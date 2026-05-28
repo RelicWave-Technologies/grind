@@ -1,4 +1,4 @@
-import { Tray, Menu, nativeImage, app } from 'electron';
+import { Tray, Menu, nativeImage, app, type Rectangle } from 'electron';
 import path from 'node:path';
 import { log } from './logger';
 
@@ -16,15 +16,15 @@ function trayImage(): Electron.NativeImage {
   return empty;
 }
 
-/** Menu-bar item. Click toggles the main window; right-click shows a menu. */
-export function createTray(opts: { onToggle: () => void }): Tray {
+/** Menu-bar item. Left-click toggles the popover; right-click shows a menu. */
+export function createTray(opts: { onToggle: (bounds: Rectangle) => void; onOpenMain: () => void }): Tray {
   const tray = new Tray(trayImage());
   tray.setToolTip('Grind');
 
-  tray.on('click', opts.onToggle);
+  tray.on('click', (_e, bounds) => opts.onToggle(bounds));
   tray.on('right-click', () => {
     const menu = Menu.buildFromTemplate([
-      { label: 'Open Grind', click: opts.onToggle },
+      { label: 'Open Grind', click: opts.onOpenMain },
       { type: 'separator' },
       { label: 'Quit Grind', click: () => app.quit() },
     ]);
@@ -34,7 +34,7 @@ export function createTray(opts: { onToggle: () => void }): Tray {
   return tray;
 }
 
-/** Show a live elapsed-time string next to the menu-bar icon (macOS). */
+/** Live elapsed-time string next to the menu-bar icon (macOS). */
 export function setTrayTitle(tray: Tray, text: string): void {
   if (process.platform === 'darwin') tray.setTitle(text ? ` ${text}` : '');
 }

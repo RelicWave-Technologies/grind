@@ -4,6 +4,10 @@ import { createMainWindow } from './window';
 import { registerIpc } from './ipc';
 import { startHeartbeatIfAuthed } from './services/heartbeat';
 import { getTimerService, initTimerOnBoot } from './services/timer';
+import { registerPowerEvents } from './services/power';
+import { showFloatingBar, hideFloatingBar, reassertFloating } from './floating';
+import { togglePopover, hidePopover } from './popover';
+import { broadcast } from './broadcast';
 import { log } from './logger';
 
 function fmtShort(ms: number): string {
@@ -27,29 +31,44 @@ let isQuitting = false;
 
 function showMainWindow() {
   if (!mainWindow) return;
+  hidePopover();
   mainWindow.show();
   mainWindow.focus();
 }
 
-app.whenReady().then(async () => {
-  mainWindow = createMainWindow();
-  tray = createTray({ onToggle: () => toggleMainWindow() });
-  registerIpc({ trayWindow: mainWindow });
+function ensureAutoStart() {
+  // Launch at login by default (internal tool). Start hidden to the tray.
+  const settings = app.getLoginItemSettings();
+  if (!settings.openAtLogin) {
+    app.setLoginItemSettings({ openAtLogin: true, args: ['--hidden'] });
+  }
+}
 
-  // Close button hides to tray; real quit only via ⌘Q / tray menu.
+app.whenReady().then(async () => {
+  ensureAutoStart();
+
+  const openedAtLogin =
+    process.argv.includes('--hidden') || app.getLoginItemSettings().wasOpenedAtLogin;
+
+  mainWindow = createMainWindow({ startHidden: openedAtLogin });
+  tray = createTray({
+    onToggle: (bounds) => togglePopover(bounds),
+    onOpenMain: () => showMainWindow(),
+  });
+  registerIpc({ onOpenMainWindow: () => showMainWindow() });
+
   mainWindow.on('close', (e) => {
     if (!isQuitting) {
       e.preventDefault();
       mainWindow?.hide();
     }
   });
-
   app.on('before-quit', () => {
     isQuitting = true;
   });
-
-  // Re-open on dock click (macOS).
   app.on('activate', () => showMainWindow());
+
+  registerPowerEvents({ onWake: () => reassertFloating() });
 
   try {
     await startHeartbeatIfAuthed();
@@ -62,30 +81,28 @@ app.whenReady().then(async () => {
     log.warn('initTimerOnBoot failed', { err: String(err) });
   }
 
-  // Live menu-bar ticker while tracking.
+  // Single 1s heartbeat: tray ticker + floating-bar visibility + live broadcast.
+  let lastRunning = false;
   setInterval(() => {
-    if (!tray) return;
     try {
       const s = getTimerService().status();
-      setTrayTitle(tray, s.state === 'RUNNING' ? fmtShort(s.workedMs) : '');
+      const running = s.state === 'RUNNING';
+      if (tray) setTrayTitle(tray, running ? fmtShort(s.workedMs) : '');
+      if (running) showFloatingBar();
+      else if (lastRunning) hideFloatingBar();
+      lastRunning = running;
+      if (running) broadcast('timer:status:push', s);
     } catch {
-      /* timer not ready yet */
+      /* timer not ready */
     }
   }, 1000);
 
-  log.info('agent ready', { platform: process.platform, version: app.getVersion() });
+  log.info('agent ready', { platform: process.platform, version: app.getVersion(), openedAtLogin });
 });
-
-function toggleMainWindow() {
-  if (!mainWindow) return;
-  if (mainWindow.isVisible() && mainWindow.isFocused()) mainWindow.hide();
-  else showMainWindow();
-}
 
 app.on('window-all-closed', () => {
-  // Stay alive in the tray; do not quit on window close.
+  // Stay alive in the tray.
 });
-
 app.on('second-instance', () => showMainWindow());
 
 void tray;

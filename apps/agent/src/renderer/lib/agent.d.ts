@@ -30,6 +30,9 @@ declare global {
         today: () => Promise<TodayEntry[]>;
         onStatusChange: (cb: (s: TimerStatus) => void) => () => void;
       };
+      window: {
+        openMain: () => Promise<void>;
+      };
     };
   }
 }

@@ -276,6 +276,18 @@ describe('validateEntry (invariant guard)', () => {
     expect(validateEntry(e).join(';')).toMatch(/closed but has an open segment/);
   });
 
+  it('flags duplicate segment ids', () => {
+    const e: TimeEntry = {
+      ...baseEntry(),
+      endedAt: T0 + 20 * MIN,
+      segments: [
+        { id: 'dup', kind: 'WORK', startedAt: T0, endedAt: T0 + 10 * MIN },
+        { id: 'dup', kind: 'WORK', startedAt: T0 + 10 * MIN, endedAt: T0 + 20 * MIN },
+      ],
+    };
+    expect(validateEntry(e).join(';')).toMatch(/duplicate segment id/);
+  });
+
   it('accepts a well-formed multi-segment entry', () => {
     let e = baseEntry();
     e = openSegment(e, { kind: 'MEETING', at: T0 + 10 * MIN, segmentId: 's2' });

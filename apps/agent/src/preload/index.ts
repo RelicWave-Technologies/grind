@@ -43,6 +43,9 @@ const api = {
       };
     },
   },
+  window: {
+    openMain: (): Promise<void> => ipcRenderer.invoke('window:openMain'),
+  },
 };
 
 contextBridge.exposeInMainWorld('agent', api);

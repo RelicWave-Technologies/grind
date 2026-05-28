@@ -207,9 +207,12 @@ export function validateEntry(entry: TimeEntry): string[] {
     errors.push(`entry.startedAt (${entry.startedAt}) !== first segment.startedAt (${segs[0]!.startedAt})`);
   }
 
+  const seenIds = new Set<string>();
   let openCount = 0;
   for (let i = 0; i < segs.length; i++) {
     const s = segs[i]!;
+    if (seenIds.has(s.id)) errors.push(`duplicate segment id ${s.id}`);
+    seenIds.add(s.id);
     if (s.endedAt === null) {
       openCount++;
       if (i !== segs.length - 1) errors.push(`open segment at index ${i} is not last`);

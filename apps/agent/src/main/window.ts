@@ -7,7 +7,7 @@ import path from 'node:path';
  * sidebar vibrancy. The content pane paints solid white over the material so
  * only the sidebar shows the frosted-glass effect (the System Settings look).
  */
-export function createMainWindow(): BrowserWindow {
+export function createMainWindow(opts: { startHidden?: boolean } = {}): BrowserWindow {
   const preloadPath = path.join(__dirname, '../preload/index.cjs');
 
   const win = new BrowserWindow({
@@ -35,7 +35,9 @@ export function createMainWindow(): BrowserWindow {
     void win.loadFile(path.join(__dirname, '../renderer/index.html'));
   }
 
-  win.once('ready-to-show', () => win.show());
+  win.once('ready-to-show', () => {
+    if (!opts.startHidden) win.show();
+  });
 
   return win;
 }
