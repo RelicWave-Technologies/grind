@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { PauseCircle } from 'lucide-react';
+import { Coffee } from 'lucide-react';
 
 function fmtAgo(ms: number): string {
   const min = Math.round(ms / 60000);
@@ -31,7 +31,7 @@ export default function IdlePrompt() {
 
   return (
     <div className="idle">
-      <span className="idle-icon"><PauseCircle size={24} strokeWidth={2} /></span>
+      <span className="idle-icon"><Coffee size={24} strokeWidth={2} /></span>
       <div className="h3">Timer paused</div>
       <div className="idle-sub callout secondary">
         No activity for <b>{fmtAgo(awayMs)}</b>. This idle time isn&rsquo;t counted.
@@ -41,7 +41,7 @@ export default function IdlePrompt() {
           Take a break
         </button>
         <button className="btn btn-prominent no-drag" onClick={() => resolve.mutate('continue')} disabled={resolve.isPending}>
-          Continue working
+          Continue
         </button>
       </div>
     </div>

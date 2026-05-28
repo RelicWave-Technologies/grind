@@ -26,7 +26,6 @@ export class IdleMonitor {
     try {
       const idleSeconds = powerMonitor.getSystemIdleTime();
       const isRunning = getTimerService().isRunning();
-      if (isRunning) log.info('idle tick', { idleSeconds, thresholdSec: IDLE_THRESHOLD_SEC });
       if (shouldPromptIdle({ isRunning, idleSeconds, thresholdSec: IDLE_THRESHOLD_SEC, prompting: this.prompting })) {
         this.prompting = true;
         this.idleStartedAt = computeIdleStart(Date.now(), idleSeconds);
