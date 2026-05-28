@@ -5,6 +5,7 @@ import { registerIpc } from './ipc';
 import { startHeartbeatIfAuthed } from './services/heartbeat';
 import { getTimerService, initTimerOnBoot } from './services/timer';
 import { startCaptureLoop } from './services/capture';
+import { startActivityCapture, setActivityRecording } from './services/activity';
 import { registerPowerEvents } from './services/power';
 import { IdleMonitor } from './services/idle/monitor';
 import { showFloatingBar, hideFloatingBar, reassertFloating } from './floating';
@@ -110,6 +111,7 @@ app.whenReady().then(async () => {
   }
 
   startCaptureLoop();
+  startActivityCapture();
 
   // Single 1s heartbeat: tray ticker + floating-bar visibility + live broadcast.
   let lastRunning = false;
@@ -117,6 +119,7 @@ app.whenReady().then(async () => {
     try {
       const s = getTimerService().status();
       const running = s.state === 'RUNNING';
+      setActivityRecording(running && !(s.state === 'RUNNING' && s.paused));
       if (tray) setTrayTitle(tray, running ? fmtShort(s.workedMs) : '');
       if (running) showFloatingBar();
       else if (lastRunning) hideFloatingBar();

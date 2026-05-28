@@ -33,6 +33,20 @@ export function hasScreenAccess(): boolean {
 }
 
 /**
+ * Accessibility / Input Monitoring trust — required for global keyboard & mouse
+ * counting via uiohook (uIOhook.start() crashes without it). `prompt=true` shows
+ * the system dialog. Non-macOS platforms don't gate this.
+ */
+export function hasAccessibilityAccess(prompt = false): boolean {
+  if (process.platform !== 'darwin') return true;
+  try {
+    return systemPreferences.isTrustedAccessibilityClient(prompt);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Pure decision: given the reported status and the last capture outcome, what
  * should the UI show? Crucially:
  *  - status granted but captures come back empty/error  → 'needs-restart'

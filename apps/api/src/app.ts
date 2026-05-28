@@ -7,6 +7,7 @@ import { authRouter } from './routes/auth';
 import { agentRouter } from './routes/agent';
 import { projectsRouter } from './routes/projects';
 import { timeEntriesRouter } from './routes/timeEntries';
+import { activityRouter } from './routes/activity';
 import { errorHandler } from './middleware/errorHandler';
 
 export function buildApp() {
@@ -31,6 +32,7 @@ export function buildApp() {
   app.use('/v1/agent', agentRouter);
   app.use('/v1/projects', projectsRouter);
   app.use('/v1/time-entries', timeEntriesRouter);
+  app.use('/v1/activity-samples', activityRouter);
 
   app.use(errorHandler);
 
