@@ -49,8 +49,9 @@ export class TimerService {
     if (!open) return;
     const recovered = recoverStaleEntry(open, lastKnownActiveAt);
     this.open = null;
+    // Persist only; the caller runs flushUnsynced() next, which performs the
+    // single sync. Syncing here too would race that flush on the same entry.
     this.store.upsert(recovered);
-    void this.trySync(recovered, 'sync');
   }
 
   isRunning(): boolean {
