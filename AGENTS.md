@@ -38,6 +38,7 @@ Grind
 | Grind — References (parent) | `HuaXdvMxfo3LNJx4OgXlhG9Lg1d` | `MQb7w4C4AimvZekyPO0l8LRvg1g` |
 | Grind — Updates (parent) | `F4WAdwmCWoz6EMxX4wKl8JGqgfg` | `RNW7w0sstixBrZkaVlXlOhF5gmc` |
 | Ref: Time Tracker — Architecture & Tech Plan | `N2wtdf0yyoED7bxO3hzlMXhsgNh` | `LBOfwqmxoiM7Q5kUl1zlGVK3gLh` |
+| Ref: Design System — Apple HIG (Light/Premium) | `TOjOdT9xMoM7iMxeCbglipRYgkc` | `WOtMw4IbfiXkRjksLoQlC0lrgo3` |
 | Feature: Time Tracker MVP (folder) | `C1NPdC66lofn7cxfkqUljzoKgYb` | `HxJowzMc2iPScmkRU26lGn6Dgpg` |
 | Time Tracker MVP — Plan | `GDWodW56fofwChxzlYvlZcRxgA3` | `WsSvwBc4aiYz1ykMX00lsno0gIc` |
 | Time Tracker MVP — Updates | `N7vkdocUsoNgB7xmcIUlWCWigyh` | `J0HLw1Lrni5cyPkK58YlbIn1gth` |
@@ -97,7 +98,17 @@ lark-cli wiki +node-create --space-id 7635896570625396443 --parent-node-token <P
 - **Privacy contract:** count keystrokes/mouse, never content. Window titles + URLs default OFF. 60-day screenshot retention.
 - **Signing:** macOS signing via Apple Developer account. Windows ships unsigned for v1 (internal IT deployment).
 
+## MANDATORY: Design & product consistency
+
+Before building ANY user-facing feature, read:
+- **`docs/design.md`** — the design system (tokens, components, patterns). Light/premium/violet, day-timeline hero, no progress rings. Use tokens; never hardcode hex/px/fonts. If a value isn't there, add a token first.
+- **`docs/product.md`** — what we're building, who for, principles, scope guards, the three surfaces, privacy contract.
+
+Desktop agent and web dashboard MUST share the same design system. Keep both docs current when the system changes.
+
 ## Local paths
 
+- `docs/design.md` — design system (canonical, in-repo)
+- `docs/product.md` — product overview (canonical, in-repo)
 - `tracker-plan/PLAN.md` — local copy of the architectural plan (also pushed to wiki under References)
 - `.context/` — scratch dir for wiki-sync snapshots; do not commit large files here

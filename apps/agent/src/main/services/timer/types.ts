@@ -20,6 +20,8 @@ export interface EntryStore {
   getOpen(): TimeEntry | null;
   /** Entries that still need to be pushed to the server. */
   getUnsynced(): TimeEntry[];
+  /** Most recent entries (newest first), for the day timeline / recent views. */
+  listRecent(limit: number): TimeEntry[];
   /** Mark an entry as successfully synced. */
   markSynced(entryId: string): void;
 }

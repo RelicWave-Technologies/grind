@@ -6,6 +6,8 @@ type AgentStatus = { state: 'IDLE' | 'OFFLINE'; lastHeartbeatAt: string | null }
 type TimerStatus =
   | { state: 'IDLE' }
   | { state: 'RUNNING'; entryId: string; projectId: string; taskId: string | null; startedAt: number; workedMs: number };
+type TodaySegment = { kind: 'WORK' | 'MEETING' | 'IDLE_TRIMMED'; startedAt: number; endedAt: number | null };
+type TodayEntry = { id: string; projectId: string; segments: TodaySegment[] };
 
 const api = {
   auth: {
@@ -32,6 +34,7 @@ const api = {
       ipcRenderer.invoke('timer:start', { projectId, taskId }),
     stop: (): Promise<TimerStatus> => ipcRenderer.invoke('timer:stop'),
     status: (): Promise<TimerStatus> => ipcRenderer.invoke('timer:status'),
+    today: (): Promise<TodayEntry[]> => ipcRenderer.invoke('timer:today'),
     onStatusChange: (cb: (s: TimerStatus) => void): (() => void) => {
       const sub = (_e: unknown, s: TimerStatus) => cb(s);
       ipcRenderer.on('timer:status:push', sub);

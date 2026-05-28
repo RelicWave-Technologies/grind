@@ -19,6 +19,15 @@ export function registerTimerIpc(win: BrowserWindow): void {
     return getTimerService().status();
   });
 
+  ipcMain.handle('timer:today', () => {
+    const entries = getTimerService().listToday(Date.now());
+    return entries.map((e) => ({
+      id: e.id,
+      projectId: e.projectId,
+      segments: e.segments.map((s) => ({ kind: s.kind, startedAt: s.startedAt, endedAt: s.endedAt })),
+    }));
+  });
+
   // Push a live status tick to the renderer every second while running, so the
   // UI elapsed time stays accurate without the renderer polling.
   setInterval(() => {

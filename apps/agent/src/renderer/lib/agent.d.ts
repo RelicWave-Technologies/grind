@@ -5,6 +5,8 @@ type AgentStatus = { state: 'IDLE' | 'OFFLINE'; lastHeartbeatAt: string | null }
 type TimerStatus =
   | { state: 'IDLE' }
   | { state: 'RUNNING'; entryId: string; projectId: string; taskId: string | null; startedAt: number; workedMs: number };
+export type TodaySegment = { kind: 'WORK' | 'MEETING' | 'IDLE_TRIMMED'; startedAt: number; endedAt: number | null };
+export type TodayEntry = { id: string; projectId: string; segments: TodaySegment[] };
 
 declare global {
   interface Window {
@@ -25,6 +27,7 @@ declare global {
         start: (projectId: string, taskId?: string | null) => Promise<TimerStatus>;
         stop: () => Promise<TimerStatus>;
         status: () => Promise<TimerStatus>;
+        today: () => Promise<TodayEntry[]>;
         onStatusChange: (cb: (s: TimerStatus) => void) => () => void;
       };
     };
