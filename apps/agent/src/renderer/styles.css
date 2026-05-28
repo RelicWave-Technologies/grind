@@ -355,12 +355,18 @@ label.field-label { display: block; font-size: 12px; font-weight: 600; color: va
    floating bar (always-on-top mini)
    ========================================================================== */
 .fbar {
-  -webkit-app-region: drag;
-  height: 100vh; width: 100vw; display: flex; align-items: center; gap: 10px;
-  padding: 0 12px; background: rgba(21, 19, 28, 0.96); color: #fff;
+  height: 100vh; width: 100vw; display: flex; align-items: center; gap: 6px;
+  padding: 0 10px 0 3px; background: rgba(21, 19, 28, 0.96); color: #fff;
   border-radius: 14px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
   -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
 }
+.fbar-grip { -webkit-app-region: drag; display: flex; align-items: center; color: rgba(255,255,255,0.28); padding: 0 1px; }
+.fbar-grip:hover { color: rgba(255,255,255,0.5); }
+.fbar-body {
+  -webkit-app-region: no-drag; flex: 1; min-width: 0; display: flex; align-items: center; gap: 9px;
+  background: transparent; border: none; color: inherit; font: inherit; text-align: left; cursor: default; padding: 0; height: 100%;
+}
+.fbar-body:hover .fbar-proj { color: rgba(255,255,255,0.85); }
 .fbar-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; box-shadow: 0 0 0 3px rgba(255,255,255,0.12); }
 .fbar-time { font-family: var(--font-round); font-size: 15px; font-weight: 700; }
 .fbar-proj { flex: 1; min-width: 0; font-size: 12px; color: rgba(255,255,255,0.6); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -397,6 +403,23 @@ label.field-label { display: block; font-size: 12px; font-weight: 600; color: va
 .pop-row:hover { background: var(--fill-hover); }
 .pop-icon { width: 30px; height: 30px; border-radius: 9px; display: flex; align-items: center; justify-content: center; color: #fff; flex-shrink: 0; }
 .pop-row-name { flex: 1; min-width: 0; font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ============================================================================
+   idle prompt ("are you still working?")
+   ========================================================================== */
+.idle {
+  -webkit-app-region: drag;
+  height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 8px; padding: 24px; text-align: center;
+  background: var(--bg-card); border-radius: 18px; box-shadow: 0 16px 44px rgba(0, 0, 0, 0.26);
+}
+.idle-icon {
+  width: 52px; height: 52px; border-radius: 14px; background: var(--violet-tint); color: var(--violet);
+  display: flex; align-items: center; justify-content: center; margin-bottom: 4px;
+}
+.idle-sub { max-width: 260px; margin-top: 2px; }
+.idle-actions { display: flex; gap: 8px; margin-top: 14px; width: 100%; }
+.idle-actions .btn { flex: 1; white-space: nowrap; }
 
 /* fade-in on mount */
 @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }

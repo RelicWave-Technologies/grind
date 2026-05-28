@@ -1,12 +1,14 @@
-import { app, BrowserWindow, Tray } from 'electron';
+import { app, BrowserWindow, Tray, ipcMain } from 'electron';
 import { createTray, setTrayTitle } from './tray';
 import { createMainWindow } from './window';
 import { registerIpc } from './ipc';
 import { startHeartbeatIfAuthed } from './services/heartbeat';
 import { getTimerService, initTimerOnBoot } from './services/timer';
 import { registerPowerEvents } from './services/power';
+import { IdleMonitor } from './services/idle/monitor';
 import { showFloatingBar, hideFloatingBar, reassertFloating } from './floating';
 import { togglePopover, hidePopover } from './popover';
+import { showIdlePrompt, hideIdlePrompt } from './idlePrompt';
 import { broadcast } from './broadcast';
 import { log } from './logger';
 
@@ -69,6 +71,31 @@ app.whenReady().then(async () => {
   app.on('activate', () => showMainWindow());
 
   registerPowerEvents({ onWake: () => reassertFloating() });
+
+  // Idle detection → pause the timer (idle is never counted) and prompt.
+  const idleMonitor = new IdleMonitor(async (idleStartedAt) => {
+    try {
+      await getTimerService().pauseForIdle(idleStartedAt);
+    } catch (err) {
+      log.warn('pauseForIdle failed', { err: String(err) });
+    }
+    broadcast('timer:status:push', getTimerService().status());
+    showIdlePrompt();
+  });
+  idleMonitor.start();
+
+  ipcMain.handle('idle:get', () => ({ idleStartedAt: idleMonitor.getIdleStart() }));
+  ipcMain.handle('idle:resolve', async (_e, action: 'continue' | 'break') => {
+    try {
+      if (action === 'continue') await getTimerService().resumeFromIdle(Date.now());
+      else await getTimerService().stop();
+    } catch (err) {
+      log.warn('idle resolve failed', { action, err: String(err) });
+    }
+    idleMonitor.resolve();
+    hideIdlePrompt();
+    broadcast('timer:status:push', getTimerService().status());
+  });
 
   try {
     await startHeartbeatIfAuthed();

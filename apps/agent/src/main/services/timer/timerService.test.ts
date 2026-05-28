@@ -179,6 +179,60 @@ describe('TimerService.discardAway (sleep/lock)', () => {
   });
 });
 
+describe('TimerService.pauseForIdle / resumeFromIdle', () => {
+  it('freezes worked time on pause and never counts the idle gap', async () => {
+    await svc.start({ projectId: 'p1' }); // WORK from T0
+    clock.advance(5 * MIN); // worked 5 min
+    await svc.pauseForIdle(clock.now());
+
+    expect(svc.isPaused()).toBe(true);
+    let s = svc.status();
+    expect(s.state === 'RUNNING' && s.paused).toBe(true);
+    if (s.state === 'RUNNING') expect(s.workedMs).toBe(5 * MIN);
+
+    // Time passes while paused — worked time stays frozen.
+    clock.advance(10 * MIN);
+    s = svc.status();
+    if (s.state === 'RUNNING') expect(s.workedMs).toBe(5 * MIN);
+
+    // Continue: resume a fresh WORK segment; idle gap excluded.
+    await svc.resumeFromIdle(clock.now());
+    expect(svc.isPaused()).toBe(false);
+    clock.advance(3 * MIN);
+    s = svc.status();
+    if (s.state === 'RUNNING') expect(s.workedMs).toBe(8 * MIN); // 5 + 3, not the 10 idle
+  });
+
+  it('clamps pause time to the segment start (whole-segment idle)', async () => {
+    await svc.start({ projectId: 'p1' });
+    clock.advance(2 * MIN);
+    await svc.pauseForIdle(T0 - 10 * MIN); // idleStart before segment start
+    const s = svc.status();
+    if (s.state === 'RUNNING') expect(s.workedMs).toBe(0); // clamped → zero worked
+  });
+
+  it('break (stop) after pause finalizes at the frozen time', async () => {
+    await svc.start({ projectId: 'p1' });
+    clock.advance(7 * MIN);
+    await svc.pauseForIdle(clock.now());
+    clock.advance(20 * MIN); // away
+    await svc.stop();
+    expect(svc.isRunning()).toBe(false);
+    const entry = [...store.entries.values()][0]!;
+    expect(totalWorkedMs(entry)).toBe(7 * MIN); // away time not billed
+  });
+
+  it('pause is a no-op when idle or already paused', async () => {
+    await svc.pauseForIdle(T0); // not running
+    expect(svc.isRunning()).toBe(false);
+    await svc.start({ projectId: 'p1' });
+    await svc.pauseForIdle(clock.now());
+    const before = svc.status();
+    await svc.pauseForIdle(clock.now()); // already paused
+    expect(svc.status()).toEqual(before);
+  });
+});
+
 describe('TimerService.recover (crash recovery)', () => {
   it('closes a left-open entry at last-known-active and syncs it', async () => {
     // Simulate a crash: persist an open entry, then build a fresh service.
