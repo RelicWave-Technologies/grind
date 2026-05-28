@@ -6,10 +6,17 @@ import { captureNow, thumbDataUrl } from './capture';
 import { nextDelayMs } from './scheduler';
 import { getTimerService } from '../timer';
 import { SCREENSHOT_INTERVAL_SEC } from '../../env';
+import { type CaptureHealth } from '../permissions';
 import { log } from '../../logger';
 
 let store: ScreenshotStore | null = null;
 let timer: NodeJS.Timeout | null = null;
+let lastHealth: CaptureHealth = 'unknown';
+
+/** Health of the most recent capture attempt (for surfacing revocation/restart). */
+export function getScreenHealth(): CaptureHealth {
+  return lastHealth;
+}
 
 function getStore(): ScreenshotStore {
   if (store) return store;
@@ -29,7 +36,8 @@ async function tick() {
     const status = getTimerService().status();
     // Only capture while actively tracking (running and not paused).
     if (status.state === 'RUNNING' && !status.paused) {
-      const rows = await captureNow(status.entryId);
+      const { rows, health } = await captureNow(status.entryId);
+      lastHealth = health;
       for (const r of rows) getStore().insert(r);
     }
   } catch (err) {
@@ -70,7 +78,8 @@ export function todayScreenshotCount(): number {
  *  call so macOS registers the app in Screen Recording even on first use. */
 export async function captureOnce(): Promise<number> {
   const status = getTimerService().status();
-  const rows = await captureNow(status.state === 'RUNNING' ? status.entryId : null, { force: true });
+  const { rows, health } = await captureNow(status.state === 'RUNNING' ? status.entryId : null, { force: true });
+  lastHealth = health;
   for (const r of rows) getStore().insert(r);
   return rows.length;
 }

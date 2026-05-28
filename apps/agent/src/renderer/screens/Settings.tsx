@@ -4,13 +4,21 @@ import { MonitorCheck, Power, FolderOpen, CheckCircle2, AlertCircle } from 'luci
 export default function Settings() {
   const qc = useQueryClient();
   const info = useQuery({ queryKey: ['settings'], queryFn: () => window.agent.settings.get(), refetchInterval: 4000 });
+  const perm = useQuery({ queryKey: ['screenPerm'], queryFn: () => window.agent.permissions.screen(), refetchInterval: 4000 });
 
   const setLogin = useMutation({
     mutationFn: (v: boolean) => window.agent.settings.setLaunchAtLogin(v),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['settings'] }),
   });
 
-  const granted = info.data?.screenStatus === 'granted';
+  const state = perm.data?.state ?? 'ok';
+  const ok = state === 'ok';
+  const sub =
+    state === 'ok'
+      ? { ok: true, text: 'Granted' }
+      : state === 'needs-restart'
+        ? { ok: false, text: 'Restart needed for capture to take effect' }
+        : { ok: false, text: 'Required for screenshots' };
 
   return (
     <>
@@ -21,24 +29,28 @@ export default function Settings() {
           <div className="section-head"><span className="section-title">Permissions</span></div>
           <div className="set-card">
             <div className="set-row">
-              <span className="set-ic" style={{ background: granted ? 'var(--c-green)' : 'var(--c-orange)' }}>
+              <span className="set-ic" style={{ background: ok ? 'var(--c-green)' : 'var(--c-orange)' }}>
                 <MonitorCheck size={17} strokeWidth={2} />
               </span>
               <div className="set-main">
                 <div className="set-title">Screen Recording</div>
                 <div className="set-sub">
-                  {granted ? (
-                    <span className="set-ok"><CheckCircle2 size={13} /> Granted</span>
+                  {sub.ok ? (
+                    <span className="set-ok"><CheckCircle2 size={13} /> {sub.text}</span>
                   ) : (
-                    <span className="set-warn"><AlertCircle size={13} /> Required for screenshots</span>
+                    <span className="set-warn"><AlertCircle size={13} /> {sub.text}</span>
                   )}
                 </div>
               </div>
-              {!granted && (
+              {state === 'needs-restart' ? (
+                <button className="btn btn-prominent no-drag" onClick={() => window.agent.app.relaunch()}>
+                  Restart Grind
+                </button>
+              ) : !ok ? (
                 <button className="btn no-drag" onClick={() => window.agent.settings.openScreenPrefs()}>
                   Open System Settings
                 </button>
-              )}
+              ) : null}
             </div>
           </div>
 
