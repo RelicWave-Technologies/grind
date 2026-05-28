@@ -59,6 +59,13 @@ const api = {
   permissions: {
     screenStatus: (): Promise<string> => ipcRenderer.invoke('permissions:screenStatus'),
   },
+  settings: {
+    get: (): Promise<{ version: string; platform: string; launchAtLogin: boolean; screenStatus: string }> =>
+      ipcRenderer.invoke('settings:get'),
+    setLaunchAtLogin: (enabled: boolean): Promise<boolean> => ipcRenderer.invoke('settings:setLaunchAtLogin', enabled),
+    openScreenPrefs: (): Promise<void> => ipcRenderer.invoke('settings:openScreenPrefs'),
+    openDataFolder: (): Promise<void> => ipcRenderer.invoke('settings:openDataFolder'),
+  },
 };
 
 contextBridge.exposeInMainWorld('agent', api);

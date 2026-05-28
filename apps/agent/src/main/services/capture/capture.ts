@@ -17,16 +17,30 @@ function dayDir(now: number): string {
  * window sources break under fullscreen), re-encodes to high-quality WebP via
  * sharp, and writes one file per display. Returns rows to enqueue.
  */
-export async function captureNow(timeEntryId: string | null): Promise<ScreenshotRow[]> {
-  if (!hasScreenAccess()) {
+export async function captureNow(
+  timeEntryId: string | null,
+  opts: { force?: boolean } = {},
+): Promise<ScreenshotRow[]> {
+  // `force` calls desktopCapturer even without prior permission — the first
+  // such call is what makes macOS register the app in the Screen Recording
+  // list (and prompt). The scheduled loop stays gated to avoid needless calls.
+  if (!opts.force && !hasScreenAccess()) {
     log.warn('screenshot skipped — no Screen Recording permission');
     return [];
   }
 
-  const sources = await desktopCapturer.getSources({
-    types: ['screen'],
-    thumbnailSize: { width: SCREENSHOT_MAX_EDGE, height: SCREENSHOT_MAX_EDGE },
-  });
+  let sources;
+  try {
+    sources = await desktopCapturer.getSources({
+      types: ['screen'],
+      thumbnailSize: { width: SCREENSHOT_MAX_EDGE, height: SCREENSHOT_MAX_EDGE },
+    });
+  } catch {
+    // No Screen Recording permission — the attempt itself registers the app in
+    // macOS System Settings so the user can enable it. Fail soft.
+    log.warn('screenshot capture failed — likely missing Screen Recording permission');
+    return [];
+  }
 
   const now = Date.now();
   const dir = dayDir(now);

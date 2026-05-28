@@ -66,10 +66,11 @@ export function todayScreenshotCount(): number {
   return getStore().countSince(d.getTime());
 }
 
-/** Capture immediately (used for a manual "test screenshot" action). */
+/** Capture immediately (manual "Take one now"). Forces the desktopCapturer
+ *  call so macOS registers the app in Screen Recording even on first use. */
 export async function captureOnce(): Promise<number> {
   const status = getTimerService().status();
-  const rows = await captureNow(status.state === 'RUNNING' ? status.entryId : null);
+  const rows = await captureNow(status.state === 'RUNNING' ? status.entryId : null, { force: true });
   for (const r of rows) getStore().insert(r);
   return rows.length;
 }

@@ -21,7 +21,7 @@ export default function ScreenshotsStrip() {
     <>
       <div className="section-head">
         <span className="section-title">Screenshots</span>
-        <button className="see-all" onClick={() => capture.mutate()} disabled={capture.isPending || !granted}>
+        <button className="see-all" onClick={() => capture.mutate()} disabled={capture.isPending}>
           {capture.isPending ? 'Capturing…' : 'Take one now'}
         </button>
       </div>

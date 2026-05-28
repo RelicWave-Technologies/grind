@@ -45,6 +45,12 @@ declare global {
       permissions: {
         screenStatus: () => Promise<string>;
       };
+      settings: {
+        get: () => Promise<{ version: string; platform: string; launchAtLogin: boolean; screenStatus: string }>;
+        setLaunchAtLogin: (enabled: boolean) => Promise<boolean>;
+        openScreenPrefs: () => Promise<void>;
+        openDataFolder: () => Promise<void>;
+      };
     };
   }
 }
