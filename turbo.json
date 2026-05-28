@@ -19,6 +19,11 @@
       "dependsOn": ["^db:generate"],
       "outputs": []
     },
+    "test": {
+      "dependsOn": ["^db:generate"],
+      "outputs": [],
+      "cache": false
+    },
     "lint": {
       "outputs": []
     },

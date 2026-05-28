@@ -15,4 +15,7 @@ if (process.env.NODE_ENV !== 'production') {
   global.__grindPrisma = prisma;
 }
 
-export * from '@prisma/client';
+// Type-only re-export: a runtime `export *` from the (CommonJS) Prisma client
+// breaks Node's named-export detection for consumers loaded via tsx, making the
+// `prisma` export above invisible. Types are erased, so this is safe.
+export type * from '@prisma/client';
