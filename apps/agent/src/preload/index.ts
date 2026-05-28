@@ -57,7 +57,8 @@ const api = {
     captureOnce: (): Promise<number> => ipcRenderer.invoke('screenshots:captureOnce'),
   },
   permissions: {
-    screenStatus: (): Promise<string> => ipcRenderer.invoke('permissions:screenStatus'),
+    screen: (): Promise<{ status: string; health: string; state: 'ok' | 'needs-grant' | 'needs-settings' | 'needs-restart' }> =>
+      ipcRenderer.invoke('permissions:screen'),
   },
   settings: {
     get: (): Promise<{ version: string; platform: string; launchAtLogin: boolean; screenStatus: string }> =>
@@ -65,6 +66,9 @@ const api = {
     setLaunchAtLogin: (enabled: boolean): Promise<boolean> => ipcRenderer.invoke('settings:setLaunchAtLogin', enabled),
     openScreenPrefs: (): Promise<void> => ipcRenderer.invoke('settings:openScreenPrefs'),
     openDataFolder: (): Promise<void> => ipcRenderer.invoke('settings:openDataFolder'),
+  },
+  app: {
+    relaunch: (): Promise<void> => ipcRenderer.invoke('app:relaunch'),
   },
 };
 

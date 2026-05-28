@@ -4,9 +4,14 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { ulid } from 'ulid';
 import { SCREENSHOT_QUALITY, SCREENSHOT_MAX_EDGE } from '../../env';
-import { hasScreenAccess } from '../permissions';
+import { hasScreenAccess, type CaptureHealth } from '../permissions';
 import { log } from '../../logger';
 import type { ScreenshotRow } from './store';
+
+export interface CaptureResult {
+  rows: ScreenshotRow[];
+  health: CaptureHealth;
+}
 
 function dayDir(now: number): string {
   return path.join(app.getPath('userData'), 'screenshots', new Date(now).toISOString().slice(0, 10));
@@ -15,18 +20,18 @@ function dayDir(now: number): string {
 /**
  * Capture every display NOW. Uses the whole-screen source (fullscreen-safe —
  * window sources break under fullscreen), re-encodes to high-quality WebP via
- * sharp, and writes one file per display. Returns rows to enqueue.
+ * sharp, writes one file per display, and reports a health signal so callers
+ * can distinguish "no permission" from "granted but blank" (revocation).
  */
 export async function captureNow(
   timeEntryId: string | null,
   opts: { force?: boolean } = {},
-): Promise<ScreenshotRow[]> {
+): Promise<CaptureResult> {
   // `force` calls desktopCapturer even without prior permission — the first
   // such call is what makes macOS register the app in the Screen Recording
   // list (and prompt). The scheduled loop stays gated to avoid needless calls.
   if (!opts.force && !hasScreenAccess()) {
-    log.warn('screenshot skipped — no Screen Recording permission');
-    return [];
+    return { rows: [], health: 'no-permission' };
   }
 
   let sources;
@@ -36,19 +41,22 @@ export async function captureNow(
       thumbnailSize: { width: SCREENSHOT_MAX_EDGE, height: SCREENSHOT_MAX_EDGE },
     });
   } catch {
-    // No Screen Recording permission — the attempt itself registers the app in
-    // macOS System Settings so the user can enable it. Fail soft.
+    // The attempt itself registers the app in macOS System Settings. Fail soft.
     log.warn('screenshot capture failed — likely missing Screen Recording permission');
-    return [];
+    return { rows: [], health: hasScreenAccess() ? 'error' : 'no-permission' };
   }
 
   const now = Date.now();
   const dir = dayDir(now);
   await fs.mkdir(dir, { recursive: true });
 
+  let sawEmpty = false;
   const rows: ScreenshotRow[] = [];
   for (const s of sources) {
-    if (s.thumbnail.isEmpty()) continue; // blank/black = permission lost mid-session
+    if (s.thumbnail.isEmpty()) {
+      sawEmpty = true; // blank/black frame = permission lost mid-session (revocation tell)
+      continue;
+    }
     const webp = await sharp(s.thumbnail.toPNG())
       .resize({ width: SCREENSHOT_MAX_EDGE, height: SCREENSHOT_MAX_EDGE, fit: 'inside', withoutEnlargement: true })
       .webp({ quality: SCREENSHOT_QUALITY })
@@ -72,7 +80,8 @@ export async function captureNow(
     });
   }
   log.info('captured screenshots', { count: rows.length, displays: screen.getAllDisplays().length });
-  return rows;
+  const health: CaptureHealth = rows.length > 0 ? 'ok' : sawEmpty ? 'empty' : 'error';
+  return { rows, health };
 }
 
 /** Read a stored screenshot and return a small base64 WebP thumbnail data URL. */

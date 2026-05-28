@@ -39,6 +39,10 @@ Plus the **web dashboard** (browser) for the heavy manager/admin views: team tim
 ## Build milestones (high level)
 M1 timer engine + segments ✅ · **M2 UI foundation + floating bar/menu-bar + auto-start (in progress)** · M3 idle + "still working?" · M4 screenshots + offline queue + S3 · M5 activity capture (+ content-free CV) + active window · M6 meeting detection · M7 Lark app + OAuth · M8 scoring + anti-cheat · M9 Lark task/calendar sync · M10 manual-time → Lark approvals · M11–M12 web dashboard · M13 signing/notarize/auto-update + dogfood. (Full detail: wiki "Build Plan — Tracker + Dashboard".)
 
+## Packaging notes (M13)
+- macOS Info.plist must set `NSScreenCaptureUsageDescription` (and later accessibility / input-monitoring usage strings) so the system prompt shows our copy. In dev (unsigned) the permission attaches to the *launching* process (Terminal/Claude); the signed build registers as "Grind".
+- A Screen Recording grant requires an app **relaunch** to take effect — the app surfaces a `needs-restart` state + Restart button for this and for mid-session revocation.
+
 ## Engineering invariants
 - Tests are rigorous and run in CI against a real Postgres; the app is **actually launched** at the end of each milestone, not just unit-tested.
 - Every milestone: branch → PR → green CI → spin up for review → merge → wiki sync.

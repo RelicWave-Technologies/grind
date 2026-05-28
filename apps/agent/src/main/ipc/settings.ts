@@ -30,4 +30,10 @@ export function registerSettingsIpc(): void {
   ipcMain.handle('settings:openDataFolder', async () => {
     await shell.openPath(app.getPath('userData'));
   });
+
+  // Relaunch — required for a Screen Recording grant to take effect.
+  ipcMain.handle('app:relaunch', () => {
+    app.relaunch();
+    app.exit(0);
+  });
 }
