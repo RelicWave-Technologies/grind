@@ -1,8 +1,10 @@
 import {
   applyIdleDiscard,
+  closeOpenSegment,
   closeTimeEntry,
   createTimeEntry,
   getOpenSegment,
+  openSegment,
   recoverStaleEntry,
   totalWorkedMs,
   type TimeEntry,
@@ -18,6 +20,7 @@ export type TimerStatus =
       taskId: string | null;
       startedAt: number;
       workedMs: number;
+      paused: boolean;
     };
 
 /**
@@ -89,6 +92,37 @@ export class TimerService {
   }
 
   /**
+   * Idle detected: PAUSE by closing the open WORK segment at `at` (the moment
+   * the user went idle). Worked time freezes there; the idle gap is simply not
+   * tracked. The entry stays open (paused) until resume or stop.
+   */
+  async pauseForIdle(at: number): Promise<void> {
+    if (!this.open) return;
+    const open = getOpenSegment(this.open);
+    if (!open) return; // already paused
+    const cut = Math.max(at, open.startedAt); // never before the segment start
+    const paused = closeOpenSegment(this.open, cut);
+    this.open = paused;
+    this.store.upsert(paused);
+    await this.trySync(paused, 'sync');
+  }
+
+  /** Resume from a paused (idle) state: open a fresh WORK segment at `at`. */
+  async resumeFromIdle(at: number): Promise<void> {
+    if (!this.open) return;
+    if (getOpenSegment(this.open)) return; // not paused
+    const resumed = openSegment(this.open, { kind: 'WORK', at, segmentId: this.ids.ulid() });
+    this.open = resumed;
+    this.store.upsert(resumed);
+    await this.trySync(resumed, 'sync');
+  }
+
+  /** True when running but paused (entry open, no open segment). */
+  isPaused(): boolean {
+    return this.open !== null && getOpenSegment(this.open) === null;
+  }
+
+  /**
    * The machine was away (slept / locked) from `awayStart` until `resumeAt`.
    * If a timer is running, trim that gap so the sleep time is never billed —
    * the open WORK segment ends at `awayStart`, the gap is recorded as
@@ -122,6 +156,7 @@ export class TimerService {
       taskId: open.taskId,
       startedAt: firstSeg.startedAt,
       workedMs: totalWorkedMs(open, this.clock.now()),
+      paused: getOpenSegment(open) === null,
     };
   }
 

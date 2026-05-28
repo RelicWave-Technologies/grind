@@ -4,7 +4,7 @@ type AuthStatus = 'loggedIn' | 'loggedOut';
 type AgentStatus = { state: 'IDLE' | 'OFFLINE'; lastHeartbeatAt: string | null };
 type TimerStatus =
   | { state: 'IDLE' }
-  | { state: 'RUNNING'; entryId: string; projectId: string; taskId: string | null; startedAt: number; workedMs: number };
+  | { state: 'RUNNING'; entryId: string; projectId: string; taskId: string | null; startedAt: number; workedMs: number; paused: boolean };
 export type TodaySegment = { kind: 'WORK' | 'MEETING' | 'IDLE_TRIMMED'; startedAt: number; endedAt: number | null };
 export type TodayEntry = { id: string; projectId: string; segments: TodaySegment[] };
 
@@ -35,7 +35,7 @@ declare global {
       };
       idle: {
         get: () => Promise<{ idleStartedAt: number }>;
-        resolve: (action: 'keep' | 'discard') => Promise<void>;
+        resolve: (action: 'continue' | 'break') => Promise<void>;
       };
     };
   }

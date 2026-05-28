@@ -72,19 +72,25 @@ app.whenReady().then(async () => {
 
   registerPowerEvents({ onWake: () => reassertFloating() });
 
-  // Idle detection → "are you still working?" prompt.
-  const idleMonitor = new IdleMonitor(() => showIdlePrompt());
+  // Idle detection → pause the timer (idle is never counted) and prompt.
+  const idleMonitor = new IdleMonitor(async (idleStartedAt) => {
+    try {
+      await getTimerService().pauseForIdle(idleStartedAt);
+    } catch (err) {
+      log.warn('pauseForIdle failed', { err: String(err) });
+    }
+    broadcast('timer:status:push', getTimerService().status());
+    showIdlePrompt();
+  });
   idleMonitor.start();
 
   ipcMain.handle('idle:get', () => ({ idleStartedAt: idleMonitor.getIdleStart() }));
-  ipcMain.handle('idle:resolve', async (_e, action: 'keep' | 'discard') => {
-    const idleStart = idleMonitor.getIdleStart();
-    if (action === 'discard') {
-      try {
-        await getTimerService().discardAway(idleStart, Date.now());
-      } catch (err) {
-        log.warn('idle discard failed', { err: String(err) });
-      }
+  ipcMain.handle('idle:resolve', async (_e, action: 'continue' | 'break') => {
+    try {
+      if (action === 'continue') await getTimerService().resumeFromIdle(Date.now());
+      else await getTimerService().stop();
+    } catch (err) {
+      log.warn('idle resolve failed', { action, err: String(err) });
     }
     idleMonitor.resolve();
     hideIdlePrompt();
