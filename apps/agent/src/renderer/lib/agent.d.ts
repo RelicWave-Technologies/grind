@@ -37,6 +37,14 @@ declare global {
         get: () => Promise<{ idleStartedAt: number }>;
         resolve: (action: 'continue' | 'break') => Promise<void>;
       };
+      screenshots: {
+        recent: (limit?: number) => Promise<{ id: string; capturedAt: number; thumb: string | null; uploadState: string }[]>;
+        countToday: () => Promise<number>;
+        captureOnce: () => Promise<number>;
+      };
+      permissions: {
+        screenStatus: () => Promise<string>;
+      };
     };
   }
 }

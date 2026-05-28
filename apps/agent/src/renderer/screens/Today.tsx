@@ -4,6 +4,7 @@ import { Play, Pause, Square, Clock } from 'lucide-react';
 import type { TimerStatus } from '../lib/agent.d';
 import { projectStyle } from '../lib/projectStyle';
 import DayTimeline from '../components/DayTimeline';
+import ScreenshotsStrip from '../components/ScreenshotsStrip';
 
 export function fmtClock(ms: number): string {
   const t = Math.floor(ms / 1000);
@@ -153,6 +154,8 @@ export default function Today() {
               );
             })}
           </div>
+
+          <ScreenshotsStrip />
         </div>
       </div>
     </>

@@ -7,3 +7,11 @@ export const HEARTBEAT_INTERVAL_MS: number = 60_000;
 export const IDLE_THRESHOLD_SEC: number = Number(process.env.AGENT_IDLE_SEC ?? 300);
 /** How often to poll the OS idle timer. */
 export const IDLE_POLL_MS: number = 5_000;
+
+/** Screenshot cadence in seconds. Default 3 hours (jittered to ~1.5–3h).
+ *  Override with AGENT_SHOT_SEC (e.g. 15) for testing. */
+export const SCREENSHOT_INTERVAL_SEC: number = Number(process.env.AGENT_SHOT_SEC ?? 10_800);
+/** WebP quality (0–100) for stored screenshots. */
+export const SCREENSHOT_QUALITY: number = Number(process.env.AGENT_SHOT_QUALITY ?? 82);
+/** Max long-edge px; larger displays are downscaled to this. */
+export const SCREENSHOT_MAX_EDGE: number = 2560;

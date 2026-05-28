@@ -1,7 +1,7 @@
 {
   "$schema": "https://turbo.build/schema.json",
   "globalDependencies": ["**/.env"],
-  "globalPassThroughEnv": ["AGENT_API_URL", "AGENT_IDLE_SEC", "NODE_ENV"],
+  "globalPassThroughEnv": ["AGENT_API_URL", "AGENT_IDLE_SEC", "AGENT_SHOT_SEC", "AGENT_SHOT_QUALITY", "NODE_ENV"],
   "tasks": {
     "dev": {
       "cache": false,

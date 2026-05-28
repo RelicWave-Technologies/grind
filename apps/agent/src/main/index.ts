@@ -4,6 +4,7 @@ import { createMainWindow } from './window';
 import { registerIpc } from './ipc';
 import { startHeartbeatIfAuthed } from './services/heartbeat';
 import { getTimerService, initTimerOnBoot } from './services/timer';
+import { startCaptureLoop } from './services/capture';
 import { registerPowerEvents } from './services/power';
 import { IdleMonitor } from './services/idle/monitor';
 import { showFloatingBar, hideFloatingBar, reassertFloating } from './floating';
@@ -107,6 +108,8 @@ app.whenReady().then(async () => {
   } catch (err) {
     log.warn('initTimerOnBoot failed', { err: String(err) });
   }
+
+  startCaptureLoop();
 
   // Single 1s heartbeat: tray ticker + floating-bar visibility + live broadcast.
   let lastRunning = false;

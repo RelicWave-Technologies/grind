@@ -50,6 +50,15 @@ const api = {
     get: (): Promise<{ idleStartedAt: number }> => ipcRenderer.invoke('idle:get'),
     resolve: (action: 'continue' | 'break'): Promise<void> => ipcRenderer.invoke('idle:resolve', action),
   },
+  screenshots: {
+    recent: (limit?: number): Promise<{ id: string; capturedAt: number; thumb: string | null; uploadState: string }[]> =>
+      ipcRenderer.invoke('screenshots:recent', limit),
+    countToday: (): Promise<number> => ipcRenderer.invoke('screenshots:countToday'),
+    captureOnce: (): Promise<number> => ipcRenderer.invoke('screenshots:captureOnce'),
+  },
+  permissions: {
+    screenStatus: (): Promise<string> => ipcRenderer.invoke('permissions:screenStatus'),
+  },
 };
 
 contextBridge.exposeInMainWorld('agent', api);
