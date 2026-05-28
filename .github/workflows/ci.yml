@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.18
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Prisma generate + validate
+        env:
+          DATABASE_URL: 'postgresql://ci:ci@localhost:5432/ci?sslmode=disable'
+          DIRECT_URL: 'postgresql://ci:ci@localhost:5432/ci?sslmode=disable'
+        run: |
+          pnpm --filter @grind/db exec prisma generate
+          pnpm --filter @grind/db exec prisma validate
+
+      - run: pnpm typecheck
+
+      - run: pnpm lint

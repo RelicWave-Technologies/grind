@@ -1,0 +1,30 @@
+{
+  "name": "grind",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Internal time tracker + screenshot monitor",
+  "packageManager": "pnpm@9.12.0",
+  "engines": {
+    "node": ">=20.18 <21"
+  },
+  "scripts": {
+    "dev": "turbo run dev --parallel",
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "lint": "turbo run lint",
+    "db:generate": "pnpm --filter @grind/db exec prisma generate",
+    "db:migrate": "pnpm --filter @grind/db exec prisma migrate dev",
+    "db:deploy": "pnpm --filter @grind/db exec prisma migrate deploy",
+    "db:seed": "pnpm --filter @grind/db exec tsx prisma/seed.ts",
+    "db:studio": "pnpm --filter @grind/db exec prisma studio",
+    "clean": "turbo run clean && rm -rf node_modules"
+  },
+  "devDependencies": {
+    "turbo": "2.2.3",
+    "typescript": "5.6.3",
+    "eslint": "9.13.0",
+    "@typescript-eslint/parser": "8.12.2",
+    "@typescript-eslint/eslint-plugin": "8.12.2",
+    "typescript-eslint": "8.12.2"
+  }
+}

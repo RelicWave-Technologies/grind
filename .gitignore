@@ -1,0 +1,37 @@
+# deps
+node_modules/
+
+# build outputs
+dist/
+out/
+.turbo/
+
+# env
+.env
+.env.local
+.env.*.local
+
+# logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# os
+.DS_Store
+Thumbs.db
+
+# editors
+.vscode/
+.idea/
+*.swp
+
+# context / scratch
+.context/
+
+# prisma generated
+packages/db/node_modules/.prisma/
+
+# electron
+out/
+dist-electron/
+release/
