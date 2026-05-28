@@ -3,6 +3,7 @@ import { createTray } from './tray';
 import { createTrayWindow } from './window';
 import { registerIpc } from './ipc';
 import { startHeartbeatIfAuthed } from './services/heartbeat';
+import { initTimerOnBoot } from './services/timer';
 import { log } from './logger';
 
 const gotLock = app.requestSingleInstanceLock();
@@ -25,6 +26,12 @@ app.whenReady().then(async () => {
     await startHeartbeatIfAuthed();
   } catch (err) {
     log.warn('startHeartbeatIfAuthed failed', { err: String(err) });
+  }
+
+  try {
+    await initTimerOnBoot();
+  } catch (err) {
+    log.warn('initTimerOnBoot failed', { err: String(err) });
   }
 
   log.info('agent ready', { platform: process.platform, version: app.getVersion() });

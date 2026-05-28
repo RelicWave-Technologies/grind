@@ -1,6 +1,5 @@
 generator client {
   provider = "prisma-client-js"
-  output   = "../node_modules/.prisma/client"
 }
 
 datasource db {
@@ -35,6 +34,7 @@ model User {
   createdAt    DateTime @default(now())
 
   refreshTokens RefreshToken[]
+  timeEntries   TimeEntry[]
 
   @@index([workspaceId])
 }
@@ -47,7 +47,8 @@ model Project {
   archived    Boolean   @default(false)
   createdAt   DateTime  @default(now())
 
-  tasks Task[]
+  tasks       Task[]
+  timeEntries TimeEntry[]
 
   @@index([workspaceId, archived])
 }
@@ -60,7 +61,56 @@ model Task {
   done      Boolean  @default(false)
   createdAt DateTime @default(now())
 
+  timeEntries TimeEntry[]
+
   @@index([projectId])
+}
+
+enum TimeEntrySource {
+  AUTO
+  MANUAL
+}
+
+enum SegmentKind {
+  WORK
+  MEETING
+  IDLE_TRIMMED
+}
+
+model TimeEntry {
+  id           String          @id // ULID from agent
+  clientUuid   String          @unique // idempotency key
+  userId       String
+  user         User            @relation(fields: [userId], references: [id])
+  projectId    String
+  project      Project         @relation(fields: [projectId], references: [id])
+  taskId       String?
+  task         Task?           @relation(fields: [taskId], references: [id])
+  larkTaskGuid String?
+  source       TimeEntrySource @default(AUTO)
+  startedAt    DateTime
+  endedAt      DateTime?
+  agentVersion String?
+  platform     String?
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  segments TimeSegment[]
+
+  @@index([userId, startedAt])
+  @@index([projectId, startedAt])
+  @@index([taskId])
+}
+
+model TimeSegment {
+  id          String      @id // ULID from agent
+  timeEntryId String
+  timeEntry   TimeEntry   @relation(fields: [timeEntryId], references: [id], onDelete: Cascade)
+  kind        SegmentKind @default(WORK)
+  startedAt   DateTime
+  endedAt     DateTime?
+
+  @@index([timeEntryId])
 }
 
 model RefreshToken {

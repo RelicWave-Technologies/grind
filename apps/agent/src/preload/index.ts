@@ -3,6 +3,9 @@ import type { UserDto, ProjectDto } from '@grind/types';
 
 type AuthStatus = 'loggedIn' | 'loggedOut';
 type AgentStatus = { state: 'IDLE' | 'OFFLINE'; lastHeartbeatAt: string | null };
+type TimerStatus =
+  | { state: 'IDLE' }
+  | { state: 'RUNNING'; entryId: string; projectId: string; taskId: string | null; startedAt: number; workedMs: number };
 
 const api = {
   auth: {
@@ -23,6 +26,19 @@ const api = {
   },
   agent: {
     status: (): Promise<AgentStatus> => ipcRenderer.invoke('agent:status'),
+  },
+  timer: {
+    start: (projectId: string, taskId?: string | null): Promise<TimerStatus> =>
+      ipcRenderer.invoke('timer:start', { projectId, taskId }),
+    stop: (): Promise<TimerStatus> => ipcRenderer.invoke('timer:stop'),
+    status: (): Promise<TimerStatus> => ipcRenderer.invoke('timer:status'),
+    onStatusChange: (cb: (s: TimerStatus) => void): (() => void) => {
+      const sub = (_e: unknown, s: TimerStatus) => cb(s);
+      ipcRenderer.on('timer:status:push', sub);
+      return () => {
+        ipcRenderer.off('timer:status:push', sub);
+      };
+    },
   },
 };
 

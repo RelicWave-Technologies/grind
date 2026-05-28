@@ -8,7 +8,30 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: grind_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # Used by Prisma generate/validate and the API integration tests.
+      DATABASE_URL: 'postgresql://ci:ci@localhost:5432/grind_test'
+      DIRECT_URL: 'postgresql://ci:ci@localhost:5432/grind_test'
+      TEST_DATABASE_URL: 'postgresql://ci:ci@localhost:5432/grind_test'
+      JWT_SECRET: 'ci-only-secret-must-be-at-least-32-chars-long'
+
     steps:
       - uses: actions/checkout@v4
 
@@ -24,9 +47,6 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Prisma generate + validate
-        env:
-          DATABASE_URL: 'postgresql://ci:ci@localhost:5432/ci?sslmode=disable'
-          DIRECT_URL: 'postgresql://ci:ci@localhost:5432/ci?sslmode=disable'
         run: |
           pnpm --filter @grind/db exec prisma generate
           pnpm --filter @grind/db exec prisma validate
@@ -34,3 +54,16 @@ jobs:
       - run: pnpm typecheck
 
       - run: pnpm lint
+
+      - name: Write .env for tests
+        run: |
+          cat > .env <<EOF
+          DATABASE_URL=$DATABASE_URL
+          DIRECT_URL=$DIRECT_URL
+          TEST_DATABASE_URL=$TEST_DATABASE_URL
+          JWT_SECRET=$JWT_SECRET
+          NODE_ENV=test
+          EOF
+
+      - name: Tests (unit + API integration against Postgres)
+        run: pnpm test
