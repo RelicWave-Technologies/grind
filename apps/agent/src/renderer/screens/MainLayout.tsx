@@ -1,16 +1,18 @@
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { CalendarClock, FolderKanban, PieChart, LogOut, Timer, CheckCircle2, Clock } from 'lucide-react';
+import { CalendarClock, FolderKanban, PieChart, Settings as SettingsIcon, LogOut, Timer, CheckCircle2, Clock } from 'lucide-react';
 import Today from './Today';
 import Projects from './Projects';
+import Settings from './Settings';
 import LineChart from '../components/LineChart';
 
-type Tab = 'today' | 'projects' | 'reports';
+type Tab = 'today' | 'projects' | 'reports' | 'settings';
 
 const NAV: { id: Tab; label: string; icon: typeof CalendarClock }[] = [
   { id: 'today', label: 'Today', icon: CalendarClock },
   { id: 'projects', label: 'Projects', icon: FolderKanban },
   { id: 'reports', label: 'Reports', icon: PieChart },
+  { id: 'settings', label: 'Settings', icon: SettingsIcon },
 ];
 
 export default function MainLayout() {
@@ -55,6 +57,7 @@ export default function MainLayout() {
         {tab === 'today' && <Today />}
         {tab === 'projects' && <Projects />}
         {tab === 'reports' && <Reports />}
+        {tab === 'settings' && <Settings />}
       </main>
     </div>
   );

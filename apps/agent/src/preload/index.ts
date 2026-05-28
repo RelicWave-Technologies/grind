@@ -50,6 +50,22 @@ const api = {
     get: (): Promise<{ idleStartedAt: number }> => ipcRenderer.invoke('idle:get'),
     resolve: (action: 'continue' | 'break'): Promise<void> => ipcRenderer.invoke('idle:resolve', action),
   },
+  screenshots: {
+    recent: (limit?: number): Promise<{ id: string; capturedAt: number; thumb: string | null; uploadState: string }[]> =>
+      ipcRenderer.invoke('screenshots:recent', limit),
+    countToday: (): Promise<number> => ipcRenderer.invoke('screenshots:countToday'),
+    captureOnce: (): Promise<number> => ipcRenderer.invoke('screenshots:captureOnce'),
+  },
+  permissions: {
+    screenStatus: (): Promise<string> => ipcRenderer.invoke('permissions:screenStatus'),
+  },
+  settings: {
+    get: (): Promise<{ version: string; platform: string; launchAtLogin: boolean; screenStatus: string }> =>
+      ipcRenderer.invoke('settings:get'),
+    setLaunchAtLogin: (enabled: boolean): Promise<boolean> => ipcRenderer.invoke('settings:setLaunchAtLogin', enabled),
+    openScreenPrefs: (): Promise<void> => ipcRenderer.invoke('settings:openScreenPrefs'),
+    openDataFolder: (): Promise<void> => ipcRenderer.invoke('settings:openDataFolder'),
+  },
 };
 
 contextBridge.exposeInMainWorld('agent', api);

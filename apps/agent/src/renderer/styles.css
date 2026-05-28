@@ -305,6 +305,53 @@ label.field-label { display: block; font-size: 12px; font-weight: 600; color: va
 .task.active .task-play { background: var(--danger); color: #fff; }
 
 /* ============================================================================
+   screenshots strip
+   ========================================================================== */
+.shot-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--sp-3); }
+.shot {
+  position: relative; border-radius: var(--radius-md); overflow: hidden; background: var(--bg-card);
+  box-shadow: var(--shadow-card); aspect-ratio: 16 / 10;
+}
+.shot img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.shot-missing { width: 100%; height: 100%; background: rgba(40, 36, 56, 0.06); }
+.shot-time {
+  position: absolute; right: 5px; bottom: 5px; font-size: 10px; font-weight: 600; color: #fff;
+  background: rgba(0, 0, 0, 0.5); padding: 1px 5px; border-radius: 5px; font-variant-numeric: tabular-nums;
+}
+.shot-empty {
+  display: flex; align-items: center; gap: 8px; padding: var(--sp-4); background: var(--bg-card);
+  border-radius: var(--radius-md); box-shadow: var(--shadow-card);
+}
+.perm-banner {
+  display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-4) var(--sp-5);
+  background: rgba(255, 159, 67, 0.1); color: var(--c-orange); border-radius: var(--radius-md); margin-bottom: var(--sp-2);
+}
+.perm-banner .secondary { color: var(--label-secondary); }
+
+/* ============================================================================
+   settings
+   ========================================================================== */
+.set-card { background: var(--bg-card); border-radius: var(--radius-lg); box-shadow: var(--shadow-card); overflow: hidden; }
+.set-row { display: flex; align-items: center; gap: var(--sp-4); padding: var(--sp-5); }
+.set-row + .set-row { border-top: 0.5px solid var(--separator); }
+.set-ic { width: 34px; height: 34px; border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #fff; flex-shrink: 0; }
+.set-main { flex: 1; min-width: 0; }
+.set-title { font-size: 14px; font-weight: 600; }
+.set-sub { font-size: 12px; margin-top: 2px; }
+.set-ok { display: inline-flex; align-items: center; gap: 4px; color: var(--success); }
+.set-warn { display: inline-flex; align-items: center; gap: 4px; color: var(--c-orange); }
+.toggle {
+  -webkit-app-region: no-drag; width: 44px; height: 26px; border-radius: 13px; border: none; flex-shrink: 0;
+  background: rgba(40, 36, 56, 0.18); position: relative; cursor: default; transition: background var(--dur-base) var(--ease);
+}
+.toggle.on { background: var(--success); }
+.toggle-knob {
+  position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25); transition: transform var(--dur-base) var(--spring);
+}
+.toggle.on .toggle-knob { transform: translateX(18px); }
+
+/* ============================================================================
    reports
    ========================================================================== */
 .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-4); }
