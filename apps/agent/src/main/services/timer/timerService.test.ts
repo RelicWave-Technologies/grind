@@ -147,6 +147,38 @@ describe('TimerService offline behaviour', () => {
   });
 });
 
+describe('TimerService.discardAway (sleep/lock)', () => {
+  it('trims the away gap and keeps the timer running', async () => {
+    await svc.start({ projectId: 'p1' }); // WORK from T0
+    clock.advance(5 * MIN); // worked 5 min, then machine sleeps
+    const awayStart = clock.now();
+    clock.advance(30 * MIN); // asleep 30 min
+    await svc.discardAway(awayStart, clock.now());
+
+    expect(svc.isRunning()).toBe(true);
+    const s = svc.status();
+    if (s.state === 'RUNNING') expect(s.workedMs).toBe(5 * MIN); // sleep not billed
+    // resume + a bit more
+    clock.advance(2 * MIN);
+    const s2 = svc.status();
+    if (s2.state === 'RUNNING') expect(s2.workedMs).toBe(7 * MIN);
+  });
+
+  it('is a no-op when idle', async () => {
+    await svc.discardAway(T0, T0 + 10 * MIN);
+    expect(svc.isRunning()).toBe(false);
+  });
+
+  it('ignores trivially short gaps', async () => {
+    await svc.start({ projectId: 'p1' });
+    clock.advance(3 * MIN);
+    const before = svc.status();
+    await svc.discardAway(clock.now(), clock.now() + 500); // <1s
+    const after = svc.status();
+    expect(after).toEqual(before);
+  });
+});
+
 describe('TimerService.recover (crash recovery)', () => {
   it('closes a left-open entry at last-known-active and syncs it', async () => {
     // Simulate a crash: persist an open entry, then build a fresh service.

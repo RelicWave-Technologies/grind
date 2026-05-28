@@ -94,6 +94,7 @@ body {
   overflow: hidden;
 }
 .selectable { user-select: text; cursor: text; }
+body.chrome-window { background: transparent; }
 
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb {
@@ -349,6 +350,53 @@ label.field-label { display: block; font-size: 12px; font-weight: 600; color: va
 /* empty states */
 .empty { display: flex; flex-direction: column; align-items: center; gap: var(--sp-3); text-align: center; padding: var(--sp-10) 0; }
 .empty-icon { width: 56px; height: 56px; border-radius: var(--radius-lg); background: var(--violet-tint); color: var(--violet); display: flex; align-items: center; justify-content: center; }
+
+/* ============================================================================
+   floating bar (always-on-top mini)
+   ========================================================================== */
+.fbar {
+  -webkit-app-region: drag;
+  height: 100vh; width: 100vw; display: flex; align-items: center; gap: 10px;
+  padding: 0 12px; background: rgba(21, 19, 28, 0.96); color: #fff;
+  border-radius: 14px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+}
+.fbar-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; box-shadow: 0 0 0 3px rgba(255,255,255,0.12); }
+.fbar-time { font-family: var(--font-round); font-size: 15px; font-weight: 700; }
+.fbar-proj { flex: 1; min-width: 0; font-size: 12px; color: rgba(255,255,255,0.6); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fbar-stop {
+  flex-shrink: 0; width: 26px; height: 26px; border-radius: 50%; border: none; cursor: default;
+  background: rgba(255, 77, 106, 0.18); color: #ff6b81; display: flex; align-items: center; justify-content: center;
+  transition: background var(--dur-fast) var(--ease);
+}
+.fbar-stop:hover { background: var(--danger); color: #fff; }
+
+/* ============================================================================
+   menu-bar popover
+   ========================================================================== */
+.pop {
+  -webkit-app-region: drag;
+  height: 100vh; display: flex; flex-direction: column; gap: 12px; padding: 14px;
+  background: var(--bg-card); border-radius: 16px; box-shadow: 0 12px 36px rgba(0,0,0,0.22);
+}
+.pop-head { display: flex; align-items: center; gap: 8px; }
+.pop-open {
+  -webkit-app-region: no-drag; margin-left: auto; width: 28px; height: 28px; border-radius: 8px; border: none;
+  background: var(--fill-hover); color: var(--label-secondary); display: flex; align-items: center; justify-content: center; cursor: default;
+  transition: background var(--dur-fast) var(--ease);
+}
+.pop-open:hover { background: var(--violet-tint); color: var(--violet); }
+.pop-running { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 12px 0; }
+.pop-time { font-family: var(--font-round); font-size: 40px; font-weight: 700; letter-spacing: -1px; }
+.pop-proj { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--label-secondary); margin-bottom: 4px; }
+.pop-list { display: flex; flex-direction: column; gap: 2px; }
+.pop-row {
+  -webkit-app-region: no-drag; display: flex; align-items: center; gap: 10px; width: 100%; border: none; background: transparent;
+  font: inherit; text-align: left; padding: 8px; border-radius: 10px; cursor: default; transition: background var(--dur-fast) var(--ease);
+}
+.pop-row:hover { background: var(--fill-hover); }
+.pop-icon { width: 30px; height: 30px; border-radius: 9px; display: flex; align-items: center; justify-content: center; color: #fff; flex-shrink: 0; }
+.pop-row-name { flex: 1; min-width: 0; font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* fade-in on mount */
 @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }

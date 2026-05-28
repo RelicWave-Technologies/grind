@@ -1,6 +1,8 @@
 import {
+  applyIdleDiscard,
   closeTimeEntry,
   createTimeEntry,
+  getOpenSegment,
   recoverStaleEntry,
   totalWorkedMs,
   type TimeEntry,
@@ -83,6 +85,29 @@ export class TimerService {
     this.store.upsert(closed);
     await this.trySync(closed, 'sync');
     return { state: 'IDLE' };
+  }
+
+  /**
+   * The machine was away (slept / locked) from `awayStart` until `resumeAt`.
+   * If a timer is running, trim that gap so the sleep time is never billed —
+   * the open WORK segment ends at `awayStart`, the gap is recorded as
+   * IDLE_TRIMMED, and a fresh WORK segment resumes at `resumeAt`.
+   * No-op if nothing is running or the gap is trivial (<1s).
+   */
+  async discardAway(awayStart: number, resumeAt: number): Promise<void> {
+    if (!this.open) return;
+    if (resumeAt - awayStart < 1000) return;
+    const open = getOpenSegment(this.open);
+    if (!open) return;
+    const updated = applyIdleDiscard(this.open, {
+      idleStartedAt: Math.max(awayStart, open.startedAt),
+      resumeAt,
+      idleSegmentId: this.ids.ulid(),
+      workSegmentId: this.ids.ulid(),
+    });
+    this.open = updated;
+    this.store.upsert(updated);
+    await this.trySync(updated, 'sync');
   }
 
   status(): TimerStatus {

@@ -1,12 +1,15 @@
-import type { BrowserWindow } from 'electron';
+import { ipcMain } from 'electron';
 import { registerAuthIpc } from './auth';
 import { registerProjectsIpc } from './projects';
 import { registerStatusIpc } from './status';
 import { registerTimerIpc } from './timer';
 
-export function registerIpc(opts: { trayWindow: BrowserWindow }): void {
-  registerAuthIpc(opts.trayWindow);
+export function registerIpc(opts: { onOpenMainWindow: () => void }): void {
+  registerAuthIpc();
   registerProjectsIpc();
   registerStatusIpc();
-  registerTimerIpc(opts.trayWindow);
+  registerTimerIpc();
+
+  // Lets the floating bar / popover ask to bring up the main window.
+  ipcMain.handle('window:openMain', () => opts.onOpenMainWindow());
 }
