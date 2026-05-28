@@ -1,12 +1,14 @@
-import { app, BrowserWindow, Tray } from 'electron';
+import { app, BrowserWindow, Tray, ipcMain } from 'electron';
 import { createTray, setTrayTitle } from './tray';
 import { createMainWindow } from './window';
 import { registerIpc } from './ipc';
 import { startHeartbeatIfAuthed } from './services/heartbeat';
 import { getTimerService, initTimerOnBoot } from './services/timer';
 import { registerPowerEvents } from './services/power';
+import { IdleMonitor } from './services/idle/monitor';
 import { showFloatingBar, hideFloatingBar, reassertFloating } from './floating';
 import { togglePopover, hidePopover } from './popover';
+import { showIdlePrompt, hideIdlePrompt } from './idlePrompt';
 import { broadcast } from './broadcast';
 import { log } from './logger';
 
@@ -69,6 +71,25 @@ app.whenReady().then(async () => {
   app.on('activate', () => showMainWindow());
 
   registerPowerEvents({ onWake: () => reassertFloating() });
+
+  // Idle detection → "are you still working?" prompt.
+  const idleMonitor = new IdleMonitor(() => showIdlePrompt());
+  idleMonitor.start();
+
+  ipcMain.handle('idle:get', () => ({ idleStartedAt: idleMonitor.getIdleStart() }));
+  ipcMain.handle('idle:resolve', async (_e, action: 'keep' | 'discard') => {
+    const idleStart = idleMonitor.getIdleStart();
+    if (action === 'discard') {
+      try {
+        await getTimerService().discardAway(idleStart, Date.now());
+      } catch (err) {
+        log.warn('idle discard failed', { err: String(err) });
+      }
+    }
+    idleMonitor.resolve();
+    hideIdlePrompt();
+    broadcast('timer:status:push', getTimerService().status());
+  });
 
   try {
     await startHeartbeatIfAuthed();

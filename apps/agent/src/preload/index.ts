@@ -46,6 +46,10 @@ const api = {
   window: {
     openMain: (): Promise<void> => ipcRenderer.invoke('window:openMain'),
   },
+  idle: {
+    get: (): Promise<{ idleStartedAt: number }> => ipcRenderer.invoke('idle:get'),
+    resolve: (action: 'keep' | 'discard'): Promise<void> => ipcRenderer.invoke('idle:resolve', action),
+  },
 };
 
 contextBridge.exposeInMainWorld('agent', api);

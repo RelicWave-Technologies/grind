@@ -398,6 +398,23 @@ label.field-label { display: block; font-size: 12px; font-weight: 600; color: va
 .pop-icon { width: 30px; height: 30px; border-radius: 9px; display: flex; align-items: center; justify-content: center; color: #fff; flex-shrink: 0; }
 .pop-row-name { flex: 1; min-width: 0; font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
+/* ============================================================================
+   idle prompt ("are you still working?")
+   ========================================================================== */
+.idle {
+  -webkit-app-region: drag;
+  height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 8px; padding: 24px; text-align: center;
+  background: var(--bg-card); border-radius: 18px; box-shadow: 0 16px 44px rgba(0, 0, 0, 0.26);
+}
+.idle-icon {
+  width: 52px; height: 52px; border-radius: 14px; background: var(--violet-tint); color: var(--violet);
+  display: flex; align-items: center; justify-content: center; margin-bottom: 4px;
+}
+.idle-sub { max-width: 260px; margin-top: 2px; }
+.idle-actions { display: flex; gap: 8px; margin-top: 14px; width: 100%; }
+.idle-actions .btn { flex: 1; }
+
 /* fade-in on mount */
 @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 .rise { animation: rise var(--dur-base) var(--ease) both; }

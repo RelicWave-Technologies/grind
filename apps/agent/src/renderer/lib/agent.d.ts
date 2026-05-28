@@ -33,6 +33,10 @@ declare global {
       window: {
         openMain: () => Promise<void>;
       };
+      idle: {
+        get: () => Promise<{ idleStartedAt: number }>;
+        resolve: (action: 'keep' | 'discard') => Promise<void>;
+      };
     };
   }
 }

@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import App from './App';
 import FloatingBar from './screens/FloatingBar';
 import Popover from './screens/Popover';
+import IdlePrompt from './screens/IdlePrompt';
 import './styles.css';
 
 const qc = new QueryClient({
@@ -14,11 +15,12 @@ const qc = new QueryClient({
 
 // One renderer build; the main process loads each window with a hash.
 const route = window.location.hash.replace('#', '');
-const Root = route === 'floating' ? FloatingBar : route === 'popover' ? Popover : App;
+const Root =
+  route === 'floating' ? FloatingBar : route === 'popover' ? Popover : route === 'idle' ? IdlePrompt : App;
 
-// Transparent windows (floating bar, popover) need a transparent body so the
-// rounded card corners don't sit on a gray fill.
-if (route === 'floating' || route === 'popover') {
+// Transparent windows (floating bar, popover, idle prompt) need a transparent
+// body so the rounded card corners don't sit on a gray fill.
+if (route === 'floating' || route === 'popover' || route === 'idle') {
   document.body.classList.add('chrome-window');
 }
 

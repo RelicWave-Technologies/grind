@@ -1,0 +1,48 @@
+import { powerMonitor } from 'electron';
+import { getTimerService } from '../timer';
+import { shouldPromptIdle, computeIdleStart } from './decide';
+import { IDLE_THRESHOLD_SEC, IDLE_POLL_MS } from '../../env';
+import { log } from '../../logger';
+
+/**
+ * Polls the OS idle timer while a timer is running and fires `onPrompt` once the
+ * user has been idle past the threshold. Stays "prompting" until `resolve()` so
+ * it never stacks prompts.
+ */
+export class IdleMonitor {
+  private interval: NodeJS.Timeout | null = null;
+  private prompting = false;
+  private idleStartedAt = 0;
+
+  constructor(private readonly onPrompt: (idleStartedAt: number) => void) {}
+
+  start(): void {
+    if (this.interval) return;
+    this.interval = setInterval(() => this.tick(), IDLE_POLL_MS);
+  }
+
+  private tick(): void {
+    try {
+      const idleSeconds = powerMonitor.getSystemIdleTime();
+      const isRunning = getTimerService().isRunning();
+      if (shouldPromptIdle({ isRunning, idleSeconds, thresholdSec: IDLE_THRESHOLD_SEC, prompting: this.prompting })) {
+        this.prompting = true;
+        this.idleStartedAt = computeIdleStart(Date.now(), idleSeconds);
+        log.info('idle prompt triggered', { idleSeconds });
+        this.onPrompt(this.idleStartedAt);
+      }
+    } catch (err) {
+      log.warn('idle tick failed', { err: String(err) });
+    }
+  }
+
+  getIdleStart(): number {
+    return this.idleStartedAt;
+  }
+  resolve(): void {
+    this.prompting = false;
+  }
+  isPrompting(): boolean {
+    return this.prompting;
+  }
+}
