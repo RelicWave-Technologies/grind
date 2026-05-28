@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { Timer } from 'lucide-react';
 
 export default function Login() {
   const qc = useQueryClient();
@@ -8,60 +9,63 @@ export default function Login() {
 
   const mut = useMutation({
     mutationFn: () => window.agent.auth.login(email, password),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ['authStatus'] });
-    },
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['authStatus'] }),
   });
 
-  const error = mut.error instanceof Error ? mut.error.message : null;
+  const error = mut.error instanceof Error ? 'Invalid email or password' : null;
 
   return (
-    <div className="app">
-      <div className="header">
-        <span>Grind</span>
-        <span className="badge">sign in</span>
-      </div>
-
+    <div className="login">
       <form
-        className="no-drag"
+        className="login-card"
         onSubmit={(e) => {
           e.preventDefault();
           if (!mut.isPending) mut.mutate();
         }}
       >
-        <div style={{ marginBottom: 10 }}>
-          <label htmlFor="email">Email</label>
-          <input
-            id="email"
-            type="email"
-            autoComplete="username"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-          />
+        <div className="login-logo">
+          <Timer size={24} strokeWidth={2} />
         </div>
-        <div style={{ marginBottom: 10 }}>
-          <label htmlFor="password">Password</label>
-          <input
-            id="password"
-            type="password"
-            autoComplete="current-password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-          />
+        <div className="login-title">
+          <div className="h2">Sign in to Grind</div>
+          <div className="callout secondary" style={{ marginTop: 4 }}>
+            Track your time across projects
+          </div>
         </div>
-        <button type="submit" disabled={mut.isPending || !email || !password}>
+
+        <div className="stack" style={{ marginTop: 8 }}>
+          <div>
+            <label className="field-label" htmlFor="email">Email</label>
+            <input
+              id="email"
+              className="field selectable"
+              type="email"
+              autoComplete="username"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+            />
+          </div>
+          <div>
+            <label className="field-label" htmlFor="password">Password</label>
+            <input
+              id="password"
+              className="field selectable"
+              type="password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+            />
+          </div>
+        </div>
+
+        <div className="error-text">{error ?? ' '}</div>
+
+        <button className="btn btn-prominent btn-lg" type="submit" disabled={mut.isPending || !email || !password}>
           {mut.isPending ? 'Signing in…' : 'Sign in'}
         </button>
-        <div className="error" style={{ marginTop: 8 }}>{error ?? ' '}</div>
       </form>
-
-      <div className="spacer" />
-      <div className="footer">
-        <span>internal • dogfood</span>
-        <span>v0.0.1</span>
-      </div>
     </div>
   );
 }

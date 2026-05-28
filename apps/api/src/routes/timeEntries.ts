@@ -168,6 +168,7 @@ timeEntriesRouter.put('/:id/sync', validate(SyncTimeEntryRequest, 'body'), async
   try {
     if (!req.user) return res.status(401).json({ error: 'unauthorized' });
     const id = req.params.id;
+    if (!id) return res.status(400).json({ error: 'missing_id' });
     const body = req.body as SyncTimeEntryRequest;
 
     const entry = await prisma.timeEntry.findUnique({ where: { id }, select: { id: true, userId: true, clientUuid: true, projectId: true, taskId: true, source: true, startedAt: true } });
@@ -188,21 +189,26 @@ timeEntriesRouter.put('/:id/sync', validate(SyncTimeEntryRequest, 'body'), async
     const violations = validateEntry(core);
     if (violations.length) return res.status(400).json({ error: 'invalid_segments', details: violations });
 
+    const incomingIds = body.segments.map((s) => s.id);
     const updated = await prisma.$transaction(async (tx) => {
-      await tx.timeSegment.deleteMany({ where: { timeEntryId: id } });
+      // Replace segments idempotently: drop this entry's segments AND any rows
+      // that reuse an incoming id (defends against replayed/retried syncs),
+      // then recreate. Avoids unique-constraint collisions on TimeSegment.id.
+      await tx.timeSegment.deleteMany({
+        where: { OR: [{ timeEntryId: id }, { id: { in: incomingIds } }] },
+      });
       await tx.timeEntry.update({
         where: { id },
-        data: {
-          endedAt: body.endedAt ? new Date(body.endedAt) : null,
-          segments: {
-            create: body.segments.map((s) => ({
-              id: s.id,
-              kind: s.kind,
-              startedAt: new Date(s.startedAt),
-              endedAt: s.endedAt ? new Date(s.endedAt) : null,
-            })),
-          },
-        },
+        data: { endedAt: body.endedAt ? new Date(body.endedAt) : null },
+      });
+      await tx.timeSegment.createMany({
+        data: body.segments.map((s) => ({
+          id: s.id,
+          timeEntryId: id,
+          kind: s.kind,
+          startedAt: new Date(s.startedAt),
+          endedAt: s.endedAt ? new Date(s.endedAt) : null,
+        })),
       });
       return tx.timeEntry.findUniqueOrThrow({ where: { id }, include: { segments: true } });
     });

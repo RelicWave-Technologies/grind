@@ -39,6 +39,9 @@ class MemStore implements EntryStore {
   getUnsynced() {
     return [...this.entries.values()].filter((e) => !this.synced.has(e.id)).map((e) => structuredClone(e));
   }
+  listRecent(limit: number) {
+    return [...this.entries.values()].reverse().slice(0, limit).map((e) => structuredClone(e));
+  }
   markSynced(id: string) {
     this.synced.add(id);
   }

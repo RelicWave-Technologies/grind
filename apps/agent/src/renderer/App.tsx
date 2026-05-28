@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import Login from './screens/Login';
-import ProjectList from './screens/ProjectList';
+import MainLayout from './screens/MainLayout';
 import './lib/agent.d';
 
 export default function App() {
@@ -20,16 +20,8 @@ export default function App() {
   }, [qc]);
 
   if (status.isLoading || status.data === undefined) {
-    return (
-      <div className="app">
-        <div className="header">
-          <span>Grind</span>
-          <span className="badge">…</span>
-        </div>
-        <div className="muted">Loading…</div>
-      </div>
-    );
+    return <div className="login" />;
   }
 
-  return status.data === 'loggedIn' ? <ProjectList /> : <Login />;
+  return status.data === 'loggedIn' ? <MainLayout /> : <Login />;
 }

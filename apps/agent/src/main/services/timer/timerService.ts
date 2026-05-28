@@ -99,6 +99,15 @@ export class TimerService {
     };
   }
 
+  /** Entries with any segment active today (newest first), incl. the open one. */
+  listToday(now: number): TimeEntry[] {
+    const dayStart = new Date(now);
+    dayStart.setHours(0, 0, 0, 0);
+    const since = dayStart.getTime();
+    const recent = this.store.listRecent(50);
+    return recent.filter((e) => e.segments.some((s) => (s.endedAt ?? now) >= since));
+  }
+
   /** Retry pushing any locally-persisted entries that haven't synced yet. */
   async flushUnsynced(): Promise<void> {
     for (const entry of this.store.getUnsynced()) {
