@@ -9,6 +9,14 @@ process.env.DATABASE_URL = process.env.TEST_DATABASE_URL;
 process.env.DIRECT_URL = process.env.TEST_DATABASE_URL;
 process.env.NODE_ENV = 'test';
 
+// Keep the Lark integration deterministically DISABLED for the test suite,
+// regardless of whether the developer's local .env has real creds. This must
+// run before src/env.ts is parsed (setupFiles load before test modules). The
+// configured OAuth path is exercised by live verification, not unit tests.
+delete process.env.LARK_APP_ID;
+delete process.env.LARK_APP_SECRET;
+delete process.env.LARK_TOKEN_KEY;
+
 const { prisma } = await import('@grind/db');
 
 beforeEach(async () => {

@@ -1,30 +1,97 @@
 import { Router } from 'express';
+import { prisma } from '@grind/db';
 import { requireAccessToken } from '../middleware/auth';
-import { isLarkConfigured, getTokenManager, LARK_SCOPES } from '../lark';
+import { logger } from '../logger';
+import {
+  isLarkConfigured,
+  getLarkConfig,
+  getTokenManager,
+  getTenantClient,
+  resolveIdentity,
+  signOAuthState,
+  verifyOAuthState,
+  buildAuthorizeUrl,
+  LARK_SCOPES,
+} from '../lark';
 
 export const larkRouter = Router();
 
+/** Minimal HTML shown in the browser tab after the OAuth round-trip. */
+function closeTabPage(title: string, detail: string): string {
+  return `<!doctype html><meta charset="utf-8"><title>${title}</title>
+<style>body{font:15px -apple-system,system-ui,sans-serif;display:grid;place-items:center;height:100vh;margin:0;background:#faf9fd;color:#1c1c1e}
+.card{max-width:380px;text-align:center;padding:32px;border-radius:16px;background:#fff;box-shadow:0 8px 30px rgba(90,60,200,.12)}
+h1{font-size:18px;margin:0 0 8px}p{color:#6b6b76;margin:0}</style>
+<div class="card"><h1>${title}</h1><p>${detail}</p></div>`;
+}
+
+/**
+ * OAuth callback — hit by the BROWSER (no Grind JWT). Mounted before the
+ * auth middleware. The signed `state` token identifies the initiating user and
+ * provides CSRF protection.
+ */
+larkRouter.get('/oauth/callback', async (req, res) => {
+  const { code, state, error } = req.query as Record<string, string | undefined>;
+  try {
+    if (!isLarkConfigured()) return res.status(503).send(closeTabPage('Lark unavailable', 'Integration is not configured.'));
+    if (error) return res.status(400).send(closeTabPage('Authorization cancelled', String(error)));
+    if (!code || !state) return res.status(400).send(closeTabPage('Invalid request', 'Missing code or state.'));
+
+    let userId: string;
+    try {
+      ({ sub: userId } = verifyOAuthState(state));
+    } catch {
+      return res.status(400).send(closeTabPage('Link expired', 'Please start the Lark connection again.'));
+    }
+
+    const { redirectUri } = getLarkConfig();
+    if (!redirectUri) throw new Error('LARK_OAUTH_REDIRECT_URI not set');
+
+    const tm = getTokenManager()!;
+    await tm.connect(userId, code, redirectUri);
+
+    // Best-effort identity resolution; the OAuth connection still succeeds if
+    // the tenant lookup fails (e.g. missing contact scope on the app).
+    try {
+      const user = await prisma.user.findUnique({ where: { id: userId } });
+      const tenant = getTenantClient();
+      if (user && tenant) await resolveIdentity(prisma, userId, user.email, tenant);
+    } catch (err) {
+      logger.warn({ err: String(err), userId }, 'lark identity resolution failed (non-fatal)');
+    }
+
+    res.status(200).send(closeTabPage('Lark connected', 'You can close this tab and return to Grind.'));
+  } catch (err) {
+    logger.error({ err: String(err) }, 'lark oauth callback failed');
+    res.status(500).send(closeTabPage('Connection failed', 'Something went wrong. Please try again.'));
+  }
+});
+
+// Everything below requires a Grind access token.
 larkRouter.use(requireAccessToken);
 
 /**
- * Connection status for the signed-in user. Always 200 — the renderer uses
- * `configured` to decide whether to show the "Connect Lark" affordance, and
- * `reauthRequired` to surface the "reconnect Lark" recovery prompt.
+ * Begin the OAuth flow: returns the authorize URL for the agent to open in the
+ * system browser. The signed state carries the user id back to the callback.
  */
+larkRouter.get('/oauth/start', (req, res) => {
+  if (!req.user) return res.status(401).json({ error: 'unauthorized' });
+  if (!isLarkConfigured()) return res.status(503).json({ error: 'lark_not_configured' });
+  const { accountsHost, appId, redirectUri } = getLarkConfig();
+  if (!redirectUri) return res.status(500).json({ error: 'redirect_uri_not_set' });
+  const state = signOAuthState(req.user.sub);
+  const authorizeUrl = buildAuthorizeUrl({ accountsHost, appId, redirectUri, state });
+  res.json({ authorizeUrl });
+});
+
+/** Connection status for the signed-in user. Always 200. */
 larkRouter.get('/status', async (req, res, next) => {
   try {
     if (!req.user) return res.status(401).json({ error: 'unauthorized' });
-    const configured = isLarkConfigured();
-    if (!configured) {
-      return res.json({
-        configured: false,
-        connected: false,
-        reauthRequired: false,
-        scopes: [],
-      });
+    if (!isLarkConfigured()) {
+      return res.json({ configured: false, connected: false, reauthRequired: false, scopes: [] });
     }
-    const tm = getTokenManager()!;
-    const status = await tm.getStatus(req.user.sub);
+    const status = await getTokenManager()!.getStatus(req.user.sub);
     res.json({
       configured: true,
       connected: status.connected,
@@ -34,6 +101,18 @@ larkRouter.get('/status', async (req, res, next) => {
       refreshExpiresAt: status.refreshExpiresAt,
       lastRefreshedAt: status.lastRefreshedAt,
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** Disconnect: forget the user's Lark tokens. */
+larkRouter.post('/disconnect', async (req, res, next) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: 'unauthorized' });
+    const tm = getTokenManager();
+    if (tm) await tm.disconnect(req.user.sub);
+    res.json({ ok: true });
   } catch (err) {
     next(err);
   }

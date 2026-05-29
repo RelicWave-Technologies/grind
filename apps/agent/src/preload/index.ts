@@ -70,6 +70,12 @@ const api = {
   app: {
     relaunch: (): Promise<void> => ipcRenderer.invoke('app:relaunch'),
   },
+  lark: {
+    status: (): Promise<{ configured: boolean; connected: boolean; reauthRequired: boolean; scopes: string[] }> =>
+      ipcRenderer.invoke('lark:status'),
+    connect: (): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('lark:connect'),
+    disconnect: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('lark:disconnect'),
+  },
 };
 
 contextBridge.exposeInMainWorld('agent', api);
