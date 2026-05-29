@@ -56,6 +56,22 @@ describe('GET /v1/lark/oauth/callback', () => {
   });
 });
 
+describe('GET /v1/lark/my-tasks', () => {
+  it('requires authentication', async () => {
+    const res = await request(app).get('/v1/lark/my-tasks');
+    expect(res.status).toBe(401);
+  });
+
+  it('returns 503 when Lark is not configured', async () => {
+    const { accessToken } = await seedUser();
+    const res = await request(app)
+      .get('/v1/lark/my-tasks')
+      .set('Authorization', `Bearer ${accessToken}`);
+    expect(res.status).toBe(503);
+    expect(res.body).toMatchObject({ error: 'lark_not_configured' });
+  });
+});
+
 describe('POST /v1/lark/disconnect', () => {
   it('requires authentication', async () => {
     const res = await request(app).post('/v1/lark/disconnect');

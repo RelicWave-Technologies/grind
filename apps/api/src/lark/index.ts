@@ -3,6 +3,7 @@ import { isLarkConfigured, getLarkConfig } from './config';
 import { TokenManager } from './tokenManager';
 import { HttpOAuthClient } from './oauthClient';
 import { HttpTenantClient, type TenantClient } from './identity';
+import { HttpUserTaskClient, type UserTaskClient } from './tasks';
 
 export { isLarkConfigured, getLarkConfig, LARK_SCOPES, LARK_SCOPE_STRING } from './config';
 export { TokenManager } from './tokenManager';
@@ -11,9 +12,12 @@ export type { OAuthClient, LarkTokenResponse } from './oauthClient';
 export { resolveIdentity } from './identity';
 export type { TenantClient, ResolvedLarkUser } from './identity';
 export { signOAuthState, verifyOAuthState, buildAuthorizeUrl } from './oauth';
+export { mapTasks } from './tasks';
+export type { UserTaskClient, LarkTaskDto } from './tasks';
 
 let manager: TokenManager | null = null;
 let tenant: TenantClient | null = null;
+let taskClient: UserTaskClient | null = null;
 
 /**
  * Returns the process-wide TokenManager, constructed lazily once Lark is
@@ -37,4 +41,11 @@ export function getTenantClient(): TenantClient | null {
   if (!isLarkConfigured()) return null;
   if (!tenant) tenant = new HttpTenantClient();
   return tenant;
+}
+
+/** Process-wide user-task client (my_tasks), lazily built once configured. */
+export function getUserTaskClient(): UserTaskClient | null {
+  if (!isLarkConfigured()) return null;
+  if (!taskClient) taskClient = new HttpUserTaskClient();
+  return taskClient;
 }
