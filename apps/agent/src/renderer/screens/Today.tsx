@@ -32,8 +32,14 @@ export default function Today() {
     queryFn: () => window.agent.timer.today(),
     refetchInterval: 3000,
   });
+  const larkTasks = useQuery({
+    queryKey: ['larkTasks'],
+    queryFn: () => window.agent.lark.tasks(),
+    refetchInterval: 60_000,
+  });
   const [timer, setTimer] = useState<TimerStatus>({ state: 'IDLE' });
   const [now, setNow] = useState(() => Date.now());
+  const [larkGuid, setLarkGuid] = useState<string>('');
 
   useEffect(() => {
     let alive = true;
@@ -51,7 +57,7 @@ export default function Today() {
   }, []);
 
   const start = useMutation({
-    mutationFn: (projectId: string) => window.agent.timer.start(projectId),
+    mutationFn: (projectId: string) => window.agent.timer.start(projectId, null, larkGuid || null),
     onSuccess: (s) => setTimer(s),
   });
   const stop = useMutation({
@@ -62,6 +68,9 @@ export default function Today() {
   const running = timer.state === 'RUNNING' ? timer : null;
   const runningProject = running ? projects.data?.find((p) => p.id === running.projectId) : undefined;
   const entries = today.data ?? [];
+  const tasks = larkTasks.data?.tasks ?? [];
+  const openTasks = tasks.filter((t) => !t.completed);
+  const runningLarkTask = running?.larkTaskGuid ? tasks.find((t) => t.guid === running.larkTaskGuid) : undefined;
 
   if (running) {
     const st = runningProject ? projectStyle(runningProject.id) : null;
@@ -76,6 +85,9 @@ export default function Today() {
                 {st && <i className="dt-dot" style={{ background: st.color }} />}
                 {runningProject?.name ?? 'Tracking'}
               </div>
+              {runningLarkTask && (
+                <div className="focus-task secondary">↳ {runningLarkTask.summary}</div>
+              )}
             </div>
 
             <div className="focus-card">
@@ -123,6 +135,25 @@ export default function Today() {
               <div className="focus-card rise rise-2">
                 <DayTimeline entries={entries} now={now} />
                 <Legend />
+              </div>
+            </>
+          )}
+
+          {openTasks.length > 0 && (
+            <>
+              <div className="section-head"><span className="section-title">Lark task (optional)</span></div>
+              <div className="lark-task-picker rise rise-1">
+                <select
+                  className="lark-task-select no-drag"
+                  value={larkGuid}
+                  onChange={(e) => setLarkGuid(e.target.value)}
+                  aria-label="Attribute time to a Lark task"
+                >
+                  <option value="">No Lark task</option>
+                  {openTasks.map((t) => (
+                    <option key={t.guid} value={t.guid}>{t.summary}</option>
+                  ))}
+                </select>
               </div>
             </>
           )}

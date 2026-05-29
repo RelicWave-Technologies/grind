@@ -30,8 +30,8 @@ const api = {
     status: (): Promise<AgentStatus> => ipcRenderer.invoke('agent:status'),
   },
   timer: {
-    start: (projectId: string, taskId?: string | null): Promise<TimerStatus> =>
-      ipcRenderer.invoke('timer:start', { projectId, taskId }),
+    start: (projectId: string, taskId?: string | null, larkTaskGuid?: string | null): Promise<TimerStatus> =>
+      ipcRenderer.invoke('timer:start', { projectId, taskId, larkTaskGuid }),
     stop: (): Promise<TimerStatus> => ipcRenderer.invoke('timer:stop'),
     status: (): Promise<TimerStatus> => ipcRenderer.invoke('timer:status'),
     today: (): Promise<TodayEntry[]> => ipcRenderer.invoke('timer:today'),
@@ -75,6 +75,8 @@ const api = {
       ipcRenderer.invoke('lark:status'),
     connect: (): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('lark:connect'),
     disconnect: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('lark:disconnect'),
+    tasks: (): Promise<{ tasks: { guid: string; summary: string; completed: boolean; url?: string }[]; reauthRequired: boolean }> =>
+      ipcRenderer.invoke('lark:tasks'),
   },
 };
 
