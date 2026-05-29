@@ -56,6 +56,9 @@ importers:
       sharp:
         specifier: 0.33.5
         version: 0.33.5
+      uiohook-napi:
+        specifier: 1.5.4
+        version: 1.5.4
       ulid:
         specifier: 2.3.0
         version: 2.3.0
@@ -2875,6 +2878,10 @@ packages:
     engines: {node: '>=14.17'}
     hasBin: true
 
+  uiohook-napi@1.5.4:
+    resolution: {integrity: sha512-7vPVDNwgb6MwTgviA/dnF2MrW0X5xm76fAqaOAC3cEKkswqAZOPw1USu14Sr6383s5qhXegcJaR63CpJOPCNAg==}
+    engines: {node: '>= 16'}
+
   ulid@2.3.0:
     resolution: {integrity: sha512-keqHubrlpvT6G2wH0OEfSW4mquYRcbe/J8NMmveoQOjUqmo+hXtO+ORCpWhdbZ7k72UtY61BL7haGxW6enBnjw==}
     hasBin: true
@@ -5637,6 +5644,10 @@ snapshots:
       - supports-color
 
   typescript@5.6.3: {}
+
+  uiohook-napi@1.5.4:
+    dependencies:
+      node-gyp-build: 4.8.4
 
   ulid@2.3.0: {}
 
