@@ -36,6 +36,8 @@ model User {
   refreshTokens   RefreshToken[]
   timeEntries     TimeEntry[]
   activitySamples ActivitySample[]
+  larkIdentity    LarkIdentity?
+  larkOAuthToken  LarkOAuthToken?
 
   @@index([workspaceId])
 }
@@ -135,6 +137,38 @@ model ActivitySample {
   @@unique([userId, bucketStart])
   @@index([userId, bucketStart])
   @@index([timeEntryId])
+}
+
+/// Maps a Grind user to their Lark identity. Resolved once (email -> open_id)
+/// via contact/v3/users/batch_get_id using a tenant token.
+model LarkIdentity {
+  id         String   @id @default(cuid())
+  userId     String   @unique
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  openId     String   @unique // per-app identifier (open_id)
+  unionId    String? // cross-app identifier within the Lark org
+  userIdLark String? // tenant-scoped user_id (requires extra scope)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([openId])
+}
+
+/// Per-user Lark OAuth tokens. The refresh token is encrypted at rest and is
+/// SINGLE-USE (7-day TTL): each refresh rotates it and the new value must be
+/// persisted in the SAME transaction before the access token is used.
+/// On any refresh failure, set reauthRequired=true and surface "reconnect Lark".
+model LarkOAuthToken {
+  id                String    @id @default(cuid())
+  userId            String    @unique
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshTokenEnc   String // AES-256-GCM ciphertext (iv:tag:data, base64url)
+  refreshExpiresAt  DateTime
+  scopes            String // space-delimited granted scopes
+  reauthRequired    Boolean   @default(false)
+  lastRefreshedAt   DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 }
 
 model RefreshToken {
