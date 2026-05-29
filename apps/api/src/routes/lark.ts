@@ -7,11 +7,13 @@ import {
   getLarkConfig,
   getTokenManager,
   getTenantClient,
+  getUserTaskClient,
   resolveIdentity,
   signOAuthState,
   verifyOAuthState,
   buildAuthorizeUrl,
   LARK_SCOPES,
+  LarkReauthRequiredError,
 } from '../lark';
 
 export const larkRouter = Router();
@@ -101,6 +103,33 @@ larkRouter.get('/status', async (req, res, next) => {
       refreshExpiresAt: status.refreshExpiresAt,
       lastRefreshedAt: status.lastRefreshedAt,
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * List the signed-in user's Lark tasks for the agent's task picker. Uses the
+ * per-user token (rotating it if needed). Returns 409 `reauth_required` when
+ * the user must reconnect Lark, 503 when the integration is off.
+ */
+larkRouter.get('/my-tasks', async (req, res, next) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: 'unauthorized' });
+    if (!isLarkConfigured()) return res.status(503).json({ error: 'lark_not_configured' });
+    const tm = getTokenManager()!;
+    const client = getUserTaskClient()!;
+    let accessToken: string;
+    try {
+      accessToken = await tm.getAccessToken(req.user.sub);
+    } catch (err) {
+      if (err instanceof LarkReauthRequiredError) {
+        return res.status(409).json({ error: 'reauth_required' });
+      }
+      throw err;
+    }
+    const tasks = await client.listMyTasks(accessToken);
+    res.json({ tasks });
   } catch (err) {
     next(err);
   }
