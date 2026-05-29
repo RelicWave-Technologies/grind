@@ -31,6 +31,8 @@ export interface CreateLarkTaskInput {
   /** Optional due time in epoch ms. */
   due?: number | null;
   description?: string | null;
+  /** open_id to add as assignee so the task shows up in their my_tasks. */
+  assigneeOpenId?: string | null;
 }
 
 export interface UserTaskClient {
@@ -40,6 +42,8 @@ export interface UserTaskClient {
   createTask(accessToken: string, input: CreateLarkTaskInput): Promise<LarkTaskDto>;
   /** Post a comment on a task (non-destructive). */
   addComment(accessToken: string, guid: string, content: string): Promise<void>;
+  /** The open_id of the token owner (so we can assign created tasks to them). */
+  getOpenId(accessToken: string): Promise<string | null>;
 }
 
 // Raw shape of a Lark Task v2 item (only the fields we use).
@@ -141,6 +145,10 @@ export class HttpUserTaskClient implements UserTaskClient {
       // Lark task due expects a seconds timestamp string.
       payload.due = { timestamp: String(Math.floor(input.due / 1000)), is_all_day: false };
     }
+    // Assign the creator so the task appears in their my_tasks list.
+    if (input.assigneeOpenId) {
+      payload.members = [{ id: input.assigneeOpenId, type: 'user', role: 'assignee' }];
+    }
     const res = await fetch(`${oauthHost}/open-apis/task/v2/tasks`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json; charset=utf-8', Authorization: `Bearer ${accessToken}` },
@@ -149,6 +157,15 @@ export class HttpUserTaskClient implements UserTaskClient {
     const body = (await res.json().catch(() => ({}))) as { code?: number; msg?: string; data?: { task?: RawLarkTask } };
     if (body.code !== 0 || !body.data?.task) throw new Error(`lark create task error: ${body.msg ?? body.code}`);
     return mapTasks([body.data.task])[0]!;
+  }
+
+  async getOpenId(accessToken: string): Promise<string | null> {
+    const { oauthHost } = getLarkConfig();
+    const res = await fetch(`${oauthHost}/open-apis/authen/v1/user_info`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    const body = (await res.json().catch(() => ({}))) as { code?: number; data?: { open_id?: string } };
+    return body.code === 0 ? body.data?.open_id ?? null : null;
   }
 
   async addComment(accessToken: string, guid: string, content: string): Promise<void> {

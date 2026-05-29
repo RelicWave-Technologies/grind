@@ -183,10 +183,14 @@ larkRouter.post('/tasks', async (req, res, next) => {
       if (err instanceof LarkReauthRequiredError) return res.status(409).json({ error: 'reauth_required' });
       throw err;
     }
+    // Resolve the token owner's open_id so the new task is assigned to them
+    // (otherwise it won't appear in their my_tasks list).
+    const assigneeOpenId = await client.getOpenId(accessToken).catch(() => null);
     const task = await client.createTask(accessToken, {
       summary: summary.trim().slice(0, 256),
       due: dueMs,
       description: typeof description === 'string' ? description.slice(0, 2000) : null,
+      assigneeOpenId,
     });
     res.status(201).json({ task });
   } catch (err) {
