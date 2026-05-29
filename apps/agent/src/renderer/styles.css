@@ -251,6 +251,9 @@ label.field-label { display: block; font-size: 12px; font-weight: 600; color: va
 .dt-legend { display: flex; gap: var(--sp-5); justify-content: center; margin-top: var(--sp-4); }
 .dt-legend span { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--label-secondary); }
 .dt-dot { width: 9px; height: 9px; border-radius: 3px; }
+/* Work is colored per task — show that with a multi-color swatch in the legend. */
+.dt-swatch-work { width: 22px; height: 9px; border-radius: 3px; background: linear-gradient(90deg, var(--c-violet), var(--c-rose), var(--c-green), var(--c-orange)); }
+.dt-leg-sub { color: var(--label-tertiary); }
 
 /* ---- focus running view ---- */
 .focus { display: flex; flex-direction: column; align-items: center; gap: var(--sp-7); padding: var(--sp-6) 0; }
