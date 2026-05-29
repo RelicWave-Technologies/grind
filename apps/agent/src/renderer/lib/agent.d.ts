@@ -38,7 +38,7 @@ declare global {
         resolve: (action: 'continue' | 'break') => Promise<void>;
       };
       screenshots: {
-        recent: (limit?: number) => Promise<{ id: string; capturedAt: number; thumb: string | null; uploadState: string }[]>;
+        recent: (limit?: number) => Promise<{ id: string; capturedAt: number; thumb: string | null; uploadState: string; keyboardPct: number; mousePct: number }[]>;
         countToday: () => Promise<number>;
         captureOnce: () => Promise<number>;
       };
@@ -53,6 +53,14 @@ declare global {
       };
       app: {
         relaunch: () => Promise<void>;
+      };
+      insights: {
+        today: () => Promise<{
+          day: string;
+          score: { score: number; trackedMinutes: number; engagedMinutes: number; protectedMinutes: number; idleMinutes: number };
+          totals: { keystrokes: number; clicks: number; mouseDistancePx: number; scrollEvents: number };
+          byHour: number[];
+        }>;
       };
       lark: {
         status: () => Promise<{ configured: boolean; connected: boolean; reauthRequired: boolean; scopes: string[] }>;

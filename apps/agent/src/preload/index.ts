@@ -51,7 +51,7 @@ const api = {
     resolve: (action: 'continue' | 'break'): Promise<void> => ipcRenderer.invoke('idle:resolve', action),
   },
   screenshots: {
-    recent: (limit?: number): Promise<{ id: string; capturedAt: number; thumb: string | null; uploadState: string }[]> =>
+    recent: (limit?: number): Promise<{ id: string; capturedAt: number; thumb: string | null; uploadState: string; keyboardPct: number; mousePct: number }[]> =>
       ipcRenderer.invoke('screenshots:recent', limit),
     countToday: (): Promise<number> => ipcRenderer.invoke('screenshots:countToday'),
     captureOnce: (): Promise<number> => ipcRenderer.invoke('screenshots:captureOnce'),
@@ -69,6 +69,14 @@ const api = {
   },
   app: {
     relaunch: (): Promise<void> => ipcRenderer.invoke('app:relaunch'),
+  },
+  insights: {
+    today: (): Promise<{
+      day: string;
+      score: { score: number; trackedMinutes: number; engagedMinutes: number; protectedMinutes: number; idleMinutes: number };
+      totals: { keystrokes: number; clicks: number; mouseDistancePx: number; scrollEvents: number };
+      byHour: number[];
+    }> => ipcRenderer.invoke('insights:today'),
   },
   lark: {
     status: (): Promise<{ configured: boolean; connected: boolean; reauthRequired: boolean; scopes: string[] }> =>
