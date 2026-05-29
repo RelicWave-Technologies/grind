@@ -1,5 +1,6 @@
 import { ipcMain, app, shell } from 'electron';
-import { screenStatus } from '../services/permissions';
+import { screenStatus, hasAccessibilityAccess } from '../services/permissions';
+import { isActivityCapturing } from '../services/activity';
 
 export interface SettingsInfo {
   version: string;
@@ -24,6 +25,20 @@ export function registerSettingsIpc(): void {
   ipcMain.handle('settings:openScreenPrefs', async () => {
     if (process.platform === 'darwin') {
       await shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture');
+    }
+  });
+
+  // Accessibility (global keyboard/mouse counting via uiohook).
+  ipcMain.handle('permissions:accessibility', (): { trusted: boolean; capturing: boolean } => ({
+    trusted: hasAccessibilityAccess(false),
+    capturing: isActivityCapturing(),
+  }));
+
+  // Prompt the system to add this app to the Accessibility list, then deep-link.
+  ipcMain.handle('permissions:requestAccessibility', async () => {
+    hasAccessibilityAccess(true); // shows the macOS prompt / registers the app
+    if (process.platform === 'darwin') {
+      await shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility');
     }
   });
 

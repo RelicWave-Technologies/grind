@@ -59,6 +59,8 @@ const api = {
   permissions: {
     screen: (): Promise<{ status: string; health: string; state: 'ok' | 'needs-grant' | 'needs-settings' | 'needs-restart' }> =>
       ipcRenderer.invoke('permissions:screen'),
+    accessibility: (): Promise<{ trusted: boolean; capturing: boolean }> => ipcRenderer.invoke('permissions:accessibility'),
+    requestAccessibility: (): Promise<void> => ipcRenderer.invoke('permissions:requestAccessibility'),
   },
   settings: {
     get: (): Promise<{ version: string; platform: string; launchAtLogin: boolean; screenStatus: string }> =>

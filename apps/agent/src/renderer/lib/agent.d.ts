@@ -44,6 +44,8 @@ declare global {
       };
       permissions: {
         screen: () => Promise<{ status: string; health: string; state: 'ok' | 'needs-grant' | 'needs-settings' | 'needs-restart' }>;
+        accessibility: () => Promise<{ trusted: boolean; capturing: boolean }>;
+        requestAccessibility: () => Promise<void>;
       };
       settings: {
         get: () => Promise<{ version: string; platform: string; launchAtLogin: boolean; screenStatus: string }>;
