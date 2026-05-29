@@ -37,6 +37,7 @@ insightsRouter.get('/score', async (req, res, next) => {
       where: { userId: req.user.sub, bucketStart: { gte: win.start, lt: win.end } },
       orderBy: { bucketStart: 'asc' },
       select: {
+        bucketStart: true,
         keystrokes: true,
         clicks: true,
         scrollEvents: true,
@@ -51,10 +52,23 @@ insightsRouter.get('/score', async (req, res, next) => {
     const day = scoreDay(samples, { role });
     const anticheat = assessWindow(samples as RiskSample[]);
 
+    // Day totals + per-hour keystrokes (for the Reports chart).
+    const totals = { keystrokes: 0, clicks: 0, mouseDistancePx: 0, scrollEvents: 0 };
+    const byHour = Array.from({ length: 24 }, () => 0);
+    for (const s of samples) {
+      totals.keystrokes += s.keystrokes;
+      totals.clicks += s.clicks;
+      totals.mouseDistancePx += s.mouseDistancePx;
+      totals.scrollEvents += s.scrollEvents;
+      byHour[new Date(s.bucketStart).getUTCHours()]! += s.keystrokes + s.clicks;
+    }
+
     res.json({
       day: win.start.toISOString().slice(0, 10),
       role,
       score: day,
+      totals,
+      byHour,
       anticheat: { hardReject: anticheat.hardReject, riskScore: anticheat.riskScore, flags: anticheat.flags },
     });
   } catch (err) {

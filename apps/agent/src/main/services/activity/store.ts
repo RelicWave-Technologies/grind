@@ -69,6 +69,24 @@ export class ActivityStore {
       .get(sinceMs) as { k: number; c: number; s: number };
     return { keystrokes: r.k, clicks: r.c, scrollEvents: r.s };
   }
+
+  /** Summed counts + minute count for a [from, to) window (for per-shot activity bars). */
+  aggregate(fromMs: number, toMs: number): {
+    minutes: number;
+    keystrokes: number;
+    clicks: number;
+    mouseDistancePx: number;
+    scrollEvents: number;
+  } {
+    const r = this.db
+      .prepare(
+        `SELECT COUNT(*) n, COALESCE(SUM(keystrokes),0) k, COALESCE(SUM(clicks),0) c,
+                COALESCE(SUM(mouse_dist_px),0) d, COALESCE(SUM(scroll_events),0) s
+         FROM activity_samples WHERE bucket_start >= ? AND bucket_start < ?`,
+      )
+      .get(fromMs, toMs) as { n: number; k: number; c: number; d: number; s: number };
+    return { minutes: r.n, keystrokes: r.k, clicks: r.c, mouseDistancePx: r.d, scrollEvents: r.s };
+  }
 }
 
 function map(r: Record<string, unknown>): ActivityRow {

@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { CalendarClock, ListTodo, PieChart, Settings as SettingsIcon, LogOut, Timer, CheckCircle2, Clock } from 'lucide-react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { CalendarClock, ListTodo, PieChart, Settings as SettingsIcon, LogOut, Timer, Gauge, Clock, Keyboard, MousePointer2 } from 'lucide-react';
 import Today from './Today';
 import Tasks from './Tasks';
 import Settings from './Settings';
@@ -63,51 +63,72 @@ export default function MainLayout() {
   );
 }
 
+function fmtHM(min: number): { h: number; m: number } {
+  return { h: Math.floor(min / 60), m: min % 60 };
+}
+
 function Reports() {
-  const [range, setRange] = useState<'day' | 'week'>('day');
-  const dayPts = [0.4, 0.7, 0.9, 1.1, 1.6, 1.3, 0.9, 1.0, 1.5];
-  const dayLabels = ['8a', '9a', '10a', '11a', '12p', '1p', '2p', '3p', '4p'];
-  const weekPts = [3.2, 5.1, 4.4, 6.2, 5.6, 2.1, 1.2];
-  const weekLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const insights = useQuery({ queryKey: ['insightsToday'], queryFn: () => window.agent.insights.today(), refetchInterval: 15_000 });
+  const d = insights.data;
+  const tracked = fmtHM(d?.score.trackedMinutes ?? 0);
+
+  // Build a daytime chart (7a–9p) from the hourly keystroke+click counts.
+  const HOURS = Array.from({ length: 15 }, (_, i) => i + 7); // 7..21
+  const points = HOURS.map((h) => d?.byHour?.[h] ?? 0);
+  const labels = HOURS.map((h) => (h % 12 === 0 ? 12 : h % 12) + (h < 12 ? 'a' : 'p'));
+  const hasData = (d?.score.trackedMinutes ?? 0) > 0;
 
   return (
     <>
       <div className="toolbar">
         <span className="h1 no-drag">Productivity</span>
-        <div className="segmented no-drag">
-          <button className={`seg${range === 'day' ? ' active' : ''}`} onClick={() => setRange('day')}>Day</button>
-          <button className={`seg${range === 'week' ? ' active' : ''}`} onClick={() => setRange('week')}>Week</button>
-        </div>
       </div>
       <div className="content-scroll">
         <div className="content-narrow">
           <div className="stat-grid rise rise-1">
             <div className="stat">
               <div className="stat-top">
-                <span className="stat-chip" style={{ background: 'var(--c-green)' }}><CheckCircle2 size={18} /></span>
-                <span className="stat-label">Sessions<br />completed</span>
+                <span className="stat-chip" style={{ background: 'var(--violet)' }}><Gauge size={18} /></span>
+                <span className="stat-label">Productivity<br />score</span>
               </div>
-              <div className="stat-value">12</div>
+              <div className="stat-value">{d?.score.score ?? 0}<span className="unit"> / 100</span></div>
             </div>
             <div className="stat">
               <div className="stat-top">
-                <span className="stat-chip" style={{ background: 'var(--violet)' }}><Clock size={18} /></span>
-                <span className="stat-label">Time<br />tracked</span>
+                <span className="stat-chip" style={{ background: 'var(--c-green)' }}><Clock size={18} /></span>
+                <span className="stat-label">Active<br />time</span>
               </div>
-              <div className="stat-value">1<span className="unit">h </span>46<span className="unit">m</span></div>
+              <div className="stat-value">{tracked.h}<span className="unit">h </span>{tracked.m}<span className="unit">m</span></div>
             </div>
           </div>
 
-          <div className="chart-card rise rise-2">
-            <LineChart
-              points={range === 'day' ? dayPts : weekPts}
-              labels={range === 'day' ? dayLabels : weekLabels}
-            />
+          <div className="stat-grid rise rise-2">
+            <div className="stat">
+              <div className="stat-top">
+                <span className="stat-chip" style={{ background: 'var(--c-green)' }}><Keyboard size={18} /></span>
+                <span className="stat-label">Keystrokes<br />today</span>
+              </div>
+              <div className="stat-value">{(d?.totals.keystrokes ?? 0).toLocaleString()}</div>
+            </div>
+            <div className="stat">
+              <div className="stat-top">
+                <span className="stat-chip" style={{ background: '#5aa9ff' }}><MousePointer2 size={18} /></span>
+                <span className="stat-label">Clicks<br />today</span>
+              </div>
+              <div className="stat-value">{(d?.totals.clicks ?? 0).toLocaleString()}</div>
+            </div>
           </div>
 
-          <div className="small tertiary" style={{ textAlign: 'center', marginTop: 16 }}>
-            Sample data — live reporting arrives with the dashboard milestone.
+          <div className="section-head"><span className="section-title">Activity by hour</span></div>
+          <div className="chart-card rise rise-2">
+            <LineChart points={points} labels={labels} />
           </div>
+
+          {!hasData && (
+            <div className="small tertiary" style={{ textAlign: 'center', marginTop: 16 }}>
+              No activity recorded today yet. Activity needs Accessibility permission and a running timer.
+            </div>
+          )}
         </div>
       </div>
     </>

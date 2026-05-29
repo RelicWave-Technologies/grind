@@ -5,6 +5,8 @@ import { ScreenshotStore } from './store';
 import { captureNow, thumbDataUrl } from './capture';
 import { nextDelayMs } from './scheduler';
 import { getTimerService } from '../timer';
+import { getActivityStore } from '../activity';
+import { activityPercent } from '../activity/percent';
 import { SCREENSHOT_INTERVAL_SEC } from '../../env';
 import { type CaptureHealth } from '../permissions';
 import { log } from '../../logger';
@@ -55,16 +57,35 @@ export function startCaptureLoop(): void {
 }
 
 export async function recentScreenshots(limit: number): Promise<
-  { id: string; capturedAt: number; thumb: string | null; uploadState: string }[]
+  { id: string; capturedAt: number; thumb: string | null; uploadState: string; keyboardPct: number; mousePct: number }[]
 > {
-  const rows = getStore().recent(limit);
+  const rows = getStore().recent(limit); // newest-first
+  const activity = getActivityStore();
+  const DEFAULT_WINDOW_MS = 30 * 60_000;
   return Promise.all(
-    rows.map(async (r) => ({
-      id: r.id,
-      capturedAt: r.capturedAt,
-      uploadState: r.uploadState,
-      thumb: await thumbDataUrl(r.filePath),
-    })),
+    rows.map(async (r, i) => {
+      // Activity for the window this shot represents: from the previous (older)
+      // shot up to this one (capped to 30 min), aligned to the shot's minute.
+      const older = rows[i + 1];
+      const to = r.capturedAt + 60_000;
+      const from = older ? older.capturedAt + 60_000 : r.capturedAt - DEFAULT_WINDOW_MS;
+      let keyboardPct = 0;
+      let mousePct = 0;
+      try {
+        const agg = activity.aggregate(from, to);
+        ({ keyboard: keyboardPct, mouse: mousePct } = activityPercent(agg));
+      } catch {
+        /* activity store may be empty/unavailable */
+      }
+      return {
+        id: r.id,
+        capturedAt: r.capturedAt,
+        uploadState: r.uploadState,
+        thumb: await thumbDataUrl(r.filePath),
+        keyboardPct,
+        mousePct,
+      };
+    }),
   );
 }
 
