@@ -217,36 +217,45 @@ export default function Today() {
           {/* Create-task form (creates a real Lark task) */}
           {larkConnected && showCreate && (
             <div className="create-card rise rise-1">
-              <input
-                className="field"
-                type="text"
-                placeholder="Task title"
-                value={newSummary}
-                autoFocus
-                onChange={(e) => setNewSummary(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || !newDesc)) submitCreate(); }}
-              />
-              <textarea
-                className="field create-desc"
-                placeholder="Description (optional)"
-                value={newDesc}
-                onChange={(e) => setNewDesc(e.target.value)}
-              />
+              <div className="create-field">
+                <label className="field-label" htmlFor="nt-title">Title</label>
+                <input
+                  id="nt-title"
+                  className="field"
+                  type="text"
+                  placeholder="What are you working on?"
+                  value={newSummary}
+                  autoFocus
+                  onChange={(e) => setNewSummary(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || !newDesc)) submitCreate(); }}
+                />
+              </div>
+              <div className="create-field">
+                <label className="field-label" htmlFor="nt-desc">Description <span className="field-optional">optional</span></label>
+                <textarea
+                  id="nt-desc"
+                  className="field create-desc"
+                  placeholder="Add any details…"
+                  value={newDesc}
+                  onChange={(e) => setNewDesc(e.target.value)}
+                />
+              </div>
               <div className="create-row">
-                <label className="create-due">
-                  <CalendarClock size={14} strokeWidth={2} />
-                  <input className="field" type="date" value={newDue} onChange={(e) => setNewDue(e.target.value)} />
-                </label>
+                <div className="create-field create-due-field">
+                  <label className="field-label" htmlFor="nt-due">Due date <span className="field-optional">optional</span></label>
+                  <input id="nt-due" className="field" type="date" value={newDue} onChange={(e) => setNewDue(e.target.value)} />
+                </div>
                 <button
-                  className="btn btn-prominent no-drag"
+                  className="btn btn-prominent btn-lg no-drag"
                   onClick={submitCreate}
                   disabled={createTask.isPending || !newSummary.trim()}
                 >
+                  <Plus size={15} strokeWidth={2.5} />
                   {createTask.isPending ? 'Creating…' : 'Create in Lark'}
                 </button>
               </div>
               {createTask.data && !createTask.data.ok && (
-                <div className="set-warn" style={{ fontSize: 12 }}>Couldn’t create the task. Try again.</div>
+                <div className="create-error"><X size={13} strokeWidth={2.5} /> Couldn’t create the task. Please try again.</div>
               )}
             </div>
           )}
