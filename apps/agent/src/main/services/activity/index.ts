@@ -28,6 +28,11 @@ export function setActivityRecording(on: boolean): void {
   recording = on;
 }
 
+/** Whether the global input hook is actually running (Accessibility granted). */
+export function isActivityCapturing(): boolean {
+  return started;
+}
+
 /**
  * Start global input counting. Requires macOS Accessibility — uIOhook.start()
  * crashes without it, so we gate. Counts only (no key identity / content).

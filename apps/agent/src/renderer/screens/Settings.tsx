@@ -1,10 +1,11 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { MonitorCheck, Power, FolderOpen, CheckCircle2, AlertCircle, Link2 } from 'lucide-react';
+import { MonitorCheck, Power, FolderOpen, CheckCircle2, AlertCircle, Link2, Keyboard } from 'lucide-react';
 
 export default function Settings() {
   const qc = useQueryClient();
   const info = useQuery({ queryKey: ['settings'], queryFn: () => window.agent.settings.get(), refetchInterval: 4000 });
   const perm = useQuery({ queryKey: ['screenPerm'], queryFn: () => window.agent.permissions.screen(), refetchInterval: 4000 });
+  const a11y = useQuery({ queryKey: ['a11yPerm'], queryFn: () => window.agent.permissions.accessibility(), refetchInterval: 4000 });
   const lark = useQuery({ queryKey: ['larkStatus'], queryFn: () => window.agent.lark.status(), refetchInterval: 4000 });
 
   const setLogin = useMutation({
@@ -41,6 +42,9 @@ export default function Settings() {
         ? { ok: false, text: 'Restart needed for capture to take effect' }
         : { ok: false, text: 'Required for screenshots' };
 
+  const aTrusted = !!a11y.data?.trusted;
+  const aCapturing = !!a11y.data?.capturing;
+
   return (
     <>
       <div className="toolbar"><span className="h1 no-drag">Settings</span></div>
@@ -72,6 +76,33 @@ export default function Settings() {
                   Open System Settings
                 </button>
               ) : null}
+            </div>
+
+            <div className="set-row">
+              <span className="set-ic" style={{ background: aCapturing ? 'var(--c-green)' : 'var(--c-orange)' }}>
+                <Keyboard size={17} strokeWidth={2} />
+              </span>
+              <div className="set-main">
+                <div className="set-title">Accessibility</div>
+                <div className="set-sub">
+                  {aCapturing ? (
+                    <span className="set-ok"><CheckCircle2 size={13} /> Tracking keyboard &amp; mouse activity</span>
+                  ) : aTrusted ? (
+                    <span className="set-warn"><AlertCircle size={13} /> Granted — restart to start tracking</span>
+                  ) : (
+                    <span className="set-warn"><AlertCircle size={13} /> Needed to count keystrokes &amp; mouse</span>
+                  )}
+                </div>
+              </div>
+              {aCapturing ? null : aTrusted ? (
+                <button className="btn btn-prominent no-drag" onClick={() => window.agent.app.relaunch()}>
+                  Restart Grind
+                </button>
+              ) : (
+                <button className="btn no-drag" onClick={() => window.agent.permissions.requestAccessibility()}>
+                  Enable
+                </button>
+              )}
             </div>
           </div>
 
