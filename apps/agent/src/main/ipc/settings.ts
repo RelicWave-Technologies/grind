@@ -1,4 +1,4 @@
-import { ipcMain, app, shell } from 'electron';
+import { ipcMain, app, shell, dialog } from 'electron';
 import { screenStatus, hasAccessibilityAccess } from '../services/permissions';
 import { isActivityCapturing } from '../services/activity';
 
@@ -46,9 +46,21 @@ export function registerSettingsIpc(): void {
     await shell.openPath(app.getPath('userData'));
   });
 
-  // Relaunch — required for a Screen Recording grant to take effect.
-  ipcMain.handle('app:relaunch', () => {
-    app.relaunch();
-    app.exit(0);
+  // Relaunch — required for a permission grant to take effect.
+  // In a packaged build this relaunches cleanly. Under `electron-vite dev`,
+  // app.relaunch() spawns Electron without the Vite dev-server URL → a blank
+  // window, so we instead tell the developer to restart the dev process.
+  ipcMain.handle('app:relaunch', async () => {
+    if (app.isPackaged) {
+      app.relaunch();
+      app.exit(0);
+      return;
+    }
+    await dialog.showMessageBox({
+      type: 'info',
+      message: 'Restart needed (dev mode)',
+      detail: 'Auto-restart is disabled in dev because it can’t reconnect to the Vite dev server. Quit Grind and run `pnpm --filter @grind/agent dev` again to apply the change.',
+      buttons: ['OK'],
+    });
   });
 }
