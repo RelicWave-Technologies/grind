@@ -5,6 +5,7 @@ import Today from './Today';
 import Tasks from './Tasks';
 import Settings from './Settings';
 import LineChart from '../components/LineChart';
+import ScreenshotGrid from '../components/ScreenshotGrid';
 
 type Tab = 'today' | 'tasks' | 'reports' | 'settings';
 
@@ -69,8 +70,12 @@ function fmtHM(min: number): { h: number; m: number } {
 
 function Reports() {
   const insights = useQuery({ queryKey: ['insightsToday'], queryFn: () => window.agent.insights.today(), refetchInterval: 15_000 });
+  const allShots = useQuery({ queryKey: ['shotsAll'], queryFn: () => window.agent.screenshots.recent(200), refetchInterval: 10_000 });
   const d = insights.data;
   const tracked = fmtHM(d?.score.trackedMinutes ?? 0);
+
+  const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
+  const todayShots = (allShots.data ?? []).filter((s) => s.capturedAt >= startOfDay.getTime());
 
   // Build a daytime chart (7a–9p) from the hourly keystroke+click counts.
   const HOURS = Array.from({ length: 15 }, (_, i) => i + 7); // 7..21
@@ -129,6 +134,15 @@ function Reports() {
               <div className="h3">No activity yet today</div>
               <div className="callout secondary">Keystroke &amp; mouse activity appears once you track with Accessibility enabled.</div>
             </div>
+          )}
+
+          <div className="section-head">
+            <span className="section-titlewrap"><span className="section-title">Screenshots</span><span className="section-aside">{todayShots.length} today</span></span>
+          </div>
+          {todayShots.length > 0 ? (
+            <ScreenshotGrid shots={todayShots} />
+          ) : (
+            <div className="shot-empty callout secondary">No screenshots captured today yet.</div>
           )}
         </div>
       </div>

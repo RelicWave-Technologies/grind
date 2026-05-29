@@ -57,6 +57,11 @@ export class ScreenshotStore {
     return rows.map(mapRow);
   }
 
+  find(id: string): ScreenshotRow | null {
+    const r = this.db.prepare(`SELECT * FROM screenshots WHERE id = ?`).get(id) as Record<string, unknown> | undefined;
+    return r ? mapRow(r) : null;
+  }
+
   countSince(sinceMs: number): number {
     const r = this.db
       .prepare(`SELECT COUNT(*) AS n FROM screenshots WHERE captured_at >= ?`)
