@@ -9,7 +9,19 @@ export type LarkStatus = {
   scopes: string[];
 };
 
-export type LarkTask = { guid: string; summary: string; completed: boolean; url?: string };
+export type LarkTask = {
+  guid: string;
+  summary: string;
+  completed: boolean;
+  url?: string;
+  due: number | null;
+  createdAt: number | null;
+  creatorId: string | null;
+  creatorName: string | null;
+  loggedMs: number;
+};
+
+export type CreateTaskInput = { summary: string; due?: number | null; description?: string | null };
 
 /**
  * Lark connection is owned by the backend (tokens never touch the device).
@@ -50,6 +62,18 @@ export function registerLarkIpc(): void {
       if (msg.includes('409')) return { tasks: [], reauthRequired: true };
       log.warn('lark:tasks failed', { err: msg });
       return { tasks: [], reauthRequired: false };
+    }
+  });
+
+  // Create a Lark task. Returns {ok, task?} or {ok:false, error}.
+  ipcMain.handle('lark:createTask', async (_e, input: CreateTaskInput): Promise<{ ok: boolean; task?: LarkTask; error?: string }> => {
+    try {
+      const { task } = await api<{ task: LarkTask }>('/v1/lark/tasks', { method: 'POST', body: input });
+      return { ok: true, task };
+    } catch (err) {
+      const msg = String(err);
+      log.warn('lark:createTask failed', { err: msg });
+      return { ok: false, error: msg.includes('409') ? 'reauth_required' : msg };
     }
   });
 

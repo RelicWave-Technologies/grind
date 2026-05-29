@@ -10,6 +10,9 @@ class FakeTenant implements TenantClient {
     this.calls.push(email);
     return this.map[email] ?? null;
   }
+  async namesByOpenId(): Promise<Map<string, string>> {
+    return new Map();
+  }
 }
 
 let userId: string;

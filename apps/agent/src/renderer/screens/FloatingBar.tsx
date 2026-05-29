@@ -7,7 +7,7 @@ import { fmtClock } from './Today';
 
 /** Always-on-top mini bar shown while tracking. */
 export default function FloatingBar() {
-  const projects = useQuery({ queryKey: ['projects'], queryFn: () => window.agent.projects.list() });
+  const larkTasks = useQuery({ queryKey: ['larkTasks'], queryFn: () => window.agent.lark.tasks() });
   const [timer, setTimer] = useState<TimerStatus>({ state: 'IDLE' });
 
   useEffect(() => {
@@ -16,8 +16,8 @@ export default function FloatingBar() {
   }, []);
 
   if (timer.state !== 'RUNNING') return <div className="fbar" />;
-  const project = projects.data?.find((p) => p.id === timer.projectId);
-  const st = project ? projectStyle(project.id) : null;
+  const task = timer.larkTaskGuid ? larkTasks.data?.tasks.find((t) => t.guid === timer.larkTaskGuid) : undefined;
+  const st = timer.larkTaskGuid ? projectStyle(timer.larkTaskGuid) : null;
 
   // The grip is the drag region; the rest is clickable (double-click opens app).
   return (
@@ -30,7 +30,7 @@ export default function FloatingBar() {
       >
         <span className="fbar-dot" style={{ background: st?.color ?? 'var(--violet)' }} />
         <span className="fbar-time tabular">{fmtClock(timer.workedMs)}</span>
-        <span className="fbar-proj">{project?.name ?? 'Tracking'}</span>
+        <span className="fbar-proj">{task?.summary ?? 'Tracking'}</span>
       </button>
       <button className="fbar-stop no-drag" title="Stop" onClick={() => window.agent.timer.stop()}>
         <Square size={13} strokeWidth={2.5} fill="currentColor" />

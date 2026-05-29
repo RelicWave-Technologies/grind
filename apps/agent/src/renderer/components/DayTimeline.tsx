@@ -25,7 +25,9 @@ function hourLabel(ms: number): string {
  */
 export default function DayTimeline({ entries, now, runningEntryId }: Props) {
   const segs = entries.flatMap((e) =>
-    e.segments.map((s) => ({ ...s, projectId: e.projectId, entryId: e.id })),
+    // Color key: prefer the Lark task, then project, then a stable default —
+    // each tracked thing gets its own deterministic color on the ribbon.
+    e.segments.map((s) => ({ ...s, colorKey: e.larkTaskGuid ?? e.projectId ?? 'work', entryId: e.id })),
   );
 
   const startsToday = segs.map((s) => s.startedAt);
@@ -52,7 +54,7 @@ export default function DayTimeline({ entries, now, runningEntryId }: Props) {
           const width = Math.max(0.6, pct(end) - left);
           const isOpen = s.endedAt === null && s.entryId === runningEntryId;
           let bg = 'var(--separator-strong)';
-          if (s.kind === 'WORK') bg = projectStyle(s.projectId).color;
+          if (s.kind === 'WORK') bg = projectStyle(s.colorKey).color;
           else if (s.kind === 'MEETING') bg = 'var(--c-blue)';
           else bg = 'rgba(40,36,56,0.12)';
           return (

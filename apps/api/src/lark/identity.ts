@@ -15,6 +15,8 @@ export interface ResolvedLarkUser {
 export interface TenantClient {
   /** Resolve one email to a Lark identity, or null if not in the tenant. */
   resolveByEmail(email: string): Promise<ResolvedLarkUser | null>;
+  /** Resolve display names for a set of open_ids. Missing ids are simply absent. */
+  namesByOpenId(openIds: string[]): Promise<Map<string, string>>;
 }
 
 /**
@@ -75,6 +77,33 @@ export class HttpTenantClient implements TenantClient {
       expiresAtMs: now + (body.expire ?? 7200) * 1000,
     };
     return this.cached.token;
+  }
+
+  async namesByOpenId(openIds: string[]): Promise<Map<string, string>> {
+    const out = new Map<string, string>();
+    // Only real users have open_ids (ou_…). Tasks created by a bot/app have a
+    // cli_… creator id, which the contact API rejects — and which has no name.
+    const unique = [...new Set(openIds.filter((id) => id && id.startsWith('ou_')))];
+    if (unique.length === 0) return out;
+    const { oauthHost } = getLarkConfig();
+    const token = await this.tenantToken();
+    // contact/v3/users/batch supports up to 50 ids per call.
+    for (let i = 0; i < unique.length; i += 50) {
+      const chunk = unique.slice(i, i + 50);
+      const url = new URL('/open-apis/contact/v3/users/batch', oauthHost);
+      url.searchParams.set('user_id_type', 'open_id');
+      for (const id of chunk) url.searchParams.append('user_ids', id);
+      const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+      const body = (await res.json().catch(() => ({}))) as {
+        code?: number;
+        data?: { items?: Array<{ open_id?: string; name?: string }> };
+      };
+      if (body.code !== 0) continue; // name resolution is best-effort
+      for (const u of body.data?.items ?? []) {
+        if (u.open_id && u.name) out.set(u.open_id, u.name);
+      }
+    }
+    return out;
   }
 
   async resolveByEmail(email: string): Promise<ResolvedLarkUser | null> {

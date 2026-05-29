@@ -155,17 +155,6 @@ body.chrome-window { background: transparent; }
 .field:focus-visible { box-shadow: inset 0 0 0 1px var(--violet), var(--focus-ring); background: #fff; }
 label.field-label { display: block; font-size: 12px; font-weight: 600; color: var(--label-secondary); margin-bottom: var(--sp-2); }
 
-/* ---- Lark task picker (Today) ---- */
-.lark-task-picker { margin: 0 4px var(--sp-3); }
-.lark-task-select {
-  width: 100%; height: 38px; padding: 0 var(--sp-4);
-  border-radius: var(--radius-sm); border: none; background: var(--bg-app);
-  box-shadow: inset 0 0 0 1px var(--separator-strong);
-  color: var(--label-primary); font: inherit; outline: none; cursor: pointer;
-  transition: box-shadow var(--dur-fast) var(--ease);
-}
-.lark-task-select:focus-visible { box-shadow: inset 0 0 0 1px var(--violet), var(--focus-ring); background: #fff; }
-.focus-task { margin-top: var(--sp-2); font-size: 13px; }
 
 /* ============================================================================
    layout
@@ -302,11 +291,42 @@ label.field-label { display: block; font-size: 12px; font-weight: 600; color: va
 }
 .task-main { flex: 1; min-width: 0; }
 .task-title { font-size: 14px; font-weight: 600; letter-spacing: -0.2px; }
-.task-tags { display: flex; gap: var(--sp-2); margin-top: 5px; }
+.task-tags { display: flex; gap: var(--sp-2); margin-top: 5px; flex-wrap: wrap; }
 .tag {
   display: inline-flex; align-items: center; height: 19px; padding: 0 8px; border-radius: 6px;
   font-size: 11px; font-weight: 600;
 }
+.tag-chip { gap: 4px; }
+.due-normal { background: rgba(40,36,56,0.06); color: var(--label-secondary); }
+.due-soon { background: var(--c-orange-bg); color: var(--c-orange); }
+.due-overdue { background: var(--c-rose-bg); color: var(--c-rose); }
+
+/* Task search */
+.task-search {
+  display: flex; align-items: center; gap: var(--sp-3);
+  height: 38px; padding: 0 var(--sp-4); margin: 0 4px var(--sp-3);
+  background: var(--bg-card); border-radius: var(--radius-sm);
+  box-shadow: inset 0 0 0 1px var(--separator-strong), var(--shadow-sm);
+}
+.task-search:focus-within { box-shadow: inset 0 0 0 1px var(--violet), var(--focus-ring); }
+.task-search-ico { color: var(--label-tertiary); flex: none; }
+.task-search-input { flex: 1 1 auto; border: none; outline: none; background: transparent; font: inherit; font-size: 13px; color: var(--label-primary); }
+.task-search-input::placeholder { color: var(--label-placeholder); }
+
+/* Task creator/created meta line */
+.task-meta { display: inline-flex; align-items: center; gap: 4px; margin-top: 3px; font-size: 11px; color: var(--label-tertiary); }
+.task-meta svg { color: var(--label-tertiary); }
+
+/* Create-task form */
+.create-card {
+  display: flex; flex-direction: column; gap: var(--sp-3);
+  margin: 0 4px var(--sp-4); padding: var(--sp-4);
+  background: var(--bg-card); border-radius: var(--radius-lg); box-shadow: var(--shadow-card);
+}
+.create-desc { height: auto; min-height: 56px; padding: var(--sp-3) var(--sp-4); resize: vertical; line-height: 1.45; }
+.create-row { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); }
+.create-due { display: inline-flex; align-items: center; gap: var(--sp-2); color: var(--label-secondary); }
+.create-due .field { width: auto; }
 .task-time { font-family: var(--font-round); font-size: 14px; font-weight: 600; color: var(--label-secondary); }
 .task-play {
   width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center;

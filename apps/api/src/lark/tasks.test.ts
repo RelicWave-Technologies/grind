@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mapTasks, type RawLarkTask } from './tasks';
+import { mapTasks, toEpochMs, loggedMsByGuid, type RawLarkTask } from './tasks';
 
 describe('mapTasks', () => {
   it('returns [] for undefined or empty input', () => {
@@ -13,9 +13,21 @@ describe('mapTasks', () => {
       { guid: 'g2', summary: 'Ship M9', completed_at: '1700000000000' },
     ];
     expect(mapTasks(raw)).toEqual([
-      { guid: 'g1', summary: 'Write tests', completed: false, url: 'https://lark/g1' },
-      { guid: 'g2', summary: 'Ship M9', completed: true, url: undefined },
+      { guid: 'g1', summary: 'Write tests', completed: false, url: 'https://lark/g1', due: null, createdAt: null, creatorId: null, creatorName: null, loggedMs: 0 },
+      { guid: 'g2', summary: 'Ship M9', completed: true, url: undefined, due: null, createdAt: null, creatorId: null, creatorName: null, loggedMs: 0 },
     ]);
+  });
+
+  it('maps a due timestamp (seconds) to epoch ms', () => {
+    const [t] = mapTasks([{ guid: 'g', summary: 's', due: { timestamp: '1623124318' } }]);
+    expect(t!.due).toBe(1623124318 * 1000);
+  });
+
+  it('maps creator id + created_at', () => {
+    const [t] = mapTasks([{ guid: 'g', summary: 's', created_at: '1700000000000', creator: { id: 'ou_x' } }]);
+    expect(t!.creatorId).toBe('ou_x');
+    expect(t!.createdAt).toBe(1700000000000);
+    expect(t!.creatorName).toBeNull();
   });
 
   it('treats missing/zero completed_at as not completed', () => {
@@ -30,5 +42,41 @@ describe('mapTasks', () => {
 
   it('falls back to a placeholder summary when missing', () => {
     expect(mapTasks([{ guid: 'g' }])[0]!.summary).toBe('(untitled task)');
+  });
+});
+
+describe('toEpochMs', () => {
+  it('returns null for absent / zero', () => {
+    expect(toEpochMs(undefined)).toBeNull();
+    expect(toEpochMs('0')).toBeNull();
+    expect(toEpochMs('')).toBeNull();
+  });
+  it('treats 10-digit values as seconds and 13-digit as ms', () => {
+    expect(toEpochMs('1623124318')).toBe(1623124318000);
+    expect(toEpochMs('1623124318000')).toBe(1623124318000);
+  });
+});
+
+describe('loggedMsByGuid', () => {
+  const now = 1_700_000_100_000;
+  const d = (ms: number) => new Date(ms);
+
+  it('sums WORK + MEETING durations per guid, ignoring idle', () => {
+    const entries = [
+      { larkTaskGuid: 'a', segments: [
+        { kind: 'WORK', startedAt: d(now - 60_000), endedAt: d(now) },
+        { kind: 'IDLE_TRIMMED', startedAt: d(now - 30_000), endedAt: d(now) },
+      ] },
+      { larkTaskGuid: 'a', segments: [{ kind: 'MEETING', startedAt: d(now - 120_000), endedAt: d(now - 60_000) }] },
+      { larkTaskGuid: 'b', segments: [{ kind: 'WORK', startedAt: d(now - 10_000), endedAt: null }] },
+    ];
+    const m = loggedMsByGuid(entries, now);
+    expect(m.get('a')).toBe(120_000); // 60s work + 60s meeting, idle excluded
+    expect(m.get('b')).toBe(10_000); // open segment counts to now
+  });
+
+  it('skips entries without a guid', () => {
+    const m = loggedMsByGuid([{ larkTaskGuid: null, segments: [{ kind: 'WORK', startedAt: d(0), endedAt: d(1000) }] }], now);
+    expect(m.size).toBe(0);
   });
 });

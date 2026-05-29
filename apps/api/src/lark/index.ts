@@ -12,8 +12,8 @@ export type { OAuthClient, LarkTokenResponse } from './oauthClient';
 export { resolveIdentity } from './identity';
 export type { TenantClient, ResolvedLarkUser } from './identity';
 export { signOAuthState, verifyOAuthState, buildAuthorizeUrl } from './oauth';
-export { mapTasks } from './tasks';
-export type { UserTaskClient, LarkTaskDto } from './tasks';
+export { mapTasks, loggedMsByGuid, toEpochMs } from './tasks';
+export type { UserTaskClient, LarkTaskDto, CreateLarkTaskInput } from './tasks';
 
 let manager: TokenManager | null = null;
 let tenant: TenantClient | null = null;

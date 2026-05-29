@@ -100,10 +100,21 @@ describe('POST /v1/time-entries', () => {
     expect(String(res.body.details)).toMatch(/overlap/);
   });
 
-  it('rejects a body that fails zod validation (missing projectId)', async () => {
+  it('allows a body with no projectId (entry attributed to a Lark task instead)', async () => {
     const u = await seedUser();
     const body = createBody(u);
     delete (body as Record<string, unknown>).projectId;
+    (body as Record<string, unknown>).larkTaskGuid = 'guid-xyz';
+    const res = await auth(request(app).post('/v1/time-entries'), u.accessToken).send(body);
+    expect(res.status).toBe(201);
+    expect(res.body.projectId).toBeNull();
+    expect(res.body.larkTaskGuid).toBe('guid-xyz');
+  });
+
+  it('rejects a body that fails zod validation (missing segments)', async () => {
+    const u = await seedUser();
+    const body = createBody(u);
+    delete (body as Record<string, unknown>).segments;
     const res = await auth(request(app).post('/v1/time-entries'), u.accessToken).send(body);
     expect(res.status).toBe(400);
     expect(res.body.error).toBe('validation_failed');
