@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Camera, ShieldAlert, RefreshCw, Keyboard, MousePointer2 } from 'lucide-react';
+import { Camera, ShieldAlert, RefreshCw } from 'lucide-react';
+import ScreenshotGrid from './ScreenshotGrid';
 
 export default function ScreenshotsStrip() {
   const qc = useQueryClient();
@@ -38,26 +39,7 @@ export default function ScreenshotsStrip() {
 
       {ok &&
         (shots.data && shots.data.length > 0 ? (
-          <div className="shot-grid">
-            {shots.data.map((s) => (
-              <div key={s.id} className="shot" title={`${new Date(s.capturedAt).toLocaleString()} · keyboard ${s.keyboardPct}% · mouse ${s.mousePct}%`}>
-                {s.thumb ? <img src={s.thumb} alt="screenshot" /> : <div className="shot-missing" />}
-                <div className="shot-act">
-                  <span className="shot-act-row" title={`Keyboard ${s.keyboardPct}%`}>
-                    <Keyboard size={11} strokeWidth={2} />
-                    <span className="shot-act-track"><span className="shot-act-fill kb" style={{ width: `${s.keyboardPct}%` }} /></span>
-                  </span>
-                  <span className="shot-act-row" title={`Mouse ${s.mousePct}%`}>
-                    <MousePointer2 size={11} strokeWidth={2} />
-                    <span className="shot-act-track"><span className="shot-act-fill ms" style={{ width: `${s.mousePct}%` }} /></span>
-                  </span>
-                </div>
-                <span className="shot-time">
-                  {new Date(s.capturedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                </span>
-              </div>
-            ))}
-          </div>
+          <ScreenshotGrid shots={shots.data} />
         ) : (
           <div className="shot-empty callout secondary">
             <Camera size={16} strokeWidth={1.75} /> No screenshots yet — captured periodically while you track.

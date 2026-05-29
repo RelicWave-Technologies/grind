@@ -55,6 +55,7 @@ const api = {
       ipcRenderer.invoke('screenshots:recent', limit),
     countToday: (): Promise<number> => ipcRenderer.invoke('screenshots:countToday'),
     captureOnce: (): Promise<number> => ipcRenderer.invoke('screenshots:captureOnce'),
+    full: (id: string): Promise<string | null> => ipcRenderer.invoke('screenshots:full', id),
   },
   permissions: {
     screen: (): Promise<{ status: string; health: string; state: 'ok' | 'needs-grant' | 'needs-settings' | 'needs-restart' }> =>

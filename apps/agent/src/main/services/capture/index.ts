@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import { app } from 'electron';
 import path from 'node:path';
 import { ScreenshotStore } from './store';
-import { captureNow, thumbDataUrl } from './capture';
+import { captureNow, thumbDataUrl, fullDataUrl } from './capture';
 import { nextDelayMs } from './scheduler';
 import { getTimerService } from '../timer';
 import { getActivityStore } from '../activity';
@@ -87,6 +87,13 @@ export async function recentScreenshots(limit: number): Promise<
       };
     }),
   );
+}
+
+/** Full-resolution data URL for one screenshot (in-app lightbox). */
+export async function fullScreenshot(id: string): Promise<string | null> {
+  const row = getStore().find(id);
+  if (!row) return null;
+  return fullDataUrl(row.filePath);
 }
 
 export function todayScreenshotCount(): number {

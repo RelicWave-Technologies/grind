@@ -93,3 +93,14 @@ export async function thumbDataUrl(filePath: string, edge = 220): Promise<string
     return null;
   }
 }
+
+/** Full-resolution screenshot as a data URL (for the in-app lightbox). Capped to
+ *  a sane long edge so the data URL isn't huge. */
+export async function fullDataUrl(filePath: string, maxEdge = 1600): Promise<string | null> {
+  try {
+    const buf = await sharp(filePath).resize({ width: maxEdge, height: maxEdge, fit: 'inside', withoutEnlargement: true }).webp({ quality: 82 }).toBuffer();
+    return `data:image/webp;base64,${buf.toString('base64')}`;
+  } catch {
+    return null;
+  }
+}

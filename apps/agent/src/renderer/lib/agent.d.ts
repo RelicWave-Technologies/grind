@@ -41,6 +41,7 @@ declare global {
         recent: (limit?: number) => Promise<{ id: string; capturedAt: number; thumb: string | null; uploadState: string; keyboardPct: number; mousePct: number }[]>;
         countToday: () => Promise<number>;
         captureOnce: () => Promise<number>;
+        full: (id: string) => Promise<string | null>;
       };
       permissions: {
         screen: () => Promise<{ status: string; health: string; state: 'ok' | 'needs-grant' | 'needs-settings' | 'needs-restart' }>;
