@@ -14,7 +14,11 @@ export class IdleMonitor {
   private prompting = false;
   private idleStartedAt = 0;
 
-  constructor(private readonly onPrompt: (idleStartedAt: number) => void) {}
+  /** `isProtected` returns true when idle should be ignored (e.g. in a meeting). */
+  constructor(
+    private readonly onPrompt: (idleStartedAt: number) => void,
+    private readonly isProtected: () => boolean = () => false,
+  ) {}
 
   start(): void {
     if (this.interval) return;
@@ -24,6 +28,8 @@ export class IdleMonitor {
 
   private tick(): void {
     try {
+      // While in a meeting (no keyboard/mouse but actively present) don't prompt.
+      if (this.isProtected()) return;
       const idleSeconds = powerMonitor.getSystemIdleTime();
       const isRunning = getTimerService().isRunning();
       if (shouldPromptIdle({ isRunning, idleSeconds, thresholdSec: IDLE_THRESHOLD_SEC, prompting: this.prompting })) {

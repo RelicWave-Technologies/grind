@@ -233,6 +233,38 @@ describe('TimerService.pauseForIdle / resumeFromIdle', () => {
   });
 });
 
+describe('TimerService meeting segments', () => {
+  it('switches WORK→MEETING→WORK and counts both as worked', async () => {
+    await svc.start({ projectId: 'p1' }); // WORK from T0
+    clock.advance(5 * MIN);
+    await svc.beginMeeting(clock.now()); // MEETING from T0+5
+    expect(svc.isInMeetingSegment()).toBe(true);
+    clock.advance(20 * MIN);
+    await svc.endMeeting(clock.now()); // WORK from T0+25
+    expect(svc.isInMeetingSegment()).toBe(false);
+    clock.advance(3 * MIN);
+    const s = svc.status();
+    if (s.state === 'RUNNING') expect(s.workedMs).toBe(28 * MIN); // 5 + 20 + 3, all counted
+  });
+
+  it('beginMeeting is a no-op when not running or already in a meeting', async () => {
+    await svc.beginMeeting(clock.now()); // not running
+    expect(svc.isRunning()).toBe(false);
+    await svc.start({ projectId: 'p1' });
+    await svc.beginMeeting(clock.now());
+    const before = svc.status();
+    await svc.beginMeeting(clock.now()); // already meeting
+    expect(svc.status()).toEqual(before);
+  });
+
+  it('endMeeting is a no-op when not in a meeting', async () => {
+    await svc.start({ projectId: 'p1' });
+    const before = svc.status();
+    await svc.endMeeting(clock.now());
+    expect(svc.status()).toEqual(before);
+  });
+});
+
 describe('TimerService.recover (crash recovery)', () => {
   it('closes a left-open entry at last-known-active and syncs it', async () => {
     // Simulate a crash: persist an open entry, then build a fresh service.
