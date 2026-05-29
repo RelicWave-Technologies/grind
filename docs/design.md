@@ -85,8 +85,8 @@ States: hover = tint fill / brightness; active = `scale(.98)`; disabled = .45 op
 ### Text field — `.field`
 38px, `--bg-app` fill with inset border, 8px radius. Focus = violet inset border + focus ring + white fill. Label = `.field-label` (12/600 secondary); append `.field-optional` (400, tertiary) for an "optional" hint. Textareas reuse `.field` with `height:auto` + `resize:vertical`. Add `.selectable` to inputs (chrome is otherwise non-selectable).
 
-### Inline form card — `.create-card`
-A card (`--radius-lg`, `--shadow-card`, `--sp-5` padding) holding stacked `.create-field` groups (label + control, `--sp-2` gap). Footer is a `.create-row` (align-items:flex-end, space-between): secondary controls left, the primary `.btn-prominent.btn-lg` action right. Inline error via `.create-error` (rose, 12px). Used for the "New Lark task" quick-create on Today.
+### Composer — `.composer`
+A calm inline create card that blends with task rows (white, `--radius-lg`, hairline inset border + `--shadow-card`). Borderless controls so it reads as content, not a form: `.composer-title` (rounded display, 18/600, transparent), `.composer-note` (13px secondary textarea, no resize), then a `.composer-foot` divided by a top hairline holding a compact `.composer-due` chip (left) and the primary `.btn-prominent` (right, after a `.composer-spacer`). Inline `.composer-error` (rose). Used for "New Lark task" on Today. Success is confirmed with a `.create-toast` (green-tint pill).
 
 ### Sidebar nav item — `.nav-item`
 38px row, icon (18px, 2px stroke) + label. Default = secondary text, tertiary icon. Hover = `--fill-hover`. **Active = `--violet-tint` bg + `--violet-700` text + violet icon, weight 600.**

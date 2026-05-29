@@ -74,6 +74,7 @@ export default function Today() {
   const [newSummary, setNewSummary] = useState('');
   const [newDue, setNewDue] = useState('');
   const [newDesc, setNewDesc] = useState('');
+  const [justCreated, setJustCreated] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -102,13 +103,17 @@ export default function Today() {
   const createTask = useMutation({
     mutationFn: (input: { summary: string; due?: number | null; description?: string | null }) =>
       window.agent.lark.createTask(input),
-    onSuccess: (r) => {
+    onSuccess: (r, vars) => {
       if (r.ok) {
         setShowCreate(false);
         setNewSummary('');
         setNewDue('');
         setNewDesc('');
+        setQuery('');
+        setShowAll(true); // reveal the full list so the new (undated) task is visible
+        setJustCreated(vars.summary);
         void qc.invalidateQueries({ queryKey: ['larkTasks'] });
+        window.setTimeout(() => setJustCreated(null), 5000);
       }
     },
   });
@@ -132,6 +137,11 @@ export default function Today() {
       const ad = a.due ?? Infinity;
       const bd = b.due ?? Infinity;
       if (ad !== bd) return ad - bd;
+      // same due bucket → newest-created first (so a just-created task surfaces),
+      // then most-tracked, then name.
+      const ac = a.createdAt ?? 0;
+      const bc = b.createdAt ?? 0;
+      if (bc !== ac) return bc - ac;
       if (b.loggedMs !== a.loggedMs) return b.loggedMs - a.loggedMs;
       return a.summary.localeCompare(b.summary);
     });
@@ -214,49 +224,50 @@ export default function Today() {
             )}
           </div>
 
-          {/* Create-task form (creates a real Lark task) */}
+          {/* Create-task composer (creates a real Lark task) */}
           {larkConnected && showCreate && (
-            <div className="create-card rise rise-1">
-              <div className="create-field">
-                <label className="field-label" htmlFor="nt-title">Title</label>
-                <input
-                  id="nt-title"
-                  className="field"
-                  type="text"
-                  placeholder="What are you working on?"
-                  value={newSummary}
-                  autoFocus
-                  onChange={(e) => setNewSummary(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || !newDesc)) submitCreate(); }}
-                />
-              </div>
-              <div className="create-field">
-                <label className="field-label" htmlFor="nt-desc">Description <span className="field-optional">optional</span></label>
-                <textarea
-                  id="nt-desc"
-                  className="field create-desc"
-                  placeholder="Add any details…"
-                  value={newDesc}
-                  onChange={(e) => setNewDesc(e.target.value)}
-                />
-              </div>
-              <div className="create-row">
-                <div className="create-field create-due-field">
-                  <label className="field-label" htmlFor="nt-due">Due date <span className="field-optional">optional</span></label>
-                  <input id="nt-due" className="field" type="date" value={newDue} onChange={(e) => setNewDue(e.target.value)} />
-                </div>
+            <div className="composer rise rise-1">
+              <input
+                className="composer-title no-drag"
+                type="text"
+                placeholder="New task…"
+                value={newSummary}
+                autoFocus
+                onChange={(e) => setNewSummary(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || !newDesc)) submitCreate(); }}
+              />
+              <textarea
+                className="composer-note no-drag"
+                placeholder="Add details (optional)"
+                rows={2}
+                value={newDesc}
+                onChange={(e) => setNewDesc(e.target.value)}
+              />
+              <div className="composer-foot">
+                <label className="composer-due no-drag" title="Due date">
+                  <CalendarClock size={15} strokeWidth={2} />
+                  <input type="date" value={newDue} onChange={(e) => setNewDue(e.target.value)} />
+                </label>
+                <span className="composer-spacer" />
+                {createTask.data && !createTask.data.ok && (
+                  <span className="composer-error"><X size={13} strokeWidth={2.5} /> Failed</span>
+                )}
                 <button
-                  className="btn btn-prominent btn-lg no-drag"
+                  className="btn btn-prominent no-drag"
                   onClick={submitCreate}
                   disabled={createTask.isPending || !newSummary.trim()}
                 >
-                  <Plus size={15} strokeWidth={2.5} />
                   {createTask.isPending ? 'Creating…' : 'Create in Lark'}
                 </button>
               </div>
-              {createTask.data && !createTask.data.ok && (
-                <div className="create-error"><X size={13} strokeWidth={2.5} /> Couldn’t create the task. Please try again.</div>
-              )}
+            </div>
+          )}
+
+          {/* Success banner after creating a task */}
+          {justCreated && !showCreate && (
+            <div className="create-toast rise" role="status">
+              <span className="create-toast-dot" />
+              Created “{justCreated}” in Lark
             </div>
           )}
 
