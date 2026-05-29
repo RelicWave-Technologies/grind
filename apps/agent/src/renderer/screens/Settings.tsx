@@ -1,15 +1,36 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { MonitorCheck, Power, FolderOpen, CheckCircle2, AlertCircle } from 'lucide-react';
+import { MonitorCheck, Power, FolderOpen, CheckCircle2, AlertCircle, Link2 } from 'lucide-react';
 
 export default function Settings() {
   const qc = useQueryClient();
   const info = useQuery({ queryKey: ['settings'], queryFn: () => window.agent.settings.get(), refetchInterval: 4000 });
   const perm = useQuery({ queryKey: ['screenPerm'], queryFn: () => window.agent.permissions.screen(), refetchInterval: 4000 });
+  const lark = useQuery({ queryKey: ['larkStatus'], queryFn: () => window.agent.lark.status(), refetchInterval: 4000 });
 
   const setLogin = useMutation({
     mutationFn: (v: boolean) => window.agent.settings.setLaunchAtLogin(v),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['settings'] }),
   });
+
+  const connectLark = useMutation({
+    mutationFn: () => window.agent.lark.connect(),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['larkStatus'] }),
+  });
+  const disconnectLark = useMutation({
+    mutationFn: () => window.agent.lark.disconnect(),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['larkStatus'] }),
+  });
+
+  const l = lark.data;
+  const larkConnected = !!l?.connected;
+  const larkReauth = !!l?.reauthRequired;
+  const larkSub = !l?.configured
+    ? { ok: false, text: 'Not configured by your workspace' }
+    : larkReauth
+      ? { ok: false, text: 'Reconnect needed — your Lark session expired' }
+      : larkConnected
+        ? { ok: true, text: 'Connected' }
+        : { ok: false, text: 'Connect to attribute time to Lark tasks' };
 
   const state = perm.data?.state ?? 'ok';
   const ok = state === 'ok';
@@ -51,6 +72,45 @@ export default function Settings() {
                   Open System Settings
                 </button>
               ) : null}
+            </div>
+          </div>
+
+          {/* Integrations */}
+          <div className="section-head"><span className="section-title">Integrations</span></div>
+          <div className="set-card">
+            <div className="set-row">
+              <span className="set-ic" style={{ background: larkConnected ? 'var(--c-green)' : 'var(--violet)' }}>
+                <Link2 size={17} strokeWidth={2} />
+              </span>
+              <div className="set-main">
+                <div className="set-title">Lark</div>
+                <div className="set-sub">
+                  {larkSub.ok ? (
+                    <span className="set-ok"><CheckCircle2 size={13} /> {larkSub.text}</span>
+                  ) : l?.configured === false ? (
+                    <span className="set-sub secondary">{larkSub.text}</span>
+                  ) : (
+                    <span className="set-warn"><AlertCircle size={13} /> {larkSub.text}</span>
+                  )}
+                </div>
+              </div>
+              {l?.configured === false ? null : larkConnected && !larkReauth ? (
+                <button
+                  className="btn no-drag"
+                  onClick={() => disconnectLark.mutate()}
+                  disabled={disconnectLark.isPending}
+                >
+                  Disconnect
+                </button>
+              ) : (
+                <button
+                  className="btn btn-prominent no-drag"
+                  onClick={() => connectLark.mutate()}
+                  disabled={connectLark.isPending}
+                >
+                  {larkReauth ? 'Reconnect' : connectLark.isPending ? 'Opening…' : 'Connect'}
+                </button>
+              )}
             </div>
           </div>
 

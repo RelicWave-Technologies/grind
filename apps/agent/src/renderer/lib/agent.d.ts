@@ -54,6 +54,11 @@ declare global {
       app: {
         relaunch: () => Promise<void>;
       };
+      lark: {
+        status: () => Promise<{ configured: boolean; connected: boolean; reauthRequired: boolean; scopes: string[] }>;
+        connect: () => Promise<{ ok: boolean; error?: string }>;
+        disconnect: () => Promise<{ ok: boolean }>;
+      };
     };
   }
 }
