@@ -88,45 +88,46 @@ function Reports() {
           <div className="stat-grid rise rise-1">
             <div className="stat">
               <div className="stat-top">
-                <span className="stat-chip" style={{ background: 'var(--violet)' }}><Gauge size={18} /></span>
-                <span className="stat-label">Productivity<br />score</span>
+                <span className="stat-chip" style={{ background: 'var(--violet)' }}><Gauge size={17} /></span>
+                <span className="stat-label">Productivity</span>
               </div>
-              <div className="stat-value">{d?.score.score ?? 0}<span className="unit"> / 100</span></div>
+              <div className="stat-value">{d?.score.score ?? 0}<span className="unit"> /100</span></div>
             </div>
             <div className="stat">
               <div className="stat-top">
-                <span className="stat-chip" style={{ background: 'var(--c-green)' }}><Clock size={18} /></span>
-                <span className="stat-label">Active<br />time</span>
+                <span className="stat-chip" style={{ background: 'var(--c-green)' }}><Clock size={17} /></span>
+                <span className="stat-label">Active time</span>
               </div>
               <div className="stat-value">{tracked.h}<span className="unit">h </span>{tracked.m}<span className="unit">m</span></div>
             </div>
-          </div>
-
-          <div className="stat-grid rise rise-2">
             <div className="stat">
               <div className="stat-top">
-                <span className="stat-chip" style={{ background: 'var(--c-green)' }}><Keyboard size={18} /></span>
-                <span className="stat-label">Keystrokes<br />today</span>
+                <span className="stat-chip" style={{ background: 'var(--c-slate)' }}><Keyboard size={17} /></span>
+                <span className="stat-label">Keystrokes</span>
               </div>
               <div className="stat-value">{(d?.totals.keystrokes ?? 0).toLocaleString()}</div>
             </div>
             <div className="stat">
               <div className="stat-top">
-                <span className="stat-chip" style={{ background: '#5aa9ff' }}><MousePointer2 size={18} /></span>
-                <span className="stat-label">Clicks<br />today</span>
+                <span className="stat-chip" style={{ background: '#5aa9ff' }}><MousePointer2 size={17} /></span>
+                <span className="stat-label">Clicks</span>
               </div>
               <div className="stat-value">{(d?.totals.clicks ?? 0).toLocaleString()}</div>
             </div>
           </div>
 
           <div className="section-head"><span className="section-title">Activity by hour</span></div>
-          <div className="chart-card rise rise-2">
-            <LineChart points={points} labels={labels} />
-          </div>
-
-          {!hasData && (
-            <div className="small tertiary" style={{ textAlign: 'center', marginTop: 16 }}>
-              No activity recorded today yet. Activity needs Accessibility permission and a running timer.
+          {hasData ? (
+            <div className="chart-card rise rise-2">
+              <LineChart points={points} labels={labels} />
+            </div>
+          ) : (
+            <div className="empty rise rise-2">
+              <span className="empty-icon" style={{ background: 'var(--violet-tint)', color: 'var(--violet)' }}>
+                <PieChart size={26} strokeWidth={2} />
+              </span>
+              <div className="h3">No activity yet today</div>
+              <div className="callout secondary">Keystroke &amp; mouse activity appears once you track with Accessibility enabled.</div>
             </div>
           )}
         </div>

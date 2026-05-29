@@ -455,16 +455,16 @@ label.field-label { display: block; font-size: 12px; font-weight: 600; color: va
 /* ============================================================================
    reports
    ========================================================================== */
-.stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-4); }
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--sp-3); }
 .stat {
-  background: var(--bg-card); border-radius: var(--radius-lg); padding: var(--sp-5);
+  background: var(--bg-card); border-radius: var(--radius-lg); padding: var(--sp-4);
   box-shadow: var(--shadow-card);
 }
-.stat-top { display: flex; align-items: center; gap: var(--sp-3); }
-.stat-chip { width: 34px; height: 34px; border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #fff; }
-.stat-label { font-size: 12px; color: var(--label-secondary); font-weight: 500; line-height: 1.2; }
-.stat-value { font-family: var(--font-round); font-size: 30px; font-weight: 700; margin-top: var(--sp-4); letter-spacing: -1px; }
-.stat-value .unit { font-size: 16px; color: var(--label-tertiary); font-weight: 600; }
+.stat-top { display: flex; align-items: center; gap: var(--sp-2); }
+.stat-chip { width: 30px; height: 30px; border-radius: 9px; flex: none; display: flex; align-items: center; justify-content: center; color: #fff; }
+.stat-label { font-size: 12px; color: var(--label-secondary); font-weight: 600; line-height: 1.2; }
+.stat-value { font-family: var(--font-round); font-size: 26px; font-weight: 700; margin-top: var(--sp-3); letter-spacing: -0.5px; }
+.stat-value .unit { font-size: 14px; color: var(--label-tertiary); font-weight: 600; }
 
 .segmented {
   display: inline-flex; background: rgba(40, 36, 56, 0.06); border-radius: 10px; padding: 3px; gap: 2px;
