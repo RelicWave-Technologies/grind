@@ -9,6 +9,8 @@ export type LarkStatus = {
   scopes: string[];
 };
 
+export type LarkTask = { guid: string; summary: string; completed: boolean; url?: string };
+
 /**
  * Lark connection is owned by the backend (tokens never touch the device).
  * The agent just (a) reads status, (b) opens the authorize URL in the system
@@ -34,6 +36,20 @@ export function registerLarkIpc(): void {
     } catch (err) {
       log.warn('lark:connect failed', { err: String(err) });
       return { ok: false, error: String(err) };
+    }
+  });
+
+  // Fetch the user's Lark tasks for the picker. Returns [] when not connected
+  // (or on reauth), so the UI can degrade quietly without throwing.
+  ipcMain.handle('lark:tasks', async (): Promise<{ tasks: LarkTask[]; reauthRequired: boolean }> => {
+    try {
+      const { tasks } = await api<{ tasks: LarkTask[] }>('/v1/lark/my-tasks');
+      return { tasks, reauthRequired: false };
+    } catch (err) {
+      const msg = String(err);
+      if (msg.includes('409')) return { tasks: [], reauthRequired: true };
+      log.warn('lark:tasks failed', { err: msg });
+      return { tasks: [], reauthRequired: false };
     }
   });
 

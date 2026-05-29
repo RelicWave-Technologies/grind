@@ -4,7 +4,7 @@ type AuthStatus = 'loggedIn' | 'loggedOut';
 type AgentStatus = { state: 'IDLE' | 'OFFLINE'; lastHeartbeatAt: string | null };
 type TimerStatus =
   | { state: 'IDLE' }
-  | { state: 'RUNNING'; entryId: string; projectId: string; taskId: string | null; startedAt: number; workedMs: number; paused: boolean };
+  | { state: 'RUNNING'; entryId: string; projectId: string; taskId: string | null; larkTaskGuid: string | null; startedAt: number; workedMs: number; paused: boolean };
 export type TodaySegment = { kind: 'WORK' | 'MEETING' | 'IDLE_TRIMMED'; startedAt: number; endedAt: number | null };
 export type TodayEntry = { id: string; projectId: string; segments: TodaySegment[] };
 
@@ -24,7 +24,7 @@ declare global {
         status: () => Promise<AgentStatus>;
       };
       timer: {
-        start: (projectId: string, taskId?: string | null) => Promise<TimerStatus>;
+        start: (projectId: string, taskId?: string | null, larkTaskGuid?: string | null) => Promise<TimerStatus>;
         stop: () => Promise<TimerStatus>;
         status: () => Promise<TimerStatus>;
         today: () => Promise<TodayEntry[]>;
@@ -58,6 +58,7 @@ declare global {
         status: () => Promise<{ configured: boolean; connected: boolean; reauthRequired: boolean; scopes: string[] }>;
         connect: () => Promise<{ ok: boolean; error?: string }>;
         disconnect: () => Promise<{ ok: boolean }>;
+        tasks: () => Promise<{ tasks: { guid: string; summary: string; completed: boolean; url?: string }[]; reauthRequired: boolean }>;
       };
     };
   }

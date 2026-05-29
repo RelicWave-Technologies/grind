@@ -28,7 +28,7 @@ export class HttpSyncClient implements SyncClient {
         clientUuid: entry.clientUuid,
         projectId: entry.projectId,
         taskId: entry.taskId,
-        larkTaskGuid: null,
+        larkTaskGuid: entry.larkTaskGuid ?? null,
         source: entry.source,
         startedAt: new Date(entry.startedAt).toISOString(),
         agentVersion: AGENT_VERSION,

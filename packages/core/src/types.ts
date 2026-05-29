@@ -24,6 +24,8 @@ export interface TimeEntry {
   userId: string;
   projectId: string;
   taskId: string | null;
+  /** Lark Task v2 GUID this entry is attributed to, if any. */
+  larkTaskGuid?: string | null;
   source: TimeEntrySource;
   /** epoch ms; equals the first segment's startedAt */
   startedAt: number;

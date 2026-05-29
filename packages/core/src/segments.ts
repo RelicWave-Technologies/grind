@@ -38,6 +38,7 @@ export interface CreateArgs {
   userId: string;
   projectId: string;
   taskId?: string | null;
+  larkTaskGuid?: string | null;
   source?: TimeEntrySource;
   startedAt: number;
   segmentId: string;
@@ -51,6 +52,7 @@ export function createTimeEntry(args: CreateArgs): TimeEntry {
     userId: args.userId,
     projectId: args.projectId,
     taskId: args.taskId ?? null,
+    larkTaskGuid: args.larkTaskGuid ?? null,
     source: args.source ?? 'AUTO',
     startedAt: args.startedAt,
     endedAt: null,

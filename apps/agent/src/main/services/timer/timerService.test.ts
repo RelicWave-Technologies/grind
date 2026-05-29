@@ -99,6 +99,17 @@ describe('TimerService.start', () => {
     const status = await svc.start({ projectId: 'p1', taskId: 't9' });
     expect(status).toMatchObject({ state: 'RUNNING', projectId: 'p1', taskId: 't9' });
   });
+
+  it('attributes a Lark task guid and persists it', async () => {
+    const status = await svc.start({ projectId: 'p1', larkTaskGuid: 'guid-123' });
+    expect(status).toMatchObject({ state: 'RUNNING', larkTaskGuid: 'guid-123' });
+    expect(store.getOpen()?.larkTaskGuid).toBe('guid-123');
+  });
+
+  it('defaults larkTaskGuid to null when not provided', async () => {
+    const status = await svc.start({ projectId: 'p1' });
+    if (status.state === 'RUNNING') expect(status.larkTaskGuid).toBeNull();
+  });
 });
 
 describe('TimerService.status worked time', () => {

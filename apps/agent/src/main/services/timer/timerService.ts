@@ -18,6 +18,7 @@ export type TimerStatus =
       entryId: string;
       projectId: string;
       taskId: string | null;
+      larkTaskGuid: string | null;
       startedAt: number;
       workedMs: number;
       paused: boolean;
@@ -72,6 +73,7 @@ export class TimerService {
       userId: 'self', // server derives the real userId from the access token
       projectId: args.projectId,
       taskId: args.taskId ?? null,
+      larkTaskGuid: args.larkTaskGuid ?? null,
       source: 'AUTO',
       startedAt: now,
       segmentId: this.ids.ulid(),
@@ -183,6 +185,7 @@ export class TimerService {
       entryId: open.id,
       projectId: open.projectId,
       taskId: open.taskId,
+      larkTaskGuid: open.larkTaskGuid ?? null,
       startedAt: firstSeg.startedAt,
       workedMs: totalWorkedMs(open, this.clock.now()),
       paused: getOpenSegment(open) === null,
