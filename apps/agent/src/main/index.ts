@@ -6,6 +6,7 @@ import { startHeartbeatIfAuthed } from './services/heartbeat';
 import { getTimerService, initTimerOnBoot } from './services/timer';
 import { startCaptureLoop } from './services/capture';
 import { startActivityCapture, setActivityRecording } from './services/activity';
+import { startMeetingDetection, isInMeeting } from './services/meeting';
 import { registerPowerEvents } from './services/power';
 import { IdleMonitor } from './services/idle/monitor';
 import { showFloatingBar, hideFloatingBar, reassertFloating } from './floating';
@@ -75,6 +76,7 @@ app.whenReady().then(async () => {
   registerPowerEvents({ onWake: () => reassertFloating() });
 
   // Idle detection → pause the timer (idle is never counted) and prompt.
+  // Suppressed while in a meeting (present but not typing).
   const idleMonitor = new IdleMonitor(async (idleStartedAt) => {
     try {
       await getTimerService().pauseForIdle(idleStartedAt);
@@ -83,7 +85,7 @@ app.whenReady().then(async () => {
     }
     broadcast('timer:status:push', getTimerService().status());
     showIdlePrompt();
-  });
+  }, () => isInMeeting());
   idleMonitor.start();
 
   ipcMain.handle('idle:get', () => ({ idleStartedAt: idleMonitor.getIdleStart() }));
@@ -112,6 +114,7 @@ app.whenReady().then(async () => {
 
   startCaptureLoop();
   startActivityCapture();
+  startMeetingDetection();
 
   // Single 1s heartbeat: tray ticker + floating-bar visibility + live broadcast.
   let lastRunning = false;

@@ -122,6 +122,35 @@ export class TimerService {
     return this.open !== null && getOpenSegment(this.open) === null;
   }
 
+  /** Currently in a MEETING segment. */
+  isInMeetingSegment(): boolean {
+    if (!this.open) return false;
+    return getOpenSegment(this.open)?.kind === 'MEETING';
+  }
+
+  /** Meeting started: switch the open WORK segment to MEETING. No-op if not
+   *  running, paused, or already in a MEETING segment. */
+  async beginMeeting(at: number): Promise<void> {
+    if (!this.open) return;
+    const open = getOpenSegment(this.open);
+    if (!open || open.kind === 'MEETING') return;
+    const updated = openSegment(this.open, { kind: 'MEETING', at, segmentId: this.ids.ulid() });
+    this.open = updated;
+    this.store.upsert(updated);
+    await this.trySync(updated, 'sync');
+  }
+
+  /** Meeting ended: switch back to a WORK segment. No-op if not in MEETING. */
+  async endMeeting(at: number): Promise<void> {
+    if (!this.open) return;
+    const open = getOpenSegment(this.open);
+    if (!open || open.kind !== 'MEETING') return;
+    const updated = openSegment(this.open, { kind: 'WORK', at, segmentId: this.ids.ulid() });
+    this.open = updated;
+    this.store.upsert(updated);
+    await this.trySync(updated, 'sync');
+  }
+
   /**
    * The machine was away (slept / locked) from `awayStart` until `resumeAt`.
    * If a timer is running, trim that gap so the sleep time is never billed —
