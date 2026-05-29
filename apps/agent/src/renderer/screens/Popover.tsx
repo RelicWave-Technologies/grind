@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { Play, Square, ExternalLink, Timer } from 'lucide-react';
+import { Play, Square, ExternalLink, Timer, ListTodo } from 'lucide-react';
 import type { TimerStatus } from '../lib/agent.d';
 import { projectStyle } from '../lib/projectStyle';
 import { fmtClock } from './Today';
 
 /** Compact menu-bar popover: current status + quick start/stop + open app. */
 export default function Popover() {
-  const projects = useQuery({ queryKey: ['projects'], queryFn: () => window.agent.projects.list() });
+  const larkTasks = useQuery({ queryKey: ['larkTasks'], queryFn: () => window.agent.lark.tasks() });
   const [timer, setTimer] = useState<TimerStatus>({ state: 'IDLE' });
 
   useEffect(() => {
@@ -15,12 +15,14 @@ export default function Popover() {
     return window.agent.timer.onStatusChange(setTimer);
   }, []);
 
-  const start = useMutation({ mutationFn: (id: string) => window.agent.timer.start(id), onSuccess: setTimer });
+  const start = useMutation({ mutationFn: (guid: string) => window.agent.timer.start(null, null, guid), onSuccess: setTimer });
   const stop = useMutation({ mutationFn: () => window.agent.timer.stop(), onSuccess: setTimer });
 
+  const tasks = larkTasks.data?.tasks ?? [];
+  const openTasks = tasks.filter((t) => !t.completed);
   const running = timer.state === 'RUNNING' ? timer : null;
-  const runningProject = running ? projects.data?.find((p) => p.id === running.projectId) : undefined;
-  const st = runningProject ? projectStyle(runningProject.id) : null;
+  const runningTask = running?.larkTaskGuid ? tasks.find((t) => t.guid === running.larkTaskGuid) : undefined;
+  const st = running?.larkTaskGuid ? projectStyle(running.larkTaskGuid) : null;
 
   return (
     <div className="pop">
@@ -37,7 +39,7 @@ export default function Popover() {
           <div className="pop-time tabular">{fmtClock(running.workedMs)}</div>
           <div className="pop-proj">
             {st && <i className="dt-dot" style={{ background: st.color }} />}
-            {runningProject?.name ?? 'Tracking'}
+            {runningTask?.summary ?? 'Tracking'}
           </div>
           <button className="btn btn-danger btn-block no-drag" onClick={() => stop.mutate()} disabled={stop.isPending}>
             <Square size={13} strokeWidth={2.5} fill="currentColor" /> Stop
@@ -46,17 +48,22 @@ export default function Popover() {
       ) : (
         <div className="pop-list no-drag">
           <div className="small tertiary" style={{ padding: '0 2px 6px' }}>START TRACKING</div>
-          {projects.data?.slice(0, 4).map((p) => {
-            const ps = projectStyle(p.id);
-            const Icon = ps.icon;
-            return (
-              <button key={p.id} className="pop-row" onClick={() => start.mutate(p.id)} disabled={start.isPending}>
-                <span className="pop-icon" style={{ background: ps.color }}><Icon size={15} strokeWidth={2} /></span>
-                <span className="pop-row-name">{p.name}</span>
-                <Play size={13} strokeWidth={2.5} fill="var(--violet)" color="var(--violet)" />
-              </button>
-            );
-          })}
+          {openTasks.length === 0 ? (
+            <div className="callout secondary" style={{ padding: '2px' }}>
+              {larkTasks.data && larkTasks.data.tasks.length === 0 ? 'No Lark tasks' : 'Open Grind to connect Lark'}
+            </div>
+          ) : (
+            openTasks.slice(0, 5).map((t) => {
+              const ps = projectStyle(t.guid);
+              return (
+                <button key={t.guid} className="pop-row" onClick={() => start.mutate(t.guid)} disabled={start.isPending}>
+                  <span className="pop-icon" style={{ background: ps.color }}><ListTodo size={15} strokeWidth={2} /></span>
+                  <span className="pop-row-name">{t.summary}</span>
+                  <Play size={13} strokeWidth={2.5} fill="var(--violet)" color="var(--violet)" />
+                </button>
+              );
+            })
+          )}
         </div>
       )}
     </div>

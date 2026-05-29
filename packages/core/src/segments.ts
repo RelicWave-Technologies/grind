@@ -36,7 +36,7 @@ export interface CreateArgs {
   id: string;
   clientUuid: string;
   userId: string;
-  projectId: string;
+  projectId?: string | null;
   taskId?: string | null;
   larkTaskGuid?: string | null;
   source?: TimeEntrySource;
@@ -50,7 +50,7 @@ export function createTimeEntry(args: CreateArgs): TimeEntry {
     id: args.id,
     clientUuid: args.clientUuid,
     userId: args.userId,
-    projectId: args.projectId,
+    projectId: args.projectId ?? null,
     taskId: args.taskId ?? null,
     larkTaskGuid: args.larkTaskGuid ?? null,
     source: args.source ?? 'AUTO',

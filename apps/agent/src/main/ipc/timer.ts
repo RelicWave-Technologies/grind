@@ -5,9 +5,9 @@ import { broadcast } from '../broadcast';
 export function registerTimerIpc(): void {
   ipcMain.handle(
     'timer:start',
-    async (_e, args: { projectId: string; taskId?: string | null; larkTaskGuid?: string | null }) => {
+    async (_e, args: { projectId?: string | null; taskId?: string | null; larkTaskGuid?: string | null }) => {
       const status = await getTimerService().start({
-        projectId: args.projectId,
+        projectId: args.projectId ?? null,
         taskId: args.taskId ?? null,
         larkTaskGuid: args.larkTaskGuid ?? null,
       });
@@ -29,6 +29,7 @@ export function registerTimerIpc(): void {
     return entries.map((e) => ({
       id: e.id,
       projectId: e.projectId,
+      larkTaskGuid: e.larkTaskGuid ?? null,
       segments: e.segments.map((s) => ({ kind: s.kind, startedAt: s.startedAt, endedAt: s.endedAt })),
     }));
   });

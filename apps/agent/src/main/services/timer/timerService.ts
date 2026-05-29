@@ -16,7 +16,7 @@ export type TimerStatus =
   | {
       state: 'RUNNING';
       entryId: string;
-      projectId: string;
+      projectId: string | null;
       taskId: string | null;
       larkTaskGuid: string | null;
       startedAt: number;

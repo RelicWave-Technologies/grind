@@ -85,8 +85,10 @@ model TimeEntry {
   clientUuid   String          @unique // idempotency key
   userId       String
   user         User            @relation(fields: [userId], references: [id])
-  projectId    String
-  project      Project         @relation(fields: [projectId], references: [id])
+  // Optional: entries are attributed to a Lark task (larkTaskGuid); project is
+  // now an optional grouping rather than a required field.
+  projectId    String?
+  project      Project?        @relation(fields: [projectId], references: [id])
   taskId       String?
   task         Task?           @relation(fields: [taskId], references: [id])
   larkTaskGuid String?

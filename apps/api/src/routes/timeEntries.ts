@@ -11,17 +11,35 @@ import {
 import { validateEntry, type Segment, type TimeEntry as CoreEntry } from '@grind/core';
 import { validate } from '../middleware/validate';
 import { requireAccessToken } from '../middleware/auth';
+import { isLarkConfigured, getTokenManager, getUserTaskClient } from '../lark';
+import { logger } from '../logger';
 
 export const timeEntriesRouter = Router();
 
 timeEntriesRouter.use(requireAccessToken);
+
+/**
+ * Best-effort: post a "started tracking" comment on the Lark task when a new
+ * entry is created against it. Fire-and-forget — never blocks or fails tracking.
+ */
+async function postStartComment(userId: string, guid: string): Promise<void> {
+  try {
+    const tm = getTokenManager();
+    const client = getUserTaskClient();
+    if (!tm || !client) return;
+    const accessToken = await tm.getAccessToken(userId);
+    await client.addComment(accessToken, guid, '⏱ Started tracking in Grind');
+  } catch (err) {
+    logger.warn({ err: String(err), guid }, 'lark start-comment failed (non-fatal)');
+  }
+}
 
 /** Map wire segments (ISO strings) to the core domain shape (epoch ms). */
 function toCoreEntry(args: {
   id: string;
   clientUuid: string;
   userId: string;
-  projectId: string;
+  projectId: string | null;
   taskId: string | null;
   source: 'AUTO' | 'MANUAL';
   startedAt: string;
@@ -51,7 +69,7 @@ function serialize(entry: {
   id: string;
   clientUuid: string;
   userId: string;
-  projectId: string;
+  projectId: string | null;
   taskId: string | null;
   larkTaskGuid: string | null;
   source: 'AUTO' | 'MANUAL';
@@ -101,19 +119,22 @@ timeEntriesRouter.post('/', validate(CreateTimeEntryRequest, 'body'), async (req
       return res.status(200).json(serialize(existing));
     }
 
-    // Validate the project is in the caller's workspace.
-    const project = await prisma.project.findFirst({
-      where: { id: body.projectId, workspaceId: req.user.ws },
-      select: { id: true },
-    });
-    if (!project) return res.status(400).json({ error: 'invalid_project' });
-
-    if (body.taskId) {
-      const task = await prisma.task.findFirst({
-        where: { id: body.taskId, projectId: body.projectId },
+    // Validate the project (if any) is in the caller's workspace. Entries are
+    // now attributed to a Lark task, so projectId is optional.
+    if (body.projectId) {
+      const project = await prisma.project.findFirst({
+        where: { id: body.projectId, workspaceId: req.user.ws },
         select: { id: true },
       });
-      if (!task) return res.status(400).json({ error: 'invalid_task' });
+      if (!project) return res.status(400).json({ error: 'invalid_project' });
+
+      if (body.taskId) {
+        const task = await prisma.task.findFirst({
+          where: { id: body.taskId, projectId: body.projectId },
+          select: { id: true },
+        });
+        if (!task) return res.status(400).json({ error: 'invalid_task' });
+      }
     }
 
     // Segment integrity check (defense in depth, shared domain logic).
@@ -121,7 +142,7 @@ timeEntriesRouter.post('/', validate(CreateTimeEntryRequest, 'body'), async (req
       id: body.id,
       clientUuid: body.clientUuid,
       userId: req.user.sub,
-      projectId: body.projectId,
+      projectId: body.projectId ?? null,
       taskId: body.taskId ?? null,
       source: body.source,
       startedAt: body.startedAt,
@@ -136,7 +157,7 @@ timeEntriesRouter.post('/', validate(CreateTimeEntryRequest, 'body'), async (req
         id: body.id,
         clientUuid: body.clientUuid,
         userId: req.user.sub,
-        projectId: body.projectId,
+        projectId: body.projectId ?? null,
         taskId: body.taskId ?? null,
         larkTaskGuid: body.larkTaskGuid ?? null,
         source: body.source,
@@ -154,6 +175,9 @@ timeEntriesRouter.post('/', validate(CreateTimeEntryRequest, 'body'), async (req
       },
       include: { segments: true },
     });
+    if (created.larkTaskGuid && isLarkConfigured()) {
+      void postStartComment(req.user.sub, created.larkTaskGuid);
+    }
     res.status(201).json(serialize(created));
   } catch (err) {
     next(err);

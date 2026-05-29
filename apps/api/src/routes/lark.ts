@@ -12,6 +12,7 @@ import {
   signOAuthState,
   verifyOAuthState,
   buildAuthorizeUrl,
+  loggedMsByGuid,
   LARK_SCOPES,
   LarkReauthRequiredError,
 } from '../lark';
@@ -129,7 +130,69 @@ larkRouter.get('/my-tasks', async (req, res, next) => {
       throw err;
     }
     const tasks = await client.listMyTasks(accessToken);
+    // Enrich with time already tracked against each task via Grind.
+    const guids = tasks.map((t) => t.guid);
+    if (guids.length) {
+      const entries = await prisma.timeEntry.findMany({
+        where: { userId: req.user.sub, larkTaskGuid: { in: guids } },
+        select: { larkTaskGuid: true, segments: { select: { kind: true, startedAt: true, endedAt: true } } },
+      });
+      const logged = loggedMsByGuid(entries, Date.now());
+      for (const t of tasks) t.loggedMs = logged.get(t.guid) ?? 0;
+    }
+    // Resolve creator display names (best-effort; needs a tenant token + contact scope).
+    const tenant = getTenantClient();
+    const creatorIds = tasks.map((t) => t.creatorId).filter((id): id is string => !!id);
+    if (tenant && creatorIds.length) {
+      try {
+        const names = await tenant.namesByOpenId(creatorIds);
+        for (const t of tasks) if (t.creatorId) t.creatorName = names.get(t.creatorId) ?? null;
+      } catch (err) {
+        logger.warn({ err: String(err) }, 'lark creator name resolution failed (non-fatal)');
+      }
+    }
     res.json({ tasks });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * Create a Lark task on behalf of the user. Body: { summary, due?, description? }.
+ * Returns the created task DTO. 409 reauth / 503 unconfigured as elsewhere.
+ */
+larkRouter.post('/tasks', async (req, res, next) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: 'unauthorized' });
+    if (!isLarkConfigured()) return res.status(503).json({ error: 'lark_not_configured' });
+    const { summary, due, description } = (req.body ?? {}) as {
+      summary?: unknown;
+      due?: unknown;
+      description?: unknown;
+    };
+    if (typeof summary !== 'string' || summary.trim().length === 0) {
+      return res.status(400).json({ error: 'summary_required' });
+    }
+    const dueMs = typeof due === 'number' && Number.isFinite(due) ? due : null;
+    const tm = getTokenManager()!;
+    const client = getUserTaskClient()!;
+    let accessToken: string;
+    try {
+      accessToken = await tm.getAccessToken(req.user.sub);
+    } catch (err) {
+      if (err instanceof LarkReauthRequiredError) return res.status(409).json({ error: 'reauth_required' });
+      throw err;
+    }
+    // Resolve the token owner's open_id so the new task is assigned to them
+    // (otherwise it won't appear in their my_tasks list).
+    const assigneeOpenId = await client.getOpenId(accessToken).catch(() => null);
+    const task = await client.createTask(accessToken, {
+      summary: summary.trim().slice(0, 256),
+      due: dueMs,
+      description: typeof description === 'string' ? description.slice(0, 2000) : null,
+      assigneeOpenId,
+    });
+    res.status(201).json({ task });
   } catch (err) {
     next(err);
   }
