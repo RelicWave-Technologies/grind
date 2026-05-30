@@ -89,7 +89,7 @@ describe('PATCH /v1/time-requests/:id — happy path', () => {
     expect(fresh.reason).toBe('updated reason after lunch');
   });
 
-  it('sends a Lark updateCard + tiny text notice to the approver when the request had been delivered', async () => {
+  it('disables the previous card and sends a NEW card with the updated values + diff', async () => {
     const { requester, approver, openId } = await seedWorkspaceWithApprover();
     // First, POST a real request so the Lark card lands and we get a larkMessageId.
     const created = await request(app)
@@ -106,22 +106,41 @@ describe('PATCH /v1/time-requests/:id — happy path', () => {
     expect(fake.sends[0]!.receiveOpenId).toBe(openId);
     const id = created.body.id;
     expect(created.body.larkMessageId).toBe('om_1');
-    void approver; // assigned via the route
+    void approver;
 
-    // Now PATCH
+    // Now PATCH the reason.
     const patched = await request(app)
       .patch(`/v1/time-requests/${id}`)
       .set(bearer(requester.accessToken))
       .send({ reason: 'updated explanation' });
     expect(patched.status).toBe(200);
 
+    // The old card (om_1) is updated to its SUPERSEDED variant (no
+    // Approve/Reject buttons, grey header, "see new card" notice).
     expect(fake.updates.length).toBe(1);
     expect(fake.updates[0]!.messageId).toBe('om_1');
-    expect(JSON.stringify(fake.updates[0]!.card)).toContain('updated explanation');
+    const supersededJson = JSON.stringify(fake.updates[0]!.card);
+    expect(supersededJson).toContain('updated');
+    // No action buttons on the superseded card.
+    expect(supersededJson).not.toContain('"action":"approve"');
+    expect(supersededJson).not.toContain('"action":"reject"');
 
-    expect(fake.texts.length).toBe(1);
-    expect(fake.texts[0]!.receiveOpenId).toBe(openId);
-    expect(fake.texts[0]!.text).toContain('updated');
+    // A NEW card was sent (the second sendCard call), to the same approver,
+    // and it carries the new reason + the diff section.
+    expect(fake.sends.length).toBe(2);
+    expect(fake.sends[1]!.receiveOpenId).toBe(openId);
+    const updatedJson = JSON.stringify(fake.sends[1]!.card);
+    expect(updatedJson).toContain('updated explanation');
+    expect(updatedJson).toContain('What changed');
+    expect(updatedJson).toContain('initial reason'); // the "before"
+    // The new card has buttons again.
+    expect(updatedJson).toContain('approve');
+
+    // DB's larkMessageId points at the NEW card so future edits/cancels
+    // act on it instead of the (now-superseded) original.
+    expect(patched.body.larkMessageId).toBe('om_2');
+    // No plain-text nudge anymore — the new card itself carries the news.
+    expect(fake.texts.length).toBe(0);
   });
 });
 

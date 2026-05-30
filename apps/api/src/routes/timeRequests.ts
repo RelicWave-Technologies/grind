@@ -11,7 +11,7 @@ import {
 } from '@grind/types';
 import { validate } from '../middleware/validate';
 import { requireAccessToken } from '../middleware/auth';
-import { buildApprovalCard, getLarkMessenger } from '../lark';
+import { buildApprovalCard, buildSupersededCard, buildUpdatedApprovalCard, getLarkMessenger, type DiffEntry } from '../lark';
 import { logger } from '../logger';
 
 export const timeRequestsRouter = Router();
@@ -185,24 +185,59 @@ timeRequestsRouter.patch('/:id', validate(PatchManualTimeRequest, 'body'), async
       },
     });
 
-    // Best-effort: re-send updated card + a small notice. Failure must NOT
-    // break the PATCH — the DB state is the source of truth.
+    // Best-effort: disable the OLD card (no buttons, "Updated — see new
+    // card" notice) and send a NEW card showing the updated values + a diff
+    // of what changed. Update DB's larkMessageId so future updates/
+    // cancellations target the latest card. Failure must NOT break the
+    // PATCH — the DB state is the source of truth.
     const messenger = getLarkMessenger();
     if (messenger && existing.approver?.larkIdentity?.openId && existing.larkMessageId) {
-      try {
-        const newCard = buildApprovalCard({
-          requestId: updated.id,
-          requesterName: existing.user.name,
-          taskSummary: body.taskSummary ?? null,
-          startedAt: start.getTime(),
-          endedAt: end.getTime(),
-          reason: updated.reason,
+      const approverOpenId = existing.approver.larkIdentity.openId;
+      const supersededAt = Date.now();
+      const diff: DiffEntry[] = [];
+      if (existing.requestedStart.getTime() !== start.getTime() || existing.requestedEnd.getTime() !== end.getTime()) {
+        diff.push({
+          label: 'Time',
+          before: `${existing.requestedStart.toISOString()} → ${existing.requestedEnd.toISOString()}`,
+          after: `${start.toISOString()} → ${end.toISOString()}`,
         });
-        await messenger.updateCard(existing.larkMessageId, newCard);
-        await messenger.sendText(
-          existing.approver.larkIdentity.openId,
-          `↑ Request from ${existing.user.name} was just updated. Please review again.`,
+      }
+      if ((existing.larkTaskGuid ?? null) !== (body.larkTaskGuid ?? existing.larkTaskGuid ?? null)) {
+        diff.push({ label: 'Task', before: existing.larkTaskGuid ?? '—', after: body.larkTaskGuid ?? '—' });
+      }
+      if (existing.reason !== updated.reason) {
+        diff.push({ label: 'Reason', before: existing.reason, after: updated.reason });
+      }
+      try {
+        // 1. Disable the previous card.
+        await messenger.updateCard(
+          existing.larkMessageId,
+          buildSupersededCard({
+            requestId: existing.id,
+            requesterName: existing.user.name,
+            taskSummary: null,
+            startedAt: existing.requestedStart.getTime(),
+            endedAt: existing.requestedEnd.getTime(),
+            reason: existing.reason,
+            supersededAt,
+          }),
         );
+        // 2. Send a fresh card with the updated values + the diff.
+        const { messageId: newMessageId } = await messenger.sendCard(
+          approverOpenId,
+          buildUpdatedApprovalCard({
+            requestId: updated.id,
+            requesterName: existing.user.name,
+            taskSummary: body.taskSummary ?? null,
+            startedAt: start.getTime(),
+            endedAt: end.getTime(),
+            reason: updated.reason,
+            diff,
+          }),
+        );
+        // 3. Future edits/cancellations should target the new card.
+        await prisma.manualTimeRequest.update({ where: { id }, data: { larkMessageId: newMessageId } });
+        updated.larkMessageId = newMessageId;
       } catch (err) {
         logger.warn({ err: String(err), requestId: id }, 'lark patch-notice failed (non-fatal)');
       }

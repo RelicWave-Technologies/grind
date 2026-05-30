@@ -24,6 +24,13 @@ interface Props {
   onChange: (epochMs: number) => void;
   /** A11y label, e.g. "Start time". */
   ariaLabel?: string;
+  /**
+   * Lower bound (inclusive). Times before this are greyed out and not
+   * clickable. Used for End time = at least Start + 1min, etc.
+   */
+  minTime?: number;
+  /** Upper bound (inclusive). Times after this are greyed out. */
+  maxTime?: number;
 }
 
 const HOURS = [12, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]; // 12-hour cycle, AM order
@@ -52,12 +59,26 @@ function fmt(ms: number): string {
   return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
 }
 
-export default function TimePopover({ value, disabled, onChange, ariaLabel }: Props) {
+export default function TimePopover({ value, disabled, onChange, ariaLabel, minTime, maxTime }: Props) {
   const pop = usePopover({ estimatedHeight: 260 });
   const parts = partsFromMs(value);
   const [active, setActive] = useState<{ col: 0 | 1; idx: number }>({ col: 0, idx: HOURS.indexOf(parts.h12) });
   const hourColRef = useRef<HTMLDivElement>(null);
   const minColRef = useRef<HTMLDivElement>(null);
+
+  // A candidate epoch ms is in-range if it falls within [minTime, maxTime].
+  // Either bound is optional. Used to grey out invalid cells.
+  const inRange = (ms: number): boolean => {
+    if (minTime !== undefined && ms < minTime) return false;
+    if (maxTime !== undefined && ms > maxTime) return false;
+    return true;
+  };
+  const hourEnabled = (h12: number, ampm: 'AM' | 'PM'): boolean =>
+    MINUTES.some((m) => inRange(msFromParts(value, h12, m, ampm)));
+  const minuteEnabled = (m: number, ampm: 'AM' | 'PM'): boolean =>
+    HOURS.some((h12) => inRange(msFromParts(value, h12, m, ampm)));
+  const ampmEnabled = (ampm: 'AM' | 'PM'): boolean =>
+    HOURS.some((h12) => MINUTES.some((m) => inRange(msFromParts(value, h12, m, ampm))));
 
   // Re-anchor `active` to the current value whenever the popover opens.
   useEffect(() => {
@@ -71,7 +92,23 @@ export default function TimePopover({ value, disabled, onChange, ariaLabel }: Pr
   }, [pop.open, parts.h12]);
 
   function pick(h12: number, m: number, ampm: 'AM' | 'PM'): void {
-    onChange(msFromParts(value, h12, m, ampm));
+    const candidate = msFromParts(value, h12, m, ampm);
+    if (inRange(candidate)) {
+      onChange(candidate);
+      return;
+    }
+    // The exact (h, m, ampm) is out of bounds — try to coerce to the nearest
+    // valid minute within the same hour first (closest 5-min step), then to
+    // any valid minute in that hour. If none, silently no-op (the cell
+    // shouldn't have been clickable in the first place, but defence in depth).
+    const sortedM = [...MINUTES].sort((a, b) => Math.abs(a - m) - Math.abs(b - m));
+    for (const altM of sortedM) {
+      const alt = msFromParts(value, h12, altM, ampm);
+      if (inRange(alt)) {
+        onChange(alt);
+        return;
+      }
+    }
   }
 
   function onKey(e: React.KeyboardEvent): void {
@@ -141,46 +178,58 @@ export default function TimePopover({ value, disabled, onChange, ariaLabel }: Pr
           onClick={(e) => e.stopPropagation()}
         >
           <div className="tp-meridiem" role="group" aria-label="AM or PM">
-            {(['AM', 'PM'] as const).map((m) => (
-              <button
-                key={m}
-                type="button"
-                className="tp-meridiem-btn"
-                aria-pressed={parts.ampm === m}
-                onClick={() => pick(parts.h12, parts.m, m)}
-              >
-                {m}
-              </button>
-            ))}
-          </div>
-          <div className="tp-grid">
-            <div className="tp-col" ref={hourColRef} role="listbox" aria-label="Hour">
-              {HOURS.map((h, i) => (
-                <button
-                  key={h}
-                  type="button"
-                  className="tp-cell"
-                  aria-selected={parts.h12 === h}
-                  data-active={active.col === 0 && active.idx === i ? 'true' : undefined}
-                  onClick={() => pick(h, parts.m, parts.ampm)}
-                >
-                  {h}
-                </button>
-              ))}
-            </div>
-            <div className="tp-col" ref={minColRef} role="listbox" aria-label="Minute">
-              {MINUTES.map((m, i) => (
+            {(['AM', 'PM'] as const).map((m) => {
+              const enabled = ampmEnabled(m);
+              return (
                 <button
                   key={m}
                   type="button"
-                  className="tp-cell"
-                  aria-selected={parts.m === m}
-                  data-active={active.col === 1 && active.idx === i ? 'true' : undefined}
-                  onClick={() => pick(parts.h12, m, parts.ampm)}
+                  className="tp-meridiem-btn"
+                  aria-pressed={parts.ampm === m}
+                  disabled={!enabled}
+                  onClick={() => pick(parts.h12, parts.m, m)}
                 >
-                  {String(m).padStart(2, '0')}
+                  {m}
                 </button>
-              ))}
+              );
+            })}
+          </div>
+          <div className="tp-grid">
+            <div className="tp-col" ref={hourColRef} role="listbox" aria-label="Hour">
+              {HOURS.map((h, i) => {
+                const enabled = hourEnabled(h, parts.ampm);
+                return (
+                  <button
+                    key={h}
+                    type="button"
+                    className="tp-cell"
+                    aria-selected={parts.h12 === h}
+                    disabled={!enabled}
+                    data-active={active.col === 0 && active.idx === i ? 'true' : undefined}
+                    onClick={() => pick(h, parts.m, parts.ampm)}
+                  >
+                    {h}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="tp-col" ref={minColRef} role="listbox" aria-label="Minute">
+              {MINUTES.map((m, i) => {
+                const enabled = minuteEnabled(m, parts.ampm);
+                return (
+                  <button
+                    key={m}
+                    type="button"
+                    className="tp-cell"
+                    aria-selected={parts.m === m}
+                    disabled={!enabled}
+                    data-active={active.col === 1 && active.idx === i ? 'true' : undefined}
+                    onClick={() => pick(parts.h12, m, parts.ampm)}
+                  >
+                    {String(m).padStart(2, '0')}
+                  </button>
+                );
+              })}
             </div>
           </div>
         </div>,

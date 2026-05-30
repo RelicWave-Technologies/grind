@@ -95,6 +95,90 @@ export function buildApprovalCard(req: ApprovalCardInput): Record<string, unknow
   };
 }
 
+/**
+ * Used when the requester EDITS a pending request. The previous card is
+ * rewritten with this "superseded" variant: grey header, no Approve/Reject
+ * buttons, and a clear note pointing the approver at the new card. Prevents
+ * an in-flight approver from clicking stale buttons.
+ */
+export interface SupersededCardInput extends ApprovalCardInput {
+  /** When the supersession happened (epoch ms). */
+  supersededAt: number;
+}
+export function buildSupersededCard(req: SupersededCardInput): Record<string, unknown> {
+  return {
+    config: { wide_screen_mode: true, update_multi: true },
+    header: {
+      title: { tag: 'plain_text', content: 'Manual time request — updated' },
+      template: 'grey',
+    },
+    elements: [
+      { tag: 'div', fields: detailFields(req) },
+      { tag: 'hr' },
+      {
+        tag: 'div',
+        text: {
+          tag: 'lark_md',
+          content: `**This request was updated** at ${new Date(req.supersededAt).toLocaleString()}. See the new card below — these buttons no longer apply.`,
+        },
+      },
+    ],
+  };
+}
+
+/** A single "old → new" entry in the diff section on an updated card. */
+export interface DiffEntry {
+  label: string;
+  before: string;
+  after: string;
+}
+
+export interface UpdatedApprovalCardInput extends ApprovalCardInput {
+  diff: DiffEntry[];
+}
+
+/**
+ * Sent as a NEW message after the requester edits a pending request. Looks
+ * like a normal approval card (Approve/Reject buttons carrying the same
+ * requestId) but includes a "What changed" section so the approver sees the
+ * delta at a glance.
+ */
+export function buildUpdatedApprovalCard(req: UpdatedApprovalCardInput): Record<string, unknown> {
+  const diffContent = req.diff.length === 0
+    ? '_no field changes_'
+    : req.diff.map((d) => `**${d.label}:** ~~${d.before || '—'}~~ → **${d.after || '—'}**`).join('\n');
+  return {
+    config: { wide_screen_mode: true, update_multi: true },
+    header: {
+      title: { tag: 'plain_text', content: 'Manual time request — updated' },
+      template: 'orange',
+    },
+    elements: [
+      { tag: 'div', fields: detailFields(req) },
+      { tag: 'hr' },
+      { tag: 'div', text: { tag: 'lark_md', content: `**What changed**\n${diffContent}` } },
+      { tag: 'hr' },
+      {
+        tag: 'action',
+        actions: [
+          {
+            tag: 'button',
+            text: { tag: 'plain_text', content: 'Approve' },
+            type: 'primary',
+            value: { requestId: req.requestId, action: 'approve' as ApprovalAction },
+          },
+          {
+            tag: 'button',
+            text: { tag: 'plain_text', content: 'Reject' },
+            type: 'danger',
+            value: { requestId: req.requestId, action: 'reject' as ApprovalAction },
+          },
+        ],
+      },
+    ],
+  };
+}
+
 /** The post-decision card returned to Lark to replace the pending one in place. */
 export function buildDecidedCard(req: DecidedCardInput): Record<string, unknown> {
   const approved = req.decision === 'APPROVED';

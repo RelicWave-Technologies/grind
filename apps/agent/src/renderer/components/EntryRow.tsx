@@ -216,11 +216,28 @@ export default function EntryRow(props: RowProps) {
   return (
     <tr ref={rowRef} className={rowCls} id={`row-${props.rowId}`} onClick={() => props.onSelectRow?.(props.rowId)}>
       <td>
-        <TimePopover value={draft.startedAt} disabled={!startMutable} onChange={(t) => setDraft((d) => ({ ...d, startedAt: t }))} ariaLabel="Start time" />
+        {/* Start must be < End and not in the future. */}
+        <TimePopover
+          value={draft.startedAt}
+          disabled={!startMutable}
+          onChange={(t) => setDraft((d) => ({ ...d, startedAt: t, endedAt: t >= d.endedAt ? t + 15 * 60 * 1000 : d.endedAt }))}
+          ariaLabel="Start time"
+          maxTime={Math.min(draft.endedAt - 5 * 60 * 1000, Date.now())}
+        />
       </td>
       <td>
         {props.isOpen ? <span className="et-chip-trigger et-chip-trigger-time" aria-disabled="true">now</span>
-          : <TimePopover value={draft.endedAt} disabled={!endMutable} onChange={(t) => setDraft((d) => ({ ...d, endedAt: t }))} ariaLabel="End time" />}
+          : (
+            /* End must be > Start and not in the future. */
+            <TimePopover
+              value={draft.endedAt}
+              disabled={!endMutable}
+              onChange={(t) => setDraft((d) => ({ ...d, endedAt: t, startedAt: t <= d.startedAt ? t - 15 * 60 * 1000 : d.startedAt }))}
+              ariaLabel="End time"
+              minTime={draft.startedAt + 5 * 60 * 1000}
+              maxTime={Date.now()}
+            />
+          )}
       </td>
       <td className="et-cell-dur">{dur}</td>
       <td>
