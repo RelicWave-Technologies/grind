@@ -34,9 +34,13 @@ function shiftDate(ymd: string, deltaDays: number): string {
   const { y, m, d } = parseYmd(ymd);
   return new Date(y, m - 1, d + deltaDays).toLocaleDateString('sv-SE');
 }
-function prettyDate(ymd: string): string {
+function prettyDateParts(ymd: string): { dow: string; rest: string } {
   const { y, m, d } = parseYmd(ymd);
-  return new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+  const dt = new Date(y, m - 1, d);
+  return {
+    dow: dt.toLocaleDateString(undefined, { weekday: 'short' }),
+    rest: dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }),
+  };
 }
 
 export default function EditTime() {
@@ -56,7 +60,11 @@ export default function EditTime() {
   const day = useQuery({
     queryKey: dayQueryKey,
     queryFn: () => window.agent.insights.day({ date, tz: timezone }),
-    refetchInterval: date === localToday() ? 5_000 : 60_000,
+    // Polling caused visible churn (today's trailing-gap endedAt = now tick
+    // every poll). Drop it. Mutations invalidate this key explicitly, and
+    // window-focus refetch covers "I just got back from Lark".
+    refetchOnWindowFocus: true,
+    staleTime: 30_000,
     retry: 1,
   });
   const larkTasks = useQuery({
@@ -66,10 +74,27 @@ export default function EditTime() {
   });
   const tasks = useMemo(() => (larkTasks.data?.tasks ?? []).filter((t) => !t.completed).map((t) => ({ guid: t.guid, summary: t.summary })), [larkTasks.data]);
 
+  // Slow "now" ticking — the ribbon's "now" cursor and the trailing-gap
+  // visualization only need minute resolution. 1s caused full ribbon
+  // re-renders 60×/min for no perceptible benefit.
   useEffect(() => {
     if (date !== localToday()) return;
-    const id = setInterval(() => setNow(Date.now()), 1000);
+    const id = setInterval(() => setNow(Date.now()), 60_000);
     return () => clearInterval(id);
+  }, [date]);
+
+  // Keyboard shortcuts: [ prev day, ] next day, T today. Only when no input
+  // is focused (don't steal the user's typing).
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      if (e.key === '[') { e.preventDefault(); setDate((d) => shiftDate(d, -1)); }
+      else if (e.key === ']') { if (date !== localToday()) { e.preventDefault(); setDate((d) => shiftDate(d, 1)); } }
+      else if (e.key.toLowerCase() === 't') { e.preventDefault(); setDate(localToday()); }
+    }
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
   }, [date]);
 
   // Flash dismiss after the CSS animation finishes (1.6s).
@@ -98,16 +123,22 @@ export default function EditTime() {
       <div className="toolbar">
         <span className="h1 no-drag">Edit Time</span>
         <div className="et-datebar no-drag">
-          <button className="btn-icon" onClick={() => setDate((d) => shiftDate(d, -1))} title="Previous day">
+          <button className="btn-icon" onClick={() => setDate((d) => shiftDate(d, -1))} title="Previous day ( [ )" aria-label="Previous day">
             <ChevronLeft size={16} strokeWidth={2.5} />
           </button>
-          <span className="et-date">{prettyDate(date)}</span>
-          <button className="btn-icon" onClick={() => setDate((d) => shiftDate(d, 1))} title="Next day" disabled={isToday}>
+          <span className="et-date">
+            <span className="et-date-dow">{prettyDateParts(date).dow}</span>
+            {prettyDateParts(date).rest}
+          </span>
+          <button className="btn-icon" onClick={() => setDate((d) => shiftDate(d, 1))} title="Next day ( ] )" aria-label="Next day" disabled={isToday}>
             <ChevronRight size={16} strokeWidth={2.5} />
           </button>
           {!isToday && (
-            <button className="btn btn-soft" onClick={() => setDate(localToday())}>Today</button>
+            <button className="btn btn-soft" onClick={() => setDate(localToday())} title="Today ( T )">Today</button>
           )}
+          <span className="et-kbd-hint">
+            <span className="et-kbd">[</span> / <span className="et-kbd">]</span> / <span className="et-kbd">T</span>
+          </span>
         </div>
       </div>
 

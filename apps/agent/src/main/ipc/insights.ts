@@ -41,21 +41,6 @@ export type DayInsight = {
   recentRejected: Array<{ id: string; requestedStart: number; requestedEnd: number; reason: string; decidedReason: string | null; larkTaskGuid: string | null }>;
 };
 
-const EMPTY_DAY: DayInsight = {
-  date: new Date().toISOString().slice(0, 10),
-  timezone: 'UTC',
-  dayStart: 0,
-  dayEnd: 0,
-  isFuture: false,
-  isToday: true,
-  firstActivityAt: null,
-  lastActivityAt: null,
-  totals: { workedMs: 0, meetingMs: 0, manualMs: 0, idleTrimmedMs: 0, gapMs: 0 },
-  blocks: [],
-  pendingOverlay: [],
-  recentRejected: [],
-};
-
 /** Today's productivity score + activity totals, from the backend insights endpoint. */
 export function registerInsightsIpc(): void {
   ipcMain.handle('insights:today', async (): Promise<InsightsToday> => {
