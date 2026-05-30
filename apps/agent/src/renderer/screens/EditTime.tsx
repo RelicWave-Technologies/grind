@@ -78,6 +78,46 @@ export default function EditTime() {
   });
   const tasks = useMemo(() => (larkTasks.data?.tasks ?? []).filter((t) => !t.completed).map((t) => ({ guid: t.guid, summary: t.summary })), [larkTasks.data]);
 
+  /**
+   * If the day has no tracked blocks, synthesize gap blocks across the
+   * working window (9 AM → min(9 PM, now)) so the user can still click the
+   * whole bar to add manual time. Pending overlays subtract from the
+   * synthesized window — so submitting a 2h range leaves two gaps (before
+   * + after) plus the red pending row in between.
+   */
+  const effectiveDay = useMemo(() => {
+    if (!day.data) return null;
+    const d = day.data;
+    if (d.isFuture || d.blocks.length > 0) return d;
+    const HOUR = 60 * 60 * 1000;
+    const start = d.dayStart + 9 * HOUR;
+    const endCap = d.isToday ? Date.now() : d.dayEnd;
+    const end = Math.min(start + 12 * HOUR, endCap);
+    if (end <= start + 5 * 60 * 1000) return d; // window too narrow (e.g. early morning today)
+    // Build gaps = [start, end] minus all pendingOverlay ranges.
+    const sorted = [...d.pendingOverlay].sort((a, b) => a.startedAt - b.startedAt);
+    const blocks: typeof d.blocks = [];
+    let cursor = start;
+    for (const p of sorted) {
+      const pStart = Math.max(p.startedAt, start);
+      const pEnd = Math.min(p.endedAt, end);
+      if (pStart >= end) break;
+      if (pStart > cursor) {
+        blocks.push({ kind: 'GAP', startedAt: cursor, endedAt: pStart, durationMs: pStart - cursor });
+      }
+      cursor = Math.max(cursor, pEnd);
+    }
+    if (cursor < end) {
+      blocks.push({ kind: 'GAP', startedAt: cursor, endedAt: end, durationMs: end - cursor });
+    }
+    return {
+      ...d,
+      blocks,
+      firstActivityAt: start,
+      lastActivityAt: end,
+    };
+  }, [day.data]);
+
   // Slow "now" ticking — the ribbon's "now" cursor and the trailing-gap
   // visualization only need minute resolution. 1s caused full ribbon
   // re-renders 60×/min for no perceptible benefit.
@@ -120,7 +160,7 @@ export default function EditTime() {
   );
 
   const isToday = date === localToday();
-  const dayData = day.data;
+  const dayData = effectiveDay ?? day.data;
 
   return (
     <>
