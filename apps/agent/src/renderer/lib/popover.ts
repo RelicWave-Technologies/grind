@@ -97,16 +97,26 @@ export function usePopover(opts: PopoverOptions = {}): PopoverState {
       setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
-    const onScrollOrResize = () => setOpen(false);
+    // Dismiss on OUTSIDE scrolls (the page or any scrollable ancestor moved
+    // so the trigger would be at a stale position). Scrolls that originate
+    // INSIDE the popover (e.g. the time list scrolling itself, or the
+    // initial scrollIntoView on the active cell) must NOT dismiss — that
+    // was the "popover came and disappeared" bug.
+    const onScroll = (e: Event) => {
+      const target = e.target as Node | null;
+      if (target && popoverRef.current && popoverRef.current.contains(target)) return;
+      setOpen(false);
+    };
+    const onResize = () => setOpen(false);
     document.addEventListener('mousedown', onDown);
     document.addEventListener('keydown', onKey);
-    window.addEventListener('scroll', onScrollOrResize, true);
-    window.addEventListener('resize', onScrollOrResize);
+    window.addEventListener('scroll', onScroll, true);
+    window.addEventListener('resize', onResize);
     return () => {
       document.removeEventListener('mousedown', onDown);
       document.removeEventListener('keydown', onKey);
-      window.removeEventListener('scroll', onScrollOrResize, true);
-      window.removeEventListener('resize', onScrollOrResize);
+      window.removeEventListener('scroll', onScroll, true);
+      window.removeEventListener('resize', onResize);
     };
   }, [open, setOpen]);
 
