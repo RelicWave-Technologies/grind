@@ -110,6 +110,12 @@ export default function DayRibbon({ day, now, taskNameFor, onPickPreset }: Props
       now,
     });
     if (!preset) return null;
+    // Also bail if the preset's RANGE would overlap any pending request —
+    // we don't want the ghost ducking under a pending block visually.
+    const overlapsPending = day.pendingOverlay.some(
+      (p) => p.startedAt < preset.endedAt && p.endedAt > preset.startedAt,
+    );
+    if (overlapsPending) return null;
     return preset;
   }, [hover, now, day.blocks, day.pendingOverlay, day.dayStart, day.dayEnd]);
 

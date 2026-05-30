@@ -277,10 +277,20 @@ label.field-label { display: block; font-size: 12px; font-weight: 600; color: va
 .dr-seg-live    { animation: segpulse 1.8s var(--ease) infinite; }
 .dr-seg[role="button"]:focus-visible { outline: 2px solid var(--c-violet); outline-offset: 2px; }
 
+/* PENDING request overlay: full-height block over the gap zone so the user
+ * unmistakably sees "this part is waiting for the approver". Diagonal
+ * amber stripes on a soft amber tint, thin solid border. Sits below the
+ * "now" cursor (z-order via DOM source order). */
 .dr-pending {
-  position: absolute; top: 2px; height: 5px; border-radius: 3px;
-  background-image: repeating-linear-gradient(45deg, var(--c-amber) 0 4px, transparent 4px 8px);
-  background-color: var(--c-amber-bg);
+  position: absolute; top: 10px; height: 36px; border-radius: 8px;
+  background-image: repeating-linear-gradient(
+    45deg,
+    rgba(245,165,36,0.55) 0 4px,
+    rgba(245,165,36,0.10) 4px 10px
+  );
+  background-color: rgba(245,165,36,0.10);
+  box-shadow: inset 0 0 0 1px rgba(245,165,36,0.55);
+  pointer-events: none;
 }
 
 .dr-now {
@@ -294,19 +304,23 @@ label.field-label { display: block; font-size: 12px; font-weight: 600; color: va
 }
 .dr-future {
   position: absolute; top: 0; bottom: 0; right: 0;
-  background-image: repeating-linear-gradient(135deg, rgba(40,36,56,0.06) 0 6px, transparent 6px 12px);
+  background-image: repeating-linear-gradient(135deg, rgba(40,36,56,0.045) 0 6px, transparent 6px 14px);
   pointer-events: none;
 }
 
+/* Hover ghost: shows the user where a click would create a manual-time
+ * request. Subtle violet — same chrome as a focused chip — so it doesn't
+ * compete with real pending blocks (which use amber). */
 .dr-ghost {
-  position: absolute; top: 6px; height: 44px; border-radius: 9px;
-  background: var(--c-amber-bg); border: 1.5px dashed var(--c-amber);
+  position: absolute; top: 10px; height: 36px; border-radius: 8px;
+  background: rgba(124, 92, 255, 0.08);
+  box-shadow: inset 0 0 0 1.5px rgba(124, 92, 255, 0.55);
   pointer-events: none;
   animation: dr-ghost-in var(--dur-fast) var(--ease) 1;
 }
 @keyframes dr-ghost-in {
-  from { opacity: 0; transform: scaleY(0.9); }
-  to   { opacity: 1; transform: scaleY(1); }
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 
 .dr-axis { position: relative; height: 18px; margin-top: 8px; }
