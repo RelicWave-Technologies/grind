@@ -268,7 +268,10 @@ label.field-label { display: block; font-size: 12px; font-weight: 600; color: va
 .dr-seg {
   position: absolute; top: 10px; height: 36px; border-radius: 8px; min-width: 3px;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22);
+  cursor: pointer;
+  transition: filter var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
 }
+.dr-seg:hover { filter: brightness(0.96); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.4), 0 0 0 1.5px rgba(124, 92, 255, 0.45); }
 .dr-seg-work    { background: var(--c-green); }
 .dr-seg-meeting { background: var(--c-blue); }
 .dr-seg-manual  { background: var(--c-amber); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.35); }
@@ -453,6 +456,15 @@ label.field-label { display: block; font-size: 12px; font-weight: 600; color: va
   100% { background-color: transparent; }
 }
 .et-row-flash { animation: et-flash var(--dur-slow) var(--ease) 1; }
+
+/* Hover-link from the ribbon: subtle shadow + tint to make it obvious
+ * which table row corresponds to the block under the cursor. */
+.et-row-highlighted {
+  background: rgba(124, 92, 255, 0.05) !important;
+  box-shadow: inset 0 0 0 1px rgba(124, 92, 255, 0.18),
+              inset 3px 0 0 var(--c-violet);
+  position: relative; z-index: 1;
+}
 
 /* Saved-success pulse: greenish, soft. */
 @keyframes et-saved {

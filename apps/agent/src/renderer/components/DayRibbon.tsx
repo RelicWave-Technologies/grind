@@ -14,14 +14,14 @@ const HOUR = 60 * 60 * 1000;
 interface Props {
   day: DayInsight;
   now: number;
-  /** Lookup task summary for a tooltip — provided by parent. */
   taskNameFor: (guid: string | null | undefined) => string | null;
-  /**
-   * Called when the user clicks an empty/gap area. The preset is what the
-   * composer should use. `null` means the click was on a tracked block or
-   * in the future — no composer.
-   */
   onPickPreset: (preset: { startedAt: number; endedAt: number; larkTaskGuid: string | null }) => void;
+  /**
+   * Hover-link: when the user hovers a block on the ribbon, the parent
+   * applies a subtle highlight to the matching row in the table so the
+   * two surfaces feel connected. `null` clears the highlight.
+   */
+  onHoverBlock?: (rowId: string | null) => void;
 }
 
 /**
@@ -39,7 +39,7 @@ interface Props {
  * a11y note: the ribbon is `aria-hidden`. The DayBlocksTable below is the
  * source of truth for keyboard / screen-reader users.
  */
-export default function DayRibbon({ day, now, taskNameFor, onPickPreset }: Props) {
+export default function DayRibbon({ day, now, taskNameFor, onPickPreset, onHoverBlock }: Props) {
   const trackRef = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<number | null>(null);
 
@@ -141,12 +141,15 @@ export default function DayRibbon({ day, now, taskNameFor, onPickPreset }: Props
           if (p.endedAt <= winStart || p.startedAt >= winEnd) return null;
           const s = Math.max(p.startedAt, winStart);
           const e = Math.min(p.endedAt, winEnd);
+          const rowId = `pending-${p.id}`;
           return (
             <div
               key={p.id}
               className="dr-pending"
               style={{ left: `${pct(s)}%`, width: `${widthPct(e - s)}%` }}
               title={`Pending: ${p.reason}`}
+              onMouseEnter={() => onHoverBlock?.(rowId)}
+              onMouseLeave={() => onHoverBlock?.(null)}
             />
           );
         })}
@@ -158,12 +161,17 @@ export default function DayRibbon({ day, now, taskNameFor, onPickPreset }: Props
           const e = Math.min(b.endedAt, winEnd);
           const live = b.isOpen ? ' dr-seg-live' : '';
           const label = b.kind === 'GAP' ? 'Not working' : `${b.kind}${b.larkTaskGuid ? ' · ' + (taskNameFor(b.larkTaskGuid) ?? 'Task') : ''}`;
+          // Match the row id scheme used by EditTime so the table can
+          // highlight the corresponding row on hover.
+          const rowId = b.kind === 'GAP' ? `gap-${b.startedAt}` : `entry-${b.timeEntryId}-${i}`;
           return (
             <div
               key={b.timeEntryId ? `${b.timeEntryId}-${i}` : `b-${i}`}
               className={segCls(b.kind) + live}
               style={{ left: `${pct(s)}%`, width: `${widthPct(e - s)}%` }}
               title={`${label} · ${fmtRange(s, e)}`}
+              onMouseEnter={() => onHoverBlock?.(rowId)}
+              onMouseLeave={() => onHoverBlock?.(null)}
             />
           );
         })}

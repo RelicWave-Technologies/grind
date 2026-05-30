@@ -46,18 +46,17 @@ describe('presetForClick', () => {
   const now = ms(20); // 8 PM today
   const args = (blocks: DayBlockClient[], clickedAtMs: number) => ({ blocks, clickedAtMs, dayStart, dayEnd, now });
 
-  it('snaps to the full gap when gap is ≤ 4h', () => {
+  it('snaps to the FULL gap regardless of length', () => {
     const blocks = [work(ms(9), ms(10), 't1'), gap(ms(10), ms(11)), work(ms(11), ms(12), 't1')];
     const out = presetForClick(args(blocks, ms(10, 30)));
     expect(out).toEqual({ startedAt: ms(10), endedAt: ms(11), larkTaskGuid: 't1' });
   });
 
-  it('uses a centered 1h window for a long (>4h) gap', () => {
+  it('snaps to the full gap even when the gap is large (>4h) — one click = whole slot', () => {
     const blocks = [work(ms(8), ms(9)), gap(ms(9), ms(15)), work(ms(15), ms(16))];
     const out = presetForClick(args(blocks, ms(12)));
-    expect(out!.endedAt - out!.startedAt).toBe(HOUR);
-    expect(out!.startedAt).toBeGreaterThanOrEqual(ms(9));
-    expect(out!.endedAt).toBeLessThanOrEqual(ms(15));
+    expect(out!.startedAt).toBe(ms(9));
+    expect(out!.endedAt).toBe(ms(15));
   });
 
   it('clamps preset endedAt to `now` (no future time)', () => {

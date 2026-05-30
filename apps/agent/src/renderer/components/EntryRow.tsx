@@ -39,6 +39,9 @@ export interface RowProps {
   kind: RowKind;
   rowId: string;
   flashing?: boolean;
+  /** When the user hovers the matching block on the ribbon, the row lifts
+   *  with a soft shadow to make the linkage between the two surfaces clear. */
+  highlighted?: boolean;
   startedAt: number;
   endedAt: number;
   isOpen?: boolean;
@@ -198,7 +201,8 @@ export default function EntryRow(props: RowProps) {
     (props.kind === 'gap' ? ' et-row-gap' : '') +
     (dirty ? ' et-row-dirty' : '') +
     (props.flashing ? ' et-row-flash' : '') +
-    (savedPulse ? ' et-row-saved' : '');
+    (savedPulse ? ' et-row-saved' : '') +
+    (props.highlighted ? ' et-row-highlighted' : '');
 
   const rowRef = useRef<HTMLTableRowElement>(null);
   useEffect(() => {

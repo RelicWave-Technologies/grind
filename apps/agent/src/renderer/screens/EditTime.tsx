@@ -47,6 +47,10 @@ export default function EditTime() {
   const [date, setDate] = useState<string>(localToday());
   const [now, setNow] = useState<number>(Date.now());
   const [flashRowId, setFlashRowId] = useState<string | null>(null);
+  /** Mirror of "which ribbon block is the user hovering right now?" so the
+   *  matching table row can render a subtle shadow + connect the two
+   *  surfaces visually. Cleared on mouseleave. */
+  const [hoveredRowId, setHoveredRowId] = useState<string | null>(null);
   /**
    * Latest ribbon-click snap range + a monotonic `tick` so that clicking
    * the same spot twice still re-applies (EntryRow's effect keys on tick).
@@ -183,7 +187,13 @@ export default function EditTime() {
             </div>
           ) : (
             <div className="et-ribbon-wrap rise rise-1">
-              <DayRibbon day={dayData} now={now} taskNameFor={taskNameFor} onPickPreset={onPickPreset} />
+              <DayRibbon
+                day={dayData}
+                now={now}
+                taskNameFor={taskNameFor}
+                onPickPreset={onPickPreset}
+                onHoverBlock={setHoveredRowId}
+              />
             </div>
           )}
 
@@ -199,6 +209,7 @@ export default function EditTime() {
                 flashRowId={flashRowId}
                 onSelectRow={setFlashRowId}
                 gapPreset={gapPreset}
+                hoveredRowId={hoveredRowId}
               />
 
               {/* Totals strip */}
@@ -226,6 +237,7 @@ function DayBlocksTable({
   flashRowId,
   onSelectRow,
   gapPreset,
+  hoveredRowId,
 }: {
   day: DayInsight;
   tasks: Array<{ guid: string; summary: string }>;
@@ -233,6 +245,7 @@ function DayBlocksTable({
   flashRowId: string | null;
   onSelectRow: (rowId: string) => void;
   gapPreset: (ManualTimePreset & { tick: number }) | null;
+  hoveredRowId: string | null;
 }) {
   // Which gap block (by index) does the preset's center sit inside? Routed
   // once per ribbon click; the EntryRow itself only re-applies on tick
@@ -297,6 +310,7 @@ function DayBlocksTable({
                     kind="gap"
                     rowId={rowId}
                     flashing={flashRowId === rowId || isPresetTarget}
+                    highlighted={hoveredRowId === rowId}
                     startedAt={b.startedAt}
                     endedAt={b.endedAt}
                     larkTaskGuid={null}
@@ -322,6 +336,7 @@ function DayBlocksTable({
                   kind={isManual ? 'manual_approved' : 'tracked'}
                   rowId={rowId}
                   flashing={flashRowId === rowId}
+                  highlighted={hoveredRowId === rowId}
                   startedAt={b.startedAt}
                   endedAt={b.endedAt}
                   isOpen={b.isOpen}
@@ -348,6 +363,7 @@ function DayBlocksTable({
                   kind="pending"
                   rowId={rowId}
                   flashing={flashRowId === rowId}
+                  highlighted={hoveredRowId === rowId}
                   startedAt={p.startedAt}
                   endedAt={p.endedAt}
                   refId={p.id}

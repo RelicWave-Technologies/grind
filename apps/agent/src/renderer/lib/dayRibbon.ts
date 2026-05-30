@@ -84,18 +84,14 @@ export function presetForClick(args: {
   let neighborGuid: string | null = null;
 
   if (hit && hit.kind === 'GAP') {
+    // Always snap to the FULL gap (capped at `now` so we never request future
+    // time). The previous "1h-window for >4h gaps" behaviour confused users —
+    // they want one click to represent the whole untracked slot, then edit
+    // the start/end down to the actual range before submitting.
     const gapStart = hit.startedAt;
-    const gapEndCapped = Math.min(hit.endedAt, now); // can't extend a gap into the future
-    const usableLen = gapEndCapped - gapStart;
-    if (usableLen <= 4 * HOUR_MS) {
-      startedAt = snapToGrid(gapStart);
-      endedAt = snapToGrid(gapEndCapped);
-    } else {
-      // 1h window centered on the click, clamped to the gap.
-      const half = 30 * 60 * 1000;
-      startedAt = clamp(snappedClick - half, gapStart, gapEndCapped - HOUR_MS);
-      endedAt = startedAt + HOUR_MS;
-    }
+    const gapEndCapped = Math.min(hit.endedAt, now);
+    startedAt = snapToGrid(gapStart);
+    endedAt = snapToGrid(gapEndCapped);
     neighborGuid = sharedNeighborGuid(blocks, hit);
   } else {
     // Click outside any rendered block (rare — happens before firstActivity).
