@@ -209,6 +209,9 @@ label.field-label { display: block; font-size: 12px; font-weight: 600; color: va
 .toolbar .no-drag { -webkit-app-region: no-drag; }
 .content-scroll { flex: 1; overflow-y: auto; padding: 0 var(--sp-8) var(--sp-8); }
 .content-narrow { max-width: 720px; margin: 0 auto; }
+/* Wide variant for the timeline/timesheet view — uses the full content
+ * width so the ribbon and table breathe and avoid horizontal scroll. */
+.content-wide { width: 100%; max-width: 1280px; margin: 0 auto; }
 /* vertically center the focus view in the available height */
 .content-scroll.center-y { display: flex; flex-direction: column; justify-content: center; padding-bottom: var(--toolbar-height); }
 .content-scroll.center-y .content-narrow { width: 100%; }
@@ -261,13 +264,13 @@ label.field-label { display: block; font-size: 12px; font-weight: 600; color: va
 /* ---- wide day ribbon (Edit Time tab) ---- */
 .dr { position: relative; width: 100%; user-select: none; }
 .dr-track {
-  position: relative; height: 56px; border-radius: 14px;
-  background: rgba(40, 36, 56, 0.045); overflow: hidden;
+  position: relative; height: 56px; border-radius: 6px;
+  background: rgba(40, 36, 56, 0.04); overflow: hidden;
   cursor: crosshair;
 }
 .dr-seg {
-  position: absolute; top: 10px; height: 36px; border-radius: 8px; min-width: 3px;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22);
+  position: absolute; top: 10px; height: 36px; border-radius: 3px; min-width: 3px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
   cursor: pointer;
   transition: filter var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
 }
@@ -284,7 +287,7 @@ label.field-label { display: block; font-size: 12px; font-weight: 600; color: va
  * reads as "stop — this is waiting on someone." Approved manual time stays
  * amber (yellow); pending is red to signal the waiting state. */
 .dr-pending {
-  position: absolute; top: 10px; height: 36px; border-radius: 8px;
+  position: absolute; top: 10px; height: 36px; border-radius: 3px;
   background-image: repeating-linear-gradient(
     45deg,
     rgba(255, 77, 106, 0.55) 0 4px,
@@ -314,7 +317,7 @@ label.field-label { display: block; font-size: 12px; font-weight: 600; color: va
  * request. Subtle violet — same chrome as a focused chip — so it doesn't
  * compete with real pending blocks (which use amber). */
 .dr-ghost {
-  position: absolute; top: 10px; height: 36px; border-radius: 8px;
+  position: absolute; top: 10px; height: 36px; border-radius: 3px;
   background: rgba(124, 92, 255, 0.08);
   box-shadow: inset 0 0 0 1.5px rgba(124, 92, 255, 0.55);
   pointer-events: none;
@@ -342,7 +345,7 @@ label.field-label { display: block; font-size: 12px; font-weight: 600; color: va
 /* ---- chip-style trigger used by TimePopover + TaskCombo ---- */
 .et-chip-trigger {
   font: inherit; font-size: 12px; line-height: 1.2;
-  padding: 6px 10px; border-radius: 8px;
+  padding: 6px 10px; border-radius: 4px;
   background: transparent; border: 1px solid transparent;
   color: var(--label); cursor: pointer;
   display: inline-flex; align-items: center; gap: 6px;
@@ -362,7 +365,7 @@ label.field-label { display: block; font-size: 12px; font-weight: 600; color: va
 /* ---- generic floating popover (used by TimePopover + TaskCombo) ---- */
 .et-pop {
   position: fixed; z-index: 1000;
-  background: white; border-radius: 12px;
+  background: white; border-radius: 8px;
   box-shadow:
     0 1px 1px rgba(40,36,56,0.04),
     0 6px 16px rgba(40,36,56,0.08),
@@ -479,7 +482,7 @@ label.field-label { display: block; font-size: 12px; font-weight: 600; color: va
  * pushing the column off-screen on narrower windows. Buttons hidden by
  * default; revealed via :hover / :focus-within / .et-row-dirty so calm
  * rows stay calm. */
-.et-action-cell { width: 220px; text-align: right; white-space: nowrap; padding-right: 16px; }
+.et-action-cell { width: 240px; text-align: right; white-space: nowrap; padding-right: 16px; }
 .et-actions {
   display: inline-flex; align-items: center; gap: 6px;
   opacity: 0;
@@ -499,8 +502,9 @@ label.field-label { display: block; font-size: 12px; font-weight: 600; color: va
  * timeline and the rows visually align column-to-column. */
 .et-ribbon-wrap {
   width: 100%; padding: var(--sp-4) var(--sp-5);
-  background: var(--bg-card); border-radius: 14px;
-  box-shadow: 0 1px 2px rgba(40,36,56,0.04), 0 8px 24px rgba(40,36,56,0.04);
+  background: var(--bg-card); border-radius: 8px;
+  box-shadow: 0 1px 2px rgba(40,36,56,0.03), 0 4px 16px rgba(40,36,56,0.03);
+  border: 1px solid var(--separator);
 }
 
 /* Spinner (used in save button). */
@@ -512,9 +516,10 @@ label.field-label { display: block; font-size: 12px; font-weight: 600; color: va
  * so the two surfaces feel like one connected timeline view. */
 .et-table-wrap {
   margin-top: var(--sp-3);
-  background: var(--bg-card); border-radius: 14px;
-  box-shadow: 0 1px 2px rgba(40,36,56,0.04), 0 8px 24px rgba(40,36,56,0.04);
-  overflow-x: auto; /* safety net: action column stays reachable on narrow windows */
+  background: var(--bg-card); border-radius: 8px;
+  box-shadow: 0 1px 2px rgba(40,36,56,0.03), 0 4px 16px rgba(40,36,56,0.03);
+  border: 1px solid var(--separator);
+  overflow: hidden;
 }
 .et-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .et-table th {

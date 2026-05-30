@@ -187,7 +187,7 @@ export default function EditTime() {
       </div>
 
       <div className="content-scroll">
-        <div className="content-narrow">
+        <div className="content-wide">
           {/* Legend — only the states the user actually creates: tracked /
               manual / pending. Meetings + breaks aren't first-class in v3. */}
           <div className="dt-legend" style={{ justifyContent: 'flex-start', margin: '4px 0 var(--sp-3)' }}>

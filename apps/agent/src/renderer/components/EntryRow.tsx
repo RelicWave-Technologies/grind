@@ -214,7 +214,20 @@ export default function EntryRow(props: RowProps) {
   const dur = fmtDur(draft.endedAt - draft.startedAt);
 
   return (
-    <tr ref={rowRef} className={rowCls} id={`row-${props.rowId}`} onClick={() => props.onSelectRow?.(props.rowId)}>
+    <tr
+      ref={rowRef}
+      className={rowCls}
+      id={`row-${props.rowId}`}
+      onClick={(e) => {
+        props.onSelectRow?.(props.rowId);
+        // Clicking anywhere in the row (except an interactive child that
+        // stopPropagation'd) focuses the Reason input — gives the user a
+        // single, predictable entry point regardless of row kind.
+        const target = e.target as HTMLElement;
+        if (target.closest('input,select,button,.et-pop,.et-chip-trigger')) return;
+        reasonRef.current?.focus();
+      }}
+    >
       <td>
         {/* Start must be < End and not in the future. */}
         <TimePopover
