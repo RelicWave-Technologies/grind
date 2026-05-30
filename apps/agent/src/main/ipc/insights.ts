@@ -66,14 +66,20 @@ export function registerInsightsIpc(): void {
   });
 
   // Per-day blocks for the Edit Time tab. The renderer passes the resolved
-  // IANA timezone so the backend's day-window math stays user-local.
+  // IANA timezone so the backend's day-window math stays user-local. We race
+  // against a 12s timeout so a hung backend never leaves the renderer stuck
+  // on a perpetual spinner — the UI surfaces an error + retry instead.
   ipcMain.handle('insights:day', async (_e, args: { date: string; tz: string }): Promise<DayInsight> => {
     try {
       const q = new URLSearchParams({ date: args.date, tz: args.tz });
-      return await api<DayInsight>(`/v1/insights/day?${q.toString()}`);
+      const fetchPromise = api<DayInsight>(`/v1/insights/day?${q.toString()}`);
+      const timeoutPromise = new Promise<DayInsight>((_, reject) =>
+        setTimeout(() => reject(new Error('insights:day timeout (12s)')), 12_000),
+      );
+      return await Promise.race([fetchPromise, timeoutPromise]);
     } catch (err) {
       log.warn('insights:day failed', { err: String(err), date: args.date });
-      return { ...EMPTY_DAY, date: args.date, timezone: args.tz };
+      throw err; // let the renderer's TanStack Query surface the error
     }
   });
 }
