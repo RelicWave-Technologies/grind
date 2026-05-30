@@ -479,7 +479,7 @@ label.field-label { display: block; font-size: 12px; font-weight: 600; color: va
  * pushing the column off-screen on narrower windows. Buttons hidden by
  * default; revealed via :hover / :focus-within / .et-row-dirty so calm
  * rows stay calm. */
-.et-action-cell { width: 150px; text-align: right; white-space: nowrap; padding-right: 16px; }
+.et-action-cell { width: 220px; text-align: right; white-space: nowrap; padding-right: 16px; }
 .et-actions {
   display: inline-flex; align-items: center; gap: 6px;
   opacity: 0;

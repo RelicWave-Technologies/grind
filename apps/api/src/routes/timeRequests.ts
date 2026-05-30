@@ -11,7 +11,7 @@ import {
 } from '@grind/types';
 import { validate } from '../middleware/validate';
 import { requireAccessToken } from '../middleware/auth';
-import { buildApprovalCard, buildSupersededCard, buildUpdatedApprovalCard, getLarkMessenger, type DiffEntry } from '../lark';
+import { buildApprovalCard, buildSupersededCard, buildUpdatedApprovalCard, buildCancelledCard, getLarkMessenger, type DiffEntry } from '../lark';
 import { logger } from '../logger';
 
 export const timeRequestsRouter = Router();
@@ -276,29 +276,25 @@ timeRequestsRouter.post('/:id/cancel', async (req, res, next) => {
     });
 
     const messenger = getLarkMessenger();
-    if (messenger && existing.approver?.larkIdentity?.openId && existing.larkMessageId) {
+    if (messenger && existing.larkMessageId) {
       try {
-        // Reuse the "decided" red card with CANCELLED chrome so the approver
-        // sees the card update in place and knows not to act.
-        const cancelledCard = buildApprovalCard({
-          requestId: updated.id,
-          requesterName: existing.user.name,
-          taskSummary: null,
-          startedAt: existing.requestedStart.getTime(),
-          endedAt: existing.requestedEnd.getTime(),
-          reason: existing.reason,
-        });
-        // The buttons are still in the card; the WS callback's idempotency
-        // catches them (status=CANCELLED → 'cancelled' noop). We could swap
-        // for buildDecidedCard but that's a separate variant; using the
-        // existing card + the sendText notice is enough for v2.
-        await messenger.updateCard(existing.larkMessageId, cancelledCard).catch(() => {});
-        await messenger.sendText(
-          existing.approver.larkIdentity.openId,
-          `✕ Request from ${existing.user.name} was cancelled by the requester. You can ignore the card.`,
+        // Rewrite the card in place: red header, NO Approve/Reject buttons,
+        // clear "withdrawn by requester" note. After this, the approver
+        // CAN'T act on stale buttons even if the WS callback fires.
+        await messenger.updateCard(
+          existing.larkMessageId,
+          buildCancelledCard({
+            requestId: existing.id,
+            requesterName: existing.user.name,
+            taskSummary: null,
+            startedAt: existing.requestedStart.getTime(),
+            endedAt: existing.requestedEnd.getTime(),
+            reason: existing.reason,
+            cancelledAt: now.getTime(),
+          }),
         );
       } catch (err) {
-        logger.warn({ err: String(err), requestId: id }, 'lark cancel-notice failed (non-fatal)');
+        logger.warn({ err: String(err), requestId: id }, 'lark cancel-card update failed (non-fatal)');
       }
     }
     res.json(serialize(updated));

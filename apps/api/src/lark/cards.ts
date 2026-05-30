@@ -179,6 +179,36 @@ export function buildUpdatedApprovalCard(req: UpdatedApprovalCardInput): Record<
   };
 }
 
+/**
+ * Used when the requester WITHDRAWS a pending request. The card is rewritten
+ * in place: red header, no Approve/Reject buttons, and a "withdrawn by
+ * requester" note. After this, the approver can't act on stale buttons.
+ */
+export interface CancelledCardInput extends ApprovalCardInput {
+  /** When the withdrawal happened (epoch ms). */
+  cancelledAt: number;
+}
+export function buildCancelledCard(req: CancelledCardInput): Record<string, unknown> {
+  return {
+    config: { wide_screen_mode: true, update_multi: true },
+    header: {
+      title: { tag: 'plain_text', content: 'Manual time request — withdrawn' },
+      template: 'red',
+    },
+    elements: [
+      { tag: 'div', fields: detailFields(req) },
+      { tag: 'hr' },
+      {
+        tag: 'div',
+        text: {
+          tag: 'lark_md',
+          content: `**Withdrawn by ${req.requesterName}** · ${new Date(req.cancelledAt).toLocaleString()}. You can ignore this card.`,
+        },
+      },
+    ],
+  };
+}
+
 /** The post-decision card returned to Lark to replace the pending one in place. */
 export function buildDecidedCard(req: DecidedCardInput): Record<string, unknown> {
   const approved = req.decision === 'APPROVED';

@@ -121,6 +121,25 @@ describe('buildDecidedCard — post-decision', () => {
   });
 });
 
+describe('buildCancelledCard — disables the card when the requester withdraws', () => {
+  it('renders a red header, no Approve/Reject buttons, "withdrawn by" note', async () => {
+    const { buildCancelledCard } = await import('./cards');
+    const card = buildCancelledCard({
+      requestId: 'req_x',
+      requesterName: 'Anish Suman',
+      taskSummary: null,
+      startedAt: REQ.startedAt,
+      endedAt: REQ.endedAt,
+      reason: REQ.reason,
+      cancelledAt: new Date('2026-05-20T11:00:00Z').getTime(),
+    });
+    expect((card.header as Record<string, unknown>).template).toBe('red');
+    expect(buttonValues(card)).toHaveLength(0);
+    expect(findTextContaining(card, 'withdrawn')).toBe(true);
+    expect(findTextContaining(card, 'Anish Suman')).toBe(true);
+  });
+});
+
 describe('buildSupersededCard — disables the previous approval card', () => {
   it('renders a grey header, no Approve/Reject buttons, and a "updated" notice', async () => {
     const { buildSupersededCard } = await import('./cards');

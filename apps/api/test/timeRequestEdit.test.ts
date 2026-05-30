@@ -221,7 +221,7 @@ describe('POST /v1/time-requests/:id/cancel', () => {
     expect(res.status).toBe(403);
   });
 
-  it('sends a Lark cancel notice to the approver when the request was delivered', async () => {
+  it('rewrites the Lark card to a withdrawn variant with NO Approve/Reject buttons', async () => {
     const { requester, openId } = await seedWorkspaceWithApprover();
     const created = await request(app)
       .post('/v1/time-requests')
@@ -233,10 +233,20 @@ describe('POST /v1/time-requests/:id/cancel', () => {
         reason: 'initial',
       });
     expect(created.status).toBe(201);
+    void openId; // delivered to the approver via the initial sendCard
+
     const cancelled = await request(app).post(`/v1/time-requests/${created.body.id}/cancel`).set(bearer(requester.accessToken));
     expect(cancelled.status).toBe(200);
-    expect(fake.texts.length).toBe(1);
-    expect(fake.texts[0]!.receiveOpenId).toBe(openId);
-    expect(fake.texts[0]!.text).toContain('cancelled');
+
+    // The original card (om_1) was rewritten with the withdrawn variant:
+    // red header, no Approve/Reject buttons, "withdrawn by requester" note.
+    expect(fake.updates.length).toBe(1);
+    expect(fake.updates[0]!.messageId).toBe('om_1');
+    const withdrawnJson = JSON.stringify(fake.updates[0]!.card);
+    expect(withdrawnJson).toContain('withdrawn');
+    expect(withdrawnJson).not.toContain('"action":"approve"');
+    expect(withdrawnJson).not.toContain('"action":"reject"');
+    // No extra text nudge — the rewritten card carries the news on its own.
+    expect(fake.texts.length).toBe(0);
   });
 });

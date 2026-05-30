@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Check, X, Loader2, AlertCircle } from 'lucide-react';
+import { Check, X, Loader2, AlertCircle, Undo2 } from 'lucide-react';
 import TimePopover from './TimePopover';
 import TaskCombo from './TaskCombo';
 
@@ -282,11 +282,12 @@ export default function EntryRow(props: RowProps) {
               className="btn btn-ghost et-row-btn no-drag"
               onClick={(e) => { e.stopPropagation(); cancelPending.mutate(); }}
               disabled={anyPending}
-              style={{ minWidth: 0, padding: '6px 10px' }}
-              title="Cancel this request"
-              aria-label="Cancel request"
+              style={{ minWidth: 0, padding: '6px 10px', color: 'var(--danger)' }}
+              title="Withdraw this request (removes the Approve/Reject card from your approver's Lark)"
+              aria-label="Withdraw request"
             >
-              <X size={13} strokeWidth={2.5} />
+              <Undo2 size={13} strokeWidth={2.5} />
+              {' '}Withdraw
             </button>
           )}
           {lastErr && (
