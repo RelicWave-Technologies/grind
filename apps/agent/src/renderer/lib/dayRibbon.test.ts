@@ -112,28 +112,23 @@ describe('isInsidePendingOverlay', () => {
   });
 });
 
-describe('windowFor — auto-zoom', () => {
-  it('expands a short activity window to the 12h minimum', () => {
+describe('windowFor — full-day reference frame', () => {
+  it('always returns [dayStart, dayEnd] regardless of activity bounds', () => {
     const w = windowFor({ dayStart, dayEnd, firstActivityAt: ms(10), lastActivityAt: ms(11) });
-    expect(w.winEnd - w.winStart).toBe(12 * HOUR);
+    expect(w.winStart).toBe(dayStart);
+    expect(w.winEnd).toBe(dayEnd);
+    expect(w.winEnd - w.winStart).toBe(24 * HOUR);
   });
 
-  it('uses real bounds + 15min padding when activity already spans ≥ 12h', () => {
+  it('full day even when activity is wide', () => {
     const w = windowFor({ dayStart, dayEnd, firstActivityAt: ms(7), lastActivityAt: ms(20) });
-    expect(w.winStart).toBe(ms(7) - 15 * 60 * 1000);
-    expect(w.winEnd).toBe(ms(20) + 15 * 60 * 1000);
+    expect(w.winStart).toBe(dayStart);
+    expect(w.winEnd).toBe(dayEnd);
   });
 
-  it('defaults to 9am–9pm for an empty day', () => {
+  it('full day on an empty day too', () => {
     const w = windowFor({ dayStart, dayEnd, firstActivityAt: null, lastActivityAt: null });
-    expect(w.winStart).toBe(ms(9));
-    expect(w.winEnd).toBe(ms(21));
-  });
-
-  it('clamps inside the day even when activity is near a boundary', () => {
-    const w = windowFor({ dayStart, dayEnd, firstActivityAt: ms(0, 30), lastActivityAt: ms(1) });
-    expect(w.winStart).toBeGreaterThanOrEqual(dayStart);
-    expect(w.winEnd).toBeLessThanOrEqual(dayEnd);
-    expect(w.winEnd - w.winStart).toBe(12 * HOUR);
+    expect(w.winStart).toBe(dayStart);
+    expect(w.winEnd).toBe(dayEnd);
   });
 });

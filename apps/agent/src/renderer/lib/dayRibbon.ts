@@ -133,9 +133,16 @@ export function isInsidePendingOverlay(overlays: PendingOverlay[], ms: number): 
 }
 
 /**
- * Auto-zoom: span = max(12h, [first, last] padded by 15 min on each side),
- * capped at 24h. For an empty day, return [9am, 9pm] of the local day so the
- * UI still has something to show + click into.
+ * Always show the full 24-hour day (local midnight → next local midnight).
+ *
+ * This makes the ribbon a stable reference frame: a 9 AM tracked block
+ * always sits at the "9 AM" tick on the axis, regardless of when the user
+ * first started working. The table's gap rows + the ribbon now share the
+ * same coordinate space, so a click at "8:30" on the ribbon lands on the
+ * same instant as the "8:30" row in the table.
+ *
+ * Once the Shifts feature ships (admin-defined working windows per user),
+ * the visible range can shrink to the shift bounds. Until then, full day.
  */
 export function windowFor(args: {
   dayStart: number;
@@ -143,39 +150,9 @@ export function windowFor(args: {
   firstActivityAt: number | null;
   lastActivityAt: number | null;
 }): { winStart: number; winEnd: number } {
-  const { dayStart, dayEnd, firstActivityAt, lastActivityAt } = args;
-  if (firstActivityAt === null || lastActivityAt === null) {
-    // 9am – 9pm window (12h, fully within the day).
-    const ws = dayStart + 9 * HOUR_MS;
-    const we = ws + 12 * HOUR_MS;
-    return { winStart: clamp(ws, dayStart, dayEnd - HOUR_MS), winEnd: clamp(we, dayStart + HOUR_MS, dayEnd) };
-  }
-  const pad = 15 * 60 * 1000;
-  let winStart = firstActivityAt - pad;
-  let winEnd = lastActivityAt + pad;
-  let span = winEnd - winStart;
-  if (span < MIN_RIBBON_SPAN_MS) {
-    const need = MIN_RIBBON_SPAN_MS - span;
-    winStart -= need / 2;
-    winEnd += need / 2;
-    span = winEnd - winStart;
-  }
-  if (span > MAX_RIBBON_SPAN_MS) {
-    winStart = dayStart;
-    winEnd = dayEnd;
-  }
-  // Clamp to day, but preserve 12h span if possible by shifting.
-  if (winStart < dayStart) {
-    winEnd += dayStart - winStart;
-    winStart = dayStart;
-  }
-  if (winEnd > dayEnd) {
-    winStart -= winEnd - dayEnd;
-    winEnd = dayEnd;
-  }
-  winStart = Math.max(winStart, dayStart);
-  winEnd = Math.min(winEnd, dayEnd);
-  return { winStart, winEnd };
+  void args.firstActivityAt;
+  void args.lastActivityAt;
+  return { winStart: args.dayStart, winEnd: args.dayEnd };
 }
 
 function clamp(x: number, lo: number, hi: number): number {

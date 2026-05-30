@@ -49,15 +49,16 @@ export default function DayRibbon({ day, now, taskNameFor, onPickPreset, onHover
   );
   const span = winEnd - winStart;
 
-  // 2h ticks, with major every 4h. Within the visible window.
+  // For a 24h window: 3-hour step → 12 AM · 3 AM · 6 AM · 9 AM · 12 PM ·
+  // 3 PM · 6 PM · 9 PM = 8 labels (clean, no crowding). All majors since
+  // we don't draw minor ticks at this density.
   const ticks = useMemo(() => {
     const out: { ms: number; major: boolean }[] = [];
     const firstTick = Math.ceil(winStart / HOUR) * HOUR;
-    for (let t = firstTick; t <= winEnd; t += HOUR) {
-      const d = new Date(t);
-      const h = d.getHours();
-      if (h % 2 !== 0) continue;
-      out.push({ ms: t, major: h % 4 === 0 });
+    for (let t = firstTick; t < winEnd; t += HOUR) {
+      const h = new Date(t).getHours();
+      if (h % 3 !== 0) continue;
+      out.push({ ms: t, major: true });
     }
     return out;
   }, [winStart, winEnd]);
