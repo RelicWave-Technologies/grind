@@ -38,17 +38,36 @@ export interface RowProps {
   dayQueryKey: readonly unknown[];
   /** Pull approver-row by clicking ribbon counterpart. */
   onSelectRow?: (rowId: string) => void;
+  /**
+   * When set on a gap row, overrides the row's initial start/end to a
+   * narrower range (e.g. ribbon click snapped a 1h window inside a long gap)
+   * and auto-focuses the reason input so the user can start typing.
+   */
+  presetOverride?: { startedAt: number; endedAt: number } | null;
 }
 
 export default function EntryRow(props: RowProps) {
   const qc = useQueryClient();
   const initial = useMemo(
-    () => ({ taskGuid: props.larkTaskGuid ?? '', notes: props.notes ?? '', startedAt: props.startedAt, endedAt: props.endedAt }),
-    [props.larkTaskGuid, props.notes, props.startedAt, props.endedAt],
+    () => ({
+      taskGuid: props.larkTaskGuid ?? '',
+      notes: props.notes ?? '',
+      startedAt: props.presetOverride?.startedAt ?? props.startedAt,
+      endedAt: props.presetOverride?.endedAt ?? props.endedAt,
+    }),
+    [props.larkTaskGuid, props.notes, props.startedAt, props.endedAt, props.presetOverride?.startedAt, props.presetOverride?.endedAt],
   );
   const [draft, setDraft] = useState(initial);
   // Re-sync when the server-side value identity changes (e.g. after refetch).
   useEffect(() => setDraft(initial), [initial]);
+  const reasonRef = useRef<HTMLInputElement>(null);
+  // When a ribbon click hands us a presetOverride, focus the reason input so
+  // the user can immediately type without hunting for it.
+  useEffect(() => {
+    if (props.presetOverride && reasonRef.current) {
+      reasonRef.current.focus();
+    }
+  }, [props.presetOverride]);
 
   const dirty =
     draft.taskGuid !== (props.larkTaskGuid ?? '') ||
@@ -56,8 +75,10 @@ export default function EntryRow(props: RowProps) {
     draft.startedAt !== props.startedAt ||
     draft.endedAt !== props.endedAt;
 
-  const startMutable = props.kind === 'pending';
-  const endMutable = props.kind === 'pending';
+  // Gap + pending rows let the user adjust the time range. Tracked rows
+  // don't (start/end on tracked OS time is reserved for an M11 admin flow).
+  const startMutable = props.kind === 'pending' || props.kind === 'gap';
+  const endMutable = props.kind === 'pending' || props.kind === 'gap';
   const taskMutable = props.kind === 'tracked' || props.kind === 'manual_approved' || props.kind === 'pending' || props.kind === 'gap';
   const notesMutable = taskMutable;
   const submitLabel = props.kind === 'gap' ? 'Send to approver' : props.kind === 'pending' ? 'Save changes' : props.kind === 'rejected' ? 'Re-request' : 'Save';
@@ -159,6 +180,7 @@ export default function EntryRow(props: RowProps) {
       </td>
       <td>
         <input
+          ref={reasonRef}
           className="et-input"
           type="text"
           maxLength={500}
