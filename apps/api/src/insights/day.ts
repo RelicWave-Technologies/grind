@@ -25,6 +25,7 @@ export interface DayEntryInput {
   id: string;
   source: 'AUTO' | 'MANUAL';
   larkTaskGuid: string | null;
+  notes?: string | null;
   segments: Array<{
     kind: SegmentKind;
     startedAt: Date;
@@ -40,6 +41,10 @@ export interface PendingRequestInput {
   larkTaskGuid: string | null;
 }
 
+export interface RejectedRequestInput extends PendingRequestInput {
+  decidedReason: string | null;
+}
+
 export interface DayBlock {
   kind: BlockKind;
   startedAt: number; // epoch ms
@@ -47,7 +52,11 @@ export interface DayBlock {
   durationMs: number;
   timeEntryId?: string;
   larkTaskGuid?: string | null;
-  reason?: string | null;
+  /**
+   * For tracked + APPROVED MANUAL blocks, this is the TimeEntry.notes the
+   * user can edit inline. For GAP blocks it's null.
+   */
+  notes?: string | null;
   isOpen?: boolean;
 }
 
@@ -63,6 +72,19 @@ export interface DayInsightResult {
   totals: { workedMs: number; meetingMs: number; manualMs: number; idleTrimmedMs: number; gapMs: number };
   blocks: DayBlock[];
   pendingOverlay: Array<{ id: string; startedAt: number; endedAt: number; reason: string; larkTaskGuid: string | null }>;
+  /**
+   * REJECTED manual-time requests overlapping the day. Rendered as red rows
+   * in the table so the user can re-request (and see decidedReason if set).
+   * Not on the ribbon — they didn't become tracked time.
+   */
+  recentRejected: Array<{
+    id: string;
+    requestedStart: number;
+    requestedEnd: number;
+    reason: string;
+    decidedReason: string | null;
+    larkTaskGuid: string | null;
+  }>;
 }
 
 /**
@@ -146,9 +168,10 @@ export function buildDayInsight(input: {
   now: Date;
   entries: DayEntryInput[];
   pending: PendingRequestInput[];
+  rejected?: RejectedRequestInput[];
   window: { start: Date; end: Date };
 }): DayInsightResult {
-  const { date, tz, now, entries, pending, window: win } = input;
+  const { date, tz, now, entries, pending, rejected = [], window: win } = input;
   const dayStart = win.start.getTime();
   const dayEnd = win.end.getTime();
   const nowMs = now.getTime();
@@ -171,6 +194,7 @@ export function buildDayInsight(input: {
         durationMs: c.b - c.a,
         timeEntryId: e.id,
         larkTaskGuid: e.larkTaskGuid,
+        notes: e.notes ?? null,
         isOpen: s.endedAt === null && isToday,
       });
     }
@@ -241,6 +265,22 @@ export function buildDayInsight(input: {
     else if (b.kind === 'GAP') totals.gapMs += b.durationMs;
   }
 
+  const recentRejected = rejected
+    .map((r) => {
+      const c = clip(r.requestedStart.getTime(), r.requestedEnd.getTime(), dayStart, dayEnd);
+      if (!c) return null;
+      return {
+        id: r.id,
+        requestedStart: c.a,
+        requestedEnd: c.b,
+        reason: r.reason,
+        decidedReason: r.decidedReason,
+        larkTaskGuid: r.larkTaskGuid,
+      };
+    })
+    .filter((x): x is NonNullable<typeof x> => x !== null)
+    .sort((a, b) => a.requestedStart - b.requestedStart);
+
   return {
     date,
     timezone: tz,
@@ -253,5 +293,6 @@ export function buildDayInsight(input: {
     totals,
     blocks,
     pendingOverlay,
+    recentRejected,
   };
 }

@@ -68,7 +68,7 @@ export function registerTimeRequestsIpc(): void {
     'timeRequests:listMine',
     async (
       _e,
-      status?: 'PENDING' | 'APPROVED' | 'REJECTED',
+      status?: 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED',
     ): Promise<{ requests: ManualTimeRequestDto[] }> => {
       try {
         const q = new URLSearchParams({ role: 'mine' });
@@ -77,6 +77,56 @@ export function registerTimeRequestsIpc(): void {
       } catch (err) {
         log.warn('timeRequests:listMine failed', { err: String(err) });
         return { requests: [] };
+      }
+    },
+  );
+
+  /** Edit a still-PENDING request. Server returns 409 once it's decided. */
+  ipcMain.handle(
+    'timeRequests:patch',
+    async (
+      _e,
+      args: {
+        id: string;
+        requestedStart?: number;
+        requestedEnd?: number;
+        larkTaskGuid?: string | null;
+        taskSummary?: string | null;
+        reason?: string;
+      },
+    ): Promise<{ ok: boolean; request?: ManualTimeRequestDto; error?: string }> => {
+      try {
+        const body: Record<string, unknown> = {};
+        if (args.requestedStart !== undefined) body.requestedStart = new Date(args.requestedStart).toISOString();
+        if (args.requestedEnd !== undefined) body.requestedEnd = new Date(args.requestedEnd).toISOString();
+        if (args.larkTaskGuid !== undefined) body.larkTaskGuid = args.larkTaskGuid;
+        if (args.taskSummary !== undefined) body.taskSummary = args.taskSummary;
+        if (args.reason !== undefined) body.reason = args.reason;
+        const request = await api<ManualTimeRequestDto>(`/v1/time-requests/${args.id}`, { method: 'PATCH', body });
+        return { ok: true, request };
+      } catch (err) {
+        const msg = String(err);
+        log.warn('timeRequests:patch failed', { err: msg, id: args.id });
+        if (msg.includes('409')) return { ok: false, error: 'already_decided' };
+        if (msg.includes('403')) return { ok: false, error: 'forbidden' };
+        if (msg.includes('404')) return { ok: false, error: 'not_found' };
+        return { ok: false, error: msg };
+      }
+    },
+  );
+
+  /** Cancel a still-PENDING request. Server returns 409 once it's decided. */
+  ipcMain.handle(
+    'timeRequests:cancel',
+    async (_e, id: string): Promise<{ ok: boolean; request?: ManualTimeRequestDto; error?: string }> => {
+      try {
+        const request = await api<ManualTimeRequestDto>(`/v1/time-requests/${id}/cancel`, { method: 'POST' });
+        return { ok: true, request };
+      } catch (err) {
+        const msg = String(err);
+        log.warn('timeRequests:cancel failed', { err: msg, id });
+        if (msg.includes('409')) return { ok: false, error: 'already_decided' };
+        return { ok: false, error: msg };
       }
     },
   );

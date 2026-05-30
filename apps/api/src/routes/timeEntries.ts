@@ -3,8 +3,10 @@ import { prisma } from '@grind/db';
 import {
   CreateTimeEntryRequest,
   ListTimeEntriesQuery,
+  PatchTimeEntryRequest,
   SyncTimeEntryRequest,
   type ListTimeEntriesResponse,
+  type PatchTimeEntryRequest as PatchBody,
   type SegmentDto,
   type TimeEntryDto,
 } from '@grind/types';
@@ -69,6 +71,7 @@ function serialize(entry: {
   source: 'AUTO' | 'MANUAL';
   startedAt: Date;
   endedAt: Date | null;
+  notes: string | null;
   segments: { id: string; kind: SegmentDto['kind']; startedAt: Date; endedAt: Date | null }[];
 }): TimeEntryDto {
   return {
@@ -79,6 +82,7 @@ function serialize(entry: {
     source: entry.source,
     startedAt: entry.startedAt.toISOString(),
     endedAt: entry.endedAt ? entry.endedAt.toISOString() : null,
+    notes: entry.notes ?? null,
     segments: entry.segments
       .slice()
       .sort((a, b) => a.startedAt.getTime() - b.startedAt.getTime())
@@ -230,6 +234,39 @@ timeEntriesRouter.get('/', validate(ListTimeEntriesQuery, 'query'), async (req, 
     });
     const response: ListTimeEntriesResponse = { entries: entries.map(serialize) };
     res.json(response);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * PATCH an entry's metadata (task attribution + user-facing notes). Cannot
+ * change start/end/segments — those are the OS-tracked truth, audit-sensitive,
+ * and reserved for the M11 admin EDIT-request flow. Used by the Edit Time
+ * tab's inline-editable green rows.
+ *
+ * No approval needed: re-attributing your own tracked time to a different
+ * Lark task or adding a note is metadata, not new tracked time.
+ */
+timeEntriesRouter.patch('/:id', validate(PatchTimeEntryRequest, 'body'), async (req, res, next) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: 'unauthorized' });
+    const id = req.params.id;
+    const existing = await prisma.timeEntry.findUnique({ where: { id }, select: { userId: true } });
+    if (!existing) return res.status(404).json({ error: 'not_found' });
+    if (existing.userId !== req.user.sub) return res.status(403).json({ error: 'forbidden' });
+
+    const body = req.body as PatchBody;
+    const data: { larkTaskGuid?: string | null; notes?: string | null } = {};
+    if (body.larkTaskGuid !== undefined) data.larkTaskGuid = body.larkTaskGuid;
+    if (body.notes !== undefined) data.notes = body.notes;
+
+    const updated = await prisma.timeEntry.update({
+      where: { id },
+      data,
+      include: { segments: true },
+    });
+    res.json(serialize(updated));
   } catch (err) {
     next(err);
   }

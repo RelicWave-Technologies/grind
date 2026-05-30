@@ -1,94 +1,87 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChevronLeft, ChevronRight, ClockArrowUp, Plus, X, CalendarRange } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { ChevronLeft, ChevronRight, X, CalendarRange } from 'lucide-react';
 import type { DayInsight } from '../lib/agent.d';
 import DayRibbon from '../components/DayRibbon';
-import ManualTimeComposer, { type ManualTimePreset } from '../components/ManualTimeComposer';
+import EntryRow from '../components/EntryRow';
+import type { ManualTimePreset } from '../components/ManualTimeComposer';
 
 /**
- * Edit Time tab — per-day timesheet with click-to-fill manual-time gaps.
+ * Edit Time tab — the Time-Doctor-style per-day timesheet.
  *
- * Top: date stepper (◀ ▶ + Today).
- * Middle: legend → DayRibbon → optional composer.
- * Bottom: DayBlocksTable of every block + totals strip.
+ * The page shows: a date stepper, a legend, a wide DayRibbon (atomic blocks
+ * by kind), and a table where EVERY block in the day is its own inline-
+ * editable row. Tracked rows let you re-attribute the task + add notes;
+ * pending rows let you change everything; gap rows act as the new-request
+ * composer; rejected rows let you re-request.
+ *
+ * Click a ribbon block → the matching table row scrolls into view + flashes.
+ * Click a ribbon gap → the gap row is focused (the row's reason input gets
+ * keyboard focus so the user can immediately type why they want the time).
  */
 
 function localToday(): string {
-  // YYYY-MM-DD in local TZ. Using `sv-SE` locale (Swedish) is the standard
-  // hack to get ISO-format-but-local-date.
   return new Date().toLocaleDateString('sv-SE');
 }
-
 function tz(): string {
-  try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-  } catch {
-    return 'UTC';
-  }
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; } catch { return 'UTC'; }
 }
-
 function parseYmd(ymd: string): { y: number; m: number; d: number } {
   const [y, m, d] = ymd.split('-').map((n) => parseInt(n, 10));
   return { y: y ?? 1970, m: m ?? 1, d: d ?? 1 };
 }
-
 function shiftDate(ymd: string, deltaDays: number): string {
   const { y, m, d } = parseYmd(ymd);
   return new Date(y, m - 1, d + deltaDays).toLocaleDateString('sv-SE');
 }
-
 function prettyDate(ymd: string): string {
   const { y, m, d } = parseYmd(ymd);
   return new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
 }
 
 export default function EditTime() {
-  const qc = useQueryClient();
   const [date, setDate] = useState<string>(localToday());
   const [now, setNow] = useState<number>(Date.now());
-  const [preset, setPreset] = useState<ManualTimePreset | null>(null);
-  const [showComposer, setShowComposer] = useState<boolean>(false);
-  const composerRef = useRef<HTMLDivElement>(null);
+  const [flashRowId, setFlashRowId] = useState<string | null>(null);
   const timezone = useMemo(tz, []);
+  const dayQueryKey = useMemo(() => ['dayInsight', date, timezone] as const, [date, timezone]);
 
   const day = useQuery({
-    queryKey: ['dayInsight', date, timezone],
+    queryKey: dayQueryKey,
     queryFn: () => window.agent.insights.day({ date, tz: timezone }),
     refetchInterval: date === localToday() ? 5_000 : 60_000,
-    retry: 1, // give 1 retry on transient failures, then surface the error
+    retry: 1,
   });
   const larkTasks = useQuery({
     queryKey: ['larkTasks'],
     queryFn: () => window.agent.lark.tasks(),
     refetchInterval: 60_000,
   });
+  const tasks = useMemo(() => (larkTasks.data?.tasks ?? []).filter((t) => !t.completed).map((t) => ({ guid: t.guid, summary: t.summary })), [larkTasks.data]);
 
-  // 1s tick on today only, so live blocks (running entry, trailing gap) feel alive.
   useEffect(() => {
     if (date !== localToday()) return;
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
   }, [date]);
 
-  const tasks = larkTasks.data?.tasks ?? [];
+  // Flash dismiss after the CSS animation finishes (1.6s).
+  useEffect(() => {
+    if (!flashRowId) return;
+    const id = setTimeout(() => setFlashRowId(null), 1700);
+    return () => clearTimeout(id);
+  }, [flashRowId]);
+
+  const onPickPreset = useCallback((preset: ManualTimePreset) => {
+    // Gap clicks on the ribbon → flash the corresponding gap row in the table.
+    // The row id encodes startedAt so we can match.
+    setFlashRowId(`gap-${preset.startedAt}`);
+  }, []);
+
   const taskNameFor = useCallback(
     (guid: string | null | undefined) => tasks.find((t) => t.guid === guid)?.summary ?? null,
     [tasks],
   );
-
-  const onPickPreset = useCallback((p: ManualTimePreset) => {
-    setPreset(p);
-    setShowComposer(true);
-    // Scroll the composer into view on the next paint.
-    requestAnimationFrame(() => composerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }));
-  }, []);
-
-  const onCreated = useCallback(() => {
-    setShowComposer(false);
-    setPreset(null);
-    void qc.invalidateQueries({ queryKey: ['dayInsight', date, timezone] });
-    void qc.invalidateQueries({ queryKey: ['myTimeRequests'] });
-  }, [qc, date, timezone]);
 
   const isToday = date === localToday();
   const dayData = day.data;
@@ -102,18 +95,11 @@ export default function EditTime() {
             <ChevronLeft size={16} strokeWidth={2.5} />
           </button>
           <span className="et-date">{prettyDate(date)}</span>
-          <button
-            className="btn-icon"
-            onClick={() => setDate((d) => shiftDate(d, 1))}
-            title="Next day"
-            disabled={isToday}
-          >
+          <button className="btn-icon" onClick={() => setDate((d) => shiftDate(d, 1))} title="Next day" disabled={isToday}>
             <ChevronRight size={16} strokeWidth={2.5} />
           </button>
           {!isToday && (
-            <button className="btn btn-soft" onClick={() => setDate(localToday())}>
-              Today
-            </button>
+            <button className="btn btn-soft" onClick={() => setDate(localToday())}>Today</button>
           )}
         </div>
       </div>
@@ -163,59 +149,29 @@ export default function EditTime() {
             </div>
           )}
 
-          {/* Composer */}
-          <div className="section-head" style={{ marginTop: 'var(--sp-5)' }}>
-            <span className="section-title">Add manual time</span>
-            <button className="btn btn-soft no-drag" onClick={() => { setShowComposer((s) => !s); if (showComposer) setPreset(null); }} disabled={!!dayData?.isFuture}>
-              {showComposer ? <><X size={14} strokeWidth={2.5} /> Cancel</> : <><Plus size={14} strokeWidth={2.5} /> New request</>}
-            </button>
-          </div>
-          {showComposer && (
-            <div ref={composerRef}>
-              <ManualTimeComposer
-                larkTasks={tasks.filter((t) => !t.completed).map((t) => ({ guid: t.guid, summary: t.summary }))}
-                preset={preset}
-                onCreated={onCreated}
-              />
-            </div>
-          )}
-
-          {/* Pending requests for this day */}
-          {dayData && dayData.pendingOverlay.length > 0 && (
+          {/* All entries — inline-editable rows */}
+          {dayData && (
             <>
-              <div className="section-head"><span className="section-title">Pending requests</span></div>
-              <div className="task-list">
-                {dayData.pendingOverlay.map((p) => (
-                  <div key={p.id} className="task-card rise" style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)' }}>
-                    <span className="dt-dot" style={{ background: 'var(--c-amber)' }} />
-                    <span style={{ flex: 1, minWidth: 0 }}>
-                      <span className="callout" style={{ fontWeight: 600, display: 'block' }}>
-                        {taskNameFor(p.larkTaskGuid) ?? 'Untracked'}
-                      </span>
-                      <span className="small secondary">
-                        {fmtRange(p.startedAt, p.endedAt)} — {p.reason}
-                      </span>
-                    </span>
-                    <span className="et-chip et-chip-manual"><ClockArrowUp size={11} strokeWidth={2.5} /> PENDING</span>
-                  </div>
-                ))}
-              </div>
+              <div className="section-head"><span className="section-title">All entries</span></div>
+              <DayBlocksTable
+                day={dayData}
+                tasks={tasks}
+                dayQueryKey={dayQueryKey}
+                flashRowId={flashRowId}
+                onSelectRow={setFlashRowId}
+              />
+
+              {/* Totals strip */}
+              {dayData.blocks.length > 0 && (
+                <div className="et-totals rise">
+                  <span className="et-total">Work <strong>{fmtDur(dayData.totals.workedMs)}</strong></span>
+                  <span className="et-total">Manual <strong>{fmtDur(dayData.totals.manualMs)}</strong></span>
+                  <span className="et-total">Meeting <strong>{fmtDur(dayData.totals.meetingMs)}</strong></span>
+                  <span className="et-total">Break <strong>{fmtDur(dayData.totals.idleTrimmedMs)}</strong></span>
+                  <span className="et-total" style={{ color: 'var(--label-tertiary)' }}>Gap <strong>{fmtDur(dayData.totals.gapMs)}</strong></span>
+                </div>
+              )}
             </>
-          )}
-
-          {/* Day blocks */}
-          <div className="section-head"><span className="section-title">All entries</span></div>
-          {dayData && <DayBlocksTable day={dayData} taskNameFor={taskNameFor} onAddForGap={onPickPreset} />}
-
-          {/* Totals strip */}
-          {dayData && dayData.blocks.length > 0 && (
-            <div className="et-totals rise">
-              <span className="et-total">Work <strong>{fmtDur(dayData.totals.workedMs)}</strong></span>
-              <span className="et-total">Manual <strong>{fmtDur(dayData.totals.manualMs)}</strong></span>
-              <span className="et-total">Meeting <strong>{fmtDur(dayData.totals.meetingMs)}</strong></span>
-              <span className="et-total">Break <strong>{fmtDur(dayData.totals.idleTrimmedMs)}</strong></span>
-              <span className="et-total" style={{ color: 'var(--label-tertiary)' }}>Gap <strong>{fmtDur(dayData.totals.gapMs)}</strong></span>
-            </div>
           )}
         </div>
       </div>
@@ -225,21 +181,25 @@ export default function EditTime() {
 
 function DayBlocksTable({
   day,
-  taskNameFor,
-  onAddForGap,
+  tasks,
+  dayQueryKey,
+  flashRowId,
+  onSelectRow,
 }: {
   day: DayInsight;
-  taskNameFor: (guid: string | null | undefined) => string | null;
-  onAddForGap: (p: ManualTimePreset) => void;
+  tasks: Array<{ guid: string; summary: string }>;
+  dayQueryKey: readonly unknown[];
+  flashRowId: string | null;
+  onSelectRow: (rowId: string) => void;
 }) {
-  if (day.blocks.length === 0) {
+  if (day.blocks.length === 0 && day.pendingOverlay.length === 0 && day.recentRejected.length === 0) {
     return (
       <div className="empty rise rise-1">
         <span className="empty-icon" style={{ background: 'var(--c-slate-bg)', color: 'var(--c-slate)' }}>
           <CalendarRange size={26} strokeWidth={2} />
         </span>
         <div className="h3">Quiet day</div>
-        <div className="callout secondary">Nothing tracked. Use “New request” above to add manual time.</div>
+        <div className="callout secondary">Nothing tracked. Click an empty area in the ribbon above (once there is one) to add manual time.</div>
       </div>
     );
   }
@@ -250,41 +210,91 @@ function DayBlocksTable({
           <th>Started</th>
           <th>Ended</th>
           <th>Total</th>
-          <th>Type</th>
           <th>Task</th>
-          <th>Reason</th>
+          <th>Reason / Notes</th>
           <th></th>
         </tr>
       </thead>
       <tbody>
         {day.blocks.map((b, i) => {
-          const cls = b.kind === 'MANUAL' ? 'et-row-manual' : b.kind === 'GAP' ? 'et-row-gap' : '';
-          const live = b.isOpen ? ' et-row-live' : '';
+          if (b.kind === 'GAP') {
+            const rowId = `gap-${b.startedAt}`;
+            return (
+              <EntryRow
+                key={rowId}
+                kind="gap"
+                rowId={rowId}
+                flashing={flashRowId === rowId}
+                startedAt={b.startedAt}
+                endedAt={b.endedAt}
+                larkTaskGuid={null}
+                notes={null}
+                tasks={tasks}
+                dayQueryKey={dayQueryKey}
+                onSelectRow={onSelectRow}
+              />
+            );
+          }
+          // Tracked AUTO + MANUAL (APPROVED) + MEETING + IDLE_TRIMMED all flow through tracked.
+          const isManual = b.kind === 'MANUAL';
+          const rowId = `entry-${b.timeEntryId}-${i}`;
           return (
-            <tr key={b.timeEntryId ? `${b.timeEntryId}-${i}` : `${b.kind}-${b.startedAt}`} className={cls + live}>
-              <td>{fmtTime(b.startedAt)}</td>
-              <td>{b.isOpen ? 'now' : fmtTime(b.endedAt)}</td>
-              <td style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtDur(b.durationMs)}</td>
-              <td><TypeChip kind={b.kind} /></td>
-              <td>{taskNameFor(b.larkTaskGuid) ?? (b.kind === 'GAP' ? '—' : 'Untracked')}</td>
-              <td>{b.kind === 'MANUAL' ? '(manual)' : b.kind === 'GAP' ? 'Not working' : ''}</td>
-              <td style={{ textAlign: 'right' }}>
-                {b.kind === 'GAP' && (
-                  <button
-                    className="et-fill-link no-drag"
-                    onClick={() =>
-                      onAddForGap({
-                        startedAt: b.startedAt,
-                        endedAt: b.endedAt,
-                        larkTaskGuid: null,
-                      })
-                    }
-                  >
-                    + Add manual time
-                  </button>
-                )}
-              </td>
-            </tr>
+            <EntryRow
+              key={rowId}
+              kind={isManual ? 'manual_approved' : 'tracked'}
+              rowId={rowId}
+              flashing={flashRowId === rowId}
+              startedAt={b.startedAt}
+              endedAt={b.endedAt}
+              isOpen={b.isOpen}
+              refId={b.timeEntryId}
+              larkTaskGuid={b.larkTaskGuid ?? null}
+              notes={b.notes ?? null}
+              tasks={tasks}
+              dayQueryKey={dayQueryKey}
+              onSelectRow={onSelectRow}
+            />
+          );
+        })}
+        {/* PENDING requests live in their own pendingOverlay array (they're not blocks because they haven't created a TimeEntry yet). */}
+        {day.pendingOverlay.map((p) => {
+          const rowId = `pending-${p.id}`;
+          return (
+            <EntryRow
+              key={rowId}
+              kind="pending"
+              rowId={rowId}
+              flashing={flashRowId === rowId}
+              startedAt={p.startedAt}
+              endedAt={p.endedAt}
+              refId={p.id}
+              larkTaskGuid={p.larkTaskGuid}
+              notes={p.reason}
+              tasks={tasks}
+              dayQueryKey={dayQueryKey}
+              onSelectRow={onSelectRow}
+            />
+          );
+        })}
+        {/* REJECTED requests for context + re-request. */}
+        {day.recentRejected.map((r) => {
+          const rowId = `rejected-${r.id}`;
+          return (
+            <EntryRow
+              key={rowId}
+              kind="rejected"
+              rowId={rowId}
+              flashing={flashRowId === rowId}
+              startedAt={r.requestedStart}
+              endedAt={r.requestedEnd}
+              refId={r.id}
+              larkTaskGuid={r.larkTaskGuid}
+              notes={r.reason}
+              decidedReason={r.decidedReason}
+              tasks={tasks}
+              dayQueryKey={dayQueryKey}
+              onSelectRow={onSelectRow}
+            />
           );
         })}
       </tbody>
@@ -292,20 +302,6 @@ function DayBlocksTable({
   );
 }
 
-function TypeChip({ kind }: { kind: DayInsight['blocks'][number]['kind'] }) {
-  if (kind === 'WORK') return <span className="et-chip et-chip-work">Work</span>;
-  if (kind === 'MEETING') return <span className="et-chip et-chip-meeting">Meeting</span>;
-  if (kind === 'MANUAL') return <span className="et-chip et-chip-manual">Manual</span>;
-  if (kind === 'IDLE_TRIMMED') return <span className="et-chip et-chip-idle">Break</span>;
-  return <span className="et-chip et-chip-gap">Not working</span>;
-}
-
-function fmtTime(ms: number): string {
-  return new Date(ms).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
-}
-function fmtRange(a: number, b: number): string {
-  return `${fmtTime(a)} – ${fmtTime(b)}`;
-}
 function fmtDur(ms: number): string {
   const m = Math.max(0, Math.round(ms / 60000));
   const h = Math.floor(m / 60);

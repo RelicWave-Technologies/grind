@@ -111,6 +111,29 @@ describe('GET /v1/insights/day — composition with real TimeEntry rows', () => 
     expect(res.body.totals.manualMs).toBe(90 * 60 * 1000);
   });
 
+  it('surfaces REJECTED requests in recentRejected with decidedReason', async () => {
+    const u = await seedUser();
+    await prisma.manualTimeRequest.create({
+      data: {
+        clientUuid: `mtr_rej_${Date.now()}`,
+        userId: u.userId,
+        requestedStart: ts('2026-05-20T11:00:00Z'),
+        requestedEnd: ts('2026-05-20T12:00:00Z'),
+        reason: 'tried but rejected',
+        status: 'REJECTED',
+        decidedAt: ts('2026-05-20T13:00:00Z'),
+        decidedReason: 'duplicate of existing entry',
+      },
+    });
+    const res = await request(app).get('/v1/insights/day?date=2026-05-20&tz=UTC').set(auth(u.accessToken));
+    expect(res.status).toBe(200);
+    expect(res.body.recentRejected).toHaveLength(1);
+    expect(res.body.recentRejected[0].reason).toBe('tried but rejected');
+    expect(res.body.recentRejected[0].decidedReason).toBe('duplicate of existing entry');
+    expect(res.body.blocks).toHaveLength(0); // rejected != block
+    expect(res.body.pendingOverlay).toHaveLength(0); // rejected != pending
+  });
+
   it('surfaces a PENDING manual-time request as a pendingOverlay entry, not a block', async () => {
     const u = await seedUser();
     await prisma.manualTimeRequest.create({

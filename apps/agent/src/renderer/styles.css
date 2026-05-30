@@ -309,6 +309,36 @@ label.field-label { display: block; font-size: 12px; font-weight: 600; color: va
 .dr-tick-major { color: var(--label-secondary); font-weight: 600; }
 
 /* ---- Edit Time table ---- */
+/* Inline-editable row inputs */
+.et-input {
+  font: inherit; font-size: 12px; padding: 5px 8px; border-radius: 7px;
+  border: 1px solid transparent; background: transparent; color: var(--label);
+  width: 100%; max-width: 220px;
+}
+.et-input:hover:not(:disabled) { border-color: var(--separator); }
+.et-input:focus { outline: none; border-color: var(--c-violet); background: white; }
+.et-input:disabled { color: var(--label-secondary); cursor: default; }
+.et-input-time { width: 88px; font-variant-numeric: tabular-nums; }
+.et-input-select { background: white; }
+
+.et-row { transition: background 0.6s ease-out; }
+.et-row td { padding: 8px 10px; vertical-align: top; }
+.et-row-tracked   { box-shadow: inset 3px 0 0 var(--c-green); }
+.et-row-pending   { box-shadow: inset 3px 0 0 var(--c-amber); background: rgba(245, 165, 36, 0.06); }
+.et-row-rejected  { box-shadow: inset 3px 0 0 var(--danger); background: rgba(255, 77, 106, 0.05); }
+.et-row-gap       { box-shadow: inset 3px 0 0 rgba(40,36,56,0.12); }
+
+@keyframes etflash {
+  0%   { background: rgba(245, 224, 100, 0.55); }
+  100% { background: transparent; }
+}
+.et-row-flash { animation: etflash 1.6s ease-out 1; }
+
+.et-row-btn { padding: 5px 10px; font-size: 12px; }
+
+.spin { animation: dr-spin 0.8s linear infinite; }
+@keyframes dr-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
 .et-table { width: 100%; border-collapse: collapse; font-size: 12px; }
 .et-table th, .et-table td { padding: 10px 12px; text-align: left; }
 .et-table thead th {

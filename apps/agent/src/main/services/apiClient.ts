@@ -3,7 +3,7 @@ import { log } from '../logger';
 import { clearTokens, loadTokens, saveTokens, type StoredTokens } from './tokenStore';
 
 type FetchOptions = {
-  method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   body?: unknown;
   auth?: boolean;
 };

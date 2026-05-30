@@ -41,9 +41,25 @@ export const TimeEntryDto = z.object({
   source: TimeEntrySource,
   startedAt: Iso,
   endedAt: Iso.nullable(),
+  notes: z.string().nullable(),
   segments: z.array(SegmentDto),
 });
 export type TimeEntryDto = z.infer<typeof TimeEntryDto>;
+
+/**
+ * Patch the metadata on a tracked entry. Cannot change start/end/segments —
+ * those are the OS-tracked truth. Used by the Edit Time table to re-attribute
+ * a session to a different Lark task or add a note ("emails", "design review").
+ */
+export const PatchTimeEntryRequest = z
+  .object({
+    larkTaskGuid: z.string().min(1).nullable().optional(),
+    notes: z.string().max(500).nullable().optional(),
+  })
+  .refine((v) => v.larkTaskGuid !== undefined || v.notes !== undefined, {
+    message: 'at least one of larkTaskGuid or notes must be set',
+  });
+export type PatchTimeEntryRequest = z.infer<typeof PatchTimeEntryRequest>;
 
 /**
  * Sync the full segment list for an entry (agent is the source of truth for an

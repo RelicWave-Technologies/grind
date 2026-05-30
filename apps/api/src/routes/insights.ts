@@ -122,6 +122,18 @@ insightsRouter.get('/day', async (req, res, next) => {
       orderBy: { requestedStart: 'asc' },
     });
 
+    // REJECTED requests in the same window — rendered as red rows in the
+    // Edit Time table so the user sees why and can re-request.
+    const rejected = await prisma.manualTimeRequest.findMany({
+      where: {
+        userId: req.user.sub,
+        status: 'REJECTED',
+        requestedStart: { lt: win.end },
+        requestedEnd: { gt: win.start },
+      },
+      orderBy: { requestedStart: 'asc' },
+    });
+
     const result = buildDayInsight({
       date,
       tz,
@@ -131,6 +143,7 @@ insightsRouter.get('/day', async (req, res, next) => {
         id: e.id,
         source: e.source as 'AUTO' | 'MANUAL',
         larkTaskGuid: e.larkTaskGuid,
+        notes: e.notes ?? null,
         segments: e.segments.map((s) => ({
           kind: s.kind as 'WORK' | 'MEETING' | 'IDLE_TRIMMED',
           startedAt: s.startedAt,
@@ -143,6 +156,14 @@ insightsRouter.get('/day', async (req, res, next) => {
         requestedEnd: p.requestedEnd,
         reason: p.reason,
         larkTaskGuid: p.larkTaskGuid,
+      })),
+      rejected: rejected.map((r) => ({
+        id: r.id,
+        requestedStart: r.requestedStart,
+        requestedEnd: r.requestedEnd,
+        reason: r.reason,
+        decidedReason: r.decidedReason,
+        larkTaskGuid: r.larkTaskGuid,
       })),
     });
 

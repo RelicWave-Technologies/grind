@@ -65,6 +65,10 @@ model TimeEntry {
   source       TimeEntrySource @default(AUTO)
   startedAt    DateTime
   endedAt      DateTime?
+  /// Free-form user-facing note ("emails", "design review", "fixed bug X").
+  /// Shown in the Edit Time table's Reason column. Editable inline; doesn't
+  /// require approver review because it's metadata, not new tracked time.
+  notes        String?
   agentVersion String?
   platform     String?
   createdAt    DateTime        @default(now())
@@ -147,6 +151,7 @@ enum ManualTimeRequestStatus {
   PENDING
   APPROVED
   REJECTED
+  CANCELLED
 }
 
 /// A user-submitted request to log time after the fact. Sent to a workspace
