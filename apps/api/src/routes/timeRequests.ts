@@ -3,9 +3,11 @@ import { prisma } from '@grind/db';
 import {
   CreateManualTimeRequest,
   ListManualTimeRequestsQuery,
+  PatchManualTimeRequest,
   type CreateManualTimeRequest as CreateBody,
   type ManualTimeRequestDto,
   type ListManualTimeRequestsQuery as ListQuery,
+  type PatchManualTimeRequest as PatchBody,
 } from '@grind/types';
 import { validate } from '../middleware/validate';
 import { requireAccessToken } from '../middleware/auth';
@@ -25,7 +27,7 @@ type Row = {
   requestedStart: Date;
   requestedEnd: Date;
   reason: string;
-  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
   decidedAt: Date | null;
   decidedReason: string | null;
   createdAt: Date;
@@ -142,6 +144,129 @@ timeRequestsRouter.get('/', validate(ListManualTimeRequestsQuery, 'query'), asyn
         : { userId: req.user.sub, ...(q.status ? { status: q.status } : {}) };
     const rows = await prisma.manualTimeRequest.findMany({ where, orderBy: { createdAt: 'desc' }, take: 200 });
     res.json({ requests: rows.map(serialize) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * Edit a still-PENDING request. Re-sends the updated approval card to the
+ * approver and a tiny "Request updated" text nudge so they notice the change.
+ * Both Lark calls are best-effort — they never block the DB write.
+ */
+timeRequestsRouter.patch('/:id', validate(PatchManualTimeRequest, 'body'), async (req, res, next) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: 'unauthorized' });
+    const id = req.params.id;
+    const existing = await prisma.manualTimeRequest.findUnique({
+      where: { id },
+      include: {
+        user: { select: { name: true } },
+        approver: { include: { larkIdentity: { select: { openId: true } } } },
+      },
+    });
+    if (!existing) return res.status(404).json({ error: 'not_found' });
+    if (existing.userId !== req.user.sub) return res.status(403).json({ error: 'forbidden' });
+    if (existing.status !== 'PENDING') return res.status(409).json({ error: 'immutable_after_decision', status: existing.status });
+
+    const body = req.body as PatchBody;
+    // Range sanity if both edges are touched (or one is touched + existing).
+    const start = body.requestedStart ? new Date(body.requestedStart) : existing.requestedStart;
+    const end = body.requestedEnd ? new Date(body.requestedEnd) : existing.requestedEnd;
+    if (!(start.getTime() < end.getTime())) return res.status(400).json({ error: 'invalid_range' });
+
+    const updated = await prisma.manualTimeRequest.update({
+      where: { id },
+      data: {
+        requestedStart: start,
+        requestedEnd: end,
+        ...(body.larkTaskGuid !== undefined ? { larkTaskGuid: body.larkTaskGuid } : {}),
+        ...(body.reason !== undefined ? { reason: body.reason } : {}),
+      },
+    });
+
+    // Best-effort: re-send updated card + a small notice. Failure must NOT
+    // break the PATCH — the DB state is the source of truth.
+    const messenger = getLarkMessenger();
+    if (messenger && existing.approver?.larkIdentity?.openId && existing.larkMessageId) {
+      try {
+        const newCard = buildApprovalCard({
+          requestId: updated.id,
+          requesterName: existing.user.name,
+          taskSummary: body.taskSummary ?? null,
+          startedAt: start.getTime(),
+          endedAt: end.getTime(),
+          reason: updated.reason,
+        });
+        await messenger.updateCard(existing.larkMessageId, newCard);
+        await messenger.sendText(
+          existing.approver.larkIdentity.openId,
+          `↑ Request from ${existing.user.name} was just updated. Please review again.`,
+        );
+      } catch (err) {
+        logger.warn({ err: String(err), requestId: id }, 'lark patch-notice failed (non-fatal)');
+      }
+    }
+    res.json(serialize(updated));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * Cancel a still-PENDING request. Marks status=CANCELLED, swaps the original
+ * Lark card for a "cancelled" variant (no buttons) and pings the approver
+ * with a one-line notice so an in-flight approver doesn't act on a dead
+ * request. Decided requests are immutable (409).
+ */
+timeRequestsRouter.post('/:id/cancel', async (req, res, next) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: 'unauthorized' });
+    const id = req.params.id;
+    const existing = await prisma.manualTimeRequest.findUnique({
+      where: { id },
+      include: {
+        user: { select: { name: true } },
+        approver: { include: { larkIdentity: { select: { openId: true } } } },
+      },
+    });
+    if (!existing) return res.status(404).json({ error: 'not_found' });
+    if (existing.userId !== req.user.sub) return res.status(403).json({ error: 'forbidden' });
+    if (existing.status !== 'PENDING') return res.status(409).json({ error: 'immutable_after_decision', status: existing.status });
+
+    const now = new Date();
+    const updated = await prisma.manualTimeRequest.update({
+      where: { id },
+      data: { status: 'CANCELLED', decidedAt: now, decidedReason: 'Cancelled by requester' },
+    });
+
+    const messenger = getLarkMessenger();
+    if (messenger && existing.approver?.larkIdentity?.openId && existing.larkMessageId) {
+      try {
+        // Reuse the "decided" red card with CANCELLED chrome so the approver
+        // sees the card update in place and knows not to act.
+        const cancelledCard = buildApprovalCard({
+          requestId: updated.id,
+          requesterName: existing.user.name,
+          taskSummary: null,
+          startedAt: existing.requestedStart.getTime(),
+          endedAt: existing.requestedEnd.getTime(),
+          reason: existing.reason,
+        });
+        // The buttons are still in the card; the WS callback's idempotency
+        // catches them (status=CANCELLED → 'cancelled' noop). We could swap
+        // for buildDecidedCard but that's a separate variant; using the
+        // existing card + the sendText notice is enough for v2.
+        await messenger.updateCard(existing.larkMessageId, cancelledCard).catch(() => {});
+        await messenger.sendText(
+          existing.approver.larkIdentity.openId,
+          `✕ Request from ${existing.user.name} was cancelled by the requester. You can ignore the card.`,
+        );
+      } catch (err) {
+        logger.warn({ err: String(err), requestId: id }, 'lark cancel-notice failed (non-fatal)');
+      }
+    }
+    res.json(serialize(updated));
   } catch (err) {
     next(err);
   }

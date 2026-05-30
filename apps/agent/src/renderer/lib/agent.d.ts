@@ -26,6 +26,7 @@ declare global {
         status: () => Promise<TimerStatus>;
         today: () => Promise<TodayEntry[]>;
         onStatusChange: (cb: (s: TimerStatus) => void) => () => void;
+        patchEntry: (args: { id: string; larkTaskGuid?: string | null; notes?: string | null }) => Promise<{ ok: boolean; error?: string }>;
       };
       window: {
         openMain: () => Promise<void>;
@@ -78,7 +79,16 @@ declare global {
           larkTaskGuid?: string | null;
           taskSummary?: string | null;
         }) => Promise<{ ok: boolean; request?: ManualTimeRequestDto; error?: string }>;
-        listMine: (status?: 'PENDING' | 'APPROVED' | 'REJECTED') => Promise<{ requests: ManualTimeRequestDto[] }>;
+        listMine: (status?: 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED') => Promise<{ requests: ManualTimeRequestDto[] }>;
+        patch: (args: {
+          id: string;
+          requestedStart?: number;
+          requestedEnd?: number;
+          larkTaskGuid?: string | null;
+          taskSummary?: string | null;
+          reason?: string;
+        }) => Promise<{ ok: boolean; request?: ManualTimeRequestDto; error?: string }>;
+        cancel: (id: string) => Promise<{ ok: boolean; request?: ManualTimeRequestDto; error?: string }>;
       };
     };
   }
@@ -101,9 +111,18 @@ export type DayInsight = {
     durationMs: number;
     timeEntryId?: string;
     larkTaskGuid?: string | null;
+    notes?: string | null;
     isOpen?: boolean;
   }>;
   pendingOverlay: Array<{ id: string; startedAt: number; endedAt: number; reason: string; larkTaskGuid: string | null }>;
+  recentRejected: Array<{
+    id: string;
+    requestedStart: number;
+    requestedEnd: number;
+    reason: string;
+    decidedReason: string | null;
+    larkTaskGuid: string | null;
+  }>;
 };
 
 export type ManualTimeRequestDto = {

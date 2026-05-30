@@ -38,6 +38,7 @@ export type DayInsight = {
   totals: { workedMs: number; meetingMs: number; manualMs: number; idleTrimmedMs: number; gapMs: number };
   blocks: DayInsightBlock[];
   pendingOverlay: Array<{ id: string; startedAt: number; endedAt: number; reason: string; larkTaskGuid: string | null }>;
+  recentRejected: Array<{ id: string; requestedStart: number; requestedEnd: number; reason: string; decidedReason: string | null; larkTaskGuid: string | null }>;
 };
 
 const EMPTY_DAY: DayInsight = {
@@ -52,6 +53,7 @@ const EMPTY_DAY: DayInsight = {
   totals: { workedMs: 0, meetingMs: 0, manualMs: 0, idleTrimmedMs: 0, gapMs: 0 },
   blocks: [],
   pendingOverlay: [],
+  recentRejected: [],
 };
 
 /** Today's productivity score + activity totals, from the backend insights endpoint. */

@@ -18,8 +18,32 @@ export const CreateManualTimeRequest = z.object({
 });
 export type CreateManualTimeRequest = z.infer<typeof CreateManualTimeRequest>;
 
-export const ManualTimeRequestStatus = z.enum(['PENDING', 'APPROVED', 'REJECTED']);
+export const ManualTimeRequestStatus = z.enum(['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED']);
 export type ManualTimeRequestStatus = z.infer<typeof ManualTimeRequestStatus>;
+
+/**
+ * Patch a still-PENDING request (the requester's only escape hatch besides
+ * "Cancel" before the approver clicks). Server returns 409 if status !=
+ * PENDING since edits are immutable after a decision.
+ */
+export const PatchManualTimeRequest = z
+  .object({
+    requestedStart: Iso.optional(),
+    requestedEnd: Iso.optional(),
+    larkTaskGuid: z.string().min(1).nullable().optional(),
+    taskSummary: z.string().max(256).nullable().optional(),
+    reason: z.string().min(1).max(1000).optional(),
+  })
+  .refine(
+    (v) =>
+      v.requestedStart !== undefined ||
+      v.requestedEnd !== undefined ||
+      v.larkTaskGuid !== undefined ||
+      v.taskSummary !== undefined ||
+      v.reason !== undefined,
+    { message: 'at least one field must be set' },
+  );
+export type PatchManualTimeRequest = z.infer<typeof PatchManualTimeRequest>;
 
 export const ManualTimeRequestDto = z.object({
   id: z.string(),

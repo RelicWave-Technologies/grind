@@ -21,10 +21,10 @@ import { logger } from '../logger';
  */
 export interface DecideResult {
   card: Record<string, unknown>;
-  status: 'APPROVED' | 'REJECTED' | 'PENDING';
+  status: 'APPROVED' | 'REJECTED' | 'PENDING' | 'CANCELLED';
   timeEntryId: string | null;
   /** Reason the decision was a no-op (or null). For observability / tests. */
-  noop: 'already_decided' | 'not_found' | 'forbidden' | null;
+  noop: 'already_decided' | 'not_found' | 'forbidden' | 'cancelled' | null;
 }
 
 export async function decideRequest(args: {
@@ -51,6 +51,27 @@ export async function decideRequest(args: {
 
   // Idempotent: already decided → return the existing decided card.
   if (req.status !== 'PENDING') {
+    // CANCELLED is a special case: requester pulled the request before this
+    // click landed. Return a "Request cancelled" card variant (red, no buttons,
+    // no TimeEntry) so the approver knows their click was a no-op.
+    if (req.status === 'CANCELLED') {
+      return {
+        card: buildDecidedCard({
+          requestId: req.id,
+          requesterName: req.user.name,
+          taskSummary: null,
+          startedAt: req.requestedStart.getTime(),
+          endedAt: req.requestedEnd.getTime(),
+          reason: req.reason,
+          decision: 'REJECTED', // CANCELLED reuses the rejected card chrome (red, no buttons)
+          decidedByName: req.user.name + ' (cancelled)',
+          decidedAt: (req.decidedAt ?? now).getTime(),
+        }),
+        status: 'CANCELLED',
+        timeEntryId: null,
+        noop: 'cancelled',
+      };
+    }
     const card = buildDecidedCard({
       requestId: req.id,
       requesterName: req.user.name,
