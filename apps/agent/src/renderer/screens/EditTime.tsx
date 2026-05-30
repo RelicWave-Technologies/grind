@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight, X, CalendarRange } from 'lucide-react';
 import type { DayInsight } from '../lib/agent.d';
@@ -266,75 +266,104 @@ function DayBlocksTable({
         </tr>
       </thead>
       <tbody>
-        {day.blocks.map((b, i) => {
-          if (b.kind === 'GAP') {
-            // Once a pending request fully covers a gap, the gap row would
-            // duplicate the (red) pending row visually. Hide it — the user
-            // sees only the red row, which IS the requested time.
-            const fullyPending = day.pendingOverlay.some(
-              (p) => p.startedAt <= b.startedAt && p.endedAt >= b.endedAt,
-            );
-            if (fullyPending) return null;
-            const rowId = `gap-${b.startedAt}`;
-            const isPresetTarget = i === presetGapIdx && !!gapPreset;
-            return (
-              <EntryRow
-                key={rowId}
-                kind="gap"
-                rowId={rowId}
-                flashing={flashRowId === rowId || isPresetTarget}
-                startedAt={b.startedAt}
-                endedAt={b.endedAt}
-                larkTaskGuid={null}
-                notes={null}
-                tasks={tasks}
-                dayQueryKey={dayQueryKey}
-                onSelectRow={onSelectRow}
-                presetOverride={isPresetTarget && gapPreset ? { startedAt: gapPreset.startedAt, endedAt: gapPreset.endedAt, tick: gapPreset.tick } : null}
-              />
-            );
-          }
-          // Tracked AUTO + MANUAL (APPROVED) + MEETING + IDLE_TRIMMED all flow through tracked.
-          const isManual = b.kind === 'MANUAL';
-          const rowId = `entry-${b.timeEntryId}-${i}`;
-          return (
-            <EntryRow
-              key={rowId}
-              kind={isManual ? 'manual_approved' : 'tracked'}
-              rowId={rowId}
-              flashing={flashRowId === rowId}
-              startedAt={b.startedAt}
-              endedAt={b.endedAt}
-              isOpen={b.isOpen}
-              refId={b.timeEntryId}
-              larkTaskGuid={b.larkTaskGuid ?? null}
-              notes={b.notes ?? null}
-              tasks={tasks}
-              dayQueryKey={dayQueryKey}
-              onSelectRow={onSelectRow}
-            />
-          );
-        })}
-        {/* PENDING requests live in their own pendingOverlay array (they're not blocks because they haven't created a TimeEntry yet). */}
-        {day.pendingOverlay.map((p) => {
-          const rowId = `pending-${p.id}`;
-          return (
-            <EntryRow
-              key={rowId}
-              kind="pending"
-              rowId={rowId}
-              flashing={flashRowId === rowId}
-              startedAt={p.startedAt}
-              endedAt={p.endedAt}
-              refId={p.id}
-              larkTaskGuid={p.larkTaskGuid}
-              notes={p.reason}
-              tasks={tasks}
-              dayQueryKey={dayQueryKey}
-              onSelectRow={onSelectRow}
-            />
-          );
-        })}
+        {(() => {
+          // Build a single, time-sorted list of rows so pending requests
+          // appear in-place chronologically rather than dumped at the bottom.
+          type Row =
+            | { sortKey: number; kind: 'tracked' | 'manual_approved'; key: string; node: ReactNode }
+            | { sortKey: number; kind: 'pending'; key: string; node: ReactNode }
+            | { sortKey: number; kind: 'gap'; key: string; node: ReactNode };
+          const rows: Row[] = [];
+
+          day.blocks.forEach((b, i) => {
+            if (b.kind === 'GAP') {
+              // Hide gap rows entirely covered by a pending overlay (the
+              // pending row IS that time, so showing both would duplicate).
+              const fullyPending = day.pendingOverlay.some(
+                (p) => p.startedAt <= b.startedAt && p.endedAt >= b.endedAt,
+              );
+              if (fullyPending) return;
+              const rowId = `gap-${b.startedAt}`;
+              const isPresetTarget = i === presetGapIdx && !!gapPreset;
+              rows.push({
+                sortKey: b.startedAt,
+                kind: 'gap',
+                key: rowId,
+                node: (
+                  <EntryRow
+                    key={rowId}
+                    kind="gap"
+                    rowId={rowId}
+                    flashing={flashRowId === rowId || isPresetTarget}
+                    startedAt={b.startedAt}
+                    endedAt={b.endedAt}
+                    larkTaskGuid={null}
+                    notes={null}
+                    tasks={tasks}
+                    dayQueryKey={dayQueryKey}
+                    onSelectRow={onSelectRow}
+                    presetOverride={isPresetTarget && gapPreset ? { startedAt: gapPreset.startedAt, endedAt: gapPreset.endedAt, tick: gapPreset.tick } : null}
+                  />
+                ),
+              });
+              return;
+            }
+            const isManual = b.kind === 'MANUAL';
+            const rowId = `entry-${b.timeEntryId}-${i}`;
+            rows.push({
+              sortKey: b.startedAt,
+              kind: isManual ? 'manual_approved' : 'tracked',
+              key: rowId,
+              node: (
+                <EntryRow
+                  key={rowId}
+                  kind={isManual ? 'manual_approved' : 'tracked'}
+                  rowId={rowId}
+                  flashing={flashRowId === rowId}
+                  startedAt={b.startedAt}
+                  endedAt={b.endedAt}
+                  isOpen={b.isOpen}
+                  refId={b.timeEntryId}
+                  larkTaskGuid={b.larkTaskGuid ?? null}
+                  notes={b.notes ?? null}
+                  tasks={tasks}
+                  dayQueryKey={dayQueryKey}
+                  onSelectRow={onSelectRow}
+                />
+              ),
+            });
+          });
+
+          day.pendingOverlay.forEach((p) => {
+            const rowId = `pending-${p.id}`;
+            rows.push({
+              sortKey: p.startedAt,
+              kind: 'pending',
+              key: rowId,
+              node: (
+                <EntryRow
+                  key={rowId}
+                  kind="pending"
+                  rowId={rowId}
+                  flashing={flashRowId === rowId}
+                  startedAt={p.startedAt}
+                  endedAt={p.endedAt}
+                  refId={p.id}
+                  larkTaskGuid={p.larkTaskGuid}
+                  notes={p.reason}
+                  tasks={tasks}
+                  dayQueryKey={dayQueryKey}
+                  onSelectRow={onSelectRow}
+                />
+              ),
+            });
+          });
+
+          // Time-sorted. Stable on equal startedAt because Array.sort is
+          // stable in modern JS and rows.forEach preserved insertion order.
+          rows.sort((a, b) => a.sortKey - b.sortKey);
+          return rows.map((r) => r.node);
+        })()}
         {/* Rejected requests are intentionally NOT rendered — they go back to
             "white" (a clean gap the user can re-request from). The decision
             + reason still live on the request in DB + in Lark IM history. */}
