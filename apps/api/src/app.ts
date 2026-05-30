@@ -9,6 +9,7 @@ import { timeEntriesRouter } from './routes/timeEntries';
 import { activityRouter } from './routes/activity';
 import { larkRouter } from './routes/lark';
 import { insightsRouter } from './routes/insights';
+import { timeRequestsRouter } from './routes/timeRequests';
 import { errorHandler } from './middleware/errorHandler';
 
 export function buildApp() {
@@ -35,6 +36,7 @@ export function buildApp() {
   app.use('/v1/activity-samples', activityRouter);
   app.use('/v1/lark', larkRouter);
   app.use('/v1/insights', insightsRouter);
+  app.use('/v1/time-requests', timeRequestsRouter);
 
   app.use(errorHandler);
 

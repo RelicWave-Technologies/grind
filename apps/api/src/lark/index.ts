@@ -4,6 +4,7 @@ import { TokenManager } from './tokenManager';
 import { HttpOAuthClient } from './oauthClient';
 import { HttpTenantClient, type TenantClient } from './identity';
 import { HttpUserTaskClient, type UserTaskClient } from './tasks';
+import { HttpLarkMessenger, type LarkMessenger } from './messenger';
 
 export { isLarkConfigured, getLarkConfig, LARK_SCOPES, LARK_SCOPE_STRING } from './config';
 export { TokenManager } from './tokenManager';
@@ -14,10 +15,15 @@ export type { TenantClient, ResolvedLarkUser } from './identity';
 export { signOAuthState, verifyOAuthState, buildAuthorizeUrl } from './oauth';
 export { mapTasks, loggedMsByGuid, toEpochMs } from './tasks';
 export type { UserTaskClient, LarkTaskDto, CreateLarkTaskInput } from './tasks';
+export { buildApprovalCard, buildDecidedCard } from './cards';
+export type { ApprovalCardInput, DecidedCardInput, ApprovalAction } from './cards';
+export type { LarkMessenger, SendCardResult } from './messenger';
 
 let manager: TokenManager | null = null;
 let tenant: TenantClient | null = null;
 let taskClient: UserTaskClient | null = null;
+let messenger: LarkMessenger | null = null;
+let messengerOverride: LarkMessenger | null = null;
 
 /**
  * Returns the process-wide TokenManager, constructed lazily once Lark is
@@ -48,4 +54,21 @@ export function getUserTaskClient(): UserTaskClient | null {
   if (!isLarkConfigured()) return null;
   if (!taskClient) taskClient = new HttpUserTaskClient();
   return taskClient;
+}
+
+/**
+ * Process-wide IM messenger for sending approval cards. Tests inject a Fake
+ * via {@link setLarkMessengerForTests} so route logic can be exercised without
+ * hitting Lark; production returns null if Lark isn't configured so the route
+ * can degrade gracefully.
+ */
+export function getLarkMessenger(): LarkMessenger | null {
+  if (messengerOverride) return messengerOverride;
+  if (!isLarkConfigured()) return null;
+  if (!messenger) messenger = new HttpLarkMessenger();
+  return messenger;
+}
+
+export function setLarkMessengerForTests(m: LarkMessenger | null): void {
+  messengerOverride = m;
 }
