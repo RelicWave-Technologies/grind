@@ -212,36 +212,61 @@ export function buildDayInsight(input: {
     lastActivityAt = isToday ? Math.max(lastSegEnd, nowMs) : lastSegEnd;
   }
 
-  // 3. Insert GAP blocks between adjacent tagged blocks, inside the envelope.
+  // 3. Insert GAP blocks for the WHOLE day — leading (dayStart → first
+  // tracked block), between tracked blocks, and trailing (last tracked
+  // block → `now` for today / dayEnd for past days). This gives the
+  // ribbon and the table a single, foundational coordinate system where
+  // every minute of the day is either tracked, manual, or a gap. The UI
+  // can show or hide gap rows by kind; the data is consistent.
   const blocks: DayBlock[] = [];
-  if (tagged.length === 0) {
-    // Empty day → no blocks. UI shows empty state.
+  const dayEndCap = isToday ? Math.min(nowMs, dayEnd) : dayEnd;
+  // Future days: no editable rows at all (UI shows an empty state).
+  if (isFuture) {
+    // blocks stays empty
+  } else if (tagged.length === 0) {
+    if (dayEndCap > dayStart) {
+      blocks.push({
+        kind: 'GAP',
+        startedAt: dayStart,
+        endedAt: dayEndCap,
+        durationMs: dayEndCap - dayStart,
+      });
+    }
   } else {
+    // Leading gap: dayStart → first tracked block.
+    if (tagged[0]!.startedAt > dayStart) {
+      blocks.push({
+        kind: 'GAP',
+        startedAt: dayStart,
+        endedAt: tagged[0]!.startedAt,
+        durationMs: tagged[0]!.startedAt - dayStart,
+      });
+    }
+    // Tracked blocks + inter-block gaps.
     for (let i = 0; i < tagged.length; i++) {
       const cur = tagged[i]!;
-      // Gap from previous block's end (or envelope start) to this block's start.
-      const prevEnd = i === 0 ? firstActivityAt! : tagged[i - 1]!.endedAt;
-      if (i > 0 && cur.startedAt > prevEnd) {
-        blocks.push({
-          kind: 'GAP',
-          startedAt: prevEnd,
-          endedAt: cur.startedAt,
-          durationMs: cur.startedAt - prevEnd,
-        });
+      if (i > 0) {
+        const prevEnd = tagged[i - 1]!.endedAt;
+        if (cur.startedAt > prevEnd) {
+          blocks.push({
+            kind: 'GAP',
+            startedAt: prevEnd,
+            endedAt: cur.startedAt,
+            durationMs: cur.startedAt - prevEnd,
+          });
+        }
       }
       blocks.push(cur);
     }
-    // Trailing gap (today only): from last tracked end to now.
-    if (isToday) {
-      const last = tagged[tagged.length - 1]!;
-      if (nowMs > last.endedAt) {
-        blocks.push({
-          kind: 'GAP',
-          startedAt: last.endedAt,
-          endedAt: nowMs,
-          durationMs: nowMs - last.endedAt,
-        });
-      }
+    // Trailing gap: last block → dayEndCap.
+    const last = tagged[tagged.length - 1]!;
+    if (dayEndCap > last.endedAt) {
+      blocks.push({
+        kind: 'GAP',
+        startedAt: last.endedAt,
+        endedAt: dayEndCap,
+        durationMs: dayEndCap - last.endedAt,
+      });
     }
   }
 

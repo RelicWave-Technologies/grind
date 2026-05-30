@@ -59,6 +59,33 @@ describe('presetForClick', () => {
     expect(out!.endedAt).toBe(ms(15));
   });
 
+  it('PRE-ACTIVITY click: synthesizes a virtual gap from dayStart to the first tracked block', () => {
+    const blocks = [work(ms(8), ms(9), 't1'), gap(ms(9), ms(10)), work(ms(10), ms(11), 't1')];
+    const out = presetForClick({ blocks, clickedAtMs: ms(4), dayStart, dayEnd, now: ms(20) });
+    expect(out!.startedAt).toBe(dayStart);
+    expect(out!.endedAt).toBe(ms(8));
+  });
+
+  it('POST-ACTIVITY click: synthesizes a virtual gap from the last tracked block to now (or dayEnd)', () => {
+    const blocks = [work(ms(8), ms(9), 't1'), gap(ms(9), ms(10)), work(ms(10), ms(11), 't1')];
+    const out = presetForClick({ blocks, clickedAtMs: ms(14), dayStart, dayEnd, now: ms(20) });
+    expect(out!.startedAt).toBe(ms(11));
+    expect(out!.endedAt).toBe(ms(20)); // capped at now
+  });
+
+  it('POST-ACTIVITY click on a past day: virtual gap extends to dayEnd', () => {
+    const blocks = [work(ms(8), ms(9), 't1')];
+    const out = presetForClick({ blocks, clickedAtMs: ms(14), dayStart, dayEnd, now: dayEnd + 10 * HOUR });
+    expect(out!.startedAt).toBe(ms(9));
+    expect(out!.endedAt).toBe(dayEnd);
+  });
+
+  it('empty day with no blocks: virtual gap spans the whole window', () => {
+    const out = presetForClick({ blocks: [], clickedAtMs: ms(10), dayStart, dayEnd, now: ms(15) });
+    expect(out!.startedAt).toBe(dayStart);
+    expect(out!.endedAt).toBe(ms(15)); // capped at now
+  });
+
   it('clamps preset endedAt to `now` (no future time)', () => {
     const localNow = ms(11, 15);
     const blocks = [gap(ms(10), ms(13))];

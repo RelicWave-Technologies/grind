@@ -41,14 +41,15 @@ describe('GET /v1/insights/day — validation', () => {
 });
 
 describe('GET /v1/insights/day — empty', () => {
-  it('returns no blocks and null bounds when the user has nothing', async () => {
+  it('returns a single full-day GAP block when the user has nothing tracked', async () => {
     const u = await seedUser();
-    const res = await request(app).get('/v1/insights/day?date=2026-05-30&tz=UTC').set(auth(u.accessToken));
+    const res = await request(app).get('/v1/insights/day?date=2026-05-20&tz=UTC').set(auth(u.accessToken));
     expect(res.status).toBe(200);
-    expect(res.body.blocks).toEqual([]);
+    expect(res.body.blocks).toHaveLength(1);
+    expect(res.body.blocks[0].kind).toBe('GAP');
+    expect(res.body.blocks[0].durationMs).toBe(24 * 60 * 60 * 1000);
     expect(res.body.pendingOverlay).toEqual([]);
     expect(res.body.firstActivityAt).toBeNull();
-    expect(res.body.totals).toEqual({ workedMs: 0, meetingMs: 0, manualMs: 0, idleTrimmedMs: 0, gapMs: 0 });
   });
 });
 
@@ -71,10 +72,12 @@ describe('GET /v1/insights/day — composition with real TimeEntry rows', () => 
 
     const res = await request(app).get('/v1/insights/day?date=2026-05-20&tz=UTC').set(auth(u.accessToken));
     expect(res.status).toBe(200);
-    expect(res.body.blocks).toHaveLength(1);
-    expect(res.body.blocks[0].kind).toBe('WORK');
-    expect(new Date(res.body.blocks[0].startedAt).toISOString()).toBe('2026-05-20T00:00:00.000Z');
-    expect(res.body.blocks[0].durationMs).toBe(90 * 60 * 1000);
+    // [trailing GAP from previous day handled by clipping] →
+    // [WORK 00:00–01:30, trailing GAP 01:30–24:00].
+    expect(res.body.blocks.map((b: { kind: string }) => b.kind)).toEqual(['WORK', 'GAP']);
+    const workBlock = res.body.blocks[0];
+    expect(new Date(workBlock.startedAt).toISOString()).toBe('2026-05-20T00:00:00.000Z');
+    expect(workBlock.durationMs).toBe(90 * 60 * 1000);
   });
 
   it('emits MANUAL for source=MANUAL entries and inserts a GAP between adjacent tracked entries (past day)', async () => {
@@ -105,9 +108,10 @@ describe('GET /v1/insights/day — composition with real TimeEntry rows', () => 
 
     const res = await request(app).get('/v1/insights/day?date=2026-05-20&tz=UTC').set(auth(u.accessToken));
     expect(res.status).toBe(200);
-    expect(res.body.blocks.map((b: { kind: string }) => b.kind)).toEqual(['WORK', 'GAP', 'MANUAL']);
-    const gap = res.body.blocks[1];
-    expect(gap.durationMs).toBe(90 * 60 * 1000);
+    // [leading GAP 12am-9am, WORK 9-11, GAP 11-12:30, MANUAL 12:30-14, trailing GAP 14-midnight]
+    expect(res.body.blocks.map((b: { kind: string }) => b.kind)).toEqual(['GAP', 'WORK', 'GAP', 'MANUAL', 'GAP']);
+    const interGap = res.body.blocks[2];
+    expect(interGap.durationMs).toBe(90 * 60 * 1000);
     expect(res.body.totals.manualMs).toBe(90 * 60 * 1000);
   });
 
@@ -130,7 +134,9 @@ describe('GET /v1/insights/day — composition with real TimeEntry rows', () => 
     expect(res.body.recentRejected).toHaveLength(1);
     expect(res.body.recentRejected[0].reason).toBe('tried but rejected');
     expect(res.body.recentRejected[0].decidedReason).toBe('duplicate of existing entry');
-    expect(res.body.blocks).toHaveLength(0); // rejected != block
+    // No tracked time, so blocks is just the single full-day GAP.
+    expect(res.body.blocks).toHaveLength(1);
+    expect(res.body.blocks[0].kind).toBe('GAP');
     expect(res.body.pendingOverlay).toHaveLength(0); // rejected != pending
   });
 
@@ -148,16 +154,16 @@ describe('GET /v1/insights/day — composition with real TimeEntry rows', () => 
     });
     const res = await request(app).get('/v1/insights/day?date=2026-05-30&tz=UTC').set(auth(u.accessToken));
     expect(res.status).toBe(200);
-    expect(res.body.blocks).toHaveLength(0);
+    // PENDING is separate from blocks. No tracked time → single full-day gap in blocks.
+    expect(res.body.blocks).toHaveLength(1);
+    expect(res.body.blocks[0].kind).toBe('GAP');
     expect(res.body.pendingOverlay).toHaveLength(1);
     expect(res.body.pendingOverlay[0].reason).toBe('forgot to start');
   });
 
-  it('adds a trailing GAP to "now" when the requested day is today', async () => {
+  it('adds a leading GAP from midnight and a trailing GAP to "now" when the day is today', async () => {
     const u = await seedUser();
     const today = new Date().toISOString().slice(0, 10);
-    // Tracked entry between 06:00Z and 07:00Z today. Real "now" is after 07:00Z
-    // for any reasonable test-run-time on this day (CI typically runs much later).
     await prisma.timeEntry.create({
       data: {
         id: `te_today_${Date.now()}`,
@@ -172,9 +178,9 @@ describe('GET /v1/insights/day — composition with real TimeEntry rows', () => 
     const res = await request(app).get(`/v1/insights/day?date=${today}&tz=UTC`).set(auth(u.accessToken));
     expect(res.status).toBe(200);
     expect(res.body.isToday).toBe(true);
-    // Order: WORK + trailing GAP (gap is open-ended to now).
-    expect(res.body.blocks.map((b: { kind: string }) => b.kind)).toEqual(['WORK', 'GAP']);
-    expect(res.body.blocks[1].endedAt).toBeGreaterThan(res.body.blocks[0].endedAt);
+    // [leading GAP midnight-6am, WORK 6-7am, trailing GAP 7am-now]
+    expect(res.body.blocks.map((b: { kind: string }) => b.kind)).toEqual(['GAP', 'WORK', 'GAP']);
+    expect(res.body.blocks[2].endedAt).toBeGreaterThan(res.body.blocks[1].endedAt);
   });
 
   it('does not leak another user\'s entries (self-scope)', async () => {
@@ -193,6 +199,8 @@ describe('GET /v1/insights/day — composition with real TimeEntry rows', () => 
     });
     const res = await request(app).get('/v1/insights/day?date=2026-05-30&tz=UTC').set(auth(a.accessToken));
     expect(res.status).toBe(200);
-    expect(res.body.blocks).toHaveLength(0);
+    // User A sees a single full-day gap (no tracking) — NOT user B's entry.
+    expect(res.body.blocks).toHaveLength(1);
+    expect(res.body.blocks[0].kind).toBe('GAP');
   });
 });

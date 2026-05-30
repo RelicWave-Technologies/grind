@@ -84,19 +84,46 @@ export function presetForClick(args: {
   let neighborGuid: string | null = null;
 
   if (hit && hit.kind === 'GAP') {
-    // Always snap to the FULL gap (capped at `now` so we never request future
-    // time). The previous "1h-window for >4h gaps" behaviour confused users —
-    // they want one click to represent the whole untracked slot, then edit
-    // the start/end down to the actual range before submitting.
+    // Click landed in an actual gap block. Snap to the full gap (capped at
+    // `now` so we never request future time).
     const gapStart = hit.startedAt;
     const gapEndCapped = Math.min(hit.endedAt, now);
     startedAt = snapToGrid(gapStart);
     endedAt = snapToGrid(gapEndCapped);
     neighborGuid = sharedNeighborGuid(blocks, hit);
   } else {
-    // Click outside any rendered block (rare — happens before firstActivity).
-    startedAt = clamp(snappedClick, dayStart, Math.min(dayEnd, now) - HOUR_MS);
-    endedAt = startedAt + HOUR_MS;
+    // Click outside ANY block — happens BEFORE firstActivity (e.g. midnight
+    // to 8 AM when the user starts at 8) or AFTER lastActivity. Synthesize
+    // a virtual gap bounded by the nearest non-gap block on each side, or
+    // the day edges if there's nothing there. This means a click at 4 AM on
+    // a day that started at 8 AM snaps to the full 12 AM → 8 AM "virtual
+    // gap" — same as a real gap click would.
+    const occupied = blocks
+      .filter((b) => b.kind !== 'GAP')
+      .sort((a, b) => a.startedAt - b.startedAt);
+    let leftBound = dayStart;
+    let rightBound = Math.min(dayEnd, now);
+    for (const r of occupied) {
+      if (r.endedAt <= clickedAtMs) leftBound = Math.max(leftBound, r.endedAt);
+      if (r.startedAt > clickedAtMs) {
+        rightBound = Math.min(rightBound, r.startedAt);
+        break;
+      }
+    }
+    if (rightBound <= leftBound) return null;
+    startedAt = snapToGrid(leftBound);
+    endedAt = snapToGrid(rightBound);
+    // Inherit task from the nearest non-gap block on either side if both
+    // sides exist and agree (rare for pre/post activity but defensive).
+    const left = occupied.filter((b) => b.endedAt <= clickedAtMs).pop();
+    const right = occupied.find((b) => b.startedAt > clickedAtMs);
+    if (left?.larkTaskGuid && right?.larkTaskGuid && left.larkTaskGuid === right.larkTaskGuid) {
+      neighborGuid = left.larkTaskGuid;
+    } else if (left?.larkTaskGuid && !right) {
+      neighborGuid = left.larkTaskGuid;
+    } else if (right?.larkTaskGuid && !left) {
+      neighborGuid = right.larkTaskGuid;
+    }
   }
 
   // Final safety: end must always be > start, and not in the future.

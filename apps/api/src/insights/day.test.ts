@@ -54,7 +54,7 @@ const baseEntry: DayEntryInput = {
 };
 
 describe('buildDayInsight — empty day', () => {
-  it('returns no blocks and null activity bounds when nothing happened', () => {
+  it('emits ONE full-day GAP block + null activity bounds + gapMs = 24h', () => {
     const r = buildDayInsight({
       date: '2026-05-30',
       tz: 'UTC',
@@ -63,15 +63,17 @@ describe('buildDayInsight — empty day', () => {
       pending: [],
       window: makeWindow('2026-05-30', 'UTC'),
     });
-    expect(r.blocks).toHaveLength(0);
+    expect(r.blocks).toHaveLength(1);
+    expect(r.blocks[0]!.kind).toBe('GAP');
+    expect(r.blocks[0]!.durationMs).toBe(24 * 3600 * 1000);
     expect(r.firstActivityAt).toBeNull();
     expect(r.lastActivityAt).toBeNull();
-    expect(r.totals).toEqual({ workedMs: 0, meetingMs: 0, manualMs: 0, idleTrimmedMs: 0, gapMs: 0 });
+    expect(r.totals.gapMs).toBe(24 * 3600 * 1000);
   });
 });
 
-describe('buildDayInsight — single tracked entry, fully inside', () => {
-  it('emits one WORK block and no GAPs (envelope = exactly that block)', () => {
+describe('buildDayInsight — single tracked entry, fully inside (past day)', () => {
+  it('emits [leading-GAP, WORK, trailing-GAP] — the whole day is partitioned', () => {
     const r = buildDayInsight({
       date: '2026-05-30',
       tz: 'UTC',
@@ -80,16 +82,18 @@ describe('buildDayInsight — single tracked entry, fully inside', () => {
       pending: [],
       window: makeWindow('2026-05-30', 'UTC'),
     });
-    expect(r.blocks).toHaveLength(1);
-    expect(r.blocks[0]!.kind).toBe('WORK');
+    expect(r.blocks.map((b) => b.kind)).toEqual(['GAP', 'WORK', 'GAP']);
     expect(r.totals.workedMs).toBe(90 * 60 * 1000);
     expect(r.firstActivityAt).toBe(date('2026-05-30T09:00:00Z').getTime());
     expect(r.lastActivityAt).toBe(date('2026-05-30T10:30:00Z').getTime());
+    // Gap durations: midnight to 9am (9h) + 10:30am to midnight (13.5h)
+    expect(r.blocks[0]!.durationMs).toBe(9 * 3600 * 1000);
+    expect(r.blocks[2]!.durationMs).toBe(13.5 * 3600 * 1000);
   });
 });
 
 describe('buildDayInsight — entry crosses midnight', () => {
-  it('clips the WORK segment to the day window', () => {
+  it('clips the WORK segment to the day window — leading gap + WORK ending at midnight', () => {
     const r = buildDayInsight({
       date: '2026-05-30',
       tz: 'UTC',
@@ -105,15 +109,16 @@ describe('buildDayInsight — entry crosses midnight', () => {
       pending: [],
       window: makeWindow('2026-05-30', 'UTC'),
     });
-    // Only 22:00 → 24:00 is in this day.
-    expect(r.blocks).toHaveLength(1);
-    expect(r.blocks[0]!.durationMs).toBe(2 * 3600 * 1000);
-    expect(r.blocks[0]!.endedAt).toBe(date('2026-05-31T00:00:00Z').getTime());
+    // [leading GAP 12am-10pm, WORK 10pm-midnight]. No trailing gap (work ends at midnight).
+    expect(r.blocks.map((b) => b.kind)).toEqual(['GAP', 'WORK']);
+    const workBlock = r.blocks[1]!;
+    expect(workBlock.durationMs).toBe(2 * 3600 * 1000);
+    expect(workBlock.endedAt).toBe(date('2026-05-31T00:00:00Z').getTime());
   });
 });
 
 describe('buildDayInsight — open running segment today', () => {
-  it('extends the open segment to `now` and marks isOpen', () => {
+  it('emits [leading-GAP, open-WORK] — no trailing gap because work ends at now', () => {
     const now = date('2026-05-30T09:45:00.000Z');
     const r = buildDayInsight({
       date: '2026-05-30',
@@ -131,9 +136,10 @@ describe('buildDayInsight — open running segment today', () => {
       window: makeWindow('2026-05-30', 'UTC'),
     });
     expect(r.isToday).toBe(true);
-    expect(r.blocks).toHaveLength(1);
-    expect(r.blocks[0]!.isOpen).toBe(true);
-    expect(r.blocks[0]!.endedAt).toBe(now.getTime());
+    expect(r.blocks.map((b) => b.kind)).toEqual(['GAP', 'WORK']);
+    const workBlock = r.blocks[1]!;
+    expect(workBlock.isOpen).toBe(true);
+    expect(workBlock.endedAt).toBe(now.getTime());
   });
 });
 
@@ -160,11 +166,13 @@ describe('buildDayInsight — MEETING / IDLE_TRIMMED inside a tracked entry', ()
       window: makeWindow('2026-05-30', 'UTC'),
     });
     const kinds = r.blocks.map((b) => b.kind);
-    expect(kinds).toEqual(['WORK', 'MEETING', 'IDLE_TRIMMED', 'WORK']);
+    // Leading + trailing gaps wrap the segment-derived blocks.
+    expect(kinds).toEqual(['GAP', 'WORK', 'MEETING', 'IDLE_TRIMMED', 'WORK', 'GAP']);
     expect(r.totals.workedMs).toBe(80 * 60 * 1000);
     expect(r.totals.meetingMs).toBe(30 * 60 * 1000);
     expect(r.totals.idleTrimmedMs).toBe(10 * 60 * 1000);
-    expect(r.totals.gapMs).toBe(0);
+    // Full day - 2h tracked = 22h of gap.
+    expect(r.totals.gapMs).toBe(22 * 3600 * 1000);
   });
 });
 
@@ -187,15 +195,16 @@ describe('buildDayInsight — APPROVED MANUAL entry', () => {
       pending: [],
       window: makeWindow('2026-05-30', 'UTC'),
     });
-    expect(r.blocks).toHaveLength(1);
-    expect(r.blocks[0]!.kind).toBe('MANUAL');
+    expect(r.blocks.map((b) => b.kind)).toEqual(['GAP', 'MANUAL', 'GAP']);
+    const manualBlock = r.blocks[1]!;
+    expect(manualBlock.kind).toBe('MANUAL');
     expect(r.totals.manualMs).toBe(90 * 60 * 1000);
     expect(r.totals.workedMs).toBe(0);
   });
 });
 
 describe('buildDayInsight — multi-entry GAP detection (past day)', () => {
-  it('inserts a GAP block between adjacent tracked entries; no leading/trailing gap', () => {
+  it('inserts leading + inter-block + trailing GAPs around tracked entries', () => {
     const r = buildDayInsight({
       date: '2026-05-30',
       tz: 'UTC',
@@ -217,9 +226,11 @@ describe('buildDayInsight — multi-entry GAP detection (past day)', () => {
       pending: [],
       window: makeWindow('2026-05-30', 'UTC'),
     });
-    expect(r.blocks.map((b) => b.kind)).toEqual(['WORK', 'GAP', 'WORK']);
-    expect(r.blocks[1]!.durationMs).toBe(90 * 60 * 1000);
-    expect(r.totals.gapMs).toBe(90 * 60 * 1000);
+    expect(r.blocks.map((b) => b.kind)).toEqual(['GAP', 'WORK', 'GAP', 'WORK', 'GAP']);
+    // Inter-block gap: 11am-12:30pm = 1.5h
+    expect(r.blocks[2]!.durationMs).toBe(90 * 60 * 1000);
+    // Total gaps: 9h (leading) + 1.5h (inter) + 10h (trailing) = 20.5h
+    expect(r.totals.gapMs).toBe(20.5 * 3600 * 1000);
   });
 });
 
@@ -241,8 +252,9 @@ describe('buildDayInsight — today with trailing gap to now', () => {
       pending: [],
       window: makeWindow('2026-05-30', 'UTC'),
     });
-    expect(r.blocks.map((b) => b.kind)).toEqual(['WORK', 'GAP']);
-    expect(r.blocks[1]!.endedAt).toBe(now.getTime());
+    // [leading GAP 12am-9am, WORK 9am-1pm, trailing GAP 1pm-now=3pm]
+    expect(r.blocks.map((b) => b.kind)).toEqual(['GAP', 'WORK', 'GAP']);
+    expect(r.blocks[2]!.endedAt).toBe(now.getTime());
     expect(r.lastActivityAt).toBe(now.getTime());
   });
 });
@@ -287,7 +299,10 @@ describe('buildDayInsight — PENDING request overlay', () => {
       ],
       window: makeWindow('2026-05-30', 'UTC'),
     });
-    expect(r.blocks).toHaveLength(0); // PENDING != real block
+    // The day has no tracked entries, so blocks is a single full-day GAP.
+    // PENDING is reported separately via pendingOverlay (not in blocks).
+    expect(r.blocks).toHaveLength(1);
+    expect(r.blocks[0]!.kind).toBe('GAP');
     expect(r.pendingOverlay).toHaveLength(2);
     // First one was clipped on the left edge.
     expect(r.pendingOverlay[0]!.startedAt).toBe(date('2026-05-30T00:00:00Z').getTime());
@@ -344,8 +359,11 @@ describe('buildDayInsight — totals accounting', () => {
       pending: [],
       window: makeWindow('2026-05-30', 'UTC'),
     });
-    const envelope = r.lastActivityAt! - r.firstActivityAt!;
+    // With full-day partitioning, totals sum to the day's billable span:
+    // 24h for past days, min(now-dayStart, 24h) for today / cropped for
+    // future. This test uses a past day so the sum is exactly 24h.
+    const fullDay = 24 * 3600 * 1000;
     const sum = r.totals.workedMs + r.totals.meetingMs + r.totals.manualMs + r.totals.idleTrimmedMs + r.totals.gapMs;
-    expect(sum).toBe(envelope);
+    expect(sum).toBe(fullDay);
   });
 });
