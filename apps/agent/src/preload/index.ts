@@ -88,6 +88,37 @@ const api = {
     createTask: (input: { summary: string; due?: number | null; description?: string | null }): Promise<{ ok: boolean; error?: string }> =>
       ipcRenderer.invoke('lark:createTask', input),
   },
+  timeRequests: {
+    create: (input: {
+      requestedStart: number;
+      requestedEnd: number;
+      reason: string;
+      larkTaskGuid?: string | null;
+      taskSummary?: string | null;
+    }): Promise<{
+      ok: boolean;
+      request?: ManualTimeRequestDto;
+      error?: string;
+    }> => ipcRenderer.invoke('timeRequests:create', input),
+    listMine: (status?: 'PENDING' | 'APPROVED' | 'REJECTED'): Promise<{ requests: ManualTimeRequestDto[] }> =>
+      ipcRenderer.invoke('timeRequests:listMine', status),
+  },
+};
+
+type ManualTimeRequestDto = {
+  id: string;
+  clientUuid: string;
+  userId: string;
+  approverId: string | null;
+  larkTaskGuid: string | null;
+  larkMessageId: string | null;
+  requestedStart: string;
+  requestedEnd: string;
+  reason: string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  decidedAt: string | null;
+  decidedReason: string | null;
+  createdAt: string;
 };
 
 contextBridge.exposeInMainWorld('agent', api);

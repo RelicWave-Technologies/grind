@@ -41,7 +41,7 @@ describe('buildApprovalCard — pending', () => {
 
   it('uses the v2 card shape (config + header + elements)', () => {
     expect(card).toMatchObject({
-      config: { wide_screen_mode: true },
+      config: { wide_screen_mode: true, update_multi: true },
       header: { template: 'blue', title: { tag: 'plain_text', content: 'Manual time request' } },
     });
     expect(Array.isArray(card.elements)).toBe(true);
@@ -68,15 +68,20 @@ describe('buildApprovalCard — pending', () => {
     expect(findTextContaining(card, '1h 30m')).toBe(true);
   });
 
-  it('omits the task field when not provided (untagged session)', () => {
+  it('still renders a Task line when no task is attached (shows "Untracked")', () => {
     const noTask = buildApprovalCard({ ...REQ, taskSummary: null });
     expect(findTextContaining(noTask, 'Implement onboarding')).toBe(false);
+    expect(findTextContaining(noTask, 'Untracked')).toBe(true);
     expect(findTextContaining(noTask, 'Anish Suman')).toBe(true);
   });
 
   it('shows "<60 min" durations correctly', () => {
     const short = buildApprovalCard({ ...REQ, endedAt: REQ.startedAt + 45 * 60 * 1000 });
     expect(findTextContaining(short, '45 min')).toBe(true);
+  });
+
+  it('enables update_multi on the ORIGINAL card so the callback can replace it (avoids Lark code 200340)', () => {
+    expect((card.config as Record<string, unknown>).update_multi).toBe(true);
   });
 
   it('JSON-serializes cleanly (Lark expects content as a JSON string)', () => {

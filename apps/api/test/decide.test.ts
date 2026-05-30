@@ -1,0 +1,129 @@
+import { describe, it, expect } from 'vitest';
+import { prisma } from '@grind/db';
+import { decideRequest } from '../src/lark/decide';
+import { seedUser } from './helpers';
+
+/**
+ * Real Postgres tests for the decide path. No mocks — we build a real
+ * ManualTimeRequest with a real approver + LarkIdentity, then call
+ * decideRequest and assert the DB state + card payload.
+ */
+
+let openIdCounter = 0;
+async function setup(opts: { approverOpenId?: string | null } = {}) {
+  const openId = opts.approverOpenId === null ? null : opts.approverOpenId ?? `ou_decider_${Date.now()}_${++openIdCounter}`;
+  const requester = await seedUser({ role: 'MEMBER' });
+  const admin = await prisma.user.create({
+    data: {
+      workspaceId: requester.workspaceId,
+      email: `dec-admin-${Date.now()}-${openIdCounter}@test.local`,
+      name: 'Decider Dave',
+      role: 'ADMIN',
+      passwordHash: 'x'.repeat(60),
+    },
+  });
+  if (openId) await prisma.larkIdentity.create({ data: { userId: admin.id, openId } });
+  const start = new Date('2026-05-29T09:00:00.000Z');
+  const end = new Date('2026-05-29T10:30:00.000Z');
+  const requesterUser = await prisma.user.findUniqueOrThrow({ where: { id: requester.userId } });
+  const req = await prisma.manualTimeRequest.create({
+    data: {
+      clientUuid: `cu_dec_${openIdCounter}`,
+      userId: requester.userId,
+      approverId: admin.id,
+      larkTaskGuid: 'guid-T',
+      requestedStart: start,
+      requestedEnd: end,
+      reason: 'Forgot to start tracker',
+      status: 'PENDING',
+    },
+  });
+  return { requester: requesterUser, admin, req, openId };
+}
+
+describe('decideRequest — APPROVE', () => {
+  it('flips status to APPROVED, creates a real TimeEntry(MANUAL), returns a green decided card', async () => {
+    const { admin, req, openId } = await setup();
+    const result = await decideRequest({ requestId: req.id, action: 'approve', decidedByOpenId: openId! });
+    expect(result).not.toBeNull();
+    expect(result!.status).toBe('APPROVED');
+    expect(result!.timeEntryId).toBeTruthy();
+    expect(result!.noop).toBeNull();
+
+    // Real DB state
+    const row = await prisma.manualTimeRequest.findUniqueOrThrow({ where: { id: req.id } });
+    expect(row.status).toBe('APPROVED');
+    expect(row.decidedAt).not.toBeNull();
+    expect(row.timeEntryId).toBe(result!.timeEntryId);
+
+    const te = await prisma.timeEntry.findUniqueOrThrow({ where: { id: result!.timeEntryId! }, include: { segments: true } });
+    expect(te.source).toBe('MANUAL');
+    expect(te.startedAt.toISOString()).toBe(req.requestedStart.toISOString());
+    expect(te.endedAt!.toISOString()).toBe(req.requestedEnd.toISOString());
+    expect(te.larkTaskGuid).toBe('guid-T');
+    expect(te.segments).toHaveLength(1);
+    expect(te.segments[0]!.kind).toBe('WORK');
+
+    // Card reflects the decision
+    expect((result!.card.header as Record<string, unknown>).template).toBe('green');
+    expect(JSON.stringify(result!.card)).toContain('Approved');
+    expect(JSON.stringify(result!.card)).toContain(admin.name);
+  });
+});
+
+describe('decideRequest — REJECT', () => {
+  it('flips status to REJECTED, does NOT create a TimeEntry, returns a red decided card', async () => {
+    const { req, openId } = await setup();
+    const result = await decideRequest({ requestId: req.id, action: 'reject', decidedByOpenId: openId! });
+    expect(result!.status).toBe('REJECTED');
+    expect(result!.timeEntryId).toBeNull();
+
+    const row = await prisma.manualTimeRequest.findUniqueOrThrow({ where: { id: req.id } });
+    expect(row.status).toBe('REJECTED');
+    expect(row.timeEntryId).toBeNull();
+    expect(await prisma.timeEntry.count()).toBe(0); // no TimeEntry was created
+
+    expect((result!.card.header as Record<string, unknown>).template).toBe('red');
+  });
+});
+
+describe('decideRequest — idempotency', () => {
+  it('a second click on an already-approved card is a no-op (status preserved, no duplicate entry)', async () => {
+    const { req, openId } = await setup();
+    const first = await decideRequest({ requestId: req.id, action: 'approve', decidedByOpenId: openId! });
+    expect(first!.status).toBe('APPROVED');
+    const firstTeId = first!.timeEntryId;
+
+    const second = await decideRequest({ requestId: req.id, action: 'reject', decidedByOpenId: openId! });
+    expect(second!.status).toBe('APPROVED'); // unchanged
+    expect(second!.noop).toBe('already_decided');
+    expect(second!.timeEntryId).toBe(firstTeId); // same TimeEntry, no duplicate
+
+    // Exactly one TimeEntry exists.
+    expect(await prisma.timeEntry.count()).toBe(1);
+  });
+});
+
+describe('decideRequest — authorization', () => {
+  it('rejects a decider whose open_id is not the assigned approver', async () => {
+    const { req } = await setup({ approverOpenId: 'ou_approver_A' });
+    const result = await decideRequest({ requestId: req.id, action: 'approve', decidedByOpenId: 'ou_someone_else' });
+    expect(result!.noop).toBe('forbidden');
+
+    const row = await prisma.manualTimeRequest.findUniqueOrThrow({ where: { id: req.id } });
+    expect(row.status).toBe('PENDING'); // not touched
+  });
+
+  it('rejects when the approver has no Lark identity (no decider can match)', async () => {
+    const { req } = await setup({ approverOpenId: null });
+    const result = await decideRequest({ requestId: req.id, action: 'approve', decidedByOpenId: 'ou_anything' });
+    expect(result!.noop).toBe('forbidden');
+  });
+});
+
+describe('decideRequest — missing request', () => {
+  it('returns null for an unknown requestId', async () => {
+    const result = await decideRequest({ requestId: 'does_not_exist', action: 'approve', decidedByOpenId: 'ou_x' });
+    expect(result).toBeNull();
+  });
+});

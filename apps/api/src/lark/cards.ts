@@ -51,7 +51,10 @@ function detailFields(req: ApprovalCardInput) {
     { is_short: true, text: { tag: 'lark_md', content: `**Duration**\n${fmtDurationMinutes(req.endedAt - req.startedAt)}` } },
     { is_short: false, text: { tag: 'lark_md', content: `**When**\n${fmtRange(req.startedAt, req.endedAt)}` } },
   ];
-  if (req.taskSummary) fields.push({ is_short: false, text: { tag: 'lark_md', content: `**Task**\n${req.taskSummary}` } });
+  fields.push({
+    is_short: false,
+    text: { tag: 'lark_md', content: `**Task**\n${req.taskSummary?.trim() ? req.taskSummary : '_Untracked_'}` },
+  });
   fields.push({ is_short: false, text: { tag: 'lark_md', content: `**Reason**\n${req.reason}` } });
   return fields;
 }
@@ -59,7 +62,11 @@ function detailFields(req: ApprovalCardInput) {
 /** The pending approval card sent to the approver. */
 export function buildApprovalCard(req: ApprovalCardInput): Record<string, unknown> {
   return {
-    config: { wide_screen_mode: true },
+    // `update_multi: true` is required on the ORIGINAL card so that the
+    // card.action.trigger callback's replacement card can update the message
+    // for everyone (not just the clicker). Without it Lark rejects the update
+    // with code 200340 ("card action handle failed").
+    config: { wide_screen_mode: true, update_multi: true },
     header: {
       title: { tag: 'plain_text', content: 'Manual time request' },
       template: 'blue',

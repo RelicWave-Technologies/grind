@@ -16,6 +16,8 @@ export { signOAuthState, verifyOAuthState, buildAuthorizeUrl } from './oauth';
 export { mapTasks, loggedMsByGuid, toEpochMs } from './tasks';
 export type { UserTaskClient, LarkTaskDto, CreateLarkTaskInput } from './tasks';
 export { buildApprovalCard, buildDecidedCard } from './cards';
+export { decideRequest } from './decide';
+export { startCardCallback } from './cardCallback';
 export type { ApprovalCardInput, DecidedCardInput, ApprovalAction } from './cards';
 export type { LarkMessenger, SendCardResult } from './messenger';
 
