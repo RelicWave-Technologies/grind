@@ -39,34 +39,64 @@ export interface RowProps {
   /** Pull approver-row by clicking ribbon counterpart. */
   onSelectRow?: (rowId: string) => void;
   /**
-   * When set on a gap row, overrides the row's initial start/end to a
-   * narrower range (e.g. ribbon click snapped a 1h window inside a long gap)
-   * and auto-focuses the reason input so the user can start typing.
+   * When set on a gap row, applies a narrower start/end (e.g. ribbon click
+   * snapped a 1h window inside a long gap) and auto-focuses the reason
+   * input so the user can start typing. The `tick` field bumps on every
+   * ribbon click so re-clicking the same spot still re-applies — pure
+   * value-equality wouldn't trigger React effects.
    */
-  presetOverride?: { startedAt: number; endedAt: number } | null;
+  presetOverride?: { startedAt: number; endedAt: number; tick: number } | null;
 }
 
 export default function EntryRow(props: RowProps) {
   const qc = useQueryClient();
+  // The row's draft only re-syncs when the SERVER-side identity changes
+  // (refetch, different row). Preset overrides apply via a separate effect
+  // below so they don't fight the user's manual edits.
   const initial = useMemo(
     () => ({
       taskGuid: props.larkTaskGuid ?? '',
       notes: props.notes ?? '',
-      startedAt: props.presetOverride?.startedAt ?? props.startedAt,
-      endedAt: props.presetOverride?.endedAt ?? props.endedAt,
+      startedAt: props.startedAt,
+      endedAt: props.endedAt,
     }),
-    [props.larkTaskGuid, props.notes, props.startedAt, props.endedAt, props.presetOverride?.startedAt, props.presetOverride?.endedAt],
+    [props.larkTaskGuid, props.notes, props.startedAt, props.endedAt],
   );
   const [draft, setDraft] = useState(initial);
-  // Re-sync when the server-side value identity changes (e.g. after refetch).
-  useEffect(() => setDraft(initial), [initial]);
-  const reasonRef = useRef<HTMLInputElement>(null);
-  // When a ribbon click hands us a presetOverride, focus the reason input so
-  // the user can immediately type without hunting for it.
+  // Refetches happen every 5s on today (trailing gap's endedAt = now ticks
+  // forward, the running entry's endedAt ticks forward). Without a guard,
+  // those refetches would wipe a user's in-progress edits. So only re-sync
+  // when the user has NO unsaved changes. The check uses the previous
+  // `initial` snapshot — we keep it in a ref so dependency churn doesn't
+  // trip the comparison.
+  const lastInitialRef = useRef(initial);
   useEffect(() => {
-    if (props.presetOverride && reasonRef.current) {
-      reasonRef.current.focus();
-    }
+    const prev = lastInitialRef.current;
+    const draftMatchesPrev =
+      draft.taskGuid === prev.taskGuid &&
+      draft.notes === prev.notes &&
+      draft.startedAt === prev.startedAt &&
+      draft.endedAt === prev.endedAt;
+    lastInitialRef.current = initial;
+    if (draftMatchesPrev) setDraft(initial);
+    // If the draft diverged from the last initial, the user has unsaved
+    // edits — leave them alone.
+  }, [initial, draft]);
+
+  const reasonRef = useRef<HTMLInputElement>(null);
+  // Apply a preset (ribbon-click → narrower start/end + focus reason) once
+  // per tick. Subsequent user edits on start/end stick; we only fire on tick
+  // changes, not on the existence of presetOverride.
+  const lastTickRef = useRef<number>(-1);
+  useEffect(() => {
+    const p = props.presetOverride;
+    if (!p) return;
+    if (p.tick === lastTickRef.current) return;
+    lastTickRef.current = p.tick;
+    setDraft((d) => ({ ...d, startedAt: p.startedAt, endedAt: p.endedAt }));
+    // Defer focus to the next paint so the input is mounted + visible after
+    // any scroll-into-view that the flash effect triggered.
+    requestAnimationFrame(() => reasonRef.current?.focus());
   }, [props.presetOverride]);
 
   const dirty =
