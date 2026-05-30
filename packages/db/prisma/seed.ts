@@ -24,21 +24,7 @@ async function main() {
     },
   });
 
-  const projects = [
-    { id: 'proj_grind_tracker', name: 'Grind Tracker' },
-    { id: 'proj_client_work', name: 'Client Work' },
-    { id: 'proj_admin_ops', name: 'Admin & Ops' },
-  ];
-
-  for (const p of projects) {
-    await prisma.project.upsert({
-      where: { id: p.id },
-      update: { name: p.name, workspaceId: ws.id },
-      create: { id: p.id, name: p.name, workspaceId: ws.id },
-    });
-  }
-
-  console.log(`Seeded: workspace=${ws.id} user=${owner.email} projects=${projects.length}`);
+  console.log(`Seeded: workspace=${ws.id} user=${owner.email} (projects removed — tracker is Lark-task-only now)`);
 }
 
 main()

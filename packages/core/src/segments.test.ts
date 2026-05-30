@@ -23,7 +23,6 @@ function baseEntry(startedAt = T0): TimeEntry {
     id: 'te_1',
     clientUuid: 'uuid_1',
     userId: 'u_1',
-    projectId: 'p_1',
     startedAt,
     segmentId: 's_1',
   });
@@ -36,17 +35,17 @@ describe('createTimeEntry', () => {
     expect(e.segments).toHaveLength(1);
     expect(e.segments[0]).toMatchObject({ id: 's_1', kind: 'WORK', startedAt: T0, endedAt: null });
     expect(e.source).toBe('AUTO');
-    expect(e.taskId).toBeNull();
+    expect(e.larkTaskGuid).toBeNull();
     expect(validateEntry(e)).toEqual([]);
   });
 
-  it('honors explicit source and taskId', () => {
+  it('honors explicit source and Lark task attribution', () => {
     const e = createTimeEntry({
-      id: 'te', clientUuid: 'u', userId: 'u1', projectId: 'p1',
-      taskId: 'task_9', source: 'MANUAL', startedAt: T0, segmentId: 's',
+      id: 'te', clientUuid: 'u', userId: 'u1',
+      larkTaskGuid: 'guid_xyz', source: 'MANUAL', startedAt: T0, segmentId: 's',
     });
     expect(e.source).toBe('MANUAL');
-    expect(e.taskId).toBe('task_9');
+    expect(e.larkTaskGuid).toBe('guid_xyz');
   });
 });
 

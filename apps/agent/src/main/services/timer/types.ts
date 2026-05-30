@@ -35,7 +35,5 @@ export interface SyncClient {
 }
 
 export interface StartArgs {
-  projectId?: string | null;
-  taskId?: string | null;
   larkTaskGuid?: string | null;
 }

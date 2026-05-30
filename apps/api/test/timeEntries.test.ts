@@ -16,13 +16,12 @@ function auth(req: request.Test, token: string) {
   return req.set('Authorization', `Bearer ${token}`);
 }
 
-function createBody(u: SeededUser, over: { startedAtMs?: number; projectId?: string; taskId?: string; segments?: unknown[] } = {}) {
+function createBody(_u: SeededUser, over: { startedAtMs?: number; larkTaskGuid?: string | null; segments?: unknown[] } = {}) {
   const startMs = over.startedAtMs ?? T0;
   return {
     id: fakeUlid('te'),
     clientUuid: fakeUlid('cu'),
-    projectId: over.projectId ?? u.projectId,
-    ...(over.taskId ? { taskId: over.taskId } : {}),
+    ...(over.larkTaskGuid !== undefined ? { larkTaskGuid: over.larkTaskGuid } : {}),
     source: 'AUTO',
     startedAt: iso(startMs),
     agentVersion: '0.0.1',
@@ -68,24 +67,6 @@ describe('POST /v1/time-entries', () => {
     expect(second.body.id).toBe(first.body.id);
   });
 
-  it('rejects a project from another workspace', async () => {
-    const u1 = await seedUser();
-    const u2 = await seedUser();
-    const body = createBody(u1, { projectId: u2.projectId }); // foreign project
-    const res = await auth(request(app).post('/v1/time-entries'), u1.accessToken).send(body);
-    expect(res.status).toBe(400);
-    expect(res.body.error).toBe('invalid_project');
-  });
-
-  it('rejects a task that does not belong to the project', async () => {
-    const u1 = await seedUser();
-    const u2 = await seedUser();
-    const body = createBody(u1, { taskId: u2.taskId });
-    const res = await auth(request(app).post('/v1/time-entries'), u1.accessToken).send(body);
-    expect(res.status).toBe(400);
-    expect(res.body.error).toBe('invalid_task');
-  });
-
   it('rejects invalid segments (overlap)', async () => {
     const u = await seedUser();
     const body = createBody(u, {
@@ -100,14 +81,11 @@ describe('POST /v1/time-entries', () => {
     expect(String(res.body.details)).toMatch(/overlap/);
   });
 
-  it('allows a body with no projectId (entry attributed to a Lark task instead)', async () => {
+  it('attributes an entry to a Lark task via larkTaskGuid', async () => {
     const u = await seedUser();
-    const body = createBody(u);
-    delete (body as Record<string, unknown>).projectId;
-    (body as Record<string, unknown>).larkTaskGuid = 'guid-xyz';
+    const body = createBody(u, { larkTaskGuid: 'guid-xyz' });
     const res = await auth(request(app).post('/v1/time-entries'), u.accessToken).send(body);
     expect(res.status).toBe(201);
-    expect(res.body.projectId).toBeNull();
     expect(res.body.larkTaskGuid).toBe('guid-xyz');
   });
 

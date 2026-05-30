@@ -83,7 +83,7 @@ beforeEach(() => {
 
 describe('TimerService.start', () => {
   it('creates a running entry and persists + syncs it', async () => {
-    const status = await svc.start({ projectId: 'p1' });
+    const status = await svc.start({});
     expect(status.state).toBe('RUNNING');
     expect(svc.isRunning()).toBe(true);
     expect(store.getOpen()).not.toBeNull();
@@ -91,30 +91,25 @@ describe('TimerService.start', () => {
   });
 
   it('rejects starting a second timer while one is running', async () => {
-    await svc.start({ projectId: 'p1' });
-    await expect(svc.start({ projectId: 'p2' })).rejects.toThrow(/already running/);
-  });
-
-  it('attributes project + task', async () => {
-    const status = await svc.start({ projectId: 'p1', taskId: 't9' });
-    expect(status).toMatchObject({ state: 'RUNNING', projectId: 'p1', taskId: 't9' });
+    await svc.start({});
+    await expect(svc.start({})).rejects.toThrow(/already running/);
   });
 
   it('attributes a Lark task guid and persists it', async () => {
-    const status = await svc.start({ projectId: 'p1', larkTaskGuid: 'guid-123' });
+    const status = await svc.start({ larkTaskGuid: 'guid-123' });
     expect(status).toMatchObject({ state: 'RUNNING', larkTaskGuid: 'guid-123' });
     expect(store.getOpen()?.larkTaskGuid).toBe('guid-123');
   });
 
   it('defaults larkTaskGuid to null when not provided', async () => {
-    const status = await svc.start({ projectId: 'p1' });
+    const status = await svc.start({});
     if (status.state === 'RUNNING') expect(status.larkTaskGuid).toBeNull();
   });
 });
 
 describe('TimerService.status worked time', () => {
   it('accrues worked ms as the clock advances', async () => {
-    await svc.start({ projectId: 'p1' });
+    await svc.start({});
     clock.advance(7 * MIN);
     const s = svc.status();
     expect(s.state).toBe('RUNNING');
@@ -124,7 +119,7 @@ describe('TimerService.status worked time', () => {
 
 describe('TimerService.stop', () => {
   it('closes the entry and returns to IDLE', async () => {
-    await svc.start({ projectId: 'p1' });
+    await svc.start({});
     clock.advance(10 * MIN);
     const status = await svc.stop();
     expect(status.state).toBe('IDLE');
@@ -146,7 +141,7 @@ describe('TimerService.stop', () => {
 describe('TimerService offline behaviour', () => {
   it('keeps the timer working when create sync fails, and retries via flush', async () => {
     sync.failNext = true; // the create POST fails
-    await svc.start({ projectId: 'p1' });
+    await svc.start({});
     expect(svc.isRunning()).toBe(true); // timer unaffected by network
     expect(sync.creates).toHaveLength(0);
     expect(store.getUnsynced()).toHaveLength(1);
@@ -160,7 +155,7 @@ describe('TimerService offline behaviour', () => {
 
 describe('TimerService.discardAway (sleep/lock)', () => {
   it('trims the away gap and keeps the timer running', async () => {
-    await svc.start({ projectId: 'p1' }); // WORK from T0
+    await svc.start({}); // WORK from T0
     clock.advance(5 * MIN); // worked 5 min, then machine sleeps
     const awayStart = clock.now();
     clock.advance(30 * MIN); // asleep 30 min
@@ -181,7 +176,7 @@ describe('TimerService.discardAway (sleep/lock)', () => {
   });
 
   it('ignores trivially short gaps', async () => {
-    await svc.start({ projectId: 'p1' });
+    await svc.start({});
     clock.advance(3 * MIN);
     const before = svc.status();
     await svc.discardAway(clock.now(), clock.now() + 500); // <1s
@@ -192,7 +187,7 @@ describe('TimerService.discardAway (sleep/lock)', () => {
 
 describe('TimerService.pauseForIdle / resumeFromIdle', () => {
   it('freezes worked time on pause and never counts the idle gap', async () => {
-    await svc.start({ projectId: 'p1' }); // WORK from T0
+    await svc.start({}); // WORK from T0
     clock.advance(5 * MIN); // worked 5 min
     await svc.pauseForIdle(clock.now());
 
@@ -215,7 +210,7 @@ describe('TimerService.pauseForIdle / resumeFromIdle', () => {
   });
 
   it('clamps pause time to the segment start (whole-segment idle)', async () => {
-    await svc.start({ projectId: 'p1' });
+    await svc.start({});
     clock.advance(2 * MIN);
     await svc.pauseForIdle(T0 - 10 * MIN); // idleStart before segment start
     const s = svc.status();
@@ -223,7 +218,7 @@ describe('TimerService.pauseForIdle / resumeFromIdle', () => {
   });
 
   it('break (stop) after pause finalizes at the frozen time', async () => {
-    await svc.start({ projectId: 'p1' });
+    await svc.start({});
     clock.advance(7 * MIN);
     await svc.pauseForIdle(clock.now());
     clock.advance(20 * MIN); // away
@@ -236,7 +231,7 @@ describe('TimerService.pauseForIdle / resumeFromIdle', () => {
   it('pause is a no-op when idle or already paused', async () => {
     await svc.pauseForIdle(T0); // not running
     expect(svc.isRunning()).toBe(false);
-    await svc.start({ projectId: 'p1' });
+    await svc.start({});
     await svc.pauseForIdle(clock.now());
     const before = svc.status();
     await svc.pauseForIdle(clock.now()); // already paused
@@ -246,7 +241,7 @@ describe('TimerService.pauseForIdle / resumeFromIdle', () => {
 
 describe('TimerService meeting segments', () => {
   it('switches WORK→MEETING→WORK and counts both as worked', async () => {
-    await svc.start({ projectId: 'p1' }); // WORK from T0
+    await svc.start({}); // WORK from T0
     clock.advance(5 * MIN);
     await svc.beginMeeting(clock.now()); // MEETING from T0+5
     expect(svc.isInMeetingSegment()).toBe(true);
@@ -261,7 +256,7 @@ describe('TimerService meeting segments', () => {
   it('beginMeeting is a no-op when not running or already in a meeting', async () => {
     await svc.beginMeeting(clock.now()); // not running
     expect(svc.isRunning()).toBe(false);
-    await svc.start({ projectId: 'p1' });
+    await svc.start({});
     await svc.beginMeeting(clock.now());
     const before = svc.status();
     await svc.beginMeeting(clock.now()); // already meeting
@@ -269,7 +264,7 @@ describe('TimerService meeting segments', () => {
   });
 
   it('endMeeting is a no-op when not in a meeting', async () => {
-    await svc.start({ projectId: 'p1' });
+    await svc.start({});
     const before = svc.status();
     await svc.endMeeting(clock.now());
     expect(svc.status()).toEqual(before);
@@ -279,7 +274,7 @@ describe('TimerService meeting segments', () => {
 describe('TimerService.recover (crash recovery)', () => {
   it('closes a left-open entry at last-known-active and syncs it', async () => {
     // Simulate a crash: persist an open entry, then build a fresh service.
-    await svc.start({ projectId: 'p1' });
+    await svc.start({});
     const lastActive = clock.now() + 3 * MIN;
 
     const svc2 = new TimerService(store, sync, clock, ids);

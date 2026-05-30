@@ -13,8 +13,7 @@ model Workspace {
   name      String
   createdAt DateTime @default(now())
 
-  users    User[]
-  projects Project[]
+  users User[]
 }
 
 enum Role {
@@ -38,35 +37,10 @@ model User {
   activitySamples ActivitySample[]
   larkIdentity    LarkIdentity?
   larkOAuthToken  LarkOAuthToken?
+  manualTimeRequests       ManualTimeRequest[] @relation("MtrRequester")
+  manualTimeApprovals      ManualTimeRequest[] @relation("MtrApprover")
 
   @@index([workspaceId])
-}
-
-model Project {
-  id          String    @id @default(cuid())
-  workspaceId String
-  workspace   Workspace @relation(fields: [workspaceId], references: [id])
-  name        String
-  archived    Boolean   @default(false)
-  createdAt   DateTime  @default(now())
-
-  tasks       Task[]
-  timeEntries TimeEntry[]
-
-  @@index([workspaceId, archived])
-}
-
-model Task {
-  id        String   @id @default(cuid())
-  projectId String
-  project   Project  @relation(fields: [projectId], references: [id])
-  name      String
-  done      Boolean  @default(false)
-  createdAt DateTime @default(now())
-
-  timeEntries TimeEntry[]
-
-  @@index([projectId])
 }
 
 enum TimeEntrySource {
@@ -85,12 +59,8 @@ model TimeEntry {
   clientUuid   String          @unique // idempotency key
   userId       String
   user         User            @relation(fields: [userId], references: [id])
-  // Optional: entries are attributed to a Lark task (larkTaskGuid); project is
-  // now an optional grouping rather than a required field.
-  projectId    String?
-  project      Project?        @relation(fields: [projectId], references: [id])
-  taskId       String?
-  task         Task?           @relation(fields: [taskId], references: [id])
+  /// Lark task this entry is attributed to (or null for an untagged session).
+  /// The "project" / local Task concepts were removed — tasks are Lark-only now.
   larkTaskGuid String?
   source       TimeEntrySource @default(AUTO)
   startedAt    DateTime
@@ -102,10 +72,10 @@ model TimeEntry {
 
   segments        TimeSegment[]
   activitySamples ActivitySample[]
+  manualTimeRequest ManualTimeRequest?
 
   @@index([userId, startedAt])
-  @@index([projectId, startedAt])
-  @@index([taskId])
+  @@index([larkTaskGuid])
 }
 
 model TimeSegment {
@@ -171,6 +141,40 @@ model LarkOAuthToken {
   lastRefreshedAt   DateTime?
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
+}
+
+enum ManualTimeRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+/// A user-submitted request to log time after the fact. Sent to a workspace
+/// approver (admin / manager) via a Lark IM interactive card; the manager's
+/// click flips status here and (on APPROVE) creates a TimeEntry(source=MANUAL).
+model ManualTimeRequest {
+  id             String                  @id @default(cuid())
+  clientUuid     String                  @unique // idempotency key from the agent
+  userId         String
+  user           User                    @relation("MtrRequester", fields: [userId], references: [id])
+  larkTaskGuid   String?
+  requestedStart DateTime
+  requestedEnd   DateTime
+  reason         String
+  status         ManualTimeRequestStatus @default(PENDING)
+  approverId     String?
+  approver       User?                   @relation("MtrApprover", fields: [approverId], references: [id])
+  larkMessageId  String?                 // id of the IM card we sent, for in-place update
+  decidedAt      DateTime?
+  decidedReason  String?                 // optional approver note
+  /// FK to the TimeEntry created on APPROVE (null until decided / on reject).
+  timeEntryId    String?                 @unique
+  timeEntry      TimeEntry?              @relation(fields: [timeEntryId], references: [id], onDelete: SetNull)
+  createdAt      DateTime                @default(now())
+  updatedAt      DateTime                @updatedAt
+
+  @@index([userId, status])
+  @@index([approverId, status])
 }
 
 model RefreshToken {

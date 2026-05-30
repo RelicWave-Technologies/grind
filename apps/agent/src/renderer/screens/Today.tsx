@@ -50,7 +50,7 @@ export default function Today() {
     return () => { alive = false; off(); clearInterval(tick); };
   }, []);
 
-  const start = useMutation({ mutationFn: (guid: string) => window.agent.timer.start(null, null, guid), onSuccess: (s) => setTimer(s) });
+  const start = useMutation({ mutationFn: (guid: string) => window.agent.timer.start(guid), onSuccess: (s) => setTimer(s) });
   const stop = useMutation({ mutationFn: () => window.agent.timer.stop(), onSuccess: (s) => setTimer(s) });
   const connectLark = useMutation({ mutationFn: () => window.agent.lark.connect() });
 

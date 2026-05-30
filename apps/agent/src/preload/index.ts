@@ -1,13 +1,13 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { UserDto, ProjectDto } from '@grind/types';
+import type { UserDto } from '@grind/types';
 
 type AuthStatus = 'loggedIn' | 'loggedOut';
 type AgentStatus = { state: 'IDLE' | 'OFFLINE'; lastHeartbeatAt: string | null };
 type TimerStatus =
   | { state: 'IDLE' }
-  | { state: 'RUNNING'; entryId: string; projectId: string | null; taskId: string | null; larkTaskGuid: string | null; startedAt: number; workedMs: number; paused: boolean };
+  | { state: 'RUNNING'; entryId: string; larkTaskGuid: string | null; startedAt: number; workedMs: number; paused: boolean };
 type TodaySegment = { kind: 'WORK' | 'MEETING' | 'IDLE_TRIMMED'; startedAt: number; endedAt: number | null };
-type TodayEntry = { id: string; projectId: string | null; larkTaskGuid: string | null; segments: TodaySegment[] };
+type TodayEntry = { id: string; larkTaskGuid: string | null; segments: TodaySegment[] };
 
 const api = {
   auth: {
@@ -23,15 +23,12 @@ const api = {
       };
     },
   },
-  projects: {
-    list: (): Promise<ProjectDto[]> => ipcRenderer.invoke('projects:list'),
-  },
   agent: {
     status: (): Promise<AgentStatus> => ipcRenderer.invoke('agent:status'),
   },
   timer: {
-    start: (projectId: string | null, taskId?: string | null, larkTaskGuid?: string | null): Promise<TimerStatus> =>
-      ipcRenderer.invoke('timer:start', { projectId, taskId, larkTaskGuid }),
+    start: (larkTaskGuid?: string | null): Promise<TimerStatus> =>
+      ipcRenderer.invoke('timer:start', { larkTaskGuid }),
     stop: (): Promise<TimerStatus> => ipcRenderer.invoke('timer:stop'),
     status: (): Promise<TimerStatus> => ipcRenderer.invoke('timer:status'),
     today: (): Promise<TodayEntry[]> => ipcRenderer.invoke('timer:today'),

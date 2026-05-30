@@ -15,7 +15,7 @@ export default function Popover() {
     return window.agent.timer.onStatusChange(setTimer);
   }, []);
 
-  const start = useMutation({ mutationFn: (guid: string) => window.agent.timer.start(null, null, guid), onSuccess: setTimer });
+  const start = useMutation({ mutationFn: (guid: string) => window.agent.timer.start(guid), onSuccess: setTimer });
   const stop = useMutation({ mutationFn: () => window.agent.timer.stop(), onSuccess: setTimer });
 
   const tasks = larkTasks.data?.tasks ?? [];

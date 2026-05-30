@@ -1,12 +1,12 @@
-import type { UserDto, ProjectDto } from '@grind/types';
+import type { UserDto } from '@grind/types';
 
 type AuthStatus = 'loggedIn' | 'loggedOut';
 type AgentStatus = { state: 'IDLE' | 'OFFLINE'; lastHeartbeatAt: string | null };
 type TimerStatus =
   | { state: 'IDLE' }
-  | { state: 'RUNNING'; entryId: string; projectId: string | null; taskId: string | null; larkTaskGuid: string | null; startedAt: number; workedMs: number; paused: boolean };
+  | { state: 'RUNNING'; entryId: string; larkTaskGuid: string | null; startedAt: number; workedMs: number; paused: boolean };
 export type TodaySegment = { kind: 'WORK' | 'MEETING' | 'IDLE_TRIMMED'; startedAt: number; endedAt: number | null };
-export type TodayEntry = { id: string; projectId: string | null; larkTaskGuid: string | null; segments: TodaySegment[] };
+export type TodayEntry = { id: string; larkTaskGuid: string | null; segments: TodaySegment[] };
 
 declare global {
   interface Window {
@@ -17,14 +17,11 @@ declare global {
         status: () => Promise<AuthStatus>;
         onStatusChange: (cb: (s: AuthStatus) => void) => () => void;
       };
-      projects: {
-        list: () => Promise<ProjectDto[]>;
-      };
       agent: {
         status: () => Promise<AgentStatus>;
       };
       timer: {
-        start: (projectId: string | null, taskId?: string | null, larkTaskGuid?: string | null) => Promise<TimerStatus>;
+        start: (larkTaskGuid?: string | null) => Promise<TimerStatus>;
         stop: () => Promise<TimerStatus>;
         status: () => Promise<TimerStatus>;
         today: () => Promise<TodayEntry[]>;
