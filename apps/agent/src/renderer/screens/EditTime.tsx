@@ -55,6 +55,7 @@ export default function EditTime() {
     queryKey: ['dayInsight', date, timezone],
     queryFn: () => window.agent.insights.day({ date, tz: timezone }),
     refetchInterval: date === localToday() ? 5_000 : 60_000,
+    retry: 1, // give 1 retry on transient failures, then surface the error
   });
   const larkTasks = useQuery({
     queryKey: ['larkTasks'],
@@ -129,7 +130,22 @@ export default function EditTime() {
           </div>
 
           {/* Ribbon */}
-          {day.isLoading || !dayData ? (
+          {day.isError ? (
+            <div className="empty rise rise-1">
+              <span className="empty-icon" style={{ background: 'rgba(255,77,106,0.12)', color: 'var(--danger)' }}>
+                <X size={26} strokeWidth={2} />
+              </span>
+              <div className="h3">Couldn't load this day</div>
+              <div className="callout secondary">
+                {String((day.error as Error)?.message ?? day.error).includes('timeout')
+                  ? "The agent's main process may need a restart (Cmd-Q + relaunch). In dev, HMR only updates the UI; IPC handlers ship in the main process."
+                  : 'Check that the API is running on port 4000.'}
+              </div>
+              <button className="btn btn-prominent no-drag" style={{ marginTop: 'var(--sp-4)' }} onClick={() => day.refetch()}>
+                Retry
+              </button>
+            </div>
+          ) : day.isLoading || !dayData ? (
             <div className="focus-card rise rise-1" style={{ height: 90, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--label-tertiary)' }}>
               Loading…
             </div>
