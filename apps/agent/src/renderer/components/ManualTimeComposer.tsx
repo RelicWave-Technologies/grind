@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { Clock, X } from 'lucide-react';
 
@@ -20,19 +20,49 @@ import { Clock, X } from 'lucide-react';
 
 type LarkTaskLite = { guid: string; summary: string };
 
+export interface ManualTimePreset {
+  startedAt: number; // epoch ms
+  endedAt: number; // epoch ms
+  larkTaskGuid: string | null;
+}
+
 export default function ManualTimeComposer({
   larkTasks,
   onCreated,
+  preset,
 }: {
   larkTasks: LarkTaskLite[];
   onCreated: (status: 'PENDING') => void;
+  /** Pre-fills the date/time/task fields. Reason intentionally stays empty. */
+  preset?: ManualTimePreset | null;
 }) {
-  const today = useMemo(() => new Date().toISOString().slice(0, 10), []);
-  const [date, setDate] = useState(today);
-  const [start, setStart] = useState('09:00');
-  const [end, setEnd] = useState('10:00');
+  const todayStr = useMemo(() => new Date().toISOString().slice(0, 10), []);
+
+  // Seed from preset on mount + whenever the preset reference changes (e.g.
+  // user clicks a different gap on the ribbon).
+  const seed = useMemo(() => {
+    if (!preset) return { date: todayStr, start: '09:00', end: '10:00', taskGuid: '' };
+    const sd = new Date(preset.startedAt);
+    const ed = new Date(preset.endedAt);
+    const ymd = `${sd.getFullYear()}-${String(sd.getMonth() + 1).padStart(2, '0')}-${String(sd.getDate()).padStart(2, '0')}`;
+    const hhmm = (d: Date) => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+    return { date: ymd, start: hhmm(sd), end: hhmm(ed), taskGuid: preset.larkTaskGuid ?? '' };
+  }, [preset, todayStr]);
+
+  const [date, setDate] = useState(seed.date);
+  const [start, setStart] = useState(seed.start);
+  const [end, setEnd] = useState(seed.end);
   const [reason, setReason] = useState('');
-  const [taskGuid, setTaskGuid] = useState<string>('');
+  const [taskGuid, setTaskGuid] = useState<string>(seed.taskGuid);
+
+  // Re-seed when the preset reference identity changes (e.g. user clicks
+  // a different gap). Reason stays empty intentionally.
+  useEffect(() => {
+    setDate(seed.date);
+    setStart(seed.start);
+    setEnd(seed.end);
+    setTaskGuid(seed.taskGuid);
+  }, [seed]);
 
   const startedAtMs = useMemo(() => new Date(`${date}T${start}:00`).getTime(), [date, start]);
   const endedAtMs = useMemo(() => new Date(`${date}T${end}:00`).getTime(), [date, end]);
@@ -77,7 +107,7 @@ export default function ManualTimeComposer({
       <div className="composer-row" style={{ display: 'flex', gap: 'var(--sp-3)', flexWrap: 'wrap' }}>
         <label className="composer-due no-drag" title="Date">
           <Clock size={15} strokeWidth={2} />
-          <input type="date" value={date} max={today} onChange={(e) => setDate(e.target.value)} />
+          <input type="date" value={date} max={todayStr} onChange={(e) => setDate(e.target.value)} />
         </label>
         <label className="composer-due no-drag" title="Start time">
           <span className="small secondary">Start</span>

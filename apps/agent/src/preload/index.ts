@@ -77,6 +77,8 @@ const api = {
       totals: { keystrokes: number; clicks: number; mouseDistancePx: number; scrollEvents: number };
       byHour: number[];
     }> => ipcRenderer.invoke('insights:today'),
+    day: (args: { date: string; tz: string }): Promise<DayInsightBridge> =>
+      ipcRenderer.invoke('insights:day', args),
   },
   lark: {
     status: (): Promise<{ configured: boolean; connected: boolean; reauthRequired: boolean; scopes: string[] }> =>
@@ -103,6 +105,28 @@ const api = {
     listMine: (status?: 'PENDING' | 'APPROVED' | 'REJECTED'): Promise<{ requests: ManualTimeRequestDto[] }> =>
       ipcRenderer.invoke('timeRequests:listMine', status),
   },
+};
+
+type DayInsightBridge = {
+  date: string;
+  timezone: string;
+  dayStart: number;
+  dayEnd: number;
+  isFuture: boolean;
+  isToday: boolean;
+  firstActivityAt: number | null;
+  lastActivityAt: number | null;
+  totals: { workedMs: number; meetingMs: number; manualMs: number; idleTrimmedMs: number; gapMs: number };
+  blocks: Array<{
+    kind: 'WORK' | 'MEETING' | 'IDLE_TRIMMED' | 'MANUAL' | 'GAP';
+    startedAt: number;
+    endedAt: number;
+    durationMs: number;
+    timeEntryId?: string;
+    larkTaskGuid?: string | null;
+    isOpen?: boolean;
+  }>;
+  pendingOverlay: Array<{ id: string; startedAt: number; endedAt: number; reason: string; larkTaskGuid: string | null }>;
 };
 
 type ManualTimeRequestDto = {

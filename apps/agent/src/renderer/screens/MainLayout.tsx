@@ -1,16 +1,18 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CalendarClock, ListTodo, PieChart, Settings as SettingsIcon, LogOut, Timer, Gauge, Clock, Keyboard, MousePointer2 } from 'lucide-react';
+import { CalendarClock, ListTodo, PieChart, Settings as SettingsIcon, LogOut, Timer, Gauge, Clock, Keyboard, MousePointer2, CalendarRange } from 'lucide-react';
 import Today from './Today';
 import Tasks from './Tasks';
+import EditTime from './EditTime';
 import Settings from './Settings';
 import LineChart from '../components/LineChart';
 import ScreenshotGrid from '../components/ScreenshotGrid';
 
-type Tab = 'today' | 'tasks' | 'reports' | 'settings';
+type Tab = 'today' | 'editTime' | 'tasks' | 'reports' | 'settings';
 
 const NAV: { id: Tab; label: string; icon: typeof CalendarClock }[] = [
   { id: 'today', label: 'Today', icon: CalendarClock },
+  { id: 'editTime', label: 'Edit Time', icon: CalendarRange },
   { id: 'tasks', label: 'Tasks', icon: ListTodo },
   { id: 'reports', label: 'Reports', icon: PieChart },
   { id: 'settings', label: 'Settings', icon: SettingsIcon },
@@ -56,6 +58,7 @@ export default function MainLayout() {
 
       <main className="content">
         {tab === 'today' && <Today />}
+        {tab === 'editTime' && <EditTime />}
         {tab === 'tasks' && <Tasks />}
         {tab === 'reports' && <Reports />}
         {tab === 'settings' && <Settings />}
