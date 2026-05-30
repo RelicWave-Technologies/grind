@@ -43,6 +43,9 @@
   --c-green: #21c17a;   --c-green-bg: rgba(33, 193, 122, 0.14);
   --c-blue: #3aa0ff;    --c-blue-bg: rgba(58, 160, 255, 0.14);
   --c-slate: #7a8699;   --c-slate-bg: rgba(122, 134, 153, 0.14);
+  /* Manual time (M10 approval flow) — distinct from the per-task green/violet
+     work palette so users instantly recognise a block as added-via-request. */
+  --c-amber: #f5a524;   --c-amber-bg: rgba(245, 165, 36, 0.16);
 
   /* status */
   --success: #21c17a;
@@ -254,6 +257,102 @@ label.field-label { display: block; font-size: 12px; font-weight: 600; color: va
 /* Work is colored per task — show that with a multi-color swatch in the legend. */
 .dt-swatch-work { width: 22px; height: 9px; border-radius: 3px; background: linear-gradient(90deg, var(--c-violet), var(--c-rose), var(--c-green), var(--c-orange)); }
 .dt-leg-sub { color: var(--label-tertiary); }
+
+/* ---- wide day ribbon (Edit Time tab) ---- */
+.dr { position: relative; width: 100%; user-select: none; }
+.dr-track {
+  position: relative; height: 56px; border-radius: 14px;
+  background: rgba(40, 36, 56, 0.045); overflow: hidden;
+  cursor: crosshair;
+}
+.dr-seg {
+  position: absolute; top: 10px; height: 36px; border-radius: 8px; min-width: 3px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22);
+}
+.dr-seg-work    { background: var(--c-green); }
+.dr-seg-meeting { background: var(--c-blue); }
+.dr-seg-manual  { background: var(--c-amber); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.35); }
+.dr-seg-idle    { background: var(--c-slate); opacity: 0.55; }
+.dr-seg-gap     { background: transparent; }
+.dr-seg-live    { animation: segpulse 1.8s var(--ease) infinite; }
+.dr-seg[role="button"]:focus-visible { outline: 2px solid var(--c-violet); outline-offset: 2px; }
+
+.dr-pending {
+  position: absolute; top: 2px; height: 6px; border-radius: 4px;
+  background-image: repeating-linear-gradient(45deg, var(--c-amber) 0 4px, transparent 4px 8px);
+  background-color: var(--c-amber-bg);
+}
+
+.dr-now {
+  position: absolute; top: -4px; bottom: -4px; width: 2px; border-radius: 2px;
+  background: var(--c-violet); transform: translateX(-1px); pointer-events: none;
+}
+.dr-now::before {
+  content: ""; position: absolute; top: -4px; left: -3px;
+  width: 8px; height: 8px; border-radius: 50%; background: var(--c-violet);
+  box-shadow: 0 0 0 4px rgba(124,92,255,0.18);
+}
+.dr-future {
+  position: absolute; top: 0; bottom: 0; right: 0;
+  background-image: repeating-linear-gradient(135deg, rgba(40,36,56,0.06) 0 6px, transparent 6px 12px);
+  pointer-events: none;
+}
+
+.dr-ghost {
+  position: absolute; top: 6px; height: 44px; border-radius: 9px;
+  background: var(--c-amber-bg); border: 1.5px dashed var(--c-amber);
+  pointer-events: none;
+}
+
+.dr-axis { position: relative; height: 18px; margin-top: 8px; }
+.dr-tick { position: absolute; transform: translateX(-50%); font-size: 10px; color: var(--label-tertiary); font-variant-numeric: tabular-nums; }
+.dr-tick-major { color: var(--label-secondary); font-weight: 600; }
+
+/* ---- Edit Time table ---- */
+.et-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.et-table th, .et-table td { padding: 10px 12px; text-align: left; }
+.et-table thead th {
+  font-weight: 600; color: var(--label-secondary); font-size: 11px;
+  text-transform: uppercase; letter-spacing: 0.04em;
+  border-bottom: 1px solid var(--separator);
+}
+.et-table tbody tr { border-bottom: 1px solid var(--separator); }
+.et-table tbody tr:hover { background: rgba(40,36,56,0.03); }
+.et-row-manual { background: var(--c-amber-bg); }
+.et-row-manual:hover { background: rgba(245,165,36,0.22); }
+.et-row-gap td { color: var(--label-tertiary); font-style: italic; }
+.et-row-live td { font-variant-numeric: tabular-nums; }
+.et-chip {
+  display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px;
+  border-radius: 999px; font-size: 11px; font-weight: 600;
+}
+.et-chip-work    { color: var(--c-green); background: var(--c-green-bg); }
+.et-chip-meeting { color: var(--c-blue); background: var(--c-blue-bg); }
+.et-chip-manual  { color: var(--c-amber); background: var(--c-amber-bg); }
+.et-chip-idle    { color: var(--c-slate); background: var(--c-slate-bg); }
+.et-chip-gap     { color: var(--label-tertiary); background: rgba(40,36,56,0.05); font-style: normal; }
+
+.et-fill-link {
+  background: none; border: 0; padding: 4px 8px; cursor: pointer;
+  color: var(--c-violet); font-weight: 600; font-size: 12px; border-radius: 6px;
+}
+.et-fill-link:hover { background: var(--c-violet-bg); }
+
+.et-totals { display: flex; gap: var(--sp-4); flex-wrap: wrap; margin-top: var(--sp-4); padding: var(--sp-3) var(--sp-4); border-radius: 12px; background: rgba(40,36,56,0.04); }
+.et-total { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--label-secondary); }
+.et-total strong { color: var(--label); font-variant-numeric: tabular-nums; font-weight: 700; }
+
+.et-datebar { display: flex; align-items: center; gap: var(--sp-2); }
+.et-datebar .et-date {
+  font-family: var(--font-round); font-size: 16px; font-weight: 600;
+  letter-spacing: -0.2px; padding: 0 var(--sp-3);
+}
+.et-datebar .btn-icon {
+  width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 8px; background: rgba(40,36,56,0.05); border: 0; cursor: pointer; color: var(--label);
+}
+.et-datebar .btn-icon:hover { background: rgba(40,36,56,0.09); }
+.et-datebar .btn-icon:disabled { opacity: 0.35; cursor: not-allowed; }
 
 /* ---- focus running view ---- */
 .focus { display: flex; flex-direction: column; align-items: center; gap: var(--sp-7); padding: var(--sp-6) 0; }

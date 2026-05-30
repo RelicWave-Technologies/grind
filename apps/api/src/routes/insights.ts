@@ -4,6 +4,7 @@ import { requireAccessToken } from '../middleware/auth';
 import { scoreDay } from '../scoring/score';
 import { assessWindow, type RiskSample } from '../anticheat/risk';
 import type { RoleTitle } from '../scoring/presets';
+import { buildDayInsight, localDayWindow } from '../insights/day';
 
 export const insightsRouter = Router();
 insightsRouter.use(requireAccessToken);
@@ -71,6 +72,81 @@ insightsRouter.get('/score', async (req, res, next) => {
       byHour,
       anticheat: { hardReject: anticheat.hardReject, riskScore: anticheat.riskScore, flags: anticheat.flags },
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /v1/insights/day?date=YYYY-MM-DD&tz=IANA
+ *
+ * Powers the "Edit Time" tab. Returns the user's per-day timeline as a list
+ * of mutually-disjoint, kind-tagged blocks (WORK / MEETING / IDLE_TRIMMED /
+ * MANUAL / GAP), already clipped to the local-day window and DST-correct.
+ * Also surfaces PENDING ManualTimeRequests overlapping the day so the UI can
+ * render a striped overlay (and prevent the user from double-requesting).
+ *
+ * Self-scope only for now. Manager/admin team-scoped views land with M11.
+ */
+insightsRouter.get('/day', async (req, res, next) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: 'unauthorized' });
+    const date = typeof req.query.date === 'string' ? req.query.date : new Date().toISOString().slice(0, 10);
+    const tz = typeof req.query.tz === 'string' && req.query.tz.length > 0 ? req.query.tz : 'UTC';
+    const win = localDayWindow(date, tz);
+    if (!win) return res.status(400).json({ error: 'invalid_date_or_tz' });
+
+    const now = new Date();
+
+    // Pull every TimeEntry that overlaps the window, including its segments.
+    const entries = await prisma.timeEntry.findMany({
+      where: {
+        userId: req.user.sub,
+        startedAt: { lt: win.end },
+        OR: [{ endedAt: null }, { endedAt: { gt: win.start } }],
+      },
+      include: {
+        segments: { orderBy: { startedAt: 'asc' } },
+      },
+      orderBy: { startedAt: 'asc' },
+    });
+
+    // PENDING manual requests overlapping the window (for the stripe overlay).
+    const pending = await prisma.manualTimeRequest.findMany({
+      where: {
+        userId: req.user.sub,
+        status: 'PENDING',
+        requestedStart: { lt: win.end },
+        requestedEnd: { gt: win.start },
+      },
+      orderBy: { requestedStart: 'asc' },
+    });
+
+    const result = buildDayInsight({
+      date,
+      tz,
+      now,
+      window: win,
+      entries: entries.map((e) => ({
+        id: e.id,
+        source: e.source as 'AUTO' | 'MANUAL',
+        larkTaskGuid: e.larkTaskGuid,
+        segments: e.segments.map((s) => ({
+          kind: s.kind as 'WORK' | 'MEETING' | 'IDLE_TRIMMED',
+          startedAt: s.startedAt,
+          endedAt: s.endedAt,
+        })),
+      })),
+      pending: pending.map((p) => ({
+        id: p.id,
+        requestedStart: p.requestedStart,
+        requestedEnd: p.requestedEnd,
+        reason: p.reason,
+        larkTaskGuid: p.larkTaskGuid,
+      })),
+    });
+
+    res.json(result);
   } catch (err) {
     next(err);
   }

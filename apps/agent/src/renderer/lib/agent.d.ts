@@ -61,6 +61,7 @@ declare global {
           totals: { keystrokes: number; clicks: number; mouseDistancePx: number; scrollEvents: number };
           byHour: number[];
         }>;
+        day: (args: { date: string; tz: string }) => Promise<DayInsight>;
       };
       lark: {
         status: () => Promise<{ configured: boolean; connected: boolean; reauthRequired: boolean; scopes: string[] }>;
@@ -82,6 +83,28 @@ declare global {
     };
   }
 }
+
+export type DayInsight = {
+  date: string;
+  timezone: string;
+  dayStart: number;
+  dayEnd: number;
+  isFuture: boolean;
+  isToday: boolean;
+  firstActivityAt: number | null;
+  lastActivityAt: number | null;
+  totals: { workedMs: number; meetingMs: number; manualMs: number; idleTrimmedMs: number; gapMs: number };
+  blocks: Array<{
+    kind: 'WORK' | 'MEETING' | 'IDLE_TRIMMED' | 'MANUAL' | 'GAP';
+    startedAt: number;
+    endedAt: number;
+    durationMs: number;
+    timeEntryId?: string;
+    larkTaskGuid?: string | null;
+    isOpen?: boolean;
+  }>;
+  pendingOverlay: Array<{ id: string; startedAt: number; endedAt: number; reason: string; larkTaskGuid: string | null }>;
+};
 
 export type ManualTimeRequestDto = {
   id: string;
