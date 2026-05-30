@@ -144,12 +144,12 @@ export default function EditTime() {
 
       <div className="content-scroll">
         <div className="content-narrow">
-          {/* Legend */}
+          {/* Legend — only the states the user actually creates: tracked /
+              manual / pending. Meetings + breaks aren't first-class in v3. */}
           <div className="dt-legend" style={{ justifyContent: 'flex-start', margin: '4px 0 var(--sp-3)' }}>
-            <span><i className="dt-dot" style={{ background: 'var(--c-green)' }} /> Work</span>
+            <span><i className="dt-dot" style={{ background: 'var(--c-green)' }} /> Working</span>
             <span><i className="dt-dot" style={{ background: 'var(--c-amber)' }} /> Manual</span>
-            <span><i className="dt-dot" style={{ background: 'var(--c-blue)' }} /> Meeting</span>
-            <span><i className="dt-dot" style={{ background: 'var(--c-slate)' }} /> Break</span>
+            <span><i className="dt-dot" style={{ background: 'var(--danger)' }} /> Pending approval</span>
             <span style={{ color: 'var(--label-tertiary)' }}>· Click a gap to add manual time</span>
           </div>
 
@@ -182,15 +182,16 @@ export default function EditTime() {
               <div className="callout secondary">You can't request manual time for the future.</div>
             </div>
           ) : (
-            <div className="focus-card rise rise-1">
+            <div className="et-ribbon-wrap rise rise-1">
               <DayRibbon day={dayData} now={now} taskNameFor={taskNameFor} onPickPreset={onPickPreset} />
             </div>
           )}
 
-          {/* All entries — inline-editable rows */}
+          {/* Inline-editable rows. The table sits in its own card directly
+              under the ribbon so the two surfaces feel like one connected
+              timeline view (no extra section heading needed). */}
           {dayData && (
             <>
-              <div className="section-head"><span className="section-title">All entries</span></div>
               <DayBlocksTable
                 day={dayData}
                 tasks={tasks}
@@ -254,7 +255,8 @@ function DayBlocksTable({
     );
   }
   return (
-    <table className="et-table rise">
+    <div className="et-table-wrap rise">
+    <table className="et-table">
       <thead>
         <tr>
           <th>Started</th>
@@ -369,6 +371,7 @@ function DayBlocksTable({
             + reason still live on the request in DB + in Lark IM history. */}
       </tbody>
     </table>
+    </div>
   );
 }
 

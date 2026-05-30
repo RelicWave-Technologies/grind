@@ -110,7 +110,10 @@ export default function EntryRow(props: RowProps) {
   const endMutable = props.kind === 'pending' || props.kind === 'gap';
   const taskMutable = true; // all four row kinds let you change the task
   const notesMutable = true;
-  const submitLabel = props.kind === 'gap' ? 'Send to approver' : props.kind === 'pending' ? 'Save changes' : 'Save';
+  const submitLabel =
+    props.kind === 'gap' ? 'Send to approver'
+    : props.kind === 'pending' ? 'Update approval'
+    : 'Save';
   const submitDisabled = (() => {
     if (!dirty) return true;
     if (props.kind === 'gap' && draft.notes.trim().length < 3) return true;
@@ -234,11 +237,10 @@ export default function EntryRow(props: RowProps) {
         />
       </td>
       <td className="et-action-cell">
-        {/* Always-visible status pill so the user sees state at a glance. */}
-        {props.kind === 'pending' && <span className="et-status-pill et-status-pending">Pending</span>}
-        {props.kind === 'manual_approved' && <span className="et-status-pill et-status-manual">Manual</span>}
         {/* Save / Cancel buttons — hidden by default, revealed via :hover /
-            :focus-within / .et-row-dirty (see styles.css). */}
+            :focus-within / .et-row-dirty (see styles.css). The left-edge
+            colored stripe already encodes the row's state, so a separate
+            status pill is visual noise. */}
         <span className="et-actions">
           <button
             className="btn btn-prominent et-row-btn no-drag"

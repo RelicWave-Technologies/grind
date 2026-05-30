@@ -214,9 +214,9 @@ export default function DayRibbon({ day, now, taskNameFor, onPickPreset }: Props
 function hourLabel(ms: number): string {
   const d = new Date(ms);
   const h = d.getHours();
-  const ampm = h < 12 ? 'a' : 'p';
+  const ampm = h < 12 ? 'AM' : 'PM';
   const h12 = h % 12 === 0 ? 12 : h % 12;
-  return `${h12}${ampm}`;
+  return `${h12} ${ampm}`;
 }
 
 function fmtTime(ms: number): string {

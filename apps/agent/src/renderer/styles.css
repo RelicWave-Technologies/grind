@@ -438,8 +438,10 @@ label.field-label { display: block; font-size: 12px; font-weight: 600; color: va
  *   red    — PENDING manual-time request (waiting for approver)
  * Gaps + rejected requests = white. (Rejected isn't rendered at all.)
  */
-.et-row { transition: background var(--dur-slow) var(--ease); }
-.et-row td { padding: 10px 12px; vertical-align: middle; }
+.et-row { transition: background var(--dur-slow) var(--ease); height: 52px; }
+.et-row td { padding: 8px 16px; vertical-align: middle; }
+/* Slightly de-emphasise gap rows so the eye lands on real entries first. */
+.et-row-gap td { color: var(--label-secondary); }
 .et-row-tracked         { box-shadow: inset 3px 0 0 var(--c-green); }
 .et-row-manual-approved { box-shadow: inset 3px 0 0 var(--c-amber); background: rgba(245, 165, 36, 0.07); }
 .et-row-pending         { box-shadow: inset 3px 0 0 var(--danger);  background: rgba(255, 77, 106, 0.07); }
@@ -478,39 +480,40 @@ label.field-label { display: block; font-size: 12px; font-weight: 600; color: va
   cursor: help;
 }
 
-/* Status pill — always visible on non-tracked rows so the user can see
- * state without hovering or interacting. */
-.et-status-pill {
-  display: inline-flex; align-items: center; gap: 4px;
-  padding: 3px 9px; border-radius: 999px;
-  font-size: 10px; font-weight: 700;
-  text-transform: uppercase; letter-spacing: 0.05em;
-  vertical-align: middle;
+/* Ribbon wrapper — minimal chrome, flush with the table below so the
+ * timeline and the rows visually align column-to-column. */
+.et-ribbon-wrap {
+  width: 100%; padding: var(--sp-4) var(--sp-5);
+  background: var(--bg-card); border-radius: 14px;
+  box-shadow: 0 1px 2px rgba(40,36,56,0.04), 0 8px 24px rgba(40,36,56,0.04);
 }
-.et-status-pill::before {
-  content: ""; width: 6px; height: 6px; border-radius: 50%;
-}
-.et-status-pending { color: var(--danger); background: rgba(255, 77, 106, 0.12); }
-.et-status-pending::before { background: var(--danger); }
-.et-status-manual  { color: #b87510; background: rgba(245, 165, 36, 0.16); }
-.et-status-manual::before { background: var(--c-amber); }
 
 /* Spinner (used in save button). */
 .spin { animation: et-spin 0.7s linear infinite; }
 @keyframes et-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 
 /* ---- Table chrome ---- */
-.et-table { width: 100%; border-collapse: collapse; font-size: 12px; }
-.et-table th { padding: 12px; text-align: left;
-  font-weight: 600; color: var(--label-secondary); font-size: 10.5px;
-  text-transform: uppercase; letter-spacing: 0.05em;
+/* The table sits in a card matching the ribbon wrap above (.et-ribbon-wrap)
+ * so the two surfaces feel like one connected timeline view. */
+.et-table-wrap {
+  margin-top: var(--sp-3);
+  background: var(--bg-card); border-radius: 14px;
+  box-shadow: 0 1px 2px rgba(40,36,56,0.04), 0 8px 24px rgba(40,36,56,0.04);
+  overflow: hidden;
+}
+.et-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.et-table th {
+  padding: 14px 16px; text-align: left;
+  font-weight: 600; color: var(--label-tertiary); font-size: 10.5px;
+  text-transform: uppercase; letter-spacing: 0.06em;
   border-bottom: 1px solid var(--separator);
+  background: rgba(40,36,56,0.015);
 }
 .et-table tbody tr { border-bottom: 1px solid var(--separator); }
 .et-table tbody tr:last-child { border-bottom: 0; }
 .et-table tbody tr:hover:not(.et-row-flash):not(.et-row-saved) { background: rgba(40,36,56,0.018); }
 
-.et-cell-dur { font-variant-numeric: tabular-nums; color: var(--label-secondary); padding-left: 4px; }
+.et-cell-dur { font-variant-numeric: tabular-nums; color: var(--label-tertiary); font-size: 12px; }
 
 .et-fill-link {
   background: none; border: 0; padding: 4px 8px; cursor: pointer;
