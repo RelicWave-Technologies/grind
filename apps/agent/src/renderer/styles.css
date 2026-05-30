@@ -351,8 +351,8 @@ label.field-label { display: block; font-size: 12px; font-weight: 600; color: va
 .et-chip-trigger:focus-visible { outline: 2px solid var(--c-violet); outline-offset: 2px; }
 .et-chip-trigger .et-chip-caret { color: var(--label-tertiary); transition: transform var(--dur-fast) var(--ease); }
 .et-chip-trigger[aria-expanded="true"] .et-chip-caret { transform: rotate(180deg); color: var(--c-violet); }
-.et-chip-trigger-time { font-variant-numeric: tabular-nums; min-width: 92px; justify-content: center; }
-.et-chip-trigger-task { min-width: 140px; max-width: 240px; }
+.et-chip-trigger-time { font-variant-numeric: tabular-nums; min-width: 76px; justify-content: center; }
+.et-chip-trigger-task { min-width: 120px; max-width: 220px; }
 .et-chip-trigger-task .et-chip-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; text-align: left; }
 .et-chip-untracked { color: var(--label-tertiary); font-style: italic; }
 
@@ -423,7 +423,7 @@ label.field-label { display: block; font-size: 12px; font-weight: 600; color: va
 .et-reason {
   font: inherit; font-size: 12px; padding: 6px 10px; border-radius: 8px;
   border: 1px solid transparent; background: transparent; color: var(--label);
-  width: 100%; min-width: 200px;
+  width: 100%; min-width: 0;
   transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
 }
 .et-reason::placeholder { color: var(--label-tertiary); }
@@ -461,22 +461,23 @@ label.field-label { display: block; font-size: 12px; font-weight: 600; color: va
 }
 .et-row-saved { animation: et-saved 1.2s var(--ease) 1; }
 
-/* Action column: fixed width so save/saving/error icon swaps don't shift layout.
- * The status pill is always visible; the action buttons only appear on
- * hover / focus-within / dirty so calm rows stay calm. */
-.et-action-cell { width: 220px; text-align: right; white-space: nowrap; }
+/* Action column: just enough to fit Save + (optional Cancel) without
+ * pushing the column off-screen on narrower windows. Buttons hidden by
+ * default; revealed via :hover / :focus-within / .et-row-dirty so calm
+ * rows stay calm. */
+.et-action-cell { width: 150px; text-align: right; white-space: nowrap; padding-right: 16px; }
 .et-actions {
-  display: inline-flex; align-items: center; gap: 6px; margin-left: 8px;
+  display: inline-flex; align-items: center; gap: 6px;
   opacity: 0;
   transition: opacity var(--dur-fast) var(--ease);
 }
 .et-row:hover .et-actions,
 .et-row:focus-within .et-actions,
 .et-row.et-row-dirty .et-actions { opacity: 1; }
-.et-row-btn { padding: 6px 12px; font-size: 12px; min-width: 100px; }
+.et-row-btn { padding: 6px 11px; font-size: 11.5px; min-width: 0; line-height: 1.2; }
 .et-row-btn:disabled { opacity: 0.45; }
 .et-row-err-icon {
-  color: var(--danger); margin-left: 6px; vertical-align: -2px;
+  color: var(--danger); margin-left: 4px; vertical-align: -2px;
   cursor: help;
 }
 
@@ -499,7 +500,7 @@ label.field-label { display: block; font-size: 12px; font-weight: 600; color: va
   margin-top: var(--sp-3);
   background: var(--bg-card); border-radius: 14px;
   box-shadow: 0 1px 2px rgba(40,36,56,0.04), 0 8px 24px rgba(40,36,56,0.04);
-  overflow: hidden;
+  overflow-x: auto; /* safety net: action column stays reachable on narrow windows */
 }
 .et-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .et-table th {

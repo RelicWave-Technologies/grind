@@ -111,9 +111,13 @@ export default function EntryRow(props: RowProps) {
   const taskMutable = true; // all four row kinds let you change the task
   const notesMutable = true;
   const submitLabel =
+    props.kind === 'gap' ? 'Send'
+    : props.kind === 'pending' ? 'Update'
+    : 'Save';
+  const submitLabelLong =
     props.kind === 'gap' ? 'Send to approver'
     : props.kind === 'pending' ? 'Update approval'
-    : 'Save';
+    : 'Save changes';
   const submitDisabled = (() => {
     if (!dirty) return true;
     if (props.kind === 'gap' && draft.notes.trim().length < 3) return true;
@@ -246,7 +250,8 @@ export default function EntryRow(props: RowProps) {
             className="btn btn-prominent et-row-btn no-drag"
             onClick={(e) => { e.stopPropagation(); submit(); }}
             disabled={submitDisabled || anyPending}
-            title={submitLabel}
+            title={submitLabelLong}
+            aria-label={submitLabelLong}
           >
             {anyPending ? <Loader2 size={13} className="spin" /> : <Check size={13} strokeWidth={2.5} />}
             {' '}{submitLabel}
