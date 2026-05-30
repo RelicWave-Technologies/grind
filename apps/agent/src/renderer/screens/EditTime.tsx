@@ -44,12 +44,12 @@ export default function EditTime() {
   const [now, setNow] = useState<number>(Date.now());
   const [flashRowId, setFlashRowId] = useState<string | null>(null);
   /**
-   * When the user clicks a gap on the ribbon, this is the snapped 1h (or
-   * snap-to-full-gap) sub-range. We pass it to the matching gap row in the
-   * table so its time inputs reseed to the narrow range and the reason
-   * input auto-focuses.
+   * Latest ribbon-click snap range + a monotonic `tick` so that clicking
+   * the same spot twice still re-applies (EntryRow's effect keys on tick).
+   * Never cleared automatically — once the user starts editing, their
+   * subsequent edits live in the row's own draft state and survive.
    */
-  const [gapPreset, setGapPreset] = useState<ManualTimePreset | null>(null);
+  const [gapPreset, setGapPreset] = useState<(ManualTimePreset & { tick: number }) | null>(null);
   const timezone = useMemo(tz, []);
   const dayQueryKey = useMemo(() => ['dayInsight', date, timezone] as const, [date, timezone]);
 
@@ -80,12 +80,9 @@ export default function EditTime() {
   }, [flashRowId]);
 
   const onPickPreset = useCallback((preset: ManualTimePreset) => {
-    // The preset is a SUB-range of some gap block in the table. We can't
-    // match by id (the gap row's id is the GAP's startedAt, not the snapped
-    // click). EditTime stores the preset itself; DayBlocksTable below finds
-    // the GAP block containing the preset's center and passes presetOverride
-    // to that row so its inputs reseed + reason auto-focuses + the row flashes.
-    setGapPreset(preset);
+    // Bump the tick so even re-clicking the exact same spot re-applies the
+    // preset (otherwise React's effect bails on value-equal deps).
+    setGapPreset((prev) => ({ ...preset, tick: (prev?.tick ?? 0) + 1 }));
   }, []);
 
   const taskNameFor = useCallback(
@@ -170,7 +167,6 @@ export default function EditTime() {
                 flashRowId={flashRowId}
                 onSelectRow={setFlashRowId}
                 gapPreset={gapPreset}
-                onClearGapPreset={() => setGapPreset(null)}
               />
 
               {/* Totals strip */}
@@ -198,31 +194,23 @@ function DayBlocksTable({
   flashRowId,
   onSelectRow,
   gapPreset,
-  onClearGapPreset,
 }: {
   day: DayInsight;
   tasks: Array<{ guid: string; summary: string }>;
   dayQueryKey: readonly unknown[];
   flashRowId: string | null;
   onSelectRow: (rowId: string) => void;
-  gapPreset: ManualTimePreset | null;
-  onClearGapPreset: () => void;
+  gapPreset: (ManualTimePreset & { tick: number }) | null;
 }) {
-  // Which gap block (by index) does the preset's center sit inside? Compute
-  // once per render so multiple gap rows don't all reseed.
+  // Which gap block (by index) does the preset's center sit inside? Routed
+  // once per ribbon click; the EntryRow itself only re-applies on tick
+  // change, so a stale preset doesn't keep snapping the row back when the
+  // user manually edits start/end.
   const presetGapIdx = useMemo(() => {
     if (!gapPreset) return -1;
     const center = (gapPreset.startedAt + gapPreset.endedAt) / 2;
     return day.blocks.findIndex((b) => b.kind === 'GAP' && b.startedAt <= center && center < b.endedAt);
   }, [day.blocks, gapPreset]);
-  // Once we render, clear the gap preset so subsequent renders don't keep
-  // forcing the override (the user can now edit the row freely).
-  useEffect(() => {
-    if (presetGapIdx === -1 || !gapPreset) return;
-    // schedule clear AFTER the row has mounted with the preset
-    const t = setTimeout(onClearGapPreset, 50);
-    return () => clearTimeout(t);
-  }, [presetGapIdx, gapPreset, onClearGapPreset]);
   if (day.blocks.length === 0 && day.pendingOverlay.length === 0 && day.recentRejected.length === 0) {
     return (
       <div className="empty rise rise-1">
@@ -264,7 +252,7 @@ function DayBlocksTable({
                 tasks={tasks}
                 dayQueryKey={dayQueryKey}
                 onSelectRow={onSelectRow}
-                presetOverride={isPresetTarget && gapPreset ? { startedAt: gapPreset.startedAt, endedAt: gapPreset.endedAt } : null}
+                presetOverride={isPresetTarget && gapPreset ? { startedAt: gapPreset.startedAt, endedAt: gapPreset.endedAt, tick: gapPreset.tick } : null}
               />
             );
           }
