@@ -268,6 +268,13 @@ function DayBlocksTable({
       <tbody>
         {day.blocks.map((b, i) => {
           if (b.kind === 'GAP') {
+            // Once a pending request fully covers a gap, the gap row would
+            // duplicate the (red) pending row visually. Hide it — the user
+            // sees only the red row, which IS the requested time.
+            const fullyPending = day.pendingOverlay.some(
+              (p) => p.startedAt <= b.startedAt && p.endedAt >= b.endedAt,
+            );
+            if (fullyPending) return null;
             const rowId = `gap-${b.startedAt}`;
             const isPresetTarget = i === presetGapIdx && !!gapPreset;
             return (

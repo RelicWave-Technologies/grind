@@ -120,10 +120,21 @@ export default function EntryRow(props: RowProps) {
   })();
 
   const onSettled = (r: { ok: boolean }) => {
-    if (r.ok) {
-      setSavedPulse(true);
-      void qc.invalidateQueries({ queryKey: props.dayQueryKey });
-      void qc.invalidateQueries({ queryKey: ['myTimeRequests'] });
+    if (!r.ok) return;
+    setSavedPulse(true);
+    void qc.invalidateQueries({ queryKey: props.dayQueryKey });
+    void qc.invalidateQueries({ queryKey: ['myTimeRequests'] });
+    // For gap-row create: the server-side gap doesn't change (the new
+    // pending row appears in pendingOverlay), so without a manual reset
+    // the draft would stay "dirty" forever and the buttons would keep
+    // showing. Reset to the freshly-recomputed initial.
+    if (props.kind === 'gap') {
+      setDraft({
+        taskGuid: props.larkTaskGuid ?? '',
+        notes: '',
+        startedAt: props.startedAt,
+        endedAt: props.endedAt,
+      });
     }
   };
 

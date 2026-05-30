@@ -440,9 +440,9 @@ label.field-label { display: block; font-size: 12px; font-weight: 600; color: va
  */
 .et-row { transition: background var(--dur-slow) var(--ease); }
 .et-row td { padding: 10px 12px; vertical-align: middle; }
-.et-row-tracked         { box-shadow: inset 3px 0 0 var(--c-green); background: rgba(33, 193, 122, 0.04); }
-.et-row-manual-approved { box-shadow: inset 3px 0 0 var(--c-amber); background: rgba(245, 165, 36, 0.06); }
-.et-row-pending         { box-shadow: inset 3px 0 0 var(--danger);  background: rgba(255, 77, 106, 0.06); }
+.et-row-tracked         { box-shadow: inset 3px 0 0 var(--c-green); }
+.et-row-manual-approved { box-shadow: inset 3px 0 0 var(--c-amber); background: rgba(245, 165, 36, 0.07); }
+.et-row-pending         { box-shadow: inset 3px 0 0 var(--danger);  background: rgba(255, 77, 106, 0.07); }
 .et-row-gap             { box-shadow: none; }
 
 /* Flash on ribbon click: short, calm, no layout shift. */
