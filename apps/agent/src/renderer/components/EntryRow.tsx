@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Check, X, Loader2, RotateCcw, AlertCircle } from 'lucide-react';
+import { Check, X, Loader2, AlertCircle } from 'lucide-react';
 import TimePopover from './TimePopover';
 import TaskCombo from './TaskCombo';
 
@@ -23,7 +23,17 @@ import TaskCombo from './TaskCombo';
  *     never wiping user edits during the today refetch tick.
  */
 
-export type RowKind = 'tracked' | 'manual_approved' | 'pending' | 'rejected' | 'gap';
+/**
+ * Three semantic states on the table, plus gaps:
+ *   tracked          — green stripe, light green tint, no pill
+ *   manual_approved  — amber stripe, light amber tint, MANUAL pill
+ *   pending          — red stripe, light red tint, PENDING pill
+ *   gap              — no stripe, white
+ *
+ * Rejected requests don't render at all — the user re-requests from the
+ * gap. (The user sees rejections in their Lark IM.)
+ */
+export type RowKind = 'tracked' | 'manual_approved' | 'pending' | 'gap';
 
 export interface RowProps {
   kind: RowKind;
@@ -36,7 +46,6 @@ export interface RowProps {
   larkTaskGuid: string | null;
   notes: string | null;
   tasks: Array<{ guid: string; summary: string }>;
-  decidedReason?: string | null;
   dayQueryKey: readonly unknown[];
   onSelectRow?: (rowId: string) => void;
   presetOverride?: { startedAt: number; endedAt: number; tick: number } | null;
@@ -99,11 +108,10 @@ export default function EntryRow(props: RowProps) {
 
   const startMutable = props.kind === 'pending' || props.kind === 'gap';
   const endMutable = props.kind === 'pending' || props.kind === 'gap';
-  const taskMutable = props.kind === 'tracked' || props.kind === 'manual_approved' || props.kind === 'pending' || props.kind === 'gap';
-  const notesMutable = taskMutable;
-  const submitLabel = props.kind === 'gap' ? 'Send to approver' : props.kind === 'pending' ? 'Save changes' : props.kind === 'rejected' ? 'Re-request' : 'Save';
+  const taskMutable = true; // all four row kinds let you change the task
+  const notesMutable = true;
+  const submitLabel = props.kind === 'gap' ? 'Send to approver' : props.kind === 'pending' ? 'Save changes' : 'Save';
   const submitDisabled = (() => {
-    if (props.kind === 'rejected') return false;
     if (!dirty) return true;
     if (props.kind === 'gap' && draft.notes.trim().length < 3) return true;
     if (notesMutable && draft.notes.length > 500) return true;
@@ -161,15 +169,16 @@ export default function EntryRow(props: RowProps) {
   function submit(): void {
     if (props.kind === 'tracked' || props.kind === 'manual_approved') saveTracked.mutate();
     else if (props.kind === 'pending') savePending.mutate();
-    else createRequest.mutate(); // gap or rejected (re-request)
+    else createRequest.mutate(); // gap
   }
 
   const rowCls =
     'et-row' +
-    (props.kind === 'tracked' || props.kind === 'manual_approved' ? ' et-row-tracked' : '') +
+    (props.kind === 'tracked' ? ' et-row-tracked' : '') +
+    (props.kind === 'manual_approved' ? ' et-row-manual-approved' : '') +
     (props.kind === 'pending' ? ' et-row-pending' : '') +
-    (props.kind === 'rejected' ? ' et-row-rejected' : '') +
     (props.kind === 'gap' ? ' et-row-gap' : '') +
+    (dirty ? ' et-row-dirty' : '') +
     (props.flashing ? ' et-row-flash' : '') +
     (savedPulse ? ' et-row-saved' : '');
 
@@ -204,7 +213,6 @@ export default function EntryRow(props: RowProps) {
           placeholder={
             props.kind === 'gap' ? 'Reason (required to send)'
             : props.kind === 'pending' ? 'Reason'
-            : props.kind === 'rejected' ? 'Reason'
             : 'Notes (optional)'
           }
           value={draft.notes}
@@ -213,46 +221,46 @@ export default function EntryRow(props: RowProps) {
           onClick={(e) => e.stopPropagation()}
           aria-label="Reason or notes"
         />
-        {props.kind === 'rejected' && props.decidedReason && (
-          <div className="small" style={{ color: 'var(--danger)', marginTop: 4, lineHeight: 1.35 }}>
-            <AlertCircle size={11} style={{ verticalAlign: -2 }} /> Approver said: {props.decidedReason}
-          </div>
-        )}
       </td>
       <td className="et-action-cell">
-        <button
-          className={'btn ' + (props.kind === 'rejected' ? 'btn-soft' : 'btn-prominent') + ' et-row-btn no-drag'}
-          onClick={(e) => { e.stopPropagation(); submit(); }}
-          disabled={submitDisabled || anyPending}
-          title={submitLabel}
-        >
-          {anyPending ? <Loader2 size={13} className="spin" />
-            : props.kind === 'rejected' ? <RotateCcw size={13} />
-            : <Check size={13} strokeWidth={2.5} />}
-          {' '}{submitLabel}
-        </button>
-        {props.kind === 'pending' && (
+        {/* Always-visible status pill so the user sees state at a glance. */}
+        {props.kind === 'pending' && <span className="et-status-pill et-status-pending">Pending</span>}
+        {props.kind === 'manual_approved' && <span className="et-status-pill et-status-manual">Manual</span>}
+        {/* Save / Cancel buttons — hidden by default, revealed via :hover /
+            :focus-within / .et-row-dirty (see styles.css). */}
+        <span className="et-actions">
           <button
-            className="btn btn-ghost et-row-btn no-drag"
-            onClick={(e) => { e.stopPropagation(); cancelPending.mutate(); }}
-            disabled={anyPending}
-            style={{ marginLeft: 6, minWidth: 0, padding: '6px 10px' }}
-            title="Cancel this request"
-            aria-label="Cancel request"
+            className="btn btn-prominent et-row-btn no-drag"
+            onClick={(e) => { e.stopPropagation(); submit(); }}
+            disabled={submitDisabled || anyPending}
+            title={submitLabel}
           >
-            <X size={13} strokeWidth={2.5} />
+            {anyPending ? <Loader2 size={13} className="spin" /> : <Check size={13} strokeWidth={2.5} />}
+            {' '}{submitLabel}
           </button>
-        )}
-        {lastErr && (
-          <span
-            className="et-row-err-icon"
-            title={humanizeErr(lastErr)}
-            aria-label={`Save failed: ${humanizeErr(lastErr)}`}
-            style={{ display: 'inline-flex', alignItems: 'center' }}
-          >
-            <AlertCircle size={14} />
-          </span>
-        )}
+          {props.kind === 'pending' && (
+            <button
+              className="btn btn-ghost et-row-btn no-drag"
+              onClick={(e) => { e.stopPropagation(); cancelPending.mutate(); }}
+              disabled={anyPending}
+              style={{ minWidth: 0, padding: '6px 10px' }}
+              title="Cancel this request"
+              aria-label="Cancel request"
+            >
+              <X size={13} strokeWidth={2.5} />
+            </button>
+          )}
+          {lastErr && (
+            <span
+              className="et-row-err-icon"
+              title={humanizeErr(lastErr)}
+              aria-label={`Save failed: ${humanizeErr(lastErr)}`}
+              style={{ display: 'inline-flex', alignItems: 'center' }}
+            >
+              <AlertCircle size={14} />
+            </span>
+          )}
+        </span>
       </td>
     </tr>
   );

@@ -328,27 +328,9 @@ function DayBlocksTable({
             />
           );
         })}
-        {/* REJECTED requests for context + re-request. */}
-        {day.recentRejected.map((r) => {
-          const rowId = `rejected-${r.id}`;
-          return (
-            <EntryRow
-              key={rowId}
-              kind="rejected"
-              rowId={rowId}
-              flashing={flashRowId === rowId}
-              startedAt={r.requestedStart}
-              endedAt={r.requestedEnd}
-              refId={r.id}
-              larkTaskGuid={r.larkTaskGuid}
-              notes={r.reason}
-              decidedReason={r.decidedReason}
-              tasks={tasks}
-              dayQueryKey={dayQueryKey}
-              onSelectRow={onSelectRow}
-            />
-          );
-        })}
+        {/* Rejected requests are intentionally NOT rendered — they go back to
+            "white" (a clean gap the user can re-request from). The decision
+            + reason still live on the request in DB + in Lark IM history. */}
       </tbody>
     </table>
   );
