@@ -43,6 +43,13 @@ export default function EditTime() {
   const [date, setDate] = useState<string>(localToday());
   const [now, setNow] = useState<number>(Date.now());
   const [flashRowId, setFlashRowId] = useState<string | null>(null);
+  /**
+   * When the user clicks a gap on the ribbon, this is the snapped 1h (or
+   * snap-to-full-gap) sub-range. We pass it to the matching gap row in the
+   * table so its time inputs reseed to the narrow range and the reason
+   * input auto-focuses.
+   */
+  const [gapPreset, setGapPreset] = useState<ManualTimePreset | null>(null);
   const timezone = useMemo(tz, []);
   const dayQueryKey = useMemo(() => ['dayInsight', date, timezone] as const, [date, timezone]);
 
@@ -73,9 +80,12 @@ export default function EditTime() {
   }, [flashRowId]);
 
   const onPickPreset = useCallback((preset: ManualTimePreset) => {
-    // Gap clicks on the ribbon → flash the corresponding gap row in the table.
-    // The row id encodes startedAt so we can match.
-    setFlashRowId(`gap-${preset.startedAt}`);
+    // The preset is a SUB-range of some gap block in the table. We can't
+    // match by id (the gap row's id is the GAP's startedAt, not the snapped
+    // click). EditTime stores the preset itself; DayBlocksTable below finds
+    // the GAP block containing the preset's center and passes presetOverride
+    // to that row so its inputs reseed + reason auto-focuses + the row flashes.
+    setGapPreset(preset);
   }, []);
 
   const taskNameFor = useCallback(
@@ -159,6 +169,8 @@ export default function EditTime() {
                 dayQueryKey={dayQueryKey}
                 flashRowId={flashRowId}
                 onSelectRow={setFlashRowId}
+                gapPreset={gapPreset}
+                onClearGapPreset={() => setGapPreset(null)}
               />
 
               {/* Totals strip */}
@@ -185,13 +197,32 @@ function DayBlocksTable({
   dayQueryKey,
   flashRowId,
   onSelectRow,
+  gapPreset,
+  onClearGapPreset,
 }: {
   day: DayInsight;
   tasks: Array<{ guid: string; summary: string }>;
   dayQueryKey: readonly unknown[];
   flashRowId: string | null;
   onSelectRow: (rowId: string) => void;
+  gapPreset: ManualTimePreset | null;
+  onClearGapPreset: () => void;
 }) {
+  // Which gap block (by index) does the preset's center sit inside? Compute
+  // once per render so multiple gap rows don't all reseed.
+  const presetGapIdx = useMemo(() => {
+    if (!gapPreset) return -1;
+    const center = (gapPreset.startedAt + gapPreset.endedAt) / 2;
+    return day.blocks.findIndex((b) => b.kind === 'GAP' && b.startedAt <= center && center < b.endedAt);
+  }, [day.blocks, gapPreset]);
+  // Once we render, clear the gap preset so subsequent renders don't keep
+  // forcing the override (the user can now edit the row freely).
+  useEffect(() => {
+    if (presetGapIdx === -1 || !gapPreset) return;
+    // schedule clear AFTER the row has mounted with the preset
+    const t = setTimeout(onClearGapPreset, 50);
+    return () => clearTimeout(t);
+  }, [presetGapIdx, gapPreset, onClearGapPreset]);
   if (day.blocks.length === 0 && day.pendingOverlay.length === 0 && day.recentRejected.length === 0) {
     return (
       <div className="empty rise rise-1">
@@ -219,12 +250,13 @@ function DayBlocksTable({
         {day.blocks.map((b, i) => {
           if (b.kind === 'GAP') {
             const rowId = `gap-${b.startedAt}`;
+            const isPresetTarget = i === presetGapIdx && !!gapPreset;
             return (
               <EntryRow
                 key={rowId}
                 kind="gap"
                 rowId={rowId}
-                flashing={flashRowId === rowId}
+                flashing={flashRowId === rowId || isPresetTarget}
                 startedAt={b.startedAt}
                 endedAt={b.endedAt}
                 larkTaskGuid={null}
@@ -232,6 +264,7 @@ function DayBlocksTable({
                 tasks={tasks}
                 dayQueryKey={dayQueryKey}
                 onSelectRow={onSelectRow}
+                presetOverride={isPresetTarget && gapPreset ? { startedAt: gapPreset.startedAt, endedAt: gapPreset.endedAt } : null}
               />
             );
           }
