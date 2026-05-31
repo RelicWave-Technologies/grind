@@ -930,6 +930,53 @@ body {
 .people-error { margin-top: 6px; }
 
 /* ============================================================================
+   Anti-cheat flag cards
+   ========================================================================== */
+.flag-card-impossible_rate { border-left: 3px solid var(--danger); }
+.flag-card-metronomic      { border-left: 3px solid var(--c-rose); }
+.flag-card-linear_mouse    { border-left: 3px solid var(--c-orange); }
+.flag-card-single_channel  { border-left: 3px solid var(--c-slate); }
+.flag-card-jiggler         { border-left: 3px solid var(--c-amber); }
+
+.flag-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11px; font-weight: 700; letter-spacing: 0.04em;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--c-rose-bg);
+  color: var(--c-rose);
+}
+.flag-pill-impossible_rate { background: rgba(255, 77, 106, 0.16); color: var(--danger); }
+.flag-pill-jiggler         { background: var(--c-amber-bg); color: #b07215; }
+.flag-pill-linear_mouse    { background: var(--c-orange-bg); color: #b96d18; }
+.flag-pill-single_channel  { background: var(--c-slate-bg); color: #4e5867; }
+.flag-pill .risk-score {
+  margin-left: 4px;
+  padding-left: 6px;
+  border-left: 1px solid currentColor;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
+}
+
+.flag-evidence {
+  display: inline-flex; flex-wrap: wrap; gap: 5px;
+}
+.evidence-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 2px 8px;
+  background: rgba(40, 36, 56, 0.04);
+  border: 1px solid var(--separator);
+  border-radius: 999px;
+  font-size: 11.5px;
+}
+.evidence-k { color: var(--label-secondary); }
+.evidence-v { font-weight: 600; }
+
+.verdict-dismissed         { background: rgba(33, 193, 122, 0.14); color: #19854f; }
+.verdict-confirmed,
+.verdict-time_invalidated  { background: rgba(255, 77, 106, 0.14); color: var(--danger); }
+
+/* ============================================================================
    Activity heatmap (per-10-min productivity grid under the ribbon)
    ========================================================================== */
 .heatmap {

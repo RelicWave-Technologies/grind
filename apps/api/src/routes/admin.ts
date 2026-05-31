@@ -597,4 +597,150 @@ adminRouter.patch('/users/:id', requireAdmin, async (req, res, next) => {
   }
 });
 
+// ============================================================================
+// Anti-cheat flags review queue (MANAGER+ read, MANAGER+ resolve in scope)
+// ============================================================================
+
+interface FlagDto {
+  id: string;
+  userId: string;
+  user: { id: string; name: string; email: string };
+  type: string;
+  windowStart: string;
+  windowEnd: string;
+  riskScore: number;
+  evidence: unknown;
+  status: 'OPEN' | 'RESOLVED';
+  resolution: 'DISMISSED' | 'CONFIRMED' | 'TIME_INVALIDATED' | null;
+  resolvedById: string | null;
+  resolvedBy: { id: string; name: string } | null;
+  resolvedAt: string | null;
+  resolvedNote: string | null;
+  createdAt: string;
+}
+
+/**
+ * GET /v1/admin/flags
+ *
+ * Lists anti-cheat flags raised for users in the caller's scope.
+ *   ?status=OPEN (default) | RESOLVED | ALL
+ *   ?type=IMPOSSIBLE_RATE|METRONOMIC|...
+ *
+ * Highest-risk OPEN flags first, then most recent. MEMBERs are 403'd here —
+ * exposing your own flag list would let a cheater calibrate their pattern
+ * against the detector. Managers see their team; admins see the workspace.
+ */
+adminRouter.get('/flags', requireManagerOrAbove, async (req, res, next) => {
+  try {
+    if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
+    const validStatuses = ['OPEN', 'RESOLVED'] as const;
+    const validTypes = ['IMPOSSIBLE_RATE', 'METRONOMIC', 'LINEAR_MOUSE', 'SINGLE_CHANNEL', 'JIGGLER'] as const;
+    const status = typeof req.query.status === 'string' ? req.query.status.toUpperCase() : 'OPEN';
+    const where: { userId: { in: string[] }; status?: (typeof validStatuses)[number]; type?: (typeof validTypes)[number] } = {
+      userId: { in: req.scope.userIds },
+    };
+    if (status !== 'ALL') {
+      if (!(validStatuses as readonly string[]).includes(status)) return res.status(400).json({ error: 'invalid_status' });
+      where.status = status as (typeof validStatuses)[number];
+    }
+    if (typeof req.query.type === 'string') {
+      const t = req.query.type.toUpperCase();
+      if (!(validTypes as readonly string[]).includes(t)) return res.status(400).json({ error: 'invalid_type' });
+      where.type = t as (typeof validTypes)[number];
+    }
+    const rows = await prisma.activityFlag.findMany({
+      where,
+      include: {
+        user: { select: { id: true, name: true, email: true } },
+        resolvedBy: { select: { id: true, name: true } },
+      },
+      orderBy: [
+        // Most-risky open flags float to the top; resolved sorted by recency.
+        { status: 'asc' },
+        { riskScore: 'desc' },
+        { createdAt: 'desc' },
+      ],
+      take: 200,
+    });
+    const flags: FlagDto[] = rows.map((r) => ({
+      id: r.id,
+      userId: r.userId,
+      user: { id: r.user.id, name: r.user.name, email: r.user.email },
+      type: r.type,
+      windowStart: r.windowStart.toISOString(),
+      windowEnd: r.windowEnd.toISOString(),
+      riskScore: r.riskScore,
+      evidence: r.evidence,
+      status: r.status,
+      resolution: r.resolution,
+      resolvedById: r.resolvedById,
+      resolvedBy: r.resolvedBy ? { id: r.resolvedBy.id, name: r.resolvedBy.name } : null,
+      resolvedAt: r.resolvedAt ? r.resolvedAt.toISOString() : null,
+      resolvedNote: r.resolvedNote,
+      createdAt: r.createdAt.toISOString(),
+    }));
+    res.json({ flags, scope: req.scope.scope });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /v1/admin/flags/:id/resolve
+ * Body: { resolution: 'DISMISSED' | 'CONFIRMED' | 'TIME_INVALIDATED', note?: string }
+ *
+ * Stamps the reviewer + verdict. The flag's subject user must be in the
+ * caller's scope (managers can't dismiss flags from another team), and the
+ * flag must currently be OPEN (re-resolving is a no-op 409 — the audit trail
+ * is preserved by refusing the change).
+ *
+ * `TIME_INVALIDATED` is wired for a future hook that drops the matching
+ * minutes from the user's TimeEntry. For now it lands as a verdict only —
+ * no time is actually removed. Documenting this in the response keeps the
+ * dashboard honest.
+ */
+const VALID_RESOLUTIONS = ['DISMISSED', 'CONFIRMED', 'TIME_INVALIDATED'] as const;
+type FlagResolution = (typeof VALID_RESOLUTIONS)[number];
+
+adminRouter.post('/flags/:id/resolve', requireManagerOrAbove, async (req, res, next) => {
+  try {
+    if (!req.scope || !req.user) return res.status(401).json({ error: 'unauthorized' });
+    const id = req.params.id;
+    if (!id) return res.status(400).json({ error: 'missing_id' });
+    const resolution = typeof req.body?.resolution === 'string' ? req.body.resolution : '';
+    if (!(VALID_RESOLUTIONS as readonly string[]).includes(resolution)) {
+      return res.status(400).json({ error: 'invalid_resolution' });
+    }
+    const note = typeof req.body?.note === 'string' ? req.body.note.trim().slice(0, 500) || null : null;
+
+    const existing = await prisma.activityFlag.findUnique({ where: { id } });
+    if (!existing) return res.status(404).json({ error: 'not_found' });
+    if (!req.scope.userIds.includes(existing.userId)) return res.status(403).json({ error: 'forbidden' });
+    if (existing.status !== 'OPEN') return res.status(409).json({ error: 'already_resolved', resolution: existing.resolution });
+
+    const updated = await prisma.activityFlag.update({
+      where: { id },
+      data: {
+        status: 'RESOLVED',
+        resolution: resolution as FlagResolution,
+        resolvedById: req.user.sub,
+        resolvedAt: new Date(),
+        resolvedNote: note,
+      },
+    });
+
+    res.json({
+      id: updated.id,
+      status: updated.status,
+      resolution: updated.resolution,
+      resolvedAt: updated.resolvedAt ? updated.resolvedAt.toISOString() : null,
+      resolvedNote: updated.resolvedNote,
+      // Document the deferred behaviour so the UI can show a small note.
+      timeInvalidated: false,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 export default adminRouter;
