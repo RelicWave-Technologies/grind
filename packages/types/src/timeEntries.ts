@@ -24,8 +24,6 @@ export type SegmentDto = z.infer<typeof SegmentDto>;
 export const CreateTimeEntryRequest = z.object({
   id: z.string().min(1),
   clientUuid: z.string().min(1),
-  projectId: z.string().min(1).nullable().optional(),
-  taskId: z.string().min(1).nullable().optional(),
   larkTaskGuid: z.string().min(1).nullable().optional(),
   source: TimeEntrySource.default('AUTO'),
   startedAt: Iso,
@@ -39,8 +37,6 @@ export const TimeEntryDto = z.object({
   id: z.string(),
   clientUuid: z.string(),
   userId: z.string(),
-  projectId: z.string().nullable(),
-  taskId: z.string().nullable(),
   larkTaskGuid: z.string().nullable(),
   source: TimeEntrySource,
   startedAt: Iso,

@@ -27,7 +27,7 @@ export default function DayTimeline({ entries, now, runningEntryId }: Props) {
   const segs = entries.flatMap((e) =>
     // Color key: prefer the Lark task, then project, then a stable default —
     // each tracked thing gets its own deterministic color on the ribbon.
-    e.segments.map((s) => ({ ...s, colorKey: e.larkTaskGuid ?? e.projectId ?? 'work', entryId: e.id })),
+    e.segments.map((s) => ({ ...s, colorKey: e.larkTaskGuid ?? 'work', entryId: e.id })),
   );
 
   const startsToday = segs.map((s) => s.startedAt);

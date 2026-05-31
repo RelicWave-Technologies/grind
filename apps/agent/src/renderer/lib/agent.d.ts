@@ -1,12 +1,12 @@
-import type { UserDto, ProjectDto } from '@grind/types';
+import type { UserDto } from '@grind/types';
 
 type AuthStatus = 'loggedIn' | 'loggedOut';
 type AgentStatus = { state: 'IDLE' | 'OFFLINE'; lastHeartbeatAt: string | null };
 type TimerStatus =
   | { state: 'IDLE' }
-  | { state: 'RUNNING'; entryId: string; projectId: string | null; taskId: string | null; larkTaskGuid: string | null; startedAt: number; workedMs: number; paused: boolean };
+  | { state: 'RUNNING'; entryId: string; larkTaskGuid: string | null; startedAt: number; workedMs: number; paused: boolean };
 export type TodaySegment = { kind: 'WORK' | 'MEETING' | 'IDLE_TRIMMED'; startedAt: number; endedAt: number | null };
-export type TodayEntry = { id: string; projectId: string | null; larkTaskGuid: string | null; segments: TodaySegment[] };
+export type TodayEntry = { id: string; larkTaskGuid: string | null; segments: TodaySegment[] };
 
 declare global {
   interface Window {
@@ -17,14 +17,11 @@ declare global {
         status: () => Promise<AuthStatus>;
         onStatusChange: (cb: (s: AuthStatus) => void) => () => void;
       };
-      projects: {
-        list: () => Promise<ProjectDto[]>;
-      };
       agent: {
         status: () => Promise<AgentStatus>;
       };
       timer: {
-        start: (projectId: string | null, taskId?: string | null, larkTaskGuid?: string | null) => Promise<TimerStatus>;
+        start: (larkTaskGuid?: string | null) => Promise<TimerStatus>;
         stop: () => Promise<TimerStatus>;
         status: () => Promise<TimerStatus>;
         today: () => Promise<TodayEntry[]>;
@@ -72,8 +69,34 @@ declare global {
         tasks: () => Promise<{ tasks: { guid: string; summary: string; completed: boolean; url?: string; due: number | null; createdAt: number | null; creatorId: string | null; creatorName: string | null; loggedMs: number }[]; reauthRequired: boolean }>;
         createTask: (input: { summary: string; due?: number | null; description?: string | null }) => Promise<{ ok: boolean; error?: string }>;
       };
+      timeRequests: {
+        create: (input: {
+          requestedStart: number;
+          requestedEnd: number;
+          reason: string;
+          larkTaskGuid?: string | null;
+          taskSummary?: string | null;
+        }) => Promise<{ ok: boolean; request?: ManualTimeRequestDto; error?: string }>;
+        listMine: (status?: 'PENDING' | 'APPROVED' | 'REJECTED') => Promise<{ requests: ManualTimeRequestDto[] }>;
+      };
     };
   }
 }
+
+export type ManualTimeRequestDto = {
+  id: string;
+  clientUuid: string;
+  userId: string;
+  approverId: string | null;
+  larkTaskGuid: string | null;
+  larkMessageId: string | null;
+  requestedStart: string;
+  requestedEnd: string;
+  reason: string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  decidedAt: string | null;
+  decidedReason: string | null;
+  createdAt: string;
+};
 
 export { TimerStatus };

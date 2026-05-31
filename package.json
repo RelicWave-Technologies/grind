@@ -9,6 +9,7 @@
   },
   "scripts": {
     "dev": "turbo run dev --parallel",
+    "dev:clean": "bash scripts/dev-clean.sh",
     "build": "turbo run build",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",

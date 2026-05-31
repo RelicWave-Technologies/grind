@@ -22,9 +22,6 @@ export interface TimeEntry {
   /** client-generated idempotency key (ULID) */
   clientUuid: string;
   userId: string;
-  /** Optional: entries are attributed to a Lark task; project is optional grouping. */
-  projectId: string | null;
-  taskId: string | null;
   /** Lark Task v2 GUID this entry is attributed to, if any. */
   larkTaskGuid?: string | null;
   source: TimeEntrySource;

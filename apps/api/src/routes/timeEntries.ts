@@ -39,8 +39,6 @@ function toCoreEntry(args: {
   id: string;
   clientUuid: string;
   userId: string;
-  projectId: string | null;
-  taskId: string | null;
   source: 'AUTO' | 'MANUAL';
   startedAt: string;
   endedAt: string | null;
@@ -56,8 +54,6 @@ function toCoreEntry(args: {
     id: args.id,
     clientUuid: args.clientUuid,
     userId: args.userId,
-    projectId: args.projectId,
-    taskId: args.taskId,
     source: args.source,
     startedAt: new Date(args.startedAt).getTime(),
     endedAt: args.endedAt ? new Date(args.endedAt).getTime() : null,
@@ -69,8 +65,6 @@ function serialize(entry: {
   id: string;
   clientUuid: string;
   userId: string;
-  projectId: string | null;
-  taskId: string | null;
   larkTaskGuid: string | null;
   source: 'AUTO' | 'MANUAL';
   startedAt: Date;
@@ -81,8 +75,6 @@ function serialize(entry: {
     id: entry.id,
     clientUuid: entry.clientUuid,
     userId: entry.userId,
-    projectId: entry.projectId,
-    taskId: entry.taskId,
     larkTaskGuid: entry.larkTaskGuid,
     source: entry.source,
     startedAt: entry.startedAt.toISOString(),
@@ -119,31 +111,11 @@ timeEntriesRouter.post('/', validate(CreateTimeEntryRequest, 'body'), async (req
       return res.status(200).json(serialize(existing));
     }
 
-    // Validate the project (if any) is in the caller's workspace. Entries are
-    // now attributed to a Lark task, so projectId is optional.
-    if (body.projectId) {
-      const project = await prisma.project.findFirst({
-        where: { id: body.projectId, workspaceId: req.user.ws },
-        select: { id: true },
-      });
-      if (!project) return res.status(400).json({ error: 'invalid_project' });
-
-      if (body.taskId) {
-        const task = await prisma.task.findFirst({
-          where: { id: body.taskId, projectId: body.projectId },
-          select: { id: true },
-        });
-        if (!task) return res.status(400).json({ error: 'invalid_task' });
-      }
-    }
-
     // Segment integrity check (defense in depth, shared domain logic).
     const core = toCoreEntry({
       id: body.id,
       clientUuid: body.clientUuid,
       userId: req.user.sub,
-      projectId: body.projectId ?? null,
-      taskId: body.taskId ?? null,
       source: body.source,
       startedAt: body.startedAt,
       endedAt: null,
@@ -157,8 +129,6 @@ timeEntriesRouter.post('/', validate(CreateTimeEntryRequest, 'body'), async (req
         id: body.id,
         clientUuid: body.clientUuid,
         userId: req.user.sub,
-        projectId: body.projectId ?? null,
-        taskId: body.taskId ?? null,
         larkTaskGuid: body.larkTaskGuid ?? null,
         source: body.source,
         startedAt: new Date(body.startedAt),
@@ -195,7 +165,7 @@ timeEntriesRouter.put('/:id/sync', validate(SyncTimeEntryRequest, 'body'), async
     if (!id) return res.status(400).json({ error: 'missing_id' });
     const body = req.body as SyncTimeEntryRequest;
 
-    const entry = await prisma.timeEntry.findUnique({ where: { id }, select: { id: true, userId: true, clientUuid: true, projectId: true, taskId: true, source: true, startedAt: true } });
+    const entry = await prisma.timeEntry.findUnique({ where: { id }, select: { id: true, userId: true, clientUuid: true, source: true, startedAt: true } });
     if (!entry) return res.status(404).json({ error: 'not_found' });
     if (entry.userId !== req.user.sub) return res.status(403).json({ error: 'forbidden' });
 
@@ -203,8 +173,6 @@ timeEntriesRouter.put('/:id/sync', validate(SyncTimeEntryRequest, 'body'), async
       id: entry.id,
       clientUuid: entry.clientUuid,
       userId: entry.userId,
-      projectId: entry.projectId,
-      taskId: entry.taskId,
       source: entry.source,
       startedAt: entry.startedAt.toISOString(),
       endedAt: body.endedAt ?? null,

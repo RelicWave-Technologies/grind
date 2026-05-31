@@ -34,6 +34,7 @@ Then click the tray icon → log in with `abhishek@emiactech.com` / `grindgrind`
 | Command | What it does |
 |---|---|
 | `pnpm dev` | Run API + Electron agent in parallel (hot reload) |
+| `pnpm dev:clean` | Kill stale dev processes (stuck Electron / port-4000 API), then `pnpm dev`. Use this when code changes "silently don't appear" or you hit `EADDRINUSE`. macOS/Linux only. |
 | `pnpm typecheck` | TypeScript check across all packages |
 | `pnpm lint` | ESLint across all packages |
 | `pnpm db:generate` | Prisma client codegen |
