@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useRouteContext } from '@tanstack/react-router';
+import { useRouteContext, useSearch } from '@tanstack/react-router';
 import { ChevronLeft, ChevronRight, Calendar } from 'lucide-react';
 import { api } from '../lib/api';
 import { isManagerOrAbove } from '../lib/auth';
@@ -23,10 +23,15 @@ interface AdminUser {
  */
 export function MeTodayScreen() {
   const { me } = useRouteContext({ from: '/authed' });
+  const search = useSearch({ from: '/authed/me-today' });
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 
-  const [date, setDate] = useState<string>(todayKey());
-  const [targetUserId, setTargetUserId] = useState<string>(me.id);
+  // Initial state from query params (deep-link from /team), then user-controlled.
+  const initialDate =
+    typeof search.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(search.date) ? search.date : todayKey();
+  const initialUserId = typeof search.userId === 'string' && search.userId.length > 0 ? search.userId : me.id;
+  const [date, setDate] = useState<string>(initialDate);
+  const [targetUserId, setTargetUserId] = useState<string>(initialUserId);
   const showPicker = isManagerOrAbove(me.role);
 
   // For the picker — only fetch when we'll show the picker.

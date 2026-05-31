@@ -13,6 +13,7 @@ import { UsersScreen } from './screens/Users';
 import { HomeScreen } from './screens/Home';
 import { MeTodayScreen } from './screens/MeToday';
 import { ApprovalsScreen } from './screens/Approvals';
+import { TeamScreen } from './screens/Team';
 
 interface RouterContext {
   queryClient: QueryClient;
@@ -65,6 +66,13 @@ const usersRoute = createRoute({
 const meTodayRoute = createRoute({
   getParentRoute: () => authedRoot,
   path: '/me-today',
+  // Optional ?date=YYYY-MM-DD&userId= so the Team page can deep-link
+  // into a specific user-day. Both are pure strings; validation happens
+  // in the screen (the date format check is cheap).
+  validateSearch: (s: Record<string, unknown>): { date?: string; userId?: string } => ({
+    date: typeof s.date === 'string' ? s.date : undefined,
+    userId: typeof s.userId === 'string' ? s.userId : undefined,
+  }),
   component: MeTodayScreen,
 });
 
@@ -72,6 +80,12 @@ const approvalsRoute = createRoute({
   getParentRoute: () => authedRoot,
   path: '/approvals',
   component: ApprovalsScreen,
+});
+
+const teamRoute = createRoute({
+  getParentRoute: () => authedRoot,
+  path: '/team',
+  component: TeamScreen,
 });
 
 const loginRoute = createRoute({
@@ -84,6 +98,6 @@ const loginRoute = createRoute({
 });
 
 export const routeTree = rootRoute.addChildren([
-  authedRoot.addChildren([homeRoute, meTodayRoute, approvalsRoute, usersRoute]),
+  authedRoot.addChildren([homeRoute, meTodayRoute, approvalsRoute, teamRoute, usersRoute]),
   loginRoute,
 ]);

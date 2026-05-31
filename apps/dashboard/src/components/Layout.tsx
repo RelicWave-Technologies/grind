@@ -1,5 +1,5 @@
 import { Outlet, Link, useRouteContext, useNavigate, useLocation } from '@tanstack/react-router';
-import { Home, Users, Clock4, Inbox, LogOut } from 'lucide-react';
+import { Home, Users, Clock4, Inbox, LayoutGrid, LogOut } from 'lucide-react';
 import { isManagerOrAbove, useLogout } from '../lib/auth';
 
 interface NavItem {
@@ -13,6 +13,7 @@ interface NavItem {
 const NAV: NavItem[] = [
   { to: '/', label: 'Home', Icon: Home, show: 'all' },
   { to: '/me-today', label: 'My Day', Icon: Clock4, show: 'all' },
+  { to: '/team', label: 'Team', Icon: LayoutGrid, show: 'manager+' },
   { to: '/approvals', label: 'Approvals', Icon: Inbox, show: 'manager+' },
   { to: '/users', label: 'People', Icon: Users, show: 'all' /* scope handles privilege */ },
 ];

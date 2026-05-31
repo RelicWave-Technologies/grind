@@ -82,3 +82,31 @@ export interface DecideResult {
   decidedReason: string | null;
   noop: 'already_decided' | 'cancelled' | 'forbidden' | null;
 }
+
+// ---------------------------------------------------------------------------
+// Timesheets matrix
+// ---------------------------------------------------------------------------
+
+export interface TimesheetCell {
+  workedMs: number;
+  meetingMs: number;
+  manualMs: number;
+  totalMs: number;
+}
+
+export interface TimesheetUser {
+  id: string;
+  name: string;
+  email: string;
+  role: 'OWNER' | 'ADMIN' | 'MANAGER' | 'MEMBER';
+}
+
+export interface TimesheetMatrix {
+  from: string;
+  to: string;
+  tz: string;
+  scope: 'self' | 'team' | 'workspace';
+  days: string[];
+  users: TimesheetUser[];
+  cells: Record<string, Record<string, TimesheetCell>>;
+}
