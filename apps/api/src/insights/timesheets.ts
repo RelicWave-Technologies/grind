@@ -14,6 +14,13 @@ export interface TimesheetCell {
   meetingMs: number;
   manualMs: number;
   totalMs: number;
+  /**
+   * Earliest / latest tracked moment in this user-day (in the rendering tz's
+   * local-day window). null = no tracked time. Powers the attendance view's
+   * "first activity 9:14 AM, last 5:42 PM" badges + CSV export.
+   */
+  firstActivityMs: number | null;
+  lastActivityMs: number | null;
 }
 
 export interface TimesheetMatrix {
@@ -87,7 +94,14 @@ export function buildTimesheetMatrix(input: {
     }
     let cell = perUser[day];
     if (!cell) {
-      cell = { workedMs: 0, meetingMs: 0, manualMs: 0, totalMs: 0 };
+      cell = {
+        workedMs: 0,
+        meetingMs: 0,
+        manualMs: 0,
+        totalMs: 0,
+        firstActivityMs: null,
+        lastActivityMs: null,
+      };
       perUser[day] = cell;
     }
     return cell;
@@ -111,6 +125,8 @@ export function buildTimesheetMatrix(input: {
       else if (s.segmentKind === 'MEETING') cell.meetingMs += dur;
       else cell.workedMs += dur;
       cell.totalMs += dur;
+      if (cell.firstActivityMs === null || start < cell.firstActivityMs) cell.firstActivityMs = start;
+      if (cell.lastActivityMs === null || end > cell.lastActivityMs) cell.lastActivityMs = end;
     }
   }
 
