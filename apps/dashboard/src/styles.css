@@ -627,30 +627,35 @@ body {
 /* ============================================================================
    People table
    ========================================================================== */
+/* Minimal table chrome — calm by default per docs §1. No tinted header
+   bars, no row backgrounds; hairline separators only; whisper-light hover. */
 .people-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 13.5px;
+  font-size: 13px;
 }
 .people-table thead th {
   text-align: left;
-  font-size: 11px;
-  letter-spacing: 0.05em;
+  font-size: 10.5px;
+  letter-spacing: 0.09em;
   text-transform: uppercase;
   color: var(--label-tertiary);
   font-weight: 600;
-  padding: 14px var(--sp-6);
+  padding: 14px var(--sp-6) 12px;
   border-bottom: 1px solid var(--separator);
-  background: rgba(40, 36, 56, 0.015);
+  background: transparent;
 }
 .people-table tbody td {
-  padding: 14px var(--sp-6);
+  padding: 16px var(--sp-6);
   border-bottom: 1px solid var(--separator);
-  vertical-align: top;
+  vertical-align: middle;
+  color: var(--label-primary);
 }
 .people-table tbody tr:last-child td { border-bottom: 0; }
+.people-table tbody tr { transition: background var(--dur-fast) var(--ease); }
 .people-table tbody tr:hover td { background: var(--fill-hover); }
-.people-table tr.is-self td { background: rgba(124, 92, 255, 0.04); }
+/* "is-self" marker becomes a tiny rail instead of a full row tint. */
+.people-table tr.is-self td:first-child { box-shadow: inset 2px 0 0 var(--violet); }
 
 .person-name { font-weight: 600; color: var(--label-primary); }
 
@@ -665,10 +670,10 @@ body {
   color: var(--violet-700);
   text-transform: uppercase;
 }
-.role-chip.role-owner   { background: rgba(124, 92, 255, 0.16); color: var(--violet-700); }
-.role-chip.role-admin   { background: rgba(124, 92, 255, 0.12); color: var(--violet-700); }
-.role-chip.role-manager { background: rgba(58, 160, 255, 0.14); color: #1d6fbf; }
-.role-chip.role-member  { background: rgba(122, 134, 153, 0.14); color: #4e5867; }
+.role-chip.role-owner   { background: var(--violet-tint-2); color: var(--violet-700); }
+.role-chip.role-admin   { background: var(--violet-tint); color: var(--violet-700); }
+.role-chip.role-manager { background: var(--c-blue-bg); color: #1d6fbf; }
+.role-chip.role-member  { background: var(--c-slate-bg); color: #4e5867; }
 
 /* Empty state — per docs §3.  56px tinted icon, title, line. */
 .empty {
@@ -908,63 +913,92 @@ body {
 }
 .dot-idle { background: rgba(122, 134, 153, 0.45); }
 
-/* Entries table */
-.entries-card { margin-top: var(--sp-6); }
+/* Entries table — minimal chrome.
+   Row colour is communicated by a 3px inset rail on .et-row-tracked /
+   .et-row-manual / .et-row-pending-edit (set elsewhere). Header is
+   hairline only, no tinted bg fill. */
+.entries-card {
+  margin-top: var(--sp-5);
+  box-shadow: none;
+  border: 1px solid var(--separator);
+}
 .entries-head {
   display: flex; align-items: baseline; justify-content: space-between;
-  padding: var(--sp-5) var(--sp-7);
+  gap: var(--sp-5);
+  padding: var(--sp-6) var(--sp-7);
   border-bottom: 1px solid var(--separator);
 }
-.entries-totals { font-size: 12.5px; }
+.entries-totals { font-size: 12px; color: var(--label-secondary); }
 .entries-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 13.5px;
+  font-size: 13px;
 }
 .entries-table thead th {
   text-align: left;
-  font-size: 11px;
-  letter-spacing: 0.05em;
+  font-size: 10.5px;
+  letter-spacing: 0.09em;
   text-transform: uppercase;
   color: var(--label-tertiary);
   font-weight: 600;
-  padding: 12px var(--sp-7);
+  padding: 14px var(--sp-7) 12px;
   border-bottom: 1px solid var(--separator);
-  background: rgba(40, 36, 56, 0.015);
+  background: transparent;
 }
 .entries-table tbody td {
-  padding: 12px var(--sp-7);
+  padding: 14px var(--sp-7);
   border-bottom: 1px solid var(--separator);
-  vertical-align: top;
+  vertical-align: middle;
+  color: var(--label-primary);
 }
 .entries-table tbody tr:last-child td { border-bottom: 0; }
 .entry-row-gap { color: var(--label-tertiary); }
-.entry-row-gap td:first-child .kind-chip { background: transparent; border: 1px dashed var(--separator-strong); color: var(--label-tertiary); }
-.entry-row-pending td { background: rgba(255, 77, 106, 0.045); }
-.entry-row-rejected td { background: rgba(255, 77, 106, 0.025); }
-.entry-row-manual td { background: rgba(245, 165, 36, 0.04); }
-.entry-notes { max-width: 360px; word-wrap: break-word; }
+.entry-row-idle_trimmed td { color: var(--label-tertiary); }
+/* No background tints on row kinds — the inset rail does the talking. */
+.entry-row-pending,
+.entry-row-rejected,
+.entry-row-manual { /* identity by rail, not by tint */ }
+.entry-notes { max-width: 360px; word-wrap: break-word; line-height: 1.4; }
 
+/* Minimal kind label: 6px coloured dot + plain text, no pill. */
 .kind-chip {
-  display: inline-flex; align-items: center;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  padding: 2px 8px;
-  border-radius: 999px;
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--label-secondary);
+  background: transparent;
+  padding: 0;
+  letter-spacing: 0;
+  text-transform: none;
 }
-.kind-work { background: rgba(33, 193, 122, 0.14); color: #19854f; }
-.kind-meeting { background: rgba(58, 160, 255, 0.14); color: #1d6fbf; }
-.kind-manual { background: rgba(245, 165, 36, 0.16); color: #b07215; }
-.kind-idle_trimmed { background: rgba(122, 134, 153, 0.14); color: #4e5867; }
-.kind-gap { color: var(--label-tertiary); }
-.kind-pending { background: rgba(255, 77, 106, 0.14); color: #c12a4a; }
-.kind-rejected { background: rgba(255, 77, 106, 0.14); color: #c12a4a; }
+.kind-chip::before {
+  content: '';
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--label-tertiary);
+  flex-shrink: 0;
+}
+.kind-work::before    { background: var(--c-green); }
+.kind-tracked::before { background: var(--c-green); }
+.kind-meeting::before { background: var(--c-blue); }
+.kind-manual::before  { background: var(--c-amber); }
+.kind-manual_approved::before { background: var(--c-amber); }
+.kind-idle_trimmed::before    { background: var(--c-slate); }
+.kind-pending::before  { background: var(--danger); }
+.kind-rejected::before { background: var(--danger); }
+.kind-gap::before { background: transparent; box-shadow: inset 0 0 0 1px var(--separator-strong); }
 
 /* ============================================================================
    Approvals
    ========================================================================== */
-.tabs { display: inline-flex; gap: 2px; background: rgba(40, 36, 56, 0.04); padding: 3px; border-radius: var(--radius-md); }
+/* Segmented control per docs §3. Pill track, 28px segments, white thumb on
+   active with a subtle shadow. Lowercase friendly typography. */
+.tabs {
+  display: inline-flex; gap: 2px;
+  background: rgba(40, 36, 56, 0.06);
+  padding: 3px;
+  border-radius: var(--radius-md);
+}
 .tab {
   appearance: none;
   border: 0;
@@ -974,12 +1008,17 @@ body {
   font-weight: 600;
   color: var(--label-secondary);
   padding: 6px 14px;
+  height: 28px;
   border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
 }
 .tab:hover { color: var(--label-primary); }
-.tab.is-active { background: var(--bg-card); color: var(--label-primary); box-shadow: var(--shadow-sm); }
+.tab.is-active {
+  background: var(--bg-card);
+  color: var(--label-primary);
+  box-shadow: var(--shadow-sm);
+}
 
 .approvals-list { display: flex; flex-direction: column; gap: 12px; }
 
@@ -987,13 +1026,16 @@ body {
   background: var(--bg-card);
   border: 1px solid var(--separator);
   border-radius: var(--radius-lg);
-  padding: var(--sp-6);
+  padding: var(--sp-6) var(--sp-7);
   box-shadow: var(--shadow-card);
-  display: flex; flex-direction: column; gap: 16px;
+  display: flex; flex-direction: column; gap: 14px;
+  transition: box-shadow var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
 }
-.approval-card.status-approved { background: rgba(33, 193, 122, 0.025); }
-.approval-card.status-rejected { background: rgba(255, 77, 106, 0.02); }
-.approval-card.status-cancelled { opacity: 0.7; }
+.approval-card:hover { box-shadow: var(--shadow-lift); transform: translateY(-1px); }
+.approval-card.status-pending  { border-left: 3px solid var(--c-amber); }
+.approval-card.status-approved { border-left: 3px solid var(--c-green); }
+.approval-card.status-rejected { border-left: 3px solid var(--danger); }
+.approval-card.status-cancelled { border-left: 3px solid var(--c-slate); opacity: 0.7; }
 
 .approval-head {
   display: flex; align-items: center; justify-content: space-between;
@@ -1012,17 +1054,21 @@ body {
 .approval-email { margin-top: 1px; }
 
 .status-pill {
-  display: inline-flex; align-items: center; gap: 4px;
-  font-size: 11px; font-weight: 700; letter-spacing: 0.04em;
-  padding: 3px 9px;
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 4px 10px;
   border-radius: 999px;
   background: var(--violet-tint);
   color: var(--violet-700);
 }
-.status-pill.status-pending { background: rgba(245, 165, 36, 0.16); color: #b07215; }
-.status-pill.status-approved { background: rgba(33, 193, 122, 0.14); color: #19854f; }
-.status-pill.status-rejected { background: rgba(255, 77, 106, 0.14); color: #c12a4a; }
-.status-pill.status-cancelled { background: rgba(122, 134, 153, 0.16); color: #4e5867; }
+.status-pill.status-pending   { background: var(--c-amber-bg); color: #b07215; }
+.status-pill.status-approved  { background: var(--c-green-bg); color: #19854f; }
+.status-pill.status-rejected  { background: rgba(255, 77, 106, 0.12); color: #c12a4a; }
+.status-pill.status-cancelled { background: var(--c-slate-bg);  color: #4e5867; }
+.status-pill.status-resolved  { background: var(--c-green-bg);  color: #19854f; }
 
 .approval-body { display: flex; flex-direction: column; gap: 6px; }
 .approval-row {
@@ -1096,7 +1142,13 @@ body {
 /* ============================================================================
    Team timesheets matrix
    ========================================================================== */
-.timesheet-card { overflow: hidden; }
+.timesheet-card {
+  overflow: hidden;
+  /* No shadow stack on the data card — the table chrome itself is calm. */
+  box-shadow: none;
+  background: var(--bg-card);
+  border: 1px solid var(--separator);
+}
 .timesheet-scroll {
   overflow-x: auto;
   /* Make sure the row of cells visible-without-scroll is at least 7 days. */
@@ -1110,22 +1162,27 @@ body {
 }
 .timesheet thead th {
   text-align: left;
-  font-size: 11px;
-  letter-spacing: 0.04em;
+  font-size: 10.5px;
+  letter-spacing: 0.09em;
   text-transform: uppercase;
   color: var(--label-tertiary);
   font-weight: 600;
-  padding: 12px var(--sp-4) 10px;
+  padding: 14px var(--sp-4) 12px;
   border-bottom: 1px solid var(--separator);
-  background: rgba(40, 36, 56, 0.015);
+  background: transparent;
   white-space: nowrap;
 }
 .timesheet tbody td {
-  padding: 10px var(--sp-4);
+  padding: 12px var(--sp-4);
   border-bottom: 1px solid var(--separator);
   vertical-align: middle;
 }
 .timesheet tbody tr:last-child td { border-bottom: 0; }
+.timesheet tbody tr { transition: background var(--dur-fast) var(--ease); }
+.timesheet tbody tr:hover td { background: var(--fill-hover); }
+/* Sticky-column hover override: keep the person column white on hover so
+   the gradient cell still reads cleanly alongside it. */
+.timesheet tbody tr:hover .ts-user-col { background: var(--bg-card); }
 
 .ts-user-col {
   min-width: 200px;
@@ -1142,11 +1199,18 @@ body {
 }
 
 .ts-day-head {
-  display: flex; flex-direction: column; align-items: center; gap: 1px;
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
   line-height: 1.1;
 }
-.ts-day-dow { font-size: 10px; opacity: 0.7; }
-.ts-day-num { font-size: 11.5px; font-weight: 600; color: var(--label-secondary); }
+.ts-day-dow { font-size: 10px; color: var(--label-tertiary); letter-spacing: 0.04em; }
+.ts-day-num {
+  font-family: var(--font-round);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--label-primary);
+  letter-spacing: -0.2px;
+  text-transform: none;
+}
 
 .ts-user { display: flex; align-items: center; gap: 10px; }
 .ts-user-meta { min-width: 0; }
@@ -1161,28 +1225,30 @@ body {
   appearance: none;
   display: inline-flex; align-items: center; justify-content: center;
   width: 100%;
-  min-width: 56px;
-  min-height: 36px;
-  padding: 5px 8px;
-  border: 1px solid var(--separator);
+  min-width: 60px;
+  min-height: 32px;
+  padding: 4px 8px;
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
   background: transparent;
   font: inherit;
+  font-family: var(--font-round);
   font-size: 12.5px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   color: var(--label-primary);
   cursor: pointer;
-  transition: transform var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+  transition: transform var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
 }
 .ts-cell:hover:not(.is-empty) {
   transform: translateY(-1px);
-  border-color: rgba(33, 193, 122, 0.55);
+  box-shadow: var(--shadow-sm);
 }
 .ts-cell.is-empty {
   color: var(--label-tertiary);
-  border-style: dashed;
   cursor: default;
+  background: transparent !important;
+  border-color: transparent !important;
 }
 .ts-cell-total { white-space: nowrap; }
 .ts-cell-marker {
@@ -1198,34 +1264,36 @@ body {
    ========================================================================== */
 .timesheet.attendance .ts-day-col { min-width: 110px; }
 .att-cell {
-  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
   padding: 6px 4px;
-  border-radius: var(--radius-sm);
-  border: 1px solid transparent;
   min-height: 64px;
   justify-content: center;
 }
-.att-cell.is-present {
-  background: rgba(33, 193, 122, 0.06);
-  border-color: rgba(33, 193, 122, 0.18);
-}
+.att-cell.is-present { background: transparent; border-color: transparent; }
 .att-badge {
   display: flex; align-items: center; justify-content: center;
-  width: 20px; height: 20px;
+  width: 18px; height: 18px;
   border-radius: 50%;
-  background: rgba(33, 193, 122, 0.22);
+  background: rgba(33, 193, 122, 0.16);
   color: #19854f;
 }
 .att-times {
-  font-size: 11.5px;
+  font-family: var(--font-round);
+  font-size: 12px;
   font-weight: 600;
+  font-variant-numeric: tabular-nums;
   color: var(--label-primary);
   white-space: nowrap;
+  letter-spacing: -0.2px;
 }
-.att-total { font-size: 10.5px; }
+.att-total {
+  font-size: 10.5px;
+  color: var(--label-tertiary);
+  letter-spacing: 0.02em;
+}
 .att-absent {
   display: flex; align-items: center; justify-content: center;
-  width: 20px; height: 20px;
+  width: 18px; height: 18px;
   border-radius: 50%;
   color: var(--label-tertiary);
 }
@@ -1466,11 +1534,13 @@ body {
      white         = gap (composer lives here)
    ========================================================================== */
 .et-row { height: 56px; transition: background var(--dur-base) var(--ease); }
-.et-row td { padding: 10px 16px; vertical-align: middle; }
-.et-row-tracked         { box-shadow: inset 3px 0 0 var(--c-green); }
-.et-row-manual          { box-shadow: inset 3px 0 0 var(--c-amber); background: rgba(245, 165, 36, 0.06); }
-.et-row-pending-edit    { box-shadow: inset 3px 0 0 var(--danger);  background: rgba(255, 77, 106, 0.05); }
-.et-row-gap td          { color: var(--label-secondary); }
+.et-row td { padding: 12px var(--sp-7); vertical-align: middle; }
+/* The 3px rail communicates kind; backgrounds stay white for calm. */
+.et-row-tracked      { box-shadow: inset 3px 0 0 var(--c-green); }
+.et-row-manual       { box-shadow: inset 3px 0 0 var(--c-amber); }
+.et-row-pending-edit { box-shadow: inset 3px 0 0 var(--danger); }
+.et-row-gap td       { color: var(--label-secondary); }
+.et-row-rejected td  { color: var(--label-tertiary); }
 
 .et-row .et-reason {
   font: inherit; font-size: 13px;
