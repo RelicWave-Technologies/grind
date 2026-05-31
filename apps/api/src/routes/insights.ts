@@ -6,6 +6,7 @@ import { scoreDay } from '../scoring/score';
 import { assessWindow, type RiskSample } from '../anticheat/risk';
 import type { RoleTitle } from '../scoring/presets';
 import { buildDayInsight, localDayWindow } from '../insights/day';
+import { buildHeatmap, DEFAULT_BUCKET_MS, type HeatmapSample } from '../insights/heatmap';
 
 export const insightsRouter = Router();
 // /day accepts an optional ?userId= so admins/managers can pull a team
@@ -187,7 +188,58 @@ insightsRouter.get('/day', async (req, res, next) => {
       })),
     });
 
-    res.json(result);
+    // Activity heatmap: 10-min productivity buckets across the day window.
+    // Pulls every per-minute ActivitySample in the local-day window and
+    // averages scoreMinute() per bucket. Returns null where no samples
+    // landed — distinct from "samples scored 0" (idle) so the dashboard
+    // can render dead air differently.
+    // Pull every per-minute ActivitySample in the local-day window. The
+    // schema doesn't (yet) carry isProtectedMeeting on each sample — we
+    // derive it post-hoc by checking whether the minute overlaps a
+    // MEETING segment in the entries we already fetched. Cheap because
+    // both lists are sorted + small.
+    const samples = await prisma.activitySample.findMany({
+      where: {
+        userId,
+        bucketStart: { gte: win.start, lt: win.end },
+      },
+      select: {
+        bucketStart: true,
+        keystrokes: true,
+        clicks: true,
+        scrollEvents: true,
+        mouseDistancePx: true,
+      },
+      orderBy: { bucketStart: 'asc' },
+    });
+    const meetingIntervals: Array<{ a: number; b: number }> = [];
+    for (const e of entries) {
+      for (const s of e.segments) {
+        if (s.kind === 'MEETING' && s.endedAt) {
+          meetingIntervals.push({ a: s.startedAt.getTime(), b: s.endedAt.getTime() });
+        }
+      }
+    }
+    const heatmapInput: HeatmapSample[] = samples.map((s) => {
+      const t = s.bucketStart.getTime();
+      const inMeeting = meetingIntervals.some((iv) => t >= iv.a && t < iv.b);
+      return {
+        bucketStartMs: t,
+        keystrokes: s.keystrokes,
+        clicks: s.clicks,
+        scrollEvents: s.scrollEvents,
+        mouseDistancePx: s.mouseDistancePx,
+        isProtectedMeeting: inMeeting,
+      };
+    });
+    const heatmap = buildHeatmap({
+      dayStart: win.start.getTime(),
+      dayEnd: win.end.getTime(),
+      samples: heatmapInput,
+      bucketMs: DEFAULT_BUCKET_MS,
+    });
+
+    res.json({ ...result, activity: heatmap });
   } catch (err) {
     next(err);
   }

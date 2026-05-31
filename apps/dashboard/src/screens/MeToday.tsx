@@ -8,6 +8,7 @@ import type { DayInsight } from '../lib/types';
 import { fmtDayLabel, todayKey, addDays } from '../lib/format';
 import { DayRibbon } from '../components/DayRibbon';
 import { EntriesTable } from '../components/EntriesTable';
+import { ActivityHeatmap } from '../components/ActivityHeatmap';
 
 interface AdminUser {
   id: string;
@@ -136,6 +137,9 @@ export function MeTodayScreen() {
         <>
           <section className="card ribbon-card">
             <DayRibbon day={dayQ.data} now={now} />
+            {dayQ.data.activity && dayQ.data.activity.buckets.length > 0 && (
+              <ActivityHeatmap day={dayQ.data} heatmap={dayQ.data.activity} />
+            )}
             <div className="ribbon-legend">
               <Legend className="dot-work" label="Tracked" />
               <Legend className="dot-meeting" label="Meeting" />
