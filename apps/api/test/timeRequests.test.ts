@@ -15,6 +15,7 @@ const T1 = T0 + 90 * 60_000;
 class FakeMessenger implements LarkMessenger {
   sends: Array<{ receiveOpenId: string; card: Record<string, unknown> }> = [];
   updates: Array<{ messageId: string; card: Record<string, unknown> }> = [];
+  texts: Array<{ receiveOpenId: string; text: string }> = [];
   failNextSend = false;
   failNextUpdate = false;
   async sendCard(receiveOpenId: string, card: Record<string, unknown>): Promise<SendCardResult> {
@@ -25,6 +26,10 @@ class FakeMessenger implements LarkMessenger {
   async updateCard(messageId: string, card: Record<string, unknown>): Promise<void> {
     if (this.failNextUpdate) { this.failNextUpdate = false; throw new Error('lark network down'); }
     this.updates.push({ messageId, card });
+  }
+  async sendText(receiveOpenId: string, text: string): Promise<SendCardResult> {
+    this.texts.push({ receiveOpenId, text });
+    return { messageId: `om_txt_${this.texts.length}` };
   }
 }
 

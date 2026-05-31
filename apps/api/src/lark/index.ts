@@ -15,10 +15,10 @@ export type { TenantClient, ResolvedLarkUser } from './identity';
 export { signOAuthState, verifyOAuthState, buildAuthorizeUrl } from './oauth';
 export { mapTasks, loggedMsByGuid, toEpochMs } from './tasks';
 export type { UserTaskClient, LarkTaskDto, CreateLarkTaskInput } from './tasks';
-export { buildApprovalCard, buildDecidedCard } from './cards';
+export { buildApprovalCard, buildDecidedCard, buildSupersededCard, buildUpdatedApprovalCard, buildCancelledCard } from './cards';
 export { decideRequest } from './decide';
 export { startCardCallback } from './cardCallback';
-export type { ApprovalCardInput, DecidedCardInput, ApprovalAction } from './cards';
+export type { ApprovalCardInput, DecidedCardInput, ApprovalAction, SupersededCardInput, UpdatedApprovalCardInput, DiffEntry, CancelledCardInput } from './cards';
 export type { LarkMessenger, SendCardResult } from './messenger';
 
 let manager: TokenManager | null = null;

@@ -17,6 +17,12 @@ export interface LarkMessenger {
   sendCard(receiveOpenId: string, card: Record<string, unknown>): Promise<SendCardResult>;
   /** Replace an already-sent card in place (used by the decision flow). */
   updateCard(messageId: string, card: Record<string, unknown>): Promise<void>;
+  /**
+   * Send a small plain-text IM ("Request updated", "Request cancelled"). Used
+   * by edits and cancellation as a low-noise nudge above the original card.
+   * Best-effort: callers should never fail on this throwing.
+   */
+  sendText(receiveOpenId: string, text: string): Promise<SendCardResult>;
 }
 
 type SendBody = { code?: number; msg?: string; data?: { message_id?: string } };
@@ -53,6 +59,23 @@ export class HttpLarkMessenger implements LarkMessenger {
     const body = (await res.json().catch(() => ({}))) as SendBody;
     if (body.code !== 0 || !body.data?.message_id) {
       throw new Error(`lark sendCard: ${body.msg ?? body.code}`);
+    }
+    return { messageId: body.data.message_id };
+  }
+
+  async sendText(receiveOpenId: string, text: string): Promise<SendCardResult> {
+    const { oauthHost } = getLarkConfig();
+    const token = await this.getTenantToken();
+    const url = new URL('/open-apis/im/v1/messages', oauthHost);
+    url.searchParams.set('receive_id_type', 'open_id');
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json; charset=utf-8', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ receive_id: receiveOpenId, msg_type: 'text', content: JSON.stringify({ text }) }),
+    });
+    const body = (await res.json().catch(() => ({}))) as SendBody;
+    if (body.code !== 0 || !body.data?.message_id) {
+      throw new Error(`lark sendText: ${body.msg ?? body.code}`);
     }
     return { messageId: body.data.message_id };
   }

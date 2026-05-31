@@ -3,13 +3,15 @@ import { prisma } from '@grind/db';
 import {
   CreateManualTimeRequest,
   ListManualTimeRequestsQuery,
+  PatchManualTimeRequest,
   type CreateManualTimeRequest as CreateBody,
   type ManualTimeRequestDto,
   type ListManualTimeRequestsQuery as ListQuery,
+  type PatchManualTimeRequest as PatchBody,
 } from '@grind/types';
 import { validate } from '../middleware/validate';
 import { requireAccessToken } from '../middleware/auth';
-import { buildApprovalCard, getLarkMessenger } from '../lark';
+import { buildApprovalCard, buildSupersededCard, buildUpdatedApprovalCard, buildCancelledCard, getLarkMessenger, type DiffEntry } from '../lark';
 import { logger } from '../logger';
 
 export const timeRequestsRouter = Router();
@@ -25,7 +27,7 @@ type Row = {
   requestedStart: Date;
   requestedEnd: Date;
   reason: string;
-  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
   decidedAt: Date | null;
   decidedReason: string | null;
   createdAt: Date;
@@ -142,6 +144,160 @@ timeRequestsRouter.get('/', validate(ListManualTimeRequestsQuery, 'query'), asyn
         : { userId: req.user.sub, ...(q.status ? { status: q.status } : {}) };
     const rows = await prisma.manualTimeRequest.findMany({ where, orderBy: { createdAt: 'desc' }, take: 200 });
     res.json({ requests: rows.map(serialize) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * Edit a still-PENDING request. Re-sends the updated approval card to the
+ * approver and a tiny "Request updated" text nudge so they notice the change.
+ * Both Lark calls are best-effort — they never block the DB write.
+ */
+timeRequestsRouter.patch('/:id', validate(PatchManualTimeRequest, 'body'), async (req, res, next) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: 'unauthorized' });
+    const id = req.params.id;
+    const existing = await prisma.manualTimeRequest.findUnique({
+      where: { id },
+      include: {
+        user: { select: { name: true } },
+        approver: { include: { larkIdentity: { select: { openId: true } } } },
+      },
+    });
+    if (!existing) return res.status(404).json({ error: 'not_found' });
+    if (existing.userId !== req.user.sub) return res.status(403).json({ error: 'forbidden' });
+    if (existing.status !== 'PENDING') return res.status(409).json({ error: 'immutable_after_decision', status: existing.status });
+
+    const body = req.body as PatchBody;
+    // Range sanity if both edges are touched (or one is touched + existing).
+    const start = body.requestedStart ? new Date(body.requestedStart) : existing.requestedStart;
+    const end = body.requestedEnd ? new Date(body.requestedEnd) : existing.requestedEnd;
+    if (!(start.getTime() < end.getTime())) return res.status(400).json({ error: 'invalid_range' });
+
+    const updated = await prisma.manualTimeRequest.update({
+      where: { id },
+      data: {
+        requestedStart: start,
+        requestedEnd: end,
+        ...(body.larkTaskGuid !== undefined ? { larkTaskGuid: body.larkTaskGuid } : {}),
+        ...(body.reason !== undefined ? { reason: body.reason } : {}),
+      },
+    });
+
+    // Best-effort: disable the OLD card (no buttons, "Updated — see new
+    // card" notice) and send a NEW card showing the updated values + a diff
+    // of what changed. Update DB's larkMessageId so future updates/
+    // cancellations target the latest card. Failure must NOT break the
+    // PATCH — the DB state is the source of truth.
+    const messenger = getLarkMessenger();
+    if (messenger && existing.approver?.larkIdentity?.openId && existing.larkMessageId) {
+      const approverOpenId = existing.approver.larkIdentity.openId;
+      const supersededAt = Date.now();
+      const diff: DiffEntry[] = [];
+      if (existing.requestedStart.getTime() !== start.getTime() || existing.requestedEnd.getTime() !== end.getTime()) {
+        diff.push({
+          label: 'Time',
+          before: `${existing.requestedStart.toISOString()} → ${existing.requestedEnd.toISOString()}`,
+          after: `${start.toISOString()} → ${end.toISOString()}`,
+        });
+      }
+      if ((existing.larkTaskGuid ?? null) !== (body.larkTaskGuid ?? existing.larkTaskGuid ?? null)) {
+        diff.push({ label: 'Task', before: existing.larkTaskGuid ?? '—', after: body.larkTaskGuid ?? '—' });
+      }
+      if (existing.reason !== updated.reason) {
+        diff.push({ label: 'Reason', before: existing.reason, after: updated.reason });
+      }
+      try {
+        // 1. Disable the previous card.
+        await messenger.updateCard(
+          existing.larkMessageId,
+          buildSupersededCard({
+            requestId: existing.id,
+            requesterName: existing.user.name,
+            taskSummary: null,
+            startedAt: existing.requestedStart.getTime(),
+            endedAt: existing.requestedEnd.getTime(),
+            reason: existing.reason,
+            supersededAt,
+          }),
+        );
+        // 2. Send a fresh card with the updated values + the diff.
+        const { messageId: newMessageId } = await messenger.sendCard(
+          approverOpenId,
+          buildUpdatedApprovalCard({
+            requestId: updated.id,
+            requesterName: existing.user.name,
+            taskSummary: body.taskSummary ?? null,
+            startedAt: start.getTime(),
+            endedAt: end.getTime(),
+            reason: updated.reason,
+            diff,
+          }),
+        );
+        // 3. Future edits/cancellations should target the new card.
+        await prisma.manualTimeRequest.update({ where: { id }, data: { larkMessageId: newMessageId } });
+        updated.larkMessageId = newMessageId;
+      } catch (err) {
+        logger.warn({ err: String(err), requestId: id }, 'lark patch-notice failed (non-fatal)');
+      }
+    }
+    res.json(serialize(updated));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * Cancel a still-PENDING request. Marks status=CANCELLED, swaps the original
+ * Lark card for a "cancelled" variant (no buttons) and pings the approver
+ * with a one-line notice so an in-flight approver doesn't act on a dead
+ * request. Decided requests are immutable (409).
+ */
+timeRequestsRouter.post('/:id/cancel', async (req, res, next) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: 'unauthorized' });
+    const id = req.params.id;
+    const existing = await prisma.manualTimeRequest.findUnique({
+      where: { id },
+      include: {
+        user: { select: { name: true } },
+        approver: { include: { larkIdentity: { select: { openId: true } } } },
+      },
+    });
+    if (!existing) return res.status(404).json({ error: 'not_found' });
+    if (existing.userId !== req.user.sub) return res.status(403).json({ error: 'forbidden' });
+    if (existing.status !== 'PENDING') return res.status(409).json({ error: 'immutable_after_decision', status: existing.status });
+
+    const now = new Date();
+    const updated = await prisma.manualTimeRequest.update({
+      where: { id },
+      data: { status: 'CANCELLED', decidedAt: now, decidedReason: 'Cancelled by requester' },
+    });
+
+    const messenger = getLarkMessenger();
+    if (messenger && existing.larkMessageId) {
+      try {
+        // Rewrite the card in place: red header, NO Approve/Reject buttons,
+        // clear "withdrawn by requester" note. After this, the approver
+        // CAN'T act on stale buttons even if the WS callback fires.
+        await messenger.updateCard(
+          existing.larkMessageId,
+          buildCancelledCard({
+            requestId: existing.id,
+            requesterName: existing.user.name,
+            taskSummary: null,
+            startedAt: existing.requestedStart.getTime(),
+            endedAt: existing.requestedEnd.getTime(),
+            reason: existing.reason,
+            cancelledAt: now.getTime(),
+          }),
+        );
+      } catch (err) {
+        logger.warn({ err: String(err), requestId: id }, 'lark cancel-card update failed (non-fatal)');
+      }
+    }
+    res.json(serialize(updated));
   } catch (err) {
     next(err);
   }

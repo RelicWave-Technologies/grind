@@ -1,14 +1,12 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Square, Clock, ListTodo, Link2, Search, Plus, X, ClockArrowUp, Check } from 'lucide-react';
-import type { TimerStatus, ManualTimeRequestDto } from '../lib/agent.d';
+import { Square, Clock, ListTodo, Link2, Search, Plus, X } from 'lucide-react';
+import type { TimerStatus } from '../lib/agent.d';
 import { projectStyle } from '../lib/projectStyle';
 import { sortTasks } from '../lib/taskFormat';
 import DayTimeline from '../components/DayTimeline';
-import ScreenshotsStrip from '../components/ScreenshotsStrip';
 import TaskCard from '../components/TaskCard';
 import TaskComposer from '../components/TaskComposer';
-import ManualTimeComposer from '../components/ManualTimeComposer';
 
 export function fmtClock(ms: number): string {
   const t = Math.floor(ms / 1000);
@@ -42,13 +40,6 @@ export default function Today() {
   const [showAll, setShowAll] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [justCreated, setJustCreated] = useState<string | null>(null);
-  const [showRequest, setShowRequest] = useState(false);
-  const [justRequested, setJustRequested] = useState<boolean>(false);
-  const myRequests = useQuery({
-    queryKey: ['myTimeRequests'],
-    queryFn: () => window.agent.timeRequests.listMine(),
-    refetchInterval: 8000,
-  });
 
   useEffect(() => {
     let alive = true;
@@ -197,73 +188,12 @@ export default function Today() {
             </>
           )}
 
-          <div className="section-head">
-            <span className="section-title">Request time</span>
-            <button className="btn btn-soft no-drag" onClick={() => setShowRequest((s) => !s)}>
-              {showRequest ? <><X size={14} strokeWidth={2.5} /> Cancel</> : <><ClockArrowUp size={14} strokeWidth={2.5} /> Add past time</>}
-            </button>
-          </div>
-
-          {showRequest && (
-            <ManualTimeComposer
-              larkTasks={tasks.filter((t) => !t.completed).map((t) => ({ guid: t.guid, summary: t.summary }))}
-              onCreated={() => {
-                setShowRequest(false);
-                setJustRequested(true);
-                void qc.invalidateQueries({ queryKey: ['myTimeRequests'] });
-                window.setTimeout(() => setJustRequested(false), 5000);
-              }}
-            />
-          )}
-
-          {justRequested && !showRequest && (
-            <div className="create-toast rise" role="status">
-              <span className="create-toast-dot" /> Sent to your approver
-            </div>
-          )}
-
-          {(myRequests.data?.requests?.length ?? 0) > 0 && (
-            <div className="task-list" style={{ marginTop: 'var(--sp-2)' }}>
-              {(myRequests.data?.requests ?? []).slice(0, 5).map((r) => (
-                <ManualRequestRow key={r.id} req={r} taskName={tasks.find((t) => t.guid === r.larkTaskGuid)?.summary ?? null} />
-              ))}
-            </div>
-          )}
-
-          <ScreenshotsStrip />
+          {/* "Request time" + recent-requests list + screenshots strip are
+              gone from Today. Manual time lives entirely in the Edit Time
+              tab now (gap rows + inline-edit). Screenshots get their own
+              dedicated surface in Reports. Today stays a focused tracker. */}
         </div>
       </div>
     </>
-  );
-}
-
-function ManualRequestRow({
-  req,
-  taskName,
-}: {
-  req: ManualTimeRequestDto;
-  taskName: string | null;
-}) {
-  const start = new Date(req.requestedStart);
-  const end = new Date(req.requestedEnd);
-  const min = Math.max(0, Math.round((end.getTime() - start.getTime()) / 60000));
-  const dur = `${Math.floor(min / 60)}h ${min % 60}m`;
-  const dateLine = `${start.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} · ${start.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })} – ${end.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`;
-  const statusColor =
-    req.status === 'APPROVED' ? 'var(--c-green)' : req.status === 'REJECTED' ? 'var(--c-red, #d04a4a)' : 'var(--c-amber, #b78a18)';
-  const StatusIcon = req.status === 'APPROVED' ? Check : req.status === 'REJECTED' ? X : Clock;
-  return (
-    <div className="task-card rise" style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)' }}>
-      <span className="dt-dot" style={{ background: statusColor }} />
-      <span style={{ flex: 1, minWidth: 0 }}>
-        <span className="callout" style={{ fontWeight: 600, display: 'block' }}>
-          {taskName ?? 'Untracked'} · {dur}
-        </span>
-        <span className="small secondary">{dateLine} — {req.reason}</span>
-      </span>
-      <span className="small" style={{ color: statusColor, display: 'inline-flex', alignItems: 'center', gap: 4, fontWeight: 600 }}>
-        <StatusIcon size={13} strokeWidth={2.5} /> {req.status}
-      </span>
-    </div>
   );
 }
