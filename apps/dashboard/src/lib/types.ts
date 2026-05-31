@@ -111,6 +111,32 @@ export interface TimesheetUser {
 }
 
 // ---------------------------------------------------------------------------
+// Anti-cheat flags
+// ---------------------------------------------------------------------------
+
+export type FlagType = 'IMPOSSIBLE_RATE' | 'METRONOMIC' | 'LINEAR_MOUSE' | 'SINGLE_CHANNEL' | 'JIGGLER';
+export type FlagStatus = 'OPEN' | 'RESOLVED';
+export type FlagResolution = 'DISMISSED' | 'CONFIRMED' | 'TIME_INVALIDATED';
+
+export interface ActivityFlag {
+  id: string;
+  userId: string;
+  user: { id: string; name: string; email: string };
+  type: FlagType;
+  windowStart: string;
+  windowEnd: string;
+  riskScore: number;
+  evidence: Record<string, number>;
+  status: FlagStatus;
+  resolution: FlagResolution | null;
+  resolvedById: string | null;
+  resolvedBy: { id: string; name: string } | null;
+  resolvedAt: string | null;
+  resolvedNote: string | null;
+  createdAt: string;
+}
+
+// ---------------------------------------------------------------------------
 // Admin CRUD: Teams + User patches
 // ---------------------------------------------------------------------------
 

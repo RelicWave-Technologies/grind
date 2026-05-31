@@ -69,6 +69,8 @@ model User {
   manualTimeRequests       ManualTimeRequest[] @relation("MtrRequester")
   manualTimeApprovals      ManualTimeRequest[] @relation("MtrApprover")
   managedTeams             Team[]              @relation("TeamManager")
+  activityFlags            ActivityFlag[]      @relation("FlagSubject")
+  resolvedFlags            ActivityFlag[]      @relation("FlagResolver")
 
   @@index([workspaceId])
   @@index([teamId])
@@ -212,6 +214,54 @@ model ManualTimeRequest {
 
   @@index([userId, status])
   @@index([approverId, status])
+}
+
+/// Content-free anti-cheat detection. One row per (user, window-start, type)
+/// raised by the risk engine when activity samples are batch-uploaded.
+/// `evidence` carries the engine's signal breakdown (rates, CVs, etc.) for
+/// the dashboard's review queue — never key/text content.
+enum FlagType {
+  IMPOSSIBLE_RATE
+  METRONOMIC
+  LINEAR_MOUSE
+  SINGLE_CHANNEL
+  JIGGLER
+}
+
+enum FlagStatus {
+  OPEN
+  RESOLVED
+}
+
+enum FlagResolution {
+  DISMISSED        // reviewer says the activity was legitimate
+  CONFIRMED        // reviewer agrees it looks like cheating
+  TIME_INVALIDATED // reviewer dropped the matching time (future hook)
+}
+
+model ActivityFlag {
+  id           String         @id @default(cuid())
+  userId       String
+  user         User           @relation("FlagSubject", fields: [userId], references: [id])
+  type         FlagType
+  windowStart  DateTime       // start of the minute-window the engine assessed
+  windowEnd    DateTime
+  riskScore    Int            // 0–100 contribution from RISK_WEIGHTS[type]
+  /// JSON keyed by signal name (eg ikiCv, pathStraightness, keysPerMin).
+  /// Numbers only; the dashboard renders these as small read-only chips.
+  evidence     Json
+  status       FlagStatus     @default(OPEN)
+  resolution   FlagResolution?
+  resolvedById String?
+  resolvedBy   User?          @relation("FlagResolver", fields: [resolvedById], references: [id], onDelete: SetNull)
+  resolvedAt   DateTime?
+  resolvedNote String?
+  createdAt    DateTime       @default(now())
+
+  /// Dedupe key: re-uploading the same window should not double-flag.
+  @@unique([userId, windowStart, type])
+  @@index([userId, status])
+  @@index([status, createdAt])
 }
 
 model RefreshToken {
