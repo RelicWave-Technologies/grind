@@ -99,6 +99,8 @@ export interface TimesheetCell {
   meetingMs: number;
   manualMs: number;
   totalMs: number;
+  firstActivityMs: number | null;
+  lastActivityMs: number | null;
 }
 
 export interface TimesheetUser {

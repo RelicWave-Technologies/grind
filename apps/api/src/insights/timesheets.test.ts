@@ -138,6 +138,53 @@ describe('buildTimesheetMatrix — multi-user, multi-day', () => {
   });
 });
 
+describe('buildTimesheetMatrix — firstActivityMs / lastActivityMs', () => {
+  it('records the earliest and latest tracked moment in the cell', () => {
+    const m = buildTimesheetMatrix({
+      from: '2026-05-25',
+      to: '2026-05-25',
+      tz: 'UTC',
+      segments: [
+        seg('u1', 'AUTO', 'WORK', '2026-05-25T11:00:00Z', '2026-05-25T11:30:00Z'),
+        seg('u1', 'AUTO', 'WORK', '2026-05-25T09:15:00Z', '2026-05-25T09:45:00Z'),
+        seg('u1', 'AUTO', 'MEETING', '2026-05-25T17:00:00Z', '2026-05-25T18:00:00Z'),
+      ],
+    });
+    const cell = m!.cells.u1!['2026-05-25']!;
+    expect(cell.firstActivityMs).toBe(new Date('2026-05-25T09:15:00Z').getTime());
+    expect(cell.lastActivityMs).toBe(new Date('2026-05-25T18:00:00Z').getTime());
+  });
+
+  it('IDLE_TRIMMED does not advance first/last (it is not real activity)', () => {
+    const m = buildTimesheetMatrix({
+      from: '2026-05-25',
+      to: '2026-05-25',
+      tz: 'UTC',
+      segments: [
+        seg('u1', 'AUTO', 'IDLE_TRIMMED', '2026-05-25T07:00:00Z', '2026-05-25T08:00:00Z'),
+        seg('u1', 'AUTO', 'WORK', '2026-05-25T10:00:00Z', '2026-05-25T10:30:00Z'),
+        seg('u1', 'AUTO', 'IDLE_TRIMMED', '2026-05-25T22:00:00Z', '2026-05-25T23:00:00Z'),
+      ],
+    });
+    const cell = m!.cells.u1!['2026-05-25']!;
+    expect(cell.firstActivityMs).toBe(new Date('2026-05-25T10:00:00Z').getTime());
+    expect(cell.lastActivityMs).toBe(new Date('2026-05-25T10:30:00Z').getTime());
+  });
+
+  it('clipped midnight-crossing segments use clipped boundaries, not the raw segment ends', () => {
+    const m = buildTimesheetMatrix({
+      from: '2026-05-25',
+      to: '2026-05-26',
+      tz: 'UTC',
+      segments: [seg('u1', 'AUTO', 'WORK', '2026-05-25T23:00:00Z', '2026-05-26T02:00:00Z')],
+    });
+    expect(m!.cells.u1!['2026-05-25']!.firstActivityMs).toBe(new Date('2026-05-25T23:00:00Z').getTime());
+    expect(m!.cells.u1!['2026-05-25']!.lastActivityMs).toBe(new Date('2026-05-26T00:00:00Z').getTime());
+    expect(m!.cells.u1!['2026-05-26']!.firstActivityMs).toBe(new Date('2026-05-26T00:00:00Z').getTime());
+    expect(m!.cells.u1!['2026-05-26']!.lastActivityMs).toBe(new Date('2026-05-26T02:00:00Z').getTime());
+  });
+});
+
 describe('buildTimesheetMatrix — tz handling', () => {
   it('a UTC-midnight segment in America/New_York lands on the *previous* local day', () => {
     // 2026-05-26T03:00Z = 2026-05-25 23:00 EDT.

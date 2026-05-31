@@ -799,6 +799,58 @@ body {
 .ts-marker-manual { background: var(--c-amber); }
 
 /* ============================================================================
+   Attendance grid cells (uses .timesheet shell with extended .att-cell)
+   ========================================================================== */
+.timesheet.attendance .ts-day-col { min-width: 110px; }
+.att-cell {
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  padding: 6px 4px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  min-height: 64px;
+  justify-content: center;
+}
+.att-cell.is-present {
+  background: rgba(33, 193, 122, 0.06);
+  border-color: rgba(33, 193, 122, 0.18);
+}
+.att-badge {
+  display: flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px;
+  border-radius: 50%;
+  background: rgba(33, 193, 122, 0.22);
+  color: #19854f;
+}
+.att-times {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--label-primary);
+  white-space: nowrap;
+}
+.att-total { font-size: 10.5px; }
+.att-absent {
+  display: flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px;
+  border-radius: 50%;
+  color: var(--label-tertiary);
+}
+
+/* Buttons-as-links (Export CSV) */
+.btn-with-icon {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 12px;
+  text-decoration: none;
+  font-size: 12.5px;
+  font-weight: 600;
+  background: var(--bg-control);
+  border: 1px solid var(--separator);
+  border-radius: var(--radius-sm);
+  color: var(--label-secondary);
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.btn-with-icon:hover { background: var(--fill-hover); color: var(--label-primary); }
+
+/* ============================================================================
    Activity heatmap (per-10-min productivity grid under the ribbon)
    ========================================================================== */
 .heatmap {

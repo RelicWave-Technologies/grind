@@ -183,4 +183,78 @@ describe('GET /v1/admin/timesheets', () => {
     expect(res.status).toBe(200);
     expect(res.body.days).toHaveLength(14);
   });
+
+  it('cell now carries firstActivityMs / lastActivityMs', async () => {
+    const s = await seed();
+    const res = await request(app)
+      .get('/v1/admin/timesheets?from=2026-05-26&to=2026-05-27&tz=UTC')
+      .set(auth(s.admin.token));
+    expect(res.status).toBe(200);
+    const cell = res.body.cells[s.memA.id]['2026-05-26'];
+    expect(cell.firstActivityMs).toBe(new Date('2026-05-26T09:00:00Z').getTime());
+    expect(cell.lastActivityMs).toBe(new Date('2026-05-26T11:00:00Z').getTime());
+  });
+});
+
+describe('GET /v1/admin/timesheets.csv', () => {
+  it('MEMBER → 403', async () => {
+    const s = await seed();
+    const res = await request(app)
+      .get('/v1/admin/timesheets.csv?from=2026-05-26&to=2026-05-27&tz=UTC')
+      .set(auth(s.memA.token));
+    expect(res.status).toBe(403);
+  });
+
+  it('emits a header row + one row per non-empty (user, day), scoped to caller', async () => {
+    const s = await seed();
+    const res = await request(app)
+      .get('/v1/admin/timesheets.csv?from=2026-05-26&to=2026-05-27&tz=UTC')
+      .set(auth(s.admin.token));
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toMatch(/text\/csv/);
+    expect(res.headers['content-disposition']).toContain('timesheets-2026-05-26-to-2026-05-27.csv');
+    const lines = res.text.trim().split('\n');
+    expect(lines[0]).toBe('name,email,role,day,worked_h,meeting_h,manual_h,total_h,first_activity,last_activity');
+    // 3 active (user, day) pairs from the seed: memA on May 26, memA on May 27, memB on May 26.
+    expect(lines.length).toBe(1 + 3);
+    // Spot-check a known cell: memA on May 26 = 1.50 worked + 0.50 meeting = 2.00 total.
+    const memARowMay26 = lines.find((l) => l.startsWith('Mia Member A') && l.includes('2026-05-26'))!;
+    expect(memARowMay26).toBeTruthy();
+    const cells = memARowMay26.split(',');
+    expect(cells[4]).toBe('1.50'); // worked_h
+    expect(cells[5]).toBe('0.50'); // meeting_h
+    expect(cells[7]).toBe('2.00'); // total_h
+    expect(cells[8]).toBe('09:00'); // first_activity
+    expect(cells[9]).toBe('11:00'); // last_activity
+  });
+
+  it('manager scope filters out the other team in CSV too', async () => {
+    const s = await seed();
+    const res = await request(app)
+      .get('/v1/admin/timesheets.csv?from=2026-05-26&to=2026-05-27&tz=UTC')
+      .set(auth(s.mgrA.token));
+    expect(res.status).toBe(200);
+    // No row should mention Bob Member B.
+    expect(res.text).not.toContain('Bob Member B');
+    expect(res.text).toContain('Mia Member A');
+  });
+
+  it('quotes commas in names', async () => {
+    const s = await seed();
+    // Rename memA to include a comma; CSV must quote.
+    await prisma.user.update({ where: { id: s.memA.id }, data: { name: 'Mia, the Member' } });
+    const res = await request(app)
+      .get('/v1/admin/timesheets.csv?from=2026-05-26&to=2026-05-27&tz=UTC')
+      .set(auth(s.admin.token));
+    expect(res.status).toBe(200);
+    expect(res.text).toContain('"Mia, the Member"');
+  });
+
+  it('invalid range → 400 (same validation as JSON endpoint)', async () => {
+    const s = await seed();
+    const res = await request(app)
+      .get('/v1/admin/timesheets.csv?from=2026-05-27&to=2026-05-26&tz=UTC')
+      .set(auth(s.admin.token));
+    expect(res.status).toBe(400);
+  });
 });
