@@ -110,6 +110,18 @@ export interface TimesheetUser {
   role: 'OWNER' | 'ADMIN' | 'MANAGER' | 'MEMBER';
 }
 
+// ---------------------------------------------------------------------------
+// Admin CRUD: Teams + User patches
+// ---------------------------------------------------------------------------
+
+export interface Team {
+  id: string;
+  name: string;
+  managerId: string | null;
+  memberCount: number;
+  createdAt: string;
+}
+
 export interface TimesheetMatrix {
   from: string;
   to: string;

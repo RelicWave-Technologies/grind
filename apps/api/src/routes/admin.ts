@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { prisma } from '@grind/db';
 import { requireAccessToken } from '../middleware/auth';
-import { attachScope, requireManagerOrAbove } from '../middleware/scope';
+import { attachScope, requireAdmin, requireManagerOrAbove } from '../middleware/scope';
 import { decideByUser } from '../lark/decideByUser';
 import {
   addDays as addDaysStr,
@@ -365,5 +365,236 @@ function fmtTimeForTz(ms: number, tz: string): string {
     hour12: false,
   }).format(new Date(ms));
 }
+
+// ============================================================================
+// Teams CRUD (read = MANAGER+, write = ADMIN)
+// ============================================================================
+
+interface TeamDto {
+  id: string;
+  name: string;
+  managerId: string | null;
+  memberCount: number;
+  createdAt: string;
+}
+
+function serializeTeam(t: {
+  id: string;
+  name: string;
+  managerId: string | null;
+  members: Array<{ id: string }>;
+  createdAt: Date;
+}): TeamDto {
+  return {
+    id: t.id,
+    name: t.name,
+    managerId: t.managerId,
+    memberCount: t.members.length,
+    createdAt: t.createdAt.toISOString(),
+  };
+}
+
+/**
+ * GET /v1/admin/teams — workspace teams visible to the caller.
+ *
+ * ADMIN / OWNER → every team in the workspace.
+ * MANAGER       → every team they manage.
+ * MEMBER        → 403 (members don't need a team list; their teamId is on /me).
+ */
+adminRouter.get('/teams', requireManagerOrAbove, async (req, res, next) => {
+  try {
+    if (!req.scope || !req.user) return res.status(401).json({ error: 'unauthorized' });
+    const where: { workspaceId: string; managerId?: string } = { workspaceId: req.scope.workspaceId };
+    if (!req.scope.isAdmin) where.managerId = req.user.sub;
+    const teams = await prisma.team.findMany({
+      where,
+      include: { members: { select: { id: true } } },
+      orderBy: { name: 'asc' },
+    });
+    res.json({ teams: teams.map(serializeTeam) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** Body shape: { name: string, managerId?: string|null }. */
+adminRouter.post('/teams', requireAdmin, async (req, res, next) => {
+  try {
+    if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
+    const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+    if (name.length === 0 || name.length > 80) return res.status(400).json({ error: 'invalid_name' });
+    const managerId = typeof req.body?.managerId === 'string' && req.body.managerId.length > 0 ? req.body.managerId : null;
+    // Manager (if provided) must be in the workspace.
+    if (managerId) {
+      const m = await prisma.user.findUnique({ where: { id: managerId }, select: { workspaceId: true } });
+      if (!m || m.workspaceId !== req.scope.workspaceId) return res.status(400).json({ error: 'manager_out_of_workspace' });
+    }
+    const team = await prisma.team.create({
+      data: { workspaceId: req.scope.workspaceId, name, managerId },
+      include: { members: { select: { id: true } } },
+    });
+    res.status(201).json(serializeTeam(team));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** PATCH body: { name?: string, managerId?: string|null }. */
+adminRouter.patch('/teams/:id', requireAdmin, async (req, res, next) => {
+  try {
+    if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
+    const id = req.params.id;
+    if (!id) return res.status(400).json({ error: 'missing_id' });
+    const existing = await prisma.team.findUnique({ where: { id } });
+    if (!existing || existing.workspaceId !== req.scope.workspaceId) {
+      return res.status(404).json({ error: 'not_found' });
+    }
+
+    const data: { name?: string; managerId?: string | null } = {};
+    if (typeof req.body?.name === 'string') {
+      const name = req.body.name.trim();
+      if (name.length === 0 || name.length > 80) return res.status(400).json({ error: 'invalid_name' });
+      data.name = name;
+    }
+    if ('managerId' in (req.body ?? {})) {
+      const raw = req.body.managerId;
+      if (raw === null || raw === '') {
+        data.managerId = null;
+      } else if (typeof raw === 'string') {
+        const m = await prisma.user.findUnique({ where: { id: raw }, select: { workspaceId: true } });
+        if (!m || m.workspaceId !== req.scope.workspaceId) {
+          return res.status(400).json({ error: 'manager_out_of_workspace' });
+        }
+        data.managerId = raw;
+      } else {
+        return res.status(400).json({ error: 'invalid_managerId' });
+      }
+    }
+    if (Object.keys(data).length === 0) return res.status(400).json({ error: 'nothing_to_update' });
+
+    const team = await prisma.team.update({
+      where: { id },
+      data,
+      include: { members: { select: { id: true } } },
+    });
+    res.json(serializeTeam(team));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * DELETE /v1/admin/teams/:id — drops the team. Members keep their User row;
+ * their teamId silently goes null (Prisma onDelete: SetNull from the schema).
+ * Lark identities and time history are untouched — managers may want to
+ * re-team people on the dashboard's /users page after a reorg.
+ */
+adminRouter.delete('/teams/:id', requireAdmin, async (req, res, next) => {
+  try {
+    if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
+    const id = req.params.id;
+    if (!id) return res.status(400).json({ error: 'missing_id' });
+    const existing = await prisma.team.findUnique({ where: { id } });
+    if (!existing || existing.workspaceId !== req.scope.workspaceId) {
+      return res.status(404).json({ error: 'not_found' });
+    }
+    await prisma.team.delete({ where: { id } });
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ============================================================================
+// PATCH a user (ADMIN-only). role / name / teamId / managerId.
+// ============================================================================
+
+const VALID_ROLES = ['OWNER', 'ADMIN', 'MANAGER', 'MEMBER'] as const;
+type ValidRole = (typeof VALID_ROLES)[number];
+
+adminRouter.patch('/users/:id', requireAdmin, async (req, res, next) => {
+  try {
+    if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
+    const id = req.params.id;
+    if (!id) return res.status(400).json({ error: 'missing_id' });
+    const existing = await prisma.user.findUnique({ where: { id } });
+    if (!existing || existing.workspaceId !== req.scope.workspaceId) {
+      return res.status(404).json({ error: 'not_found' });
+    }
+
+    const data: { name?: string; role?: ValidRole; teamId?: string | null; managerId?: string | null } = {};
+
+    if (typeof req.body?.name === 'string') {
+      const name = req.body.name.trim();
+      if (name.length === 0 || name.length > 80) return res.status(400).json({ error: 'invalid_name' });
+      data.name = name;
+    }
+
+    if (typeof req.body?.role === 'string') {
+      if (!(VALID_ROLES as readonly string[]).includes(req.body.role)) {
+        return res.status(400).json({ error: 'invalid_role' });
+      }
+      data.role = req.body.role as ValidRole;
+    }
+
+    if ('teamId' in (req.body ?? {})) {
+      const raw = req.body.teamId;
+      if (raw === null || raw === '') {
+        data.teamId = null;
+      } else if (typeof raw === 'string') {
+        const t = await prisma.team.findUnique({ where: { id: raw }, select: { workspaceId: true } });
+        if (!t || t.workspaceId !== req.scope.workspaceId) return res.status(400).json({ error: 'team_out_of_workspace' });
+        data.teamId = raw;
+      } else {
+        return res.status(400).json({ error: 'invalid_teamId' });
+      }
+    }
+
+    if ('managerId' in (req.body ?? {})) {
+      const raw = req.body.managerId;
+      if (raw === null || raw === '') {
+        data.managerId = null;
+      } else if (typeof raw === 'string') {
+        if (raw === id) return res.status(400).json({ error: 'cannot_manage_self' });
+        const m = await prisma.user.findUnique({ where: { id: raw }, select: { workspaceId: true } });
+        if (!m || m.workspaceId !== req.scope.workspaceId) return res.status(400).json({ error: 'manager_out_of_workspace' });
+        data.managerId = raw;
+      } else {
+        return res.status(400).json({ error: 'invalid_managerId' });
+      }
+    }
+
+    if (Object.keys(data).length === 0) return res.status(400).json({ error: 'nothing_to_update' });
+
+    // Safety: never demote the workspace's last OWNER. Without this, a
+    // careless admin could lock everyone out of full-workspace privileges.
+    if (data.role && data.role !== 'OWNER' && existing.role === 'OWNER') {
+      const owners = await prisma.user.count({
+        where: { workspaceId: req.scope.workspaceId, role: 'OWNER' },
+      });
+      if (owners <= 1) return res.status(400).json({ error: 'last_owner_protected' });
+    }
+
+    const updated = await prisma.user.update({
+      where: { id },
+      data,
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        role: true,
+        teamId: true,
+        managerId: true,
+        createdAt: true,
+      },
+    });
+    res.json({
+      ...updated,
+      createdAt: updated.createdAt.toISOString(),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
 
 export default adminRouter;
