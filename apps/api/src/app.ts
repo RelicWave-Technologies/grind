@@ -1,6 +1,7 @@
 import express from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
+import cookieParser from 'cookie-parser';
 import pinoHttp from 'pino-http';
 import { logger } from './logger';
 import { authRouter } from './routes/auth';
@@ -10,13 +11,19 @@ import { activityRouter } from './routes/activity';
 import { larkRouter } from './routes/lark';
 import { insightsRouter } from './routes/insights';
 import { timeRequestsRouter } from './routes/timeRequests';
+import { adminRouter } from './routes/admin';
 import { errorHandler } from './middleware/errorHandler';
 
 export function buildApp() {
   const app = express();
 
   app.use(helmet());
-  app.use(cors({ origin: true, credentials: false }));
+  // CORS: allow credentials so the dashboard (separate origin in dev: 5174)
+  // can ship the grind_at cookie. `origin: true` reflects the request
+  // origin, which Express's cors lib pairs with the Access-Control-Allow-
+  // Credentials: true header. Production may want a stricter allowlist.
+  app.use(cors({ origin: true, credentials: true }));
+  app.use(cookieParser());
   app.use(express.json({ limit: '64kb' }));
   app.use(
     pinoHttp({
@@ -37,6 +44,7 @@ export function buildApp() {
   app.use('/v1/lark', larkRouter);
   app.use('/v1/insights', insightsRouter);
   app.use('/v1/time-requests', timeRequestsRouter);
+  app.use('/v1/admin', adminRouter);
 
   app.use(errorHandler);
 
