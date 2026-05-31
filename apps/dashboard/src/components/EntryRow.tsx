@@ -31,6 +31,9 @@ interface BaseProps {
   /** Tick counter from the parent — when bumped, gap row syncs to fresh preset. */
   presetTick?: number;
   preset?: { startedAt: number; endedAt: number };
+  /** Hover-link from the ribbon. When set, the row paints a soft violet rail. */
+  rowId?: string;
+  highlighted?: boolean;
 }
 
 interface TrackedRowProps extends BaseProps {
@@ -81,7 +84,7 @@ export function EntryRow(props: EntryRowProps) {
 // Tracked + Approved-manual: editable task + notes
 // ---------------------------------------------------------------------------
 
-function TrackedRow({ block, kind, tasks, disabled, onSave }: TrackedRowProps) {
+function TrackedRow({ block, kind, tasks, disabled, rowId, highlighted, onSave }: TrackedRowProps) {
   const [task, setTask] = useState<string>(block.larkTaskGuid ?? '');
   const [notes, setNotes] = useState<string>(block.notes ?? '');
   const [saving, setSaving] = useState(false);
@@ -118,7 +121,10 @@ function TrackedRow({ block, kind, tasks, disabled, onSave }: TrackedRowProps) {
   }
 
   return (
-    <tr className={`et-row et-row-${kind === 'tracked' ? 'tracked' : 'manual'}${dirty ? ' et-row-dirty' : ''}`}>
+    <tr
+      data-row-id={rowId}
+      className={`et-row et-row-${kind === 'tracked' ? 'tracked' : 'manual'}${dirty ? ' et-row-dirty' : ''}${highlighted ? ' et-row-highlighted' : ''}`}
+    >
       <td className="et-time-cell tabular">
         <KindBadge kind={kind} />
       </td>
@@ -179,7 +185,7 @@ function TrackedRow({ block, kind, tasks, disabled, onSave }: TrackedRowProps) {
 // Pending request: edit time / task / reason + Withdraw
 // ---------------------------------------------------------------------------
 
-function PendingRow({ pending, tasks, disabled, onPatch, onWithdraw }: PendingRowProps) {
+function PendingRow({ pending, tasks, disabled, rowId, highlighted, onPatch, onWithdraw }: PendingRowProps) {
   const [start, setStart] = useState(pending.startedAt);
   const [end, setEnd] = useState(pending.endedAt);
   const [task, setTask] = useState<string>(pending.larkTaskGuid ?? '');
@@ -228,7 +234,10 @@ function PendingRow({ pending, tasks, disabled, onPatch, onWithdraw }: PendingRo
   const duration = Math.max(0, end - start);
 
   return (
-    <tr className={`et-row et-row-pending-edit${dirty ? ' et-row-dirty' : ''}`}>
+    <tr
+      data-row-id={rowId}
+      className={`et-row et-row-pending-edit${dirty ? ' et-row-dirty' : ''}${highlighted ? ' et-row-highlighted' : ''}`}
+    >
       <td><KindBadge kind="pending" /></td>
       <td className="et-time-cell">
         <span className="et-times-inline">

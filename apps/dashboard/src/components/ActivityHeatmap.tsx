@@ -7,27 +7,20 @@ interface Props {
 }
 
 /**
- * Per-minute (defaulting 10-min bucket) productivity heatmap. One cell per
- * bucket spanning the day. Color encodes productivity score 0-100:
+ * Per-minute (default 10-min bucket) productivity heatmap. One cell per
+ * bucket spanning the day. Colour encodes productivity score 0-100:
  *   null  → grey (no samples — the agent wasn't running)
  *   0     → light grey (samples landed but the user was idle)
  *   1-100 → green scale, darker as more productive
  *
- * Matches the meeting-notes legend in spirit (dark = productive). Fully
- * read-only — hover for a tooltip showing the time range and score.
- *
  * a11y note: heatmap is `aria-hidden`. Numeric totals on the entries table
- * already convey the same information to screen readers.
+ * convey the same information to screen readers.
  */
 export function ActivityHeatmap({ day, heatmap }: Props) {
   const cellCount = heatmap.buckets.length;
   if (cellCount === 0) return null;
   const bucketMs = heatmap.bucketMs;
-  const span = day.dayEnd - day.dayStart;
 
-  // Width comes from a flex container so the grid fills the same width as the
-  // ribbon above it. We use minmax(2px, 1fr) so the cells stay clickable even
-  // when 144 of them are squeezed.
   return (
     <div className="heatmap" aria-hidden>
       <div className="heatmap-row" style={{ gridTemplateColumns: `repeat(${cellCount}, minmax(2px, 1fr))` }}>
@@ -49,12 +42,9 @@ export function ActivityHeatmap({ day, heatmap }: Props) {
           );
         })}
       </div>
-      {/* Hint that the grid lines up with the ribbon above. */}
       <div className="heatmap-foot small tertiary">
         Each cell = {Math.round(bucketMs / 60_000)} min · darker = more productive
       </div>
-      {/* eslint-disable-next-line @typescript-eslint/no-unused-expressions */}
-      {span /* keep span referenced for future overlays */}
     </div>
   );
 }

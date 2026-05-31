@@ -166,6 +166,11 @@ export function MeTodayScreen() {
     });
   }
 
+  // Bar↔row link: when the ribbon hovers a block, highlight the matching
+  // table row. Uses a single piece of state so only one row can be lit at
+  // a time. Row keys match the ribbon's: `entry-<id>`, `pending-<id>`.
+  const [highlightedRowId, setHighlightedRowId] = useState<string | null>(null);
+
   // ---- Derived view state ---------------------------------------------------
 
   const targetUser: AdminUser | undefined = useMemo(() => {
@@ -239,7 +244,12 @@ export function MeTodayScreen() {
       {dayQ.data && (
         <>
           <section className="card ribbon-card">
-            <DayRibbon day={dayQ.data} now={now} onClickEpoch={editable ? onRibbonClick : undefined} />
+            <DayRibbon
+              day={dayQ.data}
+              now={now}
+              onClickEpoch={editable ? onRibbonClick : undefined}
+              onHoverRowId={setHighlightedRowId}
+            />
             {dayQ.data.activity && dayQ.data.activity.buckets.length > 0 && (
               <ActivityHeatmap day={dayQ.data} heatmap={dayQ.data.activity} />
             )}
@@ -317,9 +327,12 @@ export function MeTodayScreen() {
                   }
                   // WORK / MEETING / MANUAL
                   const kind = b.kind === 'MANUAL' ? 'manual_approved' : 'tracked';
+                  const rowId = `entry-${b.timeEntryId ?? `${b.startedAt}-${i}`}`;
                   return (
                     <EntryRow
-                      key={`entry-${b.timeEntryId ?? `${b.startedAt}-${i}`}`}
+                      key={rowId}
+                      rowId={rowId}
+                      highlighted={highlightedRowId === rowId}
                       kind={kind}
                       block={b}
                       tasks={tasks}
@@ -331,21 +344,26 @@ export function MeTodayScreen() {
                   );
                 })}
 
-                {dayQ.data.pendingOverlay.map((p) => (
-                  <EntryRow
-                    key={`pending-${p.id}`}
-                    kind="pending"
-                    pending={p}
-                    tasks={tasks}
-                    disabled={!editable}
-                    onPatch={async (vars) => {
-                      await patchRequest.mutateAsync(vars);
-                    }}
-                    onWithdraw={async (id) => {
-                      await cancelRequest.mutateAsync(id);
-                    }}
-                  />
-                ))}
+                {dayQ.data.pendingOverlay.map((p) => {
+                  const rowId = `pending-${p.id}`;
+                  return (
+                    <EntryRow
+                      key={rowId}
+                      rowId={rowId}
+                      highlighted={highlightedRowId === rowId}
+                      kind="pending"
+                      pending={p}
+                      tasks={tasks}
+                      disabled={!editable}
+                      onPatch={async (vars) => {
+                        await patchRequest.mutateAsync(vars);
+                      }}
+                      onWithdraw={async (id) => {
+                        await cancelRequest.mutateAsync(id);
+                      }}
+                    />
+                  );
+                })}
 
                 {dayQ.data.recentRejected.map((r) => (
                   <EntryRow key={`rejected-${r.id}`} kind="rejected" rejected={r} />
