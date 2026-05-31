@@ -1,13 +1,29 @@
 import { Router } from 'express';
 import { prisma } from '@grind/db';
 import { requireAccessToken } from '../middleware/auth';
+import { attachScope } from '../middleware/scope';
 import { scoreDay } from '../scoring/score';
 import { assessWindow, type RiskSample } from '../anticheat/risk';
 import type { RoleTitle } from '../scoring/presets';
 import { buildDayInsight, localDayWindow } from '../insights/day';
 
 export const insightsRouter = Router();
-insightsRouter.use(requireAccessToken);
+// /day accepts an optional ?userId= so admins/managers can pull a team
+// member's timesheet — attachScope resolves the visible userIds. /score
+// remains self-only for now (caller can only see their own productivity).
+insightsRouter.use(requireAccessToken, attachScope);
+
+/**
+ * Resolve the target userId for a "view someone's day" request. Defaults to
+ * the caller; rejects if the caller isn't permitted to view that user.
+ */
+function resolveTargetUserId(req: { user?: { sub: string }; scope?: { userIds: string[] } }, raw: unknown): { ok: true; userId: string } | { ok: false; status: number; error: string } {
+  if (!req.user) return { ok: false, status: 401, error: 'unauthorized' };
+  if (typeof raw !== 'string' || raw.length === 0) return { ok: true, userId: req.user.sub };
+  if (!req.scope) return { ok: false, status: 500, error: 'scope_unresolved' };
+  if (!req.scope.userIds.includes(raw)) return { ok: false, status: 403, error: 'forbidden' };
+  return { ok: true, userId: raw };
+}
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -96,12 +112,16 @@ insightsRouter.get('/day', async (req, res, next) => {
     const win = localDayWindow(date, tz);
     if (!win) return res.status(400).json({ error: 'invalid_date_or_tz' });
 
+    const targetUser = resolveTargetUserId(req, req.query.userId);
+    if (!targetUser.ok) return res.status(targetUser.status).json({ error: targetUser.error });
+    const userId = targetUser.userId;
+
     const now = new Date();
 
     // Pull every TimeEntry that overlaps the window, including its segments.
     const entries = await prisma.timeEntry.findMany({
       where: {
-        userId: req.user.sub,
+        userId,
         startedAt: { lt: win.end },
         OR: [{ endedAt: null }, { endedAt: { gt: win.start } }],
       },
@@ -114,7 +134,7 @@ insightsRouter.get('/day', async (req, res, next) => {
     // PENDING manual requests overlapping the window (for the stripe overlay).
     const pending = await prisma.manualTimeRequest.findMany({
       where: {
-        userId: req.user.sub,
+        userId,
         status: 'PENDING',
         requestedStart: { lt: win.end },
         requestedEnd: { gt: win.start },
@@ -126,7 +146,7 @@ insightsRouter.get('/day', async (req, res, next) => {
     // Edit Time table so the user sees why and can re-request.
     const rejected = await prisma.manualTimeRequest.findMany({
       where: {
-        userId: req.user.sub,
+        userId,
         status: 'REJECTED',
         requestedStart: { lt: win.end },
         requestedEnd: { gt: win.start },

@@ -3,6 +3,7 @@ import request from 'supertest';
 import { prisma } from '@grind/db';
 import { buildApp } from '../src/app';
 import { seedUser } from './helpers';
+import { signAccessToken } from '../src/lib/jwt';
 
 /**
  * Integration tests for GET /v1/insights/day against real Postgres.
@@ -204,3 +205,120 @@ describe('GET /v1/insights/day — composition with real TimeEntry rows', () => 
     expect(res.body.blocks[0].kind).toBe('GAP');
   });
 });
+
+describe('GET /v1/insights/day — scoped ?userId=', () => {
+  /**
+   * Build a workspace with admin + manager-A + member-A (in team-A) +
+   * manager-B + member-B (in team-B). Drop a TimeEntry on member-A's
+   * 2026-05-30 so the day has content to find.
+   */
+  async function seedScope() {
+    const stamp = Date.now();
+    const ws = await prisma.workspace.create({ data: { name: `WS-scope-${stamp}` } });
+    const mk = (role: 'ADMIN' | 'MANAGER' | 'MEMBER', tag: string) =>
+      prisma.user.create({
+        data: {
+          workspaceId: ws.id,
+          email: `${tag}-${stamp}@test.local`,
+          name: `${tag} user`,
+          role,
+          passwordHash: 'x'.repeat(60),
+        },
+      });
+    const admin = await mk('ADMIN', 'admin');
+    const mgrA = await mk('MANAGER', 'mgr-a');
+    const memA = await mk('MEMBER', 'mem-a');
+    const mgrB = await mk('MANAGER', 'mgr-b');
+    const memB = await mk('MEMBER', 'mem-b');
+    const teamA = await prisma.team.create({ data: { workspaceId: ws.id, name: 'A', managerId: mgrA.id } });
+    await prisma.user.updateMany({ where: { id: { in: [mgrA.id, memA.id] } }, data: { teamId: teamA.id } });
+    const teamB = await prisma.team.create({ data: { workspaceId: ws.id, name: 'B', managerId: mgrB.id } });
+    await prisma.user.updateMany({ where: { id: { in: [mgrB.id, memB.id] } }, data: { teamId: teamB.id } });
+    // Member-A has tracked time on 2026-05-30.
+    await prisma.timeEntry.create({
+      data: {
+        id: `te_scope_${stamp}`,
+        clientUuid: `cu_scope_${stamp}`,
+        userId: memA.id,
+        source: 'AUTO',
+        startedAt: ts('2026-05-30T09:00:00Z'),
+        endedAt: ts('2026-05-30T11:00:00Z'),
+        segments: {
+          create: [
+            {
+              id: `sscope_${stamp}`,
+              kind: 'WORK',
+              startedAt: ts('2026-05-30T09:00:00Z'),
+              endedAt: ts('2026-05-30T11:00:00Z'),
+            },
+          ],
+        },
+      },
+    });
+    const tok = (u: { id: string; role: 'ADMIN' | 'MANAGER' | 'MEMBER' }) =>
+      signAccessToken({ sub: u.id, ws: ws.id, role: u.role });
+    return {
+      ws,
+      admin: { id: admin.id, token: tok(admin) },
+      mgrA: { id: mgrA.id, token: tok(mgrA) },
+      memA: { id: memA.id, token: tok(memA) },
+      mgrB: { id: mgrB.id, token: tok(mgrB) },
+      memB: { id: memB.id, token: tok(memB) },
+    };
+  }
+
+  it('member-A views own day without ?userId → returns their tracked time', async () => {
+    const s = await seedScope();
+    const res = await request(app)
+      .get('/v1/insights/day?date=2026-05-30&tz=UTC')
+      .set(auth(s.memA.token));
+    expect(res.status).toBe(200);
+    const tracked = res.body.blocks.filter((b: { kind: string }) => b.kind === 'WORK');
+    expect(tracked.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('manager-A views member-A?userId=...  → permitted, returns tracked time', async () => {
+    const s = await seedScope();
+    const res = await request(app)
+      .get(`/v1/insights/day?date=2026-05-30&tz=UTC&userId=${s.memA.id}`)
+      .set(auth(s.mgrA.token));
+    expect(res.status).toBe(200);
+    const tracked = res.body.blocks.filter((b: { kind: string }) => b.kind === 'WORK');
+    expect(tracked.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('manager-B views member-A → 403 (not in scope)', async () => {
+    const s = await seedScope();
+    const res = await request(app)
+      .get(`/v1/insights/day?date=2026-05-30&tz=UTC&userId=${s.memA.id}`)
+      .set(auth(s.mgrB.token));
+    expect(res.status).toBe(403);
+  });
+
+  it('admin views member-A → permitted', async () => {
+    const s = await seedScope();
+    const res = await request(app)
+      .get(`/v1/insights/day?date=2026-05-30&tz=UTC&userId=${s.memA.id}`)
+      .set(auth(s.admin.token));
+    expect(res.status).toBe(200);
+    const tracked = res.body.blocks.filter((b: { kind: string }) => b.kind === 'WORK');
+    expect(tracked.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('member-A passes their own userId explicitly → still allowed', async () => {
+    const s = await seedScope();
+    const res = await request(app)
+      .get(`/v1/insights/day?date=2026-05-30&tz=UTC&userId=${s.memA.id}`)
+      .set(auth(s.memA.token));
+    expect(res.status).toBe(200);
+  });
+
+  it('member-A passes a different userId → 403', async () => {
+    const s = await seedScope();
+    const res = await request(app)
+      .get(`/v1/insights/day?date=2026-05-30&tz=UTC&userId=${s.memB.id}`)
+      .set(auth(s.memA.token));
+    expect(res.status).toBe(403);
+  });
+});
+

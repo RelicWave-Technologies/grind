@@ -1,17 +1,19 @@
 import { Outlet, Link, useRouteContext, useNavigate, useLocation } from '@tanstack/react-router';
-import { Home, Users, LogOut } from 'lucide-react';
-import { isAdmin, useLogout } from '../lib/auth';
+import { Home, Users, Clock4, Inbox, LogOut } from 'lucide-react';
+import { isManagerOrAbove, useLogout } from '../lib/auth';
 
 interface NavItem {
   to: string;
   label: string;
   Icon: typeof Home;
   /** Roles that may see this item. */
-  show: 'all' | 'admin';
+  show: 'all' | 'manager+' | 'admin';
 }
 
 const NAV: NavItem[] = [
   { to: '/', label: 'Home', Icon: Home, show: 'all' },
+  { to: '/me-today', label: 'My Day', Icon: Clock4, show: 'all' },
+  { to: '/approvals', label: 'Approvals', Icon: Inbox, show: 'manager+' },
   { to: '/users', label: 'People', Icon: Users, show: 'all' /* scope handles privilege */ },
 ];
 
@@ -21,7 +23,11 @@ export function Layout() {
   const location = useLocation();
   const logout = useLogout();
 
-  const visible = NAV.filter((n) => n.show === 'all' || (n.show === 'admin' && isAdmin(me.role)));
+  const visible = NAV.filter((n) => {
+    if (n.show === 'all') return true;
+    if (n.show === 'manager+') return isManagerOrAbove(me.role);
+    return false; // 'admin' future-proofed
+  });
 
   async function onLogout() {
     try {

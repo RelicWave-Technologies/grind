@@ -82,3 +82,14 @@ export const requireAdmin: RequestHandler = (req, res, next) => {
   if (!req.scope?.isAdmin) return res.status(403).json({ error: 'admin_only' });
   next();
 };
+
+/**
+ * Gate a route to MANAGER, ADMIN, or OWNER. The approvals queue lives here:
+ * MEMBERs have their own self-view via /v1/time-requests and don't need —
+ * shouldn't see — anyone else's queue.
+ */
+export const requireManagerOrAbove: RequestHandler = (req, res, next) => {
+  if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
+  if (req.scope.scope === 'self') return res.status(403).json({ error: 'manager_or_above_only' });
+  next();
+};
