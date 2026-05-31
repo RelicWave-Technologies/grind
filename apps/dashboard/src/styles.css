@@ -16,6 +16,7 @@
   --label-tertiary: rgba(40, 36, 56, 0.36);
   --label-placeholder: rgba(40, 36, 56, 0.34);
   --on-dark: #ffffff;
+  --on-dark-soft: rgba(255, 255, 255, 0.62);
 
   --separator: rgba(40, 36, 56, 0.08);
   --separator-strong: rgba(40, 36, 56, 0.12);
@@ -28,14 +29,17 @@
   --violet-tint: rgba(124, 92, 255, 0.1);
   --violet-tint-2: rgba(124, 92, 255, 0.16);
   --grad-violet: linear-gradient(135deg, #9b7bff 0%, #6d3bf0 100%);
+  --grad-violet-soft: linear-gradient(135deg, rgba(155, 123, 255, 0.16), rgba(109, 59, 240, 0.16));
+  --ring-from: #b69bff;
+  --ring-to: #6d3bf0;
 
-  --c-violet: #7c5cff;
-  --c-rose: #ff4d8d;
-  --c-orange: #ff9f43;
-  --c-green: #21c17a;
-  --c-blue: #3aa0ff;
-  --c-amber: #f5a524;
-  --c-slate: #7a8699;
+  --c-violet: #7c5cff;  --c-violet-bg: rgba(124, 92, 255, 0.12);
+  --c-rose: #ff4d8d;    --c-rose-bg: rgba(255, 77, 141, 0.12);
+  --c-orange: #ff9f43;  --c-orange-bg: rgba(255, 159, 67, 0.14);
+  --c-green: #21c17a;   --c-green-bg: rgba(33, 193, 122, 0.14);
+  --c-blue: #3aa0ff;    --c-blue-bg: rgba(58, 160, 255, 0.14);
+  --c-amber: #f5a524;   --c-amber-bg: rgba(245, 165, 36, 0.16);
+  --c-slate: #7a8699;   --c-slate-bg: rgba(122, 134, 153, 0.14);
 
   --success: #21c17a;
   --danger: #ff4d6a;
@@ -50,19 +54,36 @@
 
   --shadow-sm: 0 1px 2px rgba(24, 20, 44, 0.05);
   --shadow-card: 0 1px 2px rgba(24, 20, 44, 0.04), 0 8px 24px rgba(24, 20, 44, 0.06);
-  --shadow-hero: 0 12px 40px rgba(40, 24, 96, 0.28);
+  --shadow-lift: 0 6px 20px rgba(24, 20, 44, 0.10);
+  --shadow-hero: 0 24px 60px rgba(40, 24, 96, 0.32), 0 6px 18px rgba(40, 24, 96, 0.22);
   --focus-ring: 0 0 0 3px rgba(124, 92, 255, 0.4);
 
   --ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --spring: cubic-bezier(0.34, 1.56, 0.64, 1);
   --dur-fast: 130ms;
   --dur-base: 220ms;
+  --dur-slow: 360ms;
 
-  --sidebar-width: 248px;
+  --sidebar-width: 232px;
+  --toolbar-height: 58px;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  :root { --dur-fast: 0ms; --dur-base: 0ms; }
+  :root { --dur-fast: 0ms; --dur-base: 0ms; --dur-slow: 0ms; }
+  .rise, .rise-1, .rise-2, .rise-3, .rise-4 { animation: none !important; }
 }
+
+/* Premium page-mount entrance — content rises 8px and fades over 360ms.
+   Stagger via .rise-1 (40ms) … .rise-4 (160ms). */
+@keyframes page-rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.rise   { animation: page-rise var(--dur-slow) var(--ease) both; }
+.rise-1 { animation: page-rise var(--dur-slow) var(--ease) both; animation-delay: 40ms; }
+.rise-2 { animation: page-rise var(--dur-slow) var(--ease) both; animation-delay: 80ms; }
+.rise-3 { animation: page-rise var(--dur-slow) var(--ease) both; animation-delay: 120ms; }
+.rise-4 { animation: page-rise var(--dur-slow) var(--ease) both; animation-delay: 160ms; }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body, #root { height: 100%; }
@@ -88,10 +109,24 @@ body {
   background-clip: padding-box;
 }
 
-/* type helpers */
-.h1 { font-family: var(--font-round); font-size: 28px; line-height: 1.1; font-weight: 700; letter-spacing: -0.4px; }
-.h2 { font-size: 18px; line-height: 1.2; font-weight: 700; letter-spacing: -0.2px; }
-.h3 { font-size: 15px; line-height: 1.25; font-weight: 600; }
+/* Type helpers — match docs/design.md §2. Display font for big numbers/
+   titles; SF Pro Text for body. */
+.display { font-family: var(--font-round); font-variant-numeric: tabular-nums; }
+.h1 {
+  font-family: var(--font-round);
+  font-size: 30px;
+  line-height: 1.06;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+}
+.h2 {
+  font-family: var(--font-round);
+  font-size: 20px;
+  line-height: 1.2;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+}
+.h3 { font-size: 14px; line-height: 1.25; font-weight: 600; letter-spacing: -0.1px; }
 .body { font-size: 14px; }
 .callout { font-size: 12px; }
 .small { font-size: 11px; }
@@ -135,22 +170,48 @@ body {
   letter-spacing: -0.2px;
 }
 
-.nav { display: flex; flex-direction: column; gap: 2px; }
+/* Sidebar nav — per docs §3 .nav-item: 38px row, 18px icon (2px stroke),
+   active = violet-tint bg + violet-700 text + bold, with a 2px violet rail
+   on the left as a focus-indicator-grade affordance. */
+.nav {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 0 4px;
+}
+.nav-section {
+  padding: 16px 12px 6px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--label-tertiary);
+}
 .nav-item {
+  position: relative;
   display: flex; align-items: center; gap: 10px;
-  padding: 8px 12px;
+  height: 38px;
+  padding: 0 12px;
   border-radius: var(--radius-sm);
   color: var(--label-secondary);
   text-decoration: none;
-  font-size: 13.5px;
+  font-size: 13px;
   font-weight: 500;
   transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
 }
+.nav-item svg { color: var(--label-tertiary); flex-shrink: 0; transition: color var(--dur-fast) var(--ease); }
 .nav-item:hover { background: var(--fill-hover); color: var(--label-primary); }
+.nav-item:hover svg { color: var(--label-secondary); }
 .nav-item.is-active {
   background: var(--violet-tint);
   color: var(--violet-700);
   font-weight: 600;
+}
+.nav-item.is-active::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 9px; bottom: 9px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--violet);
 }
 .nav-item.is-active svg { color: var(--violet-700); }
 
@@ -186,8 +247,11 @@ body {
 
 .main {
   min-width: 0;
-  padding: var(--sp-8);
+  padding: var(--sp-9) var(--sp-9) var(--sp-10);
   overflow-x: hidden;
+}
+@media (max-width: 980px) {
+  .main { padding: var(--sp-7) var(--sp-7) var(--sp-9); }
 }
 
 /* ============================================================================
@@ -196,9 +260,11 @@ body {
 .page { max-width: 1080px; margin: 0 auto; }
 .page-head {
   display: flex; align-items: flex-end; justify-content: space-between;
+  gap: var(--sp-7);
   margin-bottom: var(--sp-7);
+  flex-wrap: wrap;
 }
-.page-sub { font-size: 13px; margin-top: 4px; }
+.page-sub { font-size: 13px; margin-top: 6px; color: var(--label-secondary); }
 
 .card {
   background: var(--bg-card);
@@ -207,13 +273,253 @@ body {
   padding: var(--sp-6) var(--sp-7);
   box-shadow: var(--shadow-card);
 }
-.welcome-card { max-width: 720px; }
+.card-interactive {
+  transition: transform var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+  cursor: pointer;
+}
+.card-interactive:hover { transform: translateY(-1px); box-shadow: var(--shadow-lift); }
+
+/* Stat-card grid (used by Home + as a header row on data pages). */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--sp-5);
+}
+
+/* Welcome list — used on the Home tip card. */
 .welcome-list {
-  margin-top: 12px;
-  padding-left: 18px;
-  display: flex; flex-direction: column; gap: 4px;
-  color: var(--label-secondary);
+  margin-top: 14px;
+  padding-left: 0;
+  list-style: none;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.welcome-list li {
+  display: flex; align-items: flex-start; gap: 12px;
   font-size: 13.5px;
+  color: var(--label-secondary);
+}
+.welcome-list li::before {
+  content: '';
+  width: 6px; height: 6px;
+  margin-top: 8px;
+  border-radius: 50%;
+  background: var(--violet);
+  flex-shrink: 0;
+}
+
+/* Quick-link card grid on Home — calm, lightly chromed, lift on hover. */
+.quick-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: var(--sp-4);
+}
+.quick-card {
+  display: flex; align-items: center; gap: 14px;
+  padding: 16px 18px;
+  background: var(--bg-card);
+  border: 1px solid var(--separator);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  text-decoration: none;
+  color: inherit;
+  transition: transform var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+}
+.quick-card:hover { transform: translateY(-1px); box-shadow: var(--shadow-lift); border-color: var(--separator-strong); }
+.quick-icon {
+  width: 36px; height: 36px;
+  border-radius: var(--radius-md);
+  background: var(--violet-tint);
+  color: var(--violet-700);
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.quick-meta { min-width: 0; flex: 1; }
+.quick-title { font-size: 14px; font-weight: 600; color: var(--label-primary); }
+.quick-sub { font-size: 12px; color: var(--label-secondary); margin-top: 2px; }
+.quick-arrow { color: var(--label-tertiary); flex-shrink: 0; transition: color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease); }
+.quick-card:hover .quick-arrow { color: var(--violet); transform: translateX(2px); }
+
+/* ============================================================================
+   Buttons — canonical hierarchy per docs/design.md §3 Button.
+   Variants: .btn (default), .btn-prominent (violet gradient + glow), .btn-soft
+   (violet tint), .btn-ghost (transparent), .btn-danger.
+   Sizes: default 34px, .btn-lg 44px. .btn-block fills width.
+   ========================================================================== */
+.btn {
+  appearance: none;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--label-primary);
+  background: var(--bg-card);
+  border: 1px solid var(--separator-strong);
+  height: 34px;
+  padding: 0 14px;
+  border-radius: var(--radius-sm);
+  display: inline-flex; align-items: center; gap: 6px;
+  transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease),
+              transform var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+}
+.btn:hover:not(:disabled) { background: var(--fill-hover); }
+.btn:active:not(:disabled) { transform: scale(0.98); }
+.btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn-lg { height: 44px; padding: 0 22px; font-size: 14px; }
+.btn-block { width: 100%; justify-content: center; }
+
+.btn-prominent {
+  background: var(--grad-violet);
+  border-color: transparent;
+  color: var(--on-dark);
+  box-shadow: 0 1px 2px rgba(40, 24, 96, 0.18), 0 6px 18px rgba(124, 92, 255, 0.32);
+}
+.btn-prominent:hover:not(:disabled) {
+  background: var(--grad-violet);
+  filter: brightness(1.05);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(40, 24, 96, 0.22), 0 10px 26px rgba(124, 92, 255, 0.4);
+}
+.btn-prominent:active:not(:disabled) { transform: translateY(0); }
+
+.btn-soft {
+  background: var(--violet-tint);
+  border-color: transparent;
+  color: var(--violet-700);
+}
+.btn-soft:hover:not(:disabled) { background: var(--violet-tint-2); }
+
+/* ============================================================================
+   Stat card — per docs §3. Colored chip + label + big rounded number.
+   ========================================================================== */
+.stat {
+  display: flex; flex-direction: column; gap: 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--separator);
+  border-radius: var(--radius-lg);
+  padding: 18px 20px;
+  box-shadow: var(--shadow-card);
+  transition: transform var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+}
+.stat:hover { transform: translateY(-1px); box-shadow: var(--shadow-lift); }
+.stat-head { display: flex; align-items: center; gap: 10px; }
+.stat-chip {
+  width: 34px; height: 34px;
+  border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--on-dark);
+  flex-shrink: 0;
+  box-shadow: var(--shadow-sm);
+}
+.stat-chip-violet { background: var(--grad-violet); }
+.stat-chip-green  { background: linear-gradient(135deg, #2dd394, #16a05c); }
+.stat-chip-blue   { background: linear-gradient(135deg, #5db4ff, #1d6fbf); }
+.stat-chip-amber  { background: linear-gradient(135deg, #ffc266, #d18415); }
+.stat-chip-rose   { background: linear-gradient(135deg, #ff7aa3, #d63365); }
+.stat-chip-slate  { background: linear-gradient(135deg, #9aa6b8, #5a6577); }
+.stat-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--label-secondary);
+  letter-spacing: 0.01em;
+}
+.stat-value {
+  font-family: var(--font-round);
+  font-variant-numeric: tabular-nums;
+  font-size: 30px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.5px;
+  color: var(--label-primary);
+}
+.stat-value .unit {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--label-secondary);
+  margin-left: 1px;
+  letter-spacing: 0;
+}
+.stat-foot {
+  font-size: 11.5px;
+  color: var(--label-tertiary);
+  letter-spacing: 0.01em;
+}
+
+/* ============================================================================
+   Hero — near-black violet-glow card, like the agent's .hero-running.
+   Used on Home + as a section header on rich pages.
+   ========================================================================== */
+.hero {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius-xl);
+  background:
+    radial-gradient(720px 320px at 12% 0%, rgba(155, 123, 255, 0.28), transparent 65%),
+    radial-gradient(620px 280px at 100% 100%, rgba(255, 77, 141, 0.18), transparent 60%),
+    linear-gradient(160deg, #1a162e 0%, #15131c 60%, #0e0c18 100%);
+  color: var(--on-dark);
+  padding: 40px 44px;
+  box-shadow: var(--shadow-hero);
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 32px;
+  align-items: end;
+}
+.hero::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 30% 0%, rgba(255, 255, 255, 0.05) 0%, transparent 50%);
+  pointer-events: none;
+}
+.hero-greeting {
+  font-family: var(--font-round);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.55);
+  margin-bottom: 12px;
+}
+.hero-title {
+  font-family: var(--font-round);
+  font-size: 36px;
+  font-weight: 700;
+  line-height: 1.05;
+  letter-spacing: -0.6px;
+  margin-bottom: 14px;
+}
+.hero-sub {
+  font-size: 14px;
+  color: var(--on-dark-soft);
+  max-width: 480px;
+  line-height: 1.55;
+}
+.hero-meta {
+  display: flex; flex-direction: column; align-items: flex-end; gap: 6px;
+  position: relative;
+  z-index: 1;
+}
+.hero-meta-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.5);
+}
+.hero-meta-value {
+  font-family: var(--font-round);
+  font-variant-numeric: tabular-nums;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+}
+.hero-meta-value .unit { font-size: 14px; color: var(--on-dark-soft); margin-left: 2px; font-weight: 600; }
+
+@media (max-width: 720px) {
+  .hero { grid-template-columns: 1fr; padding: 28px; }
+  .hero-meta { align-items: flex-start; }
 }
 
 /* ============================================================================
@@ -287,18 +593,23 @@ body {
   display: flex; align-items: center; justify-content: center;
   padding: var(--sp-7);
   background:
-    radial-gradient(1100px 600px at 12% -10%, rgba(124, 92, 255, 0.13), transparent 60%),
-    radial-gradient(900px 500px at 100% 110%, rgba(255, 77, 141, 0.08), transparent 65%),
+    radial-gradient(1200px 700px at 15% -10%, rgba(124, 92, 255, 0.18), transparent 60%),
+    radial-gradient(900px 500px at 100% 110%, rgba(255, 77, 141, 0.10), transparent 65%),
+    radial-gradient(700px 400px at 50% 50%, rgba(255, 255, 255, 0.4), transparent 80%),
     var(--bg-app);
 }
 .login-card {
-  width: 100%; max-width: 380px;
+  width: 100%; max-width: 400px;
   background: var(--bg-card);
   border: 1px solid var(--separator);
   border-radius: var(--radius-xl);
   padding: var(--sp-8) var(--sp-8) var(--sp-7);
   display: flex; flex-direction: column; gap: var(--sp-5);
-  box-shadow: var(--shadow-card);
+  box-shadow:
+    0 1px 2px rgba(24, 20, 44, 0.04),
+    0 24px 60px rgba(40, 24, 96, 0.10),
+    0 6px 24px rgba(40, 24, 96, 0.06);
+  animation: page-rise var(--dur-slow) var(--ease) both;
 }
 .login-brand { display: flex; align-items: center; gap: 10px; }
 .login-title { margin-top: var(--sp-3); }
@@ -346,22 +657,41 @@ body {
 .role-chip, .scope-chip {
   display: inline-flex; align-items: center;
   font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  padding: 2px 8px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  padding: 3px 9px;
   border-radius: 999px;
   background: var(--violet-tint);
   color: var(--violet-700);
+  text-transform: uppercase;
 }
 .role-chip.role-owner   { background: rgba(124, 92, 255, 0.16); color: var(--violet-700); }
 .role-chip.role-admin   { background: rgba(124, 92, 255, 0.12); color: var(--violet-700); }
 .role-chip.role-manager { background: rgba(58, 160, 255, 0.14); color: #1d6fbf; }
 .role-chip.role-member  { background: rgba(122, 134, 153, 0.14); color: #4e5867; }
 
+/* Empty state — per docs §3.  56px tinted icon, title, line. */
 .empty {
-  padding: var(--sp-8);
+  padding: var(--sp-9) var(--sp-8);
   text-align: center;
   color: var(--label-secondary);
+  font-size: 13px;
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+}
+.empty-icon {
+  width: 56px; height: 56px;
+  border-radius: var(--radius-md);
+  background: var(--violet-tint);
+  color: var(--violet-700);
+  display: flex; align-items: center; justify-content: center;
+  margin-bottom: 4px;
+}
+.empty-title {
+  font-family: var(--font-round);
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--label-primary);
+  letter-spacing: -0.2px;
 }
 .empty-error { color: var(--danger); }
 
@@ -418,7 +748,14 @@ body {
 }
 .date-pill.is-today { color: var(--violet-700); border-color: var(--violet-tint-2); background: var(--violet-tint); }
 
-.ribbon-card { padding: var(--sp-6) var(--sp-7) var(--sp-5); }
+.ribbon-card {
+  padding: var(--sp-7) var(--sp-7) var(--sp-5);
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(900px 300px at 0% 0%, rgba(124, 92, 255, 0.04), transparent 70%),
+    var(--bg-card);
+}
 
 .ribbon {
   --ribbon-h: 44px;
