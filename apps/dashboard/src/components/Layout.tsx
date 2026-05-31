@@ -61,7 +61,7 @@ export function Layout() {
                 to={to}
                 className={`nav-item${active ? ' is-active' : ''}`}
               >
-                <Icon size={16} strokeWidth={1.8} />
+                <Icon size={18} strokeWidth={1.8} />
                 <span>{label}</span>
               </Link>
             );
@@ -91,7 +91,9 @@ export function Layout() {
       </aside>
 
       <main className="main">
-        <Outlet />
+        <div className="rise">
+          <Outlet />
+        </div>
       </main>
     </div>
   );
