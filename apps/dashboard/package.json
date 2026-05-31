@@ -1,0 +1,29 @@
+{
+  "name": "@grind/dashboard",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port 5174",
+    "build": "tsc -p tsconfig.json --noEmit && vite build",
+    "preview": "vite preview --port 5174",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src"
+  },
+  "dependencies": {
+    "@grind/types": "workspace:*",
+    "@tanstack/react-query": "5.59.16",
+    "@tanstack/react-router": "1.81.5",
+    "lucide-react": "0.454.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@grind/tsconfig": "workspace:*",
+    "@types/react": "18.3.12",
+    "@types/react-dom": "18.3.1",
+    "@vitejs/plugin-react": "4.3.3",
+    "typescript": "5.6.3",
+    "vite": "5.4.10"
+  }
+}
