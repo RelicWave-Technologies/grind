@@ -9,7 +9,7 @@
  */
 
 const RAW_BASE =
-  (import.meta.env.VITE_API_BASE as string | undefined) ?? 'http://localhost:3000';
+  (import.meta.env.VITE_API_BASE as string | undefined) ?? 'http://localhost:4000';
 export const API_BASE = RAW_BASE.replace(/\/$/, '');
 
 export class ApiError extends Error {
