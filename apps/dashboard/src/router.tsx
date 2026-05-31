@@ -15,6 +15,7 @@ import { MeTodayScreen } from './screens/MeToday';
 import { ApprovalsScreen } from './screens/Approvals';
 import { TeamScreen } from './screens/Team';
 import { AttendanceScreen } from './screens/Attendance';
+import { TeamsScreen } from './screens/Teams';
 
 interface RouterContext {
   queryClient: QueryClient;
@@ -95,6 +96,12 @@ const attendanceRoute = createRoute({
   component: AttendanceScreen,
 });
 
+const teamsAdminRoute = createRoute({
+  getParentRoute: () => authedRoot,
+  path: '/teams',
+  component: TeamsScreen,
+});
+
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/login',
@@ -105,6 +112,6 @@ const loginRoute = createRoute({
 });
 
 export const routeTree = rootRoute.addChildren([
-  authedRoot.addChildren([homeRoute, meTodayRoute, approvalsRoute, teamRoute, attendanceRoute, usersRoute]),
+  authedRoot.addChildren([homeRoute, meTodayRoute, approvalsRoute, teamRoute, attendanceRoute, usersRoute, teamsAdminRoute]),
   loginRoute,
 ]);

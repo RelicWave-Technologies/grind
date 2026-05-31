@@ -851,6 +851,85 @@ body {
 .btn-with-icon:hover { background: var(--fill-hover); color: var(--label-primary); }
 
 /* ============================================================================
+   Admin CRUD — Teams + People edit
+   ========================================================================== */
+.composer-card { padding: var(--sp-5) var(--sp-6); }
+.composer-row {
+  display: flex; align-items: center; gap: 10px;
+  flex-wrap: wrap;
+}
+.composer-input {
+  flex: 1 1 280px;
+  appearance: none;
+  border: 1px solid var(--separator-strong);
+  background: var(--bg-control);
+  font: inherit;
+  font-size: 14px;
+  padding: 10px 13px;
+  border-radius: var(--radius-md);
+  transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+}
+.composer-input:focus { outline: none; border-color: var(--violet); box-shadow: var(--focus-ring); }
+.composer-row .btn-primary {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 10px 16px;
+  font-size: 13.5px;
+}
+
+.teams-card { overflow: hidden; }
+.teams-list { list-style: none; padding: 0; margin: 0; }
+.team-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px;
+  padding: 14px var(--sp-7);
+  border-bottom: 1px solid var(--separator);
+}
+.team-row:last-child { border-bottom: 0; }
+.team-row:hover { background: var(--fill-hover); }
+.team-main { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 3px; }
+.team-name { font-size: 14px; font-weight: 600; }
+.team-name-input {
+  appearance: none;
+  border: 1px solid var(--separator-strong);
+  background: var(--bg-control);
+  font: inherit; font-size: 14px; font-weight: 600;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  max-width: 320px;
+}
+.team-name-input:focus { outline: none; border-color: var(--violet); box-shadow: var(--focus-ring); }
+.team-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.team-mgr-select { font-size: 12px; padding: 5px 24px 5px 9px; min-width: 160px; }
+.team-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.team-actions .btn-ghost, .team-actions .btn-primary, .team-actions .btn-danger {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 11px;
+  font-size: 12.5px;
+}
+.team-delete:hover { color: var(--danger); }
+.team-error { margin-top: 6px; }
+
+.cell-input {
+  appearance: none;
+  border: 1px solid var(--separator-strong);
+  background: var(--bg-control);
+  font: inherit; font-size: 13.5px; font-weight: 600;
+  padding: 5px 8px;
+  border-radius: var(--radius-sm);
+  width: 100%;
+  max-width: 220px;
+}
+.cell-input:focus { outline: none; border-color: var(--violet); box-shadow: var(--focus-ring); }
+.people-actions { display: flex; gap: 6px; }
+.btn-icon-primary {
+  background: var(--violet-tint);
+  color: var(--violet-700);
+  border-color: var(--violet-tint-2);
+}
+.btn-icon-primary:hover:not(:disabled) { background: var(--violet-tint-2); color: var(--violet-700); }
+.people-error { margin-top: 6px; }
+
+/* ============================================================================
    Activity heatmap (per-10-min productivity grid under the ribbon)
    ========================================================================== */
 .heatmap {
