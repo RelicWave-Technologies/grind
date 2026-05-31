@@ -3,6 +3,12 @@ import { prisma } from '@grind/db';
 import { requireAccessToken } from '../middleware/auth';
 import { attachScope, requireManagerOrAbove } from '../middleware/scope';
 import { decideByUser } from '../lark/decideByUser';
+import {
+  addDays as addDaysStr,
+  buildTimesheetMatrix,
+  dateRange,
+  type TimesheetSegmentInput,
+} from '../insights/timesheets';
 
 /**
  * Mounted under `/v1/admin`. Every route requires a valid access token and
@@ -161,6 +167,111 @@ adminRouter.post('/manual-time-requests/:id/decide', requireManagerOrAbove, asyn
     if (!out) return res.status(404).json({ error: 'not_found' });
     if (out.noop === 'forbidden') return res.status(403).json({ error: 'forbidden' });
     res.json(out);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ============================================================================
+// Timesheets matrix (MANAGER and above)
+// ============================================================================
+
+const TIMESHEETS_MAX_DAYS = 60;
+const TIMESHEETS_DEFAULT_DAYS = 14;
+
+function isYmd(s: unknown): s is string {
+  return typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
+}
+
+/**
+ * GET /v1/admin/timesheets?from=YYYY-MM-DD&to=YYYY-MM-DD&tz=IANA
+ *
+ * Per-user × per-day matrix of total worked / meeting / manual time, scoped.
+ * Powers the Team page — a Hubstaff-style at-a-glance view of "who tracked
+ * what across the last week or two."
+ *
+ * Defaults: trailing 14 days ending today (in the requested tz, falling back
+ * to UTC). Hard cap at 60 days so a typo can't melt the DB.
+ */
+adminRouter.get('/timesheets', requireManagerOrAbove, async (req, res, next) => {
+  try {
+    if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
+
+    const tz = typeof req.query.tz === 'string' && req.query.tz.length > 0 ? req.query.tz : 'UTC';
+    try {
+      // Sanity-check the timezone before downstream code uses it.
+      new Intl.DateTimeFormat('en-US', { timeZone: tz });
+    } catch {
+      return res.status(400).json({ error: 'invalid_tz' });
+    }
+
+    const todayKey = new Intl.DateTimeFormat('en-CA', {
+      timeZone: tz,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    })
+      .format(new Date())
+      .slice(0, 10);
+
+    const to = isYmd(req.query.to) ? (req.query.to as string) : todayKey;
+    const from = isYmd(req.query.from)
+      ? (req.query.from as string)
+      : addDaysStr(to, -(TIMESHEETS_DEFAULT_DAYS - 1));
+
+    if (from > to) return res.status(400).json({ error: 'invalid_range' });
+    const days = dateRange(from, to);
+    if (days.length > TIMESHEETS_MAX_DAYS) {
+      return res.status(400).json({ error: 'range_too_long', maxDays: TIMESHEETS_MAX_DAYS });
+    }
+
+    // Window for the DB query (UTC bounds wider than tz to catch tz spread).
+    const lookbackStart = new Date(`${from}T00:00:00Z`);
+    lookbackStart.setUTCDate(lookbackStart.getUTCDate() - 1);
+    const lookbackEnd = new Date(`${to}T00:00:00Z`);
+    lookbackEnd.setUTCDate(lookbackEnd.getUTCDate() + 2);
+
+    // Pull every entry+segment in the scope window. We let the pure aggregator
+    // do the tz-correct clipping; it's cheap (<= 60 days × N segments).
+    const entries = await prisma.timeEntry.findMany({
+      where: {
+        userId: { in: req.scope.userIds },
+        startedAt: { lt: lookbackEnd },
+        OR: [{ endedAt: null }, { endedAt: { gt: lookbackStart } }],
+      },
+      include: { segments: { select: { kind: true, startedAt: true, endedAt: true } } },
+    });
+
+    const now = Date.now();
+    const segs: TimesheetSegmentInput[] = [];
+    for (const e of entries) {
+      for (const s of e.segments) {
+        segs.push({
+          userId: e.userId,
+          source: e.source as 'AUTO' | 'MANUAL',
+          segmentKind: s.kind as 'WORK' | 'MEETING' | 'IDLE_TRIMMED',
+          startedAt: s.startedAt.getTime(),
+          endedAt: (s.endedAt ?? new Date(now)).getTime(),
+        });
+      }
+    }
+
+    const matrix = buildTimesheetMatrix({ from, to, tz, segments: segs });
+    if (!matrix) return res.status(400).json({ error: 'invalid_date_or_tz' });
+
+    // Attach user metadata so the dashboard can label rows without a second
+    // round-trip. Returned in scope order (the manager's people first).
+    const users = await prisma.user.findMany({
+      where: { id: { in: req.scope.userIds } },
+      select: { id: true, name: true, email: true, role: true },
+      orderBy: [{ role: 'asc' }, { name: 'asc' }],
+    });
+
+    res.json({
+      ...matrix,
+      scope: req.scope.scope,
+      users,
+    });
   } catch (err) {
     next(err);
   }
