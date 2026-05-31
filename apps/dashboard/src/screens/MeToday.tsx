@@ -1,14 +1,15 @@
-import { useState, useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useState, useMemo, useCallback } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouteContext, useSearch } from '@tanstack/react-router';
 import { ChevronLeft, ChevronRight, Calendar } from 'lucide-react';
 import { api } from '../lib/api';
 import { isManagerOrAbove } from '../lib/auth';
 import type { DayInsight } from '../lib/types';
-import { fmtDayLabel, todayKey, addDays } from '../lib/format';
+import { fmtDayLabel, todayKey, addDays, fmtDurationMs } from '../lib/format';
 import { DayRibbon } from '../components/DayRibbon';
-import { EntriesTable } from '../components/EntriesTable';
 import { ActivityHeatmap } from '../components/ActivityHeatmap';
+import { EntryRow } from '../components/EntryRow';
+import type { TaskOption } from '../components/TaskCombo';
 
 interface AdminUser {
   id: string;
@@ -18,48 +19,162 @@ interface AdminUser {
 }
 
 /**
- * Browser-side My Day timesheet. Calls /v1/insights/day, renders the
- * day ribbon + entries table. For MANAGER+, includes a user picker so
- * the same view is reused for "Mira's Tuesday".
+ * /me-today — the dashboard's edit-time surface. Self-only writes (mirrors
+ * the agent's contract): when the viewer is looking at their OWN day, every
+ * row is editable; when they're looking at a teammate's day (via the user
+ * picker + ?userId= deep-link), the rows are read-only and a banner makes
+ * that clear.
+ *
+ * The mutation set:
+ *   - PATCH /v1/time-entries/:id      (tracked + APPROVED MANUAL rows)
+ *   - POST  /v1/time-requests         (gap rows → new request)
+ *   - PATCH /v1/time-requests/:id     (pending edit)
+ *   - POST  /v1/time-requests/:id/cancel (pending withdraw)
+ *
+ * Each mutation invalidates the day query so the ribbon + heatmap +
+ * pending overlay all stay in sync without manual `setState`.
  */
 export function MeTodayScreen() {
   const { me } = useRouteContext({ from: '/authed' });
   const search = useSearch({ from: '/authed/me-today' });
+  const qc = useQueryClient();
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 
-  // Initial state from query params (deep-link from /team), then user-controlled.
   const initialDate =
     typeof search.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(search.date) ? search.date : todayKey();
   const initialUserId = typeof search.userId === 'string' && search.userId.length > 0 ? search.userId : me.id;
   const [date, setDate] = useState<string>(initialDate);
   const [targetUserId, setTargetUserId] = useState<string>(initialUserId);
   const showPicker = isManagerOrAbove(me.role);
+  const editable = targetUserId === me.id;
 
-  // For the picker — only fetch when we'll show the picker.
   const usersQ = useQuery({
     queryKey: ['admin', 'users'],
     enabled: showPicker,
     queryFn: () => api<{ users: AdminUser[] }>('/v1/admin/users'),
   });
 
+  // Lark tasks — fetched once for the day view; cached for 5 min so the
+  // TaskCombos open instantly. Falls back to empty list if Lark isn't
+  // configured (the user gets the "Untracked" sentinel anyway).
+  const tasksQ = useQuery({
+    queryKey: ['lark', 'my-tasks'],
+    queryFn: async () => {
+      try {
+        return await api<{ tasks: TaskOption[] }>('/v1/lark/my-tasks');
+      } catch {
+        return { tasks: [] };
+      }
+    },
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
+
+  const dayKey = ['insights', 'day', date, tz, targetUserId];
   const dayQ = useQuery({
-    queryKey: ['insights', 'day', date, tz, targetUserId],
+    queryKey: dayKey,
     queryFn: () => {
       const params = new URLSearchParams({ date, tz });
-      // Only ship userId when we're viewing someone else — keeps the
-      // self path identical to the agent's call.
       if (targetUserId !== me.id) params.set('userId', targetUserId);
       return api<DayInsight>(`/v1/insights/day?${params.toString()}`);
     },
   });
 
-  const now = Date.now();
-  const targetUser: AdminUser | undefined = useMemo(() => {
-    if (targetUserId === me.id) {
-      return { id: me.id, name: me.name, email: me.email, role: me.role };
+  const invalidate = useCallback(() => {
+    qc.invalidateQueries({ queryKey: dayKey });
+  }, [qc, dayKey]);
+
+  // ---- Mutations (self-only) -------------------------------------------------
+
+  const patchEntry = useMutation({
+    mutationFn: (vars: { id: string; larkTaskGuid: string | null; notes: string }) =>
+      api(`/v1/time-entries/${vars.id}`, {
+        method: 'PATCH',
+        json: { larkTaskGuid: vars.larkTaskGuid, notes: vars.notes },
+      }),
+    onSuccess: invalidate,
+  });
+
+  const createRequest = useMutation({
+    mutationFn: (vars: { requestedStart: number; requestedEnd: number; larkTaskGuid: string | null; reason: string }) =>
+      api('/v1/time-requests', {
+        method: 'POST',
+        json: {
+          clientUuid: `web-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+          requestedStart: new Date(vars.requestedStart).toISOString(),
+          requestedEnd: new Date(vars.requestedEnd).toISOString(),
+          larkTaskGuid: vars.larkTaskGuid,
+          reason: vars.reason,
+        },
+      }),
+    onSuccess: invalidate,
+  });
+
+  const patchRequest = useMutation({
+    mutationFn: (vars: { id: string; requestedStart: number; requestedEnd: number; larkTaskGuid: string | null; reason: string }) =>
+      api(`/v1/time-requests/${vars.id}`, {
+        method: 'PATCH',
+        json: {
+          requestedStart: new Date(vars.requestedStart).toISOString(),
+          requestedEnd: new Date(vars.requestedEnd).toISOString(),
+          larkTaskGuid: vars.larkTaskGuid,
+          reason: vars.reason,
+        },
+      }),
+    onSuccess: invalidate,
+  });
+
+  const cancelRequest = useMutation({
+    mutationFn: (id: string) => api(`/v1/time-requests/${id}/cancel`, { method: 'POST' }),
+    onSuccess: invalidate,
+  });
+
+  // ---- Click-to-fill from ribbon --------------------------------------------
+
+  // When the user clicks a gap span on the ribbon, find the matching gap
+  // block and snap THAT row's composer to the clicked range. We use a
+  // tick counter as the "fire" signal so re-clicking the same span still
+  // triggers a re-seed.
+  const [gapPreset, setGapPreset] = useState<{
+    blockKey: string;
+    range: { startedAt: number; endedAt: number };
+    tick: number;
+  } | null>(null);
+
+  function onRibbonClick(epochMs: number) {
+    if (!editable || !dayQ.data) return;
+    const gap = dayQ.data.blocks.find(
+      (b) => b.kind === 'GAP' && epochMs >= b.startedAt && epochMs < b.endedAt,
+    );
+    if (!gap) return;
+    // Slice: a 1h window centered on the click, clamped to the gap edges.
+    const slice = Math.min(60 * 60_000, gap.endedAt - gap.startedAt);
+    let start = Math.round(epochMs - slice / 2);
+    let end = start + slice;
+    if (start < gap.startedAt) {
+      start = gap.startedAt;
+      end = Math.min(gap.endedAt, start + slice);
     }
+    if (end > gap.endedAt) {
+      end = gap.endedAt;
+      start = Math.max(gap.startedAt, end - slice);
+    }
+    setGapPreset({
+      blockKey: `${gap.startedAt}-${gap.endedAt}`,
+      range: { startedAt: start, endedAt: end },
+      tick: (gapPreset?.tick ?? 0) + 1,
+    });
+  }
+
+  // ---- Derived view state ---------------------------------------------------
+
+  const targetUser: AdminUser | undefined = useMemo(() => {
+    if (targetUserId === me.id) return { id: me.id, name: me.name, email: me.email, role: me.role };
     return usersQ.data?.users.find((u) => u.id === targetUserId);
   }, [targetUserId, usersQ.data, me]);
+
+  const now = Date.now();
+  const tasks = tasksQ.data?.tasks ?? [];
 
   return (
     <div className="page page-wide">
@@ -69,8 +184,7 @@ export function MeTodayScreen() {
             {targetUser ? (targetUser.id === me.id ? 'My Day' : `${targetUser.name.split(' ')[0]}'s Day`) : 'Day'}
           </h1>
           <p className="secondary page-sub">
-            {fmtDayLabel(date)} ·{' '}
-            <span className="tabular">{date}</span> · {tz}
+            {fmtDayLabel(date)} · <span className="tabular">{date}</span> · {tz}
           </p>
         </div>
 
@@ -83,11 +197,7 @@ export function MeTodayScreen() {
               aria-label="View someone's day"
             >
               {[...usersQ.data.users]
-                .sort((a, b) => {
-                  if (a.id === me.id) return -1;
-                  if (b.id === me.id) return 1;
-                  return a.name.localeCompare(b.name);
-                })
+                .sort((a, b) => (a.id === me.id ? -1 : b.id === me.id ? 1 : a.name.localeCompare(b.name)))
                 .map((u) => (
                   <option key={u.id} value={u.id}>
                     {u.id === me.id ? `${u.name} (you)` : `${u.name} · ${u.role.toLowerCase()}`}
@@ -97,12 +207,7 @@ export function MeTodayScreen() {
           )}
 
           <div className="date-nav">
-            <button
-              type="button"
-              className="btn-icon"
-              onClick={() => setDate((d) => addDays(d, -1))}
-              aria-label="Previous day"
-            >
+            <button type="button" className="btn-icon" onClick={() => setDate((d) => addDays(d, -1))} aria-label="Previous day">
               <ChevronLeft size={16} strokeWidth={2} />
             </button>
             <button
@@ -128,15 +233,13 @@ export function MeTodayScreen() {
 
       {dayQ.isLoading && <div className="card empty">Loading…</div>}
       {dayQ.isError && (
-        <div className="card empty empty-error">
-          Couldn&apos;t load this day: {(dayQ.error as Error).message}
-        </div>
+        <div className="card empty empty-error">Couldn&apos;t load: {(dayQ.error as Error).message}</div>
       )}
 
       {dayQ.data && (
         <>
           <section className="card ribbon-card">
-            <DayRibbon day={dayQ.data} now={now} />
+            <DayRibbon day={dayQ.data} now={now} onClickEpoch={editable ? onRibbonClick : undefined} />
             {dayQ.data.activity && dayQ.data.activity.buckets.length > 0 && (
               <ActivityHeatmap day={dayQ.data} heatmap={dayQ.data.activity} />
             )}
@@ -147,9 +250,109 @@ export function MeTodayScreen() {
               <Legend className="dot-pending" label="Pending" />
               <Legend className="dot-idle" label="Idle (trimmed)" />
             </div>
+            {!editable && (
+              <div className="et-readonly-banner">
+                Viewing {targetUser?.name}&apos;s day — read-only. Each person edits their own time.
+              </div>
+            )}
           </section>
 
-          <EntriesTable day={dayQ.data} />
+          <section className="card entries-card" style={{ padding: 0 }}>
+            <header className="entries-head">
+              <h2 className="h3">Timesheet</h2>
+              <div className="entries-totals secondary">
+                {fmtDurationMs(dayQ.data.totals.workedMs)} tracked
+                {dayQ.data.totals.meetingMs > 0 && <> · {fmtDurationMs(dayQ.data.totals.meetingMs)} meeting</>}
+                {dayQ.data.totals.manualMs > 0 && <> · {fmtDurationMs(dayQ.data.totals.manualMs)} manual</>}
+              </div>
+            </header>
+
+            <table className="entries-table">
+              <thead>
+                <tr>
+                  <th style={{ width: 100 }}>Kind</th>
+                  <th style={{ width: 200 }}>Time</th>
+                  <th style={{ width: 80 }}>Duration</th>
+                  <th style={{ width: 220 }}>Task</th>
+                  <th>Notes / Reason</th>
+                  <th style={{ width: 240 }} />
+                </tr>
+              </thead>
+              <tbody>
+                {dayQ.data.blocks.map((b, i) => {
+                  if (b.kind === 'GAP') {
+                    const blockKey = `${b.startedAt}-${b.endedAt}`;
+                    return (
+                      <EntryRow
+                        key={`gap-${blockKey}`}
+                        kind="gap"
+                        block={b}
+                        tasks={tasks}
+                        disabled={!editable}
+                        preset={
+                          gapPreset && gapPreset.blockKey === blockKey
+                            ? gapPreset.range
+                            : undefined
+                        }
+                        presetTick={
+                          gapPreset && gapPreset.blockKey === blockKey ? gapPreset.tick : 0
+                        }
+                        onCreate={async (vars) => {
+                          await createRequest.mutateAsync(vars);
+                        }}
+                      />
+                    );
+                  }
+                  if (b.kind === 'IDLE_TRIMMED') {
+                    return (
+                      <tr key={`idle-${i}`} className="et-row entry-row-idle_trimmed">
+                        <td><span className="kind-chip kind-idle_trimmed">Idle (trimmed)</span></td>
+                        <td className="tabular">{new Date(b.startedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} – {new Date(b.endedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</td>
+                        <td className="tabular secondary">{fmtDurationMs(b.durationMs)}</td>
+                        <td className="tertiary">—</td>
+                        <td className="tertiary">Trimmed via the agent&apos;s idle prompt.</td>
+                        <td />
+                      </tr>
+                    );
+                  }
+                  // WORK / MEETING / MANUAL
+                  const kind = b.kind === 'MANUAL' ? 'manual_approved' : 'tracked';
+                  return (
+                    <EntryRow
+                      key={`entry-${b.timeEntryId ?? `${b.startedAt}-${i}`}`}
+                      kind={kind}
+                      block={b}
+                      tasks={tasks}
+                      disabled={!editable}
+                      onSave={async (vars) => {
+                        await patchEntry.mutateAsync(vars);
+                      }}
+                    />
+                  );
+                })}
+
+                {dayQ.data.pendingOverlay.map((p) => (
+                  <EntryRow
+                    key={`pending-${p.id}`}
+                    kind="pending"
+                    pending={p}
+                    tasks={tasks}
+                    disabled={!editable}
+                    onPatch={async (vars) => {
+                      await patchRequest.mutateAsync(vars);
+                    }}
+                    onWithdraw={async (id) => {
+                      await cancelRequest.mutateAsync(id);
+                    }}
+                  />
+                ))}
+
+                {dayQ.data.recentRejected.map((r) => (
+                  <EntryRow key={`rejected-${r.id}`} kind="rejected" rejected={r} />
+                ))}
+              </tbody>
+            </table>
+          </section>
         </>
       )}
     </div>

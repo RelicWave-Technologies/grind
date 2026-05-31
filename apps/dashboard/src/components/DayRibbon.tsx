@@ -1,9 +1,16 @@
+import { useRef } from 'react';
 import type { DayInsight } from '../lib/types';
 import { fmtTime } from '../lib/format';
 
 interface Props {
   day: DayInsight;
   now: number;
+  /**
+   * Called with the epoch ms at the click location. Only fires for clicks
+   * on gap spans (the parent decides what to do). When undefined, the
+   * ribbon is non-interactive.
+   */
+  onClickEpoch?: (epochMs: number) => void;
 }
 
 /**
@@ -18,16 +25,29 @@ interface Props {
  * No interactivity in v1 — clicks/edits land in M11/2b once the manager
  * has had a chance to read what's there.
  */
-export function DayRibbon({ day, now }: Props) {
+export function DayRibbon({ day, now, onClickEpoch }: Props) {
   const span = day.dayEnd - day.dayStart;
   const ticks = buildTicks(day.dayStart, day.dayEnd);
   const futureStartsAt = day.isToday ? now : day.isFuture ? day.dayStart : day.dayEnd;
+  const trackRef = useRef<HTMLDivElement>(null);
 
   const pct = (ms: number) => `${((ms - day.dayStart) / span) * 100}%`;
 
+  function handleClick(e: React.MouseEvent) {
+    if (!onClickEpoch || !trackRef.current) return;
+    const rect = trackRef.current.getBoundingClientRect();
+    const x = Math.max(0, Math.min(rect.width, e.clientX - rect.left));
+    const epoch = day.dayStart + Math.round((x / rect.width) * span);
+    onClickEpoch(epoch);
+  }
+
   return (
     <div className="ribbon" aria-hidden>
-      <div className="ribbon-track">
+      <div
+        ref={trackRef}
+        className={`ribbon-track${onClickEpoch ? ' is-clickable' : ''}`}
+        onClick={handleClick}
+      >
         {/* Future overlay — light strikethrough for any time still ahead. */}
         {futureStartsAt < day.dayEnd && (
           <div
