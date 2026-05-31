@@ -797,3 +797,40 @@ body {
   border-radius: 50%;
 }
 .ts-marker-manual { background: var(--c-amber); }
+
+/* ============================================================================
+   Activity heatmap (per-10-min productivity grid under the ribbon)
+   ========================================================================== */
+.heatmap {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--separator);
+}
+.heatmap-row {
+  display: grid;
+  gap: 2px;
+  height: 18px;
+}
+.hm-cell {
+  width: 100%;
+  height: 100%;
+  border-radius: 2px;
+  background: rgba(40, 36, 56, 0.06);
+  border: 1px solid transparent;
+  transition: transform var(--dur-fast) var(--ease);
+}
+.hm-cell:hover {
+  transform: scaleY(1.18);
+  border-color: var(--violet-tint-2);
+}
+.hm-cell.is-empty {
+  background: rgba(40, 36, 56, 0.035);
+}
+.hm-cell.is-idle {
+  background: rgba(40, 36, 56, 0.10);
+}
+.heatmap-foot {
+  margin-top: 6px;
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+}

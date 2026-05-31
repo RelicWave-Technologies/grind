@@ -35,6 +35,12 @@ export interface RejectedRequest {
   larkTaskGuid: string | null;
 }
 
+export interface ActivityHeatmap {
+  bucketMs: number;
+  buckets: Array<number | null>;
+  sampleCounts: number[];
+}
+
 export interface DayInsight {
   date: string;
   timezone: string;
@@ -48,6 +54,7 @@ export interface DayInsight {
   blocks: DayBlock[];
   pendingOverlay: PendingOverlay[];
   recentRejected: RejectedRequest[];
+  activity?: ActivityHeatmap;
 }
 
 // ---------------------------------------------------------------------------
