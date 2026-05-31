@@ -5,8 +5,11 @@ export const HEARTBEAT_INTERVAL_MS: number = 60_000;
 /** Seconds of no input before the "are you still working?" prompt. Default 5 min.
  *  Override with AGENT_IDLE_SEC (e.g. 20) for testing. */
 export const IDLE_THRESHOLD_SEC: number = Number(process.env.AGENT_IDLE_SEC ?? 300);
-/** How often to poll the OS idle timer. */
-export const IDLE_POLL_MS: number = 5_000;
+/** How often to poll the OS idle timer. Capped so the poll period is never
+ *  larger than half the idle threshold (otherwise a 20s threshold with a
+ *  5s poll could miss by up to 5s; with low test thresholds we want
+ *  ~1-2s resolution). */
+export const IDLE_POLL_MS: number = Math.max(500, Math.min(5_000, Math.floor(IDLE_THRESHOLD_SEC * 1000 / 4)));
 
 /** Screenshot cadence in seconds. Default 3 hours (jittered to ~1.5–3h).
  *  Override with AGENT_SHOT_SEC (e.g. 15) for testing. */
