@@ -1,10 +1,20 @@
 import { isMeetingApp, MeetingTracker } from './detect';
 import { getTimerService } from '../timer';
+import { recordActiveWindow } from '../activity';
 import { log } from '../../logger';
 
 // get-windows is an OPTIONAL native dep (macOS/Win). We import it dynamically so
 // a missing/unbuildable install (e.g. Linux CI) never breaks the app or types.
-type ActiveWindow = { owner?: { name?: string; bundleId?: string } } | undefined;
+// `title` + `url` (Chrome/Safari only) are also exposed by get-windows; we read
+// them best-effort for the M14 active-window tracker. The backend is the
+// privacy gate — it scrubs disallowed fields per the workspace policy.
+type ActiveWindow =
+  | {
+      owner?: { name?: string; bundleId?: string };
+      title?: string;
+      url?: string;
+    }
+  | undefined;
 type GetWindows = { activeWindow: () => Promise<ActiveWindow> };
 
 let mod: GetWindows | null = null;
@@ -36,6 +46,16 @@ async function tick(): Promise<void> {
     if (status.state !== 'RUNNING' || status.paused) return;
 
     const win = await gw.activeWindow();
+    // Feed the M14 active-window tracker — best-effort, the activity flush
+    // resolves the dominant app for the bucket and the server scrubs
+    // disallowed fields per the workspace policy.
+    recordActiveWindow({
+      ts: Date.now(),
+      app: win?.owner?.name ?? null,
+      appBundle: win?.owner?.bundleId ?? null,
+      title: win?.title ?? null,
+      url: win?.url ?? null,
+    });
     const meetingNow = isMeetingApp(win?.owner?.name, win?.owner?.bundleId);
     const { inMeeting: now, changed } = tracker!.update(meetingNow);
     inMeeting = now;

@@ -4,6 +4,7 @@ import path from 'node:path';
 import { ulid } from 'ulid';
 import { uIOhook } from 'uiohook-napi';
 import { ActivityAggregator } from './aggregator';
+import { ActiveWindowTracker, type ActiveWindowObservation } from './activeWindow';
 import { ActivityStore } from './store';
 import { flushActivity } from './sync';
 import { getTimerService } from '../timer';
@@ -12,10 +13,20 @@ import { log } from '../../logger';
 
 let store: ActivityStore | null = null;
 let agg: ActivityAggregator | null = null;
+const activeWindow = new ActiveWindowTracker();
 let flushTimer: NodeJS.Timeout | null = null;
 let started = false;
 let recording = false; // mirror of "timer running & not paused"
 let bucketStart = 0;
+
+/**
+ * Called by the meeting/window poller (~every 10s) with the foreground
+ * window. Safe to call BEFORE startActivityCapture — the tracker is
+ * always live so we capture context even outside the keystroke window.
+ */
+export function recordActiveWindow(obs: ActiveWindowObservation): void {
+  activeWindow.observe(obs);
+}
 
 function getStore(): ActivityStore {
   if (store) return store;
@@ -68,8 +79,15 @@ export function startActivityCapture(): void {
 function flushMinute(): void {
   if (!agg) return;
   const empty = agg.isEmpty();
-  const sample = agg.flush(bucketStart);
+  const flushedBucket = bucketStart;
+  const sample = agg.flush(flushedBucket);
   bucketStart = Math.floor(Date.now() / 60000) * 60000;
+
+  // Resolve the dominant app + title + url for the bucket we just sealed,
+  // then prune so the next minute starts with a clean tally (the anchor
+  // stays so the first slice of the new bucket is attributed correctly).
+  const dom = activeWindow.dominantFor(flushedBucket, flushedBucket + 60_000);
+  activeWindow.prune(flushedBucket + 60_000);
 
   // Only persist real activity captured while tracking.
   if (empty) return;
@@ -87,6 +105,10 @@ function flushMinute(): void {
     ikiCv: sample.ikiCv,
     moveSpeedCv: sample.moveSpeedCv,
     pathStraightness: sample.pathStraightness,
+    activeApp: dom.activeApp,
+    activeAppBundle: dom.activeAppBundle,
+    activeTitle: dom.activeTitle,
+    activeUrl: dom.activeUrl,
     synced: 0,
   });
 
