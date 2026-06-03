@@ -12,6 +12,8 @@ import { IdleMonitor } from './services/idle/monitor';
 import { showFloatingBar, hideFloatingBar, reassertFloating } from './floating';
 import { togglePopover, hidePopover } from './popover';
 import { showIdlePrompt, hideIdlePrompt } from './idlePrompt';
+import { ShiftMonitor } from './services/shift';
+import { onAuthChange } from './services/apiClient';
 import { broadcast } from './broadcast';
 import { log } from './logger';
 
@@ -115,6 +117,24 @@ app.whenReady().then(async () => {
   startCaptureLoop();
   startActivityCapture();
   startMeetingDetection();
+
+  // Shift monitor — fetches the user's assigned shift and fires the
+  // "Ready to work?" toast at start time (+ 5-min nudges until buffer
+  // expiry). Safely no-ops if the user is not logged in or unassigned.
+  const shiftMonitor = new ShiftMonitor(() => showMainWindow());
+  try {
+    await shiftMonitor.start();
+  } catch (err) {
+    log.warn('shift monitor start failed', { err: String(err) });
+  }
+  // Re-fetch the shift whenever auth state flips (login or refresh).
+  onAuthChange((status) => {
+    if (status === 'loggedIn') void shiftMonitor.refreshShift();
+  });
+  ipcMain.handle('shift:decide', (_e, decision: 'yes' | 'not_yet') => {
+    shiftMonitor.onUserDecision(decision);
+  });
+  ipcMain.handle('shift:refresh', () => shiftMonitor.refreshShift());
 
   // Single 1s heartbeat: tray ticker + floating-bar visibility + live broadcast.
   let lastRunning = false;

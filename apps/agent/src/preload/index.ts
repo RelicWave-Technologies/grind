@@ -49,6 +49,10 @@ const api = {
     get: (): Promise<{ idleStartedAt: number }> => ipcRenderer.invoke('idle:get'),
     resolve: (action: 'continue' | 'break'): Promise<void> => ipcRenderer.invoke('idle:resolve', action),
   },
+  shift: {
+    decide: (decision: 'yes' | 'not_yet'): Promise<void> => ipcRenderer.invoke('shift:decide', decision),
+    refresh: (): Promise<void> => ipcRenderer.invoke('shift:refresh'),
+  },
   screenshots: {
     recent: (limit?: number): Promise<{ id: string; capturedAt: number; thumb: string | null; uploadState: string; keyboardPct: number; mousePct: number }[]> =>
       ipcRenderer.invoke('screenshots:recent', limit),

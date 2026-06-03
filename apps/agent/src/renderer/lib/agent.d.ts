@@ -35,6 +35,10 @@ declare global {
         get: () => Promise<{ idleStartedAt: number }>;
         resolve: (action: 'continue' | 'break') => Promise<void>;
       };
+      shift: {
+        decide: (decision: 'yes' | 'not_yet') => Promise<void>;
+        refresh: () => Promise<void>;
+      };
       screenshots: {
         recent: (limit?: number) => Promise<{ id: string; capturedAt: number; thumb: string | null; uploadState: string; keyboardPct: number; mousePct: number }[]>;
         countToday: () => Promise<number>;
