@@ -128,6 +128,7 @@ insightsRouter.get('/day', async (req, res, next) => {
       },
       include: {
         segments: { orderBy: { startedAt: 'asc' } },
+        attendees: { select: { userId: true } },
       },
       orderBy: { startedAt: 'asc' },
     });
@@ -140,6 +141,7 @@ insightsRouter.get('/day', async (req, res, next) => {
         requestedStart: { lt: win.end },
         requestedEnd: { gt: win.start },
       },
+      include: { attendees: { select: { userId: true } } },
       orderBy: { requestedStart: 'asc' },
     });
 
@@ -165,6 +167,7 @@ insightsRouter.get('/day', async (req, res, next) => {
         source: e.source as 'AUTO' | 'MANUAL',
         larkTaskGuid: e.larkTaskGuid,
         notes: e.notes ?? null,
+        attendeeIds: e.attendees.map((a) => a.userId),
         segments: e.segments.map((s) => ({
           kind: s.kind as 'WORK' | 'MEETING' | 'IDLE_TRIMMED',
           startedAt: s.startedAt,
@@ -177,6 +180,7 @@ insightsRouter.get('/day', async (req, res, next) => {
         requestedEnd: p.requestedEnd,
         reason: p.reason,
         larkTaskGuid: p.larkTaskGuid,
+        attendeeIds: p.attendees.map((a) => a.userId),
       })),
       rejected: rejected.map((r) => ({
         id: r.id,

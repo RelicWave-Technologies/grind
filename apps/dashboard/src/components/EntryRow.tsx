@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Send, Loader2, Check, X, AlertCircle, RotateCcw } from 'lucide-react';
 import TimePopover from './TimePopover';
 import TaskCombo, { type TaskOption } from './TaskCombo';
+import AttendeePicker, { type WorkspaceUser } from './AttendeePicker';
 import { fmtTime, fmtDurationMs } from '../lib/format';
 import type { DayBlock, PendingOverlay, RejectedRequest } from '../lib/types';
 
@@ -34,12 +35,19 @@ interface BaseProps {
   /** Hover-link from the ribbon. When set, the row paints a soft violet rail. */
   rowId?: string;
   highlighted?: boolean;
+  /** Workspace directory for the attendee picker (id+name+email). */
+  workspaceUsers?: WorkspaceUser[];
+  /** Current user — filtered out of the picker (implicit attendee). */
+  selfId?: string;
 }
 
 interface TrackedRowProps extends BaseProps {
   kind: 'tracked' | 'manual_approved';
   block: DayBlock;
-  onSave: (vars: { id: string; larkTaskGuid: string | null; notes: string }) => Promise<void>;
+  /** True if the block's underlying entry has a MEETING segment.
+   *  Attendees can only be tagged on those (server rejects otherwise). */
+  isMeeting?: boolean;
+  onSave: (vars: { id: string; larkTaskGuid: string | null; notes: string; attendeeIds?: string[] }) => Promise<void>;
 }
 
 interface PendingRowProps extends BaseProps {
@@ -51,6 +59,7 @@ interface PendingRowProps extends BaseProps {
     requestedEnd: number;
     larkTaskGuid: string | null;
     reason: string;
+    attendeeIds: string[];
   }) => Promise<void>;
   onWithdraw: (id: string) => Promise<void>;
 }
@@ -63,6 +72,7 @@ interface GapRowProps extends BaseProps {
     requestedEnd: number;
     larkTaskGuid: string | null;
     reason: string;
+    attendeeIds: string[];
   }) => Promise<void>;
 }
 
@@ -72,6 +82,14 @@ interface RejectedRowProps {
 }
 
 export type EntryRowProps = TrackedRowProps | PendingRowProps | GapRowProps | RejectedRowProps;
+
+/** Order-independent equality check for two string arrays. */
+function sameStringSet(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  const setB = new Set(b);
+  for (const x of a) if (!setB.has(x)) return false;
+  return true;
+}
 
 export function EntryRow(props: EntryRowProps) {
   if (props.kind === 'rejected') return <RejectedRow rejected={props.rejected} />;
@@ -84,9 +102,21 @@ export function EntryRow(props: EntryRowProps) {
 // Tracked + Approved-manual: editable task + notes
 // ---------------------------------------------------------------------------
 
-function TrackedRow({ block, kind, tasks, disabled, rowId, highlighted, onSave }: TrackedRowProps) {
+function TrackedRow({
+  block,
+  kind,
+  tasks,
+  disabled,
+  rowId,
+  highlighted,
+  isMeeting,
+  workspaceUsers,
+  selfId,
+  onSave,
+}: TrackedRowProps) {
   const [task, setTask] = useState<string>(block.larkTaskGuid ?? '');
   const [notes, setNotes] = useState<string>(block.notes ?? '');
+  const [attendees, setAttendees] = useState<string[]>(block.attendeeIds ?? []);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -95,16 +125,30 @@ function TrackedRow({ block, kind, tasks, disabled, rowId, highlighted, onSave }
   useEffect(() => {
     setTask(block.larkTaskGuid ?? '');
     setNotes(block.notes ?? '');
-  }, [block.timeEntryId, block.larkTaskGuid, block.notes]);
+    setAttendees(block.attendeeIds ?? []);
+  }, [block.timeEntryId, block.larkTaskGuid, block.notes, block.attendeeIds]);
 
-  const dirty = (task || '') !== (block.larkTaskGuid ?? '') || notes !== (block.notes ?? '');
+  const dirty =
+    (task || '') !== (block.larkTaskGuid ?? '') ||
+    notes !== (block.notes ?? '') ||
+    !sameStringSet(attendees, block.attendeeIds ?? []);
 
   async function save() {
     if (!block.timeEntryId || !dirty) return;
     setSaving(true);
     setErr(null);
     try {
-      await onSave({ id: block.timeEntryId, larkTaskGuid: task || null, notes });
+      const vars: { id: string; larkTaskGuid: string | null; notes: string; attendeeIds?: string[] } = {
+        id: block.timeEntryId,
+        larkTaskGuid: task || null,
+        notes,
+      };
+      // Only send attendees when this is a MEETING row + they changed,
+      // so the server never sees a tagging attempt on a WORK entry.
+      if (isMeeting && !sameStringSet(attendees, block.attendeeIds ?? [])) {
+        vars.attendeeIds = attendees;
+      }
+      await onSave(vars);
       setSaved(true);
       setTimeout(() => setSaved(false), 1200);
     } catch (e) {
@@ -117,6 +161,7 @@ function TrackedRow({ block, kind, tasks, disabled, rowId, highlighted, onSave }
   function reset() {
     setTask(block.larkTaskGuid ?? '');
     setNotes(block.notes ?? '');
+    setAttendees(block.attendeeIds ?? []);
     setErr(null);
   }
 
@@ -155,6 +200,18 @@ function TrackedRow({ block, kind, tasks, disabled, rowId, highlighted, onSave }
             if (e.key === 'Escape') reset();
           }}
         />
+        {isMeeting && (
+          <div style={{ marginTop: 6 }}>
+            <AttendeePicker
+              users={workspaceUsers ?? []}
+              selected={attendees}
+              disabled={disabled || !block.timeEntryId}
+              excludeIds={selfId ? [selfId] : []}
+              onChange={setAttendees}
+              ariaLabel="Meeting attendees"
+            />
+          </div>
+        )}
         {err && <div className="et-row-err">{err}</div>}
       </td>
       <td className="et-action-cell" style={{ textAlign: 'right' }}>
@@ -185,11 +242,22 @@ function TrackedRow({ block, kind, tasks, disabled, rowId, highlighted, onSave }
 // Pending request: edit time / task / reason + Withdraw
 // ---------------------------------------------------------------------------
 
-function PendingRow({ pending, tasks, disabled, rowId, highlighted, onPatch, onWithdraw }: PendingRowProps) {
+function PendingRow({
+  pending,
+  tasks,
+  disabled,
+  rowId,
+  highlighted,
+  workspaceUsers,
+  selfId,
+  onPatch,
+  onWithdraw,
+}: PendingRowProps) {
   const [start, setStart] = useState(pending.startedAt);
   const [end, setEnd] = useState(pending.endedAt);
   const [task, setTask] = useState<string>(pending.larkTaskGuid ?? '');
   const [reason, setReason] = useState(pending.reason);
+  const [attendees, setAttendees] = useState<string[]>(pending.attendeeIds ?? []);
   const [busy, setBusy] = useState<'save' | 'withdraw' | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
@@ -198,20 +266,29 @@ function PendingRow({ pending, tasks, disabled, rowId, highlighted, onPatch, onW
     setEnd(pending.endedAt);
     setTask(pending.larkTaskGuid ?? '');
     setReason(pending.reason);
-  }, [pending.id, pending.startedAt, pending.endedAt, pending.larkTaskGuid, pending.reason]);
+    setAttendees(pending.attendeeIds ?? []);
+  }, [pending.id, pending.startedAt, pending.endedAt, pending.larkTaskGuid, pending.reason, pending.attendeeIds]);
 
   const dirty =
     start !== pending.startedAt ||
     end !== pending.endedAt ||
     (task || '') !== (pending.larkTaskGuid ?? '') ||
-    reason !== pending.reason;
+    reason !== pending.reason ||
+    !sameStringSet(attendees, pending.attendeeIds ?? []);
 
   async function save() {
     if (!dirty) return;
     setBusy('save');
     setErr(null);
     try {
-      await onPatch({ id: pending.id, requestedStart: start, requestedEnd: end, larkTaskGuid: task || null, reason });
+      await onPatch({
+        id: pending.id,
+        requestedStart: start,
+        requestedEnd: end,
+        larkTaskGuid: task || null,
+        reason,
+        attendeeIds: attendees,
+      });
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Save failed');
     } finally {
@@ -259,6 +336,16 @@ function PendingRow({ pending, tasks, disabled, rowId, highlighted, onPatch, onW
           disabled={disabled}
           onChange={(e) => setReason(e.target.value)}
         />
+        <div style={{ marginTop: 6 }}>
+          <AttendeePicker
+            users={workspaceUsers ?? []}
+            selected={attendees}
+            disabled={disabled}
+            excludeIds={selfId ? [selfId] : []}
+            onChange={setAttendees}
+            ariaLabel="Meeting attendees"
+          />
+        </div>
         {err && <div className="et-row-err">{err}</div>}
       </td>
       <td className="et-action-cell" style={{ textAlign: 'right' }}>
@@ -288,7 +375,7 @@ function PendingRow({ pending, tasks, disabled, rowId, highlighted, onPatch, onW
 // Gap row: composer for a fresh manual-time request
 // ---------------------------------------------------------------------------
 
-function GapRow({ block, tasks, disabled, preset, presetTick, onCreate }: GapRowProps) {
+function GapRow({ block, tasks, disabled, preset, presetTick, onCreate, workspaceUsers, selfId }: GapRowProps) {
   // Default to a 1h slice in the MIDDLE of the gap so the user gets a sane
   // starting point and can drag with the popover.
   const defaultRange = (b: DayBlock): { startedAt: number; endedAt: number } => {
@@ -301,6 +388,7 @@ function GapRow({ block, tasks, disabled, preset, presetTick, onCreate }: GapRow
   const [end, setEnd] = useState(initial.endedAt);
   const [task, setTask] = useState('');
   const [reason, setReason] = useState('');
+  const [attendees, setAttendees] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -319,6 +407,7 @@ function GapRow({ block, tasks, disabled, preset, presetTick, onCreate }: GapRow
     setEnd(r.endedAt);
     setTask('');
     setReason('');
+    setAttendees([]);
     setErr(null);
   }, [block.startedAt, block.endedAt]);
 
@@ -336,13 +425,14 @@ function GapRow({ block, tasks, disabled, preset, presetTick, onCreate }: GapRow
     setBusy(true);
     setErr(null);
     try {
-      await onCreate({ requestedStart: start, requestedEnd: end, larkTaskGuid: task || null, reason });
+      await onCreate({ requestedStart: start, requestedEnd: end, larkTaskGuid: task || null, reason, attendeeIds: attendees });
       // Reset for the next gap-fill on the same row.
       const r = defaultRange(block);
       setStart(r.startedAt);
       setEnd(r.endedAt);
       setTask('');
       setReason('');
+      setAttendees([]);
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Send failed');
     } finally {
@@ -390,16 +480,27 @@ function GapRow({ block, tasks, disabled, preset, presetTick, onCreate }: GapRow
         {disabled ? (
           <span className="tertiary">Untracked</span>
         ) : (
-          <input
-            className="et-reason"
-            placeholder="Why is this time missing? (required)"
-            value={reason}
-            maxLength={500}
-            onChange={(e) => setReason(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && reason.trim()) submit();
-            }}
-          />
+          <>
+            <input
+              className="et-reason"
+              placeholder="Why is this time missing? (required)"
+              value={reason}
+              maxLength={500}
+              onChange={(e) => setReason(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && reason.trim()) submit();
+              }}
+            />
+            <div style={{ marginTop: 6 }}>
+              <AttendeePicker
+                users={workspaceUsers ?? []}
+                selected={attendees}
+                excludeIds={selfId ? [selfId] : []}
+                onChange={setAttendees}
+                ariaLabel="Meeting attendees"
+              />
+            </div>
+          </>
         )}
         {err && <div className="et-row-err">{err}</div>}
       </td>

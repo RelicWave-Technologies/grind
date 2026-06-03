@@ -82,8 +82,10 @@ declare global {
           reason: string;
           larkTaskGuid?: string | null;
           taskSummary?: string | null;
+          attendeeIds?: string[];
         }) => Promise<{ ok: boolean; request?: ManualTimeRequestDto; error?: string }>;
         listMine: (status?: 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED') => Promise<{ requests: ManualTimeRequestDto[] }>;
+        listWorkspaceUsers: () => Promise<{ users: Array<{ id: string; name: string; email: string; role: 'OWNER' | 'ADMIN' | 'MANAGER' | 'MEMBER' }> }>;
         patch: (args: {
           id: string;
           requestedStart?: number;

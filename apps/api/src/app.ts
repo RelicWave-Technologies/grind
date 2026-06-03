@@ -12,6 +12,7 @@ import { larkRouter } from './routes/lark';
 import { insightsRouter } from './routes/insights';
 import { timeRequestsRouter } from './routes/timeRequests';
 import { adminRouter } from './routes/admin';
+import { workspaceRouter } from './routes/workspace';
 import { errorHandler } from './middleware/errorHandler';
 
 export function buildApp() {
@@ -45,6 +46,7 @@ export function buildApp() {
   app.use('/v1/insights', insightsRouter);
   app.use('/v1/time-requests', timeRequestsRouter);
   app.use('/v1/admin', adminRouter);
+  app.use('/v1/workspace', workspaceRouter);
 
   app.use(errorHandler);
 
