@@ -111,6 +111,11 @@ model User {
   managedTeams             Team[]              @relation("TeamManager")
   activityFlags            ActivityFlag[]      @relation("FlagSubject")
   resolvedFlags            ActivityFlag[]      @relation("FlagResolver")
+  /// Attendee relations: meetings this user was tagged in (manual-time
+  /// requests + live MEETING TimeEntries). Useful for "show me everyone's
+  /// meetings I was in" reports.
+  mtrAttendances           MtrAttendee[]       @relation("MtrAttendeeUser")
+  timeEntryAttendances     TimeEntryAttendee[] @relation("TeAttendeeUser")
 
   @@index([workspaceId])
   @@index([teamId])
@@ -157,6 +162,10 @@ model TimeEntry {
   segments        TimeSegment[]
   activitySamples ActivitySample[]
   manualTimeRequest ManualTimeRequest?
+  /// Workspace members the requester (or a later retro-tag on a live
+  /// MEETING segment) said were in this meeting. Only populated for
+  /// blocks that include at least one MEETING segment.
+  attendees       TimeEntryAttendee[]
 
   @@index([userId, startedAt])
   @@index([larkTaskGuid])
@@ -255,11 +264,47 @@ model ManualTimeRequest {
   /// FK to the TimeEntry created on APPROVE (null until decided / on reject).
   timeEntryId    String?                 @unique
   timeEntry      TimeEntry?              @relation(fields: [timeEntryId], references: [id], onDelete: SetNull)
+  /// True when the request was auto-approved by the requester themselves
+  /// (their role was MANAGER+ and policy allows). Distinguishes from a
+  /// human approver in the audit trail. Admins can REOPEN auto-approved
+  /// requests within 24h via /v1/admin/time-requests/:id/reopen.
+  autoApproved   Boolean                 @default(false)
+  /// Meeting attendees (workspace members the requester says were in
+  /// this meeting). Propagated to TimeEntryAttendee on approval.
+  attendees      MtrAttendee[]
   createdAt      DateTime                @default(now())
   updatedAt      DateTime                @updatedAt
 
   @@index([userId, status])
   @@index([approverId, status])
+}
+
+/// Junction: workspace members tagged as attendees on a manual-time
+/// request. Composite PK prevents dupes; per-user index supports the
+/// "show me everyone's meetings I was tagged in" query.
+model MtrAttendee {
+  requestId String
+  request   ManualTimeRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User              @relation("MtrAttendeeUser", fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime          @default(now())
+
+  @@id([requestId, userId])
+  @@index([userId])
+}
+
+/// Junction: workspace members tagged as attendees on a TimeEntry (either
+/// inherited from an approved MtrAttendee or retro-tagged on a live MEETING
+/// segment). Same shape as MtrAttendee.
+model TimeEntryAttendee {
+  timeEntryId String
+  timeEntry   TimeEntry @relation(fields: [timeEntryId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User      @relation("TeAttendeeUser", fields: [userId], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now())
+
+  @@id([timeEntryId, userId])
+  @@index([userId])
 }
 
 /// Content-free anti-cheat detection. One row per (user, window-start, type)

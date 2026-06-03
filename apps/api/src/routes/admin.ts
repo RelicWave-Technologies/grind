@@ -902,4 +902,87 @@ adminRouter.delete('/shifts/:id', requireAdmin, async (req, res, next) => {
 // route consumes it directly (currently consumed inside CreateShift/Patch).
 void ShiftScheduleSchema;
 
+// ============================================================================
+// Reopen an auto-approved manual-time request (ADMIN-only override).
+// ============================================================================
+
+const REOPEN_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * POST /v1/admin/manual-time-requests/:id/reopen
+ *
+ * ADMIN override: take a request that was auto-approved by a manager-or-
+ * above and flip it back to PENDING so the standard approver flow can
+ * reject it. Only works if:
+ *   - status === 'APPROVED' AND autoApproved === true (we don't reopen
+ *     human-approved requests — those have a clear paper trail already)
+ *   - decidedAt is within 24h (audit-safe window)
+ *
+ * Side effects:
+ *   - DROPS the linked TimeEntry + its segments + its attendees (because
+ *     the time is no longer trusted). The request itself stays as the
+ *     audit record.
+ *   - Clears decidedAt + decidedReason + timeEntryId. Sets autoApproved
+ *     back to false.
+ *   - status → PENDING so the regular /decide flow can act on it.
+ *
+ * Cross-workspace target → 404. Re-opening twice → 409 (status was
+ * already PENDING).
+ */
+adminRouter.post('/manual-time-requests/:id/reopen', requireAdmin, async (req, res, next) => {
+  try {
+    if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
+    const id = req.params.id;
+    if (!id) return res.status(400).json({ error: 'missing_id' });
+    const existing = await prisma.manualTimeRequest.findUnique({
+      where: { id },
+      include: { user: { select: { workspaceId: true } } },
+    });
+    if (!existing || existing.user.workspaceId !== req.scope.workspaceId) {
+      return res.status(404).json({ error: 'not_found' });
+    }
+    if (existing.status !== 'APPROVED') {
+      return res.status(409).json({ error: 'not_approved', status: existing.status });
+    }
+    if (!existing.autoApproved) {
+      return res.status(409).json({ error: 'not_auto_approved' });
+    }
+    if (existing.decidedAt && Date.now() - existing.decidedAt.getTime() > REOPEN_WINDOW_MS) {
+      return res.status(409).json({ error: 'reopen_window_expired' });
+    }
+
+    await prisma.$transaction(async (tx) => {
+      // Drop the linked TimeEntry (segments + attendees cascade).
+      if (existing.timeEntryId) {
+        await tx.timeEntry.delete({ where: { id: existing.timeEntryId } }).catch(() => {
+          /* already gone — race; nothing to do */
+        });
+      }
+      await tx.manualTimeRequest.update({
+        where: { id },
+        data: {
+          status: 'PENDING',
+          autoApproved: false,
+          decidedAt: null,
+          decidedReason: null,
+          timeEntryId: null,
+          approverId: null,
+        },
+      });
+    });
+
+    const reloaded = await prisma.manualTimeRequest.findUnique({
+      where: { id },
+      include: { attendees: true },
+    });
+    res.json({
+      id: reloaded!.id,
+      status: reloaded!.status,
+      autoApproved: reloaded!.autoApproved,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 export default adminRouter;

@@ -55,10 +55,17 @@ export const PatchTimeEntryRequest = z
   .object({
     larkTaskGuid: z.string().min(1).nullable().optional(),
     notes: z.string().max(500).nullable().optional(),
+    /** Meeting attendees — only valid for entries that include at least
+     *  one MEETING segment. Server returns 400 otherwise. */
+    attendeeIds: z.array(z.string().min(1)).max(50).optional(),
   })
-  .refine((v) => v.larkTaskGuid !== undefined || v.notes !== undefined, {
-    message: 'at least one of larkTaskGuid or notes must be set',
-  });
+  .refine(
+    (v) =>
+      v.larkTaskGuid !== undefined ||
+      v.notes !== undefined ||
+      v.attendeeIds !== undefined,
+    { message: 'at least one of larkTaskGuid, notes, or attendeeIds must be set' },
+  );
 export type PatchTimeEntryRequest = z.infer<typeof PatchTimeEntryRequest>;
 
 /**
