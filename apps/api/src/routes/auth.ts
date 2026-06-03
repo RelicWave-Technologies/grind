@@ -71,10 +71,50 @@ authRouter.get('/me', requireAccessToken, async (req, res, next) => {
     if (!req.user) return res.status(401).json({ error: 'unauthorized' });
     const user = await prisma.user.findUnique({
       where: { id: req.user.sub },
-      select: { id: true, email: true, name: true, role: true, workspaceId: true },
+      select: {
+        id: true, email: true, name: true, role: true, workspaceId: true,
+        teamId: true, managerId: true,
+      },
     });
     if (!user) return res.status(401).json({ error: 'unauthorized' });
     res.json({ user });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /v1/auth/me/shift — the authed user's currently-assigned shift,
+ * with full schedule + bufferMin. The agent calls this on boot and after
+ * every `powerMonitor` resume to schedule the next "ready to work?" popup.
+ * Returns `{ shift: null, assignedAt: null }` for unassigned users.
+ */
+authRouter.get('/me/shift', requireAccessToken, async (req, res, next) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: 'unauthorized' });
+    const me = await prisma.user.findUnique({
+      where: { id: req.user.sub },
+      select: { shiftId: true, shiftAssignedAt: true },
+    });
+    if (!me?.shiftId) return res.json({ shift: null, assignedAt: null });
+    const s = await prisma.shift.findUnique({
+      where: { id: me.shiftId },
+      include: { members: { select: { id: true } } },
+    });
+    if (!s) return res.json({ shift: null, assignedAt: null });
+    res.json({
+      shift: {
+        id: s.id,
+        workspaceId: s.workspaceId,
+        name: s.name,
+        schedule: s.schedule,
+        bufferMin: s.bufferMin,
+        memberCount: s.members.length,
+        createdAt: s.createdAt.toISOString(),
+        updatedAt: s.updatedAt.toISOString(),
+      },
+      assignedAt: me.shiftAssignedAt ? me.shiftAssignedAt.toISOString() : null,
+    });
   } catch (err) {
     next(err);
   }

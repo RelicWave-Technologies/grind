@@ -9,6 +9,13 @@ import {
   dateRange,
   type TimesheetSegmentInput,
 } from '../insights/timesheets';
+import {
+  CreateShiftSchema,
+  PatchShiftSchema,
+  ShiftScheduleSchema,
+  type ShiftDto,
+  type ShiftSchedule,
+} from '@grind/types';
 
 /**
  * Mounted under `/v1/admin`. Every route requires a valid access token and
@@ -522,7 +529,14 @@ adminRouter.patch('/users/:id', requireAdmin, async (req, res, next) => {
       return res.status(404).json({ error: 'not_found' });
     }
 
-    const data: { name?: string; role?: ValidRole; teamId?: string | null; managerId?: string | null } = {};
+    const data: {
+      name?: string;
+      role?: ValidRole;
+      teamId?: string | null;
+      managerId?: string | null;
+      shiftId?: string | null;
+      shiftAssignedAt?: Date | null;
+    } = {};
 
     if (typeof req.body?.name === 'string') {
       const name = req.body.name.trim();
@@ -561,6 +575,25 @@ adminRouter.patch('/users/:id', requireAdmin, async (req, res, next) => {
         data.managerId = raw;
       } else {
         return res.status(400).json({ error: 'invalid_managerId' });
+      }
+    }
+
+    // Forward-only shift assignment. New TimeEntries snapshot `shiftIdAtStart`;
+    // history is preserved even when the user's shift later changes.
+    if ('shiftId' in (req.body ?? {})) {
+      const raw = req.body.shiftId;
+      if (raw === null || raw === '') {
+        data.shiftId = null;
+        data.shiftAssignedAt = null;
+      } else if (typeof raw === 'string') {
+        const s = await prisma.shift.findUnique({ where: { id: raw }, select: { workspaceId: true } });
+        if (!s || s.workspaceId !== req.scope.workspaceId) {
+          return res.status(400).json({ error: 'shift_out_of_workspace' });
+        }
+        data.shiftId = raw;
+        data.shiftAssignedAt = new Date();
+      } else {
+        return res.status(400).json({ error: 'invalid_shiftId' });
       }
     }
 
@@ -742,5 +775,128 @@ adminRouter.post('/flags/:id/resolve', requireManagerOrAbove, async (req, res, n
     next(err);
   }
 });
+
+// ============================================================================
+// Shifts CRUD (read = MANAGER+, write = ADMIN). Each user's `shiftId` is
+// assigned via PATCH /v1/admin/users/:id (already extended above).
+// ============================================================================
+
+function serializeShift(s: {
+  id: string;
+  workspaceId: string;
+  name: string;
+  schedule: unknown;
+  bufferMin: number;
+  members: Array<{ id: string }>;
+  createdAt: Date;
+  updatedAt: Date;
+}): ShiftDto {
+  return {
+    id: s.id,
+    workspaceId: s.workspaceId,
+    name: s.name,
+    schedule: s.schedule as ShiftSchedule,
+    bufferMin: s.bufferMin,
+    memberCount: s.members.length,
+    createdAt: s.createdAt.toISOString(),
+    updatedAt: s.updatedAt.toISOString(),
+  };
+}
+
+/**
+ * GET /v1/admin/shifts — list shifts visible to the caller.
+ *
+ * MANAGER+ see workspace shifts (they need them to know who's on what).
+ * MEMBER is 403 — they have /v1/me/shift for their own.
+ */
+adminRouter.get('/shifts', requireManagerOrAbove, async (req, res, next) => {
+  try {
+    if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
+    const shifts = await prisma.shift.findMany({
+      where: { workspaceId: req.scope.workspaceId },
+      include: { members: { select: { id: true } } },
+      orderBy: { name: 'asc' },
+    });
+    res.json({ shifts: shifts.map(serializeShift) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+adminRouter.post('/shifts', requireAdmin, async (req, res, next) => {
+  try {
+    if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
+    const parsed = CreateShiftSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'invalid_body', detail: parsed.error.format() });
+    }
+    const shift = await prisma.shift.create({
+      data: {
+        workspaceId: req.scope.workspaceId,
+        name: parsed.data.name,
+        schedule: parsed.data.schedule,
+        bufferMin: parsed.data.bufferMin,
+      },
+      include: { members: { select: { id: true } } },
+    });
+    res.status(201).json(serializeShift(shift));
+  } catch (err) {
+    next(err);
+  }
+});
+
+adminRouter.patch('/shifts/:id', requireAdmin, async (req, res, next) => {
+  try {
+    if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
+    const id = req.params.id;
+    if (!id) return res.status(400).json({ error: 'missing_id' });
+    const existing = await prisma.shift.findUnique({ where: { id } });
+    if (!existing || existing.workspaceId !== req.scope.workspaceId) {
+      return res.status(404).json({ error: 'not_found' });
+    }
+    const parsed = PatchShiftSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'invalid_body', detail: parsed.error.format() });
+    }
+    const data: { name?: string; schedule?: ShiftSchedule; bufferMin?: number } = {};
+    if (parsed.data.name !== undefined) data.name = parsed.data.name;
+    if (parsed.data.schedule !== undefined) data.schedule = parsed.data.schedule;
+    if (parsed.data.bufferMin !== undefined) data.bufferMin = parsed.data.bufferMin;
+    const updated = await prisma.shift.update({
+      where: { id },
+      data,
+      include: { members: { select: { id: true } } },
+    });
+    res.json(serializeShift(updated));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * DELETE /v1/admin/shifts/:id — drop a shift. Members' `shiftId` goes
+ * NULL via Prisma onDelete: SetNull. Past TimeEntries that snapshotted
+ * `shiftIdAtStart = this.id` keep that string (no FK) so audit history is
+ * preserved even though the row is gone.
+ */
+adminRouter.delete('/shifts/:id', requireAdmin, async (req, res, next) => {
+  try {
+    if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
+    const id = req.params.id;
+    if (!id) return res.status(400).json({ error: 'missing_id' });
+    const existing = await prisma.shift.findUnique({ where: { id } });
+    if (!existing || existing.workspaceId !== req.scope.workspaceId) {
+      return res.status(404).json({ error: 'not_found' });
+    }
+    await prisma.shift.delete({ where: { id } });
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Suppress unused-import warning for ShiftScheduleSchema until a future
+// route consumes it directly (currently consumed inside CreateShift/Patch).
+void ShiftScheduleSchema;
 
 export default adminRouter;

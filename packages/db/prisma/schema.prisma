@@ -13,8 +13,9 @@ model Workspace {
   name      String
   createdAt DateTime @default(now())
 
-  users User[]
-  teams Team[]
+  users  User[]
+  teams  Team[]
+  shifts Shift[]
 }
 
 enum Role {
@@ -43,6 +44,38 @@ model Team {
   @@index([managerId])
 }
 
+/// A workspace-defined work schedule (e.g. "Day Shift", "Night Shift").
+/// `schedule` is a JSON object keyed by lowercase weekday with optional
+/// per-day start/end times in the user's LOCAL timezone (HH:MM 24-hour).
+/// A day with `null` means off (no shift that day → no popup).
+///
+/// Shape (validated at API layer via @grind/types Shift schema):
+///   { mon: { start: "09:00", end: "18:00" } | null,
+///     tue: ..., wed: ..., thu: ..., fri: ...,
+///     sat: null, sun: null }
+///
+/// `bufferMin` is the cushion after a shift's start during which the
+/// agent's "ready to work?" popup keeps nudging the user every 5 min.
+/// After `start + bufferMin`, the popup stops bothering for that day.
+///
+/// Forward-only assignment: changing a user's shift does NOT rewrite past
+/// TimeEntries; each entry snapshots `shiftIdAtStart` at creation time.
+model Shift {
+  id          String   @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  name        String
+  /// See model-comment for the shape; validated by @grind/types.
+  schedule    Json
+  bufferMin   Int      @default(30)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  members User[] @relation("ShiftMembers")
+
+  @@index([workspaceId])
+}
+
 model User {
   id           String   @id @default(cuid())
   workspaceId  String
@@ -61,6 +94,13 @@ model User {
   passwordHash String
   createdAt    DateTime @default(now())
 
+  /// Currently-assigned shift. Forward-only: changing this does NOT
+  /// rewrite history; each TimeEntry snapshots `shiftIdAtStart` so reports
+  /// remain truthful even after a reassignment.
+  shiftId          String?
+  shift            Shift?    @relation("ShiftMembers", fields: [shiftId], references: [id], onDelete: SetNull)
+  shiftAssignedAt  DateTime?
+
   refreshTokens   RefreshToken[]
   timeEntries     TimeEntry[]
   activitySamples ActivitySample[]
@@ -75,6 +115,7 @@ model User {
   @@index([workspaceId])
   @@index([teamId])
   @@index([managerId])
+  @@index([shiftId])
 }
 
 enum TimeEntrySource {
@@ -105,6 +146,11 @@ model TimeEntry {
   notes        String?
   agentVersion String?
   platform     String?
+  /// Snapshot of the user's `shiftId` at the moment this TimeEntry started.
+  /// Lets reports answer "what shift was Anish on the morning of 2026-06-15"
+  /// even after he's been reassigned. No FK to Shift — we preserve the id
+  /// string for audit even if the shift row itself is later deleted.
+  shiftIdAtStart String?
   createdAt    DateTime        @default(now())
   updatedAt    DateTime        @updatedAt
 
