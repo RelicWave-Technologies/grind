@@ -13,6 +13,14 @@ export const ActivitySampleInput = z.object({
   ikiCv: z.number().nullable().optional(),
   moveSpeedCv: z.number().nullable().optional(),
   pathStraightness: z.number().nullable().optional(),
+  // M14: dominant active app + window in the bucket. Title/URL are
+  // policy-gated client-side AND server-side strips them when the
+  // workspace policy disallows them — so even a misbehaving agent
+  // can't sneak titles/URLs in.
+  activeApp: z.string().max(120).nullable().optional(),
+  activeAppBundle: z.string().max(200).nullable().optional(),
+  activeTitle: z.string().max(300).nullable().optional(),
+  activeUrl: z.string().max(2048).nullable().optional(),
 });
 export type ActivitySampleInput = z.infer<typeof ActivitySampleInput>;
 

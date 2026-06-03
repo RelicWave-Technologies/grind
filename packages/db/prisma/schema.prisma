@@ -16,6 +16,34 @@ model Workspace {
   users  User[]
   teams  Team[]
   shifts Shift[]
+  policy WorkspacePolicy?
+}
+
+/// Workspace-wide capture policy. A single row per workspace (unique on
+/// workspaceId) — created on demand the first time the admin opens the
+/// policy editor. Defaults are PRIVACY-CONSCIOUS: titles + URLs OFF,
+/// apps OFF. ADMIN flips them on. Surface name + bundle without title
+/// (which app, not which document); URLs require the explicit URL flag
+/// since URLs are content.
+///
+/// 60-day screenshot retention is enforced by a nightly job that
+/// deletes Screenshot rows older than this; setting it to 0 effectively
+/// disables retention (every shot kept forever — generally not what we
+/// want).
+model WorkspacePolicy {
+  id                         String   @id @default(cuid())
+  workspaceId                String   @unique
+  workspace                  Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  /// Capture which app is in focus per ActivitySample (process / bundle id).
+  captureApps                Boolean  @default(false)
+  /// Capture the foreground window title (TIGHTER than apps — leaks doc names).
+  captureTitles              Boolean  @default(false)
+  /// Capture the browser URL (TIGHTEST — content).
+  captureUrls                Boolean  @default(false)
+  /// Days to retain screenshots before the nightly purge deletes them.
+  retentionDaysScreenshots   Int      @default(60)
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
 }
 
 enum Role {
@@ -197,11 +225,23 @@ model ActivitySample {
   ikiCv           Float?
   moveSpeedCv     Float?
   pathStraightness Float?
+
+  // Active app + site for the dominant minute. Captured only when the
+  // workspace policy allows; otherwise stays null. The agent computes the
+  // dominant app over the minute window and snaps the title/URL of the
+  // window that was focused longest. Title/URL are gated by SEPARATE
+  // policy flags — apps without titles is the calm default.
+  activeApp       String?  // human-readable app name (e.g. "Google Chrome")
+  activeAppBundle String?  // OS bundle / process identifier
+  activeTitle     String?  // foreground window title (policy-gated)
+  activeUrl       String?  // browser URL (policy-gated; tighter than title)
+
   createdAt       DateTime  @default(now())
 
   @@unique([userId, bucketStart])
   @@index([userId, bucketStart])
   @@index([timeEntryId])
+  @@index([userId, activeApp])
 }
 
 /// Maps a Grind user to their Lark identity. Resolved once (email -> open_id)
