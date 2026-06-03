@@ -50,3 +50,23 @@ export function addDays(yyyyMmDd: string, delta: number): string {
 export function todayKey(): string {
   return new Date().toISOString().slice(0, 10);
 }
+
+/**
+ * Short relative age ("3m ago", "2h ago", "4d ago", "3w ago"). Designed
+ * for queue rows where space is tight and the exact minute doesn't
+ * matter — pairs well with a full timestamp tooltip.
+ */
+export function fmtAgeShort(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return 'just now';
+  const sec = Math.floor(ms / 1000);
+  if (sec < 60) return 'just now';
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  if (d < 7) return `${d}d ago`;
+  const w = Math.floor(d / 7);
+  if (w < 5) return `${w}w ago`;
+  return `${Math.floor(d / 30)}mo ago`;
+}
