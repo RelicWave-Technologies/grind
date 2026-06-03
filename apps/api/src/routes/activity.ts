@@ -1,6 +1,11 @@
 import { Router } from 'express';
 import { prisma } from '@grind/db';
-import { ActivitySamplesRequest, type ActivitySamplesResponse } from '@grind/types';
+import {
+  ActivitySamplesRequest,
+  type ActivitySamplesResponse,
+  applyPolicyToActive,
+  WORKSPACE_POLICY_DEFAULTS,
+} from '@grind/types';
 import { validate } from '../middleware/validate';
 import { requireAccessToken } from '../middleware/auth';
 import { persistFlagsForUser } from '../anticheat/persistFlags';
@@ -21,9 +26,31 @@ activityRouter.post('/', validate(ActivitySamplesRequest, 'body'), async (req, r
     const { samples } = req.body as ActivitySamplesRequest;
     const userId = req.user.sub;
 
+    // Resolve the caller's workspace policy ONCE per request — defaults
+    // when none exists. We pass the flags through `applyPolicyToActive`
+    // for every sample so a misbehaving / outdated agent can never
+    // smuggle in disabled active-window fields.
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { workspaceId: true },
+    });
+    const policyRow = user
+      ? await prisma.workspacePolicy.findUnique({ where: { workspaceId: user.workspaceId } })
+      : null;
+    const policy = policyRow ?? WORKSPACE_POLICY_DEFAULTS;
+
     await prisma.$transaction(
-      samples.map((s) =>
-        prisma.activitySample.upsert({
+      samples.map((s) => {
+        const scrubbed = applyPolicyToActive(
+          {
+            activeApp: s.activeApp ?? null,
+            activeAppBundle: s.activeAppBundle ?? null,
+            activeTitle: s.activeTitle ?? null,
+            activeUrl: s.activeUrl ?? null,
+          },
+          policy,
+        );
+        return prisma.activitySample.upsert({
           where: { userId_bucketStart: { userId, bucketStart: new Date(s.bucketStart) } },
           create: {
             id: s.id,
@@ -37,6 +64,10 @@ activityRouter.post('/', validate(ActivitySamplesRequest, 'body'), async (req, r
             ikiCv: s.ikiCv ?? null,
             moveSpeedCv: s.moveSpeedCv ?? null,
             pathStraightness: s.pathStraightness ?? null,
+            activeApp: scrubbed.activeApp,
+            activeAppBundle: scrubbed.activeAppBundle,
+            activeTitle: scrubbed.activeTitle,
+            activeUrl: scrubbed.activeUrl,
           },
           update: {
             timeEntryId: s.timeEntryId ?? null,
@@ -47,9 +78,13 @@ activityRouter.post('/', validate(ActivitySamplesRequest, 'body'), async (req, r
             ikiCv: s.ikiCv ?? null,
             moveSpeedCv: s.moveSpeedCv ?? null,
             pathStraightness: s.pathStraightness ?? null,
+            activeApp: scrubbed.activeApp,
+            activeAppBundle: scrubbed.activeAppBundle,
+            activeTitle: scrubbed.activeTitle,
+            activeUrl: scrubbed.activeUrl,
           },
-        }),
-      ),
+        });
+      }),
     );
 
     const response: ActivitySamplesResponse = { accepted: samples.length };
