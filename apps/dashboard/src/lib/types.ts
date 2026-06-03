@@ -96,6 +96,21 @@ export interface MtrUserSummary {
   email: string;
 }
 
+export type TriageVerdict = 'approve' | 'review' | 'reject';
+
+export interface TriageSignal {
+  id: string;
+  text: string;
+  weight: number;
+}
+
+export interface TriageResult {
+  verdict: TriageVerdict;
+  confidence: number;
+  signals: TriageSignal[];
+  headline: string;
+}
+
 export interface ManualTimeRequest {
   id: string;
   status: MtrStatus;
@@ -107,6 +122,8 @@ export interface ManualTimeRequest {
   decidedReason: string | null;
   createdAt: string;
   user: MtrUserSummary;
+  /** AI-assist verdict for PENDING rows. Null for already-decided ones. */
+  triage?: TriageResult | null;
 }
 
 export interface DecideResult {
@@ -154,6 +171,8 @@ export interface ActivityFlag {
   windowEnd: string;
   riskScore: number;
   evidence: Record<string, number>;
+  /** AI-assist explanation (M17). */
+  explanation?: { headline: string; detail: string };
   status: FlagStatus;
   resolution: FlagResolution | null;
   resolvedById: string | null;
