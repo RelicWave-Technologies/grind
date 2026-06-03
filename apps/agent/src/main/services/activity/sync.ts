@@ -15,6 +15,10 @@ function toInput(r: ActivityRow): ActivitySampleInput {
     ikiCv: r.ikiCv,
     moveSpeedCv: r.moveSpeedCv,
     pathStraightness: r.pathStraightness,
+    activeApp: r.activeApp,
+    activeAppBundle: r.activeAppBundle,
+    activeTitle: r.activeTitle,
+    activeUrl: r.activeUrl,
   };
 }
 
