@@ -14,12 +14,33 @@ model Workspace {
   createdAt DateTime @default(now())
 
   users User[]
+  teams Team[]
 }
 
 enum Role {
   OWNER
   ADMIN
+  MANAGER
   MEMBER
+}
+
+/// A team groups MEMBERs under a MANAGER. Manager-scoped queries
+/// (timesheets, approvals, screenshots) only return rows whose user
+/// belongs to a team the caller manages. Optional — workspaces can
+/// continue to operate flat (everyone MEMBER → admins see all).
+model Team {
+  id          String   @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  name        String
+  managerId   String?
+  manager     User?     @relation("TeamManager", fields: [managerId], references: [id], onDelete: SetNull)
+  members     User[]    @relation("TeamMembers")
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([workspaceId])
+  @@index([managerId])
 }
 
 model User {
@@ -29,6 +50,14 @@ model User {
   email        String   @unique
   name         String
   role         Role     @default(MEMBER)
+  /// Optional team this user belongs to. NULL = workspace-level (no team
+  /// scoping applies; admin sees them, no manager does).
+  teamId       String?
+  team         Team?    @relation("TeamMembers", fields: [teamId], references: [id], onDelete: SetNull)
+  /// Denormalised pointer to the user's direct manager (= their team's
+  /// managerId, kept in sync on team updates). Lets us answer "who
+  /// manages me?" with a single FK lookup, no join.
+  managerId    String?
   passwordHash String
   createdAt    DateTime @default(now())
 
@@ -39,8 +68,11 @@ model User {
   larkOAuthToken  LarkOAuthToken?
   manualTimeRequests       ManualTimeRequest[] @relation("MtrRequester")
   manualTimeApprovals      ManualTimeRequest[] @relation("MtrApprover")
+  managedTeams             Team[]              @relation("TeamManager")
 
   @@index([workspaceId])
+  @@index([teamId])
+  @@index([managerId])
 }
 
 enum TimeEntrySource {

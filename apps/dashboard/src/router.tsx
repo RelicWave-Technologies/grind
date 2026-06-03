@@ -1,0 +1,75 @@
+import {
+  Outlet,
+  createRootRouteWithContext,
+  createRoute,
+  redirect,
+} from '@tanstack/react-router';
+import type { QueryClient } from '@tanstack/react-query';
+import { api, ApiError } from './lib/api';
+import type { Me } from './lib/auth';
+import { Layout } from './components/Layout';
+import { LoginScreen } from './screens/Login';
+import { UsersScreen } from './screens/Users';
+import { HomeScreen } from './screens/Home';
+
+interface RouterContext {
+  queryClient: QueryClient;
+}
+
+const rootRoute = createRootRouteWithContext<RouterContext>()({
+  component: () => <Outlet />,
+});
+
+// Auth gate. Any route under this calls /me first and bounces to /login
+// on 401. Other failures throw — we'd rather show an error boundary than
+// silently redirect away from a transient API blip.
+const authedRoot = createRoute({
+  getParentRoute: () => rootRoute,
+  id: 'authed',
+  beforeLoad: async ({ context, location }) => {
+    const me = await context.queryClient.fetchQuery<Me | null>({
+      queryKey: ['me'],
+      queryFn: async () => {
+        try {
+          const res = await api<{ user: Me }>('/v1/auth/me');
+          return res.user;
+        } catch (e) {
+          if (e instanceof ApiError && e.status === 401) return null;
+          throw e;
+        }
+      },
+      staleTime: 5 * 60_000,
+    });
+    if (!me) {
+      throw redirect({ to: '/login', search: { next: location.href } });
+    }
+    return { me };
+  },
+  component: Layout,
+});
+
+const homeRoute = createRoute({
+  getParentRoute: () => authedRoot,
+  path: '/',
+  component: HomeScreen,
+});
+
+const usersRoute = createRoute({
+  getParentRoute: () => authedRoot,
+  path: '/users',
+  component: UsersScreen,
+});
+
+const loginRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/login',
+  validateSearch: (s: Record<string, unknown>): { next?: string } => ({
+    next: typeof s.next === 'string' ? s.next : undefined,
+  }),
+  component: LoginScreen,
+});
+
+export const routeTree = rootRoute.addChildren([
+  authedRoot.addChildren([homeRoute, usersRoute]),
+  loginRoute,
+]);
