@@ -25,6 +25,14 @@ export type CreateManualTimeRequestInput = {
   reason: string;
   larkTaskGuid?: string | null;
   taskSummary?: string | null;
+  attendeeIds?: string[];
+};
+
+export type WorkspaceUserDto = {
+  id: string;
+  name: string;
+  email: string;
+  role: 'OWNER' | 'ADMIN' | 'MANAGER' | 'MEMBER';
 };
 
 /**
@@ -43,7 +51,7 @@ export function registerTimeRequestsIpc(): void {
       input: CreateManualTimeRequestInput,
     ): Promise<{ ok: boolean; request?: ManualTimeRequestDto; error?: string }> => {
       try {
-        const body = {
+        const body: Record<string, unknown> = {
           clientUuid: ulid(),
           requestedStart: new Date(input.requestedStart).toISOString(),
           requestedEnd: new Date(input.requestedEnd).toISOString(),
@@ -51,6 +59,9 @@ export function registerTimeRequestsIpc(): void {
           larkTaskGuid: input.larkTaskGuid ?? null,
           taskSummary: input.taskSummary ?? null,
         };
+        if (input.attendeeIds && input.attendeeIds.length > 0) {
+          body.attendeeIds = input.attendeeIds;
+        }
         const request = await api<ManualTimeRequestDto>('/v1/time-requests', { method: 'POST', body });
         return { ok: true, request };
       } catch (err) {
@@ -111,6 +122,24 @@ export function registerTimeRequestsIpc(): void {
         if (msg.includes('403')) return { ok: false, error: 'forbidden' };
         if (msg.includes('404')) return { ok: false, error: 'not_found' };
         return { ok: false, error: msg };
+      }
+    },
+  );
+
+  /**
+   * Workspace directory — used by the manual-time composer to populate the
+   * attendee picker. Available to every authenticated user (server-side
+   * `/v1/workspace/users` enforces same-workspace scoping). Cached on the
+   * renderer via TanStack Query, so callers don't need to memoise.
+   */
+  ipcMain.handle(
+    'timeRequests:listWorkspaceUsers',
+    async (): Promise<{ users: WorkspaceUserDto[] }> => {
+      try {
+        return await api<{ users: WorkspaceUserDto[] }>('/v1/workspace/users');
+      } catch (err) {
+        log.warn('timeRequests:listWorkspaceUsers failed', { err: String(err) });
+        return { users: [] };
       }
     },
   );

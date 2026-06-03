@@ -4,7 +4,7 @@ import { useRouteContext, useSearch } from '@tanstack/react-router';
 import { ChevronLeft, ChevronRight, Calendar } from 'lucide-react';
 import { api } from '../lib/api';
 import { isManagerOrAbove } from '../lib/auth';
-import type { DayInsight } from '../lib/types';
+import type { DayInsight, WorkspaceUser } from '../lib/types';
 import { fmtDayLabel, todayKey, addDays, fmtDurationMs } from '../lib/format';
 import { DayRibbon } from '../components/DayRibbon';
 import { ActivityHeatmap } from '../components/ActivityHeatmap';
@@ -54,6 +54,17 @@ export function MeTodayScreen() {
     queryFn: () => api<{ users: AdminUser[] }>('/v1/admin/users'),
   });
 
+  // Workspace directory for the attendee picker. Available to every
+  // authenticated user (server-side handler is /v1/workspace/users) — needed
+  // so MEMBERs can tag co-workers on MEETING/MANUAL rows without leaking
+  // role/team metadata.
+  const wsUsersQ = useQuery({
+    queryKey: ['workspace', 'users'],
+    queryFn: () => api<{ users: WorkspaceUser[] }>('/v1/workspace/users'),
+    staleTime: 5 * 60_000,
+  });
+  const workspaceUsers = wsUsersQ.data?.users ?? [];
+
   // Lark tasks — fetched once for the day view; cached for 5 min so the
   // TaskCombos open instantly. Falls back to empty list if Lark isn't
   // configured (the user gets the "Untracked" sentinel anyway).
@@ -87,40 +98,40 @@ export function MeTodayScreen() {
   // ---- Mutations (self-only) -------------------------------------------------
 
   const patchEntry = useMutation({
-    mutationFn: (vars: { id: string; larkTaskGuid: string | null; notes: string }) =>
-      api(`/v1/time-entries/${vars.id}`, {
-        method: 'PATCH',
-        json: { larkTaskGuid: vars.larkTaskGuid, notes: vars.notes },
-      }),
+    mutationFn: (vars: { id: string; larkTaskGuid: string | null; notes: string; attendeeIds?: string[] }) => {
+      const body: Record<string, unknown> = { larkTaskGuid: vars.larkTaskGuid, notes: vars.notes };
+      if (vars.attendeeIds !== undefined) body.attendeeIds = vars.attendeeIds;
+      return api(`/v1/time-entries/${vars.id}`, { method: 'PATCH', json: body });
+    },
     onSuccess: invalidate,
   });
 
   const createRequest = useMutation({
-    mutationFn: (vars: { requestedStart: number; requestedEnd: number; larkTaskGuid: string | null; reason: string }) =>
-      api('/v1/time-requests', {
-        method: 'POST',
-        json: {
-          clientUuid: `web-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
-          requestedStart: new Date(vars.requestedStart).toISOString(),
-          requestedEnd: new Date(vars.requestedEnd).toISOString(),
-          larkTaskGuid: vars.larkTaskGuid,
-          reason: vars.reason,
-        },
-      }),
+    mutationFn: (vars: { requestedStart: number; requestedEnd: number; larkTaskGuid: string | null; reason: string; attendeeIds?: string[] }) => {
+      const body: Record<string, unknown> = {
+        clientUuid: `web-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+        requestedStart: new Date(vars.requestedStart).toISOString(),
+        requestedEnd: new Date(vars.requestedEnd).toISOString(),
+        larkTaskGuid: vars.larkTaskGuid,
+        reason: vars.reason,
+      };
+      if (vars.attendeeIds && vars.attendeeIds.length > 0) body.attendeeIds = vars.attendeeIds;
+      return api('/v1/time-requests', { method: 'POST', json: body });
+    },
     onSuccess: invalidate,
   });
 
   const patchRequest = useMutation({
-    mutationFn: (vars: { id: string; requestedStart: number; requestedEnd: number; larkTaskGuid: string | null; reason: string }) =>
-      api(`/v1/time-requests/${vars.id}`, {
-        method: 'PATCH',
-        json: {
-          requestedStart: new Date(vars.requestedStart).toISOString(),
-          requestedEnd: new Date(vars.requestedEnd).toISOString(),
-          larkTaskGuid: vars.larkTaskGuid,
-          reason: vars.reason,
-        },
-      }),
+    mutationFn: (vars: { id: string; requestedStart: number; requestedEnd: number; larkTaskGuid: string | null; reason: string; attendeeIds?: string[] }) => {
+      const body: Record<string, unknown> = {
+        requestedStart: new Date(vars.requestedStart).toISOString(),
+        requestedEnd: new Date(vars.requestedEnd).toISOString(),
+        larkTaskGuid: vars.larkTaskGuid,
+        reason: vars.reason,
+      };
+      if (vars.attendeeIds !== undefined) body.attendeeIds = vars.attendeeIds;
+      return api(`/v1/time-requests/${vars.id}`, { method: 'PATCH', json: body });
+    },
     onSuccess: invalidate,
   });
 
@@ -299,6 +310,8 @@ export function MeTodayScreen() {
                         block={b}
                         tasks={tasks}
                         disabled={!editable}
+                        workspaceUsers={workspaceUsers}
+                        selfId={me.id}
                         preset={
                           gapPreset && gapPreset.blockKey === blockKey
                             ? gapPreset.range
@@ -328,6 +341,7 @@ export function MeTodayScreen() {
                   // WORK / MEETING / MANUAL
                   const kind = b.kind === 'MANUAL' ? 'manual_approved' : 'tracked';
                   const rowId = `entry-${b.timeEntryId ?? `${b.startedAt}-${i}`}`;
+                  const isMeeting = b.kind === 'MEETING';
                   return (
                     <EntryRow
                       key={rowId}
@@ -337,6 +351,9 @@ export function MeTodayScreen() {
                       block={b}
                       tasks={tasks}
                       disabled={!editable}
+                      isMeeting={isMeeting}
+                      workspaceUsers={workspaceUsers}
+                      selfId={me.id}
                       onSave={async (vars) => {
                         await patchEntry.mutateAsync(vars);
                       }}
@@ -355,6 +372,8 @@ export function MeTodayScreen() {
                       pending={p}
                       tasks={tasks}
                       disabled={!editable}
+                      workspaceUsers={workspaceUsers}
+                      selfId={me.id}
                       onPatch={async (vars) => {
                         await patchRequest.mutateAsync(vars);
                       }}

@@ -26,6 +26,7 @@ export interface DayEntryInput {
   source: 'AUTO' | 'MANUAL';
   larkTaskGuid: string | null;
   notes?: string | null;
+  attendeeIds?: string[];
   segments: Array<{
     kind: SegmentKind;
     startedAt: Date;
@@ -39,6 +40,7 @@ export interface PendingRequestInput {
   requestedEnd: Date;
   reason: string;
   larkTaskGuid: string | null;
+  attendeeIds?: string[];
 }
 
 export interface RejectedRequestInput extends PendingRequestInput {
@@ -58,6 +60,12 @@ export interface DayBlock {
    */
   notes?: string | null;
   isOpen?: boolean;
+  /**
+   * Workspace user-ids tagged as attendees. Populated for MEETING + MANUAL
+   * blocks (any block whose underlying entry has TimeEntryAttendee rows).
+   * Absent for WORK/IDLE/GAP.
+   */
+  attendeeIds?: string[];
 }
 
 export interface DayInsightResult {
@@ -71,7 +79,14 @@ export interface DayInsightResult {
   lastActivityAt: number | null;
   totals: { workedMs: number; meetingMs: number; manualMs: number; idleTrimmedMs: number; gapMs: number };
   blocks: DayBlock[];
-  pendingOverlay: Array<{ id: string; startedAt: number; endedAt: number; reason: string; larkTaskGuid: string | null }>;
+  pendingOverlay: Array<{
+    id: string;
+    startedAt: number;
+    endedAt: number;
+    reason: string;
+    larkTaskGuid: string | null;
+    attendeeIds?: string[];
+  }>;
   /**
    * REJECTED manual-time requests overlapping the day. Rendered as red rows
    * in the table so the user can re-request (and see decidedReason if set).
@@ -187,6 +202,13 @@ export function buildDayInsight(input: {
       const c = clip(segStart, segEndRaw, dayStart, dayEnd);
       if (!c) continue;
       const kind: BlockKind = e.source === 'MANUAL' ? 'MANUAL' : s.kind;
+      // Only surface attendees on the two block kinds that semantically
+      // carry meeting attribution: MEETING (real-time detected) + MANUAL
+      // (request-flow tagged). WORK + IDLE_TRIMMED stay attendee-less.
+      const attendeeIds =
+        (kind === 'MEETING' || kind === 'MANUAL') && e.attendeeIds && e.attendeeIds.length > 0
+          ? e.attendeeIds
+          : undefined;
       tagged.push({
         kind,
         startedAt: c.a,
@@ -196,6 +218,7 @@ export function buildDayInsight(input: {
         larkTaskGuid: e.larkTaskGuid,
         notes: e.notes ?? null,
         isOpen: s.endedAt === null && isToday,
+        ...(attendeeIds ? { attendeeIds } : {}),
       });
     }
   }
@@ -275,7 +298,14 @@ export function buildDayInsight(input: {
     .map((p) => {
       const c = clip(p.requestedStart.getTime(), p.requestedEnd.getTime(), dayStart, dayEnd);
       if (!c) return null;
-      return { id: p.id, startedAt: c.a, endedAt: c.b, reason: p.reason, larkTaskGuid: p.larkTaskGuid };
+      return {
+        id: p.id,
+        startedAt: c.a,
+        endedAt: c.b,
+        reason: p.reason,
+        larkTaskGuid: p.larkTaskGuid,
+        ...(p.attendeeIds && p.attendeeIds.length > 0 ? { attendeeIds: p.attendeeIds } : {}),
+      };
     })
     .filter((x): x is NonNullable<typeof x> => x !== null)
     .sort((a, b) => a.startedAt - b.startedAt);

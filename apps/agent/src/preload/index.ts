@@ -103,6 +103,7 @@ const api = {
       reason: string;
       larkTaskGuid?: string | null;
       taskSummary?: string | null;
+      attendeeIds?: string[];
     }): Promise<{
       ok: boolean;
       request?: ManualTimeRequestDto;
@@ -110,6 +111,8 @@ const api = {
     }> => ipcRenderer.invoke('timeRequests:create', input),
     listMine: (status?: 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED'): Promise<{ requests: ManualTimeRequestDto[] }> =>
       ipcRenderer.invoke('timeRequests:listMine', status),
+    listWorkspaceUsers: (): Promise<{ users: Array<{ id: string; name: string; email: string; role: 'OWNER' | 'ADMIN' | 'MANAGER' | 'MEMBER' }> }> =>
+      ipcRenderer.invoke('timeRequests:listWorkspaceUsers'),
     patch: (args: {
       id: string;
       requestedStart?: number;

@@ -16,6 +16,7 @@ export interface DayBlock {
   larkTaskGuid?: string | null;
   notes?: string | null;
   isOpen?: boolean;
+  attendeeIds?: string[];
 }
 
 export interface PendingOverlay {
@@ -24,6 +25,7 @@ export interface PendingOverlay {
   endedAt: number;
   reason: string;
   larkTaskGuid: string | null;
+  attendeeIds?: string[];
 }
 
 export interface RejectedRequest {
@@ -55,6 +57,17 @@ export interface DayInsight {
   pendingOverlay: PendingOverlay[];
   recentRejected: RejectedRequest[];
   activity?: ActivityHeatmap;
+}
+
+// ---------------------------------------------------------------------------
+// Workspace directory (for the AttendeePicker)
+// ---------------------------------------------------------------------------
+
+export interface WorkspaceUser {
+  id: string;
+  name: string;
+  email: string;
+  role: 'OWNER' | 'ADMIN' | 'MANAGER' | 'MEMBER';
 }
 
 // ---------------------------------------------------------------------------
