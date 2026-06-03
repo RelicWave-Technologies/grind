@@ -120,6 +120,12 @@ model User {
   /// manages me?" with a single FK lookup, no join.
   managerId    String?
   passwordHash String
+  /// Soft-deactivation: when non-null, the user can't log in, doesn't
+  /// appear in scope/admin queries, and (importantly) their *history*
+  /// remains queryable for back-dated reports + audit. Reactivation
+  /// just clears this timestamp. We intentionally never hard-delete
+  /// users — every TimeEntry / approval / flag still points at them.
+  deactivatedAt DateTime?
   createdAt    DateTime @default(now())
 
   /// Currently-assigned shift. Forward-only: changing this does NOT

@@ -1980,3 +1980,21 @@ th.payroll-num { text-align: right; }
   text-transform: lowercase;
 }
 
+
+/* M11/9: People — deactivated visual + invite form */
+.people-table tr.is-deactivated td { color: var(--label-tertiary); }
+.people-table tr.is-deactivated .person-name { color: var(--label-secondary); }
+.deactivated-pill {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(40, 36, 56, 0.08);
+  color: var(--label-tertiary);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: lowercase;
+}
+.invite-form { border: 1px solid var(--border-default, rgba(40, 36, 56, 0.1)); }
+

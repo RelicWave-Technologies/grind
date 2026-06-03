@@ -27,6 +27,12 @@ authRouter.post('/login', validate(LoginRequest, 'body'), async (req, res, next)
     if (!user || !(await verifyPassword(user.passwordHash, password))) {
       return res.status(401).json({ error: 'invalid_credentials' });
     }
+    // Deactivated users can't acquire fresh sessions. They get the same
+    // generic error as a bad password so the response surface doesn't
+    // leak account state to outsiders.
+    if (user.deactivatedAt) {
+      return res.status(401).json({ error: 'invalid_credentials' });
+    }
     const accessToken = signAccessToken({ sub: user.id, ws: user.workspaceId, role: user.role });
     const { refreshToken } = await issueRefreshToken(user.id, deviceName);
 
