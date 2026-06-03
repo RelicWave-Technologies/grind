@@ -4,6 +4,8 @@ import { requireAccessToken } from '../middleware/auth';
 import { attachScope, requireAdmin, requireManagerOrAbove } from '../middleware/scope';
 import { decideByUser } from '../lark/decideByUser';
 import { hashPassword } from '../lib/password';
+import { triageRequest, type TriageResult } from '../ai/triage';
+import { explainFlag } from '../ai/explainFlag';
 import {
   addDays as addDaysStr,
   buildTimesheetMatrix,
@@ -105,6 +107,105 @@ interface MtrListEntry {
   decidedReason: string | null;
   createdAt: string;
   user: { id: string; name: string; email: string };
+  /** AI-assist verdict + reasons (PENDING only — set to null otherwise). */
+  triage: TriageResult | null;
+}
+
+const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+
+/** UTC day-start (midnight) for a given timestamp — used by triage's adjacency window. */
+function dayStartMs(d: Date): number {
+  const t = d.getTime();
+  return t - (t % (24 * 60 * 60 * 1000));
+}
+
+/**
+ * Compute per-user 30-day approval / rejection / daily-average context
+ * in a single batched DB pass. Used to enrich PENDING rows with triage.
+ */
+async function buildTriageContextByUser(userIds: string[], now: number) {
+  if (userIds.length === 0) {
+    return new Map<string, { avgDailyTotalMs: number; approved: number; rejected: number }>();
+  }
+  const since = new Date(now - THIRTY_DAYS_MS);
+
+  // Approval + rejection counts (one round-trip per status — Prisma's
+  // groupBy returns one row per (userId, status) combo).
+  const counts = await prisma.manualTimeRequest.groupBy({
+    by: ['userId', 'status'],
+    where: { userId: { in: userIds }, createdAt: { gte: since } },
+    _count: { _all: true },
+  });
+
+  // Trailing-30-day TOTAL AUTO + MANUAL tracked ms per user. Heuristic:
+  // sum segment durations directly; segment.endedAt may be null for
+  // an open entry but we clamp to `now`.
+  const segments = await prisma.timeSegment.findMany({
+    where: {
+      timeEntry: { userId: { in: userIds } },
+      startedAt: { gte: since },
+    },
+    select: {
+      startedAt: true,
+      endedAt: true,
+      timeEntry: { select: { userId: true } },
+    },
+  });
+  const totalByUser = new Map<string, number>();
+  for (const s of segments) {
+    const end = (s.endedAt ?? new Date(now)).getTime();
+    const dur = Math.max(0, end - s.startedAt.getTime());
+    const uid = s.timeEntry.userId;
+    totalByUser.set(uid, (totalByUser.get(uid) ?? 0) + dur);
+  }
+
+  const out = new Map<string, { avgDailyTotalMs: number; approved: number; rejected: number }>();
+  for (const uid of userIds) {
+    const total = totalByUser.get(uid) ?? 0;
+    const approved = counts
+      .filter((c) => c.userId === uid && c.status === 'APPROVED')
+      .reduce((n, c) => n + c._count._all, 0);
+    const rejected = counts
+      .filter((c) => c.userId === uid && c.status === 'REJECTED')
+      .reduce((n, c) => n + c._count._all, 0);
+    out.set(uid, {
+      avgDailyTotalMs: total / 30,
+      approved,
+      rejected,
+    });
+  }
+  return out;
+}
+
+/**
+ * Per-request "same-day AUTO totals + closest-edge" computed against
+ * a single user's segment list. Pure — the caller pre-fetches segments
+ * once per (workspace, day window).
+ */
+function adjacencyFor(
+  segments: Array<{ startedAt: number; endedAt: number; userId: string }>,
+  userId: string,
+  reqStart: number,
+  reqEnd: number,
+  dayStart: number,
+  dayEnd: number,
+): { autoTrackedSameDayMs: number; closestAutoEdgeMs: number } {
+  let same = 0;
+  let closest = Number.POSITIVE_INFINITY;
+  for (const s of segments) {
+    if (s.userId !== userId) continue;
+    const a = Math.max(dayStart, s.startedAt);
+    const b = Math.min(dayEnd, s.endedAt);
+    if (b > a) same += b - a;
+    // Distance from this segment to the request window (0 if overlapping).
+    if (s.endedAt < reqStart) closest = Math.min(closest, reqStart - s.endedAt);
+    else if (s.startedAt > reqEnd) closest = Math.min(closest, s.startedAt - reqEnd);
+    else closest = 0;
+  }
+  return {
+    autoTrackedSameDayMs: same,
+    closestAutoEdgeMs: Number.isFinite(closest) ? closest : 24 * 60 * 60 * 1000,
+  };
 }
 
 /**
@@ -142,6 +243,61 @@ adminRouter.get('/manual-time-requests', requireManagerOrAbove, async (req, res,
       ],
       take: 200,
     });
+    // Triage enrichment for PENDING rows only (decided rows already have
+    // a verdict). Skips entirely if there are no PENDING rows — keeps
+    // historical / decided-only queries cheap.
+    const pendingRows = rows.filter((r) => r.status === 'PENDING');
+    let triageByRequest: Map<string, TriageResult> | null = null;
+    if (pendingRows.length > 0) {
+      const now = Date.now();
+      const userIds = Array.from(new Set(pendingRows.map((r) => r.userId)));
+      const perUser = await buildTriageContextByUser(userIds, now);
+
+      // One segments query per page-load for the pending-day windows.
+      const earliestDay = pendingRows.reduce((min, r) => Math.min(min, dayStartMs(r.requestedStart)), Infinity);
+      const latestDay = pendingRows.reduce((max, r) => Math.max(max, dayStartMs(r.requestedStart) + 24 * 3_600_000), 0);
+      const segs = await prisma.timeSegment.findMany({
+        where: {
+          timeEntry: { userId: { in: userIds }, source: 'AUTO' },
+          startedAt: { lt: new Date(latestDay) },
+          OR: [{ endedAt: null }, { endedAt: { gt: new Date(earliestDay) } }],
+        },
+        select: {
+          startedAt: true,
+          endedAt: true,
+          timeEntry: { select: { userId: true } },
+        },
+      });
+      const segLite = segs.map((s) => ({
+        startedAt: s.startedAt.getTime(),
+        endedAt: (s.endedAt ?? new Date(now)).getTime(),
+        userId: s.timeEntry.userId,
+      }));
+
+      triageByRequest = new Map<string, TriageResult>();
+      for (const r of pendingRows) {
+        const reqStart = r.requestedStart.getTime();
+        const reqEnd = r.requestedEnd.getTime();
+        const dayStart = dayStartMs(r.requestedStart);
+        const adj = adjacencyFor(segLite, r.userId, reqStart, reqEnd, dayStart, dayStart + 24 * 3_600_000);
+        const ctx = perUser.get(r.userId) ?? { avgDailyTotalMs: 0, approved: 0, rejected: 0 };
+        const triage = triageRequest({
+          requestedStartMs: reqStart,
+          requestedEndMs: reqEnd,
+          reason: r.reason,
+          context: {
+            autoTrackedSameDayMs: adj.autoTrackedSameDayMs,
+            closestAutoEdgeMs: adj.closestAutoEdgeMs,
+            avgDailyTotalMs: ctx.avgDailyTotalMs,
+            rejectedLast30Days: ctx.rejected,
+            approvedLast30Days: ctx.approved,
+            requestAgeMs: Math.max(0, now - r.createdAt.getTime()),
+          },
+        });
+        triageByRequest.set(r.id, triage);
+      }
+    }
+
     const out: MtrListEntry[] = rows.map((r) => ({
       id: r.id,
       status: r.status,
@@ -153,6 +309,7 @@ adminRouter.get('/manual-time-requests', requireManagerOrAbove, async (req, res,
       decidedReason: r.decidedReason,
       createdAt: r.createdAt.toISOString(),
       user: { id: r.user.id, name: r.user.name, email: r.user.email },
+      triage: triageByRequest?.get(r.id) ?? null,
     }));
     res.json({ requests: out, scope: req.scope.scope });
   } catch (err) {
@@ -788,6 +945,8 @@ interface FlagDto {
   windowEnd: string;
   riskScore: number;
   evidence: unknown;
+  /** AI-assist plain-language explanation of this flag (M17). */
+  explanation: { headline: string; detail: string };
   status: 'OPEN' | 'RESOLVED';
   resolution: 'DISMISSED' | 'CONFIRMED' | 'TIME_INVALIDATED' | null;
   resolvedById: string | null;
@@ -849,6 +1008,11 @@ adminRouter.get('/flags', requireManagerOrAbove, async (req, res, next) => {
       windowEnd: r.windowEnd.toISOString(),
       riskScore: r.riskScore,
       evidence: r.evidence,
+      explanation: explainFlag({
+        type: r.type,
+        evidence: (r.evidence ?? {}) as Record<string, number>,
+        riskScore: r.riskScore,
+      }),
       status: r.status,
       resolution: r.resolution,
       resolvedById: r.resolvedById,

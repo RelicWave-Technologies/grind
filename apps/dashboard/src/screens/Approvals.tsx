@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Check, X, Clock, AlertTriangle } from 'lucide-react';
+import { Check, X, Clock, AlertTriangle, Sparkles } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 import type { ManualTimeRequest, DecideResult, MtrStatus } from '../lib/types';
 import { fmtTime, fmtDurationMs, fmtDayLabel, fmtAgeShort } from '../lib/format';
@@ -237,6 +237,8 @@ function ApprovalCard({ req, busy, decidedError, onApprove, onReject }: CardProp
         )}
       </div>
 
+      {req.triage && isPending && <TriageBadge triage={req.triage} />}
+
       {decidedError && <div className="approval-error">Failed: {decidedError}</div>}
 
       {isPending && (
@@ -279,6 +281,32 @@ function ApprovalCard({ req, busy, decidedError, onApprove, onReject }: CardProp
         </div>
       )}
     </article>
+  );
+}
+
+function TriageBadge({ triage }: { triage: NonNullable<ManualTimeRequest['triage']> }) {
+  const verdictClass =
+    triage.verdict === 'approve' ? 'triage-approve' : triage.verdict === 'reject' ? 'triage-reject' : 'triage-review';
+  const verdictLabel =
+    triage.verdict === 'approve' ? 'Likely safe' : triage.verdict === 'reject' ? 'Worth pushing back' : 'Take a look';
+  const confidencePct = Math.round(triage.confidence * 100);
+  return (
+    <div className={`triage-badge ${verdictClass}`} role="note" aria-label="AI triage suggestion">
+      <div className="triage-head">
+        <Sparkles size={11} strokeWidth={2.4} aria-hidden />
+        <span className="triage-label">{verdictLabel}</span>
+        <span className="triage-confidence" title={`${confidencePct}% confidence`}>
+          {confidencePct}%
+        </span>
+      </div>
+      <ul className="triage-signals" role="list">
+        {triage.signals.slice(0, 3).map((s) => (
+          <li key={s.id} className={s.weight >= 0 ? 'triage-sig-pos' : 'triage-sig-neg'}>
+            {s.text}
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 

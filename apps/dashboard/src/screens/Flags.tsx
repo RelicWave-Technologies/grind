@@ -170,7 +170,14 @@ function FlagCard({
         </div>
         <div className="approval-row">
           <span className="approval-label">Pattern</span>
-          <span className="approval-value">{FLAG_BLURB[flag.type]}</span>
+          <span className="approval-value">
+            {flag.explanation?.headline ?? FLAG_BLURB[flag.type]}
+            {flag.explanation?.detail && (
+              <span className="flag-explain-detail small secondary" style={{ display: 'block', marginTop: 3 }}>
+                {flag.explanation.detail}
+              </span>
+            )}
+          </span>
         </div>
         {Object.keys(flag.evidence).length > 0 && (
           <div className="approval-row">
