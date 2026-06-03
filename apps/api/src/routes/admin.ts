@@ -33,6 +33,7 @@ interface UserListEntry {
   role: 'OWNER' | 'ADMIN' | 'MANAGER' | 'MEMBER';
   teamId: string | null;
   managerId: string | null;
+  shiftId: string | null;
   createdAt: string;
 }
 
@@ -53,6 +54,7 @@ adminRouter.get('/users', async (req, res, next) => {
         role: true,
         teamId: true,
         managerId: true,
+        shiftId: true,
         createdAt: true,
       },
       orderBy: [{ role: 'asc' }, { name: 'asc' }],
@@ -64,6 +66,7 @@ adminRouter.get('/users', async (req, res, next) => {
       role: u.role,
       teamId: u.teamId,
       managerId: u.managerId,
+      shiftId: u.shiftId,
       createdAt: u.createdAt.toISOString(),
     }));
     res.json({ users: out, scope: req.scope.scope });

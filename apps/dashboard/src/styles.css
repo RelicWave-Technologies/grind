@@ -1393,6 +1393,99 @@ body {
 .people-error { margin-top: 6px; }
 
 /* ============================================================================
+   Shifts — schedule editor + readout
+   ========================================================================== */
+.composer-buffer {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: 13px;
+  color: var(--label-secondary);
+}
+.composer-num {
+  appearance: none;
+  border: 1px solid var(--separator-strong);
+  background: var(--bg-control);
+  font: inherit; font-size: 14px;
+  padding: 9px 10px;
+  border-radius: var(--radius-sm);
+  width: 76px;
+  font-variant-numeric: tabular-nums;
+}
+.composer-num:focus { outline: none; border-color: var(--violet); box-shadow: var(--focus-ring); }
+
+.schedule-grid {
+  display: flex; flex-direction: column;
+  border: 1px solid var(--separator);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--bg-card);
+}
+.schedule-row {
+  display: grid;
+  grid-template-columns: 56px 160px 1fr;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--separator);
+  font-size: 13px;
+}
+.schedule-row:last-child { border-bottom: 0; }
+.schedule-row.is-off { color: var(--label-tertiary); }
+.schedule-row.is-off .schedule-day { opacity: 0.6; }
+.schedule-day {
+  font-family: var(--font-round);
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: -0.1px;
+  text-transform: uppercase;
+  color: var(--label-secondary);
+}
+.schedule-toggle {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: 12.5px;
+  cursor: pointer;
+  user-select: none;
+}
+.schedule-toggle input { accent-color: var(--violet); cursor: pointer; }
+.schedule-times {
+  display: inline-flex; align-items: center; gap: 8px;
+}
+.schedule-time {
+  appearance: none;
+  border: 1px solid var(--separator-strong);
+  background: var(--bg-control);
+  font: inherit; font-size: 13px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  font-variant-numeric: tabular-nums;
+  width: 110px;
+}
+.schedule-time:focus { outline: none; border-color: var(--violet); box-shadow: var(--focus-ring); }
+.schedule-time:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.schedule-readout {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  padding-top: 4px;
+}
+.schedule-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px;
+  background: rgba(40, 36, 56, 0.04);
+  border: 1px solid var(--separator);
+  border-radius: 999px;
+  font-size: 11.5px;
+}
+.schedule-chip.is-off { opacity: 0.5; }
+.schedule-chip-day {
+  font-family: var(--font-round);
+  font-weight: 700;
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--label-secondary);
+}
+.schedule-chip-time { color: var(--label-primary); font-weight: 600; }
+
+/* ============================================================================
    Anti-cheat flag cards
    ========================================================================== */
 .flag-card-impossible_rate { border-left: 3px solid var(--danger); }

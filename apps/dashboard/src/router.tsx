@@ -17,6 +17,7 @@ import { TeamScreen } from './screens/Team';
 import { AttendanceScreen } from './screens/Attendance';
 import { TeamsScreen } from './screens/Teams';
 import { FlagsScreen } from './screens/Flags';
+import { ShiftsScreen } from './screens/Shifts';
 
 interface RouterContext {
   queryClient: QueryClient;
@@ -109,6 +110,12 @@ const flagsRoute = createRoute({
   component: FlagsScreen,
 });
 
+const shiftsRoute = createRoute({
+  getParentRoute: () => authedRoot,
+  path: '/shifts',
+  component: ShiftsScreen,
+});
+
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/login',
@@ -119,6 +126,6 @@ const loginRoute = createRoute({
 });
 
 export const routeTree = rootRoute.addChildren([
-  authedRoot.addChildren([homeRoute, meTodayRoute, approvalsRoute, teamRoute, attendanceRoute, flagsRoute, usersRoute, teamsAdminRoute]),
+  authedRoot.addChildren([homeRoute, meTodayRoute, approvalsRoute, teamRoute, attendanceRoute, flagsRoute, usersRoute, teamsAdminRoute, shiftsRoute]),
   loginRoute,
 ]);

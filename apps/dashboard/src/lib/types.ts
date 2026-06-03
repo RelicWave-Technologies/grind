@@ -148,6 +148,26 @@ export interface Team {
   createdAt: string;
 }
 
+export type WeekdayKey = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
+
+export interface DaySchedule {
+  start: string; // HH:MM
+  end: string;   // HH:MM
+}
+
+export type ShiftSchedule = Record<WeekdayKey, DaySchedule | null>;
+
+export interface Shift {
+  id: string;
+  workspaceId: string;
+  name: string;
+  schedule: ShiftSchedule;
+  bufferMin: number;
+  memberCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface TimesheetMatrix {
   from: string;
   to: string;
