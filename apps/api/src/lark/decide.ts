@@ -88,6 +88,13 @@ export async function decideRequest(args: {
 
   const decision = args.action === 'approve' ? 'APPROVED' : 'REJECTED';
 
+  // Snapshot the requester's current shiftId — manual time inherits the
+  // schedule context from the user's present assignment.
+  const requesterShift = await prisma.user.findUnique({
+    where: { id: req.userId },
+    select: { shiftId: true },
+  });
+
   // Atomic: persist the decision, and on APPROVE also create the TimeEntry.
   const result = await prisma.$transaction(async (tx) => {
     let timeEntryId: string | null = null;
@@ -102,6 +109,7 @@ export async function decideRequest(args: {
           source: 'MANUAL',
           startedAt: req.requestedStart,
           endedAt: req.requestedEnd,
+          shiftIdAtStart: requesterShift?.shiftId ?? null,
           segments: {
             create: [{ id: ulid(), kind: 'WORK', startedAt: req.requestedStart, endedAt: req.requestedEnd }],
           },

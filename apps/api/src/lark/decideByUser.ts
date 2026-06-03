@@ -77,6 +77,13 @@ export async function decideByUser(args: {
 
   const decision: 'APPROVED' | 'REJECTED' = args.action === 'approve' ? 'APPROVED' : 'REJECTED';
 
+  // Snapshot the requester's current shiftId on approve so /v1/me-today
+  // reports the correct shift context for the new MANUAL entry.
+  const requesterShift = await prisma.user.findUnique({
+    where: { id: req.userId },
+    select: { shiftId: true },
+  });
+
   const result = await prisma.$transaction(async (tx) => {
     let timeEntryId: string | null = null;
     if (decision === 'APPROVED') {
@@ -90,6 +97,7 @@ export async function decideByUser(args: {
           source: 'MANUAL',
           startedAt: req.requestedStart,
           endedAt: req.requestedEnd,
+          shiftIdAtStart: requesterShift?.shiftId ?? null,
           segments: {
             create: [
               { id: ulid(), kind: 'WORK', startedAt: req.requestedStart, endedAt: req.requestedEnd },

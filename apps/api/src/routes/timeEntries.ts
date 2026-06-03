@@ -128,6 +128,14 @@ timeEntriesRouter.post('/', validate(CreateTimeEntryRequest, 'body'), async (req
     const violations = validateEntry(core);
     if (violations.length) return res.status(400).json({ error: 'invalid_segments', details: violations });
 
+    // Snapshot the user's CURRENT shiftId so the entry preserves its
+    // schedule context even if the user is later reassigned. Forward-only:
+    // a missing shift just records null.
+    const shiftSnapshot = await prisma.user.findUnique({
+      where: { id: req.user.sub },
+      select: { shiftId: true },
+    });
+
     const created = await prisma.timeEntry.create({
       data: {
         id: body.id,
@@ -138,6 +146,7 @@ timeEntriesRouter.post('/', validate(CreateTimeEntryRequest, 'body'), async (req
         startedAt: new Date(body.startedAt),
         agentVersion: body.agentVersion,
         platform: body.platform,
+        shiftIdAtStart: shiftSnapshot?.shiftId ?? null,
         segments: {
           create: body.segments.map((s) => ({
             id: s.id,
