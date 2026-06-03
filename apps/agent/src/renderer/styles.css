@@ -900,6 +900,37 @@ label.field-label { display: block; font-size: 12px; font-weight: 600; color: va
 .idle-actions { display: flex; gap: 8px; margin-top: 14px; width: 100%; }
 .idle-actions .btn { flex: 1; white-space: nowrap; }
 
+/* ============================================================================
+   ready-to-work toast — top-right shift-start nudge
+   ========================================================================== */
+.rtw {
+  -webkit-app-region: drag;
+  height: 100vh;
+  display: flex; flex-direction: column;
+  gap: 14px;
+  padding: 18px 20px;
+  background: var(--bg-card);
+  border-radius: 16px;
+  box-shadow: 0 12px 36px rgba(24, 20, 44, 0.22);
+  animation: rise var(--dur-base) var(--ease) both;
+}
+.rtw-head { display: flex; gap: 12px; align-items: flex-start; }
+.rtw-icon {
+  width: 36px; height: 36px;
+  border-radius: 10px;
+  background: var(--grad-violet);
+  color: var(--on-dark);
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+  box-shadow: 0 4px 12px rgba(124, 92, 255, 0.32);
+}
+.rtw-title { min-width: 0; flex: 1; }
+.rtw-sub { margin-top: 2px; }
+.rtw-actions {
+  display: flex; gap: 8px; margin-top: auto; width: 100%;
+}
+.rtw-actions .btn { flex: 1; white-space: nowrap; }
+
 /* fade-in on mount */
 @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 .rise { animation: rise var(--dur-base) var(--ease) both; }
