@@ -15,6 +15,7 @@ import { adminRouter } from './routes/admin';
 import { workspaceRouter } from './routes/workspace';
 import { workspacePolicyRouter } from './routes/workspacePolicy';
 import { digestsRouter } from './routes/digests';
+import { payrollRouter } from './routes/payroll';
 import { errorHandler } from './middleware/errorHandler';
 
 export function buildApp() {
@@ -51,6 +52,7 @@ export function buildApp() {
   app.use('/v1/workspace', workspaceRouter);
   app.use('/v1/admin/workspace-policy', workspacePolicyRouter);
   app.use('/v1/admin/digests', digestsRouter);
+  app.use('/v1/admin/payroll', payrollRouter);
 
   app.use(errorHandler);
 
