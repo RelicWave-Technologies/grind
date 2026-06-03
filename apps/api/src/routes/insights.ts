@@ -7,6 +7,7 @@ import { assessWindow, type RiskSample } from '../anticheat/risk';
 import type { RoleTitle } from '../scoring/presets';
 import { buildDayInsight, localDayWindow } from '../insights/day';
 import { buildHeatmap, DEFAULT_BUCKET_MS, type HeatmapSample } from '../insights/heatmap';
+import { buildAppUsage } from '../insights/appUsage';
 
 export const insightsRouter = Router();
 // /day accepts an optional ?userId= so admins/managers can pull a team
@@ -213,6 +214,8 @@ insightsRouter.get('/day', async (req, res, next) => {
         clicks: true,
         scrollEvents: true,
         mouseDistancePx: true,
+        activeApp: true,
+        activeAppBundle: true,
       },
       orderBy: { bucketStart: 'asc' },
     });
@@ -243,7 +246,20 @@ insightsRouter.get('/day', async (req, res, next) => {
       bucketMs: DEFAULT_BUCKET_MS,
     });
 
-    res.json({ ...result, activity: heatmap });
+    // M14: top-N apps for the day. Server has already scrubbed disallowed
+    // active fields per the workspace policy at ingestion time — when the
+    // policy is "captureApps off", every sample's activeApp is null and
+    // buildAppUsage returns an empty top list, which the dashboard hides.
+    const appUsage = buildAppUsage(
+      samples.map((s) => ({
+        activeApp: s.activeApp,
+        activeAppBundle: s.activeAppBundle,
+        keystrokes: s.keystrokes,
+        clicks: s.clicks,
+      })),
+    );
+
+    res.json({ ...result, activity: heatmap, appUsage });
   } catch (err) {
     next(err);
   }
