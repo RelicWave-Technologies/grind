@@ -1,9 +1,11 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Check, X, Clock } from 'lucide-react';
+import { Check, X, Clock, AlertTriangle } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 import type { ManualTimeRequest, DecideResult, MtrStatus } from '../lib/types';
-import { fmtTime, fmtDurationMs, fmtDayLabel } from '../lib/format';
+import { fmtTime, fmtDurationMs, fmtDayLabel, fmtAgeShort } from '../lib/format';
+
+const STUCK_THRESHOLD_MS = 48 * 60 * 60 * 1000;
 
 interface ListResponse {
   requests: ManualTimeRequest[];
@@ -31,12 +33,36 @@ const TAB_LABEL: Record<'PENDING' | 'APPROVED' | 'REJECTED', string> = {
  */
 export function ApprovalsScreen() {
   const [tab, setTab] = useState<'PENDING' | 'APPROVED' | 'REJECTED'>('PENDING');
+  const [stuckOnly, setStuckOnly] = useState(false);
   const qc = useQueryClient();
 
   const q = useQuery({
     queryKey: ['admin', 'mtr', tab],
     queryFn: () => api<ListResponse>(`/v1/admin/manual-time-requests?status=${tab}`),
   });
+
+  // Client-side stuck filter + age sort. The list endpoint already
+  // returns createdAt — we don't ask the server to paginate by age
+  // because manager queues are small (≤ ~50 rows in practice).
+  const visible = useMemo(() => {
+    if (!q.data) return [];
+    const now = Date.now();
+    let rows = q.data.requests;
+    if (tab === 'PENDING' && stuckOnly) {
+      rows = rows.filter((r) => now - new Date(r.createdAt).getTime() >= STUCK_THRESHOLD_MS);
+    }
+    if (tab === 'PENDING') {
+      // Oldest first — stuck items rise to the top of the queue.
+      rows = [...rows].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+    }
+    return rows;
+  }, [q.data, tab, stuckOnly]);
+
+  const stuckCount = useMemo(() => {
+    if (!q.data || tab !== 'PENDING') return 0;
+    const now = Date.now();
+    return q.data.requests.filter((r) => now - new Date(r.createdAt).getTime() >= STUCK_THRESHOLD_MS).length;
+  }, [q.data, tab]);
 
   const decide = useMutation({
     mutationFn: async (vars: { id: string; action: 'approve' | 'reject'; reason?: string }) => {
@@ -63,17 +89,35 @@ export function ApprovalsScreen() {
           </p>
         </div>
 
-        <div className="tabs">
-          {(['PENDING', 'APPROVED', 'REJECTED'] as const).map((t) => (
+        <div className="day-controls">
+          {tab === 'PENDING' && (
             <button
-              key={t}
               type="button"
-              className={`tab${t === tab ? ' is-active' : ''}`}
-              onClick={() => setTab(t)}
+              className={`btn-ghost stuck-toggle${stuckOnly ? ' is-active' : ''}`}
+              onClick={() => setStuckOnly((v) => !v)}
+              disabled={stuckCount === 0 && !stuckOnly}
+              title={`${stuckCount} pending request${stuckCount === 1 ? '' : 's'} have been waiting ≥48h`}
             >
-              {TAB_LABEL[t]}
+              <AlertTriangle size={13} strokeWidth={2.2} />
+              <span>{stuckOnly ? 'Showing stuck' : 'Stuck only'}</span>
+              {stuckCount > 0 && <span className="stuck-count">{stuckCount}</span>}
             </button>
-          ))}
+          )}
+          <div className="tabs">
+            {(['PENDING', 'APPROVED', 'REJECTED'] as const).map((t) => (
+              <button
+                key={t}
+                type="button"
+                className={`tab${t === tab ? ' is-active' : ''}`}
+                onClick={() => {
+                  setTab(t);
+                  if (t !== 'PENDING') setStuckOnly(false);
+                }}
+              >
+                {TAB_LABEL[t]}
+              </button>
+            ))}
+          </div>
         </div>
       </header>
 
@@ -84,15 +128,19 @@ export function ApprovalsScreen() {
         </div>
       )}
 
-      {q.data && q.data.requests.length === 0 && (
+      {q.data && visible.length === 0 && (
         <div className="card empty">
-          {tab === 'PENDING' ? 'No requests waiting on you. Nice work.' : `No ${tab.toLowerCase()} requests in scope.`}
+          {tab === 'PENDING'
+            ? stuckOnly
+              ? 'No stuck approvals — everything pending is fresh.'
+              : 'No requests waiting on you. Nice work.'
+            : `No ${tab.toLowerCase()} requests in scope.`}
         </div>
       )}
 
-      {q.data && q.data.requests.length > 0 && (
+      {q.data && visible.length > 0 && (
         <div className="approvals-list">
-          {q.data.requests.map((r) => (
+          {visible.map((r) => (
             <ApprovalCard
               key={r.id}
               req={r}
@@ -128,6 +176,8 @@ function ApprovalCard({ req, busy, decidedError, onApprove, onReject }: CardProp
   const endMs = new Date(req.requestedEnd).getTime();
   const dayLabel = fmtDayLabel(req.requestedStart.slice(0, 10));
   const isPending = req.status === 'PENDING';
+  const ageMs = Date.now() - new Date(req.createdAt).getTime();
+  const isStuck = isPending && ageMs >= STUCK_THRESHOLD_MS;
 
   return (
     <article className={`approval-card status-${req.status.toLowerCase()}`}>
@@ -142,11 +192,22 @@ function ApprovalCard({ req, busy, decidedError, onApprove, onReject }: CardProp
           </div>
         </div>
 
-        <div className={`status-pill status-${req.status.toLowerCase()}`}>
-          {req.status === 'PENDING' && <Clock size={11} strokeWidth={2.2} />}
-          {req.status === 'APPROVED' && <Check size={11} strokeWidth={2.2} />}
-          {req.status === 'REJECTED' && <X size={11} strokeWidth={2.2} />}
-          <span>{req.status}</span>
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+          {isPending && (
+            <span
+              className={`age-chip${isStuck ? ' is-stuck' : ''}`}
+              title={`Submitted ${new Date(req.createdAt).toLocaleString()}`}
+            >
+              {isStuck && <AlertTriangle size={10} strokeWidth={2.4} />}
+              {fmtAgeShort(ageMs)}
+            </span>
+          )}
+          <div className={`status-pill status-${req.status.toLowerCase()}`}>
+            {req.status === 'PENDING' && <Clock size={11} strokeWidth={2.2} />}
+            {req.status === 'APPROVED' && <Check size={11} strokeWidth={2.2} />}
+            {req.status === 'REJECTED' && <X size={11} strokeWidth={2.2} />}
+            <span>{req.status}</span>
+          </div>
         </div>
       </div>
 
