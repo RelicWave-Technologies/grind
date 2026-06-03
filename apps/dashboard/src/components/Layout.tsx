@@ -1,5 +1,5 @@
 import { Outlet, Link, useRouteContext, useNavigate, useLocation } from '@tanstack/react-router';
-import { Home, Users, Clock4, Inbox, LayoutGrid, CalendarCheck, ShieldAlert, Building2, LogOut } from 'lucide-react';
+import { Home, Users, Clock4, Inbox, LayoutGrid, CalendarCheck, ShieldAlert, Building2, Sunrise, LogOut } from 'lucide-react';
 import { isAdmin, isManagerOrAbove, useLogout } from '../lib/auth';
 
 interface NavItem {
@@ -19,6 +19,7 @@ const NAV: NavItem[] = [
   { to: '/flags', label: 'Anti-cheat', Icon: ShieldAlert, show: 'manager+' },
   { to: '/users', label: 'People', Icon: Users, show: 'all' /* scope handles privilege */ },
   { to: '/teams', label: 'Teams', Icon: Building2, show: 'admin' },
+  { to: '/shifts', label: 'Shifts', Icon: Sunrise, show: 'admin' },
 ];
 
 export function Layout() {

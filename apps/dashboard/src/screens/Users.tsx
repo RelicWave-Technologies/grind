@@ -4,7 +4,7 @@ import { useRouteContext } from '@tanstack/react-router';
 import { Pencil, Check, X } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 import { isAdmin, type Role } from '../lib/auth';
-import type { Team } from '../lib/types';
+import type { Team, Shift } from '../lib/types';
 
 interface AdminUser {
   id: string;
@@ -13,6 +13,7 @@ interface AdminUser {
   role: Role;
   teamId: string | null;
   managerId: string | null;
+  shiftId?: string | null;
   createdAt: string;
 }
 
@@ -39,15 +40,23 @@ export function UsersScreen() {
     queryKey: ['admin', 'users'],
     queryFn: () => api<UsersResponse>('/v1/admin/users'),
   });
-  // Only admins need the team list — the picker is hidden for everyone else.
+  // Only admins need the team + shift lists — pickers are hidden for everyone else.
   const teamsQ = useQuery({
     queryKey: ['admin', 'teams'],
     queryFn: () => api<{ teams: Team[] }>('/v1/admin/teams'),
     enabled: canEdit,
   });
+  const shiftsQ = useQuery({
+    queryKey: ['admin', 'shifts'],
+    queryFn: () => api<{ shifts: Shift[] }>('/v1/admin/shifts'),
+    enabled: canEdit,
+  });
 
   const patch = useMutation({
-    mutationFn: (vars: { id: string; patch: Partial<{ name: string; role: Role; teamId: string | null }> }) =>
+    mutationFn: (vars: {
+      id: string;
+      patch: Partial<{ name: string; role: Role; teamId: string | null; shiftId: string | null }>;
+    }) =>
       api<AdminUser>(`/v1/admin/users/${vars.id}`, { method: 'PATCH', json: vars.patch }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'users'] }),
   });
@@ -55,6 +64,10 @@ export function UsersScreen() {
   const teamName = (id: string | null): string => {
     if (!id) return '—';
     return teamsQ.data?.teams.find((t) => t.id === id)?.name ?? id;
+  };
+  const shiftName = (id: string | null | undefined): string => {
+    if (!id) return '—';
+    return shiftsQ.data?.shifts.find((s) => s.id === id)?.name ?? id;
   };
 
   return (
@@ -87,6 +100,7 @@ export function UsersScreen() {
                 <th>Email</th>
                 <th>Role</th>
                 <th>Team</th>
+                <th>Shift</th>
                 <th>Joined</th>
                 {canEdit && <th />}
               </tr>
@@ -102,6 +116,8 @@ export function UsersScreen() {
                     canEdit={canEdit}
                     teams={teamsQ.data?.teams ?? []}
                     teamName={teamName(u.teamId)}
+                    shifts={shiftsQ.data?.shifts ?? []}
+                    shiftName={shiftName(u.shiftId)}
                     busy={patch.isPending && patch.variables?.id === u.id}
                     error={
                       patch.isError && patch.variables?.id === u.id
@@ -125,23 +141,28 @@ interface RowProps {
   canEdit: boolean;
   teams: Team[];
   teamName: string;
+  shifts: Shift[];
+  shiftName: string;
   busy: boolean;
   error: string | null;
-  onSave: (patch: Partial<{ name: string; role: Role; teamId: string | null }>) => void;
+  onSave: (patch: Partial<{ name: string; role: Role; teamId: string | null; shiftId: string | null }>) => void;
 }
 
-function PersonRow({ user, isSelf, canEdit, teams, teamName, busy, error, onSave }: RowProps) {
+function PersonRow({ user, isSelf, canEdit, teams, teamName, shifts, shiftName, busy, error, onSave }: RowProps) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(user.name);
   const [role, setRole] = useState<Role>(user.role);
   const [teamId, setTeamId] = useState<string>(user.teamId ?? '');
+  const [shiftId, setShiftId] = useState<string>(user.shiftId ?? '');
 
   function save() {
-    const next: Partial<{ name: string; role: Role; teamId: string | null }> = {};
+    const next: Partial<{ name: string; role: Role; teamId: string | null; shiftId: string | null }> = {};
     if (name.trim() && name.trim() !== user.name) next.name = name.trim();
     if (role !== user.role) next.role = role;
     const nextTeam = teamId === '' ? null : teamId;
     if (nextTeam !== (user.teamId ?? null)) next.teamId = nextTeam;
+    const nextShift = shiftId === '' ? null : shiftId;
+    if (nextShift !== (user.shiftId ?? null)) next.shiftId = nextShift;
     if (Object.keys(next).length > 0) onSave(next);
     setEditing(false);
   }
@@ -195,6 +216,20 @@ function PersonRow({ user, isSelf, canEdit, teams, teamName, busy, error, onSave
         )}
       </td>
       <td className="secondary">
+        {editing ? (
+          <select className="select" value={shiftId} onChange={(e) => setShiftId(e.target.value)}>
+            <option value="">— no shift —</option>
+            {shifts.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+        ) : (
+          shiftName
+        )}
+      </td>
+      <td className="secondary">
         {new Date(user.createdAt).toLocaleDateString(undefined, {
           year: 'numeric',
           month: 'short',
@@ -213,6 +248,7 @@ function PersonRow({ user, isSelf, canEdit, teams, teamName, busy, error, onSave
                   setName(user.name);
                   setRole(user.role);
                   setTeamId(user.teamId ?? '');
+                  setShiftId(user.shiftId ?? '');
                 }}
                 disabled={busy}
                 aria-label="Cancel"
