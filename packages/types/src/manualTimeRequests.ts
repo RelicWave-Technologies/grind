@@ -15,6 +15,11 @@ export const CreateManualTimeRequest = z.object({
   requestedStart: Iso,
   requestedEnd: Iso,
   reason: z.string().min(1).max(1000),
+  /** Workspace user-ids who were in this meeting (optional). Validated
+   *  server-side: all must be in the requester's workspace and exclude
+   *  the requester themselves (they're implicit). Capped at 50 to bound
+   *  payload size. */
+  attendeeIds: z.array(z.string().min(1)).max(50).optional(),
 });
 export type CreateManualTimeRequest = z.infer<typeof CreateManualTimeRequest>;
 
@@ -33,6 +38,7 @@ export const PatchManualTimeRequest = z
     larkTaskGuid: z.string().min(1).nullable().optional(),
     taskSummary: z.string().max(256).nullable().optional(),
     reason: z.string().min(1).max(1000).optional(),
+    attendeeIds: z.array(z.string().min(1)).max(50).optional(),
   })
   .refine(
     (v) =>
@@ -40,7 +46,8 @@ export const PatchManualTimeRequest = z
       v.requestedEnd !== undefined ||
       v.larkTaskGuid !== undefined ||
       v.taskSummary !== undefined ||
-      v.reason !== undefined,
+      v.reason !== undefined ||
+      v.attendeeIds !== undefined,
     { message: 'at least one field must be set' },
   );
 export type PatchManualTimeRequest = z.infer<typeof PatchManualTimeRequest>;
@@ -56,9 +63,11 @@ export const ManualTimeRequestDto = z.object({
   requestedEnd: Iso,
   reason: z.string(),
   status: ManualTimeRequestStatus,
+  autoApproved: z.boolean().optional(),
   decidedAt: Iso.nullable(),
   decidedReason: z.string().nullable(),
   createdAt: Iso,
+  attendeeIds: z.array(z.string()).optional(),
 });
 export type ManualTimeRequestDto = z.infer<typeof ManualTimeRequestDto>;
 
