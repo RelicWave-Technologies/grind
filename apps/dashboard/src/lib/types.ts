@@ -43,6 +43,19 @@ export interface ActivityHeatmap {
   sampleCounts: number[];
 }
 
+export interface AppUsageEntry {
+  app: string;
+  appBundle: string | null;
+  minutes: number;
+  keystrokes: number;
+  clicks: number;
+}
+
+export interface AppUsageInsight {
+  totalMinutes: number;
+  topApps: AppUsageEntry[];
+}
+
 export interface DayInsight {
   date: string;
   timezone: string;
@@ -57,6 +70,7 @@ export interface DayInsight {
   pendingOverlay: PendingOverlay[];
   recentRejected: RejectedRequest[];
   activity?: ActivityHeatmap;
+  appUsage?: AppUsageInsight;
 }
 
 // ---------------------------------------------------------------------------

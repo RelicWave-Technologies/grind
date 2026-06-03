@@ -8,6 +8,7 @@ import type { DayInsight, WorkspaceUser } from '../lib/types';
 import { fmtDayLabel, todayKey, addDays, fmtDurationMs } from '../lib/format';
 import { DayRibbon } from '../components/DayRibbon';
 import { ActivityHeatmap } from '../components/ActivityHeatmap';
+import AppUsagePanel from '../components/AppUsagePanel';
 import { EntryRow } from '../components/EntryRow';
 import type { TaskOption } from '../components/TaskCombo';
 
@@ -277,6 +278,8 @@ export function MeTodayScreen() {
               </div>
             )}
           </section>
+
+          <AppUsagePanel appUsage={dayQ.data.appUsage} />
 
           <section className="card entries-card" style={{ padding: 0 }}>
             <header className="entries-head">
