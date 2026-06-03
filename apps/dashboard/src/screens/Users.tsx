@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouteContext } from '@tanstack/react-router';
-import { Pencil, Check, X } from 'lucide-react';
+import { Pencil, Check, X, UserPlus, UserMinus, UserCheck, Loader2 } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 import { isAdmin, type Role } from '../lib/auth';
 import type { Team, Shift } from '../lib/types';
@@ -14,6 +14,7 @@ interface AdminUser {
   teamId: string | null;
   managerId: string | null;
   shiftId?: string | null;
+  deactivatedAt: string | null;
   createdAt: string;
 }
 
@@ -35,10 +36,17 @@ export function UsersScreen() {
   const { me } = useRouteContext({ from: '/authed' });
   const canEdit = isAdmin(me.role);
   const qc = useQueryClient();
+  const [showDeactivated, setShowDeactivated] = useState(false);
+  const [inviting, setInviting] = useState(false);
 
   const usersQ = useQuery({
-    queryKey: ['admin', 'users'],
-    queryFn: () => api<UsersResponse>('/v1/admin/users'),
+    queryKey: ['admin', 'users', showDeactivated && canEdit],
+    queryFn: () =>
+      api<UsersResponse>(
+        showDeactivated && canEdit
+          ? '/v1/admin/users?includeDeactivated=true'
+          : '/v1/admin/users',
+      ),
   });
   // Only admins need the team + shift lists — pickers are hidden for everyone else.
   const teamsQ = useQuery({
@@ -58,6 +66,23 @@ export function UsersScreen() {
       patch: Partial<{ name: string; role: Role; teamId: string | null; shiftId: string | null }>;
     }) =>
       api<AdminUser>(`/v1/admin/users/${vars.id}`, { method: 'PATCH', json: vars.patch }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'users'] }),
+  });
+
+  const deactivate = useMutation({
+    mutationFn: (id: string) =>
+      api<{ id: string; deactivatedAt: string | null }>(
+        `/v1/admin/users/${id}/deactivate`,
+        { method: 'POST' },
+      ),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'users'] }),
+  });
+  const reactivate = useMutation({
+    mutationFn: (id: string) =>
+      api<{ id: string; deactivatedAt: string | null }>(
+        `/v1/admin/users/${id}/reactivate`,
+        { method: 'POST' },
+      ),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'users'] }),
   });
 
@@ -83,7 +108,33 @@ export function UsersScreen() {
             </span>
           </p>
         </div>
+        {canEdit && (
+          <div className="day-controls">
+            <label className="btn-ghost stuck-toggle" style={{ cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={showDeactivated}
+                onChange={(e) => setShowDeactivated(e.target.checked)}
+                style={{ marginRight: 6 }}
+              />
+              Show deactivated
+            </label>
+            <button type="button" className="btn btn-prominent" onClick={() => setInviting(true)}>
+              <UserPlus size={14} strokeWidth={2} /> Invite
+            </button>
+          </div>
+        )}
       </header>
+
+      {canEdit && inviting && (
+        <InviteForm
+          onClose={() => setInviting(false)}
+          onCreated={() => {
+            setInviting(false);
+            qc.invalidateQueries({ queryKey: ['admin', 'users'] });
+          }}
+        />
+      )}
 
       <section className="card" style={{ padding: 0 }}>
         {usersQ.isLoading && <div className="empty">Loading…</div>}
@@ -118,13 +169,25 @@ export function UsersScreen() {
                     teamName={teamName(u.teamId)}
                     shifts={shiftsQ.data?.shifts ?? []}
                     shiftName={shiftName(u.shiftId)}
-                    busy={patch.isPending && patch.variables?.id === u.id}
+                    busy={
+                      (patch.isPending && patch.variables?.id === u.id) ||
+                      (deactivate.isPending && deactivate.variables === u.id) ||
+                      (reactivate.isPending && reactivate.variables === u.id)
+                    }
                     error={
-                      patch.isError && patch.variables?.id === u.id
+                      (patch.isError && patch.variables?.id === u.id
                         ? (patch.error as Error | ApiError).message
-                        : null
+                        : null) ||
+                      (deactivate.isError && deactivate.variables === u.id
+                        ? (deactivate.error as Error | ApiError).message
+                        : null) ||
+                      (reactivate.isError && reactivate.variables === u.id
+                        ? (reactivate.error as Error | ApiError).message
+                        : null)
                     }
                     onSave={(p) => patch.mutate({ id: u.id, patch: p })}
+                    onDeactivate={() => deactivate.mutate(u.id)}
+                    onReactivate={() => reactivate.mutate(u.id)}
                   />
                 ))}
             </tbody>
@@ -146,9 +209,11 @@ interface RowProps {
   busy: boolean;
   error: string | null;
   onSave: (patch: Partial<{ name: string; role: Role; teamId: string | null; shiftId: string | null }>) => void;
+  onDeactivate: () => void;
+  onReactivate: () => void;
 }
 
-function PersonRow({ user, isSelf, canEdit, teams, teamName, shifts, shiftName, busy, error, onSave }: RowProps) {
+function PersonRow({ user, isSelf, canEdit, teams, teamName, shifts, shiftName, busy, error, onSave, onDeactivate, onReactivate }: RowProps) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(user.name);
   const [role, setRole] = useState<Role>(user.role);
@@ -167,8 +232,14 @@ function PersonRow({ user, isSelf, canEdit, teams, teamName, shifts, shiftName, 
     setEditing(false);
   }
 
+  const isDeactivated = user.deactivatedAt !== null;
+  const trClasses = [
+    isSelf ? 'is-self' : '',
+    isDeactivated ? 'is-deactivated' : '',
+  ].filter(Boolean).join(' ');
+
   return (
-    <tr className={isSelf ? 'is-self' : undefined}>
+    <tr className={trClasses || undefined}>
       <td>
         {editing ? (
           <input
@@ -181,7 +252,10 @@ function PersonRow({ user, isSelf, canEdit, teams, teamName, shifts, shiftName, 
           />
         ) : (
           <>
-            <div className="person-name">{user.name}</div>
+            <div className="person-name">
+              {user.name}
+              {isDeactivated && <span className="deactivated-pill">deactivated</span>}
+            </div>
             {isSelf && <div className="callout secondary">(that&apos;s you)</div>}
           </>
         )}
@@ -260,12 +334,134 @@ function PersonRow({ user, isSelf, canEdit, teams, teamName, shifts, shiftName, 
               </button>
             </>
           ) : (
-            <button type="button" className="btn-icon" onClick={() => setEditing(true)} aria-label="Edit person">
-              <Pencil size={14} strokeWidth={2} />
-            </button>
+            <>
+              {!isDeactivated && (
+                <button
+                  type="button"
+                  className="btn-icon"
+                  onClick={() => setEditing(true)}
+                  aria-label="Edit person"
+                  disabled={busy}
+                >
+                  <Pencil size={14} strokeWidth={2} />
+                </button>
+              )}
+              {isDeactivated ? (
+                <button
+                  type="button"
+                  className="btn-icon btn-icon-primary"
+                  onClick={onReactivate}
+                  disabled={busy}
+                  aria-label="Reactivate"
+                  title="Reactivate this person"
+                >
+                  {busy ? <Loader2 size={14} className="spin" /> : <UserCheck size={14} strokeWidth={2} />}
+                </button>
+              ) : !isSelf ? (
+                <button
+                  type="button"
+                  className="btn-icon"
+                  onClick={() => {
+                    if (window.confirm(`Deactivate ${user.name}? Their history stays for reports, but they can't log in until you reactivate.`)) {
+                      onDeactivate();
+                    }
+                  }}
+                  disabled={busy}
+                  aria-label="Deactivate"
+                  title="Deactivate this person"
+                >
+                  {busy ? <Loader2 size={14} className="spin" /> : <UserMinus size={14} strokeWidth={2} />}
+                </button>
+              ) : null}
+            </>
           )}
         </td>
       )}
     </tr>
+  );
+}
+
+// -----------------------------------------------------------------------------
+// Invite form — inline card above the table. Calm, escape-cancels, error inline.
+
+function InviteForm({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+  const [email, setEmail] = useState('');
+  const [name, setName] = useState('');
+  const [role, setRole] = useState<Exclude<Role, 'OWNER'>>('MEMBER');
+  const m = useMutation({
+    mutationFn: (vars: { email: string; name: string; role: Role }) =>
+      api<AdminUser>('/v1/admin/users', { method: 'POST', json: vars }),
+    onSuccess: () => onCreated(),
+  });
+
+  const err =
+    m.isError
+      ? (m.error as ApiError).status === 409
+        ? 'That email is already in use.'
+        : (m.error as Error).message
+      : null;
+
+  function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!email.trim() || !name.trim()) return;
+    m.mutate({ email: email.trim(), name: name.trim(), role });
+  }
+
+  return (
+    <section
+      className="card invite-form rise rise-1"
+      style={{ padding: 'var(--sp-5) var(--sp-6)', marginBottom: 'var(--sp-3)' }}
+    >
+      <form onSubmit={submit} style={{ display: 'flex', gap: 'var(--sp-3)', alignItems: 'end', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: '2 1 220px' }}>
+          <span className="small secondary">Email</span>
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            autoFocus
+            required
+            placeholder="pat@example.com"
+            className="cell-input"
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') onClose();
+            }}
+          />
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: '2 1 180px' }}>
+          <span className="small secondary">Name</span>
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            required
+            maxLength={80}
+            placeholder="Pat Khanna"
+            className="cell-input"
+          />
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <span className="small secondary">Role</span>
+          <select className="select" value={role} onChange={(e) => setRole(e.target.value as Exclude<Role, 'OWNER'>)}>
+            <option value="MEMBER">MEMBER</option>
+            <option value="MANAGER">MANAGER</option>
+            <option value="ADMIN">ADMIN</option>
+          </select>
+        </div>
+        <div style={{ display: 'inline-flex', gap: 6 }}>
+          <button type="button" className="btn-ghost" onClick={onClose} disabled={m.isPending}>
+            Cancel
+          </button>
+          <button type="submit" className="btn btn-prominent" disabled={m.isPending || !email || !name}>
+            {m.isPending ? <Loader2 size={14} className="spin" /> : <UserPlus size={14} strokeWidth={2} />}
+            {m.isPending ? 'Inviting…' : 'Invite'}
+          </button>
+        </div>
+      </form>
+      {err && <div className="approval-error" style={{ marginTop: 'var(--sp-3)' }}>{err}</div>}
+      <p className="small tertiary" style={{ marginTop: 'var(--sp-3)' }}>
+        A temporary password is generated server-side. Share it manually for v1 — magic-link onboarding is on the roadmap.
+      </p>
+    </section>
   );
 }

@@ -3,6 +3,7 @@ import { prisma } from '@grind/db';
 import { requireAccessToken } from '../middleware/auth';
 import { attachScope, requireAdmin, requireManagerOrAbove } from '../middleware/scope';
 import { decideByUser } from '../lark/decideByUser';
+import { hashPassword } from '../lib/password';
 import {
   addDays as addDaysStr,
   buildTimesheetMatrix,
@@ -34,6 +35,7 @@ interface UserListEntry {
   teamId: string | null;
   managerId: string | null;
   shiftId: string | null;
+  deactivatedAt: string | null;
   createdAt: string;
 }
 
@@ -41,12 +43,23 @@ interface UserListEntry {
  * GET /v1/admin/users — every user the caller is allowed to see, including
  * the caller themselves. Order: managers + admins first (for the dashboard
  * "People" table), then by name.
+ *
+ * Deactivated users are EXCLUDED by default (they're not in the scope's
+ * userIds). ADMIN can pass ?includeDeactivated=true to see them — needed
+ * so the dashboard can render the People list with a Reactivate button.
  */
 adminRouter.get('/users', async (req, res, next) => {
   try {
     if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
+    const includeDeactivated =
+      req.scope.isAdmin && req.query.includeDeactivated === 'true';
+
+    const where = includeDeactivated
+      ? { workspaceId: req.scope.workspaceId }
+      : { id: { in: req.scope.userIds } };
+
     const users = await prisma.user.findMany({
-      where: { id: { in: req.scope.userIds } },
+      where,
       select: {
         id: true,
         email: true,
@@ -55,9 +68,10 @@ adminRouter.get('/users', async (req, res, next) => {
         teamId: true,
         managerId: true,
         shiftId: true,
+        deactivatedAt: true,
         createdAt: true,
       },
-      orderBy: [{ role: 'asc' }, { name: 'asc' }],
+      orderBy: [{ deactivatedAt: 'asc' }, { role: 'asc' }, { name: 'asc' }],
     });
     const out: UserListEntry[] = users.map((u) => ({
       id: u.id,
@@ -67,6 +81,7 @@ adminRouter.get('/users', async (req, res, next) => {
       teamId: u.teamId,
       managerId: u.managerId,
       shiftId: u.shiftId,
+      deactivatedAt: u.deactivatedAt ? u.deactivatedAt.toISOString() : null,
       createdAt: u.createdAt.toISOString(),
     }));
     res.json({ users: out, scope: req.scope.scope });
@@ -628,6 +643,133 @@ adminRouter.patch('/users/:id', requireAdmin, async (req, res, next) => {
       ...updated,
       createdAt: updated.createdAt.toISOString(),
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /v1/admin/users
+ *
+ * Invite a new teammate. ADMIN-only. The new user is created in the
+ * caller's workspace with a one-time random password — the user
+ * resets it on first login via the existing /v1/auth flow (out of
+ * scope here: emailing the credentials is the admin's responsibility
+ * for v1; an email-based magic-link flow is a candidate for M19+).
+ *
+ * Returns 409 on a duplicate email (the email is workspace-global per
+ * the schema's @unique constraint on User.email).
+ */
+adminRouter.post('/users', requireAdmin, async (req, res, next) => {
+  try {
+    if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
+
+    const emailRaw = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+    const nameRaw = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+    const roleRaw = typeof req.body?.role === 'string' ? req.body.role : 'MEMBER';
+
+    if (!emailRaw || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailRaw)) {
+      return res.status(400).json({ error: 'invalid_email' });
+    }
+    if (nameRaw.length === 0 || nameRaw.length > 80) {
+      return res.status(400).json({ error: 'invalid_name' });
+    }
+    if (!(VALID_ROLES as readonly string[]).includes(roleRaw)) {
+      return res.status(400).json({ error: 'invalid_role' });
+    }
+    // OWNER promotion is reserved — we never create OWNERs via invite;
+    // OWNER reassignment happens through a deliberate PATCH.
+    if (roleRaw === 'OWNER') {
+      return res.status(400).json({ error: 'invalid_role' });
+    }
+
+    const dupe = await prisma.user.findUnique({ where: { email: emailRaw }, select: { id: true } });
+    if (dupe) return res.status(409).json({ error: 'email_taken' });
+
+    // Random temp password. The invited user resets it via the existing
+    // auth flow on first login; we never surface this string back to the
+    // admin (no plaintext leak).
+    const tempPassword = `${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+    const passwordHash = await hashPassword(tempPassword);
+
+    const created = await prisma.user.create({
+      data: {
+        workspaceId: req.scope.workspaceId,
+        email: emailRaw,
+        name: nameRaw,
+        role: roleRaw as ValidRole,
+        passwordHash,
+      },
+      select: { id: true, email: true, name: true, role: true, createdAt: true },
+    });
+    res.status(201).json({ ...created, createdAt: created.createdAt.toISOString() });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /v1/admin/users/:id/deactivate
+ *
+ * Soft-deactivate. The user stays in the database (history + reports
+ * preserved) but can't log in and won't appear in admin/scope queries.
+ * Last-OWNER safety mirrors the PATCH path — you can't lock the
+ * workspace out of full privileges via deactivation either.
+ */
+adminRouter.post('/users/:id/deactivate', requireAdmin, async (req, res, next) => {
+  try {
+    if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
+    const id = req.params.id;
+    if (!id) return res.status(400).json({ error: 'missing_id' });
+    const existing = await prisma.user.findUnique({ where: { id } });
+    if (!existing || existing.workspaceId !== req.scope.workspaceId) {
+      return res.status(404).json({ error: 'not_found' });
+    }
+    if (existing.deactivatedAt) {
+      return res.status(409).json({ error: 'already_deactivated' });
+    }
+    if (existing.role === 'OWNER') {
+      const owners = await prisma.user.count({
+        where: { workspaceId: req.scope.workspaceId, role: 'OWNER', deactivatedAt: null },
+      });
+      if (owners <= 1) return res.status(400).json({ error: 'last_owner_protected' });
+    }
+    const updated = await prisma.user.update({
+      where: { id },
+      data: { deactivatedAt: new Date() },
+      select: { id: true, deactivatedAt: true },
+    });
+    res.json({ id: updated.id, deactivatedAt: updated.deactivatedAt!.toISOString() });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /v1/admin/users/:id/reactivate
+ *
+ * Reverse of deactivate. Idempotent: reactivating an already-active
+ * user is a no-op + 200. Reactivation does NOT reset the password —
+ * the user resumes with whatever creds they had before deactivation.
+ */
+adminRouter.post('/users/:id/reactivate', requireAdmin, async (req, res, next) => {
+  try {
+    if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
+    const id = req.params.id;
+    if (!id) return res.status(400).json({ error: 'missing_id' });
+    const existing = await prisma.user.findUnique({ where: { id } });
+    if (!existing || existing.workspaceId !== req.scope.workspaceId) {
+      return res.status(404).json({ error: 'not_found' });
+    }
+    if (!existing.deactivatedAt) {
+      return res.json({ id: existing.id, deactivatedAt: null });
+    }
+    const updated = await prisma.user.update({
+      where: { id },
+      data: { deactivatedAt: null },
+      select: { id: true, deactivatedAt: true },
+    });
+    res.json({ id: updated.id, deactivatedAt: updated.deactivatedAt });
   } catch (err) {
     next(err);
   }
