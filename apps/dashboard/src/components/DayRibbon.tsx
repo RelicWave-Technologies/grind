@@ -154,28 +154,37 @@ export function DayRibbon({ day, now, onClickEpoch, onHoverRowId }: Props) {
         {day.blocks.map((b, i) => {
           if (b.kind === 'GAP') return null; // gap is the absence of a block
           const rowId = `entry-${b.timeEntryId ?? `${b.startedAt}-${i}`}`;
+          const att = b.attendeeIds?.length ?? 0;
+          const title =
+            `${b.kind} · ${fmtTime(b.startedAt)} – ${fmtTime(b.endedAt)}` +
+            (att > 0 ? ` · ${att} attendee${att === 1 ? '' : 's'}` : '');
           return (
             <div
               key={`b-${i}-${b.startedAt}`}
               className={`ribbon-block ribbon-block-${b.kind.toLowerCase()}`}
               style={{ left: pct(b.startedAt), width: `${((b.endedAt - b.startedAt) / span) * 100}%` }}
-              title={`${b.kind} · ${fmtTime(b.startedAt)} – ${fmtTime(b.endedAt)}`}
+              title={title}
               onMouseEnter={() => onHoverRowId?.(rowId)}
               onMouseLeave={() => onHoverRowId?.(null)}
             />
           );
         })}
 
-        {day.pendingOverlay.map((p) => (
-          <div
-            key={`p-${p.id}`}
-            className="ribbon-pending"
-            style={{ left: pct(p.startedAt), width: `${((p.endedAt - p.startedAt) / span) * 100}%` }}
-            title={`Pending approval — ${p.reason}`}
-            onMouseEnter={() => onHoverRowId?.(`pending-${p.id}`)}
-            onMouseLeave={() => onHoverRowId?.(null)}
-          />
-        ))}
+        {day.pendingOverlay.map((p) => {
+          const att = p.attendeeIds?.length ?? 0;
+          const title =
+            `Pending approval — ${p.reason}` + (att > 0 ? ` · ${att} attendee${att === 1 ? '' : 's'}` : '');
+          return (
+            <div
+              key={`p-${p.id}`}
+              className="ribbon-pending"
+              style={{ left: pct(p.startedAt), width: `${((p.endedAt - p.startedAt) / span) * 100}%` }}
+              title={title}
+              onMouseEnter={() => onHoverRowId?.(`pending-${p.id}`)}
+              onMouseLeave={() => onHoverRowId?.(null)}
+            />
+          );
+        })}
 
         {ghost && (
           <div

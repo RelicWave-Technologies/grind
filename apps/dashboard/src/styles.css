@@ -1653,15 +1653,21 @@ body {
 .ap-check { color: var(--c-violet); font-weight: 700; }
 
 /* Attendee summary chip row (collapsed read-only view on entries) */
-.attendee-chips { display: inline-flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.attendee-chips { display: inline-flex; flex-wrap: wrap; gap: 4px; align-items: center; color: var(--label-tertiary); }
+.attendee-chips > svg { flex-shrink: 0; }
 .attendee-chip {
   display: inline-flex; align-items: center; gap: 5px;
   font-size: 11.5px;
-  padding: 2px 8px 2px 4px;
+  padding: 2px 8px;
   border-radius: 999px;
   background: var(--c-blue-bg);
   color: #1d6fbf;
   font-weight: 500;
+  white-space: nowrap;
+}
+.attendee-chip-more {
+  background: var(--bg-subtle, #f4f4f6);
+  color: var(--label-secondary);
 }
 .attendee-chip-avatar {
   width: 16px; height: 16px;

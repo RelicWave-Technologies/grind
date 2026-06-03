@@ -3,6 +3,7 @@ import { Send, Loader2, Check, X, AlertCircle, RotateCcw } from 'lucide-react';
 import TimePopover from './TimePopover';
 import TaskCombo, { type TaskOption } from './TaskCombo';
 import AttendeePicker, { type WorkspaceUser } from './AttendeePicker';
+import AttendeeChips from './AttendeeChips';
 import { fmtTime, fmtDurationMs } from '../lib/format';
 import type { DayBlock, PendingOverlay, RejectedRequest } from '../lib/types';
 
@@ -210,6 +211,15 @@ function TrackedRow({
               onChange={setAttendees}
               ariaLabel="Meeting attendees"
             />
+          </div>
+        )}
+        {/* MANUAL rows can't carry attendees (server constraint), but the
+            insight payload still types attendeeIds on the block — surface
+            them as read-only chips if present so the timeline doesn't
+            silently drop context. */}
+        {!isMeeting && (block.attendeeIds?.length ?? 0) > 0 && (
+          <div style={{ marginTop: 6 }}>
+            <AttendeeChips users={workspaceUsers ?? []} attendeeIds={block.attendeeIds ?? []} />
           </div>
         )}
         {err && <div className="et-row-err">{err}</div>}
