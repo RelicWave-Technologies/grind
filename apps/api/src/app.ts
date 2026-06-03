@@ -3,7 +3,9 @@ import helmet from 'helmet';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import pinoHttp from 'pino-http';
+import { prisma } from '@grind/db';
 import { logger } from './logger';
+import { API_VERSION, START_TIME_MS } from './lib/version';
 import { authRouter } from './routes/auth';
 import { agentRouter } from './routes/agent';
 import { timeEntriesRouter } from './routes/timeEntries';
@@ -40,7 +42,41 @@ export function buildApp() {
     }),
   );
 
+  // Liveness probe (no auth, no DB) — used by load balancers + uptime checks.
+  // Cheap on purpose: a 1ms response per check.
   app.get('/health', (_req, res) => res.json({ ok: true }));
+
+  /**
+   * Readiness probe — returns 200 with a structured payload when the API
+   * can serve real traffic (DB reachable), 503 when it can't. Reports
+   * the build version + uptime so deploys can be sanity-checked from a
+   * curl. Two-second DB timeout to keep the probe predictable under
+   * Postgres pressure.
+   */
+  app.get('/healthz', async (_req, res) => {
+    const uptimeSec = Math.floor((Date.now() - START_TIME_MS) / 1000);
+    const dbStart = Date.now();
+    try {
+      await Promise.race([
+        prisma.$queryRaw`SELECT 1`,
+        new Promise((_, reject) => setTimeout(() => reject(new Error('db_timeout')), 2000)),
+      ]);
+      res.json({
+        ok: true,
+        version: API_VERSION,
+        uptimeSec,
+        db: { ok: true, latencyMs: Date.now() - dbStart },
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      res.status(503).json({
+        ok: false,
+        version: API_VERSION,
+        uptimeSec,
+        db: { ok: false, error: msg, latencyMs: Date.now() - dbStart },
+      });
+    }
+  });
 
   app.use('/v1/auth', authRouter);
   app.use('/v1/agent', agentRouter);
