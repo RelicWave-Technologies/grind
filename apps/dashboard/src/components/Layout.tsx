@@ -1,5 +1,5 @@
 import { Outlet, Link, useRouteContext, useNavigate, useLocation } from '@tanstack/react-router';
-import { Home, Users, Clock4, Inbox, LayoutGrid, CalendarCheck, ShieldAlert, Building2, Sunrise, LogOut, ShieldCheck, FileSpreadsheet } from 'lucide-react';
+import { Home, Users, Clock4, Inbox, LayoutGrid, CalendarCheck, ShieldAlert, Building2, Sunrise, LogOut, ShieldCheck, FileSpreadsheet, Compass } from 'lucide-react';
 import { isAdmin, isManagerOrAbove, useLogout } from '../lib/auth';
 
 interface NavItem {
@@ -12,6 +12,7 @@ interface NavItem {
 
 const NAV: NavItem[] = [
   { to: '/', label: 'Home', Icon: Home, show: 'all' },
+  { to: '/overview', label: 'Overview', Icon: Compass, show: 'manager+' },
   { to: '/me-today', label: 'My Day', Icon: Clock4, show: 'all' },
   { to: '/team', label: 'Team', Icon: LayoutGrid, show: 'manager+' },
   { to: '/attendance', label: 'Attendance', Icon: CalendarCheck, show: 'manager+' },

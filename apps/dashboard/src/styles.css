@@ -1940,3 +1940,43 @@ th.payroll-num { text-align: right; }
 .payroll-total-row { background: var(--bg-subtle, rgba(40, 36, 56, 0.03)); }
 .payroll-total-row td { border-top: 1px solid var(--border-default, rgba(40, 36, 56, 0.12)); }
 
+
+/* M16: Overview command center */
+.overview-row {
+  display: grid;
+  gap: var(--sp-5);
+  grid-template-columns: 1fr 1fr;
+}
+@media (max-width: 920px) { .overview-row { grid-template-columns: 1fr; } }
+
+.overview-card { display: flex; flex-direction: column; gap: var(--sp-4); }
+.overview-card-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: var(--sp-2);
+}
+.overview-list {
+  list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.overview-row-item {
+  display: flex; align-items: center; gap: var(--sp-3);
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border-default, rgba(40, 36, 56, 0.06));
+}
+.overview-row-item:last-child { border-bottom: none; }
+.overview-row-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.overview-row-name { font-size: 13px; font-weight: 500; color: var(--label-primary); }
+.overview-row-sub { font-size: 12px; color: var(--label-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stat-warn {
+  display: inline-flex; align-items: center; gap: 3px;
+  font-size: 11px; font-weight: 600;
+  color: #b45309;
+  margin-left: 8px;
+}
+.flag-type-chip {
+  display: inline-block; padding: 1px 7px; border-radius: 4px;
+  background: rgba(244, 63, 94, 0.12); color: #be123c;
+  font-size: 10.5px; font-weight: 600; letter-spacing: 0.02em;
+  text-transform: lowercase;
+}
+

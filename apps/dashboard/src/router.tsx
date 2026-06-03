@@ -20,6 +20,7 @@ import { FlagsScreen } from './screens/Flags';
 import { ShiftsScreen } from './screens/Shifts';
 import { PolicyScreen } from './screens/Policy';
 import { PayrollScreen } from './screens/Payroll';
+import { OverviewScreen } from './screens/Overview';
 
 interface RouterContext {
   queryClient: QueryClient;
@@ -60,6 +61,16 @@ const authedRoot = createRoute({
 const homeRoute = createRoute({
   getParentRoute: () => authedRoot,
   path: '/',
+  // Default landing per role (M16): MANAGER+ → /overview command center;
+  // MEMBER → the existing hero Home (their day at a glance). The Layout
+  // sidebar's "Home" link still points to '/' so users always land
+  // wherever they should.
+  beforeLoad: ({ context }) => {
+    const me = (context as { me?: { role?: string } }).me;
+    if (me && (me.role === 'OWNER' || me.role === 'ADMIN' || me.role === 'MANAGER')) {
+      throw redirect({ to: '/overview' });
+    }
+  },
   component: HomeScreen,
 });
 
@@ -130,6 +141,19 @@ const payrollRoute = createRoute({
   component: PayrollScreen,
 });
 
+const overviewRoute = createRoute({
+  getParentRoute: () => authedRoot,
+  path: '/overview',
+  beforeLoad: ({ context }) => {
+    // /overview is MANAGER+ only — MEMBER lands on /me-today instead.
+    const me = (context as { me?: { role?: string } }).me;
+    if (!me || (me.role !== 'OWNER' && me.role !== 'ADMIN' && me.role !== 'MANAGER')) {
+      throw redirect({ to: '/me-today' });
+    }
+  },
+  component: OverviewScreen,
+});
+
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/login',
@@ -140,6 +164,6 @@ const loginRoute = createRoute({
 });
 
 export const routeTree = rootRoute.addChildren([
-  authedRoot.addChildren([homeRoute, meTodayRoute, approvalsRoute, teamRoute, attendanceRoute, flagsRoute, usersRoute, teamsAdminRoute, shiftsRoute, policyRoute, payrollRoute]),
+  authedRoot.addChildren([homeRoute, overviewRoute, meTodayRoute, approvalsRoute, teamRoute, attendanceRoute, flagsRoute, usersRoute, teamsAdminRoute, shiftsRoute, policyRoute, payrollRoute]),
   loginRoute,
 ]);
