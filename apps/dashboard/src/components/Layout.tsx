@@ -1,18 +1,28 @@
 import { Outlet, Link, useRouteContext, useNavigate, useLocation } from '@tanstack/react-router';
-import { Home, Users, LogOut } from 'lucide-react';
-import { isAdmin, useLogout } from '../lib/auth';
+import { Home, Users, Clock4, Inbox, LayoutGrid, CalendarCheck, ShieldAlert, Building2, Sunrise, LogOut, ShieldCheck, FileSpreadsheet, Compass } from 'lucide-react';
+import { isAdmin, isManagerOrAbove, useLogout } from '../lib/auth';
 
 interface NavItem {
   to: string;
   label: string;
   Icon: typeof Home;
   /** Roles that may see this item. */
-  show: 'all' | 'admin';
+  show: 'all' | 'manager+' | 'admin';
 }
 
 const NAV: NavItem[] = [
   { to: '/', label: 'Home', Icon: Home, show: 'all' },
+  { to: '/overview', label: 'Overview', Icon: Compass, show: 'manager+' },
+  { to: '/me-today', label: 'My Day', Icon: Clock4, show: 'all' },
+  { to: '/team', label: 'Team', Icon: LayoutGrid, show: 'manager+' },
+  { to: '/attendance', label: 'Attendance', Icon: CalendarCheck, show: 'manager+' },
+  { to: '/approvals', label: 'Approvals', Icon: Inbox, show: 'manager+' },
+  { to: '/flags', label: 'Anti-cheat', Icon: ShieldAlert, show: 'manager+' },
   { to: '/users', label: 'People', Icon: Users, show: 'all' /* scope handles privilege */ },
+  { to: '/teams', label: 'Teams', Icon: Building2, show: 'admin' },
+  { to: '/shifts', label: 'Shifts', Icon: Sunrise, show: 'admin' },
+  { to: '/policy', label: 'Policy', Icon: ShieldCheck, show: 'admin' },
+  { to: '/payroll', label: 'Payroll', Icon: FileSpreadsheet, show: 'admin' },
 ];
 
 export function Layout() {
@@ -21,7 +31,12 @@ export function Layout() {
   const location = useLocation();
   const logout = useLogout();
 
-  const visible = NAV.filter((n) => n.show === 'all' || (n.show === 'admin' && isAdmin(me.role)));
+  const visible = NAV.filter((n) => {
+    if (n.show === 'all') return true;
+    if (n.show === 'manager+') return isManagerOrAbove(me.role);
+    if (n.show === 'admin') return isAdmin(me.role);
+    return false;
+  });
 
   async function onLogout() {
     try {
@@ -50,7 +65,7 @@ export function Layout() {
                 to={to}
                 className={`nav-item${active ? ' is-active' : ''}`}
               >
-                <Icon size={16} strokeWidth={1.8} />
+                <Icon size={18} strokeWidth={1.8} />
                 <span>{label}</span>
               </Link>
             );
@@ -80,7 +95,9 @@ export function Layout() {
       </aside>
 
       <main className="main">
-        <Outlet />
+        <div className="rise">
+          <Outlet />
+        </div>
       </main>
     </div>
   );

@@ -11,6 +11,11 @@ export interface ActivityRow {
   ikiCv: number | null;
   moveSpeedCv: number | null;
   pathStraightness: number | null;
+  // M14: dominant active window for the bucket. Server scrubs per policy.
+  activeApp: string | null;
+  activeAppBundle: string | null;
+  activeTitle: string | null;
+  activeUrl: string | null;
   synced: number;
 }
 
@@ -34,14 +39,33 @@ export class ActivityStore {
       CREATE INDEX IF NOT EXISTS idx_activity_bucket ON activity_samples(bucket_start);
       CREATE INDEX IF NOT EXISTS idx_activity_synced ON activity_samples(synced);
     `);
+    // Idempotent column adds — SQLite has no `ADD COLUMN IF NOT EXISTS` so
+    // we swallow "duplicate column" errors. This lets older agent installs
+    // upgrade without losing their local queue.
+    for (const col of [
+      'active_app TEXT',
+      'active_app_bundle TEXT',
+      'active_title TEXT',
+      'active_url TEXT',
+    ]) {
+      try {
+        this.db.exec(`ALTER TABLE activity_samples ADD COLUMN ${col}`);
+      } catch {
+        /* already added on a prior boot */
+      }
+    }
   }
 
   insert(r: ActivityRow): void {
     this.db
       .prepare(
         `INSERT INTO activity_samples
-          (id, time_entry_id, bucket_start, keystrokes, clicks, mouse_dist_px, scroll_events, iki_cv, move_speed_cv, path_straight, synced)
-         VALUES (@id, @timeEntryId, @bucketStart, @keystrokes, @clicks, @mouseDistancePx, @scrollEvents, @ikiCv, @moveSpeedCv, @pathStraightness, 0)`,
+          (id, time_entry_id, bucket_start, keystrokes, clicks, mouse_dist_px, scroll_events,
+           iki_cv, move_speed_cv, path_straight,
+           active_app, active_app_bundle, active_title, active_url, synced)
+         VALUES (@id, @timeEntryId, @bucketStart, @keystrokes, @clicks, @mouseDistancePx, @scrollEvents,
+           @ikiCv, @moveSpeedCv, @pathStraightness,
+           @activeApp, @activeAppBundle, @activeTitle, @activeUrl, 0)`,
       )
       .run(r);
   }
@@ -101,6 +125,10 @@ function map(r: Record<string, unknown>): ActivityRow {
     ikiCv: r.iki_cv === null ? null : Number(r.iki_cv),
     moveSpeedCv: r.move_speed_cv === null ? null : Number(r.move_speed_cv),
     pathStraightness: r.path_straight === null ? null : Number(r.path_straight),
+    activeApp: r.active_app == null ? null : String(r.active_app),
+    activeAppBundle: r.active_app_bundle == null ? null : String(r.active_app_bundle),
+    activeTitle: r.active_title == null ? null : String(r.active_title),
+    activeUrl: r.active_url == null ? null : String(r.active_url),
     synced: Number(r.synced),
   };
 }

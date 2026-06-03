@@ -13,8 +13,37 @@ model Workspace {
   name      String
   createdAt DateTime @default(now())
 
-  users User[]
-  teams Team[]
+  users  User[]
+  teams  Team[]
+  shifts Shift[]
+  policy WorkspacePolicy?
+}
+
+/// Workspace-wide capture policy. A single row per workspace (unique on
+/// workspaceId) — created on demand the first time the admin opens the
+/// policy editor. Defaults are PRIVACY-CONSCIOUS: titles + URLs OFF,
+/// apps OFF. ADMIN flips them on. Surface name + bundle without title
+/// (which app, not which document); URLs require the explicit URL flag
+/// since URLs are content.
+///
+/// 60-day screenshot retention is enforced by a nightly job that
+/// deletes Screenshot rows older than this; setting it to 0 effectively
+/// disables retention (every shot kept forever — generally not what we
+/// want).
+model WorkspacePolicy {
+  id                         String   @id @default(cuid())
+  workspaceId                String   @unique
+  workspace                  Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  /// Capture which app is in focus per ActivitySample (process / bundle id).
+  captureApps                Boolean  @default(false)
+  /// Capture the foreground window title (TIGHTER than apps — leaks doc names).
+  captureTitles              Boolean  @default(false)
+  /// Capture the browser URL (TIGHTEST — content).
+  captureUrls                Boolean  @default(false)
+  /// Days to retain screenshots before the nightly purge deletes them.
+  retentionDaysScreenshots   Int      @default(60)
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
 }
 
 enum Role {
@@ -43,6 +72,38 @@ model Team {
   @@index([managerId])
 }
 
+/// A workspace-defined work schedule (e.g. "Day Shift", "Night Shift").
+/// `schedule` is a JSON object keyed by lowercase weekday with optional
+/// per-day start/end times in the user's LOCAL timezone (HH:MM 24-hour).
+/// A day with `null` means off (no shift that day → no popup).
+///
+/// Shape (validated at API layer via @grind/types Shift schema):
+///   { mon: { start: "09:00", end: "18:00" } | null,
+///     tue: ..., wed: ..., thu: ..., fri: ...,
+///     sat: null, sun: null }
+///
+/// `bufferMin` is the cushion after a shift's start during which the
+/// agent's "ready to work?" popup keeps nudging the user every 5 min.
+/// After `start + bufferMin`, the popup stops bothering for that day.
+///
+/// Forward-only assignment: changing a user's shift does NOT rewrite past
+/// TimeEntries; each entry snapshots `shiftIdAtStart` at creation time.
+model Shift {
+  id          String   @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  name        String
+  /// See model-comment for the shape; validated by @grind/types.
+  schedule    Json
+  bufferMin   Int      @default(30)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  members User[] @relation("ShiftMembers")
+
+  @@index([workspaceId])
+}
+
 model User {
   id           String   @id @default(cuid())
   workspaceId  String
@@ -59,7 +120,20 @@ model User {
   /// manages me?" with a single FK lookup, no join.
   managerId    String?
   passwordHash String
+  /// Soft-deactivation: when non-null, the user can't log in, doesn't
+  /// appear in scope/admin queries, and (importantly) their *history*
+  /// remains queryable for back-dated reports + audit. Reactivation
+  /// just clears this timestamp. We intentionally never hard-delete
+  /// users — every TimeEntry / approval / flag still points at them.
+  deactivatedAt DateTime?
   createdAt    DateTime @default(now())
+
+  /// Currently-assigned shift. Forward-only: changing this does NOT
+  /// rewrite history; each TimeEntry snapshots `shiftIdAtStart` so reports
+  /// remain truthful even after a reassignment.
+  shiftId          String?
+  shift            Shift?    @relation("ShiftMembers", fields: [shiftId], references: [id], onDelete: SetNull)
+  shiftAssignedAt  DateTime?
 
   refreshTokens   RefreshToken[]
   timeEntries     TimeEntry[]
@@ -69,10 +143,18 @@ model User {
   manualTimeRequests       ManualTimeRequest[] @relation("MtrRequester")
   manualTimeApprovals      ManualTimeRequest[] @relation("MtrApprover")
   managedTeams             Team[]              @relation("TeamManager")
+  activityFlags            ActivityFlag[]      @relation("FlagSubject")
+  resolvedFlags            ActivityFlag[]      @relation("FlagResolver")
+  /// Attendee relations: meetings this user was tagged in (manual-time
+  /// requests + live MEETING TimeEntries). Useful for "show me everyone's
+  /// meetings I was in" reports.
+  mtrAttendances           MtrAttendee[]       @relation("MtrAttendeeUser")
+  timeEntryAttendances     TimeEntryAttendee[] @relation("TeAttendeeUser")
 
   @@index([workspaceId])
   @@index([teamId])
   @@index([managerId])
+  @@index([shiftId])
 }
 
 enum TimeEntrySource {
@@ -103,12 +185,21 @@ model TimeEntry {
   notes        String?
   agentVersion String?
   platform     String?
+  /// Snapshot of the user's `shiftId` at the moment this TimeEntry started.
+  /// Lets reports answer "what shift was Anish on the morning of 2026-06-15"
+  /// even after he's been reassigned. No FK to Shift — we preserve the id
+  /// string for audit even if the shift row itself is later deleted.
+  shiftIdAtStart String?
   createdAt    DateTime        @default(now())
   updatedAt    DateTime        @updatedAt
 
   segments        TimeSegment[]
   activitySamples ActivitySample[]
   manualTimeRequest ManualTimeRequest?
+  /// Workspace members the requester (or a later retro-tag on a live
+  /// MEETING segment) said were in this meeting. Only populated for
+  /// blocks that include at least one MEETING segment.
+  attendees       TimeEntryAttendee[]
 
   @@index([userId, startedAt])
   @@index([larkTaskGuid])
@@ -140,11 +231,23 @@ model ActivitySample {
   ikiCv           Float?
   moveSpeedCv     Float?
   pathStraightness Float?
+
+  // Active app + site for the dominant minute. Captured only when the
+  // workspace policy allows; otherwise stays null. The agent computes the
+  // dominant app over the minute window and snaps the title/URL of the
+  // window that was focused longest. Title/URL are gated by SEPARATE
+  // policy flags — apps without titles is the calm default.
+  activeApp       String?  // human-readable app name (e.g. "Google Chrome")
+  activeAppBundle String?  // OS bundle / process identifier
+  activeTitle     String?  // foreground window title (policy-gated)
+  activeUrl       String?  // browser URL (policy-gated; tighter than title)
+
   createdAt       DateTime  @default(now())
 
   @@unique([userId, bucketStart])
   @@index([userId, bucketStart])
   @@index([timeEntryId])
+  @@index([userId, activeApp])
 }
 
 /// Maps a Grind user to their Lark identity. Resolved once (email -> open_id)
@@ -207,11 +310,95 @@ model ManualTimeRequest {
   /// FK to the TimeEntry created on APPROVE (null until decided / on reject).
   timeEntryId    String?                 @unique
   timeEntry      TimeEntry?              @relation(fields: [timeEntryId], references: [id], onDelete: SetNull)
+  /// True when the request was auto-approved by the requester themselves
+  /// (their role was MANAGER+ and policy allows). Distinguishes from a
+  /// human approver in the audit trail. Admins can REOPEN auto-approved
+  /// requests within 24h via /v1/admin/time-requests/:id/reopen.
+  autoApproved   Boolean                 @default(false)
+  /// Meeting attendees (workspace members the requester says were in
+  /// this meeting). Propagated to TimeEntryAttendee on approval.
+  attendees      MtrAttendee[]
   createdAt      DateTime                @default(now())
   updatedAt      DateTime                @updatedAt
 
   @@index([userId, status])
   @@index([approverId, status])
+}
+
+/// Junction: workspace members tagged as attendees on a manual-time
+/// request. Composite PK prevents dupes; per-user index supports the
+/// "show me everyone's meetings I was tagged in" query.
+model MtrAttendee {
+  requestId String
+  request   ManualTimeRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User              @relation("MtrAttendeeUser", fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime          @default(now())
+
+  @@id([requestId, userId])
+  @@index([userId])
+}
+
+/// Junction: workspace members tagged as attendees on a TimeEntry (either
+/// inherited from an approved MtrAttendee or retro-tagged on a live MEETING
+/// segment). Same shape as MtrAttendee.
+model TimeEntryAttendee {
+  timeEntryId String
+  timeEntry   TimeEntry @relation(fields: [timeEntryId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User      @relation("TeAttendeeUser", fields: [userId], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now())
+
+  @@id([timeEntryId, userId])
+  @@index([userId])
+}
+
+/// Content-free anti-cheat detection. One row per (user, window-start, type)
+/// raised by the risk engine when activity samples are batch-uploaded.
+/// `evidence` carries the engine's signal breakdown (rates, CVs, etc.) for
+/// the dashboard's review queue — never key/text content.
+enum FlagType {
+  IMPOSSIBLE_RATE
+  METRONOMIC
+  LINEAR_MOUSE
+  SINGLE_CHANNEL
+  JIGGLER
+}
+
+enum FlagStatus {
+  OPEN
+  RESOLVED
+}
+
+enum FlagResolution {
+  DISMISSED        // reviewer says the activity was legitimate
+  CONFIRMED        // reviewer agrees it looks like cheating
+  TIME_INVALIDATED // reviewer dropped the matching time (future hook)
+}
+
+model ActivityFlag {
+  id           String         @id @default(cuid())
+  userId       String
+  user         User           @relation("FlagSubject", fields: [userId], references: [id])
+  type         FlagType
+  windowStart  DateTime       // start of the minute-window the engine assessed
+  windowEnd    DateTime
+  riskScore    Int            // 0–100 contribution from RISK_WEIGHTS[type]
+  /// JSON keyed by signal name (eg ikiCv, pathStraightness, keysPerMin).
+  /// Numbers only; the dashboard renders these as small read-only chips.
+  evidence     Json
+  status       FlagStatus     @default(OPEN)
+  resolution   FlagResolution?
+  resolvedById String?
+  resolvedBy   User?          @relation("FlagResolver", fields: [resolvedById], references: [id], onDelete: SetNull)
+  resolvedAt   DateTime?
+  resolvedNote String?
+  createdAt    DateTime       @default(now())
+
+  /// Dedupe key: re-uploading the same window should not double-flag.
+  @@unique([userId, windowStart, type])
+  @@index([userId, status])
+  @@index([status, createdAt])
 }
 
 model RefreshToken {

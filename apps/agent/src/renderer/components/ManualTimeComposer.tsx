@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
-import { useMutation } from '@tanstack/react-query';
-import { Clock, X } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMutation, useQuery } from '@tanstack/react-query';
+import { Clock, X, Users } from 'lucide-react';
 
 /**
  * Inline composer for "Request manual time" (M10). Calm card matching the
@@ -54,14 +54,56 @@ export default function ManualTimeComposer({
   const [end, setEnd] = useState(seed.end);
   const [reason, setReason] = useState('');
   const [taskGuid, setTaskGuid] = useState<string>(seed.taskGuid);
+  const [attendees, setAttendees] = useState<string[]>([]);
+  const [attOpen, setAttOpen] = useState(false);
+  const [attQuery, setAttQuery] = useState('');
+  const attRef = useRef<HTMLDivElement>(null);
+
+  // Pull the workspace directory once; cached by TanStack Query so reopening
+  // the composer doesn't re-fetch. Empty list means the user has no
+  // teammates to tag — picker still renders but shows "No matches".
+  const wsUsersQ = useQuery({
+    queryKey: ['workspace', 'users'],
+    queryFn: () => window.agent.timeRequests.listWorkspaceUsers(),
+    staleTime: 5 * 60_000,
+  });
+  const wsUsers = wsUsersQ.data?.users ?? [];
+  const selectedUsers = useMemo(
+    () => wsUsers.filter((u) => attendees.includes(u.id)),
+    [wsUsers, attendees],
+  );
+  const attResults = useMemo(() => {
+    const q = attQuery.trim().toLowerCase();
+    if (q === '') return wsUsers.slice(0, 50);
+    return wsUsers
+      .filter((u) => u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q))
+      .slice(0, 50);
+  }, [wsUsers, attQuery]);
+
+  useEffect(() => {
+    if (!attOpen) return;
+    function onDoc(e: MouseEvent) {
+      if (!attRef.current?.contains(e.target as Node)) {
+        setAttOpen(false);
+        setAttQuery('');
+      }
+    }
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [attOpen]);
+
+  function toggleAttendee(id: string) {
+    setAttendees((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  }
 
   // Re-seed when the preset reference identity changes (e.g. user clicks
-  // a different gap). Reason stays empty intentionally.
+  // a different gap). Reason + attendees stay empty intentionally.
   useEffect(() => {
     setDate(seed.date);
     setStart(seed.start);
     setEnd(seed.end);
     setTaskGuid(seed.taskGuid);
+    setAttendees([]);
   }, [seed]);
 
   const startedAtMs = useMemo(() => new Date(`${date}T${start}:00`).getTime(), [date, start]);
@@ -81,12 +123,14 @@ export default function ManualTimeComposer({
         reason: reason.trim(),
         larkTaskGuid: task?.guid ?? null,
         taskSummary: task?.summary ?? null,
+        attendeeIds: attendees.length > 0 ? attendees : undefined,
       });
     },
     onSuccess: (r) => {
       if (r.ok && r.request) {
         setReason('');
         setTaskGuid('');
+        setAttendees([]);
         onCreated('PENDING');
       }
     },
@@ -133,6 +177,111 @@ export default function ManualTimeComposer({
           </select>
         </label>
       )}
+
+      <div ref={attRef} className="composer-attendees no-drag" style={{ marginTop: 'var(--sp-2)', position: 'relative' }}>
+        <button
+          type="button"
+          className="btn btn-ghost no-drag"
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+          onClick={() => setAttOpen((o) => !o)}
+          title="Tag the teammates who were in this meeting"
+        >
+          <Users size={13} strokeWidth={2} />
+          <span className="small">
+            {selectedUsers.length === 0
+              ? '+ Attendees (optional)'
+              : selectedUsers.length === 1
+                ? selectedUsers[0]?.name ?? '1 attendee'
+                : `${selectedUsers.length} attendees`}
+          </span>
+        </button>
+        {selectedUsers.length > 0 && !attOpen && (
+          <span className="small tertiary" style={{ marginLeft: 8 }}>
+            {selectedUsers.slice(0, 3).map((u) => u.name).join(', ')}
+            {selectedUsers.length > 3 ? ` +${selectedUsers.length - 3}` : ''}
+          </span>
+        )}
+        {attOpen && (
+          <div
+            className="composer-attendees-pop"
+            style={{
+              position: 'absolute',
+              top: 'calc(100% + 6px)',
+              left: 0,
+              zIndex: 30,
+              width: 320,
+              maxHeight: 320,
+              overflow: 'hidden',
+              background: 'var(--bg-elevated, #fff)',
+              border: '1px solid var(--border-default, #e5e5e7)',
+              borderRadius: 10,
+              boxShadow: '0 10px 32px rgba(0,0,0,0.12)',
+              display: 'flex',
+              flexDirection: 'column',
+            }}
+          >
+            <input
+              autoFocus
+              className="composer-attendees-search no-drag"
+              placeholder="Search workspace…"
+              value={attQuery}
+              onChange={(e) => setAttQuery(e.target.value)}
+              style={{
+                padding: '8px 10px',
+                border: 'none',
+                borderBottom: '1px solid var(--border-default, #e5e5e7)',
+                outline: 'none',
+                background: 'transparent',
+                fontSize: 13,
+              }}
+            />
+            <div style={{ overflow: 'auto', maxHeight: 260 }}>
+              {wsUsersQ.isLoading && <div className="small tertiary" style={{ padding: '10px' }}>Loading…</div>}
+              {!wsUsersQ.isLoading && attResults.length === 0 && (
+                <div className="small tertiary" style={{ padding: '10px' }}>No matches</div>
+              )}
+              {attResults.map((u) => {
+                const isSel = attendees.includes(u.id);
+                return (
+                  <button
+                    key={u.id}
+                    type="button"
+                    onClick={() => toggleAttendee(u.id)}
+                    className="no-drag"
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      width: '100%',
+                      padding: '8px 10px',
+                      background: isSel ? 'var(--bg-selected, rgba(99,102,241,0.08))' : 'transparent',
+                      border: 'none',
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                    }}
+                  >
+                    <span style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ display: 'block', fontSize: 13 }}>{u.name}</span>
+                      <span className="small tertiary" style={{ display: 'block' }}>{u.email}</span>
+                    </span>
+                    {isSel && <span style={{ color: 'var(--accent, #6366f1)', fontSize: 13 }}>✓</span>}
+                  </button>
+                );
+              })}
+            </div>
+            {selectedUsers.length > 0 && (
+              <button
+                type="button"
+                className="btn btn-ghost no-drag"
+                style={{ borderTop: '1px solid var(--border-default, #e5e5e7)', borderRadius: 0, justifyContent: 'center' }}
+                onClick={() => setAttendees([])}
+              >
+                <X size={12} strokeWidth={2.2} /> Clear all
+              </button>
+            )}
+          </div>
+        )}
+      </div>
 
       <textarea
         className="composer-note no-drag"

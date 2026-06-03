@@ -15,6 +15,41 @@ let store: ScreenshotStore | null = null;
 let timer: NodeJS.Timeout | null = null;
 let lastHealth: CaptureHealth = 'unknown';
 
+/**
+ * Compute the `[from, to)` epoch window to aggregate activity for a
+ * single screenshot's per-shot bars.
+ *
+ * Two regimes:
+ *  - **slow cadence** (3-hour production default): partition the timeline
+ *    so each minute's sample is credited to exactly ONE shot, by starting
+ *    the window 60s past the previous shot's capture time. This is what
+ *    the original code did.
+ *  - **fast cadence** (15s for testing / dogfood): adjacent shots share
+ *    a minute. The partition logic would push the lower bound *past* the
+ *    only sample that could land in the window, leaving every bar at zero
+ *    except for the lucky shot that crossed a minute boundary. Clamp the
+ *    lower bound to `capturedAt - 60s` so the past minute is always
+ *    included. Several adjacent shots will then share the same bar (the
+ *    minute's totals) — that's the right answer: the user really did do
+ *    one minute of work, the camera just fired 4 times in it.
+ *
+ *  Exported so unit tests can lock the regression in: a 15s gap MUST
+ *  yield a non-future-only window.
+ */
+export function activityWindowForShot(args: {
+  capturedAt: number;
+  olderCapturedAt?: number;
+  defaultWindowMs: number;
+}): { from: number; to: number } {
+  const to = args.capturedAt + 60_000;
+  const partitionFrom =
+    args.olderCapturedAt != null
+      ? args.olderCapturedAt + 60_000
+      : args.capturedAt - args.defaultWindowMs;
+  const from = Math.min(partitionFrom, args.capturedAt - 60_000);
+  return { from, to };
+}
+
 /** Health of the most recent capture attempt (for surfacing revocation/restart). */
 export function getScreenHealth(): CaptureHealth {
   return lastHealth;
@@ -64,11 +99,12 @@ export async function recentScreenshots(limit: number): Promise<
   const DEFAULT_WINDOW_MS = 30 * 60_000;
   return Promise.all(
     rows.map(async (r, i) => {
-      // Activity for the window this shot represents: from the previous (older)
-      // shot up to this one (capped to 30 min), aligned to the shot's minute.
       const older = rows[i + 1];
-      const to = r.capturedAt + 60_000;
-      const from = older ? older.capturedAt + 60_000 : r.capturedAt - DEFAULT_WINDOW_MS;
+      const { from, to } = activityWindowForShot({
+        capturedAt: r.capturedAt,
+        olderCapturedAt: older?.capturedAt,
+        defaultWindowMs: DEFAULT_WINDOW_MS,
+      });
       let keyboardPct = 0;
       let mousePct = 0;
       try {

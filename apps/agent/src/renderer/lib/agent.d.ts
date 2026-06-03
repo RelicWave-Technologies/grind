@@ -35,6 +35,10 @@ declare global {
         get: () => Promise<{ idleStartedAt: number }>;
         resolve: (action: 'continue' | 'break') => Promise<void>;
       };
+      shift: {
+        decide: (decision: 'yes' | 'not_yet') => Promise<void>;
+        refresh: () => Promise<void>;
+      };
       screenshots: {
         recent: (limit?: number) => Promise<{ id: string; capturedAt: number; thumb: string | null; uploadState: string; keyboardPct: number; mousePct: number }[]>;
         countToday: () => Promise<number>;
@@ -78,8 +82,10 @@ declare global {
           reason: string;
           larkTaskGuid?: string | null;
           taskSummary?: string | null;
+          attendeeIds?: string[];
         }) => Promise<{ ok: boolean; request?: ManualTimeRequestDto; error?: string }>;
         listMine: (status?: 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED') => Promise<{ requests: ManualTimeRequestDto[] }>;
+        listWorkspaceUsers: () => Promise<{ users: Array<{ id: string; name: string; email: string; role: 'OWNER' | 'ADMIN' | 'MANAGER' | 'MEMBER' }> }>;
         patch: (args: {
           id: string;
           requestedStart?: number;

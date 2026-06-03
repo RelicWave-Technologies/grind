@@ -49,6 +49,10 @@ const api = {
     get: (): Promise<{ idleStartedAt: number }> => ipcRenderer.invoke('idle:get'),
     resolve: (action: 'continue' | 'break'): Promise<void> => ipcRenderer.invoke('idle:resolve', action),
   },
+  shift: {
+    decide: (decision: 'yes' | 'not_yet'): Promise<void> => ipcRenderer.invoke('shift:decide', decision),
+    refresh: (): Promise<void> => ipcRenderer.invoke('shift:refresh'),
+  },
   screenshots: {
     recent: (limit?: number): Promise<{ id: string; capturedAt: number; thumb: string | null; uploadState: string; keyboardPct: number; mousePct: number }[]> =>
       ipcRenderer.invoke('screenshots:recent', limit),
@@ -99,6 +103,7 @@ const api = {
       reason: string;
       larkTaskGuid?: string | null;
       taskSummary?: string | null;
+      attendeeIds?: string[];
     }): Promise<{
       ok: boolean;
       request?: ManualTimeRequestDto;
@@ -106,6 +111,8 @@ const api = {
     }> => ipcRenderer.invoke('timeRequests:create', input),
     listMine: (status?: 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED'): Promise<{ requests: ManualTimeRequestDto[] }> =>
       ipcRenderer.invoke('timeRequests:listMine', status),
+    listWorkspaceUsers: (): Promise<{ users: Array<{ id: string; name: string; email: string; role: 'OWNER' | 'ADMIN' | 'MANAGER' | 'MEMBER' }> }> =>
+      ipcRenderer.invoke('timeRequests:listWorkspaceUsers'),
     patch: (args: {
       id: string;
       requestedStart?: number;

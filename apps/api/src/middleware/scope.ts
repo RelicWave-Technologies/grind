@@ -54,13 +54,19 @@ export const attachScope: RequestHandler = async (req, res, next) => {
 
     if (isAdmin) {
       scope = 'workspace';
-      const users = await prisma.user.findMany({ where: { workspaceId }, select: { id: true } });
+      // Skip deactivated users so the admin queue, /overview, payroll, etc.
+      // don't surface offboarded teammates. Their history stays
+      // queryable through direct user-id lookups.
+      const users = await prisma.user.findMany({
+        where: { workspaceId, deactivatedAt: null },
+        select: { id: true },
+      });
       userIds = users.map((u) => u.id);
     } else if (role === 'MANAGER') {
       scope = 'team';
       const teams = await prisma.team.findMany({
         where: { managerId: req.user.sub },
-        include: { members: { select: { id: true } } },
+        include: { members: { where: { deactivatedAt: null }, select: { id: true } } },
       });
       const memberIds = new Set<string>([req.user.sub]);
       for (const t of teams) for (const m of t.members) memberIds.add(m.id);
@@ -80,5 +86,16 @@ export const attachScope: RequestHandler = async (req, res, next) => {
 /** Gate a route to admin/owner only. Use after attachScope. */
 export const requireAdmin: RequestHandler = (req, res, next) => {
   if (!req.scope?.isAdmin) return res.status(403).json({ error: 'admin_only' });
+  next();
+};
+
+/**
+ * Gate a route to MANAGER, ADMIN, or OWNER. The approvals queue lives here:
+ * MEMBERs have their own self-view via /v1/time-requests and don't need —
+ * shouldn't see — anyone else's queue.
+ */
+export const requireManagerOrAbove: RequestHandler = (req, res, next) => {
+  if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
+  if (req.scope.scope === 'self') return res.status(403).json({ error: 'manager_or_above_only' });
   next();
 };

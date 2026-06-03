@@ -1,13 +1,31 @@
 import { Router } from 'express';
 import { prisma } from '@grind/db';
 import { requireAccessToken } from '../middleware/auth';
+import { attachScope } from '../middleware/scope';
 import { scoreDay } from '../scoring/score';
 import { assessWindow, type RiskSample } from '../anticheat/risk';
 import type { RoleTitle } from '../scoring/presets';
 import { buildDayInsight, localDayWindow } from '../insights/day';
+import { buildHeatmap, DEFAULT_BUCKET_MS, type HeatmapSample } from '../insights/heatmap';
+import { buildAppUsage } from '../insights/appUsage';
 
 export const insightsRouter = Router();
-insightsRouter.use(requireAccessToken);
+// /day accepts an optional ?userId= so admins/managers can pull a team
+// member's timesheet — attachScope resolves the visible userIds. /score
+// remains self-only for now (caller can only see their own productivity).
+insightsRouter.use(requireAccessToken, attachScope);
+
+/**
+ * Resolve the target userId for a "view someone's day" request. Defaults to
+ * the caller; rejects if the caller isn't permitted to view that user.
+ */
+function resolveTargetUserId(req: { user?: { sub: string }; scope?: { userIds: string[] } }, raw: unknown): { ok: true; userId: string } | { ok: false; status: number; error: string } {
+  if (!req.user) return { ok: false, status: 401, error: 'unauthorized' };
+  if (typeof raw !== 'string' || raw.length === 0) return { ok: true, userId: req.user.sub };
+  if (!req.scope) return { ok: false, status: 500, error: 'scope_unresolved' };
+  if (!req.scope.userIds.includes(raw)) return { ok: false, status: 403, error: 'forbidden' };
+  return { ok: true, userId: raw };
+}
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -96,17 +114,22 @@ insightsRouter.get('/day', async (req, res, next) => {
     const win = localDayWindow(date, tz);
     if (!win) return res.status(400).json({ error: 'invalid_date_or_tz' });
 
+    const targetUser = resolveTargetUserId(req, req.query.userId);
+    if (!targetUser.ok) return res.status(targetUser.status).json({ error: targetUser.error });
+    const userId = targetUser.userId;
+
     const now = new Date();
 
     // Pull every TimeEntry that overlaps the window, including its segments.
     const entries = await prisma.timeEntry.findMany({
       where: {
-        userId: req.user.sub,
+        userId,
         startedAt: { lt: win.end },
         OR: [{ endedAt: null }, { endedAt: { gt: win.start } }],
       },
       include: {
         segments: { orderBy: { startedAt: 'asc' } },
+        attendees: { select: { userId: true } },
       },
       orderBy: { startedAt: 'asc' },
     });
@@ -114,11 +137,12 @@ insightsRouter.get('/day', async (req, res, next) => {
     // PENDING manual requests overlapping the window (for the stripe overlay).
     const pending = await prisma.manualTimeRequest.findMany({
       where: {
-        userId: req.user.sub,
+        userId,
         status: 'PENDING',
         requestedStart: { lt: win.end },
         requestedEnd: { gt: win.start },
       },
+      include: { attendees: { select: { userId: true } } },
       orderBy: { requestedStart: 'asc' },
     });
 
@@ -126,7 +150,7 @@ insightsRouter.get('/day', async (req, res, next) => {
     // Edit Time table so the user sees why and can re-request.
     const rejected = await prisma.manualTimeRequest.findMany({
       where: {
-        userId: req.user.sub,
+        userId,
         status: 'REJECTED',
         requestedStart: { lt: win.end },
         requestedEnd: { gt: win.start },
@@ -144,6 +168,7 @@ insightsRouter.get('/day', async (req, res, next) => {
         source: e.source as 'AUTO' | 'MANUAL',
         larkTaskGuid: e.larkTaskGuid,
         notes: e.notes ?? null,
+        attendeeIds: e.attendees.map((a) => a.userId),
         segments: e.segments.map((s) => ({
           kind: s.kind as 'WORK' | 'MEETING' | 'IDLE_TRIMMED',
           startedAt: s.startedAt,
@@ -156,6 +181,7 @@ insightsRouter.get('/day', async (req, res, next) => {
         requestedEnd: p.requestedEnd,
         reason: p.reason,
         larkTaskGuid: p.larkTaskGuid,
+        attendeeIds: p.attendees.map((a) => a.userId),
       })),
       rejected: rejected.map((r) => ({
         id: r.id,
@@ -167,7 +193,73 @@ insightsRouter.get('/day', async (req, res, next) => {
       })),
     });
 
-    res.json(result);
+    // Activity heatmap: 10-min productivity buckets across the day window.
+    // Pulls every per-minute ActivitySample in the local-day window and
+    // averages scoreMinute() per bucket. Returns null where no samples
+    // landed — distinct from "samples scored 0" (idle) so the dashboard
+    // can render dead air differently.
+    // Pull every per-minute ActivitySample in the local-day window. The
+    // schema doesn't (yet) carry isProtectedMeeting on each sample — we
+    // derive it post-hoc by checking whether the minute overlaps a
+    // MEETING segment in the entries we already fetched. Cheap because
+    // both lists are sorted + small.
+    const samples = await prisma.activitySample.findMany({
+      where: {
+        userId,
+        bucketStart: { gte: win.start, lt: win.end },
+      },
+      select: {
+        bucketStart: true,
+        keystrokes: true,
+        clicks: true,
+        scrollEvents: true,
+        mouseDistancePx: true,
+        activeApp: true,
+        activeAppBundle: true,
+      },
+      orderBy: { bucketStart: 'asc' },
+    });
+    const meetingIntervals: Array<{ a: number; b: number }> = [];
+    for (const e of entries) {
+      for (const s of e.segments) {
+        if (s.kind === 'MEETING' && s.endedAt) {
+          meetingIntervals.push({ a: s.startedAt.getTime(), b: s.endedAt.getTime() });
+        }
+      }
+    }
+    const heatmapInput: HeatmapSample[] = samples.map((s) => {
+      const t = s.bucketStart.getTime();
+      const inMeeting = meetingIntervals.some((iv) => t >= iv.a && t < iv.b);
+      return {
+        bucketStartMs: t,
+        keystrokes: s.keystrokes,
+        clicks: s.clicks,
+        scrollEvents: s.scrollEvents,
+        mouseDistancePx: s.mouseDistancePx,
+        isProtectedMeeting: inMeeting,
+      };
+    });
+    const heatmap = buildHeatmap({
+      dayStart: win.start.getTime(),
+      dayEnd: win.end.getTime(),
+      samples: heatmapInput,
+      bucketMs: DEFAULT_BUCKET_MS,
+    });
+
+    // M14: top-N apps for the day. Server has already scrubbed disallowed
+    // active fields per the workspace policy at ingestion time — when the
+    // policy is "captureApps off", every sample's activeApp is null and
+    // buildAppUsage returns an empty top list, which the dashboard hides.
+    const appUsage = buildAppUsage(
+      samples.map((s) => ({
+        activeApp: s.activeApp,
+        activeAppBundle: s.activeAppBundle,
+        keystrokes: s.keystrokes,
+        clicks: s.clicks,
+      })),
+    );
+
+    res.json({ ...result, activity: heatmap, appUsage });
   } catch (err) {
     next(err);
   }

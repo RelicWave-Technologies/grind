@@ -128,6 +128,14 @@ timeEntriesRouter.post('/', validate(CreateTimeEntryRequest, 'body'), async (req
     const violations = validateEntry(core);
     if (violations.length) return res.status(400).json({ error: 'invalid_segments', details: violations });
 
+    // Snapshot the user's CURRENT shiftId so the entry preserves its
+    // schedule context even if the user is later reassigned. Forward-only:
+    // a missing shift just records null.
+    const shiftSnapshot = await prisma.user.findUnique({
+      where: { id: req.user.sub },
+      select: { shiftId: true },
+    });
+
     const created = await prisma.timeEntry.create({
       data: {
         id: body.id,
@@ -138,6 +146,7 @@ timeEntriesRouter.post('/', validate(CreateTimeEntryRequest, 'body'), async (req
         startedAt: new Date(body.startedAt),
         agentVersion: body.agentVersion,
         platform: body.platform,
+        shiftIdAtStart: shiftSnapshot?.shiftId ?? null,
         segments: {
           create: body.segments.map((s) => ({
             id: s.id,
@@ -252,19 +261,56 @@ timeEntriesRouter.patch('/:id', validate(PatchTimeEntryRequest, 'body'), async (
   try {
     if (!req.user) return res.status(401).json({ error: 'unauthorized' });
     const id = req.params.id;
-    const existing = await prisma.timeEntry.findUnique({ where: { id }, select: { userId: true } });
+    if (!id) return res.status(400).json({ error: 'missing_id' });
+    const existing = await prisma.timeEntry.findUnique({
+      where: { id },
+      select: { userId: true, segments: { select: { kind: true } } },
+    });
     if (!existing) return res.status(404).json({ error: 'not_found' });
     if (existing.userId !== req.user.sub) return res.status(403).json({ error: 'forbidden' });
 
     const body = req.body as PatchBody;
+
+    // Attendees can only be tagged on entries that contain a MEETING segment.
+    // (Tracked WORK + idle entries don't carry meeting attribution.)
+    let nextAttendees: string[] | null = null;
+    if (body.attendeeIds !== undefined) {
+      const hasMeeting = existing.segments.some((s) => s.kind === 'MEETING');
+      if (!hasMeeting) {
+        return res.status(400).json({ error: 'attendees_require_meeting_segment' });
+      }
+      const dedup = [...new Set(body.attendeeIds)].filter((uid) => uid !== req.user!.sub);
+      if (dedup.length > 0) {
+        const found = await prisma.user.findMany({
+          where: { id: { in: dedup }, workspaceId: req.user.ws },
+          select: { id: true },
+        });
+        if (found.length !== dedup.length) {
+          return res.status(400).json({ error: 'attendee_out_of_workspace' });
+        }
+      }
+      nextAttendees = dedup;
+    }
+
     const data: { larkTaskGuid?: string | null; notes?: string | null } = {};
     if (body.larkTaskGuid !== undefined) data.larkTaskGuid = body.larkTaskGuid;
     if (body.notes !== undefined) data.notes = body.notes;
 
-    const updated = await prisma.timeEntry.update({
-      where: { id },
-      data,
-      include: { segments: true },
+    const updated = await prisma.$transaction(async (tx) => {
+      const row = await tx.timeEntry.update({
+        where: { id },
+        data,
+        include: { segments: true },
+      });
+      if (nextAttendees !== null) {
+        await tx.timeEntryAttendee.deleteMany({ where: { timeEntryId: id } });
+        if (nextAttendees.length) {
+          await tx.timeEntryAttendee.createMany({
+            data: nextAttendees.map((userId) => ({ timeEntryId: id, userId })),
+          });
+        }
+      }
+      return row;
     });
     res.json(serialize(updated));
   } catch (err) {

@@ -11,6 +11,16 @@ import { Layout } from './components/Layout';
 import { LoginScreen } from './screens/Login';
 import { UsersScreen } from './screens/Users';
 import { HomeScreen } from './screens/Home';
+import { MeTodayScreen } from './screens/MeToday';
+import { ApprovalsScreen } from './screens/Approvals';
+import { TeamScreen } from './screens/Team';
+import { AttendanceScreen } from './screens/Attendance';
+import { TeamsScreen } from './screens/Teams';
+import { FlagsScreen } from './screens/Flags';
+import { ShiftsScreen } from './screens/Shifts';
+import { PolicyScreen } from './screens/Policy';
+import { PayrollScreen } from './screens/Payroll';
+import { OverviewScreen } from './screens/Overview';
 
 interface RouterContext {
   queryClient: QueryClient;
@@ -51,6 +61,16 @@ const authedRoot = createRoute({
 const homeRoute = createRoute({
   getParentRoute: () => authedRoot,
   path: '/',
+  // Default landing per role (M16): MANAGER+ → /overview command center;
+  // MEMBER → the existing hero Home (their day at a glance). The Layout
+  // sidebar's "Home" link still points to '/' so users always land
+  // wherever they should.
+  beforeLoad: ({ context }) => {
+    const me = (context as { me?: { role?: string } }).me;
+    if (me && (me.role === 'OWNER' || me.role === 'ADMIN' || me.role === 'MANAGER')) {
+      throw redirect({ to: '/overview' });
+    }
+  },
   component: HomeScreen,
 });
 
@@ -58,6 +78,80 @@ const usersRoute = createRoute({
   getParentRoute: () => authedRoot,
   path: '/users',
   component: UsersScreen,
+});
+
+const meTodayRoute = createRoute({
+  getParentRoute: () => authedRoot,
+  path: '/me-today',
+  // Optional ?date=YYYY-MM-DD&userId= so the Team page can deep-link
+  // into a specific user-day. Both are pure strings; validation happens
+  // in the screen (the date format check is cheap).
+  validateSearch: (s: Record<string, unknown>): { date?: string; userId?: string } => ({
+    date: typeof s.date === 'string' ? s.date : undefined,
+    userId: typeof s.userId === 'string' ? s.userId : undefined,
+  }),
+  component: MeTodayScreen,
+});
+
+const approvalsRoute = createRoute({
+  getParentRoute: () => authedRoot,
+  path: '/approvals',
+  component: ApprovalsScreen,
+});
+
+const teamRoute = createRoute({
+  getParentRoute: () => authedRoot,
+  path: '/team',
+  component: TeamScreen,
+});
+
+const attendanceRoute = createRoute({
+  getParentRoute: () => authedRoot,
+  path: '/attendance',
+  component: AttendanceScreen,
+});
+
+const teamsAdminRoute = createRoute({
+  getParentRoute: () => authedRoot,
+  path: '/teams',
+  component: TeamsScreen,
+});
+
+const flagsRoute = createRoute({
+  getParentRoute: () => authedRoot,
+  path: '/flags',
+  component: FlagsScreen,
+});
+
+const shiftsRoute = createRoute({
+  getParentRoute: () => authedRoot,
+  path: '/shifts',
+  component: ShiftsScreen,
+});
+
+const policyRoute = createRoute({
+  getParentRoute: () => authedRoot,
+  path: '/policy',
+  component: PolicyScreen,
+});
+
+const payrollRoute = createRoute({
+  getParentRoute: () => authedRoot,
+  path: '/payroll',
+  component: PayrollScreen,
+});
+
+const overviewRoute = createRoute({
+  getParentRoute: () => authedRoot,
+  path: '/overview',
+  beforeLoad: ({ context }) => {
+    // /overview is MANAGER+ only — MEMBER lands on /me-today instead.
+    const me = (context as { me?: { role?: string } }).me;
+    if (!me || (me.role !== 'OWNER' && me.role !== 'ADMIN' && me.role !== 'MANAGER')) {
+      throw redirect({ to: '/me-today' });
+    }
+  },
+  component: OverviewScreen,
 });
 
 const loginRoute = createRoute({
@@ -70,6 +164,6 @@ const loginRoute = createRoute({
 });
 
 export const routeTree = rootRoute.addChildren([
-  authedRoot.addChildren([homeRoute, usersRoute]),
+  authedRoot.addChildren([homeRoute, overviewRoute, meTodayRoute, approvalsRoute, teamRoute, attendanceRoute, flagsRoute, usersRoute, teamsAdminRoute, shiftsRoute, policyRoute, payrollRoute]),
   loginRoute,
 ]);
