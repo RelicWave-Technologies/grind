@@ -1,0 +1,887 @@
+/* ============================================================================
+   Grind Dashboard — "Quiet Datasheet" design system.
+   Single source of truth: src/ui/SYSTEM.md.
+
+   This file holds (1) the canonical design tokens (§2 of the spec) and (2) the
+   component classes (§5). Every class is namespaced `ui-` so the kit never
+   collides with the legacy classes in styles.css. The React primitives in
+   src/ui/*.tsx render exclusively from these classes.
+
+   Token law: components reference only the variables below. No literal hex and
+   no literal px outside :root (sole exceptions: 1px hairlines, and 0).
+   ========================================================================== */
+
+:root {
+  /* ── Surfaces — Figma DESIGN.md: white canvas + soft off-white. ─────────── */
+  --ui-surface-sunken: #F7F7F5;   /* Figma surface-soft — app bg behind panels */
+  --ui-surface:        #FFFFFF;   /* Figma canvas — panel / card / table / sidebar */
+  --ui-surface-inset:  #F1F1F1;   /* Figma hairline-soft — wells, zebra, tracks */
+  --ui-surface-raised: #FFFFFF;   /* popovers/menus — same fill + --ui-shadow-pop + --ui-line */
+
+  /* ── Ink — Figma neutral, near-black primary. ───────────────────────────── */
+  --ui-ink:          #0A0A0A;     /* Figma ink — headings, key numbers, primary text */
+  --ui-ink-2:        #6E6E73;     /* body secondary, row sublines, labels */
+  --ui-ink-3:        #9A9AA0;     /* captions, placeholders, column heads, meta */
+  --ui-ink-disabled: #C7C7CC;
+  --ui-on-accent:    #FFFFFF;     /* text on the black/accent fill */
+
+  /* ── Hairlines — Figma neutral grays. The PRIMARY structural device. ─────── */
+  --ui-line:        #E6E6E6;      /* Figma hairline — cards, rows, header rule */
+  --ui-line-strong: #D2D2D7;      /* input borders, active/emphasis dividers */
+  --ui-line-faint:  #F1F1F1;      /* Figma hairline-soft — interior table dividers */
+
+  /* ── Accent — Figma's chrome is monochrome: a BLACK primary + a magenta pop.
+        The colour identity lives in the pastel status blocks below, not here. ─ */
+  --ui-accent:        #111111;    /* primary action (black pill) */
+  --ui-accent-hover:  #2A2A2A;
+  --ui-accent-press:  #000000;
+  --ui-accent-tint:   #EFEAFC;    /* soft-lilac wash — active nav, soft button, selected row */
+  --ui-accent-tint-2: #E4DBFB;    /* hover / denser wash */
+  --ui-accent-ring:   rgba(0, 0, 0, 0.26);       /* focus ring */
+  --ui-magenta:       #FF3D8B;    /* Figma accent-magenta — the single saturated pop */
+
+  /* ── Figma block pastels — the COLOUR identity (stat tiles, washes, blocks). */
+  --ui-lime:  #DCEEB1;
+  --ui-cream: #F4ECD6;
+  --ui-lilac: #C5B0F4;
+  --ui-coral: #F3C9B6;
+  --ui-mint:  #C8E6CD;
+  --ui-pink:  #EFD4D4;
+
+  /* ── Semantic status — mapped onto the Figma block pastels; colour lives here.
+        Each: pastel tint bg + readable ink + a solid hue for dots/bars/legends. */
+  --ui-success-ink: #14622D;  --ui-success-bg: #C8E6CD;  --ui-success-solid: #1EA64A; /* Figma mint */
+  --ui-warn-ink:    #7A4B12;  --ui-warn-bg:    #F4ECD6;  --ui-warn-solid:    #C8860C; /* Figma cream */
+  --ui-danger-ink:  #A41539;  --ui-danger-bg:  #EFD4D4;  --ui-danger-solid:  #FF3D8B; /* Figma pink + magenta */
+  --ui-info-ink:    #45348A;  --ui-info-bg:    #C5B0F4;  --ui-info-solid:    #6B4FD0; /* Figma lilac */
+  --ui-neutral-ink: #5C5C60;  --ui-neutral-bg: #ECECEA;  --ui-neutral-solid: #8E8E93;
+
+  /* ── Overlay (modal scrim — the ONLY full-bleed dark). ───────────────────── */
+  --ui-overlay: rgba(26, 26, 23, 0.40);
+
+  /* ── Type families. (Existing font links stay: Inter + JetBrains Mono.) ──── */
+  --ui-font-sans: 'Inter', 'SF Pro Display', system-ui, -apple-system, sans-serif;
+  --ui-font-mono: 'JetBrains Mono', 'SF Mono', ui-monospace, Menlo, monospace;
+
+  /* ── Spacing — 4px base. Use these; never raw px. ────────────────────────── */
+  --ui-sp-1: 2px;  --ui-sp-2: 4px;  --ui-sp-3: 8px;  --ui-sp-4: 12px; --ui-sp-5: 16px;
+  --ui-sp-6: 20px; --ui-sp-7: 24px; --ui-sp-8: 32px; --ui-sp-9: 40px; --ui-sp-10: 48px; --ui-sp-12: 64px;
+
+  /* ── Radii — restrained. Three working radii + full (avatars/dots only). ─── */
+  --ui-r-sm:   6px;    /* inputs, buttons, tags, chips, segmented */
+  --ui-r-md:  10px;    /* cards, panels */
+  --ui-r-lg:  14px;    /* modals, popovers */
+  --ui-r-full: 999px;  /* avatars and status dots ONLY */
+
+  /* ── Elevation — flat by default. Exactly ONE shadow in the product. ─────── */
+  --ui-shadow-pop: 0 8px 24px -6px rgba(20, 20, 15, 0.12),
+                   0 2px 6px rgba(20, 20, 15, 0.06);   /* popovers/menus/toasts only */
+  --ui-focus-ring: 0 0 0 3px var(--ui-accent-ring);
+
+  /* ── Motion — quiet. No springs, no bounce, no card-lift. ────────────────── */
+  --ui-ease:     cubic-bezier(0.32, 0.72, 0, 1);
+  --ui-dur-fast: 120ms;   /* hover / press: bg + border tween only */
+  --ui-dur-base: 180ms;   /* control state changes, tab/segment slide */
+  --ui-dur-slow: 240ms;   /* page mount */
+
+  /* ── Layout constants. ───────────────────────────────────────────────────── */
+  --ui-sidebar-width: 240px;
+  --ui-page-max:      1180px;
+  --ui-control-h:      32px;   /* the one control height (sm 28 / lg 36) */
+  --ui-row-h:          44px;   /* table/list row (compact 36) */
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --ui-dur-fast: 0ms; --ui-dur-base: 0ms; --ui-dur-slow: 0ms; }
+}
+
+/* ============================================================================
+   §3 — Type scale. Inter for everything; mono only for data + the Eyebrow.
+   ========================================================================== */
+.ui-t-display {
+  font-family: var(--ui-font-sans);
+  font-size: 28px; line-height: 1.15; font-weight: 650; letter-spacing: -0.4px;
+  color: var(--ui-ink);
+}
+.ui-t-title {
+  font-family: var(--ui-font-sans);
+  font-size: 19px; line-height: 1.25; font-weight: 640; letter-spacing: -0.3px;
+  color: var(--ui-ink);
+}
+.ui-t-h3 {
+  font-family: var(--ui-font-sans);
+  font-size: 15px; line-height: 1.4; font-weight: 600; letter-spacing: -0.1px;
+  color: var(--ui-ink);
+}
+.ui-t-strong {
+  font-family: var(--ui-font-sans);
+  font-size: 14px; line-height: 1.5; font-weight: 600; letter-spacing: -0.1px;
+  color: var(--ui-ink);
+}
+.ui-t-body {
+  font-family: var(--ui-font-sans);
+  font-size: 14px; line-height: 1.5; font-weight: 450; letter-spacing: 0;
+  color: var(--ui-ink);
+}
+.ui-t-small {
+  font-family: var(--ui-font-sans);
+  font-size: 12.5px; line-height: 1.45; font-weight: 450; letter-spacing: 0;
+  color: var(--ui-ink-2);
+}
+.ui-t-eyebrow {
+  font-family: var(--ui-font-mono);
+  font-size: 11px; line-height: 1; font-weight: 600; letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ui-ink-3);
+}
+.ui-mono {
+  font-family: var(--ui-font-mono);
+  font-weight: 450;
+  font-variant-numeric: tabular-nums;
+}
+.ui-t-num {
+  font-family: var(--ui-font-mono);
+  font-size: 28px; line-height: 1.1; font-weight: 650; letter-spacing: -0.4px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ui-ink);
+}
+
+/* Ink utilities — never use opacity to dim; step the ink token. */
+.ui-ink   { color: var(--ui-ink); }
+.ui-ink-2 { color: var(--ui-ink-2); }
+.ui-ink-3 { color: var(--ui-ink-3); }
+
+/* ============================================================================
+   §4 — Motion. Page mount: 6px rise + fade. Stagger with .ui-rise-1/-2/-3.
+   ========================================================================== */
+@keyframes ui-page-rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+.ui-rise   { animation: ui-page-rise var(--ui-dur-slow) var(--ui-ease) both; }
+.ui-rise-1 { animation: ui-page-rise var(--ui-dur-slow) var(--ui-ease) both; animation-delay: 40ms; }
+.ui-rise-2 { animation: ui-page-rise var(--ui-dur-slow) var(--ui-ease) both; animation-delay: 80ms; }
+.ui-rise-3 { animation: ui-page-rise var(--ui-dur-slow) var(--ui-ease) both; animation-delay: 120ms; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-rise, .ui-rise-1, .ui-rise-2, .ui-rise-3 { animation: none !important; }
+}
+
+/* ============================================================================
+   §5.1 Page — centered column, gutter, mount animation.
+   ========================================================================== */
+.ui-page {
+  max-width: var(--ui-page-max);
+  margin: 0 auto;
+  padding: var(--ui-sp-8);
+  animation: ui-page-rise var(--ui-dur-slow) var(--ui-ease) both;
+}
+
+/* ============================================================================
+   §5.2 PageHeader — the universal header.
+   ========================================================================== */
+.ui-page-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--ui-sp-7);
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--ui-line);
+  padding-bottom: var(--ui-sp-5);
+  margin-bottom: var(--ui-sp-7);
+}
+.ui-page-head__text { min-width: 0; }
+.ui-page-head__eyebrow { display: block; margin-bottom: var(--ui-sp-2); }
+.ui-page-head__title { margin: 0; }
+.ui-page-head__sub { margin-top: var(--ui-sp-2); color: var(--ui-ink-2); }
+.ui-page-head__actions { display: flex; align-items: center; flex-shrink: 0; }
+/* The optional tabs row docks onto the bottom hairline of the header. */
+.ui-page-head--with-tabs { padding-bottom: 0; gap: var(--ui-sp-4); }
+.ui-page-head__tabs {
+  flex-basis: 100%;
+  margin-top: var(--ui-sp-5);
+  margin-bottom: -1px; /* baseline overlaps the header rule */
+}
+
+/* ============================================================================
+   §5.3 Card — surface container. Hairline, no shadow, no hover-lift.
+   ========================================================================== */
+.ui-card {
+  background: var(--ui-surface);
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-md);
+  padding: var(--ui-sp-6) var(--ui-sp-7);
+}
+.ui-card--flush { padding: 0; }
+.ui-card--quiet { border-color: transparent; background: transparent; padding: 0; }
+.ui-card__head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--ui-sp-4);
+  padding-bottom: var(--ui-sp-4);
+  margin-bottom: var(--ui-sp-5);
+  border-bottom: 1px solid var(--ui-line-faint);
+}
+.ui-card__title { margin: 0; }
+.ui-card__action { display: flex; align-items: center; flex-shrink: 0; }
+.ui-card__body { min-width: 0; }
+/* A flush card hosting a table/statrow keeps its head padded back in. */
+.ui-card--flush > .ui-card__head { padding: var(--ui-sp-5) var(--ui-sp-7); margin-bottom: 0; }
+
+/* ============================================================================
+   §5.4 Stat + StatRow — the metric pattern.
+   ========================================================================== */
+.ui-stat {
+  display: flex; flex-direction: column; gap: var(--ui-sp-3);
+  min-width: 0;
+}
+.ui-stat__label { display: block; }
+.ui-stat__value {
+  display: flex; align-items: baseline; gap: var(--ui-sp-2);
+}
+.ui-stat__unit {
+  font-family: var(--ui-font-mono);
+  font-size: 14px; font-weight: 450;
+  color: var(--ui-ink-2);
+  font-variant-numeric: tabular-nums;
+}
+.ui-stat__delta {
+  display: inline-flex; align-items: center; gap: var(--ui-sp-1);
+  font-family: var(--ui-font-mono);
+  font-size: 12.5px; font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.ui-stat__delta--up   { color: var(--ui-success-ink); }
+.ui-stat__delta--down { color: var(--ui-danger-ink); }
+.ui-stat__hint { color: var(--ui-ink-3); }
+
+/* N stats as separate Figma pastel BLOCK tiles — the page's colour identity. */
+.ui-stat-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
+  gap: var(--ui-sp-4);
+  align-items: stretch;
+}
+.ui-stat-row > .ui-stat {
+  padding: var(--ui-sp-6);
+  border-radius: var(--ui-r-md);
+}
+/* Cycle the Figma block pastels across the tiles. */
+.ui-stat-row > .ui-stat:nth-child(6n + 1) { background: var(--ui-lime); }
+.ui-stat-row > .ui-stat:nth-child(6n + 2) { background: var(--ui-cream); }
+.ui-stat-row > .ui-stat:nth-child(6n + 3) { background: var(--ui-lilac); }
+.ui-stat-row > .ui-stat:nth-child(6n + 4) { background: var(--ui-coral); }
+.ui-stat-row > .ui-stat:nth-child(6n + 5) { background: var(--ui-mint); }
+.ui-stat-row > .ui-stat:nth-child(6n + 6) { background: var(--ui-pink); }
+/* On the pastel ground, step the mono label/hint/unit to dark ink for contrast. */
+.ui-stat-row > .ui-stat .ui-stat__label { color: rgba(0, 0, 0, 0.62); }
+.ui-stat-row > .ui-stat .ui-stat__hint  { color: rgba(0, 0, 0, 0.58); }
+.ui-stat-row > .ui-stat .ui-stat__unit  { color: rgba(0, 0, 0, 0.55); }
+/* The flush Card that hosts the tiles is just a layout shell — drop its frame. */
+.ui-card--flush:has(.ui-stat-row) { background: transparent; border-color: transparent; }
+
+/* The rarer boxed-card layout. */
+.ui-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--ui-sp-5);
+}
+
+/* ============================================================================
+   §5.5 Table — data grid. Hosted in a flush Card.
+   ========================================================================== */
+.ui-table { width: 100%; border-collapse: collapse; }
+.ui-table__head { }
+.ui-table__head .ui-th {
+  font-family: var(--ui-font-mono);
+  font-size: 11px; font-weight: 600; letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ui-ink-3);
+  text-align: left;
+  background: transparent;
+  padding: var(--ui-sp-4) var(--ui-sp-5);
+  border-bottom: 1px solid var(--ui-line);
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.ui-th--right { text-align: right; }
+.ui-th--center { text-align: center; }
+.ui-th--sortable { cursor: pointer; user-select: none; }
+.ui-th__sort {
+  display: inline-flex; align-items: center; gap: var(--ui-sp-2);
+}
+.ui-th__caret {
+  opacity: 0;
+  transition: opacity var(--ui-dur-fast) var(--ui-ease), color var(--ui-dur-fast) var(--ui-ease);
+  font-size: 9px; line-height: 1;
+}
+.ui-th--sortable:hover .ui-th__caret { opacity: 0.6; }
+.ui-th.is-sorted { color: var(--ui-accent); }
+.ui-th.is-sorted .ui-th__caret { opacity: 1; color: var(--ui-accent); }
+
+.ui-table__row {
+  height: var(--ui-row-h);
+  transition: background var(--ui-dur-fast) var(--ui-ease);
+}
+.ui-table__row:not(:last-child) > .ui-td { border-bottom: 1px solid var(--ui-line-faint); }
+.ui-table__row:hover > .ui-td { background: var(--ui-surface-inset); }
+.ui-table__row.is-selected > .ui-td { background: var(--ui-accent-tint); }
+.ui-table__row.is-clickable { cursor: pointer; }
+.ui-table--compact .ui-table__row { height: 36px; }
+
+.ui-td {
+  padding: 0 var(--ui-sp-5);
+  vertical-align: middle;
+  color: var(--ui-ink);
+  font-family: var(--ui-font-sans);
+  font-size: 14px;
+}
+.ui-td--right { text-align: right; }
+.ui-td--center { text-align: center; }
+.ui-td--num {
+  text-align: right;
+  font-family: var(--ui-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 3px inset left-rail on the first cell encodes identity/status. */
+.ui-table__row--rail-success > .ui-td:first-child { box-shadow: inset 3px 0 0 var(--ui-success-solid); }
+.ui-table__row--rail-warn    > .ui-td:first-child { box-shadow: inset 3px 0 0 var(--ui-warn-solid); }
+.ui-table__row--rail-danger  > .ui-td:first-child { box-shadow: inset 3px 0 0 var(--ui-danger-solid); }
+.ui-table__row--rail-info    > .ui-td:first-child { box-shadow: inset 3px 0 0 var(--ui-info-solid); }
+.ui-table__row--rail-accent  > .ui-td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
+
+/* Sticky helpers. */
+.ui-table--sticky-head .ui-table__head .ui-th { position: sticky; top: 0; z-index: 2; background: var(--ui-surface); }
+.ui-table--sticky-col .ui-td:first-child,
+.ui-table--sticky-col .ui-th:first-child { position: sticky; left: 0; z-index: 1; background: var(--ui-surface); }
+
+/* ============================================================================
+   §5.6 List + ListRow — lightweight row stack.
+   ========================================================================== */
+.ui-list { display: flex; flex-direction: column; }
+.ui-list-row {
+  display: flex; align-items: center; gap: var(--ui-sp-4);
+  min-height: var(--ui-row-h);
+  padding: var(--ui-sp-3) 0;
+  border-bottom: 1px solid var(--ui-line);
+  transition: background var(--ui-dur-fast) var(--ui-ease);
+}
+.ui-list-row:last-child { border-bottom: 0; }
+.ui-list-row.is-clickable { cursor: pointer; }
+.ui-list-row.is-clickable:hover { background: var(--ui-surface-inset); }
+.ui-list-row--rail-success { box-shadow: inset 3px 0 0 var(--ui-success-solid); padding-left: var(--ui-sp-4); }
+.ui-list-row--rail-warn    { box-shadow: inset 3px 0 0 var(--ui-warn-solid);    padding-left: var(--ui-sp-4); }
+.ui-list-row--rail-danger  { box-shadow: inset 3px 0 0 var(--ui-danger-solid);  padding-left: var(--ui-sp-4); }
+.ui-list-row--rail-info    { box-shadow: inset 3px 0 0 var(--ui-info-solid);    padding-left: var(--ui-sp-4); }
+.ui-list-row--rail-accent  { box-shadow: inset 3px 0 0 var(--ui-accent);        padding-left: var(--ui-sp-4); }
+.ui-list-row__leading { flex-shrink: 0; display: flex; align-items: center; }
+.ui-list-row__main { min-width: 0; flex: 1 1 auto; display: flex; flex-direction: column; gap: var(--ui-sp-1); }
+.ui-list-row__title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui-list-row__sub { color: var(--ui-ink-2); }
+.ui-list-row__meta {
+  flex-shrink: 0;
+  font-family: var(--ui-font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ui-ink-2);
+  font-size: 13px;
+}
+.ui-list-row__trailing { flex-shrink: 0; display: flex; align-items: center; gap: var(--ui-sp-3); }
+
+/* ============================================================================
+   §5.7 Button — the only button. Flat: no gradient/glow/shadow.
+   ========================================================================== */
+.ui-btn {
+  appearance: none;
+  position: relative;
+  cursor: pointer;
+  font-family: var(--ui-font-sans);
+  font-size: 13px; font-weight: 600; letter-spacing: -0.1px;
+  height: var(--ui-control-h);
+  padding: 0 var(--ui-sp-5);
+  border-radius: var(--ui-r-full);   /* Figma: pill buttons (icon buttons → circles) */
+  border: 1px solid transparent;
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--ui-sp-2);
+  white-space: nowrap;
+  transition: background var(--ui-dur-fast) var(--ui-ease),
+              border-color var(--ui-dur-fast) var(--ui-ease),
+              color var(--ui-dur-fast) var(--ui-ease);
+}
+.ui-btn:focus-visible { outline: none; box-shadow: var(--ui-focus-ring); }
+.ui-btn:active:not(:disabled) { transform: translateY(0); } /* no scale */
+.ui-btn:disabled { color: var(--ui-ink-disabled); background: var(--ui-surface-inset); border-color: transparent; cursor: not-allowed; }
+.ui-btn__icon { display: inline-flex; align-items: center; flex-shrink: 0; }
+
+.ui-btn--sm { height: 28px; padding: 0 var(--ui-sp-3); font-size: 12.5px; }
+.ui-btn--md { height: var(--ui-control-h); }
+.ui-btn--lg { height: 36px; padding: 0 var(--ui-sp-5); }
+.ui-btn--block { width: 100%; }
+
+.ui-btn--primary { background: var(--ui-accent); color: var(--ui-on-accent); }
+.ui-btn--primary:hover:not(:disabled) { background: var(--ui-accent-hover); }
+.ui-btn--primary:active:not(:disabled) { background: var(--ui-accent-press); }
+
+.ui-btn--secondary { background: var(--ui-surface); border-color: var(--ui-line-strong); color: var(--ui-ink); }
+.ui-btn--secondary:hover:not(:disabled) { background: var(--ui-surface-inset); }
+
+.ui-btn--soft { background: var(--ui-accent-tint); color: var(--ui-accent); }
+.ui-btn--soft:hover:not(:disabled) { background: var(--ui-accent-tint-2); }
+
+.ui-btn--ghost { background: transparent; color: var(--ui-ink-2); }
+.ui-btn--ghost:hover:not(:disabled) { background: var(--ui-surface-inset); color: var(--ui-ink); }
+
+.ui-btn--danger { background: var(--ui-surface); border-color: var(--ui-danger-ink); color: var(--ui-danger-ink); }
+.ui-btn--danger:hover:not(:disabled) { background: var(--ui-danger-bg); }
+
+.ui-btn.is-loading { color: transparent; pointer-events: none; }
+.ui-btn.is-loading .ui-btn__label { visibility: hidden; }
+.ui-btn__spin { position: absolute; inset: 0; display: inline-flex; align-items: center; justify-content: center; }
+
+/* IconButton — square, ghost by default, no label. */
+.ui-btn--icon {
+  width: var(--ui-control-h);
+  padding: 0;
+}
+.ui-btn--icon.ui-btn--sm { width: 28px; }
+.ui-btn--icon.ui-btn--lg { width: 36px; }
+
+/* ============================================================================
+   §5.8 Tabs (underline) + Segmented (track+thumb).
+   ========================================================================== */
+.ui-tabs {
+  display: flex; align-items: stretch; gap: var(--ui-sp-5);
+  border-bottom: 1px solid var(--ui-line);
+}
+.ui-tab {
+  appearance: none; border: 0; background: transparent;
+  font-family: var(--ui-font-sans);
+  font-size: 13.5px; font-weight: 550;
+  color: var(--ui-ink-3);
+  padding: 0 0 var(--ui-sp-3);
+  cursor: pointer;
+  position: relative;
+  transition: color var(--ui-dur-base) var(--ui-ease);
+}
+.ui-tab::after {
+  content: '';
+  position: absolute; left: 0; right: 0; bottom: -1px;
+  height: 2px;
+  background: var(--ui-accent);
+  transform: scaleX(0);
+  transition: transform var(--ui-dur-base) var(--ui-ease);
+}
+.ui-tab:hover { color: var(--ui-ink-2); }
+.ui-tab:focus-visible { outline: none; box-shadow: var(--ui-focus-ring); border-radius: var(--ui-r-sm); }
+.ui-tab.is-active { color: var(--ui-ink); }
+.ui-tab.is-active::after { transform: scaleX(1); }
+
+.ui-seg {
+  display: inline-flex; align-items: center;
+  background: var(--ui-surface-inset);
+  border-radius: var(--ui-r-sm);
+  padding: 3px;
+  gap: 2px;
+}
+.ui-seg__item {
+  appearance: none; border: 1px solid transparent; background: transparent;
+  font-family: var(--ui-font-sans);
+  font-size: 12.5px; font-weight: 550;
+  color: var(--ui-ink-2);
+  height: 26px; padding: 0 var(--ui-sp-4);
+  border-radius: 4px;
+  cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: background var(--ui-dur-base) var(--ui-ease), color var(--ui-dur-base) var(--ui-ease), border-color var(--ui-dur-base) var(--ui-ease);
+}
+.ui-seg__item:hover { color: var(--ui-ink); }
+.ui-seg__item:focus-visible { outline: none; box-shadow: var(--ui-focus-ring); }
+.ui-seg__item.is-active {
+  background: var(--ui-surface);
+  color: var(--ui-ink);
+  border-color: var(--ui-line);
+}
+.ui-seg--lg .ui-seg__item { height: 30px; }
+
+/* ============================================================================
+   §5.9 Field (+ Input / Select / Textarea / Toggle / Checkbox / Radio).
+   ========================================================================== */
+.ui-field { display: flex; flex-direction: column; }
+.ui-field__label { display: block; margin-bottom: var(--ui-sp-2); }
+.ui-field__hint { margin-top: var(--ui-sp-2); color: var(--ui-ink-3); }
+.ui-field__error { margin-top: var(--ui-sp-2); color: var(--ui-danger-ink); }
+
+.ui-control {
+  appearance: none;
+  font-family: var(--ui-font-sans);
+  font-size: 14px;
+  height: var(--ui-control-h);
+  width: 100%;
+  color: var(--ui-ink);
+  background: var(--ui-surface);
+  border: 1px solid var(--ui-line-strong);
+  border-radius: var(--ui-r-sm);
+  padding: 0 var(--ui-sp-4);
+  transition: border-color var(--ui-dur-fast) var(--ui-ease), box-shadow var(--ui-dur-fast) var(--ui-ease);
+}
+.ui-control::placeholder { color: var(--ui-ink-3); }
+.ui-control:focus { outline: none; border-color: var(--ui-accent); box-shadow: var(--ui-focus-ring); }
+.ui-control:disabled { background: var(--ui-surface-inset); color: var(--ui-ink-disabled); cursor: not-allowed; }
+.ui-control.is-error { border-color: var(--ui-danger-ink); }
+.ui-control.is-error:focus { box-shadow: 0 0 0 3px var(--ui-danger-bg); }
+
+/* Textarea overrides the one-line height. */
+textarea.ui-control { height: auto; min-height: 80px; padding: var(--ui-sp-3) var(--ui-sp-4); line-height: 1.5; resize: vertical; }
+
+/* Select — caret glyph drawn with gradients (no asset). */
+.ui-select {
+  padding-right: var(--ui-sp-8);
+  cursor: pointer;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--ui-ink-3) 50%),
+    linear-gradient(135deg, var(--ui-ink-3) 50%, transparent 50%);
+  background-position: calc(100% - 15px) 50%, calc(100% - 10px) 50%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+}
+
+/* Toggle — 36×20 track, knob slides. */
+.ui-toggle {
+  appearance: none;
+  position: relative;
+  width: 36px; height: 20px;
+  border-radius: var(--ui-r-full);
+  background: var(--ui-line-strong);
+  border: 0;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background var(--ui-dur-base) var(--ui-ease);
+}
+.ui-toggle::after {
+  content: '';
+  position: absolute; top: 2px; left: 2px;
+  width: 16px; height: 16px;
+  border-radius: var(--ui-r-full);
+  background: var(--ui-surface);
+  transition: transform var(--ui-dur-base) var(--ui-ease);
+}
+.ui-toggle:checked { background: var(--ui-accent); }
+.ui-toggle:checked::after { transform: translateX(16px); }
+.ui-toggle:focus-visible { outline: none; box-shadow: var(--ui-focus-ring); }
+.ui-toggle:disabled { background: var(--ui-surface-inset); cursor: not-allowed; }
+
+/* Checkbox + Radio — 16px, accent when checked. */
+.ui-checkbox, .ui-radio {
+  appearance: none;
+  width: 16px; height: 16px;
+  border: 1px solid var(--ui-line-strong);
+  background: var(--ui-surface);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background var(--ui-dur-fast) var(--ui-ease), border-color var(--ui-dur-fast) var(--ui-ease);
+}
+.ui-checkbox { border-radius: 4px; }
+.ui-radio { border-radius: var(--ui-r-full); }
+.ui-checkbox:checked, .ui-radio:checked { background: var(--ui-accent); border-color: var(--ui-accent); }
+.ui-checkbox:checked {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none'%3E%3Cpath d='M3.5 8.5l3 3 6-6.5' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-size: 14px; background-position: center; background-repeat: no-repeat;
+}
+.ui-radio:checked { box-shadow: inset 0 0 0 3px var(--ui-surface); }
+.ui-checkbox:focus-visible, .ui-radio:focus-visible { outline: none; box-shadow: var(--ui-focus-ring); }
+
+/* ============================================================================
+   §5.10 Tag — status & labels. Squared-soft, never pill.
+   ========================================================================== */
+.ui-tag {
+  display: inline-flex; align-items: center; gap: var(--ui-sp-2);
+  height: 20px; padding: 2px var(--ui-sp-3);
+  border-radius: var(--ui-r-sm);
+  font-family: var(--ui-font-sans);
+  font-size: 11px; font-weight: 600; letter-spacing: 0.01em;
+  white-space: nowrap;
+  background: var(--ui-neutral-bg); color: var(--ui-neutral-ink);
+}
+.ui-tag--success { background: var(--ui-success-bg); color: var(--ui-success-ink); }
+.ui-tag--warn    { background: var(--ui-warn-bg);    color: var(--ui-warn-ink); }
+.ui-tag--danger  { background: var(--ui-danger-bg);  color: var(--ui-danger-ink); }
+.ui-tag--info    { background: var(--ui-info-bg);    color: var(--ui-info-ink); }
+.ui-tag--neutral { background: var(--ui-neutral-bg); color: var(--ui-neutral-ink); }
+.ui-tag--mono { font-family: var(--ui-font-mono); font-variant-numeric: tabular-nums; }
+
+/* Dot variant — low emphasis: 6px solid dot + plain ink-2 text, no tint bg. */
+.ui-tag--dot { background: transparent; color: var(--ui-ink-2); padding: 0; height: auto; font-weight: 500; }
+.ui-tag__dot { width: 6px; height: 6px; border-radius: var(--ui-r-full); flex-shrink: 0; background: var(--ui-neutral-solid); }
+.ui-tag--success .ui-tag__dot { background: var(--ui-success-solid); }
+.ui-tag--warn    .ui-tag__dot { background: var(--ui-warn-solid); }
+.ui-tag--danger  .ui-tag__dot { background: var(--ui-danger-solid); }
+.ui-tag--info    .ui-tag__dot { background: var(--ui-info-solid); }
+.ui-tag--neutral .ui-tag__dot { background: var(--ui-neutral-solid); }
+
+/* ============================================================================
+   §5.11 Avatar + AvatarGroup + Identity. The lone --r-full surface.
+   ========================================================================== */
+.ui-avatar {
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: var(--ui-r-full);
+  background: var(--ui-accent-tint);
+  color: var(--ui-accent);
+  font-family: var(--ui-font-sans);
+  font-weight: 500;
+  flex-shrink: 0;
+  overflow: hidden;
+  user-select: none;
+}
+.ui-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.ui-avatar--has-photo { box-shadow: inset 0 0 0 1px var(--ui-line); }
+.ui-avatar--24 { width: 24px; height: 24px; font-size: 10px; }
+.ui-avatar--32 { width: 32px; height: 32px; font-size: 12px; }
+.ui-avatar--40 { width: 40px; height: 40px; font-size: 14px; }
+
+.ui-avatar-group { display: inline-flex; align-items: center; }
+.ui-avatar-group > .ui-avatar,
+.ui-avatar-group > .ui-avatar-group__more { box-shadow: 0 0 0 2px var(--ui-surface); }
+.ui-avatar-group > * + * { margin-left: -8px; }
+.ui-avatar-group__more {
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: var(--ui-r-full);
+  background: var(--ui-surface-inset);
+  color: var(--ui-ink-2);
+  font-family: var(--ui-font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px; font-weight: 500;
+  flex-shrink: 0;
+}
+
+.ui-identity { display: inline-flex; align-items: center; gap: var(--ui-sp-3); min-width: 0; }
+.ui-identity__meta { min-width: 0; display: flex; flex-direction: column; gap: var(--ui-sp-1); }
+.ui-identity__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui-identity__sub { color: var(--ui-ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ============================================================================
+   §5.12 Toolbar — header / table-top control cluster.
+   ========================================================================== */
+.ui-toolbar { display: flex; align-items: center; gap: var(--ui-sp-3); flex-wrap: wrap; }
+.ui-toolbar__divider { width: 1px; align-self: stretch; background: var(--ui-line); margin: 0 var(--ui-sp-1); }
+
+.ui-date-stepper { display: inline-flex; align-items: center; gap: var(--ui-sp-2); }
+.ui-date-stepper__pill {
+  display: inline-flex; align-items: center; justify-content: center;
+  height: var(--ui-control-h);
+  padding: 0 var(--ui-sp-4);
+  background: var(--ui-surface-inset);
+  border-radius: var(--ui-r-sm);
+  font-family: var(--ui-font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  color: var(--ui-ink);
+  white-space: nowrap;
+}
+
+/* ============================================================================
+   §5.13 EmptyState.
+   ========================================================================== */
+.ui-empty {
+  display: flex; flex-direction: column; align-items: center; text-align: center;
+  gap: var(--ui-sp-3);
+  padding: var(--ui-sp-10) var(--ui-sp-8);
+  background: var(--ui-surface-sunken);
+  border-radius: var(--ui-r-md);
+}
+.ui-empty__icon {
+  width: 48px; height: 48px;
+  border-radius: var(--ui-r-md);
+  background: var(--ui-surface-inset);
+  color: var(--ui-ink-3);
+  display: flex; align-items: center; justify-content: center;
+  margin-bottom: var(--ui-sp-2);
+}
+.ui-empty__title { margin: 0; }
+.ui-empty__desc { color: var(--ui-ink-2); max-width: 360px; }
+.ui-empty__action { margin-top: var(--ui-sp-3); }
+.ui-empty--danger .ui-empty__icon { background: var(--ui-danger-bg); color: var(--ui-danger-ink); }
+.ui-empty--danger .ui-empty__title { color: var(--ui-danger-ink); }
+
+/* ============================================================================
+   §5.14 Skeleton + Spinner.
+   ========================================================================== */
+.ui-skeleton {
+  display: block;
+  background: var(--ui-surface-inset);
+  border-radius: var(--ui-r-sm);
+}
+.ui-skeleton--shimmer {
+  background: linear-gradient(90deg, var(--ui-surface-inset) 0%, var(--ui-line-faint) 50%, var(--ui-surface-inset) 100%);
+  background-size: 200% 100%;
+  animation: ui-shimmer 1.4s ease-in-out infinite;
+}
+@keyframes ui-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .ui-skeleton--shimmer { animation: none; background: var(--ui-surface-inset); }
+}
+.ui-skeleton-table { display: flex; flex-direction: column; gap: var(--ui-sp-4); padding: var(--ui-sp-5) var(--ui-sp-7); }
+.ui-skeleton-stat { display: flex; flex-direction: column; gap: var(--ui-sp-3); padding: var(--ui-sp-6) var(--ui-sp-7); }
+
+.ui-spinner {
+  display: inline-block;
+  border-radius: var(--ui-r-full);
+  border: 2px solid var(--ui-line);
+  border-top-color: var(--ui-ink-3);
+  animation: ui-spin 0.7s linear infinite;
+}
+@keyframes ui-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .ui-spinner { animation-duration: 1.4s; } }
+/* On accent fills the spinner inherits a light ring. */
+.ui-btn--primary .ui-spinner, .ui-btn--danger .ui-spinner {
+  border-color: rgba(255, 255, 255, 0.4);
+  border-top-color: var(--ui-on-accent);
+}
+
+/* ============================================================================
+   §5.15 Banner — inline notice.
+   ========================================================================== */
+.ui-banner {
+  display: flex; align-items: center; gap: var(--ui-sp-3);
+  padding: var(--ui-sp-3) var(--ui-sp-4);
+  border-radius: var(--ui-r-sm);
+  border: 1px solid transparent;
+  font-family: var(--ui-font-sans);
+  font-size: 13px;
+}
+.ui-banner__icon { flex-shrink: 0; display: inline-flex; align-items: center; }
+.ui-banner__body { flex: 1 1 auto; min-width: 0; }
+.ui-banner__action { flex-shrink: 0; margin-left: auto; }
+.ui-banner--success { background: var(--ui-success-bg); border-color: var(--ui-success-ink); color: var(--ui-success-ink); }
+.ui-banner--warn    { background: var(--ui-warn-bg);    border-color: var(--ui-warn-ink);    color: var(--ui-warn-ink); }
+.ui-banner--danger  { background: var(--ui-danger-bg);  border-color: var(--ui-danger-ink);  color: var(--ui-danger-ink); }
+.ui-banner--info    { background: var(--ui-info-bg);    border-color: var(--ui-info-ink);    color: var(--ui-info-ink); }
+
+/* ============================================================================
+   §5.16 Popover / Menu / Toast — the floating layers (the ONLY --ui-shadow-pop).
+   ========================================================================== */
+.ui-popover-wrap { position: relative; display: inline-flex; }
+.ui-popover {
+  position: absolute;
+  z-index: 50;
+  top: calc(100% + var(--ui-sp-2));
+  right: 0;
+  min-width: 180px;
+  background: var(--ui-surface-raised);
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-lg);
+  box-shadow: var(--ui-shadow-pop);
+  padding: var(--ui-sp-2);
+  animation: ui-page-rise var(--ui-dur-base) var(--ui-ease) both;
+}
+.ui-menu { display: flex; flex-direction: column; }
+.ui-menu-item {
+  appearance: none; border: 0; background: transparent;
+  font-family: var(--ui-font-sans);
+  font-size: 13px; font-weight: 450;
+  color: var(--ui-ink);
+  text-align: left;
+  display: flex; align-items: center; gap: var(--ui-sp-3);
+  height: 32px; padding: 0 var(--ui-sp-3);
+  border-radius: var(--ui-r-sm);
+  cursor: pointer;
+  transition: background var(--ui-dur-fast) var(--ui-ease);
+}
+.ui-menu-item:hover { background: var(--ui-surface-inset); }
+.ui-menu-item:focus-visible { outline: none; box-shadow: var(--ui-focus-ring); }
+.ui-menu-item--danger { color: var(--ui-danger-ink); }
+.ui-menu-item:disabled { color: var(--ui-ink-disabled); cursor: not-allowed; background: transparent; }
+
+.ui-toast {
+  position: fixed;
+  right: var(--ui-sp-7); bottom: var(--ui-sp-7);
+  z-index: 100;
+  min-width: 280px; max-width: 420px;
+  background: var(--ui-surface-raised);
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-lg);
+  box-shadow: var(--ui-shadow-pop);
+  padding: var(--ui-sp-4) var(--ui-sp-5);
+  font-family: var(--ui-font-sans);
+  font-size: 13px;
+  color: var(--ui-ink);
+  display: flex; align-items: center; gap: var(--ui-sp-3);
+  animation: ui-page-rise var(--ui-dur-base) var(--ui-ease) both;
+  border-left-width: 4px;
+}
+.ui-toast--success { border-left-color: var(--ui-success-solid); }
+.ui-toast--warn    { border-left-color: var(--ui-warn-solid); }
+.ui-toast--danger  { border-left-color: var(--ui-danger-solid); }
+.ui-toast--info    { border-left-color: var(--ui-info-solid); }
+.ui-toast--neutral { border-left-color: var(--ui-neutral-solid); }
+
+/* Modal scrim reuses popover chrome centered over the overlay. */
+.ui-overlay {
+  position: fixed; inset: 0; z-index: 90;
+  background: var(--ui-overlay);
+  display: flex; align-items: center; justify-content: center;
+  padding: var(--ui-sp-7);
+}
+
+/* ============================================================================
+   §5.17 AppShell + Sidebar + NavItem — chrome.
+   ========================================================================== */
+.ui-app-shell {
+  display: grid;
+  grid-template-columns: var(--ui-sidebar-width) 1fr;
+  min-height: 100vh;
+}
+.ui-sidebar {
+  background: var(--ui-surface);
+  border-right: 1px solid var(--ui-line);
+  display: flex; flex-direction: column;
+  padding: var(--ui-sp-6) var(--ui-sp-4) var(--ui-sp-5);
+  position: sticky; top: 0;
+  height: 100vh;
+}
+.ui-sidebar__brand {
+  display: flex; align-items: center; gap: var(--ui-sp-3);
+  padding: 0 var(--ui-sp-3) var(--ui-sp-6);
+}
+.ui-sidebar__mark {
+  width: 24px; height: 24px;
+  border-radius: var(--ui-r-sm);
+  background: var(--ui-accent);
+  flex-shrink: 0;
+}
+.ui-nav { display: flex; flex-direction: column; gap: var(--ui-sp-1); }
+.ui-nav-section { padding: var(--ui-sp-5) var(--ui-sp-3) var(--ui-sp-2); }
+.ui-nav-item {
+  position: relative;
+  display: flex; align-items: center; gap: var(--ui-sp-3);
+  height: 36px; padding: 0 var(--ui-sp-3);
+  border-radius: var(--ui-r-sm);
+  color: var(--ui-ink-2);
+  text-decoration: none;
+  font-family: var(--ui-font-sans);
+  font-size: 13px; font-weight: 500;
+  transition: background var(--ui-dur-fast) var(--ui-ease), color var(--ui-dur-fast) var(--ui-ease);
+}
+.ui-nav-item svg { color: var(--ui-ink-3); flex-shrink: 0; transition: color var(--ui-dur-fast) var(--ui-ease); }
+.ui-nav-item:hover { background: var(--ui-surface-inset); color: var(--ui-ink); }
+.ui-nav-item:hover svg { color: var(--ui-ink-2); }
+.ui-nav-item:focus-visible { outline: none; box-shadow: var(--ui-focus-ring); }
+.ui-nav-item.is-active { background: var(--ui-accent-tint); color: var(--ui-accent); font-weight: 600; }
+.ui-nav-item.is-active svg { color: var(--ui-accent); }
+.ui-nav-item.is-active::before {
+  content: ''; position: absolute; left: 0; top: 8px; bottom: 8px;
+  width: 2px; border-radius: 2px; background: var(--ui-accent);
+}
+.ui-sidebar__foot {
+  margin-top: auto;
+  padding-top: var(--ui-sp-5);
+  border-top: 1px solid var(--ui-line);
+  display: flex; flex-direction: column; gap: var(--ui-sp-3);
+}
+.ui-sidebar__me { display: flex; align-items: center; gap: var(--ui-sp-3); padding: 0 var(--ui-sp-2); min-width: 0; }
+.ui-sidebar__me-meta { min-width: 0; }
+.ui-sidebar__me-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* The content column. Pages built from <Page> set their own max-width + gutter;
+   this padding keeps not-yet-migrated legacy screens spaced as before. */
+.ui-main { min-width: 0; overflow-x: hidden; padding: var(--ui-sp-9) var(--ui-sp-9) var(--ui-sp-10); }
+@media (max-width: 980px) {
+  .ui-main { padding: var(--ui-sp-7) var(--ui-sp-7) var(--ui-sp-9); }
+}

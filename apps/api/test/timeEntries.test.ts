@@ -170,6 +170,98 @@ describe('PUT /v1/time-entries/:id/sync', () => {
   });
 });
 
+describe('server-authoritative clock clamp (anti-clock-tamper)', () => {
+  const SKEW = 2 * 60 * 1000; // mirrors DEFAULT_CLOCK_SKEW_MS
+
+  it('clamps a future-ended segment on create down to ~now', async () => {
+    const u = await seedUser();
+    const now = Date.now();
+    const startMs = now - 5 * MIN; // honest recent start
+    const futureEnd = now + 60 * MIN; // client clock claims +1h
+    const body = createBody(u, {
+      startedAtMs: startMs,
+      segments: [{ id: fakeUlid('seg'), kind: 'WORK', startedAt: iso(startMs), endedAt: iso(futureEnd) }],
+    });
+    const res = await auth(request(app).post('/v1/time-entries'), u.accessToken).send(body);
+    expect(res.status).toBe(201);
+    const persistedEnd = new Date(res.body.segments[0].endedAt).getTime();
+    // Pulled back to the ceiling (≈ now + skew), nowhere near the +1h claim.
+    expect(persistedEnd).toBeLessThanOrEqual(now + SKEW + 5000);
+    expect(persistedEnd).toBeLessThan(futureEnd - 30 * MIN);
+    // The honest start is preserved untouched.
+    expect(new Date(res.body.segments[0].startedAt).getTime()).toBe(startMs);
+  });
+
+  it('leaves an honest past entry exactly as sent', async () => {
+    const u = await seedUser();
+    const now = Date.now();
+    const startMs = now - 30 * MIN;
+    const endMs = now - 20 * MIN;
+    const body = createBody(u, {
+      startedAtMs: startMs,
+      segments: [{ id: fakeUlid('seg'), kind: 'WORK', startedAt: iso(startMs), endedAt: iso(endMs) }],
+    });
+    const res = await auth(request(app).post('/v1/time-entries'), u.accessToken).send(body);
+    expect(res.status).toBe(201);
+    expect(res.body.segments[0].startedAt).toBe(iso(startMs));
+    expect(res.body.segments[0].endedAt).toBe(iso(endMs));
+  });
+
+  it('clamps a future open-segment start on create but keeps it open', async () => {
+    const u = await seedUser();
+    const now = Date.now();
+    const futureStart = now + 45 * MIN;
+    const body = createBody(u, {
+      startedAtMs: futureStart,
+      segments: [{ id: fakeUlid('seg'), kind: 'WORK', startedAt: iso(futureStart), endedAt: null }],
+    });
+    const res = await auth(request(app).post('/v1/time-entries'), u.accessToken).send(body);
+    expect(res.status).toBe(201);
+    expect(res.body.segments[0].endedAt).toBeNull();
+    const persistedStart = new Date(res.body.segments[0].startedAt).getTime();
+    expect(persistedStart).toBeLessThanOrEqual(now + SKEW + 5000);
+    expect(persistedStart).toBeLessThan(futureStart - 30 * MIN);
+  });
+
+  it('clamps a future endedAt on sync', async () => {
+    const u = await seedUser();
+    const now = Date.now();
+    const startMs = now - 10 * MIN;
+    const body = createBody(u, {
+      startedAtMs: startMs,
+      segments: [{ id: fakeUlid('seg'), kind: 'WORK', startedAt: iso(startMs), endedAt: null }],
+    });
+    await auth(request(app).post('/v1/time-entries'), u.accessToken).send(body);
+
+    const futureEnd = now + 120 * MIN; // client clock 2h ahead
+    const sync = {
+      endedAt: iso(futureEnd),
+      segments: [{ id: fakeUlid('s'), kind: 'WORK', startedAt: iso(startMs), endedAt: iso(futureEnd) }],
+    };
+    const res = await auth(request(app).put(`/v1/time-entries/${body.id}/sync`), u.accessToken).send(sync);
+    expect(res.status).toBe(200);
+    const persistedEnd = new Date(res.body.endedAt).getTime();
+    expect(persistedEnd).toBeLessThanOrEqual(now + SKEW + 5000);
+    expect(persistedEnd).toBeLessThan(futureEnd - 60 * MIN);
+    expect(new Date(res.body.segments[0].endedAt).getTime()).toBeLessThanOrEqual(now + SKEW + 5000);
+  });
+
+  it('accepts a timestamp within the skew window unchanged', async () => {
+    const u = await seedUser();
+    const now = Date.now();
+    const startMs = now - 5 * MIN;
+    const nearNow = now + 30 * 1000; // 30s ahead — inside the 2-min skew
+    const body = createBody(u, {
+      startedAtMs: startMs,
+      segments: [{ id: fakeUlid('seg'), kind: 'WORK', startedAt: iso(startMs), endedAt: iso(nearNow) }],
+    });
+    const res = await auth(request(app).post('/v1/time-entries'), u.accessToken).send(body);
+    expect(res.status).toBe(201);
+    // Within skew → persisted verbatim.
+    expect(res.body.segments[0].endedAt).toBe(iso(nearNow));
+  });
+});
+
 describe('GET /v1/time-entries', () => {
   it('returns only the caller\'s entries, newest first', async () => {
     const u1 = await seedUser();

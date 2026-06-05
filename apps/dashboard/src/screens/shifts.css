@@ -1,0 +1,166 @@
+/* ============================================================================
+   SHIFTS — /shifts. LAYOUT ONLY. All component looks (surfaces, colour, type,
+   borders, radius, shadow) come from the shared kit (src/ui) + tokens. This
+   file places kit components into grids/flex and nothing more. Prefix: shf-.
+   ========================================================================== */
+
+/* Vertical rhythm between sections / saved-shift cards. */
+.shf-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-sp-7);
+}
+
+/* ── Composer form ────────────────────────────────────────────────────────── */
+.shf-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-sp-6);
+}
+.shf-form-top {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: end;
+  gap: var(--ui-sp-4);
+}
+.shf-grow {
+  min-width: 0;
+}
+.shf-num {
+  width: 120px;
+  text-align: center;
+}
+
+/* ── Saved-shift row: identity / meta+actions header, then the week body ──── */
+.shf-row-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--ui-sp-5);
+  flex-wrap: wrap;
+}
+.shf-row-id {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-sp-4);
+  min-width: 0;
+}
+.shf-row-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-sp-1);
+  min-width: 0;
+}
+.shf-summary {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.shf-name-input {
+  width: 100%;
+  max-width: 320px;
+}
+.shf-row-side {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-sp-5);
+  flex-wrap: wrap;
+}
+.shf-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-sp-3);
+  flex-wrap: wrap;
+}
+.shf-buffer-edit {
+  width: 96px;
+}
+.shf-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-sp-2);
+  flex: none;
+}
+.shf-row-banner {
+  margin-top: var(--ui-sp-4);
+}
+.shf-row-body {
+  margin-top: var(--ui-sp-5);
+}
+
+/* ── 7-day editor table cells ─────────────────────────────────────────────── */
+.shf-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-sp-3);
+  cursor: pointer;
+  user-select: none;
+}
+.shf-times {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-sp-3);
+}
+.shf-time {
+  width: auto;
+}
+
+/* ── 7-day readout strip ──────────────────────────────────────────────────── */
+.shf-week {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: var(--ui-sp-3);
+}
+.shf-day {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--ui-sp-1);
+  padding: var(--ui-sp-4) var(--ui-sp-2);
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-sm);
+  text-align: center;
+}
+.shf-day.is-off {
+  background: var(--ui-surface-sunken);
+}
+.shf-day-label {
+  margin-bottom: var(--ui-sp-1);
+}
+.shf-day-time {
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+/* Skeleton placeholder spacing while shifts load. */
+.shf-skel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-sp-4);
+  padding: var(--ui-sp-6) var(--ui-sp-7);
+}
+
+/* ── Responsive ───────────────────────────────────────────────────────────── */
+@media (max-width: 760px) {
+  .shf-form-top {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+  .shf-num {
+    width: 100%;
+  }
+}
+@media (max-width: 560px) {
+  .shf-week {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .shf-day {
+    flex-direction: row;
+    justify-content: space-between;
+    text-align: left;
+  }
+  .shf-day-label {
+    margin-bottom: 0;
+  }
+}

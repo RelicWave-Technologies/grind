@@ -1,7 +1,9 @@
+import './login.css';
 import { useState, useEffect } from 'react';
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { useLogin, useMe } from '../lib/auth';
 import { ApiError } from '../lib/api';
+import { Card, SidebarBrand, Field, Input, Button, Banner } from '../ui';
 
 export function LoginScreen() {
   const navigate = useNavigate();
@@ -36,50 +38,56 @@ export function LoginScreen() {
   }
 
   return (
-    <div className="login-wrap">
-      <form className="login-card" onSubmit={onSubmit}>
-        <div className="login-brand">
-          <div className="login-mark" />
-          <div className="login-name">Grind</div>
-        </div>
-        <h1 className="h1 login-title">Sign in</h1>
-        <p className="login-sub secondary">
-          Use the same credentials as the Grind tracker.
-        </p>
+    <div className="lgn-page">
+      <Card className="lgn-card">
+        <form className="lgn-form" onSubmit={onSubmit}>
+          <div className="lgn-head">
+            <SidebarBrand name="Grind" />
+            <div className="lgn-heading">
+              <span className="ui-t-eyebrow">Workspace access</span>
+              <h1 className="ui-t-title">Sign in</h1>
+              <p className="ui-t-small">Use the same credentials as the Grind tracker.</p>
+            </div>
+          </div>
 
-        <label className="field">
-          <span className="field-label">Email</span>
-          <input
-            type="email"
-            autoComplete="username"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-            autoFocus
-          />
-        </label>
+          <div className="lgn-fields">
+            <Field label="Email">
+              <Input
+                type="email"
+                autoComplete="username"
+                placeholder="you@company.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+                autoFocus
+                error={!!err}
+              />
+            </Field>
 
-        <label className="field">
-          <span className="field-label">Password</span>
-          <input
-            type="password"
-            autoComplete="current-password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-          />
-        </label>
+            <Field label="Password">
+              <Input
+                type="password"
+                autoComplete="current-password"
+                placeholder="••••••••••"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                error={!!err}
+              />
+            </Field>
+          </div>
 
-        {err && <div className="login-error" role="alert">{err}</div>}
+          {err && <Banner status="danger">{err}</Banner>}
 
-        <button type="submit" className="btn-primary" disabled={login.isPending}>
-          {login.isPending ? 'Signing in…' : 'Sign in'}
-        </button>
+          <Button type="submit" variant="primary" block loading={login.isPending}>
+            {login.isPending ? 'Signing in…' : 'Sign in'}
+          </Button>
 
-        <p className="login-foot small secondary">
-          Trouble signing in? Ping IT — accounts are provisioned per workspace.
-        </p>
-      </form>
+          <p className="ui-t-small">
+            Trouble signing in? Ping IT — accounts are provisioned per workspace.
+          </p>
+        </form>
+      </Card>
     </div>
   );
 }

@@ -1,0 +1,149 @@
+import { BrowserWindow, screen } from 'electron';
+import path from 'node:path';
+
+/**
+ * Foundation for every always-on-top overlay the agent shows: the floating
+ * timer bar, the idle "still working?" prompt, the "ready to work?" shift
+ * toast, and the tray popover.
+ *
+ * Three things these windows MUST get right, and historically each file did
+ * slightly differently:
+ *
+ *   1. **Float over anything, on any Space.** `screen-saver` always-on-top
+ *      level + `visibleOnFullScreen` so the window sits above a fullscreen
+ *      Zoom/Keynote/browser and follows the user across virtual desktops.
+ *      These flags are NOT sticky — macOS drops them after display sleep and
+ *      some Space transitions (electron#36364) — so they must be re-asserted
+ *      on every show AND on wake/display change, not just at creation.
+ *
+ *   2. **Appear on the display the user is actually looking at.** Positioning
+ *      on `getPrimaryDisplay()` strands a popup on monitor 1 while the user
+ *      works fullscreen on monitor 2. We anchor to the display under the
+ *      cursor instead.
+ *
+ *   3. **One definition.** A single factory + a single float-assertion + a
+ *      registry so a lone power/display handler can re-assert every live
+ *      overlay at once.
+ */
+
+export interface Size {
+  width: number;
+  height: number;
+}
+
+export interface OverlayOptions extends Size {
+  /** Renderer hash-route (e.g. 'floating', 'idle', 'ready-to-work', 'popover'). */
+  hash: string;
+}
+
+// Live overlays — used by reassertAllOverlays() on wake / display change.
+const registry = new Set<BrowserWindow>();
+
+function loadRoute(w: BrowserWindow, hash: string): void {
+  if (process.env.ELECTRON_RENDERER_URL) {
+    void w.loadURL(`${process.env.ELECTRON_RENDERER_URL}#${hash}`);
+  } else {
+    void w.loadFile(path.join(__dirname, '../renderer/index.html'), { hash });
+  }
+}
+
+/**
+ * Create a frameless, transparent, non-activating overlay window with the
+ * shared hardened webPreferences. Auto-registers for float re-assertion and
+ * auto-deregisters on close.
+ */
+export function createOverlayWindow(opts: OverlayOptions): BrowserWindow {
+  const win = new BrowserWindow({
+    width: opts.width,
+    height: opts.height,
+    show: false,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    movable: true,
+    minimizable: false,
+    maximizable: false,
+    skipTaskbar: true,
+    fullscreenable: false,
+    hasShadow: true,
+    // 'panel' floats above fullscreen apps without stealing focus (macOS).
+    type: process.platform === 'darwin' ? 'panel' : undefined,
+    webPreferences: {
+      contextIsolation: true,
+      sandbox: true,
+      nodeIntegration: false,
+      preload: path.join(__dirname, '../preload/index.cjs'),
+    },
+  });
+  loadRoute(win, opts.hash);
+  registry.add(win);
+  win.on('closed', () => registry.delete(win));
+  return win;
+}
+
+/**
+ * Canonical "float over everything, on every Space" assertion. Idempotent and
+ * cheap — call it on every show, on wake, and on display change.
+ */
+export function assertOverlayFloat(win: BrowserWindow | null): void {
+  if (!win || win.isDestroyed()) return;
+  win.setAlwaysOnTop(true, 'screen-saver');
+  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
+}
+
+/** Re-assert float on every live overlay (wake / Space / display change). */
+export function reassertAllOverlays(): void {
+  for (const w of registry) assertOverlayFloat(w);
+}
+
+/**
+ * Work area of the display under the cursor — the best proxy for "where the
+ * user is looking right now". Falls back to the primary display if the cursor
+ * point can't be resolved (shouldn't happen, but never throw on a show path).
+ */
+export function activeWorkArea(): Electron.Rectangle {
+  try {
+    const pt = screen.getCursorScreenPoint();
+    return screen.getDisplayNearestPoint(pt).workArea;
+  } catch {
+    return screen.getPrimaryDisplay().workArea;
+  }
+}
+
+// --- Pure placement helpers (work area + size in, point out) ----------------
+
+export interface Rect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface Point {
+  x: number;
+  y: number;
+}
+
+/** Horizontally centered, one-third down — used by the idle prompt. */
+export function centerUpperThird(wa: Rect, size: Size): Point {
+  return {
+    x: Math.round(wa.x + (wa.width - size.width) / 2),
+    y: Math.round(wa.y + (wa.height - size.height) / 3),
+  };
+}
+
+/** Top-right with a gutter — used by the "ready to work?" toast. */
+export function topRight(wa: Rect, size: Size, gutter = 16): Point {
+  return {
+    x: Math.round(wa.x + wa.width - size.width - gutter),
+    y: Math.round(wa.y + gutter),
+  };
+}
+
+/** Bottom-right with a gutter — the floating bar's default home. */
+export function bottomRight(wa: Rect, size: Size, gutter = 20): Point {
+  return {
+    x: Math.round(wa.x + wa.width - size.width - gutter),
+    y: Math.round(wa.y + wa.height - size.height - gutter),
+  };
+}

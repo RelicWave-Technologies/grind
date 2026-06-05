@@ -4,70 +4,78 @@
    ========================================================================== */
 
 :root {
-  /* surfaces */
-  --bg-app: #f4f4f7;      /* app canvas */
-  --bg-sidebar: #ffffff;  /* sidebar chrome */
+  /* ── Figma DESIGN.md system (shared with the dashboard kit). Legacy token
+     names kept as aliases so the whole renderer flips centrally. ───────────── */
+  /* surfaces — soft-white canvas, white panels */
+  --bg-app: #f7f7f5;      /* Figma surface-soft — app canvas */
+  --bg-sidebar: #ffffff;
   --bg-card: #ffffff;
   --bg-control: #ffffff;
-  --ink: #15131c;         /* near-black hero / primary text */
-  --ink-soft: #1c1a24;
+  --ink: #0a0a0a;         /* Figma ink — hero / primary text */
+  --ink-soft: #1a1a1a;
 
-  /* text */
-  --label-primary: #15131c;
-  --label-secondary: rgba(40, 36, 56, 0.56);
-  --label-tertiary: rgba(40, 36, 56, 0.36);
-  --label-placeholder: rgba(40, 36, 56, 0.34);
+  /* text — Figma neutral */
+  --label-primary: #0a0a0a;
+  --label-secondary: rgba(0, 0, 0, 0.56);
+  --label-tertiary: rgba(0, 0, 0, 0.4);
+  --label-placeholder: rgba(0, 0, 0, 0.4);
   --on-dark: #ffffff;
-  --on-dark-soft: rgba(255, 255, 255, 0.62);
+  --on-dark-soft: rgba(255, 255, 255, 0.66);
 
-  /* separators / fills */
-  --separator: rgba(40, 36, 56, 0.08);
-  --separator-strong: rgba(40, 36, 56, 0.12);
-  --fill-hover: rgba(124, 92, 255, 0.06);
-  --fill-press: rgba(124, 92, 255, 0.1);
+  /* separators / fills — Figma hairlines, neutral hover */
+  --separator: #e6e6e6;
+  --separator-strong: #d2d2d7;
+  --fill-hover: rgba(0, 0, 0, 0.04);
+  --fill-press: rgba(0, 0, 0, 0.07);
 
-  /* violet accent */
-  --violet: #7c5cff;
-  --violet-600: #6d4bf0;
-  --violet-700: #5b39d8;
-  --violet-tint: rgba(124, 92, 255, 0.1);
-  --violet-tint-2: rgba(124, 92, 255, 0.16);
-  --grad-violet: linear-gradient(135deg, #9b7bff 0%, #6d3bf0 100%);
-  --ring-from: #b69bff;
-  --ring-to: #6d3bf0;
+  /* accent — Figma: black chrome + magenta pop. No gradients. */
+  --violet: #111111;
+  --violet-600: #111111;
+  --violet-700: #000000;
+  --violet-tint: #efeafc;        /* soft-lilac wash (active/selected/soft) */
+  --violet-tint-2: #e4dbfb;
+  --grad-violet: #111111;        /* solid black, no gradient */
+  --ring-from: #ff7ab0;          /* hero timer ring — the single magenta pop */
+  --ring-to: #ff3d8b;
+  --magenta: #ff3d8b;            /* Figma accent-magenta */
 
-  /* category palette (project chips/tags) */
-  --c-violet: #7c5cff;  --c-violet-bg: rgba(124, 92, 255, 0.12);
-  --c-rose: #ff4d8d;    --c-rose-bg: rgba(255, 77, 141, 0.12);
-  --c-orange: #ff9f43;  --c-orange-bg: rgba(255, 159, 67, 0.14);
-  --c-green: #21c17a;   --c-green-bg: rgba(33, 193, 122, 0.14);
-  --c-blue: #3aa0ff;    --c-blue-bg: rgba(58, 160, 255, 0.14);
-  --c-slate: #7a8699;   --c-slate-bg: rgba(122, 134, 153, 0.14);
-  /* Manual time (M10 approval flow) — distinct from the per-task green/violet
-     work palette so users instantly recognise a block as added-via-request. */
-  --c-amber: #f5a524;   --c-amber-bg: rgba(245, 165, 36, 0.16);
+  /* Figma block pastels — the colour identity (task chips, blocks, tiles). */
+  --lime: #dceeb1; --cream: #f4ecd6; --lilac: #c5b0f4;
+  --coral: #f3c9b6; --mint: #c8e6cd; --pink: #efd4d4;
+
+  /* category palette (task chips) → Figma pastels + dark ink */
+  --c-violet: #45348a;  --c-violet-bg: #c5b0f4;   /* lilac */
+  --c-rose: #a41539;    --c-rose-bg: #efd4d4;     /* pink */
+  --c-orange: #7a4b12;  --c-orange-bg: #f3c9b6;   /* coral */
+  --c-green: #14622d;   --c-green-bg: #c8e6cd;    /* mint */
+  --c-blue: #234a8a;    --c-blue-bg: #dbe7f5;     /* soft blue */
+  --c-slate: #5c5c60;   --c-slate-bg: #ececea;
+  /* Manual time (M10) — Figma cream, distinct from the work palette. */
+  --c-amber: #7a4b12;   --c-amber-bg: #f4ecd6;    /* cream */
 
   /* status */
-  --success: #21c17a;
-  --danger: #ff4d6a;
+  --success: #1ea64a;
+  --danger: #e5484d;
 
-  /* type */
-  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
-  --font-round: ui-rounded, "SF Pro Rounded", "SF Pro Display", -apple-system, sans-serif;
+  /* type — Figma: Inter for text, JetBrains Mono for data/taxonomy */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif;
+  --font-round: 'Inter', -apple-system, 'SF Pro Display', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', ui-monospace, Menlo, monospace;
 
   /* spacing */
   --sp-1: 2px; --sp-2: 4px; --sp-3: 8px; --sp-4: 12px; --sp-5: 16px;
   --sp-6: 20px; --sp-7: 24px; --sp-8: 32px; --sp-9: 40px; --sp-10: 48px;
 
-  /* radii */
-  --radius-sm: 8px; --radius-md: 12px; --radius-lg: 18px; --radius-xl: 24px;
+  /* radii — Figma + pill for buttons */
+  --radius-sm: 8px; --radius-md: 10px; --radius-lg: 16px; --radius-xl: 24px; --radius-pill: 999px;
 
-  /* shadows */
-  --shadow-sm: 0 1px 2px rgba(24, 20, 44, 0.05);
-  --shadow-card: 0 1px 2px rgba(24, 20, 44, 0.04), 0 8px 24px rgba(24, 20, 44, 0.06);
-  --shadow-hero: 0 12px 40px rgba(40, 24, 96, 0.28);
-  --shadow-lift: 0 6px 20px rgba(24, 20, 44, 0.1);
-  --focus-ring: 0 0 0 3px rgba(124, 92, 255, 0.4);
+  /* shadows — Figma shadow-light (one soft pop for floating layers only) */
+  --shadow-sm: none;
+  --shadow-card: none;
+  --shadow-hero: none;
+  --shadow-lift: none;
+  --shadow-pop: 0 8px 24px -6px rgba(0, 0, 0, 0.12);
+  --focus-ring: 0 0 0 3px rgba(0, 0, 0, 0.22);
 
   /* motion */
   --ease: cubic-bezier(0.4, 0, 0.2, 1);
@@ -104,7 +112,7 @@ body.chrome-window { background: transparent; }
   background: transparent; border-radius: 8px;
   border: 3px solid transparent; background-clip: padding-box;
 }
-:hover::-webkit-scrollbar-thumb { background: rgba(40, 36, 56, 0.18); background-clip: padding-box; }
+:hover::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.18); background-clip: padding-box; }
 ::-webkit-scrollbar-track { background: transparent; }
 
 /* type helpers */
@@ -125,7 +133,7 @@ body.chrome-window { background: transparent; }
 /* ---- buttons ---- */
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-2);
-  height: 34px; padding: 0 var(--sp-5); border: none; border-radius: var(--radius-sm);
+  height: 34px; padding: 0 var(--sp-6); border: none; border-radius: var(--radius-pill);
   background: var(--bg-control); color: var(--label-primary);
   font: inherit; font-weight: 600; cursor: default;
   box-shadow: inset 0 0 0 1px var(--separator-strong);
@@ -135,15 +143,25 @@ body.chrome-window { background: transparent; }
 .btn:active:not(:disabled) { transform: scale(0.98); }
 .btn:disabled { opacity: 0.45; }
 .btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
-.btn-prominent {
-  background: var(--grad-violet); color: #fff; box-shadow: 0 4px 14px rgba(109, 59, 240, 0.35);
+
+/* Inline text link button (e.g. "Reset position" inside a settings subtitle). */
+.link-btn {
+  background: none; border: none; padding: 0; font: inherit;
+  color: var(--violet); font-weight: 600; cursor: pointer;
+  text-decoration: underline; text-underline-offset: 2px;
 }
-.btn-prominent:hover:not(:disabled) { background: var(--grad-violet); filter: brightness(1.05); }
+.link-btn:hover:not(:disabled) { opacity: 0.8; }
+.link-btn:disabled { opacity: 0.45; cursor: default; }
+.link-btn:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: 3px; }
+.btn-prominent {
+  background: var(--grad-violet); color: #fff; box-shadow: none;
+}
+.btn-prominent:hover:not(:disabled) { background: #000; filter: none; }
 .btn-soft { background: var(--violet-tint); color: var(--violet-700); box-shadow: none; }
 .btn-soft:hover:not(:disabled) { background: var(--violet-tint-2); }
 .btn-ghost { background: transparent; box-shadow: none; color: var(--label-secondary); }
 .btn-ghost:hover:not(:disabled) { background: var(--fill-hover); color: var(--label-primary); }
-.btn-lg { height: 44px; border-radius: var(--radius-md); font-size: 14px; }
+.btn-lg { height: 44px; border-radius: var(--radius-pill); font-size: 14px; }
 .btn-block { width: 100%; }
 
 /* ---- fields ---- */
@@ -173,7 +191,7 @@ label.field-label { display: block; font-size: 12px; font-weight: 600; color: va
 .brand-mark {
   width: 26px; height: 26px; border-radius: 8px; background: var(--grad-violet);
   display: flex; align-items: center; justify-content: center; color: #fff;
-  box-shadow: 0 3px 8px rgba(109, 59, 240, 0.35);
+  box-shadow: none;
 }
 .brand-name { font-family: var(--font-round); font-size: 16px; font-weight: 700; letter-spacing: -0.2px; }
 .nav { display: flex; flex-direction: column; gap: 2px; margin-top: var(--sp-5); }
@@ -221,14 +239,14 @@ label.field-label { display: block; font-size: 12px; font-weight: 600; color: va
    ========================================================================== */
 .hero-running {
   position: relative; overflow: hidden;
-  background: linear-gradient(135deg, #211c33 0%, #15131c 100%);
-  border-radius: var(--radius-xl); padding: var(--sp-7);
-  box-shadow: var(--shadow-hero); color: var(--on-dark);
+  background: #1f1d3d;   /* Figma navy block — the one dark surface */
+  border-radius: var(--radius-lg); padding: var(--sp-7);
+  box-shadow: none; color: var(--on-dark);
   display: flex; align-items: center; justify-content: space-between;
 }
 .hero-running::after {
   content: ""; position: absolute; right: -60px; top: -60px; width: 220px; height: 220px;
-  background: radial-gradient(circle, rgba(124, 92, 255, 0.45), transparent 70%); pointer-events: none;
+  background: none; pointer-events: none;   /* no violet glow (Figma) */
 }
 .hero-running .hero-time { font-family: var(--font-round); font-size: 40px; font-weight: 700; letter-spacing: -1px; }
 .hero-running .hero-proj { display: flex; align-items: center; gap: var(--sp-2); color: var(--on-dark-soft); font-size: 13px; margin-top: var(--sp-1); }
@@ -238,7 +256,7 @@ label.field-label { display: block; font-size: 12px; font-weight: 600; color: va
 .dt { width: 100%; }
 .dt-track {
   position: relative; height: 44px; border-radius: 12px;
-  background: rgba(40, 36, 56, 0.05); overflow: hidden;
+  background: rgba(0, 0, 0, 0.05); overflow: hidden;
 }
 .dt-seg {
   position: absolute; top: 7px; height: 30px; border-radius: 7px; min-width: 3px;
@@ -258,311 +276,8 @@ label.field-label { display: block; font-size: 12px; font-weight: 600; color: va
 .dt-legend span { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--label-secondary); }
 .dt-dot { width: 9px; height: 9px; border-radius: 3px; }
 /* Work is colored per task — show that with a multi-color swatch in the legend. */
-.dt-swatch-work { width: 22px; height: 9px; border-radius: 3px; background: linear-gradient(90deg, var(--c-violet), var(--c-rose), var(--c-green), var(--c-orange)); }
+.dt-swatch-work { width: 22px; height: 9px; border-radius: 3px; background: linear-gradient(90deg, var(--c-violet-bg), var(--c-rose-bg), var(--c-green-bg), var(--c-orange-bg)); }
 .dt-leg-sub { color: var(--label-tertiary); }
-
-/* ---- wide day ribbon (Edit Time tab) ---- */
-.dr { position: relative; width: 100%; user-select: none; }
-.dr-track {
-  position: relative; height: 56px; border-radius: 6px;
-  background: rgba(40, 36, 56, 0.04); overflow: hidden;
-  cursor: crosshair;
-}
-.dr-seg {
-  position: absolute; top: 10px; height: 36px; border-radius: 3px; min-width: 3px;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
-  cursor: pointer;
-  transition: filter var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
-}
-.dr-seg:hover { filter: brightness(0.96); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.4), 0 0 0 1.5px rgba(124, 92, 255, 0.45); }
-.dr-seg-work    { background: var(--c-green); }
-.dr-seg-meeting { background: var(--c-blue); }
-.dr-seg-manual  { background: var(--c-amber); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.35); }
-.dr-seg-idle    { background: var(--c-slate); opacity: 0.55; }
-.dr-seg-gap     { background: transparent; }
-.dr-seg-live    { animation: segpulse 1.8s var(--ease) infinite; }
-.dr-seg[role="button"]:focus-visible { outline: 2px solid var(--c-violet); outline-offset: 2px; }
-
-/* PENDING request overlay: full-height RED block over the gap zone so it
- * reads as "stop — this is waiting on someone." Approved manual time stays
- * amber (yellow); pending is red to signal the waiting state. */
-.dr-pending {
-  position: absolute; top: 10px; height: 36px; border-radius: 3px;
-  background-image: repeating-linear-gradient(
-    45deg,
-    rgba(255, 77, 106, 0.55) 0 4px,
-    rgba(255, 77, 106, 0.10) 4px 10px
-  );
-  background-color: rgba(255, 77, 106, 0.10);
-  box-shadow: inset 0 0 0 1px rgba(255, 77, 106, 0.55);
-  pointer-events: none;
-}
-
-.dr-now {
-  position: absolute; top: -4px; bottom: -4px; width: 2px; border-radius: 2px;
-  background: var(--c-violet); transform: translateX(-1px); pointer-events: none;
-}
-.dr-now::before {
-  content: ""; position: absolute; top: -4px; left: -3px;
-  width: 8px; height: 8px; border-radius: 50%; background: var(--c-violet);
-  box-shadow: 0 0 0 4px rgba(124,92,255,0.18);
-}
-.dr-future {
-  position: absolute; top: 0; bottom: 0; right: 0;
-  background-image: repeating-linear-gradient(135deg, rgba(40,36,56,0.045) 0 6px, transparent 6px 14px);
-  pointer-events: none;
-}
-
-/* Hover ghost: shows the user where a click would create a manual-time
- * request. Subtle violet — same chrome as a focused chip — so it doesn't
- * compete with real pending blocks (which use amber). */
-.dr-ghost {
-  position: absolute; top: 10px; height: 36px; border-radius: 3px;
-  background: rgba(124, 92, 255, 0.08);
-  box-shadow: inset 0 0 0 1.5px rgba(124, 92, 255, 0.55);
-  pointer-events: none;
-  animation: dr-ghost-in var(--dur-fast) var(--ease) 1;
-}
-@keyframes dr-ghost-in {
-  from { opacity: 0; }
-  to   { opacity: 1; }
-}
-
-.dr-axis { position: relative; height: 18px; margin-top: 8px; }
-.dr-tick { position: absolute; transform: translateX(-50%); font-size: 10px; color: var(--label-tertiary); font-variant-numeric: tabular-nums; }
-.dr-tick-major { color: var(--label-secondary); font-weight: 600; }
-
-/* ============================================================
- * Edit Time — table, rows, chip-style inline editors.
- *
- * Design language: calm, light, violet signature. Time + task inputs
- * are not raw form controls — they're chip-shaped triggers that open
- * floating popovers. Row state changes (saving / saved / error) never
- * cause layout shift; cells have fixed widths and the action column
- * keeps a reserved slot for icons.
- * ============================================================ */
-
-/* ---- chip-style trigger used by TimePopover + TaskCombo ---- */
-.et-chip-trigger {
-  font: inherit; font-size: 12px; line-height: 1.2;
-  padding: 6px 10px; border-radius: 4px;
-  background: transparent; border: 1px solid transparent;
-  color: var(--label); cursor: pointer;
-  display: inline-flex; align-items: center; gap: 6px;
-  transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
-}
-.et-chip-trigger:hover:not(:disabled) { background: rgba(40,36,56,0.04); border-color: var(--separator); }
-.et-chip-trigger[aria-expanded="true"] { background: white; border-color: var(--c-violet); box-shadow: 0 0 0 3px rgba(124,92,255,0.12); }
-.et-chip-trigger:disabled { color: var(--label-secondary); cursor: default; }
-.et-chip-trigger:focus-visible { outline: 2px solid var(--c-violet); outline-offset: 2px; }
-.et-chip-trigger .et-chip-caret { color: var(--label-tertiary); transition: transform var(--dur-fast) var(--ease); }
-.et-chip-trigger[aria-expanded="true"] .et-chip-caret { transform: rotate(180deg); color: var(--c-violet); }
-.et-chip-trigger-time { font-variant-numeric: tabular-nums; min-width: 76px; justify-content: center; }
-.et-chip-trigger-task { min-width: 120px; max-width: 220px; }
-.et-chip-trigger-task .et-chip-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; text-align: left; }
-.et-chip-untracked { color: var(--label-tertiary); font-style: italic; }
-
-/* ---- generic floating popover (used by TimePopover + TaskCombo) ---- */
-.et-pop {
-  position: fixed; z-index: 1000;
-  background: white; border-radius: 8px;
-  box-shadow:
-    0 1px 1px rgba(40,36,56,0.04),
-    0 6px 16px rgba(40,36,56,0.08),
-    0 24px 48px rgba(40,36,56,0.10);
-  border: 1px solid var(--separator);
-  padding: 8px; min-width: 200px;
-  opacity: 0; transform: translateY(-4px) scale(0.98);
-  transition: opacity var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
-  pointer-events: none;
-}
-.et-pop[data-open="true"] {
-  opacity: 1; transform: translateY(0) scale(1); pointer-events: auto;
-}
-.et-pop[data-flip="up"] { transform-origin: bottom; }
-.et-pop[data-open="true"][data-flip="up"] { transform: translateY(0) scale(1); }
-
-/* ---- TimePopover internals ---- */
-.tp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-.tp-col {
-  max-height: 200px; overflow-y: auto;
-  display: flex; flex-direction: column; gap: 1px;
-  scrollbar-width: thin;
-}
-.tp-col::-webkit-scrollbar { width: 6px; }
-.tp-col::-webkit-scrollbar-thumb { background: rgba(40,36,56,0.18); border-radius: 3px; }
-.tp-cell {
-  font-variant-numeric: tabular-nums; font-size: 13px;
-  padding: 5px 10px; border-radius: 6px; cursor: pointer; text-align: center;
-  background: transparent; border: 0; color: var(--label);
-}
-.tp-cell:not(:disabled):hover { background: var(--c-violet-bg); color: var(--c-violet); }
-.tp-cell[aria-selected="true"]:not(:disabled) { background: var(--c-violet); color: white; font-weight: 600; }
-.tp-cell[data-active="true"]:not(:disabled) { box-shadow: inset 0 0 0 1.5px var(--c-violet); }
-.tp-cell:disabled { color: var(--label-tertiary); opacity: 0.4; cursor: not-allowed; }
-.tp-meridiem { display: flex; gap: 2px; margin-bottom: 6px; padding: 2px; background: rgba(40,36,56,0.05); border-radius: 8px; }
-.tp-meridiem-btn { flex: 1; padding: 4px 0; border-radius: 6px; border: 0; background: transparent; cursor: pointer; font-size: 11px; font-weight: 600; color: var(--label-secondary); }
-.tp-meridiem-btn[aria-pressed="true"] { background: white; color: var(--label); box-shadow: 0 1px 2px rgba(40,36,56,0.08); }
-.tp-meridiem-btn:disabled { opacity: 0.35; cursor: not-allowed; }
-
-/* ---- TaskCombo internals ---- */
-.tc-search {
-  width: 100%; box-sizing: border-box;
-  font: inherit; font-size: 13px; padding: 8px 10px;
-  border: 0; border-bottom: 1px solid var(--separator);
-  background: transparent; color: var(--label); outline: none;
-  margin-bottom: 4px;
-}
-.tc-search::placeholder { color: var(--label-tertiary); }
-.tc-list { max-height: 280px; overflow-y: auto; display: flex; flex-direction: column; gap: 1px; }
-.tc-list::-webkit-scrollbar { width: 6px; }
-.tc-list::-webkit-scrollbar-thumb { background: rgba(40,36,56,0.18); border-radius: 3px; }
-.tc-item {
-  font-size: 13px; padding: 7px 10px; border-radius: 6px; cursor: pointer;
-  background: transparent; border: 0; color: var(--label);
-  display: flex; align-items: center; gap: 8px; text-align: left;
-}
-.tc-item:hover, .tc-item[data-active="true"] { background: var(--c-violet-bg); color: var(--c-violet); }
-.tc-item[aria-selected="true"] { font-weight: 600; }
-.tc-item-untracked { color: var(--label-tertiary); font-style: italic; border-bottom: 1px solid var(--separator); border-radius: 6px 6px 0 0; }
-.tc-empty { padding: 12px; color: var(--label-tertiary); font-size: 12px; text-align: center; }
-
-/* ---- Inline reason input (used by gap + pending + tracked) ---- */
-.et-reason {
-  font: inherit; font-size: 12px; padding: 6px 10px; border-radius: 8px;
-  border: 1px solid transparent; background: transparent; color: var(--label);
-  width: 100%; min-width: 0;
-  transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
-}
-.et-reason::placeholder { color: var(--label-tertiary); }
-.et-reason:hover:not(:disabled) { background: rgba(40,36,56,0.03); border-color: var(--separator); }
-.et-reason:focus { outline: none; border-color: var(--c-violet); background: white; box-shadow: 0 0 0 3px rgba(124,92,255,0.12); }
-.et-reason:disabled { color: var(--label-secondary); }
-
-/* ---- Row chrome ---- */
-/* Three semantic states ONLY (anything else returns to "white"):
- *   green  — tracked (computer time, AUTO TimeEntry)
- *   amber  — APPROVED manual time (MANUAL TimeEntry)
- *   red    — PENDING manual-time request (waiting for approver)
- * Gaps + rejected requests = white. (Rejected isn't rendered at all.)
- */
-.et-row { transition: background var(--dur-slow) var(--ease); height: 52px; }
-.et-row td { padding: 8px 16px; vertical-align: middle; }
-/* Slightly de-emphasise gap rows so the eye lands on real entries first. */
-.et-row-gap td { color: var(--label-secondary); }
-.et-row-tracked         { box-shadow: inset 3px 0 0 var(--c-green); }
-.et-row-manual-approved { box-shadow: inset 3px 0 0 var(--c-amber); background: rgba(245, 165, 36, 0.07); }
-.et-row-pending         { box-shadow: inset 3px 0 0 var(--danger);  background: rgba(255, 77, 106, 0.07); }
-.et-row-gap             { box-shadow: none; }
-
-/* Flash on ribbon click: short, calm, no layout shift. */
-@keyframes et-flash {
-  0%   { background-color: rgba(124, 92, 255, 0.18); }
-  100% { background-color: transparent; }
-}
-.et-row-flash { animation: et-flash var(--dur-slow) var(--ease) 1; }
-
-/* Hover-link from the ribbon: subtle shadow + tint to make it obvious
- * which table row corresponds to the block under the cursor. */
-.et-row-highlighted {
-  background: rgba(124, 92, 255, 0.05) !important;
-  box-shadow: inset 0 0 0 1px rgba(124, 92, 255, 0.18),
-              inset 3px 0 0 var(--c-violet);
-  position: relative; z-index: 1;
-}
-
-/* Saved-success pulse: greenish, soft. */
-@keyframes et-saved {
-  0%   { background-color: rgba(33, 193, 122, 0.22); }
-  100% { background-color: transparent; }
-}
-.et-row-saved { animation: et-saved 1.2s var(--ease) 1; }
-
-/* Action column: just enough to fit Save + (optional Cancel) without
- * pushing the column off-screen on narrower windows. Buttons hidden by
- * default; revealed via :hover / :focus-within / .et-row-dirty so calm
- * rows stay calm. */
-.et-action-cell { width: 240px; text-align: right; white-space: nowrap; padding-right: 16px; }
-.et-actions {
-  display: inline-flex; align-items: center; gap: 6px;
-  opacity: 0;
-  transition: opacity var(--dur-fast) var(--ease);
-}
-.et-row:hover .et-actions,
-.et-row:focus-within .et-actions,
-.et-row.et-row-dirty .et-actions { opacity: 1; }
-.et-row-btn { padding: 6px 11px; font-size: 11.5px; min-width: 0; line-height: 1.2; }
-.et-row-btn:disabled { opacity: 0.45; }
-.et-row-err-icon {
-  color: var(--danger); margin-left: 4px; vertical-align: -2px;
-  cursor: help;
-}
-
-/* Ribbon wrapper — minimal chrome, flush with the table below so the
- * timeline and the rows visually align column-to-column. */
-.et-ribbon-wrap {
-  width: 100%; padding: var(--sp-4) var(--sp-5);
-  background: var(--bg-card); border-radius: 8px;
-  box-shadow: 0 1px 2px rgba(40,36,56,0.03), 0 4px 16px rgba(40,36,56,0.03);
-  border: 1px solid var(--separator);
-}
-
-/* Spinner (used in save button). */
-.spin { animation: et-spin 0.7s linear infinite; }
-@keyframes et-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-
-/* ---- Table chrome ---- */
-/* The table sits in a card matching the ribbon wrap above (.et-ribbon-wrap)
- * so the two surfaces feel like one connected timeline view. */
-.et-table-wrap {
-  margin-top: var(--sp-3);
-  background: var(--bg-card); border-radius: 8px;
-  box-shadow: 0 1px 2px rgba(40,36,56,0.03), 0 4px 16px rgba(40,36,56,0.03);
-  border: 1px solid var(--separator);
-  overflow: hidden;
-}
-.et-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.et-table th {
-  padding: 14px 16px; text-align: left;
-  font-weight: 600; color: var(--label-tertiary); font-size: 10.5px;
-  text-transform: uppercase; letter-spacing: 0.06em;
-  border-bottom: 1px solid var(--separator);
-  background: rgba(40,36,56,0.015);
-}
-.et-table tbody tr { border-bottom: 1px solid var(--separator); }
-.et-table tbody tr:last-child { border-bottom: 0; }
-.et-table tbody tr:hover:not(.et-row-flash):not(.et-row-saved) { background: rgba(40,36,56,0.018); }
-
-.et-cell-dur { font-variant-numeric: tabular-nums; color: var(--label-tertiary); font-size: 12px; }
-
-.et-fill-link {
-  background: none; border: 0; padding: 4px 8px; cursor: pointer;
-  color: var(--c-violet); font-weight: 600; font-size: 12px; border-radius: 6px;
-  transition: background var(--dur-fast) var(--ease);
-}
-.et-fill-link:hover { background: var(--c-violet-bg); }
-
-.et-totals { display: flex; gap: var(--sp-4); flex-wrap: wrap; margin-top: var(--sp-5); padding: var(--sp-3) var(--sp-4); border-radius: 12px; background: rgba(40,36,56,0.035); }
-.et-total { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--label-secondary); }
-.et-total strong { color: var(--label); font-variant-numeric: tabular-nums; font-weight: 700; }
-
-.et-datebar { display: flex; align-items: center; gap: var(--sp-2); }
-.et-datebar .et-date {
-  font-family: var(--font-round); font-size: 16px; font-weight: 600;
-  letter-spacing: -0.2px; padding: 0 var(--sp-3);
-  color: var(--label);
-}
-.et-datebar .et-date .et-date-dow { color: var(--label-tertiary); font-weight: 500; margin-right: 6px; }
-.et-datebar .btn-icon {
-  width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center;
-  border-radius: 8px; background: rgba(40,36,56,0.05); border: 0; cursor: pointer; color: var(--label);
-  transition: background var(--dur-fast) var(--ease);
-}
-.et-datebar .btn-icon:hover:not(:disabled) { background: rgba(40,36,56,0.10); }
-.et-datebar .btn-icon:disabled { opacity: 0.30; cursor: not-allowed; }
-
-.et-kbd-hint { font-size: 10.5px; color: var(--label-tertiary); margin-left: var(--sp-2); }
-.et-kbd { font-family: 'SF Mono', ui-monospace, monospace; font-size: 10px; padding: 1px 5px; background: rgba(40,36,56,0.07); border-radius: 4px; }
 
 /* ---- focus running view ---- */
 .focus { display: flex; flex-direction: column; align-items: center; gap: var(--sp-7); padding: var(--sp-6) 0; }
@@ -591,15 +306,15 @@ label.field-label { display: block; font-size: 12px; font-weight: 600; color: va
 .task-list { display: flex; flex-direction: column; gap: var(--sp-3); }
 .task {
   -webkit-app-region: no-drag; display: flex; align-items: center; gap: var(--sp-4);
-  background: var(--bg-card); border: none; width: 100%; text-align: left; font: inherit;
+  background: var(--bg-card); border: 1px solid var(--separator); width: 100%; text-align: left; font: inherit;
   border-radius: var(--radius-lg); padding: var(--sp-4) var(--sp-5); cursor: default;
-  box-shadow: var(--shadow-card);
-  transition: transform var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+  box-shadow: none;
+  transition: transform var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
 }
-.task:hover { transform: translateY(-1px); box-shadow: var(--shadow-lift); }
+.task:hover { transform: translateY(-1px); border-color: var(--separator-strong); }
 .task-icon {
   width: 42px; height: 42px; border-radius: var(--radius-md); flex-shrink: 0;
-  display: flex; align-items: center; justify-content: center; color: #fff;
+  display: flex; align-items: center; justify-content: center; color: var(--ink);
 }
 .task-main { flex: 1; min-width: 0; }
 .task-title { font-size: 14px; font-weight: 600; letter-spacing: -0.2px; }
@@ -675,7 +390,7 @@ label.field-label { display: block; font-size: 12px; font-weight: 600; color: va
 .hero-stop:active { transform: scale(0.97); }
 
 /* Running task row + stop affordance */
-.task-running { box-shadow: inset 0 0 0 1.5px var(--violet), var(--shadow-card); }
+.task-running { border-color: transparent; box-shadow: inset 0 0 0 1.5px var(--magenta); }
 .task-play.stop { background: rgba(255,77,106,0.12); color: var(--danger); }
 .task:hover .task-play.stop { background: var(--danger); color: #fff; }
 .tag-live { background: rgba(33,193,122,0.14); color: #137a4f; }
@@ -713,7 +428,7 @@ label.field-label { display: block; font-size: 12px; font-weight: 600; color: va
   box-shadow: var(--shadow-card); aspect-ratio: 16 / 10;
 }
 .shot img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.shot-missing { width: 100%; height: 100%; background: rgba(40, 36, 56, 0.06); }
+.shot-missing { width: 100%; height: 100%; background: rgba(0, 0, 0, 0.06); }
 .shot-time {
   position: absolute; right: 5px; top: 5px; font-size: 10px; font-weight: 600; color: #fff;
   background: rgba(0, 0, 0, 0.5); padding: 1px 5px; border-radius: 5px; font-variant-numeric: tabular-nums;
@@ -726,7 +441,7 @@ label.field-label { display: block; font-size: 12px; font-weight: 600; color: va
 .shot-act-row { display: flex; align-items: center; gap: 4px; color: rgba(255, 255, 255, 0.92); }
 .shot-act-track { flex: 1; height: 4px; border-radius: 2px; background: rgba(255, 255, 255, 0.28); overflow: hidden; }
 .shot-act-fill { display: block; height: 100%; border-radius: 2px; }
-.shot-act-fill.kb { background: var(--c-green); }
+.shot-act-fill.kb { background: #1ea64a; }
 .shot-act-fill.ms { background: #5aa9ff; }
 /* clickable shot */
 .shot-btn { -webkit-app-region: no-drag; border: none; padding: 0; cursor: pointer; text-align: left; transition: transform var(--dur-fast) var(--spring), box-shadow var(--dur-fast) var(--ease); }
@@ -756,17 +471,17 @@ label.field-label { display: block; font-size: 12px; font-weight: 600; color: va
 }
 .perm-banner {
   display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-4) var(--sp-5);
-  background: rgba(255, 159, 67, 0.1); color: var(--c-orange); border-radius: var(--radius-md); margin-bottom: var(--sp-2);
+  background: var(--c-orange-bg); color: var(--c-orange); border-radius: var(--radius-md); margin-bottom: var(--sp-2);
 }
 .perm-banner .secondary { color: var(--label-secondary); }
 
 /* ============================================================================
    settings
    ========================================================================== */
-.set-card { background: var(--bg-card); border-radius: var(--radius-lg); box-shadow: var(--shadow-card); overflow: hidden; }
+.set-card { background: var(--bg-card); border: 1px solid var(--separator); border-radius: var(--radius-lg); box-shadow: var(--shadow-card); overflow: hidden; }
 .set-row { display: flex; align-items: center; gap: var(--sp-4); padding: var(--sp-5); }
 .set-row + .set-row { border-top: 0.5px solid var(--separator); }
-.set-ic { width: 34px; height: 34px; border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #fff; flex-shrink: 0; }
+.set-ic { width: 34px; height: 34px; border-radius: 10px; display: flex; align-items: center; justify-content: center; color: var(--ink); flex-shrink: 0; }
 .set-main { flex: 1; min-width: 0; }
 .set-title { font-size: 14px; font-weight: 600; }
 .set-sub { font-size: 12px; margin-top: 2px; }
@@ -774,9 +489,9 @@ label.field-label { display: block; font-size: 12px; font-weight: 600; color: va
 .set-warn { display: inline-flex; align-items: center; gap: 4px; color: var(--c-orange); }
 .toggle {
   -webkit-app-region: no-drag; width: 44px; height: 26px; border-radius: 13px; border: none; flex-shrink: 0;
-  background: rgba(40, 36, 56, 0.18); position: relative; cursor: default; transition: background var(--dur-base) var(--ease);
+  background: rgba(0, 0, 0, 0.16); position: relative; cursor: default; transition: background var(--dur-base) var(--ease);
 }
-.toggle.on { background: var(--success); }
+.toggle.on { background: var(--ink); }
 .toggle-knob {
   position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25); transition: transform var(--dur-base) var(--spring);
@@ -788,24 +503,24 @@ label.field-label { display: block; font-size: 12px; font-weight: 600; color: va
    ========================================================================== */
 .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--sp-3); }
 .stat {
-  background: var(--bg-card); border-radius: var(--radius-lg); padding: var(--sp-4);
+  background: var(--bg-card); border: 1px solid var(--separator); border-radius: var(--radius-lg); padding: var(--sp-4);
   box-shadow: var(--shadow-card);
 }
 .stat-top { display: flex; align-items: center; gap: var(--sp-2); }
-.stat-chip { width: 30px; height: 30px; border-radius: 9px; flex: none; display: flex; align-items: center; justify-content: center; color: #fff; }
+.stat-chip { width: 30px; height: 30px; border-radius: 9px; flex: none; display: flex; align-items: center; justify-content: center; color: var(--ink); }
 .stat-label { font-size: 12px; color: var(--label-secondary); font-weight: 600; line-height: 1.2; }
 .stat-value { font-family: var(--font-round); font-size: 26px; font-weight: 700; margin-top: var(--sp-3); letter-spacing: -0.5px; }
 .stat-value .unit { font-size: 14px; color: var(--label-tertiary); font-weight: 600; }
 
 .segmented {
-  display: inline-flex; background: rgba(40, 36, 56, 0.06); border-radius: 10px; padding: 3px; gap: 2px;
+  display: inline-flex; background: rgba(0, 0, 0, 0.06); border-radius: 10px; padding: 3px; gap: 2px;
 }
 .seg {
   -webkit-app-region: no-drag; border: none; background: transparent; font: inherit; font-weight: 600;
   font-size: 12px; color: var(--label-secondary); height: 28px; padding: 0 18px; border-radius: 8px; cursor: default;
   transition: all var(--dur-fast) var(--ease);
 }
-.seg.active { background: #fff; color: var(--label-primary); box-shadow: var(--shadow-sm); }
+.seg.active { background: #fff; color: var(--label-primary); box-shadow: inset 0 0 0 1px var(--separator); }
 
 .chart-card { background: var(--bg-card); border-radius: var(--radius-lg); padding: var(--sp-6); box-shadow: var(--shadow-card); margin-top: var(--sp-5); }
 
@@ -820,7 +535,7 @@ label.field-label { display: block; font-size: 12px; font-weight: 600; color: va
 .login-logo {
   width: 56px; height: 56px; border-radius: var(--radius-md); background: var(--grad-violet); color: #fff;
   display: flex; align-items: center; justify-content: center; margin: 0 auto var(--sp-3);
-  box-shadow: 0 8px 20px rgba(109, 59, 240, 0.4);
+  box-shadow: none;
 }
 .login-title { text-align: center; }
 .error-text { color: var(--danger); font-size: 12px; min-height: 15px; text-align: center; }
@@ -922,7 +637,7 @@ label.field-label { display: block; font-size: 12px; font-weight: 600; color: va
   color: var(--on-dark);
   display: flex; align-items: center; justify-content: center;
   flex-shrink: 0;
-  box-shadow: 0 4px 12px rgba(124, 92, 255, 0.32);
+  box-shadow: none;
 }
 .rtw-title { min-width: 0; flex: 1; }
 .rtw-sub { margin-top: 2px; }

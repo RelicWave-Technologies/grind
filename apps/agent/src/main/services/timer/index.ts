@@ -27,9 +27,14 @@ export function getTimerService(): TimerService {
 /** Recover any left-open entry on boot, then flush the sync backlog. */
 export async function initTimerOnBoot(): Promise<void> {
   const svc = getTimerService();
-  // Trust time only up to now (conservative). A future milestone can use the
-  // last persisted activity tick for a tighter bound.
-  svc.recover(Date.now());
+  // Close any dangling entry at the LAST PROOF OF LIFE — the most recent
+  // liveness tick written while the timer was accruing. On a clean restart
+  // this is ~seconds ago; after an ungraceful shutdown (battery death,
+  // force-quit, panic) it's whenever the machine died — so the dead gap is
+  // never credited. Falls back to now() only if liveness was never written
+  // (very first run), which matches the prior conservative behavior.
+  const lastAlive = svc.lastLiveness();
+  svc.recover(lastAlive ?? Date.now());
   await svc.flushUnsynced();
 }
 

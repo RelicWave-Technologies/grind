@@ -18,3 +18,7 @@ export const SCREENSHOT_INTERVAL_SEC: number = Number(process.env.AGENT_SHOT_SEC
 export const SCREENSHOT_QUALITY: number = Number(process.env.AGENT_SHOT_QUALITY ?? 82);
 /** Max long-edge px; larger displays are downscaled to this. */
 export const SCREENSHOT_MAX_EDGE: number = 2560;
+/** Days to keep local screenshots before the on-boot janitor prunes them.
+ *  Mirrors the 60-day workspace retention default. <= 0 disables time-based
+ *  expiry (orphan/dangling reconciliation still runs). */
+export const SCREENSHOT_RETENTION_DAYS: number = Number(process.env.AGENT_SHOT_RETENTION_DAYS ?? 60);

@@ -1,12 +1,16 @@
 import { ipcMain, app, shell, dialog } from 'electron';
 import { screenStatus, hasAccessibilityAccess } from '../services/permissions';
 import { isActivityCapturing } from '../services/activity';
+import { getPreferences } from '../services/preferences';
+import { applyFloatingBarVisibility, resetFloatingBarPosition } from '../floating';
 
 export interface SettingsInfo {
   version: string;
   platform: string;
   launchAtLogin: boolean;
   screenStatus: string;
+  /** Per-device UI pref (M2 floating bar). */
+  floatingBarVisible: boolean;
 }
 
 export function registerSettingsIpc(): void {
@@ -15,11 +19,21 @@ export function registerSettingsIpc(): void {
     platform: process.platform,
     launchAtLogin: app.getLoginItemSettings().openAtLogin,
     screenStatus: screenStatus(),
+    floatingBarVisible: getPreferences().floatingBar.visible,
   }));
 
   ipcMain.handle('settings:setLaunchAtLogin', (_e, enabled: boolean) => {
     app.setLoginItemSettings({ openAtLogin: enabled, args: ['--hidden'] });
     return app.getLoginItemSettings().openAtLogin;
+  });
+
+  // M2 floating bar: visibility toggle + reset-to-default-corner.
+  ipcMain.handle('settings:setFloatingBarVisible', (_e, enabled: boolean): boolean => {
+    applyFloatingBarVisibility(!!enabled);
+    return getPreferences().floatingBar.visible;
+  });
+  ipcMain.handle('settings:resetFloatingBarPosition', () => {
+    resetFloatingBarPosition();
   });
 
   ipcMain.handle('settings:openScreenPrefs', async () => {

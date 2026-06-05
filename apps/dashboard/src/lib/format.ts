@@ -17,6 +17,7 @@ export function fmtRange(startMs: number, endMs: number, tz?: string): string {
 
 export function fmtDurationMs(ms: number): string {
   if (ms <= 0) return '0m';
+  if (ms < 60_000) return '<1m'; // honest about sub-minute slivers (no misleading "0m")
   const totalMin = Math.round(ms / 60_000);
   const h = Math.floor(totalMin / 60);
   const m = totalMin % 60;

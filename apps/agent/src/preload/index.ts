@@ -39,8 +39,6 @@ const api = {
         ipcRenderer.off('timer:status:push', sub);
       };
     },
-    patchEntry: (args: { id: string; larkTaskGuid?: string | null; notes?: string | null }): Promise<{ ok: boolean; error?: string }> =>
-      ipcRenderer.invoke('timer:patchEntry', args),
   },
   window: {
     openMain: (): Promise<void> => ipcRenderer.invoke('window:openMain'),
@@ -67,9 +65,11 @@ const api = {
     requestAccessibility: (): Promise<void> => ipcRenderer.invoke('permissions:requestAccessibility'),
   },
   settings: {
-    get: (): Promise<{ version: string; platform: string; launchAtLogin: boolean; screenStatus: string }> =>
+    get: (): Promise<{ version: string; platform: string; launchAtLogin: boolean; screenStatus: string; floatingBarVisible: boolean }> =>
       ipcRenderer.invoke('settings:get'),
     setLaunchAtLogin: (enabled: boolean): Promise<boolean> => ipcRenderer.invoke('settings:setLaunchAtLogin', enabled),
+    setFloatingBarVisible: (enabled: boolean): Promise<boolean> => ipcRenderer.invoke('settings:setFloatingBarVisible', enabled),
+    resetFloatingBarPosition: (): Promise<void> => ipcRenderer.invoke('settings:resetFloatingBarPosition'),
     openScreenPrefs: (): Promise<void> => ipcRenderer.invoke('settings:openScreenPrefs'),
     openDataFolder: (): Promise<void> => ipcRenderer.invoke('settings:openDataFolder'),
   },
@@ -83,8 +83,6 @@ const api = {
       totals: { keystrokes: number; clicks: number; mouseDistancePx: number; scrollEvents: number };
       byHour: number[];
     }> => ipcRenderer.invoke('insights:today'),
-    day: (args: { date: string; tz: string }): Promise<DayInsightBridge> =>
-      ipcRenderer.invoke('insights:day', args),
   },
   lark: {
     status: (): Promise<{ configured: boolean; connected: boolean; reauthRequired: boolean; scopes: string[] }> =>
@@ -96,82 +94,6 @@ const api = {
     createTask: (input: { summary: string; due?: number | null; description?: string | null }): Promise<{ ok: boolean; error?: string }> =>
       ipcRenderer.invoke('lark:createTask', input),
   },
-  timeRequests: {
-    create: (input: {
-      requestedStart: number;
-      requestedEnd: number;
-      reason: string;
-      larkTaskGuid?: string | null;
-      taskSummary?: string | null;
-      attendeeIds?: string[];
-    }): Promise<{
-      ok: boolean;
-      request?: ManualTimeRequestDto;
-      error?: string;
-    }> => ipcRenderer.invoke('timeRequests:create', input),
-    listMine: (status?: 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED'): Promise<{ requests: ManualTimeRequestDto[] }> =>
-      ipcRenderer.invoke('timeRequests:listMine', status),
-    listWorkspaceUsers: (): Promise<{ users: Array<{ id: string; name: string; email: string; role: 'OWNER' | 'ADMIN' | 'MANAGER' | 'MEMBER' }> }> =>
-      ipcRenderer.invoke('timeRequests:listWorkspaceUsers'),
-    patch: (args: {
-      id: string;
-      requestedStart?: number;
-      requestedEnd?: number;
-      larkTaskGuid?: string | null;
-      taskSummary?: string | null;
-      reason?: string;
-    }): Promise<{ ok: boolean; request?: ManualTimeRequestDto; error?: string }> =>
-      ipcRenderer.invoke('timeRequests:patch', args),
-    cancel: (id: string): Promise<{ ok: boolean; request?: ManualTimeRequestDto; error?: string }> =>
-      ipcRenderer.invoke('timeRequests:cancel', id),
-  },
-};
-
-type DayInsightBridge = {
-  date: string;
-  timezone: string;
-  dayStart: number;
-  dayEnd: number;
-  isFuture: boolean;
-  isToday: boolean;
-  firstActivityAt: number | null;
-  lastActivityAt: number | null;
-  totals: { workedMs: number; meetingMs: number; manualMs: number; idleTrimmedMs: number; gapMs: number };
-  blocks: Array<{
-    kind: 'WORK' | 'MEETING' | 'IDLE_TRIMMED' | 'MANUAL' | 'GAP';
-    startedAt: number;
-    endedAt: number;
-    durationMs: number;
-    timeEntryId?: string;
-    larkTaskGuid?: string | null;
-    notes?: string | null;
-    isOpen?: boolean;
-  }>;
-  pendingOverlay: Array<{ id: string; startedAt: number; endedAt: number; reason: string; larkTaskGuid: string | null }>;
-  recentRejected: Array<{
-    id: string;
-    requestedStart: number;
-    requestedEnd: number;
-    reason: string;
-    decidedReason: string | null;
-    larkTaskGuid: string | null;
-  }>;
-};
-
-type ManualTimeRequestDto = {
-  id: string;
-  clientUuid: string;
-  userId: string;
-  approverId: string | null;
-  larkTaskGuid: string | null;
-  larkMessageId: string | null;
-  requestedStart: string;
-  requestedEnd: string;
-  reason: string;
-  status: 'PENDING' | 'APPROVED' | 'REJECTED';
-  decidedAt: string | null;
-  decidedReason: string | null;
-  createdAt: string;
 };
 
 contextBridge.exposeInMainWorld('agent', api);

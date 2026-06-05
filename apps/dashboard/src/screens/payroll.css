@@ -1,0 +1,28 @@
+/* ============================================================================
+   PAYROLL — page-specific LAYOUT ONLY.
+
+   The page is composed entirely from the shared "Quiet Datasheet" kit
+   (src/ui/SYSTEM.md): PageHeader, Toolbar, DateStepper, Card, StatRow/Stat,
+   Table, Identity, Tag, Banner, EmptyState. No colours / type / borders /
+   shadows live here — those come from the kit + tokens. This file only places
+   the body blocks in vertical rhythm, spreads the loading skeletons across the
+   stat row, and guards the wide ledger from overflow.
+   ========================================================================== */
+
+/* Section rhythm between body blocks below the PageHeader (spec §4: 24px). */
+.pay-block + .pay-block {
+  margin-top: var(--ui-sp-7);
+}
+
+/* Loading placeholder for the KPI row: four SkeletonStats spread evenly to
+   mirror the resolved StatRow grid (the kit skeletons carry their own padding). */
+.pay-stat-skel {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+}
+
+/* Horizontal scroll guard for the wide worksheet on narrow viewports — no
+   reflow of the grid; the flush Card clips it to the card radius. */
+.pay-scroll {
+  overflow-x: auto;
+}

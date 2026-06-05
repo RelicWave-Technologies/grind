@@ -10,7 +10,7 @@ import {
   type SegmentDto,
   type TimeEntryDto,
 } from '@grind/types';
-import { validateEntry, type Segment, type TimeEntry as CoreEntry } from '@grind/core';
+import { validateEntry, clampEntryToServerClock, type Segment, type TimeEntry as CoreEntry } from '@grind/core';
 import { validate } from '../middleware/validate';
 import { requireAccessToken } from '../middleware/auth';
 import { isLarkConfigured, getTokenManager, getUserTaskClient } from '../lark';
@@ -128,6 +128,16 @@ timeEntriesRouter.post('/', validate(CreateTimeEntryRequest, 'body'), async (req
     const violations = validateEntry(core);
     if (violations.length) return res.status(400).json({ error: 'invalid_segments', details: violations });
 
+    // Server-authoritative clock clamp: never trust the laptop's clock to push
+    // time into the future. A fast/tampered client clock can't inflate hours.
+    const clamped = clampEntryToServerClock(core, Date.now());
+    if (clamped.adjusted) {
+      logger.warn(
+        { userId: req.user.sub, entryId: body.id, notes: clamped.notes },
+        'time-entry create: clamped future timestamps to server clock',
+      );
+    }
+
     // Snapshot the user's CURRENT shiftId so the entry preserves its
     // schedule context even if the user is later reassigned. Forward-only:
     // a missing shift just records null.
@@ -143,12 +153,12 @@ timeEntriesRouter.post('/', validate(CreateTimeEntryRequest, 'body'), async (req
         userId: req.user.sub,
         larkTaskGuid: body.larkTaskGuid ?? null,
         source: body.source,
-        startedAt: new Date(body.startedAt),
+        startedAt: new Date(clamped.entry.startedAt),
         agentVersion: body.agentVersion,
         platform: body.platform,
         shiftIdAtStart: shiftSnapshot?.shiftId ?? null,
         segments: {
-          create: body.segments.map((s) => ({
+          create: clamped.entry.segments.map((s) => ({
             id: s.id,
             kind: s.kind,
             startedAt: new Date(s.startedAt),
@@ -194,7 +204,19 @@ timeEntriesRouter.put('/:id/sync', validate(SyncTimeEntryRequest, 'body'), async
     const violations = validateEntry(core);
     if (violations.length) return res.status(400).json({ error: 'invalid_segments', details: violations });
 
-    const incomingIds = body.segments.map((s) => s.id);
+    // Server-authoritative clock clamp (same guard as create): the agent owns
+    // the running entry's segments, but never the right to bill future time.
+    const clamped = clampEntryToServerClock(core, Date.now());
+    if (clamped.adjusted) {
+      logger.warn(
+        { userId: req.user.sub, entryId: id, notes: clamped.notes },
+        'time-entry sync: clamped future timestamps to server clock',
+      );
+    }
+    const clampedSegments = clamped.entry.segments;
+    const clampedEndedAt = clamped.entry.endedAt;
+
+    const incomingIds = clampedSegments.map((s) => s.id);
     const updated = await prisma.$transaction(async (tx) => {
       // Replace segments idempotently: drop this entry's segments AND any rows
       // that reuse an incoming id (defends against replayed/retried syncs),
@@ -204,10 +226,10 @@ timeEntriesRouter.put('/:id/sync', validate(SyncTimeEntryRequest, 'body'), async
       });
       await tx.timeEntry.update({
         where: { id },
-        data: { endedAt: body.endedAt ? new Date(body.endedAt) : null },
+        data: { endedAt: clampedEndedAt !== null ? new Date(clampedEndedAt) : null },
       });
       await tx.timeSegment.createMany({
-        data: body.segments.map((s) => ({
+        data: clampedSegments.map((s) => ({
           id: s.id,
           timeEntryId: id,
           kind: s.kind,

@@ -1,9 +1,28 @@
+import './approvals.css';
 import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Check, X, Clock, AlertTriangle, Sparkles } from 'lucide-react';
+import { Check, X, Sparkles, Inbox } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 import type { ManualTimeRequest, DecideResult, MtrStatus } from '../lib/types';
 import { fmtTime, fmtDurationMs, fmtDayLabel, fmtAgeShort } from '../lib/format';
+import {
+  Page,
+  PageHeader,
+  Card,
+  Stat,
+  StatRow,
+  Tabs,
+  Segmented,
+  Toolbar,
+  Identity,
+  Avatar,
+  Tag,
+  Button,
+  Banner,
+  EmptyState,
+  Skeleton,
+} from '../ui';
+import type { Status } from '../ui';
 
 const STUCK_THRESHOLD_MS = 48 * 60 * 60 * 1000;
 
@@ -18,21 +37,45 @@ const SCOPE_LABEL: Record<ListResponse['scope'], string> = {
   workspace: 'Entire workspace',
 };
 
-const TAB_LABEL: Record<'PENDING' | 'APPROVED' | 'REJECTED', string> = {
-  PENDING: 'Pending',
-  APPROVED: 'Approved',
-  REJECTED: 'Rejected',
+type TabValue = 'PENDING' | 'APPROVED' | 'REJECTED';
+
+const TABS: ReadonlyArray<{ value: TabValue; label: string }> = [
+  { value: 'PENDING', label: 'Pending' },
+  { value: 'APPROVED', label: 'Approved' },
+  { value: 'REJECTED', label: 'Rejected' },
+];
+
+/** Status taxonomy for a request's decision tag. */
+const STATUS_TAG: Record<MtrStatus, Status> = {
+  PENDING: 'warn',
+  APPROVED: 'success',
+  REJECTED: 'danger',
+  CANCELLED: 'neutral',
+};
+
+/** Triage verdict → kit status taxonomy (approve safe, review caution, reject danger). */
+const TRIAGE_STATUS: Record<NonNullable<ManualTimeRequest['triage']>['verdict'], Status> = {
+  approve: 'success',
+  review: 'warn',
+  reject: 'danger',
 };
 
 /**
- * Manager/admin queue of ManualTimeRequest decisions. Mirror of the Lark
- * IM card flow — same DB writes, plus a best-effort card refresh from the
- * server side so the chat history stays in sync.
+ * /approvals — manager/admin queue of ManualTimeRequest decisions, composed from
+ * the shared "Quiet Datasheet" kit (SYSTEM.md). The PageHeader carries scope +
+ * title + a live subline, with status Tabs docked on the rule and a stuck-only
+ * Segmented in the toolbar. Pending shows a StatRow (Pending / Stuck). Each
+ * request is a Card: requester Identity, a status Tag + age, a label/value time
+ * block, the AI-triage read as a quiet note in its taxonomy colour, and the
+ * approve / reject (inline reason) actions as kit Buttons. Stuck items (waiting
+ * ≥48h) carry the warn taxonomy so they read at a glance.
  *
- * Defaults to Pending; toggle filters at the top.
+ * Mirror of the Lark IM card flow — same DB writes, plus a best-effort card
+ * refresh server-side so chat history stays in sync. Defaults to Pending;
+ * toggle filters in the header. Behaviour is unchanged — presentation only.
  */
 export function ApprovalsScreen() {
-  const [tab, setTab] = useState<'PENDING' | 'APPROVED' | 'REJECTED'>('PENDING');
+  const [tab, setTab] = useState<TabValue>('PENDING');
   const [stuckOnly, setStuckOnly] = useState(false);
   const qc = useQueryClient();
 
@@ -79,67 +122,99 @@ export function ApprovalsScreen() {
     },
   });
 
+  const subLine = q.data
+    ? tab === 'PENDING'
+      ? visible.length === 0
+        ? 'Nothing waiting on you'
+        : `${visible.length} awaiting review${stuckCount > 0 ? ` · ${stuckCount} stuck` : ''}`
+      : `${visible.length} ${tab.toLowerCase()} in scope`
+    : 'Loading the queue';
+
+  const showStats = tab === 'PENDING' && !!q.data;
+
   return (
-    <div className="page">
-      <header className="page-head">
-        <div>
-          <h1 className="h1">Approvals</h1>
-          <p className="secondary page-sub">
-            {q.data ? <span className="scope-chip">{SCOPE_LABEL[q.data.scope]}</span> : <span>Loading scope…</span>}
-          </p>
-        </div>
+    <Page>
+      <PageHeader
+        eyebrow={`${q.data ? SCOPE_LABEL[q.data.scope] : 'Manual time'} · Review`}
+        title="Approvals"
+        subtitle={subLine}
+        actions={
+          tab === 'PENDING' ? (
+            <Toolbar>
+              <Segmented
+                aria-label="Filter pending requests"
+                value={stuckOnly ? 'stuck' : 'all'}
+                onChange={(v) => setStuckOnly(v === 'stuck')}
+                items={[
+                  { value: 'all', label: 'All' },
+                  { value: 'stuck', label: stuckCount > 0 ? `Stuck · ${stuckCount}` : 'Stuck' },
+                ]}
+              />
+            </Toolbar>
+          ) : undefined
+        }
+        tabs={
+          <Tabs
+            aria-label="Request status"
+            value={tab}
+            onChange={(t) => {
+              setTab(t);
+              if (t !== 'PENDING') setStuckOnly(false);
+            }}
+            items={TABS}
+          />
+        }
+      />
 
-        <div className="day-controls">
-          {tab === 'PENDING' && (
-            <button
-              type="button"
-              className={`btn-ghost stuck-toggle${stuckOnly ? ' is-active' : ''}`}
-              onClick={() => setStuckOnly((v) => !v)}
-              disabled={stuckCount === 0 && !stuckOnly}
-              title={`${stuckCount} pending request${stuckCount === 1 ? '' : 's'} have been waiting ≥48h`}
-            >
-              <AlertTriangle size={13} strokeWidth={2.2} />
-              <span>{stuckOnly ? 'Showing stuck' : 'Stuck only'}</span>
-              {stuckCount > 0 && <span className="stuck-count">{stuckCount}</span>}
-            </button>
-          )}
-          <div className="tabs">
-            {(['PENDING', 'APPROVED', 'REJECTED'] as const).map((t) => (
-              <button
-                key={t}
-                type="button"
-                className={`tab${t === tab ? ' is-active' : ''}`}
-                onClick={() => {
-                  setTab(t);
-                  if (t !== 'PENDING') setStuckOnly(false);
-                }}
-              >
-                {TAB_LABEL[t]}
-              </button>
-            ))}
-          </div>
-        </div>
-      </header>
+      {showStats && (
+        <Card variant="flush">
+          <StatRow>
+            <Stat label="Pending" value={visible.length} />
+            <Stat label="Stuck ≥48h" value={stuckCount} hint="Waiting too long" />
+          </StatRow>
+        </Card>
+      )}
 
-      {q.isLoading && <div className="card empty">Loading…</div>}
+      {q.isLoading && (
+        <div className="apv-list">
+          {[0, 1, 2].map((i) => (
+            <Card key={i}>
+              <div className="apv-skeleton">
+                <Skeleton w={180} h={20} />
+                <Skeleton w="60%" h={14} />
+                <Skeleton w="40%" h={14} />
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+
       {q.isError && (
-        <div className="card empty empty-error">
-          Couldn&apos;t load: {(q.error as Error).message}
-        </div>
+        <Banner status="danger">Couldn&apos;t load the queue — {(q.error as Error).message}</Banner>
       )}
 
       {q.data && visible.length === 0 && (
-        <div className="card empty">
-          {tab === 'PENDING'
-            ? stuckOnly
-              ? 'No stuck approvals — everything pending is fresh.'
-              : 'No requests waiting on you. Nice work.'
-            : `No ${tab.toLowerCase()} requests in scope.`}
-        </div>
+        <EmptyState
+          icon={tab === 'PENDING' && !stuckOnly ? <Check size={22} strokeWidth={2} /> : <Inbox size={22} strokeWidth={1.8} />}
+          title={
+            tab === 'PENDING'
+              ? stuckOnly
+                ? 'Nothing stuck'
+                : 'Queue is clear'
+              : `No ${tab.toLowerCase()} requests`
+          }
+          description={
+            tab === 'PENDING'
+              ? stuckOnly
+                ? 'Everything pending is still fresh — nothing has been waiting too long.'
+                : 'No requests waiting on you right now. Nice work.'
+              : `No ${tab.toLowerCase()} requests in scope.`
+          }
+        />
       )}
 
       {q.data && visible.length > 0 && (
-        <div className="approvals-list">
+        <div className="apv-list">
           {visible.map((r) => (
             <ApprovalCard
               key={r.id}
@@ -156,7 +231,7 @@ export function ApprovalsScreen() {
           ))}
         </div>
       )}
-    </div>
+    </Page>
   );
 }
 
@@ -180,141 +255,138 @@ function ApprovalCard({ req, busy, decidedError, onApprove, onReject }: CardProp
   const isStuck = isPending && ageMs >= STUCK_THRESHOLD_MS;
 
   return (
-    <article className={`approval-card status-${req.status.toLowerCase()}`}>
-      <div className="approval-head">
-        <div className="approval-who">
-          <div className="avatar-sm" aria-hidden>
-            {initials(req.user.name)}
-          </div>
-          <div className="approval-meta">
-            <div className="approval-name">{req.user.name}</div>
-            <div className="approval-email small secondary">{req.user.email}</div>
+    <Card>
+      <div className="apv-card">
+        <div className="apv-head">
+          <Identity
+            name={req.user.name}
+            subtitle={req.user.email}
+            avatar={<Avatar name={req.user.name} size={40} />}
+          />
+          <div className="apv-head-end">
+            {isPending && (
+              <Tag status={isStuck ? 'warn' : 'neutral'} mono dot={!isStuck}>
+                {fmtAgeShort(ageMs)}
+              </Tag>
+            )}
+            <Tag status={STATUS_TAG[req.status]}>{req.status}</Tag>
           </div>
         </div>
 
-        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-          {isPending && (
-            <span
-              className={`age-chip${isStuck ? ' is-stuck' : ''}`}
-              title={`Submitted ${new Date(req.createdAt).toLocaleString()}`}
-            >
-              {isStuck && <AlertTriangle size={10} strokeWidth={2.4} />}
-              {fmtAgeShort(ageMs)}
-            </span>
+        <dl className="apv-spec">
+          <div className="apv-row">
+            <dt className="apv-row__label ui-t-eyebrow">Time</dt>
+            <dd className="apv-row__value">
+              <span className="mono">
+                {dayLabel} · {fmtTime(startMs)} – {fmtTime(endMs)}
+              </span>
+              <Tag mono>{fmtDurationMs(endMs - startMs)}</Tag>
+            </dd>
+          </div>
+          <div className="apv-row">
+            <dt className="apv-row__label ui-t-eyebrow">Reason</dt>
+            <dd className="apv-row__value">{req.reason}</dd>
+          </div>
+          {req.larkTaskGuid && (
+            <div className="apv-row">
+              <dt className="apv-row__label ui-t-eyebrow">Task</dt>
+              <dd className="apv-row__value mono">{req.larkTaskGuid}</dd>
+            </div>
           )}
-          <div className={`status-pill status-${req.status.toLowerCase()}`}>
-            {req.status === 'PENDING' && <Clock size={11} strokeWidth={2.2} />}
-            {req.status === 'APPROVED' && <Check size={11} strokeWidth={2.2} />}
-            {req.status === 'REJECTED' && <X size={11} strokeWidth={2.2} />}
-            <span>{req.status}</span>
-          </div>
-        </div>
-      </div>
+          {req.decidedReason && (
+            <div className="apv-row">
+              <dt className="apv-row__label ui-t-eyebrow">Reviewer</dt>
+              <dd className="apv-row__value">{req.decidedReason}</dd>
+            </div>
+          )}
+        </dl>
 
-      <div className="approval-body">
-        <div className="approval-row">
-          <span className="approval-label">Time</span>
-          <span className="approval-value tabular">
-            {dayLabel} · {fmtTime(startMs)} – {fmtTime(endMs)}{' '}
-            <span className="secondary">({fmtDurationMs(endMs - startMs)})</span>
-          </span>
-        </div>
-        <div className="approval-row">
-          <span className="approval-label">Reason</span>
-          <span className="approval-value">{req.reason}</span>
-        </div>
-        {req.larkTaskGuid && (
-          <div className="approval-row">
-            <span className="approval-label">Task</span>
-            <span className="approval-value secondary">{req.larkTaskGuid}</span>
+        {req.triage && isPending && <TriageNote triage={req.triage} />}
+
+        {decidedError && <Banner status="danger">Failed — {decidedError}</Banner>}
+
+        {isPending && (
+          <div className="apv-actions">
+            {rejecting ? (
+              <form
+                className="apv-reject"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  onReject(reason.trim() || 'No reason given');
+                }}
+              >
+                <input
+                  type="text"
+                  className="ui-control apv-reject__input"
+                  autoFocus
+                  placeholder="Why? (optional, shown to the requester)"
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                  maxLength={500}
+                />
+                <Button variant="ghost" onClick={() => setRejecting(false)} disabled={busy}>
+                  Cancel
+                </Button>
+                <Button type="submit" variant="danger" loading={busy}>
+                  Confirm reject
+                </Button>
+              </form>
+            ) : (
+              <>
+                <Button
+                  variant="ghost"
+                  icon={<X size={14} strokeWidth={2} />}
+                  onClick={() => setRejecting(true)}
+                  disabled={busy}
+                >
+                  Reject
+                </Button>
+                <Button
+                  variant="primary"
+                  icon={<Check size={14} strokeWidth={2.2} />}
+                  onClick={onApprove}
+                  loading={busy}
+                >
+                  Approve
+                </Button>
+              </>
+            )}
           </div>
         )}
-        {req.decidedReason && (
-          <div className="approval-row">
-            <span className="approval-label">Reviewer note</span>
-            <span className="approval-value">{req.decidedReason}</span>
-          </div>
-        )}
       </div>
-
-      {req.triage && isPending && <TriageBadge triage={req.triage} />}
-
-      {decidedError && <div className="approval-error">Failed: {decidedError}</div>}
-
-      {isPending && (
-        <div className="approval-actions">
-          {rejecting ? (
-            <form
-              className="reject-form"
-              onSubmit={(e) => {
-                e.preventDefault();
-                onReject(reason.trim() || 'No reason given');
-              }}
-            >
-              <input
-                type="text"
-                autoFocus
-                placeholder="Why? (optional, shown to the requester)"
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-                maxLength={500}
-              />
-              <button type="button" className="btn-ghost" onClick={() => setRejecting(false)} disabled={busy}>
-                Cancel
-              </button>
-              <button type="submit" className="btn-danger" disabled={busy}>
-                {busy ? 'Rejecting…' : 'Confirm reject'}
-              </button>
-            </form>
-          ) : (
-            <>
-              <button type="button" className="btn-ghost" onClick={() => setRejecting(true)} disabled={busy}>
-                <X size={14} strokeWidth={2} />
-                <span>Reject</span>
-              </button>
-              <button type="button" className="btn-primary" onClick={onApprove} disabled={busy}>
-                <Check size={14} strokeWidth={2.2} />
-                <span>{busy ? 'Approving…' : 'Approve'}</span>
-              </button>
-            </>
-          )}
-        </div>
-      )}
-    </article>
+    </Card>
   );
 }
 
-function TriageBadge({ triage }: { triage: NonNullable<ManualTimeRequest['triage']> }) {
-  const verdictClass =
-    triage.verdict === 'approve' ? 'triage-approve' : triage.verdict === 'reject' ? 'triage-reject' : 'triage-review';
+function TriageNote({ triage }: { triage: NonNullable<ManualTimeRequest['triage']> }) {
+  const status = TRIAGE_STATUS[triage.verdict];
   const verdictLabel =
     triage.verdict === 'approve' ? 'Likely safe' : triage.verdict === 'reject' ? 'Worth pushing back' : 'Take a look';
   const confidencePct = Math.round(triage.confidence * 100);
   return (
-    <div className={`triage-badge ${verdictClass}`} role="note" aria-label="AI triage suggestion">
-      <div className="triage-head">
-        <Sparkles size={11} strokeWidth={2.4} aria-hidden />
-        <span className="triage-label">{verdictLabel}</span>
-        <span className="triage-confidence" title={`${confidencePct}% confidence`}>
-          {confidencePct}%
+    <div className="apv-triage" role="note" aria-label="AI triage suggestion">
+      <div className="apv-triage__head">
+        <span className="apv-triage__icon ui-t-eyebrow">
+          <Sparkles size={12} strokeWidth={2.2} />
+          AI read
+        </span>
+        <Tag status={status}>{verdictLabel}</Tag>
+        <span className="apv-triage__conf mono" title={`${confidencePct}% confidence`}>
+          {confidencePct}% sure
         </span>
       </div>
-      <ul className="triage-signals" role="list">
+      <ul className="apv-triage__signals" role="list">
         {triage.signals.slice(0, 3).map((s) => (
-          <li key={s.id} className={s.weight >= 0 ? 'triage-sig-pos' : 'triage-sig-neg'}>
+          <li key={s.id} className="apv-triage__sig">
+            <span className={`apv-triage__sigmark mono ${s.weight >= 0 ? 'apv-pos' : 'apv-neg'}`} aria-hidden>
+              {s.weight >= 0 ? '+' : '−'}
+            </span>
             {s.text}
           </li>
         ))}
       </ul>
     </div>
   );
-}
-
-function initials(name: string): string {
-  const parts = name.trim().split(/\s+/);
-  if (parts.length === 0) return '?';
-  if (parts.length === 1) return parts[0]!.slice(0, 2).toUpperCase();
-  return (parts[0]![0]! + parts[parts.length - 1]![0]!).toUpperCase();
 }
 
 // Suppress unused-type warning for an enum we re-export indirectly.

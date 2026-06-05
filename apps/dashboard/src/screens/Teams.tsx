@@ -1,9 +1,29 @@
+import './teams.css';
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Trash2, Pencil, Check, X } from 'lucide-react';
+import { Plus, Trash2, Pencil, Check, X, UserRound, Users2 } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 import type { Team } from '../lib/types';
 import type { Role } from '../lib/auth';
+import {
+  Page,
+  PageHeader,
+  Toolbar,
+  Card,
+  StatRow,
+  Stat,
+  Field,
+  Input,
+  Select,
+  Button,
+  IconButton,
+  List,
+  ListRow,
+  Avatar,
+  Banner,
+  EmptyState,
+  SkeletonTable,
+} from '../ui';
 
 interface AdminUser {
   id: string;
@@ -16,17 +36,22 @@ interface AdminUser {
 /**
  * Teams admin screen (ADMIN-only at the API layer; nav hides for others).
  *
- * Layout: a "Create team" composer at the top, then a list of teams in
- * the workspace with inline rename, manager reassignment, and a destructive
- * delete affordance (confirmed via two-step click — no JS confirm() popup
- * to keep the chrome consistent with the rest of the dashboard).
+ * Composed entirely from the shared "Quiet Datasheet" kit (../ui) per
+ * src/ui/SYSTEM.md — PageHeader + Toolbar masthead, a flush StatRow for the
+ * team count, a Card-hosted Field composer for create, and the directory as a
+ * Card-flush List of rows. Inline rename, manager reassignment, and a two-step
+ * delete (no JS confirm() popup) all live inside the row. Presentation only:
+ * every query / mutation / handler and all loading / empty / error states are
+ * unchanged from the prior implementation.
  *
- * Manager choice is "any user in the workspace" — we deliberately don't
- * filter to MANAGER role only. Admins routinely promote a strong member
- * to MANAGER as part of *creating* a team; refusing the assignment until
- * you've done the role change is busywork. The PATCH on user.role
- * elsewhere handles the role flip when needed.
+ * Manager choice is "any user in the workspace" — we deliberately don't filter
+ * to MANAGER role only. Admins routinely promote a strong member to MANAGER as
+ * part of *creating* a team; refusing the assignment until you've done the role
+ * change is busywork. The PATCH on user.role elsewhere handles the role flip.
+ *
+ * Page-unique CSS in teams.css is pure layout (grid/flex/gaps), prefixed `tms-`.
  */
+
 export function TeamsScreen() {
   const qc = useQueryClient();
   const teamsQ = useQuery({ queryKey: ['admin', 'teams'], queryFn: () => api<{ teams: Team[] }>('/v1/admin/teams') });
@@ -34,6 +59,8 @@ export function TeamsScreen() {
     queryKey: ['admin', 'users'],
     queryFn: () => api<{ users: AdminUser[] }>('/v1/admin/users'),
   });
+
+  const [composing, setComposing] = useState(false);
 
   const create = useMutation({
     mutationFn: (vars: { name: string; managerId: string | null }) =>
@@ -51,36 +78,74 @@ export function TeamsScreen() {
   });
 
   const usersById = new Map((usersQ.data?.users ?? []).map((u) => [u.id, u]));
+  const teamCount = teamsQ.data?.teams.length ?? 0;
+
+  const subtitle = teamsQ.data
+    ? teamCount === 0
+      ? 'No teams yet — create one to assign managers and shape the org.'
+      : 'Group people, hand each team a manager, and reorg whenever the shape changes.'
+    : 'Create teams, assign managers, and reorg.';
 
   return (
-    <div className="page">
-      <header className="page-head">
-        <div>
-          <h1 className="h1">Teams</h1>
-          <p className="secondary page-sub">Create teams, assign managers, and reorg.</p>
-        </div>
-      </header>
-
-      <NewTeamComposer
-        users={usersQ.data?.users ?? []}
-        busy={create.isPending}
-        error={create.isError ? (create.error as Error | ApiError).message : null}
-        onCreate={(vars) => create.mutate(vars)}
+    <Page>
+      <PageHeader
+        eyebrow="Workspace · Org structure"
+        title="Teams"
+        subtitle={subtitle}
+        actions={
+          <Toolbar>
+            <Button
+              variant="primary"
+              icon={composing ? <X size={14} strokeWidth={2.2} /> : <Plus size={14} strokeWidth={2.2} />}
+              onClick={() => setComposing((v) => !v)}
+              aria-expanded={composing}
+            >
+              {composing ? 'Close' : 'New team'}
+            </Button>
+          </Toolbar>
+        }
       />
 
-      <section className="card teams-card" style={{ padding: 0, marginTop: 16 }}>
-        {teamsQ.isLoading && <div className="empty">Loading…</div>}
-        {teamsQ.isError && (
-          <div className="empty empty-error">
-            Couldn&apos;t load teams: {(teamsQ.error as Error).message}
+      {teamsQ.data && (
+        <Card variant="flush" className="tms-rise">
+          <StatRow>
+            <Stat label="Teams" value={teamCount} hint={teamCount === 1 ? 'team in the org' : 'teams in the org'} />
+          </StatRow>
+        </Card>
+      )}
+
+      {composing && (
+        <NewTeamComposer
+          users={usersQ.data?.users ?? []}
+          busy={create.isPending}
+          error={create.isError ? (create.error as Error | ApiError).message : null}
+          onCreate={(vars) =>
+            create.mutate(vars, {
+              onSuccess: () => setComposing(false),
+            })
+          }
+          onCancel={() => setComposing(false)}
+        />
+      )}
+
+      <Card title="Directory" variant="flush" className="tms-rise tms-rise-1">
+        {teamsQ.isLoading ? (
+          <div className="tms-pad">
+            <SkeletonTable rows={4} />
           </div>
-        )}
-        {teamsQ.data && teamsQ.data.teams.length === 0 && (
-          <div className="empty">No teams yet — create one above.</div>
-        )}
-        {teamsQ.data && teamsQ.data.teams.length > 0 && (
-          <ul className="teams-list">
-            {teamsQ.data.teams.map((t) => (
+        ) : teamsQ.isError ? (
+          <div className="tms-pad">
+            <Banner status="danger">Couldn&apos;t load teams: {(teamsQ.error as Error).message}</Banner>
+          </div>
+        ) : teamsQ.data && teamsQ.data.teams.length === 0 ? (
+          <EmptyState
+            icon={<Users2 size={22} strokeWidth={1.8} />}
+            title="No teams yet"
+            description="Create your first team with “New team” to start assigning managers and grouping people."
+          />
+        ) : (
+          <List>
+            {(teamsQ.data?.teams ?? []).map((t) => (
               <TeamRow
                 key={t.id}
                 team={t}
@@ -97,10 +162,10 @@ export function TeamsScreen() {
                 onDelete={() => del.mutate(t.id)}
               />
             ))}
-          </ul>
+          </List>
         )}
-      </section>
-    </div>
+      </Card>
+    </Page>
   );
 }
 
@@ -109,50 +174,71 @@ function NewTeamComposer({
   busy,
   error,
   onCreate,
+  onCancel,
 }: {
   users: AdminUser[];
   busy: boolean;
   error: string | null;
   onCreate: (vars: { name: string; managerId: string | null }) => void;
+  onCancel: () => void;
 }) {
   const [name, setName] = useState('');
   const [managerId, setManagerId] = useState('');
 
   return (
-    <form
-      className="card composer-card"
-      onSubmit={(e) => {
-        e.preventDefault();
-        if (!name.trim()) return;
-        onCreate({ name: name.trim(), managerId: managerId || null });
-        setName('');
-        setManagerId('');
-      }}
-    >
-      <div className="composer-row">
-        <input
-          type="text"
-          className="composer-input"
-          placeholder="Team name (e.g. Platform Squad)"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          maxLength={80}
-        />
-        <select className="select" value={managerId} onChange={(e) => setManagerId(e.target.value)}>
-          <option value="">— no manager —</option>
-          {users.map((u) => (
-            <option key={u.id} value={u.id}>
-              {u.name} · {u.role.toLowerCase()}
-            </option>
-          ))}
-        </select>
-        <button type="submit" className="btn-primary" disabled={busy || !name.trim()}>
-          <Plus size={14} strokeWidth={2.2} />
-          <span>{busy ? 'Creating…' : 'Create team'}</span>
-        </button>
-      </div>
-      {error && <div className="approval-error" style={{ marginTop: 10 }}>{error}</div>}
-    </form>
+    <Card title="New team" className="tms-rise tms-rise-1">
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (!name.trim()) return;
+          onCreate({ name: name.trim(), managerId: managerId || null });
+          setName('');
+          setManagerId('');
+        }}
+      >
+        <div className="tms-form">
+          <Field label="Team name" className="tms-form__name">
+            <Input
+              type="text"
+              placeholder="e.g. Platform Squad"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              maxLength={80}
+              autoFocus
+            />
+          </Field>
+          <Field label="Manager" className="tms-form__mgr">
+            <Select value={managerId} onChange={(e) => setManagerId(e.target.value)}>
+              <option value="">— no manager —</option>
+              {users.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.name} · {u.role.toLowerCase()}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <div className="tms-form__actions">
+            <Button variant="ghost" onClick={onCancel} disabled={busy}>
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              variant="primary"
+              icon={<Plus size={14} strokeWidth={2.2} />}
+              loading={busy}
+              disabled={!name.trim()}
+            >
+              {busy ? 'Creating…' : 'Create team'}
+            </Button>
+          </div>
+        </div>
+        {error && (
+          <div className="tms-form__err">
+            <Banner status="danger">{error}</Banner>
+          </div>
+        )}
+      </form>
+    </Card>
   );
 }
 
@@ -191,76 +277,115 @@ function TeamRow({
     setEditing(false);
   }
 
-  return (
-    <li className="team-row">
-      <div className="team-main">
-        {editing ? (
-          <input
-            type="text"
-            className="team-name-input"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            maxLength={80}
-            autoFocus
-          />
-        ) : (
-          <div className="team-name">{team.name}</div>
-        )}
-        <div className="team-meta callout secondary">
-          {team.memberCount} member{team.memberCount === 1 ? '' : 's'}
-          {' · '}
-          {editing ? (
-            <select className="select team-mgr-select" value={managerId} onChange={(e) => setManagerId(e.target.value)}>
-              <option value="">— no manager —</option>
-              {users.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.name}
-                </option>
-              ))}
-            </select>
-          ) : manager ? (
-            <span>Manager: {manager.name}</span>
-          ) : (
-            <span className="tertiary">No manager</span>
-          )}
-        </div>
-        {error && <div className="approval-error team-error">{error}</div>}
-      </div>
+  function cancelEdit() {
+    setEditing(false);
+    setName(team.name);
+    setManagerId(team.managerId ?? '');
+  }
 
-      <div className="team-actions">
-        {editing ? (
-          <>
-            <button type="button" className="btn-ghost" onClick={() => setEditing(false)} disabled={busy}>
-              <X size={14} strokeWidth={2} />
-              <span>Cancel</span>
-            </button>
-            <button type="button" className="btn-primary" onClick={save} disabled={busy}>
-              <Check size={14} strokeWidth={2.2} />
-              <span>Save</span>
-            </button>
-          </>
-        ) : pendingDelete ? (
-          <>
-            <button type="button" className="btn-ghost" onClick={() => setPendingDelete(false)} disabled={busy}>
-              Cancel
-            </button>
-            <button type="button" className="btn-danger" onClick={onDelete} disabled={busy}>
-              {busy ? 'Deleting…' : 'Confirm delete'}
-            </button>
-          </>
-        ) : (
-          <>
-            <button type="button" className="btn-ghost" onClick={() => setEditing(true)}>
-              <Pencil size={14} strokeWidth={2} />
-              <span>Edit</span>
-            </button>
-            <button type="button" className="btn-ghost team-delete" onClick={() => setPendingDelete(true)}>
-              <Trash2 size={14} strokeWidth={2} />
-              <span>Delete</span>
-            </button>
-          </>
-        )}
-      </div>
-    </li>
+  const memberMeta = `${team.memberCount} ${team.memberCount === 1 ? 'person' : 'people'}`;
+
+  return (
+    <div className="tms-row">
+      <ListRow
+        leading={<Avatar name={team.name} size={32} />}
+        title={team.name}
+        subtitle={
+          manager ? (
+            <span className="tms-mgr">
+              <UserRound size={12} strokeWidth={2} aria-hidden /> {manager.name}
+            </span>
+          ) : (
+            'No manager'
+          )
+        }
+        meta={memberMeta}
+        trailing={
+          editing || pendingDelete ? undefined : (
+            <>
+              <IconButton
+                icon={<Pencil size={14} strokeWidth={1.9} />}
+                aria-label="Edit team"
+                onClick={() => setEditing(true)}
+                disabled={busy}
+              />
+              <IconButton
+                icon={<Trash2 size={14} strokeWidth={1.9} />}
+                aria-label="Delete team"
+                variant="danger"
+                onClick={() => setPendingDelete(true)}
+                disabled={busy}
+              />
+            </>
+          )
+        }
+      />
+
+      {editing && (
+        <div className="tms-edit">
+          <div className="tms-form">
+            <Field label="Team name" className="tms-form__name">
+              <Input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                maxLength={80}
+                autoFocus
+                aria-label="Team name"
+              />
+            </Field>
+            <Field label="Manager" className="tms-form__mgr">
+              <Select value={managerId} onChange={(e) => setManagerId(e.target.value)} aria-label="Manager">
+                <option value="">— no manager —</option>
+                {users.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <div className="tms-form__actions">
+              <Button variant="ghost" onClick={cancelEdit} disabled={busy}>
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                icon={<Check size={14} strokeWidth={2.2} />}
+                onClick={save}
+                loading={busy}
+              >
+                Save
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pendingDelete && !editing && (
+        <div className="tms-confirm">
+          <Banner
+            status="danger"
+            action={
+              <div className="tms-confirm__actions">
+                <Button variant="ghost" size="sm" onClick={() => setPendingDelete(false)} disabled={busy}>
+                  Cancel
+                </Button>
+                <Button variant="danger" size="sm" onClick={onDelete} loading={busy}>
+                  Delete team
+                </Button>
+              </div>
+            }
+          >
+            Delete <strong>{team.name}</strong>? This can&apos;t be undone.
+          </Banner>
+        </div>
+      )}
+
+      {error && (
+        <div className="tms-row__err">
+          <Banner status="danger">{error}</Banner>
+        </div>
+      )}
+    </div>
   );
 }

@@ -1,8 +1,31 @@
+import './shifts.css';
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Trash2, Pencil, Check, X, Clock4 } from 'lucide-react';
+import { Plus, Trash2, Pencil, Check, X, CalendarClock } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 import type { Shift, ShiftSchedule, DaySchedule, WeekdayKey } from '../lib/types';
+import {
+  Page,
+  PageHeader,
+  Card,
+  Toolbar,
+  Button,
+  IconButton,
+  Field,
+  Input,
+  Toggle,
+  Tag,
+  Table,
+  THead,
+  Tbody,
+  Tr,
+  Th,
+  Td,
+  Banner,
+  EmptyState,
+  Skeleton,
+  Avatar,
+} from '../ui';
 
 const WEEK: { key: WeekdayKey; label: string }[] = [
   { key: 'mon', label: 'Mon' },
@@ -14,7 +37,6 @@ const WEEK: { key: WeekdayKey; label: string }[] = [
   { key: 'sun', label: 'Sun' },
 ];
 
-const EMPTY: ShiftSchedule = { mon: null, tue: null, wed: null, thu: null, fri: null, sat: null, sun: null };
 const NINE_TO_SIX: ShiftSchedule = {
   mon: { start: '09:00', end: '18:00' },
   tue: { start: '09:00', end: '18:00' },
@@ -26,9 +48,16 @@ const NINE_TO_SIX: ShiftSchedule = {
 };
 
 /**
- * /shifts — ADMIN-only screen. Workspace shifts define each weekday's
- * working window + a buffer during which the agent's "Ready to work?"
- * toast keeps nudging the user. Assigned per-user via /users.
+ * /shifts — ADMIN-only screen, composed entirely from the shared "Quiet
+ * Datasheet" kit (Page / PageHeader / Card / Field / Table / Tag / Button …).
+ * The page contributes layout only; every colour, type, border and radius
+ * comes from the kit + tokens. Behaviour is untouched: same queries,
+ * mutations, save-diff logic, time pickers, day toggles, clamps and all
+ * loading / empty / error states.
+ *
+ * Workspace shifts define each weekday's working window + a buffer during which
+ * the agent's "Ready to work?" toast keeps nudging the user. Assigned per-user
+ * via /people.
  */
 export function ShiftsScreen() {
   const qc = useQueryClient();
@@ -52,65 +81,78 @@ export function ShiftsScreen() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'shifts'] }),
   });
 
-  return (
-    <div className="page">
-      <header className="page-head">
-        <div>
-          <h1 className="h1">Shifts</h1>
-          <p className="secondary page-sub">
-            Define when each shift starts and how long the agent should nudge before going quiet.
-          </p>
-        </div>
-      </header>
+  const count = q.data?.shifts.length ?? 0;
 
-      <ShiftComposer
-        busy={create.isPending}
-        error={create.isError ? (create.error as Error | ApiError).message : null}
-        onCreate={(vars) => create.mutate(vars)}
+  return (
+    <Page>
+      <PageHeader
+        eyebrow="Workspace · Admin"
+        title="Shifts"
+        subtitle="Define when each shift starts and how long the agent should nudge before going quiet."
+        actions={
+          <Toolbar>
+            <Tag mono>{q.data ? `${count} ${count === 1 ? 'shift' : 'shifts'}` : '—'}</Tag>
+          </Toolbar>
+        }
       />
 
-      <section className="card teams-card" style={{ padding: 0, marginTop: 16 }}>
-        {q.isLoading && <div className="empty">Loading…</div>}
-        {q.isError && (
-          <div className="empty empty-error">
-            Couldn&apos;t load shifts: {(q.error as Error).message}
-          </div>
-        )}
-        {q.data && q.data.shifts.length === 0 && (
-          <div className="empty">
-            <div className="empty-icon" aria-hidden>
-              <Clock4 size={22} strokeWidth={1.8} />
+      <div className="shf-stack">
+        <div className="ui-rise-1">
+          <ShiftComposer
+            busy={create.isPending}
+            error={create.isError ? (create.error as Error | ApiError).message : null}
+            onCreate={(vars) => create.mutate(vars)}
+          />
+        </div>
+
+        <section className="shf-stack ui-rise-2">
+          <span className="ui-t-eyebrow">Saved shifts</span>
+
+          {q.isLoading && (
+            <Card variant="flush">
+              <div className="shf-skel">
+                <Skeleton w="40%" h={16} />
+                <Skeleton w="100%" h={120} />
+              </div>
+            </Card>
+          )}
+          {q.isError && (
+            <Banner status="danger">Couldn&apos;t load shifts: {(q.error as Error).message}</Banner>
+          )}
+          {q.data && q.data.shifts.length === 0 && (
+            <EmptyState
+              icon={<CalendarClock size={22} strokeWidth={1.7} />}
+              title="No shifts yet"
+              description="Create one above. Assign it to people from /people."
+            />
+          )}
+          {q.data && q.data.shifts.length > 0 && (
+            <div className="shf-stack">
+              {q.data.shifts.map((sh) => (
+                <ShiftRow
+                  key={sh.id}
+                  shift={sh}
+                  busy={(patch.isPending && patch.variables?.id === sh.id) || (del.isPending && del.variables === sh.id)}
+                  error={
+                    (patch.isError && patch.variables?.id === sh.id
+                      ? (patch.error as Error | ApiError).message
+                      : null) ||
+                    (del.isError && del.variables === sh.id ? (del.error as Error | ApiError).message : null)
+                  }
+                  onPatch={(p) => patch.mutate({ id: sh.id, patch: p })}
+                  onDelete={() => del.mutate(sh.id)}
+                />
+              ))}
             </div>
-            <div className="empty-title">No shifts yet</div>
-            <div>Create one above. Assign it to people from /people.</div>
-          </div>
-        )}
-        {q.data && q.data.shifts.length > 0 && (
-          <ul className="teams-list">
-            {q.data.shifts.map((sh) => (
-              <ShiftRow
-                key={sh.id}
-                shift={sh}
-                busy={(patch.isPending && patch.variables?.id === sh.id) || (del.isPending && del.variables === sh.id)}
-                error={
-                  (patch.isError && patch.variables?.id === sh.id
-                    ? (patch.error as Error | ApiError).message
-                    : null) ||
-                  (del.isError && del.variables === sh.id ? (del.error as Error | ApiError).message : null)
-                }
-                onPatch={(p) => patch.mutate({ id: sh.id, patch: p })}
-                onDelete={() => del.mutate(sh.id)}
-              />
-            ))}
-          </ul>
-        )}
-      </section>
-    </div>
+          )}
+        </section>
+      </div>
+    </Page>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Composer
+// Composer — a Card hosting name/buffer fields + the 7-day editor
 // ---------------------------------------------------------------------------
 
 function ShiftComposer({
@@ -126,6 +168,8 @@ function ShiftComposer({
   const [schedule, setSchedule] = useState<ShiftSchedule>(NINE_TO_SIX);
   const [bufferMin, setBufferMin] = useState(30);
 
+  const workingDays = WEEK.filter((w) => schedule[w.key] !== null).length;
+
   function reset() {
     setName('');
     setSchedule(NINE_TO_SIX);
@@ -133,49 +177,58 @@ function ShiftComposer({
   }
 
   return (
-    <form
-      className="card composer-card"
-      onSubmit={(e) => {
-        e.preventDefault();
-        if (!name.trim()) return;
-        onCreate({ name: name.trim(), schedule, bufferMin });
-        reset();
-      }}
-    >
-      <div className="composer-row" style={{ marginBottom: 16 }}>
-        <input
-          type="text"
-          className="composer-input"
-          placeholder="Shift name (e.g. Day Shift)"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          maxLength={80}
-        />
-        <label className="composer-buffer">
-          <span className="field-label" style={{ marginRight: 8 }}>Buffer (min)</span>
-          <input
-            type="number"
-            min={0}
-            max={240}
-            step={5}
-            value={bufferMin}
-            onChange={(e) => setBufferMin(Math.max(0, Math.min(240, Number(e.target.value) || 0)))}
-            className="composer-num"
-          />
-        </label>
-        <button type="submit" className="btn-primary" disabled={busy || !name.trim()}>
-          <Plus size={14} strokeWidth={2.2} />
-          <span>{busy ? 'Creating…' : 'Create shift'}</span>
-        </button>
-      </div>
-      <ScheduleEditor value={schedule} onChange={setSchedule} />
-      {error && <div className="approval-error" style={{ marginTop: 10 }}>{error}</div>}
-    </form>
+    <Card title="New shift" action={<Tag mono>{workingDays} / 7 days on</Tag>}>
+      <form
+        className="shf-form"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (!name.trim()) return;
+          onCreate({ name: name.trim(), schedule, bufferMin });
+          reset();
+        }}
+      >
+        <div className="shf-form-top">
+          <Field label="Shift name" className="shf-grow">
+            <Input
+              type="text"
+              placeholder="e.g. Day Shift"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              maxLength={80}
+            />
+          </Field>
+          <Field label="Buffer (min)" hint="Nudge window">
+            <Input
+              type="number"
+              min={0}
+              max={240}
+              step={5}
+              value={bufferMin}
+              onChange={(e) => setBufferMin(Math.max(0, Math.min(240, Number(e.target.value) || 0)))}
+              className="shf-num"
+            />
+          </Field>
+          <Button
+            type="submit"
+            variant="primary"
+            icon={<Plus size={15} strokeWidth={2.2} />}
+            loading={busy}
+            disabled={busy || !name.trim()}
+          >
+            {busy ? 'Creating' : 'Create shift'}
+          </Button>
+        </div>
+
+        <ScheduleEditor value={schedule} onChange={setSchedule} />
+
+        {error && <Banner status="danger">{error}</Banner>}
+      </form>
+    </Card>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Row (collapsed summary; expandable inline editor)
+// Row — collapsed summary Card with an expandable inline editor
 // ---------------------------------------------------------------------------
 
 function ShiftRow({
@@ -210,92 +263,102 @@ function ShiftRow({
     setEditing(false);
   }
 
+  const workingDays = WEEK.filter((w) => shift.schedule[w.key] !== null).length;
+
   return (
-    <li className="team-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 12 }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
-        <div className="team-main" style={{ flex: 1 }}>
+    <Card>
+      <div className="shf-row-head">
+        <div className="shf-row-id">
+          <Avatar name={shift.name || 'Shift'} size={32} />
           {editing ? (
-            <input
+            <Input
               type="text"
-              className="team-name-input"
+              className="shf-name-input"
               value={name}
               onChange={(e) => setName(e.target.value)}
               maxLength={80}
             />
           ) : (
-            <div className="team-name">{shift.name}</div>
+            <div className="shf-row-main">
+              <span className="ui-t-strong">{shift.name}</span>
+              <span className="ui-t-small ui-ink-2 shf-summary">{summariseSchedule(shift.schedule)}</span>
+            </div>
           )}
-          <div className="team-meta callout secondary">
-            {shift.memberCount} member{shift.memberCount === 1 ? '' : 's'}
-            {' · '}
+        </div>
+
+        <div className="shf-row-side">
+          <div className="shf-meta">
+            <Tag mono>
+              {shift.memberCount} member{shift.memberCount === 1 ? '' : 's'}
+            </Tag>
             {editing ? (
-              <span>
-                Buffer:{' '}
-                <input
+              <Field label="Buffer" className="shf-buffer-edit">
+                <Input
                   type="number"
                   min={0}
                   max={240}
                   step={5}
                   value={bufferMin}
-                  onChange={(e) =>
-                    setBufferMin(Math.max(0, Math.min(240, Number(e.target.value) || 0)))
-                  }
-                  className="composer-num"
-                  style={{ width: 64 }}
-                />{' '}
-                min
-              </span>
+                  onChange={(e) => setBufferMin(Math.max(0, Math.min(240, Number(e.target.value) || 0)))}
+                  className="shf-num"
+                />
+              </Field>
             ) : (
-              <span>Buffer {shift.bufferMin} min</span>
+              <Tag mono>Buffer {shift.bufferMin}m</Tag>
             )}
-            {' · '}
-            <span className="tertiary">{summariseSchedule(shift.schedule)}</span>
+            <Tag status="info">
+              {workingDays} working {workingDays === 1 ? 'day' : 'days'}
+            </Tag>
           </div>
-          {error && <div className="approval-error team-error">{error}</div>}
-        </div>
 
-        <div className="team-actions">
-          {editing ? (
-            <>
-              <button type="button" className="btn-ghost" onClick={() => setEditing(false)} disabled={busy}>
-                <X size={14} strokeWidth={2} /> Cancel
-              </button>
-              <button type="button" className="btn-primary" onClick={save} disabled={busy}>
-                <Check size={14} strokeWidth={2.2} /> Save
-              </button>
-            </>
-          ) : pendingDelete ? (
-            <>
-              <button type="button" className="btn-ghost" onClick={() => setPendingDelete(false)} disabled={busy}>
-                Cancel
-              </button>
-              <button type="button" className="btn-danger" onClick={onDelete} disabled={busy}>
-                {busy ? 'Deleting…' : 'Confirm delete'}
-              </button>
-            </>
-          ) : (
-            <>
-              <button type="button" className="btn-ghost" onClick={() => setEditing(true)}>
-                <Pencil size={14} strokeWidth={2} /> Edit
-              </button>
-              <button type="button" className="btn-ghost team-delete" onClick={() => setPendingDelete(true)}>
-                <Trash2 size={14} strokeWidth={2} /> Delete
-              </button>
-            </>
-          )}
+          <div className="shf-actions">
+            {editing ? (
+              <>
+                <Button variant="ghost" size="sm" icon={<X size={14} strokeWidth={2} />} onClick={() => setEditing(false)} disabled={busy}>
+                  Cancel
+                </Button>
+                <Button variant="primary" size="sm" icon={<Check size={14} strokeWidth={2.2} />} loading={busy} onClick={save}>
+                  Save
+                </Button>
+              </>
+            ) : pendingDelete ? (
+              <>
+                <Button variant="ghost" size="sm" onClick={() => setPendingDelete(false)} disabled={busy}>
+                  Cancel
+                </Button>
+                <Button variant="danger" size="sm" loading={busy} onClick={onDelete}>
+                  {busy ? 'Deleting' : 'Confirm delete'}
+                </Button>
+              </>
+            ) : (
+              <>
+                <IconButton icon={<Pencil size={14} strokeWidth={2} />} aria-label="Edit shift" size="sm" onClick={() => setEditing(true)} />
+                <IconButton icon={<Trash2 size={14} strokeWidth={2} />} aria-label="Delete shift" size="sm" variant="danger" onClick={() => setPendingDelete(true)} />
+              </>
+            )}
+          </div>
         </div>
       </div>
-      {editing ? (
-        <ScheduleEditor value={schedule} onChange={setSchedule} />
-      ) : (
-        <ScheduleReadout schedule={shift.schedule} />
+
+      {error && (
+        <Banner status="danger" className="shf-row-banner">
+          {error}
+        </Banner>
       )}
-    </li>
+
+      <div className="shf-row-body">
+        {editing ? (
+          <ScheduleEditor value={schedule} onChange={setSchedule} />
+        ) : (
+          <ScheduleReadout schedule={shift.schedule} />
+        )}
+      </div>
+    </Card>
   );
 }
 
 // ---------------------------------------------------------------------------
-// 7-day schedule editor (edit mode) + readout (collapsed view)
+// 7-day schedule editor (edit mode) — a compact Table
 // ---------------------------------------------------------------------------
 
 function ScheduleEditor({
@@ -310,59 +373,85 @@ function ScheduleEditor({
   }
 
   return (
-    <div className="schedule-grid">
-      {WEEK.map(({ key, label }) => {
-        const day = value[key];
-        const off = day === null;
-        return (
-          <div key={key} className={`schedule-row${off ? ' is-off' : ''}`}>
-            <div className="schedule-day">{label}</div>
-            <label className="schedule-toggle">
-              <input
-                type="checkbox"
-                checked={!off}
-                onChange={(e) => {
-                  if (e.target.checked) setDay(key, day ?? { start: '09:00', end: '18:00' });
-                  else setDay(key, null);
-                }}
-              />
-              <span>{off ? 'Day off' : 'Working day'}</span>
-            </label>
-            <div className="schedule-times">
-              <input
-                type="time"
-                value={day?.start ?? '09:00'}
-                disabled={off}
-                onChange={(e) => day && setDay(key, { ...day, start: e.target.value })}
-                className="schedule-time"
-              />
-              <span className="secondary">–</span>
-              <input
-                type="time"
-                value={day?.end ?? '18:00'}
-                disabled={off}
-                onChange={(e) => day && setDay(key, { ...day, end: e.target.value })}
-                className="schedule-time"
-              />
-            </div>
-          </div>
-        );
-      })}
-    </div>
+    <Card variant="flush" className="shf-editor">
+      <Table density="compact">
+        <THead>
+          <Tr>
+            <Th>Day</Th>
+            <Th>Working</Th>
+            <Th>Window</Th>
+          </Tr>
+        </THead>
+        <Tbody>
+          {WEEK.map(({ key, label }) => {
+            const day = value[key];
+            const off = day === null;
+            return (
+              <Tr key={key} rail={off ? undefined : 'success'}>
+                <Td>
+                  <span className="ui-t-strong">{label}</span>
+                </Td>
+                <Td>
+                  <label className="shf-toggle">
+                    <Toggle
+                      checked={!off}
+                      onChange={(checked) => {
+                        if (checked) setDay(key, day ?? { start: '09:00', end: '18:00' });
+                        else setDay(key, null);
+                      }}
+                    />
+                    <span className="ui-t-small ui-ink-2">{off ? 'Day off' : 'Working'}</span>
+                  </label>
+                </Td>
+                <Td>
+                  <div className="shf-times">
+                    <Input
+                      type="time"
+                      value={day?.start ?? '09:00'}
+                      disabled={off}
+                      onChange={(e) => day && setDay(key, { ...day, start: e.target.value })}
+                      className="shf-time"
+                    />
+                    <span className="ui-mono ui-ink-3" aria-hidden>→</span>
+                    <Input
+                      type="time"
+                      value={day?.end ?? '18:00'}
+                      disabled={off}
+                      onChange={(e) => day && setDay(key, { ...day, end: e.target.value })}
+                      className="shf-time"
+                    />
+                  </div>
+                </Td>
+              </Tr>
+            );
+          })}
+        </Tbody>
+      </Table>
+    </Card>
   );
 }
 
+// ---------------------------------------------------------------------------
+// 7-day readout (collapsed view) — the week shape at a glance
+// ---------------------------------------------------------------------------
+
 function ScheduleReadout({ schedule }: { schedule: ShiftSchedule }) {
   return (
-    <div className="schedule-readout">
+    <div className="shf-week">
       {WEEK.map(({ key, label }) => {
         const day = schedule[key];
+        const off = day === null;
         return (
-          <div key={key} className={`schedule-chip${day === null ? ' is-off' : ''}`}>
-            <span className="schedule-chip-day">{label}</span>
-            <span className="schedule-chip-time tabular">
-              {day === null ? '—' : `${day.start} – ${day.end}`}
-            </span>
+          <div key={key} className={`shf-day${off ? ' is-off' : ''}`}>
+            <span className="ui-t-eyebrow shf-day-label">{label}</span>
+            {off ? (
+              <span className="ui-mono ui-ink-3">—</span>
+            ) : (
+              <>
+                <span className="ui-mono shf-day-time">{day.start}</span>
+                <span className="ui-mono ui-ink-3 shf-day-time">{day.end}</span>
+              </>
+            )}
           </div>
         );
       })}

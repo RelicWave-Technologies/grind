@@ -55,8 +55,8 @@ export default function DayTimeline({ entries, now, runningEntryId }: Props) {
           const isOpen = s.endedAt === null && s.entryId === runningEntryId;
           let bg = 'var(--separator-strong)';
           if (s.kind === 'WORK') bg = projectStyle(s.colorKey).color;
-          else if (s.kind === 'MEETING') bg = 'var(--c-blue)';
-          else bg = 'rgba(40,36,56,0.12)';
+          else if (s.kind === 'MEETING') bg = 'var(--c-blue-bg)';
+          else bg = 'rgba(0,0,0,0.08)';
           return (
             <div
               key={i}

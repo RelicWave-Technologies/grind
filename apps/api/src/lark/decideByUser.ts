@@ -45,6 +45,7 @@ export async function decideByUser(args: {
     where: { id: args.requestId },
     include: {
       user: { select: { name: true } },
+      attendees: { select: { userId: true } },
     },
   });
   if (!req) return null;
@@ -88,6 +89,7 @@ export async function decideByUser(args: {
     let timeEntryId: string | null = null;
     if (decision === 'APPROVED') {
       const teId = ulid();
+      const attendeeIds = req.attendees.map((a) => a.userId);
       await tx.timeEntry.create({
         data: {
           id: teId,
@@ -103,6 +105,10 @@ export async function decideByUser(args: {
               { id: ulid(), kind: 'WORK', startedAt: req.requestedStart, endedAt: req.requestedEnd },
             ],
           },
+          // Carry the requested attendees (meeting participants) onto the entry —
+          // same as the MANAGER+ auto-approve path. Without this they're silently
+          // dropped on approval.
+          attendees: attendeeIds.length ? { create: attendeeIds.map((userId) => ({ userId })) } : undefined,
         },
       });
       timeEntryId = teId;

@@ -34,7 +34,10 @@ interface Props {
 }
 
 const HOURS = [12, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]; // 12-hour cycle, AM order
-const MINUTES = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55];
+// Every minute (0–59) so the picker can land exactly on any real slot edge
+// (e.g. 2:41, 4:32). Out-of-range minutes are disabled by `inRange`, so it can
+// only ever produce a valid time. The active row auto-scrolls into view.
+const MINUTES = Array.from({ length: 60 }, (_, i) => i);
 
 function partsFromMs(ms: number): { h12: number; m: number; ampm: 'AM' | 'PM' } {
   const d = new Date(ms);

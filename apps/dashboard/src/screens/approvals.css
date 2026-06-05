@@ -1,0 +1,144 @@
+/* ============================================================================
+   APPROVALS — page layout only.
+
+   The Approvals queue is composed entirely from the shared "Quiet Datasheet"
+   kit (src/ui/*). This file contributes LAYOUT ONLY — grid/flex placement and
+   gaps, all on the 4px spacing scale, prefixed `apv-`. It introduces NO colour,
+   type, border, radius, or shadow; every look comes from the kit + tokens.
+   ========================================================================== */
+
+/* Queue: a vertical stack of request Cards. */
+.apv-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+/* One request Card's internal stack: head → spec → triage → actions. */
+.apv-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+}
+
+/* Card head: requester Identity ←→ age + status Tags. */
+.apv-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
+}
+.apv-head-end {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex: none;
+}
+
+/* Spec: label / value definition rows. */
+.apv-spec {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  margin: 0;
+}
+.apv-row {
+  display: grid;
+  grid-template-columns: 88px 1fr;
+  align-items: baseline;
+  gap: var(--sp-5);
+}
+.apv-row__label {
+  margin: 0;
+}
+.apv-row__value {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  min-width: 0;
+  margin: 0;
+}
+
+/* AI triage read — a quiet well grouping the verdict + signals. Surface tone
+   only (a sanctioned grouping well); no bespoke colour/border. */
+.apv-triage {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-4) var(--sp-5);
+  background: var(--surface-inset);
+  border-radius: var(--r-sm);
+}
+.apv-triage__head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+.apv-triage__icon {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.apv-triage__conf {
+  margin-left: auto;
+}
+.apv-triage__signals {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.apv-triage__sig {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+}
+.apv-triage__sigmark {
+  flex: none;
+}
+.apv-pos {
+  color: var(--success-ink);
+}
+.apv-neg {
+  color: var(--danger-ink);
+}
+
+/* Actions: right-aligned Button cluster. */
+.apv-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+
+/* Inline reject form: grows the input, keeps the buttons trailing. */
+.apv-reject {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  width: 100%;
+}
+.apv-reject__input {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+/* Loading skeleton stack inside a placeholder Card. */
+.apv-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+@media (max-width: 560px) {
+  .apv-row {
+    grid-template-columns: 1fr;
+    gap: var(--sp-1);
+  }
+}

@@ -1,18 +1,21 @@
 import Database from 'better-sqlite3';
 import { app } from 'electron';
 import path from 'node:path';
+import { promises as fs } from 'node:fs';
 import { ScreenshotStore } from './store';
 import { captureNow, thumbDataUrl, fullDataUrl } from './capture';
 import { nextDelayMs } from './scheduler';
+import { planScreenshotRetention } from './retention';
 import { getTimerService } from '../timer';
 import { getActivityStore } from '../activity';
 import { activityPercent } from '../activity/percent';
-import { SCREENSHOT_INTERVAL_SEC } from '../../env';
+import { SCREENSHOT_INTERVAL_SEC, SCREENSHOT_RETENTION_DAYS } from '../../env';
 import { type CaptureHealth } from '../permissions';
 import { log } from '../../logger';
 
 let store: ScreenshotStore | null = null;
 let timer: NodeJS.Timeout | null = null;
+let retentionTimer: NodeJS.Timeout | null = null;
 let lastHealth: CaptureHealth = 'unknown';
 
 /**
@@ -84,10 +87,101 @@ async function tick() {
   }
 }
 
-/** Start the jittered capture loop. */
+function screenshotsRoot(): string {
+  return path.join(app.getPath('userData'), 'screenshots');
+}
+
+/** All `.webp` files under the screenshots dir (one level of YYYY-MM-DD dirs). */
+async function listWebpFiles(root: string): Promise<string[]> {
+  const out: string[] = [];
+  let dayDirs: string[];
+  try {
+    dayDirs = await fs.readdir(root);
+  } catch {
+    return out; // dir doesn't exist yet — nothing captured
+  }
+  for (const d of dayDirs) {
+    const dayPath = path.join(root, d);
+    try {
+      if (!(await fs.stat(dayPath)).isDirectory()) continue;
+      for (const f of await fs.readdir(dayPath)) {
+        if (f.endsWith('.webp')) out.push(path.join(dayPath, f));
+      }
+    } catch {
+      /* race with a concurrent delete — skip */
+    }
+  }
+  return out;
+}
+
+/** Remove now-empty day directories (cosmetic; keeps the tree tidy). */
+async function pruneEmptyDirs(root: string): Promise<void> {
+  let dayDirs: string[];
+  try {
+    dayDirs = await fs.readdir(root);
+  } catch {
+    return;
+  }
+  for (const d of dayDirs) {
+    const p = path.join(root, d);
+    try {
+      if ((await fs.stat(p)).isDirectory() && (await fs.readdir(p)).length === 0) {
+        await fs.rmdir(p);
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+/**
+ * Prune the local screenshot cache: expire old shots, delete orphan files
+ * (crash between write and DB insert), and drop rows whose file vanished
+ * (so the gallery never shows a broken thumbnail). Idempotent — safe to run
+ * on every boot and daily thereafter.
+ */
+export async function runScreenshotRetention(now = Date.now()): Promise<void> {
+  try {
+    const root = screenshotsRoot();
+    const filesOnDisk = await listWebpFiles(root);
+    const rows = getStore().allForRetention();
+    const plan = planScreenshotRetention({ rows, filesOnDisk, now, retentionDays: SCREENSHOT_RETENTION_DAYS });
+
+    // Delete rows first: if we crash mid-unlink, the leftover files become
+    // orphans the next run reaps — never dangling rows pointing at gone files.
+    getStore().deleteByIds(plan.rowIdsToDelete);
+    let unlinked = 0;
+    for (const f of plan.filesToDelete) {
+      try {
+        await fs.unlink(f);
+        unlinked++;
+      } catch {
+        /* already gone / locked — next run retries */
+      }
+    }
+    await pruneEmptyDirs(root);
+
+    if (plan.rowIdsToDelete.length || plan.filesToDelete.length) {
+      log.info('screenshot retention', {
+        expired: plan.expired,
+        orphanFiles: plan.orphanFiles,
+        danglingRows: plan.danglingRows,
+        rowsDeleted: plan.rowIdsToDelete.length,
+        filesUnlinked: unlinked,
+      });
+    }
+  } catch (err) {
+    log.warn('screenshot retention failed', { err: String(err) });
+  }
+}
+
+/** Start the jittered capture loop + the local-cache janitor. */
 export function startCaptureLoop(): void {
   if (timer) return;
   getStore();
+  void runScreenshotRetention(); // reap stale/orphan files on boot
+  retentionTimer = setInterval(() => void runScreenshotRetention(), 24 * 60 * 60 * 1000);
+  void retentionTimer;
   schedule();
 }
 

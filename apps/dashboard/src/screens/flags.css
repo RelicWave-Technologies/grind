@@ -1,0 +1,107 @@
+/* ============================================================================
+   FLAGS — page LAYOUT only. Every colour, type, border, shadow, and component
+   look comes from the shared kit (src/ui). This file places kit pieces in a
+   grid/flex; it owns NO visual styling. All classes are prefixed `flg-`.
+   ========================================================================== */
+
+/* Vertical stack of flag Cards. */
+.flg-queue {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-sp-5);
+}
+
+/* Inside each flag Card, stack the composed rows with even rhythm. */
+.flg-queue .ui-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-sp-5);
+}
+
+/* Top: Identity ←→ risk readout. */
+.flg-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--ui-sp-5);
+  flex-wrap: wrap;
+}
+.flg-risk {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--ui-sp-2);
+  flex: none;
+}
+.flg-risk__cap { display: block; }
+.flg-risk__num { line-height: 1; }
+
+/* Flag-type Tag row (Tag self-aligns; this just lets it shrink-wrap). */
+.flg-type {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ui-sp-3);
+}
+
+/* Definition row: eyebrow label above a value (Window / Pattern / Evidence / Note). */
+.flg-def {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-sp-2);
+  min-width: 0;
+}
+.flg-def__val { min-width: 0; }
+
+/* Evidence chip cluster. */
+.flg-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ui-sp-2);
+}
+
+/* AI-read Banner internals — stack its lines. */
+.flg-ai__cap,
+.flg-ai__head,
+.flg-ai__detail {
+  display: block;
+}
+.flg-ai__cap {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-sp-2);
+  margin-bottom: var(--ui-sp-2);
+}
+.flg-ai__detail { margin-top: var(--ui-sp-2); }
+
+/* Resolved verdict + audit stamp on one line. */
+.flg-verdict {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--ui-sp-3);
+}
+
+/* Inline triage actions: a row of kit Buttons, right-aligned. */
+.flg-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: var(--ui-sp-3);
+}
+
+/* Compose form: the note Field grows, actions trail. */
+.flg-form {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: var(--ui-sp-3);
+}
+.flg-form__field {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+@media (max-width: 640px) {
+  .flg-risk { align-items: flex-start; }
+}

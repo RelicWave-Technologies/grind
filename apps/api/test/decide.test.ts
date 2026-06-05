@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { ulid } from 'ulid';
 import { prisma } from '@grind/db';
 import { decideRequest } from '../src/lark/decide';
 import { seedUser } from './helpers';
@@ -68,6 +69,35 @@ describe('decideRequest — APPROVE', () => {
     expect((result!.card.header as Record<string, unknown>).template).toBe('green');
     expect(JSON.stringify(result!.card)).toContain('Approved');
     expect(JSON.stringify(result!.card)).toContain(admin.name);
+  });
+});
+
+describe('decideRequest — attendees', () => {
+  it('carries the request attendees (meeting participants) onto the approved TimeEntry', async () => {
+    const { requester, req, openId } = await setup();
+    const mk = (tag: string) =>
+      prisma.user.create({
+        data: {
+          workspaceId: requester.workspaceId,
+          email: `${tag}-${ulid()}@test.local`,
+          name: tag,
+          role: 'MEMBER',
+          passwordHash: 'x'.repeat(60),
+        },
+      });
+    const a1 = await mk('att1');
+    const a2 = await mk('att2');
+    await prisma.mtrAttendee.createMany({
+      data: [
+        { requestId: req.id, userId: a1.id },
+        { requestId: req.id, userId: a2.id },
+      ],
+    });
+
+    const result = await decideRequest({ requestId: req.id, action: 'approve', decidedByOpenId: openId! });
+    expect(result!.status).toBe('APPROVED');
+    const teAttendees = await prisma.timeEntryAttendee.findMany({ where: { timeEntryId: result!.timeEntryId! } });
+    expect(teAttendees.map((a) => a.userId).sort()).toEqual([a1.id, a2.id].sort());
   });
 });
 

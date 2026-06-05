@@ -1,15 +1,41 @@
+import './payroll.css';
 import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Calendar, Download, FileSpreadsheet } from 'lucide-react';
+import { Download, FileSpreadsheet } from 'lucide-react';
 import { api, API_BASE } from '../lib/api';
+import {
+  Page,
+  PageHeader,
+  Card,
+  Stat,
+  StatRow,
+  Table,
+  THead,
+  Tbody,
+  Th,
+  Tr,
+  Td,
+  Identity,
+  Avatar,
+  Tag,
+  Toolbar,
+  DateStepper,
+  Button,
+  Banner,
+  EmptyState,
+  SkeletonTable,
+  SkeletonStat,
+} from '../ui';
 
 /**
  * /payroll — ADMIN monthly payroll worksheet (M15).
  *
- * Picks a month, previews the per-user totals (days present, hours by
- * kind), and downloads a CSV via the /v1/admin/payroll/monthly.csv
- * endpoint. The exact column set is intentionally conservative — we'll
- * iterate after the finance + Vijay sir alignment.
+ * Picks a month, previews per-user totals (days present, hours by kind), and
+ * downloads a CSV via /v1/admin/payroll/monthly.csv. Composed entirely from the
+ * shared "Quiet Datasheet" kit (see src/ui/SYSTEM.md): PageHeader + Toolbar for
+ * the month stepper and CSV download, a flush StatRow for the period headline
+ * numbers, and a flush Table for the per-user ledger with an accent-railed TOTAL
+ * row. No bespoke component styling — tokens + kit only.
  */
 
 interface PayrollRow {
@@ -63,6 +89,7 @@ function fmtMonth(month: string): string {
 
 export function PayrollScreen() {
   const [month, setMonth] = useState<string>(thisMonth());
+  const [downloading, setDownloading] = useState(false);
   const tz = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC', []);
 
   const q = useQuery({
@@ -74,138 +101,189 @@ export function PayrollScreen() {
     // Cross-origin fetch + Blob so the auth cookie travels and we can
     // suggest a sane filename. Native <a download> wouldn't pick up the
     // Content-Disposition header in a cross-origin context.
-    const res = await fetch(`${API_BASE}/v1/admin/payroll/monthly.csv?month=${month}&tz=${tz}`, {
-      credentials: 'include',
-    });
-    if (!res.ok) return;
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `grind-payroll-${month}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
+    setDownloading(true);
+    try {
+      const res = await fetch(
+        `${API_BASE}/v1/admin/payroll/monthly.csv?month=${month}&tz=${tz}`,
+        { credentials: 'include' },
+      );
+      if (!res.ok) return;
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `grind-payroll-${month}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } finally {
+      setDownloading(false);
+    }
   }
 
+  const isCurrent = month === thisMonth();
+  const peopleCount = q.data?.rows.length ?? 0;
+  const totals = q.data?.totals;
+  const hasRows = (q.data?.rows.length ?? 0) > 0;
+
   return (
-    <div className="page page-wide">
-      <header className="page-head">
-        <div>
-          <h1 className="h1" style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-            <FileSpreadsheet size={20} strokeWidth={1.8} /> Payroll worksheet
-          </h1>
-          <p className="secondary page-sub">
-            Monthly hours summary, ready for finance. CSV format will be refined with the accounts team — current
-            columns: name, email, role, team, days present, worked / meeting / manual / total / avg-day hours.
-          </p>
-        </div>
-
-        <div className="day-controls">
-          <div className="date-nav">
-            <button type="button" className="btn-icon" onClick={() => setMonth((m) => shiftMonth(m, -1))} aria-label="Previous month">
-              ‹
-            </button>
-            <button
-              type="button"
-              className={`btn-ghost date-pill${month === thisMonth() ? ' is-today' : ''}`}
-              onClick={() => setMonth(thisMonth())}
+    <Page>
+      <PageHeader
+        eyebrow={`Payroll · ${tz.replace(/_/g, ' ')}`}
+        title={fmtMonth(month)}
+        subtitle="Monthly hours summary, ready for finance — worked, meeting, manual and total hours per person."
+        actions={
+          <Toolbar>
+            {!isCurrent && (
+              <Button variant="ghost" size="sm" onClick={() => setMonth(thisMonth())}>
+                Today
+              </Button>
+            )}
+            <DateStepper
+              value={fmtMonth(month)}
+              onPrev={() => setMonth((m) => shiftMonth(m, -1))}
+              onNext={() => setMonth((m) => shiftMonth(m, 1))}
+              nextDisabled={isCurrent}
+              prevLabel="Previous month"
+              nextLabel="Next month"
+            />
+            <Button
+              variant="primary"
+              icon={<Download size={15} strokeWidth={2} />}
+              onClick={downloadCsv}
+              loading={downloading}
+              disabled={!hasRows}
             >
-              <Calendar size={13} strokeWidth={1.8} />
-              <span>{fmtMonth(month)}</span>
-            </button>
-            <button
-              type="button"
-              className="btn-icon"
-              onClick={() => setMonth((m) => shiftMonth(m, 1))}
-              disabled={month >= thisMonth()}
-              aria-label="Next month"
-            >
-              ›
-            </button>
-          </div>
-          <button
-            type="button"
-            className="btn btn-prominent"
-            onClick={downloadCsv}
-            disabled={!q.data || q.data.rows.length === 0}
-          >
-            <Download size={14} strokeWidth={2} /> Download CSV
-          </button>
-        </div>
-      </header>
+              Download CSV
+            </Button>
+          </Toolbar>
+        }
+      />
 
-      {q.isLoading && <div className="card empty">Loading worksheet…</div>}
-      {q.isError && (
-        <div className="card empty empty-error">Couldn&apos;t load: {(q.error as Error).message}</div>
-      )}
+      {q.isError ? (
+        <Banner
+          status="danger"
+          className="pay-block"
+          action={
+            <Button variant="ghost" size="sm" onClick={() => q.refetch()}>
+              Retry
+            </Button>
+          }
+        >
+          Couldn&apos;t load the payroll worksheet: {(q.error as Error).message}
+        </Banner>
+      ) : (
+        <>
+          {/* Period headline numbers. */}
+          <Card variant="flush" className="pay-block">
+            {q.isLoading || !totals ? (
+              <div className="pay-stat-skel">
+                <SkeletonStat />
+                <SkeletonStat />
+                <SkeletonStat />
+                <SkeletonStat />
+              </div>
+            ) : (
+              <StatRow>
+                <Stat
+                  label="People"
+                  value={peopleCount}
+                  hint={peopleCount === 0 ? 'nobody to bill yet' : 'in this worksheet'}
+                />
+                <Stat
+                  label="Total hours"
+                  value={totals.totalHours.toFixed(1)}
+                  unit="h"
+                  hint={
+                    totals.meetingHours > 0
+                      ? `incl. ${totals.meetingHours.toFixed(1)}h meetings`
+                      : 'across all people'
+                  }
+                />
+                <Stat label="Days present" value={totals.daysPresent} hint="person-days logged" />
+                <Stat
+                  label="Manual hours"
+                  value={totals.manualHours.toFixed(1)}
+                  unit="h"
+                  hint={totals.manualHours === 0 ? 'no manual edits' : 'manually entered'}
+                />
+              </StatRow>
+            )}
+          </Card>
 
-      {q.data && (
-        <section className="card" style={{ padding: 0 }}>
-          <header className="entries-head">
-            <h2 className="h3">{fmtMonth(month)} · {tz}</h2>
-            <div className="entries-totals secondary">
-              {q.data.rows.length} people · {q.data.totals.totalHours.toFixed(1)}h total
-            </div>
-          </header>
-          <table className="entries-table">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Role</th>
-                <th>Team</th>
-                <th className="payroll-num">Days</th>
-                <th className="payroll-num">Worked</th>
-                <th className="payroll-num">Meetings</th>
-                <th className="payroll-num">Manual</th>
-                <th className="payroll-num">Total</th>
-                <th className="payroll-num">Avg / day</th>
-              </tr>
-            </thead>
-            <tbody>
-              {q.data.rows.length === 0 && (
-                <tr>
-                  <td colSpan={9} className="tertiary" style={{ padding: 'var(--sp-5) var(--sp-6)', textAlign: 'center' }}>
-                    No users in this workspace yet.
-                  </td>
-                </tr>
-              )}
-              {q.data.rows.map((r) => (
-                <tr key={r.user.id} className="et-row">
-                  <td>
-                    <div style={{ fontWeight: 500 }}>{r.user.name}</div>
-                    <div className="small tertiary">{r.user.email}</div>
-                  </td>
-                  <td className="secondary small">{r.user.role}</td>
-                  <td className="secondary small">{r.user.teamName ?? <span className="tertiary">—</span>}</td>
-                  <td className="payroll-num tabular">{r.daysPresent}</td>
-                  <td className="payroll-num tabular">{r.workedHours.toFixed(2)}</td>
-                  <td className="payroll-num tabular">{r.meetingHours.toFixed(2)}</td>
-                  <td className="payroll-num tabular">{r.manualHours.toFixed(2)}</td>
-                  <td className="payroll-num tabular" style={{ fontWeight: 600 }}>
-                    {r.totalHours.toFixed(2)}
-                  </td>
-                  <td className="payroll-num tabular secondary">{r.avgDayHours.toFixed(2)}</td>
-                </tr>
-              ))}
-              {q.data.rows.length > 0 && (
-                <tr className="et-row payroll-total-row">
-                  <td colSpan={3} style={{ fontWeight: 600 }}>Total</td>
-                  <td className="payroll-num tabular">{q.data.totals.daysPresent}</td>
-                  <td className="payroll-num tabular">{q.data.totals.workedHours.toFixed(2)}</td>
-                  <td className="payroll-num tabular">{q.data.totals.meetingHours.toFixed(2)}</td>
-                  <td className="payroll-num tabular">{q.data.totals.manualHours.toFixed(2)}</td>
-                  <td className="payroll-num tabular" style={{ fontWeight: 700 }}>
-                    {q.data.totals.totalHours.toFixed(2)}
-                  </td>
-                  <td className="payroll-num tertiary">—</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </section>
+          {/* Per-user worksheet. */}
+          <Card variant="flush" className="pay-block">
+            {q.isLoading ? (
+              <SkeletonTable rows={6} />
+            ) : !hasRows ? (
+              <EmptyState
+                icon={<FileSpreadsheet size={22} strokeWidth={1.8} />}
+                title="No users in this workspace yet"
+                description="Once people start tracking time, their monthly totals will appear here ready to export."
+              />
+            ) : (
+              <div className="pay-scroll">
+                <Table>
+                  <THead>
+                    <Tr>
+                      <Th>Name</Th>
+                      <Th>Role</Th>
+                      <Th>Team</Th>
+                      <Th align="right">Days</Th>
+                      <Th align="right">Worked</Th>
+                      <Th align="right">Meetings</Th>
+                      <Th align="right">Manual</Th>
+                      <Th align="right">Total</Th>
+                      <Th align="right">Avg / day</Th>
+                    </Tr>
+                  </THead>
+                  <Tbody>
+                    {q.data!.rows.map((r) => (
+                      <Tr key={r.user.id}>
+                        <Td>
+                          <Identity
+                            name={r.user.name}
+                            subtitle={r.user.email}
+                            avatar={<Avatar name={r.user.name} size={32} />}
+                          />
+                        </Td>
+                        <Td>
+                          <Tag mono>{r.user.role}</Tag>
+                        </Td>
+                        <Td>
+                          {r.user.teamName ? (
+                            <Tag>{r.user.teamName}</Tag>
+                          ) : (
+                            <span className="ui-t-small">—</span>
+                          )}
+                        </Td>
+                        <Td mono>{r.daysPresent}</Td>
+                        <Td mono>{r.workedHours.toFixed(2)}</Td>
+                        <Td mono>{r.meetingHours.toFixed(2)}</Td>
+                        <Td mono>{r.manualHours.toFixed(2)}</Td>
+                        <Td mono>{r.totalHours.toFixed(2)}</Td>
+                        <Td mono>{r.avgDayHours.toFixed(2)}</Td>
+                      </Tr>
+                    ))}
+                    <Tr rail="accent">
+                      <Td className="ui-t-eyebrow">Total</Td>
+                      <Td />
+                      <Td />
+                      <Td mono>{totals!.daysPresent}</Td>
+                      <Td mono>{totals!.workedHours.toFixed(2)}</Td>
+                      <Td mono>{totals!.meetingHours.toFixed(2)}</Td>
+                      <Td mono>{totals!.manualHours.toFixed(2)}</Td>
+                      <Td mono>{totals!.totalHours.toFixed(2)}</Td>
+                      <Td mono>—</Td>
+                    </Tr>
+                  </Tbody>
+                </Table>
+              </div>
+            )}
+          </Card>
+        </>
       )}
-    </div>
+    </Page>
   );
 }

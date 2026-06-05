@@ -4,59 +4,68 @@
    ========================================================================== */
 
 :root {
-  --bg-app: #f4f4f7;
+  /* ── Figma editorial system: monochrome ink on white canvas. Legacy token
+     names are retained as ALIASES so every shared component flips centrally.
+     Hierarchy comes from weight; the few neutral grays are kept minimal. ── */
+  --bg-app: #ffffff;
   --bg-sidebar: #ffffff;
   --bg-card: #ffffff;
   --bg-control: #ffffff;
-  --ink: #15131c;
-  --ink-soft: #1c1a24;
+  --ink: #000000;
+  --ink-soft: #1a1a1a;
 
-  --label-primary: #15131c;
-  --label-secondary: rgba(40, 36, 56, 0.56);
-  --label-tertiary: rgba(40, 36, 56, 0.36);
-  --label-placeholder: rgba(40, 36, 56, 0.34);
+  --label-primary: #000000;
+  --label-secondary: rgba(0, 0, 0, 0.56);
+  --label-tertiary: rgba(0, 0, 0, 0.4);
+  --label-placeholder: rgba(0, 0, 0, 0.4);
   --on-dark: #ffffff;
-  --on-dark-soft: rgba(255, 255, 255, 0.62);
+  --on-dark-soft: rgba(255, 255, 255, 0.66);
 
-  --separator: rgba(40, 36, 56, 0.08);
-  --separator-strong: rgba(40, 36, 56, 0.12);
-  --fill-hover: rgba(124, 92, 255, 0.06);
-  --fill-press: rgba(124, 92, 255, 0.1);
+  --separator: #e6e6e6;
+  --separator-strong: #d2d2d7;
+  --fill-hover: rgba(0, 0, 0, 0.04);
+  --fill-press: rgba(0, 0, 0, 0.07);
 
-  --violet: #7c5cff;
-  --violet-600: #6d4bf0;
-  --violet-700: #5b39d8;
-  --violet-tint: rgba(124, 92, 255, 0.1);
-  --violet-tint-2: rgba(124, 92, 255, 0.16);
-  --grad-violet: linear-gradient(135deg, #9b7bff 0%, #6d3bf0 100%);
-  --grad-violet-soft: linear-gradient(135deg, rgba(155, 123, 255, 0.16), rgba(109, 59, 240, 0.16));
-  --ring-from: #b69bff;
-  --ring-to: #6d3bf0;
+  /* Brand accent → Figma black. No gradients (DESIGN.md). */
+  --violet: #000000;
+  --violet-600: #000000;
+  --violet-700: #000000;
+  --violet-tint: #f4f4f3;
+  --violet-tint-2: #ececeb;
+  --grad-violet: #000000;
+  --grad-violet-soft: #f7f7f5;
+  --ring-from: #000000;
+  --ring-to: #000000;
 
-  --c-violet: #7c5cff;  --c-violet-bg: rgba(124, 92, 255, 0.12);
-  --c-rose: #ff4d8d;    --c-rose-bg: rgba(255, 77, 141, 0.12);
-  --c-orange: #ff9f43;  --c-orange-bg: rgba(255, 159, 67, 0.14);
-  --c-green: #21c17a;   --c-green-bg: rgba(33, 193, 122, 0.14);
-  --c-blue: #3aa0ff;    --c-blue-bg: rgba(58, 160, 255, 0.14);
-  --c-amber: #f5a524;   --c-amber-bg: rgba(245, 165, 36, 0.16);
-  --c-slate: #7a8699;   --c-slate-bg: rgba(122, 134, 153, 0.14);
+  /* Semantic accents → Figma pastel grounds + dark ink (chips, badges). */
+  --c-violet: #1d1d1f;  --c-violet-bg: #c5b0f4;
+  --c-rose: #c01548;    --c-rose-bg: #efd4d4;
+  --c-orange: #9a4116;  --c-orange-bg: #f3c9b6;
+  --c-green: #1c6b34;   --c-green-bg: #c8e6cd;
+  --c-blue: #234a8a;    --c-blue-bg: #d6e0f5;
+  --c-amber: #7a4b12;   --c-amber-bg: #f4ecd6;
+  --c-slate: #3f3f46;   --c-slate-bg: #ededec;
 
-  --success: #21c17a;
-  --danger: #ff4d6a;
+  --success: #1ea64a;
+  --danger: #e5484d;
 
-  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", "Segoe UI", sans-serif;
-  --font-round: ui-rounded, "SF Pro Rounded", "SF Pro Display", -apple-system, sans-serif;
+  /* One Figma family for everything (figmaSans → Inter); mono for taxonomy. */
+  --font-sans: var(--fg-sans);
+  --font-round: var(--fg-sans);
 
   --sp-1: 2px; --sp-2: 4px; --sp-3: 8px; --sp-4: 12px; --sp-5: 16px;
   --sp-6: 20px; --sp-7: 24px; --sp-8: 32px; --sp-9: 40px; --sp-10: 48px;
 
-  --radius-sm: 8px; --radius-md: 12px; --radius-lg: 18px; --radius-xl: 24px;
+  --radius-sm: 8px; --radius-md: 10px; --radius-lg: 16px; --radius-xl: 24px;
 
-  --shadow-sm: 0 1px 2px rgba(24, 20, 44, 0.05);
-  --shadow-card: 0 1px 2px rgba(24, 20, 44, 0.04), 0 8px 24px rgba(24, 20, 44, 0.06);
-  --shadow-lift: 0 6px 20px rgba(24, 20, 44, 0.10);
-  --shadow-hero: 0 24px 60px rgba(40, 24, 96, 0.32), 0 6px 18px rgba(40, 24, 96, 0.22);
-  --focus-ring: 0 0 0 3px rgba(124, 92, 255, 0.4);
+  /* Figma is shadow-light — colour + hairlines carry depth. Keep a soft one
+     only for genuine floating layers (popovers/menus = elevation level 2). */
+  --shadow-sm: none;
+  --shadow-card: none;
+  --shadow-lift: none;
+  --shadow-hero: none;
+  --shadow-pop: 0 4px 16px rgba(0, 0, 0, 0.08);
+  --focus-ring: 0 0 0 3px rgba(0, 0, 0, 0.22);
 
   --ease: cubic-bezier(0.4, 0, 0.2, 1);
   --spring: cubic-bezier(0.34, 1.56, 0.64, 1);
@@ -66,6 +75,30 @@
 
   --sidebar-width: 232px;
   --toolbar-height: 58px;
+
+  /* ---- Figma DESIGN.md tokens (figma.com editorial system). Scoped: only the
+     .fg-overview page consumes these. Revert = remove this block + the
+     .fg-overview CSS at end of file + the index.html font links. ---- */
+  --fg-ink: #000000;
+  --fg-canvas: #ffffff;
+  --fg-on-primary: #ffffff;
+  --fg-hairline: #e6e6e6;
+  --fg-hairline-soft: #f1f1f1;
+  --fg-surface-soft: #f7f7f5;
+  --fg-lime: #dceeb1;
+  --fg-lilac: #c5b0f4;
+  --fg-cream: #f4ecd6;
+  --fg-pink: #efd4d4;
+  --fg-mint: #c8e6cd;
+  --fg-coral: #f3c9b6;
+  --fg-navy: #1f1d3d;
+  --fg-magenta: #ff3d8b;
+  --fg-sans: 'Inter', 'SF Pro Display', system-ui, -apple-system, sans-serif;
+  --fg-mono: 'JetBrains Mono', 'SF Mono', ui-monospace, Menlo, monospace;
+  --fg-r-md: 8px;
+  --fg-r-lg: 24px;
+  --fg-r-xl: 32px;
+  --fg-r-pill: 50px;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -755,11 +788,16 @@ body {
 
 .ribbon-card {
   padding: var(--sp-7) var(--sp-7) var(--sp-5);
-  position: relative;
+  /* Pin the timeline to the top so it stays in view while the user scrolls
+     the timesheet below. z-index keeps it above the (highlighted) rows. */
+  position: sticky;
+  top: 0;
+  z-index: 20;
   overflow: hidden;
   background:
     radial-gradient(900px 300px at 0% 0%, rgba(124, 92, 255, 0.04), transparent 70%),
     var(--bg-card);
+  box-shadow: 0 6px 18px rgba(40, 36, 56, 0.06);
 }
 
 .ribbon {
@@ -1688,6 +1726,8 @@ body {
    ========================================================================== */
 .et-row { height: 56px; transition: background var(--dur-base) var(--ease); }
 .et-row td { padding: 12px var(--sp-7); vertical-align: middle; }
+/* Quiet hover affordance so rows read as interactive without shouting. */
+.et-row:hover { background: rgba(40, 36, 56, 0.018); }
 /* The 3px rail communicates kind; backgrounds stay white for calm. */
 .et-row-tracked      { box-shadow: inset 3px 0 0 var(--c-green); }
 .et-row-manual       { box-shadow: inset 3px 0 0 var(--c-amber); }
@@ -1716,27 +1756,56 @@ body {
 .et-row:focus-within .et-actions,
 .et-row-dirty .et-actions { opacity: 1; }
 .et-row-btn {
-  padding: 6px 12px;
-  font-size: 12px; font-weight: 600;
-  border-radius: 6px;
+  padding: 7px 14px;
+  font-size: 12.5px; font-weight: 600;
+  letter-spacing: -0.01em;
+  white-space: nowrap;                 /* never wrap — "Send for approval" stays one line */
+  border-radius: var(--radius-sm);
   border: 1px solid var(--separator);
   background: var(--bg-card);
   color: var(--label-secondary);
   cursor: pointer;
-  display: inline-flex; align-items: center; gap: 5px;
-  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+  display: inline-flex; align-items: center; gap: 6px;
+  transition:
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--spring),
+    box-shadow var(--dur-fast) var(--ease);
 }
 .et-row-btn:hover:not(:disabled) { background: var(--fill-hover); color: var(--label-primary); }
+.et-row-btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.et-row-btn:active:not(:disabled) { transform: translateY(0); }
+/* Primary (Send / Save / Update): a solid violet pill. The inset top sheen
+   gives it a subtle physical lift; hover DEEPENS the violet (not brightens —
+   brightening a light gradient washes the white label out) for crisper text. */
 .et-row-btn-primary {
   background: var(--grad-violet); color: var(--on-dark); border-color: transparent;
+  box-shadow: var(--shadow-sm), inset 0 1px 0 rgba(255, 255, 255, 0.14);
 }
-.et-row-btn-primary:hover:not(:disabled) { filter: brightness(1.06); color: var(--on-dark); }
+.et-row-btn-primary:hover:not(:disabled) {
+  /* Re-assert the gradient — the base .et-row-btn:hover sets a near-white
+     --fill-hover bg, which (same specificity, earlier in source) would
+     otherwise win and leave white text on a white pill. */
+  background: var(--grad-violet);
+  color: var(--on-dark);
+  filter: brightness(0.96) saturate(1.05);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-lift), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+.et-row-btn-primary:active:not(:disabled) {
+  background: var(--grad-violet);
+  color: var(--on-dark);
+  filter: brightness(0.92) saturate(1.05);
+  transform: translateY(0);
+  box-shadow: var(--shadow-sm), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+/* Withdraw: quiet rose, never competes with the primary. */
 .et-row-btn-danger {
   background: rgba(255, 77, 106, 0.08); color: var(--danger);
   border-color: rgba(255, 77, 106, 0.22);
 }
-.et-row-btn-danger:hover:not(:disabled) { background: rgba(255, 77, 106, 0.16); }
-.et-row-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.et-row-btn-danger:hover:not(:disabled) { background: rgba(255, 77, 106, 0.16); transform: translateY(-1px); }
+.et-row-btn:disabled { opacity: 0.45; cursor: not-allowed; box-shadow: none; transform: none; }
 .et-row-err {
   font-size: 11.5px; color: var(--danger);
   margin-top: 4px;
@@ -2029,4 +2098,168 @@ th.payroll-num { text-align: right; }
 .triage-sig-pos::before { content: "+ "; color: #16a34a; font-weight: 600; }
 .triage-sig-neg { color: var(--label-secondary); }
 .triage-sig-neg::before { content: "− "; color: #dc2626; font-weight: 600; }
+
+/* ============================================================================
+   FIGMA THEME (DESIGN.md / figma.com) — Overview page, built from scratch.
+   Editorial black-and-white frame + oversized pastel color blocks; pills only;
+   no shadows (color is the depth device). figmaSans→Inter, figmaMono→JetBrains
+   Mono. Scoped entirely under .fg-overview so the rest of the app (violet
+   system) is untouched. REVERT = delete this block + the --fg-* :root tokens +
+   the index.html font links.
+   ========================================================================== */
+.fg-overview {
+  /* cancel .main's 40/40/48px padding so the white canvas bleeds edge-to-edge */
+  margin: calc(-1 * var(--sp-9)) calc(-1 * var(--sp-9)) calc(-1 * var(--sp-10));
+  min-height: 100vh;
+  background: var(--fg-canvas);
+  color: var(--fg-ink);
+  font-family: var(--fg-sans);
+  font-feature-settings: 'kern' 1;
+  -webkit-font-smoothing: antialiased;
+}
+.fg-inner {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 36px clamp(20px, 4vw, 44px) 76px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+/* ---- Editorial header (monochrome, hairline rule) ------------------------- */
+.fg-head {
+  display: flex; align-items: flex-end; justify-content: space-between;
+  gap: 24px; flex-wrap: wrap;
+  border-bottom: 1px solid var(--fg-ink); padding-bottom: 18px;
+}
+.fg-eyebrow {
+  font-family: var(--fg-mono); font-size: 11px; font-weight: 500;
+  text-transform: uppercase; letter-spacing: 0.12em; color: var(--fg-ink);
+}
+/* Hierarchy via WEIGHT, never opacity (DESIGN.md: no mid-gray text). */
+.fg-title { font-size: 24px; font-weight: 540; line-height: 1.08; letter-spacing: -0.025em; margin: 10px 0 0; }
+.fg-sub { font-size: 13.5px; font-weight: 360; line-height: 1.4; letter-spacing: -0.01em; color: var(--fg-ink); margin: 5px 0 0; }
+.fg-quicknav { display: flex; flex-wrap: wrap; gap: 8px; }
+.fg-pill {
+  font-size: 12.5px; font-weight: 480; letter-spacing: -0.01em;
+  color: var(--fg-ink); background: var(--fg-canvas);
+  border: 1px solid var(--fg-hairline); border-radius: var(--fg-r-pill);
+  padding: 7px 15px; text-decoration: none; white-space: nowrap;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+}
+.fg-pill:hover { background: var(--fg-ink); border-color: var(--fg-ink); color: var(--fg-on-primary); }
+.fg-pill:active { transform: scale(0.97); }
+.fg-pill:focus-visible { outline: 2px solid var(--fg-ink); outline-offset: 2px; }
+
+/* ---- KPI colour cards — the one colour zone (four pastel grounds) ---------- */
+.fg-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+.fg-kpi {
+  display: flex; flex-direction: column; justify-content: space-between; gap: 12px;
+  min-height: 122px; padding: 16px 17px 16px;
+  border-radius: var(--fg-r-lg);
+  color: var(--fg-ink); text-decoration: none;
+  transition: transform var(--dur-base) var(--spring);
+}
+.fg-kpi--lime  { background: var(--fg-lime); }
+.fg-kpi--cream { background: var(--fg-cream); }
+.fg-kpi--lilac { background: var(--fg-lilac); }
+.fg-kpi--coral { background: var(--fg-coral); }
+.fg-kpi--mint  { background: var(--fg-mint); }
+.fg-kpi--pink  { background: var(--fg-pink); }
+.fg-kpi--link { cursor: pointer; }
+.fg-kpi--link:hover { transform: translateY(-2px); }
+.fg-kpi--link:focus-visible { outline: 2px solid var(--fg-ink); outline-offset: 2px; }
+.fg-kpi-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.fg-kpi-label { font-family: var(--fg-mono); font-size: 10.5px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.1em; line-height: 1.3; color: var(--fg-ink); }
+.fg-kpi-arrow { display: grid; place-items: center; flex: none; width: 26px; height: 26px; border-radius: 50%; background: rgba(0, 0, 0, 0.07); color: var(--fg-ink); transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease); }
+.fg-kpi--link:hover .fg-kpi-arrow { background: var(--fg-ink); color: var(--fg-on-primary); }
+.fg-kpi-figure { display: flex; align-items: baseline; gap: 5px; }
+.fg-kpi-num { font-size: 30px; font-weight: 460; line-height: 1; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+.fg-kpi-unit { font-size: 14px; font-weight: 440; letter-spacing: -0.01em; }
+.fg-kpi-sub { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; font-weight: 360; letter-spacing: -0.005em; margin-top: 7px; }
+.fg-kpi-warn { display: inline-flex; align-items: center; gap: 4px; font-family: var(--fg-mono); font-size: 9.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: #fff; background: var(--fg-magenta); padding: 2px 6px; border-radius: var(--fg-r-pill); }
+
+/* ---- Detail + rejected (monochrome white hairline cards) ------------------- */
+.fg-lists { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.fg-card { background: var(--fg-canvas); border: 1px solid var(--fg-hairline); border-radius: var(--fg-r-lg); padding: 17px 19px 7px; }
+.fg-card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding-bottom: 11px; border-bottom: 1px solid var(--fg-hairline); }
+.fg-card-title { font-size: 15px; font-weight: 600; letter-spacing: -0.02em; white-space: nowrap; }
+.fg-cap { font-family: var(--fg-mono); font-size: 10px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg-ink); }
+.fg-card-link { display: inline-flex; align-items: center; gap: 4px; flex: none; font-size: 12.5px; font-weight: 480; letter-spacing: -0.01em; color: var(--fg-ink); text-decoration: none; }
+.fg-card-link:hover { text-decoration: underline; text-underline-offset: 3px; }
+.fg-card-link:focus-visible { outline: 2px solid var(--fg-ink); outline-offset: 2px; border-radius: 3px; }
+.fg-rows { list-style: none; }
+.fg-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 11px 0; border-bottom: 1px solid var(--fg-hairline-soft); }
+.fg-row:last-child { border-bottom: 0; }
+.fg-row-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.fg-row-name { font-size: 13.5px; font-weight: 520; letter-spacing: -0.01em; }
+.fg-row-sub { font-size: 12.5px; font-weight: 350; line-height: 1.4; letter-spacing: -0.01em; color: var(--fg-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 46ch; }
+.fg-row-meta { display: flex; align-items: center; gap: 8px; margin-top: 3px; }
+.fg-tag { font-family: var(--fg-mono); font-size: 10px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.04em; color: var(--fg-ink); border: 1px solid var(--fg-hairline); padding: 1px 7px; border-radius: 4px; }
+.fg-risk { font-family: var(--fg-mono); font-size: 10.5px; font-weight: 400; letter-spacing: 0.04em; text-transform: uppercase; color: var(--fg-ink); }
+.fg-age { display: inline-flex; align-items: center; gap: 4px; flex: none; font-family: var(--fg-mono); font-size: 10.5px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.03em; color: var(--fg-ink); }
+.fg-age--stuck { color: var(--fg-magenta); }
+.fg-row-note { font-family: var(--fg-mono); font-size: 10px; font-weight: 400; letter-spacing: 0.04em; text-transform: uppercase; color: var(--fg-ink); margin-top: 4px; }
+.fg-empty { font-size: 13px; font-weight: 360; letter-spacing: -0.01em; color: var(--fg-ink); padding: 12px 0 16px; }
+
+/* ---- States --------------------------------------------------------------- */
+.fg-note { font-family: var(--fg-mono); font-size: 12px; font-weight: 500; letter-spacing: 0.12em; text-transform: uppercase; color: var(--fg-ink); }
+.fg-error { border: 1px solid var(--fg-hairline); border-radius: var(--fg-r-md); padding: 14px 16px; font-size: 14px; color: var(--danger); }
+
+/* ---- Responsive ----------------------------------------------------------- */
+@media (max-width: 1040px) {
+  .fg-kpis { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 860px) {
+  .fg-lists { grid-template-columns: 1fr; }
+}
+@media (max-width: 560px) {
+  .fg-kpis { grid-template-columns: 1fr; }
+  .fg-inner { padding: 26px 16px 56px; gap: 16px; }
+}
+
+/* ============================================================================
+   FIGMA GLOBAL — centralized override layer (DESIGN.md / figma.com).
+   The :root tokens above are remapped to Figma values, which flips most of the
+   dashboard automatically. This block fixes the few shared primitives that bake
+   in violet / gradients / shadows, so the Figma system applies on EVERY page
+   from one place. Change the global Figma look here — not per page.
+   ========================================================================== */
+
+/* Pills are the only button shape (DESIGN.md). */
+.btn, .btn-primary, .btn-ghost, .btn-prominent, .btn-soft { border-radius: var(--fg-r-pill); }
+
+/* Primary / prominent = solid black pill — no gradient, no glow. */
+.btn-prominent { background: var(--fg-ink); border-color: transparent; color: var(--on-dark); box-shadow: none; }
+.btn-prominent:hover:not(:disabled) { background: var(--fg-ink); filter: none; transform: translateY(-1px); box-shadow: none; }
+.btn-primary:hover:not(:disabled) { box-shadow: none; }
+
+/* Stat / icon chips → flat Figma pastel grounds with a dark glyph. */
+.stat-chip { color: var(--fg-ink); box-shadow: none; border-radius: 10px; }
+.stat-chip-violet { background: var(--fg-lilac); }
+.stat-chip-green  { background: var(--fg-mint); }
+.stat-chip-blue   { background: #d6e0f5; }
+.stat-chip-amber  { background: var(--fg-cream); }
+.stat-chip-rose   { background: var(--fg-pink); }
+.stat-chip-slate  { background: var(--fg-surface-soft); }
+
+/* Hero → a Figma colour block (lime ground, dark ink), no dark gradient. */
+.hero { background: var(--fg-lime); color: var(--fg-ink); box-shadow: none; border-radius: var(--fg-r-lg); }
+.hero::before { display: none; }
+.hero-greeting { color: rgba(0, 0, 0, 0.6); }
+.hero-title, .hero-meta-value { color: var(--fg-ink); }
+.hero-sub, .hero-meta-label, .hero-meta-value .unit { color: rgba(0, 0, 0, 0.62); }
+
+/* Login → quiet parchment canvas + hairline card (no violet glow / shadow). */
+.login-wrap {
+  background:
+    radial-gradient(900px 520px at 50% -10%, rgba(0, 0, 0, 0.03), transparent 60%),
+    var(--fg-surface-soft);
+}
+.login-card { box-shadow: none; border: 1px solid var(--fg-hairline); border-radius: var(--fg-r-lg); }
+
+/* Uppercase nav-section eyebrows take the mono taxonomy face. */
+.nav-section { font-family: var(--fg-mono); letter-spacing: 0.1em; }
+
+/* Focus-visible everywhere uses the black ring token (already remapped). */
 

@@ -60,6 +60,21 @@ export class TimerService {
     return this.open !== null;
   }
 
+  /**
+   * Write a "still alive" proof to durable storage. Call periodically while a
+   * timer is actively accruing — it bounds crash recovery on the next boot.
+   * Cheap (one indexed upsert); safe to call when nothing is open (no-op).
+   */
+  heartbeat(): void {
+    if (!this.open) return;
+    this.store.setLiveness(this.clock.now());
+  }
+
+  /** Last persisted liveness tick, or null if none. Used by boot recovery. */
+  lastLiveness(): number | null {
+    return this.store.getLiveness();
+  }
+
   async start(args: StartArgs): Promise<TimerStatus> {
     if (this.open) {
       throw new Error('timer already running; stop the current entry first');
