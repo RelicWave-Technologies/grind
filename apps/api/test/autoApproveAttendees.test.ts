@@ -196,14 +196,18 @@ describe('POST /v1/time-requests — attendees', () => {
       .set(auth(s.admin.token))
       .send({ action: 'approve' });
     expect(decide.status).toBe(200);
-    // (Inheritance from MtrAttendee → TimeEntryAttendee on decideByUser is
-    // covered separately by M13/2 wiring — here we just confirm the request
-    // attendees survive after decide.)
     const reload = await prisma.manualTimeRequest.findUnique({
       where: { id: r1.body.id },
       include: { attendees: true },
     });
     expect(reload!.attendees.map((a) => a.userId).sort()).toEqual([s.memA.id, s.memB.id].sort());
+    // The approved TimeEntry MUST inherit those attendees (meeting participants)
+    // — parity with the auto-approve path. Regression guard for the M13/2 wiring
+    // that decideByUser previously skipped (attendees were silently dropped).
+    const teAttendees = await prisma.timeEntryAttendee.findMany({
+      where: { timeEntryId: reload!.timeEntryId! },
+    });
+    expect(teAttendees.map((a) => a.userId).sort()).toEqual([s.memA.id, s.memB.id].sort());
   });
 });
 

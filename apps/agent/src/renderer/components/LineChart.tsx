@@ -33,12 +33,12 @@ export default function LineChart({ points, labels, height = 200 }: Props) {
     <svg width="100%" viewBox={`0 0 ${w} ${h}`} role="img">
       <defs>
         <linearGradient id="lcLine" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" stopColor="#9b7bff" />
-          <stop offset="100%" stopColor="#6d3bf0" />
+          <stop offset="0%" stopColor="#ff7ab0" />
+          <stop offset="100%" stopColor="#ff3d8b" />
         </linearGradient>
         <linearGradient id="lcArea" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="rgba(124,92,255,0.22)" />
-          <stop offset="100%" stopColor="rgba(124,92,255,0)" />
+          <stop offset="0%" stopColor="rgba(255,61,139,0.18)" />
+          <stop offset="100%" stopColor="rgba(255,61,139,0)" />
         </linearGradient>
       </defs>
       {/* gridlines */}
@@ -55,7 +55,7 @@ export default function LineChart({ points, labels, height = 200 }: Props) {
       ))}
       <path d={area} fill="url(#lcArea)" />
       <path d={path} fill="none" stroke="url(#lcLine)" strokeWidth={3} strokeLinecap="round" />
-      <circle cx={peak[0]} cy={peak[1]} r={5} fill="#fff" stroke="#6d3bf0" strokeWidth={3} />
+      <circle cx={peak[0]} cy={peak[1]} r={5} fill="#fff" stroke="#ff3d8b" strokeWidth={3} />
       {labels.map((l, i) => (
         <text
           key={l}

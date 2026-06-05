@@ -1,8 +1,16 @@
 import { Outlet, Link, useRouteContext, useNavigate, useLocation } from '@tanstack/react-router';
 import { Home, Users, Clock4, Inbox, LayoutGrid, CalendarCheck, ShieldAlert, Building2, Sunrise, LogOut, ShieldCheck, FileSpreadsheet, Compass } from 'lucide-react';
 import { isAdmin, isManagerOrAbove, useLogout } from '../lib/auth';
+import {
+  AppShell,
+  Sidebar,
+  SidebarBrand,
+  NavItem,
+  Avatar,
+  Button,
+} from '../ui';
 
-interface NavItem {
+interface NavEntry {
   to: string;
   label: string;
   Icon: typeof Home;
@@ -10,7 +18,7 @@ interface NavItem {
   show: 'all' | 'manager+' | 'admin';
 }
 
-const NAV: NavItem[] = [
+const NAV: NavEntry[] = [
   { to: '/', label: 'Home', Icon: Home, show: 'all' },
   { to: '/overview', label: 'Overview', Icon: Compass, show: 'manager+' },
   { to: '/me-today', label: 'My Day', Icon: Clock4, show: 'all' },
@@ -47,65 +55,53 @@ export function Layout() {
   }
 
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
-        <div className="sidebar-brand">
-          <div className="brand-mark" />
-          <div className="brand-name">Grind</div>
-        </div>
-
-        <nav className="nav">
-          {visible.map(({ to, label, Icon }) => {
-            const active = to === '/'
-              ? location.pathname === '/'
-              : location.pathname.startsWith(to);
-            return (
-              <Link
-                key={to}
-                to={to}
-                className={`nav-item${active ? ' is-active' : ''}`}
-              >
-                <Icon size={18} strokeWidth={1.8} />
-                <span>{label}</span>
-              </Link>
-            );
-          })}
-        </nav>
-
-        <div className="sidebar-foot">
-          <div className="me-row">
-            <div className="me-avatar" aria-hidden>
-              {initials(me.name)}
+    <AppShell>
+      <Sidebar
+        brand={<SidebarBrand name="Grind" />}
+        footer={
+          <>
+            <div className="ui-sidebar__me">
+              <Avatar name={me.name} size={32} />
+              <div className="ui-sidebar__me-meta">
+                <div className="ui-sidebar__me-name ui-t-strong">{me.name}</div>
+                <div className="ui-t-small ui-ink-3">{me.role}</div>
+              </div>
             </div>
-            <div className="me-meta">
-              <div className="me-name">{me.name}</div>
-              <div className="me-role secondary">{me.role}</div>
-            </div>
-          </div>
-          <button
-            type="button"
-            className="btn-ghost btn-logout"
-            onClick={onLogout}
-            disabled={logout.isPending}
-          >
-            <LogOut size={14} strokeWidth={1.8} />
-            <span>Sign out</span>
-          </button>
-        </div>
-      </aside>
+            <Button
+              variant="ghost"
+              size="sm"
+              block
+              icon={<LogOut size={14} strokeWidth={1.8} />}
+              onClick={onLogout}
+              disabled={logout.isPending}
+            >
+              Sign out
+            </Button>
+          </>
+        }
+      >
+        {visible.map(({ to, label, Icon }) => {
+          const active = to === '/'
+            ? location.pathname === '/'
+            : location.pathname.startsWith(to);
+          return (
+            <NavItem
+              key={to}
+              as={Link}
+              to={to}
+              label={label}
+              icon={<Icon size={18} strokeWidth={1.8} />}
+              active={active}
+            />
+          );
+        })}
+      </Sidebar>
 
-      <main className="main">
-        <div className="rise">
+      <main className="ui-main">
+        <div className="ui-rise">
           <Outlet />
         </div>
       </main>
-    </div>
+    </AppShell>
   );
-}
-
-function initials(name: string): string {
-  const parts = name.trim().split(/\s+/);
-  if (parts.length === 0) return '?';
-  if (parts.length === 1) return parts[0]!.slice(0, 2).toUpperCase();
-  return (parts[0]![0]! + parts[parts.length - 1]![0]!).toUpperCase();
 }

@@ -1,27 +1,36 @@
+import './overview.css';
 import { useQuery } from '@tanstack/react-query';
-import { Link, useRouteContext } from '@tanstack/react-router';
-import {
-  Inbox,
-  ShieldAlert,
-  Users,
-  Clock4,
-  Activity,
-  ArrowRight,
-  AlertTriangle,
-  XCircle,
-} from 'lucide-react';
+import { useNavigate, useRouteContext } from '@tanstack/react-router';
+import { Clock4, LayoutGrid, CalendarCheck } from 'lucide-react';
 import { api } from '../lib/api';
-import { fmtDurationMs, fmtAgeShort } from '../lib/format';
+import { fmtAgeShort } from '../lib/format';
+import {
+  Page,
+  PageHeader,
+  Toolbar,
+  Button,
+  Card,
+  Stat,
+  StatRow,
+  List,
+  ListRow,
+  Tag,
+  EmptyState,
+  Banner,
+  SkeletonStat,
+  SkeletonTable,
+} from '../ui';
 
 /**
- * /overview — MANAGER+ command center (M16).
+ * /overview — the MANAGER+ command center (M16). Composed entirely from the
+ * shared "Quiet Datasheet" kit (src/ui/*): PageHeader for context, a flush
+ * StatRow for today's headline numbers, Card + List for the attention queues
+ * and the rejected ledger, Tag for status, Banner/EmptyState/Skeleton for the
+ * loading/error/empty states. The page file contributes layout only — no
+ * bespoke colour, type, border, or shadow (see overview.css).
  *
- * Single round-trip to /v1/admin/overview powers everything on this
- * screen: today's tracked totals, who's actively tracking, what's
- * stuck waiting on approval, recent flags, recent rejections.
- *
- * For MEMBER, the / route redirects to /me-today instead — they never
- * see this surface.
+ * A single round-trip to /v1/admin/overview powers everything. For MEMBER the
+ * `/` route redirects to /me-today, so they never reach this surface.
  */
 
 interface OverviewResponse {
@@ -71,6 +80,7 @@ interface OverviewResponse {
 
 export function OverviewScreen() {
   const { me } = useRouteContext({ from: '/authed' });
+  const navigate = useNavigate();
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
   const q = useQuery({
     queryKey: ['admin', 'overview', tz],
@@ -80,267 +90,224 @@ export function OverviewScreen() {
 
   const firstName = me.name.split(' ')[0] ?? 'there';
   const scopeLabel = q.data?.scope === 'workspace' ? 'this workspace' : 'your team';
+  const dateLine = new Intl.DateTimeFormat('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    timeZone: tz,
+  })
+    .format(new Date())
+    .toUpperCase();
+
+  const t = q.data?.today;
 
   return (
-    <div className="page page-wide">
-      <header className="page-head">
-        <div>
-          <h1 className="h1">Overview</h1>
-          <p className="secondary page-sub">
-            {q.data
-              ? `Today across ${scopeLabel} — generated ${fmtAgeShort(Date.now() - new Date(q.data.generatedAt).getTime())}`
-              : `Hi ${firstName} — loading the command center…`}
-          </p>
-        </div>
-      </header>
+    <Page>
+      <PageHeader
+        eyebrow={`${tz.replace(/_/g, ' ')} · ${dateLine}`}
+        title={`Hi ${firstName} — here's ${scopeLabel} today`}
+        subtitle={
+          q.data
+            ? `Live across ${scopeLabel}, generated ${fmtAgeShort(
+                Date.now() - new Date(q.data.generatedAt).getTime(),
+              )} ago. Approvals and flags need your eye.`
+            : 'Assembling the command center — pulling today’s numbers, approvals and flags.'
+        }
+        actions={
+          <Toolbar>
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={<Clock4 size={15} strokeWidth={1.8} />}
+              onClick={() => navigate({ to: '/me-today' })}
+            >
+              My Day
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={<LayoutGrid size={15} strokeWidth={1.8} />}
+              onClick={() => navigate({ to: '/team' })}
+            >
+              Team
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={<CalendarCheck size={15} strokeWidth={1.8} />}
+              onClick={() => navigate({ to: '/attendance' })}
+            >
+              Attendance
+            </Button>
+          </Toolbar>
+        }
+      />
 
-      {q.isLoading && <div className="card empty">Loading overview…</div>}
-      {q.isError && (
-        <div className="card empty empty-error">
-          Couldn&apos;t load: {(q.error as Error).message}
-        </div>
-      )}
-
-      {q.data && (
-        <>
-          <section className="stat-grid rise rise-1" style={{ marginTop: 'var(--sp-5)' }}>
-            <StatTile
-              chip="stat-chip-violet"
-              icon={<Users size={18} strokeWidth={2} />}
-              label="Active today"
-              value={`${q.data.today.activeUsers}`}
-              after={<span className="unit">/ {q.data.today.totalUsers}</span>}
-              foot={
-                q.data.today.activeUsers === 0
-                  ? 'Nobody has tracked time yet'
-                  : `${Math.round((q.data.today.activeUsers / Math.max(1, q.data.today.totalUsers)) * 100)}% of people`
-              }
-            />
-            <StatTile
-              chip="stat-chip-green"
-              icon={<Clock4 size={18} strokeWidth={2} />}
-              label="Tracked"
-              value={q.data.today.workedHours.toFixed(1)}
-              after={<span className="unit">h</span>}
-              foot={
-                q.data.today.meetingHours > 0
-                  ? `+ ${q.data.today.meetingHours.toFixed(1)}h meetings`
-                  : 'Across all tasks'
-              }
-            />
-            <StatTile
-              chip="stat-chip-amber"
-              icon={<Inbox size={18} strokeWidth={2} />}
-              label="Pending approvals"
-              value={`${q.data.approvals.pendingTotal}`}
-              after={
-                q.data.approvals.pendingStuck > 0 ? (
-                  <span className="stat-warn">
-                    <AlertTriangle size={11} strokeWidth={2.4} /> {q.data.approvals.pendingStuck} stuck
-                  </span>
-                ) : null
-              }
-              foot={
-                q.data.approvals.pendingTotal === 0
-                  ? 'Nothing waiting'
-                  : `Oldest ${fmtAgeShort(q.data.approvals.oldestPendingAgeMs)}`
-              }
-              href="/approvals"
-            />
-            <StatTile
-              chip="stat-chip-rose"
-              icon={<ShieldAlert size={18} strokeWidth={2} />}
-              label="Open flags"
-              value={`${q.data.flags.openTotal}`}
-              foot={q.data.flags.openTotal === 0 ? 'Clean shop' : 'Anti-cheat review'}
-              href="/flags"
-            />
-          </section>
-
-          <section className="overview-row rise rise-2" style={{ marginTop: 'var(--sp-6)' }}>
-            <Card title="Recent pending approvals" linkTo="/approvals" linkLabel="See all">
-              {q.data.approvals.recent.length === 0 ? (
-                <Empty msg="Nothing waiting on you. Nice work." />
-              ) : (
-                <ul className="overview-list" role="list">
-                  {q.data.approvals.recent.map((p) => (
-                    <li key={p.id} className="overview-row-item">
-                      <div className="overview-row-text">
-                        <span className="overview-row-name">{p.user.name}</span>
-                        <span className="overview-row-sub">{truncate(p.reason, 80)}</span>
-                      </div>
-                      <span className={`age-chip${p.isStuck ? ' is-stuck' : ''}`}>
-                        {p.isStuck && <AlertTriangle size={10} strokeWidth={2.4} />}
-                        {fmtAgeShort(p.ageMs)}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </Card>
-
-            <Card title="Recent flags" linkTo="/flags" linkLabel="Review">
-              {q.data.flags.recent.length === 0 ? (
-                <Empty msg="No open risk flags." />
-              ) : (
-                <ul className="overview-list" role="list">
-                  {q.data.flags.recent.map((f) => (
-                    <li key={f.id} className="overview-row-item">
-                      <div className="overview-row-text">
-                        <span className="overview-row-name">{f.user.name}</span>
-                        <span className="overview-row-sub">
-                          <span className="flag-type-chip">{f.type.toLowerCase().replace('_', ' ')}</span>{' '}
-                          <span className="tertiary">risk {f.riskScore}/100</span>
-                        </span>
-                      </div>
-                      <span className="age-chip">{fmtAgeShort(Date.now() - new Date(f.createdAt).getTime())}</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </Card>
-          </section>
-
-          {q.data.recentRejected.length > 0 && (
-            <section className="card rise rise-3" style={{ marginTop: 'var(--sp-5)', padding: 'var(--sp-6)' }}>
-              <header className="overview-card-head">
-                <h2 className="h3" style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                  <XCircle size={15} strokeWidth={2} /> Recently rejected
-                </h2>
-                <span className="secondary callout">Last {q.data.recentRejected.length}</span>
-              </header>
-              <ul className="overview-list" role="list">
-                {q.data.recentRejected.map((r) => (
-                  <li key={r.id} className="overview-row-item">
-                    <div className="overview-row-text">
-                      <span className="overview-row-name">{r.user.name}</span>
-                      <span className="overview-row-sub">{truncate(r.reason, 80)}</span>
-                      {r.decidedReason && (
-                        <span className="small tertiary">Reviewer: {truncate(r.decidedReason, 80)}</span>
-                      )}
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
-
-          <section className="overview-row rise rise-3" style={{ marginTop: 'var(--sp-6)' }}>
-            <QuickLink
-              to="/me-today"
-              icon={<Activity size={18} strokeWidth={2} />}
-              title="My Day"
-              sub="Your own tracked day"
-            />
-            <QuickLink
-              to="/team"
-              icon={<Users size={18} strokeWidth={2} />}
-              title="Team timesheets"
-              sub="Heat-mapped users × days"
-            />
-            <QuickLink
-              to="/attendance"
-              icon={<Clock4 size={18} strokeWidth={2} />}
-              title="Attendance"
-              sub="Present / absent + first-last times"
-            />
-          </section>
-        </>
-      )}
-    </div>
-  );
-}
-
-function StatTile({
-  chip,
-  icon,
-  label,
-  value,
-  after,
-  foot,
-  href,
-}: {
-  chip: string;
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-  after?: React.ReactNode;
-  foot?: string;
-  href?: string;
-}) {
-  const inner = (
-    <>
-      <div className="stat-head">
-        <div className={`stat-chip ${chip}`} aria-hidden>{icon}</div>
-        <div className="stat-label">{label}</div>
-      </div>
-      <div className="stat-value">
-        {value}
-        {after && <> {after}</>}
-      </div>
-      {foot && <div className="stat-foot">{foot}</div>}
-    </>
-  );
-  if (href) {
-    return (
-      <Link to={href} className="stat card-interactive" style={{ textDecoration: 'none', color: 'inherit' }}>
-        {inner}
-      </Link>
-    );
-  }
-  return <div className="stat">{inner}</div>;
-}
-
-function Card({
-  title,
-  linkTo,
-  linkLabel,
-  children,
-}: {
-  title: string;
-  linkTo?: string;
-  linkLabel?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="card overview-card" style={{ padding: 'var(--sp-6)' }}>
-      <header className="overview-card-head">
-        <h2 className="h3">{title}</h2>
-        {linkTo && linkLabel && (
-          <Link to={linkTo} className="btn-ghost small">
-            {linkLabel} <ArrowRight size={12} strokeWidth={2.2} />
-          </Link>
+      <div className="ov-sections">
+        {q.isError && (
+          <Banner status="danger">
+            Couldn&apos;t load the overview: {(q.error as Error).message}
+          </Banner>
         )}
-      </header>
-      {children}
-    </section>
-  );
-}
 
-function Empty({ msg }: { msg: string }) {
-  return <div className="tertiary" style={{ padding: 'var(--sp-3) 0' }}>{msg}</div>;
-}
+        {/* Today's headline numbers */}
+        <Card variant="flush" className="ui-rise-1">
+          {q.isLoading || !t ? (
+            <StatRow>
+              <SkeletonStat />
+              <SkeletonStat />
+              <SkeletonStat />
+              <SkeletonStat />
+            </StatRow>
+          ) : (
+            <StatRow>
+              <Stat
+                label="Active today"
+                value={`${t.activeUsers}`}
+                unit={`/ ${t.totalUsers}`}
+                hint={
+                  t.activeUsers === 0
+                    ? 'nobody tracking yet'
+                    : `${Math.round((t.activeUsers / Math.max(1, t.totalUsers)) * 100)}% of people`
+                }
+              />
+              <Stat
+                label="Tracked today"
+                value={t.workedHours.toFixed(1)}
+                unit="h"
+                hint={
+                  t.meetingHours > 0
+                    ? `+ ${t.meetingHours.toFixed(1)}h meetings`
+                    : 'across all tasks'
+                }
+              />
+              <Stat
+                label="Meeting time"
+                value={t.meetingHours.toFixed(1)}
+                unit="h"
+                hint={
+                  t.manualHours > 0
+                    ? `+ ${t.manualHours.toFixed(1)}h manual`
+                    : 'tracked in meetings'
+                }
+              />
+              <Stat
+                label="Manual time"
+                value={t.manualHours.toFixed(1)}
+                unit="h"
+                hint={
+                  t.manualHours === 0
+                    ? 'all auto-tracked'
+                    : `${Math.round((t.manualHours / Math.max(0.1, t.workedHours)) * 100)}% of tracked`
+                }
+              />
+            </StatRow>
+          )}
+        </Card>
 
-function QuickLink({
-  to,
-  icon,
-  title,
-  sub,
-}: {
-  to: string;
-  icon: React.ReactNode;
-  title: string;
-  sub: string;
-}) {
-  return (
-    <Link to={to} className="quick-card card-interactive">
-      <div className="quick-icon" aria-hidden>{icon}</div>
-      <div className="quick-meta">
-        <div className="quick-title">{title}</div>
-        <div className="quick-sub">{sub}</div>
+        {/* Attention queues — pending approvals + open flags */}
+        <div className="ov-queues ui-rise-2">
+          <Card
+            title="Pending approvals"
+            action={
+              <Toolbar>
+                {q.data && q.data.approvals.pendingStuck > 0 && (
+                  <Tag status="danger" mono>{`${q.data.approvals.pendingStuck} stuck`}</Tag>
+                )}
+                {q.data && (
+                  <Tag status="neutral" mono>{`${q.data.approvals.pendingTotal}`}</Tag>
+                )}
+                <Button variant="ghost" size="sm" onClick={() => navigate({ to: '/approvals' })}>
+                  Open queue
+                </Button>
+              </Toolbar>
+            }
+          >
+            {q.isLoading ? (
+              <SkeletonTable rows={3} />
+            ) : q.data && q.data.approvals.recent.length > 0 ? (
+              <List>
+                {q.data.approvals.recent.map((p) => (
+                  <ListRow
+                    key={p.id}
+                    rail={p.isStuck ? 'danger' : 'warn'}
+                    title={p.user.name}
+                    subtitle={truncate(p.reason, 72)}
+                    meta={fmtAgeShort(p.ageMs)}
+                    trailing={
+                      p.isStuck ? <Tag status="danger" dot>Stuck</Tag> : undefined
+                    }
+                    onClick={() => navigate({ to: '/approvals' })}
+                  />
+                ))}
+              </List>
+            ) : (
+              <EmptyState
+                title="No pending approvals"
+                description="Nothing waiting on you. Nice work."
+              />
+            )}
+          </Card>
+
+          <Card
+            title="Open flags"
+            action={
+              <Toolbar>
+                {q.data && (
+                  <Tag status="neutral" mono>{`${q.data.flags.openTotal}`}</Tag>
+                )}
+                <Button variant="ghost" size="sm" onClick={() => navigate({ to: '/flags' })}>
+                  Review flags
+                </Button>
+              </Toolbar>
+            }
+          >
+            {q.isLoading ? (
+              <SkeletonTable rows={3} />
+            ) : q.data && q.data.flags.recent.length > 0 ? (
+              <List>
+                {q.data.flags.recent.map((f) => (
+                  <ListRow
+                    key={f.id}
+                    rail="danger"
+                    title={f.user.name}
+                    subtitle={f.type.toLowerCase().replace(/_/g, ' ')}
+                    meta={fmtAgeShort(Date.now() - new Date(f.createdAt).getTime())}
+                    trailing={<Tag status="danger" mono>{`risk ${f.riskScore}`}</Tag>}
+                    onClick={() => navigate({ to: '/flags' })}
+                  />
+                ))}
+              </List>
+            ) : (
+              <EmptyState title="No open flags" description="No open risk flags." />
+            )}
+          </Card>
+        </div>
+
+        {/* Recently rejected ledger */}
+        {q.data && q.data.recentRejected.length > 0 && (
+          <Card
+            title="Recently rejected"
+            action={<Tag status="neutral" mono>{`${q.data.recentRejected.length}`}</Tag>}
+            className="ui-rise-3"
+          >
+            <List>
+              {q.data.recentRejected.map((r) => (
+                <ListRow
+                  key={r.id}
+                  title={r.user.name}
+                  subtitle={
+                    r.decidedReason
+                      ? `${truncate(r.reason, 80)} — reviewer: ${truncate(r.decidedReason, 80)}`
+                      : truncate(r.reason, 120)
+                  }
+                />
+              ))}
+            </List>
+          </Card>
+        )}
       </div>
-      <ArrowRight size={14} strokeWidth={2.2} className="quick-arrow" />
-    </Link>
+    </Page>
   );
 }
 

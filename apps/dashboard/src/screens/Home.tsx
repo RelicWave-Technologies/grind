@@ -1,10 +1,30 @@
+import './home.css';
+import type { ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Link, useRouteContext } from '@tanstack/react-router';
-import { Clock4, LayoutGrid, Inbox, ShieldAlert, CalendarCheck, ArrowRight, Activity } from 'lucide-react';
+import { useNavigate, useRouteContext } from '@tanstack/react-router';
+import {
+  Clock4,
+  LayoutGrid,
+  Inbox,
+  ShieldAlert,
+  CalendarCheck,
+  ChevronRight,
+} from 'lucide-react';
 import { api } from '../lib/api';
 import { isAdmin, isManagerOrAbove } from '../lib/auth';
 import type { DayInsight } from '../lib/types';
 import { fmtDurationMs, todayKey } from '../lib/format';
+import {
+  Page,
+  PageHeader,
+  Card,
+  Stat,
+  StatRow,
+  List,
+  ListRow,
+  Button,
+  Toolbar,
+} from '../ui';
 
 interface ListResponse<T> {
   requests?: T[];
@@ -12,15 +32,23 @@ interface ListResponse<T> {
 }
 
 /**
- * Premium Home — near-black violet-glow hero, then a stat row of today's
- * numbers, then a per-role action grid. The hero greeting and metrics
- * stagger-rise on mount per docs §2 motion.
+ * Home — the personal landing screen, composed entirely from the shared
+ * "Quiet Datasheet" kit (PageHeader, Card, Stat/StatRow, List/ListRow,
+ * Button). It contributes layout only: no bespoke colour, type, border, or
+ * shadow — those come from the kit + tokens. Greeting → today's personal
+ * numbers as a hairline-divided StatRow → role-aware quick links as a List.
  *
- * Each stat pulls from the same endpoints the dedicated pages use, so a
- * MEMBER seeing "0 approvals waiting" actually reflects scope.
+ * MANAGER+ are redirected to /overview in the route's beforeLoad, so in
+ * practice this is the MEMBER surface — but every role-aware branch is
+ * preserved EXACTLY (presentation only). Each stat pulls from the same
+ * endpoints the dedicated pages use, so a MEMBER seeing "0 approvals
+ * waiting" actually reflects scope. The body staggers-rise on mount.
+ *
+ * Page-unique CSS lives in home.css and is pure layout, every class `hm-`.
  */
 export function HomeScreen() {
   const { me } = useRouteContext({ from: '/authed' });
+  const navigate = useNavigate();
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
   const hour = new Date().getHours();
   const partOfDay = hour < 5 ? 'Working late' : hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
@@ -52,155 +80,180 @@ export function HomeScreen() {
     : null;
 
   const firstName = me.name.split(' ')[0] ?? 'there';
+  const dateLine = new Intl.DateTimeFormat('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    timeZone: tz,
+  })
+    .format(new Date())
+    .toUpperCase();
+
+  const tracked = fmtHM(trackedMs);
+  const manual = fmtHM(manualMs);
+
+  const approvalsCount = approvalsQ.data?.requests?.length ?? 0;
+  const flagsCount = flagsQ.data?.flags?.length ?? 0;
 
   return (
-    <div className="page page-wide">
-      {/* HERO — staggered on mount */}
-      <section className="hero rise rise-1">
-        <div>
-          <div className="hero-greeting">{partOfDay}</div>
-          <h1 className="hero-title">{firstName}, here&apos;s your day.</h1>
-          <p className="hero-sub">
-            {totalMs > 0
-              ? `You’ve tracked ${fmtDurationMs(totalMs)} today — keep the rhythm.`
-              : 'No time tracked yet. Open the agent and start a task to begin.'}
-          </p>
-        </div>
-        <div className="hero-meta">
-          <span className="hero-meta-label">Tracked today</span>
-          <span className="hero-meta-value">
-            {Math.floor(trackedMs / 3_600_000)}
-            <span className="unit">h</span>
-            {' '}
-            {Math.floor((trackedMs % 3_600_000) / 60_000)}
-            <span className="unit">m</span>
-          </span>
-        </div>
-      </section>
+    <Page>
+      <PageHeader
+        eyebrow={`${partOfDay} · ${dateLine}`}
+        title={`${firstName}, here's your day`}
+        subtitle={
+          totalMs > 0
+            ? `You've tracked ${fmtDurationMs(totalMs)} today — keep the rhythm.`
+            : 'No time tracked yet. Open the agent and start a task to begin.'
+        }
+        actions={
+          <Toolbar>
+            <Button
+              variant="primary"
+              icon={<Clock4 size={15} strokeWidth={2} />}
+              onClick={() => navigate({ to: '/me-today' })}
+            >
+              My Day
+            </Button>
+            {isManagerOrAbove(me.role) && (
+              <Button
+                variant="secondary"
+                icon={<LayoutGrid size={15} strokeWidth={2} />}
+                onClick={() => navigate({ to: '/team' })}
+              >
+                Team
+              </Button>
+            )}
+            {isManagerOrAbove(me.role) && (
+              <Button
+                variant="secondary"
+                icon={<CalendarCheck size={15} strokeWidth={2} />}
+                onClick={() => navigate({ to: '/attendance' })}
+              >
+                Attendance
+              </Button>
+            )}
+          </Toolbar>
+        }
+      />
 
-      {/* STAT GRID */}
-      <section className="stat-grid rise rise-2" style={{ marginTop: 'var(--sp-7)' }}>
-        <StatCard
-          chipClass="stat-chip-violet"
-          icon={<Activity size={18} strokeWidth={2} />}
-          label="Productivity"
-          value={productivity == null ? '—' : `${productivity}`}
-          unit={productivity == null ? '' : '/100'}
-          foot={productivity == null ? 'No samples yet' : productivity > 70 ? 'Strong focus' : productivity > 40 ? 'Steady' : 'Quiet day'}
-        />
-        <StatCard
-          chipClass="stat-chip-green"
-          icon={<Clock4 size={18} strokeWidth={2} />}
-          label="Tracked time"
-          value={fmtHM(trackedMs).h}
-          unit="h"
-          afterValue={<><span className="display" style={{ fontSize: 30, fontWeight: 700 }}>{fmtHM(trackedMs).m}</span><span className="unit">m</span></>}
-          foot={meetingMs > 0 ? `+ ${fmtDurationMs(meetingMs)} meetings` : 'Across all tasks'}
-        />
-        {isManagerOrAbove(me.role) ? (
-          <StatCard
-            chipClass="stat-chip-amber"
-            icon={<Inbox size={18} strokeWidth={2} />}
-            label="Approvals waiting"
-            value={`${approvalsQ.data?.requests?.length ?? 0}`}
-            foot={(approvalsQ.data?.requests?.length ?? 0) > 0 ? 'Open in Approvals' : 'Nothing waiting on you'}
-            href="/approvals"
+      {/* TODAY'S NUMBERS — hairline-divided StatRow in one flush card. */}
+      <Card variant="flush" className="ui-rise-1">
+        <StatRow>
+          <Stat
+            label="Productivity"
+            value={productivity == null ? '—' : String(productivity)}
+            unit={productivity == null ? undefined : '/100'}
+            hint={
+              productivity == null
+                ? 'no samples yet'
+                : productivity > 70
+                  ? 'strong focus'
+                  : productivity > 40
+                    ? 'steady'
+                    : 'quiet day'
+            }
           />
-        ) : (
-          <StatCard
-            chipClass="stat-chip-amber"
-            icon={<Inbox size={18} strokeWidth={2} />}
-            label="Manual time"
-            value={fmtHM(manualMs).h}
+          <Stat
+            label="Tracked time"
+            value={tracked.h}
             unit="h"
-            afterValue={<><span className="display" style={{ fontSize: 30, fontWeight: 700 }}>{fmtHM(manualMs).m}</span><span className="unit">m</span></>}
-            foot="Approved manual entries"
+            hint={meetingMs > 0 ? `+ ${fmtDurationMs(meetingMs)} meetings` : 'across all tasks'}
           />
-        )}
-        {isManagerOrAbove(me.role) ? (
-          <StatCard
-            chipClass="stat-chip-rose"
-            icon={<ShieldAlert size={18} strokeWidth={2} />}
-            label="Open flags"
-            value={`${flagsQ.data?.flags?.length ?? 0}`}
-            foot={(flagsQ.data?.flags?.length ?? 0) > 0 ? 'Review in Anti-cheat' : 'Clean shop'}
-            href="/flags"
-          />
-        ) : (
-          <StatCard
-            chipClass="stat-chip-blue"
-            icon={<CalendarCheck size={18} strokeWidth={2} />}
-            label="Days present"
-            value="—"
-            foot="Across the last week"
-          />
-        )}
-      </section>
+          {isManagerOrAbove(me.role) ? (
+            <Stat
+              label="Approvals waiting"
+              value={String(approvalsCount)}
+              hint={approvalsCount > 0 ? 'open in Approvals' : 'nothing waiting on you'}
+            />
+          ) : (
+            <Stat label="Manual time" value={manual.h} unit="h" hint="approved manual entries" />
+          )}
+          {isManagerOrAbove(me.role) ? (
+            <Stat
+              label="Open flags"
+              value={String(flagsCount)}
+              hint={flagsCount > 0 ? 'review in Anti-cheat' : 'clean shop'}
+            />
+          ) : (
+            <Stat label="Days present" value="—" hint="across the last week" />
+          )}
+        </StatRow>
+      </Card>
 
-      {/* QUICK NAV */}
-      <section className="quick-grid rise rise-3" style={{ marginTop: 'var(--sp-7)' }}>
-        <QuickLink to="/me-today" icon={<Clock4 size={18} strokeWidth={2} />} title="My Day" sub="Today’s ribbon, heatmap, and timesheet" />
-        {isManagerOrAbove(me.role) && (
-          <QuickLink to="/team" icon={<LayoutGrid size={18} strokeWidth={2} />} title="Team" sub="Heat-mapped users × days" />
-        )}
-        {isManagerOrAbove(me.role) && (
-          <QuickLink to="/attendance" icon={<CalendarCheck size={18} strokeWidth={2} />} title="Attendance" sub="Present / absent + first-last times" />
-        )}
-        {isManagerOrAbove(me.role) && (
-          <QuickLink to="/approvals" icon={<Inbox size={18} strokeWidth={2} />} title="Approvals" sub="Manual-time requests waiting" />
-        )}
-        {isManagerOrAbove(me.role) && (
-          <QuickLink to="/flags" icon={<ShieldAlert size={18} strokeWidth={2} />} title="Anti-cheat" sub="Open risk flags" />
-        )}
-        {isAdmin(me.role) && (
-          <QuickLink to="/teams" icon={<LayoutGrid size={18} strokeWidth={2} />} title="Teams" sub="Create, rename, assign managers" />
-        )}
-      </section>
-    </div>
+      {/* QUICK LINKS — role-aware jump-offs as a lightweight List. */}
+      <Card title="Jump back in" className="ui-rise-2">
+        <List>
+          <QuickLink
+            icon={<Clock4 size={18} strokeWidth={1.9} />}
+            title="My Day"
+            sub="Today's ribbon, heatmap, and timesheet"
+            onClick={() => navigate({ to: '/me-today' })}
+          />
+          {isManagerOrAbove(me.role) && (
+            <QuickLink
+              icon={<LayoutGrid size={18} strokeWidth={1.9} />}
+              title="Team"
+              sub="Heat-mapped users × days"
+              onClick={() => navigate({ to: '/team' })}
+            />
+          )}
+          {isManagerOrAbove(me.role) && (
+            <QuickLink
+              icon={<CalendarCheck size={18} strokeWidth={1.9} />}
+              title="Attendance"
+              sub="Present / absent + first-last times"
+              onClick={() => navigate({ to: '/attendance' })}
+            />
+          )}
+          {isManagerOrAbove(me.role) && (
+            <QuickLink
+              icon={<Inbox size={18} strokeWidth={1.9} />}
+              title="Approvals"
+              sub="Manual-time requests waiting"
+              onClick={() => navigate({ to: '/approvals' })}
+            />
+          )}
+          {isManagerOrAbove(me.role) && (
+            <QuickLink
+              icon={<ShieldAlert size={18} strokeWidth={1.9} />}
+              title="Anti-cheat"
+              sub="Open risk flags"
+              onClick={() => navigate({ to: '/flags' })}
+            />
+          )}
+          {isAdmin(me.role) && (
+            <QuickLink
+              icon={<LayoutGrid size={18} strokeWidth={1.9} />}
+              title="Teams"
+              sub="Create, rename, assign managers"
+              onClick={() => navigate({ to: '/teams' })}
+            />
+          )}
+        </List>
+      </Card>
+    </Page>
   );
 }
 
-interface StatProps {
-  chipClass: string;
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-  unit?: string;
-  afterValue?: React.ReactNode;
-  foot?: string;
-  href?: string;
-}
-function StatCard({ chipClass, icon, label, value, unit, afterValue, foot, href }: StatProps) {
-  const inner = (
-    <>
-      <div className="stat-head">
-        <div className={`stat-chip ${chipClass}`} aria-hidden>{icon}</div>
-        <div className="stat-label">{label}</div>
-      </div>
-      <div className="stat-value">
-        {value}
-        {unit && <span className="unit">{unit}</span>}
-        {afterValue && <> {afterValue}</>}
-      </div>
-      {foot && <div className="stat-foot">{foot}</div>}
-    </>
-  );
-  if (href) {
-    return <Link to={href} className="stat card-interactive" style={{ textDecoration: 'none', color: 'inherit' }}>{inner}</Link>;
-  }
-  return <div className="stat">{inner}</div>;
-}
-
-function QuickLink({ to, icon, title, sub }: { to: string; icon: React.ReactNode; title: string; sub: string }) {
+function QuickLink({
+  icon,
+  title,
+  sub,
+  onClick,
+}: {
+  icon: ReactNode;
+  title: string;
+  sub: string;
+  onClick: () => void;
+}) {
   return (
-    <Link to={to} className="quick-card card-interactive">
-      <div className="quick-icon" aria-hidden>{icon}</div>
-      <div className="quick-meta">
-        <div className="quick-title">{title}</div>
-        <div className="quick-sub">{sub}</div>
-      </div>
-      <ArrowRight size={14} strokeWidth={2.2} className="quick-arrow" />
-    </Link>
+    <ListRow
+      leading={<span className="hm-link-icon">{icon}</span>}
+      title={title}
+      subtitle={sub}
+      trailing={<ChevronRight size={16} strokeWidth={2} className="hm-link-chevron" />}
+      onClick={onClick}
+    />
   );
 }
 

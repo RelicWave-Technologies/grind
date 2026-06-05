@@ -39,6 +39,7 @@ export async function decideRequest(args: {
     include: {
       user: { select: { name: true } },
       approver: { include: { larkIdentity: { select: { openId: true } } } },
+      attendees: { select: { userId: true } },
     },
   });
   if (!req) return null;
@@ -100,6 +101,7 @@ export async function decideRequest(args: {
     let timeEntryId: string | null = null;
     if (decision === 'APPROVED') {
       const teId = ulid();
+      const attendeeIds = req.attendees.map((a) => a.userId);
       await tx.timeEntry.create({
         data: {
           id: teId,
@@ -113,6 +115,9 @@ export async function decideRequest(args: {
           segments: {
             create: [{ id: ulid(), kind: 'WORK', startedAt: req.requestedStart, endedAt: req.requestedEnd }],
           },
+          // Carry meeting attendees onto the approved entry (parity with the
+          // dashboard + auto-approve paths) — otherwise they're lost.
+          attendees: attendeeIds.length ? { create: attendeeIds.map((userId) => ({ userId })) } : undefined,
         },
       });
       timeEntryId = teId;

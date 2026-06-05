@@ -4,6 +4,9 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RouterProvider, createRouter } from '@tanstack/react-router';
 import { routeTree } from './router';
 import './styles.css';
+// Shared "Quiet Datasheet" UI kit — tokens + component classes (src/ui/SYSTEM.md).
+// Loaded AFTER styles.css so the ui-* namespaced kit wins where it overlaps.
+import './ui/system.css';
 
 // Single QueryClient for the whole SPA. Stale-while-revalidate is the
 // default — we refetch on window focus so toggling back from Lark/agent

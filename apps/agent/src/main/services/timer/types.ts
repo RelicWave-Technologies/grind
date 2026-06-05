@@ -24,6 +24,15 @@ export interface EntryStore {
   listRecent(limit: number): TimeEntry[];
   /** Mark an entry as successfully synced. */
   markSynced(entryId: string): void;
+  /**
+   * Durable "last proof of life" timestamp, written periodically while a timer
+   * actively accrues. On boot it bounds crash recovery: an ungraceful
+   * shutdown (battery death, force-quit, kernel panic) leaves an entry open
+   * with no `suspend`/`resume` to trim it, so we close it at the last liveness
+   * tick instead of over-crediting the dead gap.
+   */
+  setLiveness(ts: number): void;
+  getLiveness(): number | null;
 }
 
 /** Pushes entries to the backend. Implemented over the HTTP api client. */

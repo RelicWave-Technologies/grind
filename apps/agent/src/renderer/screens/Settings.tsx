@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { MonitorCheck, Power, FolderOpen, CheckCircle2, AlertCircle, Link2, Keyboard } from 'lucide-react';
+import { MonitorCheck, Power, FolderOpen, CheckCircle2, AlertCircle, Link2, Keyboard, PictureInPicture2 } from 'lucide-react';
 
 export default function Settings() {
   const qc = useQueryClient();
@@ -11,6 +11,14 @@ export default function Settings() {
   const setLogin = useMutation({
     mutationFn: (v: boolean) => window.agent.settings.setLaunchAtLogin(v),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['settings'] }),
+  });
+
+  const setFloatingBar = useMutation({
+    mutationFn: (v: boolean) => window.agent.settings.setFloatingBarVisible(v),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['settings'] }),
+  });
+  const resetFloatingBar = useMutation({
+    mutationFn: () => window.agent.settings.resetFloatingBarPosition(),
   });
 
   const connectLark = useMutation({
@@ -54,7 +62,7 @@ export default function Settings() {
           <div className="section-head"><span className="section-title">Permissions</span></div>
           <div className="set-card">
             <div className="set-row">
-              <span className="set-ic" style={{ background: ok ? 'var(--c-green)' : 'var(--c-orange)' }}>
+              <span className="set-ic" style={{ background: ok ? 'var(--c-green-bg)' : 'var(--c-orange-bg)' }}>
                 <MonitorCheck size={17} strokeWidth={2} />
               </span>
               <div className="set-main">
@@ -79,7 +87,7 @@ export default function Settings() {
             </div>
 
             <div className="set-row">
-              <span className="set-ic" style={{ background: aCapturing ? 'var(--c-green)' : 'var(--c-orange)' }}>
+              <span className="set-ic" style={{ background: aCapturing ? 'var(--c-green-bg)' : 'var(--c-orange-bg)' }}>
                 <Keyboard size={17} strokeWidth={2} />
               </span>
               <div className="set-main">
@@ -110,7 +118,7 @@ export default function Settings() {
           <div className="section-head"><span className="section-title">Integrations</span></div>
           <div className="set-card">
             <div className="set-row">
-              <span className="set-ic" style={{ background: larkConnected ? 'var(--c-green)' : 'var(--violet)' }}>
+              <span className="set-ic" style={{ background: larkConnected ? 'var(--c-green-bg)' : 'var(--c-violet-bg)' }}>
                 <Link2 size={17} strokeWidth={2} />
               </span>
               <div className="set-main">
@@ -149,7 +157,7 @@ export default function Settings() {
           <div className="section-head"><span className="section-title">General</span></div>
           <div className="set-card">
             <div className="set-row">
-              <span className="set-ic" style={{ background: 'var(--violet)' }}><Power size={17} strokeWidth={2} /></span>
+              <span className="set-ic" style={{ background: 'var(--c-violet-bg)' }}><Power size={17} strokeWidth={2} /></span>
               <div className="set-main">
                 <div className="set-title">Launch at login</div>
                 <div className="set-sub secondary">Start Grind automatically and track from the moment you log in.</div>
@@ -165,7 +173,37 @@ export default function Settings() {
               </button>
             </div>
             <div className="set-row">
-              <span className="set-ic" style={{ background: 'var(--c-slate)' }}><FolderOpen size={17} strokeWidth={2} /></span>
+              <span className="set-ic" style={{ background: 'var(--c-blue-bg)' }}><PictureInPicture2 size={17} strokeWidth={2} /></span>
+              <div className="set-main">
+                <div className="set-title">Floating timer bar</div>
+                <div className="set-sub secondary">
+                  Show the always-on-top mini bar while tracking. Drag it anywhere — it stays put.
+                  {info.data?.floatingBarVisible && (
+                    <>
+                      {' '}
+                      <button
+                        className="link-btn no-drag"
+                        onClick={() => resetFloatingBar.mutate()}
+                        disabled={resetFloatingBar.isPending}
+                      >
+                        Reset position
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+              <button
+                role="switch"
+                aria-checked={!!info.data?.floatingBarVisible}
+                className={`toggle no-drag${info.data?.floatingBarVisible ? ' on' : ''}`}
+                onClick={() => setFloatingBar.mutate(!info.data?.floatingBarVisible)}
+                disabled={setFloatingBar.isPending}
+              >
+                <span className="toggle-knob" />
+              </button>
+            </div>
+            <div className="set-row">
+              <span className="set-ic" style={{ background: 'var(--c-slate-bg)' }}><FolderOpen size={17} strokeWidth={2} /></span>
               <div className="set-main">
                 <div className="set-title">Local data</div>
                 <div className="set-sub secondary">Screenshots and the offline queue are stored on this device.</div>

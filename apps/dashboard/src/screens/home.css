@@ -1,0 +1,20 @@
+/* ============================================================================
+   HOME — page-specific LAYOUT only. Every visual (colour, type, border,
+   shadow, radius) comes from the shared kit (src/ui) + tokens. This file may
+   contain nothing but grid/flex placement, gaps, and token-driven alignment.
+   Every class is `hm-`.
+   ========================================================================== */
+
+/* Quick-link leading glyph: align the lucide icon inside the List leading slot
+   and tint it from the canonical ink token (no bespoke colour). */
+.hm-link-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ui-ink-3);
+}
+
+/* Trailing affordance chevron — same token ink as other meta. */
+.hm-link-chevron {
+  color: var(--ui-ink-3);
+}

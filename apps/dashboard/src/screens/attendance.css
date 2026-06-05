@@ -1,0 +1,68 @@
+/* ============================================================================
+   ATTENDANCE — LAYOUT ONLY.
+   The page is composed from the shared "Quiet Datasheet" kit (src/ui). This
+   file contributes pure placement (stacking, gaps, the horizontal scroll
+   wrapper, and the small intra-cell stacks) — no colours, type, borders, or
+   shadows beyond the kit's own meta-ink tokens for sub-labels. Prefix: atd-.
+   ========================================================================== */
+
+/* Vertical rhythm between the header, KPI strip, and matrix card.
+   (.ui-page sets the gutter + mount; it does not space its section children.) */
+.ui-page > .ui-page-head + .ui-card,
+.ui-page > .ui-card + .ui-card {
+  margin-top: var(--ui-sp-7);
+}
+
+/* Legend — a row of kit Tags above the table, inside the flush card padding. */
+.atd-legend {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-sp-4);
+  padding: var(--ui-sp-5) var(--ui-sp-7) 0;
+}
+
+/* The matrix scrolls horizontally inside the flush card. */
+.atd-scroll {
+  overflow-x: auto;
+}
+
+/* Day column head — weekday over day-number over the optional Today tag. */
+.atd-dayhead {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--ui-sp-1);
+}
+.atd-dayhead__dow {
+  color: var(--ui-ink-3);
+}
+.atd-dayhead__num {
+  color: var(--ui-ink);
+}
+
+/* Present cell — mono first→last over a quiet duration line. */
+.atd-cell {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--ui-sp-1);
+  white-space: nowrap;
+}
+.atd-cell__arrow,
+.atd-cell__dur {
+  color: var(--ui-ink-3);
+}
+.atd-cell__absent {
+  color: var(--ui-ink-3);
+}
+
+/* Present count column — n/total numeral next to the percentage Tag. */
+.atd-present {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--ui-sp-3);
+}
+.atd-present__of {
+  color: var(--ui-ink-3);
+}

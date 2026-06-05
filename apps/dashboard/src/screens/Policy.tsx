@@ -1,12 +1,37 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ShieldCheck, Loader2, Check } from 'lucide-react';
+import { Check } from 'lucide-react';
 import { api } from '../lib/api';
+import {
+  Page,
+  PageHeader,
+  Card,
+  List,
+  ListRow,
+  Field,
+  Input,
+  Toggle,
+  Tag,
+  Button,
+  Banner,
+  EmptyState,
+  Toolbar,
+  Skeleton,
+} from '../ui';
+import type { Rail } from '../ui';
+import './policy.css';
 
 /**
  * /policy — ADMIN editor for the workspace capture policy (M14).
  *
- * Three flags along a strictness gradient:
+ * Composed entirely from the shared "Quiet Datasheet" kit: a PageHeader carries
+ * the dirty-state Tag + primary Save in its Toolbar; each settings GROUP is a
+ * Card hosting a List of rows, one Toggle per capture flag; retention is a
+ * number Field. The capture flags carry a status rail along the strictness
+ * gradient — success → warn → danger maps the §2 taxonomy onto "least → most
+ * sensitive", so the privacy weight is legible without bespoke colour.
+ *
+ * Three flags along that gradient:
  *   captureApps   — which app is in focus (e.g. "Chrome")
  *   captureTitles — the foreground window title
  *   captureUrls   — the browser URL (true content)
@@ -16,6 +41,10 @@ import { api } from '../lib/api';
  * titles/URLs while the policy is OFF, ingestion scrubs them before
  * they hit the database. This screen exists so admins can see + flip
  * the flag from one calm surface, not so we trust the client.
+ *
+ * Behaviour, queries, and the route/export contract are unchanged — the
+ * useQuery / PATCH useMutation / draft seeding / dirty calc / clamp all match
+ * the prior version exactly. Presentation only.
  */
 
 interface WorkspacePolicy {
@@ -49,16 +78,45 @@ export function PolicyScreen() {
     },
   });
 
+  const header = (
+    <PageHeader
+      eyebrow="Admin · Privacy"
+      title="Workspace policy"
+      subtitle="Capture rules apply to everyone in this workspace. Defaults are off — flip each line on only if you genuinely need it."
+    />
+  );
+
   if (q.isLoading || !draft) {
-    return <div className="page page-wide"><div className="card empty">Loading policy…</div></div>;
+    return (
+      <Page>
+        {header}
+        <div className="pol-body">
+          <Card title="Capture">
+            <List>
+              {[0, 1, 2].map((i) => (
+                <ListRow
+                  key={i}
+                  title={<Skeleton w={220} h={14} />}
+                  subtitle={<Skeleton w={320} h={12} />}
+                  trailing={<Skeleton w={36} h={20} radius={999} />}
+                />
+              ))}
+            </List>
+          </Card>
+        </div>
+      </Page>
+    );
   }
   if (q.isError) {
     return (
-      <div className="page page-wide">
-        <div className="card empty empty-error">
-          Couldn&apos;t load policy: {(q.error as Error).message}
-        </div>
-      </div>
+      <Page>
+        {header}
+        <EmptyState
+          tone="danger"
+          title="Couldn’t load policy"
+          description={(q.error as Error).message}
+        />
+      </Page>
     );
   }
 
@@ -78,85 +136,104 @@ export function PolicyScreen() {
     });
   }
 
+  const saved = m.isSuccess && !dirty;
+
   return (
-    <div className="page page-wide">
-      <header className="page-head">
-        <div>
-          <h1 className="h1" style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-            <ShieldCheck size={20} strokeWidth={1.8} /> Workspace policy
-          </h1>
-          <p className="secondary page-sub">
-            Capture rules apply to everyone in this workspace. Defaults are off; flip each line on only if you need it.
-          </p>
-        </div>
-        <div className="day-controls">
-          <button
-            type="button"
-            className="btn btn-prominent"
-            onClick={save}
-            disabled={!dirty || m.isPending}
-          >
-            {m.isPending ? <Loader2 size={14} className="spin" /> : m.isSuccess && !dirty ? <Check size={14} /> : null}
-            {m.isPending ? 'Saving…' : m.isSuccess && !dirty ? 'Saved' : 'Save policy'}
-          </button>
-        </div>
-      </header>
+    <Page>
+      <PageHeader
+        eyebrow="Admin · Privacy"
+        title="Workspace policy"
+        subtitle="Capture rules apply to everyone in this workspace. Defaults are off — flip each line on only if you genuinely need it."
+        actions={
+          <Toolbar>
+            <Tag status={dirty ? 'warn' : 'success'} dot>
+              {dirty ? 'Unsaved changes' : 'All saved'}
+            </Tag>
+            <Button
+              variant="primary"
+              onClick={save}
+              disabled={!dirty || m.isPending}
+              loading={m.isPending}
+              icon={saved ? <Check size={14} strokeWidth={2.6} /> : undefined}
+            >
+              {m.isPending ? 'Saving…' : saved ? 'Saved' : 'Save policy'}
+            </Button>
+          </Toolbar>
+        }
+      />
 
-      <section className="card" style={{ padding: 'var(--sp-6) var(--sp-7)' }}>
-        <PolicyRow
-          title="Capture which app is in focus"
-          help="Stores the running application's name + bundle ID per minute (e.g. “Google Chrome / com.google.Chrome”). Required for the apps timeline on My Day."
-          checked={draft.captureApps}
-          onChange={(v) => setDraft({ ...draft, captureApps: v })}
-        />
-        <PolicyRow
-          title="Capture window titles"
-          help="Adds the foreground window's title (the document, tab, or message name). Titles can leak doc/customer names — turn on with care."
-          checked={draft.captureTitles}
-          onChange={(v) => setDraft({ ...draft, captureTitles: v })}
-          disabled={!draft.captureApps}
-          disabledHint="Enable “Capture which app is in focus” first."
-        />
-        <PolicyRow
-          title="Capture browser URLs"
-          help="Adds the URL of the current tab in Chrome/Safari. Treated as content — the strictest flag. Keep off unless you have a documented reason."
-          checked={draft.captureUrls}
-          onChange={(v) => setDraft({ ...draft, captureUrls: v })}
-          disabled={!draft.captureApps}
-          disabledHint="Enable “Capture which app is in focus” first."
-        />
-
-        <div className="policy-row">
-          <div className="policy-row-text">
-            <div className="policy-row-title">Screenshot retention</div>
-            <div className="policy-row-help">
-              Screenshots older than this are purged nightly. Set to 0 to keep forever (not recommended).
-            </div>
-          </div>
-          <div className="policy-row-control">
-            <input
-              type="number"
-              min={0}
-              max={3650}
-              value={draft.retentionDaysScreenshots}
-              onChange={(e) =>
-                setDraft({ ...draft, retentionDaysScreenshots: Math.max(0, Math.min(3650, Number(e.target.value) || 0)) })
-              }
-              className="policy-input"
+      <div className="pol-body">
+        {/* ── Capture group — one List, a Toggle per flag, strictness rail ─── */}
+        <Card title="Capture" action={<Tag mono>3 flags</Tag>}>
+          <List>
+            <PolicyRow
+              sensitivity="low"
+              title="Capture which app is in focus"
+              help="Stores the running application’s name + bundle ID per minute (e.g. “Google Chrome / com.google.Chrome”). Required for the apps timeline on My Day."
+              checked={draft.captureApps}
+              onChange={(v) => setDraft({ ...draft, captureApps: v })}
             />
-            <span className="small secondary">days</span>
-          </div>
-        </div>
-      </section>
+            <PolicyRow
+              sensitivity="medium"
+              title="Capture window titles"
+              help="Adds the foreground window’s title (the document, tab, or message name). Titles can leak doc/customer names — turn on with care."
+              checked={draft.captureTitles}
+              onChange={(v) => setDraft({ ...draft, captureTitles: v })}
+              disabled={!draft.captureApps}
+              disabledHint="Enable “Capture which app is in focus” first."
+            />
+            <PolicyRow
+              sensitivity="high"
+              title="Capture browser URLs"
+              help="Adds the URL of the current tab in Chrome/Safari. Treated as content — the strictest flag. Keep off unless you have a documented reason."
+              checked={draft.captureUrls}
+              onChange={(v) => setDraft({ ...draft, captureUrls: v })}
+              disabled={!draft.captureApps}
+              disabledHint="Enable “Capture which app is in focus” first."
+            />
+          </List>
+        </Card>
 
-      {m.isError && (
-        <div className="card empty empty-error" style={{ marginTop: 'var(--sp-3)' }}>
-          Couldn&apos;t save: {(m.error as Error).message}
-        </div>
-      )}
-    </div>
+        {/* ── Retention group — a single number Field ───────────────────────── */}
+        <Card title="Retention" action={<Tag>Nightly purge</Tag>}>
+          <Field
+            label="Screenshot retention"
+            hint="Screenshots older than this are purged nightly. Set to 0 to keep forever (not recommended)."
+          >
+            <div className="pol-field-control">
+              <Input
+                type="number"
+                min={0}
+                max={3650}
+                value={draft.retentionDaysScreenshots}
+                onChange={(e) =>
+                  setDraft({
+                    ...draft,
+                    retentionDaysScreenshots: Math.max(
+                      0,
+                      Math.min(3650, Number(e.target.value) || 0),
+                    ),
+                  })
+                }
+              />
+              <span className="ui-t-eyebrow">days</span>
+            </div>
+          </Field>
+        </Card>
+
+        {m.isError && (
+          <Banner status="danger">Couldn’t save: {(m.error as Error).message}</Banner>
+        )}
+      </div>
+    </Page>
   );
 }
+
+const SENSITIVITY_RAIL: Record<'low' | 'medium' | 'high', Rail> = {
+  low: 'success',
+  medium: 'warn',
+  high: 'danger',
+};
 
 function PolicyRow({
   title,
@@ -165,6 +242,7 @@ function PolicyRow({
   onChange,
   disabled,
   disabledHint,
+  sensitivity,
 }: {
   title: string;
   help: string;
@@ -172,26 +250,17 @@ function PolicyRow({
   onChange: (v: boolean) => void;
   disabled?: boolean;
   disabledHint?: string;
+  sensitivity: 'low' | 'medium' | 'high';
 }) {
   const effective = disabled ? false : checked;
   return (
-    <div className={`policy-row${disabled ? ' is-disabled' : ''}`}>
-      <div className="policy-row-text">
-        <div className="policy-row-title">{title}</div>
-        <div className="policy-row-help">{help}</div>
-        {disabled && disabledHint && <div className="policy-row-disabled-hint">{disabledHint}</div>}
-      </div>
-      <div className="policy-row-control">
-        <label className="policy-toggle">
-          <input
-            type="checkbox"
-            checked={effective}
-            disabled={disabled}
-            onChange={(e) => onChange(e.target.checked)}
-          />
-          <span className="policy-toggle-track" aria-hidden />
-        </label>
-      </div>
-    </div>
+    <ListRow
+      rail={SENSITIVITY_RAIL[sensitivity]}
+      title={title}
+      subtitle={disabled && disabledHint ? `${help} ${disabledHint}` : help}
+      trailing={
+        <Toggle checked={effective} disabled={disabled} onChange={onChange} />
+      }
+    />
   );
 }

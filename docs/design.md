@@ -1,154 +1,114 @@
-# Grind — Design System
+# Grind — Design System (Figma editorial)
 
-> The single source of truth for how Grind looks and feels. Every screen — desktop agent **and** web dashboard — follows this. If a value isn't here, add it here first, then use it. Tokens live in `apps/agent/src/renderer/styles.css` (`:root`); this doc is the spec behind them.
+> The single source of truth for how the Grind **web dashboard** looks and feels. Derived from the Figma marketing-site analysis in [`/DESIGN.md`](../DESIGN.md). Tokens live in `apps/dashboard/src/styles.css` (`:root`, the `--fg-*` set, with the legacy names aliased to Figma values). If a value isn't here, add a token first, then use it.
+>
+> **Scope note:** the dashboard implements this system. The desktop **agent** (`apps/agent`) still runs the legacy violet system — migrating it to Figma is a tracked follow-up; until then the two surfaces diverge intentionally.
 
-**Aesthetic in one line:** light, premium, calm — with a **violet signature**, **rounded display numerals**, colorful per-project chips, and a **day-timeline ribbon** as the hero data visual. Not a generic Electron web app; not a toy.
+**Aesthetic in one line:** a confident black‑and‑white **editorial frame** — Inter for prose, JetBrains Mono for taxonomy, white canvas, 1px hairlines, pill buttons, **no shadows** — punctuated by deliberate **pastel colour blocks**. Technical and calm; a tool for serious work, never candy.
 
 ---
 
 ## 1. Principles
 
-1. **Show real data, not fake progress.** We count time *up*, so we never use a progress ring or any metaphor that implies a target. The signature visual is the **day-timeline ribbon** (real sessions placed at their real time of day).
-2. **Calm by default, color with intent.** Lots of white/light-gray, one accent (violet). Color earns its place: project identity, status, category — never decoration for its own sake.
-3. **Quiet interactions.** Subtle hover fills, soft shadows, gentle 130–360ms motion, keyboard-only focus rings. Nothing bounces or shouts.
-4. **Consistency over creativity.** Use the tokens and components below. Don't hardcode hex, px, or one-off fonts.
-5. **Light theme only** (for now). No dark mode in v1.
+1. **Monochrome frame, colour with intent.** Ink on white is the default. At most **one pastel colour‑zone per viewport** (a KPI band, a summary block); everything else stays monochrome. Colour is the section break, not decoration.
+2. **Weight, not opacity, carries hierarchy.** No mid‑gray text. Express emphasis with Inter weights (320–600) and size — never `opacity`/gray fills.
+3. **Mono is taxonomy.** JetBrains Mono, UPPERCASE, positive tracking — for eyebrows, labels, tags, ages, captions, dates/times. Never for body copy.
+4. **Pills only.** Every button is a pill; every icon button is a circle. No square buttons.
+5. **Shadow‑light.** Hairlines (1px `#e6e6e6`) and colour blocks carry depth. Keep a soft shadow only for genuine floating layers (popovers/menus).
+6. **No gradients, no violet.** The accent is black. Light theme only.
 
 ---
 
-## 2. Design Tokens
+## 2. Tokens — `--fg-*` (`apps/dashboard/src/styles.css :root`)
 
-All tokens are CSS variables on `:root`. **Never hardcode** — reference the variable.
+**Never hardcode** — reference the variable. Legacy names (`--violet`, `--bg-app`, `--font-sans`, `--separator`, `--shadow-*`, `--c-*`) are **aliased** to Figma values so every shared component inherits the system centrally.
 
-### Color — surfaces
+### Surfaces & ink
 | Token | Value | Use |
 |---|---|---|
-| `--bg-app` | `#f4f4f7` | App canvas (content area) |
-| `--bg-sidebar` | `#ffffff` | Sidebar chrome |
-| `--bg-card` | `#ffffff` | Cards, rows, fields-on-card |
-| `--ink` | `#15131c` | Near-black (running hero, "now" marker, primary text) |
+| `--fg-canvas` | `#ffffff` | Page canvas, cards |
+| `--fg-ink` | `#000000` | All text + the single accent |
+| `--fg-hairline` | `#e6e6e6` | 1px borders, dividers |
+| `--fg-hairline-soft` | `#f1f1f1` | Row separators inside cards |
+| `--fg-surface-soft` | `#f7f7f5` | Quiet fills, chip grounds |
 
-### Color — text (ink with alpha for hierarchy)
-| Token | Value |
-|---|---|
-| `--label-primary` | `#15131c` |
-| `--label-secondary` | `rgba(40,36,56,.56)` |
-| `--label-tertiary` | `rgba(40,36,56,.36)` |
-| `--on-dark` / `--on-dark-soft` | `#fff` / `rgba(255,255,255,.62)` |
+### Pastel blocks (the colour vocabulary)
+`--fg-lime #dceeb1` · `--fg-cream #f4ecd6` · `--fg-lilac #c5b0f4` · `--fg-coral #f3c9b6` · `--fg-mint #c8e6cd` · `--fg-pink #efd4d4`. One zone per viewport. `--fg-magenta #ff3d8b` is the single‑shot alert/risk accent (stuck approvals, high‑risk flags) — use scarcely.
 
-### Color — accent (violet) & status
-| Token | Value | Use |
+### Type & radii
+- `--fg-sans` → **Inter** (figmaSans substitute) — everything.
+- `--fg-mono` → **JetBrains Mono** (figmaMono substitute) — uppercase taxonomy only.
+- `--fg-r-md 8` · `--fg-r-lg 24` (cards) · `--fg-r-xl 32` · `--fg-r-pill 50` (buttons).
+- Fonts loaded in `apps/dashboard/index.html` (Google Fonts).
+
+Spacing (`--sp-1..10`), motion (`--ease`, `--spring`, `--dur-*`), and `.rise`/`.rise-1..3` mount stagger are unchanged and reused.
+
+---
+
+## 3. Type ladder
+
+| Role | Face / size / weight | Use |
 |---|---|---|
-| `--violet` | `#7c5cff` | Primary accent |
-| `--violet-700` | `#5b39d8` | Pressed / text-on-tint |
-| `--violet-tint` | `rgba(124,92,255,.10)` | Selected nav, soft button, play chip |
-| `--grad-violet` | `linear-gradient(135deg,#9b7bff,#6d3bf0)` | Brand mark, prominent buttons, login logo |
-| `--ring-from`/`--ring-to` | `#b69bff` → `#6d3bf0` | Gradient strokes / chart line |
-| `--success` | `#21c17a` | Running pulse, success |
-| `--danger` | `#ff4d6a` | Stop, destructive |
+| Eyebrow | mono · 11px · 500 · UPPER · +0.12em | Context line above a title |
+| Page title | Inter · ~24px · 540 · −0.025em | One per page (`.fg-title`) |
+| KPI number | Inter · ~30px · 460 · −0.03em · tabular | Headline metrics (`.fg-kpi-num`) |
+| Card title | Inter · 15px · 600 | Section/card heads |
+| Row name | Inter · 13.5px · 520 | Primary list text |
+| Body / sub | Inter · 12–13px · 350–360 | Secondary — recedes by **weight** |
+| Taxonomy | mono · 10–11px · 500 · UPPER | Tags, ages, risk, captions, dates |
 
-### Color — category palette (per-project / per-tag)
-Six-color set; a project is assigned one **deterministically** via `projectStyle(id)` (hash → palette) so it's always the same color + icon. Tokens: `--c-violet`, `--c-rose`, `--c-orange`, `--c-green`, `--c-blue`, `--c-slate`, each with a matching `*-bg` soft tint for tags.
-
-### Separators / fills
-`--separator` `rgba(40,36,56,.08)` · `--separator-strong` `rgba(40,36,56,.12)` · `--fill-hover` `rgba(124,92,255,.06)` · `--fill-press` `rgba(124,92,255,.10)`.
-
-### Typography
-- **UI font** `--font-sans`: `-apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif`. Base **13px**, line-height 1.45.
-- **Display font** `--font-round`: `ui-rounded, "SF Pro Rounded", "SF Pro Display", -apple-system, sans-serif` — used for the **brand name, big timer numerals, section titles, stat values**. Gives warmth/character while staying native.
-- Scale (helpers): `.h1` 26/700, `.h2` 19/700, `.h3` 15/600, `.body` 13/400, `.callout` 12, `.small` 11. Emphasis = **600**, rarely 700.
-- Numerals that change live use `font-variant-numeric: tabular-nums` (`.tabular`).
-
-### Spacing — 8pt grid (4pt fine)
-`--sp-1..10` = 2, 4, 8, 12, 16, 20, 24, 32, 40, 48. Tight within a component (4–8), generous between (16–24).
-
-### Radii
-`--radius-sm` 8 (buttons/fields/segmented) · `--radius-md` 12 (chips, brand mark) · `--radius-lg` 18 (cards) · `--radius-xl` 24 (hero, login). Child radius < parent radius.
-
-### Shadows (soft, low-opacity, slightly cool)
-`--shadow-sm`, `--shadow-card` (default card), `--shadow-hero` (violet-tinted, near-black hero), `--shadow-lift` (hover), `--focus-ring` `0 0 0 3px rgba(124,92,255,.4)`.
-
-### Motion
-Eases: `--ease` `cubic-bezier(.4,0,.2,1)`, `--spring` `cubic-bezier(.34,1.56,.64,1)` (for round-button hover, play-chip pop). Durations: `--dur-fast` 130ms · `--dur-base` 220ms · `--dur-slow` 360ms. Honor `prefers-reduced-motion` (all durations → 0). Page content rises in on mount via `.rise` (+ `.rise-1/2/3` stagger delays).
-
-### Layout constants
-`--sidebar-width` 232 · `--toolbar-height` 58.
+Negative letter‑spacing scales with size; tight on titles, near‑zero on body.
 
 ---
 
-## 3. Components
+## 4. Components
 
-### Button — `.btn`
-Variants: default (white + 1px inset border), `.btn-prominent` (violet gradient, white text, glow), `.btn-soft` (violet tint), `.btn-ghost` (transparent), `.btn-danger` (red text). Sizes: default 34px, `.btn-lg` 44px. `.btn-block` full width.
-States: hover = tint fill / brightness; active = `scale(.98)`; disabled = .45 opacity; focus-visible = focus ring. Icon + label gap 4px.
+- **Editorial header — `.fg-head`**: mono `.fg-eyebrow` + tight `.fg-title` + optional `.fg-sub`, closed by a 1px **black** rule. Right rail = `.fg-quicknav` pills.
+- **Card — `.fg-card`**: white + 1px hairline + `--fg-r-lg`, no shadow. Head `.fg-card-head` (`.fg-card-title` + `.fg-card-link`/`.fg-cap`).
+- **KPI tile — `.fg-kpi` (+`--lime/cream/lilac/coral/mint/pink`, `--link`)**: pastel ground, mono `.fg-kpi-label`, light `.fg-kpi-num` + `.fg-kpi-unit`, `.fg-kpi-sub`; clickable tiles get a circular `.fg-kpi-arrow`. The KPI band is the page's colour zone.
+- **List row — `.fg-row`**: hairline‑separated; `.fg-row-name` (weight) + `.fg-row-sub`, with `.fg-row-meta`/`.fg-tag`/`.fg-risk` and a right‑aligned mono `.fg-age` (`--stuck` → magenta).
+- **Pill button — `.fg-pill` / global `.btn`**: black = primary, white + 1px hairline = secondary; `:hover` fills black. Icon buttons are circles.
+- **States**: `.fg-empty` (quiet editorial line), `.fg-note` (mono loading), `.fg-error`.
 
-### Text field — `.field`
-38px, `--bg-app` fill with inset border, 8px radius. Focus = violet inset border + focus ring + white fill. Label = `.field-label` (12/600 secondary); append `.field-optional` (400, tertiary) for an "optional" hint. Textareas reuse `.field` with `height:auto` + `resize:vertical`. Add `.selectable` to inputs (chrome is otherwise non-selectable).
-
-### Composer — `.composer`
-A calm inline create card that blends with task rows (white, `--radius-lg`, hairline inset border + `--shadow-card`). Borderless controls so it reads as content, not a form: `.composer-title` (rounded display, 18/600, transparent), `.composer-note` (13px secondary textarea, no resize), then a `.composer-foot` divided by a top hairline holding a compact `.composer-due` chip (left) and the primary `.btn-prominent` (right, after a `.composer-spacer`). Inline `.composer-error` (rose). Used for "New Lark task" on Today. Success is confirmed with a `.create-toast` (green-tint pill).
-
-### Sidebar nav item — `.nav-item`
-38px row, icon (18px, 2px stroke) + label. Default = secondary text, tertiary icon. Hover = `--fill-hover`. **Active = `--violet-tint` bg + `--violet-700` text + violet icon, weight 600.**
-
-### Task card — `.task`
-The project/session row. Layout: **icon chip** (42px, `--radius-md`, project color bg, white 20px icon) · title (14/600) + **tag** row · trailing **play chip** (`.task-play`, 34px circle, violet tint → fills gradient on hover with spring pop). Card hover = lift (`translateY(-1px)` + `--shadow-lift`). Active/running variant: play chip turns red (Stop).
-
-### Tag — `.tag`
-19px pill, 11/600, soft category bg + matching fg. One per row by default.
-
-### Stat card — `.stat`
-Card with a colored **stat-chip** (34px, 10px radius, white icon) + two-line label, then a big `.stat-value` (rounded display, 30/700) with `.unit` spans for h/m.
-
-### Segmented control — `.segmented` / `.seg`
-Pill track (`rgba(40,36,56,.06)`), 28px segments; active = white thumb + `--shadow-sm`. For Day/Week and similar view switches.
-
-### Round action button — `.round-btn`
-64px circle, white, `--shadow-card`; hover lift (spring). `.round-btn.danger` = red icon (Stop). Labeled below via `.round-btn-label`. Used in the focus (running) view.
-
-### Empty state — `.empty`
-Centered: 56px tinted `.empty-icon`, `.h3` title, `.callout.secondary` line.
+These live in `styles.css` under **"FIGMA THEME … Overview"** and the global **"FIGMA GLOBAL"** override layer. The override layer is where the shared primitives (`.btn`, `.stat-chip`, `.hero`, `.login-*`, `.nav-*`) are flipped to Figma centrally — change the global look there, not per page.
 
 ---
 
-## 4. Signature patterns
+## 5. Page structure (every screen)
 
-### Day-timeline ribbon — `DayTimeline` (`components/DayTimeline.tsx`)
-**The hero visual.** A horizontal track representing today; each segment sits at its real time-of-day, **colored by project** (work), blue (meeting), gray (idle/trimmed). The open segment extends to a black **"now" marker** and **pulses** (`.dt-seg-live`). Hour ticks (`1a`, `2a`…) on the axis below; legend (Work/Meeting/Idle) under it. Never a ring/donut — we count up, not down.
+```tsx
+import './<page>.css';            // page-unique styles, classes prefixed <pfx>-
+…
+<div className="fg-overview">
+  <div className="fg-inner">
+    <header className="fg-head">…</header>
+    {/* reuse the .fg-* kit; one pastel zone max */}
+  </div>
+</div>
+```
 
-### Running ("focus") view
-Vertically centered: big **72px rounded** elapsed time + colored dot + project, then the timeline in a `.focus-card`, then round **Pause / Stop** buttons.
-
-### Near-black running hero — `.hero-running`
-On the idle Today screen: a dark gradient card with a violet radial glow, showing the current/last state. Sets the premium tone at the top of the page.
-
-### Line chart — `LineChart` (`components/LineChart.tsx`)
-Smooth gradient **area line** (violet), rounded cap, peak marker, faint gridlines. For Reports (Day/Week).
+- Reuse the shared `.fg-*` kit first; only add **prefixed** page CSS in `apps/dashboard/src/screens/<page>.css` for layout the kit doesn't cover.
+- `Overview.tsx` is the canonical reference page — mirror its vocabulary.
+- Preserve behaviour: tokens/markup change, data/hooks/routes don't.
 
 ---
 
-## 5. Do's & Don'ts
+## 6. Do's & Don'ts
 
 | ✅ Do | ❌ Don't |
 |---|---|
-| Use tokens (`var(--…)`) | Hardcode hex / px / fonts |
-| One violet accent + category colors with meaning | Rainbow UI or random colors |
-| Rounded display font for big numbers/titles | Bold body text everywhere |
-| Day-timeline / real data visuals | Progress rings or fake "% complete" |
-| Quiet hovers, soft shadows, `:focus-visible` rings | Underline-on-hover, big color flips, focus ring on click |
-| Generous space between groups | Cramped, evenly-gray layouts |
-| Lucide icons, 1.75–2px stroke, 16–20px | Emoji or Material icons |
-| Honor `prefers-reduced-motion` | Bouncy/constant animations |
-
----
-
-## 6. Icons
-**Lucide** (`lucide-react`), MIT. 16px in rows/nav, 18px sidebar, 20px task chips, ~2px stroke. Color = category/accent on chips, `--label-secondary`/`tertiary` otherwise. Never ship SF Symbols (Apple license forbids non-Apple-platform use).
+| Ink on white; hairlines for structure | Shadows for separation (except popovers) |
+| One pastel zone per viewport | Multiple colour blocks in one view; rainbow chips |
+| Weight + size for hierarchy | Mid‑gray / opacity'd text |
+| Mono UPPERCASE for taxonomy | Mono in body copy |
+| Pill buttons, circular icon buttons | Square/gradient buttons; any violet |
+| Tokens (`var(--fg-…)`), prefixed page CSS | Hardcoded hex; editing shared `.fg-*` per page |
+| Lucide icons, ~2px stroke | Emoji / Material icons |
 
 ---
 
 ## 7. Adding to the system
-1. Need a value? Add a **token** first, then reference it.
-2. Need a UI element? Check this doc for an existing component/variant before inventing one.
-3. New reusable component → document it here (variants, states, tokens used) — "if it's not documented, it doesn't exist."
-4. Keep desktop agent and web dashboard visually identical — they share this system.
+1. Need a value? Add a `--fg-*` **token** first, then reference it.
+2. Need a component? Reuse a `.fg-*` class; only invent (prefixed, in the page's CSS) when nothing fits.
+3. A new **shared** primitive belongs in the "FIGMA GLOBAL" layer of `styles.css` + documented here.
+4. Migrating the desktop agent to this system is the open follow‑up — keep this doc as the target spec for both surfaces.

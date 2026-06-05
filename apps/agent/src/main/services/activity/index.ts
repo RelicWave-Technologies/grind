@@ -3,21 +3,23 @@ import { app } from 'electron';
 import path from 'node:path';
 import { ulid } from 'ulid';
 import { uIOhook } from 'uiohook-napi';
-import { ActivityAggregator } from './aggregator';
+import { MinuteSealer } from './minuteSealer';
+import type { ActivitySample } from './aggregator';
 import { ActiveWindowTracker, type ActiveWindowObservation } from './activeWindow';
 import { ActivityStore } from './store';
 import { flushActivity } from './sync';
-import { getTimerService } from '../timer';
 import { hasAccessibilityAccess } from '../permissions';
 import { log } from '../../logger';
 
 let store: ActivityStore | null = null;
-let agg: ActivityAggregator | null = null;
+let sealer: MinuteSealer | null = null;
 const activeWindow = new ActiveWindowTracker();
 let flushTimer: NodeJS.Timeout | null = null;
 let started = false;
-let recording = false; // mirror of "timer running & not paused"
-let bucketStart = 0;
+// Mirrors of "timer running & not paused" + the active entry, kept so a sealer
+// created after the first recording tick can be seeded with current state.
+let recording = false;
+let recordingEntryId: string | null = null;
 
 /**
  * Called by the meeting/window poller (~every 10s) with the foreground
@@ -34,9 +36,15 @@ function getStore(): ActivityStore {
   return store;
 }
 
-/** Update the recording flag cheaply (called on a 1s tick from main). */
-export function setActivityRecording(on: boolean): void {
+/**
+ * Update the recording flag cheaply (called on a 1s tick from main). `entryId`
+ * is the active time-entry so a sealed minute is credited to it even if the
+ * timer has since stopped (entryId goes null after a stop).
+ */
+export function setActivityRecording(on: boolean, entryId: string | null = null): void {
   recording = on;
+  if (on && entryId) recordingEntryId = entryId;
+  sealer?.setRecording(on, entryId);
 }
 
 /** Whether the global input hook is actually running (Accessibility granted). */
@@ -54,14 +62,14 @@ export function startActivityCapture(): void {
     log.warn('activity capture not started — Accessibility permission missing');
     return;
   }
-  agg = new ActivityAggregator();
   getStore();
-  bucketStart = Math.floor(Date.now() / 60000) * 60000;
+  sealer = new MinuteSealer({ now: () => Date.now(), persist: persistSample });
+  sealer.setRecording(recording, recordingEntryId); // seed current state
 
-  uIOhook.on('keydown', () => { if (recording) agg!.onKey(Date.now()); });
-  uIOhook.on('mousedown', () => { if (recording) agg!.onClick(); });
-  uIOhook.on('wheel', () => { if (recording) agg!.onScroll(); });
-  uIOhook.on('mousemove', (e) => { if (recording) agg!.onMove(Date.now(), e.x, e.y); });
+  uIOhook.on('keydown', () => sealer!.onKey(Date.now()));
+  uIOhook.on('mousedown', () => sealer!.onClick());
+  uIOhook.on('wheel', () => sealer!.onScroll());
+  uIOhook.on('mousemove', (e) => sealer!.onMove(Date.now(), e.x, e.y));
 
   try {
     uIOhook.start();
@@ -72,31 +80,28 @@ export function startActivityCapture(): void {
     return;
   }
 
-  // Flush one sample per minute.
-  flushTimer = setInterval(() => flushMinute(), 60_000);
+  // Seal one bucket per minute. The sealer guarantees a non-empty minute is
+  // always persisted (events are recording-gated at the source, so they're
+  // legitimate work) and never double-emits a bucket.
+  flushTimer = setInterval(() => {
+    if (sealer!.tick() == null) {
+      // Empty/duplicate minute — still bound the window tracker so it can't
+      // drift even during long idle stretches.
+      activeWindow.prune(Math.floor(Date.now() / 60_000) * 60_000);
+    }
+  }, 60_000);
 }
 
-function flushMinute(): void {
-  if (!agg) return;
-  const empty = agg.isEmpty();
-  const flushedBucket = bucketStart;
-  const sample = agg.flush(flushedBucket);
-  bucketStart = Math.floor(Date.now() / 60000) * 60000;
-
-  // Resolve the dominant app + title + url for the bucket we just sealed,
-  // then prune so the next minute starts with a clean tally (the anchor
-  // stays so the first slice of the new bucket is attributed correctly).
-  const dom = activeWindow.dominantFor(flushedBucket, flushedBucket + 60_000);
-  activeWindow.prune(flushedBucket + 60_000);
-
-  // Only persist real activity captured while tracking.
-  if (empty) return;
-  const status = getTimerService().status();
-  if (status.state !== 'RUNNING' || status.paused) return;
-
+/**
+ * Durably write a sealed minute to the local queue and kick a best-effort sync.
+ * Called by the sealer at most once per bucket (see {@link MinuteSealer}).
+ */
+function persistSample(sample: ActivitySample, entryId: string | null): void {
+  const dom = activeWindow.dominantFor(sample.bucketStart, sample.bucketStart + 60_000);
+  activeWindow.prune(sample.bucketStart + 60_000);
   getStore().insert({
     id: ulid(),
-    timeEntryId: status.entryId,
+    timeEntryId: entryId,
     bucketStart: sample.bucketStart,
     keystrokes: sample.keystrokes,
     clicks: sample.clicks,
@@ -111,8 +116,16 @@ function flushMinute(): void {
     activeUrl: dom.activeUrl,
     synced: 0,
   });
-
   void flushActivity(getStore());
+}
+
+/**
+ * Seal the in-flight (partial) minute to the local queue — call on app quit so
+ * the last sub-minute of work isn't lost. Synchronous + durable (better-sqlite3
+ * insert); the server drains it on the next launch's first flush.
+ */
+export function flushPartialActivity(): void {
+  sealer?.sealPartial();
 }
 
 export function stopActivityCapture(): void {

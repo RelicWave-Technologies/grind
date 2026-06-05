@@ -1,52 +1,34 @@
-import { BrowserWindow, screen } from 'electron';
-import path from 'node:path';
+import type { BrowserWindow } from 'electron';
+import {
+  createOverlayWindow,
+  assertOverlayFloat,
+  activeWorkArea,
+  centerUpperThird,
+} from './windows/overlay';
 
+/**
+ * "Still working?" idle prompt (M3). Appears centered on the display the user
+ * is currently on, floating above any fullscreen app, on every Space.
+ */
+
+const SIZE = { width: 340, height: 280 };
 let win: BrowserWindow | null = null;
-
-function load(w: BrowserWindow, hash: string) {
-  if (process.env.ELECTRON_RENDERER_URL) {
-    void w.loadURL(`${process.env.ELECTRON_RENDERER_URL}#${hash}`);
-  } else {
-    void w.loadFile(path.join(__dirname, '../renderer/index.html'), { hash });
-  }
-}
 
 function ensure(): BrowserWindow {
   if (win && !win.isDestroyed()) return win;
-  win = new BrowserWindow({
-    width: 340,
-    height: 280,
-    show: false,
-    frame: false,
-    transparent: true,
-    resizable: false,
-    skipTaskbar: true,
-    fullscreenable: false,
-    hasShadow: true,
-    alwaysOnTop: true,
-    type: process.platform === 'darwin' ? 'panel' : undefined,
-    webPreferences: {
-      contextIsolation: true,
-      sandbox: true,
-      nodeIntegration: false,
-      preload: path.join(__dirname, '../preload/index.cjs'),
-    },
+  win = createOverlayWindow({ ...SIZE, hash: 'idle' });
+  win.on('closed', () => {
+    win = null;
   });
-  load(win, 'idle');
-  win.setAlwaysOnTop(true, 'screen-saver');
-  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
+  assertOverlayFloat(win);
   return win;
 }
 
 export function showIdlePrompt(): void {
   const w = ensure();
-  const { workArea } = screen.getPrimaryDisplay();
-  const b = w.getBounds();
-  w.setPosition(
-    Math.round(workArea.x + (workArea.width - b.width) / 2),
-    Math.round(workArea.y + (workArea.height - b.height) / 3),
-    false,
-  );
+  const p = centerUpperThird(activeWorkArea(), SIZE);
+  w.setPosition(p.x, p.y, false);
+  assertOverlayFloat(w); // re-assert: float flags drop after sleep/Space switch
   w.show();
   w.focus();
 }

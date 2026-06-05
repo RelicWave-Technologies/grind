@@ -49,7 +49,6 @@ describe('GET /v1/insights/day — empty', () => {
     expect(res.body.blocks).toHaveLength(1);
     expect(res.body.blocks[0].kind).toBe('GAP');
     expect(res.body.blocks[0].durationMs).toBe(24 * 60 * 60 * 1000);
-    expect(res.body.pendingOverlay).toEqual([]);
     expect(res.body.firstActivityAt).toBeNull();
   });
 });
@@ -135,13 +134,13 @@ describe('GET /v1/insights/day — composition with real TimeEntry rows', () => 
     expect(res.body.recentRejected).toHaveLength(1);
     expect(res.body.recentRejected[0].reason).toBe('tried but rejected');
     expect(res.body.recentRejected[0].decidedReason).toBe('duplicate of existing entry');
-    // No tracked time, so blocks is just the single full-day GAP.
+    // No tracked time + rejected (not pending) → single full-day GAP, no PENDING block.
     expect(res.body.blocks).toHaveLength(1);
     expect(res.body.blocks[0].kind).toBe('GAP');
-    expect(res.body.pendingOverlay).toHaveLength(0); // rejected != pending
+    expect(res.body.blocks.some((b: { kind: string }) => b.kind === 'PENDING')).toBe(false);
   });
 
-  it('surfaces a PENDING manual-time request as a pendingOverlay entry, not a block', async () => {
+  it('carves a PENDING manual-time request into the partition as a PENDING block (no overlay, no duplicacy)', async () => {
     const u = await seedUser();
     await prisma.manualTimeRequest.create({
       data: {
@@ -155,33 +154,43 @@ describe('GET /v1/insights/day — composition with real TimeEntry rows', () => 
     });
     const res = await request(app).get('/v1/insights/day?date=2026-05-30&tz=UTC').set(auth(u.accessToken));
     expect(res.status).toBe(200);
-    // PENDING is separate from blocks. No tracked time → single full-day gap in blocks.
-    expect(res.body.blocks).toHaveLength(1);
-    expect(res.body.blocks[0].kind).toBe('GAP');
-    expect(res.body.pendingOverlay).toHaveLength(1);
-    expect(res.body.pendingOverlay[0].reason).toBe('forgot to start');
+    // Single partition: GAP(00–10) · PENDING(10–11) · GAP(11–24).
+    expect(res.body.blocks.map((b: { kind: string }) => b.kind)).toEqual(['GAP', 'PENDING', 'GAP']);
+    const pending = res.body.blocks.find((b: { kind: string }) => b.kind === 'PENDING');
+    expect(pending.reason).toBe('forgot to start');
+    expect(pending.requestId).toBeTruthy();
   });
 
-  it('adds a leading GAP from midnight and a trailing GAP to "now" when the day is today', async () => {
+  it('caps "today" at the present — the partition ends at now, not midnight', async () => {
     const u = await seedUser();
-    const today = new Date().toISOString().slice(0, 10);
+    // Seed relative to `now` (a 1-min WORK block that ended 2 min ago) so this
+    // never depends on the wall-clock time of day. The pure builder suite covers
+    // the exact leading/trailing-gap structure deterministically.
+    const now = new Date();
+    const today = now.toISOString().slice(0, 10);
+    // Trailing gap (wEnd → now) must stay > the 2-min coalesce threshold so it
+    // remains its own block rather than folding into the WORK.
+    const wStart = new Date(now.getTime() - 10 * 60_000);
+    const wEnd = new Date(now.getTime() - 5 * 60_000);
     await prisma.timeEntry.create({
       data: {
         id: `te_today_${Date.now()}`,
         clientUuid: `cu_today_${Date.now()}`,
         userId: u.userId,
         source: 'AUTO',
-        startedAt: ts(`${today}T06:00:00Z`),
-        endedAt: ts(`${today}T07:00:00Z`),
-        segments: { create: [{ id: `s_today_${Date.now()}`, kind: 'WORK', startedAt: ts(`${today}T06:00:00Z`), endedAt: ts(`${today}T07:00:00Z`) }] },
+        startedAt: wStart,
+        endedAt: wEnd,
+        segments: { create: [{ id: `s_today_${Date.now()}`, kind: 'WORK', startedAt: wStart, endedAt: wEnd }] },
       },
     });
     const res = await request(app).get(`/v1/insights/day?date=${today}&tz=UTC`).set(auth(u.accessToken));
     expect(res.status).toBe(200);
     expect(res.body.isToday).toBe(true);
-    // [leading GAP midnight-6am, WORK 6-7am, trailing GAP 7am-now]
-    expect(res.body.blocks.map((b: { kind: string }) => b.kind)).toEqual(['GAP', 'WORK', 'GAP']);
-    expect(res.body.blocks[2].endedAt).toBeGreaterThan(res.body.blocks[1].endedAt);
+    expect(res.body.blocks.filter((b: { kind: string }) => b.kind === 'WORK')).toHaveLength(1);
+    // The final block is a trailing GAP capped at ~now (not the calendar midnight).
+    const last = res.body.blocks[res.body.blocks.length - 1];
+    expect(last.kind).toBe('GAP');
+    expect(Math.abs(last.endedAt - Date.now())).toBeLessThan(5000);
   });
 
   it('does not leak another user\'s entries (self-scope)', async () => {

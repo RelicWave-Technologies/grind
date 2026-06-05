@@ -6,6 +6,7 @@ import {
   type OAuthClient,
   type LarkTokenResponse,
   LarkReauthRequiredError,
+  LarkTransientError,
 } from '../src/lark/oauthClient';
 import { decryptToken } from '../src/lark/crypto';
 import { seedUser } from './helpers';
@@ -148,6 +149,24 @@ describe('TokenManager failure handling → reauthRequired', () => {
     await expect(tm.getAccessToken(userId)).rejects.toBeInstanceOf(LarkReauthRequiredError);
     const row = await prisma.larkOAuthToken.findUnique({ where: { userId } });
     expect(row!.reauthRequired).toBe(true);
+  });
+
+  it('does NOT force reconnect on a transient refresh failure (stays connected, retries later)', async () => {
+    const tm = makeManager();
+    await tm.connect(userId, 'code', 'r');
+    nowMs += 3 * 3600 * 1000; // force a refresh
+    // A network blip / Lark 5xx — the single-use token was NOT consumed.
+    client.failRefreshWith = new LarkTransientError('lark 503');
+
+    await expect(tm.getAccessToken(userId)).rejects.toBeInstanceOf(LarkTransientError);
+    const row = await prisma.larkOAuthToken.findUnique({ where: { userId } });
+    expect(row!.reauthRequired).toBe(false); // still connected — no forced re-login
+
+    // Once the blip clears, the SAME (unburned) refresh token works.
+    client.failRefreshWith = null;
+    const at = await tm.getAccessToken(userId);
+    expect(at).toBe('at_2');
+    expect((await tm.getStatus(userId)).connected).toBe(true);
   });
 
   it('flags reauth when the stored refresh token has expired', async () => {

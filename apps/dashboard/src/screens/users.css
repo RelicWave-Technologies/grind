@@ -1,0 +1,54 @@
+/* ============================================================================
+   USERS — page-specific LAYOUT only (grid/flex placement + gaps), prefixed
+   `usr-`. All looks, colour, type, borders, shadows come from the shared kit
+   (src/ui/*) + tokens. No bespoke component styling lives here.
+   ========================================================================== */
+
+/* Roster row action cluster — right-aligned icon buttons. */
+.usr-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-sp-2);
+  justify-content: flex-end;
+}
+
+/* Inline name editor: keep the avatar beside the name Input while editing. */
+.usr-person-edit {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-sp-3);
+  min-width: 0;
+}
+
+/* Name + "You" tag share a baseline row in the identity first-cell. */
+.usr-name-line {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-sp-3);
+  min-width: 0;
+}
+
+/* Deactivated rows read quieter — step ink down (token), no new colour. */
+.usr-row-off > .ui-td { color: var(--ui-ink-3); }
+
+/* The inline error row carries the Banner full-bleed under its person row. */
+.usr-row-err > .ui-td { padding-top: var(--ui-sp-2); padding-bottom: var(--ui-sp-3); }
+.usr-row-err > .ui-td:hover { background: transparent; }
+
+/* ---- Invite card form layout --------------------------------------------- */
+.usr-invite-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--ui-sp-4);
+}
+.usr-invite-email { flex: 2 1 220px; }
+.usr-invite-name { flex: 2 1 180px; }
+.usr-invite-actions {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: var(--ui-sp-3);
+  margin-left: auto;
+}
+.usr-invite-banner { margin-top: var(--ui-sp-5); }
+.usr-invite-hint { margin: var(--ui-sp-5) 0 0; max-width: 66ch; }

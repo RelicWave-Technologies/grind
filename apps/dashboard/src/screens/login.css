@@ -1,0 +1,51 @@
+/* ============================================================================
+   LOGIN — layout only. Renders full-screen, OUTSIDE the app shell.
+   All looks (colour, type, borders, radius, shadow, controls) come from the
+   shared kit (src/ui) + tokens. This file owns ONLY placement: centering the
+   sign-in Card in the viewport and the vertical rhythm inside it. Every class
+   is prefixed `lgn-`. No colours / type / component styling here.
+   ========================================================================== */
+
+/* Full-viewport centering on the app ground (--ui-surface-sunken). */
+.lgn-page {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--ui-sp-7);
+  background: var(--ui-surface-sunken);
+}
+
+/* The sign-in column: a single centered Card, capped narrow. */
+.lgn-card {
+  width: 100%;
+  max-width: 400px;
+}
+
+/* Vertical rhythm inside the card. */
+.lgn-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-sp-5);
+}
+
+/* Brand sits above the heading. */
+.lgn-head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-sp-5);
+}
+
+.lgn-heading {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-sp-2);
+}
+
+/* Email + password stack. */
+.lgn-fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-sp-5);
+}

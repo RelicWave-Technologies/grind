@@ -1,0 +1,26 @@
+/* ============================================================================
+   POLICY — page-local LAYOUT ONLY for /policy (Workspace policy, M14).
+
+   All component looks (colour, type, border, radius, shadow, toggles, inputs,
+   tags, cards) come from the shared kit (src/ui/*) + tokens. This file holds a
+   minimal amount of pure placement — grid/flex/gaps — prefixed `pol-`. No hex,
+   no fonts, no borders, no component styling.
+   ========================================================================== */
+
+/* Page body rhythm — sections stacked with the standard section gap. */
+.pol-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-sp-7);
+}
+
+/* Retention: number input + its unit, sitting on one baseline. */
+.pol-field-control {
+  display: flex;
+  align-items: baseline;
+  gap: var(--ui-sp-3);
+}
+.pol-field-control .ui-control {
+  width: 96px;
+  text-align: right;
+}

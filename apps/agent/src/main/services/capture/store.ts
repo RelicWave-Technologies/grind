@@ -75,6 +75,22 @@ export class ScreenshotStore {
       .all(limit) as Record<string, unknown>[];
     return rows.map(mapRow);
   }
+
+  /** Minimal projection of every row, for the retention planner. */
+  allForRetention(): { id: string; filePath: string; capturedAt: number }[] {
+    const rows = this.db
+      .prepare(`SELECT id, file_path, captured_at FROM screenshots`)
+      .all() as { id: string; file_path: string; captured_at: number }[];
+    return rows.map((r) => ({ id: String(r.id), filePath: String(r.file_path), capturedAt: Number(r.captured_at) }));
+  }
+
+  /** Delete rows by id (retention / reconciliation). */
+  deleteByIds(ids: string[]): void {
+    if (ids.length === 0) return;
+    const stmt = this.db.prepare(`DELETE FROM screenshots WHERE id = ?`);
+    const tx = this.db.transaction((list: string[]) => list.forEach((id) => stmt.run(id)));
+    tx(ids);
+  }
 }
 
 function mapRow(r: Record<string, unknown>): ScreenshotRow {

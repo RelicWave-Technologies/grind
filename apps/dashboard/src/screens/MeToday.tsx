@@ -1,7 +1,7 @@
+import './metoday.css';
 import { useState, useMemo, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouteContext, useSearch } from '@tanstack/react-router';
-import { ChevronLeft, ChevronRight, Calendar } from 'lucide-react';
 import { api } from '../lib/api';
 import { isManagerOrAbove } from '../lib/auth';
 import type { DayInsight, WorkspaceUser } from '../lib/types';
@@ -11,6 +11,20 @@ import { ActivityHeatmap } from '../components/ActivityHeatmap';
 import AppUsagePanel from '../components/AppUsagePanel';
 import { EntryRow } from '../components/EntryRow';
 import type { TaskOption } from '../components/TaskCombo';
+import {
+  Page,
+  PageHeader,
+  Card,
+  Stat,
+  StatRow,
+  Toolbar,
+  Select,
+  DateStepper,
+  Tag,
+  Banner,
+  SkeletonStat,
+  SkeletonTable,
+} from '../ui';
 
 interface AdminUser {
   id: string;
@@ -20,11 +34,23 @@ interface AdminUser {
 }
 
 /**
- * /me-today — the dashboard's edit-time surface. Self-only writes (mirrors
- * the agent's contract): when the viewer is looking at their OWN day, every
- * row is editable; when they're looking at a teammate's day (via the user
- * picker + ?userId= deep-link), the rows are read-only and a banner makes
- * that clear.
+ * /me-today — the employee's own day, composed STRICTLY from the shared kit
+ * (`src/ui`) so it reads as one product with the other 12 pages. The page file
+ * contributes layout only: a `PageHeader` (eyebrow → title → toolbar), a
+ * day-stage `Card` hosting the timeline ribbon + heatmap, a flush `StatRow` of
+ * day totals, the app-usage panel, and a flush `Card` wrapping the editable
+ * timesheet. No bespoke colour / type / border / shadow lives here — those come
+ * only from the kit + tokens. The page CSS (`myd-` prefix) is pure LAYOUT.
+ *
+ * The rich, stateful functional core is PRESERVED byte-for-byte: the
+ * shift-bounded DayRibbon, the ActivityHeatmap, AppUsagePanel, and the editable
+ * EntryRow timesheet (with TimePopover / TaskCombo / attendee pickers) — every
+ * prop, handler, mutation, and piece of state is unchanged. The timesheet keeps
+ * the exact 6-column `<table>` contract EntryRow renders into.
+ *
+ * Self-only writes (mirrors the agent's contract): when the viewer looks at
+ * their OWN day, every row is editable; a teammate's day (via the user picker
+ * + ?userId= deep-link) is read-only with a banner.
  *
  * The mutation set:
  *   - PATCH /v1/time-entries/:id      (tracked + APPROVED MANUAL rows)
@@ -153,35 +179,48 @@ export function MeTodayScreen() {
     tick: number;
   } | null>(null);
 
-  function onRibbonClick(epochMs: number) {
-    if (!editable || !dayQ.data) return;
-    const gap = dayQ.data.blocks.find(
-      (b) => b.kind === 'GAP' && epochMs >= b.startedAt && epochMs < b.endedAt,
-    );
-    if (!gap) return;
-    // Slice: a 1h window centered on the click, clamped to the gap edges.
-    const slice = Math.min(60 * 60_000, gap.endedAt - gap.startedAt);
-    let start = Math.round(epochMs - slice / 2);
-    let end = start + slice;
-    if (start < gap.startedAt) {
-      start = gap.startedAt;
-      end = Math.min(gap.endedAt, start + slice);
-    }
-    if (end > gap.endedAt) {
-      end = gap.endedAt;
-      start = Math.max(gap.startedAt, end - slice);
-    }
-    setGapPreset({
-      blockKey: `${gap.startedAt}-${gap.endedAt}`,
-      range: { startedAt: start, endedAt: end },
-      tick: (gapPreset?.tick ?? 0) + 1,
-    });
-  }
-
   // Bar↔row link: when the ribbon hovers a block, highlight the matching
   // table row. Uses a single piece of state so only one row can be lit at
-  // a time. Row keys match the ribbon's: `entry-<id>`, `pending-<id>`.
+  // a time. Row keys match the ribbon's: `entry-<id>`, `pending-<id>`, `gap-…`.
   const [highlightedRowId, setHighlightedRowId] = useState<string | null>(null);
+
+  // Stable row key for a block — must match the keys used in the table below.
+  const rowKeyFor = useCallback((b: { kind: string; startedAt: number; endedAt: number; timeEntryId?: string; requestId?: string }): string => {
+    if (b.kind === 'GAP') return `gap-${b.startedAt}-${b.endedAt}`;
+    if (b.kind === 'PENDING') return `pending-${b.requestId}`;
+    if (b.kind === 'IDLE_TRIMMED') return `idle-${b.startedAt}`;
+    return `entry-${b.timeEntryId ?? b.startedAt}`;
+  }, []);
+
+  // Scroll a row into view, flash-highlight it, and drop the cursor straight
+  // into its reason/notes field so the user can type immediately.
+  const focusRow = useCallback((rowId: string) => {
+    setHighlightedRowId(rowId);
+    requestAnimationFrame(() => {
+      const row = document.querySelector<HTMLElement>(`[data-row-id="${rowId}"]`);
+      if (!row) return;
+      row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      // .et-reason is the notes (tracked) / reason (gap, pending) input. Focus
+      // without re-scrolling so the smooth scroll above isn't interrupted.
+      row.querySelector<HTMLInputElement>('.et-reason')?.focus({ preventScroll: true });
+    });
+  }, []);
+
+  // Click a slot on the ribbon → focus its row. For an editable GAP, also seed
+  // the composer to the WHOLE gap (the user then trims it in the dropdowns).
+  function onRibbonClick(epochMs: number) {
+    if (!dayQ.data) return;
+    const hit = dayQ.data.blocks.find((b) => epochMs >= b.startedAt && epochMs < b.endedAt);
+    if (!hit) return;
+    focusRow(rowKeyFor(hit));
+    if (editable && hit.kind === 'GAP') {
+      setGapPreset({
+        blockKey: `${hit.startedAt}-${hit.endedAt}`,
+        range: { startedAt: hit.startedAt, endedAt: hit.endedAt },
+        tick: (gapPreset?.tick ?? 0) + 1,
+      });
+    }
+  }
 
   // ---- Derived view state ---------------------------------------------------
 
@@ -193,217 +232,266 @@ export function MeTodayScreen() {
   const now = Date.now();
   const tasks = tasksQ.data?.tasks ?? [];
 
+  const isToday = date === todayKey();
+  const tzLabel = tz.replace(/_/g, ' ');
+  const isSelf = !targetUser || targetUser.id === me.id;
+  const titleName = targetUser
+    ? targetUser.id === me.id
+      ? 'My Day'
+      : `${targetUser.name.split(' ')[0]}’s Day`
+    : 'Day';
+
+  const day = dayQ.data;
+
   return (
-    <div className="page page-wide">
-      <header className="page-head">
-        <div>
-          <h1 className="h1">
-            {targetUser ? (targetUser.id === me.id ? 'My Day' : `${targetUser.name.split(' ')[0]}'s Day`) : 'Day'}
-          </h1>
-          <p className="secondary page-sub">
-            {fmtDayLabel(date)} · <span className="tabular">{date}</span> · {tz}
-          </p>
-        </div>
+    <Page>
+      <PageHeader
+        eyebrow={`${tzLabel} · ${fmtDayLabel(date).toUpperCase()}`}
+        title={titleName}
+        subtitle={isSelf ? 'Review and edit your timesheet.' : `Viewing ${targetUser?.name}’s day — read-only.`}
+        actions={
+          <Toolbar>
+            {showPicker && usersQ.data && (
+              <Select
+                value={targetUserId}
+                onChange={(e) => setTargetUserId(e.target.value)}
+                aria-label="View someone's day"
+              >
+                {[...usersQ.data.users]
+                  .sort((a, b) => (a.id === me.id ? -1 : b.id === me.id ? 1 : a.name.localeCompare(b.name)))
+                  .map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.id === me.id ? `${u.name} (you)` : `${u.name} · ${u.role.toLowerCase()}`}
+                    </option>
+                  ))}
+              </Select>
+            )}
+            <DateStepper
+              value={isToday ? 'Today' : fmtDayLabel(date)}
+              onPrev={() => setDate((d) => addDays(d, -1))}
+              onNext={() => setDate((d) => addDays(d, 1))}
+              nextDisabled={isToday}
+              prevLabel="Previous day"
+              nextLabel="Next day"
+            />
+          </Toolbar>
+        }
+      />
 
-        <div className="day-controls">
-          {showPicker && usersQ.data && (
-            <select
-              className="select"
-              value={targetUserId}
-              onChange={(e) => setTargetUserId(e.target.value)}
-              aria-label="View someone's day"
-            >
-              {[...usersQ.data.users]
-                .sort((a, b) => (a.id === me.id ? -1 : b.id === me.id ? 1 : a.name.localeCompare(b.name)))
-                .map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.id === me.id ? `${u.name} (you)` : `${u.name} · ${u.role.toLowerCase()}`}
-                  </option>
-                ))}
-            </select>
-          )}
-
-          <div className="date-nav">
-            <button type="button" className="btn-icon" onClick={() => setDate((d) => addDays(d, -1))} aria-label="Previous day">
-              <ChevronLeft size={16} strokeWidth={2} />
-            </button>
-            <button
-              type="button"
-              className={`btn-ghost date-pill${date === todayKey() ? ' is-today' : ''}`}
-              onClick={() => setDate(todayKey())}
-            >
-              <Calendar size={13} strokeWidth={1.8} />
-              <span>{date === todayKey() ? 'Today' : fmtDayLabel(date)}</span>
-            </button>
-            <button
-              type="button"
-              className="btn-icon"
-              onClick={() => setDate((d) => addDays(d, 1))}
-              aria-label="Next day"
-              disabled={date === todayKey()}
-            >
-              <ChevronRight size={16} strokeWidth={2} />
-            </button>
-          </div>
-        </div>
-      </header>
-
-      {dayQ.isLoading && <div className="card empty">Loading…</div>}
       {dayQ.isError && (
-        <div className="card empty empty-error">Couldn&apos;t load: {(dayQ.error as Error).message}</div>
+        <Banner status="danger">Couldn’t load the day: {(dayQ.error as Error).message}</Banner>
       )}
 
-      {dayQ.data && (
-        <>
-          <section className="card ribbon-card">
-            <DayRibbon
-              day={dayQ.data}
-              now={now}
-              onClickEpoch={editable ? onRibbonClick : undefined}
-              onHoverRowId={setHighlightedRowId}
-            />
-            {dayQ.data.activity && dayQ.data.activity.buckets.length > 0 && (
-              <ActivityHeatmap day={dayQ.data} heatmap={dayQ.data.activity} />
+      {dayQ.isLoading && (
+        <div className="myd-stack">
+          <Card title="Day timeline">
+            <SkeletonTable rows={3} />
+          </Card>
+          <Card variant="flush">
+            <StatRow>
+              <SkeletonStat />
+              <SkeletonStat />
+              <SkeletonStat />
+              <SkeletonStat />
+              <SkeletonStat />
+            </StatRow>
+          </Card>
+        </div>
+      )}
+
+      {day && (
+        <div className="myd-stack">
+          {/* ---- Day stage: timeline ribbon + activity heatmap ---- */}
+          <Card
+            title="Day timeline"
+            action={
+              <div className="myd-legend">
+                <Tag status="success" dot>Tracked</Tag>
+                <Tag status="info" dot>Meeting</Tag>
+                <Tag status="warn" dot>Manual</Tag>
+                <Tag status="danger" dot>Pending</Tag>
+                <Tag status="neutral" dot>Idle</Tag>
+              </div>
+            }
+          >
+            {day.shift && (
+              <div className="myd-stage-meta">
+                <Tag status="neutral" mono>
+                  {day.shift.name} · {day.shift.start}–{day.shift.end}
+                </Tag>
+                <span className="ui-t-small myd-stage-note">
+                  Shift-bounded · click a gap to log time.
+                </span>
+              </div>
             )}
-            <div className="ribbon-legend">
-              <Legend className="dot-work" label="Tracked" />
-              <Legend className="dot-meeting" label="Meeting" />
-              <Legend className="dot-manual" label="Manual" />
-              <Legend className="dot-pending" label="Pending" />
-              <Legend className="dot-idle" label="Idle (trimmed)" />
+            {!day.shift && (
+              <div className="myd-stage-meta">
+                <span className="ui-t-small myd-stage-note">Full day · click a gap to log time.</span>
+              </div>
+            )}
+
+            <div className="myd-canvas">
+              <DayRibbon
+                day={day}
+                now={now}
+                editable={editable}
+                onClickEpoch={onRibbonClick}
+                onHoverRowId={setHighlightedRowId}
+              />
+              {day.activity && day.activity.buckets.length > 0 && (
+                <ActivityHeatmap day={day} heatmap={day.activity} />
+              )}
             </div>
+
             {!editable && (
-              <div className="et-readonly-banner">
-                Viewing {targetUser?.name}&apos;s day — read-only. Each person edits their own time.
+              <div className="myd-readonly">
+                <Banner status="info">
+                  Viewing {targetUser?.name}’s day — each person edits their own time.
+                </Banner>
               </div>
             )}
-          </section>
+          </Card>
 
-          <AppUsagePanel appUsage={dayQ.data.appUsage} />
+          {/* ---- Day totals: one flush StatRow keyed to meaning ---- */}
+          <Card variant="flush">
+            <StatRow>
+              <Stat label="Tracked" value={fmtDurationMs(day.totals.workedMs)} />
+              <Stat label="Meeting" value={fmtDurationMs(day.totals.meetingMs)} />
+              <Stat label="Manual" value={fmtDurationMs(day.totals.manualMs)} />
+              <Stat label="Pending" value={fmtDurationMs(day.totals.pendingMs)} />
+              <Stat label="Gap" value={fmtDurationMs(day.totals.gapMs)} />
+            </StatRow>
+          </Card>
 
-          <section className="card entries-card" style={{ padding: 0 }}>
-            <header className="entries-head">
-              <h2 className="h3">Timesheet</h2>
-              <div className="entries-totals secondary">
-                {fmtDurationMs(dayQ.data.totals.workedMs)} tracked
-                {dayQ.data.totals.meetingMs > 0 && <> · {fmtDurationMs(dayQ.data.totals.meetingMs)} meeting</>}
-                {dayQ.data.totals.manualMs > 0 && <> · {fmtDurationMs(dayQ.data.totals.manualMs)} manual</>}
+          <AppUsagePanel appUsage={day.appUsage} />
+
+          {/* ---- Timesheet: flush Card hosting the exact 6-col EntryRow table ---- */}
+          <Card variant="flush">
+            <div className="myd-sheet-head">
+              <div className="myd-sheet-titling">
+                <h2 className="ui-t-title">Timesheet</h2>
+                <span className="ui-t-eyebrow">{day.blocks.length} entries</span>
               </div>
-            </header>
+              <div className="myd-sheet-totals">
+                <Tag status="success" mono>{fmtDurationMs(day.totals.workedMs)} tracked</Tag>
+                {day.totals.meetingMs > 0 && (
+                  <Tag status="info" mono>{fmtDurationMs(day.totals.meetingMs)} meeting</Tag>
+                )}
+                {day.totals.manualMs > 0 && (
+                  <Tag status="warn" mono>{fmtDurationMs(day.totals.manualMs)} manual</Tag>
+                )}
+              </div>
+            </div>
 
-            <table className="entries-table">
-              <thead>
-                <tr>
-                  <th style={{ width: 100 }}>Kind</th>
-                  <th style={{ width: 200 }}>Time</th>
-                  <th style={{ width: 80 }}>Duration</th>
-                  <th style={{ width: 220 }}>Task</th>
-                  <th>Notes / Reason</th>
-                  <th style={{ width: 240 }} />
-                </tr>
-              </thead>
-              <tbody>
-                {dayQ.data.blocks.map((b, i) => {
-                  if (b.kind === 'GAP') {
-                    const blockKey = `${b.startedAt}-${b.endedAt}`;
+            <div className="myd-table-wrap">
+              <table className="myd-table">
+                <thead>
+                  <tr>
+                    <th className="ui-t-eyebrow" style={{ width: 100 }}>Kind</th>
+                    <th className="ui-t-eyebrow" style={{ width: 200 }}>Time</th>
+                    <th className="ui-t-eyebrow" style={{ width: 80 }}>Duration</th>
+                    <th className="ui-t-eyebrow" style={{ width: 220 }}>Task</th>
+                    <th className="ui-t-eyebrow">Notes / Reason</th>
+                    <th className="ui-t-eyebrow" style={{ width: 240 }} />
+                  </tr>
+                </thead>
+                <tbody>
+                  {/* One sorted partition: gap · tracked · meeting · manual ·
+                      idle · pending, contiguous and non-overlapping. */}
+                  {day.blocks.map((b) => {
+                    if (b.kind === 'GAP') {
+                      const blockKey = `${b.startedAt}-${b.endedAt}`;
+                      const rowId = `gap-${blockKey}`;
+                      return (
+                        <EntryRow
+                          key={rowId}
+                          rowId={rowId}
+                          highlighted={highlightedRowId === rowId}
+                          kind="gap"
+                          block={b}
+                          tasks={tasks}
+                          disabled={!editable}
+                          workspaceUsers={workspaceUsers}
+                          selfId={me.id}
+                          preset={gapPreset && gapPreset.blockKey === blockKey ? gapPreset.range : undefined}
+                          presetTick={gapPreset && gapPreset.blockKey === blockKey ? gapPreset.tick : 0}
+                          onCreate={async (vars) => {
+                            await createRequest.mutateAsync(vars);
+                          }}
+                        />
+                      );
+                    }
+                    if (b.kind === 'PENDING') {
+                      const rowId = `pending-${b.requestId}`;
+                      return (
+                        <EntryRow
+                          key={rowId}
+                          rowId={rowId}
+                          highlighted={highlightedRowId === rowId}
+                          kind="pending"
+                          block={b}
+                          tasks={tasks}
+                          disabled={!editable}
+                          workspaceUsers={workspaceUsers}
+                          selfId={me.id}
+                          onPatch={async (vars) => {
+                            await patchRequest.mutateAsync(vars);
+                          }}
+                          onWithdraw={async (id) => {
+                            await cancelRequest.mutateAsync(id);
+                          }}
+                        />
+                      );
+                    }
+                    if (b.kind === 'IDLE_TRIMMED') {
+                      const rowId = `idle-${b.startedAt}`;
+                      return (
+                        <tr
+                          key={rowId}
+                          data-row-id={rowId}
+                          className={`et-row entry-row-idle_trimmed${highlightedRowId === rowId ? ' et-row-highlighted' : ''}`}
+                        >
+                          <td><span className="kind-chip kind-idle_trimmed">Idle (trimmed)</span></td>
+                          <td className="tabular">{new Date(b.startedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} – {new Date(b.endedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</td>
+                          <td className="tabular secondary">{fmtDurationMs(b.durationMs)}</td>
+                          <td className="tertiary">—</td>
+                          <td className="tertiary">Trimmed via the agent&apos;s idle prompt.</td>
+                          <td />
+                        </tr>
+                      );
+                    }
+                    // WORK / MEETING / MANUAL
+                    const kind = b.kind === 'MANUAL' ? 'manual_approved' : 'tracked';
+                    const rowId = `entry-${b.timeEntryId ?? b.startedAt}`;
+                    const isMeeting = b.kind === 'MEETING';
                     return (
                       <EntryRow
-                        key={`gap-${blockKey}`}
-                        kind="gap"
+                        key={rowId}
+                        rowId={rowId}
+                        highlighted={highlightedRowId === rowId}
+                        kind={kind}
                         block={b}
                         tasks={tasks}
                         disabled={!editable}
+                        isMeeting={isMeeting}
                         workspaceUsers={workspaceUsers}
                         selfId={me.id}
-                        preset={
-                          gapPreset && gapPreset.blockKey === blockKey
-                            ? gapPreset.range
-                            : undefined
-                        }
-                        presetTick={
-                          gapPreset && gapPreset.blockKey === blockKey ? gapPreset.tick : 0
-                        }
-                        onCreate={async (vars) => {
-                          await createRequest.mutateAsync(vars);
+                        onSave={async (vars) => {
+                          await patchEntry.mutateAsync(vars);
                         }}
                       />
                     );
-                  }
-                  if (b.kind === 'IDLE_TRIMMED') {
-                    return (
-                      <tr key={`idle-${i}`} className="et-row entry-row-idle_trimmed">
-                        <td><span className="kind-chip kind-idle_trimmed">Idle (trimmed)</span></td>
-                        <td className="tabular">{new Date(b.startedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} – {new Date(b.endedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</td>
-                        <td className="tabular secondary">{fmtDurationMs(b.durationMs)}</td>
-                        <td className="tertiary">—</td>
-                        <td className="tertiary">Trimmed via the agent&apos;s idle prompt.</td>
-                        <td />
-                      </tr>
-                    );
-                  }
-                  // WORK / MEETING / MANUAL
-                  const kind = b.kind === 'MANUAL' ? 'manual_approved' : 'tracked';
-                  const rowId = `entry-${b.timeEntryId ?? `${b.startedAt}-${i}`}`;
-                  const isMeeting = b.kind === 'MEETING';
-                  return (
-                    <EntryRow
-                      key={rowId}
-                      rowId={rowId}
-                      highlighted={highlightedRowId === rowId}
-                      kind={kind}
-                      block={b}
-                      tasks={tasks}
-                      disabled={!editable}
-                      isMeeting={isMeeting}
-                      workspaceUsers={workspaceUsers}
-                      selfId={me.id}
-                      onSave={async (vars) => {
-                        await patchEntry.mutateAsync(vars);
-                      }}
-                    />
-                  );
-                })}
+                  })}
 
-                {dayQ.data.pendingOverlay.map((p) => {
-                  const rowId = `pending-${p.id}`;
-                  return (
-                    <EntryRow
-                      key={rowId}
-                      rowId={rowId}
-                      highlighted={highlightedRowId === rowId}
-                      kind="pending"
-                      pending={p}
-                      tasks={tasks}
-                      disabled={!editable}
-                      workspaceUsers={workspaceUsers}
-                      selfId={me.id}
-                      onPatch={async (vars) => {
-                        await patchRequest.mutateAsync(vars);
-                      }}
-                      onWithdraw={async (id) => {
-                        await cancelRequest.mutateAsync(id);
-                      }}
-                    />
-                  );
-                })}
-
-                {dayQ.data.recentRejected.map((r) => (
-                  <EntryRow key={`rejected-${r.id}`} kind="rejected" rejected={r} />
-                ))}
-              </tbody>
-            </table>
-          </section>
-        </>
+                  {day.recentRejected.map((r) => (
+                    <EntryRow key={`rejected-${r.id}`} kind="rejected" rejected={r} />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </div>
       )}
-    </div>
-  );
-}
-
-function Legend({ className, label }: { className: string; label: string }) {
-  return (
-    <span className="legend-item">
-      <span className={`legend-dot ${className}`} />
-      <span className="callout secondary">{label}</span>
-    </span>
+    </Page>
   );
 }

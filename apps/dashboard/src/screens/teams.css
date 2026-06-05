@@ -1,0 +1,49 @@
+/* ============================================================================
+   TEAMS — page-local LAYOUT ONLY.
+   ---------------------------------------------------------------------------
+   This page is composed from the shared "Quiet Datasheet" kit (src/ui). The
+   only rules here place kit components in a grid/flex — no colours, type,
+   borders, radii or shadows live here (those come from the kit + tokens).
+   All classes are prefixed `tms-`. REVERT = delete this file + its import.
+   ========================================================================== */
+
+/* Mount stagger — reuse the kit's page-rise keyframe (defined in system.css). */
+.tms-rise   { animation: ui-page-rise var(--ui-dur-slow) var(--ui-ease) both; }
+.tms-rise-1 { animation: ui-page-rise var(--ui-dur-slow) var(--ui-ease) both; animation-delay: 40ms; }
+@media (prefers-reduced-motion: reduce) {
+  .tms-rise, .tms-rise-1 { animation: none; }
+}
+
+/* Padding wrapper for skeleton / banner placed inside a flush Card. */
+.tms-pad { padding: var(--ui-sp-6) var(--ui-sp-7); }
+
+/* ---- Create / edit form: two fields + an actions cluster, wrapping. -------- */
+.tms-form {
+  display: flex;
+  gap: var(--ui-sp-5);
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+.tms-form__name { flex: 2 1 240px; }
+.tms-form__mgr  { flex: 1 1 190px; }
+.tms-form__actions {
+  display: inline-flex;
+  gap: var(--ui-sp-3);
+  align-items: flex-end;
+  margin-left: auto;
+}
+.tms-form__err { margin-top: var(--ui-sp-5); }
+
+/* ---- A directory entry: the ListRow plus its inline edit / delete panels. -- */
+.tms-row { display: flex; flex-direction: column; }
+.tms-mgr { display: inline-flex; align-items: center; gap: var(--ui-sp-2); }
+.tms-edit,
+.tms-confirm,
+.tms-row__err { padding: 0 var(--ui-sp-4) var(--ui-sp-5); }
+.tms-confirm__actions { display: inline-flex; gap: var(--ui-sp-3); align-items: center; }
+
+@media (max-width: 560px) {
+  .tms-form__name,
+  .tms-form__mgr { flex-basis: 100%; }
+  .tms-form__actions { width: 100%; justify-content: flex-end; }
+}

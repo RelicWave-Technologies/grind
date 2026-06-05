@@ -1,52 +1,29 @@
-import { BrowserWindow, screen } from 'electron';
-import path from 'node:path';
+import type { BrowserWindow } from 'electron';
+import {
+  createOverlayWindow,
+  assertOverlayFloat,
+  activeWorkArea,
+  topRight,
+} from './windows/overlay';
 
 /**
- * "Ready to work?" toast — small frameless panel that appears at the
- * top-right of the primary display when the user's shift window opens.
- * Renders the `#ready-to-work` route in the renderer.
+ * "Ready to work?" toast (M12/2) — a small notification that appears at the
+ * top-right of the display the user is currently on when their shift window
+ * opens. Floats above fullscreen apps, on every Space.
  *
- * Lifecycle is owned by ShiftMonitor; this module just creates +
- * positions the BrowserWindow.
+ * Lifecycle is owned by ShiftMonitor; this module creates + positions it.
  */
 
+const SIZE = { width: 320, height: 168 };
 let win: BrowserWindow | null = null;
-
-function load(w: BrowserWindow, hash: string) {
-  if (process.env.ELECTRON_RENDERER_URL) {
-    void w.loadURL(`${process.env.ELECTRON_RENDERER_URL}#${hash}`);
-  } else {
-    void w.loadFile(path.join(__dirname, '../renderer/index.html'), { hash });
-  }
-}
 
 function ensure(): BrowserWindow {
   if (win && !win.isDestroyed()) return win;
-  win = new BrowserWindow({
-    width: 320,
-    height: 168,
-    show: false,
-    frame: false,
-    transparent: true,
-    resizable: false,
-    skipTaskbar: true,
-    fullscreenable: false,
-    hasShadow: true,
-    alwaysOnTop: true,
-    type: process.platform === 'darwin' ? 'panel' : undefined,
-    webPreferences: {
-      contextIsolation: true,
-      sandbox: true,
-      nodeIntegration: false,
-      preload: path.join(__dirname, '../preload/index.cjs'),
-    },
-  });
-  load(win, 'ready-to-work');
-  win.setAlwaysOnTop(true, 'screen-saver');
-  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
+  win = createOverlayWindow({ ...SIZE, hash: 'ready-to-work' });
+  assertOverlayFloat(win);
   // If the user closes via window controls (rare; chrome is hidden), treat
   // as a "Not yet" — the renderer's onbeforeunload should beat us to it.
-  win.on('close', () => {
+  win.on('closed', () => {
     win = null;
   });
   return win;
@@ -54,16 +31,10 @@ function ensure(): BrowserWindow {
 
 export function showReadyToWork(): void {
   const w = ensure();
-  const { workArea } = screen.getPrimaryDisplay();
-  const b = w.getBounds();
-  // Top-right with a small gutter.
-  w.setPosition(
-    Math.round(workArea.x + workArea.width - b.width - 16),
-    Math.round(workArea.y + 16),
-    false,
-  );
-  w.show();
-  // Don't steal focus aggressively — this is a notification, not a modal.
+  const p = topRight(activeWorkArea(), SIZE);
+  w.setPosition(p.x, p.y, false);
+  assertOverlayFloat(w); // re-assert: float flags drop after sleep/Space switch
+  // A notification, not a modal — don't steal focus.
   w.showInactive();
 }
 

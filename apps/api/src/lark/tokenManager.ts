@@ -4,6 +4,7 @@ import {
   type OAuthClient,
   type LarkTokenResponse,
   LarkReauthRequiredError,
+  LarkTransientError,
 } from './oauthClient';
 
 /**
@@ -146,6 +147,10 @@ export class TokenManager {
       try {
         res = await this.deps.client.refresh(oldRefresh);
       } catch (err) {
+        // Transient transport failure (network blip, Lark 5xx/429): the refresh
+        // token wasn't consumed, so DON'T force a reconnect — surface it and let
+        // a later call retry. Only an explicit rejection means reauth.
+        if (err instanceof LarkTransientError) throw err;
         await this.markReauth(userId);
         if (err instanceof LarkReauthRequiredError) throw err;
         throw new LarkReauthRequiredError('Lark refresh failed');

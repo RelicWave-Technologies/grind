@@ -22,7 +22,29 @@ export class SqliteEntryStore implements EntryStore {
       );
       CREATE INDEX IF NOT EXISTS idx_local_entries_open ON local_entries(ended_at);
       CREATE INDEX IF NOT EXISTS idx_local_entries_synced ON local_entries(synced);
+      CREATE TABLE IF NOT EXISTS timer_meta (
+        key   TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
     `);
+  }
+
+  setLiveness(ts: number): void {
+    this.db
+      .prepare(
+        `INSERT INTO timer_meta (key, value) VALUES ('liveness', @v)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+      )
+      .run({ v: String(ts) });
+  }
+
+  getLiveness(): number | null {
+    const row = this.db
+      .prepare(`SELECT value FROM timer_meta WHERE key = 'liveness'`)
+      .get() as { value: string } | undefined;
+    if (!row) return null;
+    const n = Number(row.value);
+    return Number.isFinite(n) ? n : null;
   }
 
   upsert(entry: TimeEntry): void {

@@ -1,0 +1,141 @@
+/* ============================================================================
+   TEAM — manager's users × days heat matrix. LAYOUT ONLY. Every look (colour,
+   type, border, radius, shadow) comes from the shared kit (src/ui/*) + tokens;
+   this file only places things in a grid/flex and hosts the ONE sanctioned
+   colour zone: the heat cell, whose fill is the accent intensity ramp
+   (SYSTEM.md §4) passed in per-cell as the inline `--tm-heat` var. All classes
+   prefixed `tm-`; consumed only by Team.tsx.
+   ========================================================================== */
+
+/* Horizontal scroll for the wide matrix, hosted inside a flush Card. */
+.tm-scroll {
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+/* Anchor pill content — icon + label inline (kit DateStepper pill is the chrome). */
+.tm-anchor-val {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-sp-2);
+}
+
+/* Column head — day-of-week stacked over the date, centered. */
+.tm-day-head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--ui-sp-1);
+  line-height: 1.1;
+}
+.tm-day-num {
+  font-size: 11px;
+  color: var(--ui-ink-3);
+}
+
+/* Day cell — let the heat button fill the cell; trim the kit Td padding. */
+.tm-day-cell {
+  padding-left: var(--ui-sp-1);
+  padding-right: var(--ui-sp-1);
+}
+
+/* ── Heat cell — the ONE colour zone (SYSTEM.md §4 sequential-intensity ramp).
+   The sampled accent colour arrives inline as `--tm-heat`; deep cells flip the
+   figure to --on-accent via `.is-strong`; the single busiest cell gets an
+   accent ring via `.is-peak`. Empty cells are a bare mono dash. Border/radius/
+   font are kit tokens, not bespoke looks. */
+.tm-cell {
+  position: relative;
+  appearance: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-width: 60px;
+  min-height: 30px;
+  padding: var(--ui-sp-2) var(--ui-sp-3);
+  border: 1px solid transparent;
+  border-radius: var(--ui-r-sm);
+  background: var(--tm-heat, transparent);
+  color: var(--ui-ink);
+  font-size: 12px;
+  transition: box-shadow var(--ui-dur-fast) var(--ui-ease);
+}
+.tm-cell:hover:not(.is-empty) {
+  box-shadow: 0 0 0 1px var(--ui-surface), 0 0 0 2px var(--ui-accent);
+}
+.tm-cell:focus-visible {
+  outline: none;
+  box-shadow: var(--ui-focus-ring);
+}
+.tm-cell.is-strong {
+  color: var(--ui-on-accent);
+}
+.tm-cell.is-empty {
+  cursor: default;
+  background: transparent;
+  color: var(--ui-ink-3);
+}
+.tm-cell.is-peak,
+.tm-cell.is-peak:hover {
+  box-shadow: 0 0 0 1px var(--ui-surface), 0 0 0 2px var(--ui-accent);
+}
+
+/* Manual-time marker — a small dot in the corner; flips on dark cells. */
+.tm-cell-manual {
+  position: absolute;
+  top: var(--ui-sp-2);
+  right: var(--ui-sp-2);
+  width: 4px;
+  height: 4px;
+  border-radius: var(--ui-r-full);
+  background: var(--ui-info-solid);
+}
+.tm-cell.is-strong .tm-cell-manual {
+  background: var(--ui-on-accent);
+}
+
+/* ── Legend — ramp swatches + taxonomy key, on the card's bottom hairline. */
+.tm-legend {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-sp-5);
+  flex-wrap: wrap;
+  padding: var(--ui-sp-4) var(--ui-sp-7);
+  border-top: 1px solid var(--ui-line);
+}
+.tm-legend-scale {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-sp-3);
+}
+.tm-legend-ramp {
+  display: inline-flex;
+  border-radius: var(--ui-r-sm);
+  overflow: hidden;
+  border: 1px solid var(--ui-line);
+}
+.tm-legend-swatch {
+  width: 22px;
+  height: 12px;
+}
+.tm-legend-keys {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-sp-4);
+  flex-wrap: wrap;
+}
+.tm-legend-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-sp-2);
+  margin-left: auto;
+  color: var(--ui-ink-3);
+}
+
+@media (max-width: 560px) {
+  .tm-legend-hint {
+    display: none;
+  }
+}

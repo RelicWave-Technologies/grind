@@ -5,10 +5,12 @@ import { fmtTime } from '../lib/format';
 interface Props {
   day: DayInsight;
   now: number;
+  /** Show the "click to add" gap ghost. False for read-only (teammate) views. */
+  editable?: boolean;
   /**
-   * Called with the epoch ms at the click location. Only fires for clicks
-   * on gap spans (the parent decides what to do). When undefined, the
-   * ribbon is non-interactive.
+   * Called with the epoch ms at the click location (any slot). The parent
+   * scrolls/focuses the matching row, and for an editable gap seeds the
+   * composer. When undefined, the ribbon is non-interactive.
    */
   onClickEpoch?: (epochMs: number) => void;
   /**
@@ -83,7 +85,7 @@ function previewForHover(args: {
  *
  * Always renders the full 24h window for axis stability across days.
  */
-export function DayRibbon({ day, now, onClickEpoch, onHoverRowId }: Props) {
+export function DayRibbon({ day, now, editable = false, onClickEpoch, onHoverRowId }: Props) {
   const span = day.dayEnd - day.dayStart;
   const ticks = buildTicks(day.dayStart, day.dayEnd);
   const futureStartsAt = day.isToday ? now : day.isFuture ? day.dayStart : day.dayEnd;
@@ -91,7 +93,7 @@ export function DayRibbon({ day, now, onClickEpoch, onHoverRowId }: Props) {
   const [hoverMs, setHoverMs] = useState<number | null>(null);
 
   const pct = (ms: number) => `${((ms - day.dayStart) / span) * 100}%`;
-  const editable = !!onClickEpoch;
+  const interactive = !!onClickEpoch;
 
   function epochFromEvent(e: MouseEvent): number | null {
     if (!trackRef.current) return null;
@@ -120,12 +122,8 @@ export function DayRibbon({ day, now, onClickEpoch, onHoverRowId }: Props) {
   // activity space) and the parent gave us an onClickEpoch (= editable).
   const ghost = useMemo(() => {
     if (!editable || hoverMs == null) return null;
-    // Skip if the hover lands on a pending overlay — clicking under a pending
-    // ribbon doesn't create a new request.
-    const onPending = day.pendingOverlay.some(
-      (p) => p.startedAt <= hoverMs && hoverMs < p.endedAt,
-    );
-    if (onPending) return null;
+    // previewForHover already returns null over any non-GAP block (incl. the
+    // PENDING blocks now in the partition), so pending is auto-excluded.
     return previewForHover({
       blocks: day.blocks,
       t: hoverMs,
@@ -133,13 +131,13 @@ export function DayRibbon({ day, now, onClickEpoch, onHoverRowId }: Props) {
       dayEnd: day.dayEnd,
       now,
     });
-  }, [editable, hoverMs, day.blocks, day.pendingOverlay, day.dayStart, day.dayEnd, now]);
+  }, [editable, hoverMs, day.blocks, day.dayStart, day.dayEnd, now]);
 
   return (
     <div className="ribbon" aria-hidden>
       <div
         ref={trackRef}
-        className={`ribbon-track${editable ? ' is-clickable' : ''}`}
+        className={`ribbon-track${interactive ? ' is-clickable' : ''}`}
         onMouseMove={handleMove}
         onMouseLeave={handleLeave}
         onClick={handleClick}
@@ -153,34 +151,29 @@ export function DayRibbon({ day, now, onClickEpoch, onHoverRowId }: Props) {
 
         {day.blocks.map((b, i) => {
           if (b.kind === 'GAP') return null; // gap is the absence of a block
-          const rowId = `entry-${b.timeEntryId ?? `${b.startedAt}-${i}`}`;
           const att = b.attendeeIds?.length ?? 0;
-          const title =
-            `${b.kind} · ${fmtTime(b.startedAt)} – ${fmtTime(b.endedAt)}` +
-            (att > 0 ? ` · ${att} attendee${att === 1 ? '' : 's'}` : '');
+          const attSuffix = att > 0 ? ` · ${att} attendee${att === 1 ? '' : 's'}` : '';
+          const width = `${((b.endedAt - b.startedAt) / span) * 100}%`;
+          if (b.kind === 'PENDING') {
+            return (
+              <div
+                key={`b-${i}-${b.startedAt}`}
+                className="ribbon-pending"
+                style={{ left: pct(b.startedAt), width }}
+                title={`Pending approval — ${b.reason ?? ''}${attSuffix}`}
+                onMouseEnter={() => onHoverRowId?.(`pending-${b.requestId}`)}
+                onMouseLeave={() => onHoverRowId?.(null)}
+              />
+            );
+          }
+          const rowId = `entry-${b.timeEntryId ?? b.startedAt}`;
           return (
             <div
               key={`b-${i}-${b.startedAt}`}
               className={`ribbon-block ribbon-block-${b.kind.toLowerCase()}`}
-              style={{ left: pct(b.startedAt), width: `${((b.endedAt - b.startedAt) / span) * 100}%` }}
-              title={title}
+              style={{ left: pct(b.startedAt), width }}
+              title={`${b.kind} · ${fmtTime(b.startedAt)} – ${fmtTime(b.endedAt)}${attSuffix}`}
               onMouseEnter={() => onHoverRowId?.(rowId)}
-              onMouseLeave={() => onHoverRowId?.(null)}
-            />
-          );
-        })}
-
-        {day.pendingOverlay.map((p) => {
-          const att = p.attendeeIds?.length ?? 0;
-          const title =
-            `Pending approval — ${p.reason}` + (att > 0 ? ` · ${att} attendee${att === 1 ? '' : 's'}` : '');
-          return (
-            <div
-              key={`p-${p.id}`}
-              className="ribbon-pending"
-              style={{ left: pct(p.startedAt), width: `${((p.endedAt - p.startedAt) / span) * 100}%` }}
-              title={title}
-              onMouseEnter={() => onHoverRowId?.(`pending-${p.id}`)}
               onMouseLeave={() => onHoverRowId?.(null)}
             />
           );

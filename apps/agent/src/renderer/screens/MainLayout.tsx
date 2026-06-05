@@ -1,18 +1,16 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CalendarClock, ListTodo, PieChart, Settings as SettingsIcon, LogOut, Timer, Gauge, Clock, Keyboard, MousePointer2, CalendarRange } from 'lucide-react';
+import { CalendarClock, ListTodo, PieChart, Settings as SettingsIcon, LogOut, Timer, Gauge, Clock, Keyboard, MousePointer2 } from 'lucide-react';
 import Today from './Today';
 import Tasks from './Tasks';
-import EditTime from './EditTime';
 import Settings from './Settings';
 import LineChart from '../components/LineChart';
 import ScreenshotGrid from '../components/ScreenshotGrid';
 
-type Tab = 'today' | 'editTime' | 'tasks' | 'reports' | 'settings';
+type Tab = 'today' | 'tasks' | 'reports' | 'settings';
 
 const NAV: { id: Tab; label: string; icon: typeof CalendarClock }[] = [
   { id: 'today', label: 'Today', icon: CalendarClock },
-  { id: 'editTime', label: 'Edit Time', icon: CalendarRange },
   { id: 'tasks', label: 'Tasks', icon: ListTodo },
   { id: 'reports', label: 'Reports', icon: PieChart },
   { id: 'settings', label: 'Settings', icon: SettingsIcon },
@@ -58,7 +56,6 @@ export default function MainLayout() {
 
       <main className="content">
         {tab === 'today' && <Today />}
-        {tab === 'editTime' && <EditTime />}
         {tab === 'tasks' && <Tasks />}
         {tab === 'reports' && <Reports />}
         {tab === 'settings' && <Settings />}
@@ -96,28 +93,28 @@ function Reports() {
           <div className="stat-grid rise rise-1">
             <div className="stat">
               <div className="stat-top">
-                <span className="stat-chip" style={{ background: 'var(--violet)' }}><Gauge size={17} /></span>
+                <span className="stat-chip" style={{ background: 'var(--c-violet-bg)' }}><Gauge size={17} /></span>
                 <span className="stat-label">Productivity</span>
               </div>
               <div className="stat-value">{d?.score.score ?? 0}<span className="unit"> /100</span></div>
             </div>
             <div className="stat">
               <div className="stat-top">
-                <span className="stat-chip" style={{ background: 'var(--c-green)' }}><Clock size={17} /></span>
+                <span className="stat-chip" style={{ background: 'var(--c-green-bg)' }}><Clock size={17} /></span>
                 <span className="stat-label">Active time</span>
               </div>
               <div className="stat-value">{tracked.h}<span className="unit">h </span>{tracked.m}<span className="unit">m</span></div>
             </div>
             <div className="stat">
               <div className="stat-top">
-                <span className="stat-chip" style={{ background: 'var(--c-slate)' }}><Keyboard size={17} /></span>
+                <span className="stat-chip" style={{ background: 'var(--c-amber-bg)' }}><Keyboard size={17} /></span>
                 <span className="stat-label">Keystrokes</span>
               </div>
               <div className="stat-value">{(d?.totals.keystrokes ?? 0).toLocaleString()}</div>
             </div>
             <div className="stat">
               <div className="stat-top">
-                <span className="stat-chip" style={{ background: '#5aa9ff' }}><MousePointer2 size={17} /></span>
+                <span className="stat-chip" style={{ background: 'var(--c-orange-bg)' }}><MousePointer2 size={17} /></span>
                 <span className="stat-label">Clicks</span>
               </div>
               <div className="stat-value">{(d?.totals.clicks ?? 0).toLocaleString()}</div>

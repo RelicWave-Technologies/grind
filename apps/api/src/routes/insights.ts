@@ -5,7 +5,8 @@ import { attachScope } from '../middleware/scope';
 import { scoreDay } from '../scoring/score';
 import { assessWindow, type RiskSample } from '../anticheat/risk';
 import type { RoleTitle } from '../scoring/presets';
-import { buildDayInsight, localDayWindow } from '../insights/day';
+import { buildDayInsight, localDayWindow, shiftDayWindow } from '../insights/day';
+import { WEEKDAYS, type ShiftSchedule } from '@grind/types';
 import { buildHeatmap, DEFAULT_BUCKET_MS, type HeatmapSample } from '../insights/heatmap';
 import { buildAppUsage } from '../insights/appUsage';
 
@@ -120,6 +121,26 @@ insightsRouter.get('/day', async (req, res, next) => {
 
     const now = new Date();
 
+    // Resolve the day's frame from the user's shift: [shiftStart, shiftEnd] for
+    // the weekday, or the full calendar day when there's no shift / it's a day
+    // off. We still QUERY against the full calendar day (`win`) so any work that
+    // happened outside the shift is fetched — the builder expands the frame to
+    // include it rather than hiding it.
+    const userRow = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { shift: { select: { name: true, schedule: true } } },
+    });
+    const schedule = (userRow?.shift?.schedule as ShiftSchedule | null | undefined) ?? null;
+    const shiftWin = schedule ? shiftDayWindow(date, tz, schedule) : null;
+    const frame = shiftWin ?? win;
+    let shiftLabel: { name: string; start: string; end: string } | null = null;
+    if (shiftWin && schedule && userRow?.shift) {
+      const [yy, mm, dd] = date.split('-').map((n) => parseInt(n, 10));
+      const weekday = WEEKDAYS[new Date(Date.UTC(yy!, mm! - 1, dd!)).getUTCDay()]!;
+      const day = schedule[weekday];
+      if (day) shiftLabel = { name: userRow.shift.name, start: day.start, end: day.end };
+    }
+
     // Pull every TimeEntry that overlaps the window, including its segments.
     const entries = await prisma.timeEntry.findMany({
       where: {
@@ -162,7 +183,9 @@ insightsRouter.get('/day', async (req, res, next) => {
       date,
       tz,
       now,
-      window: win,
+      window: frame,
+      calendarDay: win,
+      shift: shiftLabel,
       entries: entries.map((e) => ({
         id: e.id,
         source: e.source as 'AUTO' | 'MANUAL',
@@ -239,9 +262,11 @@ insightsRouter.get('/day', async (req, res, next) => {
         isProtectedMeeting: inMeeting,
       };
     });
+    // Align the heatmap strip to the framed (shift-bounded, activity-expanded)
+    // window so it lines up column-for-column with the ribbon above it.
     const heatmap = buildHeatmap({
-      dayStart: win.start.getTime(),
-      dayEnd: win.end.getTime(),
+      dayStart: result.dayStart,
+      dayEnd: result.dayEnd,
       samples: heatmapInput,
       bucketMs: DEFAULT_BUCKET_MS,
     });

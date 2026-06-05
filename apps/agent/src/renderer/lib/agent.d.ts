@@ -26,7 +26,6 @@ declare global {
         status: () => Promise<TimerStatus>;
         today: () => Promise<TodayEntry[]>;
         onStatusChange: (cb: (s: TimerStatus) => void) => () => void;
-        patchEntry: (args: { id: string; larkTaskGuid?: string | null; notes?: string | null }) => Promise<{ ok: boolean; error?: string }>;
       };
       window: {
         openMain: () => Promise<void>;
@@ -51,8 +50,10 @@ declare global {
         requestAccessibility: () => Promise<void>;
       };
       settings: {
-        get: () => Promise<{ version: string; platform: string; launchAtLogin: boolean; screenStatus: string }>;
+        get: () => Promise<{ version: string; platform: string; launchAtLogin: boolean; screenStatus: string; floatingBarVisible: boolean }>;
         setLaunchAtLogin: (enabled: boolean) => Promise<boolean>;
+        setFloatingBarVisible: (enabled: boolean) => Promise<boolean>;
+        resetFloatingBarPosition: () => Promise<void>;
         openScreenPrefs: () => Promise<void>;
         openDataFolder: () => Promise<void>;
       };
@@ -66,7 +67,6 @@ declare global {
           totals: { keystrokes: number; clicks: number; mouseDistancePx: number; scrollEvents: number };
           byHour: number[];
         }>;
-        day: (args: { date: string; tz: string }) => Promise<DayInsight>;
       };
       lark: {
         status: () => Promise<{ configured: boolean; connected: boolean; reauthRequired: boolean; scopes: string[] }>;
@@ -75,76 +75,8 @@ declare global {
         tasks: () => Promise<{ tasks: { guid: string; summary: string; completed: boolean; url?: string; due: number | null; createdAt: number | null; creatorId: string | null; creatorName: string | null; loggedMs: number }[]; reauthRequired: boolean }>;
         createTask: (input: { summary: string; due?: number | null; description?: string | null }) => Promise<{ ok: boolean; error?: string }>;
       };
-      timeRequests: {
-        create: (input: {
-          requestedStart: number;
-          requestedEnd: number;
-          reason: string;
-          larkTaskGuid?: string | null;
-          taskSummary?: string | null;
-          attendeeIds?: string[];
-        }) => Promise<{ ok: boolean; request?: ManualTimeRequestDto; error?: string }>;
-        listMine: (status?: 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED') => Promise<{ requests: ManualTimeRequestDto[] }>;
-        listWorkspaceUsers: () => Promise<{ users: Array<{ id: string; name: string; email: string; role: 'OWNER' | 'ADMIN' | 'MANAGER' | 'MEMBER' }> }>;
-        patch: (args: {
-          id: string;
-          requestedStart?: number;
-          requestedEnd?: number;
-          larkTaskGuid?: string | null;
-          taskSummary?: string | null;
-          reason?: string;
-        }) => Promise<{ ok: boolean; request?: ManualTimeRequestDto; error?: string }>;
-        cancel: (id: string) => Promise<{ ok: boolean; request?: ManualTimeRequestDto; error?: string }>;
-      };
     };
   }
 }
-
-export type DayInsight = {
-  date: string;
-  timezone: string;
-  dayStart: number;
-  dayEnd: number;
-  isFuture: boolean;
-  isToday: boolean;
-  firstActivityAt: number | null;
-  lastActivityAt: number | null;
-  totals: { workedMs: number; meetingMs: number; manualMs: number; idleTrimmedMs: number; gapMs: number };
-  blocks: Array<{
-    kind: 'WORK' | 'MEETING' | 'IDLE_TRIMMED' | 'MANUAL' | 'GAP';
-    startedAt: number;
-    endedAt: number;
-    durationMs: number;
-    timeEntryId?: string;
-    larkTaskGuid?: string | null;
-    notes?: string | null;
-    isOpen?: boolean;
-  }>;
-  pendingOverlay: Array<{ id: string; startedAt: number; endedAt: number; reason: string; larkTaskGuid: string | null }>;
-  recentRejected: Array<{
-    id: string;
-    requestedStart: number;
-    requestedEnd: number;
-    reason: string;
-    decidedReason: string | null;
-    larkTaskGuid: string | null;
-  }>;
-};
-
-export type ManualTimeRequestDto = {
-  id: string;
-  clientUuid: string;
-  userId: string;
-  approverId: string | null;
-  larkTaskGuid: string | null;
-  larkMessageId: string | null;
-  requestedStart: string;
-  requestedEnd: string;
-  reason: string;
-  status: 'PENDING' | 'APPROVED' | 'REJECTED';
-  decidedAt: string | null;
-  decidedReason: string | null;
-  createdAt: string;
-};
 
 export { TimerStatus };

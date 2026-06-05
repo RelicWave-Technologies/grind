@@ -1,0 +1,29 @@
+/* ============================================================================
+   /overview — MANAGER+ command center. LAYOUT ONLY.
+
+   This page composes the shared "Quiet Datasheet" kit (src/ui/*). Per the design
+   contract, a page file contributes layout only — which kit component goes where,
+   in what grid, with what gap. It introduces NO colour, type, border, radius, or
+   shadow; all of those come from the kit + tokens. Every class is prefixed `ov-`
+   and does nothing but place kit components on a grid.
+   ========================================================================== */
+
+/* Vertical rhythm between the page's stacked sections (KPIs → queues → ledger).
+   --ui-sp-7 (24px) is the kit's canonical section gap. */
+.ov-sections {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-sp-7);
+}
+
+/* The two attention queues sit side by side, then stack on narrow viewports. */
+.ov-queues {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--ui-sp-5);
+}
+@media (max-width: 920px) {
+  .ov-queues {
+    grid-template-columns: 1fr;
+  }
+}

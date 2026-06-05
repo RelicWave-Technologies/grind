@@ -1,0 +1,111 @@
+/* ============================================================================
+   /me-today — LAYOUT ONLY. Every look (colour, type, border, radius, shadow,
+   control) comes from the shared kit (src/ui) + tokens; this file owns only
+   placement: section rhythm, the timeline canvas frame, the legend cluster,
+   the timesheet head strip, and the timesheet table's grid (padding / widths /
+   hairline dividers) so the EntryRow rows line up under their headers. Every
+   class is prefixed `myd-`. No colours / type / component styling here.
+
+   The imported sub-components (DayRibbon, ActivityHeatmap, EntryRow,
+   AppUsagePanel, TimePopover, TaskCombo) are NOT styled here.
+
+   Revert = delete this file + its import in MeToday.tsx.
+   ========================================================================== */
+
+/* Vertical rhythm between page sections (matches the kit's section gap). */
+.myd-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-sp-7);
+}
+
+/* ---- Day-stage card internals -------------------------------------------- */
+
+/* Shift chip + note row above the canvas. */
+.myd-stage-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-sp-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--ui-sp-5);
+}
+.myd-stage-note {
+  color: var(--ui-ink-3);
+}
+
+/* Inline legend cluster docked in the card head's action slot. */
+.myd-legend {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-sp-4);
+  flex-wrap: wrap;
+}
+
+/* The well the ribbon + heatmap live in — inset surface, hairline, no shadow. */
+.myd-canvas {
+  background: var(--ui-surface-inset);
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-md);
+  padding: var(--ui-sp-3) var(--ui-sp-5);
+}
+
+/* Read-only notice sits below the canvas. */
+.myd-readonly {
+  margin-top: var(--ui-sp-5);
+}
+
+/* ============================================================================
+   Timesheet — flush Card. Head strip + the exact 6-column EntryRow table.
+   The table is a plain <table> (NOT the kit <Table>) so the EntryRow <tr>/<td>
+   contract and its styles.css row chrome stay intact; we only place the grid.
+   ========================================================================== */
+.myd-sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-sp-5);
+  flex-wrap: wrap;
+  padding: var(--ui-sp-6) var(--ui-sp-7);
+  border-bottom: 1px solid var(--ui-line);
+}
+.myd-sheet-titling {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--ui-sp-4);
+}
+.myd-sheet-totals {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-sp-3);
+  flex-wrap: wrap;
+}
+
+.myd-table-wrap {
+  overflow-x: auto;
+}
+.myd-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+/* Column heads: eyebrow look comes from the kit's .ui-t-eyebrow utility on the
+   <th>; here we only place + colour the hairline + gutter. */
+.myd-table thead th {
+  text-align: left;
+  color: var(--ui-ink-3);
+  padding: var(--ui-sp-4) var(--ui-sp-7);
+  border-bottom: 1px solid var(--ui-line);
+  white-space: nowrap;
+}
+/* Interior dividers for the bespoke (idle / rejected) rows; the EntryRow rows
+   carry their own padding + rail from styles.css. */
+.myd-table tbody td {
+  border-bottom: 1px solid var(--ui-line-faint);
+}
+.myd-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+.myd-table tbody tr.entry-row-idle_trimmed td,
+.myd-table tbody tr.entry-row-rejected td {
+  padding: var(--ui-sp-4) var(--ui-sp-7);
+  vertical-align: middle;
+}

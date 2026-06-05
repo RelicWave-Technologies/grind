@@ -5,7 +5,7 @@
  * @grind/db (no Prisma in the browser bundle).
  */
 
-export type BlockKind = 'WORK' | 'MEETING' | 'MANUAL' | 'IDLE_TRIMMED' | 'GAP';
+export type BlockKind = 'WORK' | 'MEETING' | 'MANUAL' | 'IDLE_TRIMMED' | 'PENDING' | 'GAP';
 
 export interface DayBlock {
   kind: BlockKind;
@@ -17,15 +17,10 @@ export interface DayBlock {
   notes?: string | null;
   isOpen?: boolean;
   attendeeIds?: string[];
-}
-
-export interface PendingOverlay {
-  id: string;
-  startedAt: number;
-  endedAt: number;
-  reason: string;
-  larkTaskGuid: string | null;
-  attendeeIds?: string[];
+  /** PENDING blocks only: the ManualTimeRequest id (for edit / withdraw). */
+  requestId?: string;
+  /** PENDING blocks only: the request reason (shown + editable inline). */
+  reason?: string;
 }
 
 export interface RejectedRequest {
@@ -63,11 +58,13 @@ export interface DayInsight {
   dayEnd: number;
   isFuture: boolean;
   isToday: boolean;
+  /** Shift that framed the day, or null = no shift / day off → full 00:00–23:59. */
+  shift: { name: string; start: string; end: string } | null;
   firstActivityAt: number | null;
   lastActivityAt: number | null;
-  totals: { workedMs: number; meetingMs: number; manualMs: number; idleTrimmedMs: number; gapMs: number };
+  totals: { workedMs: number; meetingMs: number; manualMs: number; idleTrimmedMs: number; pendingMs: number; gapMs: number };
+  /** Single sorted partition incl. PENDING blocks — no separate overlay. */
   blocks: DayBlock[];
-  pendingOverlay: PendingOverlay[];
   recentRejected: RejectedRequest[];
   activity?: ActivityHeatmap;
   appUsage?: AppUsageInsight;

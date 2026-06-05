@@ -1,10 +1,51 @@
+import './users.css';
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouteContext } from '@tanstack/react-router';
-import { Pencil, Check, X, UserPlus, UserMinus, UserCheck, Loader2 } from 'lucide-react';
+import { Pencil, Check, X, UserPlus, UserMinus, UserCheck, Users as UsersIcon } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 import { isAdmin, type Role } from '../lib/auth';
 import type { Team, Shift } from '../lib/types';
+import {
+  Page,
+  PageHeader,
+  Toolbar,
+  Segmented,
+  Card,
+  Stat,
+  StatRow,
+  Table,
+  THead,
+  Tbody,
+  Th,
+  Tr,
+  Td,
+  Identity,
+  Avatar,
+  Tag,
+  Button,
+  IconButton,
+  Field,
+  Input,
+  Select,
+  Banner,
+  EmptyState,
+  SkeletonTable,
+  type Status,
+} from '../ui';
+
+/**
+ * /users — people management, composed entirely from the shared "Quiet
+ * Datasheet" kit so it reads as one product with every other page. A
+ * PageHeader (scope eyebrow · People · count) carries the Active/All status
+ * Segmented and the primary Invite action; a flush StatRow summarises active vs
+ * deactivated; the roster is the kit Table (Identity first-cell, taxonomy Tags
+ * for role + status, mono Joined, IconButton actions, self = accent rail).
+ * Inline edit swaps cells for kit Field controls; Invite is a calm Card.
+ *
+ * Behaviour is IDENTICAL to before — same queries, mutations, inline edit,
+ * invite + (de/re)activate ADMIN actions, show-deactivated toggle, and states.
+ */
 
 interface AdminUser {
   id: string;
@@ -31,6 +72,19 @@ const SCOPE_LABEL: Record<UsersResponse['scope'], string> = {
 
 const ROLE_RANK: Record<Role, number> = { OWNER: 0, ADMIN: 1, MANAGER: 2, MEMBER: 3 };
 const EDITABLE_ROLES: Role[] = ['OWNER', 'ADMIN', 'MANAGER', 'MEMBER'];
+
+// Role → fixed status taxonomy (§2): one hue per role, never the accent.
+const ROLE_STATUS: Record<Role, Status> = {
+  OWNER: 'info',
+  ADMIN: 'warn',
+  MANAGER: 'success',
+  MEMBER: 'neutral',
+};
+
+const STATUS_FILTER = [
+  { value: 'active', label: 'Active' },
+  { value: 'all', label: 'All' },
+] as const;
 
 export function UsersScreen() {
   const { me } = useRouteContext({ from: '/authed' });
@@ -95,36 +149,59 @@ export function UsersScreen() {
     return shiftsQ.data?.shifts.find((s) => s.id === id)?.name ?? id;
   };
 
+  const count = usersQ.data?.users.length;
+  const scopeLine = usersQ.data ? SCOPE_LABEL[usersQ.data.scope] : 'Directory';
+
+  const sorted = usersQ.data
+    ? [...usersQ.data.users].sort(
+        (a, b) => ROLE_RANK[a.role] - ROLE_RANK[b.role] || a.name.localeCompare(b.name),
+      )
+    : [];
+  const activeCount = sorted.filter((u) => u.deactivatedAt === null).length;
+  const offCount = sorted.length - activeCount;
+
+  const colSpan = canEdit ? 7 : 6;
+
   return (
-    <div className="page">
-      <header className="page-head">
-        <div>
-          <h1 className="h1">People</h1>
-          <p className="secondary page-sub">
-            Showing {usersQ.data?.users.length ?? '…'}{' '}
-            {usersQ.data?.users.length === 1 ? 'person' : 'people'} ·{' '}
-            <span className="scope-chip">
-              {usersQ.data ? SCOPE_LABEL[usersQ.data.scope] : 'Loading scope…'}
-            </span>
-          </p>
-        </div>
-        {canEdit && (
-          <div className="day-controls">
-            <label className="btn-ghost stuck-toggle" style={{ cursor: 'pointer' }}>
-              <input
-                type="checkbox"
-                checked={showDeactivated}
-                onChange={(e) => setShowDeactivated(e.target.checked)}
-                style={{ marginRight: 6 }}
+    <Page>
+      <PageHeader
+        eyebrow={`People · ${scopeLine}`}
+        title="People"
+        subtitle={
+          count !== undefined
+            ? `Showing ${count} ${count === 1 ? 'person' : 'people'} you can see`
+            : 'Gathering the directory…'
+        }
+        actions={
+          canEdit ? (
+            <Toolbar>
+              <Segmented
+                aria-label="Filter by status"
+                value={showDeactivated ? 'all' : 'active'}
+                onChange={(v) => setShowDeactivated(v === 'all')}
+                items={STATUS_FILTER}
               />
-              Show deactivated
-            </label>
-            <button type="button" className="btn btn-prominent" onClick={() => setInviting(true)}>
-              <UserPlus size={14} strokeWidth={2} /> Invite
-            </button>
-          </div>
-        )}
-      </header>
+              <Button
+                variant="primary"
+                icon={<UserPlus size={15} strokeWidth={1.9} />}
+                onClick={() => setInviting(true)}
+              >
+                Invite
+              </Button>
+            </Toolbar>
+          ) : undefined
+        }
+      />
+
+      {usersQ.data && (
+        <Card variant="flush" className="rise rise-1">
+          <StatRow>
+            <Stat label="Active" value={String(activeCount)} />
+            <Stat label="Deactivated" value={String(offCount)} />
+            <Stat label="Total" value={String(sorted.length)} />
+          </StatRow>
+        </Card>
+      )}
 
       {canEdit && inviting && (
         <InviteForm
@@ -136,65 +213,78 @@ export function UsersScreen() {
         />
       )}
 
-      <section className="card" style={{ padding: 0 }}>
-        {usersQ.isLoading && <div className="empty">Loading…</div>}
-        {usersQ.isError && (
-          <div className="empty empty-error">
-            Couldn&apos;t load people: {(usersQ.error as Error).message}
-          </div>
+      <Card variant="flush" className="rise rise-2">
+        {usersQ.isLoading ? (
+          <SkeletonTable rows={6} />
+        ) : usersQ.isError ? (
+          <EmptyState
+            tone="danger"
+            icon={<UsersIcon size={22} strokeWidth={1.6} />}
+            title="Couldn’t load people"
+            description={(usersQ.error as Error).message}
+            action={
+              <Button variant="soft" onClick={() => usersQ.refetch()}>
+                Try again
+              </Button>
+            }
+          />
+        ) : sorted.length === 0 ? (
+          <EmptyState
+            icon={<UsersIcon size={22} strokeWidth={1.6} />}
+            title="No people yet"
+            description="Nobody is visible in your current scope."
+          />
+        ) : (
+          <Table density="comfortable">
+            <THead>
+              <Tr>
+                <Th>Person</Th>
+                <Th>Role</Th>
+                <Th>Status</Th>
+                <Th>Team</Th>
+                <Th>Shift</Th>
+                <Th align="right">Joined</Th>
+                {canEdit && <Th align="right">{''}</Th>}
+              </Tr>
+            </THead>
+            <Tbody>
+              {sorted.map((u) => (
+                <PersonRow
+                  key={u.id}
+                  user={u}
+                  isSelf={u.id === me.id}
+                  canEdit={canEdit}
+                  colSpan={colSpan}
+                  teams={teamsQ.data?.teams ?? []}
+                  teamName={teamName(u.teamId)}
+                  shifts={shiftsQ.data?.shifts ?? []}
+                  shiftName={shiftName(u.shiftId)}
+                  busy={
+                    (patch.isPending && patch.variables?.id === u.id) ||
+                    (deactivate.isPending && deactivate.variables === u.id) ||
+                    (reactivate.isPending && reactivate.variables === u.id)
+                  }
+                  error={
+                    (patch.isError && patch.variables?.id === u.id
+                      ? (patch.error as Error | ApiError).message
+                      : null) ||
+                    (deactivate.isError && deactivate.variables === u.id
+                      ? (deactivate.error as Error | ApiError).message
+                      : null) ||
+                    (reactivate.isError && reactivate.variables === u.id
+                      ? (reactivate.error as Error | ApiError).message
+                      : null)
+                  }
+                  onSave={(p) => patch.mutate({ id: u.id, patch: p })}
+                  onDeactivate={() => deactivate.mutate(u.id)}
+                  onReactivate={() => reactivate.mutate(u.id)}
+                />
+              ))}
+            </Tbody>
+          </Table>
         )}
-        {usersQ.data && (
-          <table className="people-table">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Email</th>
-                <th>Role</th>
-                <th>Team</th>
-                <th>Shift</th>
-                <th>Joined</th>
-                {canEdit && <th />}
-              </tr>
-            </thead>
-            <tbody>
-              {[...usersQ.data.users]
-                .sort((a, b) => ROLE_RANK[a.role] - ROLE_RANK[b.role] || a.name.localeCompare(b.name))
-                .map((u) => (
-                  <PersonRow
-                    key={u.id}
-                    user={u}
-                    isSelf={u.id === me.id}
-                    canEdit={canEdit}
-                    teams={teamsQ.data?.teams ?? []}
-                    teamName={teamName(u.teamId)}
-                    shifts={shiftsQ.data?.shifts ?? []}
-                    shiftName={shiftName(u.shiftId)}
-                    busy={
-                      (patch.isPending && patch.variables?.id === u.id) ||
-                      (deactivate.isPending && deactivate.variables === u.id) ||
-                      (reactivate.isPending && reactivate.variables === u.id)
-                    }
-                    error={
-                      (patch.isError && patch.variables?.id === u.id
-                        ? (patch.error as Error | ApiError).message
-                        : null) ||
-                      (deactivate.isError && deactivate.variables === u.id
-                        ? (deactivate.error as Error | ApiError).message
-                        : null) ||
-                      (reactivate.isError && reactivate.variables === u.id
-                        ? (reactivate.error as Error | ApiError).message
-                        : null)
-                    }
-                    onSave={(p) => patch.mutate({ id: u.id, patch: p })}
-                    onDeactivate={() => deactivate.mutate(u.id)}
-                    onReactivate={() => reactivate.mutate(u.id)}
-                  />
-                ))}
-            </tbody>
-          </table>
-        )}
-      </section>
-    </div>
+      </Card>
+    </Page>
   );
 }
 
@@ -202,6 +292,7 @@ interface RowProps {
   user: AdminUser;
   isSelf: boolean;
   canEdit: boolean;
+  colSpan: number;
   teams: Team[];
   teamName: string;
   shifts: Shift[];
@@ -213,7 +304,7 @@ interface RowProps {
   onReactivate: () => void;
 }
 
-function PersonRow({ user, isSelf, canEdit, teams, teamName, shifts, shiftName, busy, error, onSave, onDeactivate, onReactivate }: RowProps) {
+function PersonRow({ user, isSelf, canEdit, colSpan, teams, teamName, shifts, shiftName, busy, error, onSave, onDeactivate, onReactivate }: RowProps) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(user.name);
   const [role, setRole] = useState<Role>(user.role);
@@ -232,157 +323,185 @@ function PersonRow({ user, isSelf, canEdit, teams, teamName, shifts, shiftName, 
     setEditing(false);
   }
 
+  function cancel() {
+    setEditing(false);
+    setName(user.name);
+    setRole(user.role);
+    setTeamId(user.teamId ?? '');
+    setShiftId(user.shiftId ?? '');
+  }
+
   const isDeactivated = user.deactivatedAt !== null;
-  const trClasses = [
-    isSelf ? 'is-self' : '',
-    isDeactivated ? 'is-deactivated' : '',
-  ].filter(Boolean).join(' ');
+
+  const joined = new Date(user.createdAt).toLocaleDateString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  });
 
   return (
-    <tr className={trClasses || undefined}>
-      <td>
-        {editing ? (
-          <input
-            type="text"
-            className="cell-input"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            maxLength={80}
-            autoFocus
-          />
-        ) : (
-          <>
-            <div className="person-name">
-              {user.name}
-              {isDeactivated && <span className="deactivated-pill">deactivated</span>}
-            </div>
-            {isSelf && <div className="callout secondary">(that&apos;s you)</div>}
-          </>
-        )}
-        {error && <div className="approval-error people-error">{error}</div>}
-      </td>
-      <td className="secondary">{user.email}</td>
-      <td>
-        {editing ? (
-          <select className="select" value={role} onChange={(e) => setRole(e.target.value as Role)}>
-            {EDITABLE_ROLES.map((r) => (
-              <option key={r} value={r}>
-                {r}
-              </option>
-            ))}
-          </select>
-        ) : (
-          <span className={`role-chip role-${user.role.toLowerCase()}`}>{user.role}</span>
-        )}
-      </td>
-      <td className="secondary">
-        {editing ? (
-          <select className="select" value={teamId} onChange={(e) => setTeamId(e.target.value)}>
-            <option value="">— no team —</option>
-            {teams.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name}
-              </option>
-            ))}
-          </select>
-        ) : (
-          teamName
-        )}
-      </td>
-      <td className="secondary">
-        {editing ? (
-          <select className="select" value={shiftId} onChange={(e) => setShiftId(e.target.value)}>
-            <option value="">— no shift —</option>
-            {shifts.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-          </select>
-        ) : (
-          shiftName
-        )}
-      </td>
-      <td className="secondary">
-        {new Date(user.createdAt).toLocaleDateString(undefined, {
-          year: 'numeric',
-          month: 'short',
-          day: 'numeric',
-        })}
-      </td>
-      {canEdit && (
-        <td className="people-actions">
+    <>
+      <Tr
+        rail={isSelf ? 'accent' : undefined}
+        className={isDeactivated ? 'usr-row-off' : undefined}
+      >
+        {/* Person: avatar + name (+ You) + email --------------------------- */}
+        <Td>
           {editing ? (
-            <>
-              <button
-                type="button"
-                className="btn-icon"
-                onClick={() => {
-                  setEditing(false);
-                  setName(user.name);
-                  setRole(user.role);
-                  setTeamId(user.teamId ?? '');
-                  setShiftId(user.shiftId ?? '');
-                }}
-                disabled={busy}
-                aria-label="Cancel"
-              >
-                <X size={14} strokeWidth={2} />
-              </button>
-              <button type="button" className="btn-icon btn-icon-primary" onClick={save} disabled={busy} aria-label="Save">
-                <Check size={14} strokeWidth={2.2} />
-              </button>
-            </>
+            <div className="usr-person-edit">
+              <Avatar name={user.name} size={32} />
+              <Input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                maxLength={80}
+                autoFocus
+                aria-label="Name"
+              />
+            </div>
           ) : (
-            <>
-              {!isDeactivated && (
-                <button
-                  type="button"
-                  className="btn-icon"
-                  onClick={() => setEditing(true)}
-                  aria-label="Edit person"
-                  disabled={busy}
-                >
-                  <Pencil size={14} strokeWidth={2} />
-                </button>
-              )}
-              {isDeactivated ? (
-                <button
-                  type="button"
-                  className="btn-icon btn-icon-primary"
-                  onClick={onReactivate}
-                  disabled={busy}
-                  aria-label="Reactivate"
-                  title="Reactivate this person"
-                >
-                  {busy ? <Loader2 size={14} className="spin" /> : <UserCheck size={14} strokeWidth={2} />}
-                </button>
-              ) : !isSelf ? (
-                <button
-                  type="button"
-                  className="btn-icon"
-                  onClick={() => {
-                    if (window.confirm(`Deactivate ${user.name}? Their history stays for reports, but they can't log in until you reactivate.`)) {
-                      onDeactivate();
-                    }
-                  }}
-                  disabled={busy}
-                  aria-label="Deactivate"
-                  title="Deactivate this person"
-                >
-                  {busy ? <Loader2 size={14} className="spin" /> : <UserMinus size={14} strokeWidth={2} />}
-                </button>
-              ) : null}
-            </>
+            <Identity
+              avatar={<Avatar name={user.name} size={32} />}
+              name={
+                <span className="usr-name-line">
+                  {user.name}
+                  {isSelf && <Tag status="info" className="usr-you">You</Tag>}
+                </span>
+              }
+              subtitle={user.email}
+            />
           )}
-        </td>
+        </Td>
+
+        {/* Role ----------------------------------------------------------- */}
+        <Td>
+          {editing ? (
+            <Select value={role} onChange={(e) => setRole(e.target.value as Role)} aria-label="Role">
+              {EDITABLE_ROLES.map((r) => (
+                <option key={r} value={r}>
+                  {r}
+                </option>
+              ))}
+            </Select>
+          ) : (
+            <Tag status={ROLE_STATUS[user.role]}>{user.role}</Tag>
+          )}
+        </Td>
+
+        {/* Status --------------------------------------------------------- */}
+        <Td>
+          <Tag status={isDeactivated ? 'neutral' : 'success'} dot>
+            {isDeactivated ? 'Deactivated' : 'Active'}
+          </Tag>
+        </Td>
+
+        {/* Team ----------------------------------------------------------- */}
+        <Td>
+          {editing ? (
+            <Select value={teamId} onChange={(e) => setTeamId(e.target.value)} aria-label="Team">
+              <option value="">— no team —</option>
+              {teams.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+            </Select>
+          ) : (
+            teamName
+          )}
+        </Td>
+
+        {/* Shift ---------------------------------------------------------- */}
+        <Td>
+          {editing ? (
+            <Select value={shiftId} onChange={(e) => setShiftId(e.target.value)} aria-label="Shift">
+              <option value="">— no shift —</option>
+              {shifts.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </Select>
+          ) : (
+            shiftName
+          )}
+        </Td>
+
+        {/* Joined --------------------------------------------------------- */}
+        <Td mono>{joined}</Td>
+
+        {/* Actions -------------------------------------------------------- */}
+        {canEdit && (
+          <Td align="right">
+            <div className="usr-actions">
+              {editing ? (
+                <>
+                  <IconButton
+                    icon={<X size={15} strokeWidth={1.9} />}
+                    aria-label="Cancel"
+                    onClick={cancel}
+                    disabled={busy}
+                  />
+                  <IconButton
+                    icon={<Check size={15} strokeWidth={2.2} />}
+                    aria-label="Save"
+                    variant="primary"
+                    loading={busy}
+                    onClick={save}
+                  />
+                </>
+              ) : (
+                <>
+                  {!isDeactivated && (
+                    <IconButton
+                      icon={<Pencil size={14} strokeWidth={1.9} />}
+                      aria-label="Edit person"
+                      onClick={() => setEditing(true)}
+                      disabled={busy}
+                    />
+                  )}
+                  {isDeactivated ? (
+                    <IconButton
+                      icon={<UserCheck size={14} strokeWidth={1.9} />}
+                      aria-label="Reactivate"
+                      title="Reactivate this person"
+                      variant="soft"
+                      loading={busy}
+                      onClick={onReactivate}
+                    />
+                  ) : !isSelf ? (
+                    <IconButton
+                      icon={<UserMinus size={14} strokeWidth={1.9} />}
+                      aria-label="Deactivate"
+                      title="Deactivate this person"
+                      variant="danger"
+                      loading={busy}
+                      onClick={() => {
+                        if (window.confirm(`Deactivate ${user.name}? Their history stays for reports, but they can't log in until you reactivate.`)) {
+                          onDeactivate();
+                        }
+                      }}
+                    />
+                  ) : null}
+                </>
+              )}
+            </div>
+          </Td>
+        )}
+      </Tr>
+      {error && (
+        <tr className="usr-row-err">
+          <Td colSpan={colSpan}>
+            <Banner status="danger">{error}</Banner>
+          </Td>
+        </tr>
       )}
-    </tr>
+    </>
   );
 }
 
 // -----------------------------------------------------------------------------
-// Invite form — inline card above the table. Calm, escape-cancels, error inline.
+// Invite form — a calm Card above the roster. Escape cancels the email field,
+// errors render in a Banner. Same mutation + contract.
 
 function InviteForm({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
   const [email, setEmail] = useState('');
@@ -408,60 +527,67 @@ function InviteForm({ onClose, onCreated }: { onClose: () => void; onCreated: ()
   }
 
   return (
-    <section
-      className="card invite-form rise rise-1"
-      style={{ padding: 'var(--sp-5) var(--sp-6)', marginBottom: 'var(--sp-3)' }}
+    <Card
+      title="Invite someone"
+      action={
+        <IconButton icon={<X size={16} strokeWidth={1.9} />} aria-label="Close" onClick={onClose} />
+      }
+      className="rise rise-1"
     >
-      <form onSubmit={submit} style={{ display: 'flex', gap: 'var(--sp-3)', alignItems: 'end', flexWrap: 'wrap' }}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: '2 1 220px' }}>
-          <span className="small secondary">Email</span>
-          <input
+      <form onSubmit={submit} className="usr-invite-form">
+        <Field label="Email" className="usr-invite-email">
+          <Input
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             autoFocus
             required
             placeholder="pat@example.com"
-            className="cell-input"
             onKeyDown={(e) => {
               if (e.key === 'Escape') onClose();
             }}
           />
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: '2 1 180px' }}>
-          <span className="small secondary">Name</span>
-          <input
+        </Field>
+        <Field label="Name" className="usr-invite-name">
+          <Input
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
             required
             maxLength={80}
             placeholder="Pat Khanna"
-            className="cell-input"
           />
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <span className="small secondary">Role</span>
-          <select className="select" value={role} onChange={(e) => setRole(e.target.value as Exclude<Role, 'OWNER'>)}>
+        </Field>
+        <Field label="Role">
+          <Select value={role} onChange={(e) => setRole(e.target.value as Exclude<Role, 'OWNER'>)}>
             <option value="MEMBER">MEMBER</option>
             <option value="MANAGER">MANAGER</option>
             <option value="ADMIN">ADMIN</option>
-          </select>
-        </div>
-        <div style={{ display: 'inline-flex', gap: 6 }}>
-          <button type="button" className="btn-ghost" onClick={onClose} disabled={m.isPending}>
+          </Select>
+        </Field>
+        <div className="usr-invite-actions">
+          <Button variant="ghost" onClick={onClose} disabled={m.isPending}>
             Cancel
-          </button>
-          <button type="submit" className="btn btn-prominent" disabled={m.isPending || !email || !name}>
-            {m.isPending ? <Loader2 size={14} className="spin" /> : <UserPlus size={14} strokeWidth={2} />}
+          </Button>
+          <Button
+            type="submit"
+            variant="primary"
+            icon={<UserPlus size={15} strokeWidth={1.9} />}
+            loading={m.isPending}
+            disabled={!email || !name}
+          >
             {m.isPending ? 'Inviting…' : 'Invite'}
-          </button>
+          </Button>
         </div>
       </form>
-      {err && <div className="approval-error" style={{ marginTop: 'var(--sp-3)' }}>{err}</div>}
-      <p className="small tertiary" style={{ marginTop: 'var(--sp-3)' }}>
+      {err && (
+        <Banner status="danger" className="usr-invite-banner">
+          {err}
+        </Banner>
+      )}
+      <p className="usr-invite-hint ui-t-small">
         A temporary password is generated server-side. Share it manually for v1 — magic-link onboarding is on the roadmap.
       </p>
-    </section>
+    </Card>
   );
 }

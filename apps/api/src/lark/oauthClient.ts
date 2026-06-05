@@ -32,6 +32,21 @@ export class LarkReauthRequiredError extends Error {
   }
 }
 
+/**
+ * Thrown for RETRYABLE transport failures — a network error reaching Lark, or a
+ * Lark 5xx/429. The single-use refresh token was NOT consumed by Lark in these
+ * cases, so the caller must keep the connection and retry later rather than
+ * forcing the user to reconnect. (If the token actually *was* consumed and the
+ * response was merely lost, the next attempt fails with an explicit
+ * LarkReauthRequiredError and converges to reconnect — never a double-spend.)
+ */
+export class LarkTransientError extends Error {
+  constructor(message = 'Lark token endpoint transient failure') {
+    super(message);
+    this.name = 'LarkTransientError';
+  }
+}
+
 type RawTokenBody = {
   code?: number;
   error?: string;
@@ -67,12 +82,24 @@ export class HttpOAuthClient implements OAuthClient {
 
   private async post(payload: Record<string, string>): Promise<LarkTokenResponse> {
     const { appId, appSecret } = getLarkConfig();
-    const res = await fetch(this.tokenUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json; charset=utf-8' },
-      body: JSON.stringify({ client_id: appId, client_secret: appSecret, ...payload }),
-    });
+    let res: Response;
+    try {
+      res = await fetch(this.tokenUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json; charset=utf-8' },
+        body: JSON.stringify({ client_id: appId, client_secret: appSecret, ...payload }),
+      });
+    } catch (err) {
+      // Couldn't reach Lark at all → the grant was never processed; retryable.
+      throw new LarkTransientError(`network error reaching Lark token endpoint: ${String(err)}`);
+    }
     const body = (await res.json().catch(() => ({}))) as RawTokenBody;
+    // A 5xx/429 WITHOUT an explicit OAuth error means Lark didn't process the
+    // grant (server error / rate limit) — keep the token, retry later. An
+    // explicit OAuth error (any status) falls through to parseBody → reauth.
+    if (!res.ok && !body.error && (res.status >= 500 || res.status === 429)) {
+      throw new LarkTransientError(`lark token endpoint ${res.status}`);
+    }
     return parseBody(body);
   }
 

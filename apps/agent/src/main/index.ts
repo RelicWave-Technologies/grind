@@ -1,15 +1,17 @@
-import { app, BrowserWindow, Tray, ipcMain } from 'electron';
+import { app, BrowserWindow, Tray, ipcMain, screen } from 'electron';
 import { createTray, setTrayTitle } from './tray';
 import { createMainWindow } from './window';
 import { registerIpc } from './ipc';
 import { startHeartbeatIfAuthed } from './services/heartbeat';
 import { getTimerService, initTimerOnBoot } from './services/timer';
 import { startCaptureLoop } from './services/capture';
-import { startActivityCapture, setActivityRecording } from './services/activity';
-import { startMeetingDetection, isInMeeting } from './services/meeting';
+import { startActivityCapture, setActivityRecording, flushPartialActivity } from './services/activity';
+import { startActiveWindowPolling } from './services/activity/windowPoller';
 import { registerPowerEvents } from './services/power';
 import { IdleMonitor } from './services/idle/monitor';
-import { showFloatingBar, hideFloatingBar, reassertFloating } from './floating';
+import { showFloatingBar, hideFloatingBar, reclampFloatingBar } from './floating';
+import { reassertAllOverlays } from './windows/overlay';
+import { flushPreferences } from './services/preferences';
 import { togglePopover, hidePopover } from './popover';
 import { showIdlePrompt, hideIdlePrompt } from './idlePrompt';
 import { ShiftMonitor } from './services/shift';
@@ -72,13 +74,28 @@ app.whenReady().then(async () => {
   });
   app.on('before-quit', () => {
     isQuitting = true;
+    flushPartialActivity(); // seal the in-flight minute (durable local insert)
+    void flushPreferences(); // persist any pending floating-bar position
   });
   app.on('activate', () => showMainWindow());
 
-  registerPowerEvents({ onWake: () => reassertFloating() });
+  // On wake the OS drops the always-on-top / all-Spaces flags (electron#36364)
+  // — re-assert float on EVERY live overlay, not just the bar.
+  registerPowerEvents({ onWake: () => reassertAllOverlays() });
+
+  // When monitors change (unplug / resolution switch): re-float all overlays
+  // and re-home the floating bar onto a still-visible display.
+  screen.on('display-removed', () => {
+    reclampFloatingBar();
+    reassertAllOverlays();
+  });
+  screen.on('display-metrics-changed', () => {
+    reclampFloatingBar();
+    reassertAllOverlays();
+  });
+  screen.on('display-added', () => reassertAllOverlays());
 
   // Idle detection → pause the timer (idle is never counted) and prompt.
-  // Suppressed while in a meeting (present but not typing).
   const idleMonitor = new IdleMonitor(async (idleStartedAt) => {
     try {
       await getTimerService().pauseForIdle(idleStartedAt);
@@ -87,7 +104,7 @@ app.whenReady().then(async () => {
     }
     broadcast('timer:status:push', getTimerService().status());
     showIdlePrompt();
-  }, () => isInMeeting());
+  });
   idleMonitor.start();
 
   ipcMain.handle('idle:get', () => ({ idleStartedAt: idleMonitor.getIdleStart() }));
@@ -116,7 +133,7 @@ app.whenReady().then(async () => {
 
   startCaptureLoop();
   startActivityCapture();
-  startMeetingDetection();
+  startActiveWindowPolling();
 
   // Shift monitor — fetches the user's assigned shift and fires the
   // "Ready to work?" toast at start time (+ 5-min nudges until buffer
@@ -136,18 +153,29 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle('shift:refresh', () => shiftMonitor.refreshShift());
 
-  // Single 1s heartbeat: tray ticker + floating-bar visibility + live broadcast.
+  // Single 1s heartbeat: tray ticker + floating-bar visibility + live broadcast
+  // + a throttled durable liveness tick (crash-recovery bound).
   let lastRunning = false;
+  let tick = 0;
+  const LIVENESS_EVERY_TICKS = 15; // persist "proof of life" ~every 15s
   setInterval(() => {
     try {
+      tick += 1;
       const s = getTimerService().status();
       const running = s.state === 'RUNNING';
-      setActivityRecording(running && !(s.state === 'RUNNING' && s.paused));
+      const accruing = running && !s.paused;
+      setActivityRecording(accruing, running ? s.entryId : null);
       if (tray) setTrayTitle(tray, running ? fmtShort(s.workedMs) : '');
       if (running) showFloatingBar();
       else if (lastRunning) hideFloatingBar();
       lastRunning = running;
       if (running) broadcast('timer:status:push', s);
+      // Liveness: only while genuinely accruing, throttled. The next boot
+      // closes any dangling entry at the last tick so a crash/hard-off never
+      // over-credits the dead gap. Worst-case over-count ≈ 15s.
+      if (accruing && tick % LIVENESS_EVERY_TICKS === 0) {
+        getTimerService().heartbeat();
+      }
     } catch {
       /* timer not ready */
     }

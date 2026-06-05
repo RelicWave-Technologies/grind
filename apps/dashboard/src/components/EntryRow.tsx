@@ -5,7 +5,7 @@ import TaskCombo, { type TaskOption } from './TaskCombo';
 import AttendeePicker, { type WorkspaceUser } from './AttendeePicker';
 import AttendeeChips from './AttendeeChips';
 import { fmtTime, fmtDurationMs } from '../lib/format';
-import type { DayBlock, PendingOverlay, RejectedRequest } from '../lib/types';
+import type { DayBlock, RejectedRequest } from '../lib/types';
 
 /**
  * Polymorphic row used by /me-today's timesheet. Mirrors the agent's
@@ -53,7 +53,8 @@ interface TrackedRowProps extends BaseProps {
 
 interface PendingRowProps extends BaseProps {
   kind: 'pending';
-  pending: PendingOverlay;
+  /** A PENDING block from the partition (carries requestId + reason). */
+  block: DayBlock;
   onPatch: (vars: {
     id: string;
     requestedStart: number;
@@ -172,7 +173,7 @@ function TrackedRow({
       className={`et-row et-row-${kind === 'tracked' ? 'tracked' : 'manual'}${dirty ? ' et-row-dirty' : ''}${highlighted ? ' et-row-highlighted' : ''}`}
     >
       <td className="et-time-cell tabular">
-        <KindBadge kind={kind} />
+        <KindBadge kind={isMeeting ? 'meeting' : kind} />
       </td>
       <td className="et-time-cell tabular">
         {fmtTime(block.startedAt)} <span className="et-times-sep">–</span>{' '}
@@ -253,7 +254,7 @@ function TrackedRow({
 // ---------------------------------------------------------------------------
 
 function PendingRow({
-  pending,
+  block,
   tasks,
   disabled,
   rowId,
@@ -263,28 +264,30 @@ function PendingRow({
   onPatch,
   onWithdraw,
 }: PendingRowProps) {
-  const [start, setStart] = useState(pending.startedAt);
-  const [end, setEnd] = useState(pending.endedAt);
-  const [task, setTask] = useState<string>(pending.larkTaskGuid ?? '');
-  const [reason, setReason] = useState(pending.reason);
-  const [attendees, setAttendees] = useState<string[]>(pending.attendeeIds ?? []);
+  const requestId = block.requestId ?? '';
+  const baseReason = block.reason ?? '';
+  const [start, setStart] = useState(block.startedAt);
+  const [end, setEnd] = useState(block.endedAt);
+  const [task, setTask] = useState<string>(block.larkTaskGuid ?? '');
+  const [reason, setReason] = useState(baseReason);
+  const [attendees, setAttendees] = useState<string[]>(block.attendeeIds ?? []);
   const [busy, setBusy] = useState<'save' | 'withdraw' | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
-    setStart(pending.startedAt);
-    setEnd(pending.endedAt);
-    setTask(pending.larkTaskGuid ?? '');
-    setReason(pending.reason);
-    setAttendees(pending.attendeeIds ?? []);
-  }, [pending.id, pending.startedAt, pending.endedAt, pending.larkTaskGuid, pending.reason, pending.attendeeIds]);
+    setStart(block.startedAt);
+    setEnd(block.endedAt);
+    setTask(block.larkTaskGuid ?? '');
+    setReason(baseReason);
+    setAttendees(block.attendeeIds ?? []);
+  }, [requestId, block.startedAt, block.endedAt, block.larkTaskGuid, baseReason, block.attendeeIds]);
 
   const dirty =
-    start !== pending.startedAt ||
-    end !== pending.endedAt ||
-    (task || '') !== (pending.larkTaskGuid ?? '') ||
-    reason !== pending.reason ||
-    !sameStringSet(attendees, pending.attendeeIds ?? []);
+    start !== block.startedAt ||
+    end !== block.endedAt ||
+    (task || '') !== (block.larkTaskGuid ?? '') ||
+    reason !== baseReason ||
+    !sameStringSet(attendees, block.attendeeIds ?? []);
 
   async function save() {
     if (!dirty) return;
@@ -292,7 +295,7 @@ function PendingRow({
     setErr(null);
     try {
       await onPatch({
-        id: pending.id,
+        id: requestId,
         requestedStart: start,
         requestedEnd: end,
         larkTaskGuid: task || null,
@@ -310,7 +313,7 @@ function PendingRow({
     setBusy('withdraw');
     setErr(null);
     try {
-      await onWithdraw(pending.id);
+      await onWithdraw(requestId);
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Withdraw failed');
     } finally {
@@ -385,14 +388,14 @@ function PendingRow({
 // Gap row: composer for a fresh manual-time request
 // ---------------------------------------------------------------------------
 
-function GapRow({ block, tasks, disabled, preset, presetTick, onCreate, workspaceUsers, selfId }: GapRowProps) {
-  // Default to a 1h slice in the MIDDLE of the gap so the user gets a sane
-  // starting point and can drag with the popover.
-  const defaultRange = (b: DayBlock): { startedAt: number; endedAt: number } => {
-    const mid = (b.startedAt + b.endedAt) / 2;
-    const slice = Math.min(60 * 60_000, b.durationMs);
-    return { startedAt: Math.round(mid - slice / 2), endedAt: Math.round(mid + slice / 2) };
-  };
+function GapRow({ block, tasks, disabled, preset, presetTick, onCreate, workspaceUsers, selfId, rowId, highlighted }: GapRowProps) {
+  // Default to the WHOLE gap — the user narrows it in the time dropdowns. This
+  // matches the "fill the gap, then trim" mental model and means a single click
+  // logs the entire missing stretch.
+  const defaultRange = (b: DayBlock): { startedAt: number; endedAt: number } => ({
+    startedAt: b.startedAt,
+    endedAt: b.endedAt,
+  });
   const initial = preset ?? defaultRange(block);
   const [start, setStart] = useState(initial.startedAt);
   const [end, setEnd] = useState(initial.endedAt);
@@ -451,7 +454,7 @@ function GapRow({ block, tasks, disabled, preset, presetTick, onCreate, workspac
   }
 
   return (
-    <tr className="et-row et-row-gap">
+    <tr data-row-id={rowId} className={`et-row et-row-gap${highlighted ? ' et-row-highlighted' : ''}`}>
       <td><KindBadge kind="gap" /></td>
       <td className="et-time-cell">
         {disabled ? (
@@ -561,9 +564,10 @@ function RejectedRow({ rejected }: { rejected: RejectedRequest }) {
 
 // ---------------------------------------------------------------------------
 
-function KindBadge({ kind }: { kind: RowKind | 'rejected' }) {
+function KindBadge({ kind }: { kind: RowKind | 'rejected' | 'meeting' }) {
   const label =
     kind === 'tracked' ? 'Tracked'
+    : kind === 'meeting' ? 'Meeting'
     : kind === 'manual_approved' ? 'Manual'
     : kind === 'pending' ? 'Pending'
     : kind === 'rejected' ? 'Rejected'

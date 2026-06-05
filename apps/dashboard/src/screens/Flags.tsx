@@ -1,8 +1,25 @@
+import './flags.css';
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ShieldAlert, Check, X, AlertOctagon } from 'lucide-react';
+import { ShieldAlert, Check, X, AlertOctagon, ShieldCheck, Sparkles } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 import type { ActivityFlag, FlagResolution, FlagType } from '../lib/types';
+import {
+  Page,
+  PageHeader,
+  Tabs,
+  Card,
+  Identity,
+  Avatar,
+  Tag,
+  Button,
+  Field,
+  Input,
+  Banner,
+  EmptyState,
+  SkeletonTable,
+} from '../ui';
+import type { Status } from '../ui';
 import { fmtTime, fmtDayLabel } from '../lib/format';
 
 interface ListResponse {
@@ -14,11 +31,6 @@ const SCOPE_LABEL: Record<ListResponse['scope'], string> = {
   self: 'Just you',
   team: 'Your team',
   workspace: 'Entire workspace',
-};
-
-const TAB_LABEL: Record<'OPEN' | 'RESOLVED', string> = {
-  OPEN: 'Open',
-  RESOLVED: 'Resolved',
 };
 
 const FLAG_LABEL: Record<FlagType, string> = {
@@ -37,11 +49,28 @@ const FLAG_BLURB: Record<FlagType, string> = {
   JIGGLER: 'Mouse moves without clicks/keys/app switches at a fixed cadence.',
 };
 
+/** Risk at/above this score reads as HIGH and earns the danger taxonomy. */
+const HIGH_RISK = 40;
+
+/** Map an open flag's risk score onto the fixed status taxonomy. */
+function riskStatus(score: number, isResolved: boolean): Status {
+  if (isResolved) return 'neutral';
+  return score >= HIGH_RISK ? 'danger' : 'warn';
+}
+
+/** Map a resolution verdict onto the taxonomy: dismissed = legitimate (success). */
+function verdictStatus(resolution: FlagResolution): Status {
+  return resolution === 'DISMISSED' ? 'success' : 'danger';
+}
+
 /**
- * Anti-cheat review queue (MANAGER+). Resolved flags keep their reviewer
- * stamp + note as an audit trail. We never auto-delete time — the verdict
- * lands on a row; future hooks can drop the matching minutes when
- * resolution=TIME_INVALIDATED.
+ * Anti-cheat review queue (MANAGER+), composed entirely from the shared kit
+ * ("Quiet Datasheet"). Each flag is a Card: an Identity ←→ a mono risk readout,
+ * the flag TYPE as a status Tag, a mono Window row, the AI read in an info
+ * Banner, mono Evidence chips, and inline Dismiss / Confirm-cheat actions.
+ * Resolved flags carry a verdict Tag + audit stamp. Risk severity rides the
+ * fixed status taxonomy (danger ≥ threshold, warn below, neutral once resolved);
+ * we never auto-delete time — the verdict lands on a row. Presentation only.
  */
 export function FlagsScreen() {
   const [tab, setTab] = useState<'OPEN' | 'RESOLVED'>('OPEN');
@@ -61,45 +90,54 @@ export function FlagsScreen() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'flags'] }),
   });
 
+  const count = q.data?.flags.length ?? 0;
+
   return (
-    <div className="page">
-      <header className="page-head">
-        <div>
-          <h1 className="h1">Anti-cheat flags</h1>
-          <p className="secondary page-sub">
-            {q.data ? <span className="scope-chip">{SCOPE_LABEL[q.data.scope]}</span> : <span>Loading…</span>}
-            {' · '}
-            <span className="callout secondary">Content-free signals only. Verdicts are auditable.</span>
-          </p>
-        </div>
+    <Page>
+      <PageHeader
+        eyebrow={`${q.data ? SCOPE_LABEL[q.data.scope] : 'Loading'} · Anti-cheat`}
+        title="Risk flags"
+        subtitle="Content-free behavioural signals only. Every verdict is auditable — nothing is deleted automatically."
+        tabs={
+          <Tabs
+            aria-label="Flag status"
+            value={tab}
+            onChange={setTab}
+            items={[
+              { value: 'OPEN', label: tab === 'OPEN' && count > 0 ? `Open · ${count}` : 'Open' },
+              {
+                value: 'RESOLVED',
+                label: tab === 'RESOLVED' && count > 0 ? `Resolved · ${count}` : 'Resolved',
+              },
+            ]}
+          />
+        }
+      />
 
-        <div className="tabs">
-          {(['OPEN', 'RESOLVED'] as const).map((t) => (
-            <button
-              key={t}
-              type="button"
-              className={`tab${t === tab ? ' is-active' : ''}`}
-              onClick={() => setTab(t)}
-            >
-              {TAB_LABEL[t]}
-            </button>
-          ))}
-        </div>
-      </header>
+      {q.isLoading && (
+        <Card>
+          <SkeletonTable rows={4} />
+        </Card>
+      )}
 
-      {q.isLoading && <div className="card empty">Loading…</div>}
       {q.isError && (
-        <div className="card empty empty-error">Couldn&apos;t load: {(q.error as Error).message}</div>
+        <Banner status="danger">Couldn&apos;t load flags — {(q.error as Error).message}</Banner>
       )}
 
       {q.data && q.data.flags.length === 0 && (
-        <div className="card empty">
-          {tab === 'OPEN' ? 'No open flags in your scope — clean shop.' : 'No resolved flags yet.'}
-        </div>
+        <EmptyState
+          icon={<ShieldCheck size={26} strokeWidth={1.8} />}
+          title={tab === 'OPEN' ? 'Clean shop' : 'Nothing resolved yet'}
+          description={
+            tab === 'OPEN'
+              ? 'No open flags in your scope. New behavioural anomalies will surface here for review.'
+              : 'Resolved flags and their audit trail will appear here once you triage the queue.'
+          }
+        />
       )}
 
       {q.data && q.data.flags.length > 0 && (
-        <div className="approvals-list">
+        <div className="flg-queue">
           {q.data.flags.map((f) => (
             <FlagCard
               key={f.id}
@@ -115,7 +153,7 @@ export function FlagsScreen() {
           ))}
         </div>
       )}
-    </div>
+    </Page>
   );
 }
 
@@ -137,143 +175,168 @@ function FlagCard({
   const end = new Date(flag.windowEnd);
   const day = flag.windowStart.slice(0, 10);
   const isResolved = flag.status === 'RESOLVED';
+  const sev = riskStatus(flag.riskScore, isResolved);
+  const evidence = Object.entries(flag.evidence);
 
   return (
-    <article className={`approval-card status-${flag.status.toLowerCase()} flag-card flag-card-${flag.type.toLowerCase()}`}>
-      <div className="approval-head">
-        <div className="approval-who">
-          <div className="avatar-sm" aria-hidden>
-            {initials(flag.user.name)}
-          </div>
-          <div className="approval-meta">
-            <div className="approval-name">{flag.user.name}</div>
-            <div className="approval-email small secondary">{flag.user.email}</div>
-          </div>
+    <Card>
+      {/* Top: who ←→ risk readout */}
+      <div className="flg-top">
+        <Identity
+          name={flag.user.name}
+          subtitle={flag.user.email}
+          avatar={<Avatar name={flag.user.name} size={40} />}
+        />
+        <div className="flg-risk">
+          <span className="ui-t-eyebrow flg-risk__cap">Risk</span>
+          <span className="ui-t-num flg-risk__num">{flag.riskScore}</span>
+          <Tag status={sev}>{sev === 'danger' ? 'High' : sev === 'warn' ? 'Elevated' : 'Closed'}</Tag>
         </div>
-        <div className={`flag-pill flag-pill-${flag.type.toLowerCase()}`}>
+      </div>
+
+      {/* Flag type */}
+      <div className="flg-type">
+        <Tag status={sev}>
           {flag.type === 'IMPOSSIBLE_RATE' ? (
-            <AlertOctagon size={11} strokeWidth={2.4} />
+            <AlertOctagon size={12} strokeWidth={2.2} />
           ) : (
-            <ShieldAlert size={11} strokeWidth={2.4} />
+            <ShieldAlert size={12} strokeWidth={2.2} />
           )}
-          <span>{FLAG_LABEL[flag.type]}</span>
-          <span className="risk-score">+{flag.riskScore}</span>
-        </div>
+          {FLAG_LABEL[flag.type]}
+        </Tag>
       </div>
 
-      <div className="approval-body">
-        <div className="approval-row">
-          <span className="approval-label">Window</span>
-          <span className="approval-value tabular">
-            {fmtDayLabel(day)} · {fmtTime(start.getTime())} – {fmtTime(end.getTime())}
+      {/* Window */}
+      <div className="flg-def">
+        <span className="ui-t-eyebrow">Window</span>
+        <span className="ui-mono flg-def__val">
+          {fmtDayLabel(day)} · {fmtTime(start.getTime())} – {fmtTime(end.getTime())}
+        </span>
+      </div>
+
+      {/* AI read / pattern */}
+      {flag.explanation?.headline ? (
+        <Banner status="info">
+          <span className="flg-ai__cap">
+            <Sparkles size={11} strokeWidth={2.2} /> AI read
           </span>
+          <span className="ui-t-body flg-ai__head">{flag.explanation.headline}</span>
+          {flag.explanation.detail && (
+            <span className="ui-t-small flg-ai__detail">{flag.explanation.detail}</span>
+          )}
+        </Banner>
+      ) : (
+        <div className="flg-def">
+          <span className="ui-t-eyebrow">Pattern</span>
+          <span className="ui-t-body flg-def__val">{FLAG_BLURB[flag.type]}</span>
         </div>
-        <div className="approval-row">
-          <span className="approval-label">Pattern</span>
-          <span className="approval-value">
-            {flag.explanation?.headline ?? FLAG_BLURB[flag.type]}
-            {flag.explanation?.detail && (
-              <span className="flag-explain-detail small secondary" style={{ display: 'block', marginTop: 3 }}>
-                {flag.explanation.detail}
-              </span>
+      )}
+
+      {/* Evidence chips */}
+      {evidence.length > 0 && (
+        <div className="flg-def">
+          <span className="ui-t-eyebrow">Evidence</span>
+          <div className="flg-chips">
+            {evidence.map(([k, v]) => (
+              <Tag key={k} mono>
+                {k} {typeof v === 'number' ? fmtEvidence(v) : String(v)}
+              </Tag>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Note (resolved or rejected with a reviewer note) */}
+      {flag.resolvedNote && (
+        <div className="flg-def">
+          <span className="ui-t-eyebrow">Note</span>
+          <span className="ui-t-body flg-def__val">{flag.resolvedNote}</span>
+        </div>
+      )}
+
+      {/* Resolved: verdict + audit stamp */}
+      {isResolved && flag.resolution && (
+        <div className="flg-verdict">
+          <Tag status={verdictStatus(flag.resolution)}>
+            {flag.resolution === 'DISMISSED' ? (
+              <Check size={12} strokeWidth={2.2} />
+            ) : (
+              <X size={12} strokeWidth={2.2} />
             )}
-          </span>
+            {flag.resolution.replace('_', ' ').toLowerCase()}
+          </Tag>
+          {flag.resolvedBy && (
+            <span className="ui-mono ui-t-small flg-stamp">
+              by {flag.resolvedBy.name}
+              {flag.resolvedAt &&
+                ` · ${new Date(flag.resolvedAt).toLocaleDateString(undefined, {
+                  month: 'short',
+                  day: 'numeric',
+                })}`}
+            </span>
+          )}
         </div>
-        {Object.keys(flag.evidence).length > 0 && (
-          <div className="approval-row">
-            <span className="approval-label">Evidence</span>
-            <span className="approval-value flag-evidence">
-              {Object.entries(flag.evidence).map(([k, v]) => (
-                <span key={k} className="evidence-chip">
-                  <span className="evidence-k">{k}</span>
-                  <span className="evidence-v tabular">{typeof v === 'number' ? fmtEvidence(v) : String(v)}</span>
-                </span>
-              ))}
-            </span>
-          </div>
-        )}
-        {isResolved && (
-          <div className="approval-row">
-            <span className="approval-label">Verdict</span>
-            <span className="approval-value">
-              <span className={`status-pill status-resolved verdict-${flag.resolution?.toLowerCase()}`}>
-                {flag.resolution === 'DISMISSED' && <Check size={11} strokeWidth={2.2} />}
-                {flag.resolution === 'CONFIRMED' && <X size={11} strokeWidth={2.2} />}
-                {flag.resolution === 'TIME_INVALIDATED' && <X size={11} strokeWidth={2.2} />}
-                <span>{flag.resolution?.replace('_', ' ').toLowerCase()}</span>
-              </span>
-              {flag.resolvedBy && (
-                <span className="small secondary">
-                  {' '}
-                  by {flag.resolvedBy.name}
-                  {flag.resolvedAt && (
-                    <>
-                      {' on '}
-                      {new Date(flag.resolvedAt).toLocaleDateString(undefined, {
-                        month: 'short',
-                        day: 'numeric',
-                      })}
-                    </>
-                  )}
-                </span>
-              )}
-            </span>
-          </div>
-        )}
-        {flag.resolvedNote && (
-          <div className="approval-row">
-            <span className="approval-label">Reviewer note</span>
-            <span className="approval-value">{flag.resolvedNote}</span>
-          </div>
-        )}
-      </div>
+      )}
 
-      {error && <div className="approval-error">Failed: {error}</div>}
+      {/* Per-card error */}
+      {error && <Banner status="danger">Failed — {error}</Banner>}
 
-      {!isResolved && (
-        <div className="approval-actions">
-          {composing ? (
-            <form
-              className="reject-form"
-              onSubmit={(e) => {
-                e.preventDefault();
-                onResolve(composing, note.trim() || undefined);
-              }}
+      {/* Open: inline triage actions */}
+      {!isResolved &&
+        (composing ? (
+          <form
+            className="flg-form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              onResolve(composing, note.trim() || undefined);
+            }}
+          >
+            <Field
+              className="flg-form__field"
+              label={composing === 'DISMISSED' ? 'Why is this legitimate?' : 'Notes (optional)'}
             >
-              <input
-                type="text"
+              <Input
                 autoFocus
                 placeholder={composing === 'DISMISSED' ? 'Why is this legitimate?' : 'Notes (optional)'}
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
                 maxLength={500}
               />
-              <button type="button" className="btn-ghost" onClick={() => setComposing(null)} disabled={busy}>
+            </Field>
+            <div className="flg-actions">
+              <Button type="button" variant="ghost" onClick={() => setComposing(null)} disabled={busy}>
                 Cancel
-              </button>
-              <button
+              </Button>
+              <Button
                 type="submit"
-                className={composing === 'DISMISSED' ? 'btn-primary' : 'btn-danger'}
-                disabled={busy}
+                variant={composing === 'DISMISSED' ? 'secondary' : 'danger'}
+                loading={busy}
               >
-                {busy ? 'Saving…' : `Confirm ${composing === 'DISMISSED' ? 'dismiss' : 'cheat'}`}
-              </button>
-            </form>
-          ) : (
-            <>
-              <button type="button" className="btn-ghost" onClick={() => setComposing('DISMISSED')} disabled={busy}>
-                <Check size={14} strokeWidth={2.2} />
-                <span>Dismiss</span>
-              </button>
-              <button type="button" className="btn-danger" onClick={() => setComposing('CONFIRMED')} disabled={busy}>
-                <X size={14} strokeWidth={2.2} />
-                <span>Confirm cheat</span>
-              </button>
-            </>
-          )}
-        </div>
-      )}
-    </article>
+                Confirm {composing === 'DISMISSED' ? 'dismiss' : 'cheat'}
+              </Button>
+            </div>
+          </form>
+        ) : (
+          <div className="flg-actions">
+            <Button
+              variant="secondary"
+              icon={<Check size={14} strokeWidth={2.1} />}
+              onClick={() => setComposing('DISMISSED')}
+              disabled={busy}
+            >
+              Dismiss
+            </Button>
+            <Button
+              variant="danger"
+              icon={<X size={14} strokeWidth={2.1} />}
+              onClick={() => setComposing('CONFIRMED')}
+              disabled={busy}
+            >
+              Confirm cheat
+            </Button>
+          </div>
+        ))}
+    </Card>
   );
 }
 
@@ -282,11 +345,4 @@ function fmtEvidence(v: number): string {
   // Big or tiny → scientific; otherwise 2 dp.
   if (Math.abs(v) >= 1000 || (v !== 0 && Math.abs(v) < 0.01)) return v.toExponential(2);
   return v.toFixed(2);
-}
-
-function initials(name: string): string {
-  const parts = name.trim().split(/\s+/);
-  if (parts.length === 0) return '?';
-  if (parts.length === 1) return parts[0]!.slice(0, 2).toUpperCase();
-  return (parts[0]![0]! + parts[parts.length - 1]![0]!).toUpperCase();
 }

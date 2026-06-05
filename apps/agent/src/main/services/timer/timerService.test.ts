@@ -45,6 +45,13 @@ class MemStore implements EntryStore {
   markSynced(id: string) {
     this.synced.add(id);
   }
+  liveness: number | null = null;
+  setLiveness(ts: number) {
+    this.liveness = ts;
+  }
+  getLiveness() {
+    return this.liveness;
+  }
 }
 
 class SpySync implements SyncClient {
@@ -290,5 +297,48 @@ describe('TimerService.recover (crash recovery)', () => {
   it('does nothing when there is no open entry', () => {
     svc.recover(clock.now());
     expect(svc.isRunning()).toBe(false);
+  });
+});
+
+describe('TimerService liveness (crash-recovery bound)', () => {
+  it('heartbeat persists the current time while an entry is open', async () => {
+    await svc.start({});
+    clock.advance(42 * 1000);
+    svc.heartbeat();
+    expect(store.getLiveness()).toBe(clock.now());
+    expect(svc.lastLiveness()).toBe(clock.now());
+  });
+
+  it('heartbeat is a no-op when nothing is open', () => {
+    svc.heartbeat();
+    expect(store.getLiveness()).toBeNull();
+  });
+
+  it('boot recovery closes a dangling entry at the last liveness tick, not "now"', async () => {
+    // Work 5 min, last heartbeat at +5min, then the machine hard-dies and the
+    // app reboots an hour later. The dead hour must NOT be credited.
+    await svc.start({});
+    clock.advance(5 * MIN);
+    svc.heartbeat();
+    const lastAlive = clock.now();
+    clock.advance(60 * MIN); // an hour of being powered off
+
+    const rebooted = new TimerService(store, sync, clock, ids);
+    rebooted.recover(rebooted.lastLiveness() ?? clock.now());
+
+    const recovered = [...store.entries.values()][0]!;
+    expect(recovered.endedAt).toBe(lastAlive);
+    expect(totalWorkedMs(recovered)).toBe(5 * MIN); // the dead hour is gone
+  });
+
+  it('falls back to now() when liveness was never written', async () => {
+    await svc.start({});
+    clock.advance(3 * MIN);
+    // No heartbeat ever fired → lastLiveness null → caller uses now().
+    const rebooted = new TimerService(store, sync, clock, ids);
+    expect(rebooted.lastLiveness()).toBeNull();
+    rebooted.recover(rebooted.lastLiveness() ?? clock.now());
+    const recovered = [...store.entries.values()][0]!;
+    expect(recovered.endedAt).toBe(clock.now());
   });
 });

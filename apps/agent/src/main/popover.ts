@@ -1,42 +1,27 @@
-import { BrowserWindow, screen, type Rectangle } from 'electron';
-import path from 'node:path';
+import { screen } from 'electron';
+import type { BrowserWindow, Rectangle } from 'electron';
+import { createOverlayWindow } from './windows/overlay';
+
+/**
+ * Tray popover — anchored under the menu-bar icon. Closes on blur. Unlike the
+ * other overlays it is deliberately NOT forced to all-Spaces / over-fullscreen:
+ * it belongs to the tray, which lives on the menu-bar display, and should
+ * dismiss when the user clicks away.
+ */
 
 let win: BrowserWindow | null = null;
 
-function load(w: BrowserWindow, hash: string) {
-  if (process.env.ELECTRON_RENDERER_URL) {
-    void w.loadURL(`${process.env.ELECTRON_RENDERER_URL}#${hash}`);
-  } else {
-    void w.loadFile(path.join(__dirname, '../renderer/index.html'), { hash });
-  }
-}
-
 function ensure(): BrowserWindow {
   if (win && !win.isDestroyed()) return win;
-  win = new BrowserWindow({
-    width: 300,
-    height: 340,
-    show: false,
-    frame: false,
-    transparent: true,
-    resizable: false,
-    skipTaskbar: true,
-    fullscreenable: false,
-    hasShadow: true,
-    type: process.platform === 'darwin' ? 'panel' : undefined,
-    webPreferences: {
-      contextIsolation: true,
-      sandbox: true,
-      nodeIntegration: false,
-      preload: path.join(__dirname, '../preload/index.cjs'),
-    },
-  });
-  load(win, 'popover');
+  win = createOverlayWindow({ width: 300, height: 340, hash: 'popover' });
   win.on('blur', () => win?.hide());
+  win.on('closed', () => {
+    win = null;
+  });
   return win;
 }
 
-/** Toggle the popover anchored under the tray icon. */
+/** Toggle the popover anchored under the tray icon, on the tray's own display. */
 export function togglePopover(trayBounds: Rectangle): void {
   const w = ensure();
   if (w.isVisible()) {
