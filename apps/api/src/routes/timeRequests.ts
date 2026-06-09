@@ -12,6 +12,9 @@ import {
 } from '@grind/types';
 import { validate } from '../middleware/validate';
 import { requireAccessToken } from '../middleware/auth';
+import { attachScope } from '../middleware/scope';
+import { authorizeTimeEditForUser, resolveTimeEditTarget } from '../authz/timeEdit';
+import { resolveReportRange } from '../reports/member';
 import {
   buildApprovalCard,
   buildSupersededCard,
@@ -24,7 +27,7 @@ import {
 import { logger } from '../logger';
 
 /** Roles that auto-approve their own manual-time requests at create time. */
-const SELF_AUTO_APPROVE_ROLES = new Set(['OWNER', 'ADMIN', 'MANAGER']);
+const SELF_AUTO_APPROVE_ROLES = new Set(['ADMIN', 'MANAGER']);
 
 export const timeRequestsRouter = Router();
 timeRequestsRouter.use(requireAccessToken);
@@ -35,6 +38,7 @@ type Row = {
   userId: string;
   approverId: string | null;
   larkTaskGuid: string | null;
+  taskSummary: string | null;
   larkMessageId: string | null;
   requestedStart: Date;
   requestedEnd: Date;
@@ -45,6 +49,8 @@ type Row = {
   decidedReason: string | null;
   createdAt: Date;
   attendees?: Array<{ userId: string }>;
+  user?: { id: string; name: string; email: string };
+  approver?: { id: string; name: string; email: string } | null;
 };
 
 function serialize(r: Row): ManualTimeRequestDto {
@@ -54,6 +60,7 @@ function serialize(r: Row): ManualTimeRequestDto {
     userId: r.userId,
     approverId: r.approverId,
     larkTaskGuid: r.larkTaskGuid,
+    taskSummary: r.taskSummary ?? null,
     larkMessageId: r.larkMessageId,
     requestedStart: r.requestedStart.toISOString(),
     requestedEnd: r.requestedEnd.toISOString(),
@@ -64,7 +71,14 @@ function serialize(r: Row): ManualTimeRequestDto {
     decidedReason: r.decidedReason,
     createdAt: r.createdAt.toISOString(),
     attendeeIds: r.attendees ? r.attendees.map((a) => a.userId) : undefined,
+    user: r.user,
+    approver: r.approver ?? undefined,
   };
+}
+
+function cleanTaskSummary(value: string | null | undefined): string | null {
+  const trimmed = typeof value === 'string' ? value.trim() : '';
+  return trimmed.length > 0 ? trimmed : null;
 }
 
 /**
@@ -93,15 +107,12 @@ async function validateAttendees(
 /**
  * Submit a manual-time request. Idempotent on `clientUuid`.
  *
- * 1. Picks an approver — any ADMIN or OWNER in the same workspace, other than
- *    the requester. (Team.managerId-based scoping lands with M11.)
- * 2. Persists the row with status=PENDING.
- * 3. If Lark is configured and the approver has a Lark identity, sends an
- *    interactive card via the bot and stores `larkMessageId`. Sending failures
- *    do NOT block the request — the row stays PENDING and the dashboard
- *    mirror (also M11) can drive the decision.
+ * 1. Resolves the target user through time-edit RBAC.
+ * 2. Manager/admin target-user edits create APPROVED manual time immediately.
+ * 3. Member self-requests stay PENDING and use the approver/card flow.
+ * Lark sends are best-effort; DB state is the audit source of truth.
  */
-timeRequestsRouter.post('/', validate(CreateManualTimeRequest, 'body'), async (req, res, next) => {
+timeRequestsRouter.post('/', attachScope, validate(CreateManualTimeRequest, 'body'), async (req, res, next) => {
   try {
     if (!req.user) return res.status(401).json({ error: 'unauthorized' });
     const body = req.body as CreateBody;
@@ -111,29 +122,40 @@ timeRequestsRouter.post('/', validate(CreateManualTimeRequest, 'body'), async (r
     const end = new Date(body.requestedEnd).getTime();
     if (!(start < end)) return res.status(400).json({ error: 'invalid_range' });
 
+    const target = resolveTimeEditTarget(req, body.userId);
+    if (!target.ok) return res.status(target.status).json({ error: target.error });
+    const targetUserId = target.targetUserId;
+
     // Idempotency: same clientUuid from this user → return existing row.
     const existing = await prisma.manualTimeRequest.findUnique({
       where: { clientUuid: body.clientUuid },
       include: { attendees: true },
     });
     if (existing) {
-      if (existing.userId !== req.user.sub) return res.status(409).json({ error: 'client_uuid_conflict' });
+      if (existing.userId !== targetUserId) return res.status(409).json({ error: 'client_uuid_conflict' });
       return res.status(200).json(serialize(existing));
     }
 
     // Attendees: validate within workspace, dedupe, exclude requester.
-    const attendeeCheck = await validateAttendees(req.user.ws, req.user.sub, body.attendeeIds);
+    const attendeeCheck = await validateAttendees(req.user.ws, targetUserId, body.attendeeIds);
     if (!attendeeCheck.ok) return res.status(400).json({ error: attendeeCheck.error });
     const attendeeIds = attendeeCheck.ids;
 
     const requester = await prisma.user.findUniqueOrThrow({
-      where: { id: req.user.sub },
-      select: { name: true, role: true, shiftId: true, larkIdentity: { select: { openId: true } } },
+      where: { id: targetUserId },
+      select: { id: true, name: true, role: true, shiftId: true, larkIdentity: { select: { openId: true } } },
     });
-    const autoApprove = SELF_AUTO_APPROVE_ROLES.has(requester.role);
+    const actor =
+      target.isSelf
+        ? requester
+        : await prisma.user.findUniqueOrThrow({
+            where: { id: req.user.sub },
+            select: { id: true, name: true },
+          });
+    const autoApprove = !target.isSelf || SELF_AUTO_APPROVE_ROLES.has(requester.role);
 
     // ------------------------------------------------------------------
-    // Branch A — MANAGER+ self-approve at create time.
+    // Branch A — MANAGER+ self/team edits are approved at create time.
     // ------------------------------------------------------------------
     if (autoApprove) {
       const now = new Date();
@@ -143,7 +165,7 @@ timeRequestsRouter.post('/', validate(CreateManualTimeRequest, 'body'), async (r
           data: {
             id: teId,
             clientUuid: `mtr-auto-${ulid()}`,
-            userId: req.user!.sub,
+            userId: targetUserId,
             larkTaskGuid: body.larkTaskGuid ?? null,
             source: 'MANUAL',
             startedAt: new Date(start),
@@ -162,16 +184,19 @@ timeRequestsRouter.post('/', validate(CreateManualTimeRequest, 'body'), async (r
         const row = await tx.manualTimeRequest.create({
           data: {
             clientUuid: body.clientUuid,
-            userId: req.user!.sub,
-            approverId: req.user!.sub, // self is the approver of record
+            userId: targetUserId,
+            approverId: req.user!.sub,
             larkTaskGuid: body.larkTaskGuid ?? null,
+            taskSummary: cleanTaskSummary(body.taskSummary),
             requestedStart: new Date(start),
             requestedEnd: new Date(end),
             reason: body.reason,
             status: 'APPROVED',
             autoApproved: true,
             decidedAt: now,
-            decidedReason: 'Auto-approved (manager-or-above own request)',
+            decidedReason: target.isSelf
+              ? 'Auto-approved (manager-or-above own request)'
+              : `Added by ${actor.name}`,
             timeEntryId: teId,
             attendees: attendeeIds.length
               ? { create: attendeeIds.map((uid) => ({ userId: uid })) }
@@ -195,7 +220,7 @@ timeRequestsRouter.post('/', validate(CreateManualTimeRequest, 'body'), async (r
             endedAt: end,
             reason: body.reason,
             decision: 'APPROVED',
-            decidedByName: `${requester.name} (auto)`,
+            decidedByName: target.isSelf ? `${requester.name} (auto)` : actor.name,
             decidedAt: now.getTime(),
           });
           const { messageId } = await messenger.sendCard(requester.larkIdentity.openId, card);
@@ -219,7 +244,7 @@ timeRequestsRouter.post('/', validate(CreateManualTimeRequest, 'body'), async (r
     // Branch B — MEMBER → traditional approver-pick + IM card flow.
     // ------------------------------------------------------------------
     const approver = await prisma.user.findFirst({
-      where: { workspaceId: req.user.ws, id: { not: req.user.sub }, role: { in: ['ADMIN', 'OWNER'] } },
+      where: { workspaceId: req.user.ws, id: { not: req.user.sub }, role: 'ADMIN' },
       include: { larkIdentity: { select: { openId: true } } },
       orderBy: { createdAt: 'asc' },
     });
@@ -228,9 +253,10 @@ timeRequestsRouter.post('/', validate(CreateManualTimeRequest, 'body'), async (r
     const created = await prisma.manualTimeRequest.create({
       data: {
         clientUuid: body.clientUuid,
-        userId: req.user.sub,
+        userId: targetUserId,
         approverId: approver.id,
         larkTaskGuid: body.larkTaskGuid ?? null,
+        taskSummary: cleanTaskSummary(body.taskSummary),
         requestedStart: new Date(start),
         requestedEnd: new Date(end),
         reason: body.reason,
@@ -277,28 +303,54 @@ timeRequestsRouter.get('/', validate(ListManualTimeRequestsQuery, 'query'), asyn
   try {
     if (!req.user) return res.status(401).json({ error: 'unauthorized' });
     const q = req.query as unknown as ListQuery;
+    const hasRange = q.from !== undefined || q.to !== undefined || q.tz !== undefined;
+    const range = hasRange ? resolveReportRange(q as Record<string, unknown>) : null;
+    if (range && 'error' in range) {
+      return res.status(range.status).json({ error: range.error, ...(range.extras ?? {}) });
+    }
     const where =
       q.role === 'approvals'
-        ? { approverId: req.user.sub, ...(q.status ? { status: q.status } : {}) }
-        : { userId: req.user.sub, ...(q.status ? { status: q.status } : {}) };
+        ? {
+            approverId: req.user.sub,
+            ...(q.status ? { status: q.status } : {}),
+            ...(range && !('error' in range)
+              ? { requestedStart: { lt: range.rangeEnd }, requestedEnd: { gt: range.rangeStart } }
+              : {}),
+          }
+        : {
+            userId: req.user.sub,
+            ...(q.status ? { status: q.status } : {}),
+            ...(range && !('error' in range)
+              ? { requestedStart: { lt: range.rangeEnd }, requestedEnd: { gt: range.rangeStart } }
+              : {}),
+          };
     const rows = await prisma.manualTimeRequest.findMany({
       where,
-      orderBy: { createdAt: 'desc' },
+      orderBy: hasRange ? [{ requestedStart: 'desc' }, { createdAt: 'desc' }] : [{ createdAt: 'desc' }],
       take: 200,
-      include: { attendees: true },
+      include: {
+        attendees: true,
+        user: { select: { id: true, name: true, email: true } },
+        approver: { select: { id: true, name: true, email: true } },
+      },
     });
-    res.json({ requests: rows.map(serialize) });
+    res.json({
+      requests: rows.map(serialize),
+      ...(range && !('error' in range) ? { from: range.from, to: range.to, tz: range.tz } : {}),
+    });
   } catch (err) {
     next(err);
   }
 });
 
 /**
- * Edit a still-PENDING request. Re-sends the updated approval card to the
- * approver and a tiny "Request updated" text nudge so they notice the change.
+ * Edit a still-PENDING request. The requester or a scoped manager/admin can
+ * patch the request; RBAC scope is enforced before mutation. Re-sends the
+ * updated approval card to the approver and a tiny "Request updated" text
+ * nudge so they notice the change.
  * Both Lark calls are best-effort — they never block the DB write.
  */
-timeRequestsRouter.patch('/:id', validate(PatchManualTimeRequest, 'body'), async (req, res, next) => {
+timeRequestsRouter.patch('/:id', attachScope, validate(PatchManualTimeRequest, 'body'), async (req, res, next) => {
   try {
     if (!req.user) return res.status(401).json({ error: 'unauthorized' });
     const id = req.params.id;
@@ -311,7 +363,8 @@ timeRequestsRouter.patch('/:id', validate(PatchManualTimeRequest, 'body'), async
       },
     });
     if (!existing) return res.status(404).json({ error: 'not_found' });
-    if (existing.userId !== req.user.sub) return res.status(403).json({ error: 'forbidden' });
+    const authz = authorizeTimeEditForUser(req, existing.userId);
+    if (!authz.ok) return res.status(authz.status).json({ error: authz.error });
     if (existing.status !== 'PENDING') return res.status(409).json({ error: 'immutable_after_decision', status: existing.status });
 
     const body = req.body as PatchBody;
@@ -323,7 +376,7 @@ timeRequestsRouter.patch('/:id', validate(PatchManualTimeRequest, 'body'), async
     // Validate attendees if present in the patch.
     let attendeeIds: string[] | null = null;
     if (body.attendeeIds !== undefined) {
-      const check = await validateAttendees(req.user.ws, req.user.sub, body.attendeeIds);
+      const check = await validateAttendees(req.user.ws, existing.userId, body.attendeeIds);
       if (!check.ok) return res.status(400).json({ error: check.error });
       attendeeIds = check.ids;
     }
@@ -335,6 +388,7 @@ timeRequestsRouter.patch('/:id', validate(PatchManualTimeRequest, 'body'), async
           requestedStart: start,
           requestedEnd: end,
           ...(body.larkTaskGuid !== undefined ? { larkTaskGuid: body.larkTaskGuid } : {}),
+          ...(body.taskSummary !== undefined ? { taskSummary: cleanTaskSummary(body.taskSummary) } : {}),
           ...(body.reason !== undefined ? { reason: body.reason } : {}),
         },
       });
@@ -367,8 +421,12 @@ timeRequestsRouter.patch('/:id', validate(PatchManualTimeRequest, 'body'), async
           after: `${start.toISOString()} → ${end.toISOString()}`,
         });
       }
-      if ((existing.larkTaskGuid ?? null) !== (body.larkTaskGuid ?? existing.larkTaskGuid ?? null)) {
-        diff.push({ label: 'Task', before: existing.larkTaskGuid ?? '—', after: body.larkTaskGuid ?? '—' });
+      const nextTaskGuid = body.larkTaskGuid !== undefined ? body.larkTaskGuid : existing.larkTaskGuid;
+      const nextTaskSummary = body.taskSummary !== undefined ? cleanTaskSummary(body.taskSummary) : existing.taskSummary;
+      if ((existing.larkTaskGuid ?? null) !== (nextTaskGuid ?? null) || (existing.taskSummary ?? null) !== (nextTaskSummary ?? null)) {
+        const beforeTask = existing.taskSummary ?? existing.larkTaskGuid ?? '—';
+        const afterTask = nextTaskSummary ?? nextTaskGuid ?? '—';
+        diff.push({ label: 'Task', before: beforeTask, after: afterTask });
       }
       if (existing.reason !== updated.reason) {
         diff.push({ label: 'Reason', before: existing.reason, after: updated.reason });
@@ -380,7 +438,7 @@ timeRequestsRouter.patch('/:id', validate(PatchManualTimeRequest, 'body'), async
           buildSupersededCard({
             requestId: existing.id,
             requesterName: existing.user.name,
-            taskSummary: null,
+            taskSummary: existing.taskSummary,
             startedAt: existing.requestedStart.getTime(),
             endedAt: existing.requestedEnd.getTime(),
             reason: existing.reason,
@@ -393,7 +451,7 @@ timeRequestsRouter.patch('/:id', validate(PatchManualTimeRequest, 'body'), async
           buildUpdatedApprovalCard({
             requestId: updated.id,
             requesterName: existing.user.name,
-            taskSummary: body.taskSummary ?? null,
+            taskSummary: updated.taskSummary,
             startedAt: start.getTime(),
             endedAt: end.getTime(),
             reason: updated.reason,
@@ -414,12 +472,13 @@ timeRequestsRouter.patch('/:id', validate(PatchManualTimeRequest, 'body'), async
 });
 
 /**
- * Cancel a still-PENDING request. Marks status=CANCELLED, swaps the original
- * Lark card for a "cancelled" variant (no buttons) and pings the approver
- * with a one-line notice so an in-flight approver doesn't act on a dead
- * request. Decided requests are immutable (409).
+ * Cancel a still-PENDING request. The requester or a scoped manager/admin can
+ * cancel. Marks status=CANCELLED, swaps the original Lark card for a
+ * "cancelled" variant (no buttons) and pings the approver with a one-line
+ * notice so an in-flight approver doesn't act on a dead request. Decided
+ * requests are immutable (409).
  */
-timeRequestsRouter.post('/:id/cancel', async (req, res, next) => {
+timeRequestsRouter.post('/:id/cancel', attachScope, async (req, res, next) => {
   try {
     if (!req.user) return res.status(401).json({ error: 'unauthorized' });
     const id = req.params.id;
@@ -431,13 +490,18 @@ timeRequestsRouter.post('/:id/cancel', async (req, res, next) => {
       },
     });
     if (!existing) return res.status(404).json({ error: 'not_found' });
-    if (existing.userId !== req.user.sub) return res.status(403).json({ error: 'forbidden' });
+    const authz = authorizeTimeEditForUser(req, existing.userId);
+    if (!authz.ok) return res.status(authz.status).json({ error: authz.error });
     if (existing.status !== 'PENDING') return res.status(409).json({ error: 'immutable_after_decision', status: existing.status });
 
     const now = new Date();
     const updated = await prisma.manualTimeRequest.update({
       where: { id },
-      data: { status: 'CANCELLED', decidedAt: now, decidedReason: 'Cancelled by requester' },
+      data: {
+        status: 'CANCELLED',
+        decidedAt: now,
+        decidedReason: authz.isSelf ? 'Cancelled by requester' : 'Cancelled by manager',
+      },
     });
 
     const messenger = getLarkMessenger();
@@ -451,7 +515,7 @@ timeRequestsRouter.post('/:id/cancel', async (req, res, next) => {
           buildCancelledCard({
             requestId: existing.id,
             requesterName: existing.user.name,
-            taskSummary: null,
+            taskSummary: existing.taskSummary,
             startedAt: existing.requestedStart.getTime(),
             endedAt: existing.requestedEnd.getTime(),
             reason: existing.reason,

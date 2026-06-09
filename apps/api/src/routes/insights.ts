@@ -9,6 +9,7 @@ import { buildDayInsight, localDayWindow, shiftDayWindow } from '../insights/day
 import { WEEKDAYS, type ShiftSchedule } from '@grind/types';
 import { buildHeatmap, DEFAULT_BUCKET_MS, type HeatmapSample } from '../insights/heatmap';
 import { buildAppUsage } from '../insights/appUsage';
+import { appIconUrl } from '../insights/appIcon';
 
 export const insightsRouter = Router();
 // /day accepts an optional ?userId= so admins/managers can pull a team
@@ -151,6 +152,7 @@ insightsRouter.get('/day', async (req, res, next) => {
       include: {
         segments: { orderBy: { startedAt: 'asc' } },
         attendees: { select: { userId: true } },
+        manualTimeRequest: { select: { id: true } },
       },
       orderBy: { startedAt: 'asc' },
     });
@@ -189,6 +191,7 @@ insightsRouter.get('/day', async (req, res, next) => {
       entries: entries.map((e) => ({
         id: e.id,
         source: e.source as 'AUTO' | 'MANUAL',
+        requestId: e.manualTimeRequest?.id ?? null,
         larkTaskGuid: e.larkTaskGuid,
         notes: e.notes ?? null,
         attendeeIds: e.attendees.map((a) => a.userId),
@@ -204,6 +207,7 @@ insightsRouter.get('/day', async (req, res, next) => {
         requestedEnd: p.requestedEnd,
         reason: p.reason,
         larkTaskGuid: p.larkTaskGuid,
+        taskSummary: p.taskSummary,
         attendeeIds: p.attendees.map((a) => a.userId),
       })),
       rejected: rejected.map((r) => ({
@@ -213,6 +217,7 @@ insightsRouter.get('/day', async (req, res, next) => {
         reason: r.reason,
         decidedReason: r.decidedReason,
         larkTaskGuid: r.larkTaskGuid,
+        taskSummary: r.taskSummary,
       })),
     });
 
@@ -275,7 +280,7 @@ insightsRouter.get('/day', async (req, res, next) => {
     // active fields per the workspace policy at ingestion time — when the
     // policy is "captureApps off", every sample's activeApp is null and
     // buildAppUsage returns an empty top list, which the dashboard hides.
-    const appUsage = buildAppUsage(
+    const appUsageBase = buildAppUsage(
       samples.map((s) => ({
         activeApp: s.activeApp,
         activeAppBundle: s.activeAppBundle,
@@ -283,6 +288,13 @@ insightsRouter.get('/day', async (req, res, next) => {
         clicks: s.clicks,
       })),
     );
+    const appUsage = {
+      ...appUsageBase,
+      topApps: appUsageBase.topApps.map((app) => ({
+        ...app,
+        iconUrl: appIconUrl(app.app, app.appBundle),
+      })),
+    };
 
     res.json({ ...result, activity: heatmap, appUsage });
   } catch (err) {

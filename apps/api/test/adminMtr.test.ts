@@ -29,7 +29,7 @@ async function seed() {
   counter += 1;
   const stamp = `${Date.now()}-${counter}`;
   const ws = await prisma.workspace.create({ data: { name: `WS-mtr-${stamp}` } });
-  const mk = (email: string, name: string, role: 'OWNER' | 'ADMIN' | 'MANAGER' | 'MEMBER') =>
+  const mk = (email: string, name: string, role: 'ADMIN' | 'MANAGER' | 'MEMBER') =>
     prisma.user.create({
       data: {
         workspaceId: ws.id,
@@ -50,7 +50,7 @@ async function seed() {
   const teamB = await prisma.team.create({ data: { workspaceId: ws.id, name: 'B', managerId: mgrB.id } });
   await prisma.user.updateMany({ where: { id: { in: [mgrB.id, memB.id] } }, data: { teamId: teamB.id } });
 
-  const token = (u: { id: string; role: 'OWNER' | 'ADMIN' | 'MANAGER' | 'MEMBER' }) =>
+  const token = (u: { id: string; role: 'ADMIN' | 'MANAGER' | 'MEMBER' }) =>
     signAccessToken({ sub: u.id, ws: ws.id, role: u.role });
 
   // A request from member-A (in team-A).
@@ -127,6 +127,28 @@ describe('GET /v1/admin/manual-time-requests', () => {
     const statuses = new Set(res.body.requests.map((r: { status: string }) => r.status));
     expect(statuses.has('APPROVED')).toBe(true);
     expect(statuses.has('PENDING')).toBe(false);
+  });
+
+  it('filters by local-day range when from/to/tz are supplied', async () => {
+    const s = await seed();
+    const inRange = await request(app)
+      .get('/v1/admin/manual-time-requests?status=ALL&from=2026-05-30&to=2026-05-30&tz=UTC')
+      .set(bearer(s.admin.token));
+    expect(inRange.status).toBe(200);
+    const inRangeIds = new Set(inRange.body.requests.map((r: { id: string }) => r.id));
+    expect(inRangeIds.has(s.mtrA.id)).toBe(true);
+    expect(inRangeIds.has(s.mtrB.id)).toBe(true);
+    expect(inRange.body.from).toBe('2026-05-30');
+    expect(inRange.body.to).toBe('2026-05-30');
+    expect(inRange.body.tz).toBe('UTC');
+
+    const outOfRange = await request(app)
+      .get('/v1/admin/manual-time-requests?status=ALL&from=2026-06-01&to=2026-06-01&tz=UTC')
+      .set(bearer(s.admin.token));
+    expect(outOfRange.status).toBe(200);
+    const outRangeIds = new Set(outOfRange.body.requests.map((r: { id: string }) => r.id));
+    expect(outRangeIds.has(s.mtrA.id)).toBe(false);
+    expect(outRangeIds.has(s.mtrB.id)).toBe(false);
   });
 
   it('invalid status → 400', async () => {

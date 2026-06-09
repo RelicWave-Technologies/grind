@@ -1,0 +1,174 @@
+/* ============================================================================
+   PROFILE — layout only.
+
+   This screen uses the shared Quiet Datasheet kit for every visual choice.
+   The page CSS only arranges cards, stacks, and the weekly schedule grid.
+   ========================================================================= */
+
+.prf-page {
+  --prf-leading-col: var(--ui-sp-9);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-sp-6);
+}
+
+.prf-summary .ui-stat-row {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.prf-summary .ui-stat {
+  min-height: calc(var(--ui-sp-12) * 2);
+  justify-content: space-between;
+}
+
+.prf-summary .ui-t-num {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prf-main-grid,
+.prf-secondary-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--ui-sp-5);
+  align-items: start;
+}
+
+.prf-profile-head,
+.prf-skeleton-id,
+.prf-skeleton-copy,
+.prf-skeleton-card {
+  display: flex;
+}
+
+.prf-profile-head {
+  align-items: center;
+  padding-bottom: var(--ui-sp-5);
+  margin-bottom: var(--ui-sp-2);
+  border-bottom: 1px solid var(--ui-line-faint);
+}
+
+.prf-profile-head .ui-identity {
+  width: 100%;
+  gap: var(--ui-sp-4);
+}
+
+.prf-page .ui-list-row__leading {
+  width: var(--prf-leading-col);
+  justify-content: center;
+}
+
+.prf-leading {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ui-ink-3);
+}
+
+.prf-page .ui-list-row__meta {
+  max-width: 42%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prf-week {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(calc(var(--ui-sp-12) * 4), 1fr));
+  gap: var(--ui-sp-3);
+}
+
+.prf-week__day {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--ui-sp-4);
+  min-height: var(--ui-row-h);
+  padding: var(--ui-sp-4);
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-sm);
+  background: var(--ui-surface-inset);
+}
+
+.prf-week__day.is-today {
+  border-color: var(--ui-line-strong);
+  background: var(--ui-surface);
+}
+
+.prf-week__label {
+  width: var(--ui-sp-8);
+  flex: none;
+}
+
+.prf-week__value {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ui-ink);
+}
+
+.prf-skeleton-id {
+  align-items: center;
+  gap: var(--ui-sp-4);
+}
+
+.prf-skeleton-copy {
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--ui-sp-2);
+}
+
+.prf-skeleton-card {
+  flex-direction: column;
+  gap: var(--ui-sp-4);
+}
+
+.prf-skeleton-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-sp-4);
+}
+
+@media (max-width: 1080px) {
+  .prf-summary .ui-stat-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .prf-main-grid,
+  .prf-secondary-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .prf-week {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .prf-page .ui-list-row__meta {
+    max-width: 100%;
+  }
+
+  .prf-summary .ui-stat-row,
+  .prf-week {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 560px) {
+  .prf-week__day {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: var(--ui-sp-2);
+  }
+
+  .prf-week__label {
+    width: auto;
+  }
+}

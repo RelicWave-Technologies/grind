@@ -1,11 +1,11 @@
 import jwt from 'jsonwebtoken';
-import type { Role } from '@grind/types';
+import { Role, type Role as RoleType } from '@grind/types';
 import { env } from '../env';
 
 export type AccessTokenPayload = {
   sub: string;
   ws: string;
-  role: Role;
+  role: RoleType;
 };
 
 export function signAccessToken(payload: AccessTokenPayload): string {
@@ -24,5 +24,9 @@ export function verifyAccessToken(token: string): AccessTokenPayload {
   if (typeof sub !== 'string' || typeof ws !== 'string' || typeof role !== 'string') {
     throw new Error('Malformed access token');
   }
-  return { sub, ws, role: role as Role };
+  const parsed = Role.safeParse(role);
+  if (!parsed.success) {
+    throw new Error('Invalid access token role');
+  }
+  return { sub, ws, role: parsed.data };
 }

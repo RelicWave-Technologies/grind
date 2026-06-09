@@ -20,6 +20,11 @@ const EnvSchema = z.object({
   LARK_OAUTH_HOST: z.string().url().default('https://open.larksuite.com'),
   LARK_ACCOUNTS_HOST: z.string().url().default('https://accounts.larksuite.com'),
   LARK_OAUTH_REDIRECT_URI: z.string().url().optional(),
+  DASHBOARD_URL: z.string().url().optional(),
+
+  // --- Screenshots (optional; direct URLs on Screenshot rows also work) ---
+  SCREENSHOT_ASSET_BASE_URL: z.string().url().optional(),
+  SCREENSHOT_URL_SIGNING_SECRET: z.string().min(16).optional(),
 });
 
 const parsed = EnvSchema.safeParse(process.env);

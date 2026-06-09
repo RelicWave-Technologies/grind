@@ -8,8 +8,7 @@
  * from the JWT it decodes server-side.
  */
 
-const RAW_BASE =
-  (import.meta.env.VITE_API_BASE as string | undefined) ?? 'http://localhost:4000';
+const RAW_BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? '';
 export const API_BASE = RAW_BASE.replace(/\/$/, '');
 
 export class ApiError extends Error {

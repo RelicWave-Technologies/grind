@@ -16,7 +16,7 @@ async function seed() {
   counter += 1;
   const stamp = `${Date.now()}-${counter}-ov`;
   const ws = await prisma.workspace.create({ data: { name: `WS ${stamp}` } });
-  const mk = (email: string, role: 'OWNER' | 'ADMIN' | 'MANAGER' | 'MEMBER') =>
+  const mk = (email: string, role: 'ADMIN' | 'MANAGER' | 'MEMBER') =>
     prisma.user.create({
       data: {
         workspaceId: ws.id,
@@ -35,7 +35,7 @@ async function seed() {
   const team = await prisma.team.create({ data: { workspaceId: ws.id, name: 'Squad', managerId: mgr.id } });
   await prisma.user.updateMany({ where: { id: { in: [mgr.id, m1.id, m2.id] } }, data: { teamId: team.id } });
 
-  const token = (u: { id: string; role: 'OWNER' | 'ADMIN' | 'MANAGER' | 'MEMBER' }) =>
+  const token = (u: { id: string; role: 'ADMIN' | 'MANAGER' | 'MEMBER' }) =>
     signAccessToken({ sub: u.id, ws: ws.id, role: u.role });
   return {
     ws,

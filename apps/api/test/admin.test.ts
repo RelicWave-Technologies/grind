@@ -13,7 +13,7 @@ import { hashPassword } from '../src/lib/password';
  * expected user list:
  *   MEMBER     → 1 (self)
  *   MANAGER    → 3 (manager + 2 team members)
- *   ADMIN/OWNER → 5 (everyone in the workspace)
+ *   ADMIN      → 5 (everyone in the workspace)
  */
 
 const app = buildApp();
@@ -24,7 +24,7 @@ async function seedWorkspace() {
   counter += 1;
   const stamp = `${Date.now()}-${counter}`;
   const ws = await prisma.workspace.create({ data: { name: `WS ${stamp}` } });
-  const mk = (email: string, name: string, role: 'OWNER' | 'ADMIN' | 'MANAGER' | 'MEMBER') =>
+  const mk = (email: string, name: string, role: 'ADMIN' | 'MANAGER' | 'MEMBER') =>
     prisma.user.create({
       data: {
         workspaceId: ws.id,
@@ -44,7 +44,7 @@ async function seedWorkspace() {
   const team = await prisma.team.create({ data: { workspaceId: ws.id, name: 'Squad A', managerId: manager.id } });
   await prisma.user.updateMany({ where: { id: { in: [manager.id, member1.id, member2.id] } }, data: { teamId: team.id } });
 
-  const token = (u: { id: string; role: 'OWNER' | 'ADMIN' | 'MANAGER' | 'MEMBER' }) =>
+  const token = (u: { id: string; role: 'ADMIN' | 'MANAGER' | 'MEMBER' }) =>
     signAccessToken({ sub: u.id, ws: ws.id, role: u.role });
 
   return {

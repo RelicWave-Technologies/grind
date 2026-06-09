@@ -22,7 +22,7 @@ async function seed() {
   counter += 1;
   const stamp = `${Date.now()}-${counter}`;
   const ws = await prisma.workspace.create({ data: { name: `WS-ts-${stamp}` } });
-  const mk = (email: string, name: string, role: 'OWNER' | 'ADMIN' | 'MANAGER' | 'MEMBER') =>
+  const mk = (email: string, name: string, role: 'ADMIN' | 'MANAGER' | 'MEMBER') =>
     prisma.user.create({
       data: {
         workspaceId: ws.id,
@@ -91,7 +91,7 @@ async function seed() {
     },
   });
 
-  const tok = (u: { id: string; role: 'OWNER' | 'ADMIN' | 'MANAGER' | 'MEMBER' }) =>
+  const tok = (u: { id: string; role: 'ADMIN' | 'MANAGER' | 'MEMBER' }) =>
     signAccessToken({ sub: u.id, ws: ws.id, role: u.role });
 
   return {

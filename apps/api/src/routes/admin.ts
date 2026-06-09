@@ -1,11 +1,12 @@
-import { Router } from 'express';
-import { prisma } from '@grind/db';
+import { Router, type Request } from 'express';
+import { prisma, type Prisma } from '@grind/db';
 import { requireAccessToken } from '../middleware/auth';
-import { attachScope, requireAdmin, requireManagerOrAbove } from '../middleware/scope';
+import { attachScope, requireAdmin, requireAnyCapability, requireCapability, requireManagerOrAbove } from '../middleware/scope';
 import { decideByUser } from '../lark/decideByUser';
 import { hashPassword } from '../lib/password';
 import { triageRequest, type TriageResult } from '../ai/triage';
 import { explainFlag } from '../ai/explainFlag';
+import { resolveReportRange } from '../reports/member';
 import {
   addDays as addDaysStr,
   buildTimesheetMatrix,
@@ -15,7 +16,11 @@ import {
 import {
   CreateShiftSchema,
   PatchShiftSchema,
+  PatchTeamMemberSettingsRequest,
   ShiftScheduleSchema,
+  WORKSPACE_POLICY_DEFAULTS,
+  type TeamMemberSettingsDto,
+  type TeamSettingsResponse,
   type ShiftDto,
   type ShiftSchedule,
 } from '@grind/types';
@@ -24,7 +29,7 @@ import {
  * Mounted under `/v1/admin`. Every route requires a valid access token and
  * the resolved scope (self / team / workspace). Routes are intentionally
  * scope-aware: a MEMBER hitting `/v1/admin/users` gets their own row;
- * a MANAGER gets their team; ADMIN/OWNER gets the whole workspace.
+ * a MANAGER gets their team; ADMIN gets the whole workspace.
  */
 export const adminRouter = Router();
 adminRouter.use(requireAccessToken, attachScope);
@@ -33,7 +38,7 @@ interface UserListEntry {
   id: string;
   email: string;
   name: string;
-  role: 'OWNER' | 'ADMIN' | 'MANAGER' | 'MEMBER';
+  role: 'ADMIN' | 'MANAGER' | 'MEMBER';
   teamId: string | null;
   managerId: string | null;
   shiftId: string | null;
@@ -93,6 +98,221 @@ adminRouter.get('/users', async (req, res, next) => {
 });
 
 // ============================================================================
+// Team member tracking settings (MANAGER scoped, ADMIN workspace scoped)
+// ============================================================================
+
+type TeamSettingsUserRow = {
+  id: string;
+  email: string;
+  name: string;
+  role: 'ADMIN' | 'MANAGER' | 'MEMBER';
+  teamId: string | null;
+  managerId: string | null;
+  shiftId: string | null;
+  shiftAssignedAt: Date | null;
+  screenshotIntervalMin: number;
+  idleThresholdMin: number;
+  createdAt: Date;
+  team: { id: string; name: string; manager: { id: string; name: string; email: string } | null } | null;
+};
+
+function serializeTeamSettingsMember(
+  user: TeamSettingsUserRow,
+  manager: { id: string; name: string; email: string } | null,
+): TeamMemberSettingsDto {
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    role: user.role,
+    team: user.team ? { id: user.team.id, name: user.team.name } : null,
+    manager,
+    shiftId: user.shiftId,
+    shiftAssignedAt: user.shiftAssignedAt ? user.shiftAssignedAt.toISOString() : null,
+    screenshotIntervalMin: user.screenshotIntervalMin,
+    idleThresholdMin: user.idleThresholdMin,
+    createdAt: user.createdAt.toISOString(),
+  };
+}
+
+async function loadTeamSettingsMembers(userIds: string[]): Promise<TeamMemberSettingsDto[]> {
+  if (userIds.length === 0) return [];
+  const users = await prisma.user.findMany({
+    where: { id: { in: userIds }, deactivatedAt: null },
+    select: {
+      id: true,
+      email: true,
+      name: true,
+      role: true,
+      teamId: true,
+      managerId: true,
+      shiftId: true,
+      shiftAssignedAt: true,
+      screenshotIntervalMin: true,
+      idleThresholdMin: true,
+      createdAt: true,
+      team: { select: { id: true, name: true, manager: { select: { id: true, name: true, email: true } } } },
+    },
+    orderBy: [{ teamId: 'asc' }, { role: 'asc' }, { name: 'asc' }],
+  });
+
+  const managerIds = [...new Set(users.map((u) => u.managerId).filter((id): id is string => Boolean(id)))];
+  const managers = managerIds.length
+    ? await prisma.user.findMany({
+        where: { id: { in: managerIds } },
+        select: { id: true, name: true, email: true },
+      })
+    : [];
+  const managerById = new Map(managers.map((m) => [m.id, m]));
+  return users.map((u) =>
+    serializeTeamSettingsMember(u, u.managerId ? managerById.get(u.managerId) ?? null : u.team?.manager ?? null),
+  );
+}
+
+function scopedTeamSettingIds(req: Request): string[] {
+  if (!req.scope || !req.user) return [];
+  return req.scope.userIds;
+}
+
+adminRouter.get('/team-member-settings', requireCapability('team.settings.manage'), async (req, res, next) => {
+  try {
+    if (!req.scope || !req.user) return res.status(401).json({ error: 'unauthorized' });
+    const [members, shifts] = await Promise.all([
+      loadTeamSettingsMembers(scopedTeamSettingIds(req)),
+      prisma.shift.findMany({
+        where: { workspaceId: req.scope.workspaceId },
+        include: { members: { select: { id: true } } },
+        orderBy: { name: 'asc' },
+      }),
+    ]);
+    const response: TeamSettingsResponse = {
+      scope: req.scope.scope === 'workspace' ? 'workspace' : 'team',
+      members,
+      shifts: shifts.map(serializeShift),
+    };
+    res.json(response);
+  } catch (err) {
+    next(err);
+  }
+});
+
+adminRouter.patch('/team-member-settings/:id', requireCapability('team.settings.manage'), async (req, res, next) => {
+  try {
+    if (!req.scope || !req.user) return res.status(401).json({ error: 'unauthorized' });
+    const id = req.params.id;
+    if (!id) return res.status(400).json({ error: 'missing_id' });
+    if (!scopedTeamSettingIds(req).includes(id)) {
+      return res.status(404).json({ error: 'not_found' });
+    }
+
+    const parsed = PatchTeamMemberSettingsRequest.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'invalid_body', detail: parsed.error.format() });
+    }
+
+    const existing = await prisma.user.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        workspaceId: true,
+        shiftId: true,
+        deactivatedAt: true,
+      },
+    });
+    if (!existing || existing.workspaceId !== req.scope.workspaceId || existing.deactivatedAt) {
+      return res.status(404).json({ error: 'not_found' });
+    }
+
+    const data: {
+      shiftId?: string | null;
+      shiftAssignedAt?: Date | null;
+      screenshotIntervalMin?: number;
+      idleThresholdMin?: number;
+    } = {};
+    let shiftAssignment:
+      | {
+          effectiveFrom: Date;
+          shiftId: string | null;
+          shiftNameSnapshot: string | null;
+          scheduleSnapshot: Prisma.InputJsonValue | null;
+          bufferMinSnapshot: number | null;
+        }
+      | null = null;
+
+    if (parsed.data.screenshotIntervalMin !== undefined) {
+      data.screenshotIntervalMin = parsed.data.screenshotIntervalMin;
+    }
+    if (parsed.data.idleThresholdMin !== undefined) {
+      data.idleThresholdMin = parsed.data.idleThresholdMin;
+    }
+    if ('shiftId' in parsed.data) {
+      const raw = parsed.data.shiftId;
+      const effectiveFrom = new Date();
+      if (raw === null || raw === '') {
+        if (existing.shiftId !== null) {
+          data.shiftId = null;
+          data.shiftAssignedAt = null;
+          shiftAssignment = {
+            effectiveFrom,
+            shiftId: null,
+            shiftNameSnapshot: null,
+            scheduleSnapshot: null,
+            bufferMinSnapshot: null,
+          };
+        }
+      } else if (typeof raw === 'string') {
+        const s = await prisma.shift.findUnique({
+          where: { id: raw },
+          select: { workspaceId: true, name: true, schedule: true, bufferMin: true },
+        });
+        if (!s || s.workspaceId !== req.scope.workspaceId) {
+          return res.status(400).json({ error: 'shift_out_of_workspace' });
+        }
+        if (existing.shiftId !== raw) {
+          data.shiftId = raw;
+          data.shiftAssignedAt = effectiveFrom;
+          shiftAssignment = {
+            effectiveFrom,
+            shiftId: raw,
+            shiftNameSnapshot: s.name,
+            scheduleSnapshot: s.schedule,
+            bufferMinSnapshot: s.bufferMin,
+          };
+        }
+      }
+    }
+
+    if (Object.keys(data).length > 0) {
+      await prisma.$transaction(async (tx) => {
+        if (shiftAssignment) {
+          await tx.shiftAssignment.updateMany({
+            where: { userId: id, effectiveTo: null },
+            data: { effectiveTo: shiftAssignment.effectiveFrom },
+          });
+          await tx.shiftAssignment.create({
+            data: {
+              userId: id,
+              shiftId: shiftAssignment.shiftId,
+              effectiveFrom: shiftAssignment.effectiveFrom,
+              shiftNameSnapshot: shiftAssignment.shiftNameSnapshot,
+              bufferMinSnapshot: shiftAssignment.bufferMinSnapshot,
+              ...(shiftAssignment.scheduleSnapshot === null ? {} : { scheduleSnapshot: shiftAssignment.scheduleSnapshot }),
+            },
+          });
+        }
+        await tx.user.update({ where: { id }, data });
+      });
+    }
+
+    const [member] = await loadTeamSettingsMembers([id]);
+    if (!member) return res.status(404).json({ error: 'not_found' });
+    res.json(member);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ============================================================================
 // Manual-time approvals queue (MANAGER and above)
 // ============================================================================
 
@@ -103,10 +323,12 @@ interface MtrListEntry {
   requestedEnd: string;
   reason: string;
   larkTaskGuid: string | null;
+  taskSummary: string | null;
   decidedAt: string | null;
   decidedReason: string | null;
   createdAt: string;
   user: { id: string; name: string; email: string };
+  approver: { id: string; name: string; email: string } | null;
   /** AI-assist verdict + reasons (PENDING only — set to null otherwise). */
   triage: TriageResult | null;
 }
@@ -212,7 +434,7 @@ function adjacencyFor(
  * GET /v1/admin/manual-time-requests
  *
  * Scoped queue of manual-time requests. MANAGER sees their team members';
- * ADMIN/OWNER sees the whole workspace; MEMBERs get 403 (they have their
+ * ADMIN sees the whole workspace; MEMBERs get 403 (they have their
  * own self-view via /v1/time-requests).
  *
  * Filters:
@@ -223,10 +445,18 @@ function adjacencyFor(
 adminRouter.get('/manual-time-requests', requireManagerOrAbove, async (req, res, next) => {
   try {
     if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
+    const hasRange = req.query.from !== undefined || req.query.to !== undefined || req.query.tz !== undefined;
+    const range = hasRange ? resolveReportRange(req.query as Record<string, unknown>) : null;
+    if (range && 'error' in range) {
+      return res.status(range.status).json({ error: range.error, ...(range.extras ?? {}) });
+    }
     const statusParam = typeof req.query.status === 'string' ? req.query.status.toUpperCase() : 'PENDING';
     const validStatuses = ['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED'] as const;
-    const where: { userId: { in: string[] }; status?: (typeof validStatuses)[number] } = {
+    const where: Prisma.ManualTimeRequestWhereInput = {
       userId: { in: req.scope.userIds },
+      ...(range && !('error' in range)
+        ? { requestedStart: { lt: range.rangeEnd }, requestedEnd: { gt: range.rangeStart } }
+        : {}),
     };
     if (statusParam !== 'ALL') {
       if (!(validStatuses as readonly string[]).includes(statusParam)) {
@@ -236,7 +466,10 @@ adminRouter.get('/manual-time-requests', requireManagerOrAbove, async (req, res,
     }
     const rows = await prisma.manualTimeRequest.findMany({
       where,
-      include: { user: { select: { id: true, name: true, email: true } } },
+      include: {
+        user: { select: { id: true, name: true, email: true } },
+        approver: { select: { id: true, name: true, email: true } },
+      },
       orderBy: [
         // PENDING bubbles to the top of mixed queries via createdAt fallback.
         { createdAt: 'desc' },
@@ -305,13 +538,19 @@ adminRouter.get('/manual-time-requests', requireManagerOrAbove, async (req, res,
       requestedEnd: r.requestedEnd.toISOString(),
       reason: r.reason,
       larkTaskGuid: r.larkTaskGuid,
+      taskSummary: r.taskSummary,
       decidedAt: r.decidedAt ? r.decidedAt.toISOString() : null,
       decidedReason: r.decidedReason,
       createdAt: r.createdAt.toISOString(),
       user: { id: r.user.id, name: r.user.name, email: r.user.email },
+      approver: r.approver ? { id: r.approver.id, name: r.approver.name, email: r.approver.email } : null,
       triage: triageByRequest?.get(r.id) ?? null,
     }));
-    res.json({ requests: out, scope: req.scope.scope });
+    res.json({
+      requests: out,
+      scope: req.scope.scope,
+      ...(range && !('error' in range) ? { from: range.from, to: range.to, tz: range.tz } : {}),
+    });
   } catch (err) {
     next(err);
   }
@@ -576,10 +815,30 @@ function serializeTeam(t: {
   };
 }
 
+async function findManagedTeam(workspaceId: string, managerId: string, exceptTeamId?: string) {
+  return prisma.team.findFirst({
+    where: {
+      workspaceId,
+      managerId,
+      ...(exceptTeamId ? { id: { not: exceptTeamId } } : {}),
+    },
+    select: { id: true, name: true },
+  });
+}
+
+function managerAlreadyAssigned(team: { id: string; name: string }) {
+  return { error: 'manager_already_assigned', teamId: team.id, teamName: team.name };
+}
+
+function isTeamManagerUniqueError(err: unknown) {
+  const maybe = err as { code?: string; meta?: { target?: string[] } };
+  return maybe?.code === 'P2002' && Array.isArray(maybe.meta?.target) && maybe.meta.target.includes('managerId');
+}
+
 /**
  * GET /v1/admin/teams — workspace teams visible to the caller.
  *
- * ADMIN / OWNER → every team in the workspace.
+ * ADMIN → every team in the workspace.
  * MANAGER       → every team they manage.
  * MEMBER        → 403 (members don't need a team list; their teamId is on /me).
  */
@@ -599,29 +858,30 @@ adminRouter.get('/teams', requireManagerOrAbove, async (req, res, next) => {
   }
 });
 
-/** Body shape: { name: string, managerId?: string|null }. */
+/** Body shape: { name: string, managerId: string }. */
 adminRouter.post('/teams', requireAdmin, async (req, res, next) => {
   try {
     if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
     const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
     if (name.length === 0 || name.length > 80) return res.status(400).json({ error: 'invalid_name' });
-    const managerId = typeof req.body?.managerId === 'string' && req.body.managerId.length > 0 ? req.body.managerId : null;
-    // Manager (if provided) must be in the workspace.
-    if (managerId) {
-      const m = await prisma.user.findUnique({ where: { id: managerId }, select: { workspaceId: true } });
-      if (!m || m.workspaceId !== req.scope.workspaceId) return res.status(400).json({ error: 'manager_out_of_workspace' });
-    }
+    const managerId = typeof req.body?.managerId === 'string' ? req.body.managerId.trim() : '';
+    if (!managerId) return res.status(400).json({ error: 'manager_required' });
+    const m = await prisma.user.findUnique({ where: { id: managerId }, select: { workspaceId: true } });
+    if (!m || m.workspaceId !== req.scope.workspaceId) return res.status(400).json({ error: 'manager_out_of_workspace' });
+    const currentManagedTeam = await findManagedTeam(req.scope.workspaceId, managerId);
+    if (currentManagedTeam) return res.status(409).json(managerAlreadyAssigned(currentManagedTeam));
     const team = await prisma.team.create({
       data: { workspaceId: req.scope.workspaceId, name, managerId },
       include: { members: { select: { id: true } } },
     });
     res.status(201).json(serializeTeam(team));
   } catch (err) {
+    if (isTeamManagerUniqueError(err)) return res.status(409).json({ error: 'manager_already_assigned' });
     next(err);
   }
 });
 
-/** PATCH body: { name?: string, managerId?: string|null }. */
+/** PATCH body: { name?: string, managerId?: string }. */
 adminRouter.patch('/teams/:id', requireAdmin, async (req, res, next) => {
   try {
     if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
@@ -641,13 +901,17 @@ adminRouter.patch('/teams/:id', requireAdmin, async (req, res, next) => {
     if ('managerId' in (req.body ?? {})) {
       const raw = req.body.managerId;
       if (raw === null || raw === '') {
-        data.managerId = null;
+        return res.status(400).json({ error: 'manager_required' });
       } else if (typeof raw === 'string') {
-        const m = await prisma.user.findUnique({ where: { id: raw }, select: { workspaceId: true } });
+        const managerId = raw.trim();
+        if (!managerId) return res.status(400).json({ error: 'manager_required' });
+        const m = await prisma.user.findUnique({ where: { id: managerId }, select: { workspaceId: true } });
         if (!m || m.workspaceId !== req.scope.workspaceId) {
           return res.status(400).json({ error: 'manager_out_of_workspace' });
         }
-        data.managerId = raw;
+        const currentManagedTeam = await findManagedTeam(req.scope.workspaceId, managerId, id);
+        if (currentManagedTeam) return res.status(409).json(managerAlreadyAssigned(currentManagedTeam));
+        data.managerId = managerId;
       } else {
         return res.status(400).json({ error: 'invalid_managerId' });
       }
@@ -661,6 +925,7 @@ adminRouter.patch('/teams/:id', requireAdmin, async (req, res, next) => {
     });
     res.json(serializeTeam(team));
   } catch (err) {
+    if (isTeamManagerUniqueError(err)) return res.status(409).json({ error: 'manager_already_assigned' });
     next(err);
   }
 });
@@ -691,7 +956,7 @@ adminRouter.delete('/teams/:id', requireAdmin, async (req, res, next) => {
 // PATCH a user (ADMIN-only). role / name / teamId / managerId.
 // ============================================================================
 
-const VALID_ROLES = ['OWNER', 'ADMIN', 'MANAGER', 'MEMBER'] as const;
+const VALID_ROLES = ['ADMIN', 'MANAGER', 'MEMBER'] as const;
 type ValidRole = (typeof VALID_ROLES)[number];
 
 adminRouter.patch('/users/:id', requireAdmin, async (req, res, next) => {
@@ -712,6 +977,15 @@ adminRouter.patch('/users/:id', requireAdmin, async (req, res, next) => {
       shiftId?: string | null;
       shiftAssignedAt?: Date | null;
     } = {};
+    let shiftAssignment:
+      | {
+          effectiveFrom: Date;
+          shiftId: string | null;
+          shiftNameSnapshot: string | null;
+          scheduleSnapshot: Prisma.InputJsonValue | null;
+          bufferMinSnapshot: number | null;
+        }
+      | null = null;
 
     if (typeof req.body?.name === 'string') {
       const name = req.body.name.trim();
@@ -757,16 +1031,34 @@ adminRouter.patch('/users/:id', requireAdmin, async (req, res, next) => {
     // history is preserved even when the user's shift later changes.
     if ('shiftId' in (req.body ?? {})) {
       const raw = req.body.shiftId;
+      const effectiveFrom = new Date();
       if (raw === null || raw === '') {
         data.shiftId = null;
         data.shiftAssignedAt = null;
+        shiftAssignment = {
+          effectiveFrom,
+          shiftId: null,
+          shiftNameSnapshot: null,
+          scheduleSnapshot: null,
+          bufferMinSnapshot: null,
+        };
       } else if (typeof raw === 'string') {
-        const s = await prisma.shift.findUnique({ where: { id: raw }, select: { workspaceId: true } });
+        const s = await prisma.shift.findUnique({
+          where: { id: raw },
+          select: { workspaceId: true, name: true, schedule: true, bufferMin: true },
+        });
         if (!s || s.workspaceId !== req.scope.workspaceId) {
           return res.status(400).json({ error: 'shift_out_of_workspace' });
         }
         data.shiftId = raw;
-        data.shiftAssignedAt = new Date();
+        data.shiftAssignedAt = effectiveFrom;
+        shiftAssignment = {
+          effectiveFrom,
+          shiftId: raw,
+          shiftNameSnapshot: s.name,
+          scheduleSnapshot: s.schedule,
+          bufferMinSnapshot: s.bufferMin,
+        };
       } else {
         return res.status(400).json({ error: 'invalid_shiftId' });
       }
@@ -774,27 +1066,46 @@ adminRouter.patch('/users/:id', requireAdmin, async (req, res, next) => {
 
     if (Object.keys(data).length === 0) return res.status(400).json({ error: 'nothing_to_update' });
 
-    // Safety: never demote the workspace's last OWNER. Without this, a
-    // careless admin could lock everyone out of full-workspace privileges.
-    if (data.role && data.role !== 'OWNER' && existing.role === 'OWNER') {
-      const owners = await prisma.user.count({
-        where: { workspaceId: req.scope.workspaceId, role: 'OWNER' },
+    // Safety: never demote the workspace's last active ADMIN. Without this,
+    // a careless admin could lock everyone out of full-workspace privileges.
+    if (data.role && data.role !== 'ADMIN' && existing.role === 'ADMIN') {
+      const admins = await prisma.user.count({
+        where: { workspaceId: req.scope.workspaceId, role: 'ADMIN', deactivatedAt: null },
       });
-      if (owners <= 1) return res.status(400).json({ error: 'last_owner_protected' });
+      if (admins <= 1) return res.status(400).json({ error: 'last_admin_protected' });
     }
 
-    const updated = await prisma.user.update({
-      where: { id },
-      data,
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        role: true,
-        teamId: true,
-        managerId: true,
-        createdAt: true,
-      },
+    const updated = await prisma.$transaction(async (tx) => {
+      if (shiftAssignment) {
+        await tx.shiftAssignment.updateMany({
+          where: { userId: id, effectiveTo: null },
+          data: { effectiveTo: shiftAssignment.effectiveFrom },
+        });
+        await tx.shiftAssignment.create({
+          data: {
+            userId: id,
+            shiftId: shiftAssignment.shiftId,
+            effectiveFrom: shiftAssignment.effectiveFrom,
+            shiftNameSnapshot: shiftAssignment.shiftNameSnapshot,
+            bufferMinSnapshot: shiftAssignment.bufferMinSnapshot,
+            ...(shiftAssignment.scheduleSnapshot === null ? {} : { scheduleSnapshot: shiftAssignment.scheduleSnapshot }),
+          },
+        });
+      }
+      return tx.user.update({
+        where: { id },
+        data,
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          role: true,
+          teamId: true,
+          managerId: true,
+          shiftId: true,
+          createdAt: true,
+        },
+      });
     });
     res.json({
       ...updated,
@@ -834,12 +1145,6 @@ adminRouter.post('/users', requireAdmin, async (req, res, next) => {
     if (!(VALID_ROLES as readonly string[]).includes(roleRaw)) {
       return res.status(400).json({ error: 'invalid_role' });
     }
-    // OWNER promotion is reserved — we never create OWNERs via invite;
-    // OWNER reassignment happens through a deliberate PATCH.
-    if (roleRaw === 'OWNER') {
-      return res.status(400).json({ error: 'invalid_role' });
-    }
-
     const dupe = await prisma.user.findUnique({ where: { email: emailRaw }, select: { id: true } });
     if (dupe) return res.status(409).json({ error: 'email_taken' });
 
@@ -848,6 +1153,10 @@ adminRouter.post('/users', requireAdmin, async (req, res, next) => {
     // admin (no plaintext leak).
     const tempPassword = `${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
     const passwordHash = await hashPassword(tempPassword);
+    const policy = await prisma.workspacePolicy.findUnique({
+      where: { workspaceId: req.scope.workspaceId },
+      select: { defaultScreenshotIntervalMin: true, defaultIdleThresholdMin: true },
+    });
 
     const created = await prisma.user.create({
       data: {
@@ -856,6 +1165,8 @@ adminRouter.post('/users', requireAdmin, async (req, res, next) => {
         name: nameRaw,
         role: roleRaw as ValidRole,
         passwordHash,
+        screenshotIntervalMin: policy?.defaultScreenshotIntervalMin ?? WORKSPACE_POLICY_DEFAULTS.defaultScreenshotIntervalMin,
+        idleThresholdMin: policy?.defaultIdleThresholdMin ?? WORKSPACE_POLICY_DEFAULTS.defaultIdleThresholdMin,
       },
       select: { id: true, email: true, name: true, role: true, createdAt: true },
     });
@@ -870,7 +1181,7 @@ adminRouter.post('/users', requireAdmin, async (req, res, next) => {
  *
  * Soft-deactivate. The user stays in the database (history + reports
  * preserved) but can't log in and won't appear in admin/scope queries.
- * Last-OWNER safety mirrors the PATCH path — you can't lock the
+ * Last-ADMIN safety mirrors the PATCH path — you can't lock the
  * workspace out of full privileges via deactivation either.
  */
 adminRouter.post('/users/:id/deactivate', requireAdmin, async (req, res, next) => {
@@ -885,11 +1196,11 @@ adminRouter.post('/users/:id/deactivate', requireAdmin, async (req, res, next) =
     if (existing.deactivatedAt) {
       return res.status(409).json({ error: 'already_deactivated' });
     }
-    if (existing.role === 'OWNER') {
-      const owners = await prisma.user.count({
-        where: { workspaceId: req.scope.workspaceId, role: 'OWNER', deactivatedAt: null },
+    if (existing.role === 'ADMIN') {
+      const admins = await prisma.user.count({
+        where: { workspaceId: req.scope.workspaceId, role: 'ADMIN', deactivatedAt: null },
       });
-      if (owners <= 1) return res.status(400).json({ error: 'last_owner_protected' });
+      if (admins <= 1) return res.status(400).json({ error: 'last_admin_protected' });
     }
     const updated = await prisma.user.update({
       where: { id },
@@ -967,7 +1278,7 @@ interface FlagDto {
  * exposing your own flag list would let a cheater calibrate their pattern
  * against the detector. Managers see their team; admins see the workspace.
  */
-adminRouter.get('/flags', requireManagerOrAbove, async (req, res, next) => {
+adminRouter.get('/flags', requireAnyCapability(['flags.team.review', 'flags.workspace.review']), async (req, res, next) => {
   try {
     if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
     const validStatuses = ['OPEN', 'RESOLVED'] as const;
@@ -1044,7 +1355,7 @@ adminRouter.get('/flags', requireManagerOrAbove, async (req, res, next) => {
 const VALID_RESOLUTIONS = ['DISMISSED', 'CONFIRMED', 'TIME_INVALIDATED'] as const;
 type FlagResolution = (typeof VALID_RESOLUTIONS)[number];
 
-adminRouter.post('/flags/:id/resolve', requireManagerOrAbove, async (req, res, next) => {
+adminRouter.post('/flags/:id/resolve', requireAnyCapability(['flags.team.review', 'flags.workspace.review']), async (req, res, next) => {
   try {
     if (!req.scope || !req.user) return res.status(401).json({ error: 'unauthorized' });
     const id = req.params.id;

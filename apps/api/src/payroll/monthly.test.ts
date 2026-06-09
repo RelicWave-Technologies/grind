@@ -27,6 +27,23 @@ function emptyMatrix(days: string[]): TimesheetMatrix {
 }
 
 const NOW = 1_700_000_000_000;
+const workingSchedule = {
+  sun: null,
+  mon: { start: '09:00', end: '18:00' },
+  tue: { start: '09:00', end: '18:00' },
+  wed: { start: '09:00', end: '18:00' },
+  thu: { start: '09:00', end: '18:00' },
+  fri: { start: '09:00', end: '18:00' },
+  sat: null,
+};
+
+const shift = () => ({
+  shiftId: 'shift-1',
+  effectiveFrom: new Date('2026-01-01T00:00:00.000Z'),
+  effectiveTo: null,
+  shiftNameSnapshot: 'General',
+  scheduleSnapshot: workingSchedule,
+});
 
 describe('buildMonthlyPayroll', () => {
   it('returns empty rows + zero totals when there are no users', () => {
@@ -35,7 +52,7 @@ describe('buildMonthlyPayroll', () => {
       NOW,
     );
     expect(p.rows).toEqual([]);
-    expect(p.totals).toEqual({
+    expect(p.totals).toMatchObject({
       daysPresent: 0,
       workedHours: 0,
       meetingHours: 0,
@@ -155,6 +172,110 @@ describe('buildMonthlyPayroll', () => {
       NOW,
     );
     expect(JSON.stringify(m)).toBe(snapshot);
+  });
+
+  it('monthly guarantee marks every eligible shift day full', () => {
+    const days = ['2026-05-04', '2026-05-05'];
+    const m: TimesheetMatrix = {
+      ...emptyMatrix(days),
+      cells: { u1: { '2026-05-04': cell(1), '2026-05-05': cell(1) } },
+    };
+    const p = buildMonthlyPayroll(
+      {
+        month: '2026-05',
+        tz: 'UTC',
+        matrix: m,
+        users: [u('u1', 'Alice')],
+        policy: {
+          halfDayLowerMin: 240,
+          halfDayUpperMin: 480,
+          fullDayLowerMin: 480,
+          fullDayUpperMin: 600,
+          monthlyLowerMin: 60,
+        },
+        shiftAssignments: { u1: [shift()] },
+      },
+      NOW,
+    );
+    expect(p.rows[0]?.monthlyGuarantee).toBe(true);
+    expect(p.rows[0]?.payrollDays.map((d) => d.status)).toEqual(['FULL', 'FULL']);
+    expect(p.rows[0]?.payableUnits).toBe(2);
+  });
+
+  it('caps overflow above the full-day upper limit', () => {
+    const days = ['2026-05-04'];
+    const m: TimesheetMatrix = {
+      ...emptyMatrix(days),
+      cells: { u1: { '2026-05-04': cell(12) } },
+    };
+    const p = buildMonthlyPayroll(
+      {
+        month: '2026-05',
+        tz: 'UTC',
+        matrix: m,
+        users: [u('u1', 'Alice')],
+        policy: {
+          halfDayLowerMin: 240,
+          halfDayUpperMin: 480,
+          fullDayLowerMin: 480,
+          fullDayUpperMin: 600,
+          monthlyLowerMin: 9_999,
+        },
+        shiftAssignments: { u1: [shift()] },
+      },
+      NOW,
+    );
+    expect(p.rows[0]?.rawHours).toBe(12);
+    expect(p.rows[0]?.cappedHours).toBe(10);
+    expect(p.rows[0]?.ignoredOverflowHours).toBe(2);
+    expect(p.rows[0]?.fullDays).toBe(1);
+  });
+
+  it('excludes scheduled-off and no-shift days from payroll Off', () => {
+    const days = ['2026-05-02', '2026-05-04']; // Sat + Mon
+    const m: TimesheetMatrix = {
+      ...emptyMatrix(days),
+      cells: { u1: { '2026-05-02': cell(2), '2026-05-04': cell(0) }, u2: { '2026-05-04': cell(1) } },
+    };
+    const p = buildMonthlyPayroll(
+      { month: '2026-05', tz: 'UTC', matrix: m, users: [u('u1', 'Alice'), u('u2', 'Bob')], shiftAssignments: { u1: [shift()] } },
+      NOW,
+    );
+    const alice = p.rows.find((r) => r.user.id === 'u1')!;
+    const bob = p.rows.find((r) => r.user.id === 'u2')!;
+    expect(alice.scheduledOffDays).toBe(1);
+    expect(alice.offDays).toBe(1);
+    expect(bob.noShiftDays).toBe(2);
+    expect(bob.offDays).toBe(0);
+  });
+
+  it('carries short-day credit only in the payroll ledger', () => {
+    const days = ['2026-05-04', '2026-05-05'];
+    const m: TimesheetMatrix = {
+      ...emptyMatrix(days),
+      cells: { u1: { '2026-05-04': cell(9), '2026-05-05': cell(3) } },
+    };
+    const p = buildMonthlyPayroll(
+      {
+        month: '2026-05',
+        tz: 'UTC',
+        matrix: m,
+        users: [u('u1', 'Alice')],
+        policy: {
+          halfDayLowerMin: 240,
+          halfDayUpperMin: 480,
+          fullDayLowerMin: 480,
+          fullDayUpperMin: 600,
+          monthlyLowerMin: 9_999,
+        },
+        shiftAssignments: { u1: [shift()] },
+      },
+      NOW,
+    );
+    expect(p.rows[0]?.payrollDays.map((d) => d.status)).toEqual(['FULL', 'HALF']);
+    expect(p.rows[0]?.carryLedger).toHaveLength(2);
+    expect(p.rows[0]?.totalHours).toBe(12);
+    expect(p.rows[0]?.payableUnits).toBe(1.5);
   });
 });
 

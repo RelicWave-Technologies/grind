@@ -1,5 +1,10 @@
 import type { RequestHandler } from 'express';
 import { prisma } from '@grind/db';
+import {
+  hasPermission,
+  roleCapabilities,
+  type Permission,
+} from '@grind/types';
 
 /**
  * Role-scoped query helpers for the M11+ admin dashboard.
@@ -7,7 +12,7 @@ import { prisma } from '@grind/db';
  * Three scope tiers:
  *   - self       MEMBER → can only see their own data
  *   - team       MANAGER → can see every user in any team they manage
- *   - workspace  ADMIN / OWNER → can see every user in their workspace
+ *   - workspace  ADMIN → can see every user in their workspace
  *
  * The middleware attaches `req.scope` so route handlers don't have to repeat
  * the SQL filter. Always combine with `requireAccessToken` upstream so
@@ -22,8 +27,9 @@ export interface ResolvedScope {
   userIds: string[];
   /** The caller's workspaceId. */
   workspaceId: string;
-  /** True only for ADMIN / OWNER. Useful for "admin-only" routes within /v1/admin. */
+  /** True only for ADMIN. Useful for admin-only routes within /v1/admin. */
   isAdmin: boolean;
+  capabilities: Permission[];
 }
 
 declare global {
@@ -48,7 +54,8 @@ export const attachScope: RequestHandler = async (req, res, next) => {
   try {
     const role = req.user.role;
     const workspaceId = req.user.ws;
-    const isAdmin = role === 'ADMIN' || role === 'OWNER';
+    const capabilities = roleCapabilities(role);
+    const isAdmin = hasPermission(capabilities, 'people.manage');
     let scope: Scope;
     let userIds: string[];
 
@@ -76,21 +83,42 @@ export const attachScope: RequestHandler = async (req, res, next) => {
       userIds = [req.user.sub];
     }
 
-    req.scope = { scope, userIds, workspaceId, isAdmin };
+    req.scope = { scope, userIds, workspaceId, isAdmin, capabilities };
     next();
   } catch (err) {
     next(err);
   }
 };
 
-/** Gate a route to admin/owner only. Use after attachScope. */
+/** Gate a route to ADMIN only. Use after attachScope. */
 export const requireAdmin: RequestHandler = (req, res, next) => {
   if (!req.scope?.isAdmin) return res.status(403).json({ error: 'admin_only' });
   next();
 };
 
+export function requireCapability(permission: Permission): RequestHandler {
+  return (req, res, next) => {
+    if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
+    if (!hasPermission(req.scope.capabilities, permission)) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+    next();
+  };
+}
+
+export function requireAnyCapability(permissions: readonly Permission[]): RequestHandler {
+  return (req, res, next) => {
+    if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
+    const { capabilities } = req.scope;
+    if (!permissions.some((permission) => hasPermission(capabilities, permission))) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+    next();
+  };
+}
+
 /**
- * Gate a route to MANAGER, ADMIN, or OWNER. The approvals queue lives here:
+ * Gate a route to MANAGER or ADMIN. The approvals queue lives here:
  * MEMBERs have their own self-view via /v1/time-requests and don't need —
  * shouldn't see — anyone else's queue.
  */

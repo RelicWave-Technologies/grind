@@ -69,7 +69,7 @@ async function createRequest(userId: string, opts: { status?: 'PENDING' | 'APPRO
 }
 
 describe('PATCH /v1/time-requests/:id — happy path', () => {
-  it('updates reason + larkTaskGuid + range on a PENDING request', async () => {
+  it('updates reason + task snapshot + range on a PENDING request', async () => {
     const { requester } = await seedWorkspaceWithApprover();
     const req = await createRequest(requester.userId);
     const res = await request(app)
@@ -78,15 +78,18 @@ describe('PATCH /v1/time-requests/:id — happy path', () => {
       .send({
         reason: 'updated reason after lunch',
         larkTaskGuid: 'task_X',
+        taskSummary: 'Task X rollout',
         requestedEnd: '2026-05-20T11:00:00.000Z',
       });
     expect(res.status).toBe(200);
     expect(res.body.reason).toBe('updated reason after lunch');
     expect(res.body.larkTaskGuid).toBe('task_X');
+    expect(res.body.taskSummary).toBe('Task X rollout');
     expect(new Date(res.body.requestedEnd).toISOString()).toBe('2026-05-20T11:00:00.000Z');
 
     const fresh = await prisma.manualTimeRequest.findUniqueOrThrow({ where: { id: req.id } });
     expect(fresh.reason).toBe('updated reason after lunch');
+    expect(fresh.taskSummary).toBe('Task X rollout');
   });
 
   it('disables the previous card and sends a NEW card with the updated values + diff', async () => {

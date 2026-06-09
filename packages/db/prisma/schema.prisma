@@ -13,10 +13,12 @@ model Workspace {
   name      String
   createdAt DateTime @default(now())
 
-  users  User[]
-  teams  Team[]
-  shifts Shift[]
-  policy WorkspacePolicy?
+  users          User[]
+  teams          Team[]
+  shifts         Shift[]
+  policy         WorkspacePolicy?
+  payrollPolicy  PayrollPolicy?
+  payrollRunLogs PayrollRunLog[]
 }
 
 /// Workspace-wide capture policy. A single row per workspace (unique on
@@ -42,12 +44,78 @@ model WorkspacePolicy {
   captureUrls                Boolean  @default(false)
   /// Days to retain screenshots before the nightly purge deletes them.
   retentionDaysScreenshots   Int      @default(60)
+  /// Workspace default screenshot cadence for newly-created members.
+  /// Per-member overrides live on User.screenshotIntervalMin.
+  defaultScreenshotIntervalMin Int     @default(180)
+  /// Workspace default idle threshold for newly-created members.
+  /// Per-member overrides live on User.idleThresholdMin.
+  defaultIdleThresholdMin     Int      @default(5)
   createdAt                  DateTime @default(now())
   updatedAt                  DateTime @updatedAt
 }
 
+enum PayrollSheetRecipientMode {
+  ALL_ADMINS
+}
+
+/// Admin-owned payroll classification settings. This is intentionally
+/// separate from WorkspacePolicy because payroll is a derived finance
+/// worksheet, while WorkspacePolicy controls capture/privacy behavior.
+model PayrollPolicy {
+  id                   String                    @id @default(cuid())
+  workspaceId          String                    @unique
+  workspace            Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  halfDayLowerMin      Int                       @default(240)
+  halfDayUpperMin      Int                       @default(480)
+  fullDayLowerMin      Int                       @default(480)
+  fullDayUpperMin      Int                       @default(600)
+  monthlyLowerMin      Int                       @default(9600)
+  timezone             String                    @default("UTC")
+  approvalReminderDays Int[]                     @default([3, 4])
+  approvalReminderTime String                    @default("00:00")
+  payrollSheetSendDay  Int                       @default(5)
+  payrollSheetSendTime String                    @default("00:00")
+  sendPayrollSheetTo   PayrollSheetRecipientMode @default(ALL_ADMINS)
+  createdAt            DateTime                  @default(now())
+  updatedAt            DateTime                  @updatedAt
+}
+
+enum PayrollRunType {
+  APPROVAL_REMINDER
+  PAYROLL_SHEET
+}
+
+enum PayrollRunStatus {
+  SENT
+  PARTIAL
+  FAILED
+  SKIPPED
+}
+
+/// One row per scheduled month-close send. The unique key is the
+/// idempotency boundary so API restarts do not resend Lark reminders or
+/// payroll sheets for the same workspace/month/scheduled instant.
+model PayrollRunLog {
+  id                     String           @id @default(cuid())
+  workspaceId            String
+  workspace              Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  month                  String
+  runType                PayrollRunType
+  scheduledFor           DateTime
+  status                 PayrollRunStatus
+  sentCount              Int              @default(0)
+  skippedNoLarkCount     Int              @default(0)
+  skippedUnassignedCount Int              @default(0)
+  failedCount            Int              @default(0)
+  errors                 Json?
+  createdAt              DateTime         @default(now())
+  updatedAt              DateTime         @updatedAt
+
+  @@unique([workspaceId, month, runType, scheduledFor])
+  @@index([workspaceId, month])
+}
+
 enum Role {
-  OWNER
   ADMIN
   MANAGER
   MEMBER
@@ -68,6 +136,7 @@ model Team {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
+  @@unique([workspaceId, managerId])
   @@index([workspaceId])
   @@index([managerId])
 }
@@ -134,10 +203,20 @@ model User {
   shiftId          String?
   shift            Shift?    @relation("ShiftMembers", fields: [shiftId], references: [id], onDelete: SetNull)
   shiftAssignedAt  DateTime?
+  /// Per-member screenshot cadence. Defaults to the production privacy
+  /// cadence (one shot every 3 hours), but managers may tune it for their
+  /// team members without changing the whole workspace.
+  screenshotIntervalMin Int @default(180)
+  /// Per-member idle threshold. Once the OS reports this many idle minutes,
+  /// the agent treats the period as a break candidate and prompts the user.
+  idleThresholdMin      Int @default(5)
 
   refreshTokens   RefreshToken[]
   timeEntries     TimeEntry[]
   activitySamples ActivitySample[]
+  shiftAssignments ShiftAssignment[]
+  screenshots      Screenshot[]        @relation("ScreenshotSubject")
+  deletedScreenshots Screenshot[]      @relation("ScreenshotDeletedBy")
   larkIdentity    LarkIdentity?
   larkOAuthToken  LarkOAuthToken?
   manualTimeRequests       ManualTimeRequest[] @relation("MtrRequester")
@@ -155,6 +234,25 @@ model User {
   @@index([teamId])
   @@index([managerId])
   @@index([shiftId])
+}
+
+/// Historical shift assignment snapshots. User.shiftId is the current
+/// assignment for fast reads; this table is the audit source for back-dated
+/// reports, because shifts can be edited or users can be reassigned later.
+model ShiftAssignment {
+  id                String   @id @default(cuid())
+  userId            String
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  shiftId           String?
+  effectiveFrom     DateTime @default(now())
+  effectiveTo       DateTime?
+  shiftNameSnapshot String?
+  scheduleSnapshot  Json?
+  bufferMinSnapshot Int?
+  createdAt         DateTime @default(now())
+
+  @@index([userId, effectiveFrom])
+  @@index([userId, effectiveTo])
 }
 
 enum TimeEntrySource {
@@ -200,9 +298,45 @@ model TimeEntry {
   /// MEETING segment) said were in this meeting. Only populated for
   /// blocks that include at least one MEETING segment.
   attendees       TimeEntryAttendee[]
+  screenshots     Screenshot[]
 
   @@index([userId, startedAt])
   @@index([larkTaskGuid])
+}
+
+enum ScreenshotUploadState {
+  PENDING
+  UPLOADED
+  FAILED
+}
+
+model Screenshot {
+  id            String                @id
+  userId        String
+  user          User                  @relation("ScreenshotSubject", fields: [userId], references: [id], onDelete: Cascade)
+  timeEntryId   String?
+  timeEntry     TimeEntry?            @relation(fields: [timeEntryId], references: [id], onDelete: SetNull)
+  displayId     String?
+  capturedAt    DateTime
+  s3Key         String?
+  thumbS3Key    String?
+  fullUrl       String?
+  thumbUrl      String?
+  bytes         Int?
+  width         Int?
+  height        Int?
+  phash         BigInt?
+  uploadState   ScreenshotUploadState @default(PENDING)
+  blurred       Boolean               @default(false)
+  deletedAt     DateTime?
+  deletedById   String?
+  deletedBy     User?                 @relation("ScreenshotDeletedBy", fields: [deletedById], references: [id], onDelete: SetNull)
+  deletedReason String?
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+
+  @@index([userId, capturedAt])
+  @@index([timeEntryId])
 }
 
 model TimeSegment {
@@ -298,6 +432,9 @@ model ManualTimeRequest {
   userId         String
   user           User                    @relation("MtrRequester", fields: [userId], references: [id])
   larkTaskGuid   String?
+  /// Human task label captured at request time. Lark GUIDs are durable
+  /// references, but not readable enough for historical approval rows.
+  taskSummary    String?
   requestedStart DateTime
   requestedEnd   DateTime
   reason         String

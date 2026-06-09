@@ -21,7 +21,7 @@ async function seed() {
   const stamp = `${Date.now()}-${counter}`;
   const ws = await prisma.workspace.create({ data: { name: `WS-m13-${stamp}` } });
   const wsOther = await prisma.workspace.create({ data: { name: `WS-other-${stamp}` } });
-  const mk = (workspaceId: string, tag: string, role: 'OWNER' | 'ADMIN' | 'MANAGER' | 'MEMBER') =>
+  const mk = (workspaceId: string, tag: string, role: 'ADMIN' | 'MANAGER' | 'MEMBER') =>
     prisma.user.create({
       data: {
         workspaceId,
@@ -31,7 +31,6 @@ async function seed() {
         passwordHash: 'x'.repeat(60),
       },
     });
-  const owner = await mk(ws.id, 'owner', 'OWNER');
   const admin = await mk(ws.id, 'admin', 'ADMIN');
   const mgr = await mk(ws.id, 'mgr', 'MANAGER');
   const mem = await mk(ws.id, 'mem', 'MEMBER');
@@ -39,13 +38,12 @@ async function seed() {
   const memB = await mk(ws.id, 'memB', 'MEMBER');
   const outsider = await mk(wsOther.id, 'out', 'MEMBER');
 
-  const tok = (u: { id: string; role: 'OWNER' | 'ADMIN' | 'MANAGER' | 'MEMBER' }, wsId = ws.id) =>
+  const tok = (u: { id: string; role: 'ADMIN' | 'MANAGER' | 'MEMBER' }, wsId = ws.id) =>
     signAccessToken({ sub: u.id, ws: wsId, role: u.role });
 
   return {
     ws,
     wsOther,
-    owner: { id: owner.id, token: tok(owner) },
     admin: { id: admin.id, token: tok(admin) },
     mgr: { id: mgr.id, token: tok(mgr) },
     mem: { id: mem.id, token: tok(mem) },
@@ -84,17 +82,15 @@ describe('POST /v1/time-requests — self auto-approve', () => {
     expect(te?.segments[0]?.kind).toBe('WORK');
   });
 
-  it('ADMIN and OWNER also auto-approve', async () => {
+  it('ADMIN also auto-approves', async () => {
     const s = await seed();
-    for (const role of [s.admin, s.owner]) {
-      const res = await request(app)
-        .post('/v1/time-requests')
-        .set(auth(role.token))
-        .send({ clientUuid: `cu-${ulid()}`, ...sample });
-      expect(res.status).toBe(201);
-      expect(res.body.status).toBe('APPROVED');
-      expect(res.body.autoApproved).toBe(true);
-    }
+    const res = await request(app)
+      .post('/v1/time-requests')
+      .set(auth(s.admin.token))
+      .send({ clientUuid: `cu-${ulid()}`, ...sample });
+    expect(res.status).toBe(201);
+    expect(res.body.status).toBe('APPROVED');
+    expect(res.body.autoApproved).toBe(true);
   });
 
   it('MEMBER stays PENDING (traditional approver flow)', async () => {

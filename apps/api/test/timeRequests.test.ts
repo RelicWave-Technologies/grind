@@ -87,6 +87,7 @@ describe('POST /v1/time-requests — submit', () => {
       userId: requester.userId,
       approverId: admin.id,
       larkTaskGuid: 'guid-T',
+      taskSummary: 'Ship M10',
       reason: b.reason,
     });
     expect(res.body.larkMessageId).toBe('om_fake_1');
@@ -95,6 +96,7 @@ describe('POST /v1/time-requests — submit', () => {
     const row = await prisma.manualTimeRequest.findUnique({ where: { id: res.body.id } });
     expect(row).not.toBeNull();
     expect(row!.status).toBe('PENDING');
+    expect(row!.taskSummary).toBe('Ship M10');
     expect(row!.larkMessageId).toBe('om_fake_1');
 
     // The messenger was called with the admin's open_id and a real card payload.
@@ -198,5 +200,47 @@ describe('GET /v1/time-requests — list', () => {
     expect(pending.body.requests).toHaveLength(0);
     const approved = await request(app).get('/v1/time-requests?status=APPROVED').set('Authorization', `Bearer ${requester.accessToken}`);
     expect(approved.body.requests).toHaveLength(1);
+  });
+
+  it('filters the caller submissions by local-day range and returns people summaries', async () => {
+    const { requester, admin } = await seedWorkspaceWithApprover();
+    const inRange = await request(app)
+      .post('/v1/time-requests')
+      .set('Authorization', `Bearer ${requester.accessToken}`)
+      .send(body({ clientUuid: 'cu-in-range', larkTaskGuid: 'task-in-range', taskSummary: 'Write launch notes' }));
+    await request(app)
+      .post('/v1/time-requests')
+      .set('Authorization', `Bearer ${requester.accessToken}`)
+      .send(body({
+        clientUuid: 'cu-out-range',
+        requestedStart: '2026-06-03T09:00:00.000Z',
+        requestedEnd: '2026-06-03T10:00:00.000Z',
+      }));
+
+    const res = await request(app)
+      .get('/v1/time-requests?from=2026-05-29&to=2026-05-29&tz=UTC')
+      .set('Authorization', `Bearer ${requester.accessToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ from: '2026-05-29', to: '2026-05-29', tz: 'UTC' });
+    expect(res.body.requests).toHaveLength(1);
+    expect(res.body.requests[0].id).toBe(inRange.body.id);
+    expect(res.body.requests[0].taskSummary).toBe('Write launch notes');
+    expect(res.body.requests[0].user).toMatchObject({ id: requester.userId });
+    expect(res.body.requests[0].approver).toMatchObject({ id: admin.id, name: 'Manager Mira' });
+  });
+
+  it('rejects invalid self-list ranges', async () => {
+    const { requester } = await seedWorkspaceWithApprover();
+    const inverted = await request(app)
+      .get('/v1/time-requests?from=2026-06-02&to=2026-06-01&tz=UTC')
+      .set('Authorization', `Bearer ${requester.accessToken}`);
+    expect(inverted.status).toBe(400);
+    expect(inverted.body.error).toBe('invalid_range');
+
+    const tooLong = await request(app)
+      .get('/v1/time-requests?from=2026-01-01&to=2026-03-15&tz=UTC')
+      .set('Authorization', `Bearer ${requester.accessToken}`);
+    expect(tooLong.status).toBe(400);
+    expect(tooLong.body.error).toBe('range_too_long');
   });
 });

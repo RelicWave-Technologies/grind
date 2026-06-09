@@ -60,7 +60,7 @@ export async function decideRequest(args: {
         card: buildDecidedCard({
           requestId: req.id,
           requesterName: req.user.name,
-          taskSummary: null,
+          taskSummary: req.taskSummary,
           startedAt: req.requestedStart.getTime(),
           endedAt: req.requestedEnd.getTime(),
           reason: req.reason,
@@ -76,7 +76,7 @@ export async function decideRequest(args: {
     const card = buildDecidedCard({
       requestId: req.id,
       requesterName: req.user.name,
-      taskSummary: null,
+      taskSummary: req.taskSummary,
       startedAt: req.requestedStart.getTime(),
       endedAt: req.requestedEnd.getTime(),
       reason: req.reason,
@@ -132,7 +132,7 @@ export async function decideRequest(args: {
   const card = buildDecidedCard({
     requestId: req.id,
     requesterName: req.user.name,
-    taskSummary: null,
+    taskSummary: req.taskSummary,
     startedAt: req.requestedStart.getTime(),
     endedAt: req.requestedEnd.getTime(),
     reason: req.reason,

@@ -1,12 +1,140 @@
 /* ============================================================================
-   HOME — page-specific LAYOUT only. Every visual (colour, type, border,
-   shadow, radius) comes from the shared kit (src/ui) + tokens. This file may
-   contain nothing but grid/flex placement, gaps, and token-driven alignment.
-   Every class is `hm-`.
+   HOME — page-specific layout only. Visual language comes from the shared
+   dashboard kit and tokens: white canvas, hairlines, pills, one grouped
+   pastel KPI zone.
    ========================================================================== */
 
-/* Quick-link leading glyph: align the lucide icon inside the List leading slot
-   and tint it from the canonical ink token (no bespoke colour). */
+.hm-page {
+  --hm-leading-col: var(--ui-sp-8);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-sp-6);
+}
+
+.hm-command-card .ui-card__body {
+  min-width: 0;
+}
+
+.hm-command {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) repeat(3, minmax(0, 1fr));
+  gap: var(--ui-sp-3);
+  align-items: stretch;
+}
+
+.hm-home-metric {
+  min-width: 0;
+  min-height: calc(var(--ui-sp-12) * 2);
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  align-items: start;
+  gap: var(--ui-sp-4);
+  padding: var(--ui-sp-6);
+  border: 1px solid transparent;
+  border-radius: var(--ui-r-md);
+  background: var(--ui-surface);
+}
+
+.hm-home-metric.is-featured {
+  padding-inline: var(--ui-sp-7);
+}
+
+.hm-home-metric--lime {
+  background: var(--ui-lime);
+}
+
+.hm-home-metric--cream {
+  background: var(--ui-cream);
+}
+
+.hm-home-metric--coral {
+  background: var(--ui-coral);
+}
+
+.hm-home-metric--mint {
+  background: var(--ui-mint);
+}
+
+.hm-home-metric__value {
+  align-self: center;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ui-ink);
+}
+
+.hm-home-metric__sub {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hm-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.42fr) minmax(calc(var(--ui-sp-12) * 4), 0.9fr);
+  grid-template-areas:
+    "timeline actions"
+    "approval context";
+  gap: var(--ui-sp-5);
+  align-items: stretch;
+}
+
+.hm-grid > .ui-card {
+  min-width: 0;
+  height: 100%;
+}
+
+.hm-grid-card--timeline {
+  grid-area: timeline;
+}
+
+.hm-grid-card--actions {
+  grid-area: actions;
+}
+
+.hm-grid-card--approval {
+  grid-area: approval;
+}
+
+.hm-grid-card--context {
+  grid-area: context;
+}
+
+.hm-actions-card {
+  align-self: stretch;
+}
+
+.hm-page .ui-list-row {
+  min-width: 0;
+}
+
+.hm-page .ui-list-row__leading {
+  width: var(--hm-leading-col);
+  justify-content: center;
+}
+
+.hm-page .ui-list-row__meta {
+  max-width: calc(var(--ui-sp-12) * 1.5);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hm-page .ui-list-row__sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hm-page .ui-list-row__trailing {
+  width: var(--ui-sp-5);
+  justify-content: flex-end;
+}
+
 .hm-link-icon {
   display: flex;
   align-items: center;
@@ -14,7 +142,185 @@
   color: var(--ui-ink-3);
 }
 
-/* Trailing affordance chevron — same token ink as other meta. */
 .hm-link-chevron {
   color: var(--ui-ink-3);
+}
+
+.hm-day-brief {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--ui-sp-3);
+  margin-bottom: var(--ui-sp-4);
+}
+
+.hm-info-pill {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-sp-3);
+  padding: var(--ui-sp-3) var(--ui-sp-4);
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-sm);
+  background: var(--ui-surface-inset);
+}
+
+.hm-info-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ui-ink);
+}
+
+.hm-ribbon-shell {
+  min-width: 0;
+  padding: var(--ui-sp-3) var(--ui-sp-4);
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-md);
+  background: var(--ui-surface);
+}
+
+.hm-ribbon-shell .ribbon {
+  --ribbon-h: calc(var(--ui-sp-8) + var(--ui-sp-2));
+  padding: var(--ui-sp-2) 0 var(--ui-sp-6);
+}
+
+.hm-ribbon-shell .ribbon-track {
+  border-radius: var(--ui-r-sm);
+}
+
+.hm-ribbon-shell .ribbon-ticks {
+  height: var(--ui-sp-5);
+}
+
+.hm-timeline-insights {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 0.72fr) minmax(0, 1.28fr);
+  gap: var(--ui-sp-4);
+  align-items: center;
+  margin-top: var(--ui-sp-4);
+  padding-top: var(--ui-sp-4);
+  border-top: 1px solid var(--ui-line-faint);
+}
+
+.hm-timeline-insight {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-sp-2);
+}
+
+.hm-activity-readout {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: var(--ui-sp-3);
+}
+
+.hm-activity-value {
+  color: var(--ui-ink);
+}
+
+.hm-app-strip {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ui-sp-2);
+}
+
+.hm-app-chip {
+  min-width: 0;
+  max-width: 100%;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-sp-2);
+  padding: var(--ui-sp-2) var(--ui-sp-3);
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-full);
+  background: var(--ui-surface-inset);
+  color: var(--ui-ink);
+}
+
+.hm-app-chip__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ui-ink);
+}
+
+.hm-app-chip__time {
+  flex: 0 0 auto;
+  color: var(--ui-ink-2);
+}
+
+.hm-app-empty {
+  color: var(--ui-ink-2);
+}
+
+.hm-approval-card .ui-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-sp-4);
+}
+
+.hm-approval-summary {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-sp-3);
+  padding: var(--ui-sp-5);
+  border-radius: var(--ui-r-md);
+  background: var(--ui-cream);
+}
+
+.hm-approval-summary__value {
+  display: block;
+}
+
+.hm-approval-list .ui-list-row__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 1120px) {
+  .hm-command {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .hm-grid {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "timeline"
+      "actions"
+      "approval"
+      "context";
+  }
+}
+
+@media (max-width: 760px) {
+  .hm-command,
+  .hm-day-brief,
+  .hm-timeline-insights {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .hm-home-metric,
+  .hm-home-metric.is-featured {
+    min-height: auto;
+    padding: var(--ui-sp-5);
+  }
+
+  .hm-info-pill {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: var(--ui-sp-1);
+  }
+
+  .hm-page .ui-list-row__meta {
+    max-width: 100%;
+  }
 }

@@ -1,6 +1,6 @@
 import { Outlet, Link, useRouteContext, useNavigate, useLocation } from '@tanstack/react-router';
-import { Home, Users, Clock4, Inbox, LayoutGrid, CalendarCheck, ShieldAlert, Building2, Sunrise, LogOut, ShieldCheck, FileSpreadsheet, Compass } from 'lucide-react';
-import { isAdmin, isManagerOrAbove, useLogout } from '../lib/auth';
+import { Home, Clock4, Inbox, LayoutGrid, CalendarCheck, ShieldAlert, Building2, Sunrise, LogOut, ShieldCheck, FileSpreadsheet, Compass, FileText, User } from 'lucide-react';
+import { hasCapability, isAdmin, isManagerOrAbove, useLogout, type Permission } from '../lib/auth';
 import {
   AppShell,
   Sidebar,
@@ -14,19 +14,19 @@ interface NavEntry {
   to: string;
   label: string;
   Icon: typeof Home;
-  /** Roles that may see this item. */
-  show: 'all' | 'manager+' | 'admin';
+  show: 'all' | 'manager+' | 'admin' | { permission: Permission } | { anyPermission: Permission[] };
 }
 
 const NAV: NavEntry[] = [
   { to: '/', label: 'Home', Icon: Home, show: 'all' },
   { to: '/overview', label: 'Overview', Icon: Compass, show: 'manager+' },
-  { to: '/me-today', label: 'My Day', Icon: Clock4, show: 'all' },
+  { to: '/edit-time', label: 'Edit Time', Icon: Clock4, show: 'all' },
+  { to: '/reports', label: 'Reports', Icon: FileText, show: { permission: 'reports.self.read' } },
+  { to: '/approvals', label: 'Approvals', Icon: Inbox, show: { permission: 'approvals.self.read' } },
+  { to: '/profile', label: 'Profile', Icon: User, show: { permission: 'profile.self.read' } },
   { to: '/team', label: 'Team', Icon: LayoutGrid, show: 'manager+' },
   { to: '/attendance', label: 'Attendance', Icon: CalendarCheck, show: 'manager+' },
-  { to: '/approvals', label: 'Approvals', Icon: Inbox, show: 'manager+' },
-  { to: '/flags', label: 'Anti-cheat', Icon: ShieldAlert, show: 'manager+' },
-  { to: '/users', label: 'People', Icon: Users, show: 'all' /* scope handles privilege */ },
+  { to: '/flags', label: 'Anti-cheat', Icon: ShieldAlert, show: { anyPermission: ['flags.team.review', 'flags.workspace.review'] } },
   { to: '/teams', label: 'Teams', Icon: Building2, show: 'admin' },
   { to: '/shifts', label: 'Shifts', Icon: Sunrise, show: 'admin' },
   { to: '/policy', label: 'Policy', Icon: ShieldCheck, show: 'admin' },
@@ -43,6 +43,8 @@ export function Layout() {
     if (n.show === 'all') return true;
     if (n.show === 'manager+') return isManagerOrAbove(me.role);
     if (n.show === 'admin') return isAdmin(me.role);
+    if ('permission' in n.show) return hasCapability(me, n.show.permission);
+    if ('anyPermission' in n.show) return n.show.anyPermission.some((permission) => hasCapability(me, permission));
     return false;
   });
 
@@ -64,7 +66,7 @@ export function Layout() {
               <Avatar name={me.name} size={32} />
               <div className="ui-sidebar__me-meta">
                 <div className="ui-sidebar__me-name ui-t-strong">{me.name}</div>
-                <div className="ui-t-small ui-ink-3">{me.role}</div>
+                <div className="ui-t-small ui-ink-3">{me.displayRole}</div>
               </div>
             </div>
             <Button

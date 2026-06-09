@@ -70,15 +70,22 @@ export interface IconButtonProps
 }
 
 export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(
-  function IconButton({ icon, variant = 'ghost', size = 'md', className, ...rest }, ref) {
+  function IconButton({ icon, variant = 'ghost', size = 'md', loading, disabled, className, ...rest }, ref) {
     return (
       <button
         ref={ref}
         type="button"
-        className={cx('ui-btn', 'ui-btn--icon', `ui-btn--${variant}`, `ui-btn--${size}`, className)}
+        className={cx('ui-btn', 'ui-btn--icon', `ui-btn--${variant}`, `ui-btn--${size}`, loading && 'is-loading', className)}
+        disabled={disabled || loading}
+        aria-busy={loading || undefined}
         {...rest}
       >
         <span className="ui-btn__icon">{icon}</span>
+        {loading && (
+          <span className="ui-btn__spin">
+            <Spinner size={14} />
+          </span>
+        )}
       </button>
     );
   },

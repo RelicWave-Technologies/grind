@@ -30,7 +30,7 @@ import {
  * bespoke colour, type, border, or shadow (see overview.css).
  *
  * A single round-trip to /v1/admin/overview powers everything. For MEMBER the
- * `/` route redirects to /me-today, so they never reach this surface.
+ * `/` route redirects to /edit-time, so they never reach this surface.
  */
 
 interface OverviewResponse {
@@ -119,9 +119,9 @@ export function OverviewScreen() {
               variant="ghost"
               size="sm"
               icon={<Clock4 size={15} strokeWidth={1.8} />}
-              onClick={() => navigate({ to: '/me-today' })}
+              onClick={() => navigate({ to: '/edit-time' })}
             >
-              My Day
+              Edit Time
             </Button>
             <Button
               variant="ghost"

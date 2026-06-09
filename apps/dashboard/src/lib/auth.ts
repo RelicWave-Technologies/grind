@@ -1,13 +1,37 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from './api';
 
-export type Role = 'OWNER' | 'ADMIN' | 'MANAGER' | 'MEMBER';
+export type Role = 'ADMIN' | 'MANAGER' | 'MEMBER';
+export type Permission =
+  | 'profile.self.read'
+  | 'reports.self.read'
+  | 'reports.team.read'
+  | 'reports.workspace.read'
+  | 'time.self.edit'
+  | 'time.team.edit'
+  | 'people.read'
+  | 'people.manage'
+  | 'teams.read'
+  | 'teams.manage'
+  | 'team.settings.manage'
+  | 'shifts.read'
+  | 'shifts.manage'
+  | 'policy.manage'
+  | 'approvals.self.read'
+  | 'approvals.team.decide'
+  | 'approvals.workspace.decide'
+  | 'flags.team.review'
+  | 'flags.workspace.review'
+  | 'payroll.manage'
+  | 'overview.read';
 
 export interface Me {
   id: string;
   email: string;
   name: string;
   role: Role;
+  displayRole: Role;
+  capabilities: Permission[];
   workspaceId: string;
   teamId: string | null;
   managerId: string | null;
@@ -63,8 +87,12 @@ export function useLogout() {
 }
 
 export function isAdmin(role: Role | undefined): boolean {
-  return role === 'OWNER' || role === 'ADMIN';
+  return role === 'ADMIN';
 }
 export function isManagerOrAbove(role: Role | undefined): boolean {
-  return role === 'OWNER' || role === 'ADMIN' || role === 'MANAGER';
+  return role === 'ADMIN' || role === 'MANAGER';
+}
+
+export function hasCapability(me: Pick<Me, 'capabilities'> | null | undefined, permission: Permission): boolean {
+  return !!me?.capabilities?.includes(permission);
 }

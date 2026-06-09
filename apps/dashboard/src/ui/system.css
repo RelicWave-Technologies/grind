@@ -411,6 +411,29 @@
 .ui-btn:disabled { color: var(--ui-ink-disabled); background: var(--ui-surface-inset); border-color: transparent; cursor: not-allowed; }
 .ui-btn__icon { display: inline-flex; align-items: center; flex-shrink: 0; }
 
+.ui-app-icon {
+  display: inline-grid;
+  place-items: center;
+  width: var(--ui-sp-7);
+  height: var(--ui-sp-7);
+  flex: 0 0 var(--ui-sp-7);
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-sm);
+  background: var(--ui-surface-inset);
+  color: var(--ui-ink);
+  overflow: hidden;
+}
+
+.ui-app-icon img {
+  width: calc(100% - var(--ui-sp-2));
+  height: calc(100% - var(--ui-sp-2));
+  object-fit: contain;
+}
+
+.ui-app-icon__initial {
+  line-height: 1;
+}
+
 .ui-btn--sm { height: 28px; padding: 0 var(--ui-sp-3); font-size: 12.5px; }
 .ui-btn--md { height: var(--ui-control-h); }
 .ui-btn--lg { height: 36px; padding: 0 var(--ui-sp-5); }
@@ -664,16 +687,33 @@ textarea.ui-control { height: auto; min-height: 80px; padding: var(--ui-sp-3) va
 
 .ui-date-stepper { display: inline-flex; align-items: center; gap: var(--ui-sp-2); }
 .ui-date-stepper__pill {
-  display: inline-flex; align-items: center; justify-content: center;
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--ui-sp-2);
   height: var(--ui-control-h);
   padding: 0 var(--ui-sp-4);
   background: var(--ui-surface-inset);
+  border: 1px solid transparent;
   border-radius: var(--ui-r-sm);
   font-family: var(--ui-font-mono);
   font-variant-numeric: tabular-nums;
   font-size: 13px;
   color: var(--ui-ink);
   white-space: nowrap;
+}
+.ui-date-stepper__pill-button {
+  appearance: none;
+  cursor: pointer;
+  transition:
+    background var(--ui-dur-fast) var(--ui-ease),
+    border-color var(--ui-dur-fast) var(--ui-ease);
+}
+.ui-date-stepper__pill-button:hover,
+.ui-date-stepper__pill-button.is-open {
+  background: var(--ui-surface);
+  border-color: var(--ui-line);
+}
+.ui-date-stepper__pill-button:focus-visible {
+  outline: none;
+  box-shadow: var(--ui-focus-ring);
 }
 
 /* ============================================================================

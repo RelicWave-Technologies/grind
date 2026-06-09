@@ -20,7 +20,7 @@ async function seed() {
   const stamp = `${Date.now()}-${counter}`;
   const ws = await prisma.workspace.create({ data: { name: `WS-shifts-${stamp}` } });
   const wsOther = await prisma.workspace.create({ data: { name: `WS-other-${stamp}` } });
-  const mk = (workspaceId: string, tag: string, role: 'OWNER' | 'ADMIN' | 'MANAGER' | 'MEMBER') =>
+  const mk = (workspaceId: string, tag: string, role: 'ADMIN' | 'MANAGER' | 'MEMBER') =>
     prisma.user.create({
       data: {
         workspaceId,
@@ -30,19 +30,17 @@ async function seed() {
         passwordHash: 'x'.repeat(60),
       },
     });
-  const owner = await mk(ws.id, 'owner', 'OWNER');
   const admin = await mk(ws.id, 'admin', 'ADMIN');
   const mgr = await mk(ws.id, 'mgr', 'MANAGER');
   const mem = await mk(ws.id, 'mem', 'MEMBER');
   const bystander = await mk(wsOther.id, 'by', 'MEMBER');
 
-  const tok = (u: { id: string; role: 'OWNER' | 'ADMIN' | 'MANAGER' | 'MEMBER' }, wsId = ws.id) =>
+  const tok = (u: { id: string; role: 'ADMIN' | 'MANAGER' | 'MEMBER' }, wsId = ws.id) =>
     signAccessToken({ sub: u.id, ws: wsId, role: u.role });
 
   return {
     ws,
     wsOther,
-    owner: { id: owner.id, token: tok(owner) },
     admin: { id: admin.id, token: tok(admin) },
     mgr: { id: mgr.id, token: tok(mgr) },
     mem: { id: mem.id, token: tok(mem) },

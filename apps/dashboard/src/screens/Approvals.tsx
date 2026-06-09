@@ -1,51 +1,56 @@
 import './approvals.css';
 import { useMemo, useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Check, X, Sparkles, Inbox } from 'lucide-react';
+import type { ReactNode } from 'react';
+import { createPortal } from 'react-dom';
+import { useNavigate, useRouteContext } from '@tanstack/react-router';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { CalendarDays, Check, ChevronLeft, ChevronRight, Clock4, Inbox, X } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
-import type { ManualTimeRequest, DecideResult, MtrStatus } from '../lib/types';
-import { fmtTime, fmtDurationMs, fmtDayLabel, fmtAgeShort } from '../lib/format';
+import { hasCapability } from '../lib/auth';
+import type { DecideResult, ManualTimeRequest, MtrStatus, MtrUserSummary } from '../lib/types';
+import { addDays, fmtAgeShort, fmtDayLabel, fmtDurationMs, fmtTime, todayKey } from '../lib/format';
+import type { TaskOption } from '../components/TaskCombo';
 import {
+  Avatar,
+  Banner,
+  Button,
+  Card,
+  EmptyState,
+  IconButton,
+  Identity,
   Page,
   PageHeader,
-  Card,
+  Segmented,
+  SkeletonTable,
   Stat,
   StatRow,
+  Table,
   Tabs,
-  Segmented,
-  Toolbar,
-  Identity,
-  Avatar,
   Tag,
-  Button,
-  Banner,
-  EmptyState,
-  Skeleton,
+  Tbody,
+  Td,
+  Th,
+  THead,
+  Toolbar,
+  Tr,
 } from '../ui';
-import type { Status } from '../ui';
+import type { Rail, Status } from '../ui';
 
-const STUCK_THRESHOLD_MS = 48 * 60 * 60 * 1000;
+type ApprovalMode = 'you' | 'team';
+type ApprovalFilter = 'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED';
 
-interface ListResponse {
-  requests: ManualTimeRequest[];
-  scope: 'self' | 'team' | 'workspace';
-}
+const MODE_TABS: ReadonlyArray<{ value: ApprovalMode; label: string }> = [
+  { value: 'you', label: 'You' },
+  { value: 'team', label: 'Team' },
+];
 
-const SCOPE_LABEL: Record<ListResponse['scope'], string> = {
-  self: 'Just you',
-  team: 'Your team',
-  workspace: 'Entire workspace',
-};
-
-type TabValue = 'PENDING' | 'APPROVED' | 'REJECTED';
-
-const TABS: ReadonlyArray<{ value: TabValue; label: string }> = [
+const FILTER_TABS: ReadonlyArray<{ value: ApprovalFilter; label: string }> = [
+  { value: 'ALL', label: 'All' },
   { value: 'PENDING', label: 'Pending' },
-  { value: 'APPROVED', label: 'Approved' },
+  { value: 'APPROVED', label: 'Accepted' },
   { value: 'REJECTED', label: 'Rejected' },
 ];
 
-/** Status taxonomy for a request's decision tag. */
 const STATUS_TAG: Record<MtrStatus, Status> = {
   PENDING: 'warn',
   APPROVED: 'success',
@@ -53,341 +58,902 @@ const STATUS_TAG: Record<MtrStatus, Status> = {
   CANCELLED: 'neutral',
 };
 
-/** Triage verdict → kit status taxonomy (approve safe, review caution, reject danger). */
-const TRIAGE_STATUS: Record<NonNullable<ManualTimeRequest['triage']>['verdict'], Status> = {
-  approve: 'success',
-  review: 'warn',
-  reject: 'danger',
+interface ApprovalListResponse<T> {
+  from?: string;
+  to?: string;
+  tz?: string;
+  scope?: 'self' | 'team' | 'workspace';
+  requests: T[];
+}
+
+interface SelfApprovalRequest {
+  id: string;
+  status: MtrStatus;
+  requestedStart: string;
+  requestedEnd: string;
+  reason: string;
+  larkTaskGuid: string | null;
+  taskSummary?: string | null;
+  decidedAt: string | null;
+  decidedReason: string | null;
+  createdAt: string;
+  approverId: string | null;
+  approver?: MtrUserSummary | null;
+}
+
+type ApprovalRequest = SelfApprovalRequest | ManualTimeRequest;
+
+interface ApprovalTableRow {
+  source: ApprovalMode;
+  req: ApprovalRequest;
+  requester: MtrUserSummary | null;
+}
+
+type ApprovalTaskReadout = {
+  kind: 'known' | 'missing' | 'none';
+  label: string;
+  reference: string | null;
 };
 
-/**
- * /approvals — manager/admin queue of ManualTimeRequest decisions, composed from
- * the shared "Quiet Datasheet" kit (SYSTEM.md). The PageHeader carries scope +
- * title + a live subline, with status Tabs docked on the rule and a stuck-only
- * Segmented in the toolbar. Pending shows a StatRow (Pending / Stuck). Each
- * request is a Card: requester Identity, a status Tag + age, a label/value time
- * block, the AI-triage read as a quiet note in its taxonomy colour, and the
- * approve / reject (inline reason) actions as kit Buttons. Stuck items (waiting
- * ≥48h) carry the warn taxonomy so they read at a glance.
- *
- * Mirror of the Lark IM card flow — same DB writes, plus a best-effort card
- * refresh server-side so chat history stays in sync. Defaults to Pending;
- * toggle filters in the header. Behaviour is unchanged — presentation only.
- */
 export function ApprovalsScreen() {
-  const [tab, setTab] = useState<TabValue>('PENDING');
-  const [stuckOnly, setStuckOnly] = useState(false);
-  const qc = useQueryClient();
+  const { me } = useRouteContext({ from: '/authed' });
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  const today = todayKey();
+  const canReview =
+    hasCapability(me, 'approvals.team.decide') ||
+    hasCapability(me, 'approvals.workspace.decide');
+  const [mode, setMode] = useState<ApprovalMode>(() => (canReview ? 'team' : 'you'));
+  const activeMode: ApprovalMode = canReview ? mode : 'you';
+  const [from, setFrom] = useState(() => addDays(today, -6));
+  const [to, setTo] = useState(today);
+  const [filter, setFilter] = useState<ApprovalFilter>('ALL');
+  const [selectedRow, setSelectedRow] = useState<ApprovalTableRow | null>(null);
 
-  const q = useQuery({
-    queryKey: ['admin', 'mtr', tab],
-    queryFn: () => api<ListResponse>(`/v1/admin/manual-time-requests?status=${tab}`),
+  const selfQ = useQuery({
+    queryKey: ['approvals', 'you', from, to, tz],
+    enabled: activeMode === 'you',
+    queryFn: () =>
+      api<ApprovalListResponse<SelfApprovalRequest>>(
+        `/v1/time-requests?${new URLSearchParams({ role: 'mine', from, to, tz }).toString()}`,
+      ),
   });
 
-  // Client-side stuck filter + age sort. The list endpoint already
-  // returns createdAt — we don't ask the server to paginate by age
-  // because manager queues are small (≤ ~50 rows in practice).
-  const visible = useMemo(() => {
-    if (!q.data) return [];
-    const now = Date.now();
-    let rows = q.data.requests;
-    if (tab === 'PENDING' && stuckOnly) {
-      rows = rows.filter((r) => now - new Date(r.createdAt).getTime() >= STUCK_THRESHOLD_MS);
-    }
-    if (tab === 'PENDING') {
-      // Oldest first — stuck items rise to the top of the queue.
-      rows = [...rows].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
-    }
-    return rows;
-  }, [q.data, tab, stuckOnly]);
+  const teamQ = useQuery({
+    queryKey: ['approvals', 'team', from, to, tz],
+    enabled: canReview && activeMode === 'team',
+    queryFn: () =>
+      api<ApprovalListResponse<ManualTimeRequest>>(
+        `/v1/admin/manual-time-requests?${new URLSearchParams({ status: 'ALL', from, to, tz }).toString()}`,
+      ),
+  });
 
-  const stuckCount = useMemo(() => {
-    if (!q.data || tab !== 'PENDING') return 0;
-    const now = Date.now();
-    return q.data.requests.filter((r) => now - new Date(r.createdAt).getTime() >= STUCK_THRESHOLD_MS).length;
-  }, [q.data, tab]);
+  const tasksQ = useQuery({
+    queryKey: ['lark', 'my-tasks', 'approval-labels'],
+    enabled: activeMode === 'you',
+    queryFn: async () => {
+      try {
+        return await api<{ tasks: TaskOption[] }>('/v1/lark/my-tasks');
+      } catch {
+        return { tasks: [] };
+      }
+    },
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
+
+  const taskMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const task of tasksQ.data?.tasks ?? []) map.set(task.guid, task.summary);
+    return map;
+  }, [tasksQ.data?.tasks]);
 
   const decide = useMutation({
-    mutationFn: async (vars: { id: string; action: 'approve' | 'reject'; reason?: string }) => {
+    mutationFn: async (vars: { id: string; action: 'approve' | 'reject' }) => {
       return api<DecideResult>(`/v1/admin/manual-time-requests/${vars.id}/decide`, {
         method: 'POST',
-        json: { action: vars.action, reason: vars.reason },
+        json: { action: vars.action },
       });
     },
     onSuccess: () => {
-      // Both the source tab AND the destination tab change — invalidate
-      // every status bucket so a freshly-decided row vanishes from
-      // pending and shows up in approved/rejected next time it's opened.
-      qc.invalidateQueries({ queryKey: ['admin', 'mtr'] });
+      queryClient.invalidateQueries({ queryKey: ['approvals', 'team'] });
+      queryClient.invalidateQueries({ queryKey: ['reports', 'team'] });
     },
   });
 
-  const subLine = q.data
-    ? tab === 'PENDING'
-      ? visible.length === 0
-        ? 'Nothing waiting on you'
-        : `${visible.length} awaiting review${stuckCount > 0 ? ` · ${stuckCount} stuck` : ''}`
-      : `${visible.length} ${tab.toLowerCase()} in scope`
-    : 'Loading the queue';
+  const rows: ApprovalTableRow[] = useMemo(() => {
+    if (activeMode === 'team') {
+      return (teamQ.data?.requests ?? []).map((req) => ({ source: 'team', req, requester: req.user }));
+    }
+    return (selfQ.data?.requests ?? []).map((req) => ({ source: 'you', req, requester: null }));
+  }, [activeMode, selfQ.data?.requests, teamQ.data?.requests]);
 
-  const showStats = tab === 'PENDING' && !!q.data;
+  const visible = useMemo(() => {
+    const filtered = filter === 'ALL' ? rows : rows.filter((row) => row.req.status === filter);
+    return [...filtered].sort((a, b) => {
+      const priority = statusPriority(a.req.status) - statusPriority(b.req.status);
+      if (priority !== 0) return priority;
+      return new Date(b.req.requestedStart).getTime() - new Date(a.req.requestedStart).getTime();
+    });
+  }, [filter, rows]);
+
+  const summary = useMemo(() => summarizeApprovals(rows.map((row) => row.req)), [rows]);
+  const activeQuery = activeMode === 'team' ? teamQ : selfQ;
+  const decisionError =
+    decide.isError && decide.variables
+      ? (decide.error as Error | ApiError).message
+      : null;
 
   return (
-    <Page>
+    <Page className="apv-page">
       <PageHeader
-        eyebrow={`${q.data ? SCOPE_LABEL[q.data.scope] : 'Manual time'} · Review`}
+        eyebrow={`${tz.replace(/_/g, ' ')} · ${from} to ${to}`}
         title="Approvals"
-        subtitle={subLine}
-        actions={
-          tab === 'PENDING' ? (
-            <Toolbar>
-              <Segmented
-                aria-label="Filter pending requests"
-                value={stuckOnly ? 'stuck' : 'all'}
-                onChange={(v) => setStuckOnly(v === 'stuck')}
-                items={[
-                  { value: 'all', label: 'All' },
-                  { value: 'stuck', label: stuckCount > 0 ? `Stuck · ${stuckCount}` : 'Stuck' },
-                ]}
-              />
-            </Toolbar>
-          ) : undefined
+        subtitle={
+          activeMode === 'team'
+            ? 'Review manual time from your scoped team and keep Lark decisions in sync.'
+            : 'Every manual-time approval you sent.'
         }
-        tabs={
-          <Tabs
-            aria-label="Request status"
-            value={tab}
-            onChange={(t) => {
-              setTab(t);
-              if (t !== 'PENDING') setStuckOnly(false);
-            }}
-            items={TABS}
-          />
+        actions={
+          <Toolbar>
+            {canReview && (
+              <Segmented
+                aria-label="Approval view"
+                value={activeMode}
+                onChange={(next) => {
+                  setMode(next);
+                  setFilter('ALL');
+                  setSelectedRow(null);
+                }}
+                items={MODE_TABS}
+              />
+            )}
+            <ApprovalDateRangePicker
+              from={from}
+              to={to}
+              today={today}
+              onChange={(nextFrom, nextTo) => {
+                setFrom(nextFrom);
+                setTo(nextTo);
+                setSelectedRow(null);
+              }}
+            />
+          </Toolbar>
         }
       />
 
-      {showStats && (
-        <Card variant="flush">
-          <StatRow>
-            <Stat label="Pending" value={visible.length} />
-            <Stat label="Stuck ≥48h" value={stuckCount} hint="Waiting too long" />
-          </StatRow>
-        </Card>
-      )}
+      <Card variant="flush" className="apv-summary-card">
+        <StatRow>
+          <Stat label={activeMode === 'team' ? 'In scope' : 'Sent'} value={summary.total} hint={fmtDurationMs(summary.totalMs)} />
+          <Stat label="Pending" value={summary.pending} hint={fmtDurationMs(summary.pendingMs)} />
+          <Stat label="Accepted" value={summary.accepted} hint={fmtDurationMs(summary.acceptedMs)} />
+          <Stat label="Rejected" value={summary.rejected} hint={fmtDurationMs(summary.rejectedMs)} />
+        </StatRow>
+      </Card>
 
-      {q.isLoading && (
-        <div className="apv-list">
-          {[0, 1, 2].map((i) => (
-            <Card key={i}>
-              <div className="apv-skeleton">
-                <Skeleton w={180} h={20} />
-                <Skeleton w="60%" h={14} />
-                <Skeleton w="40%" h={14} />
-              </div>
-            </Card>
-          ))}
+      <Card variant="flush" className="apv-table-card">
+        <div className="apv-table-head">
+          <div>
+            <h2 className="ui-t-title">{activeMode === 'team' ? 'Team approvals' : 'Your approvals'}</h2>
+            <p className="ui-t-small">
+              {activeMode === 'team'
+                ? 'Approve or reject pending manual time directly from the row.'
+                : 'Click a row to inspect the full request.'}
+            </p>
+          </div>
+          <Tabs
+            aria-label="Approval status"
+            value={filter}
+            onChange={setFilter}
+            items={FILTER_TABS}
+            className="apv-status-tabs"
+          />
         </div>
-      )}
 
-      {q.isError && (
-        <Banner status="danger">Couldn&apos;t load the queue — {(q.error as Error).message}</Banner>
-      )}
+        {activeQuery.isError && (
+          <div className="apv-table-banner">
+            <Banner status="danger">Couldn&apos;t load approvals — {(activeQuery.error as Error).message}</Banner>
+          </div>
+        )}
 
-      {q.data && visible.length === 0 && (
-        <EmptyState
-          icon={tab === 'PENDING' && !stuckOnly ? <Check size={22} strokeWidth={2} /> : <Inbox size={22} strokeWidth={1.8} />}
-          title={
-            tab === 'PENDING'
-              ? stuckOnly
-                ? 'Nothing stuck'
-                : 'Queue is clear'
-              : `No ${tab.toLowerCase()} requests`
-          }
-          description={
-            tab === 'PENDING'
-              ? stuckOnly
-                ? 'Everything pending is still fresh — nothing has been waiting too long.'
-                : 'No requests waiting on you right now. Nice work.'
-              : `No ${tab.toLowerCase()} requests in scope.`
-          }
+        {decisionError && (
+          <div className="apv-table-banner">
+            <Banner status="danger">Decision failed — {decisionError}</Banner>
+          </div>
+        )}
+
+        {activeQuery.isLoading ? (
+          <SkeletonTable rows={7} />
+        ) : visible.length === 0 ? (
+          <EmptyState
+            icon={<Inbox size={22} strokeWidth={1.8} />}
+            title={filter === 'ALL' ? 'No approvals in this range' : `No ${filterLabel(filter).toLowerCase()} approvals`}
+            description="Try a wider date range or a different status."
+          />
+        ) : (
+          <ApprovalTable
+            mode={activeMode}
+            rows={visible}
+            tz={tz}
+            taskMap={taskMap}
+            busyRequestId={decide.isPending ? decide.variables?.id ?? null : null}
+            busyAction={decide.isPending ? decide.variables?.action ?? null : null}
+            onSelect={setSelectedRow}
+            onOpenDay={(date, req, userId) => {
+              navigate({ to: '/edit-time', search: editTimeSearch(date, req, userId) });
+            }}
+            onApprove={(id) => decide.mutate({ id, action: 'approve' })}
+            onReject={(id) => decide.mutate({ id, action: 'reject' })}
+          />
+        )}
+      </Card>
+
+      {selectedRow && (
+        <ApprovalDetailsModal
+          row={selectedRow}
+          tz={tz}
+          task={approvalTaskReadout(selectedRow.req, taskMap)}
+          onClose={() => setSelectedRow(null)}
+          onOpenDay={(date, req, userId) => {
+            setSelectedRow(null);
+            navigate({ to: '/edit-time', search: editTimeSearch(date, req, userId) });
+          }}
         />
-      )}
-
-      {q.data && visible.length > 0 && (
-        <div className="apv-list">
-          {visible.map((r) => (
-            <ApprovalCard
-              key={r.id}
-              req={r}
-              busy={decide.isPending && decide.variables?.id === r.id}
-              decidedError={
-                decide.isError && decide.variables?.id === r.id
-                  ? (decide.error as Error | ApiError).message
-                  : null
-              }
-              onApprove={() => decide.mutate({ id: r.id, action: 'approve' })}
-              onReject={(reason) => decide.mutate({ id: r.id, action: 'reject', reason })}
-            />
-          ))}
-        </div>
       )}
     </Page>
   );
 }
 
-interface CardProps {
-  req: ManualTimeRequest;
-  busy: boolean;
-  decidedError: string | null;
-  onApprove: () => void;
-  onReject: (reason: string) => void;
-}
-
-function ApprovalCard({ req, busy, decidedError, onApprove, onReject }: CardProps) {
-  const [rejecting, setRejecting] = useState(false);
-  const [reason, setReason] = useState('');
-
-  const startMs = new Date(req.requestedStart).getTime();
-  const endMs = new Date(req.requestedEnd).getTime();
-  const dayLabel = fmtDayLabel(req.requestedStart.slice(0, 10));
-  const isPending = req.status === 'PENDING';
-  const ageMs = Date.now() - new Date(req.createdAt).getTime();
-  const isStuck = isPending && ageMs >= STUCK_THRESHOLD_MS;
-
+function ApprovalTable({
+  mode,
+  rows,
+  tz,
+  taskMap,
+  busyRequestId,
+  busyAction,
+  onSelect,
+  onOpenDay,
+  onApprove,
+  onReject,
+}: {
+  mode: ApprovalMode;
+  rows: ApprovalTableRow[];
+  tz: string;
+  taskMap: Map<string, string>;
+  busyRequestId: string | null;
+  busyAction: 'approve' | 'reject' | null;
+  onSelect: (row: ApprovalTableRow) => void;
+  onOpenDay: (date: string, req: ApprovalRequest, userId?: string) => void;
+  onApprove: (id: string) => void;
+  onReject: (id: string) => void;
+}) {
   return (
-    <Card>
-      <div className="apv-card">
-        <div className="apv-head">
-          <Identity
-            name={req.user.name}
-            subtitle={req.user.email}
-            avatar={<Avatar name={req.user.name} size={40} />}
-          />
-          <div className="apv-head-end">
-            {isPending && (
-              <Tag status={isStuck ? 'warn' : 'neutral'} mono dot={!isStuck}>
-                {fmtAgeShort(ageMs)}
-              </Tag>
-            )}
-            <Tag status={STATUS_TAG[req.status]}>{req.status}</Tag>
-          </div>
-        </div>
-
-        <dl className="apv-spec">
-          <div className="apv-row">
-            <dt className="apv-row__label ui-t-eyebrow">Time</dt>
-            <dd className="apv-row__value">
-              <span className="mono">
-                {dayLabel} · {fmtTime(startMs)} – {fmtTime(endMs)}
-              </span>
-              <Tag mono>{fmtDurationMs(endMs - startMs)}</Tag>
-            </dd>
-          </div>
-          <div className="apv-row">
-            <dt className="apv-row__label ui-t-eyebrow">Reason</dt>
-            <dd className="apv-row__value">{req.reason}</dd>
-          </div>
-          {req.larkTaskGuid && (
-            <div className="apv-row">
-              <dt className="apv-row__label ui-t-eyebrow">Task</dt>
-              <dd className="apv-row__value mono">{req.larkTaskGuid}</dd>
-            </div>
-          )}
-          {req.decidedReason && (
-            <div className="apv-row">
-              <dt className="apv-row__label ui-t-eyebrow">Reviewer</dt>
-              <dd className="apv-row__value">{req.decidedReason}</dd>
-            </div>
-          )}
-        </dl>
-
-        {req.triage && isPending && <TriageNote triage={req.triage} />}
-
-        {decidedError && <Banner status="danger">Failed — {decidedError}</Banner>}
-
-        {isPending && (
-          <div className="apv-actions">
-            {rejecting ? (
-              <form
-                className="apv-reject"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  onReject(reason.trim() || 'No reason given');
+    <div className="apv-table-wrap">
+      <Table density="compact" stickyHead className={`apv-table apv-table--${mode}`}>
+        <THead>
+          <Tr>
+            {mode === 'team' && <Th className="apv-col-member">Member</Th>}
+            <Th className="apv-col-date">Date</Th>
+            <Th className="apv-col-time">Requested</Th>
+            <Th className="apv-col-status" align="center">Status</Th>
+            <Th className="apv-col-reason">Reason</Th>
+            {mode === 'team' && <Th className="apv-col-actions" align="center">Action</Th>}
+          </Tr>
+        </THead>
+        <Tbody>
+          {rows.map((row) => {
+            const req = row.req;
+            const startMs = new Date(req.requestedStart).getTime();
+            const endMs = new Date(req.requestedEnd).getTime();
+            const date = dateKeyInTimeZone(startMs, tz);
+            const createdMs = new Date(req.createdAt).getTime();
+            const decidedMs = req.decidedAt ? new Date(req.decidedAt).getTime() : null;
+            const task = approvalTaskReadout(req, taskMap);
+            const userId = row.requester?.id;
+            const isBusy = busyRequestId === req.id;
+            return (
+              <Tr
+                key={`${row.source}-${req.id}`}
+                rail={railForApprovalStatus(req.status)}
+                className="apv-row"
+                tabIndex={0}
+                aria-label={`View approval details for ${date}`}
+                onClick={() => onSelect(row)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    onSelect(row);
+                  }
                 }}
               >
-                <input
-                  type="text"
-                  className="ui-control apv-reject__input"
-                  autoFocus
-                  placeholder="Why? (optional, shown to the requester)"
-                  value={reason}
-                  onChange={(e) => setReason(e.target.value)}
-                  maxLength={500}
-                />
-                <Button variant="ghost" onClick={() => setRejecting(false)} disabled={busy}>
-                  Cancel
-                </Button>
-                <Button type="submit" variant="danger" loading={busy}>
-                  Confirm reject
-                </Button>
-              </form>
-            ) : (
-              <>
-                <Button
-                  variant="ghost"
-                  icon={<X size={14} strokeWidth={2} />}
-                  onClick={() => setRejecting(true)}
-                  disabled={busy}
-                >
-                  Reject
-                </Button>
-                <Button
-                  variant="primary"
-                  icon={<Check size={14} strokeWidth={2.2} />}
-                  onClick={onApprove}
-                  loading={busy}
-                >
-                  Approve
-                </Button>
-              </>
-            )}
-          </div>
-        )}
-      </div>
-    </Card>
-  );
-}
-
-function TriageNote({ triage }: { triage: NonNullable<ManualTimeRequest['triage']> }) {
-  const status = TRIAGE_STATUS[triage.verdict];
-  const verdictLabel =
-    triage.verdict === 'approve' ? 'Likely safe' : triage.verdict === 'reject' ? 'Worth pushing back' : 'Take a look';
-  const confidencePct = Math.round(triage.confidence * 100);
-  return (
-    <div className="apv-triage" role="note" aria-label="AI triage suggestion">
-      <div className="apv-triage__head">
-        <span className="apv-triage__icon ui-t-eyebrow">
-          <Sparkles size={12} strokeWidth={2.2} />
-          AI read
-        </span>
-        <Tag status={status}>{verdictLabel}</Tag>
-        <span className="apv-triage__conf mono" title={`${confidencePct}% confidence`}>
-          {confidencePct}% sure
-        </span>
-      </div>
-      <ul className="apv-triage__signals" role="list">
-        {triage.signals.slice(0, 3).map((s) => (
-          <li key={s.id} className="apv-triage__sig">
-            <span className={`apv-triage__sigmark mono ${s.weight >= 0 ? 'apv-pos' : 'apv-neg'}`} aria-hidden>
-              {s.weight >= 0 ? '+' : '−'}
-            </span>
-            {s.text}
-          </li>
-        ))}
-      </ul>
+                {mode === 'team' && (
+                  <Td className="apv-col-member">
+                    {row.requester ? (
+                      <Identity
+                        name={row.requester.name}
+                        subtitle={row.requester.email}
+                        avatar={<Avatar name={row.requester.name} size={32} />}
+                      />
+                    ) : (
+                      <span className="ui-t-small">Unknown member</span>
+                    )}
+                  </Td>
+                )}
+                <Td className="apv-col-date">
+                  <div className="apv-date-cell">
+                    <span className="ui-t-strong">{fmtDayLabel(date)}</span>
+                    <span className="ui-t-small ui-ink-3">{date}</span>
+                  </div>
+                </Td>
+                <Td className="apv-col-time">
+                  <div className="apv-time-cell">
+                    <span className="ui-mono">{fmtTime(startMs, tz)} - {fmtTime(endMs, tz)}</span>
+                    <Tag mono>{fmtDurationMs(endMs - startMs)}</Tag>
+                  </div>
+                </Td>
+                <Td className="apv-col-status" align="center">
+                  <ApprovalStatusCell req={req} createdMs={createdMs} decidedMs={decidedMs} />
+                </Td>
+                <Td className="apv-col-reason">
+                  <div className="apv-reason-row">
+                    <div className="apv-reason-cell">
+                      <span className="apv-reason-main">{req.reason}</span>
+                      {task.kind !== 'none' && (
+                        <span className={`apv-reason-meta ui-t-small${task.kind === 'missing' ? ' is-missing' : ''}`}>
+                          {task.label}
+                        </span>
+                      )}
+                    </div>
+                    {mode === 'you' && (
+                      <IconButton
+                        className="apv-open-day"
+                        size="sm"
+                        variant="ghost"
+                        icon={<Clock4 size={13} strokeWidth={1.8} />}
+                        aria-label={`Open Edit Time for ${date}`}
+                        title="Open day"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onOpenDay(date, req);
+                        }}
+                      />
+                    )}
+                  </div>
+                </Td>
+                {mode === 'team' && (
+                  <Td className="apv-col-actions" align="center">
+                    <TeamDecisionCell
+                      req={req}
+                      busy={isBusy}
+                      busyAction={isBusy ? busyAction : null}
+                      onApprove={() => onApprove(req.id)}
+                      onReject={() => onReject(req.id)}
+                      onOpenDay={() => onOpenDay(date, req, userId)}
+                    />
+                  </Td>
+                )}
+              </Tr>
+            );
+          })}
+        </Tbody>
+      </Table>
     </div>
   );
 }
 
-// Suppress unused-type warning for an enum we re-export indirectly.
-export type { MtrStatus };
+function TeamDecisionCell({
+  req,
+  busy,
+  busyAction,
+  onApprove,
+  onReject,
+  onOpenDay,
+}: {
+  req: ApprovalRequest;
+  busy: boolean;
+  busyAction: 'approve' | 'reject' | null;
+  onApprove: () => void;
+  onReject: () => void;
+  onOpenDay: () => void;
+}) {
+  if (req.status !== 'PENDING') {
+    return (
+      <div className="apv-team-decision apv-team-decision--done">
+        <Tag status={STATUS_TAG[req.status]} mono>{approvalStatusLabel(req.status)}</Tag>
+        <IconButton
+          className="apv-team-open-day"
+          size="sm"
+          variant="ghost"
+          icon={<Clock4 size={13} strokeWidth={1.8} />}
+          aria-label="Open Edit Time"
+          title="Open day"
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpenDay();
+          }}
+        />
+      </div>
+    );
+  }
+  return (
+    <div className="apv-team-decision">
+      <Button
+        size="sm"
+        variant="danger"
+        icon={<X size={13} strokeWidth={2} />}
+        loading={busyAction === 'reject'}
+        disabled={busy && busyAction !== 'reject'}
+        onClick={(e) => {
+          e.stopPropagation();
+          onReject();
+        }}
+      >
+        Reject
+      </Button>
+      <Button
+        size="sm"
+        variant="primary"
+        icon={<Check size={13} strokeWidth={2.2} />}
+        loading={busyAction === 'approve'}
+        disabled={busy && busyAction !== 'approve'}
+        onClick={(e) => {
+          e.stopPropagation();
+          onApprove();
+        }}
+      >
+        Approve
+      </Button>
+    </div>
+  );
+}
+
+function ApprovalStatusCell({
+  req,
+  createdMs,
+  decidedMs,
+}: {
+  req: ApprovalRequest;
+  createdMs: number;
+  decidedMs: number | null;
+}) {
+  if (req.status === 'PENDING') {
+    return (
+      <div className="apv-status-cell">
+        <Tag status="warn" mono>Pending</Tag>
+        <span className="ui-t-small ui-ink-3" title={new Date(req.createdAt).toLocaleString()}>
+          {fmtAgeShort(Date.now() - createdMs)}
+        </span>
+      </div>
+    );
+  }
+  if (req.status === 'CANCELLED') {
+    return (
+      <div className="apv-status-cell">
+        <Tag status="neutral" mono>Cancelled</Tag>
+        <span className="ui-t-small ui-ink-3">Withdrawn</span>
+      </div>
+    );
+  }
+  return (
+    <div className="apv-status-cell">
+      <Tag status={STATUS_TAG[req.status]} mono>{approvalStatusLabel(req.status)}</Tag>
+      <span className="ui-t-small ui-ink-3" title={req.decidedAt ? new Date(req.decidedAt).toLocaleString() : undefined}>
+        {decidedMs ? `${fmtAgeShort(Date.now() - decidedMs)} decision` : '—'}
+      </span>
+    </div>
+  );
+}
+
+function ApprovalDetailsModal({
+  row,
+  tz,
+  task,
+  onClose,
+  onOpenDay,
+}: {
+  row: ApprovalTableRow;
+  tz: string;
+  task: ApprovalTaskReadout;
+  onClose: () => void;
+  onOpenDay: (date: string, req: ApprovalRequest, userId?: string) => void;
+}) {
+  if (typeof document === 'undefined') return null;
+
+  const req = row.req;
+  const startMs = new Date(req.requestedStart).getTime();
+  const endMs = new Date(req.requestedEnd).getTime();
+  const date = dateKeyInTimeZone(startMs, tz);
+  const decidedMs = req.decidedAt ? new Date(req.decidedAt).getTime() : null;
+  const statusMeta =
+    req.status === 'CANCELLED'
+      ? 'Withdrawn'
+      : decidedMs
+        ? `${fmtAgeShort(Date.now() - decidedMs)} decision`
+        : fmtAgeShort(Date.now() - new Date(req.createdAt).getTime());
+  const userId = row.requester?.id;
+
+  return createPortal(
+    <div className="apv-detail-backdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        className="apv-detail-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Approval detail for ${date}`}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <header className="apv-detail-head">
+          <div>
+            <span className="ui-t-eyebrow">{date}</span>
+            <h2 className="ui-t-title">Approval · {fmtDayLabel(date)}</h2>
+          </div>
+          <IconButton icon={<X size={16} strokeWidth={1.8} />} aria-label="Close" onClick={onClose} />
+        </header>
+        <div className="apv-detail-body">
+          <div className="apv-detail-grid">
+            {row.requester && (
+              <DetailField label="Member">
+                <span>{row.requester.name}</span>
+                <span className="ui-t-small ui-ink-3">{row.requester.email}</span>
+              </DetailField>
+            )}
+            <DetailField label="Status">
+              <Tag status={STATUS_TAG[req.status]} mono>{approvalStatusLabel(req.status)}</Tag>
+              <span className="ui-t-small ui-ink-3">{statusMeta}</span>
+            </DetailField>
+            <DetailField label="Requested">
+              <span className="ui-mono">{fmtTime(startMs, tz)} - {fmtTime(endMs, tz)}</span>
+              <Tag mono>{fmtDurationMs(endMs - startMs)}</Tag>
+            </DetailField>
+            <DetailField label="Task">
+              <span className={task.kind === 'missing' ? 'apv-detail-missing' : undefined}>{task.label}</span>
+              {task.kind === 'missing' && <span className="ui-t-small ui-ink-3">No current Lark task match</span>}
+            </DetailField>
+            <DetailField label="Reviewer">
+              <span>{req.approver?.name ?? (row.source === 'team' ? 'Not decided yet' : 'Workspace approver')}</span>
+              {req.approver?.email && <span className="ui-t-small ui-ink-3">{req.approver.email}</span>}
+            </DetailField>
+          </div>
+
+          <section className="apv-detail-section">
+            <span className="ui-t-eyebrow">Reason</span>
+            <p>{req.reason}</p>
+          </section>
+
+          {req.decidedReason && (
+            <section className="apv-detail-section">
+              <span className="ui-t-eyebrow">Decision note</span>
+              <p>{req.decidedReason}</p>
+            </section>
+          )}
+
+          {task.reference && (
+            <section className="apv-detail-ref">
+              <span className="ui-t-eyebrow">Task reference</span>
+              <code>{task.reference}</code>
+            </section>
+          )}
+
+          <div className="apv-detail-foot">
+            <Button
+              size="sm"
+              variant="secondary"
+              icon={<Clock4 size={13} strokeWidth={1.8} />}
+              onClick={() => onOpenDay(date, req, userId)}
+            >
+              Open Edit Time
+            </Button>
+          </div>
+        </div>
+      </section>
+    </div>,
+    document.body,
+  );
+}
+
+function DetailField({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="apv-detail-field">
+      <span className="ui-t-eyebrow">{label}</span>
+      <div className="apv-detail-field-value">{children}</div>
+    </div>
+  );
+}
+
+function ApprovalDateRangePicker({
+  from,
+  to,
+  today,
+  onChange,
+}: {
+  from: string;
+  to: string;
+  today: string;
+  onChange: (from: string, to: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [draftFrom, setDraftFrom] = useState(from);
+  const [draftTo, setDraftTo] = useState<string | null>(to);
+  const [visibleMonth, setVisibleMonth] = useState(() => monthStart(parseDateKey(from)));
+  const months: [Date, Date] = [visibleMonth, addMonths(visibleMonth, 1)];
+
+  function openPicker() {
+    setDraftFrom(from);
+    setDraftTo(to);
+    setVisibleMonth(monthStart(parseDateKey(from)));
+    setOpen((v) => !v);
+  }
+
+  function chooseDay(day: string) {
+    if (!draftFrom || draftTo) {
+      setDraftFrom(day);
+      setDraftTo(null);
+      return;
+    }
+    if (Math.abs(daysBetween(draftFrom, day)) > 59) {
+      setDraftFrom(day);
+      setDraftTo(null);
+      return;
+    }
+    const [nextFrom, nextTo] = day < draftFrom ? [day, draftFrom] : [draftFrom, day];
+    setDraftFrom(nextFrom);
+    setDraftTo(nextTo);
+    onChange(nextFrom, nextTo);
+    setOpen(false);
+  }
+
+  return (
+    <div className="apv-date-range">
+      <button
+        type="button"
+        className={`apv-date-trigger${open ? ' is-open' : ''}`}
+        onClick={openPicker}
+        aria-expanded={open}
+        aria-haspopup="dialog"
+      >
+        <CalendarDays size={15} strokeWidth={1.8} />
+        <span>{formatRangeLabel(from, to)}</span>
+      </button>
+
+      {open && (
+        <div className="apv-date-popover" role="dialog" aria-label="Approval date range">
+          <div className="apv-date-popover-head">
+            <IconButton
+              size="sm"
+              icon={<ChevronLeft size={15} strokeWidth={1.8} />}
+              aria-label="Previous month"
+              onClick={() => setVisibleMonth(addMonths(visibleMonth, -1))}
+            />
+            <span className="ui-t-eyebrow">{formatMonthRange(months[0], months[1])}</span>
+            <IconButton
+              size="sm"
+              icon={<ChevronRight size={15} strokeWidth={1.8} />}
+              aria-label="Next month"
+              onClick={() => setVisibleMonth(addMonths(visibleMonth, 1))}
+            />
+          </div>
+          <div className="apv-calendars">
+            {months.map((month) => (
+              <ApprovalCalendarMonth
+                key={dateKey(month)}
+                month={month}
+                today={today}
+                draftFrom={draftFrom}
+                draftTo={draftTo}
+                onChoose={chooseDay}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ApprovalCalendarMonth({
+  month,
+  today,
+  draftFrom,
+  draftTo,
+  onChoose,
+}: {
+  month: Date;
+  today: string;
+  draftFrom: string;
+  draftTo: string | null;
+  onChoose: (day: string) => void;
+}) {
+  const days = calendarCells(month);
+  return (
+    <section className="apv-calendar" aria-label={formatMonthLabel(month)}>
+      <div className="apv-calendar-title">{formatMonthLabel(month)}</div>
+      <div className="apv-calendar-weekdays" aria-hidden>
+        {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d, index) => (
+          <span key={`${d}-${index}`}>{d}</span>
+        ))}
+      </div>
+      <div className="apv-calendar-days">
+        {days.map((day, index) => {
+          if (!day) return <span key={`blank-${index}`} aria-hidden />;
+          const disabled = day > today || (!draftTo && Math.abs(daysBetween(draftFrom, day)) > 59);
+          const selectedStart = day === draftFrom;
+          const selectedEnd = day === draftTo;
+          const inRange = draftTo ? day >= draftFrom && day <= draftTo : day === draftFrom;
+          return (
+            <button
+              key={day}
+              type="button"
+              className={[
+                'apv-calendar-day',
+                inRange ? ' is-in-range' : '',
+                selectedStart ? ' is-start' : '',
+                selectedEnd ? ' is-end' : '',
+                day === today ? ' is-today' : '',
+              ].join('')}
+              disabled={disabled}
+              onClick={() => onChoose(day)}
+              aria-label={formatFullDateLabel(day)}
+              aria-pressed={inRange}
+            >
+              {Number(day.slice(-2))}
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function summarizeApprovals(requests: ApprovalRequest[]) {
+  const out = {
+    total: requests.length,
+    pending: 0,
+    accepted: 0,
+    rejected: 0,
+    totalMs: 0,
+    pendingMs: 0,
+    acceptedMs: 0,
+    rejectedMs: 0,
+  };
+  for (const req of requests) {
+    const dur = Math.max(0, new Date(req.requestedEnd).getTime() - new Date(req.requestedStart).getTime());
+    out.totalMs += dur;
+    if (req.status === 'PENDING') {
+      out.pending += 1;
+      out.pendingMs += dur;
+    } else if (req.status === 'APPROVED') {
+      out.accepted += 1;
+      out.acceptedMs += dur;
+    } else if (req.status === 'REJECTED') {
+      out.rejected += 1;
+      out.rejectedMs += dur;
+    }
+  }
+  return out;
+}
+
+function approvalTaskReadout(req: ApprovalRequest, taskMap: Map<string, string>): ApprovalTaskReadout {
+  const stored = cleanTaskLabel(req.taskSummary);
+  if (stored) return { kind: 'known', label: stored, reference: req.larkTaskGuid };
+  const guid = cleanTaskLabel(req.larkTaskGuid);
+  if (!guid) return { kind: 'none', label: 'Untracked', reference: null };
+  const live = cleanTaskLabel(taskMap.get(guid));
+  if (live) return { kind: 'known', label: live, reference: guid };
+  return { kind: 'missing', label: 'Task unavailable', reference: guid };
+}
+
+function editTimeSearch(date: string, req: ApprovalRequest, userId?: string) {
+  const search: {
+    date: string;
+    userId?: string;
+    requestId: string;
+    focusStart: string;
+    focusEnd: string;
+  } = {
+    date,
+    requestId: req.id,
+    focusStart: String(new Date(req.requestedStart).getTime()),
+    focusEnd: String(new Date(req.requestedEnd).getTime()),
+  };
+  if (userId) search.userId = userId;
+  return search;
+}
+
+function dateKeyInTimeZone(ms: number, tz: string): string {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date(ms));
+  const year = parts.find((part) => part.type === 'year')?.value;
+  const month = parts.find((part) => part.type === 'month')?.value;
+  const day = parts.find((part) => part.type === 'day')?.value;
+  return year && month && day ? `${year}-${month}-${day}` : new Date(ms).toISOString().slice(0, 10);
+}
+
+function cleanTaskLabel(value: string | null | undefined): string | null {
+  const trimmed = typeof value === 'string' ? value.trim() : '';
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function statusPriority(status: MtrStatus): number {
+  if (status === 'PENDING') return 0;
+  if (status === 'REJECTED') return 1;
+  if (status === 'APPROVED') return 2;
+  return 3;
+}
+
+function approvalStatusLabel(status: MtrStatus): string {
+  if (status === 'APPROVED') return 'Accepted';
+  if (status === 'REJECTED') return 'Rejected';
+  if (status === 'PENDING') return 'Pending';
+  return 'Cancelled';
+}
+
+function filterLabel(filter: ApprovalFilter): string {
+  if (filter === 'APPROVED') return 'Accepted';
+  if (filter === 'REJECTED') return 'Rejected';
+  if (filter === 'PENDING') return 'Pending';
+  return 'All';
+}
+
+function railForApprovalStatus(status: MtrStatus): Rail | undefined {
+  if (status === 'APPROVED') return 'success';
+  if (status === 'PENDING') return 'warn';
+  if (status === 'REJECTED') return 'danger';
+  return undefined;
+}
+
+function parseDateKey(key: string): Date {
+  const [year, month, day] = key.split('-').map((part) => Number.parseInt(part, 10));
+  return new Date(year!, month! - 1, day!);
+}
+
+function dateKey(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function monthStart(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), 1);
+}
+
+function addMonths(date: Date, delta: number): Date {
+  return new Date(date.getFullYear(), date.getMonth() + delta, 1);
+}
+
+function daysBetween(a: string, b: string): number {
+  return Math.round((parseDateKey(b).getTime() - parseDateKey(a).getTime()) / (24 * 60 * 60 * 1000));
+}
+
+function calendarCells(month: Date): Array<string | null> {
+  const start = monthStart(month);
+  const firstDay = (start.getDay() + 6) % 7;
+  const count = new Date(start.getFullYear(), start.getMonth() + 1, 0).getDate();
+  const cells: Array<string | null> = Array.from({ length: firstDay }, () => null);
+  for (let day = 1; day <= count; day += 1) {
+    cells.push(dateKey(new Date(start.getFullYear(), start.getMonth(), day)));
+  }
+  return cells;
+}
+
+function formatRangeLabel(from: string, to: string): string {
+  return `${formatShortDateLabel(from)} - ${formatShortDateLabel(to)}`;
+}
+
+function formatShortDateLabel(key: string): string {
+  const d = parseDateKey(key);
+  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(d);
+}
+
+function formatMonthLabel(date: Date): string {
+  return new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' }).format(date);
+}
+
+function formatMonthRange(a: Date, b: Date): string {
+  return `${formatMonthLabel(a)} / ${formatMonthLabel(b)}`;
+}
+
+function formatFullDateLabel(key: string): string {
+  return new Intl.DateTimeFormat('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }).format(parseDateKey(key));
+}

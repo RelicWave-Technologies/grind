@@ -6,6 +6,7 @@ import {
 } from '@tanstack/react-router';
 import type { QueryClient } from '@tanstack/react-query';
 import { api, ApiError } from './lib/api';
+import { hasCapability } from './lib/auth';
 import type { Me } from './lib/auth';
 import { Layout } from './components/Layout';
 import { LoginScreen } from './screens/Login';
@@ -21,6 +22,8 @@ import { ShiftsScreen } from './screens/Shifts';
 import { PolicyScreen } from './screens/Policy';
 import { PayrollScreen } from './screens/Payroll';
 import { OverviewScreen } from './screens/Overview';
+import { ReportsScreen } from './screens/Reports';
+import { ProfileScreen } from './screens/Profile';
 
 interface RouterContext {
   queryClient: QueryClient;
@@ -61,47 +64,101 @@ const authedRoot = createRoute({
 const homeRoute = createRoute({
   getParentRoute: () => authedRoot,
   path: '/',
-  // Default landing per role (M16): MANAGER+ → /overview command center;
-  // MEMBER → the existing hero Home (their day at a glance). The Layout
-  // sidebar's "Home" link still points to '/' so users always land
-  // wherever they should.
-  beforeLoad: ({ context }) => {
-    const me = (context as { me?: { role?: string } }).me;
-    if (me && (me.role === 'OWNER' || me.role === 'ADMIN' || me.role === 'MANAGER')) {
-      throw redirect({ to: '/overview' });
-    }
-  },
   component: HomeScreen,
 });
 
 const usersRoute = createRoute({
   getParentRoute: () => authedRoot,
   path: '/users',
+  beforeLoad: ({ context }) => {
+    const me = (context as { me?: Me }).me;
+    if (!hasCapability(me, 'people.read')) {
+      throw redirect({ to: '/reports' });
+    }
+  },
   component: UsersScreen,
 });
 
-const meTodayRoute = createRoute({
+const editTimeRoute = createRoute({
   getParentRoute: () => authedRoot,
-  path: '/me-today',
-  // Optional ?date=YYYY-MM-DD&userId= so the Team page can deep-link
-  // into a specific user-day. Both are pure strings; validation happens
-  // in the screen (the date format check is cheap).
-  validateSearch: (s: Record<string, unknown>): { date?: string; userId?: string } => ({
+  path: '/edit-time',
+  // Optional ?date=YYYY-MM-DD&userId=&requestId=&focusStart=&focusEnd= so
+  // approval rows can deep-link into a specific user-day and focus the matching
+  // manual-time slot. Values stay as strings; the screen validates cheaply.
+  validateSearch: (s: Record<string, unknown>): { date?: string; userId?: string; requestId?: string; focusStart?: string; focusEnd?: string } => ({
     date: typeof s.date === 'string' ? s.date : undefined,
     userId: typeof s.userId === 'string' ? s.userId : undefined,
+    requestId: typeof s.requestId === 'string' ? s.requestId : undefined,
+    focusStart: typeof s.focusStart === 'string' ? s.focusStart : undefined,
+    focusEnd: typeof s.focusEnd === 'string' ? s.focusEnd : undefined,
   }),
   component: MeTodayScreen,
+});
+
+const meTodayLegacyRoute = createRoute({
+  getParentRoute: () => authedRoot,
+  path: '/me-today',
+  validateSearch: (s: Record<string, unknown>): { date?: string; userId?: string; requestId?: string; focusStart?: string; focusEnd?: string } => ({
+    date: typeof s.date === 'string' ? s.date : undefined,
+    userId: typeof s.userId === 'string' ? s.userId : undefined,
+    requestId: typeof s.requestId === 'string' ? s.requestId : undefined,
+    focusStart: typeof s.focusStart === 'string' ? s.focusStart : undefined,
+    focusEnd: typeof s.focusEnd === 'string' ? s.focusEnd : undefined,
+  }),
+  beforeLoad: ({ search }) => {
+    throw redirect({ to: '/edit-time', search });
+  },
+});
+
+const reportsRoute = createRoute({
+  getParentRoute: () => authedRoot,
+  path: '/reports',
+  beforeLoad: ({ context }) => {
+    const me = (context as { me?: Me }).me;
+    if (!hasCapability(me, 'reports.self.read')) {
+      throw redirect({ to: '/edit-time' });
+    }
+  },
+  component: ReportsScreen,
 });
 
 const approvalsRoute = createRoute({
   getParentRoute: () => authedRoot,
   path: '/approvals',
+  beforeLoad: ({ context }) => {
+    const me = (context as { me?: Me }).me;
+    const canReadSelf = hasCapability(me, 'approvals.self.read');
+    const canReview =
+      hasCapability(me, 'approvals.team.decide') ||
+      hasCapability(me, 'approvals.workspace.decide');
+    if (!canReadSelf && !canReview) {
+      throw redirect({ to: '/edit-time' });
+    }
+  },
   component: ApprovalsScreen,
+});
+
+const profileRoute = createRoute({
+  getParentRoute: () => authedRoot,
+  path: '/profile',
+  beforeLoad: ({ context }) => {
+    const me = (context as { me?: Me }).me;
+    if (!hasCapability(me, 'profile.self.read')) {
+      throw redirect({ to: '/edit-time' });
+    }
+  },
+  component: ProfileScreen,
 });
 
 const teamRoute = createRoute({
   getParentRoute: () => authedRoot,
   path: '/team',
+  beforeLoad: ({ context }) => {
+    const me = (context as { me?: Me }).me;
+    if (!hasCapability(me, 'team.settings.manage')) {
+      throw redirect({ to: '/' });
+    }
+  },
   component: TeamScreen,
 });
 
@@ -120,6 +177,15 @@ const teamsAdminRoute = createRoute({
 const flagsRoute = createRoute({
   getParentRoute: () => authedRoot,
   path: '/flags',
+  beforeLoad: ({ context }) => {
+    const me = (context as { me?: Me }).me;
+    const canReview =
+      hasCapability(me, 'flags.team.review') ||
+      hasCapability(me, 'flags.workspace.review');
+    if (!canReview) {
+      throw redirect({ to: '/' });
+    }
+  },
   component: FlagsScreen,
 });
 
@@ -145,10 +211,9 @@ const overviewRoute = createRoute({
   getParentRoute: () => authedRoot,
   path: '/overview',
   beforeLoad: ({ context }) => {
-    // /overview is MANAGER+ only — MEMBER lands on /me-today instead.
-    const me = (context as { me?: { role?: string } }).me;
-    if (!me || (me.role !== 'OWNER' && me.role !== 'ADMIN' && me.role !== 'MANAGER')) {
-      throw redirect({ to: '/me-today' });
+    const me = (context as { me?: Me }).me;
+    if (!hasCapability(me, 'overview.read')) {
+      throw redirect({ to: '/edit-time' });
     }
   },
   component: OverviewScreen,
@@ -164,6 +229,6 @@ const loginRoute = createRoute({
 });
 
 export const routeTree = rootRoute.addChildren([
-  authedRoot.addChildren([homeRoute, overviewRoute, meTodayRoute, approvalsRoute, teamRoute, attendanceRoute, flagsRoute, usersRoute, teamsAdminRoute, shiftsRoute, policyRoute, payrollRoute]),
+  authedRoot.addChildren([homeRoute, overviewRoute, editTimeRoute, meTodayLegacyRoute, reportsRoute, approvalsRoute, profileRoute, teamRoute, attendanceRoute, flagsRoute, usersRoute, teamsAdminRoute, shiftsRoute, policyRoute, payrollRoute]),
   loginRoute,
 ]);

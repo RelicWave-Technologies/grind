@@ -1,141 +1,177 @@
 /* ============================================================================
-   TEAM — manager's users × days heat matrix. LAYOUT ONLY. Every look (colour,
-   type, border, radius, shadow) comes from the shared kit (src/ui/*) + tokens;
-   this file only places things in a grid/flex and hosts the ONE sanctioned
-   colour zone: the heat cell, whose fill is the accent intensity ramp
-   (SYSTEM.md §4) passed in per-cell as the inline `--tm-heat` var. All classes
-   prefixed `tm-`; consumed only by Team.tsx.
+   TEAM — manager member settings.
+
+   A scoped settings table for member agent behavior. Uses the shared dashboard
+   tokens and kit controls; this file only owns the page and table layout.
    ========================================================================== */
 
-/* Horizontal scroll for the wide matrix, hosted inside a flush Card. */
-.tm-scroll {
+.tm-page {
+  container-type: inline-size;
+}
+
+.tm-summary-card {
+  margin-bottom: var(--ui-sp-5);
+}
+
+.tm-members-card {
+  overflow: hidden;
+}
+
+.tm-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--ui-sp-5);
+  padding: var(--ui-sp-5) var(--ui-sp-6);
+  border-bottom: 1px solid var(--ui-line);
+}
+
+.tm-card-head h2,
+.tm-card-head p {
+  margin: 0;
+}
+
+.tm-card-head p {
+  margin-top: var(--ui-sp-1);
+}
+
+.tm-table-wrap {
   overflow-x: auto;
+}
+
+.tm-members-table {
+  min-width: 100%;
+  width: 100%;
+  table-layout: fixed;
+}
+
+.tm-members-table.ui-table--compact .ui-table__row {
+  height: calc(var(--ui-row-h) + var(--ui-sp-9));
+}
+
+.tm-members-table .ui-th,
+.tm-members-table .ui-td {
+  padding-inline: var(--ui-sp-3);
+  vertical-align: middle;
+}
+
+.tm-members-table .ui-td {
+  height: calc(var(--ui-row-h) + var(--ui-sp-9));
+}
+
+.tm-col-member {
+  width: calc(var(--ui-sp-12) * 3 + var(--ui-sp-8));
+}
+
+.tm-col-shift {
+  width: calc(var(--ui-sp-12) * 2 + var(--ui-sp-7));
+}
+
+.tm-col-shot,
+.tm-col-idle {
+  width: calc(var(--ui-sp-12) * 2 + var(--ui-sp-9));
+}
+
+.tm-col-manager {
+  width: calc(var(--ui-sp-12) * 3);
+}
+
+.tm-col-action {
+  width: calc(var(--ui-sp-12) * 2 + var(--ui-sp-8));
+}
+
+.tm-member-row {
+  cursor: default;
+}
+
+.tm-stack {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--ui-sp-1);
+}
+
+.tm-stack--center {
+  align-items: center;
+  text-align: center;
+}
+
+.tm-stack > * {
   max-width: 100%;
 }
 
-/* Anchor pill content — icon + label inline (kit DateStepper pill is the chrome). */
-.tm-anchor-val {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--ui-sp-2);
-}
-
-/* Column head — day-of-week stacked over the date, centered. */
-.tm-day-head {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--ui-sp-1);
-  line-height: 1.1;
-}
-.tm-day-num {
-  font-size: 11px;
-  color: var(--ui-ink-3);
-}
-
-/* Day cell — let the heat button fill the cell; trim the kit Td padding. */
-.tm-day-cell {
-  padding-left: var(--ui-sp-1);
-  padding-right: var(--ui-sp-1);
-}
-
-/* ── Heat cell — the ONE colour zone (SYSTEM.md §4 sequential-intensity ramp).
-   The sampled accent colour arrives inline as `--tm-heat`; deep cells flip the
-   figure to --on-accent via `.is-strong`; the single busiest cell gets an
-   accent ring via `.is-peak`. Empty cells are a bare mono dash. Border/radius/
-   font are kit tokens, not bespoke looks. */
-.tm-cell {
+.tm-setting-control {
   position: relative;
-  appearance: none;
-  cursor: pointer;
+  min-width: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 100%;
-  min-width: 60px;
-  min-height: 30px;
-  padding: var(--ui-sp-2) var(--ui-sp-3);
-  border: 1px solid transparent;
-  border-radius: var(--ui-r-sm);
-  background: var(--tm-heat, transparent);
-  color: var(--ui-ink);
+  max-width: calc(var(--ui-sp-12) * 2 + var(--ui-sp-7));
+}
+
+.tm-setting-control .ui-control {
+  width: 100%;
+  min-width: 0;
+  height: calc(var(--ui-control-h) - var(--ui-sp-1));
+  text-align: center;
+  text-align-last: center;
+  font-family: var(--ui-font-mono);
   font-size: 12px;
-  transition: box-shadow var(--ui-dur-fast) var(--ui-ease);
-}
-.tm-cell:hover:not(.is-empty) {
-  box-shadow: 0 0 0 1px var(--ui-surface), 0 0 0 2px var(--ui-accent);
-}
-.tm-cell:focus-visible {
-  outline: none;
-  box-shadow: var(--ui-focus-ring);
-}
-.tm-cell.is-strong {
-  color: var(--ui-on-accent);
-}
-.tm-cell.is-empty {
-  cursor: default;
-  background: transparent;
-  color: var(--ui-ink-3);
-}
-.tm-cell.is-peak,
-.tm-cell.is-peak:hover {
-  box-shadow: 0 0 0 1px var(--ui-surface), 0 0 0 2px var(--ui-accent);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  padding-inline: var(--ui-sp-4) var(--ui-sp-8);
 }
 
-/* Manual-time marker — a small dot in the corner; flips on dark cells. */
-.tm-cell-manual {
-  position: absolute;
-  top: var(--ui-sp-2);
-  right: var(--ui-sp-2);
-  width: 4px;
-  height: 4px;
-  border-radius: var(--ui-r-full);
-  background: var(--ui-info-solid);
-}
-.tm-cell.is-strong .tm-cell-manual {
-  background: var(--ui-on-accent);
-}
-
-/* ── Legend — ramp swatches + taxonomy key, on the card's bottom hairline. */
-.tm-legend {
-  display: flex;
-  align-items: center;
-  gap: var(--ui-sp-5);
-  flex-wrap: wrap;
-  padding: var(--ui-sp-4) var(--ui-sp-7);
-  border-top: 1px solid var(--ui-line);
-}
-.tm-legend-scale {
+.tm-setting-display {
+  min-width: 0;
+  width: 100%;
+  max-width: calc(var(--ui-sp-12) * 2 + var(--ui-sp-7));
+  min-height: calc(var(--ui-control-h) - var(--ui-sp-1));
   display: inline-flex;
   align-items: center;
-  gap: var(--ui-sp-3);
-}
-.tm-legend-ramp {
-  display: inline-flex;
-  border-radius: var(--ui-r-sm);
-  overflow: hidden;
+  justify-content: center;
+  gap: var(--ui-sp-1);
+  padding: 0 var(--ui-sp-3);
   border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-md);
+  background: var(--ui-surface-inset);
+  font-family: var(--ui-font-mono);
+  font-size: 12px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
-.tm-legend-swatch {
-  width: 22px;
-  height: 12px;
-}
-.tm-legend-keys {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--ui-sp-4);
-  flex-wrap: wrap;
-}
-.tm-legend-hint {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--ui-sp-2);
-  margin-left: auto;
+
+.tm-setting-display__label {
   color: var(--ui-ink-3);
 }
 
-@media (max-width: 560px) {
-  .tm-legend-hint {
-    display: none;
+.tm-setting-display__value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tm-saving {
+  position: absolute;
+  right: var(--ui-sp-3);
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.tm-row-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ui-sp-2);
+  min-width: 0;
+}
+
+@media (max-width: 42rem) {
+  .tm-card-head {
+    flex-direction: column;
   }
 }

@@ -6,6 +6,9 @@ import {
   LogoutRequest,
   RefreshRequest,
   RefreshResponse,
+  Role as RoleSchema,
+  roleCapabilities,
+  type UserDto,
 } from '@grind/types';
 import { validate } from '../middleware/validate';
 import { requireAccessToken } from '../middleware/auth';
@@ -14,6 +17,33 @@ import { verifyPassword } from '../lib/password';
 import { issueRefreshToken, revokeRefreshToken, sha256 } from '../lib/refreshToken';
 
 export const authRouter = Router();
+
+type AuthUserRow = {
+  id: string;
+  email: string;
+  name: string;
+  role: unknown;
+  workspaceId: string;
+  teamId: string | null;
+  managerId: string | null;
+};
+
+function serializeAuthUser(user: AuthUserRow): UserDto | null {
+  const parsedRole = RoleSchema.safeParse(user.role);
+  if (!parsedRole.success) return null;
+  const role = parsedRole.data;
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    role,
+    displayRole: role,
+    capabilities: roleCapabilities(role),
+    workspaceId: user.workspaceId,
+    teamId: user.teamId,
+    managerId: user.managerId,
+  };
+}
 
 /**
  * Login. Returns access + refresh tokens in the JSON body for the agent
@@ -33,7 +63,10 @@ authRouter.post('/login', validate(LoginRequest, 'body'), async (req, res, next)
     if (user.deactivatedAt) {
       return res.status(401).json({ error: 'invalid_credentials' });
     }
-    const accessToken = signAccessToken({ sub: user.id, ws: user.workspaceId, role: user.role });
+    const payloadUser = serializeAuthUser(user);
+    if (!payloadUser) return res.status(503).json({ error: 'stale_role_migration_required' });
+
+    const accessToken = signAccessToken({ sub: user.id, ws: user.workspaceId, role: payloadUser.role });
     const { refreshToken } = await issueRefreshToken(user.id, deviceName);
 
     res.cookie('grind_at', accessToken, {
@@ -47,13 +80,7 @@ authRouter.post('/login', validate(LoginRequest, 'body'), async (req, res, next)
     const response: LoginResponse = {
       accessToken,
       refreshToken,
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        role: user.role,
-        workspaceId: user.workspaceId,
-      },
+      user: payloadUser,
     };
     res.json(response);
   } catch (err) {
@@ -83,7 +110,9 @@ authRouter.get('/me', requireAccessToken, async (req, res, next) => {
       },
     });
     if (!user) return res.status(401).json({ error: 'unauthorized' });
-    res.json({ user });
+    const payloadUser = serializeAuthUser(user);
+    if (!payloadUser) return res.status(503).json({ error: 'stale_role_migration_required' });
+    res.json({ user: payloadUser });
   } catch (err) {
     next(err);
   }
@@ -141,10 +170,12 @@ authRouter.post('/refresh', validate(RefreshRequest, 'body'), async (req, res, n
       where: { id: row.id },
       data: { revokedAt: new Date() },
     });
+    const parsedRole = RoleSchema.safeParse(row.user.role);
+    if (!parsedRole.success) return res.status(503).json({ error: 'stale_role_migration_required' });
     const accessToken = signAccessToken({
       sub: row.userId,
       ws: row.user.workspaceId,
-      role: row.user.role,
+      role: parsedRole.data,
     });
     const fresh = await issueRefreshToken(row.userId, row.deviceName ?? undefined);
     const response: RefreshResponse = { accessToken, refreshToken: fresh.refreshToken };

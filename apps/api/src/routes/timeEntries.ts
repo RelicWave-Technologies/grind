@@ -13,6 +13,8 @@ import {
 import { validateEntry, clampEntryToServerClock, type Segment, type TimeEntry as CoreEntry } from '@grind/core';
 import { validate } from '../middleware/validate';
 import { requireAccessToken } from '../middleware/auth';
+import { attachScope } from '../middleware/scope';
+import { authorizeTimeEditForUser } from '../authz/timeEdit';
 import { isLarkConfigured, getTokenManager, getUserTaskClient } from '../lark';
 import { logger } from '../logger';
 
@@ -279,7 +281,7 @@ timeEntriesRouter.get('/', validate(ListTimeEntriesQuery, 'query'), async (req, 
  * No approval needed: re-attributing your own tracked time to a different
  * Lark task or adding a note is metadata, not new tracked time.
  */
-timeEntriesRouter.patch('/:id', validate(PatchTimeEntryRequest, 'body'), async (req, res, next) => {
+timeEntriesRouter.patch('/:id', attachScope, validate(PatchTimeEntryRequest, 'body'), async (req, res, next) => {
   try {
     if (!req.user) return res.status(401).json({ error: 'unauthorized' });
     const id = req.params.id;
@@ -289,7 +291,8 @@ timeEntriesRouter.patch('/:id', validate(PatchTimeEntryRequest, 'body'), async (
       select: { userId: true, segments: { select: { kind: true } } },
     });
     if (!existing) return res.status(404).json({ error: 'not_found' });
-    if (existing.userId !== req.user.sub) return res.status(403).json({ error: 'forbidden' });
+    const authz = authorizeTimeEditForUser(req, existing.userId);
+    if (!authz.ok) return res.status(authz.status).json({ error: authz.error });
 
     const body = req.body as PatchBody;
 
@@ -301,7 +304,7 @@ timeEntriesRouter.patch('/:id', validate(PatchTimeEntryRequest, 'body'), async (
       if (!hasMeeting) {
         return res.status(400).json({ error: 'attendees_require_meeting_segment' });
       }
-      const dedup = [...new Set(body.attendeeIds)].filter((uid) => uid !== req.user!.sub);
+      const dedup = [...new Set(body.attendeeIds)].filter((uid) => uid !== existing.userId);
       if (dedup.length > 0) {
         const found = await prisma.user.findMany({
           where: { id: { in: dedup }, workspaceId: req.user.ws },
@@ -335,6 +338,55 @@ timeEntriesRouter.patch('/:id', validate(PatchTimeEntryRequest, 'body'), async (
       return row;
     });
     res.json(serialize(updated));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * Delete approved/manual added time. Only MANUAL entries can be removed here;
+ * AUTO entries remain agent-owned audit records. If the manual entry came from
+ * a ManualTimeRequest, mark that request CANCELLED first so approval history
+ * explains why the linked timesheet row disappeared.
+ */
+timeEntriesRouter.delete('/:id', attachScope, async (req, res, next) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: 'unauthorized' });
+    const id = req.params.id;
+    if (!id) return res.status(400).json({ error: 'missing_id' });
+
+    const existing = await prisma.timeEntry.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        userId: true,
+        source: true,
+        manualTimeRequest: { select: { id: true } },
+      },
+    });
+    if (!existing) return res.status(404).json({ error: 'not_found' });
+
+    const authz = authorizeTimeEditForUser(req, existing.userId);
+    if (!authz.ok) return res.status(authz.status).json({ error: authz.error });
+    if (existing.source !== 'MANUAL') return res.status(400).json({ error: 'not_manual_time' });
+
+    const now = new Date();
+    await prisma.$transaction(async (tx) => {
+      if (existing.manualTimeRequest) {
+        await tx.manualTimeRequest.update({
+          where: { id: existing.manualTimeRequest.id },
+          data: {
+            status: 'CANCELLED',
+            decidedAt: now,
+            decidedReason: authz.isSelf ? 'Deleted by requester' : 'Deleted by manager',
+            timeEntryId: null,
+          },
+        });
+      }
+      await tx.timeEntry.delete({ where: { id } });
+    });
+
+    res.json({ ok: true });
   } catch (err) {
     next(err);
   }

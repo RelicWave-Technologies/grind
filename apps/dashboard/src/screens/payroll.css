@@ -26,3 +26,292 @@
 .pay-scroll {
   overflow-x: auto;
 }
+
+.pay-table {
+  min-width: calc(var(--ui-sp-12) * 18);
+}
+
+.pay-table .ui-table__row {
+  height: calc(var(--ui-row-h) + var(--ui-sp-8));
+}
+
+.pay-table .ui-th,
+.pay-table .ui-td {
+  padding-inline: var(--ui-sp-4);
+  white-space: nowrap;
+}
+
+.pay-table .ui-td {
+  padding-block: var(--ui-sp-3);
+  vertical-align: middle;
+}
+
+.pay-table .ui-th:not(:first-child),
+.pay-table .ui-td:not(:first-child),
+.pay-table .ui-td.ui-td--num {
+  text-align: center;
+}
+
+.pay-table .ui-td:not(:first-child) > * {
+  margin-inline: auto;
+}
+
+.pay-policy-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--ui-sp-6);
+}
+
+.pay-rule-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--ui-sp-4);
+}
+
+.pay-rule {
+  min-width: 0;
+  display: grid;
+  gap: var(--ui-sp-2);
+}
+
+.pay-rule strong {
+  font-family: var(--ui-font-sans);
+  font-size: 18px;
+  line-height: 1.15;
+  font-weight: 650;
+  color: var(--ui-ink);
+}
+
+.pay-day-pills,
+.pay-warning-stack {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ui-sp-2);
+  flex-wrap: wrap;
+}
+
+.pay-modal-layer,
+.pay-drawer-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 95;
+  background: var(--ui-overlay);
+}
+
+.pay-modal-layer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--ui-sp-7);
+}
+
+.pay-modal {
+  width: min(760px, 100%);
+  max-height: min(780px, calc(100vh - var(--ui-sp-8)));
+  display: flex;
+  flex-direction: column;
+  background: var(--ui-surface);
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-xl);
+  overflow: hidden;
+}
+
+.pay-modal-head,
+.pay-modal-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-sp-5);
+  padding: var(--ui-sp-6);
+  border-bottom: 1px solid var(--ui-line);
+}
+
+.pay-modal-body {
+  padding: var(--ui-sp-6);
+  overflow: auto;
+  display: grid;
+  gap: var(--ui-sp-5);
+}
+
+.pay-modal-foot {
+  border-top: 1px solid var(--ui-line);
+  border-bottom: 0;
+  justify-content: flex-end;
+}
+
+.pay-form-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--ui-sp-5);
+}
+
+.pay-drawer-layer {
+  display: flex;
+  justify-content: flex-end;
+  z-index: 120;
+}
+
+@keyframes pay-drawer-enter {
+  from {
+    opacity: 0;
+    transform: translateX(var(--ui-sp-8));
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.pay-drawer {
+  width: min(calc(var(--ui-sp-12) * 15), calc(100vw - var(--ui-sp-6)));
+  height: 100dvh;
+  background: var(--ui-surface);
+  border-left: 1px solid var(--ui-line);
+  box-shadow: var(--ui-shadow-pop);
+  display: flex;
+  flex-direction: column;
+  animation: pay-drawer-enter var(--ui-dur-slow) var(--ui-ease) both;
+}
+
+.pay-drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-sp-5);
+  padding: var(--ui-sp-6) var(--ui-sp-7);
+  border-bottom: 1px solid var(--ui-line);
+}
+
+.pay-drawer-title {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--ui-sp-4);
+}
+
+.pay-drawer-heading {
+  min-width: 0;
+  display: grid;
+  gap: var(--ui-sp-2);
+}
+
+.pay-drawer-heading h2,
+.pay-drawer-heading p {
+  margin: 0;
+}
+
+.pay-drawer-heading h2 {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pay-drawer-heading p {
+  color: var(--ui-ink-2);
+}
+
+.pay-drawer-body {
+  min-height: 0;
+  padding: var(--ui-sp-6) var(--ui-sp-7) var(--ui-sp-7);
+  overflow: auto;
+  display: grid;
+  align-content: start;
+  gap: var(--ui-sp-5);
+}
+
+.pay-drawer-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--ui-sp-4);
+}
+
+.pay-drawer-metric {
+  min-height: calc(var(--ui-row-h) + var(--ui-sp-8));
+  display: grid;
+  align-content: space-between;
+  gap: var(--ui-sp-3);
+  padding: var(--ui-sp-4);
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-md);
+  background: var(--ui-surface-inset);
+}
+
+.pay-drawer-metric strong {
+  font-family: var(--ui-font-mono);
+  font-size: 20px;
+  line-height: 1;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  color: var(--ui-ink);
+}
+
+.pay-drawer-metric span:last-child {
+  min-width: 0;
+  color: var(--ui-ink-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pay-ledger-wrap {
+  max-height: min(62vh, calc(var(--ui-row-h) * 13));
+  overflow: auto;
+}
+
+.pay-ledger-table {
+  min-width: calc(var(--ui-sp-12) * 11);
+}
+
+.pay-ledger-table.ui-table--compact .ui-table__row {
+  height: calc(var(--ui-row-h) + var(--ui-sp-2));
+}
+
+.pay-ledger-table .ui-th,
+.pay-ledger-table .ui-td {
+  padding-inline: var(--ui-sp-4);
+  white-space: nowrap;
+}
+
+.pay-ledger-table .ui-td {
+  padding-block: var(--ui-sp-3);
+  vertical-align: middle;
+}
+
+.pay-date-cell {
+  display: grid;
+  gap: 2px;
+}
+
+.pay-date-cell span {
+  color: var(--ui-ink-2);
+  font-size: 12px;
+}
+
+.pay-ledger-table .pay-note {
+  min-width: calc(var(--ui-sp-12) * 2);
+  white-space: normal;
+}
+
+.pay-ledger-table .pay-note .ui-t-small {
+  color: var(--ui-ink-2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pay-drawer {
+    animation: none;
+  }
+}
+
+@media (max-width: 900px) {
+  .pay-policy-grid,
+  .pay-rule-grid,
+  .pay-drawer-summary,
+  .pay-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .pay-drawer {
+    width: 100vw;
+  }
+}

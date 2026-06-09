@@ -14,7 +14,7 @@ async function seed() {
   counter += 1;
   const stamp = `${Date.now()}-${counter}-dig`;
   const ws = await prisma.workspace.create({ data: { name: `WS ${stamp}` } });
-  const mk = (email: string, role: 'OWNER' | 'ADMIN' | 'MANAGER' | 'MEMBER') =>
+  const mk = (email: string, role: 'ADMIN' | 'MANAGER' | 'MEMBER') =>
     prisma.user.create({
       data: {
         workspaceId: ws.id,
@@ -28,7 +28,7 @@ async function seed() {
   const mgr1 = await mk('mgr1', 'MANAGER');
   const mgr2 = await mk('mgr2', 'MANAGER');
   const member = await mk('mem', 'MEMBER');
-  const token = (u: { id: string; role: 'OWNER' | 'ADMIN' | 'MANAGER' | 'MEMBER' }) =>
+  const token = (u: { id: string; role: 'ADMIN' | 'MANAGER' | 'MEMBER' }) =>
     signAccessToken({ sub: u.id, ws: ws.id, role: u.role });
   return {
     ws,

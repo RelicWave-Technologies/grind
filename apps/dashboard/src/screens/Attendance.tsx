@@ -122,7 +122,7 @@ export function AttendanceScreen() {
 
       {hasPeople && <AttendanceSummary data={data!} />}
 
-      <Card variant="flush">
+      <Card variant="flush" className="atd-card">
         {q.isLoading ? (
           <SkeletonTable rows={6} />
         ) : q.isError ? (
@@ -143,30 +143,43 @@ export function AttendanceScreen() {
           />
         ) : (
           <>
-            <div className="atd-legend">
-              <Tag status="success" dot>
-                Present
-              </Tag>
-              <Tag status="neutral" dot>
-                Absent · under 30m
-              </Tag>
+            <div className="atd-card-head">
+              <div>
+                <h2 className="ui-t-title">Attendance</h2>
+                <p className="ui-t-small">Present means at least 30m tracked in the local day.</p>
+              </div>
+              <div className="atd-legend">
+                <Tag status="success" dot>
+                  Present
+                </Tag>
+                <Tag status="neutral" dot>
+                  Absent · under 30m
+                </Tag>
+              </div>
             </div>
             <div className="atd-scroll">
-              <Table density="compact" stickyHead stickyCol>
+              <Table density="compact" stickyHead stickyCol className="atd-table">
+                <colgroup>
+                  <col className="atd-col-person" />
+                  {data!.days.map((d) => (
+                    <col key={d} className="atd-col-day" />
+                  ))}
+                  <col className="atd-col-present" />
+                </colgroup>
                 <THead>
                   <Tr>
-                    <Th>Person</Th>
+                    <Th className="atd-col-person">Person</Th>
                     {data!.days.map((d) => {
                       const date = new Date(`${d}T00:00:00`);
                       const dow = new Intl.DateTimeFormat(undefined, { weekday: 'short' }).format(date);
                       const dnum = new Intl.DateTimeFormat(undefined, { day: 'numeric' }).format(date);
                       return (
-                        <Th key={d} align="center">
+                        <Th key={d} className="atd-col-day" align="center">
                           <span className="atd-dayhead">
                             <span className="atd-dayhead__dow">{dow}</span>
-                            <span className="mono atd-dayhead__num">{dnum}</span>
+                            <span className="ui-mono atd-dayhead__num">{dnum}</span>
                             {d === today && (
-                              <Tag status="info" mono>
+                              <Tag status="neutral" mono className="atd-today-tag">
                                 Today
                               </Tag>
                             )}
@@ -174,7 +187,7 @@ export function AttendanceScreen() {
                         </Th>
                       );
                     })}
-                    <Th align="right">Present</Th>
+                    <Th className="atd-col-present" align="center">Present</Th>
                   </Tr>
                 </THead>
                 <Tbody>
@@ -187,7 +200,7 @@ export function AttendanceScreen() {
                     const pct = total > 0 ? Math.round((daysPresent / total) * 100) : 0;
                     return (
                       <Tr key={u.id}>
-                        <Td>
+                        <Td className="atd-col-person">
                           <Identity
                             name={u.name}
                             subtitle={u.role.toLowerCase()}
@@ -197,32 +210,32 @@ export function AttendanceScreen() {
                         {data!.days.map((d) => {
                           const cell = row[d];
                           const present = cell ? cell.totalMs >= PRESENT_MIN_MS : false;
-                          const first = cell?.firstActivityMs ? fmtTime(cell.firstActivityMs) : null;
-                          const last = cell?.lastActivityMs ? fmtTime(cell.lastActivityMs) : null;
+                          const first = cell?.firstActivityMs ? fmtTime(cell.firstActivityMs) : '—';
+                          const last = cell?.lastActivityMs ? fmtTime(cell.lastActivityMs) : '—';
                           return (
-                            <Td key={d} align="center">
+                            <Td key={d} className="atd-col-day" align="center">
                               {present ? (
-                                <span className="atd-cell">
-                                  <span className="mono atd-cell__times">
-                                    {first}
+                                <span className="atd-cell atd-cell--present">
+                                  <span className="ui-mono atd-cell__times">
+                                    <span className="atd-cell__time">{first}</span>
                                     <span className="atd-cell__arrow"> → </span>
-                                    {last}
+                                    <span className="atd-cell__time">{last}</span>
                                   </span>
-                                  <span className="mono atd-cell__dur">
+                                  <span className="ui-mono atd-cell__dur">
                                     {fmtDurationMs(cell!.totalMs)}
                                   </span>
                                 </span>
                               ) : (
-                                <span className="mono atd-cell__absent" aria-label="Absent">
+                                <span className="ui-mono atd-cell__absent" aria-label="Absent">
                                   –
                                 </span>
                               )}
                             </Td>
                           );
                         })}
-                        <Td align="right">
+                        <Td className="atd-col-present" align="center">
                           <span className="atd-present">
-                            <span className="mono atd-present__count">
+                            <span className="ui-mono atd-present__count">
                               {daysPresent}
                               <span className="atd-present__of">/{total}</span>
                             </span>

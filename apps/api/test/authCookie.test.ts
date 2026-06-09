@@ -16,7 +16,7 @@ import { hashPassword } from '../src/lib/password';
 const app = buildApp();
 
 let counter = 0;
-async function seed(role: 'OWNER' | 'ADMIN' | 'MANAGER' | 'MEMBER' = 'MEMBER') {
+async function seed(role: 'ADMIN' | 'MANAGER' | 'MEMBER' = 'MEMBER') {
   counter += 1;
   const ws = await prisma.workspace.create({ data: { name: `WS-auth-cookie-${counter}` } });
   const password = 'sekret-password-' + counter;

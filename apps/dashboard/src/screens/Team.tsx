@@ -1,322 +1,501 @@
 import './team.css';
 import { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { useNavigate } from '@tanstack/react-router';
-import { Calendar, ArrowUpRight, Download, Users } from 'lucide-react';
-import { api, API_BASE } from '../lib/api';
-import type { TimesheetMatrix } from '../lib/types';
-import { fmtDurationMs, fmtDayLabel, addDays, todayKey } from '../lib/format';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { ArrowUpRight, Check, Pencil, RotateCcw, Users, X } from 'lucide-react';
+import type {
+  PatchTeamMemberSettingsRequest,
+  ShiftDto,
+  TeamMemberSettingsDto,
+  TeamSettingsResponse,
+  WorkspacePolicyDto,
+} from '@grind/types';
+import { api } from '../lib/api';
+import { useMe } from '../lib/auth';
 import {
+  Avatar,
+  Banner,
+  Button,
+  Card,
+  EmptyState,
+  IconButton,
+  Identity,
   Page,
   PageHeader,
-  Card,
+  Select,
+  SkeletonTable,
   Stat,
   StatRow,
   Table,
-  THead,
-  Tbody,
-  Th,
-  Tr,
-  Td,
-  Avatar,
-  Identity,
-  Button,
-  Segmented,
-  Toolbar,
-  DateStepper,
   Tag,
-  Banner,
-  EmptyState,
-  SkeletonTable,
+  Tbody,
+  Td,
+  Th,
+  THead,
+  Toolbar,
+  Tr,
 } from '../ui';
+import { TeamMemberDetailDrawer } from './Reports';
 
-const SCOPE_LABEL: Record<TimesheetMatrix['scope'], string> = {
-  self: 'Just you',
-  team: 'Your team',
-  workspace: 'Entire workspace',
-};
+type PatchField = keyof PatchTeamMemberSettingsRequest;
+type PendingField = PatchField | 'settings';
+type PendingEdit = { userId: string; field: PendingField } | null;
+type RowDraft = {
+  userId: string;
+  shiftId: string | null;
+  screenshotIntervalMin: number;
+  idleThresholdMin: number;
+} | null;
 
-const RANGES: Array<{ value: '7' | '14' | '30'; label: string; days: number }> = [
-  { value: '7', label: '7d', days: 7 },
-  { value: '14', label: '14d', days: 14 },
-  { value: '30', label: '30d', days: 30 },
-];
+const TEAM_SETTINGS_QUERY_KEY = ['admin', 'team-member-settings'] as const;
 
-/* ── Heat ramp — the ONE sanctioned colour zone (SYSTEM.md §4 sequential
- * intensity): a single-hue ramp of the accent at fixed steps,
- *   --accent-tint → --accent-tint-2 → color-mix(accent 55% white) → accent.
- * A cell's intensity (total / maxTotal) samples this ramp so the matrix reads
- * as one calm violet field that deepens with hours. No multi-hue gradient, no
- * rainbow — the only place --accent fills an area (it counts toward the ≤3
- * budget). The RGB stops below are exactly those token values, used solely for
- * this data-viz ramp. Past STRONG_AT the ground is dark enough that the figure
- * flips to --on-accent. Empty cells stay a bare mono dash — the quiet baseline.
- * Presentation only: what a cell encodes (total tracked time) is unchanged. */
-const RAMP: Array<[number, number, number]> = [
-  [0xee, 0xee, 0xfb], // 0.00  --accent-tint
-  [0xe2, 0xe2, 0xf7], // 0.33  --accent-tint-2
-  [0xa5, 0xa5, 0xe8], // 0.66  color-mix(accent 55%, white)
-  [0x5b, 0x5b, 0xd6], // 1.00  --accent
-];
-const HEAT_FLOOR = 0.1; // faintest non-empty step so 1-minute days still register
-const STRONG_AT = 0.62; // intensity past which the accent ground needs --on-accent text
+const SCREENSHOT_INTERVAL_OPTIONS = [15, 30, 60, 120, 180, 240, 360, 480];
+const IDLE_THRESHOLD_OPTIONS = [1, 3, 5, 10, 15, 30, 45, 60, 120];
 
-function lerp(a: number, b: number, t: number): number {
-  return Math.round(a + (b - a) * t);
-}
-
-/** Sample the accent ramp at t∈[0,1] → an `rgb()` string. */
-function rampColor(t: number): string {
-  const clamped = Math.max(0, Math.min(1, t));
-  const span = clamped * (RAMP.length - 1);
-  const i = Math.min(RAMP.length - 2, Math.floor(span));
-  const f = span - i;
-  const [r1, g1, b1] = RAMP[i]!;
-  const [r2, g2, b2] = RAMP[i + 1]!;
-  return `rgb(${lerp(r1, r2, f)}, ${lerp(g1, g2, f)}, ${lerp(b1, b2, f)})`;
-}
-
-/** Map a cell's raw intensity onto the visible ramp (floored so faint days show). */
-function heatStop(intensity: number): number {
-  return HEAT_FLOOR + intensity * (1 - HEAT_FLOOR);
-}
-
-/**
- * Team timesheets — a manager's heat-mapped users × days matrix, composed
- * entirely from the shared "Quiet Datasheet" kit (Page / PageHeader / Toolbar /
- * Segmented / DateStepper / Card / StatRow / Table / Identity / Avatar / Tag /
- * Banner / EmptyState). The matrix is the one colour zone — every cell is a step
- * on the single accent intensity ramp (SYSTEM.md §4), so tracked intensity reads
- * instantly off the legend (not a rainbow). Hover surfaces the worked / meeting /
- * manual breakdown; click a cell to drill into that day for that person (via
- * /me-today with ?userId= ?date=).
- *
- * Presentation only — the data shape, the cell encoding (total tracked time),
- * the range / anchor controls, the CSV export and the click-through contract are
- * all unchanged. Route stays MANAGER+ only (MEMBERs hitting this URL get 403'd).
- */
 export function TeamScreen() {
-  const navigate = useNavigate();
-  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  const queryClient = useQueryClient();
+  const meQ = useMe();
+  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+  const [pendingEdit, setPendingEdit] = useState<PendingEdit>(null);
+  const [rowDraft, setRowDraft] = useState<RowDraft>(null);
 
-  // Anchor = the right-most ("to") day in the window. Defaults to today.
-  // Range size + anchor make navigation predictable; full date picker
-  // lives behind the "Custom…" affordance (future).
-  const [anchor, setAnchor] = useState<string>(todayKey());
-  const [rangeKey, setRangeKey] = useState<'7' | '14' | '30'>('7');
-  const days = RANGES.find((r) => r.value === rangeKey)!.days;
-  const from = addDays(anchor, -(days - 1));
-
-  const q = useQuery({
-    queryKey: ['admin', 'timesheets', from, anchor, tz],
-    queryFn: () => {
-      const params = new URLSearchParams({ from, to: anchor, tz });
-      return api<TimesheetMatrix>(`/v1/admin/timesheets?${params.toString()}`);
-    },
+  const settingsQ = useQuery({
+    queryKey: TEAM_SETTINGS_QUERY_KEY,
+    queryFn: () => api<TeamSettingsResponse>('/v1/admin/team-member-settings'),
+  });
+  const policyQ = useQuery({
+    queryKey: ['admin', 'workspace-policy'],
+    queryFn: () => api<WorkspacePolicyDto>('/v1/admin/workspace-policy'),
   });
 
-  const maxTotal = useMemo(() => {
-    if (!q.data) return 0;
-    let m = 0;
-    for (const u of q.data.users) {
-      const row = q.data.cells[u.id];
-      if (!row) continue;
-      for (const day of q.data.days) {
-        const c = row[day];
-        if (c && c.totalMs > m) m = c.totalMs;
-      }
+  const updateMember = useMutation({
+    mutationFn: ({ userId, patch }: { userId: string; patch: PatchTeamMemberSettingsRequest }) =>
+      api<TeamMemberSettingsDto>(`/v1/admin/team-member-settings/${userId}`, { method: 'PATCH', json: patch }),
+    onSuccess: (updated, variables) => {
+      queryClient.setQueryData<TeamSettingsResponse | undefined>(TEAM_SETTINGS_QUERY_KEY, (current) => {
+        if (!current) return current;
+        return {
+          ...current,
+          members: current.members.map((member) => (member.id === updated.id ? updated : member)),
+        };
+      });
+      setRowDraft((current) => (current?.userId === variables.userId ? null : current));
+    },
+    onSettled: () => setPendingEdit(null),
+  });
+
+  const members = settingsQ.data?.members ?? [];
+  const shifts = settingsQ.data?.shifts ?? [];
+  const summary = useMemo(() => summarizeMembers(members), [members]);
+  const policy = policyQ.data;
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  const today = localDateKey();
+  const drawerFrom = addLocalDays(today, -6);
+
+  function patchMember(userId: string, field: PendingField, patch: PatchTeamMemberSettingsRequest) {
+    setPendingEdit({ userId, field });
+    updateMember.mutate({ userId, patch });
+  }
+
+  function startRowEdit(member: TeamMemberSettingsDto) {
+    setRowDraft({
+      userId: member.id,
+      shiftId: member.shiftId,
+      screenshotIntervalMin: member.screenshotIntervalMin,
+      idleThresholdMin: member.idleThresholdMin,
+    });
+  }
+
+  function updateRowDraft(memberId: string, patch: Partial<NonNullable<RowDraft>>) {
+    setRowDraft((current) => (current?.userId === memberId ? { ...current, ...patch } : current));
+  }
+
+  function saveRowEdit(member: TeamMemberSettingsDto) {
+    if (!rowDraft || rowDraft.userId !== member.id) return;
+    const patch: PatchTeamMemberSettingsRequest = {};
+    if (rowDraft.shiftId !== member.shiftId) patch.shiftId = rowDraft.shiftId;
+    if (rowDraft.screenshotIntervalMin !== member.screenshotIntervalMin) {
+      patch.screenshotIntervalMin = rowDraft.screenshotIntervalMin;
     }
-    return m;
-  }, [q.data]);
-
-  const csvHref = `${API_BASE}/v1/admin/timesheets.csv?${new URLSearchParams({ from, to: anchor, tz }).toString()}`;
-  const eyebrow = `${tz.replace(/_/g, ' ')} · Timesheets`;
-  const isNow = anchor === todayKey();
-
-  const subtitle = q.data
-    ? `${SCOPE_LABEL[q.data.scope]} · ${fmtDayLabel(q.data.from)} → ${fmtDayLabel(q.data.to)}`
-    : 'Loading the matrix…';
+    if (rowDraft.idleThresholdMin !== member.idleThresholdMin) {
+      patch.idleThresholdMin = rowDraft.idleThresholdMin;
+    }
+    if (Object.keys(patch).length === 0) {
+      setRowDraft(null);
+      return;
+    }
+    patchMember(member.id, 'settings', patch);
+  }
 
   return (
-    <Page>
+    <Page className="tm-page">
       <PageHeader
-        eyebrow={eyebrow}
+        eyebrow="Team settings"
         title="Team"
-        subtitle={subtitle}
+        subtitle="Edit each member's shift, screenshot cadence, and idle-break threshold."
         actions={
           <Toolbar>
-            <Segmented
-              value={rangeKey}
-              onChange={(v) => setRangeKey(v as '7' | '14' | '30')}
-              items={RANGES.map((r) => ({ value: r.value, label: r.label }))}
-            />
-            <DateStepper
-              value={
-                <span className="tm-anchor-val">
-                  <Calendar size={12} strokeWidth={2} aria-hidden />
-                  {isNow ? 'Now' : fmtDayLabel(anchor)}
-                </span>
-              }
-              onPrev={() => setAnchor((d) => addDays(d, -days))}
-              onNext={() => setAnchor((d) => addDays(d, days))}
-              nextDisabled={isNow}
-              prevLabel="Previous range"
-              nextLabel="Next range"
-            />
-            <a className="ui-btn ui-btn--primary ui-btn--md" href={csvHref} download>
-              <span className="ui-btn__icon">
-                <Download size={14} strokeWidth={2} />
-              </span>
-              <span className="ui-btn__label">Export CSV</span>
-            </a>
+            <Button
+              variant="secondary"
+              size="md"
+              icon={<RotateCcw size={14} strokeWidth={1.8} />}
+              onClick={() => settingsQ.refetch()}
+              loading={settingsQ.isRefetching}
+            >
+              Refresh
+            </Button>
           </Toolbar>
         }
       />
 
-      {q.isLoading && (
+      {settingsQ.isError && (
+        <Banner
+          status="danger"
+          action={
+            <Button variant="ghost" size="sm" onClick={() => settingsQ.refetch()}>
+              Retry
+            </Button>
+          }
+        >
+          Couldn&apos;t load team settings: {(settingsQ.error as Error).message}
+        </Banner>
+      )}
+
+      {updateMember.isError && (
+        <Banner status="danger">Couldn&apos;t save the member setting: {(updateMember.error as Error).message}</Banner>
+      )}
+
+      {settingsQ.isLoading && (
         <Card variant="flush">
           <SkeletonTable rows={6} />
         </Card>
       )}
 
-      {q.isError && (
-        <Banner
-          status="danger"
-          action={
-            <Button variant="ghost" size="sm" onClick={() => q.refetch()}>
-              Retry
-            </Button>
-          }
-        >
-          Couldn&apos;t load the timesheets: {(q.error as Error).message}
-        </Banner>
-      )}
-
-      {q.data && q.data.users.length === 0 && (
+      {settingsQ.data && members.length === 0 && (
         <Card variant="flush">
           <EmptyState
             icon={<Users size={22} strokeWidth={1.8} />}
-            title="No users in scope"
-            description="No one falls under your timesheet view for this range."
+            title="No team members to configure"
+            description="Members appear here after they are assigned to a team you manage."
           />
         </Card>
       )}
 
-      {q.data && q.data.users.length > 0 && (
+      {settingsQ.data && members.length > 0 && (
         <>
-          <Card variant="flush">
+          <Card variant="flush" className="tm-summary-card">
             <StatRow>
-              <Stat
-                label="People"
-                value={q.data.users.length}
-                unit={q.data.users.length === 1 ? 'person' : 'people'}
-              />
-              <Stat label="Days" value={q.data.days.length} />
-              <Stat label="Peak day" value={maxTotal > 0 ? fmtDurationMs(maxTotal) : '—'} />
+              <Stat label="Members" value={members.length} hint={settingsQ.data.scope === 'workspace' ? 'workspace scope' : 'team scope'} />
+              <Stat label="Assigned shifts" value={summary.assignedShifts} hint={`${summary.unassignedShifts} unassigned`} />
+              <Stat label="Screenshots" value={formatCadence(summary.avgScreenshotIntervalMin)} hint="average cadence" />
+              <Stat label="Idle break" value={formatCadence(summary.avgIdleThresholdMin)} hint="average threshold" />
+              <Stat label="Capture" value={policy ? captureCount(policy) : '-'} hint={policy ? `${policy.retentionDaysScreenshots}d retention` : 'loading policy'} />
             </StatRow>
           </Card>
 
-          <Card variant="flush">
-            <div className="tm-scroll">
-              <Table stickyHead stickyCol>
-                <THead>
-                  <Tr>
-                    <Th>Person</Th>
-                    {q.data.days.map((d) => {
-                      const date = new Date(`${d}T00:00:00`);
-                      return (
-                        <Th key={d} align="center">
-                          <span className="tm-day-head">
-                            <span>
-                              {new Intl.DateTimeFormat(undefined, { weekday: 'short' }).format(date)}
-                            </span>
-                            <span className="tm-day-num mono">
-                              {new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(date)}
-                            </span>
-                          </span>
-                        </Th>
-                      );
-                    })}
-                    <Th align="right">Total</Th>
-                  </Tr>
-                </THead>
-                <Tbody>
-                  {q.data.users.map((u) => {
-                    const row = q.data!.cells[u.id] ?? {};
-                    const rowTotal = q.data!.days.reduce((sum, d) => sum + (row[d]?.totalMs ?? 0), 0);
-                    return (
-                      <Tr key={u.id}>
-                        <Td>
-                          <Identity
-                            name={u.name}
-                            subtitle={u.role.toLowerCase()}
-                            avatar={<Avatar name={u.name} />}
-                          />
-                        </Td>
-                        {q.data!.days.map((d) => {
-                          const cell = row[d];
-                          const total = cell?.totalMs ?? 0;
-                          const intensity = maxTotal > 0 ? Math.min(1, total / maxTotal) : 0;
-                          const stop = total > 0 ? heatStop(intensity) : 0;
-                          const strong = total > 0 && intensity >= STRONG_AT;
-                          const isPeak = total > 0 && total === maxTotal;
-                          return (
-                            <Td key={d} align="center" className="tm-day-cell">
-                              <button
-                                type="button"
-                                className={
-                                  `tm-cell mono${total === 0 ? ' is-empty' : ''}` +
-                                  `${strong ? ' is-strong' : ''}${isPeak ? ' is-peak' : ''}`
-                                }
-                                onClick={() => navigate({ to: '/me-today', search: { date: d, userId: u.id } })}
-                                title={
-                                  cell
-                                    ? `${fmtDurationMs(cell.totalMs)} total · ${fmtDurationMs(cell.workedMs)} work · ${fmtDurationMs(cell.meetingMs)} mtg · ${fmtDurationMs(cell.manualMs)} manual`
-                                    : 'No tracked time'
-                                }
-                                style={total > 0 ? { ['--tm-heat' as string]: rampColor(stop) } : undefined}
-                              >
-                                <span>{total > 0 ? fmtDurationMs(total) : '—'}</span>
-                                {cell && cell.manualMs > 0 && (
-                                  <span className="tm-cell-manual" title="includes manual time" />
-                                )}
-                              </button>
-                            </Td>
-                          );
-                        })}
-                        <Td mono>{fmtDurationMs(rowTotal)}</Td>
-                      </Tr>
-                    );
-                  })}
-                </Tbody>
-              </Table>
-            </div>
-
-            <div className="tm-legend">
-              <div className="tm-legend-scale">
-                <span className="ui-t-eyebrow">Less</span>
-                <span className="tm-legend-ramp" aria-hidden>
-                  {[0, 0.25, 0.5, 0.75, 1].map((step) => (
-                    <span key={step} className="tm-legend-swatch" style={{ background: rampColor(step) }} />
-                  ))}
-                </span>
-                <span className="ui-t-eyebrow">More tracked</span>
+          <Card variant="flush" className="tm-members-card">
+            <div className="tm-card-head">
+              <div>
+                <h2 className="ui-t-title">Members</h2>
+                <p className="ui-t-small">Edit settings with the pencil, then confirm with the tick.</p>
               </div>
-              <span className="tm-legend-keys">
-                <Tag status="neutral" dot>
-                  No time
-                </Tag>
-                <Tag status="info" dot>
-                  Includes manual
-                </Tag>
-                <span className="tm-legend-hint ui-t-small">
-                  <ArrowUpRight size={12} strokeWidth={2} aria-hidden /> Click a cell to open the day
-                </span>
-              </span>
+              <Tag mono>{members.length}</Tag>
             </div>
+            <TeamSettingsTable
+              members={members}
+              shifts={shifts}
+              currentUserId={meQ.data?.id ?? null}
+              pendingEdit={pendingEdit}
+              rowDraft={rowDraft}
+              onStartEdit={startRowEdit}
+              onCancelEdit={() => setRowDraft(null)}
+              onDraftChange={updateRowDraft}
+              onSaveEdit={saveRowEdit}
+              onOpenMember={setSelectedUserId}
+            />
           </Card>
         </>
       )}
+
+      {selectedUserId && (
+        <TeamMemberDetailDrawer
+          userId={selectedUserId}
+          initialFrom={drawerFrom}
+          initialTo={today}
+          today={today}
+          tz={tz}
+          onClose={() => setSelectedUserId(null)}
+        />
+      )}
     </Page>
   );
+}
+
+function TeamSettingsTable({
+  members,
+  shifts,
+  currentUserId,
+  pendingEdit,
+  rowDraft,
+  onStartEdit,
+  onCancelEdit,
+  onDraftChange,
+  onSaveEdit,
+  onOpenMember,
+}: {
+  members: TeamMemberSettingsDto[];
+  shifts: ShiftDto[];
+  currentUserId: string | null;
+  pendingEdit: PendingEdit;
+  rowDraft: RowDraft;
+  onStartEdit: (member: TeamMemberSettingsDto) => void;
+  onCancelEdit: () => void;
+  onDraftChange: (memberId: string, patch: Partial<NonNullable<RowDraft>>) => void;
+  onSaveEdit: (member: TeamMemberSettingsDto) => void;
+  onOpenMember: (userId: string) => void;
+}) {
+  return (
+    <div className="tm-table-wrap">
+      <Table density="compact" stickyHead className="tm-members-table">
+        <THead>
+          <Tr>
+            <Th className="tm-col-member">Member</Th>
+            <Th className="tm-col-shift" align="center">Shift</Th>
+            <Th className="tm-col-shot" align="center">Screenshot interval</Th>
+            <Th className="tm-col-idle" align="center">Idle break</Th>
+            <Th className="tm-col-manager" align="center">Manager</Th>
+            <Th className="tm-col-action" align="center">Action</Th>
+          </Tr>
+        </THead>
+        <Tbody>
+          {members.map((member) => {
+            const draft = rowDraft?.userId === member.id ? rowDraft : null;
+            const editing = Boolean(draft);
+            const rowBusy = isPending(pendingEdit, member.id, 'settings');
+            const shiftId = draft ? draft.shiftId : member.shiftId;
+            const screenshotIntervalMin = draft ? draft.screenshotIntervalMin : member.screenshotIntervalMin;
+            const idleThresholdMin = draft ? draft.idleThresholdMin : member.idleThresholdMin;
+            const shift = shifts.find((s) => s.id === shiftId) ?? null;
+            const isCurrentUser = member.id === currentUserId;
+
+            return (
+              <Tr key={member.id} className="tm-member-row">
+                <Td className="tm-col-member">
+                  <Identity
+                    avatar={<Avatar name={member.name} size={32} />}
+                    name={isCurrentUser ? `${member.name} (you)` : member.name}
+                    subtitle={member.team?.name ?? member.email}
+                  />
+                </Td>
+                <Td className="tm-col-shift" align="center">
+                  {editing ? (
+                    <ShiftSelect
+                      memberName={member.name}
+                      value={shiftId}
+                      shifts={shifts}
+                      busy={rowBusy}
+                      onChange={(nextShiftId) => onDraftChange(member.id, { shiftId: nextShiftId })}
+                    />
+                  ) : (
+                    <SettingValue value={shift?.name ?? 'No shift'} />
+                  )}
+                </Td>
+                <Td className="tm-col-shot" align="center">
+                  {editing ? (
+                    <CadenceSelect
+                      ariaLabel={`${member.name} screenshot interval`}
+                      value={screenshotIntervalMin}
+                      options={SCREENSHOT_INTERVAL_OPTIONS}
+                      busy={rowBusy}
+                      prefix="Every"
+                      onChange={(next) => onDraftChange(member.id, { screenshotIntervalMin: next })}
+                    />
+                  ) : (
+                    <SettingValue label="Every" value={formatCadence(screenshotIntervalMin)} />
+                  )}
+                </Td>
+                <Td className="tm-col-idle" align="center">
+                  {editing ? (
+                    <CadenceSelect
+                      ariaLabel={`${member.name} idle break threshold`}
+                      value={idleThresholdMin}
+                      options={IDLE_THRESHOLD_OPTIONS}
+                      busy={rowBusy}
+                      prefix="After"
+                      onChange={(next) => onDraftChange(member.id, { idleThresholdMin: next })}
+                    />
+                  ) : (
+                    <SettingValue label="After" value={formatCadence(idleThresholdMin)} />
+                  )}
+                </Td>
+                <Td className="tm-col-manager" align="center">
+                  <div className="tm-stack tm-stack--center">
+                    <span className="ui-t-strong">{member.manager?.name ?? 'No manager'}</span>
+                    <span className="ui-t-small ui-ink-3">{member.manager?.email ?? 'Workspace scope'}</span>
+                  </div>
+                </Td>
+                <Td className="tm-col-action" align="center">
+                  <div className="tm-row-actions">
+                    {editing ? (
+                      <>
+                        <IconButton
+                          icon={<X size={15} strokeWidth={1.9} />}
+                          aria-label="Cancel settings edit"
+                          disabled={rowBusy}
+                          onClick={onCancelEdit}
+                        />
+                        <IconButton
+                          icon={<Check size={15} strokeWidth={2.2} />}
+                          aria-label="Save settings"
+                          variant="primary"
+                          loading={rowBusy}
+                          onClick={() => onSaveEdit(member)}
+                        />
+                      </>
+                    ) : (
+                      <>
+                        <IconButton
+                          icon={<Pencil size={14} strokeWidth={1.9} />}
+                          aria-label={`Edit ${member.name} settings`}
+                          disabled={Boolean(pendingEdit) || Boolean(rowDraft)}
+                          onClick={() => onStartEdit(member)}
+                        />
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          icon={<ArrowUpRight size={14} strokeWidth={1.8} />}
+                          onClick={() => onOpenMember(member.id)}
+                        >
+                          Open
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                </Td>
+              </Tr>
+            );
+          })}
+        </Tbody>
+      </Table>
+    </div>
+  );
+}
+
+function SettingValue({ label, value }: { label?: string; value: string }) {
+  return (
+    <span className="tm-setting-display">
+      {label && <span className="tm-setting-display__label">{label}</span>}
+      <span className="tm-setting-display__value">{value}</span>
+    </span>
+  );
+}
+
+function ShiftSelect({
+  memberName,
+  value,
+  shifts,
+  busy,
+  onChange,
+}: {
+  memberName: string;
+  value: string | null;
+  shifts: ShiftDto[];
+  busy: boolean;
+  onChange: (shiftId: string | null) => void;
+}) {
+  return (
+    <div className="tm-setting-control">
+      <Select
+        value={value ?? ''}
+        aria-label={`${memberName} shift`}
+        disabled={busy}
+        onChange={(e) => onChange(e.target.value === '' ? null : e.target.value)}
+      >
+        <option value="">No shift</option>
+        {shifts.map((shift) => (
+          <option key={shift.id} value={shift.id}>
+            {shift.name}
+          </option>
+        ))}
+      </Select>
+      {busy && <span className="tm-saving ui-t-small">Saving</span>}
+    </div>
+  );
+}
+
+function CadenceSelect({
+  ariaLabel,
+  value,
+  options,
+  busy,
+  prefix,
+  onChange,
+}: {
+  ariaLabel: string;
+  value: number;
+  options: number[];
+  busy: boolean;
+  prefix: 'Every' | 'After';
+  onChange: (value: number) => void;
+}) {
+  return (
+    <div className="tm-setting-control">
+      <Select
+        value={String(value)}
+        aria-label={ariaLabel}
+        disabled={busy}
+        onChange={(e) => onChange(Number(e.target.value))}
+      >
+        {options.map((option) => (
+          <option key={option} value={option}>
+            {prefix} {formatCadence(option)}
+          </option>
+        ))}
+      </Select>
+      {busy && <span className="tm-saving ui-t-small">Saving</span>}
+    </div>
+  );
+}
+
+function isPending(pending: PendingEdit, userId: string, field: PendingField): boolean {
+  return pending?.userId === userId && pending.field === field;
+}
+
+function summarizeMembers(members: TeamMemberSettingsDto[]) {
+  const assignedShifts = members.filter((member) => member.shiftId).length;
+  const screenshotTotal = members.reduce((sum, member) => sum + member.screenshotIntervalMin, 0);
+  const idleTotal = members.reduce((sum, member) => sum + member.idleThresholdMin, 0);
+  return {
+    assignedShifts,
+    unassignedShifts: members.length - assignedShifts,
+    avgScreenshotIntervalMin: members.length ? Math.round(screenshotTotal / members.length) : 0,
+    avgIdleThresholdMin: members.length ? Math.round(idleTotal / members.length) : 0,
+  };
+}
+
+function captureCount(policy: WorkspacePolicyDto): string {
+  const enabled = [policy.captureApps, policy.captureTitles, policy.captureUrls].filter(Boolean).length;
+  return `${enabled}/3`;
+}
+
+function formatCadence(minutes: number): string {
+  if (minutes <= 0) return '-';
+  if (minutes < 60) return `${minutes}m`;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return m === 0 ? `${h}h` : `${h}h ${m}m`;
+}
+
+function localDateKey(d = new Date()): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function addLocalDays(key: string, delta: number): string {
+  const parts = key.split('-').map(Number);
+  const y = parts[0] ?? new Date().getFullYear();
+  const m = parts[1] ?? 1;
+  const d = parts[2] ?? 1;
+  return localDateKey(new Date(y, m - 1, d + delta));
 }

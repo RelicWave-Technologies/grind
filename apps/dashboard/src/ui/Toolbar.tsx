@@ -28,11 +28,14 @@ export interface DateStepperProps {
   value: ReactNode;
   onPrev: () => void;
   onNext: () => void;
+  onValueClick?: () => void;
   /** Disable the forward control (e.g. at "today"). */
   nextDisabled?: boolean;
   prevDisabled?: boolean;
   prevLabel?: string;
   nextLabel?: string;
+  valueLabel?: string;
+  valueExpanded?: boolean;
   className?: string;
 }
 
@@ -40,10 +43,13 @@ export function DateStepper({
   value,
   onPrev,
   onNext,
+  onValueClick,
   nextDisabled,
   prevDisabled,
   prevLabel = 'Previous',
   nextLabel = 'Next',
+  valueLabel = 'Choose date',
+  valueExpanded,
   className,
 }: DateStepperProps) {
   return (
@@ -55,7 +61,20 @@ export function DateStepper({
         onClick={onPrev}
         disabled={prevDisabled}
       />
-      <span className="ui-date-stepper__pill">{value}</span>
+      {onValueClick ? (
+        <button
+          type="button"
+          className={cx('ui-date-stepper__pill', 'ui-date-stepper__pill-button', valueExpanded && 'is-open')}
+          onClick={onValueClick}
+          aria-label={valueLabel}
+          aria-expanded={valueExpanded}
+          aria-haspopup="dialog"
+        >
+          {value}
+        </button>
+      ) : (
+        <span className="ui-date-stepper__pill">{value}</span>
+      )}
       <IconButton
         icon={<ChevronRight size={16} strokeWidth={1.8} />}
         aria-label={nextLabel}

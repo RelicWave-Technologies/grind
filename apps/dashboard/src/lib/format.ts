@@ -28,12 +28,10 @@ export function fmtDurationMs(ms: number): string {
 
 /** Today / Yesterday / "Sat, May 30". */
 export function fmtDayLabel(yyyyMmDd: string): string {
-  const today = new Date();
-  const todayKey = today.toISOString().slice(0, 10);
-  if (yyyyMmDd === todayKey) return 'Today';
-  const yesterday = new Date(today.getTime() - 24 * 60 * 60 * 1000);
-  if (yyyyMmDd === yesterday.toISOString().slice(0, 10)) return 'Yesterday';
-  const d = new Date(`${yyyyMmDd}T00:00:00`);
+  const today = todayKey();
+  if (yyyyMmDd === today) return 'Today';
+  if (yyyyMmDd === addDays(today, -1)) return 'Yesterday';
+  const d = parseDateKey(yyyyMmDd);
   return new Intl.DateTimeFormat(undefined, {
     weekday: 'short',
     month: 'short',
@@ -43,13 +41,25 @@ export function fmtDayLabel(yyyyMmDd: string): string {
 
 /** Shift a YYYY-MM-DD string by a number of calendar days. */
 export function addDays(yyyyMmDd: string, delta: number): string {
-  const d = new Date(`${yyyyMmDd}T00:00:00`);
+  const d = parseDateKey(yyyyMmDd);
   d.setDate(d.getDate() + delta);
-  return d.toISOString().slice(0, 10);
+  return dateKey(d);
 }
 
 export function todayKey(): string {
-  return new Date().toISOString().slice(0, 10);
+  return dateKey(new Date());
+}
+
+function parseDateKey(key: string): Date {
+  const [year, month, day] = key.split('-').map((part) => Number.parseInt(part, 10));
+  return new Date(year!, month! - 1, day!);
+}
+
+function dateKey(date: Date): string {
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, '0');
+  const day = `${date.getDate()}`.padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 /**

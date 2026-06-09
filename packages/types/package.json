@@ -11,7 +11,12 @@
     "./agent": "./src/agent.ts",
     "./projects": "./src/projects.ts",
     "./timeEntries": "./src/timeEntries.ts",
-    "./activity": "./src/activity.ts"
+    "./activity": "./src/activity.ts",
+    "./rbac": "./src/rbac.ts",
+    "./reports": "./src/reports.ts",
+    "./profile": "./src/profile.ts",
+    "./shifts": "./src/shifts.ts",
+    "./workspacePolicy": "./src/workspacePolicy.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",

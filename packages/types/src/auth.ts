@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const Role = z.enum(['OWNER', 'ADMIN', 'MANAGER', 'MEMBER']);
+export const Role = z.enum(['ADMIN', 'MANAGER', 'MEMBER']);
 export type Role = z.infer<typeof Role>;
 
 export const UserDto = z.object({
@@ -8,7 +8,11 @@ export const UserDto = z.object({
   email: z.string().email(),
   name: z.string(),
   role: Role,
+  displayRole: Role,
+  capabilities: z.array(z.string()),
   workspaceId: z.string(),
+  teamId: z.string().nullable(),
+  managerId: z.string().nullable(),
 });
 export type UserDto = z.infer<typeof UserDto>;
 

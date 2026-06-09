@@ -1,9 +1,8 @@
 /* ============================================================================
    ATTENDANCE — LAYOUT ONLY.
    The page is composed from the shared "Quiet Datasheet" kit (src/ui). This
-   file contributes pure placement (stacking, gaps, the horizontal scroll
-   wrapper, and the small intra-cell stacks) — no colours, type, borders, or
-   shadows beyond the kit's own meta-ink tokens for sub-labels. Prefix: atd-.
+   file contributes pure placement: stable matrix columns, row rhythm, and
+   compact intra-cell stacks. Prefix: atd-.
    ========================================================================== */
 
 /* Vertical rhythm between the header, KPI strip, and matrix card.
@@ -13,17 +12,110 @@
   margin-top: var(--ui-sp-7);
 }
 
-/* Legend — a row of kit Tags above the table, inside the flush card padding. */
+.atd-card {
+  overflow: hidden;
+}
+
+.atd-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--ui-sp-5);
+  padding: var(--ui-sp-5) var(--ui-sp-6);
+  border-bottom: 1px solid var(--ui-line);
+}
+
+.atd-card-head h2,
+.atd-card-head p {
+  margin: 0;
+}
+
+.atd-card-head p {
+  margin-top: var(--ui-sp-1);
+}
+
+/* Legend — compact kit Tags in the card head. */
 .atd-legend {
   display: flex;
   align-items: center;
-  gap: var(--ui-sp-4);
-  padding: var(--ui-sp-5) var(--ui-sp-7) 0;
+  justify-content: flex-end;
+  gap: var(--ui-sp-3);
+  flex-wrap: wrap;
 }
 
 /* The matrix scrolls horizontally inside the flush card. */
 .atd-scroll {
   overflow-x: auto;
+  scrollbar-gutter: stable;
+}
+
+.atd-table {
+  --atd-person-w: calc(var(--ui-sp-12) * 4 + var(--ui-sp-5));
+  --atd-day-w: calc(var(--ui-sp-12) * 2 + var(--ui-sp-6));
+  --atd-present-w: calc(var(--ui-sp-12) * 2 + var(--ui-sp-5));
+
+  width: max-content;
+  min-width: 100%;
+  table-layout: fixed;
+}
+
+.atd-table col.atd-col-person {
+  width: var(--atd-person-w);
+}
+
+.atd-table col.atd-col-day {
+  width: var(--atd-day-w);
+}
+
+.atd-table col.atd-col-present {
+  width: var(--atd-present-w);
+}
+
+.atd-table.ui-table--compact .ui-table__row {
+  height: calc(var(--ui-row-h) + var(--ui-sp-8));
+}
+
+.atd-table .ui-table__head .ui-th {
+  height: calc(var(--ui-row-h) + var(--ui-sp-9));
+  padding: var(--ui-sp-4) var(--ui-sp-3);
+  vertical-align: middle;
+}
+
+.atd-table .ui-td {
+  height: calc(var(--ui-row-h) + var(--ui-sp-8));
+  padding-inline: var(--ui-sp-3);
+  vertical-align: middle;
+}
+
+.atd-table .atd-col-person {
+  width: var(--atd-person-w);
+  min-width: var(--atd-person-w);
+  max-width: var(--atd-person-w);
+}
+
+.atd-table .atd-col-day {
+  width: var(--atd-day-w);
+  min-width: var(--atd-day-w);
+  max-width: var(--atd-day-w);
+}
+
+.atd-table .atd-col-present {
+  width: var(--atd-present-w);
+  min-width: var(--atd-present-w);
+  max-width: var(--atd-present-w);
+}
+
+.atd-table.ui-table--sticky-col .ui-th:first-child,
+.atd-table.ui-table--sticky-col .ui-td:first-child {
+  border-right: 1px solid var(--ui-line);
+}
+
+.atd-table.ui-table--sticky-col .ui-th:first-child {
+  z-index: 3;
+}
+
+.atd-table .atd-col-person .ui-identity {
+  width: 100%;
 }
 
 /* Day column head — weekday over day-number over the optional Today tag. */
@@ -32,6 +124,9 @@
   flex-direction: column;
   align-items: center;
   gap: var(--ui-sp-1);
+  justify-content: center;
+  min-height: calc(var(--ui-row-h) + var(--ui-sp-4));
+  width: 100%;
 }
 .atd-dayhead__dow {
   color: var(--ui-ink-3);
@@ -40,19 +135,75 @@
   color: var(--ui-ink);
 }
 
+.atd-today-tag {
+  max-width: 100%;
+}
+
 /* Present cell — mono first→last over a quiet duration line. */
 .atd-cell {
+  width: auto;
+  max-width: 100%;
+  margin-inline: auto;
+  min-width: 0;
+  min-height: calc(var(--ui-control-h) + var(--ui-sp-2));
   display: inline-flex;
   flex-direction: column;
   align-items: center;
-  gap: var(--ui-sp-1);
-  white-space: nowrap;
+  justify-content: center;
+  gap: var(--ui-sp-2);
+  padding: var(--ui-sp-3) var(--ui-sp-4);
+  border: 1px solid transparent;
+  border-radius: var(--ui-r-md);
+  overflow: hidden;
 }
+
+.atd-cell--present {
+  background: var(--ui-success-bg);
+  border-color: transparent;
+  color: var(--ui-success-ink);
+}
+
+.atd-cell__times {
+  width: auto;
+  min-width: 0;
+  display: inline-flex;
+  align-items: baseline;
+  justify-content: center;
+  white-space: nowrap;
+  font-size: 0.9em;
+  line-height: 1.2;
+}
+
+.atd-cell__time {
+  flex: 0 0 auto;
+}
+
 .atd-cell__arrow,
 .atd-cell__dur {
-  color: var(--ui-ink-3);
+  color: var(--ui-success-ink);
 }
+
+.atd-cell__arrow {
+  flex: none;
+}
+
+.atd-cell__dur {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--ui-sp-6);
+  padding: 0 var(--ui-sp-4);
+  border-radius: var(--ui-r-full);
+  background: var(--ui-surface);
+  font-size: 0.86em;
+  line-height: 1;
+}
+
 .atd-cell__absent {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: calc(var(--ui-control-h) + var(--ui-sp-3));
   color: var(--ui-ink-3);
 }
 
@@ -63,6 +214,21 @@
   justify-content: flex-end;
   gap: var(--ui-sp-3);
 }
+
+.atd-present__count {
+  white-space: nowrap;
+}
+
 .atd-present__of {
   color: var(--ui-ink-3);
+}
+
+@media (max-width: 42rem) {
+  .atd-card-head {
+    flex-direction: column;
+  }
+
+  .atd-legend {
+    justify-content: flex-start;
+  }
 }

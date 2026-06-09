@@ -14,10 +14,11 @@ export interface DayBlock {
   durationMs: number;
   timeEntryId?: string;
   larkTaskGuid?: string | null;
+  taskSummary?: string | null;
   notes?: string | null;
   isOpen?: boolean;
   attendeeIds?: string[];
-  /** PENDING blocks only: the ManualTimeRequest id (for edit / withdraw). */
+  /** ManualTimeRequest id for PENDING and approved MANUAL blocks. */
   requestId?: string;
   /** PENDING blocks only: the request reason (shown + editable inline). */
   reason?: string;
@@ -30,6 +31,7 @@ export interface RejectedRequest {
   reason: string;
   decidedReason: string | null;
   larkTaskGuid: string | null;
+  taskSummary?: string | null;
 }
 
 export interface ActivityHeatmap {
@@ -41,6 +43,7 @@ export interface ActivityHeatmap {
 export interface AppUsageEntry {
   app: string;
   appBundle: string | null;
+  iconUrl?: string | null;
   minutes: number;
   keystrokes: number;
   clicks: number;
@@ -78,7 +81,7 @@ export interface WorkspaceUser {
   id: string;
   name: string;
   email: string;
-  role: 'OWNER' | 'ADMIN' | 'MANAGER' | 'MEMBER';
+  role: 'ADMIN' | 'MANAGER' | 'MEMBER';
 }
 
 // ---------------------------------------------------------------------------
@@ -115,10 +118,12 @@ export interface ManualTimeRequest {
   requestedEnd: string;
   reason: string;
   larkTaskGuid: string | null;
+  taskSummary?: string | null;
   decidedAt: string | null;
   decidedReason: string | null;
   createdAt: string;
   user: MtrUserSummary;
+  approver?: MtrUserSummary | null;
   /** AI-assist verdict for PENDING rows. Null for already-decided ones. */
   triage?: TriageResult | null;
 }
@@ -148,7 +153,7 @@ export interface TimesheetUser {
   id: string;
   name: string;
   email: string;
-  role: 'OWNER' | 'ADMIN' | 'MANAGER' | 'MEMBER';
+  role: 'ADMIN' | 'MANAGER' | 'MEMBER';
 }
 
 // ---------------------------------------------------------------------------

@@ -5,3 +5,8 @@ export * from './activity';
 export * from './manualTimeRequests';
 export * from './shifts';
 export * from './workspacePolicy';
+export * from './rbac';
+export * from './reports';
+export * from './profile';
+export * from './teamSettings';
+export * from './payroll';

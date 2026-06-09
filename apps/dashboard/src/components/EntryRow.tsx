@@ -1,14 +1,15 @@
 import { useEffect, useState } from 'react';
-import { Send, Loader2, Check, X, AlertCircle, RotateCcw } from 'lucide-react';
+import { Send, Check, X, AlertCircle, RotateCcw, Trash2 } from 'lucide-react';
 import TimePopover from './TimePopover';
 import TaskCombo, { type TaskOption } from './TaskCombo';
 import AttendeePicker, { type WorkspaceUser } from './AttendeePicker';
 import AttendeeChips from './AttendeeChips';
 import { fmtTime, fmtDurationMs } from '../lib/format';
 import type { DayBlock, RejectedRequest } from '../lib/types';
+import { Button } from '../ui';
 
 /**
- * Polymorphic row used by /me-today's timesheet. Mirrors the agent's
+ * Polymorphic row used by /edit-time's timesheet. Mirrors the agent's
  * EntryRow contract:
  *
  *   - kind='tracked' (AUTO TimeEntry, green stripe): inline edit of task +
@@ -21,8 +22,8 @@ import type { DayBlock, RejectedRequest } from '../lib/types';
  *   - kind='gap' (no entry, white): a composer for a fresh manual-time
  *     request — pick start / end / task / reason → POST /v1/time-requests.
  *
- * `disabled=true` short-circuits ALL writes — used when the dashboard
- * viewer is looking at a teammate's day (read-only).
+ * `disabled=true` short-circuits ALL writes. The parent decides this from
+ * scoped RBAC; the API repeats the same check server-side.
  */
 
 export type RowKind = 'tracked' | 'manual_approved' | 'pending' | 'gap';
@@ -49,6 +50,7 @@ interface TrackedRowProps extends BaseProps {
    *  Attendees can only be tagged on those (server rejects otherwise). */
   isMeeting?: boolean;
   onSave: (vars: { id: string; larkTaskGuid: string | null; notes: string; attendeeIds?: string[] }) => Promise<void>;
+  onDeleteManual?: (id: string) => Promise<void>;
 }
 
 interface PendingRowProps extends BaseProps {
@@ -60,6 +62,7 @@ interface PendingRowProps extends BaseProps {
     requestedStart: number;
     requestedEnd: number;
     larkTaskGuid: string | null;
+    taskSummary: string | null;
     reason: string;
     attendeeIds: string[];
   }) => Promise<void>;
@@ -73,6 +76,7 @@ interface GapRowProps extends BaseProps {
     requestedStart: number;
     requestedEnd: number;
     larkTaskGuid: string | null;
+    taskSummary: string | null;
     reason: string;
     attendeeIds: string[];
   }) => Promise<void>;
@@ -81,6 +85,8 @@ interface GapRowProps extends BaseProps {
 interface RejectedRowProps {
   kind: 'rejected';
   rejected: RejectedRequest;
+  rowId?: string;
+  highlighted?: boolean;
 }
 
 export type EntryRowProps = TrackedRowProps | PendingRowProps | GapRowProps | RejectedRowProps;
@@ -93,8 +99,15 @@ function sameStringSet(a: string[], b: string[]): boolean {
   return true;
 }
 
+function taskSummaryFor(tasks: TaskOption[], guid: string, fallback?: string | null): string | null {
+  const trimmedGuid = guid.trim();
+  if (!trimmedGuid) return null;
+  const label = tasks.find((task) => task.guid === trimmedGuid)?.summary?.trim() ?? fallback?.trim() ?? '';
+  return label.length > 0 ? label : null;
+}
+
 export function EntryRow(props: EntryRowProps) {
-  if (props.kind === 'rejected') return <RejectedRow rejected={props.rejected} />;
+  if (props.kind === 'rejected') return <RejectedRow rejected={props.rejected} rowId={props.rowId} highlighted={props.highlighted} />;
   if (props.kind === 'gap') return <GapRow {...props} />;
   if (props.kind === 'pending') return <PendingRow {...props} />;
   return <TrackedRow {...props} />;
@@ -115,11 +128,13 @@ function TrackedRow({
   workspaceUsers,
   selfId,
   onSave,
+  onDeleteManual,
 }: TrackedRowProps) {
   const [task, setTask] = useState<string>(block.larkTaskGuid ?? '');
   const [notes, setNotes] = useState<string>(block.notes ?? '');
   const [attendees, setAttendees] = useState<string[]>(block.attendeeIds ?? []);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [saved, setSaved] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -167,6 +182,19 @@ function TrackedRow({
     setErr(null);
   }
 
+  async function deleteManual() {
+    if (kind !== 'manual_approved' || !block.timeEntryId || !onDeleteManual) return;
+    setDeleting(true);
+    setErr(null);
+    try {
+      await onDeleteManual(block.timeEntryId);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Delete failed');
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   return (
     <tr
       data-row-id={rowId}
@@ -203,7 +231,7 @@ function TrackedRow({
           }}
         />
         {isMeeting && (
-          <div style={{ marginTop: 6 }}>
+          <div className="et-attendees">
             <AttendeePicker
               users={workspaceUsers ?? []}
               selected={attendees}
@@ -219,29 +247,48 @@ function TrackedRow({
             them as read-only chips if present so the timeline doesn't
             silently drop context. */}
         {!isMeeting && (block.attendeeIds?.length ?? 0) > 0 && (
-          <div style={{ marginTop: 6 }}>
+          <div className="et-attendees">
             <AttendeeChips users={workspaceUsers ?? []} attendeeIds={block.attendeeIds ?? []} />
           </div>
         )}
         {err && <div className="et-row-err">{err}</div>}
       </td>
-      <td className="et-action-cell" style={{ textAlign: 'right' }}>
+      <td className="et-action-cell">
         {!disabled && (
           <span className="et-actions">
             {dirty && (
-              <button type="button" className="et-row-btn" onClick={reset} disabled={saving}>
-                <RotateCcw size={11} strokeWidth={2.2} /> Reset
-              </button>
+              <Button
+                size="sm"
+                variant="secondary"
+                icon={<RotateCcw size={12} strokeWidth={2} />}
+                onClick={reset}
+                disabled={saving || deleting}
+              >
+                Reset
+              </Button>
             )}
-            <button
-              type="button"
-              className="et-row-btn et-row-btn-primary"
+            {kind === 'manual_approved' && onDeleteManual && block.timeEntryId && (
+              <Button
+                size="sm"
+                variant="danger"
+                icon={<Trash2 size={12} strokeWidth={2} />}
+                onClick={deleteManual}
+                loading={deleting}
+                disabled={saving || deleting}
+              >
+                Delete
+              </Button>
+            )}
+            <Button
+              size="sm"
+              variant={saved ? 'soft' : 'primary'}
+              icon={saved ? <Check size={13} strokeWidth={2.2} /> : undefined}
               onClick={save}
-              disabled={saving || !dirty}
+              loading={saving}
+              disabled={deleting || (!saving && !dirty && !saved)}
             >
-              {saving ? <Loader2 size={12} className="spin" /> : saved ? <Check size={12} strokeWidth={2.4} /> : null}
               {saving ? 'Saving…' : saved ? 'Saved' : 'Save'}
-            </button>
+            </Button>
           </span>
         )}
       </td>
@@ -299,6 +346,7 @@ function PendingRow({
         requestedStart: start,
         requestedEnd: end,
         larkTaskGuid: task || null,
+        taskSummary: taskSummaryFor(tasks, task, block.taskSummary),
         reason,
         attendeeIds: attendees,
       });
@@ -349,7 +397,7 @@ function PendingRow({
           disabled={disabled}
           onChange={(e) => setReason(e.target.value)}
         />
-        <div style={{ marginTop: 6 }}>
+        <div className="et-attendees">
           <AttendeePicker
             users={workspaceUsers ?? []}
             selected={attendees}
@@ -361,22 +409,28 @@ function PendingRow({
         </div>
         {err && <div className="et-row-err">{err}</div>}
       </td>
-      <td className="et-action-cell" style={{ textAlign: 'right' }}>
+      <td className="et-action-cell">
         {!disabled && (
           <span className="et-actions">
-            <button type="button" className="et-row-btn et-row-btn-danger" onClick={withdraw} disabled={busy !== null}>
-              {busy === 'withdraw' ? <Loader2 size={12} className="spin" /> : <X size={12} strokeWidth={2.4} />}
+            <Button
+              size="sm"
+              variant="danger"
+              icon={<X size={13} strokeWidth={2.2} />}
+              onClick={withdraw}
+              loading={busy === 'withdraw'}
+              disabled={busy !== null}
+            >
               Withdraw
-            </button>
-            <button
-              type="button"
-              className="et-row-btn et-row-btn-primary"
+            </Button>
+            <Button
+              size="sm"
+              variant="primary"
               onClick={save}
+              loading={busy === 'save'}
               disabled={busy !== null || !dirty || reason.trim().length === 0}
             >
-              {busy === 'save' ? <Loader2 size={12} className="spin" /> : null}
               {busy === 'save' ? 'Saving…' : 'Update'}
-            </button>
+            </Button>
           </span>
         )}
       </td>
@@ -438,7 +492,14 @@ function GapRow({ block, tasks, disabled, preset, presetTick, onCreate, workspac
     setBusy(true);
     setErr(null);
     try {
-      await onCreate({ requestedStart: start, requestedEnd: end, larkTaskGuid: task || null, reason, attendeeIds: attendees });
+      await onCreate({
+        requestedStart: start,
+        requestedEnd: end,
+        larkTaskGuid: task || null,
+        taskSummary: taskSummaryFor(tasks, task),
+        reason,
+        attendeeIds: attendees,
+      });
       // Reset for the next gap-fill on the same row.
       const r = defaultRange(block);
       setStart(r.startedAt);
@@ -504,7 +565,7 @@ function GapRow({ block, tasks, disabled, preset, presetTick, onCreate, workspac
                 if (e.key === 'Enter' && reason.trim()) submit();
               }}
             />
-            <div style={{ marginTop: 6 }}>
+            <div className="et-attendees">
               <AttendeePicker
                 users={workspaceUsers ?? []}
                 selected={attendees}
@@ -517,18 +578,19 @@ function GapRow({ block, tasks, disabled, preset, presetTick, onCreate, workspac
         )}
         {err && <div className="et-row-err">{err}</div>}
       </td>
-      <td className="et-action-cell" style={{ textAlign: 'right' }}>
+      <td className="et-action-cell">
         {!disabled && (
-          <span className="et-actions" style={{ opacity: reason ? 1 : undefined }}>
-            <button
-              type="button"
-              className="et-row-btn et-row-btn-primary"
+          <span className="et-actions">
+            <Button
+              size="sm"
+              variant="primary"
+              icon={<Send size={13} strokeWidth={2} />}
               onClick={submit}
+              loading={busy}
               disabled={busy || !reason.trim() || duration <= 0}
             >
-              {busy ? <Loader2 size={12} className="spin" /> : <Send size={12} strokeWidth={2.2} />}
               {busy ? 'Sending…' : 'Send for approval'}
-            </button>
+            </Button>
           </span>
         )}
       </td>
@@ -540,19 +602,19 @@ function GapRow({ block, tasks, disabled, preset, presetTick, onCreate, workspac
 // Rejected row (read-only summary)
 // ---------------------------------------------------------------------------
 
-function RejectedRow({ rejected }: { rejected: RejectedRequest }) {
+function RejectedRow({ rejected, rowId, highlighted }: { rejected: RejectedRequest; rowId?: string; highlighted?: boolean }) {
   return (
-    <tr className="et-row entry-row-rejected">
+    <tr data-row-id={rowId} className={`et-row entry-row-rejected${highlighted ? ' et-row-highlighted' : ''}`}>
       <td><KindBadge kind="rejected" /></td>
       <td className="et-time-cell tabular">
         {fmtTime(rejected.requestedStart)} <span className="et-times-sep">–</span> {fmtTime(rejected.requestedEnd)}
       </td>
       <td className="tabular secondary">{fmtDurationMs(rejected.requestedEnd - rejected.requestedStart)}</td>
-      <td className="secondary">{rejected.larkTaskGuid ?? <span className="tertiary">—</span>}</td>
+      <td className="secondary">{rejected.taskSummary ?? rejected.larkTaskGuid ?? <span className="tertiary">—</span>}</td>
       <td>
         <div>{rejected.reason}</div>
         {rejected.decidedReason && (
-          <div className="small tertiary" style={{ marginTop: 2 }}>
+          <div className="small tertiary et-review-note">
             <AlertCircle size={10} strokeWidth={2.2} /> Reviewer: {rejected.decidedReason}
           </div>
         )}

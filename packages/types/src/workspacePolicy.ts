@@ -1,4 +1,10 @@
 import { z } from 'zod';
+import {
+  IDLE_THRESHOLD_MAX,
+  IDLE_THRESHOLD_MIN,
+  SCREENSHOT_INTERVAL_MAX,
+  SCREENSHOT_INTERVAL_MIN,
+} from './teamSettings';
 
 /**
  * Workspace-wide capture policy (M14). One row per workspace; created
@@ -23,6 +29,8 @@ export const WorkspacePolicyDto = z.object({
   captureTitles: z.boolean(),
   captureUrls: z.boolean(),
   retentionDaysScreenshots: z.number().int().min(0).max(3650),
+  defaultScreenshotIntervalMin: z.number().int().min(SCREENSHOT_INTERVAL_MIN).max(SCREENSHOT_INTERVAL_MAX),
+  defaultIdleThresholdMin: z.number().int().min(IDLE_THRESHOLD_MIN).max(IDLE_THRESHOLD_MAX),
   createdAt: z.string().datetime({ offset: true }),
   updatedAt: z.string().datetime({ offset: true }),
 });
@@ -35,6 +43,8 @@ export const PatchWorkspacePolicyRequest = z
     captureTitles: z.boolean().optional(),
     captureUrls: z.boolean().optional(),
     retentionDaysScreenshots: z.number().int().min(0).max(3650).optional(),
+    defaultScreenshotIntervalMin: z.number().int().min(SCREENSHOT_INTERVAL_MIN).max(SCREENSHOT_INTERVAL_MAX).optional(),
+    defaultIdleThresholdMin: z.number().int().min(IDLE_THRESHOLD_MIN).max(IDLE_THRESHOLD_MAX).optional(),
   })
   .refine(
     (v) => Object.keys(v).length > 0,
@@ -51,6 +61,8 @@ export const WORKSPACE_POLICY_DEFAULTS = {
   captureTitles: false,
   captureUrls: false,
   retentionDaysScreenshots: 60,
+  defaultScreenshotIntervalMin: 180,
+  defaultIdleThresholdMin: 5,
 } as const;
 
 /**

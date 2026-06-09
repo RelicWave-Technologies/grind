@@ -551,7 +551,7 @@ model User {
   @@index([workspaceId])
 }
 
-enum Role { OWNER ADMIN MEMBER }
+enum Role { ADMIN MANAGER MEMBER }
 
 model Project {
   id          String   @id @default(cuid())
@@ -724,7 +724,7 @@ POST   /v1/uploads/screenshot/:id/complete
 GET    /v1/users
 GET    /v1/users/:id/timesheets?from=&to=
 GET    /v1/users/:id/screenshots?from=&to=&cursor=
-DELETE /v1/screenshots/:id            # admin or owner
+DELETE /v1/screenshots/:id            # admin
 GET    /v1/reports/activity?...
 
 # Audit

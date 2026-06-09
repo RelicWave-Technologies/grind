@@ -32,6 +32,7 @@ export type BlockKind = SegmentKind | 'MANUAL' | 'PENDING' | 'GAP';
 export interface DayEntryInput {
   id: string;
   source: 'AUTO' | 'MANUAL';
+  requestId?: string | null;
   larkTaskGuid: string | null;
   notes?: string | null;
   attendeeIds?: string[];
@@ -48,6 +49,7 @@ export interface PendingRequestInput {
   requestedEnd: Date;
   reason: string;
   larkTaskGuid: string | null;
+  taskSummary?: string | null;
   attendeeIds?: string[];
 }
 
@@ -62,6 +64,7 @@ export interface DayBlock {
   durationMs: number;
   timeEntryId?: string;
   larkTaskGuid?: string | null;
+  taskSummary?: string | null;
   /**
    * For tracked + APPROVED MANUAL blocks, this is the TimeEntry.notes the
    * user can edit inline. For GAP blocks it's null.
@@ -74,7 +77,7 @@ export interface DayBlock {
    * Absent for WORK/IDLE/GAP.
    */
   attendeeIds?: string[];
-  /** PENDING blocks only: the ManualTimeRequest id (for edit / cancel). */
+  /** ManualTimeRequest id for PENDING and approved MANUAL blocks. */
   requestId?: string;
   /** PENDING blocks only: the request reason (shown + editable inline). */
   reason?: string;
@@ -229,6 +232,7 @@ interface PendingIv {
   b: number;
   reason: string;
   larkTaskGuid: string | null;
+  taskSummary?: string | null;
   attendeeIds?: string[];
 }
 
@@ -270,6 +274,7 @@ function carveGap(lo: number, hi: number, pendingIv: PendingIv[], out: DayBlock[
       requestId: p.id,
       reason: p.reason,
       larkTaskGuid: p.larkTaskGuid,
+      taskSummary: p.taskSummary ?? null,
       ...(p.attendeeIds ? { attendeeIds: p.attendeeIds } : {}),
     });
     cursor = b;
@@ -463,6 +468,7 @@ export function buildDayInsight(input: {
         endedAt: b,
         durationMs: b - a,
         timeEntryId: e.id,
+        ...(e.requestId ? { requestId: e.requestId } : {}),
         larkTaskGuid: e.larkTaskGuid,
         notes: e.notes ?? null,
         isOpen: s.endedAt === null && isToday,
@@ -479,6 +485,7 @@ export function buildDayInsight(input: {
       b: p.requestedEnd.getTime(),
       reason: p.reason,
       larkTaskGuid: p.larkTaskGuid,
+      taskSummary: p.taskSummary ?? null,
       ...(p.attendeeIds && p.attendeeIds.length > 0 ? { attendeeIds: p.attendeeIds } : {}),
     }))
     .filter((p) => p.b > p.a)
@@ -555,6 +562,7 @@ export function buildDayInsight(input: {
         reason: r.reason,
         decidedReason: r.decidedReason,
         larkTaskGuid: r.larkTaskGuid,
+        taskSummary: r.taskSummary ?? null,
       };
     })
     .filter((x): x is NonNullable<typeof x> => x !== null)

@@ -15,7 +15,7 @@ async function seed() {
   counter += 1;
   const stamp = `${Date.now()}-${counter}-pay`;
   const ws = await prisma.workspace.create({ data: { name: `WS ${stamp}` } });
-  const mk = (email: string, role: 'OWNER' | 'ADMIN' | 'MANAGER' | 'MEMBER') =>
+  const mk = (email: string, role: 'ADMIN' | 'MANAGER' | 'MEMBER') =>
     prisma.user.create({
       data: {
         workspaceId: ws.id,
@@ -27,7 +27,7 @@ async function seed() {
     });
   const admin = await mk('admin', 'ADMIN');
   const member = await mk('mem', 'MEMBER');
-  const token = (u: { id: string; role: 'OWNER' | 'ADMIN' | 'MANAGER' | 'MEMBER' }) =>
+  const token = (u: { id: string; role: 'ADMIN' | 'MANAGER' | 'MEMBER' }) =>
     signAccessToken({ sub: u.id, ws: ws.id, role: u.role });
   return {
     ws,
@@ -91,13 +91,14 @@ describe('GET /v1/admin/payroll/monthly', () => {
       .get('/v1/admin/payroll/monthly?month=2026-05&tz=UTC')
       .set(bearer(admin.token));
     expect(res.status).toBe(200);
-    expect(res.body.month).toBe('2026-05');
+    expect(res.body.payroll.month).toBe('2026-05');
     // 2 users (admin + member), each with 0 hours.
-    expect(res.body.rows).toHaveLength(2);
-    for (const row of res.body.rows) {
+    expect(res.body.payroll.rows).toHaveLength(2);
+    for (const row of res.body.payroll.rows) {
       expect(row.totalHours).toBe(0);
       expect(row.daysPresent).toBe(0);
     }
+    expect(res.body.policy.halfDayUpperMin).toBe(res.body.policy.fullDayLowerMin);
   });
 
   it('sums hours per user with correct day-presence count', async () => {
@@ -136,7 +137,7 @@ describe('GET /v1/admin/payroll/monthly', () => {
       .get('/v1/admin/payroll/monthly?month=2026-05&tz=UTC')
       .set(bearer(admin.token));
     expect(res.status).toBe(200);
-    const memberRow = res.body.rows.find((r: { user: { id: string } }) => r.user.id === member.id);
+    const memberRow = res.body.payroll.rows.find((r: { user: { id: string } }) => r.user.id === member.id);
     expect(memberRow).toBeDefined();
     expect(memberRow.daysPresent).toBe(2);
     expect(memberRow.workedHours).toBe(12); // 8 + 4
@@ -159,7 +160,44 @@ describe('GET /v1/admin/payroll/monthly', () => {
       .get('/v1/admin/payroll/monthly?month=2026-05&tz=UTC')
       .set(bearer(wsA.admin.token));
     expect(res.status).toBe(200);
-    expect(res.body.totals.totalHours).toBe(0);
+    expect(res.body.payroll.totals.totalHours).toBe(0);
+  });
+});
+
+describe('/v1/admin/payroll/policy', () => {
+  it('returns defaults and rejects invalid threshold joins', async () => {
+    const { admin } = await seed();
+    const getRes = await request(app).get('/v1/admin/payroll/policy').set(bearer(admin.token));
+    expect(getRes.status).toBe(200);
+    expect(getRes.body.approvalReminderDays).toEqual([3, 4]);
+    expect(getRes.body.payrollSheetSendDay).toBe(5);
+
+    const bad = await request(app)
+      .patch('/v1/admin/payroll/policy')
+      .set(bearer(admin.token))
+      .send({ fullDayLowerMin: 450 });
+    expect(bad.status).toBe(400);
+    expect(bad.body.error).toBe('half_day_upper_must_equal_full_day_lower');
+  });
+
+  it('updates month-close schedule fields', async () => {
+    const { admin } = await seed();
+    const res = await request(app)
+      .patch('/v1/admin/payroll/policy')
+      .set(bearer(admin.token))
+      .send({
+        approvalReminderDays: [2, 3, 4],
+        approvalReminderTime: '01:15',
+        payrollSheetSendDay: 6,
+        payrollSheetSendTime: '02:30',
+        timezone: 'Asia/Kolkata',
+      });
+    expect(res.status).toBe(200);
+    expect(res.body.approvalReminderDays).toEqual([2, 3, 4]);
+    expect(res.body.approvalReminderTime).toBe('01:15');
+    expect(res.body.payrollSheetSendDay).toBe(6);
+    expect(res.body.payrollSheetSendTime).toBe('02:30');
+    expect(res.body.timezone).toBe('Asia/Kolkata');
   });
 });
 

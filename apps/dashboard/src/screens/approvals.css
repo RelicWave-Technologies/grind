@@ -1,144 +1,523 @@
 /* ============================================================================
-   APPROVALS — page layout only.
+   APPROVALS — unified You / Team workspace.
 
-   The Approvals queue is composed entirely from the shared "Quiet Datasheet"
-   kit (src/ui/*). This file contributes LAYOUT ONLY — grid/flex placement and
-   gaps, all on the 4px spacing scale, prefixed `apv-`. It introduces NO colour,
-   type, border, radius, or shadow; every look comes from the kit + tokens.
+   Page CSS is layout-only and references the shared dashboard tokens. The
+   visible vocabulary comes from the UI kit: page header, tabs, stat row, table,
+   tags, pill buttons, and modal shell.
    ========================================================================== */
 
-/* Queue: a vertical stack of request Cards. */
-.apv-list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-4);
+.apv-page {
+  container-type: inline-size;
 }
 
-/* One request Card's internal stack: head → spec → triage → actions. */
-.apv-card {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-5);
+.apv-summary-card {
+  margin-bottom: var(--ui-sp-5);
 }
 
-/* Card head: requester Identity ←→ age + status Tags. */
-.apv-head {
+.apv-table-card {
+  overflow: hidden;
+}
+
+.apv-table-head {
   display: flex;
-  align-items: flex-start;
+  align-items: flex-end;
   justify-content: space-between;
-  gap: var(--sp-4);
-  flex-wrap: wrap;
-}
-.apv-head-end {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-3);
-  flex: none;
+  gap: var(--ui-sp-5);
+  padding: var(--ui-sp-5) var(--ui-sp-6);
+  border-bottom: 1px solid var(--ui-line);
 }
 
-/* Spec: label / value definition rows. */
-.apv-spec {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-3);
-  margin: 0;
-}
-.apv-row {
-  display: grid;
-  grid-template-columns: 88px 1fr;
-  align-items: baseline;
-  gap: var(--sp-5);
-}
-.apv-row__label {
-  margin: 0;
-}
-.apv-row__value {
-  display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: var(--sp-3);
+.apv-table-head > div {
   min-width: 0;
+}
+
+.apv-table-head h2,
+.apv-table-head p {
   margin: 0;
 }
 
-/* AI triage read — a quiet well grouping the verdict + signals. Surface tone
-   only (a sanctioned grouping well); no bespoke colour/border. */
-.apv-triage {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-3);
-  padding: var(--sp-4) var(--sp-5);
-  background: var(--surface-inset);
-  border-radius: var(--r-sm);
+.apv-table-head p {
+  margin-top: var(--ui-sp-1);
 }
-.apv-triage__head {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-3);
-}
-.apv-triage__icon {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-2);
-}
-.apv-triage__conf {
-  margin-left: auto;
-}
-.apv-triage__signals {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.apv-triage__sig {
-  display: flex;
-  align-items: baseline;
-  gap: var(--sp-3);
-}
-.apv-triage__sigmark {
+
+.apv-status-tabs {
   flex: none;
 }
-.apv-pos {
-  color: var(--success-ink);
-}
-.apv-neg {
-  color: var(--danger-ink);
+
+.apv-table-banner {
+  padding: var(--ui-sp-4) var(--ui-sp-6) 0;
 }
 
-/* Actions: right-aligned Button cluster. */
-.apv-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: var(--sp-3);
-  flex-wrap: wrap;
+.apv-table-wrap {
+  overflow-x: auto;
 }
 
-/* Inline reject form: grows the input, keeps the buttons trailing. */
-.apv-reject {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-3);
-  flex-wrap: wrap;
+.apv-table {
   width: 100%;
+  table-layout: fixed;
+  background: var(--ui-surface);
 }
-.apv-reject__input {
-  flex: 1 1 260px;
+
+.apv-table--you {
+  min-width: calc(var(--ui-sp-12) * 10);
+}
+
+.apv-table--team {
+  min-width: calc(var(--ui-sp-12) * 16);
+}
+
+.apv-table.ui-table--compact .ui-table__row {
+  height: calc(var(--ui-row-h) + var(--ui-sp-8));
+}
+
+.apv-table .ui-th,
+.apv-table .ui-td {
+  padding-inline: var(--ui-sp-4);
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.apv-table .ui-td {
+  padding-block: var(--ui-sp-3);
+  vertical-align: middle;
+}
+
+.apv-table .ui-th--center,
+.apv-table .ui-td--center {
+  text-align: center;
+}
+
+.apv-col-member {
+  width: calc(var(--ui-sp-12) * 3 + var(--ui-sp-8));
+}
+
+.apv-col-date {
+  width: calc(var(--ui-sp-12) * 2 + var(--ui-sp-3));
+}
+
+.apv-col-time {
+  width: calc(var(--ui-sp-12) * 3);
+}
+
+.apv-col-status {
+  width: calc(var(--ui-sp-12) * 2 + var(--ui-sp-6));
+}
+
+.apv-col-actions {
+  width: calc(var(--ui-sp-12) * 3 + var(--ui-sp-4));
+}
+
+.apv-col-reason {
+  width: auto;
+}
+
+.apv-date-cell,
+.apv-time-cell,
+.apv-status-cell,
+.apv-reason-cell {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-sp-1);
   min-width: 0;
 }
 
-/* Loading skeleton stack inside a placeholder Card. */
-.apv-skeleton {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-4);
+.apv-date-cell > *,
+.apv-time-cell > *,
+.apv-status-cell > * {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-@media (max-width: 560px) {
-  .apv-row {
+.apv-time-cell {
+  align-items: flex-start;
+}
+
+.apv-status-cell {
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.apv-status-cell .ui-t-small {
+  max-width: 100%;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.apv-reason-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-sp-3);
+  min-width: 0;
+}
+
+.apv-reason-cell {
+  flex: 1 1 auto;
+}
+
+.apv-reason-main,
+.apv-reason-meta {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.apv-reason-main {
+  max-width: 52ch;
+}
+
+.apv-reason-meta.is-missing,
+.apv-detail-missing {
+  color: var(--ui-warn-ink);
+}
+
+.apv-open-day {
+  flex: none;
+  margin-left: auto;
+  opacity: 0;
+  transform: translateX(var(--ui-sp-1));
+  transition:
+    opacity var(--ui-dur-fast) var(--ui-ease),
+    transform var(--ui-dur-fast) var(--ui-ease);
+}
+
+.apv-table .ui-table__row:hover .apv-open-day,
+.apv-table .ui-table__row:focus-within .apv-open-day {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.apv-row {
+  cursor: pointer;
+}
+
+.apv-row:focus-visible {
+  outline: none;
+}
+
+.apv-row:focus-visible > .ui-td {
+  background: var(--ui-surface-inset);
+  outline: 1px solid var(--ui-line-strong);
+  outline-offset: calc(var(--ui-sp-1) * -1);
+}
+
+.apv-team-decision {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ui-sp-2);
+  max-width: 100%;
+}
+
+.apv-team-decision--done {
+  gap: var(--ui-sp-1);
+}
+
+.apv-team-open-day {
+  opacity: 0;
+  transform: translateX(var(--ui-sp-1));
+  transition:
+    opacity var(--ui-dur-fast) var(--ui-ease),
+    transform var(--ui-dur-fast) var(--ui-ease);
+}
+
+.apv-table .ui-table__row:hover .apv-team-open-day,
+.apv-table .ui-table__row:focus-within .apv-team-open-day {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.apv-date-range {
+  position: relative;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.apv-date-trigger {
+  appearance: none;
+  height: var(--ui-control-h);
+  min-width: calc(var(--ui-sp-12) * 3);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ui-sp-2);
+  padding: 0 var(--ui-sp-6);
+  border: 1px solid transparent;
+  border-radius: var(--ui-r-full);
+  background: var(--ui-surface-inset);
+  color: var(--ui-ink);
+  font-family: var(--ui-font-mono);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition:
+    background var(--ui-dur-fast) var(--ui-ease),
+    border-color var(--ui-dur-fast) var(--ui-ease);
+}
+
+.apv-date-trigger:hover,
+.apv-date-trigger.is-open {
+  background: var(--ui-surface);
+  border-color: var(--ui-line);
+}
+
+.apv-date-trigger:focus-visible {
+  outline: none;
+  box-shadow: var(--ui-focus-ring);
+}
+
+.apv-date-popover {
+  position: absolute;
+  top: calc(100% + var(--ui-sp-3));
+  right: 0;
+  z-index: 30;
+  width: min(calc(var(--ui-sp-12) * 9), calc(100vw - var(--ui-sp-8)));
+  padding: var(--ui-sp-5);
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-lg);
+  background: var(--ui-surface);
+  box-shadow: var(--ui-shadow-pop);
+}
+
+.apv-date-popover-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-sp-4);
+  padding-bottom: var(--ui-sp-4);
+  border-bottom: 1px solid var(--ui-line-faint);
+}
+
+.apv-calendars {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--ui-sp-5);
+  padding-top: var(--ui-sp-5);
+}
+
+.apv-calendar {
+  min-width: 0;
+}
+
+.apv-calendar-title {
+  margin-bottom: var(--ui-sp-3);
+  text-align: center;
+}
+
+.apv-calendar-weekdays,
+.apv-calendar-days {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: var(--ui-sp-1);
+}
+
+.apv-calendar-weekdays {
+  margin-bottom: var(--ui-sp-2);
+  font-family: var(--ui-font-mono);
+  font-weight: 600;
+  color: var(--ui-ink-3);
+  text-align: center;
+}
+
+.apv-calendar-day {
+  appearance: none;
+  display: grid;
+  place-items: center;
+  height: var(--ui-sp-8);
+  border: 1px solid transparent;
+  border-radius: var(--ui-r-full);
+  background: transparent;
+  color: var(--ui-ink);
+  font-family: var(--ui-font-mono);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition:
+    background var(--ui-dur-fast) var(--ui-ease),
+    border-color var(--ui-dur-fast) var(--ui-ease),
+    color var(--ui-dur-fast) var(--ui-ease);
+}
+
+.apv-calendar-day:hover:not(:disabled) {
+  background: var(--ui-surface-inset);
+}
+
+.apv-calendar-day.is-in-range {
+  background: var(--ui-accent-tint);
+}
+
+.apv-calendar-day.is-start,
+.apv-calendar-day.is-end {
+  background: var(--ui-accent);
+  color: var(--ui-on-accent);
+}
+
+.apv-calendar-day.is-today:not(.is-start):not(.is-end) {
+  border-color: var(--ui-line-strong);
+}
+
+.apv-calendar-day:disabled {
+  color: var(--ui-ink-disabled);
+  cursor: not-allowed;
+}
+
+.apv-detail-backdrop {
+  --apv-detail-w: min(calc(var(--ui-sp-12) * 9), calc(100vw - var(--ui-sp-8)));
+
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--ui-sp-7);
+  background: var(--ui-overlay);
+}
+
+.apv-detail-modal {
+  width: var(--apv-detail-w);
+  max-height: min(82vh, calc(var(--ui-sp-12) * 10));
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: var(--ui-surface);
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-lg);
+  box-shadow: var(--ui-shadow-pop);
+}
+
+.apv-detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-sp-5);
+  padding: var(--ui-sp-5);
+  border-bottom: 1px solid var(--ui-line);
+}
+
+.apv-detail-head > div {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-sp-2);
+}
+
+.apv-detail-body {
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-sp-4);
+  padding: var(--ui-sp-5);
+}
+
+.apv-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--ui-sp-3);
+}
+
+.apv-detail-field,
+.apv-detail-section,
+.apv-detail-ref {
+  min-width: 0;
+  border: 1px solid var(--ui-line-faint);
+  border-radius: var(--ui-r-md);
+  background: var(--ui-surface);
+}
+
+.apv-detail-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-sp-2);
+  padding: var(--ui-sp-4);
+}
+
+.apv-detail-field-value {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--ui-sp-1);
+}
+
+.apv-detail-field-value > * {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.apv-detail-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-sp-2);
+  padding: var(--ui-sp-4);
+  background: var(--ui-surface-inset);
+  border: 1px solid transparent;
+}
+
+.apv-detail-section p {
+  margin: 0;
+  color: var(--ui-ink);
+  font-weight: 430;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.apv-detail-ref {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-sp-2);
+  padding: var(--ui-sp-3) var(--ui-sp-4);
+  border: 1px solid var(--ui-line);
+}
+
+.apv-detail-ref code {
+  max-width: 100%;
+  color: var(--ui-ink-2);
+  font-family: var(--ui-font-mono);
+  line-height: 1.45;
+  word-break: break-all;
+}
+
+.apv-detail-foot {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: var(--ui-sp-1);
+}
+
+@container (max-width: 54rem) {
+  .apv-table-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .apv-status-tabs {
+    width: 100%;
+    overflow-x: auto;
+  }
+}
+
+@media (max-width: 39rem) {
+  .apv-calendars {
     grid-template-columns: 1fr;
-    gap: var(--sp-1);
+  }
+
+  .apv-date-popover {
+    width: min(calc(var(--ui-sp-12) * 5), calc(100vw - var(--ui-sp-8)));
+  }
+
+  .apv-detail-backdrop {
+    padding: var(--ui-sp-3);
+  }
+
+  .apv-detail-modal {
+    max-height: calc(100vh - var(--ui-sp-6));
+  }
+
+  .apv-detail-grid {
+    grid-template-columns: 1fr;
   }
 }

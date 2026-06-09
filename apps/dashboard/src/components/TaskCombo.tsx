@@ -121,11 +121,11 @@ export default function TaskCombo({ tasks, value, disabled, onChange, ariaLabel 
           className="et-pop"
           data-open={pop.open}
           data-flip={pop.flip}
-          style={{ ...pop.popoverStyle, width: 280 }}
+          style={pop.popoverStyle}
           role="dialog"
           onClick={(e) => e.stopPropagation()}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0 10px 0 6px', color: 'var(--label-tertiary)' }}>
+          <div className="tc-search-row">
             <Search size={13} strokeWidth={2} />
             <input
               ref={searchRef}
@@ -134,7 +134,6 @@ export default function TaskCombo({ tasks, value, disabled, onChange, ariaLabel 
               value={query}
               onChange={(e) => { setQuery(e.target.value); setActiveIdx(0); }}
               onKeyDown={onKey}
-              style={{ borderBottom: 'none', padding: '8px 0', margin: 0 }}
               aria-controls="task-combo-listbox"
               aria-activedescendant={`task-combo-opt-${activeIdx}`}
             />
@@ -156,9 +155,7 @@ export default function TaskCombo({ tasks, value, disabled, onChange, ariaLabel 
                 onClick={() => pick(t)}
                 title={t.summary}
               >
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {t.summary}
-                </span>
+                <span className="tc-item-label">{t.summary}</span>
               </button>
             ))}
           </div>

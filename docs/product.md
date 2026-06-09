@@ -3,7 +3,7 @@
 > What we're building and why. Read this with [design.md](./design.md) before building any feature. Canonical plan + progress live in the Lark Wiki (see [AGENTS.md](../AGENTS.md)); this is the durable in-repo summary.
 
 ## What it is
-An **internal** time tracker + screenshot monitor for the agency (~50–200 employees, mostly Mac, some Windows). Hubstaff/WebWork-class, but **screenshots + time tracking only** — no payroll, no invoicing. Built on our existing Express + Prisma + Postgres + S3 stack with an Electron + TypeScript desktop agent, a React web dashboard, and deep **Lark** integration.
+An **internal** time tracker + screenshot monitor for the agency (~50–200 employees, mostly Mac, some Windows). Hubstaff/WebWork-class, focused on **screenshots + time tracking**, with an admin-only payroll worksheet for classifying payable days. No payment execution, invoicing, or billing. Built on our existing Express + Prisma + Postgres + S3 stack with an Electron + TypeScript desktop agent, a React web dashboard, and deep **Lark** integration.
 
 ## Who uses it
 - **Member** — tracks their own time; sees their own day/timesheets.
@@ -30,11 +30,11 @@ Plus the **web dashboard** (browser) for the heavy manager/admin views: team tim
 - **Screenshots**: 1 per 3 hours, high quality, fullscreen-safe; 60-day retention; self-serve delete/blur.
 - **Activity**: keystroke/mouse/scroll **counts** + content-free timing stats; **role-based productivity score**; **anti-cheat** (impossible rates, jigglers, PyAutoGUI, static-screen) → flag for review, hard-reject only physically-impossible.
 - **Lark**: per-user OAuth; **Task** time attribution; **Meet/Calendar** meeting detection; **IM approval cards** for manual-time requests.
-- **Attendance** + **monthly reports**.
+- **Attendance**, **monthly reports**, and an admin-only payroll worksheet that classifies shift days without executing payments.
 
 ## Scope guards (v1)
 **In:** screenshots, time tracking, activity scoring, anti-cheat, attendance, Lark (tasks/meet/IM), role-scoped dashboard.
-**Out:** payroll, invoicing, billing, mobile app, GPS/location, dark mode, public/commercial distribution. SSO deferred to v1.2.
+**Out:** payment execution, invoicing, billing, mobile app, GPS/location, dark mode, public/commercial distribution. SSO deferred to v1.2.
 
 ## Build milestones (high level)
 M1 timer engine + segments ✅ · **M2 UI foundation + floating bar/menu-bar + auto-start (in progress)** · M3 idle + "still working?" · M4 screenshots + offline queue + S3 · M5 activity capture (+ content-free CV) + active window · M6 meeting detection · M7 Lark app + OAuth · M8 scoring + anti-cheat · M9 Lark task/calendar sync · M10 manual-time → Lark approvals · M11–M12 web dashboard · M13 signing/notarize/auto-update + dogfood. (Full detail: wiki "Build Plan — Tracker + Dashboard".)

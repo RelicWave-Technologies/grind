@@ -1,13 +1,13 @@
 /* ============================================================================
-   /me-today — LAYOUT ONLY. Every look (colour, type, border, radius, shadow,
+   /edit-time — LAYOUT ONLY. Every look (colour, type, border, radius, shadow,
    control) comes from the shared kit (src/ui) + tokens; this file owns only
    placement: section rhythm, the timeline canvas frame, the legend cluster,
    the timesheet head strip, and the timesheet table's grid (padding / widths /
    hairline dividers) so the EntryRow rows line up under their headers. Every
-   class is prefixed `myd-`. No colours / type / component styling here.
+   class is prefixed `myd-`. No raw colours / type / component styling here.
 
    The imported sub-components (DayRibbon, ActivityHeatmap, EntryRow,
-   AppUsagePanel, TimePopover, TaskCombo) are NOT styled here.
+   TimePopover, TaskCombo) are NOT styled here.
 
    Revert = delete this file + its import in MeToday.tsx.
    ========================================================================== */
@@ -16,18 +16,183 @@
 .myd-stack {
   display: flex;
   flex-direction: column;
-  gap: var(--ui-sp-7);
+  gap: var(--ui-sp-6);
+}
+
+.myd-stage-card,
+.myd-sheet-card {
+  overflow: hidden;
+}
+
+.myd-stage-card {
+  background: var(--ui-cream);
+  padding: var(--ui-sp-5) var(--ui-sp-6);
+}
+
+/* ---- Header date picker --------------------------------------------------- */
+
+.myd-page .ui-page-head__actions {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.myd-header-toolbar {
+  min-width: 0;
+  max-width: 100%;
+  justify-content: flex-end;
+  flex-wrap: nowrap;
+}
+
+.myd-user-select {
+  width: min(calc(var(--ui-sp-12) * 4), calc(100vw - var(--ui-sp-8)));
+  min-width: calc(var(--ui-sp-10) * 4);
+  flex: 0 1 calc(var(--ui-sp-12) * 4);
+}
+
+.myd-date-picker {
+  position: relative;
+  display: inline-flex;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+.myd-date-popover {
+  position: absolute;
+  top: calc(100% + var(--ui-sp-3));
+  right: 0;
+  z-index: 30;
+  width: min(calc(var(--ui-sp-12) * 5), calc(100vw - var(--ui-sp-8)));
+  padding: var(--ui-sp-5);
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-lg);
+  background: var(--ui-surface);
+  box-shadow: var(--ui-shadow-pop);
+  animation: myd-popover-in var(--ui-dur-base) var(--ui-ease) both;
+}
+
+@keyframes myd-popover-in {
+  from { opacity: 0; transform: translateY(calc(var(--ui-sp-2) * -1)); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.myd-date-popover-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-sp-4);
+  padding-bottom: var(--ui-sp-4);
+  border-bottom: 1px solid var(--ui-line-faint);
+}
+
+.myd-calendar {
+  padding-top: var(--ui-sp-5);
+}
+
+.myd-calendar-weekdays,
+.myd-calendar-days {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: var(--ui-sp-1);
+}
+
+.myd-calendar-weekdays {
+  margin-bottom: var(--ui-sp-2);
+  font-family: var(--ui-font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--ui-ink-3);
+  text-align: center;
+}
+
+.myd-calendar-day {
+  appearance: none;
+  display: grid;
+  place-items: center;
+  height: var(--ui-sp-8);
+  border: 1px solid transparent;
+  border-radius: var(--ui-r-full);
+  background: transparent;
+  color: var(--ui-ink);
+  font-family: var(--ui-font-mono);
+  font-size: 12.5px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition:
+    background var(--ui-dur-fast) var(--ui-ease),
+    border-color var(--ui-dur-fast) var(--ui-ease),
+    color var(--ui-dur-fast) var(--ui-ease);
+}
+
+.myd-calendar-day:hover:not(:disabled) {
+  background: var(--ui-surface-inset);
+}
+
+.myd-calendar-day.is-selected {
+  background: var(--ui-accent);
+  color: var(--ui-on-accent);
+}
+
+.myd-calendar-day.is-today:not(.is-selected) {
+  border-color: var(--ui-line-strong);
+}
+
+.myd-calendar-day:disabled {
+  color: var(--ui-ink-disabled);
+  cursor: not-allowed;
+}
+
+.myd-calendar-day:focus-visible {
+  outline: none;
+  box-shadow: var(--ui-focus-ring);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .myd-date-popover { animation: none !important; }
+}
+
+@media (max-width: 39rem) {
+  .myd-page .ui-page-head__actions,
+  .myd-header-toolbar,
+  .myd-user-select {
+    width: 100%;
+  }
+
+  .myd-header-toolbar {
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+
+  .myd-date-picker,
+  .myd-date-picker .ui-date-stepper {
+    width: 100%;
+  }
+
+  .myd-date-popover {
+    right: auto;
+    left: 0;
+    width: calc(100vw - var(--ui-sp-6));
+  }
 }
 
 /* ---- Day-stage card internals -------------------------------------------- */
 
-/* Shift chip + note row above the canvas. */
+.myd-stage-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-sp-4);
+  flex-wrap: wrap;
+  margin-bottom: var(--ui-sp-4);
+}
+
+/* Shift chip + compact context above the canvas. */
 .myd-stage-meta {
   display: flex;
   align-items: center;
   gap: var(--ui-sp-3);
   flex-wrap: wrap;
-  margin-bottom: var(--ui-sp-5);
+  min-width: 0;
 }
 .myd-stage-note {
   color: var(--ui-ink-3);
@@ -37,16 +202,44 @@
 .myd-legend {
   display: flex;
   align-items: center;
-  gap: var(--ui-sp-4);
+  justify-content: flex-end;
+  gap: var(--ui-sp-3);
   flex-wrap: wrap;
+  min-width: 0;
 }
 
 /* The well the ribbon + heatmap live in — inset surface, hairline, no shadow. */
 .myd-canvas {
-  background: var(--ui-surface-inset);
+  background: var(--ui-surface);
   border: 1px solid var(--ui-line);
   border-radius: var(--ui-r-md);
-  padding: var(--ui-sp-3) var(--ui-sp-5);
+  padding: var(--ui-sp-3) var(--ui-sp-4);
+}
+
+.myd-stage-card .ribbon {
+  --ribbon-h: calc(var(--ui-sp-8) + var(--ui-sp-2));
+  padding: var(--ui-sp-2) 0 var(--ui-sp-6);
+}
+
+.myd-stage-card .ribbon-track {
+  border-radius: var(--ui-r-sm);
+}
+
+.myd-stage-card .ribbon-ticks {
+  height: var(--ui-sp-5);
+}
+
+.myd-stage-card .heatmap {
+  margin-top: var(--ui-sp-3);
+  padding-top: var(--ui-sp-3);
+}
+
+.myd-stage-card .heatmap-row {
+  height: var(--ui-sp-4);
+}
+
+.myd-stage-card .heatmap-foot {
+  display: none;
 }
 
 /* Read-only notice sits below the canvas. */
@@ -65,21 +258,15 @@
   justify-content: space-between;
   gap: var(--ui-sp-5);
   flex-wrap: wrap;
-  padding: var(--ui-sp-6) var(--ui-sp-7);
+  padding: var(--ui-sp-5) var(--ui-sp-6);
   border-bottom: 1px solid var(--ui-line);
+  background: var(--ui-surface-sunken);
 }
 .myd-sheet-titling {
   display: inline-flex;
   align-items: baseline;
   gap: var(--ui-sp-4);
 }
-.myd-sheet-totals {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--ui-sp-3);
-  flex-wrap: wrap;
-}
-
 .myd-table-wrap {
   overflow-x: auto;
 }
@@ -95,11 +282,18 @@
   padding: var(--ui-sp-4) var(--ui-sp-7);
   border-bottom: 1px solid var(--ui-line);
   white-space: nowrap;
+  vertical-align: middle;
 }
+.myd-col-kind { width: calc(var(--ui-sp-10) * 2); }
+.myd-col-time { width: calc(var(--ui-sp-10) * 4); }
+.myd-col-duration { width: calc(var(--ui-sp-10) * 2); }
+.myd-col-task { width: calc(var(--ui-sp-10) * 5); }
+.myd-col-actions { width: calc(var(--ui-sp-10) * 5); }
 /* Interior dividers for the bespoke (idle / rejected) rows; the EntryRow rows
    carry their own padding + rail from styles.css. */
 .myd-table tbody td {
   border-bottom: 1px solid var(--ui-line-faint);
+  vertical-align: middle;
 }
 .myd-table tbody tr:last-child td {
   border-bottom: 0;

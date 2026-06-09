@@ -39,6 +39,8 @@ function toDto(row: {
   captureTitles: boolean;
   captureUrls: boolean;
   retentionDaysScreenshots: number;
+  defaultScreenshotIntervalMin: number;
+  defaultIdleThresholdMin: number;
   createdAt: Date;
   updatedAt: Date;
 }): WorkspacePolicyDto {
@@ -48,6 +50,8 @@ function toDto(row: {
     captureTitles: row.captureTitles,
     captureUrls: row.captureUrls,
     retentionDaysScreenshots: row.retentionDaysScreenshots,
+    defaultScreenshotIntervalMin: row.defaultScreenshotIntervalMin,
+    defaultIdleThresholdMin: row.defaultIdleThresholdMin,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };

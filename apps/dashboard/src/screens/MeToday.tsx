@@ -1,28 +1,26 @@
 import './metoday.css';
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouteContext, useSearch } from '@tanstack/react-router';
+import { CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react';
 import { api } from '../lib/api';
-import { isManagerOrAbove } from '../lib/auth';
-import type { DayInsight, WorkspaceUser } from '../lib/types';
+import { hasCapability, isManagerOrAbove } from '../lib/auth';
+import type { DayBlock, DayInsight, WorkspaceUser } from '../lib/types';
 import { fmtDayLabel, todayKey, addDays, fmtDurationMs } from '../lib/format';
 import { DayRibbon } from '../components/DayRibbon';
 import { ActivityHeatmap } from '../components/ActivityHeatmap';
-import AppUsagePanel from '../components/AppUsagePanel';
 import { EntryRow } from '../components/EntryRow';
 import type { TaskOption } from '../components/TaskCombo';
 import {
   Page,
   PageHeader,
   Card,
-  Stat,
-  StatRow,
   Toolbar,
   Select,
   DateStepper,
+  IconButton,
   Tag,
   Banner,
-  SkeletonStat,
   SkeletonTable,
 } from '../ui';
 
@@ -30,27 +28,27 @@ interface AdminUser {
   id: string;
   name: string;
   email: string;
-  role: 'OWNER' | 'ADMIN' | 'MANAGER' | 'MEMBER';
+  role: 'ADMIN' | 'MANAGER' | 'MEMBER';
 }
 
 /**
- * /me-today — the employee's own day, composed STRICTLY from the shared kit
+ * /edit-time — the employee's own day, composed STRICTLY from the shared kit
  * (`src/ui`) so it reads as one product with the other 12 pages. The page file
  * contributes layout only: a `PageHeader` (eyebrow → title → toolbar), a
- * day-stage `Card` hosting the timeline ribbon + heatmap, a flush `StatRow` of
- * day totals, the app-usage panel, and a flush `Card` wrapping the editable
- * timesheet. No bespoke colour / type / border / shadow lives here — those come
- * only from the kit + tokens. The page CSS (`myd-` prefix) is pure LAYOUT.
+ * day-stage `Card` hosting the timeline ribbon + heatmap, and a flush `Card`
+ * wrapping the editable timesheet. No bespoke colour / type / border / shadow
+ * lives here — those come only from the kit + tokens. The page CSS (`myd-`
+ * prefix) is pure LAYOUT.
  *
  * The rich, stateful functional core is PRESERVED byte-for-byte: the
- * shift-bounded DayRibbon, the ActivityHeatmap, AppUsagePanel, and the editable
+ * shift-bounded DayRibbon, the ActivityHeatmap, and the editable
  * EntryRow timesheet (with TimePopover / TaskCombo / attendee pickers) — every
  * prop, handler, mutation, and piece of state is unchanged. The timesheet keeps
  * the exact 6-column `<table>` contract EntryRow renders into.
  *
- * Self-only writes (mirrors the agent's contract): when the viewer looks at
- * their OWN day, every row is editable; a teammate's day (via the user picker
- * + ?userId= deep-link) is read-only with a banner.
+ * Scoped writes: members edit only themselves; managers/admins can edit users
+ * exposed by the server's team/workspace scope. The agent create/sync contract
+ * stays self-owned; this page only drives dashboard metadata/manual edits.
  *
  * The mutation set:
  *   - PATCH /v1/time-entries/:id      (tracked + APPROVED MANUAL rows)
@@ -63,17 +61,28 @@ interface AdminUser {
  */
 export function MeTodayScreen() {
   const { me } = useRouteContext({ from: '/authed' });
-  const search = useSearch({ from: '/authed/me-today' });
+  const search = useSearch({ from: '/authed/edit-time' });
   const qc = useQueryClient();
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 
-  const initialDate =
+  const searchDate =
     typeof search.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(search.date) ? search.date : todayKey();
-  const initialUserId = typeof search.userId === 'string' && search.userId.length > 0 ? search.userId : me.id;
-  const [date, setDate] = useState<string>(initialDate);
-  const [targetUserId, setTargetUserId] = useState<string>(initialUserId);
+  const searchUserId = typeof search.userId === 'string' && search.userId.length > 0 ? search.userId : me.id;
+  const focusRequestId = typeof search.requestId === 'string' && search.requestId.length > 0 ? search.requestId : null;
+  const focusStartMs = parseSearchEpochMs(search.focusStart);
+  const focusEndMs = parseSearchEpochMs(search.focusEnd);
+  const [date, setDate] = useState<string>(searchDate);
+  const [targetUserId, setTargetUserId] = useState<string>(searchUserId);
   const showPicker = isManagerOrAbove(me.role);
-  const editable = targetUserId === me.id;
+  const editable = targetUserId === me.id || hasCapability(me, 'time.team.edit');
+
+  useEffect(() => {
+    setDate(searchDate);
+  }, [searchDate]);
+
+  useEffect(() => {
+    setTargetUserId(searchUserId);
+  }, [searchUserId]);
 
   const usersQ = useQuery({
     queryKey: ['admin', 'users'],
@@ -134,26 +143,29 @@ export function MeTodayScreen() {
   });
 
   const createRequest = useMutation({
-    mutationFn: (vars: { requestedStart: number; requestedEnd: number; larkTaskGuid: string | null; reason: string; attendeeIds?: string[] }) => {
+    mutationFn: (vars: { requestedStart: number; requestedEnd: number; larkTaskGuid: string | null; taskSummary: string | null; reason: string; attendeeIds?: string[] }) => {
       const body: Record<string, unknown> = {
         clientUuid: `web-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
         requestedStart: new Date(vars.requestedStart).toISOString(),
         requestedEnd: new Date(vars.requestedEnd).toISOString(),
         larkTaskGuid: vars.larkTaskGuid,
+        taskSummary: vars.taskSummary,
         reason: vars.reason,
       };
       if (vars.attendeeIds && vars.attendeeIds.length > 0) body.attendeeIds = vars.attendeeIds;
+      if (targetUserId !== me.id) body.userId = targetUserId;
       return api('/v1/time-requests', { method: 'POST', json: body });
     },
     onSuccess: invalidate,
   });
 
   const patchRequest = useMutation({
-    mutationFn: (vars: { id: string; requestedStart: number; requestedEnd: number; larkTaskGuid: string | null; reason: string; attendeeIds?: string[] }) => {
+    mutationFn: (vars: { id: string; requestedStart: number; requestedEnd: number; larkTaskGuid: string | null; taskSummary: string | null; reason: string; attendeeIds?: string[] }) => {
       const body: Record<string, unknown> = {
         requestedStart: new Date(vars.requestedStart).toISOString(),
         requestedEnd: new Date(vars.requestedEnd).toISOString(),
         larkTaskGuid: vars.larkTaskGuid,
+        taskSummary: vars.taskSummary,
         reason: vars.reason,
       };
       if (vars.attendeeIds !== undefined) body.attendeeIds = vars.attendeeIds;
@@ -164,6 +176,11 @@ export function MeTodayScreen() {
 
   const cancelRequest = useMutation({
     mutationFn: (id: string) => api(`/v1/time-requests/${id}/cancel`, { method: 'POST' }),
+    onSuccess: invalidate,
+  });
+
+  const deleteManualEntry = useMutation({
+    mutationFn: (id: string) => api(`/v1/time-entries/${id}`, { method: 'DELETE' }),
     onSuccess: invalidate,
   });
 
@@ -222,6 +239,59 @@ export function MeTodayScreen() {
     }
   }
 
+  const deepLinkFocusToken = `${targetUserId}:${date}:${focusRequestId ?? ''}:${focusStartMs ?? ''}:${focusEndMs ?? ''}`;
+  const lastDeepLinkFocusRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const day = dayQ.data;
+    if (!day || (!focusRequestId && focusStartMs === null)) return;
+
+    const token = `${deepLinkFocusToken}:${day.blocks.length}:${day.recentRejected.length}`;
+    if (lastDeepLinkFocusRef.current === token) return;
+
+    const requestBlock = focusRequestId
+      ? day.blocks.find((block) => block.requestId === focusRequestId)
+      : undefined;
+    const slotBlock = focusStartMs !== null
+      ? day.blocks.find((block) => focusStartMs >= block.startedAt && focusStartMs < block.endedAt)
+      : undefined;
+    const rejectedRow = focusRequestId
+      ? day.recentRejected.find((request) => request.id === focusRequestId)
+      : undefined;
+
+    const block = requestBlock ?? slotBlock;
+    if (block) {
+      lastDeepLinkFocusRef.current = token;
+      focusRow(rowKeyFor(block));
+      if (editable && block.kind === 'GAP') {
+        const startedAt = Math.max(block.startedAt, focusStartMs ?? block.startedAt);
+        const endedAt = Math.min(block.endedAt, focusEndMs ?? block.endedAt);
+        if (endedAt > startedAt) {
+          setGapPreset((previous) => ({
+            blockKey: `${block.startedAt}-${block.endedAt}`,
+            range: { startedAt, endedAt },
+            tick: (previous?.tick ?? 0) + 1,
+          }));
+        }
+      }
+      return;
+    }
+
+    if (rejectedRow) {
+      lastDeepLinkFocusRef.current = token;
+      focusRow(`rejected-${rejectedRow.id}`);
+    }
+  }, [
+    dayQ.data,
+    deepLinkFocusToken,
+    editable,
+    focusEndMs,
+    focusRequestId,
+    focusRow,
+    focusStartMs,
+    rowKeyFor,
+  ]);
+
   // ---- Derived view state ---------------------------------------------------
 
   const targetUser: AdminUser | undefined = useMemo(() => {
@@ -237,22 +307,29 @@ export function MeTodayScreen() {
   const isSelf = !targetUser || targetUser.id === me.id;
   const titleName = targetUser
     ? targetUser.id === me.id
-      ? 'My Day'
-      : `${targetUser.name.split(' ')[0]}’s Day`
-    : 'Day';
+      ? 'Edit Time'
+      : `${targetUser.name.split(' ')[0]}’s Time`
+    : 'Edit Time';
 
   const day = dayQ.data;
 
   return (
-    <Page>
+    <Page className="myd-page">
       <PageHeader
         eyebrow={`${tzLabel} · ${fmtDayLabel(date).toUpperCase()}`}
         title={titleName}
-        subtitle={isSelf ? 'Review and edit your timesheet.' : `Viewing ${targetUser?.name}’s day — read-only.`}
+        subtitle={
+          isSelf
+            ? 'Review and edit your timesheet.'
+            : targetUser
+              ? `Editing ${targetUser.name}’s time with manager scope.`
+              : 'Loading selected teammate…'
+        }
         actions={
-          <Toolbar>
+          <Toolbar className="myd-header-toolbar">
             {showPicker && usersQ.data && (
               <Select
+                className="myd-user-select"
                 value={targetUserId}
                 onChange={(e) => setTargetUserId(e.target.value)}
                 aria-label="View someone's day"
@@ -266,13 +343,13 @@ export function MeTodayScreen() {
                   ))}
               </Select>
             )}
-            <DateStepper
-              value={isToday ? 'Today' : fmtDayLabel(date)}
+            <SingleDatePicker
+              date={date}
+              today={todayKey()}
+              onChange={setDate}
               onPrev={() => setDate((d) => addDays(d, -1))}
               onNext={() => setDate((d) => addDays(d, 1))}
               nextDisabled={isToday}
-              prevLabel="Previous day"
-              nextLabel="Next day"
             />
           </Toolbar>
         }
@@ -284,17 +361,8 @@ export function MeTodayScreen() {
 
       {dayQ.isLoading && (
         <div className="myd-stack">
-          <Card title="Day timeline">
+          <Card className="ui-rise-1 myd-stage-card">
             <SkeletonTable rows={3} />
-          </Card>
-          <Card variant="flush">
-            <StatRow>
-              <SkeletonStat />
-              <SkeletonStat />
-              <SkeletonStat />
-              <SkeletonStat />
-              <SkeletonStat />
-            </StatRow>
           </Card>
         </div>
       )}
@@ -302,9 +370,21 @@ export function MeTodayScreen() {
       {day && (
         <div className="myd-stack">
           {/* ---- Day stage: timeline ribbon + activity heatmap ---- */}
-          <Card
-            title="Day timeline"
-            action={
+          <Card className="ui-rise-1 myd-stage-card">
+            <div className="myd-stage-top">
+              {day.shift && (
+                <div className="myd-stage-meta">
+                  <Tag status="neutral" mono>
+                    {day.shift.name} · {day.shift.start}–{day.shift.end}
+                  </Tag>
+                  <span className="ui-t-small myd-stage-note">Shift-bounded</span>
+                </div>
+              )}
+              {!day.shift && (
+                <div className="myd-stage-meta">
+                  <Tag status="neutral" mono>Full day</Tag>
+                </div>
+              )}
               <div className="myd-legend">
                 <Tag status="success" dot>Tracked</Tag>
                 <Tag status="info" dot>Meeting</Tag>
@@ -312,23 +392,7 @@ export function MeTodayScreen() {
                 <Tag status="danger" dot>Pending</Tag>
                 <Tag status="neutral" dot>Idle</Tag>
               </div>
-            }
-          >
-            {day.shift && (
-              <div className="myd-stage-meta">
-                <Tag status="neutral" mono>
-                  {day.shift.name} · {day.shift.start}–{day.shift.end}
-                </Tag>
-                <span className="ui-t-small myd-stage-note">
-                  Shift-bounded · click a gap to log time.
-                </span>
-              </div>
-            )}
-            {!day.shift && (
-              <div className="myd-stage-meta">
-                <span className="ui-t-small myd-stage-note">Full day · click a gap to log time.</span>
-              </div>
-            )}
+            </div>
 
             <div className="myd-canvas">
               <DayRibbon
@@ -346,40 +410,18 @@ export function MeTodayScreen() {
             {!editable && (
               <div className="myd-readonly">
                 <Banner status="info">
-                  Viewing {targetUser?.name}’s day — each person edits their own time.
+                  Viewing {targetUser?.name}’s day without edit access.
                 </Banner>
               </div>
             )}
           </Card>
 
-          {/* ---- Day totals: one flush StatRow keyed to meaning ---- */}
-          <Card variant="flush">
-            <StatRow>
-              <Stat label="Tracked" value={fmtDurationMs(day.totals.workedMs)} />
-              <Stat label="Meeting" value={fmtDurationMs(day.totals.meetingMs)} />
-              <Stat label="Manual" value={fmtDurationMs(day.totals.manualMs)} />
-              <Stat label="Pending" value={fmtDurationMs(day.totals.pendingMs)} />
-              <Stat label="Gap" value={fmtDurationMs(day.totals.gapMs)} />
-            </StatRow>
-          </Card>
-
-          <AppUsagePanel appUsage={day.appUsage} />
-
           {/* ---- Timesheet: flush Card hosting the exact 6-col EntryRow table ---- */}
-          <Card variant="flush">
+          <Card variant="flush" className="ui-rise-2 myd-sheet-card">
             <div className="myd-sheet-head">
               <div className="myd-sheet-titling">
-                <h2 className="ui-t-title">Timesheet</h2>
+                <h2 className="ui-t-h3">Timesheet</h2>
                 <span className="ui-t-eyebrow">{day.blocks.length} entries</span>
-              </div>
-              <div className="myd-sheet-totals">
-                <Tag status="success" mono>{fmtDurationMs(day.totals.workedMs)} tracked</Tag>
-                {day.totals.meetingMs > 0 && (
-                  <Tag status="info" mono>{fmtDurationMs(day.totals.meetingMs)} meeting</Tag>
-                )}
-                {day.totals.manualMs > 0 && (
-                  <Tag status="warn" mono>{fmtDurationMs(day.totals.manualMs)} manual</Tag>
-                )}
               </div>
             </div>
 
@@ -387,12 +429,12 @@ export function MeTodayScreen() {
               <table className="myd-table">
                 <thead>
                   <tr>
-                    <th className="ui-t-eyebrow" style={{ width: 100 }}>Kind</th>
-                    <th className="ui-t-eyebrow" style={{ width: 200 }}>Time</th>
-                    <th className="ui-t-eyebrow" style={{ width: 80 }}>Duration</th>
-                    <th className="ui-t-eyebrow" style={{ width: 220 }}>Task</th>
+                    <th className="ui-t-eyebrow myd-col-kind">Kind</th>
+                    <th className="ui-t-eyebrow myd-col-time">Time</th>
+                    <th className="ui-t-eyebrow myd-col-duration">Duration</th>
+                    <th className="ui-t-eyebrow myd-col-task">Task</th>
                     <th className="ui-t-eyebrow">Notes / Reason</th>
-                    <th className="ui-t-eyebrow" style={{ width: 240 }} />
+                    <th className="ui-t-eyebrow myd-col-actions" />
                   </tr>
                 </thead>
                 <tbody>
@@ -479,13 +521,29 @@ export function MeTodayScreen() {
                         onSave={async (vars) => {
                           await patchEntry.mutateAsync(vars);
                         }}
+                        onDeleteManual={
+                          kind === 'manual_approved'
+                            ? async (id) => {
+                                await deleteManualEntry.mutateAsync(id);
+                              }
+                            : undefined
+                        }
                       />
                     );
                   })}
 
-                  {day.recentRejected.map((r) => (
-                    <EntryRow key={`rejected-${r.id}`} kind="rejected" rejected={r} />
-                  ))}
+                  {day.recentRejected.map((r) => {
+                    const rowId = `rejected-${r.id}`;
+                    return (
+                      <EntryRow
+                        key={rowId}
+                        rowId={rowId}
+                        highlighted={highlightedRowId === rowId}
+                        kind="rejected"
+                        rejected={r}
+                      />
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -494,4 +552,201 @@ export function MeTodayScreen() {
       )}
     </Page>
   );
+}
+
+function parseSearchEpochMs(value: string | undefined): number | null {
+  if (!value) return null;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function SingleDatePicker({
+  date,
+  today,
+  onChange,
+  onPrev,
+  onNext,
+  nextDisabled,
+}: {
+  date: string;
+  today: string;
+  onChange: (date: string) => void;
+  onPrev: () => void;
+  onNext: () => void;
+  nextDisabled: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [visibleMonth, setVisibleMonth] = useState(() => monthStart(parseDateKey(date)));
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onPointerDown(event: MouseEvent) {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    }
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') setOpen(false);
+    }
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [open]);
+
+  function openPicker() {
+    setVisibleMonth(monthStart(parseDateKey(date)));
+    setOpen((v) => !v);
+  }
+
+  function chooseDay(day: string) {
+    if (compareDateKeys(day, today) > 0) return;
+    onChange(day);
+    setOpen(false);
+  }
+
+  return (
+    <div className="myd-date-picker" ref={rootRef}>
+      <DateStepper
+        value={
+          <>
+            <CalendarDays size={14} strokeWidth={1.8} aria-hidden />
+            <span>{fmtDayLabel(date)}</span>
+          </>
+        }
+        onValueClick={openPicker}
+        valueExpanded={open}
+        valueLabel={`Choose day, current date ${formatFullDateLabel(date)}`}
+        onPrev={onPrev}
+        onNext={onNext}
+        nextDisabled={nextDisabled}
+        prevLabel="Previous day"
+        nextLabel="Next day"
+      />
+
+      {open && (
+        <div className="myd-date-popover" role="dialog" aria-label="Choose edit time date">
+          <div className="myd-date-popover-head">
+            <IconButton
+              size="sm"
+              icon={<ChevronLeft size={15} strokeWidth={1.8} />}
+              aria-label="Previous month"
+              onClick={() => setVisibleMonth(addMonths(visibleMonth, -1))}
+            />
+            <span className="ui-t-eyebrow">{formatMonthLabel(visibleMonth)}</span>
+            <IconButton
+              size="sm"
+              icon={<ChevronRight size={15} strokeWidth={1.8} />}
+              aria-label="Next month"
+              onClick={() => setVisibleMonth(addMonths(visibleMonth, 1))}
+              disabled={compareDateKeys(localDateKey(monthStart(addMonths(visibleMonth, 1))), localDateKey(monthStart(parseDateKey(today)))) > 0}
+            />
+          </div>
+
+          <CalendarMonth
+            month={visibleMonth}
+            today={today}
+            selected={date}
+            onChoose={chooseDay}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CalendarMonth({
+  month,
+  today,
+  selected,
+  onChoose,
+}: {
+  month: Date;
+  today: string;
+  selected: string;
+  onChoose: (day: string) => void;
+}) {
+  const days = calendarCells(month);
+  return (
+    <section className="myd-calendar" aria-label={formatMonthLabel(month)}>
+      <div className="myd-calendar-weekdays" aria-hidden>
+        {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d, index) => (
+          <span key={`${d}-${index}`}>{d}</span>
+        ))}
+      </div>
+      <div className="myd-calendar-days">
+        {days.map((day, index) => {
+          if (!day) return <span key={`blank-${index}`} aria-hidden />;
+          const disabled = compareDateKeys(day, today) > 0;
+          const isSelected = day === selected;
+          return (
+            <button
+              key={day}
+              type="button"
+              className={[
+                'myd-calendar-day',
+                isSelected ? ' is-selected' : '',
+                day === today ? ' is-today' : '',
+              ].join('')}
+              disabled={disabled}
+              onClick={() => onChoose(day)}
+              aria-label={formatFullDateLabel(day)}
+              aria-pressed={isSelected}
+            >
+              {Number(day.slice(-2))}
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function parseDateKey(key: string): Date {
+  const [year, month, day] = key.split('-').map((part) => Number.parseInt(part, 10));
+  return new Date(year!, month! - 1, day!);
+}
+
+function localDateKey(date: Date): string {
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, '0');
+  const day = `${date.getDate()}`.padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function compareDateKeys(a: string, b: string): number {
+  return a.localeCompare(b);
+}
+
+function monthStart(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), 1);
+}
+
+function addMonths(date: Date, delta: number): Date {
+  return new Date(date.getFullYear(), date.getMonth() + delta, 1);
+}
+
+function calendarCells(month: Date): Array<string | null> {
+  const start = monthStart(month);
+  const firstDay = (start.getDay() + 6) % 7;
+  const count = new Date(start.getFullYear(), start.getMonth() + 1, 0).getDate();
+  const cells: Array<string | null> = Array.from({ length: firstDay }, () => null);
+  for (let day = 1; day <= count; day += 1) {
+    cells.push(localDateKey(new Date(start.getFullYear(), start.getMonth(), day)));
+  }
+  return cells;
+}
+
+function formatMonthLabel(date: Date): string {
+  return date.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+}
+
+function formatFullDateLabel(key: string): string {
+  return parseDateKey(key).toLocaleDateString(undefined, {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  });
 }

@@ -13,7 +13,7 @@ async function seed() {
   counter += 1;
   const stamp = `${Date.now()}-${counter}-inv`;
   const ws = await prisma.workspace.create({ data: { name: `WS ${stamp}` } });
-  const mk = (email: string, role: 'OWNER' | 'ADMIN' | 'MANAGER' | 'MEMBER') =>
+  const mk = (email: string, role: 'ADMIN' | 'MANAGER' | 'MEMBER') =>
     prisma.user.create({
       data: {
         workspaceId: ws.id,
@@ -23,16 +23,14 @@ async function seed() {
         passwordHash: 'x'.repeat(60),
       },
     });
-  const owner = await mk('owner', 'OWNER');
   const admin = await mk('admin', 'ADMIN');
   const mgr = await mk('mgr', 'MANAGER');
   const member = await mk('mem', 'MEMBER');
-  const token = (u: { id: string; role: 'OWNER' | 'ADMIN' | 'MANAGER' | 'MEMBER' }) =>
+  const token = (u: { id: string; role: 'ADMIN' | 'MANAGER' | 'MEMBER' }) =>
     signAccessToken({ sub: u.id, ws: ws.id, role: u.role });
   return {
     ws,
     stamp,
-    owner: { id: owner.id, token: token(owner) },
     admin: { id: admin.id, token: token(admin) },
     mgr: { id: mgr.id, token: token(mgr) },
     member: { id: member.id, token: token(member) },
@@ -78,12 +76,12 @@ describe('POST /v1/admin/users (invite)', () => {
     expect(res.body.error).toBe('invalid_name');
   });
 
-  it('400 invalid_role (OWNER cannot be invited)', async () => {
+  it('400 invalid_role for unknown roles', async () => {
     const { admin } = await seed();
     const res = await request(app)
       .post('/v1/admin/users')
       .set(bearer(admin.token))
-      .send({ email: 'owner2@x.com', name: 'O2', role: 'OWNER' });
+      .send({ email: 'superadmin@x.com', name: 'Super Admin', role: 'SUPERADMIN' });
     expect(res.status).toBe(400);
     expect(res.body.error).toBe('invalid_role');
   });
@@ -100,6 +98,27 @@ describe('POST /v1/admin/users (invite)', () => {
     const created = await prisma.user.findUnique({ where: { id: res.body.id } });
     expect(created?.workspaceId).toBe(ws.id);
     expect(created?.deactivatedAt).toBeNull();
+  });
+
+  it('applies workspace policy defaults to newly-created members', async () => {
+    const { ws, admin, stamp } = await seed();
+    await prisma.workspacePolicy.create({
+      data: {
+        workspaceId: ws.id,
+        defaultScreenshotIntervalMin: 60,
+        defaultIdleThresholdMin: 10,
+      },
+    });
+
+    const res = await request(app)
+      .post('/v1/admin/users')
+      .set(bearer(admin.token))
+      .send({ email: `policy-${stamp}@x.com`, name: 'Policy New' });
+
+    expect(res.status).toBe(201);
+    const created = await prisma.user.findUnique({ where: { id: res.body.id } });
+    expect(created?.screenshotIntervalMin).toBe(60);
+    expect(created?.idleThresholdMin).toBe(10);
   });
 
   it('409 on duplicate email', async () => {
@@ -160,31 +179,31 @@ describe('POST /v1/admin/users/:id/deactivate + /reactivate', () => {
     expect(res.status).toBe(409);
   });
 
-  it('cannot deactivate the last OWNER', async () => {
-    const { admin, owner } = await seed();
+  it('cannot deactivate the last active ADMIN', async () => {
+    const { admin } = await seed();
     const res = await request(app)
-      .post(`/v1/admin/users/${owner.id}/deactivate`)
+      .post(`/v1/admin/users/${admin.id}/deactivate`)
       .set(bearer(admin.token));
     expect(res.status).toBe(400);
-    expect(res.body.error).toBe('last_owner_protected');
+    expect(res.body.error).toBe('last_admin_protected');
   });
 
-  it('can deactivate an OWNER when another OWNER exists', async () => {
-    const { admin, owner, stamp } = await seed();
-    const owner2 = await prisma.user.create({
+  it('can deactivate an ADMIN when another active ADMIN exists', async () => {
+    const { admin, ws, stamp } = await seed();
+    const admin2 = await prisma.user.create({
       data: {
-        workspaceId: (await prisma.user.findUnique({ where: { id: owner.id } }))!.workspaceId,
-        email: `owner2-${stamp}@x.com`,
-        name: 'O2',
-        role: 'OWNER',
+        workspaceId: ws.id,
+        email: `admin2-${stamp}@x.com`,
+        name: 'A2',
+        role: 'ADMIN',
         passwordHash: 'x'.repeat(60),
       },
     });
     const res = await request(app)
-      .post(`/v1/admin/users/${owner.id}/deactivate`)
+      .post(`/v1/admin/users/${admin.id}/deactivate`)
       .set(bearer(admin.token));
     expect(res.status).toBe(200);
-    expect(owner2.id).toBeTruthy();
+    expect(admin2.id).toBeTruthy();
   });
 
   it('reactivate clears deactivatedAt', async () => {

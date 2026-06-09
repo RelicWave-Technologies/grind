@@ -1,26 +1,360 @@
 /* ============================================================================
-   POLICY — page-local LAYOUT ONLY for /policy (Workspace policy, M14).
+   POLICY — admin workspace policy.
 
-   All component looks (colour, type, border, radius, shadow, toggles, inputs,
-   tags, cards) come from the shared kit (src/ui/*) + tokens. This file holds a
-   minimal amount of pure placement — grid/flex/gaps — prefixed `pol-`. No hex,
-   no fonts, no borders, no component styling.
+   Page-local layout only. The shared UI kit owns typography, color, borders,
+   radius, controls, and motion. This file only places those primitives.
    ========================================================================== */
 
-/* Page body rhythm — sections stacked with the standard section gap. */
 .pol-body {
   display: flex;
   flex-direction: column;
-  gap: var(--ui-sp-7);
+  gap: var(--ui-sp-6);
 }
 
-/* Retention: number input + its unit, sitting on one baseline. */
+.pol-summary {
+  margin-bottom: 0;
+}
+
+.pol-summary .ui-stat-row {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--ui-sp-4);
+}
+
+.pol-summary .ui-stat-row > .ui-stat {
+  min-height: calc(var(--ui-control-h) * 3);
+  padding: var(--ui-sp-5);
+  gap: var(--ui-sp-3);
+  justify-content: center;
+}
+
+.pol-summary .ui-t-num {
+  font-size: var(--ui-sp-7);
+  line-height: 1;
+  font-weight: 640;
+}
+
+.pol-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--ui-sp-5);
+  align-items: start;
+}
+
+.pol-grid > .ui-card {
+  min-width: 0;
+}
+
+.pol-payroll-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--ui-sp-5);
+  align-items: stretch;
+}
+
+.pol-card-compact.ui-card {
+  padding: var(--ui-sp-5) var(--ui-sp-6);
+}
+
+.pol-card-compact .ui-card__head {
+  padding-bottom: var(--ui-sp-3);
+  margin-bottom: var(--ui-sp-4);
+}
+
+.pol-card-compact .ui-card__title {
+  font-size: calc(var(--ui-sp-5) + var(--ui-sp-1));
+  line-height: 1.22;
+}
+
+.pol-payroll-rule-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--ui-sp-4);
+  align-items: start;
+}
+
+.pol-payroll-rule-grid--close {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.pol-payroll-rule {
+  min-width: 0;
+  display: grid;
+  gap: var(--ui-sp-2);
+  align-content: start;
+}
+
+.pol-payroll-rule strong {
+  color: var(--ui-ink);
+  font-size: var(--ui-sp-5);
+  line-height: 1.15;
+  font-weight: 630;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pol-payroll-rule .ui-t-small {
+  color: var(--ui-ink-2);
+  max-width: 18ch;
+}
+
+.pol-icon {
+  display: inline-grid;
+  place-items: center;
+  width: var(--ui-sp-7);
+  height: var(--ui-sp-7);
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-full);
+  background: var(--ui-surface-inset);
+  color: var(--ui-ink-2);
+}
+
+.pol-select {
+  width: calc(var(--ui-control-h) * 4);
+  min-width: calc(var(--ui-control-h) * 4);
+  text-align: center;
+  text-align-last: center;
+  font-family: var(--ui-font-mono);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
 .pol-field-control {
-  display: flex;
-  align-items: baseline;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
   gap: var(--ui-sp-3);
 }
+
 .pol-field-control .ui-control {
-  width: 96px;
+  width: calc(var(--ui-control-h) * 3);
   text-align: right;
+  font-family: var(--ui-font-mono);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.pol-preset-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--ui-sp-2);
+}
+
+.pol-card-compact .ui-list-row {
+  min-height: calc(var(--ui-row-h) + var(--ui-sp-4));
+  padding: var(--ui-sp-3) 0;
+  gap: var(--ui-sp-4);
+}
+
+.pol-card-compact .ui-list-row--rail-success,
+.pol-card-compact .ui-list-row--rail-warn,
+.pol-card-compact .ui-list-row--rail-danger,
+.pol-card-compact .ui-list-row--rail-info,
+.pol-card-compact .ui-list-row--rail-accent {
+  padding-left: var(--ui-sp-5);
+}
+
+.pol-card-compact .ui-list-row__main {
+  gap: var(--ui-sp-2);
+}
+
+.pol-card-compact .ui-list-row__title {
+  line-height: 1.3;
+}
+
+.pol-card-compact .ui-list-row__sub {
+  max-width: 42ch;
+  line-height: 1.42;
+}
+
+.pol-card-compact .ui-list-row__trailing {
+  min-width: max-content;
+}
+
+.pol-card-compact .ui-toggle {
+  width: calc(var(--ui-control-h) + var(--ui-sp-5));
+}
+
+.pol-modal-layer {
+  z-index: 120;
+  padding: var(--ui-sp-5);
+}
+
+@keyframes pol-modal-enter {
+  from {
+    opacity: 0;
+    transform: translateY(var(--ui-sp-3)) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.pol-modal {
+  width: min(calc(var(--ui-sp-12) * 10), 100%);
+  max-height: min(84dvh, calc(var(--ui-sp-12) * 11));
+  display: flex;
+  flex-direction: column;
+  background: var(--ui-surface-raised);
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-lg);
+  overflow: hidden;
+  box-shadow: var(--ui-shadow-pop);
+  animation: pol-modal-enter var(--ui-dur-slow) var(--ui-ease) both;
+}
+
+.pol-modal-head,
+.pol-modal-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-sp-5);
+  padding: var(--ui-sp-5);
+  border-bottom: 1px solid var(--ui-line);
+}
+
+.pol-modal-title {
+  min-width: 0;
+  display: grid;
+  gap: var(--ui-sp-1);
+}
+
+.pol-modal-title h2,
+.pol-modal-title p,
+.pol-form-section-head h3,
+.pol-form-section-head p {
+  margin: 0;
+}
+
+.pol-modal-title p,
+.pol-form-section-head p {
+  color: var(--ui-ink-2);
+}
+
+.pol-modal-body {
+  padding: var(--ui-sp-5);
+  overflow: auto;
+  display: grid;
+  gap: var(--ui-sp-4);
+}
+
+.pol-modal-foot {
+  border-top: 1px solid var(--ui-line);
+  border-bottom: 0;
+  justify-content: flex-end;
+}
+
+.pol-form-section {
+  min-width: 0;
+  display: grid;
+  gap: var(--ui-sp-4);
+  padding: var(--ui-sp-4);
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-md);
+  background: var(--ui-surface);
+}
+
+.pol-form-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--ui-sp-4);
+  padding-bottom: var(--ui-sp-3);
+  border-bottom: 1px solid var(--ui-line-faint);
+}
+
+.pol-form-section-head p {
+  margin-top: var(--ui-sp-2);
+  line-height: 1.35;
+}
+
+.pol-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: var(--ui-sp-4);
+  row-gap: var(--ui-sp-3);
+}
+
+.pol-form-grid--rules {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.pol-input-mono {
+  font-family: var(--ui-font-mono);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.pol-modal .ui-control {
+  height: calc(var(--ui-control-h) - var(--ui-sp-2));
+}
+
+.pol-modal .ui-field__hint {
+  margin-top: var(--ui-sp-2);
+  line-height: 1.25;
+}
+
+.pol-modal-note.ui-banner {
+  background: var(--ui-surface-inset);
+  border-color: var(--ui-line);
+  color: var(--ui-ink-2);
+}
+
+.pol-modal-note.ui-banner {
+  padding: var(--ui-sp-3) var(--ui-sp-4);
+}
+
+.pol-modal-note .ui-banner__icon {
+  color: var(--ui-ink-3);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pol-modal {
+    animation: none;
+  }
+}
+
+@media (max-width: 58rem) {
+  .pol-summary .ui-stat-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .pol-grid,
+  .pol-payroll-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 42rem) {
+  .pol-summary .ui-stat-row {
+    grid-template-columns: 1fr;
+  }
+
+  .pol-field-control,
+  .pol-preset-row {
+    justify-content: flex-start;
+  }
+
+  .pol-select,
+  .pol-field-control .ui-control {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .pol-field-control {
+    width: 100%;
+  }
+
+  .pol-payroll-rule-grid,
+  .pol-payroll-rule-grid--close,
+  .pol-form-grid--rules,
+  .pol-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .pol-modal-layer {
+    padding: var(--ui-sp-4);
+  }
 }

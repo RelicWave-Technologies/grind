@@ -70,12 +70,11 @@ const SCOPE_LABEL: Record<UsersResponse['scope'], string> = {
   workspace: 'Entire workspace',
 };
 
-const ROLE_RANK: Record<Role, number> = { OWNER: 0, ADMIN: 1, MANAGER: 2, MEMBER: 3 };
-const EDITABLE_ROLES: Role[] = ['OWNER', 'ADMIN', 'MANAGER', 'MEMBER'];
+const ROLE_RANK: Record<Role, number> = { ADMIN: 0, MANAGER: 1, MEMBER: 2 };
+const EDITABLE_ROLES: Role[] = ['ADMIN', 'MANAGER', 'MEMBER'];
 
 // Role → fixed status taxonomy (§2): one hue per role, never the accent.
 const ROLE_STATUS: Record<Role, Status> = {
-  OWNER: 'info',
   ADMIN: 'warn',
   MANAGER: 'success',
   MEMBER: 'neutral',
@@ -506,7 +505,7 @@ function PersonRow({ user, isSelf, canEdit, colSpan, teams, teamName, shifts, sh
 function InviteForm({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
-  const [role, setRole] = useState<Exclude<Role, 'OWNER'>>('MEMBER');
+  const [role, setRole] = useState<Role>('MEMBER');
   const m = useMutation({
     mutationFn: (vars: { email: string; name: string; role: Role }) =>
       api<AdminUser>('/v1/admin/users', { method: 'POST', json: vars }),
@@ -559,7 +558,7 @@ function InviteForm({ onClose, onCreated }: { onClose: () => void; onCreated: ()
           />
         </Field>
         <Field label="Role">
-          <Select value={role} onChange={(e) => setRole(e.target.value as Exclude<Role, 'OWNER'>)}>
+          <Select value={role} onChange={(e) => setRole(e.target.value as Role)}>
             <option value="MEMBER">MEMBER</option>
             <option value="MANAGER">MANAGER</option>
             <option value="ADMIN">ADMIN</option>

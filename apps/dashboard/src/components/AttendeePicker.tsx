@@ -148,19 +148,11 @@ export default function AttendeePicker({
             className="et-pop ap-pop"
             data-open={pop.open}
             data-flip={pop.flip}
-            style={{ ...pop.popoverStyle, width: 320 }}
+            style={pop.popoverStyle}
             role="dialog"
             onClick={(e) => e.stopPropagation()}
           >
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-                padding: '0 10px 0 6px',
-                color: 'var(--label-tertiary)',
-              }}
-            >
+            <div className="tc-search-row">
               <Search size={13} strokeWidth={2} />
               <input
                 ref={searchRef}
@@ -172,7 +164,6 @@ export default function AttendeePicker({
                   setActiveIdx(0);
                 }}
                 onKeyDown={onKey}
-                style={{ borderBottom: 'none', padding: '8px 0', margin: 0 }}
               />
               {selected.length > 0 && (
                 <button type="button" className="ap-clear" onClick={clearAll} aria-label="Clear all">
@@ -202,8 +193,8 @@ export default function AttendeePicker({
                       <span className="ap-avatar" aria-hidden>
                         {initials(u.name)}
                       </span>
-                      <span style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0, flex: 1 }}>
-                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <span className="ap-copy">
+                        <span className="ap-name">
                           {u.name}
                         </span>
                         <span className="ap-email small tertiary">{u.email}</span>

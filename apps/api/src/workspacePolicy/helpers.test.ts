@@ -67,6 +67,11 @@ describe('WORKSPACE_POLICY_DEFAULTS', () => {
   it('defaults screenshot retention to 60 days', () => {
     expect(WORKSPACE_POLICY_DEFAULTS.retentionDaysScreenshots).toBe(60);
   });
+
+  it('defaults member tracking knobs to production values', () => {
+    expect(WORKSPACE_POLICY_DEFAULTS.defaultScreenshotIntervalMin).toBe(180);
+    expect(WORKSPACE_POLICY_DEFAULTS.defaultIdleThresholdMin).toBe(5);
+  });
 });
 
 describe('PatchWorkspacePolicyRequest', () => {
@@ -88,6 +93,19 @@ describe('PatchWorkspacePolicyRequest', () => {
   it('accepts retentionDaysScreenshots = 0 (no purge)', () => {
     const out = PatchWorkspacePolicyRequest.safeParse({ retentionDaysScreenshots: 0 });
     expect(out.success).toBe(true);
+  });
+
+  it('accepts workspace default tracking knobs inside member override ranges', () => {
+    const out = PatchWorkspacePolicyRequest.safeParse({
+      defaultScreenshotIntervalMin: 180,
+      defaultIdleThresholdMin: 5,
+    });
+    expect(out.success).toBe(true);
+  });
+
+  it('rejects workspace default tracking knobs outside member override ranges', () => {
+    expect(PatchWorkspacePolicyRequest.safeParse({ defaultScreenshotIntervalMin: 2 }).success).toBe(false);
+    expect(PatchWorkspacePolicyRequest.safeParse({ defaultIdleThresholdMin: 0 }).success).toBe(false);
   });
 });
 

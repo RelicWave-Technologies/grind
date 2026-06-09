@@ -1,42 +1,64 @@
 import './payroll.css';
-import { useState, useMemo } from 'react';
+import { useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Download, FileSpreadsheet } from 'lucide-react';
+import { Download, FileSpreadsheet, X } from 'lucide-react';
 import { api, API_BASE } from '../lib/api';
 import {
+  Avatar,
+  Banner,
+  Button,
+  Card,
+  DateStepper,
+  EmptyState,
+  IconButton,
+  Identity,
   Page,
   PageHeader,
-  Card,
+  SkeletonStat,
+  SkeletonTable,
   Stat,
   StatRow,
   Table,
-  THead,
-  Tbody,
-  Th,
-  Tr,
-  Td,
-  Identity,
-  Avatar,
   Tag,
+  Tbody,
+  Td,
+  Th,
+  THead,
   Toolbar,
-  DateStepper,
-  Button,
-  Banner,
-  EmptyState,
-  SkeletonTable,
-  SkeletonStat,
+  Tr,
 } from '../ui';
 
-/**
- * /payroll — ADMIN monthly payroll worksheet (M15).
- *
- * Picks a month, previews per-user totals (days present, hours by kind), and
- * downloads a CSV via /v1/admin/payroll/monthly.csv. Composed entirely from the
- * shared "Quiet Datasheet" kit (see src/ui/SYSTEM.md): PageHeader + Toolbar for
- * the month stepper and CSV download, a flush StatRow for the period headline
- * numbers, and a flush Table for the per-user ledger with an accent-railed TOTAL
- * row. No bespoke component styling — tokens + kit only.
- */
+interface PayrollPolicyDto {
+  halfDayLowerMin: number;
+  halfDayUpperMin: number;
+  fullDayLowerMin: number;
+  fullDayUpperMin: number;
+  monthlyLowerMin: number;
+  timezone: string;
+  approvalReminderDays: number[];
+  approvalReminderTime: string;
+  payrollSheetSendDay: number;
+  payrollSheetSendTime: string;
+  sendPayrollSheetTo: 'all_admins';
+  updatedAt: string;
+}
+
+type PayrollDayStatus = 'FULL' | 'HALF' | 'OFF' | 'SCHEDULED_OFF' | 'NO_SHIFT';
+
+interface PayrollDay {
+  date: string;
+  rawMs: number;
+  cappedMs: number;
+  ignoredOverflowMs: number;
+  eligible: boolean;
+  shiftName: string | null;
+  status: PayrollDayStatus;
+  directStatus: PayrollDayStatus;
+  reason: string;
+  carryInMs: number;
+  carryOutMs: number;
+}
 
 interface PayrollRow {
   user: {
@@ -52,6 +74,30 @@ interface PayrollRow {
   manualHours: number;
   totalHours: number;
   avgDayHours: number;
+  rawHours: number;
+  cappedHours: number;
+  ignoredOverflowHours: number;
+  eligibleDays: number;
+  fullDays: number;
+  halfDays: number;
+  offDays: number;
+  scheduledOffDays: number;
+  noShiftDays: number;
+  payableUnits: number;
+  monthlyGuarantee: boolean;
+  payrollDays: PayrollDay[];
+}
+
+interface PayrollRunLogDto {
+  id: string;
+  runType: 'APPROVAL_REMINDER' | 'PAYROLL_SHEET';
+  scheduledFor: string;
+  status: 'SENT' | 'PARTIAL' | 'FAILED' | 'SKIPPED';
+  sentCount: number;
+  skippedNoLarkCount: number;
+  skippedUnassignedCount: number;
+  failedCount: number;
+  createdAt: string;
 }
 
 interface MonthlyPayroll {
@@ -65,7 +111,22 @@ interface MonthlyPayroll {
     meetingHours: number;
     manualHours: number;
     totalHours: number;
+    rawHours: number;
+    cappedHours: number;
+    ignoredOverflowHours: number;
+    eligibleDays: number;
+    fullDays: number;
+    halfDays: number;
+    offDays: number;
+    payableUnits: number;
   };
+}
+
+interface PayrollPayload {
+  payroll: MonthlyPayroll;
+  policy: PayrollPolicyDto;
+  runs: PayrollRunLogDto[];
+  unresolvedApprovalCount: number;
 }
 
 function thisMonth(): string {
@@ -75,38 +136,61 @@ function thisMonth(): string {
 function shiftMonth(month: string, delta: number): string {
   const [y, m] = month.split('-').map((n) => Number.parseInt(n, 10));
   if (!y || !m) return month;
-  const d = new Date(Date.UTC(y, m - 1 + delta, 1));
-  return d.toISOString().slice(0, 7);
+  return new Date(Date.UTC(y, m - 1 + delta, 1)).toISOString().slice(0, 7);
 }
 
 function fmtMonth(month: string): string {
   const [y, m] = month.split('-').map((n) => Number.parseInt(n, 10));
   if (!y || !m) return month;
-  return new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric' }).format(
-    new Date(Date.UTC(y, m - 1, 1)),
-  );
+  return new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric' }).format(new Date(Date.UTC(y, m - 1, 1)));
+}
+
+function h(min: number): string {
+  const hours = Math.floor(min / 60);
+  const mins = min % 60;
+  if (hours && mins) return `${hours}h ${mins}m`;
+  if (hours) return `${hours}h`;
+  return `${mins}m`;
+}
+
+function msToTime(ms: number): string {
+  return h(Math.round(ms / 60_000));
+}
+
+function statusTone(status: PayrollDayStatus): 'success' | 'warn' | 'danger' | 'neutral' {
+  if (status === 'FULL') return 'success';
+  if (status === 'HALF') return 'warn';
+  if (status === 'OFF') return 'danger';
+  return 'neutral';
+}
+
+function statusLabel(status: PayrollDayStatus): string {
+  if (status === 'SCHEDULED_OFF') return 'Scheduled off';
+  if (status === 'NO_SHIFT') return 'No shift';
+  return status[0] + status.slice(1).toLowerCase();
 }
 
 export function PayrollScreen() {
   const [month, setMonth] = useState<string>(thisMonth());
   const [downloading, setDownloading] = useState(false);
-  const tz = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC', []);
+  const [selectedRow, setSelectedRow] = useState<PayrollRow | null>(null);
+  const browserTz = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC', []);
 
   const q = useQuery({
-    queryKey: ['admin', 'payroll', month, tz],
-    queryFn: () => api<MonthlyPayroll>(`/v1/admin/payroll/monthly?month=${month}&tz=${tz}`),
+    queryKey: ['admin', 'payroll', month],
+    queryFn: () => api<PayrollPayload>(`/v1/admin/payroll/monthly?month=${month}`),
   });
 
+  const policy = q.data?.policy;
+  const payroll = q.data?.payroll;
+  const totals = payroll?.totals;
+  const hasRows = (payroll?.rows.length ?? 0) > 0;
+  const isCurrent = month === thisMonth();
+
   async function downloadCsv() {
-    // Cross-origin fetch + Blob so the auth cookie travels and we can
-    // suggest a sane filename. Native <a download> wouldn't pick up the
-    // Content-Disposition header in a cross-origin context.
     setDownloading(true);
     try {
-      const res = await fetch(
-        `${API_BASE}/v1/admin/payroll/monthly.csv?month=${month}&tz=${tz}`,
-        { credentials: 'include' },
-      );
+      const res = await fetch(`${API_BASE}/v1/admin/payroll/monthly.csv?month=${month}`, { credentials: 'include' });
       if (!res.ok) return;
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
@@ -122,17 +206,12 @@ export function PayrollScreen() {
     }
   }
 
-  const isCurrent = month === thisMonth();
-  const peopleCount = q.data?.rows.length ?? 0;
-  const totals = q.data?.totals;
-  const hasRows = (q.data?.rows.length ?? 0) > 0;
-
   return (
     <Page>
       <PageHeader
-        eyebrow={`Payroll · ${tz.replace(/_/g, ' ')}`}
+        eyebrow={`Payroll · ${policy?.timezone ?? browserTz}`}
         title={fmtMonth(month)}
-        subtitle="Monthly hours summary, ready for finance — worked, meeting, manual and total hours per person."
+        subtitle="Classify shift-working days as Full, Half, or Off and prepare the Lark month-close worksheet."
         actions={
           <Toolbar>
             {!isCurrent && (
@@ -148,34 +227,19 @@ export function PayrollScreen() {
               prevLabel="Previous month"
               nextLabel="Next month"
             />
-            <Button
-              variant="primary"
-              icon={<Download size={15} strokeWidth={2} />}
-              onClick={downloadCsv}
-              loading={downloading}
-              disabled={!hasRows}
-            >
-              Download CSV
+            <Button variant="secondary" icon={<Download size={15} strokeWidth={2} />} onClick={downloadCsv} loading={downloading} disabled={!hasRows}>
+              CSV
             </Button>
           </Toolbar>
         }
       />
 
       {q.isError ? (
-        <Banner
-          status="danger"
-          className="pay-block"
-          action={
-            <Button variant="ghost" size="sm" onClick={() => q.refetch()}>
-              Retry
-            </Button>
-          }
-        >
-          Couldn&apos;t load the payroll worksheet: {(q.error as Error).message}
+        <Banner status="danger" className="pay-block" action={<Button variant="ghost" size="sm" onClick={() => q.refetch()}>Retry</Button>}>
+          Couldn&apos;t load payroll: {(q.error as Error).message}
         </Banner>
       ) : (
         <>
-          {/* Period headline numbers. */}
           <Card variant="flush" className="pay-block">
             {q.isLoading || !totals ? (
               <div className="pay-stat-skel">
@@ -186,97 +250,68 @@ export function PayrollScreen() {
               </div>
             ) : (
               <StatRow>
-                <Stat
-                  label="People"
-                  value={peopleCount}
-                  hint={peopleCount === 0 ? 'nobody to bill yet' : 'in this worksheet'}
-                />
-                <Stat
-                  label="Total hours"
-                  value={totals.totalHours.toFixed(1)}
-                  unit="h"
-                  hint={
-                    totals.meetingHours > 0
-                      ? `incl. ${totals.meetingHours.toFixed(1)}h meetings`
-                      : 'across all people'
-                  }
-                />
-                <Stat label="Days present" value={totals.daysPresent} hint="person-days logged" />
-                <Stat
-                  label="Manual hours"
-                  value={totals.manualHours.toFixed(1)}
-                  unit="h"
-                  hint={totals.manualHours === 0 ? 'no manual edits' : 'manually entered'}
-                />
+                <Stat label="Payable units" value={totals.payableUnits.toFixed(1)} hint={`${totals.fullDays} full · ${totals.halfDays} half · ${totals.offDays} off`} />
+                <Stat label="Capped hours" value={totals.cappedHours.toFixed(1)} unit="h" hint={`${totals.ignoredOverflowHours.toFixed(1)}h overflow ignored`} />
+                <Stat label="Eligible days" value={totals.eligibleDays} hint="shift working days only" />
+                <Stat label="Pending approvals" value={q.data?.unresolvedApprovalCount ?? 0} hint="can affect payroll" />
               </StatRow>
             )}
           </Card>
 
-          {/* Per-user worksheet. */}
           <Card variant="flush" className="pay-block">
             {q.isLoading ? (
               <SkeletonTable rows={6} />
             ) : !hasRows ? (
               <EmptyState
                 icon={<FileSpreadsheet size={22} strokeWidth={1.8} />}
-                title="No users in this workspace yet"
-                description="Once people start tracking time, their monthly totals will appear here ready to export."
+                title="No payroll rows yet"
+                description="Rows appear when workspace members exist. No-shift days are excluded from payable-day classification."
               />
             ) : (
               <div className="pay-scroll">
-                <Table>
+                <Table className="pay-table">
                   <THead>
                     <Tr>
-                      <Th>Name</Th>
-                      <Th>Role</Th>
+                      <Th>User</Th>
                       <Th>Team</Th>
-                      <Th align="right">Days</Th>
-                      <Th align="right">Worked</Th>
-                      <Th align="right">Meetings</Th>
-                      <Th align="right">Manual</Th>
-                      <Th align="right">Total</Th>
-                      <Th align="right">Avg / day</Th>
+                      <Th align="right">Raw</Th>
+                      <Th align="right">Capped</Th>
+                      <Th align="center">Days</Th>
+                      <Th align="right">Units</Th>
+                      <Th>Warnings</Th>
+                      <Th align="center">Open</Th>
                     </Tr>
                   </THead>
                   <Tbody>
-                    {q.data!.rows.map((r) => (
+                    {payroll!.rows.map((r) => (
                       <Tr key={r.user.id}>
                         <Td>
-                          <Identity
-                            name={r.user.name}
-                            subtitle={r.user.email}
-                            avatar={<Avatar name={r.user.name} size={32} />}
-                          />
+                          <Identity name={r.user.name} subtitle={r.user.email} avatar={<Avatar name={r.user.name} size={32} />} />
                         </Td>
+                        <Td>{r.user.teamName ? <Tag>{r.user.teamName}</Tag> : <span className="ui-t-small">-</span>}</Td>
+                        <Td mono>{r.rawHours.toFixed(1)}h</Td>
+                        <Td mono>{r.cappedHours.toFixed(1)}h</Td>
+                        <Td align="center">
+                          <div className="pay-day-pills">
+                            <Tag status="success" mono>{r.fullDays}F</Tag>
+                            <Tag status="warn" mono>{r.halfDays}H</Tag>
+                            <Tag status="danger" mono>{r.offDays}O</Tag>
+                          </div>
+                        </Td>
+                        <Td mono>{r.payableUnits.toFixed(1)}</Td>
                         <Td>
-                          <Tag mono>{r.user.role}</Tag>
+                          <div className="pay-warning-stack">
+                            {r.noShiftDays > 0 && <Tag status="neutral" mono>{r.noShiftDays} no shift</Tag>}
+                            {r.ignoredOverflowHours > 0 && <Tag status="warn" mono>{r.ignoredOverflowHours.toFixed(1)}h ignored</Tag>}
+                            {r.monthlyGuarantee && <Tag status="success" mono>monthly met</Tag>}
+                            {r.noShiftDays === 0 && r.ignoredOverflowHours === 0 && !r.monthlyGuarantee && <span className="ui-t-small">-</span>}
+                          </div>
                         </Td>
-                        <Td>
-                          {r.user.teamName ? (
-                            <Tag>{r.user.teamName}</Tag>
-                          ) : (
-                            <span className="ui-t-small">—</span>
-                          )}
+                        <Td align="center">
+                          <Button size="sm" variant="secondary" onClick={() => setSelectedRow(r)}>Ledger</Button>
                         </Td>
-                        <Td mono>{r.daysPresent}</Td>
-                        <Td mono>{r.workedHours.toFixed(2)}</Td>
-                        <Td mono>{r.meetingHours.toFixed(2)}</Td>
-                        <Td mono>{r.manualHours.toFixed(2)}</Td>
-                        <Td mono>{r.totalHours.toFixed(2)}</Td>
-                        <Td mono>{r.avgDayHours.toFixed(2)}</Td>
                       </Tr>
                     ))}
-                    <Tr rail="accent">
-                      <Td className="ui-t-eyebrow">Total</Td>
-                      <Td />
-                      <Td />
-                      <Td mono>{totals!.daysPresent}</Td>
-                      <Td mono>{totals!.workedHours.toFixed(2)}</Td>
-                      <Td mono>{totals!.meetingHours.toFixed(2)}</Td>
-                      <Td mono>{totals!.manualHours.toFixed(2)}</Td>
-                      <Td mono>{totals!.totalHours.toFixed(2)}</Td>
-                      <Td mono>—</Td>
-                    </Tr>
                   </Tbody>
                 </Table>
               </div>
@@ -284,6 +319,84 @@ export function PayrollScreen() {
           </Card>
         </>
       )}
+
+      {selectedRow && <PayrollDrawer row={selectedRow} month={month} onClose={() => setSelectedRow(null)} />}
     </Page>
+  );
+}
+
+function PayrollDrawer({ row, month, onClose }: { row: PayrollRow; month: string; onClose: () => void }) {
+  const drawer = (
+    <div className="pay-drawer-layer" role="presentation" onMouseDown={onClose}>
+      <aside className="pay-drawer" role="dialog" aria-modal="true" aria-labelledby="pay-drawer-title" onMouseDown={(e) => e.stopPropagation()}>
+        <header className="pay-drawer-head">
+          <div className="pay-drawer-title">
+            <Avatar name={row.user.name} size={40} />
+            <div className="pay-drawer-heading">
+              <span className="ui-t-eyebrow">Payroll ledger</span>
+              <h2 id="pay-drawer-title">{row.user.name}</h2>
+              <p>{row.user.teamName ?? 'No team'} · {month}</p>
+            </div>
+          </div>
+          <IconButton aria-label="Close" icon={<X size={18} />} onClick={onClose} />
+        </header>
+        <div className="pay-drawer-body">
+          <section className="pay-drawer-summary" aria-label="Payroll summary">
+            <DrawerMetric label="Raw" value={`${row.rawHours.toFixed(1)}h`} hint="worked + meeting + approved manual" />
+            <DrawerMetric label="Capped" value={`${row.cappedHours.toFixed(1)}h`} hint={`${row.ignoredOverflowHours.toFixed(1)}h overflow ignored`} />
+            <DrawerMetric label="Units" value={row.payableUnits.toFixed(1)} hint={`${row.fullDays} full · ${row.halfDays} half · ${row.offDays} off`} />
+            <DrawerMetric label="Eligible" value={row.eligibleDays.toString()} hint="shift working days only" />
+          </section>
+          <Card variant="flush" title="Day ledger" action={<Tag mono>{row.eligibleDays} eligible</Tag>}>
+            <div className="pay-ledger-wrap">
+              <Table density="compact" stickyHead className="pay-ledger-table">
+                <THead>
+                  <Tr>
+                    <Th>Date</Th>
+                    <Th align="right">Raw</Th>
+                    <Th align="right">Capped</Th>
+                    <Th align="right">Carry</Th>
+                    <Th align="center">Status</Th>
+                    <Th>Note</Th>
+                  </Tr>
+                </THead>
+                <Tbody>
+                  {row.payrollDays.map((day) => (
+                    <Tr key={day.date}>
+                      <Td>
+                        <div className="pay-date-cell">
+                          <strong>{new Intl.DateTimeFormat(undefined, { weekday: 'short', month: 'short', day: 'numeric' }).format(new Date(`${day.date}T00:00:00Z`))}</strong>
+                          <span>{day.shiftName ?? 'No shift'}</span>
+                        </div>
+                      </Td>
+                      <Td mono>{msToTime(day.rawMs)}</Td>
+                      <Td mono>{msToTime(day.cappedMs)}</Td>
+                      <Td mono>{day.carryInMs > 0 ? `+${msToTime(day.carryInMs)}` : day.carryOutMs > 0 ? `${msToTime(day.carryOutMs)} out` : '-'}</Td>
+                      <Td align="center"><Tag status={statusTone(day.status)} mono>{statusLabel(day.status)}</Tag></Td>
+                      <Td className="pay-note"><span className="ui-t-small">{day.ignoredOverflowMs > 0 ? `${msToTime(day.ignoredOverflowMs)} overflow ignored` : day.reason.replace(/_/g, ' ')}</span></Td>
+                    </Tr>
+                  ))}
+                </Tbody>
+              </Table>
+            </div>
+          </Card>
+          <Banner status="info">
+            Carry credits are payroll audit only. They do not rewrite timesheets.
+          </Banner>
+        </div>
+      </aside>
+    </div>
+  );
+
+  return createPortal(drawer, document.body);
+}
+
+function DrawerMetric({ label, value, hint }: { label: string; value: string; hint: string }) {
+  return (
+    <div className="pay-drawer-metric">
+      <span className="ui-t-eyebrow">{label}</span>
+      <strong>{value}</strong>
+      <span>{hint}</span>
+    </div>
   );
 }

@@ -142,7 +142,7 @@ export async function decideByUser(args: {
           buildDecidedCard({
             requestId: req.id,
             requesterName: req.user.name,
-            taskSummary: null,
+            taskSummary: req.taskSummary,
             startedAt: req.requestedStart.getTime(),
             endedAt: req.requestedEnd.getTime(),
             reason: req.reason,

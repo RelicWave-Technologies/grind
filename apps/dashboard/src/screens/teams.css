@@ -1,49 +1,558 @@
 /* ============================================================================
-   TEAMS — page-local LAYOUT ONLY.
-   ---------------------------------------------------------------------------
-   This page is composed from the shared "Quiet Datasheet" kit (src/ui). The
-   only rules here place kit components in a grid/flex — no colours, type,
-   borders, radii or shadows live here (those come from the kit + tokens).
-   All classes are prefixed `tms-`. REVERT = delete this file + its import.
+   TEAMS — page-local composition for the shared Quiet Datasheet kit.
    ========================================================================== */
 
-/* Mount stagger — reuse the kit's page-rise keyframe (defined in system.css). */
-.tms-rise   { animation: ui-page-rise var(--ui-dur-slow) var(--ui-ease) both; }
-.tms-rise-1 { animation: ui-page-rise var(--ui-dur-slow) var(--ui-ease) both; animation-delay: 40ms; }
+.tms-rise {
+  animation: ui-page-rise var(--ui-dur-slow) var(--ui-ease) both;
+}
+
+.tms-rise-1 {
+  animation-delay: 40ms;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .tms-rise, .tms-rise-1 { animation: none; }
+  .tms-rise,
+  .tms-rise-1 {
+    animation: none;
+  }
 }
 
-/* Padding wrapper for skeleton / banner placed inside a flush Card. */
-.tms-pad { padding: var(--ui-sp-6) var(--ui-sp-7); }
-
-/* ---- Create / edit form: two fields + an actions cluster, wrapping. -------- */
-.tms-form {
-  display: flex;
-  gap: var(--ui-sp-5);
-  align-items: flex-end;
-  flex-wrap: wrap;
+.tms-pad {
+  padding: var(--ui-sp-6) var(--ui-sp-7);
 }
-.tms-form__name { flex: 2 1 240px; }
-.tms-form__mgr  { flex: 1 1 190px; }
-.tms-form__actions {
-  display: inline-flex;
+
+.tms-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0;
+  margin-bottom: var(--ui-sp-7);
+  overflow: hidden;
+  border-radius: var(--ui-r-md);
+  background: var(--ui-lime);
+}
+
+.tms-summary__item {
+  min-width: 0;
+  padding: var(--ui-sp-6) var(--ui-sp-7);
+  display: grid;
   gap: var(--ui-sp-3);
-  align-items: flex-end;
-  margin-left: auto;
 }
-.tms-form__err { margin-top: var(--ui-sp-5); }
 
-/* ---- A directory entry: the ListRow plus its inline edit / delete panels. -- */
-.tms-row { display: flex; flex-direction: column; }
-.tms-mgr { display: inline-flex; align-items: center; gap: var(--ui-sp-2); }
+.tms-summary__item + .tms-summary__item {
+  border-left: 1px solid var(--ui-line-strong);
+}
+
+.tms-summary__label {
+  color: var(--ui-ink-2);
+}
+
+.tms-summary__value {
+  color: var(--ui-ink);
+}
+
+.tms-summary__hint {
+  color: var(--ui-ink-2);
+}
+
+.tms-directory .ui-card__head {
+  padding-top: var(--ui-sp-6);
+  padding-bottom: var(--ui-sp-5);
+}
+
+.tms-list {
+  border-top: 1px solid var(--ui-line);
+}
+
+.tms-row {
+  min-width: 0;
+}
+
+.tms-team-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--ui-sp-4);
+  min-height: calc(var(--ui-row-h) + var(--ui-sp-8));
+  padding: var(--ui-sp-4) var(--ui-sp-7);
+  border-bottom: 1px solid var(--ui-line);
+  transition: background var(--ui-dur-fast) var(--ui-ease);
+}
+
+.tms-row:last-child .tms-team-row {
+  border-bottom: 0;
+}
+
+.tms-team-row:hover {
+  background: var(--ui-surface-inset);
+}
+
+.tms-team-hit {
+  appearance: none;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  padding: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--ui-sp-4);
+  cursor: pointer;
+}
+
+.tms-team-hit:focus-visible {
+  outline: none;
+  box-shadow: var(--ui-focus-ring);
+  border-radius: var(--ui-r-sm);
+}
+
+.tms-team-hit:disabled {
+  cursor: default;
+}
+
+.tms-team-leading {
+  display: inline-flex;
+  align-items: center;
+}
+
+.tms-team-main {
+  min-width: 0;
+  display: grid;
+  gap: var(--ui-sp-2);
+}
+
+.tms-team-main > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tms-row-sub,
+.tms-row-count {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-sp-2);
+  min-width: 0;
+  color: var(--ui-ink-2);
+}
+
+.tms-row-count {
+  min-width: calc(var(--ui-control-h) * 3);
+  justify-content: flex-end;
+}
+
+.tms-row-sub--warn {
+  color: var(--ui-warn-ink);
+}
+
+.tms-row-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-sp-2);
+}
+
+.tms-chevron {
+  color: var(--ui-ink-3);
+}
+
 .tms-edit,
 .tms-confirm,
-.tms-row__err { padding: 0 var(--ui-sp-4) var(--ui-sp-5); }
-.tms-confirm__actions { display: inline-flex; gap: var(--ui-sp-3); align-items: center; }
+.tms-row-err {
+  padding: 0 var(--ui-sp-7) var(--ui-sp-5) calc(var(--ui-sp-7) + var(--ui-sp-10));
+}
+
+.tms-edit-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) auto;
+  align-items: end;
+  gap: var(--ui-sp-4);
+  padding-top: var(--ui-sp-2);
+}
+
+.tms-edit-actions,
+.tms-confirm-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--ui-sp-2);
+}
+
+/* Floating layers ---------------------------------------------------------- */
+
+.tms-layer,
+.tms-drawer-layer,
+.tms-nested-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: var(--ui-overlay);
+}
+
+.tms-layer {
+  display: grid;
+  place-items: center;
+  padding: var(--ui-sp-8);
+}
+
+.tms-modal,
+.tms-drawer {
+  background: var(--ui-surface);
+  border: 1px solid var(--ui-line-strong);
+  box-shadow: var(--ui-shadow-pop);
+}
+
+.tms-modal {
+  width: min(calc(var(--ui-control-h) * 16), 100%);
+  border-radius: var(--ui-r-lg);
+}
+
+.tms-modal--small {
+  width: min(calc(var(--ui-control-h) * 14), 100%);
+}
+
+.tms-layer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-sp-5);
+  padding: var(--ui-sp-6) var(--ui-sp-7);
+  border-bottom: 1px solid var(--ui-line);
+}
+
+.tms-layer-title {
+  margin: var(--ui-sp-2) 0 0;
+}
+
+.tms-modal-body {
+  display: grid;
+  gap: var(--ui-sp-5);
+  padding: var(--ui-sp-6) var(--ui-sp-7);
+}
+
+.tms-layer-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--ui-sp-3);
+  padding: var(--ui-sp-5) var(--ui-sp-7);
+  border-top: 1px solid var(--ui-line);
+}
+
+.tms-drawer-layer {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.tms-drawer {
+  width: min(calc(var(--ui-control-h) * 21), 100%);
+  height: 100%;
+  border-top: 0;
+  border-right: 0;
+  border-bottom: 0;
+  border-radius: 0;
+  overflow: auto;
+}
+
+.tms-drawer-id {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-sp-4);
+  min-width: 0;
+}
+
+.tms-drawer-body {
+  display: grid;
+  gap: var(--ui-sp-5);
+  padding: var(--ui-sp-6) var(--ui-sp-7) var(--ui-sp-8);
+}
+
+.tms-nested-layer {
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  padding: var(--ui-sp-8);
+}
+
+.tms-facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--ui-sp-4);
+}
+
+.tms-fact {
+  min-width: 0;
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-md);
+  padding: var(--ui-sp-5);
+  display: grid;
+  gap: var(--ui-sp-2);
+}
+
+.tms-fact__icon,
+.tms-scope-line svg,
+.tms-person__body svg {
+  color: var(--ui-ink-3);
+}
+
+.tms-fact strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tms-fact span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ui-ink-2);
+}
+
+.tms-section {
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-md);
+  padding: var(--ui-sp-5);
+}
+
+.tms-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-sp-4);
+  padding-bottom: var(--ui-sp-4);
+  border-bottom: 1px solid var(--ui-line-faint);
+}
+
+.tms-section-head h3 {
+  margin: 0;
+}
+
+.tms-section-head p {
+  margin: var(--ui-sp-1) 0 0;
+}
+
+.tms-inline-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-sp-2);
+}
+
+.tms-manager-edit {
+  padding-top: var(--ui-sp-4);
+}
+
+.tms-performance {
+  background: var(--ui-surface);
+}
+
+.tms-performance-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--ui-sp-2);
+  padding-top: var(--ui-sp-4);
+}
+
+.tms-performance-metric {
+  position: relative;
+  min-width: 0;
+  display: grid;
+  gap: var(--ui-sp-2);
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-sm);
+  background: var(--ui-surface);
+  padding: var(--ui-sp-4) var(--ui-sp-4) var(--ui-sp-4) var(--ui-sp-5);
+  overflow: hidden;
+}
+
+.tms-performance-metric::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: var(--ui-sp-4);
+  bottom: var(--ui-sp-4);
+  width: 3px;
+  border-radius: var(--ui-r-full);
+  background: var(--ui-neutral-solid);
+}
+
+.tms-performance-metric:nth-child(4n + 1)::before {
+  background: var(--ui-success-solid);
+}
+
+.tms-performance-metric:nth-child(4n + 2)::before {
+  background: var(--ui-warn-solid);
+}
+
+.tms-performance-metric:nth-child(4n + 3)::before {
+  background: var(--ui-info-solid);
+}
+
+.tms-performance-metric:nth-child(4n + 4)::before {
+  background: var(--ui-danger-solid);
+}
+
+.tms-performance-metric strong,
+.tms-performance-metric span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tms-top-app {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-sp-4);
+  margin-top: var(--ui-sp-4);
+  padding: var(--ui-sp-4) 0 0;
+  border: 1px solid var(--ui-line);
+  border-width: 1px 0 0;
+  background: transparent;
+}
+
+.tms-top-app__body {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-sp-3);
+}
+
+.tms-top-app__body > span:last-child {
+  min-width: 0;
+  display: grid;
+  gap: var(--ui-sp-1);
+}
+
+.tms-top-app__body strong,
+.tms-top-app__body span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tms-person-list {
+  display: grid;
+}
+
+.tms-person {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--ui-sp-4);
+  min-height: calc(var(--ui-row-h) + var(--ui-sp-5));
+  padding: var(--ui-sp-4) 0;
+  border-bottom: 1px solid var(--ui-line-faint);
+}
+
+.tms-person:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.tms-section-head + .tms-person {
+  margin-top: var(--ui-sp-1);
+}
+
+.tms-person__lead {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--ui-sp-8);
+  color: var(--ui-ink-3);
+}
+
+.tms-person__body {
+  min-width: 0;
+  display: grid;
+  gap: var(--ui-sp-1);
+}
+
+.tms-person__body strong,
+.tms-person__body span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tms-person__action {
+  display: inline-flex;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.tms-person__body span {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-sp-2);
+  min-width: 0;
+  color: var(--ui-ink-2);
+}
+
+.tms-empty-line,
+.tms-scope-line {
+  color: var(--ui-ink-2);
+  padding-top: var(--ui-sp-4);
+}
+
+.tms-scope-line {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--ui-sp-3);
+  align-items: start;
+}
+
+@media (max-width: 780px) {
+  .tms-summary,
+  .tms-facts {
+    grid-template-columns: 1fr;
+  }
+
+  .tms-summary__item + .tms-summary__item {
+    border-left: 0;
+    border-top: 1px solid var(--ui-line-strong);
+  }
+
+  .tms-edit-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .tms-performance-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .tms-edit-actions {
+    justify-content: flex-start;
+  }
+}
 
 @media (max-width: 560px) {
-  .tms-form__name,
-  .tms-form__mgr { flex-basis: 100%; }
-  .tms-form__actions { width: 100%; justify-content: flex-end; }
+  .tms-team-row {
+    padding-inline: var(--ui-sp-5);
+  }
+
+  .tms-row-count {
+    display: none;
+  }
+
+  .tms-edit,
+  .tms-confirm,
+  .tms-row-err {
+    padding-left: var(--ui-sp-5);
+    padding-right: var(--ui-sp-5);
+  }
+
+  .tms-layer {
+    padding: var(--ui-sp-4);
+  }
+
+  .tms-nested-layer {
+    padding: var(--ui-sp-4);
+  }
+
+  .tms-layer-head,
+  .tms-modal-body,
+  .tms-layer-actions,
+  .tms-drawer-body {
+    padding-inline: var(--ui-sp-5);
+  }
 }

@@ -7,7 +7,7 @@ import { signAccessToken } from '../src/lib/jwt';
 /**
  * /v1/admin/teams + /v1/admin/users/:id (PATCH) — ADMIN-only CRUD against
  * real Postgres. Covers happy paths, scope (cross-workspace 404s), validation,
- * and the "never demote the last OWNER" safety net.
+ * and the "never demote the last ADMIN" safety net.
  */
 
 const app = buildApp();
@@ -19,11 +19,10 @@ async function seed() {
   const stamp = `${Date.now()}-${counter}`;
   const ws = await prisma.workspace.create({ data: { name: `WS-crud-${stamp}` } });
   const ws2 = await prisma.workspace.create({ data: { name: `WS-other-${stamp}` } });
-  const mk = (workspaceId: string, email: string, name: string, role: 'OWNER' | 'ADMIN' | 'MANAGER' | 'MEMBER') =>
+  const mk = (workspaceId: string, email: string, name: string, role: 'ADMIN' | 'MANAGER' | 'MEMBER') =>
     prisma.user.create({
       data: { workspaceId, email: `${email}-${stamp}@test.local`, name, role, passwordHash: 'x'.repeat(60) },
     });
-  const owner = await mk(ws.id, 'owner', 'Olivia Owner', 'OWNER');
   const admin = await mk(ws.id, 'admin', 'Alice Admin', 'ADMIN');
   const mgr = await mk(ws.id, 'mgr', 'Mira Manager', 'MANAGER');
   const mem1 = await mk(ws.id, 'm1', 'Mia Member', 'MEMBER');
@@ -31,13 +30,12 @@ async function seed() {
   // Bystander in another workspace; we should never see them.
   const bystander = await mk(ws2.id, 'bys', 'Bob Bystander', 'MEMBER');
 
-  const tok = (u: { id: string; role: 'OWNER' | 'ADMIN' | 'MANAGER' | 'MEMBER' }, wsId = ws.id) =>
+  const tok = (u: { id: string; role: 'ADMIN' | 'MANAGER' | 'MEMBER' }, wsId = ws.id) =>
     signAccessToken({ sub: u.id, ws: wsId, role: u.role });
 
   return {
     ws,
     ws2,
-    owner: { id: owner.id, token: tok(owner) },
     admin: { id: admin.id, token: tok(admin) },
     mgr: { id: mgr.id, token: tok(mgr) },
     mem1: { id: mem1.id, token: tok(mem1) },
@@ -87,6 +85,13 @@ describe('/v1/admin/teams — list + create', () => {
     expect(res.status).toBe(400);
   });
 
+  it('POST requires a manager', async () => {
+    const s = await seed();
+    const res = await request(app).post('/v1/admin/teams').set(auth(s.admin.token)).send({ name: 'No Manager' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('manager_required');
+  });
+
   it('POST rejects a manager from another workspace', async () => {
     const s = await seed();
     const res = await request(app)
@@ -97,12 +102,31 @@ describe('/v1/admin/teams — list + create', () => {
     expect(res.body.error).toBe('manager_out_of_workspace');
   });
 
+  it('POST rejects a manager who already owns another team', async () => {
+    const s = await seed();
+    const existing = await prisma.team.create({
+      data: { workspaceId: s.ws.id, name: 'Already Managed', managerId: s.mgr.id },
+    });
+
+    const res = await request(app)
+      .post('/v1/admin/teams')
+      .set(auth(s.admin.token))
+      .send({ name: 'Second Team', managerId: s.mgr.id });
+
+    expect(res.status).toBe(409);
+    expect(res.body).toMatchObject({
+      error: 'manager_already_assigned',
+      teamId: existing.id,
+      teamName: existing.name,
+    });
+  });
+
   it('MANAGER cannot POST (admin-only write)', async () => {
     const s = await seed();
     const res = await request(app)
       .post('/v1/admin/teams')
       .set(auth(s.mgr.token))
-      .send({ name: 'Sneaky' });
+      .send({ name: 'Sneaky', managerId: s.mgr.id });
     expect(res.status).toBe(403);
   });
 });
@@ -119,7 +143,7 @@ describe('/v1/admin/teams/:id — patch + delete', () => {
     expect(res.body.name).toBe('New');
   });
 
-  it('reassign managerId works; sending null clears it', async () => {
+  it('reassign managerId works; sending null is rejected', async () => {
     const s = await seed();
     const t = await prisma.team.create({ data: { workspaceId: s.ws.id, name: 'X', managerId: s.mgr.id } });
     const r1 = await request(app)
@@ -132,8 +156,30 @@ describe('/v1/admin/teams/:id — patch + delete', () => {
       .patch(`/v1/admin/teams/${t.id}`)
       .set(auth(s.admin.token))
       .send({ managerId: null });
-    expect(r2.status).toBe(200);
-    expect(r2.body.managerId).toBeNull();
+    expect(r2.status).toBe(400);
+    expect(r2.body.error).toBe('manager_required');
+  });
+
+  it('rejects reassigning a manager who already owns another team', async () => {
+    const s = await seed();
+    const existing = await prisma.team.create({
+      data: { workspaceId: s.ws.id, name: 'Managed One', managerId: s.mgr.id },
+    });
+    const target = await prisma.team.create({
+      data: { workspaceId: s.ws.id, name: 'Managed Two', managerId: s.admin.id },
+    });
+
+    const res = await request(app)
+      .patch(`/v1/admin/teams/${target.id}`)
+      .set(auth(s.admin.token))
+      .send({ managerId: s.mgr.id });
+
+    expect(res.status).toBe(409);
+    expect(res.body).toMatchObject({
+      error: 'manager_already_assigned',
+      teamId: existing.id,
+      teamName: existing.name,
+    });
   });
 
   it('cross-workspace team → 404', async () => {
@@ -220,27 +266,33 @@ describe('PATCH /v1/admin/users/:id', () => {
     expect(res.body.error).toBe('cannot_manage_self');
   });
 
-  it('protects the last OWNER from being demoted', async () => {
+  it('protects the last ADMIN from being demoted', async () => {
     const s = await seed();
-    // The seed creates ONE OWNER (olivia). Demoting them should fail.
     const res = await request(app)
-      .patch(`/v1/admin/users/${s.owner.id}`)
+      .patch(`/v1/admin/users/${s.admin.id}`)
       .set(auth(s.admin.token))
-      .send({ role: 'ADMIN' });
+      .send({ role: 'MANAGER' });
     expect(res.status).toBe(400);
-    expect(res.body.error).toBe('last_owner_protected');
+    expect(res.body.error).toBe('last_admin_protected');
   });
 
-  it('allows demoting an OWNER when a second OWNER exists', async () => {
+  it('allows demoting an ADMIN when a second active ADMIN exists', async () => {
     const s = await seed();
-    // Promote admin to OWNER first.
-    await prisma.user.update({ where: { id: s.admin.id }, data: { role: 'OWNER' } });
+    await prisma.user.create({
+      data: {
+        workspaceId: s.ws.id,
+        email: `admin2-${Date.now()}@test.local`,
+        name: 'Ava Admin',
+        role: 'ADMIN',
+        passwordHash: 'x'.repeat(60),
+      },
+    });
     const res = await request(app)
-      .patch(`/v1/admin/users/${s.owner.id}`)
+      .patch(`/v1/admin/users/${s.admin.id}`)
       .set(auth(s.admin.token))
-      .send({ role: 'ADMIN' });
+      .send({ role: 'MANAGER' });
     expect(res.status).toBe(200);
-    expect(res.body.role).toBe('ADMIN');
+    expect(res.body.role).toBe('MANAGER');
   });
 
   it('cross-workspace target → 404', async () => {
@@ -250,5 +302,95 @@ describe('PATCH /v1/admin/users/:id', () => {
       .set(auth(s.admin.token))
       .send({ name: 'No' });
     expect(res.status).toBe(404);
+  });
+});
+
+describe('/v1/admin/team-member-settings', () => {
+  it('lets a manager configure their team member without gaining full People edit rights', async () => {
+    const s = await seed();
+    const team = await prisma.team.create({
+      data: { workspaceId: s.ws.id, name: 'Managed Team', managerId: s.mgr.id },
+    });
+    await prisma.user.update({
+      where: { id: s.mem1.id },
+      data: { teamId: team.id },
+    });
+    const shift = await prisma.shift.create({
+      data: {
+        workspaceId: s.ws.id,
+        name: 'Day',
+        schedule: {
+          mon: { start: '09:00', end: '18:00' },
+          tue: { start: '09:00', end: '18:00' },
+          wed: { start: '09:00', end: '18:00' },
+          thu: { start: '09:00', end: '18:00' },
+          fri: { start: '09:00', end: '18:00' },
+          sat: null,
+          sun: null,
+        },
+        bufferMin: 20,
+      },
+    });
+
+    const list = await request(app).get('/v1/admin/team-member-settings').set(auth(s.mgr.token));
+    expect(list.status).toBe(200);
+    expect(list.body.scope).toBe('team');
+    const listedIds = list.body.members.map((m: { id: string }) => m.id);
+    expect(listedIds).toContain(s.mgr.id);
+    expect(listedIds).toContain(s.mem1.id);
+    const managedMember = list.body.members.find((m: { id: string }) => m.id === s.mem1.id);
+    expect(managedMember.manager.id).toBe(s.mgr.id);
+    expect(list.body.shifts.map((sh: { id: string }) => sh.id)).toContain(shift.id);
+
+    const patch = await request(app)
+      .patch(`/v1/admin/team-member-settings/${s.mem1.id}`)
+      .set(auth(s.mgr.token))
+      .send({ shiftId: shift.id, screenshotIntervalMin: 60, idleThresholdMin: 10 });
+    expect(patch.status).toBe(200);
+    expect(patch.body.shiftId).toBe(shift.id);
+    expect(patch.body.screenshotIntervalMin).toBe(60);
+    expect(patch.body.idleThresholdMin).toBe(10);
+
+    const reload = await prisma.user.findUnique({ where: { id: s.mem1.id } });
+    expect(reload?.shiftId).toBe(shift.id);
+    expect(reload?.screenshotIntervalMin).toBe(60);
+    expect(reload?.idleThresholdMin).toBe(10);
+
+    const assignment = await prisma.shiftAssignment.findFirst({
+      where: { userId: s.mem1.id, effectiveTo: null },
+      orderBy: { effectiveFrom: 'desc' },
+    });
+    expect(assignment?.shiftId).toBe(shift.id);
+    expect(assignment?.shiftNameSnapshot).toBe('Day');
+    expect(assignment?.bufferMinSnapshot).toBe(20);
+
+    const selfPatch = await request(app)
+      .patch(`/v1/admin/team-member-settings/${s.mgr.id}`)
+      .set(auth(s.mgr.token))
+      .send({ screenshotIntervalMin: 120, idleThresholdMin: 15 });
+    expect(selfPatch.status).toBe(200);
+    expect(selfPatch.body.id).toBe(s.mgr.id);
+    expect(selfPatch.body.screenshotIntervalMin).toBe(120);
+    expect(selfPatch.body.idleThresholdMin).toBe(15);
+  });
+
+  it('keeps manager settings writes scoped to their team', async () => {
+    const s = await seed();
+    const team = await prisma.team.create({
+      data: { workspaceId: s.ws.id, name: 'Managed Team', managerId: s.mgr.id },
+    });
+    await prisma.user.update({
+      where: { id: s.mem1.id },
+      data: { teamId: team.id, managerId: s.mgr.id },
+    });
+
+    const outsider = await request(app)
+      .patch(`/v1/admin/team-member-settings/${s.mem2.id}`)
+      .set(auth(s.mgr.token))
+      .send({ idleThresholdMin: 15 });
+    expect(outsider.status).toBe(404);
+
+    const member = await request(app).get('/v1/admin/team-member-settings').set(auth(s.mem1.token));
+    expect(member.status).toBe(403);
   });
 });

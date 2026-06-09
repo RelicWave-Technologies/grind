@@ -9,6 +9,8 @@ const Iso = z.string().datetime({ offset: true });
  */
 export const CreateManualTimeRequest = z.object({
   clientUuid: z.string().min(1),
+  /** Optional target user for manager/admin scoped edits. Omitted = caller. */
+  userId: z.string().min(1).optional(),
   larkTaskGuid: z.string().min(1).nullable().optional(),
   /** Optional task summary the agent already has, used to populate the card. */
   taskSummary: z.string().max(256).nullable().optional(),
@@ -58,6 +60,7 @@ export const ManualTimeRequestDto = z.object({
   userId: z.string(),
   approverId: z.string().nullable(),
   larkTaskGuid: z.string().nullable(),
+  taskSummary: z.string().nullable().optional(),
   larkMessageId: z.string().nullable(),
   requestedStart: Iso,
   requestedEnd: Iso,
@@ -68,6 +71,8 @@ export const ManualTimeRequestDto = z.object({
   decidedReason: z.string().nullable(),
   createdAt: Iso,
   attendeeIds: z.array(z.string()).optional(),
+  user: z.object({ id: z.string(), name: z.string(), email: z.string() }).optional(),
+  approver: z.object({ id: z.string(), name: z.string(), email: z.string() }).nullable().optional(),
 });
 export type ManualTimeRequestDto = z.infer<typeof ManualTimeRequestDto>;
 
@@ -75,5 +80,9 @@ export const ListManualTimeRequestsQuery = z.object({
   /** "mine" (default): requests I submitted. "approvals": where I'm the approver. */
   role: z.enum(['mine', 'approvals']).default('mine'),
   status: ManualTimeRequestStatus.optional(),
+  /** Optional local-day range. When omitted, the legacy latest-200 list is returned. */
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u).optional(),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u).optional(),
+  tz: z.string().min(1).max(100).optional(),
 });
 export type ListManualTimeRequestsQuery = z.infer<typeof ListManualTimeRequestsQuery>;
