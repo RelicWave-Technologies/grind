@@ -6,8 +6,9 @@ import { startPayrollMonthCloseScheduler } from './payroll/scheduler';
 
 const app = buildApp();
 
-app.listen(env.API_PORT, () => {
-  logger.info({ port: env.API_PORT, env: env.NODE_ENV }, 'api listening');
+const port = env.PORT ?? env.API_PORT;
+app.listen(port, () => {
+  logger.info({ port, env: env.NODE_ENV }, 'api listening');
   // Subscribe to Lark card.action.trigger over long-connection WebSocket.
   // No-op when Lark isn't configured.
   startCardCallback();

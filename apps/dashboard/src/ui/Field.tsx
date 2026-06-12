@@ -109,8 +109,7 @@ export const Toggle = forwardRef<HTMLInputElement, ToggleProps>(function Toggle(
   );
 });
 
-export interface CheckboxProps
-  extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type'> {}
+export type CheckboxProps = Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type'>;
 
 export const Checkbox = forwardRef<HTMLInputElement, CheckboxProps>(function Checkbox(
   { className, ...rest },
@@ -119,7 +118,7 @@ export const Checkbox = forwardRef<HTMLInputElement, CheckboxProps>(function Che
   return <input ref={ref} type="checkbox" className={cx('ui-checkbox', className)} {...rest} />;
 });
 
-export interface RadioProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type'> {}
+export type RadioProps = Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type'>;
 
 export const Radio = forwardRef<HTMLInputElement, RadioProps>(function Radio(
   { className, ...rest },

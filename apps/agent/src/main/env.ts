@@ -1,4 +1,11 @@
-export const API_URL: string = process.env.AGENT_API_URL ?? 'http://localhost:4000';
+// Resolution order:
+//   1. MAIN_VITE_API_URL — baked in at build time by electron-vite (this is how
+//      the packaged/production DMG learns the Render API host, since a shipped
+//      app has no process.env). Set it in apps/agent/.env.production.
+//   2. AGENT_API_URL — runtime override for local dev / per-machine testing.
+//   3. localhost fallback for `electron-vite dev`.
+export const API_URL: string =
+  import.meta.env.MAIN_VITE_API_URL || process.env.AGENT_API_URL || 'http://localhost:4000';
 export const AGENT_VERSION: string = process.env.npm_package_version ?? '0.0.1';
 export const HEARTBEAT_INTERVAL_MS: number = 60_000;
 

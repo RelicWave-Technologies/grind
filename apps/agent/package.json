@@ -3,6 +3,8 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
+  "description": "Grind time tracker desktop agent",
+  "author": "RelicWave Technologies",
   "main": "out/main/index.cjs",
   "scripts": {
     "dev": "electron-vite dev",
@@ -10,11 +12,12 @@
     "preview": "electron-vite preview",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src",
-    "test": "vitest run"
+    "test": "vitest run",
+    "icon": "node scripts/make-icon.mjs",
+    "package": "electron-vite build && electron-builder --mac",
+    "package:unsigned": "cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-vite build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dmg -c.mac.notarize=false"
   },
   "dependencies": {
-    "@grind/core": "workspace:*",
-    "@grind/types": "workspace:*",
     "@tanstack/react-query": "5.59.16",
     "better-sqlite3": "11.5.0",
     "lucide-react": "0.454.0",
@@ -26,13 +29,18 @@
     "zod": "3.23.8"
   },
   "devDependencies": {
+    "@electron/notarize": "^2.5.0",
     "@electron/rebuild": "^4.0.4",
+    "@grind/core": "workspace:*",
     "@grind/tsconfig": "workspace:*",
+    "@grind/types": "workspace:*",
     "@types/better-sqlite3": "7.6.11",
     "@types/react": "18.3.12",
     "@types/react-dom": "18.3.1",
     "@vitejs/plugin-react": "4.3.3",
+    "cross-env": "^7.0.3",
     "electron": "33.2.0",
+    "electron-builder": "^25.1.8",
     "electron-vite": "2.3.0",
     "typescript": "5.6.3",
     "vite": "5.4.10",

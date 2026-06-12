@@ -6,6 +6,7 @@ import { ScreenshotStore } from './store';
 import { captureNow, thumbDataUrl, fullDataUrl } from './capture';
 import { nextDelayMs } from './scheduler';
 import { planScreenshotRetention } from './retention';
+import { startUploader, drainUploads } from './uploader';
 import { getTimerService } from '../timer';
 import { getActivityStore } from '../activity';
 import { activityPercent } from '../activity/percent';
@@ -65,6 +66,11 @@ function getStore(): ScreenshotStore {
   return store;
 }
 
+/** Shared accessor so the uploader can drain the same local queue. */
+export function getScreenshotStore(): ScreenshotStore {
+  return getStore();
+}
+
 function schedule() {
   const delay = nextDelayMs(SCREENSHOT_INTERVAL_SEC * 1000);
   timer = setTimeout(() => void tick(), delay);
@@ -79,6 +85,8 @@ async function tick() {
       const { rows, health } = await captureNow(status.entryId);
       lastHealth = health;
       for (const r of rows) getStore().insert(r);
+      // Push fresh shots to Cloudinary promptly (no-op if logged out/unconfigured).
+      if (rows.length) void drainUploads();
     }
   } catch (err) {
     log.warn('screenshot tick failed', { err: String(err) });
@@ -182,6 +190,7 @@ export function startCaptureLoop(): void {
   void runScreenshotRetention(); // reap stale/orphan files on boot
   retentionTimer = setInterval(() => void runScreenshotRetention(), 24 * 60 * 60 * 1000);
   void retentionTimer;
+  startUploader(); // drain the local queue to Cloudinary in the background
   schedule();
 }
 
