@@ -231,3 +231,30 @@ export const CompleteScreenshotUploadResponse = z.object({
   uploadState: ScreenshotUploadStateSchema,
 });
 export type CompleteScreenshotUploadResponse = z.infer<typeof CompleteScreenshotUploadResponse>;
+
+/**
+ * Ask the API to mint a short-lived Cloudinary signature so the agent can
+ * upload a screenshot directly to Cloudinary without ever holding the
+ * api_secret. The agent supplies the screenshot id; the server derives the
+ * public_id + folder and signs the upload params.
+ */
+export const SignScreenshotUploadRequest = z.object({
+  id: z.string().min(1),
+});
+export type SignScreenshotUploadRequest = z.infer<typeof SignScreenshotUploadRequest>;
+
+export const SignScreenshotUploadResponse = z.object({
+  // Cloudinary unsigned-upload coordinates the agent POSTs the file to.
+  cloudName: z.string(),
+  apiKey: z.string(),
+  uploadUrl: z.string().url(),
+  // Signed params — the agent must send exactly these, unchanged.
+  timestamp: z.number().int(),
+  signature: z.string(),
+  publicId: z.string(),
+  folder: z.string(),
+  // Convenience: the eager thumbnail transformation the server expects back,
+  // so the agent doesn't have to know the transform string.
+  thumbTransform: z.string(),
+});
+export type SignScreenshotUploadResponse = z.infer<typeof SignScreenshotUploadResponse>;

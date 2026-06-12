@@ -1,0 +1,64 @@
+# Render Blueprint for the Grind API (Express + Prisma).
+# Backend deploy: dashboard → Vercel, screenshots → Cloudinary, DB → Neon.
+#
+# This is a pnpm + Turborepo monorepo. Render builds from the repo root; the
+# API artifact is a self-contained CJS bundle (workspace packages inlined by
+# tsup) run with `node dist/index.cjs`.
+#
+# Secrets marked `sync: false` are NOT stored in git — set them in the Render
+# dashboard (or when importing this blueprint). See README / DEPLOY notes.
+services:
+  - type: web
+    name: grind-api
+    runtime: node
+    plan: starter # free tier sleeps + has no preDeploy; starter keeps it warm
+    region: oregon
+    rootDir: .
+    # corepack pins pnpm@9.12.0 (from package.json "packageManager").
+    # prisma generate → build → migrate the Neon DB on every deploy.
+    buildCommand: >-
+      corepack enable &&
+      pnpm install --frozen-lockfile &&
+      pnpm --filter @grind/db exec prisma generate &&
+      pnpm --filter @grind/api build &&
+      pnpm --filter @grind/db exec prisma migrate deploy
+    startCommand: pnpm --filter @grind/api start
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: "20.18.0"
+      # Neon pooled URL (runtime). Set in dashboard.
+      - key: DATABASE_URL
+        sync: false
+      # Neon direct URL (used by `prisma migrate deploy`). Set in dashboard.
+      - key: DIRECT_URL
+        sync: false
+      # Render generates a strong value on first deploy; rotating it logs
+      # everyone out. 32+ chars satisfies the env schema.
+      - key: JWT_SECRET
+        generateValue: true
+      # Comma-separated dashboard origin(s) for CORS + cross-site cookies,
+      # e.g. https://grind-dashboard.vercel.app
+      - key: DASHBOARD_URL
+        sync: false
+      # --- Cloudinary (screenshot storage) ---
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+      - key: CLOUDINARY_FOLDER
+        value: grind/screenshots
+      # --- Lark / Feishu (optional; leave unset to disable) ---
+      - key: LARK_APP_ID
+        sync: false
+      - key: LARK_APP_SECRET
+        sync: false
+      - key: LARK_TOKEN_KEY
+        sync: false
+      - key: LARK_OAUTH_REDIRECT_URI
+        sync: false

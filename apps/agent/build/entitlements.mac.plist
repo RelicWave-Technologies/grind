@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Electron/V8 JIT under the hardened runtime. -->
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+  <!-- Native modules (better-sqlite3, sharp, uiohook-napi, get-windows) are
+       signed separately from the app; allow them to load. -->
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+  <!-- The agent reaches the API over the network. -->
+  <key>com.apple.security.network.client</key>
+  <true/>
+</dict>
+</plist>

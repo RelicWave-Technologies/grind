@@ -28,11 +28,28 @@ export function buildApp() {
   const app = express();
 
   app.use(helmet());
-  // CORS: allow credentials so the dashboard (separate origin in dev: 5174)
-  // can ship the grind_at cookie. `origin: true` reflects the request
-  // origin, which Express's cors lib pairs with the Access-Control-Allow-
-  // Credentials: true header. Production may want a stricter allowlist.
-  app.use(cors({ origin: true, credentials: true }));
+  // CORS: allow credentials so the dashboard (separate origin) can ship the
+  // grind_at cookie. In production, restrict to the configured dashboard
+  // origin(s) — DASHBOARD_URL may be a comma-separated list (e.g. the prod
+  // domain plus Vercel preview URLs). In dev with nothing configured we
+  // reflect the request origin so localhost:5174 just works.
+  const allowlist = (process.env.DASHBOARD_URL ?? '')
+    .split(',')
+    .map((s) => s.trim().replace(/\/$/, ''))
+    .filter(Boolean);
+  app.use(
+    cors({
+      origin: allowlist.length
+        ? (origin, cb) => {
+            // Allow same-origin / non-browser callers (no Origin header), e.g.
+            // the agent and health probes.
+            if (!origin || allowlist.includes(origin.replace(/\/$/, ''))) return cb(null, true);
+            return cb(new Error('not_allowed_by_cors'));
+          }
+        : true,
+      credentials: true,
+    }),
+  );
   app.use(cookieParser());
   app.use(express.json({ limit: '64kb' }));
   app.use(

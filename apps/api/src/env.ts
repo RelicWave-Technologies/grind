@@ -3,6 +3,9 @@ import { z } from 'zod';
 
 const EnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
+  // PORT is injected by most PaaS hosts (Render, Heroku, Railway). When set it
+  // wins over API_PORT so the service binds where the platform expects.
+  PORT: z.coerce.number().int().min(1).max(65535).optional(),
   API_PORT: z.coerce.number().int().min(1).max(65535).default(4000),
   DATABASE_URL: z.string().url(),
   DIRECT_URL: z.string().url().optional(),
@@ -25,6 +28,15 @@ const EnvSchema = z.object({
   // --- Screenshots (optional; direct URLs on Screenshot rows also work) ---
   SCREENSHOT_ASSET_BASE_URL: z.string().url().optional(),
   SCREENSHOT_URL_SIGNING_SECRET: z.string().min(16).optional(),
+
+  // --- Cloudinary (screenshot storage) ---
+  // When all three are set, /v1/screenshots/sign mints signed direct-upload
+  // params for the agent. The api_secret never leaves the server.
+  CLOUDINARY_CLOUD_NAME: z.string().min(1).optional(),
+  CLOUDINARY_API_KEY: z.string().min(1).optional(),
+  CLOUDINARY_API_SECRET: z.string().min(1).optional(),
+  // Folder screenshots land in. Defaults to "grind/screenshots".
+  CLOUDINARY_FOLDER: z.string().min(1).default('grind/screenshots'),
 });
 
 const parsed = EnvSchema.safeParse(process.env);

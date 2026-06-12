@@ -76,6 +76,25 @@ export class ScreenshotStore {
     return rows.map(mapRow);
   }
 
+  /** Mark a row as actively uploading (so a concurrent drain skips it). */
+  markUploading(id: string): void {
+    this.db.prepare(`UPDATE screenshots SET upload_state='uploading' WHERE id = ?`).run(id);
+  }
+
+  /** Mark a row uploaded and record the Cloudinary public_id as the key. */
+  markUploaded(id: string, key: string): void {
+    this.db
+      .prepare(`UPDATE screenshots SET upload_state='uploaded', s3_key=@key WHERE id=@id`)
+      .run({ id, key });
+  }
+
+  /** Return a failed/pending row to the queue, bumping the attempt counter. */
+  markFailed(id: string): void {
+    this.db
+      .prepare(`UPDATE screenshots SET upload_state='pending', attempts=attempts+1 WHERE id = ?`)
+      .run(id);
+  }
+
   /** Minimal projection of every row, for the retention planner. */
   allForRetention(): { id: string; filePath: string; capturedAt: number }[] {
     const rows = this.db

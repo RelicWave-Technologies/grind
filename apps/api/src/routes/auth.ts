@@ -69,10 +69,14 @@ authRouter.post('/login', validate(LoginRequest, 'body'), async (req, res, next)
     const accessToken = signAccessToken({ sub: user.id, ws: user.workspaceId, role: payloadUser.role });
     const { refreshToken } = await issueRefreshToken(user.id, deviceName);
 
+    // In production the dashboard (Vercel) and API (Render) live on different
+    // sites, so the cookie must be SameSite=None + Secure to travel on the
+    // dashboard's credentialed fetches. In dev they share localhost → Lax.
+    const crossSite = process.env.NODE_ENV === 'production';
     res.cookie('grind_at', accessToken, {
       httpOnly: true,
-      sameSite: 'lax',
-      secure: process.env.NODE_ENV === 'production',
+      sameSite: crossSite ? 'none' : 'lax',
+      secure: crossSite,
       maxAge: 60 * 60 * 1000, // 1h, matches the JWT TTL
       path: '/',
     });
@@ -94,7 +98,12 @@ authRouter.post('/login', validate(LoginRequest, 'body'), async (req, res, next)
  * unchanged.
  */
 authRouter.post('/cookie-logout', (_req, res) => {
-  res.clearCookie('grind_at', { path: '/' });
+  const crossSite = process.env.NODE_ENV === 'production';
+  res.clearCookie('grind_at', {
+    path: '/',
+    sameSite: crossSite ? 'none' : 'lax',
+    secure: crossSite,
+  });
   res.json({ ok: true });
 });
 

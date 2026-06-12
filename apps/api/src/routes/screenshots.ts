@@ -5,12 +5,49 @@ import {
   CompleteScreenshotUploadResponse,
   PendingScreenshotUploadRequest,
   PendingScreenshotUploadResponse,
+  SignScreenshotUploadRequest,
+  SignScreenshotUploadResponse,
 } from '@grind/types';
 import { requireAccessToken } from '../middleware/auth';
 import { validate } from '../middleware/validate';
+import { isCloudinaryConfigured, signScreenshotUpload } from '../lib/cloudinary';
 
 export const screenshotsRouter = Router();
 screenshotsRouter.use(requireAccessToken);
+
+/**
+ * Mint a short-lived Cloudinary signature so the agent can upload a screenshot
+ * directly to Cloudinary. The api_secret never leaves the server. Returns 503
+ * when Cloudinary isn't configured so the agent can keep shots local and retry.
+ */
+screenshotsRouter.post('/sign', validate(SignScreenshotUploadRequest, 'body'), async (req, res, next) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: 'unauthorized' });
+    if (!isCloudinaryConfigured()) {
+      return res.status(503).json({ error: 'cloudinary_not_configured' });
+    }
+    const body = req.body as SignScreenshotUploadRequest;
+    if (!(await canWriteScreenshot(req.user.sub, body.id))) {
+      return res.status(409).json({ error: 'screenshot_id_conflict' });
+    }
+    // Namespace the public_id under the user so re-uploads overwrite in place
+    // and shots from different users never collide.
+    const signed = signScreenshotUpload(`${req.user.sub}/${body.id}`);
+    const response: SignScreenshotUploadResponse = {
+      cloudName: signed.cloudName,
+      apiKey: signed.apiKey,
+      uploadUrl: signed.uploadUrl,
+      timestamp: signed.timestamp,
+      signature: signed.signature,
+      publicId: signed.publicId,
+      folder: signed.folder,
+      thumbTransform: signed.thumbTransform,
+    };
+    res.json(response);
+  } catch (err) {
+    next(err);
+  }
+});
 
 screenshotsRouter.post('/pending', validate(PendingScreenshotUploadRequest, 'body'), async (req, res, next) => {
   try {
