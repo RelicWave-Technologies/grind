@@ -45,6 +45,11 @@ services:
       # Keep corepack from auto-fetching "latest" (avoids the signing-key path).
       - key: COREPACK_DEFAULT_TO_LATEST
         value: "0"
+      # The agent's `sharp` gets pulled into the workspace install. Render has a
+      # system libvips, so sharp tries to compile against it and fails on the
+      # old toolchain. Force sharp to use its prebuilt binary instead.
+      - key: SHARP_IGNORE_GLOBAL_LIBVIPS
+        value: "1"
       # Neon pooled URL (runtime). Set in dashboard.
       - key: DATABASE_URL
         sync: false
