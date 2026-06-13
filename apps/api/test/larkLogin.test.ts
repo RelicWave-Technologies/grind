@@ -21,8 +21,15 @@ function pkce() {
 }
 
 describe('resolveUser — provisioning', () => {
-  it('creates an unknown user as PENDING MEMBER and provisions the workspace', async () => {
-    const u = await resolveUser(profile());
+  it('makes the very first user (empty workspace) an ACTIVE ADMIN', async () => {
+    const u = await resolveUser(profile({ openId: 'ou_first', email: 'first@co.com' }));
+    expect(u.role).toBe('ADMIN');
+    expect(u.provisioningStatus).toBe('ACTIVE');
+  });
+
+  it('creates a later non-bootstrap user as PENDING MEMBER and provisions the workspace', async () => {
+    await resolveUser(profile({ openId: 'ou_admin', email: 'admin@co.com' })); // first → admin
+    const u = await resolveUser(profile()); // second → pending member
     expect(u.role).toBe('MEMBER');
     expect(u.provisioningStatus).toBe('PENDING');
     expect(u.workspaceId).toBe('ws_test');
