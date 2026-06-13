@@ -1,71 +1,80 @@
-import { useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Timer } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Timer, ShieldCheck } from 'lucide-react';
+
+/** Friendly copy for non-success Lark outcomes pushed from the main process. */
+const ERROR_COPY: Record<string, string> = {
+  denied: 'Sign-in was cancelled.',
+  temporary: 'Lark had a temporary hiccup. Please try again.',
+  auth_failed: 'Sign-in failed. Please try again.',
+  no_email: 'Grind couldn’t read an email from your Lark account. Ask your admin to grant the email permission.',
+  deactivated: 'Your account is deactivated. Contact your workspace admin.',
+  state_invalid: 'That sign-in link expired. Please try again.',
+  invalid_request: 'Something went wrong starting sign-in. Please try again.',
+  config: 'Single sign-on isn’t configured yet. Contact your admin.',
+};
 
 export default function Login() {
-  const qc = useQueryClient();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [phase, setPhase] = useState<'idle' | 'waiting' | 'pending' | 'error'>('idle');
+  const [message, setMessage] = useState<string | null>(null);
 
-  const mut = useMutation({
-    mutationFn: () => window.agent.auth.login(email, password),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ['authStatus'] }),
-  });
+  // The main process pushes pending/error outcomes back after the browser round-trip.
+  useEffect(() => {
+    return window.agent.auth.onLarkOutcome((o) => {
+      if (o.kind === 'pending') {
+        setPhase('pending');
+        setMessage(null);
+      } else {
+        setPhase('error');
+        setMessage(ERROR_COPY[o.reason] ?? 'Sign-in failed. Please try again.');
+      }
+    });
+  }, []);
 
-  const error = mut.error instanceof Error ? 'Invalid email or password' : null;
+  function signIn() {
+    setPhase('waiting');
+    setMessage(null);
+    void window.agent.auth.loginWithLark();
+  }
 
   return (
     <div className="login">
-      <form
-        className="login-card"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (!mut.isPending) mut.mutate();
-        }}
-      >
+      <div className="login-card">
         <div className="login-logo">
           <Timer size={24} strokeWidth={2} />
         </div>
         <div className="login-title">
           <div className="h2">Sign in to Grind</div>
           <div className="callout secondary" style={{ marginTop: 4 }}>
-            Track your time across projects
+            Continue with your Lark account
           </div>
         </div>
 
-        <div className="stack" style={{ marginTop: 8 }}>
-          <div>
-            <label className="field-label" htmlFor="email">Email</label>
-            <input
-              id="email"
-              className="field selectable"
-              type="email"
-              autoComplete="username"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-            />
+        {phase === 'pending' && (
+          <div className="callout secondary" style={{ marginTop: 12, textAlign: 'center' }}>
+            Your account is awaiting setup. An admin will assign your team and role — you’ll have
+            access right after. Try signing in again once they’ve set you up.
           </div>
-          <div>
-            <label className="field-label" htmlFor="password">Password</label>
-            <input
-              id="password"
-              className="field selectable"
-              type="password"
-              autoComplete="current-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
+        )}
+        {phase === 'error' && message && (
+          <div className="error-text" style={{ marginTop: 12 }}>{message}</div>
+        )}
+        {phase === 'waiting' && (
+          <div className="callout secondary" style={{ marginTop: 12, textAlign: 'center' }}>
+            Continue in your browser, then return here.
           </div>
-        </div>
+        )}
 
-        <div className="error-text">{error ?? ' '}</div>
-
-        <button className="btn btn-prominent btn-lg" type="submit" disabled={mut.isPending || !email || !password}>
-          {mut.isPending ? 'Signing in…' : 'Sign in'}
+        <button
+          className="btn btn-prominent btn-lg"
+          type="button"
+          onClick={signIn}
+          disabled={phase === 'waiting'}
+          style={{ marginTop: 16, display: 'inline-flex', alignItems: 'center', gap: 8, justifyContent: 'center' }}
+        >
+          <ShieldCheck size={16} strokeWidth={2} />
+          {phase === 'waiting' ? 'Waiting for browser…' : 'Continue with Lark'}
         </button>
-      </form>
+      </div>
     </div>
   );
 }
