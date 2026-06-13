@@ -25,6 +25,19 @@ const EnvSchema = z.object({
   LARK_OAUTH_REDIRECT_URI: z.string().url().optional(),
   DASHBOARD_URL: z.string().url().optional(),
 
+  // --- Lark login provisioning ---
+  // Comma-separated emails created as ACTIVE ADMIN on first Lark login (they
+  // bootstrap the workspace + grant everyone else's roles). Everyone else is
+  // provisioned PENDING. Matching is case-insensitive + trimmed.
+  LARK_BOOTSTRAP_ADMIN_EMAILS: z.string().optional(),
+  // Fixed id for the single workspace, used with upsert so concurrent first
+  // logins never create duplicates.
+  WORKSPACE_ID: z.string().min(1).default('ws_default'),
+  // DEV ONLY: when 'true' AND NODE_ENV!=='production', the legacy email/password
+  // /v1/auth/login endpoint stays mounted (for local dev + tests without a live
+  // Lark tenant). Hard-off in production regardless of value.
+  ALLOW_PASSWORD_LOGIN: z.enum(['true', 'false']).default('false'),
+
   // --- Screenshots (optional; direct URLs on Screenshot rows also work) ---
   SCREENSHOT_ASSET_BASE_URL: z.string().url().optional(),
   SCREENSHOT_URL_SIGNING_SECRET: z.string().min(16).optional(),

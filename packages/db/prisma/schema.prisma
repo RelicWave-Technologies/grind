@@ -188,7 +188,17 @@ model User {
   /// managerId, kept in sync on team updates). Lets us answer "who
   /// manages me?" with a single FK lookup, no join.
   managerId    String?
-  passwordHash String
+  /// Legacy email/password hash. NULLABLE: Lark OAuth is the sole identity in
+  /// production, so Lark-provisioned users never have one. Retained (not
+  /// dropped) so a dev-only password login shim and a clean revert path remain.
+  passwordHash String?
+  /// JIT provisioning gate. First Lark login creates the user as PENDING (no
+  /// session issued) until an admin assigns team/role and activates. The
+  /// configured bootstrap admin is created ACTIVE. Distinct from deactivatedAt,
+  /// which means "was active, now disabled".
+  provisioningStatus ProvisioningStatus @default(PENDING)
+  /// Avatar URL synced from Lark on each login (stable profile field).
+  avatarUrl    String?
   /// Soft-deactivation: when non-null, the user can't log in, doesn't
   /// appear in scope/admin queries, and (importantly) their *history*
   /// remains queryable for back-dated reports + audit. Reactivation
@@ -219,6 +229,7 @@ model User {
   deletedScreenshots Screenshot[]      @relation("ScreenshotDeletedBy")
   larkIdentity    LarkIdentity?
   larkOAuthToken  LarkOAuthToken?
+  agentAuthCodes  AgentAuthCode[]
   manualTimeRequests       ManualTimeRequest[] @relation("MtrRequester")
   manualTimeApprovals      ManualTimeRequest[] @relation("MtrApprover")
   managedTeams             Team[]              @relation("TeamManager")
@@ -414,6 +425,31 @@ model LarkOAuthToken {
   lastRefreshedAt   DateTime?
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
+}
+
+/// JIT-provisioning lifecycle for Lark-authenticated users.
+enum ProvisioningStatus {
+  PENDING // created on first Lark login; no session until an admin activates
+  ACTIVE  // admin assigned team/role (or bootstrap admin); may sign in
+}
+
+/// Short-lived, single-use handoff codes for the DESKTOP AGENT's Lark login.
+/// The system-browser OAuth callback redirects to grind://auth?code=<one-time>;
+/// the agent redeems it at /v1/auth/lark/exchange with its PKCE verifier. We
+/// never put long-lived tokens in the custom-scheme URL, and the code is
+/// useless without the verifier (blocks another local app intercepting the
+/// scheme). Plaintext is never stored — only sha256(code).
+model AgentAuthCode {
+  id         String    @id @default(cuid())
+  codeHash   String    @unique // sha256 of the one-time code
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  challenge  String // PKCE S256 challenge supplied by the agent at /start
+  expiresAt  DateTime // now + 120s
+  consumedAt DateTime? // single-use guard
+  createdAt  DateTime  @default(now())
+
+  @@index([userId])
 }
 
 enum ManualTimeRequestStatus {

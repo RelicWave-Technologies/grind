@@ -18,7 +18,7 @@ import { issueRefreshToken, revokeRefreshToken, sha256 } from '../lib/refreshTok
 
 export const authRouter = Router();
 
-type AuthUserRow = {
+export type AuthUserRow = {
   id: string;
   email: string;
   name: string;
@@ -26,9 +26,24 @@ type AuthUserRow = {
   workspaceId: string;
   teamId: string | null;
   managerId: string | null;
+  provisioningStatus: 'PENDING' | 'ACTIVE';
+  avatarUrl: string | null;
 };
 
-function serializeAuthUser(user: AuthUserRow): UserDto | null {
+/** Minimal Prisma `select` that satisfies {@link serializeAuthUser}. */
+export const AUTH_USER_SELECT = {
+  id: true,
+  email: true,
+  name: true,
+  role: true,
+  workspaceId: true,
+  teamId: true,
+  managerId: true,
+  provisioningStatus: true,
+  avatarUrl: true,
+} as const;
+
+export function serializeAuthUser(user: AuthUserRow): UserDto | null {
   const parsedRole = RoleSchema.safeParse(user.role);
   if (!parsedRole.success) return null;
   const role = parsedRole.data;
@@ -42,6 +57,8 @@ function serializeAuthUser(user: AuthUserRow): UserDto | null {
     workspaceId: user.workspaceId,
     teamId: user.teamId,
     managerId: user.managerId,
+    provisioningStatus: user.provisioningStatus,
+    avatarUrl: user.avatarUrl,
   };
 }
 
@@ -54,7 +71,9 @@ authRouter.post('/login', validate(LoginRequest, 'body'), async (req, res, next)
   try {
     const { email, password, deviceName } = req.body as LoginRequest;
     const user = await prisma.user.findUnique({ where: { email } });
-    if (!user || !(await verifyPassword(user.passwordHash, password))) {
+    // passwordHash is nullable now (Lark-only users have none) — a missing hash
+    // means "no password login for this account".
+    if (!user || !user.passwordHash || !(await verifyPassword(user.passwordHash, password))) {
       return res.status(401).json({ error: 'invalid_credentials' });
     }
     // Deactivated users can't acquire fresh sessions. They get the same
@@ -113,10 +132,7 @@ authRouter.get('/me', requireAccessToken, async (req, res, next) => {
     if (!req.user) return res.status(401).json({ error: 'unauthorized' });
     const user = await prisma.user.findUnique({
       where: { id: req.user.sub },
-      select: {
-        id: true, email: true, name: true, role: true, workspaceId: true,
-        teamId: true, managerId: true,
-      },
+      select: AUTH_USER_SELECT,
     });
     if (!user) return res.status(401).json({ error: 'unauthorized' });
     const payloadUser = serializeAuthUser(user);

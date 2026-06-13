@@ -27,25 +27,27 @@ async function main() {
 
   const admin = await prisma.user.upsert({
     where: { email: 'abhishek@emiactech.com' },
-    update: { passwordHash, role: 'ADMIN', workspaceId: ws.id },
+    update: { passwordHash, role: 'ADMIN', workspaceId: ws.id, provisioningStatus: 'ACTIVE' },
     create: {
       workspaceId: ws.id,
       email: 'abhishek@emiactech.com',
       name: 'Anish Suman',
       role: 'ADMIN',
       passwordHash,
+      provisioningStatus: 'ACTIVE',
     },
   });
 
   const manager = await prisma.user.upsert({
     where: { email: 'seed-manager@grind.local' },
-    update: { passwordHash, role: 'MANAGER', workspaceId: ws.id, name: 'Seed Manager' },
+    update: { passwordHash, role: 'MANAGER', workspaceId: ws.id, name: 'Seed Manager', provisioningStatus: 'ACTIVE' },
     create: {
       workspaceId: ws.id,
       email: 'seed-manager@grind.local',
       name: 'Seed Manager',
       role: 'MANAGER',
       passwordHash,
+      provisioningStatus: 'ACTIVE',
     },
   });
 
@@ -108,6 +110,7 @@ async function main() {
       name: 'Payroll May Cases',
       role: 'MEMBER',
       passwordHash,
+      provisioningStatus: 'ACTIVE',
       teamId: payrollTeam.id,
       managerId: manager.id,
       shiftId: null,
@@ -120,6 +123,7 @@ async function main() {
       name: 'Payroll May Cases',
       role: 'MEMBER',
       passwordHash,
+      provisioningStatus: 'ACTIVE',
       teamId: payrollTeam.id,
       managerId: manager.id,
       shiftId: null,
