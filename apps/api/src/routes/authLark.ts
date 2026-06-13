@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, type Response } from 'express';
 import crypto from 'node:crypto';
 import { prisma } from '@grind/db';
 import {
@@ -54,7 +54,7 @@ function dashboardBase(): string {
 type Terminal = { error?: LarkLoginOutcome; status?: 'pending' };
 
 /** Deliver a terminal outcome to the right client surface. */
-function finish(res: import('express').Response, client: 'dashboard' | 'agent', t: Terminal): void {
+function finish(res: Response, client: 'dashboard' | 'agent', t: Terminal): void {
   const qs = t.error ? `error=${t.error}` : `status=${t.status ?? 'pending'}`;
   if (client === 'agent') {
     res.redirect(`grind://auth?${qs}`);
@@ -63,7 +63,7 @@ function finish(res: import('express').Response, client: 'dashboard' | 'agent', 
   res.redirect(`${dashboardBase()}/login?${qs}`);
 }
 
-function setStateCookie(res: import('express').Response, nonce: string): void {
+function setStateCookie(res: Response, nonce: string): void {
   res.cookie(STATE_COOKIE, nonce, {
     httpOnly: true,
     sameSite: crossSite() ? 'none' : 'lax',
@@ -73,7 +73,7 @@ function setStateCookie(res: import('express').Response, nonce: string): void {
   });
 }
 
-function clearStateCookie(res: import('express').Response): void {
+function clearStateCookie(res: Response): void {
   res.clearCookie(STATE_COOKIE, {
     path: '/',
     sameSite: crossSite() ? 'none' : 'lax',
