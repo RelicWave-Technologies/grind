@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Timer, ShieldCheck } from 'lucide-react';
+import { ShieldCheck } from 'lucide-react';
+import grindIcon from '../assets/grind-icon.svg';
 
 /** Friendly copy for non-success Lark outcomes pushed from the main process. */
 const ERROR_COPY: Record<string, string> = {
@@ -40,7 +41,7 @@ export default function Login() {
     <div className="login">
       <div className="login-card">
         <div className="login-logo">
-          <Timer size={24} strokeWidth={2} />
+          <img src={grindIcon} alt="Grind" width={56} height={56} />
         </div>
         <div className="login-title">
           <div className="h2">Sign in to Grind</div>
