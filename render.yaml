@@ -16,13 +16,21 @@ services:
     rootDir: .
     # Upgrade corepack first: the one bundled with Node 20.18.0 has stale npm
     # registry signing keys and dies with "Cannot find matching keyid" when it
-    # provisions pnpm. corepack@latest ships current keys. It then pins
+    # provisions pnpm. corepack@latest ships current keys; it then pins
     # pnpm@9.12.0 from package.json "packageManager".
-    # prisma generate → build → migrate the Neon DB on every deploy.
+    #
+    # Install ONLY the api + db dependency closure (`--filter ...`): the API
+    # server has no business compiling the Electron agent's native modules
+    # (sharp/better-sqlite3/uiohook), which is both wasteful and fails on
+    # Render (sharp tries to build against the system libvips with an old
+    # toolchain). `NODE_ENV=development` on the install forces devDependencies
+    # (tsup + the prisma CLI) to install even though the service runs with
+    # NODE_ENV=production at runtime.
+    # Then: prisma generate → build → migrate the Neon DB on every deploy.
     buildCommand: >-
       npm i -g corepack@latest &&
       corepack enable &&
-      pnpm install --frozen-lockfile &&
+      NODE_ENV=development pnpm install --frozen-lockfile --filter @grind/api... --filter @grind/db... &&
       pnpm --filter @grind/db exec prisma generate &&
       pnpm --filter @grind/api build &&
       pnpm --filter @grind/db exec prisma migrate deploy
