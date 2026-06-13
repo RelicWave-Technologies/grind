@@ -95,13 +95,16 @@ describe('GET /v1/auth/lark/callback — dashboard', () => {
   });
 
   it('routes a non-bootstrap user to pending (no session)', async () => {
+    // Seed a prior user so the newcomer isn't the first (first user → admin).
+    const ws = await prisma.workspace.create({ data: { id: 'ws_test', name: 'W' } });
+    await prisma.user.create({ data: { workspaceId: ws.id, email: 'existing@co.com', name: 'X', role: 'ADMIN', provisioningStatus: 'ACTIVE' } });
     configure({ profile: { openId: 'ou_x', unionId: null, name: 'Newbie', email: 'newbie@co.com', avatarUrl: null } });
     const state = lark.signLoginState({ nonce: 'n2', client: 'dashboard' });
     const res = await callback(state, { code: 'abc' }, 'n2');
     expect(res.headers.location).toBe('https://dash.example/login?status=pending');
     // No session cookie for a pending user (the state cookie is cleared, that's fine).
     expect((res.headers['set-cookie'] ?? []).join(';')).not.toContain('grind_at=');
-    const u = await prisma.user.findFirst();
+    const u = await prisma.user.findUnique({ where: { email: 'newbie@co.com' } });
     expect(u?.provisioningStatus).toBe('PENDING');
   });
 

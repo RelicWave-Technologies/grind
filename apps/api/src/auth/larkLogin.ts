@@ -100,7 +100,6 @@ export async function resolveUser(profile: LarkProfile): Promise<ResolvedLoginUs
 }
 
 async function createUser(profile: LarkProfile, email: string): Promise<ResolvedLoginUser> {
-  const bootstrap = isBootstrapEmail(email);
   return prisma.$transaction(async (tx) => {
     // Idempotent single workspace — concurrent bootstraps can't duplicate it.
     await tx.workspace.upsert({
@@ -108,6 +107,10 @@ async function createUser(profile: LarkProfile, email: string): Promise<Resolved
       create: { id: env.WORKSPACE_ID, name: 'Workspace' },
       update: {},
     });
+    // Bootstrap admin = a configured bootstrap email, OR the very first user in
+    // an empty workspace (so a fresh install always has someone who can grant
+    // roles, even before LARK_BOOTSTRAP_ADMIN_EMAILS is set).
+    const bootstrap = isBootstrapEmail(email) || (await tx.user.count()) === 0;
     const user = await tx.user.create({
       data: {
         workspaceId: env.WORKSPACE_ID,
