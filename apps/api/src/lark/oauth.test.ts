@@ -1,6 +1,12 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import jwt from 'jsonwebtoken';
-import { signOAuthState, verifyOAuthState, buildAuthorizeUrl } from './oauth';
+import {
+  signOAuthState,
+  verifyOAuthState,
+  buildAuthorizeUrl,
+  signLoginState,
+  verifyLoginState,
+} from './oauth';
 
 beforeAll(() => {
   // env.ts requires a >=32-char secret; ensure one is present for these unit tests.
@@ -81,5 +87,44 @@ describe('buildAuthorizeUrl', () => {
       }),
     );
     expect(url.searchParams.get('scope')).toContain('offline_access');
+  });
+});
+
+describe('Lark login state token', () => {
+  it('round-trips a dashboard nonce', () => {
+    const tok = signLoginState({ nonce: 'n1', client: 'dashboard' });
+    expect(verifyLoginState(tok)).toEqual({ nonce: 'n1', client: 'dashboard', agentChallenge: undefined });
+  });
+
+  it('round-trips an agent challenge', () => {
+    const tok = signLoginState({ nonce: 'n2', client: 'agent', agentChallenge: 'chal' });
+    expect(verifyLoginState(tok)).toEqual({ nonce: 'n2', client: 'agent', agentChallenge: 'chal' });
+  });
+
+  it('rejects a forged login state', () => {
+    const forged = jwt.sign({ nonce: 'x', client: 'dashboard', kind: 'lark_login' }, 'another-secret-32-chars-long-xxxx', {
+      algorithm: 'HS256',
+    });
+    expect(() => verifyLoginState(forged)).toThrow();
+  });
+
+  it('rejects a connect-state token replayed as a login state (wrong kind)', () => {
+    const connect = signOAuthState('user_1'); // kind: lark_oauth
+    expect(() => verifyLoginState(connect)).toThrow(/malformed/);
+  });
+
+  it('rejects an unknown client', () => {
+    const bad = jwt.sign({ nonce: 'x', client: 'mobile', kind: 'lark_login' }, process.env.JWT_SECRET!, {
+      algorithm: 'HS256',
+    });
+    expect(() => verifyLoginState(bad)).toThrow(/malformed/);
+  });
+
+  it('rejects an expired login state', () => {
+    const expired = jwt.sign({ nonce: 'x', client: 'dashboard', kind: 'lark_login' }, process.env.JWT_SECRET!, {
+      algorithm: 'HS256',
+      expiresIn: -10,
+    });
+    expect(() => verifyLoginState(expired)).toThrow();
   });
 });

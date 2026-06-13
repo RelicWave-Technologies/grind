@@ -9,6 +9,11 @@ process.env.DATABASE_URL = process.env.TEST_DATABASE_URL;
 process.env.DIRECT_URL = process.env.TEST_DATABASE_URL;
 process.env.NODE_ENV = 'test';
 
+// Enable the dev-only email/password login shim for the suite — most tests
+// authenticate via /v1/auth/login + seeded passwords. Lark login is covered
+// separately (authLark.test.ts / larkLogin.test.ts).
+process.env.ALLOW_PASSWORD_LOGIN = 'true';
+
 // Keep the Lark integration deterministically DISABLED for the test suite,
 // regardless of whether the developer's local .env has real creds. This must
 // run before src/env.ts is parsed (setupFiles load before test modules). The
@@ -22,6 +27,6 @@ const { prisma } = await import('@grind/db');
 beforeEach(async () => {
   // Wipe all tables between tests for deterministic isolation.
   await prisma.$executeRawUnsafe(
-    'TRUNCATE TABLE "ManualTimeRequest","ActivitySample","TimeSegment","TimeEntry","RefreshToken","LarkOAuthToken","LarkIdentity","User","Workspace" RESTART IDENTITY CASCADE',
+    'TRUNCATE TABLE "ManualTimeRequest","ActivitySample","TimeSegment","TimeEntry","RefreshToken","AgentAuthCode","LarkOAuthToken","LarkIdentity","User","Workspace" RESTART IDENTITY CASCADE',
   );
 });
