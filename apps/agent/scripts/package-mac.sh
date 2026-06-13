@@ -37,7 +37,9 @@ cp -R "$AGENT_DIR/out" "$STAGE/out"
 cp -R "$AGENT_DIR/build" "$STAGE/build"
 cp "$AGENT_DIR/electron-builder.yml" "$STAGE/electron-builder.yml"
 
-EB_ARGS=(--mac dmg "--$ARCH" --projectDir "$STAGE" "-c.electronVersion=$ELECTRON_VERSION")
+# afterPack must be an absolute path (electron-builder resolves a relative one
+# against CWD, not the staging projectDir).
+EB_ARGS=(--mac dmg "--$ARCH" --projectDir "$STAGE" "-c.electronVersion=$ELECTRON_VERSION" "-c.afterPack=$STAGE/build/afterPack.cjs")
 if [[ "${SIGN:-0}" != "1" ]]; then
   echo "▸ unsigned build (set SIGN=1 + Apple creds to sign + notarize)"
   export CSC_IDENTITY_AUTO_DISCOVERY=false
