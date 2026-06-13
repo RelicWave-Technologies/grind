@@ -4,12 +4,15 @@ productName: Grind
 directories:
   buildResources: build
   output: release
-# pnpm + shamefully-hoist leaves some transitive deps (e.g. color-convert's
-# color-name) only at the hoisted root, not beside the package that requires
-# them. Without this, electron-builder dedupes them out of the asar and the
-# packaged app crashes with "Cannot find module 'color-name'". Including all
-# nested node_modules packs the complete, resolvable tree.
+# pnpm + shamefully-hoist confuses electron-builder's dependency collector: it
+# buries color-convert's `color-name` under color/node_modules and the packaged
+# app crashes at launch with "Cannot find module 'color-name'". Two-part fix:
+#  - asar: false  → node_modules ships as plain, editable files
+#  - afterPack    → hoists the misplaced color-name to the top level post-pack
 includeSubNodeModules: true
+asar: false
+# afterPack is injected as an absolute path by scripts/package-mac.sh — a
+# relative path here resolves against CWD (repo root), not the staging dir.
 files:
   - out/**/*
   - package.json
