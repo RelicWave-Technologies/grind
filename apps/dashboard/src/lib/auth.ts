@@ -1,5 +1,12 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { api, ApiError } from './api';
+import { api, ApiError, API_BASE } from './api';
+
+/** Full-page URL that starts the Lark OAuth login (a top-level navigation, not
+ *  a fetch — the API redirects through Lark and back, setting the session
+ *  cookie). The sole entry point now that passwords are gone. */
+export function larkLoginUrl(): string {
+  return `${API_BASE}/v1/auth/lark/start?client=dashboard`;
+}
 
 export type Role = 'ADMIN' | 'MANAGER' | 'MEMBER';
 export type Permission =
@@ -35,6 +42,8 @@ export interface Me {
   workspaceId: string;
   teamId: string | null;
   managerId: string | null;
+  provisioningStatus: 'PENDING' | 'ACTIVE';
+  avatarUrl: string | null;
 }
 
 /**
@@ -56,20 +65,6 @@ export function useMe() {
     },
     staleTime: 5 * 60_000,
     retry: false,
-  });
-}
-
-export function useLogin() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (input: { email: string; password: string }) => {
-      // /v1/auth/login sets the grind_at cookie as a side-effect; the
-      // body still carries accessToken for the agent.
-      return await api<{ user: Me }>('/v1/auth/login', { method: 'POST', json: input });
-    },
-    onSuccess: (data) => {
-      qc.setQueryData(['me'], data.user);
-    },
   });
 }
 

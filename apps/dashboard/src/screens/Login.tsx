@@ -1,41 +1,44 @@
 import './login.css';
-import { useState, useEffect } from 'react';
+import { useEffect } from 'react';
 import { useNavigate, useSearch } from '@tanstack/react-router';
-import { Camera, KeyRound, ShieldCheck, Timer } from 'lucide-react';
-import { useLogin, useMe } from '../lib/auth';
-import { ApiError } from '../lib/api';
-import { Card, SidebarBrand, Field, Input, Button, Banner } from '../ui';
+import { Camera, ShieldCheck, Timer } from 'lucide-react';
+import { useMe, larkLoginUrl } from '../lib/auth';
+import { Card, SidebarBrand, Button, Banner } from '../ui';
+
+/** Friendly copy for each terminal outcome the API hands back via ?status/?error. */
+const OUTCOME_COPY: Record<string, { status: 'danger' | 'warn' | 'info'; text: string }> = {
+  pending: { status: 'info', text: 'Your account is awaiting setup. An admin will assign your team and role — you’ll have access right after.' },
+  denied: { status: 'warn', text: 'Sign-in was cancelled.' },
+  temporary: { status: 'warn', text: 'Lark had a temporary hiccup. Please try again.' },
+  auth_failed: { status: 'danger', text: 'Sign-in failed. Please try again.' },
+  no_email: { status: 'danger', text: 'Grind couldn’t read an email from your Lark account. Ask your admin to grant the email permission.' },
+  deactivated: { status: 'danger', text: 'Your account is deactivated. Contact your workspace admin.' },
+  state_invalid: { status: 'warn', text: 'That sign-in link expired. Please try again.' },
+  invalid_request: { status: 'warn', text: 'Something went wrong starting sign-in. Please try again.' },
+  config: { status: 'danger', text: 'Single sign-on isn’t configured yet. Contact your admin.' },
+};
 
 export function LoginScreen() {
   const navigate = useNavigate();
   const search = useSearch({ from: '/login' });
   const me = useMe();
-  const login = useLogin();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [err, setErr] = useState<string | null>(null);
 
-  // Already logged in? Bounce straight to /next.
+  // Already logged in? Bounce straight to the dashboard.
   useEffect(() => {
     if (me.data) {
       navigate({ to: '/' });
     }
   }, [me.data, navigate]);
 
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setErr(null);
-    try {
-      await login.mutateAsync({ email: email.trim(), password });
-      const next = search.next && search.next.startsWith('/') ? search.next : '/';
-      navigate({ to: next });
-    } catch (e) {
-      if (e instanceof ApiError && e.status === 401) {
-        setErr('Invalid email or password.');
-      } else {
-        setErr(e instanceof Error ? e.message : 'Sign-in failed.');
-      }
-    }
+  const outcome = search.status === 'pending'
+    ? OUTCOME_COPY.pending
+    : search.error
+      ? OUTCOME_COPY[search.error] ?? OUTCOME_COPY.auth_failed
+      : null;
+
+  function signIn() {
+    // Top-level navigation (not a fetch) so the OAuth redirect chain works.
+    window.location.assign(larkLoginUrl());
   }
 
   return (
@@ -78,61 +81,34 @@ export function LoginScreen() {
         </section>
 
         <Card className="lgn-card ui-rise-1">
-        <form className="lgn-form" onSubmit={onSubmit}>
+        <div className="lgn-form">
           <div className="lgn-head">
             <SidebarBrand name="Grind" className="lgn-form-brand" />
             <div className="lgn-heading">
               <span className="ui-t-eyebrow">Workspace access</span>
               <h1 className="lgn-title">Sign in to Grind</h1>
-              <p className="lgn-sub">Use your workspace credentials to open the dashboard.</p>
+              <p className="lgn-sub">Continue with your Lark account to open the dashboard.</p>
             </div>
           </div>
 
-          <div className="lgn-fields">
-            <Field label="Email">
-              <Input
-                type="email"
-                autoComplete="username"
-                placeholder="you@company.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                autoFocus
-                error={!!err}
-              />
-            </Field>
-
-            <Field label="Password">
-              <Input
-                type="password"
-                autoComplete="current-password"
-                placeholder="••••••••••"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                error={!!err}
-              />
-            </Field>
-          </div>
-
-          {err && <Banner status="danger">{err}</Banner>}
+          {outcome && <Banner status={outcome.status}>{outcome.text}</Banner>}
 
           <Button
-            type="submit"
+            type="button"
             variant="primary"
             size="lg"
             block
-            loading={login.isPending}
-            icon={<KeyRound size={15} />}
+            onClick={signIn}
+            icon={<ShieldCheck size={15} />}
           >
-            {login.isPending ? 'Signing in…' : 'Sign in'}
+            Continue with Lark
           </Button>
 
           <div className="lgn-access-note">
             <span className="ui-t-eyebrow">New account</span>
-            <p className="ui-t-small">Ask your manager or admin to add you to the workspace.</p>
+            <p className="ui-t-small">Sign in once with Lark; an admin assigns your team and role.</p>
           </div>
-        </form>
+        </div>
         </Card>
       </main>
     </div>
