@@ -883,7 +883,7 @@ textarea.ui-control { height: auto; min-height: 80px; padding: var(--ui-sp-3) va
 .ui-sidebar__mark {
   width: 24px; height: 24px;
   border-radius: var(--ui-r-sm);
-  background: var(--ui-accent);
+  background: var(--ui-accent) center / cover no-repeat url('/icon.svg');
   flex-shrink: 0;
 }
 .ui-nav { display: flex; flex-direction: column; gap: var(--ui-sp-1); }
