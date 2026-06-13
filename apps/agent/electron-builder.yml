@@ -4,6 +4,12 @@ productName: Grind
 directories:
   buildResources: build
   output: release
+# pnpm + shamefully-hoist leaves some transitive deps (e.g. color-convert's
+# color-name) only at the hoisted root, not beside the package that requires
+# them. Without this, electron-builder dedupes them out of the asar and the
+# packaged app crashes with "Cannot find module 'color-name'". Including all
+# nested node_modules packs the complete, resolvable tree.
+includeSubNodeModules: true
 files:
   - out/**/*
   - package.json
