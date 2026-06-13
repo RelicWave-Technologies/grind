@@ -222,8 +222,10 @@ const overviewRoute = createRoute({
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/login',
-  validateSearch: (s: Record<string, unknown>): { next?: string } => ({
+  validateSearch: (s: Record<string, unknown>): { next?: string; status?: string; error?: string } => ({
     next: typeof s.next === 'string' ? s.next : undefined,
+    status: typeof s.status === 'string' ? s.status : undefined,
+    error: typeof s.error === 'string' ? s.error : undefined,
   }),
   component: LoginScreen,
 });

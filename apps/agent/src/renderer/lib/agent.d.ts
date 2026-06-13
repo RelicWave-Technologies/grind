@@ -1,6 +1,7 @@
 import type { UserDto } from '@grind/types';
 
 type AuthStatus = 'loggedIn' | 'loggedOut';
+type LarkOutcome = { kind: 'pending' } | { kind: 'error'; reason: string };
 type AgentStatus = { state: 'IDLE' | 'OFFLINE'; lastHeartbeatAt: string | null };
 type TimerStatus =
   | { state: 'IDLE' }
@@ -13,9 +14,11 @@ declare global {
     agent: {
       auth: {
         login: (email: string, password: string) => Promise<UserDto>;
+        loginWithLark: () => Promise<{ ok: true }>;
         logout: () => Promise<{ ok: true }>;
         status: () => Promise<AuthStatus>;
         onStatusChange: (cb: (s: AuthStatus) => void) => () => void;
+        onLarkOutcome: (cb: (o: LarkOutcome) => void) => () => void;
       };
       agent: {
         status: () => Promise<AgentStatus>;

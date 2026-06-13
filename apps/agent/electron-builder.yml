@@ -1,5 +1,10 @@
 appId: com.relicwave.grind
 productName: Grind
+# grind:// custom scheme — the system browser redirects here after Lark login.
+protocols:
+  - name: Grind
+    schemes:
+      - grind
 # electron-vite emits main/preload/renderer here; package the built tree only.
 directories:
   buildResources: build

@@ -37,3 +37,4 @@ packages/db/node_modules/.prisma/
 out/
 dist-electron/
 release/
+.vercel

@@ -15,6 +15,9 @@ export const LARK_SCOPES = [
   'im:message:update',
   'contact:user.id:readonly',
   'contact:user.employee_id:readonly',
+  // Required so /authen/v1/user_info returns email/enterprise_email — the
+  // canonical identifier Grind matches on at login.
+  'contact:user.email:readonly',
   'offline_access',
 ] as const;
 

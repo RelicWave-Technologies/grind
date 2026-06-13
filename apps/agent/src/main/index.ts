@@ -16,6 +16,7 @@ import { togglePopover, hidePopover } from './popover';
 import { showIdlePrompt, hideIdlePrompt } from './idlePrompt';
 import { ShiftMonitor } from './services/shift';
 import { onAuthChange } from './services/apiClient';
+import { registerProtocol, handleDeepLink, deepLinkFromArgv, flushQueuedDeepLink } from './services/deepLink';
 import { broadcast } from './broadcast';
 import { log } from './logger';
 
@@ -33,6 +34,15 @@ if (!gotLock) {
   app.quit();
   process.exit(0);
 }
+
+// Register grind:// for Lark login. Must happen before whenReady, and the
+// macOS open-url handler must be attached early — the OS can deliver the
+// deep-link before the app finishes booting (handleDeepLink queues it).
+registerProtocol();
+app.on('open-url', (event, url) => {
+  event.preventDefault();
+  void handleDeepLink(url);
+});
 
 let tray: Tray | null = null;
 let mainWindow: BrowserWindow | null = null;
@@ -181,12 +191,23 @@ app.whenReady().then(async () => {
     }
   }, 1000);
 
+  // Deep-link delivery is now safe. Flush any grind:// URL that arrived during
+  // boot (macOS open-url), and pick up a cold-start argv link (Windows/Linux).
+  flushQueuedDeepLink();
+  const coldStartLink = deepLinkFromArgv(process.argv);
+  if (coldStartLink) void handleDeepLink(coldStartLink);
+
   log.info('agent ready', { platform: process.platform, version: app.getVersion(), openedAtLogin });
 });
 
 app.on('window-all-closed', () => {
   // Stay alive in the tray.
 });
-app.on('second-instance', () => showMainWindow());
+// On Windows/Linux the deep-link arrives as argv of a second launch.
+app.on('second-instance', (_e, argv) => {
+  const url = deepLinkFromArgv(argv);
+  if (url) void handleDeepLink(url);
+  showMainWindow();
+});
 
 void tray;

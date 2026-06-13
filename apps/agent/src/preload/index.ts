@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 import type { UserDto } from '@grind/types';
 
 type AuthStatus = 'loggedIn' | 'loggedOut';
+type LarkOutcome = { kind: 'pending' } | { kind: 'error'; reason: string };
 type AgentStatus = { state: 'IDLE' | 'OFFLINE'; lastHeartbeatAt: string | null };
 type TimerStatus =
   | { state: 'IDLE' }
@@ -13,6 +14,7 @@ const api = {
   auth: {
     login: (email: string, password: string): Promise<UserDto> =>
       ipcRenderer.invoke('auth:login', { email, password }),
+    loginWithLark: (): Promise<{ ok: true }> => ipcRenderer.invoke('auth:loginWithLark'),
     logout: (): Promise<{ ok: true }> => ipcRenderer.invoke('auth:logout'),
     status: (): Promise<AuthStatus> => ipcRenderer.invoke('auth:status'),
     onStatusChange: (cb: (s: AuthStatus) => void): (() => void) => {
@@ -20,6 +22,14 @@ const api = {
       ipcRenderer.on('auth:status:push', sub);
       return () => {
         ipcRenderer.off('auth:status:push', sub);
+      };
+    },
+    // Non-success Lark outcomes (pending approval / error) pushed from main.
+    onLarkOutcome: (cb: (o: LarkOutcome) => void): (() => void) => {
+      const sub = (_e: unknown, o: LarkOutcome) => cb(o);
+      ipcRenderer.on('auth:lark:push', sub);
+      return () => {
+        ipcRenderer.off('auth:lark:push', sub);
       };
     },
   },

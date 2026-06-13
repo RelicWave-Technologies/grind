@@ -15,10 +15,19 @@ import { requireAccessToken } from '../middleware/auth';
 import { signAccessToken } from '../lib/jwt';
 import { verifyPassword } from '../lib/password';
 import { issueRefreshToken, revokeRefreshToken, sha256 } from '../lib/refreshToken';
+import { setSessionCookie, clearSessionCookie } from '../lib/cookies';
+import { env } from '../env';
 
 export const authRouter = Router();
 
-type AuthUserRow = {
+/**
+ * DEV-ONLY email/password login. Lark OAuth is the sole identity in production;
+ * this stays mounted only for local dev + the test suite (no live Lark tenant),
+ * gated by NODE_ENV + an explicit flag so it can never be reached in prod.
+ */
+const PASSWORD_LOGIN_ENABLED = env.NODE_ENV !== 'production' && env.ALLOW_PASSWORD_LOGIN === 'true';
+
+export type AuthUserRow = {
   id: string;
   email: string;
   name: string;
@@ -26,9 +35,24 @@ type AuthUserRow = {
   workspaceId: string;
   teamId: string | null;
   managerId: string | null;
+  provisioningStatus: 'PENDING' | 'ACTIVE';
+  avatarUrl: string | null;
 };
 
-function serializeAuthUser(user: AuthUserRow): UserDto | null {
+/** Minimal Prisma `select` that satisfies {@link serializeAuthUser}. */
+export const AUTH_USER_SELECT = {
+  id: true,
+  email: true,
+  name: true,
+  role: true,
+  workspaceId: true,
+  teamId: true,
+  managerId: true,
+  provisioningStatus: true,
+  avatarUrl: true,
+} as const;
+
+export function serializeAuthUser(user: AuthUserRow): UserDto | null {
   const parsedRole = RoleSchema.safeParse(user.role);
   if (!parsedRole.success) return null;
   const role = parsedRole.data;
@@ -42,55 +66,44 @@ function serializeAuthUser(user: AuthUserRow): UserDto | null {
     workspaceId: user.workspaceId,
     teamId: user.teamId,
     managerId: user.managerId,
+    provisioningStatus: user.provisioningStatus,
+    avatarUrl: user.avatarUrl,
   };
 }
 
 /**
- * Login. Returns access + refresh tokens in the JSON body for the agent
- * (which stores them locally), AND sets an httpOnly cookie carrying the
- * access token for the dashboard. The middleware accepts either source.
+ * DEV-ONLY login. Returns access + refresh tokens in the JSON body for the
+ * agent AND sets the httpOnly dashboard cookie. Mounted only when the password
+ * shim is enabled (never in production — Lark login replaces it).
  */
-authRouter.post('/login', validate(LoginRequest, 'body'), async (req, res, next) => {
-  try {
-    const { email, password, deviceName } = req.body as LoginRequest;
-    const user = await prisma.user.findUnique({ where: { email } });
-    if (!user || !(await verifyPassword(user.passwordHash, password))) {
-      return res.status(401).json({ error: 'invalid_credentials' });
+if (PASSWORD_LOGIN_ENABLED) {
+  authRouter.post('/login', validate(LoginRequest, 'body'), async (req, res, next) => {
+    try {
+      const { email, password, deviceName } = req.body as LoginRequest;
+      const user = await prisma.user.findUnique({ where: { email } });
+      // passwordHash is nullable (Lark-only users have none) — missing = no password login.
+      if (!user || !user.passwordHash || !(await verifyPassword(user.passwordHash, password))) {
+        return res.status(401).json({ error: 'invalid_credentials' });
+      }
+      // Deactivated users can't acquire sessions. (Provisioning status is a
+      // Lark-flow concept; this dev-only shim doesn't gate on it.)
+      if (user.deactivatedAt) {
+        return res.status(401).json({ error: 'invalid_credentials' });
+      }
+      const payloadUser = serializeAuthUser(user);
+      if (!payloadUser) return res.status(503).json({ error: 'stale_role_migration_required' });
+
+      const accessToken = signAccessToken({ sub: user.id, ws: user.workspaceId, role: payloadUser.role });
+      const { refreshToken } = await issueRefreshToken(user.id, deviceName);
+      setSessionCookie(res, accessToken);
+
+      const response: LoginResponse = { accessToken, refreshToken, user: payloadUser };
+      res.json(response);
+    } catch (err) {
+      next(err);
     }
-    // Deactivated users can't acquire fresh sessions. They get the same
-    // generic error as a bad password so the response surface doesn't
-    // leak account state to outsiders.
-    if (user.deactivatedAt) {
-      return res.status(401).json({ error: 'invalid_credentials' });
-    }
-    const payloadUser = serializeAuthUser(user);
-    if (!payloadUser) return res.status(503).json({ error: 'stale_role_migration_required' });
-
-    const accessToken = signAccessToken({ sub: user.id, ws: user.workspaceId, role: payloadUser.role });
-    const { refreshToken } = await issueRefreshToken(user.id, deviceName);
-
-    // In production the dashboard (Vercel) and API (Render) live on different
-    // sites, so the cookie must be SameSite=None + Secure to travel on the
-    // dashboard's credentialed fetches. In dev they share localhost → Lax.
-    const crossSite = process.env.NODE_ENV === 'production';
-    res.cookie('grind_at', accessToken, {
-      httpOnly: true,
-      sameSite: crossSite ? 'none' : 'lax',
-      secure: crossSite,
-      maxAge: 60 * 60 * 1000, // 1h, matches the JWT TTL
-      path: '/',
-    });
-
-    const response: LoginResponse = {
-      accessToken,
-      refreshToken,
-      user: payloadUser,
-    };
-    res.json(response);
-  } catch (err) {
-    next(err);
-  }
-});
+  });
+}
 
 /**
  * Clear the dashboard's access cookie. Agent uses /logout (with refresh
@@ -98,12 +111,7 @@ authRouter.post('/login', validate(LoginRequest, 'body'), async (req, res, next)
  * unchanged.
  */
 authRouter.post('/cookie-logout', (_req, res) => {
-  const crossSite = process.env.NODE_ENV === 'production';
-  res.clearCookie('grind_at', {
-    path: '/',
-    sameSite: crossSite ? 'none' : 'lax',
-    secure: crossSite,
-  });
+  clearSessionCookie(res);
   res.json({ ok: true });
 });
 
@@ -113,10 +121,7 @@ authRouter.get('/me', requireAccessToken, async (req, res, next) => {
     if (!req.user) return res.status(401).json({ error: 'unauthorized' });
     const user = await prisma.user.findUnique({
       where: { id: req.user.sub },
-      select: {
-        id: true, email: true, name: true, role: true, workspaceId: true,
-        teamId: true, managerId: true,
-      },
+      select: AUTH_USER_SELECT,
     });
     if (!user) return res.status(401).json({ error: 'unauthorized' });
     const payloadUser = serializeAuthUser(user);

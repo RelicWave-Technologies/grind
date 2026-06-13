@@ -56,6 +56,7 @@ interface AdminUser {
   managerId: string | null;
   shiftId?: string | null;
   deactivatedAt: string | null;
+  provisioningStatus?: 'PENDING' | 'ACTIVE';
   createdAt: string;
 }
 
@@ -138,6 +139,14 @@ export function UsersScreen() {
       ),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'users'] }),
   });
+  const activate = useMutation({
+    mutationFn: (id: string) =>
+      api<{ id: string; provisioningStatus: 'ACTIVE' }>(
+        `/v1/admin/users/${id}/activate`,
+        { method: 'POST' },
+      ),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'users'] }),
+  });
 
   const teamName = (id: string | null): string => {
     if (!id) return '—';
@@ -158,6 +167,9 @@ export function UsersScreen() {
     : [];
   const activeCount = sorted.filter((u) => u.deactivatedAt === null).length;
   const offCount = sorted.length - activeCount;
+  const pendingCount = sorted.filter(
+    (u) => u.deactivatedAt === null && u.provisioningStatus === 'PENDING',
+  ).length;
 
   const colSpan = canEdit ? 7 : 6;
 
@@ -196,6 +208,7 @@ export function UsersScreen() {
         <Card variant="flush" className="rise rise-1">
           <StatRow>
             <Stat label="Active" value={String(activeCount)} />
+            {canEdit && <Stat label="Pending setup" value={String(pendingCount)} />}
             <Stat label="Deactivated" value={String(offCount)} />
             <Stat label="Total" value={String(sorted.length)} />
           </StatRow>
@@ -261,7 +274,8 @@ export function UsersScreen() {
                   busy={
                     (patch.isPending && patch.variables?.id === u.id) ||
                     (deactivate.isPending && deactivate.variables === u.id) ||
-                    (reactivate.isPending && reactivate.variables === u.id)
+                    (reactivate.isPending && reactivate.variables === u.id) ||
+                    (activate.isPending && activate.variables === u.id)
                   }
                   error={
                     (patch.isError && patch.variables?.id === u.id
@@ -277,6 +291,7 @@ export function UsersScreen() {
                   onSave={(p) => patch.mutate({ id: u.id, patch: p })}
                   onDeactivate={() => deactivate.mutate(u.id)}
                   onReactivate={() => reactivate.mutate(u.id)}
+                  onActivate={() => activate.mutate(u.id)}
                 />
               ))}
             </Tbody>
@@ -301,9 +316,10 @@ interface RowProps {
   onSave: (patch: Partial<{ name: string; role: Role; teamId: string | null; shiftId: string | null }>) => void;
   onDeactivate: () => void;
   onReactivate: () => void;
+  onActivate: () => void;
 }
 
-function PersonRow({ user, isSelf, canEdit, colSpan, teams, teamName, shifts, shiftName, busy, error, onSave, onDeactivate, onReactivate }: RowProps) {
+function PersonRow({ user, isSelf, canEdit, colSpan, teams, teamName, shifts, shiftName, busy, error, onSave, onDeactivate, onReactivate, onActivate }: RowProps) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(user.name);
   const [role, setRole] = useState<Role>(user.role);
@@ -331,6 +347,7 @@ function PersonRow({ user, isSelf, canEdit, colSpan, teams, teamName, shifts, sh
   }
 
   const isDeactivated = user.deactivatedAt !== null;
+  const isPending = !isDeactivated && user.provisioningStatus === 'PENDING';
 
   const joined = new Date(user.createdAt).toLocaleDateString(undefined, {
     year: 'numeric',
@@ -388,8 +405,8 @@ function PersonRow({ user, isSelf, canEdit, colSpan, teams, teamName, shifts, sh
 
         {/* Status --------------------------------------------------------- */}
         <Td>
-          <Tag status={isDeactivated ? 'neutral' : 'success'} dot>
-            {isDeactivated ? 'Deactivated' : 'Active'}
+          <Tag status={isDeactivated ? 'neutral' : isPending ? 'warn' : 'success'} dot>
+            {isDeactivated ? 'Deactivated' : isPending ? 'Pending' : 'Active'}
           </Tag>
         </Td>
 
@@ -457,6 +474,17 @@ function PersonRow({ user, isSelf, canEdit, colSpan, teams, teamName, shifts, sh
                       onClick={() => setEditing(true)}
                       disabled={busy}
                     />
+                  )}
+                  {isPending && (
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      loading={busy}
+                      onClick={onActivate}
+                      icon={<UserCheck size={14} strokeWidth={1.9} />}
+                    >
+                      Activate
+                    </Button>
                   )}
                   {isDeactivated ? (
                     <IconButton

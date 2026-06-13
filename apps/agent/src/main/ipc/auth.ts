@@ -1,5 +1,5 @@
 import { ipcMain } from 'electron';
-import { login, logout, isLoggedIn } from '../services/auth';
+import { login, logout, isLoggedIn, startLarkLogin } from '../services/auth';
 import { onAuthChange } from '../services/apiClient';
 import { startHeartbeat, stopHeartbeat } from '../services/heartbeat';
 import { broadcast } from '../broadcast';
@@ -11,6 +11,13 @@ export function registerAuthIpc(): void {
     startHeartbeat();
     broadcast('auth:status:push', 'loggedIn');
     return user;
+  });
+
+  // Start the Lark login flow: opens the system browser. The grind:// deep-link
+  // (handled in services/deepLink) completes it and broadcasts the outcome.
+  ipcMain.handle('auth:loginWithLark', () => {
+    startLarkLogin();
+    return { ok: true };
   });
 
   ipcMain.handle('auth:logout', async () => {

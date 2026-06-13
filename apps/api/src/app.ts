@@ -7,6 +7,7 @@ import { prisma } from '@grind/db';
 import { logger } from './logger';
 import { API_VERSION, START_TIME_MS } from './lib/version';
 import { authRouter } from './routes/auth';
+import { authLarkRouter } from './routes/authLark';
 import { agentRouter } from './routes/agent';
 import { timeEntriesRouter } from './routes/timeEntries';
 import { activityRouter } from './routes/activity';
@@ -98,6 +99,9 @@ export function buildApp() {
     }
   });
 
+  // Lark login (browser-facing, unauthenticated) — mount before /v1/auth so its
+  // /lark/* paths are handled by the dedicated router.
+  app.use('/v1/auth/lark', authLarkRouter);
   app.use('/v1/auth', authRouter);
   app.use('/v1/agent', agentRouter);
   app.use('/v1/time-entries', timeEntriesRouter);

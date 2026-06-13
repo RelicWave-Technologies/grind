@@ -105,6 +105,28 @@ export class TokenManager {
     });
   }
 
+  /**
+   * Exchange an authorization code for a token pair WITHOUT persisting. Used by
+   * Lark *login*, where the Grind user id isn't known until the profile is
+   * fetched from the returned access token. Persist afterwards via
+   * {@link persistTokens}. Propagates LarkTransientError / LarkReauthRequiredError.
+   */
+  async exchangeCode(code: string, redirectUri: string): Promise<LarkTokenResponse> {
+    return this.deps.client.exchangeCode(code, redirectUri);
+  }
+
+  /**
+   * Store an already-exchanged token pair for a user (serialized per user).
+   * Lark login calls this once the user is resolved/created. Best-effort at the
+   * call site: a failure here doesn't block the Grind session (the next login
+   * re-grants a fresh single-use refresh token).
+   */
+  async persistTokens(userId: string, res: LarkTokenResponse): Promise<void> {
+    await this.withLock(userId, async () => {
+      await this.persist(userId, res);
+    });
+  }
+
   /** Mark a user as needing reconnection (e.g. after an unrecoverable error). */
   private async markReauth(userId: string): Promise<void> {
     this.accessCache.delete(userId);

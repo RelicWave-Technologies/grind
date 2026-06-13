@@ -3,7 +3,6 @@ import { prisma, type Prisma } from '@grind/db';
 import { requireAccessToken } from '../middleware/auth';
 import { attachScope, requireAdmin, requireAnyCapability, requireCapability, requireManagerOrAbove } from '../middleware/scope';
 import { decideByUser } from '../lark/decideByUser';
-import { hashPassword } from '../lib/password';
 import { triageRequest, type TriageResult } from '../ai/triage';
 import { explainFlag } from '../ai/explainFlag';
 import { resolveReportRange } from '../reports/member';
@@ -43,6 +42,7 @@ interface UserListEntry {
   managerId: string | null;
   shiftId: string | null;
   deactivatedAt: string | null;
+  provisioningStatus: 'PENDING' | 'ACTIVE';
   createdAt: string;
 }
 
@@ -60,10 +60,14 @@ adminRouter.get('/users', async (req, res, next) => {
     if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
     const includeDeactivated =
       req.scope.isAdmin && req.query.includeDeactivated === 'true';
+    // ?status=pending → the admin "Needs setup" view (Lark-provisioned users
+    // awaiting a team/role + activation).
+    const pendingOnly = req.scope.isAdmin && req.query.status === 'pending';
 
-    const where = includeDeactivated
-      ? { workspaceId: req.scope.workspaceId }
-      : { id: { in: req.scope.userIds } };
+    const where = {
+      ...(includeDeactivated ? { workspaceId: req.scope.workspaceId } : { id: { in: req.scope.userIds } }),
+      ...(pendingOnly ? { provisioningStatus: 'PENDING' as const } : {}),
+    };
 
     const users = await prisma.user.findMany({
       where,
@@ -76,6 +80,7 @@ adminRouter.get('/users', async (req, res, next) => {
         managerId: true,
         shiftId: true,
         deactivatedAt: true,
+        provisioningStatus: true,
         createdAt: true,
       },
       orderBy: [{ deactivatedAt: 'asc' }, { role: 'asc' }, { name: 'asc' }],
@@ -89,6 +94,7 @@ adminRouter.get('/users', async (req, res, next) => {
       managerId: u.managerId,
       shiftId: u.shiftId,
       deactivatedAt: u.deactivatedAt ? u.deactivatedAt.toISOString() : null,
+      provisioningStatus: u.provisioningStatus,
       createdAt: u.createdAt.toISOString(),
     }));
     res.json({ users: out, scope: req.scope.scope });
@@ -1148,11 +1154,9 @@ adminRouter.post('/users', requireAdmin, async (req, res, next) => {
     const dupe = await prisma.user.findUnique({ where: { email: emailRaw }, select: { id: true } });
     if (dupe) return res.status(409).json({ error: 'email_taken' });
 
-    // Random temp password. The invited user resets it via the existing
-    // auth flow on first login; we never surface this string back to the
-    // admin (no plaintext leak).
-    const tempPassword = `${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
-    const passwordHash = await hashPassword(tempPassword);
+    // Pre-create an ACTIVE shell with NO password — identity comes from Lark.
+    // When this person first signs in with Lark, they're matched by email and
+    // pick up this pre-assigned role (no PENDING review needed for invitees).
     const policy = await prisma.workspacePolicy.findUnique({
       where: { workspaceId: req.scope.workspaceId },
       select: { defaultScreenshotIntervalMin: true, defaultIdleThresholdMin: true },
@@ -1164,11 +1168,12 @@ adminRouter.post('/users', requireAdmin, async (req, res, next) => {
         email: emailRaw,
         name: nameRaw,
         role: roleRaw as ValidRole,
-        passwordHash,
+        passwordHash: null,
+        provisioningStatus: 'ACTIVE',
         screenshotIntervalMin: policy?.defaultScreenshotIntervalMin ?? WORKSPACE_POLICY_DEFAULTS.defaultScreenshotIntervalMin,
         idleThresholdMin: policy?.defaultIdleThresholdMin ?? WORKSPACE_POLICY_DEFAULTS.defaultIdleThresholdMin,
       },
-      select: { id: true, email: true, name: true, role: true, createdAt: true },
+      select: { id: true, email: true, name: true, role: true, provisioningStatus: true, createdAt: true },
     });
     res.status(201).json({ ...created, createdAt: created.createdAt.toISOString() });
   } catch (err) {
@@ -1238,6 +1243,40 @@ adminRouter.post('/users/:id/reactivate', requireAdmin, async (req, res, next) =
       select: { id: true, deactivatedAt: true },
     });
     res.json({ id: updated.id, deactivatedAt: updated.deactivatedAt });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /v1/admin/users/:id/activate
+ *
+ * Flip a PENDING (JIT-provisioned via Lark) user to ACTIVE so they can sign in.
+ * The admin assigns team/manager/role via PATCH /users/:id first if desired;
+ * this is the explicit "let them in" gate. Idempotent on an already-ACTIVE user.
+ */
+adminRouter.post('/users/:id/activate', requireAdmin, async (req, res, next) => {
+  try {
+    if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
+    const id = req.params.id;
+    if (!id) return res.status(400).json({ error: 'missing_id' });
+    const existing = await prisma.user.findUnique({
+      where: { id },
+      select: { id: true, workspaceId: true, provisioningStatus: true, deactivatedAt: true },
+    });
+    if (!existing || existing.workspaceId !== req.scope.workspaceId) {
+      return res.status(404).json({ error: 'not_found' });
+    }
+    if (existing.deactivatedAt) return res.status(409).json({ error: 'deactivated' });
+    if (existing.provisioningStatus === 'ACTIVE') {
+      return res.json({ id: existing.id, provisioningStatus: 'ACTIVE' });
+    }
+    const updated = await prisma.user.update({
+      where: { id },
+      data: { provisioningStatus: 'ACTIVE' },
+      select: { id: true, provisioningStatus: true },
+    });
+    res.json({ id: updated.id, provisioningStatus: updated.provisioningStatus });
   } catch (err) {
     next(err);
   }
