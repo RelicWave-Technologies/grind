@@ -14,9 +14,13 @@ services:
     plan: starter # free tier sleeps + has no preDeploy; starter keeps it warm
     region: oregon
     rootDir: .
-    # corepack pins pnpm@9.12.0 (from package.json "packageManager").
+    # Upgrade corepack first: the one bundled with Node 20.18.0 has stale npm
+    # registry signing keys and dies with "Cannot find matching keyid" when it
+    # provisions pnpm. corepack@latest ships current keys. It then pins
+    # pnpm@9.12.0 from package.json "packageManager".
     # prisma generate → build → migrate the Neon DB on every deploy.
     buildCommand: >-
+      npm i -g corepack@latest &&
       corepack enable &&
       pnpm install --frozen-lockfile &&
       pnpm --filter @grind/db exec prisma generate &&
@@ -30,6 +34,9 @@ services:
         value: production
       - key: NODE_VERSION
         value: "20.18.0"
+      # Keep corepack from auto-fetching "latest" (avoids the signing-key path).
+      - key: COREPACK_DEFAULT_TO_LATEST
+        value: "0"
       # Neon pooled URL (runtime). Set in dashboard.
       - key: DATABASE_URL
         sync: false
