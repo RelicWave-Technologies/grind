@@ -1,0 +1,21 @@
+# Vercel CLI uploads the working tree (it does NOT honor .gitignore), so exclude
+# everything the dashboard build doesn't need. pnpm install still needs every
+# workspace package.json + the lockfile + pnpm-workspace.yaml, so don't exclude
+# those — only heavy build artifacts, deps, and unrelated dirs.
+node_modules
+.git
+.turbo
+**/.turbo
+**/node_modules
+**/dist
+**/out
+apps/agent/release
+**/*.dmg
+**/*.blockmap
+apps/agent/build/*.icns
+apps/agent/build/*.png
+geo-deck
+interactive-product-deck
+test-results
+.context
+.claude
