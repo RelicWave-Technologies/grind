@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { Play, Square, ExternalLink, Timer, ListTodo } from 'lucide-react';
+import { Play, Square, ExternalLink, ListTodo } from 'lucide-react';
+import grindIcon from '../assets/grind-icon.svg';
 import type { TimerStatus } from '../lib/agent.d';
 import { projectStyle } from '../lib/projectStyle';
 import { fmtClock } from './Today';
@@ -27,7 +28,7 @@ export default function Popover() {
   return (
     <div className="pop">
       <div className="pop-head">
-        <span className="brand-mark" style={{ width: 22, height: 22 }}><Timer size={13} strokeWidth={2.5} /></span>
+        <span className="brand-mark" style={{ width: 22, height: 22 }}><img src={grindIcon} alt="" /></span>
         <span className="brand-name" style={{ fontSize: 14 }}>Grind</span>
         <button className="pop-open no-drag" title="Open Grind" onClick={() => window.agent.window.openMain()}>
           <ExternalLink size={15} strokeWidth={2} />
