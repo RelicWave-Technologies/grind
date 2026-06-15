@@ -21,6 +21,36 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Single-flight silent session refresh. When the short-lived access cookie
+ * expires, the next request 401s; we POST /v1/auth/refresh-cookie once (the
+ * httpOnly refresh cookie rotates server-side) and retry. Many concurrent 401s
+ * share ONE refresh promise so we never double-spend the single-use refresh
+ * token (which would trip reuse-detection and log everyone out).
+ */
+let refreshInFlight: Promise<boolean> | null = null;
+
+function refreshSession(): Promise<boolean> {
+  if (!refreshInFlight) {
+    refreshInFlight = fetch(`${API_BASE}/v1/auth/refresh-cookie`, {
+      method: 'POST',
+      credentials: 'include',
+    })
+      .then((r) => r.ok)
+      .catch(() => false)
+      .finally(() => {
+        refreshInFlight = null;
+      });
+  }
+  return refreshInFlight;
+}
+
+// The refresh/logout endpoints ARE the auth flow — never recurse into refresh
+// when one of them 401s.
+function isAuthEndpoint(path: string): boolean {
+  return path.includes('/v1/auth/refresh-cookie') || path.includes('/v1/auth/cookie-logout');
+}
+
 export async function api<T = unknown>(
   path: string,
   init?: RequestInit & { json?: unknown },
@@ -32,12 +62,20 @@ export async function api<T = unknown>(
     headers.set('Content-Type', 'application/json');
     body = JSON.stringify(init.json);
   }
-  const res = await fetch(url, {
-    ...init,
-    headers,
-    body,
-    credentials: 'include',
-  });
+  const doFetch = () =>
+    fetch(url, {
+      ...init,
+      headers,
+      body,
+      credentials: 'include',
+    });
+
+  let res = await doFetch();
+  // Access cookie expired → silent refresh once, then replay the request.
+  if (res.status === 401 && !isAuthEndpoint(path)) {
+    const refreshed = await refreshSession();
+    if (refreshed) res = await doFetch();
+  }
   const text = await res.text();
   let parsed: unknown = null;
   if (text) {

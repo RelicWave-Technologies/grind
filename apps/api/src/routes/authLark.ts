@@ -25,7 +25,7 @@ import {
 } from '../auth/larkLogin';
 import { signAccessToken } from '../lib/jwt';
 import { issueRefreshToken } from '../lib/refreshToken';
-import { setSessionCookie } from '../lib/cookies';
+import { setSessionCookie, setRefreshCookie } from '../lib/cookies';
 import { validate } from '../middleware/validate';
 import { env } from '../env';
 import { logger } from '../logger';
@@ -178,7 +178,11 @@ authLarkRouter.get('/callback', async (req, res, next) => {
       const oneTime = await createAgentAuthCode(user.id, payload.agentChallenge ?? '');
       return res.redirect(`grind://auth?code=${encodeURIComponent(oneTime)}`);
     }
+    // Dashboard: issue a refresh token alongside the access cookie so the
+    // session survives past the short access TTL via silent /refresh-cookie.
+    const { refreshToken } = await issueRefreshToken(user.id, 'dashboard');
     setSessionCookie(res, accessToken);
+    setRefreshCookie(res, refreshToken);
     return res.redirect(`${dashboardBase()}/`);
   } catch (err) {
     next(err);

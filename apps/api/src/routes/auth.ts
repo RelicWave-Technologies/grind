@@ -14,8 +14,14 @@ import { validate } from '../middleware/validate';
 import { requireAccessToken } from '../middleware/auth';
 import { signAccessToken } from '../lib/jwt';
 import { verifyPassword } from '../lib/password';
-import { issueRefreshToken, revokeRefreshToken, sha256 } from '../lib/refreshToken';
-import { setSessionCookie, clearSessionCookie } from '../lib/cookies';
+import { issueRefreshToken, revokeRefreshToken, rotateRefreshToken } from '../lib/refreshToken';
+import {
+  setSessionCookie,
+  clearSessionCookie,
+  setRefreshCookie,
+  clearRefreshCookie,
+  REFRESH_COOKIE,
+} from '../lib/cookies';
 import { env } from '../env';
 
 export const authRouter = Router();
@@ -96,6 +102,7 @@ if (PASSWORD_LOGIN_ENABLED) {
       const accessToken = signAccessToken({ sub: user.id, ws: user.workspaceId, role: payloadUser.role });
       const { refreshToken } = await issueRefreshToken(user.id, deviceName);
       setSessionCookie(res, accessToken);
+      setRefreshCookie(res, refreshToken);
 
       const response: LoginResponse = { accessToken, refreshToken, user: payloadUser };
       res.json(response);
@@ -106,13 +113,21 @@ if (PASSWORD_LOGIN_ENABLED) {
 }
 
 /**
- * Clear the dashboard's access cookie. Agent uses /logout (with refresh
- * token in body) which also revokes the refresh token — that path is
- * unchanged.
+ * Dashboard logout: revoke the refresh token server-side (so it can't be
+ * rotated again) and clear both cookies. Best-effort revoke — clearing the
+ * cookies is what actually logs the browser out. Agent uses /logout (refresh
+ * token in body) instead.
  */
-authRouter.post('/cookie-logout', (_req, res) => {
-  clearSessionCookie(res);
-  res.json({ ok: true });
+authRouter.post('/cookie-logout', async (req, res, next) => {
+  try {
+    const presented = (req.cookies as Record<string, string> | undefined)?.[REFRESH_COOKIE];
+    if (presented) await revokeRefreshToken(presented);
+    clearSessionCookie(res);
+    clearRefreshCookie(res);
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
 });
 
 /** Echo the authed user — used by the dashboard on boot to verify the cookie. */
@@ -169,31 +184,46 @@ authRouter.get('/me/shift', requireAccessToken, async (req, res, next) => {
   }
 });
 
+/**
+ * Bearer-token refresh for the agent (and any non-browser client). Rotates the
+ * refresh token in the request body with reuse detection and returns the new
+ * pair as JSON. The dashboard uses /refresh-cookie instead (httpOnly cookies).
+ */
 authRouter.post('/refresh', validate(RefreshRequest, 'body'), async (req, res, next) => {
   try {
     const { refreshToken } = req.body as RefreshRequest;
-    const tokenHash = sha256(refreshToken);
-    const row = await prisma.refreshToken.findUnique({
-      where: { tokenHash },
-      include: { user: true },
-    });
-    if (!row || row.revokedAt || row.expiresAt < new Date()) {
+    const result = await rotateRefreshToken(refreshToken);
+    if (!result.ok) {
+      if (result.reason === 'stale_role') return res.status(503).json({ error: 'stale_role_migration_required' });
       return res.status(401).json({ error: 'invalid_refresh' });
     }
-    await prisma.refreshToken.update({
-      where: { id: row.id },
-      data: { revokedAt: new Date() },
-    });
-    const parsedRole = RoleSchema.safeParse(row.user.role);
-    if (!parsedRole.success) return res.status(503).json({ error: 'stale_role_migration_required' });
-    const accessToken = signAccessToken({
-      sub: row.userId,
-      ws: row.user.workspaceId,
-      role: parsedRole.data,
-    });
-    const fresh = await issueRefreshToken(row.userId, row.deviceName ?? undefined);
-    const response: RefreshResponse = { accessToken, refreshToken: fresh.refreshToken };
+    const response: RefreshResponse = { accessToken: result.accessToken, refreshToken: result.refreshToken };
     res.json(response);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * Cookie-based silent refresh for the dashboard. Reads the httpOnly grind_rt
+ * cookie, rotates it (reuse detection), and re-sets both cookies. On any
+ * failure it clears both cookies so the browser stops replaying a dead token
+ * and the router falls through to /login. No body — the cookie is the credential.
+ */
+authRouter.post('/refresh-cookie', async (req, res, next) => {
+  try {
+    const presented = (req.cookies as Record<string, string> | undefined)?.[REFRESH_COOKIE];
+    if (!presented) return res.status(401).json({ error: 'no_refresh' });
+    const result = await rotateRefreshToken(presented);
+    if (!result.ok) {
+      clearSessionCookie(res);
+      clearRefreshCookie(res);
+      if (result.reason === 'stale_role') return res.status(503).json({ error: 'stale_role_migration_required' });
+      return res.status(401).json({ error: 'invalid_refresh', reason: result.reason });
+    }
+    setSessionCookie(res, result.accessToken);
+    setRefreshCookie(res, result.refreshToken);
+    res.json({ ok: true as const });
   } catch (err) {
     next(err);
   }

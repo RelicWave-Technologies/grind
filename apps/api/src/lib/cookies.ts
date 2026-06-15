@@ -1,4 +1,5 @@
 import type { Response } from 'express';
+import { env } from '../env';
 
 /**
  * The dashboard's httpOnly access-token cookie. In production the dashboard
@@ -9,7 +10,16 @@ import type { Response } from 'express';
  * always match (a mismatch makes the browser refuse to clear the cookie).
  */
 export const SESSION_COOKIE = 'grind_at';
-const COOKIE_MAX_AGE_MS = 60 * 60 * 1000; // 1h — matches the access-token TTL
+
+/**
+ * The dashboard's httpOnly refresh-token cookie. Scoped to `/v1/auth` so it's
+ * only ever sent to the refresh/logout endpoints — it never rides along on
+ * ordinary API calls, minimising exposure. The dashboard silently rotates it
+ * via POST /v1/auth/refresh-cookie when the short-lived access cookie 401s,
+ * giving a long (refresh-TTL) session without long-lived access tokens.
+ */
+export const REFRESH_COOKIE = 'grind_rt';
+const REFRESH_COOKIE_PATH = '/v1/auth';
 
 function crossSite(): boolean {
   return process.env.NODE_ENV === 'production';
@@ -20,7 +30,9 @@ export function setSessionCookie(res: Response, accessToken: string): void {
     httpOnly: true,
     sameSite: crossSite() ? 'none' : 'lax',
     secure: crossSite(),
-    maxAge: COOKIE_MAX_AGE_MS,
+    // Match the access-token TTL so the browser drops a stale cookie on its own;
+    // the refresh cookie (below) is what keeps the session alive past this.
+    maxAge: env.JWT_ACCESS_TTL_SECONDS * 1000,
     path: '/',
   });
 }
@@ -28,6 +40,24 @@ export function setSessionCookie(res: Response, accessToken: string): void {
 export function clearSessionCookie(res: Response): void {
   res.clearCookie(SESSION_COOKIE, {
     path: '/',
+    sameSite: crossSite() ? 'none' : 'lax',
+    secure: crossSite(),
+  });
+}
+
+export function setRefreshCookie(res: Response, refreshToken: string): void {
+  res.cookie(REFRESH_COOKIE, refreshToken, {
+    httpOnly: true,
+    sameSite: crossSite() ? 'none' : 'lax',
+    secure: crossSite(),
+    maxAge: env.JWT_REFRESH_TTL_SECONDS * 1000,
+    path: REFRESH_COOKIE_PATH,
+  });
+}
+
+export function clearRefreshCookie(res: Response): void {
+  res.clearCookie(REFRESH_COOKIE, {
+    path: REFRESH_COOKIE_PATH,
     sameSite: crossSite() ? 'none' : 'lax',
     secure: crossSite(),
   });

@@ -580,9 +580,14 @@ model RefreshToken {
   user       User      @relation(fields: [userId], references: [id])
   tokenHash  String    @unique
   deviceName String?
+  // Rotation family: every token minted by rotating an earlier one inherits the
+  // same familyId. Presenting an already-revoked token (replay/theft) revokes
+  // the whole family — OAuth 2.0 BCP refresh-token reuse detection.
+  familyId   String
   expiresAt  DateTime
   revokedAt  DateTime?
   createdAt  DateTime  @default(now())
 
   @@index([userId])
+  @@index([familyId])
 }
