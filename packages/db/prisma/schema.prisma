@@ -213,13 +213,13 @@ model User {
   shiftId          String?
   shift            Shift?    @relation("ShiftMembers", fields: [shiftId], references: [id], onDelete: SetNull)
   shiftAssignedAt  DateTime?
-  /// Per-member screenshot cadence. Defaults to the production privacy
-  /// cadence (one shot every 3 hours), but managers may tune it for their
-  /// team members without changing the whole workspace.
-  screenshotIntervalMin Int @default(180)
-  /// Per-member idle threshold. Once the OS reports this many idle minutes,
-  /// the agent treats the period as a break candidate and prompts the user.
-  idleThresholdMin      Int @default(5)
+  /// Per-member screenshot-cadence OVERRIDE in minutes. NULL = inherit the
+  /// workspace policy default (WorkspacePolicy.defaultScreenshotIntervalMin).
+  /// A value is an explicit per-member override set by an admin/manager.
+  screenshotIntervalMin Int?
+  /// Per-member idle-threshold OVERRIDE in minutes. NULL = inherit the
+  /// workspace policy default (WorkspacePolicy.defaultIdleThresholdMin).
+  idleThresholdMin      Int?
 
   refreshTokens   RefreshToken[]
   timeEntries     TimeEntry[]

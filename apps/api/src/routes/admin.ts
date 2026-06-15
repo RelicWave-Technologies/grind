@@ -116,15 +116,20 @@ type TeamSettingsUserRow = {
   managerId: string | null;
   shiftId: string | null;
   shiftAssignedAt: Date | null;
-  screenshotIntervalMin: number;
-  idleThresholdMin: number;
+  // NULL = inherit the workspace policy default (resolved below).
+  screenshotIntervalMin: number | null;
+  idleThresholdMin: number | null;
   createdAt: Date;
   team: { id: string; name: string; manager: { id: string; name: string; email: string } | null } | null;
 };
 
+/** Effective capture defaults for a workspace (per-member NULLs fall back here). */
+type PolicyDefaults = { screenshotIntervalMin: number; idleThresholdMin: number };
+
 function serializeTeamSettingsMember(
   user: TeamSettingsUserRow,
   manager: { id: string; name: string; email: string } | null,
+  defaults: PolicyDefaults,
 ): TeamMemberSettingsDto {
   return {
     id: user.id,
@@ -135,8 +140,9 @@ function serializeTeamSettingsMember(
     manager,
     shiftId: user.shiftId,
     shiftAssignedAt: user.shiftAssignedAt ? user.shiftAssignedAt.toISOString() : null,
-    screenshotIntervalMin: user.screenshotIntervalMin,
-    idleThresholdMin: user.idleThresholdMin,
+    // Resolved effective values: per-member override → policy default.
+    screenshotIntervalMin: user.screenshotIntervalMin ?? defaults.screenshotIntervalMin,
+    idleThresholdMin: user.idleThresholdMin ?? defaults.idleThresholdMin,
     createdAt: user.createdAt.toISOString(),
   };
 }
@@ -157,10 +163,25 @@ async function loadTeamSettingsMembers(userIds: string[]): Promise<TeamMemberSet
       screenshotIntervalMin: true,
       idleThresholdMin: true,
       createdAt: true,
+      workspaceId: true,
       team: { select: { id: true, name: true, manager: { select: { id: true, name: true, email: true } } } },
     },
     orderBy: [{ teamId: 'asc' }, { role: 'asc' }, { name: 'asc' }],
   });
+
+  // All members share one workspace (scope is workspace-bounded); resolve its
+  // policy defaults once so per-member NULL overrides fall back to them.
+  const workspaceId = users[0]?.workspaceId;
+  const policy = workspaceId
+    ? await prisma.workspacePolicy.findUnique({
+        where: { workspaceId },
+        select: { defaultScreenshotIntervalMin: true, defaultIdleThresholdMin: true },
+      })
+    : null;
+  const defaults: PolicyDefaults = {
+    screenshotIntervalMin: policy?.defaultScreenshotIntervalMin ?? WORKSPACE_POLICY_DEFAULTS.defaultScreenshotIntervalMin,
+    idleThresholdMin: policy?.defaultIdleThresholdMin ?? WORKSPACE_POLICY_DEFAULTS.defaultIdleThresholdMin,
+  };
 
   const managerIds = [...new Set(users.map((u) => u.managerId).filter((id): id is string => Boolean(id)))];
   const managers = managerIds.length
@@ -171,7 +192,7 @@ async function loadTeamSettingsMembers(userIds: string[]): Promise<TeamMemberSet
     : [];
   const managerById = new Map(managers.map((m) => [m.id, m]));
   return users.map((u) =>
-    serializeTeamSettingsMember(u, u.managerId ? managerById.get(u.managerId) ?? null : u.team?.manager ?? null),
+    serializeTeamSettingsMember(u, u.managerId ? managerById.get(u.managerId) ?? null : u.team?.manager ?? null, defaults),
   );
 }
 
@@ -232,8 +253,9 @@ adminRouter.patch('/team-member-settings/:id', requireCapability('team.settings.
     const data: {
       shiftId?: string | null;
       shiftAssignedAt?: Date | null;
-      screenshotIntervalMin?: number;
-      idleThresholdMin?: number;
+      // null clears the per-member override → inherit policy.
+      screenshotIntervalMin?: number | null;
+      idleThresholdMin?: number | null;
     } = {};
     let shiftAssignment:
       | {
@@ -1157,11 +1179,7 @@ adminRouter.post('/users', requireAdmin, async (req, res, next) => {
     // Pre-create an ACTIVE shell with NO password — identity comes from Lark.
     // When this person first signs in with Lark, they're matched by email and
     // pick up this pre-assigned role (no PENDING review needed for invitees).
-    const policy = await prisma.workspacePolicy.findUnique({
-      where: { workspaceId: req.scope.workspaceId },
-      select: { defaultScreenshotIntervalMin: true, defaultIdleThresholdMin: true },
-    });
-
+    // Capture settings are left NULL → inherit the workspace policy default.
     const created = await prisma.user.create({
       data: {
         workspaceId: req.scope.workspaceId,
@@ -1170,8 +1188,6 @@ adminRouter.post('/users', requireAdmin, async (req, res, next) => {
         role: roleRaw as ValidRole,
         passwordHash: null,
         provisioningStatus: 'ACTIVE',
-        screenshotIntervalMin: policy?.defaultScreenshotIntervalMin ?? WORKSPACE_POLICY_DEFAULTS.defaultScreenshotIntervalMin,
-        idleThresholdMin: policy?.defaultIdleThresholdMin ?? WORKSPACE_POLICY_DEFAULTS.defaultIdleThresholdMin,
       },
       select: { id: true, email: true, name: true, role: true, provisioningStatus: true, createdAt: true },
     });

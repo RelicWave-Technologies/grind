@@ -18,9 +18,15 @@ export const IDLE_THRESHOLD_SEC: number = Number(process.env.AGENT_IDLE_SEC ?? 3
  *  ~1-2s resolution). */
 export const IDLE_POLL_MS: number = Math.max(500, Math.min(5_000, Math.floor(IDLE_THRESHOLD_SEC * 1000 / 4)));
 
-/** Screenshot cadence in seconds. Default 3 hours (jittered to ~1.5–3h).
- *  Override with AGENT_SHOT_SEC (e.g. 15) for testing. */
+/** Screenshot cadence in seconds. Server policy (per-user → workspace) drives
+ *  this at runtime via /v1/agent/config; this is just the boot/offline default.
+ *  Set AGENT_SHOT_SEC (e.g. 15) to LOCK it for testing (server won't override). */
 export const SCREENSHOT_INTERVAL_SEC: number = Number(process.env.AGENT_SHOT_SEC ?? 10_800);
+/** True when AGENT_SHOT_SEC is explicitly set → a hard local override that the
+ *  server-config refresh must not clobber. */
+export const SHOT_SEC_LOCKED: boolean = process.env.AGENT_SHOT_SEC != null;
+/** Same lock semantics for the idle threshold (AGENT_IDLE_SEC). */
+export const IDLE_SEC_LOCKED: boolean = process.env.AGENT_IDLE_SEC != null;
 /** WebP quality (0–100) for stored screenshots. */
 export const SCREENSHOT_QUALITY: number = Number(process.env.AGENT_SHOT_QUALITY ?? 82);
 /** Max long-edge px; larger displays are downscaled to this. */

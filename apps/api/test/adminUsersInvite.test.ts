@@ -100,7 +100,7 @@ describe('POST /v1/admin/users (invite)', () => {
     expect(created?.deactivatedAt).toBeNull();
   });
 
-  it('applies workspace policy defaults to newly-created members', async () => {
+  it('leaves capture settings null on invited members (they inherit policy)', async () => {
     const { ws, admin, stamp } = await seed();
     await prisma.workspacePolicy.create({
       data: {
@@ -117,8 +117,9 @@ describe('POST /v1/admin/users (invite)', () => {
 
     expect(res.status).toBe(201);
     const created = await prisma.user.findUnique({ where: { id: res.body.id } });
-    expect(created?.screenshotIntervalMin).toBe(60);
-    expect(created?.idleThresholdMin).toBe(10);
+    // null = inherit the policy default (resolved at /v1/agent/config).
+    expect(created?.screenshotIntervalMin).toBeNull();
+    expect(created?.idleThresholdMin).toBeNull();
   });
 
   it('409 on duplicate email', async () => {

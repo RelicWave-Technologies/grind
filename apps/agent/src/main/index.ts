@@ -16,6 +16,7 @@ import { togglePopover, hidePopover } from './popover';
 import { showIdlePrompt, hideIdlePrompt } from './idlePrompt';
 import { ShiftMonitor } from './services/shift';
 import { onAuthChange } from './services/apiClient';
+import { refreshAgentConfig } from './services/agentConfig';
 import { registerProtocol, handleDeepLink, deepLinkFromArgv, flushQueuedDeepLink } from './services/deepLink';
 import { broadcast } from './broadcast';
 import { log } from './logger';
@@ -141,6 +142,11 @@ app.whenReady().then(async () => {
     log.warn('initTimerOnBoot failed', { err: String(err) });
   }
 
+  // Pull the server-driven capture cadence + idle threshold (per-user →
+  // workspace policy) BEFORE the capture loop schedules its first shot, so the
+  // first interval already reflects policy. No-ops (keeps defaults) if logged out.
+  await refreshAgentConfig();
+
   startCaptureLoop();
   startActivityCapture();
   startActiveWindowPolling();
@@ -154,9 +160,12 @@ app.whenReady().then(async () => {
   } catch (err) {
     log.warn('shift monitor start failed', { err: String(err) });
   }
-  // Re-fetch the shift whenever auth state flips (login or refresh).
+  // Re-fetch the shift + capture config whenever auth state flips (login/refresh).
   onAuthChange((status) => {
-    if (status === 'loggedIn') void shiftMonitor.refreshShift();
+    if (status === 'loggedIn') {
+      void shiftMonitor.refreshShift();
+      void refreshAgentConfig();
+    }
   });
   ipcMain.handle('shift:decide', (_e, decision: 'yes' | 'not_yet') => {
     shiftMonitor.onUserDecision(decision);
