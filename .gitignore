@@ -38,3 +38,9 @@ out/
 dist-electron/
 release/
 .vercel
+
+# local scratch / tooling — not part of the app
+.claude/
+test-results/
+geo-deck/
+interactive-product-deck/
