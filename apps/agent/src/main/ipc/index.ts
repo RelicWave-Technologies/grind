@@ -6,6 +6,7 @@ import { registerCaptureIpc } from './capture';
 import { registerSettingsIpc } from './settings';
 import { registerLarkIpc } from './lark';
 import { registerInsightsIpc } from './insights';
+import { registerAppIpc } from './app';
 
 export function registerIpc(opts: { onOpenMainWindow: () => void }): void {
   registerAuthIpc();
@@ -15,6 +16,7 @@ export function registerIpc(opts: { onOpenMainWindow: () => void }): void {
   registerSettingsIpc();
   registerLarkIpc();
   registerInsightsIpc();
+  registerAppIpc();
 
   // Lets the floating bar / popover ask to bring up the main window.
   ipcMain.handle('window:openMain', () => opts.onOpenMainWindow());

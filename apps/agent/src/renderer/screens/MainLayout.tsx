@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CalendarClock, ListTodo, PieChart, Settings as SettingsIcon, LogOut, Gauge, Clock, Keyboard, MousePointer2 } from 'lucide-react';
+import { CalendarClock, ListTodo, PieChart, Settings as SettingsIcon, LogOut, Gauge, Clock, Keyboard, MousePointer2, ExternalLink } from 'lucide-react';
 import grindIcon from '../assets/grind-icon.svg';
 import Today from './Today';
 import Tasks from './Tasks';
@@ -26,6 +26,8 @@ export default function MainLayout() {
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['authStatus'] }),
   });
 
+  const openDashboard = useMutation({ mutationFn: () => window.agent.app.openDashboard() });
+
   return (
     <div className="layout">
       <aside className="sidebar">
@@ -44,6 +46,16 @@ export default function MainLayout() {
         </nav>
 
         <div className="sidebar-spacer" />
+
+        <button
+          className="nav-item no-drag"
+          onClick={() => openDashboard.mutate()}
+          disabled={openDashboard.isPending}
+          title={openDashboard.data && !openDashboard.data.ok ? 'Dashboard URL not available yet' : 'Open the web dashboard in your browser'}
+        >
+          <ExternalLink size={18} strokeWidth={2} />
+          <span>{openDashboard.isPending ? 'Opening…' : 'Dashboard'}</span>
+        </button>
 
         <button className="sidebar-user" onClick={() => logout.mutate()} title="Sign out">
           <span className="avatar">A</span>
