@@ -37,12 +37,22 @@ cp -R "$AGENT_DIR/out" "$STAGE/out"
 cp -R "$AGENT_DIR/build" "$STAGE/build"
 cp "$AGENT_DIR/electron-builder.yml" "$STAGE/electron-builder.yml"
 
-# afterPack must be an absolute path (electron-builder resolves a relative one
-# against CWD, not the staging projectDir).
-EB_ARGS=(--mac dmg "--$ARCH" --projectDir "$STAGE" "-c.electronVersion=$ELECTRON_VERSION" "-c.afterPack=$STAGE/build/afterPack.cjs")
+# afterPack + entitlements must be ABSOLUTE paths: electron-builder resolves
+# relative ones against CWD, but spawns afterPack/codesign from a different dir,
+# so a relative `build/…` fails ("cannot read entitlement data").
+EB_ARGS=(--mac dmg "--$ARCH" --projectDir "$STAGE" "-c.electronVersion=$ELECTRON_VERSION"
+  "-c.afterPack=$STAGE/build/afterPack.cjs"
+  "-c.mac.entitlements=$STAGE/build/entitlements.mac.plist"
+  "-c.mac.entitlementsInherit=$STAGE/build/entitlements.mac.plist")
 if [[ "${SIGN:-0}" != "1" ]]; then
   echo "▸ unsigned build (set SIGN=1 + Apple creds to sign + notarize)"
   export CSC_IDENTITY_AUTO_DISCOVERY=false
+  EB_ARGS+=("-c.mac.notarize=false")
+elif [[ "${NOTARIZE:-1}" != "1" ]]; then
+  # Signed but not notarized — fixes TCC/Accessibility (stable signature) without
+  # needing Apple ID / app-specific password. Distribution still shows the
+  # "unidentified developer" Gatekeeper warning until notarized.
+  echo "▸ signed build (notarization skipped — NOTARIZE=0)"
   EB_ARGS+=("-c.mac.notarize=false")
 else
   echo "▸ signed + notarized build"
