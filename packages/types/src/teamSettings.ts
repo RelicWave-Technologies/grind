@@ -7,7 +7,7 @@ export const MEMBER_SETTING_DEFAULTS = {
   idleThresholdMin: 5,
 } as const;
 
-export const SCREENSHOT_INTERVAL_MIN = 5;
+export const SCREENSHOT_INTERVAL_MIN = 1;
 export const SCREENSHOT_INTERVAL_MAX = 480;
 export const IDLE_THRESHOLD_MIN = 1;
 export const IDLE_THRESHOLD_MAX = 120;
@@ -54,8 +54,10 @@ export type TeamSettingsResponse = z.infer<typeof TeamSettingsResponseSchema>;
 export const PatchTeamMemberSettingsRequest = z
   .object({
     shiftId: z.string().nullable().optional(),
-    screenshotIntervalMin: z.number().int().min(SCREENSHOT_INTERVAL_MIN).max(SCREENSHOT_INTERVAL_MAX).optional(),
-    idleThresholdMin: z.number().int().min(IDLE_THRESHOLD_MIN).max(IDLE_THRESHOLD_MAX).optional(),
+    // null clears the per-member override → the member inherits the workspace
+    // policy default. A number sets an explicit per-member override.
+    screenshotIntervalMin: z.number().int().min(SCREENSHOT_INTERVAL_MIN).max(SCREENSHOT_INTERVAL_MAX).nullable().optional(),
+    idleThresholdMin: z.number().int().min(IDLE_THRESHOLD_MIN).max(IDLE_THRESHOLD_MAX).nullable().optional(),
   })
   .refine((v) => Object.keys(v).length > 0, { message: 'nothing_to_update' });
 

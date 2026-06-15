@@ -104,7 +104,9 @@ describe('PatchWorkspacePolicyRequest', () => {
   });
 
   it('rejects workspace default tracking knobs outside member override ranges', () => {
-    expect(PatchWorkspacePolicyRequest.safeParse({ defaultScreenshotIntervalMin: 2 }).success).toBe(false);
+    // Screenshot interval floor is now 1 min; 0 is below it.
+    expect(PatchWorkspacePolicyRequest.safeParse({ defaultScreenshotIntervalMin: 0 }).success).toBe(false);
+    expect(PatchWorkspacePolicyRequest.safeParse({ defaultScreenshotIntervalMin: 999 }).success).toBe(false);
     expect(PatchWorkspacePolicyRequest.safeParse({ defaultIdleThresholdMin: 0 }).success).toBe(false);
   });
 });

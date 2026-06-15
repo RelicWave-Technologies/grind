@@ -54,7 +54,7 @@ interface PayrollFormState {
   payrollSheetSendTime: string;
 }
 
-const SCREENSHOT_INTERVAL_OPTIONS = [15, 30, 60, 120, 180, 240, 360, 480];
+const SCREENSHOT_INTERVAL_OPTIONS = [1, 5, 10, 15, 30, 60, 120, 180, 240, 360, 480];
 const IDLE_THRESHOLD_OPTIONS = [1, 3, 5, 10, 15, 30, 45, 60, 120];
 const RETENTION_OPTIONS = [30, 60, 90, 180, 365];
 

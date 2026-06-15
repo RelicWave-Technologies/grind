@@ -10,7 +10,8 @@ import { startUploader, drainUploads } from './uploader';
 import { getTimerService } from '../timer';
 import { getActivityStore } from '../activity';
 import { activityPercent } from '../activity/percent';
-import { SCREENSHOT_INTERVAL_SEC, SCREENSHOT_RETENTION_DAYS } from '../../env';
+import { SCREENSHOT_RETENTION_DAYS } from '../../env';
+import { getScreenshotIntervalSec } from '../agentConfig';
 import { type CaptureHealth } from '../permissions';
 import { log } from '../../logger';
 
@@ -72,7 +73,9 @@ export function getScreenshotStore(): ScreenshotStore {
 }
 
 function schedule() {
-  const delay = nextDelayMs(SCREENSHOT_INTERVAL_SEC * 1000);
+  // Read the live, server-driven cadence each time so a policy change applies
+  // from the next scheduled shot onward.
+  const delay = nextDelayMs(getScreenshotIntervalSec() * 1000);
   timer = setTimeout(() => void tick(), delay);
   log.info('next screenshot scheduled', { inMs: delay });
 }

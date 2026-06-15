@@ -1,7 +1,8 @@
 import { powerMonitor } from 'electron';
 import { getTimerService } from '../timer';
 import { shouldPromptIdle, computeIdleStart } from './decide';
-import { IDLE_THRESHOLD_SEC, IDLE_POLL_MS } from '../../env';
+import { IDLE_POLL_MS } from '../../env';
+import { getIdleThresholdSec } from '../agentConfig';
 import { log } from '../../logger';
 
 /**
@@ -22,7 +23,7 @@ export class IdleMonitor {
 
   start(): void {
     if (this.interval) return;
-    log.info('idle monitor started', { thresholdSec: IDLE_THRESHOLD_SEC, pollMs: IDLE_POLL_MS });
+    log.info('idle monitor started', { thresholdSec: getIdleThresholdSec(), pollMs: IDLE_POLL_MS });
     this.interval = setInterval(() => this.tick(), IDLE_POLL_MS);
   }
 
@@ -32,7 +33,7 @@ export class IdleMonitor {
       if (this.isProtected()) return;
       const idleSeconds = powerMonitor.getSystemIdleTime();
       const isRunning = getTimerService().isRunning();
-      if (shouldPromptIdle({ isRunning, idleSeconds, thresholdSec: IDLE_THRESHOLD_SEC, prompting: this.prompting })) {
+      if (shouldPromptIdle({ isRunning, idleSeconds, thresholdSec: getIdleThresholdSec(), prompting: this.prompting })) {
         this.prompting = true;
         this.idleStartedAt = computeIdleStart(Date.now(), idleSeconds);
         log.info('idle prompt triggered', { idleSeconds });
