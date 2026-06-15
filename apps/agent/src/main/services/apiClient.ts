@@ -54,6 +54,23 @@ async function refreshTokens(current: StoredTokens): Promise<StoredTokens | null
   return next;
 }
 
+/**
+ * Single-flight refresh: concurrent 401s share ONE rotation. The refresh token
+ * is single-use with server-side reuse detection — two parallel rotations would
+ * spend it twice, trip reuse-detection, and revoke the whole token family
+ * (forcing a re-login). One in-flight promise guarantees that never happens.
+ */
+let refreshInFlight: Promise<StoredTokens | null> | null = null;
+
+function refreshTokensOnce(current: StoredTokens): Promise<StoredTokens | null> {
+  if (!refreshInFlight) {
+    refreshInFlight = refreshTokens(current).finally(() => {
+      refreshInFlight = null;
+    });
+  }
+  return refreshInFlight;
+}
+
 export async function api<T>(path: string, opts: FetchOptions = {}): Promise<T> {
   const tokens = opts.auth === false ? null : await loadTokens();
   if (opts.auth !== false && !tokens) {
@@ -70,7 +87,7 @@ export async function api<T>(path: string, opts: FetchOptions = {}): Promise<T> 
   }
 
   if (!tokens) throw new UnauthorizedError('no_tokens');
-  const refreshed = await refreshTokens(tokens);
+  const refreshed = await refreshTokensOnce(tokens);
   if (!refreshed) {
     await clearTokens();
     notifyAuth('loggedOut');

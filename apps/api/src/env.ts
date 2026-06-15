@@ -11,7 +11,10 @@ const EnvSchema = z.object({
   DIRECT_URL: z.string().url().optional(),
   JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 chars'),
   JWT_ACCESS_TTL_SECONDS: z.coerce.number().int().min(60).default(900),
-  JWT_REFRESH_TTL_SECONDS: z.coerce.number().int().min(3600).default(60 * 60 * 24 * 30),
+  // 90-day sliding window: every use rotates the refresh token and resets this
+  // clock, so an active session effectively never expires while access tokens
+  // stay short-lived (15m) and revocable. Re-login only after 90d of inactivity.
+  JWT_REFRESH_TTL_SECONDS: z.coerce.number().int().min(3600).default(60 * 60 * 24 * 90),
 
   // --- Lark / Feishu (optional; integration is disabled when unset) ---
   // International tenant by default. Provide creds from the Lark Developer Console.
