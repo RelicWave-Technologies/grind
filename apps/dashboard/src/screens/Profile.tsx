@@ -108,7 +108,7 @@ function ProfileBody({ profile, timezone }: { profile: SelfProfileResponse; time
         <Card title="Profile">
           <div className="prf-profile-head">
             <Identity
-              avatar={<Avatar name={profile.user.name} size={40} />}
+              avatar={<Avatar name={profile.user.name} src={profile.user.avatarUrl ?? undefined} size={40} />}
               name={profile.user.name}
               subtitle={profile.user.email}
             />
@@ -121,7 +121,7 @@ function ProfileBody({ profile, timezone }: { profile: SelfProfileResponse; time
               meta={profile.team ? `${profile.team.memberCount} members` : 'No team assigned'}
             />
             <ListRow
-              leading={profile.manager ? <Avatar name={profile.manager.name} size={32} /> : <LeadingIcon icon={<User size={16} strokeWidth={1.8} />} />}
+              leading={profile.manager ? <Avatar name={profile.manager.name} src={profile.manager.avatarUrl ?? undefined} size={32} /> : <LeadingIcon icon={<User size={16} strokeWidth={1.8} />} />}
               title={profile.manager?.name ?? 'No direct manager'}
               subtitle={profile.manager ? `Manager · ${profile.manager.email}` : 'Manager'}
               meta={profile.manager ? undefined : roleLine(profile.user.displayRole)}

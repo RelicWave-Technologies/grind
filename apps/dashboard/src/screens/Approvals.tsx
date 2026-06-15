@@ -373,7 +373,7 @@ function ApprovalTable({
                       <Identity
                         name={row.requester.name}
                         subtitle={row.requester.email}
-                        avatar={<Avatar name={row.requester.name} size={32} />}
+                        avatar={<Avatar name={row.requester.name} src={row.requester.avatarUrl ?? undefined} size={32} />}
                       />
                     ) : (
                       <span className="ui-t-small">Unknown member</span>

@@ -9,7 +9,7 @@ import { buildDayInsight, localDayWindow, shiftDayWindow } from '../insights/day
 import { WEEKDAYS, type ShiftSchedule } from '@grind/types';
 import { buildHeatmap, DEFAULT_BUCKET_MS, type HeatmapSample } from '../insights/heatmap';
 import { buildAppUsage } from '../insights/appUsage';
-import { appIconUrl } from '../insights/appIcon';
+import { resolveAppIcon, storedIconDataUrls } from '../insights/appIcon';
 
 export const insightsRouter = Router();
 // /day accepts an optional ?userId= so admins/managers can pull a team
@@ -288,11 +288,12 @@ insightsRouter.get('/day', async (req, res, next) => {
         clicks: s.clicks,
       })),
     );
+    const storedIcons = await storedIconDataUrls(appUsageBase.topApps.map((a) => a.appBundle));
     const appUsage = {
       ...appUsageBase,
       topApps: appUsageBase.topApps.map((app) => ({
         ...app,
-        iconUrl: appIconUrl(app.app, app.appBundle),
+        iconUrl: resolveAppIcon(app.app, app.appBundle, storedIcons),
       })),
     };
 

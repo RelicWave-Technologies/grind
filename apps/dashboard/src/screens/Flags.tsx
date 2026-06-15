@@ -185,7 +185,7 @@ function FlagCard({
         <Identity
           name={flag.user.name}
           subtitle={flag.user.email}
-          avatar={<Avatar name={flag.user.name} size={40} />}
+          avatar={<Avatar name={flag.user.name} src={flag.user.avatarUrl ?? undefined} size={40} />}
         />
         <div className="flg-risk">
           <span className="ui-t-eyebrow flg-risk__cap">Risk</span>

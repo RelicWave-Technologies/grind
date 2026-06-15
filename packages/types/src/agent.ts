@@ -19,6 +19,19 @@ export const HeartbeatResponse = z.object({
 });
 export type HeartbeatResponse = z.infer<typeof HeartbeatResponse>;
 
+/** One extracted app icon the agent uploads (PNG, base64). */
+export const AgentAppIconItem = z.object({
+  bundleId: z.string().min(1).max(255),
+  app: z.string().min(1).max(255),
+  pngBase64: z.string().min(1).max(200_000),
+});
+export type AgentAppIconItem = z.infer<typeof AgentAppIconItem>;
+
+export const AgentAppIconsRequest = z.object({
+  icons: z.array(AgentAppIconItem).min(1).max(50),
+});
+export type AgentAppIconsRequest = z.infer<typeof AgentAppIconsRequest>;
+
 export const AgentConfigResponse = z.object({
   heartbeatIntervalSec: z.number().int().min(15).max(600).default(60),
   screenshotIntervalMin: z.number().int().min(1).max(480).default(180),

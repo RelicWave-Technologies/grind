@@ -149,6 +149,10 @@ export function resolveSingleReportDay(query: Record<string, unknown>): ReportRa
   return range;
 }
 
+/** Resolves an app's icon URL; defaults to the brand map. Routes inject one that
+ *  prefers the real agent-extracted icon (a `data:` URL) per bundle. */
+export type IconResolver = (app: string, bundle: string | null) => string | null;
+
 export function buildMemberReportDays(input: {
   userId: string;
   range: ReportRange;
@@ -158,7 +162,9 @@ export function buildMemberReportDays(input: {
   samples: ReportActivitySample[];
   screenshots: ReportScreenshotRow[];
   shiftAssignments: ReportShiftAssignment[];
+  iconFor?: IconResolver;
 }): MemberReportDay[] {
+  const iconFor = input.iconFor ?? appIconUrl;
   const segments: TimesheetSegmentInput[] = [];
   const nowMs = input.now.getTime();
   for (const e of input.entries) {
@@ -257,7 +263,7 @@ export function buildMemberReportDays(input: {
     const topApps = appUsage.topApps.map((a) => ({
       app: a.app,
       appBundle: a.appBundle,
-      iconUrl: appIconUrl(a.app, a.appBundle),
+      iconUrl: iconFor(a.app, a.appBundle),
       minutes: a.minutes,
       share: appUsage.totalMinutes > 0 ? a.minutes / appUsage.totalMinutes : 0,
     }));
@@ -293,7 +299,9 @@ export function buildMemberReportDays(input: {
 export function buildMemberReportApps(input: {
   range: ReportRange;
   samples: ReportActivitySample[];
+  iconFor?: IconResolver;
 }): { date: string; tz: string; totalMinutes: number; apps: MemberReportApp[] } {
+  const iconFor = input.iconFor ?? appIconUrl;
   const win = localDayWindow(input.range.from, input.range.tz);
   const dayStart = win?.start.getTime() ?? 0;
   const dayEnd = win?.end.getTime() ?? 0;
@@ -314,7 +322,7 @@ export function buildMemberReportApps(input: {
       byApp.set(key, {
         app: s.activeApp,
         appBundle: s.activeAppBundle,
-        iconUrl: appIconUrl(s.activeApp, s.activeAppBundle),
+        iconUrl: iconFor(s.activeApp, s.activeAppBundle),
         minutes: 1,
         share: 0,
         keystrokes: s.keystrokes,

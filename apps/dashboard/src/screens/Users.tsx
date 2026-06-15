@@ -52,6 +52,7 @@ interface AdminUser {
   email: string;
   name: string;
   role: Role;
+  avatarUrl: string | null;
   teamId: string | null;
   managerId: string | null;
   shiftId?: string | null;
@@ -365,7 +366,7 @@ function PersonRow({ user, isSelf, canEdit, colSpan, teams, teamName, shifts, sh
         <Td>
           {editing ? (
             <div className="usr-person-edit">
-              <Avatar name={user.name} size={32} />
+              <Avatar name={user.name} src={user.avatarUrl ?? undefined} size={32} />
               <Input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
@@ -376,7 +377,7 @@ function PersonRow({ user, isSelf, canEdit, colSpan, teams, teamName, shifts, sh
             </div>
           ) : (
             <Identity
-              avatar={<Avatar name={user.name} size={32} />}
+              avatar={<Avatar name={user.name} src={user.avatarUrl ?? undefined} size={32} />}
               name={
                 <span className="usr-name-line">
                   {user.name}

@@ -65,6 +65,7 @@ interface PayrollRow {
     id: string;
     name: string;
     email: string;
+    avatarUrl: string | null;
     role: string;
     teamName: string | null;
   };
@@ -286,7 +287,7 @@ export function PayrollScreen() {
                     {payroll!.rows.map((r) => (
                       <Tr key={r.user.id}>
                         <Td>
-                          <Identity name={r.user.name} subtitle={r.user.email} avatar={<Avatar name={r.user.name} size={32} />} />
+                          <Identity name={r.user.name} subtitle={r.user.email} avatar={<Avatar name={r.user.name} src={r.user.avatarUrl ?? undefined} size={32} />} />
                         </Td>
                         <Td>{r.user.teamName ? <Tag>{r.user.teamName}</Tag> : <span className="ui-t-small">-</span>}</Td>
                         <Td mono>{r.rawHours.toFixed(1)}h</Td>
@@ -331,7 +332,7 @@ function PayrollDrawer({ row, month, onClose }: { row: PayrollRow; month: string
       <aside className="pay-drawer" role="dialog" aria-modal="true" aria-labelledby="pay-drawer-title" onMouseDown={(e) => e.stopPropagation()}>
         <header className="pay-drawer-head">
           <div className="pay-drawer-title">
-            <Avatar name={row.user.name} size={40} />
+            <Avatar name={row.user.name} src={row.user.avatarUrl ?? undefined} size={40} />
             <div className="pay-drawer-heading">
               <span className="ui-t-eyebrow">Payroll ledger</span>
               <h2 id="pay-drawer-title">{row.user.name}</h2>

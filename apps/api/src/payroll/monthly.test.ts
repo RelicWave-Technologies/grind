@@ -8,6 +8,7 @@ const u = (id: string, name: string, team: string | null = null) => ({
   id,
   name,
   email: `${name.toLowerCase().replace(/\s/g, '.')}@x.com`,
+  avatarUrl: null,
   role: 'MEMBER',
   teamId: team ? `t_${team}` : null,
   teamName: team,

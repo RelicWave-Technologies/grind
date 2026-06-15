@@ -23,6 +23,7 @@ export async function loadProfileForUser(
       id: true,
       name: true,
       email: true,
+      avatarUrl: true,
       role: true,
       createdAt: true,
       managerId: true,
@@ -43,6 +44,7 @@ export async function loadProfileForUser(
               id: true,
               name: true,
               email: true,
+              avatarUrl: true,
             },
           },
           _count: { select: { members: true } },
@@ -72,7 +74,7 @@ export async function loadProfileForUser(
     user.managerId
       ? prisma.user.findUnique({
           where: { id: user.managerId },
-          select: { id: true, name: true, email: true },
+          select: { id: true, name: true, email: true, avatarUrl: true },
         })
       : Promise.resolve(null),
     loadOrCreatePolicy(workspaceId),
@@ -84,6 +86,7 @@ export async function loadProfileForUser(
       id: user.id,
       name: user.name,
       email: user.email,
+      avatarUrl: user.avatarUrl,
       role: parsedRole.data,
       displayRole: parsedRole.data,
       createdAt: user.createdAt.toISOString(),

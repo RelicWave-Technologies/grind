@@ -28,6 +28,10 @@ export default function MainLayout() {
 
   const openDashboard = useMutation({ mutationFn: () => window.agent.app.openDashboard() });
 
+  const me = useQuery({ queryKey: ['me'], queryFn: () => window.agent.auth.me(), staleTime: 5 * 60_000 });
+  const meName = me.data?.name ?? 'Account';
+  const meInitial = meName.trim().slice(0, 1).toUpperCase() || 'A';
+
   return (
     <div className="layout">
       <aside className="sidebar">
@@ -58,9 +62,11 @@ export default function MainLayout() {
         </button>
 
         <button className="sidebar-user" onClick={() => logout.mutate()} title="Sign out">
-          <span className="avatar">A</span>
+          <span className="avatar">
+            {me.data?.avatarUrl ? <img src={me.data.avatarUrl} alt="" /> : meInitial}
+          </span>
           <span style={{ flex: 1, minWidth: 0 }}>
-            <span className="callout" style={{ display: 'block', fontWeight: 600 }}>Account</span>
+            <span className="callout" style={{ display: 'block', fontWeight: 600 }}>{meName}</span>
             <span className="small secondary">Sign out</span>
           </span>
           <LogOut size={16} strokeWidth={2} color="var(--label-tertiary)" />

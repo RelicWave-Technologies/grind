@@ -16,6 +16,7 @@ export const TeamSettingsPersonSchema = z.object({
   id: z.string(),
   name: z.string(),
   email: z.string().email(),
+  avatarUrl: z.string().nullable().default(null),
 });
 
 export type TeamSettingsPerson = z.infer<typeof TeamSettingsPersonSchema>;
@@ -31,6 +32,7 @@ export const TeamMemberSettingsDtoSchema = z.object({
   id: z.string(),
   name: z.string(),
   email: z.string().email(),
+  avatarUrl: z.string().nullable().default(null),
   role: Role,
   team: TeamSettingsTeamSchema.nullable(),
   manager: TeamSettingsPersonSchema.nullable(),

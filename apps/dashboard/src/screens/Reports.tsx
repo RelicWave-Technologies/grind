@@ -508,7 +508,7 @@ function TeamMembersTable({ members, onOpenMember }: { members: TeamReportMember
             <Tr key={member.user.id} rail={member.lateDays > 0 || member.noActivityDays > 0 ? 'warn' : undefined}>
               <Td>
                 <Identity
-                  avatar={<Avatar name={member.user.name} size={32} />}
+                  avatar={<Avatar name={member.user.name} src={member.user.avatarUrl ?? undefined} size={32} />}
                   name={member.user.name}
                   subtitle={member.user.teamName ?? member.user.email}
                 />
@@ -782,7 +782,7 @@ function TeamMemberDrawer({
   const decisionError = decide.isError ? (decide.error as Error).message : null;
   const identity = member ? (
     <Identity
-      avatar={<Avatar name={member.user.name} size={40} />}
+      avatar={<Avatar name={member.user.name} src={member.user.avatarUrl ?? undefined} size={40} />}
       name={member.user.name}
       subtitle={member.user.teamName ?? member.user.email}
     />
@@ -1270,7 +1270,7 @@ function TeamMemberProfilePanel({ profile, timezone }: { profile: SelfProfileRes
     <div className="rep-drawer-profile">
       <div className="rep-drawer-profile-head">
         <Identity
-          avatar={<Avatar name={profile.user.name} size={40} />}
+          avatar={<Avatar name={profile.user.name} src={profile.user.avatarUrl ?? undefined} size={40} />}
           name={profile.user.name}
           subtitle={profile.user.email}
         />

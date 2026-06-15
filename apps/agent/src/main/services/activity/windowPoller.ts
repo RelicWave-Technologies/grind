@@ -1,5 +1,6 @@
 import { getTimerService } from '../timer';
 import { recordActiveWindow } from './index';
+import { noteRunningApp } from '../appIcons';
 import { log } from '../../logger';
 
 /**
@@ -17,7 +18,7 @@ import { log } from '../../logger';
  */
 type ActiveWindow =
   | {
-      owner?: { name?: string; bundleId?: string };
+      owner?: { name?: string; bundleId?: string; path?: string };
       title?: string;
       url?: string;
     }
@@ -57,6 +58,12 @@ async function tick(): Promise<void> {
       appBundle: win?.owner?.bundleId ?? null,
       title: win?.title ?? null,
       url: win?.url ?? null,
+    });
+    // Extract + upload this app's real OS icon (once per bundle per session).
+    void noteRunningApp({
+      app: win?.owner?.name ?? null,
+      bundleId: win?.owner?.bundleId ?? null,
+      path: win?.owner?.path ?? null,
     });
   } catch (err) {
     log.warn('active-window tick failed', { err: String(err) });

@@ -37,6 +37,7 @@ interface UserListEntry {
   id: string;
   email: string;
   name: string;
+  avatarUrl: string | null;
   role: 'ADMIN' | 'MANAGER' | 'MEMBER';
   teamId: string | null;
   managerId: string | null;
@@ -75,6 +76,7 @@ adminRouter.get('/users', async (req, res, next) => {
         id: true,
         email: true,
         name: true,
+        avatarUrl: true,
         role: true,
         teamId: true,
         managerId: true,
@@ -89,6 +91,7 @@ adminRouter.get('/users', async (req, res, next) => {
       id: u.id,
       email: u.email,
       name: u.name,
+      avatarUrl: u.avatarUrl,
       role: u.role,
       teamId: u.teamId,
       managerId: u.managerId,
@@ -111,6 +114,7 @@ type TeamSettingsUserRow = {
   id: string;
   email: string;
   name: string;
+  avatarUrl: string | null;
   role: 'ADMIN' | 'MANAGER' | 'MEMBER';
   teamId: string | null;
   managerId: string | null;
@@ -120,7 +124,7 @@ type TeamSettingsUserRow = {
   screenshotIntervalMin: number | null;
   idleThresholdMin: number | null;
   createdAt: Date;
-  team: { id: string; name: string; manager: { id: string; name: string; email: string } | null } | null;
+  team: { id: string; name: string; manager: { id: string; name: string; email: string; avatarUrl: string | null } | null } | null;
 };
 
 /** Effective capture defaults for a workspace (per-member NULLs fall back here). */
@@ -128,13 +132,14 @@ type PolicyDefaults = { screenshotIntervalMin: number; idleThresholdMin: number 
 
 function serializeTeamSettingsMember(
   user: TeamSettingsUserRow,
-  manager: { id: string; name: string; email: string } | null,
+  manager: { id: string; name: string; email: string; avatarUrl: string | null } | null,
   defaults: PolicyDefaults,
 ): TeamMemberSettingsDto {
   return {
     id: user.id,
     email: user.email,
     name: user.name,
+    avatarUrl: user.avatarUrl,
     role: user.role,
     team: user.team ? { id: user.team.id, name: user.team.name } : null,
     manager,
@@ -155,6 +160,7 @@ async function loadTeamSettingsMembers(userIds: string[]): Promise<TeamMemberSet
       id: true,
       email: true,
       name: true,
+      avatarUrl: true,
       role: true,
       teamId: true,
       managerId: true,
@@ -164,7 +170,7 @@ async function loadTeamSettingsMembers(userIds: string[]): Promise<TeamMemberSet
       idleThresholdMin: true,
       createdAt: true,
       workspaceId: true,
-      team: { select: { id: true, name: true, manager: { select: { id: true, name: true, email: true } } } },
+      team: { select: { id: true, name: true, manager: { select: { id: true, name: true, email: true, avatarUrl: true } } } },
     },
     orderBy: [{ teamId: 'asc' }, { role: 'asc' }, { name: 'asc' }],
   });
@@ -187,7 +193,7 @@ async function loadTeamSettingsMembers(userIds: string[]): Promise<TeamMemberSet
   const managers = managerIds.length
     ? await prisma.user.findMany({
         where: { id: { in: managerIds } },
-        select: { id: true, name: true, email: true },
+        select: { id: true, name: true, email: true, avatarUrl: true },
       })
     : [];
   const managerById = new Map(managers.map((m) => [m.id, m]));
@@ -706,7 +712,7 @@ async function loadTimesheetData(scope: { userIds: string[] }, range: ResolvedTi
   const matrix = buildTimesheetMatrix({ from: range.from, to: range.to, tz: range.tz, segments: segs });
   const users = await prisma.user.findMany({
     where: { id: { in: scope.userIds } },
-    select: { id: true, name: true, email: true, role: true },
+    select: { id: true, name: true, email: true, avatarUrl: true, role: true },
     orderBy: [{ role: 'asc' }, { name: 'asc' }],
   });
   return { matrix, users };
@@ -1305,7 +1311,7 @@ adminRouter.post('/users/:id/activate', requireAdmin, async (req, res, next) => 
 interface FlagDto {
   id: string;
   userId: string;
-  user: { id: string; name: string; email: string };
+  user: { id: string; name: string; email: string; avatarUrl: string | null };
   type: string;
   windowStart: string;
   windowEnd: string;
@@ -1354,7 +1360,7 @@ adminRouter.get('/flags', requireAnyCapability(['flags.team.review', 'flags.work
     const rows = await prisma.activityFlag.findMany({
       where,
       include: {
-        user: { select: { id: true, name: true, email: true } },
+        user: { select: { id: true, name: true, email: true, avatarUrl: true } },
         resolvedBy: { select: { id: true, name: true } },
       },
       orderBy: [
@@ -1368,7 +1374,7 @@ adminRouter.get('/flags', requireAnyCapability(['flags.team.review', 'flags.work
     const flags: FlagDto[] = rows.map((r) => ({
       id: r.id,
       userId: r.userId,
-      user: { id: r.user.id, name: r.user.name, email: r.user.email },
+      user: { id: r.user.id, name: r.user.name, email: r.user.email, avatarUrl: r.user.avatarUrl },
       type: r.type,
       windowStart: r.windowStart.toISOString(),
       windowEnd: r.windowEnd.toISOString(),

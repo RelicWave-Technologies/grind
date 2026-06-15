@@ -83,6 +83,7 @@ describe('/v1/profile/me', () => {
       id: s.manager.id,
       name: 'Manager Profile',
       email: s.manager.email,
+      avatarUrl: null,
     });
     expect(res.body.shift?.name).toBe('Day Shift');
     expect(res.body.shift?.bufferMin).toBe(20);

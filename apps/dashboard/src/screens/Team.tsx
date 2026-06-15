@@ -281,7 +281,7 @@ function TeamSettingsTable({
               <Tr key={member.id} className="tm-member-row">
                 <Td className="tm-col-member">
                   <Identity
-                    avatar={<Avatar name={member.name} size={32} />}
+                    avatar={<Avatar name={member.name} src={member.avatarUrl ?? undefined} size={32} />}
                     name={isCurrentUser ? `${member.name} (you)` : member.name}
                     subtitle={member.team?.name ?? member.email}
                   />

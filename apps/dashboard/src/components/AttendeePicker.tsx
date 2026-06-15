@@ -17,6 +17,7 @@ export interface WorkspaceUser {
   id: string;
   name: string;
   email: string;
+  avatarUrl?: string | null;
 }
 
 interface Props {
@@ -191,7 +192,7 @@ export default function AttendeePicker({
                       title={u.email}
                     >
                       <span className="ap-avatar" aria-hidden>
-                        {initials(u.name)}
+                        {u.avatarUrl ? <img src={u.avatarUrl} alt="" /> : initials(u.name)}
                       </span>
                       <span className="ap-copy">
                         <span className="ap-name">

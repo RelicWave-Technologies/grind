@@ -45,6 +45,7 @@ interface AdminUser {
   name: string;
   email: string;
   role: Role;
+  avatarUrl: string | null;
   teamId: string | null;
 }
 
@@ -909,7 +910,7 @@ function DrawerFact({ icon, label, value, hint }: { icon: ReactNode; label: stri
 function PersonLine({ user, icon, action }: { user: AdminUser; icon?: ReactNode; action?: ReactNode }) {
   return (
     <div className="tms-person">
-      <span className="tms-person__lead">{icon ?? <Avatar name={user.name} size={32} />}</span>
+      <span className="tms-person__lead">{icon ?? <Avatar name={user.name} src={user.avatarUrl ?? undefined} size={32} />}</span>
       <div className="tms-person__body">
         <strong className="ui-t-strong">{user.name}</strong>
         <span className="ui-t-small">

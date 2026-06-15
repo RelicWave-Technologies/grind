@@ -49,8 +49,8 @@ type Row = {
   decidedReason: string | null;
   createdAt: Date;
   attendees?: Array<{ userId: string }>;
-  user?: { id: string; name: string; email: string };
-  approver?: { id: string; name: string; email: string } | null;
+  user?: { id: string; name: string; email: string; avatarUrl: string | null };
+  approver?: { id: string; name: string; email: string; avatarUrl: string | null } | null;
 };
 
 function serialize(r: Row): ManualTimeRequestDto {
@@ -330,8 +330,8 @@ timeRequestsRouter.get('/', validate(ListManualTimeRequestsQuery, 'query'), asyn
       take: 200,
       include: {
         attendees: true,
-        user: { select: { id: true, name: true, email: true } },
-        approver: { select: { id: true, name: true, email: true } },
+        user: { select: { id: true, name: true, email: true, avatarUrl: true } },
+        approver: { select: { id: true, name: true, email: true, avatarUrl: true } },
       },
     });
     res.json({

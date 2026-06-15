@@ -7,6 +7,7 @@ export const ProfilePersonSchema = z.object({
   id: z.string(),
   name: z.string(),
   email: z.string().email(),
+  avatarUrl: z.string().nullable().default(null),
 });
 
 export type ProfilePerson = z.infer<typeof ProfilePersonSchema>;
@@ -31,6 +32,7 @@ export const SelfProfileUserSchema = z.object({
   id: z.string(),
   name: z.string(),
   email: z.string().email(),
+  avatarUrl: z.string().nullable().default(null),
   role: Role,
   displayRole: Role,
   createdAt: z.string().datetime({ offset: true }),

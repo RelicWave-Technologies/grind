@@ -1,6 +1,6 @@
 import { ipcMain } from 'electron';
 import { login, logout, isLoggedIn, startLarkLogin } from '../services/auth';
-import { onAuthChange } from '../services/apiClient';
+import { onAuthChange, api } from '../services/apiClient';
 import { startHeartbeat, stopHeartbeat } from '../services/heartbeat';
 import { broadcast } from '../broadcast';
 import { log } from '../logger';
@@ -29,6 +29,17 @@ export function registerAuthIpc(): void {
 
   ipcMain.handle('auth:status', async () => {
     return (await isLoggedIn()) ? 'loggedIn' : 'loggedOut';
+  });
+
+  // The signed-in user's display identity (name + Lark avatar) for the sidebar.
+  // Returns null when logged out or on any error — the UI falls back to initials.
+  ipcMain.handle('auth:me', async (): Promise<{ name: string; avatarUrl: string | null } | null> => {
+    try {
+      const { user } = await api<{ user: { name: string; avatarUrl: string | null } }>('/v1/auth/me');
+      return { name: user.name, avatarUrl: user.avatarUrl ?? null };
+    } catch {
+      return null;
+    }
   });
 
   onAuthChange((status) => {

@@ -8,7 +8,9 @@ export type ShiftStatus = z.infer<typeof ShiftStatusSchema>;
 export const MemberReportTopAppSchema = z.object({
   app: z.string(),
   appBundle: z.string().nullable(),
-  iconUrl: z.string().url().nullable(),
+  // Either a remote URL (brand-map fallback) or an inlined `data:image/png` URL
+  // (the agent-extracted real icon), so this is a plain string, not `.url()`.
+  iconUrl: z.string().nullable(),
   minutes: z.number().int().min(0),
   share: z.number().min(0).max(1),
 });
@@ -51,6 +53,7 @@ export const TeamReportUserSchema = z.object({
   id: z.string(),
   name: z.string(),
   email: z.string(),
+  avatarUrl: z.string().nullable().default(null),
   teamId: z.string().nullable(),
   teamName: z.string().nullable(),
 });
