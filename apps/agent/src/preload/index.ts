@@ -17,6 +17,7 @@ const api = {
     loginWithLark: (): Promise<{ ok: true }> => ipcRenderer.invoke('auth:loginWithLark'),
     logout: (): Promise<{ ok: true }> => ipcRenderer.invoke('auth:logout'),
     status: (): Promise<AuthStatus> => ipcRenderer.invoke('auth:status'),
+    me: (): Promise<{ name: string; avatarUrl: string | null } | null> => ipcRenderer.invoke('auth:me'),
     onStatusChange: (cb: (s: AuthStatus) => void): (() => void) => {
       const sub = (_e: unknown, s: AuthStatus) => cb(s);
       ipcRenderer.on('auth:status:push', sub);

@@ -1,3 +1,27 @@
+import { prisma } from '@grind/db';
+
+/**
+ * Inline real agent-extracted icons (stored per bundle id) as `data:` URLs,
+ * keyed by bundle id. Inlining avoids a separate cross-origin image endpoint;
+ * the top-N apps make the payload small. Apps without a stored icon fall back
+ * to the brand map below.
+ */
+export async function storedIconDataUrls(bundles: (string | null)[]): Promise<Map<string, string>> {
+  const ids = [...new Set(bundles.filter((b): b is string => !!b))];
+  if (ids.length === 0) return new Map();
+  const rows = await prisma.appIcon.findMany({
+    where: { bundleId: { in: ids } },
+    select: { bundleId: true, png: true },
+  });
+  return new Map(rows.map((r) => [r.bundleId, `data:image/png;base64,${Buffer.from(r.png).toString('base64')}`]));
+}
+
+/** Real stored icon if we have one, else the brand-map URL, else null. */
+export function resolveAppIcon(app: string, bundle: string | null, stored: Map<string, string>): string | null {
+  if (bundle && stored.has(bundle)) return stored.get(bundle) ?? null;
+  return appIconUrl(app, bundle);
+}
+
 export function appIconUrl(app: string, bundle: string | null): string | null {
   const haystack = `${app} ${bundle ?? ''}`.toLowerCase();
   const simple = (slug: string, color?: string) =>

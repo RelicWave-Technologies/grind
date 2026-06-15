@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { AgentConfigResponse, HeartbeatRequest, HeartbeatResponse } from '@grind/types';
+import { AgentAppIconsRequest, AgentConfigResponse, HeartbeatRequest, HeartbeatResponse } from '@grind/types';
 import { validate } from '../middleware/validate';
 import { requireAccessToken } from '../middleware/auth';
 import { prisma } from '@grind/db';
@@ -40,6 +40,32 @@ agentRouter.get('/config', async (req, res, next) => {
       dashboardUrl: dashboardOrigin(),
     };
     res.json(response);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * Agents upload real extracted app icons (PNG, base64), keyed by bundle id.
+ * Idempotent upsert — icons are workspace-agnostic, so the latest upload for a
+ * bundle wins. Oversized/empty payloads are skipped, not rejected, so one bad
+ * icon never fails the batch.
+ */
+agentRouter.post('/app-icons', validate(AgentAppIconsRequest, 'body'), async (req, res, next) => {
+  try {
+    const { icons } = req.body as AgentAppIconsRequest;
+    let stored = 0;
+    for (const it of icons) {
+      const png = Buffer.from(it.pngBase64, 'base64');
+      if (png.length === 0 || png.length > 150_000) continue;
+      await prisma.appIcon.upsert({
+        where: { bundleId: it.bundleId },
+        create: { bundleId: it.bundleId, app: it.app, png },
+        update: { app: it.app, png },
+      });
+      stored += 1;
+    }
+    res.json({ ok: true as const, stored });
   } catch (err) {
     next(err);
   }

@@ -17,6 +17,7 @@ declare global {
         loginWithLark: () => Promise<{ ok: true }>;
         logout: () => Promise<{ ok: true }>;
         status: () => Promise<AuthStatus>;
+        me: () => Promise<{ name: string; avatarUrl: string | null } | null>;
         onStatusChange: (cb: (s: AuthStatus) => void) => () => void;
         onLarkOutcome: (cb: (o: LarkOutcome) => void) => () => void;
       };

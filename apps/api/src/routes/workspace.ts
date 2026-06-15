@@ -28,7 +28,7 @@ workspaceRouter.get('/users', async (req, res, next) => {
     if (!req.user) return res.status(401).json({ error: 'unauthorized' });
     const users = await prisma.user.findMany({
       where: { workspaceId: req.user.ws },
-      select: { id: true, name: true, email: true, role: true },
+      select: { id: true, name: true, email: true, avatarUrl: true, role: true },
       orderBy: [{ name: 'asc' }],
     });
     res.json({ users });

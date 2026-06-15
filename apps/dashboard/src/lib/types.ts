@@ -81,6 +81,7 @@ export interface WorkspaceUser {
   id: string;
   name: string;
   email: string;
+  avatarUrl?: string | null;
   role: 'ADMIN' | 'MANAGER' | 'MEMBER';
 }
 
@@ -94,6 +95,7 @@ export interface MtrUserSummary {
   id: string;
   name: string;
   email: string;
+  avatarUrl?: string | null;
 }
 
 export type TriageVerdict = 'approve' | 'review' | 'reject';
@@ -153,6 +155,7 @@ export interface TimesheetUser {
   id: string;
   name: string;
   email: string;
+  avatarUrl?: string | null;
   role: 'ADMIN' | 'MANAGER' | 'MEMBER';
 }
 
@@ -167,7 +170,7 @@ export type FlagResolution = 'DISMISSED' | 'CONFIRMED' | 'TIME_INVALIDATED';
 export interface ActivityFlag {
   id: string;
   userId: string;
-  user: { id: string; name: string; email: string };
+  user: { id: string; name: string; email: string; avatarUrl: string | null };
   type: FlagType;
   windowStart: string;
   windowEnd: string;

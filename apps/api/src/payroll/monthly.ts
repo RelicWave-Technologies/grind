@@ -29,6 +29,7 @@ export interface PayrollUserMeta {
   id: string;
   name: string;
   email: string;
+  avatarUrl: string | null;
   role: string;
   teamId: string | null;
   teamName: string | null;

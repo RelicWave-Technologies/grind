@@ -27,11 +27,20 @@ import {
 } from '../reports/member';
 import { buildTeamReportsResponse } from '../reports/team';
 import { loadProfileForUser } from '../profile/service';
+import { resolveAppIcon, storedIconDataUrls } from '../insights/appIcon';
+import type { IconResolver } from '../reports/member';
 
 export const reportsRouter = Router();
 reportsRouter.use(requireAccessToken, attachScope, requireCapability('reports.self.read'));
 
 const TEAM_REPORT_MAX_DAYS = 31;
+
+/** Build an icon resolver that prefers real agent-extracted icons (data URLs)
+ *  for the bundles seen in these samples, falling back to the brand map. */
+async function iconForSamples(samples: { activeAppBundle: string | null }[]): Promise<IconResolver> {
+  const stored = await storedIconDataUrls(samples.map((s) => s.activeAppBundle));
+  return (app, bundle) => resolveAppIcon(app, bundle, stored);
+}
 
 reportsRouter.get('/me', async (req, res, next) => {
   try {
@@ -40,6 +49,7 @@ reportsRouter.get('/me', async (req, res, next) => {
     if ('error' in range) return res.status(range.status).json({ error: range.error, ...(range.extras ?? {}) });
 
     const data = await loadReportData(req.user.sub, range);
+    const iconFor = await iconForSamples(data.samples);
     const response: MemberReportsMeResponse = {
       from: range.from,
       to: range.to,
@@ -53,6 +63,7 @@ reportsRouter.get('/me', async (req, res, next) => {
         samples: data.samples,
         screenshots: data.screenshots,
         shiftAssignments: data.shiftAssignments,
+        iconFor,
       }),
     };
     res.json(response);
@@ -82,6 +93,7 @@ reportsRouter.get('/team', requireCapability('reports.team.read'), async (req, r
             id: true,
             name: true,
             email: true,
+            avatarUrl: true,
             teamId: true,
             team: { select: { name: true } },
           },
@@ -92,11 +104,13 @@ reportsRouter.get('/team', requireCapability('reports.team.read'), async (req, r
       id: u.id,
       name: u.name,
       email: u.email,
+      avatarUrl: u.avatarUrl,
       teamId: u.teamId,
       teamName: u.team?.name ?? null,
     }));
 
     const reportData = await loadTeamReportData(reportUsers.map((u) => u.id), range);
+    const iconFor = await iconForSamples([...reportData.values()].flatMap((d) => d.samples));
     const daysByUser = new Map<string, ReturnType<typeof buildMemberReportDays>>();
     const now = new Date();
     for (const user of reportUsers) {
@@ -110,6 +124,7 @@ reportsRouter.get('/team', requireCapability('reports.team.read'), async (req, r
         samples: data.samples,
         screenshots: data.screenshots,
         shiftAssignments: data.shiftAssignments,
+        iconFor,
       }));
     }
 
@@ -137,6 +152,7 @@ reportsRouter.get('/team/member', requireCapability('reports.team.read'), async 
     if ('error' in profile) return res.status(503).json({ error: profile.error });
 
     const data = reportData.get(target.user.id) ?? emptyTeamReportData();
+    const iconFor = await iconForSamples(data.samples);
     const days = buildMemberReportDays({
       userId: target.user.id,
       range,
@@ -146,6 +162,7 @@ reportsRouter.get('/team/member', requireCapability('reports.team.read'), async 
       samples: data.samples,
       screenshots: data.screenshots,
       shiftAssignments: data.shiftAssignments,
+      iconFor,
     });
     const teamReport = buildTeamReportsResponse({
       range,
@@ -178,7 +195,7 @@ reportsRouter.get('/team/member/day-apps', requireCapability('reports.team.read'
     const range = resolveSingleReportDay(req.query as Record<string, unknown>);
     if ('error' in range) return res.status(range.status).json({ error: range.error, ...(range.extras ?? {}) });
     const samples = await loadSamples(target.user.id, range);
-    const response: MemberReportDayAppsResponse = buildMemberReportApps({ range, samples });
+    const response: MemberReportDayAppsResponse = buildMemberReportApps({ range, samples, iconFor: await iconForSamples(samples) });
     res.json(response);
   } catch (err) {
     next(err);
@@ -214,7 +231,7 @@ reportsRouter.get('/me/day-apps', async (req, res, next) => {
     const range = resolveSingleReportDay(req.query as Record<string, unknown>);
     if ('error' in range) return res.status(range.status).json({ error: range.error, ...(range.extras ?? {}) });
     const samples = await loadSamples(req.user.sub, range);
-    const response: MemberReportDayAppsResponse = buildMemberReportApps({ range, samples });
+    const response: MemberReportDayAppsResponse = buildMemberReportApps({ range, samples, iconFor: await iconForSamples(samples) });
     res.json(response);
   } catch (err) {
     next(err);
@@ -246,6 +263,7 @@ async function resolveScopedReportUser(
       id: true,
       name: true,
       email: true,
+      avatarUrl: true,
       teamId: true,
       team: { select: { name: true } },
     },
@@ -257,6 +275,7 @@ async function resolveScopedReportUser(
       id: user.id,
       name: user.name,
       email: user.email,
+      avatarUrl: user.avatarUrl,
       teamId: user.teamId,
       teamName: user.team?.name ?? null,
     },
@@ -293,8 +312,8 @@ async function loadManualRequestsForUser(
       decidedReason: true,
       createdAt: true,
       attendees: { select: { userId: true } },
-      user: { select: { id: true, name: true, email: true } },
-      approver: { select: { id: true, name: true, email: true } },
+      user: { select: { id: true, name: true, email: true, avatarUrl: true } },
+      approver: { select: { id: true, name: true, email: true, avatarUrl: true } },
     },
   });
   return rows.map((row) => ({

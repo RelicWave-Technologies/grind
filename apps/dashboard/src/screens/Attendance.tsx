@@ -204,7 +204,7 @@ export function AttendanceScreen() {
                           <Identity
                             name={u.name}
                             subtitle={u.role.toLowerCase()}
-                            avatar={<Avatar name={u.name} size={32} />}
+                            avatar={<Avatar name={u.name} src={u.avatarUrl ?? undefined} size={32} />}
                           />
                         </Td>
                         {data!.days.map((d) => {

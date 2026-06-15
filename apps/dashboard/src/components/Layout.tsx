@@ -63,7 +63,7 @@ export function Layout() {
         footer={
           <>
             <div className="ui-sidebar__me">
-              <Avatar name={me.name} size={32} />
+              <Avatar name={me.name} src={me.avatarUrl ?? undefined} size={32} />
               <div className="ui-sidebar__me-meta">
                 <div className="ui-sidebar__me-name ui-t-strong">{me.name}</div>
                 <div className="ui-t-small ui-ink-3">{me.displayRole}</div>

@@ -591,3 +591,14 @@ model RefreshToken {
   @@index([userId])
   @@index([familyId])
 }
+
+/// Cached real app icons, keyed by macOS/Windows bundle id. Workspace-agnostic —
+/// an app's icon is the same for everyone, so agents upload the PNG once per
+/// bundle (idempotent upsert) and the insights API inlines it as a data URL.
+model AppIcon {
+  bundleId  String   @id
+  app       String
+  png       Bytes
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

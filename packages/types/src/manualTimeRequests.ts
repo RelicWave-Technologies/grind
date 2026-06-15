@@ -71,8 +71,8 @@ export const ManualTimeRequestDto = z.object({
   decidedReason: z.string().nullable(),
   createdAt: Iso,
   attendeeIds: z.array(z.string()).optional(),
-  user: z.object({ id: z.string(), name: z.string(), email: z.string() }).optional(),
-  approver: z.object({ id: z.string(), name: z.string(), email: z.string() }).nullable().optional(),
+  user: z.object({ id: z.string(), name: z.string(), email: z.string(), avatarUrl: z.string().nullable().default(null) }).optional(),
+  approver: z.object({ id: z.string(), name: z.string(), email: z.string(), avatarUrl: z.string().nullable().default(null) }).nullable().optional(),
 });
 export type ManualTimeRequestDto = z.infer<typeof ManualTimeRequestDto>;
 
