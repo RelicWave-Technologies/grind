@@ -5,6 +5,7 @@ import type { TimerStatus } from '../lib/agent.d';
 import { sortTasks } from '../lib/taskFormat';
 import TaskCard from '../components/TaskCard';
 import TaskComposer from '../components/TaskComposer';
+import SyncButton from '../components/SyncButton';
 
 /** Full Lark task list: open + completed, searchable, with quick create. */
 export default function Tasks() {
@@ -53,9 +54,12 @@ export default function Tasks() {
       <div className="toolbar">
         <span className="h1 no-drag">Tasks</span>
         {larkConnected && (
-          <button className="btn btn-soft no-drag" onClick={() => setShowCreate((s) => !s)}>
-            {showCreate ? <><X size={14} strokeWidth={2.5} /> Cancel</> : <><Plus size={14} strokeWidth={2.5} /> New task</>}
-          </button>
+          <span className="toolbar-actions no-drag">
+            <SyncButton />
+            <button className="btn btn-soft no-drag" onClick={() => setShowCreate((s) => !s)}>
+              {showCreate ? <><X size={14} strokeWidth={2.5} /> Cancel</> : <><Plus size={14} strokeWidth={2.5} /> New task</>}
+            </button>
+          </span>
         )}
       </div>
       <div className="content-scroll">

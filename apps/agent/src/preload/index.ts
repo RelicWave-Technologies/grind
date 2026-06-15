@@ -85,6 +85,7 @@ const api = {
   },
   app: {
     relaunch: (): Promise<void> => ipcRenderer.invoke('app:relaunch'),
+    openDashboard: (): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('app:openDashboard'),
   },
   insights: {
     today: (): Promise<{
@@ -101,6 +102,8 @@ const api = {
     disconnect: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('lark:disconnect'),
     tasks: (): Promise<{ tasks: { guid: string; summary: string; completed: boolean; url?: string; due: number | null; createdAt: number | null; creatorId: string | null; creatorName: string | null; loggedMs: number }[]; reauthRequired: boolean }> =>
       ipcRenderer.invoke('lark:tasks'),
+    sync: (): Promise<{ ok: boolean; connected: boolean; reauthRequired: boolean; tasks: { guid: string; summary: string; completed: boolean; url?: string; due: number | null; createdAt: number | null; creatorId: string | null; creatorName: string | null; loggedMs: number }[]; syncedAt: number | null; error?: string }> =>
+      ipcRenderer.invoke('lark:sync'),
     createTask: (input: { summary: string; due?: number | null; description?: string | null }): Promise<{ ok: boolean; error?: string }> =>
       ipcRenderer.invoke('lark:createTask', input),
   },

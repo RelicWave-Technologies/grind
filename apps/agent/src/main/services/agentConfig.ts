@@ -14,12 +14,17 @@ import { log } from '../logger';
  */
 let screenshotIntervalSec = SCREENSHOT_INTERVAL_SEC;
 let idleThresholdSec = IDLE_THRESHOLD_SEC;
+let dashboardUrl = '';
 
 export function getScreenshotIntervalSec(): number {
   return screenshotIntervalSec;
 }
 export function getIdleThresholdSec(): number {
   return idleThresholdSec;
+}
+/** Web dashboard origin from the server config ('' until first successful fetch). */
+export function getDashboardUrl(): string {
+  return dashboardUrl;
 }
 
 /** Fetch the effective capture config from the API and apply it. No-ops on
@@ -30,6 +35,7 @@ export async function refreshAgentConfig(): Promise<void> {
     const cfg = await api<AgentConfigResponse>('/v1/agent/config');
     if (!SHOT_SEC_LOCKED) screenshotIntervalSec = Math.max(60, cfg.screenshotIntervalMin * 60);
     if (!IDLE_SEC_LOCKED) idleThresholdSec = Math.max(60, cfg.idleThresholdMin * 60);
+    if (cfg.dashboardUrl) dashboardUrl = cfg.dashboardUrl;
     log.info('agent config applied', {
       screenshotIntervalSec,
       idleThresholdSec,

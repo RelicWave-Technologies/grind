@@ -23,5 +23,8 @@ export const AgentConfigResponse = z.object({
   heartbeatIntervalSec: z.number().int().min(15).max(600).default(60),
   screenshotIntervalMin: z.number().int().min(1).max(480).default(180),
   idleThresholdMin: z.number().int().min(1).max(120).default(5),
+  // Web dashboard origin, served so the agent's "Open Dashboard" button stays in
+  // sync with the backend's DASHBOARD_URL (empty string when unset).
+  dashboardUrl: z.string().default(''),
 });
 export type AgentConfigResponse = z.infer<typeof AgentConfigResponse>;

@@ -7,6 +7,7 @@ import { sortTasks } from '../lib/taskFormat';
 import DayTimeline from '../components/DayTimeline';
 import TaskCard from '../components/TaskCard';
 import TaskComposer from '../components/TaskComposer';
+import SyncButton from '../components/SyncButton';
 
 export function fmtClock(ms: number): string {
   const t = Math.floor(ms / 1000);
@@ -82,6 +83,7 @@ export default function Today() {
     <>
       <div className="toolbar">
         <span className="h1 no-drag">Today</span>
+        {larkConnected && <SyncButton />}
       </div>
       <div className="content-scroll">
         <div className="content-narrow">
