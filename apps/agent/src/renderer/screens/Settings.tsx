@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { MonitorCheck, Power, FolderOpen, CheckCircle2, AlertCircle, Link2, Keyboard, PictureInPicture2 } from 'lucide-react';
+import { MonitorCheck, Power, CheckCircle2, AlertCircle, Link2, Keyboard, PictureInPicture2 } from 'lucide-react';
 
 export default function Settings() {
   const qc = useQueryClient();
@@ -201,14 +201,6 @@ export default function Settings() {
               >
                 <span className="toggle-knob" />
               </button>
-            </div>
-            <div className="set-row">
-              <span className="set-ic" style={{ background: 'var(--c-slate-bg)' }}><FolderOpen size={17} strokeWidth={2} /></span>
-              <div className="set-main">
-                <div className="set-title">Local data</div>
-                <div className="set-sub secondary">Screenshots and the offline queue are stored on this device.</div>
-              </div>
-              <button className="btn no-drag" onClick={() => window.agent.settings.openDataFolder()}>Open folder</button>
             </div>
           </div>
 
