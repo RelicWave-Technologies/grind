@@ -16,6 +16,14 @@ let sealer: MinuteSealer | null = null;
 const activeWindow = new ActiveWindowTracker();
 let flushTimer: NodeJS.Timeout | null = null;
 let started = false;
+// The global input hook is only RUN while actually recording — leaving it on
+// idle delivers every system mousemove (100s/sec) across the native→V8 boundary
+// for no benefit (events no-op unless recording), which heats the CPU.
+let hookRunning = false;
+// Throttle mousemove processing: the OS fires it at the pointer's full poll rate
+// (often 125Hz+); sampling at ~20Hz is ample for distance / speed-CV metrics.
+let lastMoveTs = 0;
+const MOVE_THROTTLE_MS = 50;
 // Mirrors of "timer running & not paused" + the active entry, kept so a sealer
 // created after the first recording tick can be seeded with current state.
 let recording = false;
@@ -45,6 +53,31 @@ export function setActivityRecording(on: boolean, entryId: string | null = null)
   recording = on;
   if (on && entryId) recordingEntryId = entryId;
   sealer?.setRecording(on, entryId);
+  syncHook();
+}
+
+/**
+ * Start the global input hook only while recording; stop it otherwise. Idempotent
+ * and cheap to call on the 1s recording tick. This is the main heat fix: no input
+ * events are delivered to JS when the user isn't actively tracking.
+ */
+function syncHook(): void {
+  if (!started) return;
+  if (recording && !hookRunning) {
+    try {
+      uIOhook.start();
+      hookRunning = true;
+    } catch (err) {
+      log.warn('uIOhook.start failed', { err: String(err) });
+    }
+  } else if (!recording && hookRunning) {
+    try {
+      uIOhook.stop();
+    } catch {
+      /* ignore */
+    }
+    hookRunning = false;
+  }
 }
 
 /** Whether the global input hook is actually running (Accessibility granted). */
@@ -69,16 +102,17 @@ export function startActivityCapture(): void {
   uIOhook.on('keydown', () => sealer!.onKey(Date.now()));
   uIOhook.on('mousedown', () => sealer!.onClick());
   uIOhook.on('wheel', () => sealer!.onScroll());
-  uIOhook.on('mousemove', (e) => sealer!.onMove(Date.now(), e.x, e.y));
+  uIOhook.on('mousemove', (e) => {
+    const t = Date.now();
+    if (t - lastMoveTs < MOVE_THROTTLE_MS) return;
+    lastMoveTs = t;
+    sealer!.onMove(t, e.x, e.y);
+  });
 
-  try {
-    uIOhook.start();
-    started = true;
-    log.info('activity capture started');
-  } catch (err) {
-    log.warn('uIOhook.start failed', { err: String(err) });
-    return;
-  }
+  // Capture system is initialized; the hook itself starts only while recording.
+  started = true;
+  syncHook();
+  log.info('activity capture ready', { recording });
 
   // Seal one bucket per minute. The sealer guarantees a non-empty minute is
   // always persisted (events are recording-gated at the source, so they're
@@ -131,14 +165,15 @@ export function flushPartialActivity(): void {
 export function stopActivityCapture(): void {
   if (flushTimer) clearInterval(flushTimer);
   flushTimer = null;
-  if (started) {
+  if (hookRunning) {
     try {
       uIOhook.stop();
     } catch {
       /* ignore */
     }
-    started = false;
+    hookRunning = false;
   }
+  started = false;
 }
 
 /** Today's input totals (for an in-app summary). */
