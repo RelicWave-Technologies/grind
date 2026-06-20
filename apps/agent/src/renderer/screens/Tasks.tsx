@@ -12,7 +12,7 @@ export default function Tasks() {
   const qc = useQueryClient();
   const larkStatus = useQuery({ queryKey: ['larkStatus'], queryFn: () => window.agent.lark.status(), refetchInterval: 10_000 });
   const larkTasks = useQuery({ queryKey: ['larkTasks'], queryFn: () => window.agent.lark.tasks(), refetchInterval: 60_000 });
-  const [timer, setTimer] = useState<TimerStatus>({ state: 'IDLE' });
+  const [timer, setTimer] = useState<TimerStatus>({ state: 'IDLE', workedMs: 0 });
   const [now, setNow] = useState(() => Date.now());
   const [query, setQuery] = useState('');
   const [showCreate, setShowCreate] = useState(false);

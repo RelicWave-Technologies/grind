@@ -19,7 +19,7 @@ function isUniqueViolation(err: unknown): boolean {
  *
  * Provisioning:
  *  - bootstrap admin email → created (or promoted) ACTIVE ADMIN
- *  - everyone else → PENDING MEMBER until an admin activates them
+ *  - everyone else → PENDING MEMBER until an admin completes setup or activates them
  */
 
 export type ResolvedLoginUser = {
@@ -29,6 +29,7 @@ export type ResolvedLoginUser = {
   role: 'ADMIN' | 'MANAGER' | 'MEMBER';
   workspaceId: string;
   teamId: string | null;
+  shiftId: string | null;
   managerId: string | null;
   provisioningStatus: 'PENDING' | 'ACTIVE';
   avatarUrl: string | null;
@@ -42,6 +43,7 @@ const LOGIN_USER_SELECT = {
   role: true,
   workspaceId: true,
   teamId: true,
+  shiftId: true,
   managerId: true,
   provisioningStatus: true,
   avatarUrl: true,
@@ -152,11 +154,19 @@ async function syncAndReturn(userId: string, profile: LarkProfile): Promise<Reso
 
   const promote = profile.email && isBootstrapEmail(profile.email) &&
     (current.role !== 'ADMIN' || current.provisioningStatus !== 'ACTIVE');
+  const activateCompletedSetup =
+    current.provisioningStatus === 'PENDING' &&
+    !current.deactivatedAt &&
+    Boolean(current.teamId && current.shiftId);
 
   const data: Prisma.UserUpdateInput = {
     name: profile.name || current.name,
     avatarUrl: profile.avatarUrl,
-    ...(promote ? { role: 'ADMIN', provisioningStatus: 'ACTIVE' } : {}),
+    ...(promote
+      ? { role: 'ADMIN', provisioningStatus: 'ACTIVE' }
+      : activateCompletedSetup
+        ? { provisioningStatus: 'ACTIVE' }
+        : {}),
   };
   // Only touch email when it actually changed, and isolate its unique-collision
   // risk so a clash doesn't fail the whole login.

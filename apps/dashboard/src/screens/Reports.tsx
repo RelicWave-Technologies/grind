@@ -33,6 +33,7 @@ import type {
   MemberReportDayScreenshotsResponse,
   MemberReportsMeResponse,
   ShiftStatus,
+  TeamReportAttentionItem,
   TeamReportMember,
   TeamMemberReportsResponse,
   TeamReportsResponse,
@@ -342,7 +343,7 @@ function SelfReportTable({
             </THead>
             <Tbody>
               {days.map((day) => (
-                <Tr key={day.date} rail={railForStatus(day.shiftStatus)}>
+                <Tr key={day.date} rail={railForDay(day)}>
                   <Td className="rep-col-date">
                     <div className="rep-date-cell">
                       <span className="ui-t-strong">{fmtDayLabel(day.date)}</span>
@@ -383,7 +384,10 @@ function SelfReportTable({
                   <Td className="rep-col-activity" align="center">
                     <div className="rep-activity-cell">
                       <div className="rep-cell-main">
-                        <span className="rep-activity-value">{day.activityPercent === null ? '—' : `${day.activityPercent}%`}</span>
+                        <ActivityEvidenceValue
+                          activityPercent={day.activityPercent}
+                          hasAutoTracked={autoTrackedMs(day) > 0}
+                        />
                       </div>
                       <Button
                         size="sm"
@@ -453,6 +457,8 @@ function TeamReportsView({
         <TeamKpi label="Activity" value={percentLabel(data.summary.activityPercent)} sub={`${data.summary.screenshots} screenshots`} tone="pink" />
       </section>
 
+      <TeamAttentionStrip items={data.attention} onOpenMember={onOpenMember} />
+
       <Card variant="flush" className="rep-team-members-card">
         <div className="rep-team-card-head">
           <div>
@@ -464,6 +470,44 @@ function TeamReportsView({
         <TeamMembersTable members={data.members} onOpenMember={onOpenMember} />
       </Card>
     </div>
+  );
+}
+
+function TeamAttentionStrip({
+  items,
+  onOpenMember,
+}: {
+  items: TeamReportAttentionItem[];
+  onOpenMember: (userId: string) => void;
+}) {
+  if (items.length === 0) return null;
+  return (
+    <Card variant="flush" className="rep-attention-card">
+      <div className="rep-attention-head">
+        <div>
+          <h2 className="ui-t-title">Needs review</h2>
+          <p className="ui-t-small">Evidence gaps, approvals, late starts, and missing time in this range.</p>
+        </div>
+        <Tag status="warn" mono>{items.length}</Tag>
+      </div>
+      <div className="rep-attention-list">
+        {items.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            className="rep-attention-item"
+            onClick={() => onOpenMember(item.userId)}
+          >
+            <span className="rep-attention-main">
+              <Tag status={attentionStatus(item.severity)}>{item.title}</Tag>
+              <span className="ui-t-strong">{item.userName}</span>
+              <span className="ui-t-small ui-ink-3">{fmtDayLabel(item.date)}</span>
+            </span>
+            <span className="ui-t-small">{item.detail}</span>
+          </button>
+        ))}
+      </div>
+    </Card>
   );
 }
 
@@ -505,7 +549,7 @@ function TeamMembersTable({ members, onOpenMember }: { members: TeamReportMember
         </THead>
         <Tbody>
           {members.map((member) => (
-            <Tr key={member.user.id} rail={member.lateDays > 0 || member.noActivityDays > 0 ? 'warn' : undefined}>
+            <Tr key={member.user.id} rail={memberNeedsReview(member) ? 'warn' : undefined}>
               <Td>
                 <Identity
                   avatar={<Avatar name={member.user.name} src={member.user.avatarUrl ?? undefined} size={32} />}
@@ -527,7 +571,10 @@ function TeamMembersTable({ members, onOpenMember }: { members: TeamReportMember
                 {member.topApps[0] ? <AppBadge app={member.topApps[0]} /> : <span className="ui-t-small ui-ink-3">—</span>}
               </Td>
               <Td align="center">
-                <span className="rep-activity-value">{percentLabel(member.activityPercent)}</span>
+                <ActivityEvidenceValue
+                  activityPercent={member.activityPercent}
+                  hasAutoTracked={memberAutoTrackedMs(member) > 0}
+                />
               </Td>
               <Td align="center">
                 <Button
@@ -1601,8 +1648,37 @@ function AppBadge({ app }: { app: { app: string; appBundle: string | null; iconU
   );
 }
 
+function ActivityEvidenceValue({
+  activityPercent,
+  hasAutoTracked,
+}: {
+  activityPercent: number | null;
+  hasAutoTracked: boolean;
+}) {
+  if (activityPercent === null && hasAutoTracked) {
+    return <Tag status="warn">No samples</Tag>;
+  }
+  return <span className="rep-activity-value">{percentLabel(activityPercent)}</span>;
+}
+
+function autoTrackedMs(day: MemberReportDay): number {
+  return day.workedMs + day.meetingMs;
+}
+
 function totalDayWorkedMs(day: MemberReportDay): number {
   return day.workedMs + day.meetingMs + day.manualMs;
+}
+
+function dayNeedsReview(day: MemberReportDay): boolean {
+  return autoTrackedMs(day) > 0 && day.activityPercent === null;
+}
+
+function memberAutoTrackedMs(member: TeamReportMember): number {
+  return member.days.reduce((sum, day) => sum + autoTrackedMs(day), 0);
+}
+
+function memberNeedsReview(member: TeamReportMember): boolean {
+  return member.lateDays > 0 || member.noActivityDays > 0 || member.days.some(dayNeedsReview);
 }
 
 function percentLabel(value: number | null): string {
@@ -1771,6 +1847,19 @@ function statusTag(status: ShiftStatus): Status {
   if (status === 'late') return 'danger';
   if (status === 'no_activity') return 'warn';
   return 'neutral';
+}
+
+function attentionStatus(severity: TeamReportAttentionItem['severity']): Status {
+  if (severity === 'danger') return 'danger';
+  if (severity === 'warn') return 'warn';
+  return 'neutral';
+}
+
+function railForDay(day: MemberReportDay): Rail | undefined {
+  const statusRail = railForStatus(day.shiftStatus);
+  if (statusRail === 'danger') return statusRail;
+  if (dayNeedsReview(day)) return 'warn';
+  return statusRail;
 }
 
 function railForStatus(status: ShiftStatus): Rail | undefined {

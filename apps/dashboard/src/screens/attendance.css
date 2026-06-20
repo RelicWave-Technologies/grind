@@ -163,6 +163,12 @@
   color: var(--ui-success-ink);
 }
 
+.atd-cell--review {
+  background: var(--ui-warn-bg);
+  border-color: transparent;
+  color: var(--ui-warn-ink);
+}
+
 .atd-cell__times {
   width: auto;
   min-width: 0;
@@ -179,8 +185,15 @@
 }
 
 .atd-cell__arrow,
-.atd-cell__dur {
+.atd-cell__dur,
+.atd-cell__evidence {
   color: var(--ui-success-ink);
+}
+
+.atd-cell--review .atd-cell__arrow,
+.atd-cell--review .atd-cell__dur,
+.atd-cell--review .atd-cell__evidence {
+  color: var(--ui-warn-ink);
 }
 
 .atd-cell__arrow {
@@ -195,6 +208,11 @@
   border-radius: var(--ui-r-full);
   background: var(--ui-surface);
   font-size: 0.86em;
+  line-height: 1;
+}
+
+.atd-cell__evidence {
+  font-size: 0.78em;
   line-height: 1;
 }
 

@@ -1,4 +1,5 @@
 import {
+  COUNTED_KINDS,
   applyIdleDiscard,
   closeOpenSegment,
   closeTimeEntry,
@@ -6,13 +7,12 @@ import {
   getOpenSegment,
   openSegment,
   recoverStaleEntry,
-  totalWorkedMs,
   type TimeEntry,
 } from '@grind/core';
 import type { Clock, EntryStore, IdGen, StartArgs, SyncClient } from './types';
 
 export type TimerStatus =
-  | { state: 'IDLE' }
+  | { state: 'IDLE'; workedMs: number }
   | {
       state: 'RUNNING';
       entryId: string;
@@ -96,12 +96,12 @@ export class TimerService {
   }
 
   async stop(): Promise<TimerStatus> {
-    if (!this.open) return { state: 'IDLE' };
+    if (!this.open) return this.status();
     const closed = closeTimeEntry(this.open, this.clock.now());
     this.open = null;
     this.store.upsert(closed);
     await this.trySync(closed, 'sync');
-    return { state: 'IDLE' };
+    return this.status();
   }
 
   /**
@@ -188,7 +188,9 @@ export class TimerService {
   }
 
   status(): TimerStatus {
-    if (!this.open) return { state: 'IDLE' };
+    const now = this.clock.now();
+    const workedMs = this.workedMsForLocalDay(now);
+    if (!this.open) return { state: 'IDLE', workedMs };
     const open = this.open;
     const firstSeg = open.segments[0]!;
     return {
@@ -196,7 +198,7 @@ export class TimerService {
       entryId: open.id,
       larkTaskGuid: open.larkTaskGuid ?? null,
       startedAt: firstSeg.startedAt,
-      workedMs: totalWorkedMs(open, this.clock.now()),
+      workedMs,
       paused: getOpenSegment(open) === null,
     };
   }
@@ -206,8 +208,7 @@ export class TimerService {
     const dayStart = new Date(now);
     dayStart.setHours(0, 0, 0, 0);
     const since = dayStart.getTime();
-    const recent = this.store.listRecent(50);
-    return recent.filter((e) => e.segments.some((s) => (s.endedAt ?? now) >= since));
+    return this.store.listSince(since).filter((e) => e.segments.some((s) => (s.endedAt ?? now) >= since));
   }
 
   /** Retry pushing any locally-persisted entries that haven't synced yet. */
@@ -226,4 +227,23 @@ export class TimerService {
       // Best-effort: leave it unsynced; flushUnsynced will retry later.
     }
   }
+
+  private workedMsForLocalDay(now: number): number {
+    const dayStart = new Date(now);
+    dayStart.setHours(0, 0, 0, 0);
+    const since = dayStart.getTime();
+    const entries = this.store.listSince(since);
+    return entries.reduce((sum, entry) => sum + entryWorkedMsInWindow(entry, since, now, now), 0);
+  }
+}
+
+function entryWorkedMsInWindow(entry: TimeEntry, windowStart: number, windowEnd: number, now: number): number {
+  let total = 0;
+  for (const segment of entry.segments) {
+    if (!COUNTED_KINDS.includes(segment.kind)) continue;
+    const start = Math.max(segment.startedAt, windowStart);
+    const end = Math.min(segment.endedAt ?? now, windowEnd);
+    if (end > start) total += end - start;
+  }
+  return total;
 }

@@ -149,6 +149,7 @@ export interface TimesheetCell {
   totalMs: number;
   firstActivityMs: number | null;
   lastActivityMs: number | null;
+  activitySampleCount: number;
 }
 
 export interface TimesheetUser {

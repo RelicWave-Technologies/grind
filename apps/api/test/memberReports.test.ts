@@ -419,6 +419,28 @@ describe('/v1/reports/team', () => {
     expect(res.body.attention.some((item: { kind: string }) => item.kind === 'pending_approval')).toBe(true);
   });
 
+  it('flags automatic tracked time when activity samples are missing', async () => {
+    const s = await seedTeamReport();
+    await prisma.activitySample.deleteMany({ where: { userId: s.member.id } });
+
+    const res = await request(app)
+      .get('/v1/reports/team?from=2026-06-01&to=2026-06-01&tz=UTC')
+      .set(auth(s.managerToken));
+
+    expect(res.status).toBe(200);
+    expect(res.body.members[0].days[0].activityPercent).toBeNull();
+    expect(res.body.attention).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          userId: s.member.id,
+          date: '2026-06-01',
+          kind: 'missing_activity',
+          severity: 'warn',
+        }),
+      ]),
+    );
+  });
+
   it('returns scoped member drawer data and day details for managers only', async () => {
     const s = await seedTeamReport();
     const params = new URLSearchParams({

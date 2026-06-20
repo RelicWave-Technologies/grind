@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import request from 'supertest';
 import { prisma } from '@grind/db';
+import { NINE_TO_SIX } from '@grind/types';
 import { buildApp } from '../src/app';
 import { signAccessToken } from '../src/lib/jwt';
 
@@ -53,6 +54,34 @@ describe('admin pending users', () => {
     expect(res.body.provisioningStatus).toBe('ACTIVE');
     const row = await prisma.user.findUnique({ where: { id: s.pending1.id }, select: { provisioningStatus: true } });
     expect(row?.provisioningStatus).toBe('ACTIVE');
+  });
+
+  it('PATCH /v1/admin/users/:id activates a pending user once team and shift are assigned', async () => {
+    const s = await seed();
+    const team = await prisma.team.create({ data: { workspaceId: s.ws.id, name: 'Setup team' } });
+    const shift = await prisma.shift.create({
+      data: { workspaceId: s.ws.id, name: 'Day', schedule: NINE_TO_SIX, bufferMin: 30 },
+    });
+
+    const teamOnly = await request(app)
+      .patch(`/v1/admin/users/${s.pending1.id}`)
+      .set(bearer(s.adminToken))
+      .send({ teamId: team.id });
+    expect(teamOnly.status).toBe(200);
+    expect(teamOnly.body.provisioningStatus).toBe('PENDING');
+
+    const completed = await request(app)
+      .patch(`/v1/admin/users/${s.pending1.id}`)
+      .set(bearer(s.adminToken))
+      .send({ shiftId: shift.id });
+    expect(completed.status).toBe(200);
+    expect(completed.body.provisioningStatus).toBe('ACTIVE');
+
+    const row = await prisma.user.findUnique({
+      where: { id: s.pending1.id },
+      select: { provisioningStatus: true, teamId: true, shiftId: true },
+    });
+    expect(row).toMatchObject({ provisioningStatus: 'ACTIVE', teamId: team.id, shiftId: shift.id });
   });
 
   it('activate is idempotent on an already-active user', async () => {

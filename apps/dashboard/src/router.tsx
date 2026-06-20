@@ -29,6 +29,20 @@ interface RouterContext {
   queryClient: QueryClient;
 }
 
+const meQuery = {
+  queryKey: ['me'],
+  queryFn: async (): Promise<Me | null> => {
+    try {
+      const res = await api<{ user: Me }>('/v1/auth/me');
+      return res.user;
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) return null;
+      throw e;
+    }
+  },
+  staleTime: 5 * 60_000,
+};
+
 const rootRoute = createRootRouteWithContext<RouterContext>()({
   component: () => <Outlet />,
 });
@@ -40,19 +54,7 @@ const authedRoot = createRoute({
   getParentRoute: () => rootRoute,
   id: 'authed',
   beforeLoad: async ({ context, location }) => {
-    const me = await context.queryClient.fetchQuery<Me | null>({
-      queryKey: ['me'],
-      queryFn: async () => {
-        try {
-          const res = await api<{ user: Me }>('/v1/auth/me');
-          return res.user;
-        } catch (e) {
-          if (e instanceof ApiError && e.status === 401) return null;
-          throw e;
-        }
-      },
-      staleTime: 5 * 60_000,
-    });
+    const me = await context.queryClient.fetchQuery<Me | null>(meQuery);
     if (!me) {
       throw redirect({ to: '/login', search: { next: location.href } });
     }
@@ -227,6 +229,11 @@ const loginRoute = createRoute({
     status: typeof s.status === 'string' ? s.status : undefined,
     error: typeof s.error === 'string' ? s.error : undefined,
   }),
+  beforeLoad: async ({ context, search }) => {
+    if (search.status || search.error) return;
+    const me = await context.queryClient.fetchQuery<Me | null>(meQuery);
+    if (me) throw redirect({ to: '/' });
+  },
   component: LoginScreen,
 });
 

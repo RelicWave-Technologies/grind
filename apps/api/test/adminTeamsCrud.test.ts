@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import request from 'supertest';
 import { prisma } from '@grind/db';
+import { NINE_TO_SIX } from '@grind/types';
 import { buildApp } from '../src/app';
 import { signAccessToken } from '../src/lib/jwt';
 
@@ -306,6 +307,33 @@ describe('PATCH /v1/admin/users/:id', () => {
 });
 
 describe('/v1/admin/team-member-settings', () => {
+  it('lets an admin complete setup from team settings and activate a pending member', async () => {
+    const s = await seed();
+    const team = await prisma.team.create({
+      data: { workspaceId: s.ws.id, name: 'Managed Team', managerId: s.mgr.id },
+    });
+    await prisma.user.update({
+      where: { id: s.mem1.id },
+      data: { teamId: team.id, managerId: s.mgr.id, provisioningStatus: 'PENDING' },
+    });
+    const shift = await prisma.shift.create({
+      data: { workspaceId: s.ws.id, name: 'Day', schedule: NINE_TO_SIX, bufferMin: 20 },
+    });
+
+    const patch = await request(app)
+      .patch(`/v1/admin/team-member-settings/${s.mem1.id}`)
+      .set(auth(s.admin.token))
+      .send({ shiftId: shift.id });
+    expect(patch.status).toBe(200);
+    expect(patch.body.shiftId).toBe(shift.id);
+
+    const reload = await prisma.user.findUnique({
+      where: { id: s.mem1.id },
+      select: { provisioningStatus: true, shiftId: true },
+    });
+    expect(reload).toMatchObject({ provisioningStatus: 'ACTIVE', shiftId: shift.id });
+  });
+
   it('lets a manager configure their team member without gaining full People edit rights', async () => {
     const s = await seed();
     const team = await prisma.team.create({

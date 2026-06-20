@@ -2,8 +2,9 @@ import os from 'node:os';
 import crypto from 'node:crypto';
 import { shell } from 'electron';
 import type { AgentLarkExchangeResponse, LoginResponse, LogoutResponse, UserDto } from '@grind/types';
-import { api } from './apiClient';
+import { api, UnauthorizedError } from './apiClient';
 import { API_URL } from '../env';
+import { log } from '../logger';
 import { clearTokens, loadTokens, saveTokens } from './tokenStore';
 
 /**
@@ -17,6 +18,7 @@ let pendingVerifier: string | null = null;
 
 /** Begin a Lark login: mint PKCE, open the browser. The deep-link finishes it. */
 export function startLarkLogin(): void {
+  if (pendingVerifier) return;
   const verifier = crypto.randomBytes(48).toString('base64url'); // 64 chars (43–128 ok)
   const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
   pendingVerifier = verifier;
@@ -80,6 +82,23 @@ export async function logout(): Promise<void> {
 }
 
 export async function isLoggedIn(): Promise<boolean> {
+  return ensureSession();
+}
+
+/**
+ * Validate the locally saved session before falling back to OAuth.
+ * `api()` silently rotates the refresh token on a 401, so a valid refresh token
+ * keeps the user signed in across app restarts without reopening Lark.
+ */
+export async function ensureSession(): Promise<boolean> {
   const tokens = await loadTokens();
-  return tokens !== null;
+  if (!tokens) return false;
+  try {
+    await api('/v1/auth/me');
+    return true;
+  } catch (err) {
+    if (err instanceof UnauthorizedError) return false;
+    log.warn('session validation failed; keeping cached login state', { err: String(err) });
+    return true;
+  }
 }

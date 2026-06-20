@@ -35,7 +35,7 @@ export default function Today() {
   const today = useQuery({ queryKey: ['today'], queryFn: () => window.agent.timer.today(), refetchInterval: 3000 });
   const larkStatus = useQuery({ queryKey: ['larkStatus'], queryFn: () => window.agent.lark.status(), refetchInterval: 10_000 });
   const larkTasks = useQuery({ queryKey: ['larkTasks'], queryFn: () => window.agent.lark.tasks(), refetchInterval: 60_000 });
-  const [timer, setTimer] = useState<TimerStatus>({ state: 'IDLE' });
+  const [timer, setTimer] = useState<TimerStatus>({ state: 'IDLE', workedMs: 0 });
   const [now, setNow] = useState(() => Date.now());
   const [query, setQuery] = useState('');
   const [showAll, setShowAll] = useState(false);
@@ -50,8 +50,20 @@ export default function Today() {
     return () => { alive = false; off(); clearInterval(tick); };
   }, []);
 
-  const start = useMutation({ mutationFn: (guid: string) => window.agent.timer.start(guid), onSuccess: (s) => setTimer(s) });
-  const stop = useMutation({ mutationFn: () => window.agent.timer.stop(), onSuccess: (s) => setTimer(s) });
+  const start = useMutation({
+    mutationFn: (guid: string) => window.agent.timer.start(guid),
+    onSuccess: (s) => {
+      setTimer(s);
+      void qc.invalidateQueries({ queryKey: ['today'] });
+    },
+  });
+  const stop = useMutation({
+    mutationFn: () => window.agent.timer.stop(),
+    onSuccess: (s) => {
+      setTimer(s);
+      void qc.invalidateQueries({ queryKey: ['today'] });
+    },
+  });
   const connectLark = useMutation({ mutationFn: () => window.agent.lark.connect() });
 
   const onCreated = (summary: string) => {
@@ -90,7 +102,7 @@ export default function Today() {
           {/* Hero = live timer + stop control (no separate page) */}
           <div className={`hero-running rise rise-1${running ? ' on' : ''}`}>
             <div>
-              <div className="hero-time tabular">{fmtClock(running ? running.workedMs : 0)}</div>
+              <div className="hero-time tabular">{fmtClock(timer.workedMs)}</div>
               <div className="hero-proj">
                 {running ? (
                   <><i className="dt-dot" style={{ background: heroColor }} />{runningTask?.summary ?? 'Tracking'}{running.paused ? ' · paused' : ''}</>

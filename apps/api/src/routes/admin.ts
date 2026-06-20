@@ -10,8 +10,10 @@ import {
   addDays as addDaysStr,
   buildTimesheetMatrix,
   dateRange,
+  type TimesheetMatrix,
   type TimesheetSegmentInput,
 } from '../insights/timesheets';
+import { localDayWindow } from '../insights/day';
 import {
   CreateShiftSchema,
   PatchShiftSchema,
@@ -248,7 +250,9 @@ adminRouter.patch('/team-member-settings/:id', requireCapability('team.settings.
       select: {
         id: true,
         workspaceId: true,
+        teamId: true,
         shiftId: true,
+        provisioningStatus: true,
         deactivatedAt: true,
       },
     });
@@ -262,6 +266,7 @@ adminRouter.patch('/team-member-settings/:id', requireCapability('team.settings.
       // null clears the per-member override → inherit policy.
       screenshotIntervalMin?: number | null;
       idleThresholdMin?: number | null;
+      provisioningStatus?: 'ACTIVE';
     } = {};
     let shiftAssignment:
       | {
@@ -314,6 +319,17 @@ adminRouter.patch('/team-member-settings/:id', requireCapability('team.settings.
           };
         }
       }
+    }
+
+    if (
+      req.scope.isAdmin &&
+      existing.provisioningStatus === 'PENDING' &&
+      hasCompletedMemberSetup({
+        teamId: existing.teamId,
+        shiftId: data.shiftId !== undefined ? data.shiftId : existing.shiftId,
+      })
+    ) {
+      data.provisioningStatus = 'ACTIVE';
     }
 
     if (Object.keys(data).length > 0) {
@@ -710,12 +726,49 @@ async function loadTimesheetData(scope: { userIds: string[] }, range: ResolvedTi
   }
 
   const matrix = buildTimesheetMatrix({ from: range.from, to: range.to, tz: range.tz, segments: segs });
+  if (matrix) {
+    const samples = await prisma.activitySample.findMany({
+      where: {
+        userId: { in: scope.userIds },
+        bucketStart: { gte: lookbackStart, lt: lookbackEnd },
+      },
+      select: { userId: true, bucketStart: true },
+      orderBy: [{ userId: 'asc' }, { bucketStart: 'asc' }],
+    });
+    attachActivitySampleCounts(matrix, samples);
+  }
   const users = await prisma.user.findMany({
     where: { id: { in: scope.userIds } },
     select: { id: true, name: true, email: true, avatarUrl: true, role: true },
     orderBy: [{ role: 'asc' }, { name: 'asc' }],
   });
   return { matrix, users };
+}
+
+function attachActivitySampleCounts(
+  matrix: TimesheetMatrix,
+  samples: Array<{ userId: string; bucketStart: Date }>,
+) {
+  const windows = matrix.days
+    .map((day) => {
+      const win = localDayWindow(day, matrix.tz);
+      return win
+        ? { day, startMs: win.start.getTime(), endMs: win.end.getTime() }
+        : null;
+    })
+    .filter((win): win is { day: string; startMs: number; endMs: number } => win !== null);
+
+  for (const sample of samples) {
+    const userCells = matrix.cells[sample.userId];
+    if (!userCells) continue;
+    const t = sample.bucketStart.getTime();
+    for (const win of windows) {
+      if (t < win.startMs || t >= win.endMs) continue;
+      const cell = userCells[win.day];
+      if (cell) cell.activitySampleCount += 1;
+      break;
+    }
+  }
 }
 
 /**
@@ -760,7 +813,7 @@ adminRouter.get('/timesheets.csv', requireManagerOrAbove, async (req, res, next)
     const usersById = new Map(users.map((u) => [u.id, u]));
     const lines: string[] = [];
     lines.push(
-      'name,email,role,day,worked_h,meeting_h,manual_h,total_h,first_activity,last_activity',
+      'name,email,role,day,worked_h,meeting_h,manual_h,total_h,first_activity,last_activity,activity_samples',
     );
     // Stable ordering: user (role-then-name like the JSON), then day asc.
     for (const u of users) {
@@ -783,6 +836,7 @@ adminRouter.get('/timesheets.csv', requireManagerOrAbove, async (req, res, next)
             msToHours(cell.totalMs),
             first,
             last,
+            String(cell.activitySampleCount),
           ].join(','),
         );
       }
@@ -867,6 +921,10 @@ function managerAlreadyAssigned(team: { id: string; name: string }) {
 function isTeamManagerUniqueError(err: unknown) {
   const maybe = err as { code?: string; meta?: { target?: string[] } };
   return maybe?.code === 'P2002' && Array.isArray(maybe.meta?.target) && maybe.meta.target.includes('managerId');
+}
+
+function hasCompletedMemberSetup(input: { teamId: string | null; shiftId: string | null }): boolean {
+  return Boolean(input.teamId && input.shiftId);
 }
 
 /**
@@ -987,7 +1045,7 @@ adminRouter.delete('/teams/:id', requireAdmin, async (req, res, next) => {
 });
 
 // ============================================================================
-// PATCH a user (ADMIN-only). role / name / teamId / managerId.
+// PATCH a user (ADMIN-only). role / name / teamId / managerId / shiftId.
 // ============================================================================
 
 const VALID_ROLES = ['ADMIN', 'MANAGER', 'MEMBER'] as const;
@@ -1010,6 +1068,7 @@ adminRouter.patch('/users/:id', requireAdmin, async (req, res, next) => {
       managerId?: string | null;
       shiftId?: string | null;
       shiftAssignedAt?: Date | null;
+      provisioningStatus?: 'ACTIVE';
     } = {};
     let shiftAssignment:
       | {
@@ -1098,6 +1157,17 @@ adminRouter.patch('/users/:id', requireAdmin, async (req, res, next) => {
       }
     }
 
+    if (
+      existing.provisioningStatus === 'PENDING' &&
+      !existing.deactivatedAt &&
+      hasCompletedMemberSetup({
+        teamId: data.teamId !== undefined ? data.teamId : existing.teamId,
+        shiftId: data.shiftId !== undefined ? data.shiftId : existing.shiftId,
+      })
+    ) {
+      data.provisioningStatus = 'ACTIVE';
+    }
+
     if (Object.keys(data).length === 0) return res.status(400).json({ error: 'nothing_to_update' });
 
     // Safety: never demote the workspace's last active ADMIN. Without this,
@@ -1137,12 +1207,15 @@ adminRouter.patch('/users/:id', requireAdmin, async (req, res, next) => {
           teamId: true,
           managerId: true,
           shiftId: true,
+          provisioningStatus: true,
+          deactivatedAt: true,
           createdAt: true,
         },
       });
     });
     res.json({
       ...updated,
+      deactivatedAt: updated.deactivatedAt ? updated.deactivatedAt.toISOString() : null,
       createdAt: updated.createdAt.toISOString(),
     });
   } catch (err) {

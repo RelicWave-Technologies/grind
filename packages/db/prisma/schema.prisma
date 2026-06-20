@@ -193,7 +193,7 @@ model User {
   /// dropped) so a dev-only password login shim and a clean revert path remain.
   passwordHash String?
   /// JIT provisioning gate. First Lark login creates the user as PENDING (no
-  /// session issued) until an admin assigns team/role and activates. The
+  /// session issued) until an admin completes setup or activates access. The
   /// configured bootstrap admin is created ACTIVE. Distinct from deactivatedAt,
   /// which means "was active, now disabled".
   provisioningStatus ProvisioningStatus @default(PENDING)
@@ -429,8 +429,8 @@ model LarkOAuthToken {
 
 /// JIT-provisioning lifecycle for Lark-authenticated users.
 enum ProvisioningStatus {
-  PENDING // created on first Lark login; no session until an admin activates
-  ACTIVE  // admin assigned team/role (or bootstrap admin); may sign in
+  PENDING // created on first Lark login; no session until setup or activation
+  ACTIVE  // admin completed setup/activated access (or bootstrap admin); may sign in
 }
 
 /// Short-lived, single-use handoff codes for the DESKTOP AGENT's Lark login.

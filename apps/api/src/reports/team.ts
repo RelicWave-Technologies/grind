@@ -190,7 +190,19 @@ function buildAttention(members: TeamReportMember[]): TeamReportAttentionItem[] 
           detail: `${day.gaps.count} gap${day.gaps.count === 1 ? '' : 's'} · ${formatDuration(day.gaps.totalMs)}`,
         });
       }
-      if (day.activityPercent !== null && totalWorkedMs(day) > 0 && day.activityPercent < LOW_ACTIVITY_THRESHOLD) {
+      if (autoTrackedMs(day) > 0 && day.activityPercent === null) {
+        items.push({
+          id: `${prefix}:missing-activity`,
+          userId: member.user.id,
+          userName: member.user.name,
+          date: day.date,
+          kind: 'missing_activity',
+          severity: 'warn',
+          title: 'Evidence missing',
+          detail: 'Automatic time has no activity samples',
+        });
+      }
+      if (day.activityPercent !== null && autoTrackedMs(day) > 0 && day.activityPercent < LOW_ACTIVITY_THRESHOLD) {
         items.push({
           id: `${prefix}:low-activity`,
           userId: member.user.id,
@@ -242,6 +254,10 @@ function aggregateTopApps(days: MemberReportDay[]): MemberReportTopApp[] {
 
 function totalWorkedMs(day: MemberReportDay): number {
   return day.workedMs + day.meetingMs + day.manualMs;
+}
+
+function autoTrackedMs(day: MemberReportDay): number {
+  return day.workedMs + day.meetingMs;
 }
 
 function severityRank(severity: TeamReportAttentionItem['severity']): number {

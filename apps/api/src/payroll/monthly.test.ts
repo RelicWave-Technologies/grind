@@ -21,6 +21,7 @@ const cell = (workedH: number, meetingH = 0, manualH = 0) => ({
   totalMs: (workedH + meetingH + manualH) * HOUR,
   firstActivityMs: null,
   lastActivityMs: null,
+  activitySampleCount: 0,
 });
 
 function emptyMatrix(days: string[]): TimesheetMatrix {

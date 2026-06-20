@@ -152,6 +152,9 @@ export function AttendanceScreen() {
                 <Tag status="success" dot>
                   Present
                 </Tag>
+                <Tag status="warn" dot>
+                  Needs review
+                </Tag>
                 <Tag status="neutral" dot>
                   Absent · under 30m
                 </Tag>
@@ -197,6 +200,7 @@ export function AttendanceScreen() {
                     const daysPresent = data!.days.filter(
                       (d) => (row[d]?.totalMs ?? 0) >= PRESENT_MIN_MS,
                     ).length;
+                    const daysNeedingReview = data!.days.filter((d) => cellNeedsReview(row[d])).length;
                     const pct = total > 0 ? Math.round((daysPresent / total) * 100) : 0;
                     return (
                       <Tr key={u.id}>
@@ -210,12 +214,13 @@ export function AttendanceScreen() {
                         {data!.days.map((d) => {
                           const cell = row[d];
                           const present = cell ? cell.totalMs >= PRESENT_MIN_MS : false;
+                          const needsReview = cellNeedsReview(cell);
                           const first = cell?.firstActivityMs ? fmtTime(cell.firstActivityMs) : '—';
                           const last = cell?.lastActivityMs ? fmtTime(cell.lastActivityMs) : '—';
                           return (
                             <Td key={d} className="atd-col-day" align="center">
                               {present ? (
-                                <span className="atd-cell atd-cell--present">
+                                <span className={`atd-cell ${needsReview ? 'atd-cell--review' : 'atd-cell--present'}`}>
                                   <span className="ui-mono atd-cell__times">
                                     <span className="atd-cell__time">{first}</span>
                                     <span className="atd-cell__arrow"> → </span>
@@ -224,6 +229,7 @@ export function AttendanceScreen() {
                                   <span className="ui-mono atd-cell__dur">
                                     {fmtDurationMs(cell!.totalMs)}
                                   </span>
+                                  {needsReview && <span className="atd-cell__evidence">No samples</span>}
                                 </span>
                               ) : (
                                 <span className="ui-mono atd-cell__absent" aria-label="Absent">
@@ -239,7 +245,7 @@ export function AttendanceScreen() {
                               {daysPresent}
                               <span className="atd-present__of">/{total}</span>
                             </span>
-                            <Tag status={pct >= 80 ? 'success' : pct >= 40 ? 'warn' : 'neutral'} mono>
+                            <Tag status={daysNeedingReview > 0 ? 'warn' : pct >= 80 ? 'success' : pct >= 40 ? 'warn' : 'neutral'} mono>
                               {pct}%
                             </Tag>
                           </span>
@@ -255,6 +261,16 @@ export function AttendanceScreen() {
       </Card>
     </Page>
   );
+}
+
+function cellNeedsReview(
+  cell: { totalMs: number; workedMs: number; meetingMs: number; activitySampleCount: number } | undefined,
+): boolean {
+  return !!cell && cell.totalMs >= PRESENT_MIN_MS && autoTrackedMs(cell) > 0 && cell.activitySampleCount === 0;
+}
+
+function autoTrackedMs(cell: { workedMs: number; meetingMs: number }): number {
+  return cell.workedMs + cell.meetingMs;
 }
 
 /**

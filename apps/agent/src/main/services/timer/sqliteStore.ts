@@ -86,6 +86,17 @@ export class SqliteEntryStore implements EntryStore {
     return rows.map((r) => JSON.parse(r.json) as TimeEntry);
   }
 
+  listSince(since: number): TimeEntry[] {
+    const rows = this.db
+      .prepare(
+        `SELECT json FROM local_entries
+         WHERE ended_at IS NULL OR ended_at >= ?
+         ORDER BY rowid DESC`,
+      )
+      .all(since) as { json: string }[];
+    return rows.map((r) => JSON.parse(r.json) as TimeEntry);
+  }
+
   markSynced(entryId: string): void {
     this.db.prepare(`UPDATE local_entries SET synced = 1 WHERE id = ?`).run(entryId);
   }

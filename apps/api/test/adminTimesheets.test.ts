@@ -44,7 +44,7 @@ async function seed() {
   await prisma.user.updateMany({ where: { id: { in: [mgrB.id, memB.id] } }, data: { teamId: teamB.id } });
 
   // member-A: 90 min WORK + 30 min MEETING on May 26 UTC.
-  await prisma.timeEntry.create({
+  const memAEntry = await prisma.timeEntry.create({
     data: {
       id: `te-a1-${stamp}`,
       clientUuid: `cu-a1-${stamp}`,
@@ -59,6 +59,30 @@ async function seed() {
         ],
       },
     },
+  });
+  await prisma.activitySample.createMany({
+    data: [
+      {
+        id: `as-a1-${stamp}`,
+        userId: memA.id,
+        timeEntryId: memAEntry.id,
+        bucketStart: new Date('2026-05-26T09:15:00Z'),
+        keystrokes: 8,
+        clicks: 2,
+        mouseDistancePx: 240,
+        scrollEvents: 1,
+      },
+      {
+        id: `as-a2-${stamp}`,
+        userId: memA.id,
+        timeEntryId: memAEntry.id,
+        bucketStart: new Date('2026-05-26T09:16:00Z'),
+        keystrokes: 5,
+        clicks: 1,
+        mouseDistancePx: 140,
+        scrollEvents: 0,
+      },
+    ],
   });
   // member-A: 60 min MANUAL on May 27.
   await prisma.timeEntry.create({
@@ -194,6 +218,17 @@ describe('GET /v1/admin/timesheets', () => {
     expect(cell.firstActivityMs).toBe(new Date('2026-05-26T09:00:00Z').getTime());
     expect(cell.lastActivityMs).toBe(new Date('2026-05-26T11:00:00Z').getTime());
   });
+
+  it('cell carries activitySampleCount for evidence-aware attendance', async () => {
+    const s = await seed();
+    const res = await request(app)
+      .get('/v1/admin/timesheets?from=2026-05-26&to=2026-05-27&tz=UTC')
+      .set(auth(s.admin.token));
+    expect(res.status).toBe(200);
+    expect(res.body.cells[s.memA.id]['2026-05-26'].activitySampleCount).toBe(2);
+    expect(res.body.cells[s.memB.id]['2026-05-26'].activitySampleCount).toBe(0);
+    expect(res.body.cells[s.memA.id]['2026-05-27'].activitySampleCount).toBe(0);
+  });
 });
 
 describe('GET /v1/admin/timesheets.csv', () => {
@@ -214,7 +249,7 @@ describe('GET /v1/admin/timesheets.csv', () => {
     expect(res.headers['content-type']).toMatch(/text\/csv/);
     expect(res.headers['content-disposition']).toContain('timesheets-2026-05-26-to-2026-05-27.csv');
     const lines = res.text.trim().split('\n');
-    expect(lines[0]).toBe('name,email,role,day,worked_h,meeting_h,manual_h,total_h,first_activity,last_activity');
+    expect(lines[0]).toBe('name,email,role,day,worked_h,meeting_h,manual_h,total_h,first_activity,last_activity,activity_samples');
     // 3 active (user, day) pairs from the seed: memA on May 26, memA on May 27, memB on May 26.
     expect(lines.length).toBe(1 + 3);
     // Spot-check a known cell: memA on May 26 = 1.50 worked + 0.50 meeting = 2.00 total.
@@ -226,6 +261,7 @@ describe('GET /v1/admin/timesheets.csv', () => {
     expect(cells[7]).toBe('2.00'); // total_h
     expect(cells[8]).toBe('09:00'); // first_activity
     expect(cells[9]).toBe('11:00'); // last_activity
+    expect(cells[10]).toBe('2'); // activity_samples
   });
 
   it('manager scope filters out the other team in CSV too', async () => {

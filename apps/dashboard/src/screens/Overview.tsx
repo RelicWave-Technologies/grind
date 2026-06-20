@@ -129,7 +129,7 @@ export function OverviewScreen() {
               icon={<LayoutGrid size={15} strokeWidth={1.8} />}
               onClick={() => navigate({ to: '/team' })}
             >
-              Team
+              Team Settings
             </Button>
             <Button
               variant="ghost"
@@ -173,11 +173,11 @@ export function OverviewScreen() {
               />
               <Stat
                 label="Tracked today"
-                value={t.workedHours.toFixed(1)}
+                value={(t.workedHours + t.meetingHours).toFixed(1)}
                 unit="h"
                 hint={
                   t.meetingHours > 0
-                    ? `+ ${t.meetingHours.toFixed(1)}h meetings`
+                    ? `${t.workedHours.toFixed(1)}h work + ${t.meetingHours.toFixed(1)}h meetings`
                     : 'across all tasks'
                 }
               />
@@ -198,7 +198,7 @@ export function OverviewScreen() {
                 hint={
                   t.manualHours === 0
                     ? 'all auto-tracked'
-                    : `${Math.round((t.manualHours / Math.max(0.1, t.workedHours)) * 100)}% of tracked`
+                    : `${Math.round((t.manualHours / Math.max(0.1, t.workedHours + t.meetingHours)) * 100)}% of tracked`
                 }
               />
             </StatRow>

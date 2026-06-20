@@ -9,7 +9,7 @@ import { fmtClock } from './Today';
 /** Compact menu-bar popover: current status + quick start/stop + open app. */
 export default function Popover() {
   const larkTasks = useQuery({ queryKey: ['larkTasks'], queryFn: () => window.agent.lark.tasks() });
-  const [timer, setTimer] = useState<TimerStatus>({ state: 'IDLE' });
+  const [timer, setTimer] = useState<TimerStatus>({ state: 'IDLE', workedMs: 0 });
 
   useEffect(() => {
     void window.agent.timer.status().then(setTimer);
@@ -48,6 +48,10 @@ export default function Popover() {
         </div>
       ) : (
         <div className="pop-list no-drag">
+          <div className="pop-today-total">
+            <span>Today tracked</span>
+            <strong className="tabular">{fmtClock(timer.workedMs)}</strong>
+          </div>
           <div className="small tertiary" style={{ padding: '0 2px 6px' }}>START TRACKING</div>
           {openTasks.length === 0 ? (
             <div className="callout secondary" style={{ padding: '2px' }}>

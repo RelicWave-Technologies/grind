@@ -607,6 +607,13 @@ label.field-label { display: block; font-size: 12px; font-weight: 600; color: va
 .pop-time { font-family: var(--font-round); font-size: 40px; font-weight: 700; letter-spacing: -1px; }
 .pop-proj { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--label-secondary); margin-bottom: 4px; }
 .pop-list { display: flex; flex-direction: column; gap: 2px; }
+.pop-today-total {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 10px 12px; margin-bottom: 8px; border-radius: 12px;
+  background: var(--bg-card); border: 1px solid var(--separator);
+  color: var(--label-secondary); font-size: 12px;
+}
+.pop-today-total strong { color: var(--label-primary); font-family: var(--font-round); font-size: 18px; letter-spacing: 0; }
 .pop-row {
   -webkit-app-region: no-drag; display: flex; align-items: center; gap: 10px; width: 100%; border: none; background: transparent;
   font: inherit; text-align: left; padding: 8px; border-radius: 10px; cursor: default; transition: background var(--dur-fast) var(--ease);

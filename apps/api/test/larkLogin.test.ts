@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import crypto from 'node:crypto';
 import { prisma } from '@grind/db';
+import { NINE_TO_SIX } from '@grind/types';
 
 // Set provisioning env BEFORE the service (and its env.ts) is first imported.
 process.env.LARK_BOOTSTRAP_ADMIN_EMAILS = 'boss@co.com';
@@ -63,6 +64,29 @@ describe('resolveUser — provisioning', () => {
     expect(u.role).toBe('MANAGER'); // hierarchy untouched
     const ident = await prisma.larkIdentity.findUnique({ where: { openId: 'ou_1' } });
     expect(ident?.userId).toBe(existing.id);
+  });
+
+  it('activates a matched pending user when admin setup already assigned team and shift', async () => {
+    const ws = await prisma.workspace.create({ data: { id: 'ws_test', name: 'W' } });
+    const team = await prisma.team.create({ data: { workspaceId: ws.id, name: 'Setup team' } });
+    const shift = await prisma.shift.create({
+      data: { workspaceId: ws.id, name: 'Day', schedule: NINE_TO_SIX, bufferMin: 30 },
+    });
+    const existing = await prisma.user.create({
+      data: {
+        workspaceId: ws.id,
+        email: 'alice@co.com',
+        name: 'Alice',
+        role: 'MEMBER',
+        provisioningStatus: 'PENDING',
+        teamId: team.id,
+        shiftId: shift.id,
+      },
+    });
+
+    const u = await resolveUser(profile());
+    expect(u.id).toBe(existing.id);
+    expect(u.provisioningStatus).toBe('ACTIVE');
   });
 
   it('promotes a previously-PENDING user to ADMIN/ACTIVE when their email is a bootstrap email', async () => {

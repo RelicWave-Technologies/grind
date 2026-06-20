@@ -8,7 +8,7 @@
 
 - **Identity = Lark.** Canonical key is the Lark **`open_id`** (app-scoped, stable). `union_id` stored as a secondary key. `email`, `name`, `avatar_url` are pulled from Lark and refreshed on every login.
 - **Hierarchy = Grind.** `team`, `manager`, `role` are assigned by an admin inside Grind. Lark's department/manager tree is **never read** (it's unreliable).
-- **Provisioning.** First Lark login JIT-creates the user as **PENDING MEMBER** (no session). An admin assigns team/manager/role and activates. The configured **bootstrap admin email** is created **ACTIVE ADMIN** and bootstraps the single default workspace.
+- **Provisioning.** First Lark login JIT-creates the user as **PENDING MEMBER** (no session). An admin completes setup (team + shift) or activates explicitly. The configured **bootstrap admin email** is created **ACTIVE ADMIN** and bootstraps the single default workspace.
 - **No passwords in production.** `passwordHash` becomes nullable and is never set by the Lark path. A **dev-only** password shim stays behind `NODE_ENV!=='production' && ALLOW_PASSWORD_LOGIN==='true'` so local dev + the test suite keep working without a live Lark tenant.
 - **Reuse, don't rebuild.** `lark/oauthClient.ts`, `lark/tokenManager.ts`, `lark/oauth.ts`, `lark/crypto.ts`, `lib/jwt.ts`, `lib/refreshToken.ts`, `middleware/{auth,scope}.ts`, RBAC — all unchanged in contract.
 
@@ -104,8 +104,8 @@ Body: `{ code, codeVerifier }`.
 
 ### 3.4 Admin (`routes/admin.ts`)
 - `GET /v1/admin/users?status=pending` — list PENDING users (reuse existing list + filter).
-- `POST /v1/admin/users/:id/activate` — PENDING→ACTIVE (requires a team or role already set; 409 otherwise).
-- Reuse `PATCH /v1/admin/users/:id` (`admin.ts:962`) for team/manager/role.
+- `POST /v1/admin/users/:id/activate` — explicit PENDING→ACTIVE override. Admin setup writes also auto-activate once a pending user has both team and shift.
+- Reuse `PATCH /v1/admin/users/:id` for team/manager/role/shift.
 - **Remove** temp-password generation on invite (`admin.ts:1155`); the "invite" concept becomes "pre-create a PENDING shell by email" (optional) or simply "they appear after first Lark login."
 - Last-admin protection (`admin.ts:1071`) unchanged.
 

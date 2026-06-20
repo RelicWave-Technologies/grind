@@ -42,6 +42,12 @@ class MemStore implements EntryStore {
   listRecent(limit: number) {
     return [...this.entries.values()].reverse().slice(0, limit).map((e) => structuredClone(e));
   }
+  listSince(since: number) {
+    return [...this.entries.values()]
+      .filter((e) => e.endedAt === null || e.endedAt >= since)
+      .reverse()
+      .map((e) => structuredClone(e));
+  }
   markSynced(id: string) {
     this.synced.add(id);
   }
@@ -121,6 +127,23 @@ describe('TimerService.status worked time', () => {
     const s = svc.status();
     expect(s.state).toBe('RUNNING');
     if (s.state === 'RUNNING') expect(s.workedMs).toBe(7 * MIN);
+  });
+
+  it('keeps today worked ms cumulative across stop/start cycles', async () => {
+    await svc.start({});
+    clock.advance(10 * MIN);
+    const stopped = await svc.stop();
+    expect(stopped).toMatchObject({ state: 'IDLE', workedMs: 10 * MIN });
+
+    clock.advance(5 * MIN);
+    await svc.start({});
+    let s = svc.status();
+    expect(s.state).toBe('RUNNING');
+    if (s.state === 'RUNNING') expect(s.workedMs).toBe(10 * MIN);
+
+    clock.advance(2 * MIN);
+    s = svc.status();
+    if (s.state === 'RUNNING') expect(s.workedMs).toBe(12 * MIN);
   });
 });
 

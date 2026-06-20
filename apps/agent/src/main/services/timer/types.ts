@@ -22,6 +22,8 @@ export interface EntryStore {
   getUnsynced(): TimeEntry[];
   /** Most recent entries (newest first), for the day timeline / recent views. */
   listRecent(limit: number): TimeEntry[];
+  /** Entries that overlap or continue after `since`, newest first. */
+  listSince(since: number): TimeEntry[];
   /** Mark an entry as successfully synced. */
   markSynced(entryId: string): void;
   /**

@@ -77,6 +77,7 @@ export function HomeScreen() {
   const approvalPreview = pendingRequests.slice(0, 3);
   const topApps = dayQ.data?.appUsage?.topApps ?? [];
   const topApp = topApps[0] ?? null;
+  const evidenceReview = day ? dayNeedsEvidenceReview(day) : false;
 
   const firstName = me.name.split(' ')[0] ?? 'there';
   const dateLine = new Intl.DateTimeFormat('en-US', {
@@ -99,8 +100,9 @@ export function HomeScreen() {
       pendingCount: pendingApprovalCount,
       pendingMs,
       hasWorked: totalMs > 0,
+      evidenceReview,
     }),
-    [gapCount, gapMs, pendingApprovalCount, pendingMs, totalMs],
+    [gapCount, gapMs, pendingApprovalCount, pendingMs, totalMs, evidenceReview],
   );
 
   return (
@@ -435,6 +437,13 @@ function formatFirstLast(day: DayInsight): string {
   return `${fmtTime(day.firstActivityAt, day.timezone)} / ${fmtTime(day.lastActivityAt, day.timezone)}`;
 }
 
+function dayNeedsEvidenceReview(day: DayInsight): boolean {
+  const autoTrackedMs = day.totals.workedMs + day.totals.meetingMs;
+  if (autoTrackedMs <= 0) return false;
+  const sampleCount = day.activity?.sampleCounts.reduce((sum, count) => sum + count, 0) ?? 0;
+  return sampleCount === 0;
+}
+
 function getDayStatus(
   day: DayInsight,
   totalMs: number,
@@ -442,6 +451,7 @@ function getDayStatus(
   pendingCount: number,
 ): { label: string; status: 'success' | 'warn' | 'neutral' | 'info' } {
   if (pendingCount > 0) return { label: 'Pending', status: 'warn' };
+  if (dayNeedsEvidenceReview(day)) return { label: 'Review', status: 'warn' };
   if (totalMs > 0 && gapMs === 0) return { label: 'Clean', status: 'success' };
   if (totalMs > 0) return { label: 'Review', status: 'info' };
   if (!day.shift) return { label: 'No shift', status: 'neutral' };
@@ -454,12 +464,14 @@ function buildActionRows({
   pendingCount,
   pendingMs,
   hasWorked,
+  evidenceReview,
 }: {
   gapCount: number;
   gapMs: number;
   pendingCount: number;
   pendingMs: number;
   hasWorked: boolean;
+  evidenceReview: boolean;
 }): Array<{
   icon: ReactNode;
   title: string;
@@ -485,6 +497,15 @@ function buildActionRows({
       tag: <Tag status="warn" mono>Gap</Tag>,
       rail: 'warn',
       to: { to: '/edit-time', search: { date: todayKey() } },
+    });
+  } else if (evidenceReview) {
+    rows.push({
+      icon: <Activity size={18} strokeWidth={1.9} />,
+      title: 'Review activity evidence',
+      sub: 'Automatic time has no activity samples',
+      tag: <Tag status="warn" mono>No samples</Tag>,
+      rail: 'warn',
+      to: { to: '/reports' },
     });
   } else {
     rows.push({

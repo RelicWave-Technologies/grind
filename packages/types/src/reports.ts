@@ -90,6 +90,7 @@ export const TeamReportAttentionKindSchema = z.enum([
   'late',
   'no_activity',
   'gap',
+  'missing_activity',
   'low_activity',
 ]);
 export type TeamReportAttentionKind = z.infer<typeof TeamReportAttentionKindSchema>;

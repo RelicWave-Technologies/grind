@@ -8,7 +8,7 @@ import { fmtClock } from './Today';
 /** Always-on-top mini bar shown while tracking. */
 export default function FloatingBar() {
   const larkTasks = useQuery({ queryKey: ['larkTasks'], queryFn: () => window.agent.lark.tasks() });
-  const [timer, setTimer] = useState<TimerStatus>({ state: 'IDLE' });
+  const [timer, setTimer] = useState<TimerStatus>({ state: 'IDLE', workedMs: 0 });
 
   useEffect(() => {
     void window.agent.timer.status().then(setTimer);

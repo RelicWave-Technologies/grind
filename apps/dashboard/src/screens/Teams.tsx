@@ -144,7 +144,7 @@ export function TeamsScreen() {
     <Page className="tms-page">
       <PageHeader
         eyebrow="Workspace · Org structure"
-        title="Teams"
+        title="Org Teams"
         subtitle={subtitle}
         actions={
           <Toolbar>

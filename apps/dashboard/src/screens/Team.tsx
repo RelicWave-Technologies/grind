@@ -129,8 +129,8 @@ export function TeamScreen() {
   return (
     <Page className="tm-page">
       <PageHeader
-        eyebrow="Team settings"
-        title="Team"
+        eyebrow="Manager workspace"
+        title="Team Settings"
         subtitle="Edit each member's shift, screenshot cadence, and idle-break threshold."
         actions={
           <Toolbar>

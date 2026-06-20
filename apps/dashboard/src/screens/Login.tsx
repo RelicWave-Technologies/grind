@@ -7,7 +7,7 @@ import { Card, SidebarBrand, Button, Banner } from '../ui';
 
 /** Friendly copy for each terminal outcome the API hands back via ?status/?error. */
 const OUTCOME_COPY: Record<string, { status: 'danger' | 'warn' | 'info'; text: string }> = {
-  pending: { status: 'info', text: 'Your account is awaiting setup. An admin will assign your team and role — you’ll have access right after.' },
+  pending: { status: 'info', text: 'Your account is awaiting setup. An admin will finish your team, shift, and access activation.' },
   denied: { status: 'warn', text: 'Sign-in was cancelled.' },
   temporary: { status: 'warn', text: 'Lark had a temporary hiccup. Please try again.' },
   auth_failed: { status: 'danger', text: 'Sign-in failed. Please try again.' },
@@ -36,7 +36,12 @@ export function LoginScreen() {
       ? OUTCOME_COPY[search.error] ?? OUTCOME_COPY.auth_failed
       : null;
 
-  function signIn() {
+  async function signIn() {
+    const current = await me.refetch();
+    if (current.data) {
+      navigate({ to: '/' });
+      return;
+    }
     // Top-level navigation (not a fetch) so the OAuth redirect chain works.
     window.location.assign(larkLoginUrl());
   }
@@ -99,14 +104,15 @@ export function LoginScreen() {
             size="lg"
             block
             onClick={signIn}
+            disabled={me.isFetching}
             icon={<ShieldCheck size={15} />}
           >
-            Continue with Lark
+            {me.isFetching ? 'Checking session…' : 'Continue with Lark'}
           </Button>
 
           <div className="lgn-access-note">
             <span className="ui-t-eyebrow">New account</span>
-            <p className="ui-t-small">Sign in once with Lark; an admin assigns your team and role.</p>
+            <p className="ui-t-small">Sign in once with Lark; an admin finishes setup and activates access.</p>
           </div>
         </div>
         </Card>

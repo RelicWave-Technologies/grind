@@ -21,6 +21,8 @@ export interface TimesheetCell {
    */
   firstActivityMs: number | null;
   lastActivityMs: number | null;
+  /** Number of one-minute activity samples captured inside this user-day. */
+  activitySampleCount: number;
 }
 
 export interface TimesheetMatrix {
@@ -101,6 +103,7 @@ export function buildTimesheetMatrix(input: {
         totalMs: 0,
         firstActivityMs: null,
         lastActivityMs: null,
+        activitySampleCount: 0,
       };
       perUser[day] = cell;
     }
