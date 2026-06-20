@@ -1,5 +1,5 @@
 import { Outlet, Link, useRouteContext, useNavigate, useLocation } from '@tanstack/react-router';
-import { Home, Clock4, Inbox, LayoutGrid, CalendarCheck, ShieldAlert, Building2, Sunrise, LogOut, ShieldCheck, FileSpreadsheet, Compass, FileText, User } from 'lucide-react';
+import { Home, Clock4, Inbox, LayoutGrid, CalendarCheck, ShieldAlert, Building2, Sunrise, LogOut, ShieldCheck, FileSpreadsheet, Compass, FileText, User, Users } from 'lucide-react';
 import { hasCapability, isAdmin, isManagerOrAbove, useLogout, type Permission } from '../lib/auth';
 import {
   AppShell,
@@ -20,6 +20,7 @@ interface NavEntry {
 const NAV: NavEntry[] = [
   { to: '/', label: 'Home', Icon: Home, show: 'all' },
   { to: '/overview', label: 'Overview', Icon: Compass, show: 'manager+' },
+  { to: '/users', label: 'People', Icon: Users, show: 'admin' },
   { to: '/edit-time', label: 'Edit Time', Icon: Clock4, show: 'all' },
   { to: '/reports', label: 'Reports', Icon: FileText, show: { permission: 'reports.self.read' } },
   { to: '/approvals', label: 'Approvals', Icon: Inbox, show: { permission: 'approvals.self.read' } },
