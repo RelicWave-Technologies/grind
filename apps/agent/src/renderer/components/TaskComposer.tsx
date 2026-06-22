@@ -25,6 +25,12 @@ export default function TaskComposer({ onCreated }: { onCreated: (summary: strin
     },
   });
 
+  const errorText = create.data && !create.data.ok
+    ? create.data.error === 'reauth_required'
+      ? 'Reconnect Lark'
+      : 'Failed'
+    : null;
+
   const submit = () => {
     const s = summary.trim();
     if (!s) return;
@@ -55,8 +61,8 @@ export default function TaskComposer({ onCreated }: { onCreated: (summary: strin
           <input type="date" value={due} onChange={(e) => setDue(e.target.value)} />
         </label>
         <span className="composer-spacer" />
-        {create.data && !create.data.ok && (
-          <span className="composer-error"><X size={13} strokeWidth={2.5} /> Failed</span>
+        {errorText && (
+          <span className="composer-error"><X size={13} strokeWidth={2.5} /> {errorText}</span>
         )}
         <button className="btn btn-prominent no-drag" onClick={submit} disabled={create.isPending || !summary.trim()}>
           {create.isPending ? 'Creating…' : 'Create in Lark'}

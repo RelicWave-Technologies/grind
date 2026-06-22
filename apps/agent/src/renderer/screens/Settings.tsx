@@ -36,7 +36,7 @@ export default function Settings() {
   const larkSub = !l?.configured
     ? { ok: false, text: 'Not configured by your workspace' }
     : larkReauth
-      ? { ok: false, text: 'Reconnect needed — your Lark session expired' }
+      ? { ok: false, text: 'Reconnect needed — your Lark access changed or expired' }
       : larkConnected
         ? { ok: true, text: 'Connected' }
         : { ok: false, text: 'Connect to attribute time to Lark tasks' };

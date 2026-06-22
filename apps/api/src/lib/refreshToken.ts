@@ -10,6 +10,12 @@ export type IssuedRefresh = {
   familyId: string;
 };
 
+// Browser tabs can hit the 15-minute access-token expiry at the same time.
+// One tab rotates the cookie refresh token; another may replay the just-spent
+// token milliseconds later before the shared cookie jar settles. Treat that as
+// benign for a tiny window instead of revoking the whole family.
+export const REFRESH_REUSE_GRACE_MS = 30_000;
+
 export function sha256(input: string): string {
   return crypto.createHash('sha256').update(input).digest('hex');
 }
@@ -52,7 +58,7 @@ export async function revokeRefreshToken(refreshToken: string): Promise<boolean>
 
 export type RotateResult =
   | { ok: true; accessToken: string; refreshToken: string; expiresAt: Date }
-  | { ok: false; reason: 'invalid' | 'expired' | 'reuse' | 'stale_role' };
+  | { ok: false; reason: 'invalid' | 'expired' | 'reuse' | 'reuse_grace' | 'stale_role' };
 
 /**
  * Single-use rotation with reuse detection. Validates the presented token,
@@ -71,6 +77,17 @@ export async function rotateRefreshToken(presented: string): Promise<RotateResul
     if (!row) return { ok: false, reason: 'invalid' };
 
     if (row.revokedAt) {
+      const liveSuccessor = await tx.refreshToken.findFirst({
+        where: {
+          familyId: row.familyId,
+          revokedAt: null,
+          createdAt: { gte: row.revokedAt },
+        },
+        select: { id: true },
+      });
+      if (liveSuccessor && Date.now() - row.revokedAt.getTime() <= REFRESH_REUSE_GRACE_MS) {
+        return { ok: false, reason: 'reuse_grace' };
+      }
       // Reuse detected → nuke the whole family.
       await tx.refreshToken.updateMany({
         where: { familyId: row.familyId, revokedAt: null },

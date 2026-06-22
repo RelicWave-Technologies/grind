@@ -3,13 +3,14 @@ import request from 'supertest';
 import { prisma } from '@grind/db';
 import { buildApp } from '../src/app';
 import { hashPassword } from '../src/lib/password';
+import { REFRESH_REUSE_GRACE_MS, sha256 } from '../src/lib/refreshToken';
 
 /**
  * Production-grade refresh-token rotation:
  *   - /v1/auth/refresh (agent, bearer body) rotates single-use.
  *   - /v1/auth/refresh-cookie (dashboard, httpOnly cookie) rotates + re-sets cookies.
- *   - Reuse of an already-spent token trips reuse-detection and revokes the
- *     whole family, forcing a clean re-login.
+ *   - Reuse of an already-spent token outside a short browser-concurrency
+ *     grace trips reuse-detection and revokes the whole family.
  */
 
 const app = buildApp();
@@ -68,6 +69,10 @@ describe('refresh rotation', () => {
     const rt0 = res.body.refreshToken as string;
     const r1 = await request(app).post('/v1/auth/refresh').send({ refreshToken: rt0 });
     const rt1 = r1.body.refreshToken as string; // the legitimate live token
+    await prisma.refreshToken.update({
+      where: { tokenHash: sha256(rt0) },
+      data: { revokedAt: new Date(Date.now() - REFRESH_REUSE_GRACE_MS - 1000) },
+    });
     // Attacker replays the already-spent rt0 → reuse detected → family nuked.
     const replay = await request(app).post('/v1/auth/refresh').send({ refreshToken: rt0 });
     expect(replay.status).toBe(401);
@@ -89,6 +94,29 @@ describe('refresh rotation', () => {
     expect(newRt).not.toBe(rt);
     const joined = (refreshed.headers['set-cookie'] as unknown as string[]).join('; ');
     expect(joined).toMatch(/grind_at=/);
+  });
+
+  it('POST /v1/auth/refresh-cookie tolerates an immediate duplicate browser refresh', async () => {
+    const { res } = await login();
+    const rt = grindRt(res.headers['set-cookie'] as unknown as string[]);
+    expect(rt).toBeTruthy();
+    const refreshed = await request(app)
+      .post('/v1/auth/refresh-cookie')
+      .set('Cookie', `grind_rt=${rt}`);
+    expect(refreshed.status).toBe(200);
+    const newRt = grindRt(refreshed.headers['set-cookie'] as unknown as string[]);
+    expect(newRt).toBeTruthy();
+
+    const duplicate = await request(app)
+      .post('/v1/auth/refresh-cookie')
+      .set('Cookie', `grind_rt=${rt}`);
+    expect(duplicate.status).toBe(200);
+    expect(grindRt(duplicate.headers['set-cookie'] as unknown as string[])).toBeNull();
+
+    const stillLive = await request(app)
+      .post('/v1/auth/refresh')
+      .send({ refreshToken: newRt });
+    expect(stillLive.status).toBe(200);
   });
 
   it('POST /v1/auth/refresh-cookie with no cookie → 401', async () => {

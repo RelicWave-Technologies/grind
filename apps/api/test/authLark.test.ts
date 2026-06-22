@@ -31,7 +31,7 @@ const TOKENS: Tokens = {
   accessExpiresInSec: 7200,
   refreshToken: 'rt',
   refreshExpiresInSec: 604800,
-  scope: 'contact:user.email:readonly offline_access',
+  scope: lark.LARK_SCOPE_STRING,
 };
 
 type Profile = { openId: string; unionId: string | null; name: string; email: string | null; avatarUrl: string | null };

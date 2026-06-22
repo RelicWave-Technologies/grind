@@ -7,6 +7,7 @@ export type LarkStatus = {
   connected: boolean;
   reauthRequired: boolean;
   scopes: string[];
+  missingScopes?: string[];
 };
 
 export type LarkTask = {

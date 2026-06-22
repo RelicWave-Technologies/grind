@@ -6,6 +6,7 @@ import {
   LarkReauthRequiredError,
   LarkTransientError,
 } from './oauthClient';
+import { LARK_SCOPES } from './config';
 
 /**
  * TokenManager — owns Lark OAuth tokens server-side.
@@ -35,12 +36,18 @@ export type ConnectionStatus = {
   connected: boolean;
   reauthRequired: boolean;
   scopes: string[];
+  missingScopes: string[];
   refreshExpiresAt: Date | null;
   lastRefreshedAt: Date | null;
 };
 
 // Refresh a bit early so an in-flight request never races token expiry.
 const ACCESS_SKEW_MS = 60_000;
+
+function missingRequiredScopes(scopes: string): string[] {
+  const granted = new Set(scopes.split(' ').filter(Boolean));
+  return LARK_SCOPES.filter((scope) => !granted.has(scope));
+}
 
 export class TokenManager {
   private readonly accessCache = new Map<string, CachedAccess>();
@@ -152,6 +159,10 @@ export class TokenManager {
       const row = await this.deps.prisma.larkOAuthToken.findUnique({ where: { userId } });
       if (!row) throw new LarkReauthRequiredError('Lark not connected for this user');
       if (row.reauthRequired) throw new LarkReauthRequiredError();
+      if (missingRequiredScopes(row.scopes).length > 0) {
+        await this.markReauth(userId);
+        throw new LarkReauthRequiredError('Lark connection is missing required scopes');
+      }
       if (row.refreshExpiresAt.getTime() <= this.now()) {
         await this.markReauth(userId);
         throw new LarkReauthRequiredError('Lark refresh token expired');
@@ -198,15 +209,18 @@ export class TokenManager {
         connected: false,
         reauthRequired: false,
         scopes: [],
+        missingScopes: [],
         refreshExpiresAt: null,
         lastRefreshedAt: null,
       };
     }
     const expired = row.refreshExpiresAt.getTime() <= this.now();
+    const missingScopes = missingRequiredScopes(row.scopes);
     return {
-      connected: !row.reauthRequired && !expired,
-      reauthRequired: row.reauthRequired || expired,
+      connected: !row.reauthRequired && !expired && missingScopes.length === 0,
+      reauthRequired: row.reauthRequired || expired || missingScopes.length > 0,
       scopes: row.scopes ? row.scopes.split(' ').filter(Boolean) : [],
+      missingScopes,
       refreshExpiresAt: row.refreshExpiresAt,
       lastRefreshedAt: row.lastRefreshedAt,
     };

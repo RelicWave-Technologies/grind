@@ -100,6 +100,7 @@ larkRouter.get('/status', async (req, res, next) => {
       connected: status.connected,
       reauthRequired: status.reauthRequired,
       scopes: status.scopes,
+      missingScopes: status.missingScopes,
       requestedScopes: LARK_SCOPES,
       refreshExpiresAt: status.refreshExpiresAt,
       lastRefreshedAt: status.lastRefreshedAt,

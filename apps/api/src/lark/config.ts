@@ -6,6 +6,7 @@ import { env } from '../env';
  */
 export const LARK_SCOPES = [
   'task:task:read',
+  'task:task:write',
   'task:tasklist:read',
   'task:comment:write',
   'calendar:calendar:readonly',

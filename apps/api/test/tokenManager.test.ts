@@ -9,6 +9,7 @@ import {
   LarkTransientError,
 } from '../src/lark/oauthClient';
 import { decryptToken } from '../src/lark/crypto';
+import { LARK_SCOPE_STRING } from '../src/lark/config';
 import { seedUser } from './helpers';
 
 const KEY = crypto.randomBytes(32).toString('base64');
@@ -26,6 +27,7 @@ class FakeOAuth implements OAuthClient {
   accessExpiresInSec = 7200;
   refreshExpiresInSec = 60 * 60 * 24 * 7;
   failRefreshWith: Error | null = null;
+  scope = LARK_SCOPE_STRING;
 
   private mint(): LarkTokenResponse {
     this.seq += 1;
@@ -36,7 +38,7 @@ class FakeOAuth implements OAuthClient {
       accessExpiresInSec: this.accessExpiresInSec,
       refreshToken,
       refreshExpiresInSec: this.refreshExpiresInSec,
-      scope: 'task:task:read offline_access',
+      scope: this.scope,
     };
   }
 
@@ -229,6 +231,22 @@ describe('TokenManager.getStatus / disconnect', () => {
     expect(s.connected).toBe(true);
     expect(s.scopes).toContain('offline_access');
     expect(s.refreshExpiresAt).toBeInstanceOf(Date);
+  });
+
+  it('requires reconnect when the stored grant is missing a required scope', async () => {
+    client.scope = 'task:task:read offline_access';
+    const tm = makeManager();
+    await tm.connect(userId, 'code', 'r');
+
+    const s = await tm.getStatus(userId);
+    expect(s.connected).toBe(false);
+    expect(s.reauthRequired).toBe(true);
+    expect(s.missingScopes).toContain('task:task:write');
+
+    nowMs += 3 * 3600 * 1000;
+    await expect(tm.getAccessToken(userId)).rejects.toBeInstanceOf(LarkReauthRequiredError);
+    const row = await prisma.larkOAuthToken.findUnique({ where: { userId } });
+    expect(row!.reauthRequired).toBe(true);
   });
 
   it('reports reauthRequired when the refresh token is past expiry', async () => {

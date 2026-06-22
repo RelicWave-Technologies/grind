@@ -74,7 +74,7 @@ declare global {
         }>;
       };
       lark: {
-        status: () => Promise<{ configured: boolean; connected: boolean; reauthRequired: boolean; scopes: string[] }>;
+        status: () => Promise<{ configured: boolean; connected: boolean; reauthRequired: boolean; scopes: string[]; missingScopes?: string[] }>;
         connect: () => Promise<{ ok: boolean; error?: string }>;
         disconnect: () => Promise<{ ok: boolean }>;
         tasks: () => Promise<{ tasks: { guid: string; summary: string; completed: boolean; url?: string; due: number | null; createdAt: number | null; creatorId: string | null; creatorName: string | null; loggedMs: number }[]; reauthRequired: boolean }>;

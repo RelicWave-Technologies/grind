@@ -216,6 +216,7 @@ authRouter.post('/refresh-cookie', async (req, res, next) => {
     if (!presented) return res.status(401).json({ error: 'no_refresh' });
     const result = await rotateRefreshToken(presented);
     if (!result.ok) {
+      if (result.reason === 'reuse_grace') return res.json({ ok: true as const });
       clearSessionCookie(res);
       clearRefreshCookie(res);
       if (result.reason === 'stale_role') return res.status(503).json({ error: 'stale_role_migration_required' });

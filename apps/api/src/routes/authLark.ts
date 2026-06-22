@@ -162,8 +162,10 @@ authLarkRouter.get('/callback', async (req, res, next) => {
     // 3. Resolve / provision.
     const user = await resolveUser(profile);
 
-    // 4. Persist Lark tokens best-effort (powers bot/approvals; re-granted next login on failure).
-    void tm
+    // 4. Persist Lark tokens before redirecting so login leaves task/approval
+    // features connected. Failure is still non-terminal: the next login can
+    // re-grant a fresh single-use refresh token.
+    await tm
       .persistTokens(user.id, tokens)
       .catch((err) => logger.warn({ err: String(err), userId: user.id }, 'lark login: token persist failed'));
 
