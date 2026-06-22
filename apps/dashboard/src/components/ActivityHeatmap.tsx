@@ -30,8 +30,8 @@ export function ActivityHeatmap({ day, heatmap }: Props) {
           if (start >= day.dayEnd) return null;
           const title =
             v === null
-              ? `${fmtTime(start)} – ${fmtTime(end)} · no activity data`
-              : `${fmtTime(start)} – ${fmtTime(end)} · ${v}% productive · ${heatmap.sampleCounts[i] ?? 0} sample${(heatmap.sampleCounts[i] ?? 0) === 1 ? '' : 's'}`;
+              ? `${fmtTime(start, day.timezone)} – ${fmtTime(end, day.timezone)} · no activity data`
+              : `${fmtTime(start, day.timezone)} – ${fmtTime(end, day.timezone)} · ${v}% productive · ${heatmap.sampleCounts[i] ?? 0} sample${(heatmap.sampleCounts[i] ?? 0) === 1 ? '' : 's'}`;
           return (
             <div
               key={i}

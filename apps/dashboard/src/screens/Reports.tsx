@@ -1546,13 +1546,15 @@ function AppsPanel({ data }: { data: MemberReportDayAppsResponse }) {
 }
 
 function ActivityPanel({ data, tz }: { data: MemberReportDayScreenshotsResponse; tz: string }) {
+  const win = localDayWindowMs(data.date, data.tz);
+  const fallbackStart = new Date(`${data.date}T00:00:00`).getTime();
   const dayShell: DayInsight = {
     date: data.date,
     timezone: data.tz,
-    dayStart: new Date(`${data.date}T00:00:00`).getTime(),
-    dayEnd: new Date(`${data.date}T00:00:00`).getTime() + 24 * 60 * 60 * 1000,
+    dayStart: win?.start ?? fallbackStart,
+    dayEnd: win?.end ?? fallbackStart + 24 * 60 * 60 * 1000,
     isFuture: false,
-    isToday: data.date === localDateKey(),
+    isToday: data.date === dateKeyInTimeZone(Date.now(), data.tz),
     shift: null,
     firstActivityAt: null,
     lastActivityAt: null,
@@ -1783,6 +1785,67 @@ function dateKeyInTimeZone(ms: number, tz: string): string {
   const month = parts.find((part) => part.type === 'month')?.value;
   const day = parts.find((part) => part.type === 'day')?.value;
   return year && month && day ? `${year}-${month}-${day}` : new Date(ms).toISOString().slice(0, 10);
+}
+
+function localDayWindowMs(date: string, tz: string): { start: number; end: number } | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: tz });
+  } catch {
+    return null;
+  }
+  const [year, month, day] = date.split('-').map((part) => Number.parseInt(part, 10));
+  if (!year || !month || !day) return null;
+  const start = utcInstantForLocalTimeMs(year, month, day, 0, tz);
+  const tomorrow = new Date(Date.UTC(year, month - 1, day + 1));
+  const end = utcInstantForLocalTimeMs(
+    tomorrow.getUTCFullYear(),
+    tomorrow.getUTCMonth() + 1,
+    tomorrow.getUTCDate(),
+    0,
+    tz,
+  );
+  return { start, end };
+}
+
+function utcInstantForLocalTimeMs(
+  year: number,
+  month: number,
+  day: number,
+  minutesOfDay: number,
+  tz: string,
+): number {
+  const fmt = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  });
+  const target = Date.UTC(year, month - 1, day, Math.floor(minutesOfDay / 60), minutesOfDay % 60, 0);
+  let guess = target;
+  for (let iter = 0; iter < 4; iter++) {
+    const parts: Record<string, string> = {};
+    for (const part of fmt.formatToParts(new Date(guess))) {
+      if (part.type !== 'literal') parts[part.type] = part.value;
+    }
+    const hour = parts.hour === '24' ? '00' : parts.hour;
+    const seen = Date.UTC(
+      Number.parseInt(parts.year!, 10),
+      Number.parseInt(parts.month!, 10) - 1,
+      Number.parseInt(parts.day!, 10),
+      Number.parseInt(hour!, 10),
+      Number.parseInt(parts.minute!, 10),
+      Number.parseInt(parts.second!, 10),
+    );
+    const delta = seen - target;
+    if (delta === 0) return guess;
+    guess -= delta;
+  }
+  return guess;
 }
 
 function approvalStatus(status: ManualTimeRequestDto['status']): Status {

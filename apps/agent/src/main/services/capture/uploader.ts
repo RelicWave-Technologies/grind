@@ -83,6 +83,20 @@ async function uploadOne(row: ScreenshotRow): Promise<void> {
   }
 }
 
+/** Try to upload freshly captured rows immediately, before older backlog. */
+export async function uploadScreenshotsNow(rows: ScreenshotRow[]): Promise<void> {
+  for (const row of rows) {
+    try {
+      await uploadOne(row);
+    } catch (err) {
+      if (err instanceof UnauthorizedError) return;
+      const msg = String(err);
+      if (msg.includes('cloudinary_not_configured') || msg.includes(' 503')) return;
+      log.warn('screenshot upload failed', { id: row.id, err: msg });
+    }
+  }
+}
+
 /**
  * Drain the local pending queue. No-ops when logged out or Cloudinary is
  * unconfigured (shots stay local and are retried next pass). Safe to call

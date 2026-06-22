@@ -39,7 +39,7 @@ export default function ScreenshotGrid({ shots }: { shots: ShotItem[] }) {
           <button
             key={s.id}
             className="shot shot-btn"
-            title={`${new Date(s.capturedAt).toLocaleString()} · keyboard ${s.keyboardPct}% · mouse ${s.mousePct}%`}
+            title={`${new Date(s.capturedAt).toLocaleString()} · ${uploadLabel(s.uploadState)} · keyboard ${s.keyboardPct}% · mouse ${s.mousePct}%`}
             onClick={() => setOpenId(s.id)}
           >
             {s.thumb ? <img src={s.thumb} alt="screenshot" /> : <div className="shot-missing" />}
@@ -48,6 +48,7 @@ export default function ScreenshotGrid({ shots }: { shots: ShotItem[] }) {
               <span className="shot-act-row"><MousePointer2 size={11} strokeWidth={2} /><span className="shot-act-track"><span className="shot-act-fill ms" style={{ width: `${s.mousePct}%` }} /></span></span>
             </div>
             <span className="shot-time">{new Date(s.capturedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+            {s.uploadState !== 'uploaded' && <span className="shot-upload">{uploadLabel(s.uploadState)}</span>}
           </button>
         ))}
       </div>
@@ -69,4 +70,11 @@ export default function ScreenshotGrid({ shots }: { shots: ShotItem[] }) {
       )}
     </>
   );
+}
+
+function uploadLabel(state: string): string {
+  if (state === 'uploaded') return 'Uploaded';
+  if (state === 'uploading') return 'Uploading';
+  if (state === 'failed') return 'Retrying upload';
+  return 'Pending upload';
 }

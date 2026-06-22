@@ -6,7 +6,7 @@ import { ScreenshotStore } from './store';
 import { captureNow, thumbDataUrl, fullDataUrl } from './capture';
 import { nextDelayMs } from './scheduler';
 import { planScreenshotRetention } from './retention';
-import { startUploader, drainUploads } from './uploader';
+import { startUploader, drainUploads, uploadScreenshotsNow } from './uploader';
 import { getTimerService } from '../timer';
 import { getActivityStore } from '../activity';
 import { activityPercent } from '../activity/percent';
@@ -89,7 +89,7 @@ async function tick() {
       lastHealth = health;
       for (const r of rows) getStore().insert(r);
       // Push fresh shots to Cloudinary promptly (no-op if logged out/unconfigured).
-      if (rows.length) void drainUploads();
+      if (rows.length) void uploadScreenshotsNow(rows).finally(() => void drainUploads());
     }
   } catch (err) {
     log.warn('screenshot tick failed', { err: String(err) });
@@ -251,5 +251,9 @@ export async function captureOnce(): Promise<number> {
   const { rows, health } = await captureNow(status.state === 'RUNNING' ? status.entryId : null, { force: true });
   lastHealth = health;
   for (const r of rows) getStore().insert(r);
+  if (rows.length) {
+    await uploadScreenshotsNow(rows);
+    void drainUploads();
+  }
   return rows.length;
 }
