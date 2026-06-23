@@ -20,6 +20,10 @@ function status(patch: Partial<UpdateStatus>): UpdateStatus {
 }
 
 describe('update UI decisions', () => {
+  it('does not call unloaded update status disabled', () => {
+    expect(settingsUpdateSubtitle()).toBe('Checking update status…');
+  });
+
   it('does not expose restart before the update is ready', () => {
     expect(updateAction(status({ phase: 'available', availableVersion: '1.0.1' })).kind).toBe('check');
     expect(updateAction(status({ phase: 'downloading', percent: 40 })).disabled).toBe(true);

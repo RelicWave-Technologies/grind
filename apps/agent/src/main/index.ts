@@ -86,6 +86,10 @@ app.whenReady().then(async () => {
     getUpdateStatus: () => getUpdateStatus(),
   });
   registerIpc({ onOpenMainWindow: () => showMainWindow() });
+  startUpdateService({
+    showMainWindow: () => showMainWindow(),
+    isMainWindowVisible: () => !!mainWindow?.isVisible(),
+  });
 
   mainWindow.on('close', (e) => {
     if (!isQuitting) {
@@ -186,11 +190,6 @@ app.whenReady().then(async () => {
     shiftMonitor.onUserDecision(decision);
   });
   ipcMain.handle('shift:refresh', () => shiftMonitor.refreshShift());
-
-  startUpdateService({
-    showMainWindow: () => showMainWindow(),
-    isMainWindowVisible: () => !!mainWindow?.isVisible(),
-  });
 
   // Single 1s heartbeat: tray ticker + floating-bar visibility + live broadcast
   // + a throttled durable liveness tick (crash-recovery bound).

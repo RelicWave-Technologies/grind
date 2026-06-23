@@ -8,7 +8,8 @@ export function updatePercent(status?: UpdateStatus): number {
 
 export function settingsUpdateSubtitle(status?: UpdateStatus): string {
   const percent = updatePercent(status);
-  if (!status?.enabled) return 'Release updates are off in this build';
+  if (!status) return 'Checking update status…';
+  if (!status.enabled) return 'Release updates are off in this build';
   if (status.phase === 'checking') return 'Checking for updates…';
   if (status.phase === 'available') return `Downloading ${status.availableVersion ?? 'update'}…`;
   if (status.phase === 'downloading') return `Downloading ${percent}%`;
