@@ -61,6 +61,14 @@ async function copyIfExists(src, dest) {
   }
 }
 
+async function writeRuntimePackageJson() {
+  const raw = await fs.readFile(path.join(agentDir, 'package.json'), 'utf8');
+  const pkg = JSON.parse(raw);
+  delete pkg.devDependencies;
+  pkg.scripts = {};
+  await fs.writeFile(path.join(stage, 'package.json'), `${JSON.stringify(pkg, null, 2)}\n`);
+}
+
 async function main() {
   if (process.platform !== 'win32') {
     console.warn(
@@ -72,9 +80,16 @@ async function main() {
   console.log('> electron-vite build (bakes MAIN_VITE_API_URL from .env.production)');
   await run('pnpm', ['--filter', '@grind/agent', 'exec', 'electron-vite', 'build'], rootDir);
 
-  console.log(`> pnpm deploy --prod -> ${stage}`);
   await fs.rm(stage, { recursive: true, force: true });
-  await run('pnpm', ['--filter', '@grind/agent', 'deploy', '--prod', stage], rootDir);
+  if (process.platform === 'win32') {
+    console.log(`> npm install --omit=dev in Windows staging dir -> ${stage}`);
+    await fs.mkdir(stage, { recursive: true });
+    await writeRuntimePackageJson();
+    await run('npm', ['install', '--omit=dev', '--no-audit', '--no-fund'], stage);
+  } else {
+    console.log(`> pnpm deploy --prod -> ${stage}`);
+    await run('pnpm', ['--filter', '@grind/agent', 'deploy', '--prod', stage], rootDir);
+  }
 
   console.log('> staging out/ + build resources + config into deploy dir');
   await copyIfExists(path.join(agentDir, 'out'), path.join(stage, 'out'));

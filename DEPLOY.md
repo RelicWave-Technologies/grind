@@ -129,9 +129,10 @@ echo 'MAIN_VITE_API_URL=https://grind-xcdr.onrender.com' > apps/agent/.env.produ
 pnpm --filter @grind/agent package:win:x64
 ```
 
-The Windows packager (`apps/agent/scripts/package-windows.mjs`) uses the same
-`pnpm deploy --prod` staging approach as macOS. Prefer running this on a Windows
-machine or Windows CI runner because the agent has native modules
+The Windows packager (`apps/agent/scripts/package-windows.mjs`) builds the app,
+creates a clean runtime staging package, and runs `npm install --omit=dev` there
+so Windows-native install scripts run on Windows. Prefer running this on a
+Windows machine or Windows CI runner because the agent has native modules
 (`better-sqlite3`, `sharp`, `uiohook-napi`, optional `get-windows`). Cross-builds
 from macOS can fail if the target native binaries or Wine/NSIS toolchain are not
 available.
