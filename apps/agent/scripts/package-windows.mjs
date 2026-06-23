@@ -121,7 +121,6 @@ async function main() {
   if (process.env.SIGN !== '1') {
     console.log('> unsigned Windows build (set SIGN=1 + WIN_CSC_LINK/WIN_CSC_KEY_PASSWORD to sign)');
     env.CSC_IDENTITY_AUTO_DISCOVERY = 'false';
-    builderArgs.push('-c.win.sign=false');
   } else {
     console.log('> signed Windows build');
   }

@@ -138,4 +138,5 @@ available.
 
 If/when Windows signing is needed, provide `WIN_CSC_LINK`/`WIN_CSC_KEY_PASSWORD`
 or `CSC_LINK`/`CSC_KEY_PASSWORD` and run with `SIGN=1`. Without `SIGN=1`, the
-script explicitly disables Windows code signing.
+script disables certificate auto-discovery so the v1 internal build remains
+unsigned.
