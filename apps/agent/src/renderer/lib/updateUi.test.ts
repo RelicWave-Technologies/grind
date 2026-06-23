@@ -39,6 +39,13 @@ describe('update UI decisions', () => {
     expect(updateReadyBannerText(s)).toBe('Grind 1.0.1 is ready.');
   });
 
+  it('shows a non-clickable restarting state during install', () => {
+    const s = status({ phase: 'installing', availableVersion: '1.0.1', percent: 100 });
+    expect(updateAction(s)).toEqual({ kind: 'restart', label: 'Restarting…', disabled: true });
+    expect(settingsUpdateSubtitle(s)).toBe('Restarting Grind…');
+    expect(updateReadyBannerText(s)).toBe('Restarting Grind…');
+  });
+
   it('surfaces manual up-to-date and manual error states inline', () => {
     expect(settingsUpdateSubtitle(status({ phase: 'not-available', manual: true }))).toBe('You’re up to date');
     expect(settingsUpdateSubtitle(status({ phase: 'error', manual: true, error: 'offline' }))).toBe('Couldn’t check for updates');

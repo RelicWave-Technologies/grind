@@ -43,7 +43,7 @@ export default function MainLayout() {
   const meName = me.data?.name ?? 'Account';
   const meInitial = meName.trim().slice(0, 1).toUpperCase() || 'A';
   const showAvatar = !!me.data?.avatarUrl && !avatarFailed;
-  const updateReady = updates.data?.phase === 'ready' ? updates.data : null;
+  const updateReady = updates.data?.phase === 'ready' || updates.data?.phase === 'installing' ? updates.data : null;
   const updateBannerText = updateReadyBannerText(updateReady ?? undefined);
 
   useEffect(() => {
@@ -103,7 +103,7 @@ export default function MainLayout() {
           <div className="update-banner no-drag">
             <RefreshCw size={15} strokeWidth={2.2} />
             <span>{updateBannerText}</span>
-            {updateReady.canInstallNow && (
+            {updateReady.phase === 'ready' && updateReady.canInstallNow && (
               <button className="btn btn-prominent no-drag" onClick={() => installUpdate.mutate()} disabled={installUpdate.isPending}>
                 Restart to update
               </button>

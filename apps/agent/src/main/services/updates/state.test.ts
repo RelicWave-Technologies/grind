@@ -41,6 +41,17 @@ describe('update state transitions', () => {
     expect(s.canInstallNow).toBe(false);
   });
 
+  it('moves ready to installing when the user restarts for an update', () => {
+    const ready = applyUpdateEvent(base(), { type: 'downloaded', version: '1.0.1', canInstallNow: true, at: 30 });
+    const installing = applyUpdateEvent(ready, { type: 'installing', at: 40 });
+
+    expect(installing.phase).toBe('installing');
+    expect(installing.manual).toBe(true);
+    expect(installing.percent).toBe(100);
+    expect(installing.checkedAt).toBe(40);
+    expect(installing.error).toBeNull();
+  });
+
   it('uses the requested automatic error backoff', () => {
     expect(nextRetryDelayMs(1)).toBe(15 * 60_000);
     expect(nextRetryDelayMs(2)).toBe(60 * 60_000);

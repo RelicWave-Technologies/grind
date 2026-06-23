@@ -17,6 +17,7 @@ export function settingsUpdateSubtitle(status?: UpdateStatus): string {
       ? `Version ${status.availableVersion ?? 'new'} is ready`
       : 'Update ready — restart after you stop tracking.';
   }
+  if (status.phase === 'installing') return 'Restarting Grind…';
   if (status.phase === 'not-available' && status.manual) return 'You’re up to date';
   if (status.phase === 'error' && status.manual) return 'Couldn’t check for updates';
   return `Channel: ${status.channel === 'beta' ? 'Beta' : 'Stable'}`;
@@ -25,6 +26,9 @@ export function settingsUpdateSubtitle(status?: UpdateStatus): string {
 export function updateAction(status?: UpdateStatus, busy = false): { kind: UpdateAction; label: string; disabled: boolean } {
   if (status?.phase === 'ready' && status.canInstallNow) {
     return { kind: 'restart', label: 'Restart to update', disabled: busy };
+  }
+  if (status?.phase === 'installing') {
+    return { kind: 'restart', label: 'Restarting…', disabled: true };
   }
   if (status?.phase === 'ready') {
     return { kind: 'none', label: '', disabled: true };
@@ -36,6 +40,7 @@ export function updateAction(status?: UpdateStatus, busy = false): { kind: Updat
 }
 
 export function updateReadyBannerText(status?: UpdateStatus): string | null {
+  if (status?.phase === 'installing') return 'Restarting Grind…';
   if (status?.phase !== 'ready') return null;
   if (!status.canInstallNow) return 'Update ready — restart after you stop tracking.';
   return `Grind ${status.availableVersion ?? ''} is ready.`;

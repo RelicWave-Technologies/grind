@@ -70,7 +70,7 @@ export default function Settings() {
   const aTrusted = !!a11y.data?.trusted;
   const aCapturing = !!a11y.data?.capturing;
   const u = updates.data;
-  const updateBusy = u?.phase === 'checking' || u?.phase === 'downloading' || checkUpdates.isPending;
+  const updateBusy = u?.phase === 'checking' || u?.phase === 'downloading' || u?.phase === 'installing' || checkUpdates.isPending;
   const updatePercentValue = updatePercent(u);
   const updateSub = settingsUpdateSubtitle(u);
   const updateButton = updateAction(u, updateBusy || installUpdate.isPending);
@@ -230,8 +230,8 @@ export default function Settings() {
           <div className="section-head"><span className="section-title">About</span></div>
           <div className="set-card">
             <div className="set-row">
-              <span className="set-ic" style={{ background: u?.phase === 'ready' ? 'var(--c-green-bg)' : 'var(--c-violet-bg)' }}>
-                {u?.phase === 'ready' ? <DownloadCloud size={17} strokeWidth={2} /> : <RefreshCw size={17} strokeWidth={2} />}
+              <span className="set-ic" style={{ background: u?.phase === 'ready' || u?.phase === 'installing' ? 'var(--c-green-bg)' : 'var(--c-violet-bg)' }}>
+                {u?.phase === 'ready' || u?.phase === 'installing' ? <DownloadCloud size={17} strokeWidth={2} /> : <RefreshCw size={17} strokeWidth={2} />}
               </span>
               <div className="set-main">
                 <div className="set-title">Updates</div>

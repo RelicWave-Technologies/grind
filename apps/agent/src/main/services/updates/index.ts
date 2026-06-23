@@ -18,6 +18,8 @@ import {
 const FIRST_CHECK_DELAY_MS = 60_000;
 const NORMAL_CHECK_INTERVAL_MS = 6 * 60 * 60_000;
 const INSTALL_FLUSH_TIMEOUT_MS = 5_000;
+const INSTALL_RETRY_DELAY_MS = 3_000;
+const INSTALL_FALLBACK_QUIT_MS = 12_000;
 
 type UpdateInfoLike = { version?: string | null } | null | undefined;
 type ProgressLike = { percent?: number | null };
@@ -32,6 +34,8 @@ let checking = false;
 let firstCheckTimer: NodeJS.Timeout | null = null;
 let intervalTimer: NodeJS.Timeout | null = null;
 let retryTimer: NodeJS.Timeout | null = null;
+let installRetryTimer: NodeJS.Timeout | null = null;
+let installFallbackQuitTimer: NodeJS.Timeout | null = null;
 let automaticErrorCount = 0;
 let readyNotificationVersion: string | null = null;
 let showMainWindow: (() => void) | null = null;
@@ -67,6 +71,17 @@ function clearRetryTimer(): void {
   if (retryTimer) {
     clearTimeout(retryTimer);
     retryTimer = null;
+  }
+}
+
+function clearInstallTimers(): void {
+  if (installRetryTimer) {
+    clearTimeout(installRetryTimer);
+    installRetryTimer = null;
+  }
+  if (installFallbackQuitTimer) {
+    clearTimeout(installFallbackQuitTimer);
+    installFallbackQuitTimer = null;
   }
 }
 
@@ -115,6 +130,7 @@ function wireUpdaterEvents(): void {
   autoUpdater.on('update-downloaded', (info: UpdateInfoLike) => {
     automaticErrorCount = 0;
     clearRetryTimer();
+    clearInstallTimers();
     const next = updateStatus({
       type: 'downloaded',
       version: versionOf(info),
@@ -137,8 +153,10 @@ function wireUpdaterEvents(): void {
 
 function handleUpdateError(err: unknown, manual: boolean): void {
   const message = err instanceof Error ? err.message : String(err);
-  log.warn('update check failed', { err: message, manual });
-  if (manual) {
+  const installing = status.phase === 'installing';
+  log.warn('update check failed', { err: message, manual, installing });
+  if (manual || installing) {
+    clearInstallTimers();
     updateStatus({ type: 'error', message, manual: true, at: now() });
     return;
   }
@@ -262,12 +280,56 @@ export async function flushBeforeUpdateInstall(): Promise<void> {
   });
 }
 
+function requestQuitAndInstall(reason: string): void {
+  try {
+    if (process.platform === 'darwin') {
+      // On macOS the native updater can still be staging when electron-updater
+      // emits "update-downloaded". Toggling this before a manual install makes
+      // MacUpdater ask the native updater to finish preparing instead of
+      // waiting quietly for a later app quit.
+      autoUpdater.autoInstallOnAppQuit = false;
+    }
+    log.info('requesting downloaded update install', {
+      reason,
+      version: status.availableVersion,
+      channel: status.channel,
+      platform: process.platform,
+    });
+    autoUpdater.quitAndInstall(false, true);
+  } catch (err) {
+    handleUpdateError(err, true);
+  }
+}
+
+function scheduleInstallFallbacks(): void {
+  clearInstallTimers();
+  installRetryTimer = setTimeout(() => {
+    installRetryTimer = null;
+    if (status.phase !== 'installing') return;
+    requestQuitAndInstall('manual-retry');
+  }, INSTALL_RETRY_DELAY_MS);
+
+  installFallbackQuitTimer = setTimeout(() => {
+    installFallbackQuitTimer = null;
+    if (status.phase !== 'installing') return;
+    log.warn('update install request did not quit app; falling back to app quit', {
+      version: status.availableVersion,
+      channel: status.channel,
+      platform: process.platform,
+    });
+    autoUpdater.autoInstallOnAppQuit = true;
+    app.quit();
+  }, INSTALL_FALLBACK_QUIT_MS);
+}
+
 export async function installUpdateNow(): Promise<UpdateStatus> {
   refreshUpdateInstallability();
+  if (status.phase === 'installing') return status;
   if (!status.enabled || status.phase !== 'ready' || !status.canInstallNow) return status;
+  updateStatus({ type: 'installing', at: now() });
   await flushBeforeUpdateInstall();
-  log.info('installing downloaded update', { version: status.availableVersion, channel: status.channel });
-  autoUpdater.quitAndInstall(false, true);
+  scheduleInstallFallbacks();
+  requestQuitAndInstall('manual');
   return status;
 }
 
@@ -275,6 +337,7 @@ export function stopUpdateServiceForTests(): void {
   if (firstCheckTimer) clearTimeout(firstCheckTimer);
   if (intervalTimer) clearInterval(intervalTimer);
   clearRetryTimer();
+  clearInstallTimers();
   firstCheckTimer = null;
   intervalTimer = null;
   started = false;

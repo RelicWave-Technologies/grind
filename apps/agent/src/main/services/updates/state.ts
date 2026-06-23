@@ -6,6 +6,7 @@ export type UpdatePhase =
   | 'available'
   | 'downloading'
   | 'ready'
+  | 'installing'
   | 'not-available'
   | 'error';
 
@@ -32,6 +33,7 @@ export type UpdateEvent =
   | { type: 'available'; version: string | null }
   | { type: 'download-progress'; percent: number }
   | { type: 'downloaded'; version: string | null; canInstallNow: boolean; at: number }
+  | { type: 'installing'; at: number }
   | { type: 'not-available'; manual: boolean; at: number }
   | { type: 'error'; message: string; manual: boolean; at: number }
   | { type: 'timer-changed'; canInstallNow: boolean };
@@ -102,6 +104,15 @@ export function applyUpdateEvent(status: UpdateStatus, event: UpdateEvent): Upda
         checkedAt: event.at,
         readyAt: event.at,
         canInstallNow: event.canInstallNow,
+      };
+    case 'installing':
+      return {
+        ...status,
+        phase: 'installing',
+        percent: 100,
+        error: null,
+        checkedAt: event.at,
+        manual: true,
       };
     case 'not-available':
       return {

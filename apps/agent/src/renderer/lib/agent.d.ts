@@ -8,7 +8,7 @@ type TimerStatus =
   | { state: 'RUNNING'; entryId: string; larkTaskGuid: string | null; startedAt: number; workedMs: number; paused: boolean };
 export type TodaySegment = { kind: 'WORK' | 'MEETING' | 'IDLE_TRIMMED'; startedAt: number; endedAt: number | null };
 export type TodayEntry = { id: string; larkTaskGuid: string | null; segments: TodaySegment[] };
-export type UpdatePhase = 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'not-available' | 'error';
+export type UpdatePhase = 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'installing' | 'not-available' | 'error';
 export type UpdateStatus = {
   phase: UpdatePhase;
   enabled: boolean;
