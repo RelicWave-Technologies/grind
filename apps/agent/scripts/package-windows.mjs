@@ -39,7 +39,7 @@ function run(cmd, args, cwd, env = {}) {
       cwd,
       env: { ...process.env, ...env },
       stdio: 'inherit',
-      shell: false,
+      shell: process.platform === 'win32',
     });
     child.on('error', reject);
     child.on('exit', (code) => {
