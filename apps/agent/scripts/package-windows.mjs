@@ -93,6 +93,30 @@ async function main() {
     `-c.afterPack=${path.join(stage, 'build', 'afterPack.cjs')}`,
   ];
 
+  if (process.platform === 'win32') {
+    console.log('> rebuilding Electron native dependency: better-sqlite3');
+    await run(
+      'pnpm',
+      [
+        '--filter',
+        '@grind/agent',
+        'exec',
+        'electron-rebuild',
+        '--version',
+        electronVersion,
+        '--module-dir',
+        stage,
+        '--arch',
+        arch,
+        '--only',
+        'better-sqlite3',
+        '--force',
+      ],
+      rootDir,
+    );
+    builderArgs.push('-c.npmRebuild=false');
+  }
+
   const env = {};
   if (process.env.SIGN !== '1') {
     console.log('> unsigned Windows build (set SIGN=1 + WIN_CSC_LINK/WIN_CSC_KEY_PASSWORD to sign)');
