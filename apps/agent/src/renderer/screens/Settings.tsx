@@ -1,5 +1,7 @@
+import { useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { MonitorCheck, Power, CheckCircle2, AlertCircle, Link2, Keyboard, PictureInPicture2 } from 'lucide-react';
+import { MonitorCheck, Power, CheckCircle2, AlertCircle, Link2, Keyboard, PictureInPicture2, RefreshCw, DownloadCloud } from 'lucide-react';
+import { settingsUpdateSubtitle, updateAction, updatePercent } from '../lib/updateUi';
 
 export default function Settings() {
   const qc = useQueryClient();
@@ -7,6 +9,7 @@ export default function Settings() {
   const perm = useQuery({ queryKey: ['screenPerm'], queryFn: () => window.agent.permissions.screen(), refetchInterval: 4000 });
   const a11y = useQuery({ queryKey: ['a11yPerm'], queryFn: () => window.agent.permissions.accessibility(), refetchInterval: 4000 });
   const lark = useQuery({ queryKey: ['larkStatus'], queryFn: () => window.agent.lark.status(), refetchInterval: 4000 });
+  const updates = useQuery({ queryKey: ['updates'], queryFn: () => window.agent.updates.status(), refetchInterval: 60_000 });
 
   const setLogin = useMutation({
     mutationFn: (v: boolean) => window.agent.settings.setLaunchAtLogin(v),
@@ -29,6 +32,20 @@ export default function Settings() {
     mutationFn: () => window.agent.lark.disconnect(),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['larkStatus'] }),
   });
+  const checkUpdates = useMutation({
+    mutationFn: () => window.agent.updates.checkNow(),
+    onSuccess: (s) => qc.setQueryData(['updates'], s),
+  });
+  const installUpdate = useMutation({
+    mutationFn: () => window.agent.updates.installNow(),
+    onSuccess: (s) => qc.setQueryData(['updates'], s),
+  });
+
+  useEffect(() => {
+    return window.agent.updates.onStatusChange((s) => {
+      qc.setQueryData(['updates'], s);
+    });
+  }, [qc]);
 
   const l = lark.data;
   const larkConnected = !!l?.connected;
@@ -52,6 +69,11 @@ export default function Settings() {
 
   const aTrusted = !!a11y.data?.trusted;
   const aCapturing = !!a11y.data?.capturing;
+  const u = updates.data;
+  const updateBusy = u?.phase === 'checking' || u?.phase === 'downloading' || checkUpdates.isPending;
+  const updatePercentValue = updatePercent(u);
+  const updateSub = settingsUpdateSubtitle(u);
+  const updateButton = updateAction(u, updateBusy || installUpdate.isPending);
 
   return (
     <>
@@ -207,6 +229,40 @@ export default function Settings() {
           {/* About */}
           <div className="section-head"><span className="section-title">About</span></div>
           <div className="set-card">
+            <div className="set-row">
+              <span className="set-ic" style={{ background: u?.phase === 'ready' ? 'var(--c-green-bg)' : 'var(--c-violet-bg)' }}>
+                {u?.phase === 'ready' ? <DownloadCloud size={17} strokeWidth={2} /> : <RefreshCw size={17} strokeWidth={2} />}
+              </span>
+              <div className="set-main">
+                <div className="set-title">Updates</div>
+                <div className="set-sub secondary">
+                  {updateSub}
+                  {u?.phase === 'downloading' && (
+                    <span className="update-progress" aria-label={`Downloading ${updatePercentValue}%`}>
+                      <span style={{ width: `${updatePercentValue}%` }} />
+                    </span>
+                  )}
+                  {u?.phase === 'error' && u.manual && u.error ? ` · ${u.error}` : ''}
+                </div>
+              </div>
+              {updateButton.kind === 'restart' ? (
+                <button
+                  className="btn btn-prominent no-drag"
+                  onClick={() => installUpdate.mutate()}
+                  disabled={updateButton.disabled}
+                >
+                  {updateButton.label}
+                </button>
+              ) : updateButton.kind === 'check' ? (
+                <button
+                  className="btn no-drag"
+                  onClick={() => checkUpdates.mutate()}
+                  disabled={updateButton.disabled}
+                >
+                  {updateButton.label}
+                </button>
+              ) : null}
+            </div>
             <div className="set-row">
               <div className="set-main">
                 <div className="set-title">Grind</div>

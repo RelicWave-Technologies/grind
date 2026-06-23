@@ -30,7 +30,10 @@ jobs:
       - name: Write production agent env
         shell: pwsh
         run: |
-          "MAIN_VITE_API_URL=${{ inputs.api_url }}" | Out-File -FilePath apps/agent/.env.production -Encoding utf8
+          @(
+            "MAIN_VITE_API_URL=${{ inputs.api_url }}",
+            "MAIN_VITE_UPDATE_CHANNEL=latest"
+          ) | Out-File -FilePath apps/agent/.env.production -Encoding utf8
 
       - name: Build unsigned Windows x64 installer
         run: pnpm --filter @grind/agent package:win:x64
@@ -41,4 +44,5 @@ jobs:
           path: |
             apps/agent/release/*.exe
             apps/agent/release/*.blockmap
+            apps/agent/release/*.yml
           if-no-files-found: error

@@ -9,6 +9,11 @@ protocols:
 directories:
   buildResources: build
   output: release
+publish:
+  provider: github
+  owner: RelicWave-Technologies
+  repo: grind
+  channel: latest
 # pnpm + shamefully-hoist confuses electron-builder's dependency collector: it
 # buries color-convert's `color-name` under color/node_modules and the packaged
 # app crashes at launch with "Cannot find module 'color-name'". Two-part fix:
@@ -41,6 +46,10 @@ mac:
       arch:
         - arm64
         - x64
+        - universal
+    - target: zip
+      arch:
+        - universal
   icon: build/icon.icns
   hardenedRuntime: true
   gatekeeperAssess: false

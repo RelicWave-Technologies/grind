@@ -1,4 +1,5 @@
-import { app, BrowserWindow, Tray, ipcMain, screen } from 'electron';
+import { app, ipcMain, screen } from 'electron';
+import type { BrowserWindow, Tray } from 'electron';
 import { createTray, setTrayTitle } from './tray';
 import { createMainWindow } from './window';
 import { registerIpc } from './ipc';
@@ -18,6 +19,13 @@ import { ShiftMonitor } from './services/shift';
 import { onAuthChange } from './services/apiClient';
 import { refreshAgentConfig } from './services/agentConfig';
 import { registerProtocol, handleDeepLink, deepLinkFromArgv, flushQueuedDeepLink } from './services/deepLink';
+import {
+  flushBeforeUpdateInstall,
+  getUpdateStatus,
+  installUpdateNow,
+  refreshUpdateInstallability,
+  startUpdateService,
+} from './services/updates';
 import { broadcast } from './broadcast';
 import { log } from './logger';
 
@@ -74,6 +82,8 @@ app.whenReady().then(async () => {
   tray = createTray({
     onToggle: (bounds) => togglePopover(bounds),
     onOpenMain: () => showMainWindow(),
+    onInstallUpdate: () => void installUpdateNow(),
+    getUpdateStatus: () => getUpdateStatus(),
   });
   registerIpc({ onOpenMainWindow: () => showMainWindow() });
 
@@ -87,6 +97,10 @@ app.whenReady().then(async () => {
     isQuitting = true;
     flushPartialActivity(); // seal the in-flight minute (durable local insert)
     void flushPreferences(); // persist any pending floating-bar position
+  });
+  (app as Electron.App & { on(event: 'before-quit-for-update', listener: () => void): Electron.App }).on('before-quit-for-update', () => {
+    isQuitting = true;
+    void flushBeforeUpdateInstall();
   });
   app.on('activate', () => showMainWindow());
 
@@ -129,6 +143,7 @@ app.whenReady().then(async () => {
     idleMonitor.resolve();
     hideIdlePrompt();
     broadcast('timer:status:push', getTimerService().status());
+    refreshUpdateInstallability();
   });
 
   try {
@@ -172,6 +187,11 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle('shift:refresh', () => shiftMonitor.refreshShift());
 
+  startUpdateService({
+    showMainWindow: () => showMainWindow(),
+    isMainWindowVisible: () => !!mainWindow?.isVisible(),
+  });
+
   // Single 1s heartbeat: tray ticker + floating-bar visibility + live broadcast
   // + a throttled durable liveness tick (crash-recovery bound).
   let lastRunning = false;
@@ -181,6 +201,7 @@ app.whenReady().then(async () => {
     try {
       tick += 1;
       const s = getTimerService().status();
+      refreshUpdateInstallability();
       const running = s.state === 'RUNNING';
       const accruing = running && !s.paused;
       setActivityRecording(accruing, running ? s.entryId : null);

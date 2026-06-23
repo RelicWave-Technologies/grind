@@ -1,0 +1,240 @@
+name: Release Agent
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Exact apps/agent/package.json version to release
+        required: true
+      channel:
+        description: Release channel
+        required: true
+        type: choice
+        default: beta
+        options:
+          - stable
+          - beta
+      api_url:
+        description: Production API URL baked into the agent
+        required: true
+        default: https://grind-xcdr.onrender.com
+      release_notes:
+        description: Release notes for the GitHub draft release
+        required: true
+        default: Agent update release
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.validate.outputs.tag }}
+      update_channel: ${{ steps.validate.outputs.update_channel }}
+      prerelease: ${{ steps.validate.outputs.prerelease }}
+      metadata_file_win: ${{ steps.validate.outputs.metadata_file_win }}
+      metadata_file_mac: ${{ steps.validate.outputs.metadata_file_mac }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate version and channel
+        id: validate
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const version = process.env.VERSION;
+          const channel = process.env.CHANNEL;
+          const pkg = JSON.parse(fs.readFileSync('apps/agent/package.json', 'utf8'));
+          if (pkg.version !== version) {
+            console.error(`Version input ${version} must match apps/agent/package.json ${pkg.version}`);
+            process.exit(1);
+          }
+          const stable = /^\d+\.\d+\.\d+$/;
+          const beta = /^\d+\.\d+\.\d+-beta\.\d+$/;
+          if (channel === 'stable' && !stable.test(version)) {
+            console.error('Stable releases must use semver like 1.0.0');
+            process.exit(1);
+          }
+          if (channel === 'beta' && !beta.test(version)) {
+            console.error('Beta releases must use prerelease semver like 1.0.1-beta.1');
+            process.exit(1);
+          }
+          const updateChannel = channel === 'beta' ? 'beta' : 'latest';
+          const out = process.env.GITHUB_OUTPUT;
+          fs.appendFileSync(out, `tag=v${version}\n`);
+          fs.appendFileSync(out, `update_channel=${updateChannel}\n`);
+          fs.appendFileSync(out, `prerelease=${channel === 'beta'}\n`);
+          fs.appendFileSync(out, `metadata_file_win=${updateChannel === 'beta' ? 'beta.yml' : 'latest.yml'}\n`);
+          fs.appendFileSync(out, `metadata_file_mac=${updateChannel === 'beta' ? 'beta-mac.yml' : 'latest-mac.yml'}\n`);
+          NODE
+        env:
+          VERSION: ${{ inputs.version }}
+          CHANNEL: ${{ inputs.channel }}
+
+      - name: Create draft GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.validate.outputs.tag }}
+          CHANNEL: ${{ inputs.channel }}
+          RELEASE_NOTES: ${{ inputs.release_notes }}
+        run: |
+          printf '%s\n' "$RELEASE_NOTES" > release-notes.md
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; build jobs will upload assets to it."
+          else
+            PRERELEASE_FLAG=""
+            if [ "$CHANNEL" = "beta" ]; then PRERELEASE_FLAG="--prerelease"; fi
+            gh release create "$TAG" \
+              --draft \
+              $PRERELEASE_FLAG \
+              --target "$GITHUB_SHA" \
+              --title "$TAG" \
+              --notes-file release-notes.md
+          fi
+
+  windows:
+    needs: prepare
+    runs-on: windows-latest
+    timeout-minutes: 35
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      PUBLISH: '1'
+      UPDATE_CHANNEL: ${{ needs.prepare.outputs.update_channel }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.18
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Write production agent env
+        shell: pwsh
+        run: |
+          @(
+            "MAIN_VITE_API_URL=${{ inputs.api_url }}",
+            "MAIN_VITE_UPDATE_CHANNEL=${{ needs.prepare.outputs.update_channel }}",
+            "MAIN_VITE_AUTO_UPDATE_ENABLED=1"
+          ) | Out-File -FilePath apps/agent/.env.production -Encoding utf8
+
+      - name: Build and publish unsigned Windows x64 installer
+        run: pnpm --filter @grind/agent package:win:x64
+
+      - name: Validate Windows updater artifacts
+        shell: pwsh
+        run: |
+          $release = "apps/agent/release"
+          $metadata = Join-Path $release "${{ needs.prepare.outputs.metadata_file_win }}"
+          if (!(Test-Path $metadata)) { throw "Missing Windows update metadata: $metadata" }
+          if (-not (Get-ChildItem $release -Filter "*.exe" | Where-Object { $_.Name -like "*setup.exe" })) { throw "Missing Windows NSIS setup exe" }
+          if (-not (Get-ChildItem $release -Filter "*.exe.blockmap")) { throw "Missing Windows blockmap" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: grind-windows-x64-${{ inputs.version }}
+          path: |
+            apps/agent/release/*.exe
+            apps/agent/release/*.blockmap
+            apps/agent/release/*.yml
+          if-no-files-found: error
+
+  macos:
+    needs: prepare
+    runs-on: macos-14
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      PUBLISH: '1'
+      UPDATE_CHANNEL: ${{ needs.prepare.outputs.update_channel }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.18
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Import Developer ID certificate
+        env:
+          MAC_CERTIFICATE_BASE64: ${{ secrets.MAC_CERTIFICATE_BASE64 }}
+          MAC_CERTIFICATE_PASSWORD: ${{ secrets.MAC_CERTIFICATE_PASSWORD }}
+        run: |
+          if [ -z "$MAC_CERTIFICATE_BASE64" ] || [ -z "$MAC_CERTIFICATE_PASSWORD" ]; then
+            echo "MAC_CERTIFICATE_BASE64 and MAC_CERTIFICATE_PASSWORD secrets are required for signed macOS releases." >&2
+            exit 1
+          fi
+          if [ -z "$APPLE_ID" ] || [ -z "$APPLE_APP_SPECIFIC_PASSWORD" ] || [ -z "$APPLE_TEAM_ID" ]; then
+            echo "APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, and APPLE_TEAM_ID secrets are required for notarization." >&2
+            exit 1
+          fi
+          KEYCHAIN="$RUNNER_TEMP/grind-signing.keychain-db"
+          CERT_PATH="$RUNNER_TEMP/developer-id.p12"
+          echo "$MAC_CERTIFICATE_BASE64" | base64 --decode > "$CERT_PATH"
+          security create-keychain -p "$RUNNER_TEMP" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$RUNNER_TEMP" "$KEYCHAIN"
+          security import "$CERT_PATH" -P "$MAC_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
+          security default-keychain -s "$KEYCHAIN"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$RUNNER_TEMP" "$KEYCHAIN"
+
+      - name: Write production agent env
+        run: |
+          cat > apps/agent/.env.production <<EOF
+          MAIN_VITE_API_URL=${{ inputs.api_url }}
+          MAIN_VITE_UPDATE_CHANNEL=${{ needs.prepare.outputs.update_channel }}
+          MAIN_VITE_AUTO_UPDATE_ENABLED=1
+          EOF
+
+      - name: Build, notarize, and publish universal macOS artifacts
+        run: pnpm --filter @grind/agent package:mac:universal
+
+      - name: Validate macOS updater artifacts
+        run: |
+          release="apps/agent/release"
+          test -f "$release/${{ needs.prepare.outputs.metadata_file_mac }}" || (echo "Missing macOS update metadata" >&2; exit 1)
+          ls "$release"/*.dmg >/dev/null
+          ls "$release"/*.zip >/dev/null
+          ls "$release"/*.blockmap >/dev/null
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: grind-macos-universal-${{ inputs.version }}
+          path: |
+            apps/agent/release/*.dmg
+            apps/agent/release/*.zip
+            apps/agent/release/*.blockmap
+            apps/agent/release/*.yml
+          if-no-files-found: error
+
+  summarize:
+    needs:
+      - prepare
+      - windows
+      - macos
+    runs-on: ubuntu-latest
+    steps:
+      - name: Summarize draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          gh release view "$TAG" --json isDraft,isPrerelease,assets,url \
+            --jq '"Draft: \(.isDraft)\nPrerelease: \(.isPrerelease)\nURL: \(.url)\nAssets:\n\(.assets[].name)"'
+          echo "Review the draft release in GitHub, install beta/stable candidates, then publish manually."

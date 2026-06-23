@@ -1,6 +1,7 @@
-import { Tray, Menu, nativeImage, app, type Rectangle } from 'electron';
+import { Tray, Menu, nativeImage, app, type MenuItemConstructorOptions, type Rectangle } from 'electron';
 import path from 'node:path';
 import { log } from './logger';
+import type { UpdateStatus } from './services/updates/state';
 
 function trayImage(): Electron.NativeImage {
   const filename = process.platform === 'darwin' ? 'trayTemplate.png' : 'tray.png';
@@ -17,17 +18,33 @@ function trayImage(): Electron.NativeImage {
 }
 
 /** Menu-bar item. Left-click toggles the popover; right-click shows a menu. */
-export function createTray(opts: { onToggle: (bounds: Rectangle) => void; onOpenMain: () => void }): Tray {
+export function createTray(opts: {
+  onToggle: (bounds: Rectangle) => void;
+  onOpenMain: () => void;
+  onInstallUpdate?: () => void;
+  getUpdateStatus?: () => UpdateStatus;
+}): Tray {
   const tray = new Tray(trayImage());
   tray.setToolTip('Grind');
 
   tray.on('click', (_e, bounds) => opts.onToggle(bounds));
   tray.on('right-click', () => {
-    const menu = Menu.buildFromTemplate([
+    const template: MenuItemConstructorOptions[] = [
       { label: 'Open Grind', click: opts.onOpenMain },
+    ];
+    const update = opts.getUpdateStatus?.();
+    if (update?.phase === 'ready') {
+      template.push({
+        label: update.canInstallNow ? 'Restart to update Grind' : 'Update ready after tracking stops',
+        enabled: update.canInstallNow,
+        click: () => opts.onInstallUpdate?.(),
+      });
+    }
+    template.push(
       { type: 'separator' },
       { label: 'Quit Grind', click: () => app.quit() },
-    ]);
+    );
+    const menu = Menu.buildFromTemplate(template);
     tray.popUpContextMenu(menu);
   });
 

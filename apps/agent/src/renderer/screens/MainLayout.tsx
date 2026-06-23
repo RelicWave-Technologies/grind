@@ -1,12 +1,13 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CalendarClock, ListTodo, PieChart, Settings as SettingsIcon, LogOut, Gauge, Clock, Keyboard, MousePointer2, ExternalLink } from 'lucide-react';
+import { CalendarClock, ListTodo, PieChart, Settings as SettingsIcon, LogOut, Gauge, Clock, Keyboard, MousePointer2, ExternalLink, RefreshCw } from 'lucide-react';
 import grindIcon from '../assets/grind-icon.svg';
 import Today from './Today';
 import Tasks from './Tasks';
 import Settings from './Settings';
 import LineChart from '../components/LineChart';
 import ScreenshotGrid from '../components/ScreenshotGrid';
+import { updateReadyBannerText } from '../lib/updateUi';
 
 type Tab = 'today' | 'tasks' | 'reports' | 'settings';
 
@@ -27,12 +28,34 @@ export default function MainLayout() {
   });
 
   const openDashboard = useMutation({ mutationFn: () => window.agent.app.openDashboard() });
+  const installUpdate = useMutation({
+    mutationFn: () => window.agent.updates.installNow(),
+    onSuccess: (s) => qc.setQueryData(['updates'], s),
+  });
+  const updates = useQuery({
+    queryKey: ['updates'],
+    queryFn: () => window.agent.updates.status(),
+    refetchInterval: 60_000,
+  });
 
   const me = useQuery({ queryKey: ['me'], queryFn: () => window.agent.auth.me(), staleTime: 5 * 60_000 });
   const [avatarFailed, setAvatarFailed] = useState(false);
   const meName = me.data?.name ?? 'Account';
   const meInitial = meName.trim().slice(0, 1).toUpperCase() || 'A';
   const showAvatar = !!me.data?.avatarUrl && !avatarFailed;
+  const updateReady = updates.data?.phase === 'ready' ? updates.data : null;
+  const updateBannerText = updateReadyBannerText(updateReady ?? undefined);
+
+  useEffect(() => {
+    const offStatus = window.agent.updates.onStatusChange((s) => {
+      qc.setQueryData(['updates'], s);
+    });
+    const offOpenSettings = window.agent.updates.onOpenSettings(() => setTab('settings'));
+    return () => {
+      offStatus();
+      offOpenSettings();
+    };
+  }, [qc]);
 
   return (
     <div className="layout">
@@ -76,6 +99,17 @@ export default function MainLayout() {
       </aside>
 
       <main className="content">
+        {updateReady && (
+          <div className="update-banner no-drag">
+            <RefreshCw size={15} strokeWidth={2.2} />
+            <span>{updateBannerText}</span>
+            {updateReady.canInstallNow && (
+              <button className="btn btn-prominent no-drag" onClick={() => installUpdate.mutate()} disabled={installUpdate.isPending}>
+                Restart to update
+              </button>
+            )}
+          </div>
+        )}
         {tab === 'today' && <Today />}
         {tab === 'tasks' && <Tasks />}
         {tab === 'reports' && <Reports />}

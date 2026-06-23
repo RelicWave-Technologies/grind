@@ -8,6 +8,13 @@ export const API_URL: string =
   import.meta.env.MAIN_VITE_API_URL || process.env.AGENT_API_URL || 'http://localhost:4000';
 export const AGENT_VERSION: string = process.env.npm_package_version ?? '0.0.1';
 export const HEARTBEAT_INTERVAL_MS: number = 60_000;
+export type UpdateChannel = 'latest' | 'beta';
+
+const rawUpdateChannel =
+  String(import.meta.env.MAIN_VITE_UPDATE_CHANNEL || process.env.AGENT_UPDATE_CHANNEL || 'latest').toLowerCase();
+export const UPDATE_CHANNEL: UpdateChannel = rawUpdateChannel === 'beta' ? 'beta' : 'latest';
+export const AUTO_UPDATE_ENABLED: boolean =
+  String(import.meta.env.MAIN_VITE_AUTO_UPDATE_ENABLED || process.env.AGENT_AUTO_UPDATE_ENABLED || '') === '1';
 
 /** Seconds of no input before the "are you still working?" prompt. Default 5 min.
  *  Override with AGENT_IDLE_SEC (e.g. 20) for testing. */

@@ -6,7 +6,7 @@ Three surfaces ship independently:
 |---|---|---|---|
 | `@grind/dashboard` (Vite SPA) | **Vercel** | `vercel.json` | Vercel CLI (`anish877`) |
 | `@grind/api` (Express + Prisma) | **Render** | `render.yaml` | Render dashboard |
-| `@grind/agent` (Electron) | **DMG** (signed + notarized) | `apps/agent/electron-builder.yml` | Apple Developer ID |
+| `@grind/agent` (Electron) | **GitHub Releases** (Mac universal DMG/ZIP + Windows x64 NSIS) | `apps/agent/electron-builder.yml` | GitHub + Apple Developer ID |
 | Screenshots | **Cloudinary** | API `/v1/screenshots/sign` | Cloudinary account |
 
 Database stays on **Neon** (existing).
@@ -74,7 +74,7 @@ Set `DASHBOARD_URL` on Render to the Vercel URL (comma-separate to allow preview
 URLs too) and redeploy the API. In production the auth cookie is
 `SameSite=None; Secure`, so both must be HTTPS (they are).
 
-## 5. Agent DMG
+## 5. Agent desktop releases
 
 The build goes through a `pnpm deploy --prod` staging dir (see
 `apps/agent/scripts/package-mac.sh`). This is **required**: in this pnpm
@@ -85,6 +85,56 @@ them out of the asar and the packaged app dies at launch with
 `Cannot find module 'color-name'`. `pnpm deploy` materializes a correct flat
 `node_modules` that electron-builder packs faithfully. The script also rebuilds
 native modules (better-sqlite3, uiohook-napi, get-windows) for the Electron ABI.
+
+The production update feed is GitHub Releases using `electron-updater`.
+Release builds bake three desktop env values:
+
+```bash
+MAIN_VITE_API_URL=https://grind-xcdr.onrender.com
+MAIN_VITE_UPDATE_CHANNEL=latest     # latest for stable, beta for beta
+MAIN_VITE_AUTO_UPDATE_ENABLED=1     # release builds only
+```
+
+Local unsigned test builds should omit `MAIN_VITE_AUTO_UPDATE_ENABLED`; macOS
+auto-update is enabled only for signed/notarized release builds. Windows v1 is
+unsigned by choice for internal IT deployment, so SmartScreen warnings are
+expected until a later code-signing phase.
+
+### Manual release workflow
+
+Use **Actions → Release Agent**. Inputs:
+
+- `version`: must exactly match `apps/agent/package.json`.
+- `channel`: `stable` requires `1.0.0`; `beta` requires `1.0.1-beta.1`.
+- `api_url`: production API URL to bake into the app.
+- `release_notes`: copied into the draft GitHub Release.
+
+The workflow creates/uses tag `v<version>`, keeps the GitHub Release as a
+draft, builds Windows x64 on `windows-latest`, builds a signed/notarized
+universal macOS package on `macos-14`, and uploads:
+
+- Windows: `.exe`, `.exe.blockmap`, `latest.yml` or `beta.yml`.
+- macOS: `.dmg`, `.zip`, blockmaps, `latest-mac.yml` or `beta-mac.yml`.
+
+Required GitHub secrets for the macOS job:
+
+- `MAC_CERTIFICATE_BASE64` — base64-encoded Developer ID Application `.p12`.
+- `MAC_CERTIFICATE_PASSWORD`.
+- `APPLE_ID`.
+- `APPLE_APP_SPECIFIC_PASSWORD`.
+- `APPLE_TEAM_ID`.
+
+### Release checklist
+
+1. Bump `apps/agent/package.json` version.
+2. Run the Release Agent workflow as `beta`.
+3. Install beta on Windows x64, Apple Silicon Mac, and Intel Mac.
+4. Verify update from the previous beta on all three targets.
+5. While tracking, verify the update downloads but restart waits until Stop.
+6. Publish the draft stable release only after beta QA passes.
+7. Verify stable update from the previous stable build.
+
+### Local macOS packaging
 
 ```bash
 # 1. Bake the production API URL into the app:
@@ -98,17 +148,22 @@ export APPLE_ID="you@apple.id"
 export APPLE_APP_SPECIFIC_PASSWORD="xxxx-xxxx-xxxx-xxxx"
 export APPLE_TEAM_ID="XXXXXXXXXX"
 pnpm --filter @grind/agent package                 # SIGN=1 under the hood
+
+# 2c. Universal signed/notarized release artifacts:
+PUBLISH=1 UPDATE_CHANNEL=latest pnpm --filter @grind/agent package:mac:universal
 ```
 
-`package-mac.sh <arch>` takes `arm64` (default) or `x64`. Note: an `x64` build
-on an Apple-Silicon machine needs the `@img/sharp-darwin-x64` prebuilt present;
-arm64 covers all Apple-Silicon Macs (2020+).
+`package-mac.sh <arch>` takes `arm64` (default), `x64`, or `universal`. The
+universal lane produces both DMG and ZIP; ZIP is required for macOS updater
+metadata. Native optional dependencies for both Mac CPU families are retained
+through `.npmrc` `supportedArchitectures` settings.
 
 Explicit mac arch scripts are also available:
 
 ```bash
 pnpm --filter @grind/agent package:mac:arm64
 pnpm --filter @grind/agent package:mac:x64
+pnpm --filter @grind/agent package:mac:universal
 ```
 
 The icon is generated from source (`pnpm --filter @grind/agent icon`) and lives
@@ -117,7 +172,7 @@ at `apps/agent/build/icon.svg`, `apps/agent/build/icon.png`, and
 validation off for native modules) are in `apps/agent/build/entitlements.mac.plist`.
 Unsigned apps: users right-click → Open once to bypass Gatekeeper.
 
-### Windows packaging
+### Local Windows packaging
 
 Windows v1 is an unsigned internal IT installer. Build the x64 NSIS installer:
 
@@ -141,3 +196,10 @@ If/when Windows signing is needed, provide `WIN_CSC_LINK`/`WIN_CSC_KEY_PASSWORD`
 or `CSC_LINK`/`CSC_KEY_PASSWORD` and run with `SIGN=1`. Without `SIGN=1`, the
 script disables certificate auto-discovery so the v1 internal build remains
 unsigned.
+
+For release publishing, run through the Release Agent workflow. Local publishing
+uses:
+
+```bash
+PUBLISH=1 UPDATE_CHANNEL=beta pnpm --filter @grind/agent package:win:x64
+```

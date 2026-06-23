@@ -8,6 +8,20 @@ type TimerStatus =
   | { state: 'RUNNING'; entryId: string; larkTaskGuid: string | null; startedAt: number; workedMs: number; paused: boolean };
 export type TodaySegment = { kind: 'WORK' | 'MEETING' | 'IDLE_TRIMMED'; startedAt: number; endedAt: number | null };
 export type TodayEntry = { id: string; larkTaskGuid: string | null; segments: TodaySegment[] };
+export type UpdatePhase = 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'not-available' | 'error';
+export type UpdateStatus = {
+  phase: UpdatePhase;
+  enabled: boolean;
+  currentVersion: string;
+  channel: 'latest' | 'beta';
+  availableVersion: string | null;
+  percent: number | null;
+  error: string | null;
+  checkedAt: number | null;
+  readyAt: number | null;
+  manual: boolean;
+  canInstallNow: boolean;
+};
 
 declare global {
   interface Window {
@@ -64,6 +78,13 @@ declare global {
       app: {
         relaunch: () => Promise<void>;
         openDashboard: () => Promise<{ ok: boolean; error?: string }>;
+      };
+      updates: {
+        status: () => Promise<UpdateStatus>;
+        checkNow: () => Promise<UpdateStatus>;
+        installNow: () => Promise<UpdateStatus>;
+        onStatusChange: (cb: (s: UpdateStatus) => void) => () => void;
+        onOpenSettings: (cb: () => void) => () => void;
       };
       insights: {
         today: () => Promise<{

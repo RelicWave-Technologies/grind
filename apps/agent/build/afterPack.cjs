@@ -8,6 +8,7 @@
 // color-name (and any other known-misplaced transitive) to the top level here.
 const fs = require('node:fs');
 const path = require('node:path');
+const { execFileSync } = require('node:child_process');
 
 /** Ensure `name` exists at the top level of the app's node_modules, copying it
  *  up from any nested location if electron-builder buried it. */
@@ -29,6 +30,10 @@ function hoist(nodeModules, name) {
 
 exports.default = async function afterPack(context) {
   const product = context.packager.appInfo.productFilename; // "Grind"
+  const appBundle =
+    context.electronPlatformName === 'darwin'
+      ? path.join(context.appOutDir, `${product}.app`)
+      : null;
   const nodeModules =
     context.electronPlatformName === 'darwin'
       ? path.join(
@@ -47,4 +52,13 @@ exports.default = async function afterPack(context) {
   console.log('afterPack: normalizing hoisted transitive deps');
   // color-convert (top-level, loaded by sharp) needs a sibling color-name.
   hoist(nodeModules, 'color-name');
+
+  if (appBundle && fs.existsSync(appBundle)) {
+    try {
+      execFileSync('xattr', ['-cr', appBundle], { stdio: 'ignore' });
+      console.log('  afterPack: cleared macOS extended attributes');
+    } catch (err) {
+      console.warn(`  afterPack: xattr cleanup failed (${err && err.message ? err.message : err})`);
+    }
+  }
 };

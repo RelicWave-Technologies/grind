@@ -9,6 +9,20 @@ type TimerStatus =
   | { state: 'RUNNING'; entryId: string; larkTaskGuid: string | null; startedAt: number; workedMs: number; paused: boolean };
 type TodaySegment = { kind: 'WORK' | 'MEETING' | 'IDLE_TRIMMED'; startedAt: number; endedAt: number | null };
 type TodayEntry = { id: string; larkTaskGuid: string | null; segments: TodaySegment[] };
+type UpdatePhase = 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'not-available' | 'error';
+type UpdateStatus = {
+  phase: UpdatePhase;
+  enabled: boolean;
+  currentVersion: string;
+  channel: 'latest' | 'beta';
+  availableVersion: string | null;
+  percent: number | null;
+  error: string | null;
+  checkedAt: number | null;
+  readyAt: number | null;
+  manual: boolean;
+  canInstallNow: boolean;
+};
 
 const api = {
   auth: {
@@ -87,6 +101,25 @@ const api = {
   app: {
     relaunch: (): Promise<void> => ipcRenderer.invoke('app:relaunch'),
     openDashboard: (): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('app:openDashboard'),
+  },
+  updates: {
+    status: (): Promise<UpdateStatus> => ipcRenderer.invoke('updates:status'),
+    checkNow: (): Promise<UpdateStatus> => ipcRenderer.invoke('updates:checkNow'),
+    installNow: (): Promise<UpdateStatus> => ipcRenderer.invoke('updates:installNow'),
+    onStatusChange: (cb: (s: UpdateStatus) => void): (() => void) => {
+      const sub = (_e: unknown, s: UpdateStatus) => cb(s);
+      ipcRenderer.on('updates:status:push', sub);
+      return () => {
+        ipcRenderer.off('updates:status:push', sub);
+      };
+    },
+    onOpenSettings: (cb: () => void): (() => void) => {
+      const sub = () => cb();
+      ipcRenderer.on('updates:open-settings', sub);
+      return () => {
+        ipcRenderer.off('updates:open-settings', sub);
+      };
+    },
   },
   insights: {
     today: (): Promise<{

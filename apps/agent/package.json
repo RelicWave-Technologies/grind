@@ -1,6 +1,6 @@
 {
   "name": "@grind/agent",
-  "version": "0.0.1",
+  "version": "0.0.2-beta.1",
   "private": true,
   "type": "module",
   "description": "Grind time tracker desktop agent",
@@ -18,8 +18,10 @@
     "package:unsigned": "pnpm package:mac:unsigned:arm64",
     "package:mac:arm64": "SIGN=1 bash scripts/package-mac.sh arm64",
     "package:mac:x64": "SIGN=1 bash scripts/package-mac.sh x64",
+    "package:mac:universal": "SIGN=1 bash scripts/package-mac.sh universal",
     "package:mac:unsigned:arm64": "bash scripts/package-mac.sh arm64",
     "package:mac:unsigned:x64": "bash scripts/package-mac.sh x64",
+    "package:mac:unsigned:universal": "bash scripts/package-mac.sh universal",
     "package:win": "node scripts/package-windows.mjs x64",
     "package:win:x64": "node scripts/package-windows.mjs x64"
   },
@@ -27,6 +29,7 @@
     "@tanstack/react-query": "5.59.16",
     "better-sqlite3": "11.5.0",
     "color-name": "1.1.4",
+    "electron-updater": "6.8.9",
     "lucide-react": "0.454.0",
     "react": "18.3.1",
     "react-dom": "18.3.1",

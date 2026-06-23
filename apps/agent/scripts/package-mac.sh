@@ -10,18 +10,30 @@
 # that electron-builder can pack faithfully.
 #
 # Usage:
-#   bash scripts/package-mac.sh [arm64|x64]
+#   bash scripts/package-mac.sh [arm64|x64|universal]
 # Env:
 #   SIGN=1   sign + notarize (needs a Developer ID cert in the keychain and
 #            APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID). Default: unsigned.
+#   PUBLISH=1 upload artifacts + update metadata to the configured GitHub Release.
+#   UPDATE_CHANNEL=latest|beta controls both the baked app channel and metadata channel.
 #   MAIN_VITE_API_URL is read from apps/agent/.env.production at build time.
 set -euo pipefail
 
 ARCH="${1:-arm64}"
+if [[ "$ARCH" != "arm64" && "$ARCH" != "x64" && "$ARCH" != "universal" ]]; then
+  echo "Unsupported macOS arch '$ARCH'. Use arm64, x64, or universal." >&2
+  exit 1
+fi
 AGENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ROOT_DIR="$(cd "$AGENT_DIR/../.." && pwd)"
 STAGE="${STAGE_DIR:-/tmp/grind-agent-deploy}"
 ELECTRON_VERSION="33.2.0"
+CHANNEL="${UPDATE_CHANNEL:-${MAIN_VITE_UPDATE_CHANNEL:-latest}}"
+if [[ "$CHANNEL" != "beta" ]]; then CHANNEL="latest"; fi
+export MAIN_VITE_UPDATE_CHANNEL="$CHANNEL"
+if [[ "${PUBLISH:-0}" == "1" ]]; then
+  export MAIN_VITE_AUTO_UPDATE_ENABLED=1
+fi
 
 cd "$ROOT_DIR"
 
@@ -40,10 +52,17 @@ cp "$AGENT_DIR/electron-builder.yml" "$STAGE/electron-builder.yml"
 # afterPack + entitlements must be ABSOLUTE paths: electron-builder resolves
 # relative ones against CWD, but spawns afterPack/codesign from a different dir,
 # so a relative `build/…` fails ("cannot read entitlement data").
-EB_ARGS=(--mac dmg "--$ARCH" --projectDir "$STAGE" "-c.electronVersion=$ELECTRON_VERSION"
+if [[ "$ARCH" == "universal" ]]; then
+  TARGET_ARGS=(--mac dmg zip --universal)
+else
+  TARGET_ARGS=(--mac dmg "--$ARCH")
+fi
+
+EB_ARGS=("${TARGET_ARGS[@]}" --projectDir "$STAGE" "-c.electronVersion=$ELECTRON_VERSION"
   "-c.afterPack=$STAGE/build/afterPack.cjs"
   "-c.mac.entitlements=$STAGE/build/entitlements.mac.plist"
-  "-c.mac.entitlementsInherit=$STAGE/build/entitlements.mac.plist")
+  "-c.mac.entitlementsInherit=$STAGE/build/entitlements.mac.plist"
+  "-c.publish.channel=$CHANNEL")
 if [[ "${SIGN:-0}" != "1" ]]; then
   echo "▸ unsigned build (set SIGN=1 + Apple creds to sign + notarize)"
   export CSC_IDENTITY_AUTO_DISCOVERY=false
@@ -57,10 +76,14 @@ elif [[ "${NOTARIZE:-1}" != "1" ]]; then
 else
   echo "▸ signed + notarized build"
 fi
+if [[ "${PUBLISH:-0}" == "1" ]]; then
+  echo "▸ publishing artifacts to GitHub Releases (channel: $CHANNEL)"
+  EB_ARGS+=(--publish always)
+fi
 
 pnpm exec electron-builder "${EB_ARGS[@]}"
 
 mkdir -p "$AGENT_DIR/release"
-cp "$STAGE"/release/*.dmg "$AGENT_DIR/release/"
-echo "✓ DMG(s) → $AGENT_DIR/release/"
-ls -lh "$AGENT_DIR/release/"*.dmg
+find "$STAGE/release" -maxdepth 1 -type f -exec cp {} "$AGENT_DIR/release/" \;
+echo "✓ macOS artifacts → $AGENT_DIR/release/"
+ls -lh "$AGENT_DIR/release/"

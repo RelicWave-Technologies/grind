@@ -11,6 +11,8 @@
 // Env:
 //   SIGN=1   allow electron-builder to sign using WIN_CSC_LINK / CSC_LINK.
 //            Default is unsigned, which is expected for v1 internal Windows IT.
+//   PUBLISH=1 upload artifacts + update metadata to the configured GitHub Release.
+//   UPDATE_CHANNEL=latest|beta controls both the baked app channel and metadata channel.
 import { spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -32,6 +34,12 @@ const defaultStage =
     : path.join(os.tmpdir(), 'grind-agent-win-deploy');
 const stage = process.env.STAGE_DIR || defaultStage;
 const electronVersion = '33.2.0';
+let channel = process.env.UPDATE_CHANNEL || process.env.MAIN_VITE_UPDATE_CHANNEL || 'latest';
+if (channel !== 'beta') channel = 'latest';
+process.env.MAIN_VITE_UPDATE_CHANNEL = channel;
+if (process.env.PUBLISH === '1') {
+  process.env.MAIN_VITE_AUTO_UPDATE_ENABLED = '1';
+}
 
 function bin(name) {
   return process.platform === 'win32' ? `${name}.cmd` : name;
@@ -106,6 +114,7 @@ async function main() {
     stage,
     `-c.electronVersion=${electronVersion}`,
     `-c.afterPack=${path.join(stage, 'build', 'afterPack.cjs')}`,
+    `-c.publish.channel=${channel}`,
   ];
 
   if (process.platform === 'win32') {
@@ -138,6 +147,10 @@ async function main() {
     env.CSC_IDENTITY_AUTO_DISCOVERY = 'false';
   } else {
     console.log('> signed Windows build');
+  }
+  if (process.env.PUBLISH === '1') {
+    console.log(`> publishing artifacts to GitHub Releases (channel: ${channel})`);
+    builderArgs.push('--publish', 'always');
   }
 
   await run('pnpm', builderArgs, rootDir, env);
