@@ -44,3 +44,4 @@ release/
 test-results/
 geo-deck/
 interactive-product-deck/
+.tmp/

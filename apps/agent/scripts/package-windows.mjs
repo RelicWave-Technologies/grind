@@ -26,7 +26,11 @@ if (arch !== 'x64') {
 const here = path.dirname(fileURLToPath(import.meta.url));
 const agentDir = path.resolve(here, '..');
 const rootDir = path.resolve(agentDir, '../..');
-const stage = process.env.STAGE_DIR || path.join(os.tmpdir(), 'grind-agent-win-deploy');
+const defaultStage =
+  process.platform === 'win32'
+    ? path.join(rootDir, '.tmp', 'grind-agent-win-deploy')
+    : path.join(os.tmpdir(), 'grind-agent-win-deploy');
+const stage = process.env.STAGE_DIR || defaultStage;
 const electronVersion = '33.2.0';
 
 function bin(name) {
