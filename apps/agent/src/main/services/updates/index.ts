@@ -15,8 +15,9 @@ import {
   type UpdateStatus,
 } from './state';
 
-const FIRST_CHECK_DELAY_MS = 60_000;
+const FIRST_CHECK_DELAY_MS = 5_000;
 const NORMAL_CHECK_INTERVAL_MS = 6 * 60 * 60_000;
+const QUIET_CHECK_MIN_INTERVAL_MS = 60_000;
 const INSTALL_FLUSH_TIMEOUT_MS = 5_000;
 const INSTALL_RETRY_DELAY_MS = 3_000;
 const INSTALL_FALLBACK_QUIT_MS = 12_000;
@@ -31,6 +32,7 @@ let status: UpdateStatus = initialUpdateStatus({
 });
 let started = false;
 let checking = false;
+let lastCheckStartedAt: number | null = null;
 let firstCheckTimer: NodeJS.Timeout | null = null;
 let intervalTimer: NodeJS.Timeout | null = null;
 let retryTimer: NodeJS.Timeout | null = null;
@@ -221,6 +223,7 @@ export async function checkForUpdates(manual: boolean): Promise<UpdateStatus> {
     return status;
   }
   checking = true;
+  lastCheckStartedAt = now();
   updateStatus({ type: 'checking', manual, at: now() });
   try {
     await autoUpdater.checkForUpdates();
@@ -230,6 +233,17 @@ export async function checkForUpdates(manual: boolean): Promise<UpdateStatus> {
     checking = false;
   }
   return status;
+}
+
+export async function checkForUpdatesQuietly(reason = 'quiet'): Promise<UpdateStatus> {
+  if (!status.enabled || checking) return status;
+  if (status.phase === 'available' || status.phase === 'downloading' || status.phase === 'ready' || status.phase === 'installing') {
+    return status;
+  }
+  const ageMs = lastCheckStartedAt == null ? Number.POSITIVE_INFINITY : now() - lastCheckStartedAt;
+  if (ageMs < QUIET_CHECK_MIN_INTERVAL_MS) return status;
+  log.info('quiet update check requested', { reason, ageMs: Number.isFinite(ageMs) ? ageMs : null });
+  return checkForUpdates(false);
 }
 
 export function refreshUpdateInstallability(): UpdateStatus {

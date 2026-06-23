@@ -47,6 +47,18 @@ export default function Settings() {
     });
   }, [qc]);
 
+  useEffect(() => {
+    let alive = true;
+    void window.agent.updates.checkQuietly()
+      .then((s) => {
+        if (alive) qc.setQueryData(['updates'], s);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [qc]);
+
   const l = lark.data;
   const larkConnected = !!l?.connected;
   const larkReauth = !!l?.reauthRequired;

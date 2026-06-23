@@ -82,6 +82,7 @@ declare global {
       updates: {
         status: () => Promise<UpdateStatus>;
         checkNow: () => Promise<UpdateStatus>;
+        checkQuietly: () => Promise<UpdateStatus>;
         installNow: () => Promise<UpdateStatus>;
         onStatusChange: (cb: (s: UpdateStatus) => void) => () => void;
         onOpenSettings: (cb: () => void) => () => void;

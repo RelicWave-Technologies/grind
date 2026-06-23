@@ -105,6 +105,7 @@ const api = {
   updates: {
     status: (): Promise<UpdateStatus> => ipcRenderer.invoke('updates:status'),
     checkNow: (): Promise<UpdateStatus> => ipcRenderer.invoke('updates:checkNow'),
+    checkQuietly: (): Promise<UpdateStatus> => ipcRenderer.invoke('updates:checkQuietly'),
     installNow: (): Promise<UpdateStatus> => ipcRenderer.invoke('updates:installNow'),
     onStatusChange: (cb: (s: UpdateStatus) => void): (() => void) => {
       const sub = (_e: unknown, s: UpdateStatus) => cb(s);
