@@ -1,0 +1,44 @@
+name: Package Windows Agent
+
+on:
+  workflow_dispatch:
+    inputs:
+      api_url:
+        description: Production API URL baked into the agent
+        required: true
+        default: https://grind-xcdr.onrender.com
+
+jobs:
+  package:
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.18
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Write production agent env
+        shell: pwsh
+        run: |
+          "MAIN_VITE_API_URL=${{ inputs.api_url }}" | Out-File -FilePath apps/agent/.env.production -Encoding utf8
+
+      - name: Build unsigned Windows x64 installer
+        run: pnpm --filter @grind/agent package:win:x64
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: grind-windows-x64
+          path: |
+            apps/agent/release/*.exe
+            apps/agent/release/*.blockmap
+          if-no-files-found: error

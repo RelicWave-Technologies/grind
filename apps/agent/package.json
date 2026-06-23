@@ -14,8 +14,14 @@
     "lint": "eslint src",
     "test": "vitest run",
     "icon": "node scripts/make-icon.mjs",
-    "package": "SIGN=1 bash scripts/package-mac.sh arm64",
-    "package:unsigned": "bash scripts/package-mac.sh arm64"
+    "package": "pnpm package:mac:arm64",
+    "package:unsigned": "pnpm package:mac:unsigned:arm64",
+    "package:mac:arm64": "SIGN=1 bash scripts/package-mac.sh arm64",
+    "package:mac:x64": "SIGN=1 bash scripts/package-mac.sh x64",
+    "package:mac:unsigned:arm64": "bash scripts/package-mac.sh arm64",
+    "package:mac:unsigned:x64": "bash scripts/package-mac.sh x64",
+    "package:win": "node scripts/package-windows.mjs x64",
+    "package:win:x64": "node scripts/package-windows.mjs x64"
   },
   "dependencies": {
     "@tanstack/react-query": "5.59.16",

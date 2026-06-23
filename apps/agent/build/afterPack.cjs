@@ -29,14 +29,17 @@ function hoist(nodeModules, name) {
 
 exports.default = async function afterPack(context) {
   const product = context.packager.appInfo.productFilename; // "Grind"
-  const nodeModules = path.join(
-    context.appOutDir,
-    `${product}.app`,
-    'Contents',
-    'Resources',
-    'app',
-    'node_modules',
-  );
+  const nodeModules =
+    context.electronPlatformName === 'darwin'
+      ? path.join(
+          context.appOutDir,
+          `${product}.app`,
+          'Contents',
+          'Resources',
+          'app',
+          'node_modules',
+        )
+      : path.join(context.appOutDir, 'resources', 'app', 'node_modules');
   if (!fs.existsSync(nodeModules)) {
     console.warn(`afterPack: ${nodeModules} not found — skipping hoist`);
     return;

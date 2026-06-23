@@ -55,6 +55,21 @@ mac:
   #   APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, APPLE_TEAM_ID
   # electron-builder picks these up automatically when notarize is enabled.
   notarize: true
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: build/icon.png
+  requestedExecutionLevel: asInvoker
 dmg:
   title: Grind ${version}
   artifactName: Grind-${version}-${arch}.dmg
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Grind
+  artifactName: Grind-${version}-${arch}-setup.${ext}

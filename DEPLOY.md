@@ -91,7 +91,7 @@ native modules (better-sqlite3, uiohook-napi, get-windows) for the Electron ABI.
 echo 'MAIN_VITE_API_URL=https://grind-xcdr.onrender.com' > apps/agent/.env.production
 
 # 2a. Unsigned (no Apple account) — verified working:
-pnpm --filter @grind/agent package:unsigned        # → apps/agent/release/Grind-0.0.1-arm64.dmg
+pnpm --filter @grind/agent package:unsigned        # -> apps/agent/release/Grind-0.0.1-arm64.dmg
 
 # 2b. Signed + notarized — needs a Developer ID cert in the login keychain:
 export APPLE_ID="you@apple.id"
@@ -104,7 +104,38 @@ pnpm --filter @grind/agent package                 # SIGN=1 under the hood
 on an Apple-Silicon machine needs the `@img/sharp-darwin-x64` prebuilt present;
 arm64 covers all Apple-Silicon Macs (2020+).
 
+Explicit mac arch scripts are also available:
+
+```bash
+pnpm --filter @grind/agent package:mac:arm64
+pnpm --filter @grind/agent package:mac:x64
+```
+
 The icon is generated from source (`pnpm --filter @grind/agent icon`) and lives
-at `apps/agent/build/icon.icns`. Entitlements (hardened runtime, JIT, library
+at `apps/agent/build/icon.svg`, `apps/agent/build/icon.png`, and
+`apps/agent/build/icon.icns`. Entitlements (hardened runtime, JIT, library
 validation off for native modules) are in `apps/agent/build/entitlements.mac.plist`.
 Unsigned apps: users right-click → Open once to bypass Gatekeeper.
+
+### Windows packaging
+
+Windows v1 is an unsigned internal IT installer. Build the x64 NSIS installer:
+
+```bash
+# Bake the production API URL into the app:
+echo 'MAIN_VITE_API_URL=https://grind-xcdr.onrender.com' > apps/agent/.env.production
+
+# Unsigned Windows x64 installer:
+pnpm --filter @grind/agent package:win:x64
+```
+
+The Windows packager (`apps/agent/scripts/package-windows.mjs`) uses the same
+`pnpm deploy --prod` staging approach as macOS. Prefer running this on a Windows
+machine or Windows CI runner because the agent has native modules
+(`better-sqlite3`, `sharp`, `uiohook-napi`, optional `get-windows`). Cross-builds
+from macOS can fail if the target native binaries or Wine/NSIS toolchain are not
+available.
+
+If/when Windows signing is needed, provide `WIN_CSC_LINK`/`WIN_CSC_KEY_PASSWORD`
+or `CSC_LINK`/`CSC_KEY_PASSWORD` and run with `SIGN=1`. Without `SIGN=1`, the
+script explicitly disables Windows code signing.

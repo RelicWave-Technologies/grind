@@ -24,6 +24,7 @@ const SIZES = [16, 32, 64, 128, 256, 512, 1024];
 
 async function main() {
   await fs.mkdir(buildDir, { recursive: true });
+  await fs.writeFile(path.join(buildDir, 'icon.svg'), svg);
   const iconset = path.join(buildDir, 'icon.iconset');
   await fs.rm(iconset, { recursive: true, force: true });
   await fs.mkdir(iconset, { recursive: true });
@@ -44,7 +45,7 @@ async function main() {
   await fs.rm(iconset, { recursive: true, force: true });
   // Also drop a 512 png for any non-mac packaging that wants a raster icon.
   await sharp(base).resize(512, 512).png().toFile(path.join(buildDir, 'icon.png'));
-  console.log('wrote build/icon.icns + build/icon.png');
+  console.log('wrote build/icon.svg + build/icon.icns + build/icon.png');
 }
 
 main().catch((err) => {
