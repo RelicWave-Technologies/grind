@@ -17,6 +17,8 @@
 #   PUBLISH=1 upload artifacts + update metadata to the configured GitHub Release.
 #   UPDATE_CHANNEL=latest|beta controls both the baked app channel and metadata channel.
 #   MAIN_VITE_API_URL is read from apps/agent/.env.production at build time.
+#   MAC_TARGETS="zip" optionally overrides the default target list, useful for
+#            local update-feed builds when DMG creation is unavailable.
 set -euo pipefail
 
 ARCH="${1:-arm64}"
@@ -52,7 +54,15 @@ cp "$AGENT_DIR/electron-builder.yml" "$STAGE/electron-builder.yml"
 # afterPack + entitlements must be ABSOLUTE paths: electron-builder resolves
 # relative ones against CWD, but spawns afterPack/codesign from a different dir,
 # so a relative `build/…` fails ("cannot read entitlement data").
-if [[ "$ARCH" == "universal" ]]; then
+if [[ -n "${MAC_TARGETS:-}" ]]; then
+  read -r -a MAC_TARGET_LIST <<< "$MAC_TARGETS"
+  TARGET_ARGS=(--mac "${MAC_TARGET_LIST[@]}")
+  if [[ "$ARCH" == "universal" ]]; then
+    TARGET_ARGS+=(--universal)
+  else
+    TARGET_ARGS+=("--$ARCH")
+  fi
+elif [[ "$ARCH" == "universal" ]]; then
   TARGET_ARGS=(--mac dmg zip --universal)
 else
   TARGET_ARGS=(--mac dmg zip "--$ARCH")
