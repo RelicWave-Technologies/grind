@@ -55,7 +55,7 @@ cp "$AGENT_DIR/electron-builder.yml" "$STAGE/electron-builder.yml"
 if [[ "$ARCH" == "universal" ]]; then
   TARGET_ARGS=(--mac dmg zip --universal)
 else
-  TARGET_ARGS=(--mac dmg "--$ARCH")
+  TARGET_ARGS=(--mac dmg zip "--$ARCH")
 fi
 
 EB_ARGS=("${TARGET_ARGS[@]}" --projectDir "$STAGE" "-c.electronVersion=$ELECTRON_VERSION"
