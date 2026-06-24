@@ -1,3 +1,20 @@
 packages:
   - apps/*
   - packages/*
+
+nodeLinker: hoisted
+autoInstallPeers: true
+strictPeerDependencies: false
+shamefullyHoist: true
+
+supportedArchitectures:
+  os:
+    - current
+    - darwin
+    - win32
+  cpu:
+    - current
+    - arm64
+    - x64
+  libc:
+    - current

@@ -46,6 +46,45 @@ echo "▸ pnpm deploy --prod → $STAGE"
 rm -rf "$STAGE"
 pnpm --filter @grind/agent deploy --prod "$STAGE"
 
+install_sharp_runtime() {
+  local target_arch="$1"
+  local tmp_dir
+  echo "▸ ensuring sharp darwin-$target_arch runtime in deploy dir"
+
+  install_packed_runtime() {
+    local package_spec="$1"
+    local package_path="$2"
+    local tgz
+
+    tmp_dir="$(mktemp -d)"
+    npm pack --silent --pack-destination "$tmp_dir" "$package_spec" >/dev/null
+    tgz="$(find "$tmp_dir" -maxdepth 1 -name '*.tgz' -print -quit)"
+    if [[ -z "$tgz" ]]; then
+      echo "Failed to pack $package_spec" >&2
+      exit 1
+    fi
+
+    rm -rf "$STAGE/node_modules/$package_path"
+    mkdir -p "$STAGE/node_modules/$package_path"
+    tar -xzf "$tgz" -C "$STAGE/node_modules/$package_path" --strip-components=1
+    rm -rf "$tmp_dir"
+  }
+
+  mkdir -p "$STAGE/node_modules/@img"
+  install_packed_runtime "@img/sharp-darwin-$target_arch@0.33.5" "@img/sharp-darwin-$target_arch"
+  install_packed_runtime "@img/sharp-libvips-darwin-$target_arch@1.0.4" "@img/sharp-libvips-darwin-$target_arch"
+
+  test -f "$STAGE/node_modules/@img/sharp-darwin-$target_arch/lib/sharp-darwin-$target_arch.node"
+  test -f "$STAGE/node_modules/@img/sharp-libvips-darwin-$target_arch/lib/libvips-cpp.42.dylib"
+}
+
+if [[ "$ARCH" == "universal" ]]; then
+  install_sharp_runtime arm64
+  install_sharp_runtime x64
+else
+  install_sharp_runtime "$ARCH"
+fi
+
 echo "▸ staging out/ + build resources + config into deploy dir"
 cp -R "$AGENT_DIR/out" "$STAGE/out"
 cp -R "$AGENT_DIR/build" "$STAGE/build"
