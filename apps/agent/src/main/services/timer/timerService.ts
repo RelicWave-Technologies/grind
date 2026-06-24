@@ -76,19 +76,16 @@ export class TimerService {
   }
 
   async start(args: StartArgs): Promise<TimerStatus> {
-    if (this.open) {
-      throw new Error('timer already running; stop the current entry first');
-    }
     const now = this.clock.now();
-    const entry = createTimeEntry({
-      id: this.ids.ulid(),
-      clientUuid: this.ids.ulid(),
-      userId: 'self', // server derives the real userId from the access token
-      larkTaskGuid: args.larkTaskGuid ?? null,
-      source: 'AUTO',
-      startedAt: now,
-      segmentId: this.ids.ulid(),
-    });
+    const nextTaskGuid = args.larkTaskGuid ?? null;
+    if (this.open) {
+      if ((this.open.larkTaskGuid ?? null) === nextTaskGuid) return this.status();
+      const closed = closeTimeEntry(this.open, now);
+      this.open = null;
+      this.store.upsert(closed);
+      await this.trySync(closed, 'sync');
+    }
+    const entry = this.createEntry(nextTaskGuid, now);
     this.open = entry;
     this.store.upsert(entry);
     await this.trySync(entry, 'create');
@@ -226,6 +223,18 @@ export class TimerService {
     } catch {
       // Best-effort: leave it unsynced; flushUnsynced will retry later.
     }
+  }
+
+  private createEntry(larkTaskGuid: string | null, startedAt: number): TimeEntry {
+    return createTimeEntry({
+      id: this.ids.ulid(),
+      clientUuid: this.ids.ulid(),
+      userId: 'self', // server derives the real userId from the access token
+      larkTaskGuid,
+      source: 'AUTO',
+      startedAt,
+      segmentId: this.ids.ulid(),
+    });
   }
 
   private workedMsForLocalDay(now: number): number {

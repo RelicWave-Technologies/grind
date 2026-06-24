@@ -103,9 +103,36 @@ describe('TimerService.start', () => {
     expect(sync.creates).toHaveLength(1);
   });
 
-  it('rejects starting a second timer while one is running', async () => {
-    await svc.start({});
-    await expect(svc.start({})).rejects.toThrow(/already running/);
+  it('switches to another task without requiring a stop first', async () => {
+    await svc.start({ larkTaskGuid: 'task-a' });
+    clock.advance(10 * MIN);
+
+    const status = await svc.start({ larkTaskGuid: 'task-b' });
+
+    expect(status).toMatchObject({ state: 'RUNNING', larkTaskGuid: 'task-b' });
+    const entries = [...store.entries.values()];
+    expect(entries).toHaveLength(2);
+    const oldEntry = entries.find((e) => e.larkTaskGuid === 'task-a')!;
+    const newEntry = entries.find((e) => e.larkTaskGuid === 'task-b')!;
+    expect(oldEntry.endedAt).toBe(T0 + 10 * MIN);
+    expect(totalWorkedMs(oldEntry)).toBe(10 * MIN);
+    expect(newEntry.endedAt).toBeNull();
+    expect(newEntry.startedAt).toBe(T0 + 10 * MIN);
+    expect(store.getOpen()?.larkTaskGuid).toBe('task-b');
+    expect(sync.creates).toEqual([oldEntry.id, newEntry.id]);
+    expect(sync.syncs).toEqual([oldEntry.id]);
+  });
+
+  it('is a no-op when starting the task that is already running', async () => {
+    const first = await svc.start({ larkTaskGuid: 'task-a' });
+    clock.advance(3 * MIN);
+    const second = await svc.start({ larkTaskGuid: 'task-a' });
+
+    expect(first.state).toBe('RUNNING');
+    expect(second).toMatchObject({ state: 'RUNNING', larkTaskGuid: 'task-a', workedMs: 3 * MIN });
+    expect(store.entries).toHaveLength(1);
+    expect(sync.creates).toHaveLength(1);
+    expect(sync.syncs).toHaveLength(0);
   });
 
   it('attributes a Lark task guid and persists it', async () => {
