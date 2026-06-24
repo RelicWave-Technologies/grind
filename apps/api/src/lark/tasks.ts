@@ -46,6 +46,17 @@ export interface UserTaskClient {
   getOpenId(accessToken: string): Promise<string | null>;
 }
 
+export class LarkTaskApiError extends Error {
+  constructor(
+    public readonly operation: 'list' | 'create' | 'comment',
+    public readonly code: number | undefined,
+    message: string | undefined,
+  ) {
+    super(`lark ${operation} task error: ${message ?? code ?? 'unknown_error'}`);
+    this.name = 'LarkTaskApiError';
+  }
+}
+
 // Raw shape of a Lark Task v2 item (only the fields we use).
 export type RawLarkTask = {
   guid?: string;
@@ -96,6 +107,20 @@ export function mapTasks(items: RawLarkTask[] | undefined): LarkTaskDto[] {
   return out;
 }
 
+export function buildCreateTaskPayload(input: CreateLarkTaskInput): Record<string, unknown> {
+  const payload: Record<string, unknown> = { summary: input.summary };
+  if (input.description) payload.description = input.description;
+  if (input.due != null && Number.isFinite(input.due)) {
+    // Lark Task v2 create expects epoch milliseconds here.
+    payload.due = { timestamp: String(Math.trunc(input.due)), is_all_day: false };
+  }
+  // Assign the creator so the task appears in their my_tasks list.
+  if (input.assigneeOpenId) {
+    payload.members = [{ id: input.assigneeOpenId, type: 'user', role: 'assignee' }];
+  }
+  return payload;
+}
+
 /** Worked duration (WORK/MEETING segments) per larkTaskGuid, summed across entries. */
 export function loggedMsByGuid(
   entries: Array<{ larkTaskGuid: string | null; segments: Array<{ kind: string; startedAt: Date; endedAt: Date | null }> }>,
@@ -129,7 +154,7 @@ export class HttpUserTaskClient implements UserTaskClient {
       if (pageToken) url.searchParams.set('page_token', pageToken);
       const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
       const body = (await res.json().catch(() => ({}))) as RawTasksPage;
-      if (body.code !== 0) throw new Error(`lark my_tasks error: ${body.msg ?? body.code}`);
+      if (body.code !== 0) throw new LarkTaskApiError('list', body.code, body.msg);
       all.push(...mapTasks(body.data?.items));
       if (!body.data?.has_more || !body.data.page_token) break;
       pageToken = body.data.page_token;
@@ -139,24 +164,17 @@ export class HttpUserTaskClient implements UserTaskClient {
 
   async createTask(accessToken: string, input: CreateLarkTaskInput): Promise<LarkTaskDto> {
     const { oauthHost } = getLarkConfig();
-    const payload: Record<string, unknown> = { summary: input.summary };
-    if (input.description) payload.description = input.description;
-    if (input.due != null) {
-      // Lark task due expects a seconds timestamp string.
-      payload.due = { timestamp: String(Math.floor(input.due / 1000)), is_all_day: false };
-    }
-    // Assign the creator so the task appears in their my_tasks list.
-    if (input.assigneeOpenId) {
-      payload.members = [{ id: input.assigneeOpenId, type: 'user', role: 'assignee' }];
-    }
+    const payload = buildCreateTaskPayload(input);
     const res = await fetch(`${oauthHost}/open-apis/task/v2/tasks`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json; charset=utf-8', Authorization: `Bearer ${accessToken}` },
       body: JSON.stringify(payload),
     });
     const body = (await res.json().catch(() => ({}))) as { code?: number; msg?: string; data?: { task?: RawLarkTask } };
-    if (body.code !== 0 || !body.data?.task) throw new Error(`lark create task error: ${body.msg ?? body.code}`);
-    return mapTasks([body.data.task])[0]!;
+    if (body.code !== 0 || !body.data?.task) throw new LarkTaskApiError('create', body.code, body.msg);
+    const [task] = mapTasks([body.data.task]);
+    if (!task) throw new LarkTaskApiError('create', body.code, 'missing task in response');
+    return task;
   }
 
   async getOpenId(accessToken: string): Promise<string | null> {
@@ -176,6 +194,6 @@ export class HttpUserTaskClient implements UserTaskClient {
       body: JSON.stringify({ resource_type: 'task', resource_id: guid, content }),
     });
     const body = (await res.json().catch(() => ({}))) as { code?: number; msg?: string };
-    if (body.code !== 0) throw new Error(`lark add comment error: ${body.msg ?? body.code}`);
+    if (body.code !== 0) throw new LarkTaskApiError('comment', body.code, body.msg);
   }
 }

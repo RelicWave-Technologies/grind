@@ -17,7 +17,7 @@ export { signOAuthState, verifyOAuthState, buildAuthorizeUrl, signLoginState, ve
 export type { LarkLoginStatePayload } from './oauth';
 export type { ProfileClient, LarkProfile } from './profile';
 export { normalizeEmail } from './profile';
-export { mapTasks, loggedMsByGuid, toEpochMs } from './tasks';
+export { mapTasks, loggedMsByGuid, toEpochMs, buildCreateTaskPayload, LarkTaskApiError } from './tasks';
 export type { UserTaskClient, LarkTaskDto, CreateLarkTaskInput } from './tasks';
 export { buildApprovalCard, buildDecidedCard, buildSupersededCard, buildUpdatedApprovalCard, buildCancelledCard } from './cards';
 export { decideRequest } from './decide';

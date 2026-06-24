@@ -15,6 +15,7 @@ import {
   loggedMsByGuid,
   LARK_SCOPES,
   LarkReauthRequiredError,
+  LarkTaskApiError,
 } from '../lark';
 
 export const larkRouter = Router();
@@ -187,12 +188,21 @@ larkRouter.post('/tasks', async (req, res, next) => {
     // Resolve the token owner's open_id so the new task is assigned to them
     // (otherwise it won't appear in their my_tasks list).
     const assigneeOpenId = await client.getOpenId(accessToken).catch(() => null);
-    const task = await client.createTask(accessToken, {
-      summary: summary.trim().slice(0, 256),
-      due: dueMs,
-      description: typeof description === 'string' ? description.slice(0, 2000) : null,
-      assigneeOpenId,
-    });
+    let task: Awaited<ReturnType<typeof client.createTask>>;
+    try {
+      task = await client.createTask(accessToken, {
+        summary: summary.trim().slice(0, 256),
+        due: dueMs,
+        description: typeof description === 'string' ? description.slice(0, 2000) : null,
+        assigneeOpenId,
+      });
+    } catch (err) {
+      if (err instanceof LarkTaskApiError) {
+        logger.warn({ err: err.message, code: err.code, userId: req.user.sub }, 'lark task create failed');
+        return res.status(502).json({ error: 'lark_create_failed', detail: err.message });
+      }
+      throw err;
+    }
     res.status(201).json({ task });
   } catch (err) {
     next(err);

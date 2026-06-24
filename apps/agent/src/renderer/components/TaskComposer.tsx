@@ -2,6 +2,12 @@ import { useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { CalendarClock, X } from 'lucide-react';
 
+function createErrorText(error: string | undefined): string | null {
+  if (!error) return null;
+  if (error === 'reauth_required') return 'Reconnect Lark';
+  return error.replace(/^lark create task error:\s*/i, '').slice(0, 80) || 'Could not create task';
+}
+
 /**
  * Inline composer that creates a real Lark task. Calm, borderless card that
  * blends with task rows (see docs/design.md §3 Composer). Calls onCreated with
@@ -25,11 +31,7 @@ export default function TaskComposer({ onCreated }: { onCreated: (summary: strin
     },
   });
 
-  const errorText = create.data && !create.data.ok
-    ? create.data.error === 'reauth_required'
-      ? 'Reconnect Lark'
-      : 'Failed'
-    : null;
+  const errorText = create.data && !create.data.ok ? createErrorText(create.data.error) : null;
 
   const submit = () => {
     const s = summary.trim();
@@ -62,7 +64,7 @@ export default function TaskComposer({ onCreated }: { onCreated: (summary: strin
         </label>
         <span className="composer-spacer" />
         {errorText && (
-          <span className="composer-error"><X size={13} strokeWidth={2.5} /> {errorText}</span>
+          <span className="composer-error" title={create.data?.error}><X size={13} strokeWidth={2.5} /> {errorText}</span>
         )}
         <button className="btn btn-prominent no-drag" onClick={submit} disabled={create.isPending || !summary.trim()}>
           {create.isPending ? 'Creating…' : 'Create in Lark'}

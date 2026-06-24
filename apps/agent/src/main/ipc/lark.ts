@@ -35,6 +35,21 @@ export type LarkSyncResult = {
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
+function createTaskErrorMessage(raw: string): string {
+  if (raw.includes('409')) return 'reauth_required';
+  const jsonStart = raw.indexOf('{');
+  if (jsonStart >= 0) {
+    try {
+      const body = JSON.parse(raw.slice(jsonStart)) as { error?: string; detail?: string };
+      if (body.error === 'lark_create_failed') return body.detail ?? 'Lark rejected the task';
+      if (body.error) return body.error;
+    } catch {
+      // Fall through to a generic message below.
+    }
+  }
+  return 'Could not create task in Lark';
+}
+
 /**
  * Lark connection is owned by the backend (tokens never touch the device).
  * The agent just (a) reads status, (b) opens the authorize URL in the system
@@ -115,7 +130,7 @@ export function registerLarkIpc(): void {
     } catch (err) {
       const msg = String(err);
       log.warn('lark:createTask failed', { err: msg });
-      return { ok: false, error: msg.includes('409') ? 'reauth_required' : msg };
+      return { ok: false, error: createTaskErrorMessage(msg) };
     }
   });
 

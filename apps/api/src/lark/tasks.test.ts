@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mapTasks, toEpochMs, loggedMsByGuid, type RawLarkTask } from './tasks';
+import { buildCreateTaskPayload, mapTasks, toEpochMs, loggedMsByGuid, type RawLarkTask } from './tasks';
 
 describe('mapTasks', () => {
   it('returns [] for undefined or empty input', () => {
@@ -78,5 +78,20 @@ describe('loggedMsByGuid', () => {
   it('skips entries without a guid', () => {
     const m = loggedMsByGuid([{ larkTaskGuid: null, segments: [{ kind: 'WORK', startedAt: d(0), endedAt: d(1000) }] }], now);
     expect(m.size).toBe(0);
+  });
+});
+
+describe('buildCreateTaskPayload', () => {
+  it('sends due timestamps in epoch milliseconds for Lark Task v2 create', () => {
+    expect(buildCreateTaskPayload({ summary: 'Ship', due: 1_762_944_300_000 })).toMatchObject({
+      summary: 'Ship',
+      due: { timestamp: '1762944300000', is_all_day: false },
+    });
+  });
+
+  it('adds the token owner as a user assignee when an open_id is available', () => {
+    expect(buildCreateTaskPayload({ summary: 'Ship', assigneeOpenId: 'ou_abc' })).toMatchObject({
+      members: [{ id: 'ou_abc', type: 'user', role: 'assignee' }],
+    });
   });
 });
