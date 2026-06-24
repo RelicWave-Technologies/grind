@@ -53,6 +53,9 @@ mac:
   icon: build/icon.icns
   hardenedRuntime: true
   gatekeeperAssess: false
+  # Sharp, uiohook, and get-windows ship per-arch prebuilt native files. In universal macOS
+  # builds these runtime files must remain separate instead of being lipo-merged.
+  x64ArchFiles: "**/node_modules/{@img,uiohook-napi,get-windows}/**"
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
   # Screenshot capture + global input counting need these usage strings so

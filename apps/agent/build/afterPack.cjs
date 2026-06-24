@@ -28,6 +28,36 @@ function hoist(nodeModules, name) {
   return false;
 }
 
+function removeIfPresent(targetPath, label) {
+  if (!fs.existsSync(targetPath)) return;
+  fs.rmSync(targetPath, { recursive: true, force: true });
+  console.log(`  afterPack: removed ${label}`);
+}
+
+function currentMacArch(context) {
+  if (context.arch === 'x64' || context.arch === 1) return 'x64';
+  if (context.arch === 'arm64' || context.arch === 3) return 'arm64';
+  return null;
+}
+
+function mirrorGetWindowsBindings(nodeModules, arch) {
+  if (arch !== 'x64' && arch !== 'arm64') return;
+  const other = arch === 'x64' ? 'arm64' : 'x64';
+  const bindingRoot = path.join(nodeModules, 'get-windows', 'lib', 'binding');
+  const bindings = [
+    { abi: 'napi-6', file: 'node-active-win.node' },
+    { abi: 'napi-9', file: 'node-get-windows.node' },
+  ];
+
+  for (const binding of bindings) {
+    const source = path.join(bindingRoot, `${binding.abi}-darwin-unknown-${arch}`, binding.file);
+    const dest = path.join(bindingRoot, `${binding.abi}-darwin-unknown-${other}`, binding.file);
+    if (!fs.existsSync(source) || !fs.existsSync(dest)) continue;
+    fs.copyFileSync(source, dest);
+    console.log(`  afterPack: mirrored get-windows ${binding.abi} ${arch} binding`);
+  }
+}
+
 exports.default = async function afterPack(context) {
   const product = context.packager.appInfo.productFilename; // "Grind"
   const appBundle =
@@ -52,6 +82,17 @@ exports.default = async function afterPack(context) {
   console.log('afterPack: normalizing hoisted transitive deps');
   // color-convert (top-level, loaded by sharp) needs a sibling color-name.
   hoist(nodeModules, 'color-name');
+
+  // uiohook-napi loads from prebuilds/* via node-gyp-build. electron-builder's
+  // rebuild can leave a transient build/Release binary in only one architecture,
+  // which prevents @electron/universal from merging the two macOS apps.
+  removeIfPresent(path.join(nodeModules, 'uiohook-napi', 'build'), 'uiohook-napi/build');
+  removeIfPresent(
+    path.join(nodeModules, 'better-sqlite3', 'build', 'Release', 'test_extension.node'),
+    'better-sqlite3 test extension',
+  );
+  removeIfPresent(path.join(nodeModules, 'get-windows', 'build'), 'get-windows/build');
+  mirrorGetWindowsBindings(nodeModules, currentMacArch(context));
 
   if (appBundle && fs.existsSync(appBundle)) {
     try {
