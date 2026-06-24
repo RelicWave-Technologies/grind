@@ -5,7 +5,7 @@ import { CalendarClock, X } from 'lucide-react';
 function createErrorText(error: string | undefined): string | null {
   if (!error) return null;
   if (error === 'reauth_required') return 'Reconnect Lark';
-  return error.replace(/^lark create task error:\s*/i, '').slice(0, 80) || 'Could not create task';
+  return error.replace(/^lark create task error:\s*/i, '') || 'Could not create task';
 }
 
 /**
@@ -63,13 +63,15 @@ export default function TaskComposer({ onCreated }: { onCreated: (summary: strin
           <input type="date" value={due} onChange={(e) => setDue(e.target.value)} />
         </label>
         <span className="composer-spacer" />
-        {errorText && (
-          <span className="composer-error" title={create.data?.error}><X size={13} strokeWidth={2.5} /> {errorText}</span>
-        )}
         <button className="btn btn-prominent no-drag" onClick={submit} disabled={create.isPending || !summary.trim()}>
           {create.isPending ? 'Creating…' : 'Create in Lark'}
         </button>
       </div>
+      {errorText && (
+        <div className="composer-error" title={create.data?.error}>
+          <X size={13} strokeWidth={2.5} /> <span>{errorText}</span>
+        </div>
+      )}
     </div>
   );
 }

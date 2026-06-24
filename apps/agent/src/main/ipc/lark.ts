@@ -41,7 +41,9 @@ function createTaskErrorMessage(raw: string): string {
   if (jsonStart >= 0) {
     try {
       const body = JSON.parse(raw.slice(jsonStart)) as { error?: string; detail?: string };
-      if (body.error === 'lark_create_failed') return body.detail ?? 'Lark rejected the task';
+      if (body.detail) return body.detail;
+      if (body.error === 'lark_create_failed') return 'Lark rejected the task';
+      if (body.error === 'internal_error') return raw;
       if (body.error) return body.error;
     } catch {
       // Fall through to a generic message below.

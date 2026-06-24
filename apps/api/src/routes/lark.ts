@@ -15,10 +15,16 @@ import {
   loggedMsByGuid,
   LARK_SCOPES,
   LarkReauthRequiredError,
+  LarkTransientError,
   LarkTaskApiError,
 } from '../lark';
 
 export const larkRouter = Router();
+
+function taskErrorDetail(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err);
+  return raw.replace(/Bearer\s+[A-Za-z0-9._~+/-]+=*/g, 'Bearer [redacted]').slice(0, 2000);
+}
 
 /** Minimal HTML shown in the browser tab after the OAuth round-trip. */
 function closeTabPage(title: string, detail: string): string {
@@ -183,6 +189,11 @@ larkRouter.post('/tasks', async (req, res, next) => {
       accessToken = await tm.getAccessToken(req.user.sub);
     } catch (err) {
       if (err instanceof LarkReauthRequiredError) return res.status(409).json({ error: 'reauth_required' });
+      if (err instanceof LarkTransientError) {
+        const detail = taskErrorDetail(err);
+        logger.warn({ err: detail, userId: req.user.sub }, 'lark token refresh transient during task create');
+        return res.status(503).json({ error: 'lark_temporarily_unavailable', detail });
+      }
       throw err;
     }
     // Resolve the token owner's open_id so the new task is assigned to them
@@ -201,7 +212,9 @@ larkRouter.post('/tasks', async (req, res, next) => {
         logger.warn({ err: err.message, code: err.code, userId: req.user.sub }, 'lark task create failed');
         return res.status(502).json({ error: 'lark_create_failed', detail: err.message });
       }
-      throw err;
+      const detail = taskErrorDetail(err);
+      logger.warn({ err: detail, userId: req.user.sub }, 'lark task create failed unexpectedly');
+      return res.status(502).json({ error: 'lark_create_failed', detail });
     }
     res.status(201).json({ task });
   } catch (err) {
