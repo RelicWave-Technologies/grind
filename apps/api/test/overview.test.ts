@@ -69,6 +69,25 @@ async function seedSegment(opts: {
   });
 }
 
+async function seedOpenSegment(opts: {
+  userId: string;
+  startedAt: Date;
+}) {
+  return prisma.timeEntry.create({
+    data: {
+      id: ulid(),
+      clientUuid: ulid(),
+      userId: opts.userId,
+      source: 'AUTO',
+      startedAt: opts.startedAt,
+      endedAt: null,
+      segments: {
+        create: [{ id: ulid(), kind: 'WORK', startedAt: opts.startedAt, endedAt: null }],
+      },
+    },
+  });
+}
+
 async function pending(userId: string, ageMs: number) {
   const now = Date.now();
   const start = now - ageMs - 2 * HOUR;
@@ -109,6 +128,7 @@ describe('GET /v1/admin/overview', () => {
     const res = await request(app).get('/v1/admin/overview?tz=UTC').set(bearer(admin.token));
     expect(res.status).toBe(200);
     expect(res.body.scope).toBe('workspace');
+    expect(res.body.today.trackingUsers).toBe(0);
     expect(res.body.today.activeUsers).toBe(0);
     expect(res.body.today.workedHours).toBe(0);
     expect(res.body.approvals.pendingTotal).toBe(0);
@@ -125,8 +145,21 @@ describe('GET /v1/admin/overview', () => {
     const res = await request(app).get('/v1/admin/overview?tz=UTC').set(bearer(mgr.token));
     expect(res.status).toBe(200);
     expect(res.body.scope).toBe('team');
+    expect(res.body.today.trackingUsers).toBe(0);
     expect(res.body.today.activeUsers).toBe(1); // only m1, outsider excluded
     expect(res.body.today.workedHours).toBeGreaterThan(0);
+  });
+
+  it('counts only open auto work/meeting segments as tracking now', async () => {
+    const { admin, m1, m2 } = await seed();
+    const slot = pastSlot(0, 15 * MIN);
+    await seedSegment({ userId: m1.id, source: 'AUTO', kind: 'WORK', ...slot });
+    await seedOpenSegment({ userId: m2.id, startedAt: new Date(Date.now() - 5 * MIN) });
+
+    const res = await request(app).get('/v1/admin/overview?tz=UTC').set(bearer(admin.token));
+    expect(res.status).toBe(200);
+    expect(res.body.today.activeUsers).toBe(2);
+    expect(res.body.today.trackingUsers).toBe(1);
   });
 
   it('splits hours by source/kind (WORK / MEETING / MANUAL)', async () => {

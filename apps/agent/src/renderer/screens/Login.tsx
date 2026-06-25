@@ -17,6 +17,7 @@ const ERROR_COPY: Record<string, string> = {
 export default function Login() {
   const [phase, setPhase] = useState<'idle' | 'waiting' | 'pending' | 'error'>('idle');
   const [message, setMessage] = useState<string | null>(null);
+  const [opening, setOpening] = useState(false);
 
   // The main process pushes pending/error outcomes back after the browser round-trip.
   useEffect(() => {
@@ -31,10 +32,19 @@ export default function Login() {
     });
   }, []);
 
-  function signIn() {
+  async function signIn() {
+    if (opening) return;
+    setOpening(true);
     setPhase('waiting');
     setMessage(null);
-    void window.agent.auth.loginWithLark();
+    try {
+      await window.agent.auth.loginWithLark();
+    } catch {
+      setPhase('error');
+      setMessage('Could not open your browser for Lark sign-in. Please try again.');
+    } finally {
+      setOpening(false);
+    }
   }
 
   return (
@@ -69,11 +79,11 @@ export default function Login() {
           className="btn btn-prominent btn-lg"
           type="button"
           onClick={signIn}
-          disabled={phase === 'waiting'}
+          disabled={opening}
           style={{ marginTop: 16, display: 'inline-flex', alignItems: 'center', gap: 8, justifyContent: 'center' }}
         >
           <ShieldCheck size={16} strokeWidth={2} />
-          {phase === 'waiting' ? 'Waiting for browser…' : 'Continue with Lark'}
+          {opening ? 'Opening browser…' : phase === 'waiting' ? 'Open Lark again' : 'Continue with Lark'}
         </button>
       </div>
     </div>

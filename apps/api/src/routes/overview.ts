@@ -45,6 +45,7 @@ interface OverviewResponse {
   today: {
     date: string;
     tz: string;
+    trackingUsers: number;
     activeUsers: number;
     totalUsers: number;
     workedHours: number;
@@ -115,12 +116,16 @@ overviewRouter.get('/', async (req, res, next) => {
     let meetingMs = 0;
     let manualMs = 0;
     const usersWithTime = new Set<string>();
+    const usersTrackingNow = new Set<string>();
     for (const s of segs) {
       const a = Math.max(dayStart, s.startedAt.getTime());
       const b = Math.min(liveCap, (s.endedAt ?? new Date(liveCap)).getTime());
       const dur = b - a;
       if (dur <= 0) continue;
       usersWithTime.add(s.timeEntry.userId);
+      if (s.endedAt === null && s.timeEntry.source === 'AUTO' && (s.kind === 'WORK' || s.kind === 'MEETING')) {
+        usersTrackingNow.add(s.timeEntry.userId);
+      }
       if (s.timeEntry.source === 'MANUAL') manualMs += dur;
       else if (s.kind === 'MEETING') meetingMs += dur;
       else if (s.kind === 'WORK') workedMs += dur;
@@ -193,6 +198,7 @@ overviewRouter.get('/', async (req, res, next) => {
       today: {
         date: today,
         tz,
+        trackingUsers: usersTrackingNow.size,
         activeUsers: usersWithTime.size,
         totalUsers,
         workedHours: roundH(workedMs),

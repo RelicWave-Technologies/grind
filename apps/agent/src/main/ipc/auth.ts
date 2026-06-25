@@ -37,7 +37,7 @@ export function registerAuthIpc(): void {
       broadcast('auth:status:push', 'loggedIn');
       return { ok: true };
     }
-    startLarkLogin();
+    await startLarkLogin();
     return { ok: true };
   });
 

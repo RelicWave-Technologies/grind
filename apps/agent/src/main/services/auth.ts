@@ -15,15 +15,24 @@ import { clearTokens, loadTokens, saveTokens } from './tokenStore';
  * code (the API checks sha256(verifier) == challenge).
  */
 let pendingVerifier: string | null = null;
+let pendingLoginUrl: string | null = null;
 
 /** Begin a Lark login: mint PKCE, open the browser. The deep-link finishes it. */
-export function startLarkLogin(): void {
-  if (pendingVerifier) return;
-  const verifier = crypto.randomBytes(48).toString('base64url'); // 64 chars (43–128 ok)
-  const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
-  pendingVerifier = verifier;
-  const url = `${API_URL}/v1/auth/lark/start?client=agent&code_challenge=${encodeURIComponent(challenge)}`;
-  void shell.openExternal(url);
+export async function startLarkLogin(): Promise<void> {
+  if (!pendingVerifier || !pendingLoginUrl) {
+    const verifier = crypto.randomBytes(48).toString('base64url'); // 64 chars (43–128 ok)
+    const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
+    pendingVerifier = verifier;
+    pendingLoginUrl = `${API_URL}/v1/auth/lark/start?client=agent&code_challenge=${encodeURIComponent(challenge)}`;
+  }
+  try {
+    await shell.openExternal(pendingLoginUrl, { activate: true });
+  } catch (err) {
+    pendingVerifier = null;
+    pendingLoginUrl = null;
+    log.warn('failed to open Lark login in browser', { err: String(err) });
+    throw err;
+  }
 }
 
 /** Redeem the deep-link one-time code for a session. Returns false if no login
@@ -32,6 +41,7 @@ export async function completeLarkLogin(code: string): Promise<boolean> {
   const verifier = pendingVerifier;
   if (!verifier) return false;
   pendingVerifier = null;
+  pendingLoginUrl = null;
   const res = await api<AgentLarkExchangeResponse>('/v1/auth/lark/exchange', {
     method: 'POST',
     auth: false,
@@ -49,6 +59,7 @@ export async function completeLarkLogin(code: string): Promise<boolean> {
 /** Abandon an in-flight Lark login (e.g. the deep-link reported pending/error). */
 export function cancelLarkLogin(): void {
   pendingVerifier = null;
+  pendingLoginUrl = null;
 }
 
 export async function login(email: string, password: string): Promise<UserDto> {

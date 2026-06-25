@@ -39,6 +39,7 @@ interface OverviewResponse {
   today: {
     date: string;
     tz: string;
+    trackingUsers: number;
     activeUsers: number;
     totalUsers: number;
     workedHours: number;
@@ -162,13 +163,13 @@ export function OverviewScreen() {
           ) : (
             <StatRow>
               <Stat
-                label="Active today"
-                value={`${t.activeUsers}`}
+                label="Tracking now"
+                value={`${t.trackingUsers}`}
                 unit={`/ ${t.totalUsers}`}
                 hint={
-                  t.activeUsers === 0
-                    ? 'nobody tracking yet'
-                    : `${Math.round((t.activeUsers / Math.max(1, t.totalUsers)) * 100)}% of people`
+                  t.trackingUsers === 0
+                    ? 'paused users excluded'
+                    : `${Math.round((t.trackingUsers / Math.max(1, t.totalUsers)) * 100)}% of people now`
                 }
               />
               <Stat
