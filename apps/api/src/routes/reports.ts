@@ -504,6 +504,7 @@ async function loadTeamReportData(userIds: string[], range: ReportRange): Promis
       },
       select: {
         userId: true,
+        timeEntryId: true,
         bucketStart: true,
         keystrokes: true,
         clicks: true,
@@ -594,6 +595,7 @@ async function loadSamples(userId: string, range: ReportRange): Promise<ReportAc
     },
     select: {
       bucketStart: true,
+      timeEntryId: true,
       keystrokes: true,
       clicks: true,
       scrollEvents: true,

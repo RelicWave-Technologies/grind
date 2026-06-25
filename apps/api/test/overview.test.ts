@@ -162,6 +162,17 @@ describe('GET /v1/admin/overview', () => {
     expect(res.body.today.trackingUsers).toBe(1);
   });
 
+  it('does not treat a stale open segment with no activity as live tracked time', async () => {
+    const { admin, m1 } = await seed();
+    await seedOpenSegment({ userId: m1.id, startedAt: new Date(Date.now() - 30 * MIN) });
+
+    const res = await request(app).get('/v1/admin/overview?tz=UTC').set(bearer(admin.token));
+    expect(res.status).toBe(200);
+    expect(res.body.today.activeUsers).toBe(0);
+    expect(res.body.today.trackingUsers).toBe(0);
+    expect(res.body.today.workedHours).toBe(0);
+  });
+
   it('splits hours by source/kind (WORK / MEETING / MANUAL)', async () => {
     const { admin, m1 } = await seed();
     // 30-min WORK / 20-min MEETING / 10-min MANUAL, all within the last hour.

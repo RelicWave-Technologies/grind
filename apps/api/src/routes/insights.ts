@@ -6,6 +6,7 @@ import { scoreDay } from '../scoring/score';
 import { assessWindow, type RiskSample } from '../anticheat/risk';
 import type { RoleTitle } from '../scoring/presets';
 import { buildDayInsight, localDayWindow, shiftDayWindow } from '../insights/day';
+import { cappedOpenEndedAt, latestSampleByEntry } from '../insights/openSegmentEvidence';
 import { WEEKDAYS, type ShiftSchedule } from '@grind/types';
 import { buildHeatmap, DEFAULT_BUCKET_MS, type HeatmapSample } from '../insights/heatmap';
 import { buildAppUsage } from '../insights/appUsage';
@@ -181,6 +182,43 @@ insightsRouter.get('/day', async (req, res, next) => {
       orderBy: { requestedStart: 'asc' },
     });
 
+    const samples = await prisma.activitySample.findMany({
+      where: {
+        userId,
+        bucketStart: { gte: win.start, lt: win.end },
+      },
+      select: {
+        timeEntryId: true,
+        bucketStart: true,
+        keystrokes: true,
+        clicks: true,
+        scrollEvents: true,
+        mouseDistancePx: true,
+        activeApp: true,
+        activeAppBundle: true,
+      },
+      orderBy: { bucketStart: 'asc' },
+    });
+    const latestSampleAt = latestSampleByEntry(samples);
+    const insightEntries = entries.map((e) => ({
+      id: e.id,
+      source: e.source as 'AUTO' | 'MANUAL',
+      requestId: e.manualTimeRequest?.id ?? null,
+      larkTaskGuid: e.larkTaskGuid,
+      notes: e.notes ?? null,
+      attendeeIds: e.attendees.map((a) => a.userId),
+      segments: e.segments.map((s) => ({
+        kind: s.kind as 'WORK' | 'MEETING' | 'IDLE_TRIMMED',
+        startedAt: s.startedAt,
+        endedAt: cappedOpenEndedAt({
+          startedAt: s.startedAt,
+          endedAt: s.endedAt,
+          now,
+          latestSampleAt: latestSampleAt.get(e.id),
+        }),
+      })),
+    }));
+
     const result = buildDayInsight({
       date,
       tz,
@@ -188,19 +226,7 @@ insightsRouter.get('/day', async (req, res, next) => {
       window: frame,
       calendarDay: win,
       shift: shiftLabel,
-      entries: entries.map((e) => ({
-        id: e.id,
-        source: e.source as 'AUTO' | 'MANUAL',
-        requestId: e.manualTimeRequest?.id ?? null,
-        larkTaskGuid: e.larkTaskGuid,
-        notes: e.notes ?? null,
-        attendeeIds: e.attendees.map((a) => a.userId),
-        segments: e.segments.map((s) => ({
-          kind: s.kind as 'WORK' | 'MEETING' | 'IDLE_TRIMMED',
-          startedAt: s.startedAt,
-          endedAt: s.endedAt,
-        })),
-      })),
+      entries: insightEntries,
       pending: pending.map((p) => ({
         id: p.id,
         requestedStart: p.requestedStart,
@@ -222,33 +248,15 @@ insightsRouter.get('/day', async (req, res, next) => {
     });
 
     // Activity heatmap: 10-min productivity buckets across the day window.
-    // Pulls every per-minute ActivitySample in the local-day window and
-    // averages scoreMinute() per bucket. Returns null where no samples
-    // landed — distinct from "samples scored 0" (idle) so the dashboard
-    // can render dead air differently.
-    // Pull every per-minute ActivitySample in the local-day window. The
+    // Averages scoreMinute() per bucket. Returns null where no samples landed
+    // — distinct from "samples scored 0" (idle) so the dashboard can render
+    // dead air differently. The
     // schema doesn't (yet) carry isProtectedMeeting on each sample — we
     // derive it post-hoc by checking whether the minute overlaps a
     // MEETING segment in the entries we already fetched. Cheap because
     // both lists are sorted + small.
-    const samples = await prisma.activitySample.findMany({
-      where: {
-        userId,
-        bucketStart: { gte: win.start, lt: win.end },
-      },
-      select: {
-        bucketStart: true,
-        keystrokes: true,
-        clicks: true,
-        scrollEvents: true,
-        mouseDistancePx: true,
-        activeApp: true,
-        activeAppBundle: true,
-      },
-      orderBy: { bucketStart: 'asc' },
-    });
     const meetingIntervals: Array<{ a: number; b: number }> = [];
-    for (const e of entries) {
+    for (const e of insightEntries) {
       for (const s of e.segments) {
         if (s.kind === 'MEETING' && s.endedAt) {
           meetingIntervals.push({ a: s.startedAt.getTime(), b: s.endedAt.getTime() });

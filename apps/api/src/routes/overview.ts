@@ -3,6 +3,7 @@ import { prisma } from '@grind/db';
 import { requireAccessToken } from '../middleware/auth';
 import { attachScope, requireManagerOrAbove } from '../middleware/scope';
 import { localDayWindow } from '../insights/day';
+import { cappedOpenEndedAt, latestSampleByEntry, openSegmentIsFresh } from '../insights/openSegmentEvidence';
 import { DEFAULT_STUCK_THRESHOLD_MS } from '../digests/pendingDigest';
 
 /**
@@ -105,9 +106,20 @@ overviewRouter.get('/', async (req, res, next) => {
             kind: true,
             startedAt: true,
             endedAt: true,
-            timeEntry: { select: { userId: true, source: true } },
+            timeEntry: { select: { id: true, userId: true, source: true } },
           },
         });
+    const activitySamples = userIds.length === 0
+      ? []
+      : await prisma.activitySample.findMany({
+          where: {
+            userId: { in: userIds },
+            bucketStart: { gte: win.start, lt: win.end },
+          },
+          select: { timeEntryId: true, bucketStart: true },
+          orderBy: { bucketStart: 'asc' },
+        });
+    const latestSampleAt = latestSampleByEntry(activitySamples);
 
     const dayStart = win.start.getTime();
     const dayEnd = win.end.getTime();
@@ -119,11 +131,26 @@ overviewRouter.get('/', async (req, res, next) => {
     const usersTrackingNow = new Set<string>();
     for (const s of segs) {
       const a = Math.max(dayStart, s.startedAt.getTime());
-      const b = Math.min(liveCap, (s.endedAt ?? new Date(liveCap)).getTime());
+      const effectiveEndedAt = cappedOpenEndedAt({
+        startedAt: s.startedAt,
+        endedAt: s.endedAt,
+        now,
+        latestSampleAt: latestSampleAt.get(s.timeEntry.id),
+      });
+      const b = Math.min(liveCap, (effectiveEndedAt ?? new Date(liveCap)).getTime());
       const dur = b - a;
       if (dur <= 0) continue;
       usersWithTime.add(s.timeEntry.userId);
-      if (s.endedAt === null && s.timeEntry.source === 'AUTO' && (s.kind === 'WORK' || s.kind === 'MEETING')) {
+      if (
+        s.timeEntry.source === 'AUTO' &&
+        (s.kind === 'WORK' || s.kind === 'MEETING') &&
+        openSegmentIsFresh({
+          startedAt: s.startedAt,
+          endedAt: s.endedAt,
+          now,
+          latestSampleAt: latestSampleAt.get(s.timeEntry.id),
+        })
+      ) {
         usersTrackingNow.add(s.timeEntry.userId);
       }
       if (s.timeEntry.source === 'MANUAL') manualMs += dur;

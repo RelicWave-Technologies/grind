@@ -11,6 +11,7 @@ import { buildAppUsage } from '../insights/appUsage';
 import { appIconUrl } from '../insights/appIcon';
 import { buildDayInsight, localDayWindow, shiftDayWindow } from '../insights/day';
 import { buildHeatmap, DEFAULT_BUCKET_MS, type HeatmapSample } from '../insights/heatmap';
+import { cappedOpenEndedAt, latestSampleByEntry } from '../insights/openSegmentEvidence';
 import { buildTimesheetMatrix, dateRange, type TimesheetSegmentInput } from '../insights/timesheets';
 import { scoreMinute } from '../scoring/score';
 
@@ -58,6 +59,7 @@ export interface ReportManualRequest {
 }
 
 export interface ReportActivitySample {
+  timeEntryId: string | null;
   bucketStart: Date;
   keystrokes: number;
   clicks: number;
@@ -165,9 +167,10 @@ export function buildMemberReportDays(input: {
   iconFor?: IconResolver;
 }): MemberReportDay[] {
   const iconFor = input.iconFor ?? appIconUrl;
+  const entries = capOpenEntries(input.entries, input.samples, input.now);
   const segments: TimesheetSegmentInput[] = [];
   const nowMs = input.now.getTime();
-  for (const e of input.entries) {
+  for (const e of entries) {
     for (const s of e.segments) {
       segments.push({
         userId: e.userId,
@@ -194,7 +197,7 @@ export function buildMemberReportDays(input: {
     }
     const dayStart = win.start.getTime();
     const dayEnd = win.end.getTime();
-    const dayEntries = input.entries.filter((e) =>
+    const dayEntries = entries.filter((e) =>
       e.segments.some((s) => overlaps(s.startedAt.getTime(), (s.endedAt ?? input.now).getTime(), dayStart, dayEnd)),
     );
     const dayPending = input.manualRequests.filter((r) =>
@@ -294,6 +297,26 @@ export function buildMemberReportDays(input: {
       topApps,
     };
   });
+}
+
+function capOpenEntries(
+  entries: ReportTimeEntry[],
+  samples: ReportActivitySample[],
+  now: Date,
+): ReportTimeEntry[] {
+  const latest = latestSampleByEntry(samples);
+  return entries.map((entry) => ({
+    ...entry,
+    segments: entry.segments.map((segment) => ({
+      ...segment,
+      endedAt: cappedOpenEndedAt({
+        startedAt: segment.startedAt,
+        endedAt: segment.endedAt,
+        now,
+        latestSampleAt: latest.get(entry.id),
+      }),
+    })),
+  }));
 }
 
 export function buildMemberReportApps(input: {
