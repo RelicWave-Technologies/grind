@@ -1,0 +1,11 @@
+.git
+.turbo
+.context
+node_modules
+**/node_modules
+**/dist
+**/release
+**/.env*
+*.log
+.DS_Store
+

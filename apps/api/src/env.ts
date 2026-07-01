@@ -42,6 +42,7 @@ const EnvSchema = z.object({
   ALLOW_PASSWORD_LOGIN: z.enum(['true', 'false']).default('false'),
 
   // --- Screenshots (optional; direct URLs on Screenshot rows also work) ---
+  PUBLIC_APP_URL: z.string().url().optional(),
   SCREENSHOT_ASSET_BASE_URL: z.string().url().optional(),
   SCREENSHOT_URL_SIGNING_SECRET: z.string().min(16).optional(),
 
@@ -53,6 +54,16 @@ const EnvSchema = z.object({
   CLOUDINARY_API_SECRET: z.string().min(1).optional(),
   // Folder screenshots land in. Defaults to "grind/screenshots".
   CLOUDINARY_FOLDER: z.string().min(1).default('grind/screenshots'),
+
+  // --- Google Drive (screenshot storage) ---
+  // When configured, /v1/screenshots/sign returns a Grind upload URL that the
+  // existing agent posts to with its Cloudinary-shaped multipart body. The API
+  // stores bytes in Drive using this service account.
+  GOOGLE_DRIVE_CLIENT_EMAIL: z.string().email().optional(),
+  GOOGLE_DRIVE_PRIVATE_KEY: z.string().min(1).optional(),
+  GOOGLE_DRIVE_PRIVATE_KEY_BASE64: z.string().min(1).optional(),
+  GOOGLE_DRIVE_FOLDER_ID: z.string().min(1).optional(),
+  GOOGLE_DRIVE_SHARED_DRIVE_ID: z.string().min(1).optional(),
 });
 
 const parsed = EnvSchema.safeParse(process.env);

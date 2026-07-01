@@ -1,0 +1,23 @@
+FROM node:20.18-bookworm-slim AS build
+
+WORKDIR /app
+
+ENV COREPACK_DEFAULT_TO_LATEST=0
+RUN corepack enable && corepack prepare pnpm@9.12.0 --activate
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json tsconfig.base.json .npmrc ./
+COPY packages ./packages
+COPY apps/dashboard ./apps/dashboard
+
+RUN NODE_ENV=development pnpm install --frozen-lockfile --filter @grind/dashboard...
+ARG VITE_API_BASE=
+ENV VITE_API_BASE=${VITE_API_BASE}
+RUN pnpm --filter @grind/dashboard build
+
+FROM nginx:1.27-alpine
+
+COPY infra/vps/dashboard-nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /app/apps/dashboard/dist /usr/share/nginx/html
+
+EXPOSE 80
+
