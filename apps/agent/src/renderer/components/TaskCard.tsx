@@ -1,6 +1,7 @@
 import { Play, Square, ListTodo, Clock, CalendarClock, User } from 'lucide-react';
 import { projectStyle } from '../lib/projectStyle';
 import { dueInfo, fmtDate, fmtDuration, type LarkTaskItem } from '../lib/taskFormat';
+import { taskTimerAction, taskTimerLabel, taskTimerState } from '../lib/timerUi';
 
 /**
  * A single Lark task row. Click to start tracking (or stop, if it's the one
@@ -11,24 +12,36 @@ export default function TaskCard({
   task,
   now,
   running,
+  paused,
   disabled,
   onStart,
   onStop,
+  onResume,
 }: {
   task: LarkTaskItem;
   now: number;
   running: boolean;
+  paused?: boolean;
   disabled?: boolean;
   onStart: (guid: string) => void;
   onStop: () => void;
+  onResume?: () => void;
 }) {
   const st = projectStyle(task.guid);
   const due = task.due != null ? dueInfo(task.due, now) : null;
+  const timerState = taskTimerState({ running, paused });
+  const timerAction = taskTimerAction(timerState);
+  const timerLabel = taskTimerLabel(timerState);
+  const loggedTodayMs = task.loggedTodayMs ?? task.loggedMs;
 
   return (
     <button
       className={`task${running ? ' task-running' : ''}`}
-      onClick={() => (running ? onStop() : onStart(task.guid))}
+      onClick={() => {
+        if (timerAction === 'stop') onStop();
+        else if (timerAction === 'resume' && onResume) onResume();
+        else onStart(task.guid);
+      }}
       disabled={disabled}
     >
       <span className="task-icon" style={{ background: st.color }}>
@@ -45,21 +58,25 @@ export default function TaskCard({
           </span>
         )}
         <span className="task-tags">
-          {running && <span className="tag tag-chip tag-live"><span className="live-dot" /> Tracking</span>}
+          {timerLabel && (
+            <span className={`tag tag-chip ${timerState === 'paused' ? 'tag-paused' : 'tag-live'}`}>
+              <span className={timerState === 'paused' ? 'pause-dot' : 'live-dot'} /> {timerLabel}
+            </span>
+          )}
           {due && (
             <span className={`tag tag-chip due-${due.tone}`}>
               <CalendarClock size={11} strokeWidth={2.5} /> {due.label}
             </span>
           )}
-          {task.loggedMs > 0 && (
+          {loggedTodayMs > 0 && (
             <span className="tag tag-chip" style={{ background: 'var(--violet-tint)', color: 'var(--violet-700)' }}>
-              <Clock size={11} strokeWidth={2.5} /> {fmtDuration(task.loggedMs)}
+              <Clock size={11} strokeWidth={2.5} /> Today {fmtDuration(loggedTodayMs)}
             </span>
           )}
         </span>
       </span>
-      <span className={`task-play${running ? ' stop' : ''}`}>
-        {running ? <Square size={13} strokeWidth={2.5} fill="currentColor" /> : <Play size={15} strokeWidth={2.5} fill="currentColor" />}
+      <span className={`task-play${timerAction === 'stop' ? ' stop' : ''}${timerAction === 'resume' ? ' resume' : ''}`}>
+        {timerAction === 'stop' ? <Square size={13} strokeWidth={2.5} fill="currentColor" /> : <Play size={15} strokeWidth={2.5} fill="currentColor" />}
       </span>
     </button>
   );

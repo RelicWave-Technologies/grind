@@ -3,7 +3,7 @@ import type { BrowserWindow, Tray } from 'electron';
 import { createTray, setTrayTitle } from './tray';
 import { createMainWindow } from './window';
 import { registerIpc } from './ipc';
-import { startHeartbeatIfAuthed } from './services/heartbeat';
+import { sendHeartbeatNow, startHeartbeatIfAuthed } from './services/heartbeat';
 import { getTimerService, initTimerOnBoot } from './services/timer';
 import { startCaptureLoop } from './services/capture';
 import { startActivityCapture, setActivityRecording, flushPartialActivity } from './services/activity';
@@ -132,6 +132,7 @@ app.whenReady().then(async () => {
       log.warn('pauseForIdle failed', { err: String(err) });
     }
     broadcast('timer:status:push', getTimerService().status());
+    sendHeartbeatNow();
     showIdlePrompt();
   });
   idleMonitor.start();
@@ -139,7 +140,7 @@ app.whenReady().then(async () => {
   ipcMain.handle('idle:get', () => ({ idleStartedAt: idleMonitor.getIdleStart() }));
   ipcMain.handle('idle:resolve', async (_e, action: 'continue' | 'break') => {
     try {
-      if (action === 'continue') await getTimerService().resumeFromIdle(Date.now());
+      if (action === 'continue') await getTimerService().resume();
       else await getTimerService().stop();
     } catch (err) {
       log.warn('idle resolve failed', { action, err: String(err) });
@@ -147,6 +148,7 @@ app.whenReady().then(async () => {
     idleMonitor.resolve();
     hideIdlePrompt();
     broadcast('timer:status:push', getTimerService().status());
+    sendHeartbeatNow();
     refreshUpdateInstallability();
   });
 

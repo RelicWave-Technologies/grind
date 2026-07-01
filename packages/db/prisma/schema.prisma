@@ -121,6 +121,13 @@ enum Role {
   MEMBER
 }
 
+enum AgentRuntimeState {
+  IDLE
+  RUNNING
+  PAUSED_IDLE
+  OFFLINE
+}
+
 /// A team groups MEMBERs under a MANAGER. Manager-scoped queries
 /// (timesheets, approvals, screenshots) only return rows whose user
 /// belongs to a team the caller manages. Optional — workspaces can
@@ -220,6 +227,13 @@ model User {
   /// Per-member idle-threshold OVERRIDE in minutes. NULL = inherit the
   /// workspace policy default (WorkspacePolicy.defaultIdleThresholdMin).
   idleThresholdMin      Int?
+  /// Last heartbeat received from the desktop agent. Overview uses this as the
+  /// live-status source of truth instead of inferring "green" from open rows.
+  agentLastSeenAt       DateTime?
+  agentState            AgentRuntimeState @default(OFFLINE)
+  agentVersion          String?
+  agentPlatform         String?
+  agentActiveEntryId    String?
 
   refreshTokens   RefreshToken[]
   timeEntries     TimeEntry[]
@@ -245,6 +259,7 @@ model User {
   @@index([teamId])
   @@index([managerId])
   @@index([shiftId])
+  @@index([workspaceId, agentState, agentLastSeenAt])
 }
 
 /// Historical shift assignment snapshots. User.shiftId is the current

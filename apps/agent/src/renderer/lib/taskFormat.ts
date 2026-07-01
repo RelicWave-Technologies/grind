@@ -35,6 +35,8 @@ export type LarkTaskItem = {
   creatorId: string | null;
   creatorName: string | null;
   loggedMs: number;
+  loggedTodayMs?: number;
+  loggedTotalMs?: number;
 };
 
 /** Sort: running first, then due (soonest), newest-created, most-tracked, name. */
@@ -50,7 +52,9 @@ export function sortTasks(tasks: LarkTaskItem[], runningGuid: string | null): La
     const ac = a.createdAt ?? 0;
     const bc = b.createdAt ?? 0;
     if (bc !== ac) return bc - ac;
-    if (b.loggedMs !== a.loggedMs) return b.loggedMs - a.loggedMs;
+    const at = a.loggedTodayMs ?? a.loggedMs;
+    const bt = b.loggedTodayMs ?? b.loggedMs;
+    if (bt !== at) return bt - at;
     return a.summary.localeCompare(b.summary);
   });
 }

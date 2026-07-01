@@ -1,4 +1,5 @@
 import { getLarkConfig } from './config';
+import { cappedOpenEndedAt } from '../insights/openSegmentEvidence';
 
 /**
  * Lark Task v2 — fetch the signed-in user's tasks for the agent's task picker.
@@ -24,6 +25,10 @@ export interface LarkTaskDto {
   creatorName: string | null;
   /** Time already tracked against this task via Grind (epoch ms duration). Filled by the route. */
   loggedMs: number;
+  /** Time tracked against this task in the requested day window. Filled by the route. */
+  loggedTodayMs: number;
+  /** Total time tracked against this task across all entries. Filled by the route. */
+  loggedTotalMs: number;
 }
 
 export interface CreateLarkTaskInput {
@@ -102,6 +107,8 @@ export function mapTasks(items: RawLarkTask[] | undefined): LarkTaskDto[] {
       creatorId: t.creator?.id ?? null,
       creatorName: null,
       loggedMs: 0,
+      loggedTodayMs: 0,
+      loggedTotalMs: 0,
     });
   }
   return out;
@@ -123,16 +130,33 @@ export function buildCreateTaskPayload(input: CreateLarkTaskInput): Record<strin
 
 /** Worked duration (WORK/MEETING segments) per larkTaskGuid, summed across entries. */
 export function loggedMsByGuid(
-  entries: Array<{ larkTaskGuid: string | null; segments: Array<{ kind: string; startedAt: Date; endedAt: Date | null }> }>,
+  entries: Array<{ id?: string; larkTaskGuid: string | null; segments: Array<{ kind: string; startedAt: Date; endedAt: Date | null }> }>,
   now: number,
+  options: {
+    windowStart?: number;
+    windowEnd?: number;
+    latestSampleAt?: Map<string, Date>;
+  } = {},
 ): Map<string, number> {
   const out = new Map<string, number>();
+  const windowStart = options.windowStart ?? Number.NEGATIVE_INFINITY;
+  const windowEnd = options.windowEnd ?? now;
+  const nowDate = new Date(now);
   for (const e of entries) {
     if (!e.larkTaskGuid) continue;
     let ms = 0;
     for (const s of e.segments) {
       if (s.kind === 'WORK' || s.kind === 'MEETING') {
-        ms += (s.endedAt ? s.endedAt.getTime() : now) - s.startedAt.getTime();
+        const capped = cappedOpenEndedAt({
+          startedAt: s.startedAt,
+          endedAt: s.endedAt,
+          now: nowDate,
+          latestSampleAt: e.id ? options.latestSampleAt?.get(e.id) : null,
+        });
+        const rawEnd = capped ? capped.getTime() : now;
+        const start = Math.max(s.startedAt.getTime(), windowStart);
+        const end = Math.min(rawEnd, windowEnd);
+        if (end > start) ms += end - start;
       }
     }
     out.set(e.larkTaskGuid, (out.get(e.larkTaskGuid) ?? 0) + Math.max(0, ms));

@@ -101,6 +101,14 @@ export class TimerService {
     return this.status();
   }
 
+  /** Resume a paused open entry. No-op when idle or already accruing. */
+  async resume(): Promise<TimerStatus> {
+    if (!this.open) return this.status();
+    if (getOpenSegment(this.open)) return this.status();
+    await this.resumeFromIdle(this.clock.now());
+    return this.status();
+  }
+
   /**
    * Idle detected: PAUSE by closing the open WORK segment at `at` (the moment
    * the user went idle). Worked time freezes there; the idle gap is simply not

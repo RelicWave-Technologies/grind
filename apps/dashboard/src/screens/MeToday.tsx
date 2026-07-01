@@ -125,6 +125,7 @@ export function MeTodayScreen() {
       if (targetUserId !== me.id) params.set('userId', targetUserId);
       return api<DayInsight>(`/v1/insights/day?${params.toString()}`);
     },
+    refetchInterval: date === todayKey() ? 15_000 : false,
   });
 
   const invalidate = useCallback(() => {

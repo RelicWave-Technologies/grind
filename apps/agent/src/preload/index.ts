@@ -55,6 +55,7 @@ const api = {
     start: (larkTaskGuid?: string | null): Promise<TimerStatus> =>
       ipcRenderer.invoke('timer:start', { larkTaskGuid }),
     stop: (): Promise<TimerStatus> => ipcRenderer.invoke('timer:stop'),
+    resume: (): Promise<TimerStatus> => ipcRenderer.invoke('timer:resume'),
     status: (): Promise<TimerStatus> => ipcRenderer.invoke('timer:status'),
     today: (): Promise<TodayEntry[]> => ipcRenderer.invoke('timer:today'),
     onStatusChange: (cb: (s: TimerStatus) => void): (() => void) => {
@@ -135,9 +136,9 @@ const api = {
       ipcRenderer.invoke('lark:status'),
     connect: (): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('lark:connect'),
     disconnect: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('lark:disconnect'),
-    tasks: (): Promise<{ tasks: { guid: string; summary: string; completed: boolean; url?: string; due: number | null; createdAt: number | null; creatorId: string | null; creatorName: string | null; loggedMs: number }[]; reauthRequired: boolean }> =>
+    tasks: (): Promise<{ tasks: { guid: string; summary: string; completed: boolean; url?: string; due: number | null; createdAt: number | null; creatorId: string | null; creatorName: string | null; loggedMs: number; loggedTodayMs: number; loggedTotalMs: number }[]; reauthRequired: boolean }> =>
       ipcRenderer.invoke('lark:tasks'),
-    sync: (): Promise<{ ok: boolean; connected: boolean; reauthRequired: boolean; tasks: { guid: string; summary: string; completed: boolean; url?: string; due: number | null; createdAt: number | null; creatorId: string | null; creatorName: string | null; loggedMs: number }[]; syncedAt: number | null; error?: string }> =>
+    sync: (): Promise<{ ok: boolean; connected: boolean; reauthRequired: boolean; tasks: { guid: string; summary: string; completed: boolean; url?: string; due: number | null; createdAt: number | null; creatorId: string | null; creatorName: string | null; loggedMs: number; loggedTodayMs: number; loggedTotalMs: number }[]; syncedAt: number | null; error?: string }> =>
       ipcRenderer.invoke('lark:sync'),
     createTask: (input: { summary: string; due?: number | null; description?: string | null }): Promise<{ ok: boolean; error?: string }> =>
       ipcRenderer.invoke('lark:createTask', input),

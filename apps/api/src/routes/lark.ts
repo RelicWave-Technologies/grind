@@ -18,6 +18,8 @@ import {
   LarkTransientError,
   LarkTaskApiError,
 } from '../lark';
+import { localDayWindow } from '../insights/day';
+import { latestSampleByEntry } from '../insights/openSegmentEvidence';
 
 export const larkRouter = Router();
 
@@ -138,15 +140,43 @@ larkRouter.get('/my-tasks', async (req, res, next) => {
       throw err;
     }
     const tasks = await client.listMyTasks(accessToken);
+    const nowMs = Date.now();
+    const rawDate = typeof req.query.date === 'string' && req.query.date.length > 0 ? req.query.date : null;
+    const rawTz = typeof req.query.tz === 'string' && req.query.tz.length > 0 ? req.query.tz : null;
+    const dayWindow = rawDate || rawTz ? localDayWindow(rawDate ?? new Date(nowMs).toISOString().slice(0, 10), rawTz ?? 'UTC') : null;
+    if ((rawDate || rawTz) && !dayWindow) return res.status(400).json({ error: 'invalid_date_or_tz' });
+
     // Enrich with time already tracked against each task via Grind.
     const guids = tasks.map((t) => t.guid);
     if (guids.length) {
       const entries = await prisma.timeEntry.findMany({
         where: { userId: req.user.sub, larkTaskGuid: { in: guids } },
-        select: { larkTaskGuid: true, segments: { select: { kind: true, startedAt: true, endedAt: true } } },
+        select: { id: true, larkTaskGuid: true, segments: { select: { kind: true, startedAt: true, endedAt: true } } },
       });
-      const logged = loggedMsByGuid(entries, Date.now());
-      for (const t of tasks) t.loggedMs = logged.get(t.guid) ?? 0;
+      const openEntryIds = entries
+        .filter((e) => e.segments.some((s) => s.endedAt === null))
+        .map((e) => e.id);
+      const samples = openEntryIds.length
+        ? await prisma.activitySample.findMany({
+            where: { userId: req.user.sub, timeEntryId: { in: openEntryIds } },
+            select: { timeEntryId: true, bucketStart: true },
+            orderBy: { bucketStart: 'asc' },
+          })
+        : [];
+      const latestSampleAt = latestSampleByEntry(samples);
+      const loggedTotal = loggedMsByGuid(entries, nowMs, { latestSampleAt });
+      const loggedToday = dayWindow
+        ? loggedMsByGuid(entries, nowMs, {
+            latestSampleAt,
+            windowStart: dayWindow.start.getTime(),
+            windowEnd: dayWindow.end.getTime(),
+          })
+        : loggedTotal;
+      for (const t of tasks) {
+        t.loggedTodayMs = loggedToday.get(t.guid) ?? 0;
+        t.loggedTotalMs = loggedTotal.get(t.guid) ?? 0;
+        t.loggedMs = dayWindow ? t.loggedTodayMs : t.loggedTotalMs;
+      }
     }
     // Resolve creator display names (best-effort; needs a tenant token + contact scope).
     const tenant = getTenantClient();

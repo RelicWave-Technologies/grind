@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Square, Clock, ListTodo, Link2, Search, Plus, X } from 'lucide-react';
+import { Play, Square, Clock, ListTodo, Link2, Search, Plus, X } from 'lucide-react';
 import type { TimerStatus } from '../lib/agent.d';
 import { projectStyle } from '../lib/projectStyle';
 import { sortTasks } from '../lib/taskFormat';
@@ -64,6 +64,13 @@ export default function Today() {
       void qc.invalidateQueries({ queryKey: ['today'] });
     },
   });
+  const resume = useMutation({
+    mutationFn: () => window.agent.timer.resume(),
+    onSuccess: (s) => {
+      setTimer(s);
+      void qc.invalidateQueries({ queryKey: ['today'] });
+    },
+  });
   const connectLark = useMutation({ mutationFn: () => window.agent.lark.connect() });
 
   const onCreated = (summary: string) => {
@@ -90,6 +97,7 @@ export default function Today() {
   const shownTasks = collapsed ? openTasks.slice(0, TASK_COLLAPSE) : openTasks;
 
   const heroColor = running?.larkTaskGuid ? projectStyle(running.larkTaskGuid).color : 'var(--violet)';
+  const isPaused = !!running?.paused;
 
   return (
     <>
@@ -105,16 +113,23 @@ export default function Today() {
               <div className="hero-time tabular">{fmtClock(timer.workedMs)}</div>
               <div className="hero-proj">
                 {running ? (
-                  <><i className="dt-dot" style={{ background: heroColor }} />{runningTask?.summary ?? 'Tracking'}{running.paused ? ' · paused' : ''}</>
+                  <><i className="dt-dot" style={{ background: heroColor }} />{runningTask?.summary ?? 'Tracking'}{isPaused ? ' · paused, time not counting' : ''}</>
                 ) : (
                   <><Clock size={14} /> No timer running</>
                 )}
               </div>
             </div>
             {running && (
-              <button className="hero-stop no-drag" onClick={() => stop.mutate()} disabled={stop.isPending} title="Stop">
-                <Square size={16} strokeWidth={2.5} fill="currentColor" /> Stop
-              </button>
+              <div className="hero-actions">
+                {isPaused && (
+                  <button className="hero-resume no-drag" onClick={() => resume.mutate()} disabled={resume.isPending} title="Resume tracking">
+                    <Play size={16} strokeWidth={2.5} fill="currentColor" /> Resume
+                  </button>
+                )}
+                <button className="hero-stop no-drag" onClick={() => stop.mutate()} disabled={stop.isPending} title="Stop">
+                  <Square size={16} strokeWidth={2.5} fill="currentColor" /> Stop
+                </button>
+              </div>
             )}
           </div>
 
@@ -185,9 +200,11 @@ export default function Today() {
                     task={t}
                     now={now}
                     running={!!running && running.larkTaskGuid === t.guid}
-                    disabled={start.isPending || stop.isPending}
+                    paused={!!running && running.larkTaskGuid === t.guid && running.paused}
+                    disabled={start.isPending || stop.isPending || resume.isPending}
                     onStart={(g) => start.mutate(g)}
                     onStop={() => stop.mutate()}
+                    onResume={() => resume.mutate()}
                   />
                 ))}
               </div>

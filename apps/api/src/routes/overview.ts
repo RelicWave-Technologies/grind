@@ -3,7 +3,7 @@ import { prisma } from '@grind/db';
 import { requireAccessToken } from '../middleware/auth';
 import { attachScope, requireManagerOrAbove } from '../middleware/scope';
 import { localDayWindow } from '../insights/day';
-import { cappedOpenEndedAt, latestSampleByEntry, openSegmentIsFresh } from '../insights/openSegmentEvidence';
+import { cappedOpenEndedAt, latestSampleByEntry } from '../insights/openSegmentEvidence';
 import { DEFAULT_STUCK_THRESHOLD_MS } from '../digests/pendingDigest';
 
 /**
@@ -21,6 +21,7 @@ export const overviewRouter = Router();
 overviewRouter.use(requireAccessToken, attachScope, requireManagerOrAbove);
 
 const HOUR = 60 * 60 * 1000;
+const AGENT_HEARTBEAT_FRESH_MS = 3 * 60 * 1000;
 
 interface OverviewRecentItem {
   id: string;
@@ -120,6 +121,18 @@ overviewRouter.get('/', async (req, res, next) => {
           orderBy: { bucketStart: 'asc' },
         });
     const latestSampleAt = latestSampleByEntry(activitySamples);
+    const liveHeartbeatRows = userIds.length === 0
+      ? []
+      : await prisma.user.findMany({
+          where: {
+            id: { in: userIds },
+            workspaceId: ws,
+            deactivatedAt: null,
+            agentState: 'RUNNING',
+            agentLastSeenAt: { gte: new Date(now.getTime() - AGENT_HEARTBEAT_FRESH_MS) },
+          },
+          select: { id: true },
+        });
 
     const dayStart = win.start.getTime();
     const dayEnd = win.end.getTime();
@@ -128,7 +141,7 @@ overviewRouter.get('/', async (req, res, next) => {
     let meetingMs = 0;
     let manualMs = 0;
     const usersWithTime = new Set<string>();
-    const usersTrackingNow = new Set<string>();
+    const usersTrackingNow = new Set(liveHeartbeatRows.map((u) => u.id));
     for (const s of segs) {
       const a = Math.max(dayStart, s.startedAt.getTime());
       const effectiveEndedAt = cappedOpenEndedAt({
@@ -141,18 +154,6 @@ overviewRouter.get('/', async (req, res, next) => {
       const dur = b - a;
       if (dur <= 0) continue;
       usersWithTime.add(s.timeEntry.userId);
-      if (
-        s.timeEntry.source === 'AUTO' &&
-        (s.kind === 'WORK' || s.kind === 'MEETING') &&
-        openSegmentIsFresh({
-          startedAt: s.startedAt,
-          endedAt: s.endedAt,
-          now,
-          latestSampleAt: latestSampleAt.get(s.timeEntry.id),
-        })
-      ) {
-        usersTrackingNow.add(s.timeEntry.userId);
-      }
       if (s.timeEntry.source === 'MANUAL') manualMs += dur;
       else if (s.kind === 'MEETING') meetingMs += dur;
       else if (s.kind === 'WORK') workedMs += dur;
@@ -257,9 +258,6 @@ overviewRouter.get('/', async (req, res, next) => {
         decidedReason: r.decidedReason,
       })),
     };
-
-    // Workspace id is used implicitly via scope.userIds; suppress unused warning
-    void ws;
 
     res.json(payload);
   } catch (err) {

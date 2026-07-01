@@ -1,6 +1,6 @@
 {
   "name": "@grind/agent",
-  "version": "0.0.2-beta.13",
+  "version": "0.0.2-beta.14",
   "private": true,
   "type": "module",
   "description": "Grind time tracker desktop agent",

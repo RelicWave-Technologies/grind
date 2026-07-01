@@ -14,9 +14,27 @@ function dashboardOrigin(): string {
   return (env.DASHBOARD_URL ?? '').split(',')[0]?.trim().replace(/\/$/u, '') ?? '';
 }
 
-agentRouter.post('/heartbeat', validate(HeartbeatRequest, 'body'), (_req, res) => {
-  const response: HeartbeatResponse = { ok: true, serverTime: new Date().toISOString() };
-  res.json(response);
+agentRouter.post('/heartbeat', validate(HeartbeatRequest, 'body'), async (req, res, next) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: 'unauthorized' });
+    const body = req.body as HeartbeatRequest;
+    const now = new Date();
+    const updated = await prisma.user.updateMany({
+      where: { id: req.user.sub, workspaceId: req.user.ws, deactivatedAt: null },
+      data: {
+        agentLastSeenAt: now,
+        agentState: body.state,
+        agentVersion: body.agentVersion,
+        agentPlatform: body.platform,
+        agentActiveEntryId: body.activeEntryId ?? null,
+      },
+    });
+    if (updated.count === 0) return res.status(401).json({ error: 'unauthorized' });
+    const response: HeartbeatResponse = { ok: true, serverTime: now.toISOString() };
+    res.json(response);
+  } catch (err) {
+    next(err);
+  }
 });
 
 agentRouter.get('/config', async (req, res, next) => {

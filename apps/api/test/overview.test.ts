@@ -88,6 +88,24 @@ async function seedOpenSegment(opts: {
   });
 }
 
+async function setAgentHeartbeat(opts: {
+  userId: string;
+  state: 'IDLE' | 'RUNNING' | 'PAUSED_IDLE' | 'OFFLINE';
+  ageMs?: number;
+  activeEntryId?: string | null;
+}) {
+  await prisma.user.update({
+    where: { id: opts.userId },
+    data: {
+      agentState: opts.state,
+      agentLastSeenAt: new Date(Date.now() - (opts.ageMs ?? 0)),
+      agentVersion: 'test-agent',
+      agentPlatform: 'darwin',
+      agentActiveEntryId: opts.activeEntryId ?? null,
+    },
+  });
+}
+
 async function pending(userId: string, ageMs: number) {
   const now = Date.now();
   const start = now - ageMs - 2 * HOUR;
@@ -150,16 +168,50 @@ describe('GET /v1/admin/overview', () => {
     expect(res.body.today.workedHours).toBeGreaterThan(0);
   });
 
-  it('counts only open auto work/meeting segments as tracking now', async () => {
+  it('counts fresh RUNNING heartbeats as tracking now', async () => {
     const { admin, m1, m2 } = await seed();
     const slot = pastSlot(0, 15 * MIN);
     await seedSegment({ userId: m1.id, source: 'AUTO', kind: 'WORK', ...slot });
-    await seedOpenSegment({ userId: m2.id, startedAt: new Date(Date.now() - 5 * MIN) });
+    const open = await seedOpenSegment({ userId: m2.id, startedAt: new Date(Date.now() - 5 * MIN) });
+    await setAgentHeartbeat({ userId: m2.id, state: 'RUNNING', activeEntryId: open.id });
 
     const res = await request(app).get('/v1/admin/overview?tz=UTC').set(bearer(admin.token));
     expect(res.status).toBe(200);
     expect(res.body.today.activeUsers).toBe(2);
     expect(res.body.today.trackingUsers).toBe(1);
+  });
+
+  it('does not show paused users as tracking even with a fresh open segment', async () => {
+    const { admin, m1 } = await seed();
+    const open = await seedOpenSegment({ userId: m1.id, startedAt: new Date(Date.now() - 2 * MIN) });
+    await prisma.activitySample.create({
+      data: {
+        id: ulid(),
+        userId: m1.id,
+        timeEntryId: open.id,
+        bucketStart: new Date(Math.floor((Date.now() - MIN) / MIN) * MIN),
+        keystrokes: 5,
+        clicks: 1,
+        mouseDistancePx: 20,
+        scrollEvents: 0,
+      },
+    });
+    await setAgentHeartbeat({ userId: m1.id, state: 'PAUSED_IDLE', activeEntryId: open.id });
+
+    const res = await request(app).get('/v1/admin/overview?tz=UTC').set(bearer(admin.token));
+    expect(res.status).toBe(200);
+    expect(res.body.today.activeUsers).toBe(1);
+    expect(res.body.today.trackingUsers).toBe(0);
+    expect(res.body.today.workedHours).toBeGreaterThan(0);
+  });
+
+  it('does not show stale RUNNING heartbeats as tracking', async () => {
+    const { admin, m1 } = await seed();
+    await setAgentHeartbeat({ userId: m1.id, state: 'RUNNING', ageMs: 5 * MIN, activeEntryId: 'old-entry' });
+
+    const res = await request(app).get('/v1/admin/overview?tz=UTC').set(bearer(admin.token));
+    expect(res.status).toBe(200);
+    expect(res.body.today.trackingUsers).toBe(0);
   });
 
   it('does not treat a stale open segment with no activity as live tracked time', async () => {

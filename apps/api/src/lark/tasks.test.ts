@@ -13,8 +13,8 @@ describe('mapTasks', () => {
       { guid: 'g2', summary: 'Ship M9', completed_at: '1700000000000' },
     ];
     expect(mapTasks(raw)).toEqual([
-      { guid: 'g1', summary: 'Write tests', completed: false, url: 'https://lark/g1', due: null, createdAt: null, creatorId: null, creatorName: null, loggedMs: 0 },
-      { guid: 'g2', summary: 'Ship M9', completed: true, url: undefined, due: null, createdAt: null, creatorId: null, creatorName: null, loggedMs: 0 },
+      { guid: 'g1', summary: 'Write tests', completed: false, url: 'https://lark/g1', due: null, createdAt: null, creatorId: null, creatorName: null, loggedMs: 0, loggedTodayMs: 0, loggedTotalMs: 0 },
+      { guid: 'g2', summary: 'Ship M9', completed: true, url: undefined, due: null, createdAt: null, creatorId: null, creatorName: null, loggedMs: 0, loggedTodayMs: 0, loggedTotalMs: 0 },
     ]);
   });
 
@@ -78,6 +78,38 @@ describe('loggedMsByGuid', () => {
   it('skips entries without a guid', () => {
     const m = loggedMsByGuid([{ larkTaskGuid: null, segments: [{ kind: 'WORK', startedAt: d(0), endedAt: d(1000) }] }], now);
     expect(m.size).toBe(0);
+  });
+
+  it('clips durations to a requested day window', () => {
+    const entries = [
+      {
+        larkTaskGuid: 'a',
+        segments: [
+          { kind: 'WORK', startedAt: d(now - 90 * 60_000), endedAt: d(now - 45 * 60_000) },
+          { kind: 'MEETING', startedAt: d(now - 40 * 60_000), endedAt: d(now - 20 * 60_000) },
+        ],
+      },
+    ];
+
+    const m = loggedMsByGuid(entries, now, {
+      windowStart: now - 60 * 60_000,
+      windowEnd: now - 30 * 60_000,
+    });
+
+    expect(m.get('a')).toBe(25 * 60_000);
+  });
+
+  it('caps stale open segments at latest activity evidence instead of now', () => {
+    const entries = [
+      { id: 'e1', larkTaskGuid: 'a', segments: [{ kind: 'WORK', startedAt: d(now - 30 * 60_000), endedAt: null }] },
+      { id: 'e2', larkTaskGuid: 'b', segments: [{ kind: 'WORK', startedAt: d(now - 30 * 60_000), endedAt: null }] },
+    ];
+
+    const latestSampleAt = new Map<string, Date>([['e1', d(now - 20 * 60_000)]]);
+    const m = loggedMsByGuid(entries, now, { latestSampleAt });
+
+    expect(m.get('a')).toBe(11 * 60_000);
+    expect(m.get('b')).toBe(0);
   });
 });
 

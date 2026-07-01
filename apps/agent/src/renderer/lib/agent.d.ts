@@ -41,6 +41,7 @@ declare global {
       timer: {
         start: (larkTaskGuid?: string | null) => Promise<TimerStatus>;
         stop: () => Promise<TimerStatus>;
+        resume: () => Promise<TimerStatus>;
         status: () => Promise<TimerStatus>;
         today: () => Promise<TodayEntry[]>;
         onStatusChange: (cb: (s: TimerStatus) => void) => () => void;
@@ -99,8 +100,8 @@ declare global {
         status: () => Promise<{ configured: boolean; connected: boolean; reauthRequired: boolean; scopes: string[]; missingScopes?: string[] }>;
         connect: () => Promise<{ ok: boolean; error?: string }>;
         disconnect: () => Promise<{ ok: boolean }>;
-        tasks: () => Promise<{ tasks: { guid: string; summary: string; completed: boolean; url?: string; due: number | null; createdAt: number | null; creatorId: string | null; creatorName: string | null; loggedMs: number }[]; reauthRequired: boolean }>;
-        sync: () => Promise<{ ok: boolean; connected: boolean; reauthRequired: boolean; tasks: { guid: string; summary: string; completed: boolean; url?: string; due: number | null; createdAt: number | null; creatorId: string | null; creatorName: string | null; loggedMs: number }[]; syncedAt: number | null; error?: string }>;
+        tasks: () => Promise<{ tasks: { guid: string; summary: string; completed: boolean; url?: string; due: number | null; createdAt: number | null; creatorId: string | null; creatorName: string | null; loggedMs: number; loggedTodayMs: number; loggedTotalMs: number }[]; reauthRequired: boolean }>;
+        sync: () => Promise<{ ok: boolean; connected: boolean; reauthRequired: boolean; tasks: { guid: string; summary: string; completed: boolean; url?: string; due: number | null; createdAt: number | null; creatorId: string | null; creatorName: string | null; loggedMs: number; loggedTodayMs: number; loggedTotalMs: number }[]; syncedAt: number | null; error?: string }>;
         createTask: (input: { summary: string; due?: number | null; description?: string | null }) => Promise<{ ok: boolean; error?: string }>;
       };
     };

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Square, GripVertical } from 'lucide-react';
+import { Play, Square, GripVertical } from 'lucide-react';
 import type { TimerStatus } from '../lib/agent.d';
 import { projectStyle } from '../lib/projectStyle';
 import { fmtClock } from './Today';
@@ -18,6 +18,12 @@ export default function FloatingBar() {
   if (timer.state !== 'RUNNING') return <div className="fbar" />;
   const task = timer.larkTaskGuid ? larkTasks.data?.tasks.find((t) => t.guid === timer.larkTaskGuid) : undefined;
   const st = timer.larkTaskGuid ? projectStyle(timer.larkTaskGuid) : null;
+  const resume = () => {
+    void window.agent.timer.resume().then(setTimer);
+  };
+  const stop = () => {
+    void window.agent.timer.stop().then(setTimer);
+  };
 
   // The grip is the drag region; the rest is clickable (double-click opens app).
   return (
@@ -30,9 +36,14 @@ export default function FloatingBar() {
       >
         <span className="fbar-dot" style={{ background: st?.color ?? 'var(--violet)' }} />
         <span className="fbar-time tabular">{fmtClock(timer.workedMs)}</span>
-        <span className="fbar-proj">{task?.summary ?? 'Tracking'}</span>
+        <span className="fbar-proj">{task?.summary ?? 'Tracking'}{timer.paused ? ' · paused' : ''}</span>
       </button>
-      <button className="fbar-stop no-drag" title="Stop" onClick={() => window.agent.timer.stop()}>
+      {timer.paused && (
+        <button className="fbar-resume no-drag" title="Resume" onClick={resume}>
+          <Play size={13} strokeWidth={2.5} fill="currentColor" />
+        </button>
+      )}
+      <button className="fbar-stop no-drag" title="Stop" onClick={stop}>
         <Square size={13} strokeWidth={2.5} fill="currentColor" />
       </button>
     </div>

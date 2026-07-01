@@ -1,24 +1,20 @@
-import type { HeartbeatRequest, HeartbeatResponse, Platform } from '@grind/types';
+import type { HeartbeatResponse } from '@grind/types';
 import { AGENT_VERSION, HEARTBEAT_INTERVAL_MS } from '../env';
 import { log } from '../logger';
 import { api, UnauthorizedError } from './apiClient';
 import { isLoggedIn } from './auth';
+import { getTimerService } from './timer';
+import { buildHeartbeatRequest, currentPlatform } from './heartbeatPayload';
 
 let timer: NodeJS.Timeout | null = null;
 let lastHeartbeatAt: string | null = null;
 
-function platform(): Platform {
-  if (process.platform === 'darwin') return 'darwin';
-  if (process.platform === 'win32') return 'win32';
-  return 'linux';
-}
-
 async function tick(): Promise<void> {
-  const body: HeartbeatRequest = {
+  const body = buildHeartbeatRequest({
     agentVersion: AGENT_VERSION,
-    platform: platform(),
-    state: 'IDLE',
-  };
+    platform: currentPlatform(),
+    timerStatus: getTimerService().status(),
+  });
   try {
     const res = await api<HeartbeatResponse>('/v1/agent/heartbeat', { method: 'POST', body });
     lastHeartbeatAt = res.serverTime;
@@ -31,6 +27,10 @@ async function tick(): Promise<void> {
       log.warn('heartbeat failed', { err: String(err) });
     }
   }
+}
+
+export function sendHeartbeatNow(): void {
+  void tick();
 }
 
 export function startHeartbeat(): void {

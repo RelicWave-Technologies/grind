@@ -266,6 +266,28 @@ describe('TimerService.pauseForIdle / resumeFromIdle', () => {
     if (s.state === 'RUNNING') expect(s.workedMs).toBe(8 * MIN); // 5 + 3, not the 10 idle
   });
 
+  it('resume is idempotent and only opens a segment when paused', async () => {
+    let idle = await svc.resume();
+    expect(idle.state).toBe('IDLE');
+    expect(sync.syncs).toHaveLength(0);
+
+    await svc.start({});
+    clock.advance(2 * MIN);
+    const alreadyRunning = await svc.resume();
+    expect(alreadyRunning).toMatchObject({ state: 'RUNNING', workedMs: 2 * MIN, paused: false });
+    expect(sync.syncs).toHaveLength(0);
+
+    await svc.pauseForIdle(clock.now());
+    clock.advance(8 * MIN);
+    const resumed = await svc.resume();
+    expect(resumed).toMatchObject({ state: 'RUNNING', workedMs: 2 * MIN, paused: false });
+    expect(sync.syncs).toHaveLength(2); // pause + resume
+
+    clock.advance(3 * MIN);
+    const after = svc.status();
+    if (after.state === 'RUNNING') expect(after.workedMs).toBe(5 * MIN);
+  });
+
   it('clamps pause time to the segment start (whole-segment idle)', async () => {
     await svc.start({});
     clock.advance(2 * MIN);

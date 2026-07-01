@@ -10,6 +10,7 @@ export const HeartbeatRequest = z.object({
   agentVersion: z.string(),
   platform: Platform,
   state: AgentState.default('IDLE'),
+  activeEntryId: z.string().min(1).nullable().optional(),
 });
 export type HeartbeatRequest = z.infer<typeof HeartbeatRequest>;
 

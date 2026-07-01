@@ -52,6 +52,7 @@ export function HomeScreen() {
   const dayQ = useQuery({
     queryKey: ['insights', 'day', today, tz, me.id],
     queryFn: () => api<DayInsight>(`/v1/insights/day?date=${today}&tz=${encodeURIComponent(tz)}`),
+    refetchInterval: 15_000,
   });
   const pendingApprovalsQ = useQuery({
     queryKey: ['time-requests', 'mine', 'PENDING', me.id],

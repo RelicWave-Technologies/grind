@@ -20,6 +20,8 @@ export type LarkTask = {
   creatorId: string | null;
   creatorName: string | null;
   loggedMs: number;
+  loggedTodayMs: number;
+  loggedTotalMs: number;
 };
 
 export type CreateTaskInput = { summary: string; due?: number | null; description?: string | null };
@@ -34,6 +36,22 @@ export type LarkSyncResult = {
 };
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+function todayKey(): string {
+  const d = new Date();
+  const year = d.getFullYear();
+  const month = `${d.getMonth() + 1}`.padStart(2, '0');
+  const day = `${d.getDate()}`.padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function myTasksPath(): string {
+  const params = new URLSearchParams({
+    date: todayKey(),
+    tz: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+  });
+  return `/v1/lark/my-tasks?${params.toString()}`;
+}
 
 function createTaskErrorMessage(raw: string): string {
   if (raw.includes('409')) return 'reauth_required';
@@ -84,7 +102,7 @@ export function registerLarkIpc(): void {
   // (or on reauth), so the UI can degrade quietly without throwing.
   ipcMain.handle('lark:tasks', async (): Promise<{ tasks: LarkTask[]; reauthRequired: boolean }> => {
     try {
-      const { tasks } = await api<{ tasks: LarkTask[] }>('/v1/lark/my-tasks');
+      const { tasks } = await api<{ tasks: LarkTask[] }>(myTasksPath());
       return { tasks, reauthRequired: false };
     } catch (err) {
       const msg = String(err);
@@ -109,7 +127,7 @@ export function registerLarkIpc(): void {
           return { ok: false, connected: false, reauthRequired: status.reauthRequired, ...empty };
         }
         // Backend refreshes the Lark token here if needed; 409 ⇒ reauth required.
-        const { tasks } = await api<{ tasks: LarkTask[] }>('/v1/lark/my-tasks');
+        const { tasks } = await api<{ tasks: LarkTask[] }>(myTasksPath());
         return { ok: true, connected: true, reauthRequired: false, tasks, syncedAt: Date.now() };
       } catch (err) {
         const msg = String(err);

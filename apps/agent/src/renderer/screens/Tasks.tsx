@@ -29,6 +29,7 @@ export default function Tasks() {
 
   const start = useMutation({ mutationFn: (guid: string) => window.agent.timer.start(guid), onSuccess: (s) => setTimer(s) });
   const stop = useMutation({ mutationFn: () => window.agent.timer.stop(), onSuccess: (s) => setTimer(s) });
+  const resume = useMutation({ mutationFn: () => window.agent.timer.resume(), onSuccess: (s) => setTimer(s) });
   const connectLark = useMutation({ mutationFn: () => window.agent.lark.connect() });
 
   const onCreated = (summary: string) => {
@@ -101,7 +102,17 @@ export default function Tasks() {
               ) : (
                 <div className="task-list">
                   {open.map((t) => (
-                    <TaskCard key={t.guid} task={t} now={now} running={!!running && running.larkTaskGuid === t.guid} disabled={start.isPending || stop.isPending} onStart={(g) => start.mutate(g)} onStop={() => stop.mutate()} />
+                    <TaskCard
+                      key={t.guid}
+                      task={t}
+                      now={now}
+                      running={!!running && running.larkTaskGuid === t.guid}
+                      paused={!!running && running.larkTaskGuid === t.guid && running.paused}
+                      disabled={start.isPending || stop.isPending || resume.isPending}
+                      onStart={(g) => start.mutate(g)}
+                      onStop={() => stop.mutate()}
+                      onResume={() => resume.mutate()}
+                    />
                   ))}
                 </div>
               )}
@@ -114,7 +125,7 @@ export default function Tasks() {
                   {showDone && (
                     <div className="task-list task-list-done">
                       {done.map((t) => (
-                        <TaskCard key={t.guid} task={t} now={now} running={false} disabled={start.isPending || stop.isPending} onStart={(g) => start.mutate(g)} onStop={() => stop.mutate()} />
+                        <TaskCard key={t.guid} task={t} now={now} running={false} disabled={start.isPending || stop.isPending || resume.isPending} onStart={(g) => start.mutate(g)} onStop={() => stop.mutate()} onResume={() => resume.mutate()} />
                       ))}
                     </div>
                   )}
