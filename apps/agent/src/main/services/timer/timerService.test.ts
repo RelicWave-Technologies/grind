@@ -267,7 +267,7 @@ describe('TimerService.pauseForIdle / resumeFromIdle', () => {
   });
 
   it('resume is idempotent and only opens a segment when paused', async () => {
-    let idle = await svc.resume();
+    const idle = await svc.resume();
     expect(idle.state).toBe('IDLE');
     expect(sync.syncs).toHaveLength(0);
 
