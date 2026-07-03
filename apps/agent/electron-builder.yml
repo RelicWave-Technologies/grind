@@ -1,4 +1,4 @@
-appId: com.emiactech.timo
+appId: com.relicwave.grind
 productName: Timo
 # timo:// custom scheme — the system browser redirects here after Lark login.
 protocols:
