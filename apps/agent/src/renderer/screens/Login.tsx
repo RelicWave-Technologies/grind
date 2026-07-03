@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ShieldCheck } from 'lucide-react';
-import timoMark from '../assets/timo-mark.svg';
+import timoMascot from '../assets/timo-mascot.png';
 
 /** Friendly copy for non-success Lark outcomes pushed from the main process. */
 const ERROR_COPY: Record<string, string> = {
@@ -51,7 +51,7 @@ export default function Login() {
     <div className="login">
       <div className="login-card">
         <div className="login-logo">
-          <img src={timoMark} alt="Timo" width={82} height={82} />
+          <img src={timoMascot} alt="Timo" width={82} height={82} />
         </div>
         <div className="login-title">
           <div className="h2">Sign in to Timo</div>

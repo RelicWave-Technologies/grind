@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Play, Square, ExternalLink, ListTodo } from 'lucide-react';
-import timoMark from '../assets/timo-mark.svg';
+import timoMascot from '../assets/timo-mascot.png';
 import type { TimerStatus } from '../lib/agent.d';
 import { projectStyle } from '../lib/projectStyle';
 import { fmtClock } from './Today';
@@ -29,7 +29,7 @@ export default function Popover() {
   return (
     <div className="pop">
       <div className="pop-head">
-        <span className="brand-mark" style={{ width: 26, height: 26 }}><img src={timoMark} alt="" /></span>
+        <span className="brand-mark" style={{ width: 32, height: 32 }}><img src={timoMascot} alt="" /></span>
         <span className="brand-name" style={{ fontSize: 14 }}>Timo</span>
         <button className="pop-open no-drag" title="Open Timo" onClick={() => window.agent.window.openMain()}>
           <ExternalLink size={15} strokeWidth={2} />

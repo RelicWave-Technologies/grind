@@ -193,7 +193,7 @@ body {
 .brand-mark, .login-mark {
   width: 28px; height: 28px;
   border-radius: 0;
-  background: transparent center / contain no-repeat url('/brand/timo-mark.svg');
+  background: transparent center / contain no-repeat url('/brand/timo-mascot.png');
   border: 0;
   box-shadow: var(--shadow-sm);
 }

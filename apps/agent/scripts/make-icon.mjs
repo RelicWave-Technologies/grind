@@ -11,15 +11,15 @@ import sharp from 'sharp';
 const execFileP = promisify(execFile);
 const here = path.dirname(fileURLToPath(import.meta.url));
 const buildDir = path.join(here, '..', 'build');
-const markPath = path.join(here, '..', 'src', 'renderer', 'assets', 'timo-mark.svg');
+const mascotPath = path.join(here, '..', 'src', 'renderer', 'assets', 'timo-mascot.png');
 
 const SIZES = [16, 32, 64, 128, 256, 512, 1024];
 
 async function main() {
   await fs.mkdir(buildDir, { recursive: true });
-  const mascot = await sharp(markPath).resize(880, 880, { fit: 'contain', background: '#dceeb1' }).png().toBuffer();
+  const mascot = await sharp(mascotPath).resize(900, 900, { fit: 'contain', background: '#ffffff' }).png().toBuffer();
   const base = await sharp({
-    create: { width: 1024, height: 1024, channels: 4, background: '#dceeb1' },
+    create: { width: 1024, height: 1024, channels: 4, background: '#ffffff' },
   })
     .composite([{ input: mascot, gravity: 'center' }])
     .png()

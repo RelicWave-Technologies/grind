@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CalendarClock, ListTodo, PieChart, Settings as SettingsIcon, LogOut, Gauge, Clock, Keyboard, MousePointer2, ExternalLink, RefreshCw } from 'lucide-react';
-import timoMark from '../assets/timo-mark.svg';
+import timoMascot from '../assets/timo-mascot.png';
 import Today from './Today';
 import Tasks from './Tasks';
 import Settings from './Settings';
@@ -61,7 +61,7 @@ export default function MainLayout() {
     <div className="layout">
       <aside className="sidebar">
         <div className="sidebar-top">
-          <span className="brand-mark"><img src={timoMark} alt="" /></span>
+          <span className="brand-mark"><img src={timoMascot} alt="" /></span>
           <span className="brand-name">Timo</span>
         </div>
 
