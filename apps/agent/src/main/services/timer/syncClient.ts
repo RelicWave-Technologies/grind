@@ -29,6 +29,7 @@ export class HttpSyncClient implements SyncClient {
         larkTaskGuid: entry.larkTaskGuid ?? null,
         source: entry.source,
         startedAt: new Date(entry.startedAt).toISOString(),
+        endedAt: entry.endedAt === null ? null : new Date(entry.endedAt).toISOString(),
         agentVersion: AGENT_VERSION,
         platform: platform(),
         segments: entry.segments.map(segIso),

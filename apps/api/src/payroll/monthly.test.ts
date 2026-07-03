@@ -18,6 +18,7 @@ const cell = (workedH: number, meetingH = 0, manualH = 0) => ({
   workedMs: workedH * HOUR,
   meetingMs: meetingH * HOUR,
   manualMs: manualH * HOUR,
+  invalidatedMs: 0,
   totalMs: (workedH + meetingH + manualH) * HOUR,
   firstActivityMs: null,
   lastActivityMs: null,

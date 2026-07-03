@@ -8,6 +8,7 @@ import {
 } from '@grind/types';
 import { localDayWindow } from '../insights/day';
 import { buildTimesheetMatrix, type TimesheetSegmentInput } from '../insights/timesheets';
+import { loadTimeInvalidationsForUsers } from '../insights/timeInvalidations';
 import {
   buildMonthlyPayroll,
   type MonthlyPayroll,
@@ -169,9 +170,9 @@ export async function buildPayrollPayload(
   const lookbackStart = new Date(range.rangeStart.getTime() - 24 * 60 * 60 * 1000);
   const lookbackEnd = new Date(range.rangeEnd.getTime() + 24 * 60 * 60 * 1000);
 
-  const [entries, shiftAssignments, runs, unresolvedApprovalCount] =
+  const [entries, shiftAssignments, runs, unresolvedApprovalCount, invalidations] =
     userIds.length === 0
-      ? [[], [], [], 0]
+      ? [[], [], [], 0, []]
       : await Promise.all([
           prisma.timeEntry.findMany({
             where: {
@@ -211,6 +212,7 @@ export async function buildPayrollPayload(
               requestedEnd: { gt: range.rangeStart },
             },
           }),
+          loadTimeInvalidationsForUsers(userIds, lookbackStart, lookbackEnd),
         ]);
 
   const segs: TimesheetSegmentInput[] = [];
@@ -226,7 +228,13 @@ export async function buildPayrollPayload(
     }
   }
 
-  const matrix = buildTimesheetMatrix({ from: range.from, to: range.to, tz: range.tz, segments: segs });
+  const matrix = buildTimesheetMatrix({
+    from: range.from,
+    to: range.to,
+    tz: range.tz,
+    segments: segs,
+    invalidations,
+  });
   if (!matrix) return { error: 'invalid_date_or_tz' };
 
   const groupedAssignments: Record<string, PayrollShiftAssignmentInput[]> = {};

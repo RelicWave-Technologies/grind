@@ -27,6 +27,7 @@ export const CreateTimeEntryRequest = z.object({
   larkTaskGuid: z.string().min(1).nullable().optional(),
   source: TimeEntrySource.default('AUTO'),
   startedAt: Iso,
+  endedAt: Iso.nullable().optional(),
   agentVersion: z.string().max(50).optional(),
   platform: z.enum(['darwin', 'win32', 'linux']).optional(),
   segments: z.array(SegmentDto).min(1),

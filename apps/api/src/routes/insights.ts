@@ -11,6 +11,8 @@ import { WEEKDAYS, type ShiftSchedule } from '@grind/types';
 import { buildHeatmap, DEFAULT_BUCKET_MS, type HeatmapSample } from '../insights/heatmap';
 import { buildAppUsage } from '../insights/appUsage';
 import { resolveAppIcon, storedIconDataUrls } from '../insights/appIcon';
+import { groupInvalidationsByUser, isInvalidatedAt, invalidatedOverlapMs } from '../insights/invalidations';
+import { loadTimeInvalidationsForUsers } from '../insights/timeInvalidations';
 
 export const insightsRouter = Router();
 // /day accepts an optional ?userId= so admins/managers can pull a team
@@ -55,22 +57,45 @@ insightsRouter.get('/score', async (req, res, next) => {
     const win = dayWindow(typeof req.query.day === 'string' ? req.query.day : undefined);
     if (!win) return res.status(400).json({ error: 'invalid_day' });
 
-    const samples = await prisma.activitySample.findMany({
-      where: { userId: req.user.sub, bucketStart: { gte: win.start, lt: win.end } },
-      orderBy: { bucketStart: 'asc' },
-      select: {
-        bucketStart: true,
-        keystrokes: true,
-        clicks: true,
-        scrollEvents: true,
-        mouseDistancePx: true,
-        ikiCv: true,
-        moveSpeedCv: true,
-        pathStraightness: true,
-      },
-    });
+    const [user, samplesRaw, entries, invalidations] = await Promise.all([
+      prisma.user.findUnique({
+        where: { id: req.user.sub },
+        select: { activityRoleTitle: true },
+      }),
+      prisma.activitySample.findMany({
+        where: { userId: req.user.sub, bucketStart: { gte: win.start, lt: win.end } },
+        orderBy: { bucketStart: 'asc' },
+        select: {
+          bucketStart: true,
+          keystrokes: true,
+          clicks: true,
+          scrollEvents: true,
+          mouseDistancePx: true,
+          ikiCv: true,
+          moveSpeedCv: true,
+          pathStraightness: true,
+        },
+      }),
+      prisma.timeEntry.findMany({
+        where: {
+          userId: req.user.sub,
+          startedAt: { lt: win.end },
+          OR: [{ endedAt: null }, { endedAt: { gt: win.start } }],
+        },
+        select: { segments: { select: { kind: true, startedAt: true, endedAt: true } } },
+      }),
+      loadTimeInvalidationsForUsers([req.user.sub], win.start, win.end),
+    ]);
 
-    const role: RoleTitle = 'OTHER';
+    const role = (user?.activityRoleTitle ?? 'OTHER') as RoleTitle;
+    const invalidationsByUser = groupInvalidationsByUser(invalidations);
+    const meetingIntervals = meetingIntervalsForEntries(entries, new Date());
+    const samples = samplesRaw
+      .filter((s) => !isInvalidatedAt(invalidationsByUser, req.user!.sub, s.bucketStart.getTime()))
+      .map((s) => ({
+        ...s,
+        isProtectedMeeting: isInMeeting(meetingIntervals, s.bucketStart.getTime()),
+      }));
     const day = scoreDay(samples, { role });
     const anticheat = assessWindow(samples as RiskSample[]);
 
@@ -130,7 +155,7 @@ insightsRouter.get('/day', async (req, res, next) => {
     // include it rather than hiding it.
     const userRow = await prisma.user.findUnique({
       where: { id: userId },
-      select: { shift: { select: { name: true, schedule: true } } },
+      select: { activityRoleTitle: true, shift: { select: { name: true, schedule: true } } },
     });
     const schedule = (userRow?.shift?.schedule as ShiftSchedule | null | undefined) ?? null;
     const shiftWin = schedule ? shiftDayWindow(date, tz, schedule) : null;
@@ -182,23 +207,28 @@ insightsRouter.get('/day', async (req, res, next) => {
       orderBy: { requestedStart: 'asc' },
     });
 
-    const samples = await prisma.activitySample.findMany({
-      where: {
-        userId,
-        bucketStart: { gte: win.start, lt: win.end },
-      },
-      select: {
-        timeEntryId: true,
-        bucketStart: true,
-        keystrokes: true,
-        clicks: true,
-        scrollEvents: true,
-        mouseDistancePx: true,
-        activeApp: true,
-        activeAppBundle: true,
-      },
-      orderBy: { bucketStart: 'asc' },
-    });
+    const [samplesRaw, invalidations] = await Promise.all([
+      prisma.activitySample.findMany({
+        where: {
+          userId,
+          bucketStart: { gte: win.start, lt: win.end },
+        },
+        select: {
+          timeEntryId: true,
+          bucketStart: true,
+          keystrokes: true,
+          clicks: true,
+          scrollEvents: true,
+          mouseDistancePx: true,
+          activeApp: true,
+          activeAppBundle: true,
+        },
+        orderBy: { bucketStart: 'asc' },
+      }),
+      loadTimeInvalidationsForUsers([userId], win.start, win.end),
+    ]);
+    const invalidationsByUser = groupInvalidationsByUser(invalidations);
+    const samples = samplesRaw.filter((s) => !isInvalidatedAt(invalidationsByUser, userId, s.bucketStart.getTime()));
     const latestSampleAt = latestSampleByEntry(samples);
     const insightEntries = entries.map((e) => ({
       id: e.id,
@@ -263,6 +293,12 @@ insightsRouter.get('/day', async (req, res, next) => {
         }
       }
     }
+    const invalidatedMs = invalidatedTrackedMsForEntries(insightEntries, invalidationsByUser, userId);
+    const resultForResponse = {
+      ...result,
+      totals: { ...result.totals, invalidatedMs },
+    };
+
     const heatmapInput: HeatmapSample[] = samples.map((s) => {
       const t = s.bucketStart.getTime();
       const inMeeting = meetingIntervals.some((iv) => t >= iv.a && t < iv.b);
@@ -281,6 +317,7 @@ insightsRouter.get('/day', async (req, res, next) => {
       dayStart: result.dayStart,
       dayEnd: result.dayEnd,
       samples: heatmapInput,
+      role: (userRow?.activityRoleTitle ?? 'OTHER') as RoleTitle,
       bucketMs: DEFAULT_BUCKET_MS,
     });
 
@@ -305,10 +342,53 @@ insightsRouter.get('/day', async (req, res, next) => {
       })),
     };
 
-    res.json({ ...result, activity: heatmap, appUsage });
+    res.json({ ...resultForResponse, activity: heatmap, appUsage });
   } catch (err) {
     next(err);
   }
 });
 
 export default insightsRouter;
+
+function meetingIntervalsForEntries(
+  entries: Array<{ segments: Array<{ kind: string; startedAt: Date; endedAt: Date | null }> }>,
+  now: Date,
+): Array<{ a: number; b: number }> {
+  const out: Array<{ a: number; b: number }> = [];
+  for (const entry of entries) {
+    for (const segment of entry.segments) {
+      if (segment.kind !== 'MEETING') continue;
+      const a = segment.startedAt.getTime();
+      const b = (segment.endedAt ?? now).getTime();
+      if (b > a) out.push({ a, b });
+    }
+  }
+  return out;
+}
+
+function isInMeeting(intervals: Array<{ a: number; b: number }>, epochMs: number): boolean {
+  return intervals.some((iv) => epochMs >= iv.a && epochMs < iv.b);
+}
+
+function invalidatedTrackedMsForEntries(
+  entries: Array<{
+    segments: Array<{
+      kind: 'WORK' | 'MEETING' | 'IDLE_TRIMMED';
+      startedAt: Date;
+      endedAt: Date | null;
+    }>;
+  }>,
+  invalidationsByUser: ReturnType<typeof groupInvalidationsByUser>,
+  userId: string,
+): number {
+  let total = 0;
+  for (const entry of entries) {
+    for (const segment of entry.segments) {
+      if (segment.kind === 'IDLE_TRIMMED') continue;
+      const start = segment.startedAt.getTime();
+      const end = segment.endedAt?.getTime() ?? Date.now();
+      total += invalidatedOverlapMs(invalidationsByUser, userId, start, end);
+    }
+  }
+  return total;
+}

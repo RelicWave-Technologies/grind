@@ -52,10 +52,14 @@ const LOGIN_USER_SELECT = {
 
 /** Parsed, normalized bootstrap-admin allowlist from env (case-insensitive). */
 export function bootstrapAdminEmails(): string[] {
-  return (env.LARK_BOOTSTRAP_ADMIN_EMAILS ?? '')
+  return (process.env.LARK_BOOTSTRAP_ADMIN_EMAILS || env.LARK_BOOTSTRAP_ADMIN_EMAILS || '')
     .split(',')
     .map((e) => normalizeEmail(e))
     .filter((e): e is string => e !== null);
+}
+
+function workspaceId(): string {
+  return process.env.WORKSPACE_ID || env.WORKSPACE_ID;
 }
 
 function isBootstrapEmail(email: string): boolean {
@@ -105,8 +109,8 @@ async function createUser(profile: LarkProfile, email: string): Promise<Resolved
   return prisma.$transaction(async (tx) => {
     // Idempotent single workspace — concurrent bootstraps can't duplicate it.
     await tx.workspace.upsert({
-      where: { id: env.WORKSPACE_ID },
-      create: { id: env.WORKSPACE_ID, name: 'Workspace' },
+      where: { id: workspaceId() },
+      create: { id: workspaceId(), name: 'Workspace' },
       update: {},
     });
     // Bootstrap admin = a configured bootstrap email, OR the very first user in
@@ -115,7 +119,7 @@ async function createUser(profile: LarkProfile, email: string): Promise<Resolved
     const bootstrap = isBootstrapEmail(email) || (await tx.user.count()) === 0;
     const user = await tx.user.create({
       data: {
-        workspaceId: env.WORKSPACE_ID,
+        workspaceId: workspaceId(),
         email,
         name: profile.name || email,
         avatarUrl: profile.avatarUrl,

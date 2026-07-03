@@ -27,6 +27,7 @@ class FakeOAuth implements OAuthClient {
   accessExpiresInSec = 7200;
   refreshExpiresInSec = 60 * 60 * 24 * 7;
   failRefreshWith: Error | null = null;
+  refreshDelay: Promise<void> | null = null;
   scope = LARK_SCOPE_STRING;
 
   private mint(): LarkTokenResponse {
@@ -49,6 +50,7 @@ class FakeOAuth implements OAuthClient {
 
   async refresh(refreshToken: string): Promise<LarkTokenResponse> {
     this.refreshCalls += 1;
+    if (this.refreshDelay) await this.refreshDelay;
     if (this.failRefreshWith) throw this.failRefreshWith;
     if (!this.valid.has(refreshToken)) {
       throw new LarkReauthRequiredError('refresh token already used or unknown');
@@ -93,6 +95,32 @@ describe('TokenManager.connect', () => {
     expect(at).toBe('at_1');
     expect(client.refreshCalls).toBe(0); // served from cache
   });
+
+  it('keeps the cached access token when the refresh grant is not due', async () => {
+    client.accessExpiresInSec = 10 * 24 * 3600;
+    const tm = makeManager();
+    await tm.connect(userId, 'code', 'r');
+
+    nowMs += 2 * 3600 * 1000;
+    const at = await tm.getAccessToken(userId);
+
+    expect(at).toBe('at_1');
+    expect(client.refreshCalls).toBe(0);
+  });
+
+  it('refreshes a due grant even when the cached access token is still valid', async () => {
+    client.accessExpiresInSec = 10 * 24 * 3600;
+    const tm = makeManager();
+    await tm.connect(userId, 'code', 'r');
+
+    nowMs += 6 * 24 * 3600 * 1000 + 2 * 3600 * 1000; // inside the final 24h grant window
+    const at = await tm.getAccessToken(userId);
+
+    expect(at).toBe('at_2');
+    expect(client.refreshCalls).toBe(1);
+    const row = await prisma.larkOAuthToken.findUnique({ where: { userId } });
+    expect(decryptToken(row!.refreshTokenEnc, KEY)).toBe('rt_2');
+  });
 });
 
 describe('TokenManager.getAccessToken rotation', () => {
@@ -125,6 +153,20 @@ describe('TokenManager.getAccessToken rotation', () => {
     expect(client.refreshCalls).toBe(1);
     expect(a).toBe(b);
     expect(b).toBe(c);
+  });
+
+  it('does not double-refresh proactive grant rotation across TokenManager instances', async () => {
+    const tm1 = makeManager();
+    const tm2 = makeManager();
+    await tm1.connect(userId, 'code', 'r');
+    nowMs += 6 * 24 * 3600 * 1000 + 2 * 3600 * 1000; // force proactive grant refresh
+
+    const [a, b] = await Promise.all([tm1.refreshGrantIfDue(userId), tm2.refreshGrantIfDue(userId)]);
+
+    expect([a, b].sort()).toEqual(['refreshed', 'skipped']);
+    expect(client.refreshCalls).toBe(1);
+    const row = await prisma.larkOAuthToken.findUnique({ where: { userId } });
+    expect(decryptToken(row!.refreshTokenEnc, KEY)).toBe('rt_2');
   });
 
   it('survives repeated rotations (token stays usable across many refreshes)', async () => {
@@ -169,6 +211,19 @@ describe('TokenManager failure handling → reauthRequired', () => {
     const at = await tm.getAccessToken(userId);
     expect(at).toBe('at_2');
     expect((await tm.getStatus(userId)).connected).toBe(true);
+  });
+
+  it('cleans up the per-user lock after a refresh failure', async () => {
+    const tm = makeManager();
+    await tm.connect(userId, 'code', 'r');
+    nowMs += 3 * 3600 * 1000;
+    client.failRefreshWith = new LarkTransientError('lark 503');
+
+    await expect(tm.getAccessToken(userId)).rejects.toBeInstanceOf(LarkTransientError);
+
+    client.failRefreshWith = null;
+    await expect(tm.getAccessToken(userId)).resolves.toBe('at_2');
+    expect(client.refreshCalls).toBe(2);
   });
 
   it('flags reauth when the stored refresh token has expired', async () => {

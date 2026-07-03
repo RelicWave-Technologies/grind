@@ -8,8 +8,11 @@ import type { ActivitySample } from './aggregator';
 import { ActiveWindowTracker, type ActiveWindowObservation } from './activeWindow';
 import { ActivityStore } from './store';
 import { flushActivity } from './sync';
+import { ActivitySyncDrain, type ActivitySyncDrainReason, type ActivitySyncDrainResult } from './syncDrain';
 import { hasAccessibilityAccess } from '../permissions';
+import { getCapturePolicy } from '../agentConfig';
 import { log } from '../../logger';
+import type { PolicyFlags } from '@grind/types';
 
 let store: ActivityStore | null = null;
 let sealer: MinuteSealer | null = null;
@@ -20,6 +23,7 @@ let started = false;
 // idle delivers every system mousemove (100s/sec) across the native→V8 boundary
 // for no benefit (events no-op unless recording), which heats the CPU.
 let hookRunning = false;
+let lastHookError: string | null = null;
 // Throttle mousemove processing: the OS fires it at the pointer's full poll rate
 // (often 125Hz+); sampling at ~20Hz is ample for distance / speed-CV metrics.
 let lastMoveTs = 0;
@@ -35,13 +39,33 @@ let recordingEntryId: string | null = null;
  * always live so we capture context even outside the keystroke window.
  */
 export function recordActiveWindow(obs: ActiveWindowObservation): void {
-  activeWindow.observe(obs);
+  const policy = getCapturePolicy();
+  if (!policy.captureApps) return;
+  activeWindow.observe({
+    ...obs,
+    title: policy.captureTitles ? obs.title : null,
+    url: policy.captureUrls ? obs.url : null,
+  });
 }
 
 function getStore(): ActivityStore {
   if (store) return store;
   store = new ActivityStore(new Database(path.join(app.getPath('userData'), 'agent.db')));
   return store;
+}
+
+const activitySyncDrain = new ActivitySyncDrain({
+  getStore,
+  flush: flushActivity,
+  logger: log,
+});
+
+export function startActivitySyncDrain(): void {
+  activitySyncDrain.start();
+}
+
+export function drainActivityNow(reason: ActivitySyncDrainReason): Promise<ActivitySyncDrainResult> {
+  return activitySyncDrain.drainNow(reason);
 }
 
 /**
@@ -56,6 +80,16 @@ export function setActivityRecording(on: boolean, entryId: string | null = null)
   syncHook();
 }
 
+export function applyActivityCapturePolicy(policy: PolicyFlags): void {
+  if (!policy.captureApps || !policy.captureTitles || !policy.captureUrls) {
+    activeWindow.clear();
+    const rows = getStore().scrubActiveFields(policy);
+    if (rows > 0) {
+      log.info('local activity active-window fields scrubbed for capture policy', { rows, policy });
+    }
+  }
+}
+
 /**
  * Start the global input hook only while recording; stop it otherwise. Idempotent
  * and cheap to call on the 1s recording tick. This is the main heat fix: no input
@@ -67,7 +101,10 @@ function syncHook(): void {
     try {
       uIOhook.start();
       hookRunning = true;
+      lastHookError = null;
     } catch (err) {
+      hookRunning = false;
+      lastHookError = String(err);
       log.warn('uIOhook.start failed', { err: String(err) });
     }
   } else if (!recording && hookRunning) {
@@ -77,12 +114,34 @@ function syncHook(): void {
       /* ignore */
     }
     hookRunning = false;
+    lastHookError = null;
   }
 }
 
 /** Whether the global input hook is actually running (Accessibility granted). */
 export function isActivityCapturing(): boolean {
-  return started;
+  return hookRunning;
+}
+
+export interface ActivityCaptureStatus {
+  trusted: boolean;
+  ready: boolean;
+  recording: boolean;
+  capturing: boolean;
+  hookRunning: boolean;
+  lastHookError: string | null;
+}
+
+export function getActivityCaptureStatus(): ActivityCaptureStatus {
+  const trusted = hasAccessibilityAccess(false);
+  return {
+    trusted,
+    ready: started,
+    recording,
+    capturing: hookRunning,
+    hookRunning,
+    lastHookError,
+  };
 }
 
 /**
@@ -92,6 +151,7 @@ export function isActivityCapturing(): boolean {
 export function startActivityCapture(): void {
   if (started) return;
   if (!hasAccessibilityAccess(false)) {
+    lastHookError = null;
     log.warn('activity capture not started — Accessibility permission missing');
     return;
   }
@@ -132,6 +192,7 @@ export function startActivityCapture(): void {
  */
 function persistSample(sample: ActivitySample, entryId: string | null): void {
   const dom = activeWindow.dominantFor(sample.bucketStart, sample.bucketStart + 60_000);
+  const policy = getCapturePolicy();
   activeWindow.prune(sample.bucketStart + 60_000);
   getStore().insert({
     id: ulid(),
@@ -144,13 +205,13 @@ function persistSample(sample: ActivitySample, entryId: string | null): void {
     ikiCv: sample.ikiCv,
     moveSpeedCv: sample.moveSpeedCv,
     pathStraightness: sample.pathStraightness,
-    activeApp: dom.activeApp,
-    activeAppBundle: dom.activeAppBundle,
-    activeTitle: dom.activeTitle,
-    activeUrl: dom.activeUrl,
+    activeApp: policy.captureApps ? dom.activeApp : null,
+    activeAppBundle: policy.captureApps ? dom.activeAppBundle : null,
+    activeTitle: policy.captureApps && policy.captureTitles ? dom.activeTitle : null,
+    activeUrl: policy.captureApps && policy.captureUrls ? dom.activeUrl : null,
     synced: 0,
   });
-  void flushActivity(getStore());
+  void drainActivityNow('sample');
 }
 
 /**
@@ -174,6 +235,7 @@ export function stopActivityCapture(): void {
     hookRunning = false;
   }
   started = false;
+  lastHookError = null;
 }
 
 /** Today's input totals (for an in-app summary). */

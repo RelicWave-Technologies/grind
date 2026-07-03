@@ -1,4 +1,3 @@
-import crypto from 'crypto';
 import { Router, type Request } from 'express';
 import { prisma } from '@grind/db';
 import type {
@@ -11,7 +10,6 @@ import type {
 } from '@grind/types';
 import { requireAccessToken } from '../middleware/auth';
 import { attachScope, requireCapability } from '../middleware/scope';
-import { env } from '../env';
 import {
   buildMemberReportApps,
   buildMemberReportDays,
@@ -29,6 +27,9 @@ import { buildTeamReportsResponse } from '../reports/team';
 import { loadProfileForUser } from '../profile/service';
 import { resolveAppIcon, storedIconDataUrls } from '../insights/appIcon';
 import type { IconResolver } from '../reports/member';
+import { loadTimeInvalidationsForUsers } from '../insights/timeInvalidations';
+import type { TimeInvalidationInput } from '../insights/invalidations';
+import type { RoleTitle } from '../scoring/presets';
 
 export const reportsRouter = Router();
 reportsRouter.use(requireAccessToken, attachScope, requireCapability('reports.self.read'));
@@ -63,6 +64,8 @@ reportsRouter.get('/me', async (req, res, next) => {
         samples: data.samples,
         screenshots: data.screenshots,
         shiftAssignments: data.shiftAssignments,
+        invalidations: data.invalidations,
+        activityRoleTitle: data.activityRoleTitle,
         iconFor,
       }),
     };
@@ -94,26 +97,36 @@ reportsRouter.get('/team', requireCapability('reports.team.read'), async (req, r
             name: true,
             email: true,
             avatarUrl: true,
+            activityRoleTitle: true,
             teamId: true,
             team: { select: { name: true } },
           },
           orderBy: [{ name: 'asc' }, { email: 'asc' }],
         })
       : [];
-    const reportUsers: TeamReportUser[] = users.map((u) => ({
+    const reportUsersWithRole: Array<TeamReportUser & { activityRoleTitle: RoleTitle }> = users.map((u) => ({
       id: u.id,
       name: u.name,
       email: u.email,
       avatarUrl: u.avatarUrl,
+      activityRoleTitle: u.activityRoleTitle as RoleTitle,
       teamId: u.teamId,
       teamName: u.team?.name ?? null,
+    }));
+    const reportUsers: TeamReportUser[] = reportUsersWithRole.map((user) => ({
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      avatarUrl: user.avatarUrl,
+      teamId: user.teamId,
+      teamName: user.teamName,
     }));
 
     const reportData = await loadTeamReportData(reportUsers.map((u) => u.id), range);
     const iconFor = await iconForSamples([...reportData.values()].flatMap((d) => d.samples));
     const daysByUser = new Map<string, ReturnType<typeof buildMemberReportDays>>();
     const now = new Date();
-    for (const user of reportUsers) {
+    for (const user of reportUsersWithRole) {
       const data = reportData.get(user.id) ?? emptyTeamReportData();
       daysByUser.set(user.id, buildMemberReportDays({
         userId: user.id,
@@ -124,6 +137,8 @@ reportsRouter.get('/team', requireCapability('reports.team.read'), async (req, r
         samples: data.samples,
         screenshots: data.screenshots,
         shiftAssignments: data.shiftAssignments,
+        invalidations: data.invalidations,
+        activityRoleTitle: user.activityRoleTitle,
         iconFor,
       }));
     }
@@ -162,6 +177,8 @@ reportsRouter.get('/team/member', requireCapability('reports.team.read'), async 
       samples: data.samples,
       screenshots: data.screenshots,
       shiftAssignments: data.shiftAssignments,
+      invalidations: data.invalidations,
+      activityRoleTitle: target.user.activityRoleTitle,
       iconFor,
     });
     const teamReport = buildTeamReportsResponse({
@@ -194,8 +211,17 @@ reportsRouter.get('/team/member/day-apps', requireCapability('reports.team.read'
     if (!target.ok) return res.status(target.status).json({ error: target.error });
     const range = resolveSingleReportDay(req.query as Record<string, unknown>);
     if ('error' in range) return res.status(range.status).json({ error: range.error, ...(range.extras ?? {}) });
-    const samples = await loadSamples(target.user.id, range);
-    const response: MemberReportDayAppsResponse = buildMemberReportApps({ range, samples, iconFor: await iconForSamples(samples) });
+    const [samples, invalidations] = await Promise.all([
+      loadSamples(target.user.id, range),
+      loadTimeInvalidationsForUsers([target.user.id], range.rangeStart, range.rangeEnd),
+    ]);
+    const response: MemberReportDayAppsResponse = buildMemberReportApps({
+      userId: target.user.id,
+      range,
+      samples,
+      invalidations,
+      iconFor: await iconForSamples(samples),
+    });
     res.json(response);
   } catch (err) {
     next(err);
@@ -209,14 +235,16 @@ reportsRouter.get('/team/member/day-screenshots', requireCapability('reports.tea
     if (!target.ok) return res.status(target.status).json({ error: target.error });
     const range = resolveSingleReportDay(req.query as Record<string, unknown>);
     if ('error' in range) return res.status(range.status).json({ error: range.error, ...(range.extras ?? {}) });
-    const [samples, screenshots] = await Promise.all([
-      loadSamples(target.user.id, range),
-      loadScreenshots(target.user.id, range),
-    ]);
+    const reportData = await loadTeamReportData([target.user.id], range);
+    const data = reportData.get(target.user.id) ?? emptyTeamReportData();
     const response: MemberReportDayScreenshotsResponse = buildMemberReportScreenshots({
+      userId: target.user.id,
       range,
-      samples,
-      screenshots,
+      samples: data.samples,
+      screenshots: data.screenshots,
+      entries: data.entries,
+      invalidations: data.invalidations,
+      activityRoleTitle: target.user.activityRoleTitle,
       toUrl: screenshotUrl,
     });
     res.json(response);
@@ -230,8 +258,17 @@ reportsRouter.get('/me/day-apps', async (req, res, next) => {
     if (!req.user) return res.status(401).json({ error: 'unauthorized' });
     const range = resolveSingleReportDay(req.query as Record<string, unknown>);
     if ('error' in range) return res.status(range.status).json({ error: range.error, ...(range.extras ?? {}) });
-    const samples = await loadSamples(req.user.sub, range);
-    const response: MemberReportDayAppsResponse = buildMemberReportApps({ range, samples, iconFor: await iconForSamples(samples) });
+    const [samples, invalidations] = await Promise.all([
+      loadSamples(req.user.sub, range),
+      loadTimeInvalidationsForUsers([req.user.sub], range.rangeStart, range.rangeEnd),
+    ]);
+    const response: MemberReportDayAppsResponse = buildMemberReportApps({
+      userId: req.user.sub,
+      range,
+      samples,
+      invalidations,
+      iconFor: await iconForSamples(samples),
+    });
     res.json(response);
   } catch (err) {
     next(err);
@@ -242,7 +279,7 @@ async function resolveScopedReportUser(
   req: Request,
   rawUserId: unknown,
 ): Promise<
-  | { ok: true; user: TeamReportUser }
+  | { ok: true; user: TeamReportUser & { activityRoleTitle: RoleTitle } }
   | { ok: false; status: 400 | 401 | 403 | 404; error: string }
 > {
   if (!req.user || !req.scope) return { ok: false, status: 401, error: 'unauthorized' };
@@ -264,6 +301,7 @@ async function resolveScopedReportUser(
       name: true,
       email: true,
       avatarUrl: true,
+      activityRoleTitle: true,
       teamId: true,
       team: { select: { name: true } },
     },
@@ -276,6 +314,7 @@ async function resolveScopedReportUser(
       name: user.name,
       email: user.email,
       avatarUrl: user.avatarUrl,
+      activityRoleTitle: user.activityRoleTitle as RoleTitle,
       teamId: user.teamId,
       teamName: user.team?.name ?? null,
     },
@@ -343,14 +382,15 @@ reportsRouter.get('/me/day-screenshots', async (req, res, next) => {
     if (!req.user) return res.status(401).json({ error: 'unauthorized' });
     const range = resolveSingleReportDay(req.query as Record<string, unknown>);
     if ('error' in range) return res.status(range.status).json({ error: range.error, ...(range.extras ?? {}) });
-    const [samples, screenshots] = await Promise.all([
-      loadSamples(req.user.sub, range),
-      loadScreenshots(req.user.sub, range),
-    ]);
+    const data = await loadReportData(req.user.sub, range);
     const response: MemberReportDayScreenshotsResponse = buildMemberReportScreenshots({
+      userId: req.user.sub,
       range,
-      samples,
-      screenshots,
+      samples: data.samples,
+      screenshots: data.screenshots,
+      entries: data.entries,
+      invalidations: data.invalidations,
+      activityRoleTitle: data.activityRoleTitle,
       toUrl: screenshotUrl,
     });
     res.json(response);
@@ -360,7 +400,11 @@ reportsRouter.get('/me/day-screenshots', async (req, res, next) => {
 });
 
 async function loadReportData(userId: string, range: ReportRange) {
-  const [entries, manualRequests, samples, screenshots, shiftAssignments] = await Promise.all([
+  const [user, entries, manualRequests, samples, screenshots, shiftAssignments, invalidations] = await Promise.all([
+    prisma.user.findUnique({
+      where: { id: userId },
+      select: { activityRoleTitle: true },
+    }),
     prisma.timeEntry.findMany({
       where: {
         userId,
@@ -417,8 +461,10 @@ async function loadReportData(userId: string, range: ReportRange) {
       },
       orderBy: { effectiveFrom: 'asc' },
     }),
+    loadTimeInvalidationsForUsers([userId], range.rangeStart, range.rangeEnd),
   ]);
   return {
+    activityRoleTitle: (user?.activityRoleTitle ?? 'OTHER') as RoleTitle,
     entries: entries.map((e) => ({
       ...e,
       source: e.source as 'AUTO' | 'MANUAL',
@@ -431,6 +477,7 @@ async function loadReportData(userId: string, range: ReportRange) {
     samples,
     screenshots,
     shiftAssignments,
+    invalidations,
   };
 }
 
@@ -440,6 +487,7 @@ interface TeamReportDataBucket {
   samples: ReportActivitySample[];
   screenshots: ReportScreenshotRow[];
   shiftAssignments: ReportShiftAssignment[];
+  invalidations: TimeInvalidationInput[];
 }
 
 function emptyTeamReportData(): TeamReportDataBucket {
@@ -449,6 +497,7 @@ function emptyTeamReportData(): TeamReportDataBucket {
     samples: [],
     screenshots: [],
     shiftAssignments: [],
+    invalidations: [],
   };
 }
 
@@ -457,7 +506,7 @@ async function loadTeamReportData(userIds: string[], range: ReportRange): Promis
   for (const userId of userIds) grouped.set(userId, emptyTeamReportData());
   if (userIds.length === 0) return grouped;
 
-  const [entries, manualRequests, samples, screenshots, shiftAssignments] = await Promise.all([
+  const [entries, manualRequests, samples, screenshots, shiftAssignments, invalidations] = await Promise.all([
     prisma.timeEntry.findMany({
       where: {
         userId: { in: userIds },
@@ -556,6 +605,7 @@ async function loadTeamReportData(userIds: string[], range: ReportRange): Promis
       },
       orderBy: [{ userId: 'asc' }, { effectiveFrom: 'asc' }],
     }),
+    loadTimeInvalidationsForUsers(userIds, range.rangeStart, range.rangeEnd),
   ]);
 
   for (const entry of entries) {
@@ -583,6 +633,9 @@ async function loadTeamReportData(userIds: string[], range: ReportRange): Promis
   for (const row of shiftAssignments) {
     const { userId, ...assignment } = row;
     grouped.get(userId)?.shiftAssignments.push(assignment);
+  }
+  for (const row of invalidations) {
+    grouped.get(row.userId)?.invalidations.push(row);
   }
   return grouped;
 }
@@ -634,26 +687,11 @@ async function loadScreenshots(userId: string, range: ReportRange): Promise<Repo
 }
 
 function screenshotUrl(row: ReportScreenshotRow, variant: 'full' | 'thumb'): string | null {
-  const direct = variant === 'thumb' ? row.thumbUrl : row.fullUrl;
-  if (direct) return direct;
-  const key = variant === 'thumb' ? row.thumbS3Key : row.s3Key;
-  if (!key || !env.SCREENSHOT_ASSET_BASE_URL) return null;
-  const expires = Math.floor(Date.now() / 1000) + 10 * 60;
-  const url = new URL(env.SCREENSHOT_ASSET_BASE_URL);
-  url.pathname = `${url.pathname.replace(/\/$/u, '')}/${encodeKeyPath(key)}`;
-  if (env.SCREENSHOT_URL_SIGNING_SECRET) {
-    const sig = crypto
-      .createHmac('sha256', env.SCREENSHOT_URL_SIGNING_SECRET)
-      .update(`${key}:${expires}`)
-      .digest('hex');
-    url.searchParams.set('expires', String(expires));
-    url.searchParams.set('sig', sig);
-  }
-  return url.toString();
-}
-
-function encodeKeyPath(key: string): string {
-  return key.split('/').map((part) => encodeURIComponent(part)).join('/');
+  const hasFull = Boolean(row.s3Key || row.fullUrl);
+  const hasThumb = Boolean(row.thumbS3Key || row.thumbUrl || hasFull);
+  if (variant === 'full' && !hasFull) return null;
+  if (variant === 'thumb' && !hasThumb) return null;
+  return `/v1/screenshots/${encodeURIComponent(row.id)}/image?variant=${variant}`;
 }
 
 export default reportsRouter;

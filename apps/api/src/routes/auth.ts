@@ -38,6 +38,7 @@ export type AuthUserRow = {
   email: string;
   name: string;
   role: unknown;
+  activityRoleTitle: 'DEVELOPER' | 'DESIGNER' | 'SALES' | 'OTHER';
   workspaceId: string;
   teamId: string | null;
   managerId: string | null;
@@ -51,6 +52,7 @@ export const AUTH_USER_SELECT = {
   email: true,
   name: true,
   role: true,
+  activityRoleTitle: true,
   workspaceId: true,
   teamId: true,
   managerId: true,
@@ -67,6 +69,7 @@ export function serializeAuthUser(user: AuthUserRow): UserDto | null {
     email: user.email,
     name: user.name,
     role,
+    activityRoleTitle: user.activityRoleTitle,
     displayRole: role,
     capabilities: roleCapabilities(role),
     workspaceId: user.workspaceId,

@@ -26,7 +26,7 @@ export interface DecideByUserResult {
   timeEntryId: string | null;
   decidedAt: string | null;
   decidedReason: string | null;
-  noop: 'already_decided' | 'cancelled' | 'forbidden' | null;
+  noop: 'already_decided' | 'cancelled' | 'forbidden' | 'self_approval_forbidden' | null;
 }
 
 export async function decideByUser(args: {
@@ -62,6 +62,20 @@ export async function decideByUser(args: {
       decidedAt: req.decidedAt ? req.decidedAt.toISOString() : null,
       decidedReason: req.decidedReason,
       noop: 'forbidden',
+    };
+  }
+
+  if (req.status === 'PENDING' && req.userId === args.deciderUserId) {
+    logger.warn(
+      { requestId: req.id, deciderUserId: args.deciderUserId },
+      'decideByUser: forbidden (self approval)',
+    );
+    return {
+      status: req.status,
+      timeEntryId: req.timeEntryId,
+      decidedAt: req.decidedAt ? req.decidedAt.toISOString() : null,
+      decidedReason: req.decidedReason,
+      noop: 'self_approval_forbidden',
     };
   }
 
@@ -106,7 +120,7 @@ export async function decideByUser(args: {
             ],
           },
           // Carry the requested attendees (meeting participants) onto the entry —
-          // same as the MANAGER+ auto-approve path. Without this they're silently
+          // same as the supervisor auto-approve path. Without this they're silently
           // dropped on approval.
           attendees: attendeeIds.length ? { create: attendeeIds.map((userId) => ({ userId })) } : undefined,
         },

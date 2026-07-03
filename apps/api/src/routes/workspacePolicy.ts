@@ -7,6 +7,11 @@ import {
 } from '@grind/types';
 import { requireAccessToken } from '../middleware/auth';
 import { attachScope, requireAdmin } from '../middleware/scope';
+import {
+  monitoringRiskLevel,
+  monitoringTimingChanged,
+  normalizeAuditReason,
+} from '../monitoringSettingsAudit';
 
 /**
  * Workspace-wide capture policy (M14). One row per workspace; created on
@@ -69,21 +74,60 @@ workspacePolicyRouter.get('/', async (req, res, next) => {
 
 workspacePolicyRouter.patch('/', requireAdmin, async (req, res, next) => {
   try {
-    if (!req.scope) return res.status(500).json({ error: 'scope_unresolved' });
+    if (!req.scope || !req.user) return res.status(500).json({ error: 'scope_unresolved' });
     const parsed = PatchWorkspacePolicyRequest.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({ error: 'invalid_body', issues: parsed.error.flatten() });
     }
-    // Upsert so a workspace whose policy row was never materialised
-    // doesn't 404 on the first admin flip.
-    const row = await prisma.workspacePolicy.upsert({
-      where: { workspaceId: req.scope.workspaceId },
-      create: {
-        workspaceId: req.scope.workspaceId,
-        ...WORKSPACE_POLICY_DEFAULTS,
-        ...parsed.data,
-      },
-      update: parsed.data,
+    const { auditReason: rawAuditReason, ...updateData } = parsed.data;
+    const current = await loadOrCreatePolicy(req.scope.workspaceId);
+    const merged = {
+      captureApps: updateData.captureApps ?? current.captureApps,
+      captureTitles: updateData.captureTitles ?? current.captureTitles,
+      captureUrls: updateData.captureUrls ?? current.captureUrls,
+    };
+    if (!merged.captureApps && (merged.captureTitles || merged.captureUrls)) {
+      return res.status(400).json({ error: 'invalid_capture_policy', message: 'capture_titles_or_urls_require_apps' });
+    }
+
+    const previousTiming = {
+      screenshotIntervalMin: current.defaultScreenshotIntervalMin,
+      idleThresholdMin: current.defaultIdleThresholdMin,
+    };
+    const nextTiming = {
+      screenshotIntervalMin: updateData.defaultScreenshotIntervalMin ?? current.defaultScreenshotIntervalMin,
+      idleThresholdMin: updateData.defaultIdleThresholdMin ?? current.defaultIdleThresholdMin,
+    };
+    const timingChanged = monitoringTimingChanged(previousTiming, nextTiming);
+    const riskLevel = monitoringRiskLevel(nextTiming);
+    const auditReason = normalizeAuditReason(rawAuditReason);
+    if (timingChanged && riskLevel === 'HIGH' && !auditReason) {
+      return res.status(400).json({ error: 'missing_monitoring_audit_reason' });
+    }
+
+    const workspaceId = req.scope.workspaceId;
+    const actorId = req.user.sub;
+    const row = await prisma.$transaction(async (tx) => {
+      const updated = await tx.workspacePolicy.update({
+        where: { workspaceId },
+        data: updateData,
+      });
+      if (timingChanged) {
+        await tx.monitoringSettingsAudit.create({
+          data: {
+            workspaceId,
+            actorId,
+            scope: 'WORKSPACE_POLICY',
+            previousScreenshotIntervalMin: previousTiming.screenshotIntervalMin,
+            previousIdleThresholdMin: previousTiming.idleThresholdMin,
+            nextScreenshotIntervalMin: nextTiming.screenshotIntervalMin,
+            nextIdleThresholdMin: nextTiming.idleThresholdMin,
+            riskLevel,
+            reason: auditReason,
+          },
+        });
+      }
+      return updated;
     });
     res.json(toDto(row));
   } catch (err) {

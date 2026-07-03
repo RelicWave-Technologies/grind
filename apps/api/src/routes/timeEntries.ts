@@ -124,7 +124,7 @@ timeEntriesRouter.post('/', validate(CreateTimeEntryRequest, 'body'), async (req
       userId: req.user.sub,
       source: body.source,
       startedAt: body.startedAt,
-      endedAt: null,
+      endedAt: body.endedAt ?? null,
       segments: body.segments,
     });
     const violations = validateEntry(core);
@@ -156,6 +156,7 @@ timeEntriesRouter.post('/', validate(CreateTimeEntryRequest, 'body'), async (req
         larkTaskGuid: body.larkTaskGuid ?? null,
         source: body.source,
         startedAt: new Date(clamped.entry.startedAt),
+        endedAt: clamped.entry.endedAt !== null ? new Date(clamped.entry.endedAt) : null,
         agentVersion: body.agentVersion,
         platform: body.platform,
         shiftIdAtStart: shiftSnapshot?.shiftId ?? null,

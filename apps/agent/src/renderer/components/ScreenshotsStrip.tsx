@@ -14,17 +14,31 @@ export default function ScreenshotsStrip() {
     queryFn: () => window.agent.screenshots.recent(8),
     refetchInterval: 5000,
   });
+  const uploads = useQuery({
+    queryKey: ['screenshotsUploadSummary'],
+    queryFn: () => window.agent.screenshots.uploadSummary(),
+    refetchInterval: 5000,
+  });
 
   const capture = useMutation({
     mutationFn: () => window.agent.screenshots.captureOnce(),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['screenshots'] });
+      void qc.invalidateQueries({ queryKey: ['screenshotsUploadSummary'] });
       void qc.invalidateQueries({ queryKey: ['screenPerm'] });
+    },
+  });
+  const retryFailed = useMutation({
+    mutationFn: () => window.agent.screenshots.retryFailedUploads(),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['screenshots'] });
+      void qc.invalidateQueries({ queryKey: ['screenshotsUploadSummary'] });
     },
   });
 
   const state = perm.data?.state ?? 'ok';
   const ok = state === 'ok';
+  const failedUploads = uploads.data?.failed ?? 0;
 
   return (
     <>
@@ -36,6 +50,18 @@ export default function ScreenshotsStrip() {
       </div>
 
       {!ok && <PermBanner state={state} />}
+      {ok && failedUploads > 0 && (
+        <div className="perm-banner">
+          <ShieldAlert size={18} strokeWidth={2} />
+          <div style={{ flex: 1 }}>
+            <div className="callout" style={{ fontWeight: 600 }}>Upload failed</div>
+            <div className="small secondary">{failedUploads} screenshot{failedUploads === 1 ? '' : 's'} need a manual retry.</div>
+          </div>
+          <button className="btn no-drag" onClick={() => retryFailed.mutate()} disabled={retryFailed.isPending}>
+            {retryFailed.isPending ? 'Retrying…' : 'Retry uploads'}
+          </button>
+        </div>
+      )}
 
       {ok &&
         (shots.data && shots.data.length > 0 ? (

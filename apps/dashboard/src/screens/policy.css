@@ -141,6 +141,22 @@
   gap: var(--ui-sp-2);
 }
 
+.pol-audit-sub {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--ui-sp-2);
+}
+
+.pol-audit-sub > span {
+  min-width: 0;
+  max-width: 44ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .pol-card-compact .ui-list-row {
   min-height: calc(var(--ui-row-h) + var(--ui-sp-4));
   padding: var(--ui-sp-3) 0;
@@ -203,6 +219,10 @@
   overflow: hidden;
   box-shadow: var(--ui-shadow-pop);
   animation: pol-modal-enter var(--ui-dur-slow) var(--ui-ease) both;
+}
+
+.pol-risk-modal {
+  width: min(calc(var(--ui-sp-12) * 8), 100%);
 }
 
 .pol-modal-head,

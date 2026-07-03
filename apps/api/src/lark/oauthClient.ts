@@ -58,6 +58,8 @@ type RawTokenBody = {
   scope?: string;
 };
 
+const TOKEN_ENDPOINT_TIMEOUT_MS = 10_000;
+
 function parseBody(body: RawTokenBody): LarkTokenResponse {
   // Lark v2 returns code:0 on success; non-zero (or an OAuth `error`) is failure.
   const failed = (body.code != null && body.code !== 0) || Boolean(body.error);
@@ -83,15 +85,21 @@ export class HttpOAuthClient implements OAuthClient {
   private async post(payload: Record<string, string>): Promise<LarkTokenResponse> {
     const { appId, appSecret } = getLarkConfig();
     let res: Response;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), TOKEN_ENDPOINT_TIMEOUT_MS);
+    timeout.unref?.();
     try {
       res = await fetch(this.tokenUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json; charset=utf-8' },
         body: JSON.stringify({ client_id: appId, client_secret: appSecret, ...payload }),
+        signal: controller.signal,
       });
     } catch (err) {
       // Couldn't reach Lark at all → the grant was never processed; retryable.
       throw new LarkTransientError(`network error reaching Lark token endpoint: ${String(err)}`);
+    } finally {
+      clearTimeout(timeout);
     }
     const body = (await res.json().catch(() => ({}))) as RawTokenBody;
     // A 5xx/429 WITHOUT an explicit OAuth error means Lark didn't process the

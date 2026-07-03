@@ -3,9 +3,8 @@ import { autoUpdater } from 'electron-updater';
 import { AUTO_UPDATE_ENABLED, UPDATE_CHANNEL } from '../../env';
 import { broadcast } from '../../broadcast';
 import { log } from '../../logger';
-import { flushPartialActivity } from '../activity';
 import { drainUploads } from '../capture/uploader';
-import { flushPreferences } from '../preferences';
+import { runQuitCleanup } from '../quitCleanup';
 import { getTimerService } from '../timer';
 import {
   applyUpdateEvent,
@@ -271,26 +270,10 @@ function withTimeout<T>(label: string, task: Promise<T>, ms: number): Promise<T 
 }
 
 export async function flushBeforeUpdateInstall(): Promise<void> {
-  try {
-    flushPartialActivity();
-  } catch (err) {
-    log.warn('update flush activity failed', { err: String(err) });
-  }
-
-  try {
-    const timer = getTimerService();
-    const timerStatus = timer.status();
-    if (timerStatus.state === 'RUNNING' && !timerStatus.paused) timer.heartbeat();
-    await withTimeout('timer sync', timer.flushUnsynced(), INSTALL_FLUSH_TIMEOUT_MS);
-  } catch (err) {
-    log.warn('update flush timer failed', { err: String(err) });
-  }
+  await runQuitCleanup('update');
 
   await withTimeout('screenshot queue', drainUploads(), INSTALL_FLUSH_TIMEOUT_MS).catch((err) => {
     log.warn('update flush screenshots failed', { err: String(err) });
-  });
-  await withTimeout('preferences', flushPreferences(), INSTALL_FLUSH_TIMEOUT_MS).catch((err) => {
-    log.warn('update flush preferences failed', { err: String(err) });
   });
 }
 

@@ -1,8 +1,20 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import type { TimeEntry } from '@grind/core';
-import { totalWorkedMs } from '@grind/core';
+import { closeTimeEntry, totalWorkedMs } from '@grind/core';
+import { HttpError } from '../apiClient';
 import { TimerService } from './timerService';
-import type { Clock, EntryStore, IdGen, SyncClient } from './types';
+import type {
+  Clock,
+  EntryStore,
+  IdGen,
+  EntrySyncState,
+  PendingEntrySyncState,
+  SyncClient,
+  TimerAwayState,
+  TimerExitIntent,
+  TimerRecoveryNotice,
+  UnsyncedEntry,
+} from './types';
 
 const T0 = 1_700_000_000_000;
 const MIN = 60_000;
@@ -27,17 +39,22 @@ class SeqIdGen implements IdGen {
 
 class MemStore implements EntryStore {
   entries = new Map<string, TimeEntry>();
-  synced = new Set<string>();
-  upsert(e: TimeEntry) {
+  syncStates = new Map<string, EntrySyncState>();
+  upsert(e: TimeEntry, opts?: { syncState?: PendingEntrySyncState }) {
+    const existing = this.syncStates.get(e.id);
+    const nextState = opts?.syncState ?? (existing === 'pending_create' ? 'pending_create' : existing ? 'pending_update' : 'pending_create');
     this.entries.set(e.id, structuredClone(e));
-    this.synced.delete(e.id); // any change marks it dirty
+    this.syncStates.set(e.id, nextState);
+    return nextState;
   }
   getOpen() {
     for (const e of this.entries.values()) if (e.endedAt === null) return structuredClone(e);
     return null;
   }
-  getUnsynced() {
-    return [...this.entries.values()].filter((e) => !this.synced.has(e.id)).map((e) => structuredClone(e));
+  getUnsynced(): UnsyncedEntry[] {
+    return [...this.entries.values()]
+      .map((e) => ({ entry: structuredClone(e), syncState: this.syncStates.get(e.id) ?? 'pending_create' }))
+      .filter((r): r is UnsyncedEntry => r.syncState === 'pending_create' || r.syncState === 'pending_update');
   }
   listRecent(limit: number) {
     return [...this.entries.values()].reverse().slice(0, limit).map((e) => structuredClone(e));
@@ -48,8 +65,19 @@ class MemStore implements EntryStore {
       .reverse()
       .map((e) => structuredClone(e));
   }
-  markSynced(id: string) {
-    this.synced.add(id);
+  markCreated(id: string) {
+    this.syncStates.set(id, 'pending_update');
+  }
+  markPendingCreate(id: string) {
+    this.syncStates.set(id, 'pending_create');
+  }
+  markSynced(id: string, expectedEntry?: TimeEntry) {
+    if (expectedEntry) {
+      const current = this.entries.get(id);
+      if (!current || JSON.stringify(current) !== JSON.stringify(expectedEntry)) return false;
+    }
+    this.syncStates.set(id, 'synced');
+    return true;
   }
   liveness: number | null = null;
   setLiveness(ts: number) {
@@ -58,25 +86,64 @@ class MemStore implements EntryStore {
   getLiveness() {
     return this.liveness;
   }
+  exitIntent: TimerExitIntent | null = null;
+  awayState: TimerAwayState | null = null;
+  recovery: TimerRecoveryNotice | null = null;
+  setExitIntent(intent: TimerExitIntent) {
+    this.exitIntent = structuredClone(intent);
+  }
+  getExitIntent() {
+    return this.exitIntent ? structuredClone(this.exitIntent) : null;
+  }
+  clearExitIntent() {
+    this.exitIntent = null;
+  }
+  setAwayState(state: TimerAwayState) {
+    this.awayState = structuredClone(state);
+  }
+  getAwayState() {
+    return this.awayState ? structuredClone(this.awayState) : null;
+  }
+  clearAwayState() {
+    this.awayState = null;
+  }
+  setRecoveryNotice(notice: TimerRecoveryNotice) {
+    this.recovery = structuredClone(notice);
+  }
+  getRecoveryNotice() {
+    return this.recovery ? structuredClone(this.recovery) : null;
+  }
+  clearRecoveryNotice() {
+    this.recovery = null;
+  }
 }
 
 class SpySync implements SyncClient {
   creates: string[] = [];
   syncs: string[] = [];
-  failNext = false;
+  calls: string[] = [];
+  failCreateCount = 0;
+  failSyncCount = 0;
+  notFoundSyncCount = 0;
   async create(e: TimeEntry) {
-    if (this.failNext) {
-      this.failNext = false;
+    if (this.failCreateCount > 0) {
+      this.failCreateCount -= 1;
       throw new Error('network down');
     }
     this.creates.push(e.id);
+    this.calls.push(`create:${e.id}`);
   }
   async sync(e: TimeEntry) {
-    if (this.failNext) {
-      this.failNext = false;
+    if (this.notFoundSyncCount > 0) {
+      this.notFoundSyncCount -= 1;
+      throw new HttpError(`/v1/time-entries/${e.id}/sync`, 404, '{"error":"not_found"}');
+    }
+    if (this.failSyncCount > 0) {
+      this.failSyncCount -= 1;
       throw new Error('network down');
     }
     this.syncs.push(e.id);
+    this.calls.push(`sync:${e.id}`);
   }
 }
 
@@ -101,6 +168,7 @@ describe('TimerService.start', () => {
     expect(svc.isRunning()).toBe(true);
     expect(store.getOpen()).not.toBeNull();
     expect(sync.creates).toHaveLength(1);
+    expect(sync.syncs).toHaveLength(1);
   });
 
   it('switches to another task without requiring a stop first', async () => {
@@ -120,7 +188,7 @@ describe('TimerService.start', () => {
     expect(newEntry.startedAt).toBe(T0 + 10 * MIN);
     expect(store.getOpen()?.larkTaskGuid).toBe('task-b');
     expect(sync.creates).toEqual([oldEntry.id, newEntry.id]);
-    expect(sync.syncs).toEqual([oldEntry.id]);
+    expect(sync.syncs).toEqual([oldEntry.id, oldEntry.id, newEntry.id]);
   });
 
   it('is a no-op when starting the task that is already running', async () => {
@@ -132,7 +200,7 @@ describe('TimerService.start', () => {
     expect(second).toMatchObject({ state: 'RUNNING', larkTaskGuid: 'task-a', workedMs: 3 * MIN });
     expect(store.entries).toHaveLength(1);
     expect(sync.creates).toHaveLength(1);
-    expect(sync.syncs).toHaveLength(0);
+    expect(sync.syncs).toHaveLength(1);
   });
 
   it('attributes a Lark task guid and persists it', async () => {
@@ -185,7 +253,7 @@ describe('TimerService.stop', () => {
     // closed entry total = 10 minutes
     const closed = [...store.entries.values()][0]!;
     expect(totalWorkedMs(closed)).toBe(10 * MIN);
-    expect(sync.syncs).toHaveLength(1);
+    expect(sync.syncs).toEqual([closed.id, closed.id]);
   });
 
   it('is a no-op when not running', async () => {
@@ -195,18 +263,225 @@ describe('TimerService.stop', () => {
   });
 });
 
+describe('TimerService.prepareForQuit', () => {
+  it('stops an active timer locally and clears the exit intent after persistence', async () => {
+    await svc.start({});
+    clock.advance(9 * MIN);
+
+    const status = await svc.prepareForQuit('quit');
+
+    expect(status.state).toBe('IDLE');
+    expect(store.getOpen()).toBeNull();
+    expect(store.getExitIntent()).toBeNull();
+    const closed = [...store.entries.values()][0]!;
+    expect(closed.endedAt).toBe(T0 + 9 * MIN);
+    expect(totalWorkedMs(closed)).toBe(9 * MIN);
+  });
+
+  it('quits while paused without adding the paused gap as worked time', async () => {
+    await svc.start({});
+    clock.advance(5 * MIN);
+    await svc.pauseForIdle(clock.now());
+    clock.advance(20 * MIN);
+
+    await svc.prepareForQuit('quit');
+
+    const closed = [...store.entries.values()][0]!;
+    expect(closed.endedAt).toBe(T0 + 25 * MIN);
+    expect(totalWorkedMs(closed)).toBe(5 * MIN);
+  });
+
+  it('leaves the closed row pending when quit sync fails', async () => {
+    await svc.start({});
+    sync.failSyncCount = 1;
+    clock.advance(6 * MIN);
+
+    await svc.prepareForQuit('quit');
+
+    const closed = [...store.entries.values()][0]!;
+    expect(closed.endedAt).toBe(T0 + 6 * MIN);
+    expect(store.getUnsynced()).toMatchObject([{ syncState: 'pending_update' }]);
+    expect(store.getExitIntent()).toBeNull();
+  });
+
+  it('clears stale exit intent when nothing is running', async () => {
+    store.setExitIntent({ reason: 'quit', entryId: 'old', observedAt: clock.now() });
+
+    await svc.prepareForQuit('quit');
+
+    expect(store.getExitIntent()).toBeNull();
+  });
+});
+
+describe('TimerService.prepareForAway', () => {
+  it('stops a running timer at sleep start and records a sleep notice', async () => {
+    await svc.start({});
+    clock.advance(5 * MIN);
+
+    const status = await svc.prepareForAway('suspend', clock.now());
+
+    expect(status.state).toBe('IDLE');
+    expect(store.getOpen()).toBeNull();
+    expect(store.getAwayState()).toBeNull();
+    const closed = [...store.entries.values()][0]!;
+    expect(closed.endedAt).toBe(T0 + 5 * MIN);
+    expect(totalWorkedMs(closed)).toBe(5 * MIN);
+    expect(store.getRecoveryNotice()).toMatchObject({
+      entryId: closed.id,
+      recoveredAt: T0 + 5 * MIN,
+      reason: 'sleep_stop',
+    });
+  });
+
+  it('stops a paused timer without counting the away gap', async () => {
+    await svc.start({});
+    clock.advance(5 * MIN);
+    await svc.pauseForIdle(clock.now());
+    clock.advance(20 * MIN);
+
+    await svc.prepareForAway('lock', clock.now());
+
+    const closed = [...store.entries.values()][0]!;
+    expect(closed.endedAt).toBe(T0 + 25 * MIN);
+    expect(totalWorkedMs(closed)).toBe(5 * MIN);
+    expect(store.getRecoveryNotice()).toMatchObject({
+      entryId: closed.id,
+      recoveredAt: T0 + 25 * MIN,
+      reason: 'lock_stop',
+    });
+  });
+
+  it('leaves the closed row pending when sleep-stop sync fails', async () => {
+    await svc.start({});
+    sync.failSyncCount = 1;
+    clock.advance(6 * MIN);
+
+    await svc.prepareForAway('suspend', clock.now());
+
+    const closed = [...store.entries.values()][0]!;
+    expect(closed.endedAt).toBe(T0 + 6 * MIN);
+    expect(store.getUnsynced()).toMatchObject([{ syncState: 'pending_update' }]);
+    expect(store.getAwayState()).toBeNull();
+  });
+
+  it('is a no-op when away fires while idle', async () => {
+    store.setAwayState({ reason: 'suspend', entryId: 'old', awayStartedAt: clock.now(), observedAt: clock.now() });
+
+    const status = await svc.prepareForAway('suspend', clock.now());
+
+    expect(status.state).toBe('IDLE');
+    expect(store.getAwayState()).toBeNull();
+    expect(store.getRecoveryNotice()).toBeNull();
+  });
+});
+
 describe('TimerService offline behaviour', () => {
   it('keeps the timer working when create sync fails, and retries via flush', async () => {
-    sync.failNext = true; // the create POST fails
+    sync.failCreateCount = 1; // the create POST fails
     await svc.start({});
     expect(svc.isRunning()).toBe(true); // timer unaffected by network
     expect(sync.creates).toHaveLength(0);
-    expect(store.getUnsynced()).toHaveLength(1);
+    expect(store.getUnsynced()).toMatchObject([{ syncState: 'pending_create' }]);
 
     // Network recovers; flush retries.
     await svc.flushUnsynced();
+    expect(sync.creates).toHaveLength(1);
     expect(sync.syncs).toHaveLength(1);
     expect(store.getUnsynced()).toHaveLength(0);
+  });
+
+  it('creates then closes an entry that was started and stopped offline', async () => {
+    sync.failCreateCount = 2;
+    await svc.start({});
+    clock.advance(10 * MIN);
+    await svc.stop();
+    const entry = [...store.entries.values()][0]!;
+    expect(entry.endedAt).toBe(T0 + 10 * MIN);
+    expect(store.getUnsynced()).toMatchObject([{ syncState: 'pending_create' }]);
+
+    await svc.flushUnsynced();
+
+    expect(sync.calls).toEqual([`create:${entry.id}`, `sync:${entry.id}`]);
+    expect(store.getUnsynced()).toHaveLength(0);
+  });
+
+  it('downgrades a pending update that 404s and recreates it once', async () => {
+    await svc.start({});
+    const entry = store.getOpen()!;
+    expect(store.getUnsynced()).toHaveLength(0);
+
+    clock.advance(5 * MIN);
+    sync.notFoundSyncCount = 1;
+    await svc.pauseForIdle(clock.now());
+
+    expect(sync.calls.slice(-2)).toEqual([`create:${entry.id}`, `sync:${entry.id}`]);
+    expect(store.getUnsynced()).toHaveLength(0);
+  });
+
+  it('keeps pending_update when create succeeds but follow-up sync fails', async () => {
+    sync.failCreateCount = 1;
+    await svc.start({});
+    expect(store.getUnsynced()).toMatchObject([{ syncState: 'pending_create' }]);
+
+    sync.failSyncCount = 1;
+    await svc.flushUnsynced();
+
+    expect(sync.creates).toHaveLength(1);
+    expect(sync.syncs).toHaveLength(0);
+    expect(store.getUnsynced()).toMatchObject([{ syncState: 'pending_update' }]);
+
+    await svc.flushUnsynced();
+    expect(sync.syncs).toHaveLength(1);
+    expect(store.getUnsynced()).toHaveLength(0);
+  });
+
+  it('does not upgrade a pending_create row to pending_update when mutated locally', async () => {
+    sync.failCreateCount = 2;
+    await svc.start({});
+    expect(store.getUnsynced()).toMatchObject([{ syncState: 'pending_create' }]);
+
+    clock.advance(5 * MIN);
+    await svc.pauseForIdle(clock.now());
+
+    expect(store.getUnsynced()).toMatchObject([{ syncState: 'pending_create' }]);
+    expect(sync.syncs).toHaveLength(0);
+  });
+
+  it('does not mark a newer local mutation synced when an older update finishes', async () => {
+    await svc.start({});
+    const originalSync = sync.sync.bind(sync);
+    sync.sync = async (e) => {
+      store.upsert({
+        ...e,
+        segments: [{ ...e.segments[0]!, endedAt: T0 + 2 * MIN }],
+      });
+      await originalSync(e);
+    };
+
+    clock.advance(1 * MIN);
+    await svc.pauseForIdle(clock.now());
+
+    expect(store.getUnsynced()).toMatchObject([{ syncState: 'pending_update' }]);
+  });
+
+  it('leaves stale create-plus-sync rows pending_update when local state changes after create', async () => {
+    sync.failCreateCount = 1;
+    await svc.start({});
+    const entry = store.getOpen()!;
+    const originalCreate = sync.create.bind(sync);
+    sync.create = async (e) => {
+      await originalCreate(e);
+      store.upsert({
+        ...entry,
+        segments: [{ ...entry.segments[0]!, endedAt: T0 + 3 * MIN }],
+      });
+    };
+
+    await svc.flushUnsynced();
+
+    expect(sync.creates).toHaveLength(1);
+    expect(sync.syncs).toHaveLength(1);
+    expect(store.getUnsynced()).toMatchObject([{ syncState: 'pending_update' }]);
   });
 });
 
@@ -275,13 +550,13 @@ describe('TimerService.pauseForIdle / resumeFromIdle', () => {
     clock.advance(2 * MIN);
     const alreadyRunning = await svc.resume();
     expect(alreadyRunning).toMatchObject({ state: 'RUNNING', workedMs: 2 * MIN, paused: false });
-    expect(sync.syncs).toHaveLength(0);
+    expect(sync.syncs).toHaveLength(1);
 
     await svc.pauseForIdle(clock.now());
     clock.advance(8 * MIN);
     const resumed = await svc.resume();
     expect(resumed).toMatchObject({ state: 'RUNNING', workedMs: 2 * MIN, paused: false });
-    expect(sync.syncs).toHaveLength(2); // pause + resume
+    expect(sync.syncs).toHaveLength(3); // start + pause + resume
 
     clock.advance(3 * MIN);
     const after = svc.status();
@@ -351,24 +626,96 @@ describe('TimerService meeting segments', () => {
 });
 
 describe('TimerService.recover (crash recovery)', () => {
-  it('closes a left-open entry at last-known-active and syncs it', async () => {
+  it('recovers durable sleep state before generic crash recovery', async () => {
+    await svc.start({});
+    clock.advance(8 * MIN);
+    const open = store.getOpen()!;
+    store.setAwayState({ reason: 'suspend', entryId: open.id, awayStartedAt: clock.now(), observedAt: clock.now() });
+    clock.advance(60 * MIN);
+
+    const rebooted = new TimerService(store, sync, clock, ids);
+    const result = rebooted.recoverAway();
+
+    expect(result).toMatchObject({ entryId: open.id, recoveredAt: T0 + 8 * MIN });
+    expect(store.getAwayState()).toBeNull();
+    const recovered = [...store.entries.values()][0]!;
+    expect(recovered.endedAt).toBe(T0 + 8 * MIN);
+    expect(totalWorkedMs(recovered)).toBe(8 * MIN);
+    expect(store.getRecoveryNotice()).toMatchObject({
+      entryId: open.id,
+      recoveredAt: T0 + 8 * MIN,
+      reason: 'sleep_stop',
+    });
+  });
+
+  it('clears stale away state for an already-closed entry and creates a lock notice', async () => {
+    await svc.start({});
+    clock.advance(4 * MIN);
+    const open = store.getOpen()!;
+    store.upsert(closeTimeEntry(open, clock.now()));
+    store.setAwayState({ reason: 'lock', entryId: open.id, awayStartedAt: clock.now(), observedAt: clock.now() });
+
+    const rebooted = new TimerService(store, sync, clock, ids);
+    const result = rebooted.recoverAway();
+
+    expect(result).toMatchObject({ entryId: open.id, recoveredAt: T0 + 4 * MIN });
+    expect(store.getAwayState()).toBeNull();
+    expect(store.getOpen()).toBeNull();
+    expect(store.getRecoveryNotice()).toMatchObject({
+      entryId: open.id,
+      recoveredAt: T0 + 4 * MIN,
+      reason: 'lock_stop',
+    });
+  });
+
+  it('closes a left-open entry at last-known-active and records a recovery notice', async () => {
     // Simulate a crash: persist an open entry, then build a fresh service.
     await svc.start({});
     const lastActive = clock.now() + 3 * MIN;
 
     const svc2 = new TimerService(store, sync, clock, ids);
-    svc2.recover(lastActive);
+    const result = svc2.recover(lastActive);
 
+    expect(result).toMatchObject({ entryId: expect.any(String), recoveredAt: lastActive });
     expect(svc2.isRunning()).toBe(false);
     expect(store.getOpen()).toBeNull();
     const recovered = [...store.entries.values()][0]!;
     expect(recovered.endedAt).toBe(lastActive);
     expect(totalWorkedMs(recovered)).toBe(3 * MIN);
+    expect(store.getRecoveryNotice()).toMatchObject({
+      entryId: recovered.id,
+      recoveredAt: lastActive,
+      reason: 'unexpected_shutdown',
+    });
   });
 
   it('does nothing when there is no open entry', () => {
-    svc.recover(clock.now());
+    expect(svc.recover(clock.now())).toBeNull();
     expect(svc.isRunning()).toBe(false);
+  });
+
+  it('never recovers a paused entry before its latest segment end', async () => {
+    await svc.start({});
+    clock.advance(10 * MIN);
+    await svc.pauseForIdle(clock.now());
+    const staleLiveness = T0 + 5 * MIN;
+
+    const rebooted = new TimerService(store, sync, clock, ids);
+    const result = rebooted.recover(staleLiveness);
+
+    expect(result?.recoveredAt).toBe(T0 + 10 * MIN);
+    const recovered = [...store.entries.values()][0]!;
+    expect(recovered.endedAt).toBe(T0 + 10 * MIN);
+    expect(totalWorkedMs(recovered)).toBe(10 * MIN);
+  });
+
+  it('dismisses recovery notices', async () => {
+    await svc.start({});
+    svc.recover(clock.now());
+
+    expect(svc.recoveryNotice()).not.toBeNull();
+    svc.dismissRecoveryNotice();
+    expect(svc.recoveryNotice()).toBeNull();
   });
 });
 

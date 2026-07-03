@@ -9,6 +9,7 @@ export function larkLoginUrl(): string {
 }
 
 export type Role = 'ADMIN' | 'MANAGER' | 'MEMBER';
+export type ActivityRoleTitle = 'DEVELOPER' | 'DESIGNER' | 'SALES' | 'OTHER';
 export type Permission =
   | 'profile.self.read'
   | 'reports.self.read'
@@ -37,6 +38,7 @@ export interface Me {
   email: string;
   name: string;
   role: Role;
+  activityRoleTitle: ActivityRoleTitle;
   displayRole: Role;
   capabilities: Permission[];
   workspaceId: string;

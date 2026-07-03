@@ -11,8 +11,15 @@ import { buildAppUsage } from '../insights/appUsage';
 import { appIconUrl } from '../insights/appIcon';
 import { buildDayInsight, localDayWindow, shiftDayWindow } from '../insights/day';
 import { buildHeatmap, DEFAULT_BUCKET_MS, type HeatmapSample } from '../insights/heatmap';
+import {
+  groupInvalidationsByUser,
+  isInvalidatedAt,
+  type InvalidationsByUser,
+  type TimeInvalidationInput,
+} from '../insights/invalidations';
 import { cappedOpenEndedAt, latestSampleByEntry } from '../insights/openSegmentEvidence';
 import { buildTimesheetMatrix, dateRange, type TimesheetSegmentInput } from '../insights/timesheets';
+import type { RoleTitle } from '../scoring/presets';
 import { scoreMinute } from '../scoring/score';
 
 export const MEMBER_REPORT_MAX_DAYS = 60;
@@ -164,10 +171,13 @@ export function buildMemberReportDays(input: {
   samples: ReportActivitySample[];
   screenshots: ReportScreenshotRow[];
   shiftAssignments: ReportShiftAssignment[];
+  invalidations?: TimeInvalidationInput[];
+  activityRoleTitle?: RoleTitle | null;
   iconFor?: IconResolver;
 }): MemberReportDay[] {
   const iconFor = input.iconFor ?? appIconUrl;
   const entries = capOpenEntries(input.entries, input.samples, input.now);
+  const invalidationsByUser = groupInvalidationsByUser(input.invalidations);
   const segments: TimesheetSegmentInput[] = [];
   const nowMs = input.now.getTime();
   for (const e of entries) {
@@ -187,6 +197,7 @@ export function buildMemberReportDays(input: {
     to: input.range.to,
     tz: input.range.tz,
     segments,
+    invalidations: input.invalidations,
   });
   const cells = matrix?.cells[input.userId] ?? {};
 
@@ -200,6 +211,7 @@ export function buildMemberReportDays(input: {
     const dayEntries = entries.filter((e) =>
       e.segments.some((s) => overlaps(s.startedAt.getTime(), (s.endedAt ?? input.now).getTime(), dayStart, dayEnd)),
     );
+    const meetingIntervals = meetingIntervalsForEntries(dayEntries, input.now);
     const dayPending = input.manualRequests.filter((r) =>
       r.status === 'PENDING' && overlaps(r.requestedStart.getTime(), r.requestedEnd.getTime(), dayStart, dayEnd),
     );
@@ -248,12 +260,14 @@ export function buildMemberReportDays(input: {
       workedMs: 0,
       meetingMs: 0,
       manualMs: 0,
+      invalidatedMs: 0,
       totalMs: 0,
       firstActivityMs: null,
       lastActivityMs: null,
+      activitySampleCount: 0,
     };
     const gaps = insight.blocks.filter((b) => b.kind === 'GAP');
-    const daySamples = samplesForWindow(input.samples, dayStart, dayEnd);
+    const daySamples = samplesForWindow(input.samples, dayStart, dayEnd, invalidationsByUser, input.userId);
     const appUsage = buildAppUsage(
       daySamples.map((s) => ({
         activeApp: s.activeApp,
@@ -280,6 +294,7 @@ export function buildMemberReportDays(input: {
       workedMs: cell.workedMs,
       meetingMs: cell.meetingMs,
       manualMs: cell.manualMs,
+      invalidatedMs: cell.invalidatedMs,
       firstActivityMs: cell.firstActivityMs,
       lastActivityMs: cell.lastActivityMs,
       shiftStatus: computeShiftStatus({
@@ -292,7 +307,7 @@ export function buildMemberReportDays(input: {
         totalMs: gaps.reduce((sum, g) => sum + g.durationMs, 0),
       },
       approvals,
-      activityPercent: activityPercent(daySamples),
+      activityPercent: activityPercent(daySamples, input.activityRoleTitle, meetingIntervals),
       screenshots: { count: screenshotCount },
       topApps,
     };
@@ -320,15 +335,18 @@ function capOpenEntries(
 }
 
 export function buildMemberReportApps(input: {
+  userId: string;
   range: ReportRange;
   samples: ReportActivitySample[];
+  invalidations?: TimeInvalidationInput[];
   iconFor?: IconResolver;
 }): { date: string; tz: string; totalMinutes: number; apps: MemberReportApp[] } {
   const iconFor = input.iconFor ?? appIconUrl;
   const win = localDayWindow(input.range.from, input.range.tz);
   const dayStart = win?.start.getTime() ?? 0;
   const dayEnd = win?.end.getTime() ?? 0;
-  const samples = samplesForWindow(input.samples, dayStart, dayEnd);
+  const invalidationsByUser = groupInvalidationsByUser(input.invalidations);
+  const samples = samplesForWindow(input.samples, dayStart, dayEnd, invalidationsByUser, input.userId);
   const byApp = new Map<string, MemberReportApp & { scrolls: number; keystrokes: number; clicks: number }>();
   let totalMinutes = 0;
   for (const s of samples) {
@@ -365,9 +383,14 @@ export function buildMemberReportApps(input: {
 }
 
 export function buildMemberReportScreenshots(input: {
+  userId: string;
   range: ReportRange;
   samples: ReportActivitySample[];
   screenshots: ReportScreenshotRow[];
+  entries?: ReportTimeEntry[];
+  invalidations?: TimeInvalidationInput[];
+  activityRoleTitle?: RoleTitle | null;
+  now?: Date;
   toUrl: (row: ReportScreenshotRow, variant: 'full' | 'thumb') => string | null;
 }): {
   date: string;
@@ -379,11 +402,14 @@ export function buildMemberReportScreenshots(input: {
   const win = localDayWindow(input.range.from, input.range.tz);
   const dayStart = win?.start.getTime() ?? 0;
   const dayEnd = win?.end.getTime() ?? 0;
-  const samples = samplesForWindow(input.samples, dayStart, dayEnd);
+  const invalidationsByUser = groupInvalidationsByUser(input.invalidations);
+  const samples = samplesForWindow(input.samples, dayStart, dayEnd, invalidationsByUser, input.userId);
+  const meetingIntervals = meetingIntervalsForEntries(input.entries ?? [], input.now ?? new Date());
   const heatmap = buildHeatmap({
     dayStart,
     dayEnd,
-    samples: heatmapSamples(samples),
+    samples: heatmapSamples(samples, meetingIntervals),
+    role: input.activityRoleTitle,
     bucketMs: DEFAULT_BUCKET_MS,
   });
   const screenshots = input.screenshots
@@ -391,6 +417,7 @@ export function buildMemberReportScreenshots(input: {
     .sort((a, b) => a.capturedAt.getTime() - b.capturedAt.getTime())
     .map((s) => {
       const sample = sampleForScreenshot(samples, s.capturedAt.getTime());
+      const invalidated = isInvalidatedAt(invalidationsByUser, input.userId, s.capturedAt.getTime());
       return {
         id: s.id,
         capturedAt: s.capturedAt.toISOString(),
@@ -400,7 +427,8 @@ export function buildMemberReportScreenshots(input: {
         height: s.height,
         bytes: s.bytes,
         blurred: s.blurred,
-        activityPercent: sample ? Math.round(100 * scoreMinute(sample)) : null,
+        invalidated,
+        activityPercent: sample ? Math.round(100 * scoreSample(sample, input.activityRoleTitle, meetingIntervals)) : null,
         dominantApp: sample?.activeApp ?? null,
         dominantAppBundle: sample?.activeAppBundle ?? null,
         timeEntryId: s.timeEntryId,
@@ -409,7 +437,7 @@ export function buildMemberReportScreenshots(input: {
   return {
     date: input.range.from,
     tz: input.range.tz,
-    activityPercent: activityPercent(samples),
+    activityPercent: activityPercent(samples, input.activityRoleTitle, meetingIntervals),
     heatmap,
     screenshots,
   };
@@ -421,6 +449,7 @@ function emptyReportDay(date: string): MemberReportDay {
     workedMs: 0,
     meetingMs: 0,
     manualMs: 0,
+    invalidatedMs: 0,
     firstActivityMs: null,
     lastActivityMs: null,
     shiftStatus: 'no_shift',
@@ -436,36 +465,76 @@ function overlaps(startMs: number, endMs: number, winStartMs: number, winEndMs: 
   return startMs < winEndMs && endMs > winStartMs;
 }
 
-function samplesForWindow(samples: ReportActivitySample[], startMs: number, endMs: number): ReportActivitySample[] {
+function samplesForWindow(
+  samples: ReportActivitySample[],
+  startMs: number,
+  endMs: number,
+  invalidationsByUser?: InvalidationsByUser,
+  userId?: string,
+): ReportActivitySample[] {
   return samples.filter((s) => {
     const t = s.bucketStart.getTime();
-    return t >= startMs && t < endMs;
+    if (t < startMs || t >= endMs) return false;
+    return !(invalidationsByUser && userId && isInvalidatedAt(invalidationsByUser, userId, t));
   });
 }
 
-function heatmapSamples(samples: ReportActivitySample[]): HeatmapSample[] {
+function heatmapSamples(samples: ReportActivitySample[], meetingIntervals: Array<{ a: number; b: number }>): HeatmapSample[] {
   return samples.map((s) => ({
     bucketStartMs: s.bucketStart.getTime(),
     keystrokes: s.keystrokes,
     clicks: s.clicks,
     scrollEvents: s.scrollEvents,
     mouseDistancePx: s.mouseDistancePx,
-    isProtectedMeeting: false,
+    isProtectedMeeting: isInMeeting(meetingIntervals, s.bucketStart.getTime()),
   }));
 }
 
-function activityPercent(samples: ReportActivitySample[]): number | null {
+function activityPercent(
+  samples: ReportActivitySample[],
+  role: RoleTitle | null | undefined,
+  meetingIntervals: Array<{ a: number; b: number }>,
+): number | null {
   if (samples.length === 0) return null;
   let sum = 0;
   for (const s of samples) {
-    sum += scoreMinute({
-      keystrokes: s.keystrokes,
-      clicks: s.clicks,
-      scrollEvents: s.scrollEvents,
-      mouseDistancePx: s.mouseDistancePx,
-    });
+    sum += scoreSample(s, role, meetingIntervals);
   }
   return Math.round((100 * sum) / samples.length);
+}
+
+function scoreSample(
+  sample: ReportActivitySample,
+  role: RoleTitle | null | undefined,
+  meetingIntervals: Array<{ a: number; b: number }>,
+): number {
+  const bucketStartMs = sample.bucketStart.getTime();
+  return scoreMinute(
+    {
+      keystrokes: sample.keystrokes,
+      clicks: sample.clicks,
+      scrollEvents: sample.scrollEvents,
+      mouseDistancePx: sample.mouseDistancePx,
+    },
+    { role, ctx: { isProtectedMeeting: isInMeeting(meetingIntervals, bucketStartMs) } },
+  );
+}
+
+function meetingIntervalsForEntries(entries: ReportTimeEntry[], now: Date): Array<{ a: number; b: number }> {
+  const out: Array<{ a: number; b: number }> = [];
+  for (const entry of entries) {
+    for (const segment of entry.segments) {
+      if (segment.kind !== 'MEETING') continue;
+      const a = segment.startedAt.getTime();
+      const b = (segment.endedAt ?? now).getTime();
+      if (b > a) out.push({ a, b });
+    }
+  }
+  return out;
+}
+
+function isInMeeting(intervals: Array<{ a: number; b: number }>, epochMs: number): boolean {
+  return intervals.some((iv) => epochMs >= iv.a && epochMs < iv.b);
 }
 
 function countApprovalsForWindow(

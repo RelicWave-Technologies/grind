@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import { app } from 'electron';
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
-import { ScreenshotStore } from './store';
+import { ScreenshotStore, type ScreenshotUploadSummary } from './store';
 import { captureNow, thumbDataUrl, fullDataUrl } from './capture';
 import { nextDelayMs } from './scheduler';
 import { planScreenshotRetention } from './retention';
@@ -73,6 +73,7 @@ export function getScreenshotStore(): ScreenshotStore {
 }
 
 function schedule() {
+  if (timer) clearTimeout(timer);
   // Read the live, server-driven cadence each time so a policy change applies
   // from the next scheduled shot onward.
   const delay = nextDelayMs(getScreenshotIntervalSec() * 1000);
@@ -81,6 +82,7 @@ function schedule() {
 }
 
 async function tick() {
+  timer = null;
   try {
     const status = getTimerService().status();
     // Only capture while actively tracking (running and not paused).
@@ -96,6 +98,12 @@ async function tick() {
   } finally {
     schedule();
   }
+}
+
+export function rescheduleCaptureLoop(reason = 'config-change'): void {
+  if (!timer) return;
+  schedule();
+  log.info('screenshot loop rescheduled', { reason });
 }
 
 function screenshotsRoot(): string {
@@ -198,7 +206,16 @@ export function startCaptureLoop(): void {
 }
 
 export async function recentScreenshots(limit: number): Promise<
-  { id: string; capturedAt: number; thumb: string | null; uploadState: string; keyboardPct: number; mousePct: number }[]
+  {
+    id: string;
+    capturedAt: number;
+    thumb: string | null;
+    uploadState: string;
+    keyboardPct: number;
+    mousePct: number;
+    attempts: number;
+    lastError: string | null;
+  }[]
 > {
   const rows = getStore().recent(limit); // newest-first
   const activity = getActivityStore();
@@ -223,6 +240,8 @@ export async function recentScreenshots(limit: number): Promise<
         id: r.id,
         capturedAt: r.capturedAt,
         uploadState: r.uploadState,
+        attempts: r.attempts,
+        lastError: r.lastError,
         thumb: await thumbDataUrl(r.filePath),
         keyboardPct,
         mousePct,
@@ -242,6 +261,16 @@ export function todayScreenshotCount(): number {
   const d = new Date();
   d.setHours(0, 0, 0, 0);
   return getStore().countSince(d.getTime());
+}
+
+export function screenshotUploadSummary(): ScreenshotUploadSummary {
+  return getStore().uploadSummary();
+}
+
+export async function retryFailedUploads(): Promise<{ reset: number }> {
+  const reset = getStore().resetFailedUploads();
+  if (reset > 0) await drainUploads();
+  return { reset };
 }
 
 /** Capture immediately (manual "Take one now"). Forces the desktopCapturer

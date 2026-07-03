@@ -21,7 +21,7 @@ import {
   Users,
   X,
 } from 'lucide-react';
-import { api } from '../lib/api';
+import { api, API_BASE } from '../lib/api';
 import { fmtAgeShort, fmtDayLabel, fmtDurationMs, fmtTime } from '../lib/format';
 import { hasCapability } from '../lib/auth';
 import type { ManualTimeRequestDto } from '@grind/types';
@@ -33,7 +33,6 @@ import type {
   MemberReportDayScreenshotsResponse,
   MemberReportsMeResponse,
   ShiftStatus,
-  TeamReportAttentionItem,
   TeamReportMember,
   TeamMemberReportsResponse,
   TeamReportsResponse,
@@ -81,6 +80,11 @@ const MEMBER_DRAWER_TABS: ReadonlyArray<{ value: DrawerTab; label: string }> = [
   { value: 'approvals', label: 'Approvals' },
   { value: 'profile', label: 'Profile' },
 ];
+
+function reportImageUrl(value: string | null | undefined): string | undefined {
+  if (!value) return undefined;
+  return value.startsWith('/') ? `${API_BASE}${value}` : value;
+}
 
 const WEEKDAY_LABELS: ReadonlyArray<{ key: Weekday; label: string }> = [
   { key: 'mon', label: 'Mon' },
@@ -231,6 +235,7 @@ export function ReportsScreen() {
             <StatRow>
               <Stat label="Worked" value={fmtDurationMs(summary.workedMs)} />
               <Stat label="Manual" value={fmtDurationMs(summary.manualMs)} />
+              <Stat label="Excluded" value={fmtDurationMs(summary.invalidatedMs)} />
               <Stat label="Gaps" value={fmtDurationMs(summary.gapMs)} unit={`${summary.gapCount}`} />
               <Stat label="Approvals" value={summary.approvalsTotal} hint={`${summary.approved} accepted · ${summary.pending} pending · ${summary.rejected} rejected`} />
               <Stat label="Activity" value={summary.activityPercent === null ? '—' : `${summary.activityPercent}%`} />
@@ -350,7 +355,12 @@ function SelfReportTable({
                       <span className="ui-t-small ui-ink-3">{day.date}</span>
                     </div>
                   </Td>
-                  <Td className="rep-col-worked" mono>{fmtDurationMs(totalDayWorkedMs(day))}</Td>
+                  <Td className="rep-col-worked" mono>
+                    <div className="rep-metric-stack">
+                      <span>{fmtDurationMs(totalDayWorkedMs(day))}</span>
+                      {day.invalidatedMs > 0 && <span className="rep-invalidated-note">{fmtDurationMs(day.invalidatedMs)} excluded</span>}
+                    </div>
+                  </Td>
                   <Td className="rep-col-start" align="center">
                     <Tag status={statusTag(day.shiftStatus)}>{shiftLabel(day.shiftStatus)}</Tag>
                   </Td>
@@ -451,13 +461,16 @@ function TeamReportsView({
     <div className="rep-team">
       <section className="rep-team-summary" aria-label="Team report summary">
         <TeamKpi label="Members" value={data.summary.memberCount} sub={`${data.summary.activeDays}/${data.summary.memberDays} active days`} tone="lime" />
-        <TeamKpi label="Worked" value={fmtDurationMs(data.summary.workedMs)} sub={`${fmtDurationMs(data.summary.manualMs)} manual`} tone="mint" />
+        <TeamKpi
+          label="Worked"
+          value={fmtDurationMs(data.summary.workedMs)}
+          sub={`${fmtDurationMs(data.summary.manualMs)} manual${data.summary.invalidatedMs > 0 ? ` · ${fmtDurationMs(data.summary.invalidatedMs)} excluded` : ''}`}
+          tone="mint"
+        />
         <TeamKpi label="Late days" value={data.summary.lateDays} sub={`${data.summary.noActivityDays} no-activity days`} tone="cream" />
         <TeamKpi label="Pending" value={data.summary.pendingApprovals} sub={`${data.summary.gapCount} gaps · ${fmtDurationMs(data.summary.gapMs)}`} tone="coral" />
         <TeamKpi label="Activity" value={percentLabel(data.summary.activityPercent)} sub={`${data.summary.screenshots} screenshots`} tone="pink" />
       </section>
-
-      <TeamAttentionStrip items={data.attention} onOpenMember={onOpenMember} />
 
       <Card variant="flush" className="rep-team-members-card">
         <div className="rep-team-card-head">
@@ -470,44 +483,6 @@ function TeamReportsView({
         <TeamMembersTable members={data.members} onOpenMember={onOpenMember} />
       </Card>
     </div>
-  );
-}
-
-function TeamAttentionStrip({
-  items,
-  onOpenMember,
-}: {
-  items: TeamReportAttentionItem[];
-  onOpenMember: (userId: string) => void;
-}) {
-  if (items.length === 0) return null;
-  return (
-    <Card variant="flush" className="rep-attention-card">
-      <div className="rep-attention-head">
-        <div>
-          <h2 className="ui-t-title">Needs review</h2>
-          <p className="ui-t-small">Evidence gaps, approvals, late starts, and missing time in this range.</p>
-        </div>
-        <Tag status="warn" mono>{items.length}</Tag>
-      </div>
-      <div className="rep-attention-list">
-        {items.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            className="rep-attention-item"
-            onClick={() => onOpenMember(item.userId)}
-          >
-            <span className="rep-attention-main">
-              <Tag status={attentionStatus(item.severity)}>{item.title}</Tag>
-              <span className="ui-t-strong">{item.userName}</span>
-              <span className="ui-t-small ui-ink-3">{fmtDayLabel(item.date)}</span>
-            </span>
-            <span className="ui-t-small">{item.detail}</span>
-          </button>
-        ))}
-      </div>
-    </Card>
   );
 }
 
@@ -558,7 +533,10 @@ function TeamMembersTable({ members, onOpenMember }: { members: TeamReportMember
                 />
               </Td>
               <Td align="center">
-                <span className="ui-mono">{fmtDurationMs(member.workedMs)}</span>
+                <div className="rep-metric-stack">
+                  <span className="ui-mono">{fmtDurationMs(member.workedMs)}</span>
+                  {member.invalidatedMs > 0 && <span className="rep-invalidated-note">{fmtDurationMs(member.invalidatedMs)} excluded</span>}
+                </div>
               </Td>
               <Td align="center">
                 <span className="ui-mono">{fmtDurationMs(member.manualMs)}</span>
@@ -893,6 +871,7 @@ function TeamMemberDrawer({
               approvals={q.data.approvals}
               tz={tz}
               canDecide={canDecideApprovals}
+              currentUserId={me.id}
               decisionError={decisionError}
               busyRequestId={decide.isPending ? decide.variables?.id ?? null : null}
               busyAction={decide.isPending ? decide.variables?.action ?? null : null}
@@ -926,6 +905,7 @@ function TeamMemberReportsPanel({
       <div className="rep-drawer-stat-row">
         <DrawerMetric tone="lime" label="Worked" value={fmtDurationMs(member.workedMs)} />
         <DrawerMetric tone="cream" label="Approved hours" value={fmtDurationMs(member.manualMs)} />
+        <DrawerMetric tone="pink" label="Excluded" value={fmtDurationMs(member.invalidatedMs)} />
         <DrawerMetric label="Starts" value={<StartCounts member={member} />} />
         <DrawerMetric label="Approvals" value={<ApprovalCounts member={member} />} />
         <DrawerMetric tone="mint" label="Activity" value={percentLabel(member.activityPercent)} />
@@ -965,6 +945,7 @@ function TeamMemberApprovalsPanel({
   approvals,
   tz,
   canDecide,
+  currentUserId,
   decisionError,
   busyRequestId,
   busyAction,
@@ -975,6 +956,7 @@ function TeamMemberApprovalsPanel({
   approvals: ManualTimeRequestDto[];
   tz: string;
   canDecide: boolean;
+  currentUserId: string;
   decisionError: string | null;
   busyRequestId: string | null;
   busyAction: ApprovalDecisionAction | null;
@@ -1021,6 +1003,7 @@ function TeamMemberApprovalsPanel({
               const decidedMs = req.decidedAt ? new Date(req.decidedAt).getTime() : null;
               const task = reportApprovalTask(req);
               const isBusy = busyRequestId === req.id;
+              const isOwnRequest = req.userId === currentUserId;
               return (
                 <Tr
                   key={req.id}
@@ -1070,6 +1053,7 @@ function TeamMemberApprovalsPanel({
                     <Td className="rep-drawer-apv-col-actions" align="center">
                       <ReportApprovalDecisionCell
                         req={req}
+                        isOwnRequest={isOwnRequest}
                         busy={isBusy}
                         busyAction={isBusy ? busyAction : null}
                         onApprove={() => onApprove(req.id)}
@@ -1089,6 +1073,7 @@ function TeamMemberApprovalsPanel({
           req={selectedApproval}
           tz={tz}
           canDecide={canDecide}
+          isOwnRequest={selectedApproval.userId === currentUserId}
           busy={busyRequestId === selectedApproval.id}
           busyAction={busyRequestId === selectedApproval.id ? busyAction : null}
           onApprove={(id) => {
@@ -1112,6 +1097,7 @@ function TeamMemberApprovalsPanel({
 
 function ReportApprovalDecisionCell({
   req,
+  isOwnRequest,
   busy,
   busyAction,
   onApprove,
@@ -1119,6 +1105,7 @@ function ReportApprovalDecisionCell({
   onOpenDay,
 }: {
   req: ManualTimeRequestDto;
+  isOwnRequest: boolean;
   busy: boolean;
   busyAction: ApprovalDecisionAction | null;
   onApprove: () => void;
@@ -1135,6 +1122,25 @@ function ReportApprovalDecisionCell({
           icon={<Clock4 size={13} strokeWidth={1.8} />}
           aria-label="Open Edit Time"
           title="Open day"
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpenDay();
+          }}
+        />
+      </div>
+    );
+  }
+  if (isOwnRequest) {
+    return (
+      <div className="rep-drawer-approval-actions rep-drawer-approval-actions--done">
+        <Tag status="neutral" mono>Needs reviewer</Tag>
+        <IconButton
+          size="sm"
+          variant="ghost"
+          className="rep-drawer-approval-open-day"
+          icon={<Clock4 size={13} strokeWidth={1.8} />}
+          aria-label="Open Edit Time"
+          title="Another approver must decide"
           onClick={(e) => {
             e.stopPropagation();
             onOpenDay();
@@ -1179,6 +1185,7 @@ function ReportApprovalDetailsModal({
   req,
   tz,
   canDecide,
+  isOwnRequest,
   busy,
   busyAction,
   onApprove,
@@ -1189,6 +1196,7 @@ function ReportApprovalDetailsModal({
   req: ManualTimeRequestDto;
   tz: string;
   canDecide: boolean;
+  isOwnRequest: boolean;
   busy: boolean;
   busyAction: ApprovalDecisionAction | null;
   onApprove: (id: string) => void;
@@ -1268,7 +1276,10 @@ function ReportApprovalDetailsModal({
             >
               Open Edit Time
             </Button>
-            {canDecide && req.status === 'PENDING' && (
+            {canDecide && isOwnRequest && req.status === 'PENDING' && (
+              <Tag status="neutral" mono>Needs reviewer</Tag>
+            )}
+            {canDecide && !isOwnRequest && req.status === 'PENDING' && (
               <>
                 <Button
                   size="sm"
@@ -1558,7 +1569,7 @@ function ActivityPanel({ data, tz }: { data: MemberReportDayScreenshotsResponse;
     shift: null,
     firstActivityAt: null,
     lastActivityAt: null,
-    totals: { workedMs: 0, meetingMs: 0, manualMs: 0, idleTrimmedMs: 0, pendingMs: 0, gapMs: 0 },
+    totals: { workedMs: 0, meetingMs: 0, manualMs: 0, idleTrimmedMs: 0, pendingMs: 0, gapMs: 0, invalidatedMs: 0 },
     blocks: [],
     recentRejected: [],
   };
@@ -1578,25 +1589,30 @@ function ActivityPanel({ data, tz }: { data: MemberReportDayScreenshotsResponse;
         <EmptyState icon={<Images size={22} strokeWidth={1.8} />} title="No screenshots" description="No uploaded screenshots exist for this day yet." />
       ) : (
         <div className="rep-shot-grid">
-          {data.screenshots.map((shot) => (
-            <div key={shot.id} className="rep-shot">
-              {shot.thumbUrl || shot.fullUrl ? (
-                <a href={shot.fullUrl ?? shot.thumbUrl ?? undefined} target="_blank" rel="noreferrer" className="rep-shot-img">
-                  <img src={shot.thumbUrl ?? shot.fullUrl ?? undefined} alt="" />
-                  <ExternalLink size={14} strokeWidth={1.8} />
-                </a>
-              ) : (
-                <div className="rep-shot-empty">
-                  <Images size={20} strokeWidth={1.8} />
+          {data.screenshots.map((shot) => {
+            const href = reportImageUrl(shot.fullUrl ?? shot.thumbUrl);
+            const src = reportImageUrl(shot.thumbUrl ?? shot.fullUrl);
+            return (
+              <div key={shot.id} className="rep-shot">
+                {href && src ? (
+                  <a href={href} target="_blank" rel="noreferrer" className="rep-shot-img">
+                    <img src={src} alt="" />
+                    <ExternalLink size={14} strokeWidth={1.8} />
+                  </a>
+                ) : (
+                  <div className="rep-shot-empty">
+                    <Images size={20} strokeWidth={1.8} />
+                  </div>
+                )}
+                <div className="rep-shot-meta">
+                  <span className="ui-t-strong">{fmtTime(new Date(shot.capturedAt).getTime(), tz)}</span>
+                  <span className="ui-t-small ui-ink-2">{shot.invalidated ? 'Invalidated window' : shot.activityPercent === null ? 'No activity sample' : `${shot.activityPercent}% activity`}</span>
+                  <span className="ui-t-small ui-ink-3">{shot.dominantApp ?? 'Unknown app'}</span>
+                  {shot.invalidated && <Tag status="warn">Excluded</Tag>}
                 </div>
-              )}
-              <div className="rep-shot-meta">
-                <span className="ui-t-strong">{fmtTime(new Date(shot.capturedAt).getTime(), tz)}</span>
-                <span className="ui-t-small ui-ink-2">{shot.activityPercent === null ? 'No activity sample' : `${shot.activityPercent}% activity`}</span>
-                <span className="ui-t-small ui-ink-3">{shot.dominantApp ?? 'Unknown app'}</span>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
@@ -1690,6 +1706,7 @@ function percentLabel(value: number | null): string {
 function summarize(days: MemberReportDay[]) {
   let workedMs = 0;
   let manualMs = 0;
+  let invalidatedMs = 0;
   let gapMs = 0;
   let gapCount = 0;
   let approved = 0;
@@ -1700,6 +1717,7 @@ function summarize(days: MemberReportDay[]) {
   for (const d of days) {
     workedMs += totalDayWorkedMs(d);
     manualMs += d.manualMs;
+    invalidatedMs += d.invalidatedMs;
     gapMs += d.gaps.totalMs;
     gapCount += d.gaps.count;
     approved += d.approvals.approved;
@@ -1713,6 +1731,7 @@ function summarize(days: MemberReportDay[]) {
   return {
     workedMs,
     manualMs,
+    invalidatedMs,
     gapMs,
     gapCount,
     approved,
@@ -1909,12 +1928,6 @@ function statusTag(status: ShiftStatus): Status {
   if (status === 'early' || status === 'on_time') return 'success';
   if (status === 'late') return 'danger';
   if (status === 'no_activity') return 'warn';
-  return 'neutral';
-}
-
-function attentionStatus(severity: TeamReportAttentionItem['severity']): Status {
-  if (severity === 'danger') return 'danger';
-  if (severity === 'warn') return 'warn';
   return 'neutral';
 }
 

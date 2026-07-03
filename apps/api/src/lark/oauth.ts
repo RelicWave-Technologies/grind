@@ -79,6 +79,36 @@ export function verifyLoginState(token: string): LarkLoginStatePayload {
   };
 }
 
+export type AgentLoginRouteHint = {
+  client: 'agent';
+  agentCallbackScheme: 'grind' | 'timo';
+};
+
+/**
+ * Recover only the signed client-routing hint from an expired login state.
+ *
+ * This intentionally ignores expiration but still verifies the JWT signature
+ * and token kind. Callers must use the result only for terminal error routing,
+ * never for identity, session issuance, or token exchange.
+ */
+export function verifyExpiredAgentLoginRouteHint(token: string): AgentLoginRouteHint | null {
+  try {
+    const decoded = jwt.verify(token, env.JWT_SECRET, {
+      algorithms: ['HS256'],
+      ignoreExpiration: true,
+    });
+    if (typeof decoded !== 'object' || !decoded) return null;
+    const { kind, client, agentCallbackScheme } = decoded as Record<string, unknown>;
+    if (kind !== 'lark_login' || client !== 'agent') return null;
+    if (agentCallbackScheme !== undefined && agentCallbackScheme !== 'grind' && agentCallbackScheme !== 'timo') {
+      return null;
+    }
+    return { client: 'agent', agentCallbackScheme: agentCallbackScheme === 'timo' ? 'timo' : 'grind' };
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Build the Lark OAuth v2 authorize URL. Hosted on the accounts host
  * (accounts.larksuite.com) per Lark's OAuth v2 docs.

@@ -60,7 +60,14 @@ export const PatchTeamMemberSettingsRequest = z
     // policy default. A number sets an explicit per-member override.
     screenshotIntervalMin: z.number().int().min(SCREENSHOT_INTERVAL_MIN).max(SCREENSHOT_INTERVAL_MAX).nullable().optional(),
     idleThresholdMin: z.number().int().min(IDLE_THRESHOLD_MIN).max(IDLE_THRESHOLD_MAX).nullable().optional(),
+    auditReason: z.string().max(500).optional(),
   })
-  .refine((v) => Object.keys(v).length > 0, { message: 'nothing_to_update' });
+  .refine(
+    (v) =>
+      v.shiftId !== undefined ||
+      v.screenshotIntervalMin !== undefined ||
+      v.idleThresholdMin !== undefined,
+    { message: 'nothing_to_update' },
+  );
 
 export type PatchTeamMemberSettingsRequest = z.infer<typeof PatchTeamMemberSettingsRequest>;

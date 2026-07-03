@@ -79,6 +79,101 @@ The agent's local DB lives at:
 
 ---
 
+## Release QA — packaged agent
+
+Use this before calling a desktop release ready. Dev Electron is not enough:
+macOS permissions attach to the launched bundle identity, and Windows unsigned
+installers have different install and SmartScreen behavior than local dev.
+
+### Evidence to record
+
+Create a short result note in the Lark Updates page with:
+
+- Artifact name and version.
+- API URL baked into the agent.
+- OS name/version and CPU architecture.
+- Tester name and date.
+- Pass/fail for each checklist item.
+- Blocking issue, reproduction steps, logs/screenshots, and whether a rebuild is required.
+
+### macOS signed/notarized checklist
+
+1. Build or download the intended artifact.
+   - Signed/notarized release: `SIGN=1 pnpm --filter @grind/agent package:mac:arm64`.
+   - Signed without notarization for internal TCC smoke: `SIGN=1 NOTARIZE=0 pnpm --filter @grind/agent package:mac:arm64`.
+2. Verify identity before install.
+   - `codesign --verify --deep --strict --verbose=2 "Timo.app"`
+   - `codesign -dv --verbose=4 "Timo.app"`
+   - `spctl --assess --type execute --verbose=4 "Timo.app"`
+   - For notarized builds: `stapler validate "Timo.app"`.
+3. Install from the packaged DMG/ZIP, not `electron-vite dev`.
+4. Launch Timo and confirm the app name appears as `Timo` in macOS permission prompts/settings.
+5. Complete Lark login through the browser and confirm `timo://` returns to the agent.
+6. Start a timer and confirm the menu bar/floating/window tracking state is visible.
+7. Screen Recording:
+   - trigger screenshot capture;
+   - confirm the permission state is accurate;
+   - grant permission, relaunch, and confirm screenshots capture real pixels.
+8. Accessibility/input capture:
+   - request permission;
+   - relaunch after grant;
+   - confirm Settings reports trusted/ready/recording/hook-running truthfully;
+   - verify keyboard/mouse counts increase while tracking.
+9. Screenshot upload path:
+   - capture at least one screenshot;
+   - confirm local strip renders it;
+   - confirm dashboard report thumbnail opens through `/v1/screenshots/:id/image`.
+10. Policy behavior:
+    - set app/title/URL capture off and verify the agent does not store/upload active-window fields;
+    - set screenshot interval shorter and verify heartbeat config refresh reschedules without restart.
+11. Idle behavior:
+    - trigger idle threshold;
+    - confirm idle discard/trim behavior is visible and does not over-count.
+12. Offline/retry:
+    - stop API/network;
+    - create activity/screenshots;
+    - restore network and confirm outbox drains;
+    - force screenshot upload failure and confirm failed/retry UI is truthful.
+13. Quit/update safety:
+    - stop while tracking and verify clean flush;
+    - trigger update-ready UI if an update feed is available;
+    - confirm install is blocked or deferred while tracking and flushes before restart.
+
+### Windows unsigned installer checklist
+
+1. Build or download the intended unsigned x64 installer.
+   - CI path: `Package Windows Agent` workflow.
+   - Local Windows path: `pnpm --filter @grind/agent package:win:x64`.
+2. Confirm SmartScreen behavior is expected for an unsigned v1 internal build.
+   - Warning shown is acceptable only if IT deployment policy still allows install.
+   - If install/run is blocked by policy, record as a release blocker.
+3. Install via the NSIS installer; verify Start Menu/Desktop shortcuts.
+4. Launch Timo from the installed shortcut, not from source.
+5. Complete Lark login through the browser and confirm the `timo://` callback reaches the installed app.
+6. Start/stop/resume tracking; verify tray/window state and elapsed time.
+7. Verify launch-at-login setting persists across sign out/reboot.
+8. Capture screenshots and confirm thumbnails/full images render locally and in dashboard reports.
+9. Verify keyboard/mouse hook status is truthful and activity counts increase while tracking.
+10. Verify activity/screenshot outboxes drain after network interruption.
+11. Verify failed screenshot uploads show failed state and retry action.
+12. Uninstall and confirm the app is removed cleanly; record whether local data retention needs an IT cleanup step.
+
+### Dashboard regression pass
+
+Use the packaged-agent run above plus the web dashboard to verify the strict
+admin-flow fixes together:
+
+1. Policy: 1-minute screenshot/idle settings require an audit reason and appear in Monitoring audit.
+2. Team Settings: manager can edit a direct report, cannot self-edit, and 1-minute member settings require a reason.
+3. People: admins can set activity role; managers/members cannot self-tune it.
+4. Flags: `TIME_INVALIDATED` requires a note and reports affected minutes.
+5. Reports/Attendance/Payroll: invalidated time is excluded and shown as audit context.
+6. Screenshots: report images load through authenticated API URLs, not storage-provider URLs.
+7. Approvals: member requests route manager-first; nobody can approve their own request.
+8. Direct URLs: manager can open `/attendance` and is redirected away from `/teams`, `/shifts`, `/policy`, and `/payroll`.
+
+---
+
 ## Running the automated tests yourself
 
 ```bash

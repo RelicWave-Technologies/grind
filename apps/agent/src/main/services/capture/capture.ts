@@ -77,6 +77,9 @@ export async function captureNow(
       uploadState: 'pending',
       attempts: 0,
       s3Key: null,
+      lastError: null,
+      nextAttemptAt: null,
+      failedAt: null,
     });
   }
   log.info('captured screenshots', { count: rows.length, displays: screen.getAllDisplays().length });

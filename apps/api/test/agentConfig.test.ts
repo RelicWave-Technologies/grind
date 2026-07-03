@@ -10,7 +10,13 @@ const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
 let counter = 0;
 
 async function seedAgentConfig(input: {
-  policy?: { defaultScreenshotIntervalMin: number; defaultIdleThresholdMin: number };
+  policy?: {
+    defaultScreenshotIntervalMin: number;
+    defaultIdleThresholdMin: number;
+    captureApps?: boolean;
+    captureTitles?: boolean;
+    captureUrls?: boolean;
+  };
   user?: { screenshotIntervalMin?: number | null; idleThresholdMin?: number | null };
 }) {
   counter += 1;
@@ -22,6 +28,9 @@ async function seedAgentConfig(input: {
         workspaceId: workspace.id,
         defaultScreenshotIntervalMin: input.policy.defaultScreenshotIntervalMin,
         defaultIdleThresholdMin: input.policy.defaultIdleThresholdMin,
+        captureApps: input.policy.captureApps ?? false,
+        captureTitles: input.policy.captureTitles ?? false,
+        captureUrls: input.policy.captureUrls ?? false,
       },
     });
   }
@@ -52,8 +61,12 @@ describe('/v1/agent/config', () => {
     const res = await request(app).get('/v1/agent/config').set(auth(s.token));
 
     expect(res.status).toBe(200);
+    expect(res.body.configVersion).toEqual(expect.any(String));
     expect(res.body.screenshotIntervalMin).toBe(45);
     expect(res.body.idleThresholdMin).toBe(7);
+    expect(res.body.captureApps).toBe(false);
+    expect(res.body.captureTitles).toBe(false);
+    expect(res.body.captureUrls).toBe(false);
   });
 
   it('gives per-member overrides priority over workspace policy defaults', async () => {
@@ -69,13 +82,37 @@ describe('/v1/agent/config', () => {
     expect(res.body.idleThresholdMin).toBe(12);
   });
 
+  it('returns workspace capture policy flags to the agent', async () => {
+    const s = await seedAgentConfig({
+      policy: {
+        defaultScreenshotIntervalMin: 45,
+        defaultIdleThresholdMin: 7,
+        captureApps: true,
+        captureTitles: true,
+        captureUrls: false,
+      },
+      user: { screenshotIntervalMin: null, idleThresholdMin: null },
+    });
+
+    const res = await request(app).get('/v1/agent/config').set(auth(s.token));
+
+    expect(res.status).toBe(200);
+    expect(res.body.captureApps).toBe(true);
+    expect(res.body.captureTitles).toBe(true);
+    expect(res.body.captureUrls).toBe(false);
+  });
+
   it('falls back to built-in defaults when no policy row exists', async () => {
     const s = await seedAgentConfig({});
 
     const res = await request(app).get('/v1/agent/config').set(auth(s.token));
 
     expect(res.status).toBe(200);
+    expect(res.body.configVersion).toEqual(expect.any(String));
     expect(res.body.screenshotIntervalMin).toBe(180);
     expect(res.body.idleThresholdMin).toBe(5);
+    expect(res.body.captureApps).toBe(false);
+    expect(res.body.captureTitles).toBe(false);
+    expect(res.body.captureUrls).toBe(false);
   });
 });

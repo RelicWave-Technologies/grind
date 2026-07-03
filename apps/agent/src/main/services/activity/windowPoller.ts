@@ -1,12 +1,13 @@
 import { getTimerService } from '../timer';
 import { recordActiveWindow } from './index';
 import { noteRunningApp } from '../appIcons';
+import { getCapturePolicy } from '../agentConfig';
 import { log } from '../../logger';
 
 /**
  * Polls the foreground window (~10s) and feeds the active-window tracker for
- * the M14 app/site usage panel. Policy-gated server-side — titles/URLs are
- * scrubbed on ingestion unless the workspace allows them.
+ * the M14 app/site usage panel. Policy-gated at the source: if app capture is
+ * disabled, this never loads/calls the OS active-window module.
  *
  * (This used to also drive automatic meeting detection, which was removed:
  * browser-tab call detection needed Screen Recording + a scriptable browser
@@ -45,19 +46,21 @@ async function loadModule(): Promise<GetWindows | null> {
 
 async function tick(): Promise<void> {
   try {
-    const gw = await loadModule();
-    if (!gw) return;
+    const policy = getCapturePolicy();
+    if (!policy.captureApps) return;
     // Only capture while actively tracking.
     const status = getTimerService().status();
     if (status.state !== 'RUNNING' || status.paused) return;
 
+    const gw = await loadModule();
+    if (!gw) return;
     const win = await gw.activeWindow();
     recordActiveWindow({
       ts: Date.now(),
       app: win?.owner?.name ?? null,
       appBundle: win?.owner?.bundleId ?? null,
-      title: win?.title ?? null,
-      url: win?.url ?? null,
+      title: policy.captureTitles ? win?.title ?? null : null,
+      url: policy.captureUrls ? win?.url ?? null : null,
     });
     // Extract + upload this app's real OS icon (once per bundle per session).
     void noteRunningApp({

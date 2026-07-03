@@ -13,8 +13,15 @@ export { LarkReauthRequiredError, LarkTransientError } from './oauthClient';
 export type { OAuthClient, LarkTokenResponse } from './oauthClient';
 export { resolveIdentity } from './identity';
 export type { TenantClient, ResolvedLarkUser } from './identity';
-export { signOAuthState, verifyOAuthState, buildAuthorizeUrl, signLoginState, verifyLoginState } from './oauth';
-export type { LarkLoginStatePayload } from './oauth';
+export {
+  signOAuthState,
+  verifyOAuthState,
+  buildAuthorizeUrl,
+  signLoginState,
+  verifyLoginState,
+  verifyExpiredAgentLoginRouteHint,
+} from './oauth';
+export type { AgentLoginRouteHint, LarkLoginStatePayload } from './oauth';
 export type { ProfileClient, LarkProfile } from './profile';
 export { normalizeEmail } from './profile';
 export { mapTasks, loggedMsByGuid, toEpochMs, buildCreateTaskPayload, LarkTaskApiError } from './tasks';

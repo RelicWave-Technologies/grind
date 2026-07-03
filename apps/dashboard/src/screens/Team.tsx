@@ -1,7 +1,8 @@
 import './team.css';
 import { useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowUpRight, Check, Pencil, RotateCcw, Users, X } from 'lucide-react';
+import { ArrowUpRight, Check, Pencil, RotateCcw, Save, Users, X } from 'lucide-react';
 import type {
   PatchTeamMemberSettingsRequest,
   ShiftDto,
@@ -10,13 +11,14 @@ import type {
   WorkspacePolicyDto,
 } from '@grind/types';
 import { api } from '../lib/api';
-import { useMe } from '../lib/auth';
+import { useMe, type Role } from '../lib/auth';
 import {
   Avatar,
   Banner,
   Button,
   Card,
   EmptyState,
+  Field,
   IconButton,
   Identity,
   Page,
@@ -29,6 +31,7 @@ import {
   Tag,
   Tbody,
   Td,
+  Textarea,
   Th,
   THead,
   Toolbar,
@@ -45,6 +48,8 @@ type RowDraft = {
   screenshotIntervalMin: number;
   idleThresholdMin: number;
 } | null;
+type MonitoringRisk = 'NORMAL' | 'CAUTION' | 'HIGH';
+type MonitoringTiming = { screenshotIntervalMin: number; idleThresholdMin: number };
 
 const TEAM_SETTINGS_QUERY_KEY = ['admin', 'team-member-settings'] as const;
 
@@ -57,6 +62,11 @@ export function TeamScreen() {
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [pendingEdit, setPendingEdit] = useState<PendingEdit>(null);
   const [rowDraft, setRowDraft] = useState<RowDraft>(null);
+  const [riskPrompt, setRiskPrompt] = useState<{
+    member: TeamMemberSettingsDto;
+    patch: PatchTeamMemberSettingsRequest;
+    next: MonitoringTiming;
+  } | null>(null);
 
   const settingsQ = useQuery({
     queryKey: TEAM_SETTINGS_QUERY_KEY,
@@ -79,6 +89,7 @@ export function TeamScreen() {
         };
       });
       setRowDraft((current) => (current?.userId === variables.userId ? null : current));
+      setRiskPrompt((current) => (current?.member.id === variables.userId ? null : current));
     },
     onSettled: () => setPendingEdit(null),
   });
@@ -123,8 +134,25 @@ export function TeamScreen() {
       setRowDraft(null);
       return;
     }
+    const previousTiming = {
+      screenshotIntervalMin: member.screenshotIntervalMin,
+      idleThresholdMin: member.idleThresholdMin,
+    };
+    const nextTiming = {
+      screenshotIntervalMin: rowDraft.screenshotIntervalMin,
+      idleThresholdMin: rowDraft.idleThresholdMin,
+    };
+    if (
+      monitoringTimingChanged(previousTiming, nextTiming) &&
+      monitoringRiskLevel(nextTiming) === 'HIGH'
+    ) {
+      setRiskPrompt({ member, patch, next: nextTiming });
+      return;
+    }
     patchMember(member.id, 'settings', patch);
   }
+
+  const draftRisk = rowDraft ? monitoringRiskLevel(rowDraft) : 'NORMAL';
 
   return (
     <Page className="tm-page">
@@ -162,6 +190,18 @@ export function TeamScreen() {
 
       {updateMember.isError && (
         <Banner status="danger">Couldn&apos;t save the member setting: {(updateMember.error as Error).message}</Banner>
+      )}
+
+      {rowDraft && draftRisk === 'HIGH' && (
+        <Banner status="danger">
+          This edit sets 1-minute monitoring for a member. Saving it requires an audit reason.
+        </Banner>
+      )}
+
+      {rowDraft && draftRisk === 'CAUTION' && (
+        <Banner status="warn">
+          This edit uses a short monitoring cadence. It will be audit-logged when saved.
+        </Banner>
       )}
 
       {settingsQ.isLoading && (
@@ -204,6 +244,7 @@ export function TeamScreen() {
               members={members}
               shifts={shifts}
               currentUserId={meQ.data?.id ?? null}
+              currentUserRole={meQ.data?.role ?? null}
               pendingEdit={pendingEdit}
               rowDraft={rowDraft}
               onStartEdit={startRowEdit}
@@ -226,6 +267,17 @@ export function TeamScreen() {
           onClose={() => setSelectedUserId(null)}
         />
       )}
+
+      {riskPrompt && (
+        <TeamMonitoringRiskModal
+          member={riskPrompt.member}
+          next={riskPrompt.next}
+          saving={updateMember.isPending}
+          error={updateMember.error instanceof Error ? updateMember.error.message : null}
+          onClose={() => setRiskPrompt(null)}
+          onConfirm={(auditReason) => patchMember(riskPrompt.member.id, 'settings', { ...riskPrompt.patch, auditReason })}
+        />
+      )}
     </Page>
   );
 }
@@ -234,6 +286,7 @@ function TeamSettingsTable({
   members,
   shifts,
   currentUserId,
+  currentUserRole,
   pendingEdit,
   rowDraft,
   onStartEdit,
@@ -245,6 +298,7 @@ function TeamSettingsTable({
   members: TeamMemberSettingsDto[];
   shifts: ShiftDto[];
   currentUserId: string | null;
+  currentUserRole: Role | null;
   pendingEdit: PendingEdit;
   rowDraft: RowDraft;
   onStartEdit: (member: TeamMemberSettingsDto) => void;
@@ -276,6 +330,7 @@ function TeamSettingsTable({
             const idleThresholdMin = draft ? draft.idleThresholdMin : member.idleThresholdMin;
             const shift = shifts.find((s) => s.id === shiftId) ?? null;
             const isCurrentUser = member.id === currentUserId;
+            const selfEditLocked = isCurrentUser && currentUserRole !== 'ADMIN';
 
             return (
               <Tr key={member.id} className="tm-member-row">
@@ -355,8 +410,13 @@ function TeamSettingsTable({
                       <>
                         <IconButton
                           icon={<Pencil size={14} strokeWidth={1.9} />}
-                          aria-label={`Edit ${member.name} settings`}
-                          disabled={Boolean(pendingEdit) || Boolean(rowDraft)}
+                          aria-label={
+                            selfEditLocked
+                              ? `Admin controls ${member.name} settings`
+                              : `Edit ${member.name} settings`
+                          }
+                          title={selfEditLocked ? 'Admins control your settings' : undefined}
+                          disabled={Boolean(pendingEdit) || Boolean(rowDraft) || selfEditLocked}
                           onClick={() => onStartEdit(member)}
                         />
                         <Button
@@ -483,6 +543,80 @@ function formatCadence(minutes: number): string {
   const h = Math.floor(minutes / 60);
   const m = minutes % 60;
   return m === 0 ? `${h}h` : `${h}h ${m}m`;
+}
+
+function monitoringRiskLevel(timing: MonitoringTiming): MonitoringRisk {
+  if (timing.screenshotIntervalMin === 1 || timing.idleThresholdMin === 1) return 'HIGH';
+  if (timing.screenshotIntervalMin <= 5 || timing.idleThresholdMin <= 3) return 'CAUTION';
+  return 'NORMAL';
+}
+
+function monitoringTimingChanged(previous: MonitoringTiming, next: MonitoringTiming): boolean {
+  return previous.screenshotIntervalMin !== next.screenshotIntervalMin ||
+    previous.idleThresholdMin !== next.idleThresholdMin;
+}
+
+function TeamMonitoringRiskModal({
+  member,
+  next,
+  saving,
+  error,
+  onClose,
+  onConfirm,
+}: {
+  member: TeamMemberSettingsDto;
+  next: MonitoringTiming;
+  saving: boolean;
+  error: string | null;
+  onClose: () => void;
+  onConfirm: (auditReason: string) => void;
+}) {
+  const [reason, setReason] = useState('');
+  const trimmed = reason.trim();
+  return createPortal(
+    <div className="ui-overlay tm-risk-layer" role="presentation" onMouseDown={onClose}>
+      <section className="tm-risk-modal" role="dialog" aria-modal="true" aria-labelledby="tm-risk-title" onMouseDown={(e) => e.stopPropagation()}>
+        <header className="tm-risk-head">
+          <div className="tm-risk-title">
+            <div className="ui-t-eyebrow">Monitoring audit</div>
+            <h2 id="tm-risk-title" className="ui-t-title">Confirm 1-minute monitoring</h2>
+            <p className="ui-t-small">
+              {member.name}: screenshots every {formatCadence(next.screenshotIntervalMin)}, idle after {formatCadence(next.idleThresholdMin)}.
+            </p>
+          </div>
+          <IconButton aria-label="Close" icon={<X size={18} />} onClick={onClose} />
+        </header>
+        <div className="tm-risk-body">
+          <Banner status="danger">
+            1-minute monitoring is exceptional. Record why this member needs it before saving.
+          </Banner>
+          <Field label="Audit reason" hint="Required. Visible to admins in policy audit history.">
+            <Textarea
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              maxLength={500}
+              placeholder="Example: temporary review window approved by Ops."
+              autoFocus
+            />
+          </Field>
+          {error && <Banner status="danger">{error}</Banner>}
+        </div>
+        <footer className="tm-risk-foot">
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button
+            variant="primary"
+            icon={<Save size={15} />}
+            onClick={() => onConfirm(trimmed)}
+            loading={saving}
+            disabled={!trimmed}
+          >
+            Save with audit
+          </Button>
+        </footer>
+      </section>
+    </div>,
+    document.body,
+  );
 }
 
 function localDateKey(d = new Date()): string {

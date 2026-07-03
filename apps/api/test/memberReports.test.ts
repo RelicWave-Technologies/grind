@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import request from 'supertest';
 import { ulid } from 'ulid';
 import { prisma } from '@grind/db';
@@ -9,6 +9,10 @@ import { NINE_TO_SIX } from '@grind/types';
 const app = buildApp();
 const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
 const iso = (s: string) => new Date(s);
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 let counter = 0;
 
@@ -331,6 +335,7 @@ async function seedTeamReport() {
     outsider,
     managerToken: signAccessToken({ sub: manager.id, ws: ws.id, role: 'MANAGER' }),
     memberToken: signAccessToken({ sub: member.id, ws: ws.id, role: 'MEMBER' }),
+    outsiderToken: signAccessToken({ sub: outsider.id, ws: ws.id, role: 'MEMBER' }),
   };
 }
 
@@ -347,12 +352,65 @@ describe('/v1/reports/me', () => {
     expect(day.workedMs).toBe(110 * 60_000);
     expect(day.meetingMs).toBe(45 * 60_000);
     expect(day.manualMs).toBe(60 * 60_000);
+    expect(day.invalidatedMs).toBe(0);
     expect(day.shiftStatus).toBe('on_time');
     expect(day.gaps.count).toBeGreaterThanOrEqual(1);
     expect(day.approvals).toEqual({ approved: 1, pending: 1, rejected: 1 });
     expect(day.screenshots.count).toBe(1);
     expect(day.topApps[0].app).toBe('Code');
     expect(day.activityPercent).not.toBeNull();
+  });
+
+  it('excludes invalidated time and samples while marking screenshots in the invalidated window', async () => {
+    const s = await seedReportDay();
+    const flag = await prisma.activityFlag.create({
+      data: {
+        userId: s.member.id,
+        type: 'METRONOMIC',
+        windowStart: iso('2026-06-01T09:10:00Z'),
+        windowEnd: iso('2026-06-01T09:11:00Z'),
+        riskScore: 70,
+        evidence: {},
+        status: 'RESOLVED',
+        resolution: 'TIME_INVALIDATED',
+        resolvedById: s.admin.id,
+        resolvedAt: iso('2026-06-01T09:12:00Z'),
+        resolvedNote: 'Confirmed macro',
+      },
+    });
+    await prisma.timeInvalidation.create({
+      data: {
+        workspaceId: s.member.workspaceId,
+        flagId: flag.id,
+        userId: s.member.id,
+        windowStart: flag.windowStart,
+        windowEnd: flag.windowEnd,
+        invalidatedById: s.admin.id,
+        reason: 'Confirmed macro',
+      },
+    });
+
+    const report = await request(app)
+      .get('/v1/reports/me?from=2026-06-01&to=2026-06-01&tz=UTC')
+      .set(auth(s.memberToken));
+    expect(report.status).toBe(200);
+    const day = report.body.days[0];
+    expect(day.workedMs).toBe(109 * 60_000);
+    expect(day.invalidatedMs).toBe(1 * 60_000);
+    expect(day.topApps[0].app).toBe('Code');
+    expect(day.topApps[0].minutes).toBe(1);
+
+    const apps = await request(app)
+      .get('/v1/reports/me/day-apps?date=2026-06-01&tz=UTC')
+      .set(auth(s.memberToken));
+    expect(apps.status).toBe(200);
+    expect(apps.body.apps.find((a: { app: string }) => a.app === 'Code').minutes).toBe(1);
+
+    const shots = await request(app)
+      .get('/v1/reports/me/day-screenshots?date=2026-06-01&tz=UTC')
+      .set(auth(s.memberToken));
+    expect(shots.status).toBe(200);
+    expect(shots.body.screenshots[0].invalidated).toBe(true);
   });
 
   it('rejects invalid and overlong ranges', async () => {
@@ -383,8 +441,44 @@ describe('/v1/reports/me', () => {
       .set(auth(s.memberToken));
     expect(shots.status).toBe(200);
     expect(shots.body.screenshots).toHaveLength(1);
-    expect(shots.body.screenshots[0].fullUrl).toContain('member.webp');
-    expect(shots.body.screenshots[0].dominantApp).toBe('Code');
+    const shot = shots.body.screenshots[0];
+    expect(shot.fullUrl).toBe(`/v1/screenshots/${encodeURIComponent(shot.id)}/image?variant=full`);
+    expect(shot.thumbUrl).toBe(`/v1/screenshots/${encodeURIComponent(shot.id)}/image?variant=thumb`);
+    expect(shot.fullUrl).not.toContain('assets.example.test');
+    expect(shot.dominantApp).toBe('Code');
+  });
+
+  it('streams permitted screenshot bytes through the authenticated image route', async () => {
+    const s = await seedReportDay();
+    const shots = await request(app)
+      .get('/v1/reports/me/day-screenshots?date=2026-06-01&tz=UTC')
+      .set(auth(s.memberToken));
+    const shot = shots.body.screenshots[0];
+    const fetchMock = vi.fn(async () => new Response(new Uint8Array([1, 2, 3]), {
+      status: 200,
+      headers: { 'content-type': 'image/webp' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const unauthenticated = await request(app).get(shot.fullUrl);
+    expect(unauthenticated.status).toBe(401);
+
+    const image = await request(app).get(shot.fullUrl).set(auth(s.memberToken));
+    expect(image.status).toBe(200);
+    expect(image.headers['content-type']).toContain('image/webp');
+    expect(Buffer.from(image.body)).toEqual(Buffer.from([1, 2, 3]));
+    expect(fetchMock).toHaveBeenCalledWith(new URL('https://assets.example.test/member.webp'));
+
+    const invalidVariant = await request(app)
+      .get(`/v1/screenshots/${encodeURIComponent(shot.id)}/image?variant=poster`)
+      .set(auth(s.memberToken));
+    expect(invalidVariant.status).toBe(400);
+    expect(invalidVariant.body.error).toBe('invalid_variant');
+
+    await prisma.screenshot.update({ where: { id: shot.id }, data: { uploadState: 'PENDING' } });
+    const notUploaded = await request(app).get(shot.fullUrl).set(auth(s.memberToken));
+    expect(notUploaded.status).toBe(404);
+    expect(notUploaded.body.error).toBe('screenshot_not_found');
   });
 
   it('member has reports.self.read but not people.read', async () => {
@@ -472,7 +566,13 @@ describe('/v1/reports/team', () => {
       .set(auth(s.managerToken));
     expect(shots.status).toBe(200);
     expect(shots.body.screenshots).toHaveLength(1);
-    expect(shots.body.screenshots[0].fullUrl).toContain('team.webp');
+    const shot = shots.body.screenshots[0];
+    expect(shot.fullUrl).toBe(`/v1/screenshots/${encodeURIComponent(shot.id)}/image?variant=full`);
+    expect(shot.thumbUrl).toBe(`/v1/screenshots/${encodeURIComponent(shot.id)}/image?variant=thumb`);
+    expect(shot.fullUrl).not.toContain('assets.example.test');
+
+    const deniedImage = await request(app).get(shot.fullUrl).set(auth(s.outsiderToken));
+    expect(deniedImage.status).toBe(403);
 
     const memberDenied = await request(app)
       .get(`/v1/reports/team/member?${params.toString()}`)

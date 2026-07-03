@@ -57,6 +57,31 @@ async function seedWorkspaceWithApprover(approverOpenId: string | null | undefin
   return { requester, admin };
 }
 
+async function seedWorkspaceWithManagerApprover(managerOpenId = `ou_manager_${Date.now()}_${++approverCounter}`) {
+  const requester = await seedUser({ role: 'MEMBER' });
+  const admin = await prisma.user.create({
+    data: {
+      workspaceId: requester.workspaceId,
+      email: `admin-${Date.now()}@test.local`,
+      name: 'Admin Ada',
+      role: 'ADMIN',
+      passwordHash: 'x'.repeat(60),
+    },
+  });
+  const manager = await prisma.user.create({
+    data: {
+      workspaceId: requester.workspaceId,
+      email: `manager-${Date.now()}@test.local`,
+      name: 'Manager Mira',
+      role: 'MANAGER',
+      passwordHash: 'x'.repeat(60),
+    },
+  });
+  await prisma.user.update({ where: { id: requester.userId }, data: { managerId: manager.id } });
+  await prisma.larkIdentity.create({ data: { userId: manager.id, openId: managerOpenId } });
+  return { requester, admin, manager, managerOpenId };
+}
+
 function body(over: Partial<Record<string, unknown>> = {}) {
   return {
     clientUuid: `cu_${Math.random().toString(36).slice(2)}`,
@@ -107,6 +132,20 @@ describe('POST /v1/time-requests — submit', () => {
     expect(json).toContain(res.body.id);
     expect(json).toContain('Ship M10');
     expect(json).toContain(b.reason);
+  });
+
+  it('routes a member request to their direct manager before admin fallback', async () => {
+    const { requester, admin, manager, managerOpenId } = await seedWorkspaceWithManagerApprover();
+    const res = await request(app)
+      .post('/v1/time-requests')
+      .set('Authorization', `Bearer ${requester.accessToken}`)
+      .send(body());
+    expect(res.status).toBe(201);
+    expect(res.body.status).toBe('PENDING');
+    expect(res.body.approverId).toBe(manager.id);
+    expect(res.body.approverId).not.toBe(admin.id);
+    expect(fake.sends).toHaveLength(1);
+    expect(fake.sends[0]!.receiveOpenId).toBe(managerOpenId);
   });
 
   it('is idempotent on clientUuid (second POST returns 200 same row)', async () => {

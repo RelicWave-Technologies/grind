@@ -4,23 +4,28 @@ import { createTray, setTrayTitle } from './tray';
 import { createMainWindow } from './window';
 import { registerIpc } from './ipc';
 import { sendHeartbeatNow, startHeartbeatIfAuthed } from './services/heartbeat';
-import { getTimerService, initTimerOnBoot } from './services/timer';
-import { startCaptureLoop } from './services/capture';
-import { startActivityCapture, setActivityRecording, flushPartialActivity } from './services/activity';
+import { drainTimerSyncNow, getTimerService, initTimerOnBoot, startTimerSyncDrain } from './services/timer';
+import { rescheduleCaptureLoop, startCaptureLoop } from './services/capture';
+import {
+  applyActivityCapturePolicy,
+  drainActivityNow,
+  startActivityCapture,
+  startActivitySyncDrain,
+  setActivityRecording,
+} from './services/activity';
 import { startActiveWindowPolling } from './services/activity/windowPoller';
 import { registerPowerEvents } from './services/power';
 import { IdleMonitor } from './services/idle/monitor';
 import { showFloatingBar, hideFloatingBar, reclampFloatingBar } from './floating';
 import { reassertAllOverlays } from './windows/overlay';
-import { flushPreferences } from './services/preferences';
 import { togglePopover, hidePopover } from './popover';
 import { showIdlePrompt, hideIdlePrompt } from './idlePrompt';
 import { ShiftMonitor } from './services/shift';
 import { onAuthChange } from './services/apiClient';
-import { refreshAgentConfig } from './services/agentConfig';
+import { onAgentConfigChange, refreshAgentConfig } from './services/agentConfig';
 import { registerProtocol, handleDeepLink, deepLinkFromArgv, flushQueuedDeepLink } from './services/deepLink';
+import { hasQuitCleanupCompleted, registerGracefulQuitHandler, runQuitCleanup } from './services/quitCleanup';
 import {
-  flushBeforeUpdateInstall,
   getUpdateStatus,
   installUpdateNow,
   refreshUpdateInstallability,
@@ -97,20 +102,28 @@ app.whenReady().then(async () => {
       mainWindow?.hide();
     }
   });
-  app.on('before-quit', () => {
-    isQuitting = true;
-    flushPartialActivity(); // seal the in-flight minute (durable local insert)
-    void flushPreferences(); // persist any pending floating-bar position
+  registerGracefulQuitHandler({
+    app,
+    hasCleanupCompleted: () => hasQuitCleanupCompleted(),
+    markQuitting: () => {
+      isQuitting = true;
+    },
   });
   (app as Electron.App & { on(event: 'before-quit-for-update', listener: () => void): Electron.App }).on('before-quit-for-update', () => {
     isQuitting = true;
-    void flushBeforeUpdateInstall();
+    void runQuitCleanup('update');
   });
   app.on('activate', () => showMainWindow());
 
   // On wake the OS drops the always-on-top / all-Spaces flags (electron#36364)
   // — re-assert float on EVERY live overlay, not just the bar.
-  registerPowerEvents({ onWake: () => reassertAllOverlays() });
+  registerPowerEvents({
+    onWake: () => {
+      reassertAllOverlays();
+      void drainTimerSyncNow('wake');
+      void drainActivityNow('wake');
+    },
+  });
 
   // When monitors change (unplug / resolution switch): re-float all overlays
   // and re-home the floating bar onto a still-visible display.
@@ -152,15 +165,23 @@ app.whenReady().then(async () => {
     refreshUpdateInstallability();
   });
 
+  onAgentConfigChange(({ previous, current }) => {
+    applyActivityCapturePolicy(current);
+    if (!previous || previous.screenshotIntervalSec !== current.screenshotIntervalSec) {
+      rescheduleCaptureLoop('agent-config');
+    }
+  });
+
+  try {
+    await initTimerOnBoot();
+    startTimerSyncDrain();
+  } catch (err) {
+    log.warn('initTimerOnBoot failed', { err: String(err) });
+  }
   try {
     await startHeartbeatIfAuthed();
   } catch (err) {
     log.warn('startHeartbeatIfAuthed failed', { err: String(err) });
-  }
-  try {
-    await initTimerOnBoot();
-  } catch (err) {
-    log.warn('initTimerOnBoot failed', { err: String(err) });
   }
 
   // Pull the server-driven capture cadence + idle threshold (per-user →
@@ -170,6 +191,8 @@ app.whenReady().then(async () => {
 
   startCaptureLoop();
   startActivityCapture();
+  startActivitySyncDrain();
+  void drainActivityNow('boot');
   startActiveWindowPolling();
 
   // Shift monitor — fetches the user's assigned shift and fires the
@@ -186,6 +209,7 @@ app.whenReady().then(async () => {
     if (status === 'loggedIn') {
       void shiftMonitor.refreshShift();
       void refreshAgentConfig();
+      void drainActivityNow('auth');
     }
   });
   ipcMain.handle('shift:decide', (_e, decision: 'yes' | 'not_yet') => {

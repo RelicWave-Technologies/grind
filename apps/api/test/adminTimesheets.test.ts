@@ -119,6 +119,7 @@ async function seed() {
     signAccessToken({ sub: u.id, ws: ws.id, role: u.role });
 
   return {
+    workspaceId: ws.id,
     admin: { id: admin.id, token: tok(admin) },
     mgrA: { id: mgrA.id, token: tok(mgrA) },
     memA: { id: memA.id, token: tok(memA) },
@@ -229,6 +230,47 @@ describe('GET /v1/admin/timesheets', () => {
     expect(res.body.cells[s.memB.id]['2026-05-26'].activitySampleCount).toBe(0);
     expect(res.body.cells[s.memA.id]['2026-05-27'].activitySampleCount).toBe(0);
   });
+
+  it('excludes invalidated time and samples from the matrix', async () => {
+    const s = await seed();
+    const flag = await prisma.activityFlag.create({
+      data: {
+        userId: s.memA.id,
+        type: 'METRONOMIC',
+        windowStart: new Date('2026-05-26T09:15:00Z'),
+        windowEnd: new Date('2026-05-26T09:17:00Z'),
+        riskScore: 60,
+        evidence: {},
+        status: 'RESOLVED',
+        resolution: 'TIME_INVALIDATED',
+        resolvedById: s.admin.id,
+        resolvedAt: new Date('2026-05-26T09:20:00Z'),
+        resolvedNote: 'Confirmed macro',
+      },
+    });
+    await prisma.timeInvalidation.create({
+      data: {
+        workspaceId: s.workspaceId,
+        flagId: flag.id,
+        userId: s.memA.id,
+        windowStart: flag.windowStart,
+        windowEnd: flag.windowEnd,
+        invalidatedById: s.admin.id,
+        reason: 'Confirmed macro',
+      },
+    });
+
+    const res = await request(app)
+      .get('/v1/admin/timesheets?from=2026-05-26&to=2026-05-26&tz=UTC')
+      .set(auth(s.admin.token));
+    expect(res.status).toBe(200);
+    const cell = res.body.cells[s.memA.id]['2026-05-26'];
+    expect(cell.workedMs).toBe(88 * 60 * 1000);
+    expect(cell.meetingMs).toBe(30 * 60 * 1000);
+    expect(cell.invalidatedMs).toBe(2 * 60 * 1000);
+    expect(cell.totalMs).toBe(118 * 60 * 1000);
+    expect(cell.activitySampleCount).toBe(0);
+  });
 });
 
 describe('GET /v1/admin/timesheets.csv', () => {
@@ -249,7 +291,7 @@ describe('GET /v1/admin/timesheets.csv', () => {
     expect(res.headers['content-type']).toMatch(/text\/csv/);
     expect(res.headers['content-disposition']).toContain('timesheets-2026-05-26-to-2026-05-27.csv');
     const lines = res.text.trim().split('\n');
-    expect(lines[0]).toBe('name,email,role,day,worked_h,meeting_h,manual_h,total_h,first_activity,last_activity,activity_samples');
+    expect(lines[0]).toBe('name,email,role,day,worked_h,meeting_h,manual_h,total_h,invalidated_h,first_activity,last_activity,activity_samples');
     // 3 active (user, day) pairs from the seed: memA on May 26, memA on May 27, memB on May 26.
     expect(lines.length).toBe(1 + 3);
     // Spot-check a known cell: memA on May 26 = 1.50 worked + 0.50 meeting = 2.00 total.
@@ -259,9 +301,10 @@ describe('GET /v1/admin/timesheets.csv', () => {
     expect(cells[4]).toBe('1.50'); // worked_h
     expect(cells[5]).toBe('0.50'); // meeting_h
     expect(cells[7]).toBe('2.00'); // total_h
-    expect(cells[8]).toBe('09:00'); // first_activity
-    expect(cells[9]).toBe('11:00'); // last_activity
-    expect(cells[10]).toBe('2'); // activity_samples
+    expect(cells[8]).toBe('0.00'); // invalidated_h
+    expect(cells[9]).toBe('09:00'); // first_activity
+    expect(cells[10]).toBe('11:00'); // last_activity
+    expect(cells[11]).toBe('2'); // activity_samples
   });
 
   it('manager scope filters out the other team in CSV too', async () => {

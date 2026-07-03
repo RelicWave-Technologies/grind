@@ -185,6 +185,93 @@ describe('buildTimesheetMatrix — firstActivityMs / lastActivityMs', () => {
   });
 });
 
+describe('buildTimesheetMatrix — invalidations', () => {
+  it('subtracts invalidated overlaps and exposes invalidatedMs', () => {
+    const m = buildTimesheetMatrix({
+      from: '2026-05-25',
+      to: '2026-05-25',
+      tz: 'UTC',
+      segments: [seg('u1', 'AUTO', 'WORK', '2026-05-25T09:00:00Z', '2026-05-25T10:00:00Z')],
+      invalidations: [
+        {
+          userId: 'u1',
+          startedAt: new Date('2026-05-25T09:15:00Z').getTime(),
+          endedAt: new Date('2026-05-25T09:45:00Z').getTime(),
+        },
+      ],
+    });
+    const cell = m!.cells.u1!['2026-05-25']!;
+    expect(cell.workedMs).toBe(30 * 60 * 1000);
+    expect(cell.invalidatedMs).toBe(30 * 60 * 1000);
+    expect(cell.totalMs).toBe(30 * 60 * 1000);
+    expect(cell.firstActivityMs).toBe(new Date('2026-05-25T09:00:00Z').getTime());
+    expect(cell.lastActivityMs).toBe(new Date('2026-05-25T10:00:00Z').getTime());
+  });
+
+  it('merges overlapping invalidations so excluded time is not double-counted', () => {
+    const m = buildTimesheetMatrix({
+      from: '2026-05-25',
+      to: '2026-05-25',
+      tz: 'UTC',
+      segments: [seg('u1', 'AUTO', 'WORK', '2026-05-25T09:00:00Z', '2026-05-25T10:00:00Z')],
+      invalidations: [
+        {
+          userId: 'u1',
+          startedAt: new Date('2026-05-25T09:10:00Z').getTime(),
+          endedAt: new Date('2026-05-25T09:40:00Z').getTime(),
+        },
+        {
+          userId: 'u1',
+          startedAt: new Date('2026-05-25T09:30:00Z').getTime(),
+          endedAt: new Date('2026-05-25T09:50:00Z').getTime(),
+        },
+      ],
+    });
+    const cell = m!.cells.u1!['2026-05-25']!;
+    expect(cell.workedMs).toBe(20 * 60 * 1000);
+    expect(cell.invalidatedMs).toBe(40 * 60 * 1000);
+  });
+
+  it('keeps invalidations scoped to the matching user', () => {
+    const m = buildTimesheetMatrix({
+      from: '2026-05-25',
+      to: '2026-05-25',
+      tz: 'UTC',
+      segments: [seg('u1', 'AUTO', 'WORK', '2026-05-25T09:00:00Z', '2026-05-25T10:00:00Z')],
+      invalidations: [
+        {
+          userId: 'u2',
+          startedAt: new Date('2026-05-25T09:00:00Z').getTime(),
+          endedAt: new Date('2026-05-25T10:00:00Z').getTime(),
+        },
+      ],
+    });
+    const cell = m!.cells.u1!['2026-05-25']!;
+    expect(cell.workedMs).toBe(60 * 60 * 1000);
+    expect(cell.invalidatedMs).toBe(0);
+  });
+
+  it('splits invalidated time across local days', () => {
+    const m = buildTimesheetMatrix({
+      from: '2026-05-25',
+      to: '2026-05-26',
+      tz: 'UTC',
+      segments: [seg('u1', 'AUTO', 'WORK', '2026-05-25T23:30:00Z', '2026-05-26T00:30:00Z')],
+      invalidations: [
+        {
+          userId: 'u1',
+          startedAt: new Date('2026-05-25T23:45:00Z').getTime(),
+          endedAt: new Date('2026-05-26T00:15:00Z').getTime(),
+        },
+      ],
+    });
+    expect(m!.cells.u1!['2026-05-25']!.workedMs).toBe(15 * 60 * 1000);
+    expect(m!.cells.u1!['2026-05-25']!.invalidatedMs).toBe(15 * 60 * 1000);
+    expect(m!.cells.u1!['2026-05-26']!.workedMs).toBe(15 * 60 * 1000);
+    expect(m!.cells.u1!['2026-05-26']!.invalidatedMs).toBe(15 * 60 * 1000);
+  });
+});
+
 describe('buildTimesheetMatrix — tz handling', () => {
   it('a UTC-midnight segment in America/New_York lands on the *previous* local day', () => {
     // 2026-05-26T03:00Z = 2026-05-25 23:00 EDT.

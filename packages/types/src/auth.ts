@@ -3,6 +3,9 @@ import { z } from 'zod';
 export const Role = z.enum(['ADMIN', 'MANAGER', 'MEMBER']);
 export type Role = z.infer<typeof Role>;
 
+export const ActivityRoleTitle = z.enum(['DEVELOPER', 'DESIGNER', 'SALES', 'OTHER']);
+export type ActivityRoleTitle = z.infer<typeof ActivityRoleTitle>;
+
 /** JIT-provisioning lifecycle for Lark-authenticated users. */
 export const ProvisioningStatus = z.enum(['PENDING', 'ACTIVE']);
 export type ProvisioningStatus = z.infer<typeof ProvisioningStatus>;
@@ -12,6 +15,7 @@ export const UserDto = z.object({
   email: z.string().email(),
   name: z.string(),
   role: Role,
+  activityRoleTitle: ActivityRoleTitle,
   displayRole: Role,
   capabilities: z.array(z.string()),
   workspaceId: z.string(),

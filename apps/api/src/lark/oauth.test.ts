@@ -6,6 +6,7 @@ import {
   buildAuthorizeUrl,
   signLoginState,
   verifyLoginState,
+  verifyExpiredAgentLoginRouteHint,
 } from './oauth';
 
 beforeAll(() => {
@@ -160,5 +161,33 @@ describe('Lark login state token', () => {
       expiresIn: -10,
     });
     expect(() => verifyLoginState(expired)).toThrow();
+  });
+
+  it('recovers only a signed expired agent routing hint', () => {
+    const expired = jwt.sign(
+      { nonce: 'n5', client: 'agent', agentChallenge: 'chal', agentCallbackScheme: 'timo', kind: 'lark_login' },
+      process.env.JWT_SECRET!,
+      { algorithm: 'HS256', expiresIn: -10 },
+    );
+    expect(verifyExpiredAgentLoginRouteHint(expired)).toEqual({
+      client: 'agent',
+      agentCallbackScheme: 'timo',
+    });
+  });
+
+  it('does not recover dashboard or forged login state route hints', () => {
+    const dashboard = jwt.sign({ nonce: 'n6', client: 'dashboard', kind: 'lark_login' }, process.env.JWT_SECRET!, {
+      algorithm: 'HS256',
+      expiresIn: -10,
+    });
+    const forged = jwt.sign(
+      { nonce: 'n7', client: 'agent', agentCallbackScheme: 'timo', kind: 'lark_login' },
+      'another-secret-32-chars-long-xxxx',
+      { algorithm: 'HS256', expiresIn: -10 },
+    );
+
+    expect(verifyExpiredAgentLoginRouteHint(dashboard)).toBeNull();
+    expect(verifyExpiredAgentLoginRouteHint(forged)).toBeNull();
+    expect(verifyExpiredAgentLoginRouteHint('not-a-jwt')).toBeNull();
   });
 });

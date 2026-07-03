@@ -1,6 +1,6 @@
 import { ipcMain, app, shell, dialog } from 'electron';
 import { screenStatus, hasAccessibilityAccess } from '../services/permissions';
-import { isActivityCapturing } from '../services/activity';
+import { getActivityCaptureStatus, type ActivityCaptureStatus } from '../services/activity';
 import { getPreferences } from '../services/preferences';
 import { applyFloatingBarVisibility, resetFloatingBarPosition } from '../floating';
 
@@ -43,10 +43,7 @@ export function registerSettingsIpc(): void {
   });
 
   // Accessibility (global keyboard/mouse counting via uiohook).
-  ipcMain.handle('permissions:accessibility', (): { trusted: boolean; capturing: boolean } => ({
-    trusted: hasAccessibilityAccess(false),
-    capturing: isActivityCapturing(),
-  }));
+  ipcMain.handle('permissions:accessibility', (): ActivityCaptureStatus => getActivityCaptureStatus());
 
   // Prompt the system to add this app to the Accessibility list, then deep-link.
   ipcMain.handle('permissions:requestAccessibility', async () => {

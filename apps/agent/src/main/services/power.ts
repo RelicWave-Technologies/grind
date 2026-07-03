@@ -1,39 +1,42 @@
-import { powerMonitor } from 'electron';
+import { app, powerMonitor } from 'electron';
 import { getTimerService } from './timer';
+import { runQuitCleanup } from './quitCleanup';
+import { broadcast } from '../broadcast';
 import { log } from '../logger';
 
 /**
- * Wires OS power/lock events to the timer so sleep/lock gaps are never billed:
- * capture when the machine goes away, and on return trim that gap from the
- * running entry (TimerService.discardAway). Also fires `onWake` so callers can
- * re-assert always-on-top state for the floating bar.
+ * Wires OS power/lock events to the timer so sleep/lock gaps are never billed.
+ * Going away stops any active timer at the away boundary; coming back only
+ * fires `onWake` so callers can re-assert always-on-top state and retry sync.
  */
 export function registerPowerEvents(opts: { onWake: () => void }): void {
-  let awayStart: number | null = null;
+  const shutdownMonitor = powerMonitor as typeof powerMonitor & {
+    on(event: 'shutdown', listener: (event: { preventDefault(): void }) => void): typeof powerMonitor;
+  };
 
-  const markAway = (reason: string) => {
-    if (awayStart === null) {
-      awayStart = Date.now();
-      log.info('machine away', { reason });
+  const markAway = async (reason: 'suspend' | 'lock') => {
+    const awayStartedAt = Date.now();
+    try {
+      const timer = getTimerService();
+      await timer.prepareForAway(reason, awayStartedAt);
+      broadcast('timer:status:push', timer.status());
+      log.info('timer stopped for machine away', { reason, awayStartedAt });
+    } catch (err) {
+      log.warn('prepareForAway failed', { reason, err: String(err) });
     }
   };
 
-  const markBack = async (reason: string) => {
-    const start = awayStart;
-    awayStart = null;
-    if (start !== null) {
-      try {
-        await getTimerService().discardAway(start, Date.now());
-        log.info('trimmed away gap', { reason, awayMs: Date.now() - start });
-      } catch (err) {
-        log.warn('discardAway failed', { err: String(err) });
-      }
-    }
+  const markBack = () => {
     opts.onWake();
   };
 
-  powerMonitor.on('suspend', () => markAway('suspend'));
-  powerMonitor.on('lock-screen', () => markAway('lock'));
-  powerMonitor.on('resume', () => void markBack('resume'));
-  powerMonitor.on('unlock-screen', () => void markBack('unlock'));
+  powerMonitor.on('suspend', () => void markAway('suspend'));
+  powerMonitor.on('lock-screen', () => void markAway('lock'));
+  powerMonitor.on('resume', () => markBack());
+  powerMonitor.on('unlock-screen', () => markBack());
+  shutdownMonitor.on('shutdown', (event: { preventDefault(): void }) => {
+    event.preventDefault();
+    log.info('system shutdown cleanup requested');
+    void runQuitCleanup('shutdown').finally(() => app.quit());
+  });
 }

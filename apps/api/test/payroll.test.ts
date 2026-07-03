@@ -146,6 +146,51 @@ describe('GET /v1/admin/payroll/monthly', () => {
     expect(memberRow.totalHours).toBe(15);
   });
 
+  it('excludes invalidated time from payroll totals', async () => {
+    const { ws, admin, member } = await seed();
+    await seedEntry({
+      userId: member.id,
+      source: 'AUTO',
+      segmentKind: 'WORK',
+      startedAt: new Date('2026-05-04T09:00:00Z'),
+      endedAt: new Date('2026-05-04T17:00:00Z'),
+    });
+    const flag = await prisma.activityFlag.create({
+      data: {
+        userId: member.id,
+        type: 'METRONOMIC',
+        windowStart: new Date('2026-05-04T09:00:00Z'),
+        windowEnd: new Date('2026-05-04T11:00:00Z'),
+        riskScore: 70,
+        evidence: {},
+        status: 'RESOLVED',
+        resolution: 'TIME_INVALIDATED',
+        resolvedById: admin.id,
+        resolvedAt: new Date('2026-05-04T11:05:00Z'),
+        resolvedNote: 'Invalidated',
+      },
+    });
+    await prisma.timeInvalidation.create({
+      data: {
+        workspaceId: ws.id,
+        flagId: flag.id,
+        userId: member.id,
+        windowStart: flag.windowStart,
+        windowEnd: flag.windowEnd,
+        invalidatedById: admin.id,
+        reason: 'Invalidated',
+      },
+    });
+
+    const res = await request(app)
+      .get('/v1/admin/payroll/monthly?month=2026-05&tz=UTC')
+      .set(bearer(admin.token));
+    expect(res.status).toBe(200);
+    const memberRow = res.body.payroll.rows.find((r: { user: { id: string } }) => r.user.id === member.id);
+    expect(memberRow.workedHours).toBe(6);
+    expect(memberRow.totalHours).toBe(6);
+  });
+
   it('isolates by workspace', async () => {
     const wsA = await seed();
     const wsB = await seed();

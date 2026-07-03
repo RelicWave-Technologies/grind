@@ -65,7 +65,7 @@ export interface DayInsight {
   shift: { name: string; start: string; end: string } | null;
   firstActivityAt: number | null;
   lastActivityAt: number | null;
-  totals: { workedMs: number; meetingMs: number; manualMs: number; idleTrimmedMs: number; pendingMs: number; gapMs: number };
+  totals: { workedMs: number; meetingMs: number; manualMs: number; idleTrimmedMs: number; pendingMs: number; gapMs: number; invalidatedMs?: number };
   /** Single sorted partition incl. PENDING blocks — no separate overlay. */
   blocks: DayBlock[];
   recentRejected: RejectedRequest[];
@@ -135,7 +135,7 @@ export interface DecideResult {
   timeEntryId: string | null;
   decidedAt: string | null;
   decidedReason: string | null;
-  noop: 'already_decided' | 'cancelled' | 'forbidden' | null;
+  noop: 'already_decided' | 'cancelled' | 'forbidden' | 'self_approval_forbidden' | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -146,6 +146,7 @@ export interface TimesheetCell {
   workedMs: number;
   meetingMs: number;
   manualMs: number;
+  invalidatedMs: number;
   totalMs: number;
   firstActivityMs: number | null;
   lastActivityMs: number | null;
@@ -187,6 +188,8 @@ export interface ActivityFlag {
   resolvedNote: string | null;
   createdAt: string;
 }
+
+export type ActivityRoleTitle = 'DEVELOPER' | 'DESIGNER' | 'SALES' | 'OTHER';
 
 // ---------------------------------------------------------------------------
 // Admin CRUD: Teams + User patches

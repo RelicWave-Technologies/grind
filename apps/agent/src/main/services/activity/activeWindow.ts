@@ -158,4 +158,9 @@ export class ActiveWindowTracker {
   size(): number {
     return this.observations.length;
   }
+
+  /** Drop all cached observations, used when capture policy tightens. */
+  clear(): void {
+    this.observations = [];
+  }
 }

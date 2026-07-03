@@ -38,6 +38,7 @@ export function buildTeamReportsResponse(input: {
 function summarizeMember(user: TeamReportUser, days: MemberReportDay[]): TeamReportMember {
   let workedMs = 0;
   let manualMs = 0;
+  let invalidatedMs = 0;
   let activeDays = 0;
   let lateDays = 0;
   let onTimeDays = 0;
@@ -56,6 +57,7 @@ function summarizeMember(user: TeamReportUser, days: MemberReportDay[]): TeamRep
     const dayWorkedMs = totalWorkedMs(day);
     workedMs += dayWorkedMs;
     manualMs += day.manualMs;
+    invalidatedMs += day.invalidatedMs;
     if (dayWorkedMs > 0) activeDays += 1;
     if (day.shiftStatus === 'late') lateDays += 1;
     if (day.shiftStatus === 'on_time' || day.shiftStatus === 'early') onTimeDays += 1;
@@ -77,6 +79,7 @@ function summarizeMember(user: TeamReportUser, days: MemberReportDay[]): TeamRep
     user,
     workedMs,
     manualMs,
+    invalidatedMs,
     activeDays,
     lateDays,
     onTimeDays,
@@ -95,6 +98,7 @@ function summarizeMember(user: TeamReportUser, days: MemberReportDay[]): TeamRep
 function summarizeTeam(members: TeamReportMember[], rangeDayCount: number): TeamReportsResponse['summary'] {
   let workedMs = 0;
   let manualMs = 0;
+  let invalidatedMs = 0;
   let activeDays = 0;
   let lateDays = 0;
   let noActivityDays = 0;
@@ -108,6 +112,7 @@ function summarizeTeam(members: TeamReportMember[], rangeDayCount: number): Team
   for (const member of members) {
     workedMs += member.workedMs;
     manualMs += member.manualMs;
+    invalidatedMs += member.invalidatedMs;
     activeDays += member.activeDays;
     lateDays += member.lateDays;
     noActivityDays += member.noActivityDays;
@@ -125,6 +130,7 @@ function summarizeTeam(members: TeamReportMember[], rangeDayCount: number): Team
     memberCount: members.length,
     workedMs,
     manualMs,
+    invalidatedMs,
     activeDays,
     memberDays: members.length * rangeDayCount,
     lateDays,

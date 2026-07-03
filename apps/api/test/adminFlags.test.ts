@@ -246,4 +246,79 @@ describe('POST /v1/admin/flags/:id/resolve', () => {
       .send({ resolution: 'TOTALLY_FINE' });
     expect(res.status).toBe(400);
   });
+
+  it('400 on TIME_INVALIDATED without an audit note', async () => {
+    const s = await seed();
+    const flag = await prisma.activityFlag.create({
+      data: {
+        userId: s.memA.id,
+        type: 'METRONOMIC',
+        windowStart: new Date('2026-05-30T09:15:00Z'),
+        windowEnd: new Date('2026-05-30T09:45:00Z'),
+        riskScore: 60,
+        evidence: {},
+      },
+    });
+    const res = await request(app)
+      .post(`/v1/admin/flags/${flag.id}/resolve`)
+      .set(auth(s.admin.token))
+      .send({ resolution: 'TIME_INVALIDATED' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('missing_resolution_note');
+  });
+
+  it('TIME_INVALIDATED creates an invalidation and removes matching time from timesheets', async () => {
+    const s = await seed();
+    await prisma.timeEntry.create({
+      data: {
+        id: `flag-te-${Date.now()}`,
+        clientUuid: `flag-cu-${Date.now()}`,
+        userId: s.memA.id,
+        source: 'AUTO',
+        startedAt: new Date('2026-05-30T09:00:00Z'),
+        endedAt: new Date('2026-05-30T10:00:00Z'),
+        segments: {
+          create: [
+            {
+              id: `flag-seg-${Date.now()}`,
+              kind: 'WORK',
+              startedAt: new Date('2026-05-30T09:00:00Z'),
+              endedAt: new Date('2026-05-30T10:00:00Z'),
+            },
+          ],
+        },
+      },
+    });
+    const flag = await prisma.activityFlag.create({
+      data: {
+        userId: s.memA.id,
+        type: 'METRONOMIC',
+        windowStart: new Date('2026-05-30T09:15:00Z'),
+        windowEnd: new Date('2026-05-30T09:45:00Z'),
+        riskScore: 60,
+        evidence: { ikiCv: 0.01 },
+      },
+    });
+
+    const res = await request(app)
+      .post(`/v1/admin/flags/${flag.id}/resolve`)
+      .set(auth(s.admin.token))
+      .send({ resolution: 'TIME_INVALIDATED', note: 'Macro-like pattern in this window' });
+    expect(res.status).toBe(200);
+    expect(res.body.timeInvalidated).toBe(true);
+    expect(res.body.invalidatedMs).toBe(30 * 60 * 1000);
+
+    const invalidation = await prisma.timeInvalidation.findUnique({ where: { flagId: flag.id } });
+    expect(invalidation?.reason).toContain('Macro-like');
+    expect(invalidation?.invalidatedById).toBe(s.admin.id);
+
+    const timesheet = await request(app)
+      .get('/v1/admin/timesheets?from=2026-05-30&to=2026-05-30&tz=UTC')
+      .set(auth(s.admin.token));
+    expect(timesheet.status).toBe(200);
+    const cell = timesheet.body.cells[s.memA.id]['2026-05-30'];
+    expect(cell.workedMs).toBe(30 * 60 * 1000);
+    expect(cell.invalidatedMs).toBe(30 * 60 * 1000);
+    expect(cell.totalMs).toBe(30 * 60 * 1000);
+  });
 });

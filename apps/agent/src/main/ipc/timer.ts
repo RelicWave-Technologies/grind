@@ -29,6 +29,11 @@ export function registerTimerIpc(): void {
   });
 
   ipcMain.handle('timer:status', () => getTimerService().status());
+  ipcMain.handle('timer:recoveryNotice', () => getTimerService().recoveryNotice());
+  ipcMain.handle('timer:dismissRecoveryNotice', () => {
+    getTimerService().dismissRecoveryNotice();
+    return { ok: true };
+  });
 
   ipcMain.handle('timer:today', () => {
     const entries = getTimerService().listToday(Date.now());

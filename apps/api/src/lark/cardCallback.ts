@@ -59,6 +59,9 @@ export function startCardCallback(): void {
         if (result.noop === 'forbidden') {
           return { toast: { type: 'error', content: 'Only the assigned approver can decide this request.' } };
         }
+        if (result.noop === 'self_approval_forbidden') {
+          return { toast: { type: 'error', content: 'Another approver must decide this request.' } };
+        }
         return {
           toast: { type: 'success', content: `Marked ${result.status.toLowerCase()}` },
           card: { type: 'raw', data: result.card },

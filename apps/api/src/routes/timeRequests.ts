@@ -26,9 +26,6 @@ import {
 } from '../lark';
 import { logger } from '../logger';
 
-/** Roles that auto-approve their own manual-time requests at create time. */
-const SELF_AUTO_APPROVE_ROLES = new Set(['ADMIN', 'MANAGER']);
-
 export const timeRequestsRouter = Router();
 timeRequestsRouter.use(requireAccessToken);
 
@@ -104,12 +101,57 @@ async function validateAttendees(
   return { ok: true, ids: deduped };
 }
 
+async function resolveManualTimeApprover(
+  workspaceId: string,
+  requesterId: string,
+): Promise<{
+  id: string;
+  name: string;
+  larkIdentity: { openId: string } | null;
+} | null> {
+  const requester = await prisma.user.findUnique({
+    where: { id: requesterId },
+    select: { managerId: true },
+  });
+  if (requester?.managerId && requester.managerId !== requesterId) {
+    const manager = await prisma.user.findFirst({
+      where: {
+        id: requester.managerId,
+        workspaceId,
+        deactivatedAt: null,
+        role: { in: ['MANAGER', 'ADMIN'] },
+      },
+      select: {
+        id: true,
+        name: true,
+        larkIdentity: { select: { openId: true } },
+      },
+    });
+    if (manager) return manager;
+  }
+
+  return prisma.user.findFirst({
+    where: {
+      workspaceId,
+      id: { not: requesterId },
+      role: 'ADMIN',
+      deactivatedAt: null,
+    },
+    select: {
+      id: true,
+      name: true,
+      larkIdentity: { select: { openId: true } },
+    },
+    orderBy: { createdAt: 'asc' },
+  });
+}
+
 /**
  * Submit a manual-time request. Idempotent on `clientUuid`.
  *
  * 1. Resolves the target user through time-edit RBAC.
- * 2. Manager/admin target-user edits create APPROVED manual time immediately.
- * 3. Member self-requests stay PENDING and use the approver/card flow.
+ * 2. Manager/admin edits for another user create APPROVED manual time immediately.
+ * 3. Self-requests from every role stay PENDING and use a non-self approver.
  * Lark sends are best-effort; DB state is the audit source of truth.
  */
 timeRequestsRouter.post('/', attachScope, validate(CreateManualTimeRequest, 'body'), async (req, res, next) => {
@@ -143,7 +185,7 @@ timeRequestsRouter.post('/', attachScope, validate(CreateManualTimeRequest, 'bod
 
     const requester = await prisma.user.findUniqueOrThrow({
       where: { id: targetUserId },
-      select: { id: true, name: true, role: true, shiftId: true, larkIdentity: { select: { openId: true } } },
+      select: { id: true, name: true, shiftId: true, larkIdentity: { select: { openId: true } } },
     });
     const actor =
       target.isSelf
@@ -152,10 +194,10 @@ timeRequestsRouter.post('/', attachScope, validate(CreateManualTimeRequest, 'bod
             where: { id: req.user.sub },
             select: { id: true, name: true },
           });
-    const autoApprove = !target.isSelf || SELF_AUTO_APPROVE_ROLES.has(requester.role);
+    const autoApprove = !target.isSelf;
 
     // ------------------------------------------------------------------
-    // Branch A — MANAGER+ self/team edits are approved at create time.
+    // Branch A — supervisor edits for another user are approved at create time.
     // ------------------------------------------------------------------
     if (autoApprove) {
       const now = new Date();
@@ -194,9 +236,7 @@ timeRequestsRouter.post('/', attachScope, validate(CreateManualTimeRequest, 'bod
             status: 'APPROVED',
             autoApproved: true,
             decidedAt: now,
-            decidedReason: target.isSelf
-              ? 'Auto-approved (manager-or-above own request)'
-              : `Added by ${actor.name}`,
+            decidedReason: `Added by ${actor.name}`,
             timeEntryId: teId,
             attendees: attendeeIds.length
               ? { create: attendeeIds.map((uid) => ({ userId: uid })) }
@@ -220,7 +260,7 @@ timeRequestsRouter.post('/', attachScope, validate(CreateManualTimeRequest, 'bod
             endedAt: end,
             reason: body.reason,
             decision: 'APPROVED',
-            decidedByName: target.isSelf ? `${requester.name} (auto)` : actor.name,
+            decidedByName: actor.name,
             decidedAt: now.getTime(),
           });
           const { messageId } = await messenger.sendCard(requester.larkIdentity.openId, card);
@@ -232,7 +272,7 @@ timeRequestsRouter.post('/', attachScope, validate(CreateManualTimeRequest, 'bod
         } catch (err) {
           logger.warn(
             { err: String(err), requestId: created.id },
-            'lark auto-approve self-notification failed (non-fatal)',
+            'lark supervisor-edit notification failed (non-fatal)',
           );
         }
       }
@@ -241,13 +281,9 @@ timeRequestsRouter.post('/', attachScope, validate(CreateManualTimeRequest, 'bod
     }
 
     // ------------------------------------------------------------------
-    // Branch B — MEMBER → traditional approver-pick + IM card flow.
+    // Branch B — self request → manager-first approver-pick + IM card flow.
     // ------------------------------------------------------------------
-    const approver = await prisma.user.findFirst({
-      where: { workspaceId: req.user.ws, id: { not: req.user.sub }, role: 'ADMIN' },
-      include: { larkIdentity: { select: { openId: true } } },
-      orderBy: { createdAt: 'asc' },
-    });
+    const approver = await resolveManualTimeApprover(req.user.ws, targetUserId);
     if (!approver) return res.status(400).json({ error: 'no_approver' });
 
     const created = await prisma.manualTimeRequest.create({

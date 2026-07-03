@@ -6,8 +6,28 @@ type AgentStatus = { state: 'IDLE' | 'OFFLINE'; lastHeartbeatAt: string | null }
 type TimerStatus =
   | { state: 'IDLE'; workedMs: number }
   | { state: 'RUNNING'; entryId: string; larkTaskGuid: string | null; startedAt: number; workedMs: number; paused: boolean };
+export type TimerRecoveryNotice = { entryId: string; recoveredAt: number; reason: 'unexpected_shutdown' | 'sleep_stop' | 'lock_stop'; observedAt: number };
 export type TodaySegment = { kind: 'WORK' | 'MEETING' | 'IDLE_TRIMMED'; startedAt: number; endedAt: number | null };
 export type TodayEntry = { id: string; larkTaskGuid: string | null; segments: TodaySegment[] };
+export type ScreenshotItem = {
+  id: string;
+  capturedAt: number;
+  thumb: string | null;
+  uploadState: string;
+  keyboardPct: number;
+  mousePct: number;
+  attempts: number;
+  lastError: string | null;
+};
+export type ScreenshotUploadSummary = { pending: number; uploading: number; failed: number };
+export type AccessibilityStatus = {
+  trusted: boolean;
+  capturing: boolean;
+  ready: boolean;
+  recording: boolean;
+  hookRunning: boolean;
+  lastHookError: string | null;
+};
 export type UpdatePhase = 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'installing' | 'not-available' | 'error';
 export type UpdateStatus = {
   phase: UpdatePhase;
@@ -43,6 +63,8 @@ declare global {
         stop: () => Promise<TimerStatus>;
         resume: () => Promise<TimerStatus>;
         status: () => Promise<TimerStatus>;
+        recoveryNotice: () => Promise<TimerRecoveryNotice | null>;
+        dismissRecoveryNotice: () => Promise<{ ok: true }>;
         today: () => Promise<TodayEntry[]>;
         onStatusChange: (cb: (s: TimerStatus) => void) => () => void;
       };
@@ -58,14 +80,16 @@ declare global {
         refresh: () => Promise<void>;
       };
       screenshots: {
-        recent: (limit?: number) => Promise<{ id: string; capturedAt: number; thumb: string | null; uploadState: string; keyboardPct: number; mousePct: number }[]>;
+        recent: (limit?: number) => Promise<ScreenshotItem[]>;
         countToday: () => Promise<number>;
         captureOnce: () => Promise<number>;
         full: (id: string) => Promise<string | null>;
+        uploadSummary: () => Promise<ScreenshotUploadSummary>;
+        retryFailedUploads: () => Promise<{ reset: number }>;
       };
       permissions: {
         screen: () => Promise<{ status: string; health: string; state: 'ok' | 'needs-grant' | 'needs-settings' | 'needs-restart' }>;
-        accessibility: () => Promise<{ trusted: boolean; capturing: boolean }>;
+        accessibility: () => Promise<AccessibilityStatus>;
         requestAccessibility: () => Promise<void>;
       };
       settings: {

@@ -1,4 +1,9 @@
 import { localDayWindow } from './day';
+import {
+  groupInvalidationsByUser,
+  subtractInvalidations,
+  type TimeInvalidationInput,
+} from './invalidations';
 
 export interface TimesheetSegmentInput {
   userId: string;
@@ -13,6 +18,7 @@ export interface TimesheetCell {
   workedMs: number;
   meetingMs: number;
   manualMs: number;
+  invalidatedMs: number;
   totalMs: number;
   /**
    * Earliest / latest tracked moment in this user-day (in the rendering tz's
@@ -70,6 +76,7 @@ export function buildTimesheetMatrix(input: {
   to: string;
   tz: string;
   segments: TimesheetSegmentInput[];
+  invalidations?: TimeInvalidationInput[];
 }): TimesheetMatrix | null {
   const fromWin = localDayWindow(input.from, input.tz);
   const toWin = localDayWindow(input.to, input.tz);
@@ -88,6 +95,7 @@ export function buildTimesheetMatrix(input: {
   const rangeEnd = dayWindows[dayWindows.length - 1]!.endMs;
 
   const cells: Record<string, Record<string, TimesheetCell>> = {};
+  const invalidationsByUser = groupInvalidationsByUser(input.invalidations);
   const ensure = (userId: string, day: string): TimesheetCell => {
     let perUser = cells[userId];
     if (!perUser) {
@@ -100,6 +108,7 @@ export function buildTimesheetMatrix(input: {
         workedMs: 0,
         meetingMs: 0,
         manualMs: 0,
+        invalidatedMs: 0,
         totalMs: 0,
         firstActivityMs: null,
         lastActivityMs: null,
@@ -122,14 +131,18 @@ export function buildTimesheetMatrix(input: {
       const start = Math.max(s.startedAt, dw.startMs);
       const end = Math.min(s.endedAt, dw.endMs);
       if (end <= start) continue;
-      const dur = end - start;
       const cell = ensure(s.userId, dw.key);
-      if (s.source === 'MANUAL') cell.manualMs += dur;
-      else if (s.segmentKind === 'MEETING') cell.meetingMs += dur;
-      else cell.workedMs += dur;
-      cell.totalMs += dur;
-      if (cell.firstActivityMs === null || start < cell.firstActivityMs) cell.firstActivityMs = start;
-      if (cell.lastActivityMs === null || end > cell.lastActivityMs) cell.lastActivityMs = end;
+      const { valid, invalidatedMs } = subtractInvalidations(invalidationsByUser, s.userId, start, end);
+      cell.invalidatedMs += invalidatedMs;
+      for (const part of valid) {
+        const dur = part.end - part.start;
+        if (s.source === 'MANUAL') cell.manualMs += dur;
+        else if (s.segmentKind === 'MEETING') cell.meetingMs += dur;
+        else cell.workedMs += dur;
+        cell.totalMs += dur;
+        if (cell.firstActivityMs === null || part.start < cell.firstActivityMs) cell.firstActivityMs = part.start;
+        if (cell.lastActivityMs === null || part.end > cell.lastActivityMs) cell.lastActivityMs = part.end;
+      }
     }
   }
 

@@ -237,6 +237,18 @@ describe('PATCH /v1/admin/users/:id', () => {
     expect(res.body.teamId).toBe(t.id);
   });
 
+  it('ADMIN can change activityRoleTitle for scoring', async () => {
+    const s = await seed();
+    const res = await request(app)
+      .patch(`/v1/admin/users/${s.mem1.id}`)
+      .set(auth(s.admin.token))
+      .send({ activityRoleTitle: 'DESIGNER' });
+    expect(res.status).toBe(200);
+    expect(res.body.activityRoleTitle).toBe('DESIGNER');
+    const reload = await prisma.user.findUnique({ where: { id: s.mem1.id } });
+    expect(reload?.activityRoleTitle).toBe('DESIGNER');
+  });
+
   it('ADMIN cannot move a user to a team in another workspace', async () => {
     const s = await seed();
     const otherTeam = await prisma.team.create({ data: { workspaceId: s.ws2.id, name: 'Other' } });
@@ -255,6 +267,16 @@ describe('PATCH /v1/admin/users/:id', () => {
       .set(auth(s.admin.token))
       .send({ role: 'SUPERHERO' });
     expect(res.status).toBe(400);
+  });
+
+  it('rejects invalid activityRoleTitle string', async () => {
+    const s = await seed();
+    const res = await request(app)
+      .patch(`/v1/admin/users/${s.mem1.id}`)
+      .set(auth(s.admin.token))
+      .send({ activityRoleTitle: 'WIZARD' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('invalid_activity_role_title');
   });
 
   it('rejects setting self as own manager', async () => {
@@ -396,10 +418,91 @@ describe('/v1/admin/team-member-settings', () => {
       .patch(`/v1/admin/team-member-settings/${s.mgr.id}`)
       .set(auth(s.mgr.token))
       .send({ screenshotIntervalMin: 120, idleThresholdMin: 15 });
-    expect(selfPatch.status).toBe(200);
-    expect(selfPatch.body.id).toBe(s.mgr.id);
-    expect(selfPatch.body.screenshotIntervalMin).toBe(120);
-    expect(selfPatch.body.idleThresholdMin).toBe(15);
+    expect(selfPatch.status).toBe(403);
+    expect(selfPatch.body.error).toBe('self_settings_forbidden');
+
+    const adminPatch = await request(app)
+      .patch(`/v1/admin/team-member-settings/${s.mgr.id}`)
+      .set(auth(s.admin.token))
+      .send({ screenshotIntervalMin: 120, idleThresholdMin: 15 });
+    expect(adminPatch.status).toBe(200);
+    expect(adminPatch.body.id).toBe(s.mgr.id);
+    expect(adminPatch.body.screenshotIntervalMin).toBe(120);
+    expect(adminPatch.body.idleThresholdMin).toBe(15);
+  });
+
+  it('requires an audit reason before changing member timing to 1 minute', async () => {
+    const s = await seed();
+    const team = await prisma.team.create({
+      data: { workspaceId: s.ws.id, name: 'Managed Team', managerId: s.mgr.id },
+    });
+    await prisma.user.update({
+      where: { id: s.mem1.id },
+      data: { teamId: team.id, managerId: s.mgr.id },
+    });
+
+    const denied = await request(app)
+      .patch(`/v1/admin/team-member-settings/${s.mem1.id}`)
+      .set(auth(s.mgr.token))
+      .send({ screenshotIntervalMin: 1 });
+    expect(denied.status).toBe(400);
+    expect(denied.body.error).toBe('missing_monitoring_audit_reason');
+    expect(await prisma.monitoringSettingsAudit.findMany({ where: { workspaceId: s.ws.id } })).toHaveLength(0);
+
+    const allowed = await request(app)
+      .patch(`/v1/admin/team-member-settings/${s.mem1.id}`)
+      .set(auth(s.mgr.token))
+      .send({ screenshotIntervalMin: 1, auditReason: 'Temporary high-touch review approved by admin.' });
+    expect(allowed.status).toBe(200);
+    expect(allowed.body.screenshotIntervalMin).toBe(1);
+
+    const audit = await prisma.monitoringSettingsAudit.findFirstOrThrow({
+      where: { workspaceId: s.ws.id },
+    });
+    expect(audit).toMatchObject({
+      actorId: s.mgr.id,
+      targetUserId: s.mem1.id,
+      scope: 'MEMBER_OVERRIDE',
+      previousScreenshotIntervalMin: 180,
+      previousIdleThresholdMin: 5,
+      nextScreenshotIntervalMin: 1,
+      nextIdleThresholdMin: 5,
+      riskLevel: 'HIGH',
+      reason: 'Temporary high-touch review approved by admin.',
+    });
+  });
+
+  it('audits caution member timing changes without requiring a reason', async () => {
+    const s = await seed();
+    const team = await prisma.team.create({
+      data: { workspaceId: s.ws.id, name: 'Managed Team', managerId: s.mgr.id },
+    });
+    await prisma.user.update({
+      where: { id: s.mem1.id },
+      data: { teamId: team.id, managerId: s.mgr.id },
+    });
+
+    const res = await request(app)
+      .patch(`/v1/admin/team-member-settings/${s.mem1.id}`)
+      .set(auth(s.mgr.token))
+      .send({ idleThresholdMin: 3 });
+    expect(res.status).toBe(200);
+    expect(res.body.idleThresholdMin).toBe(3);
+
+    const audit = await prisma.monitoringSettingsAudit.findFirstOrThrow({
+      where: { workspaceId: s.ws.id },
+    });
+    expect(audit).toMatchObject({
+      actorId: s.mgr.id,
+      targetUserId: s.mem1.id,
+      scope: 'MEMBER_OVERRIDE',
+      previousScreenshotIntervalMin: 180,
+      previousIdleThresholdMin: 5,
+      nextScreenshotIntervalMin: 180,
+      nextIdleThresholdMin: 3,
+      riskLevel: 'CAUTION',
+      reason: null,
+    });
   });
 
   it('keeps manager settings writes scoped to their team', async () => {

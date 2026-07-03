@@ -202,6 +202,30 @@ describe('POST /v1/admin/manual-time-requests/:id/decide', () => {
     expect(reloaded?.status).toBe('PENDING');
   });
 
+  it('ADMIN cannot decide their own manual-time request', async () => {
+    const s = await seed();
+    const selfReq = await prisma.manualTimeRequest.create({
+      data: {
+        clientUuid: `cu-self-${Date.now()}`,
+        userId: s.admin.id,
+        approverId: s.admin.id,
+        requestedStart: new Date('2026-05-30T13:00:00Z'),
+        requestedEnd: new Date('2026-05-30T14:00:00Z'),
+        reason: 'Own admin request must be reviewed by someone else',
+        status: 'PENDING',
+      },
+    });
+    const res = await request(app)
+      .post(`/v1/admin/manual-time-requests/${selfReq.id}/decide`)
+      .set(bearer(s.admin.token))
+      .send({ action: 'approve' });
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe('self_approval_forbidden');
+    const reloaded = await prisma.manualTimeRequest.findUnique({ where: { id: selfReq.id } });
+    expect(reloaded?.status).toBe('PENDING');
+    expect(reloaded?.timeEntryId).toBeNull();
+  });
+
   it('idempotent: deciding twice returns the already-decided state (no double TimeEntry)', async () => {
     const s = await seed();
     const r1 = await request(app)

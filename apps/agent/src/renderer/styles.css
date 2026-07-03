@@ -241,6 +241,23 @@ label.field-label { display: block; font-size: 12px; font-weight: 600; color: va
 }
 .update-banner span { flex: 1; min-width: 0; }
 .update-banner .btn { height: 30px; padding: 0 var(--sp-4); flex-shrink: 0; }
+.recovery-banner {
+  display: flex; align-items: center; gap: var(--sp-3);
+  margin: var(--sp-4) 4px 0; padding: var(--sp-3) var(--sp-4);
+  min-height: 42px;
+  border: 1px solid color-mix(in srgb, var(--c-orange) 18%, transparent);
+  border-radius: var(--radius-md);
+  background: var(--c-amber-bg);
+  color: var(--c-orange);
+  font-size: 12px; font-weight: 600;
+}
+.recovery-banner span { flex: 1; min-width: 0; }
+.recovery-dismiss {
+  width: 28px; height: 28px; border-radius: 50%; border: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: rgba(255, 255, 255, 0.62); color: currentColor;
+}
+.recovery-dismiss:hover:not(:disabled) { background: rgba(255, 255, 255, 0.86); }
 .toolbar {
   height: var(--toolbar-height); display: flex; align-items: center; justify-content: space-between;
   padding: 0 var(--sp-8); -webkit-app-region: drag;

@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import request from 'supertest';
 import crypto from 'node:crypto';
+import jwt from 'jsonwebtoken';
 import { prisma } from '@grind/db';
+import { seedUser } from './helpers';
 
 // Configure Lark + provisioning BEFORE app/env first import.
 process.env.LARK_APP_ID = 'cli_test';
@@ -47,6 +49,7 @@ function configure(opts: { exchange?: () => Promise<Tokens>; profile?: Profile |
   lark.setTokenManagerForTests(tm);
   const profile = opts.profile === undefined ? { openId: 'ou_1', unionId: null, name: 'Boss', email: 'boss@co.com', avatarUrl: null } : opts.profile;
   lark.setProfileClientForTests({ getProfile: async () => profile });
+  return tm;
 }
 
 beforeEach(() => {
@@ -175,6 +178,25 @@ describe('agent deep-link + exchange', () => {
     expect(res.body.accessToken).toBeTruthy();
   });
 
+  it('routes an expired but signed Timo agent state back to the agent', async () => {
+    const expired = jwt.sign(
+      {
+        nonce: 'expired-agent',
+        client: 'agent',
+        agentChallenge: 'chal',
+        agentCallbackScheme: 'timo',
+        kind: 'lark_login',
+      },
+      process.env.JWT_SECRET!,
+      { algorithm: 'HS256', expiresIn: -10 },
+    );
+
+    const res = await callback(expired, { code: 'abc' });
+
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe('timo://auth?error=state_invalid');
+  });
+
   it('issues a one-time code and exchanges it for a session', async () => {
     const verifier = crypto.randomBytes(40).toString('base64url');
     const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
@@ -205,5 +227,78 @@ describe('agent deep-link + exchange', () => {
     const res = await request(app).post('/v1/auth/lark/exchange').send({ code, codeVerifier: verifier });
     expect(res.status).toBe(400);
     expect(res.body.error).toBe('code_invalid');
+  });
+});
+
+describe('GET /v1/lark/status — proactive refresh', () => {
+  function statusManager(opts: { refresh?: () => Promise<Tokens> }) {
+    let nowMs = 1_700_000_000_000;
+    let refreshCalls = 0;
+    const tm = new lark.TokenManager({
+      prisma,
+      tokenKey: process.env.LARK_TOKEN_KEY!,
+      now: () => nowMs,
+      client: {
+        exchangeCode: async () => TOKENS,
+        refresh: async () => {
+          refreshCalls += 1;
+          return opts.refresh ? opts.refresh() : { ...TOKENS, accessToken: 'at_refreshed', refreshToken: 'rt_refreshed' };
+        },
+      },
+    });
+    lark.setTokenManagerForTests(tm);
+    return {
+      tm,
+      advance(ms: number) {
+        nowMs += ms;
+      },
+      refreshCalls() {
+        return refreshCalls;
+      },
+    };
+  }
+
+  it('best-effort refreshes a due grant and still reports connected', async () => {
+    const { userId, accessToken } = await seedUser();
+    const h = statusManager({});
+    await h.tm.persistTokens(userId, TOKENS);
+    h.advance(6 * 24 * 3600 * 1000 + 2 * 3600 * 1000);
+
+    const res = await request(app).get('/v1/lark/status').set('Authorization', `Bearer ${accessToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.connected).toBe(true);
+    expect(res.body.reauthRequired).toBe(false);
+    expect(h.refreshCalls()).toBe(1);
+  });
+
+  it('does not force reconnect when due refresh is transient', async () => {
+    const { userId, accessToken } = await seedUser();
+    const h = statusManager({ refresh: async () => { throw new LarkTransientError('lark 503'); } });
+    await h.tm.persistTokens(userId, TOKENS);
+    h.advance(6 * 24 * 3600 * 1000 + 2 * 3600 * 1000);
+
+    const res = await request(app).get('/v1/lark/status').set('Authorization', `Bearer ${accessToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.connected).toBe(true);
+    expect(res.body.reauthRequired).toBe(false);
+    const row = await prisma.larkOAuthToken.findUnique({ where: { userId } });
+    expect(row!.reauthRequired).toBe(false);
+  });
+
+  it('reports reauth when due refresh is explicitly rejected', async () => {
+    const { userId, accessToken } = await seedUser();
+    const h = statusManager({ refresh: async () => { throw new lark.LarkReauthRequiredError('revoked'); } });
+    await h.tm.persistTokens(userId, TOKENS);
+    h.advance(6 * 24 * 3600 * 1000 + 2 * 3600 * 1000);
+
+    const res = await request(app).get('/v1/lark/status').set('Authorization', `Bearer ${accessToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.connected).toBe(false);
+    expect(res.body.reauthRequired).toBe(true);
+    const row = await prisma.larkOAuthToken.findUnique({ where: { userId } });
+    expect(row!.reauthRequired).toBe(true);
   });
 });

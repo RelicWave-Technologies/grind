@@ -277,6 +277,7 @@ export function ApprovalsScreen() {
             rows={visible}
             tz={tz}
             taskMap={taskMap}
+            currentUserId={me.id}
             busyRequestId={decide.isPending ? decide.variables?.id ?? null : null}
             busyAction={decide.isPending ? decide.variables?.action ?? null : null}
             onSelect={setSelectedRow}
@@ -310,6 +311,7 @@ function ApprovalTable({
   rows,
   tz,
   taskMap,
+  currentUserId,
   busyRequestId,
   busyAction,
   onSelect,
@@ -321,6 +323,7 @@ function ApprovalTable({
   rows: ApprovalTableRow[];
   tz: string;
   taskMap: Map<string, string>;
+  currentUserId: string;
   busyRequestId: string | null;
   busyAction: 'approve' | 'reject' | null;
   onSelect: (row: ApprovalTableRow) => void;
@@ -351,6 +354,7 @@ function ApprovalTable({
             const decidedMs = req.decidedAt ? new Date(req.decidedAt).getTime() : null;
             const task = approvalTaskReadout(req, taskMap);
             const userId = row.requester?.id;
+            const isOwnRequest = userId === currentUserId;
             const isBusy = busyRequestId === req.id;
             return (
               <Tr
@@ -425,6 +429,7 @@ function ApprovalTable({
                   <Td className="apv-col-actions" align="center">
                     <TeamDecisionCell
                       req={req}
+                      isOwnRequest={isOwnRequest}
                       busy={isBusy}
                       busyAction={isBusy ? busyAction : null}
                       onApprove={() => onApprove(req.id)}
@@ -444,6 +449,7 @@ function ApprovalTable({
 
 function TeamDecisionCell({
   req,
+  isOwnRequest,
   busy,
   busyAction,
   onApprove,
@@ -451,6 +457,7 @@ function TeamDecisionCell({
   onOpenDay,
 }: {
   req: ApprovalRequest;
+  isOwnRequest: boolean;
   busy: boolean;
   busyAction: 'approve' | 'reject' | null;
   onApprove: () => void;
@@ -468,6 +475,25 @@ function TeamDecisionCell({
           icon={<Clock4 size={13} strokeWidth={1.8} />}
           aria-label="Open Edit Time"
           title="Open day"
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpenDay();
+          }}
+        />
+      </div>
+    );
+  }
+  if (isOwnRequest) {
+    return (
+      <div className="apv-team-decision apv-team-decision--done">
+        <Tag status="neutral" mono>Needs reviewer</Tag>
+        <IconButton
+          className="apv-team-open-day"
+          size="sm"
+          variant="ghost"
+          icon={<Clock4 size={13} strokeWidth={1.8} />}
+          aria-label="Open Edit Time"
+          title="Another approver must decide"
           onClick={(e) => {
             e.stopPropagation();
             onOpenDay();

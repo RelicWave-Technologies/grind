@@ -8,6 +8,8 @@ export type ShotItem = {
   uploadState: string;
   keyboardPct: number;
   mousePct: number;
+  attempts: number;
+  lastError: string | null;
 };
 
 /** Grid of screenshot thumbnails with per-shot keyboard/mouse activity bars.
@@ -39,7 +41,13 @@ export default function ScreenshotGrid({ shots }: { shots: ShotItem[] }) {
           <button
             key={s.id}
             className="shot shot-btn"
-            title={`${new Date(s.capturedAt).toLocaleString()} · ${uploadLabel(s.uploadState)} · keyboard ${s.keyboardPct}% · mouse ${s.mousePct}%`}
+            title={[
+              new Date(s.capturedAt).toLocaleString(),
+              uploadLabel(s.uploadState),
+              s.lastError ? s.lastError : null,
+              `keyboard ${s.keyboardPct}%`,
+              `mouse ${s.mousePct}%`,
+            ].filter(Boolean).join(' · ')}
             onClick={() => setOpenId(s.id)}
           >
             {s.thumb ? <img src={s.thumb} alt="screenshot" /> : <div className="shot-missing" />}
@@ -75,6 +83,6 @@ export default function ScreenshotGrid({ shots }: { shots: ShotItem[] }) {
 function uploadLabel(state: string): string {
   if (state === 'uploaded') return 'Uploaded';
   if (state === 'uploading') return 'Uploading';
-  if (state === 'failed') return 'Retrying upload';
+  if (state === 'failed') return 'Upload failed';
   return 'Pending upload';
 }

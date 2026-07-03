@@ -19,6 +19,8 @@ model Workspace {
   policy         WorkspacePolicy?
   payrollPolicy  PayrollPolicy?
   payrollRunLogs PayrollRunLog[]
+  timeInvalidations TimeInvalidation[]
+  monitoringSettingsAudits MonitoringSettingsAudit[]
 }
 
 /// Workspace-wide capture policy. A single row per workspace (unique on
@@ -121,6 +123,24 @@ enum Role {
   MEMBER
 }
 
+enum ActivityRoleTitle {
+  DEVELOPER
+  DESIGNER
+  SALES
+  OTHER
+}
+
+enum MonitoringSettingsScope {
+  WORKSPACE_POLICY
+  MEMBER_OVERRIDE
+}
+
+enum MonitoringSettingsRiskLevel {
+  NORMAL
+  CAUTION
+  HIGH
+}
+
 enum AgentRuntimeState {
   IDLE
   RUNNING
@@ -206,6 +226,8 @@ model User {
   provisioningStatus ProvisioningStatus @default(PENDING)
   /// Avatar URL synced from Lark on each login (stable profile field).
   avatarUrl    String?
+  /// Activity scoring preset. Admin-owned so users cannot self-tune KPI output.
+  activityRoleTitle ActivityRoleTitle @default(OTHER)
   /// Soft-deactivation: when non-null, the user can't log in, doesn't
   /// appear in scope/admin queries, and (importantly) their *history*
   /// remains queryable for back-dated reports + audit. Reactivation
@@ -249,6 +271,10 @@ model User {
   managedTeams             Team[]              @relation("TeamManager")
   activityFlags            ActivityFlag[]      @relation("FlagSubject")
   resolvedFlags            ActivityFlag[]      @relation("FlagResolver")
+  timeInvalidations        TimeInvalidation[]  @relation("TimeInvalidationSubject")
+  timeInvalidationsCreated TimeInvalidation[]  @relation("TimeInvalidationActor")
+  monitoringSettingsAuditsCreated MonitoringSettingsAudit[] @relation("MonitoringSettingsAuditActor")
+  monitoringSettingsAuditsTargeted MonitoringSettingsAudit[] @relation("MonitoringSettingsAuditTarget")
   /// Attendee relations: meetings this user was tagged in (manual-time
   /// requests + live MEETING TimeEntries). Useful for "show me everyone's
   /// meetings I was in" reports.
@@ -582,11 +608,57 @@ model ActivityFlag {
   resolvedAt   DateTime?
   resolvedNote String?
   createdAt    DateTime       @default(now())
+  timeInvalidation TimeInvalidation?
 
   /// Dedupe key: re-uploading the same window should not double-flag.
   @@unique([userId, windowStart, type])
   @@index([userId, status])
   @@index([status, createdAt])
+}
+
+/// Immutable audit record that removes a reviewed anti-cheat window from
+/// counted totals without deleting raw TimeEntry/Screenshot/ActivitySample rows.
+model TimeInvalidation {
+  id              String       @id @default(cuid())
+  workspaceId     String
+  workspace       Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  flagId          String       @unique
+  flag            ActivityFlag @relation(fields: [flagId], references: [id], onDelete: Cascade)
+  userId          String
+  user            User         @relation("TimeInvalidationSubject", fields: [userId], references: [id], onDelete: Cascade)
+  windowStart     DateTime
+  windowEnd       DateTime
+  invalidatedById String?
+  invalidatedBy   User?        @relation("TimeInvalidationActor", fields: [invalidatedById], references: [id], onDelete: SetNull)
+  reason          String
+  createdAt       DateTime     @default(now())
+
+  @@index([workspaceId, windowStart])
+  @@index([userId, windowStart])
+}
+
+/// Immutable audit trail for screenshot/idle timing changes. This exists so
+/// unusually aggressive monitoring settings are explainable after the fact.
+model MonitoringSettingsAudit {
+  id                            String                      @id @default(cuid())
+  workspaceId                   String
+  workspace                     Workspace                   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  actorId                       String?
+  actor                         User?                       @relation("MonitoringSettingsAuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+  targetUserId                  String?
+  targetUser                    User?                       @relation("MonitoringSettingsAuditTarget", fields: [targetUserId], references: [id], onDelete: SetNull)
+  scope                         MonitoringSettingsScope
+  previousScreenshotIntervalMin Int?
+  previousIdleThresholdMin      Int?
+  nextScreenshotIntervalMin     Int?
+  nextIdleThresholdMin          Int?
+  riskLevel                     MonitoringSettingsRiskLevel
+  reason                        String?
+  createdAt                     DateTime                    @default(now())
+
+  @@index([workspaceId, createdAt])
+  @@index([targetUserId, createdAt])
+  @@index([actorId, createdAt])
 }
 
 model RefreshToken {

@@ -17,6 +17,7 @@ export type HeartbeatRequest = z.infer<typeof HeartbeatRequest>;
 export const HeartbeatResponse = z.object({
   ok: z.literal(true),
   serverTime: z.string(),
+  configVersion: z.string().min(1).default('legacy'),
 });
 export type HeartbeatResponse = z.infer<typeof HeartbeatResponse>;
 
@@ -34,9 +35,13 @@ export const AgentAppIconsRequest = z.object({
 export type AgentAppIconsRequest = z.infer<typeof AgentAppIconsRequest>;
 
 export const AgentConfigResponse = z.object({
+  configVersion: z.string().default(''),
   heartbeatIntervalSec: z.number().int().min(15).max(600).default(60),
   screenshotIntervalMin: z.number().int().min(1).max(480).default(180),
   idleThresholdMin: z.number().int().min(1).max(120).default(5),
+  captureApps: z.boolean().default(false),
+  captureTitles: z.boolean().default(false),
+  captureUrls: z.boolean().default(false),
   // Web dashboard origin, served so the agent's "Open Dashboard" button stays in
   // sync with the backend's DASHBOARD_URL (empty string when unset).
   dashboardUrl: z.string().default(''),

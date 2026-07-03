@@ -1,7 +1,7 @@
 import './flags.css';
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ShieldAlert, Check, X, AlertOctagon, ShieldCheck, Sparkles } from 'lucide-react';
+import { ShieldAlert, Check, X, AlertOctagon, ShieldCheck, Sparkles, Ban } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 import type { ActivityFlag, FlagResolution, FlagType } from '../lib/types';
 import {
@@ -20,7 +20,7 @@ import {
   SkeletonTable,
 } from '../ui';
 import type { Status } from '../ui';
-import { fmtTime, fmtDayLabel } from '../lib/format';
+import { fmtTime, fmtDayLabel, fmtDurationMs } from '../lib/format';
 
 interface ListResponse {
   flags: ActivityFlag[];
@@ -74,6 +74,7 @@ function verdictStatus(resolution: FlagResolution): Status {
  */
 export function FlagsScreen() {
   const [tab, setTab] = useState<'OPEN' | 'RESOLVED'>('OPEN');
+  const [lastInvalidation, setLastInvalidation] = useState<null | { id: string; invalidatedMs: number }>(null);
   const qc = useQueryClient();
 
   const q = useQuery({
@@ -83,11 +84,14 @@ export function FlagsScreen() {
 
   const resolve = useMutation({
     mutationFn: async (vars: { id: string; resolution: FlagResolution; note?: string }) =>
-      api<{ id: string; status: 'RESOLVED'; resolution: FlagResolution; timeInvalidated: boolean }>(
+      api<{ id: string; status: 'RESOLVED'; resolution: FlagResolution; timeInvalidated: boolean; invalidatedMs: number }>(
         `/v1/admin/flags/${vars.id}/resolve`,
         { method: 'POST', json: { resolution: vars.resolution, note: vars.note } },
       ),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'flags'] }),
+    onSuccess: (data) => {
+      setLastInvalidation(data.timeInvalidated ? { id: data.id, invalidatedMs: data.invalidatedMs } : null);
+      qc.invalidateQueries({ queryKey: ['admin', 'flags'] });
+    },
   });
 
   const count = q.data?.flags.length ?? 0;
@@ -122,6 +126,12 @@ export function FlagsScreen() {
 
       {q.isError && (
         <Banner status="danger">Couldn&apos;t load flags — {(q.error as Error).message}</Banner>
+      )}
+
+      {lastInvalidation && (
+        <Banner status="warn">
+          Time invalidated: {fmtDurationMs(lastInvalidation.invalidatedMs)} excluded from reports and KPIs.
+        </Banner>
       )}
 
       {q.data && q.data.flags.length === 0 && (
@@ -288,19 +298,33 @@ function FlagCard({
             className="flg-form"
             onSubmit={(e) => {
               e.preventDefault();
+              if (composing === 'TIME_INVALIDATED' && !note.trim()) return;
               onResolve(composing, note.trim() || undefined);
             }}
           >
             <Field
               className="flg-form__field"
-              label={composing === 'DISMISSED' ? 'Why is this legitimate?' : 'Notes (optional)'}
+              label={
+                composing === 'DISMISSED'
+                  ? 'Why is this legitimate?'
+                  : composing === 'TIME_INVALIDATED'
+                    ? 'Why should this time be excluded?'
+                    : 'Notes (optional)'
+              }
             >
               <Input
                 autoFocus
-                placeholder={composing === 'DISMISSED' ? 'Why is this legitimate?' : 'Notes (optional)'}
+                placeholder={
+                  composing === 'DISMISSED'
+                    ? 'Why is this legitimate?'
+                    : composing === 'TIME_INVALIDATED'
+                      ? 'Required audit note'
+                      : 'Notes (optional)'
+                }
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
                 maxLength={500}
+                required={composing === 'TIME_INVALIDATED'}
               />
             </Field>
             <div className="flg-actions">
@@ -312,7 +336,11 @@ function FlagCard({
                 variant={composing === 'DISMISSED' ? 'secondary' : 'danger'}
                 loading={busy}
               >
-                Confirm {composing === 'DISMISSED' ? 'dismiss' : 'cheat'}
+                {composing === 'DISMISSED'
+                  ? 'Confirm dismiss'
+                  : composing === 'TIME_INVALIDATED'
+                    ? 'Invalidate time'
+                    : 'Confirm cheat'}
               </Button>
             </div>
           </form>
@@ -321,7 +349,10 @@ function FlagCard({
             <Button
               variant="secondary"
               icon={<Check size={14} strokeWidth={2.1} />}
-              onClick={() => setComposing('DISMISSED')}
+              onClick={() => {
+                setNote('');
+                setComposing('DISMISSED');
+              }}
               disabled={busy}
             >
               Dismiss
@@ -329,10 +360,24 @@ function FlagCard({
             <Button
               variant="danger"
               icon={<X size={14} strokeWidth={2.1} />}
-              onClick={() => setComposing('CONFIRMED')}
+              onClick={() => {
+                setNote('');
+                setComposing('CONFIRMED');
+              }}
               disabled={busy}
             >
               Confirm cheat
+            </Button>
+            <Button
+              variant="danger"
+              icon={<Ban size={14} strokeWidth={2.1} />}
+              onClick={() => {
+                setNote('');
+                setComposing('TIME_INVALIDATED');
+              }}
+              disabled={busy}
+            >
+              Invalidate time
             </Button>
           </div>
         ))}

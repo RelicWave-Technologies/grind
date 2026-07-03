@@ -45,9 +45,16 @@ export const PatchWorkspacePolicyRequest = z
     retentionDaysScreenshots: z.number().int().min(0).max(3650).optional(),
     defaultScreenshotIntervalMin: z.number().int().min(SCREENSHOT_INTERVAL_MIN).max(SCREENSHOT_INTERVAL_MAX).optional(),
     defaultIdleThresholdMin: z.number().int().min(IDLE_THRESHOLD_MIN).max(IDLE_THRESHOLD_MAX).optional(),
+    auditReason: z.string().max(500).optional(),
   })
   .refine(
-    (v) => Object.keys(v).length > 0,
+    (v) =>
+      v.captureApps !== undefined ||
+      v.captureTitles !== undefined ||
+      v.captureUrls !== undefined ||
+      v.retentionDaysScreenshots !== undefined ||
+      v.defaultScreenshotIntervalMin !== undefined ||
+      v.defaultIdleThresholdMin !== undefined,
     { message: 'at_least_one_field_required' },
   );
 export type PatchWorkspacePolicyRequest = z.infer<typeof PatchWorkspacePolicyRequest>;

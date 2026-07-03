@@ -39,6 +39,7 @@ Grind
 | Grind — Updates (parent) | `F4WAdwmCWoz6EMxX4wKl8JGqgfg` | `RNW7w0sstixBrZkaVlXlOhF5gmc` |
 | Ref: Time Tracker — Architecture & Tech Plan | `N2wtdf0yyoED7bxO3hzlMXhsgNh` | `LBOfwqmxoiM7Q5kUl1zlGVK3gLh` |
 | Ref: Design System — Apple HIG (Light/Premium) | `TOjOdT9xMoM7iMxeCbglipRYgkc` | `WOtMw4IbfiXkRjksLoQlC0lrgo3` |
+| Ref: API Reference — Third-Party Integration (v1) | `Q7kPdVd6joS1wixnn5glHv9lgBe` | `HSyvwIDVUiF7LkkjGsgl9Km9grx` |
 | Feature: Time Tracker MVP (folder) | `C1NPdC66lofn7cxfkqUljzoKgYb` | `HxJowzMc2iPScmkRU26lGn6Dgpg` |
 | Time Tracker MVP — Plan | `GDWodW56fofwChxzlYvlZcRxgA3` | `WsSvwBc4aiYz1ykMX00lsno0gIc` |
 | Time Tracker MVP — Updates | `N7vkdocUsoNgB7xmcIUlWCWigyh` | `J0HLw1Lrni5cyPkK58YlbIn1gth` |

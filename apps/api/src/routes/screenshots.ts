@@ -54,6 +54,41 @@ screenshotsRouter.post('/direct-upload', async (req, res, next) => {
 
 screenshotsRouter.use(requireAccessToken);
 
+screenshotsRouter.get('/:id/image', attachScope, async (req, res, next) => {
+  try {
+    if (!req.user || !req.scope) return res.status(401).json({ error: 'unauthorized' });
+    const variant = screenshotImageVariant(req.query.variant);
+    if (!variant) return res.status(400).json({ error: 'invalid_variant' });
+    const screenshotId = req.params.id;
+    if (!screenshotId) return res.status(404).json({ error: 'screenshot_not_found' });
+
+    const row = await prisma.screenshot.findUnique({
+      where: { id: screenshotId },
+      select: {
+        userId: true,
+        uploadState: true,
+        deletedAt: true,
+        s3Key: true,
+        thumbS3Key: true,
+        fullUrl: true,
+        thumbUrl: true,
+      },
+    });
+    if (!row || row.deletedAt || row.uploadState !== 'UPLOADED') {
+      return res.status(404).json({ error: 'screenshot_not_found' });
+    }
+    if (!req.scope.userIds.includes(row.userId)) return res.status(403).json({ error: 'forbidden' });
+
+    const data = await loadScreenshotImage(row, variant);
+    if (!data) return res.status(404).json({ error: 'screenshot_not_found' });
+    res.setHeader('Content-Type', 'image/webp');
+    res.setHeader('Cache-Control', 'private, max-age=300');
+    res.send(data);
+  } catch (err) {
+    next(err);
+  }
+});
+
 screenshotsRouter.get('/assets/:fileId', attachScope, async (req, res, next) => {
   try {
     if (!req.user || !req.scope) return res.status(401).json({ error: 'unauthorized' });
@@ -255,6 +290,50 @@ async function canWriteScreenshot(userId: string, screenshotId: string): Promise
     select: { userId: true },
   });
   return !existing || existing.userId === userId;
+}
+
+type ScreenshotImageVariant = 'full' | 'thumb';
+
+interface ScreenshotImageRow {
+  s3Key: string | null;
+  thumbS3Key: string | null;
+  fullUrl: string | null;
+  thumbUrl: string | null;
+}
+
+function screenshotImageVariant(raw: unknown): ScreenshotImageVariant | null {
+  return raw === 'full' || raw === 'thumb' ? raw : null;
+}
+
+async function loadScreenshotImage(row: ScreenshotImageRow, variant: ScreenshotImageVariant): Promise<Buffer | null> {
+  const driveKey = variant === 'thumb' ? row.thumbS3Key ?? row.s3Key : row.s3Key;
+  if (isGoogleDriveConfigured() && driveKey) {
+    try {
+      return await downloadScreenshotFromDrive(driveKey);
+    } catch {
+      // Legacy Cloudinary rows can still have s3Key-style public ids after
+      // Drive is enabled. Fall through to the stored provider URL.
+    }
+  }
+
+  const remoteUrl = variant === 'thumb' ? row.thumbUrl ?? row.fullUrl : row.fullUrl;
+  if (!remoteUrl) return null;
+  return fetchRemoteScreenshot(remoteUrl);
+}
+
+async function fetchRemoteScreenshot(rawUrl: string): Promise<Buffer | null> {
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== 'https:') return null;
+
+  const response = await fetch(url);
+  if (!response.ok) return null;
+  const bytes = await response.arrayBuffer();
+  return Buffer.from(bytes);
 }
 
 function signDriveUpload(userId: string, id: string): { uploadUrl: string; expires: number; signature: string } {

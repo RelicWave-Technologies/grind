@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import type { PolicyFlags } from '@grind/types';
 
 export interface ActivityRow {
   id: string;
@@ -82,6 +83,19 @@ export class ActivityStore {
     const stmt = this.db.prepare(`UPDATE activity_samples SET synced = 1 WHERE id = ?`);
     const tx = this.db.transaction((list: string[]) => list.forEach((id) => stmt.run(id)));
     tx(ids);
+  }
+
+  scrubActiveFields(policy: PolicyFlags): number {
+    const sets: string[] = [];
+    if (!policy.captureApps) {
+      sets.push('active_app = NULL', 'active_app_bundle = NULL', 'active_title = NULL', 'active_url = NULL');
+    } else {
+      if (!policy.captureTitles) sets.push('active_title = NULL');
+      if (!policy.captureUrls) sets.push('active_url = NULL');
+    }
+    if (sets.length === 0) return 0;
+    const info = this.db.prepare(`UPDATE activity_samples SET ${sets.join(', ')}`).run();
+    return Number(info.changes ?? 0);
   }
 
   countSince(sinceMs: number): { keystrokes: number; clicks: number; scrollEvents: number } {

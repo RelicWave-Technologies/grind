@@ -16,7 +16,10 @@ function auth(req: request.Test, token: string) {
   return req.set('Authorization', `Bearer ${token}`);
 }
 
-function createBody(_u: SeededUser, over: { startedAtMs?: number; larkTaskGuid?: string | null; segments?: unknown[] } = {}) {
+function createBody(
+  _u: SeededUser,
+  over: { startedAtMs?: number; endedAtMs?: number | null; larkTaskGuid?: string | null; segments?: unknown[] } = {},
+) {
   const startMs = over.startedAtMs ?? T0;
   return {
     id: fakeUlid('te'),
@@ -24,6 +27,7 @@ function createBody(_u: SeededUser, over: { startedAtMs?: number; larkTaskGuid?:
     ...(over.larkTaskGuid !== undefined ? { larkTaskGuid: over.larkTaskGuid } : {}),
     source: 'AUTO',
     startedAt: iso(startMs),
+    ...(over.endedAtMs !== undefined ? { endedAt: over.endedAtMs === null ? null : iso(over.endedAtMs) } : {}),
     agentVersion: '0.0.1',
     platform: 'darwin',
     // Default segment tracks the entry start so the invariant holds.
@@ -65,6 +69,22 @@ describe('POST /v1/time-entries', () => {
     const second = await auth(request(app).post('/v1/time-entries'), u.accessToken).send(body);
     expect(second.status).toBe(200);
     expect(second.body.id).toBe(first.body.id);
+  });
+
+  it('creates a closed entry from an offline snapshot', async () => {
+    const u = await seedUser();
+    const endedAtMs = T0 + 10 * MIN;
+    const body = createBody(u, {
+      endedAtMs,
+      segments: [{ id: fakeUlid('seg'), kind: 'WORK', startedAt: iso(T0), endedAt: iso(endedAtMs) }],
+    });
+
+    const res = await auth(request(app).post('/v1/time-entries'), u.accessToken).send(body);
+
+    expect(res.status).toBe(201);
+    expect(res.body.endedAt).toBe(iso(endedAtMs));
+    expect(res.body.segments).toHaveLength(1);
+    expect(res.body.segments[0]).toMatchObject({ kind: 'WORK', endedAt: iso(endedAtMs) });
   });
 
   it('rejects invalid segments (overlap)', async () => {

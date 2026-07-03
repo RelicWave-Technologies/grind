@@ -6,7 +6,7 @@ import { buildApp } from '../src/app';
 import { signAccessToken } from '../src/lib/jwt';
 
 /**
- * M13/1: self auto-approve (MGR+) + meeting attendees + admin reopen.
+ * M13/1: supervisor-created manual time + meeting attendees + admin reopen.
  * Real Postgres, no Lark calls (best-effort messenger silently no-ops
  * when not configured in tests).
  */
@@ -37,6 +37,11 @@ async function seed() {
   const memA = await mk(ws.id, 'memA', 'MEMBER');
   const memB = await mk(ws.id, 'memB', 'MEMBER');
   const outsider = await mk(wsOther.id, 'out', 'MEMBER');
+  const team = await prisma.team.create({ data: { workspaceId: ws.id, name: `Team-${stamp}`, managerId: mgr.id } });
+  await prisma.user.updateMany({
+    where: { id: { in: [mgr.id, mem.id, memA.id, memB.id] } },
+    data: { teamId: team.id, managerId: mgr.id },
+  });
 
   const tok = (u: { id: string; role: 'ADMIN' | 'MANAGER' | 'MEMBER' }, wsId = ws.id) =>
     signAccessToken({ sub: u.id, ws: wsId, role: u.role });
@@ -44,6 +49,7 @@ async function seed() {
   return {
     ws,
     wsOther,
+    team,
     admin: { id: admin.id, token: tok(admin) },
     mgr: { id: mgr.id, token: tok(mgr) },
     mem: { id: mem.id, token: tok(mem) },
@@ -59,38 +65,29 @@ const sample = {
   reason: 'Forgot to start the tracker — design review.',
 };
 
-describe('POST /v1/time-requests — self auto-approve', () => {
-  it('MANAGER auto-approves: status APPROVED + autoApproved=true + TimeEntry created', async () => {
+describe('POST /v1/time-requests — self requests require an approver', () => {
+  it('MANAGER self request stays PENDING for the workspace admin', async () => {
     const s = await seed();
     const res = await request(app)
       .post('/v1/time-requests')
       .set(auth(s.mgr.token))
       .send({ clientUuid: `cu-${ulid()}`, ...sample });
     expect(res.status).toBe(201);
-    expect(res.body.status).toBe('APPROVED');
-    expect(res.body.autoApproved).toBe(true);
-    expect(res.body.approverId).toBe(s.mgr.id);
-    // TimeEntry should exist linked to the request.
+    expect(res.body.status).toBe('PENDING');
+    expect(res.body.autoApproved).toBe(false);
+    expect(res.body.approverId).toBe(s.admin.id);
     const row = await prisma.manualTimeRequest.findUnique({ where: { id: res.body.id } });
-    expect(row?.timeEntryId).toBeTruthy();
-    const te = await prisma.timeEntry.findUnique({
-      where: { id: row!.timeEntryId! },
-      include: { segments: true },
-    });
-    expect(te?.source).toBe('MANUAL');
-    expect(te?.segments).toHaveLength(1);
-    expect(te?.segments[0]?.kind).toBe('WORK');
+    expect(row?.timeEntryId).toBeNull();
   });
 
-  it('ADMIN also auto-approves', async () => {
+  it('ADMIN self request returns no_approver when no non-self admin exists', async () => {
     const s = await seed();
     const res = await request(app)
       .post('/v1/time-requests')
       .set(auth(s.admin.token))
       .send({ clientUuid: `cu-${ulid()}`, ...sample });
-    expect(res.status).toBe(201);
-    expect(res.body.status).toBe('APPROVED');
-    expect(res.body.autoApproved).toBe(true);
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('no_approver');
   });
 
   it('MEMBER stays PENDING (traditional approver flow)', async () => {
@@ -102,7 +99,7 @@ describe('POST /v1/time-requests — self auto-approve', () => {
     expect(res.status).toBe(201);
     expect(res.body.status).toBe('PENDING');
     expect(res.body.autoApproved).toBe(false);
-    expect(res.body.approverId).not.toBe(s.mem.id);
+    expect(res.body.approverId).toBe(s.mgr.id);
   });
 
   it('snapshots requester.shiftId at start time', async () => {
@@ -123,11 +120,11 @@ describe('POST /v1/time-requests — self auto-approve', () => {
         bufferMin: 30,
       },
     });
-    await prisma.user.update({ where: { id: s.mgr.id }, data: { shiftId: shift.id, shiftAssignedAt: new Date() } });
+    await prisma.user.update({ where: { id: s.mem.id }, data: { shiftId: shift.id, shiftAssignedAt: new Date() } });
     const res = await request(app)
       .post('/v1/time-requests')
       .set(auth(s.mgr.token))
-      .send({ clientUuid: `cu-${ulid()}`, ...sample });
+      .send({ clientUuid: `cu-${ulid()}`, ...sample, userId: s.mem.id });
     expect(res.status).toBe(201);
     const row = await prisma.manualTimeRequest.findUnique({ where: { id: res.body.id } });
     const te = await prisma.timeEntry.findUnique({ where: { id: row!.timeEntryId! } });
@@ -144,7 +141,8 @@ describe('POST /v1/time-requests — attendees', () => {
       .send({
         clientUuid: `cu-${ulid()}`,
         ...sample,
-        attendeeIds: [s.memA.id, s.memB.id, s.memA.id /* dupe */, s.mgr.id /* self */],
+        userId: s.mem.id,
+        attendeeIds: [s.memA.id, s.memB.id, s.memA.id /* dupe */, s.mem.id /* self */],
       });
     expect(res.status).toBe(201);
     const ids = (res.body.attendeeIds as string[]).sort();
@@ -198,7 +196,7 @@ describe('POST /v1/time-requests — attendees', () => {
     });
     expect(reload!.attendees.map((a) => a.userId).sort()).toEqual([s.memA.id, s.memB.id].sort());
     // The approved TimeEntry MUST inherit those attendees (meeting participants)
-    // — parity with the auto-approve path. Regression guard for the M13/2 wiring
+    // — parity with the supervisor-created path. Regression guard for the M13/2 wiring
     // that decideByUser previously skipped (attendees were silently dropped).
     const teAttendees = await prisma.timeEntryAttendee.findMany({
       where: { timeEntryId: reload!.timeEntryId! },
@@ -213,7 +211,7 @@ describe('POST /v1/admin/manual-time-requests/:id/reopen', () => {
     const r = await request(app)
       .post('/v1/time-requests')
       .set(auth(s.mgr.token))
-      .send({ clientUuid: `cu-${ulid()}`, ...sample });
+      .send({ clientUuid: `cu-${ulid()}`, ...sample, userId: s.mem.id });
     expect(r.status).toBe(201);
     const id = r.body.id;
     const teId = (await prisma.manualTimeRequest.findUnique({ where: { id } }))!.timeEntryId!;
@@ -233,7 +231,7 @@ describe('POST /v1/admin/manual-time-requests/:id/reopen', () => {
     const r = await request(app)
       .post('/v1/time-requests')
       .set(auth(s.admin.token))
-      .send({ clientUuid: `cu-${ulid()}`, ...sample });
+      .send({ clientUuid: `cu-${ulid()}`, ...sample, userId: s.mem.id });
     const reopen = await request(app)
       .post(`/v1/admin/manual-time-requests/${r.body.id}/reopen`)
       .set(auth(s.mgr.token));
@@ -263,7 +261,7 @@ describe('POST /v1/admin/manual-time-requests/:id/reopen', () => {
     const r = await request(app)
       .post('/v1/time-requests')
       .set(auth(s.mgr.token))
-      .send({ clientUuid: `cu-${ulid()}`, ...sample });
+      .send({ clientUuid: `cu-${ulid()}`, ...sample, userId: s.mem.id });
     // Push decidedAt 25h back in time.
     await prisma.manualTimeRequest.update({
       where: { id: r.body.id },
@@ -288,13 +286,20 @@ describe('POST /v1/admin/manual-time-requests/:id/reopen', () => {
         passwordHash: 'x'.repeat(60),
       },
     });
-    const tok = signAccessToken({ sub: otherOwner.id, ws: s.wsOther.id, role: 'MANAGER' });
-    const r = await request(app)
-      .post('/v1/time-requests')
-      .set(auth(tok))
-      .send({ clientUuid: `cu-${ulid()}`, ...sample });
+    const r = await prisma.manualTimeRequest.create({
+      data: {
+        clientUuid: `cu-other-${ulid()}`,
+        userId: otherOwner.id,
+        requestedStart: new Date(sample.requestedStart),
+        requestedEnd: new Date(sample.requestedEnd),
+        reason: sample.reason,
+        status: 'APPROVED',
+        autoApproved: true,
+        decidedAt: new Date(),
+      },
+    });
     const reopen = await request(app)
-      .post(`/v1/admin/manual-time-requests/${r.body.id}/reopen`)
+      .post(`/v1/admin/manual-time-requests/${r.id}/reopen`)
       .set(auth(s.admin.token));
     expect(reopen.status).toBe(404);
   });

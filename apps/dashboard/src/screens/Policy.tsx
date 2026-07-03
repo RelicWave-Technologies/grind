@@ -1,8 +1,12 @@
 import { useState, useEffect, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Check, Clock3, Camera, Pencil, Save, X } from 'lucide-react';
-import type { WorkspacePolicyDto } from '@grind/types';
+import { Check, Clock3, Camera, History, Pencil, Save, X } from 'lucide-react';
+import type {
+  MonitoringSettingsAuditDto,
+  MonitoringSettingsAuditListResponse,
+  WorkspacePolicyDto,
+} from '@grind/types';
 import { api } from '../lib/api';
 import {
   Page,
@@ -13,6 +17,7 @@ import {
   Input,
   Field,
   Select,
+  Textarea,
   Toggle,
   Tag,
   Button,
@@ -57,6 +62,17 @@ interface PayrollFormState {
 const SCREENSHOT_INTERVAL_OPTIONS = [1, 5, 10, 15, 30, 60, 120, 180, 240, 360, 480];
 const IDLE_THRESHOLD_OPTIONS = [1, 3, 5, 10, 15, 30, 45, 60, 120];
 const RETENTION_OPTIONS = [30, 60, 90, 180, 365];
+type MonitoringRisk = 'NORMAL' | 'CAUTION' | 'HIGH';
+type MonitoringTiming = { screenshotIntervalMin: number; idleThresholdMin: number };
+type WorkspacePolicyPatch = Partial<Pick<
+  WorkspacePolicyDto,
+  | 'captureApps'
+  | 'captureTitles'
+  | 'captureUrls'
+  | 'retentionDaysScreenshots'
+  | 'defaultScreenshotIntervalMin'
+  | 'defaultIdleThresholdMin'
+>> & { auditReason?: string };
 
 export function PolicyScreen() {
   const qc = useQueryClient();
@@ -68,19 +84,26 @@ export function PolicyScreen() {
     queryKey: ['payroll-policy'],
     queryFn: () => api<PayrollPolicyDto>('/v1/admin/payroll/policy'),
   });
+  const auditQ = useQuery({
+    queryKey: ['admin', 'monitoring-settings-audits'],
+    queryFn: () => api<MonitoringSettingsAuditListResponse>('/v1/admin/monitoring-settings-audits?limit=20'),
+  });
 
   const [draft, setDraft] = useState<WorkspacePolicyDto | null>(null);
   const [payrollOpen, setPayrollOpen] = useState(false);
+  const [policyRiskPrompt, setPolicyRiskPrompt] = useState<{ patch: WorkspacePolicyPatch; next: MonitoringTiming } | null>(null);
   useEffect(() => {
     if (q.data && !draft) setDraft(q.data);
   }, [q.data, draft]);
 
   const m = useMutation({
-    mutationFn: (patch: Partial<WorkspacePolicyDto>) =>
+    mutationFn: (patch: WorkspacePolicyPatch) =>
       api<WorkspacePolicyDto>('/v1/admin/workspace-policy', { method: 'PATCH', json: patch }),
     onSuccess: (next) => {
       qc.setQueryData(['workspace-policy'], next);
       setDraft(next);
+      qc.invalidateQueries({ queryKey: ['admin', 'monitoring-settings-audits'] });
+      setPolicyRiskPrompt(null);
     },
   });
   const payrollMutation = useMutation({
@@ -146,18 +169,41 @@ export function PolicyScreen() {
 
   async function save() {
     if (!draft) return;
-    await m.mutateAsync({
+    const patch: WorkspacePolicyPatch = {
       captureApps: draft.captureApps,
       captureTitles: draft.captureTitles,
       captureUrls: draft.captureUrls,
       retentionDaysScreenshots: draft.retentionDaysScreenshots,
       defaultScreenshotIntervalMin: draft.defaultScreenshotIntervalMin,
       defaultIdleThresholdMin: draft.defaultIdleThresholdMin,
-    });
+    };
+    const previousTiming = q.data
+      ? {
+          screenshotIntervalMin: q.data.defaultScreenshotIntervalMin,
+          idleThresholdMin: q.data.defaultIdleThresholdMin,
+        }
+      : null;
+    const nextTiming = {
+      screenshotIntervalMin: draft.defaultScreenshotIntervalMin,
+      idleThresholdMin: draft.defaultIdleThresholdMin,
+    };
+    if (
+      previousTiming &&
+      monitoringTimingChanged(previousTiming, nextTiming) &&
+      monitoringRiskLevel(nextTiming) === 'HIGH'
+    ) {
+      setPolicyRiskPrompt({ patch, next: nextTiming });
+      return;
+    }
+    await m.mutateAsync(patch);
   }
 
   const saved = m.isSuccess && !dirty;
   const captureCount = [draft.captureApps, draft.captureTitles, draft.captureUrls].filter(Boolean).length;
+  const currentRisk = monitoringRiskLevel({
+    screenshotIntervalMin: draft.defaultScreenshotIntervalMin,
+    idleThresholdMin: draft.defaultIdleThresholdMin,
+  });
 
   return (
     <Page>
@@ -192,6 +238,16 @@ export function PolicyScreen() {
             <Stat label="Retention" value={draft.retentionDaysScreenshots === 0 ? 'Forever' : `${draft.retentionDaysScreenshots}d`} hint="purge" />
           </StatRow>
         </Card>
+
+        {currentRisk === 'HIGH' ? (
+          <Banner status="danger">
+            1-minute monitoring is active in this draft. Saving a timing change at this level requires an audit reason.
+          </Banner>
+        ) : currentRisk === 'CAUTION' ? (
+          <Banner status="warn">
+            This draft uses a short monitoring cadence. The change will be audit-logged when saved.
+          </Banner>
+        ) : null}
 
         <div className="pol-payroll-grid">
           {payrollQ.isLoading || !payrollQ.data ? (
@@ -330,6 +386,35 @@ export function PolicyScreen() {
         {m.isError && (
           <Banner status="danger">Couldn’t save: {(m.error as Error).message}</Banner>
         )}
+        <Card title="Monitoring audit" className="pol-card-compact" action={<Tag mono>Recent</Tag>}>
+          {auditQ.isLoading ? (
+            <List>
+              {[0, 1, 2].map((i) => (
+                <ListRow
+                  key={i}
+                  leading={<PolicyIcon><History size={16} /></PolicyIcon>}
+                  title={<Skeleton w={180} h={14} />}
+                  subtitle={<Skeleton w={360} h={12} />}
+                  trailing={<Skeleton w={80} h={24} radius={999} />}
+                />
+              ))}
+            </List>
+          ) : auditQ.isError ? (
+            <Banner status="danger">Couldn’t load monitoring audit: {(auditQ.error as Error).message}</Banner>
+          ) : auditQ.data && auditQ.data.audits.length > 0 ? (
+            <List>
+              {auditQ.data.audits.map((audit) => (
+                <MonitoringAuditRow key={audit.id} audit={audit} />
+              ))}
+            </List>
+          ) : (
+            <EmptyState
+              icon={<History size={20} strokeWidth={1.8} />}
+              title="No monitoring changes yet"
+              description="Screenshot and idle timing edits will appear here."
+            />
+          )}
+        </Card>
         {payrollQ.data && payrollOpen && (
           <PayrollPolicyModal
             policy={payrollQ.data}
@@ -337,6 +422,16 @@ export function PolicyScreen() {
             error={payrollMutation.error instanceof Error ? payrollMutation.error.message : null}
             onClose={() => setPayrollOpen(false)}
             onSave={(patch) => payrollMutation.mutate(patch)}
+          />
+        )}
+        {policyRiskPrompt && (
+          <MonitoringRiskModal
+            title="Confirm 1-minute monitoring"
+            description={`This changes workspace defaults to screenshots every ${formatMinutes(policyRiskPrompt.next.screenshotIntervalMin)} and idle break after ${formatMinutes(policyRiskPrompt.next.idleThresholdMin)}.`}
+            saving={m.isPending}
+            error={m.error instanceof Error ? m.error.message : null}
+            onClose={() => setPolicyRiskPrompt(null)}
+            onConfirm={(auditReason) => m.mutate({ ...policyRiskPrompt.patch, auditReason })}
           />
         )}
       </div>
@@ -362,6 +457,123 @@ function PolicyRule({ label, value, hint }: { label: string; value: string; hint
       {hint && <span className="ui-t-small">{hint}</span>}
     </div>
   );
+}
+
+function monitoringRiskLevel(timing: MonitoringTiming): MonitoringRisk {
+  if (timing.screenshotIntervalMin === 1 || timing.idleThresholdMin === 1) return 'HIGH';
+  if (timing.screenshotIntervalMin <= 5 || timing.idleThresholdMin <= 3) return 'CAUTION';
+  return 'NORMAL';
+}
+
+function monitoringTimingChanged(previous: MonitoringTiming, next: MonitoringTiming): boolean {
+  return previous.screenshotIntervalMin !== next.screenshotIntervalMin ||
+    previous.idleThresholdMin !== next.idleThresholdMin;
+}
+
+function MonitoringAuditRow({ audit }: { audit: MonitoringSettingsAuditDto }) {
+  const target = audit.scope === 'WORKSPACE_POLICY'
+    ? 'Workspace defaults'
+    : audit.targetUser?.name ?? 'Deleted member';
+  const actor = audit.actor?.name ?? 'System';
+  return (
+    <ListRow
+      leading={<PolicyIcon><History size={16} /></PolicyIcon>}
+      title={`${target} · ${formatAuditChange(audit)}`}
+      subtitle={
+        <span className="pol-audit-sub">
+          <span>{actor}</span>
+          <span>{formatAuditTime(audit.createdAt)}</span>
+          {audit.reason && <span>{audit.reason}</span>}
+        </span>
+      }
+      trailing={<RiskTag risk={audit.riskLevel} />}
+    />
+  );
+}
+
+function formatAuditChange(audit: MonitoringSettingsAuditDto): string {
+  const shot = `${formatNullableMinutes(audit.previousScreenshotIntervalMin)} → ${formatNullableMinutes(audit.nextScreenshotIntervalMin)}`;
+  const idle = `${formatNullableMinutes(audit.previousIdleThresholdMin)} → ${formatNullableMinutes(audit.nextIdleThresholdMin)}`;
+  return `shots ${shot}, idle ${idle}`;
+}
+
+function formatNullableMinutes(value: number | null): string {
+  return value === null ? '-' : formatMinutes(value);
+}
+
+function formatAuditTime(value: string): string {
+  return new Date(value).toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
+function RiskTag({ risk }: { risk: MonitoringRisk }) {
+  const status = risk === 'HIGH' ? 'danger' : risk === 'CAUTION' ? 'warn' : 'neutral';
+  return <Tag status={status} mono>{risk.toLowerCase()}</Tag>;
+}
+
+function MonitoringRiskModal({
+  title,
+  description,
+  saving,
+  error,
+  onClose,
+  onConfirm,
+}: {
+  title: string;
+  description: string;
+  saving: boolean;
+  error: string | null;
+  onClose: () => void;
+  onConfirm: (auditReason: string) => void;
+}) {
+  const [reason, setReason] = useState('');
+  const trimmed = reason.trim();
+  const modal = (
+    <div className="ui-overlay pol-modal-layer" role="presentation" onMouseDown={onClose}>
+      <section className="pol-modal pol-risk-modal" role="dialog" aria-modal="true" aria-labelledby="pol-risk-title" onMouseDown={(e) => e.stopPropagation()}>
+        <header className="pol-modal-head">
+          <div className="pol-modal-title">
+            <div className="ui-t-eyebrow">Monitoring audit</div>
+            <h2 id="pol-risk-title" className="ui-t-title">{title}</h2>
+            <p className="ui-t-small">{description}</p>
+          </div>
+          <IconButton aria-label="Close" icon={<X size={18} />} onClick={onClose} />
+        </header>
+        <div className="pol-modal-body">
+          <Banner status="danger">
+            1-minute monitoring is exceptional. Record why this is needed before saving.
+          </Banner>
+          <Field label="Audit reason" hint="Required. Be specific enough for later review.">
+            <Textarea
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              maxLength={500}
+              placeholder="Example: temporary QA window for a customer escalation, approved by Ops."
+              autoFocus
+            />
+          </Field>
+          {error && <Banner status="danger">{error}</Banner>}
+        </div>
+        <footer className="pol-modal-foot">
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button
+            variant="primary"
+            icon={<Save size={15} />}
+            onClick={() => onConfirm(trimmed)}
+            loading={saving}
+            disabled={!trimmed}
+          >
+            Save with audit
+          </Button>
+        </footer>
+      </section>
+    </div>
+  );
+  return createPortal(modal, document.body);
 }
 
 function payrollPolicyToForm(policy: PayrollPolicyDto): PayrollFormState {

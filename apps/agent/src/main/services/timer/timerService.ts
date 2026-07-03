@@ -9,7 +9,19 @@ import {
   recoverStaleEntry,
   type TimeEntry,
 } from '@grind/core';
-import type { Clock, EntryStore, IdGen, StartArgs, SyncClient } from './types';
+import { HttpError } from '../apiClient';
+import type {
+  Clock,
+  EntryStore,
+  IdGen,
+  PendingEntrySyncState,
+  StartArgs,
+  SyncClient,
+  TimerAwayReason,
+  TimerExitReason,
+  TimerRecoveryNotice,
+  TimerRecoveryResult,
+} from './types';
 
 export type TimerStatus =
   | { state: 'IDLE'; workedMs: number }
@@ -46,14 +58,49 @@ export class TimerService {
    * `lastKnownActiveAt` (e.g. last heartbeat / last persisted tick), so a crash
    * or power-off never over-credits the offline gap.
    */
-  recover(lastKnownActiveAt: number): void {
+  recover(lastKnownActiveAt: number): TimerRecoveryResult | null {
     const open = this.store.getOpen();
-    if (!open) return;
-    const recovered = recoverStaleEntry(open, lastKnownActiveAt);
+    if (!open) {
+      this.store.clearExitIntent();
+      return null;
+    }
+    const recoveredAt = safeCloseAt(open, lastKnownActiveAt);
+    const recovered = recoverStaleEntry(open, recoveredAt);
     this.open = null;
     // Persist only; the caller runs flushUnsynced() next, which performs the
     // single sync. Syncing here too would race that flush on the same entry.
     this.store.upsert(recovered);
+    this.store.clearExitIntent();
+    const notice: TimerRecoveryNotice = {
+      entryId: recovered.id,
+      recoveredAt,
+      reason: 'unexpected_shutdown',
+      observedAt: this.clock.now(),
+    };
+    this.store.setRecoveryNotice(notice);
+    return { entryId: recovered.id, recoveredAt, notice };
+  }
+
+  recoverAway(): TimerRecoveryResult | null {
+    const away = this.store.getAwayState();
+    if (!away) return null;
+
+    const notice = this.awayNotice(away.reason, away.entryId, away.awayStartedAt);
+    const open = this.store.getOpen();
+    if (!open || open.id !== away.entryId) {
+      if (!this.store.getRecoveryNotice()) this.store.setRecoveryNotice(notice);
+      this.store.clearAwayState();
+      return { entryId: away.entryId, recoveredAt: away.awayStartedAt, notice };
+    }
+
+    const recoveredAt = safeCloseAt(open, away.awayStartedAt);
+    const recovered = recoverStaleEntry(open, recoveredAt);
+    this.open = null;
+    this.store.upsert(recovered);
+    const recoveredNotice = this.awayNotice(away.reason, recovered.id, recoveredAt);
+    this.store.setRecoveryNotice(recoveredNotice);
+    this.store.clearAwayState();
+    return { entryId: recovered.id, recoveredAt, notice: recoveredNotice };
   }
 
   isRunning(): boolean {
@@ -82,22 +129,50 @@ export class TimerService {
       if ((this.open.larkTaskGuid ?? null) === nextTaskGuid) return this.status();
       const closed = closeTimeEntry(this.open, now);
       this.open = null;
-      this.store.upsert(closed);
-      await this.trySync(closed, 'sync');
+      await this.persistAndSync(closed);
     }
     const entry = this.createEntry(nextTaskGuid, now);
     this.open = entry;
-    this.store.upsert(entry);
-    await this.trySync(entry, 'create');
+    await this.persistAndSync(entry, 'pending_create');
     return this.status();
   }
 
   async stop(): Promise<TimerStatus> {
     if (!this.open) return this.status();
-    const closed = closeTimeEntry(this.open, this.clock.now());
+    const closed = closeTimeEntry(this.open, safeCloseAt(this.open, this.clock.now()));
     this.open = null;
-    this.store.upsert(closed);
-    await this.trySync(closed, 'sync');
+    await this.persistAndSync(closed);
+    return this.status();
+  }
+
+  async prepareForQuit(reason: TimerExitReason): Promise<TimerStatus> {
+    if (!this.open) {
+      this.store.clearExitIntent();
+      return this.status();
+    }
+    const open = this.open;
+    const observedAt = this.clock.now();
+    this.store.setExitIntent({ reason, entryId: open.id, observedAt });
+    const closed = closeTimeEntry(open, safeCloseAt(open, observedAt));
+    this.open = null;
+    await this.persistAndSync(closed);
+    this.store.clearExitIntent();
+    return this.status();
+  }
+
+  async prepareForAway(reason: TimerAwayReason, awayStartedAt: number): Promise<TimerStatus> {
+    if (!this.open) {
+      this.store.clearAwayState();
+      return this.status();
+    }
+    const open = this.open;
+    const closeAt = safeCloseAt(open, awayStartedAt);
+    this.store.setAwayState({ reason, entryId: open.id, awayStartedAt: closeAt, observedAt: this.clock.now() });
+    const closed = closeTimeEntry(open, closeAt);
+    this.open = null;
+    await this.persistAndSync(closed);
+    this.store.setRecoveryNotice(this.awayNotice(reason, closed.id, closeAt));
+    this.store.clearAwayState();
     return this.status();
   }
 
@@ -121,8 +196,7 @@ export class TimerService {
     const cut = Math.max(at, open.startedAt); // never before the segment start
     const paused = closeOpenSegment(this.open, cut);
     this.open = paused;
-    this.store.upsert(paused);
-    await this.trySync(paused, 'sync');
+    await this.persistAndSync(paused);
   }
 
   /** Resume from a paused (idle) state: open a fresh WORK segment at `at`. */
@@ -131,8 +205,7 @@ export class TimerService {
     if (getOpenSegment(this.open)) return; // not paused
     const resumed = openSegment(this.open, { kind: 'WORK', at, segmentId: this.ids.ulid() });
     this.open = resumed;
-    this.store.upsert(resumed);
-    await this.trySync(resumed, 'sync');
+    await this.persistAndSync(resumed);
   }
 
   /** True when running but paused (entry open, no open segment). */
@@ -154,8 +227,7 @@ export class TimerService {
     if (!open || open.kind === 'MEETING') return;
     const updated = openSegment(this.open, { kind: 'MEETING', at, segmentId: this.ids.ulid() });
     this.open = updated;
-    this.store.upsert(updated);
-    await this.trySync(updated, 'sync');
+    await this.persistAndSync(updated);
   }
 
   /** Meeting ended: switch back to a WORK segment. No-op if not in MEETING. */
@@ -165,8 +237,7 @@ export class TimerService {
     if (!open || open.kind !== 'MEETING') return;
     const updated = openSegment(this.open, { kind: 'WORK', at, segmentId: this.ids.ulid() });
     this.open = updated;
-    this.store.upsert(updated);
-    await this.trySync(updated, 'sync');
+    await this.persistAndSync(updated);
   }
 
   /**
@@ -188,8 +259,7 @@ export class TimerService {
       workSegmentId: this.ids.ulid(),
     });
     this.open = updated;
-    this.store.upsert(updated);
-    await this.trySync(updated, 'sync');
+    await this.persistAndSync(updated);
   }
 
   status(): TimerStatus {
@@ -216,20 +286,55 @@ export class TimerService {
     return this.store.listSince(since).filter((e) => e.segments.some((s) => (s.endedAt ?? now) >= since));
   }
 
+  recoveryNotice(): TimerRecoveryNotice | null {
+    return this.store.getRecoveryNotice();
+  }
+
+  dismissRecoveryNotice(): void {
+    this.store.clearRecoveryNotice();
+  }
+
   /** Retry pushing any locally-persisted entries that haven't synced yet. */
   async flushUnsynced(): Promise<void> {
-    for (const entry of this.store.getUnsynced()) {
-      await this.trySync(entry, 'sync');
+    for (const { entry, syncState } of this.store.getUnsynced()) {
+      await this.trySync(entry, syncState);
     }
   }
 
-  private async trySync(entry: TimeEntry, mode: 'create' | 'sync'): Promise<void> {
+  private async persistAndSync(entry: TimeEntry, syncState?: PendingEntrySyncState): Promise<void> {
+    const nextState = this.store.upsert(entry, syncState ? { syncState } : undefined);
+    await this.trySync(entry, nextState);
+  }
+
+  private async trySync(entry: TimeEntry, syncState: PendingEntrySyncState): Promise<void> {
+    if (syncState === 'pending_create') {
+      await this.tryCreateThenSync(entry);
+      return;
+    }
+    await this.tryUpdate(entry, true);
+  }
+
+  private async tryCreateThenSync(entry: TimeEntry): Promise<void> {
     try {
-      if (mode === 'create') await this.sync.create(entry);
-      else await this.sync.sync(entry);
-      this.store.markSynced(entry.id);
+      await this.sync.create(entry);
+      this.store.markCreated(entry.id);
     } catch {
-      // Best-effort: leave it unsynced; flushUnsynced will retry later.
+      // Best-effort: leave it pending_create; flushUnsynced will retry later.
+      return;
+    }
+    await this.tryUpdate(entry, false);
+  }
+
+  private async tryUpdate(entry: TimeEntry, retryCreateOnNotFound: boolean): Promise<void> {
+    try {
+      await this.sync.sync(entry);
+      this.store.markSynced(entry.id, entry);
+    } catch (err) {
+      if (retryCreateOnNotFound && isNotFound(err)) {
+        this.store.markPendingCreate(entry.id);
+        await this.tryCreateThenSync(entry);
+      }
+      // Otherwise best-effort: leave its current pending state for a later flush.
     }
   }
 
@@ -245,6 +350,15 @@ export class TimerService {
     });
   }
 
+  private awayNotice(reason: TimerAwayReason, entryId: string, recoveredAt: number): TimerRecoveryNotice {
+    return {
+      entryId,
+      recoveredAt,
+      reason: reason === 'suspend' ? 'sleep_stop' : 'lock_stop',
+      observedAt: this.clock.now(),
+    };
+  }
+
   private workedMsForLocalDay(now: number): number {
     const dayStart = new Date(now);
     dayStart.setHours(0, 0, 0, 0);
@@ -252,6 +366,21 @@ export class TimerService {
     const entries = this.store.listSince(since);
     return entries.reduce((sum, entry) => sum + entryWorkedMsInWindow(entry, since, now, now), 0);
   }
+}
+
+function latestSegmentBoundary(entry: TimeEntry): number {
+  return entry.segments.reduce((latest, segment) => {
+    const end = segment.endedAt ?? segment.startedAt;
+    return Math.max(latest, segment.startedAt, end);
+  }, entry.startedAt);
+}
+
+function safeCloseAt(entry: TimeEntry, at: number): number {
+  return Math.max(at, latestSegmentBoundary(entry));
+}
+
+function isNotFound(err: unknown): boolean {
+  return err instanceof HttpError && err.status === 404;
 }
 
 function entryWorkedMsInWindow(entry: TimeEntry, windowStart: number, windowEnd: number, now: number): number {

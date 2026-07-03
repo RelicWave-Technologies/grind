@@ -33,13 +33,25 @@ export type LarkConfig = {
   redirectUri?: string;
 };
 
+function larkEnv() {
+  return {
+    appId: process.env.LARK_APP_ID || env.LARK_APP_ID,
+    appSecret: process.env.LARK_APP_SECRET || env.LARK_APP_SECRET,
+    tokenKey: process.env.LARK_TOKEN_KEY || env.LARK_TOKEN_KEY,
+    oauthHost: process.env.LARK_OAUTH_HOST || env.LARK_OAUTH_HOST,
+    accountsHost: process.env.LARK_ACCOUNTS_HOST || env.LARK_ACCOUNTS_HOST,
+    redirectUri: process.env.LARK_OAUTH_REDIRECT_URI || env.LARK_OAUTH_REDIRECT_URI,
+  };
+}
+
 /**
  * True only when every credential needed to run the OAuth flow is present.
  * The integration is disabled (not crashing) when creds are missing, so the
  * rest of the API runs fine in dev/CI without Lark configured.
  */
 export function isLarkConfigured(): boolean {
-  return Boolean(env.LARK_APP_ID && env.LARK_APP_SECRET && env.LARK_TOKEN_KEY);
+  const cfg = larkEnv();
+  return Boolean(cfg.appId && cfg.appSecret && cfg.tokenKey);
 }
 
 /**
@@ -48,15 +60,16 @@ export function isLarkConfigured(): boolean {
  * can rely on this never throwing.
  */
 export function getLarkConfig(): LarkConfig {
-  if (!isLarkConfigured()) {
+  const cfg = larkEnv();
+  if (!cfg.appId || !cfg.appSecret || !cfg.tokenKey) {
     throw new Error('Lark is not configured (set LARK_APP_ID, LARK_APP_SECRET, LARK_TOKEN_KEY)');
   }
   return {
-    appId: env.LARK_APP_ID!,
-    appSecret: env.LARK_APP_SECRET!,
-    tokenKey: env.LARK_TOKEN_KEY!,
-    oauthHost: env.LARK_OAUTH_HOST,
-    accountsHost: env.LARK_ACCOUNTS_HOST,
-    redirectUri: env.LARK_OAUTH_REDIRECT_URI,
+    appId: cfg.appId,
+    appSecret: cfg.appSecret,
+    tokenKey: cfg.tokenKey,
+    oauthHost: cfg.oauthHost,
+    accountsHost: cfg.accountsHost,
+    redirectUri: cfg.redirectUri,
   };
 }

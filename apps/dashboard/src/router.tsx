@@ -63,6 +63,16 @@ const authedRoot = createRoute({
   component: Layout,
 });
 
+function fallbackRoute(me: Me | null | undefined): '/overview' | '/edit-time' {
+  return hasCapability(me, 'overview.read') ? '/overview' : '/edit-time';
+}
+
+function requireAnyRouteCapability(me: Me | null | undefined, permissions: Array<Parameters<typeof hasCapability>[1]>): void {
+  if (!permissions.some((permission) => hasCapability(me, permission))) {
+    throw redirect({ to: fallbackRoute(me) });
+  }
+}
+
 const homeRoute = createRoute({
   getParentRoute: () => authedRoot,
   path: '/',
@@ -167,12 +177,20 @@ const teamRoute = createRoute({
 const attendanceRoute = createRoute({
   getParentRoute: () => authedRoot,
   path: '/attendance',
+  beforeLoad: ({ context }) => {
+    const me = (context as { me?: Me }).me;
+    requireAnyRouteCapability(me, ['reports.team.read', 'reports.workspace.read']);
+  },
   component: AttendanceScreen,
 });
 
 const teamsAdminRoute = createRoute({
   getParentRoute: () => authedRoot,
   path: '/teams',
+  beforeLoad: ({ context }) => {
+    const me = (context as { me?: Me }).me;
+    requireAnyRouteCapability(me, ['teams.manage']);
+  },
   component: TeamsScreen,
 });
 
@@ -194,18 +212,30 @@ const flagsRoute = createRoute({
 const shiftsRoute = createRoute({
   getParentRoute: () => authedRoot,
   path: '/shifts',
+  beforeLoad: ({ context }) => {
+    const me = (context as { me?: Me }).me;
+    requireAnyRouteCapability(me, ['shifts.manage']);
+  },
   component: ShiftsScreen,
 });
 
 const policyRoute = createRoute({
   getParentRoute: () => authedRoot,
   path: '/policy',
+  beforeLoad: ({ context }) => {
+    const me = (context as { me?: Me }).me;
+    requireAnyRouteCapability(me, ['policy.manage']);
+  },
   component: PolicyScreen,
 });
 
 const payrollRoute = createRoute({
   getParentRoute: () => authedRoot,
   path: '/payroll',
+  beforeLoad: ({ context }) => {
+    const me = (context as { me?: Me }).me;
+    requireAnyRouteCapability(me, ['payroll.manage']);
+  },
   component: PayrollScreen,
 });
 

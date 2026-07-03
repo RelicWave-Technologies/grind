@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Play, Square, Clock, ListTodo, Link2, Search, Plus, X } from 'lucide-react';
+import { AlertTriangle, Play, Square, Clock, ListTodo, Link2, Search, Plus, X } from 'lucide-react';
 import type { TimerStatus } from '../lib/agent.d';
 import { projectStyle } from '../lib/projectStyle';
+import { timerRecoveryNoticeText } from '../lib/recoveryNotice';
 import { sortTasks } from '../lib/taskFormat';
 import DayTimeline from '../components/DayTimeline';
 import TaskCard from '../components/TaskCard';
@@ -35,6 +36,7 @@ export default function Today() {
   const today = useQuery({ queryKey: ['today'], queryFn: () => window.agent.timer.today(), refetchInterval: 3000 });
   const larkStatus = useQuery({ queryKey: ['larkStatus'], queryFn: () => window.agent.lark.status(), refetchInterval: 10_000 });
   const larkTasks = useQuery({ queryKey: ['larkTasks'], queryFn: () => window.agent.lark.tasks(), refetchInterval: 60_000 });
+  const recoveryNotice = useQuery({ queryKey: ['timerRecoveryNotice'], queryFn: () => window.agent.timer.recoveryNotice() });
   const [timer, setTimer] = useState<TimerStatus>({ state: 'IDLE', workedMs: 0 });
   const [now, setNow] = useState(() => Date.now());
   const [query, setQuery] = useState('');
@@ -70,6 +72,10 @@ export default function Today() {
       setTimer(s);
       void qc.invalidateQueries({ queryKey: ['today'] });
     },
+  });
+  const dismissRecovery = useMutation({
+    mutationFn: () => window.agent.timer.dismissRecoveryNotice(),
+    onSuccess: () => qc.setQueryData(['timerRecoveryNotice'], null),
   });
   const connectLark = useMutation({ mutationFn: () => window.agent.lark.connect() });
 
@@ -132,6 +138,21 @@ export default function Today() {
               </div>
             )}
           </div>
+
+          {recoveryNotice.data && (
+            <div className="recovery-banner rise rise-1" role="status">
+              <AlertTriangle size={16} strokeWidth={2.2} />
+              <span>{timerRecoveryNoticeText(recoveryNotice.data)}</span>
+              <button
+                className="recovery-dismiss no-drag"
+                onClick={() => dismissRecovery.mutate()}
+                disabled={dismissRecovery.isPending}
+                title="Dismiss"
+              >
+                <X size={14} strokeWidth={2.4} />
+              </button>
+            </div>
+          )}
 
           {entries.length > 0 && (
             <>

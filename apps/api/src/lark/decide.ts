@@ -24,7 +24,7 @@ export interface DecideResult {
   status: 'APPROVED' | 'REJECTED' | 'PENDING' | 'CANCELLED';
   timeEntryId: string | null;
   /** Reason the decision was a no-op (or null). For observability / tests. */
-  noop: 'already_decided' | 'not_found' | 'forbidden' | 'cancelled' | null;
+  noop: 'already_decided' | 'not_found' | 'forbidden' | 'self_approval_forbidden' | 'cancelled' | null;
 }
 
 export async function decideRequest(args: {
@@ -48,6 +48,11 @@ export async function decideRequest(args: {
   if (!req.approver?.larkIdentity?.openId || req.approver.larkIdentity.openId !== args.decidedByOpenId) {
     logger.warn({ requestId: req.id, decidedByOpenId: args.decidedByOpenId }, 'decideRequest: forbidden');
     return { card: {}, status: req.status, timeEntryId: req.timeEntryId, noop: 'forbidden' };
+  }
+
+  if (req.status === 'PENDING' && req.approverId === req.userId) {
+    logger.warn({ requestId: req.id, userId: req.userId }, 'decideRequest: forbidden (self approval)');
+    return { card: {}, status: req.status, timeEntryId: req.timeEntryId, noop: 'self_approval_forbidden' };
   }
 
   // Idempotent: already decided → return the existing decided card.

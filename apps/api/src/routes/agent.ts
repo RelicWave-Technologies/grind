@@ -1,5 +1,11 @@
 import { Router } from 'express';
-import { AgentAppIconsRequest, AgentConfigResponse, HeartbeatRequest, HeartbeatResponse } from '@grind/types';
+import {
+  AgentAppIconsRequest,
+  HeartbeatRequest,
+  WORKSPACE_POLICY_DEFAULTS,
+  type AgentConfigResponse,
+  type HeartbeatResponse,
+} from '@grind/types';
 import { validate } from '../middleware/validate';
 import { requireAccessToken } from '../middleware/auth';
 import { prisma } from '@grind/db';
@@ -12,6 +18,64 @@ agentRouter.use(requireAccessToken);
 /** First entry of the (possibly comma-separated) DASHBOARD_URL, trailing-slash trimmed. */
 function dashboardOrigin(): string {
   return (env.DASHBOARD_URL ?? '').split(',')[0]?.trim().replace(/\/$/u, '') ?? '';
+}
+
+async function buildAgentConfig(userId: string, workspaceId: string): Promise<AgentConfigResponse | null> {
+  const user = await prisma.user.findFirst({
+    where: { id: userId, workspaceId, deactivatedAt: null },
+    select: {
+      workspaceId: true,
+      screenshotIntervalMin: true,
+      idleThresholdMin: true,
+    },
+  });
+  if (!user) return null;
+
+  const policy = await prisma.workspacePolicy.findUnique({
+    where: { workspaceId: user.workspaceId },
+    select: {
+      captureApps: true,
+      captureTitles: true,
+      captureUrls: true,
+      defaultScreenshotIntervalMin: true,
+      defaultIdleThresholdMin: true,
+      updatedAt: true,
+    },
+  });
+
+  const screenshotIntervalMin =
+    user.screenshotIntervalMin ??
+    policy?.defaultScreenshotIntervalMin ??
+    WORKSPACE_POLICY_DEFAULTS.defaultScreenshotIntervalMin;
+  const idleThresholdMin =
+    user.idleThresholdMin ??
+    policy?.defaultIdleThresholdMin ??
+    WORKSPACE_POLICY_DEFAULTS.defaultIdleThresholdMin;
+  const captureApps = policy?.captureApps ?? WORKSPACE_POLICY_DEFAULTS.captureApps;
+  const captureTitles = policy?.captureTitles ?? WORKSPACE_POLICY_DEFAULTS.captureTitles;
+  const captureUrls = policy?.captureUrls ?? WORKSPACE_POLICY_DEFAULTS.captureUrls;
+  const dashboardUrl = dashboardOrigin();
+  const policyUpdatedAt = policy?.updatedAt.toISOString() ?? 'no-policy';
+  const configVersion = [
+    policyUpdatedAt,
+    screenshotIntervalMin,
+    idleThresholdMin,
+    captureApps ? 'apps:on' : 'apps:off',
+    captureTitles ? 'titles:on' : 'titles:off',
+    captureUrls ? 'urls:on' : 'urls:off',
+    dashboardUrl,
+  ].join('|');
+
+  return {
+    configVersion,
+    heartbeatIntervalSec: 60,
+    screenshotIntervalMin,
+    idleThresholdMin,
+    captureApps,
+    captureTitles,
+    captureUrls,
+    dashboardUrl,
+  };
 }
 
 agentRouter.post('/heartbeat', validate(HeartbeatRequest, 'body'), async (req, res, next) => {
@@ -30,7 +94,13 @@ agentRouter.post('/heartbeat', validate(HeartbeatRequest, 'body'), async (req, r
       },
     });
     if (updated.count === 0) return res.status(401).json({ error: 'unauthorized' });
-    const response: HeartbeatResponse = { ok: true, serverTime: now.toISOString() };
+    const config = await buildAgentConfig(req.user.sub, req.user.ws);
+    if (!config) return res.status(401).json({ error: 'unauthorized' });
+    const response: HeartbeatResponse = {
+      ok: true,
+      serverTime: now.toISOString(),
+      configVersion: config.configVersion,
+    };
     res.json(response);
   } catch (err) {
     next(err);
@@ -40,23 +110,8 @@ agentRouter.post('/heartbeat', validate(HeartbeatRequest, 'body'), async (req, r
 agentRouter.get('/config', async (req, res, next) => {
   try {
     if (!req.user) return res.status(401).json({ error: 'unauthorized' });
-    const user = await prisma.user.findUnique({
-      where: { id: req.user.sub },
-      select: { workspaceId: true, screenshotIntervalMin: true, idleThresholdMin: true },
-    });
-    // Resolution: per-member override → workspace policy default → hardcoded fallback.
-    const policy = user
-      ? await prisma.workspacePolicy.findUnique({
-          where: { workspaceId: user.workspaceId },
-          select: { defaultScreenshotIntervalMin: true, defaultIdleThresholdMin: true },
-        })
-      : null;
-    const response: AgentConfigResponse = {
-      heartbeatIntervalSec: 60,
-      screenshotIntervalMin: user?.screenshotIntervalMin ?? policy?.defaultScreenshotIntervalMin ?? 180,
-      idleThresholdMin: user?.idleThresholdMin ?? policy?.defaultIdleThresholdMin ?? 5,
-      dashboardUrl: dashboardOrigin(),
-    };
+    const response = await buildAgentConfig(req.user.sub, req.user.ws);
+    if (!response) return res.status(401).json({ error: 'unauthorized' });
     res.json(response);
   } catch (err) {
     next(err);
@@ -71,6 +126,14 @@ agentRouter.get('/config', async (req, res, next) => {
  */
 agentRouter.post('/app-icons', validate(AgentAppIconsRequest, 'body'), async (req, res, next) => {
   try {
+    if (!req.user) return res.status(401).json({ error: 'unauthorized' });
+    const policy = await prisma.workspacePolicy.findUnique({
+      where: { workspaceId: req.user.ws },
+      select: { captureApps: true },
+    });
+    if (!(policy?.captureApps ?? WORKSPACE_POLICY_DEFAULTS.captureApps)) {
+      return res.json({ ok: true as const, stored: 0 });
+    }
     const { icons } = req.body as AgentAppIconsRequest;
     let stored = 0;
     for (const it of icons) {

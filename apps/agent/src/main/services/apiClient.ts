@@ -8,7 +8,23 @@ type FetchOptions = {
   auth?: boolean;
 };
 
-class UnauthorizedError extends Error {}
+class UnauthorizedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'UnauthorizedError';
+  }
+}
+
+class HttpError extends Error {
+  constructor(
+    public readonly path: string,
+    public readonly status: number,
+    public readonly body: string,
+  ) {
+    super(`${path} ${status}: ${body}`);
+    this.name = 'HttpError';
+  }
+}
 
 type AuthListener = (status: 'loggedIn' | 'loggedOut') => void;
 const authListeners = new Set<AuthListener>();
@@ -81,7 +97,7 @@ export async function api<T>(path: string, opts: FetchOptions = {}): Promise<T> 
   if (firstRes.status !== 401 || opts.auth === false) {
     if (!firstRes.ok) {
       const text = await firstRes.text().catch(() => '');
-      throw new Error(`${path} ${firstRes.status}: ${text}`);
+      throw new HttpError(path, firstRes.status, text);
     }
     return (await firstRes.json()) as T;
   }
@@ -101,9 +117,9 @@ export async function api<T>(path: string, opts: FetchOptions = {}): Promise<T> 
       notifyAuth('loggedOut');
     }
     const text = await secondRes.text().catch(() => '');
-    throw new Error(`${path} ${secondRes.status}: ${text}`);
+    throw new HttpError(path, secondRes.status, text);
   }
   return (await secondRes.json()) as T;
 }
 
-export { UnauthorizedError };
+export { UnauthorizedError, HttpError };

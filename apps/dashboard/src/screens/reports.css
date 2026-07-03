@@ -177,65 +177,6 @@
 .rep-team-kpi--coral { background: var(--ui-coral); }
 .rep-team-kpi--pink { background: var(--ui-pink); }
 
-.rep-attention-card {
-  overflow: hidden;
-}
-
-.rep-attention-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--ui-sp-5);
-  padding: var(--ui-sp-5) var(--ui-sp-6);
-  border-bottom: 1px solid var(--ui-line);
-}
-
-.rep-attention-head h2,
-.rep-attention-head p {
-  margin: 0;
-}
-
-.rep-attention-head p {
-  margin-top: var(--ui-sp-1);
-}
-
-.rep-attention-list {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--ui-sp-3);
-  padding: var(--ui-sp-4) var(--ui-sp-6) var(--ui-sp-5);
-}
-
-.rep-attention-item {
-  appearance: none;
-  border: 1px solid var(--ui-line);
-  border-radius: var(--ui-r-md);
-  background: var(--ui-surface);
-  color: var(--ui-ink);
-  cursor: pointer;
-  display: grid;
-  gap: var(--ui-sp-2);
-  min-width: 0;
-  padding: var(--ui-sp-4);
-  text-align: left;
-}
-
-.rep-attention-item:hover {
-  background: var(--ui-surface-inset);
-}
-
-.rep-attention-item:focus-visible {
-  outline: none;
-  box-shadow: var(--ui-focus-ring);
-}
-
-.rep-attention-main {
-  display: flex;
-  align-items: center;
-  gap: var(--ui-sp-2);
-  min-width: 0;
-}
-
 .rep-team-card-head {
   display: flex;
   align-items: flex-start;
@@ -925,6 +866,23 @@
   text-align: center;
 }
 
+.rep-metric-stack {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--ui-sp-1);
+  min-width: 0;
+}
+
+.rep-invalidated-note {
+  color: var(--ui-ink-3);
+  font-family: var(--ui-font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
 .rep-table .ui-td.rep-col-apps,
 .rep-table .ui-td.rep-col-activity {
   position: relative;
@@ -1265,10 +1223,6 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .rep-attention-list {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
   .rep-drawer {
     width: 100vw;
   }
@@ -1304,11 +1258,6 @@
 @media (max-width: 39rem) {
   .rep-team-summary {
     grid-template-columns: 1fr;
-  }
-
-  .rep-attention-list {
-    grid-template-columns: 1fr;
-    padding-inline: var(--ui-sp-4);
   }
 
   .rep-drawer-body,

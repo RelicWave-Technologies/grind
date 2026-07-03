@@ -92,6 +92,32 @@ describe('PATCH /v1/admin/workspace-policy', () => {
     expect(row?.captureTitles).toBe(true);
   });
 
+  it('rejects title or URL capture when app capture is off', async () => {
+    const { admin } = await seedWorkspace();
+    const res = await request(app)
+      .patch('/v1/admin/workspace-policy')
+      .set(bearer(admin.token))
+      .send({ captureTitles: true });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('invalid_capture_policy');
+  });
+
+  it('rejects partial patches that would leave titles or URLs on while apps are off', async () => {
+    const { admin } = await seedWorkspace();
+    await request(app)
+      .patch('/v1/admin/workspace-policy')
+      .set(bearer(admin.token))
+      .send({ captureApps: true, captureTitles: true, captureUrls: true });
+
+    const res = await request(app)
+      .patch('/v1/admin/workspace-policy')
+      .set(bearer(admin.token))
+      .send({ captureApps: false });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('invalid_capture_policy');
+  });
+
   it('rejects MEMBER PATCH (admin-only)', async () => {
     const { member } = await seedWorkspace();
     const res = await request(app)
@@ -129,6 +155,108 @@ describe('PATCH /v1/admin/workspace-policy', () => {
       .send({ captureApps: true });
     expect(res.status).toBe(200);
     expect(await prisma.workspacePolicy.findUnique({ where: { workspaceId: ws.id } })).not.toBeNull();
+  });
+
+  it('requires an audit reason before changing workspace timing to 1 minute', async () => {
+    const { ws, admin } = await seedWorkspace();
+    const res = await request(app)
+      .patch('/v1/admin/workspace-policy')
+      .set(bearer(admin.token))
+      .send({ defaultScreenshotIntervalMin: 1 });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('missing_monitoring_audit_reason');
+    const audits = await prisma.monitoringSettingsAudit.findMany({ where: { workspaceId: ws.id } });
+    expect(audits).toHaveLength(0);
+  });
+
+  it('allows 1-minute workspace timing with a required audit reason', async () => {
+    const { ws, admin } = await seedWorkspace();
+    const res = await request(app)
+      .patch('/v1/admin/workspace-policy')
+      .set(bearer(admin.token))
+      .send({
+        defaultScreenshotIntervalMin: 1,
+        auditReason: 'Short incident-response window approved by ops.',
+      });
+    expect(res.status).toBe(200);
+    expect(res.body.defaultScreenshotIntervalMin).toBe(1);
+
+    const audit = await prisma.monitoringSettingsAudit.findFirstOrThrow({
+      where: { workspaceId: ws.id },
+    });
+    expect(audit).toMatchObject({
+      actorId: admin.id,
+      targetUserId: null,
+      scope: 'WORKSPACE_POLICY',
+      previousScreenshotIntervalMin: 180,
+      previousIdleThresholdMin: 5,
+      nextScreenshotIntervalMin: 1,
+      nextIdleThresholdMin: 5,
+      riskLevel: 'HIGH',
+      reason: 'Short incident-response window approved by ops.',
+    });
+  });
+
+  it('audits caution and normal workspace timing changes without requiring a reason', async () => {
+    const { ws, admin } = await seedWorkspace();
+    const caution = await request(app)
+      .patch('/v1/admin/workspace-policy')
+      .set(bearer(admin.token))
+      .send({ defaultScreenshotIntervalMin: 5 });
+    expect(caution.status).toBe(200);
+
+    const normal = await request(app)
+      .patch('/v1/admin/workspace-policy')
+      .set(bearer(admin.token))
+      .send({ defaultScreenshotIntervalMin: 60, defaultIdleThresholdMin: 10 });
+    expect(normal.status).toBe(200);
+
+    const audits = await prisma.monitoringSettingsAudit.findMany({ where: { workspaceId: ws.id } });
+    expect(audits).toHaveLength(2);
+    const cautionAudit = audits.find((audit) => audit.riskLevel === 'CAUTION');
+    const normalAudit = audits.find((audit) => audit.riskLevel === 'NORMAL');
+    expect(cautionAudit).toMatchObject({
+      scope: 'WORKSPACE_POLICY',
+      riskLevel: 'CAUTION',
+      reason: null,
+      previousScreenshotIntervalMin: 180,
+      nextScreenshotIntervalMin: 5,
+    });
+    expect(normalAudit).toMatchObject({
+      scope: 'WORKSPACE_POLICY',
+      riskLevel: 'NORMAL',
+      reason: null,
+      previousScreenshotIntervalMin: 5,
+      nextScreenshotIntervalMin: 60,
+      nextIdleThresholdMin: 10,
+    });
+  });
+
+  it('returns recent monitoring-setting audits to policy admins only', async () => {
+    const { admin, member } = await seedWorkspace();
+    await request(app)
+      .patch('/v1/admin/workspace-policy')
+      .set(bearer(admin.token))
+      .send({ defaultIdleThresholdMin: 3 });
+
+    const denied = await request(app)
+      .get('/v1/admin/monitoring-settings-audits')
+      .set(bearer(member.token));
+    expect(denied.status).toBe(403);
+
+    const allowed = await request(app)
+      .get('/v1/admin/monitoring-settings-audits?limit=10')
+      .set(bearer(admin.token));
+    expect(allowed.status).toBe(200);
+    expect(allowed.body.audits).toHaveLength(1);
+    expect(allowed.body.audits[0]).toMatchObject({
+      scope: 'WORKSPACE_POLICY',
+      riskLevel: 'CAUTION',
+      actor: { id: admin.id, name: 'admin' },
+      targetUser: null,
+      nextIdleThresholdMin: 3,
+      reason: null,
+    });
   });
 });
 

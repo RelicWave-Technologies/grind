@@ -14,27 +14,60 @@ import { clearTokens, loadTokens, saveTokens } from './tokenStore';
  * process, so a malicious app that intercepts the callback URL can't redeem the
  * code (the API checks sha256(verifier) == challenge).
  */
-let pendingVerifier: string | null = null;
-let pendingLoginUrl: string | null = null;
+export const LARK_LOGIN_REUSE_TTL_MS = 9 * 60_000;
+export const LARK_LOGIN_HARD_TTL_MS = 12 * 60_000;
+
+type PendingLarkLogin = {
+  verifier: string;
+  loginUrl: string;
+  createdAt: number;
+  clearTimer: ReturnType<typeof setTimeout>;
+};
+
+let pendingLogin: PendingLarkLogin | null = null;
+
+function clearPendingLarkLogin(): void {
+  if (pendingLogin) clearTimeout(pendingLogin.clearTimer);
+  pendingLogin = null;
+}
+
+function createPendingLarkLogin(now = Date.now()): PendingLarkLogin {
+  const verifier = crypto.randomBytes(48).toString('base64url'); // 64 chars (43-128 ok)
+  const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
+  const params = new URLSearchParams({
+    client: 'agent',
+    code_challenge: challenge,
+    callback_scheme: CALLBACK_SCHEME,
+  });
+  const loginUrl = `${API_URL}/v1/auth/lark/start?${params.toString()}`;
+  const clearTimer = setTimeout(() => {
+    if (pendingLogin?.verifier === verifier && pendingLogin.createdAt === now) {
+      pendingLogin = null;
+    }
+  }, LARK_LOGIN_HARD_TTL_MS);
+  clearTimer.unref?.();
+  return { verifier, loginUrl, createdAt: now, clearTimer };
+}
+
+function isReusable(login: PendingLarkLogin, now: number): boolean {
+  return now - login.createdAt < LARK_LOGIN_REUSE_TTL_MS;
+}
+
+function isHardExpired(login: PendingLarkLogin, now: number): boolean {
+  return now - login.createdAt >= LARK_LOGIN_HARD_TTL_MS;
+}
 
 /** Begin a Lark login: mint PKCE, open the browser. The deep-link finishes it. */
 export async function startLarkLogin(): Promise<void> {
-  if (!pendingVerifier || !pendingLoginUrl) {
-    const verifier = crypto.randomBytes(48).toString('base64url'); // 64 chars (43–128 ok)
-    const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
-    pendingVerifier = verifier;
-    const params = new URLSearchParams({
-      client: 'agent',
-      code_challenge: challenge,
-      callback_scheme: CALLBACK_SCHEME,
-    });
-    pendingLoginUrl = `${API_URL}/v1/auth/lark/start?${params.toString()}`;
+  const now = Date.now();
+  if (!pendingLogin || !isReusable(pendingLogin, now)) {
+    clearPendingLarkLogin();
+    pendingLogin = createPendingLarkLogin(now);
   }
   try {
-    await shell.openExternal(pendingLoginUrl, { activate: true });
+    await shell.openExternal(pendingLogin.loginUrl, { activate: true });
   } catch (err) {
-    pendingVerifier = null;
-    pendingLoginUrl = null;
+    clearPendingLarkLogin();
     log.warn('failed to open Lark login in browser', { err: String(err) });
     throw err;
   }
@@ -43,14 +76,17 @@ export async function startLarkLogin(): Promise<void> {
 /** Redeem the deep-link one-time code for a session. Returns false if no login
  *  flow is in progress (stray/replayed deep-link) or the exchange fails. */
 export async function completeLarkLogin(code: string): Promise<boolean> {
-  const verifier = pendingVerifier;
-  if (!verifier) return false;
-  pendingVerifier = null;
-  pendingLoginUrl = null;
+  const login = pendingLogin;
+  if (!login) return false;
+  if (isHardExpired(login, Date.now())) {
+    clearPendingLarkLogin();
+    return false;
+  }
+  clearPendingLarkLogin();
   const res = await api<AgentLarkExchangeResponse>('/v1/auth/lark/exchange', {
     method: 'POST',
     auth: false,
-    body: { code, codeVerifier: verifier },
+    body: { code, codeVerifier: login.verifier },
   });
   await saveTokens({
     accessToken: res.accessToken,
@@ -63,8 +99,7 @@ export async function completeLarkLogin(code: string): Promise<boolean> {
 
 /** Abandon an in-flight Lark login (e.g. the deep-link reported pending/error). */
 export function cancelLarkLogin(): void {
-  pendingVerifier = null;
-  pendingLoginUrl = null;
+  clearPendingLarkLogin();
 }
 
 export async function login(email: string, password: string): Promise<UserDto> {

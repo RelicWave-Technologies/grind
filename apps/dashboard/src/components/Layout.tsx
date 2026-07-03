@@ -1,6 +1,6 @@
 import { Outlet, Link, useRouteContext, useNavigate, useLocation } from '@tanstack/react-router';
 import { Home, Clock4, Inbox, LayoutGrid, CalendarCheck, ShieldAlert, Building2, Sunrise, LogOut, ShieldCheck, FileSpreadsheet, Compass, FileText, User, Users } from 'lucide-react';
-import { hasCapability, isAdmin, isManagerOrAbove, useLogout, type Permission } from '../lib/auth';
+import { hasCapability, useLogout, type Permission } from '../lib/auth';
 import {
   AppShell,
   Sidebar,
@@ -14,24 +14,24 @@ interface NavEntry {
   to: string;
   label: string;
   Icon: typeof Home;
-  show: 'all' | 'manager+' | 'admin' | { permission: Permission } | { anyPermission: Permission[] };
+  show: 'all' | { permission: Permission } | { anyPermission: Permission[] };
 }
 
 const NAV: NavEntry[] = [
   { to: '/', label: 'Home', Icon: Home, show: 'all' },
-  { to: '/overview', label: 'Overview', Icon: Compass, show: 'manager+' },
-  { to: '/users', label: 'People', Icon: Users, show: 'admin' },
+  { to: '/overview', label: 'Overview', Icon: Compass, show: { permission: 'overview.read' } },
+  { to: '/users', label: 'People', Icon: Users, show: { permission: 'people.read' } },
   { to: '/edit-time', label: 'Edit Time', Icon: Clock4, show: 'all' },
   { to: '/reports', label: 'Reports', Icon: FileText, show: { permission: 'reports.self.read' } },
   { to: '/approvals', label: 'Approvals', Icon: Inbox, show: { permission: 'approvals.self.read' } },
   { to: '/profile', label: 'Profile', Icon: User, show: { permission: 'profile.self.read' } },
-  { to: '/team', label: 'Team Settings', Icon: LayoutGrid, show: 'manager+' },
-  { to: '/attendance', label: 'Attendance', Icon: CalendarCheck, show: 'manager+' },
+  { to: '/team', label: 'Team Settings', Icon: LayoutGrid, show: { permission: 'team.settings.manage' } },
+  { to: '/attendance', label: 'Attendance', Icon: CalendarCheck, show: { anyPermission: ['reports.team.read', 'reports.workspace.read'] } },
   { to: '/flags', label: 'Anti-cheat', Icon: ShieldAlert, show: { anyPermission: ['flags.team.review', 'flags.workspace.review'] } },
-  { to: '/teams', label: 'Org Teams', Icon: Building2, show: 'admin' },
-  { to: '/shifts', label: 'Shifts', Icon: Sunrise, show: 'admin' },
-  { to: '/policy', label: 'Policy', Icon: ShieldCheck, show: 'admin' },
-  { to: '/payroll', label: 'Payroll', Icon: FileSpreadsheet, show: 'admin' },
+  { to: '/teams', label: 'Org Teams', Icon: Building2, show: { permission: 'teams.manage' } },
+  { to: '/shifts', label: 'Shifts', Icon: Sunrise, show: { permission: 'shifts.manage' } },
+  { to: '/policy', label: 'Policy', Icon: ShieldCheck, show: { permission: 'policy.manage' } },
+  { to: '/payroll', label: 'Payroll', Icon: FileSpreadsheet, show: { permission: 'payroll.manage' } },
 ];
 
 export function Layout() {
@@ -42,8 +42,6 @@ export function Layout() {
 
   const visible = NAV.filter((n) => {
     if (n.show === 'all') return true;
-    if (n.show === 'manager+') return isManagerOrAbove(me.role);
-    if (n.show === 'admin') return isAdmin(me.role);
     if ('permission' in n.show) return hasCapability(me, n.show.permission);
     if ('anyPermission' in n.show) return n.show.anyPermission.some((permission) => hasCapability(me, permission));
     return false;

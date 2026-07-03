@@ -1,10 +1,11 @@
 import Database from 'better-sqlite3';
 import { ulid } from 'ulid';
-import { app } from 'electron';
+import { app, net } from 'electron';
 import path from 'node:path';
 import { TimerService } from './timerService';
 import { SqliteEntryStore } from './sqliteStore';
 import { HttpSyncClient } from './syncClient';
+import { TimerSyncDrain, type TimerSyncDrainReason } from './syncDrain';
 import type { Clock, IdGen } from './types';
 import { log } from '../../logger';
 
@@ -12,6 +13,7 @@ const realClock: Clock = { now: () => Date.now() };
 const realIds: IdGen = { ulid: () => ulid() };
 
 let service: TimerService | null = null;
+let syncDrain: TimerSyncDrain | null = null;
 
 /** Lazily build the timer service against the on-disk SQLite DB. */
 export function getTimerService(): TimerService {
@@ -34,9 +36,39 @@ export async function initTimerOnBoot(): Promise<void> {
   // never credited. Falls back to now() only if liveness was never written
   // (very first run), which matches the prior conservative behavior.
   const lastAlive = svc.lastLiveness();
-  svc.recover(lastAlive ?? Date.now());
+  const recovered = svc.recoverAway() ?? svc.recover(lastAlive ?? Date.now());
+  if (recovered) {
+    log.warn('timer recovered stale open entry', {
+      entryId: recovered.entryId,
+      recoveredAt: recovered.recoveredAt,
+      reason: recovered.notice.reason,
+    });
+  }
   await svc.flushUnsynced();
+}
+
+function getTimerSyncDrain(): TimerSyncDrain {
+  if (syncDrain) return syncDrain;
+  syncDrain = new TimerSyncDrain({
+    timer: getTimerService(),
+    isOnline: () => net.isOnline(),
+    logger: log,
+  });
+  return syncDrain;
+}
+
+export function startTimerSyncDrain(): void {
+  getTimerSyncDrain().start();
+}
+
+export function stopTimerSyncDrain(): void {
+  syncDrain?.stop();
+}
+
+export function drainTimerSyncNow(reason: TimerSyncDrainReason): Promise<void> {
+  return getTimerSyncDrain().drainNow(reason);
 }
 
 export { TimerService } from './timerService';
 export type { TimerStatus } from './timerService';
+export type { TimerRecoveryNotice } from './types';

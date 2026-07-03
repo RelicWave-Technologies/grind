@@ -170,8 +170,67 @@
   min-width: 0;
 }
 
+.tm-risk-layer {
+  z-index: 120;
+  padding: var(--ui-sp-5);
+}
+
+.tm-risk-modal {
+  width: min(calc(var(--ui-sp-12) * 8), 100%);
+  max-height: min(84dvh, calc(var(--ui-sp-12) * 10));
+  display: flex;
+  flex-direction: column;
+  background: var(--ui-surface-raised);
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-lg);
+  overflow: hidden;
+  box-shadow: var(--ui-shadow-pop);
+}
+
+.tm-risk-head,
+.tm-risk-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-sp-5);
+  padding: var(--ui-sp-5);
+  border-bottom: 1px solid var(--ui-line);
+}
+
+.tm-risk-title {
+  min-width: 0;
+  display: grid;
+  gap: var(--ui-sp-1);
+}
+
+.tm-risk-title h2,
+.tm-risk-title p {
+  margin: 0;
+}
+
+.tm-risk-title p {
+  color: var(--ui-ink-2);
+}
+
+.tm-risk-body {
+  padding: var(--ui-sp-5);
+  overflow: auto;
+  display: grid;
+  gap: var(--ui-sp-4);
+}
+
+.tm-risk-foot {
+  border-top: 1px solid var(--ui-line);
+  border-bottom: 0;
+  justify-content: flex-end;
+}
+
 @media (max-width: 42rem) {
   .tm-card-head {
     flex-direction: column;
+  }
+
+  .tm-risk-layer {
+    padding: var(--ui-sp-4);
   }
 }

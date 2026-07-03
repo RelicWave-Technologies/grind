@@ -7,8 +7,28 @@ type AgentStatus = { state: 'IDLE' | 'OFFLINE'; lastHeartbeatAt: string | null }
 type TimerStatus =
   | { state: 'IDLE'; workedMs: number }
   | { state: 'RUNNING'; entryId: string; larkTaskGuid: string | null; startedAt: number; workedMs: number; paused: boolean };
+type TimerRecoveryNotice = { entryId: string; recoveredAt: number; reason: 'unexpected_shutdown' | 'sleep_stop' | 'lock_stop'; observedAt: number };
 type TodaySegment = { kind: 'WORK' | 'MEETING' | 'IDLE_TRIMMED'; startedAt: number; endedAt: number | null };
 type TodayEntry = { id: string; larkTaskGuid: string | null; segments: TodaySegment[] };
+type ScreenshotItem = {
+  id: string;
+  capturedAt: number;
+  thumb: string | null;
+  uploadState: string;
+  keyboardPct: number;
+  mousePct: number;
+  attempts: number;
+  lastError: string | null;
+};
+type ScreenshotUploadSummary = { pending: number; uploading: number; failed: number };
+type AccessibilityStatus = {
+  trusted: boolean;
+  capturing: boolean;
+  ready: boolean;
+  recording: boolean;
+  hookRunning: boolean;
+  lastHookError: string | null;
+};
 type UpdatePhase = 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'installing' | 'not-available' | 'error';
 type UpdateStatus = {
   phase: UpdatePhase;
@@ -57,6 +77,8 @@ const api = {
     stop: (): Promise<TimerStatus> => ipcRenderer.invoke('timer:stop'),
     resume: (): Promise<TimerStatus> => ipcRenderer.invoke('timer:resume'),
     status: (): Promise<TimerStatus> => ipcRenderer.invoke('timer:status'),
+    recoveryNotice: (): Promise<TimerRecoveryNotice | null> => ipcRenderer.invoke('timer:recoveryNotice'),
+    dismissRecoveryNotice: (): Promise<{ ok: true }> => ipcRenderer.invoke('timer:dismissRecoveryNotice'),
     today: (): Promise<TodayEntry[]> => ipcRenderer.invoke('timer:today'),
     onStatusChange: (cb: (s: TimerStatus) => void): (() => void) => {
       const sub = (_e: unknown, s: TimerStatus) => cb(s);
@@ -78,16 +100,17 @@ const api = {
     refresh: (): Promise<void> => ipcRenderer.invoke('shift:refresh'),
   },
   screenshots: {
-    recent: (limit?: number): Promise<{ id: string; capturedAt: number; thumb: string | null; uploadState: string; keyboardPct: number; mousePct: number }[]> =>
-      ipcRenderer.invoke('screenshots:recent', limit),
+    recent: (limit?: number): Promise<ScreenshotItem[]> => ipcRenderer.invoke('screenshots:recent', limit),
     countToday: (): Promise<number> => ipcRenderer.invoke('screenshots:countToday'),
     captureOnce: (): Promise<number> => ipcRenderer.invoke('screenshots:captureOnce'),
     full: (id: string): Promise<string | null> => ipcRenderer.invoke('screenshots:full', id),
+    uploadSummary: (): Promise<ScreenshotUploadSummary> => ipcRenderer.invoke('screenshots:uploadSummary'),
+    retryFailedUploads: (): Promise<{ reset: number }> => ipcRenderer.invoke('screenshots:retryFailedUploads'),
   },
   permissions: {
     screen: (): Promise<{ status: string; health: string; state: 'ok' | 'needs-grant' | 'needs-settings' | 'needs-restart' }> =>
       ipcRenderer.invoke('permissions:screen'),
-    accessibility: (): Promise<{ trusted: boolean; capturing: boolean }> => ipcRenderer.invoke('permissions:accessibility'),
+    accessibility: (): Promise<AccessibilityStatus> => ipcRenderer.invoke('permissions:accessibility'),
     requestAccessibility: (): Promise<void> => ipcRenderer.invoke('permissions:requestAccessibility'),
   },
   settings: {

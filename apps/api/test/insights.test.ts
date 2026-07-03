@@ -71,6 +71,94 @@ describe('GET /v1/insights/score', () => {
     expect(res.body.anticheat.flags).toHaveLength(0);
   });
 
+  it('uses the user activity role preset when scoring', async () => {
+    const { userId, accessToken } = await seedUser();
+    await seedSamples(userId, Array.from({ length: 5 }, () => ({ mouseDistancePx: 12000 })));
+
+    await prisma.user.update({ where: { id: userId }, data: { activityRoleTitle: 'DESIGNER' } });
+    const designer = await request(app)
+      .get(`/v1/insights/score?day=${DAY}`)
+      .set('Authorization', `Bearer ${accessToken}`);
+    expect(designer.status).toBe(200);
+    expect(designer.body.role).toBe('DESIGNER');
+
+    await prisma.user.update({ where: { id: userId }, data: { activityRoleTitle: 'DEVELOPER' } });
+    const developer = await request(app)
+      .get(`/v1/insights/score?day=${DAY}`)
+      .set('Authorization', `Bearer ${accessToken}`);
+    expect(developer.status).toBe(200);
+    expect(developer.body.role).toBe('DEVELOPER');
+    expect(designer.body.score.score).toBeGreaterThan(developer.body.score.score);
+  });
+
+  it('scores quiet meeting samples as protected time', async () => {
+    const { userId, accessToken } = await seedUser();
+    await prisma.timeEntry.create({
+      data: {
+        id: fakeUlid('te'),
+        clientUuid: fakeUlid('cu'),
+        userId,
+        source: 'AUTO',
+        startedAt: new Date(`${DAY}T00:00:00Z`),
+        endedAt: new Date(`${DAY}T00:01:00Z`),
+        segments: {
+          create: [
+            {
+              id: fakeUlid('seg'),
+              kind: 'MEETING',
+              startedAt: new Date(`${DAY}T00:00:00Z`),
+              endedAt: new Date(`${DAY}T00:01:00Z`),
+            },
+          ],
+        },
+      },
+    });
+    await seedSamples(userId, [{ keystrokes: 0, clicks: 0, scrollEvents: 0, mouseDistancePx: 0 }]);
+    const res = await request(app)
+      .get(`/v1/insights/score?day=${DAY}`)
+      .set('Authorization', `Bearer ${accessToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.score.trackedMinutes).toBe(1);
+    expect(res.body.score.protectedMinutes).toBe(1);
+    expect(res.body.score.score).toBe(100);
+  });
+
+  it('excludes invalidated samples from score totals', async () => {
+    const { workspaceId, userId, accessToken } = await seedUser();
+    await seedSamples(userId, [{ keystrokes: 200 }]);
+    const flag = await prisma.activityFlag.create({
+      data: {
+        userId,
+        type: 'METRONOMIC',
+        windowStart: new Date(`${DAY}T00:00:00Z`),
+        windowEnd: new Date(`${DAY}T00:01:00Z`),
+        riskScore: 60,
+        evidence: {},
+        status: 'RESOLVED',
+        resolution: 'TIME_INVALIDATED',
+        resolvedAt: new Date(`${DAY}T00:02:00Z`),
+        resolvedNote: 'Invalidated',
+      },
+    });
+    await prisma.timeInvalidation.create({
+      data: {
+        workspaceId,
+        flagId: flag.id,
+        userId,
+        windowStart: flag.windowStart,
+        windowEnd: flag.windowEnd,
+        reason: 'Invalidated',
+      },
+    });
+
+    const res = await request(app)
+      .get(`/v1/insights/score?day=${DAY}`)
+      .set('Authorization', `Bearer ${accessToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.score.trackedMinutes).toBe(0);
+    expect(res.body.totals.keystrokes).toBe(0);
+  });
+
   it('detects a key-spam bot day: hard reject + flags', async () => {
     const { userId, accessToken } = await seedUser();
     await seedSamples(userId, Array.from({ length: 8 }, () => ({ keystrokes: 1500, ikiCv: 0.01 })));

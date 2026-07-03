@@ -22,15 +22,17 @@ function toInput(r: ActivityRow): ActivitySampleInput {
   };
 }
 
-/** Push unsynced activity samples to the API in a batch (best-effort). */
-export async function flushActivity(store: ActivityStore): Promise<void> {
+/** Push unsynced activity samples to the API in a batch. Returns rows synced. */
+export async function flushActivity(store: ActivityStore): Promise<number> {
   const rows = store.unsynced(200);
-  if (rows.length === 0) return;
+  if (rows.length === 0) return 0;
   try {
     await api('/v1/activity-samples', { method: 'POST', body: { samples: rows.map(toInput) } });
     store.markSynced(rows.map((r) => r.id));
     log.debug('flushed activity samples', { count: rows.length });
+    return rows.length;
   } catch (err) {
     log.warn('activity flush failed', { err: String(err) });
+    throw err;
   }
 }

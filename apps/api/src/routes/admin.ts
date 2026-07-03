@@ -15,16 +15,29 @@ import {
 } from '../insights/timesheets';
 import { localDayWindow } from '../insights/day';
 import {
+  groupInvalidationsByUser,
+  isInvalidatedAt,
+  invalidatedOverlapMs,
+  type TimeInvalidationInput,
+} from '../insights/invalidations';
+import { loadTimeInvalidationsForUsers } from '../insights/timeInvalidations';
+import {
   CreateShiftSchema,
   PatchShiftSchema,
   PatchTeamMemberSettingsRequest,
   ShiftScheduleSchema,
   WORKSPACE_POLICY_DEFAULTS,
+  type MonitoringSettingsAuditDto,
   type TeamMemberSettingsDto,
   type TeamSettingsResponse,
   type ShiftDto,
   type ShiftSchedule,
 } from '@grind/types';
+import {
+  monitoringRiskLevel,
+  monitoringTimingChanged,
+  normalizeAuditReason,
+} from '../monitoringSettingsAudit';
 
 /**
  * Mounted under `/v1/admin`. Every route requires a valid access token and
@@ -41,6 +54,7 @@ interface UserListEntry {
   name: string;
   avatarUrl: string | null;
   role: 'ADMIN' | 'MANAGER' | 'MEMBER';
+  activityRoleTitle: 'DEVELOPER' | 'DESIGNER' | 'SALES' | 'OTHER';
   teamId: string | null;
   managerId: string | null;
   shiftId: string | null;
@@ -80,6 +94,7 @@ adminRouter.get('/users', async (req, res, next) => {
         name: true,
         avatarUrl: true,
         role: true,
+        activityRoleTitle: true,
         teamId: true,
         managerId: true,
         shiftId: true,
@@ -95,6 +110,7 @@ adminRouter.get('/users', async (req, res, next) => {
       name: u.name,
       avatarUrl: u.avatarUrl,
       role: u.role,
+      activityRoleTitle: u.activityRoleTitle,
       teamId: u.teamId,
       managerId: u.managerId,
       shiftId: u.shiftId,
@@ -131,6 +147,17 @@ type TeamSettingsUserRow = {
 
 /** Effective capture defaults for a workspace (per-member NULLs fall back here). */
 type PolicyDefaults = { screenshotIntervalMin: number; idleThresholdMin: number };
+
+async function loadPolicyDefaults(workspaceId: string): Promise<PolicyDefaults> {
+  const policy = await prisma.workspacePolicy.findUnique({
+    where: { workspaceId },
+    select: { defaultScreenshotIntervalMin: true, defaultIdleThresholdMin: true },
+  });
+  return {
+    screenshotIntervalMin: policy?.defaultScreenshotIntervalMin ?? WORKSPACE_POLICY_DEFAULTS.defaultScreenshotIntervalMin,
+    idleThresholdMin: policy?.defaultIdleThresholdMin ?? WORKSPACE_POLICY_DEFAULTS.defaultIdleThresholdMin,
+  };
+}
 
 function serializeTeamSettingsMember(
   user: TeamSettingsUserRow,
@@ -180,15 +207,9 @@ async function loadTeamSettingsMembers(userIds: string[]): Promise<TeamMemberSet
   // All members share one workspace (scope is workspace-bounded); resolve its
   // policy defaults once so per-member NULL overrides fall back to them.
   const workspaceId = users[0]?.workspaceId;
-  const policy = workspaceId
-    ? await prisma.workspacePolicy.findUnique({
-        where: { workspaceId },
-        select: { defaultScreenshotIntervalMin: true, defaultIdleThresholdMin: true },
-      })
-    : null;
-  const defaults: PolicyDefaults = {
-    screenshotIntervalMin: policy?.defaultScreenshotIntervalMin ?? WORKSPACE_POLICY_DEFAULTS.defaultScreenshotIntervalMin,
-    idleThresholdMin: policy?.defaultIdleThresholdMin ?? WORKSPACE_POLICY_DEFAULTS.defaultIdleThresholdMin,
+  const defaults = workspaceId ? await loadPolicyDefaults(workspaceId) : {
+    screenshotIntervalMin: WORKSPACE_POLICY_DEFAULTS.defaultScreenshotIntervalMin,
+    idleThresholdMin: WORKSPACE_POLICY_DEFAULTS.defaultIdleThresholdMin,
   };
 
   const managerIds = [...new Set(users.map((u) => u.managerId).filter((id): id is string => Boolean(id)))];
@@ -239,6 +260,9 @@ adminRouter.patch('/team-member-settings/:id', requireCapability('team.settings.
     if (!scopedTeamSettingIds(req).includes(id)) {
       return res.status(404).json({ error: 'not_found' });
     }
+    if (!req.scope.isAdmin && id === req.user.sub) {
+      return res.status(403).json({ error: 'self_settings_forbidden' });
+    }
 
     const parsed = PatchTeamMemberSettingsRequest.safeParse(req.body);
     if (!parsed.success) {
@@ -252,12 +276,36 @@ adminRouter.patch('/team-member-settings/:id', requireCapability('team.settings.
         workspaceId: true,
         teamId: true,
         shiftId: true,
+        screenshotIntervalMin: true,
+        idleThresholdMin: true,
         provisioningStatus: true,
         deactivatedAt: true,
       },
     });
     if (!existing || existing.workspaceId !== req.scope.workspaceId || existing.deactivatedAt) {
       return res.status(404).json({ error: 'not_found' });
+    }
+
+    const defaults = await loadPolicyDefaults(req.scope.workspaceId);
+    const previousTiming = {
+      screenshotIntervalMin: existing.screenshotIntervalMin ?? defaults.screenshotIntervalMin,
+      idleThresholdMin: existing.idleThresholdMin ?? defaults.idleThresholdMin,
+    };
+    const nextTiming = {
+      screenshotIntervalMin:
+        parsed.data.screenshotIntervalMin !== undefined
+          ? parsed.data.screenshotIntervalMin ?? defaults.screenshotIntervalMin
+          : previousTiming.screenshotIntervalMin,
+      idleThresholdMin:
+        parsed.data.idleThresholdMin !== undefined
+          ? parsed.data.idleThresholdMin ?? defaults.idleThresholdMin
+          : previousTiming.idleThresholdMin,
+    };
+    const timingChanged = monitoringTimingChanged(previousTiming, nextTiming);
+    const riskLevel = monitoringRiskLevel(nextTiming);
+    const auditReason = normalizeAuditReason(parsed.data.auditReason);
+    if (timingChanged && riskLevel === 'HIGH' && !auditReason) {
+      return res.status(400).json({ error: 'missing_monitoring_audit_reason' });
     }
 
     const data: {
@@ -351,12 +399,78 @@ adminRouter.patch('/team-member-settings/:id', requireCapability('team.settings.
           });
         }
         await tx.user.update({ where: { id }, data });
+        if (timingChanged) {
+          await tx.monitoringSettingsAudit.create({
+            data: {
+              workspaceId: req.scope!.workspaceId,
+              actorId: req.user!.sub,
+              targetUserId: id,
+              scope: 'MEMBER_OVERRIDE',
+              previousScreenshotIntervalMin: previousTiming.screenshotIntervalMin,
+              previousIdleThresholdMin: previousTiming.idleThresholdMin,
+              nextScreenshotIntervalMin: nextTiming.screenshotIntervalMin,
+              nextIdleThresholdMin: nextTiming.idleThresholdMin,
+              riskLevel,
+              reason: auditReason,
+            },
+          });
+        }
       });
     }
 
     const [member] = await loadTeamSettingsMembers([id]);
     if (!member) return res.status(404).json({ error: 'not_found' });
     res.json(member);
+  } catch (err) {
+    next(err);
+  }
+});
+
+type MonitoringSettingsAuditRow = {
+  id: string;
+  scope: 'WORKSPACE_POLICY' | 'MEMBER_OVERRIDE';
+  riskLevel: 'NORMAL' | 'CAUTION' | 'HIGH';
+  previousScreenshotIntervalMin: number | null;
+  previousIdleThresholdMin: number | null;
+  nextScreenshotIntervalMin: number | null;
+  nextIdleThresholdMin: number | null;
+  reason: string | null;
+  createdAt: Date;
+  actor: { id: string; name: string; email: string } | null;
+  targetUser: { id: string; name: string; email: string } | null;
+};
+
+function serializeMonitoringSettingsAudit(row: MonitoringSettingsAuditRow): MonitoringSettingsAuditDto {
+  return {
+    id: row.id,
+    scope: row.scope,
+    riskLevel: row.riskLevel,
+    actor: row.actor,
+    targetUser: row.targetUser,
+    previousScreenshotIntervalMin: row.previousScreenshotIntervalMin,
+    previousIdleThresholdMin: row.previousIdleThresholdMin,
+    nextScreenshotIntervalMin: row.nextScreenshotIntervalMin,
+    nextIdleThresholdMin: row.nextIdleThresholdMin,
+    reason: row.reason,
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
+adminRouter.get('/monitoring-settings-audits', requireCapability('policy.manage'), async (req, res, next) => {
+  try {
+    if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
+    const rawLimit = typeof req.query.limit === 'string' ? Number.parseInt(req.query.limit, 10) : 100;
+    const limit = Number.isFinite(rawLimit) ? Math.min(200, Math.max(1, rawLimit)) : 100;
+    const rows = await prisma.monitoringSettingsAudit.findMany({
+      where: { workspaceId: req.scope.workspaceId },
+      include: {
+        actor: { select: { id: true, name: true, email: true } },
+        targetUser: { select: { id: true, name: true, email: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+    });
+    res.json({ audits: rows.map(serializeMonitoringSettingsAudit) });
   } catch (err) {
     next(err);
   }
@@ -637,6 +751,7 @@ adminRouter.post('/manual-time-requests/:id/decide', requireManagerOrAbove, asyn
     });
     if (!out) return res.status(404).json({ error: 'not_found' });
     if (out.noop === 'forbidden') return res.status(403).json({ error: 'forbidden' });
+    if (out.noop === 'self_approval_forbidden') return res.status(403).json({ error: 'self_approval_forbidden' });
     res.json(out);
   } catch (err) {
     next(err);
@@ -702,14 +817,17 @@ async function loadTimesheetData(scope: { userIds: string[] }, range: ResolvedTi
   const lookbackEnd = new Date(`${range.to}T00:00:00Z`);
   lookbackEnd.setUTCDate(lookbackEnd.getUTCDate() + 2);
 
-  const entries = await prisma.timeEntry.findMany({
-    where: {
-      userId: { in: scope.userIds },
-      startedAt: { lt: lookbackEnd },
-      OR: [{ endedAt: null }, { endedAt: { gt: lookbackStart } }],
-    },
-    include: { segments: { select: { kind: true, startedAt: true, endedAt: true } } },
-  });
+  const [entries, invalidations] = await Promise.all([
+    prisma.timeEntry.findMany({
+      where: {
+        userId: { in: scope.userIds },
+        startedAt: { lt: lookbackEnd },
+        OR: [{ endedAt: null }, { endedAt: { gt: lookbackStart } }],
+      },
+      include: { segments: { select: { kind: true, startedAt: true, endedAt: true } } },
+    }),
+    loadTimeInvalidationsForUsers(scope.userIds, lookbackStart, lookbackEnd),
+  ]);
 
   const now = Date.now();
   const segs: TimesheetSegmentInput[] = [];
@@ -725,7 +843,7 @@ async function loadTimesheetData(scope: { userIds: string[] }, range: ResolvedTi
     }
   }
 
-  const matrix = buildTimesheetMatrix({ from: range.from, to: range.to, tz: range.tz, segments: segs });
+  const matrix = buildTimesheetMatrix({ from: range.from, to: range.to, tz: range.tz, segments: segs, invalidations });
   if (matrix) {
     const samples = await prisma.activitySample.findMany({
       where: {
@@ -735,7 +853,7 @@ async function loadTimesheetData(scope: { userIds: string[] }, range: ResolvedTi
       select: { userId: true, bucketStart: true },
       orderBy: [{ userId: 'asc' }, { bucketStart: 'asc' }],
     });
-    attachActivitySampleCounts(matrix, samples);
+    attachActivitySampleCounts(matrix, samples, invalidations);
   }
   const users = await prisma.user.findMany({
     where: { id: { in: scope.userIds } },
@@ -748,7 +866,9 @@ async function loadTimesheetData(scope: { userIds: string[] }, range: ResolvedTi
 function attachActivitySampleCounts(
   matrix: TimesheetMatrix,
   samples: Array<{ userId: string; bucketStart: Date }>,
+  invalidations: TimeInvalidationInput[] = [],
 ) {
+  const invalidationsByUser = groupInvalidationsByUser(invalidations);
   const windows = matrix.days
     .map((day) => {
       const win = localDayWindow(day, matrix.tz);
@@ -762,6 +882,7 @@ function attachActivitySampleCounts(
     const userCells = matrix.cells[sample.userId];
     if (!userCells) continue;
     const t = sample.bucketStart.getTime();
+    if (isInvalidatedAt(invalidationsByUser, sample.userId, t)) continue;
     for (const win of windows) {
       if (t < win.startMs || t >= win.endMs) continue;
       const cell = userCells[win.day];
@@ -781,7 +902,7 @@ function attachActivitySampleCounts(
  * Defaults: trailing 14 days ending today (in the requested tz, falling back
  * to UTC). Hard cap at 60 days so a typo can't melt the DB.
  */
-adminRouter.get('/timesheets', requireManagerOrAbove, async (req, res, next) => {
+adminRouter.get('/timesheets', requireAnyCapability(['reports.team.read', 'reports.workspace.read']), async (req, res, next) => {
   try {
     if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
     const range = resolveTimesheetRange(req);
@@ -802,7 +923,7 @@ adminRouter.get('/timesheets', requireManagerOrAbove, async (req, res, next) => 
  * tracked nothing are dropped (zero rows, not blank rows) — managers
  * exporting a 30-day audit don't want to scroll through "Sat: 0".
  */
-adminRouter.get('/timesheets.csv', requireManagerOrAbove, async (req, res, next) => {
+adminRouter.get('/timesheets.csv', requireAnyCapability(['reports.team.read', 'reports.workspace.read']), async (req, res, next) => {
   try {
     if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
     const range = resolveTimesheetRange(req);
@@ -813,7 +934,7 @@ adminRouter.get('/timesheets.csv', requireManagerOrAbove, async (req, res, next)
     const usersById = new Map(users.map((u) => [u.id, u]));
     const lines: string[] = [];
     lines.push(
-      'name,email,role,day,worked_h,meeting_h,manual_h,total_h,first_activity,last_activity,activity_samples',
+      'name,email,role,day,worked_h,meeting_h,manual_h,total_h,invalidated_h,first_activity,last_activity,activity_samples',
     );
     // Stable ordering: user (role-then-name like the JSON), then day asc.
     for (const u of users) {
@@ -834,6 +955,7 @@ adminRouter.get('/timesheets.csv', requireManagerOrAbove, async (req, res, next)
             msToHours(cell.meetingMs),
             msToHours(cell.manualMs),
             msToHours(cell.totalMs),
+            msToHours(cell.invalidatedMs),
             first,
             last,
             String(cell.activitySampleCount),
@@ -934,7 +1056,7 @@ function hasCompletedMemberSetup(input: { teamId: string | null; shiftId: string
  * MANAGER       → every team they manage.
  * MEMBER        → 403 (members don't need a team list; their teamId is on /me).
  */
-adminRouter.get('/teams', requireManagerOrAbove, async (req, res, next) => {
+adminRouter.get('/teams', requireCapability('teams.read'), async (req, res, next) => {
   try {
     if (!req.scope || !req.user) return res.status(401).json({ error: 'unauthorized' });
     const where: { workspaceId: string; managerId?: string } = { workspaceId: req.scope.workspaceId };
@@ -1050,6 +1172,8 @@ adminRouter.delete('/teams/:id', requireAdmin, async (req, res, next) => {
 
 const VALID_ROLES = ['ADMIN', 'MANAGER', 'MEMBER'] as const;
 type ValidRole = (typeof VALID_ROLES)[number];
+const VALID_ACTIVITY_ROLE_TITLES = ['DEVELOPER', 'DESIGNER', 'SALES', 'OTHER'] as const;
+type ValidActivityRoleTitle = (typeof VALID_ACTIVITY_ROLE_TITLES)[number];
 
 adminRouter.patch('/users/:id', requireAdmin, async (req, res, next) => {
   try {
@@ -1064,6 +1188,7 @@ adminRouter.patch('/users/:id', requireAdmin, async (req, res, next) => {
     const data: {
       name?: string;
       role?: ValidRole;
+      activityRoleTitle?: ValidActivityRoleTitle;
       teamId?: string | null;
       managerId?: string | null;
       shiftId?: string | null;
@@ -1091,6 +1216,13 @@ adminRouter.patch('/users/:id', requireAdmin, async (req, res, next) => {
         return res.status(400).json({ error: 'invalid_role' });
       }
       data.role = req.body.role as ValidRole;
+    }
+
+    if (typeof req.body?.activityRoleTitle === 'string') {
+      if (!(VALID_ACTIVITY_ROLE_TITLES as readonly string[]).includes(req.body.activityRoleTitle)) {
+        return res.status(400).json({ error: 'invalid_activity_role_title' });
+      }
+      data.activityRoleTitle = req.body.activityRoleTitle as ValidActivityRoleTitle;
     }
 
     if ('teamId' in (req.body ?? {})) {
@@ -1204,6 +1336,7 @@ adminRouter.patch('/users/:id', requireAdmin, async (req, res, next) => {
           email: true,
           name: true,
           role: true,
+          activityRoleTitle: true,
           teamId: true,
           managerId: true,
           shiftId: true,
@@ -1242,6 +1375,7 @@ adminRouter.post('/users', requireAdmin, async (req, res, next) => {
     const emailRaw = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
     const nameRaw = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
     const roleRaw = typeof req.body?.role === 'string' ? req.body.role : 'MEMBER';
+    const activityRoleRaw = typeof req.body?.activityRoleTitle === 'string' ? req.body.activityRoleTitle : 'OTHER';
 
     if (!emailRaw || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailRaw)) {
       return res.status(400).json({ error: 'invalid_email' });
@@ -1251,6 +1385,9 @@ adminRouter.post('/users', requireAdmin, async (req, res, next) => {
     }
     if (!(VALID_ROLES as readonly string[]).includes(roleRaw)) {
       return res.status(400).json({ error: 'invalid_role' });
+    }
+    if (!(VALID_ACTIVITY_ROLE_TITLES as readonly string[]).includes(activityRoleRaw)) {
+      return res.status(400).json({ error: 'invalid_activity_role_title' });
     }
     const dupe = await prisma.user.findUnique({ where: { email: emailRaw }, select: { id: true } });
     if (dupe) return res.status(409).json({ error: 'email_taken' });
@@ -1265,10 +1402,11 @@ adminRouter.post('/users', requireAdmin, async (req, res, next) => {
         email: emailRaw,
         name: nameRaw,
         role: roleRaw as ValidRole,
+        activityRoleTitle: activityRoleRaw as ValidActivityRoleTitle,
         passwordHash: null,
         provisioningStatus: 'ACTIVE',
       },
-      select: { id: true, email: true, name: true, role: true, provisioningStatus: true, createdAt: true },
+      select: { id: true, email: true, name: true, role: true, activityRoleTitle: true, provisioningStatus: true, createdAt: true },
     });
     res.status(201).json({ ...created, createdAt: created.createdAt.toISOString() });
   } catch (err) {
@@ -1499,21 +1637,52 @@ adminRouter.post('/flags/:id/resolve', requireAnyCapability(['flags.team.review'
       return res.status(400).json({ error: 'invalid_resolution' });
     }
     const note = typeof req.body?.note === 'string' ? req.body.note.trim().slice(0, 500) || null : null;
+    if (resolution === 'TIME_INVALIDATED' && !note) {
+      return res.status(400).json({ error: 'missing_resolution_note' });
+    }
 
-    const existing = await prisma.activityFlag.findUnique({ where: { id } });
+    const existing = await prisma.activityFlag.findUnique({
+      where: { id },
+      include: { user: { select: { workspaceId: true } } },
+    });
     if (!existing) return res.status(404).json({ error: 'not_found' });
     if (!req.scope.userIds.includes(existing.userId)) return res.status(403).json({ error: 'forbidden' });
     if (existing.status !== 'OPEN') return res.status(409).json({ error: 'already_resolved', resolution: existing.resolution });
 
-    const updated = await prisma.activityFlag.update({
-      where: { id },
-      data: {
-        status: 'RESOLVED',
-        resolution: resolution as FlagResolution,
-        resolvedById: req.user.sub,
-        resolvedAt: new Date(),
-        resolvedNote: note,
-      },
+    const invalidatedMs = resolution === 'TIME_INVALIDATED'
+      ? await calculateInvalidatedMsForWindow(
+          prisma,
+          existing.userId,
+          existing.windowStart,
+          existing.windowEnd,
+        )
+      : 0;
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const row = await tx.activityFlag.update({
+        where: { id },
+        data: {
+          status: 'RESOLVED',
+          resolution: resolution as FlagResolution,
+          resolvedById: req.user!.sub,
+          resolvedAt: new Date(),
+          resolvedNote: note,
+        },
+      });
+      if (resolution === 'TIME_INVALIDATED') {
+        await tx.timeInvalidation.create({
+          data: {
+            workspaceId: existing.user.workspaceId,
+            flagId: existing.id,
+            userId: existing.userId,
+            windowStart: existing.windowStart,
+            windowEnd: existing.windowEnd,
+            invalidatedById: req.user!.sub,
+            reason: note!,
+          },
+        });
+      }
+      return row;
     });
 
     res.json({
@@ -1522,13 +1691,47 @@ adminRouter.post('/flags/:id/resolve', requireAnyCapability(['flags.team.review'
       resolution: updated.resolution,
       resolvedAt: updated.resolvedAt ? updated.resolvedAt.toISOString() : null,
       resolvedNote: updated.resolvedNote,
-      // Document the deferred behaviour so the UI can show a small note.
-      timeInvalidated: false,
+      timeInvalidated: resolution === 'TIME_INVALIDATED',
+      invalidatedMs,
     });
   } catch (err) {
     next(err);
   }
 });
+
+async function calculateInvalidatedMsForWindow(
+  db: Pick<Prisma.TransactionClient, 'timeEntry'>,
+  userId: string,
+  windowStart: Date,
+  windowEnd: Date,
+): Promise<number> {
+  const rows = await db.timeEntry.findMany({
+    where: {
+      userId,
+      startedAt: { lt: windowEnd },
+      OR: [{ endedAt: null }, { endedAt: { gt: windowStart } }],
+    },
+    select: {
+      segments: { select: { kind: true, startedAt: true, endedAt: true } },
+    },
+  });
+  const grouped = groupInvalidationsByUser([
+    {
+      userId,
+      startedAt: windowStart.getTime(),
+      endedAt: windowEnd.getTime(),
+    },
+  ]);
+  let total = 0;
+  for (const row of rows) {
+    for (const s of row.segments) {
+      if (s.kind === 'IDLE_TRIMMED') continue;
+      const endedAt = s.endedAt ?? windowEnd;
+      total += invalidatedOverlapMs(grouped, userId, s.startedAt.getTime(), endedAt.getTime());
+    }
+  }
+  return total;
+}
 
 // ============================================================================
 // Shifts CRUD (read = MANAGER+, write = ADMIN). Each user's `shiftId` is
@@ -1563,7 +1766,7 @@ function serializeShift(s: {
  * MANAGER+ see workspace shifts (they need them to know who's on what).
  * MEMBER is 403 — they have /v1/me/shift for their own.
  */
-adminRouter.get('/shifts', requireManagerOrAbove, async (req, res, next) => {
+adminRouter.get('/shifts', requireCapability('shifts.read'), async (req, res, next) => {
   try {
     if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
     const shifts = await prisma.shift.findMany({

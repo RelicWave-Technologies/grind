@@ -80,7 +80,19 @@ export default function Settings() {
         : { ok: false, text: 'Required for screenshots' };
 
   const aTrusted = !!a11y.data?.trusted;
-  const aCapturing = !!a11y.data?.capturing;
+  const aReady = !!a11y.data?.ready;
+  const aRecording = !!a11y.data?.recording;
+  const aHookRunning = !!a11y.data?.hookRunning;
+  const aHealthy = aTrusted && aReady && (!aRecording || aHookRunning);
+  const a11ySub = !aTrusted
+    ? { ok: false, text: 'Needed to count keystrokes & mouse' }
+    : !aReady
+      ? { ok: false, text: 'Granted — restart to start tracking' }
+      : aRecording && aHookRunning
+        ? { ok: true, text: 'Counting keyboard & mouse activity' }
+        : aRecording
+          ? { ok: false, text: 'Tracking failed — restart or re-grant Accessibility' }
+          : { ok: true, text: 'Ready — counts while the timer runs' };
   const u = updates.data;
   const updateBusy = u?.phase === 'checking' || u?.phase === 'downloading' || u?.phase === 'installing' || checkUpdates.isPending;
   const updatePercentValue = updatePercent(u);
@@ -121,30 +133,28 @@ export default function Settings() {
             </div>
 
             <div className="set-row">
-              <span className="set-ic" style={{ background: aCapturing ? 'var(--c-green-bg)' : 'var(--c-orange-bg)' }}>
+              <span className="set-ic" style={{ background: aHealthy ? 'var(--c-green-bg)' : 'var(--c-orange-bg)' }}>
                 <Keyboard size={17} strokeWidth={2} />
               </span>
               <div className="set-main">
                 <div className="set-title">Accessibility</div>
                 <div className="set-sub">
-                  {aCapturing ? (
-                    <span className="set-ok"><CheckCircle2 size={13} /> Tracking keyboard &amp; mouse activity</span>
-                  ) : aTrusted ? (
-                    <span className="set-warn"><AlertCircle size={13} /> Granted — restart to start tracking</span>
+                  {a11ySub.ok ? (
+                    <span className="set-ok"><CheckCircle2 size={13} /> {a11ySub.text}</span>
                   ) : (
-                    <span className="set-warn"><AlertCircle size={13} /> Needed to count keystrokes &amp; mouse</span>
+                    <span className="set-warn" title={a11y.data?.lastHookError ?? undefined}><AlertCircle size={13} /> {a11ySub.text}</span>
                   )}
                 </div>
               </div>
-              {aCapturing ? null : aTrusted ? (
+              {aTrusted && (!aReady || (aRecording && !aHookRunning)) ? (
                 <button className="btn btn-prominent no-drag" onClick={() => window.agent.app.relaunch()}>
                   Restart Timo
                 </button>
-              ) : (
+              ) : !aTrusted ? (
                 <button className="btn no-drag" onClick={() => window.agent.permissions.requestAccessibility()}>
                   Enable
                 </button>
-              )}
+              ) : null}
             </div>
           </div>
 

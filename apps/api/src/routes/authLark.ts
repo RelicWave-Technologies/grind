@@ -14,6 +14,7 @@ import {
   buildAuthorizeUrl,
   signLoginState,
   verifyLoginState,
+  verifyExpiredAgentLoginRouteHint,
   LARK_SCOPE_STRING,
   LarkTransientError,
 } from '../lark';
@@ -47,7 +48,7 @@ function crossSite(): boolean {
 
 /** Canonical dashboard origin for post-login redirects (never a user param). */
 function dashboardBase(): string {
-  const first = (env.DASHBOARD_URL ?? '').split(',')[0]?.trim().replace(/\/$/u, '');
+  const first = (process.env.DASHBOARD_URL || env.DASHBOARD_URL || '').split(',')[0]?.trim().replace(/\/$/u, '');
   return first || 'http://localhost:5174';
 }
 
@@ -140,6 +141,8 @@ authLarkRouter.get('/callback', async (req, res, next) => {
   try {
     payload = verifyLoginState(String(req.query.state ?? ''));
   } catch {
+    const hint = verifyExpiredAgentLoginRouteHint(String(req.query.state ?? ''));
+    if (hint) return finish(res, hint.client, { error: 'state_invalid' }, hint.agentCallbackScheme);
     return finish(res, 'dashboard', { error: 'state_invalid' });
   }
   const { client } = payload;
