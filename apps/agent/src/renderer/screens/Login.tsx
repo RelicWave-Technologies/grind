@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ShieldCheck } from 'lucide-react';
-import timoMascot from '../assets/timo-mascot.png';
+import timoMascot from '../assets/timo-mascot.svg';
 
 /** Friendly copy for non-success Lark outcomes pushed from the main process. */
 const ERROR_COPY: Record<string, string> = {

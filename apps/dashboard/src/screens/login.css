@@ -1,5 +1,5 @@
 /* ============================================================================
-   LOGIN — premium auth entry surface.
+   LOGIN — strict auth entry surface.
    Uses the shared dashboard kit for controls and tokens; this file owns only
    auth-specific composition. Every class is prefixed `lgn-`.
    ========================================================================== */
@@ -9,236 +9,67 @@
   min-height: 100dvh;
   display: grid;
   place-items: center;
-  padding: clamp(var(--ui-sp-6), 3vw, var(--ui-sp-9));
+  padding: clamp(var(--ui-sp-5), 4vw, var(--ui-sp-9));
   background: var(--ui-surface-sunken);
 }
 
 .lgn-shell {
-  width: min(100%, calc(var(--ui-sp-12) * 16));
-  min-height: min(calc(var(--ui-sp-12) * 8), calc(100dvh - var(--ui-sp-12)));
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0;
-  align-items: stretch;
-  overflow: hidden;
-  background: var(--ui-surface);
-  border: 1px solid var(--ui-line);
-  border-radius: var(--ui-r-lg);
-}
-
-.lgn-story,
-.lgn-card {
-  min-width: 0;
-  border-radius: var(--ui-r-lg);
-}
-
-.lgn-story {
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  gap: var(--ui-sp-7);
-  padding: clamp(var(--ui-sp-7), 3vw, var(--ui-sp-10));
-  background: var(--ui-lime);
-  border: 0;
-  border-right: 1px solid var(--ui-line);
-  border-radius: 0;
-  overflow: hidden;
-}
-
-.lgn-story-brand,
-.lgn-form-brand {
-  padding: 0;
-}
-
-.lgn-story-brand {
-  margin-bottom: var(--ui-sp-7);
-}
-
-.lgn-story-brand .ui-sidebar__mark,
-.lgn-form-brand .ui-sidebar__mark {
-  border: 0;
-}
-
-.lgn-story-brand .ui-sidebar__mark {
-  width: 76px;
-  height: 76px;
-}
-
-.lgn-story-brand .ui-t-strong {
-  font-size: 28px;
-  letter-spacing: -0.035em;
-}
-
-.lgn-form-brand .ui-sidebar__mark {
-  width: 54px;
-  height: 54px;
-}
-
-.lgn-story-copy {
-  max-width: calc(var(--ui-sp-12) * 6);
-}
-
-.lgn-story-title {
-  margin-top: var(--ui-sp-4);
-  color: var(--ui-ink);
-  font-family: var(--ui-font-sans);
-  font-size: clamp(1.75rem, 2.6vw, 2.35rem);
-  line-height: 1.08;
-  font-weight: 640;
-  letter-spacing: -0.045em;
-}
-
-.lgn-story-sub {
-  max-width: calc(var(--ui-sp-12) * 6);
-  margin-top: var(--ui-sp-5);
-  color: var(--ui-ink);
-  font-size: 14px;
-  line-height: 1.48;
-  font-weight: 420;
-  letter-spacing: -0.015em;
-}
-
-.lgn-proof-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  padding-top: 0;
-  border-top: 1px solid var(--ui-ink);
-}
-
-.lgn-proof-row {
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: var(--ui-sp-4);
-  padding: var(--ui-sp-5) 0;
-  border-bottom: 1px solid var(--ui-ink);
-}
-
-.lgn-proof-row > div {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--ui-sp-1);
-}
-
-.lgn-proof-icon {
-  width: var(--ui-sp-7);
-  height: var(--ui-sp-7);
-  border: 1px solid var(--ui-ink);
-  border-radius: var(--ui-r-full);
-  display: inline-grid;
-  place-items: center;
-  flex: 0 0 var(--ui-sp-7);
-  color: var(--ui-ink);
-}
-
-.lgn-proof-row .ui-t-strong {
-  font-size: 12.5px;
-}
-
-.lgn-proof-row .ui-t-small {
-  font-size: 11.5px;
+  width: min(100%, calc(var(--ui-sp-12) * 5));
 }
 
 .lgn-card {
-  align-self: stretch;
-  justify-self: stretch;
   width: 100%;
-  display: flex;
-  align-items: center;
-  padding: clamp(var(--ui-sp-7), 3vw, var(--ui-sp-9));
-  border: 0;
-  border-radius: 0;
-  background: transparent;
+  border-radius: var(--ui-r-lg);
 }
 
 .lgn-form {
-  width: 100%;
-  max-width: calc(var(--ui-sp-12) * 6);
-  margin: 0 auto;
   display: flex;
   flex-direction: column;
-  gap: var(--ui-sp-5);
-  justify-content: center;
+  gap: var(--ui-sp-6);
 }
 
 .lgn-head {
   display: flex;
   flex-direction: column;
-  gap: var(--ui-sp-7);
+  gap: var(--ui-sp-6);
+  padding-bottom: var(--ui-sp-6);
+  border-bottom: 1px solid var(--ui-line);
 }
 
-.lgn-heading {
-  display: flex;
-  flex-direction: column;
-  gap: var(--ui-sp-2);
-  padding-bottom: var(--ui-sp-5);
-  border-bottom: 1px solid var(--ui-line);
+.lgn-brand {
+  padding: 0;
+}
+
+.lgn-brand .ui-sidebar__mark {
+  width: var(--ui-sp-9);
+  height: var(--ui-sp-9);
+}
+
+.lgn-brand .ui-sidebar__wordmark {
+  font-size: var(--ui-sp-6);
+  line-height: 1.1;
+  font-weight: 650;
+  letter-spacing: -0.03em;
 }
 
 .lgn-title {
   color: var(--ui-ink);
   font-family: var(--ui-font-sans);
-  font-size: clamp(1.65rem, 2.2vw, 2.05rem);
-  line-height: 1.08;
-  font-weight: 640;
-  letter-spacing: -0.04em;
+  font-size: var(--ui-sp-7);
+  line-height: 1.16;
+  font-weight: 650;
+  letter-spacing: -0.03em;
 }
 
-.lgn-sub {
-  max-width: calc(var(--ui-sp-12) * 6);
-  color: var(--ui-ink-2);
-  font-size: 13px;
-  line-height: 1.5;
-  font-weight: 430;
+.lgn-card .ui-btn__icon {
+  width: var(--ui-sp-5);
+  height: var(--ui-sp-5);
 }
 
-.lgn-fields {
-  display: flex;
-  flex-direction: column;
-  gap: var(--ui-sp-5);
-}
-
-.lgn-fields .ui-control {
-  height: 36px;
-  border-radius: var(--ui-r-full);
-  padding-inline: var(--ui-sp-5);
-}
-
-.lgn-card .ui-btn--lg {
-  height: 36px;
-}
-
-.lgn-access-note {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--ui-sp-5);
-  padding-top: var(--ui-sp-5);
-  border-top: 1px solid var(--ui-line-faint);
-}
-
-.lgn-access-note p {
-  max-width: calc(var(--ui-sp-12) * 4);
-  text-align: right;
-}
-
-@media (max-width: 960px) {
-  .lgn-shell {
-    grid-template-columns: 1fr;
-    max-width: calc(var(--ui-sp-12) * 8);
-  }
-
-  .lgn-story {
-    border-right: 0;
-    border-bottom: 1px solid var(--ui-line);
-  }
-
-  .lgn-card {
-    align-self: stretch;
-  }
+.lgn-lark-icon {
+  display: block;
+  width: var(--ui-sp-5);
+  height: var(--ui-sp-5);
 }
 
 @media (max-width: 560px) {
@@ -248,29 +79,7 @@
   }
 
   .lgn-shell {
-    gap: var(--ui-sp-4);
-  }
-
-  .lgn-story,
-  .lgn-card {
-    padding: var(--ui-sp-6);
-  }
-
-  .lgn-story-brand {
-    margin-bottom: var(--ui-sp-8);
-  }
-
-  .lgn-story-title {
-    font-size: 1.8rem;
-  }
-
-  .lgn-access-note {
-    flex-direction: column;
-    gap: var(--ui-sp-3);
-  }
-
-  .lgn-access-note p {
-    max-width: none;
-    text-align: left;
+    display: grid;
+    align-items: center;
   }
 }

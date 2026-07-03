@@ -41,13 +41,13 @@ export interface SidebarBrandProps extends React.HTMLAttributes<HTMLDivElement> 
   name: ReactNode;
   markSrc?: string;
 }
-export function SidebarBrand({ name, markSrc = '/brand/timo-mascot.png', className, ...rest }: SidebarBrandProps) {
+export function SidebarBrand({ name, markSrc = '/brand/timo-mascot.svg', className, ...rest }: SidebarBrandProps) {
   return (
     <div className={cx('ui-sidebar__brand', className)} {...rest}>
       <span className="ui-sidebar__mark" aria-hidden>
         <img src={markSrc} alt="" />
       </span>
-      <span className="ui-t-strong">{name}</span>
+      <span className="ui-sidebar__wordmark">{name}</span>
     </div>
   );
 }

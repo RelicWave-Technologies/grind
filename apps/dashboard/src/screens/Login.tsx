@@ -1,7 +1,6 @@
 import './login.css';
 import { useEffect } from 'react';
 import { useNavigate, useSearch } from '@tanstack/react-router';
-import { Camera, ShieldCheck, Timer } from 'lucide-react';
 import { useMe, larkLoginUrl } from '../lib/auth';
 import { Card, SidebarBrand, Button, Banner } from '../ui';
 
@@ -48,75 +47,41 @@ export function LoginScreen() {
 
   return (
     <div className="lgn-page">
-      <main className="lgn-shell" aria-label="Timo workspace access">
-        <section className="lgn-story ui-rise" aria-label="Timo overview">
-          <div className="lgn-story-copy">
-            <SidebarBrand name="Timo" className="lgn-story-brand" />
-            <span className="ui-t-eyebrow">Workspace time tracker</span>
-            <h2 className="lgn-story-title">Transparent time tracking for focused teams.</h2>
-            <p className="lgn-story-sub">
-              Time, screenshots, approvals, and policy stay visible to the people who need them.
-              Nothing more.
-            </p>
-          </div>
-
-          <div className="lgn-proof-list" aria-label="Product guarantees">
-            <div className="lgn-proof-row">
-              <span className="lgn-proof-icon"><Timer size={18} /></span>
-              <div>
-                <span className="ui-t-strong">Honest time</span>
-                <span className="ui-t-small">Tracked, meeting, idle-trimmed, and manual time stay separate.</span>
-              </div>
+      <main className="lgn-shell ui-rise" aria-label="Timo workspace access">
+        <Card className="lgn-card">
+          <div className="lgn-form">
+            <div className="lgn-head">
+              <SidebarBrand name="Timo" className="lgn-brand" />
+              <h1 className="lgn-title">Sign in</h1>
             </div>
-            <div className="lgn-proof-row">
-              <span className="lgn-proof-icon"><Camera size={18} /></span>
-              <div>
-                <span className="ui-t-strong">Bounded capture</span>
-                <span className="ui-t-small">Screenshot retention and capture rules are workspace policy.</span>
-              </div>
-            </div>
-            <div className="lgn-proof-row">
-              <span className="lgn-proof-icon"><ShieldCheck size={18} /></span>
-              <div>
-                <span className="ui-t-strong">Private activity</span>
-                <span className="ui-t-small">Activity uses counts and timing signals, never typed content.</span>
-              </div>
-            </div>
+
+            {outcome && <Banner status={outcome.status}>{outcome.text}</Banner>}
+
+            <Button
+              type="button"
+              variant="primary"
+              size="lg"
+              block
+              onClick={signIn}
+              disabled={me.isFetching}
+              icon={<LarkIcon />}
+            >
+              {me.isFetching ? 'Checking...' : 'Continue with Lark'}
+            </Button>
           </div>
-        </section>
-
-        <Card className="lgn-card ui-rise-1">
-        <div className="lgn-form">
-          <div className="lgn-head">
-            <SidebarBrand name="Timo" className="lgn-form-brand" />
-            <div className="lgn-heading">
-              <span className="ui-t-eyebrow">Workspace access</span>
-              <h1 className="lgn-title">Sign in to Timo</h1>
-              <p className="lgn-sub">Continue with your Lark account to open the dashboard.</p>
-            </div>
-          </div>
-
-          {outcome && <Banner status={outcome.status}>{outcome.text}</Banner>}
-
-          <Button
-            type="button"
-            variant="primary"
-            size="lg"
-            block
-            onClick={signIn}
-            disabled={me.isFetching}
-            icon={<ShieldCheck size={15} />}
-          >
-            {me.isFetching ? 'Checking session…' : 'Continue with Lark'}
-          </Button>
-
-          <div className="lgn-access-note">
-            <span className="ui-t-eyebrow">New account</span>
-            <p className="ui-t-small">Sign in once with Lark; an admin finishes setup and activates access.</p>
-          </div>
-        </div>
         </Card>
       </main>
     </div>
+  );
+}
+
+function LarkIcon() {
+  return (
+    <svg className="lgn-lark-icon" viewBox="0 0 20 20" aria-hidden="true">
+      <path fill="#00B96B" d="M10 2.2c2.6 0 4.8 2.1 4.8 4.8v1.1h-3.9V7c0-.5-.4-.9-.9-.9s-.9.4-.9.9v3.9H7.9C5.3 10.9 3.2 8.7 3.2 6.1S5.3 2.2 7.9 2.2H10Z" />
+      <path fill="#3370FF" d="M2.2 10c0-2.6 2.1-4.8 4.8-4.8h1.1v3.9H7c-.5 0-.9.4-.9.9s.4.9.9.9h3.9v1.2c0 2.6-2.1 4.7-4.8 4.7S2.2 14.7 2.2 12.1V10Z" />
+      <path fill="#FF6B4A" d="M10 17.8c-2.6 0-4.8-2.1-4.8-4.8v-1.1h3.9V13c0 .5.4.9.9.9s.9-.4.9-.9V9.1h1.2c2.6 0 4.7 2.1 4.7 4.8s-2.1 3.9-4.7 3.9H10Z" />
+      <path fill="#FFC60A" d="M17.8 10c0 2.6-2.1 4.8-4.8 4.8h-1.1v-3.9H13c.5 0 .9-.4.9-.9s-.4-.9-.9-.9H9.1V7.9c0-2.6 2.1-4.7 4.8-4.7s3.9 2.1 3.9 4.7V10Z" />
+    </svg>
   );
 }

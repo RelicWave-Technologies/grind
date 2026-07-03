@@ -897,6 +897,14 @@ textarea.ui-control { height: auto; min-height: 80px; padding: var(--ui-sp-3) va
   display: block;
   object-fit: contain;
 }
+.ui-sidebar__wordmark {
+  color: var(--ui-ink);
+  font-family: var(--ui-font-sans);
+  font-size: 15px;
+  line-height: 1.15;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
 .ui-nav { display: flex; flex-direction: column; gap: var(--ui-sp-1); }
 .ui-nav-section { padding: var(--ui-sp-5) var(--ui-sp-3) var(--ui-sp-2); }
 .ui-nav-item {

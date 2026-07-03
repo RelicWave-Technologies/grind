@@ -91,6 +91,8 @@
   --fg-pink: #efd4d4;
   --fg-mint: #c8e6cd;
   --fg-coral: #f3c9b6;
+  --fg-teal: #319aa5;
+  --fg-teal-deep: #2d696d;
   --fg-navy: #1f1d3d;
   --fg-magenta: #ff3d8b;
   --fg-sans: 'Inter', 'SF Pro Display', system-ui, -apple-system, sans-serif;
@@ -193,7 +195,7 @@ body {
 .brand-mark, .login-mark {
   width: 28px; height: 28px;
   border-radius: 0;
-  background: transparent center / contain no-repeat url('/brand/timo-mascot.png');
+  background: transparent center / contain no-repeat url('/brand/timo-mascot.svg');
   border: 0;
   box-shadow: var(--shadow-sm);
 }

@@ -42,6 +42,7 @@
   /* Figma block pastels — the colour identity (task chips, blocks, tiles). */
   --lime: #dceeb1; --cream: #f4ecd6; --lilac: #c5b0f4;
   --coral: #f3c9b6; --mint: #c8e6cd; --pink: #efd4d4;
+  --teal: #319aa5; --teal-deep: #2d696d; /* Timo mascot artwork only. */
 
   /* category palette (task chips) → Figma pastels + dark ink */
   --c-violet: #45348a;  --c-violet-bg: #c5b0f4;   /* lilac */

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Play, Square, ExternalLink, ListTodo } from 'lucide-react';
-import timoMascot from '../assets/timo-mascot.png';
+import timoMascot from '../assets/timo-mascot.svg';
 import type { TimerStatus } from '../lib/agent.d';
 import { projectStyle } from '../lib/projectStyle';
 import { fmtClock } from './Today';

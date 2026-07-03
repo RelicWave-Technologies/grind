@@ -6,7 +6,7 @@
 
 **Aesthetic in one line:** a confident black‑and‑white **editorial frame** — Inter for prose, JetBrains Mono for taxonomy, white canvas, 1px hairlines, pill buttons, **no shadows** — punctuated by deliberate **pastel colour blocks**. Technical and calm; a tool for serious work, never candy.
 
-**Brand mark:** the product-facing brand is **Timo**, represented by a white teddy mascot holding a clock. Use it as a contained mascot mark on white or the single soft-lime accent block (`--fg-lime`); keep it small, crisp, and editorial rather than sticker-like.
+**Brand mark:** the product-facing brand is **Timo**, represented by a transparent teal floating mascot with white eyes and black editorial linework. Use it directly on white or the single soft-lime accent block (`--fg-lime`); never place it inside a decorative badge/card unless the host OS requires a mask. Keep it small, crisp, and calm rather than sticker-like.
 
 ---
 
@@ -35,7 +35,7 @@
 | `--fg-surface-soft` | `#f7f7f5` | Quiet fills, chip grounds |
 
 ### Pastel blocks (the colour vocabulary)
-`--fg-lime #dceeb1` · `--fg-cream #f4ecd6` · `--fg-lilac #c5b0f4` · `--fg-coral #f3c9b6` · `--fg-mint #c8e6cd` · `--fg-pink #efd4d4`. One zone per viewport. `--fg-magenta #ff3d8b` is the single‑shot alert/risk accent (stuck approvals, high‑risk flags) — use scarcely.
+`--fg-lime #dceeb1` · `--fg-cream #f4ecd6` · `--fg-lilac #c5b0f4` · `--fg-coral #f3c9b6` · `--fg-mint #c8e6cd` · `--fg-pink #efd4d4`. One zone per viewport. `--fg-teal #319aa5` and `--fg-teal-deep #2d696d` are reserved for the Timo mascot artwork only. `--fg-magenta #ff3d8b` is the single‑shot alert/risk accent (stuck approvals, high‑risk flags) — use scarcely.
 
 ### Type & radii
 - `--fg-sans` → **Inter** (figmaSans substitute) — everything.

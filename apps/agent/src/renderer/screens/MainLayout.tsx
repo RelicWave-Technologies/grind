@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CalendarClock, ListTodo, PieChart, Settings as SettingsIcon, LogOut, Gauge, Clock, Keyboard, MousePointer2, ExternalLink, RefreshCw } from 'lucide-react';
-import timoMascot from '../assets/timo-mascot.png';
+import timoMascot from '../assets/timo-mascot.svg';
 import Today from './Today';
 import Tasks from './Tasks';
 import Settings from './Settings';
