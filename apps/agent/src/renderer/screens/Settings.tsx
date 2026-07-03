@@ -111,7 +111,7 @@ export default function Settings() {
               </div>
               {state === 'needs-restart' ? (
                 <button className="btn btn-prominent no-drag" onClick={() => window.agent.app.relaunch()}>
-                  Restart Grind
+                  Restart Timo
                 </button>
               ) : !ok ? (
                 <button className="btn no-drag" onClick={() => window.agent.settings.openScreenPrefs()}>
@@ -138,7 +138,7 @@ export default function Settings() {
               </div>
               {aCapturing ? null : aTrusted ? (
                 <button className="btn btn-prominent no-drag" onClick={() => window.agent.app.relaunch()}>
-                  Restart Grind
+                  Restart Timo
                 </button>
               ) : (
                 <button className="btn no-drag" onClick={() => window.agent.permissions.requestAccessibility()}>
@@ -194,7 +194,7 @@ export default function Settings() {
               <span className="set-ic" style={{ background: 'var(--c-violet-bg)' }}><Power size={17} strokeWidth={2} /></span>
               <div className="set-main">
                 <div className="set-title">Launch at login</div>
-                <div className="set-sub secondary">Start Grind automatically and track from the moment you log in.</div>
+                <div className="set-sub secondary">Start Timo automatically and track from the moment you log in.</div>
               </div>
               <button
                 role="switch"
@@ -277,7 +277,7 @@ export default function Settings() {
             </div>
             <div className="set-row">
               <div className="set-main">
-                <div className="set-title">Grind</div>
+                <div className="set-title">Timo</div>
                 <div className="set-sub secondary">Version {info.data?.version ?? '—'} · {info.data?.platform ?? ''}</div>
               </div>
             </div>

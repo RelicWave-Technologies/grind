@@ -11,7 +11,7 @@ const OUTCOME_COPY: Record<string, { status: 'danger' | 'warn' | 'info'; text: s
   denied: { status: 'warn', text: 'Sign-in was cancelled.' },
   temporary: { status: 'warn', text: 'Lark had a temporary hiccup. Please try again.' },
   auth_failed: { status: 'danger', text: 'Sign-in failed. Please try again.' },
-  no_email: { status: 'danger', text: 'Grind couldn’t read an email from your Lark account. Ask your admin to grant the email permission.' },
+  no_email: { status: 'danger', text: 'Timo couldn’t read an email from your Lark account. Ask your admin to grant the email permission.' },
   deactivated: { status: 'danger', text: 'Your account is deactivated. Contact your workspace admin.' },
   state_invalid: { status: 'warn', text: 'That sign-in link expired. Please try again.' },
   invalid_request: { status: 'warn', text: 'Something went wrong starting sign-in. Please try again.' },
@@ -48,10 +48,10 @@ export function LoginScreen() {
 
   return (
     <div className="lgn-page">
-      <main className="lgn-shell" aria-label="Grind workspace access">
-        <section className="lgn-story ui-rise" aria-label="Grind overview">
+      <main className="lgn-shell" aria-label="Timo workspace access">
+        <section className="lgn-story ui-rise" aria-label="Timo overview">
           <div className="lgn-story-copy">
-            <SidebarBrand name="Grind" className="lgn-story-brand" />
+            <SidebarBrand name="Timo" className="lgn-story-brand" />
             <span className="ui-t-eyebrow">Workspace time tracker</span>
             <h2 className="lgn-story-title">Transparent time tracking for focused teams.</h2>
             <p className="lgn-story-sub">
@@ -88,10 +88,10 @@ export function LoginScreen() {
         <Card className="lgn-card ui-rise-1">
         <div className="lgn-form">
           <div className="lgn-head">
-            <SidebarBrand name="Grind" className="lgn-form-brand" />
+            <SidebarBrand name="Timo" className="lgn-form-brand" />
             <div className="lgn-heading">
               <span className="ui-t-eyebrow">Workspace access</span>
-              <h1 className="lgn-title">Sign in to Grind</h1>
+              <h1 className="lgn-title">Sign in to Timo</h1>
               <p className="lgn-sub">Continue with your Lark account to open the dashboard.</p>
             </div>
           </div>

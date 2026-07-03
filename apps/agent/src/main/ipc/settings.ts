@@ -73,7 +73,7 @@ export function registerSettingsIpc(): void {
     await dialog.showMessageBox({
       type: 'info',
       message: 'Restart needed (dev mode)',
-      detail: 'Auto-restart is disabled in dev because it can’t reconnect to the Vite dev server. Quit Grind and run `pnpm --filter @grind/agent dev` again to apply the change.',
+      detail: 'Auto-restart is disabled in dev because it can’t reconnect to the Vite dev server. Quit Timo and run `pnpm --filter @grind/agent dev` again to apply the change.',
       buttons: ['OK'],
     });
   });

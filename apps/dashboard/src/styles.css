@@ -1,5 +1,5 @@
 /* ============================================================================
-   Grind Dashboard — mirrors apps/agent/src/renderer/styles.css token system.
+   Timo Dashboard — mirrors apps/agent/src/renderer/styles.css token system.
    Same light/violet/premium aesthetic, scaled up to a web layout.
    ========================================================================== */
 
@@ -192,8 +192,9 @@ body {
 }
 .brand-mark, .login-mark {
   width: 28px; height: 28px;
-  border-radius: 8px;
-  background: var(--grad-violet);
+  border-radius: 0;
+  background: transparent center / contain no-repeat url('/brand/timo-mark.svg');
+  border: 0;
   box-shadow: var(--shadow-sm);
 }
 .brand-name, .login-name {

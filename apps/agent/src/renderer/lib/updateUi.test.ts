@@ -40,14 +40,14 @@ describe('update UI decisions', () => {
   it('promotes to restart after the timer stops', () => {
     const s = status({ phase: 'ready', availableVersion: '1.0.1', canInstallNow: true });
     expect(updateAction(s)).toEqual({ kind: 'restart', label: 'Restart to update', disabled: false });
-    expect(updateReadyBannerText(s)).toBe('Grind 1.0.1 is ready.');
+    expect(updateReadyBannerText(s)).toBe('Timo 1.0.1 is ready.');
   });
 
   it('shows a non-clickable restarting state during install', () => {
     const s = status({ phase: 'installing', availableVersion: '1.0.1', percent: 100 });
     expect(updateAction(s)).toEqual({ kind: 'restart', label: 'Restarting…', disabled: true });
-    expect(settingsUpdateSubtitle(s)).toBe('Restarting Grind…');
-    expect(updateReadyBannerText(s)).toBe('Restarting Grind…');
+    expect(settingsUpdateSubtitle(s)).toBe('Restarting Timo…');
+    expect(updateReadyBannerText(s)).toBe('Restarting Timo…');
   });
 
   it('surfaces manual up-to-date and manual error states inline', () => {

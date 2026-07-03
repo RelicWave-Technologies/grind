@@ -60,7 +60,7 @@ export function Layout() {
   return (
     <AppShell>
       <Sidebar
-        brand={<SidebarBrand name="Grind" />}
+        brand={<SidebarBrand name="Timo" />}
         footer={
           <>
             <div className="ui-sidebar__me">

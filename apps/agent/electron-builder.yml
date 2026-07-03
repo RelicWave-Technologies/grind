@@ -1,8 +1,8 @@
 appId: com.relicwave.grind
-productName: Grind
+productName: Timo
 # grind:// custom scheme — the system browser redirects here after Lark login.
 protocols:
-  - name: Grind
+  - name: Timo
     schemes:
       - grind
 # electron-vite emits main/preload/renderer here; package the built tree only.
@@ -61,8 +61,8 @@ mac:
   # Screenshot capture + global input counting need these usage strings so
   # macOS shows a sensible prompt when it requests TCC permission.
   extendInfo:
-    NSScreenCaptureUsageDescription: Grind captures periodic screenshots while you are tracking time.
-    NSAccessibilityUsageDescription: Grind counts keyboard and mouse activity (never content) while tracking.
+    NSScreenCaptureUsageDescription: Timo captures periodic screenshots while you are tracking time.
+    NSAccessibilityUsageDescription: Timo counts keyboard and mouse activity (never content) while tracking.
   # Notarization runs via notarytool using credentials from the environment:
   #   APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, APPLE_TEAM_ID
   # electron-builder picks these up automatically when notarize is enabled.
@@ -75,13 +75,13 @@ win:
   icon: build/icon.png
   requestedExecutionLevel: asInvoker
 dmg:
-  title: Grind ${version}
-  artifactName: Grind-${version}-${arch}.dmg
+  title: Timo ${version}
+  artifactName: Timo-${version}-${arch}.dmg
 nsis:
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
-  shortcutName: Grind
-  artifactName: Grind-${version}-${arch}-setup.${ext}
+  shortcutName: Timo
+  artifactName: Timo-${version}-${arch}-setup.${ext}

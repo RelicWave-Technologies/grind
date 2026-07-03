@@ -6,6 +6,8 @@
 
 **Aesthetic in one line:** a confident black‑and‑white **editorial frame** — Inter for prose, JetBrains Mono for taxonomy, white canvas, 1px hairlines, pill buttons, **no shadows** — punctuated by deliberate **pastel colour blocks**. Technical and calm; a tool for serious work, never candy.
 
+**Brand mark:** the product-facing brand is **Timo**, represented by a white teddy mascot holding a clock. Use it as a contained mascot mark on white or the single soft-lime accent block (`--fg-lime`); keep it small, crisp, and editorial rather than sticker-like.
+
 ---
 
 ## 1. Principles

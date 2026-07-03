@@ -1,5 +1,5 @@
 /**
- * Grind Dashboard UI kit — the "Quiet Datasheet" component system.
+ * Timo Dashboard UI kit — the "Quiet Datasheet" component system.
  * Single source of truth: ./SYSTEM.md. Styles: ./system.css (wired globally in
  * src/main.tsx). Every one of the 13 pages composes from these primitives;
  * a page contributes layout only — never a color, font, radius, or shadow.

@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react';
 import { ShieldCheck } from 'lucide-react';
-import grindIcon from '../assets/grind-icon.svg';
+import timoMark from '../assets/timo-mark.svg';
 
 /** Friendly copy for non-success Lark outcomes pushed from the main process. */
 const ERROR_COPY: Record<string, string> = {
   denied: 'Sign-in was cancelled.',
   temporary: 'Lark had a temporary hiccup. Please try again.',
   auth_failed: 'Sign-in failed. Please try again.',
-  no_email: 'Grind couldn’t read an email from your Lark account. Ask your admin to grant the email permission.',
+  no_email: 'Timo couldn’t read an email from your Lark account. Ask your admin to grant the email permission.',
   deactivated: 'Your account is deactivated. Contact your workspace admin.',
   state_invalid: 'That sign-in link expired. Please try again.',
   invalid_request: 'Something went wrong starting sign-in. Please try again.',
@@ -51,10 +51,10 @@ export default function Login() {
     <div className="login">
       <div className="login-card">
         <div className="login-logo">
-          <img src={grindIcon} alt="Grind" width={56} height={56} />
+          <img src={timoMark} alt="Timo" width={82} height={82} />
         </div>
         <div className="login-title">
-          <div className="h2">Sign in to Grind</div>
+          <div className="h2">Sign in to Timo</div>
           <div className="callout secondary" style={{ marginTop: 4 }}>
             Continue with your Lark account
           </div>

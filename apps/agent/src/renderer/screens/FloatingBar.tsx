@@ -31,7 +31,7 @@ export default function FloatingBar() {
       <span className="fbar-grip" title="Drag to move"><GripVertical size={14} strokeWidth={2} /></span>
       <button
         className="fbar-body no-drag"
-        title="Open Grind"
+        title="Open Timo"
         onClick={() => window.agent.window.openMain()}
       >
         <span className="fbar-dot" style={{ background: st?.color ?? 'var(--violet)' }} />

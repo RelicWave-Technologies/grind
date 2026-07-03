@@ -106,8 +106,8 @@ function handleReadyNotification(): void {
 
   if (isMainWindowVisible?.() || !Notification.isSupported()) return;
   const notification = new Notification({
-    title: 'Grind update ready',
-    body: 'Restart Grind when you finish tracking.',
+    title: 'Timo update ready',
+    body: 'Restart Timo when you finish tracking.',
   });
   notification.on('click', () => {
     showMainWindow?.();

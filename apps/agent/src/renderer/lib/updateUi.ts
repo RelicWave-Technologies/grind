@@ -18,7 +18,7 @@ export function settingsUpdateSubtitle(status?: UpdateStatus): string {
       ? `Version ${status.availableVersion ?? 'new'} is ready`
       : 'Update ready — restart after you stop tracking.';
   }
-  if (status.phase === 'installing') return 'Restarting Grind…';
+  if (status.phase === 'installing') return 'Restarting Timo…';
   if (status.phase === 'not-available' && status.manual) return 'You’re up to date';
   if (status.phase === 'error' && status.manual) return 'Couldn’t check for updates';
   return `Channel: ${status.channel === 'beta' ? 'Beta' : 'Stable'}`;
@@ -41,8 +41,8 @@ export function updateAction(status?: UpdateStatus, busy = false): { kind: Updat
 }
 
 export function updateReadyBannerText(status?: UpdateStatus): string | null {
-  if (status?.phase === 'installing') return 'Restarting Grind…';
+  if (status?.phase === 'installing') return 'Restarting Timo…';
   if (status?.phase !== 'ready') return null;
   if (!status.canInstallNow) return 'Update ready — restart after you stop tracking.';
-  return `Grind ${status.availableVersion ?? ''} is ready.`;
+  return `Timo ${status.availableVersion ?? ''} is ready.`;
 }

@@ -53,20 +53,20 @@ function PermBanner({ state }: { state: 'needs-grant' | 'needs-settings' | 'need
   const copy = {
     'needs-grant': {
       title: 'Enable screenshots',
-      body: 'Click “Take one now”, then allow Grind under Screen Recording.',
+      body: 'Click “Take one now”, then allow Timo under Screen Recording.',
       label: 'Open System Settings',
       run: () => window.agent.settings.openScreenPrefs(),
     },
     'needs-settings': {
       title: 'Screen Recording permission needed',
-      body: 'Enable Grind under System Settings → Privacy & Security → Screen Recording.',
+      body: 'Enable Timo under System Settings → Privacy & Security → Screen Recording.',
       label: 'Open System Settings',
       run: () => window.agent.settings.openScreenPrefs(),
     },
     'needs-restart': {
       title: 'Restart to finish enabling screenshots',
-      body: 'Permission changed — Grind needs a restart for screen capture to take effect.',
-      label: 'Restart Grind',
+      body: 'Permission changed — Timo needs a restart for screen capture to take effect.',
+      label: 'Restart Timo',
       run: () => window.agent.app.relaunch(),
     },
   }[state];

@@ -59,7 +59,7 @@ function mirrorGetWindowsBindings(nodeModules, arch) {
 }
 
 exports.default = async function afterPack(context) {
-  const product = context.packager.appInfo.productFilename; // "Grind"
+  const product = context.packager.appInfo.productFilename; // "Timo"
   const appBundle =
     context.electronPlatformName === 'darwin'
       ? path.join(context.appOutDir, `${product}.app`)

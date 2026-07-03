@@ -57,7 +57,22 @@
 
 .lgn-story-brand .ui-sidebar__mark,
 .lgn-form-brand .ui-sidebar__mark {
-  border: 1px solid var(--ui-ink);
+  border: 0;
+}
+
+.lgn-story-brand .ui-sidebar__mark {
+  width: 54px;
+  height: 54px;
+}
+
+.lgn-story-brand .ui-t-strong {
+  font-size: 28px;
+  letter-spacing: -0.035em;
+}
+
+.lgn-form-brand .ui-sidebar__mark {
+  width: 40px;
+  height: 40px;
 }
 
 .lgn-story-copy {

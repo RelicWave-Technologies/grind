@@ -36,14 +36,17 @@ export function Sidebar({ brand, footer, className, children, ...rest }: Sidebar
   );
 }
 
-/** Brand block: 24px accent mark + wordmark. */
+/** Brand block: mascot mark + wordmark. */
 export interface SidebarBrandProps extends React.HTMLAttributes<HTMLDivElement> {
   name: ReactNode;
+  markSrc?: string;
 }
-export function SidebarBrand({ name, className, ...rest }: SidebarBrandProps) {
+export function SidebarBrand({ name, markSrc = '/brand/timo-mark.svg', className, ...rest }: SidebarBrandProps) {
   return (
     <div className={cx('ui-sidebar__brand', className)} {...rest}>
-      <span className="ui-sidebar__mark" aria-hidden />
+      <span className="ui-sidebar__mark" aria-hidden>
+        <img src={markSrc} alt="" />
+      </span>
       <span className="ui-t-strong">{name}</span>
     </div>
   );

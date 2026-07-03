@@ -1,4 +1,4 @@
-# Grind Dashboard — Design System ("Quiet Datasheet")
+# Timo Dashboard — Design System ("Quiet Datasheet")
 
 > **SINGLE SOURCE OF TRUTH.** Every one of the 13 pages (Home, Overview, MeToday, Team,
 > Teams, Users, Approvals, Attendance, Shifts, Payroll, Flags, Policy, Login) is composed

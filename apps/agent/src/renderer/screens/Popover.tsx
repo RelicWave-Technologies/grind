@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Play, Square, ExternalLink, ListTodo } from 'lucide-react';
-import grindIcon from '../assets/grind-icon.svg';
+import timoMark from '../assets/timo-mark.svg';
 import type { TimerStatus } from '../lib/agent.d';
 import { projectStyle } from '../lib/projectStyle';
 import { fmtClock } from './Today';
@@ -29,9 +29,9 @@ export default function Popover() {
   return (
     <div className="pop">
       <div className="pop-head">
-        <span className="brand-mark" style={{ width: 22, height: 22 }}><img src={grindIcon} alt="" /></span>
-        <span className="brand-name" style={{ fontSize: 14 }}>Grind</span>
-        <button className="pop-open no-drag" title="Open Grind" onClick={() => window.agent.window.openMain()}>
+        <span className="brand-mark" style={{ width: 26, height: 26 }}><img src={timoMark} alt="" /></span>
+        <span className="brand-name" style={{ fontSize: 14 }}>Timo</span>
+        <button className="pop-open no-drag" title="Open Timo" onClick={() => window.agent.window.openMain()}>
           <ExternalLink size={15} strokeWidth={2} />
         </button>
       </div>
@@ -63,7 +63,7 @@ export default function Popover() {
           <div className="small tertiary" style={{ padding: '0 2px 6px' }}>START TRACKING</div>
           {openTasks.length === 0 ? (
             <div className="callout secondary" style={{ padding: '2px' }}>
-              {larkTasks.data && larkTasks.data.tasks.length === 0 ? 'No Lark tasks' : 'Open Grind to connect Lark'}
+              {larkTasks.data && larkTasks.data.tasks.length === 0 ? 'No Lark tasks' : 'Open Timo to connect Lark'}
             </div>
           ) : (
             openTasks.slice(0, 5).map((t) => {

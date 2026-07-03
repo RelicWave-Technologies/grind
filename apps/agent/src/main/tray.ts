@@ -25,24 +25,24 @@ export function createTray(opts: {
   getUpdateStatus?: () => UpdateStatus;
 }): Tray {
   const tray = new Tray(trayImage());
-  tray.setToolTip('Grind');
+  tray.setToolTip('Timo');
 
   tray.on('click', (_e, bounds) => opts.onToggle(bounds));
   tray.on('right-click', () => {
     const template: MenuItemConstructorOptions[] = [
-      { label: 'Open Grind', click: opts.onOpenMain },
+      { label: 'Open Timo', click: opts.onOpenMain },
     ];
     const update = opts.getUpdateStatus?.();
     if (update?.phase === 'ready') {
       template.push({
-        label: update.canInstallNow ? 'Restart to update Grind' : 'Update ready after tracking stops',
+        label: update.canInstallNow ? 'Restart to update Timo' : 'Update ready after tracking stops',
         enabled: update.canInstallNow,
         click: () => opts.onInstallUpdate?.(),
       });
     }
     template.push(
       { type: 'separator' },
-      { label: 'Quit Grind', click: () => app.quit() },
+      { label: 'Quit Timo', click: () => app.quit() },
     );
     const menu = Menu.buildFromTemplate(template);
     tray.popUpContextMenu(menu);

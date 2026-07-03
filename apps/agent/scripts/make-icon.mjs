@@ -1,6 +1,5 @@
-// Generates build/icon.icns from an inline SVG so the packaged app has a real
-// dock/Finder icon. On-brand per docs/design.md: black accent, cream type,
-// light "Quiet Datasheet" feel. Run via `pnpm --filter @grind/agent icon`.
+// Generates build/icon.icns from the Timo mascot so the packaged app has the
+// same teddy mark used in the dashboard and agent chrome.
 // Requires macOS `iconutil` (preinstalled) + the `sharp` dep (already present).
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -12,24 +11,25 @@ import sharp from 'sharp';
 const execFileP = promisify(execFile);
 const here = path.dirname(fileURLToPath(import.meta.url));
 const buildDir = path.join(here, '..', 'build');
-
-const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <rect width="1024" height="1024" rx="224" ry="224" fill="#000000"/>
-  <text x="50%" y="52%" dy="0.34em" text-anchor="middle"
-        font-family="Helvetica Neue, Helvetica, Arial, sans-serif"
-        font-size="640" font-weight="600" fill="#f4ecd6">G</text>
-</svg>`;
+const markPath = path.join(here, '..', 'src', 'renderer', 'assets', 'timo-mark.svg');
 
 const SIZES = [16, 32, 64, 128, 256, 512, 1024];
 
 async function main() {
   await fs.mkdir(buildDir, { recursive: true });
+  const mascot = await sharp(markPath).resize(880, 880, { fit: 'contain', background: '#dceeb1' }).png().toBuffer();
+  const base = await sharp({
+    create: { width: 1024, height: 1024, channels: 4, background: '#dceeb1' },
+  })
+    .composite([{ input: mascot, gravity: 'center' }])
+    .png()
+    .toBuffer();
+  const svgImage = base.toString('base64');
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024"><rect width="1024" height="1024" rx="224" fill="#dceeb1"/><image href="data:image/png;base64,${svgImage}" width="1024" height="1024"/></svg>\n`;
   await fs.writeFile(path.join(buildDir, 'icon.svg'), svg);
   const iconset = path.join(buildDir, 'icon.iconset');
   await fs.rm(iconset, { recursive: true, force: true });
   await fs.mkdir(iconset, { recursive: true });
-
-  const base = await sharp(Buffer.from(svg)).resize(1024, 1024).png().toBuffer();
 
   // Apple iconset naming: icon_<pt>x<pt>.png and @2x variants.
   for (const size of SIZES) {
@@ -45,7 +45,7 @@ async function main() {
   await fs.rm(iconset, { recursive: true, force: true });
   // Also drop a 512 png for any non-mac packaging that wants a raster icon.
   await sharp(base).resize(512, 512).png().toFile(path.join(buildDir, 'icon.png'));
-  console.log('wrote build/icon.svg + build/icon.icns + build/icon.png');
+  console.log('wrote Timo build/icon.svg + build/icon.icns + build/icon.png');
 }
 
 main().catch((err) => {
