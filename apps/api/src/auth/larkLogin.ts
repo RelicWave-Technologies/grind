@@ -218,7 +218,7 @@ export async function createAgentAuthCode(userId: string, challenge: string): Pr
 
 /**
  * Redeem a one-time code for the userId, enforcing single-use + TTL + PKCE.
- * The PKCE check blocks another local app that intercepted the grind:// URL —
+ * The PKCE check blocks another local app that intercepted the custom-scheme URL —
  * it can't redeem without the agent's verifier.
  */
 export async function redeemAgentAuthCode(code: string, codeVerifier: string): Promise<string> {

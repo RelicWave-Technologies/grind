@@ -44,7 +44,7 @@ if (!gotLock) {
   process.exit(0);
 }
 
-// Register grind:// for Lark login. Must happen before whenReady, and the
+// Register the custom auth callback for Lark login. Must happen before whenReady, and the
 // macOS open-url handler must be attached early — the OS can deliver the
 // deep-link before the app finishes booting (handleDeepLink queues it).
 registerProtocol();
@@ -222,7 +222,7 @@ app.whenReady().then(async () => {
     }
   }, 1000);
 
-  // Deep-link delivery is now safe. Flush any grind:// URL that arrived during
+  // Deep-link delivery is now safe. Flush any callback URL that arrived during
   // boot (macOS open-url), and pick up a cold-start argv link (Windows/Linux).
   flushQueuedDeepLink();
   const coldStartLink = deepLinkFromArgv(process.argv);

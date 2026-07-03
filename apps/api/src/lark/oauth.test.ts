@@ -93,12 +93,46 @@ describe('buildAuthorizeUrl', () => {
 describe('Lark login state token', () => {
   it('round-trips a dashboard nonce', () => {
     const tok = signLoginState({ nonce: 'n1', client: 'dashboard' });
-    expect(verifyLoginState(tok)).toEqual({ nonce: 'n1', client: 'dashboard', agentChallenge: undefined });
+    expect(verifyLoginState(tok)).toEqual({
+      nonce: 'n1',
+      client: 'dashboard',
+      agentChallenge: undefined,
+      agentCallbackScheme: undefined,
+    });
   });
 
   it('round-trips an agent challenge', () => {
     const tok = signLoginState({ nonce: 'n2', client: 'agent', agentChallenge: 'chal' });
-    expect(verifyLoginState(tok)).toEqual({ nonce: 'n2', client: 'agent', agentChallenge: 'chal' });
+    expect(verifyLoginState(tok)).toEqual({
+      nonce: 'n2',
+      client: 'agent',
+      agentChallenge: 'chal',
+      agentCallbackScheme: undefined,
+    });
+  });
+
+  it('round-trips an agent callback scheme', () => {
+    const tok = signLoginState({
+      nonce: 'n3',
+      client: 'agent',
+      agentChallenge: 'chal',
+      agentCallbackScheme: 'timo',
+    });
+    expect(verifyLoginState(tok)).toEqual({
+      nonce: 'n3',
+      client: 'agent',
+      agentChallenge: 'chal',
+      agentCallbackScheme: 'timo',
+    });
+  });
+
+  it('rejects an arbitrary agent callback scheme', () => {
+    const bad = jwt.sign(
+      { nonce: 'n4', client: 'agent', agentChallenge: 'chal', agentCallbackScheme: 'evil', kind: 'lark_login' },
+      process.env.JWT_SECRET!,
+      { algorithm: 'HS256' },
+    );
+    expect(() => verifyLoginState(bad)).toThrow(/malformed/);
   });
 
   it('rejects a forged login state', () => {

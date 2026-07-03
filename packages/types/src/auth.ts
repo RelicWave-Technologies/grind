@@ -65,7 +65,7 @@ export type LarkLoginClient = z.infer<typeof LarkLoginClient>;
 
 /**
  * Terminal outcomes surfaced to the UI as `?error=`/`?status=` on the login
- * route (dashboard) or `grind://auth?...` (agent). Kept as a closed set so both
+ * route (dashboard) or `timo://auth?...` (agent). Kept as a closed set so both
  * clients render consistent, friendly copy.
  */
 export const LarkLoginOutcome = z.enum([
@@ -81,7 +81,7 @@ export const LarkLoginOutcome = z.enum([
 ]);
 export type LarkLoginOutcome = z.infer<typeof LarkLoginOutcome>;
 
-/** Agent redeems its one-time deep-link code for a Grind session. */
+/** Agent redeems its one-time deep-link code for a Timo session. */
 export const AgentLarkExchangeRequest = z.object({
   code: z.string().min(1),
   codeVerifier: z.string().min(43).max(128),

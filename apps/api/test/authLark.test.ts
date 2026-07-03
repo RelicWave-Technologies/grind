@@ -77,6 +77,12 @@ describe('GET /v1/auth/lark/start', () => {
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe('grind://auth?error=invalid_request');
   });
+
+  it('uses the requested Timo callback scheme for agent start errors', async () => {
+    const res = await request(app).get('/v1/auth/lark/start?client=agent&callback_scheme=timo');
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe('timo://auth?error=invalid_request');
+  });
 });
 
 describe('GET /v1/auth/lark/callback — dashboard', () => {
@@ -142,17 +148,32 @@ describe('GET /v1/auth/lark/callback — dashboard', () => {
 });
 
 describe('agent deep-link + exchange', () => {
-  async function getAgentCode(challenge: string): Promise<string> {
+  async function getAgentCode(challenge: string, callbackScheme: 'grind' | 'timo' = 'grind'): Promise<string> {
     configure({});
-    const state = lark.signLoginState({ nonce: 'na', client: 'agent', agentChallenge: challenge });
+    const state = lark.signLoginState({
+      nonce: 'na',
+      client: 'agent',
+      agentChallenge: challenge,
+      agentCallbackScheme: callbackScheme,
+    });
     const res = await callback(state, { code: 'abc' });
     expect(res.status).toBe(302);
     const url = new URL(res.headers.location);
-    expect(url.protocol).toBe('grind:');
+    expect(url.protocol).toBe(`${callbackScheme}:`);
     const code = url.searchParams.get('code');
     expect(code).toBeTruthy();
     return code!;
   }
+
+  it('routes new Timo agents through timo://', async () => {
+    const verifier = crypto.randomBytes(40).toString('base64url');
+    const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
+    const code = await getAgentCode(challenge, 'timo');
+
+    const res = await request(app).post('/v1/auth/lark/exchange').send({ code, codeVerifier: verifier });
+    expect(res.status).toBe(200);
+    expect(res.body.accessToken).toBeTruthy();
+  });
 
   it('issues a one-time code and exchanges it for a session', async () => {
     const verifier = crypto.randomBytes(40).toString('base64url');

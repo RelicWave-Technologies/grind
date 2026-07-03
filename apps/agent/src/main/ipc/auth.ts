@@ -29,7 +29,7 @@ export function registerAuthIpc(): void {
     return user;
   });
 
-  // Start the Lark login flow: opens the system browser. The grind:// deep-link
+  // Start the Lark login flow: opens the system browser. The custom deep-link
   // (handled in services/deepLink) completes it and broadcasts the outcome.
   ipcMain.handle('auth:loginWithLark', async () => {
     if (await ensureSession()) {

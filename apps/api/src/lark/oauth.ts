@@ -39,12 +39,15 @@ export function verifyOAuthState(token: string): OAuthState {
  *     deep-link) at the callback.
  *  - `agentChallenge`: the agent's PKCE S256 challenge, bound to the one-time
  *     code so only the agent that started the flow can redeem it.
+ *  - `agentCallbackScheme`: the custom URL scheme to redirect back to. New
+ *     Timo agents use `timo`; old Grind agents default to `grind`.
  * Signed + short-TTL with our JWT secret, so a forged/expired state is rejected.
  */
 export type LarkLoginStatePayload = {
   nonce: string;
   client: 'dashboard' | 'agent';
   agentChallenge?: string;
+  agentCallbackScheme?: 'grind' | 'timo';
 };
 
 export function signLoginState(payload: LarkLoginStatePayload): string {
@@ -57,7 +60,7 @@ export function signLoginState(payload: LarkLoginStatePayload): string {
 export function verifyLoginState(token: string): LarkLoginStatePayload {
   const decoded = jwt.verify(token, env.JWT_SECRET, { algorithms: ['HS256'] });
   if (typeof decoded !== 'object' || !decoded) throw new Error('invalid state');
-  const { nonce, client, agentChallenge, kind } = decoded as Record<string, unknown>;
+  const { nonce, client, agentChallenge, agentCallbackScheme, kind } = decoded as Record<string, unknown>;
   if (kind !== 'lark_login') throw new Error('malformed state');
   if (typeof nonce !== 'string' || (client !== 'dashboard' && client !== 'agent')) {
     throw new Error('malformed state');
@@ -65,7 +68,15 @@ export function verifyLoginState(token: string): LarkLoginStatePayload {
   if (agentChallenge !== undefined && typeof agentChallenge !== 'string') {
     throw new Error('malformed state');
   }
-  return { nonce, client, agentChallenge: agentChallenge as string | undefined };
+  if (agentCallbackScheme !== undefined && agentCallbackScheme !== 'grind' && agentCallbackScheme !== 'timo') {
+    throw new Error('malformed state');
+  }
+  return {
+    nonce,
+    client,
+    agentChallenge: agentChallenge as string | undefined,
+    agentCallbackScheme: agentCallbackScheme as 'grind' | 'timo' | undefined,
+  };
 }
 
 /**

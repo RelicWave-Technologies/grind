@@ -3,18 +3,19 @@ import { app } from 'electron';
 import { completeLarkLogin, cancelLarkLogin } from './auth';
 import { startHeartbeat } from './heartbeat';
 import { broadcast } from '../broadcast';
+import { CALLBACK_SCHEME } from '../env';
 import { log } from '../logger';
 
 /**
- * grind:// custom-scheme handling for Lark login. The system browser, after the
- * OAuth round-trip, redirects to grind://auth?code=<one-time> (or ?status / ?error).
+ * Custom-scheme handling for Lark login. The system browser, after the OAuth
+ * round-trip, redirects to timo://auth?code=<one-time> (or ?status / ?error).
  * The OS hands us that URL via `open-url` (macOS) or argv on `second-instance`
  * (Windows/Linux). We redeem the code for a session; non-success outcomes are
  * pushed to the renderer so the login screen can explain them.
  */
-const PROTOCOL = 'grind';
+const PROTOCOL = CALLBACK_SCHEME;
 
-/** Register grind:// as our scheme. In dev (electron-vite) we must pass the
+/** Register the callback scheme. In dev (electron-vite) we must pass the
  *  script path so the OS maps the scheme to this running instance. */
 export function registerProtocol(): void {
   const scriptPath = process.argv[1];
@@ -28,7 +29,7 @@ export function registerProtocol(): void {
 let ready = false;
 let queued: string | null = null;
 
-/** Pull a grind:// URL out of a process argv (Windows/Linux delivery). */
+/** Pull our callback URL out of a process argv (Windows/Linux delivery). */
 export function deepLinkFromArgv(argv: string[]): string | null {
   return argv.find((a) => a.startsWith(`${PROTOCOL}://`)) ?? null;
 }
@@ -55,7 +56,7 @@ export async function handleDeepLink(url: string): Promise<void> {
     log.warn('deep link: unparseable url');
     return;
   }
-  // Only handle grind://auth?...
+  // Only handle our own auth callback.
   if (parsed.protocol !== `${PROTOCOL}:` || parsed.host !== 'auth') return;
 
   const code = parsed.searchParams.get('code');

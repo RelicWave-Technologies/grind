@@ -17,7 +17,7 @@ on:
       api_url:
         description: Production API URL baked into the agent
         required: true
-        default: https://grind-xcdr.onrender.com
+        default: https://timo.emiactech.com
       release_notes:
         description: Release notes for the GitHub draft release
         required: true
@@ -120,6 +120,7 @@ jobs:
         run: |
           @(
             "MAIN_VITE_API_URL=${{ inputs.api_url }}",
+            "MAIN_VITE_CALLBACK_SCHEME=timo",
             "MAIN_VITE_UPDATE_CHANNEL=${{ needs.prepare.outputs.update_channel }}",
             "MAIN_VITE_AUTO_UPDATE_ENABLED=1"
           ) | Out-File -FilePath apps/agent/.env.production -Encoding utf8
@@ -138,7 +139,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: grind-windows-x64-${{ inputs.version }}
+          name: timo-windows-x64-${{ inputs.version }}
           path: |
             apps/agent/release/*.exe
             apps/agent/release/*.blockmap
@@ -198,6 +199,7 @@ jobs:
         run: |
           cat > apps/agent/.env.production <<EOF
           MAIN_VITE_API_URL=${{ inputs.api_url }}
+          MAIN_VITE_CALLBACK_SCHEME=timo
           MAIN_VITE_UPDATE_CHANNEL=${{ needs.prepare.outputs.update_channel }}
           MAIN_VITE_AUTO_UPDATE_ENABLED=1
           EOF
@@ -215,7 +217,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: grind-macos-universal-${{ inputs.version }}
+          name: timo-macos-universal-${{ inputs.version }}
           path: |
             apps/agent/release/*.dmg
             apps/agent/release/*.zip

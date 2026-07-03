@@ -6,7 +6,7 @@ on:
       api_url:
         description: Production API URL baked into the agent
         required: true
-        default: https://grind-xcdr.onrender.com
+        default: https://timo.emiactech.com
 
 jobs:
   package:
@@ -32,6 +32,7 @@ jobs:
         run: |
           @(
             "MAIN_VITE_API_URL=${{ inputs.api_url }}",
+            "MAIN_VITE_CALLBACK_SCHEME=timo",
             "MAIN_VITE_UPDATE_CHANNEL=latest"
           ) | Out-File -FilePath apps/agent/.env.production -Encoding utf8
 
@@ -40,7 +41,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: grind-windows-x64
+          name: timo-windows-x64
           path: |
             apps/agent/release/*.exe
             apps/agent/release/*.blockmap

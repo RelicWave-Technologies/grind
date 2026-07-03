@@ -3,15 +3,15 @@ import crypto from 'node:crypto';
 import { shell } from 'electron';
 import type { AgentLarkExchangeResponse, LoginResponse, LogoutResponse, UserDto } from '@grind/types';
 import { api, UnauthorizedError } from './apiClient';
-import { API_URL } from '../env';
+import { API_URL, CALLBACK_SCHEME } from '../env';
 import { log } from '../logger';
 import { clearTokens, loadTokens, saveTokens } from './tokenStore';
 
 /**
- * Lark login (system-browser + grind:// deep-link). We generate a PKCE
+ * Lark login (system-browser + custom-scheme deep-link). We generate a PKCE
  * verifier, open the system browser at the API's /start, and hold the verifier
  * until the deep-link returns a one-time code. The verifier never leaves this
- * process, so a malicious app that intercepts the grind:// URL can't redeem the
+ * process, so a malicious app that intercepts the callback URL can't redeem the
  * code (the API checks sha256(verifier) == challenge).
  */
 let pendingVerifier: string | null = null;
@@ -23,7 +23,12 @@ export async function startLarkLogin(): Promise<void> {
     const verifier = crypto.randomBytes(48).toString('base64url'); // 64 chars (43–128 ok)
     const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
     pendingVerifier = verifier;
-    pendingLoginUrl = `${API_URL}/v1/auth/lark/start?client=agent&code_challenge=${encodeURIComponent(challenge)}`;
+    const params = new URLSearchParams({
+      client: 'agent',
+      code_challenge: challenge,
+      callback_scheme: CALLBACK_SCHEME,
+    });
+    pendingLoginUrl = `${API_URL}/v1/auth/lark/start?${params.toString()}`;
   }
   try {
     await shell.openExternal(pendingLoginUrl, { activate: true });

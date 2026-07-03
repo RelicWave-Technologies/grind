@@ -6,6 +6,10 @@
 //   3. localhost fallback for `electron-vite dev`.
 export const API_URL: string =
   import.meta.env.MAIN_VITE_API_URL || process.env.AGENT_API_URL || 'http://localhost:4000';
+const rawCallbackScheme = String(
+  import.meta.env.MAIN_VITE_CALLBACK_SCHEME || process.env.AGENT_CALLBACK_SCHEME || 'timo',
+).toLowerCase();
+export const CALLBACK_SCHEME: 'grind' | 'timo' = rawCallbackScheme === 'grind' ? 'grind' : 'timo';
 export const AGENT_VERSION: string = process.env.npm_package_version ?? '0.0.1';
 export const HEARTBEAT_INTERVAL_MS: number = 60_000;
 export type UpdateChannel = 'latest' | 'beta';

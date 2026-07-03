@@ -449,7 +449,7 @@ enum ProvisioningStatus {
 }
 
 /// Short-lived, single-use handoff codes for the DESKTOP AGENT's Lark login.
-/// The system-browser OAuth callback redirects to grind://auth?code=<one-time>;
+/// The system-browser OAuth callback redirects to timo://auth?code=<one-time>;
 /// the agent redeems it at /v1/auth/lark/exchange with its PKCE verifier. We
 /// never put long-lived tokens in the custom-scheme URL, and the code is
 /// useless without the verifier (blocks another local app intercepting the

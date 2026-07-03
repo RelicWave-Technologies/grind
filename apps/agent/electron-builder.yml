@@ -1,10 +1,10 @@
-appId: com.relicwave.grind
+appId: com.emiactech.timo
 productName: Timo
-# grind:// custom scheme — the system browser redirects here after Lark login.
+# timo:// custom scheme — the system browser redirects here after Lark login.
 protocols:
   - name: Timo
     schemes:
-      - grind
+      - timo
 # electron-vite emits main/preload/renderer here; package the built tree only.
 directories:
   buildResources: build
