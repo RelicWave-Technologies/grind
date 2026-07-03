@@ -165,8 +165,9 @@ jobs:
           docker login ghcr.io -u "$GHCR_USER" --password-stdin < /tmp/grind-ghcr-token
           rm -f /tmp/grind-ghcr-token /tmp/grind-ghcr-user
           docker compose --env-file .deploy.env -f docker-compose.prod.yml pull
-          docker compose --env-file .deploy.env -f docker-compose.prod.yml run --rm api pnpm --filter @grind/db exec prisma migrate deploy
+          docker compose --env-file .deploy.env -f docker-compose.prod.yml run --rm -T api pnpm --filter @grind/db exec prisma migrate deploy < /dev/null
           docker compose --env-file .deploy.env -f docker-compose.prod.yml up -d --remove-orphans
+          docker compose --env-file .deploy.env -f docker-compose.prod.yml ps
           docker image prune -f
           REMOTE
         env:
