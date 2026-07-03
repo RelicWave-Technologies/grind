@@ -1,0 +1,17 @@
+services:
+  api:
+    image: ${GRIND_API_IMAGE}:${IMAGE_TAG}
+    env_file:
+      - ./.env.production
+    environment:
+      NODE_ENV: production
+      API_PORT: 4000
+    ports:
+      - "127.0.0.1:4100:4000"
+    restart: unless-stopped
+
+  dashboard:
+    image: ${GRIND_DASHBOARD_IMAGE}:${IMAGE_TAG}
+    ports:
+      - "127.0.0.1:4101:80"
+    restart: unless-stopped

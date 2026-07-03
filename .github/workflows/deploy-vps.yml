@@ -1,0 +1,204 @@
+name: Deploy VPS
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/deploy-vps.yml'
+      - 'apps/api/**'
+      - 'apps/dashboard/**'
+      - 'packages/**'
+      - 'infra/vps/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'turbo.json'
+      - 'tsconfig.base.json'
+
+concurrency:
+  group: deploy-vps-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  API_IMAGE: ghcr.io/relicwave-technologies/grind-api
+  DASHBOARD_IMAGE: ghcr.io/relicwave-technologies/grind-dashboard
+  IMAGE_TAG: ${{ github.sha }}
+  DOMAIN: timo.emiactech.com
+  LETSENCRYPT_EMAIL: admin@emiactech.com
+
+jobs:
+  build:
+    name: Build and push images
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Build and push API
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/vps/Dockerfile.api
+          push: true
+          tags: |
+            ${{ env.API_IMAGE }}:${{ env.IMAGE_TAG }}
+            ${{ env.API_IMAGE }}:main
+          cache-from: type=gha,scope=grind-api
+          cache-to: type=gha,mode=max,scope=grind-api
+
+      - name: Build and push dashboard
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/vps/Dockerfile.dashboard
+          push: true
+          build-args: |
+            VITE_API_BASE=
+          tags: |
+            ${{ env.DASHBOARD_IMAGE }}:${{ env.IMAGE_TAG }}
+            ${{ env.DASHBOARD_IMAGE }}:main
+          cache-from: type=gha,scope=grind-dashboard
+          cache-to: type=gha,mode=max,scope=grind-dashboard
+
+  deploy:
+    name: Deploy to VPS
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: build
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate required secrets
+        run: |
+          test -n "$VPS_HOST"
+          test -n "$VPS_USER"
+          test -n "$VPS_SSH_PRIVATE_KEY"
+          test -n "$PRODUCTION_ENV"
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_PRIVATE_KEY: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+          PRODUCTION_ENV: ${{ secrets.PRODUCTION_ENV }}
+
+      - name: Prepare SSH
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_PRIVATE_KEY" > ~/.ssh/grind_vps
+          chmod 600 ~/.ssh/grind_vps
+          ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_SSH_PRIVATE_KEY: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+
+      - name: Write deploy files
+        run: |
+          printf '%s\n' "$PRODUCTION_ENV" > .env.production
+          cat > .deploy.env <<EOF
+          GRIND_API_IMAGE=${API_IMAGE}
+          GRIND_DASHBOARD_IMAGE=${DASHBOARD_IMAGE}
+          IMAGE_TAG=${IMAGE_TAG}
+          EOF
+          chmod 600 .env.production .deploy.env
+        env:
+          PRODUCTION_ENV: ${{ secrets.PRODUCTION_ENV }}
+
+      - name: Ensure server checkout
+        run: |
+          ssh -i ~/.ssh/grind_vps "$VPS_USER@$VPS_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          mkdir -p /opt
+          if [ -d /opt/grind/.git ]; then
+            cd /opt/grind
+            git fetch origin main
+            git checkout main
+            git pull --ff-only origin main
+          elif [ -e /opt/grind ]; then
+            echo "/opt/grind exists but is not a git checkout" >&2
+            exit 1
+          else
+            git clone https://github.com/RelicWave-Technologies/grind.git /opt/grind
+            cd /opt/grind
+            git checkout main
+          fi
+          REMOTE
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+
+      - name: Sync production env
+        run: |
+          ssh -i ~/.ssh/grind_vps "$VPS_USER@$VPS_HOST" 'mkdir -p /opt/grind/infra/vps && chmod 755 /opt/grind /opt/grind/infra /opt/grind/infra/vps'
+          scp -i ~/.ssh/grind_vps .env.production "$VPS_USER@$VPS_HOST:/opt/grind/infra/vps/.env.production.tmp"
+          scp -i ~/.ssh/grind_vps .deploy.env "$VPS_USER@$VPS_HOST:/opt/grind/infra/vps/.deploy.env.tmp"
+          ssh -i ~/.ssh/grind_vps "$VPS_USER@$VPS_HOST" 'mv /opt/grind/infra/vps/.env.production.tmp /opt/grind/infra/vps/.env.production && mv /opt/grind/infra/vps/.deploy.env.tmp /opt/grind/infra/vps/.deploy.env && chmod 600 /opt/grind/infra/vps/.env.production /opt/grind/infra/vps/.deploy.env'
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+
+      - name: Pull images, migrate, and restart
+        run: |
+          printf '%s' "$GHCR_TOKEN" > .ghcr-token
+          printf '%s' "$GHCR_USER" > .ghcr-user
+          chmod 600 .ghcr-token .ghcr-user
+          scp -i ~/.ssh/grind_vps .ghcr-token "$VPS_USER@$VPS_HOST:/tmp/grind-ghcr-token"
+          scp -i ~/.ssh/grind_vps .ghcr-user "$VPS_USER@$VPS_HOST:/tmp/grind-ghcr-user"
+          ssh -i ~/.ssh/grind_vps "$VPS_USER@$VPS_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+
+          cd /opt/grind/infra/vps
+          GHCR_USER="$(cat /tmp/grind-ghcr-user)"
+          docker login ghcr.io -u "$GHCR_USER" --password-stdin < /tmp/grind-ghcr-token
+          rm -f /tmp/grind-ghcr-token /tmp/grind-ghcr-user
+          docker compose --env-file .deploy.env -f docker-compose.prod.yml pull
+          docker compose --env-file .deploy.env -f docker-compose.prod.yml run --rm api pnpm --filter @grind/db exec prisma migrate deploy
+          docker compose --env-file .deploy.env -f docker-compose.prod.yml up -d --remove-orphans
+          docker image prune -f
+          REMOTE
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ github.token }}
+
+      - name: Configure Nginx and TLS
+        run: |
+          ssh -i ~/.ssh/grind_vps "$VPS_USER@$VPS_HOST" 'bash -s' <<REMOTE
+          set -euo pipefail
+
+          mkdir -p /var/www/html
+          if [ ! -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" ]; then
+            cp /opt/grind/infra/vps/nginx-timo.emiactech.com.http.conf /etc/nginx/sites-available/timo.emiactech.com
+            ln -sf /etc/nginx/sites-available/timo.emiactech.com /etc/nginx/sites-enabled/timo.emiactech.com
+            nginx -t
+            systemctl reload nginx
+            certbot certonly --webroot -w /var/www/html -d "${DOMAIN}" --non-interactive --agree-tos -m "${LETSENCRYPT_EMAIL}"
+          fi
+
+          cp /opt/grind/infra/vps/nginx-timo.emiactech.com.conf /etc/nginx/sites-available/timo.emiactech.com
+          ln -sf /etc/nginx/sites-available/timo.emiactech.com /etc/nginx/sites-enabled/timo.emiactech.com
+          nginx -t
+          systemctl reload nginx
+          REMOTE
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+
+      - name: Verify public endpoint
+        run: |
+          curl --fail --show-error --silent "https://${DOMAIN}/healthz"
+          curl --fail --show-error --silent --head "https://${DOMAIN}/" >/dev/null
