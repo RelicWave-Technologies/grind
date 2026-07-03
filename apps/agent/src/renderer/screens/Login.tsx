@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { ShieldCheck } from 'lucide-react';
 import timoMascot from '../assets/timo-mascot.svg';
+import larkIcon from '../assets/lark.svg';
 
 /** Friendly copy for non-success Lark outcomes pushed from the main process. */
 const ERROR_COPY: Record<string, string> = {
@@ -82,7 +82,7 @@ export default function Login() {
           disabled={opening}
           style={{ marginTop: 16, display: 'inline-flex', alignItems: 'center', gap: 8, justifyContent: 'center' }}
         >
-          <ShieldCheck size={16} strokeWidth={2} />
+          <img className="login-lark-icon" src={larkIcon} alt="" />
           {opening ? 'Opening browser…' : phase === 'waiting' ? 'Open Lark again' : 'Continue with Lark'}
         </button>
       </div>

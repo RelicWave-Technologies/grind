@@ -14,62 +14,85 @@
 }
 
 .lgn-shell {
-  width: min(100%, calc(var(--ui-sp-12) * 5));
+  width: min(100%, calc(var(--ui-sp-12) * 10.5));
 }
 
 .lgn-card {
   width: 100%;
-  border-radius: var(--ui-r-lg);
+  min-height: min(calc(var(--ui-sp-12) * 9.75), calc(100dvh - var(--ui-sp-12)));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: calc(var(--ui-r-lg) * 3);
+  background: var(--ui-surface);
 }
 
 .lgn-form {
+  width: 100%;
+  max-width: calc(var(--ui-sp-12) * 8.5);
   display: flex;
   flex-direction: column;
-  gap: var(--ui-sp-6);
+  align-items: stretch;
+  gap: var(--ui-sp-10);
 }
 
 .lgn-head {
   display: flex;
   flex-direction: column;
-  gap: var(--ui-sp-6);
-  padding-bottom: var(--ui-sp-6);
-  border-bottom: 1px solid var(--ui-line);
+  align-items: center;
+  gap: var(--ui-sp-8);
+  text-align: center;
 }
 
-.lgn-brand {
-  padding: 0;
+.lgn-mascot {
+  width: calc(var(--ui-sp-12) * 2.35);
+  height: calc(var(--ui-sp-12) * 2.35);
+  object-fit: contain;
 }
 
-.lgn-brand .ui-sidebar__mark {
-  width: var(--ui-sp-9);
-  height: var(--ui-sp-9);
-}
-
-.lgn-brand .ui-sidebar__wordmark {
-  font-size: var(--ui-sp-6);
-  line-height: 1.1;
-  font-weight: 650;
-  letter-spacing: -0.03em;
+.lgn-copy {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--ui-sp-3);
 }
 
 .lgn-title {
   color: var(--ui-ink);
   font-family: var(--ui-font-sans);
-  font-size: var(--ui-sp-7);
-  line-height: 1.16;
-  font-weight: 650;
-  letter-spacing: -0.03em;
+  font-size: calc(var(--ui-sp-8) + var(--ui-sp-2));
+  line-height: 1.08;
+  font-weight: 720;
+  letter-spacing: 0;
 }
 
-.lgn-card .ui-btn__icon {
-  width: var(--ui-sp-5);
-  height: var(--ui-sp-5);
+.lgn-sub {
+  color: var(--ui-ink-2);
+  font-family: var(--ui-font-sans);
+  font-size: var(--ui-sp-6);
+  line-height: 1.35;
+  font-weight: 420;
+  letter-spacing: 0;
+}
+
+.lgn-submit.ui-btn--lg {
+  height: calc(var(--ui-sp-12) + var(--ui-sp-6));
+  border-radius: var(--ui-r-full);
+  font-size: var(--ui-sp-6);
+  font-weight: 650;
+  letter-spacing: 0;
+}
+
+.lgn-submit .ui-btn__icon {
+  width: var(--ui-sp-7);
+  height: var(--ui-sp-7);
 }
 
 .lgn-lark-icon {
   display: block;
-  width: var(--ui-sp-5);
-  height: var(--ui-sp-5);
+  width: var(--ui-sp-7);
+  height: var(--ui-sp-7);
 }
 
 @media (max-width: 560px) {
@@ -81,5 +104,33 @@
   .lgn-shell {
     display: grid;
     align-items: center;
+  }
+
+  .lgn-card {
+    min-height: min(calc(var(--ui-sp-12) * 7.5), calc(100dvh - var(--ui-sp-8)));
+    border-radius: calc(var(--ui-r-lg) * 2);
+  }
+
+  .lgn-form {
+    width: 100%;
+    gap: var(--ui-sp-8);
+  }
+
+  .lgn-mascot {
+    width: calc(var(--ui-sp-12) * 1.7);
+    height: calc(var(--ui-sp-12) * 1.7);
+  }
+
+  .lgn-title {
+    font-size: var(--ui-sp-8);
+  }
+
+  .lgn-sub {
+    font-size: var(--ui-sp-5);
+  }
+
+  .lgn-submit.ui-btn--lg {
+    height: var(--ui-sp-12);
+    font-size: var(--ui-sp-5);
   }
 }
