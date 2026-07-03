@@ -28,10 +28,10 @@ model Workspace {
 /// (which app, not which document); URLs require the explicit URL flag
 /// since URLs are content.
 ///
-/// 60-day screenshot retention is enforced by a nightly job that
-/// deletes Screenshot rows older than this; setting it to 0 effectively
-/// disables retention (every shot kept forever — generally not what we
-/// want).
+/// 60-day screenshot retention is enforced by a scheduled API job that
+/// soft-deletes expired Screenshot rows and trashes their storage objects;
+/// setting it to 0 disables retention (every shot kept forever —
+/// generally not what we want).
 model WorkspacePolicy {
   id                         String   @id @default(cuid())
   workspaceId                String   @unique

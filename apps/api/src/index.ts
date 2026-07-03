@@ -3,6 +3,7 @@ import { logger } from './logger';
 import { buildApp } from './app';
 import { startCardCallback } from './lark';
 import { startPayrollMonthCloseScheduler } from './payroll/scheduler';
+import { startScreenshotRetentionScheduler } from './screenshots/retention';
 
 const app = buildApp();
 
@@ -13,4 +14,5 @@ app.listen(port, () => {
   // No-op when Lark isn't configured.
   startCardCallback();
   startPayrollMonthCloseScheduler();
+  startScreenshotRetentionScheduler();
 });

@@ -68,6 +68,26 @@ export async function downloadScreenshotFromDrive(fileId: string): Promise<Buffe
   return Buffer.from(await res.arrayBuffer());
 }
 
+export async function trashScreenshotInDrive(fileId: string): Promise<'trashed' | 'missing'> {
+  const token = await getAccessToken();
+  const url = new URL(`${DRIVE_FILE_URL}/${encodeURIComponent(fileId)}`);
+  url.searchParams.set('supportsAllDrives', 'true');
+  url.searchParams.set('fields', 'id,trashed');
+  const res = await fetch(url, {
+    method: 'PATCH',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ trashed: true }),
+  });
+  if (res.status === 404) return 'missing';
+  if (!res.ok) {
+    throw new Error(`google_drive_trash_failed:${res.status}:${await safeText(res)}`);
+  }
+  return 'trashed';
+}
+
 async function getAccessToken(): Promise<string> {
   if (cachedAccessToken && cachedAccessToken.expiresAtMs - Date.now() > 60_000) {
     return cachedAccessToken.token;
