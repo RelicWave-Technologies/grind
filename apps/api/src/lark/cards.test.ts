@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { buildApprovalCard, buildDecidedCard, buildPayrollReminderCard, type ApprovalCardInput } from './cards';
+import {
+  buildApprovalCard,
+  buildDecidedCard,
+  buildPayrollReminderCard,
+  buildUnavailableRequestCard,
+  type ApprovalCardInput,
+} from './cards';
 
 const REQ: ApprovalCardInput = {
   requestId: 'req_abc',
@@ -187,6 +193,19 @@ describe('buildCancelledCard — disables the card when the requester withdraws'
     expect(buttonValues(card)).toHaveLength(0);
     expect(findTextContaining(card, 'withdrawn')).toBe(true);
     expect(findTextContaining(card, 'Anish Suman')).toBe(true);
+    expect(findTextContaining(card, 'Time rejected')).toBe(false);
+  });
+});
+
+describe('buildUnavailableRequestCard — stale Lark cards', () => {
+  it('renders a grey no-action card that does not look approved or rejected', () => {
+    const card = buildUnavailableRequestCard({ requestId: 'req_missing' });
+    expect((card.header as Record<string, unknown>).template).toBe('grey');
+    expect(buttonValues(card)).toHaveLength(0);
+    expect(findTextContaining(card, 'unavailable')).toBe(true);
+    expect(findTextContaining(card, 'req_missing')).toBe(true);
+    expect(findTextContaining(card, 'Time approved')).toBe(false);
+    expect(findTextContaining(card, 'Time rejected')).toBe(false);
   });
 });
 

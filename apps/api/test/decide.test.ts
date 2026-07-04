@@ -134,6 +134,24 @@ describe('decideRequest — idempotency', () => {
   });
 });
 
+describe('decideRequest — cancelled requests', () => {
+  it('returns a cancelled card, not a rejected decision card', async () => {
+    const { req, openId } = await setup();
+    await prisma.manualTimeRequest.update({
+      where: { id: req.id },
+      data: { status: 'CANCELLED', decidedAt: new Date('2026-05-29T11:00:00.000Z') },
+    });
+
+    const result = await decideRequest({ requestId: req.id, action: 'approve', decidedByOpenId: openId! });
+    expect(result!.status).toBe('CANCELLED');
+    expect(result!.noop).toBe('cancelled');
+    expect(result!.timeEntryId).toBeNull();
+    expect(JSON.stringify(result!.card)).toContain('Manual time request — withdrawn');
+    expect(JSON.stringify(result!.card)).not.toContain('Time rejected');
+    expect(await prisma.timeEntry.count()).toBe(0);
+  });
+});
+
 describe('decideRequest — authorization', () => {
   it('rejects a decider whose open_id is not the assigned approver', async () => {
     const { req } = await setup({ approverOpenId: 'ou_approver_A' });

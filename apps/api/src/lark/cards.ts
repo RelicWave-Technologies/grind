@@ -27,6 +27,10 @@ export interface DecidedCardInput extends ApprovalCardInput {
   decidedAt: number; // epoch ms
 }
 
+export interface UnavailableRequestCardInput {
+  requestId: string;
+}
+
 export interface PayrollReminderItem {
   requestId: string;
   requesterName: string;
@@ -249,6 +253,31 @@ export function buildCancelledCard(req: CancelledCardInput): Record<string, unkn
           tag: 'lark_md',
           content: `**Withdrawn by ${req.requesterName}** · ${new Date(req.cancelledAt).toLocaleString()}. You can ignore this card.`,
         },
+      },
+    ],
+  };
+}
+
+/** Used when someone clicks a stale Lark card whose backing DB row is gone. */
+export function buildUnavailableRequestCard(req: UnavailableRequestCardInput): Record<string, unknown> {
+  return {
+    config: { wide_screen_mode: true, update_multi: true },
+    header: {
+      title: { tag: 'plain_text', content: 'Manual time request unavailable' },
+      template: 'grey',
+    },
+    elements: [
+      {
+        tag: 'div',
+        text: {
+          tag: 'lark_md',
+          content:
+            'This card is stale or the request was removed. Open Timo and use the latest approval request.',
+        },
+      },
+      {
+        tag: 'note',
+        elements: [{ tag: 'plain_text', content: `Request ${req.requestId}` }],
       },
     ],
   };

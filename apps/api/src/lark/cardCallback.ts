@@ -1,6 +1,7 @@
 import { WSClient, EventDispatcher } from '@larksuiteoapi/node-sdk';
 import { isLarkConfigured, getLarkConfig } from './config';
 import { decideRequest } from './decide';
+import { buildUnavailableRequestCard } from './cards';
 import { logger } from '../logger';
 
 /**
@@ -22,6 +23,13 @@ type CardActionEvent = {
 
 function parseValue(raw: unknown): { requestId?: string; action?: 'approve' | 'reject' } {
   // value is the object we put in the button at build time.
+  if (typeof raw === 'string') {
+    try {
+      return parseValue(JSON.parse(raw));
+    } catch {
+      return {};
+    }
+  }
   if (raw && typeof raw === 'object') {
     const v = raw as Record<string, unknown>;
     return {
@@ -49,19 +57,30 @@ export function startCardCallback(): void {
         const { requestId, action } = parseValue(raw.action?.value);
         const decidedByOpenId = raw.operator?.open_id;
         if (!requestId || !action || !decidedByOpenId) {
-          logger.warn({ raw }, 'card.action.trigger: missing requestId/action/operator');
+          logger.warn(
+            { hasValue: raw.action?.value !== undefined, hasOperator: Boolean(decidedByOpenId) },
+            'card.action.trigger: missing requestId/action/operator',
+          );
           return { toast: { type: 'error', content: 'Bad payload' } };
         }
+        logger.info({ requestId, action, decidedByOpenId }, 'card.action.trigger: decision received');
         const result = await decideRequest({ requestId, action, decidedByOpenId });
         if (!result) {
-          return { toast: { type: 'error', content: 'Request not found' } };
+          logger.warn({ requestId, action, decidedByOpenId }, 'card.action.trigger: request not found');
+          return {
+            toast: { type: 'error', content: 'This approval card is stale. Open the latest request in Timo.' },
+            card: { type: 'raw', data: buildUnavailableRequestCard({ requestId }) },
+          };
         }
         if (result.noop === 'forbidden') {
+          logger.warn({ requestId, action, decidedByOpenId }, 'card.action.trigger: forbidden decider');
           return { toast: { type: 'error', content: 'Only the assigned approver can decide this request.' } };
         }
         if (result.noop === 'self_approval_forbidden') {
+          logger.warn({ requestId, action, decidedByOpenId }, 'card.action.trigger: self approval forbidden');
           return { toast: { type: 'error', content: 'Another approver must decide this request.' } };
         }
+        logger.info({ requestId, action, status: result.status, noop: result.noop }, 'card.action.trigger: decision handled');
         return {
           toast: { type: 'success', content: `Marked ${result.status.toLowerCase()}` },
           card: { type: 'raw', data: result.card },

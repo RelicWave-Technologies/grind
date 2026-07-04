@@ -1,6 +1,6 @@
 import { prisma } from '@grind/db';
 import { ulid } from 'ulid';
-import { buildDecidedCard, type ApprovalAction } from './cards';
+import { buildCancelledCard, buildDecidedCard, type ApprovalAction } from './cards';
 import { logger } from '../logger';
 
 /**
@@ -46,7 +46,10 @@ export async function decideRequest(args: {
       attendees: { select: { userId: true } },
     },
   });
-  if (!req) return null;
+  if (!req) {
+    logger.warn({ requestId: args.requestId, action: args.action, decidedByOpenId: args.decidedByOpenId }, 'decideRequest: not found');
+    return null;
+  }
 
   // Authorization: the clicker must be the assigned approver.
   if (!req.approver?.larkIdentity?.openId || req.approver.larkIdentity.openId !== args.decidedByOpenId) {
@@ -66,16 +69,14 @@ export async function decideRequest(args: {
     // no TimeEntry) so the approver knows their click was a no-op.
     if (req.status === 'CANCELLED') {
       return {
-        card: buildDecidedCard({
+        card: buildCancelledCard({
           requestId: req.id,
           requesterName: req.user.name,
           taskSummary: req.taskSummary,
           startedAt: req.requestedStart.getTime(),
           endedAt: req.requestedEnd.getTime(),
           reason: req.reason,
-          decision: 'REJECTED', // CANCELLED reuses the rejected card chrome (red, no buttons)
-          decidedByName: req.user.name + ' (cancelled)',
-          decidedAt: (req.decidedAt ?? now).getTime(),
+          cancelledAt: (req.decidedAt ?? now).getTime(),
         }),
         status: 'CANCELLED',
         timeEntryId: null,

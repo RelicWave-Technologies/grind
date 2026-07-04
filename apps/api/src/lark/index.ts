@@ -26,10 +26,26 @@ export type { ProfileClient, LarkProfile } from './profile';
 export { normalizeEmail } from './profile';
 export { mapTasks, loggedMsByGuid, toEpochMs, buildCreateTaskPayload, LarkTaskApiError } from './tasks';
 export type { UserTaskClient, LarkTaskDto, CreateLarkTaskInput } from './tasks';
-export { buildApprovalCard, buildDecidedCard, buildSupersededCard, buildUpdatedApprovalCard, buildCancelledCard } from './cards';
+export {
+  buildApprovalCard,
+  buildDecidedCard,
+  buildSupersededCard,
+  buildUpdatedApprovalCard,
+  buildCancelledCard,
+  buildUnavailableRequestCard,
+} from './cards';
 export { decideRequest } from './decide';
 export { startCardCallback } from './cardCallback';
-export type { ApprovalCardInput, DecidedCardInput, ApprovalAction, SupersededCardInput, UpdatedApprovalCardInput, DiffEntry, CancelledCardInput } from './cards';
+export type {
+  ApprovalCardInput,
+  DecidedCardInput,
+  ApprovalAction,
+  SupersededCardInput,
+  UpdatedApprovalCardInput,
+  DiffEntry,
+  CancelledCardInput,
+  UnavailableRequestCardInput,
+} from './cards';
 export type { LarkMessenger, SendCardResult } from './messenger';
 
 let manager: TokenManager | null = null;
