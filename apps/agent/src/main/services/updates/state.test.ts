@@ -3,6 +3,7 @@ import {
   applyUpdateEvent,
   canInstallUpdate,
   initialUpdateStatus,
+  isVersionNewer,
   nextRetryDelayMs,
 } from './state';
 
@@ -62,5 +63,27 @@ describe('update state transitions', () => {
     expect(canInstallUpdate({ state: 'IDLE' })).toBe(true);
     expect(canInstallUpdate({ state: 'RUNNING', paused: false })).toBe(false);
     expect(canInstallUpdate({ state: 'RUNNING', paused: true })).toBe(false);
+  });
+
+  it('compares beta prerelease numbers numerically', () => {
+    expect(isVersionNewer('0.0.2-beta.18', '0.0.2-beta.19')).toBe(true);
+    expect(isVersionNewer('0.0.2-beta.19', '0.0.2-beta.11')).toBe(false);
+    expect(isVersionNewer('0.0.2-beta.19', '0.0.2-beta.19')).toBe(false);
+    expect(isVersionNewer('0.0.2-beta.19', '0.0.3-beta.1')).toBe(true);
+  });
+
+  it('ignores stale downloaded updates below the current app version', () => {
+    const ready = applyUpdateEvent(
+      initialUpdateStatus({
+        enabled: true,
+        currentVersion: '0.0.2-beta.19',
+        channel: 'beta',
+      }),
+      { type: 'downloaded', version: '0.0.2-beta.11', canInstallNow: true, at: 30 },
+    );
+
+    expect(ready.phase).toBe('not-available');
+    expect(ready.availableVersion).toBeNull();
+    expect(ready.readyAt).toBeNull();
   });
 });

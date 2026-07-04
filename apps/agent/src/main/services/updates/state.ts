@@ -69,6 +69,60 @@ export function nextRetryDelayMs(automaticErrorCount: number): number | null {
   return null;
 }
 
+type ParsedVersion = {
+  major: number;
+  minor: number;
+  patch: number;
+  prerelease: string[];
+};
+
+function parseVersion(version: string | null | undefined): ParsedVersion | null {
+  const match = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/u.exec(version ?? '');
+  if (!match) return null;
+  return {
+    major: Number(match[1]),
+    minor: Number(match[2]),
+    patch: Number(match[3]),
+    prerelease: match[4]?.split('.') ?? [],
+  };
+}
+
+function comparePrerelease(a: string[], b: string[]): number {
+  if (a.length === 0 && b.length === 0) return 0;
+  if (a.length === 0) return 1;
+  if (b.length === 0) return -1;
+  const max = Math.max(a.length, b.length);
+  for (let i = 0; i < max; i += 1) {
+    const ai = a[i];
+    const bi = b[i];
+    if (ai == null) return -1;
+    if (bi == null) return 1;
+    const an = /^\d+$/u.test(ai) ? Number(ai) : null;
+    const bn = /^\d+$/u.test(bi) ? Number(bi) : null;
+    if (an != null && bn != null && an !== bn) return an > bn ? 1 : -1;
+    if (an != null && bn == null) return -1;
+    if (an == null && bn != null) return 1;
+    if (an == null && bn == null && ai !== bi) return ai > bi ? 1 : -1;
+  }
+  return 0;
+}
+
+export function compareVersions(a: string, b: string): number | null {
+  const av = parseVersion(a);
+  const bv = parseVersion(b);
+  if (!av || !bv) return null;
+  for (const key of ['major', 'minor', 'patch'] as const) {
+    if (av[key] !== bv[key]) return av[key] > bv[key] ? 1 : -1;
+  }
+  return comparePrerelease(av.prerelease, bv.prerelease);
+}
+
+export function isVersionNewer(currentVersion: string, candidateVersion: string | null | undefined): boolean {
+  if (!candidateVersion) return false;
+  const compared = compareVersions(candidateVersion, currentVersion);
+  return compared == null ? candidateVersion !== currentVersion : compared > 0;
+}
+
 export function applyUpdateEvent(status: UpdateStatus, event: UpdateEvent): UpdateStatus {
   switch (event.type) {
     case 'checking':
@@ -80,6 +134,15 @@ export function applyUpdateEvent(status: UpdateStatus, event: UpdateEvent): Upda
         manual: event.manual,
       };
     case 'available':
+      if (!isVersionNewer(status.currentVersion, event.version)) {
+        return {
+          ...status,
+          phase: 'not-available',
+          availableVersion: null,
+          percent: null,
+          error: null,
+        };
+      }
       return {
         ...status,
         phase: 'available',
@@ -95,6 +158,17 @@ export function applyUpdateEvent(status: UpdateStatus, event: UpdateEvent): Upda
         error: null,
       };
     case 'downloaded':
+      if (!isVersionNewer(status.currentVersion, event.version)) {
+        return {
+          ...status,
+          phase: 'not-available',
+          availableVersion: null,
+          percent: null,
+          error: null,
+          checkedAt: event.at,
+          readyAt: null,
+        };
+      }
       return {
         ...status,
         phase: 'ready',
