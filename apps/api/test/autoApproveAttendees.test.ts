@@ -65,29 +65,37 @@ const sample = {
   reason: 'Forgot to start the tracker — design review.',
 };
 
-describe('POST /v1/time-requests — self requests require an approver', () => {
-  it('MANAGER self request stays PENDING for the workspace admin', async () => {
+describe('POST /v1/time-requests — supervisor self requests auto-approve', () => {
+  it('MANAGER self request is auto-approved by themselves', async () => {
     const s = await seed();
     const res = await request(app)
       .post('/v1/time-requests')
       .set(auth(s.mgr.token))
       .send({ clientUuid: `cu-${ulid()}`, ...sample });
     expect(res.status).toBe(201);
-    expect(res.body.status).toBe('PENDING');
-    expect(res.body.autoApproved).toBe(false);
-    expect(res.body.approverId).toBe(s.admin.id);
+    expect(res.body.status).toBe('APPROVED');
+    expect(res.body.autoApproved).toBe(true);
+    expect(res.body.approverId).toBe(s.mgr.id);
     const row = await prisma.manualTimeRequest.findUnique({ where: { id: res.body.id } });
-    expect(row?.timeEntryId).toBeNull();
+    expect(row?.timeEntryId).toBeTruthy();
+    const te = await prisma.timeEntry.findUnique({ where: { id: row!.timeEntryId! } });
+    expect(te?.userId).toBe(s.mgr.id);
   });
 
-  it('ADMIN self request returns no_approver when no non-self admin exists', async () => {
+  it('ADMIN self request is auto-approved by themselves', async () => {
     const s = await seed();
     const res = await request(app)
       .post('/v1/time-requests')
       .set(auth(s.admin.token))
       .send({ clientUuid: `cu-${ulid()}`, ...sample });
-    expect(res.status).toBe(400);
-    expect(res.body.error).toBe('no_approver');
+    expect(res.status).toBe(201);
+    expect(res.body.status).toBe('APPROVED');
+    expect(res.body.autoApproved).toBe(true);
+    expect(res.body.approverId).toBe(s.admin.id);
+    const row = await prisma.manualTimeRequest.findUnique({ where: { id: res.body.id } });
+    expect(row?.timeEntryId).toBeTruthy();
+    const te = await prisma.timeEntry.findUnique({ where: { id: row!.timeEntryId! } });
+    expect(te?.userId).toBe(s.admin.id);
   });
 
   it('MEMBER stays PENDING (traditional approver flow)', async () => {

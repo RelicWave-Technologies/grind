@@ -37,6 +37,14 @@
 ### Pastel blocks (the colour vocabulary)
 `--fg-lime #dceeb1` · `--fg-cream #f4ecd6` · `--fg-lilac #c5b0f4` · `--fg-coral #f3c9b6` · `--fg-mint #c8e6cd` · `--fg-pink #efd4d4`. One zone per viewport. `--fg-teal #319aa5` and `--fg-teal-deep #2d696d` are reserved for the Timo mascot artwork only. `--fg-magenta #ff3d8b` is the single‑shot alert/risk accent (stuck approvals, high‑risk flags) — use scarcely.
 
+### Timeline ribbon colours
+The day timeline uses a softer category layer than generic status chips:
+`--timeline-work-bg #def4e4` with `--timeline-work-ink` for tracked work, and
+`--timeline-manual-bg #fff3c9` with `--timeline-manual-ink` for manual time.
+Use these for ribbon blocks and their legends across dashboard and desktop so
+the bar reads lighter/pastel while status pills can keep their stronger system
+fills.
+
 ### Type & radii
 - `--fg-sans` → **Inter** (figmaSans substitute) — everything.
 - `--fg-mono` → **JetBrains Mono** (figmaMono substitute) — uppercase taxonomy only.

@@ -1,13 +1,13 @@
 {
   "name": "@grind/agent",
-  "version": "0.0.2-beta.20",
+  "version": "0.0.2-beta.21",
   "private": true,
   "type": "module",
   "description": "Timo time tracker desktop agent",
   "author": "RelicWave Technologies",
   "main": "out/main/index.cjs",
   "scripts": {
-    "dev": "electron-vite dev",
+    "dev": "node scripts/prepare-dev-electron.mjs && electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "typecheck": "tsc -p tsconfig.json --noEmit",

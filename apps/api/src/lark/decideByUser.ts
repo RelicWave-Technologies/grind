@@ -29,11 +29,17 @@ export interface DecideByUserResult {
   noop: 'already_decided' | 'cancelled' | 'forbidden' | 'self_approval_forbidden' | null;
 }
 
+function canSelfApproveManualTime(role: string): boolean {
+  return role === 'ADMIN' || role === 'MANAGER';
+}
+
 export async function decideByUser(args: {
   requestId: string;
   action: ApprovalAction;
   /** The authenticated user making the decision. */
   deciderUserId: string;
+  /** Role from the authenticated session. Managers/admins may approve themselves. */
+  deciderRole: string;
   /** The visible userIds from attachScope. The requester MUST appear here. */
   scopeUserIds: string[];
   /** Optional approver note attached to the decision. */
@@ -65,7 +71,7 @@ export async function decideByUser(args: {
     };
   }
 
-  if (req.status === 'PENDING' && req.userId === args.deciderUserId) {
+  if (req.status === 'PENDING' && req.userId === args.deciderUserId && !canSelfApproveManualTime(args.deciderRole)) {
     logger.warn(
       { requestId: req.id, deciderUserId: args.deciderUserId },
       'decideByUser: forbidden (self approval)',

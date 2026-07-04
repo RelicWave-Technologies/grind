@@ -202,7 +202,7 @@ describe('POST /v1/admin/manual-time-requests/:id/decide', () => {
     expect(reloaded?.status).toBe('PENDING');
   });
 
-  it('ADMIN cannot decide their own manual-time request', async () => {
+  it('ADMIN can decide their own manual-time request', async () => {
     const s = await seed();
     const selfReq = await prisma.manualTimeRequest.create({
       data: {
@@ -211,7 +211,7 @@ describe('POST /v1/admin/manual-time-requests/:id/decide', () => {
         approverId: s.admin.id,
         requestedStart: new Date('2026-05-30T13:00:00Z'),
         requestedEnd: new Date('2026-05-30T14:00:00Z'),
-        reason: 'Own admin request must be reviewed by someone else',
+        reason: 'Own admin request',
         status: 'PENDING',
       },
     });
@@ -219,11 +219,37 @@ describe('POST /v1/admin/manual-time-requests/:id/decide', () => {
       .post(`/v1/admin/manual-time-requests/${selfReq.id}/decide`)
       .set(bearer(s.admin.token))
       .send({ action: 'approve' });
-    expect(res.status).toBe(403);
-    expect(res.body.error).toBe('self_approval_forbidden');
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('APPROVED');
+    expect(res.body.timeEntryId).toBeTruthy();
     const reloaded = await prisma.manualTimeRequest.findUnique({ where: { id: selfReq.id } });
-    expect(reloaded?.status).toBe('PENDING');
-    expect(reloaded?.timeEntryId).toBeNull();
+    expect(reloaded?.status).toBe('APPROVED');
+    expect(reloaded?.timeEntryId).toBeTruthy();
+  });
+
+  it('MANAGER can decide their own manual-time request', async () => {
+    const s = await seed();
+    const selfReq = await prisma.manualTimeRequest.create({
+      data: {
+        clientUuid: `cu-mgr-self-${Date.now()}`,
+        userId: s.mgrA.id,
+        approverId: s.mgrA.id,
+        requestedStart: new Date('2026-05-30T13:00:00Z'),
+        requestedEnd: new Date('2026-05-30T14:00:00Z'),
+        reason: 'Own manager request',
+        status: 'PENDING',
+      },
+    });
+    const res = await request(app)
+      .post(`/v1/admin/manual-time-requests/${selfReq.id}/decide`)
+      .set(bearer(s.mgrA.token))
+      .send({ action: 'approve' });
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('APPROVED');
+    expect(res.body.timeEntryId).toBeTruthy();
+    const reloaded = await prisma.manualTimeRequest.findUnique({ where: { id: selfReq.id } });
+    expect(reloaded?.status).toBe('APPROVED');
+    expect(reloaded?.timeEntryId).toBeTruthy();
   });
 
   it('idempotent: deciding twice returns the already-decided state (no double TimeEntry)', async () => {

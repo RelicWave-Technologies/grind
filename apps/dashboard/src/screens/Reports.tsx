@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 import { api, API_BASE } from '../lib/api';
 import { fmtAgeShort, fmtDayLabel, fmtDurationMs, fmtTime } from '../lib/format';
-import { hasCapability } from '../lib/auth';
+import { hasCapability, isManagerOrAbove } from '../lib/auth';
 import type { ManualTimeRequestDto } from '@grind/types';
 import type { SelfProfileResponse } from '@grind/types/profile';
 import type { ShiftSchedule, Weekday } from '@grind/types/shifts';
@@ -778,6 +778,7 @@ function TeamMemberDrawer({
   const canDecideApprovals =
     hasCapability(me, 'approvals.team.decide') ||
     hasCapability(me, 'approvals.workspace.decide');
+  const canSelfApproveOwn = isManagerOrAbove(me.role);
 
   const q = useQuery({
     queryKey: ['reports', 'team', 'member', userId, from, to, tz],
@@ -872,6 +873,7 @@ function TeamMemberDrawer({
               tz={tz}
               canDecide={canDecideApprovals}
               currentUserId={me.id}
+              canSelfApproveOwn={canSelfApproveOwn}
               decisionError={decisionError}
               busyRequestId={decide.isPending ? decide.variables?.id ?? null : null}
               busyAction={decide.isPending ? decide.variables?.action ?? null : null}
@@ -946,6 +948,7 @@ function TeamMemberApprovalsPanel({
   tz,
   canDecide,
   currentUserId,
+  canSelfApproveOwn,
   decisionError,
   busyRequestId,
   busyAction,
@@ -957,6 +960,7 @@ function TeamMemberApprovalsPanel({
   tz: string;
   canDecide: boolean;
   currentUserId: string;
+  canSelfApproveOwn: boolean;
   decisionError: string | null;
   busyRequestId: string | null;
   busyAction: ApprovalDecisionAction | null;
@@ -1054,6 +1058,7 @@ function TeamMemberApprovalsPanel({
                       <ReportApprovalDecisionCell
                         req={req}
                         isOwnRequest={isOwnRequest}
+                        canSelfApproveOwn={canSelfApproveOwn}
                         busy={isBusy}
                         busyAction={isBusy ? busyAction : null}
                         onApprove={() => onApprove(req.id)}
@@ -1074,6 +1079,7 @@ function TeamMemberApprovalsPanel({
           tz={tz}
           canDecide={canDecide}
           isOwnRequest={selectedApproval.userId === currentUserId}
+          canSelfApproveOwn={canSelfApproveOwn}
           busy={busyRequestId === selectedApproval.id}
           busyAction={busyRequestId === selectedApproval.id ? busyAction : null}
           onApprove={(id) => {
@@ -1098,6 +1104,7 @@ function TeamMemberApprovalsPanel({
 function ReportApprovalDecisionCell({
   req,
   isOwnRequest,
+  canSelfApproveOwn,
   busy,
   busyAction,
   onApprove,
@@ -1106,6 +1113,7 @@ function ReportApprovalDecisionCell({
 }: {
   req: ManualTimeRequestDto;
   isOwnRequest: boolean;
+  canSelfApproveOwn: boolean;
   busy: boolean;
   busyAction: ApprovalDecisionAction | null;
   onApprove: () => void;
@@ -1130,7 +1138,7 @@ function ReportApprovalDecisionCell({
       </div>
     );
   }
-  if (isOwnRequest) {
+  if (isOwnRequest && !canSelfApproveOwn) {
     return (
       <div className="rep-drawer-approval-actions rep-drawer-approval-actions--done">
         <Tag status="neutral" mono>Needs reviewer</Tag>
@@ -1186,6 +1194,7 @@ function ReportApprovalDetailsModal({
   tz,
   canDecide,
   isOwnRequest,
+  canSelfApproveOwn,
   busy,
   busyAction,
   onApprove,
@@ -1197,6 +1206,7 @@ function ReportApprovalDetailsModal({
   tz: string;
   canDecide: boolean;
   isOwnRequest: boolean;
+  canSelfApproveOwn: boolean;
   busy: boolean;
   busyAction: ApprovalDecisionAction | null;
   onApprove: (id: string) => void;
@@ -1276,10 +1286,10 @@ function ReportApprovalDetailsModal({
             >
               Open Edit Time
             </Button>
-            {canDecide && isOwnRequest && req.status === 'PENDING' && (
+            {canDecide && isOwnRequest && !canSelfApproveOwn && req.status === 'PENDING' && (
               <Tag status="neutral" mono>Needs reviewer</Tag>
             )}
-            {canDecide && !isOwnRequest && req.status === 'PENDING' && (
+            {canDecide && (!isOwnRequest || canSelfApproveOwn) && req.status === 'PENDING' && (
               <>
                 <Button
                   size="sm"

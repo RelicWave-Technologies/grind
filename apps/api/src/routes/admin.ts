@@ -746,6 +746,7 @@ adminRouter.post('/manual-time-requests/:id/decide', requireManagerOrAbove, asyn
       requestId: id,
       action,
       deciderUserId: req.user.sub,
+      deciderRole: req.user.role,
       scopeUserIds: req.scope.userIds,
       reason,
     });

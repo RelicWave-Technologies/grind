@@ -27,6 +27,10 @@ export interface DecideResult {
   noop: 'already_decided' | 'not_found' | 'forbidden' | 'self_approval_forbidden' | 'cancelled' | null;
 }
 
+function canSelfApproveManualTime(role: string): boolean {
+  return role === 'ADMIN' || role === 'MANAGER';
+}
+
 export async function decideRequest(args: {
   requestId: string;
   action: ApprovalAction;
@@ -50,7 +54,7 @@ export async function decideRequest(args: {
     return { card: {}, status: req.status, timeEntryId: req.timeEntryId, noop: 'forbidden' };
   }
 
-  if (req.status === 'PENDING' && req.approverId === req.userId) {
+  if (req.status === 'PENDING' && req.approverId === req.userId && !canSelfApproveManualTime(req.approver.role)) {
     logger.warn({ requestId: req.id, userId: req.userId }, 'decideRequest: forbidden (self approval)');
     return { card: {}, status: req.status, timeEntryId: req.timeEntryId, noop: 'self_approval_forbidden' };
   }

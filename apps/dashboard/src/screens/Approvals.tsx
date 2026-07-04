@@ -6,7 +6,7 @@ import { useNavigate, useRouteContext } from '@tanstack/react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CalendarDays, Check, ChevronLeft, ChevronRight, Clock4, Inbox, X } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
-import { hasCapability } from '../lib/auth';
+import { hasCapability, isManagerOrAbove } from '../lib/auth';
 import type { DecideResult, ManualTimeRequest, MtrStatus, MtrUserSummary } from '../lib/types';
 import { addDays, fmtAgeShort, fmtDayLabel, fmtDurationMs, fmtTime, todayKey } from '../lib/format';
 import type { TaskOption } from '../components/TaskCombo';
@@ -104,6 +104,7 @@ export function ApprovalsScreen() {
   const canReview =
     hasCapability(me, 'approvals.team.decide') ||
     hasCapability(me, 'approvals.workspace.decide');
+  const canSelfApproveOwn = isManagerOrAbove(me.role);
   const [mode, setMode] = useState<ApprovalMode>(() => (canReview ? 'team' : 'you'));
   const activeMode: ApprovalMode = canReview ? mode : 'you';
   const [from, setFrom] = useState(() => addDays(today, -6));
@@ -278,6 +279,7 @@ export function ApprovalsScreen() {
             tz={tz}
             taskMap={taskMap}
             currentUserId={me.id}
+            canSelfApproveOwn={canSelfApproveOwn}
             busyRequestId={decide.isPending ? decide.variables?.id ?? null : null}
             busyAction={decide.isPending ? decide.variables?.action ?? null : null}
             onSelect={setSelectedRow}
@@ -312,6 +314,7 @@ function ApprovalTable({
   tz,
   taskMap,
   currentUserId,
+  canSelfApproveOwn,
   busyRequestId,
   busyAction,
   onSelect,
@@ -324,6 +327,7 @@ function ApprovalTable({
   tz: string;
   taskMap: Map<string, string>;
   currentUserId: string;
+  canSelfApproveOwn: boolean;
   busyRequestId: string | null;
   busyAction: 'approve' | 'reject' | null;
   onSelect: (row: ApprovalTableRow) => void;
@@ -430,6 +434,7 @@ function ApprovalTable({
                     <TeamDecisionCell
                       req={req}
                       isOwnRequest={isOwnRequest}
+                      canSelfApproveOwn={canSelfApproveOwn}
                       busy={isBusy}
                       busyAction={isBusy ? busyAction : null}
                       onApprove={() => onApprove(req.id)}
@@ -450,6 +455,7 @@ function ApprovalTable({
 function TeamDecisionCell({
   req,
   isOwnRequest,
+  canSelfApproveOwn,
   busy,
   busyAction,
   onApprove,
@@ -458,6 +464,7 @@ function TeamDecisionCell({
 }: {
   req: ApprovalRequest;
   isOwnRequest: boolean;
+  canSelfApproveOwn: boolean;
   busy: boolean;
   busyAction: 'approve' | 'reject' | null;
   onApprove: () => void;
@@ -483,7 +490,7 @@ function TeamDecisionCell({
       </div>
     );
   }
-  if (isOwnRequest) {
+  if (isOwnRequest && !canSelfApproveOwn) {
     return (
       <div className="apv-team-decision apv-team-decision--done">
         <Tag status="neutral" mono>Needs reviewer</Tag>

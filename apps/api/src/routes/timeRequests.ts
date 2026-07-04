@@ -78,6 +78,10 @@ function cleanTaskSummary(value: string | null | undefined): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function canSelfApproveManualTime(role: string): boolean {
+  return role === 'ADMIN' || role === 'MANAGER';
+}
+
 /**
  * Validate the optional `attendeeIds` against a workspace. Returns the
  * cleaned set (deduped, requester excluded) or an error code suitable
@@ -151,7 +155,8 @@ async function resolveManualTimeApprover(
  *
  * 1. Resolves the target user through time-edit RBAC.
  * 2. Manager/admin edits for another user create APPROVED manual time immediately.
- * 3. Self-requests from every role stay PENDING and use a non-self approver.
+ * 3. Manager/admin self-requests are APPROVED immediately; member self-requests
+ *    stay PENDING and use a separate approver.
  * Lark sends are best-effort; DB state is the audit source of truth.
  */
 timeRequestsRouter.post('/', attachScope, validate(CreateManualTimeRequest, 'body'), async (req, res, next) => {
@@ -194,10 +199,10 @@ timeRequestsRouter.post('/', attachScope, validate(CreateManualTimeRequest, 'bod
             where: { id: req.user.sub },
             select: { id: true, name: true },
           });
-    const autoApprove = !target.isSelf;
+    const autoApprove = !target.isSelf || canSelfApproveManualTime(req.user.role);
 
     // ------------------------------------------------------------------
-    // Branch A — supervisor edits for another user are approved at create time.
+    // Branch A — supervisor edits and supervisor self-requests are approved at create time.
     // ------------------------------------------------------------------
     if (autoApprove) {
       const now = new Date();

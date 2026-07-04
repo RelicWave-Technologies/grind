@@ -3,9 +3,9 @@ import { z } from 'zod';
 const Iso = z.string().datetime({ offset: true });
 
 /**
- * The agent submits a manual-time request after the fact, attributable to a
- * Lark task (or untagged). The server picks an approver (workspace admin for
- * now; manager-scoped when Team lands with M11) and sends an interactive card.
+ * A user submits manual time after the fact, attributable to a Lark task (or
+ * untagged). Members enter the approval flow; managers/admins can create
+ * approved supervisor/self edits.
  */
 export const CreateManualTimeRequest = z.object({
   clientUuid: z.string().min(1),

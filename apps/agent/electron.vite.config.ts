@@ -34,6 +34,11 @@ export default defineConfig({
   renderer: {
     root: resolve(__dirname, 'src/renderer'),
     plugins: [react()],
+    server: {
+      host: '127.0.0.1',
+      port: 5175,
+      strictPort: true,
+    },
     build: {
       outDir: resolve(__dirname, 'out/renderer'),
       rollupOptions: {

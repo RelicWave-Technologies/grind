@@ -23,9 +23,11 @@ export function fmtClock(ms: number): string {
 function Legend() {
   return (
     <div className="dt-legend">
-      <span><i className="dt-swatch-work" /> Work <span className="dt-leg-sub">· by task</span></span>
-      <span><i className="dt-dot" style={{ background: 'var(--c-blue)' }} /> Meeting</span>
-      <span><i className="dt-dot" style={{ background: 'rgba(40,36,56,0.18)' }} /> Idle</span>
+      <span><i className="dt-dot dt-dot--work" /> Tracked</span>
+      <span><i className="dt-dot dt-dot--meeting" /> Meeting</span>
+      <span><i className="dt-dot dt-dot--manual" /> Manual</span>
+      <span><i className="dt-dot dt-dot--pending" /> Pending</span>
+      <span><i className="dt-dot dt-dot--idle" /> Idle</span>
     </div>
   );
 }

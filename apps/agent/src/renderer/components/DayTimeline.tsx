@@ -1,5 +1,4 @@
-import type { TodayEntry } from '../lib/agent.d';
-import { projectStyle } from '../lib/projectStyle';
+import type { TodayEntry, TodaySegment } from '../lib/agent.d';
 
 interface Props {
   entries: TodayEntry[];
@@ -9,70 +8,80 @@ interface Props {
 }
 
 const HOUR = 3_600_000;
+type TimelineKind = TodaySegment['kind'] | 'MANUAL' | 'PENDING';
 
-function hourLabel(ms: number): string {
-  const d = new Date(ms);
-  const h = d.getHours();
-  const ampm = h < 12 ? 'a' : 'p';
-  const h12 = h % 12 === 0 ? 12 : h % 12;
-  return `${h12}${ampm}`;
+function fmtTime(ms: number): string {
+  return new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(new Date(ms));
+}
+
+function timelineLabel(kind: TimelineKind): string {
+  if (kind === 'WORK') return 'Tracked';
+  if (kind === 'IDLE_TRIMMED') return 'Idle';
+  return kind.charAt(0) + kind.slice(1).toLowerCase();
+}
+
+function kindClass(kind: TimelineKind): string {
+  if (kind === 'WORK') return 'work';
+  if (kind === 'IDLE_TRIMMED') return 'idle';
+  return kind.toLowerCase();
+}
+
+function localDayBounds(now: number): { dayStart: number; dayEnd: number } {
+  const start = new Date(now);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 1);
+  return { dayStart: start.getTime(), dayEnd: end.getTime() };
+}
+
+function clamp(v: number, lo: number, hi: number): number {
+  return Math.max(lo, Math.min(hi, v));
 }
 
 /**
- * Horizontal timeline of today's tracked sessions, positioned by real
- * time-of-day. Work segments use the project color, meetings blue, trimmed
- * idle gray. The open segment extends to `now` and pulses.
+ * Horizontal timeline of today's sessions, matching the dashboard Edit Time
+ * ribbon: a stable full-day track with category colors and 3-hour labels.
  */
 export default function DayTimeline({ entries, now, runningEntryId }: Props) {
-  const segs = entries.flatMap((e) =>
-    // Color key: prefer the Lark task, then project, then a stable default —
-    // each tracked thing gets its own deterministic color on the ribbon.
-    e.segments.map((s) => ({ ...s, colorKey: e.larkTaskGuid ?? 'work', entryId: e.id })),
-  );
-
-  const startsToday = segs.map((s) => s.startedAt);
-  const earliest = startsToday.length ? Math.min(...startsToday) : now - 2 * HOUR;
-
-  // Window: floor(earliest) .. ceil(now), at least a 4h span.
-  const winStart = Math.floor(earliest / HOUR) * HOUR;
-  let winEnd = Math.ceil(now / HOUR) * HOUR;
-  if (winEnd - winStart < 4 * HOUR) winEnd = winStart + 4 * HOUR;
-  const span = winEnd - winStart;
+  const segs = entries.flatMap((e) => e.segments.map((s) => ({ ...s, entryId: e.id })));
+  const { dayStart, dayEnd } = localDayBounds(now);
+  const span = dayEnd - dayStart;
 
   const ticks: number[] = [];
-  const stepHours = span > 8 * HOUR ? 2 : 1;
-  for (let t = winStart; t <= winEnd; t += stepHours * HOUR) ticks.push(t);
+  for (let t = dayStart; t < dayEnd; t += 3 * HOUR) ticks.push(t);
 
-  const pct = (ms: number) => ((ms - winStart) / span) * 100;
+  const pct = (ms: number) => ((ms - dayStart) / span) * 100;
+  const nowMs = clamp(now, dayStart, dayEnd);
 
   return (
     <div className="dt">
       <div className="dt-track">
+        {nowMs < dayEnd && (
+          <div className="dt-future" style={{ left: `${pct(nowMs)}%`, width: `${pct(dayEnd) - pct(nowMs)}%` }} />
+        )}
         {segs.map((s, i) => {
-          const end = s.endedAt ?? now;
-          const left = pct(s.startedAt);
+          const kind = s.kind as TimelineKind;
+          const start = clamp(s.startedAt, dayStart, dayEnd);
+          const end = clamp(s.endedAt ?? now, dayStart, dayEnd);
+          if (end <= start) return null;
+          const left = pct(start);
           const width = Math.max(0.6, pct(end) - left);
           const isOpen = s.endedAt === null && s.entryId === runningEntryId;
-          let bg = 'var(--separator-strong)';
-          if (s.kind === 'WORK') bg = projectStyle(s.colorKey).color;
-          else if (s.kind === 'MEETING') bg = 'var(--c-blue-bg)';
-          else bg = 'rgba(0,0,0,0.08)';
           return (
             <div
               key={i}
-              className={`dt-seg${isOpen ? ' dt-seg-live' : ''}`}
-              style={{ left: `${left}%`, width: `${width}%`, background: bg }}
-              title={s.kind.toLowerCase()}
+              className={`dt-seg dt-seg-${kindClass(kind)}${isOpen ? ' dt-seg-live' : ''}`}
+              style={{ left: `${left}%`, width: `${width}%` }}
+              title={`${timelineLabel(kind)} · ${fmtTime(start)} – ${fmtTime(end)}`}
             />
           );
         })}
-        {/* now marker */}
-        <div className="dt-now" style={{ left: `${pct(now)}%` }} />
+        <div className="dt-now" style={{ left: `${pct(nowMs)}%` }} />
       </div>
       <div className="dt-axis">
         {ticks.map((t) => (
           <span key={t} className="dt-tick" style={{ left: `${pct(t)}%` }}>
-            {hourLabel(t)}
+            {fmtTime(t)}
           </span>
         ))}
       </div>

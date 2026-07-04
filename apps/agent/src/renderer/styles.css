@@ -54,6 +54,12 @@
   /* Manual time (M10) — Figma cream, distinct from the work palette. */
   --c-amber: #7a4b12;   --c-amber-bg: #f4ecd6;    /* cream */
 
+  /* Timeline ribbon fills: lighter pastels than the general status chips. */
+  --timeline-work-bg: #def4e4;
+  --timeline-work-ink: var(--c-green);
+  --timeline-manual-bg: #fff3c9;
+  --timeline-manual-ink: var(--c-amber);
+
   /* status */
   --success: #1ea64a;
   --danger: #e5484d;
@@ -307,29 +313,70 @@ label.field-label { display: block; font-size: 12px; font-weight: 600; color: va
 /* ---- day timeline ribbon ---- */
 .dt { width: 100%; }
 .dt-track {
-  position: relative; height: 44px; border-radius: 12px;
+  position: relative; height: 44px; border-radius: 6px;
   background: rgba(0, 0, 0, 0.05); overflow: hidden;
 }
 .dt-seg {
-  position: absolute; top: 7px; height: 30px; border-radius: 7px; min-width: 3px;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25);
+  position: absolute; top: 4px; bottom: 4px; border-radius: 3px; min-width: 3px;
   transition: width 0.9s linear, left 0.9s linear;
+}
+.dt-seg-work {
+  background: var(--timeline-work-bg);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--timeline-work-ink) 24%, transparent);
+}
+.dt-seg-meeting {
+  background: var(--c-blue-bg);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c-blue) 24%, transparent);
+}
+.dt-seg-manual {
+  background: var(--timeline-manual-bg);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--timeline-manual-ink) 24%, transparent);
+}
+.dt-seg-pending {
+  background: repeating-linear-gradient(
+    45deg,
+    color-mix(in srgb, var(--pink) 72%, transparent) 0 6px,
+    color-mix(in srgb, var(--pink) 34%, transparent) 6px 12px
+  );
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 30%, transparent);
+}
+.dt-seg-idle {
+  background: rgba(122, 134, 153, 0.22);
+  box-shadow: inset 0 0 0 1px rgba(122, 134, 153, 0.2);
 }
 .dt-seg-live { animation: segpulse 1.8s var(--ease) infinite; }
 @keyframes segpulse {
   0%, 100% { box-shadow: inset 0 0 0 1px rgba(255,255,255,0.25), 0 0 0 0 rgba(124,92,255,0); }
   50% { box-shadow: inset 0 0 0 1px rgba(255,255,255,0.4), 0 0 0 4px rgba(124,92,255,0.18); }
 }
+.dt-future {
+  position: absolute; top: 0; bottom: 0;
+  background: repeating-linear-gradient(
+    -45deg,
+    rgba(0, 0, 0, 0.035) 0 4px,
+    transparent 4px 8px
+  );
+  pointer-events: none;
+}
 .dt-now { position: absolute; top: -3px; bottom: -3px; width: 2px; border-radius: 2px; background: var(--ink); transform: translateX(-1px); }
 .dt-now::before { content: ""; position: absolute; top: -3px; left: -3px; width: 8px; height: 8px; border-radius: 50%; background: var(--ink); }
 .dt-axis { position: relative; height: 18px; margin-top: 6px; }
 .dt-tick { position: absolute; transform: translateX(-50%); font-size: 10px; color: var(--label-tertiary); font-variant-numeric: tabular-nums; }
-.dt-legend { display: flex; gap: var(--sp-5); justify-content: center; margin-top: var(--sp-4); }
+.dt-legend { display: flex; gap: var(--sp-4); justify-content: center; margin-top: var(--sp-4); flex-wrap: wrap; }
 .dt-legend span { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--label-secondary); }
 .dt-dot { width: 9px; height: 9px; border-radius: 3px; }
-/* Work is colored per task — show that with a multi-color swatch in the legend. */
-.dt-swatch-work { width: 22px; height: 9px; border-radius: 3px; background: linear-gradient(90deg, var(--c-violet-bg), var(--c-rose-bg), var(--c-green-bg), var(--c-orange-bg)); }
-.dt-leg-sub { color: var(--label-tertiary); }
+.dt-dot--work { background: var(--timeline-work-bg); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--timeline-work-ink) 32%, transparent); }
+.dt-dot--meeting { background: var(--c-blue-bg); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c-blue) 34%, transparent); }
+.dt-dot--manual { background: var(--timeline-manual-bg); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--timeline-manual-ink) 32%, transparent); }
+.dt-dot--pending {
+  background: repeating-linear-gradient(
+    45deg,
+    color-mix(in srgb, var(--pink) 72%, transparent) 0 3px,
+    color-mix(in srgb, var(--pink) 34%, transparent) 3px 6px
+  );
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 32%, transparent);
+}
+.dt-dot--idle { background: rgba(122, 134, 153, 0.22); box-shadow: inset 0 0 0 1px rgba(122, 134, 153, 0.25); }
 
 /* ---- focus running view ---- */
 .focus { display: flex; flex-direction: column; align-items: center; gap: var(--sp-7); padding: var(--sp-6) 0; }

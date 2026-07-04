@@ -150,7 +150,7 @@ describe('decideRequest — authorization', () => {
     expect(result!.noop).toBe('forbidden');
   });
 
-  it('rejects self-assigned old cards even when the open_id matches', async () => {
+  it('allows self-assigned admin cards when the open_id matches', async () => {
     const openId = `ou_self_${Date.now()}`;
     const requester = await seedUser({ role: 'ADMIN' });
     await prisma.larkIdentity.create({ data: { userId: requester.userId, openId } });
@@ -162,6 +162,30 @@ describe('decideRequest — authorization', () => {
         requestedStart: new Date('2026-05-29T13:00:00.000Z'),
         requestedEnd: new Date('2026-05-29T14:00:00.000Z'),
         reason: 'Old self-assigned request',
+        status: 'PENDING',
+      },
+    });
+
+    const result = await decideRequest({ requestId: req.id, action: 'approve', decidedByOpenId: openId });
+    expect(result!.noop).toBeNull();
+    expect(result!.status).toBe('APPROVED');
+    const row = await prisma.manualTimeRequest.findUniqueOrThrow({ where: { id: req.id } });
+    expect(row.status).toBe('APPROVED');
+    expect(row.timeEntryId).toBeTruthy();
+  });
+
+  it('still rejects self-assigned member cards even when the open_id matches', async () => {
+    const openId = `ou_member_self_${Date.now()}`;
+    const requester = await seedUser({ role: 'MEMBER' });
+    await prisma.larkIdentity.create({ data: { userId: requester.userId, openId } });
+    const req = await prisma.manualTimeRequest.create({
+      data: {
+        clientUuid: `cu_member_self_${Date.now()}`,
+        userId: requester.userId,
+        approverId: requester.userId,
+        requestedStart: new Date('2026-05-29T15:00:00.000Z'),
+        requestedEnd: new Date('2026-05-29T16:00:00.000Z'),
+        reason: 'Member self-assigned request',
         status: 'PENDING',
       },
     });
