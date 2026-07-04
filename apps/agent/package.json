@@ -1,6 +1,6 @@
 {
   "name": "@grind/agent",
-  "version": "0.0.2-beta.17",
+  "version": "0.0.2-beta.18",
   "private": true,
   "type": "module",
   "description": "Timo time tracker desktop agent",
