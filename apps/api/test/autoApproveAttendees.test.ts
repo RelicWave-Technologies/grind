@@ -29,6 +29,7 @@ async function seed() {
         email: `${tag}-${stamp}@test.local`,
         name: `${tag} user`,
         role,
+        provisioningStatus: 'ACTIVE',
         passwordHash: 'x'.repeat(60),
       },
     });

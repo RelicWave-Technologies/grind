@@ -164,6 +164,18 @@ jobs:
           GHCR_USER="$(cat /tmp/grind-ghcr-user)"
           docker login ghcr.io -u "$GHCR_USER" --password-stdin < /tmp/grind-ghcr-token
           rm -f /tmp/grind-ghcr-token /tmp/grind-ghcr-user
+          set -a
+          . ./.deploy.env
+          set +a
+
+          migration_started=0
+          restart_previous_on_early_failure() {
+            if [ "$migration_started" = "0" ]; then
+              docker start vps-api-1 vps-dashboard-1 >/dev/null 2>&1 || true
+            fi
+          }
+          trap restart_previous_on_early_failure ERR
+
           docker compose --env-file .deploy.env -f docker-compose.prod.yml pull
 
           # Freeze writes before the backup/migration boundary. This keeps the
@@ -181,6 +193,7 @@ jobs:
             sh -lc "pg_dump \"\$DATABASE_URL\" -Fc --no-owner --no-privileges -f \"/backups/${BACKUP_NAME}\" && pg_restore --list \"/backups/${BACKUP_NAME}\" >/dev/null"
           sha256sum "$BACKUP_DIR/$BACKUP_NAME"
 
+          migration_started=1
           docker compose --env-file .deploy.env -f docker-compose.prod.yml run --rm -T api pnpm --filter @grind/db exec prisma migrate deploy < /dev/null
           docker run --rm \
             --env-file .env.production \
@@ -213,6 +226,7 @@ jobs:
           docker compose --env-file .deploy.env -f docker-compose.prod.yml up -d --remove-orphans
           docker compose --env-file .deploy.env -f docker-compose.prod.yml ps
           docker image prune -f
+          trap - ERR
           REMOTE
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
