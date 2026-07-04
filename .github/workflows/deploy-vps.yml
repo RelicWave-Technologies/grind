@@ -169,12 +169,14 @@ jobs:
           set +a
 
           migration_started=0
-          restart_previous_on_early_failure() {
+          recover_services_on_failure() {
             if [ "$migration_started" = "0" ]; then
               docker start vps-api-1 vps-dashboard-1 >/dev/null 2>&1 || true
+            else
+              docker compose --env-file .deploy.env -f docker-compose.prod.yml up -d --remove-orphans >/dev/null 2>&1 || true
             fi
           }
-          trap restart_previous_on_early_failure ERR
+          trap recover_services_on_failure ERR
 
           docker compose --env-file .deploy.env -f docker-compose.prod.yml pull
 
@@ -197,8 +199,9 @@ jobs:
           docker compose --env-file .deploy.env -f docker-compose.prod.yml run --rm -T api pnpm --filter @grind/db exec prisma migrate deploy < /dev/null
           docker run --rm \
             --env-file .env.production \
+            -i \
             postgres:16-alpine \
-            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+            sh -lc 'psql "$DATABASE_URL" -v ON_ERROR_STOP=1' <<'SQL'
           SELECT migration_name
           FROM "_prisma_migrations"
           WHERE finished_at IS NOT NULL
