@@ -3,6 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   openExternal: vi.fn(),
   api: vi.fn(),
+  loadPendingLarkLogin: vi.fn(),
+  savePendingLarkLogin: vi.fn(),
+  clearStoredPendingLarkLogin: vi.fn(),
   saveTokens: vi.fn(),
   loadTokens: vi.fn(),
   clearTokens: vi.fn(),
@@ -25,6 +28,12 @@ vi.mock('./tokenStore', () => ({
   saveTokens: mocks.saveTokens,
   loadTokens: mocks.loadTokens,
   clearTokens: mocks.clearTokens,
+}));
+
+vi.mock('./pendingLarkLoginStore', () => ({
+  loadPendingLarkLogin: mocks.loadPendingLarkLogin,
+  savePendingLarkLogin: mocks.savePendingLarkLogin,
+  clearStoredPendingLarkLogin: mocks.clearStoredPendingLarkLogin,
 }));
 
 vi.mock('../logger', () => ({
@@ -57,6 +66,9 @@ describe('Lark agent login flow', () => {
       workspaceId: 'ws_1',
     });
     mocks.saveTokens.mockResolvedValue(undefined);
+    mocks.loadPendingLarkLogin.mockResolvedValue(null);
+    mocks.savePendingLarkLogin.mockResolvedValue(undefined);
+    mocks.clearStoredPendingLarkLogin.mockResolvedValue(undefined);
     mocks.loadTokens.mockResolvedValue(null);
     cancelLarkLogin();
   });
@@ -77,6 +89,11 @@ describe('Lark agent login flow', () => {
     expect(url.searchParams.get('client')).toBe('agent');
     expect(url.searchParams.get('callback_scheme')).toBe('timo');
     expect(url.searchParams.get('code_challenge')).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(mocks.savePendingLarkLogin).toHaveBeenCalledWith({
+      verifier: expect.stringMatching(/^[A-Za-z0-9_-]{64}$/),
+      loginUrl: url.toString(),
+      createdAt: BASE_TIME.getTime(),
+    });
   });
 
   it('reuses a pending login URL before the reuse TTL', async () => {
@@ -150,6 +167,27 @@ describe('Lark agent login flow', () => {
       refreshToken: 'rt',
       userId: 'user_1',
       workspaceId: 'ws_1',
+    });
+    expect(mocks.clearStoredPendingLarkLogin).toHaveBeenCalled();
+  });
+
+  it('redeems a deep-link code after app relaunch by hydrating the stored verifier', async () => {
+    await startLarkLogin();
+    const stored = mocks.savePendingLarkLogin.mock.calls[0]![0];
+
+    vi.resetModules();
+    mocks.loadPendingLarkLogin.mockResolvedValueOnce(stored);
+    const fresh = await import('./auth');
+    const ok = await fresh.completeLarkLogin('agent-code');
+
+    expect(ok).toBe(true);
+    expect(mocks.api).toHaveBeenCalledWith('/v1/auth/lark/exchange', {
+      method: 'POST',
+      auth: false,
+      body: {
+        code: 'agent-code',
+        codeVerifier: stored.verifier,
+      },
     });
   });
 });

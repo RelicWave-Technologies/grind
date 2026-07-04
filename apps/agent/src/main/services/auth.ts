@@ -6,6 +6,12 @@ import { api, UnauthorizedError } from './apiClient';
 import { API_URL, CALLBACK_SCHEME } from '../env';
 import { log } from '../logger';
 import { clearTokens, loadTokens, saveTokens } from './tokenStore';
+import {
+  clearStoredPendingLarkLogin,
+  loadPendingLarkLogin,
+  savePendingLarkLogin,
+  type StoredPendingLarkLogin,
+} from './pendingLarkLoginStore';
 
 /**
  * Lark login (system-browser + custom-scheme deep-link). We generate a PKCE
@@ -26,9 +32,30 @@ type PendingLarkLogin = {
 
 let pendingLogin: PendingLarkLogin | null = null;
 
-function clearPendingLarkLogin(): void {
+function toStored(login: PendingLarkLogin): StoredPendingLarkLogin {
+  return { verifier: login.verifier, loginUrl: login.loginUrl, createdAt: login.createdAt };
+}
+
+function clearPendingLarkLoginMemory(): void {
   if (pendingLogin) clearTimeout(pendingLogin.clearTimer);
   pendingLogin = null;
+}
+
+async function clearPendingLarkLogin(): Promise<void> {
+  clearPendingLarkLoginMemory();
+  await clearStoredPendingLarkLogin();
+}
+
+function armExpiryTimer(verifier: string, createdAt: number): ReturnType<typeof setTimeout> {
+  const remaining = Math.max(1, LARK_LOGIN_HARD_TTL_MS - (Date.now() - createdAt));
+  const clearTimer = setTimeout(() => {
+    if (pendingLogin?.verifier === verifier && pendingLogin.createdAt === createdAt) {
+      pendingLogin = null;
+      void clearStoredPendingLarkLogin();
+    }
+  }, remaining);
+  clearTimer.unref?.();
+  return clearTimer;
 }
 
 function createPendingLarkLogin(now = Date.now()): PendingLarkLogin {
@@ -40,12 +67,7 @@ function createPendingLarkLogin(now = Date.now()): PendingLarkLogin {
     callback_scheme: CALLBACK_SCHEME,
   });
   const loginUrl = `${API_URL}/v1/auth/lark/start?${params.toString()}`;
-  const clearTimer = setTimeout(() => {
-    if (pendingLogin?.verifier === verifier && pendingLogin.createdAt === now) {
-      pendingLogin = null;
-    }
-  }, LARK_LOGIN_HARD_TTL_MS);
-  clearTimer.unref?.();
+  const clearTimer = armExpiryTimer(verifier, now);
   return { verifier, loginUrl, createdAt: now, clearTimer };
 }
 
@@ -57,17 +79,34 @@ function isHardExpired(login: PendingLarkLogin, now: number): boolean {
   return now - login.createdAt >= LARK_LOGIN_HARD_TTL_MS;
 }
 
+async function getPendingLarkLogin(now = Date.now()): Promise<PendingLarkLogin | null> {
+  if (pendingLogin) return pendingLogin;
+  const stored = await loadPendingLarkLogin();
+  if (!stored) return null;
+  const login: PendingLarkLogin = { ...stored, clearTimer: armExpiryTimer(stored.verifier, stored.createdAt) };
+  if (isHardExpired(login, now)) {
+    clearPendingLarkLoginMemory();
+    await clearStoredPendingLarkLogin();
+    return null;
+  }
+  pendingLogin = login;
+  return login;
+}
+
 /** Begin a Lark login: mint PKCE, open the browser. The deep-link finishes it. */
 export async function startLarkLogin(): Promise<void> {
   const now = Date.now();
-  if (!pendingLogin || !isReusable(pendingLogin, now)) {
-    clearPendingLarkLogin();
+  let login = await getPendingLarkLogin(now);
+  if (!login || !isReusable(login, now)) {
+    await clearPendingLarkLogin();
     pendingLogin = createPendingLarkLogin(now);
+    login = pendingLogin;
+    await savePendingLarkLogin(toStored(login));
   }
   try {
-    await shell.openExternal(pendingLogin.loginUrl, { activate: true });
+    await shell.openExternal(login.loginUrl, { activate: true });
   } catch (err) {
-    clearPendingLarkLogin();
+    await clearPendingLarkLogin();
     log.warn('failed to open Lark login in browser', { err: String(err) });
     throw err;
   }
@@ -76,13 +115,12 @@ export async function startLarkLogin(): Promise<void> {
 /** Redeem the deep-link one-time code for a session. Returns false if no login
  *  flow is in progress (stray/replayed deep-link) or the exchange fails. */
 export async function completeLarkLogin(code: string): Promise<boolean> {
-  const login = pendingLogin;
+  const login = await getPendingLarkLogin();
   if (!login) return false;
   if (isHardExpired(login, Date.now())) {
-    clearPendingLarkLogin();
+    await clearPendingLarkLogin();
     return false;
   }
-  clearPendingLarkLogin();
   const res = await api<AgentLarkExchangeResponse>('/v1/auth/lark/exchange', {
     method: 'POST',
     auth: false,
@@ -94,12 +132,14 @@ export async function completeLarkLogin(code: string): Promise<boolean> {
     userId: res.userId,
     workspaceId: res.workspaceId,
   });
+  await clearPendingLarkLogin();
   return true;
 }
 
 /** Abandon an in-flight Lark login (e.g. the deep-link reported pending/error). */
 export function cancelLarkLogin(): void {
-  clearPendingLarkLogin();
+  clearPendingLarkLoginMemory();
+  void clearStoredPendingLarkLogin();
 }
 
 export async function login(email: string, password: string): Promise<UserDto> {

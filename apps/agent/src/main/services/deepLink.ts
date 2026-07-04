@@ -62,6 +62,11 @@ export async function handleDeepLink(url: string): Promise<void> {
   const code = parsed.searchParams.get('code');
   const status = parsed.searchParams.get('status');
   const error = parsed.searchParams.get('error');
+  log.info('deep link: auth callback received', {
+    hasCode: Boolean(code),
+    status: status ?? null,
+    hasError: Boolean(error),
+  });
 
   try {
     if (code) {
@@ -70,6 +75,7 @@ export async function handleDeepLink(url: string): Promise<void> {
         startHeartbeat();
         broadcast('auth:status:push', 'loggedIn');
       } else {
+        log.warn('deep link: login code was not exchanged');
         broadcast('auth:lark:push', { kind: 'error', reason: 'auth_failed' });
       }
     } else if (status === 'pending') {

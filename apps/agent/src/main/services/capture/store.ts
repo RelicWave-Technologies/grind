@@ -45,9 +45,6 @@ export class ScreenshotStore {
         next_attempt_at INTEGER,
         failed_at    INTEGER
       );
-      CREATE INDEX IF NOT EXISTS idx_shots_captured ON screenshots(captured_at);
-      CREATE INDEX IF NOT EXISTS idx_shots_upload ON screenshots(upload_state);
-      CREATE INDEX IF NOT EXISTS idx_shots_next_attempt ON screenshots(upload_state, next_attempt_at);
     `);
     for (const col of ['last_error TEXT', 'next_attempt_at INTEGER', 'failed_at INTEGER']) {
       try {
@@ -56,6 +53,11 @@ export class ScreenshotStore {
         /* already added on a prior boot */
       }
     }
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_shots_captured ON screenshots(captured_at);
+      CREATE INDEX IF NOT EXISTS idx_shots_upload ON screenshots(upload_state);
+      CREATE INDEX IF NOT EXISTS idx_shots_next_attempt ON screenshots(upload_state, next_attempt_at);
+    `);
     // Crash recovery: any 'uploading' left mid-flight goes back to 'pending'.
     this.db
       .prepare(`UPDATE screenshots SET upload_state='pending', next_attempt_at=NULL WHERE upload_state='uploading'`)
