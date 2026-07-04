@@ -190,16 +190,16 @@ label.field-label { display: block; font-size: 12px; font-weight: 600; color: va
   background: var(--bg-sidebar); border-right: 0.5px solid var(--separator);
   -webkit-app-region: drag;
 }
-.sidebar-top { height: var(--toolbar-height); display: flex; align-items: center; padding-left: 76px; gap: var(--sp-3); }
+.sidebar-top { height: var(--toolbar-height); display: flex; align-items: center; padding-left: 76px; gap: var(--sp-4); }
 .brand-mark {
-  width: 34px; height: 34px; border-radius: 0;
+  width: var(--sp-9); height: var(--sp-9); border-radius: 0;
   display: flex; align-items: center; justify-content: center;
   overflow: hidden; box-shadow: none;
   background: transparent;
   border: 0;
 }
 .brand-mark img { width: 100%; height: 100%; display: block; border-radius: 0; object-fit: contain; }
-.brand-name { font-family: var(--font-round); font-size: 16px; font-weight: 700; letter-spacing: -0.2px; }
+.brand-name { font-family: var(--font-round); font-size: var(--sp-7); font-weight: 700; letter-spacing: 0; }
 .nav { display: flex; flex-direction: column; gap: 2px; margin-top: var(--sp-5); }
 .nav-item {
   -webkit-app-region: no-drag; display: flex; align-items: center; gap: var(--sp-3);
@@ -560,6 +560,10 @@ label.field-label { display: block; font-size: 12px; font-weight: 600; color: va
 .set-row { display: flex; align-items: center; gap: var(--sp-4); padding: var(--sp-5); }
 .set-row + .set-row { border-top: 0.5px solid var(--separator); }
 .set-ic { width: 34px; height: 34px; border-radius: 10px; display: flex; align-items: center; justify-content: center; color: var(--ink); flex-shrink: 0; }
+.lark-icon { display: block; width: 18px; height: 18px; object-fit: contain; }
+.lark-icon--button { width: 16px; height: 16px; }
+.lark-icon--empty { width: 30px; height: 30px; }
+.lark-icon--setting { width: 21px; height: 21px; }
 .set-main { flex: 1; min-width: 0; }
 .set-title { font-size: 14px; font-weight: 600; }
 .set-sub { font-size: 12px; margin-top: 2px; }

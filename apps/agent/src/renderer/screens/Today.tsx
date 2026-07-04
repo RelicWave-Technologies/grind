@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Play, Square, Clock, ListTodo, Link2, Search, Plus, X } from 'lucide-react';
+import { AlertTriangle, Play, Square, Clock, ListTodo, Search, Plus, X } from 'lucide-react';
 import type { TimerStatus } from '../lib/agent.d';
 import { projectStyle } from '../lib/projectStyle';
 import { timerRecoveryNoticeText } from '../lib/recoveryNotice';
 import { sortTasks } from '../lib/taskFormat';
+import larkIcon from '../assets/lark.svg';
 import DayTimeline from '../components/DayTimeline';
 import TaskCard from '../components/TaskCard';
 import TaskComposer from '../components/TaskComposer';
@@ -184,7 +185,7 @@ export default function Today() {
           {!larkConnected ? (
             <div className="empty rise rise-1">
               <span className="empty-icon" style={{ background: 'var(--violet-tint)', color: 'var(--violet)' }}>
-                <Link2 size={26} strokeWidth={2} />
+                <img className="lark-icon lark-icon--empty" src={larkIcon} alt="" />
               </span>
               <div className="h3">{larkConfigured ? 'Connect Lark to see your tasks' : 'Lark not set up'}</div>
               <div className="callout secondary">

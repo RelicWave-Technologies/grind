@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { RefreshCw, AlertCircle, Link2 } from 'lucide-react';
+import { RefreshCw, AlertCircle } from 'lucide-react';
+import larkIcon from '../assets/lark.svg';
 
 /**
  * Manual Lark sync: re-checks the connection and re-pulls tasks (the main
@@ -59,7 +60,7 @@ export default function SyncButton(): JSX.Element {
         disabled={connect.isPending}
         title="Your Lark session expired — reconnect to sync"
       >
-        <Link2 size={14} strokeWidth={2.5} /> {connect.isPending ? 'Opening…' : 'Reconnect Lark'}
+        <img className="lark-icon lark-icon--button" src={larkIcon} alt="" /> {connect.isPending ? 'Opening…' : 'Reconnect Lark'}
       </button>
     );
   }

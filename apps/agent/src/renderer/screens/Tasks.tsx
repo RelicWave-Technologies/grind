@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Search, Plus, X, Link2 } from 'lucide-react';
+import { Search, Plus, X } from 'lucide-react';
 import type { TimerStatus } from '../lib/agent.d';
 import { sortTasks } from '../lib/taskFormat';
+import larkIcon from '../assets/lark.svg';
 import TaskCard from '../components/TaskCard';
 import TaskComposer from '../components/TaskComposer';
 import SyncButton from '../components/SyncButton';
@@ -68,7 +69,7 @@ export default function Tasks() {
           {!larkConnected ? (
             <div className="empty rise rise-1">
               <span className="empty-icon" style={{ background: 'var(--violet-tint)', color: 'var(--violet)' }}>
-                <Link2 size={26} strokeWidth={2} />
+                <img className="lark-icon lark-icon--empty" src={larkIcon} alt="" />
               </span>
               <div className="h3">{larkConfigured ? 'Connect Lark to see your tasks' : 'Lark not set up'}</div>
               <div className="callout secondary">

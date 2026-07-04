@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { MonitorCheck, Power, CheckCircle2, AlertCircle, Link2, Keyboard, PictureInPicture2, RefreshCw, DownloadCloud } from 'lucide-react';
+import { MonitorCheck, Power, CheckCircle2, AlertCircle, Keyboard, PictureInPicture2, RefreshCw, DownloadCloud } from 'lucide-react';
+import larkIcon from '../assets/lark.svg';
 import { settingsUpdateSubtitle, updateAction, updatePercent } from '../lib/updateUi';
 
 export default function Settings() {
@@ -163,7 +164,7 @@ export default function Settings() {
           <div className="set-card">
             <div className="set-row">
               <span className="set-ic" style={{ background: larkConnected ? 'var(--c-green-bg)' : 'var(--c-violet-bg)' }}>
-                <Link2 size={17} strokeWidth={2} />
+                <img className="lark-icon lark-icon--setting" src={larkIcon} alt="" />
               </span>
               <div className="set-main">
                 <div className="set-title">Lark</div>
