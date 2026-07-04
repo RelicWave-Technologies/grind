@@ -23,6 +23,7 @@ import { workspacePolicyRouter } from './routes/workspacePolicy';
 import { digestsRouter } from './routes/digests';
 import { payrollRouter } from './routes/payroll';
 import { overviewRouter } from './routes/overview';
+import { downloadsRouter } from './routes/downloads';
 import { errorHandler } from './middleware/errorHandler';
 
 export function buildApp() {
@@ -112,6 +113,7 @@ export function buildApp() {
   app.use('/v1/profile', profileRouter);
   app.use('/v1/time-requests', timeRequestsRouter);
   app.use('/v1/screenshots', screenshotsRouter);
+  app.use('/v1/downloads', downloadsRouter);
   app.use('/v1/admin', adminRouter);
   app.use('/v1/workspace', workspaceRouter);
   app.use('/v1/admin/workspace-policy', workspacePolicyRouter);

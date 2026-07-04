@@ -934,6 +934,27 @@ textarea.ui-control { height: auto; min-height: 80px; padding: var(--ui-sp-3) va
   border-top: 1px solid var(--ui-line);
   display: flex; flex-direction: column; gap: var(--ui-sp-3);
 }
+.ui-sidebar__downloads {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--ui-sp-2);
+}
+.ui-sidebar__download.ui-btn {
+  min-width: 0;
+  padding: 0 var(--ui-sp-3);
+  color: var(--ui-ink);
+  text-decoration: none;
+  letter-spacing: 0;
+}
+.ui-sidebar__download .ui-btn__icon img {
+  display: block;
+  width: 14px;
+  height: 14px;
+}
+.ui-sidebar__download .ui-btn__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .ui-sidebar__me { display: flex; align-items: center; gap: var(--ui-sp-3); padding: 0 var(--ui-sp-2); min-width: 0; }
 .ui-sidebar__me-meta { min-width: 0; }
 .ui-sidebar__me-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

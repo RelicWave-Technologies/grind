@@ -2,6 +2,7 @@ import './login.css';
 import { useEffect } from 'react';
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { useMe, larkLoginUrl } from '../lib/auth';
+import { AGENT_DOWNLOADS, agentDownloadUrl } from '../lib/downloads';
 import { Card, Button, Banner } from '../ui';
 
 /** Friendly copy for each terminal outcome the API hands back via ?status/?error. */
@@ -72,6 +73,21 @@ export function LoginScreen() {
             >
               {me.isFetching ? 'Checking...' : 'Continue with Lark'}
             </Button>
+
+            <div className="lgn-downloads" aria-label="Download Timo app">
+              {AGENT_DOWNLOADS.map((option) => (
+                <a
+                  key={option.platform}
+                  className="ui-btn ui-btn--secondary ui-btn--md lgn-download"
+                  href={agentDownloadUrl(option.platform)}
+                >
+                  <span className="ui-btn__icon" aria-hidden="true">
+                    <img className="lgn-platform-logo" src={option.iconSrc} alt="" />
+                  </span>
+                  <span className="ui-btn__label">{option.label}</span>
+                </a>
+              ))}
+            </div>
           </div>
         </Card>
       </main>

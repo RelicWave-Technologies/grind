@@ -1,6 +1,7 @@
 import { Outlet, Link, useRouteContext, useNavigate, useLocation } from '@tanstack/react-router';
 import { Home, Clock4, Inbox, LayoutGrid, CalendarCheck, ShieldAlert, Building2, Sunrise, LogOut, ShieldCheck, FileSpreadsheet, Compass, FileText, User, Users } from 'lucide-react';
 import { hasCapability, useLogout, type Permission } from '../lib/auth';
+import { AGENT_DOWNLOADS, agentDownloadUrl } from '../lib/downloads';
 import {
   AppShell,
   Sidebar,
@@ -61,6 +62,22 @@ export function Layout() {
         brand={<SidebarBrand name="Timo" />}
         footer={
           <>
+            <div className="ui-sidebar__downloads" aria-label="Download Timo app">
+              {AGENT_DOWNLOADS.map((option) => (
+                <a
+                  key={option.platform}
+                  className="ui-sidebar__download ui-btn ui-btn--secondary ui-btn--sm"
+                  href={agentDownloadUrl(option.platform)}
+                  title={`Download Timo for ${option.label}`}
+                  aria-label={`Download Timo for ${option.label}`}
+                >
+                  <span className="ui-btn__icon" aria-hidden="true">
+                    <img src={option.iconSrc} alt="" />
+                  </span>
+                  <span className="ui-btn__label">{option.label}</span>
+                </a>
+              ))}
+            </div>
             <div className="ui-sidebar__me">
               <Avatar name={me.name} src={me.avatarUrl ?? undefined} size={32} />
               <div className="ui-sidebar__me-meta">

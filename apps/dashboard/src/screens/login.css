@@ -95,6 +95,28 @@
   height: var(--ui-sp-7);
 }
 
+.lgn-downloads {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--ui-sp-3);
+  margin-top: calc(var(--ui-sp-10) * -0.45);
+}
+
+.lgn-download.ui-btn {
+  height: calc(var(--ui-sp-8) + var(--ui-sp-2));
+  color: var(--ui-ink);
+  text-decoration: none;
+  font-size: var(--ui-sp-4);
+  font-weight: 620;
+  letter-spacing: 0;
+}
+
+.lgn-platform-logo {
+  display: block;
+  width: 17px;
+  height: 17px;
+}
+
 @media (max-width: 560px) {
   .lgn-page {
     align-items: stretch;
@@ -132,5 +154,10 @@
   .lgn-submit.ui-btn--lg {
     height: var(--ui-sp-12);
     font-size: var(--ui-sp-5);
+  }
+
+  .lgn-downloads {
+    grid-template-columns: 1fr;
+    margin-top: calc(var(--ui-sp-8) * -0.45);
   }
 }
