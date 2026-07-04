@@ -5,7 +5,7 @@ import { useRouteContext } from '@tanstack/react-router';
 import { Pencil, Check, X, UserPlus, UserMinus, UserCheck, Users as UsersIcon } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 import { isAdmin, type Role } from '../lib/auth';
-import type { Team, Shift, ActivityRoleTitle } from '../lib/types';
+import type { Team, Shift } from '../lib/types';
 import {
   Page,
   PageHeader,
@@ -52,10 +52,11 @@ interface AdminUser {
   email: string;
   name: string;
   role: Role;
-  activityRoleTitle: ActivityRoleTitle;
   avatarUrl: string | null;
   teamId: string | null;
   managerId: string | null;
+  managesTeamId: string | null;
+  managesTeamName: string | null;
   shiftId?: string | null;
   deactivatedAt: string | null;
   provisioningStatus?: 'PENDING' | 'ACTIVE';
@@ -74,13 +75,7 @@ const SCOPE_LABEL: Record<UsersResponse['scope'], string> = {
 };
 
 const ROLE_RANK: Record<Role, number> = { ADMIN: 0, MANAGER: 1, MEMBER: 2 };
-const EDITABLE_ROLES: Role[] = ['ADMIN', 'MANAGER', 'MEMBER'];
-const ACTIVITY_ROLES: ReadonlyArray<{ value: ActivityRoleTitle; label: string }> = [
-  { value: 'OTHER', label: 'OTHER' },
-  { value: 'DEVELOPER', label: 'DEVELOPER' },
-  { value: 'DESIGNER', label: 'DESIGNER' },
-  { value: 'SALES', label: 'SALES' },
-];
+const EDITABLE_ROLES: Role[] = ['ADMIN', 'MEMBER'];
 
 // Role → fixed status taxonomy (§2): one hue per role, never the accent.
 const ROLE_STATUS: Record<Role, Status> = {
@@ -125,7 +120,7 @@ export function UsersScreen() {
   const patch = useMutation({
     mutationFn: (vars: {
       id: string;
-      patch: Partial<{ name: string; role: Role; activityRoleTitle: ActivityRoleTitle; teamId: string | null; shiftId: string | null }>;
+      patch: Partial<{ name: string; role: Role; teamId: string | null; shiftId: string | null }>;
     }) =>
       api<AdminUser>(`/v1/admin/users/${vars.id}`, { method: 'PATCH', json: vars.patch }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'users'] }),
@@ -179,7 +174,7 @@ export function UsersScreen() {
     (u) => u.deactivatedAt === null && u.provisioningStatus === 'PENDING',
   ).length;
 
-  const colSpan = canEdit ? 8 : 7;
+  const colSpan = canEdit ? 7 : 6;
 
   return (
     <Page>
@@ -260,7 +255,6 @@ export function UsersScreen() {
               <Tr>
                 <Th>Person</Th>
                 <Th>Role</Th>
-                <Th>Activity role</Th>
                 <Th>Status</Th>
                 <Th>Team</Th>
                 <Th>Shift</Th>
@@ -322,7 +316,7 @@ interface RowProps {
   shiftName: string;
   busy: boolean;
   error: string | null;
-  onSave: (patch: Partial<{ name: string; role: Role; activityRoleTitle: ActivityRoleTitle; teamId: string | null; shiftId: string | null }>) => void;
+  onSave: (patch: Partial<{ name: string; role: Role; teamId: string | null; shiftId: string | null }>) => void;
   onDeactivate: () => void;
   onReactivate: () => void;
   onActivate: () => void;
@@ -331,16 +325,14 @@ interface RowProps {
 function PersonRow({ user, isSelf, canEdit, colSpan, teams, teamName, shifts, shiftName, busy, error, onSave, onDeactivate, onReactivate, onActivate }: RowProps) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(user.name);
-  const [role, setRole] = useState<Role>(user.role);
-  const [activityRoleTitle, setActivityRoleTitle] = useState<ActivityRoleTitle>(user.activityRoleTitle);
+  const [role, setRole] = useState<Role>(user.role === 'MANAGER' ? 'MEMBER' : user.role);
   const [teamId, setTeamId] = useState<string>(user.teamId ?? '');
   const [shiftId, setShiftId] = useState<string>(user.shiftId ?? '');
 
   function save() {
-    const next: Partial<{ name: string; role: Role; activityRoleTitle: ActivityRoleTitle; teamId: string | null; shiftId: string | null }> = {};
+    const next: Partial<{ name: string; role: Role; teamId: string | null; shiftId: string | null }> = {};
     if (name.trim() && name.trim() !== user.name) next.name = name.trim();
-    if (role !== user.role) next.role = role;
-    if (activityRoleTitle !== user.activityRoleTitle) next.activityRoleTitle = activityRoleTitle;
+    if (user.role !== 'MANAGER' && role !== user.role) next.role = role;
     const nextTeam = teamId === '' ? null : teamId;
     if (nextTeam !== (user.teamId ?? null)) next.teamId = nextTeam;
     const nextShift = shiftId === '' ? null : shiftId;
@@ -352,14 +344,14 @@ function PersonRow({ user, isSelf, canEdit, colSpan, teams, teamName, shifts, sh
   function cancel() {
     setEditing(false);
     setName(user.name);
-    setRole(user.role);
-    setActivityRoleTitle(user.activityRoleTitle);
+    setRole(user.role === 'MANAGER' ? 'MEMBER' : user.role);
     setTeamId(user.teamId ?? '');
     setShiftId(user.shiftId ?? '');
   }
 
   const isDeactivated = user.deactivatedAt !== null;
   const isPending = !isDeactivated && user.provisioningStatus === 'PENDING';
+  const teamLockedByManagement = user.role === 'MANAGER' && Boolean(user.managesTeamId);
 
   const joined = new Date(user.createdAt).toLocaleDateString(undefined, {
     year: 'numeric',
@@ -403,33 +395,22 @@ function PersonRow({ user, isSelf, canEdit, colSpan, teams, teamName, shifts, sh
         {/* Role ----------------------------------------------------------- */}
         <Td>
           {editing ? (
-            <Select value={role} onChange={(e) => setRole(e.target.value as Role)} aria-label="Role">
-              {EDITABLE_ROLES.map((r) => (
-                <option key={r} value={r}>
-                  {r}
-                </option>
-              ))}
-            </Select>
+            user.role === 'MANAGER' ? (
+              <Tag status={ROLE_STATUS[user.role]}>{user.role}</Tag>
+            ) : (
+              <Select value={role} onChange={(e) => setRole(e.target.value as Role)} aria-label="Role">
+                {EDITABLE_ROLES.map((r) => (
+                  <option key={r} value={r}>
+                    {r}
+                  </option>
+                ))}
+              </Select>
+            )
           ) : (
-            <Tag status={ROLE_STATUS[user.role]}>{user.role}</Tag>
-          )}
-        </Td>
-
-        <Td>
-          {editing ? (
-            <Select
-              value={activityRoleTitle}
-              onChange={(e) => setActivityRoleTitle(e.target.value as ActivityRoleTitle)}
-              aria-label="Activity role"
-            >
-              {ACTIVITY_ROLES.map((r) => (
-                <option key={r.value} value={r.value}>
-                  {r.label}
-                </option>
-              ))}
-            </Select>
-          ) : (
-            <Tag status="neutral">{user.activityRoleTitle}</Tag>
+            <span className="usr-role-stack">
+              <Tag status={ROLE_STATUS[user.role]}>{user.role}</Tag>
+              {user.managesTeamName && <span className="ui-t-small ui-ink-3">Manages {user.managesTeamName}</span>}
+            </span>
           )}
         </Td>
 
@@ -443,14 +424,17 @@ function PersonRow({ user, isSelf, canEdit, colSpan, teams, teamName, shifts, sh
         {/* Team ----------------------------------------------------------- */}
         <Td>
           {editing ? (
-            <Select value={teamId} onChange={(e) => setTeamId(e.target.value)} aria-label="Team">
-              <option value="">— no team —</option>
-              {teams.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name}
-                </option>
-              ))}
-            </Select>
+            <span className="usr-role-stack">
+              <Select value={teamId} onChange={(e) => setTeamId(e.target.value)} aria-label="Team" disabled={teamLockedByManagement}>
+                <option value="">— no team —</option>
+                {teams.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+              </Select>
+              {teamLockedByManagement && <span className="ui-t-small ui-ink-3">Locked to managed team</span>}
+            </span>
           ) : (
             teamName
           )}
@@ -564,10 +548,9 @@ function InviteForm({ onClose, onCreated }: { onClose: () => void; onCreated: ()
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
   const [role, setRole] = useState<Role>('MEMBER');
-  const [activityRoleTitle, setActivityRoleTitle] = useState<ActivityRoleTitle>('OTHER');
   const m = useMutation({
-    mutationFn: (vars: { email: string; name: string; role: Role; activityRoleTitle: ActivityRoleTitle }) =>
-      api<AdminUser>('/v1/admin/users', { method: 'POST', json: vars }),
+    mutationFn: (vars: { email: string; name: string; role: Role }) =>
+      api<AdminUser>('/v1/admin/users', { method: 'POST', json: { ...vars, activityRoleTitle: 'OTHER' } }),
     onSuccess: () => onCreated(),
   });
 
@@ -581,7 +564,7 @@ function InviteForm({ onClose, onCreated }: { onClose: () => void; onCreated: ()
   function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!email.trim() || !name.trim()) return;
-    m.mutate({ email: email.trim(), name: name.trim(), role, activityRoleTitle });
+    m.mutate({ email: email.trim(), name: name.trim(), role });
   }
 
   return (
@@ -621,15 +604,6 @@ function InviteForm({ onClose, onCreated }: { onClose: () => void; onCreated: ()
             <option value="MEMBER">MEMBER</option>
             <option value="MANAGER">MANAGER</option>
             <option value="ADMIN">ADMIN</option>
-          </Select>
-        </Field>
-        <Field label="Activity role">
-          <Select value={activityRoleTitle} onChange={(e) => setActivityRoleTitle(e.target.value as ActivityRoleTitle)}>
-            {ACTIVITY_ROLES.map((r) => (
-              <option key={r.value} value={r.value}>
-                {r.label}
-              </option>
-            ))}
           </Select>
         </Field>
         <div className="usr-invite-actions">

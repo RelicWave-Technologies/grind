@@ -16,6 +16,7 @@ import { requireAccessToken } from '../middleware/auth';
 import { attachScope } from '../middleware/scope';
 import { authorizeTimeEditForUser } from '../authz/timeEdit';
 import { isLarkConfigured, getTokenManager, getUserTaskClient } from '../lark';
+import { queueManualTimeFinalizeCards } from '../manualTime/larkOutbox';
 import { logger } from '../logger';
 
 export const timeEntriesRouter = Router();
@@ -378,11 +379,15 @@ timeEntriesRouter.delete('/:id', attachScope, async (req, res, next) => {
           where: { id: existing.manualTimeRequest.id },
           data: {
             status: 'CANCELLED',
+            version: { increment: 1 },
             decidedAt: now,
             decidedReason: authz.isSelf ? 'Deleted by requester' : 'Deleted by manager',
+            decidedById: req.user!.sub,
+            decisionSource: authz.isSelf ? 'REQUESTER_CANCEL' : 'MANAGER_CANCEL',
             timeEntryId: null,
           },
         });
+        await queueManualTimeFinalizeCards(tx, existing.manualTimeRequest.id);
       }
       await tx.timeEntry.delete({ where: { id } });
     });

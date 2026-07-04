@@ -44,7 +44,7 @@ describe('GET /v1/admin/workspace-policy', () => {
     expect(res.body.captureTitles).toBe(false);
     expect(res.body.captureUrls).toBe(false);
     expect(res.body.retentionDaysScreenshots).toBe(60);
-    expect(res.body.defaultScreenshotIntervalMin).toBe(180);
+    expect(res.body.defaultScreenshotIntervalMin).toBe(3);
     expect(res.body.defaultIdleThresholdMin).toBe(5);
     // Row should now exist in the DB.
     const row = await prisma.workspacePolicy.findUnique({ where: { workspaceId: ws.id } });
@@ -188,7 +188,7 @@ describe('PATCH /v1/admin/workspace-policy', () => {
       actorId: admin.id,
       targetUserId: null,
       scope: 'WORKSPACE_POLICY',
-      previousScreenshotIntervalMin: 180,
+      previousScreenshotIntervalMin: 3,
       previousIdleThresholdMin: 5,
       nextScreenshotIntervalMin: 1,
       nextIdleThresholdMin: 5,
@@ -202,13 +202,13 @@ describe('PATCH /v1/admin/workspace-policy', () => {
     const caution = await request(app)
       .patch('/v1/admin/workspace-policy')
       .set(bearer(admin.token))
-      .send({ defaultScreenshotIntervalMin: 5 });
+      .send({ defaultScreenshotIntervalMin: 2 });
     expect(caution.status).toBe(200);
 
     const normal = await request(app)
       .patch('/v1/admin/workspace-policy')
       .set(bearer(admin.token))
-      .send({ defaultScreenshotIntervalMin: 60, defaultIdleThresholdMin: 10 });
+      .send({ defaultScreenshotIntervalMin: 3, defaultIdleThresholdMin: 10 });
     expect(normal.status).toBe(200);
 
     const audits = await prisma.monitoringSettingsAudit.findMany({ where: { workspaceId: ws.id } });
@@ -219,17 +219,29 @@ describe('PATCH /v1/admin/workspace-policy', () => {
       scope: 'WORKSPACE_POLICY',
       riskLevel: 'CAUTION',
       reason: null,
-      previousScreenshotIntervalMin: 180,
-      nextScreenshotIntervalMin: 5,
+      previousScreenshotIntervalMin: 3,
+      nextScreenshotIntervalMin: 2,
     });
     expect(normalAudit).toMatchObject({
       scope: 'WORKSPACE_POLICY',
       riskLevel: 'NORMAL',
       reason: null,
-      previousScreenshotIntervalMin: 5,
-      nextScreenshotIntervalMin: 60,
+      previousScreenshotIntervalMin: 2,
+      nextScreenshotIntervalMin: 3,
       nextIdleThresholdMin: 10,
     });
+  });
+
+  it('rejects screenshot timing outside 1, 2, or 3 minutes', async () => {
+    const { admin } = await seedWorkspace();
+    for (const value of [0, 4, 5, 180]) {
+      const res = await request(app)
+        .patch('/v1/admin/workspace-policy')
+        .set(bearer(admin.token))
+        .send({ defaultScreenshotIntervalMin: value });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('invalid_body');
+    }
   });
 
   it('returns recent monitoring-setting audits to policy admins only', async () => {
@@ -301,11 +313,11 @@ describe('POST /v1/activity-samples — policy-gated active fields', () => {
       .set(bearer(admin.token))
       .send({
         captureApps: true,
-        defaultScreenshotIntervalMin: 60,
+        defaultScreenshotIntervalMin: 3,
         defaultIdleThresholdMin: 10,
       });
     expect(policyRes.status).toBe(200);
-    expect(policyRes.body.defaultScreenshotIntervalMin).toBe(60);
+    expect(policyRes.body.defaultScreenshotIntervalMin).toBe(3);
     expect(policyRes.body.defaultIdleThresholdMin).toBe(10);
     const t = new Date(Math.floor(Date.now() / 60000) * 60000).toISOString();
     const res = await request(app)

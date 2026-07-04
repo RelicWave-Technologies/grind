@@ -222,6 +222,7 @@ insightsRouter.get('/day', async (req, res, next) => {
           mouseDistancePx: true,
           activeApp: true,
           activeAppBundle: true,
+          activeUrl: true,
         },
         orderBy: { bucketStart: 'asc' },
       }),
@@ -329,6 +330,7 @@ insightsRouter.get('/day', async (req, res, next) => {
       samples.map((s) => ({
         activeApp: s.activeApp,
         activeAppBundle: s.activeAppBundle,
+        activeUrl: s.activeUrl,
         keystrokes: s.keystrokes,
         clicks: s.clicks,
       })),
@@ -338,7 +340,7 @@ insightsRouter.get('/day', async (req, res, next) => {
       ...appUsageBase,
       topApps: appUsageBase.topApps.map((app) => ({
         ...app,
-        iconUrl: resolveAppIcon(app.app, app.appBundle, storedIcons),
+        iconUrl: resolveAppIcon(app.app, app.appBundle, storedIcons, app.domain),
       })),
     };
 

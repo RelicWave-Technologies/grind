@@ -3,6 +3,7 @@ import { prisma } from '@grind/db';
 import {
   PatchWorkspacePolicyRequest,
   WORKSPACE_POLICY_DEFAULTS,
+  normalizeScreenshotIntervalMin,
   type WorkspacePolicyDto,
 } from '@grind/types';
 import { requireAccessToken } from '../middleware/auth';
@@ -55,7 +56,10 @@ function toDto(row: {
     captureTitles: row.captureTitles,
     captureUrls: row.captureUrls,
     retentionDaysScreenshots: row.retentionDaysScreenshots,
-    defaultScreenshotIntervalMin: row.defaultScreenshotIntervalMin,
+    defaultScreenshotIntervalMin: normalizeScreenshotIntervalMin(
+      row.defaultScreenshotIntervalMin,
+      WORKSPACE_POLICY_DEFAULTS.defaultScreenshotIntervalMin,
+    ),
     defaultIdleThresholdMin: row.defaultIdleThresholdMin,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
@@ -91,11 +95,14 @@ workspacePolicyRouter.patch('/', requireAdmin, async (req, res, next) => {
     }
 
     const previousTiming = {
-      screenshotIntervalMin: current.defaultScreenshotIntervalMin,
+      screenshotIntervalMin: normalizeScreenshotIntervalMin(
+        current.defaultScreenshotIntervalMin,
+        WORKSPACE_POLICY_DEFAULTS.defaultScreenshotIntervalMin,
+      ),
       idleThresholdMin: current.defaultIdleThresholdMin,
     };
     const nextTiming = {
-      screenshotIntervalMin: updateData.defaultScreenshotIntervalMin ?? current.defaultScreenshotIntervalMin,
+      screenshotIntervalMin: updateData.defaultScreenshotIntervalMin ?? previousTiming.screenshotIntervalMin,
       idleThresholdMin: updateData.defaultIdleThresholdMin ?? current.defaultIdleThresholdMin,
     };
     const timingChanged = monitoringTimingChanged(previousTiming, nextTiming);

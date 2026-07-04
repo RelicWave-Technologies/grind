@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { cx } from '../ui/util';
 
 export function AppIcon({
@@ -13,10 +13,14 @@ export function AppIcon({
   const [failed, setFailed] = useState(false);
   const initial = name.trim().slice(0, 1).toUpperCase() || '?';
 
+  useEffect(() => {
+    setFailed(false);
+  }, [iconUrl]);
+
   return (
     <span className={cx('ui-app-icon', className)} aria-hidden>
       {iconUrl && !failed ? (
-        <img src={iconUrl} alt="" onError={() => setFailed(true)} />
+        <img src={iconUrl} alt="" decoding="async" onError={() => setFailed(true)} />
       ) : (
         <span className="ui-app-icon__initial ui-t-eyebrow">{initial}</span>
       )}

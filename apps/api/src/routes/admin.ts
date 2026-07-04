@@ -27,6 +27,7 @@ import {
   PatchTeamMemberSettingsRequest,
   ShiftScheduleSchema,
   WORKSPACE_POLICY_DEFAULTS,
+  normalizeScreenshotIntervalMin,
   type MonitoringSettingsAuditDto,
   type TeamMemberSettingsDto,
   type TeamSettingsResponse,
@@ -38,6 +39,15 @@ import {
   monitoringTimingChanged,
   normalizeAuditReason,
 } from '../monitoringSettingsAudit';
+import {
+  addTeamManager,
+  assignUserToTeam,
+  deleteTeam,
+  normalizeManagerIds,
+  removeTeamManager,
+  replaceTeamManagers,
+  type OrgMutationResult,
+} from '../org/teamManagers';
 
 /**
  * Mounted under `/v1/admin`. Every route requires a valid access token and
@@ -57,6 +67,8 @@ interface UserListEntry {
   activityRoleTitle: 'DEVELOPER' | 'DESIGNER' | 'SALES' | 'OTHER';
   teamId: string | null;
   managerId: string | null;
+  managesTeamId: string | null;
+  managesTeamName: string | null;
   shiftId: string | null;
   deactivatedAt: string | null;
   provisioningStatus: 'PENDING' | 'ACTIVE';
@@ -97,6 +109,7 @@ adminRouter.get('/users', async (req, res, next) => {
         activityRoleTitle: true,
         teamId: true,
         managerId: true,
+        managedTeamAssignment: { select: { teamId: true, team: { select: { name: true } } } },
         shiftId: true,
         deactivatedAt: true,
         provisioningStatus: true,
@@ -113,6 +126,8 @@ adminRouter.get('/users', async (req, res, next) => {
       activityRoleTitle: u.activityRoleTitle,
       teamId: u.teamId,
       managerId: u.managerId,
+      managesTeamId: u.managedTeamAssignment?.teamId ?? null,
+      managesTeamName: u.managedTeamAssignment?.team.name ?? null,
       shiftId: u.shiftId,
       deactivatedAt: u.deactivatedAt ? u.deactivatedAt.toISOString() : null,
       provisioningStatus: u.provisioningStatus,
@@ -142,7 +157,11 @@ type TeamSettingsUserRow = {
   screenshotIntervalMin: number | null;
   idleThresholdMin: number | null;
   createdAt: Date;
-  team: { id: string; name: string; manager: { id: string; name: string; email: string; avatarUrl: string | null } | null } | null;
+  team: {
+    id: string;
+    name: string;
+    managers: Array<{ user: { id: string; name: string; email: string; avatarUrl: string | null } }>;
+  } | null;
 };
 
 /** Effective capture defaults for a workspace (per-member NULLs fall back here). */
@@ -154,7 +173,10 @@ async function loadPolicyDefaults(workspaceId: string): Promise<PolicyDefaults> 
     select: { defaultScreenshotIntervalMin: true, defaultIdleThresholdMin: true },
   });
   return {
-    screenshotIntervalMin: policy?.defaultScreenshotIntervalMin ?? WORKSPACE_POLICY_DEFAULTS.defaultScreenshotIntervalMin,
+    screenshotIntervalMin: normalizeScreenshotIntervalMin(
+      policy?.defaultScreenshotIntervalMin,
+      WORKSPACE_POLICY_DEFAULTS.defaultScreenshotIntervalMin,
+    ),
     idleThresholdMin: policy?.defaultIdleThresholdMin ?? WORKSPACE_POLICY_DEFAULTS.defaultIdleThresholdMin,
   };
 }
@@ -175,7 +197,7 @@ function serializeTeamSettingsMember(
     shiftId: user.shiftId,
     shiftAssignedAt: user.shiftAssignedAt ? user.shiftAssignedAt.toISOString() : null,
     // Resolved effective values: per-member override → policy default.
-    screenshotIntervalMin: user.screenshotIntervalMin ?? defaults.screenshotIntervalMin,
+    screenshotIntervalMin: normalizeScreenshotIntervalMin(user.screenshotIntervalMin, defaults.screenshotIntervalMin),
     idleThresholdMin: user.idleThresholdMin ?? defaults.idleThresholdMin,
     createdAt: user.createdAt.toISOString(),
   };
@@ -199,7 +221,16 @@ async function loadTeamSettingsMembers(userIds: string[]): Promise<TeamMemberSet
       idleThresholdMin: true,
       createdAt: true,
       workspaceId: true,
-      team: { select: { id: true, name: true, manager: { select: { id: true, name: true, email: true, avatarUrl: true } } } },
+      team: {
+        select: {
+          id: true,
+          name: true,
+          managers: {
+            orderBy: { createdAt: 'asc' },
+            select: { user: { select: { id: true, name: true, email: true, avatarUrl: true } } },
+          },
+        },
+      },
     },
     orderBy: [{ teamId: 'asc' }, { role: 'asc' }, { name: 'asc' }],
   });
@@ -212,16 +243,12 @@ async function loadTeamSettingsMembers(userIds: string[]): Promise<TeamMemberSet
     idleThresholdMin: WORKSPACE_POLICY_DEFAULTS.defaultIdleThresholdMin,
   };
 
-  const managerIds = [...new Set(users.map((u) => u.managerId).filter((id): id is string => Boolean(id)))];
-  const managers = managerIds.length
-    ? await prisma.user.findMany({
-        where: { id: { in: managerIds } },
-        select: { id: true, name: true, email: true, avatarUrl: true },
-      })
-    : [];
-  const managerById = new Map(managers.map((m) => [m.id, m]));
   return users.map((u) =>
-    serializeTeamSettingsMember(u, u.managerId ? managerById.get(u.managerId) ?? null : u.team?.manager ?? null, defaults),
+    serializeTeamSettingsMember(
+      u,
+      u.team?.managers.find((m) => m.user.id !== u.id)?.user ?? u.team?.managers[0]?.user ?? null,
+      defaults,
+    ),
   );
 }
 
@@ -483,6 +510,9 @@ adminRouter.get('/monitoring-settings-audits', requireCapability('policy.manage'
 interface MtrListEntry {
   id: string;
   status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
+  version: number;
+  larkDeliveryStatus: 'none' | 'queued' | 'sent' | 'retrying' | 'failed';
+  latestLarkMessageStatus: string | null;
   requestedStart: string;
   requestedEnd: string;
   reason: string;
@@ -633,6 +663,7 @@ adminRouter.get('/manual-time-requests', requireManagerOrAbove, async (req, res,
       include: {
         user: { select: { id: true, name: true, email: true } },
         approver: { select: { id: true, name: true, email: true } },
+        larkMessages: { select: { status: true, attempts: true, version: true, createdAt: true } },
       },
       orderBy: [
         // PENDING bubbles to the top of mixed queries via createdAt fallback.
@@ -695,9 +726,25 @@ adminRouter.get('/manual-time-requests', requireManagerOrAbove, async (req, res,
       }
     }
 
+    function deliveryFor(r: (typeof rows)[number]): Pick<MtrListEntry, 'larkDeliveryStatus' | 'latestLarkMessageStatus'> {
+      const latest = r.larkMessages
+        .slice()
+        .sort((a, b) => b.version - a.version || b.createdAt.getTime() - a.createdAt.getTime())[0];
+      if (!latest) return { larkDeliveryStatus: 'none', latestLarkMessageStatus: null };
+      if (['SENT', 'DECIDED', 'CANCELLED', 'SUPERSEDED'].includes(latest.status)) {
+        return { larkDeliveryStatus: 'sent', latestLarkMessageStatus: latest.status };
+      }
+      if (['SEND_FAILED', 'UPDATE_FAILED'].includes(latest.status)) {
+        return { larkDeliveryStatus: latest.attempts >= 25 ? 'failed' : 'retrying', latestLarkMessageStatus: latest.status };
+      }
+      return { larkDeliveryStatus: 'queued', latestLarkMessageStatus: latest.status };
+    }
+
     const out: MtrListEntry[] = rows.map((r) => ({
       id: r.id,
       status: r.status,
+      version: r.version,
+      ...deliveryFor(r),
       requestedStart: r.requestedStart.toISOString(),
       requestedEnd: r.requestedEnd.toISOString(),
       reason: r.reason,
@@ -1005,6 +1052,17 @@ function fmtTimeForTz(ms: number, tz: string): string {
 interface TeamDto {
   id: string;
   name: string;
+  managers: Array<{
+    id: string;
+    name: string;
+    email: string;
+    avatarUrl: string | null;
+    role: 'ADMIN' | 'MANAGER' | 'MEMBER';
+    teamId: string | null;
+  }>;
+  managerIds: string[];
+  managerCount: number;
+  /** Compatibility alias for old clients; first manager by assignment time. */
   managerId: string | null;
   memberCount: number;
   createdAt: string;
@@ -1013,37 +1071,96 @@ interface TeamDto {
 function serializeTeam(t: {
   id: string;
   name: string;
-  managerId: string | null;
+  managers: Array<{
+    user: {
+      id: string;
+      name: string;
+      email: string;
+      avatarUrl: string | null;
+      role: 'ADMIN' | 'MANAGER' | 'MEMBER';
+      teamId: string | null;
+    };
+  }>;
   members: Array<{ id: string }>;
   createdAt: Date;
 }): TeamDto {
+  const managers = t.managers.map((row) => row.user);
   return {
     id: t.id,
     name: t.name,
-    managerId: t.managerId,
+    managers,
+    managerIds: managers.map((m) => m.id),
+    managerCount: managers.length,
+    managerId: managers[0]?.id ?? null,
     memberCount: t.members.length,
     createdAt: t.createdAt.toISOString(),
   };
 }
 
-async function findManagedTeam(workspaceId: string, managerId: string, exceptTeamId?: string) {
-  return prisma.team.findFirst({
-    where: {
-      workspaceId,
-      managerId,
-      ...(exceptTeamId ? { id: { not: exceptTeamId } } : {}),
+function includeTeamForDto() {
+  return {
+    members: { select: { id: true } },
+    managers: {
+      orderBy: { createdAt: 'asc' as const },
+      select: {
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            avatarUrl: true,
+            role: true,
+            teamId: true,
+          },
+        },
+      },
     },
-    select: { id: true, name: true },
-  });
+  };
 }
 
-function managerAlreadyAssigned(team: { id: string; name: string }) {
-  return { error: 'manager_already_assigned', teamId: team.id, teamName: team.name };
+async function loadTeamDto(teamId: string, workspaceId: string): Promise<TeamDto | null> {
+  const team = await prisma.team.findFirst({
+    where: { id: teamId, workspaceId },
+    include: includeTeamForDto(),
+  });
+  return team ? serializeTeam(team) : null;
+}
+
+class TeamManagerRouteError extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly body: {
+      error: string;
+      teamId?: string;
+      teamName?: string;
+      managedTeamId?: string;
+      managedTeamName?: string;
+    },
+  ) {
+    super(body.error);
+  }
+}
+
+function throwTeamManagerError(result: Exclude<OrgMutationResult, { ok: true }>): never {
+  const { ok: _ok, ...body } = result;
+  if (result.error === 'manager_already_assigned') {
+    throw new TeamManagerRouteError(409, body);
+  }
+  if (result.error === 'managed_user_team_locked') {
+    throw new TeamManagerRouteError(409, body);
+  }
+  if (result.error === 'team_not_found') {
+    throw new TeamManagerRouteError(404, { error: 'not_found' });
+  }
+  if (result.error === 'user_not_found') {
+    throw new TeamManagerRouteError(404, { error: 'not_found' });
+  }
+  throw new TeamManagerRouteError(400, { error: result.error });
 }
 
 function isTeamManagerUniqueError(err: unknown) {
   const maybe = err as { code?: string; meta?: { target?: string[] } };
-  return maybe?.code === 'P2002' && Array.isArray(maybe.meta?.target) && maybe.meta.target.includes('managerId');
+  return maybe?.code === 'P2002' && Array.isArray(maybe.meta?.target) && maybe.meta.target.includes('userId');
 }
 
 function hasCompletedMemberSetup(input: { teamId: string | null; shiftId: string | null }): boolean {
@@ -1053,18 +1170,18 @@ function hasCompletedMemberSetup(input: { teamId: string | null; shiftId: string
 /**
  * GET /v1/admin/teams — workspace teams visible to the caller.
  *
- * ADMIN → every team in the workspace.
- * MANAGER       → every team they manage.
+ * ADMIN         → every team in the workspace.
+ * MANAGER       → their managed team.
  * MEMBER        → 403 (members don't need a team list; their teamId is on /me).
  */
 adminRouter.get('/teams', requireCapability('teams.read'), async (req, res, next) => {
   try {
     if (!req.scope || !req.user) return res.status(401).json({ error: 'unauthorized' });
-    const where: { workspaceId: string; managerId?: string } = { workspaceId: req.scope.workspaceId };
-    if (!req.scope.isAdmin) where.managerId = req.user.sub;
+    const where: Prisma.TeamWhereInput = { workspaceId: req.scope.workspaceId };
+    if (!req.scope.isAdmin) where.managers = { some: { userId: req.user.sub } };
     const teams = await prisma.team.findMany({
       where,
-      include: { members: { select: { id: true } } },
+      include: includeTeamForDto(),
       orderBy: { name: 'asc' },
     });
     res.json({ teams: teams.map(serializeTeam) });
@@ -1073,30 +1190,34 @@ adminRouter.get('/teams', requireCapability('teams.read'), async (req, res, next
   }
 });
 
-/** Body shape: { name: string, managerId: string }. */
+/** Body shape: { name: string, managerIds?: string[] } (managerId is accepted as a compatibility alias). */
 adminRouter.post('/teams', requireAdmin, async (req, res, next) => {
   try {
     if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
     const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
     if (name.length === 0 || name.length > 80) return res.status(400).json({ error: 'invalid_name' });
-    const managerId = typeof req.body?.managerId === 'string' ? req.body.managerId.trim() : '';
-    if (!managerId) return res.status(400).json({ error: 'manager_required' });
-    const m = await prisma.user.findUnique({ where: { id: managerId }, select: { workspaceId: true } });
-    if (!m || m.workspaceId !== req.scope.workspaceId) return res.status(400).json({ error: 'manager_out_of_workspace' });
-    const currentManagedTeam = await findManagedTeam(req.scope.workspaceId, managerId);
-    if (currentManagedTeam) return res.status(409).json(managerAlreadyAssigned(currentManagedTeam));
-    const team = await prisma.team.create({
-      data: { workspaceId: req.scope.workspaceId, name, managerId },
-      include: { members: { select: { id: true } } },
+    const managerIds = normalizeManagerIds(req.body?.managerIds ?? req.body?.managerId);
+    const teamId = await prisma.$transaction(async (tx) => {
+      const team = await tx.team.create({
+        data: { workspaceId: req.scope!.workspaceId, name },
+        select: { id: true },
+      });
+      for (const managerId of managerIds) {
+        const added = await addTeamManager(tx, { workspaceId: req.scope!.workspaceId, teamId: team.id, userId: managerId });
+        if (!added.ok) throwTeamManagerError(added);
+      }
+      return team.id;
     });
-    res.status(201).json(serializeTeam(team));
+    const team = await loadTeamDto(teamId, req.scope.workspaceId);
+    res.status(201).json(team);
   } catch (err) {
+    if (err instanceof TeamManagerRouteError) return res.status(err.status).json(err.body);
     if (isTeamManagerUniqueError(err)) return res.status(409).json({ error: 'manager_already_assigned' });
     next(err);
   }
 });
 
-/** PATCH body: { name?: string, managerId?: string }. */
+/** PATCH body: { name?: string, managerIds?: string[] } (managerId replaces with one manager for old clients). */
 adminRouter.patch('/teams/:id', requireAdmin, async (req, res, next) => {
   try {
     if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
@@ -1107,40 +1228,72 @@ adminRouter.patch('/teams/:id', requireAdmin, async (req, res, next) => {
       return res.status(404).json({ error: 'not_found' });
     }
 
-    const data: { name?: string; managerId?: string | null } = {};
+    const data: { name?: string } = {};
     if (typeof req.body?.name === 'string') {
       const name = req.body.name.trim();
       if (name.length === 0 || name.length > 80) return res.status(400).json({ error: 'invalid_name' });
       data.name = name;
     }
-    if ('managerId' in (req.body ?? {})) {
-      const raw = req.body.managerId;
-      if (raw === null || raw === '') {
-        return res.status(400).json({ error: 'manager_required' });
-      } else if (typeof raw === 'string') {
-        const managerId = raw.trim();
-        if (!managerId) return res.status(400).json({ error: 'manager_required' });
-        const m = await prisma.user.findUnique({ where: { id: managerId }, select: { workspaceId: true } });
-        if (!m || m.workspaceId !== req.scope.workspaceId) {
-          return res.status(400).json({ error: 'manager_out_of_workspace' });
-        }
-        const currentManagedTeam = await findManagedTeam(req.scope.workspaceId, managerId, id);
-        if (currentManagedTeam) return res.status(409).json(managerAlreadyAssigned(currentManagedTeam));
-        data.managerId = managerId;
-      } else {
-        return res.status(400).json({ error: 'invalid_managerId' });
-      }
-    }
-    if (Object.keys(data).length === 0) return res.status(400).json({ error: 'nothing_to_update' });
+    const replacesManagers = 'managerIds' in (req.body ?? {}) || 'managerId' in (req.body ?? {});
+    const managerIds = replacesManagers
+      ? normalizeManagerIds(req.body?.managerIds ?? req.body?.managerId)
+      : null;
+    if (Object.keys(data).length === 0 && !replacesManagers) return res.status(400).json({ error: 'nothing_to_update' });
 
-    const team = await prisma.team.update({
-      where: { id },
-      data,
-      include: { members: { select: { id: true } } },
+    await prisma.$transaction(async (tx) => {
+      if (Object.keys(data).length > 0) {
+        await tx.team.update({ where: { id }, data });
+      }
+      if (managerIds) {
+        const replaced = await replaceTeamManagers(tx, { workspaceId: req.scope!.workspaceId, teamId: id, managerIds });
+        if (!replaced.ok) throwTeamManagerError(replaced);
+      }
     });
-    res.json(serializeTeam(team));
+    const team = await loadTeamDto(id, req.scope.workspaceId);
+    res.json(team);
   } catch (err) {
+    if (err instanceof TeamManagerRouteError) return res.status(err.status).json(err.body);
     if (isTeamManagerUniqueError(err)) return res.status(409).json({ error: 'manager_already_assigned' });
+    next(err);
+  }
+});
+
+adminRouter.post('/teams/:id/managers', requireAdmin, async (req, res, next) => {
+  try {
+    if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
+    const teamId = req.params.id;
+    if (!teamId) return res.status(400).json({ error: 'missing_id' });
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId.trim() : typeof req.body?.managerId === 'string' ? req.body.managerId.trim() : '';
+    if (!userId) return res.status(400).json({ error: 'manager_required' });
+    await prisma.$transaction(async (tx) => {
+      const added = await addTeamManager(tx, { workspaceId: req.scope!.workspaceId, teamId, userId });
+      if (!added.ok) throwTeamManagerError(added);
+    });
+    const team = await loadTeamDto(teamId, req.scope.workspaceId);
+    if (!team) return res.status(404).json({ error: 'not_found' });
+    res.status(201).json(team);
+  } catch (err) {
+    if (err instanceof TeamManagerRouteError) return res.status(err.status).json(err.body);
+    if (isTeamManagerUniqueError(err)) return res.status(409).json({ error: 'manager_already_assigned' });
+    next(err);
+  }
+});
+
+adminRouter.delete('/teams/:id/managers/:userId', requireAdmin, async (req, res, next) => {
+  try {
+    if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
+    const teamId = req.params.id;
+    const userId = req.params.userId;
+    if (!teamId || !userId) return res.status(400).json({ error: 'missing_id' });
+    await prisma.$transaction(async (tx) => {
+      const removed = await removeTeamManager(tx, { workspaceId: req.scope!.workspaceId, teamId, userId });
+      if (!removed.ok) throwTeamManagerError(removed);
+    });
+    const team = await loadTeamDto(teamId, req.scope.workspaceId);
+    if (!team) return res.status(404).json({ error: 'not_found' });
+    res.json(team);
+  } catch (err) {
+    if (err instanceof TeamManagerRouteError) return res.status(err.status).json(err.body);
     next(err);
   }
 });
@@ -1160,15 +1313,19 @@ adminRouter.delete('/teams/:id', requireAdmin, async (req, res, next) => {
     if (!existing || existing.workspaceId !== req.scope.workspaceId) {
       return res.status(404).json({ error: 'not_found' });
     }
-    await prisma.team.delete({ where: { id } });
+    await prisma.$transaction(async (tx) => {
+      const deleted = await deleteTeam(tx, { workspaceId: req.scope!.workspaceId, teamId: id });
+      if (!deleted.ok) throwTeamManagerError(deleted);
+    });
     res.json({ ok: true });
   } catch (err) {
+    if (err instanceof TeamManagerRouteError) return res.status(err.status).json(err.body);
     next(err);
   }
 });
 
 // ============================================================================
-// PATCH a user (ADMIN-only). role / name / teamId / managerId / shiftId.
+// PATCH a user (ADMIN-only). role / name / teamId / shiftId.
 // ============================================================================
 
 const VALID_ROLES = ['ADMIN', 'MANAGER', 'MEMBER'] as const;
@@ -1190,12 +1347,12 @@ adminRouter.patch('/users/:id', requireAdmin, async (req, res, next) => {
       name?: string;
       role?: ValidRole;
       activityRoleTitle?: ValidActivityRoleTitle;
-      teamId?: string | null;
       managerId?: string | null;
       shiftId?: string | null;
       shiftAssignedAt?: Date | null;
       provisioningStatus?: 'ACTIVE';
     } = {};
+    let requestedTeamId: string | null | undefined = undefined;
     let shiftAssignment:
       | {
           effectiveFrom: Date;
@@ -1216,6 +1373,9 @@ adminRouter.patch('/users/:id', requireAdmin, async (req, res, next) => {
       if (!(VALID_ROLES as readonly string[]).includes(req.body.role)) {
         return res.status(400).json({ error: 'invalid_role' });
       }
+      if (req.body.role === 'MANAGER') {
+        return res.status(400).json({ error: 'manager_role_is_derived' });
+      }
       data.role = req.body.role as ValidRole;
     }
 
@@ -1229,11 +1389,9 @@ adminRouter.patch('/users/:id', requireAdmin, async (req, res, next) => {
     if ('teamId' in (req.body ?? {})) {
       const raw = req.body.teamId;
       if (raw === null || raw === '') {
-        data.teamId = null;
+        requestedTeamId = null;
       } else if (typeof raw === 'string') {
-        const t = await prisma.team.findUnique({ where: { id: raw }, select: { workspaceId: true } });
-        if (!t || t.workspaceId !== req.scope.workspaceId) return res.status(400).json({ error: 'team_out_of_workspace' });
-        data.teamId = raw;
+        requestedTeamId = raw;
       } else {
         return res.status(400).json({ error: 'invalid_teamId' });
       }
@@ -1243,13 +1401,8 @@ adminRouter.patch('/users/:id', requireAdmin, async (req, res, next) => {
       const raw = req.body.managerId;
       if (raw === null || raw === '') {
         data.managerId = null;
-      } else if (typeof raw === 'string') {
-        if (raw === id) return res.status(400).json({ error: 'cannot_manage_self' });
-        const m = await prisma.user.findUnique({ where: { id: raw }, select: { workspaceId: true } });
-        if (!m || m.workspaceId !== req.scope.workspaceId) return res.status(400).json({ error: 'manager_out_of_workspace' });
-        data.managerId = raw;
       } else {
-        return res.status(400).json({ error: 'invalid_managerId' });
+        return res.status(400).json({ error: 'manager_id_deprecated' });
       }
     }
 
@@ -1294,14 +1447,14 @@ adminRouter.patch('/users/:id', requireAdmin, async (req, res, next) => {
       existing.provisioningStatus === 'PENDING' &&
       !existing.deactivatedAt &&
       hasCompletedMemberSetup({
-        teamId: data.teamId !== undefined ? data.teamId : existing.teamId,
+        teamId: requestedTeamId !== undefined ? requestedTeamId : existing.teamId,
         shiftId: data.shiftId !== undefined ? data.shiftId : existing.shiftId,
       })
     ) {
       data.provisioningStatus = 'ACTIVE';
     }
 
-    if (Object.keys(data).length === 0) return res.status(400).json({ error: 'nothing_to_update' });
+    if (Object.keys(data).length === 0 && requestedTeamId === undefined) return res.status(400).json({ error: 'nothing_to_update' });
 
     // Safety: never demote the workspace's last active ADMIN. Without this,
     // a careless admin could lock everyone out of full-workspace privileges.
@@ -1310,6 +1463,19 @@ adminRouter.patch('/users/:id', requireAdmin, async (req, res, next) => {
         where: { workspaceId: req.scope.workspaceId, role: 'ADMIN', deactivatedAt: null },
       });
       if (admins <= 1) return res.status(400).json({ error: 'last_admin_protected' });
+    }
+    if (data.role === 'MEMBER') {
+      const managed = await prisma.teamManager.findUnique({
+        where: { userId: id },
+        select: { team: { select: { id: true, name: true } } },
+      });
+      if (managed) {
+        return res.status(400).json({
+          error: 'remove_team_manager_first',
+          teamId: managed.team.id,
+          teamName: managed.team.name,
+        });
+      }
     }
 
     const updated = await prisma.$transaction(async (tx) => {
@@ -1329,9 +1495,23 @@ adminRouter.patch('/users/:id', requireAdmin, async (req, res, next) => {
           },
         });
       }
-      return tx.user.update({
+      if (Object.keys(data).length > 0) {
+        await tx.user.update({
+          where: { id },
+          data,
+        });
+      }
+      if (requestedTeamId !== undefined) {
+        const assigned = await assignUserToTeam(tx, {
+          workspaceId: req.scope!.workspaceId,
+          userId: id,
+          teamId: requestedTeamId,
+          roleOverride: data.role,
+        });
+        if (!assigned.ok) throwTeamManagerError(assigned);
+      }
+      return tx.user.findUniqueOrThrow({
         where: { id },
-        data,
         select: {
           id: true,
           email: true,
@@ -1353,6 +1533,7 @@ adminRouter.patch('/users/:id', requireAdmin, async (req, res, next) => {
       createdAt: updated.createdAt.toISOString(),
     });
   } catch (err) {
+    if (err instanceof TeamManagerRouteError) return res.status(err.status).json(err.body);
     next(err);
   }
 });
@@ -1386,6 +1567,9 @@ adminRouter.post('/users', requireAdmin, async (req, res, next) => {
     }
     if (!(VALID_ROLES as readonly string[]).includes(roleRaw)) {
       return res.status(400).json({ error: 'invalid_role' });
+    }
+    if (roleRaw === 'MANAGER') {
+      return res.status(400).json({ error: 'manager_role_is_derived' });
     }
     if (!(VALID_ACTIVITY_ROLE_TITLES as readonly string[]).includes(activityRoleRaw)) {
       return res.status(400).json({ error: 'invalid_activity_role_title' });
@@ -1434,6 +1618,17 @@ adminRouter.post('/users/:id/deactivate', requireAdmin, async (req, res, next) =
     }
     if (existing.deactivatedAt) {
       return res.status(409).json({ error: 'already_deactivated' });
+    }
+    const managed = await prisma.teamManager.findUnique({
+      where: { userId: id },
+      select: { team: { select: { id: true, name: true } } },
+    });
+    if (managed) {
+      return res.status(400).json({
+        error: 'remove_team_manager_first',
+        teamId: managed.team.id,
+        teamName: managed.team.name,
+      });
     }
     if (existing.role === 'ADMIN') {
       const admins = await prisma.user.count({
@@ -1917,9 +2112,12 @@ adminRouter.post('/manual-time-requests/:id/reopen', requireAdmin, async (req, r
         where: { id },
         data: {
           status: 'PENDING',
+          version: { increment: 1 },
           autoApproved: false,
           decidedAt: null,
           decidedReason: null,
+          decidedById: null,
+          decisionSource: 'ADMIN_REOPEN',
           timeEntryId: null,
           approverId: null,
         },

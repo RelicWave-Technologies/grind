@@ -25,6 +25,7 @@ async function seedSamples(
     clicks?: number;
     activeApp: string | null;
     activeAppBundle: string | null;
+    activeUrl?: string | null;
   }>,
 ) {
   for (const r of rows) {
@@ -39,6 +40,7 @@ async function seedSamples(
         scrollEvents: 0,
         activeApp: r.activeApp,
         activeAppBundle: r.activeAppBundle,
+        activeUrl: r.activeUrl ?? null,
       },
     });
   }
@@ -151,5 +153,47 @@ describe('GET /v1/insights/day — appUsage', () => {
     // Title + URL still scrubbed because captureTitles + captureUrls
     // weren't flipped — the row's columns are null. Only appUsage's
     // app+bundle survive.
+  });
+
+  it('rolls browser activity up by domain when URL capture is enabled', async () => {
+    const admin = await seedUser({ role: 'ADMIN' });
+    await request(app)
+      .patch('/v1/admin/workspace-policy')
+      .set(auth(admin.accessToken))
+      .send({ captureApps: true, captureUrls: true });
+
+    const bucket = new Date(Math.floor(Date.now() / 60000) * 60000).toISOString();
+    const today = new Date().toISOString().slice(0, 10);
+    const post = await request(app)
+      .post('/v1/activity-samples')
+      .set(auth(admin.accessToken))
+      .send({
+        samples: [
+          {
+            id: ulid(),
+            bucketStart: bucket,
+            keystrokes: 5,
+            clicks: 1,
+            mouseDistancePx: 0,
+            scrollEvents: 0,
+            activeApp: 'Google Chrome',
+            activeAppBundle: 'com.google.Chrome',
+            activeUrl: 'https://www.github.com/org/repo',
+          },
+        ],
+      });
+    expect(post.status).toBe(201);
+
+    const res = await request(app).get(`/v1/insights/day?date=${today}&tz=UTC`).set(auth(admin.accessToken));
+    expect(res.status).toBe(200);
+    expect(res.body.appUsage.totalMinutes).toBe(1);
+    expect(res.body.appUsage.topApps[0]).toMatchObject({
+      app: 'github.com',
+      appBundle: null,
+      domain: 'github.com',
+      sourceApp: 'Google Chrome',
+      sourceAppBundle: 'com.google.Chrome',
+      iconUrl: 'https://www.google.com/s2/favicons?domain=github.com&sz=64',
+    });
   });
 });

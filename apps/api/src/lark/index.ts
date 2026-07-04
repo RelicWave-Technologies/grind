@@ -33,6 +33,7 @@ export {
   buildUpdatedApprovalCard,
   buildCancelledCard,
   buildUnavailableRequestCard,
+  buildStaleRequestCard,
 } from './cards';
 export { decideRequest } from './decide';
 export { startCardCallback } from './cardCallback';
@@ -45,6 +46,7 @@ export type {
   DiffEntry,
   CancelledCardInput,
   UnavailableRequestCardInput,
+  StaleRequestCardInput,
 } from './cards';
 export type { LarkMessenger, SendCardResult } from './messenger';
 

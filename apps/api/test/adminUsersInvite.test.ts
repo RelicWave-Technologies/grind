@@ -105,7 +105,7 @@ describe('POST /v1/admin/users (invite)', () => {
     await prisma.workspacePolicy.create({
       data: {
         workspaceId: ws.id,
-        defaultScreenshotIntervalMin: 60,
+        defaultScreenshotIntervalMin: 3,
         defaultIdleThresholdMin: 10,
       },
     });

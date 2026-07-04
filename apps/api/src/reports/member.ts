@@ -7,7 +7,7 @@ import {
   type ShiftSchedule,
   type ShiftStatus,
 } from '@grind/types';
-import { buildAppUsage } from '../insights/appUsage';
+import { appUsageIdentity, buildAppUsage } from '../insights/appUsage';
 import { appIconUrl } from '../insights/appIcon';
 import { buildDayInsight, localDayWindow, shiftDayWindow } from '../insights/day';
 import { buildHeatmap, DEFAULT_BUCKET_MS, type HeatmapSample } from '../insights/heatmap';
@@ -74,6 +74,7 @@ export interface ReportActivitySample {
   mouseDistancePx: number;
   activeApp: string | null;
   activeAppBundle: string | null;
+  activeUrl?: string | null;
 }
 
 export interface ReportScreenshotRow {
@@ -160,7 +161,7 @@ export function resolveSingleReportDay(query: Record<string, unknown>): ReportRa
 
 /** Resolves an app's icon URL; defaults to the brand map. Routes inject one that
  *  prefers the real agent-extracted icon (a `data:` URL) per bundle. */
-export type IconResolver = (app: string, bundle: string | null) => string | null;
+export type IconResolver = (app: string, bundle: string | null, domain?: string | null) => string | null;
 
 export function buildMemberReportDays(input: {
   userId: string;
@@ -272,6 +273,7 @@ export function buildMemberReportDays(input: {
       daySamples.map((s) => ({
         activeApp: s.activeApp,
         activeAppBundle: s.activeAppBundle,
+        activeUrl: s.activeUrl,
         keystrokes: s.keystrokes,
         clicks: s.clicks,
       })),
@@ -280,7 +282,10 @@ export function buildMemberReportDays(input: {
     const topApps = appUsage.topApps.map((a) => ({
       app: a.app,
       appBundle: a.appBundle,
-      iconUrl: iconFor(a.app, a.appBundle),
+      ...(a.domain ? { domain: a.domain } : {}),
+      ...(a.sourceApp !== undefined ? { sourceApp: a.sourceApp } : {}),
+      ...(a.sourceAppBundle !== undefined ? { sourceAppBundle: a.sourceAppBundle } : {}),
+      iconUrl: iconFor(a.app, a.appBundle, a.domain),
       minutes: a.minutes,
       share: appUsage.totalMinutes > 0 ? a.minutes / appUsage.totalMinutes : 0,
     }));
@@ -351,19 +356,23 @@ export function buildMemberReportApps(input: {
   let totalMinutes = 0;
   for (const s of samples) {
     if (!s.activeApp) continue;
+    const identity = appUsageIdentity(s);
+    if (!identity) continue;
     totalMinutes += 1;
-    const key = `${s.activeApp}\x00${s.activeAppBundle ?? ''}`;
-    const row = byApp.get(key);
+    const row = byApp.get(identity.key);
     if (row) {
       row.minutes += 1;
       row.keystrokes += s.keystrokes;
       row.clicks += s.clicks;
       row.scrolls += s.scrollEvents;
     } else {
-      byApp.set(key, {
-        app: s.activeApp,
-        appBundle: s.activeAppBundle,
-        iconUrl: iconFor(s.activeApp, s.activeAppBundle),
+      byApp.set(identity.key, {
+        app: identity.app,
+        appBundle: identity.appBundle,
+        ...(identity.domain ? { domain: identity.domain } : {}),
+        ...(identity.sourceApp !== undefined ? { sourceApp: identity.sourceApp } : {}),
+        ...(identity.sourceAppBundle !== undefined ? { sourceAppBundle: identity.sourceAppBundle } : {}),
+        iconUrl: iconFor(identity.app, identity.appBundle, identity.domain),
         minutes: 1,
         share: 0,
         keystrokes: s.keystrokes,

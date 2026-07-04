@@ -1,16 +1,12 @@
 /**
  * Pure screenshot scheduling logic (no Electron), so it's unit-testable.
  *
- * Screenshots are taken on a jittered cadence so the timing is unpredictable
- * (users can't game it) but bounded: never sooner than half the interval, never
- * later than the full interval. With the default 3h interval that's one shot
- * every ~90–180 min.
+ * Screenshots are taken on the exact server-driven cadence. The product policy
+ * only allows 1m, 2m, or 3m intervals; this helper still keeps a defensive
+ * 1-second floor for tests/dev overrides.
  */
 
-/** Next capture delay in ms, jittered within [interval/2, interval]. */
-export function nextDelayMs(intervalMs: number, rng: () => number = Math.random): number {
-  const safe = Math.max(1000, intervalMs);
-  const half = safe / 2;
-  const r = Math.min(1, Math.max(0, rng()));
-  return Math.round(half + r * half);
+/** Next capture delay in ms, exact with a defensive 1s floor. */
+export function nextDelayMs(intervalMs: number): number {
+  return Math.max(1000, Math.round(intervalMs));
 }

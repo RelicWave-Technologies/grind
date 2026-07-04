@@ -44,6 +44,8 @@ export interface Me {
   workspaceId: string;
   teamId: string | null;
   managerId: string | null;
+  managesTeamId?: string | null;
+  managesTeamName?: string | null;
   provisioningStatus: 'PENDING' | 'ACTIVE';
   avatarUrl: string | null;
 }

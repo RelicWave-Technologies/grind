@@ -150,7 +150,7 @@ jobs:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_USER: ${{ secrets.VPS_USER }}
 
-      - name: Pull images, migrate, and restart
+      - name: Pull images, backup, migrate, and restart
         run: |
           printf '%s' "$GHCR_TOKEN" > .ghcr-token
           printf '%s' "$GHCR_USER" > .ghcr-user
@@ -165,7 +165,51 @@ jobs:
           docker login ghcr.io -u "$GHCR_USER" --password-stdin < /tmp/grind-ghcr-token
           rm -f /tmp/grind-ghcr-token /tmp/grind-ghcr-user
           docker compose --env-file .deploy.env -f docker-compose.prod.yml pull
+
+          # Freeze writes before the backup/migration boundary. This keeps the
+          # backup a true restore point for exactly the data being migrated.
+          docker compose --env-file .deploy.env -f docker-compose.prod.yml stop api dashboard || true
+
+          BACKUP_DIR=/opt/grind/backups
+          BACKUP_NAME="timetracker_pre_${IMAGE_TAG}_$(date -u +%Y%m%dT%H%M%SZ).dump"
+          mkdir -p "$BACKUP_DIR"
+          chmod 700 "$BACKUP_DIR"
+          docker run --rm \
+            --env-file .env.production \
+            -v "$BACKUP_DIR:/backups" \
+            postgres:16-alpine \
+            sh -lc "pg_dump \"\$DATABASE_URL\" -Fc --no-owner --no-privileges -f \"/backups/${BACKUP_NAME}\" && pg_restore --list \"/backups/${BACKUP_NAME}\" >/dev/null"
+          sha256sum "$BACKUP_DIR/$BACKUP_NAME"
+
           docker compose --env-file .deploy.env -f docker-compose.prod.yml run --rm -T api pnpm --filter @grind/db exec prisma migrate deploy < /dev/null
+          docker run --rm \
+            --env-file .env.production \
+            postgres:16-alpine \
+            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          SELECT migration_name
+          FROM "_prisma_migrations"
+          WHERE finished_at IS NOT NULL
+          ORDER BY finished_at DESC
+          LIMIT 4;
+
+          SELECT COUNT(*) AS team_manager_rows
+          FROM "TeamManager";
+
+          SELECT COUNT(*) AS non_admin_manager_team_mismatches
+          FROM "TeamManager" tm
+          JOIN "User" u ON u.id = tm."userId"
+          WHERE u.role <> 'ADMIN' AND u."teamId" IS DISTINCT FROM tm."teamId";
+
+          SELECT COUNT(*) AS invalid_workspace_screenshot_defaults
+          FROM "WorkspacePolicy"
+          WHERE "defaultScreenshotIntervalMin" NOT IN (1, 2, 3);
+
+          SELECT COUNT(*) AS invalid_user_screenshot_overrides
+          FROM "User"
+          WHERE "screenshotIntervalMin" IS NOT NULL
+            AND "screenshotIntervalMin" NOT IN (1, 2, 3);
+          SQL
+
           docker compose --env-file .deploy.env -f docker-compose.prod.yml up -d --remove-orphans
           docker compose --env-file .deploy.env -f docker-compose.prod.yml ps
           docker image prune -f

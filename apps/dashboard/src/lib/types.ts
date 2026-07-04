@@ -43,6 +43,9 @@ export interface ActivityHeatmap {
 export interface AppUsageEntry {
   app: string;
   appBundle: string | null;
+  domain?: string | null;
+  sourceApp?: string | null;
+  sourceAppBundle?: string | null;
   iconUrl?: string | null;
   minutes: number;
   keystrokes: number;
@@ -198,6 +201,17 @@ export type ActivityRoleTitle = 'DEVELOPER' | 'DESIGNER' | 'SALES' | 'OTHER';
 export interface Team {
   id: string;
   name: string;
+  managers: Array<{
+    id: string;
+    name: string;
+    email: string;
+    avatarUrl: string | null;
+    role: 'ADMIN' | 'MANAGER' | 'MEMBER';
+    teamId: string | null;
+  }>;
+  managerIds: string[];
+  managerCount: number;
+  /** Compatibility alias for old API clients; prefer managers/managerIds. */
   managerId: string | null;
   memberCount: number;
   createdAt: string;

@@ -108,7 +108,7 @@ for (const s of sources) {
 }
 ```
 
-**Randomized scheduling.** Hubstaff and Time Doctor both randomize within a window — e.g. "3 per 10 min, jittered" — so users can't predict the shot ([Hubstaff docs](https://support.hubstaff.com/change-screenshot-frequency/), [Time Doctor docs](https://support.timedoctor.com/knowledge/the-screencasts-screenshots-feature)). Implement as: divide the interval into N sub-buckets, take one shot per bucket at `start + random(0, bucketLen)`.
+**Scheduling.** Product policy allows only exact 1, 2, or 3 minute screenshot intervals, with 3 minutes as the default. The agent schedules the next capture at the exact configured interval; changing this requires shipping an updated desktop agent because older agents used jittered timing.
 
 **Blur / redaction.**
 - Server-side is easier; client-side is more private. For internal use, server-side is fine.

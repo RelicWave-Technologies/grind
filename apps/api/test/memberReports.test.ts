@@ -5,6 +5,7 @@ import { prisma } from '@grind/db';
 import { buildApp } from '../src/app';
 import { signAccessToken } from '../src/lib/jwt';
 import { NINE_TO_SIX } from '@grind/types';
+import { createManagedTeam } from './helpers';
 
 const app = buildApp();
 const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
@@ -221,7 +222,6 @@ async function seedTeamReport() {
       email: `team-member-${stamp}@test.local`,
       name: 'Team Member',
       role: 'MEMBER',
-      managerId: manager.id,
       passwordHash: 'x'.repeat(60),
     },
   });
@@ -240,16 +240,11 @@ async function seedTeamReport() {
       email: `outsider-${stamp}@test.local`,
       name: 'Outside Member',
       role: 'MEMBER',
-      managerId: otherManager.id,
       passwordHash: 'x'.repeat(60),
     },
   });
-  const team = await prisma.team.create({
-    data: { workspaceId: ws.id, name: 'Reports Team', managerId: manager.id },
-  });
-  const otherTeam = await prisma.team.create({
-    data: { workspaceId: ws.id, name: 'Other Team', managerId: otherManager.id },
-  });
+  const team = await createManagedTeam({ workspaceId: ws.id, name: 'Reports Team', managerId: manager.id });
+  const otherTeam = await createManagedTeam({ workspaceId: ws.id, name: 'Other Team', managerId: otherManager.id });
   await prisma.user.update({ where: { id: member.id }, data: { teamId: team.id } });
   await prisma.user.update({ where: { id: outsider.id }, data: { teamId: otherTeam.id } });
   await prisma.shiftAssignment.create({

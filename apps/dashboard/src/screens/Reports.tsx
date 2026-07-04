@@ -1542,12 +1542,12 @@ function AppsPanel({ data }: { data: MemberReportDayAppsResponse }) {
   return (
     <div className="rep-apps-list">
       {data.apps.map((app) => (
-        <div key={`${app.app}-${app.appBundle ?? ''}`} className="rep-app-row">
+        <div key={`${app.domain ?? app.app}-${app.appBundle ?? ''}`} className="rep-app-row">
           <AppIcon name={app.app} iconUrl={app.iconUrl} />
           <div className="rep-app-row-main">
             <div className="rep-app-row-title">
               <span className="ui-t-strong">{app.app}</span>
-              <span className="ui-t-small ui-ink-3">{app.appBundle ?? 'Unknown bundle'}</span>
+              <span className="ui-t-small ui-ink-3">{app.domain ? app.sourceApp ?? 'Browser' : app.appBundle ?? 'Unknown bundle'}</span>
             </div>
             <div className="rep-bar" aria-hidden>
               <span style={{ width: `${Math.max(2, app.share * 100)}%` }} />
@@ -1667,9 +1667,9 @@ function ReportModal({
   );
 }
 
-function AppBadge({ app }: { app: { app: string; appBundle: string | null; iconUrl: string | null; minutes: number; share: number } }) {
+function AppBadge({ app }: { app: { app: string; appBundle: string | null; domain?: string | null; sourceApp?: string | null; iconUrl: string | null; minutes: number; share: number } }) {
   return (
-    <span className="rep-app-badge">
+    <span className="rep-app-badge" title={app.domain ? `${app.domain}${app.sourceApp ? ` · ${app.sourceApp}` : ''}` : undefined}>
       <AppIcon name={app.app} iconUrl={app.iconUrl} />
       <span>{app.app}</span>
     </span>

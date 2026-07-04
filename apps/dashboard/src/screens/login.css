@@ -95,6 +95,32 @@
   height: var(--ui-sp-7);
 }
 
+.lgn-dev-form {
+  display: grid;
+  gap: var(--ui-sp-3);
+  margin-top: calc(var(--ui-sp-8) * -0.55);
+}
+
+.lgn-dev-input {
+  width: 100%;
+  height: calc(var(--ui-sp-10) + var(--ui-sp-1));
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-md);
+  background: var(--ui-surface);
+  color: var(--ui-ink);
+  font-family: var(--ui-font-sans);
+  font-size: var(--ui-sp-4);
+  font-weight: 520;
+  letter-spacing: 0;
+  padding: 0 var(--ui-sp-5);
+  outline: none;
+}
+
+.lgn-dev-input:focus {
+  border-color: var(--ui-focus);
+  box-shadow: var(--ui-focus-ring);
+}
+
 .lgn-downloads {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

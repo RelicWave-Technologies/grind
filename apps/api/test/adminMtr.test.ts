@@ -3,6 +3,7 @@ import request from 'supertest';
 import { prisma } from '@grind/db';
 import { buildApp } from '../src/app';
 import { signAccessToken } from '../src/lib/jwt';
+import { createManagedTeam } from './helpers';
 
 /**
  * /v1/admin/manual-time-requests + /decide tests against real Postgres.
@@ -45,9 +46,9 @@ async function seed() {
   const mgrB = await mk('mgr-b', 'Mark Manager B', 'MANAGER');
   const memB = await mk('mem-b', 'Bob Member B', 'MEMBER');
 
-  const teamA = await prisma.team.create({ data: { workspaceId: ws.id, name: 'A', managerId: mgrA.id } });
+  const teamA = await createManagedTeam({ workspaceId: ws.id, name: 'A', managerId: mgrA.id });
   await prisma.user.updateMany({ where: { id: { in: [mgrA.id, memA.id] } }, data: { teamId: teamA.id } });
-  const teamB = await prisma.team.create({ data: { workspaceId: ws.id, name: 'B', managerId: mgrB.id } });
+  const teamB = await createManagedTeam({ workspaceId: ws.id, name: 'B', managerId: mgrB.id });
   await prisma.user.updateMany({ where: { id: { in: [mgrB.id, memB.id] } }, data: { teamId: teamB.id } });
 
   const token = (u: { id: string; role: 'ADMIN' | 'MANAGER' | 'MEMBER' }) =>

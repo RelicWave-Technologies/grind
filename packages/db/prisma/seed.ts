@@ -53,18 +53,22 @@ async function main() {
 
   const payrollTeam = await prisma.team.upsert({
     where: { id: 'team_payroll_may_cases' },
-    update: { workspaceId: ws.id, name: 'Payroll May Cases', managerId: manager.id },
+    update: { workspaceId: ws.id, name: 'Payroll May Cases' },
     create: {
       id: 'team_payroll_may_cases',
       workspaceId: ws.id,
       name: 'Payroll May Cases',
-      managerId: manager.id,
     },
+  });
+  await prisma.teamManager.upsert({
+    where: { userId: manager.id },
+    update: { workspaceId: ws.id, teamId: payrollTeam.id },
+    create: { workspaceId: ws.id, teamId: payrollTeam.id, userId: manager.id },
   });
 
   await prisma.user.update({
     where: { id: manager.id },
-    data: { teamId: payrollTeam.id, managerId: manager.id },
+    data: { teamId: payrollTeam.id, managerId: null },
   });
 
   const mayShift = await prisma.shift.upsert({
@@ -112,7 +116,7 @@ async function main() {
       passwordHash,
       provisioningStatus: 'ACTIVE',
       teamId: payrollTeam.id,
-      managerId: manager.id,
+      managerId: null,
       shiftId: null,
       shiftAssignedAt: null,
       deactivatedAt: null,
@@ -125,7 +129,7 @@ async function main() {
       passwordHash,
       provisioningStatus: 'ACTIVE',
       teamId: payrollTeam.id,
-      managerId: manager.id,
+      managerId: null,
       shiftId: null,
       shiftAssignedAt: null,
     },

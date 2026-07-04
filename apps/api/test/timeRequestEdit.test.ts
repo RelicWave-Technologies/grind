@@ -4,11 +4,12 @@ import { prisma } from '@grind/db';
 import { buildApp } from '../src/app';
 import { seedUser } from './helpers';
 import { setLarkMessengerForTests, type LarkMessenger, type SendCardResult } from '../src/lark';
+import { processManualTimeLarkOutboxOnce } from '../src/manualTime/larkOutbox';
 
 /**
  * Integration tests for PATCH /v1/time-requests/:id and POST :id/cancel.
- * Real Postgres + FakeMessenger captures so we can assert the Lark side
- * (card update + text notice) without hitting Lark.
+ * Real Postgres + FakeMessenger captures so we can assert the queued Lark side
+ * without hitting Lark.
  */
 
 const app = buildApp();
@@ -105,10 +106,12 @@ describe('PATCH /v1/time-requests/:id — happy path', () => {
         reason: 'initial reason',
       });
     expect(created.status).toBe(201);
+    expect(fake.sends.length).toBe(0);
+    await processManualTimeLarkOutboxOnce();
     expect(fake.sends.length).toBe(1);
     expect(fake.sends[0]!.receiveOpenId).toBe(openId);
     const id = created.body.id;
-    expect(created.body.larkMessageId).toBe('om_1');
+    expect(created.body.larkMessageId).toBeNull();
     void approver;
 
     // Now PATCH the reason.
@@ -117,13 +120,19 @@ describe('PATCH /v1/time-requests/:id — happy path', () => {
       .set(bearer(requester.accessToken))
       .send({ reason: 'updated explanation' });
     expect(patched.status).toBe(200);
+    expect(patched.body.version).toBe(2);
 
-    // The old card (om_1) is updated to its SUPERSEDED variant (no
-    // Approve/Reject buttons, grey header, "see new card" notice).
+    // PATCH only queues Lark work; the outbox then sends the new card and
+    // disables older known cards.
+    expect(fake.sends.length).toBe(1);
+    expect(fake.updates.length).toBe(0);
+    await processManualTimeLarkOutboxOnce();
+
+    // The old card (om_1) is updated to a stale variant (no buttons).
     expect(fake.updates.length).toBe(1);
     expect(fake.updates[0]!.messageId).toBe('om_1');
     const supersededJson = JSON.stringify(fake.updates[0]!.card);
-    expect(supersededJson).toContain('updated');
+    expect(supersededJson).toContain('stale');
     // No action buttons on the superseded card.
     expect(supersededJson).not.toContain('"action":"approve"');
     expect(supersededJson).not.toContain('"action":"reject"');
@@ -141,9 +150,44 @@ describe('PATCH /v1/time-requests/:id — happy path', () => {
 
     // DB's larkMessageId points at the NEW card so future edits/cancels
     // act on it instead of the (now-superseded) original.
-    expect(patched.body.larkMessageId).toBe('om_2');
+    const fresh = await prisma.manualTimeRequest.findUniqueOrThrow({ where: { id } });
+    expect(fresh.larkMessageId).toBe('om_2');
     // No plain-text nudge anymore — the new card itself carries the news.
     expect(fake.texts.length).toBe(0);
+  });
+
+  it('does not send the original actionable card if the request is edited before the outbox drains', async () => {
+    const { requester, openId } = await seedWorkspaceWithApprover();
+    const created = await request(app)
+      .post('/v1/time-requests')
+      .set(bearer(requester.accessToken))
+      .send({
+        clientUuid: `cu_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        requestedStart: '2026-05-20T09:00:00.000Z',
+        requestedEnd: '2026-05-20T10:00:00.000Z',
+        reason: 'initial reason',
+      });
+    expect(created.status).toBe(201);
+    expect(fake.sends.length).toBe(0);
+
+    const patched = await request(app)
+      .patch(`/v1/time-requests/${created.body.id}`)
+      .set(bearer(requester.accessToken))
+      .send({ reason: 'updated before first send' });
+    expect(patched.status).toBe(200);
+
+    await processManualTimeLarkOutboxOnce();
+    expect(fake.sends.length).toBe(1);
+    expect(fake.sends[0]!.receiveOpenId).toBe(openId);
+    const sentJson = JSON.stringify(fake.sends[0]!.card);
+    expect(sentJson).toContain('updated before first send');
+    expect(sentJson).toContain('What changed');
+
+    const messages = await prisma.manualTimeLarkMessage.findMany({
+      where: { requestId: created.body.id },
+      orderBy: { version: 'asc' },
+    });
+    expect(messages.map((m) => m.status)).toEqual(['SUPERSEDED', 'SENT']);
   });
 });
 
@@ -237,9 +281,12 @@ describe('POST /v1/time-requests/:id/cancel', () => {
       });
     expect(created.status).toBe(201);
     void openId; // delivered to the approver via the initial sendCard
+    await processManualTimeLarkOutboxOnce();
 
     const cancelled = await request(app).post(`/v1/time-requests/${created.body.id}/cancel`).set(bearer(requester.accessToken));
     expect(cancelled.status).toBe(200);
+    expect(fake.updates.length).toBe(0);
+    await processManualTimeLarkOutboxOnce();
 
     // The original card (om_1) was rewritten with the withdrawn variant:
     // red header, no Approve/Reject buttons, "withdrawn by requester" note.
@@ -251,5 +298,28 @@ describe('POST /v1/time-requests/:id/cancel', () => {
     expect(withdrawnJson).not.toContain('"action":"reject"');
     // No extra text nudge — the rewritten card carries the news on its own.
     expect(fake.texts.length).toBe(0);
+  });
+
+  it('does not send an actionable card if the request is cancelled before the outbox drains', async () => {
+    const { requester } = await seedWorkspaceWithApprover();
+    const created = await request(app)
+      .post('/v1/time-requests')
+      .set(bearer(requester.accessToken))
+      .send({
+        clientUuid: `cu_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        requestedStart: '2026-05-20T09:00:00.000Z',
+        requestedEnd: '2026-05-20T10:00:00.000Z',
+        reason: 'initial',
+      });
+    expect(created.status).toBe(201);
+
+    const cancelled = await request(app).post(`/v1/time-requests/${created.body.id}/cancel`).set(bearer(requester.accessToken));
+    expect(cancelled.status).toBe(200);
+    await processManualTimeLarkOutboxOnce();
+
+    expect(fake.sends.length).toBe(0);
+    expect(fake.updates.length).toBe(0);
+    const message = await prisma.manualTimeLarkMessage.findFirstOrThrow({ where: { requestId: created.body.id } });
+    expect(message.status).toBe('CANCELLED');
   });
 });

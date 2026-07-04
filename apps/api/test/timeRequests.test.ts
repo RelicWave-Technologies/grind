@@ -3,8 +3,9 @@ import request from 'supertest';
 import type { Express } from 'express';
 import { prisma } from '@grind/db';
 import { buildApp } from '../src/app';
-import { seedUser, iso } from './helpers';
+import { createManagedTeam, seedUser, iso } from './helpers';
 import { setLarkMessengerForTests, type LarkMessenger, type SendCardResult } from '../src/lark';
+import { processManualTimeLarkOutboxOnce } from '../src/manualTime/larkOutbox';
 
 let app: Express;
 beforeAll(() => { app = buildApp(); });
@@ -48,6 +49,7 @@ async function seedWorkspaceWithApprover(approverOpenId: string | null | undefin
       email: `admin-${Date.now()}@test.local`,
       name: 'Manager Mira',
       role: 'ADMIN',
+      provisioningStatus: 'ACTIVE',
       passwordHash: 'x'.repeat(60),
     },
   });
@@ -65,6 +67,7 @@ async function seedWorkspaceWithManagerApprover(managerOpenId = `ou_manager_${Da
       email: `admin-${Date.now()}@test.local`,
       name: 'Admin Ada',
       role: 'ADMIN',
+      provisioningStatus: 'ACTIVE',
       passwordHash: 'x'.repeat(60),
     },
   });
@@ -74,10 +77,12 @@ async function seedWorkspaceWithManagerApprover(managerOpenId = `ou_manager_${Da
       email: `manager-${Date.now()}@test.local`,
       name: 'Manager Mira',
       role: 'MANAGER',
+      provisioningStatus: 'ACTIVE',
       passwordHash: 'x'.repeat(60),
     },
   });
-  await prisma.user.update({ where: { id: requester.userId }, data: { managerId: manager.id } });
+  const team = await createManagedTeam({ workspaceId: requester.workspaceId, name: 'Approvals', managerId: manager.id });
+  await prisma.user.update({ where: { id: requester.userId }, data: { teamId: team.id, managerId: null } });
   await prisma.larkIdentity.create({ data: { userId: manager.id, openId: managerOpenId } });
   return { requester, admin, manager, managerOpenId };
 }
@@ -98,7 +103,7 @@ describe('POST /v1/time-requests — submit', () => {
     expect(res.status).toBe(401);
   });
 
-  it('creates a PENDING request and sends a card to the approver', async () => {
+  it('creates a PENDING request and queues a card to the approver', async () => {
     const openId = `ou_admin_X_${Date.now()}`;
     const { requester, admin } = await seedWorkspaceWithApprover(openId);
     const b = body({ larkTaskGuid: 'guid-T', taskSummary: 'Ship M10' });
@@ -115,14 +120,18 @@ describe('POST /v1/time-requests — submit', () => {
       taskSummary: 'Ship M10',
       reason: b.reason,
     });
-    expect(res.body.larkMessageId).toBe('om_fake_1');
+    expect(res.body.larkMessageId).toBeNull();
+    expect(res.body.larkDeliveryStatus).toBe('queued');
 
-    // Real DB has the row, status PENDING, with the messageId persisted.
+    // Real DB has the row, status PENDING, before the outbox talks to Lark.
     const row = await prisma.manualTimeRequest.findUnique({ where: { id: res.body.id } });
     expect(row).not.toBeNull();
     expect(row!.status).toBe('PENDING');
     expect(row!.taskSummary).toBe('Ship M10');
-    expect(row!.larkMessageId).toBe('om_fake_1');
+    expect(row!.larkMessageId).toBeNull();
+
+    expect(fake.sends).toHaveLength(0);
+    expect(await processManualTimeLarkOutboxOnce()).toBe(1);
 
     // The messenger was called with the admin's open_id and a real card payload.
     expect(fake.sends).toHaveLength(1);
@@ -130,11 +139,16 @@ describe('POST /v1/time-requests — submit', () => {
     // Card body carries the requestId in a button value, and the requester name + reason in fields.
     const json = JSON.stringify(fake.sends[0]!.card);
     expect(json).toContain(res.body.id);
+    expect(json).toContain('cardId');
+    expect(json).toContain('version');
     expect(json).toContain('Ship M10');
     expect(json).toContain(b.reason);
+
+    const sent = await prisma.manualTimeRequest.findUniqueOrThrow({ where: { id: res.body.id } });
+    expect(sent.larkMessageId).toBe('om_fake_1');
   });
 
-  it('routes a member request to their direct manager before admin fallback', async () => {
+  it('routes a member request to their team manager before admin fallback', async () => {
     const { requester, admin, manager, managerOpenId } = await seedWorkspaceWithManagerApprover();
     const res = await request(app)
       .post('/v1/time-requests')
@@ -144,6 +158,8 @@ describe('POST /v1/time-requests — submit', () => {
     expect(res.body.status).toBe('PENDING');
     expect(res.body.approverId).toBe(manager.id);
     expect(res.body.approverId).not.toBe(admin.id);
+    expect(fake.sends).toHaveLength(0);
+    await processManualTimeLarkOutboxOnce();
     expect(fake.sends).toHaveLength(1);
     expect(fake.sends[0]!.receiveOpenId).toBe(managerOpenId);
   });
@@ -153,6 +169,7 @@ describe('POST /v1/time-requests — submit', () => {
     const b = body();
     const first = await request(app).post('/v1/time-requests').set('Authorization', `Bearer ${requester.accessToken}`).send(b);
     expect(first.status).toBe(201);
+    await processManualTimeLarkOutboxOnce();
     const second = await request(app).post('/v1/time-requests').set('Authorization', `Bearer ${requester.accessToken}`).send(b);
     expect(second.status).toBe(200);
     expect(second.body.id).toBe(first.body.id);
@@ -200,11 +217,15 @@ describe('POST /v1/time-requests — submit', () => {
 
   it('treats Lark send failure as non-fatal — request still PENDING, no larkMessageId', async () => {
     const { requester } = await seedWorkspaceWithApprover();
-    fake.failNextSend = true;
     const res = await request(app).post('/v1/time-requests').set('Authorization', `Bearer ${requester.accessToken}`).send(body());
     expect(res.status).toBe(201);
     expect(res.body.status).toBe('PENDING');
     expect(res.body.larkMessageId).toBeNull();
+    fake.failNextSend = true;
+    await processManualTimeLarkOutboxOnce();
+    const message = await prisma.manualTimeLarkMessage.findFirstOrThrow({ where: { requestId: res.body.id } });
+    expect(message.status).toBe('SEND_FAILED');
+    expect(message.lastError).toContain('lark network down');
   });
 });
 

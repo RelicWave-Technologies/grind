@@ -54,7 +54,7 @@ async function seedAgentConfig(input: {
 describe('/v1/agent/config', () => {
   it('uses workspace policy defaults when member overrides are null', async () => {
     const s = await seedAgentConfig({
-      policy: { defaultScreenshotIntervalMin: 45, defaultIdleThresholdMin: 7 },
+      policy: { defaultScreenshotIntervalMin: 2, defaultIdleThresholdMin: 7 },
       user: { screenshotIntervalMin: null, idleThresholdMin: null },
     });
 
@@ -62,7 +62,7 @@ describe('/v1/agent/config', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.configVersion).toEqual(expect.any(String));
-    expect(res.body.screenshotIntervalMin).toBe(45);
+    expect(res.body.screenshotIntervalMin).toBe(2);
     expect(res.body.idleThresholdMin).toBe(7);
     expect(res.body.captureApps).toBe(false);
     expect(res.body.captureTitles).toBe(false);
@@ -71,21 +71,21 @@ describe('/v1/agent/config', () => {
 
   it('gives per-member overrides priority over workspace policy defaults', async () => {
     const s = await seedAgentConfig({
-      policy: { defaultScreenshotIntervalMin: 45, defaultIdleThresholdMin: 7 },
-      user: { screenshotIntervalMin: 90, idleThresholdMin: 12 },
+      policy: { defaultScreenshotIntervalMin: 3, defaultIdleThresholdMin: 7 },
+      user: { screenshotIntervalMin: 1, idleThresholdMin: 12 },
     });
 
     const res = await request(app).get('/v1/agent/config').set(auth(s.token));
 
     expect(res.status).toBe(200);
-    expect(res.body.screenshotIntervalMin).toBe(90);
+    expect(res.body.screenshotIntervalMin).toBe(1);
     expect(res.body.idleThresholdMin).toBe(12);
   });
 
   it('returns workspace capture policy flags to the agent', async () => {
     const s = await seedAgentConfig({
       policy: {
-        defaultScreenshotIntervalMin: 45,
+        defaultScreenshotIntervalMin: 2,
         defaultIdleThresholdMin: 7,
         captureApps: true,
         captureTitles: true,
@@ -109,7 +109,7 @@ describe('/v1/agent/config', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.configVersion).toEqual(expect.any(String));
-    expect(res.body.screenshotIntervalMin).toBe(180);
+    expect(res.body.screenshotIntervalMin).toBe(3);
     expect(res.body.idleThresholdMin).toBe(5);
     expect(res.body.captureApps).toBe(false);
     expect(res.body.captureTitles).toBe(false);

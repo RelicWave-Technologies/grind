@@ -39,13 +39,34 @@ async function setup(opts: { approverOpenId?: string | null } = {}) {
       status: 'PENDING',
     },
   });
-  return { requester: requesterUser, admin, req, openId };
+  const card = openId
+    ? await prisma.manualTimeLarkMessage.create({
+        data: {
+          requestId: req.id,
+          version: req.version,
+          recipientOpenId: openId,
+          messageId: `om_dec_${ulid()}`,
+          kind: 'APPROVAL',
+          status: 'SENT',
+        },
+      })
+    : null;
+  return { requester: requesterUser, admin, req, openId, card };
+}
+
+function click(req: { id: string; version: number }, card: { id: string; version: number } | null, openId: string) {
+  return {
+    requestId: req.id,
+    cardId: card?.id,
+    version: card?.version ?? req.version,
+    decidedByOpenId: openId,
+  };
 }
 
 describe('decideRequest — APPROVE', () => {
   it('flips status to APPROVED, creates a real TimeEntry(MANUAL), returns a green decided card', async () => {
-    const { admin, req, openId } = await setup();
-    const result = await decideRequest({ requestId: req.id, action: 'approve', decidedByOpenId: openId! });
+    const { admin, req, openId, card } = await setup();
+    const result = await decideRequest({ ...click(req, card, openId!), action: 'approve' });
     expect(result).not.toBeNull();
     expect(result!.status).toBe('APPROVED');
     expect(result!.timeEntryId).toBeTruthy();
@@ -74,7 +95,7 @@ describe('decideRequest — APPROVE', () => {
 
 describe('decideRequest — attendees', () => {
   it('carries the request attendees (meeting participants) onto the approved TimeEntry', async () => {
-    const { requester, req, openId } = await setup();
+    const { requester, req, openId, card } = await setup();
     const mk = (tag: string) =>
       prisma.user.create({
         data: {
@@ -94,7 +115,7 @@ describe('decideRequest — attendees', () => {
       ],
     });
 
-    const result = await decideRequest({ requestId: req.id, action: 'approve', decidedByOpenId: openId! });
+    const result = await decideRequest({ ...click(req, card, openId!), action: 'approve' });
     expect(result!.status).toBe('APPROVED');
     const teAttendees = await prisma.timeEntryAttendee.findMany({ where: { timeEntryId: result!.timeEntryId! } });
     expect(teAttendees.map((a) => a.userId).sort()).toEqual([a1.id, a2.id].sort());
@@ -103,8 +124,8 @@ describe('decideRequest — attendees', () => {
 
 describe('decideRequest — REJECT', () => {
   it('flips status to REJECTED, does NOT create a TimeEntry, returns a red decided card', async () => {
-    const { req, openId } = await setup();
-    const result = await decideRequest({ requestId: req.id, action: 'reject', decidedByOpenId: openId! });
+    const { req, openId, card } = await setup();
+    const result = await decideRequest({ ...click(req, card, openId!), action: 'reject' });
     expect(result!.status).toBe('REJECTED');
     expect(result!.timeEntryId).toBeNull();
 
@@ -119,12 +140,12 @@ describe('decideRequest — REJECT', () => {
 
 describe('decideRequest — idempotency', () => {
   it('a second click on an already-approved card is a no-op (status preserved, no duplicate entry)', async () => {
-    const { req, openId } = await setup();
-    const first = await decideRequest({ requestId: req.id, action: 'approve', decidedByOpenId: openId! });
+    const { req, openId, card } = await setup();
+    const first = await decideRequest({ ...click(req, card, openId!), action: 'approve' });
     expect(first!.status).toBe('APPROVED');
     const firstTeId = first!.timeEntryId;
 
-    const second = await decideRequest({ requestId: req.id, action: 'reject', decidedByOpenId: openId! });
+    const second = await decideRequest({ ...click(req, card, openId!), action: 'reject' });
     expect(second!.status).toBe('APPROVED'); // unchanged
     expect(second!.noop).toBe('already_decided');
     expect(second!.timeEntryId).toBe(firstTeId); // same TimeEntry, no duplicate
@@ -134,15 +155,51 @@ describe('decideRequest — idempotency', () => {
   });
 });
 
+describe('decideRequest — stale cards and races', () => {
+  it('does not decide when an old card version is clicked after an edit', async () => {
+    const { req, openId, card } = await setup();
+    await prisma.manualTimeRequest.update({
+      where: { id: req.id },
+      data: { version: { increment: 1 }, reason: 'edited reason' },
+    });
+
+    const result = await decideRequest({ ...click(req, card, openId!), action: 'approve' });
+    expect(result!.noop).toBe('stale_card');
+    expect(result!.status).toBe('PENDING');
+    expect(JSON.stringify(result!.card)).toContain('stale');
+
+    const row = await prisma.manualTimeRequest.findUniqueOrThrow({ where: { id: req.id } });
+    expect(row.status).toBe('PENDING');
+    expect(row.timeEntryId).toBeNull();
+    expect(await prisma.timeEntry.count()).toBe(0);
+    const staleCard = await prisma.manualTimeLarkMessage.findUniqueOrThrow({ where: { id: card!.id } });
+    expect(staleCard.status).toBe('STALE');
+  });
+
+  it('serializes approve/reject races into one final state without duplicate time', async () => {
+    const { req, openId, card } = await setup();
+    const [a, b] = await Promise.all([
+      decideRequest({ ...click(req, card, openId!), action: 'approve' }),
+      decideRequest({ ...click(req, card, openId!), action: 'reject' }),
+    ]);
+    const row = await prisma.manualTimeRequest.findUniqueOrThrow({ where: { id: req.id } });
+
+    expect(['APPROVED', 'REJECTED']).toContain(row.status);
+    expect(a!.status).toBe(row.status);
+    expect(b!.status).toBe(row.status);
+    expect(await prisma.timeEntry.count({ where: { clientUuid: `mtr-${req.id}` } })).toBe(row.status === 'APPROVED' ? 1 : 0);
+  });
+});
+
 describe('decideRequest — cancelled requests', () => {
   it('returns a cancelled card, not a rejected decision card', async () => {
-    const { req, openId } = await setup();
+    const { req, openId, card } = await setup();
     await prisma.manualTimeRequest.update({
       where: { id: req.id },
       data: { status: 'CANCELLED', decidedAt: new Date('2026-05-29T11:00:00.000Z') },
     });
 
-    const result = await decideRequest({ requestId: req.id, action: 'approve', decidedByOpenId: openId! });
+    const result = await decideRequest({ ...click(req, card, openId!), action: 'approve' });
     expect(result!.status).toBe('CANCELLED');
     expect(result!.noop).toBe('cancelled');
     expect(result!.timeEntryId).toBeNull();
@@ -154,8 +211,8 @@ describe('decideRequest — cancelled requests', () => {
 
 describe('decideRequest — authorization', () => {
   it('rejects a decider whose open_id is not the assigned approver', async () => {
-    const { req } = await setup({ approverOpenId: 'ou_approver_A' });
-    const result = await decideRequest({ requestId: req.id, action: 'approve', decidedByOpenId: 'ou_someone_else' });
+    const { req, card } = await setup({ approverOpenId: 'ou_approver_A' });
+    const result = await decideRequest({ ...click(req, card, 'ou_someone_else'), action: 'approve' });
     expect(result!.noop).toBe('forbidden');
 
     const row = await prisma.manualTimeRequest.findUniqueOrThrow({ where: { id: req.id } });
@@ -183,8 +240,18 @@ describe('decideRequest — authorization', () => {
         status: 'PENDING',
       },
     });
+    const card = await prisma.manualTimeLarkMessage.create({
+      data: {
+        requestId: req.id,
+        version: req.version,
+        recipientOpenId: openId,
+        messageId: `om_self_${ulid()}`,
+        kind: 'APPROVAL',
+        status: 'SENT',
+      },
+    });
 
-    const result = await decideRequest({ requestId: req.id, action: 'approve', decidedByOpenId: openId });
+    const result = await decideRequest({ ...click(req, card, openId), action: 'approve' });
     expect(result!.noop).toBeNull();
     expect(result!.status).toBe('APPROVED');
     const row = await prisma.manualTimeRequest.findUniqueOrThrow({ where: { id: req.id } });
@@ -207,8 +274,18 @@ describe('decideRequest — authorization', () => {
         status: 'PENDING',
       },
     });
+    const card = await prisma.manualTimeLarkMessage.create({
+      data: {
+        requestId: req.id,
+        version: req.version,
+        recipientOpenId: openId,
+        messageId: `om_member_self_${ulid()}`,
+        kind: 'APPROVAL',
+        status: 'SENT',
+      },
+    });
 
-    const result = await decideRequest({ requestId: req.id, action: 'approve', decidedByOpenId: openId });
+    const result = await decideRequest({ ...click(req, card, openId), action: 'approve' });
     expect(result!.noop).toBe('self_approval_forbidden');
     expect(result!.status).toBe('PENDING');
     const row = await prisma.manualTimeRequest.findUniqueOrThrow({ where: { id: req.id } });

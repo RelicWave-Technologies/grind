@@ -27,7 +27,7 @@ Plus the **web dashboard** (browser) for the heavy manager/admin views: team tim
 ## Core capabilities (target)
 - Time tracking with a **segment model** (work / meeting / idle-trimmed); idle discard trims retroactively; crash-safe.
 - **Auto-start on boot/wake**; idle detection with an "are you still working?" prompt (popup time never counts).
-- **Screenshots**: 1 per 3 hours, high quality, fullscreen-safe; 60-day retention; self-serve delete/blur.
+- **Screenshots**: exact 1/2/3 minute cadence, 3 minutes by default, high quality, fullscreen-safe; 60-day retention; self-serve delete/blur.
 - **Activity**: keystroke/mouse/scroll **counts** + content-free timing stats; **role-based productivity score**; **anti-cheat** (impossible rates, jigglers, PyAutoGUI, static-screen) → flag for review, hard-reject only physically-impossible.
 - **Lark**: per-user OAuth; **Task** time attribution; **Meet/Calendar** meeting detection; **IM approval cards** for manual-time requests.
 - **Attendance**, **monthly reports**, and an admin-only payroll worksheet that classifies shift days without executing payments.

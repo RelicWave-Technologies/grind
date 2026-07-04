@@ -11,7 +11,7 @@ import {
  *
  * Three scope tiers:
  *   - self       MEMBER → can only see their own data
- *   - team       MANAGER → can see every user in any team they manage
+ *   - team       MANAGER → can see every user in the one team they manage
  *   - workspace  ADMIN → can see every user in their workspace
  *
  * The middleware attaches `req.scope` so route handlers don't have to repeat
@@ -45,15 +45,20 @@ declare global {
  * Resolves the caller's scope and pre-computes the visible user-id list.
  * Use as `app.use('/v1/admin', requireAccessToken, attachScope, ...)`.
  *
- * For MANAGERs we fetch the union of members across every team they manage
- * — usually 1 team, but we don't constrain that. We also include the
- * manager themselves so "My Day" works for managers.
+ * For MANAGERs we fetch members of the single team they manage. We also
+ * include the manager themselves so "My Day" works for managers.
  */
 export const attachScope: RequestHandler = async (req, res, next) => {
   if (!req.user) return res.status(401).json({ error: 'unauthorized' });
   try {
-    const role = req.user.role;
     const workspaceId = req.user.ws;
+    const currentUser = await prisma.user.findFirst({
+      where: { id: req.user.sub, workspaceId, deactivatedAt: null },
+      select: { role: true },
+    });
+    if (!currentUser) return res.status(401).json({ error: 'unauthorized' });
+    const role = currentUser.role;
+    req.user.role = role;
     const capabilities = roleCapabilities(role);
     const isAdmin = hasPermission(capabilities, 'people.manage');
     let scope: Scope;
@@ -71,12 +76,16 @@ export const attachScope: RequestHandler = async (req, res, next) => {
       userIds = users.map((u) => u.id);
     } else if (role === 'MANAGER') {
       scope = 'team';
-      const teams = await prisma.team.findMany({
-        where: { managerId: req.user.sub },
-        include: { members: { where: { deactivatedAt: null }, select: { id: true } } },
+      const managed = await prisma.teamManager.findUnique({
+        where: { userId: req.user.sub },
+        include: {
+          team: {
+            include: { members: { where: { deactivatedAt: null }, select: { id: true } } },
+          },
+        },
       });
       const memberIds = new Set<string>([req.user.sub]);
-      for (const t of teams) for (const m of t.members) memberIds.add(m.id);
+      if (managed) for (const m of managed.team.members) memberIds.add(m.id);
       userIds = [...memberIds];
     } else {
       scope = 'self';

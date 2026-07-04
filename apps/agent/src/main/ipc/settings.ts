@@ -2,12 +2,13 @@ import { ipcMain, app, shell, dialog } from 'electron';
 import { screenStatus, hasAccessibilityAccess } from '../services/permissions';
 import { getActivityCaptureStatus, type ActivityCaptureStatus } from '../services/activity';
 import { getPreferences } from '../services/preferences';
+import { enableLaunchAtLogin, getLaunchAtLoginInfo, type LaunchAtLoginInfo } from '../services/launchAtLogin';
 import { applyFloatingBarVisibility, resetFloatingBarPosition } from '../floating';
 
 export interface SettingsInfo {
   version: string;
   platform: string;
-  launchAtLogin: boolean;
+  launchAtLogin: LaunchAtLoginInfo;
   screenStatus: string;
   /** Per-device UI pref (M2 floating bar). */
   floatingBarVisible: boolean;
@@ -17,15 +18,12 @@ export function registerSettingsIpc(): void {
   ipcMain.handle('settings:get', (): SettingsInfo => ({
     version: app.getVersion(),
     platform: process.platform,
-    launchAtLogin: app.getLoginItemSettings().openAtLogin,
+    launchAtLogin: getLaunchAtLoginInfo(),
     screenStatus: screenStatus(),
     floatingBarVisible: getPreferences().floatingBar.visible,
   }));
 
-  ipcMain.handle('settings:setLaunchAtLogin', (_e, enabled: boolean) => {
-    app.setLoginItemSettings({ openAtLogin: enabled, args: ['--hidden'] });
-    return app.getLoginItemSettings().openAtLogin;
-  });
+  ipcMain.handle('settings:enableLaunchAtLogin', (): LaunchAtLoginInfo => enableLaunchAtLogin());
 
   // M2 floating bar: visibility toggle + reset-to-default-corner.
   ipcMain.handle('settings:setFloatingBarVisible', (_e, enabled: boolean): boolean => {
@@ -39,6 +37,12 @@ export function registerSettingsIpc(): void {
   ipcMain.handle('settings:openScreenPrefs', async () => {
     if (process.platform === 'darwin') {
       await shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture');
+    }
+  });
+
+  ipcMain.handle('settings:openLoginItemsPrefs', async () => {
+    if (process.platform === 'darwin') {
+      await shell.openExternal('x-apple.systempreferences:com.apple.LoginItems-Settings.extension');
     }
   });
 

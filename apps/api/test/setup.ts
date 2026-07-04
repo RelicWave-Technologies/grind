@@ -27,6 +27,6 @@ const { prisma } = await import('@grind/db');
 beforeEach(async () => {
   // Wipe all tables between tests for deterministic isolation.
   await prisma.$executeRawUnsafe(
-    'TRUNCATE TABLE "ManualTimeRequest","ActivitySample","TimeSegment","TimeEntry","RefreshToken","AgentAuthCode","LarkOAuthToken","LarkIdentity","User","Workspace" RESTART IDENTITY CASCADE',
+    'TRUNCATE TABLE "ManualTimeLarkOutboxEvent","ManualTimeLarkMessage","ManualTimeRequest","MtrAttendee","ActivitySample","Screenshot","TimeSegment","TimeEntryAttendee","TimeEntry","RefreshToken","AgentAuthCode","LarkOAuthToken","LarkIdentity","TeamManager","User","Team","Shift","Workspace" RESTART IDENTITY CASCADE',
   );
 });

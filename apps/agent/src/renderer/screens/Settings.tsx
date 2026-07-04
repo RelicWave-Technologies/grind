@@ -12,8 +12,8 @@ export default function Settings() {
   const lark = useQuery({ queryKey: ['larkStatus'], queryFn: () => window.agent.lark.status(), refetchInterval: 4000 });
   const updates = useQuery({ queryKey: ['updates'], queryFn: () => window.agent.updates.status(), refetchInterval: 60_000 });
 
-  const setLogin = useMutation({
-    mutationFn: (v: boolean) => window.agent.settings.setLaunchAtLogin(v),
+  const enableLogin = useMutation({
+    mutationFn: () => window.agent.settings.enableLaunchAtLogin(),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['settings'] }),
   });
 
@@ -99,6 +99,20 @@ export default function Settings() {
   const updatePercentValue = updatePercent(u);
   const updateSub = settingsUpdateSubtitle(u);
   const updateButton = updateAction(u, updateBusy || installUpdate.isPending);
+  const launch = info.data?.launchAtLogin;
+  const launchText = !launch
+    ? 'Checking startup status...'
+    : launch.enabled
+      ? 'Enabled'
+      : launch.status === 'blocked-dmg'
+        ? 'Move Timo to Applications, then open it from there'
+        : launch.status === 'requires-approval'
+          ? 'Approve Timo in Login Items'
+          : launch.status === 'unavailable-dev'
+            ? 'Unavailable in dev mode'
+            : 'Startup item needs repair';
+  const launchOk = !!launch?.enabled;
+  const launchWarn = !!launch && !launch.enabled && launch.status !== 'unavailable-dev';
 
   return (
     <>
@@ -202,20 +216,32 @@ export default function Settings() {
           <div className="section-head"><span className="section-title">General</span></div>
           <div className="set-card">
             <div className="set-row">
-              <span className="set-ic" style={{ background: 'var(--c-violet-bg)' }}><Power size={17} strokeWidth={2} /></span>
+              <span className="set-ic" style={{ background: launchOk ? 'var(--c-green-bg)' : launchWarn ? 'var(--c-orange-bg)' : 'var(--c-violet-bg)' }}><Power size={17} strokeWidth={2} /></span>
               <div className="set-main">
                 <div className="set-title">Launch at login</div>
-                <div className="set-sub secondary">Start Timo automatically and track from the moment you log in.</div>
+                <div className="set-sub">
+                  {launchOk ? (
+                    <span className="set-ok"><CheckCircle2 size={13} /> {launchText}</span>
+                  ) : launchWarn ? (
+                    <span className="set-warn"><AlertCircle size={13} /> {launchText}</span>
+                  ) : (
+                    <span className="secondary">{launchText}</span>
+                  )}
+                </div>
               </div>
-              <button
-                role="switch"
-                aria-checked={!!info.data?.launchAtLogin}
-                className={`toggle no-drag${info.data?.launchAtLogin ? ' on' : ''}`}
-                onClick={() => setLogin.mutate(!info.data?.launchAtLogin)}
-                disabled={setLogin.isPending}
-              >
-                <span className="toggle-knob" />
-              </button>
+              {launch?.status === 'requires-approval' ? (
+                <button className="btn no-drag" onClick={() => window.agent.settings.openLoginItemsPrefs()}>
+                  Open System Settings
+                </button>
+              ) : launch?.canRegister ? (
+                <button
+                  className="btn btn-prominent no-drag"
+                  onClick={() => enableLogin.mutate()}
+                  disabled={enableLogin.isPending}
+                >
+                  Enable
+                </button>
+              ) : null}
             </div>
             <div className="set-row">
               <span className="set-ic" style={{ background: 'var(--c-blue-bg)' }}><PictureInPicture2 size={17} strokeWidth={2} /></span>

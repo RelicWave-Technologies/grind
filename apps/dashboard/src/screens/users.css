@@ -28,6 +28,13 @@
   min-width: 0;
 }
 
+.usr-role-stack {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--ui-sp-1);
+}
+
 /* Deactivated rows read quieter — step ink down (token), no new colour. */
 .usr-row-off > .ui-td { color: var(--ui-ink-3); }
 

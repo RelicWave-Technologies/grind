@@ -69,7 +69,7 @@ describe('WORKSPACE_POLICY_DEFAULTS', () => {
   });
 
   it('defaults member tracking knobs to production values', () => {
-    expect(WORKSPACE_POLICY_DEFAULTS.defaultScreenshotIntervalMin).toBe(180);
+    expect(WORKSPACE_POLICY_DEFAULTS.defaultScreenshotIntervalMin).toBe(3);
     expect(WORKSPACE_POLICY_DEFAULTS.defaultIdleThresholdMin).toBe(5);
   });
 });
@@ -97,16 +97,16 @@ describe('PatchWorkspacePolicyRequest', () => {
 
   it('accepts workspace default tracking knobs inside member override ranges', () => {
     const out = PatchWorkspacePolicyRequest.safeParse({
-      defaultScreenshotIntervalMin: 180,
+      defaultScreenshotIntervalMin: 3,
       defaultIdleThresholdMin: 5,
     });
     expect(out.success).toBe(true);
   });
 
   it('rejects workspace default tracking knobs outside member override ranges', () => {
-    // Screenshot interval floor is now 1 min; 0 is below it.
     expect(PatchWorkspacePolicyRequest.safeParse({ defaultScreenshotIntervalMin: 0 }).success).toBe(false);
-    expect(PatchWorkspacePolicyRequest.safeParse({ defaultScreenshotIntervalMin: 999 }).success).toBe(false);
+    expect(PatchWorkspacePolicyRequest.safeParse({ defaultScreenshotIntervalMin: 4 }).success).toBe(false);
+    expect(PatchWorkspacePolicyRequest.safeParse({ defaultScreenshotIntervalMin: 180 }).success).toBe(false);
     expect(PatchWorkspacePolicyRequest.safeParse({ defaultIdleThresholdMin: 0 }).success).toBe(false);
   });
 });

@@ -4,6 +4,7 @@ import { prisma } from '@grind/db';
 import { buildApp } from '../src/app';
 import { signAccessToken } from '../src/lib/jwt';
 import { ulid } from 'ulid';
+import { createManagedTeam } from './helpers';
 
 const app = buildApp();
 const bearer = (token: string) => ({ Authorization: `Bearer ${token}` });
@@ -32,7 +33,7 @@ async function seed() {
   const m2 = await mk('m2', 'MEMBER');
   const outsider = await mk('out', 'MEMBER');
 
-  const team = await prisma.team.create({ data: { workspaceId: ws.id, name: 'Squad', managerId: mgr.id } });
+  const team = await createManagedTeam({ workspaceId: ws.id, name: 'Squad', managerId: mgr.id });
   await prisma.user.updateMany({ where: { id: { in: [mgr.id, m1.id, m2.id] } }, data: { teamId: team.id } });
 
   const token = (u: { id: string; role: 'ADMIN' | 'MANAGER' | 'MEMBER' }) =>

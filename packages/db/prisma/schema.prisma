@@ -15,6 +15,7 @@ model Workspace {
 
   users          User[]
   teams          Team[]
+  teamManagers   TeamManager[]
   shifts         Shift[]
   policy         WorkspacePolicy?
   payrollPolicy  PayrollPolicy?
@@ -48,7 +49,7 @@ model WorkspacePolicy {
   retentionDaysScreenshots   Int      @default(60)
   /// Workspace default screenshot cadence for newly-created members.
   /// Per-member overrides live on User.screenshotIntervalMin.
-  defaultScreenshotIntervalMin Int     @default(180)
+  defaultScreenshotIntervalMin Int     @default(3)
   /// Workspace default idle threshold for newly-created members.
   /// Per-member overrides live on User.idleThresholdMin.
   defaultIdleThresholdMin     Int      @default(5)
@@ -148,24 +149,39 @@ enum AgentRuntimeState {
   OFFLINE
 }
 
-/// A team groups MEMBERs under a MANAGER. Manager-scoped queries
-/// (timesheets, approvals, screenshots) only return rows whose user
-/// belongs to a team the caller manages. Optional — workspaces can
-/// continue to operate flat (everyone MEMBER → admins see all).
+/// A team is a home grouping for time totals. Management is modeled by
+/// TeamManager so a team can have multiple managers while each manager owns
+/// at most one team.
 model Team {
   id          String   @id @default(cuid())
   workspaceId String
   workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   name        String
-  managerId   String?
-  manager     User?     @relation("TeamManager", fields: [managerId], references: [id], onDelete: SetNull)
   members     User[]    @relation("TeamMembers")
+  managers    TeamManager[]
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
-  @@unique([workspaceId, managerId])
   @@index([workspaceId])
-  @@index([managerId])
+}
+
+/// Team management assignment. Product rule for v1: one team can have many
+/// managers, but one user can manage only one team. A non-admin user's
+/// workspace role is derived from this table.
+model TeamManager {
+  id          String   @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  teamId      String
+  team        Team      @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+
+  @@unique([teamId, userId])
+  @@unique([userId])
+  @@index([workspaceId])
+  @@index([teamId])
 }
 
 /// A workspace-defined work schedule (e.g. "Day Shift", "Night Shift").
@@ -211,9 +227,8 @@ model User {
   /// scoping applies; admin sees them, no manager does).
   teamId       String?
   team         Team?    @relation("TeamMembers", fields: [teamId], references: [id], onDelete: SetNull)
-  /// Denormalised pointer to the user's direct manager (= their team's
-  /// managerId, kept in sync on team updates). Lets us answer "who
-  /// manages me?" with a single FK lookup, no join.
+  /// Deprecated: old direct-manager pointer. v1 org scope and manual-time
+  /// approval now resolve through TeamManager + User.teamId.
   managerId    String?
   /// Legacy email/password hash. NULLABLE: Lark OAuth is the sole identity in
   /// production, so Lark-provisioned users never have one. Retained (not
@@ -268,7 +283,8 @@ model User {
   agentAuthCodes  AgentAuthCode[]
   manualTimeRequests       ManualTimeRequest[] @relation("MtrRequester")
   manualTimeApprovals      ManualTimeRequest[] @relation("MtrApprover")
-  managedTeams             Team[]              @relation("TeamManager")
+  manualTimeDecisions      ManualTimeRequest[] @relation("MtrDecider")
+  managedTeamAssignment    TeamManager?
   activityFlags            ActivityFlag[]      @relation("FlagSubject")
   resolvedFlags            ActivityFlag[]      @relation("FlagResolver")
   timeInvalidations        TimeInvalidation[]  @relation("TimeInvalidationSubject")
@@ -500,6 +516,45 @@ enum ManualTimeRequestStatus {
   CANCELLED
 }
 
+enum ManualTimeDecisionSource {
+  LARK_CARD
+  DASHBOARD
+  REQUESTER_CANCEL
+  MANAGER_CANCEL
+  AUTO_APPROVE
+  ADMIN_REOPEN
+}
+
+enum ManualTimeLarkMessageKind {
+  APPROVAL
+  UPDATED_APPROVAL
+  DECIDED_NOTICE
+}
+
+enum ManualTimeLarkMessageStatus {
+  PENDING
+  SENT
+  SEND_FAILED
+  UPDATE_FAILED
+  SUPERSEDED
+  CANCELLED
+  DECIDED
+  STALE
+}
+
+enum ManualTimeLarkOutboxKind {
+  SEND_CARD
+  SUPERSEDE_OLD_CARDS
+  FINALIZE_CARDS
+}
+
+enum ManualTimeLarkOutboxStatus {
+  PENDING
+  PROCESSING
+  DONE
+  FAILED
+}
+
 /// A user-submitted request to log time after the fact. Sent to a workspace
 /// approver (admin / manager) via a Lark IM interactive card; the manager's
 /// click flips status here and (on APPROVE) creates a TimeEntry(source=MANUAL).
@@ -516,8 +571,12 @@ model ManualTimeRequest {
   requestedEnd   DateTime
   reason         String
   status         ManualTimeRequestStatus @default(PENDING)
+  version        Int                     @default(1)
   approverId     String?
   approver       User?                   @relation("MtrApprover", fields: [approverId], references: [id])
+  decidedById    String?
+  decidedBy      User?                   @relation("MtrDecider", fields: [decidedById], references: [id], onDelete: SetNull)
+  decisionSource ManualTimeDecisionSource?
   larkMessageId  String?                 // id of the IM card we sent, for in-place update
   decidedAt      DateTime?
   decidedReason  String?                 // optional approver note
@@ -532,11 +591,59 @@ model ManualTimeRequest {
   /// Meeting attendees (workspace members the requester says were in
   /// this meeting). Propagated to TimeEntryAttendee on approval.
   attendees      MtrAttendee[]
+  larkMessages   ManualTimeLarkMessage[]
+  larkOutboxEvents ManualTimeLarkOutboxEvent[]
   createdAt      DateTime                @default(now())
   updatedAt      DateTime                @updatedAt
 
   @@index([userId, status])
   @@index([approverId, status])
+  @@index([status, version])
+}
+
+model ManualTimeLarkMessage {
+  id              String                      @id @default(cuid())
+  requestId       String
+  request         ManualTimeRequest           @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  version         Int
+  recipientOpenId String
+  messageId       String?                     @unique
+  kind            ManualTimeLarkMessageKind
+  status          ManualTimeLarkMessageStatus @default(PENDING)
+  attempts        Int                         @default(0)
+  lastError       String?
+  sentAt          DateTime?
+  createdAt       DateTime                    @default(now())
+  updatedAt       DateTime                    @updatedAt
+
+  outboxEvents    ManualTimeLarkOutboxEvent[]
+
+  @@index([requestId, version])
+  @@index([requestId, status])
+  @@index([status, updatedAt])
+}
+
+model ManualTimeLarkOutboxEvent {
+  id              String                       @id @default(cuid())
+  requestId       String
+  request         ManualTimeRequest            @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  messageLedgerId String?
+  messageLedger   ManualTimeLarkMessage?       @relation(fields: [messageLedgerId], references: [id], onDelete: SetNull)
+  kind            ManualTimeLarkOutboxKind
+  status          ManualTimeLarkOutboxStatus   @default(PENDING)
+  payload         Json                         @default("{}")
+  attempts        Int                          @default(0)
+  nextRunAt       DateTime                     @default(now())
+  lockedAt        DateTime?
+  lockedBy        String?
+  lastError       String?
+  processedAt     DateTime?
+  createdAt       DateTime                     @default(now())
+  updatedAt       DateTime                     @updatedAt
+
+  @@index([status, nextRunAt, createdAt])
+  @@index([requestId])
+  @@index([messageLedgerId])
 }
 
 /// Junction: workspace members tagged as attendees on a manual-time

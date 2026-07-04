@@ -3,6 +3,7 @@ import request from 'supertest';
 import { prisma } from '@grind/db';
 import { buildApp } from '../src/app';
 import { signAccessToken } from '../src/lib/jwt';
+import { createManagedTeam } from './helpers';
 
 const app = buildApp();
 const bearer = (token: string) => ({ Authorization: `Bearer ${token}` });
@@ -28,12 +29,10 @@ async function seedManagerWorkspace() {
   const manager = await mk('manager', 'Manager Mira', 'MANAGER');
   const member = await mk('member', 'Member Mia', 'MEMBER');
   const outsider = await mk('outsider', 'Outside Omar', 'MEMBER');
-  const team = await prisma.team.create({
-    data: { workspaceId: ws.id, name: 'Manager Team', managerId: manager.id },
-  });
+  const team = await createManagedTeam({ workspaceId: ws.id, name: 'Manager Team', managerId: manager.id });
   await prisma.user.update({
     where: { id: member.id },
-    data: { teamId: team.id, managerId: manager.id },
+    data: { teamId: team.id, managerId: null },
   });
 
   const token = (u: { id: string; role: 'ADMIN' | 'MANAGER' | 'MEMBER' }) =>

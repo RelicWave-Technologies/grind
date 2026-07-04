@@ -31,6 +31,7 @@ import {
   refreshUpdateInstallability,
   startUpdateService,
 } from './services/updates';
+import { ensureLaunchAtLogin, shouldStartHidden } from './services/launchAtLogin';
 import { broadcast } from './broadcast';
 import { log } from './logger';
 
@@ -69,19 +70,9 @@ function showMainWindow() {
   mainWindow.focus();
 }
 
-function ensureAutoStart() {
-  // Launch at login by default (internal tool). Start hidden to the tray.
-  const settings = app.getLoginItemSettings();
-  if (!settings.openAtLogin) {
-    app.setLoginItemSettings({ openAtLogin: true, args: ['--hidden'] });
-  }
-}
-
 app.whenReady().then(async () => {
-  ensureAutoStart();
-
-  const openedAtLogin =
-    process.argv.includes('--hidden') || app.getLoginItemSettings().wasOpenedAtLogin;
+  const launchAtLogin = ensureLaunchAtLogin();
+  const openedAtLogin = shouldStartHidden(process.argv);
 
   mainWindow = createMainWindow({ startHidden: openedAtLogin });
   tray = createTray({
@@ -252,7 +243,12 @@ app.whenReady().then(async () => {
   const coldStartLink = deepLinkFromArgv(process.argv);
   if (coldStartLink) void handleDeepLink(coldStartLink);
 
-  log.info('agent ready', { platform: process.platform, version: app.getVersion(), openedAtLogin });
+  log.info('agent ready', {
+    platform: process.platform,
+    version: app.getVersion(),
+    openedAtLogin,
+    launchAtLoginStatus: launchAtLogin.status,
+  });
 });
 
 app.on('window-all-closed', () => {

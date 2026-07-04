@@ -32,7 +32,7 @@ export const IDLE_POLL_MS: number = Math.max(500, Math.min(5_000, Math.floor(IDL
 /** Screenshot cadence in seconds. Server policy (per-user → workspace) drives
  *  this at runtime via /v1/agent/config; this is just the boot/offline default.
  *  Set AGENT_SHOT_SEC (e.g. 15) to LOCK it for testing (server won't override). */
-export const SCREENSHOT_INTERVAL_SEC: number = Number(process.env.AGENT_SHOT_SEC ?? 10_800);
+export const SCREENSHOT_INTERVAL_SEC: number = Number(process.env.AGENT_SHOT_SEC ?? 180);
 /** True when AGENT_SHOT_SEC is explicitly set → a hard local override that the
  *  server-config refresh must not clobber. */
 export const SHOT_SEC_LOCKED: boolean = process.env.AGENT_SHOT_SEC != null;

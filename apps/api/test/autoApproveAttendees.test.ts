@@ -4,6 +4,7 @@ import { ulid } from 'ulid';
 import { prisma } from '@grind/db';
 import { buildApp } from '../src/app';
 import { signAccessToken } from '../src/lib/jwt';
+import { createManagedTeam } from './helpers';
 
 /**
  * M13/1: supervisor-created manual time + meeting attendees + admin reopen.
@@ -37,10 +38,10 @@ async function seed() {
   const memA = await mk(ws.id, 'memA', 'MEMBER');
   const memB = await mk(ws.id, 'memB', 'MEMBER');
   const outsider = await mk(wsOther.id, 'out', 'MEMBER');
-  const team = await prisma.team.create({ data: { workspaceId: ws.id, name: `Team-${stamp}`, managerId: mgr.id } });
+  const team = await createManagedTeam({ workspaceId: ws.id, name: `Team-${stamp}`, managerId: mgr.id });
   await prisma.user.updateMany({
     where: { id: { in: [mgr.id, mem.id, memA.id, memB.id] } },
-    data: { teamId: team.id, managerId: mgr.id },
+    data: { teamId: team.id, managerId: null },
   });
 
   const tok = (u: { id: string; role: 'ADMIN' | 'MANAGER' | 'MEMBER' }, wsId = ws.id) =>

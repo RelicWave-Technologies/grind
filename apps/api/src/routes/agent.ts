@@ -3,6 +3,7 @@ import {
   AgentAppIconsRequest,
   HeartbeatRequest,
   WORKSPACE_POLICY_DEFAULTS,
+  normalizeScreenshotIntervalMin,
   type AgentConfigResponse,
   type HeartbeatResponse,
 } from '@grind/types';
@@ -43,10 +44,14 @@ async function buildAgentConfig(userId: string, workspaceId: string): Promise<Ag
     },
   });
 
-  const screenshotIntervalMin =
-    user.screenshotIntervalMin ??
-    policy?.defaultScreenshotIntervalMin ??
-    WORKSPACE_POLICY_DEFAULTS.defaultScreenshotIntervalMin;
+  const policyScreenshotIntervalMin = normalizeScreenshotIntervalMin(
+    policy?.defaultScreenshotIntervalMin,
+    WORKSPACE_POLICY_DEFAULTS.defaultScreenshotIntervalMin,
+  );
+  const screenshotIntervalMin = normalizeScreenshotIntervalMin(
+    user.screenshotIntervalMin,
+    policyScreenshotIntervalMin,
+  );
   const idleThresholdMin =
     user.idleThresholdMin ??
     policy?.defaultIdleThresholdMin ??

@@ -1,7 +1,8 @@
 import './login.css';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { useMe, larkLoginUrl } from '../lib/auth';
+import { api, ApiError } from '../lib/api';
 import { AGENT_DOWNLOADS, agentDownloadUrl } from '../lib/downloads';
 import { Card, Button, Banner } from '../ui';
 
@@ -18,10 +19,16 @@ const OUTCOME_COPY: Record<string, { status: 'danger' | 'warn' | 'info'; text: s
   config: { status: 'danger', text: 'Single sign-on isn’t configured yet. Contact your admin.' },
 };
 
+const DEV_PASSWORD_LOGIN = import.meta.env.DEV && import.meta.env.VITE_ENABLE_PASSWORD_LOGIN === 'true';
+
 export function LoginScreen() {
   const navigate = useNavigate();
   const search = useSearch({ from: '/login' });
   const me = useMe();
+  const [email, setEmail] = useState('anish@emiactech.com');
+  const [password, setPassword] = useState('password123');
+  const [devError, setDevError] = useState<string | null>(null);
+  const [devLoading, setDevLoading] = useState(false);
 
   // Already logged in? Bounce straight to the dashboard.
   useEffect(() => {
@@ -44,6 +51,24 @@ export function LoginScreen() {
     }
     // Top-level navigation (not a fetch) so the OAuth redirect chain works.
     window.location.assign(larkLoginUrl());
+  }
+
+  async function signInWithPassword(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setDevError(null);
+    setDevLoading(true);
+    try {
+      await api('/v1/auth/login', {
+        method: 'POST',
+        json: { email, password, deviceName: 'Local dashboard' },
+      });
+      await me.refetch();
+      navigate({ to: '/' });
+    } catch (error) {
+      setDevError(error instanceof ApiError ? error.message : 'login_failed');
+    } finally {
+      setDevLoading(false);
+    }
   }
 
   return (
@@ -73,6 +98,29 @@ export function LoginScreen() {
             >
               {me.isFetching ? 'Checking...' : 'Continue with Lark'}
             </Button>
+
+            {DEV_PASSWORD_LOGIN && (
+              <form className="lgn-dev-form" onSubmit={signInWithPassword}>
+                {devError && <Banner status="danger">{devError}</Banner>}
+                <input
+                  className="lgn-dev-input"
+                  type="email"
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                  aria-label="Email"
+                />
+                <input
+                  className="lgn-dev-input"
+                  type="password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  aria-label="Password"
+                />
+                <Button type="submit" variant="secondary" size="md" block disabled={devLoading}>
+                  {devLoading ? 'Signing in...' : 'Dev sign in'}
+                </Button>
+              </form>
+            )}
 
             <div className="lgn-downloads" aria-label="Download Timo app">
               {AGENT_DOWNLOADS.map((option) => (

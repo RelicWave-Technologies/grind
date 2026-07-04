@@ -7,7 +7,7 @@ export type MonitoringTiming = {
 
 export function monitoringRiskLevel(timing: MonitoringTiming): MonitoringSettingsRiskLevel {
   if (timing.screenshotIntervalMin === 1 || timing.idleThresholdMin === 1) return 'HIGH';
-  if (timing.screenshotIntervalMin <= 5 || timing.idleThresholdMin <= 3) return 'CAUTION';
+  if (timing.screenshotIntervalMin === 2 || timing.idleThresholdMin <= 3) return 'CAUTION';
   return 'NORMAL';
 }
 

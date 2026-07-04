@@ -4,6 +4,7 @@ import { prisma } from '@grind/db';
 import { buildApp } from '../src/app';
 import { signAccessToken } from '../src/lib/jwt';
 import { hashPassword } from '../src/lib/password';
+import { createManagedTeam } from './helpers';
 
 /**
  * /v1/admin/users + scope-resolution tests against real Postgres.
@@ -41,7 +42,7 @@ async function seedWorkspace() {
   const outsider = await mk('out', 'Owen Outsider', 'MEMBER');
 
   // Build the team: manager + member1 + member2.
-  const team = await prisma.team.create({ data: { workspaceId: ws.id, name: 'Squad A', managerId: manager.id } });
+  const team = await createManagedTeam({ workspaceId: ws.id, name: 'Squad A', managerId: manager.id });
   await prisma.user.updateMany({ where: { id: { in: [manager.id, member1.id, member2.id] } }, data: { teamId: team.id } });
 
   const token = (u: { id: string; role: 'ADMIN' | 'MANAGER' | 'MEMBER' }) =>
@@ -117,7 +118,7 @@ describe('GET /v1/admin/users — role-scoped list', () => {
         passwordHash: 'x'.repeat(60),
       },
     });
-    const t2 = await prisma.team.create({ data: { workspaceId: w.ws.id, name: 'Squad B', managerId: mgr2.id } });
+    const t2 = await createManagedTeam({ workspaceId: w.ws.id, name: 'Squad B', managerId: mgr2.id });
     const m3 = await prisma.user.create({
       data: {
         workspaceId: w.ws.id,

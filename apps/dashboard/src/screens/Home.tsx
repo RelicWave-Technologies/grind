@@ -205,7 +205,7 @@ export function HomeScreen() {
               {topApps.length > 0 ? (
                 <div className="hm-app-strip">
                   {topApps.slice(0, 3).map((app) => (
-                    <AppUsageChip key={`${app.app}-${app.appBundle ?? ''}`} app={app} />
+                    <AppUsageChip key={`${app.domain ?? app.app}-${app.appBundle ?? ''}`} app={app} />
                   ))}
                 </div>
               ) : (
@@ -401,10 +401,13 @@ function InfoPill({ label, value }: { label: string; value: string }) {
 }
 
 function AppUsageChip({ app }: { app: AppUsageEntry }) {
+  const title = app.domain
+    ? `${app.domain}${app.sourceApp ? ` · ${app.sourceApp}` : ''}`
+    : `${app.app}${app.appBundle ? ` · ${app.appBundle}` : ''}`;
   return (
     <span
       className="hm-app-chip"
-      title={`${app.app}${app.appBundle ? ` · ${app.appBundle}` : ''}`}
+      title={title}
     >
       <AppIcon name={app.app} iconUrl={app.iconUrl} />
       <span className="hm-app-chip__name ui-t-small">{app.app}</span>

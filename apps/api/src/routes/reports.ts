@@ -40,7 +40,7 @@ const TEAM_REPORT_MAX_DAYS = 31;
  *  for the bundles seen in these samples, falling back to the brand map. */
 async function iconForSamples(samples: { activeAppBundle: string | null }[]): Promise<IconResolver> {
   const stored = await storedIconDataUrls(samples.map((s) => s.activeAppBundle));
-  return (app, bundle) => resolveAppIcon(app, bundle, stored);
+  return (app, bundle, domain) => resolveAppIcon(app, bundle, stored, domain);
 }
 
 reportsRouter.get('/me', async (req, res, next) => {
@@ -337,11 +337,13 @@ async function loadManualRequestsForUser(
     select: {
       id: true,
       clientUuid: true,
+      version: true,
       userId: true,
       approverId: true,
       larkTaskGuid: true,
       taskSummary: true,
       larkMessageId: true,
+      larkMessages: { select: { status: true, attempts: true, version: true, createdAt: true } },
       requestedStart: true,
       requestedEnd: true,
       reason: true,
@@ -356,8 +358,25 @@ async function loadManualRequestsForUser(
     },
   });
   return rows.map((row) => ({
+    ...(() => {
+      const latest = row.larkMessages.slice().sort((a, b) => b.version - a.version || b.createdAt.getTime() - a.createdAt.getTime())[0];
+      const larkDeliveryStatus =
+        !latest
+          ? row.larkMessageId
+            ? 'sent'
+            : 'none'
+          : ['SENT', 'DECIDED', 'CANCELLED', 'SUPERSEDED'].includes(latest.status)
+            ? 'sent'
+            : ['SEND_FAILED', 'UPDATE_FAILED'].includes(latest.status)
+              ? latest.attempts >= 25
+                ? 'failed'
+                : 'retrying'
+              : 'queued';
+      return { larkDeliveryStatus, latestLarkMessageStatus: latest?.status ?? (row.larkMessageId ? 'SENT' : null) };
+    })(),
     id: row.id,
     clientUuid: row.clientUuid,
+    version: row.version,
     userId: row.userId,
     approverId: row.approverId,
     larkTaskGuid: row.larkTaskGuid,
@@ -561,6 +580,7 @@ async function loadTeamReportData(userIds: string[], range: ReportRange): Promis
         mouseDistancePx: true,
         activeApp: true,
         activeAppBundle: true,
+        activeUrl: true,
       },
       orderBy: [{ userId: 'asc' }, { bucketStart: 'asc' }],
     }),
@@ -655,6 +675,7 @@ async function loadSamples(userId: string, range: ReportRange): Promise<ReportAc
       mouseDistancePx: true,
       activeApp: true,
       activeAppBundle: true,
+      activeUrl: true,
     },
     orderBy: { bucketStart: 'asc' },
   });

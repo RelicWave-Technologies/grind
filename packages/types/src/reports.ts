@@ -8,6 +8,9 @@ export type ShiftStatus = z.infer<typeof ShiftStatusSchema>;
 export const MemberReportTopAppSchema = z.object({
   app: z.string(),
   appBundle: z.string().nullable(),
+  domain: z.string().nullable().optional(),
+  sourceApp: z.string().nullable().optional(),
+  sourceAppBundle: z.string().nullable().optional(),
   // Either a remote URL (brand-map fallback) or an inlined `data:image/png` URL
   // (the agent-extracted real icon), so this is a plain string, not `.url()`.
   iconUrl: z.string().nullable(),

@@ -47,9 +47,11 @@ interface AdminUser {
   role: Role;
   avatarUrl: string | null;
   teamId: string | null;
+  managesTeamId: string | null;
+  managesTeamName: string | null;
 }
 
-type TeamPatch = Partial<{ name: string; managerId: string }>;
+type TeamPatch = Partial<{ name: string; managerIds: string[] }>;
 type UserPatch = Partial<{ teamId: string | null }>;
 
 export function TeamsScreen() {
@@ -69,12 +71,11 @@ export function TeamsScreen() {
 
   const teams = teamsQ.data?.teams ?? [];
   const users = usersQ.data?.users ?? [];
-  const usersById = useMemo(() => new Map(users.map((u) => [u.id, u])), [users]);
   const teamsById = useMemo(() => new Map(teams.map((team) => [team.id, team])), [teams]);
   const teamByManagerId = useMemo(() => {
     const map = new Map<string, Team>();
     for (const team of teams) {
-      if (team.managerId) map.set(team.managerId, team);
+      for (const managerId of team.managerIds) map.set(managerId, team);
     }
     return map;
   }, [teams]);
@@ -90,7 +91,7 @@ export function TeamsScreen() {
 
   const teamCount = teams.length;
   const totalMembers = teams.reduce((sum, team) => sum + team.memberCount, 0);
-  const managedTeams = teams.filter((team) => team.managerId).length;
+  const managedTeams = teams.filter((team) => team.managerCount > 0).length;
   const selectedTeam = selectedTeamId ? teams.find((team) => team.id === selectedTeamId) ?? null : null;
   const selectedMemberIds = useMemo(() => {
     if (!selectedTeam) return new Set<string>();
@@ -111,7 +112,7 @@ export function TeamsScreen() {
   }, [performanceQ.data, selectedMemberIds]);
 
   const create = useMutation({
-    mutationFn: (vars: { name: string; managerId: string }) =>
+    mutationFn: (vars: { name: string; managerIds: string[] }) =>
       api<Team>('/v1/admin/teams', { method: 'POST', json: vars }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'teams'] }),
   });
@@ -127,6 +128,24 @@ export function TeamsScreen() {
   const patchUser = useMutation({
     mutationFn: (vars: { id: string; patch: UserPatch }) =>
       api(`/v1/admin/users/${vars.id}`, { method: 'PATCH', json: vars.patch }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin', 'users'] });
+      qc.invalidateQueries({ queryKey: ['admin', 'teams'] });
+      qc.invalidateQueries({ queryKey: ['reports', 'team'] });
+    },
+  });
+  const addManager = useMutation({
+    mutationFn: (vars: { teamId: string; userId: string }) =>
+      api<Team>(`/v1/admin/teams/${vars.teamId}/managers`, { method: 'POST', json: { userId: vars.userId } }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin', 'users'] });
+      qc.invalidateQueries({ queryKey: ['admin', 'teams'] });
+      qc.invalidateQueries({ queryKey: ['reports', 'team'] });
+    },
+  });
+  const removeManager = useMutation({
+    mutationFn: (vars: { teamId: string; userId: string }) =>
+      api<Team>(`/v1/admin/teams/${vars.teamId}/managers/${vars.userId}`, { method: 'DELETE' }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['admin', 'users'] });
       qc.invalidateQueries({ queryKey: ['admin', 'teams'] });
@@ -193,9 +212,6 @@ export function TeamsScreen() {
               <TeamRow
                 key={team.id}
                 team={team}
-                users={users}
-                teamByManagerId={teamByManagerId}
-                manager={team.managerId ? usersById.get(team.managerId) ?? null : null}
                 busy={(patch.isPending && patch.variables?.id === team.id) || (del.isPending && del.variables === team.id)}
                 error={
                   (patch.isError && patch.variables?.id === team.id
@@ -236,7 +252,6 @@ export function TeamsScreen() {
       {selectedTeam && (
         <TeamDrawer
           team={selectedTeam}
-          manager={selectedTeam.managerId ? usersById.get(selectedTeam.managerId) ?? null : null}
           members={membersByTeam.get(selectedTeam.id) ?? []}
           users={users}
           teamByManagerId={teamByManagerId}
@@ -246,10 +261,25 @@ export function TeamsScreen() {
           performanceTo={performanceTo}
           performanceLoading={performanceQ.isLoading}
           performanceError={performanceQ.isError ? (performanceQ.error as Error).message : null}
-          changingManager={patch.isPending && patch.variables?.id === selectedTeam.id}
+          managerMutationUserId={
+            addManager.isPending && addManager.variables?.teamId === selectedTeam.id
+              ? addManager.variables.userId
+              : removeManager.isPending && removeManager.variables?.teamId === selectedTeam.id
+                ? removeManager.variables.userId
+                : null
+          }
+          managerMutationError={
+            (addManager.isError && addManager.variables?.teamId === selectedTeam.id
+              ? (addManager.error as Error | ApiError).message
+              : null) ||
+            (removeManager.isError && removeManager.variables?.teamId === selectedTeam.id
+              ? (removeManager.error as Error | ApiError).message
+              : null)
+          }
           memberMutationUserId={patchUser.isPending ? patchUser.variables?.id ?? null : null}
           memberMutationError={patchUser.isError ? (patchUser.error as Error | ApiError).message : null}
-          onChangeManager={(managerId) => patch.mutate({ id: selectedTeam.id, patch: { managerId } })}
+          onAddManager={(userId) => addManager.mutate({ teamId: selectedTeam.id, userId })}
+          onRemoveManager={(userId) => removeManager.mutate({ teamId: selectedTeam.id, userId })}
           onAddMember={(userId) => patchUser.mutate({ id: userId, patch: { teamId: selectedTeam.id } })}
           onRemoveMember={(userId) => patchUser.mutate({ id: userId, patch: { teamId: null } })}
           onClose={() => setSelectedTeamId(null)}
@@ -281,13 +311,13 @@ function NewTeamModal({
   teamByManagerId: Map<string, Team>;
   busy: boolean;
   error: string | null;
-  onCreate: (vars: { name: string; managerId: string }) => void;
+  onCreate: (vars: { name: string; managerIds: string[] }) => void;
   onClose: () => void;
 }) {
   const [name, setName] = useState('');
   const [managerId, setManagerId] = useState('');
   const managerOptions = availableManagerOptions(users, teamByManagerId);
-  const canSubmit = Boolean(name.trim() && managerId);
+  const canSubmit = Boolean(name.trim());
 
   return createPortal(
     <div className="tms-layer" role="presentation" onMouseDown={onClose}>
@@ -300,7 +330,7 @@ function NewTeamModal({
         onSubmit={(event) => {
           event.preventDefault();
           if (!canSubmit) return;
-          onCreate({ name: name.trim(), managerId });
+          onCreate({ name: name.trim(), managerIds: managerId ? [managerId] : [] });
         }}
       >
         <div className="tms-layer-head">
@@ -329,10 +359,9 @@ function NewTeamModal({
               value={managerId}
               onChange={(event) => setManagerId(event.target.value)}
               disabled={managerOptions.length === 0}
-              required
             >
-              <option value="" disabled>
-                {managerOptions.length === 0 ? 'No available managers' : 'Select a manager'}
+              <option value="">
+                {managerOptions.length === 0 ? 'No available managers' : 'No manager yet'}
               </option>
               {managerOptions.map((user) => (
                 <option key={user.id} value={user.id}>
@@ -341,7 +370,7 @@ function NewTeamModal({
               ))}
             </Select>
           </Field>
-          <Banner status="info">Every team needs a manager, and one person can manage only one team.</Banner>
+          <Banner status="info">A team can have multiple managers. Non-admin managers are moved into the team they manage.</Banner>
           {error && <Banner status="danger">{error}</Banner>}
         </div>
 
@@ -367,9 +396,6 @@ function NewTeamModal({
 
 function TeamRow({
   team,
-  users,
-  teamByManagerId,
-  manager,
   busy,
   error,
   onOpen,
@@ -377,9 +403,6 @@ function TeamRow({
   onDelete,
 }: {
   team: Team;
-  users: AdminUser[];
-  teamByManagerId: Map<string, Team>;
-  manager: AdminUser | null;
   busy: boolean;
   error: string | null;
   onOpen: () => void;
@@ -388,15 +411,12 @@ function TeamRow({
 }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(team.name);
-  const [managerId, setManagerId] = useState(team.managerId ?? '');
   const [pendingDelete, setPendingDelete] = useState(false);
-  const managerOptions = availableManagerOptions(users, teamByManagerId, team.id);
 
   function save() {
-    if (!name.trim() || !managerId) return;
+    if (!name.trim()) return;
     const next: TeamPatch = {};
     if (name.trim() !== team.name) next.name = name.trim();
-    if (managerId !== (team.managerId ?? '')) next.managerId = managerId;
     if (Object.keys(next).length === 0) {
       setEditing(false);
       return;
@@ -408,7 +428,6 @@ function TeamRow({
   function cancelEdit() {
     setEditing(false);
     setName(team.name);
-    setManagerId(team.managerId ?? '');
   }
 
   function stopRowClick(event: MouseEvent) {
@@ -426,10 +445,10 @@ function TeamRow({
           </span>
           <span className="tms-team-main">
             <span className="ui-t-strong">{team.name}</span>
-            {manager ? (
+            {team.managers.length > 0 ? (
               <span className="tms-row-sub ui-t-small">
                 <UserRound size={13} strokeWidth={2} aria-hidden />
-                <span>{manager.name}</span>
+                <span>{managerNames(team.managers)}</span>
               </span>
             ) : (
               <span className="tms-row-sub tms-row-sub--warn ui-t-small">
@@ -474,18 +493,6 @@ function TeamRow({
                 aria-label="Team name"
               />
             </Field>
-            <Field label="Manager">
-              <Select value={managerId} onChange={(event) => setManagerId(event.target.value)} aria-label="Manager" required>
-                <option value="" disabled>
-                  Select a manager
-                </option>
-                {managerOptions.map((user) => (
-                  <option key={user.id} value={user.id}>
-                    {user.name}
-                  </option>
-                ))}
-              </Select>
-            </Field>
             <div className="tms-edit-actions">
               <IconButton
                 icon={<X size={15} strokeWidth={2} />}
@@ -499,7 +506,7 @@ function TeamRow({
                 variant="primary"
                 onClick={save}
                 loading={busy}
-                disabled={!name.trim() || !managerId}
+                disabled={!name.trim()}
               />
             </div>
           </div>
@@ -537,7 +544,6 @@ function TeamRow({
 
 function TeamDrawer({
   team,
-  manager,
   members,
   users,
   teamByManagerId,
@@ -547,16 +553,17 @@ function TeamDrawer({
   performanceTo,
   performanceLoading,
   performanceError,
-  changingManager,
+  managerMutationUserId,
+  managerMutationError,
   memberMutationUserId,
   memberMutationError,
-  onChangeManager,
+  onAddManager,
+  onRemoveManager,
   onAddMember,
   onRemoveMember,
   onClose,
 }: {
   team: Team;
-  manager: AdminUser | null;
   members: AdminUser[];
   users: AdminUser[];
   teamByManagerId: Map<string, Team>;
@@ -566,33 +573,21 @@ function TeamDrawer({
   performanceTo: string;
   performanceLoading: boolean;
   performanceError: string | null;
-  changingManager: boolean;
+  managerMutationUserId: string | null;
+  managerMutationError: string | null;
   memberMutationUserId: string | null;
   memberMutationError: string | null;
-  onChangeManager: (managerId: string) => void;
+  onAddManager: (userId: string) => void;
+  onRemoveManager: (userId: string) => void;
   onAddMember: (userId: string) => void;
   onRemoveMember: (userId: string) => void;
   onClose: () => void;
 }) {
-  const [editingManager, setEditingManager] = useState(false);
-  const [nextManagerId, setNextManagerId] = useState(team.managerId ?? '');
   const [addingMember, setAddingMember] = useState(false);
-  const availableUsers = users.filter((user) => user.teamId !== team.id);
-  const managerOptions = availableManagerOptions(users, teamByManagerId, team.id);
-
-  function cancelManagerEdit() {
-    setEditingManager(false);
-    setNextManagerId(team.managerId ?? '');
-  }
-
-  function saveManager() {
-    if (!nextManagerId || nextManagerId === team.managerId) {
-      setEditingManager(false);
-      return;
-    }
-    onChangeManager(nextManagerId);
-    setEditingManager(false);
-  }
+  const [addingManager, setAddingManager] = useState(false);
+  const availableUsers = users.filter((user) => user.teamId !== team.id && (!user.managesTeamId || user.managesTeamId === team.id));
+  const managerOptions = availableManagerOptions(users, teamByManagerId, team.id)
+    .filter((user) => !team.managerIds.includes(user.id));
 
   return createPortal(
     <div className="tms-drawer-layer" role="presentation" onMouseDown={onClose}>
@@ -619,7 +614,7 @@ function TeamDrawer({
         <div className="tms-drawer-body">
           <section className="tms-facts" aria-label="Team facts">
             <DrawerFact icon={<Users2 size={17} />} label="Members" value={members.length} hint={memberCountLabel(members.length)} />
-            <DrawerFact icon={<UserRound size={17} />} label="Manager" value={manager?.name ?? 'Missing'} hint={manager?.email ?? 'Assign one'} />
+            <DrawerFact icon={<UserRound size={17} />} label="Managers" value={team.managerCount} hint={team.managerCount === 1 ? 'person' : 'people'} />
             <DrawerFact icon={<CalendarDays size={17} />} label="Created" value={formatDate(team.createdAt)} hint="Org structure" />
           </section>
 
@@ -634,51 +629,35 @@ function TeamDrawer({
 
           <section className="tms-section">
             <div className="tms-section-head">
-              <h3 className="ui-t-h3">Manager</h3>
-              {editingManager ? (
-                <div className="tms-inline-actions">
-                  <IconButton
-                    size="sm"
-                    icon={<X size={14} strokeWidth={2} />}
-                    aria-label="Cancel manager change"
-                    onClick={cancelManagerEdit}
-                    disabled={changingManager}
-                  />
-                  <IconButton
-                    size="sm"
-                    icon={<Check size={14} strokeWidth={2.2} />}
-                    aria-label="Save manager"
-                    variant="primary"
-                    onClick={saveManager}
-                    loading={changingManager}
-                    disabled={!nextManagerId}
-                  />
-                </div>
-              ) : (
-                <Button size="sm" variant="secondary" icon={<Pencil size={13} strokeWidth={1.8} />} onClick={() => setEditingManager(true)}>
-                  Change
-                </Button>
-              )}
+              <h3 className="ui-t-h3">Managers</h3>
+              <Button size="sm" variant="secondary" icon={<Plus size={13} strokeWidth={2} />} onClick={() => setAddingManager(true)}>
+                Add
+              </Button>
             </div>
-            {editingManager ? (
-              <div className="tms-manager-edit">
-                <Field label="Manager">
-                  <Select value={nextManagerId} onChange={(event) => setNextManagerId(event.target.value)} required>
-                    <option value="" disabled>
-                      Select a manager
-                    </option>
-                    {managerOptions.map((user) => (
-                      <option key={user.id} value={user.id}>
-                        {user.name} · {roleLabel(user.role)}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
+            {managerMutationError && <Banner status="danger">{managerMutationError}</Banner>}
+            {team.managers.length > 0 ? (
+              <div className="tms-person-list">
+                {team.managers.map((manager) => (
+                  <PersonLine
+                    key={manager.id}
+                    user={manager}
+                    icon={<UserRound size={17} strokeWidth={1.8} />}
+                    action={
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        icon={<Minus size={13} strokeWidth={2} />}
+                        onClick={() => onRemoveManager(manager.id)}
+                        loading={managerMutationUserId === manager.id}
+                      >
+                        Remove
+                      </Button>
+                    }
+                  />
+                ))}
               </div>
-            ) : manager ? (
-              <PersonLine user={manager} icon={<UserRound size={17} strokeWidth={1.8} />} />
             ) : (
-              <div className="tms-empty-line ui-t-small">This team needs a manager before it should be used for reporting.</div>
+              <div className="tms-empty-line ui-t-small">Add a manager to unlock team scope and approvals.</div>
             )}
           </section>
 
@@ -724,7 +703,7 @@ function TeamDrawer({
             </div>
             <div className="tms-scope-line ui-t-small">
               <Building2 size={17} strokeWidth={1.8} aria-hidden />
-              <span>Admins can rename the team, reassign its manager, or remove it from the directory.</span>
+              <span>Admins can rename the team, manage managers, or remove it from the directory.</span>
             </div>
           </section>
         </div>
@@ -741,6 +720,20 @@ function TeamDrawer({
             setAddingMember(false);
           }}
           onClose={() => setAddingMember(false)}
+        />
+      )}
+      {addingManager && (
+        <AddManagerModal
+          team={team}
+          users={managerOptions}
+          teamByManagerId={teamByManagerId}
+          busyUserId={managerMutationUserId}
+          error={managerMutationError}
+          onAdd={(userId) => {
+            onAddManager(userId);
+            setAddingManager(false);
+          }}
+          onClose={() => setAddingManager(false)}
         />
       )}
     </div>,
@@ -789,7 +782,10 @@ function TeamPerformance({
           <div className="tms-top-app">
             <span className="ui-t-eyebrow">Top app</span>
             {performance.topApp ? (
-              <span className="tms-top-app__body">
+              <span
+                className="tms-top-app__body"
+                title={performance.topApp.domain ? `${performance.topApp.domain}${performance.topApp.sourceApp ? ` · ${performance.topApp.sourceApp}` : ''}` : undefined}
+              >
                 <AppIcon name={performance.topApp.app} iconUrl={performance.topApp.iconUrl} />
                 <span>
                   <strong className="ui-t-strong">{performance.topApp.app}</strong>
@@ -874,7 +870,7 @@ function AddMemberModal({
               })}
             </Select>
           </Field>
-          <Banner status="info">Adding a person moves them into this team.</Banner>
+          <Banner status="info">Adding a person moves them into this team. Managers of another team are locked to that team.</Banner>
           {error && <Banner status="danger">{error}</Banner>}
         </div>
         <div className="tms-layer-actions">
@@ -896,6 +892,86 @@ function AddMemberModal({
   );
 }
 
+function AddManagerModal({
+  team,
+  users,
+  teamByManagerId,
+  busyUserId,
+  error,
+  onAdd,
+  onClose,
+}: {
+  team: Team;
+  users: AdminUser[];
+  teamByManagerId: Map<string, Team>;
+  busyUserId: string | null;
+  error: string | null;
+  onAdd: (userId: string) => void;
+  onClose: () => void;
+}) {
+  const [userId, setUserId] = useState('');
+  const canSubmit = Boolean(userId);
+  return (
+    <div className="tms-nested-layer" role="presentation" onMouseDown={onClose}>
+      <form
+        className="tms-modal tms-modal--small"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="tms-add-manager-title"
+        onMouseDown={(event) => event.stopPropagation()}
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (!canSubmit) return;
+          onAdd(userId);
+        }}
+      >
+        <div className="tms-layer-head">
+          <div>
+            <span className="ui-t-eyebrow">Add manager</span>
+            <h2 id="tms-add-manager-title" className="tms-layer-title ui-t-title">
+              {team.name}
+            </h2>
+          </div>
+          <IconButton icon={<X size={18} strokeWidth={1.9} />} aria-label="Close add manager dialog" onClick={onClose} />
+        </div>
+        <div className="tms-modal-body">
+          <Field label="Person">
+            <Select value={userId} onChange={(event) => setUserId(event.target.value)} disabled={users.length === 0} required>
+              <option value="" disabled>
+                {users.length === 0 ? 'No people available' : 'Select a manager'}
+              </option>
+              {users.map((user) => {
+                const managedTeam = teamByManagerId.get(user.id);
+                return (
+                  <option key={user.id} value={user.id}>
+                    {user.name} · {roleLabel(user.role)} · {managedTeam ? `Manages ${managedTeam.name}` : 'Available'}
+                  </option>
+                );
+              })}
+            </Select>
+          </Field>
+          <Banner status="info">Adding a manager also moves them into this team.</Banner>
+          {error && <Banner status="danger">{error}</Banner>}
+        </div>
+        <div className="tms-layer-actions">
+          <Button variant="ghost" onClick={onClose} disabled={Boolean(busyUserId)}>
+            Cancel
+          </Button>
+          <Button
+            type="submit"
+            variant="primary"
+            icon={<Plus size={14} strokeWidth={2.2} />}
+            loading={Boolean(busyUserId)}
+            disabled={!canSubmit}
+          >
+            Add manager
+          </Button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 function DrawerFact({ icon, label, value, hint }: { icon: ReactNode; label: string; value: ReactNode; hint: string }) {
   return (
     <div className="tms-fact">
@@ -907,7 +983,9 @@ function DrawerFact({ icon, label, value, hint }: { icon: ReactNode; label: stri
   );
 }
 
-function PersonLine({ user, icon, action }: { user: AdminUser; icon?: ReactNode; action?: ReactNode }) {
+type PersonLineUser = Pick<AdminUser, 'id' | 'name' | 'email' | 'avatarUrl' | 'role'>;
+
+function PersonLine({ user, icon, action }: { user: PersonLineUser; icon?: ReactNode; action?: ReactNode }) {
   return (
     <div className="tms-person">
       <span className="tms-person__lead">{icon ?? <Avatar name={user.name} src={user.avatarUrl ?? undefined} size={32} />}</span>
@@ -942,7 +1020,7 @@ function summarizePerformance(members: TeamReportMember[]) {
       activityCount += 1;
     }
     for (const app of member.topApps) {
-      const key = `${app.app}\u0000${app.appBundle ?? ''}`;
+      const key = app.domain ? `site:${app.domain}` : `app:${app.app}\u0000${app.appBundle ?? ''}`;
       const previous = apps.get(key);
       if (previous) {
         apps.set(key, { ...previous, minutes: previous.minutes + app.minutes });
@@ -986,6 +1064,13 @@ function availableManagerOptions(users: AdminUser[], teamByManagerId: Map<string
     const managedTeam = teamByManagerId.get(user.id);
     return !managedTeam || managedTeam.id === currentTeamId;
   });
+}
+
+function managerNames(managers: Team['managers']) {
+  if (managers.length === 0) return 'No managers';
+  if (managers.length === 1) return managers[0]!.name;
+  if (managers.length === 2) return `${managers[0]!.name}, ${managers[1]!.name}`;
+  return `${managers[0]!.name} + ${managers.length - 1} more`;
 }
 
 function roleLabel(role: Role) {

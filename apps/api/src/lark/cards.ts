@@ -13,6 +13,10 @@ export type ApprovalAction = 'approve' | 'reject';
 
 export interface ApprovalCardInput {
   requestId: string;
+  /** Durable Lark-message ledger id. Required for new actionable cards. */
+  cardId?: string;
+  /** ManualTimeRequest.version represented by this card. */
+  version?: number;
   requesterName: string;
   /** Lark task summary if the request is attributed to one. */
   taskSummary?: string | null;
@@ -29,6 +33,12 @@ export interface DecidedCardInput extends ApprovalCardInput {
 
 export interface UnavailableRequestCardInput {
   requestId: string;
+}
+
+export interface StaleRequestCardInput {
+  requestId: string;
+  version?: number | null;
+  currentVersion?: number | null;
 }
 
 export interface PayrollReminderItem {
@@ -108,6 +118,15 @@ function detailFields(req: ApprovalCardInput) {
   return fields;
 }
 
+function actionValue(req: ApprovalCardInput, action: ApprovalAction): Record<string, unknown> {
+  return {
+    requestId: req.requestId,
+    cardId: req.cardId,
+    version: req.version,
+    action,
+  };
+}
+
 /** The pending approval card sent to the approver. */
 export function buildApprovalCard(req: ApprovalCardInput): Record<string, unknown> {
   return {
@@ -130,13 +149,13 @@ export function buildApprovalCard(req: ApprovalCardInput): Record<string, unknow
             tag: 'button',
             text: { tag: 'plain_text', content: 'Approve' },
             type: 'primary',
-            value: { requestId: req.requestId, action: 'approve' as ApprovalAction },
+            value: actionValue(req, 'approve'),
           },
           {
             tag: 'button',
             text: { tag: 'plain_text', content: 'Reject' },
             type: 'danger',
-            value: { requestId: req.requestId, action: 'reject' as ApprovalAction },
+            value: actionValue(req, 'reject'),
           },
         ],
       },
@@ -214,13 +233,13 @@ export function buildUpdatedApprovalCard(req: UpdatedApprovalCardInput): Record<
             tag: 'button',
             text: { tag: 'plain_text', content: 'Approve' },
             type: 'primary',
-            value: { requestId: req.requestId, action: 'approve' as ApprovalAction },
+            value: actionValue(req, 'approve'),
           },
           {
             tag: 'button',
             text: { tag: 'plain_text', content: 'Reject' },
             type: 'danger',
-            value: { requestId: req.requestId, action: 'reject' as ApprovalAction },
+            value: actionValue(req, 'reject'),
           },
         ],
       },
@@ -273,6 +292,34 @@ export function buildUnavailableRequestCard(req: UnavailableRequestCardInput): R
           tag: 'lark_md',
           content:
             'This card is stale or the request was removed. Open Timo and use the latest approval request.',
+        },
+      },
+      {
+        tag: 'note',
+        elements: [{ tag: 'plain_text', content: `Request ${req.requestId}` }],
+      },
+    ],
+  };
+}
+
+/** Used when an old card is clicked after the request was edited/decided. */
+export function buildStaleRequestCard(req: StaleRequestCardInput): Record<string, unknown> {
+  const note =
+    req.currentVersion && req.version
+      ? `This card is version ${req.version}; the latest request is version ${req.currentVersion}.`
+      : 'This card is not the latest approval card.';
+  return {
+    config: { wide_screen_mode: true, update_multi: true },
+    header: {
+      title: { tag: 'plain_text', content: 'Manual time request — stale' },
+      template: 'grey',
+    },
+    elements: [
+      {
+        tag: 'div',
+        text: {
+          tag: 'lark_md',
+          content: `${note} Open Timo or use the latest Lark card before approving.`,
         },
       },
       {

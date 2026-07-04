@@ -26,7 +26,6 @@ export async function loadProfileForUser(
       avatarUrl: true,
       role: true,
       createdAt: true,
-      managerId: true,
       shiftAssignedAt: true,
       workspace: {
         select: {
@@ -39,12 +38,17 @@ export async function loadProfileForUser(
         select: {
           id: true,
           name: true,
-          manager: {
+          managers: {
+            orderBy: { createdAt: 'asc' },
             select: {
-              id: true,
-              name: true,
-              email: true,
-              avatarUrl: true,
+              user: {
+                select: {
+                  id: true,
+                  name: true,
+                  email: true,
+                  avatarUrl: true,
+                },
+              },
             },
           },
           _count: { select: { members: true } },
@@ -70,16 +74,8 @@ export async function loadProfileForUser(
   const parsedRole = RoleSchema.safeParse(user.role);
   if (!parsedRole.success) return { error: 'stale_role_migration_required' };
 
-  const [directManager, policy] = await Promise.all([
-    user.managerId
-      ? prisma.user.findUnique({
-          where: { id: user.managerId },
-          select: { id: true, name: true, email: true, avatarUrl: true },
-        })
-      : Promise.resolve(null),
-    loadOrCreatePolicy(workspaceId),
-  ]);
-  const manager = directManager ?? user.team?.manager ?? null;
+  const policy = await loadOrCreatePolicy(workspaceId);
+  const manager = user.team?.managers.find((m) => m.user.id !== user.id)?.user ?? user.team?.managers[0]?.user ?? null;
 
   return {
     user: {

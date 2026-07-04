@@ -11,10 +11,10 @@ describe('activityWindowForShot', () => {
     expect(w.to).toBe(t + 60_000);
   });
 
-  describe('slow cadence (3-hour interval, partition mode)', () => {
+  describe('normal cadence (1-3 minute interval, partition mode)', () => {
     it('starts the window 60s past the older shot', () => {
       const older = 0;
-      const now = 3 * 60 * 60_000; // 3h later
+      const now = 3 * 60_000; // 3m later
       const w = activityWindowForShot({ capturedAt: now, olderCapturedAt: older, defaultWindowMs: DAY_DEFAULT });
       expect(w.from).toBe(older + 60_000);
       expect(w.to).toBe(now + 60_000);

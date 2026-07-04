@@ -1,155 +1,39 @@
-import { prisma } from '@grind/db';
-import { ulid } from 'ulid';
-import { buildCancelledCard, buildDecidedCard, type ApprovalAction } from './cards';
-import { logger } from '../logger';
+import { decideManualTimeRequest } from '../manualTime/decision';
+import { type ApprovalAction } from './cards';
 
 /**
- * Apply an approval decision to a manual-time request. Pure-ish: takes prisma
- * via the singleton (so tests run against the real test DB) and returns the
- * card payload that the Lark callback should respond with to update the card
- * in place.
- *
- * Invariants:
- *  - Idempotent: a second click on an already-decided card returns the same
- *    decided card without re-decision.
- *  - Authorization: the decider's open_id must match the request's approver's
- *    LarkIdentity. (Until M11 introduces team-scoped MANAGER, the approver is
- *    fixed at create time so this is exact.)
- *  - On APPROVE: a real TimeEntry(source=MANUAL) is created spanning the
- *    requested range with a single WORK segment, and linked via
- *    ManualTimeRequest.timeEntryId.
+ * Lark-card decision wrapper. The actual state machine lives in
+ * manualTime/decision so dashboard and Lark cannot diverge.
  */
 export interface DecideResult {
   card: Record<string, unknown>;
   status: 'APPROVED' | 'REJECTED' | 'PENDING' | 'CANCELLED';
   timeEntryId: string | null;
-  /** Reason the decision was a no-op (or null). For observability / tests. */
-  noop: 'already_decided' | 'not_found' | 'forbidden' | 'self_approval_forbidden' | 'cancelled' | null;
-}
-
-function canSelfApproveManualTime(role: string): boolean {
-  return role === 'ADMIN' || role === 'MANAGER';
+  noop: 'already_decided' | 'not_found' | 'forbidden' | 'self_approval_forbidden' | 'cancelled' | 'stale_card' | null;
 }
 
 export async function decideRequest(args: {
   requestId: string;
   action: ApprovalAction;
   decidedByOpenId: string;
+  cardId?: string;
+  version?: number;
   now?: Date;
 }): Promise<DecideResult | null> {
-  const now = args.now ?? new Date();
-  const req = await prisma.manualTimeRequest.findUnique({
-    where: { id: args.requestId },
-    include: {
-      user: { select: { name: true } },
-      approver: { include: { larkIdentity: { select: { openId: true } } } },
-      attendees: { select: { userId: true } },
-    },
+  const result = await decideManualTimeRequest({
+    requestId: args.requestId,
+    action: args.action,
+    source: 'LARK_CARD',
+    decidedByOpenId: args.decidedByOpenId,
+    cardId: args.cardId,
+    version: args.version,
+    now: args.now,
   });
-  if (!req) {
-    logger.warn({ requestId: args.requestId, action: args.action, decidedByOpenId: args.decidedByOpenId }, 'decideRequest: not found');
-    return null;
-  }
-
-  // Authorization: the clicker must be the assigned approver.
-  if (!req.approver?.larkIdentity?.openId || req.approver.larkIdentity.openId !== args.decidedByOpenId) {
-    logger.warn({ requestId: req.id, decidedByOpenId: args.decidedByOpenId }, 'decideRequest: forbidden');
-    return { card: {}, status: req.status, timeEntryId: req.timeEntryId, noop: 'forbidden' };
-  }
-
-  if (req.status === 'PENDING' && req.approverId === req.userId && !canSelfApproveManualTime(req.approver.role)) {
-    logger.warn({ requestId: req.id, userId: req.userId }, 'decideRequest: forbidden (self approval)');
-    return { card: {}, status: req.status, timeEntryId: req.timeEntryId, noop: 'self_approval_forbidden' };
-  }
-
-  // Idempotent: already decided → return the existing decided card.
-  if (req.status !== 'PENDING') {
-    // CANCELLED is a special case: requester pulled the request before this
-    // click landed. Return a "Request cancelled" card variant (red, no buttons,
-    // no TimeEntry) so the approver knows their click was a no-op.
-    if (req.status === 'CANCELLED') {
-      return {
-        card: buildCancelledCard({
-          requestId: req.id,
-          requesterName: req.user.name,
-          taskSummary: req.taskSummary,
-          startedAt: req.requestedStart.getTime(),
-          endedAt: req.requestedEnd.getTime(),
-          reason: req.reason,
-          cancelledAt: (req.decidedAt ?? now).getTime(),
-        }),
-        status: 'CANCELLED',
-        timeEntryId: null,
-        noop: 'cancelled',
-      };
-    }
-    const card = buildDecidedCard({
-      requestId: req.id,
-      requesterName: req.user.name,
-      taskSummary: req.taskSummary,
-      startedAt: req.requestedStart.getTime(),
-      endedAt: req.requestedEnd.getTime(),
-      reason: req.reason,
-      decision: req.status,
-      decidedByName: req.approver?.name ?? 'Approver',
-      decidedAt: (req.decidedAt ?? now).getTime(),
-    });
-    return { card, status: req.status, timeEntryId: req.timeEntryId, noop: 'already_decided' };
-  }
-
-  const decision = args.action === 'approve' ? 'APPROVED' : 'REJECTED';
-
-  // Snapshot the requester's current shiftId — manual time inherits the
-  // schedule context from the user's present assignment.
-  const requesterShift = await prisma.user.findUnique({
-    where: { id: req.userId },
-    select: { shiftId: true },
-  });
-
-  // Atomic: persist the decision, and on APPROVE also create the TimeEntry.
-  const result = await prisma.$transaction(async (tx) => {
-    let timeEntryId: string | null = null;
-    if (decision === 'APPROVED') {
-      const teId = ulid();
-      const attendeeIds = req.attendees.map((a) => a.userId);
-      await tx.timeEntry.create({
-        data: {
-          id: teId,
-          clientUuid: `mtr-${req.id}`,
-          userId: req.userId,
-          larkTaskGuid: req.larkTaskGuid,
-          source: 'MANUAL',
-          startedAt: req.requestedStart,
-          endedAt: req.requestedEnd,
-          shiftIdAtStart: requesterShift?.shiftId ?? null,
-          segments: {
-            create: [{ id: ulid(), kind: 'WORK', startedAt: req.requestedStart, endedAt: req.requestedEnd }],
-          },
-          // Carry meeting attendees onto the approved entry (parity with the
-          // dashboard + auto-approve paths) — otherwise they're lost.
-          attendees: attendeeIds.length ? { create: attendeeIds.map((userId) => ({ userId })) } : undefined,
-        },
-      });
-      timeEntryId = teId;
-    }
-    const updated = await tx.manualTimeRequest.update({
-      where: { id: req.id },
-      data: { status: decision, decidedAt: now, timeEntryId },
-    });
-    return { updated, timeEntryId };
-  });
-
-  const card = buildDecidedCard({
-    requestId: req.id,
-    requesterName: req.user.name,
-    taskSummary: req.taskSummary,
-    startedAt: req.requestedStart.getTime(),
-    endedAt: req.requestedEnd.getTime(),
-    reason: req.reason,
-    decision,
-    decidedByName: req.approver.name,
-    decidedAt: now.getTime(),
-  });
-
-  return { card, status: decision, timeEntryId: result.timeEntryId, noop: null };
+  if (!result) return null;
+  return {
+    card: result.card,
+    status: result.status,
+    timeEntryId: result.timeEntryId,
+    noop: result.noop,
+  };
 }

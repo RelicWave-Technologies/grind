@@ -4,6 +4,7 @@ import { prisma } from '@grind/db';
 import { buildApp } from '../src/app';
 import { signAccessToken } from '../src/lib/jwt';
 import { NINE_TO_SIX } from '@grind/types';
+import { createManagedTeam } from './helpers';
 
 const app = buildApp();
 const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
@@ -25,13 +26,7 @@ async function seedProfile() {
       passwordHash: 'x'.repeat(60),
     },
   });
-  const team = await prisma.team.create({
-    data: {
-      workspaceId: workspace.id,
-      name: 'Product',
-      managerId: manager.id,
-    },
-  });
+  const team = await createManagedTeam({ workspaceId: workspace.id, name: 'Product', managerId: manager.id });
   const shift = await prisma.shift.create({
     data: {
       workspaceId: workspace.id,
@@ -48,7 +43,6 @@ async function seedProfile() {
       role: 'MEMBER',
       passwordHash: 'x'.repeat(60),
       teamId: team.id,
-      managerId: manager.id,
       shiftId: shift.id,
       shiftAssignedAt: new Date('2026-06-01T03:30:00.000Z'),
     },
@@ -77,7 +71,7 @@ describe('/v1/profile/me', () => {
     expect(res.body.team).toEqual({
       id: s.team.id,
       name: 'Product',
-      memberCount: 1,
+      memberCount: 2,
     });
     expect(res.body.manager).toEqual({
       id: s.manager.id,

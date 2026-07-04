@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import request from 'supertest';
 import { prisma } from '@grind/db';
 import { buildApp } from '../src/app';
-import { seedUser } from './helpers';
+import { createManagedTeam, seedUser } from './helpers';
 import { signAccessToken } from '../src/lib/jwt';
 
 /**
@@ -239,9 +239,9 @@ describe('GET /v1/insights/day — scoped ?userId=', () => {
     const memA = await mk('MEMBER', 'mem-a');
     const mgrB = await mk('MANAGER', 'mgr-b');
     const memB = await mk('MEMBER', 'mem-b');
-    const teamA = await prisma.team.create({ data: { workspaceId: ws.id, name: 'A', managerId: mgrA.id } });
+    const teamA = await createManagedTeam({ workspaceId: ws.id, name: 'A', managerId: mgrA.id });
     await prisma.user.updateMany({ where: { id: { in: [mgrA.id, memA.id] } }, data: { teamId: teamA.id } });
-    const teamB = await prisma.team.create({ data: { workspaceId: ws.id, name: 'B', managerId: mgrB.id } });
+    const teamB = await createManagedTeam({ workspaceId: ws.id, name: 'B', managerId: mgrB.id });
     await prisma.user.updateMany({ where: { id: { in: [mgrB.id, memB.id] } }, data: { teamId: teamB.id } });
     // Member-A has tracked time on 2026-05-30.
     await prisma.timeEntry.create({
@@ -330,4 +330,3 @@ describe('GET /v1/insights/day — scoped ?userId=', () => {
     expect(res.status).toBe(403);
   });
 });
-

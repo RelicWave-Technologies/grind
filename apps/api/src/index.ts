@@ -3,6 +3,7 @@ import { logger } from './logger';
 import { buildApp } from './app';
 import { startCardCallback } from './lark';
 import { startLarkTokenRefreshScheduler } from './lark/refreshScheduler';
+import { startManualTimeLarkOutboxWorker } from './manualTime/larkOutbox';
 import { startPayrollMonthCloseScheduler } from './payroll/scheduler';
 import { startScreenshotRetentionScheduler } from './screenshots/retention';
 
@@ -14,6 +15,7 @@ app.listen(port, () => {
   // Subscribe to Lark card.action.trigger over long-connection WebSocket.
   // No-op when Lark isn't configured.
   startCardCallback();
+  startManualTimeLarkOutboxWorker();
   startLarkTokenRefreshScheduler();
   startPayrollMonthCloseScheduler();
   startScreenshotRetentionScheduler();

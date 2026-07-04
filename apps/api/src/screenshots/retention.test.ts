@@ -13,6 +13,7 @@ async function seedWorkspace(input: { retentionDays?: number | null } = {}) {
       data: {
         workspaceId: workspace.id,
         retentionDaysScreenshots: input.retentionDays ?? 30,
+        defaultScreenshotIntervalMin: 3,
       },
     });
   }
@@ -153,4 +154,3 @@ describe('screenshot retention', () => {
     expect(row.fullUrl).toBeNull();
   });
 });
-

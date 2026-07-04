@@ -25,18 +25,15 @@ let lastHealth: CaptureHealth = 'unknown';
  * single screenshot's per-shot bars.
  *
  * Two regimes:
- *  - **slow cadence** (3-hour production default): partition the timeline
- *    so each minute's sample is credited to exactly ONE shot, by starting
- *    the window 60s past the previous shot's capture time. This is what
- *    the original code did.
- *  - **fast cadence** (15s for testing / dogfood): adjacent shots share
- *    a minute. The partition logic would push the lower bound *past* the
- *    only sample that could land in the window, leaving every bar at zero
- *    except for the lucky shot that crossed a minute boundary. Clamp the
- *    lower bound to `capturedAt - 60s` so the past minute is always
- *    included. Several adjacent shots will then share the same bar (the
- *    minute's totals) — that's the right answer: the user really did do
- *    one minute of work, the camera just fired 4 times in it.
+ *  - **normal cadence** (1-3 minutes): partition the timeline so each
+ *    minute's sample is credited to exactly ONE shot, by starting the window
+ *    60s past the previous shot's capture time.
+ *  - **sub-minute dev/test cadence**: adjacent shots share a minute. The
+ *    partition logic would push the lower bound *past* the only sample that
+ *    could land in the window, leaving every bar at zero except for the lucky
+ *    shot that crossed a minute boundary. Clamp the lower bound to
+ *    `capturedAt - 60s` so the past minute is always included. Several
+ *    adjacent shots will then share the same bar (the minute's totals).
  *
  *  Exported so unit tests can lock the regression in: a 15s gap MUST
  *  yield a non-future-only window.
@@ -194,7 +191,7 @@ export async function runScreenshotRetention(now = Date.now()): Promise<void> {
   }
 }
 
-/** Start the jittered capture loop + the local-cache janitor. */
+/** Start the exact-cadence capture loop + the local-cache janitor. */
 export function startCaptureLoop(): void {
   if (timer) return;
   getStore();

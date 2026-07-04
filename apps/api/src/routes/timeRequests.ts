@@ -16,15 +16,14 @@ import { attachScope } from '../middleware/scope';
 import { authorizeTimeEditForUser, resolveTimeEditTarget } from '../authz/timeEdit';
 import { resolveReportRange } from '../reports/member';
 import {
-  buildApprovalCard,
-  buildSupersededCard,
-  buildUpdatedApprovalCard,
-  buildCancelledCard,
-  buildDecidedCard,
-  getLarkMessenger,
   type DiffEntry,
 } from '../lark';
-import { logger } from '../logger';
+import {
+  queueManualTimeApprovalCard,
+  queueManualTimeSupersedeOldCards,
+} from '../manualTime/larkOutbox';
+import { cancelManualTimeRequest } from '../manualTime/decision';
+import { activeManagersForHomeTeam } from '../org/teamManagers';
 
 export const timeRequestsRouter = Router();
 timeRequestsRouter.use(requireAccessToken);
@@ -32,6 +31,7 @@ timeRequestsRouter.use(requireAccessToken);
 type Row = {
   id: string;
   clientUuid: string;
+  version?: number;
   userId: string;
   approverId: string | null;
   larkTaskGuid: string | null;
@@ -45,20 +45,39 @@ type Row = {
   decidedAt: Date | null;
   decidedReason: string | null;
   createdAt: Date;
+  larkMessages?: Array<{ status: string; attempts: number; version: number; createdAt: Date }>;
   attendees?: Array<{ userId: string }>;
   user?: { id: string; name: string; email: string; avatarUrl: string | null };
   approver?: { id: string; name: string; email: string; avatarUrl: string | null } | null;
 };
 
+function larkDelivery(row: Row): { larkDeliveryStatus: 'none' | 'queued' | 'sent' | 'retrying' | 'failed'; latestLarkMessageStatus: string | null } {
+  const latest = row.larkMessages
+    ?.slice()
+    .sort((a, b) => b.version - a.version || b.createdAt.getTime() - a.createdAt.getTime())[0];
+  if (!latest) return { larkDeliveryStatus: row.larkMessageId ? 'sent' : 'none', latestLarkMessageStatus: row.larkMessageId ? 'SENT' : null };
+  if (latest.status === 'SENT' || latest.status === 'DECIDED' || latest.status === 'CANCELLED' || latest.status === 'SUPERSEDED') {
+    return { larkDeliveryStatus: 'sent', latestLarkMessageStatus: latest.status };
+  }
+  if (latest.status === 'SEND_FAILED' || latest.status === 'UPDATE_FAILED') {
+    return { larkDeliveryStatus: latest.attempts >= 25 ? 'failed' : 'retrying', latestLarkMessageStatus: latest.status };
+  }
+  return { larkDeliveryStatus: 'queued', latestLarkMessageStatus: latest.status };
+}
+
 function serialize(r: Row): ManualTimeRequestDto {
+  const delivery = larkDelivery(r);
   return {
     id: r.id,
     clientUuid: r.clientUuid,
+    version: r.version ?? 1,
     userId: r.userId,
     approverId: r.approverId,
     larkTaskGuid: r.larkTaskGuid,
     taskSummary: r.taskSummary ?? null,
     larkMessageId: r.larkMessageId,
+    larkDeliveryStatus: delivery.larkDeliveryStatus,
+    latestLarkMessageStatus: delivery.latestLarkMessageStatus,
     requestedStart: r.requestedStart.toISOString(),
     requestedEnd: r.requestedEnd.toISOString(),
     reason: r.reason,
@@ -115,23 +134,11 @@ async function resolveManualTimeApprover(
 } | null> {
   const requester = await prisma.user.findUnique({
     where: { id: requesterId },
-    select: { managerId: true },
+    select: { teamId: true },
   });
-  if (requester?.managerId && requester.managerId !== requesterId) {
-    const manager = await prisma.user.findFirst({
-      where: {
-        id: requester.managerId,
-        workspaceId,
-        deactivatedAt: null,
-        role: { in: ['MANAGER', 'ADMIN'] },
-      },
-      select: {
-        id: true,
-        name: true,
-        larkIdentity: { select: { openId: true } },
-      },
-    });
-    if (manager) return manager;
+  if (requester?.teamId) {
+    const managers = await activeManagersForHomeTeam(workspaceId, requester.teamId, requesterId);
+    if (managers[0]) return managers[0];
   }
 
   return prisma.user.findFirst({
@@ -176,7 +183,10 @@ timeRequestsRouter.post('/', attachScope, validate(CreateManualTimeRequest, 'bod
     // Idempotency: same clientUuid from this user → return existing row.
     const existing = await prisma.manualTimeRequest.findUnique({
       where: { clientUuid: body.clientUuid },
-      include: { attendees: true },
+      include: {
+        attendees: true,
+        larkMessages: { select: { status: true, attempts: true, version: true, createdAt: true } },
+      },
     });
     if (existing) {
       if (existing.userId !== targetUserId) return res.status(409).json({ error: 'client_uuid_conflict' });
@@ -239,50 +249,38 @@ timeRequestsRouter.post('/', attachScope, validate(CreateManualTimeRequest, 'bod
             requestedEnd: new Date(end),
             reason: body.reason,
             status: 'APPROVED',
+            version: 1,
             autoApproved: true,
             decidedAt: now,
+            decidedById: req.user!.sub,
+            decisionSource: 'AUTO_APPROVE',
             decidedReason: `Added by ${actor.name}`,
             timeEntryId: teId,
             attendees: attendeeIds.length
               ? { create: attendeeIds.map((uid) => ({ userId: uid })) }
-              : undefined,
+            : undefined,
           },
           include: { attendees: true },
         });
+        if (requester.larkIdentity?.openId) {
+          await queueManualTimeApprovalCard(tx, {
+            requestId: row.id,
+            version: row.version,
+            recipientOpenId: requester.larkIdentity.openId,
+            kind: 'DECIDED_NOTICE',
+          });
+        }
         return row;
       });
 
-      // Best-effort informational card to the requester themselves so the
-      // audit trail exists in Lark too. No buttons — pure record.
-      const messenger = getLarkMessenger();
-      if (messenger && requester.larkIdentity?.openId) {
-        try {
-          const card = buildDecidedCard({
-            requestId: created.id,
-            requesterName: requester.name,
-            taskSummary: body.taskSummary ?? null,
-            startedAt: start,
-            endedAt: end,
-            reason: body.reason,
-            decision: 'APPROVED',
-            decidedByName: actor.name,
-            decidedAt: now.getTime(),
-          });
-          const { messageId } = await messenger.sendCard(requester.larkIdentity.openId, card);
-          await prisma.manualTimeRequest.update({
-            where: { id: created.id },
-            data: { larkMessageId: messageId },
-          });
-          created.larkMessageId = messageId;
-        } catch (err) {
-          logger.warn(
-            { err: String(err), requestId: created.id },
-            'lark supervisor-edit notification failed (non-fatal)',
-          );
-        }
-      }
-
-      return res.status(201).json(serialize(created));
+      const hydrated = await prisma.manualTimeRequest.findUniqueOrThrow({
+        where: { id: created.id },
+        include: {
+          attendees: true,
+          larkMessages: { select: { status: true, attempts: true, version: true, createdAt: true } },
+        },
+      });
+      return res.status(201).json(serialize(hydrated));
     }
 
     // ------------------------------------------------------------------
@@ -291,44 +289,45 @@ timeRequestsRouter.post('/', attachScope, validate(CreateManualTimeRequest, 'bod
     const approver = await resolveManualTimeApprover(req.user.ws, targetUserId);
     if (!approver) return res.status(400).json({ error: 'no_approver' });
 
-    const created = await prisma.manualTimeRequest.create({
-      data: {
-        clientUuid: body.clientUuid,
-        userId: targetUserId,
-        approverId: approver.id,
-        larkTaskGuid: body.larkTaskGuid ?? null,
-        taskSummary: cleanTaskSummary(body.taskSummary),
-        requestedStart: new Date(start),
-        requestedEnd: new Date(end),
-        reason: body.reason,
-        status: 'PENDING',
-        attendees: attendeeIds.length
-          ? { create: attendeeIds.map((uid) => ({ userId: uid })) }
-          : undefined,
-      },
-      include: { attendees: true },
+    const created = await prisma.$transaction(async (tx) => {
+      const row = await tx.manualTimeRequest.create({
+        data: {
+          clientUuid: body.clientUuid,
+          userId: targetUserId,
+          approverId: approver.id,
+          larkTaskGuid: body.larkTaskGuid ?? null,
+          taskSummary: cleanTaskSummary(body.taskSummary),
+          requestedStart: new Date(start),
+          requestedEnd: new Date(end),
+          reason: body.reason,
+          status: 'PENDING',
+          version: 1,
+          attendees: attendeeIds.length
+            ? { create: attendeeIds.map((uid) => ({ userId: uid })) }
+            : undefined,
+        },
+        include: { attendees: true },
+      });
+      if (approver.larkIdentity?.openId) {
+        await queueManualTimeApprovalCard(tx, {
+          requestId: row.id,
+          version: row.version,
+          recipientOpenId: approver.larkIdentity.openId,
+          kind: 'APPROVAL',
+        });
+      }
+      return row;
     });
 
-    const messenger = getLarkMessenger();
-    if (messenger && approver.larkIdentity?.openId) {
-      try {
-        const card = buildApprovalCard({
-          requestId: created.id,
-          requesterName: requester.name,
-          taskSummary: body.taskSummary ?? null,
-          startedAt: start,
-          endedAt: end,
-          reason: body.reason,
-        });
-        const { messageId } = await messenger.sendCard(approver.larkIdentity.openId, card);
-        await prisma.manualTimeRequest.update({ where: { id: created.id }, data: { larkMessageId: messageId } });
-        created.larkMessageId = messageId;
-      } catch (err) {
-        logger.warn({ err: String(err), requestId: created.id }, 'lark approval card send failed (non-fatal)');
-      }
-    }
+    const hydrated = await prisma.manualTimeRequest.findUniqueOrThrow({
+      where: { id: created.id },
+      include: {
+        attendees: true,
+        larkMessages: { select: { status: true, attempts: true, version: true, createdAt: true } },
+      },
+    });
 
-    res.status(201).json(serialize(created));
+    res.status(201).json(serialize(hydrated));
   } catch (err) {
     next(err);
   }
@@ -371,6 +370,7 @@ timeRequestsRouter.get('/', validate(ListManualTimeRequestsQuery, 'query'), asyn
       take: 200,
       include: {
         attendees: true,
+        larkMessages: { select: { status: true, attempts: true, version: true, createdAt: true } },
         user: { select: { id: true, name: true, email: true, avatarUrl: true } },
         approver: { select: { id: true, name: true, email: true, avatarUrl: true } },
       },
@@ -386,10 +386,8 @@ timeRequestsRouter.get('/', validate(ListManualTimeRequestsQuery, 'query'), asyn
 
 /**
  * Edit a still-PENDING request. The requester or a scoped manager/admin can
- * patch the request; RBAC scope is enforced before mutation. Re-sends the
- * updated approval card to the approver and a tiny "Request updated" text
- * nudge so they notice the change.
- * Both Lark calls are best-effort — they never block the DB write.
+ * patch the request; DB mutation and Lark projection jobs are written in one
+ * transaction. Old cards are rejected by version even if Lark updates lag.
  */
 timeRequestsRouter.patch('/:id', attachScope, validate(PatchManualTimeRequest, 'body'), async (req, res, next) => {
   try {
@@ -422,15 +420,16 @@ timeRequestsRouter.patch('/:id', attachScope, validate(PatchManualTimeRequest, '
       attendeeIds = check.ids;
     }
 
-    const updated = await prisma.$transaction(async (tx) => {
-      const row = await tx.manualTimeRequest.update({
-        where: { id },
-        data: {
-          requestedStart: start,
-          requestedEnd: end,
-          ...(body.larkTaskGuid !== undefined ? { larkTaskGuid: body.larkTaskGuid } : {}),
-          ...(body.taskSummary !== undefined ? { taskSummary: cleanTaskSummary(body.taskSummary) } : {}),
-          ...(body.reason !== undefined ? { reason: body.reason } : {}),
+	    const updated = await prisma.$transaction(async (tx) => {
+	      const row = await tx.manualTimeRequest.update({
+	        where: { id },
+	        data: {
+	          requestedStart: start,
+	          requestedEnd: end,
+	          version: { increment: 1 },
+	          ...(body.larkTaskGuid !== undefined ? { larkTaskGuid: body.larkTaskGuid } : {}),
+	          ...(body.taskSummary !== undefined ? { taskSummary: cleanTaskSummary(body.taskSummary) } : {}),
+	          ...(body.reason !== undefined ? { reason: body.reason } : {}),
         },
       });
       if (attendeeIds !== null) {
@@ -439,134 +438,82 @@ timeRequestsRouter.patch('/:id', attachScope, validate(PatchManualTimeRequest, '
         if (attendeeIds.length) {
           await tx.mtrAttendee.createMany({
             data: attendeeIds.map((userId) => ({ requestId: id, userId })),
-          });
-        }
-      }
-      return row;
-    });
+	          });
+	        }
+	      }
+	      if (existing.approver?.larkIdentity?.openId) {
+	        const diff: DiffEntry[] = [];
+	        if (existing.requestedStart.getTime() !== start.getTime() || existing.requestedEnd.getTime() !== end.getTime()) {
+	          diff.push({
+	            label: 'Time',
+	            before: `${existing.requestedStart.toISOString()} → ${existing.requestedEnd.toISOString()}`,
+	            after: `${start.toISOString()} → ${end.toISOString()}`,
+	          });
+	        }
+	        const nextTaskGuid = body.larkTaskGuid !== undefined ? body.larkTaskGuid : existing.larkTaskGuid;
+	        const nextTaskSummary = body.taskSummary !== undefined ? cleanTaskSummary(body.taskSummary) : existing.taskSummary;
+	        if ((existing.larkTaskGuid ?? null) !== (nextTaskGuid ?? null) || (existing.taskSummary ?? null) !== (nextTaskSummary ?? null)) {
+	          const beforeTask = existing.taskSummary ?? existing.larkTaskGuid ?? '—';
+	          const afterTask = nextTaskSummary ?? nextTaskGuid ?? '—';
+	          diff.push({ label: 'Task', before: beforeTask, after: afterTask });
+	        }
+	        if (existing.reason !== row.reason) {
+	          diff.push({ label: 'Reason', before: existing.reason, after: row.reason });
+	        }
+	        await queueManualTimeApprovalCard(tx, {
+	          requestId: row.id,
+	          version: row.version,
+	          recipientOpenId: existing.approver.larkIdentity.openId,
+	          kind: 'UPDATED_APPROVAL',
+	          diff,
+	        });
+	        await queueManualTimeSupersedeOldCards(tx, row.id);
+	      }
+	      return row;
+	    });
 
-    // Best-effort: disable the OLD card (no buttons, "Updated — see new
-    // card" notice) and send a NEW card showing the updated values + a diff
-    // of what changed. Update DB's larkMessageId so future updates/
-    // cancellations target the latest card. Failure must NOT break the
-    // PATCH — the DB state is the source of truth.
-    const messenger = getLarkMessenger();
-    if (messenger && existing.approver?.larkIdentity?.openId && existing.larkMessageId) {
-      const approverOpenId = existing.approver.larkIdentity.openId;
-      const supersededAt = Date.now();
-      const diff: DiffEntry[] = [];
-      if (existing.requestedStart.getTime() !== start.getTime() || existing.requestedEnd.getTime() !== end.getTime()) {
-        diff.push({
-          label: 'Time',
-          before: `${existing.requestedStart.toISOString()} → ${existing.requestedEnd.toISOString()}`,
-          after: `${start.toISOString()} → ${end.toISOString()}`,
-        });
-      }
-      const nextTaskGuid = body.larkTaskGuid !== undefined ? body.larkTaskGuid : existing.larkTaskGuid;
-      const nextTaskSummary = body.taskSummary !== undefined ? cleanTaskSummary(body.taskSummary) : existing.taskSummary;
-      if ((existing.larkTaskGuid ?? null) !== (nextTaskGuid ?? null) || (existing.taskSummary ?? null) !== (nextTaskSummary ?? null)) {
-        const beforeTask = existing.taskSummary ?? existing.larkTaskGuid ?? '—';
-        const afterTask = nextTaskSummary ?? nextTaskGuid ?? '—';
-        diff.push({ label: 'Task', before: beforeTask, after: afterTask });
-      }
-      if (existing.reason !== updated.reason) {
-        diff.push({ label: 'Reason', before: existing.reason, after: updated.reason });
-      }
-      try {
-        // 1. Disable the previous card.
-        await messenger.updateCard(
-          existing.larkMessageId,
-          buildSupersededCard({
-            requestId: existing.id,
-            requesterName: existing.user.name,
-            taskSummary: existing.taskSummary,
-            startedAt: existing.requestedStart.getTime(),
-            endedAt: existing.requestedEnd.getTime(),
-            reason: existing.reason,
-            supersededAt,
-          }),
-        );
-        // 2. Send a fresh card with the updated values + the diff.
-        const { messageId: newMessageId } = await messenger.sendCard(
-          approverOpenId,
-          buildUpdatedApprovalCard({
-            requestId: updated.id,
-            requesterName: existing.user.name,
-            taskSummary: updated.taskSummary,
-            startedAt: start.getTime(),
-            endedAt: end.getTime(),
-            reason: updated.reason,
-            diff,
-          }),
-        );
-        // 3. Future edits/cancellations should target the new card.
-        await prisma.manualTimeRequest.update({ where: { id }, data: { larkMessageId: newMessageId } });
-        updated.larkMessageId = newMessageId;
-      } catch (err) {
-        logger.warn({ err: String(err), requestId: id }, 'lark patch-notice failed (non-fatal)');
-      }
-    }
-    res.json(serialize(updated));
+	    const hydrated = await prisma.manualTimeRequest.findUniqueOrThrow({
+	      where: { id: updated.id },
+	      include: {
+	        attendees: true,
+	        larkMessages: { select: { status: true, attempts: true, version: true, createdAt: true } },
+	      },
+	    });
+	    res.json(serialize(hydrated));
   } catch (err) {
     next(err);
   }
 });
 
 /**
- * Cancel a still-PENDING request. The requester or a scoped manager/admin can
- * cancel. Marks status=CANCELLED, swaps the original Lark card for a
- * "cancelled" variant (no buttons) and pings the approver with a one-line
- * notice so an in-flight approver doesn't act on a dead request. Decided
- * requests are immutable (409).
+ * Cancel a still-PENDING request. The DB transition is atomic and all known
+ * Lark cards are finalized asynchronously via the outbox.
  */
 timeRequestsRouter.post('/:id/cancel', attachScope, async (req, res, next) => {
   try {
-    if (!req.user) return res.status(401).json({ error: 'unauthorized' });
-    const id = req.params.id;
-    const existing = await prisma.manualTimeRequest.findUnique({
-      where: { id },
-      include: {
-        user: { select: { name: true } },
-        approver: { include: { larkIdentity: { select: { openId: true } } } },
-      },
-    });
+	    if (!req.user) return res.status(401).json({ error: 'unauthorized' });
+	    const id = req.params.id;
+	    if (!id) return res.status(400).json({ error: 'missing_id' });
+	    const existing = await prisma.manualTimeRequest.findUnique({ where: { id } });
     if (!existing) return res.status(404).json({ error: 'not_found' });
     const authz = authorizeTimeEditForUser(req, existing.userId);
     if (!authz.ok) return res.status(authz.status).json({ error: authz.error });
     if (existing.status !== 'PENDING') return res.status(409).json({ error: 'immutable_after_decision', status: existing.status });
 
-    const now = new Date();
-    const updated = await prisma.manualTimeRequest.update({
-      where: { id },
-      data: {
-        status: 'CANCELLED',
-        decidedAt: now,
-        decidedReason: authz.isSelf ? 'Cancelled by requester' : 'Cancelled by manager',
-      },
+    await cancelManualTimeRequest({
+      requestId: id,
+      actorUserId: req.user.sub,
+      reason: authz.isSelf ? 'Cancelled by requester' : 'Cancelled by manager',
+      source: authz.isSelf ? 'REQUESTER_CANCEL' : 'MANAGER_CANCEL',
     });
 
-    const messenger = getLarkMessenger();
-    if (messenger && existing.larkMessageId) {
-      try {
-        // Rewrite the card in place: red header, NO Approve/Reject buttons,
-        // clear "withdrawn by requester" note. After this, the approver
-        // CAN'T act on stale buttons even if the WS callback fires.
-        await messenger.updateCard(
-          existing.larkMessageId,
-          buildCancelledCard({
-            requestId: existing.id,
-            requesterName: existing.user.name,
-            taskSummary: existing.taskSummary,
-            startedAt: existing.requestedStart.getTime(),
-            endedAt: existing.requestedEnd.getTime(),
-            reason: existing.reason,
-            cancelledAt: now.getTime(),
-          }),
-        );
-      } catch (err) {
-        logger.warn({ err: String(err), requestId: id }, 'lark cancel-card update failed (non-fatal)');
-      }
-    }
+    const updated = await prisma.manualTimeRequest.findUniqueOrThrow({
+      where: { id },
+      include: {
+        attendees: true,
+        larkMessages: { select: { status: true, attempts: true, version: true, createdAt: true } },
+      },
+    });
     res.json(serialize(updated));
   } catch (err) {
     next(err);

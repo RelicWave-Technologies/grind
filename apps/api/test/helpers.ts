@@ -20,11 +20,30 @@ export async function seedUser(opts?: { role?: 'ADMIN' | 'MANAGER' | 'MEMBER' })
       email: `user${counter}-${Date.now()}@test.local`,
       name: `User ${counter}`,
       role: opts?.role ?? 'MEMBER',
+      provisioningStatus: 'ACTIVE',
       passwordHash: await hashPassword('password123'),
     },
   });
   const accessToken = signAccessToken({ sub: user.id, ws: ws.id, role: user.role });
   return { workspaceId: ws.id, userId: user.id, accessToken };
+}
+
+export async function createManagedTeam(args: {
+  workspaceId: string;
+  name: string;
+  managerId: string;
+}) {
+  const team = await prisma.team.create({
+    data: { workspaceId: args.workspaceId, name: args.name },
+  });
+  await prisma.teamManager.create({
+    data: { workspaceId: args.workspaceId, teamId: team.id, userId: args.managerId },
+  });
+  await prisma.user.updateMany({
+    where: { id: args.managerId, role: { not: 'ADMIN' } },
+    data: { role: 'MANAGER', teamId: team.id, managerId: null },
+  });
+  return team;
 }
 
 let ulidCounter = 0;

@@ -28,6 +28,13 @@ export type AccessibilityStatus = {
   hookRunning: boolean;
   lastHookError: string | null;
 };
+export type LaunchAtLoginStatus = 'enabled' | 'not-registered' | 'requires-approval' | 'not-found' | 'blocked-dmg' | 'unavailable-dev';
+export type LaunchAtLoginInfo = {
+  enabled: boolean;
+  status: LaunchAtLoginStatus;
+  canRegister: boolean;
+  reason: 'running-from-dmg' | null;
+};
 export type UpdatePhase = 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'installing' | 'not-available' | 'error';
 export type UpdateStatus = {
   phase: UpdatePhase;
@@ -93,11 +100,12 @@ declare global {
         requestAccessibility: () => Promise<void>;
       };
       settings: {
-        get: () => Promise<{ version: string; platform: string; launchAtLogin: boolean; screenStatus: string; floatingBarVisible: boolean }>;
-        setLaunchAtLogin: (enabled: boolean) => Promise<boolean>;
+        get: () => Promise<{ version: string; platform: string; launchAtLogin: LaunchAtLoginInfo; screenStatus: string; floatingBarVisible: boolean }>;
+        enableLaunchAtLogin: () => Promise<LaunchAtLoginInfo>;
         setFloatingBarVisible: (enabled: boolean) => Promise<boolean>;
         resetFloatingBarPosition: () => Promise<void>;
         openScreenPrefs: () => Promise<void>;
+        openLoginItemsPrefs: () => Promise<void>;
         openDataFolder: () => Promise<void>;
       };
       app: {

@@ -16,10 +16,15 @@ export async function storedIconDataUrls(bundles: (string | null)[]): Promise<Ma
   return new Map(rows.map((r) => [r.bundleId, `data:image/png;base64,${Buffer.from(r.png).toString('base64')}`]));
 }
 
-/** Real stored icon if we have one, else the brand-map URL, else null. */
-export function resolveAppIcon(app: string, bundle: string | null, stored: Map<string, string>): string | null {
+/** Real stored icon if we have one, else domain favicon / brand-map URL, else null. */
+export function resolveAppIcon(app: string, bundle: string | null, stored: Map<string, string>, domain?: string | null): string | null {
+  if (domain) return siteFaviconUrl(domain);
   if (bundle && stored.has(bundle)) return stored.get(bundle) ?? null;
   return appIconUrl(app, bundle);
+}
+
+export function siteFaviconUrl(domain: string): string {
+  return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64`;
 }
 
 export function appIconUrl(app: string, bundle: string | null): string | null {

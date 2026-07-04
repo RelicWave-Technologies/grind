@@ -71,7 +71,7 @@ describe('POST /v1/agent/heartbeat', () => {
 
     await prisma.user.update({
       where: { id: user.userId },
-      data: { screenshotIntervalMin: 30 },
+      data: { screenshotIntervalMin: 2 },
     });
 
     const second = await request(app)
@@ -94,7 +94,7 @@ describe('POST /v1/agent/heartbeat', () => {
     await prisma.workspacePolicy.create({
       data: {
         workspaceId: user.workspaceId,
-        defaultScreenshotIntervalMin: 45,
+        defaultScreenshotIntervalMin: 2,
         defaultIdleThresholdMin: 10,
         captureApps: true,
       },

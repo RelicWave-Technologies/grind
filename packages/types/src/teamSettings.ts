@@ -3,14 +3,36 @@ import { Role } from './auth';
 import { ShiftDtoSchema } from './shifts';
 
 export const MEMBER_SETTING_DEFAULTS = {
-  screenshotIntervalMin: 180,
+  screenshotIntervalMin: 3,
   idleThresholdMin: 5,
 } as const;
 
+export const SCREENSHOT_INTERVAL_OPTIONS = [1, 2, 3] as const;
+export type ScreenshotIntervalMin = (typeof SCREENSHOT_INTERVAL_OPTIONS)[number];
+export const DEFAULT_SCREENSHOT_INTERVAL_MIN: ScreenshotIntervalMin = 3;
 export const SCREENSHOT_INTERVAL_MIN = 1;
-export const SCREENSHOT_INTERVAL_MAX = 480;
+export const SCREENSHOT_INTERVAL_MAX = 3;
 export const IDLE_THRESHOLD_MIN = 1;
 export const IDLE_THRESHOLD_MAX = 120;
+
+export function isScreenshotIntervalMin(value: unknown): value is ScreenshotIntervalMin {
+  return typeof value === 'number' &&
+    Number.isInteger(value) &&
+    (SCREENSHOT_INTERVAL_OPTIONS as readonly number[]).includes(value);
+}
+
+export function normalizeScreenshotIntervalMin(
+  value: number | null | undefined,
+  fallback: number = DEFAULT_SCREENSHOT_INTERVAL_MIN,
+): ScreenshotIntervalMin {
+  if (isScreenshotIntervalMin(value)) return value;
+  return isScreenshotIntervalMin(fallback) ? fallback : DEFAULT_SCREENSHOT_INTERVAL_MIN;
+}
+
+export const ScreenshotIntervalMinSchema = z
+  .number()
+  .int()
+  .refine(isScreenshotIntervalMin, { message: 'invalid_screenshot_interval' });
 
 export const TeamSettingsPersonSchema = z.object({
   id: z.string(),
@@ -38,7 +60,7 @@ export const TeamMemberSettingsDtoSchema = z.object({
   manager: TeamSettingsPersonSchema.nullable(),
   shiftId: z.string().nullable(),
   shiftAssignedAt: z.string().datetime({ offset: true }).nullable(),
-  screenshotIntervalMin: z.number().int().min(SCREENSHOT_INTERVAL_MIN).max(SCREENSHOT_INTERVAL_MAX),
+  screenshotIntervalMin: ScreenshotIntervalMinSchema,
   idleThresholdMin: z.number().int().min(IDLE_THRESHOLD_MIN).max(IDLE_THRESHOLD_MAX),
   createdAt: z.string().datetime({ offset: true }),
 });
@@ -58,7 +80,7 @@ export const PatchTeamMemberSettingsRequest = z
     shiftId: z.string().nullable().optional(),
     // null clears the per-member override → the member inherits the workspace
     // policy default. A number sets an explicit per-member override.
-    screenshotIntervalMin: z.number().int().min(SCREENSHOT_INTERVAL_MIN).max(SCREENSHOT_INTERVAL_MAX).nullable().optional(),
+    screenshotIntervalMin: ScreenshotIntervalMinSchema.nullable().optional(),
     idleThresholdMin: z.number().int().min(IDLE_THRESHOLD_MIN).max(IDLE_THRESHOLD_MAX).nullable().optional(),
     auditReason: z.string().max(500).optional(),
   })

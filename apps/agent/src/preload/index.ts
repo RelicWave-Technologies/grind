@@ -29,6 +29,13 @@ type AccessibilityStatus = {
   hookRunning: boolean;
   lastHookError: string | null;
 };
+type LaunchAtLoginStatus = 'enabled' | 'not-registered' | 'requires-approval' | 'not-found' | 'blocked-dmg' | 'unavailable-dev';
+type LaunchAtLoginInfo = {
+  enabled: boolean;
+  status: LaunchAtLoginStatus;
+  canRegister: boolean;
+  reason: 'running-from-dmg' | null;
+};
 type UpdatePhase = 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'installing' | 'not-available' | 'error';
 type UpdateStatus = {
   phase: UpdatePhase;
@@ -114,12 +121,13 @@ const api = {
     requestAccessibility: (): Promise<void> => ipcRenderer.invoke('permissions:requestAccessibility'),
   },
   settings: {
-    get: (): Promise<{ version: string; platform: string; launchAtLogin: boolean; screenStatus: string; floatingBarVisible: boolean }> =>
+    get: (): Promise<{ version: string; platform: string; launchAtLogin: LaunchAtLoginInfo; screenStatus: string; floatingBarVisible: boolean }> =>
       ipcRenderer.invoke('settings:get'),
-    setLaunchAtLogin: (enabled: boolean): Promise<boolean> => ipcRenderer.invoke('settings:setLaunchAtLogin', enabled),
+    enableLaunchAtLogin: (): Promise<LaunchAtLoginInfo> => ipcRenderer.invoke('settings:enableLaunchAtLogin'),
     setFloatingBarVisible: (enabled: boolean): Promise<boolean> => ipcRenderer.invoke('settings:setFloatingBarVisible', enabled),
     resetFloatingBarPosition: (): Promise<void> => ipcRenderer.invoke('settings:resetFloatingBarPosition'),
     openScreenPrefs: (): Promise<void> => ipcRenderer.invoke('settings:openScreenPrefs'),
+    openLoginItemsPrefs: (): Promise<void> => ipcRenderer.invoke('settings:openLoginItemsPrefs'),
     openDataFolder: (): Promise<void> => ipcRenderer.invoke('settings:openDataFolder'),
   },
   app: {

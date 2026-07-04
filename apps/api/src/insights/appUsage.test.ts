@@ -6,7 +6,8 @@ const s = (
   activeAppBundle: string | null = null,
   keystrokes = 0,
   clicks = 0,
-) => ({ activeApp, activeAppBundle, keystrokes, clicks });
+  activeUrl: string | null = null,
+) => ({ activeApp, activeAppBundle, activeUrl, keystrokes, clicks });
 
 describe('buildAppUsage', () => {
   it('returns empty when no samples', () => {
@@ -72,5 +73,37 @@ describe('buildAppUsage', () => {
     const out = buildAppUsage([s('Chrome'), s(null), s('Chrome'), s(null)]);
     expect(out.totalMinutes).toBe(2);
     expect(out.topApps[0]?.minutes).toBe(2);
+  });
+
+  it('uses policy-allowed URLs to aggregate browser work by domain', () => {
+    const out = buildAppUsage([
+      s('Google Chrome', 'com.google.Chrome', 4, 1, 'https://www.github.com/org/repo'),
+      s('Dia', 'company.thebrowser.dia', 1, 0, 'https://github.com/pulls'),
+      s('Google Chrome', 'com.google.Chrome', 2, 0, 'https://linear.app/acme'),
+    ]);
+
+    expect(out.totalMinutes).toBe(3);
+    expect(out.topApps).toEqual([
+      {
+        app: 'github.com',
+        appBundle: null,
+        domain: 'github.com',
+        sourceApp: 'Google Chrome',
+        sourceAppBundle: 'com.google.Chrome',
+        minutes: 2,
+        keystrokes: 5,
+        clicks: 1,
+      },
+      {
+        app: 'linear.app',
+        appBundle: null,
+        domain: 'linear.app',
+        sourceApp: 'Google Chrome',
+        sourceAppBundle: 'com.google.Chrome',
+        minutes: 1,
+        keystrokes: 2,
+        clicks: 0,
+      },
+    ]);
   });
 });

@@ -7,6 +7,7 @@ import type {
   MonitoringSettingsAuditListResponse,
   WorkspacePolicyDto,
 } from '@grind/types';
+import { SCREENSHOT_INTERVAL_OPTIONS } from '@grind/types';
 import { api } from '../lib/api';
 import {
   Page,
@@ -59,7 +60,6 @@ interface PayrollFormState {
   payrollSheetSendTime: string;
 }
 
-const SCREENSHOT_INTERVAL_OPTIONS = [1, 5, 10, 15, 30, 60, 120, 180, 240, 360, 480];
 const IDLE_THRESHOLD_OPTIONS = [1, 3, 5, 10, 15, 30, 45, 60, 120];
 const RETENTION_OPTIONS = [30, 60, 90, 180, 365];
 type MonitoringRisk = 'NORMAL' | 'CAUTION' | 'HIGH';
@@ -461,7 +461,7 @@ function PolicyRule({ label, value, hint }: { label: string; value: string; hint
 
 function monitoringRiskLevel(timing: MonitoringTiming): MonitoringRisk {
   if (timing.screenshotIntervalMin === 1 || timing.idleThresholdMin === 1) return 'HIGH';
-  if (timing.screenshotIntervalMin <= 5 || timing.idleThresholdMin <= 3) return 'CAUTION';
+  if (timing.screenshotIntervalMin === 2 || timing.idleThresholdMin <= 3) return 'CAUTION';
   return 'NORMAL';
 }
 
@@ -705,7 +705,7 @@ function PayrollPolicyModal({
   return createPortal(modal, document.body);
 }
 
-function SelectRow({
+function SelectRow<T extends number>({
   icon,
   title,
   subtitle,
@@ -717,10 +717,10 @@ function SelectRow({
   icon: ReactNode;
   title: string;
   subtitle: string;
-  value: number;
-  options: number[];
+  value: T;
+  options: readonly T[];
   format: (value: number) => string;
-  onChange: (value: number) => void;
+  onChange: (value: T) => void;
 }) {
   return (
     <ListRow
@@ -731,7 +731,7 @@ function SelectRow({
         <Select
           className="pol-select"
           value={value}
-          onChange={(e) => onChange(Number(e.target.value))}
+          onChange={(e) => onChange(Number(e.target.value) as T)}
           aria-label={title}
         >
           {options.map((option) => (

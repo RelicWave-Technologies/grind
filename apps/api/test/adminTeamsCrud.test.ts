@@ -4,6 +4,7 @@ import { prisma } from '@grind/db';
 import { NINE_TO_SIX } from '@grind/types';
 import { buildApp } from '../src/app';
 import { signAccessToken } from '../src/lib/jwt';
+import { createManagedTeam } from './helpers';
 
 /**
  * /v1/admin/teams + /v1/admin/users/:id (PATCH) — ADMIN-only CRUD against
@@ -22,7 +23,14 @@ async function seed() {
   const ws2 = await prisma.workspace.create({ data: { name: `WS-other-${stamp}` } });
   const mk = (workspaceId: string, email: string, name: string, role: 'ADMIN' | 'MANAGER' | 'MEMBER') =>
     prisma.user.create({
-      data: { workspaceId, email: `${email}-${stamp}@test.local`, name, role, passwordHash: 'x'.repeat(60) },
+      data: {
+        workspaceId,
+        email: `${email}-${stamp}@test.local`,
+        name,
+        role,
+        provisioningStatus: 'ACTIVE',
+        passwordHash: 'x'.repeat(60),
+      },
     });
   const admin = await mk(ws.id, 'admin', 'Alice Admin', 'ADMIN');
   const mgr = await mk(ws.id, 'mgr', 'Mira Manager', 'MANAGER');
@@ -54,8 +62,8 @@ describe('/v1/admin/teams — list + create', () => {
 
   it('ADMIN sees all workspace teams; MANAGER sees only theirs', async () => {
     const s = await seed();
-    const t1 = await prisma.team.create({ data: { workspaceId: s.ws.id, name: 'Squad A', managerId: s.mgr.id } });
-    const t2 = await prisma.team.create({ data: { workspaceId: s.ws.id, name: 'Squad B', managerId: s.admin.id } });
+    const t1 = await createManagedTeam({ workspaceId: s.ws.id, name: 'Squad A', managerId: s.mgr.id });
+    const t2 = await createManagedTeam({ workspaceId: s.ws.id, name: 'Squad B', managerId: s.admin.id });
 
     const adminRes = await request(app).get('/v1/admin/teams').set(auth(s.admin.token));
     expect(adminRes.status).toBe(200);
@@ -68,7 +76,7 @@ describe('/v1/admin/teams — list + create', () => {
     expect(mgrRes.body.teams.map((t: { id: string }) => t.id)).toEqual([t1.id]);
   });
 
-  it('POST creates a team; memberCount starts at 0', async () => {
+  it('POST creates a team and moves a non-admin manager into that team', async () => {
     const s = await seed();
     const res = await request(app)
       .post('/v1/admin/teams')
@@ -77,7 +85,23 @@ describe('/v1/admin/teams — list + create', () => {
     expect(res.status).toBe(201);
     expect(res.body.name).toBe('Fresh Squad');
     expect(res.body.managerId).toBe(s.mgr.id);
+    expect(res.body.managerIds).toEqual([s.mgr.id]);
+    expect(res.body.memberCount).toBe(1);
+    const reload = await prisma.user.findUnique({ where: { id: s.mgr.id }, select: { role: true, teamId: true } });
+    expect(reload).toMatchObject({ role: 'MANAGER', teamId: res.body.id });
+  });
+
+  it('POST with an admin manager does not force the admin into the team', async () => {
+    const s = await seed();
+    const res = await request(app)
+      .post('/v1/admin/teams')
+      .set(auth(s.admin.token))
+      .send({ name: 'Admin Managed', managerId: s.admin.id });
+    expect(res.status).toBe(201);
+    expect(res.body.managerIds).toEqual([s.admin.id]);
     expect(res.body.memberCount).toBe(0);
+    const reload = await prisma.user.findUnique({ where: { id: s.admin.id }, select: { role: true, teamId: true } });
+    expect(reload).toMatchObject({ role: 'ADMIN', teamId: null });
   });
 
   it('POST rejects empty name', async () => {
@@ -86,11 +110,11 @@ describe('/v1/admin/teams — list + create', () => {
     expect(res.status).toBe(400);
   });
 
-  it('POST requires a manager', async () => {
+  it('POST can create an empty team before managers are assigned', async () => {
     const s = await seed();
     const res = await request(app).post('/v1/admin/teams').set(auth(s.admin.token)).send({ name: 'No Manager' });
-    expect(res.status).toBe(400);
-    expect(res.body.error).toBe('manager_required');
+    expect(res.status).toBe(201);
+    expect(res.body.managerIds).toEqual([]);
   });
 
   it('POST rejects a manager from another workspace', async () => {
@@ -100,14 +124,12 @@ describe('/v1/admin/teams — list + create', () => {
       .set(auth(s.admin.token))
       .send({ name: 'X', managerId: s.bystander.id });
     expect(res.status).toBe(400);
-    expect(res.body.error).toBe('manager_out_of_workspace');
+    expect(res.body.error).toBe('manager_unavailable');
   });
 
   it('POST rejects a manager who already owns another team', async () => {
     const s = await seed();
-    const existing = await prisma.team.create({
-      data: { workspaceId: s.ws.id, name: 'Already Managed', managerId: s.mgr.id },
-    });
+    const existing = await createManagedTeam({ workspaceId: s.ws.id, name: 'Already Managed', managerId: s.mgr.id });
 
     const res = await request(app)
       .post('/v1/admin/teams')
@@ -144,31 +166,28 @@ describe('/v1/admin/teams/:id — patch + delete', () => {
     expect(res.body.name).toBe('New');
   });
 
-  it('reassign managerId works; sending null is rejected', async () => {
+  it('replaces managers through the compatibility managerId patch and can clear managers', async () => {
     const s = await seed();
-    const t = await prisma.team.create({ data: { workspaceId: s.ws.id, name: 'X', managerId: s.mgr.id } });
+    const t = await createManagedTeam({ workspaceId: s.ws.id, name: 'X', managerId: s.mgr.id });
     const r1 = await request(app)
       .patch(`/v1/admin/teams/${t.id}`)
       .set(auth(s.admin.token))
       .send({ managerId: s.admin.id });
     expect(r1.status).toBe(200);
     expect(r1.body.managerId).toBe(s.admin.id);
+    expect(r1.body.managerIds).toEqual([s.admin.id]);
     const r2 = await request(app)
       .patch(`/v1/admin/teams/${t.id}`)
       .set(auth(s.admin.token))
       .send({ managerId: null });
-    expect(r2.status).toBe(400);
-    expect(r2.body.error).toBe('manager_required');
+    expect(r2.status).toBe(200);
+    expect(r2.body.managerIds).toEqual([]);
   });
 
   it('rejects reassigning a manager who already owns another team', async () => {
     const s = await seed();
-    const existing = await prisma.team.create({
-      data: { workspaceId: s.ws.id, name: 'Managed One', managerId: s.mgr.id },
-    });
-    const target = await prisma.team.create({
-      data: { workspaceId: s.ws.id, name: 'Managed Two', managerId: s.admin.id },
-    });
+    const existing = await createManagedTeam({ workspaceId: s.ws.id, name: 'Managed One', managerId: s.mgr.id });
+    const target = await createManagedTeam({ workspaceId: s.ws.id, name: 'Managed Two', managerId: s.admin.id });
 
     const res = await request(app)
       .patch(`/v1/admin/teams/${target.id}`)
@@ -203,6 +222,74 @@ describe('/v1/admin/teams/:id — patch + delete', () => {
     const reload = await prisma.user.findUnique({ where: { id: s.mem1.id } });
     expect(reload?.teamId).toBeNull();
   });
+
+  it('supports multiple managers on one team and derives non-admin manager roles', async () => {
+    const s = await seed();
+    const t = await prisma.team.create({ data: { workspaceId: s.ws.id, name: 'Multi Managed' } });
+
+    const first = await request(app)
+      .post(`/v1/admin/teams/${t.id}/managers`)
+      .set(auth(s.admin.token))
+      .send({ userId: s.mem1.id });
+    expect(first.status).toBe(201);
+    expect(first.body.managerIds).toEqual([s.mem1.id]);
+
+    const second = await request(app)
+      .post(`/v1/admin/teams/${t.id}/managers`)
+      .set(auth(s.admin.token))
+      .send({ userId: s.mem2.id });
+    expect(second.status).toBe(201);
+    expect(new Set(second.body.managerIds)).toEqual(new Set([s.mem1.id, s.mem2.id]));
+
+    const users = await prisma.user.findMany({
+      where: { id: { in: [s.mem1.id, s.mem2.id] } },
+      select: { id: true, role: true, teamId: true },
+    });
+    expect(new Map(users.map((u) => [u.id, { role: u.role, teamId: u.teamId }]))).toEqual(new Map([
+      [s.mem1.id, { role: 'MANAGER', teamId: t.id }],
+      [s.mem2.id, { role: 'MANAGER', teamId: t.id }],
+    ]));
+  });
+
+  it('adding a member from another team as manager moves them into the managed team', async () => {
+    const s = await seed();
+    const source = await prisma.team.create({ data: { workspaceId: s.ws.id, name: 'Source Team' } });
+    const target = await prisma.team.create({ data: { workspaceId: s.ws.id, name: 'Target Team' } });
+    await prisma.user.update({ where: { id: s.mem1.id }, data: { teamId: source.id } });
+
+    const res = await request(app)
+      .post(`/v1/admin/teams/${target.id}/managers`)
+      .set(auth(s.admin.token))
+      .send({ userId: s.mem1.id });
+
+    expect(res.status).toBe(201);
+    expect(res.body.managerIds).toEqual([s.mem1.id]);
+    const reload = await prisma.user.findUnique({ where: { id: s.mem1.id }, select: { role: true, teamId: true } });
+    expect(reload).toMatchObject({ role: 'MANAGER', teamId: target.id });
+  });
+
+  it('removing a user from their only managed team downgrades them to MEMBER but keeps their home team', async () => {
+    const s = await seed();
+    const t = await createManagedTeam({ workspaceId: s.ws.id, name: 'Managed', managerId: s.mem1.id });
+
+    const res = await request(app).delete(`/v1/admin/teams/${t.id}/managers/${s.mem1.id}`).set(auth(s.admin.token));
+    expect(res.status).toBe(200);
+    expect(res.body.managerIds).toEqual([]);
+
+    const reload = await prisma.user.findUnique({ where: { id: s.mem1.id }, select: { role: true, teamId: true } });
+    expect(reload).toMatchObject({ role: 'MEMBER', teamId: t.id });
+  });
+
+  it('deleting a team clears former non-admin manager teamId and downgrades role', async () => {
+    const s = await seed();
+    const t = await createManagedTeam({ workspaceId: s.ws.id, name: 'Temporary Managed', managerId: s.mem1.id });
+
+    const res = await request(app).delete(`/v1/admin/teams/${t.id}`).set(auth(s.admin.token));
+    expect(res.status).toBe(200);
+
+    const reload = await prisma.user.findUnique({ where: { id: s.mem1.id }, select: { role: true, teamId: true } });
+    expect(reload).toMatchObject({ role: 'MEMBER', teamId: null });
+  });
 });
 
 describe('PATCH /v1/admin/users/:id', () => {
@@ -224,17 +311,67 @@ describe('PATCH /v1/admin/users/:id', () => {
     expect(res.status).toBe(403);
   });
 
-  it('ADMIN can change name + role + teamId in one call', async () => {
+  it('ADMIN can change name + teamId in one call', async () => {
     const s = await seed();
     const t = await prisma.team.create({ data: { workspaceId: s.ws.id, name: 'Target' } });
     const res = await request(app)
       .patch(`/v1/admin/users/${s.mem1.id}`)
       .set(auth(s.admin.token))
-      .send({ name: 'Mia Promoted', role: 'MANAGER', teamId: t.id });
+      .send({ name: 'Mia Member', teamId: t.id });
     expect(res.status).toBe(200);
-    expect(res.body.name).toBe('Mia Promoted');
-    expect(res.body.role).toBe('MANAGER');
+    expect(res.body.name).toBe('Mia Member');
+    expect(res.body.role).toBe('MEMBER');
     expect(res.body.teamId).toBe(t.id);
+  });
+
+  it('rejects moving a non-admin manager away from their managed team', async () => {
+    const s = await seed();
+    const managed = await createManagedTeam({ workspaceId: s.ws.id, name: 'Managed A', managerId: s.mgr.id });
+    const other = await prisma.team.create({ data: { workspaceId: s.ws.id, name: 'Other Team' } });
+
+    const move = await request(app)
+      .patch(`/v1/admin/users/${s.mgr.id}`)
+      .set(auth(s.admin.token))
+      .send({ teamId: other.id });
+    expect(move.status).toBe(409);
+    expect(move.body).toMatchObject({
+      error: 'managed_user_team_locked',
+      managedTeamId: managed.id,
+      managedTeamName: managed.name,
+    });
+
+    const clear = await request(app)
+      .patch(`/v1/admin/users/${s.mgr.id}`)
+      .set(auth(s.admin.token))
+      .send({ teamId: null });
+    expect(clear.status).toBe(409);
+    expect(clear.body.error).toBe('managed_user_team_locked');
+  });
+
+  it('rejects adding a manager of one team as a member of another team', async () => {
+    const s = await seed();
+    const managed = await createManagedTeam({ workspaceId: s.ws.id, name: 'Managed A', managerId: s.mgr.id });
+    const other = await prisma.team.create({ data: { workspaceId: s.ws.id, name: 'Other Team' } });
+
+    const res = await request(app)
+      .patch(`/v1/admin/users/${s.mgr.id}`)
+      .set(auth(s.admin.token))
+      .send({ teamId: other.id });
+    expect(res.status).toBe(409);
+    expect(res.body).toMatchObject({
+      error: 'managed_user_team_locked',
+      managedTeamId: managed.id,
+    });
+  });
+
+  it('rejects direct MANAGER role writes because manager role is derived from team assignment', async () => {
+    const s = await seed();
+    const res = await request(app)
+      .patch(`/v1/admin/users/${s.mem1.id}`)
+      .set(auth(s.admin.token))
+      .send({ role: 'MANAGER' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('manager_role_is_derived');
   });
 
   it('ADMIN can change activityRoleTitle for scoring', async () => {
@@ -279,14 +416,14 @@ describe('PATCH /v1/admin/users/:id', () => {
     expect(res.body.error).toBe('invalid_activity_role_title');
   });
 
-  it('rejects setting self as own manager', async () => {
+  it('rejects non-null direct managerId writes because managerId is deprecated', async () => {
     const s = await seed();
     const res = await request(app)
       .patch(`/v1/admin/users/${s.mem1.id}`)
       .set(auth(s.admin.token))
       .send({ managerId: s.mem1.id });
     expect(res.status).toBe(400);
-    expect(res.body.error).toBe('cannot_manage_self');
+    expect(res.body.error).toBe('manager_id_deprecated');
   });
 
   it('protects the last ADMIN from being demoted', async () => {
@@ -294,7 +431,7 @@ describe('PATCH /v1/admin/users/:id', () => {
     const res = await request(app)
       .patch(`/v1/admin/users/${s.admin.id}`)
       .set(auth(s.admin.token))
-      .send({ role: 'MANAGER' });
+      .send({ role: 'MEMBER' });
     expect(res.status).toBe(400);
     expect(res.body.error).toBe('last_admin_protected');
   });
@@ -313,9 +450,9 @@ describe('PATCH /v1/admin/users/:id', () => {
     const res = await request(app)
       .patch(`/v1/admin/users/${s.admin.id}`)
       .set(auth(s.admin.token))
-      .send({ role: 'MANAGER' });
+      .send({ role: 'MEMBER' });
     expect(res.status).toBe(200);
-    expect(res.body.role).toBe('MANAGER');
+    expect(res.body.role).toBe('MEMBER');
   });
 
   it('cross-workspace target → 404', async () => {
@@ -331,12 +468,10 @@ describe('PATCH /v1/admin/users/:id', () => {
 describe('/v1/admin/team-member-settings', () => {
   it('lets an admin complete setup from team settings and activate a pending member', async () => {
     const s = await seed();
-    const team = await prisma.team.create({
-      data: { workspaceId: s.ws.id, name: 'Managed Team', managerId: s.mgr.id },
-    });
+    const team = await createManagedTeam({ workspaceId: s.ws.id, name: 'Managed Team', managerId: s.mgr.id });
     await prisma.user.update({
       where: { id: s.mem1.id },
-      data: { teamId: team.id, managerId: s.mgr.id, provisioningStatus: 'PENDING' },
+      data: { teamId: team.id, managerId: null, provisioningStatus: 'PENDING' },
     });
     const shift = await prisma.shift.create({
       data: { workspaceId: s.ws.id, name: 'Day', schedule: NINE_TO_SIX, bufferMin: 20 },
@@ -358,9 +493,7 @@ describe('/v1/admin/team-member-settings', () => {
 
   it('lets a manager configure their team member without gaining full People edit rights', async () => {
     const s = await seed();
-    const team = await prisma.team.create({
-      data: { workspaceId: s.ws.id, name: 'Managed Team', managerId: s.mgr.id },
-    });
+    const team = await createManagedTeam({ workspaceId: s.ws.id, name: 'Managed Team', managerId: s.mgr.id });
     await prisma.user.update({
       where: { id: s.mem1.id },
       data: { teamId: team.id },
@@ -395,15 +528,15 @@ describe('/v1/admin/team-member-settings', () => {
     const patch = await request(app)
       .patch(`/v1/admin/team-member-settings/${s.mem1.id}`)
       .set(auth(s.mgr.token))
-      .send({ shiftId: shift.id, screenshotIntervalMin: 60, idleThresholdMin: 10 });
+      .send({ shiftId: shift.id, screenshotIntervalMin: 3, idleThresholdMin: 10 });
     expect(patch.status).toBe(200);
     expect(patch.body.shiftId).toBe(shift.id);
-    expect(patch.body.screenshotIntervalMin).toBe(60);
+    expect(patch.body.screenshotIntervalMin).toBe(3);
     expect(patch.body.idleThresholdMin).toBe(10);
 
     const reload = await prisma.user.findUnique({ where: { id: s.mem1.id } });
     expect(reload?.shiftId).toBe(shift.id);
-    expect(reload?.screenshotIntervalMin).toBe(60);
+    expect(reload?.screenshotIntervalMin).toBe(3);
     expect(reload?.idleThresholdMin).toBe(10);
 
     const assignment = await prisma.shiftAssignment.findFirst({
@@ -417,28 +550,26 @@ describe('/v1/admin/team-member-settings', () => {
     const selfPatch = await request(app)
       .patch(`/v1/admin/team-member-settings/${s.mgr.id}`)
       .set(auth(s.mgr.token))
-      .send({ screenshotIntervalMin: 120, idleThresholdMin: 15 });
+      .send({ screenshotIntervalMin: 3, idleThresholdMin: 15 });
     expect(selfPatch.status).toBe(403);
     expect(selfPatch.body.error).toBe('self_settings_forbidden');
 
     const adminPatch = await request(app)
       .patch(`/v1/admin/team-member-settings/${s.mgr.id}`)
       .set(auth(s.admin.token))
-      .send({ screenshotIntervalMin: 120, idleThresholdMin: 15 });
+      .send({ screenshotIntervalMin: 3, idleThresholdMin: 15 });
     expect(adminPatch.status).toBe(200);
     expect(adminPatch.body.id).toBe(s.mgr.id);
-    expect(adminPatch.body.screenshotIntervalMin).toBe(120);
+    expect(adminPatch.body.screenshotIntervalMin).toBe(3);
     expect(adminPatch.body.idleThresholdMin).toBe(15);
   });
 
   it('requires an audit reason before changing member timing to 1 minute', async () => {
     const s = await seed();
-    const team = await prisma.team.create({
-      data: { workspaceId: s.ws.id, name: 'Managed Team', managerId: s.mgr.id },
-    });
+    const team = await createManagedTeam({ workspaceId: s.ws.id, name: 'Managed Team', managerId: s.mgr.id });
     await prisma.user.update({
       where: { id: s.mem1.id },
-      data: { teamId: team.id, managerId: s.mgr.id },
+      data: { teamId: team.id, managerId: null },
     });
 
     const denied = await request(app)
@@ -463,7 +594,7 @@ describe('/v1/admin/team-member-settings', () => {
       actorId: s.mgr.id,
       targetUserId: s.mem1.id,
       scope: 'MEMBER_OVERRIDE',
-      previousScreenshotIntervalMin: 180,
+      previousScreenshotIntervalMin: 3,
       previousIdleThresholdMin: 5,
       nextScreenshotIntervalMin: 1,
       nextIdleThresholdMin: 5,
@@ -474,12 +605,10 @@ describe('/v1/admin/team-member-settings', () => {
 
   it('audits caution member timing changes without requiring a reason', async () => {
     const s = await seed();
-    const team = await prisma.team.create({
-      data: { workspaceId: s.ws.id, name: 'Managed Team', managerId: s.mgr.id },
-    });
+    const team = await createManagedTeam({ workspaceId: s.ws.id, name: 'Managed Team', managerId: s.mgr.id });
     await prisma.user.update({
       where: { id: s.mem1.id },
-      data: { teamId: team.id, managerId: s.mgr.id },
+      data: { teamId: team.id, managerId: null },
     });
 
     const res = await request(app)
@@ -496,9 +625,9 @@ describe('/v1/admin/team-member-settings', () => {
       actorId: s.mgr.id,
       targetUserId: s.mem1.id,
       scope: 'MEMBER_OVERRIDE',
-      previousScreenshotIntervalMin: 180,
+      previousScreenshotIntervalMin: 3,
       previousIdleThresholdMin: 5,
-      nextScreenshotIntervalMin: 180,
+      nextScreenshotIntervalMin: 3,
       nextIdleThresholdMin: 3,
       riskLevel: 'CAUTION',
       reason: null,
@@ -507,12 +636,10 @@ describe('/v1/admin/team-member-settings', () => {
 
   it('keeps manager settings writes scoped to their team', async () => {
     const s = await seed();
-    const team = await prisma.team.create({
-      data: { workspaceId: s.ws.id, name: 'Managed Team', managerId: s.mgr.id },
-    });
+    const team = await createManagedTeam({ workspaceId: s.ws.id, name: 'Managed Team', managerId: s.mgr.id });
     await prisma.user.update({
       where: { id: s.mem1.id },
-      data: { teamId: team.id, managerId: s.mgr.id },
+      data: { teamId: team.id, managerId: null },
     });
 
     const outsider = await request(app)

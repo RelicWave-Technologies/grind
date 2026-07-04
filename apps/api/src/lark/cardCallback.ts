@@ -21,7 +21,7 @@ type CardActionEvent = {
   operator?: { open_id?: string };
 };
 
-function parseValue(raw: unknown): { requestId?: string; action?: 'approve' | 'reject' } {
+function parseValue(raw: unknown): { requestId?: string; cardId?: string; version?: number; action?: 'approve' | 'reject' } {
   // value is the object we put in the button at build time.
   if (typeof raw === 'string') {
     try {
@@ -34,6 +34,8 @@ function parseValue(raw: unknown): { requestId?: string; action?: 'approve' | 'r
     const v = raw as Record<string, unknown>;
     return {
       requestId: typeof v.requestId === 'string' ? v.requestId : undefined,
+      cardId: typeof v.cardId === 'string' ? v.cardId : undefined,
+      version: typeof v.version === 'number' ? v.version : undefined,
       action: v.action === 'approve' || v.action === 'reject' ? v.action : undefined,
     };
   }
@@ -54,7 +56,7 @@ export function startCardCallback(): void {
   const dispatcher = new EventDispatcher({}).register({
     'card.action.trigger': async (raw: CardActionEvent) => {
       try {
-        const { requestId, action } = parseValue(raw.action?.value);
+        const { requestId, cardId, version, action } = parseValue(raw.action?.value);
         const decidedByOpenId = raw.operator?.open_id;
         if (!requestId || !action || !decidedByOpenId) {
           logger.warn(
@@ -63,8 +65,15 @@ export function startCardCallback(): void {
           );
           return { toast: { type: 'error', content: 'Bad payload' } };
         }
-        logger.info({ requestId, action, decidedByOpenId }, 'card.action.trigger: decision received');
-        const result = await decideRequest({ requestId, action, decidedByOpenId });
+        if (!cardId || version === undefined) {
+          logger.warn({ requestId, action, decidedByOpenId, hasCardId: Boolean(cardId), hasVersion: version !== undefined }, 'card.action.trigger: stale legacy payload');
+          return {
+            toast: { type: 'error', content: 'This approval card is old. Use the latest Timo card.' },
+            card: { type: 'raw', data: buildUnavailableRequestCard({ requestId }) },
+          };
+        }
+        logger.info({ requestId, cardId, version, action, decidedByOpenId }, 'card.action.trigger: decision received');
+        const result = await decideRequest({ requestId, action, decidedByOpenId, cardId, version });
         if (!result) {
           logger.warn({ requestId, action, decidedByOpenId }, 'card.action.trigger: request not found');
           return {
@@ -79,6 +88,13 @@ export function startCardCallback(): void {
         if (result.noop === 'self_approval_forbidden') {
           logger.warn({ requestId, action, decidedByOpenId }, 'card.action.trigger: self approval forbidden');
           return { toast: { type: 'error', content: 'Another approver must decide this request.' } };
+        }
+        if (result.noop === 'stale_card') {
+          logger.warn({ requestId, cardId, version, action, decidedByOpenId }, 'card.action.trigger: stale card');
+          return {
+            toast: { type: 'error', content: 'This approval card is stale. Use the latest request.' },
+            card: { type: 'raw', data: result.card },
+          };
         }
         logger.info({ requestId, action, status: result.status, noop: result.noop }, 'card.action.trigger: decision handled');
         return {
