@@ -1,0 +1,109 @@
+name: VPS Diagnostics
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  timo:
+    name: Timo stuck-card diagnostics
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    steps:
+      - name: Validate required secrets
+        run: |
+          test -n "$VPS_HOST"
+          test -n "$VPS_USER"
+          test -n "$VPS_SSH_PRIVATE_KEY"
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_PRIVATE_KEY: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+
+      - name: Prepare SSH
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_PRIVATE_KEY" > ~/.ssh/grind_vps
+          chmod 600 ~/.ssh/grind_vps
+          ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_SSH_PRIVATE_KEY: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+
+      - name: Collect sanitized Timo diagnostics
+        run: |
+          ssh -i ~/.ssh/grind_vps "$VPS_USER@$VPS_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+
+          cd /opt/grind/infra/vps
+          echo "== time =="
+          date -u
+
+          echo "== compose ps =="
+          docker compose --env-file .deploy.env -f docker-compose.prod.yml ps
+
+          echo "== timo env status =="
+          docker compose --env-file .deploy.env -f docker-compose.prod.yml exec -T api node <<'NODE'
+          const keys = [
+            'TIMO_TESTER_BOT_ENABLED',
+            'TIMO_TESTER_GROUP_CHAT_ID',
+            'TIMO_TESTER_GROUP_TIMEZONE',
+            'TIMO_TESTER_HISTORY_POLL_INTERVAL_MS',
+            'TIMO_AI_ENABLED',
+            'TIMO_AI_PROVIDER',
+            'TIMO_AI_MODEL',
+            'OPENROUTER_API_KEY',
+            'TIMO_CARD_STREAMING_IMAGE_KEY',
+          ];
+          for (const key of keys) {
+            const value = process.env[key];
+            const shown = !value ? '<empty>' : key.includes('KEY') || key.includes('SECRET') || key.includes('TOKEN') ? '<set>' : value;
+            console.log(`${key}=${shown}`);
+          }
+          NODE
+
+          echo "== tester ops db =="
+          docker compose --env-file .deploy.env -f docker-compose.prod.yml exec -T api node <<'NODE'
+          const { PrismaClient } = require('@prisma/client');
+          const prisma = new PrismaClient();
+          const trim = (value, n = 400) => typeof value === 'string' && value.length > n ? `${value.slice(0, n)}…` : value;
+          (async () => {
+            const cfg = await prisma.testerOpsConfig.findMany({
+              select: { workspaceId: true, enabled: true, chatId: true, timezone: true, lastHistoryPollAt: true, updatedAt: true },
+            });
+            const events = await prisma.testerOpsEvent.findMany({
+              orderBy: { createdAt: 'desc' },
+              take: 12,
+              select: { id: true, source: true, sourceId: true, chatId: true, messageId: true, messageText: true, status: true, error: true, receivedAt: true, processedAt: true, createdAt: true },
+            });
+            const runs = await prisma.testerOpsAiRun.findMany({
+              orderBy: { createdAt: 'desc' },
+              take: 12,
+              select: { id: true, eventId: true, provider: true, model: true, task: true, safeAction: true, confidence: true, latencyMs: true, error: true, output: true, createdAt: true },
+            });
+            const outbox = await prisma.testerOpsOutboxEvent.findMany({
+              orderBy: { createdAt: 'desc' },
+              take: 12,
+              select: { kind: true, status: true, chatId: true, idempotencyKey: true, attempts: true, lastError: true, messageId: true, createdAt: true, processedAt: true },
+            });
+            console.log(JSON.stringify({
+              cfg,
+              events: events.map((event) => ({ ...event, messageText: trim(event.messageText), error: trim(event.error) })),
+              runs: runs.map((run) => ({ ...run, output: run.output ? JSON.stringify(run.output).slice(0, 700) : null, error: trim(run.error) })),
+              outbox: outbox.map((row) => ({ ...row, lastError: trim(row.lastError) })),
+            }, null, 2));
+          })().finally(() => prisma.$disconnect());
+          NODE
+
+          echo "== recent api logs =="
+          docker logs --since 20m --tail 1000 vps-api-1 2>&1 \
+            | grep -Ei 'tester ops|lark updateCard|lark sendMessage|openrouter|deepseek|ai|outbox|event processing|progress card|error|warn' \
+            || true
+          REMOTE
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
