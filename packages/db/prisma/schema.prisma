@@ -22,6 +22,15 @@ model Workspace {
   payrollRunLogs PayrollRunLog[]
   timeInvalidations TimeInvalidation[]
   monitoringSettingsAudits MonitoringSettingsAudit[]
+  testerOpsConfig TesterOpsConfig?
+  testerOpsAiPolicy TesterOpsAiPolicy?
+  testerOpsMembers TesterOpsMember[]
+  testerOpsEvents TesterOpsEvent[]
+  testerOpsIssues TesterOpsIssue[]
+  testerOpsReminders TesterOpsReminder[]
+  testerOpsOutboxEvents TesterOpsOutboxEvent[]
+  testerOpsKnowledgeSources TesterOpsKnowledgeSource[]
+  testerOpsAiRuns TesterOpsAiRun[]
 }
 
 /// Workspace-wide capture policy. A single row per workspace (unique on
@@ -291,6 +300,8 @@ model User {
   timeInvalidationsCreated TimeInvalidation[]  @relation("TimeInvalidationActor")
   monitoringSettingsAuditsCreated MonitoringSettingsAudit[] @relation("MonitoringSettingsAuditActor")
   monitoringSettingsAuditsTargeted MonitoringSettingsAudit[] @relation("MonitoringSettingsAuditTarget")
+  testerOpsMemberships TesterOpsMember[]
+  testerOpsReportedIssues TesterOpsIssue[] @relation("TesterOpsReporter")
   /// Attendee relations: meetings this user was tagged in (manual-time
   /// requests + live MEETING TimeEntries). Useful for "show me everyone's
   /// meetings I was in" reports.
@@ -644,6 +655,283 @@ model ManualTimeLarkOutboxEvent {
   @@index([status, nextRunAt, createdAt])
   @@index([requestId])
   @@index([messageLedgerId])
+}
+
+enum TesterOpsAiProvider {
+  OPENROUTER
+  DEEPSEEK
+}
+
+enum TesterOpsEventSource {
+  LARK_EVENT
+  HISTORY_POLL
+  MANUAL_REPLAY
+}
+
+enum TesterOpsEventStatus {
+  PENDING
+  PROCESSED
+  IGNORED
+  FAILED
+}
+
+enum TesterOpsIntent {
+  ISSUE_REPORT
+  DOC_QUESTION
+  USAGE_STATUS
+  PING_REQUEST
+  GENERAL_HELP
+  IRRELEVANT
+}
+
+enum TesterOpsSafeAction {
+  NONE
+  LOG_ISSUE
+  ASK_CLARIFICATION
+  ANSWER_FROM_DOCS
+  GET_USAGE_STATUS
+  SEND_PING
+}
+
+enum TesterOpsIssueStatus {
+  CANDIDATE
+  OPEN
+  RESOLVED
+  DISMISSED
+}
+
+enum TesterOpsIssueSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum TesterOpsOutboxKind {
+  SEND_TEXT
+  SEND_CARD
+}
+
+enum TesterOpsOutboxStatus {
+  PENDING
+  PROCESSING
+  DONE
+  FAILED
+  DEAD_LETTER
+}
+
+model TesterOpsConfig {
+  id                           String    @id @default(cuid())
+  workspaceId                  String    @unique
+  workspace                    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  enabled                      Boolean   @default(false)
+  chatId                       String?
+  timezone                     String    @default("UTC")
+  pingTimes                    String[]  @default(["11:00", "17:00"])
+  passiveIssueDetectionEnabled Boolean   @default(false)
+  announcementSentAt           DateTime?
+  pollCursor                   String?
+  lastHistoryPollAt            DateTime?
+  createdAt                    DateTime  @default(now())
+  updatedAt                    DateTime  @updatedAt
+}
+
+model TesterOpsAiPolicy {
+  id                        String              @id @default(cuid())
+  workspaceId               String              @unique
+  workspace                 Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  provider                  TesterOpsAiProvider @default(OPENROUTER)
+  model                     String?
+  promptVersion             String              @default("tester-ops-v1")
+  temperature               Float               @default(0.1)
+  highConfidenceThreshold   Float               @default(0.78)
+  mediumConfidenceThreshold Float               @default(0.5)
+  maxClarifyingQuestions    Int                 @default(1)
+  allowedActions            String[]            @default(["NONE", "LOG_ISSUE", "ASK_CLARIFICATION", "ANSWER_FROM_DOCS", "GET_USAGE_STATUS", "SEND_PING"])
+  createdAt                 DateTime            @default(now())
+  updatedAt                 DateTime            @updatedAt
+}
+
+model TesterOpsMember {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  openId      String
+  userId      String?
+  user        User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  displayName String?
+  isTester    Boolean   @default(true)
+  lastSeenAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  events TesterOpsEvent[]
+  issues TesterOpsIssue[]
+
+  @@unique([workspaceId, openId])
+  @@index([workspaceId])
+  @@index([userId])
+}
+
+model TesterOpsEvent {
+  id           String               @id @default(cuid())
+  workspaceId  String
+  workspace    Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  source       TesterOpsEventSource
+  sourceId     String
+  chatId       String?
+  messageId    String?
+  senderOpenId String?
+  memberId     String?
+  member       TesterOpsMember?     @relation(fields: [memberId], references: [id], onDelete: SetNull)
+  messageText  String
+  raw          Json?
+  status       TesterOpsEventStatus @default(PENDING)
+  receivedAt   DateTime             @default(now())
+  processedAt  DateTime?
+  error        String?
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+
+  issues TesterOpsIssue[]
+  aiRuns TesterOpsAiRun[]
+
+  @@unique([workspaceId, source, sourceId])
+  @@index([workspaceId, status, receivedAt])
+  @@index([messageId])
+}
+
+model TesterOpsIssue {
+  id                String                 @id @default(cuid())
+  workspaceId       String
+  workspace         Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  eventId           String?
+  event             TesterOpsEvent?        @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  reporterMemberId  String?
+  reporterMember    TesterOpsMember?       @relation(fields: [reporterMemberId], references: [id], onDelete: SetNull)
+  reporterUserId    String?
+  reporterUser      User?                  @relation("TesterOpsReporter", fields: [reporterUserId], references: [id], onDelete: SetNull)
+  reporterOpenId    String?
+  status            TesterOpsIssueStatus   @default(CANDIDATE)
+  intent            TesterOpsIntent        @default(ISSUE_REPORT)
+  category          String?
+  severity          TesterOpsIssueSeverity @default(LOW)
+  confidence        Float                  @default(0)
+  summary           String
+  sourceMessageText String?
+  sourceMessageId   String?
+  clarifyingQuestion String?
+  replyText         String?
+  citations         Json?
+  aiRunId           String?
+  aiRun             TesterOpsAiRun?        @relation(fields: [aiRunId], references: [id], onDelete: SetNull)
+  adminNote         String?
+  resolvedAt        DateTime?
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+
+  @@index([workspaceId, status, createdAt])
+  @@index([eventId])
+  @@index([reporterUserId])
+}
+
+model TesterOpsReminder {
+  id            String    @id @default(cuid())
+  workspaceId   String
+  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  scheduledFor  DateTime
+  sentAt        DateTime?
+  messageId     String?
+  usageSnapshot Json      @default("{}")
+  createdAt     DateTime  @default(now())
+
+  @@unique([workspaceId, scheduledFor])
+  @@index([workspaceId, sentAt])
+}
+
+model TesterOpsOutboxEvent {
+  id             String                @id @default(cuid())
+  workspaceId    String
+  workspace      Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  kind           TesterOpsOutboxKind
+  status         TesterOpsOutboxStatus @default(PENDING)
+  idempotencyKey String                @unique
+  chatId         String?
+  openId         String?
+  payload        Json                  @default("{}")
+  attempts       Int                   @default(0)
+  nextRunAt      DateTime              @default(now())
+  lockedAt       DateTime?
+  lockedBy       String?
+  lastError      String?
+  messageId      String?
+  processedAt    DateTime?
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+
+  @@index([workspaceId, status, nextRunAt])
+}
+
+model TesterOpsKnowledgeSource {
+  id            String    @id @default(cuid())
+  workspaceId   String
+  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  title         String
+  token         String
+  url           String?
+  enabled       Boolean   @default(true)
+  lastFetchedAt DateTime?
+  lastError     String?
+  contentHash   String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  chunks TesterOpsKnowledgeChunk[]
+
+  @@unique([workspaceId, token])
+  @@index([workspaceId, enabled])
+}
+
+model TesterOpsKnowledgeChunk {
+  id          String                   @id @default(cuid())
+  sourceId    String
+  source      TesterOpsKnowledgeSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  ordinal     Int
+  title       String
+  content     String
+  contentHash String
+  tokenCount  Int                      @default(0)
+  metadata    Json?
+  embedding   Json?
+  createdAt   DateTime                 @default(now())
+
+  @@unique([sourceId, ordinal])
+  @@index([sourceId])
+  @@index([contentHash])
+}
+
+model TesterOpsAiRun {
+  id            String               @id @default(cuid())
+  workspaceId   String
+  workspace     Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  eventId       String?
+  event         TesterOpsEvent?      @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  provider      String
+  model         String
+  promptVersion String
+  task          String
+  input         Json
+  output        Json?
+  safeAction    TesterOpsSafeAction?
+  confidence    Float?
+  latencyMs     Int?
+  error         String?
+  createdAt     DateTime             @default(now())
+
+  issues TesterOpsIssue[]
+
+  @@index([workspaceId, createdAt])
+  @@index([eventId])
 }
 
 /// Junction: workspace members tagged as attendees on a manual-time

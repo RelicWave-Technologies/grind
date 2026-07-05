@@ -14,10 +14,13 @@
     "test:watch": "dotenv -e ../../.env -- vitest"
   },
   "dependencies": {
+    "@ai-sdk/deepseek": "0.2.14",
+    "@ai-sdk/openai-compatible": "0.2.16",
     "@grind/core": "workspace:*",
     "@grind/db": "workspace:*",
     "@grind/types": "workspace:*",
     "@larksuiteoapi/node-sdk": "^1.66.0",
+    "ai": "4.3.19",
     "argon2": "0.41.1",
     "cookie-parser": "^1.4.7",
     "cors": "2.8.5",
@@ -28,7 +31,7 @@
     "pino": "9.5.0",
     "pino-http": "10.3.0",
     "pino-pretty": "11.3.0",
-    "zod": "3.23.8"
+    "zod": "3.25.76"
   },
   "devDependencies": {
     "@grind/tsconfig": "workspace:*",

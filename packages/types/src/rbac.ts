@@ -22,6 +22,7 @@ export const PERMISSIONS = [
   'flags.workspace.review',
   'payroll.manage',
   'overview.read',
+  'tester-ops.manage',
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];

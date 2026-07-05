@@ -8,13 +8,23 @@ let counter = 0;
 class FakeMessenger implements LarkMessenger {
   texts: Array<{ openId: string; text: string }> = [];
   cards: Array<{ openId: string; card: Record<string, unknown> }> = [];
+  chatTexts: Array<{ chatId: string; text: string }> = [];
+  chatCards: Array<{ chatId: string; card: Record<string, unknown> }> = [];
   async sendText(openId: string, text: string): Promise<SendCardResult> {
     this.texts.push({ openId, text });
     return { messageId: `msg-${this.texts.length}` };
   }
+  async sendTextToChat(chatId: string, text: string): Promise<SendCardResult> {
+    this.chatTexts.push({ chatId, text });
+    return { messageId: `chat-msg-${this.chatTexts.length}` };
+  }
   async sendCard(openId: string, card: Record<string, unknown>): Promise<SendCardResult> {
     this.cards.push({ openId, card });
     return { messageId: `card-${this.cards.length}` };
+  }
+  async sendCardToChat(chatId: string, card: Record<string, unknown>): Promise<SendCardResult> {
+    this.chatCards.push({ chatId, card });
+    return { messageId: `chat-card-${this.chatCards.length}` };
   }
   async updateCard(): Promise<void> {}
 }

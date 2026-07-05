@@ -36,7 +36,7 @@ export {
   buildStaleRequestCard,
 } from './cards';
 export { decideRequest } from './decide';
-export { startCardCallback } from './cardCallback';
+export { startCardCallback, startLarkEventHarness } from './cardCallback';
 export type {
   ApprovalCardInput,
   DecidedCardInput,

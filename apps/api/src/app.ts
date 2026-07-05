@@ -23,6 +23,7 @@ import { workspacePolicyRouter } from './routes/workspacePolicy';
 import { digestsRouter } from './routes/digests';
 import { payrollRouter } from './routes/payroll';
 import { overviewRouter } from './routes/overview';
+import { testerOpsRouter } from './routes/testerOps';
 import { downloadsRouter } from './routes/downloads';
 import { errorHandler } from './middleware/errorHandler';
 
@@ -120,6 +121,7 @@ export function buildApp() {
   app.use('/v1/admin/digests', digestsRouter);
   app.use('/v1/admin/payroll', payrollRouter);
   app.use('/v1/admin/overview', overviewRouter);
+  app.use('/v1/admin/tester-ops', testerOpsRouter);
 
   app.use(errorHandler);
 

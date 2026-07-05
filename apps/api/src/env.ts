@@ -41,6 +41,23 @@ const EnvSchema = z.object({
   // Lark tenant). Hard-off in production regardless of value.
   ALLOW_PASSWORD_LOGIN: z.enum(['true', 'false']).default('false'),
 
+  // --- Timo tester-ops AI brain ---
+  TIMO_AI_ENABLED: z.enum(['true', 'false']).default('false'),
+  TIMO_AI_PROVIDER: z.enum(['openrouter', 'deepseek']).default('openrouter'),
+  TIMO_AI_MODEL: z.string().min(1).optional(),
+  OPENROUTER_API_KEY: z.string().min(1).optional(),
+  DEEPSEEK_API_KEY: z.string().min(1).optional(),
+  TIMO_AI_TIMEOUT_MS: z.coerce.number().int().min(1000).max(120000).default(30000),
+  TIMO_AI_MAX_INPUT_CHARS: z.coerce.number().int().min(1000).max(50000).default(12000),
+  TIMO_TESTER_BOT_ENABLED: z.enum(['true', 'false']).default('false'),
+  TIMO_TESTER_GROUP_CHAT_ID: z.string().min(1).optional(),
+  TIMO_TESTER_GROUP_TIMEZONE: z.string().min(1).default('UTC'),
+  TIMO_TESTER_PING_TIMES: z.string().min(1).default('11:00,17:00'),
+  TIMO_TESTER_HISTORY_POLL_INTERVAL_MS: z.coerce.number().int().min(3000).max(300000).default(5000),
+  TIMO_PASSIVE_ISSUE_DETECTION_ENABLED: z.enum(['true', 'false']).default('false'),
+  TIMO_CARD_MASCOT_IMAGE_KEY: z.string().min(1).optional(),
+  TIMO_CARD_STREAMING_IMAGE_KEY: z.string().min(1).optional(),
+
   // --- Screenshots (optional; direct URLs on Screenshot rows also work) ---
   PUBLIC_APP_URL: z.string().url().optional(),
   SCREENSHOT_ASSET_BASE_URL: z.string().url().optional(),

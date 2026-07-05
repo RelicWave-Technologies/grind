@@ -3,10 +3,11 @@ import { isLarkConfigured, getLarkConfig } from './config';
 import { decideRequest } from './decide';
 import { buildUnavailableRequestCard } from './cards';
 import { logger } from '../logger';
+import { ingestRawLarkMessage } from '../testerOps/inbound';
 
 /**
- * Subscribes to Lark `card.action.trigger` events over a long-connection
- * WebSocket — no public URL needed (matches the M7 Build-Plan §3.1 decision).
+ * Subscribes to Lark long-connection events. Approval-card clicks stay on the
+ * synchronous path; tester-ops message events are queued async.
  *
  * Each click must be acknowledged within 3 seconds with the updated card,
  * which Lark uses to replace the original message in place. We dispatch the
@@ -106,6 +107,14 @@ export function startCardCallback(): void {
         return { toast: { type: 'error', content: 'Server error' } };
       }
     },
+    'im.message.receive_v1': async (raw: unknown) => {
+      void ingestRawLarkMessage(raw);
+      return undefined;
+    },
+    'im.chat.member.bot.added_v1': async () => {
+      logger.info('lark bot added to chat');
+      return undefined;
+    },
   });
 
   // start() returns a promise but runs the long-connection in the background.
@@ -114,3 +123,5 @@ export function startCardCallback(): void {
     .then(() => logger.info('lark card callback subscriber started'))
     .catch((err) => logger.error({ err: String(err) }, 'lark card callback subscriber failed to start'));
 }
+
+export const startLarkEventHarness = startCardCallback;

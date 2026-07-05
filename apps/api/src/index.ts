@@ -6,6 +6,7 @@ import { startLarkTokenRefreshScheduler } from './lark/refreshScheduler';
 import { startManualTimeLarkOutboxWorker } from './manualTime/larkOutbox';
 import { startPayrollMonthCloseScheduler } from './payroll/scheduler';
 import { startScreenshotRetentionScheduler } from './screenshots/retention';
+import { startTesterOpsSchedulers } from './testerOps/scheduler';
 
 const app = buildApp();
 
@@ -19,4 +20,5 @@ app.listen(port, () => {
   startLarkTokenRefreshScheduler();
   startPayrollMonthCloseScheduler();
   startScreenshotRetentionScheduler();
+  startTesterOpsSchedulers();
 });

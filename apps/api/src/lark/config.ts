@@ -14,6 +14,9 @@ export const LARK_SCOPES = [
   'vc:meeting:readonly',
   'im:message:send_as_bot',
   'im:message:update',
+  'im:message:readonly',
+  'im:message.group_at_msg:readonly',
+  'im:chat:read',
   'contact:user.id:readonly',
   'contact:user.employee_id:readonly',
   // Required so /authen/v1/user_info returns email/enterprise_email — the
