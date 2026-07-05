@@ -17,7 +17,7 @@ function findElement(card: Record<string, unknown>, tag: string): Record<string,
 }
 
 describe('tester ops Lark cards', () => {
-  it('uses boolean person-list flags so Lark does not parse them as variables', () => {
+  it('keeps status cards on conservative Lark-safe elements', () => {
     const card = buildTesterOpsUsageCard({
       generatedAt: '2026-07-05T16:20:00.000Z',
       date: '2026-07-05',
@@ -37,11 +37,8 @@ describe('tester ops Lark cards', () => {
       ],
     });
 
-    const people = findElement(card, 'person_list');
-    expect(people).toMatchObject({
-      show_name: true,
-      drop_invalid_user_id: true,
-    });
-    expect(JSON.stringify(card)).not.toContain('"drop_invalid_user_id":"true"');
+    expect(findElement(card, 'table')).toBeNull();
+    expect(findElement(card, 'person_list')).toBeNull();
+    expect(findElement(card, 'markdown')).not.toBeNull();
   });
 });

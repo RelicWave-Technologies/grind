@@ -107,14 +107,14 @@ export function buildTesterOpsUsageCard(snapshot: UsageSnapshot): Card {
       { text: `${snapshot.totals.silent} silent`, color: snapshot.totals.silent > 0 ? 'orange' : 'neutral' },
     ],
     elements: [
-      metricTable('usage_metrics', [
-        ['Tracking now', `${snapshot.totals.trackingNow}/${snapshot.totals.testers}`, `${percent(tracking)} live coverage`],
-        ['Silent today', String(snapshot.totals.silent), 'No time or screenshots yet'],
-        ['Tracked time', minutesLabel(totalMinutes), 'Across all testers today'],
-        ['Screenshots', String(totalScreenshots), 'Captured today'],
-      ]),
-      testerPersonList(snapshot),
-      testerTable(snapshot),
+      markdown(safeBlock([
+        '## Live status',
+        `Tracking now: ${snapshot.totals.trackingNow}/${snapshot.totals.testers} (${percent(tracking)} live)`,
+        `Silent today: ${snapshot.totals.silent}`,
+        `Tracked time: ${minutesLabel(totalMinutes)}`,
+        `Screenshots: ${totalScreenshots}`,
+      ].join('\n'), 700), { elementId: 'usage_status', textSize: 'heading-4' }),
+      testerSummary(snapshot),
       smallText(`Generated ${formatLocalDateTime(snapshot.generatedAt, snapshot.timezone)}.`),
     ],
   });
@@ -249,86 +249,12 @@ function smallText(content: string): Element {
   return markdown(safeBlock(content, 500), { elementId: uniqueElementId('small'), textSize: 'notation', margin: '4px 0 0 0' });
 }
 
-function metricTable(elementId: string, rows: Array<[string, string, string]>): Element {
-  return {
-    tag: 'table',
-    element_id: elementId.slice(0, 20),
-    page_size: Math.min(Math.max(rows.length, 1), 10),
-    row_height: 'middle',
-    header_style: {
-      text_align: 'left',
-      text_size: 'normal',
-      background_style: 'grey',
-      text_color: 'grey',
-      bold: true,
-      lines: 1,
-    },
-    columns: [
-      { name: 'metric', display_name: 'Metric', data_type: 'text', width: '34%', horizontal_align: 'left', vertical_align: 'center' },
-      { name: 'value', display_name: 'Now', data_type: 'text', width: '22%', horizontal_align: 'left', vertical_align: 'center' },
-      { name: 'detail', display_name: 'Detail', data_type: 'text', width: '44%', horizontal_align: 'left', vertical_align: 'center' },
-    ],
-    rows: rows.map(([metric, value, detail]) => ({
-      metric: clean(metric, 60),
-      value: clean(value, 60),
-      detail: clean(detail, 120),
-    })),
-  };
-}
-
-function testerTable(snapshot: UsageSnapshot): Element {
+function testerSummary(snapshot: UsageSnapshot): Element {
   const testers = snapshot.testers.slice(0, 10);
-  const usePersonColumn = testers.length > 0 && testers.every((tester) => tester.openId);
-  return {
-    tag: 'table',
-    element_id: 'tester_table',
-    page_size: Math.min(Math.max(testers.length, 1), 10),
-    row_height: 'low',
-    freeze_first_column: true,
-    header_style: {
-      text_align: 'left',
-      text_size: 'normal',
-      background_style: 'grey',
-      text_color: 'grey',
-      bold: true,
-      lines: 1,
-    },
-    columns: [
-      { name: 'name', display_name: 'Tester', data_type: usePersonColumn ? 'persons' : 'text', width: '34%', horizontal_align: 'left', vertical_align: 'center' },
-      { name: 'time', display_name: 'Time', data_type: 'text', width: '18%', horizontal_align: 'left', vertical_align: 'center' },
-      { name: 'shots', display_name: 'Shots', data_type: 'number', width: '16%', horizontal_align: 'center', vertical_align: 'center', format: { percision: 0 } },
-      { name: 'state', display_name: 'State', data_type: 'options', width: '32%', horizontal_align: 'left', vertical_align: 'center' },
-    ],
-    rows: testers.length > 0
-      ? testers.map((tester) => ({
-          name: usePersonColumn ? personCell(tester.openId) : clean(tester.name, 80),
-          time: minutesLabel(tester.trackedMinutes),
-          shots: tester.screenshots,
-          state: [{ text: stateLabel(tester.agentState), color: stateColor(tester.agentState) }],
-        }))
-      : [{ name: 'No testers yet', time: '-', shots: 0, state: [{ text: 'WAITING', color: 'neutral' }] }],
-  };
-}
-
-function testerPersonList(snapshot: UsageSnapshot): Element | null {
-  const persons = snapshot.testers
-    .map((tester) => tester.openId)
-    .filter((openId): openId is string => Boolean(openId))
-    .slice(0, 12)
-    .map((id) => ({ id }));
-  if (persons.length === 0) return null;
-  return {
-    tag: 'person_list',
-    element_id: 'tester_people',
-    size: 'medium',
-    show_name: true,
-    drop_invalid_user_id: true,
-    persons,
-  };
-}
-
-function personCell(openId: string | null): Array<{ id: string }> {
-  return openId ? [{ id: openId }] : [];
+  const lines = testers.length > 0
+    ? testers.map((tester) => `- ${clean(tester.name, 80)}: ${minutesLabel(tester.trackedMinutes)} · ${tester.screenshots} shots · ${stateLabel(tester.agentState)}`)
+    : ['- No testers mapped yet.'];
+  return markdown(safeBlock(`**Testers**\n${lines.join('\n')}`, 1200), { elementId: 'tester_summary' });
 }
 
 function sourceBlock(citations: Citation[]): Element | null {
@@ -390,13 +316,6 @@ function stateLabel(state: string | null): string {
   if (state === 'PAUSED') return 'PAUSED';
   if (state === 'STOPPED') return 'STOPPED';
   return 'UNKNOWN';
-}
-
-function stateColor(state: string | null): TagColor {
-  if (state === 'RUNNING') return 'green';
-  if (state === 'PAUSED') return 'orange';
-  if (state === 'STOPPED') return 'neutral';
-  return 'red';
 }
 
 function minutesLabel(minutes: number): string {
