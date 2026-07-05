@@ -64,14 +64,20 @@ async function ingestTesterMessage(args: {
   chatId: string | null;
   messageId: string | null;
   senderOpenId: string | null;
+  senderType?: string | null;
   messageText: string;
   raw?: unknown;
 }) {
   const workspaceId = args.workspaceId ?? env.WORKSPACE_ID;
   const cfg = await loadOrCreateTesterOpsConfig(workspaceId);
-  if (!cfg.enabled || !cfg.chatId || args.chatId !== cfg.chatId) return;
+  if (!cfg.enabled) return;
+  if (!args.chatId) return;
+  if (args.senderType && args.senderType !== 'user') return;
   if (!args.senderOpenId) return;
   if (!args.messageText.trim()) return;
+  const directMention = isDirectMention(args.messageText);
+  const configuredChat = Boolean(cfg.chatId && args.chatId === cfg.chatId);
+  if (!configuredChat && !directMention) return;
 
   const member = await prisma.testerOpsMember.upsert({
     where: { workspaceId_openId: { workspaceId, openId: args.senderOpenId } },
@@ -106,14 +112,15 @@ export async function processTesterEvent(eventId: string, forceDirectMention?: b
   const cfg = await loadOrCreateTesterOpsConfig(event.workspaceId);
   const policy = await loadOrCreateAiPolicy(event.workspaceId);
   const directMention = forceDirectMention ?? isDirectMention(event.messageText);
+  const replyChatId = event.chatId ?? cfg.chatId;
   if (!directMention && !cfg.passiveIssueDetectionEnabled) {
     await prisma.testerOpsEvent.update({ where: { id: event.id }, data: { status: 'IGNORED', processedAt: new Date() } });
     return { ignored: true };
   }
 
   const usageSnapshot = directMention ? await buildTesterUsageSnapshot(event.workspaceId, cfg.timezone) : undefined;
-  const progress = directMention && cfg.chatId
-    ? await startProgressCard(cfg.chatId, event.id, event.messageText)
+  const progress = directMention && replyChatId
+    ? await startProgressCard(replyChatId, event.id, event.messageText)
     : null;
   const progressMessageId = progress?.messageId ?? null;
   try {
@@ -132,11 +139,11 @@ export async function processTesterEvent(eventId: string, forceDirectMention?: b
       const chunks = await retrieveKnowledgeChunks(event.workspaceId, event.messageText);
       const answer = await ai.answerDocs({ workspaceId: event.workspaceId, eventId: event.id, question: event.messageText, chunks });
       const reply = answer.answer.answer ?? answer.answer.missingInfo ?? answer.answer.refusalReason;
-      if (reply && cfg.chatId) {
+      if (reply && replyChatId) {
         progress?.stop();
         await deliverReplyCard({
           workspaceId: event.workspaceId,
-          chatId: cfg.chatId,
+          chatId: replyChatId,
           progressMessageId,
           idempotencyKey: `doc-answer:${event.id}`,
           card: buildTesterOpsDocAnswerCard({
@@ -146,11 +153,11 @@ export async function processTesterEvent(eventId: string, forceDirectMention?: b
           }),
         });
       }
-    } else if ((safeAction === 'GET_USAGE_STATUS' || safeAction === 'SEND_PING') && cfg.chatId && usageSnapshot) {
+    } else if ((safeAction === 'GET_USAGE_STATUS' || safeAction === 'SEND_PING') && replyChatId && usageSnapshot) {
       progress?.stop();
       await deliverReplyCard({
         workspaceId: event.workspaceId,
-        chatId: cfg.chatId,
+        chatId: replyChatId,
         progressMessageId,
         idempotencyKey: safeAction === 'SEND_PING' ? `ping-request:${event.id}` : `usage:${event.id}`,
         card: safeAction === 'SEND_PING' ? buildTesterOpsPingCard(usageSnapshot) : buildTesterOpsUsageCard(usageSnapshot),
@@ -178,22 +185,22 @@ export async function processTesterEvent(eventId: string, forceDirectMention?: b
           aiRunId,
         },
       });
-      const shouldReply = cfg.chatId && (status === 'OPEN' || safeAction === 'ASK_CLARIFICATION' || directMention);
+      const shouldReply = replyChatId && (status === 'OPEN' || safeAction === 'ASK_CLARIFICATION' || directMention);
       if (shouldReply) {
         progress?.stop();
         await deliverReplyCard({
           workspaceId: event.workspaceId,
-          chatId: cfg.chatId!,
+          chatId: replyChatId!,
           progressMessageId,
           idempotencyKey: `issue-reply:${event.id}`,
           card: buildTesterOpsIssueCard({ decision, status, sourceText: event.messageText }),
         });
       }
-    } else if (directMention && decision.replyText && cfg.chatId) {
+    } else if (directMention && decision.replyText && replyChatId) {
       progress?.stop();
       await deliverReplyCard({
         workspaceId: event.workspaceId,
-        chatId: cfg.chatId,
+        chatId: replyChatId,
         progressMessageId,
         idempotencyKey: `mention-reply:${event.id}`,
         card: buildTesterOpsGeneralCard({
@@ -203,11 +210,11 @@ export async function processTesterEvent(eventId: string, forceDirectMention?: b
           citations: decision.citations,
         }),
       });
-    } else if (directMention && cfg.chatId) {
+    } else if (directMention && replyChatId) {
       progress?.stop();
       await deliverReplyCard({
         workspaceId: event.workspaceId,
-        chatId: cfg.chatId,
+        chatId: replyChatId,
         progressMessageId,
         idempotencyKey: `mention-empty:${event.id}`,
         card: buildTesterOpsGeneralCard({
@@ -295,6 +302,7 @@ function parseLarkMessageEvent(raw: unknown): {
   chatId: string | null;
   messageId: string | null;
   senderOpenId: string | null;
+  senderType: string | null;
   messageText: string;
   raw: unknown;
 } | null {
@@ -315,6 +323,7 @@ function parseLarkMessageEvent(raw: unknown): {
     chatId: typeof message.chat_id === 'string' ? message.chat_id : null,
     messageId,
     senderOpenId: typeof senderId?.open_id === 'string' ? senderId.open_id : null,
+    senderType: typeof sender?.sender_type === 'string' ? sender.sender_type : null,
     messageText: renderContent(typeof body?.content === 'string' ? body.content : ''),
     raw,
   };

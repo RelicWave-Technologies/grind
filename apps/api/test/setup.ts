@@ -22,11 +22,19 @@ delete process.env.LARK_APP_ID;
 delete process.env.LARK_APP_SECRET;
 delete process.env.LARK_TOKEN_KEY;
 
+// Keep Tester Ops tests deterministic regardless of the developer's local
+// private-DM smoke config.
+process.env.TIMO_TESTER_BOT_ENABLED = 'true';
+process.env.TIMO_TESTER_GROUP_CHAT_ID = 'oc_configured_status';
+process.env.TIMO_TESTER_GROUP_TIMEZONE = 'UTC';
+process.env.TIMO_TESTER_PING_TIMES = '11:00,17:00';
+process.env.TIMO_PASSIVE_ISSUE_DETECTION_ENABLED = 'true';
+
 const { prisma } = await import('@grind/db');
 
 beforeEach(async () => {
   // Wipe all tables between tests for deterministic isolation.
   await prisma.$executeRawUnsafe(
-    'TRUNCATE TABLE "ManualTimeLarkOutboxEvent","ManualTimeLarkMessage","ManualTimeRequest","MtrAttendee","ActivitySample","Screenshot","TimeSegment","TimeEntryAttendee","TimeEntry","RefreshToken","AgentAuthCode","LarkOAuthToken","LarkIdentity","TeamManager","User","Team","Shift","Workspace" RESTART IDENTITY CASCADE',
+    'TRUNCATE TABLE "TesterOpsIssue","TesterOpsAiRun","TesterOpsEvent","TesterOpsMember","TesterOpsReminder","TesterOpsOutboxEvent","TesterOpsKnowledgeChunk","TesterOpsKnowledgeSource","TesterOpsAiPolicy","TesterOpsConfig","ManualTimeLarkOutboxEvent","ManualTimeLarkMessage","ManualTimeRequest","MtrAttendee","ActivitySample","Screenshot","TimeSegment","TimeEntryAttendee","TimeEntry","RefreshToken","AgentAuthCode","LarkOAuthToken","LarkIdentity","TeamManager","User","Team","Shift","Workspace" RESTART IDENTITY CASCADE',
   );
 });
