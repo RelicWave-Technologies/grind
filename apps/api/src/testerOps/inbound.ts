@@ -324,16 +324,26 @@ function parseLarkMessageEvent(raw: unknown): {
     messageId,
     senderOpenId: typeof senderId?.open_id === 'string' ? senderId.open_id : null,
     senderType: typeof sender?.sender_type === 'string' ? sender.sender_type : null,
-    messageText: renderContent(typeof body?.content === 'string' ? body.content : ''),
+    messageText: renderContent(typeof body?.content === 'string' ? body.content : '', message.mentions),
     raw,
   };
 }
 
-function renderContent(content: string): string {
+function renderContent(content: string, mentions?: unknown): string {
   try {
     const parsed = JSON.parse(content) as { text?: unknown };
-    return typeof parsed.text === 'string' ? parsed.text : content;
+    return renderMentions(typeof parsed.text === 'string' ? parsed.text : content, mentions);
   } catch {
-    return content;
+    return renderMentions(content, mentions);
   }
+}
+
+function renderMentions(text: string, mentions: unknown): string {
+  if (!Array.isArray(mentions)) return text;
+  return mentions.reduce((next, mention) => {
+    if (!mention || typeof mention !== 'object') return next;
+    const item = mention as { key?: unknown; name?: unknown };
+    if (typeof item.key !== 'string' || typeof item.name !== 'string') return next;
+    return next.split(item.key).join(`@${item.name}`);
+  }, text);
 }

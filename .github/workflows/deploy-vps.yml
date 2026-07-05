@@ -108,6 +108,9 @@ jobs:
       - name: Write deploy files
         run: |
           printf '%s\n' "$PRODUCTION_ENV" > .env.production
+          if [ -n "$TIMO_PRODUCTION_ENV" ]; then
+            printf '\n%s\n' "$TIMO_PRODUCTION_ENV" >> .env.production
+          fi
           cat > .deploy.env <<EOF
           GRIND_API_IMAGE=${API_IMAGE}
           GRIND_DASHBOARD_IMAGE=${DASHBOARD_IMAGE}
@@ -116,6 +119,7 @@ jobs:
           chmod 600 .env.production .deploy.env
         env:
           PRODUCTION_ENV: ${{ secrets.PRODUCTION_ENV }}
+          TIMO_PRODUCTION_ENV: ${{ secrets.TIMO_PRODUCTION_ENV }}
 
       - name: Ensure server checkout
         run: |

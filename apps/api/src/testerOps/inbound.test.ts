@@ -81,7 +81,8 @@ describe('tester ops inbound chat routing', () => {
       eventId: 'ev-any-chat-mention',
       chatId: 'oc_random_group',
       messageId: 'om-any-chat-mention',
-      text: '@Timo status',
+      text: '@_user_1 status',
+      mentions: [{ key: '@_user_1', name: 'Timo' }],
     }));
 
     await waitFor(async () => messenger.updates.length > 0);
@@ -119,7 +120,13 @@ async function seedWorkspace() {
   await prisma.workspace.create({ data: { id: env.WORKSPACE_ID, name: 'Tester Ops Routing' } });
 }
 
-function larkTextEvent(input: { eventId: string; chatId: string; messageId: string; text: string }) {
+function larkTextEvent(input: {
+  eventId: string;
+  chatId: string;
+  messageId: string;
+  text: string;
+  mentions?: Array<{ key: string; name: string }>;
+}) {
   return {
     event_id: input.eventId,
     event: {
@@ -130,6 +137,7 @@ function larkTextEvent(input: { eventId: string; chatId: string; messageId: stri
       message: {
         message_id: input.messageId,
         chat_id: input.chatId,
+        mentions: input.mentions,
         body: { content: JSON.stringify({ text: input.text }) },
       },
     },
