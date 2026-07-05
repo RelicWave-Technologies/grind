@@ -296,7 +296,7 @@ function testerTable(snapshot: UsageSnapshot): Element {
     columns: [
       { name: 'name', display_name: 'Tester', data_type: usePersonColumn ? 'persons' : 'text', width: '34%', horizontal_align: 'left', vertical_align: 'center' },
       { name: 'time', display_name: 'Time', data_type: 'text', width: '18%', horizontal_align: 'left', vertical_align: 'center' },
-      { name: 'shots', display_name: 'Shots', data_type: 'number', width: '16%', horizontal_align: 'center', vertical_align: 'center', format: { precision: 0 } },
+      { name: 'shots', display_name: 'Shots', data_type: 'number', width: '16%', horizontal_align: 'center', vertical_align: 'center', format: { percision: 0 } },
       { name: 'state', display_name: 'State', data_type: 'options', width: '32%', horizontal_align: 'left', vertical_align: 'center' },
     ],
     rows: testers.length > 0
@@ -322,7 +322,7 @@ function testerPersonList(snapshot: UsageSnapshot): Element | null {
     element_id: 'tester_people',
     size: 'medium',
     show_name: true,
-    drop_invalid_user_id: 'true',
+    drop_invalid_user_id: true,
     persons,
   };
 }
