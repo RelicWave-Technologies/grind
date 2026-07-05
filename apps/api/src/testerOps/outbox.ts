@@ -77,13 +77,37 @@ export async function processTesterOpsOutbox(limit = 10): Promise<number> {
       });
       processed += 1;
     } catch (err) {
+      const errorText = redactText(err instanceof Error ? err.message : String(err));
+      let fallback: { messageId: string } | null = null;
+      if (event.kind === 'SEND_CARD' && isCardRenderError(errorText)) {
+        try {
+          fallback = await sendCardFallback(messenger, event, event.payload);
+        } catch {
+          fallback = null;
+        }
+      }
+      if (fallback) {
+        await prisma.testerOpsOutboxEvent.update({
+          where: { id: event.id },
+          data: {
+            status: 'DONE',
+            attempts: { increment: 1 },
+            messageId: fallback.messageId,
+            processedAt: new Date(),
+            lastError: `rich_card_fallback: ${errorText}`,
+          },
+        });
+        processed += 1;
+        continue;
+      }
+
       const attempts = event.attempts + 1;
       await prisma.testerOpsOutboxEvent.update({
         where: { id: event.id },
         data: {
           status: attempts >= 10 ? 'DEAD_LETTER' : 'FAILED',
           attempts,
-          lastError: redactText(err instanceof Error ? err.message : String(err)),
+          lastError: errorText,
           nextRunAt: new Date(Date.now() + retryDelayMs(attempts)),
           lockedAt: null,
           lockedBy: null,
@@ -120,6 +144,70 @@ async function sendCardPayload(
     : event.openId
       ? messenger.sendCard(event.openId, card)
       : null;
+}
+
+async function sendCardFallback(
+  messenger: NonNullable<ReturnType<typeof getTesterOpsLarkMessenger>>,
+  event: TesterOpsOutboxEvent,
+  rawPayload: TesterOpsOutboxEvent['payload'],
+) {
+  const payload = rawPayload && typeof rawPayload === 'object' && !Array.isArray(rawPayload)
+    ? (rawPayload as { card?: unknown })
+    : {};
+  if (!payload.card || typeof payload.card !== 'object' || Array.isArray(payload.card)) return null;
+  const text = cardFallbackText(payload.card as Record<string, unknown>);
+  if (!text) return null;
+  return event.chatId
+    ? messenger.sendTextToChat(event.chatId, text, `${event.idempotencyKey}:fallback`)
+    : event.openId
+      ? messenger.sendText(event.openId, text)
+      : null;
+}
+
+function isCardRenderError(errorText: string): boolean {
+  return errorText.includes('200621')
+    || errorText.includes('Failed to create card content')
+    || errorText.includes('parse card json err');
+}
+
+function cardFallbackText(card: Record<string, unknown>): string {
+  const title = readCardString(card, ['header', 'title', 'content']);
+  const markdown = collectMarkdown(card).join('\n\n');
+  return plainFallbackText([title, markdown].filter(Boolean).join('\n\n'), 1900);
+}
+
+function collectMarkdown(value: unknown): string[] {
+  if (!value || typeof value !== 'object') return [];
+  const record = value as Record<string, unknown>;
+  const here = record.tag === 'markdown' && typeof record.content === 'string' ? [record.content] : [];
+  const children = Object.values(record).flatMap((child) => {
+    if (Array.isArray(child)) return child.flatMap(collectMarkdown);
+    return collectMarkdown(child);
+  });
+  return [...here, ...children];
+}
+
+function readCardString(card: Record<string, unknown>, path: string[]): string | null {
+  let current: unknown = card;
+  for (const part of path) {
+    if (!current || typeof current !== 'object' || Array.isArray(current)) return null;
+    current = (current as Record<string, unknown>)[part];
+  }
+  return typeof current === 'string' ? current : null;
+}
+
+function plainFallbackText(value: string, max: number): string {
+  const plain = value
+    .replace(/&#60;/gu, '<')
+    .replace(/&#62;/gu, '>')
+    .replace(/&amp;/gu, '&')
+    .replace(/^#{1,6}\s*/gmu, '')
+    .replace(/\*\*/gu, '')
+    .replace(/`/gu, '')
+    .replace(/\n{3,}/gu, '\n\n')
+    .trim();
+  if (plain.length <= max) return plain;
+  return `${plain.slice(0, max - 1).trimEnd()}...`;
 }
 
 function retryDelayMs(attempts: number): number {

@@ -37,6 +37,8 @@ interface HeaderIcon {
 }
 
 const MAX_MD = 2600;
+const STATUS_PROFILE_LIMIT = 8;
+const STATUS_ROW_LIMIT = 10;
 
 const PROGRESS_FRAMES = [
   { title: 'Timo is checking', subtitle: 'Reading the right notes', icon: 'loading_outlined', state: 'Looking for the part that answers you' },
@@ -96,6 +98,8 @@ export function buildTesterOpsUsageCard(snapshot: UsageSnapshot): Card {
   const tracking = snapshot.totals.testers > 0 ? snapshot.totals.trackingNow / snapshot.totals.testers : 0;
   const totalMinutes = snapshot.testers.reduce((sum, tester) => sum + tester.trackedMinutes, 0);
   const totalScreenshots = snapshot.testers.reduce((sum, tester) => sum + tester.screenshots, 0);
+  const progressed = snapshot.testers.filter(hasProgress).length;
+  const priority = priorityTesters(snapshot);
   return baseCard({
     title: 'Tester status',
     subtitle: `${snapshot.date} · ${snapshot.timezone}`,
@@ -108,13 +112,13 @@ export function buildTesterOpsUsageCard(snapshot: UsageSnapshot): Card {
     ],
     elements: [
       markdown(safeBlock([
-        '## Live status',
-        `Tracking now: ${snapshot.totals.trackingNow}/${snapshot.totals.testers} (${percent(tracking)} live)`,
-        `Silent today: ${snapshot.totals.silent}`,
-        `Tracked time: ${minutesLabel(totalMinutes)}`,
-        `Screenshots: ${totalScreenshots}`,
-      ].join('\n'), 700), { elementId: 'usage_status', textSize: 'heading-4' }),
-      testerSummary(snapshot),
+        '## Today at a glance',
+        `Live now: ${snapshot.totals.trackingNow}/${snapshot.totals.testers} (${percent(tracking)})`,
+        `Worked today: ${progressed} testers | ${minutesLabel(totalMinutes)} total | ${totalScreenshots} screenshots`,
+        `Needs check-in: ${snapshot.totals.silent}`,
+      ].join('\n'), 760), { elementId: 'usage_status', textSize: 'heading-4' }),
+      profileStrip(priority),
+      testerSummary(snapshot, priority),
       smallText(`Generated ${formatLocalDateTime(snapshot.generatedAt, snapshot.timezone)}.`),
     ],
   });
@@ -249,12 +253,56 @@ function smallText(content: string): Element {
   return markdown(safeBlock(content, 500), { elementId: uniqueElementId('small'), textSize: 'notation', margin: '4px 0 0 0' });
 }
 
-function testerSummary(snapshot: UsageSnapshot): Element {
-  const testers = snapshot.testers.slice(0, 10);
+function testerSummary(snapshot: UsageSnapshot, priority: UsageSnapshot['testers']): Element {
+  const testers = priority.slice(0, STATUS_ROW_LIMIT);
   const lines = testers.length > 0
-    ? testers.map((tester) => `- ${clean(tester.name, 80)}: ${minutesLabel(tester.trackedMinutes)} · ${tester.screenshots} shots · ${stateLabel(tester.agentState)}`)
+    ? testers.map((tester) => `- ${clean(tester.name, 80)}: ${testerStatusLabel(tester)} | ${minutesLabel(tester.trackedMinutes)} | ${tester.screenshots} shots${lastSeenSuffix(tester, snapshot.generatedAt)}`)
     : ['- No testers mapped yet.'];
-  return markdown(safeBlock(`**Testers**\n${lines.join('\n')}`, 1200), { elementId: 'tester_summary' });
+  const hidden = Math.max(0, snapshot.testers.length - testers.length);
+  const footer = hidden > 0 ? `\n+ ${hidden} more testers in dashboard.` : '';
+  return markdown(safeBlock(`**Priority testers**\n${lines.join('\n')}${footer}`, 1500), { elementId: 'tester_summary' });
+}
+
+function profileStrip(testers: UsageSnapshot['testers']): Element | null {
+  const persons = testers
+    .map((tester) => tester.openId)
+    .filter((openId): openId is string => Boolean(openId?.startsWith('ou_')))
+    .slice(0, STATUS_PROFILE_LIMIT)
+    .map((id) => ({ id }));
+
+  if (persons.length === 0) return null;
+  return {
+    tag: 'person_list',
+    element_id: 'status_people',
+    size: 'small',
+    show_avatar: true,
+    show_name: true,
+    drop_invalid_user_id: true,
+    persons,
+  };
+}
+
+function priorityTesters(snapshot: UsageSnapshot): UsageSnapshot['testers'] {
+  const live = snapshot.testers.filter((tester) => tester.isLiveNow).sort(compareByWork);
+  const progressed = snapshot.testers.filter((tester) => !tester.isLiveNow && hasProgress(tester)).sort(compareByWork);
+  const silent = snapshot.testers
+    .filter((tester) => !tester.isLiveNow && !hasProgress(tester))
+    .sort(compareByLastSeenThenName);
+  return [...live, ...progressed, ...silent];
+}
+
+function hasProgress(tester: UsageSnapshot['testers'][number]): boolean {
+  return tester.trackedMinutes > 0 || tester.screenshots > 0;
+}
+
+function compareByWork(a: UsageSnapshot['testers'][number], b: UsageSnapshot['testers'][number]): number {
+  return b.trackedMinutes - a.trackedMinutes
+    || b.screenshots - a.screenshots
+    || compareByLastSeenThenName(a, b);
+}
+
+function compareByLastSeenThenName(a: UsageSnapshot['testers'][number], b: UsageSnapshot['testers'][number]): number {
+  return lastSeenMs(b) - lastSeenMs(a) || a.name.localeCompare(b.name);
 }
 
 function sourceBlock(citations: Citation[]): Element | null {
@@ -311,11 +359,38 @@ function severityColor(severity: TesterDecision['severity']): TagColor {
   return 'green';
 }
 
-function stateLabel(state: string | null): string {
-  if (state === 'RUNNING') return 'RUNNING';
-  if (state === 'PAUSED') return 'PAUSED';
-  if (state === 'STOPPED') return 'STOPPED';
-  return 'UNKNOWN';
+function testerStatusLabel(tester: UsageSnapshot['testers'][number]): string {
+  if (tester.isLiveNow) return 'Live now';
+  if (hasProgress(tester)) {
+    if (tester.agentState === 'PAUSED_IDLE') return 'Paused after work';
+    if (tester.agentState === 'IDLE') return 'Idle after work';
+    return 'Worked today';
+  }
+  if (tester.agentState === 'PAUSED_IDLE' || tester.agentState === 'IDLE') return 'Idle, no time yet';
+  if (tester.agentState === 'RUNNING') return 'Offline now';
+  return 'Not started today';
+}
+
+function lastSeenSuffix(tester: UsageSnapshot['testers'][number], generatedAt: string): string {
+  if (tester.isLiveNow) return '';
+  const relative = relativeLastSeen(tester.agentLastSeenAt, generatedAt);
+  return relative ? ` | seen ${relative}` : '';
+}
+
+function relativeLastSeen(value: string | null, generatedAt: string): string | null {
+  const seenMs = value ? new Date(value).getTime() : NaN;
+  const baseMs = new Date(generatedAt).getTime();
+  if (!Number.isFinite(seenMs) || !Number.isFinite(baseMs)) return null;
+  const diffMinutes = Math.max(0, Math.round((baseMs - seenMs) / 60000));
+  if (diffMinutes < 2) return 'just now';
+  if (diffMinutes < 60) return `${diffMinutes}m ago`;
+  const diffHours = Math.round(diffMinutes / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  return `${Math.round(diffHours / 24)}d ago`;
+}
+
+function lastSeenMs(tester: UsageSnapshot['testers'][number]): number {
+  return tester.agentLastSeenAt ? new Date(tester.agentLastSeenAt).getTime() || 0 : 0;
 }
 
 function minutesLabel(minutes: number): string {

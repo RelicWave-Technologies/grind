@@ -1,6 +1,8 @@
 import { prisma } from '@grind/db';
 import { localDayWindow } from '../insights/day';
 
+const AGENT_HEARTBEAT_FRESH_MS = 3 * 60 * 1000;
+
 export async function buildTesterUsageSnapshot(workspaceId: string, timezone: string) {
   const now = new Date();
   const date = new Intl.DateTimeFormat('en-CA', { timeZone: timezone }).format(now);
@@ -45,16 +47,25 @@ export async function buildTesterUsageSnapshot(workspaceId: string, timezone: st
     if (end > start) totals.set(entry.userId, (totals.get(entry.userId) ?? 0) + end - start);
   }
 
-  const testers = users.map((u) => ({
-    userId: u.id,
-    name: u.name,
-    avatarUrl: u.avatarUrl,
-    openId: u.larkIdentity?.openId ?? null,
-    trackedMinutes: Math.round((totals.get(u.id) ?? 0) / 60000),
-    screenshots: screenshotCount.get(u.id) ?? 0,
-    agentState: u.agentState,
-    agentLastSeenAt: u.agentLastSeenAt?.toISOString() ?? null,
-  }));
+  const testers = users.map((u) => {
+    const lastSeen = u.agentLastSeenAt;
+    const agentLastSeenAt = lastSeen?.toISOString() ?? null;
+    const isLiveNow = u.agentState === 'RUNNING'
+      && lastSeen !== null
+      && now.getTime() - lastSeen.getTime() <= AGENT_HEARTBEAT_FRESH_MS;
+
+    return {
+      userId: u.id,
+      name: u.name,
+      avatarUrl: u.avatarUrl,
+      openId: u.larkIdentity?.openId ?? null,
+      trackedMinutes: Math.round((totals.get(u.id) ?? 0) / 60000),
+      screenshots: screenshotCount.get(u.id) ?? 0,
+      agentState: u.agentState,
+      agentLastSeenAt,
+      isLiveNow,
+    };
+  });
 
   return {
     generatedAt: now.toISOString(),
@@ -62,8 +73,8 @@ export async function buildTesterUsageSnapshot(workspaceId: string, timezone: st
     timezone,
     totals: {
       testers: testers.length,
-      trackingNow: testers.filter((t) => t.agentState === 'RUNNING').length,
-      silent: testers.filter((t) => t.agentState !== 'RUNNING' && t.trackedMinutes === 0 && t.screenshots === 0).length,
+      trackingNow: testers.filter((t) => t.isLiveNow).length,
+      silent: testers.filter((t) => !t.isLiveNow && t.trackedMinutes === 0 && t.screenshots === 0).length,
     },
     testers,
   };
