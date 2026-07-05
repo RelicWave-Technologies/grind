@@ -108,15 +108,17 @@ jobs:
           docker compose --env-file .deploy.env -f docker-compose.prod.yml exec -T api \
             pnpm --filter @grind/api exec tsx -e "
               import { replayTesterMessage } from './apps/api/src/testerOps/inbound.ts';
-              const result = await replayTesterMessage({
-                workspaceId: process.env.WORKSPACE_ID ?? 'ws_default',
-                messageText: '@Timo status',
-                directMention: true,
-              });
-              console.log(JSON.stringify({
-                safeAction: result.safeAction ?? null,
-                error: result.error ?? null,
-              }, null, 2));
+              void (async () => {
+                const result = await replayTesterMessage({
+                  workspaceId: process.env.WORKSPACE_ID ?? 'ws_default',
+                  messageText: '@Timo status',
+                  directMention: true,
+                });
+                console.log(JSON.stringify({
+                  safeAction: result.safeAction ?? null,
+                  error: result.error ?? null,
+                }, null, 2));
+              })();
             "
           REMOTE
         env:
