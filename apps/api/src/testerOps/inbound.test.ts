@@ -63,6 +63,16 @@ const fakeAi: TesterOpsAiClient = {
       },
     };
   },
+  async answerGeneral() {
+    return {
+      aiRunId: 'unused-general-run',
+      answer: {
+        confidence: 0.9,
+        answer: 'I am Timo, your Grind testing assistant.',
+        citations: [],
+      },
+    };
+  },
 };
 
 afterEach(() => {
@@ -113,6 +123,48 @@ describe('tester ops inbound chat routing', () => {
     const count = await prisma.testerOpsEvent.count({ where: { workspaceId: env.WORKSPACE_ID } });
     expect(count).toBe(0);
     expect(messenger.chatCards).toHaveLength(0);
+  });
+
+  it('answers Timo identity/help mentions without requiring docs', async () => {
+    const messenger = new FakeMessenger();
+    setTesterOpsLarkMessengerForTests(messenger);
+    setTesterOpsAiClientForTests({
+      ...fakeAi,
+      async decideMessage() {
+        return {
+          aiRunId: 'fake-general-decision-run',
+          decision: {
+            intent: 'GENERAL_HELP',
+            confidence: 0.95,
+            language: 'english',
+            category: 'help',
+            severity: 'LOW',
+            summary: 'User asked who Timo is.',
+            safeAction: 'ANSWER_GENERAL',
+            replyText: null,
+            needsClarification: false,
+            clarifyingQuestion: null,
+            citations: [],
+          },
+        };
+      },
+    });
+    await seedWorkspace();
+
+    await ingestRawLarkMessage(larkTextEvent({
+      eventId: 'ev-who-are-you',
+      chatId: 'oc_random_group',
+      messageId: 'om-who-are-you',
+      text: '@_user_1 who are you',
+      mentions: [{ key: '@_user_1', name: 'Timo' }],
+    }));
+
+    await waitFor(async () => messenger.updates.length > 0);
+
+    const rendered = JSON.stringify(messenger.updates[0]?.card);
+    expect(rendered).toContain('I am Timo');
+    expect(rendered).not.toContain('Needs docs');
+    expect(rendered).not.toContain('Not enough evidence');
   });
 });
 

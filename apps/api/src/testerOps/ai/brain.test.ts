@@ -39,6 +39,16 @@ describe('tester ops AI brain seam', () => {
           },
         };
       },
+      async answerGeneral() {
+        return {
+          aiRunId: 'fake-general-run',
+          answer: {
+            confidence: 0.92,
+            answer: 'I am Timo, your Grind testing assistant.',
+            citations: [],
+          },
+        };
+      },
     };
     setTesterOpsAiClientForTests(fake);
 
@@ -49,10 +59,12 @@ describe('tester ops AI brain seam', () => {
       directMention: false,
     });
     const docs = await ai.answerDocs({ workspaceId: 'ws', question: 'what should I test?', chunks: [] });
+    const general = await ai.answerGeneral({ workspaceId: 'ws', messageText: 'who are you', directMention: true });
 
     expect(issue.decision.safeAction).toBe('LOG_ISSUE');
     expect(issue.decision.confidence).toBeGreaterThan(0.9);
     expect(docs.answer.answer).toContain('screenshot upload');
+    expect(general.answer.answer).toContain('Timo');
   });
 
   it('redacts token-like values before audit/log surfaces', () => {
@@ -63,4 +75,3 @@ describe('tester ops AI brain seam', () => {
     });
   });
 });
-

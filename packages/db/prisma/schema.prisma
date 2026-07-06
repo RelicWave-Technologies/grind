@@ -689,6 +689,7 @@ enum TesterOpsSafeAction {
   LOG_ISSUE
   ASK_CLARIFICATION
   ANSWER_FROM_DOCS
+  ANSWER_GENERAL
   GET_USAGE_STATUS
   SEND_PING
 }
@@ -747,7 +748,7 @@ model TesterOpsAiPolicy {
   highConfidenceThreshold   Float               @default(0.78)
   mediumConfidenceThreshold Float               @default(0.5)
   maxClarifyingQuestions    Int                 @default(1)
-  allowedActions            String[]            @default(["NONE", "LOG_ISSUE", "ASK_CLARIFICATION", "ANSWER_FROM_DOCS", "GET_USAGE_STATUS", "SEND_PING"])
+  allowedActions            String[]            @default(["NONE", "LOG_ISSUE", "ASK_CLARIFICATION", "ANSWER_FROM_DOCS", "ANSWER_GENERAL", "GET_USAGE_STATUS", "SEND_PING"])
   createdAt                 DateTime            @default(now())
   updatedAt                 DateTime            @updatedAt
 }

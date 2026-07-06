@@ -135,7 +135,29 @@ export async function processTesterEvent(eventId: string, forceDirectMention?: b
     const allowed = new Set(policy.allowedActions);
     const safeAction = allowed.has(decision.safeAction) ? decision.safeAction : 'NONE';
 
-    if (safeAction === 'ANSWER_FROM_DOCS') {
+    if (safeAction === 'ANSWER_GENERAL' && directMention && replyChatId) {
+      const answer = await ai.answerGeneral({
+        workspaceId: event.workspaceId,
+        eventId: event.id,
+        messageText: event.messageText,
+        directMention,
+        usageSnapshot,
+        decisionSummary: decision.summary,
+      });
+      progress?.stop();
+      await deliverReplyCard({
+        workspaceId: event.workspaceId,
+        chatId: replyChatId,
+        progressMessageId,
+        idempotencyKey: `general-answer:${event.id}`,
+        card: buildTesterOpsGeneralCard({
+          title: 'Timo',
+          text: answer.answer.answer,
+          template: answer.error ? 'orange' : 'blue',
+          citations: answer.answer.citations,
+        }),
+      });
+    } else if (safeAction === 'ANSWER_FROM_DOCS') {
       const chunks = await retrieveKnowledgeChunks(event.workspaceId, event.messageText);
       const answer = await ai.answerDocs({ workspaceId: event.workspaceId, eventId: event.id, question: event.messageText, chunks });
       const reply = answer.answer.answer ?? answer.answer.missingInfo ?? answer.answer.refusalReason;
