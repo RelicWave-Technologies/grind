@@ -9,6 +9,7 @@ type TimerStatus =
 export type TimerRecoveryNotice = { entryId: string; recoveredAt: number; reason: 'unexpected_shutdown' | 'sleep_stop' | 'lock_stop'; observedAt: number };
 export type TodaySegment = { kind: 'WORK' | 'MEETING' | 'IDLE_TRIMMED'; startedAt: number; endedAt: number | null };
 export type TodayEntry = { id: string; larkTaskGuid: string | null; segments: TodaySegment[] };
+export type AwayInfo = { larkTaskGuid: string | null; stoppedAt: number; reason: 'suspend' | 'lock' };
 export type ScreenshotItem = {
   id: string;
   capturedAt: number;
@@ -81,6 +82,11 @@ declare global {
       idle: {
         get: () => Promise<{ idleStartedAt: number }>;
         resolve: (action: 'continue' | 'break') => Promise<void>;
+      };
+      away: {
+        get: () => Promise<AwayInfo | null>;
+        resume: () => Promise<TimerStatus>;
+        dismiss: () => Promise<{ ok: true }>;
       };
       shift: {
         decide: (decision: 'yes' | 'not_yet') => Promise<void>;

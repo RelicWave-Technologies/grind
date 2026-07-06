@@ -2,6 +2,7 @@ import { ipcMain } from 'electron';
 import { registerAuthIpc } from './auth';
 import { registerStatusIpc } from './status';
 import { registerTimerIpc } from './timer';
+import { registerAwayIpc } from './away';
 import { registerCaptureIpc } from './capture';
 import { registerSettingsIpc } from './settings';
 import { registerLarkIpc } from './lark';
@@ -13,6 +14,7 @@ export function registerIpc(opts: { onOpenMainWindow: () => void }): void {
   registerAuthIpc();
   registerStatusIpc();
   registerTimerIpc();
+  registerAwayIpc();
   registerCaptureIpc();
   registerSettingsIpc();
   registerLarkIpc();

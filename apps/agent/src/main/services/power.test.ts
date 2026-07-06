@@ -106,4 +106,55 @@ describe('registerPowerEvents', () => {
     expect(mocks.runQuitCleanup).toHaveBeenCalledWith('shutdown');
     expect(mocks.quit).toHaveBeenCalledTimes(1);
   });
+
+  it('offers to resume after a lock that stopped a running timer', async () => {
+    const onReturnFromAway = vi.fn();
+    mocks.status.mockReturnValue({ state: 'RUNNING', entryId: 'e1', larkTaskGuid: 'task-1', startedAt: 0, workedMs: 0, paused: false });
+    registerPowerEvents({ onWake: vi.fn(), onReturnFromAway });
+
+    mocks.listeners.get('lock-screen')!();
+    await settle();
+    vi.mocked(Date.now).mockReturnValue(1_700_000_000_000 + 61_000); // returned 61s later
+    mocks.listeners.get('unlock-screen')!();
+
+    expect(onReturnFromAway).toHaveBeenCalledWith({ larkTaskGuid: 'task-1', stoppedAt: 1_700_000_000_000, reason: 'lock' });
+  });
+
+  it('offers to resume after sleep/suspend too', async () => {
+    const onReturnFromAway = vi.fn();
+    mocks.status.mockReturnValue({ state: 'RUNNING', entryId: 'e1', larkTaskGuid: null, startedAt: 0, workedMs: 0, paused: false });
+    registerPowerEvents({ onWake: vi.fn(), onReturnFromAway });
+
+    mocks.listeners.get('suspend')!();
+    await settle();
+    vi.mocked(Date.now).mockReturnValue(1_700_000_000_000 + 120_000);
+    mocks.listeners.get('resume')!();
+
+    expect(onReturnFromAway).toHaveBeenCalledWith({ larkTaskGuid: null, stoppedAt: 1_700_000_000_000, reason: 'suspend' });
+  });
+
+  it('offers to resume even after a brief away (no minimum duration)', async () => {
+    const onReturnFromAway = vi.fn();
+    mocks.status.mockReturnValue({ state: 'RUNNING', entryId: 'e1', larkTaskGuid: null, startedAt: 0, workedMs: 0, paused: false });
+    registerPowerEvents({ onWake: vi.fn(), onReturnFromAway });
+
+    mocks.listeners.get('lock-screen')!();
+    await settle();
+    vi.mocked(Date.now).mockReturnValue(1_700_000_000_000 + 5_000); // only 5s away
+    mocks.listeners.get('unlock-screen')!();
+
+    expect(onReturnFromAway).toHaveBeenCalledWith({ larkTaskGuid: null, stoppedAt: 1_700_000_000_000, reason: 'lock' });
+  });
+
+  it('does not offer resume when nothing was tracking', async () => {
+    const onReturnFromAway = vi.fn(); // status stays IDLE (beforeEach)
+    registerPowerEvents({ onWake: vi.fn(), onReturnFromAway });
+
+    mocks.listeners.get('suspend')!();
+    await settle();
+    vi.mocked(Date.now).mockReturnValue(1_700_000_000_000 + 120_000);
+    mocks.listeners.get('resume')!();
+
+    expect(onReturnFromAway).not.toHaveBeenCalled();
+  });
 });

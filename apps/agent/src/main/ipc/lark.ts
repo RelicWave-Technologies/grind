@@ -77,11 +77,15 @@ function createTaskErrorMessage(raw: string): string {
  */
 export function registerLarkIpc(): void {
   ipcMain.handle('lark:status', async (): Promise<LarkStatus> => {
+    // Do NOT fabricate a "not configured / not connected" status on a transient
+    // failure — that makes a stale or briefly-dropped connection look like "Lark
+    // not set up" and hides the Sync button. Reject instead, so the renderer's
+    // query keeps the last-known-good status until a later poll succeeds.
     try {
       return await api<LarkStatus>('/v1/lark/status');
     } catch (err) {
-      log.warn('lark:status failed', { err: String(err) });
-      return { configured: false, connected: false, reauthRequired: false, scopes: [] };
+      log.warn('lark:status failed; keeping last-known status', { err: String(err) });
+      throw err;
     }
   });
 
@@ -107,8 +111,10 @@ export function registerLarkIpc(): void {
     } catch (err) {
       const msg = String(err);
       if (msg.includes('409')) return { tasks: [], reauthRequired: true };
-      log.warn('lark:tasks failed', { err: msg });
-      return { tasks: [], reauthRequired: false };
+      // A transient failure must not blank the task list — reject so the
+      // renderer keeps the last-known tasks and repopulates on the next poll.
+      log.warn('lark:tasks failed; keeping last-known tasks', { err: msg });
+      throw err;
     }
   });
 

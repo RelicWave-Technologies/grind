@@ -20,6 +20,7 @@ import { showFloatingBar, hideFloatingBar, reclampFloatingBar } from './floating
 import { reassertAllOverlays } from './windows/overlay';
 import { togglePopover, hidePopover } from './popover';
 import { showIdlePrompt, hideIdlePrompt } from './idlePrompt';
+import { showAwayPrompt } from './awayPrompt';
 import { ShiftMonitor } from './services/shift';
 import { onAuthChange } from './services/apiClient';
 import { onAgentConfigChange, refreshAgentConfig } from './services/agentConfig';
@@ -148,6 +149,8 @@ app.whenReady().then(async () => {
       void drainTimerSyncNow('wake');
       void drainActivityNow('wake');
     },
+    // Returned from a lock/sleep that stopped a running timer → offer to resume.
+    onReturnFromAway: (info) => showAwayPrompt(info),
   });
 
   // When monitors change (unplug / resolution switch): re-float all overlays
@@ -169,9 +172,12 @@ app.whenReady().then(async () => {
     } catch (err) {
       log.warn('pauseForIdle failed', { err: String(err) });
     }
+    // Show the prompt FIRST, and let any failure propagate to the IdleMonitor so
+    // it resets its prompt state — a wedged flag would otherwise silently kill
+    // every future idle prompt this session.
+    showIdlePrompt();
     broadcast('timer:status:push', getTimerService().status());
     sendHeartbeatNow();
-    showIdlePrompt();
   });
   idleMonitor.start();
 

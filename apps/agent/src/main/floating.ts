@@ -18,7 +18,11 @@ import { createOverlayWindow, assertOverlayFloat, activeWorkArea, bottomRight } 
  * user turns it off in Settings it stays hidden even while tracking.
  */
 
-const SIZE = { width: 248, height: 56 };
+// The window hugs the pill exactly — no shadow, no transparent margin. The pill
+// fills the whole frame and its own border-radius owns the shape, so nothing is
+// ever painted behind it (`.fbar` insets by 0).
+const BAR = { width: 240, height: 44 };
+const SIZE = { width: BAR.width, height: BAR.height };
 
 let win: BrowserWindow | null = null;
 let wantVisible = false; // mirror of "timer running" — set by the heartbeat
@@ -49,7 +53,15 @@ function computePosition(): { x: number; y: number } {
 
 function ensure(): BrowserWindow {
   if (win && !win.isDestroyed()) return win;
-  win = createOverlayWindow({ width: SIZE.width, height: SIZE.height, hash: 'floating' });
+  win = createOverlayWindow({
+    width: SIZE.width,
+    height: SIZE.height,
+    hash: 'floating',
+    // The pill draws its own CSS shadow inside the transparent padding, and
+    // owns its corner radius — so no OS shadow/rounding to mismatch it.
+    hasShadow: false,
+    roundedCorners: false,
+  });
 
   const p = computePosition();
   win.setPosition(p.x, p.y, false);

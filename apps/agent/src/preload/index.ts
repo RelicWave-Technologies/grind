@@ -8,6 +8,7 @@ type TimerStatus =
   | { state: 'IDLE'; workedMs: number }
   | { state: 'RUNNING'; entryId: string; larkTaskGuid: string | null; startedAt: number; workedMs: number; paused: boolean };
 type TimerRecoveryNotice = { entryId: string; recoveredAt: number; reason: 'unexpected_shutdown' | 'sleep_stop' | 'lock_stop'; observedAt: number };
+type AwayInfo = { larkTaskGuid: string | null; stoppedAt: number; reason: 'suspend' | 'lock' };
 type TodaySegment = { kind: 'WORK' | 'MEETING' | 'IDLE_TRIMMED'; startedAt: number; endedAt: number | null };
 type TodayEntry = { id: string; larkTaskGuid: string | null; segments: TodaySegment[] };
 type ScreenshotItem = {
@@ -101,6 +102,11 @@ const api = {
   idle: {
     get: (): Promise<{ idleStartedAt: number }> => ipcRenderer.invoke('idle:get'),
     resolve: (action: 'continue' | 'break'): Promise<void> => ipcRenderer.invoke('idle:resolve', action),
+  },
+  away: {
+    get: (): Promise<AwayInfo | null> => ipcRenderer.invoke('away:get'),
+    resume: (): Promise<TimerStatus> => ipcRenderer.invoke('away:resume'),
+    dismiss: (): Promise<{ ok: true }> => ipcRenderer.invoke('away:dismiss'),
   },
   shift: {
     decide: (decision: 'yes' | 'not_yet'): Promise<void> => ipcRenderer.invoke('shift:decide', decision),
