@@ -113,6 +113,14 @@ app.whenReady().then(async () => {
     isMainWindowVisible: () => !!mainWindow?.isVisible(),
   });
 
+  // Deep-link delivery is now safe (window + IPC are up). Process any Lark login
+  // callback ASAP — BEFORE the heavy awaited boot work below — so a slow network
+  // call can't delay or drop it. Flush anything queued during boot (macOS
+  // open-url) and pick up a cold-start argv link (Windows/Linux).
+  flushQueuedDeepLink();
+  const coldStartLink = deepLinkFromArgv(process.argv);
+  if (coldStartLink) void handleDeepLink(coldStartLink);
+
   mainWindow.on('close', (e) => {
     if (!isQuitting) {
       e.preventDefault();
@@ -203,8 +211,13 @@ app.whenReady().then(async () => {
 
   // Pull the server-driven capture cadence + idle threshold (per-user →
   // workspace policy) BEFORE the capture loop schedules its first shot, so the
-  // first interval already reflects policy. No-ops (keeps defaults) if logged out.
-  await refreshAgentConfig();
+  // first interval already reflects policy. No-ops (keeps defaults) if logged
+  // out; a failure here must not abort the rest of boot.
+  try {
+    await refreshAgentConfig();
+  } catch (err) {
+    log.warn('refreshAgentConfig failed', { err: String(err) });
+  }
 
   startCaptureLoop();
   startActivityCapture();
@@ -262,12 +275,6 @@ app.whenReady().then(async () => {
       /* timer not ready */
     }
   }, 1000);
-
-  // Deep-link delivery is now safe. Flush any callback URL that arrived during
-  // boot (macOS open-url), and pick up a cold-start argv link (Windows/Linux).
-  flushQueuedDeepLink();
-  const coldStartLink = deepLinkFromArgv(process.argv);
-  if (coldStartLink) void handleDeepLink(coldStartLink);
 
   log.info('agent ready', {
     platform: process.platform,

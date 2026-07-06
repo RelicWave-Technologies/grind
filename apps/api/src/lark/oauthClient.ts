@@ -102,11 +102,15 @@ export class HttpOAuthClient implements OAuthClient {
       clearTimeout(timeout);
     }
     const body = (await res.json().catch(() => ({}))) as RawTokenBody;
-    // A 5xx/429 WITHOUT an explicit OAuth error means Lark didn't process the
-    // grant (server error / rate limit) — keep the token, retry later. An
-    // explicit OAuth error (any status) falls through to parseBody → reauth.
-    if (!res.ok && !body.error && (res.status >= 500 || res.status === 429)) {
-      throw new LarkTransientError(`lark token endpoint ${res.status}`);
+    // Force reauth ONLY when Lark EXPLICITLY rejects the grant — an OAuth
+    // `error`, or a non-zero Lark `code`. Every other failure (any non-2xx with
+    // no explicit error, a truncated/unparseable body, missing tokens) is
+    // treated as TRANSIENT: the single-use refresh token was almost certainly
+    // not consumed, so keep the connection and retry rather than bricking the
+    // user on an infra blip (proxy 4xx, WAF challenge, gateway, partial read).
+    const explicitReject = (body.code != null && body.code !== 0) || Boolean(body.error);
+    if (!explicitReject && (!res.ok || !body.access_token || !body.refresh_token)) {
+      throw new LarkTransientError(`lark token endpoint ${res.status} (no explicit error)`);
     }
     return parseBody(body);
   }

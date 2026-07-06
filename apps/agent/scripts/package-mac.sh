@@ -39,6 +39,9 @@ fi
 
 cd "$ROOT_DIR"
 
+echo "▸ asserting build env (API_URL + callback scheme)"
+node "$AGENT_DIR/scripts/assert-build-env.mjs"
+
 echo "▸ electron-vite build (bakes MAIN_VITE_API_URL from .env.production)"
 pnpm --filter @grind/agent exec electron-vite build
 
