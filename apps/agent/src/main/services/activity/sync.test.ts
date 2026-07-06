@@ -1,0 +1,61 @@
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+const mocks = vi.hoisted(() => ({ api: vi.fn() }));
+vi.mock('../apiClient', () => ({ api: mocks.api }));
+vi.mock('../../logger', () => ({ log: { debug: vi.fn(), warn: vi.fn(), info: vi.fn(), error: vi.fn() } }));
+
+const { flushActivity } = await import('./sync');
+
+type Row = Record<string, unknown>;
+function row(id: string, over: Row = {}): Row {
+  return {
+    id, timeEntryId: 't', bucketStart: 0, keystrokes: 1, clicks: 1, mouseDistancePx: 0,
+    scrollEvents: 0, ikiCv: 0, moveSpeedCv: 0, pathStraightness: 0,
+    activeApp: 'app', activeAppBundle: null, activeTitle: null, activeUrl: null, ...over,
+  };
+}
+function fakeStore(rows: Row[]) {
+  const synced: string[] = [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const store = { unsynced: (n: number) => rows.slice(0, n), markSynced: (ids: string[]) => synced.push(...ids) } as any;
+  return { store, synced };
+}
+const bodyOf = () =>
+  (mocks.api.mock.calls[0]![1] as { body: { samples: { activeUrl: string | null }[] } }).body;
+
+afterEach(() => mocks.api.mockReset());
+
+describe('flushActivity byte-bounded batching', () => {
+  it('sends nothing when there is no backlog', async () => {
+    const { store } = fakeStore([]);
+    expect(await flushActivity(store)).toBe(0);
+    expect(mocks.api).not.toHaveBeenCalled();
+  });
+
+  it('bounds the batch by bytes so the body never exceeds the API limit', async () => {
+    const bigUrl = 'https://x/' + 'a'.repeat(2000); // ~2KB each → 500 rows would be ~1MB
+    const rows = Array.from({ length: 500 }, (_, i) => row('r' + i, { activeUrl: bigUrl }));
+    mocks.api.mockResolvedValue(undefined);
+    const { store, synced } = fakeStore(rows);
+
+    const sent = await flushActivity(store);
+    expect(Buffer.byteLength(JSON.stringify(bodyOf()))).toBeLessThan(64 * 1024); // under the server cap
+    expect(sent).toBeGreaterThan(0);
+    expect(sent).toBeLessThan(500); // did not cram all 500 into one request
+    expect(synced).toHaveLength(sent); // marked exactly what it sent, not the rest
+  });
+
+  it('truncates over-long text fields', async () => {
+    mocks.api.mockResolvedValue(undefined);
+    const { store } = fakeStore([row('r1', { activeUrl: 'u'.repeat(5000) })]);
+    await flushActivity(store);
+    expect(bodyOf().samples[0]!.activeUrl!.length).toBeLessThanOrEqual(1024);
+  });
+
+  it('always sends at least one sample even if it alone is large', async () => {
+    mocks.api.mockResolvedValue(undefined);
+    const { store, synced } = fakeStore([row('r1', { activeUrl: 'u'.repeat(5000) })]);
+    expect(await flushActivity(store)).toBe(1);
+    expect(synced).toEqual(['r1']);
+  });
+});
