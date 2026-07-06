@@ -1,4 +1,4 @@
-import { app, ipcMain, screen } from 'electron';
+import { app, ipcMain, safeStorage, screen } from 'electron';
 import type { BrowserWindow, Tray } from 'electron';
 import { createTray, setTrayTitle } from './tray';
 import { createMainWindow } from './window';
@@ -32,8 +32,10 @@ import {
   startUpdateService,
 } from './services/updates';
 import { ensureLaunchAtLogin, shouldStartHidden } from './services/launchAtLogin';
+import { migrateLegacyUserData } from './services/legacyMigration';
 import { broadcast } from './broadcast';
-import { log } from './logger';
+import { API_URL, CALLBACK_SCHEME } from './env';
+import { log, logFilePath } from './logger';
 
 function fmtShort(ms: number): string {
   const t = Math.floor(ms / 1000);
@@ -53,7 +55,7 @@ if (!gotLock) {
 // Register the custom auth callback for Lark login. Must happen before whenReady, and the
 // macOS open-url handler must be attached early — the OS can deliver the
 // deep-link before the app finishes booting (handleDeepLink queues it).
-registerProtocol();
+const protocolRegistered = registerProtocol();
 app.on('open-url', (event, url) => {
   event.preventDefault();
   void handleDeepLink(url);
@@ -71,6 +73,30 @@ function showMainWindow() {
 }
 
 app.whenReady().then(async () => {
+  // Recover a session stranded by a prior app identity (Grind->Timo) BEFORE any
+  // token read. Windows-only: that's where the productName-based userData dir
+  // moved and orphaned tokens.bin.
+  if (process.platform === 'win32') migrateLegacyUserData();
+
+  // Boot diagnostics — the first line in every log file. Pinpoints the two
+  // known Windows failure modes at a glance: a moved data dir (userData /
+  // appName after the rebrand) and an unregistered deep-link scheme
+  // (protocolRegistered / isDefaultProtocolClient false ⇒ Lark login can't
+  // complete). Also confirms the baked API_URL/scheme and token encryption.
+  log.info('boot diagnostics', {
+    platform: process.platform,
+    arch: process.arch,
+    appName: app.getName(),
+    version: app.getVersion(),
+    userData: app.getPath('userData'),
+    logFile: logFilePath(),
+    apiUrl: API_URL,
+    callbackScheme: CALLBACK_SCHEME,
+    protocolRegistered,
+    isDefaultProtocolClient: app.isDefaultProtocolClient(CALLBACK_SCHEME),
+    safeStorageAvailable: safeStorage.isEncryptionAvailable(),
+  });
+
   const launchAtLogin = ensureLaunchAtLogin();
   const openedAtLogin = shouldStartHidden(process.argv);
 
@@ -86,6 +112,14 @@ app.whenReady().then(async () => {
     showMainWindow: () => showMainWindow(),
     isMainWindowVisible: () => !!mainWindow?.isVisible(),
   });
+
+  // Deep-link delivery is now safe (window + IPC are up). Process any Lark login
+  // callback ASAP — BEFORE the heavy awaited boot work below — so a slow network
+  // call can't delay or drop it. Flush anything queued during boot (macOS
+  // open-url) and pick up a cold-start argv link (Windows/Linux).
+  flushQueuedDeepLink();
+  const coldStartLink = deepLinkFromArgv(process.argv);
+  if (coldStartLink) void handleDeepLink(coldStartLink);
 
   mainWindow.on('close', (e) => {
     if (!isQuitting) {
@@ -177,8 +211,13 @@ app.whenReady().then(async () => {
 
   // Pull the server-driven capture cadence + idle threshold (per-user →
   // workspace policy) BEFORE the capture loop schedules its first shot, so the
-  // first interval already reflects policy. No-ops (keeps defaults) if logged out.
-  await refreshAgentConfig();
+  // first interval already reflects policy. No-ops (keeps defaults) if logged
+  // out; a failure here must not abort the rest of boot.
+  try {
+    await refreshAgentConfig();
+  } catch (err) {
+    log.warn('refreshAgentConfig failed', { err: String(err) });
+  }
 
   startCaptureLoop();
   startActivityCapture();
@@ -236,12 +275,6 @@ app.whenReady().then(async () => {
       /* timer not ready */
     }
   }, 1000);
-
-  // Deep-link delivery is now safe. Flush any callback URL that arrived during
-  // boot (macOS open-url), and pick up a cold-start argv link (Windows/Linux).
-  flushQueuedDeepLink();
-  const coldStartLink = deepLinkFromArgv(process.argv);
-  if (coldStartLink) void handleDeepLink(coldStartLink);
 
   log.info('agent ready', {
     platform: process.platform,

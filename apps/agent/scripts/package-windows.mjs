@@ -85,6 +85,9 @@ async function main() {
     );
   }
 
+  console.log('> asserting build env (API_URL + callback scheme)');
+  await run('node', [path.join(agentDir, 'scripts', 'assert-build-env.mjs')], agentDir);
+
   console.log('> electron-vite build (bakes MAIN_VITE_API_URL from .env.production)');
   await run('pnpm', ['--filter', '@grind/agent', 'exec', 'electron-vite', 'build'], rootDir);
 

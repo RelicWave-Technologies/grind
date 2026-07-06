@@ -193,7 +193,12 @@ async function syncAndReturn(userId: string, profile: LarkProfile): Promise<Reso
 
 // --- Agent one-time deep-link codes (PKCE-bound, single-use) ----------------
 
-const AGENT_CODE_TTL_MS = 120_000;
+// The code is minted at the Lark callback and redeemed once the OS delivers the
+// deep link to the agent. On a cold start (app launched by the deep link) that
+// delivery waits on the agent's boot, so keep a generous margin — a too-tight
+// window silently expires the login on slow machines. Still far below the
+// client's 12-min hard TTL for the overall flow.
+const AGENT_CODE_TTL_MS = 5 * 60_000;
 
 export class AgentCodeError extends Error {
   constructor(public readonly code: 'code_invalid' | 'pkce_mismatch') {

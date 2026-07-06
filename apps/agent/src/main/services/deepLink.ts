@@ -16,14 +16,16 @@ import { log } from '../logger';
 const PROTOCOL = CALLBACK_SCHEME;
 
 /** Register the callback scheme. In dev (electron-vite) we must pass the
- *  script path so the OS maps the scheme to this running instance. */
-export function registerProtocol(): void {
+ *  script path so the OS maps the scheme to this running instance. Returns the
+ *  OS result — on Windows this is the ONLY thing that registers `timo://`
+ *  (electron-builder's `protocols:` block writes nothing for NSIS), so a
+ *  `false` here means the deep-link login can't complete. Worth logging. */
+export function registerProtocol(): boolean {
   const scriptPath = process.argv[1];
   if (process.defaultApp && scriptPath) {
-    app.setAsDefaultProtocolClient(PROTOCOL, process.execPath, [path.resolve(scriptPath)]);
-  } else {
-    app.setAsDefaultProtocolClient(PROTOCOL);
+    return app.setAsDefaultProtocolClient(PROTOCOL, process.execPath, [path.resolve(scriptPath)]);
   }
+  return app.setAsDefaultProtocolClient(PROTOCOL);
 }
 
 let ready = false;

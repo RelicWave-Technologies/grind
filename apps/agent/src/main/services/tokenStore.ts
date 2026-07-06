@@ -36,7 +36,13 @@ export async function saveTokens(tokens: StoredTokens): Promise<void> {
     throw new Error('safeStorage encryption unavailable on this OS');
   }
   const buf = safeStorage.encryptString(JSON.stringify(tokens));
-  await fs.writeFile(filePath(), buf, { mode: 0o600 });
+  // Atomic write: a crash mid-write must never leave a half-written (and thus
+  // undecryptable) token file that would strand the session. Write to a temp
+  // file, then rename — rename is atomic on the same filesystem.
+  const dest = filePath();
+  const tmp = `${dest}.tmp`;
+  await fs.writeFile(tmp, buf, { mode: 0o600 });
+  await fs.rename(tmp, dest);
 }
 
 export async function clearTokens(): Promise<void> {
