@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { prisma } from '@grind/db';
 import { requireAccessToken } from '../middleware/auth';
 import { attachScope, requireAdmin } from '../middleware/scope';
-import { buildTesterOpsPingCard } from '../testerOps/cards';
+import { buildTesterOpsUsageCard } from '../testerOps/cards';
 import { loadOrCreateAiPolicy, loadOrCreateTesterOpsConfig } from '../testerOps/config';
 import { replayTesterMessage } from '../testerOps/inbound';
 import { refreshKnowledgeSource } from '../testerOps/knowledge';
@@ -142,8 +142,8 @@ testerOpsRouter.post('/reminders/send-now', async (req, res, next) => {
       await enqueueTesterOpsCard(tx, {
         workspaceId: req.scope!.workspaceId,
         chatId: cfg.chatId,
-        card: buildTesterOpsPingCard(usage),
-        idempotencyKey: `tester-ops-send-now:${Date.now()}`,
+        card: buildTesterOpsUsageCard(usage),
+        idempotencyKey: `tester-ops-status-send-now:${Date.now()}`,
       });
     });
     res.json({ queued: true, usage });

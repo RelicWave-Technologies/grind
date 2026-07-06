@@ -1,7 +1,7 @@
 import { prisma } from '@grind/db';
 import { env } from '../env';
 import { logger } from '../logger';
-import { buildTesterOpsGeneralCard, buildTesterOpsPingCard } from './cards';
+import { buildTesterOpsGeneralCard, buildTesterOpsUsageCard } from './cards';
 import { isDirectMention, loadOrCreateTesterOpsConfig } from './config';
 import { ingestHistoryMessage } from './inbound';
 import { getTesterOpsLarkMessenger } from './larkRuntime';
@@ -35,7 +35,7 @@ async function tick(): Promise<void> {
   const cfg = await loadOrCreateTesterOpsConfig(env.WORKSPACE_ID);
   if (!cfg.enabled || !cfg.chatId) return;
   await maybeAnnounce(cfg.workspaceId, cfg.chatId);
-  await maybeSendScheduledPing(cfg.workspaceId, cfg.chatId, cfg.timezone, cfg.pingTimes);
+  await maybeSendScheduledStatus(cfg.workspaceId, cfg.chatId, cfg.timezone, cfg.pingTimes);
   await pollHistory(cfg.workspaceId, cfg.chatId, cfg.lastHistoryPollAt, cfg.passiveIssueDetectionEnabled);
 }
 
@@ -57,7 +57,7 @@ async function maybeAnnounce(workspaceId: string, chatId: string): Promise<void>
   });
 }
 
-async function maybeSendScheduledPing(workspaceId: string, chatId: string, timezone: string, pingTimes: string[]): Promise<void> {
+async function maybeSendScheduledStatus(workspaceId: string, chatId: string, timezone: string, pingTimes: string[]): Promise<void> {
   const now = new Date();
   const local = localParts(now, timezone);
   if (!pingTimes.includes(local.hhmm)) return;
@@ -72,8 +72,8 @@ async function maybeSendScheduledPing(workspaceId: string, chatId: string, timez
     await enqueueTesterOpsCard(tx, {
       workspaceId,
       chatId,
-      card: buildTesterOpsPingCard(usage),
-      idempotencyKey: `tester-ops-ping:${reminder.id}`,
+      card: buildTesterOpsUsageCard(usage),
+      idempotencyKey: `tester-ops-status:${reminder.id}`,
     });
   });
 }

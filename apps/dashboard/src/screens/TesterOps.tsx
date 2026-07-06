@@ -135,7 +135,7 @@ export function TesterOpsScreen() {
               Refresh
             </Button>
             <Button size="sm" icon={<Send size={15} />} onClick={() => sendNow.mutate()} disabled={sendNow.isPending || !cfg?.chatId}>
-              Send ping
+              Send status
             </Button>
           </Toolbar>
         }
@@ -171,7 +171,7 @@ export function TesterOpsScreen() {
                 <Field label="Timezone">
                   <Input defaultValue={cfg.timezone} onBlur={(e) => saveConfig.mutate({ timezone: e.currentTarget.value || 'UTC' })} />
                 </Field>
-                <Field label="Ping times">
+                <Field label="Status times">
                   <Input defaultValue={cfg.pingTimes.join(', ')} onBlur={(e) => saveConfig.mutate({ pingTimes: e.currentTarget.value.split(',').map((s) => s.trim()).filter(Boolean) })} />
                 </Field>
               </div>

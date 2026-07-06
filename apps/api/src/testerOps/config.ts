@@ -9,16 +9,10 @@ export function envPingTimes(): string[] {
 }
 
 export async function loadOrCreateTesterOpsConfig(workspaceId = env.WORKSPACE_ID) {
-  return prisma.testerOpsConfig.upsert({
-    where: { workspaceId },
-    update: {
-      enabled: env.TIMO_TESTER_BOT_ENABLED === 'true',
-      ...(env.TIMO_TESTER_GROUP_CHAT_ID ? { chatId: env.TIMO_TESTER_GROUP_CHAT_ID } : {}),
-      timezone: env.TIMO_TESTER_GROUP_TIMEZONE,
-      pingTimes: envPingTimes(),
-      passiveIssueDetectionEnabled: env.TIMO_PASSIVE_ISSUE_DETECTION_ENABLED === 'true',
-    },
-    create: {
+  const existing = await prisma.testerOpsConfig.findUnique({ where: { workspaceId } });
+  if (existing) return existing;
+  return prisma.testerOpsConfig.create({
+    data: {
       workspaceId,
       enabled: env.TIMO_TESTER_BOT_ENABLED === 'true',
       chatId: env.TIMO_TESTER_GROUP_CHAT_ID,
