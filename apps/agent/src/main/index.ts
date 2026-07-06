@@ -1,4 +1,4 @@
-import { app, ipcMain, screen } from 'electron';
+import { app, ipcMain, safeStorage, screen } from 'electron';
 import type { BrowserWindow, Tray } from 'electron';
 import { createTray, setTrayTitle } from './tray';
 import { createMainWindow } from './window';
@@ -33,7 +33,8 @@ import {
 } from './services/updates';
 import { ensureLaunchAtLogin, shouldStartHidden } from './services/launchAtLogin';
 import { broadcast } from './broadcast';
-import { log } from './logger';
+import { API_URL, CALLBACK_SCHEME } from './env';
+import { log, logFilePath } from './logger';
 
 function fmtShort(ms: number): string {
   const t = Math.floor(ms / 1000);
@@ -53,7 +54,7 @@ if (!gotLock) {
 // Register the custom auth callback for Lark login. Must happen before whenReady, and the
 // macOS open-url handler must be attached early — the OS can deliver the
 // deep-link before the app finishes booting (handleDeepLink queues it).
-registerProtocol();
+const protocolRegistered = registerProtocol();
 app.on('open-url', (event, url) => {
   event.preventDefault();
   void handleDeepLink(url);
@@ -71,6 +72,25 @@ function showMainWindow() {
 }
 
 app.whenReady().then(async () => {
+  // Boot diagnostics — the first line in every log file. Pinpoints the two
+  // known Windows failure modes at a glance: a moved data dir (userData /
+  // appName after the rebrand) and an unregistered deep-link scheme
+  // (protocolRegistered / isDefaultProtocolClient false ⇒ Lark login can't
+  // complete). Also confirms the baked API_URL/scheme and token encryption.
+  log.info('boot diagnostics', {
+    platform: process.platform,
+    arch: process.arch,
+    appName: app.getName(),
+    version: app.getVersion(),
+    userData: app.getPath('userData'),
+    logFile: logFilePath(),
+    apiUrl: API_URL,
+    callbackScheme: CALLBACK_SCHEME,
+    protocolRegistered,
+    isDefaultProtocolClient: app.isDefaultProtocolClient(CALLBACK_SCHEME),
+    safeStorageAvailable: safeStorage.isEncryptionAvailable(),
+  });
+
   const launchAtLogin = ensureLaunchAtLogin();
   const openedAtLogin = shouldStartHidden(process.argv);
 
