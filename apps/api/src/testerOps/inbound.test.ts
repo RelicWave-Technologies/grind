@@ -125,6 +125,47 @@ describe('tester ops inbound chat routing', () => {
     expect(messenger.chatCards).toHaveLength(0);
   });
 
+  it('treats private Lark DMs as direct messages without requiring @Timo', async () => {
+    const messenger = new FakeMessenger();
+    setTesterOpsLarkMessengerForTests(messenger);
+    setTesterOpsAiClientForTests({
+      ...fakeAi,
+      async decideMessage(input) {
+        expect(input.directMention).toBe(true);
+        return {
+          aiRunId: 'fake-dm-general-run',
+          decision: {
+            intent: 'GENERAL_HELP',
+            confidence: 0.9,
+            language: 'english',
+            category: 'greeting',
+            severity: 'LOW',
+            summary: 'User greeted Timo in a private chat.',
+            safeAction: 'ANSWER_GENERAL',
+            replyText: null,
+            needsClarification: false,
+            clarifyingQuestion: null,
+            citations: [],
+          },
+        };
+      },
+    });
+    await seedWorkspace();
+
+    await ingestRawLarkMessage(larkTextEvent({
+      eventId: 'ev-private-dm-hi',
+      chatId: 'oc_private_dm',
+      chatType: 'p2p',
+      messageId: 'om-private-dm-hi',
+      text: 'hi',
+    }));
+
+    await waitFor(async () => messenger.updates.length > 0);
+
+    const rendered = JSON.stringify(messenger.updates[0]?.card);
+    expect(rendered).toContain('I am Timo');
+  });
+
   it('answers Timo identity/help mentions without requiring docs', async () => {
     const messenger = new FakeMessenger();
     setTesterOpsLarkMessengerForTests(messenger);
@@ -175,6 +216,7 @@ async function seedWorkspace() {
 function larkTextEvent(input: {
   eventId: string;
   chatId: string;
+  chatType?: string;
   messageId: string;
   text: string;
   mentions?: Array<{ key: string; name: string }>;
@@ -189,6 +231,7 @@ function larkTextEvent(input: {
       message: {
         message_id: input.messageId,
         chat_id: input.chatId,
+        chat_type: input.chatType,
         mentions: input.mentions,
         body: { content: JSON.stringify({ text: input.text }) },
       },

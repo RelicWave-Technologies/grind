@@ -62,6 +62,7 @@ async function ingestTesterMessage(args: {
   source: 'LARK_EVENT' | 'HISTORY_POLL';
   sourceId: string;
   chatId: string | null;
+  chatType?: string | null;
   messageId: string | null;
   senderOpenId: string | null;
   senderType?: string | null;
@@ -75,7 +76,7 @@ async function ingestTesterMessage(args: {
   if (args.senderType && args.senderType !== 'user') return;
   if (!args.senderOpenId) return;
   if (!args.messageText.trim()) return;
-  const directMention = isDirectMention(args.messageText);
+  const directMention = isDirectTesterMessage(args.messageText, args.chatType);
   const configuredChat = Boolean(cfg.chatId && args.chatId === cfg.chatId);
   if (!configuredChat && !directMention) return;
 
@@ -111,7 +112,10 @@ export async function processTesterEvent(eventId: string, forceDirectMention?: b
   if (!event) throw new Error('event_not_found');
   const cfg = await loadOrCreateTesterOpsConfig(event.workspaceId);
   const policy = await loadOrCreateAiPolicy(event.workspaceId);
-  const directMention = forceDirectMention ?? isDirectMention(event.messageText);
+  const rawChatType = event.raw && typeof event.raw === 'object'
+    ? getLarkMessageChatType(event.raw)
+    : null;
+  const directMention = forceDirectMention ?? isDirectTesterMessage(event.messageText, rawChatType);
   const replyChatId = event.chatId ?? cfg.chatId;
   if (!directMention && !cfg.passiveIssueDetectionEnabled) {
     await prisma.testerOpsEvent.update({ where: { id: event.id }, data: { status: 'IGNORED', processedAt: new Date() } });
@@ -322,6 +326,7 @@ function parseLarkMessageEvent(raw: unknown): {
   workspaceId: string;
   sourceId: string;
   chatId: string | null;
+  chatType: string | null;
   messageId: string | null;
   senderOpenId: string | null;
   senderType: string | null;
@@ -343,12 +348,25 @@ function parseLarkMessageEvent(raw: unknown): {
     workspaceId: env.WORKSPACE_ID,
     sourceId: eventId,
     chatId: typeof message.chat_id === 'string' ? message.chat_id : null,
+    chatType: typeof message.chat_type === 'string' ? message.chat_type : null,
     messageId,
     senderOpenId: typeof senderId?.open_id === 'string' ? senderId.open_id : null,
     senderType: typeof sender?.sender_type === 'string' ? sender.sender_type : null,
     messageText: renderContent(typeof body?.content === 'string' ? body.content : '', message.mentions),
     raw,
   };
+}
+
+function isDirectTesterMessage(text: string, chatType?: string | null): boolean {
+  return chatType === 'p2p' || isDirectMention(text);
+}
+
+function getLarkMessageChatType(raw: unknown): string | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const root = raw as Record<string, unknown>;
+  const event = root.event && typeof root.event === 'object' ? (root.event as Record<string, unknown>) : root;
+  const message = event.message && typeof event.message === 'object' ? (event.message as Record<string, unknown>) : null;
+  return typeof message?.chat_type === 'string' ? message.chat_type : null;
 }
 
 function renderContent(content: string, mentions?: unknown): string {
