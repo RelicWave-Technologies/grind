@@ -86,7 +86,10 @@ async function main() {
   }
 
   console.log('> asserting build env (API_URL + callback scheme)');
-  await run('node', [path.join(agentDir, 'scripts', 'assert-build-env.mjs')], agentDir);
+  // Import (don't spawn) — the shared run() helper appends `.cmd` on Windows,
+  // which turns `node` into the nonexistent `node.cmd`. The assert module runs
+  // its checks at load and process.exit(1)s on failure.
+  await import('./assert-build-env.mjs');
 
   console.log('> electron-vite build (bakes MAIN_VITE_API_URL from .env.production)');
   await run('pnpm', ['--filter', '@grind/agent', 'exec', 'electron-vite', 'build'], rootDir);
