@@ -34,6 +34,13 @@ export interface Size {
 export interface OverlayOptions extends Size {
   /** Renderer hash-route (e.g. 'floating', 'idle', 'ready-to-work', 'popover'). */
   hash: string;
+  /** Native OS window shadow. Turn OFF for a surface that draws its own CSS
+   *  shadow inside transparent padding — otherwise the OS backing/shadow is
+   *  drawn on the full window rect and peeks past the surface's rounded corners. */
+  hasShadow?: boolean;
+  /** OS corner rounding. Set false to let CSS own the shape completely, so a
+   *  DWM/AppKit corner radius can't mismatch the surface's own border-radius. */
+  roundedCorners?: boolean;
 }
 
 // Live overlays — used by reassertAllOverlays() on wake / display change.
@@ -59,13 +66,15 @@ export function createOverlayWindow(opts: OverlayOptions): BrowserWindow {
     show: false,
     frame: false,
     transparent: true,
+    backgroundColor: '#00000000',
     resizable: false,
     movable: true,
     minimizable: false,
     maximizable: false,
     skipTaskbar: true,
     fullscreenable: false,
-    hasShadow: true,
+    hasShadow: opts.hasShadow ?? true,
+    roundedCorners: opts.roundedCorners ?? true,
     // 'panel' floats above fullscreen apps without stealing focus (macOS).
     type: process.platform === 'darwin' ? 'panel' : undefined,
     webPreferences: {
