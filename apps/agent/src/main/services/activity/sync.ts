@@ -3,6 +3,20 @@ import { api } from '../apiClient';
 import { log } from '../../logger';
 import type { ActivityStore, ActivityRow } from './store';
 
+// A batch must stay comfortably under the API's body-size limit. If it doesn't,
+// the POST is rejected with 413 and — because a count-based batch never shrinks
+// on its own — that user's activity would never sync again (it snowballs). So we
+// bound the batch by BYTES, not just row count, and cap the per-sample text
+// fields, so neither a run of long active-URLs nor one giant sample can blow
+// past the limit.
+const MAX_BATCH_ROWS = 500; // also the server-side schema cap (ActivitySamplesRequest)
+const MAX_BATCH_BYTES = 48 * 1024; // headroom under the API's activity-route limit
+const MAX_FIELD_CHARS = 1024;
+
+function cap(s: string | null): string | null {
+  return s != null && s.length > MAX_FIELD_CHARS ? s.slice(0, MAX_FIELD_CHARS) : s;
+}
+
 function toInput(r: ActivityRow): ActivitySampleInput {
   return {
     id: r.id,
@@ -15,22 +29,40 @@ function toInput(r: ActivityRow): ActivitySampleInput {
     ikiCv: r.ikiCv,
     moveSpeedCv: r.moveSpeedCv,
     pathStraightness: r.pathStraightness,
-    activeApp: r.activeApp,
-    activeAppBundle: r.activeAppBundle,
-    activeTitle: r.activeTitle,
-    activeUrl: r.activeUrl,
+    activeApp: cap(r.activeApp),
+    activeAppBundle: cap(r.activeAppBundle),
+    activeTitle: cap(r.activeTitle),
+    activeUrl: cap(r.activeUrl),
   };
 }
 
-/** Push unsynced activity samples to the API in a batch. Returns rows synced. */
+/**
+ * Push unsynced activity samples to the API in a byte-bounded batch. Returns the
+ * number of rows synced (0 when nothing is pending). The remaining backlog
+ * drains on subsequent calls (the sync drain loops), so a large backlog clears
+ * in safe chunks instead of one oversized — and rejected — request.
+ */
 export async function flushActivity(store: ActivityStore): Promise<number> {
-  const rows = store.unsynced(200);
+  const rows = store.unsynced(MAX_BATCH_ROWS);
   if (rows.length === 0) return 0;
+
+  // Pack the longest prefix whose JSON stays under the byte budget — always at
+  // least one row, so a single large sample still makes forward progress.
+  const batch: { id: string; input: ActivitySampleInput }[] = [];
+  let bytes = 20; // {"samples":[ ... ]} envelope
+  for (const r of rows) {
+    const input = toInput(r);
+    const size = Buffer.byteLength(JSON.stringify(input), 'utf8') + 1; // + comma
+    if (batch.length > 0 && bytes + size > MAX_BATCH_BYTES) break;
+    batch.push({ id: r.id, input });
+    bytes += size;
+  }
+
   try {
-    await api('/v1/activity-samples', { method: 'POST', body: { samples: rows.map(toInput) } });
-    store.markSynced(rows.map((r) => r.id));
-    log.debug('flushed activity samples', { count: rows.length });
-    return rows.length;
+    await api('/v1/activity-samples', { method: 'POST', body: { samples: batch.map((b) => b.input) } });
+    store.markSynced(batch.map((b) => b.id));
+    log.debug('flushed activity samples', { count: batch.length, bytes });
+    return batch.length;
   } catch (err) {
     log.warn('activity flush failed', { err: String(err) });
     throw err;
