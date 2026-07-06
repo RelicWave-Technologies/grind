@@ -68,7 +68,7 @@ const fakeAi: TesterOpsAiClient = {
       aiRunId: 'unused-general-run',
       answer: {
         confidence: 0.9,
-        answer: 'I am Timo, your Grind testing assistant.',
+        answer: 'I am Timo, your testing assistant.',
         citations: [],
       },
     };

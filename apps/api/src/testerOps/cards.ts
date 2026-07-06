@@ -79,7 +79,7 @@ export function buildTesterOpsDocAnswerCard(input: {
   const { lead, body } = splitAnswer(answerText);
   return baseCard({
     title: hasAnswer ? 'Timo answer' : 'Timo needs context',
-    subtitle: hasAnswer ? 'Simple answer from Grind docs' : 'Not enough evidence in allowed docs',
+    subtitle: hasAnswer ? 'Simple answer from Timo docs' : 'Not enough evidence in allowed docs',
     template: hasAnswer ? 'green' : 'orange',
     icon: { token: hasAnswer ? 'safe-pass_outlined' : 'info_outlined' },
     summary: hasAnswer ? lead : 'Timo could not verify the answer from docs',

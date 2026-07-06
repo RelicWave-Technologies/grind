@@ -35,7 +35,7 @@ describe('tester ops AI brain seam', () => {
             answer: 'Test the screenshot upload flow first.',
             missingInfo: null,
             refusalReason: null,
-            citations: [{ title: 'Grind QA Plan', url: 'https://example.test/doc' }],
+            citations: [{ title: 'Timo QA Plan', url: 'https://example.test/doc' }],
           },
         };
       },
@@ -44,7 +44,7 @@ describe('tester ops AI brain seam', () => {
           aiRunId: 'fake-general-run',
           answer: {
             confidence: 0.92,
-            answer: 'I am Timo, your Grind testing assistant.',
+            answer: 'I am Timo, your testing assistant.',
             citations: [],
           },
         };

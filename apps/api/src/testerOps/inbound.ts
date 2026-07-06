@@ -245,7 +245,7 @@ export async function processTesterEvent(eventId: string, forceDirectMention?: b
         idempotencyKey: `mention-empty:${event.id}`,
         card: buildTesterOpsGeneralCard({
           title: 'Timo needs a sharper ask',
-          text: 'I could not safely choose an action for that. Ask for tester status, a specific Grind doc question, or a clear issue report.',
+          text: 'I could not safely choose an action for that. Ask for tester status, a specific Timo doc question, or a clear issue report.',
           template: 'orange',
         }),
       });
