@@ -113,6 +113,12 @@ jobs:
           node-version: 20.18
           cache: pnpm
 
+      # Python 3.12+ removed distutils, which node-gyp needs to rebuild native
+      # deps (get-windows / better-sqlite3). Pin 3.11 so the build succeeds.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
       - run: pnpm install --frozen-lockfile
 
       - name: Write production agent env
@@ -168,6 +174,12 @@ jobs:
         with:
           node-version: 20.18
           cache: pnpm
+
+      # Python 3.12+ removed distutils, which node-gyp needs to rebuild native
+      # deps (get-windows / better-sqlite3). Pin 3.11 so the build succeeds.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
       - run: pnpm install --frozen-lockfile
 
