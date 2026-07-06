@@ -32,6 +32,7 @@ import {
   startUpdateService,
 } from './services/updates';
 import { ensureLaunchAtLogin, shouldStartHidden } from './services/launchAtLogin';
+import { migrateLegacyUserData } from './services/legacyMigration';
 import { broadcast } from './broadcast';
 import { API_URL, CALLBACK_SCHEME } from './env';
 import { log, logFilePath } from './logger';
@@ -72,6 +73,11 @@ function showMainWindow() {
 }
 
 app.whenReady().then(async () => {
+  // Recover a session stranded by a prior app identity (Grind->Timo) BEFORE any
+  // token read. Windows-only: that's where the productName-based userData dir
+  // moved and orphaned tokens.bin.
+  if (process.platform === 'win32') migrateLegacyUserData();
+
   // Boot diagnostics — the first line in every log file. Pinpoints the two
   // known Windows failure modes at a glance: a moved data dir (userData /
   // appName after the rebrand) and an unregistered deep-link scheme
