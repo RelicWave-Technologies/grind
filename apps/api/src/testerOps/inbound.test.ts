@@ -207,6 +207,54 @@ describe('tester ops inbound chat routing', () => {
     expect(rendered).not.toContain('Needs docs');
     expect(rendered).not.toContain('Not enough evidence');
   });
+
+  it('lists logged tester issues when asked in a direct mention', async () => {
+    const messenger = new FakeMessenger();
+    setTesterOpsLarkMessengerForTests(messenger);
+    setTesterOpsAiClientForTests({
+      ...fakeAi,
+      async decideMessage() {
+        return {
+          aiRunId: 'fake-list-run',
+          decision: {
+            intent: 'ISSUE_LIST',
+            confidence: 0.93,
+            language: 'english',
+            category: null,
+            severity: 'LOW',
+            summary: 'User asked to see all reported issues.',
+            safeAction: 'LIST_ISSUES',
+            replyText: null,
+            needsClarification: false,
+            clarifyingQuestion: null,
+            citations: [],
+          },
+        };
+      },
+    });
+    await seedWorkspace();
+    await prisma.testerOpsIssue.createMany({
+      data: [
+        { workspaceId: env.WORKSPACE_ID, status: 'OPEN', severity: 'HIGH', summary: 'Screenshots stop uploading after logout', reporterOpenId: 'ou_reporter_1' },
+        { workspaceId: env.WORKSPACE_ID, status: 'CANDIDATE', severity: 'LOW', summary: 'Widget corner radius looks off', reporterOpenId: 'ou_reporter_2' },
+      ],
+    });
+
+    await ingestRawLarkMessage(larkTextEvent({
+      eventId: 'ev-list-issues',
+      chatId: 'oc_random_group',
+      messageId: 'om-list-issues',
+      text: '@_user_1 show all issues',
+      mentions: [{ key: '@_user_1', name: 'Timo' }],
+    }));
+
+    await waitFor(async () => messenger.updates.length > 0);
+    const rendered = JSON.stringify(messenger.updates[0]?.card);
+    expect(rendered).toContain('active issue');
+    expect(rendered).toContain('Screenshots stop uploading after logout');
+    expect(rendered).toContain('<at id=ou_reporter_1></at>');
+    expect(rendered).toContain('"content":"1 open"');
+  });
 });
 
 async function seedWorkspace() {

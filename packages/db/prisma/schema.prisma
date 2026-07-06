@@ -692,6 +692,7 @@ enum TesterOpsSafeAction {
   ANSWER_GENERAL
   GET_USAGE_STATUS
   SEND_PING
+  LIST_ISSUES
 }
 
 enum TesterOpsIssueStatus {
@@ -748,7 +749,7 @@ model TesterOpsAiPolicy {
   highConfidenceThreshold   Float               @default(0.78)
   mediumConfidenceThreshold Float               @default(0.5)
   maxClarifyingQuestions    Int                 @default(1)
-  allowedActions            String[]            @default(["NONE", "LOG_ISSUE", "ASK_CLARIFICATION", "ANSWER_FROM_DOCS", "ANSWER_GENERAL", "GET_USAGE_STATUS", "SEND_PING"])
+  allowedActions            String[]            @default(["NONE", "LOG_ISSUE", "ASK_CLARIFICATION", "ANSWER_FROM_DOCS", "ANSWER_GENERAL", "GET_USAGE_STATUS", "SEND_PING", "LIST_ISSUES"])
   createdAt                 DateTime            @default(now())
   updatedAt                 DateTime            @updatedAt
 }

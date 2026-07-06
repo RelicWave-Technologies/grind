@@ -36,9 +36,30 @@ interface HeaderIcon {
   preferMascot?: boolean;
 }
 
+export interface TesterIssueListItem {
+  status: string;
+  severity: TesterDecision['severity'];
+  category: string | null;
+  summary: string;
+  reporterOpenId: string | null;
+  createdAt: string;
+}
+
+export interface TesterIssueListSnapshot {
+  items: TesterIssueListItem[];
+  total: number;
+  openCount: number;
+  candidateCount: number;
+  severityCounts: { CRITICAL: number; HIGH: number; MEDIUM: number; LOW: number };
+  generatedAt: string;
+  timezone: string;
+}
+
 const MAX_MD = 2600;
 const STATUS_PROFILE_LIMIT = 8;
-const STATUS_ROW_LIMIT = 10;
+const STATUS_TABLE_PAGE_SIZE = 10;
+const STATUS_TABLE_ROW_LIMIT = 50;
+const STATUS_CHECK_IN_LIMIT = 5;
 
 const PROGRESS_FRAMES = [
   { title: 'Timo is checking', subtitle: 'Reading the right notes', icon: 'loading_outlined', state: 'Looking for the part that answers you' },
@@ -118,7 +139,8 @@ export function buildTesterOpsUsageCard(snapshot: UsageSnapshot): Card {
         `Needs check-in: ${snapshot.totals.silent}`,
       ].join('\n'), 760), { elementId: 'usage_status', textSize: 'heading-4' }),
       profileStrip(priority),
-      testerSummary(snapshot, priority),
+      ...testerSummary(snapshot, priority),
+      checkInBlock(snapshot),
       smallText(`Generated ${formatLocalDateTime(snapshot.generatedAt, snapshot.timezone)}.`),
     ],
   });
@@ -170,6 +192,51 @@ export function buildTesterOpsIssueCard(input: { decision: TesterDecision; statu
       input.decision.clarifyingQuestion ? markdown(`**One thing I need**\n${safeBlock(input.decision.clarifyingQuestion, 500)}`, { elementId: 'clarifier' }) : null,
       markdown(`**Source message**\n> ${safeInline(input.sourceText, 900)}`, { elementId: 'source', textSize: 'notation' }),
       smallText('Keep replying in this thread with more details; Tester Ops will keep the audit trail.'),
+    ],
+  });
+}
+
+export function buildTesterOpsIssueListCard(snapshot: TesterIssueListSnapshot): Card {
+  if (snapshot.total === 0) {
+    return baseCard({
+      title: 'Reported issues',
+      subtitle: 'Tester Ops',
+      template: 'green',
+      icon: { token: 'check_outlined' },
+      summary: 'No open issues right now',
+      tags: [{ text: '0 open', color: 'green' }],
+      elements: [
+        markdown('## All clear\nNo open issues are logged right now. New reports in this group get captured automatically.', { elementId: 'issue_empty', textSize: 'heading-4' }),
+        smallText(`Generated ${formatLocalDateTime(snapshot.generatedAt, snapshot.timezone)}.`),
+      ],
+    });
+  }
+  const worst: SeverityKey = snapshot.severityCounts.CRITICAL > 0
+    ? 'CRITICAL'
+    : snapshot.severityCounts.HIGH > 0
+      ? 'HIGH'
+      : snapshot.severityCounts.MEDIUM > 0
+        ? 'MEDIUM'
+        : 'LOW';
+  const template: CardTemplate = worst === 'CRITICAL' ? 'red' : worst === 'HIGH' ? 'orange' : worst === 'MEDIUM' ? 'yellow' : 'blue';
+  const hidden = Math.max(0, snapshot.total - snapshot.items.length);
+  const tags: Array<TextTag | null> = [
+    { text: `${snapshot.openCount} open`, color: snapshot.openCount > 0 ? 'orange' : 'neutral' },
+    snapshot.candidateCount > 0 ? { text: `${snapshot.candidateCount} review`, color: 'neutral' } : null,
+    { text: `${snapshot.severityCounts[worst]} ${worst.toLowerCase()}`, color: severityColor(worst) },
+  ];
+  return baseCard({
+    title: 'Reported issues',
+    subtitle: `${snapshot.openCount} open · ${snapshot.candidateCount} to review`,
+    template,
+    icon: { token: 'report_outlined' },
+    summary: `${snapshot.total} active issue${snapshot.total === 1 ? '' : 's'}`,
+    tags: tags.filter(Boolean) as TextTag[],
+    elements: [
+      markdown(safeBlock(issueOverview(snapshot), 500), { elementId: 'issue_overview', textSize: 'heading-4' }),
+      markdown(snapshot.items.map(issueLine).join('\n'), { elementId: 'issue_list' }),
+      hidden > 0 ? smallText(`Showing top ${snapshot.items.length}. ${hidden} more in the dashboard.`) : null,
+      smallText(`Generated ${formatLocalDateTime(snapshot.generatedAt, snapshot.timezone)}.`),
     ],
   });
 }
@@ -253,14 +320,72 @@ function smallText(content: string): Element {
   return markdown(safeBlock(content, 500), { elementId: uniqueElementId('small'), textSize: 'notation', margin: '4px 0 0 0' });
 }
 
-function testerSummary(snapshot: UsageSnapshot, priority: UsageSnapshot['testers']): Element {
-  const testers = priority.slice(0, STATUS_ROW_LIMIT);
-  const lines = testers.length > 0
-    ? testers.map((tester) => `- ${clean(tester.name, 80)}: ${testerStatusLabel(tester)} | ${minutesLabel(tester.trackedMinutes)} | ${tester.screenshots} shots${lastSeenSuffix(tester, snapshot.generatedAt)}`)
-    : ['- No testers mapped yet.'];
+function testerSummary(snapshot: UsageSnapshot, priority: UsageSnapshot['testers']): Element[] {
+  const testers = priority.slice(0, STATUS_TABLE_ROW_LIMIT);
+  if (testers.length === 0) {
+    return [markdown('**All testers**\nNo testers mapped yet.', { elementId: 'tester_empty' })];
+  }
   const hidden = Math.max(0, snapshot.testers.length - testers.length);
-  const footer = hidden > 0 ? `\n+ ${hidden} more testers in dashboard.` : '';
-  return markdown(safeBlock(`**Priority testers**\n${lines.join('\n')}${footer}`, 1500), { elementId: 'tester_summary' });
+  const rows = testers.map((tester) => {
+    const state = testerStateTag(tester);
+    return {
+      tester: clean(tester.name, 80),
+      state: [{ text: state.text, color: state.color }],
+      work: `${minutesLabel(tester.trackedMinutes)} · ${shotsLabel(tester.screenshots)}`,
+      seen: lastSeenLabel(tester, snapshot.generatedAt),
+    };
+  });
+  return [
+    markdown('**All testers**', { elementId: 'tester_heading', margin: '4px 0 0 0' }),
+    {
+      tag: 'table',
+      element_id: 'tester_table',
+      margin: '0',
+      page_size: Math.min(STATUS_TABLE_PAGE_SIZE, Math.max(1, testers.length)),
+      row_height: 'low',
+      freeze_first_column: true,
+      header_style: {
+        text_align: 'left',
+        text_size: 'notation',
+        background_style: 'none',
+        text_color: 'grey',
+        bold: true,
+        lines: 1,
+      },
+      columns: [
+        { name: 'tester', display_name: 'Tester', data_type: 'text', width: 'auto', vertical_align: 'center', horizontal_align: 'left' },
+        { name: 'state', display_name: 'State', data_type: 'options', width: '92px', vertical_align: 'center', horizontal_align: 'left' },
+        { name: 'work', display_name: 'Today', data_type: 'text', width: '108px', vertical_align: 'center', horizontal_align: 'left' },
+        { name: 'seen', display_name: 'Seen', data_type: 'text', width: '86px', vertical_align: 'center', horizontal_align: 'left' },
+      ],
+      rows,
+    },
+    hidden > 0 ? smallText(`Showing ${testers.length} testers here. ${hidden} more in dashboard.`) : null,
+  ].filter(Boolean) as Element[];
+}
+
+function checkInBlock(snapshot: UsageSnapshot): Element | null {
+  const testers = bottomCheckInTesters(snapshot);
+  if (testers.length === 0) return null;
+  const people = testers.map(mentionOrName).join(', ');
+  return markdown(
+    safeBlock('**Needs check-in**', 80)
+      + `\n${people}`
+      + '\nPlease reply with why Timo is not running today, or what is blocking you.',
+    { elementId: 'check_in', margin: '4px 0 0 0' },
+  );
+}
+
+function bottomCheckInTesters(snapshot: UsageSnapshot): UsageSnapshot['testers'] {
+  return snapshot.testers
+    .filter((tester) => !tester.isLiveNow && !hasProgress(tester))
+    .sort(compareByLeastRecentThenName)
+    .slice(0, STATUS_CHECK_IN_LIMIT);
+}
+
+function mentionOrName(tester: UsageSnapshot['testers'][number]): string {
+  if (tester.openId?.startsWith('ou_')) return `<at id=${tester.openId}></at>`;
+  return safeInline(tester.name, 80);
 }
 
 function profileStrip(testers: UsageSnapshot['testers']): Element | null {
@@ -303,6 +428,10 @@ function compareByWork(a: UsageSnapshot['testers'][number], b: UsageSnapshot['te
 
 function compareByLastSeenThenName(a: UsageSnapshot['testers'][number], b: UsageSnapshot['testers'][number]): number {
   return lastSeenMs(b) - lastSeenMs(a) || a.name.localeCompare(b.name);
+}
+
+function compareByLeastRecentThenName(a: UsageSnapshot['testers'][number], b: UsageSnapshot['testers'][number]): number {
+  return leastRecentMs(a) - leastRecentMs(b) || a.name.localeCompare(b.name);
 }
 
 function sourceBlock(citations: Citation[]): Element | null {
@@ -359,22 +488,46 @@ function severityColor(severity: TesterDecision['severity']): TagColor {
   return 'green';
 }
 
-function testerStatusLabel(tester: UsageSnapshot['testers'][number]): string {
-  if (tester.isLiveNow) return 'Live now';
-  if (hasProgress(tester)) {
-    if (tester.agentState === 'PAUSED_IDLE') return 'Paused after work';
-    if (tester.agentState === 'IDLE') return 'Idle after work';
-    return 'Worked today';
-  }
-  if (tester.agentState === 'PAUSED_IDLE' || tester.agentState === 'IDLE') return 'Idle, no time yet';
-  if (tester.agentState === 'RUNNING') return 'Offline now';
-  return 'Not started today';
+type SeverityKey = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
+
+function issueOverview(snapshot: TesterIssueListSnapshot): string {
+  const parts: string[] = [];
+  if (snapshot.severityCounts.CRITICAL) parts.push(`${snapshot.severityCounts.CRITICAL} critical`);
+  if (snapshot.severityCounts.HIGH) parts.push(`${snapshot.severityCounts.HIGH} high`);
+  if (snapshot.severityCounts.MEDIUM) parts.push(`${snapshot.severityCounts.MEDIUM} medium`);
+  if (snapshot.severityCounts.LOW) parts.push(`${snapshot.severityCounts.LOW} low`);
+  const breakdown = parts.length > 0 ? `\n${parts.join(' · ')}` : '';
+  return `## ${snapshot.total} active issue${snapshot.total === 1 ? '' : 's'}${breakdown}`;
 }
 
-function lastSeenSuffix(tester: UsageSnapshot['testers'][number], generatedAt: string): string {
-  if (tester.isLiveNow) return '';
-  const relative = relativeLastSeen(tester.agentLastSeenAt, generatedAt);
-  return relative ? ` | seen ${relative}` : '';
+function issueLine(item: TesterIssueListItem): string {
+  const reporter = item.reporterOpenId?.startsWith('ou_') ? ` — <at id=${item.reporterOpenId}></at>` : '';
+  const area = item.category ? ` [${safeInline(item.category, 40)}]` : '';
+  const review = item.status === 'CANDIDATE' ? ' _(needs review)_' : '';
+  return `${severityDot(item.severity)} ${safeInline(item.summary, 160)}${area}${reporter}${review}`;
+}
+
+function severityDot(severity: TesterDecision['severity']): string {
+  if (severity === 'CRITICAL') return '🔴';
+  if (severity === 'HIGH') return '🟠';
+  if (severity === 'MEDIUM') return '🟡';
+  return '🟢';
+}
+
+function testerStateTag(tester: UsageSnapshot['testers'][number]): { text: string; color: string } {
+  if (tester.isLiveNow) return { text: 'Live', color: 'green' };
+  if (hasProgress(tester)) return { text: 'Worked', color: 'blue' };
+  if (tester.agentState === 'IDLE' || tester.agentState === 'PAUSED_IDLE') return { text: 'Idle', color: 'orange' };
+  return { text: 'No time', color: 'orange' };
+}
+
+function shotsLabel(shots: number): string {
+  return `${shots} ${shots === 1 ? 'shot' : 'shots'}`;
+}
+
+function lastSeenLabel(tester: UsageSnapshot['testers'][number], generatedAt: string): string {
+  if (tester.isLiveNow) return 'now';
+  return relativeLastSeen(tester.agentLastSeenAt, generatedAt) ?? 'not seen';
 }
 
 function relativeLastSeen(value: string | null, generatedAt: string): string | null {
@@ -391,6 +544,10 @@ function relativeLastSeen(value: string | null, generatedAt: string): string | n
 
 function lastSeenMs(tester: UsageSnapshot['testers'][number]): number {
   return tester.agentLastSeenAt ? new Date(tester.agentLastSeenAt).getTime() || 0 : 0;
+}
+
+function leastRecentMs(tester: UsageSnapshot['testers'][number]): number {
+  return tester.agentLastSeenAt ? new Date(tester.agentLastSeenAt).getTime() || 0 : -1;
 }
 
 function minutesLabel(minutes: number): string {

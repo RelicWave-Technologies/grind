@@ -13,10 +13,11 @@ export const SafeActionSchema = z.enum([
   'ANSWER_GENERAL',
   'GET_USAGE_STATUS',
   'SEND_PING',
+  'LIST_ISSUES',
 ]);
 
 export const TesterDecisionSchema = z.object({
-  intent: z.enum(['ISSUE_REPORT', 'DOC_QUESTION', 'USAGE_STATUS', 'PING_REQUEST', 'GENERAL_HELP', 'IRRELEVANT']),
+  intent: z.enum(['ISSUE_REPORT', 'DOC_QUESTION', 'USAGE_STATUS', 'PING_REQUEST', 'GENERAL_HELP', 'ISSUE_LIST', 'IRRELEVANT']),
   confidence: z.number().min(0).max(1),
   language: z.string().min(2).max(40),
   category: z.string().max(80).nullable(),
@@ -210,7 +211,7 @@ async function runAiObject<T>(args: {
   }
 }
 
-function getSafeAction(value: unknown): 'NONE' | 'LOG_ISSUE' | 'ASK_CLARIFICATION' | 'ANSWER_FROM_DOCS' | 'ANSWER_GENERAL' | 'GET_USAGE_STATUS' | 'SEND_PING' | undefined {
+function getSafeAction(value: unknown): 'NONE' | 'LOG_ISSUE' | 'ASK_CLARIFICATION' | 'ANSWER_FROM_DOCS' | 'ANSWER_GENERAL' | 'GET_USAGE_STATUS' | 'SEND_PING' | 'LIST_ISSUES' | undefined {
   return value && typeof value === 'object' && SafeActionSchema.safeParse((value as { safeAction?: unknown }).safeAction).success
     ? (value as { safeAction: 'NONE' }).safeAction
     : undefined;
@@ -223,6 +224,21 @@ function getConfidence(value: unknown): number | undefined {
 }
 
 function unavailableDecision(directMention: boolean, messageText = ''): TesterDecision {
+  if (directMention && /\b(issues?|bugs?|problems?|reports?|complaints?)\b/iu.test(messageText) && /\b(list|show|all|open|any|current|pending|what|which|how\s*many|kitne|kaunse|konse)\b/iu.test(messageText)) {
+    return {
+      intent: 'ISSUE_LIST',
+      confidence: 0.6,
+      language: 'user',
+      category: null,
+      severity: 'LOW',
+      summary: 'Tester issue list requested while AI output was unavailable.',
+      safeAction: 'LIST_ISSUES',
+      replyText: null,
+      needsClarification: false,
+      clarifyingQuestion: null,
+      citations: [],
+    };
+  }
   if (directMention && /\b(status|usage|tracking|silent|who\s+used|how\s+many)\b/iu.test(messageText)) {
     return {
       intent: 'USAGE_STATUS',
@@ -297,6 +313,7 @@ Default audience is a tester or consumer user, not a developer.
 You may choose only the safeAction enum. The backend will execute it after validation.
 For passive messages, avoid replying unless the message is clearly an issue report.
 For direct mentions, route status questions to GET_USAGE_STATUS, ping/check-in requests to SEND_PING, product/how-to questions that need factual Timo evidence to ANSWER_FROM_DOCS, and conversational identity/help/meta questions about Timo itself to ANSWER_GENERAL.
+For direct mentions asking to see, list, count, or summarize current issues, bugs, problems, complaints, or what testers reported so far, use intent ISSUE_LIST with safeAction LIST_ISSUES. This only reads issues already logged; it never creates a new issue. A single new bug report is still LOG_ISSUE, not LIST_ISSUES.
 Do not send self-introductions, capability questions, greetings, or casual help prompts to docs. Those are GENERAL_HELP with safeAction ANSWER_GENERAL.
 Use ANSWER_FROM_DOCS only when the user is asking for product behavior, exact steps, policies, or facts that should be grounded in allowed Timo docs.
 In user-visible replies, the app/product name is Timo. If docs or chat evidence say Grind, translate that name to Timo.

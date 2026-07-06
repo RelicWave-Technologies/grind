@@ -7,9 +7,11 @@ import {
   buildTesterOpsGeneralCard,
   hasTesterOpsStreamingImage,
   buildTesterOpsIssueCard,
+  buildTesterOpsIssueListCard,
   buildTesterOpsPingCard,
   buildTesterOpsThinkingCard,
   buildTesterOpsUsageCard,
+  type TesterIssueListSnapshot,
 } from './cards';
 import { isDirectMention, loadOrCreateAiPolicy, loadOrCreateTesterOpsConfig } from './config';
 import { retrieveKnowledgeChunks } from './knowledge';
@@ -188,6 +190,16 @@ export async function processTesterEvent(eventId: string, forceDirectMention?: b
         idempotencyKey: safeAction === 'SEND_PING' ? `ping-request:${event.id}` : `usage:${event.id}`,
         card: safeAction === 'SEND_PING' ? buildTesterOpsPingCard(usageSnapshot) : buildTesterOpsUsageCard(usageSnapshot),
       });
+    } else if (safeAction === 'LIST_ISSUES' && directMention && replyChatId) {
+      const issueList = await buildTesterIssueListSnapshot(event.workspaceId, cfg.timezone);
+      progress?.stop();
+      await deliverReplyCard({
+        workspaceId: event.workspaceId,
+        chatId: replyChatId,
+        progressMessageId,
+        idempotencyKey: `issue-list:${event.id}`,
+        card: buildTesterOpsIssueListCard(issueList),
+      });
     } else if ((safeAction === 'LOG_ISSUE' || safeAction === 'ASK_CLARIFICATION') && decision.intent === 'ISSUE_REPORT') {
       const status = decision.confidence >= policy.highConfidenceThreshold ? 'OPEN' : 'CANDIDATE';
       await prisma.testerOpsIssue.create({
@@ -320,6 +332,46 @@ async function deliverReplyCard(args: {
       idempotencyKey: args.idempotencyKey,
     });
   });
+}
+
+async function buildTesterIssueListSnapshot(workspaceId: string, timezone: string): Promise<TesterIssueListSnapshot> {
+  const where: Prisma.TesterOpsIssueWhereInput = { workspaceId, status: { in: ['OPEN', 'CANDIDATE'] } };
+  const [items, grouped] = await Promise.all([
+    prisma.testerOpsIssue.findMany({
+      where,
+      orderBy: [{ severity: 'desc' }, { createdAt: 'desc' }],
+      take: 15,
+      select: { status: true, severity: true, category: true, summary: true, reporterOpenId: true, createdAt: true },
+    }),
+    prisma.testerOpsIssue.groupBy({ by: ['severity', 'status'], where, _count: { _all: true } }),
+  ]);
+  const severityCounts = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0 };
+  let total = 0;
+  let openCount = 0;
+  let candidateCount = 0;
+  for (const row of grouped) {
+    const count = row._count._all;
+    total += count;
+    if (row.status === 'OPEN') openCount += count;
+    if (row.status === 'CANDIDATE') candidateCount += count;
+    severityCounts[row.severity] += count;
+  }
+  return {
+    items: items.map((issue) => ({
+      status: issue.status,
+      severity: issue.severity,
+      category: issue.category,
+      summary: issue.summary,
+      reporterOpenId: issue.reporterOpenId,
+      createdAt: issue.createdAt.toISOString(),
+    })),
+    total,
+    openCount,
+    candidateCount,
+    severityCounts,
+    generatedAt: new Date().toISOString(),
+    timezone,
+  };
 }
 
 function parseLarkMessageEvent(raw: unknown): {
