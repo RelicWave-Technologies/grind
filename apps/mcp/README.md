@@ -1,6 +1,14 @@
-# Timo MCP
+<p align="center">
+  <img src="https://unpkg.com/@anish23_05/timo-mcp@latest/assets/timo-mascot.png" width="112" alt="Timo mascot" />
+</p>
 
-Read-only MCP server for Timo workspace data.
+<h1 align="center">Timo MCP</h1>
+
+<p align="center">
+  Read-only MCP tools for Timo workspace health, people, time, and manual-time requests.
+</p>
+
+---
 
 The server runs locally over stdio and talks only to the Timo API. It does not connect to the VM, Postgres, screenshots, or raw activity samples.
 
