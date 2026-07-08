@@ -7,7 +7,7 @@ import {
   type ApprovalAction,
 } from '../lark/cards';
 import { logger } from '../logger';
-import { queueManualTimeFinalizeCards } from './larkOutbox';
+import { queueManualTimeApprovalCard, queueManualTimeFinalizeCards } from './larkOutbox';
 
 type ManualTimeStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
 type ManualTimeNoop =
@@ -92,7 +92,7 @@ export async function decideManualTimeRequest(args: {
     const req = await tx.manualTimeRequest.findUniqueOrThrow({
       where: { id: args.requestId },
       include: {
-        user: { select: { name: true } },
+        user: { select: { name: true, larkIdentity: { select: { openId: true } } } },
         approver: { include: { larkIdentity: { select: { openId: true } } } },
         attendees: { select: { userId: true } },
       },
@@ -232,6 +232,19 @@ export async function decideManualTimeRequest(args: {
       },
     });
     await queueManualTimeFinalizeCards(tx, req.id);
+    const requesterOpenId = req.user.larkIdentity?.openId ?? null;
+    const requesterMadeDecision =
+      args.source === 'DASHBOARD'
+        ? req.userId === args.deciderUserId
+        : requesterOpenId !== null && requesterOpenId === args.decidedByOpenId;
+    if (requesterOpenId && !requesterMadeDecision) {
+      await queueManualTimeApprovalCard(tx, {
+        requestId: req.id,
+        version: updated.version,
+        recipientOpenId: requesterOpenId,
+        kind: 'DECIDED_NOTICE',
+      });
+    }
 
     return {
       card: finalCard(updated, now),

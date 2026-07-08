@@ -1,8 +1,16 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect } from 'vitest';
 import { ulid } from 'ulid';
 import { prisma } from '@grind/db';
 import { decideRequest } from '../src/lark/decide';
 import { seedUser } from './helpers';
+import {
+  processManualTimeLarkOutboxOnce,
+} from '../src/manualTime/larkOutbox';
+import {
+  setLarkMessengerForTests,
+  type LarkMessenger,
+  type SendCardResult,
+} from '../src/lark';
 
 /**
  * Real Postgres tests for the decide path. No mocks — we build a real
@@ -11,9 +19,12 @@ import { seedUser } from './helpers';
  */
 
 let openIdCounter = 0;
-async function setup(opts: { approverOpenId?: string | null } = {}) {
+async function setup(opts: { approverOpenId?: string | null; requesterOpenId?: string | null } = {}) {
   const openId = opts.approverOpenId === null ? null : opts.approverOpenId ?? `ou_decider_${Date.now()}_${++openIdCounter}`;
   const requester = await seedUser({ role: 'MEMBER' });
+  if (opts.requesterOpenId) {
+    await prisma.larkIdentity.create({ data: { userId: requester.userId, openId: opts.requesterOpenId } });
+  }
   const admin = await prisma.user.create({
     data: {
       workspaceId: requester.workspaceId,
@@ -54,6 +65,31 @@ async function setup(opts: { approverOpenId?: string | null } = {}) {
   return { requester: requesterUser, admin, req, openId, card };
 }
 
+class FakeMessenger implements LarkMessenger {
+  sends: Array<{ openId: string; card: Record<string, unknown> }> = [];
+  updates: Array<{ messageId: string; card: Record<string, unknown> }> = [];
+  async sendCard(openId: string, card: Record<string, unknown>): Promise<SendCardResult> {
+    this.sends.push({ openId, card });
+    return { messageId: `om_notice_${this.sends.length}` };
+  }
+  async sendCardToChat(): Promise<SendCardResult> {
+    return { messageId: 'om_chat_unused' };
+  }
+  async updateCard(messageId: string, card: Record<string, unknown>): Promise<void> {
+    this.updates.push({ messageId, card });
+  }
+  async sendText(): Promise<SendCardResult> {
+    return { messageId: 'om_text_unused' };
+  }
+  async sendTextToChat(): Promise<SendCardResult> {
+    return { messageId: 'om_chat_text_unused' };
+  }
+}
+
+afterEach(() => {
+  setLarkMessengerForTests(null);
+});
+
 function click(req: { id: string; version: number }, card: { id: string; version: number } | null, openId: string) {
   return {
     requestId: req.id,
@@ -90,6 +126,37 @@ describe('decideRequest — APPROVE', () => {
     expect((result!.card.header as Record<string, unknown>).template).toBe('green');
     expect(JSON.stringify(result!.card)).toContain('Approved');
     expect(JSON.stringify(result!.card)).toContain(admin.name);
+  });
+
+  it('queues and sends a requester Lark notice without replacing the approver card pointer', async () => {
+    const requesterOpenId = `ou_requester_${Date.now()}`;
+    const { req, openId, card } = await setup({ requesterOpenId });
+    await prisma.manualTimeRequest.update({
+      where: { id: req.id },
+      data: { larkMessageId: card!.messageId },
+    });
+
+    const result = await decideRequest({ ...click(req, card, openId!), action: 'approve' });
+    expect(result!.status).toBe('APPROVED');
+
+    const notice = await prisma.manualTimeLarkMessage.findFirstOrThrow({
+      where: { requestId: req.id, kind: 'DECIDED_NOTICE' },
+    });
+    expect(notice.recipientOpenId).toBe(requesterOpenId);
+    expect(notice.version).toBe(req.version + 1);
+
+    const fake = new FakeMessenger();
+    setLarkMessengerForTests(fake);
+    await processManualTimeLarkOutboxOnce(10);
+
+    expect(fake.updates).toHaveLength(1);
+    expect(fake.updates[0]!.messageId).toBe(card!.messageId);
+    expect(fake.sends).toHaveLength(1);
+    expect(fake.sends[0]!.openId).toBe(requesterOpenId);
+    expect(JSON.stringify(fake.sends[0]!.card)).toContain('Time approved');
+
+    const row = await prisma.manualTimeRequest.findUniqueOrThrow({ where: { id: req.id } });
+    expect(row.larkMessageId).toBe(card!.messageId);
   });
 });
 
@@ -135,6 +202,19 @@ describe('decideRequest — REJECT', () => {
     expect(await prisma.timeEntry.count()).toBe(0); // no TimeEntry was created
 
     expect((result!.card.header as Record<string, unknown>).template).toBe('red');
+  });
+
+  it('queues a requester Lark notice for rejections too', async () => {
+    const requesterOpenId = `ou_requester_reject_${Date.now()}`;
+    const { req, openId, card } = await setup({ requesterOpenId });
+    const result = await decideRequest({ ...click(req, card, openId!), action: 'reject' });
+    expect(result!.status).toBe('REJECTED');
+
+    const notice = await prisma.manualTimeLarkMessage.findFirstOrThrow({
+      where: { requestId: req.id, kind: 'DECIDED_NOTICE' },
+    });
+    expect(notice.recipientOpenId).toBe(requesterOpenId);
+    expect(notice.version).toBe(req.version + 1);
   });
 });
 
@@ -257,6 +337,7 @@ describe('decideRequest — authorization', () => {
     const row = await prisma.manualTimeRequest.findUniqueOrThrow({ where: { id: req.id } });
     expect(row.status).toBe('APPROVED');
     expect(row.timeEntryId).toBeTruthy();
+    expect(await prisma.manualTimeLarkMessage.count({ where: { requestId: req.id, kind: 'DECIDED_NOTICE' } })).toBe(0);
   });
 
   it('still rejects self-assigned member cards even when the open_id matches', async () => {

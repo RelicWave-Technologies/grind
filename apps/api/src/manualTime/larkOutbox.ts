@@ -138,7 +138,7 @@ async function handleSendCard(event: { id: string; requestId: string; messageLed
           sentAt: new Date(),
         },
       });
-      if (message.version === req.version) {
+      if (message.kind !== 'DECIDED_NOTICE' && message.version === req.version) {
         await tx.manualTimeRequest.update({
           where: { id: req.id },
           data: { larkMessageId: messageId },
@@ -209,6 +209,7 @@ async function handleFinalizeCards(event: { requestId: string }): Promise<void> 
     where: {
       requestId: req.id,
       messageId: { not: null },
+      kind: { in: ['APPROVAL', 'UPDATED_APPROVAL'] },
       status: { notIn: ['CANCELLED', 'DECIDED'] },
     },
     orderBy: { createdAt: 'asc' },
