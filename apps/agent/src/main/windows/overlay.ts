@@ -133,6 +133,10 @@ export interface Point {
   y: number;
 }
 
+function clamp(n: number, min: number, max: number): number {
+  return Math.max(min, Math.min(n, max));
+}
+
 /** Horizontally centered, one-third down — used by the idle prompt. */
 export function centerUpperThird(wa: Rect, size: Size): Point {
   return {
@@ -155,4 +159,22 @@ export function bottomRight(wa: Rect, size: Size, gutter = 20): Point {
     x: Math.round(wa.x + wa.width - size.width - gutter),
     y: Math.round(wa.y + wa.height - size.height - gutter),
   };
+}
+
+/** Tray popover placement: below top menu bars, above bottom taskbars. */
+export function trayPopoverPoint(tray: Rect, wa: Rect, size: Size, gutter = 6): Point {
+  const minX = wa.x + gutter;
+  const maxX = wa.x + wa.width - size.width - gutter;
+  const centeredX = tray.x + tray.width / 2 - size.width / 2;
+  const x = Math.round(clamp(centeredX, minX, Math.max(minX, maxX)));
+
+  const minY = wa.y + gutter;
+  const maxY = wa.y + wa.height - size.height - gutter;
+  const belowY = tray.y + tray.height + gutter;
+  const aboveY = tray.y - size.height - gutter;
+  const fitsBelow = belowY + size.height <= wa.y + wa.height - gutter;
+  const preferredY = fitsBelow ? belowY : aboveY;
+  const y = Math.round(clamp(preferredY, minY, Math.max(minY, maxY)));
+
+  return { x, y };
 }
