@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { centerUpperThird, topRight, bottomRight, type Rect } from './overlay';
+import { centerUpperThird, topRight, bottomRight, trayPopoverPoint, type Rect } from './overlay';
 
 const SIZE = { width: 320, height: 168 };
 const PRIMARY: Rect = { x: 0, y: 0, width: 1440, height: 900 };
@@ -51,5 +51,36 @@ describe('bottomRight', () => {
     const inset: Rect = { x: 0, y: 25, width: 1440, height: 850 };
     const p = bottomRight(inset, SIZE);
     expect(p.y).toBe(25 + 850 - 168 - 20);
+  });
+});
+
+describe('trayPopoverPoint', () => {
+  const POPOVER = { width: 300, height: 340 };
+
+  it('opens below a macOS-style top menu bar tray icon', () => {
+    const wa: Rect = { x: 0, y: 25, width: 1440, height: 875 };
+    const tray: Rect = { x: 1180, y: 0, width: 24, height: 24 };
+    const p = trayPopoverPoint(tray, wa, POPOVER);
+
+    expect(p.y).toBe(31);
+    expect(p.x).toBe(Math.round(1180 + 12 - 150));
+  });
+
+  it('opens above a Windows bottom taskbar tray icon', () => {
+    const wa: Rect = { x: 0, y: 0, width: 1440, height: 860 };
+    const tray: Rect = { x: 1320, y: 860, width: 24, height: 40 };
+    const p = trayPopoverPoint(tray, wa, POPOVER);
+
+    expect(p.y).toBe(860 - 340 - 6);
+    expect(p.x).toBe(1440 - 300 - 6);
+  });
+
+  it('keeps the popover inside a small work area', () => {
+    const wa: Rect = { x: 100, y: 50, width: 320, height: 360 };
+    const tray: Rect = { x: 390, y: 390, width: 24, height: 24 };
+    const p = trayPopoverPoint(tray, wa, POPOVER);
+
+    expect(p.x).toBe(114);
+    expect(p.y).toBe(56);
   });
 });

@@ -41,6 +41,29 @@ describe('migrateLegacyUserData', () => {
     expect(fs.existsSync(path.join(legacy, 'pending-lark-login.bin.migrated-to-timo'))).toBe(true);
   });
 
+  it('copies local state from the scoped package-name app dir', () => {
+    const root = makeRoot();
+    const legacy = path.join(root, '@grind', 'agent');
+    const current = path.join(root, 'Timo');
+    fs.mkdirSync(path.join(legacy, 'screenshots'), { recursive: true });
+    fs.writeFileSync(path.join(legacy, 'tokens.bin'), 'TOKENS');
+    fs.writeFileSync(path.join(legacy, 'agent.db'), 'DB');
+    fs.writeFileSync(path.join(legacy, 'preferences.json'), '{"floatingBarVisible":true}');
+    fs.writeFileSync(path.join(legacy, 'screenshots', 'shot.jpg'), 'JPEG');
+    state.userData = current;
+
+    migrateLegacyUserData();
+
+    expect(fs.readFileSync(path.join(current, 'tokens.bin'), 'utf8')).toBe('TOKENS');
+    expect(fs.readFileSync(path.join(current, 'agent.db'), 'utf8')).toBe('DB');
+    expect(fs.readFileSync(path.join(current, 'preferences.json'), 'utf8')).toBe('{"floatingBarVisible":true}');
+    expect(fs.readFileSync(path.join(current, 'screenshots', 'shot.jpg'), 'utf8')).toBe('JPEG');
+    expect(fs.existsSync(path.join(legacy, 'tokens.bin'))).toBe(false);
+    expect(fs.existsSync(path.join(legacy, 'tokens.bin.migrated-to-timo'))).toBe(true);
+    expect(fs.existsSync(path.join(legacy, 'screenshots'))).toBe(false);
+    expect(fs.existsSync(path.join(legacy, 'screenshots.migrated-to-timo'))).toBe(true);
+  });
+
   it('does not overwrite an existing session in the current dir', () => {
     const root = makeRoot();
     const legacy = path.join(root, 'Grind');
