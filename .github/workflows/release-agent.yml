@@ -249,6 +249,6 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.prepare.outputs.tag }}
         run: |
-          gh release view "$TAG" --json isDraft,isPrerelease,assets,url \
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,isPrerelease,assets,url \
             --jq '"Draft: \(.isDraft)\nPrerelease: \(.isPrerelease)\nURL: \(.url)\nAssets:\n\(.assets[].name)"'
           echo "Review the draft release in GitHub, install beta/stable candidates, then publish manually."
