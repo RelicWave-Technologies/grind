@@ -280,6 +280,17 @@ model User {
   agentVersion          String?
   agentPlatform         String?
   agentActiveEntryId    String?
+  /// Last known local desktop permission health from agent heartbeat.
+  /// Nullable so older agents keep heartbeating and show as Unknown in admin UI.
+  agentScreenPermissionStatus   String?
+  agentScreenCaptureHealth      String?
+  agentScreenPermissionState    String?
+  agentAccessibilityTrusted     Boolean?
+  agentAccessibilityReady       Boolean?
+  agentAccessibilityRecording   Boolean?
+  agentAccessibilityCapturing   Boolean?
+  agentAccessibilityHookRunning Boolean?
+  agentPermissionsUpdatedAt     DateTime?
 
   refreshTokens   RefreshToken[]
   timeEntries     TimeEntry[]

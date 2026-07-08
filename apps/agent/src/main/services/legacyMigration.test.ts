@@ -35,6 +35,10 @@ describe('migrateLegacyUserData', () => {
 
     expect(fs.readFileSync(path.join(current, 'tokens.bin'), 'utf8')).toBe('TOKENS');
     expect(fs.readFileSync(path.join(current, 'pending-lark-login.bin'), 'utf8')).toBe('PENDING');
+    expect(fs.existsSync(path.join(legacy, 'tokens.bin'))).toBe(false);
+    expect(fs.existsSync(path.join(legacy, 'tokens.bin.migrated-to-timo'))).toBe(true);
+    expect(fs.existsSync(path.join(legacy, 'pending-lark-login.bin'))).toBe(false);
+    expect(fs.existsSync(path.join(legacy, 'pending-lark-login.bin.migrated-to-timo'))).toBe(true);
   });
 
   it('does not overwrite an existing session in the current dir', () => {

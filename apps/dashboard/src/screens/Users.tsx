@@ -61,6 +61,19 @@ interface AdminUser {
   deactivatedAt: string | null;
   provisioningStatus?: 'PENDING' | 'ACTIVE';
   createdAt: string;
+  agentLastSeenAt: string | null;
+  agentState: 'IDLE' | 'RUNNING' | 'PAUSED_IDLE' | 'OFFLINE' | null;
+  agentVersion: string | null;
+  agentPlatform: string | null;
+  agentScreenPermissionStatus: string | null;
+  agentScreenCaptureHealth: string | null;
+  agentScreenPermissionState: string | null;
+  agentAccessibilityTrusted: boolean | null;
+  agentAccessibilityReady: boolean | null;
+  agentAccessibilityRecording: boolean | null;
+  agentAccessibilityCapturing: boolean | null;
+  agentAccessibilityHookRunning: boolean | null;
+  agentPermissionsUpdatedAt: string | null;
 }
 
 interface UsersResponse {
@@ -88,6 +101,20 @@ const STATUS_FILTER = [
   { value: 'active', label: 'Active' },
   { value: 'all', label: 'All' },
 ] as const;
+
+const PLATFORM_META: Record<string, { label: string; iconSrc?: string }> = {
+  darwin: { label: 'macOS', iconSrc: '/brand/apple.svg' },
+  win32: { label: 'Windows', iconSrc: '/brand/windows.svg' },
+  linux: { label: 'Linux' },
+};
+
+const MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+function joinedDateLabel(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  return `${String(date.getDate()).padStart(2, '0')} ${MONTH_SHORT[date.getMonth()]} ${String(date.getFullYear()).slice(-2)}`;
+}
 
 export function UsersScreen() {
   const { me } = useRouteContext({ from: '/authed' });
@@ -173,8 +200,9 @@ export function UsersScreen() {
   const pendingCount = sorted.filter(
     (u) => u.deactivatedAt === null && u.provisioningStatus === 'PENDING',
   ).length;
+  const showDeviceHealth = canEdit;
 
-  const colSpan = canEdit ? 7 : 6;
+  const colSpan = (canEdit ? 7 : 6) + (showDeviceHealth ? 2 : 0);
 
   return (
     <Page>
@@ -250,55 +278,71 @@ export function UsersScreen() {
             description="Nobody is visible in your current scope."
           />
         ) : (
-          <Table density="comfortable">
-            <THead>
-              <Tr>
-                <Th>Person</Th>
-                <Th>Role</Th>
-                <Th>Status</Th>
-                <Th>Team</Th>
-                <Th>Shift</Th>
-                <Th align="right">Joined</Th>
-                {canEdit && <Th align="right">{''}</Th>}
-              </Tr>
-            </THead>
-            <Tbody>
-              {sorted.map((u) => (
-                <PersonRow
-                  key={u.id}
-                  user={u}
-                  isSelf={u.id === me.id}
-                  canEdit={canEdit}
-                  colSpan={colSpan}
-                  teams={teamsQ.data?.teams ?? []}
-                  teamName={teamName(u.teamId)}
-                  shifts={shiftsQ.data?.shifts ?? []}
-                  shiftName={shiftName(u.shiftId)}
-                  busy={
-                    (patch.isPending && patch.variables?.id === u.id) ||
-                    (deactivate.isPending && deactivate.variables === u.id) ||
-                    (reactivate.isPending && reactivate.variables === u.id) ||
-                    (activate.isPending && activate.variables === u.id)
-                  }
-                  error={
-                    (patch.isError && patch.variables?.id === u.id
-                      ? (patch.error as Error | ApiError).message
-                      : null) ||
-                    (deactivate.isError && deactivate.variables === u.id
-                      ? (deactivate.error as Error | ApiError).message
-                      : null) ||
-                    (reactivate.isError && reactivate.variables === u.id
-                      ? (reactivate.error as Error | ApiError).message
-                      : null)
-                  }
-                  onSave={(p) => patch.mutate({ id: u.id, patch: p })}
-                  onDeactivate={() => deactivate.mutate(u.id)}
-                  onReactivate={() => reactivate.mutate(u.id)}
-                  onActivate={() => activate.mutate(u.id)}
-                />
-              ))}
-            </Tbody>
-          </Table>
+          <div className="usr-table-wrap">
+            <Table density="comfortable" className={showDeviceHealth ? 'usr-table usr-table--device' : 'usr-table'}>
+              <colgroup>
+                <col className="usr-col-person" />
+                <col className="usr-col-role" />
+                <col className="usr-col-status" />
+                <col className="usr-col-team" />
+                <col className="usr-col-shift" />
+                {showDeviceHealth && <col className="usr-col-device" />}
+                {showDeviceHealth && <col className="usr-col-permissions" />}
+                <col className="usr-col-joined" />
+                {canEdit && <col className="usr-col-actions" />}
+              </colgroup>
+              <THead>
+                <Tr>
+                  <Th>Person</Th>
+                  <Th>Role</Th>
+                  <Th>Status</Th>
+                  <Th>Team</Th>
+                  <Th>Shift</Th>
+                  {showDeviceHealth && <Th>Device</Th>}
+                  {showDeviceHealth && <Th>Permissions</Th>}
+                  <Th align="right">Joined</Th>
+                  {canEdit && <Th align="right">{''}</Th>}
+                </Tr>
+              </THead>
+              <Tbody>
+                {sorted.map((u) => (
+                  <PersonRow
+                    key={u.id}
+                    user={u}
+                    isSelf={u.id === me.id}
+                    canEdit={canEdit}
+                    colSpan={colSpan}
+                    showDeviceHealth={showDeviceHealth}
+                    teams={teamsQ.data?.teams ?? []}
+                    teamName={teamName(u.teamId)}
+                    shifts={shiftsQ.data?.shifts ?? []}
+                    shiftName={shiftName(u.shiftId)}
+                    busy={
+                      (patch.isPending && patch.variables?.id === u.id) ||
+                      (deactivate.isPending && deactivate.variables === u.id) ||
+                      (reactivate.isPending && reactivate.variables === u.id) ||
+                      (activate.isPending && activate.variables === u.id)
+                    }
+                    error={
+                      (patch.isError && patch.variables?.id === u.id
+                        ? (patch.error as Error | ApiError).message
+                        : null) ||
+                      (deactivate.isError && deactivate.variables === u.id
+                        ? (deactivate.error as Error | ApiError).message
+                        : null) ||
+                      (reactivate.isError && reactivate.variables === u.id
+                        ? (reactivate.error as Error | ApiError).message
+                        : null)
+                    }
+                    onSave={(p) => patch.mutate({ id: u.id, patch: p })}
+                    onDeactivate={() => deactivate.mutate(u.id)}
+                    onReactivate={() => reactivate.mutate(u.id)}
+                    onActivate={() => activate.mutate(u.id)}
+                  />
+                ))}
+              </Tbody>
+            </Table>
+          </div>
         )}
       </Card>
     </Page>
@@ -310,6 +354,7 @@ interface RowProps {
   isSelf: boolean;
   canEdit: boolean;
   colSpan: number;
+  showDeviceHealth: boolean;
   teams: Team[];
   teamName: string;
   shifts: Shift[];
@@ -322,7 +367,23 @@ interface RowProps {
   onActivate: () => void;
 }
 
-function PersonRow({ user, isSelf, canEdit, colSpan, teams, teamName, shifts, shiftName, busy, error, onSave, onDeactivate, onReactivate, onActivate }: RowProps) {
+function PersonRow({
+  user,
+  isSelf,
+  canEdit,
+  colSpan,
+  showDeviceHealth,
+  teams,
+  teamName,
+  shifts,
+  shiftName,
+  busy,
+  error,
+  onSave,
+  onDeactivate,
+  onReactivate,
+  onActivate,
+}: RowProps) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(user.name);
   const [role, setRole] = useState<Role>(user.role === 'MANAGER' ? 'MEMBER' : user.role);
@@ -353,11 +414,7 @@ function PersonRow({ user, isSelf, canEdit, colSpan, teams, teamName, shifts, sh
   const isPending = !isDeactivated && user.provisioningStatus === 'PENDING';
   const teamLockedByManagement = user.role === 'MANAGER' && Boolean(user.managesTeamId);
 
-  const joined = new Date(user.createdAt).toLocaleDateString(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  });
+  const joined = joinedDateLabel(user.createdAt);
 
   return (
     <>
@@ -456,12 +513,26 @@ function PersonRow({ user, isSelf, canEdit, colSpan, teams, teamName, shifts, sh
           )}
         </Td>
 
+        {/* Device --------------------------------------------------------- */}
+        {showDeviceHealth && (
+          <Td>
+            <DeviceCell user={user} />
+          </Td>
+        )}
+
+        {/* Permissions ---------------------------------------------------- */}
+        {showDeviceHealth && (
+          <Td>
+            <PermissionCell user={user} />
+          </Td>
+        )}
+
         {/* Joined --------------------------------------------------------- */}
-        <Td mono>{joined}</Td>
+        <Td mono className="usr-joined">{joined}</Td>
 
         {/* Actions -------------------------------------------------------- */}
         {canEdit && (
-          <Td align="right">
+          <Td align="right" className="usr-action-cell">
             <div className="usr-actions">
               {editing ? (
                 <>
@@ -538,6 +609,87 @@ function PersonRow({ user, isSelf, canEdit, colSpan, teams, teamName, shifts, sh
       )}
     </>
   );
+}
+
+function DeviceCell({ user }: { user: AdminUser }) {
+  const meta = user.agentPlatform ? PLATFORM_META[user.agentPlatform] ?? { label: user.agentPlatform } : null;
+  if (!meta) return <span className="usr-device-empty">No heartbeat</span>;
+  const version = user.agentVersion ? `v${user.agentVersion.replace(/^v/u, '')}` : 'Version unknown';
+
+  return (
+    <span className="usr-device">
+      <span className="usr-device-icon" aria-hidden>
+        {meta.iconSrc ? (
+          <img src={meta.iconSrc} alt="" />
+        ) : (
+          <span className="usr-device-fallback">{meta.label.slice(0, 2).toUpperCase()}</span>
+        )}
+      </span>
+      <span className="usr-device-copy">
+        <span className="usr-device-name">{meta.label}</span>
+        <span className="usr-device-version">{version}</span>
+      </span>
+    </span>
+  );
+}
+
+function PermissionCell({ user }: { user: AdminUser }) {
+  const screen = screenPermissionTag(user);
+  const access = accessibilityPermissionTag(user);
+  return (
+    <div className="usr-permissions">
+      <Tag status={screen.status} title={screen.title}>
+        {screen.label}
+      </Tag>
+      <Tag status={access.status} title={access.title}>
+        {access.label}
+      </Tag>
+    </div>
+  );
+}
+
+function screenPermissionTag(user: AdminUser): { label: string; status: Status; title: string } {
+  if (!user.agentPlatform) return { label: 'Screen ?', status: 'neutral', title: 'No desktop heartbeat yet.' };
+  if (user.agentPlatform !== 'darwin') {
+    return {
+      label: 'Screen N/A',
+      status: 'neutral',
+      title: 'No Screen Recording permission is required on this OS.',
+    };
+  }
+  if (!user.agentPermissionsUpdatedAt || !user.agentScreenPermissionState) {
+    return { label: 'Screen ?', status: 'neutral', title: 'Waiting for a newer Timo heartbeat.' };
+  }
+  if (user.agentScreenPermissionState === 'ok') return { label: 'Screen OK', status: 'success', title: 'Screen Recording is ready.' };
+  if (user.agentScreenPermissionState === 'needs-restart') {
+    return { label: 'Screen restart', status: 'warn', title: 'Permission changed; Timo needs a restart.' };
+  }
+  if (user.agentScreenPermissionState === 'needs-settings') {
+    return { label: 'Screen off', status: 'danger', title: 'Screen Recording is denied or restricted.' };
+  }
+  return { label: 'Screen grant', status: 'warn', title: 'Screen Recording has not been granted yet.' };
+}
+
+function accessibilityPermissionTag(user: AdminUser): { label: string; status: Status; title: string } {
+  if (!user.agentPlatform) return { label: 'Access ?', status: 'neutral', title: 'No desktop heartbeat yet.' };
+  if (user.agentPlatform !== 'darwin') {
+    return {
+      label: 'Access N/A',
+      status: 'neutral',
+      title: 'No Accessibility permission is required on this OS.',
+    };
+  }
+  if (!user.agentPermissionsUpdatedAt || user.agentAccessibilityTrusted == null) {
+    return { label: 'Access ?', status: 'neutral', title: 'Waiting for a newer Timo heartbeat.' };
+  }
+  if (!user.agentAccessibilityTrusted) return { label: 'Access off', status: 'danger', title: 'Accessibility is not granted.' };
+  if (!user.agentAccessibilityReady) {
+    return { label: 'Access restart', status: 'warn', title: 'Accessibility is granted, but Timo needs a restart.' };
+  }
+  if (user.agentAccessibilityRecording && !user.agentAccessibilityHookRunning) {
+    return { label: 'Access restart', status: 'danger', title: 'Timo is tracking, but the input hook is not running.' };
+  }
+  return { label: 'Access OK', status: 'success', title: 'Accessibility is ready.' };
 }
 
 // -----------------------------------------------------------------------------

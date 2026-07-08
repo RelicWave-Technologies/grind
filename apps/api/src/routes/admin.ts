@@ -73,6 +73,19 @@ interface UserListEntry {
   deactivatedAt: string | null;
   provisioningStatus: 'PENDING' | 'ACTIVE';
   createdAt: string;
+  agentLastSeenAt: string | null;
+  agentState: 'IDLE' | 'RUNNING' | 'PAUSED_IDLE' | 'OFFLINE' | null;
+  agentVersion: string | null;
+  agentPlatform: string | null;
+  agentScreenPermissionStatus: string | null;
+  agentScreenCaptureHealth: string | null;
+  agentScreenPermissionState: string | null;
+  agentAccessibilityTrusted: boolean | null;
+  agentAccessibilityReady: boolean | null;
+  agentAccessibilityRecording: boolean | null;
+  agentAccessibilityCapturing: boolean | null;
+  agentAccessibilityHookRunning: boolean | null;
+  agentPermissionsUpdatedAt: string | null;
 }
 
 /**
@@ -89,6 +102,7 @@ adminRouter.get('/users', async (req, res, next) => {
     if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
     const includeDeactivated =
       req.scope.isAdmin && req.query.includeDeactivated === 'true';
+    const exposeAgentHealth = req.scope.isAdmin;
     // ?status=pending → the admin "Needs setup" view (Lark-provisioned users
     // awaiting a team/role + activation).
     const pendingOnly = req.scope.isAdmin && req.query.status === 'pending';
@@ -114,6 +128,19 @@ adminRouter.get('/users', async (req, res, next) => {
         deactivatedAt: true,
         provisioningStatus: true,
         createdAt: true,
+        agentLastSeenAt: true,
+        agentState: true,
+        agentVersion: true,
+        agentPlatform: true,
+        agentScreenPermissionStatus: true,
+        agentScreenCaptureHealth: true,
+        agentScreenPermissionState: true,
+        agentAccessibilityTrusted: true,
+        agentAccessibilityReady: true,
+        agentAccessibilityRecording: true,
+        agentAccessibilityCapturing: true,
+        agentAccessibilityHookRunning: true,
+        agentPermissionsUpdatedAt: true,
       },
       orderBy: [{ deactivatedAt: 'asc' }, { role: 'asc' }, { name: 'asc' }],
     });
@@ -132,6 +159,22 @@ adminRouter.get('/users', async (req, res, next) => {
       deactivatedAt: u.deactivatedAt ? u.deactivatedAt.toISOString() : null,
       provisioningStatus: u.provisioningStatus,
       createdAt: u.createdAt.toISOString(),
+      agentLastSeenAt: exposeAgentHealth && u.agentLastSeenAt ? u.agentLastSeenAt.toISOString() : null,
+      agentState: exposeAgentHealth ? u.agentState : null,
+      agentVersion: exposeAgentHealth ? u.agentVersion : null,
+      agentPlatform: exposeAgentHealth ? u.agentPlatform : null,
+      agentScreenPermissionStatus: exposeAgentHealth ? u.agentScreenPermissionStatus : null,
+      agentScreenCaptureHealth: exposeAgentHealth ? u.agentScreenCaptureHealth : null,
+      agentScreenPermissionState: exposeAgentHealth ? u.agentScreenPermissionState : null,
+      agentAccessibilityTrusted: exposeAgentHealth ? u.agentAccessibilityTrusted : null,
+      agentAccessibilityReady: exposeAgentHealth ? u.agentAccessibilityReady : null,
+      agentAccessibilityRecording: exposeAgentHealth ? u.agentAccessibilityRecording : null,
+      agentAccessibilityCapturing: exposeAgentHealth ? u.agentAccessibilityCapturing : null,
+      agentAccessibilityHookRunning: exposeAgentHealth ? u.agentAccessibilityHookRunning : null,
+      agentPermissionsUpdatedAt:
+        exposeAgentHealth && u.agentPermissionsUpdatedAt
+          ? u.agentPermissionsUpdatedAt.toISOString()
+          : null,
     }));
     res.json({ users: out, scope: req.scope.scope });
   } catch (err) {

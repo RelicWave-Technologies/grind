@@ -10,11 +10,37 @@ export type AgentState = z.infer<typeof AgentState>;
 export const Platform = z.enum(['darwin', 'win32', 'linux']);
 export type Platform = z.infer<typeof Platform>;
 
+export const ScreenPermissionStatus = z.enum(['granted', 'denied', 'restricted', 'not-determined', 'unknown']);
+export type ScreenPermissionStatus = z.infer<typeof ScreenPermissionStatus>;
+
+export const CaptureHealth = z.enum(['ok', 'no-permission', 'empty', 'error', 'unknown']);
+export type CaptureHealth = z.infer<typeof CaptureHealth>;
+
+export const ScreenPermissionState = z.enum(['ok', 'needs-grant', 'needs-settings', 'needs-restart']);
+export type ScreenPermissionState = z.infer<typeof ScreenPermissionState>;
+
+export const DesktopPermissionSnapshot = z.object({
+  screen: z.object({
+    status: ScreenPermissionStatus,
+    health: CaptureHealth,
+    state: ScreenPermissionState,
+  }),
+  accessibility: z.object({
+    trusted: z.boolean(),
+    ready: z.boolean(),
+    recording: z.boolean(),
+    capturing: z.boolean(),
+    hookRunning: z.boolean(),
+  }),
+});
+export type DesktopPermissionSnapshot = z.infer<typeof DesktopPermissionSnapshot>;
+
 export const HeartbeatRequest = z.object({
   agentVersion: z.string(),
   platform: Platform,
   state: AgentState.default('IDLE'),
   activeEntryId: z.string().min(1).nullable().optional(),
+  permissions: DesktopPermissionSnapshot.optional(),
 });
 export type HeartbeatRequest = z.infer<typeof HeartbeatRequest>;
 

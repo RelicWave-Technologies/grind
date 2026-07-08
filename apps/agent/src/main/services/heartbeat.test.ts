@@ -4,8 +4,21 @@ const mocks = vi.hoisted(() => ({
   api: vi.fn(),
   drainTimerSyncNow: vi.fn(),
   drainActivityNow: vi.fn(),
+  getActivityCaptureStatus: vi.fn(),
   currentVersion: 'version-1',
   refreshAgentConfig: vi.fn(),
+  appVersion: '9.8.7',
+  getScreenHealth: vi.fn(),
+  screenStatus: vi.fn(),
+  screenUiState: vi.fn(),
+  logWarn: vi.fn(),
+  logDebug: vi.fn(),
+}));
+
+vi.mock('electron', () => ({
+  app: {
+    getVersion: () => mocks.appVersion,
+  },
 }));
 
 vi.mock('./apiClient', () => ({
@@ -26,10 +39,25 @@ vi.mock('./timer', () => ({
 
 vi.mock('./activity', () => ({
   drainActivityNow: mocks.drainActivityNow,
+  getActivityCaptureStatus: mocks.getActivityCaptureStatus,
+}));
+
+vi.mock('./capture', () => ({
+  getScreenHealth: mocks.getScreenHealth,
+}));
+
+vi.mock('./permissions', () => ({
+  screenStatus: mocks.screenStatus,
+  screenUiState: mocks.screenUiState,
 }));
 
 vi.mock('./heartbeatPayload', () => ({
-  buildHeartbeatRequest: () => ({ agentVersion: 'test', platform: 'darwin', state: 'IDLE' }),
+  buildHeartbeatRequest: (args: { agentVersion: string; permissions?: unknown }) => ({
+    agentVersion: args.agentVersion,
+    platform: 'darwin',
+    state: 'IDLE',
+    permissions: args.permissions,
+  }),
   currentPlatform: () => 'darwin',
 }));
 
@@ -38,13 +66,40 @@ vi.mock('./agentConfig', () => ({
   refreshAgentConfig: mocks.refreshAgentConfig,
 }));
 
+vi.mock('../logger', () => ({
+  log: {
+    debug: mocks.logDebug,
+    warn: mocks.logWarn,
+    info: vi.fn(),
+    error: vi.fn(),
+  },
+}));
+
 describe('heartbeat config refresh', () => {
   beforeEach(() => {
     mocks.api.mockReset();
     mocks.drainTimerSyncNow.mockReset();
     mocks.drainActivityNow.mockReset();
+    mocks.getActivityCaptureStatus.mockReset();
     mocks.refreshAgentConfig.mockReset();
+    mocks.getScreenHealth.mockReset();
+    mocks.screenStatus.mockReset();
+    mocks.screenUiState.mockReset();
+    mocks.logWarn.mockReset();
+    mocks.logDebug.mockReset();
     mocks.currentVersion = 'version-1';
+    mocks.appVersion = '9.8.7';
+    mocks.getScreenHealth.mockReturnValue('ok');
+    mocks.screenStatus.mockReturnValue('granted');
+    mocks.screenUiState.mockReturnValue('ok');
+    mocks.getActivityCaptureStatus.mockReturnValue({
+      trusted: true,
+      ready: true,
+      recording: false,
+      capturing: false,
+      hookRunning: false,
+      lastHookError: null,
+    });
   });
 
   afterEach(() => {
@@ -62,6 +117,60 @@ describe('heartbeat config refresh', () => {
     expect(mocks.drainActivityNow).toHaveBeenCalledWith('heartbeat');
   });
 
+  it('sends the packaged app version in the heartbeat payload', async () => {
+    mocks.api.mockResolvedValue({ ok: true, serverTime: '2026-07-04T00:00:00.000Z', configVersion: 'version-1' });
+    const { sendHeartbeatNow } = await import('./heartbeat');
+
+    sendHeartbeatNow();
+
+    await vi.waitFor(() =>
+      expect(mocks.api).toHaveBeenCalledWith(
+        '/v1/agent/heartbeat',
+        expect.objectContaining({
+          body: expect.objectContaining({ agentVersion: '9.8.7' }),
+        }),
+      ),
+    );
+  });
+
+  it('sends the local desktop permission snapshot in the heartbeat payload', async () => {
+    mocks.getScreenHealth.mockReturnValue('empty');
+    mocks.screenStatus.mockReturnValue('granted');
+    mocks.screenUiState.mockReturnValue('needs-restart');
+    mocks.getActivityCaptureStatus.mockReturnValue({
+      trusted: true,
+      ready: true,
+      recording: true,
+      capturing: false,
+      hookRunning: false,
+      lastHookError: 'native hook stopped',
+    });
+    mocks.api.mockResolvedValue({ ok: true, serverTime: '2026-07-04T00:00:00.000Z', configVersion: 'version-1' });
+    const { sendHeartbeatNow } = await import('./heartbeat');
+
+    sendHeartbeatNow();
+
+    await vi.waitFor(() =>
+      expect(mocks.api).toHaveBeenCalledWith(
+        '/v1/agent/heartbeat',
+        expect.objectContaining({
+          body: expect.objectContaining({
+            permissions: {
+              screen: { status: 'granted', health: 'empty', state: 'needs-restart' },
+              accessibility: {
+                trusted: true,
+                ready: true,
+                recording: true,
+                capturing: false,
+                hookRunning: false,
+              },
+            },
+          }),
+        }),
+      ),
+    );
+  });
+
   it('does not refresh agent config when the server version matches', async () => {
     mocks.api.mockResolvedValue({ ok: true, serverTime: '2026-07-04T00:00:00.000Z', configVersion: 'version-1' });
     const { sendHeartbeatNow } = await import('./heartbeat');
@@ -71,5 +180,22 @@ describe('heartbeat config refresh', () => {
     await vi.waitFor(() => expect(mocks.drainTimerSyncNow).toHaveBeenCalledWith('heartbeat'));
     expect(mocks.drainActivityNow).toHaveBeenCalledWith('heartbeat');
     expect(mocks.refreshAgentConfig).not.toHaveBeenCalled();
+  });
+
+  it('keeps heartbeat errors contained when local permission collection fails', async () => {
+    mocks.screenStatus.mockImplementationOnce(() => {
+      throw new Error('permission probe failed');
+    });
+    const { sendHeartbeatNow } = await import('./heartbeat');
+
+    sendHeartbeatNow();
+
+    await vi.waitFor(() =>
+      expect(mocks.logWarn).toHaveBeenCalledWith(
+        'heartbeat failed',
+        expect.objectContaining({ err: expect.stringContaining('permission probe failed') }),
+      ),
+    );
+    expect(mocks.api).not.toHaveBeenCalled();
   });
 });

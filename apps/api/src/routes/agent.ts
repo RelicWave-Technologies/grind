@@ -9,7 +9,7 @@ import {
 } from '@grind/types';
 import { validate } from '../middleware/validate';
 import { requireAccessToken } from '../middleware/auth';
-import { prisma } from '@grind/db';
+import { prisma, type Prisma } from '@grind/db';
 import { env } from '../env';
 
 export const agentRouter = Router();
@@ -88,15 +88,27 @@ agentRouter.post('/heartbeat', validate(HeartbeatRequest, 'body'), async (req, r
     if (!req.user) return res.status(401).json({ error: 'unauthorized' });
     const body = req.body as HeartbeatRequest;
     const now = new Date();
+    const data: Prisma.UserUpdateManyMutationInput = {
+      agentLastSeenAt: now,
+      agentState: body.state,
+      agentVersion: body.agentVersion,
+      agentPlatform: body.platform,
+      agentActiveEntryId: body.activeEntryId ?? null,
+    };
+    if (body.permissions) {
+      data.agentScreenPermissionStatus = body.permissions.screen.status;
+      data.agentScreenCaptureHealth = body.permissions.screen.health;
+      data.agentScreenPermissionState = body.permissions.screen.state;
+      data.agentAccessibilityTrusted = body.permissions.accessibility.trusted;
+      data.agentAccessibilityReady = body.permissions.accessibility.ready;
+      data.agentAccessibilityRecording = body.permissions.accessibility.recording;
+      data.agentAccessibilityCapturing = body.permissions.accessibility.capturing;
+      data.agentAccessibilityHookRunning = body.permissions.accessibility.hookRunning;
+      data.agentPermissionsUpdatedAt = now;
+    }
     const updated = await prisma.user.updateMany({
       where: { id: req.user.sub, workspaceId: req.user.ws, deactivatedAt: null },
-      data: {
-        agentLastSeenAt: now,
-        agentState: body.state,
-        agentVersion: body.agentVersion,
-        agentPlatform: body.platform,
-        agentActiveEntryId: body.activeEntryId ?? null,
-      },
+      data,
     });
     if (updated.count === 0) return res.status(401).json({ error: 'unauthorized' });
     const config = await buildAgentConfig(req.user.sub, req.user.ws);

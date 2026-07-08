@@ -15,29 +15,12 @@ import { validate } from '../middleware/validate';
 import { requireAccessToken } from '../middleware/auth';
 import { attachScope } from '../middleware/scope';
 import { authorizeTimeEditForUser } from '../authz/timeEdit';
-import { isLarkConfigured, getTokenManager, getUserTaskClient } from '../lark';
 import { queueManualTimeFinalizeCards } from '../manualTime/larkOutbox';
 import { logger } from '../logger';
 
 export const timeEntriesRouter = Router();
 
 timeEntriesRouter.use(requireAccessToken);
-
-/**
- * Best-effort: post a "started tracking" comment on the Lark task when a new
- * entry is created against it. Fire-and-forget — never blocks or fails tracking.
- */
-async function postStartComment(userId: string, guid: string): Promise<void> {
-  try {
-    const tm = getTokenManager();
-    const client = getUserTaskClient();
-    if (!tm || !client) return;
-    const accessToken = await tm.getAccessToken(userId);
-    await client.addComment(accessToken, guid, '⏱ Started tracking in Grind');
-  } catch (err) {
-    logger.warn({ err: String(err), guid }, 'lark start-comment failed (non-fatal)');
-  }
-}
 
 /** Map wire segments (ISO strings) to the core domain shape (epoch ms). */
 function toCoreEntry(args: {
@@ -172,9 +155,6 @@ timeEntriesRouter.post('/', validate(CreateTimeEntryRequest, 'body'), async (req
       },
       include: { segments: true },
     });
-    if (created.larkTaskGuid && isLarkConfigured()) {
-      void postStartComment(req.user.sub, created.larkTaskGuid);
-    }
     res.status(201).json(serialize(created));
   } catch (err) {
     next(err);

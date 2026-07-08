@@ -66,11 +66,32 @@ let tray: Tray | null = null;
 let mainWindow: BrowserWindow | null = null;
 let isQuitting = false;
 
+function attachMainWindowHandlers(win: BrowserWindow): void {
+  win.on('close', (e) => {
+    if (!isQuitting) {
+      e.preventDefault();
+      win.hide();
+    }
+  });
+  win.on('closed', () => {
+    if (mainWindow === win) mainWindow = null;
+  });
+}
+
+function ensureMainWindow(opts: { startHidden?: boolean } = {}): BrowserWindow {
+  if (mainWindow && !mainWindow.isDestroyed()) return mainWindow;
+  mainWindow = createMainWindow(opts);
+  attachMainWindowHandlers(mainWindow);
+  return mainWindow;
+}
+
 function showMainWindow() {
-  if (!mainWindow) return;
+  if (isQuitting) return;
+  const win = ensureMainWindow({ startHidden: true });
   hidePopover();
-  mainWindow.show();
-  mainWindow.focus();
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
 }
 
 app.whenReady().then(async () => {
@@ -101,7 +122,7 @@ app.whenReady().then(async () => {
   const launchAtLogin = ensureLaunchAtLogin();
   const openedAtLogin = shouldStartHidden(process.argv);
 
-  mainWindow = createMainWindow({ startHidden: openedAtLogin });
+  mainWindow = ensureMainWindow({ startHidden: openedAtLogin });
   tray = createTray({
     onToggle: (bounds) => togglePopover(bounds),
     onOpenMain: () => showMainWindow(),
@@ -111,7 +132,7 @@ app.whenReady().then(async () => {
   registerIpc({ onOpenMainWindow: () => showMainWindow() });
   startUpdateService({
     showMainWindow: () => showMainWindow(),
-    isMainWindowVisible: () => !!mainWindow?.isVisible(),
+    isMainWindowVisible: () => !!mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible(),
   });
 
   // Deep-link delivery is now safe (window + IPC are up). Process any Lark login
@@ -122,12 +143,6 @@ app.whenReady().then(async () => {
   const coldStartLink = deepLinkFromArgv(process.argv);
   if (coldStartLink) void handleDeepLink(coldStartLink);
 
-  mainWindow.on('close', (e) => {
-    if (!isQuitting) {
-      e.preventDefault();
-      mainWindow?.hide();
-    }
-  });
   registerGracefulQuitHandler({
     app,
     hasCleanupCompleted: () => hasQuitCleanupCompleted(),

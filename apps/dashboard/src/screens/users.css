@@ -5,11 +5,61 @@
    ========================================================================== */
 
 /* Roster row action cluster — right-aligned icon buttons. */
+.usr-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.usr-table {
+  min-width: 760px;
+  table-layout: fixed;
+}
+
+.usr-table--device {
+  min-width: 980px;
+}
+
+.usr-table--device .usr-col-person { width: 24%; }
+.usr-table--device .usr-col-role { width: 11%; }
+.usr-table--device .usr-col-status { width: 8%; }
+.usr-table--device .usr-col-team { width: 9%; }
+.usr-table--device .usr-col-shift { width: 6%; }
+.usr-table--device .usr-col-device { width: 12%; }
+.usr-table--device .usr-col-permissions { width: 12%; }
+.usr-table--device .usr-col-joined { width: 10%; }
+.usr-table--device .usr-col-actions { width: 8%; }
+
+.usr-table .ui-table__row {
+  height: auto;
+}
+
+.usr-table .ui-td {
+  padding-top: var(--ui-sp-4);
+  padding-bottom: var(--ui-sp-4);
+}
+
+.usr-table .ui-th,
+.usr-table .ui-td {
+  padding-left: var(--ui-sp-4);
+  padding-right: var(--ui-sp-4);
+  overflow: hidden;
+}
+
 .usr-actions {
   display: inline-flex;
   align-items: center;
   gap: var(--ui-sp-2);
   justify-content: flex-end;
+  white-space: nowrap;
+}
+
+.usr-joined {
+  white-space: nowrap;
+}
+
+.usr-action-cell {
+  white-space: nowrap;
+  overflow: visible;
 }
 
 /* Inline name editor: keep the avatar beside the name Input while editing. */
@@ -33,6 +83,79 @@
   flex-direction: column;
   align-items: flex-start;
   gap: var(--ui-sp-1);
+  max-width: 100%;
+  min-width: 0;
+}
+
+.usr-role-stack > .ui-t-small {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.usr-device {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-sp-3);
+  min-width: 0;
+}
+
+.usr-device-icon {
+  width: var(--ui-sp-7);
+  height: var(--ui-sp-7);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-full);
+  color: var(--ui-ink);
+  flex-shrink: 0;
+}
+
+.usr-device-icon img {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
+
+.usr-device-fallback {
+  font-family: var(--ui-font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.usr-device-copy {
+  display: inline-flex;
+  flex-direction: column;
+  gap: var(--ui-sp-1);
+  min-width: 0;
+  line-height: 1.2;
+}
+
+.usr-device-name {
+  font-weight: 600;
+  color: var(--ui-ink);
+  white-space: nowrap;
+}
+
+.usr-device-version,
+.usr-device-empty {
+  font-size: 11px;
+  color: var(--ui-ink-3);
+  white-space: nowrap;
+}
+
+.usr-permissions {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--ui-sp-2);
+  min-width: 0;
+}
+
+.usr-permissions .ui-tag {
+  height: 22px;
 }
 
 /* Deactivated rows read quieter — step ink down (token), no new colour. */

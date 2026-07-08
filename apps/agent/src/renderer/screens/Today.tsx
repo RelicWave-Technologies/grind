@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Play, Square, Clock, ListTodo, Search, Plus, X } from 'lucide-react';
+import { AlertTriangle, Play, Square, Clock, ListTodo, Search, Plus, X, ChevronDown, Check } from 'lucide-react';
 import type { TimerStatus } from '../lib/agent.d';
 import { projectStyle } from '../lib/projectStyle';
 import { timerRecoveryNoticeText } from '../lib/recoveryNotice';
@@ -46,19 +46,57 @@ export default function Today() {
   const [showAll, setShowAll] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [justCreated, setJustCreated] = useState<string | null>(null);
+  const [selectedTaskGuid, setSelectedTaskGuid] = useState('');
+  const [taskPickerOpen, setTaskPickerOpen] = useState(false);
+  const [taskPickerQuery, setTaskPickerQuery] = useState('');
+  const taskPickerRef = useRef<HTMLDivElement>(null);
+  const taskPickerSearchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     let alive = true;
-    void window.agent.timer.status().then((s) => alive && setTimer(s));
-    const off = window.agent.timer.onStatusChange((s) => { setTimer(s); setNow(Date.now()); });
+    const rememberRunningTask = (s: TimerStatus) => {
+      if (s.state === 'RUNNING' && s.larkTaskGuid) setSelectedTaskGuid(s.larkTaskGuid);
+    };
+    void window.agent.timer.status().then((s) => {
+      if (!alive) return;
+      setTimer(s);
+      rememberRunningTask(s);
+    });
+    const off = window.agent.timer.onStatusChange((s) => {
+      setTimer(s);
+      setNow(Date.now());
+      rememberRunningTask(s);
+    });
     const tick = setInterval(() => setNow(Date.now()), 1000);
     return () => { alive = false; off(); clearInterval(tick); };
   }, []);
+
+  useEffect(() => {
+    if (!taskPickerOpen) return;
+    taskPickerSearchRef.current?.focus();
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (taskPickerRef.current?.contains(target)) return;
+      setTaskPickerOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setTaskPickerOpen(false);
+    };
+    window.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [taskPickerOpen]);
 
   const start = useMutation({
     mutationFn: (guid: string) => window.agent.timer.start(guid),
     onSuccess: (s) => {
       setTimer(s);
+      setTaskPickerOpen(false);
+      setTaskPickerQuery('');
       void qc.invalidateQueries({ queryKey: ['today'] });
     },
   });
@@ -98,15 +136,22 @@ export default function Today() {
   const larkConnected = !!larkStatus.data?.connected;
   const larkConfigured = larkStatus.data?.configured !== false;
 
+  const allOpenTasks = sortTasks(tasks.filter((t) => !t.completed), running?.larkTaskGuid ?? null);
   const q = query.trim().toLowerCase();
   const filtered = tasks.filter((t) => !t.completed && (q === '' || t.summary.toLowerCase().includes(q)));
   const openTasks = sortTasks(filtered, running?.larkTaskGuid ?? null);
-  const totalOpen = tasks.filter((t) => !t.completed).length;
+  const totalOpen = allOpenTasks.length;
   const collapsed = !showAll && q === '' && openTasks.length > TASK_COLLAPSE;
   const shownTasks = collapsed ? openTasks.slice(0, TASK_COLLAPSE) : openTasks;
 
   const heroColor = running?.larkTaskGuid ? projectStyle(running.larkTaskGuid).color : 'var(--violet)';
   const isPaused = !!running?.paused;
+  const selectedTask = allOpenTasks.find((t) => t.guid === selectedTaskGuid) ?? allOpenTasks[0] ?? null;
+  const selectedTaskValue = selectedTask?.guid ?? '';
+  const selectedTaskColor = selectedTask ? projectStyle(selectedTask.guid).color : 'var(--violet)';
+  const pickerQuery = taskPickerQuery.trim().toLowerCase();
+  const pickerTasks = pickerQuery === '' ? allOpenTasks : allOpenTasks.filter((task) => task.summary.toLowerCase().includes(pickerQuery));
+  const canStartSelectedTask = !!selectedTask && !start.isPending;
 
   return (
     <>
@@ -123,20 +168,96 @@ export default function Today() {
               <div className="hero-proj">
                 {running ? (
                   <><i className="dt-dot" style={{ background: heroColor }} />{runningTask?.summary ?? 'Tracking'}{isPaused ? ' · paused, time not counting' : ''}</>
+                ) : larkTasks.isLoading ? (
+                  <><Clock size={14} /> Loading tasks...</>
+                ) : !larkConnected ? (
+                  <><Clock size={14} /> Connect Lark first</>
+                ) : totalOpen === 0 ? (
+                  <><Clock size={14} /> No open tasks</>
                 ) : (
-                  <><Clock size={14} /> No timer running</>
+                  <div className="hero-task-picker" ref={taskPickerRef}>
+                    <span className="sr-only">Task to start</span>
+                    <button
+                      type="button"
+                      className="hero-task-trigger no-drag"
+                      onClick={() => setTaskPickerOpen((open) => !open)}
+                      aria-haspopup="listbox"
+                      aria-expanded={taskPickerOpen}
+                    >
+                      <span className="hero-task-icon" style={{ background: selectedTaskColor }}>
+                        <ListTodo size={11} strokeWidth={2.3} />
+                      </span>
+                      <span className="hero-task-label">{selectedTask?.summary ?? 'Select task'}</span>
+                      <ChevronDown className="hero-task-caret-inline" size={13} strokeWidth={2.5} aria-hidden="true" />
+                    </button>
+                    {taskPickerOpen && (
+                      <div className="hero-task-menu no-drag" role="dialog" aria-label="Choose task">
+                        <div className="hero-task-search">
+                          <Search size={14} strokeWidth={2.2} />
+                          <input
+                            ref={taskPickerSearchRef}
+                            value={taskPickerQuery}
+                            onChange={(e) => setTaskPickerQuery(e.target.value)}
+                            placeholder="Search tasks"
+                          />
+                        </div>
+                        <div className="hero-task-options" role="listbox">
+                          {pickerTasks.length === 0 ? (
+                            <div className="hero-task-empty">No matching tasks</div>
+                          ) : (
+                            pickerTasks.map((task) => {
+                              const style = projectStyle(task.guid);
+                              const selected = task.guid === selectedTaskValue;
+                              return (
+                                <button
+                                  type="button"
+                                  key={task.guid}
+                                  className={`hero-task-option${selected ? ' selected' : ''}`}
+                                  role="option"
+                                  aria-selected={selected}
+                                  onClick={() => {
+                                    setSelectedTaskGuid(task.guid);
+                                    setTaskPickerOpen(false);
+                                    setTaskPickerQuery('');
+                                  }}
+                                >
+                                  <span className="hero-task-option-icon" style={{ background: style.color }}>
+                                    <ListTodo size={12} strokeWidth={2.3} />
+                                  </span>
+                                  <span className="hero-task-option-name">{task.summary}</span>
+                                  {selected && <Check size={14} strokeWidth={2.4} />}
+                                </button>
+                              );
+                            })
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
             </div>
-            {running && (
+            {running ? (
               <div className="hero-actions">
                 {isPaused && (
-                  <button className="hero-resume no-drag" onClick={() => resume.mutate()} disabled={resume.isPending} title="Resume tracking">
-                    <Play size={16} strokeWidth={2.5} fill="currentColor" /> Resume
+                  <button className="hero-resume no-drag" onClick={() => resume.mutate()} disabled={resume.isPending} title="Resume tracking" aria-label="Resume tracking">
+                    <Play size={18} strokeWidth={2.5} fill="currentColor" />
                   </button>
                 )}
-                <button className="hero-stop no-drag" onClick={() => stop.mutate()} disabled={stop.isPending} title="Stop">
-                  <Square size={16} strokeWidth={2.5} fill="currentColor" /> Stop
+                <button className="hero-stop no-drag" onClick={() => stop.mutate()} disabled={stop.isPending} title="Stop" aria-label="Stop tracking">
+                  <Square size={18} strokeWidth={2.5} fill="currentColor" />
+                </button>
+              </div>
+            ) : (
+              <div className="hero-actions">
+                <button
+                  className="hero-start no-drag"
+                  onClick={() => selectedTask && start.mutate(selectedTask.guid)}
+                  disabled={!canStartSelectedTask}
+                  title={selectedTask ? `Start ${selectedTask.summary}` : 'No task available'}
+                  aria-label={selectedTask ? `Start ${selectedTask.summary}` : 'No task available'}
+                >
+                  <Play size={18} strokeWidth={2.5} fill="currentColor" />
                 </button>
               </div>
             )}

@@ -8,7 +8,6 @@ export const LARK_SCOPES = [
   'task:task:read',
   'task:task:write',
   'task:tasklist:read',
-  'task:comment:write',
   'calendar:calendar:readonly',
   'calendar:calendar.free_busy:read',
   'vc:meeting:readonly',

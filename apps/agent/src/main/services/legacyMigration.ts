@@ -6,6 +6,7 @@ import { log } from '../logger';
 /** App-dir names used by prior builds, as siblings of the current userData dir. */
 const LEGACY_APP_DIRS = ['Grind'];
 const MIGRATE_FILES = ['tokens.bin', 'pending-lark-login.bin'];
+const MIGRATED_SUFFIX = '.migrated-to-timo';
 
 /**
  * Recover a session stranded by the Grind->Timo rebrand. On Windows the
@@ -29,12 +30,25 @@ export function migrateLegacyUserData(): void {
       for (const file of MIGRATE_FILES) {
         const from = path.join(legacyDir, file);
         const to = path.join(currentDir, file);
-        if (fs.existsSync(from) && !fs.existsSync(to)) fs.copyFileSync(from, to);
+        if (fs.existsSync(from) && !fs.existsSync(to)) {
+          fs.copyFileSync(from, to);
+          quarantineLegacyFile(from);
+        }
       }
       log.info('migrated legacy session from prior app identity', { from: legacyDir, to: currentDir });
       return;
     }
   } catch (err) {
     log.warn('legacy userData migration failed', { err: String(err) });
+  }
+}
+
+function quarantineLegacyFile(file: string): void {
+  try {
+    const backup = `${file}${MIGRATED_SUFFIX}`;
+    if (fs.existsSync(backup)) fs.rmSync(file, { force: true });
+    else fs.renameSync(file, backup);
+  } catch (err) {
+    log.warn('legacy userData quarantine failed', { file, err: String(err) });
   }
 }
