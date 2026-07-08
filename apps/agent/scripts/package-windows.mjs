@@ -158,6 +158,8 @@ async function main() {
   if (process.env.PUBLISH === '1') {
     console.log(`> publishing artifacts to GitHub Releases (channel: ${channel})`);
     builderArgs.push('--publish', 'always');
+  } else {
+    builderArgs.push('--publish', 'never');
   }
 
   await run('pnpm', builderArgs, rootDir, env);
