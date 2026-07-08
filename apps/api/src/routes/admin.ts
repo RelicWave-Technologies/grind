@@ -22,18 +22,22 @@ import {
 } from '../insights/invalidations';
 import { loadTimeInvalidationsForUsers } from '../insights/timeInvalidations';
 import {
+  CreateApiTokenRequest,
+  API_TOKEN_SCOPES,
   CreateShiftSchema,
   PatchShiftSchema,
   PatchTeamMemberSettingsRequest,
   ShiftScheduleSchema,
   WORKSPACE_POLICY_DEFAULTS,
   normalizeScreenshotIntervalMin,
+  type ApiTokenDto,
   type MonitoringSettingsAuditDto,
   type TeamMemberSettingsDto,
   type TeamSettingsResponse,
   type ShiftDto,
   type ShiftSchedule,
 } from '@grind/types';
+import { generateApiToken } from '../lib/apiTokens';
 import {
   monitoringRiskLevel,
   monitoringTimingChanged,
@@ -57,6 +61,33 @@ import {
  */
 export const adminRouter = Router();
 adminRouter.use(requireAccessToken, attachScope);
+
+type ApiTokenRow = {
+  id: string;
+  name: string;
+  tokenPrefix: string;
+  scopes: string[];
+  createdAt: Date;
+  lastUsedAt: Date | null;
+  revokedAt: Date | null;
+  createdBy: { id: string; name: string; email: string };
+};
+
+function serializeApiToken(token: ApiTokenRow): ApiTokenDto {
+  const validScopes = new Set<string>(API_TOKEN_SCOPES);
+  return {
+    id: token.id,
+    name: token.name,
+    tokenPrefix: token.tokenPrefix,
+    scopes: token.scopes.filter((scope): scope is ApiTokenDto['scopes'][number] =>
+      validScopes.has(scope),
+    ),
+    createdBy: token.createdBy,
+    createdAt: token.createdAt.toISOString(),
+    lastUsedAt: token.lastUsedAt ? token.lastUsedAt.toISOString() : null,
+    revokedAt: token.revokedAt ? token.revokedAt.toISOString() : null,
+  };
+}
 
 interface UserListEntry {
   id: string;
@@ -177,6 +208,77 @@ adminRouter.get('/users', async (req, res, next) => {
           : null,
     }));
     res.json({ users: out, scope: req.scope.scope });
+  } catch (err) {
+    next(err);
+  }
+});
+
+adminRouter.get('/api-tokens', requireAdmin, async (req, res, next) => {
+  try {
+    if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
+    const tokens = await prisma.apiToken.findMany({
+      where: { workspaceId: req.scope.workspaceId },
+      select: {
+        id: true,
+        name: true,
+        tokenPrefix: true,
+        scopes: true,
+        createdAt: true,
+        lastUsedAt: true,
+        revokedAt: true,
+        createdBy: { select: { id: true, name: true, email: true } },
+      },
+      orderBy: [{ revokedAt: 'asc' }, { createdAt: 'desc' }],
+    });
+    res.json({ tokens: tokens.map(serializeApiToken) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+adminRouter.post('/api-tokens', requireAdmin, async (req, res, next) => {
+  try {
+    if (!req.scope || !req.user) return res.status(401).json({ error: 'unauthorized' });
+    const parsed = CreateApiTokenRequest.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'invalid_request', issues: parsed.error.issues });
+
+    const generated = generateApiToken();
+    const token = await prisma.apiToken.create({
+      data: {
+        workspaceId: req.scope.workspaceId,
+        createdById: req.user.sub,
+        name: parsed.data.name,
+        scopes: [...new Set(parsed.data.scopes)],
+        publicId: generated.publicId,
+        tokenPrefix: generated.tokenPrefix,
+        tokenHash: generated.tokenHash,
+      },
+      select: {
+        id: true,
+        name: true,
+        tokenPrefix: true,
+        scopes: true,
+        createdAt: true,
+        lastUsedAt: true,
+        revokedAt: true,
+        createdBy: { select: { id: true, name: true, email: true } },
+      },
+    });
+
+    res.status(201).json({ apiToken: serializeApiToken(token), token: generated.rawToken });
+  } catch (err) {
+    next(err);
+  }
+});
+
+adminRouter.post('/api-tokens/:id/revoke', requireAdmin, async (req, res, next) => {
+  try {
+    if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
+    await prisma.apiToken.updateMany({
+      where: { id: req.params.id, workspaceId: req.scope.workspaceId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+    res.json({ ok: true });
   } catch (err) {
     next(err);
   }

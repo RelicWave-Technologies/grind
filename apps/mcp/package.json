@@ -1,0 +1,30 @@
+{
+  "name": "@grind/mcp",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "timo-mcp": "dist/index.cjs"
+  },
+  "main": "dist/index.cjs",
+  "scripts": {
+    "build": "tsup src/index.ts --format cjs --target node20 --clean --out-dir dist",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.cjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "lint": "eslint src"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "@grind/tsconfig": "workspace:*",
+    "@types/node": "20.16.13",
+    "tsup": "8.3.5",
+    "tsx": "4.19.2",
+    "typescript": "5.6.3",
+    "vitest": "2.1.4"
+  }
+}

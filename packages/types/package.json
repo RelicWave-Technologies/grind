@@ -16,7 +16,8 @@
     "./reports": "./src/reports.ts",
     "./profile": "./src/profile.ts",
     "./shifts": "./src/shifts.ts",
-    "./workspacePolicy": "./src/workspacePolicy.ts"
+    "./workspacePolicy": "./src/workspacePolicy.ts",
+    "./apiTokens": "./src/apiTokens.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",

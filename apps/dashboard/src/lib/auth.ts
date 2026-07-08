@@ -32,7 +32,8 @@ export type Permission =
   | 'flags.workspace.review'
   | 'payroll.manage'
   | 'overview.read'
-  | 'tester-ops.manage';
+  | 'tester-ops.manage'
+  | 'api-tokens.manage';
 
 export interface Me {
   id: string;
