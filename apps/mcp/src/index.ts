@@ -9,7 +9,7 @@ async function main() {
   const config = loadConfig();
   const server = new McpServer({
     name: 'timo',
-    version: '0.1.0',
+    version: '0.2.0',
   });
   registerTimoTools(server, new TimoClient(config));
   await server.connect(new StdioServerTransport());

@@ -2,10 +2,11 @@ import { describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { prisma } from '@grind/db';
 import { buildApp } from '../src/app';
-import { seedUser } from './helpers';
+import { fakeUlid, seedUser } from './helpers';
 
 const app = buildApp();
 const bearer = (token: string) => ({ Authorization: `Bearer ${token}` });
+const ALL_READ_SCOPES = ['read:people', 'read:device-health', 'read:time-summary', 'read:manual-time'];
 
 async function createToken(accessToken: string, scopes: string[] = ['read:people']) {
   const res = await request(app)
@@ -96,7 +97,7 @@ describe('admin API tokens', () => {
     const second = await seedUser({ role: 'ADMIN' });
     await prisma.user.update({ where: { id: first.userId }, data: { name: 'First Admin' } });
     await prisma.user.update({ where: { id: second.userId }, data: { name: 'Second Admin' } });
-    const created = await createToken(first.accessToken, ['read:people']);
+    const created = await createToken(first.accessToken, ['read:people', 'read:device-health']);
 
     const res = await request(app)
       .get('/v1/mcp/people')
@@ -104,5 +105,207 @@ describe('admin API tokens', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.users.map((user: { name: string }) => user.name)).toEqual(['First Admin']);
+  });
+
+  it('serves detailed read-only MCP routes with scoped tokens', async () => {
+    const admin = await seedUser({ role: 'ADMIN' });
+    const team = await prisma.team.create({
+      data: { workspaceId: admin.workspaceId, name: 'Design' },
+    });
+    await prisma.teamManager.create({
+      data: { workspaceId: admin.workspaceId, teamId: team.id, userId: admin.userId },
+    });
+    await prisma.user.update({
+      where: { id: admin.userId },
+      data: {
+        teamId: team.id,
+        agentVersion: '0.0.2-beta.25',
+        agentPlatform: 'darwin',
+        agentState: 'RUNNING',
+        agentLastSeenAt: new Date(),
+        agentScreenPermissionStatus: 'granted',
+        agentAccessibilityTrusted: true,
+        agentAccessibilityReady: true,
+      },
+    });
+
+    const startedAt = new Date('2026-07-09T03:00:00.000Z');
+    const endedAt = new Date('2026-07-09T04:00:00.000Z');
+    await prisma.timeEntry.create({
+      data: {
+        id: fakeUlid('te'),
+        clientUuid: fakeUlid('client'),
+        userId: admin.userId,
+        source: 'AUTO',
+        startedAt,
+        endedAt,
+        segments: {
+          create: {
+            id: fakeUlid('seg'),
+            kind: 'WORK',
+            startedAt,
+            endedAt,
+          },
+        },
+      },
+    });
+    await prisma.manualTimeRequest.create({
+      data: {
+        clientUuid: fakeUlid('mtr-client'),
+        userId: admin.userId,
+        taskSummary: 'Design review',
+        requestedStart: startedAt,
+        requestedEnd: endedAt,
+        reason: 'Forgot to start Timo',
+        status: 'PENDING',
+      },
+    });
+    await prisma.activityFlag.create({
+      data: {
+        userId: admin.userId,
+        type: 'METRONOMIC',
+        windowStart: startedAt,
+        windowEnd: endedAt,
+        riskScore: 30,
+        evidence: { keysPerMin: 120 },
+      },
+    });
+    const created = await createToken(admin.accessToken, ALL_READ_SCOPES);
+
+    const overview = await request(app)
+      .get('/v1/mcp/workspace-overview?tz=UTC')
+      .set(bearer(created.token));
+    expect(overview.status).toBe(200);
+    expect(overview.body.devices.running).toBe(1);
+    expect(overview.body.manualTime.pendingTotal).toBe(1);
+    expect(overview.body.activityFlags.openTotal).toBe(1);
+
+    const userDetail = await request(app)
+      .get(`/v1/mcp/user-detail?userId=${admin.userId}&from=2026-07-09&to=2026-07-09&tz=UTC`)
+      .set(bearer(created.token));
+    expect(userDetail.status).toBe(200);
+    expect(userDetail.body.user.device.status).toBe('running');
+    expect(userDetail.body.time.total.workedMs).toBe(60 * 60 * 1000);
+    expect(userDetail.body.manualTimeRequests).toHaveLength(1);
+
+    const teamSummary = await request(app)
+      .get(`/v1/mcp/team-summary?teamId=${team.id}&from=2026-07-09&to=2026-07-09&tz=UTC`)
+      .set(bearer(created.token));
+    expect(teamSummary.status).toBe(200);
+    expect(teamSummary.body.teams[0].deviceCounts.running).toBe(1);
+    expect(teamSummary.body.teams[0].time.total.workedMs).toBe(60 * 60 * 1000);
+
+    const flags = await request(app)
+      .get('/v1/mcp/activity-flags-summary?from=2026-07-09&to=2026-07-09&tz=UTC')
+      .set(bearer(created.token));
+    expect(flags.status).toBe(200);
+    expect(flags.body.counts.byStatus).toEqual([{ status: 'OPEN', count: 1 }]);
+    expect(flags.body.flags[0]).toMatchObject({ type: 'METRONOMIC', riskScore: 30 });
+  });
+
+  it('keeps detailed MCP routes privacy-safe', async () => {
+    const admin = await seedUser({ role: 'ADMIN' });
+    await prisma.user.update({
+      where: { id: admin.userId },
+      data: {
+        agentVersion: '0.0.2-beta.25',
+        agentPlatform: 'win32',
+        agentState: 'RUNNING',
+        agentLastSeenAt: new Date(),
+      },
+    });
+    const startedAt = new Date('2026-07-09T05:00:00.000Z');
+    const endedAt = new Date('2026-07-09T05:10:00.000Z');
+    const entry = await prisma.timeEntry.create({
+      data: {
+        id: fakeUlid('te'),
+        clientUuid: fakeUlid('client'),
+        userId: admin.userId,
+        source: 'AUTO',
+        startedAt,
+        endedAt,
+        segments: {
+          create: {
+            id: fakeUlid('seg'),
+            kind: 'WORK',
+            startedAt,
+            endedAt,
+          },
+        },
+      },
+    });
+    await prisma.activitySample.create({
+      data: {
+        id: fakeUlid('sample'),
+        userId: admin.userId,
+        timeEntryId: entry.id,
+        bucketStart: startedAt,
+        keystrokes: 99,
+        clicks: 88,
+        mouseDistancePx: 777,
+        scrollEvents: 6,
+        activeTitle: 'SECRET_WINDOW_TITLE',
+        activeUrl: 'https://private.example/secret',
+      },
+    });
+    await prisma.screenshot.create({
+      data: {
+        id: fakeUlid('shot'),
+        userId: admin.userId,
+        timeEntryId: entry.id,
+        capturedAt: startedAt,
+        s3Key: 'secret/screenshot.png',
+        fullUrl: 'https://private.example/screenshot.png',
+        thumbUrl: 'https://private.example/thumb.png',
+      },
+    });
+    await prisma.activityFlag.create({
+      data: {
+        userId: admin.userId,
+        type: 'IMPOSSIBLE_RATE',
+        windowStart: startedAt,
+        windowEnd: endedAt,
+        riskScore: 90,
+        evidence: { rawSignal: 'SECRET_EVIDENCE' },
+      },
+    });
+    const created = await createToken(admin.accessToken, ALL_READ_SCOPES);
+
+    const responses = await Promise.all([
+      request(app).get('/v1/mcp/workspace-overview?tz=UTC').set(bearer(created.token)),
+      request(app).get(`/v1/mcp/user-detail?userId=${admin.userId}&from=2026-07-09&to=2026-07-09&tz=UTC`).set(bearer(created.token)),
+      request(app).get('/v1/mcp/time-summary?from=2026-07-09&to=2026-07-09&tz=UTC').set(bearer(created.token)),
+      request(app).get('/v1/mcp/activity-flags-summary?from=2026-07-09&to=2026-07-09&tz=UTC').set(bearer(created.token)),
+    ]);
+
+    for (const res of responses) expect(res.status).toBe(200);
+    const payload = JSON.stringify(responses.map((res) => res.body));
+    expect(payload).not.toContain('SECRET_WINDOW_TITLE');
+    expect(payload).not.toContain('https://private.example');
+    expect(payload).not.toContain('secret/screenshot.png');
+    expect(payload).not.toContain('SECRET_EVIDENCE');
+    expect(payload).not.toContain('activeTitle');
+    expect(payload).not.toContain('activeUrl');
+    expect(payload).not.toContain('fullUrl');
+    expect(payload).not.toContain('thumbUrl');
+    expect(payload).not.toContain('s3Key');
+    expect(payload).not.toContain('evidence');
+  });
+
+  it('rejects missing scopes and over-large detailed MCP ranges', async () => {
+    const admin = await seedUser({ role: 'ADMIN' });
+    const peopleOnly = await createToken(admin.accessToken, ['read:people']);
+
+    const missingScope = await request(app)
+      .get('/v1/mcp/activity-flags-summary')
+      .set(bearer(peopleOnly.token));
+    expect(missingScope.status).toBe(403);
+
+    const full = await createToken(admin.accessToken, ALL_READ_SCOPES);
+    const tooLarge = await request(app)
+      .get('/v1/mcp/activity-flags-summary?from=2026-01-01&to=2026-02-15&tz=UTC')
+      .set(bearer(full.token));
+    expect(tooLarge.status).toBe(400);
+    expect(tooLarge.body).toMatchObject({ error: 'invalid_date_range', maxDays: 31 });
   });
 });
