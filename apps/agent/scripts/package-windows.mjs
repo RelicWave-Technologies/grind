@@ -72,6 +72,7 @@ async function copyIfExists(src, dest) {
 async function writeRuntimePackageJson() {
   const raw = await fs.readFile(path.join(agentDir, 'package.json'), 'utf8');
   const pkg = JSON.parse(raw);
+  pkg.productName = pkg.productName || 'Timo';
   delete pkg.devDependencies;
   pkg.scripts = {};
   await fs.writeFile(path.join(stage, 'package.json'), `${JSON.stringify(pkg, null, 2)}\n`);

@@ -3,6 +3,7 @@
   "version": "0.0.2-beta.24",
   "private": true,
   "type": "module",
+  "productName": "Timo",
   "description": "Timo time tracker desktop agent",
   "author": "RelicWave Technologies",
   "main": "out/main/index.cjs",
