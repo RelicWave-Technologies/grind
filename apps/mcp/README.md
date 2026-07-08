@@ -5,12 +5,14 @@
 <h1 align="center">Timo MCP</h1>
 
 <p align="center">
-  Read-only MCP tools for Timo workspace health, people, time, and manual-time requests.
+  Detailed read-only MCP tools for Timo workspace operations, device health, time summaries, and audit context.
 </p>
 
 ---
 
-The server runs locally over stdio and talks only to the Timo API. It does not connect to the VM, Postgres, screenshots, or raw activity samples.
+Timo MCP runs locally over stdio and talks only to the Timo API using a scoped API token.
+
+It does not connect to the VM, Postgres, dashboard cookies, Lark write APIs, screenshots, or raw activity samples.
 
 ## Install
 
@@ -42,19 +44,66 @@ Restart the MCP client after editing the config.
 
 ## Tools
 
-- `timo_version_adoption`
-- `timo_device_health`
-- `timo_running_users`
-- `timo_people_list`
-- `timo_time_summary`
-- `timo_manual_time_requests`
+- `timo_mcp_capabilities` — explains tools, scopes, limits, date formats, and privacy boundaries.
+- `timo_workspace_overview` — workspace totals for people, teams, devices, versions, today time, manual-time requests, and open activity flags.
+- `timo_people_list` — active people with role, team, managed team, shift, and device summary.
+- `timo_user_detail` — one user's profile, device health, time totals, and recent manual-time requests.
+- `timo_device_health` — app version, platform, runtime state, heartbeat freshness, and permission health.
+- `timo_version_adoption` — version/platform/state adoption buckets and unknown/stale users.
+- `timo_running_users` — users currently RUNNING with a fresh heartbeat.
+- `timo_team_summary` — team managers, roster, device counts, permission issues, and time totals.
+- `timo_time_summary` — per-user/per-day tracked, meeting, manual, invalidated, and total time.
+- `timo_manual_time_requests` — manual-time request and decision audit metadata.
+- `timo_activity_flags_summary` — privacy-safe flag counts and recent flag summaries.
+
+## Scopes
+
+- `read:people` — people, roles, teams, shifts, roster context.
+- `read:device-health` — desktop platform, version, runtime state, heartbeat, permissions.
+- `read:time-summary` — aggregated time summaries and privacy-safe activity flag summaries.
+- `read:manual-time` — manual-time requests and approval audit metadata.
+
+Some detailed tools require multiple scopes. If a token is missing a scope, the tool fails clearly with `insufficient_scope` instead of returning partial or guessed data.
+
+## Example Questions
+
+- "Which Timo version is everyone using?"
+- "Who is currently running Timo?"
+- "Show me users with stale or missing desktop heartbeats."
+- "Which Mac users are missing Screen Recording or Accessibility?"
+- "Summarize today's tracked time by team."
+- "Show pending manual-time requests."
+- "Give me privacy-safe activity flag counts for this week."
+- "What can this Timo MCP read, and what is intentionally blocked?"
+
+## Privacy
+
+This MCP never exposes:
+
+- screenshots or screenshot URLs
+- S3 keys
+- raw `ActivitySample` rows
+- raw keystroke/click/mouse minute timelines
+- foreground window titles
+- browser URLs
+- dashboard cookies
+- token hashes or secrets
+
+It also has no write tools. It cannot approve requests, edit time, create users, change settings, or send Lark messages.
+
+## Limits
+
+- List tools return at most 200 rows.
+- Summary-style tools allow at most 31 days per request.
+- Dates use `YYYY-MM-DD`.
+- Timezone accepts IANA names such as `Asia/Kolkata` or `UTC`.
 
 ## Security
 
 - Use one token per person or machine.
 - Do not paste tokens into chat or commit them to git.
 - Revoke lost or shared tokens from **Integrations**.
-- Tokens are scoped and read-only, but they can still expose workspace people, device health, running status, time summaries, and manual-time requests.
+- Rotate any token that was accidentally shared.
 
 ## Local Development
 
