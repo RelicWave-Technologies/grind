@@ -1,5 +1,5 @@
 import { Outlet, Link, useRouteContext, useNavigate, useLocation } from '@tanstack/react-router';
-import { Home, Clock4, Inbox, LayoutGrid, CalendarCheck, ShieldAlert, Building2, Sunrise, LogOut, ShieldCheck, FileSpreadsheet, Compass, FileText, User, Users, Bot } from 'lucide-react';
+import { Home, Clock4, Inbox, LayoutGrid, CalendarCheck, ShieldAlert, Building2, Sunrise, LogOut, ShieldCheck, FileSpreadsheet, Compass, FileText, User, Users, KeyRound } from 'lucide-react';
 import { hasCapability, useLogout, type Permission } from '../lib/auth';
 import { AGENT_DOWNLOADS, agentDownloadUrl } from '../lib/downloads';
 import {
@@ -21,7 +21,6 @@ interface NavEntry {
 const NAV: NavEntry[] = [
   { to: '/', label: 'Home', Icon: Home, show: 'all' },
   { to: '/overview', label: 'Overview', Icon: Compass, show: { permission: 'overview.read' } },
-  { to: '/tester-ops', label: 'Tester Ops', Icon: Bot, show: { permission: 'tester-ops.manage' } },
   { to: '/users', label: 'People', Icon: Users, show: { permission: 'people.read' } },
   { to: '/edit-time', label: 'Edit Time', Icon: Clock4, show: 'all' },
   { to: '/reports', label: 'Reports', Icon: FileText, show: { permission: 'reports.self.read' } },
@@ -33,6 +32,7 @@ const NAV: NavEntry[] = [
   { to: '/teams', label: 'Org Teams', Icon: Building2, show: { permission: 'teams.manage' } },
   { to: '/shifts', label: 'Shifts', Icon: Sunrise, show: { permission: 'shifts.manage' } },
   { to: '/policy', label: 'Policy', Icon: ShieldCheck, show: { permission: 'policy.manage' } },
+  { to: '/integrations', label: 'Integrations', Icon: KeyRound, show: { permission: 'api-tokens.manage' } },
   { to: '/payroll', label: 'Payroll', Icon: FileSpreadsheet, show: { permission: 'payroll.manage' } },
 ];
 

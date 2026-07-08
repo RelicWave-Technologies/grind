@@ -31,6 +31,7 @@ model Workspace {
   testerOpsOutboxEvents TesterOpsOutboxEvent[]
   testerOpsKnowledgeSources TesterOpsKnowledgeSource[]
   testerOpsAiRuns TesterOpsAiRun[]
+  apiTokens ApiToken[]
 }
 
 /// Workspace-wide capture policy. A single row per workspace (unique on
@@ -318,12 +319,34 @@ model User {
   /// meetings I was in" reports.
   mtrAttendances           MtrAttendee[]       @relation("MtrAttendeeUser")
   timeEntryAttendances     TimeEntryAttendee[] @relation("TeAttendeeUser")
+  createdApiTokens         ApiToken[]          @relation("ApiTokenCreator")
 
   @@index([workspaceId])
   @@index([teamId])
   @@index([managerId])
   @@index([shiftId])
   @@index([workspaceId, agentState, agentLastSeenAt])
+}
+
+model ApiToken {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdById String
+  createdBy   User      @relation("ApiTokenCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  name        String
+  publicId    String    @unique
+  tokenPrefix String
+  tokenHash   String    @unique
+  scopes      String[]  @default([])
+  lastUsedAt  DateTime?
+  lastUsedIp  String?
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([workspaceId, revokedAt])
+  @@index([createdById])
 }
 
 /// Historical shift assignment snapshots. User.shiftId is the current

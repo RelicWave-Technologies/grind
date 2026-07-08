@@ -23,6 +23,7 @@ export const PERMISSIONS = [
   'payroll.manage',
   'overview.read',
   'tester-ops.manage',
+  'api-tokens.manage',
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];

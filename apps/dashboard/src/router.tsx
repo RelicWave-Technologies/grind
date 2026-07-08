@@ -22,7 +22,7 @@ import { ShiftsScreen } from './screens/Shifts';
 import { PolicyScreen } from './screens/Policy';
 import { PayrollScreen } from './screens/Payroll';
 import { OverviewScreen } from './screens/Overview';
-import { TesterOpsScreen } from './screens/TesterOps';
+import { IntegrationsScreen } from './screens/Integrations';
 import { ReportsScreen } from './screens/Reports';
 import { ProfileScreen } from './screens/Profile';
 
@@ -230,6 +230,16 @@ const policyRoute = createRoute({
   component: PolicyScreen,
 });
 
+const integrationsRoute = createRoute({
+  getParentRoute: () => authedRoot,
+  path: '/integrations',
+  beforeLoad: ({ context }) => {
+    const me = (context as { me?: Me }).me;
+    requireAnyRouteCapability(me, ['api-tokens.manage']);
+  },
+  component: IntegrationsScreen,
+});
+
 const payrollRoute = createRoute({
   getParentRoute: () => authedRoot,
   path: '/payroll',
@@ -252,16 +262,6 @@ const overviewRoute = createRoute({
   component: OverviewScreen,
 });
 
-const testerOpsRoute = createRoute({
-  getParentRoute: () => authedRoot,
-  path: '/tester-ops',
-  beforeLoad: ({ context }) => {
-    const me = (context as { me?: Me }).me;
-    requireAnyRouteCapability(me, ['tester-ops.manage']);
-  },
-  component: TesterOpsScreen,
-});
-
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/login',
@@ -279,6 +279,6 @@ const loginRoute = createRoute({
 });
 
 export const routeTree = rootRoute.addChildren([
-  authedRoot.addChildren([homeRoute, overviewRoute, testerOpsRoute, editTimeRoute, meTodayLegacyRoute, reportsRoute, approvalsRoute, profileRoute, teamRoute, attendanceRoute, flagsRoute, usersRoute, teamsAdminRoute, shiftsRoute, policyRoute, payrollRoute]),
+  authedRoot.addChildren([homeRoute, overviewRoute, editTimeRoute, meTodayLegacyRoute, reportsRoute, approvalsRoute, profileRoute, teamRoute, attendanceRoute, flagsRoute, usersRoute, teamsAdminRoute, shiftsRoute, policyRoute, integrationsRoute, payrollRoute]),
   loginRoute,
 ]);

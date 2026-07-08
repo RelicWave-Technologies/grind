@@ -1,0 +1,223 @@
+.int-token-table-card {
+  overflow: hidden;
+}
+
+.int-create-strip {
+  display: grid;
+  grid-template-columns:
+    minmax(calc(var(--ui-sp-12) * 4), 0.9fr)
+    minmax(calc(var(--ui-sp-12) * 5), 1.25fr)
+    auto;
+  gap: var(--ui-sp-5);
+  align-items: start;
+  padding: var(--ui-sp-6) var(--ui-sp-7);
+  border-bottom: 1px solid var(--ui-line);
+  background: var(--ui-surface);
+}
+
+.int-create-name {
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ui-sp-3);
+}
+
+.int-create-name > .int-token-icon,
+.int-create-strip > .ui-btn {
+  margin-top: calc(var(--ui-sp-4) + var(--ui-sp-2));
+}
+
+.int-name-field {
+  min-width: 0;
+  flex: 1;
+}
+
+.int-scope-field {
+  min-width: 0;
+  display: grid;
+  gap: var(--ui-sp-2);
+}
+
+.int-scope-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ui-sp-2);
+}
+
+.int-scope {
+  min-width: 0;
+  height: var(--ui-control-h);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-sp-2);
+  padding: 0 var(--ui-sp-3);
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-sm);
+  background: var(--ui-surface-inset);
+}
+
+.int-token-name span {
+  min-width: 0;
+  display: grid;
+  gap: var(--ui-sp-1);
+}
+
+.int-token-name strong {
+  color: var(--ui-ink);
+  font-weight: 620;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.int-token-name small {
+  color: var(--ui-ink-3);
+  font-size: var(--ui-sp-4);
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.int-inline-banner {
+  padding: var(--ui-sp-4) var(--ui-sp-7) 0;
+}
+
+.int-token-once {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--ui-sp-3);
+  align-items: center;
+  margin: var(--ui-sp-4) var(--ui-sp-7);
+  padding: var(--ui-sp-4);
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-md);
+  background: var(--ui-surface-inset);
+}
+
+.int-token-once-copy {
+  min-width: 0;
+  display: grid;
+  gap: var(--ui-sp-2);
+}
+
+.int-token-box {
+  min-width: 0;
+  height: var(--ui-control-h);
+  display: flex;
+  align-items: center;
+  padding: 0 var(--ui-sp-4);
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-sm);
+  background: var(--ui-surface);
+  color: var(--ui-ink);
+  font-family: var(--ui-font-mono);
+  font-size: var(--ui-sp-4);
+  white-space: nowrap;
+  overflow-x: auto;
+}
+
+.int-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.int-table {
+  min-width: calc(var(--ui-sp-12) * 15);
+  table-layout: fixed;
+}
+
+.int-col-name { width: 22%; }
+.int-col-prefix { width: 24%; }
+.int-col-scopes { width: 22%; }
+.int-col-created { width: 11%; }
+.int-col-used { width: 13%; }
+.int-col-action { width: 8%; }
+
+.int-table .ui-table__row {
+  height: calc(var(--ui-row-h) + var(--ui-sp-8));
+}
+
+.int-table .ui-th,
+.int-table .ui-td {
+  padding-left: var(--ui-sp-4);
+  padding-right: var(--ui-sp-4);
+  vertical-align: middle;
+}
+
+.int-table .ui-td {
+  padding-top: var(--ui-sp-3);
+  padding-bottom: var(--ui-sp-3);
+}
+
+.int-token-name {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--ui-sp-3);
+}
+
+.int-token-icon {
+  flex: 0 0 auto;
+  display: inline-grid;
+  place-items: center;
+  width: calc(var(--ui-control-h) - var(--ui-sp-2));
+  height: calc(var(--ui-control-h) - var(--ui-sp-2));
+  border-radius: var(--ui-r-full);
+  background: var(--ui-surface-inset);
+  color: var(--ui-ink-2);
+}
+
+.int-prefix-cell,
+.int-date-cell,
+.int-action-cell {
+  white-space: nowrap;
+}
+
+.int-prefix-cell {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.int-date-stamp {
+  min-width: 0;
+  display: inline-grid;
+  gap: var(--ui-sp-1);
+  color: var(--ui-ink);
+  line-height: 1.15;
+}
+
+.int-date-stamp small,
+.int-date-empty {
+  color: var(--ui-ink-3);
+  font-size: var(--ui-sp-4);
+  line-height: 1.15;
+}
+
+.int-tags {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--ui-sp-2);
+}
+
+.int-confirm {
+  display: inline-flex;
+  justify-content: flex-end;
+  gap: var(--ui-sp-2);
+  white-space: nowrap;
+}
+
+@media (max-width: 860px) {
+  .int-create-strip,
+  .int-token-once {
+    grid-template-columns: 1fr;
+  }
+
+  .int-create-name {
+    align-items: flex-start;
+  }
+}

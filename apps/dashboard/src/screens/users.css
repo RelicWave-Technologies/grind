@@ -6,27 +6,29 @@
 
 /* Roster row action cluster — right-aligned icon buttons. */
 .usr-table-wrap {
+  max-width: 100%;
   width: 100%;
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .usr-table {
-  min-width: 760px;
+  min-width: calc(var(--ui-sp-12) * 14);
   table-layout: fixed;
 }
 
 .usr-table--device {
-  min-width: 980px;
+  min-width: calc(var(--ui-sp-12) * 21);
 }
 
-.usr-table--device .usr-col-person { width: 24%; }
+.usr-table--device .usr-col-person { width: 23%; }
 .usr-table--device .usr-col-role { width: 11%; }
 .usr-table--device .usr-col-status { width: 8%; }
-.usr-table--device .usr-col-team { width: 9%; }
-.usr-table--device .usr-col-shift { width: 6%; }
-.usr-table--device .usr-col-device { width: 12%; }
-.usr-table--device .usr-col-permissions { width: 12%; }
-.usr-table--device .usr-col-joined { width: 10%; }
+.usr-table--device .usr-col-team { width: 10%; }
+.usr-table--device .usr-col-shift { width: 7%; }
+.usr-table--device .usr-col-device { width: 13%; }
+.usr-table--device .usr-col-permissions { width: 13%; }
+.usr-table--device .usr-col-joined { width: 7%; }
 .usr-table--device .usr-col-actions { width: 8%; }
 
 .usr-table .ui-table__row {
@@ -43,6 +45,7 @@
   padding-left: var(--ui-sp-4);
   padding-right: var(--ui-sp-4);
   overflow: hidden;
+  vertical-align: middle;
 }
 
 .usr-actions {
