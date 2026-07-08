@@ -42,6 +42,32 @@ describe('heartbeat payload', () => {
     });
   });
 
+  it('includes the current permission snapshot when provided', () => {
+    const status: TimerStatus = { state: 'IDLE', workedMs: 0 };
+    expect(
+      buildHeartbeatRequest({
+        agentVersion: '0.0.2',
+        platform: 'darwin',
+        timerStatus: status,
+        permissions: {
+          screen: { status: 'granted', health: 'ok', state: 'ok' },
+          accessibility: {
+            trusted: true,
+            ready: true,
+            recording: false,
+            capturing: false,
+            hookRunning: false,
+          },
+        },
+      }),
+    ).toMatchObject({
+      permissions: {
+        screen: { status: 'granted', health: 'ok', state: 'ok' },
+        accessibility: { trusted: true, ready: true },
+      },
+    });
+  });
+
   it('normalizes unknown node platforms to linux', () => {
     expect(currentPlatform('darwin')).toBe('darwin');
     expect(currentPlatform('win32')).toBe('win32');

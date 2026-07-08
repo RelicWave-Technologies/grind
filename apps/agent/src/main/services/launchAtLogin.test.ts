@@ -109,4 +109,20 @@ describe('launch at login service', () => {
     });
     expect(info).toMatchObject({ enabled: true, status: 'enabled', canRegister: false });
   });
+
+  it('disables legacy Grind Windows startup entries', () => {
+    const exe = 'C:\\Users\\Anish\\AppData\\Local\\Programs\\Timo\\Timo.exe';
+
+    service('win32', exe).cleanupLegacy();
+
+    expect(mocks.app.setLoginItemSettings).toHaveBeenCalledWith({
+      openAtLogin: false,
+      path: 'C:\\Users\\Anish\\AppData\\Local\\Programs\\Grind\\Grind.exe',
+      args: ['--hidden'],
+    });
+    expect(mocks.app.setLoginItemSettings).toHaveBeenCalledWith({
+      openAtLogin: false,
+      path: 'C:\\Users\\Anish\\AppData\\Local\\Programs\\Grind\\Grind.exe',
+    });
+  });
 });

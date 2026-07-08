@@ -97,7 +97,12 @@ export function showFloatingBar(): void {
   wantVisible = true;
   if (!getPreferences().floatingBar.visible) return;
   const w = ensure();
-  if (!w.isVisible()) w.showInactive();
+  reassertFloating();
+  // macOS can drop a non-activating panel from the onscreen window list while
+  // Electron still reports it as visible after Space/fullscreen transitions.
+  // Re-showing is idempotent and keeps the tracking indicator recoverable.
+  if (process.platform === 'darwin' || !w.isVisible()) w.showInactive();
+  w.moveTop();
   reassertFloating();
 }
 

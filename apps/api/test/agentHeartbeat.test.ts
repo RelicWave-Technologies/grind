@@ -19,6 +19,16 @@ describe('POST /v1/agent/heartbeat', () => {
         platform: 'darwin',
         state: 'PAUSED_IDLE',
         activeEntryId: 'entry-paused',
+        permissions: {
+          screen: { status: 'granted', health: 'ok', state: 'ok' },
+          accessibility: {
+            trusted: true,
+            ready: true,
+            recording: false,
+            capturing: false,
+            hookRunning: false,
+          },
+        },
       });
 
     expect(res.status).toBe(200);
@@ -33,6 +43,15 @@ describe('POST /v1/agent/heartbeat', () => {
         agentVersion: true,
         agentPlatform: true,
         agentActiveEntryId: true,
+        agentScreenPermissionStatus: true,
+        agentScreenCaptureHealth: true,
+        agentScreenPermissionState: true,
+        agentAccessibilityTrusted: true,
+        agentAccessibilityReady: true,
+        agentAccessibilityRecording: true,
+        agentAccessibilityCapturing: true,
+        agentAccessibilityHookRunning: true,
+        agentPermissionsUpdatedAt: true,
       },
     });
     expect(row.agentLastSeenAt).toBeInstanceOf(Date);
@@ -40,9 +59,18 @@ describe('POST /v1/agent/heartbeat', () => {
     expect(row.agentVersion).toBe('0.0.2');
     expect(row.agentPlatform).toBe('darwin');
     expect(row.agentActiveEntryId).toBe('entry-paused');
+    expect(row.agentScreenPermissionStatus).toBe('granted');
+    expect(row.agentScreenCaptureHealth).toBe('ok');
+    expect(row.agentScreenPermissionState).toBe('ok');
+    expect(row.agentAccessibilityTrusted).toBe(true);
+    expect(row.agentAccessibilityReady).toBe(true);
+    expect(row.agentAccessibilityRecording).toBe(false);
+    expect(row.agentAccessibilityCapturing).toBe(false);
+    expect(row.agentAccessibilityHookRunning).toBe(false);
+    expect(row.agentPermissionsUpdatedAt).toBeInstanceOf(Date);
   });
 
-  it('defaults old agents without state to IDLE', async () => {
+  it('defaults old agents without state or permissions to IDLE', async () => {
     const user = await seedUser();
 
     const res = await request(app)
@@ -54,10 +82,19 @@ describe('POST /v1/agent/heartbeat', () => {
     expect(res.body.configVersion).toEqual(expect.any(String));
     const row = await prisma.user.findUniqueOrThrow({
       where: { id: user.userId },
-      select: { agentState: true, agentActiveEntryId: true },
+      select: {
+        agentState: true,
+        agentActiveEntryId: true,
+        agentScreenPermissionStatus: true,
+        agentAccessibilityTrusted: true,
+        agentPermissionsUpdatedAt: true,
+      },
     });
     expect(row.agentState).toBe('IDLE');
     expect(row.agentActiveEntryId).toBeNull();
+    expect(row.agentScreenPermissionStatus).toBeNull();
+    expect(row.agentAccessibilityTrusted).toBeNull();
+    expect(row.agentPermissionsUpdatedAt).toBeNull();
   });
 
   it('changes configVersion after effective member timing changes', async () => {

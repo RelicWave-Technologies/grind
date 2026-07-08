@@ -1,4 +1,4 @@
-import type { AgentState, HeartbeatRequest, Platform } from '@grind/types';
+import type { AgentState, DesktopPermissionSnapshot, HeartbeatRequest, Platform } from '@grind/types';
 import type { TimerStatus } from './timer';
 
 export function currentPlatform(nodePlatform: NodeJS.Platform = process.platform): Platform {
@@ -16,12 +16,14 @@ export function buildHeartbeatRequest(args: {
   agentVersion: string;
   platform: Platform;
   timerStatus: TimerStatus;
+  permissions?: DesktopPermissionSnapshot;
 }): HeartbeatRequest {
-  const { agentVersion, platform, timerStatus } = args;
+  const { agentVersion, platform, timerStatus, permissions } = args;
   return {
     agentVersion,
     platform,
     state: agentStateFromTimer(timerStatus),
     activeEntryId: timerStatus.state === 'RUNNING' ? timerStatus.entryId : null,
+    ...(permissions ? { permissions } : {}),
   };
 }

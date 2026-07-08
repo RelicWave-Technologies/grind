@@ -51,7 +51,7 @@ describe('refresh rotation', () => {
     expect(joined.toLowerCase()).toContain('httponly');
   });
 
-  it('POST /v1/auth/refresh rotates the agent refresh token (old one dies)', async () => {
+  it('POST /v1/auth/refresh rotates the agent refresh token and treats immediate duplicate as reuse grace', async () => {
     const { res } = await login();
     const rt = res.body.refreshToken as string;
     const first = await request(app).post('/v1/auth/refresh').send({ refreshToken: rt });
@@ -59,9 +59,15 @@ describe('refresh rotation', () => {
     expect(first.body.accessToken).toBeTruthy();
     expect(first.body.refreshToken).toBeTruthy();
     expect(first.body.refreshToken).not.toBe(rt);
-    // Old token is now spent → rejected.
+    // Old token is now spent. An immediate duplicate is rejected as recoverable
+    // reuse grace, so desktop clients can reload the successor already written
+    // by their first refresh instead of logging out.
     const reuse = await request(app).post('/v1/auth/refresh').send({ refreshToken: rt });
-    expect(reuse.status).toBe(401);
+    expect(reuse.status).toBe(409);
+    expect(reuse.body).toEqual({ error: 'refresh_reuse_grace', reason: 'reuse_grace' });
+
+    const stillLive = await request(app).post('/v1/auth/refresh').send({ refreshToken: first.body.refreshToken });
+    expect(stillLive.status).toBe(200);
   });
 
   it('reuse-detection: replaying a spent token revokes the whole family', async () => {

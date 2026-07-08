@@ -1,9 +1,12 @@
-import type { HeartbeatResponse } from '@grind/types';
+import { app } from 'electron';
+import type { DesktopPermissionSnapshot, HeartbeatResponse } from '@grind/types';
 import { AGENT_VERSION, HEARTBEAT_INTERVAL_MS } from '../env';
 import { log } from '../logger';
 import { api, UnauthorizedError } from './apiClient';
 import { isLoggedIn } from './auth';
-import { drainActivityNow } from './activity';
+import { drainActivityNow, getActivityCaptureStatus } from './activity';
+import { getScreenHealth } from './capture';
+import { screenStatus, screenUiState } from './permissions';
 import { drainTimerSyncNow, getTimerService } from './timer';
 import { buildHeartbeatRequest, currentPlatform } from './heartbeatPayload';
 import type { TimerSyncDrainReason } from './timer/syncDrain';
@@ -11,6 +14,34 @@ import { getAgentConfigVersion, refreshAgentConfig } from './agentConfig';
 
 let timer: NodeJS.Timeout | null = null;
 let lastHeartbeatAt: string | null = null;
+
+function agentVersion(): string {
+  try {
+    return app.getVersion() || AGENT_VERSION;
+  } catch {
+    return AGENT_VERSION;
+  }
+}
+
+function currentPermissionSnapshot(): DesktopPermissionSnapshot {
+  const screen = screenStatus();
+  const health = getScreenHealth();
+  const accessibility = getActivityCaptureStatus();
+  return {
+    screen: {
+      status: screen,
+      health,
+      state: screenUiState(screen, health),
+    },
+    accessibility: {
+      trusted: accessibility.trusted,
+      ready: accessibility.ready,
+      recording: accessibility.recording,
+      capturing: accessibility.capturing,
+      hookRunning: accessibility.hookRunning,
+    },
+  };
+}
 
 function requestTimerDrain(reason: TimerSyncDrainReason): void {
   void Promise.resolve()
@@ -32,12 +63,13 @@ function requestAgentConfigRefresh(serverVersion: string): void {
 }
 
 async function tick(): Promise<void> {
-  const body = buildHeartbeatRequest({
-    agentVersion: AGENT_VERSION,
-    platform: currentPlatform(),
-    timerStatus: getTimerService().status(),
-  });
   try {
+    const body = buildHeartbeatRequest({
+      agentVersion: agentVersion(),
+      platform: currentPlatform(),
+      timerStatus: getTimerService().status(),
+      permissions: currentPermissionSnapshot(),
+    });
     const res = await api<HeartbeatResponse>('/v1/agent/heartbeat', { method: 'POST', body });
     lastHeartbeatAt = res.serverTime;
     log.debug('heartbeat ok', { serverTime: res.serverTime, configVersion: res.configVersion });

@@ -198,7 +198,10 @@ authRouter.post('/refresh', validate(RefreshRequest, 'body'), async (req, res, n
     const result = await rotateRefreshToken(refreshToken);
     if (!result.ok) {
       if (result.reason === 'stale_role') return res.status(503).json({ error: 'stale_role_migration_required' });
-      return res.status(401).json({ error: 'invalid_refresh' });
+      if (result.reason === 'reuse_grace') {
+        return res.status(409).json({ error: 'refresh_reuse_grace', reason: result.reason });
+      }
+      return res.status(401).json({ error: 'invalid_refresh', reason: result.reason });
     }
     const response: RefreshResponse = { accessToken: result.accessToken, refreshToken: result.refreshToken };
     res.json(response);

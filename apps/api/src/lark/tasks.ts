@@ -45,15 +45,13 @@ export interface UserTaskClient {
   listMyTasks(accessToken: string): Promise<LarkTaskDto[]>;
   /** Create a Lark task; returns the new task's guid. */
   createTask(accessToken: string, input: CreateLarkTaskInput): Promise<LarkTaskDto>;
-  /** Post a comment on a task (non-destructive). */
-  addComment(accessToken: string, guid: string, content: string): Promise<void>;
   /** The open_id of the token owner (so we can assign created tasks to them). */
   getOpenId(accessToken: string): Promise<string | null>;
 }
 
 export class LarkTaskApiError extends Error {
   constructor(
-    public readonly operation: 'list' | 'create' | 'comment',
+    public readonly operation: 'list' | 'create',
     public readonly code: number | undefined,
     message: string | undefined,
   ) {
@@ -208,16 +206,5 @@ export class HttpUserTaskClient implements UserTaskClient {
     });
     const body = (await res.json().catch(() => ({}))) as { code?: number; data?: { open_id?: string } };
     return body.code === 0 ? body.data?.open_id ?? null : null;
-  }
-
-  async addComment(accessToken: string, guid: string, content: string): Promise<void> {
-    const { oauthHost } = getLarkConfig();
-    const res = await fetch(`${oauthHost}/open-apis/task/v2/comments`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json; charset=utf-8', Authorization: `Bearer ${accessToken}` },
-      body: JSON.stringify({ resource_type: 'task', resource_id: guid, content }),
-    });
-    const body = (await res.json().catch(() => ({}))) as { code?: number; msg?: string };
-    if (body.code !== 0) throw new LarkTaskApiError('comment', body.code, body.msg);
   }
 }

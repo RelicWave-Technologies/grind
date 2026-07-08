@@ -1,7 +1,9 @@
 import { app } from 'electron';
 import type { App, LoginItemSettings, LoginItemSettingsOptions, Settings } from 'electron';
+import path from 'node:path';
 
 const HIDDEN_ARG = '--hidden';
+const LEGACY_WINDOWS_APP_DIRS = ['Grind'];
 
 export type LaunchAtLoginStatus =
   | 'enabled'
@@ -57,6 +59,18 @@ function registrationSettings(deps: LaunchAtLoginDeps): Settings {
   return { openAtLogin: true };
 }
 
+function legacyWindowsLoginItemSettings(deps: LaunchAtLoginDeps): Settings[] {
+  if (deps.platform !== 'win32') return [];
+  const programsDir = path.win32.dirname(path.win32.dirname(deps.execPath));
+  return LEGACY_WINDOWS_APP_DIRS.flatMap((name) => {
+    const legacyExe = path.win32.join(programsDir, name, `${name}.exe`);
+    return [
+      { openAtLogin: false, path: legacyExe, args: [HIDDEN_ARG] },
+      { openAtLogin: false, path: legacyExe },
+    ];
+  });
+}
+
 function macStatus(settings: LoginItemSettings): LaunchAtLoginStatus {
   if (SUPPORTED_MAC_STATUSES.has(settings.status as LaunchAtLoginStatus)) {
     return settings.status as LaunchAtLoginStatus;
@@ -101,6 +115,13 @@ export function createLaunchAtLoginService(deps: LaunchAtLoginDeps) {
     return getInfo();
   }
 
+  function cleanupLegacy(): void {
+    if (!deps.app.isPackaged || deps.platform !== 'win32') return;
+    for (const settings of legacyWindowsLoginItemSettings(deps)) {
+      deps.app.setLoginItemSettings(settings);
+    }
+  }
+
   function shouldStartHidden(argv: string[]): boolean {
     if (argv.includes(HIDDEN_ARG)) return true;
     if (!deps.app.isPackaged || deps.platform !== 'darwin') return false;
@@ -108,7 +129,7 @@ export function createLaunchAtLoginService(deps: LaunchAtLoginDeps) {
     return deps.app.getLoginItemSettings(queryOptions(deps)).wasOpenedAtLogin;
   }
 
-  return { getInfo, enable, shouldStartHidden };
+  return { getInfo, enable, cleanupLegacy, shouldStartHidden };
 }
 
 export function getLaunchAtLoginInfo(): LaunchAtLoginInfo {
@@ -120,7 +141,9 @@ export function enableLaunchAtLogin(): LaunchAtLoginInfo {
 }
 
 export function ensureLaunchAtLogin(): LaunchAtLoginInfo {
-  return enableLaunchAtLogin();
+  const service = createLaunchAtLoginService(defaultDeps());
+  service.cleanupLegacy();
+  return service.enable();
 }
 
 export function shouldStartHidden(argv: string[] = process.argv): boolean {

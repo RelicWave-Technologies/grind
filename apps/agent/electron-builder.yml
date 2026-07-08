@@ -26,6 +26,7 @@ asar: false
 files:
   - out/**/*
   - package.json
+  - build/icons/**/*
   # The @grind/* workspace packages are TS source bundled into out/ by
   # electron-vite, so they don't belong in node_modules. Excluding them stops
   # electron-builder from following the pnpm symlinks into the monorepo (and
