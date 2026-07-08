@@ -1,0 +1,64 @@
+name: Publish Timo MCP
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: npm dist-tag
+        required: true
+        default: latest
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.18
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Validate package metadata
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const pkg = JSON.parse(fs.readFileSync('apps/mcp/package.json', 'utf8'));
+          if (pkg.name !== '@anish23_05/timo-mcp') {
+            throw new Error(`Unexpected package name: ${pkg.name}`);
+          }
+          if (pkg.private) {
+            throw new Error('apps/mcp must not be private');
+          }
+          if (!pkg.bin?.['timo-mcp']) {
+            throw new Error('Missing timo-mcp bin');
+          }
+          if (!/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(pkg.version)) {
+            throw new Error(`Invalid semver version: ${pkg.version}`);
+          }
+          NODE
+
+      - run: pnpm --filter @anish23_05/timo-mcp typecheck
+
+      - run: pnpm --filter @anish23_05/timo-mcp test
+
+      - run: pnpm --filter @anish23_05/timo-mcp pack:dry-run
+
+      - name: Publish package
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: true
+        run: pnpm --filter @anish23_05/timo-mcp publish --access public --tag "${{ inputs.tag }}" --no-git-checks
