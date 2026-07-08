@@ -4,16 +4,16 @@ import path from 'node:path';
 import { log } from '../logger';
 
 /** App-dir names used by prior builds, as siblings of the current userData dir. */
-const LEGACY_APP_DIRS = ['Grind'];
-const MIGRATE_FILES = ['tokens.bin', 'pending-lark-login.bin'];
+const LEGACY_APP_DIRS = ['Grind', path.join('@grind', 'agent')];
+const MIGRATE_ENTRIES = ['tokens.bin', 'pending-lark-login.bin', 'agent.db', 'preferences.json', 'screenshots'];
 const MIGRATED_SUFFIX = '.migrated-to-timo';
 
 /**
- * Recover a session stranded by the Grind->Timo rebrand. On Windows the
- * userData dir is named after productName, so the rename left the old encrypted
- * token file behind in %APPDATA%\Grind while the new build reads %APPDATA%\Timo
- * and finds nothing -> logged out. safeStorage keys are user-scoped (DPAPI on
- * Windows) so the current build can still decrypt the copied file.
+ * Recover local state stranded by app identity changes. Windows userData is
+ * derived from Electron's runtime app name, so both the Grind->Timo rebrand and
+ * the scoped package fallback (@grind/agent) can leave tokens/local DB behind
+ * while the fixed build reads %APPDATA%\Timo. safeStorage keys are user-scoped
+ * (DPAPI on Windows), so the current build can still decrypt copied tokens.
  *
  * Only acts when the current dir has NO session, so it never clobbers a live
  * login, and is fully best-effort — a failure here must never block boot.
@@ -27,12 +27,12 @@ export function migrateLegacyUserData(): void {
       const legacyDir = path.join(parent, name);
       if (legacyDir === currentDir || !fs.existsSync(path.join(legacyDir, 'tokens.bin'))) continue;
       fs.mkdirSync(currentDir, { recursive: true });
-      for (const file of MIGRATE_FILES) {
-        const from = path.join(legacyDir, file);
-        const to = path.join(currentDir, file);
+      for (const entry of MIGRATE_ENTRIES) {
+        const from = path.join(legacyDir, entry);
+        const to = path.join(currentDir, entry);
         if (fs.existsSync(from) && !fs.existsSync(to)) {
-          fs.copyFileSync(from, to);
-          quarantineLegacyFile(from);
+          fs.cpSync(from, to, { recursive: true });
+          quarantineLegacyEntry(from);
         }
       }
       log.info('migrated legacy session from prior app identity', { from: legacyDir, to: currentDir });
@@ -43,7 +43,7 @@ export function migrateLegacyUserData(): void {
   }
 }
 
-function quarantineLegacyFile(file: string): void {
+function quarantineLegacyEntry(file: string): void {
   try {
     const backup = `${file}${MIGRATED_SUFFIX}`;
     if (fs.existsSync(backup)) fs.rmSync(file, { force: true });
