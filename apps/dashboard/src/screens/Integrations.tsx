@@ -7,7 +7,7 @@ import type {
   CreateApiTokenResponse,
 } from '@grind/types';
 import { API_TOKEN_SCOPES } from '@grind/types';
-import { api } from '../lib/api';
+import { api, API_BASE } from '../lib/api';
 import {
   Page,
   PageHeader,
@@ -44,6 +44,8 @@ const SCOPE_STATUS: Record<ApiTokenScope, 'neutral' | 'info' | 'success' | 'warn
   'read:time-summary': 'success',
   'read:manual-time': 'warn',
 };
+
+const MCP_PACKAGE = '@relicwave/timo-mcp@latest';
 
 function formatDateParts(value: string | null): { date: string; time: string } | null {
   if (!value) return null;
@@ -87,12 +89,18 @@ function formatTooltipDate(value: string | null): string {
   }).format(date);
 }
 
+function getMcpApiBase(): string {
+  if (API_BASE.startsWith('http://') || API_BASE.startsWith('https://')) return API_BASE;
+  return window.location.origin;
+}
+
 export function IntegrationsScreen() {
   const qc = useQueryClient();
   const [name, setName] = useState('');
   const [scopes, setScopes] = useState<ApiTokenScope[]>([...API_TOKEN_SCOPES]);
   const [createdToken, setCreatedToken] = useState<CreateApiTokenResponse | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [copiedToken, setCopiedToken] = useState(false);
+  const [copiedConfig, setCopiedConfig] = useState(false);
   const [confirmRevokeId, setConfirmRevokeId] = useState<string | null>(null);
 
   const tokensQ = useQuery({
@@ -105,6 +113,22 @@ export function IntegrationsScreen() {
     [tokensQ.data?.tokens],
   );
 
+  const createdMcpConfig = useMemo(() => {
+    if (!createdToken) return '';
+    return JSON.stringify({
+      mcpServers: {
+        timo: {
+          command: 'npx',
+          args: ['-y', MCP_PACKAGE],
+          env: {
+            TIMO_API_BASE: getMcpApiBase(),
+            TIMO_API_TOKEN: createdToken.token,
+          },
+        },
+      },
+    }, null, 2);
+  }, [createdToken]);
+
   const createToken = useMutation({
     mutationFn: () =>
       api<CreateApiTokenResponse>('/v1/admin/api-tokens', {
@@ -115,7 +139,8 @@ export function IntegrationsScreen() {
       setCreatedToken(res);
       setName('');
       setScopes([...API_TOKEN_SCOPES]);
-      setCopied(false);
+      setCopiedToken(false);
+      setCopiedConfig(false);
       qc.invalidateQueries({ queryKey: ['admin', 'api-tokens'] });
     },
   });
@@ -142,7 +167,13 @@ export function IntegrationsScreen() {
   async function copyCreatedToken() {
     if (!createdToken) return;
     await navigator.clipboard.writeText(createdToken.token);
-    setCopied(true);
+    setCopiedToken(true);
+  }
+
+  async function copyCreatedMcpConfig() {
+    if (!createdMcpConfig) return;
+    await navigator.clipboard.writeText(createdMcpConfig);
+    setCopiedConfig(true);
   }
 
   return (
@@ -219,13 +250,22 @@ export function IntegrationsScreen() {
               <span className="ui-t-eyebrow">Copy once</span>
               <div className="int-token-box" aria-label="New API token">{createdToken.token}</div>
             </div>
-            <Button
-              variant={copied ? 'soft' : 'secondary'}
-              icon={copied ? <Check size={16} strokeWidth={2.4} /> : <Clipboard size={16} strokeWidth={2.1} />}
-              onClick={copyCreatedToken}
-            >
-              {copied ? 'Copied' : 'Copy'}
-            </Button>
+            <div className="int-token-once-actions">
+              <Button
+                variant={copiedToken ? 'soft' : 'secondary'}
+                icon={copiedToken ? <Check size={16} strokeWidth={2.4} /> : <Clipboard size={16} strokeWidth={2.1} />}
+                onClick={copyCreatedToken}
+              >
+                {copiedToken ? 'Copied' : 'Copy token'}
+              </Button>
+              <Button
+                variant={copiedConfig ? 'soft' : 'secondary'}
+                icon={copiedConfig ? <Check size={16} strokeWidth={2.4} /> : <Clipboard size={16} strokeWidth={2.1} />}
+                onClick={copyCreatedMcpConfig}
+              >
+                {copiedConfig ? 'Copied' : 'Copy config'}
+              </Button>
+            </div>
           </div>
         )}
 

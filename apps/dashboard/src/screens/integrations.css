@@ -102,6 +102,13 @@
   gap: var(--ui-sp-2);
 }
 
+.int-token-once-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--ui-sp-2);
+  flex-wrap: wrap;
+}
+
 .int-token-box {
   min-width: 0;
   height: var(--ui-control-h);
@@ -219,5 +226,9 @@
 
   .int-create-name {
     align-items: flex-start;
+  }
+
+  .int-token-once-actions {
+    justify-content: flex-start;
   }
 }
