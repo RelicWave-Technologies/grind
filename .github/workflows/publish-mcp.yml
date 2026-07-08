@@ -37,7 +37,7 @@ jobs:
           node <<'NODE'
           const fs = require('node:fs');
           const pkg = JSON.parse(fs.readFileSync('apps/mcp/package.json', 'utf8'));
-          if (pkg.name !== '@relicwave/timo-mcp') {
+          if (pkg.name !== '@anish23_05/timo-mcp') {
             throw new Error(`Unexpected package name: ${pkg.name}`);
           }
           if (pkg.private) {
@@ -51,14 +51,14 @@ jobs:
           }
           NODE
 
-      - run: pnpm --filter @relicwave/timo-mcp typecheck
+      - run: pnpm --filter @anish23_05/timo-mcp typecheck
 
-      - run: pnpm --filter @relicwave/timo-mcp test
+      - run: pnpm --filter @anish23_05/timo-mcp test
 
-      - run: pnpm --filter @relicwave/timo-mcp pack:dry-run
+      - run: pnpm --filter @anish23_05/timo-mcp pack:dry-run
 
       - name: Publish package
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_PROVENANCE: true
-        run: pnpm --filter @relicwave/timo-mcp publish --access public --tag "${{ inputs.tag }}" --no-git-checks
+        run: pnpm --filter @anish23_05/timo-mcp publish --access public --tag "${{ inputs.tag }}" --no-git-checks

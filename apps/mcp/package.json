@@ -1,5 +1,5 @@
 {
-  "name": "@relicwave/timo-mcp",
+  "name": "@anish23_05/timo-mcp",
   "version": "0.1.0",
   "description": "Read-only MCP server for Timo workspace data.",
   "private": false,

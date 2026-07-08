@@ -20,7 +20,7 @@ Add this to your MCP client config:
   "mcpServers": {
     "timo": {
       "command": "npx",
-      "args": ["-y", "@relicwave/timo-mcp@latest"],
+      "args": ["-y", "@anish23_05/timo-mcp@latest"],
       "env": {
         "TIMO_API_BASE": "https://timo.emiactech.com",
         "TIMO_API_TOKEN": "timo_mcp_atk_..."
@@ -51,6 +51,6 @@ Restart the MCP client after editing the config.
 ## Local Development
 
 ```bash
-pnpm --filter @relicwave/timo-mcp build
+pnpm --filter @anish23_05/timo-mcp build
 TIMO_API_BASE=http://localhost:4010 TIMO_API_TOKEN=token node apps/mcp/dist/index.cjs
 ```

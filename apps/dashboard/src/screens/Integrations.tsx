@@ -45,7 +45,7 @@ const SCOPE_STATUS: Record<ApiTokenScope, 'neutral' | 'info' | 'success' | 'warn
   'read:manual-time': 'warn',
 };
 
-const MCP_PACKAGE = '@relicwave/timo-mcp@latest';
+const MCP_PACKAGE = '@anish23_05/timo-mcp@latest';
 
 function formatDateParts(value: string | null): { date: string; time: string } | null {
   if (!value) return null;
