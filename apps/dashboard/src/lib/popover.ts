@@ -89,7 +89,8 @@ export function computePopoverPosition(args: {
  * Singleton signal so only one popover is open at a time across the page.
  * Each instance subscribes on mount; the most recently opened one wins.
  */
-let openInstance: { close: () => void } | null = null;
+let nextInstanceId = 1;
+let openInstance: { id: number; close: () => void } | null = null;
 
 export function usePopover(opts: PopoverOptions = {}): PopoverState {
   const { offsetX = 0, gap = 4, estimatedHeight = 280, onOpen } = opts;
@@ -99,13 +100,20 @@ export function usePopover(opts: PopoverOptions = {}): PopoverState {
   });
   const triggerRef = useRef<HTMLElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
-  const closerRef = useRef<() => void>(() => setOpenState(false));
   const scrollDismissArmedRef = useRef(false);
+  const instanceIdRef = useRef(0);
+  if (instanceIdRef.current === 0) instanceIdRef.current = nextInstanceId++;
 
-  // Keep closerRef up to date so the singleton can close us.
+  const closeThisInstance = useCallback(() => {
+    if (openInstance?.id === instanceIdRef.current) openInstance = null;
+    setOpenState(false);
+  }, []);
+
   useEffect(() => {
-    closerRef.current = () => setOpenState(false);
-  });
+    return () => {
+      if (openInstance?.id === instanceIdRef.current) openInstance = null;
+    };
+  }, []);
 
   // Compute position whenever we transition to open.
   useLayoutEffect(() => {
@@ -129,17 +137,20 @@ export function usePopover(opts: PopoverOptions = {}): PopoverState {
 
   const setOpen = useCallback((next: boolean) => {
     setOpenState((cur) => {
-      if (next === cur) return cur;
+      if (next === cur) {
+        if (!next && openInstance?.id === instanceIdRef.current) openInstance = null;
+        return cur;
+      }
       if (next) {
-        if (openInstance && openInstance.close !== closerRef.current) openInstance.close();
-        openInstance = { close: closerRef.current };
+        if (openInstance && openInstance.id !== instanceIdRef.current) openInstance.close();
+        openInstance = { id: instanceIdRef.current, close: closeThisInstance };
         if (onOpen) requestAnimationFrame(onOpen);
-      } else if (openInstance && openInstance.close === closerRef.current) {
+      } else if (openInstance?.id === instanceIdRef.current) {
         openInstance = null;
       }
       return next;
     });
-  }, [onOpen]);
+  }, [closeThisInstance, onOpen]);
 
   // Dismiss on outside mousedown, Esc, scroll, resize.
   useEffect(() => {
