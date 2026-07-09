@@ -72,7 +72,70 @@ type TimeTotal = {
   totalMs: number;
 };
 
+type BreakInterval = {
+  date: string;
+  startedAt: string;
+  endedAt: string;
+  durationMs: number;
+  classification: 'break' | 'lunch_candidate';
+  source: 'untracked_gap' | 'idle_trimmed' | 'mixed';
+  idleTrimmedMs: number;
+  evidence: {
+    sourceOfTruth: string;
+    previousTrackedBlock: TrackedBlockEvidence;
+    nextTrackedBlock: TrackedBlockEvidence;
+    manualRequestsOverlappingGap: ManualRequestEvidence[];
+  };
+};
+
 type ValidRange = NonNullable<ReturnType<typeof validateRange>>;
+
+type ManualRequestEvidence = {
+  id: string;
+  taskSummary: string | null;
+  requestedStart: string;
+  requestedEnd: string;
+  durationMs: number;
+  reason: string;
+  status: string;
+  approver: { id: string; name: string; email: string } | null;
+  decidedBy: { id: string; name: string; email: string } | null;
+  decidedAt: string | null;
+  decidedReason: string | null;
+  decisionSource: string | null;
+  autoApproved: boolean;
+};
+
+type TrackedBlockSourceEvidence = {
+  timeEntryId: string;
+  source: string;
+  kind: string;
+  startedAt: string;
+  endedAt: string;
+  durationMs: number;
+  taskGuid: string | null;
+  notes: string | null;
+  manualTimeRequest: ManualRequestEvidence | null;
+};
+
+type TrackedBlockEvidence = {
+  startedAt: string;
+  endedAt: string;
+  durationMs: number;
+  sources: TrackedBlockSourceEvidence[];
+};
+
+type TrackedInterval = {
+  start: number;
+  end: number;
+  source: TrackedBlockSourceEvidence;
+};
+
+type TrackedBlock = {
+  start: number;
+  end: number;
+  sources: TrackedBlockSourceEvidence[];
+};
 
 function workspaceId(req: Express.Request): string {
   if (!req.apiToken) throw new Error('api_token_missing_after_auth');
@@ -102,6 +165,17 @@ function todayForTz(tz: string): string | null {
   } catch {
     return null;
   }
+}
+
+function addDaysIso(date: string, days: number): string {
+  const d = new Date(`${date}T00:00:00.000Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+function yesterdayForTz(tz: string): string | null {
+  const today = todayForTz(tz);
+  return today ? addDaysIso(today, -1) : null;
 }
 
 function validateRange(input: { from: string; to: string; tz: string }) {
@@ -207,6 +281,284 @@ function dayRows(range: ValidRange, cells: Record<string, SummaryCell | undefine
       ? new Date(cells[day]!.lastActivityMs!).toISOString()
       : null,
   }));
+}
+
+function overlapsMs(start: number, end: number, winStart: number, winEnd: number): boolean {
+  return start < winEnd && end > winStart;
+}
+
+function clipMs(start: number, end: number, winStart: number, winEnd: number) {
+  const a = Math.max(start, winStart);
+  const b = Math.min(end, winEnd);
+  return b > a ? { start: a, end: b } : null;
+}
+
+function mergeIntervals(intervals: Array<{ start: number; end: number }>) {
+  const sorted = intervals
+    .filter((interval) => interval.end > interval.start)
+    .sort((a, b) => a.start - b.start);
+  const merged: Array<{ start: number; end: number }> = [];
+  for (const interval of sorted) {
+    const last = merged.at(-1);
+    if (!last || interval.start > last.end) {
+      merged.push({ ...interval });
+      continue;
+    }
+    last.end = Math.max(last.end, interval.end);
+  }
+  return merged;
+}
+
+function mergeTrackedBlocks(intervals: TrackedInterval[]) {
+  const sorted = intervals
+    .filter((interval) => interval.end > interval.start)
+    .sort((a, b) => a.start - b.start);
+  const merged: TrackedBlock[] = [];
+  for (const interval of sorted) {
+    const last = merged.at(-1);
+    if (!last || interval.start > last.end) {
+      merged.push({ start: interval.start, end: interval.end, sources: [interval.source] });
+      continue;
+    }
+    last.end = Math.max(last.end, interval.end);
+    last.sources.push(interval.source);
+  }
+  return merged;
+}
+
+function serializeManualRequestEvidence(request: {
+  id: string;
+  taskSummary: string | null;
+  requestedStart: Date;
+  requestedEnd: Date;
+  reason: string;
+  status: string;
+  approver: { id: string; name: string; email: string } | null;
+  decidedBy: { id: string; name: string; email: string } | null;
+  decidedAt: Date | null;
+  decidedReason: string | null;
+  decisionSource: string | null;
+  autoApproved: boolean;
+}): ManualRequestEvidence {
+  return {
+    id: request.id,
+    taskSummary: request.taskSummary,
+    requestedStart: request.requestedStart.toISOString(),
+    requestedEnd: request.requestedEnd.toISOString(),
+    durationMs: request.requestedEnd.getTime() - request.requestedStart.getTime(),
+    reason: request.reason,
+    status: request.status,
+    approver: request.approver,
+    decidedBy: request.decidedBy,
+    decidedAt: request.decidedAt?.toISOString() ?? null,
+    decidedReason: request.decidedReason,
+    decisionSource: request.decisionSource,
+    autoApproved: request.autoApproved,
+  };
+}
+
+function serializeTrackedBlock(block: TrackedBlock): TrackedBlockEvidence {
+  return {
+    startedAt: new Date(block.start).toISOString(),
+    endedAt: new Date(block.end).toISOString(),
+    durationMs: block.end - block.start,
+    sources: block.sources,
+  };
+}
+
+function localMinuteOfDay(ms: number, tz: string): number | null {
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz,
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    }).formatToParts(new Date(ms));
+    const hour = Number(parts.find((part) => part.type === 'hour')?.value);
+    const minute = Number(parts.find((part) => part.type === 'minute')?.value);
+    if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
+    return hour * 60 + minute;
+  } catch {
+    return null;
+  }
+}
+
+function isLunchCandidate(input: {
+  start: number;
+  end: number;
+  durationMs: number;
+  tz: string;
+  lunchMinMs: number;
+}) {
+  if (input.durationMs < input.lunchMinMs) return false;
+  const startMin = localMinuteOfDay(input.start, input.tz);
+  const endMinRaw = localMinuteOfDay(input.end, input.tz);
+  if (startMin === null || endMinRaw === null) return false;
+  const endMin = endMinRaw <= startMin ? 24 * 60 : endMinRaw;
+  const lunchStart = 11 * 60;
+  const lunchEnd = 15 * 60;
+  return startMin < lunchEnd && endMin > lunchStart;
+}
+
+function buildBreakSummaryForDay(input: {
+  date: string;
+  tz: string;
+  dayStart: number;
+  dayEnd: number;
+  minBreakMs: number;
+  lunchMinMs: number;
+  entries: Array<{
+    id: string;
+    source: string;
+    larkTaskGuid: string | null;
+    notes: string | null;
+    endedAt: Date | null;
+    manualTimeRequest: {
+      id: string;
+      taskSummary: string | null;
+      requestedStart: Date;
+      requestedEnd: Date;
+      reason: string;
+      status: string;
+      approver: { id: string; name: string; email: string } | null;
+      decidedBy: { id: string; name: string; email: string } | null;
+      decidedAt: Date | null;
+      decidedReason: string | null;
+      decisionSource: string | null;
+      autoApproved: boolean;
+    } | null;
+    segments: Array<{ kind: string; startedAt: Date; endedAt: Date | null }>;
+  }>;
+  manualRequests: Array<{
+    id: string;
+    taskSummary: string | null;
+    requestedStart: Date;
+    requestedEnd: Date;
+    reason: string;
+    status: string;
+    approver: { id: string; name: string; email: string } | null;
+    decidedBy: { id: string; name: string; email: string } | null;
+    decidedAt: Date | null;
+    decidedReason: string | null;
+    decisionSource: string | null;
+    autoApproved: boolean;
+  }>;
+  now: Date;
+}) {
+  const nowMs = input.now.getTime();
+  const trackedIntervals: TrackedInterval[] = [];
+  const idleIntervals: Array<{ start: number; end: number }> = [];
+
+  for (const entry of input.entries) {
+    for (const segment of entry.segments) {
+      const rawStart = segment.startedAt.getTime();
+      const rawEnd = (segment.endedAt ?? entry.endedAt ?? input.now).getTime();
+      if (!overlapsMs(rawStart, rawEnd, input.dayStart, input.dayEnd)) continue;
+      const clipped = clipMs(rawStart, rawEnd, input.dayStart, Math.min(input.dayEnd, nowMs));
+      if (!clipped) continue;
+      if (entry.source === 'MANUAL' || segment.kind === 'WORK' || segment.kind === 'MEETING') {
+        trackedIntervals.push({
+          ...clipped,
+          source: {
+            timeEntryId: entry.id,
+            source: entry.source,
+            kind: segment.kind,
+            startedAt: new Date(clipped.start).toISOString(),
+            endedAt: new Date(clipped.end).toISOString(),
+            durationMs: clipped.end - clipped.start,
+            taskGuid: entry.larkTaskGuid,
+            notes: entry.notes,
+            manualTimeRequest: entry.manualTimeRequest
+              ? serializeManualRequestEvidence(entry.manualTimeRequest)
+              : null,
+          },
+        });
+      } else if (segment.kind === 'IDLE_TRIMMED') {
+        idleIntervals.push(clipped);
+      }
+    }
+  }
+
+  const tracked = mergeTrackedBlocks(trackedIntervals);
+  const idle = mergeIntervals(idleIntervals);
+  const breaks: BreakInterval[] = [];
+  for (let i = 1; i < tracked.length; i += 1) {
+    const previous = tracked[i - 1]!;
+    const next = tracked[i]!;
+    const start = previous.end;
+    const end = next.start;
+    const durationMs = end - start;
+    if (durationMs < input.minBreakMs) continue;
+    const idleTrimmedMs = idle.reduce((sum, interval) => {
+      const overlap = clipMs(interval.start, interval.end, start, end);
+      return sum + (overlap ? overlap.end - overlap.start : 0);
+    }, 0);
+    const classification = isLunchCandidate({
+      start,
+      end,
+      durationMs,
+      tz: input.tz,
+      lunchMinMs: input.lunchMinMs,
+    })
+      ? 'lunch_candidate'
+      : 'break';
+    const source =
+      idleTrimmedMs === 0
+        ? 'untracked_gap'
+        : idleTrimmedMs >= durationMs * 0.8
+          ? 'idle_trimmed'
+          : 'mixed';
+    const manualRequestsOverlappingGap = input.manualRequests
+      .filter((request) =>
+        overlapsMs(request.requestedStart.getTime(), request.requestedEnd.getTime(), start, end),
+      )
+      .map(serializeManualRequestEvidence);
+    breaks.push({
+      date: input.date,
+      startedAt: new Date(start).toISOString(),
+      endedAt: new Date(end).toISOString(),
+      durationMs,
+      classification,
+      source,
+      idleTrimmedMs,
+      evidence: {
+        sourceOfTruth:
+          'Computed from the gap between the previous tracked TimeEntry/TimeSegment block and the next tracked TimeEntry/TimeSegment block.',
+        previousTrackedBlock: serializeTrackedBlock(previous),
+        nextTrackedBlock: serializeTrackedBlock(next),
+        manualRequestsOverlappingGap,
+      },
+    });
+  }
+
+  const lunchCandidate = breaks
+    .filter((item) => item.classification === 'lunch_candidate')
+    .sort((a, b) => b.durationMs - a.durationMs)[0] ?? null;
+  for (const item of breaks) {
+    if (item.classification === 'lunch_candidate' && item !== lunchCandidate) {
+      item.classification = 'break';
+    }
+  }
+
+  const totalBreakMs = breaks.reduce((sum, item) => sum + item.durationMs, 0);
+  const lunchCandidateMs = breaks
+    .filter((item) => item.classification === 'lunch_candidate')
+    .reduce((max, item) => Math.max(max, item.durationMs), 0);
+
+  return {
+    date: input.date,
+    firstTrackedAt: tracked[0] ? new Date(tracked[0].start).toISOString() : null,
+    lastTrackedAt: tracked.at(-1) ? new Date(tracked.at(-1)!.end).toISOString() : null,
+    trackedBlockCount: tracked.length,
+    breakCount: breaks.length,
+    totalBreakMs,
+    lunchCandidateMs,
+    otherBreakMs: Math.max(0, totalBreakMs - lunchCandidateMs),
+    manualTimeBlocks: tracked
+      .flatMap((block) => block.sources)
+      .filter((source) => source.source === 'MANUAL'),
+    breaks,
+  };
 }
 
 function isBadStatus(value: string | null): boolean {
@@ -801,6 +1153,214 @@ mcpRouter.get('/team-summary', requireApiToken(['read:people', 'read:device-heal
           truncatedRoster: roster.size > 50,
         };
       }),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+mcpRouter.get('/break-summary', requireApiToken(['read:people', 'read:time-summary', 'read:manual-time']), async (req, res, next) => {
+  try {
+    const query = z.object({
+      q: OptionalTextSchema,
+      role: z.enum(['ADMIN', 'MANAGER', 'MEMBER']).optional(),
+      from: DateSchema.optional(),
+      to: DateSchema.optional(),
+      tz: TimezoneSchema,
+      minBreakMinutes: z.coerce.number().int().min(1).max(240).default(5),
+      lunchMinMinutes: z.coerce.number().int().min(10).max(240).default(30),
+      limit: LimitSchema,
+    }).safeParse(req.query);
+    if (!query.success) return res.status(400).json({ error: 'invalid_query', issues: query.error.issues });
+
+    const from = query.data.from ?? yesterdayForTz(query.data.tz);
+    const to = query.data.to ?? from;
+    if (!from || !to) return res.status(400).json({ error: 'invalid_tz' });
+    const range = validateRange({ from, to, tz: query.data.tz });
+    if (!range) return res.status(400).json({ error: 'invalid_date_range', maxDays: MAX_SUMMARY_DAYS });
+
+    const users = await prisma.user.findMany({
+      where: {
+        workspaceId: workspaceId(req),
+        deactivatedAt: null,
+        ...(query.data.role ? { role: query.data.role } : {}),
+        ...userSearch(query.data.q),
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        team: { select: { id: true, name: true } },
+        shift: { select: { id: true, name: true } },
+      },
+      orderBy: [{ role: 'asc' }, { name: 'asc' }],
+      take: query.data.limit,
+    });
+    const userIds = users.map((user) => user.id);
+    const entries = userIds.length === 0
+      ? []
+      : await prisma.timeEntry.findMany({
+          where: {
+            userId: { in: userIds },
+            startedAt: { lt: range.toWindow.end },
+            OR: [{ endedAt: null }, { endedAt: { gt: range.fromWindow.start } }],
+          },
+          select: {
+            id: true,
+            userId: true,
+            source: true,
+            larkTaskGuid: true,
+            notes: true,
+            endedAt: true,
+            manualTimeRequest: {
+              select: {
+                id: true,
+                taskSummary: true,
+                requestedStart: true,
+                requestedEnd: true,
+                reason: true,
+                status: true,
+                approver: { select: { id: true, name: true, email: true } },
+                decidedBy: { select: { id: true, name: true, email: true } },
+                decidedAt: true,
+                decidedReason: true,
+                decisionSource: true,
+                autoApproved: true,
+              },
+            },
+            segments: {
+              select: { kind: true, startedAt: true, endedAt: true },
+              orderBy: { startedAt: 'asc' },
+            },
+          },
+          orderBy: { startedAt: 'asc' },
+        });
+    const manualRequests = userIds.length === 0
+      ? []
+      : await prisma.manualTimeRequest.findMany({
+          where: {
+            userId: { in: userIds },
+            requestedStart: { lt: range.toWindow.end },
+            requestedEnd: { gt: range.fromWindow.start },
+          },
+          select: {
+            id: true,
+            userId: true,
+            taskSummary: true,
+            requestedStart: true,
+            requestedEnd: true,
+            reason: true,
+            status: true,
+            approver: { select: { id: true, name: true, email: true } },
+            decidedBy: { select: { id: true, name: true, email: true } },
+            decidedAt: true,
+            decidedReason: true,
+            decisionSource: true,
+            autoApproved: true,
+          },
+          orderBy: { requestedStart: 'asc' },
+        });
+    const entriesByUser = new Map<string, typeof entries>();
+    for (const entry of entries) {
+      const list = entriesByUser.get(entry.userId) ?? [];
+      list.push(entry);
+      entriesByUser.set(entry.userId, list);
+    }
+    const manualRequestsByUser = new Map<string, typeof manualRequests>();
+    for (const request of manualRequests) {
+      const list = manualRequestsByUser.get(request.userId) ?? [];
+      list.push(request);
+      manualRequestsByUser.set(request.userId, list);
+    }
+
+    const now = new Date();
+    const minBreakMs = query.data.minBreakMinutes * 60_000;
+    const lunchMinMs = query.data.lunchMinMinutes * 60_000;
+    const resultUsers = users.map((user) => {
+      const userEntries = entriesByUser.get(user.id) ?? [];
+      const userManualRequests = manualRequestsByUser.get(user.id) ?? [];
+      const days = range.days.map((date) => {
+        const day = localDayWindow(date, range.tz);
+        if (!day) {
+          return {
+            date,
+            firstTrackedAt: null,
+            lastTrackedAt: null,
+            trackedBlockCount: 0,
+            breakCount: 0,
+            totalBreakMs: 0,
+            lunchCandidateMs: 0,
+            otherBreakMs: 0,
+            manualTimeBlocks: [] as TrackedBlockSourceEvidence[],
+            breaks: [] as BreakInterval[],
+          };
+        }
+        const dayStart = day.start.getTime();
+        const dayEnd = day.end.getTime();
+        return buildBreakSummaryForDay({
+          date,
+          tz: range.tz,
+          dayStart,
+          dayEnd,
+          minBreakMs,
+          lunchMinMs,
+          entries: userEntries.filter((entry) =>
+            entry.segments.some((segment) =>
+              overlapsMs(
+                segment.startedAt.getTime(),
+                (segment.endedAt ?? entry.endedAt ?? now).getTime(),
+                dayStart,
+                dayEnd,
+              ),
+            ),
+          ),
+          manualRequests: userManualRequests.filter((request) =>
+            overlapsMs(request.requestedStart.getTime(), request.requestedEnd.getTime(), dayStart, dayEnd),
+          ),
+          now,
+        });
+      });
+      const totalBreakMs = days.reduce((sum, day) => sum + day.totalBreakMs, 0);
+      const lunchCandidateMs = days.reduce((sum, day) => sum + day.lunchCandidateMs, 0);
+      return {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        team: user.team,
+        shift: user.shift,
+        totalBreakMs,
+        lunchCandidateMs,
+        otherBreakMs: Math.max(0, totalBreakMs - lunchCandidateMs),
+        breakCount: days.reduce((sum, day) => sum + day.breakCount, 0),
+        days,
+      };
+    });
+
+    res.json({
+      generatedAt: now.toISOString(),
+      from: range.from,
+      to: range.to,
+      tz: range.tz,
+      method: {
+        break: 'Inferred from untracked gaps between tracked work/meeting/manual blocks. Leading time before first work and trailing time after last work are not counted as breaks.',
+        lunch: 'Candidate only: the longest break at least lunchMinMinutes long that overlaps the local 11:00-15:00 lunch window. Timo cannot prove lunch unless users explicitly label it.',
+        evidence: 'Each break includes previous/next tracked TimeEntry/TimeSegment blocks as source-of-truth. Manual time reasons and approval decision notes are included only through the read:manual-time scope.',
+      },
+      limits: {
+        maxSummaryDays: MAX_SUMMARY_DAYS,
+        maxRows: MAX_LIMIT,
+        minBreakMinutes: query.data.minBreakMinutes,
+        lunchMinMinutes: query.data.lunchMinMinutes,
+      },
+      totals: {
+        users: resultUsers.length,
+        totalBreakMs: resultUsers.reduce((sum, user) => sum + user.totalBreakMs, 0),
+        lunchCandidateMs: resultUsers.reduce((sum, user) => sum + user.lunchCandidateMs, 0),
+        otherBreakMs: resultUsers.reduce((sum, user) => sum + user.otherBreakMs, 0),
+      },
+      users: resultUsers,
     });
   } catch (err) {
     next(err);

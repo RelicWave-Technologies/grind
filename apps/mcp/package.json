@@ -1,6 +1,6 @@
 {
   "name": "@anish23_05/timo-mcp",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Detailed read-only MCP server for Timo workspace data.",
   "private": false,
   "type": "module",

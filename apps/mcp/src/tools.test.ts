@@ -12,6 +12,7 @@ describe('Timo MCP tools', () => {
       'timo_version_adoption',
       'timo_running_users',
       'timo_team_summary',
+      'timo_break_summary',
       'timo_time_summary',
       'timo_manual_time_requests',
       'timo_activity_flags_summary',

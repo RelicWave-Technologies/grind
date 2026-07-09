@@ -11,6 +11,7 @@ export const TIMO_TOOLS = [
   'timo_version_adoption',
   'timo_running_users',
   'timo_team_summary',
+  'timo_break_summary',
   'timo_time_summary',
   'timo_manual_time_requests',
   'timo_activity_flags_summary',
@@ -73,6 +74,17 @@ const TimeSummaryInput = z.object({
   userId: z.string().trim().min(1).max(120).optional(),
 });
 
+const BreakSummaryInput = z.object({
+  q: z.string().trim().min(1).max(120).optional(),
+  role: z.enum(['ADMIN', 'MANAGER', 'MEMBER']).optional(),
+  from: DateSchema.optional(),
+  to: DateSchema.optional(),
+  tz: TzSchema,
+  minBreakMinutes: z.number().int().min(1).max(240).optional(),
+  lunchMinMinutes: z.number().int().min(10).max(240).optional(),
+  limit: LimitSchema,
+});
+
 const ManualTimeInput = z.object({
   status: z.enum(['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED']).optional(),
   from: DateSchema.optional(),
@@ -99,6 +111,7 @@ const CAPABILITIES = {
     maxSummaryDays: 31,
     dates: 'YYYY-MM-DD',
     timezone: 'IANA timezone string, default UTC',
+    breakSummary: 'Defaults to yesterday. Breaks are inferred from gaps between tracked blocks; lunch is the longest qualifying candidate only. Gap evidence includes previous/next tracked blocks plus manual-time request reasons when available.',
   },
   scopes: {
     'read:people': 'People, roles, teams, shifts, and basic roster context.',
@@ -210,6 +223,17 @@ export function registerTimoTools(server: McpServer, client: TimoClient): void {
   );
 
   server.registerTool(
+    'timo_break_summary',
+    {
+      title: 'Timo Break Summary',
+      description:
+        'Infer who took how much break time for yesterday or a date range. Breaks are untracked gaps between tracked work/meeting/manual blocks after filtering tiny gaps. Each gap includes source-of-truth evidence: previous/next tracked blocks, manual blocks, and overlapping manual-time request reasons/approval notes. Lunch is only a candidate: the longest long-enough break overlapping the local 11:00-15:00 lunch window. Timo cannot prove lunch unless users explicitly label it. Requires people, time-summary, and manual-time scopes.',
+      inputSchema: BreakSummaryInput.shape,
+    },
+    async (input) => run('Timo Break Summary', () => client.get('/v1/mcp/break-summary', input)),
+  );
+
+  server.registerTool(
     'timo_time_summary',
     {
       title: 'Timo Time Summary',
@@ -285,6 +309,15 @@ function summarize(value: unknown): string {
 
   if (record.counts && typeof record.counts === 'object') {
     lines.push('Counts are included in the JSON payload.');
+  }
+  if (record.totals && typeof record.totals === 'object') {
+    const totals = record.totals as Record<string, unknown>;
+    if (typeof totals.totalBreakMs === 'number') {
+      lines.push(`Total break time: ${Math.round(totals.totalBreakMs / 60000)} min.`);
+    }
+    if (typeof totals.lunchCandidateMs === 'number') {
+      lines.push(`Lunch candidate time: ${Math.round(totals.lunchCandidateMs / 60000)} min.`);
+    }
   }
   if (record.limits && typeof record.limits === 'object') {
     lines.push('Limits are included in the JSON payload.');

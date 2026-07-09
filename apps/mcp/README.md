@@ -52,6 +52,7 @@ Restart the MCP client after editing the config.
 - `timo_version_adoption` — version/platform/state adoption buckets and unknown/stale users.
 - `timo_running_users` — users currently RUNNING with a fresh heartbeat.
 - `timo_team_summary` — team managers, roster, device counts, permission issues, and time totals.
+- `timo_break_summary` — inferred break time by user/day with source-of-truth gap evidence; lunch is separated as the longest qualifying candidate when a long break overlaps the local lunch window.
 - `timo_time_summary` — per-user/per-day tracked, meeting, manual, invalidated, and total time.
 - `timo_manual_time_requests` — manual-time request and decision audit metadata.
 - `timo_activity_flags_summary` — privacy-safe flag counts and recent flag summaries.
@@ -72,6 +73,9 @@ Some detailed tools require multiple scopes. If a token is missing a scope, the 
 - "Show me users with stale or missing desktop heartbeats."
 - "Which Mac users are missing Screen Recording or Accessibility?"
 - "Summarize today's tracked time by team."
+- "Kal kisne kitna break liya?"
+- "Yesterday, show lunch candidates separately from other breaks."
+- "For yesterday's breaks, show the actual gaps and any manual-time approval reasons."
 - "Show pending manual-time requests."
 - "Give me privacy-safe activity flag counts for this week."
 - "What can this Timo MCP read, and what is intentionally blocked?"
@@ -97,6 +101,7 @@ It also has no write tools. It cannot approve requests, edit time, create users,
 - Summary-style tools allow at most 31 days per request.
 - Dates use `YYYY-MM-DD`.
 - Timezone accepts IANA names such as `Asia/Kolkata` or `UTC`.
+- Break summaries default to yesterday. Breaks are inferred from gaps between tracked work/meeting/manual blocks; each gap includes previous/next tracked-block evidence. Lunch is the longest qualifying candidate only unless users explicitly label it.
 
 ## Security
 

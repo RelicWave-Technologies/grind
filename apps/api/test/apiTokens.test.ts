@@ -203,6 +203,150 @@ describe('admin API tokens', () => {
     expect(flags.body.flags[0]).toMatchObject({ type: 'METRONOMIC', riskScore: 30 });
   });
 
+  it('infers break and lunch-candidate time without counting before or after work', async () => {
+    const admin = await seedUser({ role: 'ADMIN' });
+    await prisma.user.update({
+      where: { id: admin.userId },
+      data: { name: 'Break Tester' },
+    });
+    await prisma.timeEntry.create({
+      data: {
+        id: fakeUlid('te'),
+        clientUuid: fakeUlid('client'),
+        userId: admin.userId,
+        source: 'AUTO',
+        startedAt: new Date('2026-07-08T09:00:00.000Z'),
+        endedAt: new Date('2026-07-08T11:00:00.000Z'),
+        segments: {
+          create: {
+            id: fakeUlid('seg'),
+            kind: 'WORK',
+            startedAt: new Date('2026-07-08T09:00:00.000Z'),
+            endedAt: new Date('2026-07-08T11:00:00.000Z'),
+          },
+        },
+      },
+    });
+    const manualEntry = await prisma.timeEntry.create({
+      data: {
+        id: fakeUlid('te'),
+        clientUuid: fakeUlid('client'),
+        userId: admin.userId,
+        source: 'MANUAL',
+        startedAt: new Date('2026-07-08T12:00:00.000Z'),
+        endedAt: new Date('2026-07-08T13:00:00.000Z'),
+        notes: 'Approved correction',
+        segments: {
+          create: {
+            id: fakeUlid('seg'),
+            kind: 'WORK',
+            startedAt: new Date('2026-07-08T12:00:00.000Z'),
+            endedAt: new Date('2026-07-08T13:00:00.000Z'),
+          },
+        },
+      },
+    });
+    await prisma.manualTimeRequest.create({
+      data: {
+        clientUuid: fakeUlid('mtr-client'),
+        userId: admin.userId,
+        taskSummary: 'Customer escalation',
+        requestedStart: new Date('2026-07-08T12:00:00.000Z'),
+        requestedEnd: new Date('2026-07-08T13:00:00.000Z'),
+        reason: 'Worked during lunch but forgot to start timer',
+        status: 'APPROVED',
+        approverId: admin.userId,
+        decidedById: admin.userId,
+        decidedAt: new Date('2026-07-08T14:00:00.000Z'),
+        decidedReason: 'Calendar matched the escalation call',
+        decisionSource: 'DASHBOARD',
+        timeEntryId: manualEntry.id,
+      },
+    });
+    await prisma.manualTimeRequest.create({
+      data: {
+        clientUuid: fakeUlid('mtr-client'),
+        userId: admin.userId,
+        taskSummary: 'Pending overlap',
+        requestedStart: new Date('2026-07-08T13:05:00.000Z'),
+        requestedEnd: new Date('2026-07-08T13:20:00.000Z'),
+        reason: 'Asked to cover part of this gap',
+        status: 'PENDING',
+      },
+    });
+    await prisma.timeEntry.create({
+      data: {
+        id: fakeUlid('te'),
+        clientUuid: fakeUlid('client'),
+        userId: admin.userId,
+        source: 'AUTO',
+        startedAt: new Date('2026-07-08T13:30:00.000Z'),
+        endedAt: new Date('2026-07-08T17:00:00.000Z'),
+        segments: {
+          create: {
+            id: fakeUlid('seg'),
+            kind: 'WORK',
+            startedAt: new Date('2026-07-08T13:30:00.000Z'),
+            endedAt: new Date('2026-07-08T17:00:00.000Z'),
+          },
+        },
+      },
+    });
+    const created = await createToken(admin.accessToken, ['read:people', 'read:time-summary', 'read:manual-time']);
+
+    const res = await request(app)
+      .get('/v1/mcp/break-summary?from=2026-07-08&to=2026-07-08&tz=UTC&minBreakMinutes=5&lunchMinMinutes=30')
+      .set(bearer(created.token));
+
+    expect(res.status).toBe(200);
+    expect(res.body.method.lunch).toContain('Candidate only');
+    expect(res.body.totals.totalBreakMs).toBe(90 * 60 * 1000);
+    expect(res.body.totals.lunchCandidateMs).toBe(60 * 60 * 1000);
+    expect(res.body.totals.otherBreakMs).toBe(30 * 60 * 1000);
+    expect(res.body.users).toHaveLength(1);
+    expect(res.body.users[0]).toMatchObject({
+      name: 'Break Tester',
+      totalBreakMs: 90 * 60 * 1000,
+      lunchCandidateMs: 60 * 60 * 1000,
+      otherBreakMs: 30 * 60 * 1000,
+      breakCount: 2,
+    });
+    expect(res.body.users[0].days[0]).toMatchObject({
+      firstTrackedAt: '2026-07-08T09:00:00.000Z',
+      lastTrackedAt: '2026-07-08T17:00:00.000Z',
+      breakCount: 2,
+      totalBreakMs: 90 * 60 * 1000,
+    });
+    expect(res.body.users[0].days[0].breaks.map((item: { classification: string; durationMs: number }) => ({
+      classification: item.classification,
+      durationMs: item.durationMs,
+    }))).toEqual([
+      { classification: 'lunch_candidate', durationMs: 60 * 60 * 1000 },
+      { classification: 'break', durationMs: 30 * 60 * 1000 },
+    ]);
+    expect(res.body.users[0].days[0].manualTimeBlocks).toHaveLength(1);
+    expect(res.body.users[0].days[0].manualTimeBlocks[0].manualTimeRequest).toMatchObject({
+      taskSummary: 'Customer escalation',
+      reason: 'Worked during lunch but forgot to start timer',
+      status: 'APPROVED',
+      decidedReason: 'Calendar matched the escalation call',
+      decisionSource: 'DASHBOARD',
+    });
+    expect(res.body.users[0].days[0].breaks[0].evidence.previousTrackedBlock.sources[0]).toMatchObject({
+      source: 'AUTO',
+      kind: 'WORK',
+    });
+    expect(res.body.users[0].days[0].breaks[0].evidence.nextTrackedBlock.sources[0].manualTimeRequest).toMatchObject({
+      reason: 'Worked during lunch but forgot to start timer',
+      decidedReason: 'Calendar matched the escalation call',
+    });
+    expect(res.body.users[0].days[0].breaks[1].evidence.manualRequestsOverlappingGap).toHaveLength(1);
+    expect(res.body.users[0].days[0].breaks[1].evidence.manualRequestsOverlappingGap[0]).toMatchObject({
+      status: 'PENDING',
+      reason: 'Asked to cover part of this gap',
+    });
+  });
+
   it('keeps detailed MCP routes privacy-safe', async () => {
     const admin = await seedUser({ role: 'ADMIN' });
     await prisma.user.update({
@@ -275,6 +419,7 @@ describe('admin API tokens', () => {
       request(app).get('/v1/mcp/workspace-overview?tz=UTC').set(bearer(created.token)),
       request(app).get(`/v1/mcp/user-detail?userId=${admin.userId}&from=2026-07-09&to=2026-07-09&tz=UTC`).set(bearer(created.token)),
       request(app).get('/v1/mcp/time-summary?from=2026-07-09&to=2026-07-09&tz=UTC').set(bearer(created.token)),
+      request(app).get('/v1/mcp/break-summary?from=2026-07-09&to=2026-07-09&tz=UTC').set(bearer(created.token)),
       request(app).get('/v1/mcp/activity-flags-summary?from=2026-07-09&to=2026-07-09&tz=UTC').set(bearer(created.token)),
     ]);
 
@@ -289,7 +434,7 @@ describe('admin API tokens', () => {
     expect(payload).not.toContain('fullUrl');
     expect(payload).not.toContain('thumbUrl');
     expect(payload).not.toContain('s3Key');
-    expect(payload).not.toContain('evidence');
+    expect(JSON.stringify(responses[4].body)).not.toContain('evidence');
   });
 
   it('rejects missing scopes and over-large detailed MCP ranges', async () => {
@@ -300,6 +445,17 @@ describe('admin API tokens', () => {
       .get('/v1/mcp/activity-flags-summary')
       .set(bearer(peopleOnly.token));
     expect(missingScope.status).toBe(403);
+
+    const missingBreakScope = await request(app)
+      .get('/v1/mcp/break-summary')
+      .set(bearer(peopleOnly.token));
+    expect(missingBreakScope.status).toBe(403);
+
+    const missingBreakManualScope = await createToken(admin.accessToken, ['read:people', 'read:time-summary']);
+    const missingBreakManual = await request(app)
+      .get('/v1/mcp/break-summary')
+      .set(bearer(missingBreakManualScope.token));
+    expect(missingBreakManual.status).toBe(403);
 
     const full = await createToken(admin.accessToken, ALL_READ_SCOPES);
     const tooLarge = await request(app)
