@@ -1656,6 +1656,7 @@ body {
   box-shadow: var(--ui-shadow-pop);
   border: 1px solid var(--ui-line);
   padding: var(--ui-sp-3);
+  overflow: hidden;
   opacity: 0; transform: translateY(calc(-1 * var(--ui-sp-2))) scale(0.98);
   transition:
     opacity var(--ui-dur-fast) var(--ui-ease),
@@ -1768,6 +1769,7 @@ body {
 .ap-avatar {
   width: var(--ui-sp-7); height: var(--ui-sp-7);
   border-radius: var(--ui-r-full);
+  overflow: hidden;
   background: var(--ui-accent);
   color: var(--ui-on-accent);
   display: flex; align-items: center; justify-content: center;
@@ -1775,7 +1777,18 @@ body {
   flex-shrink: 0;
   letter-spacing: 0.3px;
 }
-.ap-email { display: block; }
+.ap-avatar img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.ap-email {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .ap-check { color: var(--ui-accent); font-weight: 700; }
 
 /* Attendee summary chip row (collapsed read-only view on entries) */
