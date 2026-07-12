@@ -18,12 +18,22 @@ function platform(): 'darwin' | 'win32' | 'linux' {
   return 'linux';
 }
 
+function lifecycle(entry: TimeEntry) {
+  return {
+    trackingProtocolVersion: 2 as const,
+    revision: Math.max(1, entry.revision),
+    observedAt: new Date(entry.endedAt ?? Date.now()).toISOString(),
+    closeReason: entry.closeReason,
+  };
+}
+
 /** SyncClient implemented over the authenticated HTTP api() helper. */
 export class HttpSyncClient implements SyncClient {
   async create(entry: TimeEntry): Promise<void> {
     await api('/v1/time-entries', {
       method: 'POST',
       body: {
+        ...lifecycle(entry),
         id: entry.id,
         clientUuid: entry.clientUuid,
         larkTaskGuid: entry.larkTaskGuid ?? null,
@@ -41,6 +51,7 @@ export class HttpSyncClient implements SyncClient {
     await api(`/v1/time-entries/${entry.id}/sync`, {
       method: 'PUT',
       body: {
+        ...lifecycle(entry),
         endedAt: entry.endedAt === null ? null : new Date(entry.endedAt).toISOString(),
         segments: entry.segments.map(segIso),
       },

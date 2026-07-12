@@ -6,6 +6,9 @@ export type SegmentKind = z.infer<typeof SegmentKind>;
 export const TimeEntrySource = z.enum(['AUTO', 'MANUAL']);
 export type TimeEntrySource = z.infer<typeof TimeEntrySource>;
 
+export const AgentTimeEntryCloseReason = z.enum(['AGENT', 'AGENT_RECOVERY']);
+export type AgentTimeEntryCloseReason = z.infer<typeof AgentTimeEntryCloseReason>;
+
 /** ISO-8601 timestamp string at the wire boundary. */
 const Iso = z.string().datetime({ offset: true });
 
@@ -26,10 +29,14 @@ export const CreateTimeEntryRequest = z.object({
   clientUuid: z.string().min(1),
   larkTaskGuid: z.string().min(1).nullable().optional(),
   source: TimeEntrySource.default('AUTO'),
+  trackingProtocolVersion: z.literal(2).optional(),
+  revision: z.number().int().min(1).optional(),
+  observedAt: Iso.optional(),
   startedAt: Iso,
   endedAt: Iso.nullable().optional(),
   agentVersion: z.string().max(50).optional(),
   platform: z.enum(['darwin', 'win32', 'linux']).optional(),
+  closeReason: AgentTimeEntryCloseReason.nullable().optional(),
   segments: z.array(SegmentDto).min(1),
 });
 export type CreateTimeEntryRequest = z.infer<typeof CreateTimeEntryRequest>;
@@ -40,6 +47,12 @@ export const TimeEntryDto = z.object({
   userId: z.string(),
   larkTaskGuid: z.string().nullable(),
   source: TimeEntrySource,
+  trackingProtocolVersion: z.number().int().nullable(),
+  revision: z.number().int().min(0).nullable(),
+  lastProvenAt: Iso.nullable(),
+  leaseExpiresAt: Iso.nullable(),
+  closeReason: z.enum(['AGENT', 'AGENT_RECOVERY', 'LEASE_EXPIRED', 'SUPERSEDED', 'LEGACY_RECONCILED']).nullable(),
+  serverFinalizedAt: Iso.nullable(),
   startedAt: Iso,
   endedAt: Iso.nullable(),
   notes: z.string().nullable(),
@@ -75,7 +88,11 @@ export type PatchTimeEntryRequest = z.infer<typeof PatchTimeEntryRequest>;
  * the idempotent "push my current state" call.
  */
 export const SyncTimeEntryRequest = z.object({
+  trackingProtocolVersion: z.literal(2).optional(),
+  revision: z.number().int().min(1).optional(),
+  observedAt: Iso.optional(),
   endedAt: Iso.nullable().optional(),
+  closeReason: AgentTimeEntryCloseReason.nullable().optional(),
   segments: z.array(SegmentDto).min(1),
 });
 export type SyncTimeEntryRequest = z.infer<typeof SyncTimeEntryRequest>;

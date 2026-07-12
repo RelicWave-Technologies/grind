@@ -4,9 +4,9 @@ import ScreenshotGrid from './ScreenshotGrid';
 
 export default function ScreenshotsStrip() {
   const qc = useQueryClient();
-  const perm = useQuery({
-    queryKey: ['screenPerm'],
-    queryFn: () => window.agent.permissions.screen(),
+  const permissions = useQuery({
+    queryKey: ['trackingReadiness'],
+    queryFn: () => window.agent.permissions.readiness(),
     refetchInterval: 4000,
   });
   const shots = useQuery({
@@ -25,7 +25,7 @@ export default function ScreenshotsStrip() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['screenshots'] });
       void qc.invalidateQueries({ queryKey: ['screenshotsUploadSummary'] });
-      void qc.invalidateQueries({ queryKey: ['screenPerm'] });
+      void qc.invalidateQueries({ queryKey: ['trackingReadiness'] });
     },
   });
   const retryFailed = useMutation({
@@ -36,7 +36,14 @@ export default function ScreenshotsStrip() {
     },
   });
 
-  const state = perm.data?.state ?? 'ok';
+  const screenState = permissions.data?.screenRecording ?? 'NEEDS_GRANT';
+  const state = screenState === 'READY' || screenState === 'NOT_REQUIRED'
+    ? 'ok'
+    : screenState === 'NEEDS_GRANT'
+      ? 'needs-grant'
+      : screenState === 'NEEDS_SETTINGS'
+        ? 'needs-settings'
+        : 'needs-restart';
   const ok = state === 'ok';
   const failedUploads = uploads.data?.failed ?? 0;
 
@@ -81,7 +88,7 @@ function PermBanner({ state }: { state: 'needs-grant' | 'needs-settings' | 'need
       title: 'Enable screenshots',
       body: 'Click “Take one now”, then allow Timo under Screen Recording.',
       label: 'Open System Settings',
-      run: () => window.agent.settings.openScreenPrefs(),
+      run: () => window.agent.permissions.requestScreen(),
     },
     'needs-settings': {
       title: 'Screen Recording permission needed',

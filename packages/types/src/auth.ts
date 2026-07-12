@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { TimeZoneSchema } from './timezone';
 
 export const Role = z.enum(['ADMIN', 'MANAGER', 'MEMBER']);
 export type Role = z.infer<typeof Role>;
@@ -19,6 +20,7 @@ export const UserDto = z.object({
   displayRole: Role,
   capabilities: z.array(z.string()),
   workspaceId: z.string(),
+  workspaceTimezone: TimeZoneSchema,
   teamId: z.string().nullable(),
   managerId: z.string().nullable(),
   provisioningStatus: ProvisioningStatus,

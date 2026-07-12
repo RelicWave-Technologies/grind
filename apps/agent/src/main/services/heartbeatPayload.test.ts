@@ -16,14 +16,24 @@ describe('heartbeat payload', () => {
     const status: TimerStatus = {
       state: 'RUNNING',
       entryId: 'entry-1',
+      revision: 7,
       larkTaskGuid: null,
       startedAt: 1,
+      segmentStartedAt: 1,
       workedMs: 10,
       paused: false,
+      pauseReason: null,
     };
-    expect(buildHeartbeatRequest({ agentVersion: '0.0.2', platform: 'darwin', timerStatus: status })).toMatchObject({
+    expect(buildHeartbeatRequest({ agentVersion: '0.0.2', platform: 'darwin', timerStatus: status, observedAt: 1000 })).toMatchObject({
       state: 'RUNNING',
       activeEntryId: 'entry-1',
+      trackingProtocolVersion: 2,
+      timerCheckpoint: {
+        entryId: 'entry-1',
+        revision: 7,
+        state: 'RUNNING',
+        observedAt: new Date(1000).toISOString(),
+      },
     });
   });
 
@@ -31,14 +41,42 @@ describe('heartbeat payload', () => {
     const status: TimerStatus = {
       state: 'RUNNING',
       entryId: 'entry-2',
+      revision: 8,
       larkTaskGuid: 'task',
       startedAt: 1,
+      segmentStartedAt: null,
       workedMs: 10,
       paused: true,
+      pauseReason: 'IDLE',
     };
-    expect(buildHeartbeatRequest({ agentVersion: '0.0.2', platform: 'win32', timerStatus: status })).toMatchObject({
+    expect(buildHeartbeatRequest({ agentVersion: '0.0.2', platform: 'win32', timerStatus: status, observedAt: 2000 })).toMatchObject({
       state: 'PAUSED_IDLE',
       activeEntryId: 'entry-2',
+      timerCheckpoint: {
+        entryId: 'entry-2',
+        revision: 8,
+        state: 'PAUSED_IDLE',
+        observedAt: new Date(2000).toISOString(),
+      },
+    });
+  });
+
+  it('distinguishes a permission-enforced pause from ordinary idle', () => {
+    const status: TimerStatus = {
+      state: 'RUNNING',
+      entryId: 'entry-permission',
+      revision: 9,
+      larkTaskGuid: 'task',
+      startedAt: 1,
+      segmentStartedAt: null,
+      workedMs: 10,
+      paused: true,
+      pauseReason: 'PERMISSION_REQUIRED',
+    };
+
+    expect(buildHeartbeatRequest({ agentVersion: '0.0.2', platform: 'darwin', timerStatus: status })).toMatchObject({
+      state: 'PAUSED_PERMISSION',
+      timerCheckpoint: { state: 'PAUSED_PERMISSION' },
     });
   });
 
@@ -64,6 +102,30 @@ describe('heartbeat payload', () => {
       permissions: {
         screen: { status: 'granted', health: 'ok', state: 'ok' },
         accessibility: { trusted: true, ready: true },
+      },
+    });
+  });
+
+  it('includes launch-at-login health when provided', () => {
+    const status: TimerStatus = { state: 'IDLE', workedMs: 0 };
+    expect(
+      buildHeartbeatRequest({
+        agentVersion: '0.0.2',
+        platform: 'win32',
+        timerStatus: status,
+        startup: {
+          state: 'NEEDS_REPAIR',
+          ready: false,
+          openedAtLogin: false,
+          origin: 'USER',
+        },
+      }),
+    ).toMatchObject({
+      startup: {
+        state: 'NEEDS_REPAIR',
+        ready: false,
+        openedAtLogin: false,
+        origin: 'USER',
       },
     });
   });

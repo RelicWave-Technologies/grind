@@ -1,4 +1,4 @@
-import { app, ipcMain, safeStorage, screen } from 'electron';
+import { app, ipcMain, Notification, safeStorage, screen } from 'electron';
 import type { BrowserWindow, Tray } from 'electron';
 import { createTray, setTrayTitle } from './tray';
 import { createMainWindow } from './window';
@@ -21,8 +21,10 @@ import { reassertAllOverlays } from './windows/overlay';
 import { togglePopover, hidePopover } from './popover';
 import { showIdlePrompt, hideIdlePrompt } from './idlePrompt';
 import { showAwayPrompt } from './awayPrompt';
+import { focusPermissionPromptIfVisible } from './permissionPrompt';
 import { ShiftMonitor } from './services/shift';
 import { onAuthChange } from './services/apiClient';
+import { isLoggedIn } from './services/auth';
 import { onAgentConfigChange, refreshAgentConfig } from './services/agentConfig';
 import { registerProtocol, handleDeepLink, deepLinkFromArgv, flushQueuedDeepLink } from './services/deepLink';
 import { hasQuitCleanupCompleted, registerGracefulQuitHandler, runQuitCleanup } from './services/quitCleanup';
@@ -32,9 +34,19 @@ import {
   refreshUpdateInstallability,
   startUpdateService,
 } from './services/updates';
-import { ensureLaunchAtLogin, shouldStartHidden } from './services/launchAtLogin';
+import { getLaunchAtLoginService, isHiddenLaunch } from './services/launchAtLogin';
+import type { LaunchAtLoginHealth } from '../shared/launchAtLogin';
 import { migrateLegacyUserData } from './services/legacyMigration';
 import { broadcast } from './broadcast';
+import {
+  offerPermissionSetupOnStartup,
+  resetPermissionSetupOffer,
+  resumeTracking,
+} from './services/trackingCommands';
+import {
+  checkTrackingPermissionsNow,
+  startTrackingPermissionMonitor,
+} from './services/trackingPermissionMonitor';
 import { API_URL, CALLBACK_SCHEME } from './env';
 import { log, logFilePath } from './logger';
 
@@ -94,6 +106,26 @@ function showMainWindow() {
   win.focus();
 }
 
+function showSettingsWindow() {
+  showMainWindow();
+  broadcast('settings:open:push', {});
+}
+
+function notifyStartupHealth(state: LaunchAtLoginHealth): void {
+  if (state.ready || state.state === 'UNAVAILABLE' || state.openedAtLogin || !Notification.isSupported()) return;
+  const body = state.state === 'NEEDS_INSTALL'
+    ? 'Move Timo to Applications so it can start when you sign in.'
+    : state.state === 'NEEDS_APPROVAL'
+      ? 'Approve Timo in Login Items so it can start when you sign in.'
+      : 'Open Timo Settings to repair Launch at Login.';
+  const notification = new Notification({
+    title: 'Timo startup needs attention',
+    body,
+  });
+  notification.on('click', showSettingsWindow);
+  notification.show();
+}
+
 app.whenReady().then(async () => {
   // Recover a session stranded by a prior app identity (Grind->Timo) BEFORE any
   // token read. Windows-only: that's where the productName-based userData dir
@@ -119,8 +151,9 @@ app.whenReady().then(async () => {
     safeStorageAvailable: safeStorage.isEncryptionAvailable(),
   });
 
-  const launchAtLogin = ensureLaunchAtLogin();
-  const openedAtLogin = shouldStartHidden(process.argv);
+  const launchAtLoginService = getLaunchAtLoginService();
+  const openedAtLogin = launchAtLoginService.shouldStartHidden();
+  const launchAtLogin = launchAtLoginService.reconcileOnBoot();
 
   mainWindow = ensureMainWindow({ startHidden: openedAtLogin });
   tray = createTray({
@@ -154,13 +187,16 @@ app.whenReady().then(async () => {
     isQuitting = true;
     void runQuitCleanup('update');
   });
-  app.on('activate', () => showMainWindow());
+  app.on('activate', () => {
+    if (!focusPermissionPromptIfVisible()) showMainWindow();
+  });
 
   // On wake the OS drops the always-on-top / all-Spaces flags (electron#36364)
   // — re-assert float on EVERY live overlay, not just the bar.
   registerPowerEvents({
     onWake: () => {
       reassertAllOverlays();
+      checkTrackingPermissionsNow();
       void drainTimerSyncNow('wake');
       void drainActivityNow('wake');
     },
@@ -198,16 +234,23 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('idle:get', () => ({ idleStartedAt: idleMonitor.getIdleStart() }));
   ipcMain.handle('idle:resolve', async (_e, action: 'continue' | 'break') => {
+    let commandPublished = false;
     try {
-      if (action === 'continue') await getTimerService().resume();
-      else await getTimerService().stop();
+      if (action === 'continue') {
+        await resumeTracking();
+        commandPublished = true;
+      } else {
+        await getTimerService().stop();
+      }
     } catch (err) {
       log.warn('idle resolve failed', { action, err: String(err) });
     }
     idleMonitor.resolve();
     hideIdlePrompt();
-    broadcast('timer:status:push', getTimerService().status());
-    sendHeartbeatNow();
+    if (!commandPublished) {
+      broadcast('timer:status:push', getTimerService().status());
+      sendHeartbeatNow();
+    }
     refreshUpdateInstallability();
   });
 
@@ -242,6 +285,8 @@ app.whenReady().then(async () => {
 
   startCaptureLoop();
   startActivityCapture();
+  startTrackingPermissionMonitor();
+  if (await isLoggedIn()) void offerPermissionSetupOnStartup();
   startActivitySyncDrain();
   void drainActivityNow('boot');
   startActiveWindowPolling();
@@ -261,6 +306,9 @@ app.whenReady().then(async () => {
       void shiftMonitor.refreshShift();
       void refreshAgentConfig();
       void drainActivityNow('auth');
+      void offerPermissionSetupOnStartup();
+    } else {
+      resetPermissionSetupOffer();
     }
   });
   ipcMain.handle('shift:decide', (_e, decision: 'yes' | 'not_yet') => {
@@ -301,8 +349,9 @@ app.whenReady().then(async () => {
     platform: process.platform,
     version: app.getVersion(),
     openedAtLogin,
-    launchAtLoginStatus: launchAtLogin.status,
+    launchAtLoginStatus: launchAtLogin.state,
   });
+  notifyStartupHealth(launchAtLogin);
 });
 
 app.on('window-all-closed', () => {
@@ -312,7 +361,7 @@ app.on('window-all-closed', () => {
 app.on('second-instance', (_e, argv) => {
   const url = deepLinkFromArgv(argv);
   if (url) void handleDeepLink(url);
-  showMainWindow();
+  if (!isHiddenLaunch(argv)) showMainWindow();
 });
 
 void tray;

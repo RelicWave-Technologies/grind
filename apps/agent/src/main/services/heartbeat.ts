@@ -4,13 +4,14 @@ import { AGENT_VERSION, HEARTBEAT_INTERVAL_MS } from '../env';
 import { log } from '../logger';
 import { api, UnauthorizedError } from './apiClient';
 import { isLoggedIn } from './auth';
-import { drainActivityNow, getActivityCaptureStatus } from './activity';
-import { getScreenHealth } from './capture';
-import { screenStatus, screenUiState } from './permissions';
+import { drainActivityNow } from './activity';
 import { drainTimerSyncNow, getTimerService } from './timer';
 import { buildHeartbeatRequest, currentPlatform } from './heartbeatPayload';
 import type { TimerSyncDrainReason } from './timer/syncDrain';
 import { getAgentConfigVersion, refreshAgentConfig } from './agentConfig';
+import { broadcast } from '../broadcast';
+import { getTrackingReadinessService } from './trackingReadiness';
+import { getLaunchAtLoginService } from './launchAtLogin';
 
 let timer: NodeJS.Timeout | null = null;
 let lastHeartbeatAt: string | null = null;
@@ -23,23 +24,18 @@ function agentVersion(): string {
   }
 }
 
-function currentPermissionSnapshot(): DesktopPermissionSnapshot {
-  const screen = screenStatus();
-  const health = getScreenHealth();
-  const accessibility = getActivityCaptureStatus();
+async function currentPermissionSnapshot(): Promise<DesktopPermissionSnapshot> {
+  return (await getTrackingReadinessService().inspect()).permissions;
+}
+
+function currentStartupSnapshot() {
+  const service = getLaunchAtLoginService();
+  const health = service.inspect();
   return {
-    screen: {
-      status: screen,
-      health,
-      state: screenUiState(screen, health),
-    },
-    accessibility: {
-      trusted: accessibility.trusted,
-      ready: accessibility.ready,
-      recording: accessibility.recording,
-      capturing: accessibility.capturing,
-      hookRunning: accessibility.hookRunning,
-    },
+    state: health.state,
+    ready: health.ready,
+    openedAtLogin: health.openedAtLogin,
+    origin: service.launchOrigin(),
   };
 }
 
@@ -64,17 +60,35 @@ function requestAgentConfigRefresh(serverVersion: string): void {
 
 async function tick(): Promise<void> {
   try {
+    await drainTimerSyncNow('heartbeat');
+    const timerService = getTimerService();
+    const timerStatus = timerService.status();
+    if (timerStatus.state === 'RUNNING' && !timerStatus.paused) timerService.heartbeat();
     const body = buildHeartbeatRequest({
       agentVersion: agentVersion(),
       platform: currentPlatform(),
-      timerStatus: getTimerService().status(),
-      permissions: currentPermissionSnapshot(),
+      timerStatus,
+      observedAt: Date.now(),
+      permissions: await currentPermissionSnapshot(),
+      startup: currentStartupSnapshot(),
     });
     const res = await api<HeartbeatResponse>('/v1/agent/heartbeat', { method: 'POST', body });
     lastHeartbeatAt = res.serverTime;
     log.debug('heartbeat ok', { serverTime: res.serverTime, configVersion: res.configVersion });
+    if (res.timer?.disposition === 'needs_sync') requestTimerDrain('heartbeat');
+    if (res.timer?.disposition === 'finalized' || res.timer?.disposition === 'conflict') {
+      log.warn('server rejected active timer checkpoint', {
+        entryId: res.timer.entryId,
+        disposition: res.timer.disposition,
+        endedAt: res.timer.endedAt,
+        closeReason: res.timer.closeReason,
+      });
+      if (res.timer.endedAt) {
+        const status = getTimerService().acceptServerFinalization(res.timer.entryId, new Date(res.timer.endedAt).getTime());
+        broadcast('timer:status:push', status);
+      }
+    }
     requestAgentConfigRefresh(res.configVersion);
-    requestTimerDrain('heartbeat');
     requestActivityDrain('heartbeat');
   } catch (err: unknown) {
     if (err instanceof UnauthorizedError) {

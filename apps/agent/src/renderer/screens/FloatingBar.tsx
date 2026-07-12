@@ -19,7 +19,7 @@ export default function FloatingBar() {
   const task = timer.larkTaskGuid ? larkTasks.data?.tasks.find((t) => t.guid === timer.larkTaskGuid) : undefined;
   const st = timer.larkTaskGuid ? projectStyle(timer.larkTaskGuid) : null;
   const resume = () => {
-    void window.agent.timer.resume().then(setTimer);
+    void window.agent.timer.resume().then((result) => setTimer(result.status));
   };
   const stop = () => {
     void window.agent.timer.stop().then(setTimer);

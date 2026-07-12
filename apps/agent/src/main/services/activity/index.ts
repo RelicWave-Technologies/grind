@@ -24,6 +24,7 @@ let started = false;
 // for no benefit (events no-op unless recording), which heats the CPU.
 let hookRunning = false;
 let lastHookError: string | null = null;
+const captureStatusListeners = new Set<(status: ActivityCaptureStatus) => void>();
 // Throttle mousemove processing: the OS fires it at the pointer's full poll rate
 // (often 125Hz+); sampling at ~20Hz is ample for distance / speed-CV metrics.
 let lastMoveTs = 0;
@@ -96,7 +97,10 @@ export function applyActivityCapturePolicy(policy: PolicyFlags): void {
  * events are delivered to JS when the user isn't actively tracking.
  */
 function syncHook(): void {
-  if (!started) return;
+  if (!started) {
+    emitCaptureStatus();
+    return;
+  }
   if (recording && !hookRunning) {
     try {
       uIOhook.start();
@@ -116,6 +120,7 @@ function syncHook(): void {
     hookRunning = false;
     lastHookError = null;
   }
+  emitCaptureStatus();
 }
 
 /** Whether the global input hook is actually running (Accessibility granted). */
@@ -130,6 +135,16 @@ export interface ActivityCaptureStatus {
   capturing: boolean;
   hookRunning: boolean;
   lastHookError: string | null;
+}
+
+export function onActivityCaptureStatusChange(listener: (status: ActivityCaptureStatus) => void): () => void {
+  captureStatusListeners.add(listener);
+  return () => captureStatusListeners.delete(listener);
+}
+
+function emitCaptureStatus(): void {
+  const status = getActivityCaptureStatus();
+  for (const listener of captureStatusListeners) listener(status);
 }
 
 export function getActivityCaptureStatus(): ActivityCaptureStatus {
@@ -153,6 +168,7 @@ export function startActivityCapture(): void {
   if (!hasAccessibilityAccess(false)) {
     lastHookError = null;
     log.warn('activity capture not started — Accessibility permission missing');
+    emitCaptureStatus();
     return;
   }
   getStore();
@@ -236,6 +252,7 @@ export function stopActivityCapture(): void {
   }
   started = false;
   lastHookError = null;
+  emitCaptureStatus();
 }
 
 /** Today's input totals (for an in-app summary). */

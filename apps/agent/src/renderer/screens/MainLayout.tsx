@@ -51,9 +51,11 @@ export default function MainLayout() {
       qc.setQueryData(['updates'], s);
     });
     const offOpenSettings = window.agent.updates.onOpenSettings(() => setTab('settings'));
+    const offStartupSettings = window.agent.settings.onOpen(() => setTab('settings'));
     return () => {
       offStatus();
       offOpenSettings();
+      offStartupSettings();
     };
   }, [qc]);
 

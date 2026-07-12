@@ -41,6 +41,9 @@ export interface OverlayOptions extends Size {
   /** OS corner rounding. Set false to let CSS own the shape completely, so a
    *  DWM/AppKit corner radius can't mismatch the surface's own border-radius. */
   roundedCorners?: boolean;
+  /** Interactive overlays must become key windows. Passive surfaces use an
+   * NSPanel on macOS so they can float without activating the app. */
+  activation?: 'passive' | 'interactive';
 }
 
 // Live overlays — used by reassertAllOverlays() on wake / display change.
@@ -55,9 +58,9 @@ function loadRoute(w: BrowserWindow, hash: string): void {
 }
 
 /**
- * Create a frameless, transparent, non-activating overlay window with the
- * shared hardened webPreferences. Auto-registers for float re-assertion and
- * auto-deregisters on close.
+ * Create a frameless, transparent overlay window with shared hardened
+ * webPreferences. Auto-registers for float re-assertion and deregisters on
+ * close. Passive overlays use NSPanel; interactive overlays are key windows.
  */
 export function createOverlayWindow(opts: OverlayOptions): BrowserWindow {
   const win = new BrowserWindow({
@@ -75,8 +78,9 @@ export function createOverlayWindow(opts: OverlayOptions): BrowserWindow {
     fullscreenable: false,
     hasShadow: opts.hasShadow ?? true,
     roundedCorners: opts.roundedCorners ?? true,
-    // 'panel' floats above fullscreen apps without stealing focus (macOS).
-    type: process.platform === 'darwin' ? 'panel' : undefined,
+    // NSPanel is correct for passive surfaces, but cannot reliably become the
+    // key window for a permission flow opened from an already-visible window.
+    type: process.platform === 'darwin' && opts.activation !== 'interactive' ? 'panel' : undefined,
     webPreferences: {
       contextIsolation: true,
       sandbox: true,

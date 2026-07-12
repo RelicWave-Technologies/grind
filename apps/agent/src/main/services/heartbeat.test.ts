@@ -13,6 +13,11 @@ const mocks = vi.hoisted(() => ({
   screenUiState: vi.fn(),
   logWarn: vi.fn(),
   logDebug: vi.fn(),
+  startupHealth: {
+    state: 'READY',
+    ready: true,
+    openedAtLogin: true,
+  },
 }));
 
 vi.mock('electron', () => ({
@@ -52,13 +57,21 @@ vi.mock('./permissions', () => ({
 }));
 
 vi.mock('./heartbeatPayload', () => ({
-  buildHeartbeatRequest: (args: { agentVersion: string; permissions?: unknown }) => ({
+  buildHeartbeatRequest: (args: { agentVersion: string; permissions?: unknown; startup?: unknown }) => ({
     agentVersion: args.agentVersion,
     platform: 'darwin',
     state: 'IDLE',
     permissions: args.permissions,
+    startup: args.startup,
   }),
   currentPlatform: () => 'darwin',
+}));
+
+vi.mock('./launchAtLogin', () => ({
+  getLaunchAtLoginService: () => ({
+    inspect: () => mocks.startupHealth,
+    launchOrigin: () => 'LOGIN_ITEM',
+  }),
 }));
 
 vi.mock('./agentConfig', () => ({
@@ -171,14 +184,37 @@ describe('heartbeat config refresh', () => {
     );
   });
 
+  it('sends launch-at-login health without local paths', async () => {
+    mocks.api.mockResolvedValue({ ok: true, serverTime: '2026-07-04T00:00:00.000Z', configVersion: 'version-1' });
+    const { sendHeartbeatNow } = await import('./heartbeat');
+
+    sendHeartbeatNow();
+
+    await vi.waitFor(() =>
+      expect(mocks.api).toHaveBeenCalledWith(
+        '/v1/agent/heartbeat',
+        expect.objectContaining({
+          body: expect.objectContaining({
+            startup: {
+              state: 'READY',
+              ready: true,
+              openedAtLogin: true,
+              origin: 'LOGIN_ITEM',
+            },
+          }),
+        }),
+      ),
+    );
+  });
+
   it('does not refresh agent config when the server version matches', async () => {
     mocks.api.mockResolvedValue({ ok: true, serverTime: '2026-07-04T00:00:00.000Z', configVersion: 'version-1' });
     const { sendHeartbeatNow } = await import('./heartbeat');
 
     sendHeartbeatNow();
 
-    await vi.waitFor(() => expect(mocks.drainTimerSyncNow).toHaveBeenCalledWith('heartbeat'));
-    expect(mocks.drainActivityNow).toHaveBeenCalledWith('heartbeat');
+    await vi.waitFor(() => expect(mocks.drainActivityNow).toHaveBeenCalledWith('heartbeat'));
+    expect(mocks.drainTimerSyncNow).toHaveBeenCalledWith('heartbeat');
     expect(mocks.refreshAgentConfig).not.toHaveBeenCalled();
   });
 

@@ -19,6 +19,7 @@ let store: ScreenshotStore | null = null;
 let timer: NodeJS.Timeout | null = null;
 let retentionTimer: NodeJS.Timeout | null = null;
 let lastHealth: CaptureHealth = 'unknown';
+const healthListeners = new Set<(health: CaptureHealth) => void>();
 
 /**
  * Compute the `[from, to)` epoch window to aggregate activity for a
@@ -57,6 +58,16 @@ export function getScreenHealth(): CaptureHealth {
   return lastHealth;
 }
 
+export function onScreenHealthChange(listener: (health: CaptureHealth) => void): () => void {
+  healthListeners.add(listener);
+  return () => healthListeners.delete(listener);
+}
+
+function setScreenHealth(health: CaptureHealth): void {
+  lastHealth = health;
+  for (const listener of healthListeners) listener(health);
+}
+
 function getStore(): ScreenshotStore {
   if (store) return store;
   const db = new Database(path.join(app.getPath('userData'), 'agent.db'));
@@ -85,7 +96,7 @@ async function tick() {
     // Only capture while actively tracking (running and not paused).
     if (status.state === 'RUNNING' && !status.paused) {
       const { rows, health } = await captureNow(status.entryId);
-      lastHealth = health;
+      setScreenHealth(health);
       for (const r of rows) getStore().insert(r);
       // Push fresh shots to Cloudinary promptly (no-op if logged out/unconfigured).
       if (rows.length) void uploadScreenshotsNow(rows).finally(() => void drainUploads());
@@ -275,7 +286,7 @@ export async function retryFailedUploads(): Promise<{ reset: number }> {
 export async function captureOnce(): Promise<number> {
   const status = getTimerService().status();
   const { rows, health } = await captureNow(status.state === 'RUNNING' ? status.entryId : null, { force: true });
-  lastHealth = health;
+  setScreenHealth(health);
   for (const r of rows) getStore().insert(r);
   if (rows.length) {
     await uploadScreenshotsNow(rows);

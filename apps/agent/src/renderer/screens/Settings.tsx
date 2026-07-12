@@ -7,13 +7,16 @@ import { settingsUpdateSubtitle, updateAction, updatePercent } from '../lib/upda
 export default function Settings() {
   const qc = useQueryClient();
   const info = useQuery({ queryKey: ['settings'], queryFn: () => window.agent.settings.get(), refetchInterval: 4000 });
-  const perm = useQuery({ queryKey: ['screenPerm'], queryFn: () => window.agent.permissions.screen(), refetchInterval: 4000 });
-  const a11y = useQuery({ queryKey: ['a11yPerm'], queryFn: () => window.agent.permissions.accessibility(), refetchInterval: 4000 });
+  const permissions = useQuery({ queryKey: ['trackingReadiness'], queryFn: () => window.agent.permissions.readiness(), refetchInterval: 4000 });
   const lark = useQuery({ queryKey: ['larkStatus'], queryFn: () => window.agent.lark.status(), refetchInterval: 4000 });
   const updates = useQuery({ queryKey: ['updates'], queryFn: () => window.agent.updates.status(), refetchInterval: 60_000 });
 
-  const enableLogin = useMutation({
-    mutationFn: () => window.agent.settings.enableLaunchAtLogin(),
+  const repairLogin = useMutation({
+    mutationFn: () => window.agent.settings.repairLaunchAtLogin(),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['settings'] }),
+  });
+  const moveToApplications = useMutation({
+    mutationFn: () => window.agent.settings.moveToApplications(),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['settings'] }),
   });
 
@@ -71,29 +74,24 @@ export default function Settings() {
         ? { ok: true, text: 'Connected' }
         : { ok: false, text: 'Connect to attribute time to Lark tasks' };
 
-  const state = perm.data?.state ?? 'ok';
-  const ok = state === 'ok';
-  const sub =
-    state === 'ok'
-      ? { ok: true, text: 'Granted' }
-      : state === 'needs-restart'
-        ? { ok: false, text: 'Restart needed for capture to take effect' }
-        : { ok: false, text: 'Required for screenshots' };
-
-  const aTrusted = !!a11y.data?.trusted;
-  const aReady = !!a11y.data?.ready;
-  const aRecording = !!a11y.data?.recording;
-  const aHookRunning = !!a11y.data?.hookRunning;
-  const aHealthy = aTrusted && aReady && (!aRecording || aHookRunning);
-  const a11ySub = !aTrusted
-    ? { ok: false, text: 'Needed to count keystrokes & mouse' }
-    : !aReady
-      ? { ok: false, text: 'Granted — restart to start tracking' }
-      : aRecording && aHookRunning
-        ? { ok: true, text: 'Counting keyboard & mouse activity' }
-        : aRecording
-          ? { ok: false, text: 'Tracking failed — restart or re-grant Accessibility' }
-          : { ok: true, text: 'Ready — counts while the timer runs' };
+  const screenState = permissions.data?.screenRecording ?? 'NEEDS_GRANT';
+  const screenReady = screenState === 'READY' || screenState === 'NOT_REQUIRED';
+  const screenText = screenReady
+    ? 'Ready'
+    : screenState === 'NEEDS_GRANT'
+      ? 'Required for screenshots'
+      : screenState === 'NEEDS_SETTINGS'
+        ? 'Enable in System Settings'
+        : 'Restart needed for capture to take effect';
+  const accessibilityState = permissions.data?.accessibility ?? 'NEEDS_GRANT';
+  const accessibilityReady = accessibilityState === 'READY' || accessibilityState === 'NOT_REQUIRED';
+  const accessibilityText = accessibilityReady
+    ? 'Ready — counts while the timer runs'
+    : accessibilityState === 'NEEDS_GRANT'
+      ? 'Needed to count keystrokes & mouse'
+      : accessibilityState === 'NEEDS_SETTINGS'
+        ? 'Enable in System Settings'
+        : 'Restart Timo to start activity tracking';
   const u = updates.data;
   const updateBusy = u?.phase === 'checking' || u?.phase === 'downloading' || u?.phase === 'installing' || checkUpdates.isPending;
   const updatePercentValue = updatePercent(u);
@@ -102,17 +100,28 @@ export default function Settings() {
   const launch = info.data?.launchAtLogin;
   const launchText = !launch
     ? 'Checking startup status...'
-    : launch.enabled
-      ? 'Enabled'
-      : launch.status === 'blocked-dmg'
-        ? 'Move Timo to Applications, then open it from there'
-        : launch.status === 'requires-approval'
+    : launch.state === 'READY'
+      ? 'Starts automatically when you sign in'
+      : launch.state === 'NEEDS_INSTALL'
+        ? 'Move Timo to Applications to enable startup'
+        : launch.state === 'NEEDS_APPROVAL'
           ? 'Approve Timo in Login Items'
-          : launch.status === 'unavailable-dev'
-            ? 'Unavailable in dev mode'
-            : 'Startup item needs repair';
-  const launchOk = !!launch?.enabled;
-  const launchWarn = !!launch && !launch.enabled && launch.status !== 'unavailable-dev';
+          : launch.state === 'NEEDS_REGISTRATION'
+            ? 'Startup registration is missing'
+            : launch.state === 'NEEDS_REPAIR'
+              ? 'Startup item is disabled or points to the wrong app'
+              : launch.state === 'BLOCKED'
+                ? 'Startup is blocked by system settings'
+                : 'Unavailable in dev mode';
+  const moveError = moveToApplications.data?.ok === false
+    ? moveToApplications.data.reason === 'TRACKING_ACTIVE'
+      ? 'Stop tracking before moving Timo.'
+      : moveToApplications.data.reason === 'MOVE_FAILED'
+        ? 'Timo could not be moved. Check Applications folder access.'
+        : null
+    : null;
+  const launchOk = launch?.ready === true;
+  const launchWarn = !!launch && !launch.ready && launch.state !== 'UNAVAILABLE';
 
   return (
     <>
@@ -123,24 +132,28 @@ export default function Settings() {
           <div className="section-head"><span className="section-title">Permissions</span></div>
           <div className="set-card">
             <div className="set-row">
-              <span className="set-ic" style={{ background: ok ? 'var(--c-green-bg)' : 'var(--c-orange-bg)' }}>
+              <span className="set-ic" style={{ background: screenReady ? 'var(--c-green-bg)' : 'var(--c-orange-bg)' }}>
                 <MonitorCheck size={17} strokeWidth={2} />
               </span>
               <div className="set-main">
                 <div className="set-title">Screen Recording</div>
                 <div className="set-sub">
-                  {sub.ok ? (
-                    <span className="set-ok"><CheckCircle2 size={13} /> {sub.text}</span>
+                  {screenReady ? (
+                    <span className="set-ok"><CheckCircle2 size={13} /> {screenText}</span>
                   ) : (
-                    <span className="set-warn"><AlertCircle size={13} /> {sub.text}</span>
+                    <span className="set-warn"><AlertCircle size={13} /> {screenText}</span>
                   )}
                 </div>
               </div>
-              {state === 'needs-restart' ? (
+              {screenState === 'NEEDS_RESTART' || screenState === 'FAILED' ? (
                 <button className="btn btn-prominent no-drag" onClick={() => window.agent.app.relaunch()}>
                   Restart Timo
                 </button>
-              ) : !ok ? (
+              ) : screenState === 'NEEDS_GRANT' ? (
+                <button className="btn no-drag" onClick={() => window.agent.permissions.requestScreen()}>
+                  Enable
+                </button>
+              ) : !screenReady ? (
                 <button className="btn no-drag" onClick={() => window.agent.settings.openScreenPrefs()}>
                   Open System Settings
                 </button>
@@ -148,24 +161,24 @@ export default function Settings() {
             </div>
 
             <div className="set-row">
-              <span className="set-ic" style={{ background: aHealthy ? 'var(--c-green-bg)' : 'var(--c-orange-bg)' }}>
+              <span className="set-ic" style={{ background: accessibilityReady ? 'var(--c-green-bg)' : 'var(--c-orange-bg)' }}>
                 <Keyboard size={17} strokeWidth={2} />
               </span>
               <div className="set-main">
                 <div className="set-title">Accessibility</div>
                 <div className="set-sub">
-                  {a11ySub.ok ? (
-                    <span className="set-ok"><CheckCircle2 size={13} /> {a11ySub.text}</span>
+                  {accessibilityReady ? (
+                    <span className="set-ok"><CheckCircle2 size={13} /> {accessibilityText}</span>
                   ) : (
-                    <span className="set-warn" title={a11y.data?.lastHookError ?? undefined}><AlertCircle size={13} /> {a11ySub.text}</span>
+                    <span className="set-warn"><AlertCircle size={13} /> {accessibilityText}</span>
                   )}
                 </div>
               </div>
-              {aTrusted && (!aReady || (aRecording && !aHookRunning)) ? (
+              {accessibilityState === 'NEEDS_RESTART' || accessibilityState === 'FAILED' ? (
                 <button className="btn btn-prominent no-drag" onClick={() => window.agent.app.relaunch()}>
                   Restart Timo
                 </button>
-              ) : !aTrusted ? (
+              ) : !accessibilityReady ? (
                 <button className="btn no-drag" onClick={() => window.agent.permissions.requestAccessibility()}>
                   Enable
                 </button>
@@ -223,23 +236,31 @@ export default function Settings() {
                   {launchOk ? (
                     <span className="set-ok"><CheckCircle2 size={13} /> {launchText}</span>
                   ) : launchWarn ? (
-                    <span className="set-warn"><AlertCircle size={13} /> {launchText}</span>
+                    <span className="set-warn"><AlertCircle size={13} /> {moveError ?? launchText}</span>
                   ) : (
                     <span className="secondary">{launchText}</span>
                   )}
                 </div>
               </div>
-              {launch?.status === 'requires-approval' ? (
-                <button className="btn no-drag" onClick={() => window.agent.settings.openLoginItemsPrefs()}>
-                  Open System Settings
-                </button>
-              ) : launch?.canRegister ? (
+              {launch?.remediation === 'MOVE_TO_APPLICATIONS' ? (
                 <button
                   className="btn btn-prominent no-drag"
-                  onClick={() => enableLogin.mutate()}
-                  disabled={enableLogin.isPending}
+                  onClick={() => moveToApplications.mutate()}
+                  disabled={moveToApplications.isPending}
                 >
-                  Enable
+                  Move to Applications
+                </button>
+              ) : launch?.remediation === 'OPEN_LOGIN_ITEMS' || launch?.remediation === 'OPEN_STARTUP_APPS' ? (
+                <button className="btn no-drag" onClick={() => window.agent.settings.openStartupPrefs()}>
+                  {launch.remediation === 'OPEN_LOGIN_ITEMS' ? 'Open Login Items' : 'Open Startup Apps'}
+                </button>
+              ) : launch?.canRepair ? (
+                <button
+                  className="btn btn-prominent no-drag"
+                  onClick={() => repairLogin.mutate()}
+                  disabled={repairLogin.isPending}
+                >
+                  Repair
                 </button>
               ) : null}
             </div>

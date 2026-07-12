@@ -51,6 +51,10 @@ export class QuitCleanupRunner {
     return this.completed;
   }
 
+  invalidate(): void {
+    this.completed = false;
+  }
+
   run(reason: TimerExitReason): Promise<void> {
     if (this.inFlight) return this.inFlight;
     this.completed = false;
@@ -126,6 +130,10 @@ export function runQuitCleanup(reason: TimerExitReason): Promise<void> {
 
 export function hasQuitCleanupCompleted(): boolean {
   return defaultRunner.hasCompleted();
+}
+
+export function invalidateQuitCleanup(): void {
+  defaultRunner.invalidate();
 }
 
 export function registerGracefulQuitHandler(opts: {

@@ -7,6 +7,7 @@ import Popover from './screens/Popover';
 import IdlePrompt from './screens/IdlePrompt';
 import AwayPrompt from './screens/AwayPrompt';
 import ReadyToWork from './screens/ReadyToWork';
+import PermissionPrompt from './screens/PermissionPrompt';
 import './styles.css';
 
 const qc = new QueryClient({
@@ -23,11 +24,12 @@ const Root =
   : route === 'idle' ? IdlePrompt
   : route === 'away' ? AwayPrompt
   : route === 'ready-to-work' ? ReadyToWork
+  : route === 'permissions' ? PermissionPrompt
   : App;
 
 // Transparent windows (floating bar, popover, idle/away prompt, ready-to-work)
 // need a transparent body so the rounded card corners don't sit on a gray fill.
-if (['floating', 'popover', 'idle', 'away', 'ready-to-work'].includes(route)) {
+if (['floating', 'popover', 'idle', 'away', 'ready-to-work', 'permissions'].includes(route)) {
   document.body.classList.add('chrome-window');
 }
 

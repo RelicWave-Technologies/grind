@@ -6,16 +6,16 @@ const mocks = vi.hoisted(() => ({
     isPackaged: true,
     getLoginItemSettings: vi.fn(),
     setLoginItemSettings: vi.fn(),
+    isInApplicationsFolder: vi.fn(),
+    moveToApplicationsFolder: vi.fn(),
   },
 }));
 
-vi.mock('electron', () => ({
-  app: mocks.app,
-}));
+vi.mock('electron', () => ({ app: mocks.app }));
 
-import { createLaunchAtLoginService } from './launchAtLogin';
+import { createLaunchAtLoginService, isHiddenLaunch } from './launchAtLogin';
 
-function settings(patch: Partial<LoginItemSettings>): LoginItemSettings {
+function settings(patch: Partial<LoginItemSettings> = {}): LoginItemSettings {
   return {
     openAtLogin: false,
     openAsHidden: false,
@@ -29,8 +29,25 @@ function settings(patch: Partial<LoginItemSettings>): LoginItemSettings {
   };
 }
 
-function service(platform: NodeJS.Platform, execPath: string) {
-  return createLaunchAtLoginService({ app: mocks.app, platform, execPath });
+function item(patch: Partial<LoginItemSettings['launchItems'][number]> = {}): LoginItemSettings['launchItems'][number] {
+  return {
+    name: 'Timo',
+    path: 'C:\\Users\\Anish\\AppData\\Local\\Programs\\Timo\\Timo.exe',
+    args: ['--hidden'],
+    scope: 'user',
+    enabled: true,
+    ...patch,
+  };
+}
+
+function service(platform: NodeJS.Platform, execPath: string, argv: string[] = []) {
+  return createLaunchAtLoginService({
+    app: mocks.app,
+    platform,
+    execPath,
+    argv,
+    now: () => Date.parse('2026-07-12T00:00:00.000Z'),
+  });
 }
 
 describe('launch at login service', () => {
@@ -38,91 +55,166 @@ describe('launch at login service', () => {
     mocks.app.isPackaged = true;
     mocks.app.getLoginItemSettings.mockReset();
     mocks.app.setLoginItemSettings.mockReset();
+    mocks.app.isInApplicationsFolder.mockReset().mockReturnValue(true);
+    mocks.app.moveToApplicationsFolder.mockReset().mockReturnValue(true);
   });
 
-  it('does not register login items in dev mode', () => {
+  it('recognizes only the explicit hidden startup argument', () => {
+    expect(isHiddenLaunch(['Timo.exe', '--hidden'])).toBe(true);
+    expect(isHiddenLaunch(['Timo.exe', 'timo://callback'])).toBe(false);
+  });
+
+  it('is unavailable without mutating login items in dev mode', () => {
     mocks.app.isPackaged = false;
 
-    const info = service('darwin', '/Applications/Timo.app/Contents/MacOS/Timo').enable();
-
-    expect(info).toEqual({
-      enabled: false,
-      status: 'unavailable-dev',
-      canRegister: false,
-      reason: null,
+    expect(service('darwin', '/Applications/Timo.app/Contents/MacOS/Timo').reconcileOnBoot()).toMatchObject({
+      required: false,
+      ready: false,
+      state: 'UNAVAILABLE',
     });
-    expect(mocks.app.getLoginItemSettings).not.toHaveBeenCalled();
     expect(mocks.app.setLoginItemSettings).not.toHaveBeenCalled();
   });
 
-  it('blocks macOS registration when running from a mounted DMG', () => {
-    const info = service('darwin', '/Volumes/Timo 0.0.2/Timo.app/Contents/MacOS/Timo').enable();
+  it('requires installation when a packaged mac app is outside Applications', () => {
+    mocks.app.isInApplicationsFolder.mockReturnValue(false);
+    mocks.app.getLoginItemSettings.mockReturnValue(settings());
 
-    expect(info).toEqual({
-      enabled: false,
-      status: 'blocked-dmg',
-      canRegister: false,
-      reason: 'running-from-dmg',
+    expect(service('darwin', '/Volumes/Timo/Timo.app/Contents/MacOS/Timo').inspect()).toMatchObject({
+      state: 'NEEDS_INSTALL',
+      remediation: 'MOVE_TO_APPLICATIONS',
+      canRepair: false,
     });
-    expect(mocks.app.getLoginItemSettings).not.toHaveBeenCalled();
-    expect(mocks.app.setLoginItemSettings).not.toHaveBeenCalled();
   });
 
-  it('registers a packaged macOS app from a stable installed path', () => {
+  it('registers a missing macOS main app service on boot and verifies it', () => {
     mocks.app.getLoginItemSettings
-      .mockReturnValueOnce(settings({ openAtLogin: false, status: 'not-registered' }))
+      .mockReturnValueOnce(settings({ wasOpenedAtLogin: false }))
+      .mockReturnValueOnce(settings())
       .mockReturnValueOnce(settings({ openAtLogin: true, status: 'enabled' }));
 
-    const info = service('darwin', '/Applications/Timo.app/Contents/MacOS/Timo').enable();
+    const health = service('darwin', '/Applications/Timo.app/Contents/MacOS/Timo').reconcileOnBoot();
 
-    expect(mocks.app.setLoginItemSettings).toHaveBeenCalledWith({ openAtLogin: true });
-    expect(info).toMatchObject({ enabled: true, status: 'enabled', canRegister: false });
+    expect(mocks.app.setLoginItemSettings).toHaveBeenCalledWith({ openAtLogin: true, type: 'mainAppService' });
+    expect(health).toMatchObject({ ready: true, state: 'READY' });
   });
 
-  it('surfaces macOS approval-required state without treating it as enabled', () => {
+  it('surfaces macOS approval without silently overriding it', () => {
     mocks.app.getLoginItemSettings.mockReturnValue(settings({ openAtLogin: true, status: 'requires-approval' }));
 
-    const info = service('darwin', '/Applications/Timo.app/Contents/MacOS/Timo').enable();
+    const health = service('darwin', '/Applications/Timo.app/Contents/MacOS/Timo').reconcileOnBoot();
 
-    expect(info).toEqual({
-      enabled: false,
-      status: 'requires-approval',
-      canRegister: false,
-      reason: null,
-    });
+    expect(health).toMatchObject({ state: 'NEEDS_APPROVAL', remediation: 'OPEN_LOGIN_ITEMS' });
     expect(mocks.app.setLoginItemSettings).not.toHaveBeenCalled();
   });
 
-  it('registers Windows with the executable path and hidden argument', () => {
+  it('captures macOS login origin before registration changes', () => {
+    mocks.app.getLoginItemSettings.mockReturnValue(settings({ openAtLogin: true, status: 'enabled', wasOpenedAtLogin: true }));
+    const launch = service('darwin', '/Applications/Timo.app/Contents/MacOS/Timo');
+
+    expect(launch.shouldStartHidden()).toBe(true);
+    expect(launch.launchOrigin()).toBe('LOGIN_ITEM');
+    expect(launch.inspect().openedAtLogin).toBe(true);
+  });
+
+  it('requires the canonical approved Windows item, not only openAtLogin', () => {
     const exe = 'C:\\Users\\Anish\\AppData\\Local\\Programs\\Timo\\Timo.exe';
+    mocks.app.getLoginItemSettings.mockReturnValue(settings({
+      openAtLogin: true,
+      executableWillLaunchAtLogin: false,
+      launchItems: [item({ enabled: false })],
+    }));
+
+    expect(service('win32', exe).inspect()).toMatchObject({
+      ready: false,
+      state: 'NEEDS_REPAIR',
+      remediation: 'ENABLE_STARTUP',
+    });
+  });
+
+  it('accepts only the current Windows path, hidden args, and approval', () => {
+    const exe = 'C:\\Users\\Anish\\AppData\\Local\\Programs\\Timo\\Timo.exe';
+    mocks.app.getLoginItemSettings.mockReturnValue(settings({
+      openAtLogin: true,
+      executableWillLaunchAtLogin: true,
+      launchItems: [item()],
+    }));
+
+    expect(service('win32', exe, ['Timo.exe', '--hidden']).inspect()).toMatchObject({
+      ready: true,
+      state: 'READY',
+      openedAtLogin: true,
+    });
+  });
+
+  it('repairs a disabled Windows item only after an explicit repair', () => {
+    const exe = 'C:\\Users\\Anish\\AppData\\Local\\Programs\\Timo\\Timo.exe';
+    const disabled = settings({
+      openAtLogin: true,
+      executableWillLaunchAtLogin: false,
+      launchItems: [item({ enabled: false })],
+    });
+    const ready = settings({
+      openAtLogin: true,
+      executableWillLaunchAtLogin: true,
+      launchItems: [item()],
+    });
     mocks.app.getLoginItemSettings
-      .mockReturnValueOnce(settings({ openAtLogin: false }))
-      .mockReturnValueOnce(settings({ openAtLogin: true, executableWillLaunchAtLogin: true }));
+      .mockReturnValueOnce(disabled)
+      .mockReturnValueOnce(disabled)
+      .mockReturnValueOnce(ready);
 
-    const info = service('win32', exe).enable();
+    const health = service('win32', exe).repair();
 
-    expect(mocks.app.getLoginItemSettings).toHaveBeenCalledWith({ path: exe, args: ['--hidden'] });
     expect(mocks.app.setLoginItemSettings).toHaveBeenCalledWith({
       openAtLogin: true,
+      enabled: true,
+      name: 'Timo',
       path: exe,
       args: ['--hidden'],
     });
-    expect(info).toMatchObject({ enabled: true, status: 'enabled', canRegister: false });
+    expect(health).toMatchObject({ ready: true, state: 'READY' });
   });
 
-  it('disables legacy Grind Windows startup entries', () => {
+  it('reports blocked when a Windows repair does not become effective', () => {
     const exe = 'C:\\Users\\Anish\\AppData\\Local\\Programs\\Timo\\Timo.exe';
+    const disabled = settings({ openAtLogin: true, launchItems: [item({ enabled: false })] });
+    mocks.app.getLoginItemSettings.mockReturnValue(disabled);
 
-    service('win32', exe).cleanupLegacy();
+    expect(service('win32', exe).repair()).toMatchObject({
+      state: 'BLOCKED',
+      remediation: 'OPEN_STARTUP_APPS',
+      canRepair: false,
+    });
+  });
 
-    expect(mocks.app.setLoginItemSettings).toHaveBeenCalledWith({
-      openAtLogin: false,
-      path: 'C:\\Users\\Anish\\AppData\\Local\\Programs\\Grind\\Grind.exe',
-      args: ['--hidden'],
+  it('removes legacy and wrong-path Windows entries during reconciliation', () => {
+    const exe = 'C:\\Users\\Anish\\AppData\\Local\\Programs\\Timo\\Timo.exe';
+    const stale = settings({
+      launchItems: [
+        item({ name: 'Grind', path: 'C:\\Old\\Grind.exe' }),
+        item({ path: 'C:\\Old\\Timo.exe' }),
+        item({ name: 'Timo Legacy', args: [] }),
+      ],
     });
-    expect(mocks.app.setLoginItemSettings).toHaveBeenCalledWith({
-      openAtLogin: false,
-      path: 'C:\\Users\\Anish\\AppData\\Local\\Programs\\Grind\\Grind.exe',
-    });
+    const ready = settings({ openAtLogin: true, executableWillLaunchAtLogin: true, launchItems: [item()] });
+    mocks.app.getLoginItemSettings
+      .mockReturnValueOnce(stale)
+      .mockReturnValueOnce(settings())
+      .mockReturnValueOnce(ready);
+
+    service('win32', exe).reconcileOnBoot();
+
+    expect(mocks.app.setLoginItemSettings).toHaveBeenCalledWith(expect.objectContaining({ openAtLogin: false, name: 'Grind' }));
+    expect(mocks.app.setLoginItemSettings).toHaveBeenCalledWith(expect.objectContaining({ openAtLogin: false, name: 'Timo', path: 'C:\\Old\\Timo.exe' }));
+    expect(mocks.app.setLoginItemSettings).toHaveBeenCalledWith(expect.objectContaining({ openAtLogin: false, name: 'Timo Legacy', path: exe }));
+  });
+
+  it('delegates a user-confirmed macOS move to Electron', () => {
+    mocks.app.isInApplicationsFolder.mockReturnValue(false);
+    mocks.app.getLoginItemSettings.mockReturnValue(settings());
+    const conflictHandler = vi.fn(() => true);
+
+    expect(service('darwin', '/Volumes/Timo/Timo.app/Contents/MacOS/Timo').moveToApplicationsFolder({ conflictHandler })).toBe(true);
+    expect(mocks.app.moveToApplicationsFolder).toHaveBeenCalledWith({ conflictHandler });
   });
 });

@@ -1,13 +1,16 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { UserDto } from '@grind/types';
+import type {
+  TimerStatus,
+  TrackingCommandResult,
+  TrackingReadiness,
+} from '../shared/tracking';
+import type { LaunchAtLoginHealth, MoveToApplicationsResult } from '../shared/launchAtLogin';
 
 type AuthStatus = 'loggedIn' | 'loggedOut';
 type LarkOutcome = { kind: 'pending' } | { kind: 'error'; reason: string };
 type AgentStatus = { state: 'IDLE' | 'OFFLINE'; lastHeartbeatAt: string | null };
-type TimerStatus =
-  | { state: 'IDLE'; workedMs: number }
-  | { state: 'RUNNING'; entryId: string; larkTaskGuid: string | null; startedAt: number; workedMs: number; paused: boolean };
-type TimerRecoveryNotice = { entryId: string; recoveredAt: number; reason: 'unexpected_shutdown' | 'sleep_stop' | 'lock_stop'; observedAt: number };
+type TimerRecoveryNotice = { entryId: string; recoveredAt: number; reason: 'unexpected_shutdown' | 'sleep_stop' | 'lock_stop' | 'server_finalized'; observedAt: number };
 type AwayInfo = { larkTaskGuid: string | null; stoppedAt: number; reason: 'suspend' | 'lock' };
 type TodaySegment = { kind: 'WORK' | 'MEETING' | 'IDLE_TRIMMED'; startedAt: number; endedAt: number | null };
 type TodayEntry = { id: string; larkTaskGuid: string | null; segments: TodaySegment[] };
@@ -29,13 +32,6 @@ type AccessibilityStatus = {
   recording: boolean;
   hookRunning: boolean;
   lastHookError: string | null;
-};
-type LaunchAtLoginStatus = 'enabled' | 'not-registered' | 'requires-approval' | 'not-found' | 'blocked-dmg' | 'unavailable-dev';
-type LaunchAtLoginInfo = {
-  enabled: boolean;
-  status: LaunchAtLoginStatus;
-  canRegister: boolean;
-  reason: 'running-from-dmg' | null;
 };
 type UpdatePhase = 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'installing' | 'not-available' | 'error';
 type UpdateStatus = {
@@ -80,10 +76,10 @@ const api = {
     status: (): Promise<AgentStatus> => ipcRenderer.invoke('agent:status'),
   },
   timer: {
-    start: (larkTaskGuid?: string | null): Promise<TimerStatus> =>
+    start: (larkTaskGuid?: string | null): Promise<TrackingCommandResult> =>
       ipcRenderer.invoke('timer:start', { larkTaskGuid }),
     stop: (): Promise<TimerStatus> => ipcRenderer.invoke('timer:stop'),
-    resume: (): Promise<TimerStatus> => ipcRenderer.invoke('timer:resume'),
+    resume: (): Promise<TrackingCommandResult> => ipcRenderer.invoke('timer:resume'),
     status: (): Promise<TimerStatus> => ipcRenderer.invoke('timer:status'),
     recoveryNotice: (): Promise<TimerRecoveryNotice | null> => ipcRenderer.invoke('timer:recoveryNotice'),
     dismissRecoveryNotice: (): Promise<{ ok: true }> => ipcRenderer.invoke('timer:dismissRecoveryNotice'),
@@ -105,7 +101,7 @@ const api = {
   },
   away: {
     get: (): Promise<AwayInfo | null> => ipcRenderer.invoke('away:get'),
-    resume: (): Promise<TimerStatus> => ipcRenderer.invoke('away:resume'),
+    resume: (): Promise<TrackingCommandResult> => ipcRenderer.invoke('away:resume'),
     dismiss: (): Promise<{ ok: true }> => ipcRenderer.invoke('away:dismiss'),
   },
   shift: {
@@ -121,19 +117,30 @@ const api = {
     retryFailedUploads: (): Promise<{ reset: number }> => ipcRenderer.invoke('screenshots:retryFailedUploads'),
   },
   permissions: {
+    readiness: (): Promise<TrackingReadiness> => ipcRenderer.invoke('permissions:readiness'),
+    requestScreen: (): Promise<TrackingReadiness> => ipcRenderer.invoke('permissions:requestScreen'),
+    promptContext: (): Promise<{ action: 'START' | 'RESUME' } | null> => ipcRenderer.invoke('permissions:promptContext'),
+    retryPending: (): Promise<TrackingCommandResult | null> => ipcRenderer.invoke('permissions:retryPending'),
+    closePrompt: (): Promise<{ ok: true }> => ipcRenderer.invoke('permissions:closePrompt'),
     screen: (): Promise<{ status: string; health: string; state: 'ok' | 'needs-grant' | 'needs-settings' | 'needs-restart' }> =>
       ipcRenderer.invoke('permissions:screen'),
     accessibility: (): Promise<AccessibilityStatus> => ipcRenderer.invoke('permissions:accessibility'),
     requestAccessibility: (): Promise<void> => ipcRenderer.invoke('permissions:requestAccessibility'),
   },
   settings: {
-    get: (): Promise<{ version: string; platform: string; launchAtLogin: LaunchAtLoginInfo; screenStatus: string; floatingBarVisible: boolean }> =>
+    get: (): Promise<{ version: string; platform: string; launchAtLogin: LaunchAtLoginHealth; screenStatus: string; floatingBarVisible: boolean }> =>
       ipcRenderer.invoke('settings:get'),
-    enableLaunchAtLogin: (): Promise<LaunchAtLoginInfo> => ipcRenderer.invoke('settings:enableLaunchAtLogin'),
+    repairLaunchAtLogin: (): Promise<LaunchAtLoginHealth> => ipcRenderer.invoke('settings:repairLaunchAtLogin'),
+    moveToApplications: (): Promise<MoveToApplicationsResult> => ipcRenderer.invoke('settings:moveToApplications'),
     setFloatingBarVisible: (enabled: boolean): Promise<boolean> => ipcRenderer.invoke('settings:setFloatingBarVisible', enabled),
     resetFloatingBarPosition: (): Promise<void> => ipcRenderer.invoke('settings:resetFloatingBarPosition'),
     openScreenPrefs: (): Promise<void> => ipcRenderer.invoke('settings:openScreenPrefs'),
-    openLoginItemsPrefs: (): Promise<void> => ipcRenderer.invoke('settings:openLoginItemsPrefs'),
+    openStartupPrefs: (): Promise<void> => ipcRenderer.invoke('settings:openStartupPrefs'),
+    onOpen: (cb: () => void): (() => void) => {
+      const sub = () => cb();
+      ipcRenderer.on('settings:open:push', sub);
+      return () => ipcRenderer.off('settings:open:push', sub);
+    },
     openDataFolder: (): Promise<void> => ipcRenderer.invoke('settings:openDataFolder'),
   },
   app: {

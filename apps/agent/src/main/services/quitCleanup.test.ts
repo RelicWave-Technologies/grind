@@ -71,6 +71,23 @@ describe('QuitCleanupRunner', () => {
     expect(warn).toHaveBeenCalledWith('quit cleanup timer failed', expect.objectContaining({ reason: 'quit' }));
     expect(runner.hasCompleted()).toBe(true);
   });
+
+  it('can invalidate an early cleanup when the quit-triggering action is cancelled', async () => {
+    const runner = new QuitCleanupRunner({
+      getTimer: () => ({
+        prepareForQuit: vi.fn().mockResolvedValue(undefined),
+        flushUnsynced: vi.fn().mockResolvedValue(undefined),
+      }),
+      flushPartialActivity: vi.fn(),
+      flushPreferences: vi.fn(),
+      logger: { debug: vi.fn(), warn: vi.fn() },
+    });
+
+    await runner.run('quit');
+    runner.invalidate();
+
+    expect(runner.hasCompleted()).toBe(false);
+  });
 });
 
 describe('registerGracefulQuitHandler', () => {

@@ -19,8 +19,23 @@
 
   ; Remove the pre-Timo scheme so a stale handler can't intercept logins.
   DeleteRegKey HKCU "Software\Classes\grind"
+
+  ; Remove startup entries from pre-rebrand and accidental package-name builds.
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "Grind"
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "@grind/agent"
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run" "Grind"
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run" "@grind/agent"
 !macroend
 
 !macro customUnInstall
   DeleteRegKey HKCU "Software\Classes\timo"
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "Timo"
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "Grind"
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "@grind/agent"
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run" "Timo"
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run" "Grind"
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run" "@grind/agent"
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run32" "Timo"
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run32" "Grind"
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run32" "@grind/agent"
 !macroend

@@ -1,6 +1,8 @@
 import { ipcMain, shell } from 'electron';
 import { api } from '../services/apiClient';
 import { log } from '../logger';
+import { dateKeyInTimeZone } from '@grind/types';
+import { getWorkspaceTimezone } from '../services/agentConfig';
 
 export type LarkStatus = {
   configured: boolean;
@@ -38,17 +40,13 @@ export type LarkSyncResult = {
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 function todayKey(): string {
-  const d = new Date();
-  const year = d.getFullYear();
-  const month = `${d.getMonth() + 1}`.padStart(2, '0');
-  const day = `${d.getDate()}`.padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  return dateKeyInTimeZone(new Date(), getWorkspaceTimezone());
 }
 
 function myTasksPath(): string {
   const params = new URLSearchParams({
     date: todayKey(),
-    tz: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+    tz: getWorkspaceTimezone(),
   });
   return `/v1/lark/my-tasks?${params.toString()}`;
 }

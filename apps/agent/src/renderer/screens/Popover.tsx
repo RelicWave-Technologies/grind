@@ -41,7 +41,8 @@ export default function Popover() {
 
   const start = useMutation({
     mutationFn: (guid: string) => window.agent.timer.start(guid),
-    onSuccess: (status) => {
+    onSuccess: (result) => {
+      const status = result.status;
       setTimer(status);
       setTaskQuery('');
       const guid = trackedTaskGuid(status);
@@ -49,7 +50,7 @@ export default function Popover() {
     },
   });
   const stop = useMutation({ mutationFn: () => window.agent.timer.stop(), onSuccess: setTimer });
-  const resume = useMutation({ mutationFn: () => window.agent.timer.resume(), onSuccess: setTimer });
+  const resume = useMutation({ mutationFn: () => window.agent.timer.resume(), onSuccess: (result) => setTimer(result.status) });
 
   const tasks = larkTasks.data?.tasks ?? [];
   const running = timer.state === 'RUNNING' ? timer : null;

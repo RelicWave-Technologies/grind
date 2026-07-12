@@ -93,8 +93,8 @@ export default function Today() {
 
   const start = useMutation({
     mutationFn: (guid: string) => window.agent.timer.start(guid),
-    onSuccess: (s) => {
-      setTimer(s);
+    onSuccess: (result) => {
+      setTimer(result.status);
       setTaskPickerOpen(false);
       setTaskPickerQuery('');
       void qc.invalidateQueries({ queryKey: ['today'] });
@@ -102,15 +102,15 @@ export default function Today() {
   });
   const stop = useMutation({
     mutationFn: () => window.agent.timer.stop(),
-    onSuccess: (s) => {
-      setTimer(s);
+    onSuccess: (status) => {
+      setTimer(status);
       void qc.invalidateQueries({ queryKey: ['today'] });
     },
   });
   const resume = useMutation({
     mutationFn: () => window.agent.timer.resume(),
-    onSuccess: (s) => {
-      setTimer(s);
+    onSuccess: (result) => {
+      setTimer(result.status);
       void qc.invalidateQueries({ queryKey: ['today'] });
     },
   });
