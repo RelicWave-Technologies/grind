@@ -5,6 +5,7 @@ import type {
   TrackingReadiness,
 } from '../../shared/tracking';
 import type { LaunchAtLoginHealth, MoveToApplicationsResult } from '../../shared/launchAtLogin';
+import type { AttentionAction, AttentionActionResult, AttentionPrompt } from '../../shared/attention';
 
 type AuthStatus = 'loggedIn' | 'loggedOut';
 type LarkOutcome = { kind: 'pending' } | { kind: 'error'; reason: string };
@@ -12,7 +13,6 @@ type AgentStatus = { state: 'IDLE' | 'OFFLINE'; lastHeartbeatAt: string | null }
 export type TimerRecoveryNotice = { entryId: string; recoveredAt: number; reason: 'unexpected_shutdown' | 'sleep_stop' | 'lock_stop' | 'server_finalized'; observedAt: number };
 export type TodaySegment = { kind: 'WORK' | 'MEETING' | 'IDLE_TRIMMED'; startedAt: number; endedAt: number | null };
 export type TodayEntry = { id: string; larkTaskGuid: string | null; segments: TodaySegment[] };
-export type AwayInfo = { larkTaskGuid: string | null; stoppedAt: number; reason: 'suspend' | 'lock' };
 export type ScreenshotItem = {
   id: string;
   capturedAt: number;
@@ -75,14 +75,11 @@ declare global {
       window: {
         openMain: () => Promise<void>;
       };
-      idle: {
-        get: () => Promise<{ idleStartedAt: number }>;
-        resolve: (action: 'continue' | 'break') => Promise<void>;
-      };
-      away: {
-        get: () => Promise<AwayInfo | null>;
-        resume: () => Promise<TrackingCommandResult>;
-        dismiss: () => Promise<{ ok: true }>;
+      attention: {
+        get: () => Promise<AttentionPrompt>;
+        resolve: (promptId: string, action: AttentionAction) => Promise<AttentionActionResult>;
+        yieldToSystemSettings: (promptId: string) => Promise<{ ok: boolean }>;
+        onChange: (cb: (prompt: AttentionPrompt) => void) => () => void;
       };
       shift: {
         decide: (decision: 'yes' | 'not_yet') => Promise<void>;
@@ -99,9 +96,6 @@ declare global {
       permissions: {
         readiness: () => Promise<TrackingReadiness>;
         requestScreen: () => Promise<TrackingReadiness>;
-        promptContext: () => Promise<{ action: 'START' | 'RESUME' } | null>;
-        retryPending: () => Promise<TrackingCommandResult | null>;
-        closePrompt: () => Promise<{ ok: true }>;
         screen: () => Promise<{ status: string; health: string; state: 'ok' | 'needs-grant' | 'needs-settings' | 'needs-restart' }>;
         accessibility: () => Promise<AccessibilityStatus>;
         requestAccessibility: () => Promise<void>;

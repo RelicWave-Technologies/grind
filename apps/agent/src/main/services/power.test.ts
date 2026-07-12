@@ -83,14 +83,19 @@ describe('registerPowerEvents', () => {
     expect(mocks.prepareForAway).toHaveBeenCalledWith('lock', 1_700_000_000_000);
   });
 
-  it('does not trim or resume tracking on resume and unlock', () => {
+  it('deduplicates resume and unlock into one wake lifecycle', async () => {
     const onWake = vi.fn();
-    registerPowerEvents({ onWake });
+    const onVisibilityReturn = vi.fn();
+    const onReturnComplete = vi.fn();
+    registerPowerEvents({ onWake, onVisibilityReturn, onReturnComplete });
 
     mocks.listeners.get('resume')!();
     mocks.listeners.get('unlock-screen')!();
+    await settle();
 
-    expect(onWake).toHaveBeenCalledTimes(2);
+    expect(onWake).toHaveBeenCalledTimes(1);
+    expect(onVisibilityReturn).toHaveBeenCalledTimes(1);
+    expect(onReturnComplete).toHaveBeenCalledTimes(1);
     expect(mocks.discardAway).not.toHaveBeenCalled();
     expect(mocks.prepareForAway).not.toHaveBeenCalled();
   });
@@ -116,6 +121,7 @@ describe('registerPowerEvents', () => {
     await settle();
     vi.mocked(Date.now).mockReturnValue(1_700_000_000_000 + 61_000); // returned 61s later
     mocks.listeners.get('unlock-screen')!();
+    await settle();
 
     expect(onReturnFromAway).toHaveBeenCalledWith({ larkTaskGuid: 'task-1', stoppedAt: 1_700_000_000_000, reason: 'lock' });
   });
@@ -129,6 +135,7 @@ describe('registerPowerEvents', () => {
     await settle();
     vi.mocked(Date.now).mockReturnValue(1_700_000_000_000 + 120_000);
     mocks.listeners.get('resume')!();
+    await settle();
 
     expect(onReturnFromAway).toHaveBeenCalledWith({ larkTaskGuid: null, stoppedAt: 1_700_000_000_000, reason: 'suspend' });
   });
@@ -142,6 +149,7 @@ describe('registerPowerEvents', () => {
     await settle();
     vi.mocked(Date.now).mockReturnValue(1_700_000_000_000 + 5_000); // only 5s away
     mocks.listeners.get('unlock-screen')!();
+    await settle();
 
     expect(onReturnFromAway).toHaveBeenCalledWith({ larkTaskGuid: null, stoppedAt: 1_700_000_000_000, reason: 'lock' });
   });
@@ -154,7 +162,58 @@ describe('registerPowerEvents', () => {
     await settle();
     vi.mocked(Date.now).mockReturnValue(1_700_000_000_000 + 120_000);
     mocks.listeners.get('resume')!();
+    await settle();
 
     expect(onReturnFromAway).not.toHaveBeenCalled();
+  });
+
+  it('uses the first away event and ignores a duplicate lock/suspend pair', async () => {
+    const onAwayStart = vi.fn();
+    mocks.status.mockReturnValue({ state: 'RUNNING', larkTaskGuid: 'task-1', paused: false });
+    registerPowerEvents({ onWake: vi.fn(), onAwayStart });
+
+    mocks.listeners.get('lock-screen')!();
+    mocks.listeners.get('suspend')!();
+    await settle();
+
+    expect(onAwayStart).toHaveBeenCalledTimes(1);
+    expect(mocks.prepareForAway).toHaveBeenCalledTimes(1);
+    expect(mocks.prepareForAway).toHaveBeenCalledWith('lock', 1_700_000_000_000);
+  });
+
+  it('waits for durable away cleanup before offering resume', async () => {
+    let finish!: (value: unknown) => void;
+    mocks.prepareForAway.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
+    mocks.status.mockReturnValue({ state: 'RUNNING', larkTaskGuid: 'task-1', paused: false });
+    const onReturnFromAway = vi.fn();
+    registerPowerEvents({ onWake: vi.fn(), onReturnFromAway });
+
+    mocks.listeners.get('lock-screen')!();
+    mocks.listeners.get('unlock-screen')!();
+    await settle();
+    expect(onReturnFromAway).not.toHaveBeenCalled();
+
+    finish({ state: 'IDLE' });
+    await settle();
+    expect(onReturnFromAway).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries cleanup once at the original boundary and never shows a false resume prompt', async () => {
+    mocks.status.mockReturnValue({ state: 'RUNNING', larkTaskGuid: 'task-1', paused: false });
+    mocks.prepareForAway.mockRejectedValue(new Error('disk unavailable'));
+    const onReturnFromAway = vi.fn();
+    const onReturnComplete = vi.fn();
+    registerPowerEvents({ onWake: vi.fn(), onReturnFromAway, onReturnComplete });
+
+    mocks.listeners.get('suspend')!();
+    mocks.listeners.get('resume')!();
+    await settle();
+    await settle();
+
+    expect(mocks.prepareForAway).toHaveBeenCalledTimes(2);
+    expect(mocks.prepareForAway).toHaveBeenNthCalledWith(1, 'suspend', 1_700_000_000_000);
+    expect(mocks.prepareForAway).toHaveBeenNthCalledWith(2, 'suspend', 1_700_000_000_000);
+    expect(onReturnFromAway).not.toHaveBeenCalled();
+    expect(onReturnComplete).toHaveBeenCalledTimes(1);
   });
 });

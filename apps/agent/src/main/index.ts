@@ -19,9 +19,8 @@ import { IdleMonitor } from './services/idle/monitor';
 import { showFloatingBar, hideFloatingBar, reclampFloatingBar } from './floating';
 import { reassertAllOverlays } from './windows/overlay';
 import { togglePopover, hidePopover } from './popover';
-import { showIdlePrompt, hideIdlePrompt } from './idlePrompt';
-import { showAwayPrompt } from './awayPrompt';
-import { focusPermissionPromptIfVisible } from './permissionPrompt';
+import { reassertAttentionWindow } from './attentionWindow';
+import { getTrackingAttentionCoordinator } from './services/trackingAttention';
 import { ShiftMonitor } from './services/shift';
 import { onAuthChange } from './services/apiClient';
 import { isLoggedIn } from './services/auth';
@@ -39,9 +38,9 @@ import type { LaunchAtLoginHealth } from '../shared/launchAtLogin';
 import { migrateLegacyUserData } from './services/legacyMigration';
 import { broadcast } from './broadcast';
 import {
+  offerPermissionStart,
   offerPermissionSetupOnStartup,
   resetPermissionSetupOffer,
-  resumeTracking,
 } from './services/trackingCommands';
 import {
   checkTrackingPermissionsNow,
@@ -97,8 +96,9 @@ function ensureMainWindow(opts: { startHidden?: boolean } = {}): BrowserWindow {
   return mainWindow;
 }
 
-function showMainWindow() {
+function showMainWindow(opts: { bypassAttention?: boolean } = {}) {
   if (isQuitting) return;
+  if (!opts.bypassAttention && getTrackingAttentionCoordinator().restoreActive(true)) return;
   const win = ensureMainWindow({ startHidden: true });
   hidePopover();
   if (win.isMinimized()) win.restore();
@@ -107,7 +107,7 @@ function showMainWindow() {
 }
 
 function showSettingsWindow() {
-  showMainWindow();
+  showMainWindow({ bypassAttention: true });
   broadcast('settings:open:push', {});
 }
 
@@ -156,13 +156,36 @@ app.whenReady().then(async () => {
   const launchAtLogin = launchAtLoginService.reconcileOnBoot();
 
   mainWindow = ensureMainWindow({ startHidden: openedAtLogin });
+  const attention = getTrackingAttentionCoordinator();
   tray = createTray({
-    onToggle: (bounds) => togglePopover(bounds),
+    onToggle: (bounds) => {
+      if (!attention.restoreActive(true)) togglePopover(bounds);
+    },
     onOpenMain: () => showMainWindow(),
     onInstallUpdate: () => void installUpdateNow(),
     getUpdateStatus: () => getUpdateStatus(),
   });
-  registerIpc({ onOpenMainWindow: () => showMainWindow() });
+  // Idle detection pauses first, then asks the single attention coordinator to
+  // present. A rejected request means a higher-priority prompt already owns the
+  // window, so the monitor immediately releases its local prompting flag.
+  const idleMonitor = new IdleMonitor(async (idleStartedAt) => {
+    try {
+      await getTimerService().pauseForIdle(idleStartedAt);
+    } catch (err) {
+      log.warn('pauseForIdle failed', { err: String(err) });
+      return false;
+    }
+    const accepted = attention.requestIdle(idleStartedAt);
+    broadcast('timer:status:push', getTimerService().status());
+    sendHeartbeatNow();
+    return accepted;
+  });
+  idleMonitor.start();
+
+  registerIpc({
+    onOpenMainWindow: () => showMainWindow(),
+    onIdleResolved: () => idleMonitor.resolve(),
+  });
   startUpdateService({
     showMainWindow: () => showMainWindow(),
     isMainWindowVisible: () => !!mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible(),
@@ -188,20 +211,32 @@ app.whenReady().then(async () => {
     void runQuitCleanup('update');
   });
   app.on('activate', () => {
-    if (!focusPermissionPromptIfVisible()) showMainWindow();
+    showMainWindow();
   });
 
   // On wake the OS drops the always-on-top / all-Spaces flags (electron#36364)
   // — re-assert float on EVERY live overlay, not just the bar.
   registerPowerEvents({
+    onAwayStart: () => {
+      idleMonitor.suspend();
+      attention.beginMachineAway();
+    },
     onWake: () => {
       reassertAllOverlays();
+      reassertAttentionWindow(true);
       checkTrackingPermissionsNow();
       void drainTimerSyncNow('wake');
       void drainActivityNow('wake');
     },
+    // `resume` can arrive while macOS still owns the lock screen. Reassert once
+    // more on the distinct unlock signal without running timer recovery twice.
+    onVisibilityReturn: () => reassertAttentionWindow(true),
     // Returned from a lock/sleep that stopped a running timer → offer to resume.
-    onReturnFromAway: (info) => showAwayPrompt(info),
+    onReturnFromAway: (info) => {
+      if (attention.isPermissionActive()) offerPermissionStart(info.larkTaskGuid);
+      else attention.requestAway(info);
+    },
+    onReturnComplete: () => idleMonitor.resume(),
   });
 
   // When monitors change (unplug / resolution switch): re-float all overlays
@@ -209,49 +244,16 @@ app.whenReady().then(async () => {
   screen.on('display-removed', () => {
     reclampFloatingBar();
     reassertAllOverlays();
+    reassertAttentionWindow(false);
   });
   screen.on('display-metrics-changed', () => {
     reclampFloatingBar();
     reassertAllOverlays();
+    reassertAttentionWindow(false);
   });
-  screen.on('display-added', () => reassertAllOverlays());
-
-  // Idle detection → pause the timer (idle is never counted) and prompt.
-  const idleMonitor = new IdleMonitor(async (idleStartedAt) => {
-    try {
-      await getTimerService().pauseForIdle(idleStartedAt);
-    } catch (err) {
-      log.warn('pauseForIdle failed', { err: String(err) });
-    }
-    // Show the prompt FIRST, and let any failure propagate to the IdleMonitor so
-    // it resets its prompt state — a wedged flag would otherwise silently kill
-    // every future idle prompt this session.
-    showIdlePrompt();
-    broadcast('timer:status:push', getTimerService().status());
-    sendHeartbeatNow();
-  });
-  idleMonitor.start();
-
-  ipcMain.handle('idle:get', () => ({ idleStartedAt: idleMonitor.getIdleStart() }));
-  ipcMain.handle('idle:resolve', async (_e, action: 'continue' | 'break') => {
-    let commandPublished = false;
-    try {
-      if (action === 'continue') {
-        await resumeTracking();
-        commandPublished = true;
-      } else {
-        await getTimerService().stop();
-      }
-    } catch (err) {
-      log.warn('idle resolve failed', { action, err: String(err) });
-    }
-    idleMonitor.resolve();
-    hideIdlePrompt();
-    if (!commandPublished) {
-      broadcast('timer:status:push', getTimerService().status());
-      sendHeartbeatNow();
-    }
-    refreshUpdateInstallability();
+  screen.on('display-added', () => {
+    reassertAllOverlays();
+    reassertAttentionWindow(false);
   });
 
   onAgentConfigChange(({ previous, current }) => {

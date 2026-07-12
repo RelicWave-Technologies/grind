@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation } from '@tanstack/react-query';
 import { Coffee } from 'lucide-react';
+import type { AttentionPrompt } from '../../shared/attention';
 
 function fmtAgo(ms: number): string {
   const totalSec = Math.max(0, Math.round(ms / 1000));
@@ -22,13 +23,13 @@ function fmtAgo(ms: number): string {
  * snapshot, not a live counter. (It used to tick up every second, so a prompt
  * left on screen would balloon to "11 minutes" while you read it.)
  */
-export default function IdlePrompt() {
-  // refetchOnWindowFocus (default) re-pulls idleStartedAt each time the prompt
-  // window is shown + focused, so a reused window still reflects the new idle.
-  const info = useQuery({ queryKey: ['idle'], queryFn: () => window.agent.idle.get() });
-  const resolve = useMutation({ mutationFn: (a: 'continue' | 'break') => window.agent.idle.resolve(a) });
+export default function IdlePrompt({ prompt }: { prompt: Extract<AttentionPrompt, { kind: 'IDLE' }> }) {
+  const resolve = useMutation({
+    mutationFn: (action: 'IDLE_CONTINUE' | 'IDLE_BREAK') =>
+      window.agent.attention.resolve(prompt.promptId, action),
+  });
 
-  const idleStart = info.data?.idleStartedAt ?? null;
+  const idleStart = prompt.idleStartedAt;
   // Snapshot the elapsed idle once, at the moment we learn the idle-start —
   // not on an interval. Recomputes only when a fresh prompt provides a new
   // idleStartedAt.
@@ -45,10 +46,10 @@ export default function IdlePrompt() {
         No activity for <b>{fmtAgo(awayMs)}</b>. This idle time isn&rsquo;t counted.
       </div>
       <div className="idle-actions">
-        <button className="btn no-drag" onClick={() => resolve.mutate('break')} disabled={resolve.isPending}>
+        <button className="btn no-drag" onClick={() => resolve.mutate('IDLE_BREAK')} disabled={resolve.isPending}>
           Take a break
         </button>
-        <button className="btn btn-prominent no-drag" onClick={() => resolve.mutate('continue')} disabled={resolve.isPending}>
+        <button className="btn btn-prominent no-drag" onClick={() => resolve.mutate('IDLE_CONTINUE')} disabled={resolve.isPending}>
           Continue
         </button>
       </div>

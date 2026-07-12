@@ -1,8 +1,8 @@
 import type { TrackingCommandResult } from '../../shared/tracking';
 import { broadcast } from '../broadcast';
-import { hidePermissionPrompt, showPermissionPrompt } from '../permissionPrompt';
 import { sendHeartbeatNow } from './heartbeat';
 import { getTimerService } from './timer';
+import { getTrackingAttentionCoordinator } from './trackingAttention';
 import { isTrackingBlockedError } from './trackingReadiness';
 import { getTrackingReadinessService } from './trackingReadiness';
 
@@ -27,7 +27,7 @@ async function execute(command: PendingCommand): Promise<TrackingCommandResult> 
     if (!isTrackingBlockedError(error)) throw error;
     pending = command;
     const status = getTimerService().status();
-    showPermissionPrompt();
+    getTrackingAttentionCoordinator().requestPermission(command.kind === 'START' ? 'START_TASK' : 'RESUME_ENTRY');
     return {
       ok: false,
       reason: 'PERMISSIONS_REQUIRED',
@@ -51,26 +51,28 @@ export function retryPendingTrackingCommand(): Promise<TrackingCommandResult | n
 
 export function offerPermissionResume(): void {
   pending = { kind: 'RESUME' };
-  showPermissionPrompt();
+  getTrackingAttentionCoordinator().requestPermission('RESUME_ENTRY');
+}
+
+export function offerPermissionStart(larkTaskGuid: string | null): void {
+  pending = { kind: 'START', larkTaskGuid };
+  getTrackingAttentionCoordinator().requestPermission('START_TASK');
 }
 
 export function clearPendingTrackingCommand(): void {
   pending = null;
 }
 
-export function getPendingTrackingCommand(): { action: 'START' | 'RESUME' } | null {
-  return pending ? { action: pending.kind } : null;
-}
-
 export async function offerPermissionSetupOnStartup(): Promise<void> {
   if (startupPromptOffered) return;
   startupPromptOffered = true;
   const { readiness } = await getTrackingReadinessService().inspect({ verifyScreen: true });
-  if (!readiness.ready) showPermissionPrompt();
+  if (!readiness.ready) getTrackingAttentionCoordinator().requestPermission('SETUP');
 }
 
 export function resetPermissionSetupOffer(): void {
   startupPromptOffered = false;
   pending = null;
-  hidePermissionPrompt();
+  const coordinator = getTrackingAttentionCoordinator();
+  if (coordinator.isPermissionActive()) coordinator.clear();
 }

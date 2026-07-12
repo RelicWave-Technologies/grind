@@ -162,8 +162,12 @@ export class TimerService {
     const closeAt = safeCloseAt(open, awayStartedAt);
     this.store.setAwayState({ reason, entryId: open.id, awayStartedAt: closeAt, observedAt: this.clock.now() });
     const closed = closeTimeEntry(open, closeAt);
+    // The away boundary must exist durably before memory reports the timer as
+    // closed. If SQLite rejects the write, keep `open` intact so the power
+    // coordinator's one bounded retry can safely attempt the same boundary.
+    const nextState = this.store.upsert(closed);
     this.open = null;
-    await this.persistAndSync(closed);
+    await this.trySync(closed, nextState);
     this.store.setRecoveryNotice(this.awayNotice(reason, closed.id, closeAt));
     this.store.clearAwayState();
     return this.status();

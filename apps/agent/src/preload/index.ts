@@ -6,12 +6,12 @@ import type {
   TrackingReadiness,
 } from '../shared/tracking';
 import type { LaunchAtLoginHealth, MoveToApplicationsResult } from '../shared/launchAtLogin';
+import type { AttentionAction, AttentionActionResult, AttentionPrompt } from '../shared/attention';
 
 type AuthStatus = 'loggedIn' | 'loggedOut';
 type LarkOutcome = { kind: 'pending' } | { kind: 'error'; reason: string };
 type AgentStatus = { state: 'IDLE' | 'OFFLINE'; lastHeartbeatAt: string | null };
 type TimerRecoveryNotice = { entryId: string; recoveredAt: number; reason: 'unexpected_shutdown' | 'sleep_stop' | 'lock_stop' | 'server_finalized'; observedAt: number };
-type AwayInfo = { larkTaskGuid: string | null; stoppedAt: number; reason: 'suspend' | 'lock' };
 type TodaySegment = { kind: 'WORK' | 'MEETING' | 'IDLE_TRIMMED'; startedAt: number; endedAt: number | null };
 type TodayEntry = { id: string; larkTaskGuid: string | null; segments: TodaySegment[] };
 type ScreenshotItem = {
@@ -95,14 +95,17 @@ const api = {
   window: {
     openMain: (): Promise<void> => ipcRenderer.invoke('window:openMain'),
   },
-  idle: {
-    get: (): Promise<{ idleStartedAt: number }> => ipcRenderer.invoke('idle:get'),
-    resolve: (action: 'continue' | 'break'): Promise<void> => ipcRenderer.invoke('idle:resolve', action),
-  },
-  away: {
-    get: (): Promise<AwayInfo | null> => ipcRenderer.invoke('away:get'),
-    resume: (): Promise<TrackingCommandResult> => ipcRenderer.invoke('away:resume'),
-    dismiss: (): Promise<{ ok: true }> => ipcRenderer.invoke('away:dismiss'),
+  attention: {
+    get: (): Promise<AttentionPrompt> => ipcRenderer.invoke('attention:get'),
+    resolve: (promptId: string, action: AttentionAction): Promise<AttentionActionResult> =>
+      ipcRenderer.invoke('attention:resolve', { promptId, action }),
+    yieldToSystemSettings: (promptId: string): Promise<{ ok: boolean }> =>
+      ipcRenderer.invoke('attention:yieldToSystemSettings', promptId),
+    onChange: (cb: (prompt: AttentionPrompt) => void): (() => void) => {
+      const sub = (_event: unknown, prompt: AttentionPrompt) => cb(prompt);
+      ipcRenderer.on('attention:state:push', sub);
+      return () => ipcRenderer.off('attention:state:push', sub);
+    },
   },
   shift: {
     decide: (decision: 'yes' | 'not_yet'): Promise<void> => ipcRenderer.invoke('shift:decide', decision),
@@ -119,9 +122,6 @@ const api = {
   permissions: {
     readiness: (): Promise<TrackingReadiness> => ipcRenderer.invoke('permissions:readiness'),
     requestScreen: (): Promise<TrackingReadiness> => ipcRenderer.invoke('permissions:requestScreen'),
-    promptContext: (): Promise<{ action: 'START' | 'RESUME' } | null> => ipcRenderer.invoke('permissions:promptContext'),
-    retryPending: (): Promise<TrackingCommandResult | null> => ipcRenderer.invoke('permissions:retryPending'),
-    closePrompt: (): Promise<{ ok: true }> => ipcRenderer.invoke('permissions:closePrompt'),
     screen: (): Promise<{ status: string; health: string; state: 'ok' | 'needs-grant' | 'needs-settings' | 'needs-restart' }> =>
       ipcRenderer.invoke('permissions:screen'),
     accessibility: (): Promise<AccessibilityStatus> => ipcRenderer.invoke('permissions:accessibility'),
