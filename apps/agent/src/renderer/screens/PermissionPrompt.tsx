@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertCircle, CheckCircle2, Keyboard, Lock, MonitorCheck, RotateCcw, X } from 'lucide-react';
 import type { CapabilityState } from '../../shared/tracking';
+import type { AttentionPrompt } from '../../shared/attention';
 import timoMascot from '../assets/timo-mascot.svg';
 
 function actionFor(state: CapabilityState): 'enable' | 'settings' | 'restart' | null {
@@ -30,17 +31,11 @@ function StatusLine({ state }: { state: CapabilityState }) {
   );
 }
 
-export default function PermissionPrompt() {
+export default function PermissionPrompt({ prompt }: { prompt: Extract<AttentionPrompt, { kind: 'PERMISSION' }> }) {
   const qc = useQueryClient();
   const readiness = useQuery({
     queryKey: ['trackingReadiness'],
     queryFn: () => window.agent.permissions.readiness(),
-    refetchInterval: 1000,
-    staleTime: 0,
-  });
-  const context = useQuery({
-    queryKey: ['permissionPromptContext'],
-    queryFn: () => window.agent.permissions.promptContext(),
     refetchInterval: 1000,
     staleTime: 0,
   });
@@ -53,10 +48,7 @@ export default function PermissionPrompt() {
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['trackingReadiness'] }),
   });
   const retry = useMutation({
-    mutationFn: () => window.agent.permissions.retryPending(),
-    onSuccess: (result) => {
-      if (result?.ok) void window.agent.permissions.closePrompt();
-    },
+    mutationFn: () => window.agent.attention.resolve(prompt.promptId, 'PERMISSION_RETRY'),
   });
 
   const state = readiness.data;
@@ -67,14 +59,22 @@ export default function PermissionPrompt() {
   const ready = state?.ready === true;
   const busy = requestScreen.isPending || requestAccessibility.isPending || retry.isPending;
 
-  const runScreenAction = () => {
-    if (screenAction === 'enable') requestScreen.mutate();
-    else if (screenAction === 'settings') void window.agent.settings.openScreenPrefs();
-    else if (screenAction === 'restart') void window.agent.app.relaunch();
+  const yieldToSettings = async (): Promise<boolean> => {
+    const result = await window.agent.attention.yieldToSystemSettings(prompt.promptId);
+    return result.ok;
   };
-  const runAccessibilityAction = () => {
+  const runScreenAction = async () => {
+    if (screenAction === 'enable') {
+      if (await yieldToSettings()) requestScreen.mutate();
+    } else if (screenAction === 'settings') {
+      if (await yieldToSettings()) await window.agent.settings.openScreenPrefs();
+    } else if (screenAction === 'restart') {
+      void window.agent.app.relaunch();
+    }
+  };
+  const runAccessibilityAction = async () => {
     if (accessibilityAction === 'enable' || accessibilityAction === 'settings') {
-      requestAccessibility.mutate();
+      if (await yieldToSettings()) requestAccessibility.mutate();
     } else if (accessibilityAction === 'restart') {
       void window.agent.app.relaunch();
     }
@@ -88,7 +88,7 @@ export default function PermissionPrompt() {
           <div className="h2">Permissions needed</div>
           <div className="callout secondary">Timo needs both services ready before tracking can start.</div>
         </div>
-        <button className="perm-close no-drag" title="Close" onClick={() => window.agent.permissions.closePrompt()}>
+        <button className="perm-close no-drag" title="Close" onClick={() => window.agent.attention.resolve(prompt.promptId, 'PERMISSION_CLOSE')}>
           <X size={15} strokeWidth={2.2} />
         </button>
       </header>
@@ -126,12 +126,12 @@ export default function PermissionPrompt() {
       </div>
 
       <footer className="perm-actions">
-        {ready && context.data ? (
+        {ready && prompt.intent !== 'SETUP' ? (
           <button className="btn btn-prominent btn-lg btn-block no-drag" onClick={() => retry.mutate()} disabled={busy}>
-            {context.data.action === 'RESUME' ? 'Resume tracking' : 'Start tracking'}
+            {prompt.intent === 'RESUME_ENTRY' ? 'Resume tracking' : 'Start tracking'}
           </button>
         ) : ready ? (
-          <button className="btn btn-prominent btn-lg btn-block no-drag" onClick={() => window.agent.permissions.closePrompt()}>
+          <button className="btn btn-prominent btn-lg btn-block no-drag" onClick={() => window.agent.attention.resolve(prompt.promptId, 'PERMISSION_CLOSE')}>
             Done
           </button>
         ) : (

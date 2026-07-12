@@ -2,7 +2,6 @@ import { ipcMain } from 'electron';
 import { registerAuthIpc } from './auth';
 import { registerStatusIpc } from './status';
 import { registerTimerIpc } from './timer';
-import { registerAwayIpc } from './away';
 import { registerCaptureIpc } from './capture';
 import { registerSettingsIpc } from './settings';
 import { registerLarkIpc } from './lark';
@@ -10,12 +9,12 @@ import { registerInsightsIpc } from './insights';
 import { registerAppIpc } from './app';
 import { registerUpdatesIpc } from './updates';
 import { registerPermissionsIpc } from './permissions';
+import { registerAttentionIpc } from './attention';
 
-export function registerIpc(opts: { onOpenMainWindow: () => void }): void {
+export function registerIpc(opts: { onOpenMainWindow: () => void; onIdleResolved: () => void }): void {
   registerAuthIpc();
   registerStatusIpc();
   registerTimerIpc();
-  registerAwayIpc();
   registerCaptureIpc();
   registerSettingsIpc();
   registerLarkIpc();
@@ -23,6 +22,7 @@ export function registerIpc(opts: { onOpenMainWindow: () => void }): void {
   registerAppIpc();
   registerUpdatesIpc();
   registerPermissionsIpc();
+  registerAttentionIpc({ onIdleResolved: opts.onIdleResolved });
 
   // Lets the floating bar / popover ask to bring up the main window.
   ipcMain.handle('window:openMain', () => opts.onOpenMainWindow());

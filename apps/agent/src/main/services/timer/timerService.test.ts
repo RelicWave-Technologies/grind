@@ -403,6 +403,22 @@ describe('TimerService.prepareForAway', () => {
     expect(store.getAwayState()).toBeNull();
   });
 
+  it('keeps the timer recoverable when the durable away write fails', async () => {
+    await svc.start({ larkTaskGuid: 'task-1' });
+    clock.advance(4 * MIN);
+    const originalUpsert = store.upsert.bind(store);
+    store.upsert = () => { throw new Error('disk unavailable'); };
+
+    await expect(svc.prepareForAway('lock', clock.now())).rejects.toThrow('disk unavailable');
+    expect(svc.status()).toMatchObject({ state: 'RUNNING', larkTaskGuid: 'task-1' });
+    expect(store.getAwayState()).toMatchObject({ reason: 'lock', awayStartedAt: T0 + 4 * MIN });
+
+    store.upsert = originalUpsert;
+    await svc.prepareForAway('lock', T0 + 4 * MIN);
+    expect(svc.status().state).toBe('IDLE');
+    expect(store.getAwayState()).toBeNull();
+  });
+
   it('is a no-op when away fires while idle', async () => {
     store.setAwayState({ reason: 'suspend', entryId: 'old', awayStartedAt: clock.now(), observedAt: clock.now() });
 

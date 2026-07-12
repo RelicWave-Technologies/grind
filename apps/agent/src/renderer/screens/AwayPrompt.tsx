@@ -1,5 +1,6 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Coffee } from 'lucide-react';
+import type { AttentionPrompt } from '../../shared/attention';
 
 /**
  * "Welcome back — resume tracking?" toast. Shown at top-right after the user
@@ -10,17 +11,15 @@ function fmtTime(ts: number): string {
   return new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 }
 
-export default function AwayPrompt() {
-  const info = useQuery({ queryKey: ['away'], queryFn: () => window.agent.away.get() });
+export default function AwayPrompt({ prompt }: { prompt: Extract<AttentionPrompt, { kind: 'AWAY' }> }) {
   const larkTasks = useQuery({ queryKey: ['larkTasks'], queryFn: () => window.agent.lark.tasks() });
-  const resume = useMutation({ mutationFn: () => window.agent.away.resume() });
-  const dismiss = useMutation({ mutationFn: () => window.agent.away.dismiss() });
+  const resume = useMutation({ mutationFn: () => window.agent.attention.resolve(prompt.promptId, 'AWAY_RESUME') });
+  const dismiss = useMutation({ mutationFn: () => window.agent.attention.resolve(prompt.promptId, 'AWAY_DISMISS') });
 
-  const data = info.data ?? null;
-  const guid = data?.larkTaskGuid ?? null;
+  const guid = prompt.larkTaskGuid;
   const task = guid ? larkTasks.data?.tasks.find((t) => t.guid === guid) : undefined;
-  const reasonText = data?.reason === 'suspend' ? 'your computer slept' : 'your screen locked';
-  const when = data ? ` at ${fmtTime(data.stoppedAt)}` : '';
+  const reasonText = prompt.reason === 'suspend' ? 'your computer slept' : 'your screen locked';
+  const when = ` at ${fmtTime(prompt.stoppedAt)}`;
   const busy = resume.isPending || dismiss.isPending;
 
   return (

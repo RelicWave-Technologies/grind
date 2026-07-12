@@ -1,22 +1,17 @@
 import { describe, it, expect } from 'vitest';
-import { centerUpperThird, topRight, bottomRight, trayPopoverPoint, type Rect } from './overlay';
+import { center, topRight, bottomRight, trayPopoverPoint, type Rect } from './overlay';
 
 const SIZE = { width: 320, height: 168 };
 const PRIMARY: Rect = { x: 0, y: 0, width: 1440, height: 900 };
 // A second monitor to the right, with a non-zero origin.
 const SECOND: Rect = { x: 1440, y: 0, width: 1920, height: 1080 };
 
-describe('centerUpperThird', () => {
-  it('centers horizontally and sits one-third down', () => {
-    const p = centerUpperThird(PRIMARY, SIZE);
-    expect(p.x).toBe(Math.round((1440 - 320) / 2));
-    expect(p.y).toBe(Math.round((900 - 168) / 3));
-  });
-
-  it('respects a non-zero display origin (secondary monitor)', () => {
-    const p = centerUpperThird(SECOND, SIZE);
-    expect(p.x).toBe(Math.round(1440 + (1920 - 320) / 2));
-    expect(p.y).toBe(Math.round((1080 - 168) / 3));
+describe('center', () => {
+  it('centers on the usable area of the active display', () => {
+    expect(center(SECOND, SIZE)).toEqual({
+      x: Math.round(1440 + (1920 - 320) / 2),
+      y: Math.round((1080 - 168) / 2),
+    });
   });
 });
 

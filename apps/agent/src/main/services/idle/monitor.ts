@@ -13,11 +13,12 @@ import { log } from '../../logger';
 export class IdleMonitor {
   private interval: NodeJS.Timeout | null = null;
   private prompting = false;
+  private suspended = false;
   private idleStartedAt = 0;
 
   /** `isProtected` returns true when idle should be ignored (e.g. in a meeting). */
   constructor(
-    private readonly onPrompt: (idleStartedAt: number) => void | Promise<void>,
+    private readonly onPrompt: (idleStartedAt: number) => boolean | Promise<boolean>,
     private readonly isProtected: () => boolean = () => false,
   ) {}
 
@@ -29,18 +30,21 @@ export class IdleMonitor {
 
   private async tick(): Promise<void> {
     try {
+      if (this.suspended) return;
       // While in a meeting (no keyboard/mouse but actively present) don't prompt.
       if (this.isProtected()) return;
       const idleSeconds = powerMonitor.getSystemIdleTime();
-      const isRunning = getTimerService().isRunning();
-      if (!shouldPromptIdle({ isRunning, idleSeconds, thresholdSec: getIdleThresholdSec(), prompting: this.prompting })) {
+      const status = getTimerService().status();
+      const isAccruing = status.state === 'RUNNING' && !status.paused;
+      if (!shouldPromptIdle({ isRunning: isAccruing, idleSeconds, thresholdSec: getIdleThresholdSec(), prompting: this.prompting })) {
         return;
       }
       this.prompting = true;
       this.idleStartedAt = computeIdleStart(Date.now(), idleSeconds);
       log.info('idle prompt triggered', { idleSeconds });
       try {
-        await this.onPrompt(this.idleStartedAt);
+        const accepted = await this.onPrompt(this.idleStartedAt);
+        if (!accepted) this.prompting = false;
       } catch (err) {
         // Never leave `prompting` wedged true on a failed prompt — otherwise no
         // idle prompt would EVER fire again this session (the flag only clears via
@@ -54,10 +58,16 @@ export class IdleMonitor {
     }
   }
 
-  getIdleStart(): number {
-    return this.idleStartedAt;
-  }
   resolve(): void {
+    this.prompting = false;
+  }
+  suspend(): void {
+    this.suspended = true;
+    this.prompting = false;
+    this.idleStartedAt = 0;
+  }
+  resume(): void {
+    this.suspended = false;
     this.prompting = false;
   }
   isPrompting(): boolean {

@@ -44,6 +44,10 @@ export interface OverlayOptions extends Size {
   /** Interactive overlays must become key windows. Passive surfaces use an
    * NSPanel on macOS so they can float without activating the app. */
   activation?: 'passive' | 'interactive';
+  /** Most overlays share the global wake/display reassertion registry. A
+   * coordinator-owned window can opt out when its own state controls whether
+   * it should float (for example, while yielding to System Settings). */
+  registerForReassert?: boolean;
 }
 
 // Live overlays — used by reassertAllOverlays() on wake / display change.
@@ -89,8 +93,10 @@ export function createOverlayWindow(opts: OverlayOptions): BrowserWindow {
     },
   });
   loadRoute(win, opts.hash);
-  registry.add(win);
-  win.on('closed', () => registry.delete(win));
+  if (opts.registerForReassert !== false) {
+    registry.add(win);
+    win.on('closed', () => registry.delete(win));
+  }
   return win;
 }
 
@@ -141,11 +147,11 @@ function clamp(n: number, min: number, max: number): number {
   return Math.max(min, Math.min(n, max));
 }
 
-/** Horizontally centered, one-third down — used by the idle prompt. */
-export function centerUpperThird(wa: Rect, size: Size): Point {
+/** Centered in the usable desktop area — used by blocking attention prompts. */
+export function center(wa: Rect, size: Size): Point {
   return {
     x: Math.round(wa.x + (wa.width - size.width) / 2),
-    y: Math.round(wa.y + (wa.height - size.height) / 3),
+    y: Math.round(wa.y + (wa.height - size.height) / 2),
   };
 }
 

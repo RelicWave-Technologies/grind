@@ -17,47 +17,82 @@ export type AwayReturn = { larkTaskGuid: string | null; stoppedAt: number; reaso
  */
 export function registerPowerEvents(opts: {
   onWake: () => void;
+  onVisibilityReturn?: () => void;
   onReturnFromAway?: (info: AwayReturn) => void;
+  onAwayStart?: () => void;
+  onReturnComplete?: () => void;
 }): void {
   const shutdownMonitor = powerMonitor as typeof powerMonitor & {
     on(event: 'shutdown', listener: (event: { preventDefault(): void }) => void): typeof powerMonitor;
   };
 
-  // Set when a RUNNING timer is stopped by lock/suspend; consumed on the next
-  // resume/unlock. First away wins (sleep can fire both lock + suspend).
-  let pendingAway: { larkTaskGuid: string | null; awayStartedAt: number; reason: TimerAwayReason } | null = null;
+  type AwaySession = {
+    info: { larkTaskGuid: string | null; awayStartedAt: number; reason: TimerAwayReason } | null;
+    preparation: Promise<boolean>;
+  };
+  let awaySession: AwaySession | null = null;
+  let returning: Promise<void> | null = null;
+  let lastWakeAt = 0;
 
-  const markAway = async (reason: TimerAwayReason) => {
-    const awayStartedAt = Date.now();
+  const prepare = async (reason: TimerAwayReason, awayStartedAt: number): Promise<boolean> => {
     try {
       const timer = getTimerService();
-      const before = timer.status();
-      if (before.state === 'RUNNING' && !pendingAway) {
-        pendingAway = { larkTaskGuid: before.larkTaskGuid, awayStartedAt, reason };
-      }
       await timer.prepareForAway(reason, awayStartedAt);
       broadcast('timer:status:push', timer.status());
       log.info('timer stopped for machine away', { reason, awayStartedAt });
+      return true;
     } catch (err) {
-      log.warn('prepareForAway failed', { reason, err: String(err) });
+      log.warn('prepareForAway failed', { reason, awayStartedAt, err: String(err) });
+      return false;
     }
   };
 
-  const markBack = () => {
-    opts.onWake();
-    const away = pendingAway;
-    pendingAway = null;
-    // Always offer to resume when a running timer was stopped by the away —
-    // regardless of how long it was tracked or how long the machine was away.
-    if (away) {
-      opts.onReturnFromAway?.({ larkTaskGuid: away.larkTaskGuid, stoppedAt: away.awayStartedAt, reason: away.reason });
-    }
+  const markAway = (reason: TimerAwayReason) => {
+    if (awaySession) return;
+    const awayStartedAt = Date.now();
+    const before = getTimerService().status();
+    opts.onAwayStart?.();
+    awaySession = {
+      info: before.state === 'RUNNING'
+        ? { larkTaskGuid: before.larkTaskGuid, awayStartedAt, reason }
+        : null,
+      preparation: prepare(reason, awayStartedAt),
+    };
   };
 
-  powerMonitor.on('suspend', () => void markAway('suspend'));
-  powerMonitor.on('lock-screen', () => void markAway('lock'));
+  const markBack = (): void => {
+    if (returning) return;
+    const now = Date.now();
+    if (!awaySession && now - lastWakeAt < 1_000) return;
+    lastWakeAt = now;
+    const session = awaySession;
+    returning = (async () => {
+      opts.onWake();
+      let prepared = session ? await session.preparation : true;
+      if (!prepared && session?.info) {
+        prepared = await prepare(session.info.reason, session.info.awayStartedAt);
+      }
+      if (prepared && session?.info) {
+        opts.onReturnFromAway?.({
+          larkTaskGuid: session.info.larkTaskGuid,
+          stoppedAt: session.info.awayStartedAt,
+          reason: session.info.reason,
+        });
+      }
+      awaySession = null;
+      opts.onReturnComplete?.();
+    })().finally(() => {
+      returning = null;
+    });
+  };
+
+  powerMonitor.on('suspend', () => markAway('suspend'));
+  powerMonitor.on('lock-screen', () => markAway('lock'));
   powerMonitor.on('resume', () => markBack());
-  powerMonitor.on('unlock-screen', () => markBack());
+  powerMonitor.on('unlock-screen', () => {
+    markBack();
+    opts.onVisibilityReturn?.();
+  });
   shutdownMonitor.on('shutdown', (event: { preventDefault(): void }) => {
     event.preventDefault();
     log.info('system shutdown cleanup requested');
