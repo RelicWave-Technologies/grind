@@ -1,12 +1,15 @@
 import type { UserDto } from '@grind/types';
+import type {
+  TimerStatus,
+  TrackingCommandResult,
+  TrackingReadiness,
+} from '../../shared/tracking';
+import type { LaunchAtLoginHealth, MoveToApplicationsResult } from '../../shared/launchAtLogin';
 
 type AuthStatus = 'loggedIn' | 'loggedOut';
 type LarkOutcome = { kind: 'pending' } | { kind: 'error'; reason: string };
 type AgentStatus = { state: 'IDLE' | 'OFFLINE'; lastHeartbeatAt: string | null };
-type TimerStatus =
-  | { state: 'IDLE'; workedMs: number }
-  | { state: 'RUNNING'; entryId: string; larkTaskGuid: string | null; startedAt: number; workedMs: number; paused: boolean };
-export type TimerRecoveryNotice = { entryId: string; recoveredAt: number; reason: 'unexpected_shutdown' | 'sleep_stop' | 'lock_stop'; observedAt: number };
+export type TimerRecoveryNotice = { entryId: string; recoveredAt: number; reason: 'unexpected_shutdown' | 'sleep_stop' | 'lock_stop' | 'server_finalized'; observedAt: number };
 export type TodaySegment = { kind: 'WORK' | 'MEETING' | 'IDLE_TRIMMED'; startedAt: number; endedAt: number | null };
 export type TodayEntry = { id: string; larkTaskGuid: string | null; segments: TodaySegment[] };
 export type AwayInfo = { larkTaskGuid: string | null; stoppedAt: number; reason: 'suspend' | 'lock' };
@@ -28,13 +31,6 @@ export type AccessibilityStatus = {
   recording: boolean;
   hookRunning: boolean;
   lastHookError: string | null;
-};
-export type LaunchAtLoginStatus = 'enabled' | 'not-registered' | 'requires-approval' | 'not-found' | 'blocked-dmg' | 'unavailable-dev';
-export type LaunchAtLoginInfo = {
-  enabled: boolean;
-  status: LaunchAtLoginStatus;
-  canRegister: boolean;
-  reason: 'running-from-dmg' | null;
 };
 export type UpdatePhase = 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'installing' | 'not-available' | 'error';
 export type UpdateStatus = {
@@ -67,9 +63,9 @@ declare global {
         status: () => Promise<AgentStatus>;
       };
       timer: {
-        start: (larkTaskGuid?: string | null) => Promise<TimerStatus>;
+        start: (larkTaskGuid?: string | null) => Promise<TrackingCommandResult>;
         stop: () => Promise<TimerStatus>;
-        resume: () => Promise<TimerStatus>;
+        resume: () => Promise<TrackingCommandResult>;
         status: () => Promise<TimerStatus>;
         recoveryNotice: () => Promise<TimerRecoveryNotice | null>;
         dismissRecoveryNotice: () => Promise<{ ok: true }>;
@@ -85,7 +81,7 @@ declare global {
       };
       away: {
         get: () => Promise<AwayInfo | null>;
-        resume: () => Promise<TimerStatus>;
+        resume: () => Promise<TrackingCommandResult>;
         dismiss: () => Promise<{ ok: true }>;
       };
       shift: {
@@ -101,17 +97,24 @@ declare global {
         retryFailedUploads: () => Promise<{ reset: number }>;
       };
       permissions: {
+        readiness: () => Promise<TrackingReadiness>;
+        requestScreen: () => Promise<TrackingReadiness>;
+        promptContext: () => Promise<{ action: 'START' | 'RESUME' } | null>;
+        retryPending: () => Promise<TrackingCommandResult | null>;
+        closePrompt: () => Promise<{ ok: true }>;
         screen: () => Promise<{ status: string; health: string; state: 'ok' | 'needs-grant' | 'needs-settings' | 'needs-restart' }>;
         accessibility: () => Promise<AccessibilityStatus>;
         requestAccessibility: () => Promise<void>;
       };
       settings: {
-        get: () => Promise<{ version: string; platform: string; launchAtLogin: LaunchAtLoginInfo; screenStatus: string; floatingBarVisible: boolean }>;
-        enableLaunchAtLogin: () => Promise<LaunchAtLoginInfo>;
+        get: () => Promise<{ version: string; platform: string; launchAtLogin: LaunchAtLoginHealth; screenStatus: string; floatingBarVisible: boolean }>;
+        repairLaunchAtLogin: () => Promise<LaunchAtLoginHealth>;
+        moveToApplications: () => Promise<MoveToApplicationsResult>;
         setFloatingBarVisible: (enabled: boolean) => Promise<boolean>;
         resetFloatingBarPosition: () => Promise<void>;
         openScreenPrefs: () => Promise<void>;
-        openLoginItemsPrefs: () => Promise<void>;
+        openStartupPrefs: () => Promise<void>;
+        onOpen: (cb: () => void) => () => void;
         openDataFolder: () => Promise<void>;
       };
       app: {
@@ -146,4 +149,4 @@ declare global {
   }
 }
 
-export { TimerStatus };
+export type { TimerStatus, TrackingCommandResult, TrackingReadiness };

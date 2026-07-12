@@ -1,10 +1,11 @@
 import type { TimeEntry } from '@grind/core';
+import type { TrackingReadiness } from '../../../shared/tracking';
 
 export type EntrySyncState = 'pending_create' | 'pending_update' | 'synced';
 export type PendingEntrySyncState = Exclude<EntrySyncState, 'synced'>;
 export type TimerExitReason = 'quit' | 'update' | 'shutdown';
 export type TimerAwayReason = 'suspend' | 'lock';
-export type TimerRecoveryReason = 'unexpected_shutdown' | 'sleep_stop' | 'lock_stop';
+export type TimerRecoveryReason = 'unexpected_shutdown' | 'sleep_stop' | 'lock_stop' | 'server_finalized';
 
 export interface TimerExitIntent {
   reason: TimerExitReason;
@@ -44,6 +45,15 @@ export interface Clock {
 
 export interface IdGen {
   ulid(): string;
+}
+
+export interface TrackingAccrualGuard {
+  assertCanAccrue(): Promise<void>;
+}
+
+export interface TrackingBlockedErrorLike extends Error {
+  code: 'TRACKING_PERMISSIONS_REQUIRED';
+  readiness: TrackingReadiness;
 }
 
 /**

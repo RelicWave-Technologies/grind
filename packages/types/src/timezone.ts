@@ -20,7 +20,6 @@ export class LocalTimeResolutionError extends RangeError {
     this.name = 'LocalTimeResolutionError';
   }
 }
-
 export function isValidTimeZone(value: string): boolean {
   try {
     new Intl.DateTimeFormat('en-US', { timeZone: value }).format(0);

@@ -17,6 +17,7 @@ export interface RuntimeAgentConfig {
   captureTitles: boolean;
   captureUrls: boolean;
   dashboardUrl: string;
+  workspaceTimezone: string;
 }
 
 export interface AgentConfigChange {
@@ -36,6 +37,7 @@ export interface AgentConfigChange {
 let screenshotIntervalSec = SCREENSHOT_INTERVAL_SEC;
 let idleThresholdSec = IDLE_THRESHOLD_SEC;
 let dashboardUrl = '';
+let workspaceTimezone = 'UTC';
 let configVersion: string | null = null;
 let captureApps = false;
 let captureTitles = false;
@@ -53,6 +55,10 @@ export function getIdleThresholdSec(): number {
 /** Web dashboard origin from the server config ('' until first successful fetch). */
 export function getDashboardUrl(): string {
   return dashboardUrl;
+}
+
+export function getWorkspaceTimezone(): string {
+  return workspaceTimezone;
 }
 
 export function getAgentConfigVersion(): string | null {
@@ -77,6 +83,7 @@ function snapshot(): RuntimeAgentConfig {
     captureTitles,
     captureUrls,
     dashboardUrl,
+    workspaceTimezone,
   };
 }
 
@@ -89,7 +96,8 @@ function sameConfig(a: RuntimeAgentConfig | null, b: RuntimeAgentConfig): boolea
       a.captureApps === b.captureApps &&
       a.captureTitles === b.captureTitles &&
       a.captureUrls === b.captureUrls &&
-      a.dashboardUrl === b.dashboardUrl,
+      a.dashboardUrl === b.dashboardUrl &&
+      a.workspaceTimezone === b.workspaceTimezone,
   );
 }
 
@@ -110,6 +118,7 @@ function applyAgentConfig(cfg: AgentConfigResponseType): void {
   if (!SHOT_SEC_LOCKED) screenshotIntervalSec = Math.max(60, cfg.screenshotIntervalMin * 60);
   if (!IDLE_SEC_LOCKED) idleThresholdSec = Math.max(60, cfg.idleThresholdMin * 60);
   dashboardUrl = cfg.dashboardUrl ?? '';
+  workspaceTimezone = cfg.workspaceTimezone || 'UTC';
   captureApps = Boolean(cfg.captureApps);
   captureTitles = captureApps && Boolean(cfg.captureTitles);
   captureUrls = captureApps && Boolean(cfg.captureUrls);
@@ -145,6 +154,7 @@ async function refreshAgentConfigOnce(): Promise<void> {
       captureApps,
       captureTitles,
       captureUrls,
+      workspaceTimezone,
       shotLocked: SHOT_SEC_LOCKED,
       idleLocked: IDLE_SEC_LOCKED,
     });

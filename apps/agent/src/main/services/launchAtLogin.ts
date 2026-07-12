@@ -1,151 +1,277 @@
 import { app } from 'electron';
 import type { App, LoginItemSettings, LoginItemSettingsOptions, Settings } from 'electron';
 import path from 'node:path';
+import type {
+  LaunchAtLoginHealth,
+  LaunchAtLoginRemediation,
+  LaunchAtLoginState,
+  LaunchOrigin,
+} from '../../shared/launchAtLogin';
 
 const HIDDEN_ARG = '--hidden';
-const LEGACY_WINDOWS_APP_DIRS = ['Grind'];
+const WINDOWS_ITEM_NAME = 'Timo';
+const LEGACY_WINDOWS_ITEMS = [
+  { name: 'Grind', appDir: 'Grind', executable: 'Grind.exe' },
+  { name: '@grind/agent', appDir: '@grind', executable: 'agent.exe' },
+] as const;
 
-export type LaunchAtLoginStatus =
-  | 'enabled'
-  | 'not-registered'
-  | 'requires-approval'
-  | 'not-found'
-  | 'blocked-dmg'
-  | 'unavailable-dev';
-
-export type LaunchAtLoginReason = 'running-from-dmg' | null;
-
-export interface LaunchAtLoginInfo {
-  enabled: boolean;
-  status: LaunchAtLoginStatus;
-  canRegister: boolean;
-  reason: LaunchAtLoginReason;
+interface LaunchAtLoginApp {
+  isPackaged: boolean;
+  getLoginItemSettings(options?: LoginItemSettingsOptions): LoginItemSettings;
+  setLoginItemSettings(settings: Settings): void;
+  isInApplicationsFolder(): boolean;
+  moveToApplicationsFolder(options?: Parameters<App['moveToApplicationsFolder']>[0]): boolean;
 }
 
 interface LaunchAtLoginDeps {
-  app: Pick<App, 'isPackaged' | 'getLoginItemSettings' | 'setLoginItemSettings'>;
+  app: LaunchAtLoginApp;
   platform: NodeJS.Platform;
   execPath: string;
+  argv: string[];
+  now: () => number;
 }
 
-const SUPPORTED_MAC_STATUSES = new Set<LaunchAtLoginStatus>([
-  'enabled',
-  'not-registered',
-  'requires-approval',
-  'not-found',
-]);
+type WindowsLaunchItem = LoginItemSettings['launchItems'][number];
 
 function defaultDeps(): LaunchAtLoginDeps {
-  return { app, platform: process.platform, execPath: process.execPath };
-}
-
-function isSupportedPlatform(platform: NodeJS.Platform): boolean {
-  return platform === 'darwin' || platform === 'win32';
-}
-
-function isMacDmgPath(platform: NodeJS.Platform, execPath: string): boolean {
-  return platform === 'darwin' && /^\/Volumes\/.*\.app\/Contents\/MacOS\//.test(execPath);
-}
-
-function queryOptions(deps: LaunchAtLoginDeps): LoginItemSettingsOptions | undefined {
-  if (deps.platform !== 'win32') return undefined;
-  return { path: deps.execPath, args: [HIDDEN_ARG] };
-}
-
-function registrationSettings(deps: LaunchAtLoginDeps): Settings {
-  if (deps.platform === 'win32') {
-    return { openAtLogin: true, path: deps.execPath, args: [HIDDEN_ARG] };
-  }
-  return { openAtLogin: true };
-}
-
-function legacyWindowsLoginItemSettings(deps: LaunchAtLoginDeps): Settings[] {
-  if (deps.platform !== 'win32') return [];
-  const programsDir = path.win32.dirname(path.win32.dirname(deps.execPath));
-  return LEGACY_WINDOWS_APP_DIRS.flatMap((name) => {
-    const legacyExe = path.win32.join(programsDir, name, `${name}.exe`);
-    return [
-      { openAtLogin: false, path: legacyExe, args: [HIDDEN_ARG] },
-      { openAtLogin: false, path: legacyExe },
-    ];
-  });
-}
-
-function macStatus(settings: LoginItemSettings): LaunchAtLoginStatus {
-  if (SUPPORTED_MAC_STATUSES.has(settings.status as LaunchAtLoginStatus)) {
-    return settings.status as LaunchAtLoginStatus;
-  }
-  return settings.openAtLogin ? 'enabled' : 'not-registered';
-}
-
-function fromSettings(deps: LaunchAtLoginDeps, settings: LoginItemSettings): LaunchAtLoginInfo {
-  const status = deps.platform === 'darwin'
-    ? macStatus(settings)
-    : settings.openAtLogin
-      ? 'enabled'
-      : 'not-registered';
-  const enabled = status === 'enabled' && settings.openAtLogin;
   return {
-    enabled,
-    status,
-    canRegister: !enabled && status !== 'requires-approval',
-    reason: null,
+    app,
+    platform: process.platform,
+    execPath: process.execPath,
+    argv: process.argv,
+    now: () => Date.now(),
   };
 }
 
-function blocked(status: LaunchAtLoginStatus, reason: LaunchAtLoginReason = null): LaunchAtLoginInfo {
-  return { enabled: false, status, canRegister: false, reason };
+function supported(platform: NodeJS.Platform): boolean {
+  return platform === 'darwin' || platform === 'win32';
+}
+
+function canonicalQuery(deps: LaunchAtLoginDeps): LoginItemSettingsOptions | undefined {
+  if (deps.platform === 'darwin') return { type: 'mainAppService' };
+  if (deps.platform === 'win32') return { path: deps.execPath, args: [HIDDEN_ARG] };
+  return undefined;
+}
+
+function canonicalRegistration(deps: LaunchAtLoginDeps, openAtLogin = true): Settings {
+  if (deps.platform === 'darwin') {
+    return { openAtLogin, type: 'mainAppService' };
+  }
+  return {
+    openAtLogin,
+    enabled: openAtLogin,
+    name: WINDOWS_ITEM_NAME,
+    path: deps.execPath,
+    args: [HIDDEN_ARG],
+  };
+}
+
+function normalizeWindowsPath(value: string): string {
+  return path.win32.normalize(value.replace(/^"|"$/gu, '')).toLowerCase();
+}
+
+function sameArgs(args: string[]): boolean {
+  return args.length === 1 && args[0] === HIDDEN_ARG;
+}
+
+function isCanonicalWindowsItem(item: WindowsLaunchItem, execPath: string): boolean {
+  return item.name === WINDOWS_ITEM_NAME
+    && normalizeWindowsPath(item.path) === normalizeWindowsPath(execPath)
+    && sameArgs(item.args);
+}
+
+function result(
+  deps: LaunchAtLoginDeps,
+  openedAtLogin: boolean,
+  state: LaunchAtLoginState,
+  remediation: LaunchAtLoginRemediation,
+  canRepair: boolean,
+): LaunchAtLoginHealth {
+  return {
+    required: state !== 'UNAVAILABLE',
+    ready: state === 'READY',
+    state,
+    canRepair,
+    remediation,
+    openedAtLogin,
+    checkedAt: new Date(deps.now()).toISOString(),
+  };
+}
+
+function detectOpenedAtLogin(deps: LaunchAtLoginDeps): boolean {
+  if (!deps.app.isPackaged || !supported(deps.platform)) return false;
+  if (deps.platform === 'win32') return isHiddenLaunch(deps.argv);
+  try {
+    return deps.app.getLoginItemSettings(canonicalQuery(deps)).wasOpenedAtLogin;
+  } catch {
+    return false;
+  }
+}
+
+export function isHiddenLaunch(argv: string[]): boolean {
+  return argv.includes(HIDDEN_ARG);
+}
+
+function inspectMac(deps: LaunchAtLoginDeps, openedAtLogin: boolean): LaunchAtLoginHealth {
+  if (!deps.app.isInApplicationsFolder()) {
+    return result(deps, openedAtLogin, 'NEEDS_INSTALL', 'MOVE_TO_APPLICATIONS', false);
+  }
+  try {
+    const settings = deps.app.getLoginItemSettings(canonicalQuery(deps));
+    if (settings.status === 'enabled' && settings.openAtLogin) {
+      return result(deps, openedAtLogin, 'READY', 'NONE', false);
+    }
+    if (settings.status === 'requires-approval') {
+      return result(deps, openedAtLogin, 'NEEDS_APPROVAL', 'OPEN_LOGIN_ITEMS', false);
+    }
+    if (settings.status === 'not-registered' || settings.status === 'not-found') {
+      return result(deps, openedAtLogin, 'NEEDS_REGISTRATION', 'REGISTER', true);
+    }
+    return result(deps, openedAtLogin, 'BLOCKED', 'OPEN_LOGIN_ITEMS', false);
+  } catch {
+    return result(deps, openedAtLogin, 'BLOCKED', 'OPEN_LOGIN_ITEMS', false);
+  }
+}
+
+function inspectWindows(deps: LaunchAtLoginDeps, openedAtLogin: boolean): LaunchAtLoginHealth {
+  try {
+    const settings = deps.app.getLoginItemSettings(canonicalQuery(deps));
+    const canonicalItem = settings.launchItems.find((item) => isCanonicalWindowsItem(item, deps.execPath));
+    const executableReady = settings.executableWillLaunchAtLogin === true;
+    if (settings.openAtLogin && executableReady && canonicalItem?.enabled === true) {
+      return result(deps, openedAtLogin, 'READY', 'NONE', false);
+    }
+    const relatedItem = settings.launchItems.some((item) =>
+      item.name === WINDOWS_ITEM_NAME
+      || normalizeWindowsPath(item.path) === normalizeWindowsPath(deps.execPath),
+    );
+    if (settings.openAtLogin || relatedItem) {
+      return result(deps, openedAtLogin, 'NEEDS_REPAIR', 'ENABLE_STARTUP', true);
+    }
+    return result(deps, openedAtLogin, 'NEEDS_REGISTRATION', 'REGISTER', true);
+  } catch {
+    return result(deps, openedAtLogin, 'BLOCKED', 'OPEN_STARTUP_APPS', false);
+  }
 }
 
 export function createLaunchAtLoginService(deps: LaunchAtLoginDeps) {
-  function getInfo(): LaunchAtLoginInfo {
-    if (!deps.app.isPackaged || !isSupportedPlatform(deps.platform)) {
-      return blocked('unavailable-dev');
+  const openedAtLogin = detectOpenedAtLogin(deps);
+
+  function inspect(): LaunchAtLoginHealth {
+    if (!deps.app.isPackaged || !supported(deps.platform)) {
+      return result(deps, openedAtLogin, 'UNAVAILABLE', 'NONE', false);
     }
-    if (isMacDmgPath(deps.platform, deps.execPath)) {
-      return blocked('blocked-dmg', 'running-from-dmg');
-    }
-    return fromSettings(deps, deps.app.getLoginItemSettings(queryOptions(deps)));
+    return deps.platform === 'darwin'
+      ? inspectMac(deps, openedAtLogin)
+      : inspectWindows(deps, openedAtLogin);
   }
 
-  function enable(): LaunchAtLoginInfo {
-    const current = getInfo();
-    if (!current.canRegister) return current;
-    deps.app.setLoginItemSettings(registrationSettings(deps));
-    return getInfo();
+  function removeWindowsItem(item: WindowsLaunchItem): void {
+    deps.app.setLoginItemSettings({
+      openAtLogin: false,
+      enabled: false,
+      name: item.name,
+      path: item.path,
+      args: item.args,
+    });
   }
 
-  function cleanupLegacy(): void {
+  function cleanupWindowsItems(): void {
     if (!deps.app.isPackaged || deps.platform !== 'win32') return;
-    for (const settings of legacyWindowsLoginItemSettings(deps)) {
-      deps.app.setLoginItemSettings(settings);
+    try {
+      const settings = deps.app.getLoginItemSettings();
+      for (const item of settings.launchItems) {
+        const isLegacy = LEGACY_WINDOWS_ITEMS.some(({ name }) => item.name === name);
+        const canonical = isCanonicalWindowsItem(item, deps.execPath);
+        const isTimoName = item.name === WINDOWS_ITEM_NAME;
+        const usesCurrentExecutable = normalizeWindowsPath(item.path) === normalizeWindowsPath(deps.execPath);
+        if (isLegacy || (!canonical && (isTimoName || usesCurrentExecutable))) removeWindowsItem(item);
+      }
+    } catch {
+      // Keep startup non-fatal; repair() will surface a blocked state.
+    }
+
+    const programsDir = path.win32.dirname(path.win32.dirname(deps.execPath));
+    for (const legacy of LEGACY_WINDOWS_ITEMS) {
+      const legacyPath = path.win32.join(programsDir, legacy.appDir, legacy.executable);
+      deps.app.setLoginItemSettings({
+        openAtLogin: false,
+        enabled: false,
+        name: legacy.name,
+        path: legacyPath,
+        args: [HIDDEN_ARG],
+      });
+      deps.app.setLoginItemSettings({
+        openAtLogin: false,
+        enabled: false,
+        name: legacy.name,
+        path: legacyPath,
+      });
     }
   }
 
-  function shouldStartHidden(argv: string[]): boolean {
-    if (argv.includes(HIDDEN_ARG)) return true;
-    if (!deps.app.isPackaged || deps.platform !== 'darwin') return false;
-    if (isMacDmgPath(deps.platform, deps.execPath)) return false;
-    return deps.app.getLoginItemSettings(queryOptions(deps)).wasOpenedAtLogin;
+  function blockedAfterAttempt(next: LaunchAtLoginHealth): LaunchAtLoginHealth {
+    if (next.ready || next.state === 'NEEDS_APPROVAL' || next.state === 'NEEDS_INSTALL') return next;
+    return result(
+      deps,
+      openedAtLogin,
+      'BLOCKED',
+      deps.platform === 'darwin' ? 'OPEN_LOGIN_ITEMS' : 'OPEN_STARTUP_APPS',
+      false,
+    );
   }
 
-  return { getInfo, enable, cleanupLegacy, shouldStartHidden };
+  function registerAndVerify(): LaunchAtLoginHealth {
+    try {
+      deps.app.setLoginItemSettings(canonicalRegistration(deps));
+      return blockedAfterAttempt(inspect());
+    } catch {
+      return result(
+        deps,
+        openedAtLogin,
+        'BLOCKED',
+        deps.platform === 'darwin' ? 'OPEN_LOGIN_ITEMS' : 'OPEN_STARTUP_APPS',
+        false,
+      );
+    }
+  }
+
+  function reconcileOnBoot(): LaunchAtLoginHealth {
+    cleanupWindowsItems();
+    const health = inspect();
+    return health.state === 'NEEDS_REGISTRATION' ? registerAndVerify() : health;
+  }
+
+  function repair(): LaunchAtLoginHealth {
+    cleanupWindowsItems();
+    const health = inspect();
+    if (health.state !== 'NEEDS_REGISTRATION' && health.state !== 'NEEDS_REPAIR') return health;
+    return registerAndVerify();
+  }
+
+  function moveToApplicationsFolder(options?: Parameters<App['moveToApplicationsFolder']>[0]): boolean {
+    if (!deps.app.isPackaged || deps.platform !== 'darwin' || deps.app.isInApplicationsFolder()) return false;
+    return deps.app.moveToApplicationsFolder(options);
+  }
+
+  function launchOrigin(): LaunchOrigin {
+    if (!deps.app.isPackaged || !supported(deps.platform)) return 'UNKNOWN';
+    return openedAtLogin ? 'LOGIN_ITEM' : 'USER';
+  }
+
+  return {
+    inspect,
+    reconcileOnBoot,
+    repair,
+    moveToApplicationsFolder,
+    launchOrigin,
+    shouldStartHidden: () => openedAtLogin,
+  };
 }
 
-export function getLaunchAtLoginInfo(): LaunchAtLoginInfo {
-  return createLaunchAtLoginService(defaultDeps()).getInfo();
-}
+let singleton: ReturnType<typeof createLaunchAtLoginService> | null = null;
 
-export function enableLaunchAtLogin(): LaunchAtLoginInfo {
-  return createLaunchAtLoginService(defaultDeps()).enable();
-}
-
-export function ensureLaunchAtLogin(): LaunchAtLoginInfo {
-  const service = createLaunchAtLoginService(defaultDeps());
-  service.cleanupLegacy();
-  return service.enable();
-}
-
-export function shouldStartHidden(argv: string[] = process.argv): boolean {
-  return createLaunchAtLoginService(defaultDeps()).shouldStartHidden(argv);
+export function getLaunchAtLoginService() {
+  if (!singleton) singleton = createLaunchAtLoginService(defaultDeps());
+  return singleton;
 }

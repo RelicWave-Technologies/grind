@@ -13,6 +13,21 @@ export interface CaptureResult {
   health: CaptureHealth;
 }
 
+/** Permission/readiness probe. It never writes, uploads, or retains pixels. */
+export async function probeScreenCapture(): Promise<CaptureHealth> {
+  try {
+    const sources = await desktopCapturer.getSources({
+      types: ['screen'],
+      thumbnailSize: { width: 64, height: 64 },
+      fetchWindowIcons: false,
+    });
+    if (sources.some((source) => !source.thumbnail.isEmpty())) return 'ok';
+    return sources.length > 0 ? 'empty' : 'error';
+  } catch {
+    return hasScreenAccess() ? 'error' : 'no-permission';
+  }
+}
+
 function dayDir(now: number): string {
   return path.join(app.getPath('userData'), 'screenshots', new Date(now).toISOString().slice(0, 10));
 }

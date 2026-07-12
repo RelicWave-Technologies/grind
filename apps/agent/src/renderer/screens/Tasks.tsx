@@ -28,9 +28,9 @@ export default function Tasks() {
     return () => { alive = false; off(); clearInterval(tick); };
   }, []);
 
-  const start = useMutation({ mutationFn: (guid: string) => window.agent.timer.start(guid), onSuccess: (s) => setTimer(s) });
+  const start = useMutation({ mutationFn: (guid: string) => window.agent.timer.start(guid), onSuccess: (result) => setTimer(result.status) });
   const stop = useMutation({ mutationFn: () => window.agent.timer.stop(), onSuccess: (s) => setTimer(s) });
-  const resume = useMutation({ mutationFn: () => window.agent.timer.resume(), onSuccess: (s) => setTimer(s) });
+  const resume = useMutation({ mutationFn: () => window.agent.timer.resume(), onSuccess: (result) => setTimer(result.status) });
   const connectLark = useMutation({ mutationFn: () => window.agent.lark.connect() });
 
   const onCreated = (summary: string) => {

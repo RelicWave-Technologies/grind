@@ -3,6 +3,7 @@ import type { TimeEntry } from '@grind/core';
 import { closeTimeEntry, totalWorkedMs } from '@grind/core';
 import { HttpError } from '../apiClient';
 import { TimerService } from './timerService';
+import { TrackingBlockedError } from '../trackingReadiness';
 import type {
   Clock,
   EntryStore,
@@ -155,16 +156,42 @@ let ids: SeqIdGen;
 let store: MemStore;
 let sync: SpySync;
 let svc: TimerService;
+let shouldBlockAccrual = false;
+const allowAccrual = {
+  assertCanAccrue: async () => {
+    if (shouldBlockAccrual) {
+      throw new TrackingBlockedError({
+        ready: false,
+        checkedAt: new Date(T0).toISOString(),
+        screenRecording: 'NEEDS_SETTINGS',
+        accessibility: 'READY',
+        blockingCapabilities: ['SCREEN_RECORDING'],
+      });
+    }
+  },
+};
 
 beforeEach(() => {
   clock = new FakeClock();
   ids = new SeqIdGen();
   store = new MemStore();
   sync = new SpySync();
-  svc = new TimerService(store, sync, clock, ids);
+  shouldBlockAccrual = false;
+  svc = new TimerService(store, sync, clock, ids, allowAccrual);
 });
 
 describe('TimerService.start', () => {
+  it('does not mutate local state when permissions block a new start', async () => {
+    shouldBlockAccrual = true;
+
+    await expect(svc.start({ larkTaskGuid: 'task-a' })).rejects.toMatchObject({
+      code: 'TRACKING_PERMISSIONS_REQUIRED',
+    });
+
+    expect(store.getOpen()).toBeNull();
+    expect(sync.creates).toHaveLength(0);
+  });
+
   it('creates a running entry and persists + syncs it', async () => {
     const status = await svc.start({});
     expect(status.state).toBe('RUNNING');
@@ -192,6 +219,18 @@ describe('TimerService.start', () => {
     expect(store.getOpen()?.larkTaskGuid).toBe('task-b');
     expect(sync.creates).toEqual([oldEntry.id, newEntry.id]);
     expect(sync.syncs).toEqual([oldEntry.id, oldEntry.id, newEntry.id]);
+  });
+
+  it('checks permissions before a task switch can close the current entry', async () => {
+    await svc.start({ larkTaskGuid: 'task-a' });
+    shouldBlockAccrual = true;
+
+    await expect(svc.start({ larkTaskGuid: 'task-b' })).rejects.toMatchObject({
+      code: 'TRACKING_PERMISSIONS_REQUIRED',
+    });
+
+    expect(svc.status()).toMatchObject({ state: 'RUNNING', larkTaskGuid: 'task-a', paused: false });
+    expect(sync.creates).toHaveLength(1);
   });
 
   it('is a no-op when starting the task that is already running', async () => {
@@ -521,6 +560,38 @@ describe('TimerService.discardAway (sleep/lock)', () => {
 });
 
 describe('TimerService.pauseForIdle / resumeFromIdle', () => {
+  it('freezes at the last healthy proof and records a permission pause', async () => {
+    await svc.start({});
+    clock.advance(5 * MIN);
+    const lastHealthyAt = clock.now();
+    clock.advance(2 * MIN);
+
+    const paused = await svc.pauseForPermission(lastHealthyAt);
+
+    expect(paused).toMatchObject({
+      state: 'RUNNING',
+      paused: true,
+      pauseReason: 'PERMISSION_REQUIRED',
+      workedMs: 5 * MIN,
+    });
+    clock.advance(10 * MIN);
+    expect(svc.status()).toMatchObject({ workedMs: 5 * MIN });
+  });
+
+  it('cannot resume a permission pause until the accrual guard is ready', async () => {
+    await svc.start({});
+    clock.advance(MIN);
+    await svc.pauseForPermission(clock.now());
+    shouldBlockAccrual = true;
+
+    await expect(svc.resume()).rejects.toMatchObject({ code: 'TRACKING_PERMISSIONS_REQUIRED' });
+    expect(svc.status()).toMatchObject({ paused: true, pauseReason: 'PERMISSION_REQUIRED' });
+
+    shouldBlockAccrual = false;
+    await svc.resume();
+    expect(svc.status()).toMatchObject({ paused: false, pauseReason: null });
+  });
+
   it('freezes worked time on pause and never counts the idle gap', async () => {
     await svc.start({}); // WORK from T0
     clock.advance(5 * MIN); // worked 5 min
@@ -636,7 +707,7 @@ describe('TimerService.recover (crash recovery)', () => {
     store.setAwayState({ reason: 'suspend', entryId: open.id, awayStartedAt: clock.now(), observedAt: clock.now() });
     clock.advance(60 * MIN);
 
-    const rebooted = new TimerService(store, sync, clock, ids);
+    const rebooted = new TimerService(store, sync, clock, ids, allowAccrual);
     const result = rebooted.recoverAway();
 
     expect(result).toMatchObject({ entryId: open.id, recoveredAt: T0 + 8 * MIN });
@@ -658,7 +729,7 @@ describe('TimerService.recover (crash recovery)', () => {
     store.upsert(closeTimeEntry(open, clock.now()));
     store.setAwayState({ reason: 'lock', entryId: open.id, awayStartedAt: clock.now(), observedAt: clock.now() });
 
-    const rebooted = new TimerService(store, sync, clock, ids);
+    const rebooted = new TimerService(store, sync, clock, ids, allowAccrual);
     const result = rebooted.recoverAway();
 
     expect(result).toMatchObject({ entryId: open.id, recoveredAt: T0 + 4 * MIN });
@@ -676,7 +747,7 @@ describe('TimerService.recover (crash recovery)', () => {
     await svc.start({});
     const lastActive = clock.now() + 3 * MIN;
 
-    const svc2 = new TimerService(store, sync, clock, ids);
+    const svc2 = new TimerService(store, sync, clock, ids, allowAccrual);
     const result = svc2.recover(lastActive);
 
     expect(result).toMatchObject({ entryId: expect.any(String), recoveredAt: lastActive });
@@ -703,7 +774,7 @@ describe('TimerService.recover (crash recovery)', () => {
     await svc.pauseForIdle(clock.now());
     const staleLiveness = T0 + 5 * MIN;
 
-    const rebooted = new TimerService(store, sync, clock, ids);
+    const rebooted = new TimerService(store, sync, clock, ids, allowAccrual);
     const result = rebooted.recover(staleLiveness);
 
     expect(result?.recoveredAt).toBe(T0 + 10 * MIN);
@@ -745,7 +816,7 @@ describe('TimerService liveness (crash-recovery bound)', () => {
     const lastAlive = clock.now();
     clock.advance(60 * MIN); // an hour of being powered off
 
-    const rebooted = new TimerService(store, sync, clock, ids);
+    const rebooted = new TimerService(store, sync, clock, ids, allowAccrual);
     rebooted.recover(rebooted.lastLiveness() ?? clock.now());
 
     const recovered = [...store.entries.values()][0]!;
@@ -757,10 +828,33 @@ describe('TimerService liveness (crash-recovery bound)', () => {
     await svc.start({});
     clock.advance(3 * MIN);
     // No heartbeat ever fired → lastLiveness null → caller uses now().
-    const rebooted = new TimerService(store, sync, clock, ids);
+    const rebooted = new TimerService(store, sync, clock, ids, allowAccrual);
     expect(rebooted.lastLiveness()).toBeNull();
     rebooted.recover(rebooted.lastLiveness() ?? clock.now());
     const recovered = [...store.entries.values()][0]!;
     expect(recovered.endedAt).toBe(clock.now());
+  });
+});
+
+describe('TimerService server finalization', () => {
+  it('stops the matching local timer, marks it synced, and records a visible notice', async () => {
+    const clock = new FakeClock();
+    const store = new MemStore();
+    const svc = new TimerService(store, new SpySync(), clock, new SeqIdGen(), allowAccrual);
+    const running = await svc.start({ larkTaskGuid: 'task' });
+    expect(running.state).toBe('RUNNING');
+    if (running.state !== 'RUNNING') throw new Error('expected running timer');
+
+    clock.advance(2 * MIN);
+    const status = svc.acceptServerFinalization(running.entryId, clock.now());
+
+    expect(status.state).toBe('IDLE');
+    expect(store.getOpen()).toBeNull();
+    expect(store.getUnsynced()).toEqual([]);
+    expect(svc.recoveryNotice()).toMatchObject({
+      entryId: running.entryId,
+      reason: 'server_finalized',
+      recoveredAt: clock.now(),
+    });
   });
 });

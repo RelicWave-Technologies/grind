@@ -21,4 +21,10 @@ describe('timerRecoveryNoticeText', () => {
       'Timo recovered a timer from an unexpected shutdown and stopped it at 09:30.',
     );
   });
+
+  it('renders authoritative server-finalization copy', () => {
+    expect(timerRecoveryNoticeText({ entryId: 'e', recoveredAt: 1, reason: 'server_finalized', observedAt: 2 }, fmt)).toBe(
+      'Timo stopped this timer at 09:30 because the server had already finalized it.',
+    );
+  });
 });

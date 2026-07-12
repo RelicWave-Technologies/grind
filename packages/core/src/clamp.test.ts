@@ -11,8 +11,11 @@ function entry(partial: Partial<TimeEntry> & { segments: TimeEntry['segments'] }
     clientUuid: 'cu1',
     userId: 'u1',
     source: 'AUTO',
+    revision: partial.revision ?? 1,
     startedAt: partial.startedAt ?? NOW - 10 * MIN,
     endedAt: partial.endedAt ?? null,
+    pauseReason: partial.pauseReason ?? null,
+    closeReason: partial.closeReason ?? null,
     segments: partial.segments,
   };
 }

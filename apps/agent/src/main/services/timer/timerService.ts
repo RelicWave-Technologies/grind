@@ -9,6 +9,7 @@ import {
   recoverStaleEntry,
   type TimeEntry,
 } from '@grind/core';
+import type { TimerStatus } from '../../../shared/tracking';
 import { HttpError } from '../apiClient';
 import type {
   Clock,
@@ -17,22 +18,12 @@ import type {
   PendingEntrySyncState,
   StartArgs,
   SyncClient,
+  TrackingAccrualGuard,
   TimerAwayReason,
   TimerExitReason,
   TimerRecoveryNotice,
   TimerRecoveryResult,
 } from './types';
-
-export type TimerStatus =
-  | { state: 'IDLE'; workedMs: number }
-  | {
-      state: 'RUNNING';
-      entryId: string;
-      larkTaskGuid: string | null;
-      startedAt: number;
-      workedMs: number;
-      paused: boolean;
-    };
 
 /**
  * Orchestrates the local timer using the pure @grind/core segment logic.
@@ -51,6 +42,7 @@ export class TimerService {
     private readonly sync: SyncClient,
     private readonly clock: Clock,
     private readonly ids: IdGen,
+    private readonly accrualGuard: TrackingAccrualGuard,
   ) {}
 
   /**
@@ -65,7 +57,7 @@ export class TimerService {
       return null;
     }
     const recoveredAt = safeCloseAt(open, lastKnownActiveAt);
-    const recovered = recoverStaleEntry(open, recoveredAt);
+    const recovered = { ...recoverStaleEntry(open, recoveredAt), closeReason: 'AGENT_RECOVERY' as const };
     this.open = null;
     // Persist only; the caller runs flushUnsynced() next, which performs the
     // single sync. Syncing here too would race that flush on the same entry.
@@ -94,7 +86,7 @@ export class TimerService {
     }
 
     const recoveredAt = safeCloseAt(open, away.awayStartedAt);
-    const recovered = recoverStaleEntry(open, recoveredAt);
+    const recovered = { ...recoverStaleEntry(open, recoveredAt), closeReason: 'AGENT_RECOVERY' as const };
     this.open = null;
     this.store.upsert(recovered);
     const recoveredNotice = this.awayNotice(away.reason, recovered.id, recoveredAt);
@@ -123,6 +115,7 @@ export class TimerService {
   }
 
   async start(args: StartArgs): Promise<TimerStatus> {
+    await this.accrualGuard.assertCanAccrue();
     const now = this.clock.now();
     const nextTaskGuid = args.larkTaskGuid ?? null;
     if (this.open) {
@@ -194,16 +187,36 @@ export class TimerService {
     const open = getOpenSegment(this.open);
     if (!open) return; // already paused
     const cut = Math.max(at, open.startedAt); // never before the segment start
-    const paused = closeOpenSegment(this.open, cut);
+    const paused = { ...closeOpenSegment(this.open, cut), pauseReason: 'IDLE' as const };
     this.open = paused;
     await this.persistAndSync(paused);
+  }
+
+  /** Required capture capability disappeared: freeze at the last healthy proof. */
+  async pauseForPermission(at: number): Promise<TimerStatus> {
+    if (!this.open) return this.status();
+    const open = getOpenSegment(this.open);
+    if (!open) {
+      if (this.open.pauseReason !== 'PERMISSION_REQUIRED') {
+        this.open = { ...this.open, revision: this.open.revision + 1, pauseReason: 'PERMISSION_REQUIRED' };
+        await this.persistAndSync(this.open);
+      }
+      return this.status();
+    }
+    const cut = Math.max(open.startedAt, Math.min(at, this.clock.now()));
+    const paused = { ...closeOpenSegment(this.open, cut), pauseReason: 'PERMISSION_REQUIRED' as const };
+    this.open = paused;
+    await this.persistAndSync(paused);
+    return this.status();
   }
 
   /** Resume from a paused (idle) state: open a fresh WORK segment at `at`. */
   async resumeFromIdle(at: number): Promise<void> {
     if (!this.open) return;
     if (getOpenSegment(this.open)) return; // not paused
-    const resumed = openSegment(this.open, { kind: 'WORK', at, segmentId: this.ids.ulid() });
+    await this.accrualGuard.assertCanAccrue();
+    const readyAt = Math.max(at, this.clock.now());
+    const resumed = openSegment(this.open, { kind: 'WORK', at: readyAt, segmentId: this.ids.ulid() });
     this.open = resumed;
     await this.persistAndSync(resumed);
   }
@@ -225,6 +238,7 @@ export class TimerService {
     if (!this.open) return;
     const open = getOpenSegment(this.open);
     if (!open || open.kind === 'MEETING') return;
+    await this.accrualGuard.assertCanAccrue();
     const updated = openSegment(this.open, { kind: 'MEETING', at, segmentId: this.ids.ulid() });
     this.open = updated;
     await this.persistAndSync(updated);
@@ -235,6 +249,7 @@ export class TimerService {
     if (!this.open) return;
     const open = getOpenSegment(this.open);
     if (!open || open.kind !== 'MEETING') return;
+    await this.accrualGuard.assertCanAccrue();
     const updated = openSegment(this.open, { kind: 'WORK', at, segmentId: this.ids.ulid() });
     this.open = updated;
     await this.persistAndSync(updated);
@@ -252,6 +267,7 @@ export class TimerService {
     if (resumeAt - awayStart < 1000) return;
     const open = getOpenSegment(this.open);
     if (!open) return;
+    await this.accrualGuard.assertCanAccrue();
     const updated = applyIdleDiscard(this.open, {
       idleStartedAt: Math.max(awayStart, open.startedAt),
       resumeAt,
@@ -267,14 +283,18 @@ export class TimerService {
     const workedMs = this.workedMsForLocalDay(now);
     if (!this.open) return { state: 'IDLE', workedMs };
     const open = this.open;
+    const activeSegment = getOpenSegment(open);
     const firstSeg = open.segments[0]!;
     return {
       state: 'RUNNING',
       entryId: open.id,
+      revision: open.revision,
       larkTaskGuid: open.larkTaskGuid ?? null,
       startedAt: firstSeg.startedAt,
+      segmentStartedAt: activeSegment?.startedAt ?? null,
       workedMs,
-      paused: getOpenSegment(open) === null,
+      paused: activeSegment === null,
+      pauseReason: activeSegment === null ? open.pauseReason : null,
     };
   }
 
@@ -292,6 +312,38 @@ export class TimerService {
 
   dismissRecoveryNotice(): void {
     this.store.clearRecoveryNotice();
+  }
+
+  /** Accept an authoritative non-recoverable server finalization and stop the
+   * local timer visibly. Lease-expired entries use normal sync reconciliation
+   * instead and never call this path. */
+  acceptServerFinalization(entryId: string, endedAt: number): TimerStatus {
+    if (!this.open || this.open.id !== entryId) return this.status();
+    const boundary = Math.max(this.open.startedAt, endedAt);
+    const segments = this.open.segments
+      .filter((segment) => segment.startedAt <= boundary)
+      .map((segment) => ({
+        ...segment,
+        endedAt: segment.endedAt === null || segment.endedAt > boundary ? boundary : segment.endedAt,
+      }));
+    const closed: TimeEntry = {
+      ...this.open,
+      revision: this.open.revision + 1,
+      endedAt: boundary,
+      pauseReason: null,
+      closeReason: 'AGENT',
+      segments,
+    };
+    this.open = null;
+    this.store.upsert(closed);
+    this.store.markSynced(closed.id, closed);
+    this.store.setRecoveryNotice({
+      entryId,
+      recoveredAt: boundary,
+      reason: 'server_finalized',
+      observedAt: this.clock.now(),
+    });
+    return this.status();
   }
 
   /** Retry pushing any locally-persisted entries that haven't synced yet. */
@@ -372,6 +424,8 @@ export class TimerService {
     return entries.reduce((sum, entry) => sum + entryWorkedMsInWindow(entry, since, now, now), 0);
   }
 }
+
+export type { TimerStatus } from '../../../shared/tracking';
 
 function latestSegmentBoundary(entry: TimeEntry): number {
   return entry.segments.reduce((latest, segment) => {

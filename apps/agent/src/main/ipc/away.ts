@@ -1,8 +1,6 @@
 import { ipcMain } from 'electron';
-import { getTimerService } from '../services/timer';
-import { sendHeartbeatNow } from '../services/heartbeat';
-import { broadcast } from '../broadcast';
 import { getAwayInfo, hideAwayPrompt, type AwayInfo } from '../awayPrompt';
+import { startTracking } from '../services/trackingCommands';
 
 /**
  * IPC for the "welcome back — resume?" toast. `resume` starts a fresh entry on
@@ -15,11 +13,9 @@ export function registerAwayIpc(): void {
 
   ipcMain.handle('away:resume', async () => {
     const info = getAwayInfo();
-    const status = await getTimerService().start({ larkTaskGuid: info?.larkTaskGuid ?? null });
+    const result = await startTracking(info?.larkTaskGuid ?? null);
     hideAwayPrompt();
-    broadcast('timer:status:push', status);
-    sendHeartbeatNow();
-    return status;
+    return result;
   });
 
   ipcMain.handle('away:dismiss', () => {

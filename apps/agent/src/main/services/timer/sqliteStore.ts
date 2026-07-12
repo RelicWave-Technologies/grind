@@ -23,6 +23,22 @@ function asFiniteNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
+function parseEntry(json: string): TimeEntry {
+  const raw = JSON.parse(json) as TimeEntry & { revision?: unknown; closeReason?: unknown; pauseReason?: unknown };
+  return {
+    ...raw,
+    revision: typeof raw.revision === 'number' && Number.isInteger(raw.revision) && raw.revision >= 0
+      ? raw.revision
+      : 0,
+    closeReason: raw.closeReason === 'AGENT_RECOVERY' || raw.closeReason === 'AGENT'
+      ? raw.closeReason
+      : null,
+    pauseReason: raw.pauseReason === 'IDLE' || raw.pauseReason === 'PERMISSION_REQUIRED'
+      ? raw.pauseReason
+      : null,
+  };
+}
+
 function asExitIntent(value: unknown): TimerExitIntent | null {
   if (!value || typeof value !== 'object') return null;
   const raw = value as Partial<TimerExitIntent>;
@@ -35,7 +51,12 @@ function asExitIntent(value: unknown): TimerExitIntent | null {
 function asRecoveryNotice(value: unknown): TimerRecoveryNotice | null {
   if (!value || typeof value !== 'object') return null;
   const raw = value as Partial<TimerRecoveryNotice>;
-  if (raw.reason !== 'unexpected_shutdown' && raw.reason !== 'sleep_stop' && raw.reason !== 'lock_stop') return null;
+  if (
+    raw.reason !== 'unexpected_shutdown'
+    && raw.reason !== 'sleep_stop'
+    && raw.reason !== 'lock_stop'
+    && raw.reason !== 'server_finalized'
+  ) return null;
   if (typeof raw.entryId !== 'string' || raw.entryId.length === 0) return null;
   const recoveredAt = asFiniteNumber(raw.recoveredAt);
   const observedAt = asFiniteNumber(raw.observedAt);
@@ -182,7 +203,7 @@ export class SqliteEntryStore implements EntryStore {
     const row = this.db
       .prepare(`SELECT json FROM local_entries WHERE ended_at IS NULL ORDER BY rowid DESC LIMIT 1`)
       .get() as { json: string } | undefined;
-    return row ? (JSON.parse(row.json) as TimeEntry) : null;
+    return row ? parseEntry(row.json) : null;
   }
 
   getUnsynced(): UnsyncedEntry[] {
@@ -195,7 +216,7 @@ export class SqliteEntryStore implements EntryStore {
       )
       .all() as { json: string; sync_state: string }[];
     return rows.map((r) => ({
-      entry: JSON.parse(r.json) as TimeEntry,
+      entry: parseEntry(r.json),
       syncState: asSyncState(r.sync_state) as PendingEntrySyncState,
     }));
   }
@@ -208,7 +229,7 @@ export class SqliteEntryStore implements EntryStore {
     const rows = this.db
       .prepare(`SELECT json FROM local_entries ORDER BY rowid DESC LIMIT ?`)
       .all(limit) as { json: string }[];
-    return rows.map((r) => JSON.parse(r.json) as TimeEntry);
+    return rows.map((r) => parseEntry(r.json));
   }
 
   listSince(since: number): TimeEntry[] {
@@ -219,7 +240,7 @@ export class SqliteEntryStore implements EntryStore {
          ORDER BY rowid DESC`,
       )
       .all(since) as { json: string }[];
-    return rows.map((r) => JSON.parse(r.json) as TimeEntry);
+    return rows.map((r) => parseEntry(r.json));
   }
 
   markCreated(entryId: string): void {
