@@ -12,6 +12,7 @@ async function createLegacyEntry(args: {
   userId: string;
   startedAt?: Date;
   sampleAt?: Date;
+  screenshotAt?: Date;
   activePointer?: string | null;
 }) {
   const startedAt = args.startedAt ?? new Date('2026-07-13T10:00:00.000Z');
@@ -48,6 +49,16 @@ async function createLegacyEntry(args: {
       },
     });
   }
+  if (args.screenshotAt) {
+    await prisma.screenshot.create({
+      data: {
+        id: fakeUlid('legacy-screenshot'),
+        userId: args.userId,
+        timeEntryId: entryId,
+        capturedAt: args.screenshotAt,
+      },
+    });
+  }
   await prisma.user.update({
     where: { id: args.userId },
     data: { agentActiveEntryId: args.activePointer === undefined ? entryId : args.activePointer },
@@ -75,6 +86,26 @@ describe('legacy timer reconciliation', () => {
     });
     expect(plan.planHash).toMatch(/^[a-f0-9]{64}$/u);
     expect((await prisma.timeEntry.findUniqueOrThrow({ where: { id: entryId } })).endedAt).toBeNull();
+  });
+
+  it('preserves work proven by a linked screenshot', async () => {
+    const user = await seedUser();
+    const entryId = await createLegacyEntry({
+      userId: user.userId,
+      screenshotAt: new Date('2026-07-13T10:00:21.000Z'),
+    });
+
+    const plan = await buildLegacyReconciliationPlan({ now });
+
+    expect(plan.version).toBe(2);
+    expect(plan.entries).toEqual([
+      expect.objectContaining({
+        entryId,
+        proposedEndedAt: '2026-07-13T10:00:21.000Z',
+        latestScreenshotAt: '2026-07-13T10:00:21.000Z',
+        reconciledDurationMs: 21_000,
+      }),
+    ]);
   });
 
   it('applies only the reviewed hash and clears the matching pointer', async () => {
@@ -126,6 +157,24 @@ describe('legacy timer reconciliation', () => {
         clicks: 1,
         mouseDistancePx: 1,
         scrollEvents: 0,
+      },
+    });
+
+    await expect(applyLegacyReconciliationPlan({ planHash: plan.planHash, now }))
+      .rejects.toThrow('legacy_reconciliation_plan_changed');
+    expect((await prisma.timeEntry.findUniqueOrThrow({ where: { id: entryId } })).endedAt).toBeNull();
+  });
+
+  it('rejects apply when screenshot evidence arrives after the reviewed dry run', async () => {
+    const user = await seedUser();
+    const entryId = await createLegacyEntry({ userId: user.userId });
+    const plan = await buildLegacyReconciliationPlan({ now });
+    await prisma.screenshot.create({
+      data: {
+        id: fakeUlid('late-screenshot'),
+        userId: user.userId,
+        timeEntryId: entryId,
+        capturedAt: new Date('2026-07-13T10:00:21.000Z'),
       },
     });
 
