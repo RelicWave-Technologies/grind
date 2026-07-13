@@ -6,6 +6,7 @@ import { trayMenuTitleForElapsed, trayTooltipForElapsed } from './trayPresentati
 
 const ICONS_DIR = 'build/icons';
 const MAC_TRAY_GUID = '2c4e6bf1-41cf-4697-8d87-5d344c3b43e2';
+const MAC_DEV_TRAY_GUID = 'c5f0e8af-6a92-4f02-9b5c-5b6f372d4a91';
 const trayLabels = new WeakMap<Tray, string>();
 const trayIconLoaded = new WeakMap<Tray, boolean>();
 
@@ -41,12 +42,18 @@ function trayImage(): { image: Electron.NativeImage; loaded: boolean } {
   return { image: nativeImage.createEmpty(), loaded: false };
 }
 
-export function trayGuidForPlatform(platform: NodeJS.Platform = process.platform): string | undefined {
+export function trayGuidForPlatform(
+  platform: NodeJS.Platform = process.platform,
+  isDevelopment: boolean = !app.isPackaged,
+): string | undefined {
   // Windows builds are currently unsigned. Electron's Windows tray GUID must be
   // UUID-shaped and is path-bound for unsigned apps, so omitting it is the most
   // reliable choice until Windows signing is in place. macOS keeps a stable
-  // UUID so the menu-bar item can retain its position.
-  return platform === 'darwin' ? MAC_TRAY_GUID : undefined;
+  // UUID so the menu-bar item can retain its position. A local Electron dev
+  // shell must have its own status item too; otherwise macOS treats it as the
+  // installed Timo and reuses that item's placement.
+  if (platform !== 'darwin') return undefined;
+  return isDevelopment ? MAC_DEV_TRAY_GUID : MAC_TRAY_GUID;
 }
 
 /** Menu-bar item. Left-click toggles the popover; right-click shows a menu. */
@@ -61,6 +68,7 @@ export function createTray(opts: {
   const tray = guid ? new Tray(icon.image, guid) : new Tray(icon.image);
   trayIconLoaded.set(tray, icon.loaded);
   setTrayTitle(tray, '');
+  log.info('tray created', { iconLoaded: icon.loaded, guid: guid ?? null });
 
   tray.on('click', (_e, bounds) => opts.onToggle(bounds));
   tray.on('right-click', () => {
