@@ -5,6 +5,7 @@ import { requireApiToken } from '../middleware/apiToken';
 import { buildTimesheetMatrix, dateRange, type TimesheetSegmentInput } from '../insights/timesheets';
 import { localDayWindow } from '../insights/day';
 import { loadTimeInvalidationsForUsers } from '../insights/timeInvalidations';
+import { latestSampleByEntry, resolveEffectiveSegmentEnd } from '../insights/openSegmentEvidence';
 
 export const mcpRouter = Router();
 
@@ -224,9 +225,13 @@ async function loadTimeMatrixForUsers(userIds: string[], range: ValidRange) {
           OR: [{ endedAt: null }, { endedAt: { gt: range.fromWindow.start } }],
         },
         select: {
+          id: true,
           userId: true,
           source: true,
           endedAt: true,
+          trackingProtocolVersion: true,
+          lastProvenAt: true,
+          leaseExpiresAt: true,
           segments: {
             select: { kind: true, startedAt: true, endedAt: true },
             orderBy: { startedAt: 'asc' },
@@ -235,14 +240,31 @@ async function loadTimeMatrixForUsers(userIds: string[], range: ValidRange) {
         orderBy: { startedAt: 'asc' },
       });
 
-  const nowMs = Date.now();
+  const activitySamples = userIds.length === 0
+    ? []
+    : await prisma.activitySample.findMany({
+        where: {
+          userId: { in: userIds },
+          bucketStart: { gte: range.fromWindow.start, lt: range.toWindow.end },
+        },
+        select: { timeEntryId: true, bucketStart: true },
+        orderBy: { bucketStart: 'asc' },
+      });
+  const now = new Date();
+  const latestSampleAt = latestSampleByEntry(activitySamples);
   const segments: TimesheetSegmentInput[] = entries.flatMap((entry) =>
     entry.segments.map((segment) => ({
       userId: entry.userId,
       source: entry.source,
       segmentKind: segment.kind,
       startedAt: segment.startedAt.getTime(),
-      endedAt: (segment.endedAt ?? entry.endedAt ?? new Date(nowMs)).getTime(),
+      endedAt: (resolveEffectiveSegmentEnd({
+        startedAt: segment.startedAt,
+        endedAt: segment.endedAt ?? entry.endedAt,
+        now,
+        latestSampleAt: latestSampleAt.get(entry.id),
+        lifecycle: entry,
+      }) ?? now).getTime(),
     })),
   );
   const invalidations = await loadTimeInvalidationsForUsers(userIds, range.fromWindow.start, range.toWindow.end);
@@ -413,6 +435,9 @@ function buildBreakSummaryForDay(input: {
     larkTaskGuid: string | null;
     notes: string | null;
     endedAt: Date | null;
+    trackingProtocolVersion: number | null;
+    lastProvenAt: Date | null;
+    leaseExpiresAt: Date | null;
     manualTimeRequest: {
       id: string;
       taskSummary: string | null;
@@ -443,6 +468,7 @@ function buildBreakSummaryForDay(input: {
     decisionSource: string | null;
     autoApproved: boolean;
   }>;
+  latestSampleAt?: Map<string, Date>;
   now: Date;
 }) {
   const nowMs = input.now.getTime();
@@ -452,7 +478,13 @@ function buildBreakSummaryForDay(input: {
   for (const entry of input.entries) {
     for (const segment of entry.segments) {
       const rawStart = segment.startedAt.getTime();
-      const rawEnd = (segment.endedAt ?? entry.endedAt ?? input.now).getTime();
+      const rawEnd = (resolveEffectiveSegmentEnd({
+        startedAt: segment.startedAt,
+        endedAt: segment.endedAt ?? entry.endedAt,
+        now: input.now,
+        latestSampleAt: input.latestSampleAt?.get(entry.id),
+        lifecycle: entry,
+      }) ?? input.now).getTime();
       if (!overlapsMs(rawStart, rawEnd, input.dayStart, input.dayEnd)) continue;
       const clipped = clipMs(rawStart, rawEnd, input.dayStart, Math.min(input.dayEnd, nowMs));
       if (!clipped) continue;
@@ -1213,6 +1245,9 @@ mcpRouter.get('/break-summary', requireApiToken(['read:people', 'read:time-summa
             larkTaskGuid: true,
             notes: true,
             endedAt: true,
+            trackingProtocolVersion: true,
+            lastProvenAt: true,
+            leaseExpiresAt: true,
             manualTimeRequest: {
               select: {
                 id: true,
@@ -1236,6 +1271,17 @@ mcpRouter.get('/break-summary', requireApiToken(['read:people', 'read:time-summa
           },
           orderBy: { startedAt: 'asc' },
         });
+    const activitySamples = userIds.length === 0
+      ? []
+      : await prisma.activitySample.findMany({
+          where: {
+            userId: { in: userIds },
+            bucketStart: { gte: range.fromWindow.start, lt: range.toWindow.end },
+          },
+          select: { timeEntryId: true, bucketStart: true },
+          orderBy: { bucketStart: 'asc' },
+        });
+    const latestSampleAt = latestSampleByEntry(activitySamples);
     const manualRequests = userIds.length === 0
       ? []
       : await prisma.manualTimeRequest.findMany({
@@ -1309,7 +1355,13 @@ mcpRouter.get('/break-summary', requireApiToken(['read:people', 'read:time-summa
             entry.segments.some((segment) =>
               overlapsMs(
                 segment.startedAt.getTime(),
-                (segment.endedAt ?? entry.endedAt ?? now).getTime(),
+                (resolveEffectiveSegmentEnd({
+                  startedAt: segment.startedAt,
+                  endedAt: segment.endedAt ?? entry.endedAt,
+                  now,
+                  latestSampleAt: latestSampleAt.get(entry.id),
+                  lifecycle: entry,
+                }) ?? now).getTime(),
                 dayStart,
                 dayEnd,
               ),
@@ -1318,6 +1370,7 @@ mcpRouter.get('/break-summary', requireApiToken(['read:people', 'read:time-summa
           manualRequests: userManualRequests.filter((request) =>
             overlapsMs(request.requestedStart.getTime(), request.requestedEnd.getTime(), dayStart, dayEnd),
           ),
+          latestSampleAt,
           now,
         });
       });

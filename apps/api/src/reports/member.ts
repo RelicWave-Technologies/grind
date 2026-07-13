@@ -17,7 +17,7 @@ import {
   type InvalidationsByUser,
   type TimeInvalidationInput,
 } from '../insights/invalidations';
-import { cappedOpenEndedAt, latestSampleByEntry } from '../insights/openSegmentEvidence';
+import { latestSampleByEntry, resolveEffectiveSegmentEnd } from '../insights/openSegmentEvidence';
 import { buildTimesheetMatrix, dateRange, type TimesheetSegmentInput } from '../insights/timesheets';
 import type { RoleTitle } from '../scoring/presets';
 import { scoreMinute } from '../scoring/score';
@@ -46,6 +46,9 @@ export interface ReportTimeEntry {
   source: 'AUTO' | 'MANUAL';
   larkTaskGuid: string | null;
   notes: string | null;
+  trackingProtocolVersion?: number | null;
+  lastProvenAt?: Date | null;
+  leaseExpiresAt?: Date | null;
   segments: Array<{
     kind: 'WORK' | 'MEETING' | 'IDLE_TRIMMED';
     startedAt: Date;
@@ -329,11 +332,12 @@ function capOpenEntries(
     ...entry,
     segments: entry.segments.map((segment) => ({
       ...segment,
-      endedAt: cappedOpenEndedAt({
+      endedAt: resolveEffectiveSegmentEnd({
         startedAt: segment.startedAt,
         endedAt: segment.endedAt,
         now,
         latestSampleAt: latest.get(entry.id),
+        lifecycle: entry,
       }),
     })),
   }));
@@ -413,7 +417,11 @@ export function buildMemberReportScreenshots(input: {
   const dayEnd = win?.end.getTime() ?? 0;
   const invalidationsByUser = groupInvalidationsByUser(input.invalidations);
   const samples = samplesForWindow(input.samples, dayStart, dayEnd, invalidationsByUser, input.userId);
-  const meetingIntervals = meetingIntervalsForEntries(input.entries ?? [], input.now ?? new Date());
+  const reportNow = input.now ?? new Date();
+  const meetingIntervals = meetingIntervalsForEntries(
+    capOpenEntries(input.entries ?? [], input.samples, reportNow),
+    reportNow,
+  );
   const heatmap = buildHeatmap({
     dayStart,
     dayEnd,

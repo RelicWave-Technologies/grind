@@ -1,5 +1,5 @@
 import { getLarkConfig } from './config';
-import { cappedOpenEndedAt } from '../insights/openSegmentEvidence';
+import { resolveEffectiveSegmentEnd } from '../insights/openSegmentEvidence';
 
 /**
  * Lark Task v2 — fetch the signed-in user's tasks for the agent's task picker.
@@ -128,7 +128,14 @@ export function buildCreateTaskPayload(input: CreateLarkTaskInput): Record<strin
 
 /** Worked duration (WORK/MEETING segments) per larkTaskGuid, summed across entries. */
 export function loggedMsByGuid(
-  entries: Array<{ id?: string; larkTaskGuid: string | null; segments: Array<{ kind: string; startedAt: Date; endedAt: Date | null }> }>,
+  entries: Array<{
+    id?: string;
+    larkTaskGuid: string | null;
+    trackingProtocolVersion?: number | null;
+    lastProvenAt?: Date | null;
+    leaseExpiresAt?: Date | null;
+    segments: Array<{ kind: string; startedAt: Date; endedAt: Date | null }>;
+  }>,
   now: number,
   options: {
     windowStart?: number;
@@ -145,11 +152,12 @@ export function loggedMsByGuid(
     let ms = 0;
     for (const s of e.segments) {
       if (s.kind === 'WORK' || s.kind === 'MEETING') {
-        const capped = cappedOpenEndedAt({
+        const capped = resolveEffectiveSegmentEnd({
           startedAt: s.startedAt,
           endedAt: s.endedAt,
           now: nowDate,
           latestSampleAt: e.id ? options.latestSampleAt?.get(e.id) : null,
+          lifecycle: e,
         });
         const rawEnd = capped ? capped.getTime() : now;
         const start = Math.max(s.startedAt.getTime(), windowStart);

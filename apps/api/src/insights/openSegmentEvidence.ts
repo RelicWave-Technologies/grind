@@ -14,6 +14,12 @@ export interface ActivitySampleEvidence {
   bucketStart: Date;
 }
 
+export interface TimerLifecycleEvidence {
+  trackingProtocolVersion?: number | null;
+  lastProvenAt?: Date | null;
+  leaseExpiresAt?: Date | null;
+}
+
 export function latestSampleByEntry(samples: ActivitySampleEvidence[]): Map<string, Date> {
   const latest = new Map<string, Date>();
   for (const sample of samples) {
@@ -24,16 +30,25 @@ export function latestSampleByEntry(samples: ActivitySampleEvidence[]): Map<stri
   return latest;
 }
 
-export function cappedOpenEndedAt(input: {
+export function resolveEffectiveSegmentEnd(input: {
   startedAt: Date;
   endedAt: Date | null;
   now: Date;
   latestSampleAt?: Date | null;
+  lifecycle?: TimerLifecycleEvidence | null;
 }): Date | null {
   if (input.endedAt) return input.endedAt;
 
   const startMs = input.startedAt.getTime();
   const nowMs = input.now.getTime();
+  if (input.lifecycle?.trackingProtocolVersion === 2) {
+    const leaseExpiresMs = input.lifecycle.leaseExpiresAt?.getTime() ?? null;
+    if (leaseExpiresMs !== null && leaseExpiresMs > nowMs) return null;
+
+    const provenMs = input.lifecycle.lastProvenAt?.getTime() ?? startMs;
+    return new Date(Math.min(nowMs, Math.max(startMs, provenMs)));
+  }
+
   const latestSampleEndMs = input.latestSampleAt
     ? input.latestSampleAt.getTime() + ACTIVITY_SAMPLE_SPAN_MS
     : null;
@@ -47,11 +62,15 @@ export function cappedOpenEndedAt(input: {
   return input.startedAt;
 }
 
+/** Backward-compatible name while callers converge on the shared resolver. */
+export const cappedOpenEndedAt = resolveEffectiveSegmentEnd;
+
 export function openSegmentIsFresh(input: {
   startedAt: Date;
   endedAt: Date | null;
   now: Date;
   latestSampleAt?: Date | null;
+  lifecycle?: TimerLifecycleEvidence | null;
 }): boolean {
-  return input.endedAt === null && cappedOpenEndedAt(input) === null;
+  return input.endedAt === null && resolveEffectiveSegmentEnd(input) === null;
 }

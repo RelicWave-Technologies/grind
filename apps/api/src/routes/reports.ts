@@ -436,6 +436,9 @@ async function loadReportData(userId: string, range: ReportRange) {
         source: true,
         larkTaskGuid: true,
         notes: true,
+        trackingProtocolVersion: true,
+        lastProvenAt: true,
+        leaseExpiresAt: true,
         segments: {
           select: { kind: true, startedAt: true, endedAt: true },
           orderBy: { startedAt: 'asc' },
@@ -538,6 +541,9 @@ async function loadTeamReportData(userIds: string[], range: ReportRange): Promis
         source: true,
         larkTaskGuid: true,
         notes: true,
+        trackingProtocolVersion: true,
+        lastProvenAt: true,
+        leaseExpiresAt: true,
         segments: {
           select: { kind: true, startedAt: true, endedAt: true },
           orderBy: { startedAt: 'asc' },

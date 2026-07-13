@@ -21,6 +21,7 @@ import {
   type TimeInvalidationInput,
 } from '../insights/invalidations';
 import { loadTimeInvalidationsForUsers } from '../insights/timeInvalidations';
+import { latestSampleByEntry, resolveEffectiveSegmentEnd } from '../insights/openSegmentEvidence';
 import {
   CreateApiTokenRequest,
   API_TOKEN_SCOPES,
@@ -709,12 +710,32 @@ async function buildTriageContextByUser(userIds: string[], now: number) {
     select: {
       startedAt: true,
       endedAt: true,
-      timeEntry: { select: { userId: true } },
+      timeEntry: {
+        select: {
+          id: true,
+          userId: true,
+          trackingProtocolVersion: true,
+          lastProvenAt: true,
+          leaseExpiresAt: true,
+        },
+      },
     },
   });
+  const samples = await prisma.activitySample.findMany({
+    where: { userId: { in: userIds }, bucketStart: { gte: since, lte: new Date(now) } },
+    select: { timeEntryId: true, bucketStart: true },
+    orderBy: { bucketStart: 'asc' },
+  });
+  const latestSampleAt = latestSampleByEntry(samples);
   const totalByUser = new Map<string, number>();
   for (const s of segments) {
-    const end = (s.endedAt ?? new Date(now)).getTime();
+    const end = (resolveEffectiveSegmentEnd({
+      startedAt: s.startedAt,
+      endedAt: s.endedAt,
+      now: new Date(now),
+      latestSampleAt: latestSampleAt.get(s.timeEntry.id),
+      lifecycle: s.timeEntry,
+    }) ?? new Date(now)).getTime();
     const dur = Math.max(0, end - s.startedAt.getTime());
     const uid = s.timeEntry.userId;
     totalByUser.set(uid, (totalByUser.get(uid) ?? 0) + dur);
@@ -838,12 +859,35 @@ adminRouter.get('/manual-time-requests', requireManagerOrAbove, async (req, res,
         select: {
           startedAt: true,
           endedAt: true,
-          timeEntry: { select: { userId: true } },
+          timeEntry: {
+            select: {
+              id: true,
+              userId: true,
+              trackingProtocolVersion: true,
+              lastProvenAt: true,
+              leaseExpiresAt: true,
+            },
+          },
         },
       });
+      const triageSamples = await prisma.activitySample.findMany({
+        where: {
+          userId: { in: userIds },
+          bucketStart: { gte: new Date(earliestDay), lt: new Date(latestDay) },
+        },
+        select: { timeEntryId: true, bucketStart: true },
+        orderBy: { bucketStart: 'asc' },
+      });
+      const latestTriageSampleAt = latestSampleByEntry(triageSamples);
       const segLite = segs.map((s) => ({
         startedAt: s.startedAt.getTime(),
-        endedAt: (s.endedAt ?? new Date(now)).getTime(),
+        endedAt: (resolveEffectiveSegmentEnd({
+          startedAt: s.startedAt,
+          endedAt: s.endedAt,
+          now: new Date(now),
+          latestSampleAt: latestTriageSampleAt.get(s.timeEntry.id),
+          lifecycle: s.timeEntry,
+        }) ?? new Date(now)).getTime(),
         userId: s.timeEntry.userId,
       }));
 
@@ -1010,7 +1054,7 @@ async function loadTimesheetData(scope: { userIds: string[] }, range: ResolvedTi
   const lookbackEnd = new Date(`${range.to}T00:00:00Z`);
   lookbackEnd.setUTCDate(lookbackEnd.getUTCDate() + 2);
 
-  const [entries, invalidations] = await Promise.all([
+  const [entries, invalidations, activitySamples] = await Promise.all([
     prisma.timeEntry.findMany({
       where: {
         userId: { in: scope.userIds },
@@ -1020,9 +1064,18 @@ async function loadTimesheetData(scope: { userIds: string[] }, range: ResolvedTi
       include: { segments: { select: { kind: true, startedAt: true, endedAt: true } } },
     }),
     loadTimeInvalidationsForUsers(scope.userIds, lookbackStart, lookbackEnd),
+    prisma.activitySample.findMany({
+      where: {
+        userId: { in: scope.userIds },
+        bucketStart: { gte: lookbackStart, lt: lookbackEnd },
+      },
+      select: { timeEntryId: true, bucketStart: true },
+      orderBy: { bucketStart: 'asc' },
+    }),
   ]);
 
-  const now = Date.now();
+  const now = new Date();
+  const latestTimesheetSampleAt = latestSampleByEntry(activitySamples);
   const segs: TimesheetSegmentInput[] = [];
   for (const e of entries) {
     for (const s of e.segments) {
@@ -1031,7 +1084,13 @@ async function loadTimesheetData(scope: { userIds: string[] }, range: ResolvedTi
         source: e.source as 'AUTO' | 'MANUAL',
         segmentKind: s.kind as 'WORK' | 'MEETING' | 'IDLE_TRIMMED',
         startedAt: s.startedAt.getTime(),
-        endedAt: (s.endedAt ?? new Date(now)).getTime(),
+        endedAt: (resolveEffectiveSegmentEnd({
+          startedAt: s.startedAt,
+          endedAt: s.endedAt,
+          now,
+          latestSampleAt: latestTimesheetSampleAt.get(e.id),
+          lifecycle: e,
+        }) ?? now).getTime(),
       });
     }
   }

@@ -379,6 +379,14 @@ enum SegmentKind {
   IDLE_TRIMMED
 }
 
+enum TimeEntryCloseReason {
+  AGENT
+  AGENT_RECOVERY
+  LEASE_EXPIRED
+  SUPERSEDED
+  LEGACY_RECONCILED
+}
+
 model TimeEntry {
   id           String          @id // ULID from agent
   clientUuid   String          @unique // idempotency key
@@ -390,6 +398,17 @@ model TimeEntry {
   source       TimeEntrySource @default(AUTO)
   startedAt    DateTime
   endedAt      DateTime?
+  /// Versioned agent/server lifecycle protocol. NULL means a legacy agent.
+  trackingProtocolVersion Int?
+  /// Monotonic local timer mutation revision. Used to reject delayed syncs.
+  agentRevision Int?
+  /// Latest client checkpoint accepted by the server, clamped to server time.
+  lastProvenAt DateTime?
+  /// Server-time lease deadline. Only protocol-v2 entries are auto-finalized.
+  leaseExpiresAt DateTime?
+  closeReason TimeEntryCloseReason?
+  /// Audit timestamp for server-side finalization/reconciliation.
+  serverFinalizedAt DateTime?
   /// Free-form user-facing note ("emails", "design review", "fixed bug X").
   /// Shown in the Edit Time table's Reason column. Editable inline; doesn't
   /// require approver review because it's metadata, not new tracked time.
@@ -415,6 +434,7 @@ model TimeEntry {
 
   @@index([userId, startedAt])
   @@index([larkTaskGuid])
+  @@index([trackingProtocolVersion, endedAt, leaseExpiresAt])
 }
 
 enum ScreenshotUploadState {

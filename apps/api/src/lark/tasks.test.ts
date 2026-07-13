@@ -111,6 +111,19 @@ describe('loggedMsByGuid', () => {
     expect(m.get('a')).toBe(11 * 60_000);
     expect(m.get('b')).toBe(0);
   });
+
+  it('caps an expired protocol-v2 timer at its server-proven boundary', () => {
+    const entries = [{
+      id: 'v2-expired',
+      larkTaskGuid: 'a',
+      trackingProtocolVersion: 2,
+      lastProvenAt: d(now - 20 * 60_000),
+      leaseExpiresAt: d(now - 60_000),
+      segments: [{ kind: 'WORK', startedAt: d(now - 30 * 60_000), endedAt: null }],
+    }];
+
+    expect(loggedMsByGuid(entries, now).get('a')).toBe(10 * 60_000);
+  });
 });
 
 describe('buildCreateTaskPayload', () => {

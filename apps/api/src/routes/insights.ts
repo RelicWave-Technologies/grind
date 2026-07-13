@@ -6,7 +6,7 @@ import { scoreDay } from '../scoring/score';
 import { assessWindow, type RiskSample } from '../anticheat/risk';
 import type { RoleTitle } from '../scoring/presets';
 import { buildDayInsight, localDayWindow, shiftDayWindow } from '../insights/day';
-import { cappedOpenEndedAt, latestSampleByEntry } from '../insights/openSegmentEvidence';
+import { latestSampleByEntry, resolveEffectiveSegmentEnd } from '../insights/openSegmentEvidence';
 import { WEEKDAYS, type ShiftSchedule } from '@grind/types';
 import { buildHeatmap, DEFAULT_BUCKET_MS, type HeatmapSample } from '../insights/heatmap';
 import { buildAppUsage } from '../insights/appUsage';
@@ -66,6 +66,7 @@ insightsRouter.get('/score', async (req, res, next) => {
         where: { userId: req.user.sub, bucketStart: { gte: win.start, lt: win.end } },
         orderBy: { bucketStart: 'asc' },
         select: {
+          timeEntryId: true,
           bucketStart: true,
           keystrokes: true,
           clicks: true,
@@ -82,14 +83,20 @@ insightsRouter.get('/score', async (req, res, next) => {
           startedAt: { lt: win.end },
           OR: [{ endedAt: null }, { endedAt: { gt: win.start } }],
         },
-        select: { segments: { select: { kind: true, startedAt: true, endedAt: true } } },
+        select: {
+          id: true,
+          trackingProtocolVersion: true,
+          lastProvenAt: true,
+          leaseExpiresAt: true,
+          segments: { select: { kind: true, startedAt: true, endedAt: true } },
+        },
       }),
       loadTimeInvalidationsForUsers([req.user.sub], win.start, win.end),
     ]);
 
     const role = (user?.activityRoleTitle ?? 'OTHER') as RoleTitle;
     const invalidationsByUser = groupInvalidationsByUser(invalidations);
-    const meetingIntervals = meetingIntervalsForEntries(entries, new Date());
+    const meetingIntervals = meetingIntervalsForEntries(entries, latestSampleByEntry(samplesRaw), new Date());
     const samples = samplesRaw
       .filter((s) => !isInvalidatedAt(invalidationsByUser, req.user!.sub, s.bucketStart.getTime()))
       .map((s) => ({
@@ -241,11 +248,12 @@ insightsRouter.get('/day', async (req, res, next) => {
       segments: e.segments.map((s) => ({
         kind: s.kind as 'WORK' | 'MEETING' | 'IDLE_TRIMMED',
         startedAt: s.startedAt,
-        endedAt: cappedOpenEndedAt({
+        endedAt: resolveEffectiveSegmentEnd({
           startedAt: s.startedAt,
           endedAt: s.endedAt,
           now,
           latestSampleAt: latestSampleAt.get(e.id),
+          lifecycle: e,
         }),
       })),
     }));
@@ -353,7 +361,14 @@ insightsRouter.get('/day', async (req, res, next) => {
 export default insightsRouter;
 
 function meetingIntervalsForEntries(
-  entries: Array<{ segments: Array<{ kind: string; startedAt: Date; endedAt: Date | null }> }>,
+  entries: Array<{
+    id: string;
+    trackingProtocolVersion: number | null;
+    lastProvenAt: Date | null;
+    leaseExpiresAt: Date | null;
+    segments: Array<{ kind: string; startedAt: Date; endedAt: Date | null }>;
+  }>,
+  latestSampleAt: Map<string, Date>,
   now: Date,
 ): Array<{ a: number; b: number }> {
   const out: Array<{ a: number; b: number }> = [];
@@ -361,7 +376,13 @@ function meetingIntervalsForEntries(
     for (const segment of entry.segments) {
       if (segment.kind !== 'MEETING') continue;
       const a = segment.startedAt.getTime();
-      const b = (segment.endedAt ?? now).getTime();
+      const b = (resolveEffectiveSegmentEnd({
+        startedAt: segment.startedAt,
+        endedAt: segment.endedAt,
+        now,
+        latestSampleAt: latestSampleAt.get(entry.id),
+        lifecycle: entry,
+      }) ?? now).getTime();
       if (b > a) out.push({ a, b });
     }
   }

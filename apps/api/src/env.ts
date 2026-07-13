@@ -58,6 +58,10 @@ const EnvSchema = z.object({
   TIMO_CARD_MASCOT_IMAGE_KEY: z.string().min(1).optional(),
   TIMO_CARD_STREAMING_IMAGE_KEY: z.string().min(1).optional(),
 
+  // Deploy schema/API first, then enable only after protocol-v2 checkpoints
+  // are visible and the legacy cleanup dry run has been reviewed.
+  TIMO_TIMER_LEASE_RECONCILER_ENABLED: z.enum(['true', 'false']).default('false'),
+
   // --- Screenshots (optional; direct URLs on Screenshot rows also work) ---
   PUBLIC_APP_URL: z.string().url().optional(),
   SCREENSHOT_ASSET_BASE_URL: z.string().url().optional(),
