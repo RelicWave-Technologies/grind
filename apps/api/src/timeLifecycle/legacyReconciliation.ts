@@ -38,7 +38,7 @@ export interface LegacyPointerRepair {
 }
 
 export interface LegacyReconciliationPlan {
-  version: 3;
+  version: 4;
   generatedAt: string;
   staleMinutes: number;
   planHash: string;
@@ -70,10 +70,9 @@ function hashPlan(
   staleMinutes: number,
   entries: LegacyReconciliationEntry[],
   pointerRepairs: LegacyPointerRepair[],
-  skipped: LegacyReconciliationSkip[],
 ): string {
   const stable = {
-    version: 3,
+    version: 4,
     staleMinutes,
     entries: entries.map((entry) => ({
       entryId: entry.entryId,
@@ -93,7 +92,6 @@ function hashPlan(
       reason: repair.reason,
       staleEntryEndedAt: repair.staleEntryEndedAt,
     })),
-    skipped,
   };
   return createHash('sha256').update(JSON.stringify(stable)).digest('hex');
 }
@@ -232,10 +230,10 @@ export async function buildLegacyReconciliationPlan(args: {
   const unsafeDurationMs = entries.reduce((sum, entry) => sum + entry.unsafeDurationMs, 0);
   const reconciledDurationMs = entries.reduce((sum, entry) => sum + entry.reconciledDurationMs, 0);
   return {
-    version: 3,
+    version: 4,
     generatedAt: now.toISOString(),
     staleMinutes,
-    planHash: hashPlan(staleMinutes, entries, pointerRepairs, skipped),
+    planHash: hashPlan(staleMinutes, entries, pointerRepairs),
     entries,
     pointerRepairs,
     skipped,
