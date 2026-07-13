@@ -15,6 +15,7 @@ export interface LegacyReconciliationEntry {
   proposedEndedAt: string;
   latestActivitySampleAt: string | null;
   latestScreenshotAt: string | null;
+  latestRunningHeartbeatAt: string | null;
   latestClosedSegmentEnd: string | null;
   openSegmentCount: number;
   unsafeDurationMs: number;
@@ -37,7 +38,7 @@ export interface LegacyPointerRepair {
 }
 
 export interface LegacyReconciliationPlan {
-  version: 2;
+  version: 3;
   generatedAt: string;
   staleMinutes: number;
   planHash: string;
@@ -72,7 +73,7 @@ function hashPlan(
   skipped: LegacyReconciliationSkip[],
 ): string {
   const stable = {
-    version: 2,
+    version: 3,
     staleMinutes,
     entries: entries.map((entry) => ({
       entryId: entry.entryId,
@@ -81,6 +82,7 @@ function hashPlan(
       proposedEndedAt: entry.proposedEndedAt,
       latestActivitySampleAt: entry.latestActivitySampleAt,
       latestScreenshotAt: entry.latestScreenshotAt,
+      latestRunningHeartbeatAt: entry.latestRunningHeartbeatAt,
       latestClosedSegmentEnd: entry.latestClosedSegmentEnd,
       openSegmentCount: entry.openSegmentCount,
       reconciledDurationMs: entry.reconciledDurationMs,
@@ -123,6 +125,8 @@ export async function buildLegacyReconciliationPlan(args: {
           name: true,
           email: true,
           agentLastSeenAt: true,
+          agentState: true,
+          agentActiveEntryId: true,
         },
       },
       segments: {
@@ -154,6 +158,10 @@ export async function buildLegacyReconciliationPlan(args: {
     const latestSampleAt = row.activitySamples[0]?.bucketStart ?? null;
     const latestSampleEndMs = latestSampleAt ? latestSampleAt.getTime() + ACTIVITY_SAMPLE_MS : 0;
     const latestScreenshotAt = row.screenshots[0]?.capturedAt ?? null;
+    const latestRunningHeartbeatAt = row.user.agentState === 'RUNNING'
+      && row.user.agentActiveEntryId === row.id
+      ? row.user.agentLastSeenAt
+      : null;
     const latestClosedSegmentEnd = row.segments.reduce<Date | null>((latest, segment) => {
       if (!segment.endedAt || (latest && latest >= segment.endedAt)) return latest;
       return segment.endedAt;
@@ -168,6 +176,7 @@ export async function buildLegacyReconciliationPlan(args: {
       latestClosedSegmentEnd?.getTime() ?? 0,
       latestSampleEndMs,
       latestScreenshotAt?.getTime() ?? 0,
+      latestRunningHeartbeatAt?.getTime() ?? 0,
     );
     if (latestEvidenceMs > now.getTime()) {
       skipped.push({ entryId: row.id, userId: row.userId, reason: 'FUTURE_EVIDENCE' });
@@ -184,6 +193,7 @@ export async function buildLegacyReconciliationPlan(args: {
       proposedEndedAt: proposedEndedAt.toISOString(),
       latestActivitySampleAt: latestSampleAt?.toISOString() ?? null,
       latestScreenshotAt: latestScreenshotAt?.toISOString() ?? null,
+      latestRunningHeartbeatAt: latestRunningHeartbeatAt?.toISOString() ?? null,
       latestClosedSegmentEnd: latestClosedSegmentEnd?.toISOString() ?? null,
       openSegmentCount: row.segments.filter((segment) => segment.endedAt === null).length,
       unsafeDurationMs: durationMs(row.segments, now),
@@ -222,7 +232,7 @@ export async function buildLegacyReconciliationPlan(args: {
   const unsafeDurationMs = entries.reduce((sum, entry) => sum + entry.unsafeDurationMs, 0);
   const reconciledDurationMs = entries.reduce((sum, entry) => sum + entry.reconciledDurationMs, 0);
   return {
-    version: 2,
+    version: 3,
     generatedAt: now.toISOString(),
     staleMinutes,
     planHash: hashPlan(staleMinutes, entries, pointerRepairs, skipped),
