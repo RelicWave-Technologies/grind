@@ -97,7 +97,7 @@ describe('legacy timer reconciliation', () => {
 
     const plan = await buildLegacyReconciliationPlan({ now });
 
-    expect(plan.version).toBe(3);
+    expect(plan.version).toBe(4);
     expect(plan.entries).toEqual([
       expect.objectContaining({
         entryId,
@@ -188,6 +188,27 @@ describe('legacy timer reconciliation', () => {
 
     expect(plan.entries).toHaveLength(0);
     expect(plan.skipped).toEqual([{ entryId, userId: user.userId, reason: 'FRESH_HEARTBEAT' }]);
+  });
+
+  it('does not invalidate a reviewed mutation set when an unrelated fresh timer appears', async () => {
+    const staleUser = await seedUser();
+    const staleEntryId = await createLegacyEntry({ userId: staleUser.userId });
+    const plan = await buildLegacyReconciliationPlan({ now });
+
+    const freshUser = await seedUser();
+    await createLegacyEntry({ userId: freshUser.userId });
+    await prisma.user.update({
+      where: { id: freshUser.userId },
+      data: { agentState: 'RUNNING', agentLastSeenAt: new Date(now.getTime() - 60_000) },
+    });
+
+    await expect(applyLegacyReconciliationPlan({ planHash: plan.planHash, now })).resolves.toEqual({
+      applied: 1,
+      repairedPointers: 0,
+      planHash: plan.planHash,
+    });
+    expect((await prisma.timeEntry.findUniqueOrThrow({ where: { id: staleEntryId } })).endedAt)
+      .not.toBeNull();
   });
 
   it('rejects apply when evidence changed after the reviewed dry run', async () => {
