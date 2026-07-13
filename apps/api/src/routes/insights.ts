@@ -162,7 +162,13 @@ insightsRouter.get('/day', async (req, res, next) => {
     // include it rather than hiding it.
     const userRow = await prisma.user.findUnique({
       where: { id: userId },
-      select: { activityRoleTitle: true, shift: { select: { name: true, schedule: true } } },
+      select: {
+        activityRoleTitle: true,
+        agentState: true,
+        agentLastSeenAt: true,
+        agentActiveEntryId: true,
+        shift: { select: { name: true, schedule: true } },
+      },
     });
     const schedule = (userRow?.shift?.schedule as ShiftSchedule | null | undefined) ?? null;
     const shiftWin = schedule ? shiftDayWindow(date, tz, schedule) : null;
@@ -184,6 +190,12 @@ insightsRouter.get('/day', async (req, res, next) => {
       },
       include: {
         segments: { orderBy: { startedAt: 'asc' } },
+        screenshots: {
+          where: { deletedAt: null },
+          orderBy: { capturedAt: 'desc' },
+          take: 1,
+          select: { capturedAt: true },
+        },
         attendees: { select: { userId: true } },
         manualTimeRequest: { select: { id: true } },
       },
@@ -253,6 +265,10 @@ insightsRouter.get('/day', async (req, res, next) => {
           endedAt: s.endedAt,
           now,
           latestSampleAt: latestSampleAt.get(e.id),
+          latestScreenshotAt: e.screenshots[0]?.capturedAt,
+          latestHeartbeatAt: userRow?.agentState === 'RUNNING' && userRow.agentActiveEntryId === e.id
+            ? userRow.agentLastSeenAt
+            : null,
           lifecycle: e,
         }),
       })),

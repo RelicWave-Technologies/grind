@@ -3,7 +3,7 @@ import { prisma } from '@grind/db';
 import { requireAccessToken } from '../middleware/auth';
 import { attachScope, requireManagerOrAbove } from '../middleware/scope';
 import { localDayWindow } from '../insights/day';
-import { latestSampleByEntry, resolveEffectiveSegmentEnd } from '../insights/openSegmentEvidence';
+import { latestSampleByEntry, latestScreenshotByEntry, resolveEffectiveSegmentEnd } from '../insights/openSegmentEvidence';
 import { DEFAULT_STUCK_THRESHOLD_MS } from '../digests/pendingDigest';
 
 /**
@@ -115,6 +115,12 @@ overviewRouter.get('/', async (req, res, next) => {
                 trackingProtocolVersion: true,
                 lastProvenAt: true,
                 leaseExpiresAt: true,
+                screenshots: {
+                  where: { deletedAt: null },
+                  orderBy: { capturedAt: 'desc' },
+                  take: 1,
+                  select: { capturedAt: true },
+                },
               },
             },
           },
@@ -140,12 +146,25 @@ overviewRouter.get('/', async (req, res, next) => {
             agentState: 'RUNNING',
             agentLastSeenAt: { gte: new Date(now.getTime() - AGENT_HEARTBEAT_FRESH_MS) },
           },
-          select: { id: true },
+          select: { id: true, agentActiveEntryId: true, agentLastSeenAt: true },
         });
 
     const dayStart = win.start.getTime();
     const dayEnd = win.end.getTime();
     const liveCap = Math.min(dayEnd, now.getTime());
+    const latestScreenshotAt = latestScreenshotByEntry(segs.flatMap((segment) =>
+      segment.timeEntry.screenshots.map((screenshot) => ({
+        timeEntryId: segment.timeEntry.id,
+        capturedAt: screenshot.capturedAt,
+      })),
+    ));
+    const latestHeartbeatAt = new Map(
+      liveHeartbeatRows.flatMap((user) =>
+        user.agentActiveEntryId && user.agentLastSeenAt
+          ? [[user.agentActiveEntryId, user.agentLastSeenAt] as const]
+          : [],
+      ),
+    );
     let workedMs = 0;
     let meetingMs = 0;
     let manualMs = 0;
@@ -158,6 +177,8 @@ overviewRouter.get('/', async (req, res, next) => {
         endedAt: s.endedAt,
         now,
         latestSampleAt: latestSampleAt.get(s.timeEntry.id),
+        latestScreenshotAt: latestScreenshotAt.get(s.timeEntry.id),
+        latestHeartbeatAt: latestHeartbeatAt.get(s.timeEntry.id),
         lifecycle: s.timeEntry,
       });
       const b = Math.min(liveCap, (effectiveEndedAt ?? new Date(liveCap)).getTime());

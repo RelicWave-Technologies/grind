@@ -14,6 +14,16 @@ export interface ActivitySampleEvidence {
   bucketStart: Date;
 }
 
+/**
+ * Screenshots are durable proof that an AUTO entry was still collecting at a
+ * particular instant. They deliberately carry no image data here: lifecycle
+ * accounting needs only the capture timestamp.
+ */
+export interface ScreenshotEvidence {
+  timeEntryId: string | null;
+  capturedAt: Date;
+}
+
 export interface TimerLifecycleEvidence {
   trackingProtocolVersion?: number | null;
   lastProvenAt?: Date | null;
@@ -30,11 +40,24 @@ export function latestSampleByEntry(samples: ActivitySampleEvidence[]): Map<stri
   return latest;
 }
 
+export function latestScreenshotByEntry(screenshots: ScreenshotEvidence[]): Map<string, Date> {
+  const latest = new Map<string, Date>();
+  for (const screenshot of screenshots) {
+    if (!screenshot.timeEntryId) continue;
+    const prev = latest.get(screenshot.timeEntryId);
+    if (!prev || screenshot.capturedAt > prev) latest.set(screenshot.timeEntryId, screenshot.capturedAt);
+  }
+  return latest;
+}
+
 export function resolveEffectiveSegmentEnd(input: {
   startedAt: Date;
   endedAt: Date | null;
   now: Date;
   latestSampleAt?: Date | null;
+  latestScreenshotAt?: Date | null;
+  /** A fresh heartbeat is valid only when the caller has matched it to this entry. */
+  latestHeartbeatAt?: Date | null;
   lifecycle?: TimerLifecycleEvidence | null;
 }): Date | null {
   if (input.endedAt) return input.endedAt;
@@ -52,10 +75,25 @@ export function resolveEffectiveSegmentEnd(input: {
   const latestSampleEndMs = input.latestSampleAt
     ? input.latestSampleAt.getTime() + ACTIVITY_SAMPLE_SPAN_MS
     : null;
+  const latestStoredProofMs = Math.max(
+    latestSampleEndMs ?? Number.NEGATIVE_INFINITY,
+    input.latestScreenshotAt?.getTime() ?? Number.NEGATIVE_INFINITY,
+  );
+  const latestHeartbeatMs = input.latestHeartbeatAt?.getTime() ?? Number.NEGATIVE_INFINITY;
 
-  if (latestSampleEndMs !== null && latestSampleEndMs >= startMs) {
-    if (latestSampleEndMs >= nowMs - OPEN_SEGMENT_FRESH_MS) return null;
-    return new Date(Math.min(latestSampleEndMs, nowMs));
+  // A heartbeat is usable only when the caller has matched it to this exact
+  // entry. It is the only legacy proof that permits a small live extension to
+  // `now`; a screenshot/sample proves time only at its observed timestamp.
+  if (latestHeartbeatMs >= startMs && latestHeartbeatMs >= nowMs - OPEN_SEGMENT_FRESH_MS) {
+    return null;
+  }
+
+  if (latestStoredProofMs >= startMs) {
+    return new Date(Math.min(latestStoredProofMs, nowMs));
+  }
+
+  if (latestHeartbeatMs >= startMs) {
+    return new Date(Math.min(latestHeartbeatMs, nowMs));
   }
 
   if (nowMs - startMs <= OPEN_SEGMENT_FRESH_MS) return null;
@@ -70,6 +108,8 @@ export function openSegmentIsFresh(input: {
   endedAt: Date | null;
   now: Date;
   latestSampleAt?: Date | null;
+  latestScreenshotAt?: Date | null;
+  latestHeartbeatAt?: Date | null;
   lifecycle?: TimerLifecycleEvidence | null;
 }): boolean {
   return input.endedAt === null && resolveEffectiveSegmentEnd(input) === null;

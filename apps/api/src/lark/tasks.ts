@@ -141,6 +141,8 @@ export function loggedMsByGuid(
     windowStart?: number;
     windowEnd?: number;
     latestSampleAt?: Map<string, Date>;
+    latestScreenshotAt?: Map<string, Date>;
+    latestHeartbeatAt?: Map<string, Date>;
   } = {},
 ): Map<string, number> {
   const out = new Map<string, number>();
@@ -157,6 +159,8 @@ export function loggedMsByGuid(
           endedAt: s.endedAt,
           now: nowDate,
           latestSampleAt: e.id ? options.latestSampleAt?.get(e.id) : null,
+          latestScreenshotAt: e.id ? options.latestScreenshotAt?.get(e.id) : null,
+          latestHeartbeatAt: e.id ? options.latestHeartbeatAt?.get(e.id) : null,
           lifecycle: e,
         });
         const rawEnd = capped ? capped.getTime() : now;

@@ -9,7 +9,7 @@ import {
 import { localDayWindow } from '../insights/day';
 import { buildTimesheetMatrix, type TimesheetSegmentInput } from '../insights/timesheets';
 import { loadTimeInvalidationsForUsers } from '../insights/timeInvalidations';
-import { latestSampleByEntry, resolveEffectiveSegmentEnd } from '../insights/openSegmentEvidence';
+import { latestSampleByEntry, latestScreenshotByEntry, resolveEffectiveSegmentEnd } from '../insights/openSegmentEvidence';
 import {
   buildMonthlyPayroll,
   type MonthlyPayroll,
@@ -181,7 +181,15 @@ export async function buildPayrollPayload(
               startedAt: { lt: lookbackEnd },
               OR: [{ endedAt: null }, { endedAt: { gt: lookbackStart } }],
             },
-            include: { segments: { select: { kind: true, startedAt: true, endedAt: true } } },
+            include: {
+              segments: { select: { kind: true, startedAt: true, endedAt: true } },
+              screenshots: {
+                where: { deletedAt: null },
+                orderBy: { capturedAt: 'desc' },
+                take: 1,
+                select: { capturedAt: true },
+              },
+            },
           }),
           prisma.shiftAssignment.findMany({
             where: {
@@ -226,6 +234,9 @@ export async function buildPayrollPayload(
 
   const now = new Date(nowMs);
   const latestSampleAt = latestSampleByEntry(activitySamples);
+  const latestScreenshotAt = latestScreenshotByEntry(entries.flatMap((entry) =>
+    entry.screenshots.map((screenshot) => ({ timeEntryId: entry.id, capturedAt: screenshot.capturedAt })),
+  ));
   const segs: TimesheetSegmentInput[] = [];
   for (const e of entries) {
     for (const s of e.segments) {
@@ -239,6 +250,7 @@ export async function buildPayrollPayload(
           endedAt: s.endedAt,
           now,
           latestSampleAt: latestSampleAt.get(e.id),
+          latestScreenshotAt: latestScreenshotAt.get(e.id),
           lifecycle: e,
         }) ?? now).getTime(),
       });

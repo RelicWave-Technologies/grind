@@ -21,7 +21,7 @@ import {
   type TimeInvalidationInput,
 } from '../insights/invalidations';
 import { loadTimeInvalidationsForUsers } from '../insights/timeInvalidations';
-import { latestSampleByEntry, resolveEffectiveSegmentEnd } from '../insights/openSegmentEvidence';
+import { latestSampleByEntry, latestScreenshotByEntry, resolveEffectiveSegmentEnd } from '../insights/openSegmentEvidence';
 import {
   CreateApiTokenRequest,
   API_TOKEN_SCOPES,
@@ -717,6 +717,12 @@ async function buildTriageContextByUser(userIds: string[], now: number) {
           trackingProtocolVersion: true,
           lastProvenAt: true,
           leaseExpiresAt: true,
+          screenshots: {
+            where: { deletedAt: null },
+            orderBy: { capturedAt: 'desc' },
+            take: 1,
+            select: { capturedAt: true },
+          },
         },
       },
     },
@@ -727,6 +733,12 @@ async function buildTriageContextByUser(userIds: string[], now: number) {
     orderBy: { bucketStart: 'asc' },
   });
   const latestSampleAt = latestSampleByEntry(samples);
+  const latestScreenshotAt = latestScreenshotByEntry(segments.flatMap((segment) =>
+    segment.timeEntry.screenshots.map((screenshot) => ({
+      timeEntryId: segment.timeEntry.id,
+      capturedAt: screenshot.capturedAt,
+    })),
+  ));
   const totalByUser = new Map<string, number>();
   for (const s of segments) {
     const end = (resolveEffectiveSegmentEnd({
@@ -734,6 +746,7 @@ async function buildTriageContextByUser(userIds: string[], now: number) {
       endedAt: s.endedAt,
       now: new Date(now),
       latestSampleAt: latestSampleAt.get(s.timeEntry.id),
+      latestScreenshotAt: latestScreenshotAt.get(s.timeEntry.id),
       lifecycle: s.timeEntry,
     }) ?? new Date(now)).getTime();
     const dur = Math.max(0, end - s.startedAt.getTime());
@@ -866,6 +879,12 @@ adminRouter.get('/manual-time-requests', requireManagerOrAbove, async (req, res,
               trackingProtocolVersion: true,
               lastProvenAt: true,
               leaseExpiresAt: true,
+              screenshots: {
+                where: { deletedAt: null },
+                orderBy: { capturedAt: 'desc' },
+                take: 1,
+                select: { capturedAt: true },
+              },
             },
           },
         },
@@ -879,6 +898,12 @@ adminRouter.get('/manual-time-requests', requireManagerOrAbove, async (req, res,
         orderBy: { bucketStart: 'asc' },
       });
       const latestTriageSampleAt = latestSampleByEntry(triageSamples);
+      const latestTriageScreenshotAt = latestScreenshotByEntry(segs.flatMap((segment) =>
+        segment.timeEntry.screenshots.map((screenshot) => ({
+          timeEntryId: segment.timeEntry.id,
+          capturedAt: screenshot.capturedAt,
+        })),
+      ));
       const segLite = segs.map((s) => ({
         startedAt: s.startedAt.getTime(),
         endedAt: (resolveEffectiveSegmentEnd({
@@ -886,6 +911,7 @@ adminRouter.get('/manual-time-requests', requireManagerOrAbove, async (req, res,
           endedAt: s.endedAt,
           now: new Date(now),
           latestSampleAt: latestTriageSampleAt.get(s.timeEntry.id),
+          latestScreenshotAt: latestTriageScreenshotAt.get(s.timeEntry.id),
           lifecycle: s.timeEntry,
         }) ?? new Date(now)).getTime(),
         userId: s.timeEntry.userId,
@@ -1061,7 +1087,15 @@ async function loadTimesheetData(scope: { userIds: string[] }, range: ResolvedTi
         startedAt: { lt: lookbackEnd },
         OR: [{ endedAt: null }, { endedAt: { gt: lookbackStart } }],
       },
-      include: { segments: { select: { kind: true, startedAt: true, endedAt: true } } },
+      include: {
+        segments: { select: { kind: true, startedAt: true, endedAt: true } },
+        screenshots: {
+          where: { deletedAt: null },
+          orderBy: { capturedAt: 'desc' },
+          take: 1,
+          select: { capturedAt: true },
+        },
+      },
     }),
     loadTimeInvalidationsForUsers(scope.userIds, lookbackStart, lookbackEnd),
     prisma.activitySample.findMany({
@@ -1076,6 +1110,9 @@ async function loadTimesheetData(scope: { userIds: string[] }, range: ResolvedTi
 
   const now = new Date();
   const latestTimesheetSampleAt = latestSampleByEntry(activitySamples);
+  const latestTimesheetScreenshotAt = latestScreenshotByEntry(entries.flatMap((entry) =>
+    entry.screenshots.map((screenshot) => ({ timeEntryId: entry.id, capturedAt: screenshot.capturedAt })),
+  ));
   const segs: TimesheetSegmentInput[] = [];
   for (const e of entries) {
     for (const s of e.segments) {
@@ -1089,6 +1126,7 @@ async function loadTimesheetData(scope: { userIds: string[] }, range: ResolvedTi
           endedAt: s.endedAt,
           now,
           latestSampleAt: latestTimesheetSampleAt.get(e.id),
+          latestScreenshotAt: latestTimesheetScreenshotAt.get(e.id),
           lifecycle: e,
         }) ?? now).getTime(),
       });

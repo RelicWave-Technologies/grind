@@ -5,7 +5,7 @@ import { requireApiToken } from '../middleware/apiToken';
 import { buildTimesheetMatrix, dateRange, type TimesheetSegmentInput } from '../insights/timesheets';
 import { localDayWindow } from '../insights/day';
 import { loadTimeInvalidationsForUsers } from '../insights/timeInvalidations';
-import { latestSampleByEntry, resolveEffectiveSegmentEnd } from '../insights/openSegmentEvidence';
+import { latestSampleByEntry, latestScreenshotByEntry, resolveEffectiveSegmentEnd } from '../insights/openSegmentEvidence';
 
 export const mcpRouter = Router();
 
@@ -232,6 +232,12 @@ async function loadTimeMatrixForUsers(userIds: string[], range: ValidRange) {
           trackingProtocolVersion: true,
           lastProvenAt: true,
           leaseExpiresAt: true,
+          screenshots: {
+            where: { deletedAt: null },
+            orderBy: { capturedAt: 'desc' },
+            take: 1,
+            select: { capturedAt: true },
+          },
           segments: {
             select: { kind: true, startedAt: true, endedAt: true },
             orderBy: { startedAt: 'asc' },
@@ -252,6 +258,9 @@ async function loadTimeMatrixForUsers(userIds: string[], range: ValidRange) {
       });
   const now = new Date();
   const latestSampleAt = latestSampleByEntry(activitySamples);
+  const latestScreenshotAt = latestScreenshotByEntry(entries.flatMap((entry) =>
+    entry.screenshots.map((screenshot) => ({ timeEntryId: entry.id, capturedAt: screenshot.capturedAt })),
+  ));
   const segments: TimesheetSegmentInput[] = entries.flatMap((entry) =>
     entry.segments.map((segment) => ({
       userId: entry.userId,
@@ -263,6 +272,7 @@ async function loadTimeMatrixForUsers(userIds: string[], range: ValidRange) {
         endedAt: segment.endedAt ?? entry.endedAt,
         now,
         latestSampleAt: latestSampleAt.get(entry.id),
+        latestScreenshotAt: latestScreenshotAt.get(entry.id),
         lifecycle: entry,
       }) ?? now).getTime(),
     })),
@@ -438,6 +448,7 @@ function buildBreakSummaryForDay(input: {
     trackingProtocolVersion: number | null;
     lastProvenAt: Date | null;
     leaseExpiresAt: Date | null;
+    screenshots: Array<{ capturedAt: Date }>;
     manualTimeRequest: {
       id: string;
       taskSummary: string | null;
@@ -469,6 +480,7 @@ function buildBreakSummaryForDay(input: {
     autoApproved: boolean;
   }>;
   latestSampleAt?: Map<string, Date>;
+  latestScreenshotAt?: Map<string, Date>;
   now: Date;
 }) {
   const nowMs = input.now.getTime();
@@ -483,6 +495,7 @@ function buildBreakSummaryForDay(input: {
         endedAt: segment.endedAt ?? entry.endedAt,
         now: input.now,
         latestSampleAt: input.latestSampleAt?.get(entry.id),
+        latestScreenshotAt: input.latestScreenshotAt?.get(entry.id),
         lifecycle: entry,
       }) ?? input.now).getTime();
       if (!overlapsMs(rawStart, rawEnd, input.dayStart, input.dayEnd)) continue;
@@ -1248,6 +1261,12 @@ mcpRouter.get('/break-summary', requireApiToken(['read:people', 'read:time-summa
             trackingProtocolVersion: true,
             lastProvenAt: true,
             leaseExpiresAt: true,
+            screenshots: {
+              where: { deletedAt: null },
+              orderBy: { capturedAt: 'desc' },
+              take: 1,
+              select: { capturedAt: true },
+            },
             manualTimeRequest: {
               select: {
                 id: true,
@@ -1282,6 +1301,9 @@ mcpRouter.get('/break-summary', requireApiToken(['read:people', 'read:time-summa
           orderBy: { bucketStart: 'asc' },
         });
     const latestSampleAt = latestSampleByEntry(activitySamples);
+    const latestScreenshotAt = latestScreenshotByEntry(entries.flatMap((entry) =>
+      entry.screenshots.map((screenshot) => ({ timeEntryId: entry.id, capturedAt: screenshot.capturedAt })),
+    ));
     const manualRequests = userIds.length === 0
       ? []
       : await prisma.manualTimeRequest.findMany({
@@ -1360,6 +1382,7 @@ mcpRouter.get('/break-summary', requireApiToken(['read:people', 'read:time-summa
                   endedAt: segment.endedAt ?? entry.endedAt,
                   now,
                   latestSampleAt: latestSampleAt.get(entry.id),
+                  latestScreenshotAt: latestScreenshotAt.get(entry.id),
                   lifecycle: entry,
                 }) ?? now).getTime(),
                 dayStart,
@@ -1371,6 +1394,7 @@ mcpRouter.get('/break-summary', requireApiToken(['read:people', 'read:time-summa
             overlapsMs(request.requestedStart.getTime(), request.requestedEnd.getTime(), dayStart, dayEnd),
           ),
           latestSampleAt,
+          latestScreenshotAt,
           now,
         });
       });

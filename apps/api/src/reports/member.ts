@@ -17,7 +17,7 @@ import {
   type InvalidationsByUser,
   type TimeInvalidationInput,
 } from '../insights/invalidations';
-import { latestSampleByEntry, resolveEffectiveSegmentEnd } from '../insights/openSegmentEvidence';
+import { latestSampleByEntry, latestScreenshotByEntry, resolveEffectiveSegmentEnd } from '../insights/openSegmentEvidence';
 import { buildTimesheetMatrix, dateRange, type TimesheetSegmentInput } from '../insights/timesheets';
 import type { RoleTitle } from '../scoring/presets';
 import { scoreMinute } from '../scoring/score';
@@ -180,7 +180,7 @@ export function buildMemberReportDays(input: {
   iconFor?: IconResolver;
 }): MemberReportDay[] {
   const iconFor = input.iconFor ?? appIconUrl;
-  const entries = capOpenEntries(input.entries, input.samples, input.now);
+  const entries = capOpenEntries(input.entries, input.samples, input.screenshots, input.now);
   const invalidationsByUser = groupInvalidationsByUser(input.invalidations);
   const segments: TimesheetSegmentInput[] = [];
   const nowMs = input.now.getTime();
@@ -325,9 +325,11 @@ export function buildMemberReportDays(input: {
 function capOpenEntries(
   entries: ReportTimeEntry[],
   samples: ReportActivitySample[],
+  screenshots: ReportScreenshotRow[],
   now: Date,
 ): ReportTimeEntry[] {
   const latest = latestSampleByEntry(samples);
+  const latestScreenshot = latestScreenshotByEntry(screenshots);
   return entries.map((entry) => ({
     ...entry,
     segments: entry.segments.map((segment) => ({
@@ -337,6 +339,7 @@ function capOpenEntries(
         endedAt: segment.endedAt,
         now,
         latestSampleAt: latest.get(entry.id),
+        latestScreenshotAt: latestScreenshot.get(entry.id),
         lifecycle: entry,
       }),
     })),
@@ -419,7 +422,7 @@ export function buildMemberReportScreenshots(input: {
   const samples = samplesForWindow(input.samples, dayStart, dayEnd, invalidationsByUser, input.userId);
   const reportNow = input.now ?? new Date();
   const meetingIntervals = meetingIntervalsForEntries(
-    capOpenEntries(input.entries ?? [], input.samples, reportNow),
+    capOpenEntries(input.entries ?? [], input.samples, input.screenshots, reportNow),
     reportNow,
   );
   const heatmap = buildHeatmap({
