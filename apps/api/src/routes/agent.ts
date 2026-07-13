@@ -111,6 +111,11 @@ agentRouter.post('/heartbeat', validate(HeartbeatRequest, 'body'), async (req, r
       data.agentAccessibilityHookRunning = body.permissions.accessibility.hookRunning;
       data.agentPermissionsUpdatedAt = now;
     }
+    if (body.startup) {
+      data.agentLaunchAtLoginState = body.startup.state;
+      data.agentLaunchOrigin = body.startup.origin;
+      data.agentLaunchAtLoginUpdatedAt = now;
+    }
     const heartbeatResult = await prisma.$transaction(async (tx): Promise<{
       authorized: boolean;
       timer: TimerCheckpointResult | null;

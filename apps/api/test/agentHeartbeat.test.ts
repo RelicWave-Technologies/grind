@@ -38,6 +38,12 @@ describe('POST /v1/agent/heartbeat', () => {
             hookRunning: false,
           },
         },
+        startup: {
+          state: 'READY',
+          ready: true,
+          openedAtLogin: true,
+          origin: 'LOGIN_ITEM',
+        },
       });
 
     expect(res.status).toBe(200);
@@ -61,6 +67,9 @@ describe('POST /v1/agent/heartbeat', () => {
         agentAccessibilityCapturing: true,
         agentAccessibilityHookRunning: true,
         agentPermissionsUpdatedAt: true,
+        agentLaunchAtLoginState: true,
+        agentLaunchOrigin: true,
+        agentLaunchAtLoginUpdatedAt: true,
       },
     });
     expect(row.agentLastSeenAt).toBeInstanceOf(Date);
@@ -77,6 +86,61 @@ describe('POST /v1/agent/heartbeat', () => {
     expect(row.agentAccessibilityCapturing).toBe(false);
     expect(row.agentAccessibilityHookRunning).toBe(false);
     expect(row.agentPermissionsUpdatedAt).toBeInstanceOf(Date);
+    expect(row.agentLaunchAtLoginState).toBe('READY');
+    expect(row.agentLaunchOrigin).toBe('LOGIN_ITEM');
+    expect(row.agentLaunchAtLoginUpdatedAt).toBeInstanceOf(Date);
+  });
+
+  it('accepts a permission-enforced pause without changing legacy entry ownership checks', async () => {
+    const user = await seedUser();
+    await prisma.timeEntry.create({
+      data: {
+        id: 'entry-permission-paused',
+        clientUuid: fakeUlid('heartbeat-permission-paused-client'),
+        userId: user.userId,
+        source: 'AUTO',
+        startedAt: new Date(Date.now() - 60_000),
+      },
+    });
+
+    const res = await request(app)
+      .post('/v1/agent/heartbeat')
+      .set(bearer(user.accessToken))
+      .send({
+        agentVersion: '0.0.2-beta.27',
+        platform: 'darwin',
+        state: 'PAUSED_PERMISSION',
+        activeEntryId: 'entry-permission-paused',
+      });
+
+    expect(res.status).toBe(200);
+    await expect(prisma.user.findUniqueOrThrow({
+      where: { id: user.userId },
+      select: { agentState: true, agentActiveEntryId: true },
+    })).resolves.toMatchObject({
+      agentState: 'PAUSED_PERMISSION',
+      agentActiveEntryId: 'entry-permission-paused',
+    });
+  });
+
+  it('rejects an internally inconsistent startup snapshot', async () => {
+    const user = await seedUser();
+
+    const res = await request(app)
+      .post('/v1/agent/heartbeat')
+      .set(bearer(user.accessToken))
+      .send({
+        agentVersion: '0.0.2-beta.27',
+        platform: 'win32',
+        startup: {
+          state: 'READY',
+          ready: false,
+          openedAtLogin: false,
+          origin: 'USER',
+        },
+      });
+
+    expect(res.status).toBe(400);
   });
 
   it('defaults old agents without state or permissions to IDLE', async () => {
@@ -97,6 +161,9 @@ describe('POST /v1/agent/heartbeat', () => {
         agentScreenPermissionStatus: true,
         agentAccessibilityTrusted: true,
         agentPermissionsUpdatedAt: true,
+        agentLaunchAtLoginState: true,
+        agentLaunchOrigin: true,
+        agentLaunchAtLoginUpdatedAt: true,
       },
     });
     expect(row.agentState).toBe('IDLE');
@@ -104,6 +171,9 @@ describe('POST /v1/agent/heartbeat', () => {
     expect(row.agentScreenPermissionStatus).toBeNull();
     expect(row.agentAccessibilityTrusted).toBeNull();
     expect(row.agentPermissionsUpdatedAt).toBeNull();
+    expect(row.agentLaunchAtLoginState).toBeNull();
+    expect(row.agentLaunchOrigin).toBeNull();
+    expect(row.agentLaunchAtLoginUpdatedAt).toBeNull();
   });
 
   it('changes configVersion after effective member timing changes', async () => {

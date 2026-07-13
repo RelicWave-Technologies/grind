@@ -69,6 +69,9 @@ describe('GET /v1/admin/users — role-scoped list', () => {
         agentScreenPermissionStatus: 'granted',
         agentAccessibilityTrusted: true,
         agentPermissionsUpdatedAt: new Date(),
+        agentLaunchAtLoginState: 'READY',
+        agentLaunchOrigin: 'LOGIN_ITEM',
+        agentLaunchAtLoginUpdatedAt: new Date(),
       },
     });
     const res = await request(app).get('/v1/admin/users').set(bearer(w.member1.token));
@@ -79,6 +82,9 @@ describe('GET /v1/admin/users — role-scoped list', () => {
     expect(res.body.users[0].agentVersion).toBeNull();
     expect(res.body.users[0].agentScreenPermissionStatus).toBeNull();
     expect(res.body.users[0].agentAccessibilityTrusted).toBeNull();
+    expect(res.body.users[0].agentLaunchAtLoginState).toBeNull();
+    expect(res.body.users[0].agentLaunchOrigin).toBeNull();
+    expect(res.body.users[0].agentLaunchAtLoginUpdatedAt).toBeNull();
   });
 
   it('MEMBER outside any team → still sees only self', async () => {
@@ -110,7 +116,7 @@ describe('GET /v1/admin/users — role-scoped list', () => {
       where: { id: w.member1.id },
       data: {
         agentLastSeenAt: new Date('2026-07-08T10:00:00.000Z'),
-        agentState: 'RUNNING',
+        agentState: 'PAUSED_PERMISSION',
         agentVersion: '0.0.2-beta.24',
         agentPlatform: 'darwin',
         agentScreenPermissionStatus: 'granted',
@@ -122,6 +128,9 @@ describe('GET /v1/admin/users — role-scoped list', () => {
         agentAccessibilityCapturing: true,
         agentAccessibilityHookRunning: true,
         agentPermissionsUpdatedAt: new Date('2026-07-08T10:00:00.000Z'),
+        agentLaunchAtLoginState: 'READY',
+        agentLaunchOrigin: 'LOGIN_ITEM',
+        agentLaunchAtLoginUpdatedAt: new Date('2026-07-08T10:00:00.000Z'),
       },
     });
     const res = await request(app).get('/v1/admin/users').set(bearer(w.admin.token));
@@ -133,7 +142,7 @@ describe('GET /v1/admin/users — role-scoped list', () => {
     const member = res.body.users.find((u: { id: string }) => u.id === w.member1.id);
     expect(member).toMatchObject({
       agentLastSeenAt: '2026-07-08T10:00:00.000Z',
-      agentState: 'RUNNING',
+      agentState: 'PAUSED_PERMISSION',
       agentVersion: '0.0.2-beta.24',
       agentPlatform: 'darwin',
       agentScreenPermissionStatus: 'granted',
@@ -145,6 +154,9 @@ describe('GET /v1/admin/users — role-scoped list', () => {
       agentAccessibilityCapturing: true,
       agentAccessibilityHookRunning: true,
       agentPermissionsUpdatedAt: '2026-07-08T10:00:00.000Z',
+      agentLaunchAtLoginState: 'READY',
+      agentLaunchOrigin: 'LOGIN_ITEM',
+      agentLaunchAtLoginUpdatedAt: '2026-07-08T10:00:00.000Z',
     });
   });
 
