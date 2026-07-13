@@ -1,8 +1,7 @@
 import { prisma } from '@grind/db';
 import { localDayWindow } from '../insights/day';
-import { latestSampleByEntry, latestScreenshotByEntry, resolveEffectiveSegmentEnd } from '../insights/openSegmentEvidence';
-
-const AGENT_HEARTBEAT_FRESH_MS = 3 * 60 * 1000;
+import { loadEntryLiveEvidence, LIVE_HEARTBEAT_FRESH_MS } from '../insights/liveEntryEvidence';
+import { resolveEffectiveEntrySegmentEnds } from '../insights/openSegmentEvidence';
 
 export async function buildTesterUsageSnapshot(workspaceId: string, timezone: string) {
   const now = new Date();
@@ -18,7 +17,6 @@ export async function buildTesterUsageSnapshot(workspaceId: string, timezone: st
       avatarUrl: true,
       agentState: true,
       agentLastSeenAt: true,
-      agentActiveEntryId: true,
       larkIdentity: { select: { openId: true } },
     },
     orderBy: { name: 'asc' },
@@ -34,28 +32,13 @@ export async function buildTesterUsageSnapshot(workspaceId: string, timezone: st
       id: true,
       userId: true,
       source: true,
+      endedAt: true,
       trackingProtocolVersion: true,
       lastProvenAt: true,
       leaseExpiresAt: true,
-      screenshots: {
-        where: { deletedAt: null },
-        orderBy: { capturedAt: 'desc' },
-        take: 1,
-        select: { capturedAt: true },
-      },
       segments: { select: { kind: true, startedAt: true, endedAt: true } },
     },
   });
-  const activitySamples = userIds.length === 0
-    ? []
-    : await prisma.activitySample.findMany({
-        where: {
-          userId: { in: userIds },
-          bucketStart: { gte: win.start, lt: win.end },
-        },
-        select: { timeEntryId: true, bucketStart: true },
-        orderBy: { bucketStart: 'asc' },
-      });
   const screenshots = await prisma.screenshot.groupBy({
     by: ['userId'],
     where: {
@@ -67,30 +50,19 @@ export async function buildTesterUsageSnapshot(workspaceId: string, timezone: st
   });
 
   const screenshotCount = new Map(screenshots.map((s) => [s.userId, s._count._all]));
-  const latestSampleAt = latestSampleByEntry(activitySamples);
-  const latestScreenshotAt = latestScreenshotByEntry(entries.flatMap((entry) =>
-    entry.screenshots.map((screenshot) => ({ timeEntryId: entry.id, capturedAt: screenshot.capturedAt })),
-  ));
-  const latestHeartbeatAt = new Map<string, Date>();
-  for (const user of users) {
-    if (user.agentState === 'RUNNING' && user.agentActiveEntryId && user.agentLastSeenAt) {
-      latestHeartbeatAt.set(user.agentActiveEntryId, user.agentLastSeenAt);
-    }
-  }
+  const evidenceByEntry = await loadEntryLiveEvidence(entries, now);
   const totals = new Map<string, number>();
   for (const entry of entries) {
-    for (const segment of entry.segments) {
+    const effectiveEnds = resolveEffectiveEntrySegmentEnds({
+      segments: entry.segments,
+      now,
+      evidence: evidenceByEntry.get(entry.id),
+      lifecycle: entry,
+    });
+    for (const [index, segment] of entry.segments.entries()) {
       if (entry.source !== 'MANUAL' && segment.kind === 'IDLE_TRIMMED') continue;
       const start = Math.max(segment.startedAt.getTime(), win.start.getTime());
-      const effectiveEndedAt = resolveEffectiveSegmentEnd({
-        startedAt: segment.startedAt,
-        endedAt: segment.endedAt,
-        now,
-        latestSampleAt: latestSampleAt.get(entry.id),
-        latestScreenshotAt: latestScreenshotAt.get(entry.id),
-        latestHeartbeatAt: latestHeartbeatAt.get(entry.id),
-        lifecycle: entry,
-      });
+      const effectiveEndedAt = effectiveEnds[index];
       const end = Math.min(
         (effectiveEndedAt ?? now).getTime(),
         win.end.getTime(),
@@ -105,7 +77,7 @@ export async function buildTesterUsageSnapshot(workspaceId: string, timezone: st
     const agentLastSeenAt = lastSeen?.toISOString() ?? null;
     const isLiveNow = u.agentState === 'RUNNING'
       && lastSeen !== null
-      && now.getTime() - lastSeen.getTime() <= AGENT_HEARTBEAT_FRESH_MS;
+      && now.getTime() - lastSeen.getTime() <= LIVE_HEARTBEAT_FRESH_MS;
 
     return {
       userId: u.id,

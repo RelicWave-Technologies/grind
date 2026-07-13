@@ -105,8 +105,10 @@ describe('loggedMsByGuid', () => {
       { id: 'e2', larkTaskGuid: 'b', segments: [{ kind: 'WORK', startedAt: d(now - 30 * 60_000), endedAt: null }] },
     ];
 
-    const latestSampleAt = new Map<string, Date>([['e1', d(now - 20 * 60_000)]]);
-    const m = loggedMsByGuid(entries, now, { latestSampleAt });
+    const evidenceByEntry = new Map([
+      ['e1', { latestStoredProofAt: d(now - 19 * 60_000), latestHeartbeatAt: null }],
+    ]);
+    const m = loggedMsByGuid(entries, now, { evidenceByEntry });
 
     expect(m.get('a')).toBe(11 * 60_000);
     expect(m.get('b')).toBe(0);

@@ -19,7 +19,7 @@ import {
   LarkTaskApiError,
 } from '../lark';
 import { localDayWindow } from '../insights/day';
-import { latestSampleByEntry, latestScreenshotByEntry } from '../insights/openSegmentEvidence';
+import { loadEntryLiveEvidence } from '../insights/liveEntryEvidence';
 
 export const larkRouter = Router();
 
@@ -149,53 +149,24 @@ larkRouter.get('/my-tasks', async (req, res, next) => {
     // Enrich with time already tracked against each task via Grind.
     const guids = tasks.map((t) => t.guid);
     if (guids.length) {
-      const [entries, runtime] = await Promise.all([
-        prisma.timeEntry.findMany({
-          where: { userId: req.user.sub, larkTaskGuid: { in: guids } },
-          select: {
-            id: true,
-            larkTaskGuid: true,
-            trackingProtocolVersion: true,
-            lastProvenAt: true,
-            leaseExpiresAt: true,
-            screenshots: {
-              where: { deletedAt: null },
-              orderBy: { capturedAt: 'desc' },
-              take: 1,
-              select: { capturedAt: true },
-            },
-            segments: { select: { kind: true, startedAt: true, endedAt: true } },
-          },
-        }),
-        prisma.user.findUnique({
-          where: { id: req.user.sub },
-          select: { agentState: true, agentActiveEntryId: true, agentLastSeenAt: true },
-        }),
-      ]);
-      const openEntryIds = entries
-        .filter((e) => e.segments.some((s) => s.endedAt === null))
-        .map((e) => e.id);
-      const samples = openEntryIds.length
-        ? await prisma.activitySample.findMany({
-            where: { userId: req.user.sub, timeEntryId: { in: openEntryIds } },
-            select: { timeEntryId: true, bucketStart: true },
-            orderBy: { bucketStart: 'asc' },
-          })
-        : [];
-      const latestSampleAt = latestSampleByEntry(samples);
-      const latestScreenshotAt = latestScreenshotByEntry(entries.flatMap((entry) =>
-        entry.screenshots.map((screenshot) => ({ timeEntryId: entry.id, capturedAt: screenshot.capturedAt })),
-      ));
-      const latestHeartbeatAt = new Map<string, Date>();
-      if (runtime?.agentState === 'RUNNING' && runtime.agentActiveEntryId && runtime.agentLastSeenAt) {
-        latestHeartbeatAt.set(runtime.agentActiveEntryId, runtime.agentLastSeenAt);
-      }
-      const loggedTotal = loggedMsByGuid(entries, nowMs, { latestSampleAt, latestScreenshotAt, latestHeartbeatAt });
+      const entries = await prisma.timeEntry.findMany({
+        where: { userId: req.user.sub, larkTaskGuid: { in: guids } },
+        select: {
+          id: true,
+          userId: true,
+          endedAt: true,
+          larkTaskGuid: true,
+          trackingProtocolVersion: true,
+          lastProvenAt: true,
+          leaseExpiresAt: true,
+          segments: { select: { kind: true, startedAt: true, endedAt: true } },
+        },
+      });
+      const evidenceByEntry = await loadEntryLiveEvidence(entries, new Date(nowMs));
+      const loggedTotal = loggedMsByGuid(entries, nowMs, { evidenceByEntry });
       const loggedToday = dayWindow
         ? loggedMsByGuid(entries, nowMs, {
-            latestSampleAt,
-            latestScreenshotAt,
-            latestHeartbeatAt,
+            evidenceByEntry,
             windowStart: dayWindow.start.getTime(),
             windowEnd: dayWindow.end.getTime(),
           })

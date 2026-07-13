@@ -21,7 +21,8 @@ import {
   type TimeInvalidationInput,
 } from '../insights/invalidations';
 import { loadTimeInvalidationsForUsers } from '../insights/timeInvalidations';
-import { latestSampleByEntry, latestScreenshotByEntry, resolveEffectiveSegmentEnd } from '../insights/openSegmentEvidence';
+import { loadEntryLiveEvidence } from '../insights/liveEntryEvidence';
+import { resolveEffectiveEntrySegmentEnds } from '../insights/openSegmentEvidence';
 import {
   CreateApiTokenRequest,
   API_TOKEN_SCOPES,
@@ -702,56 +703,41 @@ async function buildTriageContextByUser(userIds: string[], now: number) {
   // Trailing-30-day TOTAL AUTO + MANUAL tracked ms per user. Heuristic:
   // sum segment durations directly; segment.endedAt may be null for
   // an open entry but we clamp to `now`.
-  const segments = await prisma.timeSegment.findMany({
+  const entries = await prisma.timeEntry.findMany({
     where: {
-      timeEntry: { userId: { in: userIds } },
-      startedAt: { gte: since },
+      userId: { in: userIds },
+      segments: { some: { startedAt: { gte: since } } },
     },
     select: {
-      startedAt: true,
+      id: true,
+      userId: true,
       endedAt: true,
-      timeEntry: {
-        select: {
-          id: true,
-          userId: true,
-          trackingProtocolVersion: true,
-          lastProvenAt: true,
-          leaseExpiresAt: true,
-          screenshots: {
-            where: { deletedAt: null },
-            orderBy: { capturedAt: 'desc' },
-            take: 1,
-            select: { capturedAt: true },
-          },
-        },
+      trackingProtocolVersion: true,
+      lastProvenAt: true,
+      leaseExpiresAt: true,
+      segments: {
+        where: { startedAt: { gte: since } },
+        select: { startedAt: true, endedAt: true },
+        orderBy: { startedAt: 'asc' },
       },
     },
   });
-  const samples = await prisma.activitySample.findMany({
-    where: { userId: { in: userIds }, bucketStart: { gte: since, lte: new Date(now) } },
-    select: { timeEntryId: true, bucketStart: true },
-    orderBy: { bucketStart: 'asc' },
-  });
-  const latestSampleAt = latestSampleByEntry(samples);
-  const latestScreenshotAt = latestScreenshotByEntry(segments.flatMap((segment) =>
-    segment.timeEntry.screenshots.map((screenshot) => ({
-      timeEntryId: segment.timeEntry.id,
-      capturedAt: screenshot.capturedAt,
-    })),
-  ));
+  const nowDate = new Date(now);
+  const evidenceByEntry = await loadEntryLiveEvidence(entries, nowDate);
   const totalByUser = new Map<string, number>();
-  for (const s of segments) {
-    const end = (resolveEffectiveSegmentEnd({
-      startedAt: s.startedAt,
-      endedAt: s.endedAt,
-      now: new Date(now),
-      latestSampleAt: latestSampleAt.get(s.timeEntry.id),
-      latestScreenshotAt: latestScreenshotAt.get(s.timeEntry.id),
-      lifecycle: s.timeEntry,
-    }) ?? new Date(now)).getTime();
-    const dur = Math.max(0, end - s.startedAt.getTime());
-    const uid = s.timeEntry.userId;
-    totalByUser.set(uid, (totalByUser.get(uid) ?? 0) + dur);
+  for (const entry of entries) {
+    const effectiveEnds = resolveEffectiveEntrySegmentEnds({
+      segments: entry.segments,
+      entryEndedAt: entry.endedAt,
+      now: nowDate,
+      evidence: evidenceByEntry.get(entry.id),
+      lifecycle: entry,
+    });
+    for (const [index, segment] of entry.segments.entries()) {
+      const end = (effectiveEnds[index] ?? nowDate).getTime();
+      const dur = Math.max(0, end - segment.startedAt.getTime());
+      totalByUser.set(entry.userId, (totalByUser.get(entry.userId) ?? 0) + dur);
+    }
   }
 
   const out = new Map<string, { avgDailyTotalMs: number; approved: number; rejected: number }>();
@@ -863,59 +849,46 @@ adminRouter.get('/manual-time-requests', requireManagerOrAbove, async (req, res,
       // One segments query per page-load for the pending-day windows.
       const earliestDay = pendingRows.reduce((min, r) => Math.min(min, dayStartMs(r.requestedStart)), Infinity);
       const latestDay = pendingRows.reduce((max, r) => Math.max(max, dayStartMs(r.requestedStart) + 24 * 3_600_000), 0);
-      const segs = await prisma.timeSegment.findMany({
+      const triageEntries = await prisma.timeEntry.findMany({
         where: {
-          timeEntry: { userId: { in: userIds }, source: 'AUTO' },
+          userId: { in: userIds },
+          source: 'AUTO',
           startedAt: { lt: new Date(latestDay) },
           OR: [{ endedAt: null }, { endedAt: { gt: new Date(earliestDay) } }],
         },
         select: {
-          startedAt: true,
+          id: true,
+          userId: true,
           endedAt: true,
-          timeEntry: {
-            select: {
-              id: true,
-              userId: true,
-              trackingProtocolVersion: true,
-              lastProvenAt: true,
-              leaseExpiresAt: true,
-              screenshots: {
-                where: { deletedAt: null },
-                orderBy: { capturedAt: 'desc' },
-                take: 1,
-                select: { capturedAt: true },
-              },
+          trackingProtocolVersion: true,
+          lastProvenAt: true,
+          leaseExpiresAt: true,
+          segments: {
+            where: {
+              startedAt: { lt: new Date(latestDay) },
+              OR: [{ endedAt: null }, { endedAt: { gt: new Date(earliestDay) } }],
             },
+            select: { startedAt: true, endedAt: true },
+            orderBy: { startedAt: 'asc' },
           },
         },
       });
-      const triageSamples = await prisma.activitySample.findMany({
-        where: {
-          userId: { in: userIds },
-          bucketStart: { gte: new Date(earliestDay), lt: new Date(latestDay) },
-        },
-        select: { timeEntryId: true, bucketStart: true },
-        orderBy: { bucketStart: 'asc' },
+      const triageNow = new Date(now);
+      const triageEvidence = await loadEntryLiveEvidence(triageEntries, triageNow);
+      const segLite = triageEntries.flatMap((entry) => {
+        const effectiveEnds = resolveEffectiveEntrySegmentEnds({
+          segments: entry.segments,
+          entryEndedAt: entry.endedAt,
+          now: triageNow,
+          evidence: triageEvidence.get(entry.id),
+          lifecycle: entry,
+        });
+        return entry.segments.map((segment, index) => ({
+          startedAt: segment.startedAt.getTime(),
+          endedAt: (effectiveEnds[index] ?? triageNow).getTime(),
+          userId: entry.userId,
+        }));
       });
-      const latestTriageSampleAt = latestSampleByEntry(triageSamples);
-      const latestTriageScreenshotAt = latestScreenshotByEntry(segs.flatMap((segment) =>
-        segment.timeEntry.screenshots.map((screenshot) => ({
-          timeEntryId: segment.timeEntry.id,
-          capturedAt: screenshot.capturedAt,
-        })),
-      ));
-      const segLite = segs.map((s) => ({
-        startedAt: s.startedAt.getTime(),
-        endedAt: (resolveEffectiveSegmentEnd({
-          startedAt: s.startedAt,
-          endedAt: s.endedAt,
-          now: new Date(now),
-          latestSampleAt: latestTriageSampleAt.get(s.timeEntry.id),
-          latestScreenshotAt: latestTriageScreenshotAt.get(s.timeEntry.id),
-          lifecycle: s.timeEntry,
-        }) ?? new Date(now)).getTime(),
-        userId: s.timeEntry.userId,
-      }));
 
       triageByRequest = new Map<string, TriageResult>();
       for (const r of pendingRows) {
@@ -1080,55 +1053,36 @@ async function loadTimesheetData(scope: { userIds: string[] }, range: ResolvedTi
   const lookbackEnd = new Date(`${range.to}T00:00:00Z`);
   lookbackEnd.setUTCDate(lookbackEnd.getUTCDate() + 2);
 
-  const [entries, invalidations, activitySamples] = await Promise.all([
+  const [entries, invalidations] = await Promise.all([
     prisma.timeEntry.findMany({
       where: {
         userId: { in: scope.userIds },
         startedAt: { lt: lookbackEnd },
         OR: [{ endedAt: null }, { endedAt: { gt: lookbackStart } }],
       },
-      include: {
-        segments: { select: { kind: true, startedAt: true, endedAt: true } },
-        screenshots: {
-          where: { deletedAt: null },
-          orderBy: { capturedAt: 'desc' },
-          take: 1,
-          select: { capturedAt: true },
-        },
-      },
+      include: { segments: { select: { kind: true, startedAt: true, endedAt: true } } },
     }),
     loadTimeInvalidationsForUsers(scope.userIds, lookbackStart, lookbackEnd),
-    prisma.activitySample.findMany({
-      where: {
-        userId: { in: scope.userIds },
-        bucketStart: { gte: lookbackStart, lt: lookbackEnd },
-      },
-      select: { timeEntryId: true, bucketStart: true },
-      orderBy: { bucketStart: 'asc' },
-    }),
   ]);
 
   const now = new Date();
-  const latestTimesheetSampleAt = latestSampleByEntry(activitySamples);
-  const latestTimesheetScreenshotAt = latestScreenshotByEntry(entries.flatMap((entry) =>
-    entry.screenshots.map((screenshot) => ({ timeEntryId: entry.id, capturedAt: screenshot.capturedAt })),
-  ));
+  const evidenceByEntry = await loadEntryLiveEvidence(entries, now);
   const segs: TimesheetSegmentInput[] = [];
   for (const e of entries) {
-    for (const s of e.segments) {
+    const effectiveEnds = resolveEffectiveEntrySegmentEnds({
+      segments: e.segments,
+      entryEndedAt: e.endedAt,
+      now,
+      evidence: evidenceByEntry.get(e.id),
+      lifecycle: e,
+    });
+    for (const [index, s] of e.segments.entries()) {
       segs.push({
         userId: e.userId,
         source: e.source as 'AUTO' | 'MANUAL',
         segmentKind: s.kind as 'WORK' | 'MEETING' | 'IDLE_TRIMMED',
         startedAt: s.startedAt.getTime(),
-        endedAt: (resolveEffectiveSegmentEnd({
-          startedAt: s.startedAt,
-          endedAt: s.endedAt,
-          now,
-          latestSampleAt: latestTimesheetSampleAt.get(e.id),
-          latestScreenshotAt: latestTimesheetScreenshotAt.get(e.id),
-          lifecycle: e,
-        }) ?? now).getTime(),
+        endedAt: (effectiveEnds[index] ?? now).getTime(),
       });
     }
   }
@@ -2143,6 +2097,7 @@ async function calculateInvalidatedMsForWindow(
   windowStart: Date,
   windowEnd: Date,
 ): Promise<number> {
+  const now = new Date();
   const rows = await db.timeEntry.findMany({
     where: {
       userId,
@@ -2150,9 +2105,19 @@ async function calculateInvalidatedMsForWindow(
       OR: [{ endedAt: null }, { endedAt: { gt: windowStart } }],
     },
     select: {
-      segments: { select: { kind: true, startedAt: true, endedAt: true } },
+      id: true,
+      userId: true,
+      endedAt: true,
+      trackingProtocolVersion: true,
+      lastProvenAt: true,
+      leaseExpiresAt: true,
+      segments: {
+        select: { kind: true, startedAt: true, endedAt: true },
+        orderBy: { startedAt: 'asc' },
+      },
     },
   });
+  const evidenceByEntry = await loadEntryLiveEvidence(rows, now);
   const grouped = groupInvalidationsByUser([
     {
       userId,
@@ -2162,9 +2127,16 @@ async function calculateInvalidatedMsForWindow(
   ]);
   let total = 0;
   for (const row of rows) {
-    for (const s of row.segments) {
+    const effectiveEnds = resolveEffectiveEntrySegmentEnds({
+      segments: row.segments,
+      entryEndedAt: row.endedAt,
+      now,
+      evidence: evidenceByEntry.get(row.id),
+      lifecycle: row,
+    });
+    for (const [index, s] of row.segments.entries()) {
       if (s.kind === 'IDLE_TRIMMED') continue;
-      const endedAt = s.endedAt ?? windowEnd;
+      const endedAt = effectiveEnds[index] ?? now;
       total += invalidatedOverlapMs(grouped, userId, s.startedAt.getTime(), endedAt.getTime());
     }
   }

@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { prisma } from '@grind/db';
 import { buildTesterUsageSnapshot } from './usage';
+import { loadEntryLiveEvidence } from '../insights/liveEntryEvidence';
+import { loggedMsByGuid } from '../lark/tasks';
 
 let counter = 0;
 
@@ -30,6 +32,7 @@ async function createEntry(args: {
   trackingProtocolVersion?: number;
   lastProvenAt?: string;
   leaseExpiresAt?: string;
+  larkTaskGuid?: string;
   segments: Array<{
     id: string;
     kind?: 'WORK' | 'MEETING' | 'IDLE_TRIMMED';
@@ -43,6 +46,7 @@ async function createEntry(args: {
       clientUuid: `${args.id}-client`,
       userId: args.userId,
       source: 'AUTO',
+      larkTaskGuid: args.larkTaskGuid,
       startedAt: new Date(args.startedAt),
       endedAt: args.endedAt === undefined || args.endedAt === null ? null : new Date(args.endedAt),
       trackingProtocolVersion: args.trackingProtocolVersion,
@@ -145,5 +149,37 @@ describe('buildTesterUsageSnapshot', () => {
 
     const snapshot = await buildTesterUsageSnapshot(workspace.id, 'Asia/Kolkata');
     expect(snapshot.testers[0]?.trackedMinutes).toBe(10);
+  });
+
+  it('keeps heartbeat-only Tester Ops and Lark totals identical', async () => {
+    vi.useFakeTimers();
+    const now = new Date('2026-07-10T09:34:00.000Z');
+    vi.setSystemTime(now);
+    const { workspace, user } = await seedTester('Heartbeat parity');
+    const entry = await createEntry({
+      userId: user.id,
+      id: 'heartbeat-parity-entry',
+      larkTaskGuid: 'heartbeat-task',
+      startedAt: '2026-07-10T09:20:00.000Z',
+      segments: [{ id: 'heartbeat-parity-segment', startedAt: '2026-07-10T09:20:00.000Z' }],
+    });
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        agentState: 'RUNNING',
+        agentActiveEntryId: entry.id,
+        agentLastSeenAt: new Date('2026-07-10T09:33:00.000Z'),
+      },
+    });
+
+    const snapshot = await buildTesterUsageSnapshot(workspace.id, 'UTC');
+    const evidenceByEntry = await loadEntryLiveEvidence([entry], now);
+    const larkTotal = loggedMsByGuid([{
+      ...entry,
+      segments: [{ kind: 'WORK', startedAt: entry.startedAt, endedAt: null }],
+    }], now.getTime(), { evidenceByEntry });
+
+    expect(snapshot.testers[0]?.trackedMinutes).toBe(14);
+    expect(larkTotal.get('heartbeat-task')).toBe(14 * 60_000);
   });
 });

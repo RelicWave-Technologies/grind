@@ -1,5 +1,6 @@
 import { getLarkConfig } from './config';
-import { resolveEffectiveSegmentEnd } from '../insights/openSegmentEvidence';
+import { resolveEffectiveEntrySegmentEnds } from '../insights/openSegmentEvidence';
+import type { EntryLiveEvidenceMap } from '../insights/liveEntryEvidence';
 
 /**
  * Lark Task v2 — fetch the signed-in user's tasks for the agent's task picker.
@@ -131,6 +132,7 @@ export function loggedMsByGuid(
   entries: Array<{
     id?: string;
     larkTaskGuid: string | null;
+    endedAt?: Date | null;
     trackingProtocolVersion?: number | null;
     lastProvenAt?: Date | null;
     leaseExpiresAt?: Date | null;
@@ -140,9 +142,7 @@ export function loggedMsByGuid(
   options: {
     windowStart?: number;
     windowEnd?: number;
-    latestSampleAt?: Map<string, Date>;
-    latestScreenshotAt?: Map<string, Date>;
-    latestHeartbeatAt?: Map<string, Date>;
+    evidenceByEntry?: EntryLiveEvidenceMap;
   } = {},
 ): Map<string, number> {
   const out = new Map<string, number>();
@@ -152,17 +152,16 @@ export function loggedMsByGuid(
   for (const e of entries) {
     if (!e.larkTaskGuid) continue;
     let ms = 0;
-    for (const s of e.segments) {
+    const effectiveEnds = resolveEffectiveEntrySegmentEnds({
+      segments: e.segments,
+      entryEndedAt: e.endedAt,
+      now: nowDate,
+      evidence: e.id ? options.evidenceByEntry?.get(e.id) : null,
+      lifecycle: e,
+    });
+    for (const [index, s] of e.segments.entries()) {
       if (s.kind === 'WORK' || s.kind === 'MEETING') {
-        const capped = resolveEffectiveSegmentEnd({
-          startedAt: s.startedAt,
-          endedAt: s.endedAt,
-          now: nowDate,
-          latestSampleAt: e.id ? options.latestSampleAt?.get(e.id) : null,
-          latestScreenshotAt: e.id ? options.latestScreenshotAt?.get(e.id) : null,
-          latestHeartbeatAt: e.id ? options.latestHeartbeatAt?.get(e.id) : null,
-          lifecycle: e,
-        });
+        const capped = effectiveEnds[index];
         const rawEnd = capped ? capped.getTime() : now;
         const start = Math.max(s.startedAt.getTime(), windowStart);
         const end = Math.min(rawEnd, windowEnd);

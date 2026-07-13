@@ -30,6 +30,7 @@ import type { IconResolver } from '../reports/member';
 import { loadTimeInvalidationsForUsers } from '../insights/timeInvalidations';
 import type { TimeInvalidationInput } from '../insights/invalidations';
 import type { RoleTitle } from '../scoring/presets';
+import { loadEntryLiveEvidence, type EntryLiveEvidenceMap } from '../insights/liveEntryEvidence';
 
 export const reportsRouter = Router();
 reportsRouter.use(requireAccessToken, attachScope, requireCapability('reports.self.read'));
@@ -49,7 +50,8 @@ reportsRouter.get('/me', async (req, res, next) => {
     const range = resolveReportRange(req.query as Record<string, unknown>);
     if ('error' in range) return res.status(range.status).json({ error: range.error, ...(range.extras ?? {}) });
 
-    const data = await loadReportData(req.user.sub, range);
+    const now = new Date();
+    const data = await loadReportData(req.user.sub, range, now);
     const iconFor = await iconForSamples(data.samples);
     const response: MemberReportsMeResponse = {
       from: range.from,
@@ -58,11 +60,12 @@ reportsRouter.get('/me', async (req, res, next) => {
       days: buildMemberReportDays({
         userId: req.user.sub,
         range,
-        now: new Date(),
+        now,
         entries: data.entries,
         manualRequests: data.manualRequests,
         samples: data.samples,
         screenshots: data.screenshots,
+        evidenceByEntry: data.evidenceByEntry,
         shiftAssignments: data.shiftAssignments,
         invalidations: data.invalidations,
         activityRoleTitle: data.activityRoleTitle,
@@ -122,10 +125,10 @@ reportsRouter.get('/team', requireCapability('reports.team.read'), async (req, r
       teamName: user.teamName,
     }));
 
-    const reportData = await loadTeamReportData(reportUsers.map((u) => u.id), range);
+    const now = new Date();
+    const reportData = await loadTeamReportData(reportUsers.map((u) => u.id), range, now);
     const iconFor = await iconForSamples([...reportData.values()].flatMap((d) => d.samples));
     const daysByUser = new Map<string, ReturnType<typeof buildMemberReportDays>>();
-    const now = new Date();
     for (const user of reportUsersWithRole) {
       const data = reportData.get(user.id) ?? emptyTeamReportData();
       daysByUser.set(user.id, buildMemberReportDays({
@@ -136,6 +139,7 @@ reportsRouter.get('/team', requireCapability('reports.team.read'), async (req, r
         manualRequests: data.manualRequests,
         samples: data.samples,
         screenshots: data.screenshots,
+        evidenceByEntry: data.evidenceByEntry,
         shiftAssignments: data.shiftAssignments,
         invalidations: data.invalidations,
         activityRoleTitle: user.activityRoleTitle,
@@ -158,9 +162,10 @@ reportsRouter.get('/team/member', requireCapability('reports.team.read'), async 
     const range = resolveReportRange(req.query as Record<string, unknown>);
     if ('error' in range) return res.status(range.status).json({ error: range.error, ...(range.extras ?? {}) });
 
+    const now = new Date();
     const [profile, reportData, approvals] = await Promise.all([
       loadProfileForUser(target.user.id, req.user.ws),
-      loadTeamReportData([target.user.id], range),
+      loadTeamReportData([target.user.id], range, now),
       loadManualRequestsForUser(target.user.id, range),
     ]);
     if (!profile) return res.status(404).json({ error: 'user_not_found' });
@@ -171,11 +176,12 @@ reportsRouter.get('/team/member', requireCapability('reports.team.read'), async 
     const days = buildMemberReportDays({
       userId: target.user.id,
       range,
-      now: new Date(),
+      now,
       entries: data.entries,
       manualRequests: data.manualRequests,
       samples: data.samples,
       screenshots: data.screenshots,
+      evidenceByEntry: data.evidenceByEntry,
       shiftAssignments: data.shiftAssignments,
       invalidations: data.invalidations,
       activityRoleTitle: target.user.activityRoleTitle,
@@ -235,7 +241,8 @@ reportsRouter.get('/team/member/day-screenshots', requireCapability('reports.tea
     if (!target.ok) return res.status(target.status).json({ error: target.error });
     const range = resolveSingleReportDay(req.query as Record<string, unknown>);
     if ('error' in range) return res.status(range.status).json({ error: range.error, ...(range.extras ?? {}) });
-    const reportData = await loadTeamReportData([target.user.id], range);
+    const now = new Date();
+    const reportData = await loadTeamReportData([target.user.id], range, now);
     const data = reportData.get(target.user.id) ?? emptyTeamReportData();
     const response: MemberReportDayScreenshotsResponse = buildMemberReportScreenshots({
       userId: target.user.id,
@@ -243,6 +250,8 @@ reportsRouter.get('/team/member/day-screenshots', requireCapability('reports.tea
       samples: data.samples,
       screenshots: data.screenshots,
       entries: data.entries,
+      evidenceByEntry: data.evidenceByEntry,
+      now,
       invalidations: data.invalidations,
       activityRoleTitle: target.user.activityRoleTitle,
       toUrl: screenshotUrl,
@@ -401,13 +410,16 @@ reportsRouter.get('/me/day-screenshots', async (req, res, next) => {
     if (!req.user) return res.status(401).json({ error: 'unauthorized' });
     const range = resolveSingleReportDay(req.query as Record<string, unknown>);
     if ('error' in range) return res.status(range.status).json({ error: range.error, ...(range.extras ?? {}) });
-    const data = await loadReportData(req.user.sub, range);
+    const now = new Date();
+    const data = await loadReportData(req.user.sub, range, now);
     const response: MemberReportDayScreenshotsResponse = buildMemberReportScreenshots({
       userId: req.user.sub,
       range,
       samples: data.samples,
       screenshots: data.screenshots,
       entries: data.entries,
+      evidenceByEntry: data.evidenceByEntry,
+      now,
       invalidations: data.invalidations,
       activityRoleTitle: data.activityRoleTitle,
       toUrl: screenshotUrl,
@@ -418,7 +430,7 @@ reportsRouter.get('/me/day-screenshots', async (req, res, next) => {
   }
 });
 
-async function loadReportData(userId: string, range: ReportRange) {
+async function loadReportData(userId: string, range: ReportRange, now = new Date()) {
   const [user, entries, manualRequests, samples, screenshots, shiftAssignments, invalidations] = await Promise.all([
     prisma.user.findUnique({
       where: { id: userId },
@@ -436,6 +448,7 @@ async function loadReportData(userId: string, range: ReportRange) {
         source: true,
         larkTaskGuid: true,
         notes: true,
+        endedAt: true,
         trackingProtocolVersion: true,
         lastProvenAt: true,
         leaseExpiresAt: true,
@@ -485,6 +498,7 @@ async function loadReportData(userId: string, range: ReportRange) {
     }),
     loadTimeInvalidationsForUsers([userId], range.rangeStart, range.rangeEnd),
   ]);
+  const evidenceByEntry = await loadEntryLiveEvidence(entries, now);
   return {
     activityRoleTitle: (user?.activityRoleTitle ?? 'OTHER') as RoleTitle,
     entries: entries.map((e) => ({
@@ -498,6 +512,7 @@ async function loadReportData(userId: string, range: ReportRange) {
     manualRequests,
     samples,
     screenshots,
+    evidenceByEntry,
     shiftAssignments,
     invalidations,
   };
@@ -510,6 +525,7 @@ interface TeamReportDataBucket {
   screenshots: ReportScreenshotRow[];
   shiftAssignments: ReportShiftAssignment[];
   invalidations: TimeInvalidationInput[];
+  evidenceByEntry: EntryLiveEvidenceMap;
 }
 
 function emptyTeamReportData(): TeamReportDataBucket {
@@ -520,10 +536,15 @@ function emptyTeamReportData(): TeamReportDataBucket {
     screenshots: [],
     shiftAssignments: [],
     invalidations: [],
+    evidenceByEntry: new Map(),
   };
 }
 
-async function loadTeamReportData(userIds: string[], range: ReportRange): Promise<Map<string, TeamReportDataBucket>> {
+async function loadTeamReportData(
+  userIds: string[],
+  range: ReportRange,
+  now = new Date(),
+): Promise<Map<string, TeamReportDataBucket>> {
   const grouped = new Map<string, TeamReportDataBucket>();
   for (const userId of userIds) grouped.set(userId, emptyTeamReportData());
   if (userIds.length === 0) return grouped;
@@ -541,6 +562,7 @@ async function loadTeamReportData(userIds: string[], range: ReportRange): Promis
         source: true,
         larkTaskGuid: true,
         notes: true,
+        endedAt: true,
         trackingProtocolVersion: true,
         lastProvenAt: true,
         leaseExpiresAt: true,
@@ -634,6 +656,8 @@ async function loadTeamReportData(userIds: string[], range: ReportRange): Promis
     loadTimeInvalidationsForUsers(userIds, range.rangeStart, range.rangeEnd),
   ]);
 
+  const evidenceByEntry = await loadEntryLiveEvidence(entries, now);
+  for (const bucket of grouped.values()) bucket.evidenceByEntry = evidenceByEntry;
   for (const entry of entries) {
     grouped.get(entry.userId)?.entries.push({
       ...entry,

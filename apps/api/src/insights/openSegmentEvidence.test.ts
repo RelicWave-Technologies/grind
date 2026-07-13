@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveEffectiveSegmentEnd } from './openSegmentEvidence';
+import { resolveEffectiveEntrySegmentEnds, resolveEffectiveSegmentEnd } from './openSegmentEvidence';
 
 const now = new Date('2026-07-11T10:00:00.000Z');
 const startedAt = new Date('2026-07-11T09:00:00.000Z');
@@ -31,12 +31,15 @@ describe('resolveEffectiveSegmentEnd', () => {
     })?.toISOString()).toBe('2026-07-11T09:56:00.000Z');
   });
 
-  it('retains activity-sample fallback for legacy entries', () => {
+  it('caps a legacy entry at its latest server-bounded stored proof', () => {
     expect(resolveEffectiveSegmentEnd({
       startedAt,
       endedAt: null,
       now,
-      latestSampleAt: new Date('2026-07-11T09:30:00.000Z'),
+      evidence: {
+        latestStoredProofAt: new Date('2026-07-11T09:31:00.000Z'),
+        latestHeartbeatAt: null,
+      },
     })?.toISOString()).toBe('2026-07-11T09:31:00.000Z');
   });
 
@@ -45,7 +48,10 @@ describe('resolveEffectiveSegmentEnd', () => {
       startedAt,
       endedAt: null,
       now,
-      latestScreenshotAt: new Date('2026-07-11T09:58:00.000Z'),
+      evidence: {
+        latestStoredProofAt: new Date('2026-07-11T09:58:00.000Z'),
+        latestHeartbeatAt: null,
+      },
     })?.toISOString()).toBe('2026-07-11T09:58:00.000Z');
   });
 
@@ -54,7 +60,10 @@ describe('resolveEffectiveSegmentEnd', () => {
       startedAt,
       endedAt: null,
       now,
-      latestScreenshotAt: new Date('2026-07-11T09:42:00.000Z'),
+      evidence: {
+        latestStoredProofAt: new Date('2026-07-11T09:42:00.000Z'),
+        latestHeartbeatAt: null,
+      },
     })?.toISOString()).toBe('2026-07-11T09:42:00.000Z');
   });
 
@@ -63,7 +72,44 @@ describe('resolveEffectiveSegmentEnd', () => {
       startedAt,
       endedAt: null,
       now,
-      latestHeartbeatAt: new Date('2026-07-11T09:59:00.000Z'),
+      evidence: {
+        latestStoredProofAt: null,
+        latestHeartbeatAt: new Date('2026-07-11T09:59:00.000Z'),
+      },
     })).toBeNull();
+  });
+
+  it('does not treat a heartbeat older than three minutes as live', () => {
+    expect(resolveEffectiveSegmentEnd({
+      startedAt,
+      endedAt: null,
+      now,
+      evidence: {
+        latestStoredProofAt: null,
+        latestHeartbeatAt: new Date('2026-07-11T09:56:59.000Z'),
+      },
+    })?.toISOString()).toBe('2026-07-11T09:56:59.000Z');
+  });
+});
+
+describe('resolveEffectiveEntrySegmentEnds', () => {
+  it('applies entry proof only to the final open segment', () => {
+    const segments = [
+      { startedAt, endedAt: null },
+      { startedAt: new Date('2026-07-11T09:30:00.000Z'), endedAt: null },
+    ];
+    const ends = resolveEffectiveEntrySegmentEnds({
+      segments,
+      now,
+      evidence: {
+        latestStoredProofAt: new Date('2026-07-11T09:50:00.000Z'),
+        latestHeartbeatAt: null,
+      },
+    });
+
+    expect(ends.map((end) => end?.toISOString())).toEqual([
+      '2026-07-11T09:30:00.000Z',
+      '2026-07-11T09:50:00.000Z',
+    ]);
   });
 });

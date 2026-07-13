@@ -3,7 +3,8 @@ import { prisma } from '@grind/db';
 import { requireAccessToken } from '../middleware/auth';
 import { attachScope, requireManagerOrAbove } from '../middleware/scope';
 import { localDayWindow } from '../insights/day';
-import { latestSampleByEntry, latestScreenshotByEntry, resolveEffectiveSegmentEnd } from '../insights/openSegmentEvidence';
+import { heartbeatIsFresh, loadEntryLiveEvidence } from '../insights/liveEntryEvidence';
+import { resolveEffectiveEntrySegmentEnds } from '../insights/openSegmentEvidence';
 import { DEFAULT_STUCK_THRESHOLD_MS } from '../digests/pendingDigest';
 
 /**
@@ -21,7 +22,6 @@ export const overviewRouter = Router();
 overviewRouter.use(requireAccessToken, attachScope, requireManagerOrAbove);
 
 const HOUR = 60 * 60 * 1000;
-const AGENT_HEARTBEAT_FRESH_MS = 3 * 60 * 1000;
 
 interface OverviewRecentItem {
   id: string;
@@ -92,103 +92,66 @@ overviewRouter.get('/', async (req, res, next) => {
     if (!win) return res.status(400).json({ error: 'invalid_tz' });
 
     const userIds = req.scope.userIds;
-    const ws = req.scope.workspaceId;
 
     // --- Today's totals (per-user totalMs threshold for "active") --------
-    const segs = userIds.length === 0
+    const entries = userIds.length === 0
       ? []
-      : await prisma.timeSegment.findMany({
+      : await prisma.timeEntry.findMany({
           where: {
+            userId: { in: userIds },
             startedAt: { lt: win.end },
             OR: [{ endedAt: null }, { endedAt: { gt: win.start } }],
-            timeEntry: { userId: { in: userIds } },
           },
           select: {
-            kind: true,
+            id: true,
+            userId: true,
+            source: true,
             startedAt: true,
             endedAt: true,
-            timeEntry: {
-              select: {
-                id: true,
-                userId: true,
-                source: true,
-                trackingProtocolVersion: true,
-                lastProvenAt: true,
-                leaseExpiresAt: true,
-                screenshots: {
-                  where: { deletedAt: null },
-                  orderBy: { capturedAt: 'desc' },
-                  take: 1,
-                  select: { capturedAt: true },
-                },
+            trackingProtocolVersion: true,
+            lastProvenAt: true,
+            leaseExpiresAt: true,
+            segments: {
+              where: {
+                startedAt: { lt: win.end },
+                OR: [{ endedAt: null }, { endedAt: { gt: win.start } }],
               },
+              select: { kind: true, startedAt: true, endedAt: true },
+              orderBy: { startedAt: 'asc' },
             },
           },
         });
-    const activitySamples = userIds.length === 0
-      ? []
-      : await prisma.activitySample.findMany({
-          where: {
-            userId: { in: userIds },
-            bucketStart: { gte: win.start, lt: win.end },
-          },
-          select: { timeEntryId: true, bucketStart: true },
-          orderBy: { bucketStart: 'asc' },
-        });
-    const latestSampleAt = latestSampleByEntry(activitySamples);
-    const liveHeartbeatRows = userIds.length === 0
-      ? []
-      : await prisma.user.findMany({
-          where: {
-            id: { in: userIds },
-            workspaceId: ws,
-            deactivatedAt: null,
-            agentState: 'RUNNING',
-            agentLastSeenAt: { gte: new Date(now.getTime() - AGENT_HEARTBEAT_FRESH_MS) },
-          },
-          select: { id: true, agentActiveEntryId: true, agentLastSeenAt: true },
-        });
+    const evidenceByEntry = await loadEntryLiveEvidence(entries, now);
 
     const dayStart = win.start.getTime();
     const dayEnd = win.end.getTime();
     const liveCap = Math.min(dayEnd, now.getTime());
-    const latestScreenshotAt = latestScreenshotByEntry(segs.flatMap((segment) =>
-      segment.timeEntry.screenshots.map((screenshot) => ({
-        timeEntryId: segment.timeEntry.id,
-        capturedAt: screenshot.capturedAt,
-      })),
-    ));
-    const latestHeartbeatAt = new Map(
-      liveHeartbeatRows.flatMap((user) =>
-        user.agentActiveEntryId && user.agentLastSeenAt
-          ? [[user.agentActiveEntryId, user.agentLastSeenAt] as const]
-          : [],
-      ),
-    );
     let workedMs = 0;
     let meetingMs = 0;
     let manualMs = 0;
     const usersWithTime = new Set<string>();
-    const usersTrackingNow = new Set(liveHeartbeatRows.map((u) => u.id));
-    for (const s of segs) {
-      const a = Math.max(dayStart, s.startedAt.getTime());
-      const effectiveEndedAt = resolveEffectiveSegmentEnd({
-        startedAt: s.startedAt,
-        endedAt: s.endedAt,
+    const usersTrackingNow = new Set<string>();
+    for (const entry of entries) {
+      const evidence = evidenceByEntry.get(entry.id);
+      if (heartbeatIsFresh(evidence, now, entry.startedAt)) usersTrackingNow.add(entry.userId);
+      const effectiveEnds = resolveEffectiveEntrySegmentEnds({
+        segments: entry.segments,
+        entryEndedAt: entry.endedAt,
         now,
-        latestSampleAt: latestSampleAt.get(s.timeEntry.id),
-        latestScreenshotAt: latestScreenshotAt.get(s.timeEntry.id),
-        latestHeartbeatAt: latestHeartbeatAt.get(s.timeEntry.id),
-        lifecycle: s.timeEntry,
+        evidence,
+        lifecycle: entry,
       });
-      const b = Math.min(liveCap, (effectiveEndedAt ?? new Date(liveCap)).getTime());
-      const dur = b - a;
-      if (dur <= 0) continue;
-      usersWithTime.add(s.timeEntry.userId);
-      if (s.timeEntry.source === 'MANUAL') manualMs += dur;
-      else if (s.kind === 'MEETING') meetingMs += dur;
-      else if (s.kind === 'WORK') workedMs += dur;
-      // IDLE_TRIMMED never counts toward billed time.
+      for (const [index, segment] of entry.segments.entries()) {
+        const a = Math.max(dayStart, segment.startedAt.getTime());
+        const b = Math.min(liveCap, (effectiveEnds[index] ?? new Date(liveCap)).getTime());
+        const dur = b - a;
+        if (dur <= 0) continue;
+        usersWithTime.add(entry.userId);
+        if (entry.source === 'MANUAL') manualMs += dur;
+        else if (segment.kind === 'MEETING') meetingMs += dur;
+        else if (segment.kind === 'WORK') workedMs += dur;
+        // IDLE_TRIMMED never counts toward billed time.
+      }
     }
 
     // --- Pending approvals (scoped) --------------------------------------

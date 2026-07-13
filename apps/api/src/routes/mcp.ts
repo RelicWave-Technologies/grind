@@ -5,13 +5,17 @@ import { requireApiToken } from '../middleware/apiToken';
 import { buildTimesheetMatrix, dateRange, type TimesheetSegmentInput } from '../insights/timesheets';
 import { localDayWindow } from '../insights/day';
 import { loadTimeInvalidationsForUsers } from '../insights/timeInvalidations';
-import { latestSampleByEntry, latestScreenshotByEntry, resolveEffectiveSegmentEnd } from '../insights/openSegmentEvidence';
+import {
+  LIVE_HEARTBEAT_FRESH_MS,
+  loadEntryLiveEvidence,
+  type EntryLiveEvidenceMap,
+} from '../insights/liveEntryEvidence';
+import { resolveEffectiveEntrySegmentEnds } from '../insights/openSegmentEvidence';
 
 export const mcpRouter = Router();
 
 const MAX_LIMIT = 200;
 const MAX_SUMMARY_DAYS = 31;
-const HEARTBEAT_FRESH_MS = 3 * 60 * 1000;
 
 const DateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const TimezoneSchema = z.string().trim().min(1).max(80).default('UTC');
@@ -232,12 +236,6 @@ async function loadTimeMatrixForUsers(userIds: string[], range: ValidRange) {
           trackingProtocolVersion: true,
           lastProvenAt: true,
           leaseExpiresAt: true,
-          screenshots: {
-            where: { deletedAt: null },
-            orderBy: { capturedAt: 'desc' },
-            take: 1,
-            select: { capturedAt: true },
-          },
           segments: {
             select: { kind: true, startedAt: true, endedAt: true },
             orderBy: { startedAt: 'asc' },
@@ -246,37 +244,24 @@ async function loadTimeMatrixForUsers(userIds: string[], range: ValidRange) {
         orderBy: { startedAt: 'asc' },
       });
 
-  const activitySamples = userIds.length === 0
-    ? []
-    : await prisma.activitySample.findMany({
-        where: {
-          userId: { in: userIds },
-          bucketStart: { gte: range.fromWindow.start, lt: range.toWindow.end },
-        },
-        select: { timeEntryId: true, bucketStart: true },
-        orderBy: { bucketStart: 'asc' },
-      });
   const now = new Date();
-  const latestSampleAt = latestSampleByEntry(activitySamples);
-  const latestScreenshotAt = latestScreenshotByEntry(entries.flatMap((entry) =>
-    entry.screenshots.map((screenshot) => ({ timeEntryId: entry.id, capturedAt: screenshot.capturedAt })),
-  ));
-  const segments: TimesheetSegmentInput[] = entries.flatMap((entry) =>
-    entry.segments.map((segment) => ({
+  const evidenceByEntry = await loadEntryLiveEvidence(entries, now);
+  const segments: TimesheetSegmentInput[] = entries.flatMap((entry) => {
+    const effectiveEnds = resolveEffectiveEntrySegmentEnds({
+      segments: entry.segments,
+      entryEndedAt: entry.endedAt,
+      now,
+      evidence: evidenceByEntry.get(entry.id),
+      lifecycle: entry,
+    });
+    return entry.segments.map((segment, index) => ({
       userId: entry.userId,
       source: entry.source,
       segmentKind: segment.kind,
       startedAt: segment.startedAt.getTime(),
-      endedAt: (resolveEffectiveSegmentEnd({
-        startedAt: segment.startedAt,
-        endedAt: segment.endedAt ?? entry.endedAt,
-        now,
-        latestSampleAt: latestSampleAt.get(entry.id),
-        latestScreenshotAt: latestScreenshotAt.get(entry.id),
-        lifecycle: entry,
-      }) ?? now).getTime(),
-    })),
-  );
+      endedAt: (effectiveEnds[index] ?? now).getTime(),
+    }));
+  });
   const invalidations = await loadTimeInvalidationsForUsers(userIds, range.fromWindow.start, range.toWindow.end);
   return buildTimesheetMatrix({
     from: range.from,
@@ -448,7 +433,6 @@ function buildBreakSummaryForDay(input: {
     trackingProtocolVersion: number | null;
     lastProvenAt: Date | null;
     leaseExpiresAt: Date | null;
-    screenshots: Array<{ capturedAt: Date }>;
     manualTimeRequest: {
       id: string;
       taskSummary: string | null;
@@ -479,8 +463,7 @@ function buildBreakSummaryForDay(input: {
     decisionSource: string | null;
     autoApproved: boolean;
   }>;
-  latestSampleAt?: Map<string, Date>;
-  latestScreenshotAt?: Map<string, Date>;
+  evidenceByEntry?: EntryLiveEvidenceMap;
   now: Date;
 }) {
   const nowMs = input.now.getTime();
@@ -488,16 +471,16 @@ function buildBreakSummaryForDay(input: {
   const idleIntervals: Array<{ start: number; end: number }> = [];
 
   for (const entry of input.entries) {
-    for (const segment of entry.segments) {
+    const effectiveEnds = resolveEffectiveEntrySegmentEnds({
+      segments: entry.segments,
+      entryEndedAt: entry.endedAt,
+      now: input.now,
+      evidence: input.evidenceByEntry?.get(entry.id),
+      lifecycle: entry,
+    });
+    for (const [index, segment] of entry.segments.entries()) {
       const rawStart = segment.startedAt.getTime();
-      const rawEnd = (resolveEffectiveSegmentEnd({
-        startedAt: segment.startedAt,
-        endedAt: segment.endedAt ?? entry.endedAt,
-        now: input.now,
-        latestSampleAt: input.latestSampleAt?.get(entry.id),
-        latestScreenshotAt: input.latestScreenshotAt?.get(entry.id),
-        lifecycle: entry,
-      }) ?? input.now).getTime();
+      const rawEnd = (effectiveEnds[index] ?? input.now).getTime();
       if (!overlapsMs(rawStart, rawEnd, input.dayStart, input.dayEnd)) continue;
       const clipped = clipMs(rawStart, rawEnd, input.dayStart, Math.min(input.dayEnd, nowMs));
       if (!clipped) continue;
@@ -624,7 +607,7 @@ function isBadStatus(value: string | null): boolean {
 function serializeDevice(user: DeviceFields, now = new Date()) {
   const lastSeenMs = user.agentLastSeenAt?.getTime() ?? null;
   const heartbeatAgeMs = lastSeenMs === null ? null : Math.max(0, now.getTime() - lastSeenMs);
-  const heartbeatFresh = heartbeatAgeMs !== null && heartbeatAgeMs <= HEARTBEAT_FRESH_MS;
+  const heartbeatFresh = heartbeatAgeMs !== null && heartbeatAgeMs <= LIVE_HEARTBEAT_FRESH_MS;
   const running = user.agentState === 'RUNNING' && heartbeatFresh;
   const stale = user.agentLastSeenAt !== null && !heartbeatFresh;
   const screenIssue =
@@ -653,7 +636,7 @@ function serializeDevice(user: DeviceFields, now = new Date()) {
     running,
     heartbeatFresh,
     heartbeatAgeMs,
-    freshWithinMs: HEARTBEAT_FRESH_MS,
+    freshWithinMs: LIVE_HEARTBEAT_FRESH_MS,
     lastSeenAt: user.agentLastSeenAt?.toISOString() ?? null,
     permissionsUpdatedAt: user.agentPermissionsUpdatedAt?.toISOString() ?? null,
     permissionIssues: {
@@ -1074,7 +1057,7 @@ mcpRouter.get('/running-users', requireApiToken(['read:people', 'read:device-hea
         workspaceId: workspaceId(req),
         deactivatedAt: null,
         agentState: 'RUNNING',
-        agentLastSeenAt: { gte: new Date(now.getTime() - HEARTBEAT_FRESH_MS) },
+        agentLastSeenAt: { gte: new Date(now.getTime() - LIVE_HEARTBEAT_FRESH_MS) },
       },
       select: {
         id: true,
@@ -1088,7 +1071,7 @@ mcpRouter.get('/running-users', requireApiToken(['read:people', 'read:device-hea
     });
     res.json({
       generatedAt: now.toISOString(),
-      freshWithinMs: HEARTBEAT_FRESH_MS,
+      freshWithinMs: LIVE_HEARTBEAT_FRESH_MS,
       users: users.map((user) => ({
         id: user.id,
         name: user.name,
@@ -1261,12 +1244,6 @@ mcpRouter.get('/break-summary', requireApiToken(['read:people', 'read:time-summa
             trackingProtocolVersion: true,
             lastProvenAt: true,
             leaseExpiresAt: true,
-            screenshots: {
-              where: { deletedAt: null },
-              orderBy: { capturedAt: 'desc' },
-              take: 1,
-              select: { capturedAt: true },
-            },
             manualTimeRequest: {
               select: {
                 id: true,
@@ -1290,20 +1267,6 @@ mcpRouter.get('/break-summary', requireApiToken(['read:people', 'read:time-summa
           },
           orderBy: { startedAt: 'asc' },
         });
-    const activitySamples = userIds.length === 0
-      ? []
-      : await prisma.activitySample.findMany({
-          where: {
-            userId: { in: userIds },
-            bucketStart: { gte: range.fromWindow.start, lt: range.toWindow.end },
-          },
-          select: { timeEntryId: true, bucketStart: true },
-          orderBy: { bucketStart: 'asc' },
-        });
-    const latestSampleAt = latestSampleByEntry(activitySamples);
-    const latestScreenshotAt = latestScreenshotByEntry(entries.flatMap((entry) =>
-      entry.screenshots.map((screenshot) => ({ timeEntryId: entry.id, capturedAt: screenshot.capturedAt })),
-    ));
     const manualRequests = userIds.length === 0
       ? []
       : await prisma.manualTimeRequest.findMany({
@@ -1329,8 +1292,23 @@ mcpRouter.get('/break-summary', requireApiToken(['read:people', 'read:time-summa
           },
           orderBy: { requestedStart: 'asc' },
         });
-    const entriesByUser = new Map<string, typeof entries>();
-    for (const entry of entries) {
+    const now = new Date();
+    const evidenceByEntry = await loadEntryLiveEvidence(entries, now);
+    const resolvedEntries = entries.map((entry) => {
+      const effectiveEnds = resolveEffectiveEntrySegmentEnds({
+        segments: entry.segments,
+        entryEndedAt: entry.endedAt,
+        now,
+        evidence: evidenceByEntry.get(entry.id),
+        lifecycle: entry,
+      });
+      return {
+        ...entry,
+        segments: entry.segments.map((segment, index) => ({ ...segment, endedAt: effectiveEnds[index]! })),
+      };
+    });
+    const entriesByUser = new Map<string, typeof resolvedEntries>();
+    for (const entry of resolvedEntries) {
       const list = entriesByUser.get(entry.userId) ?? [];
       list.push(entry);
       entriesByUser.set(entry.userId, list);
@@ -1342,7 +1320,6 @@ mcpRouter.get('/break-summary', requireApiToken(['read:people', 'read:time-summa
       manualRequestsByUser.set(request.userId, list);
     }
 
-    const now = new Date();
     const minBreakMs = query.data.minBreakMinutes * 60_000;
     const lunchMinMs = query.data.lunchMinMinutes * 60_000;
     const resultUsers = users.map((user) => {
@@ -1377,14 +1354,7 @@ mcpRouter.get('/break-summary', requireApiToken(['read:people', 'read:time-summa
             entry.segments.some((segment) =>
               overlapsMs(
                 segment.startedAt.getTime(),
-                (resolveEffectiveSegmentEnd({
-                  startedAt: segment.startedAt,
-                  endedAt: segment.endedAt ?? entry.endedAt,
-                  now,
-                  latestSampleAt: latestSampleAt.get(entry.id),
-                  latestScreenshotAt: latestScreenshotAt.get(entry.id),
-                  lifecycle: entry,
-                }) ?? now).getTime(),
+                (segment.endedAt ?? now).getTime(),
                 dayStart,
                 dayEnd,
               ),
@@ -1393,8 +1363,7 @@ mcpRouter.get('/break-summary', requireApiToken(['read:people', 'read:time-summa
           manualRequests: userManualRequests.filter((request) =>
             overlapsMs(request.requestedStart.getTime(), request.requestedEnd.getTime(), dayStart, dayEnd),
           ),
-          latestSampleAt,
-          latestScreenshotAt,
+          evidenceByEntry,
           now,
         });
       });
