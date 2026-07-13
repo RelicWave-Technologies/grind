@@ -1,5 +1,6 @@
 import { prisma } from '@grind/db';
 import { localDayWindow } from '../insights/day';
+import { cappedOpenEndedAt, latestSampleByEntry } from '../insights/openSegmentEvidence';
 
 const AGENT_HEARTBEAT_FRESH_MS = 3 * 60 * 1000;
 
@@ -21,14 +22,30 @@ export async function buildTesterUsageSnapshot(workspaceId: string, timezone: st
     },
     orderBy: { name: 'asc' },
   });
+  const userIds = users.map((u) => u.id);
   const entries = await prisma.timeEntry.findMany({
     where: {
-      userId: { in: users.map((u) => u.id) },
+      userId: { in: userIds },
       startedAt: { lt: win.end },
       OR: [{ endedAt: null }, { endedAt: { gt: win.start } }],
     },
-    select: { userId: true, startedAt: true, endedAt: true },
+    select: {
+      id: true,
+      userId: true,
+      source: true,
+      segments: { select: { kind: true, startedAt: true, endedAt: true } },
+    },
   });
+  const activitySamples = userIds.length === 0
+    ? []
+    : await prisma.activitySample.findMany({
+        where: {
+          userId: { in: userIds },
+          bucketStart: { gte: win.start, lt: win.end },
+        },
+        select: { timeEntryId: true, bucketStart: true },
+        orderBy: { bucketStart: 'asc' },
+      });
   const screenshots = await prisma.screenshot.groupBy({
     by: ['userId'],
     where: {
@@ -40,11 +57,25 @@ export async function buildTesterUsageSnapshot(workspaceId: string, timezone: st
   });
 
   const screenshotCount = new Map(screenshots.map((s) => [s.userId, s._count._all]));
+  const latestSampleAt = latestSampleByEntry(activitySamples);
   const totals = new Map<string, number>();
   for (const entry of entries) {
-    const start = Math.max(entry.startedAt.getTime(), win.start.getTime());
-    const end = Math.min((entry.endedAt ?? now).getTime(), win.end.getTime(), now.getTime());
-    if (end > start) totals.set(entry.userId, (totals.get(entry.userId) ?? 0) + end - start);
+    for (const segment of entry.segments) {
+      if (entry.source !== 'MANUAL' && segment.kind === 'IDLE_TRIMMED') continue;
+      const start = Math.max(segment.startedAt.getTime(), win.start.getTime());
+      const effectiveEndedAt = cappedOpenEndedAt({
+        startedAt: segment.startedAt,
+        endedAt: segment.endedAt,
+        now,
+        latestSampleAt: latestSampleAt.get(entry.id),
+      });
+      const end = Math.min(
+        (effectiveEndedAt ?? now).getTime(),
+        win.end.getTime(),
+        now.getTime(),
+      );
+      if (end > start) totals.set(entry.userId, (totals.get(entry.userId) ?? 0) + end - start);
+    }
   }
 
   const testers = users.map((u) => {
