@@ -9,7 +9,8 @@ import {
 import { localDayWindow } from '../insights/day';
 import { buildTimesheetMatrix, type TimesheetSegmentInput } from '../insights/timesheets';
 import { loadTimeInvalidationsForUsers } from '../insights/timeInvalidations';
-import { latestSampleByEntry, resolveEffectiveSegmentEnd } from '../insights/openSegmentEvidence';
+import { loadEntryLiveEvidence } from '../insights/liveEntryEvidence';
+import { resolveEffectiveEntrySegmentEnds } from '../insights/openSegmentEvidence';
 import {
   buildMonthlyPayroll,
   type MonthlyPayroll,
@@ -171,9 +172,9 @@ export async function buildPayrollPayload(
   const lookbackStart = new Date(range.rangeStart.getTime() - 24 * 60 * 60 * 1000);
   const lookbackEnd = new Date(range.rangeEnd.getTime() + 24 * 60 * 60 * 1000);
 
-  const [entries, shiftAssignments, runs, unresolvedApprovalCount, invalidations, activitySamples] =
+  const [entries, shiftAssignments, runs, unresolvedApprovalCount, invalidations] =
     userIds.length === 0
-      ? [[], [], [], 0, [], []]
+      ? [[], [], [], 0, []]
       : await Promise.all([
           prisma.timeEntry.findMany({
             where: {
@@ -214,33 +215,26 @@ export async function buildPayrollPayload(
             },
           }),
           loadTimeInvalidationsForUsers(userIds, lookbackStart, lookbackEnd),
-          prisma.activitySample.findMany({
-            where: {
-              userId: { in: userIds },
-              bucketStart: { gte: lookbackStart, lt: lookbackEnd },
-            },
-            select: { timeEntryId: true, bucketStart: true },
-            orderBy: { bucketStart: 'asc' },
-          }),
         ]);
 
   const now = new Date(nowMs);
-  const latestSampleAt = latestSampleByEntry(activitySamples);
+  const evidenceByEntry = await loadEntryLiveEvidence(entries, now);
   const segs: TimesheetSegmentInput[] = [];
   for (const e of entries) {
-    for (const s of e.segments) {
+    const effectiveEnds = resolveEffectiveEntrySegmentEnds({
+      segments: e.segments,
+      entryEndedAt: e.endedAt,
+      now,
+      evidence: evidenceByEntry.get(e.id),
+      lifecycle: e,
+    });
+    for (const [index, s] of e.segments.entries()) {
       segs.push({
         userId: e.userId,
         source: e.source as 'AUTO' | 'MANUAL',
         segmentKind: s.kind as 'WORK' | 'MEETING' | 'IDLE_TRIMMED',
         startedAt: s.startedAt.getTime(),
-        endedAt: (resolveEffectiveSegmentEnd({
-          startedAt: s.startedAt,
-          endedAt: s.endedAt,
-          now,
-          latestSampleAt: latestSampleAt.get(e.id),
-          lifecycle: e,
-        }) ?? now).getTime(),
+        endedAt: (effectiveEnds[index] ?? now).getTime(),
       });
     }
   }

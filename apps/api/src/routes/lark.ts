@@ -19,7 +19,7 @@ import {
   LarkTaskApiError,
 } from '../lark';
 import { localDayWindow } from '../insights/day';
-import { latestSampleByEntry } from '../insights/openSegmentEvidence';
+import { loadEntryLiveEvidence } from '../insights/liveEntryEvidence';
 
 export const larkRouter = Router();
 
@@ -153,6 +153,8 @@ larkRouter.get('/my-tasks', async (req, res, next) => {
         where: { userId: req.user.sub, larkTaskGuid: { in: guids } },
         select: {
           id: true,
+          userId: true,
+          endedAt: true,
           larkTaskGuid: true,
           trackingProtocolVersion: true,
           lastProvenAt: true,
@@ -160,21 +162,11 @@ larkRouter.get('/my-tasks', async (req, res, next) => {
           segments: { select: { kind: true, startedAt: true, endedAt: true } },
         },
       });
-      const openEntryIds = entries
-        .filter((e) => e.segments.some((s) => s.endedAt === null))
-        .map((e) => e.id);
-      const samples = openEntryIds.length
-        ? await prisma.activitySample.findMany({
-            where: { userId: req.user.sub, timeEntryId: { in: openEntryIds } },
-            select: { timeEntryId: true, bucketStart: true },
-            orderBy: { bucketStart: 'asc' },
-          })
-        : [];
-      const latestSampleAt = latestSampleByEntry(samples);
-      const loggedTotal = loggedMsByGuid(entries, nowMs, { latestSampleAt });
+      const evidenceByEntry = await loadEntryLiveEvidence(entries, new Date(nowMs));
+      const loggedTotal = loggedMsByGuid(entries, nowMs, { evidenceByEntry });
       const loggedToday = dayWindow
         ? loggedMsByGuid(entries, nowMs, {
-            latestSampleAt,
+            evidenceByEntry,
             windowStart: dayWindow.start.getTime(),
             windowEnd: dayWindow.end.getTime(),
           })

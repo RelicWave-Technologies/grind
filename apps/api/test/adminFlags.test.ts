@@ -322,4 +322,44 @@ describe('POST /v1/admin/flags/:id/resolve', () => {
     expect(cell.invalidatedMs).toBe(30 * 60 * 1000);
     expect(cell.totalMs).toBe(30 * 60 * 1000);
   });
+
+  it('does not report unproven time from an abandoned open entry as invalidated', async () => {
+    const s = await seed();
+    const windowEnd = new Date(Date.now() - 10 * 60_000);
+    const windowStart = new Date(windowEnd.getTime() - 60 * 60_000);
+    await prisma.timeEntry.create({
+      data: {
+        id: `stale-flag-te-${Date.now()}`,
+        clientUuid: `stale-flag-cu-${Date.now()}`,
+        userId: s.memA.id,
+        source: 'AUTO',
+        startedAt: windowStart,
+        segments: {
+          create: {
+            id: `stale-flag-seg-${Date.now()}`,
+            kind: 'WORK',
+            startedAt: windowStart,
+          },
+        },
+      },
+    });
+    const flag = await prisma.activityFlag.create({
+      data: {
+        userId: s.memA.id,
+        type: 'METRONOMIC',
+        windowStart,
+        windowEnd,
+        riskScore: 60,
+        evidence: {},
+      },
+    });
+
+    const res = await request(app)
+      .post(`/v1/admin/flags/${flag.id}/resolve`)
+      .set(auth(s.admin.token))
+      .send({ resolution: 'TIME_INVALIDATED', note: 'Review abandoned entry' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.invalidatedMs).toBe(0);
+  });
 });

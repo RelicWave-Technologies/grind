@@ -17,7 +17,8 @@ import {
   type InvalidationsByUser,
   type TimeInvalidationInput,
 } from '../insights/invalidations';
-import { latestSampleByEntry, resolveEffectiveSegmentEnd } from '../insights/openSegmentEvidence';
+import type { EntryLiveEvidenceMap } from '../insights/liveEntryEvidence';
+import { resolveEffectiveEntrySegmentEnds } from '../insights/openSegmentEvidence';
 import { buildTimesheetMatrix, dateRange, type TimesheetSegmentInput } from '../insights/timesheets';
 import type { RoleTitle } from '../scoring/presets';
 import { scoreMinute } from '../scoring/score';
@@ -46,6 +47,7 @@ export interface ReportTimeEntry {
   source: 'AUTO' | 'MANUAL';
   larkTaskGuid: string | null;
   notes: string | null;
+  endedAt: Date | null;
   trackingProtocolVersion?: number | null;
   lastProvenAt?: Date | null;
   leaseExpiresAt?: Date | null;
@@ -174,13 +176,14 @@ export function buildMemberReportDays(input: {
   manualRequests: ReportManualRequest[];
   samples: ReportActivitySample[];
   screenshots: ReportScreenshotRow[];
+  evidenceByEntry?: EntryLiveEvidenceMap;
   shiftAssignments: ReportShiftAssignment[];
   invalidations?: TimeInvalidationInput[];
   activityRoleTitle?: RoleTitle | null;
   iconFor?: IconResolver;
 }): MemberReportDay[] {
   const iconFor = input.iconFor ?? appIconUrl;
-  const entries = capOpenEntries(input.entries, input.samples, input.now);
+  const entries = capOpenEntries(input.entries, input.evidenceByEntry, input.now);
   const invalidationsByUser = groupInvalidationsByUser(input.invalidations);
   const segments: TimesheetSegmentInput[] = [];
   const nowMs = input.now.getTime();
@@ -324,23 +327,22 @@ export function buildMemberReportDays(input: {
 
 function capOpenEntries(
   entries: ReportTimeEntry[],
-  samples: ReportActivitySample[],
+  evidenceByEntry: EntryLiveEvidenceMap | undefined,
   now: Date,
 ): ReportTimeEntry[] {
-  const latest = latestSampleByEntry(samples);
-  return entries.map((entry) => ({
-    ...entry,
-    segments: entry.segments.map((segment) => ({
-      ...segment,
-      endedAt: resolveEffectiveSegmentEnd({
-        startedAt: segment.startedAt,
-        endedAt: segment.endedAt,
-        now,
-        latestSampleAt: latest.get(entry.id),
-        lifecycle: entry,
-      }),
-    })),
-  }));
+  return entries.map((entry) => {
+    const effectiveEnds = resolveEffectiveEntrySegmentEnds({
+      segments: entry.segments,
+      entryEndedAt: entry.endedAt,
+      now,
+      evidence: evidenceByEntry?.get(entry.id),
+      lifecycle: entry,
+    });
+    return {
+      ...entry,
+      segments: entry.segments.map((segment, index) => ({ ...segment, endedAt: effectiveEnds[index]! })),
+    };
+  });
 }
 
 export function buildMemberReportApps(input: {
@@ -401,6 +403,7 @@ export function buildMemberReportScreenshots(input: {
   samples: ReportActivitySample[];
   screenshots: ReportScreenshotRow[];
   entries?: ReportTimeEntry[];
+  evidenceByEntry?: EntryLiveEvidenceMap;
   invalidations?: TimeInvalidationInput[];
   activityRoleTitle?: RoleTitle | null;
   now?: Date;
@@ -419,7 +422,7 @@ export function buildMemberReportScreenshots(input: {
   const samples = samplesForWindow(input.samples, dayStart, dayEnd, invalidationsByUser, input.userId);
   const reportNow = input.now ?? new Date();
   const meetingIntervals = meetingIntervalsForEntries(
-    capOpenEntries(input.entries ?? [], input.samples, reportNow),
+    capOpenEntries(input.entries ?? [], input.evidenceByEntry, reportNow),
     reportNow,
   );
   const heatmap = buildHeatmap({

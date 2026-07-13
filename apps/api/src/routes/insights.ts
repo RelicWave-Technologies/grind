@@ -6,7 +6,8 @@ import { scoreDay } from '../scoring/score';
 import { assessWindow, type RiskSample } from '../anticheat/risk';
 import type { RoleTitle } from '../scoring/presets';
 import { buildDayInsight, localDayWindow, shiftDayWindow } from '../insights/day';
-import { latestSampleByEntry, resolveEffectiveSegmentEnd } from '../insights/openSegmentEvidence';
+import { loadEntryLiveEvidence, type EntryLiveEvidenceMap } from '../insights/liveEntryEvidence';
+import { resolveEffectiveEntrySegmentEnds } from '../insights/openSegmentEvidence';
 import { WEEKDAYS, type ShiftSchedule } from '@grind/types';
 import { buildHeatmap, DEFAULT_BUCKET_MS, type HeatmapSample } from '../insights/heatmap';
 import { buildAppUsage } from '../insights/appUsage';
@@ -85,6 +86,8 @@ insightsRouter.get('/score', async (req, res, next) => {
         },
         select: {
           id: true,
+          userId: true,
+          endedAt: true,
           trackingProtocolVersion: true,
           lastProvenAt: true,
           leaseExpiresAt: true,
@@ -96,7 +99,9 @@ insightsRouter.get('/score', async (req, res, next) => {
 
     const role = (user?.activityRoleTitle ?? 'OTHER') as RoleTitle;
     const invalidationsByUser = groupInvalidationsByUser(invalidations);
-    const meetingIntervals = meetingIntervalsForEntries(entries, latestSampleByEntry(samplesRaw), new Date());
+    const scoreNow = new Date();
+    const scoreEvidence = await loadEntryLiveEvidence(entries, scoreNow);
+    const meetingIntervals = meetingIntervalsForEntries(entries, scoreEvidence, scoreNow);
     const samples = samplesRaw
       .filter((s) => !isInvalidatedAt(invalidationsByUser, req.user!.sub, s.bucketStart.getTime()))
       .map((s) => ({
@@ -162,7 +167,10 @@ insightsRouter.get('/day', async (req, res, next) => {
     // include it rather than hiding it.
     const userRow = await prisma.user.findUnique({
       where: { id: userId },
-      select: { activityRoleTitle: true, shift: { select: { name: true, schedule: true } } },
+      select: {
+        activityRoleTitle: true,
+        shift: { select: { name: true, schedule: true } },
+      },
     });
     const schedule = (userRow?.shift?.schedule as ShiftSchedule | null | undefined) ?? null;
     const shiftWin = schedule ? shiftDayWindow(date, tz, schedule) : null;
@@ -237,26 +245,29 @@ insightsRouter.get('/day', async (req, res, next) => {
     ]);
     const invalidationsByUser = groupInvalidationsByUser(invalidations);
     const samples = samplesRaw.filter((s) => !isInvalidatedAt(invalidationsByUser, userId, s.bucketStart.getTime()));
-    const latestSampleAt = latestSampleByEntry(samples);
-    const insightEntries = entries.map((e) => ({
-      id: e.id,
-      source: e.source as 'AUTO' | 'MANUAL',
-      requestId: e.manualTimeRequest?.id ?? null,
-      larkTaskGuid: e.larkTaskGuid,
-      notes: e.notes ?? null,
-      attendeeIds: e.attendees.map((a) => a.userId),
-      segments: e.segments.map((s) => ({
-        kind: s.kind as 'WORK' | 'MEETING' | 'IDLE_TRIMMED',
-        startedAt: s.startedAt,
-        endedAt: resolveEffectiveSegmentEnd({
+    const evidenceByEntry = await loadEntryLiveEvidence(entries, now);
+    const insightEntries = entries.map((e) => {
+      const effectiveEnds = resolveEffectiveEntrySegmentEnds({
+        segments: e.segments,
+        entryEndedAt: e.endedAt,
+        now,
+        evidence: evidenceByEntry.get(e.id),
+        lifecycle: e,
+      });
+      return {
+        id: e.id,
+        source: e.source as 'AUTO' | 'MANUAL',
+        requestId: e.manualTimeRequest?.id ?? null,
+        larkTaskGuid: e.larkTaskGuid,
+        notes: e.notes ?? null,
+        attendeeIds: e.attendees.map((a) => a.userId),
+        segments: e.segments.map((s, index) => ({
+          kind: s.kind as 'WORK' | 'MEETING' | 'IDLE_TRIMMED',
           startedAt: s.startedAt,
-          endedAt: s.endedAt,
-          now,
-          latestSampleAt: latestSampleAt.get(e.id),
-          lifecycle: e,
-        }),
-      })),
-    }));
+          endedAt: effectiveEnds[index]!,
+        })),
+      };
+    });
 
     const result = buildDayInsight({
       date,
@@ -363,26 +374,28 @@ export default insightsRouter;
 function meetingIntervalsForEntries(
   entries: Array<{
     id: string;
+    endedAt: Date | null;
     trackingProtocolVersion: number | null;
     lastProvenAt: Date | null;
     leaseExpiresAt: Date | null;
     segments: Array<{ kind: string; startedAt: Date; endedAt: Date | null }>;
   }>,
-  latestSampleAt: Map<string, Date>,
+  evidenceByEntry: EntryLiveEvidenceMap,
   now: Date,
 ): Array<{ a: number; b: number }> {
   const out: Array<{ a: number; b: number }> = [];
   for (const entry of entries) {
-    for (const segment of entry.segments) {
+    const effectiveEnds = resolveEffectiveEntrySegmentEnds({
+      segments: entry.segments,
+      entryEndedAt: entry.endedAt,
+      now,
+      evidence: evidenceByEntry.get(entry.id),
+      lifecycle: entry,
+    });
+    for (const [index, segment] of entry.segments.entries()) {
       if (segment.kind !== 'MEETING') continue;
       const a = segment.startedAt.getTime();
-      const b = (resolveEffectiveSegmentEnd({
-        startedAt: segment.startedAt,
-        endedAt: segment.endedAt,
-        now,
-        latestSampleAt: latestSampleAt.get(entry.id),
-        lifecycle: entry,
-      }) ?? now).getTime();
+      const b = (effectiveEnds[index] ?? now).getTime();
       if (b > a) out.push({ a, b });
     }
   }
