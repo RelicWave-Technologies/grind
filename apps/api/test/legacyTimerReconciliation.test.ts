@@ -97,13 +97,60 @@ describe('legacy timer reconciliation', () => {
 
     const plan = await buildLegacyReconciliationPlan({ now });
 
-    expect(plan.version).toBe(2);
+    expect(plan.version).toBe(3);
     expect(plan.entries).toEqual([
       expect.objectContaining({
         entryId,
         proposedEndedAt: '2026-07-13T10:00:21.000Z',
         latestScreenshotAt: '2026-07-13T10:00:21.000Z',
         reconciledDurationMs: 21_000,
+      }),
+    ]);
+  });
+
+  it('preserves time proven by a matching running heartbeat', async () => {
+    const user = await seedUser();
+    const entryId = await createLegacyEntry({
+      userId: user.userId,
+      screenshotAt: new Date('2026-07-13T10:00:21.000Z'),
+    });
+    const heartbeatAt = new Date('2026-07-13T10:02:00.000Z');
+    await prisma.user.update({
+      where: { id: user.userId },
+      data: { agentState: 'RUNNING', agentLastSeenAt: heartbeatAt },
+    });
+
+    const plan = await buildLegacyReconciliationPlan({ now });
+
+    expect(plan.entries).toEqual([
+      expect.objectContaining({
+        entryId,
+        proposedEndedAt: heartbeatAt.toISOString(),
+        latestRunningHeartbeatAt: heartbeatAt.toISOString(),
+        reconciledDurationMs: 2 * 60_000,
+      }),
+    ]);
+  });
+
+  it('does not count a paused heartbeat as work evidence', async () => {
+    const user = await seedUser();
+    const entryId = await createLegacyEntry({ userId: user.userId });
+    await prisma.user.update({
+      where: { id: user.userId },
+      data: {
+        agentState: 'PAUSED_IDLE',
+        agentLastSeenAt: new Date('2026-07-13T10:02:00.000Z'),
+      },
+    });
+
+    const plan = await buildLegacyReconciliationPlan({ now });
+
+    expect(plan.entries).toEqual([
+      expect.objectContaining({
+        entryId,
+        proposedEndedAt: '2026-07-13T10:00:00.000Z',
+        latestRunningHeartbeatAt: null,
+        reconciledDurationMs: 0,
       }),
     ]);
   });
