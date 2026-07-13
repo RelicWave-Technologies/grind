@@ -4,7 +4,7 @@ import {
   ScreenshotIntervalMinSchema,
 } from './teamSettings';
 
-export const AgentState = z.enum(['IDLE', 'RUNNING', 'PAUSED_IDLE', 'OFFLINE']);
+export const AgentState = z.enum(['IDLE', 'RUNNING', 'PAUSED_IDLE', 'PAUSED_PERMISSION', 'OFFLINE']);
 export type AgentState = z.infer<typeof AgentState>;
 
 export const TIMER_TRACKING_PROTOCOL_VERSION = 2 as const;
@@ -12,7 +12,7 @@ export const TIMER_TRACKING_PROTOCOL_VERSION = 2 as const;
 export const TimerCheckpoint = z.object({
   entryId: z.string().min(1),
   revision: z.number().int().min(1),
-  state: z.enum(['RUNNING', 'PAUSED_IDLE']),
+  state: z.enum(['RUNNING', 'PAUSED_IDLE', 'PAUSED_PERMISSION']),
   observedAt: z.string().datetime({ offset: true }),
 });
 export type TimerCheckpoint = z.infer<typeof TimerCheckpoint>;
@@ -53,6 +53,36 @@ export const DesktopPermissionSnapshot = z.object({
 });
 export type DesktopPermissionSnapshot = z.infer<typeof DesktopPermissionSnapshot>;
 
+export const LaunchAtLoginState = z.enum([
+  'READY',
+  'NEEDS_INSTALL',
+  'NEEDS_REGISTRATION',
+  'NEEDS_APPROVAL',
+  'NEEDS_REPAIR',
+  'BLOCKED',
+  'UNAVAILABLE',
+]);
+export type LaunchAtLoginState = z.infer<typeof LaunchAtLoginState>;
+
+export const LaunchOrigin = z.enum(['LOGIN_ITEM', 'USER', 'UNKNOWN']);
+export type LaunchOrigin = z.infer<typeof LaunchOrigin>;
+
+export const LaunchAtLoginSnapshot = z.object({
+  state: LaunchAtLoginState,
+  ready: z.boolean(),
+  openedAtLogin: z.boolean(),
+  origin: LaunchOrigin,
+}).superRefine((value, ctx) => {
+  if (value.ready !== (value.state === 'READY')) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['ready'],
+      message: 'ready must match the READY state',
+    });
+  }
+});
+export type LaunchAtLoginSnapshot = z.infer<typeof LaunchAtLoginSnapshot>;
+
 export const HeartbeatRequest = z.object({
   agentVersion: z.string(),
   platform: Platform,
@@ -61,6 +91,7 @@ export const HeartbeatRequest = z.object({
   trackingProtocolVersion: z.literal(TIMER_TRACKING_PROTOCOL_VERSION).optional(),
   timerCheckpoint: TimerCheckpoint.nullable().optional(),
   permissions: DesktopPermissionSnapshot.optional(),
+  startup: LaunchAtLoginSnapshot.optional(),
 });
 export type HeartbeatRequest = z.infer<typeof HeartbeatRequest>;
 

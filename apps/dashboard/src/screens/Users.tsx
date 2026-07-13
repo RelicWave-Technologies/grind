@@ -3,7 +3,8 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouteContext } from '@tanstack/react-router';
 import { Pencil, Check, X, UserPlus, UserMinus, UserCheck, Users as UsersIcon } from 'lucide-react';
-import { api, ApiError } from '../lib/api';
+import type { LaunchAtLoginState, LaunchOrigin } from '@grind/types';
+import { api, type ApiError } from '../lib/api';
 import { isAdmin, type Role } from '../lib/auth';
 import type { Team, Shift } from '../lib/types';
 import {
@@ -62,7 +63,7 @@ interface AdminUser {
   provisioningStatus?: 'PENDING' | 'ACTIVE';
   createdAt: string;
   agentLastSeenAt: string | null;
-  agentState: 'IDLE' | 'RUNNING' | 'PAUSED_IDLE' | 'OFFLINE' | null;
+  agentState: 'IDLE' | 'RUNNING' | 'PAUSED_IDLE' | 'PAUSED_PERMISSION' | 'OFFLINE' | null;
   agentVersion: string | null;
   agentPlatform: string | null;
   agentScreenPermissionStatus: string | null;
@@ -74,6 +75,9 @@ interface AdminUser {
   agentAccessibilityCapturing: boolean | null;
   agentAccessibilityHookRunning: boolean | null;
   agentPermissionsUpdatedAt: string | null;
+  agentLaunchAtLoginState: LaunchAtLoginState | null;
+  agentLaunchOrigin: LaunchOrigin | null;
+  agentLaunchAtLoginUpdatedAt: string | null;
 }
 
 interface UsersResponse {
@@ -299,7 +303,7 @@ export function UsersScreen() {
                   <Th>Team</Th>
                   <Th>Shift</Th>
                   {showDeviceHealth && <Th>Device</Th>}
-                  {showDeviceHealth && <Th>Permissions</Th>}
+                  {showDeviceHealth && <Th>Health</Th>}
                   <Th align="right">Joined</Th>
                   {canEdit && <Th align="right">{''}</Th>}
                 </Tr>
@@ -636,6 +640,7 @@ function DeviceCell({ user }: { user: AdminUser }) {
 function PermissionCell({ user }: { user: AdminUser }) {
   const screen = screenPermissionTag(user);
   const access = accessibilityPermissionTag(user);
+  const startup = startupHealthTag(user);
   return (
     <div className="usr-permissions">
       <Tag status={screen.status} title={screen.title}>
@@ -644,8 +649,39 @@ function PermissionCell({ user }: { user: AdminUser }) {
       <Tag status={access.status} title={access.title}>
         {access.label}
       </Tag>
+      <Tag status={startup.status} title={startup.title}>
+        {startup.label}
+      </Tag>
     </div>
   );
+}
+
+function startupHealthTag(user: AdminUser): { label: string; status: Status; title: string } {
+  if (!user.agentLaunchAtLoginUpdatedAt || !user.agentLaunchAtLoginState) {
+    return { label: 'Startup ?', status: 'neutral', title: 'Waiting for a newer Timo heartbeat.' };
+  }
+  if (user.agentLaunchAtLoginState === 'READY') {
+    return {
+      label: 'Startup OK',
+      status: 'success',
+      title: user.agentLaunchOrigin === 'LOGIN_ITEM'
+        ? 'This Timo session was opened by the operating system at login.'
+        : 'Launch at Login is registered and approved.',
+    };
+  }
+  if (user.agentLaunchAtLoginState === 'NEEDS_INSTALL') {
+    return { label: 'Startup install', status: 'danger', title: 'Timo must be installed in Applications before startup can be enabled.' };
+  }
+  if (user.agentLaunchAtLoginState === 'NEEDS_APPROVAL') {
+    return { label: 'Startup approval', status: 'warn', title: 'The user must approve Timo in operating-system Login Items.' };
+  }
+  if (user.agentLaunchAtLoginState === 'NEEDS_REGISTRATION' || user.agentLaunchAtLoginState === 'NEEDS_REPAIR') {
+    return { label: 'Startup repair', status: 'warn', title: 'The Launch at Login entry is missing, disabled, or incorrect.' };
+  }
+  if (user.agentLaunchAtLoginState === 'BLOCKED') {
+    return { label: 'Startup off', status: 'danger', title: 'The operating system is preventing Timo from launching at login.' };
+  }
+  return { label: 'Startup N/A', status: 'neutral', title: 'Launch at Login health is unavailable for this build.' };
 }
 
 function screenPermissionTag(user: AdminUser): { label: string; status: Status; title: string } {

@@ -107,7 +107,7 @@ interface UserListEntry {
   provisioningStatus: 'PENDING' | 'ACTIVE';
   createdAt: string;
   agentLastSeenAt: string | null;
-  agentState: 'IDLE' | 'RUNNING' | 'PAUSED_IDLE' | 'OFFLINE' | null;
+  agentState: 'IDLE' | 'RUNNING' | 'PAUSED_IDLE' | 'PAUSED_PERMISSION' | 'OFFLINE' | null;
   agentVersion: string | null;
   agentPlatform: string | null;
   agentScreenPermissionStatus: string | null;
@@ -119,6 +119,9 @@ interface UserListEntry {
   agentAccessibilityCapturing: boolean | null;
   agentAccessibilityHookRunning: boolean | null;
   agentPermissionsUpdatedAt: string | null;
+  agentLaunchAtLoginState: string | null;
+  agentLaunchOrigin: string | null;
+  agentLaunchAtLoginUpdatedAt: string | null;
 }
 
 /**
@@ -174,6 +177,9 @@ adminRouter.get('/users', async (req, res, next) => {
         agentAccessibilityCapturing: true,
         agentAccessibilityHookRunning: true,
         agentPermissionsUpdatedAt: true,
+        agentLaunchAtLoginState: true,
+        agentLaunchOrigin: true,
+        agentLaunchAtLoginUpdatedAt: true,
       },
       orderBy: [{ deactivatedAt: 'asc' }, { role: 'asc' }, { name: 'asc' }],
     });
@@ -207,6 +213,12 @@ adminRouter.get('/users', async (req, res, next) => {
       agentPermissionsUpdatedAt:
         exposeAgentHealth && u.agentPermissionsUpdatedAt
           ? u.agentPermissionsUpdatedAt.toISOString()
+          : null,
+      agentLaunchAtLoginState: exposeAgentHealth ? u.agentLaunchAtLoginState : null,
+      agentLaunchOrigin: exposeAgentHealth ? u.agentLaunchOrigin : null,
+      agentLaunchAtLoginUpdatedAt:
+        exposeAgentHealth && u.agentLaunchAtLoginUpdatedAt
+          ? u.agentLaunchAtLoginUpdatedAt.toISOString()
           : null,
     }));
     res.json({ users: out, scope: req.scope.scope });

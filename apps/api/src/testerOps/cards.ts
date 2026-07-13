@@ -517,6 +517,7 @@ function severityDot(severity: TesterDecision['severity']): string {
 function testerStateTag(tester: UsageSnapshot['testers'][number]): { text: string; color: string } {
   if (tester.isLiveNow) return { text: 'Live', color: 'green' };
   if (hasProgress(tester)) return { text: 'Worked', color: 'blue' };
+  if (tester.agentState === 'PAUSED_PERMISSION') return { text: 'Permission needed', color: 'orange' };
   if (tester.agentState === 'IDLE' || tester.agentState === 'PAUSED_IDLE') return { text: 'Idle', color: 'orange' };
   return { text: 'No time', color: 'orange' };
 }

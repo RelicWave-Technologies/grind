@@ -156,6 +156,7 @@ enum AgentRuntimeState {
   IDLE
   RUNNING
   PAUSED_IDLE
+  PAUSED_PERMISSION
   OFFLINE
 }
 
@@ -292,6 +293,10 @@ model User {
   agentAccessibilityCapturing   Boolean?
   agentAccessibilityHookRunning Boolean?
   agentPermissionsUpdatedAt     DateTime?
+  /// Last-known launch-at-login health. Nullable for older desktop agents.
+  agentLaunchAtLoginState       String?
+  agentLaunchOrigin             String?
+  agentLaunchAtLoginUpdatedAt   DateTime?
 
   refreshTokens   RefreshToken[]
   timeEntries     TimeEntry[]
