@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { prisma } from '@grind/db';
+import { prisma, type TimeEntryCloseReason } from '@grind/db';
 import {
   CreateTimeEntryRequest,
   ListTimeEntriesQuery,
@@ -17,6 +17,12 @@ import { attachScope } from '../middleware/scope';
 import { authorizeTimeEditForUser } from '../authz/timeEdit';
 import { queueManualTimeFinalizeCards } from '../manualTime/larkOutbox';
 import { logger } from '../logger';
+import {
+  lockTimerOwner,
+  supersedeExpiredTimersForUser,
+  TIMER_LEASE_MS,
+  TIMER_PROTOCOL_VERSION,
+} from '../timeLifecycle';
 
 export const timeEntriesRouter = Router();
 
@@ -55,6 +61,12 @@ function serialize(entry: {
   userId: string;
   larkTaskGuid: string | null;
   source: 'AUTO' | 'MANUAL';
+  trackingProtocolVersion: number | null;
+  agentRevision: number | null;
+  lastProvenAt: Date | null;
+  leaseExpiresAt: Date | null;
+  closeReason: TimeEntryCloseReason | null;
+  serverFinalizedAt: Date | null;
   startedAt: Date;
   endedAt: Date | null;
   notes: string | null;
@@ -66,6 +78,12 @@ function serialize(entry: {
     userId: entry.userId,
     larkTaskGuid: entry.larkTaskGuid,
     source: entry.source,
+    trackingProtocolVersion: entry.trackingProtocolVersion,
+    revision: entry.agentRevision,
+    lastProvenAt: entry.lastProvenAt?.toISOString() ?? null,
+    leaseExpiresAt: entry.leaseExpiresAt?.toISOString() ?? null,
+    closeReason: entry.closeReason,
+    serverFinalizedAt: entry.serverFinalizedAt?.toISOString() ?? null,
     startedAt: entry.startedAt.toISOString(),
     endedAt: entry.endedAt ? entry.endedAt.toISOString() : null,
     notes: entry.notes ?? null,
@@ -81,6 +99,35 @@ function serialize(entry: {
   };
 }
 
+function hasCompleteV2Lifecycle(input: {
+  trackingProtocolVersion?: number;
+  revision?: number;
+  observedAt?: string;
+  closeReason?: string | null;
+}): boolean {
+  return input.trackingProtocolVersion === TIMER_PROTOCOL_VERSION
+    && input.revision !== undefined
+    && input.observedAt !== undefined;
+}
+
+function hasAnyLifecycleField(input: {
+  trackingProtocolVersion?: number;
+  revision?: number;
+  observedAt?: string;
+  closeReason?: string | null;
+}): boolean {
+  return input.trackingProtocolVersion !== undefined
+    || input.revision !== undefined
+    || input.observedAt !== undefined
+    || input.closeReason !== undefined;
+}
+
+function clampObservedAt(observedAt: string, now: Date, startedAt: Date): Date {
+  const raw = new Date(observedAt).getTime();
+  const bounded = Number.isFinite(raw) ? Math.min(raw, now.getTime()) : now.getTime();
+  return new Date(Math.max(startedAt.getTime(), bounded));
+}
+
 /**
  * Create a time entry (idempotent on clientUuid). If the entry already exists,
  * return it unchanged (the agent retried). The project must belong to the
@@ -90,6 +137,13 @@ timeEntriesRouter.post('/', validate(CreateTimeEntryRequest, 'body'), async (req
   try {
     if (!req.user) return res.status(401).json({ error: 'unauthorized' });
     const body = req.body as CreateTimeEntryRequest;
+    if (hasAnyLifecycleField(body) && !hasCompleteV2Lifecycle(body)) {
+      return res.status(400).json({ error: 'incomplete_timer_lifecycle' });
+    }
+    const isV2 = hasCompleteV2Lifecycle(body);
+    if (isV2 && body.source !== 'AUTO') {
+      return res.status(400).json({ error: 'timer_lifecycle_requires_auto_entry' });
+    }
 
     // Idempotency: existing clientUuid => return as-is.
     const existing = await prisma.timeEntry.findUnique({
@@ -124,38 +178,73 @@ timeEntriesRouter.post('/', validate(CreateTimeEntryRequest, 'body'), async (req
       );
     }
 
-    // Snapshot the user's CURRENT shiftId so the entry preserves its
-    // schedule context even if the user is later reassigned. Forward-only:
-    // a missing shift just records null.
-    const shiftSnapshot = await prisma.user.findUnique({
-      where: { id: req.user.sub },
-      select: { shiftId: true },
-    });
-
-    const created = await prisma.timeEntry.create({
-      data: {
-        id: body.id,
-        clientUuid: body.clientUuid,
-        userId: req.user.sub,
-        larkTaskGuid: body.larkTaskGuid ?? null,
-        source: body.source,
-        startedAt: new Date(clamped.entry.startedAt),
-        endedAt: clamped.entry.endedAt !== null ? new Date(clamped.entry.endedAt) : null,
-        agentVersion: body.agentVersion,
-        platform: body.platform,
-        shiftIdAtStart: shiftSnapshot?.shiftId ?? null,
-        segments: {
-          create: clamped.entry.segments.map((s) => ({
-            id: s.id,
-            kind: s.kind,
-            startedAt: new Date(s.startedAt),
-            endedAt: s.endedAt ? new Date(s.endedAt) : null,
-          })),
+    const now = new Date();
+    const lastProvenAt = isV2
+      ? clampObservedAt(body.observedAt!, now, new Date(clamped.entry.startedAt))
+      : null;
+    const outcome = await prisma.$transaction(async (tx) => {
+      if (isV2 && clamped.entry.endedAt === null) {
+        await lockTimerOwner(tx, req.user!.sub);
+        const racedExisting = await tx.timeEntry.findUnique({
+          where: { clientUuid: body.clientUuid },
+          include: { segments: true },
+        });
+        if (racedExisting) {
+          return racedExisting.userId === req.user!.sub
+            ? { kind: 'existing' as const, entry: racedExisting }
+            : { kind: 'clientUuidConflict' as const };
+        }
+      }
+      const shiftSnapshot = await tx.user.findUnique({
+        where: { id: req.user!.sub },
+        select: { shiftId: true },
+      });
+      if (isV2 && clamped.entry.endedAt === null) {
+        const activeEntryId = await supersedeExpiredTimersForUser(tx, req.user!.sub, now);
+        if (activeEntryId) return { kind: 'conflict' as const, activeEntryId };
+      }
+      const created = await tx.timeEntry.create({
+        data: {
+          id: body.id,
+          clientUuid: body.clientUuid,
+          userId: req.user!.sub,
+          larkTaskGuid: body.larkTaskGuid ?? null,
+          source: body.source,
+          startedAt: new Date(clamped.entry.startedAt),
+          endedAt: clamped.entry.endedAt !== null ? new Date(clamped.entry.endedAt) : null,
+          trackingProtocolVersion: isV2 ? TIMER_PROTOCOL_VERSION : null,
+          agentRevision: isV2 ? body.revision : null,
+          lastProvenAt,
+          leaseExpiresAt: isV2 && clamped.entry.endedAt === null
+            ? new Date(now.getTime() + TIMER_LEASE_MS)
+            : null,
+          closeReason: clamped.entry.endedAt !== null
+            ? (body.closeReason ?? (isV2 ? 'AGENT' : null))
+            : null,
+          agentVersion: body.agentVersion,
+          platform: body.platform,
+          shiftIdAtStart: shiftSnapshot?.shiftId ?? null,
+          segments: {
+            create: clamped.entry.segments.map((s) => ({
+              id: s.id,
+              kind: s.kind,
+              startedAt: new Date(s.startedAt),
+              endedAt: s.endedAt ? new Date(s.endedAt) : null,
+            })),
+          },
         },
-      },
-      include: { segments: true },
+        include: { segments: true },
+      });
+      return { kind: 'created' as const, entry: created };
     });
-    res.status(201).json(serialize(created));
+    if (outcome.kind === 'conflict') {
+      return res.status(409).json({ error: 'active_timer_conflict', activeEntryId: outcome.activeEntryId });
+    }
+    if (outcome.kind === 'clientUuidConflict') {
+      return res.status(409).json({ error: 'client_uuid_conflict' });
+    }
+    if (outcome.kind === 'existing') return res.status(200).json(serialize(outcome.entry));
+    res.status(201).json(serialize(outcome.entry));
   } catch (err) {
     next(err);
   }
@@ -171,10 +260,28 @@ timeEntriesRouter.put('/:id/sync', validate(SyncTimeEntryRequest, 'body'), async
     const id = req.params.id;
     if (!id) return res.status(400).json({ error: 'missing_id' });
     const body = req.body as SyncTimeEntryRequest;
+    if (hasAnyLifecycleField(body) && !hasCompleteV2Lifecycle(body)) {
+      return res.status(400).json({ error: 'incomplete_timer_lifecycle' });
+    }
+    const isV2 = hasCompleteV2Lifecycle(body);
 
-    const entry = await prisma.timeEntry.findUnique({ where: { id }, select: { id: true, userId: true, clientUuid: true, source: true, startedAt: true } });
+    const entry = await prisma.timeEntry.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        userId: true,
+        clientUuid: true,
+        source: true,
+        startedAt: true,
+        trackingProtocolVersion: true,
+        agentRevision: true,
+      },
+    });
     if (!entry) return res.status(404).json({ error: 'not_found' });
     if (entry.userId !== req.user.sub) return res.status(403).json({ error: 'forbidden' });
+    if (entry.trackingProtocolVersion === TIMER_PROTOCOL_VERSION && !isV2) {
+      return res.status(409).json({ error: 'timer_protocol_required' });
+    }
 
     const core = toCoreEntry({
       id: entry.id,
@@ -201,7 +308,60 @@ timeEntriesRouter.put('/:id/sync', validate(SyncTimeEntryRequest, 'body'), async
     const clampedEndedAt = clamped.entry.endedAt;
 
     const incomingIds = clampedSegments.map((s) => s.id);
-    const updated = await prisma.$transaction(async (tx) => {
+    const now = new Date();
+    const outcome = await prisma.$transaction(async (tx) => {
+      if (isV2) await lockTimerOwner(tx, entry.userId);
+      await tx.$queryRaw`SELECT "id" FROM "TimeEntry" WHERE "id" = ${id} FOR UPDATE`;
+      const current = await tx.timeEntry.findUniqueOrThrow({ where: { id }, include: { segments: true } });
+
+      const currentRevision = current.agentRevision ?? 0;
+      if (isV2 && body.revision! < currentRevision) {
+        return { kind: 'ok' as const, entry: current };
+      }
+
+      const checkpointAt = isV2 ? clampObservedAt(body.observedAt!, now, current.startedAt) : null;
+      const observedAt = checkpointAt && current.lastProvenAt && current.lastProvenAt > checkpointAt
+        ? current.lastProvenAt
+        : checkpointAt;
+      if (current.endedAt) {
+        if (current.closeReason === 'SUPERSEDED') {
+          return {
+            kind: 'conflict' as const,
+            payload: { error: 'timer_finalized', endedAt: current.endedAt.toISOString() },
+          };
+        }
+
+        if (current.closeReason === 'LEASE_EXPIRED') {
+          const mayReconcile = isV2
+            && body.revision! > currentRevision
+            && observedAt !== null
+            && observedAt > current.endedAt;
+          if (!mayReconcile) return { kind: 'ok' as const, entry: current };
+
+          const otherActive = await tx.timeEntry.findFirst({
+            where: {
+              id: { not: id },
+              userId: current.userId,
+              source: 'AUTO',
+              endedAt: null,
+              trackingProtocolVersion: TIMER_PROTOCOL_VERSION,
+            },
+            select: { id: true },
+          });
+          if (otherActive) {
+            return {
+              kind: 'conflict' as const,
+              payload: { error: 'timer_conflict', activeEntryId: otherActive.id },
+            };
+          }
+        } else if (clampedEndedAt === null) {
+          return {
+            kind: 'conflict' as const,
+            payload: { error: 'timer_finalized', endedAt: current.endedAt.toISOString() },
+          };
+        }
+      }
+
       // Replace segments idempotently: drop this entry's segments AND any rows
       // that reuse an incoming id (defends against replayed/retried syncs),
       // then recreate. Avoids unique-constraint collisions on TimeSegment.id.
@@ -210,7 +370,19 @@ timeEntriesRouter.put('/:id/sync', validate(SyncTimeEntryRequest, 'body'), async
       });
       await tx.timeEntry.update({
         where: { id },
-        data: { endedAt: clampedEndedAt !== null ? new Date(clampedEndedAt) : null },
+        data: {
+          endedAt: clampedEndedAt !== null ? new Date(clampedEndedAt) : null,
+          trackingProtocolVersion: isV2 ? TIMER_PROTOCOL_VERSION : current.trackingProtocolVersion,
+          agentRevision: isV2 ? body.revision : current.agentRevision,
+          lastProvenAt: observedAt ?? current.lastProvenAt,
+          leaseExpiresAt: isV2 && clampedEndedAt === null
+            ? new Date(now.getTime() + TIMER_LEASE_MS)
+            : null,
+          closeReason: clampedEndedAt !== null
+            ? (body.closeReason ?? (isV2 ? 'AGENT' : current.closeReason))
+            : null,
+          serverFinalizedAt: null,
+        },
       });
       await tx.timeSegment.createMany({
         data: clampedSegments.map((s) => ({
@@ -221,10 +393,12 @@ timeEntriesRouter.put('/:id/sync', validate(SyncTimeEntryRequest, 'body'), async
           endedAt: s.endedAt ? new Date(s.endedAt) : null,
         })),
       });
-      return tx.timeEntry.findUniqueOrThrow({ where: { id }, include: { segments: true } });
+      const updated = await tx.timeEntry.findUniqueOrThrow({ where: { id }, include: { segments: true } });
+      return { kind: 'ok' as const, entry: updated };
     });
 
-    res.json(serialize(updated));
+    if (outcome.kind === 'conflict') return res.status(409).json(outcome.payload);
+    res.json(serialize(outcome.entry));
   } catch (err) {
     next(err);
   }

@@ -27,6 +27,9 @@ async function createEntry(args: {
   id: string;
   startedAt: string;
   endedAt?: string | null;
+  trackingProtocolVersion?: number;
+  lastProvenAt?: string;
+  leaseExpiresAt?: string;
   segments: Array<{
     id: string;
     kind?: 'WORK' | 'MEETING' | 'IDLE_TRIMMED';
@@ -42,6 +45,9 @@ async function createEntry(args: {
       source: 'AUTO',
       startedAt: new Date(args.startedAt),
       endedAt: args.endedAt === undefined || args.endedAt === null ? null : new Date(args.endedAt),
+      trackingProtocolVersion: args.trackingProtocolVersion,
+      lastProvenAt: args.lastProvenAt ? new Date(args.lastProvenAt) : undefined,
+      leaseExpiresAt: args.leaseExpiresAt ? new Date(args.leaseExpiresAt) : undefined,
       segments: {
         create: args.segments.map((segment) => ({
           id: segment.id,
@@ -120,5 +126,24 @@ describe('buildTesterUsageSnapshot', () => {
 
     const snapshot = await buildTesterUsageSnapshot(workspace.id, 'Asia/Kolkata');
     expect(snapshot.testers[0]?.trackedMinutes).toBe(74);
+  });
+
+  it('uses the same protocol-v2 lease boundary as Lark task totals', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-10T09:34:00.000Z'));
+    const { workspace, user } = await seedTester('Lease Boundary');
+
+    await createEntry({
+      userId: user.id,
+      id: 'expired-v2-entry',
+      startedAt: '2026-07-10T09:04:00.000Z',
+      trackingProtocolVersion: 2,
+      lastProvenAt: '2026-07-10T09:14:00.000Z',
+      leaseExpiresAt: '2026-07-10T09:17:00.000Z',
+      segments: [{ id: 'expired-v2-segment', startedAt: '2026-07-10T09:04:00.000Z' }],
+    });
+
+    const snapshot = await buildTesterUsageSnapshot(workspace.id, 'Asia/Kolkata');
+    expect(snapshot.testers[0]?.trackedMinutes).toBe(10);
   });
 });

@@ -11,6 +11,7 @@ import { validate } from '../middleware/validate';
 import { requireAccessToken } from '../middleware/auth';
 import { prisma, type Prisma } from '@grind/db';
 import { env } from '../env';
+import { renewTimerLease, TIMER_PROTOCOL_VERSION, type TimerCheckpointResult } from '../timeLifecycle';
 
 export const agentRouter = Router();
 
@@ -88,12 +89,16 @@ agentRouter.post('/heartbeat', validate(HeartbeatRequest, 'body'), async (req, r
     if (!req.user) return res.status(401).json({ error: 'unauthorized' });
     const body = req.body as HeartbeatRequest;
     const now = new Date();
+    if (body.timerCheckpoint && body.trackingProtocolVersion !== TIMER_PROTOCOL_VERSION) {
+      return res.status(400).json({ error: 'timer_protocol_mismatch' });
+    }
+    if (body.timerCheckpoint && body.state !== body.timerCheckpoint.state) {
+      return res.status(400).json({ error: 'timer_state_mismatch' });
+    }
     const data: Prisma.UserUpdateManyMutationInput = {
       agentLastSeenAt: now,
-      agentState: body.state,
       agentVersion: body.agentVersion,
       agentPlatform: body.platform,
-      agentActiveEntryId: body.activeEntryId ?? null,
     };
     if (body.permissions) {
       data.agentScreenPermissionStatus = body.permissions.screen.status;
@@ -106,17 +111,51 @@ agentRouter.post('/heartbeat', validate(HeartbeatRequest, 'body'), async (req, r
       data.agentAccessibilityHookRunning = body.permissions.accessibility.hookRunning;
       data.agentPermissionsUpdatedAt = now;
     }
-    const updated = await prisma.user.updateMany({
-      where: { id: req.user.sub, workspaceId: req.user.ws, deactivatedAt: null },
-      data,
+    const heartbeatResult = await prisma.$transaction(async (tx): Promise<{
+      authorized: boolean;
+      timer: TimerCheckpointResult | null;
+    }> => {
+      const user = await tx.user.findFirst({
+        where: { id: req.user!.sub, workspaceId: req.user!.ws, deactivatedAt: null },
+        select: { id: true },
+      });
+      if (!user) return { authorized: false, timer: null };
+      const timer = body.timerCheckpoint
+        ? await renewTimerLease(tx, req.user!.sub, body.timerCheckpoint, now)
+        : null;
+      const legacyActiveEntry = !body.timerCheckpoint && body.activeEntryId
+        ? await tx.timeEntry.findFirst({
+            where: {
+              id: body.activeEntryId,
+              userId: req.user!.sub,
+              endedAt: null,
+            },
+            select: { id: true },
+          })
+        : null;
+      const timerStateAccepted = timer === null || timer.disposition === 'accepted' || timer.disposition === 'needs_sync';
+      await tx.user.update({
+        where: { id: user.id },
+        data: {
+          ...data,
+          ...(timerStateAccepted
+            ? {
+                agentState: body.state,
+                agentActiveEntryId: body.timerCheckpoint?.entryId ?? legacyActiveEntry?.id ?? null,
+              }
+            : {}),
+        },
+      });
+      return { authorized: true, timer };
     });
-    if (updated.count === 0) return res.status(401).json({ error: 'unauthorized' });
+    if (!heartbeatResult.authorized) return res.status(401).json({ error: 'unauthorized' });
     const config = await buildAgentConfig(req.user.sub, req.user.ws);
     if (!config) return res.status(401).json({ error: 'unauthorized' });
     const response: HeartbeatResponse = {
       ok: true,
       serverTime: now.toISOString(),
       configVersion: config.configVersion,
+      timer: heartbeatResult.timer,
     };
     res.json(response);
   } catch (err) {

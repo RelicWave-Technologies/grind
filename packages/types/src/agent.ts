@@ -7,6 +7,24 @@ import {
 export const AgentState = z.enum(['IDLE', 'RUNNING', 'PAUSED_IDLE', 'OFFLINE']);
 export type AgentState = z.infer<typeof AgentState>;
 
+export const TIMER_TRACKING_PROTOCOL_VERSION = 2 as const;
+
+export const TimerCheckpoint = z.object({
+  entryId: z.string().min(1),
+  revision: z.number().int().min(1),
+  state: z.enum(['RUNNING', 'PAUSED_IDLE']),
+  observedAt: z.string().datetime({ offset: true }),
+});
+export type TimerCheckpoint = z.infer<typeof TimerCheckpoint>;
+
+export const TimerCheckpointDisposition = z.enum([
+  'accepted',
+  'needs_sync',
+  'finalized',
+  'conflict',
+]);
+export type TimerCheckpointDisposition = z.infer<typeof TimerCheckpointDisposition>;
+
 export const Platform = z.enum(['darwin', 'win32', 'linux']);
 export type Platform = z.infer<typeof Platform>;
 
@@ -40,6 +58,8 @@ export const HeartbeatRequest = z.object({
   platform: Platform,
   state: AgentState.default('IDLE'),
   activeEntryId: z.string().min(1).nullable().optional(),
+  trackingProtocolVersion: z.literal(TIMER_TRACKING_PROTOCOL_VERSION).optional(),
+  timerCheckpoint: TimerCheckpoint.nullable().optional(),
   permissions: DesktopPermissionSnapshot.optional(),
 });
 export type HeartbeatRequest = z.infer<typeof HeartbeatRequest>;
@@ -48,6 +68,13 @@ export const HeartbeatResponse = z.object({
   ok: z.literal(true),
   serverTime: z.string(),
   configVersion: z.string().min(1).default('legacy'),
+  timer: z.object({
+    disposition: TimerCheckpointDisposition,
+    entryId: z.string(),
+    serverRevision: z.number().int().min(0).nullable(),
+    endedAt: z.string().nullable(),
+    closeReason: z.enum(['AGENT', 'AGENT_RECOVERY', 'LEASE_EXPIRED', 'SUPERSEDED', 'LEGACY_RECONCILED']).nullable(),
+  }).nullable().optional(),
 });
 export type HeartbeatResponse = z.infer<typeof HeartbeatResponse>;
 

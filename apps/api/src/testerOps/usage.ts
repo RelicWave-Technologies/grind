@@ -1,6 +1,6 @@
 import { prisma } from '@grind/db';
 import { localDayWindow } from '../insights/day';
-import { cappedOpenEndedAt, latestSampleByEntry } from '../insights/openSegmentEvidence';
+import { latestSampleByEntry, resolveEffectiveSegmentEnd } from '../insights/openSegmentEvidence';
 
 const AGENT_HEARTBEAT_FRESH_MS = 3 * 60 * 1000;
 
@@ -33,6 +33,9 @@ export async function buildTesterUsageSnapshot(workspaceId: string, timezone: st
       id: true,
       userId: true,
       source: true,
+      trackingProtocolVersion: true,
+      lastProvenAt: true,
+      leaseExpiresAt: true,
       segments: { select: { kind: true, startedAt: true, endedAt: true } },
     },
   });
@@ -63,11 +66,12 @@ export async function buildTesterUsageSnapshot(workspaceId: string, timezone: st
     for (const segment of entry.segments) {
       if (entry.source !== 'MANUAL' && segment.kind === 'IDLE_TRIMMED') continue;
       const start = Math.max(segment.startedAt.getTime(), win.start.getTime());
-      const effectiveEndedAt = cappedOpenEndedAt({
+      const effectiveEndedAt = resolveEffectiveSegmentEnd({
         startedAt: segment.startedAt,
         endedAt: segment.endedAt,
         now,
         latestSampleAt: latestSampleAt.get(entry.id),
+        lifecycle: entry,
       });
       const end = Math.min(
         (effectiveEndedAt ?? now).getTime(),

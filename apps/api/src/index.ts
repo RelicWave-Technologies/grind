@@ -7,6 +7,7 @@ import { startManualTimeLarkOutboxWorker } from './manualTime/larkOutbox';
 import { startPayrollMonthCloseScheduler } from './payroll/scheduler';
 import { startScreenshotRetentionScheduler } from './screenshots/retention';
 import { startTesterOpsSchedulers } from './testerOps/scheduler';
+import { startTimerLifecycleScheduler } from './timeLifecycle';
 
 const app = buildApp();
 
@@ -21,4 +22,5 @@ app.listen(port, () => {
   startPayrollMonthCloseScheduler();
   startScreenshotRetentionScheduler();
   startTesterOpsSchedulers();
+  startTimerLifecycleScheduler(env.TIMO_TIMER_LEASE_RECONCILER_ENABLED === 'true');
 });

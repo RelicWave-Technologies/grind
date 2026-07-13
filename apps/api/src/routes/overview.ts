@@ -3,7 +3,7 @@ import { prisma } from '@grind/db';
 import { requireAccessToken } from '../middleware/auth';
 import { attachScope, requireManagerOrAbove } from '../middleware/scope';
 import { localDayWindow } from '../insights/day';
-import { cappedOpenEndedAt, latestSampleByEntry } from '../insights/openSegmentEvidence';
+import { latestSampleByEntry, resolveEffectiveSegmentEnd } from '../insights/openSegmentEvidence';
 import { DEFAULT_STUCK_THRESHOLD_MS } from '../digests/pendingDigest';
 
 /**
@@ -107,7 +107,16 @@ overviewRouter.get('/', async (req, res, next) => {
             kind: true,
             startedAt: true,
             endedAt: true,
-            timeEntry: { select: { id: true, userId: true, source: true } },
+            timeEntry: {
+              select: {
+                id: true,
+                userId: true,
+                source: true,
+                trackingProtocolVersion: true,
+                lastProvenAt: true,
+                leaseExpiresAt: true,
+              },
+            },
           },
         });
     const activitySamples = userIds.length === 0
@@ -144,11 +153,12 @@ overviewRouter.get('/', async (req, res, next) => {
     const usersTrackingNow = new Set(liveHeartbeatRows.map((u) => u.id));
     for (const s of segs) {
       const a = Math.max(dayStart, s.startedAt.getTime());
-      const effectiveEndedAt = cappedOpenEndedAt({
+      const effectiveEndedAt = resolveEffectiveSegmentEnd({
         startedAt: s.startedAt,
         endedAt: s.endedAt,
         now,
         latestSampleAt: latestSampleAt.get(s.timeEntry.id),
+        lifecycle: s.timeEntry,
       });
       const b = Math.min(liveCap, (effectiveEndedAt ?? new Date(liveCap)).getTime());
       const dur = b - a;

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { prisma } from '@grind/db';
 import { buildApp } from '../src/app';
-import { seedUser } from './helpers';
+import { fakeUlid, seedUser } from './helpers';
 
 const app = buildApp();
 const bearer = (token: string) => ({ Authorization: `Bearer ${token}` });
@@ -10,6 +10,15 @@ const bearer = (token: string) => ({ Authorization: `Bearer ${token}` });
 describe('POST /v1/agent/heartbeat', () => {
   it('persists the agent timer state used by live overview status', async () => {
     const user = await seedUser();
+    await prisma.timeEntry.create({
+      data: {
+        id: 'entry-paused',
+        clientUuid: fakeUlid('heartbeat-paused-client'),
+        userId: user.userId,
+        source: 'AUTO',
+        startedAt: new Date(Date.now() - 60_000),
+      },
+    });
 
     const res = await request(app)
       .post('/v1/agent/heartbeat')

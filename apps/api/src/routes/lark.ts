@@ -151,7 +151,14 @@ larkRouter.get('/my-tasks', async (req, res, next) => {
     if (guids.length) {
       const entries = await prisma.timeEntry.findMany({
         where: { userId: req.user.sub, larkTaskGuid: { in: guids } },
-        select: { id: true, larkTaskGuid: true, segments: { select: { kind: true, startedAt: true, endedAt: true } } },
+        select: {
+          id: true,
+          larkTaskGuid: true,
+          trackingProtocolVersion: true,
+          lastProvenAt: true,
+          leaseExpiresAt: true,
+          segments: { select: { kind: true, startedAt: true, endedAt: true } },
+        },
       });
       const openEntryIds = entries
         .filter((e) => e.segments.some((s) => s.endedAt === null))
