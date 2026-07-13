@@ -305,6 +305,39 @@ describe('TimerService.stop', () => {
   });
 });
 
+describe('TimerService.pause', () => {
+  it('freezes work but keeps the same entry available for explicit resume', async () => {
+    const started = await svc.start({ larkTaskGuid: 'task-a' });
+    clock.advance(5 * MIN);
+
+    const paused = await svc.pause();
+
+    expect(paused).toMatchObject({
+      state: 'RUNNING',
+      entryId: started.state === 'RUNNING' ? started.entryId : undefined,
+      larkTaskGuid: 'task-a',
+      paused: true,
+      pauseReason: 'MANUAL',
+      workedMs: 5 * MIN,
+    });
+    clock.advance(10 * MIN);
+    expect(svc.status()).toMatchObject({ paused: true, workedMs: 5 * MIN });
+
+    await svc.resume();
+    clock.advance(2 * MIN);
+    expect(svc.status()).toMatchObject({ paused: false, workedMs: 7 * MIN });
+  });
+
+  it('is idempotent while idle or already paused', async () => {
+    expect(await svc.pause()).toMatchObject({ state: 'IDLE' });
+    await svc.start({});
+    await svc.pause();
+    const once = svc.status();
+
+    expect(await svc.pause()).toEqual(once);
+  });
+});
+
 describe('TimerService.prepareForQuit', () => {
   it('stops an active timer locally and clears the exit intent after persistence', async () => {
     await svc.start({});

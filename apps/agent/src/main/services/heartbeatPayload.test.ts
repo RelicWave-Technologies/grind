@@ -61,6 +61,26 @@ describe('heartbeat payload', () => {
     });
   });
 
+  it('keeps an explicit user pause backward-compatible as PAUSED_IDLE', () => {
+    const status: TimerStatus = {
+      state: 'RUNNING',
+      entryId: 'entry-manual',
+      revision: 9,
+      larkTaskGuid: 'task',
+      startedAt: 1,
+      segmentStartedAt: null,
+      workedMs: 10,
+      paused: true,
+      pauseReason: 'MANUAL',
+    };
+
+    expect(buildHeartbeatRequest({ agentVersion: '0.0.2', platform: 'darwin', timerStatus: status })).toMatchObject({
+      state: 'PAUSED_IDLE',
+      activeEntryId: 'entry-manual',
+      timerCheckpoint: { state: 'PAUSED_IDLE' },
+    });
+  });
+
   it('distinguishes a permission-enforced pause from ordinary idle', () => {
     const status: TimerStatus = {
       state: 'RUNNING',

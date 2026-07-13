@@ -181,6 +181,17 @@ export class TimerService {
     return this.status();
   }
 
+  /** Explicit user pause: keep the entry/task selected but stop accruing now. */
+  async pause(): Promise<TimerStatus> {
+    if (!this.open) return this.status();
+    const open = getOpenSegment(this.open);
+    if (!open) return this.status();
+    const paused = { ...closeOpenSegment(this.open, safeCloseAt(this.open, this.clock.now())), pauseReason: 'MANUAL' as const };
+    this.open = paused;
+    await this.persistAndSync(paused);
+    return this.status();
+  }
+
   /**
    * Idle detected: PAUSE by closing the open WORK segment at `at` (the moment
    * the user went idle). Worked time freezes there; the idle gap is simply not

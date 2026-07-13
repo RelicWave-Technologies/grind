@@ -64,6 +64,7 @@ declare global {
       };
       timer: {
         start: (larkTaskGuid?: string | null) => Promise<TrackingCommandResult>;
+        pause: () => Promise<TimerStatus>;
         stop: () => Promise<TimerStatus>;
         resume: () => Promise<TrackingCommandResult>;
         status: () => Promise<TimerStatus>;
@@ -74,6 +75,7 @@ declare global {
       };
       window: {
         openMain: () => Promise<void>;
+        dismissFloatingBar: () => Promise<void>;
       };
       attention: {
         get: () => Promise<AttentionPrompt>;

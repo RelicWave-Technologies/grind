@@ -973,15 +973,18 @@ label.field-label { display: block; font-size: 12px; font-weight: 600; color: va
 .fbar-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; box-shadow: 0 0 0 3px rgba(255,255,255,0.12); }
 .fbar-time { font-family: var(--font-round); font-size: 15px; font-weight: 700; }
 .fbar-proj { flex: 1; min-width: 0; font-size: 12px; color: rgba(255,255,255,0.6); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.fbar-stop,
-.fbar-resume {
+.fbar-toggle,
+.fbar-close {
   flex-shrink: 0; width: 24px; height: 24px; border-radius: 50%; border: none; cursor: default;
-  background: rgba(255, 77, 106, 0.18); color: #ff6b81; display: flex; align-items: center; justify-content: center;
+  display: flex; align-items: center; justify-content: center;
   transition: background var(--dur-fast) var(--ease);
 }
-.fbar-resume { background: rgba(255, 255, 255, 0.92); color: var(--label-primary); }
-.fbar-resume:hover { background: var(--violet-tint); color: var(--label-primary); }
-.fbar-stop:hover { background: var(--danger); color: #fff; }
+.fbar-toggle { background: rgba(255, 255, 255, 0.14); color: #fff; }
+.fbar-toggle:hover { background: rgba(255, 255, 255, 0.24); }
+.fbar-toggle.is-resume { background: rgba(255, 255, 255, 0.92); color: var(--label-primary); }
+.fbar-toggle.is-resume:hover { background: var(--violet-tint); color: var(--label-primary); }
+.fbar-close { background: transparent; color: rgba(255,255,255,0.5); }
+.fbar-close:hover { background: rgba(255,255,255,0.12); color: #fff; }
 
 /* ============================================================================
    menu-bar popover

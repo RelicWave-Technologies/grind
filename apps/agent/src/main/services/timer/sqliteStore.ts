@@ -33,7 +33,7 @@ function parseEntry(json: string): TimeEntry {
     closeReason: raw.closeReason === 'AGENT_RECOVERY' || raw.closeReason === 'AGENT'
       ? raw.closeReason
       : null,
-    pauseReason: raw.pauseReason === 'IDLE' || raw.pauseReason === 'PERMISSION_REQUIRED'
+    pauseReason: raw.pauseReason === 'IDLE' || raw.pauseReason === 'MANUAL' || raw.pauseReason === 'PERMISSION_REQUIRED'
       ? raw.pauseReason
       : null,
   };

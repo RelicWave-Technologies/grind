@@ -16,7 +16,7 @@ import {
 import { startActiveWindowPolling } from './services/activity/windowPoller';
 import { registerPowerEvents } from './services/power';
 import { IdleMonitor } from './services/idle/monitor';
-import { showFloatingBar, hideFloatingBar, reclampFloatingBar } from './floating';
+import { dismissFloatingBar, reclampFloatingBar, syncFloatingBar } from './floating';
 import { reassertAllOverlays } from './windows/overlay';
 import { togglePopover, hidePopover } from './popover';
 import { reassertAttentionWindow } from './attentionWindow';
@@ -184,6 +184,7 @@ app.whenReady().then(async () => {
 
   registerIpc({
     onOpenMainWindow: () => showMainWindow(),
+    onDismissFloatingBar: () => dismissFloatingBar(),
     onIdleResolved: () => idleMonitor.resolve(),
   });
   startUpdateService({
@@ -320,7 +321,6 @@ app.whenReady().then(async () => {
 
   // Single 1s heartbeat: tray ticker + floating-bar visibility + live broadcast
   // + a throttled durable liveness tick (crash-recovery bound).
-  let lastRunning = false;
   let tick = 0;
   const LIVENESS_EVERY_TICKS = 15; // persist "proof of life" ~every 15s
   setInterval(() => {
@@ -332,9 +332,7 @@ app.whenReady().then(async () => {
       const accruing = running && !s.paused;
       setActivityRecording(accruing, running ? s.entryId : null);
       if (tray) setTrayTitle(tray, running ? fmtShort(s.workedMs) : '');
-      if (running) showFloatingBar();
-      else if (lastRunning) hideFloatingBar();
-      lastRunning = running;
+      syncFloatingBar(s);
       if (running) broadcast('timer:status:push', s);
       // Liveness: only while genuinely accruing, throttled. The next boot
       // closes any dangling entry at the last tick so a crash/hard-off never

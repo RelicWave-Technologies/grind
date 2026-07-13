@@ -20,6 +20,14 @@ export function registerTimerIpc(): void {
     return status;
   });
 
+  ipcMain.handle('timer:pause', async () => {
+    clearPendingTrackingCommand();
+    const status = await getTimerService().pause();
+    broadcast('timer:status:push', status);
+    sendHeartbeatNow();
+    return status;
+  });
+
   ipcMain.handle('timer:resume', async () => {
     return resumeTracking();
   });

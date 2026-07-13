@@ -20,7 +20,7 @@ An **internal** time tracker + screenshot monitor for the agency (~50–200 empl
 ## The three surfaces (desktop agent)
 1. **Main window** — the real app: Today (timer + day timeline), Projects, Reports; later task management, screenshots review. Resizable, hidden-inset title bar.
 2. **Menu-bar item** — live elapsed-time ticker; click toggles the window; quick popover (start/stop/switch) planned.
-3. **Floating bar** — always-on-top "you're being tracked" indicator while running (survives fullscreen). Planned in M2.
+3. **Floating bar** — always-on-top timer control for the current entry (survives fullscreen). It stays visible while paused, supports pause/resume in place, and has an explicit close action that hides only the current entry's bar without changing tracked time.
 
 Plus the **web dashboard** (browser) for the heavy manager/admin views: team timesheets, screenshot gallery, activity heatmap, attendance, monthly reports, approvals, admin.
 

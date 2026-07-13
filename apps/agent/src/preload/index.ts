@@ -78,6 +78,7 @@ const api = {
   timer: {
     start: (larkTaskGuid?: string | null): Promise<TrackingCommandResult> =>
       ipcRenderer.invoke('timer:start', { larkTaskGuid }),
+    pause: (): Promise<TimerStatus> => ipcRenderer.invoke('timer:pause'),
     stop: (): Promise<TimerStatus> => ipcRenderer.invoke('timer:stop'),
     resume: (): Promise<TrackingCommandResult> => ipcRenderer.invoke('timer:resume'),
     status: (): Promise<TimerStatus> => ipcRenderer.invoke('timer:status'),
@@ -94,6 +95,7 @@ const api = {
   },
   window: {
     openMain: (): Promise<void> => ipcRenderer.invoke('window:openMain'),
+    dismissFloatingBar: (): Promise<void> => ipcRenderer.invoke('window:dismissFloatingBar'),
   },
   attention: {
     get: (): Promise<AttentionPrompt> => ipcRenderer.invoke('attention:get'),

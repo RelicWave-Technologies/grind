@@ -8,7 +8,7 @@ export type SegmentKind = 'WORK' | 'MEETING' | 'IDLE_TRIMMED';
 
 export type TimeEntrySource = 'AUTO' | 'MANUAL';
 
-export type TimeEntryPauseReason = 'IDLE' | 'PERMISSION_REQUIRED';
+export type TimeEntryPauseReason = 'IDLE' | 'MANUAL' | 'PERMISSION_REQUIRED';
 
 export type TimeEntryCloseReason =
   | 'AGENT'

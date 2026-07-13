@@ -1,6 +1,8 @@
 import { screen } from 'electron';
 import type { BrowserWindow } from 'electron';
 import { getPreferences, patchFloatingBar } from './services/preferences';
+import type { TimerStatus } from './services/timer';
+import { FloatingBarVisibilityPolicy } from './services/floatingBarVisibility';
 import { resolvePosition, type Rect } from './windows/floatingBarPosition';
 import { createOverlayWindow, assertOverlayFloat, activeWorkArea, bottomRight } from './windows/overlay';
 
@@ -14,19 +16,20 @@ import { createOverlayWindow, assertOverlayFloat, activeWorkArea, bottomRight } 
  * after an explicit "reset", or when the saved spot is off-screen (a monitor
  * was unplugged).
  *
- * Visibility: gated by the per-device `floatingBar.visible` preference. When a
- * user turns it off in Settings it stays hidden even while tracking.
+ * Visibility has two independent controls: the persistent per-device Settings
+ * preference, and an ephemeral dismiss for the current entry. Pausing keeps
+ * the entry open, so the bar stays visible; a new entry clears the dismiss.
  */
 
 // The window hugs the pill exactly — no shadow, no transparent margin. The pill
 // fills the whole frame and its own border-radius owns the shape, so nothing is
 // ever painted behind it (`.fbar` insets by 0).
-const BAR = { width: 240, height: 44 };
+const BAR = { width: 268, height: 44 };
 const SIZE = { width: BAR.width, height: BAR.height };
 
 let win: BrowserWindow | null = null;
-let wantVisible = false; // mirror of "timer running" — set by the heartbeat
 let moveSaveTimer: NodeJS.Timeout | null = null;
+const visibility = new FloatingBarVisibilityPolicy();
 
 function toRect(wa: Electron.Rectangle): Rect {
   return { x: wa.x, y: wa.y, width: wa.width, height: wa.height };
@@ -93,9 +96,7 @@ export function reassertFloating(): void {
  * disabled it, this does nothing. Does NOT reposition an already-placed bar —
  * that's what kept snapping it back to the corner.
  */
-export function showFloatingBar(): void {
-  wantVisible = true;
-  if (!getPreferences().floatingBar.visible) return;
+function showFloatingBar(): void {
   const w = ensure();
   reassertFloating();
   // macOS can drop a non-activating panel from the onscreen window list while
@@ -106,22 +107,33 @@ export function showFloatingBar(): void {
   reassertFloating();
 }
 
-export function hideFloatingBar(): void {
-  wantVisible = false;
+function hideFloatingBar(): void {
   if (win && !win.isDestroyed() && win.isVisible()) win.hide();
+}
+
+function applyVisibility(shouldShow: boolean): void {
+  if (shouldShow) showFloatingBar();
+  else hideFloatingBar();
+}
+
+/** Reconcile timer session state with preference and one-session dismissal. */
+export function syncFloatingBar(status: TimerStatus): void {
+  const entryId = status.state === 'RUNNING' ? status.entryId : null;
+  applyVisibility(visibility.syncTimer(entryId, getPreferences().floatingBar.visible));
+}
+
+/** Hide only the current timer session. Tracking state is never mutated. */
+export function dismissFloatingBar(): void {
+  applyVisibility(visibility.dismissCurrent());
 }
 
 /**
  * React to a Settings toggle. Turning it OFF hides immediately; turning it ON
- * shows again only if the timer is currently running (wantVisible).
+ * explicitly restores the current entry's bar, even after a session dismiss.
  */
 export function applyFloatingBarVisibility(visible: boolean): void {
   patchFloatingBar({ visible });
-  if (!visible) {
-    if (win && !win.isDestroyed() && win.isVisible()) win.hide();
-  } else if (wantVisible) {
-    showFloatingBar();
-  }
+  applyVisibility(visibility.setPreferenceVisible(visible));
 }
 
 /**

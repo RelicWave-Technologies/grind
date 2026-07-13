@@ -11,7 +11,11 @@ import { registerUpdatesIpc } from './updates';
 import { registerPermissionsIpc } from './permissions';
 import { registerAttentionIpc } from './attention';
 
-export function registerIpc(opts: { onOpenMainWindow: () => void; onIdleResolved: () => void }): void {
+export function registerIpc(opts: {
+  onOpenMainWindow: () => void;
+  onDismissFloatingBar: () => void;
+  onIdleResolved: () => void;
+}): void {
   registerAuthIpc();
   registerStatusIpc();
   registerTimerIpc();
@@ -26,4 +30,5 @@ export function registerIpc(opts: { onOpenMainWindow: () => void; onIdleResolved
 
   // Lets the floating bar / popover ask to bring up the main window.
   ipcMain.handle('window:openMain', () => opts.onOpenMainWindow());
+  ipcMain.handle('window:dismissFloatingBar', () => opts.onDismissFloatingBar());
 }
