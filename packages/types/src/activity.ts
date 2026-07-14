@@ -32,5 +32,7 @@ export type ActivitySamplesRequest = z.infer<typeof ActivitySamplesRequest>;
 
 export const ActivitySamplesResponse = z.object({
   accepted: z.number().int(),
+  /** Samples retained safely without a missing or foreign timer parent. */
+  detached: z.number().int().min(0).optional(),
 });
 export type ActivitySamplesResponse = z.infer<typeof ActivitySamplesResponse>;

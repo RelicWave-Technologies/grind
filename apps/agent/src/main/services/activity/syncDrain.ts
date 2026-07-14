@@ -14,6 +14,7 @@ export interface ActivitySyncDrainLogger {
 export interface ActivitySyncDrainDeps {
   getStore: () => ActivityStore;
   flush: (store: ActivityStore) => Promise<number>;
+  beforeFlush?: () => Promise<void>;
   intervalMs?: number;
   heartbeatThrottleMs?: number;
   maxBatches?: number;
@@ -89,6 +90,12 @@ export class ActivitySyncDrain {
   private async run(reason: ActivitySyncDrainReason): Promise<ActivitySyncDrainResult> {
     let batches = 0;
     let samples = 0;
+    try {
+      await this.deps.beforeFlush?.();
+    } catch (err) {
+      this.logger?.warn('activity sync prerequisite failed', { reason, err: String(err) });
+      return { batches, samples, skipped: null };
+    }
     for (let i = 0; i < this.maxBatches; i += 1) {
       try {
         const flushed = await this.deps.flush(this.deps.getStore());

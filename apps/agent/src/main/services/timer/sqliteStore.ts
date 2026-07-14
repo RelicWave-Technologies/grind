@@ -200,6 +200,10 @@ export class SqliteEntryStore implements EntryStore {
     }));
   }
 
+  isPendingCreate(entryId: string): boolean {
+    return this.getSyncState(entryId) === 'pending_create';
+  }
+
   listRecent(limit: number): TimeEntry[] {
     const rows = this.db
       .prepare(`SELECT json FROM local_entries ORDER BY rowid DESC LIMIT ?`)

@@ -301,6 +301,11 @@ export class TimerService {
     }
   }
 
+  /** Activity linked to this entry must wait until its server parent exists. */
+  isPendingCreate(entryId: string): boolean {
+    return this.store.isPendingCreate(entryId);
+  }
+
   private async persistAndSync(entry: TimeEntry, syncState?: PendingEntrySyncState): Promise<void> {
     const nextState = this.store.upsert(entry, syncState ? { syncState } : undefined);
     await this.trySync(entry, nextState);

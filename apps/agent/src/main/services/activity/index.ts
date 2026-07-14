@@ -13,6 +13,7 @@ import { hasAccessibilityAccess } from '../permissions';
 import { getCapturePolicy } from '../agentConfig';
 import { log } from '../../logger';
 import type { PolicyFlags } from '@grind/types';
+import { drainTimerSyncNow, getTimerService } from '../timer';
 
 let store: ActivityStore | null = null;
 let sealer: MinuteSealer | null = null;
@@ -56,7 +57,8 @@ function getStore(): ActivityStore {
 
 const activitySyncDrain = new ActivitySyncDrain({
   getStore,
-  flush: flushActivity,
+  beforeFlush: () => drainTimerSyncNow('manual'),
+  flush: (activityStore) => flushActivity(activityStore, (entryId) => getTimerService().isPendingCreate(entryId)),
   logger: log,
 });
 

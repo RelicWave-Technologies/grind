@@ -52,9 +52,11 @@ describeSqlite('SqliteEntryStore sync state', () => {
     const e = entry();
 
     expect(store.upsert(e)).toBe('pending_create');
+    expect(store.isPendingCreate(e.id)).toBe(true);
     expect(store.getUnsynced()).toMatchObject([{ syncState: 'pending_create' }]);
 
     store.markSynced(e.id);
+    expect(store.isPendingCreate(e.id)).toBe(false);
     expect(store.getUnsynced()).toHaveLength(0);
   });
 
