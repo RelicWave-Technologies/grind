@@ -41,7 +41,7 @@ function finalCard(req: {
   reason: string;
   status: ManualTimeStatus;
   decidedAt: Date | null;
-  user: { name: string };
+  user: { name: string; workspace: { timezone: string } };
   approver: { name: string } | null;
 }, now: Date): Record<string, unknown> {
   const common = {
@@ -51,6 +51,7 @@ function finalCard(req: {
     startedAt: req.requestedStart.getTime(),
     endedAt: req.requestedEnd.getTime(),
     reason: req.reason,
+    timeZone: req.user.workspace.timezone,
   };
   if (req.status === 'CANCELLED') {
     return buildCancelledCard({
@@ -92,7 +93,13 @@ export async function decideManualTimeRequest(args: {
     const req = await tx.manualTimeRequest.findUniqueOrThrow({
       where: { id: args.requestId },
       include: {
-        user: { select: { name: true, larkIdentity: { select: { openId: true } } } },
+        user: {
+          select: {
+            name: true,
+            workspace: { select: { timezone: true } },
+            larkIdentity: { select: { openId: true } },
+          },
+        },
         approver: { include: { larkIdentity: { select: { openId: true } } } },
         attendees: { select: { userId: true } },
       },
@@ -227,7 +234,7 @@ export async function decideManualTimeRequest(args: {
         timeEntryId,
       },
       include: {
-        user: { select: { name: true } },
+        user: { select: { name: true, workspace: { select: { timezone: true } } } },
         approver: { select: { name: true } },
       },
     });

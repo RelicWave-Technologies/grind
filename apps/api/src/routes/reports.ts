@@ -47,7 +47,8 @@ async function iconForSamples(samples: { activeAppBundle: string | null }[]): Pr
 reportsRouter.get('/me', async (req, res, next) => {
   try {
     if (!req.user) return res.status(401).json({ error: 'unauthorized' });
-    const range = resolveReportRange(req.query as Record<string, unknown>);
+    if (!req.scope) return res.status(500).json({ error: 'scope_unresolved' });
+    const range = resolveReportRange(req.query as Record<string, unknown>, req.scope.workspaceTimezone);
     if ('error' in range) return res.status(range.status).json({ error: range.error, ...(range.extras ?? {}) });
 
     const now = new Date();
@@ -81,7 +82,8 @@ reportsRouter.get('/me', async (req, res, next) => {
 reportsRouter.get('/team', requireCapability('reports.team.read'), async (req, res, next) => {
   try {
     if (!req.user || !req.scope) return res.status(401).json({ error: 'unauthorized' });
-    const range = resolveReportRange(req.query as Record<string, unknown>);
+    if (!req.scope) return res.status(500).json({ error: 'scope_unresolved' });
+    const range = resolveReportRange(req.query as Record<string, unknown>, req.scope.workspaceTimezone);
     if ('error' in range) return res.status(range.status).json({ error: range.error, ...(range.extras ?? {}) });
     if (range.days.length > TEAM_REPORT_MAX_DAYS) {
       return res.status(400).json({ error: 'range_too_long', maxDays: TEAM_REPORT_MAX_DAYS });
@@ -159,7 +161,8 @@ reportsRouter.get('/team/member', requireCapability('reports.team.read'), async 
     const target = await resolveScopedReportUser(req, req.query.userId);
     if (!target.ok) return res.status(target.status).json({ error: target.error });
 
-    const range = resolveReportRange(req.query as Record<string, unknown>);
+    if (!req.scope) return res.status(500).json({ error: 'scope_unresolved' });
+    const range = resolveReportRange(req.query as Record<string, unknown>, req.scope.workspaceTimezone);
     if ('error' in range) return res.status(range.status).json({ error: range.error, ...(range.extras ?? {}) });
 
     const now = new Date();
@@ -215,7 +218,8 @@ reportsRouter.get('/team/member/day-apps', requireCapability('reports.team.read'
     if (!req.user || !req.scope) return res.status(401).json({ error: 'unauthorized' });
     const target = await resolveScopedReportUser(req, req.query.userId);
     if (!target.ok) return res.status(target.status).json({ error: target.error });
-    const range = resolveSingleReportDay(req.query as Record<string, unknown>);
+    if (!req.scope) return res.status(500).json({ error: 'scope_unresolved' });
+    const range = resolveSingleReportDay(req.query as Record<string, unknown>, req.scope.workspaceTimezone);
     if ('error' in range) return res.status(range.status).json({ error: range.error, ...(range.extras ?? {}) });
     const [samples, invalidations] = await Promise.all([
       loadSamples(target.user.id, range),
@@ -239,7 +243,8 @@ reportsRouter.get('/team/member/day-screenshots', requireCapability('reports.tea
     if (!req.user || !req.scope) return res.status(401).json({ error: 'unauthorized' });
     const target = await resolveScopedReportUser(req, req.query.userId);
     if (!target.ok) return res.status(target.status).json({ error: target.error });
-    const range = resolveSingleReportDay(req.query as Record<string, unknown>);
+    if (!req.scope) return res.status(500).json({ error: 'scope_unresolved' });
+    const range = resolveSingleReportDay(req.query as Record<string, unknown>, req.scope.workspaceTimezone);
     if ('error' in range) return res.status(range.status).json({ error: range.error, ...(range.extras ?? {}) });
     const now = new Date();
     const reportData = await loadTeamReportData([target.user.id], range, now);
@@ -265,7 +270,8 @@ reportsRouter.get('/team/member/day-screenshots', requireCapability('reports.tea
 reportsRouter.get('/me/day-apps', async (req, res, next) => {
   try {
     if (!req.user) return res.status(401).json({ error: 'unauthorized' });
-    const range = resolveSingleReportDay(req.query as Record<string, unknown>);
+    if (!req.scope) return res.status(500).json({ error: 'scope_unresolved' });
+    const range = resolveSingleReportDay(req.query as Record<string, unknown>, req.scope.workspaceTimezone);
     if ('error' in range) return res.status(range.status).json({ error: range.error, ...(range.extras ?? {}) });
     const [samples, invalidations] = await Promise.all([
       loadSamples(req.user.sub, range),
@@ -408,7 +414,8 @@ async function loadManualRequestsForUser(
 reportsRouter.get('/me/day-screenshots', async (req, res, next) => {
   try {
     if (!req.user) return res.status(401).json({ error: 'unauthorized' });
-    const range = resolveSingleReportDay(req.query as Record<string, unknown>);
+    if (!req.scope) return res.status(500).json({ error: 'scope_unresolved' });
+    const range = resolveSingleReportDay(req.query as Record<string, unknown>, req.scope.workspaceTimezone);
     if ('error' in range) return res.status(range.status).json({ error: range.error, ...(range.extras ?? {}) });
     const now = new Date();
     const data = await loadReportData(req.user.sub, range, now);

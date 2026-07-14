@@ -1,10 +1,13 @@
 import { useMemo, useRef, useState, type MouseEvent } from 'react';
 import type { DayInsight, DayBlock } from '../lib/types';
 import { fmtTime } from '../lib/format';
+import { zonedDateTimeParts } from '@grind/types';
 
 interface Props {
   day: DayInsight;
   now: number;
+  /** Canonical workspace timezone used by all labels and tick placement. */
+  timeZone: string;
   /** Show the "click to add" gap ghost. False for read-only (teammate) views. */
   editable?: boolean;
   /**
@@ -85,9 +88,9 @@ function previewForHover(args: {
  *
  * Always renders the full 24h window for axis stability across days.
  */
-export function DayRibbon({ day, now, editable = false, onClickEpoch, onHoverRowId }: Props) {
+export function DayRibbon({ day, now, timeZone, editable = false, onClickEpoch, onHoverRowId }: Props) {
   const span = day.dayEnd - day.dayStart;
-  const ticks = buildTicks(day.dayStart, day.dayEnd);
+  const ticks = buildTicks(day.dayStart, day.dayEnd, timeZone);
   const futureStartsAt = day.isToday ? now : day.isFuture ? day.dayStart : day.dayEnd;
   const trackRef = useRef<HTMLDivElement>(null);
   const [hoverMs, setHoverMs] = useState<number | null>(null);
@@ -172,7 +175,7 @@ export function DayRibbon({ day, now, editable = false, onClickEpoch, onHoverRow
               key={`b-${i}-${b.startedAt}`}
               className={`ribbon-block ribbon-block-${b.kind.toLowerCase()}`}
               style={{ left: pct(b.startedAt), width }}
-              title={`${b.kind} · ${fmtTime(b.startedAt)} – ${fmtTime(b.endedAt)}${attSuffix}`}
+              title={`${b.kind} · ${fmtTime(b.startedAt, timeZone)} – ${fmtTime(b.endedAt, timeZone)}${attSuffix}`}
               onMouseEnter={() => onHoverRowId?.(rowId)}
               onMouseLeave={() => onHoverRowId?.(null)}
             />
@@ -186,7 +189,7 @@ export function DayRibbon({ day, now, editable = false, onClickEpoch, onHoverRow
               left: pct(ghost.startedAt),
               width: `${((ghost.endedAt - ghost.startedAt) / span) * 100}%`,
             }}
-            title={`Click to add manual time · ${fmtTime(ghost.startedAt)} – ${fmtTime(ghost.endedAt)}`}
+            title={`Click to add manual time · ${fmtTime(ghost.startedAt, timeZone)} – ${fmtTime(ghost.endedAt, timeZone)}`}
           />
         )}
 
@@ -201,7 +204,7 @@ export function DayRibbon({ day, now, editable = false, onClickEpoch, onHoverRow
         {ticks.map((t) => (
           <div key={t.ms} className="ribbon-tick" style={{ left: pct(t.ms) }}>
             <div className="ribbon-tick-line" />
-            <div className="ribbon-tick-label small tertiary">{fmtTime(t.ms)}</div>
+            <div className="ribbon-tick-label small tertiary">{fmtTime(t.ms, timeZone)}</div>
           </div>
         ))}
         {hoverMs != null && (
@@ -211,7 +214,7 @@ export function DayRibbon({ day, now, editable = false, onClickEpoch, onHoverRow
             aria-hidden
           >
             <div className="ribbon-tick-line ribbon-tick-line-hover" />
-            <div className="ribbon-tick-label ribbon-tick-label-hover">{fmtTime(hoverMs)}</div>
+            <div className="ribbon-tick-label ribbon-tick-label-hover">{fmtTime(hoverMs, timeZone)}</div>
           </div>
         )}
       </div>
@@ -219,11 +222,11 @@ export function DayRibbon({ day, now, editable = false, onClickEpoch, onHoverRow
   );
 }
 
-function buildTicks(dayStart: number, dayEnd: number): Array<{ ms: number }> {
+function buildTicks(dayStart: number, dayEnd: number, timeZone: string): Array<{ ms: number }> {
   const out: Array<{ ms: number }> = [];
   const first = Math.ceil(dayStart / HOUR_MS) * HOUR_MS;
   for (let t = first; t < dayEnd; t += HOUR_MS) {
-    if (new Date(t).getHours() % 3 !== 0) continue;
+    if (zonedDateTimeParts(t, timeZone).hour % 3 !== 0) continue;
     out.push({ ms: t });
   }
   return out;

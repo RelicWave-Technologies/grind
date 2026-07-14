@@ -1,6 +1,7 @@
 import './attendance.css';
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useRouteContext } from '@tanstack/react-router';
 import { CalendarRange } from 'lucide-react';
 import { api, API_BASE } from '../lib/api';
 import type { TimesheetMatrix } from '../lib/types';
@@ -24,7 +25,6 @@ import {
   Identity,
   Avatar,
   Tag,
-  Banner,
   EmptyState,
   SkeletonTable,
 } from '../ui';
@@ -59,9 +59,10 @@ const PRESENT_MIN_MS = 30 * 60 * 1000;
  * threshold, first/last computation, CSV href, and all states are unchanged.
  */
 export function AttendanceScreen() {
-  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  const { me } = useRouteContext({ from: '/authed' });
+  const tz = me.workspaceTimezone;
 
-  const [anchor, setAnchor] = useState<string>(todayKey());
+  const [anchor, setAnchor] = useState<string>(() => todayKey(tz));
   const [rangeKey, setRangeKey] = useState<'7' | '14' | '30'>('14');
   const days = RANGES.find((r) => r.key === rangeKey)!.days;
   const from = addDays(anchor, -(days - 1));
@@ -79,8 +80,8 @@ export function AttendanceScreen() {
     return `${API_BASE}/v1/admin/timesheets.csv?${params.toString()}`;
   }
 
-  const isToday = anchor === todayKey();
-  const today = todayKey();
+  const isToday = anchor === todayKey(tz);
+  const today = todayKey(tz);
   const tzLabel = tz.replace(/_/g, ' ');
   const data = q.data;
   const hasPeople = !!data && data.users.length > 0;
@@ -103,7 +104,7 @@ export function AttendanceScreen() {
               items={RANGES.map((r) => ({ value: r.key, label: r.label }))}
             />
             <DateStepper
-              value={isToday ? 'Today' : fmtDayLabel(anchor)}
+              value={isToday ? 'Today' : fmtDayLabel(anchor, tz)}
               onPrev={() => setAnchor((d) => addDays(d, -days))}
               onNext={() => setAnchor((d) => addDays(d, days))}
               nextDisabled={isToday}
@@ -120,7 +121,7 @@ export function AttendanceScreen() {
         }
       />
 
-      {hasPeople && <AttendanceSummary data={data!} />}
+      {hasPeople && <AttendanceSummary data={data!} timeZone={tz} />}
 
       <Card variant="flush" className="atd-card">
         {q.isLoading ? (
@@ -215,8 +216,8 @@ export function AttendanceScreen() {
                           const cell = row[d];
                           const present = cell ? cell.totalMs >= PRESENT_MIN_MS : false;
                           const needsReview = cellNeedsReview(cell);
-                          const first = cell?.firstActivityMs ? fmtTime(cell.firstActivityMs) : '—';
-                          const last = cell?.lastActivityMs ? fmtTime(cell.lastActivityMs) : '—';
+                          const first = cell?.firstActivityMs ? fmtTime(cell.firstActivityMs, tz) : '—';
+                          const last = cell?.lastActivityMs ? fmtTime(cell.lastActivityMs, tz) : '—';
                           return (
                             <Td key={d} className="atd-col-day" align="center">
                               {present ? (
@@ -278,7 +279,7 @@ function autoTrackedMs(cell: { workedMs: number; meetingMs: number }): number {
  * people present every day, and the day span. Derived from the same
  * cells/days/threshold — read-only, presentation only.
  */
-function AttendanceSummary({ data }: { data: TimesheetMatrix }) {
+function AttendanceSummary({ data, timeZone }: { data: TimesheetMatrix; timeZone: string }) {
   const total = data.users.length;
   const dayCount = data.days.length;
   const slots = total * dayCount;
@@ -299,7 +300,7 @@ function AttendanceSummary({ data }: { data: TimesheetMatrix }) {
   return (
     <Card variant="flush">
       <StatRow>
-        <Stat label="Present rate" value={rate} unit="%" hint={`${fmtDayLabel(data.from)} – ${fmtDayLabel(data.to)}`} />
+        <Stat label="Present rate" value={rate} unit="%" hint={`${fmtDayLabel(data.from, timeZone)} – ${fmtDayLabel(data.to, timeZone)}`} />
         <Stat label="People" value={total} hint="in scope" />
         <Stat label="Full house" value={perfect} unit={`/ ${total}`} hint="present every day" />
         <Stat label="Days" value={dayCount} hint="in this range" />

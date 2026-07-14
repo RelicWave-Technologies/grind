@@ -1,8 +1,9 @@
 import './flags.css';
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useRouteContext } from '@tanstack/react-router';
 import { ShieldAlert, Check, X, AlertOctagon, ShieldCheck, Sparkles, Ban } from 'lucide-react';
-import { api, ApiError } from '../lib/api';
+import { api, type ApiError } from '../lib/api';
 import type { ActivityFlag, FlagResolution, FlagType } from '../lib/types';
 import {
   Page,
@@ -20,7 +21,8 @@ import {
   SkeletonTable,
 } from '../ui';
 import type { Status } from '../ui';
-import { fmtTime, fmtDayLabel, fmtDurationMs } from '../lib/format';
+import { fmtTime, fmtDayLabel, fmtDurationMs, fmtDateShort } from '../lib/format';
+import { dateKeyInTimeZone } from '@grind/types';
 
 interface ListResponse {
   flags: ActivityFlag[];
@@ -73,6 +75,8 @@ function verdictStatus(resolution: FlagResolution): Status {
  * we never auto-delete time — the verdict lands on a row. Presentation only.
  */
 export function FlagsScreen() {
+  const { me } = useRouteContext({ from: '/authed' });
+  const timeZone = me.workspaceTimezone;
   const [tab, setTab] = useState<'OPEN' | 'RESOLVED'>('OPEN');
   const [lastInvalidation, setLastInvalidation] = useState<null | { id: string; invalidatedMs: number }>(null);
   const qc = useQueryClient();
@@ -152,6 +156,7 @@ export function FlagsScreen() {
             <FlagCard
               key={f.id}
               flag={f}
+              timeZone={timeZone}
               busy={resolve.isPending && resolve.variables?.id === f.id}
               error={
                 resolve.isError && resolve.variables?.id === f.id
@@ -169,11 +174,13 @@ export function FlagsScreen() {
 
 function FlagCard({
   flag,
+  timeZone,
   busy,
   error,
   onResolve,
 }: {
   flag: ActivityFlag;
+  timeZone: string;
   busy: boolean;
   error: string | null;
   onResolve: (resolution: FlagResolution, note?: string) => void;
@@ -183,7 +190,7 @@ function FlagCard({
 
   const start = new Date(flag.windowStart);
   const end = new Date(flag.windowEnd);
-  const day = flag.windowStart.slice(0, 10);
+  const day = dateKeyInTimeZone(start, timeZone);
   const isResolved = flag.status === 'RESOLVED';
   const sev = riskStatus(flag.riskScore, isResolved);
   const evidence = Object.entries(flag.evidence);
@@ -220,7 +227,7 @@ function FlagCard({
       <div className="flg-def">
         <span className="ui-t-eyebrow">Window</span>
         <span className="ui-mono flg-def__val">
-          {fmtDayLabel(day)} · {fmtTime(start.getTime())} – {fmtTime(end.getTime())}
+          {fmtDayLabel(day, timeZone)} · {fmtTime(start.getTime(), timeZone)} – {fmtTime(end.getTime(), timeZone)}
         </span>
       </div>
 
@@ -279,10 +286,7 @@ function FlagCard({
             <span className="ui-mono ui-t-small flg-stamp">
               by {flag.resolvedBy.name}
               {flag.resolvedAt &&
-                ` · ${new Date(flag.resolvedAt).toLocaleDateString(undefined, {
-                  month: 'short',
-                  day: 'numeric',
-                })}`}
+                ` · ${fmtDateShort(new Date(flag.resolvedAt).getTime(), timeZone)}`}
             </span>
           )}
         </div>

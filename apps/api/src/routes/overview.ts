@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { prisma } from '@grind/db';
+import { dateKeyInTimeZone, isValidTimeZone } from '@grind/types';
 import { requireAccessToken } from '../middleware/auth';
 import { attachScope, requireManagerOrAbove } from '../middleware/scope';
 import { localDayWindow } from '../insights/day';
@@ -78,16 +79,12 @@ overviewRouter.get('/', async (req, res, next) => {
     if (!req.scope) return res.status(500).json({ error: 'scope_unresolved' });
     if (req.scope.scope === 'self') return res.status(403).json({ error: 'forbidden' });
 
-    const tz = typeof req.query.tz === 'string' && req.query.tz.length > 0 ? req.query.tz : 'UTC';
+    if (req.query.tz !== undefined && (typeof req.query.tz !== 'string' || !isValidTimeZone(req.query.tz))) {
+      return res.status(400).json({ error: 'invalid_tz' });
+    }
+    const tz = req.scope.workspaceTimezone;
     const now = new Date();
-    const today = new Intl.DateTimeFormat('en-CA', {
-      timeZone: tz,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    })
-      .format(now)
-      .slice(0, 10);
+    const today = dateKeyInTimeZone(now, tz);
     const win = localDayWindow(today, tz);
     if (!win) return res.status(400).json({ error: 'invalid_tz' });
 

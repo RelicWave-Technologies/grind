@@ -31,6 +31,7 @@ import {
   PatchTeamMemberSettingsRequest,
   ShiftScheduleSchema,
   WORKSPACE_POLICY_DEFAULTS,
+  dateKeyInTimeZone,
   normalizeScreenshotIntervalMin,
   type ApiTokenDto,
   type MonitoringSettingsAuditDto,
@@ -817,7 +818,7 @@ adminRouter.get('/manual-time-requests', requireManagerOrAbove, async (req, res,
   try {
     if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
     const hasRange = req.query.from !== undefined || req.query.to !== undefined || req.query.tz !== undefined;
-    const range = hasRange ? resolveReportRange(req.query as Record<string, unknown>) : null;
+    const range = hasRange ? resolveReportRange(req.query as Record<string, unknown>, req.scope.workspaceTimezone) : null;
     if (range && 'error' in range) {
       return res.status(range.status).json({ error: range.error, ...(range.extras ?? {}) });
     }
@@ -1031,21 +1032,22 @@ interface TimesheetRangeError {
 
 /** Pull tz / from / to from the query and validate. Returns either a
  *  resolved range or the error shape the route should respond with. */
-function resolveTimesheetRange(req: { query: Record<string, unknown> }): ResolvedTimesheetRange | TimesheetRangeError {
-  const tz = typeof req.query.tz === 'string' && (req.query.tz as string).length > 0 ? (req.query.tz as string) : 'UTC';
+function resolveTimesheetRange(req: { query: Record<string, unknown> }, workspaceTz: string): ResolvedTimesheetRange | TimesheetRangeError {
+  if (req.query.tz !== undefined) {
+    if (typeof req.query.tz !== 'string') return { status: 400, error: 'invalid_tz' };
+    try {
+      new Intl.DateTimeFormat('en-US', { timeZone: req.query.tz });
+    } catch {
+      return { status: 400, error: 'invalid_tz' };
+    }
+  }
+  const tz = workspaceTz;
   try {
     new Intl.DateTimeFormat('en-US', { timeZone: tz });
   } catch {
     return { status: 400, error: 'invalid_tz' };
   }
-  const todayKey = new Intl.DateTimeFormat('en-CA', {
-    timeZone: tz,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  })
-    .format(new Date())
-    .slice(0, 10);
+  const todayKey = dateKeyInTimeZone(new Date(), tz);
 
   const to = isYmd(req.query.to) ? (req.query.to as string) : todayKey;
   const from = isYmd(req.query.from) ? (req.query.from as string) : addDaysStr(to, -(TIMESHEETS_DEFAULT_DAYS - 1));
@@ -1060,10 +1062,15 @@ function resolveTimesheetRange(req: { query: Record<string, unknown> }): Resolve
 
 /** Build the matrix + the user list, used by both the JSON and CSV endpoints. */
 async function loadTimesheetData(scope: { userIds: string[] }, range: ResolvedTimesheetRange) {
-  const lookbackStart = new Date(`${range.from}T00:00:00Z`);
-  lookbackStart.setUTCDate(lookbackStart.getUTCDate() - 1);
-  const lookbackEnd = new Date(`${range.to}T00:00:00Z`);
-  lookbackEnd.setUTCDate(lookbackEnd.getUTCDate() + 2);
+  const firstDay = localDayWindow(range.from, range.tz);
+  const lastDay = localDayWindow(range.to, range.tz);
+  if (!firstDay || !lastDay) throw new Error('timesheet_range_unresolvable');
+
+  // Query an extra calendar day on both sides for entries/invalidations that
+  // overlap a local-day boundary. These are instants in the workspace zone,
+  // never server-midnight guesses.
+  const lookbackStart = new Date(firstDay.start.getTime() - 24 * 60 * 60 * 1000);
+  const lookbackEnd = new Date(lastDay.end.getTime() + 24 * 60 * 60 * 1000);
 
   const [entries, invalidations] = await Promise.all([
     prisma.timeEntry.findMany({
@@ -1155,13 +1162,13 @@ function attachActivitySampleCounts(
  * Powers the Team page — a Hubstaff-style at-a-glance view of "who tracked
  * what across the last week or two."
  *
- * Defaults: trailing 14 days ending today (in the requested tz, falling back
- * to UTC). Hard cap at 60 days so a typo can't melt the DB.
+ * Defaults: trailing 14 days ending today in the workspace timezone. Hard cap
+ * at 60 days so a typo can't melt the DB.
  */
 adminRouter.get('/timesheets', requireAnyCapability(['reports.team.read', 'reports.workspace.read']), async (req, res, next) => {
   try {
     if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
-    const range = resolveTimesheetRange(req);
+    const range = resolveTimesheetRange(req, req.scope.workspaceTimezone);
     if ('error' in range) return res.status(range.status).json({ error: range.error, ...(range.extras ?? {}) });
     const { matrix, users } = await loadTimesheetData(req.scope, range);
     if (!matrix) return res.status(400).json({ error: 'invalid_date_or_tz' });
@@ -1182,7 +1189,7 @@ adminRouter.get('/timesheets', requireAnyCapability(['reports.team.read', 'repor
 adminRouter.get('/timesheets.csv', requireAnyCapability(['reports.team.read', 'reports.workspace.read']), async (req, res, next) => {
   try {
     if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
-    const range = resolveTimesheetRange(req);
+    const range = resolveTimesheetRange(req, req.scope.workspaceTimezone);
     if ('error' in range) return res.status(range.status).json({ error: range.error, ...(range.extras ?? {}) });
     const { matrix, users } = await loadTimesheetData(req.scope, range);
     if (!matrix) return res.status(400).json({ error: 'invalid_date_or_tz' });

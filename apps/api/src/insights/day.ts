@@ -18,7 +18,13 @@
  * No prisma/network calls in this file. The route owns I/O; this owns logic.
  */
 
-import { WEEKDAYS, hhmmToMin, type ShiftSchedule } from '@grind/types';
+import {
+  WEEKDAYS,
+  hhmmToMin,
+  instantForZonedDateTime,
+  localDayWindowInTimeZone,
+  type ShiftSchedule,
+} from '@grind/types';
 
 export type SegmentKind = 'WORK' | 'MEETING' | 'IDLE_TRIMMED';
 /**
@@ -127,23 +133,7 @@ export interface DayInsightResult {
  * returns end-start = 23h.
  */
 export function localDayWindow(date: string, tz: string): { start: Date; end: Date } | null {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
-  try {
-    new Intl.DateTimeFormat('en-US', { timeZone: tz });
-  } catch {
-    return null;
-  }
-  const [y, m, d] = date.split('-').map((n) => parseInt(n, 10));
-  if (!y || !m || !d) return null;
-  const start = utcInstantForLocalTime(y, m, d, 0, tz);
-  // For the next day's midnight, increment day then resolve again — this
-  // naturally yields a 23h / 25h span on DST transition days.
-  const tomorrow = new Date(Date.UTC(y, m - 1, d + 1));
-  const ny = tomorrow.getUTCFullYear();
-  const nm = tomorrow.getUTCMonth() + 1;
-  const nd = tomorrow.getUTCDate();
-  const end = utcInstantForLocalTime(ny, nm, nd, 0, tz);
-  return { start, end };
+  return localDayWindowInTimeZone(date, tz);
 }
 
 /**
@@ -167,18 +157,19 @@ export function shiftDayWindow(
   if (!day) return null; // day off → caller uses the full calendar day
   const startMin = hhmmToMin(day.start);
   const endMin = hhmmToMin(day.end);
-  return {
-    start: utcInstantForLocalTime(y, m, d, startMin, tz),
-    end: utcInstantForLocalTime(y, m, d, endMin, tz),
-  };
+  try {
+    return {
+      start: utcInstantForLocalTime(y, m, d, startMin, tz),
+      end: utcInstantForLocalTime(y, m, d, endMin, tz),
+    };
+  } catch {
+    return null;
+  }
 }
 
 /**
- * Solve for the UTC instant whose wall-clock in `tz` is
- * `year-month-day 00:00:00`. Algorithm: format a guess, treat the formatted
- * components as if they were a UTC instant, compare to the target, shift by
- * the delta. Converges in <=2 iterations because the tz offset is constant
- * away from DST transitions, and a 1h adjustment crosses the transition.
+ * Delegate all wall-clock resolution to the shared timezone boundary. This
+ * rejects impossible DST times and documents the deterministic fall-back rule.
  */
 function utcInstantForLocalTime(
   year: number,
@@ -187,36 +178,14 @@ function utcInstantForLocalTime(
   minutesOfDay: number,
   tz: string,
 ): Date {
-  const fmt = new Intl.DateTimeFormat('en-US', {
-    timeZone: tz,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  });
-  const target = Date.UTC(year, month - 1, day, Math.floor(minutesOfDay / 60), minutesOfDay % 60, 0);
-  // First guess: pretend tz offset is 0.
-  let guess = target;
-  for (let iter = 0; iter < 4; iter++) {
-    const map: Record<string, string> = {};
-    for (const p of fmt.formatToParts(new Date(guess))) if (p.type !== 'literal') map[p.type] = p.value;
-    const hourStr = map.hour === '24' ? '00' : map.hour!;
-    const seen = Date.UTC(
-      parseInt(map.year!, 10),
-      parseInt(map.month!, 10) - 1,
-      parseInt(map.day!, 10),
-      parseInt(hourStr, 10),
-      parseInt(map.minute!, 10),
-      parseInt(map.second!, 10),
-    );
-    const delta = seen - target;
-    if (delta === 0) return new Date(guess);
-    guess -= delta;
-  }
-  return new Date(guess);
+  return instantForZonedDateTime({
+    year,
+    month,
+    day,
+    hour: Math.floor(minutesOfDay / 60),
+    minute: minutesOfDay % 60,
+    second: 0,
+  }, tz);
 }
 
 /** Clip [a,b) by [lo,hi) → returns null when disjoint. */

@@ -1,5 +1,6 @@
 import { prisma } from '@grind/db';
 import { env } from '../env';
+import { getWorkspaceTimezone } from '../workspace/timezone';
 
 export function envPingTimes(): string[] {
   return env.TIMO_TESTER_PING_TIMES
@@ -9,17 +10,18 @@ export function envPingTimes(): string[] {
 }
 
 export async function loadOrCreateTesterOpsConfig(workspaceId = env.WORKSPACE_ID) {
-  const existing = await prisma.testerOpsConfig.findUnique({ where: { workspaceId } });
-  if (existing) return existing;
-  return prisma.testerOpsConfig.create({
-    data: {
+  const timezone = await getWorkspaceTimezone(workspaceId);
+  return prisma.testerOpsConfig.upsert({
+    where: { workspaceId },
+    create: {
       workspaceId,
       enabled: env.TIMO_TESTER_BOT_ENABLED === 'true',
       chatId: env.TIMO_TESTER_GROUP_CHAT_ID,
-      timezone: env.TIMO_TESTER_GROUP_TIMEZONE,
+      timezone,
       pingTimes: envPingTimes(),
       passiveIssueDetectionEnabled: env.TIMO_PASSIVE_ISSUE_DETECTION_ENABLED === 'true',
     },
+    update: { timezone },
   });
 }
 

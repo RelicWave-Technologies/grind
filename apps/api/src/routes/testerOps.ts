@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import { TimeZoneSchema } from '@grind/types';
 import { prisma } from '@grind/db';
 import { requireAccessToken } from '../middleware/auth';
 import { attachScope, requireAdmin } from '../middleware/scope';
@@ -9,6 +10,7 @@ import { replayTesterMessage } from '../testerOps/inbound';
 import { refreshKnowledgeSource } from '../testerOps/knowledge';
 import { enqueueTesterOpsCard } from '../testerOps/outbox';
 import { buildTesterUsageSnapshot } from '../testerOps/usage';
+import { setWorkspaceTimezone } from '../workspace/timezone';
 
 export const testerOpsRouter = Router();
 testerOpsRouter.use(requireAccessToken, attachScope, requireAdmin);
@@ -16,7 +18,7 @@ testerOpsRouter.use(requireAccessToken, attachScope, requireAdmin);
 const ConfigPatch = z.object({
   enabled: z.boolean().optional(),
   chatId: z.string().min(1).nullable().optional(),
-  timezone: z.string().min(1).optional(),
+  timezone: TimeZoneSchema.optional(),
   pingTimes: z.array(z.string().regex(/^\d{2}:\d{2}$/)).optional(),
   passiveIssueDetectionEnabled: z.boolean().optional(),
 });
@@ -46,8 +48,17 @@ testerOpsRouter.put('/config', async (req, res, next) => {
     if (!req.scope) return res.status(500).json({ error: 'scope_unresolved' });
     const parsed = ConfigPatch.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'invalid_config' });
+    const { timezone, ...configPatch } = parsed.data;
     await loadOrCreateTesterOpsConfig(req.scope.workspaceId);
-    const cfg = await prisma.testerOpsConfig.update({ where: { workspaceId: req.scope.workspaceId }, data: parsed.data });
+    const cfg = await prisma.$transaction(async (tx) => {
+      if (timezone !== undefined) {
+        await setWorkspaceTimezone(tx, req.scope!.workspaceId, timezone);
+      }
+      return tx.testerOpsConfig.update({
+        where: { workspaceId: req.scope!.workspaceId },
+        data: configPatch,
+      });
+    });
     res.json(cfg);
   } catch (err) {
     next(err);

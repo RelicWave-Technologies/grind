@@ -11,6 +11,8 @@ datasource db {
 model Workspace {
   id        String   @id @default(cuid())
   name      String
+  /// Canonical business-calendar timezone. Stored event timestamps remain UTC.
+  timezone  String   @default("UTC")
   createdAt DateTime @default(now())
 
   users          User[]

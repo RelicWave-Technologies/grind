@@ -2,6 +2,7 @@ import './teams.css';
 import { type MouseEvent, type ReactNode, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useRouteContext } from '@tanstack/react-router';
 import {
   Building2,
   CalendarDays,
@@ -16,7 +17,7 @@ import {
   Users2,
   X,
 } from 'lucide-react';
-import { api, ApiError } from '../lib/api';
+import { api, type ApiError } from '../lib/api';
 import { addDays, fmtDurationMs, todayKey } from '../lib/format';
 import type { Team } from '../lib/types';
 import type { Role } from '../lib/auth';
@@ -55,6 +56,7 @@ type TeamPatch = Partial<{ name: string; managerIds: string[] }>;
 type UserPatch = Partial<{ teamId: string | null }>;
 
 export function TeamsScreen() {
+  const { me } = useRouteContext({ from: '/authed' });
   const qc = useQueryClient();
   const teamsQ = useQuery({ queryKey: ['admin', 'teams'], queryFn: () => api<{ teams: Team[] }>('/v1/admin/teams') });
   const usersQ = useQuery({
@@ -64,8 +66,8 @@ export function TeamsScreen() {
 
   const [createOpen, setCreateOpen] = useState(false);
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
-  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-  const today = todayKey();
+  const tz = me.workspaceTimezone;
+  const today = todayKey(tz);
   const performanceFrom = addDays(today, -6);
   const performanceTo = today;
 

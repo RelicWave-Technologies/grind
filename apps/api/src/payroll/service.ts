@@ -2,6 +2,8 @@ import { prisma, type PayrollPolicy, type PayrollRunLog, type PayrollSheetRecipi
 import {
   PAYROLL_POLICY_DEFAULTS,
   PayrollPolicySettingsSchema,
+  dateKeyInTimeZone,
+  isValidTimeZone,
   type PayrollPolicyDto,
   type PayrollPolicySettings,
   type PayrollRunLogDto,
@@ -18,6 +20,7 @@ import {
   type PayrollShiftAssignmentInput,
   type PayrollUserMeta,
 } from './monthly';
+import { getWorkspaceTimezone, setWorkspaceTimezone } from '../workspace/timezone';
 
 export const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/u;
 
@@ -53,9 +56,12 @@ export function previousMonthKeyForLocalDate(localDate: string): string {
 
 export function resolvePayrollMonth(
   query: Record<string, unknown>,
-  fallbackTz = 'UTC',
+  workspaceTz: string,
 ): ResolvedPayrollMonth | { error: string } {
-  const tz = typeof query.tz === 'string' && query.tz.length > 0 ? query.tz : fallbackTz;
+  const tz = workspaceTz;
+  if (query.tz !== undefined && (typeof query.tz !== 'string' || !isValidTimeZone(query.tz))) {
+    return { error: 'invalid_tz' };
+  }
   try {
     new Intl.DateTimeFormat('en-US', { timeZone: tz });
   } catch {
@@ -66,13 +72,7 @@ export function resolvePayrollMonth(
   if (isPayrollMonth(query.month)) {
     month = query.month;
   } else if (query.month == null) {
-    month = new Intl.DateTimeFormat('en-CA', {
-      timeZone: tz,
-      year: 'numeric',
-      month: '2-digit',
-    })
-      .format(new Date())
-      .slice(0, 7);
+    month = dateKeyInTimeZone(new Date(), tz).slice(0, 7);
   } else {
     return { error: 'invalid_month' };
   }
@@ -88,6 +88,7 @@ export function resolvePayrollMonth(
 }
 
 export async function loadOrCreatePayrollPolicy(workspaceId: string): Promise<PayrollPolicy> {
+  const timezone = await getWorkspaceTimezone(workspaceId);
   return prisma.payrollPolicy.upsert({
     where: { workspaceId },
     create: {
@@ -97,14 +98,15 @@ export async function loadOrCreatePayrollPolicy(workspaceId: string): Promise<Pa
       fullDayLowerMin: PAYROLL_POLICY_DEFAULTS.fullDayLowerMin,
       fullDayUpperMin: PAYROLL_POLICY_DEFAULTS.fullDayUpperMin,
       monthlyLowerMin: PAYROLL_POLICY_DEFAULTS.monthlyLowerMin,
-      timezone: PAYROLL_POLICY_DEFAULTS.timezone,
+      timezone,
       approvalReminderDays: [...PAYROLL_POLICY_DEFAULTS.approvalReminderDays],
       approvalReminderTime: PAYROLL_POLICY_DEFAULTS.approvalReminderTime,
       payrollSheetSendDay: PAYROLL_POLICY_DEFAULTS.payrollSheetSendDay,
       payrollSheetSendTime: PAYROLL_POLICY_DEFAULTS.payrollSheetSendTime,
       sendPayrollSheetTo: recipientModeToDb(PAYROLL_POLICY_DEFAULTS.sendPayrollSheetTo),
     },
-    update: {},
+    // Defensive re-sync for a database restored from before the migration.
+    update: { timezone },
   });
 }
 
@@ -112,15 +114,25 @@ export async function patchPayrollPolicy(
   workspaceId: string,
   patch: Partial<PayrollPolicySettings>,
 ): Promise<PayrollPolicyDto | { error: string }> {
-  const current = toPolicySettings(await loadOrCreatePayrollPolicy(workspaceId));
-  const merged = { ...current, ...patch };
-  const parsed = PayrollPolicySettingsSchema.safeParse(merged);
-  if (!parsed.success) {
-    return { error: parsed.error.issues[0]?.message ?? 'invalid_payroll_policy' };
-  }
-  const saved = await prisma.payrollPolicy.update({
-    where: { workspaceId },
-    data: {
+  return prisma.$transaction(async (tx) => {
+    const workspace = await tx.workspace.findUnique({
+      where: { id: workspaceId },
+      select: { timezone: true },
+    });
+    if (!workspace) return { error: 'workspace_not_found' };
+
+    const existing = await tx.payrollPolicy.findUnique({ where: { workspaceId } });
+    const current: PayrollPolicySettings = existing
+      ? toPolicySettings(existing)
+      : { ...PAYROLL_POLICY_DEFAULTS, timezone: workspace.timezone, approvalReminderDays: [...PAYROLL_POLICY_DEFAULTS.approvalReminderDays] };
+    const parsed = PayrollPolicySettingsSchema.safeParse({ ...current, ...patch });
+    if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? 'invalid_payroll_policy' };
+
+    if (parsed.data.timezone !== workspace.timezone) {
+      await setWorkspaceTimezone(tx, workspaceId, parsed.data.timezone);
+    }
+
+    const data = {
       halfDayLowerMin: parsed.data.halfDayLowerMin,
       halfDayUpperMin: parsed.data.halfDayUpperMin,
       fullDayLowerMin: parsed.data.fullDayLowerMin,
@@ -132,9 +144,12 @@ export async function patchPayrollPolicy(
       payrollSheetSendDay: parsed.data.payrollSheetSendDay,
       payrollSheetSendTime: parsed.data.payrollSheetSendTime,
       sendPayrollSheetTo: recipientModeToDb(parsed.data.sendPayrollSheetTo),
-    },
+    };
+    const saved = existing
+      ? await tx.payrollPolicy.update({ where: { workspaceId }, data })
+      : await tx.payrollPolicy.create({ data: { workspaceId, ...data } });
+    return toPolicyDto(saved);
   });
-  return toPolicyDto(saved);
 }
 
 export async function buildPayrollPayload(

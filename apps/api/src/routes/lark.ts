@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import { prisma } from '@grind/db';
 import { requireAccessToken } from '../middleware/auth';
+import { attachScope } from '../middleware/scope';
+import { dateKeyInTimeZone, isValidTimeZone } from '@grind/types';
 import { logger } from '../logger';
 import {
   isLarkConfigured,
@@ -80,7 +82,7 @@ larkRouter.get('/oauth/callback', async (req, res) => {
 });
 
 // Everything below requires a Grind access token.
-larkRouter.use(requireAccessToken);
+larkRouter.use(requireAccessToken, attachScope);
 
 /**
  * Begin the OAuth flow: returns the authorize URL for the agent to open in the
@@ -143,7 +145,12 @@ larkRouter.get('/my-tasks', async (req, res, next) => {
     const nowMs = Date.now();
     const rawDate = typeof req.query.date === 'string' && req.query.date.length > 0 ? req.query.date : null;
     const rawTz = typeof req.query.tz === 'string' && req.query.tz.length > 0 ? req.query.tz : null;
-    const dayWindow = rawDate || rawTz ? localDayWindow(rawDate ?? new Date(nowMs).toISOString().slice(0, 10), rawTz ?? 'UTC') : null;
+    if (!req.scope) return res.status(500).json({ error: 'scope_unresolved' });
+    if (req.query.tz !== undefined && (!rawTz || !isValidTimeZone(rawTz))) {
+      return res.status(400).json({ error: 'invalid_date_or_tz' });
+    }
+    const timezone = req.scope.workspaceTimezone;
+    const dayWindow = rawDate || rawTz ? localDayWindow(rawDate ?? dateKeyInTimeZone(nowMs, timezone), timezone) : null;
     if ((rawDate || rawTz) && !dayWindow) return res.status(400).json({ error: 'invalid_date_or_tz' });
 
     // Enrich with time already tracked against each task via Grind.

@@ -15,6 +15,7 @@ declare global {
       apiToken?: {
         id: string;
         workspaceId: string;
+        workspaceTimezone: string;
         createdById: string;
         scopes: ApiTokenScope[];
       };
@@ -50,6 +51,7 @@ export function requireApiToken(requiredScopes: readonly ApiTokenScope[]): Reque
           tokenHash: true,
           scopes: true,
           revokedAt: true,
+          workspace: { select: { timezone: true } },
           createdBy: {
             select: {
               role: true,
@@ -78,6 +80,7 @@ export function requireApiToken(requiredScopes: readonly ApiTokenScope[]): Reque
       req.apiToken = {
         id: token.id,
         workspaceId: token.workspaceId,
+        workspaceTimezone: token.workspace.timezone,
         createdById: token.createdById,
         scopes,
       };

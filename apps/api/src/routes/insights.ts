@@ -8,7 +8,7 @@ import type { RoleTitle } from '../scoring/presets';
 import { buildDayInsight, localDayWindow, shiftDayWindow } from '../insights/day';
 import { loadEntryLiveEvidence, type EntryLiveEvidenceMap } from '../insights/liveEntryEvidence';
 import { resolveEffectiveEntrySegmentEnds } from '../insights/openSegmentEvidence';
-import { WEEKDAYS, type ShiftSchedule } from '@grind/types';
+import { WEEKDAYS, dateKeyInTimeZone, isValidTimeZone, zonedDateTimeParts, type ShiftSchedule } from '@grind/types';
 import { buildHeatmap, DEFAULT_BUCKET_MS, type HeatmapSample } from '../insights/heatmap';
 import { buildAppUsage } from '../insights/appUsage';
 import { resolveAppIcon, storedIconDataUrls } from '../insights/appIcon';
@@ -33,14 +33,9 @@ function resolveTargetUserId(req: { user?: { sub: string }; scope?: { userIds: s
   return { ok: true, userId: raw };
 }
 
-const DAY_MS = 24 * 60 * 60 * 1000;
-
-/** Parse YYYY-MM-DD as a UTC day window; default to today (UTC). */
-function dayWindow(day?: string): { start: Date; end: Date } | null {
-  const base = day ? new Date(`${day}T00:00:00.000Z`) : new Date();
-  if (Number.isNaN(base.getTime())) return null;
-  const start = new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth(), base.getUTCDate()));
-  return { start, end: new Date(start.getTime() + DAY_MS) };
+/** Resolve one business-calendar day, never the API host's local calendar. */
+function dayWindow(day: string | undefined, timezone: string): { start: Date; end: Date } | null {
+  return localDayWindow(day ?? dateKeyInTimeZone(new Date(), timezone), timezone);
 }
 
 /**
@@ -55,7 +50,15 @@ function dayWindow(day?: string): { start: Date; end: Date } | null {
 insightsRouter.get('/score', async (req, res, next) => {
   try {
     if (!req.user) return res.status(401).json({ error: 'unauthorized' });
-    const win = dayWindow(typeof req.query.day === 'string' ? req.query.day : undefined);
+    if (!req.scope) return res.status(500).json({ error: 'scope_unresolved' });
+    if (req.query.tz !== undefined && (typeof req.query.tz !== 'string' || !isValidTimeZone(req.query.tz))) {
+      return res.status(400).json({ error: 'invalid_tz' });
+    }
+    const timezone = req.scope.workspaceTimezone;
+    const requestedDay = typeof req.query.day === 'string'
+      ? req.query.day
+      : dateKeyInTimeZone(new Date(), timezone);
+    const win = dayWindow(requestedDay, timezone);
     if (!win) return res.status(400).json({ error: 'invalid_day' });
 
     const [user, samplesRaw, entries, invalidations] = await Promise.all([
@@ -119,11 +122,11 @@ insightsRouter.get('/score', async (req, res, next) => {
       totals.clicks += s.clicks;
       totals.mouseDistancePx += s.mouseDistancePx;
       totals.scrollEvents += s.scrollEvents;
-      byHour[new Date(s.bucketStart).getUTCHours()]! += s.keystrokes + s.clicks;
+      byHour[zonedDateTimeParts(s.bucketStart, timezone).hour]! += s.keystrokes + s.clicks;
     }
 
     res.json({
-      day: win.start.toISOString().slice(0, 10),
+      day: requestedDay,
       role,
       score: day,
       totals,
@@ -149,8 +152,12 @@ insightsRouter.get('/score', async (req, res, next) => {
 insightsRouter.get('/day', async (req, res, next) => {
   try {
     if (!req.user) return res.status(401).json({ error: 'unauthorized' });
-    const date = typeof req.query.date === 'string' ? req.query.date : new Date().toISOString().slice(0, 10);
-    const tz = typeof req.query.tz === 'string' && req.query.tz.length > 0 ? req.query.tz : 'UTC';
+    if (!req.scope) return res.status(500).json({ error: 'scope_unresolved' });
+    if (req.query.tz !== undefined && (typeof req.query.tz !== 'string' || !isValidTimeZone(req.query.tz))) {
+      return res.status(400).json({ error: 'invalid_tz' });
+    }
+    const tz = req.scope.workspaceTimezone;
+    const date = typeof req.query.date === 'string' ? req.query.date : dateKeyInTimeZone(new Date(), tz);
     const win = localDayWindow(date, tz);
     if (!win) return res.status(400).json({ error: 'invalid_date_or_tz' });
 

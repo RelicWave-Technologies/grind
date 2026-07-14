@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { prisma, type Prisma } from '@grind/db';
 import { z } from 'zod';
+import { TimeZoneSchema, dateKeyInTimeZone } from '@grind/types';
 import { requireApiToken } from '../middleware/apiToken';
 import { buildTimesheetMatrix, dateRange, type TimesheetSegmentInput } from '../insights/timesheets';
 import { localDayWindow } from '../insights/day';
@@ -18,13 +19,13 @@ const MAX_LIMIT = 200;
 const MAX_SUMMARY_DAYS = 31;
 
 const DateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
-const TimezoneSchema = z.string().trim().min(1).max(80).default('UTC');
+const OptionalTimezoneSchema = TimeZoneSchema.optional();
 const LimitSchema = z.coerce.number().int().min(1).max(MAX_LIMIT).default(100);
 const OptionalTextSchema = z.string().trim().min(1).max(120).optional();
 const OptionalDateRangeSchema = z.object({
   from: DateSchema.optional(),
   to: DateSchema.optional(),
-  tz: TimezoneSchema,
+  tz: OptionalTimezoneSchema,
 });
 
 const deviceSelect = {
@@ -147,6 +148,13 @@ function workspaceId(req: Express.Request): string {
   return req.apiToken.workspaceId;
 }
 
+/** Explicit query timezone is an opt-in alternate view; normal MCP reads use
+ * the token workspace's business calendar, never the API host timezone. */
+function requestedTimezone(req: Express.Request, explicitTimezone: string | undefined): string {
+  if (!req.apiToken) throw new Error('api_token_missing_after_auth');
+  return explicitTimezone ?? req.apiToken.workspaceTimezone;
+}
+
 function userSearch(q: string | undefined): Prisma.UserWhereInput {
   if (!q) return {};
   return {
@@ -157,19 +165,8 @@ function userSearch(q: string | undefined): Prisma.UserWhereInput {
   };
 }
 
-function todayForTz(tz: string): string | null {
-  try {
-    return new Intl.DateTimeFormat('en-CA', {
-      timeZone: tz,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    })
-      .format(new Date())
-      .slice(0, 10);
-  } catch {
-    return null;
-  }
+function todayForTz(tz: string): string {
+  return dateKeyInTimeZone(new Date(), tz);
 }
 
 function addDaysIso(date: string, days: number): string {
@@ -178,9 +175,9 @@ function addDaysIso(date: string, days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-function yesterdayForTz(tz: string): string | null {
+function yesterdayForTz(tz: string): string {
   const today = todayForTz(tz);
-  return today ? addDaysIso(today, -1) : null;
+  return addDaysIso(today, -1);
 }
 
 function validateRange(input: { from: string; to: string; tz: string }) {
@@ -192,7 +189,7 @@ function validateRange(input: { from: string; to: string; tz: string }) {
   return { from: input.from, to: input.to, tz: input.tz, fromWindow, toWindow, days };
 }
 
-function resolveOptionalRange(input: z.infer<typeof OptionalDateRangeSchema>) {
+function resolveOptionalRange(input: { from?: string; to?: string; tz: string }) {
   if (input.from || input.to) {
     if (!input.from || !input.to) return { error: 'from_and_to_required' as const };
     const range = validateRange({ from: input.from, to: input.to, tz: input.tz });
@@ -200,7 +197,6 @@ function resolveOptionalRange(input: z.infer<typeof OptionalDateRangeSchema>) {
   }
 
   const today = todayForTz(input.tz);
-  if (!today) return { error: 'invalid_tz' as const };
   const range = validateRange({ from: today, to: today, tz: input.tz });
   return range ?? { error: 'invalid_date_range' as const, maxDays: MAX_SUMMARY_DAYS };
 }
@@ -682,11 +678,11 @@ mcpRouter.get('/workspace-overview', requireApiToken([
   'read:manual-time',
 ]), async (req, res, next) => {
   try {
-    const query = z.object({ tz: TimezoneSchema }).safeParse(req.query);
+    const query = z.object({ tz: OptionalTimezoneSchema }).safeParse(req.query);
     if (!query.success) return res.status(400).json({ error: 'invalid_query', issues: query.error.issues });
 
     const ws = workspaceId(req);
-    const range = resolveOptionalRange({ tz: query.data.tz });
+    const range = resolveOptionalRange({ tz: requestedTimezone(req, query.data.tz) });
     if ('error' in range) return res.status(400).json(range);
 
     const now = new Date();
@@ -845,7 +841,7 @@ mcpRouter.get('/user-detail', requireApiToken([
       return res.status(400).json({ error: 'user_lookup_required' });
     }
 
-    const range = resolveOptionalRange(query.data);
+    const range = resolveOptionalRange({ ...query.data, tz: requestedTimezone(req, query.data.tz) });
     if ('error' in range) return res.status(400).json(range);
 
     const where: Prisma.UserWhereInput = {
@@ -1098,7 +1094,7 @@ mcpRouter.get('/team-summary', requireApiToken(['read:people', 'read:device-heal
     }).safeParse(req.query);
     if (!query.success) return res.status(400).json({ error: 'invalid_query', issues: query.error.issues });
 
-    const range = resolveOptionalRange(query.data);
+    const range = resolveOptionalRange({ ...query.data, tz: requestedTimezone(req, query.data.tz) });
     if ('error' in range) return res.status(400).json(range);
 
     const teams = await prisma.team.findMany({
@@ -1194,17 +1190,17 @@ mcpRouter.get('/break-summary', requireApiToken(['read:people', 'read:time-summa
       role: z.enum(['ADMIN', 'MANAGER', 'MEMBER']).optional(),
       from: DateSchema.optional(),
       to: DateSchema.optional(),
-      tz: TimezoneSchema,
+      tz: OptionalTimezoneSchema,
       minBreakMinutes: z.coerce.number().int().min(1).max(240).default(5),
       lunchMinMinutes: z.coerce.number().int().min(10).max(240).default(30),
       limit: LimitSchema,
     }).safeParse(req.query);
     if (!query.success) return res.status(400).json({ error: 'invalid_query', issues: query.error.issues });
 
-    const from = query.data.from ?? yesterdayForTz(query.data.tz);
+    const tz = requestedTimezone(req, query.data.tz);
+    const from = query.data.from ?? yesterdayForTz(tz);
     const to = query.data.to ?? from;
-    if (!from || !to) return res.status(400).json({ error: 'invalid_tz' });
-    const range = validateRange({ from, to, tz: query.data.tz });
+    const range = validateRange({ from, to, tz });
     if (!range) return res.status(400).json({ error: 'invalid_date_range', maxDays: MAX_SUMMARY_DAYS });
 
     const users = await prisma.user.findMany({
@@ -1418,12 +1414,12 @@ mcpRouter.get('/time-summary', requireApiToken(['read:time-summary']), async (re
     const query = z.object({
       from: DateSchema,
       to: DateSchema,
-      tz: TimezoneSchema,
+      tz: OptionalTimezoneSchema,
       userId: z.string().trim().min(1).max(120).optional(),
     }).safeParse(req.query);
     if (!query.success) return res.status(400).json({ error: 'invalid_query', issues: query.error.issues });
 
-    const range = validateRange(query.data);
+    const range = validateRange({ ...query.data, tz: requestedTimezone(req, query.data.tz) });
     if (!range) return res.status(400).json({ error: 'invalid_date_range', maxDays: MAX_SUMMARY_DAYS });
 
     const users = await prisma.user.findMany({
@@ -1468,7 +1464,7 @@ mcpRouter.get('/manual-time-requests', requireApiToken(['read:manual-time']), as
       status: z.enum(['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED']).optional(),
       from: DateSchema.optional(),
       to: DateSchema.optional(),
-      tz: TimezoneSchema,
+      tz: OptionalTimezoneSchema,
       limit: LimitSchema,
     }).safeParse(req.query);
     if (!query.success) return res.status(400).json({ error: 'invalid_query', issues: query.error.issues });
@@ -1476,7 +1472,11 @@ mcpRouter.get('/manual-time-requests', requireApiToken(['read:manual-time']), as
     let requestedRange: { requestedStart: { lt: Date }; requestedEnd: { gt: Date } } | undefined;
     if (query.data.from || query.data.to) {
       if (!query.data.from || !query.data.to) return res.status(400).json({ error: 'from_and_to_required' });
-      const range = validateRange({ from: query.data.from, to: query.data.to, tz: query.data.tz });
+      const range = validateRange({
+        from: query.data.from,
+        to: query.data.to,
+        tz: requestedTimezone(req, query.data.tz),
+      });
       if (!range) return res.status(400).json({ error: 'invalid_date_range', maxDays: MAX_SUMMARY_DAYS });
       requestedRange = {
         requestedStart: { lt: range.toWindow.end },
@@ -1548,7 +1548,7 @@ mcpRouter.get('/activity-flags-summary', requireApiToken(['read:people', 'read:t
       status: z.enum(['OPEN', 'RESOLVED']).optional(),
       from: DateSchema.optional(),
       to: DateSchema.optional(),
-      tz: TimezoneSchema,
+      tz: OptionalTimezoneSchema,
       limit: LimitSchema,
     }).safeParse(req.query);
     if (!query.success) return res.status(400).json({ error: 'invalid_query', issues: query.error.issues });
@@ -1556,7 +1556,11 @@ mcpRouter.get('/activity-flags-summary', requireApiToken(['read:people', 'read:t
     let windowRange: { windowStart: { lt: Date; gte?: Date } } | undefined;
     if (query.data.from || query.data.to) {
       if (!query.data.from || !query.data.to) return res.status(400).json({ error: 'from_and_to_required' });
-      const range = validateRange({ from: query.data.from, to: query.data.to, tz: query.data.tz });
+      const range = validateRange({
+        from: query.data.from,
+        to: query.data.to,
+        tz: requestedTimezone(req, query.data.tz),
+      });
       if (!range) return res.status(400).json({ error: 'invalid_date_range', maxDays: MAX_SUMMARY_DAYS });
       windowRange = { windowStart: { gte: range.fromWindow.start, lt: range.toWindow.end } };
     }

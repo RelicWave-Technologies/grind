@@ -51,8 +51,7 @@ payrollRouter.patch('/policy', async (req, res, next) => {
 payrollRouter.get('/monthly', async (req, res, next) => {
   try {
     if (!req.scope) return res.status(500).json({ error: 'scope_unresolved' });
-    const policy = await loadOrCreatePayrollPolicy(req.scope.workspaceId);
-    const range = resolvePayrollMonth(req.query, policy.timezone);
+    const range = resolvePayrollMonth(req.query, req.scope.workspaceTimezone);
     if ('error' in range) return res.status(400).json({ error: range.error });
     const result = await buildPayrollPayload(req.scope.workspaceId, range);
     if ('error' in result) return res.status(400).json({ error: result.error });
@@ -65,8 +64,7 @@ payrollRouter.get('/monthly', async (req, res, next) => {
 payrollRouter.get('/monthly.csv', async (req, res, next) => {
   try {
     if (!req.scope) return res.status(500).json({ error: 'scope_unresolved' });
-    const policy = await loadOrCreatePayrollPolicy(req.scope.workspaceId);
-    const range = resolvePayrollMonth(req.query, policy.timezone);
+    const range = resolvePayrollMonth(req.query, req.scope.workspaceTimezone);
     if ('error' in range) return res.status(400).json({ error: range.error });
     const result = await buildPayrollPayload(req.scope.workspaceId, range);
     if ('error' in result) return res.status(400).json({ error: result.error });

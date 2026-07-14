@@ -1,6 +1,7 @@
 import './team.css';
 import { useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useRouteContext } from '@tanstack/react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowUpRight, Check, Pencil, RotateCcw, Save, Users, X } from 'lucide-react';
 import type {
@@ -11,9 +12,9 @@ import type {
   TeamSettingsResponse,
   WorkspacePolicyDto,
 } from '@grind/types';
-import { SCREENSHOT_INTERVAL_OPTIONS } from '@grind/types';
+import { SCREENSHOT_INTERVAL_OPTIONS, dateKeyInTimeZone } from '@grind/types';
 import { api } from '../lib/api';
-import { useMe, type Role } from '../lib/auth';
+import type { Role } from '../lib/auth';
 import {
   Avatar,
   Banner,
@@ -59,7 +60,7 @@ const IDLE_THRESHOLD_OPTIONS = [1, 3, 5, 10, 15, 30, 45, 60, 120];
 
 export function TeamScreen() {
   const queryClient = useQueryClient();
-  const meQ = useMe();
+  const { me } = useRouteContext({ from: '/authed' });
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [pendingEdit, setPendingEdit] = useState<PendingEdit>(null);
   const [rowDraft, setRowDraft] = useState<RowDraft>(null);
@@ -99,8 +100,8 @@ export function TeamScreen() {
   const shifts = settingsQ.data?.shifts ?? [];
   const summary = useMemo(() => summarizeMembers(members), [members]);
   const policy = policyQ.data;
-  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-  const today = localDateKey();
+  const tz = me.workspaceTimezone;
+  const today = dateKeyInTimeZone(Date.now(), tz);
   const drawerFrom = addLocalDays(today, -6);
 
   function patchMember(userId: string, field: PendingField, patch: PatchTeamMemberSettingsRequest) {
@@ -244,8 +245,8 @@ export function TeamScreen() {
             <TeamSettingsTable
               members={members}
               shifts={shifts}
-              currentUserId={meQ.data?.id ?? null}
-              currentUserRole={meQ.data?.role ?? null}
+              currentUserId={me.id}
+              currentUserRole={me.role}
               pendingEdit={pendingEdit}
               rowDraft={rowDraft}
               onStartEdit={startRowEdit}
@@ -621,16 +622,13 @@ function TeamMonitoringRiskModal({
 }
 
 function localDateKey(d = new Date()): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
+  return d.toISOString().slice(0, 10);
 }
 
 function addLocalDays(key: string, delta: number): string {
   const parts = key.split('-').map(Number);
-  const y = parts[0] ?? new Date().getFullYear();
+  const y = parts[0] ?? new Date().getUTCFullYear();
   const m = parts[1] ?? 1;
   const d = parts[2] ?? 1;
-  return localDateKey(new Date(y, m - 1, d + delta));
+  return localDateKey(new Date(Date.UTC(y, m - 1, d + delta, 12)));
 }

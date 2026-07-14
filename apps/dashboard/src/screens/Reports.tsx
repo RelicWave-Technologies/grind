@@ -22,9 +22,15 @@ import {
   X,
 } from 'lucide-react';
 import { api, API_BASE } from '../lib/api';
-import { fmtAgeShort, fmtDayLabel, fmtDurationMs, fmtTime } from '../lib/format';
+import { addDays, fmtAgeShort, fmtDayLabel, fmtDurationMs, fmtTime, todayKey } from '../lib/format';
 import { hasCapability, isManagerOrAbove } from '../lib/auth';
-import type { ManualTimeRequestDto } from '@grind/types';
+import {
+  dateKeyInTimeZone,
+  instantForZonedDateTime,
+  localDayWindowInTimeZone,
+  zonedDateTimeParts,
+  type ManualTimeRequestDto,
+} from '@grind/types';
 import type { SelfProfileResponse } from '@grind/types/profile';
 import type { ShiftSchedule, Weekday } from '@grind/types/shifts';
 import type {
@@ -98,9 +104,9 @@ const WEEKDAY_LABELS: ReadonlyArray<{ key: Weekday; label: string }> = [
 
 export function ReportsScreen() {
   const { me } = useRouteContext({ from: '/authed' });
-  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-  const today = localDateKey();
-  const [from, setFrom] = useState(() => addLocalDays(today, -6));
+  const tz = me.workspaceTimezone;
+  const today = todayKey(tz);
+  const [from, setFrom] = useState(() => addDays(today, -6));
   const [to, setTo] = useState(today);
   const [modal, setModal] = useState<ReportModalState | null>(null);
   const canReadTeam = hasCapability(me, 'reports.team.read');
@@ -176,7 +182,7 @@ export function ReportsScreen() {
     setModal(null);
     setMemberDrawer(null);
     if (nextMode === 'team' && daysBetween(from, to) > 30) {
-      setFrom(addLocalDays(to, -30));
+      setFrom(addDays(to, -30));
     }
     setMode(nextMode);
   }
@@ -209,6 +215,7 @@ export function ReportsScreen() {
               from={from}
               to={to}
               today={today}
+              timeZone={tz}
               maxDays={activeMode === 'team' ? 31 : 60}
               onChange={applyCalendarRange}
             />
@@ -263,7 +270,7 @@ export function ReportsScreen() {
 
       {modal?.kind === 'apps' && (
         <ReportModal
-          title={`Apps · ${fmtDayLabel(modal.date)}`}
+          title={`Apps · ${fmtDayLabel(modal.date, tz)}`}
           subtitle={modal.date}
           size="sm"
           onClose={() => setModal(null)}
@@ -276,7 +283,7 @@ export function ReportsScreen() {
 
       {modal?.kind === 'activity' && (
         <ReportModal
-          title={`Activity · ${fmtDayLabel(modal.date)}`}
+          title={`Activity · ${fmtDayLabel(modal.date, tz)}`}
           subtitle={modal.date}
           size="md"
           onClose={() => setModal(null)}
@@ -289,7 +296,7 @@ export function ReportsScreen() {
 
       {modal?.kind === 'timeline' && (
         <ReportModal
-          title={`Timeline · ${fmtDayLabel(modal.date)}`}
+          title={`Timeline · ${fmtDayLabel(modal.date, tz)}`}
           subtitle={modal.date}
           size="lg"
           onClose={() => setModal(null)}
@@ -298,7 +305,7 @@ export function ReportsScreen() {
           {timelineQ.isError && <Banner status="danger">{(timelineQ.error as Error).message}</Banner>}
           {timelineQ.data && (
             <div className="rep-timeline-modal">
-              <DayRibbon day={timelineQ.data} now={Date.now()} editable={false} />
+              <DayRibbon day={timelineQ.data} now={Date.now()} timeZone={tz} editable={false} />
               {timelineQ.data.activity && timelineQ.data.activity.buckets.length > 0 && (
                 <ActivityHeatmap day={timelineQ.data} heatmap={timelineQ.data.activity} />
               )}
@@ -351,7 +358,7 @@ function SelfReportTable({
                 <Tr key={day.date} rail={railForDay(day)}>
                   <Td className="rep-col-date">
                     <div className="rep-date-cell">
-                      <span className="ui-t-strong">{fmtDayLabel(day.date)}</span>
+                      <span className="ui-t-strong">{fmtDayLabel(day.date, tz)}</span>
                       <span className="ui-t-small ui-ink-3">{day.date}</span>
                     </div>
                   </Td>
@@ -705,7 +712,7 @@ export function TeamMemberDetailDrawer({
 
       {modal?.kind === 'apps' && (
         <ReportModal
-          title={`Apps · ${fmtDayLabel(modal.date)}`}
+          title={`Apps · ${fmtDayLabel(modal.date, tz)}`}
           subtitle={modal.date}
           size="sm"
           onClose={() => setModal(null)}
@@ -718,7 +725,7 @@ export function TeamMemberDetailDrawer({
 
       {modal?.kind === 'activity' && (
         <ReportModal
-          title={`Activity · ${fmtDayLabel(modal.date)}`}
+          title={`Activity · ${fmtDayLabel(modal.date, tz)}`}
           subtitle={modal.date}
           size="md"
           onClose={() => setModal(null)}
@@ -731,7 +738,7 @@ export function TeamMemberDetailDrawer({
 
       {modal?.kind === 'timeline' && (
         <ReportModal
-          title={`Timeline · ${fmtDayLabel(modal.date)}`}
+          title={`Timeline · ${fmtDayLabel(modal.date, tz)}`}
           subtitle={modal.date}
           size="lg"
           onClose={() => setModal(null)}
@@ -740,7 +747,7 @@ export function TeamMemberDetailDrawer({
           {timelineQ.isError && <Banner status="danger">{(timelineQ.error as Error).message}</Banner>}
           {timelineQ.data && (
             <div className="rep-timeline-modal">
-              <DayRibbon day={timelineQ.data} now={Date.now()} editable={false} />
+              <DayRibbon day={timelineQ.data} now={Date.now()} timeZone={tz} editable={false} />
               {timelineQ.data.activity && timelineQ.data.activity.buckets.length > 0 && (
                 <ActivityHeatmap day={timelineQ.data} heatmap={timelineQ.data.activity} />
               )}
@@ -829,7 +836,7 @@ function TeamMemberDrawer({
           <div className="rep-drawer-title">
             {identity}
             <div className="rep-drawer-meta">
-              <Tag mono>{formatRangeLabel(from, to)}</Tag>
+              <Tag mono>{formatRangeLabel(from, to, tz)}</Tag>
               {member?.user.teamName && <Tag>{member.user.teamName}</Tag>}
             </div>
           </div>
@@ -838,6 +845,7 @@ function TeamMemberDrawer({
               from={from}
               to={to}
               today={today}
+              timeZone={tz}
               maxDays={60}
               onChange={(nextFrom, nextTo) => {
                 setFrom(nextFrom);
@@ -1025,7 +1033,7 @@ function TeamMemberApprovalsPanel({
                 >
                   <Td className="rep-drawer-apv-col-date">
                     <div className="rep-drawer-approval-date">
-                      <span className="ui-t-strong">{fmtDayLabel(date)}</span>
+                      <span className="ui-t-strong">{fmtDayLabel(date, tz)}</span>
                       <span className="ui-t-small ui-ink-3">{date}</span>
                     </div>
                   </Td>
@@ -1234,7 +1242,7 @@ function ReportApprovalDetailsModal({
         <header className="rep-approval-detail-head">
           <div>
             <span className="ui-t-eyebrow">{date}</span>
-            <h2 className="ui-t-title">Approval · {fmtDayLabel(date)}</h2>
+            <h2 className="ui-t-title">Approval · {fmtDayLabel(date, tz)}</h2>
           </div>
           <IconButton icon={<X size={16} strokeWidth={1.8} />} aria-label="Close" onClick={onClose} />
         </header>
@@ -1331,7 +1339,7 @@ function ReportApprovalDetailField({ label, children }: { label: string; childre
 }
 
 function TeamMemberProfilePanel({ profile, timezone }: { profile: SelfProfileResponse; timezone: string }) {
-  const todayWindow = profile.shift ? formatScheduleRange(profile.shift.schedule[weekdayKey(new Date())]) : 'Day off';
+  const todayWindow = profile.shift ? formatScheduleRange(profile.shift.schedule[weekdayKey(new Date(), timezone)]) : 'Day off';
   const workingDays = profile.shift ? countWorkingDays(profile.shift.schedule) : 0;
   const captureCount = [profile.policy.captureApps, profile.policy.captureTitles, profile.policy.captureUrls].filter(Boolean).length;
   return (
@@ -1351,14 +1359,14 @@ function TeamMemberProfilePanel({ profile, timezone }: { profile: SelfProfileRes
         <ProfileFact icon={<SunMedium size={16} strokeWidth={1.8} />} label="Shift" value={profile.shift?.name ?? 'No shift'} detail={todayWindow} />
         <ProfileFact icon={<Clock4 size={16} strokeWidth={1.8} />} label="Weekly pattern" value={`${workingDays} working days`} detail={profile.shift ? `${profile.shift.bufferMin} min grace` : 'Full-day timeline'} />
         <ProfileFact icon={<Mail size={16} strokeWidth={1.8} />} label="Email" value={profile.user.email} detail={timezone.replace(/_/g, ' ')} />
-        <ProfileFact icon={<Building2 size={16} strokeWidth={1.8} />} label="Workspace" value={profile.workspace.name} detail={`Member since ${formatLongDate(profile.user.createdAt)}`} />
+        <ProfileFact icon={<Building2 size={16} strokeWidth={1.8} />} label="Workspace" value={profile.workspace.name} detail={`Member since ${formatLongDate(profile.user.createdAt, timezone)}`} />
         <ProfileFact icon={<Shield size={16} strokeWidth={1.8} />} label="Capture" value={`${captureCount}/3 enabled`} detail={`${profile.policy.retentionDaysScreenshots}d screenshot retention`} />
       </div>
 
       {profile.shift && (
         <div className="rep-drawer-week">
           {WEEKDAY_LABELS.map((day) => {
-            const isToday = day.key === weekdayKey(new Date());
+            const isToday = day.key === weekdayKey(new Date(), timezone);
             return (
               <div key={day.key} className={`rep-drawer-week-day${isToday ? ' is-today' : ''}`}>
                 <span className="ui-t-eyebrow">{day.label}</span>
@@ -1389,12 +1397,14 @@ function DateRangePicker({
   from,
   to,
   today,
+  timeZone,
   maxDays,
   onChange,
 }: {
   from: string;
   to: string;
   today: string;
+  timeZone: string;
   maxDays: number;
   onChange: (from: string, to: string) => void;
 }) {
@@ -1440,7 +1450,7 @@ function DateRangePicker({
         aria-haspopup="dialog"
       >
         <CalendarDays size={15} strokeWidth={1.8} />
-        <span>{formatRangeLabel(from, to)}</span>
+        <span>{formatRangeLabel(from, to, timeZone)}</span>
       </button>
 
       {open && (
@@ -1452,7 +1462,7 @@ function DateRangePicker({
               aria-label="Previous month"
               onClick={() => setVisibleMonth(addMonths(visibleMonth, -1))}
             />
-            <span className="ui-t-eyebrow">{formatMonthRange(months[0], months[1])}</span>
+            <span className="ui-t-eyebrow">{formatMonthRange(months[0], months[1], timeZone)}</span>
             <IconButton
               size="sm"
               icon={<ChevronRight size={15} strokeWidth={1.8} />}
@@ -1466,6 +1476,7 @@ function DateRangePicker({
                 key={localDateKey(month)}
                 month={month}
                 today={today}
+                timeZone={timeZone}
                 draftFrom={draftFrom}
                 draftTo={draftTo}
                 maxDays={maxDays}
@@ -1482,6 +1493,7 @@ function DateRangePicker({
 function CalendarMonth({
   month,
   today,
+  timeZone,
   draftFrom,
   draftTo,
   maxDays,
@@ -1489,6 +1501,7 @@ function CalendarMonth({
 }: {
   month: Date;
   today: string;
+  timeZone: string;
   draftFrom: string;
   draftTo: string | null;
   maxDays: number;
@@ -1496,8 +1509,8 @@ function CalendarMonth({
 }) {
   const days = calendarCells(month);
   return (
-    <section className="rep-calendar" aria-label={formatMonthLabel(month)}>
-      <div className="rep-calendar-title">{formatMonthLabel(month)}</div>
+    <section className="rep-calendar" aria-label={formatMonthLabel(month, timeZone)}>
+      <div className="rep-calendar-title">{formatMonthLabel(month, timeZone)}</div>
       <div className="rep-calendar-weekdays" aria-hidden>
         {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d, index) => (
           <span key={`${d}-${index}`}>{d}</span>
@@ -1523,7 +1536,7 @@ function CalendarMonth({
               ].join('')}
               disabled={disabled}
               onClick={() => onChoose(day)}
-              aria-label={formatFullDateLabel(day)}
+              aria-label={formatFullDateLabel(day, timeZone)}
               aria-pressed={inRange}
             >
               {Number(day.slice(-2))}
@@ -1803,78 +1816,9 @@ function memberEditTimeSearch(date: string, userId: string, req: ManualTimeReque
   };
 }
 
-function dateKeyInTimeZone(ms: number, tz: string): string {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: tz,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(new Date(ms));
-  const year = parts.find((part) => part.type === 'year')?.value;
-  const month = parts.find((part) => part.type === 'month')?.value;
-  const day = parts.find((part) => part.type === 'day')?.value;
-  return year && month && day ? `${year}-${month}-${day}` : new Date(ms).toISOString().slice(0, 10);
-}
-
 function localDayWindowMs(date: string, tz: string): { start: number; end: number } | null {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
-  try {
-    new Intl.DateTimeFormat('en-US', { timeZone: tz });
-  } catch {
-    return null;
-  }
-  const [year, month, day] = date.split('-').map((part) => Number.parseInt(part, 10));
-  if (!year || !month || !day) return null;
-  const start = utcInstantForLocalTimeMs(year, month, day, 0, tz);
-  const tomorrow = new Date(Date.UTC(year, month - 1, day + 1));
-  const end = utcInstantForLocalTimeMs(
-    tomorrow.getUTCFullYear(),
-    tomorrow.getUTCMonth() + 1,
-    tomorrow.getUTCDate(),
-    0,
-    tz,
-  );
-  return { start, end };
-}
-
-function utcInstantForLocalTimeMs(
-  year: number,
-  month: number,
-  day: number,
-  minutesOfDay: number,
-  tz: string,
-): number {
-  const fmt = new Intl.DateTimeFormat('en-US', {
-    timeZone: tz,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  });
-  const target = Date.UTC(year, month - 1, day, Math.floor(minutesOfDay / 60), minutesOfDay % 60, 0);
-  let guess = target;
-  for (let iter = 0; iter < 4; iter++) {
-    const parts: Record<string, string> = {};
-    for (const part of fmt.formatToParts(new Date(guess))) {
-      if (part.type !== 'literal') parts[part.type] = part.value;
-    }
-    const hour = parts.hour === '24' ? '00' : parts.hour;
-    const seen = Date.UTC(
-      Number.parseInt(parts.year!, 10),
-      Number.parseInt(parts.month!, 10) - 1,
-      Number.parseInt(parts.day!, 10),
-      Number.parseInt(hour!, 10),
-      Number.parseInt(parts.minute!, 10),
-      Number.parseInt(parts.second!, 10),
-    );
-    const delta = seen - target;
-    if (delta === 0) return guess;
-    guess -= delta;
-  }
-  return guess;
+  const window = localDayWindowInTimeZone(date, tz);
+  return window ? { start: window.start.getTime(), end: window.end.getTime() } : null;
 }
 
 function approvalStatus(status: ManualTimeRequestDto['status']): Status {
@@ -1904,8 +1848,10 @@ function friendlyRole(role: SelfProfileResponse['user']['displayRole']) {
   return 'Member';
 }
 
-function weekdayKey(date: Date): Weekday {
-  return ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'][date.getDay()] as Weekday;
+function weekdayKey(date: Date, timeZone: string): Weekday {
+  const local = zonedDateTimeParts(date, timeZone);
+  const weekday = new Date(Date.UTC(local.year, local.month - 1, local.day)).getUTCDay();
+  return ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'][weekday] as Weekday;
 }
 
 function formatScheduleRange(slot: ShiftSchedule[Weekday] | undefined) {
@@ -1926,11 +1872,12 @@ function formatShiftClock(hhmm: string) {
   return `${hour12}:${String(minute).padStart(2, '0')} ${suffix}`;
 }
 
-function formatLongDate(iso: string) {
+function formatLongDate(iso: string, timeZone: string) {
   return new Intl.DateTimeFormat(undefined, {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
+    timeZone,
   }).format(new Date(iso));
 }
 
@@ -1962,13 +1909,13 @@ function shiftLabel(status: ShiftStatus): string {
   return status.slice(0, 1).toUpperCase() + status.slice(1);
 }
 
-function localDateKey(d = new Date()): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+function localDateKey(d: Date): string {
+  return d.toISOString().slice(0, 10);
 }
 
 function parseDateKey(key: string): Date {
   const [y, m, d] = key.split('-').map((n) => Number.parseInt(n, 10));
-  return new Date(y!, m! - 1, d!);
+  return new Date(Date.UTC(y!, m! - 1, d!, 12));
 }
 
 function compareDateKeys(a: string, b: string): number {
@@ -1982,46 +1929,47 @@ function daysBetween(a: string, b: string): number {
 }
 
 function monthStart(date: Date): Date {
-  return new Date(date.getFullYear(), date.getMonth(), 1);
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1, 12));
 }
 
 function addMonths(date: Date, delta: number): Date {
-  return new Date(date.getFullYear(), date.getMonth() + delta, 1);
-}
-
-function addLocalDays(key: string, delta: number): string {
-  const [y, m, d] = key.split('-').map((n) => Number.parseInt(n, 10));
-  const date = new Date(y!, m! - 1, d! + delta);
-  return localDateKey(date);
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + delta, 1, 12));
 }
 
 function calendarCells(month: Date): Array<string | null> {
   const start = monthStart(month);
-  const firstDay = (start.getDay() + 6) % 7;
-  const count = new Date(start.getFullYear(), start.getMonth() + 1, 0).getDate();
+  const firstDay = (start.getUTCDay() + 6) % 7;
+  const count = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 0)).getUTCDate();
   const cells: Array<string | null> = Array.from({ length: firstDay }, () => null);
   for (let day = 1; day <= count; day += 1) {
-    cells.push(localDateKey(new Date(start.getFullYear(), start.getMonth(), day)));
+    cells.push(localDateKey(new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), day, 12))));
   }
   return cells;
 }
 
-function formatRangeLabel(from: string, to: string): string {
-  return `${formatShortDateLabel(from)} - ${formatShortDateLabel(to)}`;
+function calendarDateInstant(key: string, timeZone: string): Date {
+  const [year, month, day] = key.split('-').map((part) => Number.parseInt(part, 10));
+  return instantForZonedDateTime({ year: year!, month: month!, day: day!, hour: 12, minute: 0, second: 0 }, timeZone);
 }
 
-function formatShortDateLabel(key: string): string {
-  return parseDateKey(key).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+function formatRangeLabel(from: string, to: string, timeZone: string): string {
+  return `${formatShortDateLabel(from, timeZone)} - ${formatShortDateLabel(to, timeZone)}`;
 }
 
-function formatFullDateLabel(key: string): string {
-  return parseDateKey(key).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+function formatShortDateLabel(key: string, timeZone: string): string {
+  return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', timeZone }).format(calendarDateInstant(key, timeZone));
 }
 
-function formatMonthLabel(date: Date): string {
-  return date.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+function formatFullDateLabel(key: string, timeZone: string): string {
+  return new Intl.DateTimeFormat(undefined, {
+    weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', timeZone,
+  }).format(calendarDateInstant(key, timeZone));
 }
 
-function formatMonthRange(first: Date, second: Date): string {
-  return `${formatMonthLabel(first)} / ${formatMonthLabel(second)}`;
+function formatMonthLabel(date: Date, timeZone: string): string {
+  return new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric', timeZone }).format(date);
+}
+
+function formatMonthRange(first: Date, second: Date, timeZone: string): string {
+  return `${formatMonthLabel(first, timeZone)} / ${formatMonthLabel(second, timeZone)}`;
 }

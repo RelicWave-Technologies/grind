@@ -23,6 +23,8 @@ export interface ApprovalCardInput {
   startedAt: number; // epoch ms
   endedAt: number; // epoch ms
   reason: string;
+  /** Workspace business timezone for every calendar value in this card. */
+  timeZone: string;
 }
 
 export interface DecidedCardInput extends ApprovalCardInput {
@@ -59,16 +61,21 @@ export interface PayrollReminderCardInput {
   requests: PayrollReminderItem[];
   dashboardUrl?: string;
   generatedAt?: number;
+  /** Recipient workspace timezone for every calendar value in this card. */
+  timeZone: string;
 }
 
-function fmtRange(startMs: number, endMs: number): string {
-  const start = new Date(startMs);
-  const end = new Date(endMs);
-  const sameDay = start.toDateString() === end.toDateString();
+function formatAt(ms: number, timeZone: string, options: Intl.DateTimeFormatOptions): string {
+  return new Intl.DateTimeFormat('en-US', { timeZone, ...options }).format(new Date(ms));
+}
+
+function fmtRange(startMs: number, endMs: number, timeZone: string): string {
+  const sameDay = formatAt(startMs, timeZone, { year: 'numeric', month: '2-digit', day: '2-digit' })
+    === formatAt(endMs, timeZone, { year: 'numeric', month: '2-digit', day: '2-digit' });
   const dOpts: Intl.DateTimeFormatOptions = { weekday: 'short', month: 'short', day: 'numeric' };
   const tOpts: Intl.DateTimeFormatOptions = { hour: 'numeric', minute: '2-digit' };
-  if (sameDay) return `${start.toLocaleDateString(undefined, dOpts)} · ${start.toLocaleTimeString(undefined, tOpts)} – ${end.toLocaleTimeString(undefined, tOpts)}`;
-  return `${start.toLocaleString(undefined, { ...dOpts, ...tOpts })} → ${end.toLocaleString(undefined, { ...dOpts, ...tOpts })}`;
+  if (sameDay) return `${formatAt(startMs, timeZone, dOpts)} · ${formatAt(startMs, timeZone, tOpts)} – ${formatAt(endMs, timeZone, tOpts)}`;
+  return `${formatAt(startMs, timeZone, { ...dOpts, ...tOpts })} → ${formatAt(endMs, timeZone, { ...dOpts, ...tOpts })}`;
 }
 
 function fmtDurationMinutes(ms: number): string {
@@ -88,15 +95,24 @@ function fmtAge(ms: number | undefined): string {
   return rest ? `${days}d ${rest}h` : `${days}d`;
 }
 
-function fmtClockRange(startMs: number, endMs: number): string {
-  const start = new Date(startMs);
-  const end = new Date(endMs);
+function fmtClockRange(startMs: number, endMs: number, timeZone: string): string {
   const dOpts: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric' };
   const tOpts: Intl.DateTimeFormatOptions = { hour: 'numeric', minute: '2-digit' };
-  if (start.toDateString() === end.toDateString()) {
-    return `${start.toLocaleDateString(undefined, dOpts)} · ${start.toLocaleTimeString(undefined, tOpts)} – ${end.toLocaleTimeString(undefined, tOpts)}`;
+  const sameDay = formatAt(startMs, timeZone, { year: 'numeric', month: '2-digit', day: '2-digit' })
+    === formatAt(endMs, timeZone, { year: 'numeric', month: '2-digit', day: '2-digit' });
+  if (sameDay) {
+    return `${formatAt(startMs, timeZone, dOpts)} · ${formatAt(startMs, timeZone, tOpts)} – ${formatAt(endMs, timeZone, tOpts)}`;
   }
-  return `${start.toLocaleString(undefined, { ...dOpts, ...tOpts })} → ${end.toLocaleString(undefined, { ...dOpts, ...tOpts })}`;
+  return `${formatAt(startMs, timeZone, { ...dOpts, ...tOpts })} → ${formatAt(endMs, timeZone, { ...dOpts, ...tOpts })}`;
+}
+
+function fmtTimestamp(ms: number, timeZone: string): string {
+  return formatAt(ms, timeZone, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
 }
 
 function truncate(s: string, n: number): string {
@@ -108,7 +124,7 @@ function detailFields(req: ApprovalCardInput) {
   const fields: Array<{ is_short: boolean; text: { tag: 'lark_md'; content: string } }> = [
     { is_short: true, text: { tag: 'lark_md', content: `**Who**\n${req.requesterName}` } },
     { is_short: true, text: { tag: 'lark_md', content: `**Duration**\n${fmtDurationMinutes(req.endedAt - req.startedAt)}` } },
-    { is_short: false, text: { tag: 'lark_md', content: `**When**\n${fmtRange(req.startedAt, req.endedAt)}` } },
+    { is_short: false, text: { tag: 'lark_md', content: `**When**\n${fmtRange(req.startedAt, req.endedAt, req.timeZone)}` } },
   ];
   fields.push({
     is_short: false,
@@ -187,7 +203,7 @@ export function buildSupersededCard(req: SupersededCardInput): Record<string, un
         tag: 'div',
         text: {
           tag: 'lark_md',
-          content: `**This request was updated** at ${new Date(req.supersededAt).toLocaleString()}. See the new card below — these buttons no longer apply.`,
+          content: `**This request was updated** at ${fmtTimestamp(req.supersededAt, req.timeZone)}. See the new card below — these buttons no longer apply.`,
         },
       },
     ],
@@ -270,7 +286,7 @@ export function buildCancelledCard(req: CancelledCardInput): Record<string, unkn
         tag: 'div',
         text: {
           tag: 'lark_md',
-          content: `**Withdrawn by ${req.requesterName}** · ${new Date(req.cancelledAt).toLocaleString()}. You can ignore this card.`,
+          content: `**Withdrawn by ${req.requesterName}** · ${fmtTimestamp(req.cancelledAt, req.timeZone)}. You can ignore this card.`,
         },
       },
     ],
@@ -346,7 +362,7 @@ export function buildDecidedCard(req: DecidedCardInput): Record<string, unknown>
         tag: 'div',
         text: {
           tag: 'lark_md',
-          content: `**${approved ? 'Approved' : 'Rejected'}** by ${req.decidedByName} · ${new Date(req.decidedAt).toLocaleString()}`,
+          content: `**${approved ? 'Approved' : 'Rejected'}** by ${req.decidedByName} · ${fmtTimestamp(req.decidedAt, req.timeZone)}`,
         },
       },
     ],
@@ -369,7 +385,7 @@ export function buildPayrollReminderCard(input: PayrollReminderCardInput): Recor
       const age = req.ageMs !== undefined ? ` · waiting ${fmtAge(req.ageMs)}` : '';
       return [
         `**${index + 1}. ${req.requesterName}** · ${fmtDurationMinutes(req.endedAt - req.startedAt)}${age}`,
-        `${fmtClockRange(req.startedAt, req.endedAt)} · ${task}`,
+        `${fmtClockRange(req.startedAt, req.endedAt, input.timeZone)} · ${task}`,
         `_${truncate(req.reason, 110)}_`,
       ].join('\n');
     }).join('\n\n')
@@ -415,7 +431,7 @@ export function buildPayrollReminderCard(input: PayrollReminderCardInput): Recor
     tag: 'div',
     text: {
       tag: 'lark_md',
-      content: input.generatedAt ? `_Generated ${new Date(input.generatedAt).toLocaleString()}_` : '_Generated by Timo payroll month close_',
+      content: input.generatedAt ? `_Generated ${fmtTimestamp(input.generatedAt, input.timeZone)}_` : '_Generated by Timo payroll month close_',
     },
   });
   if (input.dashboardUrl) {

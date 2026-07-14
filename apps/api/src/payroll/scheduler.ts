@@ -1,4 +1,5 @@
 import { prisma, type PayrollRunStatus, type PayrollRunType } from '@grind/db';
+import { instantForZonedDateTime, zonedDateTimeParts } from '@grind/types';
 import { buildPendingDigests } from '../digests/pendingDigest';
 import { localDayWindow } from '../insights/day';
 import { getLarkMessenger, type LarkMessenger } from '../lark';
@@ -178,6 +179,7 @@ export async function sendApprovalReminders(
           requests: reminderItemsFromRequests(group, now.getTime()),
           dashboardUrl: dashboardLink('/approvals'),
           generatedAt: now.getTime(),
+          timeZone: tz,
         }),
       );
       sentCount += 1;
@@ -224,6 +226,7 @@ export async function sendApprovalReminders(
           requests: reminderItemsFromDigest(digest),
           dashboardUrl: dashboardLink('/approvals'),
           generatedAt: now.getTime(),
+          timeZone: tz,
         }),
       );
       sentCount += 1;
@@ -319,26 +322,33 @@ function isUniqueError(err: unknown): boolean {
 }
 
 function localParts(now: Date, tz: string): { date: string; day: number; minutes: number } {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: tz,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).formatToParts(now);
-  const pick = (type: string) => parts.find((p) => p.type === type)?.value ?? '0';
-  const date = `${pick('year')}-${pick('month')}-${pick('day')}`;
-  const hour = Number.parseInt(pick('hour'), 10) % 24;
-  const minute = Number.parseInt(pick('minute'), 10);
-  return { date, day: Number.parseInt(pick('day'), 10), minutes: hour * 60 + minute };
+  const local = zonedDateTimeParts(now, tz);
+  const date = `${local.year}-${String(local.month).padStart(2, '0')}-${String(local.day).padStart(2, '0')}`;
+  return { date, day: local.day, minutes: local.hour * 60 + local.minute };
 }
 
 function scheduledDate(localDate: string, tz: string, hhmm: string): Date {
+  const [year, month, day] = localDate.split('-').map((part) => Number.parseInt(part, 10));
+  const requestedMinute = hhmmToMinutes(hhmm);
+  for (let minute = requestedMinute; minute < 24 * 60; minute += 1) {
+    try {
+      return instantForZonedDateTime({
+        year: year!,
+        month: month!,
+        day: day!,
+        hour: Math.floor(minute / 60),
+        minute: minute % 60,
+        second: 0,
+      }, tz);
+    } catch {
+      // A DST spring-forward gap has no real wall-clock instant. The first
+      // valid minute after the requested local time is the least surprising
+      // one-time schedule for that day.
+    }
+  }
   const win = localDayWindow(localDate, tz);
-  if (!win) return new Date(`${localDate}T00:00:00.000Z`);
-  return new Date(win.start.getTime() + hhmmToMinutes(hhmm) * 60 * 1000);
+  if (!win) throw new Error('invalid_scheduled_local_date');
+  return win.end;
 }
 
 function hhmmToMinutes(hhmm: string): number {

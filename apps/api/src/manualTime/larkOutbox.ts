@@ -68,7 +68,7 @@ async function loadRequest(requestId: string) {
   return prisma.manualTimeRequest.findUnique({
     where: { id: requestId },
     include: {
-      user: { select: { name: true } },
+      user: { select: { name: true, workspace: { select: { timezone: true } } }, },
       approver: { select: { name: true } },
     },
   });
@@ -106,6 +106,7 @@ async function handleSendCard(event: { id: string; requestId: string; messageLed
     startedAt: req.requestedStart.getTime(),
     endedAt: req.requestedEnd.getTime(),
     reason: req.reason,
+    timeZone: req.user.workspace.timezone,
   };
   const payload = event.payload && typeof event.payload === 'object' && !Array.isArray(event.payload)
     ? (event.payload as Record<string, unknown>)
@@ -222,6 +223,7 @@ async function handleFinalizeCards(event: { requestId: string }): Promise<void> 
     startedAt: req.requestedStart.getTime(),
     endedAt: req.requestedEnd.getTime(),
     reason: req.reason,
+    timeZone: req.user.workspace.timezone,
   };
   const card =
     req.status === 'CANCELLED'

@@ -3,6 +3,7 @@ import {
   DEFAULT_SCREENSHOT_INTERVAL_MIN,
   ScreenshotIntervalMinSchema,
 } from './teamSettings';
+import { TimeZoneSchema } from './timezone';
 
 export const AgentState = z.enum(['IDLE', 'RUNNING', 'PAUSED_IDLE', 'PAUSED_PERMISSION', 'OFFLINE']);
 export type AgentState = z.infer<typeof AgentState>;
@@ -133,5 +134,6 @@ export const AgentConfigResponse = z.object({
   // Web dashboard origin, served so the agent's "Open Dashboard" button stays in
   // sync with the backend's DASHBOARD_URL (empty string when unset).
   dashboardUrl: z.string().default(''),
+  workspaceTimezone: TimeZoneSchema.default('UTC'),
 });
 export type AgentConfigResponse = z.infer<typeof AgentConfigResponse>;
