@@ -26,7 +26,7 @@ import { cancelManualTimeRequest } from '../manualTime/decision';
 import { activeManagersForHomeTeam } from '../org/teamManagers';
 
 export const timeRequestsRouter = Router();
-timeRequestsRouter.use(requireAccessToken);
+timeRequestsRouter.use(requireAccessToken, attachScope);
 
 type Row = {
   id: string;
@@ -166,7 +166,7 @@ async function resolveManualTimeApprover(
  *    stay PENDING and use a separate approver.
  * Lark sends are best-effort; DB state is the audit source of truth.
  */
-timeRequestsRouter.post('/', attachScope, validate(CreateManualTimeRequest, 'body'), async (req, res, next) => {
+timeRequestsRouter.post('/', validate(CreateManualTimeRequest, 'body'), async (req, res, next) => {
   try {
     if (!req.user) return res.status(401).json({ error: 'unauthorized' });
     const body = req.body as CreateBody;
@@ -344,7 +344,8 @@ timeRequestsRouter.get('/', validate(ListManualTimeRequestsQuery, 'query'), asyn
     if (!req.user) return res.status(401).json({ error: 'unauthorized' });
     const q = req.query as unknown as ListQuery;
     const hasRange = q.from !== undefined || q.to !== undefined || q.tz !== undefined;
-    const range = hasRange ? resolveReportRange(q as Record<string, unknown>) : null;
+    if (!req.scope) return res.status(500).json({ error: 'scope_unresolved' });
+    const range = hasRange ? resolveReportRange(q as Record<string, unknown>, req.scope.workspaceTimezone) : null;
     if (range && 'error' in range) {
       return res.status(range.status).json({ error: range.error, ...(range.extras ?? {}) });
     }
@@ -389,7 +390,7 @@ timeRequestsRouter.get('/', validate(ListManualTimeRequestsQuery, 'query'), asyn
  * patch the request; DB mutation and Lark projection jobs are written in one
  * transaction. Old cards are rejected by version even if Lark updates lag.
  */
-timeRequestsRouter.patch('/:id', attachScope, validate(PatchManualTimeRequest, 'body'), async (req, res, next) => {
+timeRequestsRouter.patch('/:id', validate(PatchManualTimeRequest, 'body'), async (req, res, next) => {
   try {
     if (!req.user) return res.status(401).json({ error: 'unauthorized' });
     const id = req.params.id;

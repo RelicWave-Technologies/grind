@@ -5,7 +5,7 @@ import { createPortal } from 'react-dom';
 import { useNavigate, useRouteContext } from '@tanstack/react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CalendarDays, Check, ChevronLeft, ChevronRight, Clock4, Inbox, X } from 'lucide-react';
-import { api, ApiError } from '../lib/api';
+import { api, type ApiError } from '../lib/api';
 import { hasCapability, isManagerOrAbove } from '../lib/auth';
 import type { DecideResult, ManualTimeRequest, MtrStatus, MtrUserSummary } from '../lib/types';
 import { addDays, fmtAgeShort, fmtDayLabel, fmtDurationMs, fmtTime, todayKey } from '../lib/format';
@@ -99,8 +99,8 @@ export function ApprovalsScreen() {
   const { me } = useRouteContext({ from: '/authed' });
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-  const today = todayKey();
+  const tz = me.workspaceTimezone;
+  const today = todayKey(tz);
   const canReview =
     hasCapability(me, 'approvals.team.decide') ||
     hasCapability(me, 'approvals.workspace.decide');
@@ -390,7 +390,7 @@ function ApprovalTable({
                 )}
                 <Td className="apv-col-date">
                   <div className="apv-date-cell">
-                    <span className="ui-t-strong">{fmtDayLabel(date)}</span>
+                    <span className="ui-t-strong">{fmtDayLabel(date, tz)}</span>
                     <span className="ui-t-small ui-ink-3">{date}</span>
                   </div>
                 </Td>
@@ -401,7 +401,7 @@ function ApprovalTable({
                   </div>
                 </Td>
                 <Td className="apv-col-status" align="center">
-                  <ApprovalStatusCell req={req} createdMs={createdMs} decidedMs={decidedMs} />
+                  <ApprovalStatusCell req={req} createdMs={createdMs} decidedMs={decidedMs} timeZone={tz} />
                 </Td>
                 <Td className="apv-col-reason">
                   <div className="apv-reason-row">
@@ -545,16 +545,18 @@ function ApprovalStatusCell({
   req,
   createdMs,
   decidedMs,
+  timeZone,
 }: {
   req: ApprovalRequest;
   createdMs: number;
   decidedMs: number | null;
+  timeZone: string;
 }) {
   if (req.status === 'PENDING') {
     return (
       <div className="apv-status-cell">
         <Tag status="warn" mono>Pending</Tag>
-        <span className="ui-t-small ui-ink-3" title={new Date(req.createdAt).toLocaleString()}>
+        <span className="ui-t-small ui-ink-3" title={formatApprovalTimestamp(req.createdAt, timeZone)}>
           {fmtAgeShort(Date.now() - createdMs)}
         </span>
       </div>
@@ -571,11 +573,22 @@ function ApprovalStatusCell({
   return (
     <div className="apv-status-cell">
       <Tag status={STATUS_TAG[req.status]} mono>{approvalStatusLabel(req.status)}</Tag>
-      <span className="ui-t-small ui-ink-3" title={req.decidedAt ? new Date(req.decidedAt).toLocaleString() : undefined}>
+      <span className="ui-t-small ui-ink-3" title={req.decidedAt ? formatApprovalTimestamp(req.decidedAt, timeZone) : undefined}>
         {decidedMs ? `${fmtAgeShort(Date.now() - decidedMs)} decision` : '—'}
       </span>
     </div>
   );
+}
+
+function formatApprovalTimestamp(value: string, timeZone: string): string {
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZone,
+  }).format(new Date(value));
 }
 
 function ApprovalDetailsModal({
@@ -618,7 +631,7 @@ function ApprovalDetailsModal({
         <header className="apv-detail-head">
           <div>
             <span className="ui-t-eyebrow">{date}</span>
-            <h2 className="ui-t-title">Approval · {fmtDayLabel(date)}</h2>
+            <h2 className="ui-t-title">Approval · {fmtDayLabel(date, tz)}</h2>
           </div>
           <IconButton icon={<X size={16} strokeWidth={1.8} />} aria-label="Close" onClick={onClose} />
         </header>

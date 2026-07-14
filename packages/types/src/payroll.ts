@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { HHMMSchema } from './shifts';
+import { TimeZoneSchema } from './timezone';
 
 const PayrollMinuteSchema = z.number().int().min(1).max(24 * 60);
 const PayrollMonthlyMinuteSchema = z.number().int().min(1).max(31 * 24 * 60);
@@ -22,22 +23,13 @@ export const PAYROLL_POLICY_DEFAULTS = {
   sendPayrollSheetTo: 'all_admins',
 } as const;
 
-function validateTz(tz: string): boolean {
-  try {
-    new Intl.DateTimeFormat('en-US', { timeZone: tz });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 const PayrollPolicyFieldsSchema = z.object({
     halfDayLowerMin: PayrollMinuteSchema,
     halfDayUpperMin: PayrollMinuteSchema,
     fullDayLowerMin: PayrollMinuteSchema,
     fullDayUpperMin: PayrollMinuteSchema,
     monthlyLowerMin: PayrollMonthlyMinuteSchema,
-    timezone: z.string().min(1).refine(validateTz, { message: 'invalid_timezone' }),
+    timezone: TimeZoneSchema,
     approvalReminderDays: z.array(MonthCloseDaySchema).min(1).max(4),
     approvalReminderTime: HHMMSchema,
     payrollSheetSendDay: MonthCloseDaySchema,

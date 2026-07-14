@@ -44,6 +44,7 @@ export interface Me {
   displayRole: Role;
   capabilities: Permission[];
   workspaceId: string;
+  workspaceTimezone: string;
   teamId: string | null;
   managerId: string | null;
   managesTeamId?: string | null;

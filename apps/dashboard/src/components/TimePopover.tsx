@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronDown } from 'lucide-react';
+import { instantForZonedDateTime, zonedDateTimeParts } from '@grind/types';
 import { usePopover } from '../lib/popover';
 
 /**
@@ -20,6 +21,8 @@ import { usePopover } from '../lib/popover';
 
 interface Props {
   value: number;
+  /** Workspace business timezone; wall-clock editing never uses browser time. */
+  timeZone: string;
   disabled?: boolean;
   onChange: (epochMs: number) => void;
   /** A11y label, e.g. "Start time". */
@@ -39,49 +42,61 @@ const HOURS = [12, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]; // 12-hour cycle, AM orde
 // only ever produce a valid time. The active row auto-scrolls into view.
 const MINUTES = Array.from({ length: 60 }, (_, i) => i);
 
-function partsFromMs(ms: number): { h12: number; m: number; ampm: 'AM' | 'PM' } {
-  const d = new Date(ms);
-  const rawH = d.getHours();
+function partsFromMs(ms: number, timeZone: string): { h12: number; m: number; ampm: 'AM' | 'PM' } {
+  const local = zonedDateTimeParts(ms, timeZone);
+  const rawH = local.hour;
   const ampm = rawH < 12 ? 'AM' : 'PM';
   const h12 = rawH % 12 === 0 ? 12 : rawH % 12;
-  return { h12, m: d.getMinutes(), ampm };
+  return { h12, m: local.minute, ampm };
 }
 
-function msFromParts(baseMs: number, h12: number, m: number, ampm: 'AM' | 'PM'): number {
+function msFromParts(baseMs: number, h12: number, m: number, ampm: 'AM' | 'PM', timeZone: string): number | null {
   const h24 = ampm === 'AM' ? (h12 === 12 ? 0 : h12) : (h12 === 12 ? 12 : h12 + 12);
-  const d = new Date(baseMs);
-  d.setHours(h24);
-  d.setMinutes(m);
-  d.setSeconds(0);
-  d.setMilliseconds(0);
-  return d.getTime();
+  const base = zonedDateTimeParts(baseMs, timeZone);
+  try {
+    return instantForZonedDateTime({
+      year: base.year,
+      month: base.month,
+      day: base.day,
+      hour: h24,
+      minute: m,
+      second: 0,
+    }, timeZone).getTime();
+  } catch {
+    // Spring-forward local times do not exist. Do not silently save a different time.
+    return null;
+  }
 }
 
-function fmt(ms: number): string {
-  const d = new Date(ms);
-  return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+function fmt(ms: number, timeZone: string): string {
+  return new Intl.DateTimeFormat(undefined, {
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZone,
+  }).format(new Date(ms));
 }
 
-export default function TimePopover({ value, disabled, onChange, ariaLabel, minTime, maxTime }: Props) {
+export default function TimePopover({ value, timeZone, disabled, onChange, ariaLabel, minTime, maxTime }: Props) {
   const pop = usePopover({ estimatedHeight: 260 });
-  const parts = partsFromMs(value);
+  const parts = partsFromMs(value, timeZone);
   const [active, setActive] = useState<{ col: 0 | 1; idx: number }>({ col: 0, idx: HOURS.indexOf(parts.h12) });
   const hourColRef = useRef<HTMLDivElement>(null);
   const minColRef = useRef<HTMLDivElement>(null);
 
   // A candidate epoch ms is in-range if it falls within [minTime, maxTime].
   // Either bound is optional. Used to grey out invalid cells.
-  const inRange = (ms: number): boolean => {
+  const inRange = (ms: number | null): boolean => {
+    if (ms === null) return false;
     if (minTime !== undefined && ms < minTime) return false;
     if (maxTime !== undefined && ms > maxTime) return false;
     return true;
   };
   const hourEnabled = (h12: number, ampm: 'AM' | 'PM'): boolean =>
-    MINUTES.some((m) => inRange(msFromParts(value, h12, m, ampm)));
+    MINUTES.some((m) => inRange(msFromParts(value, h12, m, ampm, timeZone)));
   const minuteEnabled = (m: number, ampm: 'AM' | 'PM'): boolean =>
-    HOURS.some((h12) => inRange(msFromParts(value, h12, m, ampm)));
+    HOURS.some((h12) => inRange(msFromParts(value, h12, m, ampm, timeZone)));
   const ampmEnabled = (ampm: 'AM' | 'PM'): boolean =>
-    HOURS.some((h12) => MINUTES.some((m) => inRange(msFromParts(value, h12, m, ampm))));
+    HOURS.some((h12) => MINUTES.some((m) => inRange(msFromParts(value, h12, m, ampm, timeZone))));
 
   // Re-anchor `active` to the current value whenever the popover opens.
   useEffect(() => {
@@ -95,8 +110,8 @@ export default function TimePopover({ value, disabled, onChange, ariaLabel, minT
   }, [pop.open, parts.h12]);
 
   function pick(h12: number, m: number, ampm: 'AM' | 'PM'): void {
-    const candidate = msFromParts(value, h12, m, ampm);
-    if (inRange(candidate)) {
+    const candidate = msFromParts(value, h12, m, ampm, timeZone);
+    if (candidate !== null && inRange(candidate)) {
       onChange(candidate);
       return;
     }
@@ -106,8 +121,8 @@ export default function TimePopover({ value, disabled, onChange, ariaLabel, minT
     // shouldn't have been clickable in the first place, but defence in depth).
     const sortedM = [...MINUTES].sort((a, b) => Math.abs(a - m) - Math.abs(b - m));
     for (const altM of sortedM) {
-      const alt = msFromParts(value, h12, altM, ampm);
-      if (inRange(alt)) {
+      const alt = msFromParts(value, h12, altM, ampm, timeZone);
+      if (alt !== null && inRange(alt)) {
         onChange(alt);
         return;
       }
@@ -143,7 +158,7 @@ export default function TimePopover({ value, disabled, onChange, ariaLabel, minT
     }
   }
 
-  const triggerLabel = useMemo(() => fmt(value), [value]);
+  const triggerLabel = useMemo(() => fmt(value, timeZone), [value, timeZone]);
 
   if (disabled) {
     return <span className="et-chip-trigger et-chip-trigger-time" aria-disabled="true">{triggerLabel}</span>;

@@ -14,6 +14,7 @@ const REQ: ApprovalCardInput = {
   startedAt: new Date('2026-05-29T09:00:00Z').getTime(),
   endedAt: new Date('2026-05-29T10:30:00Z').getTime(),
   reason: 'Forgot to start the tracker',
+  timeZone: 'UTC',
 };
 
 /** Walk every element looking for action buttons, returning their `value` payloads. */
@@ -86,6 +87,19 @@ describe('buildApprovalCard — pending', () => {
     expect(findTextContaining(short, '45 min')).toBe(true);
   });
 
+  it('renders submitted wall-clock time in the workspace timezone, not the API host timezone', () => {
+    const card = buildApprovalCard({
+      ...REQ,
+      startedAt: new Date('2026-07-09T22:36:00.000Z').getTime(),
+      endedAt: new Date('2026-07-09T23:49:00.000Z').getTime(),
+      timeZone: 'Asia/Kolkata',
+    });
+
+    expect(findTextContaining(card, 'Fri, Jul 10')).toBe(true);
+    expect(findTextContaining(card, '4:06 AM – 5:19 AM')).toBe(true);
+    expect(findTextContaining(card, 'Thu, Jul 9')).toBe(false);
+  });
+
   it('enables update_multi on the ORIGINAL card so the callback can replace it (avoids Lark code 200340)', () => {
     expect((card.config as Record<string, unknown>).update_multi).toBe(true);
   });
@@ -147,6 +161,7 @@ describe('buildPayrollReminderCard', () => {
       requests: [base],
       dashboardUrl: 'http://localhost:5174/approvals',
       generatedAt: new Date('2026-06-08T12:00:00Z').getTime(),
+      timeZone: 'UTC',
     });
     expect(card).toMatchObject({
       config: { wide_screen_mode: true, update_multi: true },
@@ -170,6 +185,7 @@ describe('buildPayrollReminderCard', () => {
       audience: 'approver',
       teamName: 'tech',
       requests,
+      timeZone: 'UTC',
     });
     expect(findTextContaining(card, 'Member 8')).toBe(true);
     expect(findTextContaining(card, 'Member 9')).toBe(false);
@@ -188,6 +204,7 @@ describe('buildCancelledCard — disables the card when the requester withdraws'
       endedAt: REQ.endedAt,
       reason: REQ.reason,
       cancelledAt: new Date('2026-05-20T11:00:00Z').getTime(),
+      timeZone: 'UTC',
     });
     expect((card.header as Record<string, unknown>).template).toBe('red');
     expect(buttonValues(card)).toHaveLength(0);
@@ -220,6 +237,7 @@ describe('buildSupersededCard — disables the previous approval card', () => {
       endedAt: REQ.endedAt,
       reason: REQ.reason,
       supersededAt: new Date('2026-05-20T10:30:00Z').getTime(),
+      timeZone: 'UTC',
     });
     expect((card.header as Record<string, unknown>).template).toBe('grey');
     expect(buttonValues(card)).toHaveLength(0);
@@ -237,6 +255,7 @@ describe('buildUpdatedApprovalCard — fresh card after an edit', () => {
       startedAt: REQ.startedAt,
       endedAt: REQ.endedAt,
       reason: 'updated reason',
+      timeZone: 'UTC',
       diff: [
         { label: 'Time', before: '09:00 → 10:00', after: '09:30 → 10:30' },
         { label: 'Reason', before: 'initial', after: 'updated reason' },
@@ -259,6 +278,7 @@ describe('buildUpdatedApprovalCard — fresh card after an edit', () => {
       startedAt: REQ.startedAt,
       endedAt: REQ.endedAt,
       reason: REQ.reason,
+      timeZone: 'UTC',
       diff: [],
     });
     expect(findTextContaining(card, 'What changed')).toBe(true);

@@ -35,6 +35,22 @@ describe('GET /v1/insights/day — validation', () => {
     expect(res.status).toBe(400);
   });
 
+  it('uses the workspace timezone even when an older client sends a different valid device timezone', async () => {
+    const u = await seedUser();
+    await prisma.workspace.update({
+      where: { id: u.workspaceId },
+      data: { timezone: 'Asia/Kolkata' },
+    });
+
+    const res = await request(app)
+      .get('/v1/insights/day?date=2026-07-14&tz=America/Los_Angeles')
+      .set(auth(u.accessToken));
+
+    expect(res.status).toBe(200);
+    expect(new Date(res.body.dayStart).toISOString()).toBe('2026-07-13T18:30:00.000Z');
+    expect(new Date(res.body.dayEnd).toISOString()).toBe('2026-07-14T18:30:00.000Z');
+  });
+
   it('401 without auth', async () => {
     const res = await request(app).get('/v1/insights/day?date=2026-05-30');
     expect(res.status).toBe(401);

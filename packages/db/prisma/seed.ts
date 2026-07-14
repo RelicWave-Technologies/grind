@@ -21,8 +21,8 @@ async function main() {
 
   const ws = await prisma.workspace.upsert({
     where: { id: 'ws_dogfood' },
-    update: {},
-    create: { id: 'ws_dogfood', name: 'EmiAC Dogfood' },
+    update: { timezone: 'Asia/Kolkata' },
+    create: { id: 'ws_dogfood', name: 'EmiAC Dogfood', timezone: 'Asia/Kolkata' },
   });
 
   const admin = await prisma.user.upsert({
@@ -90,7 +90,7 @@ async function main() {
 
   await prisma.payrollPolicy.upsert({
     where: { workspaceId: ws.id },
-    update: {},
+    update: { timezone: 'Asia/Kolkata' },
     create: {
       workspaceId: ws.id,
       halfDayLowerMin: 240,
@@ -98,7 +98,7 @@ async function main() {
       fullDayLowerMin: 480,
       fullDayUpperMin: 600,
       monthlyLowerMin: 9_600,
-      timezone: 'Asia/Calcutta',
+      timezone: 'Asia/Kolkata',
       approvalReminderDays: [3, 4],
       approvalReminderTime: '00:00',
       payrollSheetSendDay: 5,

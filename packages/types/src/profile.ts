@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { Role } from './auth';
 import { ShiftDtoSchema } from './shifts';
 import { WorkspacePolicyDto } from './workspacePolicy';
+import { TimeZoneSchema } from './timezone';
 
 export const ProfilePersonSchema = z.object({
   id: z.string(),
@@ -23,6 +24,7 @@ export type ProfileTeam = z.infer<typeof ProfileTeamSchema>;
 export const ProfileWorkspaceSchema = z.object({
   id: z.string(),
   name: z.string(),
+  timezone: TimeZoneSchema,
   createdAt: z.string().datetime({ offset: true }),
 });
 

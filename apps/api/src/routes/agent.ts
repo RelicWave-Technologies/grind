@@ -27,6 +27,7 @@ async function buildAgentConfig(userId: string, workspaceId: string): Promise<Ag
     where: { id: userId, workspaceId, deactivatedAt: null },
     select: {
       workspaceId: true,
+      workspace: { select: { timezone: true } },
       screenshotIntervalMin: true,
       idleThresholdMin: true,
     },
@@ -70,6 +71,7 @@ async function buildAgentConfig(userId: string, workspaceId: string): Promise<Ag
     captureTitles ? 'titles:on' : 'titles:off',
     captureUrls ? 'urls:on' : 'urls:off',
     dashboardUrl,
+    user.workspace.timezone,
   ].join('|');
 
   return {
@@ -81,6 +83,7 @@ async function buildAgentConfig(userId: string, workspaceId: string): Promise<Ag
     captureTitles,
     captureUrls,
     dashboardUrl,
+    workspaceTimezone: user.workspace.timezone,
   };
 }
 

@@ -2,12 +2,12 @@ import { Router } from 'express';
 import { prisma } from '@grind/db';
 import {
   LoginRequest,
-  LoginResponse,
   LogoutRequest,
   RefreshRequest,
-  RefreshResponse,
   Role as RoleSchema,
   roleCapabilities,
+  type LoginResponse,
+  type RefreshResponse,
   type UserDto,
 } from '@grind/types';
 import { validate } from '../middleware/validate';
@@ -44,6 +44,7 @@ export type AuthUserRow = {
   managerId: string | null;
   provisioningStatus: 'PENDING' | 'ACTIVE';
   avatarUrl: string | null;
+  workspace: { timezone: string };
 };
 
 /** Minimal Prisma `select` that satisfies {@link serializeAuthUser}. */
@@ -58,6 +59,7 @@ export const AUTH_USER_SELECT = {
   managerId: true,
   provisioningStatus: true,
   avatarUrl: true,
+  workspace: { select: { timezone: true } },
 } as const;
 
 export function serializeAuthUser(user: AuthUserRow): UserDto | null {
@@ -73,6 +75,7 @@ export function serializeAuthUser(user: AuthUserRow): UserDto | null {
     displayRole: role,
     capabilities: roleCapabilities(role),
     workspaceId: user.workspaceId,
+    workspaceTimezone: user.workspace.timezone,
     teamId: user.teamId,
     managerId: user.managerId,
     provisioningStatus: user.provisioningStatus,
@@ -89,7 +92,10 @@ if (PASSWORD_LOGIN_ENABLED) {
   authRouter.post('/login', validate(LoginRequest, 'body'), async (req, res, next) => {
     try {
       const { email, password, deviceName } = req.body as LoginRequest;
-      const user = await prisma.user.findUnique({ where: { email } });
+      const user = await prisma.user.findUnique({
+        where: { email },
+        include: { workspace: { select: { timezone: true } } },
+      });
       // passwordHash is nullable (Lark-only users have none) — missing = no password login.
       if (!user || !user.passwordHash || !(await verifyPassword(user.passwordHash, password))) {
         return res.status(401).json({ error: 'invalid_credentials' });

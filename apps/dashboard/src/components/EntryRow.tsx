@@ -30,6 +30,7 @@ export type RowKind = 'tracked' | 'manual_approved' | 'pending' | 'gap';
 
 interface BaseProps {
   tasks: TaskOption[];
+  timeZone: string;
   disabled?: boolean;
   /** Tick counter from the parent — when bumped, gap row syncs to fresh preset. */
   presetTick?: number;
@@ -85,6 +86,7 @@ interface GapRowProps extends BaseProps {
 interface RejectedRowProps {
   kind: 'rejected';
   rejected: RejectedRequest;
+  timeZone: string;
   rowId?: string;
   highlighted?: boolean;
 }
@@ -107,7 +109,7 @@ function taskSummaryFor(tasks: TaskOption[], guid: string, fallback?: string | n
 }
 
 export function EntryRow(props: EntryRowProps) {
-  if (props.kind === 'rejected') return <RejectedRow rejected={props.rejected} rowId={props.rowId} highlighted={props.highlighted} />;
+  if (props.kind === 'rejected') return <RejectedRow {...props} />;
   if (props.kind === 'gap') return <GapRow {...props} />;
   if (props.kind === 'pending') return <PendingRow {...props} />;
   return <TrackedRow {...props} />;
@@ -121,6 +123,7 @@ function TrackedRow({
   block,
   kind,
   tasks,
+  timeZone,
   disabled,
   rowId,
   highlighted,
@@ -204,8 +207,8 @@ function TrackedRow({
         <KindBadge kind={isMeeting ? 'meeting' : kind} />
       </td>
       <td className="et-time-cell tabular">
-        {fmtTime(block.startedAt)} <span className="et-times-sep">–</span>{' '}
-        {block.isOpen ? <em className="tertiary">now</em> : fmtTime(block.endedAt)}
+        {fmtTime(block.startedAt, timeZone)} <span className="et-times-sep">–</span>{' '}
+        {block.isOpen ? <em className="tertiary">now</em> : fmtTime(block.endedAt, timeZone)}
       </td>
       <td className="tabular secondary">{fmtDurationMs(block.durationMs)}</td>
       <td>
@@ -303,6 +306,7 @@ function TrackedRow({
 function PendingRow({
   block,
   tasks,
+  timeZone,
   disabled,
   rowId,
   highlighted,
@@ -379,9 +383,9 @@ function PendingRow({
       <td><KindBadge kind="pending" /></td>
       <td className="et-time-cell">
         <span className="et-times-inline">
-          <TimePopover value={start} disabled={disabled} maxTime={end - 60_000} onChange={setStart} ariaLabel="Start" />
+          <TimePopover value={start} timeZone={timeZone} disabled={disabled} maxTime={end - 60_000} onChange={setStart} ariaLabel="Start" />
           <span className="et-times-sep">–</span>
-          <TimePopover value={end} disabled={disabled} minTime={start + 60_000} onChange={setEnd} ariaLabel="End" />
+          <TimePopover value={end} timeZone={timeZone} disabled={disabled} minTime={start + 60_000} onChange={setEnd} ariaLabel="End" />
         </span>
       </td>
       <td className="tabular secondary">{fmtDurationMs(duration)}</td>
@@ -442,7 +446,7 @@ function PendingRow({
 // Gap row: composer for a fresh manual-time request
 // ---------------------------------------------------------------------------
 
-function GapRow({ block, tasks, disabled, preset, presetTick, onCreate, workspaceUsers, selfId, rowId, highlighted }: GapRowProps) {
+function GapRow({ block, tasks, timeZone, disabled, preset, presetTick, onCreate, workspaceUsers, selfId, rowId, highlighted }: GapRowProps) {
   // Default to the WHOLE gap — the user narrows it in the time dropdowns. This
   // matches the "fill the gap, then trim" mental model and means a single click
   // logs the entire missing stretch.
@@ -520,12 +524,13 @@ function GapRow({ block, tasks, disabled, preset, presetTick, onCreate, workspac
       <td className="et-time-cell">
         {disabled ? (
           <span className="tabular secondary">
-            {fmtTime(block.startedAt)} – {fmtTime(block.endedAt)}
+            {fmtTime(block.startedAt, timeZone)} – {fmtTime(block.endedAt, timeZone)}
           </span>
         ) : (
           <span className="et-times-inline">
             <TimePopover
               value={start}
+              timeZone={timeZone}
               minTime={block.startedAt}
               maxTime={Math.max(block.startedAt, end - 60_000)}
               onChange={setStart}
@@ -534,6 +539,7 @@ function GapRow({ block, tasks, disabled, preset, presetTick, onCreate, workspac
             <span className="et-times-sep">–</span>
             <TimePopover
               value={end}
+              timeZone={timeZone}
               minTime={Math.min(block.endedAt, start + 60_000)}
               maxTime={block.endedAt}
               onChange={setEnd}
@@ -602,12 +608,12 @@ function GapRow({ block, tasks, disabled, preset, presetTick, onCreate, workspac
 // Rejected row (read-only summary)
 // ---------------------------------------------------------------------------
 
-function RejectedRow({ rejected, rowId, highlighted }: { rejected: RejectedRequest; rowId?: string; highlighted?: boolean }) {
+function RejectedRow({ rejected, timeZone, rowId, highlighted }: RejectedRowProps) {
   return (
     <tr data-row-id={rowId} className={`et-row entry-row-rejected${highlighted ? ' et-row-highlighted' : ''}`}>
       <td><KindBadge kind="rejected" /></td>
       <td className="et-time-cell tabular">
-        {fmtTime(rejected.requestedStart)} <span className="et-times-sep">–</span> {fmtTime(rejected.requestedEnd)}
+        {fmtTime(rejected.requestedStart, timeZone)} <span className="et-times-sep">–</span> {fmtTime(rejected.requestedEnd, timeZone)}
       </td>
       <td className="tabular secondary">{fmtDurationMs(rejected.requestedEnd - rejected.requestedStart)}</td>
       <td className="secondary">{rejected.taskSummary ?? rejected.larkTaskGuid ?? <span className="tertiary">—</span>}</td>

@@ -1,6 +1,9 @@
 import { Router } from 'express';
 import { prisma } from '@grind/db';
+import { PatchWorkspaceSettingsRequest, type WorkspaceSettingsDto } from '@grind/types';
 import { requireAccessToken } from '../middleware/auth';
+import { attachScope, requireAdmin } from '../middleware/scope';
+import { updateWorkspaceTimezone } from '../workspace/timezone';
 
 /**
  * Lightweight workspace-directory endpoints. Distinct from `/v1/admin/*`
@@ -15,6 +18,36 @@ import { requireAccessToken } from '../middleware/auth';
  */
 export const workspaceRouter = Router();
 workspaceRouter.use(requireAccessToken);
+
+function toSettingsDto(workspace: { id: string; name: string; timezone: string }): WorkspaceSettingsDto {
+  return workspace;
+}
+
+workspaceRouter.get('/settings', attachScope, async (req, res, next) => {
+  try {
+    if (!req.scope) return res.status(500).json({ error: 'scope_unresolved' });
+    const workspace = await prisma.workspace.findUnique({
+      where: { id: req.scope.workspaceId },
+      select: { id: true, name: true, timezone: true },
+    });
+    if (!workspace) return res.status(404).json({ error: 'workspace_not_found' });
+    res.json(toSettingsDto(workspace));
+  } catch (err) {
+    next(err);
+  }
+});
+
+workspaceRouter.patch('/settings', attachScope, requireAdmin, async (req, res, next) => {
+  try {
+    if (!req.scope) return res.status(500).json({ error: 'scope_unresolved' });
+    const parsed = PatchWorkspaceSettingsRequest.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'invalid_workspace_settings' });
+    const workspace = await updateWorkspaceTimezone(req.scope.workspaceId, parsed.data.timezone);
+    res.json(toSettingsDto(workspace));
+  } catch (err) {
+    next(err);
+  }
+});
 
 /**
  * GET /v1/workspace/users — every user in the caller's workspace.

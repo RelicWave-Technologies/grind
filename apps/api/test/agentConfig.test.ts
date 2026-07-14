@@ -10,6 +10,7 @@ const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
 let counter = 0;
 
 async function seedAgentConfig(input: {
+  workspaceTimezone?: string;
   policy?: {
     defaultScreenshotIntervalMin: number;
     defaultIdleThresholdMin: number;
@@ -21,7 +22,12 @@ async function seedAgentConfig(input: {
 }) {
   counter += 1;
   const stamp = `${Date.now()}-${counter}`;
-  const workspace = await prisma.workspace.create({ data: { name: `WS-agent-config-${stamp}` } });
+  const workspace = await prisma.workspace.create({
+    data: {
+      name: `WS-agent-config-${stamp}`,
+      timezone: input.workspaceTimezone ?? 'UTC',
+    },
+  });
   if (input.policy) {
     await prisma.workspacePolicy.create({
       data: {
@@ -114,5 +120,15 @@ describe('/v1/agent/config', () => {
     expect(res.body.captureApps).toBe(false);
     expect(res.body.captureTitles).toBe(false);
     expect(res.body.captureUrls).toBe(false);
+  });
+
+  it('returns the canonical workspace timezone and versions config changes with it', async () => {
+    const s = await seedAgentConfig({ workspaceTimezone: 'Asia/Kolkata' });
+
+    const res = await request(app).get('/v1/agent/config').set(auth(s.token));
+
+    expect(res.status).toBe(200);
+    expect(res.body.workspaceTimezone).toBe('Asia/Kolkata');
+    expect(res.body.configVersion).toContain('Asia/Kolkata');
   });
 });

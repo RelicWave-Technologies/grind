@@ -27,6 +27,8 @@ export interface ResolvedScope {
   userIds: string[];
   /** The caller's workspaceId. */
   workspaceId: string;
+  /** Canonical workspace-owned business timezone. */
+  workspaceTimezone: string;
   /** True only for ADMIN. Useful for admin-only routes within /v1/admin. */
   isAdmin: boolean;
   capabilities: Permission[];
@@ -54,7 +56,7 @@ export const attachScope: RequestHandler = async (req, res, next) => {
     const workspaceId = req.user.ws;
     const currentUser = await prisma.user.findFirst({
       where: { id: req.user.sub, workspaceId, deactivatedAt: null },
-      select: { role: true },
+      select: { role: true, workspace: { select: { timezone: true } } },
     });
     if (!currentUser) return res.status(401).json({ error: 'unauthorized' });
     const role = currentUser.role;
@@ -92,7 +94,7 @@ export const attachScope: RequestHandler = async (req, res, next) => {
       userIds = [req.user.sub];
     }
 
-    req.scope = { scope, userIds, workspaceId, isAdmin, capabilities };
+    req.scope = { scope, userIds, workspaceId, workspaceTimezone: currentUser.workspace.timezone, isAdmin, capabilities };
     next();
   } catch (err) {
     next(err);

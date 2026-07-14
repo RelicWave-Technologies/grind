@@ -1,6 +1,7 @@
 import { useState, useEffect, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useRouteContext } from '@tanstack/react-router';
 import { Check, Clock3, Camera, History, Pencil, Save, X } from 'lucide-react';
 import type {
   MonitoringSettingsAuditDto,
@@ -75,6 +76,8 @@ type WorkspacePolicyPatch = Partial<Pick<
 >> & { auditReason?: string };
 
 export function PolicyScreen() {
+  const { me } = useRouteContext({ from: '/authed' });
+  const timeZone = me.workspaceTimezone;
   const qc = useQueryClient();
   const q = useQuery({
     queryKey: ['workspace-policy'],
@@ -404,7 +407,7 @@ export function PolicyScreen() {
           ) : auditQ.data && auditQ.data.audits.length > 0 ? (
             <List>
               {auditQ.data.audits.map((audit) => (
-                <MonitoringAuditRow key={audit.id} audit={audit} />
+                <MonitoringAuditRow key={audit.id} audit={audit} timeZone={timeZone} />
               ))}
             </List>
           ) : (
@@ -470,7 +473,7 @@ function monitoringTimingChanged(previous: MonitoringTiming, next: MonitoringTim
     previous.idleThresholdMin !== next.idleThresholdMin;
 }
 
-function MonitoringAuditRow({ audit }: { audit: MonitoringSettingsAuditDto }) {
+function MonitoringAuditRow({ audit, timeZone }: { audit: MonitoringSettingsAuditDto; timeZone: string }) {
   const target = audit.scope === 'WORKSPACE_POLICY'
     ? 'Workspace defaults'
     : audit.targetUser?.name ?? 'Deleted member';
@@ -482,7 +485,7 @@ function MonitoringAuditRow({ audit }: { audit: MonitoringSettingsAuditDto }) {
       subtitle={
         <span className="pol-audit-sub">
           <span>{actor}</span>
-          <span>{formatAuditTime(audit.createdAt)}</span>
+          <span>{formatAuditTime(audit.createdAt, timeZone)}</span>
           {audit.reason && <span>{audit.reason}</span>}
         </span>
       }
@@ -501,13 +504,14 @@ function formatNullableMinutes(value: number | null): string {
   return value === null ? '-' : formatMinutes(value);
 }
 
-function formatAuditTime(value: string): string {
-  return new Date(value).toLocaleString(undefined, {
+function formatAuditTime(value: string, timeZone: string): string {
+  return new Intl.DateTimeFormat(undefined, {
     month: 'short',
     day: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
-  });
+    timeZone,
+  }).format(new Date(value));
 }
 
 function RiskTag({ risk }: { risk: MonitoringRisk }) {

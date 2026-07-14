@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { NINE_TO_SIX } from '@grind/types';
+import {
+  NINE_TO_SIX,
+  LocalTimeResolutionError,
+  instantForZonedDateTime,
+  possibleInstantsForZonedDateTime,
+} from '@grind/types';
 import { buildDayInsight, localDayWindow, shiftDayWindow, type DayEntryInput, type PendingRequestInput } from './day';
 
 /**
@@ -44,6 +49,37 @@ describe('localDayWindow', () => {
   it('produces a 25h window on the DST fall-back day in America/Los_Angeles (2026-11-01)', () => {
     const w = makeWindow('2026-11-01', TZ_LA);
     expect(w.end.getTime() - w.start.getTime()).toBe(25 * 3600 * 1000);
+  });
+});
+
+describe('shared local wall-clock resolution', () => {
+  it('rejects a nonexistent spring-forward time instead of silently changing it', () => {
+    const resolve = () => instantForZonedDateTime({
+      year: 2026,
+      month: 3,
+      day: 8,
+      hour: 2,
+      minute: 30,
+      second: 0,
+    }, TZ_NY);
+
+    expect(resolve).toThrow(LocalTimeResolutionError);
+    try {
+      resolve();
+    } catch (error) {
+      expect((error as LocalTimeResolutionError).code).toBe('nonexistent_local_time');
+    }
+  });
+
+  it('uses the earlier real instant for the repeated fall-back hour', () => {
+    const parts = { year: 2026, month: 11, day: 1, hour: 1, minute: 30, second: 0 };
+    const candidates = possibleInstantsForZonedDateTime(parts, TZ_NY);
+
+    expect(candidates.map((candidate) => candidate.toISOString())).toEqual([
+      '2026-11-01T05:30:00.000Z',
+      '2026-11-01T06:30:00.000Z',
+    ]);
+    expect(instantForZonedDateTime(parts, TZ_NY).toISOString()).toBe('2026-11-01T05:30:00.000Z');
   });
 });
 

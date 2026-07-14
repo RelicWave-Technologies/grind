@@ -1,11 +1,12 @@
 import { prisma } from '@grind/db';
+import { dateKeyInTimeZone } from '@grind/types';
 import { localDayWindow } from '../insights/day';
 import { loadEntryLiveEvidence, LIVE_HEARTBEAT_FRESH_MS } from '../insights/liveEntryEvidence';
 import { resolveEffectiveEntrySegmentEnds } from '../insights/openSegmentEvidence';
 
 export async function buildTesterUsageSnapshot(workspaceId: string, timezone: string) {
   const now = new Date();
-  const date = new Intl.DateTimeFormat('en-CA', { timeZone: timezone }).format(now);
+  const date = dateKeyInTimeZone(now, timezone);
   const win = localDayWindow(date, timezone);
   if (!win) throw new Error('invalid_timezone');
 

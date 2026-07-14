@@ -31,6 +31,7 @@ export async function loadProfileForUser(
         select: {
           id: true,
           name: true,
+          timezone: true,
           createdAt: true,
         },
       },
@@ -90,6 +91,7 @@ export async function loadProfileForUser(
     workspace: {
       id: user.workspace.id,
       name: user.workspace.name,
+      timezone: user.workspace.timezone,
       createdAt: user.workspace.createdAt.toISOString(),
     },
     team: user.team

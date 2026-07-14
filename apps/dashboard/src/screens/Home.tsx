@@ -14,6 +14,7 @@ import {
   User,
 } from 'lucide-react';
 import { api } from '../lib/api';
+import { dateKeyInTimeZone, zonedDateTimeParts } from '@grind/types';
 import type { AppUsageEntry, DayInsight, ManualTimeRequest } from '../lib/types';
 import { fmtDayLabel, fmtDurationMs, fmtTime, todayKey } from '../lib/format';
 import { DayRibbon } from '../components/DayRibbon';
@@ -44,11 +45,11 @@ interface ListResponse<T> {
 export function HomeScreen() {
   const { me } = useRouteContext({ from: '/authed' });
   const navigate = useNavigate();
-  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-  const hour = new Date().getHours();
+  const tz = me.workspaceTimezone;
+  const hour = zonedDateTimeParts(Date.now(), tz).hour;
   const partOfDay = hour < 5 ? 'Working late' : hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
 
-  const today = todayKey();
+  const today = todayKey(tz);
   const dayQ = useQuery({
     queryKey: ['insights', 'day', today, tz, me.id],
     queryFn: () => api<DayInsight>(`/v1/insights/day?date=${today}&tz=${encodeURIComponent(tz)}`),
@@ -102,8 +103,9 @@ export function HomeScreen() {
       pendingMs,
       hasWorked: totalMs > 0,
       evidenceReview,
+      timeZone: tz,
     }),
-    [gapCount, gapMs, pendingApprovalCount, pendingMs, totalMs, evidenceReview],
+    [gapCount, gapMs, pendingApprovalCount, pendingMs, totalMs, evidenceReview, tz],
   );
 
   return (
@@ -186,7 +188,7 @@ export function HomeScreen() {
 
           <div className="hm-ribbon-shell">
             {dayQ.isLoading && <Skeleton h={84} radius="var(--ui-r-sm)" />}
-            {day && <DayRibbon day={day} now={Date.now()} editable={false} />}
+            {day && <DayRibbon day={day} now={Date.now()} timeZone={tz} editable={false} />}
           </div>
 
           <div className="hm-timeline-insights">
@@ -377,7 +379,7 @@ function ApprovalRequestRow({
     <ListRow
       leading={<span className="hm-link-icon"><Inbox size={18} strokeWidth={1.9} /></span>}
       title={approvalTaskLabel(req)}
-      subtitle={`${fmtDayLabel(req.requestedStart.slice(0, 10))} · ${fmtTime(startMs, tz)} – ${fmtTime(endMs, tz)}`}
+      subtitle={`${fmtDayLabel(dateKeyInTimeZone(startMs, tz), tz)} · ${fmtTime(startMs, tz)} – ${fmtTime(endMs, tz)}`}
       meta={<Tag status="warn" mono>{fmtDurationMs(durationMs)}</Tag>}
       trailing={<ChevronRight size={16} strokeWidth={2} className="hm-link-chevron" />}
       onClick={onClick}
@@ -469,6 +471,7 @@ function buildActionRows({
   pendingMs,
   hasWorked,
   evidenceReview,
+  timeZone,
 }: {
   gapCount: number;
   gapMs: number;
@@ -476,6 +479,7 @@ function buildActionRows({
   pendingMs: number;
   hasWorked: boolean;
   evidenceReview: boolean;
+  timeZone: string;
 }): Array<{
   icon: ReactNode;
   title: string;
@@ -500,7 +504,7 @@ function buildActionRows({
       sub: `${gapCount} gap${gapCount === 1 ? '' : 's'} · ${fmtDurationMs(gapMs)}`,
       tag: <Tag status="warn" mono>Gap</Tag>,
       rail: 'warn',
-      to: { to: '/edit-time', search: { date: todayKey() } },
+      to: { to: '/edit-time', search: { date: todayKey(timeZone) } },
     });
   } else if (evidenceReview) {
     rows.push({
@@ -518,7 +522,7 @@ function buildActionRows({
       sub: hasWorked ? 'Open Edit Time for details' : 'Open Edit Time when you need to fill a day',
       tag: <Tag status={hasWorked ? 'success' : 'neutral'} mono>{hasWorked ? 'OK' : 'Start'}</Tag>,
       rail: hasWorked ? 'success' : undefined,
-      to: { to: '/edit-time', search: { date: todayKey() } },
+      to: { to: '/edit-time', search: { date: todayKey(timeZone) } },
     });
   }
 

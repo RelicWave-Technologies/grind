@@ -1,3 +1,5 @@
+import { dateKeyInTimeZone, instantForZonedDateTime } from '@grind/types';
+
 /**
  * Tiny time/duration formatters for the dashboard. Match the agent's
  * conventions (12h clock, "Xh Ym", "·" separators) so an employee
@@ -5,14 +7,24 @@
  * the same numbers in the same shape.
  */
 
-export function fmtTime(ms: number, tz?: string): string {
-  const opts: Intl.DateTimeFormatOptions = { hour: 'numeric', minute: '2-digit' };
-  if (tz) opts.timeZone = tz;
-  return new Intl.DateTimeFormat(undefined, opts).format(new Date(ms));
+export function fmtTime(ms: number, timeZone: string): string {
+  return new Intl.DateTimeFormat(undefined, {
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZone,
+  }).format(new Date(ms));
 }
 
-export function fmtRange(startMs: number, endMs: number, tz?: string): string {
-  return `${fmtTime(startMs, tz)} – ${fmtTime(endMs, tz)}`;
+export function fmtRange(startMs: number, endMs: number, timeZone: string): string {
+  return `${fmtTime(startMs, timeZone)} – ${fmtTime(endMs, timeZone)}`;
+}
+
+export function fmtDateShort(ms: number, timeZone: string): string {
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+    timeZone,
+  }).format(new Date(ms));
 }
 
 export function fmtDurationMs(ms: number): string {
@@ -27,39 +39,40 @@ export function fmtDurationMs(ms: number): string {
 }
 
 /** Today / Yesterday / "Sat, May 30". */
-export function fmtDayLabel(yyyyMmDd: string): string {
-  const today = todayKey();
+export function fmtDayLabel(yyyyMmDd: string, timeZone: string): string {
+  const today = todayKey(timeZone);
   if (yyyyMmDd === today) return 'Today';
   if (yyyyMmDd === addDays(today, -1)) return 'Yesterday';
-  const d = parseDateKey(yyyyMmDd);
+  const d = calendarDateInstant(yyyyMmDd, timeZone);
   return new Intl.DateTimeFormat(undefined, {
     weekday: 'short',
     month: 'short',
     day: 'numeric',
+    timeZone,
   }).format(d);
 }
 
 /** Shift a YYYY-MM-DD string by a number of calendar days. */
 export function addDays(yyyyMmDd: string, delta: number): string {
   const d = parseDateKey(yyyyMmDd);
-  d.setDate(d.getDate() + delta);
-  return dateKey(d);
+  d.setUTCDate(d.getUTCDate() + delta);
+  return d.toISOString().slice(0, 10);
 }
 
-export function todayKey(): string {
-  return dateKey(new Date());
+export function todayKey(timeZone: string): string {
+  return dateKeyInTimeZone(new Date(), timeZone);
 }
 
 function parseDateKey(key: string): Date {
   const [year, month, day] = key.split('-').map((part) => Number.parseInt(part, 10));
-  return new Date(year!, month! - 1, day!);
+  return new Date(Date.UTC(year!, month! - 1, day!, 12));
 }
 
-function dateKey(date: Date): string {
-  const year = date.getFullYear();
-  const month = `${date.getMonth() + 1}`.padStart(2, '0');
-  const day = `${date.getDate()}`.padStart(2, '0');
-  return `${year}-${month}-${day}`;
+/** A formatting-only local-noon instant. Noon is valid through DST changes,
+ * so a YYYY-MM-DD label cannot roll into a neighboring business date. */
+export function calendarDateInstant(key: string, timeZone: string): Date {
+  const [year, month, day] = key.split('-').map((part) => Number.parseInt(part, 10));
+  return instantForZonedDateTime({ year: year!, month: month!, day: day!, hour: 12, minute: 0, second: 0 }, timeZone);
 }
 
 /**

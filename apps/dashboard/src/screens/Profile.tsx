@@ -2,6 +2,7 @@ import './profile.css';
 import { useQuery } from '@tanstack/react-query';
 import { CalendarDays, Clock3, Building2, Shield, Users, User, Mail, SunMedium } from 'lucide-react';
 import { useRouteContext } from '@tanstack/react-router';
+import { zonedDateTimeParts } from '@grind/types';
 import { api } from '../lib/api';
 import type { SelfProfileResponse } from '@grind/types/profile';
 import type { ShiftSchedule, Weekday } from '@grind/types/shifts';
@@ -33,7 +34,7 @@ const WEEKDAYS: ReadonlyArray<{ key: Weekday; label: string }> = [
 
 export function ProfileScreen() {
   const { me } = useRouteContext({ from: '/authed' });
-  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  const tz = me.workspaceTimezone;
   const profileQ = useQuery({
     queryKey: ['profile', 'me'],
     queryFn: () => api<SelfProfileResponse>('/v1/profile/me'),
@@ -70,7 +71,7 @@ export function ProfileScreen() {
 
 function ProfileBody({ profile, timezone }: { profile: SelfProfileResponse; timezone: string }) {
   const roleLabel = friendlyRole(profile.user.displayRole);
-  const todayKey = weekdayKey(new Date());
+  const todayKey = weekdayKey(new Date(), timezone);
   const todayWindow = profile.shift ? formatScheduleRange(profile.shift.schedule[todayKey]) : 'Day off';
   const workingDays = profile.shift ? countWorkingDays(profile.shift.schedule) : 0;
   const captureCount = [profile.policy.captureApps, profile.policy.captureTitles, profile.policy.captureUrls]
@@ -321,8 +322,10 @@ function roleLine(role: SelfProfileResponse['user']['displayRole']) {
   return 'Self scope';
 }
 
-function weekdayKey(date: Date): Weekday {
-  return ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'][date.getDay()] as Weekday;
+function weekdayKey(date: Date, timeZone: string): Weekday {
+  const local = zonedDateTimeParts(date, timeZone);
+  const weekday = new Date(Date.UTC(local.year, local.month - 1, local.day)).getUTCDay();
+  return ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'][weekday] as Weekday;
 }
 
 function formatScheduleRange(slot: ShiftSchedule[Weekday] | undefined) {

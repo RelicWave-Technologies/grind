@@ -5,8 +5,8 @@ import { useRouteContext, useSearch } from '@tanstack/react-router';
 import { CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react';
 import { api } from '../lib/api';
 import { hasCapability, isManagerOrAbove } from '../lib/auth';
-import type { DayBlock, DayInsight, WorkspaceUser } from '../lib/types';
-import { fmtDayLabel, todayKey, addDays, fmtDurationMs } from '../lib/format';
+import type { DayInsight, WorkspaceUser } from '../lib/types';
+import { addDays, calendarDateInstant, fmtDayLabel, fmtDurationMs, fmtTime, todayKey } from '../lib/format';
 import { DayRibbon } from '../components/DayRibbon';
 import { ActivityHeatmap } from '../components/ActivityHeatmap';
 import { EntryRow } from '../components/EntryRow';
@@ -63,10 +63,10 @@ export function MeTodayScreen() {
   const { me } = useRouteContext({ from: '/authed' });
   const search = useSearch({ from: '/authed/edit-time' });
   const qc = useQueryClient();
-  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  const tz = me.workspaceTimezone;
 
   const searchDate =
-    typeof search.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(search.date) ? search.date : todayKey();
+    typeof search.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(search.date) ? search.date : todayKey(tz);
   const searchUserId = typeof search.userId === 'string' && search.userId.length > 0 ? search.userId : me.id;
   const focusRequestId = typeof search.requestId === 'string' && search.requestId.length > 0 ? search.requestId : null;
   const focusStartMs = parseSearchEpochMs(search.focusStart);
@@ -125,7 +125,7 @@ export function MeTodayScreen() {
       if (targetUserId !== me.id) params.set('userId', targetUserId);
       return api<DayInsight>(`/v1/insights/day?${params.toString()}`);
     },
-    refetchInterval: date === todayKey() ? 15_000 : false,
+    refetchInterval: date === todayKey(tz) ? 15_000 : false,
   });
 
   const invalidate = useCallback(() => {
@@ -303,7 +303,7 @@ export function MeTodayScreen() {
   const now = Date.now();
   const tasks = tasksQ.data?.tasks ?? [];
 
-  const isToday = date === todayKey();
+  const isToday = date === todayKey(tz);
   const tzLabel = tz.replace(/_/g, ' ');
   const isSelf = !targetUser || targetUser.id === me.id;
   const titleName = targetUser
@@ -317,7 +317,7 @@ export function MeTodayScreen() {
   return (
     <Page className="myd-page">
       <PageHeader
-        eyebrow={`${tzLabel} · ${fmtDayLabel(date).toUpperCase()}`}
+        eyebrow={`${tzLabel} · ${fmtDayLabel(date, tz).toUpperCase()}`}
         title={titleName}
         subtitle={
           isSelf
@@ -346,7 +346,8 @@ export function MeTodayScreen() {
             )}
             <SingleDatePicker
               date={date}
-              today={todayKey()}
+              today={todayKey(tz)}
+              timeZone={tz}
               onChange={setDate}
               onPrev={() => setDate((d) => addDays(d, -1))}
               onNext={() => setDate((d) => addDays(d, 1))}
@@ -399,6 +400,7 @@ export function MeTodayScreen() {
               <DayRibbon
                 day={day}
                 now={now}
+                timeZone={tz}
                 editable={editable}
                 onClickEpoch={onRibbonClick}
                 onHoverRowId={setHighlightedRowId}
@@ -453,6 +455,7 @@ export function MeTodayScreen() {
                           kind="gap"
                           block={b}
                           tasks={tasks}
+                          timeZone={tz}
                           disabled={!editable}
                           workspaceUsers={workspaceUsers}
                           selfId={me.id}
@@ -474,6 +477,7 @@ export function MeTodayScreen() {
                           kind="pending"
                           block={b}
                           tasks={tasks}
+                          timeZone={tz}
                           disabled={!editable}
                           workspaceUsers={workspaceUsers}
                           selfId={me.id}
@@ -495,7 +499,7 @@ export function MeTodayScreen() {
                           className={`et-row entry-row-idle_trimmed${highlightedRowId === rowId ? ' et-row-highlighted' : ''}`}
                         >
                           <td><span className="kind-chip kind-idle_trimmed">Idle (trimmed)</span></td>
-                          <td className="tabular">{new Date(b.startedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} – {new Date(b.endedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</td>
+                          <td className="tabular">{fmtTime(b.startedAt, tz)} – {fmtTime(b.endedAt, tz)}</td>
                           <td className="tabular secondary">{fmtDurationMs(b.durationMs)}</td>
                           <td className="tertiary">—</td>
                           <td className="tertiary">Trimmed via the agent&apos;s idle prompt.</td>
@@ -515,6 +519,7 @@ export function MeTodayScreen() {
                         kind={kind}
                         block={b}
                         tasks={tasks}
+                        timeZone={tz}
                         disabled={!editable}
                         isMeeting={isMeeting}
                         workspaceUsers={workspaceUsers}
@@ -542,6 +547,7 @@ export function MeTodayScreen() {
                         highlighted={highlightedRowId === rowId}
                         kind="rejected"
                         rejected={r}
+                        timeZone={tz}
                       />
                     );
                   })}
@@ -564,6 +570,7 @@ function parseSearchEpochMs(value: string | undefined): number | null {
 function SingleDatePicker({
   date,
   today,
+  timeZone,
   onChange,
   onPrev,
   onNext,
@@ -571,6 +578,7 @@ function SingleDatePicker({
 }: {
   date: string;
   today: string;
+  timeZone: string;
   onChange: (date: string) => void;
   onPrev: () => void;
   onNext: () => void;
@@ -613,12 +621,12 @@ function SingleDatePicker({
         value={
           <>
             <CalendarDays size={14} strokeWidth={1.8} aria-hidden />
-            <span>{fmtDayLabel(date)}</span>
+            <span>{fmtDayLabel(date, timeZone)}</span>
           </>
         }
         onValueClick={openPicker}
         valueExpanded={open}
-        valueLabel={`Choose day, current date ${formatFullDateLabel(date)}`}
+        valueLabel={`Choose day, current date ${formatFullDateLabel(date, timeZone)}`}
         onPrev={onPrev}
         onNext={onNext}
         nextDisabled={nextDisabled}
@@ -649,6 +657,7 @@ function SingleDatePicker({
             month={visibleMonth}
             today={today}
             selected={date}
+            timeZone={timeZone}
             onChoose={chooseDay}
           />
         </div>
@@ -661,11 +670,13 @@ function CalendarMonth({
   month,
   today,
   selected,
+  timeZone,
   onChoose,
 }: {
   month: Date;
   today: string;
   selected: string;
+  timeZone: string;
   onChoose: (day: string) => void;
 }) {
   const days = calendarCells(month);
@@ -692,7 +703,7 @@ function CalendarMonth({
               ].join('')}
               disabled={disabled}
               onClick={() => onChoose(day)}
-              aria-label={formatFullDateLabel(day)}
+              aria-label={formatFullDateLabel(day, timeZone)}
               aria-pressed={isSelected}
             >
               {Number(day.slice(-2))}
@@ -706,14 +717,11 @@ function CalendarMonth({
 
 function parseDateKey(key: string): Date {
   const [year, month, day] = key.split('-').map((part) => Number.parseInt(part, 10));
-  return new Date(year!, month! - 1, day!);
+  return new Date(Date.UTC(year!, month! - 1, day!, 12));
 }
 
 function localDateKey(date: Date): string {
-  const year = date.getFullYear();
-  const month = `${date.getMonth() + 1}`.padStart(2, '0');
-  const day = `${date.getDate()}`.padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  return date.toISOString().slice(0, 10);
 }
 
 function compareDateKeys(a: string, b: string): number {
@@ -721,33 +729,34 @@ function compareDateKeys(a: string, b: string): number {
 }
 
 function monthStart(date: Date): Date {
-  return new Date(date.getFullYear(), date.getMonth(), 1);
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1, 12));
 }
 
 function addMonths(date: Date, delta: number): Date {
-  return new Date(date.getFullYear(), date.getMonth() + delta, 1);
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + delta, 1, 12));
 }
 
 function calendarCells(month: Date): Array<string | null> {
   const start = monthStart(month);
-  const firstDay = (start.getDay() + 6) % 7;
-  const count = new Date(start.getFullYear(), start.getMonth() + 1, 0).getDate();
+  const firstDay = (start.getUTCDay() + 6) % 7;
+  const count = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 0)).getUTCDate();
   const cells: Array<string | null> = Array.from({ length: firstDay }, () => null);
   for (let day = 1; day <= count; day += 1) {
-    cells.push(localDateKey(new Date(start.getFullYear(), start.getMonth(), day)));
+    cells.push(localDateKey(new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), day, 12))));
   }
   return cells;
 }
 
 function formatMonthLabel(date: Date): string {
-  return date.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+  return date.toLocaleDateString(undefined, { month: 'long', year: 'numeric', timeZone: 'UTC' });
 }
 
-function formatFullDateLabel(key: string): string {
-  return parseDateKey(key).toLocaleDateString(undefined, {
+function formatFullDateLabel(key: string, timeZone: string): string {
+  return calendarDateInstant(key, timeZone).toLocaleDateString(undefined, {
     weekday: 'long',
     month: 'long',
     day: 'numeric',
     year: 'numeric',
+    timeZone,
   });
 }

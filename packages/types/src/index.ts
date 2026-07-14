@@ -12,3 +12,5 @@ export * from './teamSettings';
 export * from './payroll';
 export * from './monitoringSettings';
 export * from './apiTokens';
+export * from './timezone';
+export * from './workspace';

@@ -82,7 +82,7 @@ interface OverviewResponse {
 export function OverviewScreen() {
   const { me } = useRouteContext({ from: '/authed' });
   const navigate = useNavigate();
-  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  const tz = me.workspaceTimezone;
   const q = useQuery({
     queryKey: ['admin', 'overview', tz],
     queryFn: () => api<OverviewResponse>(`/v1/admin/overview?tz=${encodeURIComponent(tz)}`),

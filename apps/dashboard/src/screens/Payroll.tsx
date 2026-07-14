@@ -1,9 +1,11 @@
 import './payroll.css';
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
+import { useRouteContext } from '@tanstack/react-router';
 import { Download, FileSpreadsheet, X } from 'lucide-react';
 import { api, API_BASE } from '../lib/api';
+import { dateKeyInTimeZone, instantForZonedDateTime } from '@grind/types';
 import {
   Avatar,
   Banner,
@@ -130,8 +132,8 @@ interface PayrollPayload {
   unresolvedApprovalCount: number;
 }
 
-function thisMonth(): string {
-  return new Date().toISOString().slice(0, 7);
+function thisMonth(timeZone: string): string {
+  return dateKeyInTimeZone(new Date(), timeZone).slice(0, 7);
 }
 
 function shiftMonth(month: string, delta: number): string {
@@ -140,10 +142,22 @@ function shiftMonth(month: string, delta: number): string {
   return new Date(Date.UTC(y, m - 1 + delta, 1)).toISOString().slice(0, 7);
 }
 
-function fmtMonth(month: string): string {
+function fmtMonth(month: string, timeZone: string): string {
   const [y, m] = month.split('-').map((n) => Number.parseInt(n, 10));
   if (!y || !m) return month;
-  return new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric' }).format(new Date(Date.UTC(y, m - 1, 1)));
+  const instant = instantForZonedDateTime({ year: y, month: m, day: 1, hour: 12, minute: 0, second: 0 }, timeZone);
+  return new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric', timeZone }).format(instant);
+}
+
+function formatPayrollDay(date: string, timeZone: string): string {
+  const [year, month, day] = date.split('-').map((part) => Number.parseInt(part, 10));
+  const instant = instantForZonedDateTime({ year: year!, month: month!, day: day!, hour: 12, minute: 0, second: 0 }, timeZone);
+  return new Intl.DateTimeFormat(undefined, {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    timeZone,
+  }).format(instant);
 }
 
 function h(min: number): string {
@@ -172,10 +186,11 @@ function statusLabel(status: PayrollDayStatus): string {
 }
 
 export function PayrollScreen() {
-  const [month, setMonth] = useState<string>(thisMonth());
+  const { me } = useRouteContext({ from: '/authed' });
+  const timeZone = me.workspaceTimezone;
+  const [month, setMonth] = useState<string>(() => thisMonth(timeZone));
   const [downloading, setDownloading] = useState(false);
   const [selectedRow, setSelectedRow] = useState<PayrollRow | null>(null);
-  const browserTz = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC', []);
 
   const q = useQuery({
     queryKey: ['admin', 'payroll', month],
@@ -186,7 +201,7 @@ export function PayrollScreen() {
   const payroll = q.data?.payroll;
   const totals = payroll?.totals;
   const hasRows = (payroll?.rows.length ?? 0) > 0;
-  const isCurrent = month === thisMonth();
+  const isCurrent = month === thisMonth(timeZone);
 
   async function downloadCsv() {
     setDownloading(true);
@@ -210,18 +225,18 @@ export function PayrollScreen() {
   return (
     <Page>
       <PageHeader
-        eyebrow={`Payroll · ${policy?.timezone ?? browserTz}`}
-        title={fmtMonth(month)}
+        eyebrow={`Payroll · ${policy?.timezone ?? timeZone}`}
+        title={fmtMonth(month, timeZone)}
         subtitle="Classify shift-working days as Full, Half, or Off and prepare the Lark month-close worksheet."
         actions={
           <Toolbar>
             {!isCurrent && (
-              <Button variant="ghost" size="sm" onClick={() => setMonth(thisMonth())}>
+              <Button variant="ghost" size="sm" onClick={() => setMonth(thisMonth(timeZone))}>
                 Today
               </Button>
             )}
             <DateStepper
-              value={fmtMonth(month)}
+              value={fmtMonth(month, timeZone)}
               onPrev={() => setMonth((m) => shiftMonth(m, -1))}
               onNext={() => setMonth((m) => shiftMonth(m, 1))}
               nextDisabled={isCurrent}
@@ -321,12 +336,12 @@ export function PayrollScreen() {
         </>
       )}
 
-      {selectedRow && <PayrollDrawer row={selectedRow} month={month} onClose={() => setSelectedRow(null)} />}
+      {selectedRow && <PayrollDrawer row={selectedRow} month={month} timeZone={timeZone} onClose={() => setSelectedRow(null)} />}
     </Page>
   );
 }
 
-function PayrollDrawer({ row, month, onClose }: { row: PayrollRow; month: string; onClose: () => void }) {
+function PayrollDrawer({ row, month, timeZone, onClose }: { row: PayrollRow; month: string; timeZone: string; onClose: () => void }) {
   const drawer = (
     <div className="pay-drawer-layer" role="presentation" onMouseDown={onClose}>
       <aside className="pay-drawer" role="dialog" aria-modal="true" aria-labelledby="pay-drawer-title" onMouseDown={(e) => e.stopPropagation()}>
@@ -366,7 +381,7 @@ function PayrollDrawer({ row, month, onClose }: { row: PayrollRow; month: string
                     <Tr key={day.date}>
                       <Td>
                         <div className="pay-date-cell">
-                          <strong>{new Intl.DateTimeFormat(undefined, { weekday: 'short', month: 'short', day: 'numeric' }).format(new Date(`${day.date}T00:00:00Z`))}</strong>
+                          <strong>{formatPayrollDay(day.date, timeZone)}</strong>
                           <span>{day.shiftName ?? 'No shift'}</span>
                         </div>
                       </Td>

@@ -1,6 +1,8 @@
 import {
   WEEKDAYS,
   ShiftScheduleSchema,
+  dateKeyInTimeZone,
+  isValidTimeZone,
   type MemberReportApp,
   type MemberReportDay,
   type MemberReportScreenshot,
@@ -113,12 +115,7 @@ export function isYmd(value: unknown): value is string {
 }
 
 export function todayKeyForTz(tz: string, now = new Date()): string {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: tz,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(now);
+  return dateKeyInTimeZone(now, tz);
 }
 
 export function addDaysKey(day: string, delta: number): string {
@@ -127,8 +124,14 @@ export function addDaysKey(day: string, delta: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-export function resolveReportRange(query: Record<string, unknown>): ReportRange | ReportRangeError {
-  const tz = typeof query.tz === 'string' && query.tz.length > 0 ? query.tz : 'UTC';
+export function resolveReportRange(query: Record<string, unknown>, workspaceTz: string): ReportRange | ReportRangeError {
+  // Authenticated report routes are workspace-calendar views. Older clients
+  // may still send their device timezone; it must never redefine business
+  // dates or split one workspace day differently from other surfaces.
+  const tz = workspaceTz;
+  if (query.tz !== undefined && (typeof query.tz !== 'string' || !isValidTimeZone(query.tz))) {
+    return { status: 400, error: 'invalid_tz' };
+  }
   try {
     new Intl.DateTimeFormat('en-US', { timeZone: tz });
   } catch {
@@ -156,10 +159,10 @@ export function resolveReportRange(query: Record<string, unknown>): ReportRange 
   return { from, to, tz, days, rangeStart: first.start, rangeEnd: last.end };
 }
 
-export function resolveSingleReportDay(query: Record<string, unknown>): ReportRange | ReportRangeError {
+export function resolveSingleReportDay(query: Record<string, unknown>, fallbackTz: string): ReportRange | ReportRangeError {
   const date = isYmd(query.date) ? query.date : null;
   if (!date) return { status: 400, error: 'invalid_date' };
-  const range = resolveReportRange({ from: date, to: date, tz: query.tz });
+  const range = resolveReportRange({ from: date, to: date }, fallbackTz);
   if ('error' in range) return range;
   return range;
 }
