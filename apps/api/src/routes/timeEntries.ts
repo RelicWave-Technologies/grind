@@ -34,6 +34,8 @@ function toCoreEntry(args: {
   clientUuid: string;
   userId: string;
   source: 'AUTO' | 'MANUAL';
+  revision?: number;
+  closeReason?: 'AGENT' | 'AGENT_RECOVERY' | null;
   startedAt: string;
   endedAt: string | null;
   segments: SegmentDto[];
@@ -49,8 +51,11 @@ function toCoreEntry(args: {
     clientUuid: args.clientUuid,
     userId: args.userId,
     source: args.source,
+    revision: args.revision ?? 0,
     startedAt: new Date(args.startedAt).getTime(),
     endedAt: args.endedAt ? new Date(args.endedAt).getTime() : null,
+    pauseReason: null,
+    closeReason: args.closeReason ?? null,
     segments,
   };
 }
@@ -161,6 +166,8 @@ timeEntriesRouter.post('/', validate(CreateTimeEntryRequest, 'body'), async (req
       clientUuid: body.clientUuid,
       userId: req.user.sub,
       source: body.source,
+      revision: body.revision,
+      closeReason: body.closeReason,
       startedAt: body.startedAt,
       endedAt: body.endedAt ?? null,
       segments: body.segments,
@@ -288,6 +295,8 @@ timeEntriesRouter.put('/:id/sync', validate(SyncTimeEntryRequest, 'body'), async
       clientUuid: entry.clientUuid,
       userId: entry.userId,
       source: entry.source,
+      revision: body.revision,
+      closeReason: body.closeReason,
       startedAt: entry.startedAt.toISOString(),
       endedAt: body.endedAt ?? null,
       segments: body.segments,
