@@ -56,6 +56,9 @@ class MemStore implements EntryStore {
       .map((e) => ({ entry: structuredClone(e), syncState: this.syncStates.get(e.id) ?? 'pending_create' }))
       .filter((r): r is UnsyncedEntry => r.syncState === 'pending_create' || r.syncState === 'pending_update');
   }
+  isPendingCreate(id: string) {
+    return this.syncStates.get(id) === 'pending_create';
+  }
   listRecent(limit: number) {
     return [...this.entries.values()].reverse().slice(0, limit).map((e) => structuredClone(e));
   }

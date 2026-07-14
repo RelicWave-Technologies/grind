@@ -1,4 +1,4 @@
-import type { ActivitySampleInput } from '@grind/types';
+import type { ActivitySampleInput, ActivitySamplesResponse } from '@grind/types';
 import { api } from '../apiClient';
 import { log } from '../../logger';
 import type { ActivityStore, ActivityRow } from './store';
@@ -42,8 +42,13 @@ function toInput(r: ActivityRow): ActivitySampleInput {
  * drains on subsequent calls (the sync drain loops), so a large backlog clears
  * in safe chunks instead of one oversized — and rejected — request.
  */
-export async function flushActivity(store: ActivityStore): Promise<number> {
-  const rows = store.unsynced(MAX_BATCH_ROWS);
+export async function flushActivity(
+  store: ActivityStore,
+  isTimeEntryPendingCreate: (entryId: string) => boolean = () => false,
+): Promise<number> {
+  const rows = store
+    .unsynced(MAX_BATCH_ROWS)
+    .filter((row) => row.timeEntryId === null || !isTimeEntryPendingCreate(row.timeEntryId));
   if (rows.length === 0) return 0;
 
   // Pack the longest prefix whose JSON stays under the byte budget — always at
@@ -59,8 +64,14 @@ export async function flushActivity(store: ActivityStore): Promise<number> {
   }
 
   try {
-    await api('/v1/activity-samples', { method: 'POST', body: { samples: batch.map((b) => b.input) } });
+    const response = await api<ActivitySamplesResponse>('/v1/activity-samples', {
+      method: 'POST',
+      body: { samples: batch.map((b) => b.input) },
+    });
     store.markSynced(batch.map((b) => b.id));
+    if ((response?.detached ?? 0) > 0) {
+      log.warn('activity samples accepted without unavailable timer parent', { count: response.detached });
+    }
     log.debug('flushed activity samples', { count: batch.length, bytes });
     return batch.length;
   } catch (err) {

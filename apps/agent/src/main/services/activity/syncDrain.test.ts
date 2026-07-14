@@ -44,6 +44,35 @@ describe('ActivitySyncDrain', () => {
     expect(flush).toHaveBeenCalledTimes(3);
   });
 
+  it('waits for timer sync before uploading dependent activity', async () => {
+    const order: string[] = [];
+    const beforeFlush = vi.fn(async () => {
+      order.push('timer');
+    });
+    const flush = vi.fn(async () => {
+      order.push('activity');
+      return 0;
+    });
+    const drain = new ActivitySyncDrain({ getStore: () => ({}) as ActivityStore, beforeFlush, flush });
+
+    await drain.drainNow('sample');
+
+    expect(order).toEqual(['timer', 'activity']);
+    expect(beforeFlush).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not upload activity when its sync prerequisite fails', async () => {
+    const flush = vi.fn().mockResolvedValue(0);
+    const drain = new ActivitySyncDrain({
+      getStore: () => ({}) as ActivityStore,
+      beforeFlush: vi.fn().mockRejectedValue(new Error('timer store unavailable')),
+      flush,
+    });
+
+    expect(await drain.drainNow('wake')).toEqual({ batches: 0, samples: 0, skipped: null });
+    expect(flush).not.toHaveBeenCalled();
+  });
+
   it('stops on the first failed batch and leaves later rows for a retry', async () => {
     const flush = vi.fn().mockResolvedValueOnce(200).mockRejectedValueOnce(new Error('network down')).mockResolvedValueOnce(0);
     const drain = new ActivitySyncDrain({ getStore: () => ({}) as ActivityStore, flush });
@@ -61,6 +90,7 @@ describe('ActivitySyncDrain', () => {
 
     const first = drain.drainNow('sample');
     const second = drain.drainNow('wake');
+    await Promise.resolve();
 
     expect(second).toBe(first);
     expect(flush).toHaveBeenCalledTimes(1);

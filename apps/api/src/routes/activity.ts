@@ -39,8 +39,23 @@ activityRouter.post('/', validate(ActivitySamplesRequest, 'body'), async (req, r
       : null;
     const policy = policyRow ?? WORKSPACE_POLICY_DEFAULTS;
 
+    // A timer entry is a parent of activity, but older agents may upload the
+    // child first after an offline retry. Preserve the activity evidence while
+    // refusing to attach it to a missing or another user's entry.
+    const submittedEntryIds = [...new Set(samples.flatMap((sample) => (sample.timeEntryId ? [sample.timeEntryId] : [])))];
+    const ownedEntries = submittedEntryIds.length
+      ? await prisma.timeEntry.findMany({
+          where: { id: { in: submittedEntryIds }, userId },
+          select: { id: true },
+        })
+      : [];
+    const ownedEntryIds = new Set(ownedEntries.map((entry) => entry.id));
+    let detached = 0;
+
     await prisma.$transaction(
       samples.map((s) => {
+        const timeEntryId = s.timeEntryId && ownedEntryIds.has(s.timeEntryId) ? s.timeEntryId : null;
+        if (s.timeEntryId && timeEntryId === null) detached += 1;
         const scrubbed = applyPolicyToActive(
           {
             activeApp: s.activeApp ?? null,
@@ -55,7 +70,7 @@ activityRouter.post('/', validate(ActivitySamplesRequest, 'body'), async (req, r
           create: {
             id: s.id,
             userId,
-            timeEntryId: s.timeEntryId ?? null,
+            timeEntryId,
             bucketStart: new Date(s.bucketStart),
             keystrokes: s.keystrokes,
             clicks: s.clicks,
@@ -70,7 +85,7 @@ activityRouter.post('/', validate(ActivitySamplesRequest, 'body'), async (req, r
             activeUrl: scrubbed.activeUrl,
           },
           update: {
-            timeEntryId: s.timeEntryId ?? null,
+            timeEntryId,
             keystrokes: s.keystrokes,
             clicks: s.clicks,
             mouseDistancePx: s.mouseDistancePx,
@@ -87,7 +102,10 @@ activityRouter.post('/', validate(ActivitySamplesRequest, 'body'), async (req, r
       }),
     );
 
-    const response: ActivitySamplesResponse = { accepted: samples.length };
+    if (detached > 0) {
+      logger.warn({ userId, detached, submitted: samples.length }, 'activity samples detached from unavailable timer entries');
+    }
+    const response: ActivitySamplesResponse = { accepted: samples.length, detached };
     res.status(201).json(response);
 
     // Anti-cheat scoring runs AFTER the response — it's a side effect for

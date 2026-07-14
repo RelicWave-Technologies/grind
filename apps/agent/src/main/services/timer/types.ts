@@ -61,6 +61,8 @@ export interface EntryStore {
   getOpen(): TimeEntry | null;
   /** Entries that still need to be pushed to the server. */
   getUnsynced(): UnsyncedEntry[];
+  /** True until the entry has been created successfully on the server. */
+  isPendingCreate(entryId: string): boolean;
   /** Most recent entries (newest first), for the day timeline / recent views. */
   listRecent(limit: number): TimeEntry[];
   /** Entries that overlap or continue after `since`, newest first. */

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({ api: vi.fn() }));
 vi.mock('../apiClient', () => ({ api: mocks.api }));
@@ -21,9 +21,12 @@ function fakeStore(rows: Row[]) {
   return { store, synced };
 }
 const bodyOf = () =>
-  (mocks.api.mock.calls[0]![1] as { body: { samples: { activeUrl: string | null }[] } }).body;
+  (mocks.api.mock.calls.find((call) => call[0] === '/v1/activity-samples')![1] as {
+    body: { samples: { id: string; activeUrl: string | null }[] };
+  }).body;
 
 afterEach(() => mocks.api.mockReset());
+beforeEach(() => mocks.api.mockResolvedValue({ accepted: 1, detached: 0 }));
 
 describe('flushActivity byte-bounded batching', () => {
   it('sends nothing when there is no backlog', async () => {
@@ -35,7 +38,6 @@ describe('flushActivity byte-bounded batching', () => {
   it('bounds the batch by bytes so the body never exceeds the API limit', async () => {
     const bigUrl = 'https://x/' + 'a'.repeat(2000); // ~2KB each → 500 rows would be ~1MB
     const rows = Array.from({ length: 500 }, (_, i) => row('r' + i, { activeUrl: bigUrl }));
-    mocks.api.mockResolvedValue(undefined);
     const { store, synced } = fakeStore(rows);
 
     const sent = await flushActivity(store);
@@ -46,15 +48,35 @@ describe('flushActivity byte-bounded batching', () => {
   });
 
   it('truncates over-long text fields', async () => {
-    mocks.api.mockResolvedValue(undefined);
     const { store } = fakeStore([row('r1', { activeUrl: 'u'.repeat(5000) })]);
     await flushActivity(store);
     expect(bodyOf().samples[0]!.activeUrl!.length).toBeLessThanOrEqual(1024);
   });
 
   it('always sends at least one sample even if it alone is large', async () => {
-    mocks.api.mockResolvedValue(undefined);
     const { store, synced } = fakeStore([row('r1', { activeUrl: 'u'.repeat(5000) })]);
+    expect(await flushActivity(store)).toBe(1);
+    expect(synced).toEqual(['r1']);
+  });
+
+  it('holds children whose timer parent has not been created yet', async () => {
+    const { store, synced } = fakeStore([
+      row('waiting', { timeEntryId: 'pending-parent' }),
+      row('ready', { timeEntryId: 'created-parent', bucketStart: 60_000 }),
+      row('unlinked', { timeEntryId: null, bucketStart: 120_000 }),
+    ]);
+
+    expect(await flushActivity(store, (entryId) => entryId === 'pending-parent')).toBe(2);
+
+    const sent = bodyOf().samples as unknown as { id: string }[];
+    expect(sent.map((sample) => sample.id)).toEqual(['ready', 'unlinked']);
+    expect(synced).toEqual(['ready', 'unlinked']);
+  });
+
+  it('remains compatible with an older API response without detached count', async () => {
+    mocks.api.mockResolvedValue({ accepted: 1 });
+    const { store, synced } = fakeStore([row('r1')]);
+
     expect(await flushActivity(store)).toBe(1);
     expect(synced).toEqual(['r1']);
   });

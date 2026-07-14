@@ -61,6 +61,49 @@ describe('POST /v1/activity-samples', () => {
     expect(rows[0]!.keystrokes).toBe(99);
   });
 
+  it('keeps a mixed batch when a timer parent is missing or belongs to another user', async () => {
+    const u = await seedUser();
+    const outsider = await seedUser();
+    const ownEntry = await prisma.timeEntry.create({
+      data: {
+        id: fakeUlid('entry'),
+        clientUuid: fakeUlid('client'),
+        userId: u.userId,
+        source: 'AUTO',
+        startedAt: new Date(T0),
+      },
+    });
+    const foreignEntry = await prisma.timeEntry.create({
+      data: {
+        id: fakeUlid('entry'),
+        clientUuid: fakeUlid('client'),
+        userId: outsider.userId,
+        source: 'AUTO',
+        startedAt: new Date(T0),
+      },
+    });
+
+    const res = await request(app)
+      .post('/v1/activity-samples')
+      .set('Authorization', `Bearer ${u.accessToken}`)
+      .send({
+        samples: [
+          sample({ bucketStart: iso(T0), timeEntryId: ownEntry.id }),
+          sample({ bucketStart: iso(T0 + MIN), timeEntryId: fakeUlid('missing') }),
+          sample({ bucketStart: iso(T0 + 2 * MIN), timeEntryId: foreignEntry.id }),
+        ],
+      });
+
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({ accepted: 3, detached: 2 });
+    const rows = await prisma.activitySample.findMany({
+      where: { userId: u.userId },
+      orderBy: { bucketStart: 'asc' },
+    });
+    expect(rows).toHaveLength(3);
+    expect(rows.map((row) => row.timeEntryId)).toEqual([ownEntry.id, null, null]);
+  });
+
   it('scopes samples to the caller', async () => {
     const u1 = await seedUser();
     const u2 = await seedUser();
