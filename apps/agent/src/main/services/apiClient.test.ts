@@ -2,14 +2,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   loadTokens: vi.fn(),
-  saveTokens: vi.fn(),
-  clearTokens: vi.fn(),
+  replaceTokensIfMatch: vi.fn(),
+  clearTokensIfMatch: vi.fn(),
 }));
 
 vi.mock('./tokenStore', () => ({
   loadTokens: mocks.loadTokens,
-  saveTokens: mocks.saveTokens,
-  clearTokens: mocks.clearTokens,
+  replaceTokensIfMatch: mocks.replaceTokensIfMatch,
+  clearTokensIfMatch: mocks.clearTokensIfMatch,
 }));
 vi.mock('../logger', () => ({ log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } }));
 
@@ -30,8 +30,10 @@ function res(status: number, body: unknown): Response {
 afterEach(() => {
   vi.unstubAllGlobals();
   mocks.loadTokens.mockReset();
-  mocks.saveTokens.mockReset();
-  mocks.clearTokens.mockReset();
+  mocks.replaceTokensIfMatch.mockReset();
+  mocks.replaceTokensIfMatch.mockResolvedValue(true);
+  mocks.clearTokensIfMatch.mockReset();
+  mocks.clearTokensIfMatch.mockResolvedValue(true);
 });
 
 describe('api() refresh handling', () => {
@@ -45,7 +47,7 @@ describe('api() refresh handling', () => {
     const off = onAuthChange((s) => seen.push(s));
 
     await expect(api('/v1/thing')).rejects.toBeInstanceOf(HttpError);
-    expect(mocks.clearTokens).not.toHaveBeenCalled();
+    expect(mocks.clearTokensIfMatch).not.toHaveBeenCalled();
     expect(seen).not.toContain('loggedOut');
     off();
   });
@@ -63,7 +65,7 @@ describe('api() refresh handling', () => {
     const off = onAuthChange((s) => seen.push(s));
 
     await expect(api('/v1/thing')).rejects.toBeInstanceOf(UnauthorizedError);
-    expect(mocks.clearTokens).toHaveBeenCalledOnce();
+    expect(mocks.clearTokensIfMatch).toHaveBeenCalledOnce();
     expect(seen).toContain('loggedOut');
     off();
   });
@@ -80,7 +82,8 @@ describe('api() refresh handling', () => {
     );
 
     await expect(api<{ value: number }>('/v1/thing')).resolves.toEqual({ value: 42 });
-    expect(mocks.saveTokens).toHaveBeenCalledWith(
+    expect(mocks.replaceTokensIfMatch).toHaveBeenCalledWith(
+      TOKENS,
       expect.objectContaining({ accessToken: 'a1', refreshToken: 'r1' }),
     );
   });
@@ -97,8 +100,8 @@ describe('api() refresh handling', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls[1]![1]?.headers).toMatchObject({ Authorization: 'Bearer a1' });
-    expect(mocks.saveTokens).not.toHaveBeenCalled();
-    expect(mocks.clearTokens).not.toHaveBeenCalled();
+    expect(mocks.replaceTokensIfMatch).not.toHaveBeenCalled();
+    expect(mocks.clearTokensIfMatch).not.toHaveBeenCalled();
   });
 
   it('recovers reuse grace by reloading newer stored tokens', async () => {
@@ -116,7 +119,7 @@ describe('api() refresh handling', () => {
     );
 
     await expect(api<{ value: number }>('/v1/thing')).resolves.toEqual({ value: 42 });
-    expect(mocks.clearTokens).not.toHaveBeenCalled();
+    expect(mocks.clearTokensIfMatch).not.toHaveBeenCalled();
   });
 
   it('does not clear tokens when reuse grace has no newer local token to use', async () => {
@@ -130,7 +133,7 @@ describe('api() refresh handling', () => {
     );
 
     await expect(api('/v1/thing')).rejects.toBeInstanceOf(HttpError);
-    expect(mocks.clearTokens).not.toHaveBeenCalled();
+    expect(mocks.clearTokensIfMatch).not.toHaveBeenCalled();
   });
 
   it('does not clear a newer login if a stale refresh is terminally rejected', async () => {
@@ -146,7 +149,7 @@ describe('api() refresh handling', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(api<{ value: number }>('/v1/thing')).resolves.toEqual({ value: 42 });
-    expect(mocks.clearTokens).not.toHaveBeenCalled();
+    expect(mocks.clearTokensIfMatch).not.toHaveBeenCalled();
     expect(fetchMock.mock.calls[2]![1]?.headers).toMatchObject({ Authorization: 'Bearer a1' });
   });
 });

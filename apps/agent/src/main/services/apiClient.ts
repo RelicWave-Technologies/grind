@@ -1,6 +1,6 @@
 import { API_URL } from '../env';
 import { log } from '../logger';
-import { clearTokens, loadTokens, saveTokens, type StoredTokens } from './tokenStore';
+import { clearTokensIfMatch, loadTokens, replaceTokensIfMatch, type StoredTokens } from './tokenStore';
 
 type FetchOptions = {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
@@ -72,11 +72,10 @@ async function loadNewerTokens(current: StoredTokens): Promise<StoredTokens | nu
 }
 
 async function clearTokensIfUnchanged(current: StoredTokens): Promise<boolean> {
-  if (await loadNewerTokens(current)) {
+  if (!await clearTokensIfMatch(current)) {
     log.info('skipped logout because newer stored tokens exist');
     return false;
   }
-  await clearTokens();
   notifyAuth('loggedOut');
   return true;
 }
@@ -131,8 +130,13 @@ async function refreshTokens(current: StoredTokens): Promise<RefreshOutcome> {
     accessToken: data.accessToken,
     refreshToken: data.refreshToken,
   };
-  await saveTokens(next);
-  return { ok: true, tokens: next };
+  if (await replaceTokensIfMatch(current, next)) return { ok: true, tokens: next };
+  const latest = await loadTokens();
+  if (latest) {
+    log.info('refresh result discarded because the stored session changed');
+    return { ok: true, tokens: latest };
+  }
+  return { ok: false, terminal: true, status: 401, reason: 'session_changed' };
 }
 
 /**
