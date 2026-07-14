@@ -48,6 +48,11 @@ import {
 } from './services/trackingPermissionMonitor';
 import { API_URL, CALLBACK_SCHEME } from './env';
 import { log, logFilePath } from './logger';
+import {
+  clearWorkspaceTimeSession,
+  initializeWorkspaceTime,
+  onWorkspaceTimeChange,
+} from './services/workspaceTime';
 
 function fmtShort(ms: number): string {
   const t = Math.floor(ms / 1000);
@@ -187,6 +192,7 @@ app.whenReady().then(async () => {
     onDismissFloatingBar: () => dismissFloatingBar(),
     onIdleResolved: () => idleMonitor.resolve(),
   });
+  onWorkspaceTimeChange((context) => broadcast('workspaceTime:push', context));
   startUpdateService({
     showMainWindow: () => showMainWindow(),
     isMainWindowVisible: () => !!mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible(),
@@ -264,6 +270,16 @@ app.whenReady().then(async () => {
     }
   });
 
+  // Resolve the canonical workspace clock before timer recovery and renderer
+  // totals. A validated on-disk timezone is available immediately offline;
+  // an online config refresh upgrades it to the current server value.
+  try {
+    await initializeWorkspaceTime();
+    await refreshAgentConfig();
+  } catch (err) {
+    log.warn('refreshAgentConfig failed', { err: String(err) });
+  }
+
   try {
     await initTimerOnBoot();
     startTimerSyncDrain();
@@ -274,16 +290,6 @@ app.whenReady().then(async () => {
     await startHeartbeatIfAuthed();
   } catch (err) {
     log.warn('startHeartbeatIfAuthed failed', { err: String(err) });
-  }
-
-  // Pull the server-driven capture cadence + idle threshold (per-user →
-  // workspace policy) BEFORE the capture loop schedules its first shot, so the
-  // first interval already reflects policy. No-ops (keeps defaults) if logged
-  // out; a failure here must not abort the rest of boot.
-  try {
-    await refreshAgentConfig();
-  } catch (err) {
-    log.warn('refreshAgentConfig failed', { err: String(err) });
   }
 
   startCaptureLoop();
@@ -311,6 +317,7 @@ app.whenReady().then(async () => {
       void drainActivityNow('auth');
       void offerPermissionSetupOnStartup();
     } else {
+      clearWorkspaceTimeSession();
       resetPermissionSetupOffer();
     }
   });

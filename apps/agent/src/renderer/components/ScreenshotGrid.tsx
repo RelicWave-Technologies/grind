@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Keyboard, MousePointer2, X } from 'lucide-react';
+import { formatWorkspaceDateTime, formatWorkspaceTime } from '../lib/workspaceTime';
 
 export type ShotItem = {
   id: string;
@@ -14,7 +15,7 @@ export type ShotItem = {
 
 /** Grid of screenshot thumbnails with per-shot keyboard/mouse activity bars.
  *  Clicking a shot opens a full-resolution lightbox. Shared by Today + Reports. */
-export default function ScreenshotGrid({ shots }: { shots: ShotItem[] }) {
+export default function ScreenshotGrid({ shots, timeZone }: { shots: ShotItem[]; timeZone: string }) {
   const [openId, setOpenId] = useState<string | null>(null);
   const [full, setFull] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -42,7 +43,7 @@ export default function ScreenshotGrid({ shots }: { shots: ShotItem[] }) {
             key={s.id}
             className="shot shot-btn"
             title={[
-              new Date(s.capturedAt).toLocaleString(),
+              formatWorkspaceDateTime(s.capturedAt, timeZone),
               uploadLabel(s.uploadState),
               s.lastError ? s.lastError : null,
               `keyboard ${s.keyboardPct}%`,
@@ -55,7 +56,7 @@ export default function ScreenshotGrid({ shots }: { shots: ShotItem[] }) {
               <span className="shot-act-row"><Keyboard size={11} strokeWidth={2} /><span className="shot-act-track"><span className="shot-act-fill kb" style={{ width: `${s.keyboardPct}%` }} /></span></span>
               <span className="shot-act-row"><MousePointer2 size={11} strokeWidth={2} /><span className="shot-act-track"><span className="shot-act-fill ms" style={{ width: `${s.mousePct}%` }} /></span></span>
             </div>
-            <span className="shot-time">{new Date(s.capturedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+            <span className="shot-time">{formatWorkspaceTime(s.capturedAt, timeZone)}</span>
             {s.uploadState !== 'uploaded' && <span className="shot-upload">{uploadLabel(s.uploadState)}</span>}
           </button>
         ))}
@@ -70,7 +71,7 @@ export default function ScreenshotGrid({ shots }: { shots: ShotItem[] }) {
             {!loading && !full && <div className="lightbox-loading">Couldn’t load this screenshot.</div>}
             {openShot && (
               <div className="lightbox-meta">
-                {new Date(openShot.capturedAt).toLocaleString()} · keyboard {openShot.keyboardPct}% · mouse {openShot.mousePct}%
+                {formatWorkspaceDateTime(openShot.capturedAt, timeZone)} · keyboard {openShot.keyboardPct}% · mouse {openShot.mousePct}%
               </div>
             )}
           </div>

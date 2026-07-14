@@ -51,6 +51,10 @@ export interface TrackingAccrualGuard {
   assertCanAccrue(): Promise<void>;
 }
 
+export interface BusinessDayProvider {
+  window(now: number): { start: number; end: number } | null;
+}
+
 export interface TrackingBlockedErrorLike extends Error {
   code: 'TRACKING_PERMISSIONS_REQUIRED';
   readiness: TrackingReadiness;

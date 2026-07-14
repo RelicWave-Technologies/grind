@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import type { TimeEntry } from '@grind/core';
 import { closeTimeEntry, totalWorkedMs } from '@grind/core';
+import { dateKeyInTimeZone, localDayWindowInTimeZone } from '@grind/types';
 import { HttpError } from '../apiClient';
 import { TimerService } from './timerService';
 import { TrackingBlockedError } from '../trackingReadiness';
@@ -905,5 +906,33 @@ describe('TimerService server finalization', () => {
       reason: 'server_finalized',
       recoveredAt: clock.now(),
     });
+  });
+});
+
+describe('TimerService workspace business day', () => {
+  it('counts only the portion after Asia/Kolkata midnight when the laptop zone differs', async () => {
+    const timeZone = 'Asia/Kolkata';
+    const clock = new FakeClock(Date.parse('2026-07-14T18:25:00.000Z'));
+    const store = new MemStore();
+    const service = new TimerService(
+      store,
+      new SpySync(),
+      clock,
+      new SeqIdGen(),
+      allowAccrual,
+      {
+        window(now) {
+          const date = dateKeyInTimeZone(now, timeZone);
+          const window = localDayWindowInTimeZone(date, timeZone)!;
+          return { start: window.start.getTime(), end: window.end.getTime() };
+        },
+      },
+    );
+
+    await service.start({ larkTaskGuid: 'overnight' });
+    clock.advance(10 * MIN);
+
+    expect(service.status()).toMatchObject({ state: 'RUNNING', workedMs: 5 * MIN });
+    expect(service.listToday(clock.now())).toHaveLength(1);
   });
 });

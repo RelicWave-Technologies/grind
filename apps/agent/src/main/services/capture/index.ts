@@ -8,6 +8,7 @@ import { nextDelayMs } from './scheduler';
 import { planScreenshotRetention } from './retention';
 import { startUploader, drainUploads, uploadScreenshotsNow } from './uploader';
 import { getTimerService } from '../timer';
+import { getWorkspaceTimeContext } from '../workspaceTime';
 import { getActivityStore } from '../activity';
 import { activityPercent } from '../activity/percent';
 import { SCREENSHOT_RETENTION_DAYS } from '../../env';
@@ -266,9 +267,8 @@ export async function fullScreenshot(id: string): Promise<string | null> {
 }
 
 export function todayScreenshotCount(): number {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return getStore().countSince(d.getTime());
+  const context = getWorkspaceTimeContext();
+  return context.ready && context.dayStart !== null ? getStore().countSince(context.dayStart) : 0;
 }
 
 export function screenshotUploadSummary(): ScreenshotUploadSummary {

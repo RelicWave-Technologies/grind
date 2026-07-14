@@ -1,4 +1,6 @@
 /** Shared formatting for Lark task cards (used by Today + Tasks screens). */
+import { dateKeyInTimeZone } from '@grind/types';
+import { formatWorkspaceDate } from './workspaceTime';
 
 export function fmtDuration(ms: number): string {
   const m = Math.round(ms / 60000);
@@ -9,20 +11,25 @@ export function fmtDuration(ms: number): string {
   return r ? `${h}h ${r}m` : `${h}h`;
 }
 
-export function fmtDate(ms: number): string {
-  return new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+export function fmtDate(ms: number, timeZone: string | null): string {
+  return formatWorkspaceDate(ms, timeZone);
 }
 
 export type DueInfo = { label: string; tone: 'overdue' | 'soon' | 'normal' };
-export function dueInfo(due: number, now: number): DueInfo {
+export function dueInfo(due: number, now: number, timeZone: string): DueInfo {
   const day = 86_400_000;
-  const startOfDay = (t: number) => { const d = new Date(t); d.setHours(0, 0, 0, 0); return d.getTime(); };
-  const diff = Math.round((startOfDay(due) - startOfDay(now)) / day);
+  const ordinal = (value: number) => {
+    const [year, month, date] = dateKeyInTimeZone(value, timeZone)
+      .split('-')
+      .map((part) => Number.parseInt(part, 10));
+    return Date.UTC(year!, month! - 1, date!);
+  };
+  const diff = Math.round((ordinal(due) - ordinal(now)) / day);
   if (diff < 0) return { label: `Overdue ${-diff}d`, tone: 'overdue' };
   if (diff === 0) return { label: 'Due today', tone: 'soon' };
   if (diff === 1) return { label: 'Due tomorrow', tone: 'soon' };
   if (diff < 7) return { label: `Due in ${diff}d`, tone: 'normal' };
-  return { label: `Due ${new Date(due).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`, tone: 'normal' };
+  return { label: `Due ${formatWorkspaceDate(due, timeZone)}`, tone: 'normal' };
 }
 
 export type LarkTaskItem = {

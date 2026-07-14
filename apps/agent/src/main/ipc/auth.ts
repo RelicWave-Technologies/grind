@@ -4,6 +4,7 @@ import { onAuthChange, api } from '../services/apiClient';
 import { startHeartbeat, stopHeartbeat } from '../services/heartbeat';
 import { broadcast } from '../broadcast';
 import { log } from '../logger';
+import { refreshAgentConfig } from '../services/agentConfig';
 
 /** Fetch a remote image and return it as a `data:` URL (renderer CSP allows
  *  data: but not remote img). Returns null on any failure or oversized image. */
@@ -24,6 +25,7 @@ async function fetchImageAsDataUrl(url: string): Promise<string | null> {
 export function registerAuthIpc(): void {
   ipcMain.handle('auth:login', async (_e, payload: { email: string; password: string }) => {
     const user = await login(payload.email, payload.password);
+    await refreshAgentConfig();
     startHeartbeat();
     broadcast('auth:status:push', 'loggedIn');
     return user;

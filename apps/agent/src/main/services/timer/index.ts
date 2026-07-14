@@ -9,6 +9,7 @@ import { TimerSyncDrain, type TimerSyncDrainReason } from './syncDrain';
 import type { Clock, IdGen } from './types';
 import { log } from '../../logger';
 import { getTrackingReadinessService } from '../trackingReadiness';
+import { getWorkspaceTimeContext } from '../workspaceTime';
 
 const realClock: Clock = { now: () => Date.now() };
 const realIds: IdGen = { ulid: () => ulid() };
@@ -22,7 +23,21 @@ export function getTimerService(): TimerService {
   const dbPath = path.join(app.getPath('userData'), 'agent.db');
   const db = new Database(dbPath);
   const store = new SqliteEntryStore(db);
-  service = new TimerService(store, new HttpSyncClient(), realClock, realIds, getTrackingReadinessService());
+  service = new TimerService(
+    store,
+    new HttpSyncClient(),
+    realClock,
+    realIds,
+    getTrackingReadinessService(),
+    {
+      window(now) {
+        const context = getWorkspaceTimeContext(now);
+        return context.ready && context.dayStart !== null && context.dayEnd !== null
+          ? { start: context.dayStart, end: context.dayEnd }
+          : null;
+      },
+    },
+  );
   log.info('timer service initialized', { dbPath });
   return service;
 }

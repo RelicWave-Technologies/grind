@@ -10,6 +10,7 @@ import DayTimeline from '../components/DayTimeline';
 import TaskCard from '../components/TaskCard';
 import TaskComposer from '../components/TaskComposer';
 import SyncButton from '../components/SyncButton';
+import { formatWorkspaceTime, useWorkspaceTime, workspaceTimeReady } from '../lib/workspaceTime';
 
 export function fmtClock(ms: number): string {
   const t = Math.floor(ms / 1000);
@@ -40,6 +41,7 @@ export default function Today() {
   const larkStatus = useQuery({ queryKey: ['larkStatus'], queryFn: () => window.agent.lark.status(), refetchInterval: 10_000 });
   const larkTasks = useQuery({ queryKey: ['larkTasks'], queryFn: () => window.agent.lark.tasks(), refetchInterval: 60_000 });
   const recoveryNotice = useQuery({ queryKey: ['timerRecoveryNotice'], queryFn: () => window.agent.timer.recoveryNotice() });
+  const workspaceTime = useWorkspaceTime();
   const [timer, setTimer] = useState<TimerStatus>({ state: 'IDLE', workedMs: 0 });
   const [now, setNow] = useState(() => Date.now());
   const [query, setQuery] = useState('');
@@ -152,6 +154,8 @@ export default function Today() {
   const pickerQuery = taskPickerQuery.trim().toLowerCase();
   const pickerTasks = pickerQuery === '' ? allOpenTasks : allOpenTasks.filter((task) => task.summary.toLowerCase().includes(pickerQuery));
   const canStartSelectedTask = !!selectedTask && !start.isPending;
+  const timeContext = workspaceTime.data;
+  const hasWorkspaceTime = workspaceTimeReady(timeContext);
 
   return (
     <>
@@ -161,6 +165,12 @@ export default function Today() {
       </div>
       <div className="content-scroll">
         <div className="content-narrow">
+          {!hasWorkspaceTime && (
+            <div className="recovery-banner rise rise-1" role="status">
+              <Clock size={16} strokeWidth={2.2} />
+              <span>Syncing workspace time...</span>
+            </div>
+          )}
           {/* Hero = live timer + stop control (no separate page) */}
           <div className={`hero-running rise rise-1${running ? ' on' : ''}`}>
             <div>
@@ -266,7 +276,7 @@ export default function Today() {
           {recoveryNotice.data && (
             <div className="recovery-banner rise rise-1" role="status">
               <AlertTriangle size={16} strokeWidth={2.2} />
-              <span>{timerRecoveryNoticeText(recoveryNotice.data)}</span>
+              <span>{timerRecoveryNoticeText(recoveryNotice.data, (value) => formatWorkspaceTime(value, timeContext?.timeZone ?? null))}</span>
               <button
                 className="recovery-dismiss no-drag"
                 onClick={() => dismissRecovery.mutate()}
@@ -278,11 +288,18 @@ export default function Today() {
             </div>
           )}
 
-          {entries.length > 0 && (
+          {entries.length > 0 && hasWorkspaceTime && (
             <>
               <div className="section-head"><span className="section-title">Today&rsquo;s activity</span></div>
               <div className="focus-card rise rise-2">
-                <DayTimeline entries={entries} now={now} runningEntryId={running?.entryId} />
+                <DayTimeline
+                  entries={entries}
+                  now={now}
+                  runningEntryId={running?.entryId}
+                  dayStart={timeContext.dayStart}
+                  dayEnd={timeContext.dayEnd}
+                  timeZone={timeContext.timeZone}
+                />
                 <Legend />
               </div>
             </>
@@ -297,7 +314,7 @@ export default function Today() {
             )}
           </div>
 
-          {larkConnected && showCreate && <TaskComposer onCreated={onCreated} />}
+          {larkConnected && showCreate && <TaskComposer onCreated={onCreated} timeZone={timeContext?.timeZone ?? null} />}
 
           {justCreated && !showCreate && (
             <div className="create-toast rise" role="status">
@@ -344,6 +361,7 @@ export default function Today() {
                     key={t.guid}
                     task={t}
                     now={now}
+                    timeZone={timeContext?.timeZone ?? null}
                     running={!!running && running.larkTaskGuid === t.guid}
                     paused={!!running && running.larkTaskGuid === t.guid && running.paused}
                     disabled={start.isPending || stop.isPending || resume.isPending}

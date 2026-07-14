@@ -1,9 +1,11 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Camera, ShieldAlert, RefreshCw } from 'lucide-react';
 import ScreenshotGrid from './ScreenshotGrid';
+import { useWorkspaceTime } from '../lib/workspaceTime';
 
 export default function ScreenshotsStrip() {
   const qc = useQueryClient();
+  const workspaceTime = useWorkspaceTime();
   const permissions = useQuery({
     queryKey: ['trackingReadiness'],
     queryFn: () => window.agent.permissions.readiness(),
@@ -70,9 +72,9 @@ export default function ScreenshotsStrip() {
         </div>
       )}
 
-      {ok &&
+      {ok && workspaceTime.data?.timeZone &&
         (shots.data && shots.data.length > 0 ? (
-          <ScreenshotGrid shots={shots.data} />
+          <ScreenshotGrid shots={shots.data} timeZone={workspaceTime.data.timeZone} />
         ) : (
           <div className="shot-empty callout secondary">
             <Camera size={16} strokeWidth={1.75} /> No screenshots yet — captured periodically while you track.

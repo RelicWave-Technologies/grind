@@ -11,6 +11,7 @@ import {
   type ShiftMonitorState,
 } from './decide';
 import { showReadyToWork, hideReadyToWork, isReadyToWorkVisible } from '../../readyToWork';
+import { getWorkspaceTimeZone } from '../workspaceTime';
 
 /**
  * ShiftMonitor — owns the "Ready to work?" toast lifecycle.
@@ -89,8 +90,10 @@ export class ShiftMonitor {
   onUserDecision(decision: 'yes' | 'not_yet'): void {
     if (!this.shift) return;
     const now = new Date();
+    const timeZone = getWorkspaceTimeZone();
+    if (!timeZone) return;
     if (decision === 'yes') {
-      this.state = ackToday(this.state, this.shift.schedule, now);
+      this.state = ackToday(this.state, this.shift.schedule, now, timeZone);
       hideReadyToWork();
       this.openMainWindow();
     } else {
@@ -109,6 +112,8 @@ export class ShiftMonitor {
 
   private tick(): void {
     if (!this.shift) return;
+    const timeZone = getWorkspaceTimeZone();
+    if (!timeZone) return;
     // `prompting` mirrors actual visibility — refresh from the window state
     // so a manually-dismissed toast doesn't keep us pinned in `prompting`.
     this.state = { ...this.state, prompting: isReadyToWorkVisible() };
@@ -118,6 +123,7 @@ export class ShiftMonitor {
       bufferMin: this.shift.bufferMin,
       state: this.state,
       now: new Date(),
+      timeZone,
       nudgeIntervalMs: NUDGE_INTERVAL_MS,
     });
 

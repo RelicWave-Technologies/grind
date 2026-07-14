@@ -1,18 +1,18 @@
 import type { TodayEntry, TodaySegment } from '../lib/agent.d';
+import { formatWorkspaceTime } from '../lib/workspaceTime';
 
 interface Props {
   entries: TodayEntry[];
   now: number;
   /** highlight the currently-running entry's open segment */
   runningEntryId?: string | null;
+  dayStart: number;
+  dayEnd: number;
+  timeZone: string;
 }
 
 const HOUR = 3_600_000;
 type TimelineKind = TodaySegment['kind'] | 'MANUAL' | 'PENDING';
-
-function fmtTime(ms: number): string {
-  return new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(new Date(ms));
-}
 
 function timelineLabel(kind: TimelineKind): string {
   if (kind === 'WORK') return 'Tracked';
@@ -26,14 +26,6 @@ function kindClass(kind: TimelineKind): string {
   return kind.toLowerCase();
 }
 
-function localDayBounds(now: number): { dayStart: number; dayEnd: number } {
-  const start = new Date(now);
-  start.setHours(0, 0, 0, 0);
-  const end = new Date(start);
-  end.setDate(end.getDate() + 1);
-  return { dayStart: start.getTime(), dayEnd: end.getTime() };
-}
-
 function clamp(v: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, v));
 }
@@ -42,9 +34,8 @@ function clamp(v: number, lo: number, hi: number): number {
  * Horizontal timeline of today's sessions, matching the dashboard Edit Time
  * ribbon: a stable full-day track with category colors and 3-hour labels.
  */
-export default function DayTimeline({ entries, now, runningEntryId }: Props) {
+export default function DayTimeline({ entries, now, runningEntryId, dayStart, dayEnd, timeZone }: Props) {
   const segs = entries.flatMap((e) => e.segments.map((s) => ({ ...s, entryId: e.id })));
-  const { dayStart, dayEnd } = localDayBounds(now);
   const span = dayEnd - dayStart;
 
   const ticks: number[] = [];
@@ -72,7 +63,7 @@ export default function DayTimeline({ entries, now, runningEntryId }: Props) {
               key={i}
               className={`dt-seg dt-seg-${kindClass(kind)}${isOpen ? ' dt-seg-live' : ''}`}
               style={{ left: `${left}%`, width: `${width}%` }}
-              title={`${timelineLabel(kind)} · ${fmtTime(start)} – ${fmtTime(end)}`}
+              title={`${timelineLabel(kind)} · ${formatWorkspaceTime(start, timeZone)} – ${formatWorkspaceTime(end, timeZone)}`}
             />
           );
         })}
@@ -81,7 +72,7 @@ export default function DayTimeline({ entries, now, runningEntryId }: Props) {
       <div className="dt-axis">
         {ticks.map((t) => (
           <span key={t} className="dt-tick" style={{ left: `${pct(t)}%` }}>
-            {fmtTime(t)}
+            {formatWorkspaceTime(t, timeZone)}
           </span>
         ))}
       </div>

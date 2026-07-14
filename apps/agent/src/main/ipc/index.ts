@@ -10,6 +10,7 @@ import { registerAppIpc } from './app';
 import { registerUpdatesIpc } from './updates';
 import { registerPermissionsIpc } from './permissions';
 import { registerAttentionIpc } from './attention';
+import { getWorkspaceTimeContext } from '../services/workspaceTime';
 
 export function registerIpc(opts: {
   onOpenMainWindow: () => void;
@@ -27,6 +28,7 @@ export function registerIpc(opts: {
   registerUpdatesIpc();
   registerPermissionsIpc();
   registerAttentionIpc({ onIdleResolved: opts.onIdleResolved });
+  ipcMain.handle('workspaceTime:get', () => getWorkspaceTimeContext());
 
   // Lets the floating bar / popover ask to bring up the main window.
   ipcMain.handle('window:openMain', () => opts.onOpenMainWindow());

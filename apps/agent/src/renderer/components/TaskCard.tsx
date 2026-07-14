@@ -11,6 +11,7 @@ import { taskTimerAction, taskTimerLabel, taskTimerState } from '../lib/timerUi'
 export default function TaskCard({
   task,
   now,
+  timeZone,
   running,
   paused,
   disabled,
@@ -20,6 +21,7 @@ export default function TaskCard({
 }: {
   task: LarkTaskItem;
   now: number;
+  timeZone: string | null;
   running: boolean;
   paused?: boolean;
   disabled?: boolean;
@@ -28,7 +30,7 @@ export default function TaskCard({
   onResume?: () => void;
 }) {
   const st = projectStyle(task.guid);
-  const due = task.due != null ? dueInfo(task.due, now) : null;
+  const due = task.due != null && timeZone ? dueInfo(task.due, now, timeZone) : null;
   const timerState = taskTimerState({ running, paused });
   const timerAction = taskTimerAction(timerState);
   const timerLabel = taskTimerLabel(timerState);
@@ -52,7 +54,7 @@ export default function TaskCard({
         {(task.creatorName || task.createdAt) && (
           <span className="task-meta">
             <User size={11} strokeWidth={2} />
-            {[task.creatorName ? `By ${task.creatorName}` : null, task.createdAt ? fmtDate(task.createdAt) : null]
+            {[task.creatorName ? `By ${task.creatorName}` : null, task.createdAt ? fmtDate(task.createdAt, timeZone) : null]
               .filter(Boolean)
               .join(' · ')}
           </span>

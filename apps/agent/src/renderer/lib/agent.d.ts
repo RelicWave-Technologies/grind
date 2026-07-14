@@ -6,6 +6,7 @@ import type {
 } from '../../shared/tracking';
 import type { LaunchAtLoginHealth, MoveToApplicationsResult } from '../../shared/launchAtLogin';
 import type { AttentionAction, AttentionActionResult, AttentionPrompt } from '../../shared/attention';
+import type { WorkspaceTimeContext } from '../../shared/workspaceTime';
 
 type AuthStatus = 'loggedIn' | 'loggedOut';
 type LarkOutcome = { kind: 'pending' } | { kind: 'error'; reason: string };
@@ -61,6 +62,10 @@ declare global {
       };
       agent: {
         status: () => Promise<AgentStatus>;
+      };
+      workspaceTime: {
+        get: () => Promise<WorkspaceTimeContext>;
+        onChange: (cb: (context: WorkspaceTimeContext) => void) => () => void;
       };
       timer: {
         start: (larkTaskGuid?: string | null) => Promise<TrackingCommandResult>;

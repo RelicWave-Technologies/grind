@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { CalendarClock, X } from 'lucide-react';
+import { localDateAtHour } from '../lib/workspaceTime';
 
 function createErrorText(error: string | undefined): string | null {
   if (!error) return null;
@@ -13,7 +14,13 @@ function createErrorText(error: string | undefined): string | null {
  * blends with task rows (see docs/design.md §3 Composer). Calls onCreated with
  * the new task's title so the parent can refresh + confirm.
  */
-export default function TaskComposer({ onCreated }: { onCreated: (summary: string) => void }) {
+export default function TaskComposer({
+  onCreated,
+  timeZone,
+}: {
+  onCreated: (summary: string) => void;
+  timeZone: string | null;
+}) {
   const [summary, setSummary] = useState('');
   const [due, setDue] = useState('');
   const [desc, setDesc] = useState('');
@@ -36,7 +43,12 @@ export default function TaskComposer({ onCreated }: { onCreated: (summary: strin
   const submit = () => {
     const s = summary.trim();
     if (!s) return;
-    create.mutate({ summary: s, due: due ? new Date(`${due}T17:00:00`).getTime() : null, description: desc.trim() || null });
+    if (due && !timeZone) return;
+    create.mutate({
+      summary: s,
+      due: due && timeZone ? localDateAtHour(due, 17, timeZone) : null,
+      description: desc.trim() || null,
+    });
   };
 
   return (
@@ -63,7 +75,7 @@ export default function TaskComposer({ onCreated }: { onCreated: (summary: strin
           <input type="date" value={due} onChange={(e) => setDue(e.target.value)} />
         </label>
         <span className="composer-spacer" />
-        <button className="btn btn-prominent no-drag" onClick={submit} disabled={create.isPending || !summary.trim()}>
+        <button className="btn btn-prominent no-drag" onClick={submit} disabled={create.isPending || !summary.trim() || Boolean(due && !timeZone)}>
           {create.isPending ? 'Creating…' : 'Create in Lark'}
         </button>
       </div>

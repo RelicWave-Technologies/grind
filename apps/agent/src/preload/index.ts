@@ -7,6 +7,7 @@ import type {
 } from '../shared/tracking';
 import type { LaunchAtLoginHealth, MoveToApplicationsResult } from '../shared/launchAtLogin';
 import type { AttentionAction, AttentionActionResult, AttentionPrompt } from '../shared/attention';
+import type { WorkspaceTimeContext } from '../shared/workspaceTime';
 
 type AuthStatus = 'loggedIn' | 'loggedOut';
 type LarkOutcome = { kind: 'pending' } | { kind: 'error'; reason: string };
@@ -74,6 +75,14 @@ const api = {
   },
   agent: {
     status: (): Promise<AgentStatus> => ipcRenderer.invoke('agent:status'),
+  },
+  workspaceTime: {
+    get: (): Promise<WorkspaceTimeContext> => ipcRenderer.invoke('workspaceTime:get'),
+    onChange: (cb: (context: WorkspaceTimeContext) => void): (() => void) => {
+      const sub = (_event: unknown, context: WorkspaceTimeContext) => cb(context);
+      ipcRenderer.on('workspaceTime:push', sub);
+      return () => ipcRenderer.off('workspaceTime:push', sub);
+    },
   },
   timer: {
     start: (larkTaskGuid?: string | null): Promise<TrackingCommandResult> =>

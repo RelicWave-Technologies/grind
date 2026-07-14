@@ -2,7 +2,7 @@ import { ipcMain } from 'electron';
 import { api } from '../services/apiClient';
 import { log } from '../logger';
 import { dateKeyInTimeZone } from '@grind/types';
-import { getWorkspaceTimezone } from '../services/agentConfig';
+import { getWorkspaceTimeContext, getWorkspaceTimeZone } from '../services/workspaceTime';
 
 export type InsightsToday = {
   day: string;
@@ -23,12 +23,21 @@ function emptyInsights(timezone: string): InsightsToday {
 /** Today's productivity score + activity totals, from the backend insights endpoint. */
 export function registerInsightsIpc(): void {
   ipcMain.handle('insights:today', async (): Promise<InsightsToday> => {
+    const timezone = getWorkspaceTimeZone();
+    if (!timezone) {
+      const day = getWorkspaceTimeContext().date ?? '';
+      return {
+        day,
+        score: { score: 0, trackedMinutes: 0, engagedMinutes: 0, protectedMinutes: 0, idleMinutes: 0 },
+        totals: { keystrokes: 0, clicks: 0, mouseDistancePx: 0, scrollEvents: 0 },
+        byHour: Array.from({ length: 24 }, () => 0),
+      };
+    }
     try {
-      const timezone = getWorkspaceTimezone();
       return await api<InsightsToday>(`/v1/insights/score?tz=${encodeURIComponent(timezone)}`);
     } catch (err) {
       log.warn('insights:today failed', { err: String(err) });
-      return emptyInsights(getWorkspaceTimezone());
+      return emptyInsights(timezone);
     }
   });
 }

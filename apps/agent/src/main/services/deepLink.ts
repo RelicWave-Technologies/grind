@@ -5,6 +5,7 @@ import { startHeartbeat } from './heartbeat';
 import { broadcast } from '../broadcast';
 import { CALLBACK_SCHEME } from '../env';
 import { log } from '../logger';
+import { refreshAgentConfig } from './agentConfig';
 
 /**
  * Custom-scheme handling for Lark login. The system browser, after the OAuth
@@ -74,6 +75,7 @@ export async function handleDeepLink(url: string): Promise<void> {
     if (code) {
       const ok = await completeLarkLogin(code);
       if (ok) {
+        await refreshAgentConfig();
         startHeartbeat();
         broadcast('auth:status:push', 'loggedIn');
       } else {

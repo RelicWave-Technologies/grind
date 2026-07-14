@@ -2,7 +2,7 @@ import { ipcMain, shell } from 'electron';
 import { api } from '../services/apiClient';
 import { log } from '../logger';
 import { dateKeyInTimeZone } from '@grind/types';
-import { getWorkspaceTimezone } from '../services/agentConfig';
+import { getWorkspaceTimeZone } from '../services/workspaceTime';
 
 export type LarkStatus = {
   configured: boolean;
@@ -40,13 +40,17 @@ export type LarkSyncResult = {
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 function todayKey(): string {
-  return dateKeyInTimeZone(new Date(), getWorkspaceTimezone());
+  const timeZone = getWorkspaceTimeZone();
+  if (!timeZone) throw new Error('workspace_time_unavailable');
+  return dateKeyInTimeZone(new Date(), timeZone);
 }
 
 function myTasksPath(): string {
+  const timeZone = getWorkspaceTimeZone();
+  if (!timeZone) throw new Error('workspace_time_unavailable');
   const params = new URLSearchParams({
     date: todayKey(),
-    tz: getWorkspaceTimezone(),
+    tz: timeZone,
   });
   return `/v1/lark/my-tasks?${params.toString()}`;
 }

@@ -1,13 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import {
-  tickShiftMonitor,
-  ackToday,
+  tickShiftMonitor as tickShiftMonitorInTimeZone,
+  ackToday as ackTodayInTimeZone,
   snooze,
   expire,
   INITIAL_STATE,
   type ShiftMonitorState,
 } from './decide';
-import { NINE_TO_SIX, EMPTY_SCHEDULE } from '@grind/types';
+import { NINE_TO_SIX, EMPTY_SCHEDULE, zonedDateTimeParts, type ShiftSchedule } from '@grind/types';
 
 /**
  * Pure tests for the ShiftMonitor reducer. The agent's service uses
@@ -15,7 +15,15 @@ import { NINE_TO_SIX, EMPTY_SCHEDULE } from '@grind/types';
  * one-shot scheduled when outside the window so we don't poll forever.
  */
 
-const at = (yyyyMmDdHHmm: string) => new Date(yyyyMmDdHHmm);
+const TIME_ZONE = 'Asia/Kolkata';
+const at = (yyyyMmDdHHmm: string) => new Date(`${yyyyMmDdHHmm}+05:30`);
+const parts = (value: number) => zonedDateTimeParts(value, TIME_ZONE);
+const tickShiftMonitor = (
+  input: Omit<Parameters<typeof tickShiftMonitorInTimeZone>[0], 'timeZone'>,
+) => tickShiftMonitorInTimeZone({ ...input, timeZone: TIME_ZONE });
+const ackToday = (state: ShiftMonitorState, schedule: ShiftSchedule, now: Date) => (
+  ackTodayInTimeZone(state, schedule, now, TIME_ZONE)
+);
 
 describe('tickShiftMonitor — no schedule', () => {
   it('null schedule → noop', () => {
@@ -101,8 +109,8 @@ describe('tickShiftMonitor — outside the window', () => {
     });
     expect(r.kind).toBe('schedule');
     if (r.kind !== 'schedule') throw new Error('narrow');
-    expect(new Date(r.nextAt).getHours()).toBe(9);
-    expect(new Date(r.nextAt).getDate()).toBe(1);
+    expect(parts(r.nextAt).hour).toBe(9);
+    expect(parts(r.nextAt).day).toBe(1);
   });
 
   it('after buffer expires today → schedule for tomorrow\'s start', () => {
@@ -115,7 +123,7 @@ describe('tickShiftMonitor — outside the window', () => {
     });
     expect(r.kind).toBe('schedule');
     if (r.kind !== 'schedule') throw new Error('narrow');
-    expect(new Date(r.nextAt).getDate()).toBe(2);
+    expect(parts(r.nextAt).day).toBe(2);
   });
 
   it('weekend → schedule for Monday', () => {
@@ -128,7 +136,7 @@ describe('tickShiftMonitor — outside the window', () => {
     });
     expect(r.kind).toBe('schedule');
     if (r.kind !== 'schedule') throw new Error('narrow');
-    expect(new Date(r.nextAt).getDay()).toBe(1); // Mon
+    expect(new Date(Date.UTC(parts(r.nextAt).year, parts(r.nextAt).month - 1, parts(r.nextAt).day)).getUTCDay()).toBe(1); // Mon
   });
 
   it('outside window + popup currently visible → hide', () => {
@@ -224,6 +232,6 @@ describe('full lifecycle', () => {
     const r = tickShiftMonitor({ schedule: NINE_TO_SIX, bufferMin: 30, state: st, now: at('2026-06-01T09:31:00') });
     expect(r.kind).toBe('schedule');
     if (r.kind !== 'schedule') throw new Error('narrow');
-    expect(new Date(r.nextAt).getDate()).toBe(2);
+    expect(parts(r.nextAt).day).toBe(2);
   });
 });

@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   saveTokens: vi.fn(),
   loadTokens: vi.fn(),
   clearTokens: vi.fn(),
+  clearWorkspaceTimeSession: vi.fn(),
   warn: vi.fn(),
 }));
 
@@ -34,6 +35,10 @@ vi.mock('./pendingLarkLoginStore', () => ({
   loadPendingLarkLogin: mocks.loadPendingLarkLogin,
   savePendingLarkLogin: mocks.savePendingLarkLogin,
   clearStoredPendingLarkLogin: mocks.clearStoredPendingLarkLogin,
+}));
+
+vi.mock('./workspaceTime', () => ({
+  clearWorkspaceTimeSession: mocks.clearWorkspaceTimeSession,
 }));
 
 vi.mock('../logger', () => ({
@@ -70,6 +75,7 @@ describe('Lark agent login flow', () => {
     mocks.savePendingLarkLogin.mockResolvedValue(undefined);
     mocks.clearStoredPendingLarkLogin.mockResolvedValue(undefined);
     mocks.loadTokens.mockResolvedValue(null);
+    mocks.clearWorkspaceTimeSession.mockReset();
     cancelLarkLogin();
   });
 
@@ -169,6 +175,7 @@ describe('Lark agent login flow', () => {
       workspaceId: 'ws_1',
     });
     expect(mocks.clearStoredPendingLarkLogin).toHaveBeenCalled();
+    expect(mocks.clearWorkspaceTimeSession).toHaveBeenCalledTimes(1);
   });
 
   it('redeems a deep-link code after app relaunch by hydrating the stored verifier', async () => {

@@ -7,12 +7,14 @@ import larkIcon from '../assets/lark.svg';
 import TaskCard from '../components/TaskCard';
 import TaskComposer from '../components/TaskComposer';
 import SyncButton from '../components/SyncButton';
+import { useWorkspaceTime } from '../lib/workspaceTime';
 
 /** Full Lark task list: open + completed, searchable, with quick create. */
 export default function Tasks() {
   const qc = useQueryClient();
   const larkStatus = useQuery({ queryKey: ['larkStatus'], queryFn: () => window.agent.lark.status(), refetchInterval: 10_000 });
   const larkTasks = useQuery({ queryKey: ['larkTasks'], queryFn: () => window.agent.lark.tasks(), refetchInterval: 60_000 });
+  const workspaceTime = useWorkspaceTime();
   const [timer, setTimer] = useState<TimerStatus>({ state: 'IDLE', workedMs: 0 });
   const [now, setNow] = useState(() => Date.now());
   const [query, setQuery] = useState('');
@@ -83,7 +85,7 @@ export default function Tasks() {
             </div>
           ) : (
             <>
-              {showCreate && <TaskComposer onCreated={onCreated} />}
+              {showCreate && <TaskComposer onCreated={onCreated} timeZone={workspaceTime.data?.timeZone ?? null} />}
               {justCreated && !showCreate && (
                 <div className="create-toast rise" role="status"><span className="create-toast-dot" /> Created “{justCreated}” in Lark</div>
               )}
@@ -107,6 +109,7 @@ export default function Tasks() {
                       key={t.guid}
                       task={t}
                       now={now}
+                      timeZone={workspaceTime.data?.timeZone ?? null}
                       running={!!running && running.larkTaskGuid === t.guid}
                       paused={!!running && running.larkTaskGuid === t.guid && running.paused}
                       disabled={start.isPending || stop.isPending || resume.isPending}
@@ -126,7 +129,7 @@ export default function Tasks() {
                   {showDone && (
                     <div className="task-list task-list-done">
                       {done.map((t) => (
-                        <TaskCard key={t.guid} task={t} now={now} running={false} disabled={start.isPending || stop.isPending || resume.isPending} onStart={(g) => start.mutate(g)} onStop={() => stop.mutate()} onResume={() => resume.mutate()} />
+                        <TaskCard key={t.guid} task={t} now={now} timeZone={workspaceTime.data?.timeZone ?? null} running={false} disabled={start.isPending || stop.isPending || resume.isPending} onStart={(g) => start.mutate(g)} onStop={() => stop.mutate()} onResume={() => resume.mutate()} />
                       ))}
                     </div>
                   )}

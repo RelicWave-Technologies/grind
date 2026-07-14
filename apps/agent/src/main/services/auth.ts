@@ -12,6 +12,7 @@ import {
   savePendingLarkLogin,
   type StoredPendingLarkLogin,
 } from './pendingLarkLoginStore';
+import { clearWorkspaceTimeSession } from './workspaceTime';
 
 /**
  * Lark login (system-browser + custom-scheme deep-link). We generate a PKCE
@@ -132,6 +133,7 @@ export async function completeLarkLogin(code: string): Promise<boolean> {
     userId: res.userId,
     workspaceId: res.workspaceId,
   });
+  clearWorkspaceTimeSession();
   await clearPendingLarkLogin();
   return true;
 }
@@ -154,6 +156,7 @@ export async function login(email: string, password: string): Promise<UserDto> {
     userId: res.user.id,
     workspaceId: res.user.workspaceId,
   });
+  clearWorkspaceTimeSession();
   return res.user;
 }
 
@@ -170,6 +173,7 @@ export async function logout(): Promise<void> {
     }
   }
   await clearTokens();
+  clearWorkspaceTimeSession();
 }
 
 export async function isLoggedIn(): Promise<boolean> {

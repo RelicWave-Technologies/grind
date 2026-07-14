@@ -12,6 +12,7 @@ import { ActivitySyncDrain, type ActivitySyncDrainReason, type ActivitySyncDrain
 import { hasAccessibilityAccess } from '../permissions';
 import { getCapturePolicy } from '../agentConfig';
 import { log } from '../../logger';
+import { getWorkspaceTimeContext } from '../workspaceTime';
 import type { PolicyFlags } from '@grind/types';
 import { drainTimerSyncNow, getTimerService } from '../timer';
 
@@ -259,9 +260,10 @@ export function stopActivityCapture(): void {
 
 /** Today's input totals (for an in-app summary). */
 export function todayActivity(): { keystrokes: number; clicks: number; scrollEvents: number } {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return getStore().countSince(d.getTime());
+  const context = getWorkspaceTimeContext();
+  return context.ready && context.dayStart !== null
+    ? getStore().countSince(context.dayStart)
+    : { keystrokes: 0, clicks: 0, scrollEvents: 0 };
 }
 
 export { getStore as getActivityStore };

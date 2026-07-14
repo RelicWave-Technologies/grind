@@ -6,6 +6,10 @@ import {
 import { api } from './apiClient';
 import { SCREENSHOT_INTERVAL_SEC, IDLE_THRESHOLD_SEC, SHOT_SEC_LOCKED, IDLE_SEC_LOCKED } from '../env';
 import { log } from '../logger';
+import {
+  applyServerWorkspaceTimeZone,
+} from './workspaceTime';
+import { loadTokens, type StoredTokens } from './tokenStore';
 
 export type CapturePolicy = PolicyFlags;
 
@@ -42,7 +46,7 @@ let configVersion: string | null = null;
 let captureApps = false;
 let captureTitles = false;
 let captureUrls = false;
-let refreshInFlight: Promise<void> | null = null;
+let refreshInFlight: { sessionKey: string; promise: Promise<void> } | null = null;
 let hasAppliedConfig = false;
 const listeners = new Set<(change: AgentConfigChange) => void>();
 
@@ -55,10 +59,6 @@ export function getIdleThresholdSec(): number {
 /** Web dashboard origin from the server config ('' until first successful fetch). */
 export function getDashboardUrl(): string {
   return dashboardUrl;
-}
-
-export function getWorkspaceTimezone(): string {
-  return workspaceTimezone;
 }
 
 export function getAgentConfigVersion(): string | null {
@@ -112,13 +112,24 @@ function notifyConfigChange(previous: RuntimeAgentConfig | null, current: Runtim
   }
 }
 
-function applyAgentConfig(cfg: AgentConfigResponseType): void {
+async function applyAgentConfig(cfg: AgentConfigResponseType, requestedSession: StoredTokens): Promise<void> {
+  const nextWorkspaceTimezone = cfg.workspaceTimezone || 'UTC';
+  await applyServerWorkspaceTimeZone(nextWorkspaceTimezone, requestedSession.workspaceId);
+  const currentSession = await loadTokens();
+  if (
+    !currentSession
+    || currentSession.userId !== requestedSession.userId
+    || currentSession.workspaceId !== requestedSession.workspaceId
+  ) {
+    throw new Error('agent_config_session_changed');
+  }
+
   const previous = hasAppliedConfig ? snapshot() : null;
   configVersion = cfg.configVersion || null;
   if (!SHOT_SEC_LOCKED) screenshotIntervalSec = Math.max(60, cfg.screenshotIntervalMin * 60);
   if (!IDLE_SEC_LOCKED) idleThresholdSec = Math.max(60, cfg.idleThresholdMin * 60);
   dashboardUrl = cfg.dashboardUrl ?? '';
-  workspaceTimezone = cfg.workspaceTimezone || 'UTC';
+  workspaceTimezone = nextWorkspaceTimezone;
   captureApps = Boolean(cfg.captureApps);
   captureTitles = captureApps && Boolean(cfg.captureTitles);
   captureUrls = captureApps && Boolean(cfg.captureUrls);
@@ -131,22 +142,41 @@ function applyAgentConfig(cfg: AgentConfigResponseType): void {
  *  failure (keeps the current/boot value). Safe to call when logged out — the
  *  authed request throws and we keep defaults. */
 export async function refreshAgentConfig(): Promise<void> {
-  if (refreshInFlight) return refreshInFlight;
-  refreshInFlight = refreshAgentConfigOnce().finally(() => {
-    refreshInFlight = null;
+  const requestedSession = await loadTokens();
+  if (!requestedSession) return;
+  const sessionKey = `${requestedSession.userId}:${requestedSession.workspaceId}`;
+
+  if (refreshInFlight) {
+    if (refreshInFlight.sessionKey === sessionKey) return refreshInFlight.promise;
+    await refreshInFlight.promise;
+    return refreshAgentConfig();
+  }
+
+  const promise = refreshAgentConfigOnce(requestedSession).finally(() => {
+    if (refreshInFlight?.promise === promise) refreshInFlight = null;
   });
-  return refreshInFlight;
+  refreshInFlight = { sessionKey, promise };
+  return promise;
 }
 
-async function refreshAgentConfigOnce(): Promise<void> {
+async function refreshAgentConfigOnce(requestedSession: StoredTokens): Promise<void> {
   try {
     const raw = await api<unknown>('/v1/agent/config');
+    const currentSession = await loadTokens();
+    if (
+      !currentSession
+      || currentSession.userId !== requestedSession.userId
+      || currentSession.workspaceId !== requestedSession.workspaceId
+    ) {
+      log.info('agent config response discarded because the stored session changed');
+      return;
+    }
     const parsed = AgentConfigResponseSchema.safeParse(raw);
     if (!parsed.success) {
       log.warn('agent config response invalid - keeping privacy-first defaults', { issues: parsed.error.flatten() });
       return;
     }
-    applyAgentConfig(parsed.data);
+    await applyAgentConfig(parsed.data, requestedSession);
     log.info('agent config applied', {
       configVersion,
       screenshotIntervalSec,

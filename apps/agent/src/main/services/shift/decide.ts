@@ -1,7 +1,8 @@
 import {
-  isInsideShiftStartWindow,
-  nextShiftStartMs,
-  todaysSchedule,
+  instantForZonedDateTime,
+  isValidTimeZone,
+  zonedDateTimeParts,
+  WEEKDAYS,
   type ShiftSchedule,
 } from '@grind/types';
 
@@ -44,28 +45,29 @@ export function tickShiftMonitor(input: {
   bufferMin: number;
   state: ShiftMonitorState;
   now: Date;
+  timeZone: string;
   nudgeIntervalMs?: number;
 }): ShiftAction {
-  if (!input.schedule) return { kind: 'noop' };
-  const inWindow = isInsideShiftStartWindow({
-    schedule: input.schedule,
-    bufferMin: input.bufferMin,
-    now: input.now,
-  });
-
-  // Resolve today's start (in local clock) — needed for both the "show"
-  // action and the ack-key. Cheap; runs on every tick.
-  const day = todaysSchedule(input.schedule, input.now);
-  const todaysStartMs = day ? startOfDayClock(input.now, day.start) : null;
-  const bufferUntilMs =
-    todaysStartMs !== null ? todaysStartMs + Math.max(0, input.bufferMin) * 60_000 : null;
+  const timeZone = input.timeZone;
+  if (!input.schedule || !isValidTimeZone(timeZone)) return { kind: 'noop' };
+  const nowParts = zonedDateTimeParts(input.now, timeZone);
+  const day = scheduleForDate(input.schedule, nowParts);
+  const todaysStartMs = day ? shiftStartForDate(nowParts, day.start, timeZone) : null;
+  const bufferUntilMs = todaysStartMs === null
+    ? null
+    : todaysStartMs + Math.max(0, input.bufferMin) * 60_000;
+  const nowMs = input.now.getTime();
+  const inWindow = todaysStartMs !== null
+    && bufferUntilMs !== null
+    && nowMs >= todaysStartMs
+    && nowMs <= bufferUntilMs;
 
   if (!inWindow) {
     // Outside the buffer window. If a popup is up (e.g. we just expired),
     // close it. Otherwise schedule a one-shot for the next shift start so
     // we don't poll forever.
     if (input.state.prompting) return { kind: 'hide' };
-    const nextAt = nextShiftStartMs({ schedule: input.schedule, now: input.now });
+    const nextAt = nextShiftStartMs(input.schedule, input.now, timeZone);
     return nextAt !== null ? { kind: 'schedule', nextAt } : { kind: 'noop' };
   }
 
@@ -89,19 +91,64 @@ export function tickShiftMonitor(input: {
   };
 }
 
-/** Treat HH:MM as the user's local clock on the same calendar day as `now`. */
-function startOfDayClock(now: Date, hhmm: string): number {
+function shiftStartForDate(
+  date: { year: number; month: number; day: number },
+  hhmm: string,
+  timeZone: string,
+): number | null {
   const [h, m] = hhmm.split(':').map((n) => Number.parseInt(n, 10));
-  const d = new Date(now);
-  d.setHours(h ?? 0, m ?? 0, 0, 0);
-  return d.getTime();
+  try {
+    return instantForZonedDateTime({
+      year: date.year,
+      month: date.month,
+      day: date.day,
+      hour: h ?? 0,
+      minute: m ?? 0,
+      second: 0,
+    }, timeZone).getTime();
+  } catch {
+    return null;
+  }
+}
+
+function scheduleForDate(
+  schedule: ShiftSchedule,
+  date: { year: number; month: number; day: number },
+) {
+  const weekday = WEEKDAYS[new Date(Date.UTC(date.year, date.month - 1, date.day)).getUTCDay()]!;
+  return schedule[weekday];
+}
+
+function addCalendarDays(
+  date: { year: number; month: number; day: number },
+  offset: number,
+): { year: number; month: number; day: number } {
+  const next = new Date(Date.UTC(date.year, date.month - 1, date.day + offset));
+  return { year: next.getUTCFullYear(), month: next.getUTCMonth() + 1, day: next.getUTCDate() };
+}
+
+function nextShiftStartMs(schedule: ShiftSchedule, now: Date, timeZone: string): number | null {
+  const today = zonedDateTimeParts(now, timeZone);
+  for (let offset = 0; offset <= 7; offset += 1) {
+    const date = addCalendarDays(today, offset);
+    const day = scheduleForDate(schedule, date);
+    if (!day) continue;
+    const startsAt = shiftStartForDate(date, day.start, timeZone);
+    if (startsAt === null || startsAt < now.getTime()) continue;
+    return startsAt;
+  }
+  return null;
 }
 
 /** Apply user's "Yes" — acknowledge today's window. */
-export function ackToday(state: ShiftMonitorState, schedule: ShiftSchedule, now: Date): ShiftMonitorState {
-  const day = todaysSchedule(schedule, now);
+export function ackToday(state: ShiftMonitorState, schedule: ShiftSchedule, now: Date, timeZone: string): ShiftMonitorState {
+  if (!isValidTimeZone(timeZone)) return state;
+  const date = zonedDateTimeParts(now, timeZone);
+  const day = scheduleForDate(schedule, date);
   if (!day) return state;
-  return { ...state, ackedFor: startOfDayClock(now, day.start), snoozedUntil: null, prompting: false };
+  const startedAt = shiftStartForDate(date, day.start, timeZone);
+  if (startedAt === null) return state;
+  return { ...state, ackedFor: startedAt, snoozedUntil: null, prompting: false };
 }
 
 /** Apply user's "Not yet" — snooze for `nudgeIntervalMs`. */

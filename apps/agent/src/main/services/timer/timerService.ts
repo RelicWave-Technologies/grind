@@ -13,6 +13,7 @@ import type { TimerStatus } from '../../../shared/tracking';
 import { HttpError } from '../apiClient';
 import type {
   Clock,
+  BusinessDayProvider,
   EntryStore,
   IdGen,
   PendingEntrySyncState,
@@ -43,6 +44,7 @@ export class TimerService {
     private readonly clock: Clock,
     private readonly ids: IdGen,
     private readonly accrualGuard: TrackingAccrualGuard,
+    private readonly businessDay: BusinessDayProvider = UTC_DAY_PROVIDER,
   ) {}
 
   /**
@@ -315,10 +317,14 @@ export class TimerService {
 
   /** Entries with any segment active today (newest first), incl. the open one. */
   listToday(now: number): TimeEntry[] {
-    const dayStart = new Date(now);
-    dayStart.setHours(0, 0, 0, 0);
-    const since = dayStart.getTime();
-    return this.store.listSince(since).filter((e) => e.segments.some((s) => (s.endedAt ?? now) >= since));
+    const window = this.businessDay.window(now);
+    if (!window) return [];
+    return this.store
+      .listSince(window.start)
+      .filter((entry) => entry.segments.some((segment) => {
+        const end = segment.endedAt ?? now;
+        return segment.startedAt < window.end && end > window.start;
+      }));
   }
 
   recoveryNotice(): TimerRecoveryNotice | null {
@@ -432,15 +438,26 @@ export class TimerService {
   }
 
   private workedMsForLocalDay(now: number): number {
-    const dayStart = new Date(now);
-    dayStart.setHours(0, 0, 0, 0);
-    const since = dayStart.getTime();
-    const entries = this.store.listSince(since);
-    return entries.reduce((sum, entry) => sum + entryWorkedMsInWindow(entry, since, now, now), 0);
+    const window = this.businessDay.window(now);
+    if (!window) return 0;
+    const end = Math.min(now, window.end);
+    const entries = this.store.listSince(window.start);
+    return entries.reduce(
+      (sum, entry) => sum + entryWorkedMsInWindow(entry, window.start, end, now),
+      0,
+    );
   }
 }
 
 export type { TimerStatus } from '../../../shared/tracking';
+
+const UTC_DAY_PROVIDER: BusinessDayProvider = {
+  window(now) {
+    const date = new Date(now);
+    const start = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+    return { start, end: start + 24 * 60 * 60_000 };
+  },
+};
 
 function latestSegmentBoundary(entry: TimeEntry): number {
   return entry.segments.reduce((latest, segment) => {
