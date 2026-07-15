@@ -21,12 +21,30 @@ export class LocalTimeResolutionError extends RangeError {
   }
 }
 
+const MAX_TIME_ZONE_CACHE_ENTRIES = 128;
+const MAX_DAY_WINDOW_CACHE_ENTRIES = 512;
+const validTimeZones = new Map<string, boolean>();
+const zonedPartsFormatters = new Map<string, Intl.DateTimeFormat>();
+const localDayWindows = new Map<string, { startMs: number; endMs: number } | null>();
+
+function cacheBounded<K, V>(cache: Map<K, V>, key: K, value: V, maxEntries: number): V {
+  if (!cache.has(key) && cache.size >= maxEntries) {
+    const oldestKey = cache.keys().next().value as K | undefined;
+    if (oldestKey !== undefined) cache.delete(oldestKey);
+  }
+  cache.set(key, value);
+  return value;
+}
+
 export function isValidTimeZone(value: string): boolean {
+  const cached = validTimeZones.get(value);
+  if (cached !== undefined) return cached;
+
   try {
     new Intl.DateTimeFormat('en-US', { timeZone: value }).format(0);
-    return true;
+    return cacheBounded(validTimeZones, value, true, MAX_TIME_ZONE_CACHE_ENTRIES);
   } catch {
-    return false;
+    return cacheBounded(validTimeZones, value, false, MAX_TIME_ZONE_CACHE_ENTRIES);
   }
 }
 
@@ -44,16 +62,20 @@ export function zonedDateTimeParts(value: Date | number | string, timeZone: stri
   if (Number.isNaN(date.getTime()) || !isValidTimeZone(timeZone)) {
     throw new Error('invalid_date_or_timezone');
   }
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hourCycle: 'h23',
-  }).formatToParts(date);
+  let formatter = zonedPartsFormatters.get(timeZone);
+  if (!formatter) {
+    formatter = cacheBounded(zonedPartsFormatters, timeZone, new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hourCycle: 'h23',
+    }), MAX_TIME_ZONE_CACHE_ENTRIES);
+  }
+  const parts = formatter.formatToParts(date);
   const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
   return {
     year: Number(values.year),
@@ -137,6 +159,11 @@ export function localDayWindowInTimeZone(
   timeZone: string,
 ): { start: Date; end: Date } | null {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !isValidTimeZone(timeZone)) return null;
+  const cacheKey = `${timeZone}\u0000${date}`;
+  if (localDayWindows.has(cacheKey)) {
+    const cached = localDayWindows.get(cacheKey);
+    return cached ? { start: new Date(cached.startMs), end: new Date(cached.endMs) } : null;
+  }
   const [year, month, day] = date.split('-').map((part) => Number.parseInt(part, 10));
   if (!year || !month || !day) return null;
 
@@ -151,8 +178,13 @@ export function localDayWindowInTimeZone(
       minute: 0,
       second: 0,
     }, timeZone);
+    cacheBounded(localDayWindows, cacheKey, {
+      startMs: start.getTime(),
+      endMs: end.getTime(),
+    }, MAX_DAY_WINDOW_CACHE_ENTRIES);
     return { start, end };
   } catch {
+    cacheBounded(localDayWindows, cacheKey, null, MAX_DAY_WINDOW_CACHE_ENTRIES);
     return null;
   }
 }
