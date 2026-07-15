@@ -206,7 +206,10 @@ app.whenReady().then(async () => {
     onDismissFloatingBar: () => dismissFloatingBar(),
     onIdleResolved: () => idleMonitor.resolve(),
   });
-  onWorkspaceTimeChange((context) => broadcast('workspaceTime:push', context));
+  onWorkspaceTimeChange((context) => {
+    broadcast('workspaceTime:push', context);
+    if (context.ready) void refreshTodayLedger('config');
+  });
   startUpdateService({
     showMainWindow: () => showMainWindow(),
     isMainWindowVisible: () => !!mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible(),

@@ -6,6 +6,7 @@ import { log } from '../logger';
 import { dateKeyInTimeZone } from '@grind/types';
 import { getWorkspaceTimeZone } from '../services/workspaceTime';
 import { getTimerService, refreshTodayLedger } from '../services/timer';
+import { refreshAgentConfig } from '../services/agentConfig';
 import { loadTokens } from '../services/tokenStore';
 import { LarkTaskCache, type CachedLarkTask } from '../services/larkTaskCache';
 import { CALLBACK_SCHEME } from '../env';
@@ -158,6 +159,7 @@ export function registerLarkIpc(): void {
         if (!status.connected) {
           return { ok: false, connected: false, reauthRequired: status.reauthRequired, ...empty };
         }
+        await refreshAgentConfig();
         // Backend refreshes the Lark token here if needed; 409 ⇒ reauth required.
         const { tasks } = await api<{ tasks: LarkTask[] }>(myTasksPath());
         await cacheTasks(tasks);
