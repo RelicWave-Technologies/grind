@@ -4,7 +4,7 @@ import { ulid } from 'ulid';
 import { prisma } from '@grind/db';
 import { buildApp } from '../src/app';
 import { signAccessToken } from '../src/lib/jwt';
-import { NINE_TO_SIX } from '@grind/types';
+import { NINE_TO_SIX, TeamReportsSummaryResponseSchema } from '@grind/types';
 import { createManagedTeam } from './helpers';
 
 const app = buildApp();
@@ -328,6 +328,8 @@ async function seedTeamReport() {
     manager,
     member,
     outsider,
+    team,
+    otherTeam,
     managerToken: signAccessToken({ sub: manager.id, ws: ws.id, role: 'MANAGER' }),
     memberToken: signAccessToken({ sub: member.id, ws: ws.id, role: 'MEMBER' }),
     outsiderToken: signAccessToken({ sub: outsider.id, ws: ws.id, role: 'MEMBER' }),
@@ -492,8 +494,10 @@ describe('/v1/reports/team', () => {
     const s = await seedTeamReport();
     const res = await request(app)
       .get('/v1/reports/team?from=2026-06-01&to=2026-06-01&tz=UTC')
+      .set('Accept-Encoding', 'gzip')
       .set(auth(s.managerToken));
     expect(res.status).toBe(200);
+    expect(res.headers['content-encoding']).toBe('gzip');
     expect(res.body.summary.memberCount).toBe(1);
     expect(res.body.members).toHaveLength(1);
     expect(res.body.members[0].user.id).toBe(s.member.id);
@@ -506,6 +510,47 @@ describe('/v1/reports/team', () => {
     expect(res.body.members[0].screenshots).toBe(1);
     expect(res.body.members[0].days[0].topApps[0].app).toBe('Code');
     expect(res.body.attention.some((item: { kind: string }) => item.kind === 'pending_approval')).toBe(true);
+  });
+
+  it('returns a compact summary without loading evidence details and supports scoped team filtering', async () => {
+    const s = await seedTeamReport();
+    await prisma.activitySample.deleteMany({ where: { userId: s.member.id } });
+
+    const summary = await request(app)
+      .get('/v1/reports/team/summary?from=2026-06-01&to=2026-06-01&tz=UTC')
+      .set(auth(s.managerToken));
+
+    expect(summary.status).toBe(200);
+    expect(TeamReportsSummaryResponseSchema.safeParse(summary.body).success).toBe(true);
+    expect(summary.body.summary).toMatchObject({
+      memberCount: 1,
+      workedMs: 60 * 60_000,
+      pendingApprovals: 1,
+      screenshots: 1,
+    });
+    expect(summary.body.members).toHaveLength(1);
+    expect(summary.body.members[0]).toMatchObject({
+      user: { id: s.member.id },
+      workedMs: 60 * 60_000,
+      onTimeDays: 1,
+      screenshots: 1,
+    });
+    expect(summary.body.members[0]).not.toHaveProperty('days');
+    expect(summary.body.members[0]).not.toHaveProperty('topApps');
+    expect(summary.body.members[0]).not.toHaveProperty('activityPercent');
+
+    const selectedTeam = await request(app)
+      .get(`/v1/reports/team/summary?from=2026-06-01&to=2026-06-01&tz=UTC&teamId=${s.team.id}`)
+      .set(auth(s.managerToken));
+    expect(selectedTeam.status).toBe(200);
+    expect(selectedTeam.body.members.map((member: { user: { id: string } }) => member.user.id)).toEqual([s.member.id]);
+
+    const outsideScope = await request(app)
+      .get(`/v1/reports/team/summary?from=2026-06-01&to=2026-06-01&tz=UTC&teamId=${s.otherTeam.id}`)
+      .set(auth(s.managerToken));
+    expect(outsideScope.status).toBe(200);
+    expect(outsideScope.body.summary.memberCount).toBe(0);
+    expect(outsideScope.body.members).toEqual([]);
   });
 
   it('flags automatic tracked time when activity samples are missing', async () => {
@@ -592,6 +637,17 @@ describe('/v1/reports/team', () => {
       .get('/v1/reports/team?from=2026-06-01&to=2026-06-01&tz=UTC')
       .set(auth(s.memberToken));
     expect(memberRes.status).toBe(403);
+
+    const memberSummary = await request(app)
+      .get('/v1/reports/team/summary?from=2026-06-01&to=2026-06-01&tz=UTC')
+      .set(auth(s.memberToken));
+    expect(memberSummary.status).toBe(403);
+
+    const invalidTeam = await request(app)
+      .get('/v1/reports/team/summary?from=2026-06-01&to=2026-06-01&tz=UTC&teamId=')
+      .set(auth(s.managerToken));
+    expect(invalidTeam.status).toBe(400);
+    expect(invalidTeam.body.error).toBe('invalid_team_id');
 
     const tooLong = await request(app)
       .get('/v1/reports/team?from=2026-06-01&to=2026-07-10&tz=UTC')

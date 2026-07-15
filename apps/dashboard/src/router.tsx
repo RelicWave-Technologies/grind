@@ -2,6 +2,7 @@ import {
   Outlet,
   createRootRouteWithContext,
   createRoute,
+  lazyRouteComponent,
   redirect,
 } from '@tanstack/react-router';
 import type { QueryClient } from '@tanstack/react-query';
@@ -10,21 +11,22 @@ import { hasCapability } from './lib/auth';
 import type { Me } from './lib/auth';
 import { Layout } from './components/Layout';
 import { LoginScreen } from './screens/Login';
-import { UsersScreen } from './screens/Users';
-import { HomeScreen } from './screens/Home';
-import { MeTodayScreen } from './screens/MeToday';
-import { ApprovalsScreen } from './screens/Approvals';
-import { TeamScreen } from './screens/Team';
-import { AttendanceScreen } from './screens/Attendance';
-import { TeamsScreen } from './screens/Teams';
-import { FlagsScreen } from './screens/Flags';
-import { ShiftsScreen } from './screens/Shifts';
-import { PolicyScreen } from './screens/Policy';
-import { PayrollScreen } from './screens/Payroll';
-import { OverviewScreen } from './screens/Overview';
-import { IntegrationsScreen } from './screens/Integrations';
-import { ReportsScreen } from './screens/Reports';
-import { ProfileScreen } from './screens/Profile';
+
+const UsersScreen = lazyRouteComponent(() => import('./screens/Users'), 'UsersScreen');
+const HomeScreen = lazyRouteComponent(() => import('./screens/Home'), 'HomeScreen');
+const MeTodayScreen = lazyRouteComponent(() => import('./screens/MeToday'), 'MeTodayScreen');
+const ApprovalsScreen = lazyRouteComponent(() => import('./screens/Approvals'), 'ApprovalsScreen');
+const TeamScreen = lazyRouteComponent(() => import('./screens/Team'), 'TeamScreen');
+const AttendanceScreen = lazyRouteComponent(() => import('./screens/Attendance'), 'AttendanceScreen');
+const TeamsScreen = lazyRouteComponent(() => import('./screens/Teams'), 'TeamsScreen');
+const FlagsScreen = lazyRouteComponent(() => import('./screens/Flags'), 'FlagsScreen');
+const ShiftsScreen = lazyRouteComponent(() => import('./screens/Shifts'), 'ShiftsScreen');
+const PolicyScreen = lazyRouteComponent(() => import('./screens/Policy'), 'PolicyScreen');
+const PayrollScreen = lazyRouteComponent(() => import('./screens/Payroll'), 'PayrollScreen');
+const OverviewScreen = lazyRouteComponent(() => import('./screens/Overview'), 'OverviewScreen');
+const IntegrationsScreen = lazyRouteComponent(() => import('./screens/Integrations'), 'IntegrationsScreen');
+const ReportsScreen = lazyRouteComponent(() => import('./screens/Reports'), 'ReportsScreen');
+const ProfileScreen = lazyRouteComponent(() => import('./screens/Profile'), 'ProfileScreen');
 
 interface RouterContext {
   queryClient: QueryClient;

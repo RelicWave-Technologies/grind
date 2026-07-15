@@ -40,13 +40,15 @@ import type {
   MemberReportsMeResponse,
   ShiftStatus,
   TeamReportMember,
+  TeamReportSummaryMember,
   TeamMemberReportsResponse,
-  TeamReportsResponse,
+  TeamReportsSummaryResponse,
 } from '@grind/types/reports';
 import type { Rail, Status } from '../ui';
 import type {
   DayInsight,
 } from '../lib/types';
+import { reportQueryKeys, teamReportSummaryQuery } from '../lib/reportQueries';
 import { DayRibbon } from '../components/DayRibbon';
 import { ActivityHeatmap } from '../components/ActivityHeatmap';
 import { AppIcon } from '../components/AppIcon';
@@ -121,15 +123,13 @@ export function ReportsScreen() {
       const params = new URLSearchParams({ from, to, tz });
       return api<MemberReportsMeResponse>(`/v1/reports/me?${params.toString()}`);
     },
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
   });
 
   const teamQ = useQuery({
-    queryKey: ['reports', 'team', from, to, tz],
+    ...teamReportSummaryQuery({ from, to, tz }),
     enabled: activeMode === 'team' && canReadTeam,
-    queryFn: () => {
-      const params = new URLSearchParams({ from, to, tz });
-      return api<TeamReportsResponse>(`/v1/reports/team?${params.toString()}`);
-    },
   });
 
   const days = reportQ.data?.days ?? [];
@@ -445,7 +445,7 @@ function TeamReportsView({
   loading,
   onOpenMember,
 }: {
-  data?: TeamReportsResponse;
+  data?: TeamReportsSummaryResponse;
   loading: boolean;
   onOpenMember: (userId: string) => void;
 }) {
@@ -476,14 +476,14 @@ function TeamReportsView({
         />
         <TeamKpi label="Late days" value={data.summary.lateDays} sub={`${data.summary.noActivityDays} no-activity days`} tone="cream" />
         <TeamKpi label="Pending" value={data.summary.pendingApprovals} sub={`${data.summary.gapCount} gaps · ${fmtDurationMs(data.summary.gapMs)}`} tone="coral" />
-        <TeamKpi label="Activity" value={percentLabel(data.summary.activityPercent)} sub={`${data.summary.screenshots} screenshots`} tone="pink" />
+        <TeamKpi label="Screenshots" value={data.summary.screenshots} sub="captured in range" tone="pink" />
       </section>
 
       <Card variant="flush" className="rep-team-members-card">
         <div className="rep-team-card-head">
           <div>
             <h2 className="ui-t-title">Members</h2>
-            <p className="ui-t-small">Range totals, punctuality, approvals, top app, and member drill-in.</p>
+            <p className="ui-t-small">Range totals, punctuality, approvals, evidence counts, and member drill-in.</p>
           </div>
           <Tag mono>{data.members.length}</Tag>
         </div>
@@ -513,7 +513,7 @@ function TeamKpi({
   );
 }
 
-function TeamMembersTable({ members, onOpenMember }: { members: TeamReportMember[]; onOpenMember: (userId: string) => void }) {
+function TeamMembersTable({ members, onOpenMember }: { members: TeamReportSummaryMember[]; onOpenMember: (userId: string) => void }) {
   return (
     <div className="rep-table-wrap">
       <Table density="compact" className="rep-team-members-table">
@@ -524,14 +524,14 @@ function TeamMembersTable({ members, onOpenMember }: { members: TeamReportMember
             <Th align="center">Approved hours</Th>
             <Th align="center">Starts</Th>
             <Th align="center">Approvals</Th>
-            <Th align="center">Top app</Th>
-            <Th align="center">Avg activity</Th>
+            <Th align="center">Gaps</Th>
+            <Th align="center">Screenshots</Th>
             <Th align="center">Open</Th>
           </Tr>
         </THead>
         <Tbody>
           {members.map((member) => (
-            <Tr key={member.user.id} rail={memberNeedsReview(member) ? 'warn' : undefined}>
+            <Tr key={member.user.id} rail={summaryMemberNeedsReview(member) ? 'warn' : undefined}>
               <Td>
                 <Identity
                   avatar={<Avatar name={member.user.name} src={member.user.avatarUrl ?? undefined} size={32} />}
@@ -553,13 +553,11 @@ function TeamMembersTable({ members, onOpenMember }: { members: TeamReportMember
                 <ApprovalCounts member={member} />
               </Td>
               <Td align="center">
-                {member.topApps[0] ? <AppBadge app={member.topApps[0]} /> : <span className="ui-t-small ui-ink-3">—</span>}
+                <span className="ui-mono">{member.gapCount}</span>
+                {member.gapMs > 0 && <span className="ui-t-small ui-ink-3"> · {fmtDurationMs(member.gapMs)}</span>}
               </Td>
               <Td align="center">
-                <ActivityEvidenceValue
-                  activityPercent={member.activityPercent}
-                  hasAutoTracked={memberAutoTrackedMs(member) > 0}
-                />
+                <span className="ui-mono">{member.screenshots}</span>
               </Td>
               <Td align="center">
                 <Button
@@ -579,7 +577,10 @@ function TeamMembersTable({ members, onOpenMember }: { members: TeamReportMember
   );
 }
 
-function StartCounts({ member }: { member: TeamReportMember }) {
+type TeamMemberCounts = Pick<TeamReportSummaryMember, 'lateDays' | 'onTimeDays' | 'offDays'>;
+type TeamMemberApprovals = Pick<TeamReportSummaryMember, 'approvals'>;
+
+function StartCounts({ member }: { member: TeamMemberCounts }) {
   return (
     <CountTagGroup
       ariaLabel={`${member.lateDays} late, ${member.onTimeDays} on time, ${member.offDays} off`}
@@ -592,7 +593,7 @@ function StartCounts({ member }: { member: TeamReportMember }) {
   );
 }
 
-function ApprovalCounts({ member }: { member: TeamReportMember }) {
+function ApprovalCounts({ member }: { member: TeamMemberApprovals }) {
   return (
     <CountTagGroup
       ariaLabel={`${member.approvals.pending} pending, ${member.approvals.approved} accepted, ${member.approvals.rejected} rejected`}
@@ -793,6 +794,8 @@ function TeamMemberDrawer({
       const params = new URLSearchParams({ userId, from, to, tz });
       return api<TeamMemberReportsResponse>(`/v1/reports/team/member?${params.toString()}`);
     },
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
   });
 
   const decide = useMutation({
@@ -803,7 +806,7 @@ function TeamMemberDrawer({
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['reports', 'team', 'member', userId] });
-      queryClient.invalidateQueries({ queryKey: ['reports', 'team'] });
+      queryClient.invalidateQueries({ queryKey: reportQueryKeys.teamSummaryRoot });
       queryClient.invalidateQueries({ queryKey: ['approvals', 'team'] });
       queryClient.invalidateQueries({ queryKey: ['overview'] });
     },
@@ -1714,12 +1717,8 @@ function dayNeedsReview(day: MemberReportDay): boolean {
   return autoTrackedMs(day) > 0 && day.activityPercent === null;
 }
 
-function memberAutoTrackedMs(member: TeamReportMember): number {
-  return member.days.reduce((sum, day) => sum + autoTrackedMs(day), 0);
-}
-
-function memberNeedsReview(member: TeamReportMember): boolean {
-  return member.lateDays > 0 || member.noActivityDays > 0 || member.days.some(dayNeedsReview);
+function summaryMemberNeedsReview(member: TeamReportSummaryMember): boolean {
+  return member.lateDays > 0 || member.noActivityDays > 0;
 }
 
 function percentLabel(value: number | null): string {
