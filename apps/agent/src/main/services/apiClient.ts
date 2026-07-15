@@ -6,6 +6,7 @@ type FetchOptions = {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   body?: unknown;
   auth?: boolean;
+  timeoutMs?: number;
 };
 
 class UnauthorizedError extends Error {
@@ -48,6 +49,7 @@ async function rawFetch(path: string, opts: FetchOptions, accessToken?: string):
     method: opts.method ?? 'GET',
     headers,
     body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+    signal: opts.timeoutMs ? AbortSignal.timeout(opts.timeoutMs) : undefined,
   });
 }
 

@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { prisma, type TimeEntryCloseReason } from '@grind/db';
+import { prisma } from '@grind/db';
 import {
   CreateTimeEntryRequest,
   ListTimeEntriesQuery,
@@ -10,7 +10,12 @@ import {
   type SegmentDto,
   type TimeEntryDto,
 } from '@grind/types';
-import { validateEntry, clampEntryToServerClock, type Segment, type TimeEntry as CoreEntry } from '@grind/core';
+import {
+  validateEntry,
+  clampEntryToServerClock,
+  type Segment,
+  type TimeEntry as CoreEntry,
+} from '@grind/core';
 import { validate } from '../middleware/validate';
 import { requireAccessToken } from '../middleware/auth';
 import { attachScope } from '../middleware/scope';
@@ -23,6 +28,12 @@ import {
   TIMER_LEASE_MS,
   TIMER_PROTOCOL_VERSION,
 } from '../timeLifecycle';
+import {
+  canonicalTimeEntryHash,
+  createTimerSyncReceipt,
+  serializeTimeEntry,
+  type SerializableTimeEntry,
+} from '../timeEntries/wire';
 
 export const timeEntriesRouter = Router();
 
@@ -60,50 +71,6 @@ function toCoreEntry(args: {
   };
 }
 
-function serialize(entry: {
-  id: string;
-  clientUuid: string;
-  userId: string;
-  larkTaskGuid: string | null;
-  source: 'AUTO' | 'MANUAL';
-  trackingProtocolVersion: number | null;
-  agentRevision: number | null;
-  lastProvenAt: Date | null;
-  leaseExpiresAt: Date | null;
-  closeReason: TimeEntryCloseReason | null;
-  serverFinalizedAt: Date | null;
-  startedAt: Date;
-  endedAt: Date | null;
-  notes: string | null;
-  segments: { id: string; kind: SegmentDto['kind']; startedAt: Date; endedAt: Date | null }[];
-}): TimeEntryDto {
-  return {
-    id: entry.id,
-    clientUuid: entry.clientUuid,
-    userId: entry.userId,
-    larkTaskGuid: entry.larkTaskGuid,
-    source: entry.source,
-    trackingProtocolVersion: entry.trackingProtocolVersion,
-    revision: entry.agentRevision,
-    lastProvenAt: entry.lastProvenAt?.toISOString() ?? null,
-    leaseExpiresAt: entry.leaseExpiresAt?.toISOString() ?? null,
-    closeReason: entry.closeReason,
-    serverFinalizedAt: entry.serverFinalizedAt?.toISOString() ?? null,
-    startedAt: entry.startedAt.toISOString(),
-    endedAt: entry.endedAt ? entry.endedAt.toISOString() : null,
-    notes: entry.notes ?? null,
-    segments: entry.segments
-      .slice()
-      .sort((a, b) => a.startedAt.getTime() - b.startedAt.getTime())
-      .map((s) => ({
-        id: s.id,
-        kind: s.kind,
-        startedAt: s.startedAt.toISOString(),
-        endedAt: s.endedAt ? s.endedAt.toISOString() : null,
-      })),
-  };
-}
-
 function hasCompleteV2Lifecycle(input: {
   trackingProtocolVersion?: number;
   revision?: number;
@@ -133,6 +100,97 @@ function clampObservedAt(observedAt: string, now: Date, startedAt: Date): Date {
   return new Date(Math.max(startedAt.getTime(), bounded));
 }
 
+function canonicalTimestampCeiling(entry: {
+  startedAt: Date;
+  endedAt: Date | null;
+  segments: Array<{ startedAt: Date; endedAt: Date | null }>;
+}): number {
+  return entry.segments.reduce(
+    (ceiling, segment) => Math.max(
+      ceiling,
+      segment.startedAt.getTime(),
+      segment.endedAt?.getTime() ?? Number.NEGATIVE_INFINITY,
+    ),
+    Math.max(entry.startedAt.getTime(), entry.endedAt?.getTime() ?? Number.NEGATIVE_INFINITY),
+  );
+}
+
+function evaluateExistingCreate(args: {
+  entry: SerializableTimeEntry;
+  body: CreateTimeEntryRequest;
+  userId: string;
+  isV2: boolean;
+}): { status: 200 | 409; payload: unknown } {
+  const { entry, body, userId, isV2 } = args;
+  if (entry.userId !== userId) {
+    return { status: 409, payload: { error: 'client_uuid_conflict' } };
+  }
+  if (entry.id !== body.id) {
+    return { status: 409, payload: { error: 'client_uuid_entry_conflict' } };
+  }
+  if (!isV2) {
+    return { status: 200, payload: serializeTimeEntry(entry) };
+  }
+  if (entry.closeReason === 'LEASE_EXPIRED' || entry.closeReason === 'SUPERSEDED') {
+    return {
+      status: 200,
+      payload: createTimerSyncReceipt(
+        entry,
+        'FINALIZED',
+        entry.closeReason === 'LEASE_EXPIRED' ? 'LEASE_FINALIZED' : 'SUPERSEDED',
+      ),
+    };
+  }
+
+  const currentRevision = entry.agentRevision ?? 0;
+  if (body.revision === currentRevision) {
+    // Reuse the first accepted server boundary. Re-clamping an identical
+    // retry against a later Date.now() would manufacture a different hash
+    // when the original client clock was ahead and its response was lost.
+    const retryBoundary = canonicalTimestampCeiling(entry);
+    const retryCore = clampEntryToServerClock(toCoreEntry({
+      id: body.id,
+      clientUuid: body.clientUuid,
+      userId,
+      source: body.source,
+      revision: body.revision,
+      closeReason: body.closeReason,
+      startedAt: body.startedAt,
+      endedAt: body.endedAt ?? null,
+      segments: body.segments,
+    }), retryBoundary, 0);
+    const retryDto: TimeEntryDto = {
+      ...serializeTimeEntry(entry),
+      larkTaskGuid: body.larkTaskGuid ?? null,
+      revision: body.revision,
+      startedAt: new Date(retryCore.entry.startedAt).toISOString(),
+      endedAt: retryCore.entry.endedAt === null ? null : new Date(retryCore.entry.endedAt).toISOString(),
+      closeReason: retryCore.entry.endedAt === null ? null : (body.closeReason ?? 'AGENT'),
+      segments: retryCore.entry.segments.map((segment) => ({
+        id: segment.id,
+        kind: segment.kind,
+        startedAt: new Date(segment.startedAt).toISOString(),
+        endedAt: segment.endedAt === null ? null : new Date(segment.endedAt).toISOString(),
+      })),
+    };
+    if (canonicalTimeEntryHash(retryDto) !== canonicalTimeEntryHash(serializeTimeEntry(entry))) {
+      return {
+        status: 409,
+        payload: { error: 'revision_payload_conflict', revision: body.revision },
+      };
+    }
+  }
+
+  return {
+    status: 200,
+    payload: createTimerSyncReceipt(
+      entry,
+      (body.revision ?? 0) < currentRevision ? 'STALE' : 'ALREADY_APPLIED',
+      null,
+    ),
+  };
+}
+
 /**
  * Create a time entry (idempotent on clientUuid). If the entry already exists,
  * return it unchanged (the agent retried). The project must belong to the
@@ -156,8 +214,8 @@ timeEntriesRouter.post('/', validate(CreateTimeEntryRequest, 'body'), async (req
       include: { segments: true },
     });
     if (existing) {
-      if (existing.userId !== req.user.sub) return res.status(409).json({ error: 'client_uuid_conflict' });
-      return res.status(200).json(serialize(existing));
+      const decision = evaluateExistingCreate({ entry: existing, body, userId: req.user.sub, isV2 });
+      return res.status(decision.status).json(decision.payload);
     }
 
     // Segment integrity check (defense in depth, shared domain logic).
@@ -197,9 +255,7 @@ timeEntriesRouter.post('/', validate(CreateTimeEntryRequest, 'body'), async (req
           include: { segments: true },
         });
         if (racedExisting) {
-          return racedExisting.userId === req.user!.sub
-            ? { kind: 'existing' as const, entry: racedExisting }
-            : { kind: 'clientUuidConflict' as const };
+          return { kind: 'existing' as const, entry: racedExisting };
         }
       }
       const shiftSnapshot = await tx.user.findUnique({
@@ -209,6 +265,14 @@ timeEntriesRouter.post('/', validate(CreateTimeEntryRequest, 'body'), async (req
       if (isV2 && clamped.entry.endedAt === null) {
         const activeEntryId = await supersedeExpiredTimersForUser(tx, req.user!.sub, now);
         if (activeEntryId) return { kind: 'conflict' as const, activeEntryId };
+      }
+      const incomingSegmentIds = clamped.entry.segments.map((segment) => segment.id);
+      const foreignSegment = await tx.timeSegment.findFirst({
+        where: { id: { in: incomingSegmentIds } },
+        select: { id: true },
+      });
+      if (foreignSegment) {
+        return { kind: 'segmentIdConflict' as const, segmentId: foreignSegment.id };
       }
       const created = await tx.timeEntry.create({
         data: {
@@ -247,11 +311,16 @@ timeEntriesRouter.post('/', validate(CreateTimeEntryRequest, 'body'), async (req
     if (outcome.kind === 'conflict') {
       return res.status(409).json({ error: 'active_timer_conflict', activeEntryId: outcome.activeEntryId });
     }
-    if (outcome.kind === 'clientUuidConflict') {
-      return res.status(409).json({ error: 'client_uuid_conflict' });
+    if (outcome.kind === 'segmentIdConflict') {
+      return res.status(409).json({ error: 'segment_id_conflict', segmentId: outcome.segmentId });
     }
-    if (outcome.kind === 'existing') return res.status(200).json(serialize(outcome.entry));
-    res.status(201).json(serialize(outcome.entry));
+    if (outcome.kind === 'existing') {
+      const decision = evaluateExistingCreate({ entry: outcome.entry, body, userId: req.user.sub, isV2 });
+      return res.status(decision.status).json(decision.payload);
+    }
+    res.status(201).json(isV2
+      ? createTimerSyncReceipt(outcome.entry, 'APPLIED', clamped.adjusted ? 'CLOCK_CLAMP' : null, now)
+      : serializeTimeEntry(outcome.entry));
   } catch (err) {
     next(err);
   }
@@ -325,7 +394,7 @@ timeEntriesRouter.put('/:id/sync', validate(SyncTimeEntryRequest, 'body'), async
 
       const currentRevision = current.agentRevision ?? 0;
       if (isV2 && body.revision! < currentRevision) {
-        return { kind: 'ok' as const, entry: current };
+        return { kind: 'receipt' as const, entry: current, disposition: 'STALE' as const, correction: null };
       }
 
       const checkpointAt = isV2 ? clampObservedAt(body.observedAt!, now, current.startedAt) : null;
@@ -334,10 +403,7 @@ timeEntriesRouter.put('/:id/sync', validate(SyncTimeEntryRequest, 'body'), async
         : checkpointAt;
       if (current.endedAt) {
         if (current.closeReason === 'SUPERSEDED') {
-          return {
-            kind: 'conflict' as const,
-            payload: { error: 'timer_finalized', endedAt: current.endedAt.toISOString() },
-          };
+          return { kind: 'receipt' as const, entry: current, disposition: 'FINALIZED' as const, correction: 'SUPERSEDED' as const };
         }
 
         if (current.closeReason === 'LEASE_EXPIRED') {
@@ -345,7 +411,9 @@ timeEntriesRouter.put('/:id/sync', validate(SyncTimeEntryRequest, 'body'), async
             && body.revision! > currentRevision
             && observedAt !== null
             && observedAt > current.endedAt;
-          if (!mayReconcile) return { kind: 'ok' as const, entry: current };
+          if (!mayReconcile) {
+            return { kind: 'receipt' as const, entry: current, disposition: 'FINALIZED' as const, correction: 'LEASE_FINALIZED' as const };
+          }
 
           const otherActive = await tx.timeEntry.findFirst({
             where: {
@@ -364,19 +432,50 @@ timeEntriesRouter.put('/:id/sync', validate(SyncTimeEntryRequest, 'body'), async
             };
           }
         } else if (clampedEndedAt === null) {
-          return {
-            kind: 'conflict' as const,
-            payload: { error: 'timer_finalized', endedAt: current.endedAt.toISOString() },
-          };
+          return { kind: 'receipt' as const, entry: current, disposition: 'FINALIZED' as const, correction: null };
         }
       }
 
-      // Replace segments idempotently: drop this entry's segments AND any rows
-      // that reuse an incoming id (defends against replayed/retried syncs),
-      // then recreate. Avoids unique-constraint collisions on TimeSegment.id.
-      await tx.timeSegment.deleteMany({
-        where: { OR: [{ timeEntryId: id }, { id: { in: incomingIds } }] },
-      });
+      if (isV2 && body.revision! === currentRevision) {
+        const comparisonBoundary = canonicalTimestampCeiling(current);
+        const comparison = clampEntryToServerClock(core, comparisonBoundary, 0).entry;
+        const incomingDto: TimeEntryDto = {
+          ...serializeTimeEntry(current),
+          revision: body.revision!,
+          endedAt: comparison.endedAt === null ? null : new Date(comparison.endedAt).toISOString(),
+          closeReason: comparison.endedAt === null ? null : (body.closeReason ?? 'AGENT'),
+          segments: comparison.segments.map((segment) => ({
+            id: segment.id,
+            kind: segment.kind,
+            startedAt: new Date(segment.startedAt).toISOString(),
+            endedAt: segment.endedAt === null ? null : new Date(segment.endedAt).toISOString(),
+          })),
+        };
+        if (canonicalTimeEntryHash(incomingDto) !== canonicalTimeEntryHash(serializeTimeEntry(current))) {
+          return {
+            kind: 'conflict' as const,
+            payload: { error: 'revision_payload_conflict', revision: currentRevision },
+          };
+        }
+        return { kind: 'receipt' as const, entry: current, disposition: 'ALREADY_APPLIED' as const, correction: null };
+      }
+
+      const foreignSegment = incomingIds.length === 0
+        ? null
+        : await tx.timeSegment.findFirst({
+            where: { id: { in: incomingIds }, timeEntryId: { not: id } },
+            select: { id: true },
+          });
+      if (foreignSegment) {
+        return {
+          kind: 'conflict' as const,
+          payload: { error: 'segment_id_conflict', segmentId: foreignSegment.id },
+        };
+      }
+
+      // Incoming ids owned by another entry are rejected above. Never delete
+      // another entry's audit rows while replacing this entry's snapshot.
+      await tx.timeSegment.deleteMany({ where: { timeEntryId: id } });
       await tx.timeEntry.update({
         where: { id },
         data: {
@@ -403,11 +502,18 @@ timeEntriesRouter.put('/:id/sync', validate(SyncTimeEntryRequest, 'body'), async
         })),
       });
       const updated = await tx.timeEntry.findUniqueOrThrow({ where: { id }, include: { segments: true } });
-      return { kind: 'ok' as const, entry: updated };
+      return {
+        kind: 'receipt' as const,
+        entry: updated,
+        disposition: 'APPLIED' as const,
+        correction: clamped.adjusted ? 'CLOCK_CLAMP' as const : null,
+      };
     });
 
     if (outcome.kind === 'conflict') return res.status(409).json(outcome.payload);
-    res.json(serialize(outcome.entry));
+    res.json(isV2
+      ? createTimerSyncReceipt(outcome.entry, outcome.disposition, outcome.correction, now)
+      : serializeTimeEntry(outcome.entry));
   } catch (err) {
     next(err);
   }
@@ -430,7 +536,7 @@ timeEntriesRouter.get('/', validate(ListTimeEntriesQuery, 'query'), async (req, 
       take: q.limit,
       include: { segments: true },
     });
-    const response: ListTimeEntriesResponse = { entries: entries.map(serialize) };
+    const response: ListTimeEntriesResponse = { entries: entries.map(serializeTimeEntry) };
     res.json(response);
   } catch (err) {
     next(err);
@@ -502,7 +608,7 @@ timeEntriesRouter.patch('/:id', attachScope, validate(PatchTimeEntryRequest, 'bo
       }
       return row;
     });
-    res.json(serialize(updated));
+    res.json(serializeTimeEntry(updated));
   } catch (err) {
     next(err);
   }

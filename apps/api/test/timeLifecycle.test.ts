@@ -34,11 +34,12 @@ describe('timer lifecycle protocol v2', () => {
     const created = await request(app).post('/v1/time-entries').set(bearer(user.accessToken)).send(body);
 
     expect(created.status).toBe(201);
-    expect(created.body.trackingProtocolVersion).toBe(2);
-    expect(created.body.revision).toBe(1);
-    expect(created.body.leaseExpiresAt).toEqual(expect.any(String));
+    expect(created.body).toMatchObject({ disposition: 'APPLIED', acceptedRevision: 1 });
+    expect(created.body.canonicalEntry.trackingProtocolVersion).toBe(2);
+    expect(created.body.canonicalEntry.revision).toBe(1);
+    expect(created.body.canonicalEntry.leaseExpiresAt).toEqual(expect.any(String));
 
-    const before = new Date(created.body.leaseExpiresAt).getTime();
+    const before = new Date(created.body.canonicalEntry.leaseExpiresAt).getTime();
     const monotonicProof = new Date();
     await prisma.timeEntry.update({ where: { id: body.id }, data: { lastProvenAt: monotonicProof } });
     const heartbeat = await request(app).post('/v1/agent/heartbeat').set(bearer(user.accessToken)).send({
@@ -60,6 +61,22 @@ describe('timer lifecycle protocol v2', () => {
     const row = await prisma.timeEntry.findUniqueOrThrow({ where: { id: body.id } });
     expect(row.leaseExpiresAt!.getTime()).toBeGreaterThanOrEqual(before);
     expect(row.lastProvenAt?.toISOString()).toBe(monotonicProof.toISOString());
+  });
+
+  it('replays an identical clock-clamped create after its first response is lost', async () => {
+    const user = await seedUser();
+    const body = v2Body(new Date(Date.now() + 45 * 60_000));
+
+    const first = await request(app).post('/v1/time-entries').set(bearer(user.accessToken)).send(body);
+    expect(first.status).toBe(201);
+    expect(first.body).toMatchObject({ disposition: 'APPLIED', correction: 'CLOCK_CLAMP' });
+
+    const retry = await request(app).post('/v1/time-entries').set(bearer(user.accessToken)).send(body);
+    expect(retry.status).toBe(200);
+    expect(retry.body).toMatchObject({
+      disposition: 'ALREADY_APPLIED',
+      canonicalHash: first.body.canonicalHash,
+    });
   });
 
   it('finalizes an expired lease once even when two workers race', async () => {
@@ -174,6 +191,10 @@ describe('timer lifecycle protocol v2', () => {
     });
     await reconcileExpiredTimersOnce();
 
+    const retriedCreate = await request(app).post('/v1/time-entries').set(bearer(user.accessToken)).send(body);
+    expect(retriedCreate.status).toBe(200);
+    expect(retriedCreate.body).toMatchObject({ disposition: 'FINALIZED', correction: 'LEASE_FINALIZED' });
+
     const sameRevision = await request(app).put(`/v1/time-entries/${body.id}/sync`).set(bearer(user.accessToken)).send({
       trackingProtocolVersion: 2,
       revision: 2,
@@ -183,8 +204,9 @@ describe('timer lifecycle protocol v2', () => {
       segments: body.segments,
     });
     expect(sameRevision.status).toBe(200);
-    expect(sameRevision.body.endedAt).not.toBeNull();
-    expect(sameRevision.body.closeReason).toBe('LEASE_EXPIRED');
+    expect(sameRevision.body).toMatchObject({ disposition: 'FINALIZED', correction: 'LEASE_FINALIZED' });
+    expect(sameRevision.body.canonicalEntry.endedAt).not.toBeNull();
+    expect(sameRevision.body.canonicalEntry.closeReason).toBe('LEASE_EXPIRED');
 
     const reopened = await request(app).put(`/v1/time-entries/${body.id}/sync`).set(bearer(user.accessToken)).send({
       trackingProtocolVersion: 2,
@@ -195,9 +217,10 @@ describe('timer lifecycle protocol v2', () => {
       segments: body.segments,
     });
     expect(reopened.status).toBe(200);
-    expect(reopened.body.endedAt).toBeNull();
-    expect(reopened.body.closeReason).toBeNull();
-    expect(new Date(reopened.body.leaseExpiresAt).getTime()).toBeGreaterThan(Date.now() + TIMER_LEASE_MS - 10_000);
+    expect(reopened.body).toMatchObject({ disposition: 'APPLIED', acceptedRevision: 3 });
+    expect(reopened.body.canonicalEntry.endedAt).toBeNull();
+    expect(reopened.body.canonicalEntry.closeReason).toBeNull();
+    expect(new Date(reopened.body.canonicalEntry.leaseExpiresAt).getTime()).toBeGreaterThan(Date.now() + TIMER_LEASE_MS - 10_000);
 
     const stale = await request(app).put(`/v1/time-entries/${body.id}/sync`).set(bearer(user.accessToken)).send({
       trackingProtocolVersion: 2,
@@ -208,8 +231,8 @@ describe('timer lifecycle protocol v2', () => {
       segments: [{ ...body.segments[0], endedAt: new Date().toISOString() }],
     });
     expect(stale.status).toBe(200);
-    expect(stale.body.revision).toBe(3);
-    expect(stale.body.endedAt).toBeNull();
+    expect(stale.body).toMatchObject({ disposition: 'STALE', acceptedRevision: 3 });
+    expect(stale.body.canonicalEntry.endedAt).toBeNull();
   });
 
   it('atomically supersedes expired ownership and blocks a second live timer', async () => {
@@ -265,8 +288,8 @@ describe('timer lifecycle protocol v2', () => {
       closeReason: 'AGENT',
       segments: [{ ...first.segments[0], endedAt: new Date().toISOString() }],
     });
-    expect(rejectedOldSync.status).toBe(409);
-    expect(rejectedOldSync.body.error).toBe('timer_finalized');
+    expect(rejectedOldSync.status).toBe(200);
+    expect(rejectedOldSync.body).toMatchObject({ disposition: 'FINALIZED', correction: 'SUPERSEDED' });
 
     const conflict = await request(app).post('/v1/time-entries').set(bearer(user.accessToken)).send(v2Body(new Date()));
     expect(conflict.status).toBe(409);
@@ -349,7 +372,28 @@ describe('timer lifecycle protocol v2', () => {
     ]);
 
     expect(results.map((result) => result.status).sort()).toEqual([200, 201]);
-    expect(new Set(results.map((result) => result.body.id))).toEqual(new Set([body.id]));
+    expect(new Set(results.map((result) => result.body.canonicalEntry.id))).toEqual(new Set([body.id]));
     expect(await prisma.timeEntry.count({ where: { clientUuid: body.clientUuid } })).toBe(1);
+  });
+
+  it('rejects the same revision when its normalized payload differs', async () => {
+    const user = await seedUser();
+    const body = v2Body(new Date(Date.now() - 60_000));
+    expect((await request(app).post('/v1/time-entries').set(bearer(user.accessToken)).send(body)).status).toBe(201);
+
+    const response = await request(app)
+      .put(`/v1/time-entries/${body.id}/sync`)
+      .set(bearer(user.accessToken))
+      .send({
+        trackingProtocolVersion: 2,
+        revision: 1,
+        observedAt: new Date().toISOString(),
+        endedAt: null,
+        closeReason: null,
+        segments: [{ ...body.segments[0], id: fakeUlid('different-segment') }],
+      });
+
+    expect(response.status).toBe(409);
+    expect(response.body).toMatchObject({ error: 'revision_payload_conflict', revision: 1 });
   });
 });

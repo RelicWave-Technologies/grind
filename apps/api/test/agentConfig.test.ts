@@ -73,6 +73,8 @@ describe('/v1/agent/config', () => {
     expect(res.body.captureApps).toBe(false);
     expect(res.body.captureTitles).toBe(false);
     expect(res.body.captureUrls).toBe(false);
+    expect(res.body.todayLedgerMode).toBe('OFF');
+    expect(res.body.configVersion).toContain('today-ledger:OFF');
   });
 
   it('gives per-member overrides priority over workspace policy defaults', async () => {

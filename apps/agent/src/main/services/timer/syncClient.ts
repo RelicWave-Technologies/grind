@@ -1,4 +1,5 @@
 import type { TimeEntry, Segment } from '@grind/core';
+import { TimerSyncReceipt, type TimerSyncReceipt as TimerSyncReceiptValue } from '@grind/types';
 import { api } from '../apiClient';
 import { AGENT_VERSION } from '../../env';
 import type { SyncClient } from './types';
@@ -29,9 +30,10 @@ function lifecycle(entry: TimeEntry) {
 
 /** SyncClient implemented over the authenticated HTTP api() helper. */
 export class HttpSyncClient implements SyncClient {
-  async create(entry: TimeEntry): Promise<void> {
-    await api('/v1/time-entries', {
+  async create(entry: TimeEntry): Promise<TimerSyncReceiptValue> {
+    const response = await api<unknown>('/v1/time-entries', {
       method: 'POST',
+      timeoutMs: 15_000,
       body: {
         ...lifecycle(entry),
         id: entry.id,
@@ -45,16 +47,19 @@ export class HttpSyncClient implements SyncClient {
         segments: entry.segments.map(segIso),
       },
     });
+    return TimerSyncReceipt.parse(response);
   }
 
-  async sync(entry: TimeEntry): Promise<void> {
-    await api(`/v1/time-entries/${entry.id}/sync`, {
+  async sync(entry: TimeEntry): Promise<TimerSyncReceiptValue> {
+    const response = await api<unknown>(`/v1/time-entries/${entry.id}/sync`, {
       method: 'PUT',
+      timeoutMs: 15_000,
       body: {
         ...lifecycle(entry),
         endedAt: entry.endedAt === null ? null : new Date(entry.endedAt).toISOString(),
         segments: entry.segments.map(segIso),
       },
     });
+    return TimerSyncReceipt.parse(response);
   }
 }

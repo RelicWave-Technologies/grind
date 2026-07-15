@@ -68,6 +68,7 @@ export default function Today() {
       setTimer(s);
       setNow(Date.now());
       rememberRunningTask(s);
+      void qc.invalidateQueries({ queryKey: ['timerRecoveryNotice'] });
     });
     const tick = setInterval(() => setNow(Date.now()), 1000);
     return () => { alive = false; off(); clearInterval(tick); };
@@ -136,7 +137,10 @@ export default function Today() {
   const tasks = larkTasks.data?.tasks ?? [];
   const runningTask = running?.larkTaskGuid ? tasks.find((t) => t.guid === running.larkTaskGuid) : undefined;
   const larkConnected = !!larkStatus.data?.connected;
+  const larkOffline = !!larkStatus.data?.offline;
   const larkConfigured = larkStatus.data?.configured !== false;
+  const canUseSavedTasks = larkOffline && tasks.length > 0;
+  const taskCatalogAvailable = larkConnected || canUseSavedTasks;
 
   const allOpenTasks = sortTasks(tasks.filter((t) => !t.completed), running?.larkTaskGuid ?? null);
   const q = query.trim().toLowerCase();
@@ -173,15 +177,18 @@ export default function Today() {
           )}
           {/* Hero = live timer + stop control (no separate page) */}
           <div className={`hero-running rise rise-1${running ? ' on' : ''}`}>
-            <div>
+            <div className="hero-copy">
               <div className="hero-time tabular">{fmtClock(timer.workedMs)}</div>
               <div className="hero-proj">
                 {running ? (
-                  <><i className="dt-dot" style={{ background: heroColor }} />{runningTask?.summary ?? 'Tracking'}{isPaused ? ' · paused, time not counting' : ''}</>
+                  <>
+                    <i className="dt-dot" style={{ background: heroColor }} />
+                    <span className="hero-proj-name" title={runningTask?.summary ?? 'Tracking'}>{runningTask?.summary ?? 'Tracking'}</span>
+                  </>
                 ) : larkTasks.isLoading ? (
                   <><Clock size={14} /> Loading tasks...</>
-                ) : !larkConnected ? (
-                  <><Clock size={14} /> Connect Lark first</>
+                ) : !taskCatalogAvailable ? (
+                  <><Clock size={14} /> {larkOffline ? 'Offline - no saved task' : 'Connect Lark first'}</>
                 ) : totalOpen === 0 ? (
                   <><Clock size={14} /> No open tasks</>
                 ) : (
@@ -322,16 +329,16 @@ export default function Today() {
             </div>
           )}
 
-          {!larkConnected ? (
+          {!taskCatalogAvailable ? (
             <div className="empty rise rise-1">
               <span className="empty-icon" style={{ background: 'var(--violet-tint)', color: 'var(--violet)' }}>
                 <img className="lark-icon lark-icon--empty" src={larkIcon} alt="" />
               </span>
-              <div className="h3">{larkConfigured ? 'Connect Lark to see your tasks' : 'Lark not set up'}</div>
+              <div className="h3">{larkOffline ? 'Offline with no saved tasks' : larkConfigured ? 'Connect Lark to see your tasks' : 'Lark not set up'}</div>
               <div className="callout secondary">
-                {larkConfigured ? 'Your Lark tasks become the things you track time against.' : 'Ask your workspace admin to enable the Lark integration.'}
+                {larkOffline ? 'Reconnect once to refresh your task list.' : larkConfigured ? 'Your Lark tasks become the things you track time against.' : 'Ask your workspace admin to enable the Lark integration.'}
               </div>
-              {larkConfigured && (
+              {larkConfigured && !larkOffline && (
                 <button className="btn btn-prominent no-drag" style={{ marginTop: 'var(--sp-4)' }} onClick={() => connectLark.mutate()} disabled={connectLark.isPending}>
                   {connectLark.isPending ? 'Opening…' : 'Connect Lark'}
                 </button>

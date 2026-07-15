@@ -1,8 +1,13 @@
-import { ipcMain, shell } from 'electron';
+import { app, ipcMain, shell } from 'electron';
+import Database from 'better-sqlite3';
+import path from 'node:path';
 import { api } from '../services/apiClient';
 import { log } from '../logger';
 import { dateKeyInTimeZone } from '@grind/types';
 import { getWorkspaceTimeZone } from '../services/workspaceTime';
+import { getTimerService, refreshTodayLedger } from '../services/timer';
+import { loadTokens } from '../services/tokenStore';
+import { LarkTaskCache, type CachedLarkTask } from '../services/larkTaskCache';
 
 export type LarkStatus = {
   configured: boolean;
@@ -10,21 +15,11 @@ export type LarkStatus = {
   reauthRequired: boolean;
   scopes: string[];
   missingScopes?: string[];
+  /** The API is unreachable; the UI may offer an owner-scoped saved task list. */
+  offline?: boolean;
 };
 
-export type LarkTask = {
-  guid: string;
-  summary: string;
-  completed: boolean;
-  url?: string;
-  due: number | null;
-  createdAt: number | null;
-  creatorId: string | null;
-  creatorName: string | null;
-  loggedMs: number;
-  loggedTodayMs: number;
-  loggedTotalMs: number;
-};
+export type LarkTask = CachedLarkTask;
 
 export type CreateTaskInput = { summary: string; due?: number | null; description?: string | null };
 
@@ -38,6 +33,27 @@ export type LarkSyncResult = {
 };
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+let taskCache: LarkTaskCache | null = null;
+
+function getTaskCache(): LarkTaskCache {
+  if (!taskCache) taskCache = new LarkTaskCache(new Database(path.join(app.getPath('userData'), 'agent.db')));
+  return taskCache;
+}
+
+async function cachedTasks(): Promise<LarkTask[]> {
+  const tokens = await loadTokens();
+  return tokens ? getTaskCache().list(tokens) : [];
+}
+
+async function hasCachedTasks(): Promise<boolean> {
+  const tokens = await loadTokens();
+  return Boolean(tokens && getTaskCache().has(tokens));
+}
+
+async function cacheTasks(tasks: LarkTask[]): Promise<void> {
+  const tokens = await loadTokens();
+  if (tokens) getTaskCache().replace(tokens, tasks);
+}
 
 function todayKey(): string {
   const timeZone = getWorkspaceTimeZone();
@@ -72,6 +88,14 @@ function createTaskErrorMessage(raw: string): string {
   return 'Could not create task in Lark';
 }
 
+function withProjectedToday(tasks: LarkTask[]): LarkTask[] {
+  const byTask = getTimerService().workedMsByTask();
+  return tasks.map((task) => ({
+    ...task,
+    loggedTodayMs: byTask.get(task.guid) ?? task.loggedTodayMs,
+  }));
+}
+
 /**
  * Lark connection is owned by the backend (tokens never touch the device).
  * The agent just (a) reads status, (b) opens the authorize URL in the system
@@ -79,15 +103,12 @@ function createTaskErrorMessage(raw: string): string {
  */
 export function registerLarkIpc(): void {
   ipcMain.handle('lark:status', async (): Promise<LarkStatus> => {
-    // Do NOT fabricate a "not configured / not connected" status on a transient
-    // failure — that makes a stale or briefly-dropped connection look like "Lark
-    // not set up" and hides the Sync button. Reject instead, so the renderer's
-    // query keeps the last-known-good status until a later poll succeeds.
     try {
       return await api<LarkStatus>('/v1/lark/status');
     } catch (err) {
-      log.warn('lark:status failed; keeping last-known status', { err: String(err) });
-      throw err;
+      const cached = await hasCachedTasks();
+      log.warn('lark:status unavailable', { cachedTasks: cached, err: String(err) });
+      return { configured: true, connected: false, reauthRequired: false, scopes: [], offline: true };
     }
   });
 
@@ -104,19 +125,20 @@ export function registerLarkIpc(): void {
     }
   });
 
-  // Fetch the user's Lark tasks for the picker. Returns [] when not connected
-  // (or on reauth), so the UI can degrade quietly without throwing.
-  ipcMain.handle('lark:tasks', async (): Promise<{ tasks: LarkTask[]; reauthRequired: boolean }> => {
+  // Fetch fresh tasks when possible. Offline uses only the same user's durable
+  // snapshot; it never claims that Lark is connected or lets the user create a
+  // task without the server.
+  ipcMain.handle('lark:tasks', async (): Promise<{ tasks: LarkTask[]; reauthRequired: boolean; offline?: boolean }> => {
     try {
       const { tasks } = await api<{ tasks: LarkTask[] }>(myTasksPath());
-      return { tasks, reauthRequired: false };
+      await cacheTasks(tasks);
+      return { tasks: withProjectedToday(tasks), reauthRequired: false };
     } catch (err) {
       const msg = String(err);
       if (msg.includes('409')) return { tasks: [], reauthRequired: true };
-      // A transient failure must not blank the task list — reject so the
-      // renderer keeps the last-known tasks and repopulates on the next poll.
-      log.warn('lark:tasks failed; keeping last-known tasks', { err: msg });
-      throw err;
+      const tasks = withProjectedToday(await cachedTasks());
+      log.warn('lark:tasks unavailable', { cachedTasks: tasks.length, err: msg });
+      return { tasks, reauthRequired: false, offline: true };
     }
   });
 
@@ -136,7 +158,15 @@ export function registerLarkIpc(): void {
         }
         // Backend refreshes the Lark token here if needed; 409 ⇒ reauth required.
         const { tasks } = await api<{ tasks: LarkTask[] }>(myTasksPath());
-        return { ok: true, connected: true, reauthRequired: false, tasks, syncedAt: Date.now() };
+        await cacheTasks(tasks);
+        await refreshTodayLedger('manual');
+        return {
+          ok: true,
+          connected: true,
+          reauthRequired: false,
+          tasks: withProjectedToday(tasks),
+          syncedAt: Date.now(),
+        };
       } catch (err) {
         const msg = String(err);
         if (msg.includes('409')) {

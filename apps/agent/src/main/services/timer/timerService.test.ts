@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import type { TimeEntry } from '@grind/core';
 import { closeTimeEntry, totalWorkedMs } from '@grind/core';
-import { dateKeyInTimeZone, localDayWindowInTimeZone } from '@grind/types';
+import { canonicalTimerEntryPayload } from '@grind/core';
+import { createHash } from 'node:crypto';
+import { dateKeyInTimeZone, localDayWindowInTimeZone, type TimerSyncReceipt } from '@grind/types';
 import { HttpError } from '../apiClient';
 import { TimerService } from './timerService';
 import { TrackingBlockedError } from '../trackingReadiness';
@@ -16,6 +18,7 @@ import type {
   TimerExitIntent,
   TimerRecoveryNotice,
   UnsyncedEntry,
+  TimerOwner,
 } from './types';
 
 const T0 = 1_700_000_000_000;
@@ -40,14 +43,31 @@ class SeqIdGen implements IdGen {
 }
 
 class MemStore implements EntryStore {
+  owner: TimerOwner | null = { userId: 'test-user', workspaceId: 'test-workspace' };
+  failNextUpsert = false;
   entries = new Map<string, TimeEntry>();
   syncStates = new Map<string, EntrySyncState>();
+  bindOwner(owner: TimerOwner | null) { this.owner = owner; }
+  currentOwner() { return this.owner; }
+  claimUnownedEntries() { return 0; }
+  claimServerMatchedEntries() { return 0; }
   upsert(e: TimeEntry, opts?: { syncState?: PendingEntrySyncState }) {
+    if (this.failNextUpsert) {
+      this.failNextUpsert = false;
+      throw new Error('sqlite_write_failed');
+    }
     const existing = this.syncStates.get(e.id);
     const nextState = opts?.syncState ?? (existing === 'pending_create' ? 'pending_create' : existing ? 'pending_update' : 'pending_create');
     this.entries.set(e.id, structuredClone(e));
     this.syncStates.set(e.id, nextState);
     return nextState;
+  }
+  switchEntry(closed: TimeEntry, next: TimeEntry): [PendingEntrySyncState, PendingEntrySyncState] {
+    if (this.failNextUpsert) {
+      this.failNextUpsert = false;
+      throw new Error('sqlite_write_failed');
+    }
+    return [this.upsert(closed), this.upsert(next, { syncState: 'pending_create' })];
   }
   getOpen() {
     for (const e of this.entries.values()) if (e.endedAt === null) return structuredClone(e);
@@ -58,6 +78,7 @@ class MemStore implements EntryStore {
       .map((e) => ({ entry: structuredClone(e), syncState: this.syncStates.get(e.id) ?? 'pending_create' }))
       .filter((r): r is UnsyncedEntry => r.syncState === 'pending_create' || r.syncState === 'pending_update');
   }
+  hasUnsynced() { return this.getUnsynced().length > 0; }
   isPendingCreate(id: string) {
     return this.syncStates.get(id) === 'pending_create';
   }
@@ -70,17 +91,30 @@ class MemStore implements EntryStore {
       .reverse()
       .map((e) => structuredClone(e));
   }
-  markCreated(id: string) {
+  listLedgerEntries(since: number) {
+    return this.listSince(since).map((entry) => ({
+      entry,
+      syncState: this.syncStates.get(entry.id) ?? 'pending_create',
+      acknowledgedRevision: null,
+      acknowledgedHash: null,
+    }));
+  }
+  markCreated(id: string, expectedEntry: TimeEntry) {
+    const current = this.entries.get(id);
+    if (!current || JSON.stringify(current) !== JSON.stringify(expectedEntry)) return false;
+    if (this.syncStates.get(id) !== 'pending_create') return false;
     this.syncStates.set(id, 'pending_update');
+    return true;
   }
-  markPendingCreate(id: string) {
+  markPendingCreate(id: string, expectedEntry: TimeEntry) {
+    const current = this.entries.get(id);
+    if (!current || JSON.stringify(current) !== JSON.stringify(expectedEntry)) return false;
     this.syncStates.set(id, 'pending_create');
+    return true;
   }
-  markSynced(id: string, expectedEntry?: TimeEntry) {
-    if (expectedEntry) {
-      const current = this.entries.get(id);
-      if (!current || JSON.stringify(current) !== JSON.stringify(expectedEntry)) return false;
-    }
+  markSynced(id: string, expectedEntry: TimeEntry) {
+    const current = this.entries.get(id);
+    if (!current || JSON.stringify(current) !== JSON.stringify(expectedEntry)) return false;
     this.syncStates.set(id, 'synced');
     return true;
   }
@@ -137,6 +171,7 @@ class SpySync implements SyncClient {
     }
     this.creates.push(e.id);
     this.calls.push(`create:${e.id}`);
+    return receipt(e, { acceptedRevision: 0, canonicalHash: '0'.repeat(64) });
   }
   async sync(e: TimeEntry) {
     if (this.notFoundSyncCount > 0) {
@@ -149,7 +184,45 @@ class SpySync implements SyncClient {
     }
     this.syncs.push(e.id);
     this.calls.push(`sync:${e.id}`);
+    return receipt(e);
   }
+}
+
+function receipt(
+  entry: TimeEntry,
+  overrides: Partial<TimerSyncReceipt> = {},
+): TimerSyncReceipt {
+  const canonicalHash = createHash('sha256').update(canonicalTimerEntryPayload(entry)).digest('hex');
+  return {
+    disposition: 'APPLIED',
+    acceptedRevision: entry.revision,
+    canonicalHash,
+    canonicalEntry: {
+      id: entry.id,
+      clientUuid: entry.clientUuid,
+      userId: entry.userId,
+      larkTaskGuid: entry.larkTaskGuid ?? null,
+      source: entry.source,
+      trackingProtocolVersion: 2,
+      revision: entry.revision,
+      lastProvenAt: new Date(entry.endedAt ?? T0).toISOString(),
+      leaseExpiresAt: entry.endedAt === null ? new Date(T0 + 3 * MIN).toISOString() : null,
+      closeReason: entry.closeReason,
+      serverFinalizedAt: null,
+      startedAt: new Date(entry.startedAt).toISOString(),
+      endedAt: entry.endedAt === null ? null : new Date(entry.endedAt).toISOString(),
+      notes: null,
+      segments: entry.segments.map((segment) => ({
+        id: segment.id,
+        kind: segment.kind,
+        startedAt: new Date(segment.startedAt).toISOString(),
+        endedAt: segment.endedAt === null ? null : new Date(segment.endedAt).toISOString(),
+      })),
+    },
+    serverTime: new Date(T0).toISOString(),
+    correction: null,
+    ...overrides,
+  };
 }
 
 let clock: FakeClock;
@@ -202,6 +275,53 @@ describe('TimerService.start', () => {
     expect(sync.syncs).toHaveLength(1);
   });
 
+  it('does not publish a new timer when the durable insert fails', async () => {
+    store.failNextUpsert = true;
+    await expect(svc.start({ larkTaskGuid: 'task-a' })).rejects.toThrow('sqlite_write_failed');
+    expect(svc.status().state).toBe('IDLE');
+    expect(store.entries.size).toBe(0);
+    expect(sync.calls).toEqual([]);
+  });
+
+  it('publishes the durable local timer without waiting for the network', async () => {
+    let release!: () => void;
+    let pendingEntry!: TimeEntry;
+    const blockedSync: SyncClient = {
+      create: (entryValue) => {
+        pendingEntry = entryValue;
+        return new Promise<TimerSyncReceipt>((resolve) => {
+          release = () => resolve(receipt(entryValue, { acceptedRevision: 0, canonicalHash: '0'.repeat(64) }));
+        });
+      },
+      sync: async (entryValue) => receipt(entryValue),
+    };
+    const blockedService = new TimerService(store, blockedSync, clock, ids, allowAccrual);
+
+    const status = await Promise.race([
+      blockedService.start({}),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timer_waited_for_network')), 100)),
+    ]);
+    expect(status.state).toBe('RUNNING');
+    expect(store.getOpen()).not.toBeNull();
+
+    release();
+    await blockedService.flushUnsynced();
+    expect(pendingEntry.id).toBe(store.getOpen()?.id);
+  });
+
+  it('records a visible notice for an acknowledged server clock correction', async () => {
+    const correctingSync: SyncClient = {
+      create: async (entryValue) => receipt(entryValue, { correction: 'CLOCK_CLAMP' }),
+      sync: async (entryValue) => receipt(entryValue),
+    };
+    const correctingService = new TimerService(store, correctingSync, clock, ids, allowAccrual);
+
+    await correctingService.start({});
+    await correctingService.flushUnsynced();
+
+    expect(correctingService.recoveryNotice()).toMatchObject({ reason: 'server_clock_corrected' });
+  });
+
   it('switches to another task without requiring a stop first', async () => {
     await svc.start({ larkTaskGuid: 'task-a' });
     clock.advance(10 * MIN);
@@ -220,6 +340,16 @@ describe('TimerService.start', () => {
     expect(store.getOpen()?.larkTaskGuid).toBe('task-b');
     expect(sync.creates).toEqual([oldEntry.id, newEntry.id]);
     expect(sync.syncs).toEqual([oldEntry.id, oldEntry.id, newEntry.id]);
+  });
+
+  it('keeps the old task running when the task-switch close cannot persist', async () => {
+    await svc.start({ larkTaskGuid: 'task-a' });
+    clock.advance(MIN);
+    store.failNextUpsert = true;
+
+    await expect(svc.start({ larkTaskGuid: 'task-b' })).rejects.toThrow('sqlite_write_failed');
+    expect(svc.status()).toMatchObject({ state: 'RUNNING', larkTaskGuid: 'task-a', paused: false });
+    expect(store.getOpen()?.larkTaskGuid).toBe('task-a');
   });
 
   it('checks permissions before a task switch can close the current entry', async () => {
@@ -304,6 +434,14 @@ describe('TimerService.stop', () => {
     expect(status.state).toBe('IDLE');
     expect(sync.syncs).toHaveLength(0);
   });
+
+  it('stays visibly running when the durable close fails', async () => {
+    await svc.start({});
+    store.failNextUpsert = true;
+    await expect(svc.stop()).rejects.toThrow('sqlite_write_failed');
+    expect(svc.status()).toMatchObject({ state: 'RUNNING', paused: false });
+    expect(store.getOpen()).not.toBeNull();
+  });
 });
 
 describe('TimerService.pause', () => {
@@ -336,6 +474,13 @@ describe('TimerService.pause', () => {
     const once = svc.status();
 
     expect(await svc.pause()).toEqual(once);
+  });
+
+  it('does not publish a pause when SQLite rejects it', async () => {
+    await svc.start({});
+    store.failNextUpsert = true;
+    await expect(svc.pause()).rejects.toThrow('sqlite_write_failed');
+    expect(svc.status()).toMatchObject({ state: 'RUNNING', paused: false });
   });
 });
 
@@ -505,6 +650,7 @@ describe('TimerService offline behaviour', () => {
     clock.advance(5 * MIN);
     sync.notFoundSyncCount = 1;
     await svc.pauseForIdle(clock.now());
+    await svc.flushUnsynced();
 
     expect(sync.calls.slice(-2)).toEqual([`create:${entry.id}`, `sync:${entry.id}`]);
     expect(store.getUnsynced()).toHaveLength(0);
@@ -547,7 +693,7 @@ describe('TimerService offline behaviour', () => {
         ...e,
         segments: [{ ...e.segments[0]!, endedAt: T0 + 2 * MIN }],
       });
-      await originalSync(e);
+      return originalSync(e);
     };
 
     clock.advance(1 * MIN);
@@ -556,24 +702,25 @@ describe('TimerService offline behaviour', () => {
     expect(store.getUnsynced()).toMatchObject([{ syncState: 'pending_update' }]);
   });
 
-  it('leaves stale create-plus-sync rows pending_update when local state changes after create', async () => {
+  it('ignores a stale create response when local state changes in flight', async () => {
     sync.failCreateCount = 1;
     await svc.start({});
     const entry = store.getOpen()!;
     const originalCreate = sync.create.bind(sync);
     sync.create = async (e) => {
-      await originalCreate(e);
+      const result = await originalCreate(e);
       store.upsert({
         ...entry,
         segments: [{ ...entry.segments[0]!, endedAt: T0 + 3 * MIN }],
       });
+      return result;
     };
 
     await svc.flushUnsynced();
 
     expect(sync.creates).toHaveLength(1);
-    expect(sync.syncs).toHaveLength(1);
-    expect(store.getUnsynced()).toMatchObject([{ syncState: 'pending_update' }]);
+    expect(sync.syncs).toHaveLength(0);
+    expect(store.getUnsynced()).toMatchObject([{ syncState: 'pending_create' }]);
   });
 });
 
@@ -887,7 +1034,7 @@ describe('TimerService liveness (crash-recovery bound)', () => {
 });
 
 describe('TimerService server finalization', () => {
-  it('stops the matching local timer, marks it synced, and records a visible notice', async () => {
+  it('stops the matching local timer, preserves its journal evidence, and records a visible notice', async () => {
     const clock = new FakeClock();
     const store = new MemStore();
     const svc = new TimerService(store, new SpySync(), clock, new SeqIdGen(), allowAccrual);
@@ -900,7 +1047,7 @@ describe('TimerService server finalization', () => {
 
     expect(status.state).toBe('IDLE');
     expect(store.getOpen()).toBeNull();
-    expect(store.getUnsynced()).toEqual([]);
+    expect(store.getUnsynced()).toMatchObject([{ syncState: 'pending_update' }]);
     expect(svc.recoveryNotice()).toMatchObject({
       entryId: running.entryId,
       reason: 'server_finalized',
@@ -934,5 +1081,6 @@ describe('TimerService workspace business day', () => {
 
     expect(service.status()).toMatchObject({ state: 'RUNNING', workedMs: 5 * MIN });
     expect(service.listToday(clock.now())).toHaveLength(1);
+    expect(service.workedMsByTask(clock.now()).get('overnight')).toBe(5 * MIN);
   });
 });

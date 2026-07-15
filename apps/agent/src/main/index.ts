@@ -4,7 +4,14 @@ import { createTray, setTrayTitle } from './tray';
 import { createMainWindow } from './window';
 import { registerIpc } from './ipc';
 import { sendHeartbeatNow, startHeartbeatIfAuthed } from './services/heartbeat';
-import { drainTimerSyncNow, getTimerService, initTimerOnBoot, startTimerSyncDrain } from './services/timer';
+import {
+  applyTodayLedgerMode,
+  drainTimerSyncNow,
+  getTimerService,
+  initTimerOnBoot,
+  refreshTodayLedger,
+  startTimerSyncDrain,
+} from './services/timer';
 import { rescheduleCaptureLoop, startCaptureLoop } from './services/capture';
 import {
   applyActivityCapturePolicy,
@@ -233,6 +240,7 @@ app.whenReady().then(async () => {
       reassertAttentionWindow(true);
       checkTrackingPermissionsNow();
       void drainTimerSyncNow('wake');
+      void refreshTodayLedger('wake');
       void drainActivityNow('wake');
     },
     // `resume` can arrive while macOS still owns the lock screen. Reassert once
@@ -265,6 +273,7 @@ app.whenReady().then(async () => {
 
   onAgentConfigChange(({ previous, current }) => {
     applyActivityCapturePolicy(current);
+    applyTodayLedgerMode(current.todayLedgerMode);
     if (!previous || previous.screenshotIntervalSec !== current.screenshotIntervalSec) {
       rescheduleCaptureLoop('agent-config');
     }
@@ -283,6 +292,7 @@ app.whenReady().then(async () => {
   try {
     await initTimerOnBoot();
     startTimerSyncDrain();
+    void refreshTodayLedger('boot');
   } catch (err) {
     log.warn('initTimerOnBoot failed', { err: String(err) });
   }

@@ -1,4 +1,8 @@
-import type { ActivitySampleInput, ActivitySamplesResponse } from '@grind/types';
+import {
+  ACTIVITY_METADATA_MAX_CHARS,
+  type ActivitySampleInput,
+  type ActivitySamplesResponse,
+} from '@grind/types';
 import { api } from '../apiClient';
 import { log } from '../../logger';
 import type { ActivityStore, ActivityRow } from './store';
@@ -11,10 +15,8 @@ import type { ActivityStore, ActivityRow } from './store';
 // past the limit.
 const MAX_BATCH_ROWS = 500; // also the server-side schema cap (ActivitySamplesRequest)
 const MAX_BATCH_BYTES = 48 * 1024; // headroom under the API's activity-route limit
-const MAX_FIELD_CHARS = 1024;
-
-function cap(s: string | null): string | null {
-  return s != null && s.length > MAX_FIELD_CHARS ? s.slice(0, MAX_FIELD_CHARS) : s;
+function cap(s: string | null, maxChars: number): string | null {
+  return s != null && s.length > maxChars ? s.slice(0, maxChars) : s;
 }
 
 function toInput(r: ActivityRow): ActivitySampleInput {
@@ -29,10 +31,10 @@ function toInput(r: ActivityRow): ActivitySampleInput {
     ikiCv: r.ikiCv,
     moveSpeedCv: r.moveSpeedCv,
     pathStraightness: r.pathStraightness,
-    activeApp: cap(r.activeApp),
-    activeAppBundle: cap(r.activeAppBundle),
-    activeTitle: cap(r.activeTitle),
-    activeUrl: cap(r.activeUrl),
+    activeApp: cap(r.activeApp, ACTIVITY_METADATA_MAX_CHARS.activeApp),
+    activeAppBundle: cap(r.activeAppBundle, ACTIVITY_METADATA_MAX_CHARS.activeAppBundle),
+    activeTitle: cap(r.activeTitle, ACTIVITY_METADATA_MAX_CHARS.activeTitle),
+    activeUrl: cap(r.activeUrl, ACTIVITY_METADATA_MAX_CHARS.activeUrl),
   };
 }
 

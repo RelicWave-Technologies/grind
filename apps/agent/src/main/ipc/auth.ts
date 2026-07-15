@@ -5,6 +5,12 @@ import { startHeartbeat, stopHeartbeat } from '../services/heartbeat';
 import { broadcast } from '../broadcast';
 import { log } from '../logger';
 import { refreshAgentConfig } from '../services/agentConfig';
+import {
+  bindTimerToStoredSession,
+  drainTimerSyncNow,
+  getTimerService,
+  refreshTodayLedger,
+} from '../services/timer';
 
 /** Fetch a remote image and return it as a `data:` URL (renderer CSP allows
  *  data: but not remote img). Returns null on any failure or oversized image. */
@@ -25,7 +31,10 @@ async function fetchImageAsDataUrl(url: string): Promise<string | null> {
 export function registerAuthIpc(): void {
   ipcMain.handle('auth:login', async (_e, payload: { email: string; password: string }) => {
     const user = await login(payload.email, payload.password);
+    await bindTimerToStoredSession(false);
+    await drainTimerSyncNow('auth');
     await refreshAgentConfig();
+    void refreshTodayLedger('auth');
     startHeartbeat();
     broadcast('auth:status:push', 'loggedIn');
     return user;
@@ -35,6 +44,10 @@ export function registerAuthIpc(): void {
   // (handled in services/deepLink) completes it and broadcasts the outcome.
   ipcMain.handle('auth:loginWithLark', async () => {
     if (await ensureSession()) {
+      await bindTimerToStoredSession(false);
+      await drainTimerSyncNow('auth');
+      await refreshAgentConfig();
+      void refreshTodayLedger('auth');
       startHeartbeat();
       broadcast('auth:status:push', 'loggedIn');
       return { ok: true };
@@ -44,8 +57,15 @@ export function registerAuthIpc(): void {
   });
 
   ipcMain.handle('auth:logout', async () => {
+    const timer = getTimerService();
+    await timer.stop();
+    await drainTimerSyncNow('manual');
+    if (timer.hasUnsynced()) {
+      throw new Error('time_waiting_to_sync');
+    }
     stopHeartbeat();
     await logout();
+    timer.bindOwner(null);
     broadcast('auth:status:push', 'loggedOut');
     return { ok: true };
   });

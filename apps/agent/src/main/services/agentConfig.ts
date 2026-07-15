@@ -2,6 +2,7 @@ import {
   AgentConfigResponse as AgentConfigResponseSchema,
   type AgentConfigResponse as AgentConfigResponseType,
   type PolicyFlags,
+  type TodayLedgerMode,
 } from '@grind/types';
 import { api } from './apiClient';
 import { SCREENSHOT_INTERVAL_SEC, IDLE_THRESHOLD_SEC, SHOT_SEC_LOCKED, IDLE_SEC_LOCKED } from '../env';
@@ -20,6 +21,7 @@ export interface RuntimeAgentConfig {
   captureApps: boolean;
   captureTitles: boolean;
   captureUrls: boolean;
+  todayLedgerMode: TodayLedgerMode;
   dashboardUrl: string;
   workspaceTimezone: string;
 }
@@ -46,6 +48,7 @@ let configVersion: string | null = null;
 let captureApps = false;
 let captureTitles = false;
 let captureUrls = false;
+let todayLedgerMode: TodayLedgerMode = 'OFF';
 let refreshInFlight: { sessionKey: string; promise: Promise<void> } | null = null;
 let hasAppliedConfig = false;
 const listeners = new Set<(change: AgentConfigChange) => void>();
@@ -69,6 +72,10 @@ export function getCapturePolicy(): CapturePolicy {
   return { captureApps, captureTitles, captureUrls };
 }
 
+export function getTodayLedgerMode(): TodayLedgerMode {
+  return todayLedgerMode;
+}
+
 export function onAgentConfigChange(listener: (change: AgentConfigChange) => void): () => void {
   listeners.add(listener);
   return () => listeners.delete(listener);
@@ -82,6 +89,7 @@ function snapshot(): RuntimeAgentConfig {
     captureApps,
     captureTitles,
     captureUrls,
+    todayLedgerMode,
     dashboardUrl,
     workspaceTimezone,
   };
@@ -96,6 +104,7 @@ function sameConfig(a: RuntimeAgentConfig | null, b: RuntimeAgentConfig): boolea
       a.captureApps === b.captureApps &&
       a.captureTitles === b.captureTitles &&
       a.captureUrls === b.captureUrls &&
+      a.todayLedgerMode === b.todayLedgerMode &&
       a.dashboardUrl === b.dashboardUrl &&
       a.workspaceTimezone === b.workspaceTimezone,
   );
@@ -133,6 +142,7 @@ async function applyAgentConfig(cfg: AgentConfigResponseType, requestedSession: 
   captureApps = Boolean(cfg.captureApps);
   captureTitles = captureApps && Boolean(cfg.captureTitles);
   captureUrls = captureApps && Boolean(cfg.captureUrls);
+  todayLedgerMode = cfg.todayLedgerMode;
   const current = snapshot();
   hasAppliedConfig = true;
   notifyConfigChange(previous, current);
@@ -184,6 +194,7 @@ async function refreshAgentConfigOnce(requestedSession: StoredTokens): Promise<v
       captureApps,
       captureTitles,
       captureUrls,
+      todayLedgerMode,
       workspaceTimezone,
       shotLocked: SHOT_SEC_LOCKED,
       idleLocked: IDLE_SEC_LOCKED,

@@ -43,6 +43,7 @@ const config = {
   captureApps: false,
   captureTitles: false,
   captureUrls: false,
+  todayLedgerMode: 'SHADOW' as const,
   dashboardUrl: 'https://timo.example',
   workspaceTimezone: 'Asia/Kolkata',
 };
@@ -57,11 +58,12 @@ describe('agent config session isolation', () => {
   it('applies config to the workspace that requested it', async () => {
     mocks.loadTokens.mockResolvedValue(sessionA);
     mocks.api.mockResolvedValue(config);
-    const { refreshAgentConfig } = await import('./agentConfig');
+    const { getTodayLedgerMode, refreshAgentConfig } = await import('./agentConfig');
 
     await refreshAgentConfig();
 
     expect(mocks.applyServerWorkspaceTimeZone).toHaveBeenCalledWith('Asia/Kolkata', 'workspace_a');
+    expect(getTodayLedgerMode()).toBe('SHADOW');
   });
 
   it('discards an old account response and refreshes the newly active session', async () => {

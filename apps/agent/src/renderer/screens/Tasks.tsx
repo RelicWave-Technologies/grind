@@ -46,7 +46,9 @@ export default function Tasks() {
   const running = timer.state === 'RUNNING' ? timer : null;
   const tasks = larkTasks.data?.tasks ?? [];
   const larkConnected = !!larkStatus.data?.connected;
+  const larkOffline = !!larkStatus.data?.offline;
   const larkConfigured = larkStatus.data?.configured !== false;
+  const taskCatalogAvailable = larkConnected || (larkOffline && tasks.length > 0);
 
   const q = query.trim().toLowerCase();
   const match = (s: string) => q === '' || s.toLowerCase().includes(q);
@@ -68,16 +70,16 @@ export default function Tasks() {
       </div>
       <div className="content-scroll">
         <div className="content-narrow">
-          {!larkConnected ? (
+          {!taskCatalogAvailable ? (
             <div className="empty rise rise-1">
               <span className="empty-icon" style={{ background: 'var(--violet-tint)', color: 'var(--violet)' }}>
                 <img className="lark-icon lark-icon--empty" src={larkIcon} alt="" />
               </span>
-              <div className="h3">{larkConfigured ? 'Connect Lark to see your tasks' : 'Lark not set up'}</div>
+              <div className="h3">{larkOffline ? 'Offline with no saved tasks' : larkConfigured ? 'Connect Lark to see your tasks' : 'Lark not set up'}</div>
               <div className="callout secondary">
-                {larkConfigured ? 'Your Lark tasks become the things you track time against.' : 'Ask your workspace admin to enable the Lark integration.'}
+                {larkOffline ? 'Reconnect once to refresh your task list.' : larkConfigured ? 'Your Lark tasks become the things you track time against.' : 'Ask your workspace admin to enable the Lark integration.'}
               </div>
-              {larkConfigured && (
+              {larkConfigured && !larkOffline && (
                 <button className="btn btn-prominent no-drag" style={{ marginTop: 'var(--sp-4)' }} onClick={() => connectLark.mutate()} disabled={connectLark.isPending}>
                   {connectLark.isPending ? 'Opening…' : 'Connect Lark'}
                 </button>

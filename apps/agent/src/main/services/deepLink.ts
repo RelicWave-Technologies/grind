@@ -6,6 +6,7 @@ import { broadcast } from '../broadcast';
 import { CALLBACK_SCHEME } from '../env';
 import { log } from '../logger';
 import { refreshAgentConfig } from './agentConfig';
+import { bindTimerToStoredSession, drainTimerSyncNow, refreshTodayLedger } from './timer';
 
 /**
  * Custom-scheme handling for Lark login. The system browser, after the OAuth
@@ -74,7 +75,10 @@ export async function handleDeepLink(url: string): Promise<void> {
     if (code) {
       const ok = await completeLarkLogin(code);
       if (ok) {
+        await bindTimerToStoredSession(false);
+        await drainTimerSyncNow('auth');
         await refreshAgentConfig();
+        void refreshTodayLedger('auth');
         startHeartbeat();
         broadcast('auth:status:push', 'loggedIn');
       } else {

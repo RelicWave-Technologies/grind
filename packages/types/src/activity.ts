@@ -2,6 +2,18 @@ import { z } from 'zod';
 
 const Iso = z.string().datetime({ offset: true });
 
+/**
+ * Wire-contract limits for optional foreground-window metadata. The desktop
+ * agent imports these values before upload so one malformed long value cannot
+ * make a whole durable activity batch permanently retry.
+ */
+export const ACTIVITY_METADATA_MAX_CHARS = {
+  activeApp: 120,
+  activeAppBundle: 200,
+  activeTitle: 300,
+  activeUrl: 2048,
+} as const;
+
 export const ActivitySampleInput = z.object({
   id: z.string().min(1),
   timeEntryId: z.string().min(1).nullable().optional(),
@@ -17,10 +29,10 @@ export const ActivitySampleInput = z.object({
   // policy-gated client-side AND server-side strips them when the
   // workspace policy disallows them — so even a misbehaving agent
   // can't sneak titles/URLs in.
-  activeApp: z.string().max(120).nullable().optional(),
-  activeAppBundle: z.string().max(200).nullable().optional(),
-  activeTitle: z.string().max(300).nullable().optional(),
-  activeUrl: z.string().max(2048).nullable().optional(),
+  activeApp: z.string().max(ACTIVITY_METADATA_MAX_CHARS.activeApp).nullable().optional(),
+  activeAppBundle: z.string().max(ACTIVITY_METADATA_MAX_CHARS.activeAppBundle).nullable().optional(),
+  activeTitle: z.string().max(ACTIVITY_METADATA_MAX_CHARS.activeTitle).nullable().optional(),
+  activeUrl: z.string().max(ACTIVITY_METADATA_MAX_CHARS.activeUrl).nullable().optional(),
 });
 export type ActivitySampleInput = z.infer<typeof ActivitySampleInput>;
 

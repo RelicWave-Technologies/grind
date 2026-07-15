@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ActivitySamplesRequest } from '@grind/types';
 
 const mocks = vi.hoisted(() => ({ api: vi.fn() }));
 vi.mock('../apiClient', () => ({ api: mocks.api }));
@@ -22,11 +23,27 @@ function fakeStore(rows: Row[]) {
 }
 const bodyOf = () =>
   (mocks.api.mock.calls.find((call) => call[0] === '/v1/activity-samples')![1] as {
-    body: { samples: { id: string; activeUrl: string | null }[] };
+    body: {
+      samples: Array<{
+        id: string;
+        activeApp: string | null;
+        activeAppBundle: string | null;
+        activeTitle: string | null;
+        activeUrl: string | null;
+      }>;
+    };
   }).body;
 
 afterEach(() => mocks.api.mockReset());
-beforeEach(() => mocks.api.mockResolvedValue({ accepted: 1, detached: 0 }));
+beforeEach(() => {
+  mocks.api.mockImplementation(async (_path: string, options: { body: unknown }) => {
+    // Keep the desktop's sender tested against the actual server wire schema.
+    // This catches a client/server max-length drift before it can poison a
+    // durable activity queue in production.
+    ActivitySamplesRequest.parse(options.body);
+    return { accepted: 1, detached: 0 };
+  });
+});
 
 describe('flushActivity byte-bounded batching', () => {
   it('sends nothing when there is no backlog', async () => {
@@ -47,10 +64,19 @@ describe('flushActivity byte-bounded batching', () => {
     expect(synced).toHaveLength(sent); // marked exactly what it sent, not the rest
   });
 
-  it('truncates over-long text fields', async () => {
-    const { store } = fakeStore([row('r1', { activeUrl: 'u'.repeat(5000) })]);
+  it('truncates every metadata field to the shared API contract', async () => {
+    const { store } = fakeStore([row('r1', {
+      activeApp: 'a'.repeat(121),
+      activeAppBundle: 'b'.repeat(201),
+      activeTitle: 't'.repeat(301),
+      activeUrl: 'u'.repeat(5000),
+    })]);
     await flushActivity(store);
-    expect(bodyOf().samples[0]!.activeUrl!.length).toBeLessThanOrEqual(1024);
+    const [sample] = bodyOf().samples;
+    expect(sample!.activeApp!.length).toBe(120);
+    expect(sample!.activeAppBundle!.length).toBe(200);
+    expect(sample!.activeTitle!.length).toBe(300);
+    expect(sample!.activeUrl!.length).toBe(2048);
   });
 
   it('always sends at least one sample even if it alone is large', async () => {

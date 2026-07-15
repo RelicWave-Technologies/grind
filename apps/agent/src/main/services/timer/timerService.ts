@@ -1,5 +1,6 @@
 import {
-  COUNTED_KINDS,
+  canonicalTimerEntryPayload,
+  reconcileTodayLedger,
   applyIdleDiscard,
   closeOpenSegment,
   closeTimeEntry,
@@ -9,6 +10,8 @@ import {
   recoverStaleEntry,
   type TimeEntry,
 } from '@grind/core';
+import { createHash } from 'node:crypto';
+import type { TimerSyncReceipt, TodayLedgerMode } from '@grind/types';
 import type { TimerStatus } from '../../../shared/tracking';
 import { HttpError } from '../apiClient';
 import type {
@@ -24,6 +27,8 @@ import type {
   TimerExitReason,
   TimerRecoveryNotice,
   TimerRecoveryResult,
+  TimerOwner,
+  ServerLedgerCache,
 } from './types';
 
 /**
@@ -37,6 +42,9 @@ import type {
  */
 export class TimerService {
   private open: TimeEntry | null = null;
+  private mutationListener: (() => void) | null = null;
+  private readonly backgroundSyncs = new Set<Promise<void>>();
+  private todayLedgerMode: TodayLedgerMode = 'OFF';
 
   constructor(
     private readonly store: EntryStore,
@@ -45,7 +53,61 @@ export class TimerService {
     private readonly ids: IdGen,
     private readonly accrualGuard: TrackingAccrualGuard,
     private readonly businessDay: BusinessDayProvider = UTC_DAY_PROVIDER,
+    private readonly serverCache: ServerLedgerCache = EMPTY_SERVER_CACHE,
   ) {}
+
+  bindOwner(owner: TimerOwner | null, claimLegacy = false): void {
+    // Switching sessions never rewrites or uploads the previous owner's row.
+    // A stranded open row stays owner-bound and is recovered only when that
+    // same user signs in again.
+    this.store.bindOwner(owner);
+    if (owner && claimLegacy) this.store.claimUnownedEntries(owner);
+    this.open = this.store.getOpen();
+  }
+
+  currentOwner(): TimerOwner | null {
+    return this.store.currentOwner();
+  }
+
+  claimServerMatchedEntries(matches: Array<{ id: string; clientUuid: string }>): number {
+    const owner = this.store.currentOwner();
+    if (!owner) return 0;
+    return this.store.claimServerMatchedEntries(owner, matches);
+  }
+
+  setMutationListener(listener: (() => void) | null): void {
+    this.mutationListener = listener;
+  }
+
+  setTodayLedgerMode(mode: TodayLedgerMode): boolean {
+    if (this.todayLedgerMode === mode) return false;
+    this.todayLedgerMode = mode;
+    return true;
+  }
+
+  todayLedgerDiagnostics(now = this.clock.now()): { localMs: number; mergedMs: number; conflicts: number } | null {
+    const window = this.businessDay.window(now);
+    const owner = this.store.currentOwner();
+    if (!window || !owner) return null;
+    const local = this.localLedgerEntries(window.start);
+    const shared = {
+      local,
+      activeLocalEntryId: this.open?.id ?? null,
+      windowStart: window.start,
+      windowEnd: window.end,
+      now,
+    };
+    const localProjection = reconcileTodayLedger({ ...shared, server: [] });
+    const mergedProjection = reconcileTodayLedger({
+      ...shared,
+      server: this.serverCache.list(owner, window.start, window.end, now),
+    });
+    return {
+      localMs: localProjection.workedMs,
+      mergedMs: mergedProjection.workedMs,
+      conflicts: mergedProjection.conflicts,
+    };
+  }
 
   /**
    * On boot, recover a left-open entry. We only trust time up to
@@ -60,10 +122,10 @@ export class TimerService {
     }
     const recoveredAt = safeCloseAt(open, lastKnownActiveAt);
     const recovered = { ...recoverStaleEntry(open, recoveredAt), closeReason: 'AGENT_RECOVERY' as const };
-    this.open = null;
     // Persist only; the caller runs flushUnsynced() next, which performs the
     // single sync. Syncing here too would race that flush on the same entry.
     this.store.upsert(recovered);
+    this.open = null;
     this.store.clearExitIntent();
     const notice: TimerRecoveryNotice = {
       entryId: recovered.id,
@@ -89,8 +151,8 @@ export class TimerService {
 
     const recoveredAt = safeCloseAt(open, away.awayStartedAt);
     const recovered = { ...recoverStaleEntry(open, recoveredAt), closeReason: 'AGENT_RECOVERY' as const };
-    this.open = null;
     this.store.upsert(recovered);
+    this.open = null;
     const recoveredNotice = this.awayNotice(away.reason, recovered.id, recoveredAt);
     this.store.setRecoveryNotice(recoveredNotice);
     this.store.clearAwayState();
@@ -123,20 +185,23 @@ export class TimerService {
     if (this.open) {
       if ((this.open.larkTaskGuid ?? null) === nextTaskGuid) return this.status();
       const closed = closeTimeEntry(this.open, now);
-      this.open = null;
-      await this.persistAndSync(closed);
+      const next = this.createEntry(nextTaskGuid, now);
+      const [closedState, nextState] = this.store.switchEntry(closed, next);
+      this.open = next;
+      this.notifyMutation();
+      this.syncInBackground(closed, closedState);
+      this.syncInBackground(next, nextState);
+      return this.status();
     }
     const entry = this.createEntry(nextTaskGuid, now);
-    this.open = entry;
-    await this.persistAndSync(entry, 'pending_create');
+    await this.commitOpen(entry, 'pending_create');
     return this.status();
   }
 
   async stop(): Promise<TimerStatus> {
     if (!this.open) return this.status();
     const closed = closeTimeEntry(this.open, safeCloseAt(this.open, this.clock.now()));
-    this.open = null;
-    await this.persistAndSync(closed);
+    await this.commitClosed(closed);
     return this.status();
   }
 
@@ -149,8 +214,7 @@ export class TimerService {
     const observedAt = this.clock.now();
     this.store.setExitIntent({ reason, entryId: open.id, observedAt });
     const closed = closeTimeEntry(open, safeCloseAt(open, observedAt));
-    this.open = null;
-    await this.persistAndSync(closed);
+    await this.commitClosed(closed);
     this.store.clearExitIntent();
     return this.status();
   }
@@ -169,9 +233,10 @@ export class TimerService {
     // coordinator's one bounded retry can safely attempt the same boundary.
     const nextState = this.store.upsert(closed);
     this.open = null;
-    await this.trySync(closed, nextState);
     this.store.setRecoveryNotice(this.awayNotice(reason, closed.id, closeAt));
     this.store.clearAwayState();
+    this.notifyMutation();
+    this.syncInBackground(closed, nextState);
     return this.status();
   }
 
@@ -189,8 +254,7 @@ export class TimerService {
     const open = getOpenSegment(this.open);
     if (!open) return this.status();
     const paused = { ...closeOpenSegment(this.open, safeCloseAt(this.open, this.clock.now())), pauseReason: 'MANUAL' as const };
-    this.open = paused;
-    await this.persistAndSync(paused);
+    await this.commitOpen(paused);
     return this.status();
   }
 
@@ -205,8 +269,7 @@ export class TimerService {
     if (!open) return; // already paused
     const cut = Math.max(at, open.startedAt); // never before the segment start
     const paused = { ...closeOpenSegment(this.open, cut), pauseReason: 'IDLE' as const };
-    this.open = paused;
-    await this.persistAndSync(paused);
+    await this.commitOpen(paused);
   }
 
   /** Required capture capability disappeared: freeze at the last healthy proof. */
@@ -215,15 +278,14 @@ export class TimerService {
     const open = getOpenSegment(this.open);
     if (!open) {
       if (this.open.pauseReason !== 'PERMISSION_REQUIRED') {
-        this.open = { ...this.open, revision: this.open.revision + 1, pauseReason: 'PERMISSION_REQUIRED' };
-        await this.persistAndSync(this.open);
+        const paused = { ...this.open, revision: this.open.revision + 1, pauseReason: 'PERMISSION_REQUIRED' as const };
+        await this.commitOpen(paused);
       }
       return this.status();
     }
     const cut = Math.max(open.startedAt, Math.min(at, this.clock.now()));
     const paused = { ...closeOpenSegment(this.open, cut), pauseReason: 'PERMISSION_REQUIRED' as const };
-    this.open = paused;
-    await this.persistAndSync(paused);
+    await this.commitOpen(paused);
     return this.status();
   }
 
@@ -234,8 +296,7 @@ export class TimerService {
     await this.accrualGuard.assertCanAccrue();
     const readyAt = Math.max(at, this.clock.now());
     const resumed = openSegment(this.open, { kind: 'WORK', at: readyAt, segmentId: this.ids.ulid() });
-    this.open = resumed;
-    await this.persistAndSync(resumed);
+    await this.commitOpen(resumed);
   }
 
   /** True when running but paused (entry open, no open segment). */
@@ -257,8 +318,7 @@ export class TimerService {
     if (!open || open.kind === 'MEETING') return;
     await this.accrualGuard.assertCanAccrue();
     const updated = openSegment(this.open, { kind: 'MEETING', at, segmentId: this.ids.ulid() });
-    this.open = updated;
-    await this.persistAndSync(updated);
+    await this.commitOpen(updated);
   }
 
   /** Meeting ended: switch back to a WORK segment. No-op if not in MEETING. */
@@ -268,8 +328,7 @@ export class TimerService {
     if (!open || open.kind !== 'MEETING') return;
     await this.accrualGuard.assertCanAccrue();
     const updated = openSegment(this.open, { kind: 'WORK', at, segmentId: this.ids.ulid() });
-    this.open = updated;
-    await this.persistAndSync(updated);
+    await this.commitOpen(updated);
   }
 
   /**
@@ -291,8 +350,7 @@ export class TimerService {
       idleSegmentId: this.ids.ulid(),
       workSegmentId: this.ids.ulid(),
     });
-    this.open = updated;
-    await this.persistAndSync(updated);
+    await this.commitOpen(updated);
   }
 
   status(): TimerStatus {
@@ -319,12 +377,25 @@ export class TimerService {
   listToday(now: number): TimeEntry[] {
     const window = this.businessDay.window(now);
     if (!window) return [];
-    return this.store
-      .listSince(window.start)
-      .filter((entry) => entry.segments.some((segment) => {
-        const end = segment.endedAt ?? now;
-        return segment.startedAt < window.end && end > window.start;
-      }));
+    return this.todayProjection(now, window).entries.map((item) => item.entry);
+  }
+
+  workedMsByTask(now = this.clock.now()): Map<string, number> {
+    const window = this.businessDay.window(now);
+    if (!window) return new Map();
+    const intervals = new Map<string, Array<{ start: number; end: number }>>();
+    for (const entry of this.listToday(now)) {
+      if (!entry.larkTaskGuid) continue;
+      const taskIntervals = intervals.get(entry.larkTaskGuid) ?? [];
+      for (const segment of entry.segments) {
+        if (segment.kind !== 'WORK' && segment.kind !== 'MEETING') continue;
+        const start = Math.max(segment.startedAt, window.start);
+        const end = Math.min(segment.endedAt ?? now, window.end);
+        if (end > start) taskIntervals.push({ start, end });
+      }
+      intervals.set(entry.larkTaskGuid, taskIntervals);
+    }
+    return new Map([...intervals].map(([taskGuid, values]) => [taskGuid, intervalUnionMs(values)]));
   }
 
   recoveryNotice(): TimerRecoveryNotice | null {
@@ -355,23 +426,30 @@ export class TimerService {
       closeReason: 'AGENT',
       segments,
     };
-    this.open = null;
     this.store.upsert(closed);
-    this.store.markSynced(closed.id, closed);
+    this.open = null;
     this.store.setRecoveryNotice({
       entryId,
       recoveredAt: boundary,
       reason: 'server_finalized',
       observedAt: this.clock.now(),
     });
+    this.notifyMutation();
     return this.status();
   }
 
   /** Retry pushing any locally-persisted entries that haven't synced yet. */
   async flushUnsynced(): Promise<void> {
+    if (this.backgroundSyncs.size > 0) {
+      await Promise.allSettled([...this.backgroundSyncs]);
+    }
     for (const { entry, syncState } of this.store.getUnsynced()) {
       await this.trySync(entry, syncState);
     }
+  }
+
+  hasUnsynced(): boolean {
+    return this.store.hasUnsynced();
   }
 
   /** Activity linked to this entry must wait until its server parent exists. */
@@ -379,9 +457,27 @@ export class TimerService {
     return this.store.isPendingCreate(entryId);
   }
 
-  private async persistAndSync(entry: TimeEntry, syncState?: PendingEntrySyncState): Promise<void> {
+  private async commitOpen(entry: TimeEntry, syncState?: PendingEntrySyncState): Promise<void> {
     const nextState = this.store.upsert(entry, syncState ? { syncState } : undefined);
-    await this.trySync(entry, nextState);
+    this.open = entry;
+    this.notifyMutation();
+    this.syncInBackground(entry, nextState);
+  }
+
+  private async commitClosed(entry: TimeEntry): Promise<void> {
+    const nextState = this.store.upsert(entry);
+    this.open = null;
+    this.notifyMutation();
+    this.syncInBackground(entry, nextState);
+  }
+
+  private syncInBackground(entry: TimeEntry, syncState: PendingEntrySyncState): void {
+    const pending = this.trySync(entry, syncState).catch(() => {
+      // The durable row stays pending and the drain retries it later.
+    }).finally(() => {
+      this.backgroundSyncs.delete(pending);
+    });
+    this.backgroundSyncs.add(pending);
   }
 
   private async trySync(entry: TimeEntry, syncState: PendingEntrySyncState): Promise<void> {
@@ -394,8 +490,9 @@ export class TimerService {
 
   private async tryCreateThenSync(entry: TimeEntry): Promise<void> {
     try {
-      await this.sync.create(entry);
-      this.store.markCreated(entry.id);
+      const receipt = await this.sync.create(entry);
+      if (this.acknowledge(entry, receipt)) return;
+      if (!this.store.markCreated(entry.id, entry)) return;
     } catch {
       // Best-effort: leave it pending_create; flushUnsynced will retry later.
       return;
@@ -405,11 +502,11 @@ export class TimerService {
 
   private async tryUpdate(entry: TimeEntry, retryCreateOnNotFound: boolean): Promise<void> {
     try {
-      await this.sync.sync(entry);
-      this.store.markSynced(entry.id, entry);
+      const receipt = await this.sync.sync(entry);
+      this.acknowledge(entry, receipt);
     } catch (err) {
       if (retryCreateOnNotFound && isNotFound(err)) {
-        this.store.markPendingCreate(entry.id);
+        if (!this.store.markPendingCreate(entry.id, entry)) return;
         await this.tryCreateThenSync(entry);
       }
       // Otherwise best-effort: leave its current pending state for a later flush.
@@ -417,15 +514,47 @@ export class TimerService {
   }
 
   private createEntry(larkTaskGuid: string | null, startedAt: number): TimeEntry {
+    const owner = this.store.currentOwner();
+    if (!owner) throw new Error('timer_owner_unavailable');
     return createTimeEntry({
       id: this.ids.ulid(),
       clientUuid: this.ids.ulid(),
-      userId: 'self', // server derives the real userId from the access token
+      userId: owner.userId,
       larkTaskGuid,
       source: 'AUTO',
       startedAt,
       segmentId: this.ids.ulid(),
     });
+  }
+
+  private acknowledge(entry: TimeEntry, receipt: TimerSyncReceipt): boolean {
+    const localHash = createHash('sha256').update(canonicalTimerEntryPayload(entry)).digest('hex');
+    const exact = receipt.acceptedRevision === entry.revision && receipt.canonicalHash === localHash;
+    const corrected = receipt.acceptedRevision >= entry.revision
+      && (receipt.correction !== null || receipt.disposition === 'FINALIZED' || receipt.disposition === 'STALE');
+    if (!exact && !corrected) return false;
+    const marked = this.store.markSynced(entry.id, entry, {
+      revision: receipt.acceptedRevision,
+      hash: receipt.canonicalHash,
+    });
+    if (marked && receipt.correction === 'CLOCK_CLAMP') {
+      const correctedAt = new Date(receipt.canonicalEntry.endedAt ?? receipt.serverTime).getTime();
+      this.store.setRecoveryNotice({
+        entryId: entry.id,
+        recoveredAt: Number.isFinite(correctedAt) ? correctedAt : this.clock.now(),
+        reason: 'server_clock_corrected',
+        observedAt: this.clock.now(),
+      });
+    }
+    return marked;
+  }
+
+  private notifyMutation(): void {
+    try {
+      this.mutationListener?.();
+    } catch {
+      // Hydration is advisory; a committed timer mutation must stay successful.
+    }
   }
 
   private awayNotice(reason: TimerAwayReason, entryId: string, recoveredAt: number): TimerRecoveryNotice {
@@ -440,12 +569,32 @@ export class TimerService {
   private workedMsForLocalDay(now: number): number {
     const window = this.businessDay.window(now);
     if (!window) return 0;
-    const end = Math.min(now, window.end);
-    const entries = this.store.listSince(window.start);
-    return entries.reduce(
-      (sum, entry) => sum + entryWorkedMsInWindow(entry, window.start, end, now),
-      0,
-    );
+    return this.todayProjection(now, window).workedMs;
+  }
+
+  private todayProjection(now: number, window: { start: number; end: number }) {
+    const owner = this.store.currentOwner();
+    const local = this.localLedgerEntries(window.start);
+    const server = owner && this.todayLedgerMode === 'VISIBLE'
+      ? this.serverCache.list(owner, window.start, window.end, now)
+      : [];
+    return reconcileTodayLedger({
+      local,
+      server,
+      activeLocalEntryId: this.open?.id ?? null,
+      windowStart: window.start,
+      windowEnd: window.end,
+      now,
+    });
+  }
+
+  private localLedgerEntries(windowStart: number) {
+    return this.store.listLedgerEntries(windowStart).map((item) => ({
+      entry: item.entry,
+      syncState: item.syncState,
+      acknowledgedRevision: item.acknowledgedRevision,
+      acknowledgedHash: item.acknowledgedHash,
+    }));
   }
 }
 
@@ -458,6 +607,25 @@ const UTC_DAY_PROVIDER: BusinessDayProvider = {
     return { start, end: start + 24 * 60 * 60_000 };
   },
 };
+
+const EMPTY_SERVER_CACHE: ServerLedgerCache = {
+  list: () => [],
+};
+
+function intervalUnionMs(values: Array<{ start: number; end: number }>): number {
+  values.sort((a, b) => a.start - b.start || a.end - b.end);
+  let total = 0;
+  let current: { start: number; end: number } | null = null;
+  for (const value of values) {
+    if (!current) current = { ...value };
+    else if (value.start <= current.end) current.end = Math.max(current.end, value.end);
+    else {
+      total += current.end - current.start;
+      current = { ...value };
+    }
+  }
+  return current ? total + current.end - current.start : total;
+}
 
 function latestSegmentBoundary(entry: TimeEntry): number {
   return entry.segments.reduce((latest, segment) => {
@@ -472,15 +640,4 @@ function safeCloseAt(entry: TimeEntry, at: number): number {
 
 function isNotFound(err: unknown): boolean {
   return err instanceof HttpError && err.status === 404;
-}
-
-function entryWorkedMsInWindow(entry: TimeEntry, windowStart: number, windowEnd: number, now: number): number {
-  let total = 0;
-  for (const segment of entry.segments) {
-    if (!COUNTED_KINDS.includes(segment.kind)) continue;
-    const start = Math.max(segment.startedAt, windowStart);
-    const end = Math.min(segment.endedAt ?? now, windowEnd);
-    if (end > start) total += end - start;
-  }
-  return total;
 }
