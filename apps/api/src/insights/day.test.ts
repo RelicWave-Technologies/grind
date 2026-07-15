@@ -50,6 +50,21 @@ describe('localDayWindow', () => {
     const w = makeWindow('2026-11-01', TZ_LA);
     expect(w.end.getTime() - w.start.getTime()).toBe(25 * 3600 * 1000);
   });
+
+  it('returns isolated Date values for repeated day-window reads', () => {
+    const first = makeWindow('2026-07-16', TZ_KOL);
+    const expectedStart = first.start.getTime();
+    const expectedEnd = first.end.getTime();
+
+    first.start.setTime(0);
+    first.end.setTime(0);
+
+    const second = makeWindow('2026-07-16', TZ_KOL);
+    expect(second.start.getTime()).toBe(expectedStart);
+    expect(second.end.getTime()).toBe(expectedEnd);
+    expect(second.start).not.toBe(first.start);
+    expect(second.end).not.toBe(first.end);
+  });
 });
 
 describe('shared local wall-clock resolution', () => {
