@@ -61,6 +61,10 @@ const EnvSchema = z.object({
   // Deploy schema/API first, then enable only after protocol-v2 checkpoints
   // are visible and the legacy cleanup dry run has been reviewed.
   TIMO_TIMER_LEASE_RECONCILER_ENABLED: z.enum(['true', 'false']).default('false'),
+  // Server-controlled rollout for desktop server/local Today reconciliation.
+  // Optional canary ids restrict SHADOW/VISIBLE to an explicit user cohort.
+  TIMO_TODAY_LEDGER_MODE: z.enum(['OFF', 'SHADOW', 'VISIBLE']).default('OFF'),
+  TIMO_TODAY_LEDGER_CANARY_USER_IDS: z.string().optional(),
 
   // --- Screenshots (optional; direct URLs on Screenshot rows also work) ---
   PUBLIC_APP_URL: z.string().url().optional(),

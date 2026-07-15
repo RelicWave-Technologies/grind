@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import request from 'supertest';
 import type { Express } from 'express';
+import { prisma } from '@grind/db';
 import { buildApp } from '../src/app';
 import { seedUser, fakeUlid, iso, type SeededUser } from './helpers';
 
@@ -101,6 +102,24 @@ describe('POST /v1/time-entries', () => {
     expect(String(res.body.details)).toMatch(/overlap/);
   });
 
+  it('cannot create an entry using a segment id owned by another entry', async () => {
+    const u = await seedUser();
+    const first = createBody(u, { startedAtMs: T0 });
+    expect((await auth(request(app).post('/v1/time-entries'), u.accessToken).send(first)).status).toBe(201);
+    const foreignSegmentId = (first.segments[0] as { id: string }).id;
+    const second = createBody(u, {
+      startedAtMs: T0 + 20 * MIN,
+      segments: [{ id: foreignSegmentId, kind: 'WORK', startedAt: iso(T0 + 20 * MIN), endedAt: null }],
+    });
+
+    const response = await auth(request(app).post('/v1/time-entries'), u.accessToken).send(second);
+
+    expect(response.status).toBe(409);
+    expect(response.body).toMatchObject({ error: 'segment_id_conflict', segmentId: foreignSegmentId });
+    expect(await prisma.timeSegment.count({ where: { id: foreignSegmentId, timeEntryId: first.id } })).toBe(1);
+    expect(await prisma.timeEntry.count({ where: { id: second.id } })).toBe(0);
+  });
+
   it('attributes an entry to a Lark task via larkTaskGuid', async () => {
     const u = await seedUser();
     const body = createBody(u, { larkTaskGuid: 'guid-xyz' });
@@ -187,6 +206,26 @@ describe('PUT /v1/time-entries/:id/sync', () => {
     });
     expect(res.status).toBe(400);
     expect(res.body.error).toBe('invalid_segments');
+  });
+
+  it('cannot reuse a segment id owned by another entry', async () => {
+    const u = await seedUser();
+    const first = createBody(u, { startedAtMs: T0 });
+    const second = createBody(u, { startedAtMs: T0 + 20 * MIN });
+    await auth(request(app).post('/v1/time-entries'), u.accessToken).send(first);
+    await auth(request(app).post('/v1/time-entries'), u.accessToken).send(second);
+    const foreignSegmentId = (second.segments[0] as { id: string }).id;
+
+    const response = await auth(
+      request(app).put(`/v1/time-entries/${first.id}/sync`),
+      u.accessToken,
+    ).send({
+      segments: [{ id: foreignSegmentId, kind: 'WORK', startedAt: iso(T0), endedAt: null }],
+    });
+
+    expect(response.status).toBe(409);
+    expect(response.body).toMatchObject({ error: 'segment_id_conflict', segmentId: foreignSegmentId });
+    expect(await prisma.timeSegment.count({ where: { id: foreignSegmentId, timeEntryId: second.id } })).toBe(1);
   });
 });
 
@@ -310,5 +349,48 @@ describe('GET /v1/time-entries', () => {
     });
     expect(res.status).toBe(200);
     expect(res.body.entries).toHaveLength(1);
+  });
+});
+
+describe('GET /v1/agent/today-ledger', () => {
+  it('returns a complete owner-scoped AUTO snapshot including entries that cross the boundary', async () => {
+    const u = await seedUser();
+    const other = await seedUser();
+    const crossing = createBody(u, {
+      startedAtMs: T0 - 30 * MIN,
+      endedAtMs: T0 + 30 * MIN,
+      segments: [{
+        id: fakeUlid('crossing-segment'),
+        kind: 'WORK',
+        startedAt: iso(T0 - 30 * MIN),
+        endedAt: iso(T0 + 30 * MIN),
+      }],
+    });
+    await auth(request(app).post('/v1/time-entries'), u.accessToken).send(crossing);
+    await auth(request(app).post('/v1/time-entries'), other.accessToken).send(createBody(other, { startedAtMs: T0 }));
+
+    const response = await auth(request(app).get('/v1/agent/today-ledger'), u.accessToken).query({
+      from: iso(T0),
+      to: iso(T0 + 24 * 60 * MIN),
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body.complete).toBe(true);
+    expect(response.body.workspaceTimezone).toBeTruthy();
+    expect(response.body.entries.map((entry: { id: string }) => entry.id)).toContain(crossing.id);
+    expect(response.body.effectiveEntries.map((entry: { entryId: string }) => entry.entryId)).toContain(crossing.id);
+    expect(response.body.entries.every((entry: { userId: string; source: string }) => (
+      entry.userId === u.userId && entry.source === 'AUTO'
+    ))).toBe(true);
+  });
+
+  it('rejects unbounded ranges without touching any data', async () => {
+    const u = await seedUser();
+    const response = await auth(request(app).get('/v1/agent/today-ledger'), u.accessToken).query({
+      from: iso(T0),
+      to: iso(T0 + 48 * 60 * MIN),
+    });
+    expect(response.status).toBe(400);
+    expect(response.body.error).toBe('today_ledger_range_too_large');
   });
 });

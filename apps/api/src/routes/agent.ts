@@ -2,16 +2,22 @@ import { Router } from 'express';
 import {
   AgentAppIconsRequest,
   HeartbeatRequest,
+  TodayLedgerQuery,
   WORKSPACE_POLICY_DEFAULTS,
   normalizeScreenshotIntervalMin,
   type AgentConfigResponse,
   type HeartbeatResponse,
+  type TodayLedgerResponse,
 } from '@grind/types';
 import { validate } from '../middleware/validate';
 import { requireAccessToken } from '../middleware/auth';
 import { prisma, type Prisma } from '@grind/db';
 import { env } from '../env';
 import { renewTimerLease, TIMER_PROTOCOL_VERSION, type TimerCheckpointResult } from '../timeLifecycle';
+import { serializeTimeEntry } from '../timeEntries/wire';
+import { loadEntryLiveEvidence } from '../insights/liveEntryEvidence';
+import { resolveEffectiveEntrySegmentEnds } from '../insights/openSegmentEvidence';
+import { resolveTodayLedgerMode } from '../agent/todayLedgerMode';
 
 export const agentRouter = Router();
 
@@ -62,6 +68,11 @@ async function buildAgentConfig(userId: string, workspaceId: string): Promise<Ag
   const captureTitles = policy?.captureTitles ?? WORKSPACE_POLICY_DEFAULTS.captureTitles;
   const captureUrls = policy?.captureUrls ?? WORKSPACE_POLICY_DEFAULTS.captureUrls;
   const dashboardUrl = dashboardOrigin();
+  const ledgerMode = resolveTodayLedgerMode(
+    env.TIMO_TODAY_LEDGER_MODE,
+    env.TIMO_TODAY_LEDGER_CANARY_USER_IDS,
+    userId,
+  );
   const policyUpdatedAt = policy?.updatedAt.toISOString() ?? 'no-policy';
   const configVersion = [
     policyUpdatedAt,
@@ -72,6 +83,7 @@ async function buildAgentConfig(userId: string, workspaceId: string): Promise<Ag
     captureUrls ? 'urls:on' : 'urls:off',
     dashboardUrl,
     user.workspace.timezone,
+    `today-ledger:${ledgerMode}`,
   ].join('|');
 
   return {
@@ -82,6 +94,7 @@ async function buildAgentConfig(userId: string, workspaceId: string): Promise<Ag
     captureApps,
     captureTitles,
     captureUrls,
+    todayLedgerMode: ledgerMode,
     dashboardUrl,
     workspaceTimezone: user.workspace.timezone,
   };
@@ -177,6 +190,77 @@ agentRouter.get('/config', async (req, res, next) => {
     const response = await buildAgentConfig(req.user.sub, req.user.ws);
     if (!response) return res.status(401).json({ error: 'unauthorized' });
     res.json(response);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * Complete, bounded server snapshot for the authenticated user's tracked day.
+ * This is deliberately separate from the mutable local timer journal: clients
+ * cache it as server evidence and reconcile by entry id/client UUID.
+ */
+agentRouter.get('/today-ledger', validate(TodayLedgerQuery, 'query'), async (req, res, next) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: 'unauthorized' });
+    const query = req.query as unknown as TodayLedgerQuery;
+    const from = new Date(query.from);
+    const to = new Date(query.to);
+    if (to.getTime() - from.getTime() > 36 * 60 * 60_000) {
+      return res.status(400).json({ error: 'today_ledger_range_too_large' });
+    }
+
+    const user = await prisma.user.findFirst({
+      where: { id: req.user.sub, workspaceId: req.user.ws, deactivatedAt: null },
+      select: { workspace: { select: { timezone: true } } },
+    });
+    if (!user) return res.status(401).json({ error: 'unauthorized' });
+
+    const entries = await prisma.timeEntry.findMany({
+      where: {
+        userId: req.user.sub,
+        source: 'AUTO',
+        startedAt: { lt: to },
+        OR: [{ endedAt: null }, { endedAt: { gt: from } }],
+      },
+      orderBy: [{ startedAt: 'asc' }, { id: 'asc' }],
+      take: 2_001,
+      include: { segments: true },
+    });
+    if (entries.length > 2_000) {
+      return res.status(409).json({ error: 'today_ledger_snapshot_too_large' });
+    }
+
+    const now = new Date();
+    const evidence = await loadEntryLiveEvidence(entries, now);
+    const serialized = entries.map(serializeTimeEntry);
+    const effectiveEntries = entries.map((entry) => {
+      const effectiveEnds = resolveEffectiveEntrySegmentEnds({
+        segments: entry.segments,
+        entryEndedAt: entry.endedAt,
+        now,
+        evidence: evidence.get(entry.id),
+        lifecycle: entry,
+      });
+      const segments = entry.segments.map((segment, index) => ({
+        segmentId: segment.id,
+        endedAt: effectiveEnds[index]?.toISOString() ?? null,
+      }));
+      const effectiveEntryEnd = entry.endedAt?.toISOString() ?? (
+        segments.every((segment) => segment.endedAt !== null)
+          ? segments.map((segment) => segment.endedAt!).sort().at(-1) ?? null
+          : null
+      );
+      return { entryId: entry.id, endedAt: effectiveEntryEnd, segments };
+    });
+    const response: TodayLedgerResponse = {
+      complete: true,
+      serverTime: now.toISOString(),
+      workspaceTimezone: user.workspace.timezone,
+      entries: serialized,
+      effectiveEntries,
+    };
+    return res.json(response);
   } catch (err) {
     next(err);
   }
