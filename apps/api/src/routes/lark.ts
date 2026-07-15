@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, type Response } from 'express';
 import { prisma } from '@grind/db';
 import { requireAccessToken } from '../middleware/auth';
 import { attachScope } from '../middleware/scope';
@@ -39,6 +39,29 @@ h1{font-size:18px;margin:0 0 8px}p{color:#6b6b76;margin:0}</style>
 <div class="card"><h1>${title}</h1><p>${detail}</p></div>`;
 }
 
+function parseAgentCallbackScheme(value: unknown): 'grind' | 'timo' | null {
+  return value === 'grind' || value === 'timo' ? value : null;
+}
+
+function finishOAuthConnect(
+  res: Response,
+  state: { returnTo: 'browser' | 'agent'; agentCallbackScheme?: 'grind' | 'timo' },
+  outcome: 'connected' | 'cancelled' | 'failed',
+): void {
+  if (state.returnTo === 'agent' && state.agentCallbackScheme) {
+    res.redirect(`${state.agentCallbackScheme}://lark?status=${outcome}`);
+    return;
+  }
+  if (outcome === 'connected') {
+    res.status(200).send(closeTabPage('Lark connected', 'You can close this tab and return to Timo.'));
+    return;
+  }
+  res.status(outcome === 'cancelled' ? 400 : 500).send(closeTabPage(
+    outcome === 'cancelled' ? 'Authorization cancelled' : 'Connection failed',
+    outcome === 'cancelled' ? 'Lark was not connected.' : 'Something went wrong. Please try again.',
+  ));
+}
+
 /**
  * OAuth callback — hit by the BROWSER (no Grind JWT). Mounted before the
  * auth middleware. The signed `state` token identifies the initiating user and
@@ -46,17 +69,20 @@ h1{font-size:18px;margin:0 0 8px}p{color:#6b6b76;margin:0}</style>
  */
 larkRouter.get('/oauth/callback', async (req, res) => {
   const { code, state, error } = req.query as Record<string, string | undefined>;
+  let oauthState: ReturnType<typeof verifyOAuthState> | null = null;
   try {
     if (!isLarkConfigured()) return res.status(503).send(closeTabPage('Lark unavailable', 'Integration is not configured.'));
-    if (error) return res.status(400).send(closeTabPage('Authorization cancelled', String(error)));
-    if (!code || !state) return res.status(400).send(closeTabPage('Invalid request', 'Missing code or state.'));
+    if (!state || (!code && !error)) return res.status(400).send(closeTabPage('Invalid request', 'Missing code or state.'));
 
-    let userId: string;
     try {
-      ({ sub: userId } = verifyOAuthState(state));
+      oauthState = verifyOAuthState(state);
     } catch {
       return res.status(400).send(closeTabPage('Link expired', 'Please start the Lark connection again.'));
     }
+    if (error) return finishOAuthConnect(res, oauthState, 'cancelled');
+    if (!code) return finishOAuthConnect(res, oauthState, 'failed');
+
+    const { sub: userId } = oauthState;
 
     const { redirectUri } = getLarkConfig();
     if (!redirectUri) throw new Error('LARK_OAUTH_REDIRECT_URI not set');
@@ -74,9 +100,10 @@ larkRouter.get('/oauth/callback', async (req, res) => {
       logger.warn({ err: String(err), userId }, 'lark identity resolution failed (non-fatal)');
     }
 
-    res.status(200).send(closeTabPage('Lark connected', 'You can close this tab and return to Grind.'));
+    return finishOAuthConnect(res, oauthState, 'connected');
   } catch (err) {
     logger.error({ err: String(err) }, 'lark oauth callback failed');
+    if (oauthState) return finishOAuthConnect(res, oauthState, 'failed');
     res.status(500).send(closeTabPage('Connection failed', 'Something went wrong. Please try again.'));
   }
 });
@@ -93,7 +120,15 @@ larkRouter.get('/oauth/start', (req, res) => {
   if (!isLarkConfigured()) return res.status(503).json({ error: 'lark_not_configured' });
   const { accountsHost, appId, redirectUri } = getLarkConfig();
   if (!redirectUri) return res.status(500).json({ error: 'redirect_uri_not_set' });
-  const state = signOAuthState(req.user.sub);
+  const returnTo = req.query.return_to === 'agent' ? 'agent' : 'browser';
+  const agentCallbackScheme = returnTo === 'agent' ? parseAgentCallbackScheme(req.query.callback_scheme) : null;
+  if (returnTo === 'agent' && !agentCallbackScheme) {
+    return res.status(400).json({ error: 'invalid_agent_callback_scheme' });
+  }
+  const state = signOAuthState(req.user.sub, {
+    returnTo,
+    agentCallbackScheme: agentCallbackScheme ?? undefined,
+  });
   const authorizeUrl = buildAuthorizeUrl({ accountsHost, appId, redirectUri, state });
   res.json({ authorizeUrl });
 });
