@@ -50,8 +50,11 @@ export function createTimeEntry(args: CreateArgs): TimeEntry {
     userId: args.userId,
     larkTaskGuid: args.larkTaskGuid ?? null,
     source: args.source ?? 'AUTO',
+    revision: 1,
     startedAt: args.startedAt,
     endedAt: null,
+    pauseReason: null,
+    closeReason: null,
     segments: [{ id: args.segmentId, kind: 'WORK', startedAt: args.startedAt, endedAt: null }],
   };
 }
@@ -66,7 +69,7 @@ export function closeOpenSegment(entry: TimeEntry, at: number): TimeEntry {
   }
   const segments = cloneSegments(entry.segments);
   segments[i] = { ...open, endedAt: at };
-  return { ...entry, segments };
+  return { ...entry, revision: entry.revision + 1, segments };
 }
 
 /**
@@ -87,14 +90,14 @@ export function openSegment(
   }
   const segments = cloneSegments(closed.segments);
   segments.push({ id: args.segmentId, kind: args.kind, startedAt: args.at, endedAt: null });
-  return { ...closed, segments };
+  return { ...closed, revision: entry.revision + 1, pauseReason: null, closeReason: null, segments };
 }
 
 /** Close the open segment (if any) and mark the entry finished at `at`. Idempotent. */
 export function closeTimeEntry(entry: TimeEntry, at: number): TimeEntry {
   if (entry.endedAt !== null) return entry;
   const closed = closeOpenSegment(entry, at);
-  return { ...closed, endedAt: at };
+  return { ...closed, revision: entry.revision + 1, endedAt: at, pauseReason: null, closeReason: 'AGENT' };
 }
 
 /**
@@ -148,7 +151,7 @@ export function applyIdleDiscard(
 
   // Resume a fresh WORK segment.
   segments.push({ id: args.workSegmentId, kind: 'WORK', startedAt: resumeAt, endedAt: null });
-  return { ...entry, segments };
+  return { ...entry, revision: entry.revision + 1, pauseReason: null, closeReason: null, segments };
 }
 
 /**

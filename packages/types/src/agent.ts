@@ -123,6 +123,9 @@ export const AgentAppIconsRequest = z.object({
 });
 export type AgentAppIconsRequest = z.infer<typeof AgentAppIconsRequest>;
 
+export const TodayLedgerMode = z.enum(['OFF', 'SHADOW', 'VISIBLE']);
+export type TodayLedgerMode = z.infer<typeof TodayLedgerMode>;
+
 export const AgentConfigResponse = z.object({
   configVersion: z.string().default(''),
   heartbeatIntervalSec: z.number().int().min(15).max(600).default(60),
@@ -131,6 +134,7 @@ export const AgentConfigResponse = z.object({
   captureApps: z.boolean().default(false),
   captureTitles: z.boolean().default(false),
   captureUrls: z.boolean().default(false),
+  todayLedgerMode: TodayLedgerMode.default('OFF'),
   // Web dashboard origin, served so the agent's "Open Dashboard" button stays in
   // sync with the backend's DASHBOARD_URL (empty string when unset).
   dashboardUrl: z.string().default(''),

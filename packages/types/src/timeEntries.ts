@@ -108,3 +108,55 @@ export const ListTimeEntriesResponse = z.object({
   entries: z.array(TimeEntryDto),
 });
 export type ListTimeEntriesResponse = z.infer<typeof ListTimeEntriesResponse>;
+
+export const TimerSyncDisposition = z.enum([
+  'APPLIED',
+  'ALREADY_APPLIED',
+  'STALE',
+  'FINALIZED',
+  'CONFLICT',
+]);
+export type TimerSyncDisposition = z.infer<typeof TimerSyncDisposition>;
+
+export const TimerSyncCorrection = z.enum([
+  'CLOCK_CLAMP',
+  'LEASE_FINALIZED',
+  'SUPERSEDED',
+]);
+export type TimerSyncCorrection = z.infer<typeof TimerSyncCorrection>;
+
+export const TimerSyncReceipt = z.object({
+  disposition: TimerSyncDisposition,
+  acceptedRevision: z.number().int().min(0),
+  canonicalHash: z.string().length(64),
+  canonicalEntry: TimeEntryDto,
+  serverTime: Iso,
+  correction: TimerSyncCorrection.nullable(),
+});
+export type TimerSyncReceipt = z.infer<typeof TimerSyncReceipt>;
+
+export const TodayLedgerQuery = z.object({
+  from: Iso,
+  to: Iso,
+}).superRefine((value, ctx) => {
+  if (new Date(value.to).getTime() <= new Date(value.from).getTime()) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['to'], message: 'to must be after from' });
+  }
+});
+export type TodayLedgerQuery = z.infer<typeof TodayLedgerQuery>;
+
+export const TodayLedgerResponse = z.object({
+  complete: z.literal(true),
+  serverTime: Iso,
+  workspaceTimezone: z.string().min(1),
+  entries: z.array(TimeEntryDto).max(2_000),
+  effectiveEntries: z.array(z.object({
+    entryId: z.string().min(1),
+    endedAt: Iso.nullable(),
+    segments: z.array(z.object({
+      segmentId: z.string().min(1),
+      endedAt: Iso.nullable(),
+    })),
+  })).max(2_000),
+});
+export type TodayLedgerResponse = z.infer<typeof TodayLedgerResponse>;
