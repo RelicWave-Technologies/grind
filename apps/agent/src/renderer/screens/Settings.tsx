@@ -52,6 +52,13 @@ export default function Settings() {
   }, [qc]);
 
   useEffect(() => {
+    return window.agent.lark.onConnectionChange(() => {
+      void qc.invalidateQueries({ queryKey: ['larkStatus'] });
+      void qc.invalidateQueries({ queryKey: ['larkTasks'] });
+    });
+  }, [qc]);
+
+  useEffect(() => {
     let alive = true;
     void window.agent.updates.checkQuietly()
       .then((s) => {

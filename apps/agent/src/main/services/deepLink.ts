@@ -16,6 +16,12 @@ import { bindTimerToStoredSession, drainTimerSyncNow, refreshTodayLedger } from 
  * pushed to the renderer so the login screen can explain them.
  */
 const PROTOCOL = CALLBACK_SCHEME;
+let larkConnectionHandler: ((outcome: 'connected' | 'cancelled' | 'failed') => void) | null = null;
+
+/** Main window ownership stays in index.ts; this service only delivers the verified outcome. */
+export function setLarkConnectionHandler(handler: (outcome: 'connected' | 'cancelled' | 'failed') => void): void {
+  larkConnectionHandler = handler;
+}
 
 /** Register the callback scheme. Windows development needs the entry path so
  *  a second launch can boot this app instead of bare Electron. macOS ignores
@@ -59,8 +65,17 @@ export async function handleDeepLink(url: string): Promise<void> {
     log.warn('deep link: unparseable url');
     return;
   }
-  // Only handle our own auth callback.
-  if (parsed.protocol !== `${PROTOCOL}:` || parsed.host !== 'auth') return;
+  if (parsed.protocol !== `${PROTOCOL}:`) return;
+  if (parsed.host === 'lark') {
+    const status = parsed.searchParams.get('status');
+    const outcome = status === 'connected' || status === 'cancelled' || status === 'failed' ? status : 'failed';
+    log.info('deep link: lark connection callback received', { outcome });
+    larkConnectionHandler?.(outcome);
+    broadcast('lark:connection:push', { outcome });
+    return;
+  }
+  // Main sign-in callback.
+  if (parsed.host !== 'auth') return;
 
   const code = parsed.searchParams.get('code');
   const status = parsed.searchParams.get('status');

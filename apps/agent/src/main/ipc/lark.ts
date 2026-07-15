@@ -8,6 +8,7 @@ import { getWorkspaceTimeZone } from '../services/workspaceTime';
 import { getTimerService, refreshTodayLedger } from '../services/timer';
 import { loadTokens } from '../services/tokenStore';
 import { LarkTaskCache, type CachedLarkTask } from '../services/larkTaskCache';
+import { CALLBACK_SCHEME } from '../env';
 
 export type LarkStatus = {
   configured: boolean;
@@ -112,11 +113,12 @@ export function registerLarkIpc(): void {
     }
   });
 
-  // Open the OAuth authorize URL in the user's default browser. The backend
-  // callback stores the tokens; the renderer then polls lark:status.
+  // The signed return target brings this desktop app back after the browser
+  // callback. Dashboard-initiated connections intentionally omit these values.
   ipcMain.handle('lark:connect', async (): Promise<{ ok: boolean; error?: string }> => {
     try {
-      const { authorizeUrl } = await api<{ authorizeUrl: string }>('/v1/lark/oauth/start');
+      const params = new URLSearchParams({ return_to: 'agent', callback_scheme: CALLBACK_SCHEME });
+      const { authorizeUrl } = await api<{ authorizeUrl: string }>(`/v1/lark/oauth/start?${params.toString()}`);
       await shell.openExternal(authorizeUrl);
       return { ok: true };
     } catch (err) {

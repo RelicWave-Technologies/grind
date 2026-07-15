@@ -47,6 +47,14 @@ export function formatWorkspaceDateTime(value: number, timeZone: string | null):
   }).format(new Date(value));
 }
 
+/**
+ * Recovery notices persist until dismissed, so always include the workspace date.
+ * A clock time by itself can make an old sleep/lock boundary look like it happened today.
+ */
+export function formatWorkspaceRecoveryTime(value: number, timeZone: string | null): string {
+  return formatWorkspaceDateTime(value, timeZone);
+}
+
 export function localDateAtHour(date: string, hour: number, timeZone: string): number {
   const [year, month, day] = date.split('-').map((part) => Number.parseInt(part, 10));
   return instantForZonedDateTime({

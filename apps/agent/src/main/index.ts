@@ -32,7 +32,13 @@ import { ShiftMonitor } from './services/shift';
 import { onAuthChange } from './services/apiClient';
 import { isLoggedIn } from './services/auth';
 import { onAgentConfigChange, refreshAgentConfig } from './services/agentConfig';
-import { registerProtocol, handleDeepLink, deepLinkFromArgv, flushQueuedDeepLink } from './services/deepLink';
+import {
+  registerProtocol,
+  handleDeepLink,
+  deepLinkFromArgv,
+  flushQueuedDeepLink,
+  setLarkConnectionHandler,
+} from './services/deepLink';
 import { hasQuitCleanupCompleted, registerGracefulQuitHandler, runQuitCleanup } from './services/quitCleanup';
 import {
   getUpdateStatus,
@@ -168,6 +174,7 @@ app.whenReady().then(async () => {
   const launchAtLogin = launchAtLoginService.reconcileOnBoot();
 
   mainWindow = ensureMainWindow({ startHidden: openedAtLogin });
+  setLarkConnectionHandler(() => showMainWindow());
   const attention = getTrackingAttentionCoordinator();
   tray = createTray({
     onToggle: (bounds) => {

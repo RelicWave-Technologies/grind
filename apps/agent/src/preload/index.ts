@@ -197,6 +197,11 @@ const api = {
       ipcRenderer.invoke('lark:sync'),
     createTask: (input: { summary: string; due?: number | null; description?: string | null }): Promise<{ ok: boolean; error?: string }> =>
       ipcRenderer.invoke('lark:createTask', input),
+    onConnectionChange: (cb: (outcome: 'connected' | 'cancelled' | 'failed') => void): (() => void) => {
+      const sub = (_event: unknown, payload: { outcome: 'connected' | 'cancelled' | 'failed' }) => cb(payload.outcome);
+      ipcRenderer.on('lark:connection:push', sub);
+      return () => ipcRenderer.off('lark:connection:push', sub);
+    },
   },
 };
 

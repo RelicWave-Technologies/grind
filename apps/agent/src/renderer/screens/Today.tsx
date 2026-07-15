@@ -10,7 +10,7 @@ import DayTimeline from '../components/DayTimeline';
 import TaskCard from '../components/TaskCard';
 import TaskComposer from '../components/TaskComposer';
 import SyncButton from '../components/SyncButton';
-import { formatWorkspaceTime, useWorkspaceTime, workspaceTimeReady } from '../lib/workspaceTime';
+import { formatWorkspaceRecoveryTime, useWorkspaceTime, workspaceTimeReady } from '../lib/workspaceTime';
 
 export function fmtClock(ms: number): string {
   const t = Math.floor(ms / 1000);
@@ -283,7 +283,7 @@ export default function Today() {
           {recoveryNotice.data && (
             <div className="recovery-banner rise rise-1" role="status">
               <AlertTriangle size={16} strokeWidth={2.2} />
-              <span>{timerRecoveryNoticeText(recoveryNotice.data, (value) => formatWorkspaceTime(value, timeContext?.timeZone ?? null))}</span>
+              <span>{timerRecoveryNoticeText(recoveryNotice.data, (value) => formatWorkspaceRecoveryTime(value, timeContext?.timeZone ?? null))}</span>
               <button
                 className="recovery-dismiss no-drag"
                 onClick={() => dismissRecovery.mutate()}
