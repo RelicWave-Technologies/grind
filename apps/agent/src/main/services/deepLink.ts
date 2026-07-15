@@ -16,14 +16,13 @@ import { refreshAgentConfig } from './agentConfig';
  */
 const PROTOCOL = CALLBACK_SCHEME;
 
-/** Register the callback scheme. In dev (electron-vite) we must pass the
- *  script path so the OS maps the scheme to this running instance. Returns the
- *  OS result — on Windows this is the ONLY thing that registers `timo://`
- *  (electron-builder's `protocols:` block writes nothing for NSIS), so a
- *  `false` here means the deep-link login can't complete. Worth logging. */
+/** Register the callback scheme. Windows development needs the entry path so
+ *  a second launch can boot this app instead of bare Electron. macOS ignores
+ *  path/args and relies on the scheme baked into the development bundle by
+ *  prepare-dev-electron.mjs. */
 export function registerProtocol(): boolean {
   const scriptPath = process.argv[1];
-  if (process.defaultApp && scriptPath) {
+  if (process.defaultApp && process.platform === 'win32' && scriptPath) {
     return app.setAsDefaultProtocolClient(PROTOCOL, process.execPath, [path.resolve(scriptPath)]);
   }
   return app.setAsDefaultProtocolClient(PROTOCOL);
