@@ -17,7 +17,19 @@ beforeAll(() => {
 describe('OAuth state token', () => {
   it('round-trips the user id', () => {
     const tok = signOAuthState('user_123');
-    expect(verifyOAuthState(tok)).toEqual({ sub: 'user_123' });
+    expect(verifyOAuthState(tok)).toEqual({ sub: 'user_123', returnTo: 'browser', agentCallbackScheme: undefined });
+  });
+
+  it('round-trips the signed desktop return target', () => {
+    const tok = signOAuthState('user_123', { returnTo: 'agent', agentCallbackScheme: 'timo' });
+    expect(verifyOAuthState(tok)).toEqual({ sub: 'user_123', returnTo: 'agent', agentCallbackScheme: 'timo' });
+  });
+
+  it('rejects an agent return target without an allowed callback scheme', () => {
+    const missing = jwt.sign({ sub: 'x', returnTo: 'agent', kind: 'lark_oauth' }, process.env.JWT_SECRET!, { algorithm: 'HS256' });
+    const evil = jwt.sign({ sub: 'x', returnTo: 'agent', agentCallbackScheme: 'evil', kind: 'lark_oauth' }, process.env.JWT_SECRET!, { algorithm: 'HS256' });
+    expect(() => verifyOAuthState(missing)).toThrow(/malformed/);
+    expect(() => verifyOAuthState(evil)).toThrow(/malformed/);
   });
 
   it('rejects a token signed with a different secret', () => {
