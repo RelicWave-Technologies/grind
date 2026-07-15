@@ -1,5 +1,5 @@
 import { getLarkConfig } from './config';
-import { resolveEffectiveEntrySegmentEnds } from '../insights/openSegmentEvidence';
+import { collectEffectiveIntervals, intervalUnionMs, type EffectiveInterval } from '../insights/effectiveIntervals';
 import type { EntryLiveEvidenceMap } from '../insights/liveEntryEvidence';
 
 /**
@@ -145,32 +145,26 @@ export function loggedMsByGuid(
     evidenceByEntry?: EntryLiveEvidenceMap;
   } = {},
 ): Map<string, number> {
-  const out = new Map<string, number>();
+  const intervalsByGuid = new Map<string, EffectiveInterval[]>();
   const windowStart = options.windowStart ?? Number.NEGATIVE_INFINITY;
   const windowEnd = options.windowEnd ?? now;
   const nowDate = new Date(now);
   for (const e of entries) {
     if (!e.larkTaskGuid) continue;
-    let ms = 0;
-    const effectiveEnds = resolveEffectiveEntrySegmentEnds({
-      segments: e.segments,
-      entryEndedAt: e.endedAt,
+    const intervals = collectEffectiveIntervals(e, {
       now: nowDate,
-      evidence: e.id ? options.evidenceByEntry?.get(e.id) : null,
-      lifecycle: e,
+      windowStart,
+      windowEnd,
+      evidenceByEntry: options.evidenceByEntry,
+      includeSegment: (segment) => segment.kind === 'WORK' || segment.kind === 'MEETING',
     });
-    for (const [index, s] of e.segments.entries()) {
-      if (s.kind === 'WORK' || s.kind === 'MEETING') {
-        const capped = effectiveEnds[index];
-        const rawEnd = capped ? capped.getTime() : now;
-        const start = Math.max(s.startedAt.getTime(), windowStart);
-        const end = Math.min(rawEnd, windowEnd);
-        if (end > start) ms += end - start;
-      }
-    }
-    out.set(e.larkTaskGuid, (out.get(e.larkTaskGuid) ?? 0) + Math.max(0, ms));
+    const existing = intervalsByGuid.get(e.larkTaskGuid) ?? [];
+    existing.push(...intervals);
+    intervalsByGuid.set(e.larkTaskGuid, existing);
   }
-  return out;
+  return new Map(
+    Array.from(intervalsByGuid.entries()).map(([guid, intervals]) => [guid, intervalUnionMs(intervals)]),
+  );
 }
 
 /** Real client: paginates `my_tasks` with the user token. */

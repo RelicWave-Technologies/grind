@@ -99,6 +99,22 @@ describe('loggedMsByGuid', () => {
     expect(m.get('a')).toBe(25 * 60_000);
   });
 
+  it('counts overlapping entries for the same Lark task once', () => {
+    const entries = [
+      {
+        larkTaskGuid: 'a',
+        segments: [{ kind: 'WORK', startedAt: d(now - 90 * 60_000), endedAt: d(now - 30 * 60_000) }],
+      },
+      {
+        larkTaskGuid: 'a',
+        segments: [{ kind: 'WORK', startedAt: d(now - 60 * 60_000), endedAt: d(now) }],
+      },
+    ];
+
+    const m = loggedMsByGuid(entries, now);
+    expect(m.get('a')).toBe(90 * 60_000);
+  });
+
   it('caps stale open segments at latest activity evidence instead of now', () => {
     const entries = [
       { id: 'e1', larkTaskGuid: 'a', segments: [{ kind: 'WORK', startedAt: d(now - 30 * 60_000), endedAt: null }] },

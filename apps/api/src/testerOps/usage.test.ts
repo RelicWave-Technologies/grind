@@ -151,6 +151,47 @@ describe('buildTesterUsageSnapshot', () => {
     expect(snapshot.testers[0]?.trackedMinutes).toBe(10);
   });
 
+  it('counts overlapping duplicate entries once in the Tester Ops card', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-10T12:00:00.000Z'));
+    const { workspace, user } = await seedTester('Overlap Regression');
+
+    await createEntry({
+      userId: user.id,
+      id: 'overlap-entry-a',
+      startedAt: '2026-07-10T01:00:00.000Z',
+      endedAt: '2026-07-10T09:00:00.000Z',
+      segments: [{ id: 'overlap-segment-a', startedAt: '2026-07-10T01:00:00.000Z', endedAt: '2026-07-10T09:00:00.000Z' }],
+    });
+    await createEntry({
+      userId: user.id,
+      id: 'overlap-entry-b',
+      startedAt: '2026-07-10T02:00:00.000Z',
+      endedAt: '2026-07-10T10:00:00.000Z',
+      segments: [{ id: 'overlap-segment-b', startedAt: '2026-07-10T02:00:00.000Z', endedAt: '2026-07-10T10:00:00.000Z' }],
+    });
+
+    const snapshot = await buildTesterUsageSnapshot(workspace.id, 'UTC');
+    expect(snapshot.testers[0]?.trackedMinutes).toBe(9 * 60);
+  });
+
+  it('uses the entry end as the boundary for a closed entry with an open final segment', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-10T12:00:00.000Z'));
+    const { workspace, user } = await seedTester('Closed Boundary');
+
+    await createEntry({
+      userId: user.id,
+      id: 'closed-open-segment-entry',
+      startedAt: '2026-07-10T09:00:00.000Z',
+      endedAt: '2026-07-10T10:00:00.000Z',
+      segments: [{ id: 'closed-open-segment', startedAt: '2026-07-10T09:00:00.000Z', endedAt: null }],
+    });
+
+    const snapshot = await buildTesterUsageSnapshot(workspace.id, 'UTC');
+    expect(snapshot.testers[0]?.trackedMinutes).toBe(60);
+  });
+
   it('keeps heartbeat-only Tester Ops and Lark totals identical', async () => {
     vi.useFakeTimers();
     const now = new Date('2026-07-10T09:34:00.000Z');
