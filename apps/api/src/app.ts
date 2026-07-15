@@ -1,4 +1,5 @@
 import express from 'express';
+import compression from 'compression';
 import helmet from 'helmet';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
@@ -32,6 +33,7 @@ export function buildApp() {
   const app = express();
 
   app.use(helmet());
+  app.use(compression());
   // CORS: allow credentials so the dashboard (separate origin) can ship the
   // grind_at cookie. In production, restrict to the configured dashboard
   // origin(s) — DASHBOARD_URL may be a comma-separated list (e.g. the prod

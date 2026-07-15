@@ -6,6 +6,7 @@ import type {
   MemberReportDayScreenshotsResponse,
   MemberReportsMeResponse,
   TeamMemberReportsResponse,
+  TeamReportsSummaryResponse,
   TeamReportUser,
 } from '@grind/types';
 import { requireAccessToken } from '../middleware/auth';
@@ -23,7 +24,7 @@ import {
   type ReportScreenshotRow,
   type ReportTimeEntry,
 } from '../reports/member';
-import { buildTeamReportsResponse } from '../reports/team';
+import { buildTeamReportsResponse, buildTeamReportsSummaryResponse } from '../reports/team';
 import { loadProfileForUser } from '../profile/service';
 import { resolveAppIcon, storedIconDataUrls } from '../insights/appIcon';
 import type { IconResolver } from '../reports/member';
@@ -150,6 +151,77 @@ reportsRouter.get('/team', requireCapability('reports.team.read'), async (req, r
     }
 
     res.json(buildTeamReportsResponse({ range, users: reportUsers, daysByUser }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+reportsRouter.get('/team/summary', requireCapability('reports.team.read'), async (req, res, next) => {
+  try {
+    if (!req.user || !req.scope) return res.status(401).json({ error: 'unauthorized' });
+    const range = resolveReportRange(req.query as Record<string, unknown>, req.scope.workspaceTimezone);
+    if ('error' in range) return res.status(range.status).json({ error: range.error, ...(range.extras ?? {}) });
+    if (range.days.length > TEAM_REPORT_MAX_DAYS) {
+      return res.status(400).json({ error: 'range_too_long', maxDays: TEAM_REPORT_MAX_DAYS });
+    }
+    const teamId = parseOptionalTeamId(req.query.teamId);
+    if ('error' in teamId) return res.status(400).json({ error: teamId.error });
+
+    const scopedUserIds = req.scope.userIds.filter((id) => id !== req.user!.sub);
+    const users = scopedUserIds.length > 0
+      ? await prisma.user.findMany({
+          where: {
+            id: { in: scopedUserIds },
+            workspaceId: req.user.ws,
+            deactivatedAt: null,
+            ...(teamId.value ? { teamId: teamId.value } : {}),
+          },
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            avatarUrl: true,
+            teamId: true,
+            team: { select: { name: true } },
+          },
+          orderBy: [{ name: 'asc' }, { email: 'asc' }],
+        })
+      : [];
+    const reportUsers: TeamReportUser[] = users.map((user) => ({
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      avatarUrl: user.avatarUrl,
+      teamId: user.teamId,
+      teamName: user.team?.name ?? null,
+    }));
+
+    const now = new Date();
+    const summaryData = await loadTeamReportSummaryData(reportUsers.map((user) => user.id), range, now);
+    const daysByUser = new Map<string, ReturnType<typeof buildMemberReportDays>>();
+    for (const user of reportUsers) {
+      const data = summaryData.buckets.get(user.id) ?? emptyTeamReportSummaryData();
+      daysByUser.set(user.id, buildMemberReportDays({
+        userId: user.id,
+        range,
+        now,
+        entries: data.entries,
+        manualRequests: data.manualRequests,
+        samples: [],
+        screenshots: [],
+        evidenceByEntry: data.evidenceByEntry,
+        shiftAssignments: data.shiftAssignments,
+        invalidations: data.invalidations,
+      }));
+    }
+
+    const response: TeamReportsSummaryResponse = buildTeamReportsSummaryResponse({
+      range,
+      users: reportUsers,
+      daysByUser,
+      screenshotCountByUser: summaryData.screenshotCountByUser,
+    });
+    res.json(response);
   } catch (err) {
     next(err);
   }
@@ -545,6 +617,139 @@ function emptyTeamReportData(): TeamReportDataBucket {
     invalidations: [],
     evidenceByEntry: new Map(),
   };
+}
+
+type TeamReportSummaryDataBucket = Omit<TeamReportDataBucket, 'samples' | 'screenshots'>;
+
+function emptyTeamReportSummaryData(): TeamReportSummaryDataBucket {
+  return {
+    entries: [],
+    manualRequests: [],
+    shiftAssignments: [],
+    invalidations: [],
+    evidenceByEntry: new Map(),
+  };
+}
+
+async function loadTeamReportSummaryData(
+  userIds: string[],
+  range: ReportRange,
+  now = new Date(),
+): Promise<{
+  buckets: Map<string, TeamReportSummaryDataBucket>;
+  screenshotCountByUser: Map<string, number>;
+}> {
+  const buckets = new Map<string, TeamReportSummaryDataBucket>();
+  for (const userId of userIds) buckets.set(userId, emptyTeamReportSummaryData());
+  if (userIds.length === 0) return { buckets, screenshotCountByUser: new Map() };
+
+  const [entries, manualRequests, shiftAssignments, invalidations, screenshotCounts] = await Promise.all([
+    prisma.timeEntry.findMany({
+      where: {
+        userId: { in: userIds },
+        startedAt: { lt: range.rangeEnd },
+        OR: [{ endedAt: null }, { endedAt: { gt: range.rangeStart } }],
+      },
+      select: {
+        id: true,
+        userId: true,
+        source: true,
+        larkTaskGuid: true,
+        notes: true,
+        endedAt: true,
+        trackingProtocolVersion: true,
+        lastProvenAt: true,
+        leaseExpiresAt: true,
+        segments: {
+          select: { kind: true, startedAt: true, endedAt: true },
+          orderBy: { startedAt: 'asc' },
+        },
+        attendees: { select: { userId: true } },
+      },
+      orderBy: [{ userId: 'asc' }, { startedAt: 'asc' }],
+    }),
+    prisma.manualTimeRequest.findMany({
+      where: {
+        userId: { in: userIds },
+        requestedStart: { lt: range.rangeEnd },
+        requestedEnd: { gt: range.rangeStart },
+        status: { in: ['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED'] },
+      },
+      select: {
+        userId: true,
+        id: true,
+        status: true,
+        requestedStart: true,
+        requestedEnd: true,
+        reason: true,
+        larkTaskGuid: true,
+        decidedReason: true,
+        attendees: { select: { userId: true } },
+      },
+    }),
+    prisma.shiftAssignment.findMany({
+      where: {
+        userId: { in: userIds },
+        effectiveFrom: { lt: range.rangeEnd },
+        OR: [{ effectiveTo: null }, { effectiveTo: { gt: range.rangeStart } }],
+      },
+      select: {
+        userId: true,
+        shiftId: true,
+        effectiveFrom: true,
+        effectiveTo: true,
+        shiftNameSnapshot: true,
+        scheduleSnapshot: true,
+        bufferMinSnapshot: true,
+      },
+      orderBy: [{ userId: 'asc' }, { effectiveFrom: 'asc' }],
+    }),
+    loadTimeInvalidationsForUsers(userIds, range.rangeStart, range.rangeEnd),
+    prisma.screenshot.groupBy({
+      by: ['userId'],
+      where: {
+        userId: { in: userIds },
+        uploadState: 'UPLOADED',
+        deletedAt: null,
+        capturedAt: { gte: range.rangeStart, lt: range.rangeEnd },
+      },
+      _count: { _all: true },
+    }),
+  ]);
+
+  const evidenceByEntry = await loadEntryLiveEvidence(entries, now);
+  for (const bucket of buckets.values()) bucket.evidenceByEntry = evidenceByEntry;
+  for (const entry of entries) {
+    buckets.get(entry.userId)?.entries.push({
+      ...entry,
+      source: entry.source as 'AUTO' | 'MANUAL',
+      segments: entry.segments.map((segment) => ({
+        ...segment,
+        kind: segment.kind as 'WORK' | 'MEETING' | 'IDLE_TRIMMED',
+      })),
+    });
+  }
+  for (const row of manualRequests) {
+    const { userId, ...manualRequest } = row;
+    buckets.get(userId)?.manualRequests.push(manualRequest);
+  }
+  for (const row of shiftAssignments) {
+    const { userId, ...assignment } = row;
+    buckets.get(userId)?.shiftAssignments.push(assignment);
+  }
+  for (const invalidation of invalidations) buckets.get(invalidation.userId)?.invalidations.push(invalidation);
+
+  return {
+    buckets,
+    screenshotCountByUser: new Map(screenshotCounts.map((row) => [row.userId, row._count._all])),
+  };
+}
+
+function parseOptionalTeamId(raw: unknown): { value: string | null } | { error: 'invalid_team_id' } {
+  if (raw === undefined) return { value: null };
+  if (typeof raw !== 'string') return { error: 'invalid_team_id' };
+  const value = raw.trim();
+  return value.length > 0 && value.length <= 191 ? { value } : { error: 'invalid_team_id' };
 }
 
 async function loadTeamReportData(

@@ -9,6 +9,7 @@ import { api, type ApiError } from '../lib/api';
 import { hasCapability, isManagerOrAbove } from '../lib/auth';
 import type { DecideResult, ManualTimeRequest, MtrStatus, MtrUserSummary } from '../lib/types';
 import { addDays, fmtAgeShort, fmtDayLabel, fmtDurationMs, fmtTime, todayKey } from '../lib/format';
+import { reportQueryKeys } from '../lib/reportQueries';
 import type { TaskOption } from '../components/TaskCombo';
 import {
   Avatar,
@@ -159,7 +160,8 @@ export function ApprovalsScreen() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['approvals', 'team'] });
-      queryClient.invalidateQueries({ queryKey: ['reports', 'team'] });
+      queryClient.invalidateQueries({ queryKey: ['reports', 'team', 'member'] });
+      queryClient.invalidateQueries({ queryKey: reportQueryKeys.teamSummaryRoot });
     },
   });
 
