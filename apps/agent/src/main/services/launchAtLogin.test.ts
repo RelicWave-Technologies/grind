@@ -192,6 +192,7 @@ describe('launch at login service', () => {
     const stale = settings({
       launchItems: [
         item({ name: 'Grind', path: 'C:\\Old\\Grind.exe' }),
+        item({ name: 'Timo time tracker desktop agent', path: 'C:\\Old\\Timo\\Timo.exe' }),
         item({ path: 'C:\\Old\\Timo.exe' }),
         item({ name: 'Timo Legacy', args: [] }),
       ],
@@ -205,8 +206,39 @@ describe('launch at login service', () => {
     service('win32', exe).reconcileOnBoot();
 
     expect(mocks.app.setLoginItemSettings).toHaveBeenCalledWith(expect.objectContaining({ openAtLogin: false, name: 'Grind' }));
+    expect(mocks.app.setLoginItemSettings).toHaveBeenCalledWith(expect.objectContaining({ openAtLogin: false, name: 'Timo time tracker desktop agent', path: 'C:\\Old\\Timo\\Timo.exe' }));
     expect(mocks.app.setLoginItemSettings).toHaveBeenCalledWith(expect.objectContaining({ openAtLogin: false, name: 'Timo', path: 'C:\\Old\\Timo.exe' }));
     expect(mocks.app.setLoginItemSettings).toHaveBeenCalledWith(expect.objectContaining({ openAtLogin: false, name: 'Timo Legacy', path: exe }));
+  });
+
+  it('keeps the canonical Windows startup item while removing duplicate Timo rows', () => {
+    const exe = 'C:\\Users\\Anish\\AppData\\Local\\Programs\\Timo\\Timo.exe';
+    const duplicate = item({
+      name: 'Timo time tracker desktop agent',
+      path: 'C:\\Users\\Anish\\AppData\\Local\\Programs\\Timo-old\\Timo.exe',
+    });
+    const ready = settings({
+      openAtLogin: true,
+      executableWillLaunchAtLogin: true,
+      launchItems: [item(), duplicate],
+    });
+    mocks.app.getLoginItemSettings
+      .mockReturnValueOnce(ready)
+      .mockReturnValueOnce(ready);
+
+    service('win32', exe).repair();
+
+    expect(mocks.app.setLoginItemSettings).toHaveBeenCalledWith(expect.objectContaining({
+      openAtLogin: false,
+      name: 'Timo time tracker desktop agent',
+      path: 'C:\\Users\\Anish\\AppData\\Local\\Programs\\Timo-old\\Timo.exe',
+    }));
+    expect(mocks.app.setLoginItemSettings).not.toHaveBeenCalledWith(expect.objectContaining({
+      openAtLogin: false,
+      name: 'Timo',
+      path: exe,
+      args: ['--hidden'],
+    }));
   });
 
   it('delegates a user-confirmed macOS move to Electron', () => {

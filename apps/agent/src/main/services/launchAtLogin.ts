@@ -10,10 +10,16 @@ import type {
 
 const HIDDEN_ARG = '--hidden';
 const WINDOWS_ITEM_NAME = 'Timo';
+const WINDOWS_DESCRIPTION_NAME = 'Timo time tracker desktop agent';
 const LEGACY_WINDOWS_ITEMS = [
   { name: 'Grind', appDir: 'Grind', executable: 'Grind.exe' },
   { name: '@grind/agent', appDir: '@grind', executable: 'agent.exe' },
 ] as const;
+const WINDOWS_OWNED_NAMES = new Set([
+  WINDOWS_ITEM_NAME.toLowerCase(),
+  WINDOWS_DESCRIPTION_NAME.toLowerCase(),
+  ...LEGACY_WINDOWS_ITEMS.map((item) => item.name.toLowerCase()),
+]);
 
 interface LaunchAtLoginApp {
   isPackaged: boolean;
@@ -70,6 +76,10 @@ function normalizeWindowsPath(value: string): string {
   return path.win32.normalize(value.replace(/^"|"$/gu, '')).toLowerCase();
 }
 
+function normalizeWindowsName(value: string): string {
+  return value.trim().toLowerCase();
+}
+
 function sameArgs(args: string[]): boolean {
   return args.length === 1 && args[0] === HIDDEN_ARG;
 }
@@ -78,6 +88,21 @@ function isCanonicalWindowsItem(item: WindowsLaunchItem, execPath: string): bool
   return item.name === WINDOWS_ITEM_NAME
     && normalizeWindowsPath(item.path) === normalizeWindowsPath(execPath)
     && sameArgs(item.args);
+}
+
+function isOwnedWindowsStartupItem(item: WindowsLaunchItem, execPath: string): boolean {
+  const name = normalizeWindowsName(item.name);
+  if (WINDOWS_OWNED_NAMES.has(name)) return true;
+
+  const normalizedPath = normalizeWindowsPath(item.path);
+  if (normalizedPath === normalizeWindowsPath(execPath)) return true;
+
+  const executable = path.win32.basename(normalizedPath);
+  if (executable === 'timo.exe' && normalizedPath.includes('\\timo\\')) return true;
+  if (executable === 'grind.exe' && normalizedPath.includes('\\grind\\')) return true;
+  if (executable === 'agent.exe' && normalizedPath.includes('\\@grind\\')) return true;
+
+  return false;
 }
 
 function result(
@@ -181,11 +206,8 @@ export function createLaunchAtLoginService(deps: LaunchAtLoginDeps) {
     try {
       const settings = deps.app.getLoginItemSettings();
       for (const item of settings.launchItems) {
-        const isLegacy = LEGACY_WINDOWS_ITEMS.some(({ name }) => item.name === name);
         const canonical = isCanonicalWindowsItem(item, deps.execPath);
-        const isTimoName = item.name === WINDOWS_ITEM_NAME;
-        const usesCurrentExecutable = normalizeWindowsPath(item.path) === normalizeWindowsPath(deps.execPath);
-        if (isLegacy || (!canonical && (isTimoName || usesCurrentExecutable))) removeWindowsItem(item);
+        if (!canonical && isOwnedWindowsStartupItem(item, deps.execPath)) removeWindowsItem(item);
       }
     } catch {
       // Keep startup non-fatal; repair() will surface a blocked state.
