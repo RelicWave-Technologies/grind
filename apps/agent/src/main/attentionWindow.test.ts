@@ -6,12 +6,12 @@ const mocks = vi.hoisted(() => {
   const window = {
     isDestroyed: vi.fn(() => false),
     isVisible: vi.fn(() => false),
-    isFocused: vi.fn(() => true),
     webContents: { on: vi.fn((event: string, cb: (...args: unknown[]) => void) => webListeners.set(event, cb)), send: vi.fn() },
     on: vi.fn((event: string, cb: (...args: unknown[]) => void) => windowListeners.set(event, cb)),
     setBounds: vi.fn(),
     setAlwaysOnTop: vi.fn(),
     show: vi.fn(),
+    showInactive: vi.fn(),
     hide: vi.fn(),
     moveTop: vi.fn(),
     focus: vi.fn(),
@@ -70,6 +70,10 @@ describe('attention window', () => {
       { x: 1104, y: 16, width: 320, height: 176 },
       false,
     );
+    expect(mocks.window.showInactive).toHaveBeenCalled();
+    expect(mocks.window.show).not.toHaveBeenCalled();
+    expect(mocks.window.focus).not.toHaveBeenCalled();
+    expect(mocks.appFocus).not.toHaveBeenCalled();
   });
 
   it('does not float or steal focus again after yielding to System Settings', async () => {
@@ -79,14 +83,33 @@ describe('attention window', () => {
     mocks.webListeners.get('did-finish-load')?.();
     attentionPresenter.yieldToSystemSettings({ ...front, presentation: 'YIELDED_TO_SETTINGS' });
     const floatCalls = mocks.assertFloat.mock.calls.length;
-    const focusCalls = mocks.window.focus.mock.calls.length;
+    const inactiveShowCalls = mocks.window.showInactive.mock.calls.length;
 
-    reassertAttentionWindow(true);
+    reassertAttentionWindow();
     vi.runAllTimers();
 
     expect(mocks.window.setAlwaysOnTop).toHaveBeenCalledWith(false);
     expect(mocks.window.blur).toHaveBeenCalled();
     expect(mocks.assertFloat).toHaveBeenCalledTimes(floatCalls);
-    expect(mocks.window.focus).toHaveBeenCalledTimes(focusCalls);
+    expect(mocks.window.showInactive).toHaveBeenCalledTimes(inactiveShowCalls);
+    expect(mocks.window.focus).not.toHaveBeenCalled();
+    expect(mocks.appFocus).not.toHaveBeenCalled();
+  });
+
+  it('refreshes fullscreen-Space membership without taking focus', async () => {
+    const { attentionPresenter, reassertAttentionWindow } = await import('./attentionWindow');
+    attentionPresenter.show({ kind: 'AWAY', promptId: 'away-1', larkTaskGuid: null, stoppedAt: 200, reason: 'lock' });
+    mocks.webListeners.get('did-finish-load')?.();
+    vi.clearAllMocks();
+
+    reassertAttentionWindow({ refreshWorkspaceVisibility: true });
+
+    expect(mocks.assertFloat).toHaveBeenCalledWith(
+      mocks.window,
+      { refreshWorkspaceVisibility: true },
+    );
+    expect(mocks.window.moveTop).toHaveBeenCalled();
+    expect(mocks.window.focus).not.toHaveBeenCalled();
+    expect(mocks.appFocus).not.toHaveBeenCalled();
   });
 });

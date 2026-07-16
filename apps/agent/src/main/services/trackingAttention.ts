@@ -6,7 +6,7 @@ export interface AttentionPresenter {
   show(prompt: Exclude<AttentionPrompt, { kind: 'NONE' }>): void;
   hide(): void;
   yieldToSystemSettings(prompt: Extract<AttentionPrompt, { kind: 'PERMISSION' }>): void;
-  reassert(takeFocus?: boolean): void;
+  reassert(): void;
 }
 
 interface TrackingAttentionDeps {
@@ -54,14 +54,14 @@ export function createTrackingAttentionCoordinator(deps: TrackingAttentionDeps) 
     return true;
   }
 
-  function restoreActive(takeFocus = true): boolean {
+  function restoreActive(): boolean {
     if (active.kind === 'NONE') return false;
     if (active.kind === 'PERMISSION' && active.presentation === 'YIELDED_TO_SETTINGS') {
       active = { ...active, presentation: 'FRONT' };
       deps.presenter.show(active);
       return true;
     }
-    deps.presenter.reassert(takeFocus);
+    deps.presenter.reassert();
     return true;
   }
 

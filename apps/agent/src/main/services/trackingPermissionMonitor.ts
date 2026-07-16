@@ -7,11 +7,13 @@ import { onScreenHealthChange } from './capture';
 import { sendHeartbeatNow } from './heartbeat';
 import { getTimerService } from './timer';
 import { offerPermissionResume } from './trackingCommands';
-import { getTrackingReadinessService } from './trackingReadiness';
+import { getTrackingReadinessService, type ReadinessInspection } from './trackingReadiness';
 import { log } from '../logger';
 
 const CHECK_INTERVAL_MS = 2_000;
 const HOOK_START_GRACE_MS = 3_000;
+const SCREEN_FAILURE_GRACE_MS = 10_000;
+const SCREEN_FAILURE_MIN_CHECKS = 3;
 
 let timer: NodeJS.Timeout | null = null;
 let removeScreenListener: (() => void) | null = null;
@@ -20,6 +22,42 @@ let checkInFlight: Promise<void> | null = null;
 let activeEntryId: string | null = null;
 let accruingSince: number | null = null;
 let lastHealthyAt: number | null = null;
+let screenFailureStartedAt: number | null = null;
+let screenFailureChecks = 0;
+
+function resetScreenFailure(): void {
+  screenFailureStartedAt = null;
+  screenFailureChecks = 0;
+}
+
+function isDefinitiveScreenPermissionLoss(inspection: ReadinessInspection): boolean {
+  const status = inspection.permissions.screen.status;
+  return status === 'denied' || status === 'restricted' || status === 'not-determined';
+}
+
+function shouldDeferScreenFailure(inspection: ReadinessInspection, now: number): boolean {
+  if (inspection.readiness.screenRecording === 'READY') {
+    resetScreenFailure();
+    return false;
+  }
+  if (isDefinitiveScreenPermissionLoss(inspection)) {
+    resetScreenFailure();
+    return false;
+  }
+
+  if (screenFailureStartedAt === null) {
+    screenFailureStartedAt = now;
+    screenFailureChecks = 1;
+    log.warn('screen capture probe failed; waiting for confirmation before pausing', {
+      status: inspection.permissions.screen.status,
+      health: inspection.permissions.screen.health,
+    });
+    return true;
+  }
+
+  screenFailureChecks += 1;
+  return now - screenFailureStartedAt < SCREEN_FAILURE_GRACE_MS || screenFailureChecks < SCREEN_FAILURE_MIN_CHECKS;
+}
 
 function scheduleCheck(): void {
   if (checkInFlight) return;
@@ -36,6 +74,7 @@ async function checkNow(): Promise<void> {
     activeEntryId = status.state === 'RUNNING' ? status.entryId : null;
     accruingSince = null;
     lastHealthyAt = null;
+    resetScreenFailure();
     return;
   }
 
@@ -44,6 +83,7 @@ async function checkNow(): Promise<void> {
     activeEntryId = status.entryId;
     accruingSince = now;
     lastHealthyAt = status.segmentStartedAt ?? now;
+    resetScreenFailure();
   }
 
   const readinessService = getTrackingReadinessService();
@@ -62,10 +102,16 @@ async function checkNow(): Promise<void> {
     && !inspection.accessibilityError;
   const accessibilityHealthy = inspection.readiness.accessibility === 'READY'
     && (!accessibility.recording || accessibility.hookRunning || hookStillStarting);
-  const healthy = inspection.readiness.screenRecording === 'READY' && accessibilityHealthy;
+  const screenHealthy = inspection.readiness.screenRecording === 'READY';
+  const healthy = screenHealthy && accessibilityHealthy;
 
   if (healthy) {
     if (!hookStillStarting) lastHealthyAt = now;
+    resetScreenFailure();
+    return;
+  }
+
+  if (!screenHealthy && accessibilityHealthy && shouldDeferScreenFailure(inspection, now)) {
     return;
   }
 

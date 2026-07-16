@@ -49,6 +49,18 @@ function inspection(ready: boolean) {
   };
 }
 
+function transientScreenFailureInspection() {
+  const value = inspection(true);
+  return {
+    ...value,
+    readiness: { ...value.readiness, ready: false, screenRecording: 'NEEDS_RESTART', blockingCapabilities: ['SCREEN_RECORDING'] },
+    permissions: {
+      ...value.permissions,
+      screen: { status: 'granted', health: 'empty', state: 'needs-restart' },
+    },
+  };
+}
+
 function hookFailureInspection() {
   const value = inspection(true);
   return {
@@ -130,6 +142,46 @@ describe('tracking permission monitor', () => {
 
     expect(mocks.pauseForPermission).not.toHaveBeenCalled();
     expect(mocks.offerResume).not.toHaveBeenCalled();
+  });
+
+  it('does not pause for a granted-but-empty screen capture before the confirmation window expires', async () => {
+    const running = {
+      state: 'RUNNING', entryId: 'entry-2b', revision: 1, larkTaskGuid: null,
+      startedAt: Date.now(), segmentStartedAt: Date.now(), workedMs: 0, paused: false, pauseReason: null,
+    };
+    mocks.status.mockReturnValue(running);
+    mocks.inspect.mockResolvedValueOnce(inspection(true));
+    startTrackingPermissionMonitor();
+    await vi.advanceTimersByTimeAsync(0);
+
+    mocks.inspect.mockResolvedValue(transientScreenFailureInspection());
+    await vi.advanceTimersByTimeAsync(6_000);
+
+    expect(mocks.pauseForPermission).not.toHaveBeenCalled();
+    expect(mocks.offerResume).not.toHaveBeenCalled();
+  });
+
+  it('pauses after a granted-but-empty screen capture stays failed through the confirmation window', async () => {
+    const running = {
+      state: 'RUNNING', entryId: 'entry-2c', revision: 1, larkTaskGuid: null,
+      startedAt: Date.now(), segmentStartedAt: Date.now(), workedMs: 0, paused: false, pauseReason: null,
+    };
+    const paused = { ...running, revision: 2, paused: true, pauseReason: 'PERMISSION_REQUIRED' };
+    mocks.status.mockReturnValue(running);
+    mocks.inspect.mockResolvedValueOnce(inspection(true));
+    mocks.pauseForPermission.mockImplementation(async () => {
+      mocks.status.mockReturnValue(paused);
+      return paused;
+    });
+    startTrackingPermissionMonitor();
+    await vi.advanceTimersByTimeAsync(0);
+    const lastHealthyAt = Date.now();
+
+    mocks.inspect.mockResolvedValue(transientScreenFailureInspection());
+    await vi.advanceTimersByTimeAsync(12_000);
+
+    expect(mocks.pauseForPermission).toHaveBeenCalledWith(lastHealthyAt);
+    expect(mocks.offerResume).toHaveBeenCalledTimes(1);
   });
 
   it('pauses when the native activity hook remains failed beyond its startup allowance', async () => {

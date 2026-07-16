@@ -116,7 +116,7 @@ function ensureMainWindow(opts: { startHidden?: boolean } = {}): BrowserWindow {
 
 function showMainWindow(opts: { bypassAttention?: boolean } = {}) {
   if (isQuitting) return;
-  if (!opts.bypassAttention && getTrackingAttentionCoordinator().restoreActive(true)) return;
+  if (!opts.bypassAttention && getTrackingAttentionCoordinator().restoreActive()) return;
   const win = ensureMainWindow({ startHidden: true });
   hidePopover();
   if (win.isMinimized()) win.restore();
@@ -178,7 +178,7 @@ app.whenReady().then(async () => {
   const attention = getTrackingAttentionCoordinator();
   tray = createTray({
     onToggle: (bounds) => {
-      if (!attention.restoreActive(true)) togglePopover(bounds);
+      if (!attention.restoreActive()) togglePopover(bounds);
     },
     onOpenMain: () => showMainWindow(),
     onInstallUpdate: () => void installUpdateNow(),
@@ -247,7 +247,7 @@ app.whenReady().then(async () => {
     },
     onWake: () => {
       reassertAllOverlays();
-      reassertAttentionWindow(true);
+      reassertAttentionWindow({ refreshWorkspaceVisibility: true });
       checkTrackingPermissionsNow();
       void drainTimerSyncNow('wake');
       void refreshTodayLedger('wake');
@@ -255,7 +255,7 @@ app.whenReady().then(async () => {
     },
     // `resume` can arrive while macOS still owns the lock screen. Reassert once
     // more on the distinct unlock signal without running timer recovery twice.
-    onVisibilityReturn: () => reassertAttentionWindow(true),
+    onVisibilityReturn: () => reassertAttentionWindow({ refreshWorkspaceVisibility: true }),
     // Returned from a lock/sleep that stopped a running timer → offer to resume.
     onReturnFromAway: (info) => {
       if (attention.isPermissionActive()) offerPermissionStart(info.larkTaskGuid);
@@ -269,16 +269,16 @@ app.whenReady().then(async () => {
   screen.on('display-removed', () => {
     reclampFloatingBar();
     reassertAllOverlays();
-    reassertAttentionWindow(false);
+    reassertAttentionWindow({ refreshWorkspaceVisibility: true });
   });
   screen.on('display-metrics-changed', () => {
     reclampFloatingBar();
     reassertAllOverlays();
-    reassertAttentionWindow(false);
+    reassertAttentionWindow({ refreshWorkspaceVisibility: true });
   });
   screen.on('display-added', () => {
     reassertAllOverlays();
-    reassertAttentionWindow(false);
+    reassertAttentionWindow({ refreshWorkspaceVisibility: true });
   });
 
   onAgentConfigChange(({ previous, current }) => {

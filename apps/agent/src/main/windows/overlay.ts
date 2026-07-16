@@ -41,8 +41,8 @@ export interface OverlayOptions extends Size {
   /** OS corner rounding. Set false to let CSS own the shape completely, so a
    *  DWM/AppKit corner radius can't mismatch the surface's own border-radius. */
   roundedCorners?: boolean;
-  /** Interactive overlays must become key windows. Passive surfaces use an
-   * NSPanel on macOS so they can float without activating the app. */
+  /** Interactive overlays must be capable of becoming key when clicked.
+   * Passive surfaces use an NSPanel on macOS so they never activate the app. */
   activation?: 'passive' | 'interactive';
   /** Most overlays share the global wake/display reassertion registry. A
    * coordinator-owned window can opt out when its own state controls whether
@@ -52,6 +52,14 @@ export interface OverlayOptions extends Size {
 
 // Live overlays — used by reassertAllOverlays() on wake / display change.
 const registry = new Set<BrowserWindow>();
+// Electron briefly transforms a normal macOS app into a UIElement application
+// while applying fullscreen-Space membership. Do that once per window during
+// normal presentation; wake/display recovery can explicitly refresh it.
+const workspaceVisibilityConfigured = new WeakSet<BrowserWindow>();
+
+export interface OverlayFloatOptions {
+  refreshWorkspaceVisibility?: boolean;
+}
 
 function loadRoute(w: BrowserWindow, hash: string): void {
   if (process.env.ELECTRON_RENDERER_URL) {
@@ -64,7 +72,8 @@ function loadRoute(w: BrowserWindow, hash: string): void {
 /**
  * Create a frameless, transparent overlay window with shared hardened
  * webPreferences. Auto-registers for float re-assertion and deregisters on
- * close. Passive overlays use NSPanel; interactive overlays are key windows.
+ * close. Passive overlays use NSPanel; interactive overlays can become key
+ * windows through explicit user interaction.
  */
 export function createOverlayWindow(opts: OverlayOptions): BrowserWindow {
   const win = new BrowserWindow({
@@ -101,18 +110,31 @@ export function createOverlayWindow(opts: OverlayOptions): BrowserWindow {
 }
 
 /**
- * Canonical "float over everything, on every Space" assertion. Idempotent and
- * cheap — call it on every show, on wake, and on display change.
+ * Canonical "float over everything, on every Space" assertion.
+ *
+ * `setVisibleOnAllWorkspaces` must use Electron's default macOS process-type
+ * transition. Skipping that transition is only valid for apps which are
+ * already UIElement applications; Timo is a normal foreground app. Because
+ * the transition may briefly hide the Dock, it is applied once per window and
+ * explicitly refreshed only after wake/unlock/display changes.
  */
-export function assertOverlayFloat(win: BrowserWindow | null): void {
+export function assertOverlayFloat(
+  win: BrowserWindow | null,
+  options: OverlayFloatOptions = {},
+): void {
   if (!win || win.isDestroyed()) return;
   win.setAlwaysOnTop(true, 'screen-saver');
-  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
+  if (options.refreshWorkspaceVisibility || !workspaceVisibilityConfigured.has(win)) {
+    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    workspaceVisibilityConfigured.add(win);
+  }
 }
 
 /** Re-assert float on every live overlay (wake / Space / display change). */
 export function reassertAllOverlays(): void {
-  for (const w of registry) assertOverlayFloat(w);
+  for (const w of registry) {
+    assertOverlayFloat(w, { refreshWorkspaceVisibility: true });
+  }
 }
 
 /**

@@ -1,10 +1,51 @@
-import { describe, it, expect } from 'vitest';
-import { center, topRight, bottomRight, trayPopoverPoint, type Rect } from './overlay';
+import { describe, it, expect, vi } from 'vitest';
+import {
+  assertOverlayFloat,
+  center,
+  topRight,
+  bottomRight,
+  trayPopoverPoint,
+  type Rect,
+} from './overlay';
 
 const SIZE = { width: 320, height: 168 };
 const PRIMARY: Rect = { x: 0, y: 0, width: 1440, height: 900 };
 // A second monitor to the right, with a non-zero origin.
 const SECOND: Rect = { x: 1440, y: 0, width: 1920, height: 1080 };
+
+describe('assertOverlayFloat', () => {
+  it('uses Electron fullscreen-Space registration without bypassing its macOS transition', () => {
+    const win = {
+      isDestroyed: vi.fn(() => false),
+      setAlwaysOnTop: vi.fn(),
+      setVisibleOnAllWorkspaces: vi.fn(),
+    } as unknown as Electron.BrowserWindow;
+
+    assertOverlayFloat(win);
+    assertOverlayFloat(win);
+
+    expect(win.setAlwaysOnTop).toHaveBeenCalledTimes(2);
+    expect(win.setAlwaysOnTop).toHaveBeenLastCalledWith(true, 'screen-saver');
+    expect(win.setVisibleOnAllWorkspaces).toHaveBeenCalledOnce();
+    expect(win.setVisibleOnAllWorkspaces).toHaveBeenCalledWith(
+      true,
+      { visibleOnFullScreen: true },
+    );
+  });
+
+  it('refreshes fullscreen-Space membership after wake or display changes', () => {
+    const win = {
+      isDestroyed: vi.fn(() => false),
+      setAlwaysOnTop: vi.fn(),
+      setVisibleOnAllWorkspaces: vi.fn(),
+    } as unknown as Electron.BrowserWindow;
+
+    assertOverlayFloat(win);
+    assertOverlayFloat(win, { refreshWorkspaceVisibility: true });
+
+    expect(win.setVisibleOnAllWorkspaces).toHaveBeenCalledTimes(2);
+  });
+});
 
 describe('center', () => {
   it('centers on the usable area of the active display', () => {

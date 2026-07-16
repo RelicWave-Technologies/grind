@@ -1,4 +1,4 @@
-import { app, type BrowserWindow } from 'electron';
+import type { BrowserWindow } from 'electron';
 import type { AttentionPrompt } from '../shared/attention';
 import {
   activeWorkArea,
@@ -6,6 +6,7 @@ import {
   center,
   createOverlayWindow,
   topRight,
+  type OverlayFloatOptions,
 } from './windows/overlay';
 
 const SIZES = {
@@ -33,12 +34,13 @@ function ensure(): BrowserWindow {
   win.webContents.on('did-finish-load', () => {
     loaded = true;
     publish();
-    if (current.kind !== 'NONE') presentCurrent(true);
+    if (current.kind !== 'NONE') presentCurrent();
   });
   win.on('always-on-top-changed', (_event, isAlwaysOnTop) => {
-    if (!isAlwaysOnTop && isFront(current)) queueMicrotask(() => reassertAttentionWindow(false));
+    if (!isAlwaysOnTop && isFront(current)) {
+      queueMicrotask(() => reassertAttentionWindow({ refreshWorkspaceVisibility: true }));
+    }
   });
-  win.on('focus', () => win?.flashFrame(false));
   win.on('closed', () => {
     win = null;
     loaded = false;
@@ -64,17 +66,15 @@ function applyBounds(window: BrowserWindow, prompt: Exclude<AttentionPrompt, { k
   window.setBounds({ ...point, ...size }, false);
 }
 
-function raise(window: BrowserWindow, takeFocus: boolean): void {
-  assertOverlayFloat(window);
-  if (!window.isVisible()) window.show();
+function raise(window: BrowserWindow, options: OverlayFloatOptions = {}): void {
+  // Visibility and activation are separate: keep the prompt above other apps
+  // without interrupting the user's current keyboard or mouse work.
+  assertOverlayFloat(window, options);
+  if (!window.isVisible()) window.showInactive();
   window.moveTop();
-  if (!takeFocus) return;
-  if (process.platform === 'darwin') app.focus({ steal: true });
-  window.focus();
-  if (process.platform === 'win32' && !window.isFocused()) window.flashFrame(true);
 }
 
-function presentCurrent(takeFocus: boolean): void {
+function presentCurrent(): void {
   if (current.kind === 'NONE') return;
   const window = ensure();
   applyBounds(window, current);
@@ -87,13 +87,13 @@ function presentCurrent(takeFocus: boolean): void {
   }
 
   const generation = ++presentationGeneration;
-  raise(window, takeFocus);
+  raise(window);
   for (const delay of RAISE_RETRY_MS) {
     setTimeout(() => {
       if (generation !== presentationGeneration || !isFront(current)) return;
       if (!win || win.isDestroyed()) return;
       applyBounds(win, current as Exclude<AttentionPrompt, { kind: 'NONE' }>);
-      raise(win, takeFocus);
+      raise(win);
     }, delay).unref?.();
   }
 }
@@ -102,7 +102,7 @@ export const attentionPresenter = {
   show(prompt: Exclude<AttentionPrompt, { kind: 'NONE' }>): void {
     current = prompt;
     ensure();
-    presentCurrent(true);
+    presentCurrent();
   },
   hide(): void {
     presentationGeneration += 1;
@@ -118,13 +118,13 @@ export const attentionPresenter = {
     win.setAlwaysOnTop(false);
     win.blur();
   },
-  reassert(takeFocus = false): void {
-    reassertAttentionWindow(takeFocus);
+  reassert(): void {
+    reassertAttentionWindow();
   },
 };
 
-export function reassertAttentionWindow(takeFocus = false): void {
+export function reassertAttentionWindow(options: OverlayFloatOptions = {}): void {
   if (!isFront(current) || !win || win.isDestroyed()) return;
   applyBounds(win, current as Exclude<AttentionPrompt, { kind: 'NONE' }>);
-  raise(win, takeFocus);
+  raise(win, options);
 }
