@@ -128,7 +128,7 @@ function fmtHM(min: number): { h: number; m: number } {
 
 function Reports() {
   const insights = useQuery({ queryKey: ['insightsToday'], queryFn: () => window.agent.insights.today(), refetchInterval: 15_000 });
-  const allShots = useQuery({ queryKey: ['shotsAll'], queryFn: () => window.agent.screenshots.recent(200), refetchInterval: 10_000 });
+  const allShots = useQuery({ queryKey: ['shotsAll'], queryFn: () => window.agent.screenshots.recent(200) });
   const workspaceTime = useWorkspaceTime();
   const d = insights.data;
   const tracked = fmtHM(d?.score.trackedMinutes ?? 0);
@@ -140,10 +140,11 @@ function Reports() {
     ? (allShots.data ?? []).filter((shot) => shot.capturedAt >= timeContext.dayStart && shot.capturedAt < timeContext.dayEnd)
     : [];
 
-  // Build a daytime chart (7a–9p) from the hourly keystroke+click counts.
-  const HOURS = Array.from({ length: 15 }, (_, i) => i + 7); // 7..21
+  // The backend returns workspace-local hourly buckets for the whole day.
+  // Keep the full 24-hour frame visible so early/late activity is not hidden.
+  const HOURS = Array.from({ length: 24 }, (_, i) => i);
   const points = HOURS.map((h) => d?.byHour?.[h] ?? 0);
-  const labels = HOURS.map((h) => (h % 12 === 0 ? 12 : h % 12) + (h < 12 ? 'a' : 'p'));
+  const labels = HOURS.map((h) => (h % 2 === 0 ? formatHourLabel(h) : ''));
   const hasData = (d?.score.trackedMinutes ?? 0) > 0;
 
   return (
@@ -211,4 +212,10 @@ function Reports() {
       </div>
     </>
   );
+}
+
+function formatHourLabel(hour: number): string {
+  if (hour === 0) return '12a';
+  if (hour === 12) return '12p';
+  return `${hour % 12}${hour < 12 ? 'a' : 'p'}`;
 }

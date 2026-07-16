@@ -18,7 +18,6 @@ type TodayEntry = { id: string; larkTaskGuid: string | null; segments: TodaySegm
 type ScreenshotItem = {
   id: string;
   capturedAt: number;
-  thumb: string | null;
   uploadState: string;
   keyboardPct: number;
   mousePct: number;
@@ -126,9 +125,15 @@ const api = {
     recent: (limit?: number): Promise<ScreenshotItem[]> => ipcRenderer.invoke('screenshots:recent', limit),
     countToday: (): Promise<number> => ipcRenderer.invoke('screenshots:countToday'),
     captureOnce: (): Promise<number> => ipcRenderer.invoke('screenshots:captureOnce'),
+    thumbnail: (id: string): Promise<string | null> => ipcRenderer.invoke('screenshots:thumbnail', id),
     full: (id: string): Promise<string | null> => ipcRenderer.invoke('screenshots:full', id),
     uploadSummary: (): Promise<ScreenshotUploadSummary> => ipcRenderer.invoke('screenshots:uploadSummary'),
     retryFailedUploads: (): Promise<{ reset: number }> => ipcRenderer.invoke('screenshots:retryFailedUploads'),
+    onChange: (cb: () => void): (() => void) => {
+      const sub = () => cb();
+      ipcRenderer.on('screenshots:changed', sub);
+      return () => ipcRenderer.off('screenshots:changed', sub);
+    },
   },
   permissions: {
     readiness: (): Promise<TrackingReadiness> => ipcRenderer.invoke('permissions:readiness'),

@@ -58,7 +58,7 @@ export default function LineChart({ points, labels, height = 200 }: Props) {
       <circle cx={peak[0]} cy={peak[1]} r={5} fill="#fff" stroke="#ff3d8b" strokeWidth={3} />
       {labels.map((l, i) => (
         <text
-          key={l}
+          key={`${i}-${l}`}
           x={padX + i * stepX}
           y={h - 2}
           textAnchor="middle"

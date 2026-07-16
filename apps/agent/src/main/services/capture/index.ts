@@ -15,6 +15,7 @@ import { SCREENSHOT_RETENTION_DAYS } from '../../env';
 import { getScreenshotIntervalSec } from '../agentConfig';
 import { type CaptureHealth } from '../permissions';
 import { log } from '../../logger';
+import { broadcastScreenshotChange } from './events';
 
 let store: ScreenshotStore | null = null;
 let timer: NodeJS.Timeout | null = null;
@@ -99,6 +100,7 @@ async function tick() {
       const { rows, health } = await captureNow(status.entryId);
       setScreenHealth(health);
       for (const r of rows) getStore().insert(r);
+      if (rows.length) broadcastScreenshotChange();
       // Push fresh shots to Cloudinary promptly (no-op if logged out/unconfigured).
       if (rows.length) void uploadScreenshotsNow(rows).finally(() => void drainUploads());
     }
@@ -218,7 +220,6 @@ export async function recentScreenshots(limit: number): Promise<
   {
     id: string;
     capturedAt: number;
-    thumb: string | null;
     uploadState: string;
     keyboardPct: number;
     mousePct: number;
@@ -251,12 +252,18 @@ export async function recentScreenshots(limit: number): Promise<
         uploadState: r.uploadState,
         attempts: r.attempts,
         lastError: r.lastError,
-        thumb: await thumbDataUrl(r.filePath),
         keyboardPct,
         mousePct,
       };
     }),
   );
+}
+
+/** Lazily load one thumbnail after its gallery tile approaches the viewport. */
+export async function thumbnailScreenshot(id: string): Promise<string | null> {
+  const row = getStore().find(id);
+  if (!row) return null;
+  return thumbDataUrl(row.filePath);
 }
 
 /** Full-resolution data URL for one screenshot (in-app lightbox). */
@@ -289,6 +296,7 @@ export async function captureOnce(): Promise<number> {
   setScreenHealth(health);
   for (const r of rows) getStore().insert(r);
   if (rows.length) {
+    broadcastScreenshotChange();
     await uploadScreenshotsNow(rows);
     void drainUploads();
   }

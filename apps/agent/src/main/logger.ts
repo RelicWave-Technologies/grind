@@ -14,16 +14,21 @@ import path from 'node:path';
 type Fields = Record<string, unknown> | undefined;
 
 const MAX_BYTES = 5 * 1024 * 1024; // rotate once main.log passes 5 MB
+const FLUSH_DELAY_MS = 1_000;
+const FLUSH_SIZE_BYTES = 64 * 1024;
+const ROTATION_CHECK_BYTES = 256 * 1024;
 let cachedLogFile: string | null = null;
 let fileDisabled = false;
-let sinceRotateCheck = 50; // start high so the first write checks immediately
+let pendingLines: string[] = [];
+let pendingBytes = 0;
+let bytesSinceRotateCheck = ROTATION_CHECK_BYTES;
+let flushTimer: NodeJS.Timeout | null = null;
+let writeChain = Promise.resolve();
 
 function resolveLogFile(): string | null {
   if (cachedLogFile || fileDisabled) return cachedLogFile;
   try {
-    const dir = path.join(app.getPath('userData'), 'logs');
-    fs.mkdirSync(dir, { recursive: true });
-    cachedLogFile = path.join(dir, 'main.log');
+    cachedLogFile = path.join(app.getPath('userData'), 'logs', 'main.log');
   } catch {
     fileDisabled = true; // e.g. app path unavailable in tests / no write access
   }
@@ -31,28 +36,72 @@ function resolveLogFile(): string | null {
 }
 
 /** Keep one previous file: main.log -> main.log.1 (overwriting the older one). */
-function rotateIfNeeded(file: string): void {
-  sinceRotateCheck += 1;
-  if (sinceRotateCheck < 50) return;
-  sinceRotateCheck = 0;
+async function rotateIfNeeded(file: string, incomingBytes: number): Promise<void> {
+  bytesSinceRotateCheck += incomingBytes;
+  if (bytesSinceRotateCheck < ROTATION_CHECK_BYTES) return;
+  bytesSinceRotateCheck = 0;
   try {
-    if (fs.statSync(file).size < MAX_BYTES) return;
-    fs.rmSync(`${file}.1`, { force: true });
-    fs.renameSync(file, `${file}.1`);
+    const size = await fs.promises.stat(file).then((stat) => stat.size, () => 0);
+    if (size + incomingBytes < MAX_BYTES) return;
+    await fs.promises.rm(`${file}.1`, { force: true });
+    await fs.promises.rename(file, `${file}.1`);
   } catch {
     // best-effort — a rotation hiccup must never break logging
   }
 }
 
-function writeToFile(line: string): void {
+async function appendBatch(lines: string[], bytes: number): Promise<void> {
   const file = resolveLogFile();
   if (!file) return;
   try {
-    rotateIfNeeded(file);
-    fs.appendFileSync(file, `${line}\n`); // sync so a crash can't lose the last lines
+    await fs.promises.mkdir(path.dirname(file), { recursive: true });
+    await rotateIfNeeded(file, bytes);
+    await fs.promises.appendFile(file, `${lines.join('\n')}\n`);
   } catch {
     fileDisabled = true; // stop hammering a broken sink
   }
+}
+
+function scheduleFlush(delayMs: number): void {
+  if (flushTimer) {
+    if (delayMs > 0) return;
+    clearTimeout(flushTimer);
+  }
+  flushTimer = setTimeout(() => {
+    flushTimer = null;
+    void flushLogs();
+  }, delayMs);
+  flushTimer.unref?.();
+}
+
+function writeToFile(line: string, urgent: boolean): void {
+  if (fileDisabled) return;
+  pendingLines.push(line);
+  pendingBytes += Buffer.byteLength(line) + 1;
+  if (urgent || pendingBytes >= FLUSH_SIZE_BYTES) void flushLogs();
+  else scheduleFlush(FLUSH_DELAY_MS);
+}
+
+/**
+ * Flush queued log lines in call order without blocking Electron's main loop.
+ * Multiple callers serialize through one promise chain; lines arriving during
+ * a flush are drained by the next pass.
+ */
+export async function flushLogs(): Promise<void> {
+  if (flushTimer) {
+    clearTimeout(flushTimer);
+    flushTimer = null;
+  }
+
+  while (pendingLines.length > 0 && !fileDisabled) {
+    const lines = pendingLines;
+    const bytes = pendingBytes;
+    pendingLines = [];
+    pendingBytes = 0;
+    writeChain = writeChain.then(() => appendBatch(lines, bytes));
+    await writeChain;
+  }
+  await writeChain;
 }
 
 function safeFields(fields?: Fields): string {
@@ -71,8 +120,8 @@ function fmt(level: string, msg: string, fields?: Fields): string {
 
 function emit(level: string, consoleFn: (msg: string) => void, msg: string, fields?: Fields): void {
   const line = fmt(level, msg, fields);
-  consoleFn(line);
-  writeToFile(line);
+  if (!app.isPackaged) consoleFn(line);
+  writeToFile(line, level === 'WARN' || level === 'ERROR');
 }
 
 export const log = {

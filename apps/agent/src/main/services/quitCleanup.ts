@@ -2,7 +2,7 @@ import { flushPartialActivity } from './activity';
 import { flushPreferences } from './preferences';
 import { getTimerService } from './timer';
 import type { TimerExitReason } from './timer/types';
-import { log } from '../logger';
+import { flushLogs, log } from '../logger';
 
 const QUIT_CLEANUP_TIMEOUT_MS = 5_000;
 
@@ -17,6 +17,7 @@ export interface QuitCleanupDeps {
   getTimer: () => TimerForQuit;
   flushPartialActivity: () => void;
   flushPreferences: () => Promise<unknown> | unknown;
+  flushLogs?: () => Promise<unknown> | unknown;
   logger?: QuitCleanupLogger;
   timeoutMs?: number;
   setTimeout?: typeof setTimeout;
@@ -92,6 +93,12 @@ export class QuitCleanupRunner {
     }
 
     this.logger.debug('quit cleanup finished', { reason });
+
+    try {
+      await this.withTimeout('logs', Promise.resolve(this.deps.flushLogs?.()));
+    } catch {
+      // Logging is best-effort and must never prevent a clean timer shutdown.
+    }
   }
 
   private withTimeout<T>(label: string, task: Promise<T>): Promise<T | null> {
@@ -121,6 +128,7 @@ const defaultRunner = new QuitCleanupRunner({
   getTimer: () => getTimerService(),
   flushPartialActivity,
   flushPreferences,
+  flushLogs,
   logger: log,
 });
 

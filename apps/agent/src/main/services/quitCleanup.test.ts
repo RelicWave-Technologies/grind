@@ -17,10 +17,12 @@ describe('QuitCleanupRunner', () => {
     const flushUnsynced = vi.fn().mockResolvedValue(undefined);
     const flushPartialActivity = vi.fn();
     const flushPreferences = vi.fn().mockResolvedValue(undefined);
+    const flushLogs = vi.fn().mockResolvedValue(undefined);
     const runner = new QuitCleanupRunner({
       getTimer: () => ({ prepareForQuit, flushUnsynced }),
       flushPartialActivity,
       flushPreferences,
+      flushLogs,
       logger: { debug: vi.fn(), warn: vi.fn() },
     });
 
@@ -30,6 +32,7 @@ describe('QuitCleanupRunner', () => {
     expect(prepareForQuit).toHaveBeenCalledWith('quit');
     expect(flushUnsynced).toHaveBeenCalledTimes(1);
     expect(flushPreferences).toHaveBeenCalledTimes(1);
+    expect(flushLogs).toHaveBeenCalledTimes(1);
     expect(runner.hasCompleted()).toBe(true);
   });
 

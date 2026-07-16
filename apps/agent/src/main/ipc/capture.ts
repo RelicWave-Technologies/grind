@@ -5,6 +5,7 @@ import {
   captureOnce,
   getScreenHealth,
   fullScreenshot,
+  thumbnailScreenshot,
   retryFailedUploads,
   screenshotUploadSummary,
 } from '../services/capture';
@@ -15,6 +16,7 @@ export function registerCaptureIpc(): void {
   ipcMain.handle('screenshots:countToday', () => todayScreenshotCount());
   ipcMain.handle('screenshots:captureOnce', () => captureOnce());
   ipcMain.handle('screenshots:full', (_e, id: string) => fullScreenshot(id));
+  ipcMain.handle('screenshots:thumbnail', (_e, id: string) => thumbnailScreenshot(id));
   ipcMain.handle('screenshots:uploadSummary', () => screenshotUploadSummary());
   ipcMain.handle('screenshots:retryFailedUploads', () => retryFailedUploads());
 

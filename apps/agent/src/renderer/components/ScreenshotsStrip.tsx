@@ -14,12 +14,10 @@ export default function ScreenshotsStrip() {
   const shots = useQuery({
     queryKey: ['screenshots'],
     queryFn: () => window.agent.screenshots.recent(8),
-    refetchInterval: 5000,
   });
   const uploads = useQuery({
     queryKey: ['screenshotsUploadSummary'],
     queryFn: () => window.agent.screenshots.uploadSummary(),
-    refetchInterval: 5000,
   });
 
   const capture = useMutation({

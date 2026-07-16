@@ -17,7 +17,6 @@ export type TodayEntry = { id: string; larkTaskGuid: string | null; segments: To
 export type ScreenshotItem = {
   id: string;
   capturedAt: number;
-  thumb: string | null;
   uploadState: string;
   keyboardPct: number;
   mousePct: number;
@@ -96,9 +95,11 @@ declare global {
         recent: (limit?: number) => Promise<ScreenshotItem[]>;
         countToday: () => Promise<number>;
         captureOnce: () => Promise<number>;
+        thumbnail: (id: string) => Promise<string | null>;
         full: (id: string) => Promise<string | null>;
         uploadSummary: () => Promise<ScreenshotUploadSummary>;
         retryFailedUploads: () => Promise<{ reset: number }>;
+        onChange: (cb: () => void) => () => void;
       };
       permissions: {
         readiness: () => Promise<TrackingReadiness>;

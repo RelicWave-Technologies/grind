@@ -19,6 +19,12 @@ export default function App() {
     return off;
   }, [qc]);
 
+  useEffect(() => window.agent.screenshots.onChange(() => {
+    void qc.invalidateQueries({ queryKey: ['screenshots'] });
+    void qc.invalidateQueries({ queryKey: ['shotsAll'] });
+    void qc.invalidateQueries({ queryKey: ['screenshotsUploadSummary'] });
+  }), [qc]);
+
   if (status.isLoading || status.data === undefined) {
     return <div className="login" />;
   }

@@ -8,6 +8,7 @@ import { api, HttpError, UnauthorizedError } from '../apiClient';
 import { log } from '../../logger';
 import { getScreenshotStore } from './index';
 import type { ScreenshotRow } from './store';
+import { broadcastScreenshotChange } from './events';
 
 /** Stop retrying a shot after this many failed attempts (Cloudinary/network). */
 const MAX_ATTEMPTS = 5;
@@ -116,11 +117,13 @@ async function handleUploadFailure(row: ScreenshotRow, err: unknown): Promise<vo
 
   if (decision.action === 'pending') {
     store.markPending(row.id, decision.lastError, decision.nextAttemptAt);
+    broadcastScreenshotChange();
     return;
   }
 
   if (decision.action === 'failed') {
     store.markTerminalFailed(row.id, decision.lastError);
+    broadcastScreenshotChange();
     await notifyServerFailed(row).catch((notifyErr) => {
       if (!isNonCountingFailure(notifyErr)) {
         log.debug('failed screenshot server audit update failed', { id: row.id, err: errText(notifyErr) });
@@ -130,6 +133,7 @@ async function handleUploadFailure(row: ScreenshotRow, err: unknown): Promise<vo
   }
 
   store.markRetryScheduled(row.id, decision.lastError, decision.nextAttemptAt);
+  broadcastScreenshotChange();
 }
 
 /**
@@ -148,6 +152,7 @@ async function uploadOne(row: ScreenshotRow): Promise<void> {
     });
 
     store.markUploading(row.id);
+    broadcastScreenshotChange();
     const buf = await fs.readFile(row.filePath);
 
     const form = new FormData();
@@ -188,6 +193,7 @@ async function uploadOne(row: ScreenshotRow): Promise<void> {
     });
 
     store.markUploaded(row.id, json.public_id ?? signed.publicId);
+    broadcastScreenshotChange();
     log.info('screenshot uploaded', { id: row.id });
   } catch (err) {
     await handleUploadFailure(row, err);
