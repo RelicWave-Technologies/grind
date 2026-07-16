@@ -21,8 +21,8 @@ import { api, type ApiError } from '../lib/api';
 import { addDays, fmtDurationMs, todayKey } from '../lib/format';
 import type { Team } from '../lib/types';
 import type { Role } from '../lib/auth';
-import type { MemberReportTopApp, TeamReportMember, TeamReportsResponse } from '@grind/types/reports';
-import { AppIcon } from '../components/AppIcon';
+import type { TeamReportSummaryMember } from '@grind/types/reports';
+import { reportQueryKeys, teamReportSummaryQuery } from '../lib/reportQueries';
 import {
   Avatar,
   Banner,
@@ -95,23 +95,20 @@ export function TeamsScreen() {
   const totalMembers = teams.reduce((sum, team) => sum + team.memberCount, 0);
   const managedTeams = teams.filter((team) => team.managerCount > 0).length;
   const selectedTeam = selectedTeamId ? teams.find((team) => team.id === selectedTeamId) ?? null : null;
-  const selectedMemberIds = useMemo(() => {
-    if (!selectedTeam) return new Set<string>();
-    return new Set((membersByTeam.get(selectedTeam.id) ?? []).map((member) => member.id));
-  }, [membersByTeam, selectedTeam]);
 
   const performanceQ = useQuery({
-    queryKey: ['reports', 'team', 'teams-drawer', performanceFrom, performanceTo, tz],
+    ...teamReportSummaryQuery({
+      from: performanceFrom,
+      to: performanceTo,
+      tz,
+      teamId: selectedTeamId ?? undefined,
+    }),
     enabled: Boolean(selectedTeamId),
-    queryFn: () => {
-      const params = new URLSearchParams({ from: performanceFrom, to: performanceTo, tz });
-      return api<TeamReportsResponse>(`/v1/reports/team?${params.toString()}`);
-    },
   });
   const selectedPerformanceMembers = useMemo(() => {
-    if (!performanceQ.data || selectedMemberIds.size === 0) return [];
-    return performanceQ.data.members.filter((member) => selectedMemberIds.has(member.user.id));
-  }, [performanceQ.data, selectedMemberIds]);
+    if (!performanceQ.data) return [];
+    return performanceQ.data.members;
+  }, [performanceQ.data]);
 
   const create = useMutation({
     mutationFn: (vars: { name: string; managerIds: string[] }) =>
@@ -133,7 +130,7 @@ export function TeamsScreen() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['admin', 'users'] });
       qc.invalidateQueries({ queryKey: ['admin', 'teams'] });
-      qc.invalidateQueries({ queryKey: ['reports', 'team'] });
+      qc.invalidateQueries({ queryKey: reportQueryKeys.teamSummaryRoot });
     },
   });
   const addManager = useMutation({
@@ -142,7 +139,7 @@ export function TeamsScreen() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['admin', 'users'] });
       qc.invalidateQueries({ queryKey: ['admin', 'teams'] });
-      qc.invalidateQueries({ queryKey: ['reports', 'team'] });
+      qc.invalidateQueries({ queryKey: reportQueryKeys.teamSummaryRoot });
     },
   });
   const removeManager = useMutation({
@@ -151,7 +148,7 @@ export function TeamsScreen() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['admin', 'users'] });
       qc.invalidateQueries({ queryKey: ['admin', 'teams'] });
-      qc.invalidateQueries({ queryKey: ['reports', 'team'] });
+      qc.invalidateQueries({ queryKey: reportQueryKeys.teamSummaryRoot });
     },
   });
 
@@ -570,7 +567,7 @@ function TeamDrawer({
   users: AdminUser[];
   teamByManagerId: Map<string, Team>;
   teamsById: Map<string, Team>;
-  performanceMembers: TeamReportMember[];
+  performanceMembers: TeamReportSummaryMember[];
   performanceFrom: string;
   performanceTo: string;
   performanceLoading: boolean;
@@ -751,7 +748,7 @@ function TeamPerformance({
   loading,
   error,
 }: {
-  members: TeamReportMember[];
+  members: TeamReportSummaryMember[];
   memberCount: number;
   from: string;
   to: string;
@@ -778,25 +775,8 @@ function TeamPerformance({
           <div className="tms-performance-grid">
             <PerformanceMetric label="Worked" value={fmtDurationMs(performance.workedMs)} hint={`${performance.activeMembers}/${memberCount} active`} />
             <PerformanceMetric label="Approved" value={fmtDurationMs(performance.manualMs)} hint="manual time" />
-            <PerformanceMetric label="Activity" value={percentLabel(performance.activityPercent)} hint="average" />
+            <PerformanceMetric label="Screenshots" value={performance.screenshots} hint="captured" />
             <PerformanceMetric label="Pending" value={performance.pendingApprovals} hint="approvals" />
-          </div>
-          <div className="tms-top-app">
-            <span className="ui-t-eyebrow">Top app</span>
-            {performance.topApp ? (
-              <span
-                className="tms-top-app__body"
-                title={performance.topApp.domain ? `${performance.topApp.domain}${performance.topApp.sourceApp ? ` · ${performance.topApp.sourceApp}` : ''}` : undefined}
-              >
-                <AppIcon name={performance.topApp.app} iconUrl={performance.topApp.iconUrl} />
-                <span>
-                  <strong className="ui-t-strong">{performance.topApp.app}</strong>
-                  <span className="ui-t-small">{fmtDurationMs(performance.topApp.minutes * 60_000)}</span>
-                </span>
-              </span>
-            ) : (
-              <span className="ui-t-small ui-ink-3">No app activity yet</span>
-            )}
           </div>
         </>
       )}
@@ -1003,43 +983,27 @@ function PersonLine({ user, icon, action }: { user: PersonLineUser; icon?: React
   );
 }
 
-function summarizePerformance(members: TeamReportMember[]) {
+function summarizePerformance(members: TeamReportSummaryMember[]) {
   let workedMs = 0;
   let manualMs = 0;
   let pendingApprovals = 0;
   let activeMembers = 0;
-  let activitySum = 0;
-  let activityCount = 0;
-  const apps = new Map<string, MemberReportTopApp>();
+  let screenshots = 0;
 
   for (const member of members) {
     workedMs += member.workedMs;
     manualMs += member.manualMs;
     pendingApprovals += member.approvals.pending;
     if (member.workedMs > 0) activeMembers += 1;
-    if (member.activityPercent !== null) {
-      activitySum += member.activityPercent;
-      activityCount += 1;
-    }
-    for (const app of member.topApps) {
-      const key = app.domain ? `site:${app.domain}` : `app:${app.app}\u0000${app.appBundle ?? ''}`;
-      const previous = apps.get(key);
-      if (previous) {
-        apps.set(key, { ...previous, minutes: previous.minutes + app.minutes });
-      } else {
-        apps.set(key, { ...app });
-      }
-    }
+    screenshots += member.screenshots;
   }
 
-  const topApp = [...apps.values()].sort((a, b) => b.minutes - a.minutes)[0] ?? null;
   return {
     workedMs,
     manualMs,
     pendingApprovals,
     activeMembers,
-    activityPercent: activityCount > 0 ? Math.round(activitySum / activityCount) : null,
-    topApp,
+    screenshots,
   };
 }
 
@@ -1055,10 +1019,6 @@ function formatShortRange(from: string, to: string) {
 function parseDateKey(key: string) {
   const [year, month, day] = key.split('-').map((part) => Number.parseInt(part, 10));
   return new Date(year!, month! - 1, day!);
-}
-
-function percentLabel(value: number | null) {
-  return value === null ? '—' : `${value}%`;
 }
 
 function availableManagerOptions(users: AdminUser[], teamByManagerId: Map<string, Team>, currentTeamId?: string) {

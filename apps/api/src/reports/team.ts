@@ -3,6 +3,7 @@ import type {
   MemberReportTopApp,
   TeamReportAttentionItem,
   TeamReportMember,
+  TeamReportsSummaryResponse,
   TeamReportsResponse,
   TeamReportUser,
 } from '@grind/types';
@@ -31,6 +32,54 @@ export function buildTeamReportsResponse(input: {
     days: input.range.days,
     summary,
     attention,
+    members,
+  };
+}
+
+export function buildTeamReportsSummaryResponse(input: {
+  range: ReportRange;
+  users: TeamReportUser[];
+  daysByUser: Map<string, MemberReportDay[]>;
+  screenshotCountByUser: Map<string, number>;
+}): TeamReportsSummaryResponse {
+  const members = input.users.map((user) => {
+    const member = summarizeMember(user, input.daysByUser.get(user.id) ?? []);
+    return {
+      user: member.user,
+      workedMs: member.workedMs,
+      manualMs: member.manualMs,
+      invalidatedMs: member.invalidatedMs,
+      activeDays: member.activeDays,
+      lateDays: member.lateDays,
+      onTimeDays: member.onTimeDays,
+      offDays: member.offDays,
+      noActivityDays: member.noActivityDays,
+      gapCount: member.gapCount,
+      gapMs: member.gapMs,
+      approvals: member.approvals,
+      screenshots: input.screenshotCountByUser.get(user.id) ?? 0,
+    };
+  });
+
+  return {
+    from: input.range.from,
+    to: input.range.to,
+    tz: input.range.tz,
+    days: input.range.days,
+    summary: {
+      memberCount: members.length,
+      workedMs: members.reduce((sum, member) => sum + member.workedMs, 0),
+      manualMs: members.reduce((sum, member) => sum + member.manualMs, 0),
+      invalidatedMs: members.reduce((sum, member) => sum + member.invalidatedMs, 0),
+      activeDays: members.reduce((sum, member) => sum + member.activeDays, 0),
+      memberDays: members.length * input.range.days.length,
+      lateDays: members.reduce((sum, member) => sum + member.lateDays, 0),
+      noActivityDays: members.reduce((sum, member) => sum + member.noActivityDays, 0),
+      gapCount: members.reduce((sum, member) => sum + member.gapCount, 0),
+      gapMs: members.reduce((sum, member) => sum + member.gapMs, 0),
+      pendingApprovals: members.reduce((sum, member) => sum + member.approvals.pending, 0),
+      screenshots: members.reduce((sum, member) => sum + member.screenshots, 0),
+    },
     members,
   };
 }

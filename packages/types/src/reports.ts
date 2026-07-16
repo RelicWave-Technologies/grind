@@ -90,6 +90,46 @@ export const TeamReportMemberSchema = z.object({
 });
 export type TeamReportMember = z.infer<typeof TeamReportMemberSchema>;
 
+export const TeamReportSummaryMemberSchema = z.object({
+  user: TeamReportUserSchema,
+  workedMs: z.number().int().min(0),
+  manualMs: z.number().int().min(0),
+  invalidatedMs: z.number().int().min(0),
+  activeDays: z.number().int().min(0),
+  lateDays: z.number().int().min(0),
+  onTimeDays: z.number().int().min(0),
+  offDays: z.number().int().min(0),
+  noActivityDays: z.number().int().min(0),
+  gapCount: z.number().int().min(0),
+  gapMs: z.number().int().min(0),
+  approvals: TeamReportApprovalCountsSchema,
+  screenshots: z.number().int().min(0),
+});
+export type TeamReportSummaryMember = z.infer<typeof TeamReportSummaryMemberSchema>;
+
+export const TeamReportsSummaryResponseSchema = z.object({
+  from: z.string(),
+  to: z.string(),
+  tz: z.string(),
+  days: z.array(z.string()),
+  summary: z.object({
+    memberCount: z.number().int().min(0),
+    workedMs: z.number().int().min(0),
+    manualMs: z.number().int().min(0),
+    invalidatedMs: z.number().int().min(0),
+    activeDays: z.number().int().min(0),
+    memberDays: z.number().int().min(0),
+    lateDays: z.number().int().min(0),
+    noActivityDays: z.number().int().min(0),
+    gapCount: z.number().int().min(0),
+    gapMs: z.number().int().min(0),
+    pendingApprovals: z.number().int().min(0),
+    screenshots: z.number().int().min(0),
+  }),
+  members: z.array(TeamReportSummaryMemberSchema),
+});
+export type TeamReportsSummaryResponse = z.infer<typeof TeamReportsSummaryResponseSchema>;
+
 export const TeamReportAttentionKindSchema = z.enum([
   'pending_approval',
   'late',
