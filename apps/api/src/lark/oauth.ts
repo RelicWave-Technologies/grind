@@ -10,13 +10,26 @@ import { LARK_SCOPE_STRING } from './config';
  * doubles as CSRF protection: a callback whose state doesn't verify is rejected.
  */
 
-export type OAuthState = { sub: string };
+export type OAuthReturnTarget = 'browser' | 'agent';
+export type AgentCallbackScheme = 'grind' | 'timo';
+
+export type OAuthState = {
+  sub: string;
+  returnTo: OAuthReturnTarget;
+  agentCallbackScheme?: AgentCallbackScheme;
+};
 
 // 10 minutes is plenty to complete an interactive authorize round-trip.
 const STATE_TTL_SECONDS = 600;
 
-export function signOAuthState(userId: string): string {
-  return jwt.sign({ sub: userId, kind: 'lark_oauth' }, env.JWT_SECRET, {
+export function signOAuthState(
+  userId: string,
+  opts: { returnTo?: OAuthReturnTarget; agentCallbackScheme?: AgentCallbackScheme } = {},
+): string {
+  const returnTo = opts.returnTo ?? 'browser';
+  const agentCallbackScheme = returnTo === 'agent' ? opts.agentCallbackScheme : undefined;
+  if (returnTo === 'agent' && !agentCallbackScheme) throw new Error('agent callback scheme is required');
+  return jwt.sign({ sub: userId, returnTo, agentCallbackScheme, kind: 'lark_oauth' }, env.JWT_SECRET, {
     algorithm: 'HS256',
     expiresIn: STATE_TTL_SECONDS,
   });
@@ -25,9 +38,20 @@ export function signOAuthState(userId: string): string {
 export function verifyOAuthState(token: string): OAuthState {
   const decoded = jwt.verify(token, env.JWT_SECRET, { algorithms: ['HS256'] });
   if (typeof decoded !== 'object' || !decoded) throw new Error('invalid state');
-  const { sub, kind } = decoded as Record<string, unknown>;
+  const { sub, kind, returnTo, agentCallbackScheme } = decoded as Record<string, unknown>;
   if (kind !== 'lark_oauth' || typeof sub !== 'string') throw new Error('malformed state');
-  return { sub };
+  // Existing browser-originated links predate returnTo. Preserve that safe default.
+  const resolvedReturnTo = returnTo === undefined ? 'browser' : returnTo;
+  if (resolvedReturnTo !== 'browser' && resolvedReturnTo !== 'agent') throw new Error('malformed state');
+  if (agentCallbackScheme !== undefined && agentCallbackScheme !== 'grind' && agentCallbackScheme !== 'timo') {
+    throw new Error('malformed state');
+  }
+  if (resolvedReturnTo === 'agent' && agentCallbackScheme === undefined) throw new Error('malformed state');
+  return {
+    sub,
+    returnTo: resolvedReturnTo,
+    agentCallbackScheme: agentCallbackScheme as AgentCallbackScheme | undefined,
+  };
 }
 
 /**
