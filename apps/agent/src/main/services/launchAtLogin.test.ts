@@ -131,7 +131,7 @@ describe('launch at login service', () => {
     });
   });
 
-  it('accepts only the current Windows path, hidden args, and approval', () => {
+  it('accepts the current Windows path when Windows reports startup approval', () => {
     const exe = 'C:\\Users\\Anish\\AppData\\Local\\Programs\\Timo\\Timo.exe';
     mocks.app.getLoginItemSettings.mockReturnValue(settings({
       openAtLogin: true,
@@ -143,6 +143,21 @@ describe('launch at login service', () => {
       ready: true,
       state: 'READY',
       openedAtLogin: true,
+    });
+  });
+
+  it('trusts an enabled current Windows startup item even when Windows reports the display description name', () => {
+    const exe = 'C:\\Users\\Anish\\AppData\\Local\\Programs\\Timo\\Timo.exe';
+    mocks.app.getLoginItemSettings.mockReturnValue(settings({
+      openAtLogin: false,
+      executableWillLaunchAtLogin: false,
+      launchItems: [item({ name: 'Timo time tracker desktop agent', args: [] })],
+    }));
+
+    expect(service('win32', exe).inspect()).toMatchObject({
+      ready: true,
+      state: 'READY',
+      remediation: 'NONE',
     });
   });
 
@@ -194,7 +209,7 @@ describe('launch at login service', () => {
         item({ name: 'Grind', path: 'C:\\Old\\Grind.exe' }),
         item({ name: 'Timo time tracker desktop agent', path: 'C:\\Old\\Timo\\Timo.exe' }),
         item({ path: 'C:\\Old\\Timo.exe' }),
-        item({ name: 'Timo Legacy', args: [] }),
+        item({ name: 'Timo Legacy', path: 'C:\\Old\\Timo\\Timo.exe', args: [] }),
       ],
     });
     const ready = settings({ openAtLogin: true, executableWillLaunchAtLogin: true, launchItems: [item()] });
@@ -208,7 +223,7 @@ describe('launch at login service', () => {
     expect(mocks.app.setLoginItemSettings).toHaveBeenCalledWith(expect.objectContaining({ openAtLogin: false, name: 'Grind' }));
     expect(mocks.app.setLoginItemSettings).toHaveBeenCalledWith(expect.objectContaining({ openAtLogin: false, name: 'Timo time tracker desktop agent', path: 'C:\\Old\\Timo\\Timo.exe' }));
     expect(mocks.app.setLoginItemSettings).toHaveBeenCalledWith(expect.objectContaining({ openAtLogin: false, name: 'Timo', path: 'C:\\Old\\Timo.exe' }));
-    expect(mocks.app.setLoginItemSettings).toHaveBeenCalledWith(expect.objectContaining({ openAtLogin: false, name: 'Timo Legacy', path: exe }));
+    expect(mocks.app.setLoginItemSettings).toHaveBeenCalledWith(expect.objectContaining({ openAtLogin: false, name: 'Timo Legacy', path: 'C:\\Old\\Timo\\Timo.exe' }));
   });
 
   it('keeps the canonical Windows startup item while removing duplicate Timo rows', () => {
@@ -238,6 +253,26 @@ describe('launch at login service', () => {
       name: 'Timo',
       path: exe,
       args: ['--hidden'],
+    }));
+  });
+
+  it('does not remove the current Windows startup item when Windows reports the display description name', () => {
+    const exe = 'C:\\Users\\Anish\\AppData\\Local\\Programs\\Timo\\Timo.exe';
+    const windowsDisplayItem = item({ name: 'Timo time tracker desktop agent', args: [] });
+    const state = settings({
+      openAtLogin: false,
+      executableWillLaunchAtLogin: false,
+      launchItems: [windowsDisplayItem],
+    });
+    mocks.app.getLoginItemSettings
+      .mockReturnValueOnce(state)
+      .mockReturnValueOnce(state);
+
+    expect(service('win32', exe).repair()).toMatchObject({ ready: true, state: 'READY' });
+    expect(mocks.app.setLoginItemSettings).not.toHaveBeenCalledWith(expect.objectContaining({
+      openAtLogin: false,
+      name: 'Timo time tracker desktop agent',
+      path: exe,
     }));
   });
 

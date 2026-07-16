@@ -84,9 +84,17 @@ function sameArgs(args: string[]): boolean {
   return args.length === 1 && args[0] === HIDDEN_ARG;
 }
 
+function sameWindowsPath(left: string, right: string): boolean {
+  return normalizeWindowsPath(left) === normalizeWindowsPath(right);
+}
+
+function isCurrentWindowsItem(item: WindowsLaunchItem, execPath: string): boolean {
+  return sameWindowsPath(item.path, execPath);
+}
+
 function isCanonicalWindowsItem(item: WindowsLaunchItem, execPath: string): boolean {
-  return item.name === WINDOWS_ITEM_NAME
-    && normalizeWindowsPath(item.path) === normalizeWindowsPath(execPath)
+  return (item.name === WINDOWS_ITEM_NAME || item.name === WINDOWS_DESCRIPTION_NAME)
+    && isCurrentWindowsItem(item, execPath)
     && sameArgs(item.args);
 }
 
@@ -94,9 +102,9 @@ function isOwnedWindowsStartupItem(item: WindowsLaunchItem, execPath: string): b
   const name = normalizeWindowsName(item.name);
   if (WINDOWS_OWNED_NAMES.has(name)) return true;
 
-  const normalizedPath = normalizeWindowsPath(item.path);
-  if (normalizedPath === normalizeWindowsPath(execPath)) return true;
+  if (sameWindowsPath(item.path, execPath)) return true;
 
+  const normalizedPath = normalizeWindowsPath(item.path);
   const executable = path.win32.basename(normalizedPath);
   if (executable === 'timo.exe' && normalizedPath.includes('\\timo\\')) return true;
   if (executable === 'grind.exe' && normalizedPath.includes('\\grind\\')) return true;
@@ -162,14 +170,14 @@ function inspectWindows(deps: LaunchAtLoginDeps, openedAtLogin: boolean): Launch
   try {
     const settings = deps.app.getLoginItemSettings(canonicalQuery(deps));
     const canonicalItem = settings.launchItems.find((item) => isCanonicalWindowsItem(item, deps.execPath));
+    const enabledCurrentItem = settings.launchItems.find((item) =>
+      isCurrentWindowsItem(item, deps.execPath) && item.enabled === true,
+    );
     const executableReady = settings.executableWillLaunchAtLogin === true;
-    if (settings.openAtLogin && executableReady && canonicalItem?.enabled === true) {
+    if (enabledCurrentItem || (settings.openAtLogin && executableReady && canonicalItem?.enabled === true)) {
       return result(deps, openedAtLogin, 'READY', 'NONE', false);
     }
-    const relatedItem = settings.launchItems.some((item) =>
-      item.name === WINDOWS_ITEM_NAME
-      || normalizeWindowsPath(item.path) === normalizeWindowsPath(deps.execPath),
-    );
+    const relatedItem = settings.launchItems.some((item) => isOwnedWindowsStartupItem(item, deps.execPath));
     if (settings.openAtLogin || relatedItem) {
       return result(deps, openedAtLogin, 'NEEDS_REPAIR', 'ENABLE_STARTUP', true);
     }
@@ -207,7 +215,8 @@ export function createLaunchAtLoginService(deps: LaunchAtLoginDeps) {
       const settings = deps.app.getLoginItemSettings();
       for (const item of settings.launchItems) {
         const canonical = isCanonicalWindowsItem(item, deps.execPath);
-        if (!canonical && isOwnedWindowsStartupItem(item, deps.execPath)) removeWindowsItem(item);
+        const current = isCurrentWindowsItem(item, deps.execPath);
+        if (!canonical && !current && isOwnedWindowsStartupItem(item, deps.execPath)) removeWindowsItem(item);
       }
     } catch {
       // Keep startup non-fatal; repair() will surface a blocked state.
