@@ -4,6 +4,8 @@ import { MonitorCheck, Power, CheckCircle2, AlertCircle, Keyboard, PictureInPict
 import larkIcon from '../assets/lark.svg';
 import { settingsUpdateSubtitle, updateAction, updatePercent } from '../lib/updateUi';
 
+type SettingsInfo = Awaited<ReturnType<typeof window.agent.settings.get>>;
+
 export default function Settings() {
   const qc = useQueryClient();
   const info = useQuery({ queryKey: ['settings'], queryFn: () => window.agent.settings.get(), refetchInterval: 4000 });
@@ -13,7 +15,16 @@ export default function Settings() {
 
   const repairLogin = useMutation({
     mutationFn: () => window.agent.settings.repairLaunchAtLogin(),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ['settings'] }),
+    onSuccess: (launchAtLogin) => {
+      qc.setQueryData<SettingsInfo | undefined>(
+        ['settings'],
+        (current) => current ? { ...current, launchAtLogin } : current,
+      );
+      if (launchAtLogin.remediation === 'OPEN_LOGIN_ITEMS' || launchAtLogin.remediation === 'OPEN_STARTUP_APPS') {
+        void window.agent.settings.openStartupPrefs();
+      }
+      void qc.invalidateQueries({ queryKey: ['settings'] });
+    },
   });
   const moveToApplications = useMutation({
     mutationFn: () => window.agent.settings.moveToApplications(),
@@ -104,7 +115,11 @@ export default function Settings() {
   const updatePercentValue = updatePercent(u);
   const updateSub = settingsUpdateSubtitle(u);
   const updateButton = updateAction(u, updateBusy || installUpdate.isPending);
-  const launch = info.data?.launchAtLogin;
+  const inspectedLaunch = info.data?.launchAtLogin;
+  const attemptedLaunch = repairLogin.data;
+  const launch = attemptedLaunch && !attemptedLaunch.ready && inspectedLaunch?.state !== 'READY'
+    ? attemptedLaunch
+    : inspectedLaunch;
   const launchText = !launch
     ? 'Checking startup status...'
     : launch.state === 'READY'
