@@ -1,7 +1,7 @@
 import { env } from '../env';
 
 /**
- * Lark scopes Grind requests. Mirrors the plan (§3.1). Kept here so the OAuth
+ * Lark scopes Timo requests. Mirrors the plan (§3.1). Kept here so the OAuth
  * authorize URL, the status endpoint, and tests all reference one list.
  */
 export const LARK_SCOPES = [
@@ -19,7 +19,7 @@ export const LARK_SCOPES = [
   'contact:user.id:readonly',
   'contact:user.employee_id:readonly',
   // Required so /authen/v1/user_info returns email/enterprise_email — the
-  // canonical identifier Grind matches on at login.
+  // canonical identifier Timo matches on at login.
   'contact:user.email:readonly',
   'offline_access',
 ] as const;
@@ -32,28 +32,60 @@ export type LarkConfig = {
   tokenKey: string;
   oauthHost: string;
   accountsHost: string;
-  redirectUri?: string;
+  loginRedirectUri?: string;
+  connectRedirectUri?: string;
 };
 
+function matchesCallbackPath(value: string | undefined, suffix: string): string | undefined {
+  if (!value) return undefined;
+  try {
+    const url = new URL(value);
+    return url.pathname.endsWith(suffix) ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function larkEnv() {
+  const legacyRedirectUri = process.env.LARK_OAUTH_REDIRECT_URI || env.LARK_OAUTH_REDIRECT_URI;
   return {
     appId: process.env.LARK_APP_ID || env.LARK_APP_ID,
     appSecret: process.env.LARK_APP_SECRET || env.LARK_APP_SECRET,
     tokenKey: process.env.LARK_TOKEN_KEY || env.LARK_TOKEN_KEY,
     oauthHost: process.env.LARK_OAUTH_HOST || env.LARK_OAUTH_HOST,
     accountsHost: process.env.LARK_ACCOUNTS_HOST || env.LARK_ACCOUNTS_HOST,
-    redirectUri: process.env.LARK_OAUTH_REDIRECT_URI || env.LARK_OAUTH_REDIRECT_URI,
+    loginRedirectUri:
+      process.env.LARK_LOGIN_REDIRECT_URI ||
+      env.LARK_LOGIN_REDIRECT_URI ||
+      matchesCallbackPath(legacyRedirectUri, '/v1/auth/lark/callback'),
+    connectRedirectUri:
+      process.env.LARK_CONNECT_REDIRECT_URI ||
+      env.LARK_CONNECT_REDIRECT_URI ||
+      matchesCallbackPath(legacyRedirectUri, '/v1/lark/oauth/callback'),
   };
 }
 
+function hasCredentialValues(cfg: ReturnType<typeof larkEnv>): boolean {
+  return Boolean(cfg.appId && cfg.appSecret && cfg.tokenKey);
+}
+
+export function hasLarkCredentials(): boolean {
+  return hasCredentialValues(larkEnv());
+}
+
 /**
- * True only when every credential needed to run the OAuth flow is present.
+ * True only when every credential needed to run task-connect OAuth is present.
  * The integration is disabled (not crashing) when creds are missing, so the
  * rest of the API runs fine in dev/CI without Lark configured.
  */
 export function isLarkConfigured(): boolean {
   const cfg = larkEnv();
-  return Boolean(cfg.appId && cfg.appSecret && cfg.tokenKey);
+  return hasCredentialValues(cfg) && Boolean(cfg.connectRedirectUri);
+}
+
+export function isLarkLoginConfigured(): boolean {
+  const cfg = larkEnv();
+  return hasCredentialValues(cfg) && Boolean(cfg.loginRedirectUri);
 }
 
 /**
@@ -72,6 +104,7 @@ export function getLarkConfig(): LarkConfig {
     tokenKey: cfg.tokenKey,
     oauthHost: cfg.oauthHost,
     accountsHost: cfg.accountsHost,
-    redirectUri: cfg.redirectUri,
+    loginRedirectUri: cfg.loginRedirectUri,
+    connectRedirectUri: cfg.connectRedirectUri,
   };
 }

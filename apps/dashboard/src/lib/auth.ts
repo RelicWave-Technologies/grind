@@ -4,8 +4,10 @@ import { api, ApiError, API_BASE } from './api';
 /** Full-page URL that starts the Lark OAuth login (a top-level navigation, not
  *  a fetch — the API redirects through Lark and back, setting the session
  *  cookie). The sole entry point now that passwords are gone. */
-export function larkLoginUrl(): string {
-  return `${API_BASE}/v1/auth/lark/start?client=dashboard`;
+export function larkLoginUrl(next?: string): string {
+  const params = new URLSearchParams({ client: 'dashboard' });
+  if (next) params.set('next', next);
+  return `${API_BASE}/v1/auth/lark/start?${params.toString()}`;
 }
 
 export type Role = 'ADMIN' | 'MANAGER' | 'MEMBER';

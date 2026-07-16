@@ -63,7 +63,7 @@ function finishOAuthConnect(
 }
 
 /**
- * OAuth callback — hit by the BROWSER (no Grind JWT). Mounted before the
+ * OAuth callback — hit by the BROWSER (no Timo JWT). Mounted before the
  * auth middleware. The signed `state` token identifies the initiating user and
  * provides CSRF protection.
  */
@@ -84,11 +84,11 @@ larkRouter.get('/oauth/callback', async (req, res) => {
 
     const { sub: userId } = oauthState;
 
-    const { redirectUri } = getLarkConfig();
-    if (!redirectUri) throw new Error('LARK_OAUTH_REDIRECT_URI not set');
+    const { connectRedirectUri } = getLarkConfig();
+    if (!connectRedirectUri) throw new Error('LARK_CONNECT_REDIRECT_URI not set');
 
     const tm = getTokenManager()!;
-    await tm.connect(userId, code, redirectUri);
+    await tm.connect(userId, code, connectRedirectUri);
 
     // Best-effort identity resolution; the OAuth connection still succeeds if
     // the tenant lookup fails (e.g. missing contact scope on the app).
@@ -108,7 +108,7 @@ larkRouter.get('/oauth/callback', async (req, res) => {
   }
 });
 
-// Everything below requires a Grind access token.
+// Everything below requires a Timo access token.
 larkRouter.use(requireAccessToken, attachScope);
 
 /**
@@ -118,8 +118,8 @@ larkRouter.use(requireAccessToken, attachScope);
 larkRouter.get('/oauth/start', (req, res) => {
   if (!req.user) return res.status(401).json({ error: 'unauthorized' });
   if (!isLarkConfigured()) return res.status(503).json({ error: 'lark_not_configured' });
-  const { accountsHost, appId, redirectUri } = getLarkConfig();
-  if (!redirectUri) return res.status(500).json({ error: 'redirect_uri_not_set' });
+  const { accountsHost, appId, connectRedirectUri } = getLarkConfig();
+  if (!connectRedirectUri) return res.status(500).json({ error: 'redirect_uri_not_set' });
   const returnTo = req.query.return_to === 'agent' ? 'agent' : 'browser';
   const agentCallbackScheme = returnTo === 'agent' ? parseAgentCallbackScheme(req.query.callback_scheme) : null;
   if (returnTo === 'agent' && !agentCallbackScheme) {
@@ -129,7 +129,7 @@ larkRouter.get('/oauth/start', (req, res) => {
     returnTo,
     agentCallbackScheme: agentCallbackScheme ?? undefined,
   });
-  const authorizeUrl = buildAuthorizeUrl({ accountsHost, appId, redirectUri, state });
+  const authorizeUrl = buildAuthorizeUrl({ accountsHost, appId, redirectUri: connectRedirectUri, state });
   res.json({ authorizeUrl });
 });
 

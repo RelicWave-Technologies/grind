@@ -80,5 +80,7 @@ services:
         sync: false
       - key: LARK_TOKEN_KEY
         sync: false
-      - key: LARK_OAUTH_REDIRECT_URI
+      - key: LARK_LOGIN_REDIRECT_URI
+        sync: false
+      - key: LARK_CONNECT_REDIRECT_URI
         sync: false

@@ -29,13 +29,14 @@ export function LoginScreen() {
   const [password, setPassword] = useState('password123');
   const [devError, setDevError] = useState<string | null>(null);
   const [devLoading, setDevLoading] = useState(false);
+  const nextPath = search.next && search.next.startsWith('/') && !search.next.startsWith('//') ? search.next : undefined;
 
   // Already logged in? Bounce straight to the dashboard.
   useEffect(() => {
     if (me.data) {
-      navigate({ to: '/' });
+      window.location.assign(nextPath ?? '/');
     }
-  }, [me.data, navigate]);
+  }, [me.data, nextPath]);
 
   const outcome = search.status === 'pending'
     ? OUTCOME_COPY.pending
@@ -46,11 +47,11 @@ export function LoginScreen() {
   async function signIn() {
     const current = await me.refetch();
     if (current.data) {
-      navigate({ to: '/' });
+      window.location.assign(nextPath ?? '/');
       return;
     }
     // Top-level navigation (not a fetch) so the OAuth redirect chain works.
-    window.location.assign(larkLoginUrl());
+    window.location.assign(larkLoginUrl(nextPath));
   }
 
   async function signInWithPassword(event: React.FormEvent<HTMLFormElement>) {

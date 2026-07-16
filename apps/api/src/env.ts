@@ -22,9 +22,12 @@ const EnvSchema = z.object({
   LARK_APP_SECRET: z.string().min(1).optional(),
   // 32-byte key (base64 or base64url) used to encrypt OAuth refresh tokens at rest.
   LARK_TOKEN_KEY: z.string().min(1).optional(),
-  // OAuth v2 host + redirect; sensible larksuite.com defaults.
+  // OAuth v2 hosts + redirects; sensible larksuite.com defaults.
   LARK_OAUTH_HOST: z.string().url().default('https://open.larksuite.com'),
   LARK_ACCOUNTS_HOST: z.string().url().default('https://accounts.larksuite.com'),
+  LARK_LOGIN_REDIRECT_URI: z.string().url().optional(),
+  LARK_CONNECT_REDIRECT_URI: z.string().url().optional(),
+  // Legacy single-redirect config. Prefer the two flow-specific values above.
   LARK_OAUTH_REDIRECT_URI: z.string().url().optional(),
   DASHBOARD_URL: z.string().url().optional(),
 

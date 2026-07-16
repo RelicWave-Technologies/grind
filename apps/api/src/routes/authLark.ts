@@ -7,7 +7,7 @@ import {
   type LarkLoginOutcome,
 } from '@grind/types';
 import {
-  isLarkConfigured,
+  isLarkLoginConfigured,
   getLarkConfig,
   getTokenManager,
   getProfileClient,
@@ -55,6 +55,20 @@ function dashboardBase(): string {
 type Terminal = { error?: LarkLoginOutcome; status?: 'pending' };
 type AgentCallbackScheme = 'grind' | 'timo';
 
+function safeDashboardNext(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  if (!value.startsWith('/') || value.startsWith('//') || /[\u0000-\u001F\u007F]/u.test(value)) return undefined;
+  return value;
+}
+
+function dashboardUrl(path: string, params?: Record<string, string | undefined>): string {
+  const url = new URL(path, `${dashboardBase()}/`);
+  for (const [key, value] of Object.entries(params ?? {})) {
+    if (value) url.searchParams.set(key, value);
+  }
+  return url.toString();
+}
+
 function parseAgentCallbackScheme(value: unknown): AgentCallbackScheme {
   return value === 'timo' ? 'timo' : 'grind';
 }
@@ -65,13 +79,18 @@ function finish(
   client: 'dashboard' | 'agent',
   t: Terminal,
   agentCallbackScheme: AgentCallbackScheme = 'grind',
+  nextPath?: string,
 ): void {
   const qs = t.error ? `error=${t.error}` : `status=${t.status ?? 'pending'}`;
   if (client === 'agent') {
     res.redirect(`${agentCallbackScheme}://auth?${qs}`);
     return;
   }
-  res.redirect(`${dashboardBase()}/login?${qs}`);
+  res.redirect(dashboardUrl('/login', {
+    error: t.error,
+    status: t.status ?? (t.error ? undefined : 'pending'),
+    next: nextPath,
+  }));
 }
 
 function setStateCookie(res: Response, nonce: string): void {
@@ -99,9 +118,9 @@ function clearStateCookie(res: Response): void {
 authLarkRouter.get('/start', (req, res) => {
   const client = req.query.client === 'agent' ? 'agent' : 'dashboard';
   const agentCallbackScheme = client === 'agent' ? parseAgentCallbackScheme(req.query.callback_scheme) : 'grind';
-  if (!isLarkConfigured()) return finish(res, client, { error: 'config' }, agentCallbackScheme);
+  if (!isLarkLoginConfigured()) return finish(res, client, { error: 'config' }, agentCallbackScheme);
   const cfg = getLarkConfig();
-  if (!cfg.redirectUri) return finish(res, client, { error: 'config' }, agentCallbackScheme);
+  if (!cfg.loginRedirectUri) return finish(res, client, { error: 'config' }, agentCallbackScheme);
 
   let agentChallenge: string | undefined;
   if (client === 'agent') {
@@ -110,16 +129,17 @@ authLarkRouter.get('/start', (req, res) => {
   }
 
   const nonce = crypto.randomBytes(16).toString('base64url');
+  const nextPath = client === 'dashboard' ? safeDashboardNext(req.query.next) : undefined;
   const state =
     client === 'agent'
       ? signLoginState({ nonce, client, agentChallenge, agentCallbackScheme })
-      : signLoginState({ nonce, client });
+      : signLoginState({ nonce, client, nextPath });
   if (client === 'dashboard') setStateCookie(res, nonce);
 
   const url = buildAuthorizeUrl({
     accountsHost: cfg.accountsHost,
     appId: cfg.appId,
-    redirectUri: cfg.redirectUri,
+    redirectUri: cfg.loginRedirectUri,
     state,
     scope: LARK_SCOPE_STRING, // already includes contact:user.email:readonly
   });
@@ -137,6 +157,7 @@ authLarkRouter.get('/callback', async (req, res, next) => {
     client: 'dashboard' | 'agent';
     agentChallenge?: string;
     agentCallbackScheme?: AgentCallbackScheme;
+    nextPath?: string;
   };
   try {
     payload = verifyLoginState(String(req.query.state ?? ''));
@@ -152,35 +173,35 @@ authLarkRouter.get('/callback', async (req, res, next) => {
   try {
     if (req.query.error) return finish(res, client, { error: 'denied' }, agentCallbackScheme);
     if (!req.query.code) return finish(res, client, { error: 'invalid_request' }, agentCallbackScheme);
-    if (!isLarkConfigured()) return finish(res, client, { error: 'config' }, agentCallbackScheme);
+    if (!isLarkLoginConfigured()) return finish(res, client, { error: 'config' }, agentCallbackScheme, payload.nextPath);
 
     // Dashboard CSRF: double-submit cookie must match the state nonce.
     if (client === 'dashboard') {
       const cookieNonce = (req.cookies as Record<string, string> | undefined)?.[STATE_COOKIE];
       if (!cookieNonce || cookieNonce !== payload.nonce) {
-        return finish(res, client, { error: 'state_invalid' }, agentCallbackScheme);
+        return finish(res, client, { error: 'state_invalid' }, agentCallbackScheme, payload.nextPath);
       }
     }
 
     const tm = getTokenManager();
     const pc = getProfileClient();
     const cfg = getLarkConfig();
-    if (!tm || !pc || !cfg.redirectUri) return finish(res, client, { error: 'config' }, agentCallbackScheme);
+    if (!tm || !pc || !cfg.loginRedirectUri) return finish(res, client, { error: 'config' }, agentCallbackScheme, payload.nextPath);
 
     // 1. Exchange code → tokens.
     let tokens;
     try {
-      tokens = await tm.exchangeCode(String(req.query.code), cfg.redirectUri);
+      tokens = await tm.exchangeCode(String(req.query.code), cfg.loginRedirectUri);
     } catch (err) {
-      if (err instanceof LarkTransientError) return finish(res, client, { error: 'temporary' }, agentCallbackScheme);
+      if (err instanceof LarkTransientError) return finish(res, client, { error: 'temporary' }, agentCallbackScheme, payload.nextPath);
       logger.warn({ err: String(err), nonce: payload.nonce }, 'lark login: code exchange failed');
-      return finish(res, client, { error: 'auth_failed' }, agentCallbackScheme);
+      return finish(res, client, { error: 'auth_failed' }, agentCallbackScheme, payload.nextPath);
     }
 
     // 2. Fetch profile.
     const profile = await pc.getProfile(tokens.accessToken);
-    if (!profile) return finish(res, client, { error: 'auth_failed' }, agentCallbackScheme);
-    if (!profile.email) return finish(res, client, { error: 'no_email' }, agentCallbackScheme);
+    if (!profile) return finish(res, client, { error: 'auth_failed' }, agentCallbackScheme, payload.nextPath);
+    if (!profile.email) return finish(res, client, { error: 'no_email' }, agentCallbackScheme, payload.nextPath);
 
     // 3. Resolve / provision.
     const user = await resolveUser(profile);
@@ -192,10 +213,10 @@ authLarkRouter.get('/callback', async (req, res, next) => {
       .persistTokens(user.id, tokens)
       .catch((err) => logger.warn({ err: String(err), userId: user.id }, 'lark login: token persist failed'));
 
-    if (user.deactivatedAt) return finish(res, client, { error: 'deactivated' }, agentCallbackScheme);
-    if (user.provisioningStatus !== 'ACTIVE') return finish(res, client, { status: 'pending' }, agentCallbackScheme);
+    if (user.deactivatedAt) return finish(res, client, { error: 'deactivated' }, agentCallbackScheme, payload.nextPath);
+    if (user.provisioningStatus !== 'ACTIVE') return finish(res, client, { status: 'pending' }, agentCallbackScheme, payload.nextPath);
 
-    // 5. Issue the Grind session.
+    // 5. Issue the Timo session.
     const accessToken = signAccessToken({ sub: user.id, ws: user.workspaceId, role: user.role });
     logger.info({ openId: profile.openId, userId: user.id, client }, 'lark login: session issued');
 
@@ -208,7 +229,7 @@ authLarkRouter.get('/callback', async (req, res, next) => {
     const { refreshToken } = await issueRefreshToken(user.id, 'dashboard');
     setSessionCookie(res, accessToken);
     setRefreshCookie(res, refreshToken);
-    return res.redirect(`${dashboardBase()}/`);
+    return res.redirect(dashboardUrl(payload.nextPath ?? '/'));
   } catch (err) {
     next(err);
   }

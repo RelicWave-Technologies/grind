@@ -9,7 +9,9 @@ import { seedUser } from './helpers';
 process.env.LARK_APP_ID = 'cli_test';
 process.env.LARK_APP_SECRET = 'secret';
 process.env.LARK_TOKEN_KEY = crypto.randomBytes(32).toString('base64');
-process.env.LARK_OAUTH_REDIRECT_URI = 'http://localhost:4000/v1/auth/lark/callback';
+process.env.LARK_LOGIN_REDIRECT_URI = 'http://localhost:4000/v1/auth/lark/callback';
+process.env.LARK_CONNECT_REDIRECT_URI = 'http://localhost:4000/v1/lark/oauth/callback';
+process.env.LARK_OAUTH_REDIRECT_URI = 'http://localhost:4000/legacy/should-not-be-used';
 process.env.LARK_ACCOUNTS_HOST = 'https://accounts.larksuite.com';
 process.env.DASHBOARD_URL = 'https://dash.example';
 process.env.LARK_BOOTSTRAP_ADMIN_EMAILS = 'boss@co.com';
@@ -39,7 +41,7 @@ const TOKENS: Tokens = {
 type Profile = { openId: string; unionId: string | null; name: string; email: string | null; avatarUrl: string | null };
 
 /** Inject a TokenManager around a fake OAuth client + a fake profile client. */
-function configure(opts: { exchange?: () => Promise<Tokens>; profile?: Profile | null }) {
+function configure(opts: { exchange?: (code: string, redirectUri: string) => Promise<Tokens>; profile?: Profile | null }) {
   const exchange = opts.exchange ?? (async () => TOKENS);
   const tm = new lark.TokenManager({
     prisma,
@@ -71,6 +73,7 @@ describe('GET /v1/auth/lark/start', () => {
     const loc = new URL(res.headers.location);
     expect(loc.origin).toBe('https://accounts.larksuite.com');
     expect(loc.searchParams.get('client_id')).toBe('cli_test');
+    expect(loc.searchParams.get('redirect_uri')).toBe('http://localhost:4000/v1/auth/lark/callback');
     expect(loc.searchParams.get('scope')).toContain('contact:user.email:readonly');
     expect(res.headers['set-cookie'].join(';')).toContain('grind_login_state=');
   });
@@ -90,11 +93,18 @@ describe('GET /v1/auth/lark/start', () => {
 
 describe('GET /v1/auth/lark/callback — dashboard', () => {
   it('issues a session for a bootstrap admin (ACTIVE) and redirects home', async () => {
-    configure({});
+    let exchangedRedirectUri: string | null = null;
+    configure({
+      exchange: async (_code, redirectUri) => {
+        exchangedRedirectUri = redirectUri;
+        return TOKENS;
+      },
+    });
     const state = lark.signLoginState({ nonce: 'n1', client: 'dashboard' });
     const res = await callback(state, { code: 'abc' }, 'n1');
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe('https://dash.example/');
+    expect(exchangedRedirectUri).toBe('http://localhost:4000/v1/auth/lark/callback');
     expect(res.headers['set-cookie'].join(';')).toContain('grind_at=');
     const u = await prisma.user.findFirst();
     expect(u?.role).toBe('ADMIN');
@@ -115,6 +125,30 @@ describe('GET /v1/auth/lark/callback — dashboard', () => {
     expect((res.headers['set-cookie'] ?? []).join(';')).not.toContain('grind_at=');
     const u = await prisma.user.findUnique({ where: { email: 'newbie@co.com' } });
     expect(u?.provisioningStatus).toBe('PENDING');
+  });
+
+  it('preserves a safe dashboard next path through the signed state', async () => {
+    configure({});
+    const start = await request(app).get('/v1/auth/lark/start?client=dashboard&next=%2Fedit-time%3Fdate%3D2026-07-16');
+    const loc = new URL(start.headers.location);
+    const state = loc.searchParams.get('state');
+    expect(state).toBeTruthy();
+
+    const payload = lark.verifyLoginState(state!);
+    expect(payload.nextPath).toBe('/edit-time?date=2026-07-16');
+
+    const res = await callback(state!, { code: 'abc' }, payload.nonce);
+    expect(res.headers.location).toBe('https://dash.example/edit-time?date=2026-07-16');
+  });
+
+  it('drops unsafe dashboard next paths', async () => {
+    const start = await request(app).get('/v1/auth/lark/start?client=dashboard&next=https%3A%2F%2Fevil.example');
+    const loc = new URL(start.headers.location);
+    const state = loc.searchParams.get('state');
+    expect(state).toBeTruthy();
+
+    const payload = lark.verifyLoginState(state!);
+    expect(payload.nextPath).toBeUndefined();
   });
 
   it('rejects a CSRF cookie/state mismatch', async () => {

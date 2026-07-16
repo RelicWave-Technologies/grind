@@ -1,5 +1,5 @@
 import { prisma } from '@grind/db';
-import { isLarkConfigured, getLarkConfig } from './config';
+import { hasLarkCredentials, getLarkConfig } from './config';
 import { TokenManager } from './tokenManager';
 import { HttpOAuthClient } from './oauthClient';
 import { HttpTenantClient, type TenantClient } from './identity';
@@ -7,7 +7,14 @@ import { HttpUserTaskClient, type UserTaskClient } from './tasks';
 import { HttpLarkMessenger, type LarkMessenger } from './messenger';
 import { HttpProfileClient, type ProfileClient } from './profile';
 
-export { isLarkConfigured, getLarkConfig, LARK_SCOPES, LARK_SCOPE_STRING } from './config';
+export {
+  hasLarkCredentials,
+  isLarkConfigured,
+  isLarkLoginConfigured,
+  getLarkConfig,
+  LARK_SCOPES,
+  LARK_SCOPE_STRING,
+} from './config';
 export { TokenManager } from './tokenManager';
 export { LarkReauthRequiredError, LarkTransientError } from './oauthClient';
 export type { OAuthClient, LarkTokenResponse } from './oauthClient';
@@ -66,7 +73,7 @@ let profileOverride: ProfileClient | null = null;
  */
 export function getTokenManager(): TokenManager | null {
   if (managerOverride) return managerOverride;
-  if (!isLarkConfigured()) return null;
+  if (!hasLarkCredentials()) return null;
   if (!manager) {
     manager = new TokenManager({
       prisma,
@@ -84,14 +91,14 @@ export function setTokenManagerForTests(m: TokenManager | null): void {
 
 /** Process-wide tenant client (email→open_id), lazily built once configured. */
 export function getTenantClient(): TenantClient | null {
-  if (!isLarkConfigured()) return null;
+  if (!hasLarkCredentials()) return null;
   if (!tenant) tenant = new HttpTenantClient();
   return tenant;
 }
 
 /** Process-wide user-task client (my_tasks), lazily built once configured. */
 export function getUserTaskClient(): UserTaskClient | null {
-  if (!isLarkConfigured()) return null;
+  if (!hasLarkCredentials()) return null;
   if (!taskClient) taskClient = new HttpUserTaskClient();
   return taskClient;
 }
@@ -104,7 +111,7 @@ export function getUserTaskClient(): UserTaskClient | null {
  */
 export function getLarkMessenger(): LarkMessenger | null {
   if (messengerOverride) return messengerOverride;
-  if (!isLarkConfigured()) return null;
+  if (!hasLarkCredentials()) return null;
   if (!messenger) messenger = new HttpLarkMessenger();
   return messenger;
 }
@@ -120,7 +127,7 @@ export function setLarkMessengerForTests(m: LarkMessenger | null): void {
  */
 export function getProfileClient(): ProfileClient | null {
   if (profileOverride) return profileOverride;
-  if (!isLarkConfigured()) return null;
+  if (!hasLarkCredentials()) return null;
   if (!profileClient) profileClient = new HttpProfileClient();
   return profileClient;
 }

@@ -72,9 +72,17 @@ export type LarkLoginStatePayload = {
   client: 'dashboard' | 'agent';
   agentChallenge?: string;
   agentCallbackScheme?: 'grind' | 'timo';
+  nextPath?: string;
 };
 
+function isSafeDashboardPath(value: string): boolean {
+  return value.startsWith('/') && !value.startsWith('//') && !/[\u0000-\u001F\u007F]/u.test(value);
+}
+
 export function signLoginState(payload: LarkLoginStatePayload): string {
+  if (payload.nextPath !== undefined && !isSafeDashboardPath(payload.nextPath)) {
+    throw new Error('unsafe dashboard return path');
+  }
   return jwt.sign({ ...payload, kind: 'lark_login' }, env.JWT_SECRET, {
     algorithm: 'HS256',
     expiresIn: STATE_TTL_SECONDS,
@@ -84,9 +92,12 @@ export function signLoginState(payload: LarkLoginStatePayload): string {
 export function verifyLoginState(token: string): LarkLoginStatePayload {
   const decoded = jwt.verify(token, env.JWT_SECRET, { algorithms: ['HS256'] });
   if (typeof decoded !== 'object' || !decoded) throw new Error('invalid state');
-  const { nonce, client, agentChallenge, agentCallbackScheme, kind } = decoded as Record<string, unknown>;
+  const { nonce, client, agentChallenge, agentCallbackScheme, nextPath, kind } = decoded as Record<string, unknown>;
   if (kind !== 'lark_login') throw new Error('malformed state');
   if (typeof nonce !== 'string' || (client !== 'dashboard' && client !== 'agent')) {
+    throw new Error('malformed state');
+  }
+  if (nextPath !== undefined && (typeof nextPath !== 'string' || !isSafeDashboardPath(nextPath))) {
     throw new Error('malformed state');
   }
   if (agentChallenge !== undefined && typeof agentChallenge !== 'string') {
@@ -100,6 +111,7 @@ export function verifyLoginState(token: string): LarkLoginStatePayload {
     client,
     agentChallenge: agentChallenge as string | undefined,
     agentCallbackScheme: agentCallbackScheme as 'grind' | 'timo' | undefined,
+    nextPath: nextPath as string | undefined,
   };
 }
 

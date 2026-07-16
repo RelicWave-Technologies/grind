@@ -189,7 +189,7 @@ Body: `{ code, codeVerifier }`.
 
 - Structured `pino` logs per phase keyed by `state.nonce` as a correlation id: `lark_login.start|callback.exchange_ok|profile_ok|provisioned|session_issued|denied|error{reason}` — **tokens/emails redacted** (log `open_id` + hashed email only).
 - Counters (log-derived): logins by outcome, pending-created, bootstrap-promotions.
-- `/healthz` unchanged; add a `/v1/auth/lark/diag` (admin-only) reporting `{configured, redirectUri, scopes, bootstrapEmailsSet}` for ops.
+- `/healthz` unchanged; add a `/v1/auth/lark/diag` (admin-only) reporting `{configured, loginRedirectUri, connectRedirectUri, scopes, bootstrapEmailsSet}` for ops.
 
 ---
 
@@ -205,9 +205,9 @@ Body: `{ code, codeVerifier }`.
 
 ## 11. Rollout
 
-1. Lark console: enable scopes (+`contact:user.email:readonly`), register redirect URI, copy App ID/Secret.
-2. Render env: `LARK_APP_ID, LARK_APP_SECRET, LARK_TOKEN_KEY (openssl rand -base64 32), LARK_OAUTH_REDIRECT_URI=https://grind-xcdr.onrender.com/v1/auth/lark/callback, LARK_BOOTSTRAP_ADMIN_EMAILS=abhishek@emiactech.com, WORKSPACE_ID=ws_default`. (Leave `ALLOW_PASSWORD_LOGIN` unset in prod.)
-3. Ship API (migration runs via `prisma migrate deploy` in the Render build) → deploy dashboard (Vercel) → ship signed/unsigned agent with the `grind://` protocol.
+1. Lark console: enable scopes (+`contact:user.email:readonly`), register both redirect URIs, copy App ID/Secret.
+2. Render env: `LARK_APP_ID, LARK_APP_SECRET, LARK_TOKEN_KEY (openssl rand -base64 32), LARK_LOGIN_REDIRECT_URI=https://timo.emiactech.com/v1/auth/lark/callback, LARK_CONNECT_REDIRECT_URI=https://timo.emiactech.com/v1/lark/oauth/callback, LARK_BOOTSTRAP_ADMIN_EMAILS=abhishek@emiactech.com, WORKSPACE_ID=ws_default`. (Leave `ALLOW_PASSWORD_LOGIN` unset in prod.)
+3. Ship API (migration runs via `prisma migrate deploy` in the Render build) → deploy dashboard (Vercel) → ship signed/unsigned agent with the `timo://` protocol.
 4. Bootstrap admin signs in → activates the team as they log in.
 5. Revert path: `passwordHash` is retained (nullable) + the dev shim, so password login can be re-enabled by flag without data loss.
 
@@ -218,7 +218,8 @@ Body: `{ code, codeVerifier }`.
 | Var | Where | Purpose |
 |---|---|---|
 | `LARK_APP_ID/_SECRET/_TOKEN_KEY` | Render | OAuth + refresh-token encryption (already in `env.ts`) |
-| `LARK_OAUTH_REDIRECT_URI` | Render | strict-match callback |
+| `LARK_LOGIN_REDIRECT_URI` | Render | strict-match callback for dashboard/agent sign-in |
+| `LARK_CONNECT_REDIRECT_URI` | Render | strict-match callback for task integration connect/reconnect |
 | `LARK_BOOTSTRAP_ADMIN_EMAILS` | Render (new) | comma-list → ACTIVE ADMIN on first login |
 | `WORKSPACE_ID` | Render (new, default `ws_default`) | idempotent single workspace |
 | `DASHBOARD_URL` | Render | post-login redirect allowlist + CORS |
