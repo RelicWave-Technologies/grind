@@ -97,7 +97,16 @@ export class TodayLedgerHydrator {
       this.deps.log.debug('discarded today ledger because hydration was disabled', { reason });
       return;
     }
-    if (response.entries.some((entry) => entry.userId !== owner.userId || entry.source !== 'AUTO')) {
+    const approvedManualEntries = response.approvedManualEntries ?? [];
+    if (
+      response.entries.some((entry) => entry.userId !== owner.userId || entry.source !== 'AUTO')
+      || approvedManualEntries.some((entry) => (
+        entry.userId !== owner.userId
+        || entry.source !== 'MANUAL'
+        || entry.endedAt === null
+        || entry.segments.some((segment) => segment.endedAt === null)
+      ))
+    ) {
       throw new Error('today_ledger_owner_mismatch');
     }
     this.deps.cache.replaceSnapshot(owner, window, response);
@@ -117,6 +126,10 @@ export class TodayLedgerHydrator {
       response.entries.map((entry) => ({ id: entry.id, clientUuid: entry.clientUuid })),
     );
     this.deps.onUpdated();
-    this.deps.log.debug('today ledger snapshot refreshed', { reason, entries: response.entries.length });
+    this.deps.log.debug('today ledger snapshot refreshed', {
+      reason,
+      autoEntries: response.entries.length,
+      approvedManualEntries: approvedManualEntries.length,
+    });
   }
 }

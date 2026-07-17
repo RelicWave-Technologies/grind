@@ -139,7 +139,7 @@ insightsRouter.get('/score', async (req, res, next) => {
 });
 
 /**
- * GET /v1/insights/day?date=YYYY-MM-DD&tz=IANA
+ * GET /v1/insights/day?date=YYYY-MM-DD&tz=IANA&gapScope=shift|calendar-day
  *
  * Powers the "Edit Time" tab. Returns the user's per-day timeline as a list
  * of mutually-disjoint, kind-tagged blocks (WORK / MEETING / IDLE_TRIMMED /
@@ -156,6 +156,14 @@ insightsRouter.get('/day', async (req, res, next) => {
     if (req.query.tz !== undefined && (typeof req.query.tz !== 'string' || !isValidTimeZone(req.query.tz))) {
       return res.status(400).json({ error: 'invalid_tz' });
     }
+    if (
+      req.query.gapScope !== undefined &&
+      req.query.gapScope !== 'shift' &&
+      req.query.gapScope !== 'calendar-day'
+    ) {
+      return res.status(400).json({ error: 'invalid_gap_scope' });
+    }
+    const gapScope = req.query.gapScope === 'calendar-day' ? 'calendar-day' : 'shift';
     const tz = req.scope.workspaceTimezone;
     const date = typeof req.query.date === 'string' ? req.query.date : dateKeyInTimeZone(new Date(), tz);
     const win = localDayWindow(date, tz);
@@ -167,11 +175,10 @@ insightsRouter.get('/day', async (req, res, next) => {
 
     const now = new Date();
 
-    // Resolve the day's frame from the user's shift: [shiftStart, shiftEnd] for
-    // the weekday, or the full calendar day when there's no shift / it's a day
-    // off. We still QUERY against the full calendar day (`win`) so any work that
-    // happened outside the shift is fetched — the builder expands the frame to
-    // include it rather than hiding it.
+    // Resolve the assigned shift independently from the requested gap scope.
+    // Most consumers retain shift-scoped gap metrics. Edit Time explicitly asks
+    // for a calendar-day partition so its outside-shift empty intervals use the
+    // same gap composer without redefining Home/Reports attendance semantics.
     const userRow = await prisma.user.findUnique({
       where: { id: userId },
       select: {
@@ -181,7 +188,7 @@ insightsRouter.get('/day', async (req, res, next) => {
     });
     const schedule = (userRow?.shift?.schedule as ShiftSchedule | null | undefined) ?? null;
     const shiftWin = schedule ? shiftDayWindow(date, tz, schedule) : null;
-    const frame = shiftWin ?? win;
+    const frame = gapScope === 'calendar-day' ? win : shiftWin ?? win;
     let shiftLabel: { name: string; start: string; end: string } | null = null;
     if (shiftWin && schedule && userRow?.shift) {
       const [yy, mm, dd] = date.split('-').map((n) => parseInt(n, 10));
@@ -283,6 +290,7 @@ insightsRouter.get('/day', async (req, res, next) => {
       window: frame,
       calendarDay: win,
       shift: shiftLabel,
+      shiftWindow: shiftWin,
       entries: insightEntries,
       pending: pending.map((p) => ({
         id: p.id,
@@ -347,6 +355,13 @@ insightsRouter.get('/day', async (req, res, next) => {
       role: (userRow?.activityRoleTitle ?? 'OTHER') as RoleTitle,
       bucketMs: DEFAULT_BUCKET_MS,
     });
+    const fullDayActivity = buildHeatmap({
+      dayStart: result.calendarDayStart,
+      dayEnd: result.calendarDayEnd,
+      samples: heatmapInput,
+      role: (userRow?.activityRoleTitle ?? 'OTHER') as RoleTitle,
+      bucketMs: DEFAULT_BUCKET_MS,
+    });
 
     // M14: top-N apps for the day. Server has already scrubbed disallowed
     // active fields per the workspace policy at ingestion time — when the
@@ -370,7 +385,7 @@ insightsRouter.get('/day', async (req, res, next) => {
       })),
     };
 
-    res.json({ ...resultForResponse, activity: heatmap, appUsage });
+    res.json({ ...resultForResponse, activity: heatmap, fullDayActivity, appUsage });
   } catch (err) {
     next(err);
   }

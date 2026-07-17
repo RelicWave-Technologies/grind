@@ -21,6 +21,9 @@ process.env.ALLOW_PASSWORD_LOGIN = 'true';
 delete process.env.LARK_APP_ID;
 delete process.env.LARK_APP_SECRET;
 delete process.env.LARK_TOKEN_KEY;
+delete process.env.LARK_LOGIN_REDIRECT_URI;
+delete process.env.LARK_CONNECT_REDIRECT_URI;
+delete process.env.LARK_OAUTH_REDIRECT_URI;
 
 // Keep Tester Ops tests deterministic regardless of the developer's local
 // private-DM smoke config.

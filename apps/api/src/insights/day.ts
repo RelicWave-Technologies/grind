@@ -92,24 +92,34 @@ export interface DayBlock {
 export interface DayInsightResult {
   date: string;
   timezone: string;
+  /** True local midnight-to-midnight bounds used by full-day visualizations. */
+  calendarDayStart: number;
+  calendarDayEnd: number;
+  /** Caller-selected review bounds used by the editable partition and gap totals. */
   dayStart: number;
   dayEnd: number;
   isFuture: boolean;
   isToday: boolean;
   /**
-   * The shift that framed this day's window (or null = no shift / day off →
-   * full-day 00:00–23:59). The window [dayStart,dayEnd] equals the shift bounds,
-   * EXPANDED to include any tracked/pending time that fell outside the shift so
-   * real time is never hidden.
+   * The assigned shift, when this is a scheduled workday. Its exact instants
+   * let clients mark the shift independently from the caller-selected review
+   * window. Edit Time may review the calendar day while reports stay bounded.
    */
-  shift: { name: string; start: string; end: string } | null;
+  shift: {
+    name: string;
+    start: string;
+    end: string;
+    startedAt: number;
+    endedAt: number;
+  } | null;
   firstActivityAt: number | null;
   lastActivityAt: number | null;
   totals: { workedMs: number; meetingMs: number; manualMs: number; idleTrimmedMs: number; pendingMs: number; gapMs: number };
   /**
-   * The single sorted partition: tracked · meeting · manual · idle · pending ·
-   * gap, contiguous and non-overlapping across [dayStart, dayEnd] (capped at
-   * `now` for today). PENDING blocks carry `requestId`/`reason`.
+   * The single sorted review partition: tracked · meeting · manual · idle ·
+   * pending · gap, contiguous and non-overlapping across [dayStart, dayEnd]
+   * (capped at `now` for today). No gap is fabricated outside the frame chosen
+   * by the caller.
    */
   blocks: DayBlock[];
   /**
@@ -409,6 +419,8 @@ export function buildDayInsight(input: {
   calendarDay?: { start: Date; end: Date };
   /** Shift label, or null when the window is the full calendar day. */
   shift?: { name: string; start: string; end: string } | null;
+  /** Exact shift instants. Defaults to `window` for backwards-compatible callers. */
+  shiftWindow?: { start: Date; end: Date } | null;
 }): DayInsightResult {
   const { date, tz, now, entries, pending, rejected = [], window: frame, shift = null } = input;
   const calendarDay = input.calendarDay ?? frame;
@@ -544,11 +556,19 @@ export function buildDayInsight(input: {
   return {
     date,
     timezone: tz,
+    calendarDayStart: calStart,
+    calendarDayEnd: calEnd,
     dayStart,
     dayEnd,
     isFuture,
     isToday,
-    shift,
+    shift: shift
+      ? {
+          ...shift,
+          startedAt: (input.shiftWindow ?? frame).start.getTime(),
+          endedAt: (input.shiftWindow ?? frame).end.getTime(),
+        }
+      : null,
     firstActivityAt,
     lastActivityAt,
     totals,

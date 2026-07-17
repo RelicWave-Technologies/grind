@@ -52,11 +52,21 @@ export class SqliteTodayLedgerStore implements ServerLedgerCache {
     response: TodayLedgerResponse,
     fetchedAt = Date.now(),
   ): void {
-    const entries = response.entries.map((raw) => TimeEntryDto.parse(raw));
-    if (entries.some((entry) => entry.userId !== owner.userId || entry.source !== 'AUTO')) {
+    const autoEntries = response.entries.map((raw) => TimeEntryDto.parse(raw));
+    const approvedManualEntries = (response.approvedManualEntries ?? []).map((raw) => TimeEntryDto.parse(raw));
+    if (autoEntries.some((entry) => entry.userId !== owner.userId || entry.source !== 'AUTO')) {
       throw new Error('today_ledger_owner_mismatch');
     }
-    const effectiveByEntry = validateEffectiveEntries(entries, response.effectiveEntries);
+    if (approvedManualEntries.some((entry) => (
+      entry.userId !== owner.userId
+      || entry.source !== 'MANUAL'
+      || entry.endedAt === null
+      || entry.segments.some((segment) => segment.endedAt === null)
+    ))) {
+      throw new Error('today_ledger_manual_entry_invalid');
+    }
+    const entries = [...autoEntries, ...approvedManualEntries];
+    const effectiveByEntry = validateEffectiveEntries(autoEntries, response.effectiveEntries);
     const serverTime = new Date(response.serverTime).getTime();
     if (!Number.isFinite(serverTime)) throw new Error('invalid_today_ledger_server_time');
 
@@ -86,7 +96,7 @@ export class SqliteTodayLedgerStore implements ServerLedgerCache {
           revision: entry.revision ?? 0,
           fetchedAt,
           json: JSON.stringify(entry),
-          effectiveJson: JSON.stringify(effectiveByEntry.get(entry.id)),
+          effectiveJson: JSON.stringify(effectiveByEntry.get(entry.id) ?? fallbackEffectiveEntry(entry)),
         });
       }
 

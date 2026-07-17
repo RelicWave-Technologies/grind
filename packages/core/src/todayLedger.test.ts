@@ -4,13 +4,19 @@ import type { TimeEntry } from './types';
 import { reconcileTodayLedger } from './todayLedger';
 import { canonicalTimerEntryPayload } from './timerLedger';
 
-function entry(id: string, revision: number, start: number, end: number | null): TimeEntry {
+function entry(
+  id: string,
+  revision: number,
+  start: number,
+  end: number | null,
+  source: TimeEntry['source'] = 'AUTO',
+): TimeEntry {
   return {
     id,
     clientUuid: `client-${id}`,
     userId: 'user-1',
     larkTaskGuid: null,
-    source: 'AUTO',
+    source,
     revision,
     startedAt: start,
     endedAt: end,
@@ -30,6 +36,24 @@ function server(entryValue: TimeEntry, effective = entryValue) {
 }
 
 describe('reconcileTodayLedger', () => {
+  it('includes approved manual time without double-counting overlaps', () => {
+    const tracked = entry('tracked', 1, 0, 60_000);
+    const approvedManual = entry('manual', 0, 30_000, 90_000, 'MANUAL');
+    const projection = reconcileTodayLedger({
+      local: [{ entry: tracked, syncState: 'synced' }],
+      server: [server(tracked), server(approvedManual)],
+      windowStart: 0,
+      windowEnd: 100_000,
+      now: 100_000,
+    });
+
+    expect(projection.workedMs).toBe(90_000);
+    expect(projection.entries.find((item) => item.entry.id === 'manual')).toMatchObject({
+      origin: 'SERVER',
+      pending: false,
+    });
+  });
+
   it('adds pending local time without duplicating server-confirmed time', () => {
     const confirmed = entry('confirmed', 2, 0, 4.5 * 60 * 60_000);
     const pending = entry('pending', 1, 4.5 * 60 * 60_000, 5 * 60 * 60_000);

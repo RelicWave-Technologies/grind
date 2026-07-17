@@ -21,6 +21,8 @@ import {
   IconButton,
   Tag,
   Banner,
+  Stat,
+  StatRow,
   SkeletonTable,
 } from '../ui';
 
@@ -41,7 +43,7 @@ interface AdminUser {
  * prefix) is pure LAYOUT.
  *
  * The rich, stateful functional core is PRESERVED byte-for-byte: the
- * shift-bounded DayRibbon, the ActivityHeatmap, and the editable
+ * full-day DayRibbon with a marked shift, the ActivityHeatmap, and the editable
  * EntryRow timesheet (with TimePopover / TaskCombo / attendee pickers) — every
  * prop, handler, mutation, and piece of state is unchanged. The timesheet keeps
  * the exact 6-column `<table>` contract EntryRow renders into.
@@ -117,11 +119,11 @@ export function MeTodayScreen() {
     retry: false,
   });
 
-  const dayKey = ['insights', 'day', date, tz, targetUserId];
+  const dayKey = ['insights', 'day', date, tz, targetUserId, 'calendar-day-gaps'];
   const dayQ = useQuery({
     queryKey: dayKey,
     queryFn: () => {
-      const params = new URLSearchParams({ date, tz });
+      const params = new URLSearchParams({ date, tz, gapScope: 'calendar-day' });
       if (targetUserId !== me.id) params.set('userId', targetUserId);
       return api<DayInsight>(`/v1/insights/day?${params.toString()}`);
     },
@@ -313,6 +315,22 @@ export function MeTodayScreen() {
     : 'Edit Time';
 
   const day = dayQ.data;
+  const countedMs = day
+    ? day.totals.workedMs + day.totals.meetingMs + day.totals.manualMs
+    : 0;
+  const calendarWindow = day
+    ? {
+        startedAt: day.calendarDayStart ?? day.dayStart,
+        endedAt: day.calendarDayEnd ?? day.dayEnd,
+      }
+    : null;
+  const shiftWindow = day?.shift?.startedAt !== undefined && day.shift.endedAt !== undefined
+    ? {
+        startedAt: day.shift.startedAt,
+        endedAt: day.shift.endedAt,
+        label: `${day.shift.name} · ${day.shift.start}–${day.shift.end}`,
+      }
+    : null;
 
   return (
     <Page className="myd-page">
@@ -371,15 +389,40 @@ export function MeTodayScreen() {
 
       {day && (
         <div className="myd-stack">
+          <Card variant="flush" className="ui-rise-1">
+            <StatRow aria-label="Day time summary">
+              <Stat
+                label="Total time"
+                value={fmtDurationMs(countedMs)}
+                hint="Tracked + meetings + approved manual"
+              />
+              <Stat
+                label="Tracked work"
+                value={fmtDurationMs(day.totals.workedMs)}
+                hint="Captured by Timo"
+              />
+              <Stat
+                label="Meetings"
+                value={fmtDurationMs(day.totals.meetingMs)}
+                hint="Tracked meeting time"
+              />
+              <Stat
+                label="Approved manual"
+                value={fmtDurationMs(day.totals.manualMs)}
+                hint="Confirmed adjustments only"
+              />
+            </StatRow>
+          </Card>
+
           {/* ---- Day stage: timeline ribbon + activity heatmap ---- */}
           <Card className="ui-rise-1 myd-stage-card">
             <div className="myd-stage-top">
               {day.shift && (
                 <div className="myd-stage-meta">
-                  <Tag status="neutral" mono>
-                    {day.shift.name} · {day.shift.start}–{day.shift.end}
-                  </Tag>
-                  <span className="ui-t-small myd-stage-note">Shift-bounded</span>
+                  <Tag status="neutral" mono>Full day</Tag>
+                  <span className="ui-t-small myd-stage-note">
+                    {day.shift.name} · {day.shift.start}–{day.shift.end} marked
+                  </span>
                 </div>
               )}
               {!day.shift && (
@@ -404,9 +447,15 @@ export function MeTodayScreen() {
                 editable={editable}
                 onClickEpoch={onRibbonClick}
                 onHoverRowId={setHighlightedRowId}
+                displayWindow={calendarWindow ?? undefined}
+                markedWindow={shiftWindow}
               />
-              {day.activity && day.activity.buckets.length > 0 && (
-                <ActivityHeatmap day={day} heatmap={day.activity} />
+              {(day.fullDayActivity ?? day.activity) && (
+                <ActivityHeatmap
+                  day={day}
+                  heatmap={(day.fullDayActivity ?? day.activity)!}
+                  window={day.fullDayActivity ? calendarWindow ?? undefined : undefined}
+                />
               )}
             </div>
 

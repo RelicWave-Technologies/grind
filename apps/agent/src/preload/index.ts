@@ -8,13 +8,14 @@ import type {
 import type { LaunchAtLoginHealth, MoveToApplicationsResult } from '../shared/launchAtLogin';
 import type { AttentionAction, AttentionActionResult, AttentionPrompt } from '../shared/attention';
 import type { WorkspaceTimeContext } from '../shared/workspaceTime';
+import type { TodayShiftWindow } from '../shared/shift';
 
 type AuthStatus = 'loggedIn' | 'loggedOut';
 type LarkOutcome = { kind: 'pending' } | { kind: 'error'; reason: string };
 type AgentStatus = { state: 'IDLE' | 'OFFLINE'; lastHeartbeatAt: string | null };
 type TimerRecoveryNotice = { entryId: string; recoveredAt: number; reason: 'unexpected_shutdown' | 'sleep_stop' | 'lock_stop' | 'server_finalized'; observedAt: number };
 type TodaySegment = { kind: 'WORK' | 'MEETING' | 'IDLE_TRIMMED'; startedAt: number; endedAt: number | null };
-type TodayEntry = { id: string; larkTaskGuid: string | null; segments: TodaySegment[] };
+type TodayEntry = { id: string; source: 'AUTO' | 'MANUAL'; larkTaskGuid: string | null; segments: TodaySegment[] };
 type ScreenshotItem = {
   id: string;
   capturedAt: number;
@@ -120,6 +121,7 @@ const api = {
   shift: {
     decide: (decision: 'yes' | 'not_yet'): Promise<void> => ipcRenderer.invoke('shift:decide', decision),
     refresh: (): Promise<void> => ipcRenderer.invoke('shift:refresh'),
+    today: (): Promise<TodayShiftWindow | null> => ipcRenderer.invoke('shift:today'),
   },
   screenshots: {
     recent: (limit?: number): Promise<ScreenshotItem[]> => ipcRenderer.invoke('screenshots:recent', limit),

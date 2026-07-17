@@ -10,6 +10,7 @@ import {
 } from './windows/overlay';
 
 const SIZES = {
+  IDLE_WARNING: { width: 340, height: 280 },
   IDLE: { width: 340, height: 280 },
   AWAY: { width: 320, height: 176 },
   PERMISSION: { width: 480, height: 332 },

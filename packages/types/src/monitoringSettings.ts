@@ -21,8 +21,10 @@ export const MonitoringSettingsAuditDto = z.object({
   targetUser: MonitoringSettingsAuditPerson.nullable(),
   previousScreenshotIntervalMin: z.number().int().nullable(),
   previousIdleThresholdMin: z.number().int().nullable(),
+  previousIdleWarningSeconds: z.number().int().nullable(),
   nextScreenshotIntervalMin: z.number().int().nullable(),
   nextIdleThresholdMin: z.number().int().nullable(),
+  nextIdleWarningSeconds: z.number().int().nullable(),
   reason: z.string().nullable(),
   createdAt: z.string().datetime({ offset: true }),
 });

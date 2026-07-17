@@ -7,13 +7,14 @@ import type {
 import type { LaunchAtLoginHealth, MoveToApplicationsResult } from '../../shared/launchAtLogin';
 import type { AttentionAction, AttentionActionResult, AttentionPrompt } from '../../shared/attention';
 import type { WorkspaceTimeContext } from '../../shared/workspaceTime';
+import type { TodayShiftWindow } from '../../shared/shift';
 
 type AuthStatus = 'loggedIn' | 'loggedOut';
 type LarkOutcome = { kind: 'pending' } | { kind: 'error'; reason: string };
 type AgentStatus = { state: 'IDLE' | 'OFFLINE'; lastHeartbeatAt: string | null };
 export type TimerRecoveryNotice = { entryId: string; recoveredAt: number; reason: 'unexpected_shutdown' | 'sleep_stop' | 'lock_stop' | 'server_finalized' | 'server_clock_corrected'; observedAt: number };
 export type TodaySegment = { kind: 'WORK' | 'MEETING' | 'IDLE_TRIMMED'; startedAt: number; endedAt: number | null };
-export type TodayEntry = { id: string; larkTaskGuid: string | null; segments: TodaySegment[] };
+export type TodayEntry = { id: string; source: 'AUTO' | 'MANUAL'; larkTaskGuid: string | null; segments: TodaySegment[] };
 export type ScreenshotItem = {
   id: string;
   capturedAt: number;
@@ -90,6 +91,7 @@ declare global {
       shift: {
         decide: (decision: 'yes' | 'not_yet') => Promise<void>;
         refresh: () => Promise<void>;
+        today: () => Promise<TodayShiftWindow | null>;
       };
       screenshots: {
         recent: (limit?: number) => Promise<ScreenshotItem[]>;

@@ -18,7 +18,11 @@ async function seedAgentConfig(input: {
     captureTitles?: boolean;
     captureUrls?: boolean;
   };
-  user?: { screenshotIntervalMin?: number | null; idleThresholdMin?: number | null };
+  user?: {
+    screenshotIntervalMin?: number | null;
+    idleThresholdMin?: number | null;
+    idleWarningSeconds?: number | null;
+  };
 }) {
   counter += 1;
   const stamp = `${Date.now()}-${counter}`;
@@ -49,6 +53,7 @@ async function seedAgentConfig(input: {
       passwordHash: 'x'.repeat(60),
       screenshotIntervalMin: input.user?.screenshotIntervalMin,
       idleThresholdMin: input.user?.idleThresholdMin,
+      idleWarningSeconds: input.user?.idleWarningSeconds,
     },
   });
   return {
@@ -70,6 +75,7 @@ describe('/v1/agent/config', () => {
     expect(res.body.configVersion).toEqual(expect.any(String));
     expect(res.body.screenshotIntervalMin).toBe(2);
     expect(res.body.idleThresholdMin).toBe(7);
+    expect(res.body.idleWarningSeconds).toBeNull();
     expect(res.body.captureApps).toBe(false);
     expect(res.body.captureTitles).toBe(false);
     expect(res.body.captureUrls).toBe(false);
@@ -88,6 +94,31 @@ describe('/v1/agent/config', () => {
     expect(res.status).toBe(200);
     expect(res.body.screenshotIntervalMin).toBe(1);
     expect(res.body.idleThresholdMin).toBe(12);
+  });
+
+  it('returns an enabled per-member idle warning and versions it', async () => {
+    const s = await seedAgentConfig({
+      policy: { defaultScreenshotIntervalMin: 3, defaultIdleThresholdMin: 5 },
+      user: { idleWarningSeconds: 30 },
+    });
+
+    const res = await request(app).get('/v1/agent/config').set(auth(s.token));
+
+    expect(res.status).toBe(200);
+    expect(res.body.idleWarningSeconds).toBe(30);
+    expect(res.body.configVersion).toContain('|30|');
+  });
+
+  it('defensively disables a stored warning that is not before the threshold', async () => {
+    const s = await seedAgentConfig({
+      policy: { defaultScreenshotIntervalMin: 3, defaultIdleThresholdMin: 1 },
+      user: { idleWarningSeconds: 60 },
+    });
+
+    const res = await request(app).get('/v1/agent/config').set(auth(s.token));
+
+    expect(res.status).toBe(200);
+    expect(res.body.idleWarningSeconds).toBeNull();
   });
 
   it('returns workspace capture policy flags to the agent', async () => {

@@ -42,6 +42,15 @@ export default function Today() {
   const larkTasks = useQuery({ queryKey: ['larkTasks'], queryFn: () => window.agent.lark.tasks(), refetchInterval: 60_000 });
   const recoveryNotice = useQuery({ queryKey: ['timerRecoveryNotice'], queryFn: () => window.agent.timer.recoveryNotice() });
   const workspaceTime = useWorkspaceTime();
+  const timeContext = workspaceTime.data;
+  const hasWorkspaceTime = workspaceTimeReady(timeContext);
+  const todayShift = useQuery({
+    queryKey: ['todayShift', timeContext?.date],
+    queryFn: () => window.agent.shift.today(),
+    enabled: hasWorkspaceTime,
+    staleTime: 60_000,
+    refetchInterval: 5 * 60_000,
+  });
   const [timer, setTimer] = useState<TimerStatus>({ state: 'IDLE', workedMs: 0 });
   const [now, setNow] = useState(() => Date.now());
   const [query, setQuery] = useState('');
@@ -158,8 +167,13 @@ export default function Today() {
   const pickerQuery = taskPickerQuery.trim().toLowerCase();
   const pickerTasks = pickerQuery === '' ? allOpenTasks : allOpenTasks.filter((task) => task.summary.toLowerCase().includes(pickerQuery));
   const canStartSelectedTask = !!selectedTask && !start.isPending;
-  const timeContext = workspaceTime.data;
-  const hasWorkspaceTime = workspaceTimeReady(timeContext);
+  const markedShift = todayShift.data
+    ? {
+        startedAt: todayShift.data.startedAt,
+        endedAt: todayShift.data.endedAt,
+        label: `${todayShift.data.name} · ${todayShift.data.start}–${todayShift.data.end}`,
+      }
+    : null;
 
   return (
     <>
@@ -295,7 +309,7 @@ export default function Today() {
             </div>
           )}
 
-          {entries.length > 0 && hasWorkspaceTime && (
+          {hasWorkspaceTime && (
             <>
               <div className="section-head"><span className="section-title">Today&rsquo;s activity</span></div>
               <div className="focus-card rise rise-2">
@@ -306,6 +320,7 @@ export default function Today() {
                   dayStart={timeContext.dayStart}
                   dayEnd={timeContext.dayEnd}
                   timeZone={timeContext.timeZone}
+                  markedWindow={markedShift}
                 />
                 <Legend />
               </div>

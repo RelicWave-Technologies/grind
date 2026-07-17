@@ -18,6 +18,7 @@ export interface RuntimeAgentConfig {
   configVersion: string | null;
   screenshotIntervalSec: number;
   idleThresholdSec: number;
+  idleWarningSeconds: number | null;
   captureApps: boolean;
   captureTitles: boolean;
   captureUrls: boolean;
@@ -42,6 +43,7 @@ export interface AgentConfigChange {
  */
 let screenshotIntervalSec = SCREENSHOT_INTERVAL_SEC;
 let idleThresholdSec = IDLE_THRESHOLD_SEC;
+let idleWarningSeconds: number | null = null;
 let dashboardUrl = '';
 let workspaceTimezone = 'UTC';
 let configVersion: string | null = null;
@@ -58,6 +60,9 @@ export function getScreenshotIntervalSec(): number {
 }
 export function getIdleThresholdSec(): number {
   return idleThresholdSec;
+}
+export function getIdleWarningSeconds(): number | null {
+  return idleWarningSeconds;
 }
 /** Web dashboard origin from the server config ('' until first successful fetch). */
 export function getDashboardUrl(): string {
@@ -86,6 +91,7 @@ function snapshot(): RuntimeAgentConfig {
     configVersion,
     screenshotIntervalSec,
     idleThresholdSec,
+    idleWarningSeconds,
     captureApps,
     captureTitles,
     captureUrls,
@@ -101,6 +107,7 @@ function sameConfig(a: RuntimeAgentConfig | null, b: RuntimeAgentConfig): boolea
       a.configVersion === b.configVersion &&
       a.screenshotIntervalSec === b.screenshotIntervalSec &&
       a.idleThresholdSec === b.idleThresholdSec &&
+      a.idleWarningSeconds === b.idleWarningSeconds &&
       a.captureApps === b.captureApps &&
       a.captureTitles === b.captureTitles &&
       a.captureUrls === b.captureUrls &&
@@ -137,6 +144,10 @@ async function applyAgentConfig(cfg: AgentConfigResponseType, requestedSession: 
   configVersion = cfg.configVersion || null;
   if (!SHOT_SEC_LOCKED) screenshotIntervalSec = Math.max(60, cfg.screenshotIntervalMin * 60);
   if (!IDLE_SEC_LOCKED) idleThresholdSec = Math.max(60, cfg.idleThresholdMin * 60);
+  idleWarningSeconds =
+    cfg.idleWarningSeconds != null && cfg.idleWarningSeconds < idleThresholdSec
+      ? cfg.idleWarningSeconds
+      : null;
   dashboardUrl = cfg.dashboardUrl ?? '';
   workspaceTimezone = nextWorkspaceTimezone;
   captureApps = Boolean(cfg.captureApps);
@@ -191,6 +202,7 @@ async function refreshAgentConfigOnce(requestedSession: StoredTokens): Promise<v
       configVersion,
       screenshotIntervalSec,
       idleThresholdSec,
+      idleWarningSeconds,
       captureApps,
       captureTitles,
       captureUrls,

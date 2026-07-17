@@ -21,10 +21,14 @@ interface Props {
    * (`entry-<id>`, `pending-<id>`, `gap-<startMs>`) or `null` to clear.
    */
   onHoverRowId?: (rowId: string | null) => void;
+  /** Optional visual range. The editable block partition remains `dayStart..dayEnd`. */
+  displayWindow?: { startedAt: number; endedAt: number };
+  /** Optional contextual range drawn behind the blocks, e.g. the assigned shift. */
+  markedWindow?: { startedAt: number; endedAt: number; label: string } | null;
 }
 
 const FIVE_MIN_MS = 5 * 60 * 1000;
-const HOUR_MS = 60 * 60 * 1000;
+const TICK_PROBE_MS = 15 * 60 * 1000;
 
 function snapToGrid(ms: number, stepMs = FIVE_MIN_MS): number {
   return Math.round(ms / stepMs) * stepMs;
@@ -86,23 +90,38 @@ function previewForHover(args: {
  *   - Clicking on a gap (or pre-/post-activity dead space) fires
  *     `onClickEpoch` so the parent's gap composer can preset.
  *
- * Always renders the full 24h window for axis stability across days.
+ * Uses the review window by default; callers may provide a full calendar-day
+ * display window without changing the editable block partition.
  */
-export function DayRibbon({ day, now, timeZone, editable = false, onClickEpoch, onHoverRowId }: Props) {
-  const span = day.dayEnd - day.dayStart;
-  const ticks = buildTicks(day.dayStart, day.dayEnd, timeZone);
-  const futureStartsAt = day.isToday ? now : day.isFuture ? day.dayStart : day.dayEnd;
+export function DayRibbon({
+  day,
+  now,
+  timeZone,
+  editable = false,
+  onClickEpoch,
+  onHoverRowId,
+  displayWindow,
+  markedWindow,
+}: Props) {
+  const displayStart = displayWindow?.startedAt ?? day.dayStart;
+  const displayEnd = displayWindow?.endedAt ?? day.dayEnd;
+  const span = displayEnd - displayStart;
+  const ticks = buildTimelineTicks(displayStart, displayEnd, timeZone);
+  const futureStartsAt = clamp(day.isToday ? now : day.isFuture ? displayStart : displayEnd, displayStart, displayEnd);
   const trackRef = useRef<HTMLDivElement>(null);
   const [hoverMs, setHoverMs] = useState<number | null>(null);
 
-  const pct = (ms: number) => `${((ms - day.dayStart) / span) * 100}%`;
+  const pct = (ms: number) => `${((ms - displayStart) / span) * 100}%`;
   const interactive = !!onClickEpoch;
+  const visibleMarkedWindow = markedWindow
+    ? clip(markedWindow.startedAt, markedWindow.endedAt, displayStart, displayEnd)
+    : null;
 
   function epochFromEvent(e: MouseEvent): number | null {
     if (!trackRef.current) return null;
     const rect = trackRef.current.getBoundingClientRect();
     const x = clamp(e.clientX - rect.left, 0, rect.width);
-    return Math.round(day.dayStart + (x / rect.width) * span);
+    return Math.round(displayStart + (x / rect.width) * span);
   }
 
   function handleMove(e: MouseEvent) {
@@ -117,7 +136,7 @@ export function DayRibbon({ day, now, timeZone, editable = false, onClickEpoch, 
   function handleClick(e: MouseEvent) {
     if (!onClickEpoch) return;
     const t = epochFromEvent(e);
-    if (t == null) return;
+    if (t == null || t < day.dayStart || t >= day.dayEnd) return;
     onClickEpoch(t);
   }
 
@@ -145,24 +164,37 @@ export function DayRibbon({ day, now, timeZone, editable = false, onClickEpoch, 
         onMouseLeave={handleLeave}
         onClick={handleClick}
       >
-        {futureStartsAt < day.dayEnd && (
+        {visibleMarkedWindow && (
+          <div
+            className="ribbon-marked-window"
+            style={{
+              left: pct(visibleMarkedWindow.startedAt),
+              width: `${((visibleMarkedWindow.endedAt - visibleMarkedWindow.startedAt) / span) * 100}%`,
+            }}
+            title={markedWindow?.label}
+          />
+        )}
+
+        {futureStartsAt < displayEnd && (
           <div
             className="ribbon-future"
-            style={{ left: pct(futureStartsAt), width: `${((day.dayEnd - futureStartsAt) / span) * 100}%` }}
+            style={{ left: pct(futureStartsAt), width: `${((displayEnd - futureStartsAt) / span) * 100}%` }}
           />
         )}
 
         {day.blocks.map((b, i) => {
           if (b.kind === 'GAP') return null; // gap is the absence of a block
+          const visible = clip(b.startedAt, b.endedAt, displayStart, displayEnd);
+          if (!visible) return null;
           const att = b.attendeeIds?.length ?? 0;
           const attSuffix = att > 0 ? ` · ${att} attendee${att === 1 ? '' : 's'}` : '';
-          const width = `${((b.endedAt - b.startedAt) / span) * 100}%`;
+          const width = `${((visible.endedAt - visible.startedAt) / span) * 100}%`;
           if (b.kind === 'PENDING') {
             return (
               <div
                 key={`b-${i}-${b.startedAt}`}
                 className="ribbon-pending"
-                style={{ left: pct(b.startedAt), width }}
+                style={{ left: pct(visible.startedAt), width }}
                 title={`Pending approval — ${b.reason ?? ''}${attSuffix}`}
                 onMouseEnter={() => onHoverRowId?.(`pending-${b.requestId}`)}
                 onMouseLeave={() => onHoverRowId?.(null)}
@@ -174,7 +206,7 @@ export function DayRibbon({ day, now, timeZone, editable = false, onClickEpoch, 
             <div
               key={`b-${i}-${b.startedAt}`}
               className={`ribbon-block ribbon-block-${b.kind.toLowerCase()}`}
-              style={{ left: pct(b.startedAt), width }}
+              style={{ left: pct(visible.startedAt), width }}
               title={`${b.kind} · ${fmtTime(b.startedAt, timeZone)} – ${fmtTime(b.endedAt, timeZone)}${attSuffix}`}
               onMouseEnter={() => onHoverRowId?.(rowId)}
               onMouseLeave={() => onHoverRowId?.(null)}
@@ -193,7 +225,9 @@ export function DayRibbon({ day, now, timeZone, editable = false, onClickEpoch, 
           />
         )}
 
-        {day.isToday && <div className="ribbon-now" style={{ left: pct(now) }} aria-hidden />}
+        {day.isToday && now >= displayStart && now < displayEnd && (
+          <div className="ribbon-now" style={{ left: pct(now) }} aria-hidden />
+        )}
 
         {hoverMs != null && (
           <div className="ribbon-hover-line" style={{ left: pct(hoverMs) }} aria-hidden />
@@ -222,11 +256,22 @@ export function DayRibbon({ day, now, timeZone, editable = false, onClickEpoch, 
   );
 }
 
-function buildTicks(dayStart: number, dayEnd: number, timeZone: string): Array<{ ms: number }> {
+function clip(
+  startedAt: number,
+  endedAt: number,
+  windowStart: number,
+  windowEnd: number,
+): { startedAt: number; endedAt: number } | null {
+  const visibleStart = Math.max(startedAt, windowStart);
+  const visibleEnd = Math.min(endedAt, windowEnd);
+  return visibleEnd > visibleStart ? { startedAt: visibleStart, endedAt: visibleEnd } : null;
+}
+
+export function buildTimelineTicks(dayStart: number, dayEnd: number, timeZone: string): Array<{ ms: number }> {
   const out: Array<{ ms: number }> = [];
-  const first = Math.ceil(dayStart / HOUR_MS) * HOUR_MS;
-  for (let t = first; t < dayEnd; t += HOUR_MS) {
-    if (zonedDateTimeParts(t, timeZone).hour % 3 !== 0) continue;
+  for (let t = dayStart; t < dayEnd; t += TICK_PROBE_MS) {
+    const parts = zonedDateTimeParts(t, timeZone);
+    if (parts.minute !== 0 || parts.second !== 0 || parts.hour % 3 !== 0) continue;
     out.push({ ms: t });
   }
   return out;

@@ -4,6 +4,12 @@ export type PermissionIntent = 'START_TASK' | 'RESUME_ENTRY' | 'SETUP';
 
 export type AttentionPrompt =
   | { kind: 'NONE' }
+  | {
+      kind: 'IDLE_WARNING';
+      promptId: string;
+      idleStartedAt: number;
+      deadlineAt: number;
+    }
   | { kind: 'IDLE'; promptId: string; idleStartedAt: number }
   | {
       kind: 'AWAY';
@@ -20,6 +26,7 @@ export type AttentionPrompt =
     };
 
 export type AttentionAction =
+  | 'IDLE_WARNING_CONTINUE'
   | 'IDLE_CONTINUE'
   | 'IDLE_BREAK'
   | 'AWAY_RESUME'

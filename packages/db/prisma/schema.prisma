@@ -277,6 +277,10 @@ model User {
   /// Per-member idle-threshold OVERRIDE in minutes. NULL = inherit the
   /// workspace policy default (WorkspacePolicy.defaultIdleThresholdMin).
   idleThresholdMin      Int?
+  /// Optional early idle warning for this member, in seconds. NULL means the
+  /// countdown is disabled. Admins own this setting; the idle threshold still
+  /// controls when tracked time is actually paused.
+  idleWarningSeconds    Int?
   /// Last heartbeat received from the desktop agent. Overview uses this as the
   /// live-status source of truth instead of inferring "green" from open rows.
   agentLastSeenAt       DateTime?
@@ -1108,8 +1112,10 @@ model MonitoringSettingsAudit {
   scope                         MonitoringSettingsScope
   previousScreenshotIntervalMin Int?
   previousIdleThresholdMin      Int?
+  previousIdleWarningSeconds    Int?
   nextScreenshotIntervalMin     Int?
   nextIdleThresholdMin          Int?
+  nextIdleWarningSeconds        Int?
   riskLevel                     MonitoringSettingsRiskLevel
   reason                        String?
   createdAt                     DateTime                    @default(now())

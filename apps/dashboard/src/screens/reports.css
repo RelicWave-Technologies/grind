@@ -1193,18 +1193,25 @@
   position: relative;
   display: grid;
   place-items: center;
+  width: 100%;
+  padding: 0;
+  border: 0;
   aspect-ratio: 16 / 10;
   background: var(--ui-surface-inset);
   color: var(--ui-ink-3);
+  cursor: pointer;
+  overflow: hidden;
 }
 
 .rep-shot-img img {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  transition: transform var(--ui-dur-base) var(--ui-ease);
 }
 
-.rep-shot-img svg {
+.rep-shot-img > svg,
+.rep-shot-empty > svg:last-child {
   position: absolute;
   right: var(--ui-sp-3);
   bottom: var(--ui-sp-3);
@@ -1214,8 +1221,204 @@
   padding: var(--ui-sp-1);
 }
 
+.rep-shot-img:hover img {
+  transform: scale(1.02);
+}
+
+.rep-shot-img:focus-visible,
+.rep-shot-empty:focus-visible,
+.rep-lightbox-thumb:focus-visible {
+  outline: none;
+  box-shadow: var(--ui-focus-ring);
+}
+
 .rep-shot-meta {
   padding: var(--ui-sp-3);
+}
+
+/* Focused screenshot viewer: a second modal layer above the activity gallery.
+   Counts are privacy-safe activity samples near the capture, never content. */
+.rep-lightbox-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: var(--ui-sp-4);
+  background: var(--ui-overlay);
+}
+
+.rep-lightbox {
+  display: flex;
+  flex-direction: column;
+  width: min(var(--ui-page-max), calc(100vw - var(--ui-sp-8)));
+  max-height: calc(100vh - var(--ui-sp-8));
+  overflow: hidden;
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-lg);
+  background: var(--ui-surface);
+  box-shadow: var(--ui-shadow-pop);
+}
+
+.rep-lightbox-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-sp-5);
+  padding: var(--ui-sp-4) var(--ui-sp-5);
+  border-bottom: 1px solid var(--ui-line);
+}
+
+.rep-lightbox-head-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-sp-3);
+  flex: 0 0 auto;
+}
+
+.rep-lightbox-content {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(calc(var(--ui-sp-12) * 5), calc(var(--ui-sp-12) * 6));
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.rep-lightbox-media {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  min-height: calc(var(--ui-sp-12) * 7);
+  overflow: hidden;
+  background: var(--ui-ink);
+}
+
+.rep-lightbox-media > img {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  object-fit: contain;
+}
+
+.rep-lightbox-missing {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--ui-sp-3);
+  color: var(--ui-ink-disabled);
+}
+
+.rep-lightbox-arrow.ui-btn {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  background: var(--ui-surface);
+  box-shadow: var(--ui-shadow-pop);
+}
+
+.rep-lightbox-arrow--previous {
+  left: var(--ui-sp-4);
+}
+
+.rep-lightbox-arrow--next {
+  right: var(--ui-sp-4);
+}
+
+.rep-lightbox-details {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-sp-5);
+  min-width: 0;
+  overflow: auto;
+  padding: var(--ui-sp-5);
+  border-left: 1px solid var(--ui-line);
+}
+
+.rep-lightbox-note {
+  margin: var(--ui-sp-1) 0 0;
+  color: var(--ui-ink-3);
+}
+
+.rep-shot-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--ui-sp-3);
+}
+
+.rep-shot-metric {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-sp-2);
+  min-width: 0;
+  padding: var(--ui-sp-4);
+  border-radius: var(--ui-r-md);
+  background: var(--ui-surface-inset);
+}
+
+.rep-shot-metric .ui-t-num {
+  font-size: calc(var(--ui-sp-5) + var(--ui-sp-1));
+}
+
+.rep-shot-facts {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  border-top: 1px solid var(--ui-line-faint);
+}
+
+.rep-shot-fact {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--ui-sp-4);
+  min-height: var(--ui-row-h);
+  border-bottom: 1px solid var(--ui-line-faint);
+}
+
+.rep-shot-fact dt {
+  color: var(--ui-ink-3);
+}
+
+.rep-shot-fact dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--ui-ink);
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.rep-lightbox-strip {
+  display: flex;
+  gap: var(--ui-sp-2);
+  padding: var(--ui-sp-3) var(--ui-sp-5);
+  overflow-x: auto;
+  border-top: 1px solid var(--ui-line);
+  background: var(--ui-surface-sunken);
+}
+
+.rep-lightbox-thumb {
+  flex: 0 0 calc(var(--ui-sp-12) + var(--ui-sp-5));
+  width: calc(var(--ui-sp-12) + var(--ui-sp-5));
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: var(--ui-r-sm);
+  aspect-ratio: 16 / 10;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  background: var(--ui-surface-inset);
+  color: var(--ui-ink-3);
+  cursor: pointer;
+}
+
+.rep-lightbox-thumb.is-selected {
+  border-color: var(--ui-accent);
+}
+
+.rep-lightbox-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 @media (max-width: 54rem) {
@@ -1293,6 +1496,31 @@
 
   .rep-modal {
     max-height: calc(100vh - var(--ui-sp-6));
+  }
+
+  .rep-lightbox-backdrop {
+    padding: var(--ui-sp-2);
+  }
+
+  .rep-lightbox {
+    width: calc(100vw - var(--ui-sp-4));
+    max-height: calc(100vh - var(--ui-sp-4));
+  }
+
+  .rep-lightbox-content {
+    grid-template-columns: 1fr;
+    overflow: auto;
+  }
+
+  .rep-lightbox-media {
+    min-height: 0;
+    aspect-ratio: 16 / 10;
+  }
+
+  .rep-lightbox-details {
+    overflow: visible;
+    border-top: 1px solid var(--ui-line);
+    border-left: 0;
   }
 
   .rep-app-row {

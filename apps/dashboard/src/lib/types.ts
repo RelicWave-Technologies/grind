@@ -60,12 +60,22 @@ export interface AppUsageInsight {
 export interface DayInsight {
   date: string;
   timezone: string;
+  /** True local midnight-to-midnight bounds. Optional while older APIs roll out. */
+  calendarDayStart?: number;
+  calendarDayEnd?: number;
+  /** Caller-selected review bounds used by editable blocks and gap totals. */
   dayStart: number;
   dayEnd: number;
   isFuture: boolean;
   isToday: boolean;
-  /** Shift that framed the day, or null = no shift / day off → full 00:00–23:59. */
-  shift: { name: string; start: string; end: string } | null;
+  /** Assigned shift marker, or null on an unassigned/day-off calendar day. */
+  shift: {
+    name: string;
+    start: string;
+    end: string;
+    startedAt?: number;
+    endedAt?: number;
+  } | null;
   firstActivityAt: number | null;
   lastActivityAt: number | null;
   totals: { workedMs: number; meetingMs: number; manualMs: number; idleTrimmedMs: number; pendingMs: number; gapMs: number; invalidatedMs?: number };
@@ -73,6 +83,8 @@ export interface DayInsight {
   blocks: DayBlock[];
   recentRejected: RejectedRequest[];
   activity?: ActivityHeatmap;
+  /** Full calendar-day activity. Falls back to `activity` against older APIs. */
+  fullDayActivity?: ActivityHeatmap;
   appUsage?: AppUsageInsight;
 }
 

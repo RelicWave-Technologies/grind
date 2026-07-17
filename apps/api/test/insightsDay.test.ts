@@ -35,6 +35,15 @@ describe('GET /v1/insights/day — validation', () => {
     expect(res.status).toBe(400);
   });
 
+  it('400 on an unknown gap scope', async () => {
+    const u = await seedUser();
+    const res = await request(app)
+      .get('/v1/insights/day?date=2026-05-30&tz=UTC&gapScope=everything')
+      .set(auth(u.accessToken));
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('invalid_gap_scope');
+  });
+
   it('uses the workspace timezone even when an older client sends a different valid device timezone', async () => {
     const u = await seedUser();
     await prisma.workspace.update({

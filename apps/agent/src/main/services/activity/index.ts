@@ -27,6 +27,7 @@ let started = false;
 let hookRunning = false;
 let lastHookError: string | null = null;
 const captureStatusListeners = new Set<(status: ActivityCaptureStatus) => void>();
+const trackedInputListeners = new Set<() => void>();
 // Throttle mousemove processing: the OS fires it at the pointer's full poll rate
 // (often 125Hz+); sampling at ~20Hz is ample for distance / speed-CV metrics.
 let lastMoveTs = 0;
@@ -145,9 +146,19 @@ export function onActivityCaptureStatusChange(listener: (status: ActivityCapture
   return () => captureStatusListeners.delete(listener);
 }
 
+export function onTrackedInputActivity(listener: () => void): () => void {
+  trackedInputListeners.add(listener);
+  return () => trackedInputListeners.delete(listener);
+}
+
 function emitCaptureStatus(): void {
   const status = getActivityCaptureStatus();
   for (const listener of captureStatusListeners) listener(status);
+}
+
+function emitTrackedInputActivity(): void {
+  if (!recording) return;
+  for (const listener of trackedInputListeners) listener();
 }
 
 export function getActivityCaptureStatus(): ActivityCaptureStatus {
@@ -178,13 +189,23 @@ export function startActivityCapture(): void {
   sealer = new MinuteSealer({ now: () => Date.now(), persist: persistSample });
   sealer.setRecording(recording, recordingEntryId); // seed current state
 
-  uIOhook.on('keydown', () => sealer!.onKey(Date.now()));
-  uIOhook.on('mousedown', () => sealer!.onClick());
-  uIOhook.on('wheel', () => sealer!.onScroll());
+  uIOhook.on('keydown', () => {
+    emitTrackedInputActivity();
+    sealer!.onKey(Date.now());
+  });
+  uIOhook.on('mousedown', () => {
+    emitTrackedInputActivity();
+    sealer!.onClick();
+  });
+  uIOhook.on('wheel', () => {
+    emitTrackedInputActivity();
+    sealer!.onScroll();
+  });
   uIOhook.on('mousemove', (e) => {
     const t = Date.now();
     if (t - lastMoveTs < MOVE_THROTTLE_MS) return;
     lastMoveTs = t;
+    emitTrackedInputActivity();
     sealer!.onMove(t, e.x, e.y);
   });
 

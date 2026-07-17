@@ -236,6 +236,7 @@ export function buildMemberReportDays(input: {
       window: shift.window ?? win,
       calendarDay: win,
       shift: shift.label,
+      shiftWindow: shift.window,
       entries: dayEntries.map((e) => ({
         id: e.id,
         source: e.source,
@@ -452,6 +453,10 @@ export function buildMemberReportScreenshots(input: {
         blurred: s.blurred,
         invalidated,
         activityPercent: sample ? Math.round(100 * scoreSample(sample, input.activityRoleTitle, meetingIntervals)) : null,
+        keystrokes: sample?.keystrokes ?? null,
+        clicks: sample?.clicks ?? null,
+        scrolls: sample?.scrollEvents ?? null,
+        mouseDistancePx: sample?.mouseDistancePx ?? null,
         dominantApp: sample?.activeApp ?? null,
         dominantAppBundle: sample?.activeAppBundle ?? null,
         timeEntryId: s.timeEntryId,

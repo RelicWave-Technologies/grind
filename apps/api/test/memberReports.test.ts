@@ -443,6 +443,10 @@ describe('/v1/reports/me', () => {
     expect(shot.thumbUrl).toBe(`/v1/screenshots/${encodeURIComponent(shot.id)}/image?variant=thumb`);
     expect(shot.fullUrl).not.toContain('assets.example.test');
     expect(shot.dominantApp).toBe('Code');
+    expect(shot.keystrokes).toBe(12);
+    expect(shot.clicks).toBe(4);
+    expect(shot.scrolls).toBe(1);
+    expect(shot.mouseDistancePx).toBe(600);
   });
 
   it('streams permitted screenshot bytes through the authenticated image route', async () => {

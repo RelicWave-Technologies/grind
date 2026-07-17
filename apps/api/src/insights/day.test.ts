@@ -440,6 +440,38 @@ describe('shiftDayWindow', () => {
 });
 
 describe('buildDayInsight — shift-bounded frame', () => {
+  it('can review the full calendar day while retaining the assigned shift marker', () => {
+    const calendarDay = makeWindow('2026-06-01', 'UTC');
+    const r = buildDayInsight({
+      date: '2026-06-01',
+      tz: 'UTC',
+      now: date('2026-06-02T00:00:00Z'),
+      entries: [
+        {
+          id: 'a',
+          source: 'AUTO',
+          larkTaskGuid: null,
+          segments: [{ kind: 'WORK', startedAt: date('2026-06-01T10:00:00Z'), endedAt: date('2026-06-01T11:00:00Z') }],
+        },
+      ],
+      pending: [],
+      window: calendarDay,
+      calendarDay,
+      shift: { name: 'Day', start: '09:00', end: '18:00' },
+      shiftWindow: shiftDayWindow('2026-06-01', 'UTC', NINE_TO_SIX),
+    });
+
+    expect(r.dayStart).toBe(date('2026-06-01T00:00:00Z').getTime());
+    expect(r.dayEnd).toBe(date('2026-06-02T00:00:00Z').getTime());
+    expect(r.blocks.map((b) => b.kind)).toEqual(['GAP', 'WORK', 'GAP']);
+    expect(r.totals.workedMs + r.totals.gapMs).toBe(24 * 3600 * 1000);
+    expect(r.shift).toMatchObject({
+      name: 'Day',
+      startedAt: date('2026-06-01T09:00:00Z').getTime(),
+      endedAt: date('2026-06-01T18:00:00Z').getTime(),
+    });
+  });
+
   it('frames the day to the shift window when all activity is inside it', () => {
     const r = buildDayInsight({
       date: '2026-06-01',
@@ -460,8 +492,14 @@ describe('buildDayInsight — shift-bounded frame', () => {
     });
     expect(r.dayStart).toBe(date('2026-06-01T09:00:00Z').getTime());
     expect(r.dayEnd).toBe(date('2026-06-01T18:00:00Z').getTime());
+    expect(r.calendarDayStart).toBe(date('2026-06-01T00:00:00Z').getTime());
+    expect(r.calendarDayEnd).toBe(date('2026-06-02T00:00:00Z').getTime());
     expect(r.blocks.map((b) => b.kind)).toEqual(['GAP', 'WORK', 'GAP']);
-    expect(r.shift?.name).toBe('Day');
+    expect(r.shift).toMatchObject({
+      name: 'Day',
+      startedAt: date('2026-06-01T09:00:00Z').getTime(),
+      endedAt: date('2026-06-01T18:00:00Z').getTime(),
+    });
     // Partition sums to the 9h shift span (not 24h).
     expect(r.totals.workedMs + r.totals.gapMs).toBe(9 * 3600 * 1000);
   });

@@ -127,6 +127,26 @@ describe('PATCH /v1/admin/workspace-policy', () => {
     expect(res.status).toBe(403);
   });
 
+  it('does not lower the inherited threshold past an enabled member countdown', async () => {
+    const { admin, member } = await seedWorkspace();
+    await request(app).get('/v1/admin/workspace-policy').set(bearer(admin.token));
+    await prisma.user.update({
+      where: { id: member.id },
+      data: { idleThresholdMin: null, idleWarningSeconds: 60 },
+    });
+
+    const res = await request(app)
+      .patch('/v1/admin/workspace-policy')
+      .set(bearer(admin.token))
+      .send({ defaultIdleThresholdMin: 1, auditReason: 'Testing threshold guard.' });
+
+    expect(res.status).toBe(400);
+    expect(res.body).toMatchObject({
+      error: 'idle_warning_requires_higher_threshold',
+      affectedUsers: 1,
+    });
+  });
+
   it('rejects an empty body', async () => {
     const { admin } = await seedWorkspace();
     const res = await request(app)

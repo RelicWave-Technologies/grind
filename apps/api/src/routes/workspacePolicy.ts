@@ -105,6 +105,21 @@ workspacePolicyRouter.patch('/', requireAdmin, async (req, res, next) => {
       screenshotIntervalMin: updateData.defaultScreenshotIntervalMin ?? previousTiming.screenshotIntervalMin,
       idleThresholdMin: updateData.defaultIdleThresholdMin ?? current.defaultIdleThresholdMin,
     };
+    if (nextTiming.idleThresholdMin !== previousTiming.idleThresholdMin) {
+      const incompatibleWarnings = await prisma.user.count({
+        where: {
+          workspaceId: req.scope.workspaceId,
+          idleThresholdMin: null,
+          idleWarningSeconds: { gte: nextTiming.idleThresholdMin * 60 },
+        },
+      });
+      if (incompatibleWarnings > 0) {
+        return res.status(400).json({
+          error: 'idle_warning_requires_higher_threshold',
+          affectedUsers: incompatibleWarnings,
+        });
+      }
+    }
     const timingChanged = monitoringTimingChanged(previousTiming, nextTiming);
     const riskLevel = monitoringRiskLevel(nextTiming);
     const auditReason = normalizeAuditReason(rawAuditReason);

@@ -16,6 +16,7 @@ import { rescheduleCaptureLoop, startCaptureLoop } from './services/capture';
 import {
   applyActivityCapturePolicy,
   drainActivityNow,
+  onTrackedInputActivity,
   startActivityCapture,
   startActivitySyncDrain,
   setActivityRecording,
@@ -184,22 +185,29 @@ app.whenReady().then(async () => {
     onInstallUpdate: () => void installUpdateNow(),
     getUpdateStatus: () => getUpdateStatus(),
   });
-  // Idle detection pauses first, then asks the single attention coordinator to
-  // present. A rejected request means a higher-priority prompt already owns the
-  // window, so the monitor immediately releases its local prompting flag.
-  const idleMonitor = new IdleMonitor(async (idleStartedAt) => {
-    try {
-      await getTimerService().pauseForIdle(idleStartedAt);
-    } catch (err) {
-      log.warn('pauseForIdle failed', { err: String(err) });
-      return false;
-    }
-    const accepted = attention.requestIdle(idleStartedAt);
-    broadcast('timer:status:push', getTimerService().status());
-    sendHeartbeatNow();
-    return accepted;
+  // Idle detection optionally warns first, then performs the same durable pause
+  // at the real idle boundary. Both stages share the single attention window.
+  const idleMonitor = new IdleMonitor({
+    onWarning: ({ idleStartedAt, deadlineAt }) =>
+      attention.requestIdleWarning({ idleStartedAt, deadlineAt }),
+    onWarningCancelled: () => {
+      attention.clearIdleWarning();
+    },
+    onIdle: async (idleStartedAt) => {
+      try {
+        await getTimerService().pauseForIdle(idleStartedAt);
+      } catch (err) {
+        log.warn('pauseForIdle failed', { err: String(err) });
+        return false;
+      }
+      const accepted = attention.requestIdle(idleStartedAt);
+      broadcast('timer:status:push', getTimerService().status());
+      sendHeartbeatNow();
+      return accepted;
+    },
   });
   idleMonitor.start();
+  onTrackedInputActivity(() => idleMonitor.noteActivity());
 
   registerIpc({
     onOpenMainWindow: () => showMainWindow(),
@@ -345,6 +353,10 @@ app.whenReady().then(async () => {
     shiftMonitor.onUserDecision(decision);
   });
   ipcMain.handle('shift:refresh', () => shiftMonitor.refreshShift());
+  ipcMain.handle('shift:today', async () => {
+    await shiftMonitor.refreshShift();
+    return shiftMonitor.todayWindow();
+  });
 
   // Single 1s heartbeat: tray ticker + floating-bar visibility + live broadcast
   // + a throttled durable liveness tick (crash-recovery bound).

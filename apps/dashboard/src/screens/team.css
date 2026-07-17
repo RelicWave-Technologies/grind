@@ -45,6 +45,10 @@
   table-layout: fixed;
 }
 
+.tm-members-table--countdown {
+  min-width: calc(var(--ui-sp-12) * 16);
+}
+
 .tm-members-table.ui-table--compact .ui-table__row {
   height: calc(var(--ui-row-h) + var(--ui-sp-9));
 }
@@ -70,6 +74,10 @@
 .tm-col-shot,
 .tm-col-idle {
   width: calc(var(--ui-sp-12) * 2 + var(--ui-sp-9));
+}
+
+.tm-col-countdown {
+  width: calc(var(--ui-sp-12) * 2 + var(--ui-sp-8));
 }
 
 .tm-col-manager {
@@ -160,6 +168,34 @@
   top: 50%;
   transform: translateY(-50%);
   pointer-events: none;
+}
+
+.tm-countdown-control {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ui-sp-2);
+  width: 100%;
+}
+
+.tm-countdown-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-sp-2);
+  white-space: nowrap;
+}
+
+.tm-countdown-input {
+  width: calc(var(--ui-sp-12) + var(--ui-sp-4));
+  min-width: calc(var(--ui-sp-12) + var(--ui-sp-4));
+  height: calc(var(--ui-control-h) - var(--ui-sp-1));
+  text-align: center;
+  font-family: var(--ui-font-mono);
+  font-size: 12px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  padding-inline: var(--ui-sp-2);
 }
 
 .tm-row-actions {

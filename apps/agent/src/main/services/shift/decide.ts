@@ -6,6 +6,13 @@ import {
   type ShiftSchedule,
 } from '@grind/types';
 
+export interface ResolvedShiftWindow {
+  start: string;
+  end: string;
+  startedAt: number;
+  endedAt: number;
+}
+
 /**
  * Pure state machine for the agent's "Ready to work?" popup.
  *
@@ -52,7 +59,7 @@ export function tickShiftMonitor(input: {
   if (!input.schedule || !isValidTimeZone(timeZone)) return { kind: 'noop' };
   const nowParts = zonedDateTimeParts(input.now, timeZone);
   const day = scheduleForDate(input.schedule, nowParts);
-  const todaysStartMs = day ? shiftStartForDate(nowParts, day.start, timeZone) : null;
+  const todaysStartMs = day ? shiftInstantForDate(nowParts, day.start, timeZone) : null;
   const bufferUntilMs = todaysStartMs === null
     ? null
     : todaysStartMs + Math.max(0, input.bufferMin) * 60_000;
@@ -91,7 +98,7 @@ export function tickShiftMonitor(input: {
   };
 }
 
-function shiftStartForDate(
+function shiftInstantForDate(
   date: { year: number; month: number; day: number },
   hhmm: string,
   timeZone: string,
@@ -109,6 +116,22 @@ function shiftStartForDate(
   } catch {
     return null;
   }
+}
+
+/** Resolve the assigned shift for the workspace-local calendar day containing `now`. */
+export function resolveShiftWindow(
+  schedule: ShiftSchedule,
+  now: Date,
+  timeZone: string,
+): ResolvedShiftWindow | null {
+  if (!isValidTimeZone(timeZone)) return null;
+  const date = zonedDateTimeParts(now, timeZone);
+  const day = scheduleForDate(schedule, date);
+  if (!day) return null;
+  const startedAt = shiftInstantForDate(date, day.start, timeZone);
+  const endedAt = shiftInstantForDate(date, day.end, timeZone);
+  if (startedAt === null || endedAt === null || endedAt <= startedAt) return null;
+  return { start: day.start, end: day.end, startedAt, endedAt };
 }
 
 function scheduleForDate(
@@ -133,7 +156,7 @@ function nextShiftStartMs(schedule: ShiftSchedule, now: Date, timeZone: string):
     const date = addCalendarDays(today, offset);
     const day = scheduleForDate(schedule, date);
     if (!day) continue;
-    const startsAt = shiftStartForDate(date, day.start, timeZone);
+    const startsAt = shiftInstantForDate(date, day.start, timeZone);
     if (startsAt === null || startsAt < now.getTime()) continue;
     return startsAt;
   }
@@ -146,7 +169,7 @@ export function ackToday(state: ShiftMonitorState, schedule: ShiftSchedule, now:
   const date = zonedDateTimeParts(now, timeZone);
   const day = scheduleForDate(schedule, date);
   if (!day) return state;
-  const startedAt = shiftStartForDate(date, day.start, timeZone);
+  const startedAt = shiftInstantForDate(date, day.start, timeZone);
   if (startedAt === null) return state;
   return { ...state, ackedFor: startedAt, snoozedUntil: null, prompting: false };
 }

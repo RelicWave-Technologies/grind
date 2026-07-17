@@ -495,13 +495,25 @@ function MonitoringAuditRow({ audit, timeZone }: { audit: MonitoringSettingsAudi
 }
 
 function formatAuditChange(audit: MonitoringSettingsAuditDto): string {
-  const shot = `${formatNullableMinutes(audit.previousScreenshotIntervalMin)} → ${formatNullableMinutes(audit.nextScreenshotIntervalMin)}`;
-  const idle = `${formatNullableMinutes(audit.previousIdleThresholdMin)} → ${formatNullableMinutes(audit.nextIdleThresholdMin)}`;
-  return `shots ${shot}, idle ${idle}`;
+  const changes: string[] = [];
+  if (audit.previousScreenshotIntervalMin !== audit.nextScreenshotIntervalMin) {
+    changes.push(`shots ${formatNullableMinutes(audit.previousScreenshotIntervalMin)} → ${formatNullableMinutes(audit.nextScreenshotIntervalMin)}`);
+  }
+  if (audit.previousIdleThresholdMin !== audit.nextIdleThresholdMin) {
+    changes.push(`idle ${formatNullableMinutes(audit.previousIdleThresholdMin)} → ${formatNullableMinutes(audit.nextIdleThresholdMin)}`);
+  }
+  if (audit.previousIdleWarningSeconds !== audit.nextIdleWarningSeconds) {
+    changes.push(`idle alert ${formatNullableSeconds(audit.previousIdleWarningSeconds)} → ${formatNullableSeconds(audit.nextIdleWarningSeconds)}`);
+  }
+  return changes.join(', ') || 'settings unchanged';
 }
 
 function formatNullableMinutes(value: number | null): string {
   return value === null ? '-' : formatMinutes(value);
+}
+
+function formatNullableSeconds(value: number | null): string {
+  return value === null ? 'off' : `${value}s`;
 }
 
 function formatAuditTime(value: string, timeZone: string): string {

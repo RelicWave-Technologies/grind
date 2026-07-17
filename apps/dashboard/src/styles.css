@@ -823,6 +823,19 @@ body {
 .ribbon-track.is-clickable { cursor: crosshair; }
 .ribbon-track.is-clickable:hover { background: rgba(40, 36, 56, 0.06); }
 
+/* Optional contextual range (the assigned shift on Edit Time). The timeline
+   remains a full-day canvas; this neutral inset only marks the review window. */
+.ribbon-marked-window {
+  position: absolute;
+  inset-block: 0;
+  background: var(--ui-surface);
+  box-shadow:
+    inset 1px 0 0 var(--ui-line-strong),
+    inset -1px 0 0 var(--ui-line-strong);
+  pointer-events: none;
+  z-index: 0;
+}
+
 /* Hover ghost: shows where a click would land. Violet-tinted, animated in. */
 .ribbon-ghost {
   position: absolute;
@@ -883,6 +896,7 @@ body {
   top: 4px; bottom: 4px;
   border-radius: 3px;
   min-width: 2px;
+  z-index: 2;
 }
 .ribbon-block-work {
   background: var(--timeline-work-bg);
@@ -913,6 +927,7 @@ body {
     rgba(255, 77, 106, 0.18) 6px 12px
   );
   border: 1px solid rgba(255, 77, 106, 0.5);
+  z-index: 2;
 }
 
 .ribbon-future {
@@ -924,6 +939,7 @@ body {
     transparent 4px 8px
   );
   pointer-events: none;
+  z-index: 1;
 }
 .ribbon-now {
   position: absolute;
@@ -933,6 +949,7 @@ body {
   border-radius: 2px;
   box-shadow: 0 0 0 3px rgba(124, 92, 255, 0.18);
   pointer-events: none;
+  z-index: 3;
 }
 
 .ribbon-ticks {

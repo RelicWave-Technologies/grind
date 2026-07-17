@@ -24,13 +24,28 @@ export function createTrackingAttentionCoordinator(deps: TrackingAttentionDeps) 
   }
 
   function requestIdle(idleStartedAt: number): boolean {
+    if (active.kind === 'IDLE_WARNING') {
+      show({ kind: 'IDLE', promptId: active.promptId, idleStartedAt });
+      return true;
+    }
     if (active.kind !== 'NONE') return false;
     show({ kind: 'IDLE', promptId: deps.id(), idleStartedAt });
     return true;
   }
 
+  function requestIdleWarning(info: { idleStartedAt: number; deadlineAt: number }): boolean {
+    if (active.kind !== 'NONE') return false;
+    show({ kind: 'IDLE_WARNING', promptId: deps.id(), ...info });
+    return true;
+  }
+
+  function clearIdleWarning(): boolean {
+    if (active.kind !== 'IDLE_WARNING') return false;
+    return clear(active.promptId);
+  }
+
   function beginMachineAway(): void {
-    if (active.kind === 'IDLE' || active.kind === 'AWAY') {
+    if (active.kind === 'IDLE_WARNING' || active.kind === 'IDLE' || active.kind === 'AWAY') {
       active = { kind: 'NONE' };
       deps.presenter.hide();
     }
@@ -75,7 +90,9 @@ export function createTrackingAttentionCoordinator(deps: TrackingAttentionDeps) 
 
   return {
     get: (): AttentionPrompt => active,
+    requestIdleWarning,
     requestIdle,
+    clearIdleWarning,
     beginMachineAway,
     requestAway,
     requestPermission,

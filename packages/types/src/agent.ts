@@ -126,11 +126,19 @@ export type AgentAppIconsRequest = z.infer<typeof AgentAppIconsRequest>;
 export const TodayLedgerMode = z.enum(['OFF', 'SHADOW', 'VISIBLE']);
 export type TodayLedgerMode = z.infer<typeof TodayLedgerMode>;
 
+export const IDLE_WARNING_SECONDS_MIN = 5;
+export const IDLE_WARNING_SECONDS_MAX = 120;
+export const IdleWarningSecondsSchema = z.number()
+  .int()
+  .min(IDLE_WARNING_SECONDS_MIN)
+  .max(IDLE_WARNING_SECONDS_MAX);
+
 export const AgentConfigResponse = z.object({
   configVersion: z.string().default(''),
   heartbeatIntervalSec: z.number().int().min(15).max(600).default(60),
   screenshotIntervalMin: ScreenshotIntervalMinSchema.default(DEFAULT_SCREENSHOT_INTERVAL_MIN),
   idleThresholdMin: z.number().int().min(1).max(120).default(5),
+  idleWarningSeconds: IdleWarningSecondsSchema.nullable().default(null),
   captureApps: z.boolean().default(false),
   captureTitles: z.boolean().default(false),
   captureUrls: z.boolean().default(false),

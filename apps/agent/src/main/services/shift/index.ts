@@ -9,9 +9,11 @@ import {
   expire,
   INITIAL_STATE,
   type ShiftMonitorState,
+  resolveShiftWindow,
 } from './decide';
 import { showReadyToWork, hideReadyToWork, isReadyToWorkVisible } from '../../readyToWork';
 import { getWorkspaceTimeZone } from '../workspaceTime';
+import type { TodayShiftWindow } from '../../../shared/shift';
 
 /**
  * ShiftMonitor — owns the "Ready to work?" toast lifecycle.
@@ -84,6 +86,14 @@ export class ShiftMonitor {
       log.warn('shift refresh failed (non-fatal)', { err: String(err) });
       this.shift = null;
     }
+  }
+
+  todayWindow(now = Date.now()): TodayShiftWindow | null {
+    if (!this.shift) return null;
+    const timeZone = getWorkspaceTimeZone();
+    if (!timeZone) return null;
+    const window = resolveShiftWindow(this.shift.schedule, new Date(now), timeZone);
+    return window ? { name: this.shift.name, ...window } : null;
   }
 
   /** Called from IPC after the user clicks Yes / Not yet in the toast. */

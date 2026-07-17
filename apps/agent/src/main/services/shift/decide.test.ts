@@ -5,6 +5,7 @@ import {
   snooze,
   expire,
   INITIAL_STATE,
+  resolveShiftWindow,
   type ShiftMonitorState,
 } from './decide';
 import { NINE_TO_SIX, EMPTY_SCHEDULE, zonedDateTimeParts, type ShiftSchedule } from '@grind/types';
@@ -34,6 +35,21 @@ describe('tickShiftMonitor — no schedule', () => {
       now: at('2026-06-01T09:00:00'),
     });
     expect(r).toEqual({ kind: 'noop' });
+  });
+});
+
+describe('resolveShiftWindow', () => {
+  it('returns exact workspace-local shift instants', () => {
+    expect(resolveShiftWindow(NINE_TO_SIX, at('2026-06-01T12:00:00'), TIME_ZONE)).toEqual({
+      start: '09:00',
+      end: '18:00',
+      startedAt: at('2026-06-01T09:00:00').getTime(),
+      endedAt: at('2026-06-01T18:00:00').getTime(),
+    });
+  });
+
+  it('returns null on a scheduled day off', () => {
+    expect(resolveShiftWindow(NINE_TO_SIX, at('2026-06-06T12:00:00'), TIME_ZONE)).toBeNull();
   });
 });
 

@@ -368,6 +368,24 @@ describe('GET /v1/agent/today-ledger', () => {
     });
     await auth(request(app).post('/v1/time-entries'), u.accessToken).send(crossing);
     await auth(request(app).post('/v1/time-entries'), other.accessToken).send(createBody(other, { startedAtMs: T0 }));
+    const approvedManual = await prisma.timeEntry.create({
+      data: {
+        id: fakeUlid('manual-entry'),
+        clientUuid: fakeUlid('manual-client'),
+        userId: u.userId,
+        source: 'MANUAL',
+        startedAt: new Date(T0 + 60 * MIN),
+        endedAt: new Date(T0 + 90 * MIN),
+        segments: {
+          create: [{
+            id: fakeUlid('manual-segment'),
+            kind: 'WORK',
+            startedAt: new Date(T0 + 60 * MIN),
+            endedAt: new Date(T0 + 90 * MIN),
+          }],
+        },
+      },
+    });
 
     const response = await auth(request(app).get('/v1/agent/today-ledger'), u.accessToken).query({
       from: iso(T0),
@@ -381,6 +399,10 @@ describe('GET /v1/agent/today-ledger', () => {
     expect(response.body.effectiveEntries.map((entry: { entryId: string }) => entry.entryId)).toContain(crossing.id);
     expect(response.body.entries.every((entry: { userId: string; source: string }) => (
       entry.userId === u.userId && entry.source === 'AUTO'
+    ))).toBe(true);
+    expect(response.body.approvedManualEntries.map((entry: { id: string }) => entry.id)).toEqual([approvedManual.id]);
+    expect(response.body.approvedManualEntries.every((entry: { userId: string; source: string }) => (
+      entry.userId === u.userId && entry.source === 'MANUAL'
     ))).toBe(true);
   });
 

@@ -482,9 +482,20 @@ label.field-label { display: block; font-size: 12px; font-weight: 600; color: va
   position: relative; height: 44px; border-radius: 6px;
   background: rgba(0, 0, 0, 0.05); overflow: hidden;
 }
+.dt-marked-window {
+  position: absolute;
+  inset-block: 0;
+  background: var(--bg-card);
+  box-shadow:
+    inset 1px 0 0 var(--separator-strong),
+    inset -1px 0 0 var(--separator-strong);
+  pointer-events: none;
+  z-index: 0;
+}
 .dt-seg {
   position: absolute; top: 4px; bottom: 4px; border-radius: 3px; min-width: 3px;
   transition: width 0.9s linear, left 0.9s linear;
+  z-index: 2;
 }
 .dt-seg-work {
   background: var(--timeline-work-bg);
@@ -523,8 +534,9 @@ label.field-label { display: block; font-size: 12px; font-weight: 600; color: va
     transparent 4px 8px
   );
   pointer-events: none;
+  z-index: 1;
 }
-.dt-now { position: absolute; top: -3px; bottom: -3px; width: 2px; border-radius: 2px; background: var(--ink); transform: translateX(-1px); }
+.dt-now { position: absolute; top: -3px; bottom: -3px; width: 2px; border-radius: 2px; background: var(--ink); transform: translateX(-1px); z-index: 3; }
 .dt-now::before { content: ""; position: absolute; top: -3px; left: -3px; width: 8px; height: 8px; border-radius: 50%; background: var(--ink); }
 .dt-axis { position: relative; height: 18px; margin-top: 6px; }
 .dt-tick { position: absolute; transform: translateX(-50%); font-size: 10px; color: var(--label-tertiary); font-variant-numeric: tabular-nums; }
@@ -1145,6 +1157,14 @@ label.field-label { display: block; font-size: 12px; font-weight: 600; color: va
 .idle-icon {
   width: 52px; height: 52px; border-radius: 14px; background: var(--violet-tint); color: var(--violet);
   display: flex; align-items: center; justify-content: center; margin-bottom: 4px;
+}
+.idle-countdown {
+  font-size: 36px;
+  line-height: 1;
+  font-weight: 760;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  margin-top: 2px;
 }
 .idle-sub { max-width: 260px; margin-top: 2px; }
 .idle-actions { display: flex; gap: 8px; margin-top: 14px; width: 100%; }

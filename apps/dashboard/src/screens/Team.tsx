@@ -20,10 +20,12 @@ import {
   Banner,
   Button,
   Card,
+  Checkbox,
   EmptyState,
   Field,
   IconButton,
   Identity,
+  Input,
   Page,
   PageHeader,
   Select,
@@ -50,6 +52,7 @@ type RowDraft = {
   shiftId: string | null;
   screenshotIntervalMin: ScreenshotIntervalMin;
   idleThresholdMin: number;
+  idleWarningSeconds: number | null;
 } | null;
 type MonitoringRisk = 'NORMAL' | 'CAUTION' | 'HIGH';
 type MonitoringTiming = { screenshotIntervalMin: number; idleThresholdMin: number };
@@ -57,6 +60,9 @@ type MonitoringTiming = { screenshotIntervalMin: number; idleThresholdMin: numbe
 const TEAM_SETTINGS_QUERY_KEY = ['admin', 'team-member-settings'] as const;
 
 const IDLE_THRESHOLD_OPTIONS = [1, 3, 5, 10, 15, 30, 45, 60, 120];
+const IDLE_WARNING_MIN_SECONDS = 5;
+const IDLE_WARNING_MAX_SECONDS = 120;
+const IDLE_WARNING_STEP_SECONDS = 5;
 
 export function TeamScreen() {
   const queryClient = useQueryClient();
@@ -115,11 +121,19 @@ export function TeamScreen() {
       shiftId: member.shiftId,
       screenshotIntervalMin: member.screenshotIntervalMin,
       idleThresholdMin: member.idleThresholdMin,
+      idleWarningSeconds: member.idleWarningSeconds,
     });
   }
 
   function updateRowDraft(memberId: string, patch: Partial<NonNullable<RowDraft>>) {
-    setRowDraft((current) => (current?.userId === memberId ? { ...current, ...patch } : current));
+    setRowDraft((current) => {
+      if (current?.userId !== memberId) return current;
+      const next = { ...current, ...patch };
+      if (next.idleWarningSeconds != null) {
+        next.idleWarningSeconds = clampIdleWarningSeconds(next.idleWarningSeconds, next.idleThresholdMin);
+      }
+      return next;
+    });
   }
 
   function saveRowEdit(member: TeamMemberSettingsDto) {
@@ -131,6 +145,9 @@ export function TeamScreen() {
     }
     if (rowDraft.idleThresholdMin !== member.idleThresholdMin) {
       patch.idleThresholdMin = rowDraft.idleThresholdMin;
+    }
+    if (rowDraft.idleWarningSeconds !== member.idleWarningSeconds) {
+      patch.idleWarningSeconds = rowDraft.idleWarningSeconds;
     }
     if (Object.keys(patch).length === 0) {
       setRowDraft(null);
@@ -161,7 +178,7 @@ export function TeamScreen() {
       <PageHeader
         eyebrow="Manager workspace"
         title="Team Settings"
-        subtitle="Edit each member's shift, screenshot cadence, and idle-break threshold."
+        subtitle="Edit each member's shift, screenshot cadence, idle-break threshold, and admin idle countdown."
         actions={
           <Toolbar>
             <Button
@@ -230,6 +247,7 @@ export function TeamScreen() {
               <Stat label="Assigned shifts" value={summary.assignedShifts} hint={`${summary.unassignedShifts} unassigned`} />
               <Stat label="Screenshots" value={formatCadence(summary.avgScreenshotIntervalMin)} hint="average cadence" />
               <Stat label="Idle break" value={formatCadence(summary.avgIdleThresholdMin)} hint="average threshold" />
+              {me.role === 'ADMIN' && <Stat label="Countdowns" value={String(summary.idleWarningsEnabled)} hint="enabled members" />}
               <Stat label="Capture" value={policy ? captureCount(policy) : '-'} hint={policy ? `${policy.retentionDaysScreenshots}d retention` : 'loading policy'} />
             </StatRow>
           </Card>
@@ -309,15 +327,21 @@ function TeamSettingsTable({
   onSaveEdit: (member: TeamMemberSettingsDto) => void;
   onOpenMember: (userId: string) => void;
 }) {
+  const showIdleCountdown = currentUserRole === 'ADMIN';
   return (
     <div className="tm-table-wrap">
-      <Table density="compact" stickyHead className="tm-members-table">
+      <Table
+        density="compact"
+        stickyHead
+        className={showIdleCountdown ? 'tm-members-table tm-members-table--countdown' : 'tm-members-table'}
+      >
         <THead>
           <Tr>
             <Th className="tm-col-member">Member</Th>
             <Th className="tm-col-shift" align="center">Shift</Th>
             <Th className="tm-col-shot" align="center">Screenshot interval</Th>
             <Th className="tm-col-idle" align="center">Idle break</Th>
+            {showIdleCountdown && <Th className="tm-col-countdown" align="center">Idle countdown</Th>}
             <Th className="tm-col-manager" align="center">Manager</Th>
             <Th className="tm-col-action" align="center">Action</Th>
           </Tr>
@@ -330,6 +354,7 @@ function TeamSettingsTable({
             const shiftId = draft ? draft.shiftId : member.shiftId;
             const screenshotIntervalMin = draft ? draft.screenshotIntervalMin : member.screenshotIntervalMin;
             const idleThresholdMin = draft ? draft.idleThresholdMin : member.idleThresholdMin;
+            const idleWarningSeconds = draft ? draft.idleWarningSeconds : member.idleWarningSeconds;
             const shift = shifts.find((s) => s.id === shiftId) ?? null;
             const isCurrentUser = member.id === currentUserId;
             const selfEditLocked = isCurrentUser && currentUserRole !== 'ADMIN';
@@ -384,6 +409,21 @@ function TeamSettingsTable({
                     <SettingValue label="After" value={formatCadence(idleThresholdMin)} />
                   )}
                 </Td>
+                {showIdleCountdown && (
+                  <Td className="tm-col-countdown" align="center">
+                    {editing ? (
+                      <IdleWarningControl
+                        memberName={member.name}
+                        value={idleWarningSeconds}
+                        idleThresholdMin={idleThresholdMin}
+                        busy={rowBusy}
+                        onChange={(next) => onDraftChange(member.id, { idleWarningSeconds: next })}
+                      />
+                    ) : (
+                      <IdleWarningValue value={idleWarningSeconds} />
+                    )}
+                  </Td>
+                )}
                 <Td className="tm-col-manager" align="center">
                   <div className="tm-stack tm-stack--center">
                     <span className="ui-t-strong">{member.manager?.name ?? 'No manager'}</span>
@@ -518,17 +558,74 @@ function CadenceSelect<T extends number>({
   );
 }
 
+function IdleWarningControl({
+  memberName,
+  value,
+  idleThresholdMin,
+  busy,
+  onChange,
+}: {
+  memberName: string;
+  value: number | null;
+  idleThresholdMin: number;
+  busy: boolean;
+  onChange: (seconds: number | null) => void;
+}) {
+  const enabled = value != null;
+  const max = maxIdleWarningSeconds(idleThresholdMin);
+  const current = value == null ? Math.min(30, max) : clampIdleWarningSeconds(value, idleThresholdMin);
+  return (
+    <div className="tm-countdown-control">
+      <label className="tm-countdown-toggle">
+        <Checkbox
+          checked={enabled}
+          disabled={busy}
+          onChange={(event) => onChange(event.target.checked ? current : null)}
+          aria-label={`Enable idle countdown for ${memberName}`}
+        />
+        <span className="ui-t-small">{enabled ? 'On' : 'Off'}</span>
+      </label>
+      {enabled && (
+        <Input
+          className="tm-countdown-input"
+          type="number"
+          min={IDLE_WARNING_MIN_SECONDS}
+          max={max}
+          step={IDLE_WARNING_STEP_SECONDS}
+          value={current}
+          disabled={busy}
+          onChange={(event) => {
+            const parsed = Number.parseInt(event.target.value, 10);
+            if (Number.isFinite(parsed)) onChange(clampIdleWarningSeconds(parsed, idleThresholdMin));
+          }}
+          aria-label={`Idle countdown seconds for ${memberName}`}
+        />
+      )}
+    </div>
+  );
+}
+
+function IdleWarningValue({ value }: { value: number | null }) {
+  return (
+    <Tag status={value == null ? 'neutral' : 'info'}>
+      {value == null ? 'Off' : `${value}s`}
+    </Tag>
+  );
+}
+
 function isPending(pending: PendingEdit, userId: string, field: PendingField): boolean {
   return pending?.userId === userId && pending.field === field;
 }
 
 function summarizeMembers(members: TeamMemberSettingsDto[]) {
   const assignedShifts = members.filter((member) => member.shiftId).length;
+  const idleWarningsEnabled = members.filter((member) => member.idleWarningSeconds != null).length;
   const screenshotTotal = members.reduce((sum, member) => sum + member.screenshotIntervalMin, 0);
   const idleTotal = members.reduce((sum, member) => sum + member.idleThresholdMin, 0);
   return {
     assignedShifts,
     unassignedShifts: members.length - assignedShifts,
+    idleWarningsEnabled,
     avgScreenshotIntervalMin: members.length ? Math.round(screenshotTotal / members.length) : 0,
     avgIdleThresholdMin: members.length ? Math.round(idleTotal / members.length) : 0,
   };
@@ -545,6 +642,16 @@ function formatCadence(minutes: number): string {
   const h = Math.floor(minutes / 60);
   const m = minutes % 60;
   return m === 0 ? `${h}h` : `${h}h ${m}m`;
+}
+
+function maxIdleWarningSeconds(idleThresholdMin: number): number {
+  const belowThreshold = idleThresholdMin * 60 - IDLE_WARNING_STEP_SECONDS;
+  return Math.max(IDLE_WARNING_MIN_SECONDS, Math.min(IDLE_WARNING_MAX_SECONDS, belowThreshold));
+}
+
+function clampIdleWarningSeconds(seconds: number, idleThresholdMin: number): number {
+  const rounded = Math.round(seconds / IDLE_WARNING_STEP_SECONDS) * IDLE_WARNING_STEP_SECONDS;
+  return Math.min(maxIdleWarningSeconds(idleThresholdMin), Math.max(IDLE_WARNING_MIN_SECONDS, rounded));
 }
 
 function monitoringRiskLevel(timing: MonitoringTiming): MonitoringRisk {

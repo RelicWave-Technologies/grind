@@ -1,5 +1,5 @@
 import './reports.css';
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useRouteContext } from '@tanstack/react-router';
@@ -10,10 +10,10 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock4,
-  ExternalLink,
   Images,
   ListTree,
   Mail,
+  Maximize2,
   Rows3,
   Shield,
   SunMedium,
@@ -37,6 +37,7 @@ import type {
   MemberReportDay,
   MemberReportDayAppsResponse,
   MemberReportDayScreenshotsResponse,
+  MemberReportScreenshot,
   MemberReportsMeResponse,
   ShiftStatus,
   TeamReportMember,
@@ -1583,6 +1584,7 @@ function AppsPanel({ data }: { data: MemberReportDayAppsResponse }) {
 }
 
 function ActivityPanel({ data, tz }: { data: MemberReportDayScreenshotsResponse; tz: string }) {
+  const [selectedShotIndex, setSelectedShotIndex] = useState<number | null>(null);
   const win = localDayWindowMs(data.date, data.tz);
   const fallbackStart = new Date(`${data.date}T00:00:00`).getTime();
   const dayShell: DayInsight = {
@@ -1615,21 +1617,20 @@ function ActivityPanel({ data, tz }: { data: MemberReportDayScreenshotsResponse;
         <EmptyState icon={<Images size={22} strokeWidth={1.8} />} title="No screenshots" description="No uploaded screenshots exist for this day yet." />
       ) : (
         <div className="rep-shot-grid">
-          {data.screenshots.map((shot) => {
+          {data.screenshots.map((shot, index) => {
             const href = reportImageUrl(shot.fullUrl ?? shot.thumbUrl);
             const src = reportImageUrl(shot.thumbUrl ?? shot.fullUrl);
             return (
               <div key={shot.id} className="rep-shot">
-                {href && src ? (
-                  <a href={href} target="_blank" rel="noreferrer" className="rep-shot-img">
-                    <img src={src} alt="" />
-                    <ExternalLink size={14} strokeWidth={1.8} />
-                  </a>
-                ) : (
-                  <div className="rep-shot-empty">
-                    <Images size={20} strokeWidth={1.8} />
-                  </div>
-                )}
+                <button
+                  type="button"
+                  className={href && src ? 'rep-shot-img' : 'rep-shot-empty'}
+                  onClick={() => setSelectedShotIndex(index)}
+                  aria-label={`View screenshot captured at ${fmtTime(new Date(shot.capturedAt).getTime(), tz)}`}
+                >
+                  {src ? <img src={src} alt="" /> : <Images size={20} strokeWidth={1.8} />}
+                  <Maximize2 size={14} strokeWidth={1.8} aria-hidden />
+                </button>
                 <div className="rep-shot-meta">
                   <span className="ui-t-strong">{fmtTime(new Date(shot.capturedAt).getTime(), tz)}</span>
                   <span className="ui-t-small ui-ink-2">{shot.invalidated ? 'Invalidated window' : shot.activityPercent === null ? 'No activity sample' : `${shot.activityPercent}% activity`}</span>
@@ -1641,8 +1642,204 @@ function ActivityPanel({ data, tz }: { data: MemberReportDayScreenshotsResponse;
           })}
         </div>
       )}
+
+      {selectedShotIndex !== null && (
+        <ScreenshotCarousel
+          screenshots={data.screenshots}
+          selectedIndex={selectedShotIndex}
+          timeZone={tz}
+          onSelect={setSelectedShotIndex}
+          onClose={() => setSelectedShotIndex(null)}
+        />
+      )}
     </div>
   );
+}
+
+function ScreenshotCarousel({
+  screenshots,
+  selectedIndex,
+  timeZone,
+  onSelect,
+  onClose,
+}: {
+  screenshots: MemberReportScreenshot[];
+  selectedIndex: number;
+  timeZone: string;
+  onSelect: (index: number) => void;
+  onClose: () => void;
+}) {
+  const shot = screenshots[selectedIndex];
+  const hasPrevious = selectedIndex > 0;
+  const hasNext = selectedIndex < screenshots.length - 1;
+
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') onClose();
+      if (event.key === 'ArrowLeft' && hasPrevious) onSelect(selectedIndex - 1);
+      if (event.key === 'ArrowRight' && hasNext) onSelect(selectedIndex + 1);
+    }
+
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [hasNext, hasPrevious, onClose, onSelect, selectedIndex]);
+
+  if (!shot || typeof document === 'undefined') return null;
+
+  const fullSrc = reportImageUrl(shot.fullUrl ?? shot.thumbUrl);
+  const capturedAtMs = new Date(shot.capturedAt).getTime();
+
+  return createPortal(
+    <div className="rep-lightbox-backdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        className="rep-lightbox"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Screenshot captured at ${fmtTime(capturedAtMs, timeZone)}`}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header className="rep-lightbox-head">
+          <div>
+            <span className="ui-t-eyebrow">Screenshot evidence</span>
+            <h3 className="ui-t-title">{formatScreenshotDate(shot.capturedAt, timeZone)}</h3>
+          </div>
+          <div className="rep-lightbox-head-actions">
+            <Tag mono>{selectedIndex + 1} / {screenshots.length}</Tag>
+            <IconButton icon={<X size={17} strokeWidth={1.8} />} aria-label="Close screenshot viewer" onClick={onClose} />
+          </div>
+        </header>
+
+        <div className="rep-lightbox-content">
+          <div className="rep-lightbox-media">
+            {fullSrc ? (
+              <img src={fullSrc} alt={`Screenshot captured at ${fmtTime(capturedAtMs, timeZone)}`} />
+            ) : (
+              <div className="rep-lightbox-missing">
+                <Images size={28} strokeWidth={1.7} />
+                <span className="ui-t-small">Image unavailable</span>
+              </div>
+            )}
+
+            <IconButton
+              className="rep-lightbox-arrow rep-lightbox-arrow--previous"
+              icon={<ChevronLeft size={20} strokeWidth={1.9} />}
+              aria-label="Previous screenshot"
+              disabled={!hasPrevious}
+              onClick={() => onSelect(selectedIndex - 1)}
+            />
+            <IconButton
+              className="rep-lightbox-arrow rep-lightbox-arrow--next"
+              icon={<ChevronRight size={20} strokeWidth={1.9} />}
+              aria-label="Next screenshot"
+              disabled={!hasNext}
+              onClick={() => onSelect(selectedIndex + 1)}
+            />
+          </div>
+
+          <aside className="rep-lightbox-details" aria-label="Screenshot details">
+            <div>
+              <span className="ui-t-eyebrow">Activity near capture</span>
+              <p className="ui-t-small rep-lightbox-note">Nearest activity sample within two minutes.</p>
+            </div>
+
+            <div className="rep-shot-metrics">
+              <ScreenshotMetric label="Activity" value={shot.activityPercent === null ? '—' : `${shot.activityPercent}%`} />
+              <ScreenshotMetric label="Clicks" value={formatSampleCount(shot.clicks)} />
+              <ScreenshotMetric label="Keys" value={formatSampleCount(shot.keystrokes)} />
+              <ScreenshotMetric label="Scrolls" value={formatSampleCount(shot.scrolls)} />
+            </div>
+
+            <dl className="rep-shot-facts">
+              <ScreenshotFact label="App" value={shot.dominantApp ?? 'Unknown app'} />
+              <ScreenshotFact label="Resolution" value={formatResolution(shot.width, shot.height)} />
+              <ScreenshotFact label="File size" value={formatBytes(shot.bytes)} />
+              <ScreenshotFact label="Mouse travel" value={formatMouseDistance(shot.mouseDistancePx)} />
+              <ScreenshotFact
+                label="Status"
+                value={shot.invalidated ? <Tag status="warn">Excluded</Tag> : <Tag status="success">Included</Tag>}
+              />
+              <ScreenshotFact label="Image" value={shot.blurred ? 'Blurred by policy' : 'Original capture'} />
+            </dl>
+          </aside>
+        </div>
+
+        <footer className="rep-lightbox-strip" aria-label="Screenshot carousel">
+          {screenshots.map((candidate, index) => {
+            const thumb = reportImageUrl(candidate.thumbUrl ?? candidate.fullUrl);
+            return (
+              <button
+                type="button"
+                key={candidate.id}
+                className={`rep-lightbox-thumb${index === selectedIndex ? ' is-selected' : ''}`}
+                onClick={() => onSelect(index)}
+                aria-label={`View screenshot ${index + 1} of ${screenshots.length}`}
+                aria-pressed={index === selectedIndex}
+              >
+                {thumb ? <img src={thumb} alt="" /> : <Images size={16} strokeWidth={1.8} />}
+              </button>
+            );
+          })}
+        </footer>
+      </section>
+    </div>,
+    document.body,
+  );
+}
+
+function ScreenshotMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rep-shot-metric">
+      <strong className="ui-t-num">{value}</strong>
+      <span className="ui-t-eyebrow">{label}</span>
+    </div>
+  );
+}
+
+function ScreenshotFact({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className="rep-shot-fact">
+      <dt className="ui-t-small">{label}</dt>
+      <dd className="ui-t-strong">{value}</dd>
+    </div>
+  );
+}
+
+function formatScreenshotDate(value: string, timeZone: string): string {
+  return new Intl.DateTimeFormat('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    second: '2-digit',
+    timeZone,
+  }).format(new Date(value));
+}
+
+function formatSampleCount(value: number | null | undefined): string {
+  return value === null || value === undefined ? '—' : value.toLocaleString();
+}
+
+function formatResolution(width: number | null, height: number | null): string {
+  return width && height ? `${width} × ${height}` : 'Unknown';
+}
+
+function formatBytes(bytes: number | null): string {
+  if (bytes === null) return 'Unknown';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatMouseDistance(value: number | null | undefined): string {
+  if (value === null || value === undefined) return 'No sample';
+  return value >= 1000 ? `${(value / 1000).toFixed(1)}k px` : `${Math.round(value)} px`;
 }
 
 function ReportModal({

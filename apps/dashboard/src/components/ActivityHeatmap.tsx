@@ -4,6 +4,8 @@ import { fmtTime } from '../lib/format';
 interface Props {
   day: DayInsight;
   heatmap: ActivityHeatmap;
+  /** Bounds represented by `heatmap`; defaults to the editable review window. */
+  window?: { startedAt: number; endedAt: number };
 }
 
 /**
@@ -16,18 +18,20 @@ interface Props {
  * a11y note: heatmap is `aria-hidden`. Numeric totals on the entries table
  * convey the same information to screen readers.
  */
-export function ActivityHeatmap({ day, heatmap }: Props) {
+export function ActivityHeatmap({ day, heatmap, window }: Props) {
   const cellCount = heatmap.buckets.length;
   if (cellCount === 0) return null;
   const bucketMs = heatmap.bucketMs;
+  const windowStart = window?.startedAt ?? day.dayStart;
+  const windowEnd = window?.endedAt ?? day.dayEnd;
 
   return (
     <div className="heatmap" aria-hidden>
       <div className="heatmap-row" style={{ gridTemplateColumns: `repeat(${cellCount}, minmax(2px, 1fr))` }}>
         {heatmap.buckets.map((v, i) => {
-          const start = day.dayStart + i * bucketMs;
-          const end = Math.min(day.dayStart + (i + 1) * bucketMs, day.dayEnd);
-          if (start >= day.dayEnd) return null;
+          const start = windowStart + i * bucketMs;
+          const end = Math.min(windowStart + (i + 1) * bucketMs, windowEnd);
+          if (start >= windowEnd) return null;
           const title =
             v === null
               ? `${fmtTime(start, day.timezone)} – ${fmtTime(end, day.timezone)} · no activity data`

@@ -20,6 +20,27 @@ function setup() {
 }
 
 describe('TrackingAttentionCoordinator', () => {
+  it('reuses one prompt while an idle warning becomes a paused idle prompt', () => {
+    const { coordinator, presenter } = setup();
+
+    expect(coordinator.requestIdleWarning({ idleStartedAt: 100, deadlineAt: 200 })).toBe(true);
+    const warning = coordinator.get();
+    if (warning.kind !== 'IDLE_WARNING') throw new Error('expected warning prompt');
+
+    expect(coordinator.requestIdle(100)).toBe(true);
+    expect(coordinator.get()).toMatchObject({ kind: 'IDLE', promptId: warning.promptId });
+    expect(presenter.show).toHaveBeenCalledTimes(2);
+  });
+
+  it('clears only an active idle warning', () => {
+    const { coordinator } = setup();
+    coordinator.requestIdleWarning({ idleStartedAt: 100, deadlineAt: 200 });
+
+    expect(coordinator.clearIdleWarning()).toBe(true);
+    expect(coordinator.get()).toEqual({ kind: 'NONE' });
+    expect(coordinator.clearIdleWarning()).toBe(false);
+  });
+
   it('allows only one prompt and gives permission the highest priority', () => {
     const { coordinator } = setup();
 

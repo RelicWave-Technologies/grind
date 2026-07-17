@@ -1,5 +1,6 @@
 import type { TodayEntry, TodaySegment } from '../lib/agent.d';
 import { formatWorkspaceTime } from '../lib/workspaceTime';
+import { zonedDateTimeParts } from '@grind/types';
 
 interface Props {
   entries: TodayEntry[];
@@ -9,9 +10,10 @@ interface Props {
   dayStart: number;
   dayEnd: number;
   timeZone: string;
+  markedWindow?: { startedAt: number; endedAt: number; label: string } | null;
 }
 
-const HOUR = 3_600_000;
+const TICK_PROBE_MS = 15 * 60_000;
 type TimelineKind = TodaySegment['kind'] | 'MANUAL' | 'PENDING';
 
 function timelineLabel(kind: TimelineKind): string {
@@ -34,19 +36,35 @@ function clamp(v: number, lo: number, hi: number): number {
  * Horizontal timeline of today's sessions, matching the dashboard Edit Time
  * ribbon: a stable full-day track with category colors and 3-hour labels.
  */
-export default function DayTimeline({ entries, now, runningEntryId, dayStart, dayEnd, timeZone }: Props) {
-  const segs = entries.flatMap((e) => e.segments.map((s) => ({ ...s, entryId: e.id })));
+export default function DayTimeline({ entries, now, runningEntryId, dayStart, dayEnd, timeZone, markedWindow }: Props) {
+  const segs = entries.flatMap((entry) => entry.segments.map((segment) => ({
+    ...segment,
+    entryId: entry.id,
+    kind: entry.source === 'MANUAL' ? 'MANUAL' as const : segment.kind,
+  })));
   const span = dayEnd - dayStart;
 
-  const ticks: number[] = [];
-  for (let t = dayStart; t < dayEnd; t += 3 * HOUR) ticks.push(t);
+  const ticks = buildTimelineTicks(dayStart, dayEnd, timeZone);
 
   const pct = (ms: number) => ((ms - dayStart) / span) * 100;
   const nowMs = clamp(now, dayStart, dayEnd);
+  const visibleMarkedWindow = markedWindow
+    ? clip(markedWindow.startedAt, markedWindow.endedAt, dayStart, dayEnd)
+    : null;
 
   return (
     <div className="dt">
       <div className="dt-track">
+        {visibleMarkedWindow && (
+          <div
+            className="dt-marked-window"
+            style={{
+              left: `${pct(visibleMarkedWindow.startedAt)}%`,
+              width: `${pct(visibleMarkedWindow.endedAt) - pct(visibleMarkedWindow.startedAt)}%`,
+            }}
+            title={markedWindow?.label}
+          />
+        )}
         {nowMs < dayEnd && (
           <div className="dt-future" style={{ left: `${pct(nowMs)}%`, width: `${pct(dayEnd) - pct(nowMs)}%` }} />
         )}
@@ -78,4 +96,19 @@ export default function DayTimeline({ entries, now, runningEntryId, dayStart, da
       </div>
     </div>
   );
+}
+
+function clip(startedAt: number, endedAt: number, windowStart: number, windowEnd: number) {
+  const visibleStart = Math.max(startedAt, windowStart);
+  const visibleEnd = Math.min(endedAt, windowEnd);
+  return visibleEnd > visibleStart ? { startedAt: visibleStart, endedAt: visibleEnd } : null;
+}
+
+export function buildTimelineTicks(dayStart: number, dayEnd: number, timeZone: string): number[] {
+  const ticks: number[] = [];
+  for (let t = dayStart; t < dayEnd; t += TICK_PROBE_MS) {
+    const parts = zonedDateTimeParts(t, timeZone);
+    if (parts.minute === 0 && parts.second === 0 && parts.hour % 3 === 0) ticks.push(t);
+  }
+  return ticks;
 }

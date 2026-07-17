@@ -1083,4 +1083,48 @@ describe('TimerService workspace business day', () => {
     expect(service.listToday(clock.now())).toHaveLength(1);
     expect(service.workedMsByTask(clock.now()).get('overnight')).toBe(5 * MIN);
   });
+
+  it('uses the same approved-manual projection for every Today surface', () => {
+    const clock = new FakeClock(T0 + 2 * 60 * MIN);
+    const store = new MemStore();
+    const approvedManual: TimeEntry = {
+      id: 'manual-entry',
+      clientUuid: 'manual-client',
+      userId: 'test-user',
+      larkTaskGuid: 'manual-task',
+      source: 'MANUAL',
+      revision: 0,
+      startedAt: T0 + 30 * MIN,
+      endedAt: T0 + 60 * MIN,
+      pauseReason: null,
+      closeReason: 'AGENT',
+      segments: [{
+        id: 'manual-segment',
+        kind: 'WORK',
+        startedAt: T0 + 30 * MIN,
+        endedAt: T0 + 60 * MIN,
+      }],
+    };
+    const canonicalPayload = canonicalTimerEntryPayload(approvedManual);
+    const service = new TimerService(
+      store,
+      new SpySync(),
+      clock,
+      new SeqIdGen(),
+      allowAccrual,
+      { window: () => ({ start: T0, end: T0 + 24 * 60 * MIN }) },
+      {
+        list: () => [{
+          entry: approvedManual,
+          canonicalPayload,
+          canonicalHash: createHash('sha256').update(canonicalPayload).digest('hex'),
+        }],
+      },
+    );
+    service.setTodayLedgerMode('VISIBLE');
+
+    expect(service.status()).toMatchObject({ state: 'IDLE', workedMs: 30 * MIN });
+    expect(service.listToday(clock.now())).toMatchObject([{ id: 'manual-entry', source: 'MANUAL' }]);
+    expect(service.workedMsByTask(clock.now()).get('manual-task')).toBe(30 * MIN);
+  });
 });

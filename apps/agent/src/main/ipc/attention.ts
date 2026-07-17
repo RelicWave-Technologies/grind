@@ -21,6 +21,7 @@ interface AttentionIpcOptions {
 }
 
 function allowed(kind: AttentionPrompt['kind'], action: AttentionAction): boolean {
+  if (kind === 'IDLE_WARNING') return action === 'IDLE_WARNING_CONTINUE';
   if (kind === 'IDLE') return action === 'IDLE_CONTINUE' || action === 'IDLE_BREAK';
   if (kind === 'AWAY') return action === 'AWAY_RESUME' || action === 'AWAY_DISMISS';
   if (kind === 'PERMISSION') return action === 'PERMISSION_RETRY' || action === 'PERMISSION_CLOSE';
@@ -44,6 +45,12 @@ export function registerAttentionIpc(opts: AttentionIpcOptions): void {
         return { ok: false, reason: 'STALE_PROMPT' };
       }
       if (!allowed(prompt.kind, input.action)) return { ok: false, reason: 'ACTION_NOT_ALLOWED' };
+
+      if (prompt.kind === 'IDLE_WARNING') {
+        opts.onIdleResolved();
+        coordinator.clear(prompt.promptId);
+        return { ok: true };
+      }
 
       if (prompt.kind === 'IDLE') {
         const command = input.action === 'IDLE_CONTINUE'

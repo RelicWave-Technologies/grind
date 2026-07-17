@@ -97,7 +97,7 @@ export default function Popover() {
       ) : (
         <div className="pop-list no-drag">
           <div className="pop-today-total">
-            <span>Today tracked</span>
+            <span>Today total</span>
             <strong className="tabular">{fmtClock(timer.workedMs)}</strong>
           </div>
           {openTasks.length === 0 ? (

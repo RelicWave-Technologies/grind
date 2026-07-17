@@ -43,6 +43,7 @@ export function registerTimerIpc(): void {
     const entries = getTimerService().listToday(Date.now());
     return entries.map((e) => ({
       id: e.id,
+      source: e.source,
       larkTaskGuid: e.larkTaskGuid ?? null,
       segments: e.segments.map((s) => ({ kind: s.kind, startedAt: s.startedAt, endedAt: s.endedAt })),
     }));

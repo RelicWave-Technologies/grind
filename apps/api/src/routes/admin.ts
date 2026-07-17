@@ -29,6 +29,7 @@ import {
   CreateShiftSchema,
   PatchShiftSchema,
   PatchTeamMemberSettingsRequest,
+  IdleWarningSecondsSchema,
   ShiftScheduleSchema,
   WORKSPACE_POLICY_DEFAULTS,
   dateKeyInTimeZone,
@@ -123,6 +124,7 @@ interface UserListEntry {
   agentLaunchAtLoginState: string | null;
   agentLaunchOrigin: string | null;
   agentLaunchAtLoginUpdatedAt: string | null;
+  idleWarningSeconds?: number | null;
 }
 
 /**
@@ -181,6 +183,7 @@ adminRouter.get('/users', async (req, res, next) => {
         agentLaunchAtLoginState: true,
         agentLaunchOrigin: true,
         agentLaunchAtLoginUpdatedAt: true,
+        idleWarningSeconds: true,
       },
       orderBy: [{ deactivatedAt: 'asc' }, { role: 'asc' }, { name: 'asc' }],
     });
@@ -221,6 +224,7 @@ adminRouter.get('/users', async (req, res, next) => {
         exposeAgentHealth && u.agentLaunchAtLoginUpdatedAt
           ? u.agentLaunchAtLoginUpdatedAt.toISOString()
           : null,
+      ...(exposeAgentHealth ? { idleWarningSeconds: u.idleWarningSeconds } : {}),
     }));
     res.json({ users: out, scope: req.scope.scope });
   } catch (err) {
@@ -316,6 +320,7 @@ type TeamSettingsUserRow = {
   // NULL = inherit the workspace policy default (resolved below).
   screenshotIntervalMin: number | null;
   idleThresholdMin: number | null;
+  idleWarningSeconds: number | null;
   createdAt: Date;
   team: {
     id: string;
@@ -345,6 +350,7 @@ function serializeTeamSettingsMember(
   user: TeamSettingsUserRow,
   manager: { id: string; name: string; email: string; avatarUrl: string | null } | null,
   defaults: PolicyDefaults,
+  exposeIdleWarning: boolean,
 ): TeamMemberSettingsDto {
   return {
     id: user.id,
@@ -359,11 +365,12 @@ function serializeTeamSettingsMember(
     // Resolved effective values: per-member override → policy default.
     screenshotIntervalMin: normalizeScreenshotIntervalMin(user.screenshotIntervalMin, defaults.screenshotIntervalMin),
     idleThresholdMin: user.idleThresholdMin ?? defaults.idleThresholdMin,
+    idleWarningSeconds: exposeIdleWarning ? user.idleWarningSeconds : null,
     createdAt: user.createdAt.toISOString(),
   };
 }
 
-async function loadTeamSettingsMembers(userIds: string[]): Promise<TeamMemberSettingsDto[]> {
+async function loadTeamSettingsMembers(userIds: string[], exposeIdleWarning = false): Promise<TeamMemberSettingsDto[]> {
   if (userIds.length === 0) return [];
   const users = await prisma.user.findMany({
     where: { id: { in: userIds }, deactivatedAt: null },
@@ -379,6 +386,7 @@ async function loadTeamSettingsMembers(userIds: string[]): Promise<TeamMemberSet
       shiftAssignedAt: true,
       screenshotIntervalMin: true,
       idleThresholdMin: true,
+      idleWarningSeconds: true,
       createdAt: true,
       workspaceId: true,
       team: {
@@ -408,6 +416,7 @@ async function loadTeamSettingsMembers(userIds: string[]): Promise<TeamMemberSet
       u,
       u.team?.managers.find((m) => m.user.id !== u.id)?.user ?? u.team?.managers[0]?.user ?? null,
       defaults,
+      exposeIdleWarning,
     ),
   );
 }
@@ -421,7 +430,7 @@ adminRouter.get('/team-member-settings', requireCapability('team.settings.manage
   try {
     if (!req.scope || !req.user) return res.status(401).json({ error: 'unauthorized' });
     const [members, shifts] = await Promise.all([
-      loadTeamSettingsMembers(scopedTeamSettingIds(req)),
+      loadTeamSettingsMembers(scopedTeamSettingIds(req), req.scope.isAdmin),
       prisma.shift.findMany({
         where: { workspaceId: req.scope.workspaceId },
         include: { members: { select: { id: true } } },
@@ -455,6 +464,9 @@ adminRouter.patch('/team-member-settings/:id', requireCapability('team.settings.
     if (!parsed.success) {
       return res.status(400).json({ error: 'invalid_body', detail: parsed.error.format() });
     }
+    if (!req.scope.isAdmin && parsed.data.idleWarningSeconds !== undefined) {
+      return res.status(403).json({ error: 'admin_required_for_idle_warning' });
+    }
 
     const existing = await prisma.user.findUnique({
       where: { id },
@@ -465,6 +477,7 @@ adminRouter.patch('/team-member-settings/:id', requireCapability('team.settings.
         shiftId: true,
         screenshotIntervalMin: true,
         idleThresholdMin: true,
+        idleWarningSeconds: true,
         provisioningStatus: true,
         deactivatedAt: true,
       },
@@ -488,7 +501,15 @@ adminRouter.patch('/team-member-settings/:id', requireCapability('team.settings.
           ? parsed.data.idleThresholdMin ?? defaults.idleThresholdMin
           : previousTiming.idleThresholdMin,
     };
+    const nextIdleWarningSeconds =
+      parsed.data.idleWarningSeconds !== undefined
+        ? parsed.data.idleWarningSeconds
+        : existing.idleWarningSeconds;
+    if (nextIdleWarningSeconds != null && nextIdleWarningSeconds >= nextTiming.idleThresholdMin * 60) {
+      return res.status(400).json({ error: 'idle_warning_requires_higher_threshold' });
+    }
     const timingChanged = monitoringTimingChanged(previousTiming, nextTiming);
+    const idleWarningChanged = nextIdleWarningSeconds !== existing.idleWarningSeconds;
     const riskLevel = monitoringRiskLevel(nextTiming);
     const auditReason = normalizeAuditReason(parsed.data.auditReason);
     if (timingChanged && riskLevel === 'HIGH' && !auditReason) {
@@ -501,6 +522,7 @@ adminRouter.patch('/team-member-settings/:id', requireCapability('team.settings.
       // null clears the per-member override → inherit policy.
       screenshotIntervalMin?: number | null;
       idleThresholdMin?: number | null;
+      idleWarningSeconds?: number | null;
       provisioningStatus?: 'ACTIVE';
     } = {};
     let shiftAssignment:
@@ -518,6 +540,9 @@ adminRouter.patch('/team-member-settings/:id', requireCapability('team.settings.
     }
     if (parsed.data.idleThresholdMin !== undefined) {
       data.idleThresholdMin = parsed.data.idleThresholdMin;
+    }
+    if (parsed.data.idleWarningSeconds !== undefined) {
+      data.idleWarningSeconds = parsed.data.idleWarningSeconds;
     }
     if ('shiftId' in parsed.data) {
       const raw = parsed.data.shiftId;
@@ -586,7 +611,7 @@ adminRouter.patch('/team-member-settings/:id', requireCapability('team.settings.
           });
         }
         await tx.user.update({ where: { id }, data });
-        if (timingChanged) {
+        if (timingChanged || idleWarningChanged) {
           await tx.monitoringSettingsAudit.create({
             data: {
               workspaceId: req.scope!.workspaceId,
@@ -595,8 +620,10 @@ adminRouter.patch('/team-member-settings/:id', requireCapability('team.settings.
               scope: 'MEMBER_OVERRIDE',
               previousScreenshotIntervalMin: previousTiming.screenshotIntervalMin,
               previousIdleThresholdMin: previousTiming.idleThresholdMin,
+              previousIdleWarningSeconds: existing.idleWarningSeconds,
               nextScreenshotIntervalMin: nextTiming.screenshotIntervalMin,
               nextIdleThresholdMin: nextTiming.idleThresholdMin,
+              nextIdleWarningSeconds,
               riskLevel,
               reason: auditReason,
             },
@@ -605,7 +632,7 @@ adminRouter.patch('/team-member-settings/:id', requireCapability('team.settings.
       });
     }
 
-    const [member] = await loadTeamSettingsMembers([id]);
+    const [member] = await loadTeamSettingsMembers([id], req.scope.isAdmin);
     if (!member) return res.status(404).json({ error: 'not_found' });
     res.json(member);
   } catch (err) {
@@ -619,8 +646,10 @@ type MonitoringSettingsAuditRow = {
   riskLevel: 'NORMAL' | 'CAUTION' | 'HIGH';
   previousScreenshotIntervalMin: number | null;
   previousIdleThresholdMin: number | null;
+  previousIdleWarningSeconds: number | null;
   nextScreenshotIntervalMin: number | null;
   nextIdleThresholdMin: number | null;
+  nextIdleWarningSeconds: number | null;
   reason: string | null;
   createdAt: Date;
   actor: { id: string; name: string; email: string } | null;
@@ -636,8 +665,10 @@ function serializeMonitoringSettingsAudit(row: MonitoringSettingsAuditRow): Moni
     targetUser: row.targetUser,
     previousScreenshotIntervalMin: row.previousScreenshotIntervalMin,
     previousIdleThresholdMin: row.previousIdleThresholdMin,
+    previousIdleWarningSeconds: row.previousIdleWarningSeconds,
     nextScreenshotIntervalMin: row.nextScreenshotIntervalMin,
     nextIdleThresholdMin: row.nextIdleThresholdMin,
+    nextIdleWarningSeconds: row.nextIdleWarningSeconds,
     reason: row.reason,
     createdAt: row.createdAt.toISOString(),
   };
@@ -1565,8 +1596,17 @@ adminRouter.patch('/users/:id', requireAdmin, async (req, res, next) => {
       managerId?: string | null;
       shiftId?: string | null;
       shiftAssignedAt?: Date | null;
+      idleWarningSeconds?: number | null;
       provisioningStatus?: 'ACTIVE';
     } = {};
+    let idleWarningAudit:
+      | {
+          previous: number | null;
+          next: number | null;
+          screenshotIntervalMin: number;
+          idleThresholdMin: number;
+        }
+      | null = null;
     let requestedTeamId: string | null | undefined = undefined;
     let shiftAssignment:
       | {
@@ -1618,6 +1658,29 @@ adminRouter.patch('/users/:id', requireAdmin, async (req, res, next) => {
         data.managerId = null;
       } else {
         return res.status(400).json({ error: 'manager_id_deprecated' });
+      }
+    }
+
+    if ('idleWarningSeconds' in (req.body ?? {})) {
+      const raw = req.body.idleWarningSeconds;
+      const parsedWarning = raw === null ? { success: true as const, data: null } : IdleWarningSecondsSchema.safeParse(raw);
+      if (!parsedWarning.success) {
+        return res.status(400).json({ error: 'invalid_idle_warning_seconds' });
+      }
+      const warningSeconds = parsedWarning.data;
+      const defaults = await loadPolicyDefaults(req.scope.workspaceId);
+      const idleThresholdMin = existing.idleThresholdMin ?? defaults.idleThresholdMin;
+      if (warningSeconds != null && warningSeconds >= idleThresholdMin * 60) {
+        return res.status(400).json({ error: 'idle_warning_requires_higher_threshold' });
+      }
+      data.idleWarningSeconds = warningSeconds;
+      if (warningSeconds !== existing.idleWarningSeconds) {
+        idleWarningAudit = {
+          previous: existing.idleWarningSeconds,
+          next: warningSeconds,
+          screenshotIntervalMin: existing.screenshotIntervalMin ?? defaults.screenshotIntervalMin,
+          idleThresholdMin,
+        };
       }
     }
 
@@ -1716,6 +1779,26 @@ adminRouter.patch('/users/:id', requireAdmin, async (req, res, next) => {
           data,
         });
       }
+      if (idleWarningAudit) {
+        await tx.monitoringSettingsAudit.create({
+          data: {
+            workspaceId: req.scope!.workspaceId,
+            actorId: req.user!.sub,
+            targetUserId: id,
+            scope: 'MEMBER_OVERRIDE',
+            previousScreenshotIntervalMin: idleWarningAudit.screenshotIntervalMin,
+            previousIdleThresholdMin: idleWarningAudit.idleThresholdMin,
+            previousIdleWarningSeconds: idleWarningAudit.previous,
+            nextScreenshotIntervalMin: idleWarningAudit.screenshotIntervalMin,
+            nextIdleThresholdMin: idleWarningAudit.idleThresholdMin,
+            nextIdleWarningSeconds: idleWarningAudit.next,
+            riskLevel: monitoringRiskLevel({
+              screenshotIntervalMin: idleWarningAudit.screenshotIntervalMin,
+              idleThresholdMin: idleWarningAudit.idleThresholdMin,
+            }),
+          },
+        });
+      }
       if (requestedTeamId !== undefined) {
         const assigned = await assignUserToTeam(tx, {
           workspaceId: req.scope!.workspaceId,
@@ -1736,6 +1819,7 @@ adminRouter.patch('/users/:id', requireAdmin, async (req, res, next) => {
           teamId: true,
           managerId: true,
           shiftId: true,
+          idleWarningSeconds: true,
           provisioningStatus: true,
           deactivatedAt: true,
           createdAt: true,

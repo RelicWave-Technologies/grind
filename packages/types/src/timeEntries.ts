@@ -149,7 +149,13 @@ export const TodayLedgerResponse = z.object({
   complete: z.literal(true),
   serverTime: Iso,
   workspaceTimezone: z.string().min(1),
+  /** AUTO rows retain their original field for backwards compatibility. */
   entries: z.array(TimeEntryDto).max(2_000),
+  /**
+   * Approved manual rows are additive. Older agents ignore this unknown field;
+   * newer agents treat an absent field from an older API as an empty list.
+   */
+  approvedManualEntries: z.array(TimeEntryDto).max(2_000).optional(),
   effectiveEntries: z.array(z.object({
     entryId: z.string().min(1),
     endedAt: Iso.nullable(),

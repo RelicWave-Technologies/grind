@@ -324,6 +324,50 @@ describe('PATCH /v1/admin/users/:id', () => {
     expect(res.body.teamId).toBe(t.id);
   });
 
+  it('allows only an admin to enable and audit a member idle countdown', async () => {
+    const s = await seed();
+
+    const denied = await request(app)
+      .patch(`/v1/admin/users/${s.mem1.id}`)
+      .set(auth(s.mgr.token))
+      .send({ idleWarningSeconds: 30 });
+    expect(denied.status).toBe(403);
+
+    const allowed = await request(app)
+      .patch(`/v1/admin/users/${s.mem1.id}`)
+      .set(auth(s.admin.token))
+      .send({ idleWarningSeconds: 30 });
+    expect(allowed.status).toBe(200);
+    expect(allowed.body.idleWarningSeconds).toBe(30);
+
+    const member = await prisma.user.findUniqueOrThrow({ where: { id: s.mem1.id } });
+    expect(member.idleWarningSeconds).toBe(30);
+    const audit = await prisma.monitoringSettingsAudit.findFirstOrThrow({
+      where: { targetUserId: s.mem1.id },
+    });
+    expect(audit).toMatchObject({
+      actorId: s.admin.id,
+      previousIdleWarningSeconds: null,
+      nextIdleWarningSeconds: 30,
+    });
+  });
+
+  it('rejects an idle countdown that does not fit before the member threshold', async () => {
+    const s = await seed();
+    await prisma.user.update({
+      where: { id: s.mem1.id },
+      data: { idleThresholdMin: 1 },
+    });
+
+    const res = await request(app)
+      .patch(`/v1/admin/users/${s.mem1.id}`)
+      .set(auth(s.admin.token))
+      .send({ idleWarningSeconds: 60 });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('idle_warning_requires_higher_threshold');
+  });
+
   it('rejects moving a non-admin manager away from their managed team', async () => {
     const s = await seed();
     const managed = await createManagedTeam({ workspaceId: s.ws.id, name: 'Managed A', managerId: s.mgr.id });
@@ -462,6 +506,32 @@ describe('PATCH /v1/admin/users/:id', () => {
       .set(auth(s.admin.token))
       .send({ name: 'No' });
     expect(res.status).toBe(404);
+  });
+});
+
+describe('GET /v1/admin/users — idle countdown visibility', () => {
+  it('exposes the idle countdown to admins but omits it for managers', async () => {
+    const s = await seed();
+    const team = await createManagedTeam({
+      workspaceId: s.ws.id,
+      name: 'Private countdown team',
+      managerId: s.mgr.id,
+    });
+    await prisma.user.update({
+      where: { id: s.mem1.id },
+      data: { teamId: team.id, idleWarningSeconds: 30 },
+    });
+
+    const adminRes = await request(app).get('/v1/admin/users').set(auth(s.admin.token));
+    expect(adminRes.status).toBe(200);
+    expect(adminRes.body.users.find((user: { id: string }) => user.id === s.mem1.id))
+      .toMatchObject({ idleWarningSeconds: 30 });
+
+    const managerRes = await request(app).get('/v1/admin/users').set(auth(s.mgr.token));
+    expect(managerRes.status).toBe(200);
+    const managerMember = managerRes.body.users.find((user: { id: string }) => user.id === s.mem1.id);
+    expect(managerMember).toBeDefined();
+    expect(managerMember).not.toHaveProperty('idleWarningSeconds');
   });
 });
 
@@ -632,6 +702,57 @@ describe('/v1/admin/team-member-settings', () => {
       riskLevel: 'CAUTION',
       reason: null,
     });
+  });
+
+  it('prevents a manager from lowering the threshold below an admin countdown', async () => {
+    const s = await seed();
+    const team = await createManagedTeam({ workspaceId: s.ws.id, name: 'Managed Team', managerId: s.mgr.id });
+    await prisma.user.update({
+      where: { id: s.mem1.id },
+      data: { teamId: team.id, managerId: null, idleWarningSeconds: 60 },
+    });
+
+    const res = await request(app)
+      .patch(`/v1/admin/team-member-settings/${s.mem1.id}`)
+      .set(auth(s.mgr.token))
+      .send({ idleThresholdMin: 1, auditReason: 'Testing threshold guard.' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('idle_warning_requires_higher_threshold');
+  });
+
+  it('lets only admins view and edit member idle countdowns from team settings', async () => {
+    const s = await seed();
+    const team = await createManagedTeam({ workspaceId: s.ws.id, name: 'Managed Team', managerId: s.mgr.id });
+    await prisma.user.update({
+      where: { id: s.mem1.id },
+      data: { teamId: team.id, managerId: null, idleWarningSeconds: 30 },
+    });
+
+    const managerList = await request(app).get('/v1/admin/team-member-settings').set(auth(s.mgr.token));
+    expect(managerList.status).toBe(200);
+    expect(managerList.body.members.find((m: { id: string }) => m.id === s.mem1.id))
+      .toMatchObject({ idleWarningSeconds: null });
+
+    const managerPatch = await request(app)
+      .patch(`/v1/admin/team-member-settings/${s.mem1.id}`)
+      .set(auth(s.mgr.token))
+      .send({ idleWarningSeconds: 45 });
+    expect(managerPatch.status).toBe(403);
+    expect(managerPatch.body.error).toBe('admin_required_for_idle_warning');
+
+    const adminPatch = await request(app)
+      .patch(`/v1/admin/team-member-settings/${s.mem1.id}`)
+      .set(auth(s.admin.token))
+      .send({ idleWarningSeconds: 45 });
+    expect(adminPatch.status).toBe(200);
+    expect(adminPatch.body.idleWarningSeconds).toBe(45);
+
+    const saved = await prisma.user.findUnique({
+      where: { id: s.mem1.id },
+      select: { idleWarningSeconds: true },
+    });
+    expect(saved?.idleWarningSeconds).toBe(45);
   });
 
   it('keeps manager settings writes scoped to their team', async () => {

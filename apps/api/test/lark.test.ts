@@ -73,7 +73,7 @@ describe('GET /v1/lark/oauth/start', () => {
 
   it('uses the connect callback URI and returns to the Timo app when requested', async () => {
     configureLarkConnect();
-    const { accessToken, user } = await seedUser();
+    const { accessToken, userId } = await seedUser();
     const res = await request(app)
       .get('/v1/lark/oauth/start?return_to=agent&callback_scheme=timo')
       .set('Authorization', `Bearer ${accessToken}`);
@@ -85,7 +85,7 @@ describe('GET /v1/lark/oauth/start', () => {
     expect(url.searchParams.get('redirect_uri')).toBe('http://localhost:4000/v1/lark/oauth/callback');
 
     const state = verifyOAuthState(url.searchParams.get('state')!);
-    expect(state).toMatchObject({ sub: user.id, returnTo: 'agent', agentCallbackScheme: 'timo' });
+    expect(state).toMatchObject({ sub: userId, returnTo: 'agent', agentCallbackScheme: 'timo' });
   });
 
   it('does not treat a login callback URI as a valid task-connect callback', async () => {

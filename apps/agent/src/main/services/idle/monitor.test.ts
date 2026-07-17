@@ -1,6 +1,12 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const state = vi.hoisted(() => ({ idleSeconds: 0, running: true, paused: false, threshold: 10 }));
+const state = vi.hoisted(() => ({
+  idleSeconds: 0,
+  running: true,
+  paused: false,
+  threshold: 10,
+  warning: null as number | null,
+}));
 
 vi.mock('electron', () => ({ powerMonitor: { getSystemIdleTime: () => state.idleSeconds } }));
 vi.mock('../timer', () => ({
@@ -10,100 +16,143 @@ vi.mock('../timer', () => ({
       : { state: 'IDLE' },
   }),
 }));
-vi.mock('../agentConfig', () => ({ getIdleThresholdSec: () => state.threshold }));
+vi.mock('../agentConfig', () => ({
+  getIdleThresholdSec: () => state.threshold,
+  getIdleWarningSeconds: () => state.warning,
+}));
 vi.mock('../../env', () => ({ IDLE_POLL_MS: 1000 }));
 vi.mock('../../logger', () => ({ log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } }));
 
 const { IdleMonitor } = await import('./monitor');
 
-// tick() is private; call it directly for deterministic, timer-free assertions.
-const tick = (m: InstanceType<typeof IdleMonitor>) => (m as unknown as { tick(): Promise<void> }).tick();
+const tick = (monitor: InstanceType<typeof IdleMonitor>) =>
+  (monitor as unknown as { tick(): Promise<void> }).tick();
+
+function setup() {
+  const handlers = {
+    onWarning: vi.fn(async () => true),
+    onWarningCancelled: vi.fn(),
+    onIdle: vi.fn(async () => true),
+  };
+  return { handlers, monitor: new IdleMonitor(handlers) };
+}
+
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-07-16T12:00:00.000Z'));
+});
 
 afterEach(() => {
   state.idleSeconds = 0;
   state.running = true;
   state.paused = false;
   state.threshold = 10;
+  state.warning = null;
+  vi.useRealTimers();
 });
 
-describe('IdleMonitor prompt gating', () => {
-  it('does not re-prompt while a prompt is open, until resolve()', async () => {
-    state.idleSeconds = 20;
-    const onPrompt = vi.fn(async () => true);
-    const m = new IdleMonitor(onPrompt);
+describe('IdleMonitor two-stage gating', () => {
+  it('keeps the existing direct idle pause when warning is disabled', async () => {
+    state.idleSeconds = 10;
+    const { handlers, monitor } = setup();
 
-    await tick(m);
-    await tick(m);
-    expect(onPrompt).toHaveBeenCalledTimes(1); // second tick guarded by `prompting`
-    expect(m.isPrompting()).toBe(true);
+    await tick(monitor);
 
-    m.resolve();
-    await tick(m);
-    expect(onPrompt).toHaveBeenCalledTimes(2);
+    expect(handlers.onWarning).not.toHaveBeenCalled();
+    expect(handlers.onIdle).toHaveBeenCalledTimes(1);
+    expect(monitor.isPrompting()).toBe(true);
   });
 
-  it('resets prompting when onPrompt fails, so a later idle can prompt again (#7)', async () => {
-    state.idleSeconds = 20;
-    let calls = 0;
-    const onPrompt = vi.fn(async () => {
-      calls += 1;
-      if (calls === 1) throw new Error('showIdlePrompt failed');
-      return true;
-    });
-    const m = new IdleMonitor(onPrompt);
+  it('shows one warning before the threshold without pausing', async () => {
+    state.warning = 3;
+    state.idleSeconds = 7;
+    const { handlers, monitor } = setup();
 
-    await tick(m); // first attempt throws → must NOT wedge the flag
-    expect(m.isPrompting()).toBe(false);
+    await tick(monitor);
+    await tick(monitor);
 
-    await tick(m); // retries because the flag was reset
-    expect(onPrompt).toHaveBeenCalledTimes(2);
-    expect(m.isPrompting()).toBe(true); // second succeeded → stays open until resolve()
+    expect(handlers.onWarning).toHaveBeenCalledTimes(1);
+    expect(handlers.onWarning).toHaveBeenCalledWith(expect.objectContaining({
+      deadlineAt: Date.now() + 3000,
+    }));
+    expect(handlers.onIdle).not.toHaveBeenCalled();
+    monitor.resolve();
   });
 
-  it('never prompts when the timer is not running', async () => {
-    state.idleSeconds = 20;
-    state.running = false;
-    const onPrompt = vi.fn(async () => true);
-    const m = new IdleMonitor(onPrompt);
+  it('dismisses the warning automatically when activity returns', async () => {
+    state.warning = 3;
+    state.idleSeconds = 7;
+    const { handlers, monitor } = setup();
+    await tick(monitor);
 
-    await tick(m);
-    expect(onPrompt).not.toHaveBeenCalled();
+    state.idleSeconds = 0;
+    await tick(monitor);
+
+    expect(handlers.onWarningCancelled).toHaveBeenCalledTimes(1);
+    expect(monitor.isPrompting()).toBe(false);
   });
 
-  it('never prompts while a running entry is paused', async () => {
+  it('dismisses the warning immediately when tracked input returns', async () => {
+    state.warning = 3;
+    state.idleSeconds = 7;
+    const { handlers, monitor } = setup();
+    await tick(monitor);
+
+    monitor.noteActivity();
+
+    expect(handlers.onWarningCancelled).toHaveBeenCalledTimes(1);
+    expect(monitor.isPrompting()).toBe(false);
+  });
+
+  it('transitions the warning into the durable idle prompt at the deadline', async () => {
+    state.warning = 3;
+    state.idleSeconds = 7;
+    const { handlers, monitor } = setup();
+    await tick(monitor);
+
+    vi.setSystemTime(Date.now() + 3000);
+    state.idleSeconds = 10;
+    await tick(monitor);
+
+    expect(handlers.onIdle).toHaveBeenCalledTimes(1);
+    expect(monitor.isPrompting()).toBe(true);
+  });
+
+  it('retries presenting a paused idle prompt after a coordinator conflict', async () => {
+    state.idleSeconds = 10;
+    const { handlers, monitor } = setup();
+    handlers.onIdle.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+
+    await tick(monitor);
+    state.paused = true;
+    await tick(monitor);
+
+    expect(handlers.onIdle).toHaveBeenCalledTimes(2);
+    expect(monitor.isPrompting()).toBe(true);
+  });
+
+  it('never warns or pauses when the timer is not accruing', async () => {
+    state.warning = 3;
     state.idleSeconds = 20;
     state.paused = true;
-    const onPrompt = vi.fn(async () => true);
-    const m = new IdleMonitor(onPrompt);
+    const { handlers, monitor } = setup();
 
-    await tick(m);
-    expect(onPrompt).not.toHaveBeenCalled();
+    await tick(monitor);
+
+    expect(handlers.onWarning).not.toHaveBeenCalled();
+    expect(handlers.onIdle).not.toHaveBeenCalled();
   });
 
-  it('releases prompting when the coordinator rejects the idle prompt', async () => {
-    state.idleSeconds = 20;
-    const onPrompt = vi.fn(async () => false);
-    const m = new IdleMonitor(onPrompt);
+  it('clears a warning while machine-away handling is active', async () => {
+    state.warning = 3;
+    state.idleSeconds = 7;
+    const { handlers, monitor } = setup();
+    await tick(monitor);
 
-    await tick(m);
-    expect(m.isPrompting()).toBe(false);
-    await tick(m);
-    expect(onPrompt).toHaveBeenCalledTimes(2);
-  });
+    monitor.suspend();
+    await tick(monitor);
 
-  it('clears and suppresses prompting while machine-away handling is active', async () => {
-    state.idleSeconds = 20;
-    const onPrompt = vi.fn(async () => true);
-    const m = new IdleMonitor(onPrompt);
-
-    await tick(m);
-    m.suspend();
-    await tick(m);
-    expect(m.isPrompting()).toBe(false);
-    expect(onPrompt).toHaveBeenCalledTimes(1);
-
-    m.resume();
-    await tick(m);
-    expect(onPrompt).toHaveBeenCalledTimes(2);
+    expect(handlers.onWarningCancelled).toHaveBeenCalledTimes(1);
+    expect(monitor.isPrompting()).toBe(false);
   });
 });

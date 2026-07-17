@@ -26,7 +26,9 @@ Plus the **web dashboard** (browser) for the heavy manager/admin views: team tim
 
 ## Core capabilities (target)
 - Time tracking with a **segment model** (work / meeting / idle-trimmed); idle discard trims retroactively; crash-safe.
-- **Auto-start on boot/wake**; idle detection with an "are you still working?" prompt (popup time never counts).
+- **Edit Time** uses a full local-calendar-day review partition: elapsed outside-shift empty time has the same gap composer and approval flow as in-shift time, while future time is never fabricated. The assigned shift remains visibly marked. Home and Reports retain shift-scoped gap KPIs. The desktop Today timeline is full-day and marks the assigned shift but remains read-only.
+- Desktop “Today” totals use one reconciled projection everywhere: server-confirmed AUTO time, unsynced local AUTO time, and approved MANUAL time. Pending/rejected requests never count, overlapping intervals are unioned, and approved time renders as Manual on the desktop timeline.
+- **Auto-start on boot/wake**; idle detection with an admin-assigned early "are you still working?" countdown. Admins choose the users and warning seconds; managers cannot view or change the assignment. Ignoring the countdown uses the existing idle boundary, and idle time never counts.
 - **Screenshots**: exact 1/2/3 minute cadence, 3 minutes by default, high quality, fullscreen-safe; 60-day retention; self-serve delete/blur.
 - **Activity**: keystroke/mouse/scroll **counts** + content-free timing stats; **role-based productivity score**; **anti-cheat** (impossible rates, jigglers, PyAutoGUI, static-screen) → flag for review, hard-reject only physically-impossible.
 - **Lark**: per-user OAuth; **Task** time attribution; **Meet/Calendar** meeting detection; **IM approval cards** for manual-time requests.

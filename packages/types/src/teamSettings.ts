@@ -62,6 +62,7 @@ export const TeamMemberSettingsDtoSchema = z.object({
   shiftAssignedAt: z.string().datetime({ offset: true }).nullable(),
   screenshotIntervalMin: ScreenshotIntervalMinSchema,
   idleThresholdMin: z.number().int().min(IDLE_THRESHOLD_MIN).max(IDLE_THRESHOLD_MAX),
+  idleWarningSeconds: z.number().int().min(5).max(120).nullable(),
   createdAt: z.string().datetime({ offset: true }),
 });
 
@@ -82,13 +83,15 @@ export const PatchTeamMemberSettingsRequest = z
     // policy default. A number sets an explicit per-member override.
     screenshotIntervalMin: ScreenshotIntervalMinSchema.nullable().optional(),
     idleThresholdMin: z.number().int().min(IDLE_THRESHOLD_MIN).max(IDLE_THRESHOLD_MAX).nullable().optional(),
+    idleWarningSeconds: z.number().int().min(5).max(120).nullable().optional(),
     auditReason: z.string().max(500).optional(),
   })
   .refine(
     (v) =>
       v.shiftId !== undefined ||
       v.screenshotIntervalMin !== undefined ||
-      v.idleThresholdMin !== undefined,
+      v.idleThresholdMin !== undefined ||
+      v.idleWarningSeconds !== undefined,
     { message: 'nothing_to_update' },
   );
 

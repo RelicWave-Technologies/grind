@@ -36,6 +36,7 @@ async function buildAgentConfig(userId: string, workspaceId: string): Promise<Ag
       workspace: { select: { timezone: true } },
       screenshotIntervalMin: true,
       idleThresholdMin: true,
+      idleWarningSeconds: true,
     },
   });
   if (!user) return null;
@@ -64,6 +65,10 @@ async function buildAgentConfig(userId: string, workspaceId: string): Promise<Ag
     user.idleThresholdMin ??
     policy?.defaultIdleThresholdMin ??
     WORKSPACE_POLICY_DEFAULTS.defaultIdleThresholdMin;
+  const idleWarningSeconds =
+    user.idleWarningSeconds != null && user.idleWarningSeconds < idleThresholdMin * 60
+      ? user.idleWarningSeconds
+      : null;
   const captureApps = policy?.captureApps ?? WORKSPACE_POLICY_DEFAULTS.captureApps;
   const captureTitles = policy?.captureTitles ?? WORKSPACE_POLICY_DEFAULTS.captureTitles;
   const captureUrls = policy?.captureUrls ?? WORKSPACE_POLICY_DEFAULTS.captureUrls;
@@ -78,6 +83,7 @@ async function buildAgentConfig(userId: string, workspaceId: string): Promise<Ag
     policyUpdatedAt,
     screenshotIntervalMin,
     idleThresholdMin,
+    idleWarningSeconds ?? 'idle-warning:off',
     captureApps ? 'apps:on' : 'apps:off',
     captureTitles ? 'titles:on' : 'titles:off',
     captureUrls ? 'urls:on' : 'urls:off',
@@ -91,6 +97,7 @@ async function buildAgentConfig(userId: string, workspaceId: string): Promise<Ag
     heartbeatIntervalSec: 60,
     screenshotIntervalMin,
     idleThresholdMin,
+    idleWarningSeconds,
     captureApps,
     captureTitles,
     captureUrls,
@@ -198,7 +205,9 @@ agentRouter.get('/config', async (req, res, next) => {
 /**
  * Complete, bounded server snapshot for the authenticated user's tracked day.
  * This is deliberately separate from the mutable local timer journal: clients
- * cache it as server evidence and reconcile by entry id/client UUID.
+ * cache it as server evidence and reconcile by entry id/client UUID. Approved
+ * manual time is returned separately so older agents keep their AUTO-only
+ * response contract while newer agents can include it in today's total.
  */
 agentRouter.get('/today-ledger', validate(TodayLedgerQuery, 'query'), async (req, res, next) => {
   try {
@@ -216,10 +225,10 @@ agentRouter.get('/today-ledger', validate(TodayLedgerQuery, 'query'), async (req
     });
     if (!user) return res.status(401).json({ error: 'unauthorized' });
 
-    const entries = await prisma.timeEntry.findMany({
+    const allEntries = await prisma.timeEntry.findMany({
       where: {
         userId: req.user.sub,
-        source: 'AUTO',
+        source: { in: ['AUTO', 'MANUAL'] },
         startedAt: { lt: to },
         OR: [{ endedAt: null }, { endedAt: { gt: from } }],
       },
@@ -227,14 +236,16 @@ agentRouter.get('/today-ledger', validate(TodayLedgerQuery, 'query'), async (req
       take: 2_001,
       include: { segments: true },
     });
-    if (entries.length > 2_000) {
+    if (allEntries.length > 2_000) {
       return res.status(409).json({ error: 'today_ledger_snapshot_too_large' });
     }
 
     const now = new Date();
-    const evidence = await loadEntryLiveEvidence(entries, now);
-    const serialized = entries.map(serializeTimeEntry);
-    const effectiveEntries = entries.map((entry) => {
+    const autoEntries = allEntries.filter((entry) => entry.source === 'AUTO');
+    const approvedManualEntries = allEntries.filter((entry) => entry.source === 'MANUAL');
+    const evidence = await loadEntryLiveEvidence(autoEntries, now);
+    const serialized = autoEntries.map(serializeTimeEntry);
+    const effectiveEntries = autoEntries.map((entry) => {
       const effectiveEnds = resolveEffectiveEntrySegmentEnds({
         segments: entry.segments,
         entryEndedAt: entry.endedAt,
@@ -258,6 +269,7 @@ agentRouter.get('/today-ledger', validate(TodayLedgerQuery, 'query'), async (req
       serverTime: now.toISOString(),
       workspaceTimezone: user.workspace.timezone,
       entries: serialized,
+      approvedManualEntries: approvedManualEntries.map(serializeTimeEntry),
       effectiveEntries,
     };
     return res.json(response);

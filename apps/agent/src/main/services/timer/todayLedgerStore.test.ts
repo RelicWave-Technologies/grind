@@ -42,7 +42,45 @@ function snapshot(overrides: Partial<TodayLedgerResponse> = {}): TodayLedgerResp
   };
 }
 
+function approvedManualEntry(): NonNullable<TodayLedgerResponse['approvedManualEntries']>[number] {
+  return {
+    id: 'manual-entry',
+    clientUuid: 'manual-client',
+    userId: owner.userId,
+    larkTaskGuid: 'manual-task',
+    source: 'MANUAL',
+    trackingProtocolVersion: null,
+    revision: null,
+    lastProvenAt: null,
+    leaseExpiresAt: null,
+    closeReason: null,
+    serverFinalizedAt: null,
+    startedAt: new Date(20_000).toISOString(),
+    endedAt: new Date(30_000).toISOString(),
+    notes: null,
+    segments: [{
+      id: 'manual-segment',
+      kind: 'WORK',
+      startedAt: new Date(20_000).toISOString(),
+      endedAt: new Date(30_000).toISOString(),
+    }],
+  };
+}
+
 describe('SqliteTodayLedgerStore', () => {
+  it('caches approved manual rows as closed server-only ledger evidence', () => {
+    const db = new Database(':memory:');
+    const store = new SqliteTodayLedgerStore(db);
+    store.replaceSnapshot(owner, window, snapshot({ approvedManualEntries: [approvedManualEntry()] }));
+
+    const rows = store.list(owner, window.start, window.end, 40_000);
+    expect(rows).toHaveLength(2);
+    expect(rows.find((row) => row.entry.id === 'manual-entry')?.entry).toMatchObject({
+      source: 'MANUAL',
+      endedAt: 30_000,
+    });
+  });
+
   it('caps an expired open lease at the last proven boundary', () => {
     const db = new Database(':memory:');
     const store = new SqliteTodayLedgerStore(db);

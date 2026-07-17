@@ -151,7 +151,12 @@ export function UsersScreen() {
   const patch = useMutation({
     mutationFn: (vars: {
       id: string;
-      patch: Partial<{ name: string; role: Role; teamId: string | null; shiftId: string | null }>;
+      patch: Partial<{
+        name: string;
+        role: Role;
+        teamId: string | null;
+        shiftId: string | null;
+      }>;
     }) =>
       api<AdminUser>(`/v1/admin/users/${vars.id}`, { method: 'PATCH', json: vars.patch }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'users'] }),
@@ -365,7 +370,12 @@ interface RowProps {
   shiftName: string;
   busy: boolean;
   error: string | null;
-  onSave: (patch: Partial<{ name: string; role: Role; teamId: string | null; shiftId: string | null }>) => void;
+  onSave: (patch: Partial<{
+    name: string;
+    role: Role;
+    teamId: string | null;
+    shiftId: string | null;
+  }>) => void;
   onDeactivate: () => void;
   onReactivate: () => void;
   onActivate: () => void;
@@ -395,7 +405,12 @@ function PersonRow({
   const [shiftId, setShiftId] = useState<string>(user.shiftId ?? '');
 
   function save() {
-    const next: Partial<{ name: string; role: Role; teamId: string | null; shiftId: string | null }> = {};
+    const next: Partial<{
+      name: string;
+      role: Role;
+      teamId: string | null;
+      shiftId: string | null;
+    }> = {};
     if (name.trim() && name.trim() !== user.name) next.name = name.trim();
     if (user.role !== 'MANAGER' && role !== user.role) next.role = role;
     const nextTeam = teamId === '' ? null : teamId;
