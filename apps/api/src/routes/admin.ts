@@ -206,7 +206,9 @@ adminRouter.get('/users', async (req, res, next) => {
       provisioningStatus: u.provisioningStatus,
       createdAt: u.createdAt.toISOString(),
       agentLastSeenAt: exposeAgentHealth && u.agentLastSeenAt ? u.agentLastSeenAt.toISOString() : null,
-      agentPresence: exposeAgentHealth ? agentPresence(u.agentLastSeenAt, presenceCheckedAt) : null,
+      agentPresence: exposeAgentHealth
+        ? agentPresence(u.agentLastSeenAt, u.agentState, presenceCheckedAt)
+        : null,
       agentState: exposeAgentHealth ? u.agentState : null,
       agentVersion: exposeAgentHealth ? u.agentVersion : null,
       agentPlatform: exposeAgentHealth ? u.agentPlatform : null,

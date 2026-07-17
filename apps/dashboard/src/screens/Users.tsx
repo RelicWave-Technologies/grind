@@ -645,10 +645,15 @@ function presenceTag(
   if (state.isDeactivated) return { label: 'Deactivated', status: 'neutral', title: 'This account is deactivated.' };
   if (state.isPending) return { label: 'Pending', status: 'warn', title: 'This account is still awaiting setup.' };
   if (user.agentPresence === 'ONLINE') {
-    return { label: 'Online', status: 'success', title: 'Timo has sent a heartbeat within the last 3 minutes.' };
+    return { label: 'Online', status: 'success', title: 'Timo is actively tracking and sent a heartbeat within the last 3 minutes.' };
   }
   if (user.agentPresence === 'OFFLINE') {
-    return { label: 'Offline', status: 'neutral', title: 'Timo has not sent a heartbeat within the last 3 minutes.' };
+    const title = user.agentState === 'IDLE'
+      ? 'Timo is connected but not tracking right now.'
+      : user.agentState === 'PAUSED_IDLE' || user.agentState === 'PAUSED_PERMISSION'
+        ? 'Tracking is paused.'
+        : 'Timo is not actively tracking right now.';
+    return { label: 'Offline', status: 'neutral', title };
   }
   return { label: 'Unknown', status: 'neutral', title: 'Live device presence is visible to workspace admins only.' };
 }
