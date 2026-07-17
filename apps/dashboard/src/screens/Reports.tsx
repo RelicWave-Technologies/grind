@@ -1584,7 +1584,7 @@ function AppsPanel({ data }: { data: MemberReportDayAppsResponse }) {
 }
 
 function ActivityPanel({ data, tz }: { data: MemberReportDayScreenshotsResponse; tz: string }) {
-  const [selectedShotIndex, setSelectedShotIndex] = useState<number | null>(null);
+  const [selectedShotId, setSelectedShotId] = useState<string | null>(null);
   const win = localDayWindowMs(data.date, data.tz);
   const fallbackStart = new Date(`${data.date}T00:00:00`).getTime();
   const dayShell: DayInsight = {
@@ -1617,7 +1617,7 @@ function ActivityPanel({ data, tz }: { data: MemberReportDayScreenshotsResponse;
         <EmptyState icon={<Images size={22} strokeWidth={1.8} />} title="No screenshots" description="No uploaded screenshots exist for this day yet." />
       ) : (
         <div className="rep-shot-grid">
-          {data.screenshots.map((shot, index) => {
+          {data.screenshots.map((shot) => {
             const href = reportImageUrl(shot.fullUrl ?? shot.thumbUrl);
             const src = reportImageUrl(shot.thumbUrl ?? shot.fullUrl);
             return (
@@ -1625,7 +1625,7 @@ function ActivityPanel({ data, tz }: { data: MemberReportDayScreenshotsResponse;
                 <button
                   type="button"
                   className={href && src ? 'rep-shot-img' : 'rep-shot-empty'}
-                  onClick={() => setSelectedShotIndex(index)}
+                  onClick={() => setSelectedShotId(shot.id)}
                   aria-label={`View screenshot captured at ${fmtTime(new Date(shot.capturedAt).getTime(), tz)}`}
                 >
                   {src ? <img src={src} alt="" /> : <Images size={20} strokeWidth={1.8} />}
@@ -1643,13 +1643,13 @@ function ActivityPanel({ data, tz }: { data: MemberReportDayScreenshotsResponse;
         </div>
       )}
 
-      {selectedShotIndex !== null && (
+      {selectedShotId && (
         <ScreenshotCarousel
           screenshots={data.screenshots}
-          selectedIndex={selectedShotIndex}
+          selectedShotId={selectedShotId}
           timeZone={tz}
-          onSelect={setSelectedShotIndex}
-          onClose={() => setSelectedShotIndex(null)}
+          onSelect={setSelectedShotId}
+          onClose={() => setSelectedShotId(null)}
         />
       )}
     </div>
@@ -1658,20 +1658,26 @@ function ActivityPanel({ data, tz }: { data: MemberReportDayScreenshotsResponse;
 
 function ScreenshotCarousel({
   screenshots,
-  selectedIndex,
+  selectedShotId,
   timeZone,
   onSelect,
   onClose,
 }: {
   screenshots: MemberReportScreenshot[];
-  selectedIndex: number;
+  selectedShotId: string;
   timeZone: string;
-  onSelect: (index: number) => void;
+  onSelect: (id: string) => void;
   onClose: () => void;
 }) {
+  const selectedIndex = screenshots.findIndex((candidate) => candidate.id === selectedShotId);
   const shot = screenshots[selectedIndex];
   const hasPrevious = selectedIndex > 0;
   const hasNext = selectedIndex < screenshots.length - 1;
+
+  function selectAt(index: number) {
+    const next = screenshots[index];
+    if (next) onSelect(next.id);
+  }
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
@@ -1679,8 +1685,10 @@ function ScreenshotCarousel({
 
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === 'Escape') onClose();
-      if (event.key === 'ArrowLeft' && hasPrevious) onSelect(selectedIndex - 1);
-      if (event.key === 'ArrowRight' && hasNext) onSelect(selectedIndex + 1);
+      const previous = screenshots[selectedIndex - 1];
+      const next = screenshots[selectedIndex + 1];
+      if (event.key === 'ArrowLeft' && previous) onSelect(previous.id);
+      if (event.key === 'ArrowRight' && next) onSelect(next.id);
     }
 
     document.addEventListener('keydown', onKeyDown);
@@ -1688,7 +1696,7 @@ function ScreenshotCarousel({
       document.removeEventListener('keydown', onKeyDown);
       document.body.style.overflow = previousOverflow;
     };
-  }, [hasNext, hasPrevious, onClose, onSelect, selectedIndex]);
+  }, [hasNext, hasPrevious, onClose, onSelect, screenshots, selectedIndex]);
 
   if (!shot || typeof document === 'undefined') return null;
 
@@ -1718,7 +1726,11 @@ function ScreenshotCarousel({
         <div className="rep-lightbox-content">
           <div className="rep-lightbox-media">
             {fullSrc ? (
-              <img src={fullSrc} alt={`Screenshot captured at ${fmtTime(capturedAtMs, timeZone)}`} />
+              <img
+                key={shot.id}
+                src={fullSrc}
+                alt={`Screenshot captured at ${fmtTime(capturedAtMs, timeZone)}`}
+              />
             ) : (
               <div className="rep-lightbox-missing">
                 <Images size={28} strokeWidth={1.7} />
@@ -1731,14 +1743,14 @@ function ScreenshotCarousel({
               icon={<ChevronLeft size={20} strokeWidth={1.9} />}
               aria-label="Previous screenshot"
               disabled={!hasPrevious}
-              onClick={() => onSelect(selectedIndex - 1)}
+              onClick={() => selectAt(selectedIndex - 1)}
             />
             <IconButton
               className="rep-lightbox-arrow rep-lightbox-arrow--next"
               icon={<ChevronRight size={20} strokeWidth={1.9} />}
               aria-label="Next screenshot"
               disabled={!hasNext}
-              onClick={() => onSelect(selectedIndex + 1)}
+              onClick={() => selectAt(selectedIndex + 1)}
             />
           </div>
 
@@ -1777,7 +1789,7 @@ function ScreenshotCarousel({
                 type="button"
                 key={candidate.id}
                 className={`rep-lightbox-thumb${index === selectedIndex ? ' is-selected' : ''}`}
-                onClick={() => onSelect(index)}
+                onClick={() => onSelect(candidate.id)}
                 aria-label={`View screenshot ${index + 1} of ${screenshots.length}`}
                 aria-pressed={index === selectedIndex}
               >
