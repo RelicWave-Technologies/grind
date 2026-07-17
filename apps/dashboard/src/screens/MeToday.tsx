@@ -5,6 +5,7 @@ import { useRouteContext, useSearch } from '@tanstack/react-router';
 import { CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react';
 import { api } from '../lib/api';
 import { hasCapability, isManagerOrAbove } from '../lib/auth';
+import { dayBlockRowId } from '../lib/dayBlockIdentity';
 import type { DayInsight, WorkspaceUser } from '../lib/types';
 import { addDays, calendarDateInstant, fmtDayLabel, fmtDurationMs, fmtTime, todayKey } from '../lib/format';
 import { DayRibbon } from '../components/DayRibbon';
@@ -201,16 +202,8 @@ export function MeTodayScreen() {
 
   // Bar↔row link: when the ribbon hovers a block, highlight the matching
   // table row. Uses a single piece of state so only one row can be lit at
-  // a time. Row keys match the ribbon's: `entry-<id>`, `pending-<id>`, `gap-…`.
+  // a time. Row keys come from the shared dayBlockRowId contract.
   const [highlightedRowId, setHighlightedRowId] = useState<string | null>(null);
-
-  // Stable row key for a block — must match the keys used in the table below.
-  const rowKeyFor = useCallback((b: { kind: string; startedAt: number; endedAt: number; timeEntryId?: string; requestId?: string }): string => {
-    if (b.kind === 'GAP') return `gap-${b.startedAt}-${b.endedAt}`;
-    if (b.kind === 'PENDING') return `pending-${b.requestId}`;
-    if (b.kind === 'IDLE_TRIMMED') return `idle-${b.startedAt}`;
-    return `entry-${b.timeEntryId ?? b.startedAt}`;
-  }, []);
 
   // Scroll a row into view, flash-highlight it, and drop the cursor straight
   // into its reason/notes field so the user can type immediately.
@@ -232,7 +225,7 @@ export function MeTodayScreen() {
     if (!dayQ.data) return;
     const hit = dayQ.data.blocks.find((b) => epochMs >= b.startedAt && epochMs < b.endedAt);
     if (!hit) return;
-    focusRow(rowKeyFor(hit));
+    focusRow(dayBlockRowId(hit));
     if (editable && hit.kind === 'GAP') {
       setGapPreset({
         blockKey: `${hit.startedAt}-${hit.endedAt}`,
@@ -244,6 +237,14 @@ export function MeTodayScreen() {
 
   const deepLinkFocusToken = `${targetUserId}:${date}:${focusRequestId ?? ''}:${focusStartMs ?? ''}:${focusEndMs ?? ''}`;
   const lastDeepLinkFocusRef = useRef<string | null>(null);
+
+  // A date/person switch is a new editable document. Clear transient row
+  // state before the new response lands so it cannot target a previous day.
+  useEffect(() => {
+    setHighlightedRowId(null);
+    setGapPreset(null);
+    lastDeepLinkFocusRef.current = null;
+  }, [date, targetUserId]);
 
   useEffect(() => {
     const day = dayQ.data;
@@ -265,7 +266,7 @@ export function MeTodayScreen() {
     const block = requestBlock ?? slotBlock;
     if (block) {
       lastDeepLinkFocusRef.current = token;
-      focusRow(rowKeyFor(block));
+      focusRow(dayBlockRowId(block));
       if (editable && block.kind === 'GAP') {
         const startedAt = Math.max(block.startedAt, focusStartMs ?? block.startedAt);
         const endedAt = Math.min(block.endedAt, focusEndMs ?? block.endedAt);
@@ -292,7 +293,6 @@ export function MeTodayScreen() {
     focusRequestId,
     focusRow,
     focusStartMs,
-    rowKeyFor,
   ]);
 
   // ---- Derived view state ---------------------------------------------------
@@ -489,13 +489,13 @@ export function MeTodayScreen() {
                     <th className="ui-t-eyebrow myd-col-actions" />
                   </tr>
                 </thead>
-                <tbody>
+                <tbody key={`${targetUserId}:${date}`}>
                   {/* One sorted partition: gap · tracked · meeting · manual ·
                       idle · pending, contiguous and non-overlapping. */}
                   {day.blocks.map((b) => {
                     if (b.kind === 'GAP') {
                       const blockKey = `${b.startedAt}-${b.endedAt}`;
-                      const rowId = `gap-${blockKey}`;
+                      const rowId = dayBlockRowId(b);
                       return (
                         <EntryRow
                           key={rowId}
@@ -517,7 +517,7 @@ export function MeTodayScreen() {
                       );
                     }
                     if (b.kind === 'PENDING') {
-                      const rowId = `pending-${b.requestId}`;
+                      const rowId = dayBlockRowId(b);
                       return (
                         <EntryRow
                           key={rowId}
@@ -540,7 +540,7 @@ export function MeTodayScreen() {
                       );
                     }
                     if (b.kind === 'IDLE_TRIMMED') {
-                      const rowId = `idle-${b.startedAt}`;
+                      const rowId = dayBlockRowId(b);
                       return (
                         <tr
                           key={rowId}
@@ -558,7 +558,7 @@ export function MeTodayScreen() {
                     }
                     // WORK / MEETING / MANUAL
                     const kind = b.kind === 'MANUAL' ? 'manual_approved' : 'tracked';
-                    const rowId = `entry-${b.timeEntryId ?? b.startedAt}`;
+                    const rowId = dayBlockRowId(b);
                     const isMeeting = b.kind === 'MEETING';
                     return (
                       <EntryRow

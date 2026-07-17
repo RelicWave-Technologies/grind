@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState, type MouseEvent } from 'react';
 import type { DayInsight, DayBlock } from '../lib/types';
 import { fmtTime } from '../lib/format';
+import { dayBlockRowId } from '../lib/dayBlockIdentity';
 import { zonedDateTimeParts } from '@grind/types';
 
 interface Props {
@@ -18,7 +19,8 @@ interface Props {
   onClickEpoch?: (epochMs: number) => void;
   /**
    * Bar↔row link. Called with the row key of the block under the cursor
-   * (`entry-<id>`, `pending-<id>`, `gap-<startMs>`) or `null` to clear.
+   * (`entry-<id>-<kind>-<startMs>`, `pending-<id>`, `gap-…`) or `null` to
+   * clear. The shared identity keeps one paused entry's segments distinct.
    */
   onHoverRowId?: (rowId: string | null) => void;
   /** Optional visual range. The editable block partition remains `dayStart..dayEnd`. */
@@ -182,29 +184,29 @@ export function DayRibbon({
           />
         )}
 
-        {day.blocks.map((b, i) => {
+        {day.blocks.map((b) => {
           if (b.kind === 'GAP') return null; // gap is the absence of a block
           const visible = clip(b.startedAt, b.endedAt, displayStart, displayEnd);
           if (!visible) return null;
+          const rowId = dayBlockRowId(b);
           const att = b.attendeeIds?.length ?? 0;
           const attSuffix = att > 0 ? ` · ${att} attendee${att === 1 ? '' : 's'}` : '';
           const width = `${((visible.endedAt - visible.startedAt) / span) * 100}%`;
           if (b.kind === 'PENDING') {
             return (
               <div
-                key={`b-${i}-${b.startedAt}`}
+                key={`ribbon-${rowId}`}
                 className="ribbon-pending"
                 style={{ left: pct(visible.startedAt), width }}
                 title={`Pending approval — ${b.reason ?? ''}${attSuffix}`}
-                onMouseEnter={() => onHoverRowId?.(`pending-${b.requestId}`)}
+                onMouseEnter={() => onHoverRowId?.(rowId)}
                 onMouseLeave={() => onHoverRowId?.(null)}
               />
             );
           }
-          const rowId = `entry-${b.timeEntryId ?? b.startedAt}`;
           return (
             <div
-              key={`b-${i}-${b.startedAt}`}
+              key={`ribbon-${rowId}`}
               className={`ribbon-block ribbon-block-${b.kind.toLowerCase()}`}
               style={{ left: pct(visible.startedAt), width }}
               title={`${b.kind} · ${fmtTime(b.startedAt, timeZone)} – ${fmtTime(b.endedAt, timeZone)}${attSuffix}`}
