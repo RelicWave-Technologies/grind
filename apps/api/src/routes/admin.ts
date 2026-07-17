@@ -23,6 +23,7 @@ import {
 import { loadTimeInvalidationsForUsers } from '../insights/timeInvalidations';
 import { loadEntryLiveEvidence } from '../insights/liveEntryEvidence';
 import { resolveEffectiveEntrySegmentEnds } from '../insights/openSegmentEvidence';
+import { agentPresence, type AgentPresence } from '../agentPresence';
 import {
   CreateApiTokenRequest,
   API_TOKEN_SCOPES,
@@ -109,6 +110,7 @@ interface UserListEntry {
   provisioningStatus: 'PENDING' | 'ACTIVE';
   createdAt: string;
   agentLastSeenAt: string | null;
+  agentPresence: AgentPresence | null;
   agentState: 'IDLE' | 'RUNNING' | 'PAUSED_IDLE' | 'PAUSED_PERMISSION' | 'OFFLINE' | null;
   agentVersion: string | null;
   agentPlatform: string | null;
@@ -187,6 +189,7 @@ adminRouter.get('/users', async (req, res, next) => {
       },
       orderBy: [{ deactivatedAt: 'asc' }, { role: 'asc' }, { name: 'asc' }],
     });
+    const presenceCheckedAt = new Date();
     const out: UserListEntry[] = users.map((u) => ({
       id: u.id,
       email: u.email,
@@ -203,6 +206,7 @@ adminRouter.get('/users', async (req, res, next) => {
       provisioningStatus: u.provisioningStatus,
       createdAt: u.createdAt.toISOString(),
       agentLastSeenAt: exposeAgentHealth && u.agentLastSeenAt ? u.agentLastSeenAt.toISOString() : null,
+      agentPresence: exposeAgentHealth ? agentPresence(u.agentLastSeenAt, presenceCheckedAt) : null,
       agentState: exposeAgentHealth ? u.agentState : null,
       agentVersion: exposeAgentHealth ? u.agentVersion : null,
       agentPlatform: exposeAgentHealth ? u.agentPlatform : null,

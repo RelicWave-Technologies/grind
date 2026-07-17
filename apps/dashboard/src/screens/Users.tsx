@@ -63,6 +63,7 @@ interface AdminUser {
   provisioningStatus?: 'PENDING' | 'ACTIVE';
   createdAt: string;
   agentLastSeenAt: string | null;
+  agentPresence: 'ONLINE' | 'OFFLINE' | null;
   agentState: 'IDLE' | 'RUNNING' | 'PAUSED_IDLE' | 'PAUSED_PERMISSION' | 'OFFLINE' | null;
   agentVersion: string | null;
   agentPlatform: string | null;
@@ -135,6 +136,7 @@ export function UsersScreen() {
           ? '/v1/admin/users?includeDeactivated=true'
           : '/v1/admin/users',
       ),
+    refetchInterval: canEdit ? 60_000 : false,
   });
   // Only admins need the team + shift lists — pickers are hidden for everyone else.
   const teamsQ = useQuery({
@@ -204,11 +206,15 @@ export function UsersScreen() {
         (a, b) => ROLE_RANK[a.role] - ROLE_RANK[b.role] || a.name.localeCompare(b.name),
       )
     : [];
-  const activeCount = sorted.filter((u) => u.deactivatedAt === null).length;
+  const activePeople = sorted.filter((u) => u.deactivatedAt === null);
+  const activeCount = activePeople.length;
   const offCount = sorted.length - activeCount;
   const pendingCount = sorted.filter(
     (u) => u.deactivatedAt === null && u.provisioningStatus === 'PENDING',
   ).length;
+  const presenceEligible = activePeople.filter((u) => u.provisioningStatus === 'ACTIVE');
+  const onlineCount = presenceEligible.filter((u) => u.agentPresence === 'ONLINE').length;
+  const offlineCount = presenceEligible.length - onlineCount;
   const showDeviceHealth = canEdit;
 
   const colSpan = (canEdit ? 7 : 6) + (showDeviceHealth ? 2 : 0);
@@ -247,7 +253,8 @@ export function UsersScreen() {
       {usersQ.data && (
         <Card variant="flush" className="rise rise-1">
           <StatRow>
-            <Stat label="Active" value={String(activeCount)} />
+            {canEdit && <Stat label="Online" value={String(onlineCount)} />}
+            {canEdit && <Stat label="Offline" value={String(offlineCount)} />}
             {canEdit && <Stat label="Pending setup" value={String(pendingCount)} />}
             <Stat label="Deactivated" value={String(offCount)} />
             <Stat label="Total" value={String(sorted.length)} />
@@ -304,7 +311,7 @@ export function UsersScreen() {
                 <Tr>
                   <Th>Person</Th>
                   <Th>Role</Th>
-                  <Th>Status</Th>
+                  <Th>Presence</Th>
                   <Th>Team</Th>
                   <Th>Shift</Th>
                   {showDeviceHealth && <Th>Device</Th>}
@@ -432,6 +439,7 @@ function PersonRow({
   const isDeactivated = user.deactivatedAt !== null;
   const isPending = !isDeactivated && user.provisioningStatus === 'PENDING';
   const teamLockedByManagement = user.role === 'MANAGER' && Boolean(user.managesTeamId);
+  const presence = presenceTag(user, { isDeactivated, isPending });
 
   const joined = joinedDateLabel(user.createdAt);
 
@@ -490,10 +498,10 @@ function PersonRow({
           )}
         </Td>
 
-        {/* Status --------------------------------------------------------- */}
+        {/* Presence ------------------------------------------------------- */}
         <Td>
-          <Tag status={isDeactivated ? 'neutral' : isPending ? 'warn' : 'success'} dot>
-            {isDeactivated ? 'Deactivated' : isPending ? 'Pending' : 'Active'}
+          <Tag status={presence.status} dot title={presence.title}>
+            {presence.label}
           </Tag>
         </Td>
 
@@ -628,6 +636,21 @@ function PersonRow({
       )}
     </>
   );
+}
+
+function presenceTag(
+  user: AdminUser,
+  state: { isDeactivated: boolean; isPending: boolean },
+): { label: string; status: Status; title: string } {
+  if (state.isDeactivated) return { label: 'Deactivated', status: 'neutral', title: 'This account is deactivated.' };
+  if (state.isPending) return { label: 'Pending', status: 'warn', title: 'This account is still awaiting setup.' };
+  if (user.agentPresence === 'ONLINE') {
+    return { label: 'Online', status: 'success', title: 'Timo has sent a heartbeat within the last 3 minutes.' };
+  }
+  if (user.agentPresence === 'OFFLINE') {
+    return { label: 'Offline', status: 'neutral', title: 'Timo has not sent a heartbeat within the last 3 minutes.' };
+  }
+  return { label: 'Unknown', status: 'neutral', title: 'Live device presence is visible to workspace admins only.' };
 }
 
 function DeviceCell({ user }: { user: AdminUser }) {
