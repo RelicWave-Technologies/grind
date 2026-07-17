@@ -90,6 +90,7 @@ describe('launch at login service', () => {
     mocks.app.getLoginItemSettings
       .mockReturnValueOnce(settings({ wasOpenedAtLogin: false }))
       .mockReturnValueOnce(settings())
+      .mockReturnValueOnce(settings({ openAtLogin: true, status: 'enabled' }))
       .mockReturnValueOnce(settings({ openAtLogin: true, status: 'enabled' }));
 
     const health = service('darwin', '/Applications/Timo.app/Contents/MacOS/Timo').reconcileOnBoot();
@@ -146,6 +147,59 @@ describe('launch at login service', () => {
     });
   });
 
+  it('trusts the exact Electron Windows receipt when launch item metadata is absent', () => {
+    const exe = 'C:\\Users\\Anish\\AppData\\Local\\Programs\\Timo\\Timo.exe';
+    mocks.app.getLoginItemSettings.mockReturnValue(settings({
+      openAtLogin: true,
+      executableWillLaunchAtLogin: true,
+      launchItems: [],
+    }));
+
+    expect(service('win32', exe).inspect()).toMatchObject({
+      ready: true,
+      state: 'READY',
+      remediation: 'NONE',
+    });
+  });
+
+  it('uses a real hidden Windows boot as readiness proof when registry metadata is incomplete', () => {
+    const exe = 'C:\\Users\\Anish\\AppData\\Local\\Programs\\Timo\\Timo.exe';
+    mocks.app.getLoginItemSettings.mockReturnValue(settings());
+
+    expect(service('win32', exe, ['Timo.exe', '--hidden']).inspect()).toMatchObject({
+      ready: true,
+      state: 'READY',
+      openedAtLogin: true,
+    });
+  });
+
+  it('honors an explicitly disabled current Windows item after a hidden boot', () => {
+    const exe = 'C:\\Users\\Anish\\AppData\\Local\\Programs\\Timo\\Timo.exe';
+    mocks.app.getLoginItemSettings.mockReturnValue(settings({
+      launchItems: [item({ enabled: false })],
+    }));
+
+    expect(service('win32', exe, ['Timo.exe', '--hidden']).inspect()).toMatchObject({
+      ready: false,
+      state: 'NEEDS_REPAIR',
+    });
+  });
+
+  it('does not let an enabled duplicate override an explicitly disabled canonical item', () => {
+    const exe = 'C:\\Users\\Anish\\AppData\\Local\\Programs\\Timo\\Timo.exe';
+    mocks.app.getLoginItemSettings.mockReturnValue(settings({
+      launchItems: [
+        item({ enabled: false }),
+        item({ name: 'Timo time tracker desktop agent', args: [], enabled: true }),
+      ],
+    }));
+
+    expect(service('win32', exe).inspect()).toMatchObject({
+      ready: false,
+      state: 'NEEDS_REPAIR',
+    });
+  });
+
   it('trusts an enabled current Windows startup item even when Windows reports the display description name', () => {
     const exe = 'C:\\Users\\Anish\\AppData\\Local\\Programs\\Timo\\Timo.exe';
     mocks.app.getLoginItemSettings.mockReturnValue(settings({
@@ -175,7 +229,9 @@ describe('launch at login service', () => {
     });
     mocks.app.getLoginItemSettings
       .mockReturnValueOnce(disabled)
-      .mockReturnValueOnce(disabled)
+      .mockReturnValueOnce(ready)
+      .mockReturnValueOnce(ready)
+      .mockReturnValueOnce(ready)
       .mockReturnValueOnce(ready);
 
     const health = service('win32', exe).repair();
@@ -202,6 +258,30 @@ describe('launch at login service', () => {
     });
   });
 
+  it('does not remove a working Windows item before a replacement is verified', () => {
+    const exe = 'C:\\Users\\Anish\\AppData\\Local\\Programs\\Timo\\Timo.exe';
+    const staleItem = item({
+      name: 'Timo time tracker desktop agent',
+      path: 'C:\\Old\\Timo\\Timo.exe',
+    });
+    const repairable = settings({ launchItems: [staleItem] });
+    mocks.app.getLoginItemSettings.mockReturnValue(repairable);
+
+    service('win32', exe).repair();
+
+    expect(mocks.app.setLoginItemSettings).toHaveBeenNthCalledWith(1, {
+      openAtLogin: true,
+      enabled: true,
+      name: 'Timo',
+      path: exe,
+      args: ['--hidden'],
+    });
+    expect(mocks.app.setLoginItemSettings).not.toHaveBeenCalledWith(expect.objectContaining({
+      openAtLogin: false,
+      path: staleItem.path,
+    }));
+  });
+
   it('removes legacy and wrong-path Windows entries during reconciliation', () => {
     const exe = 'C:\\Users\\Anish\\AppData\\Local\\Programs\\Timo\\Timo.exe';
     const stale = settings({
@@ -213,9 +293,16 @@ describe('launch at login service', () => {
       ],
     });
     const ready = settings({ openAtLogin: true, executableWillLaunchAtLogin: true, launchItems: [item()] });
+    const readyWithStale = settings({
+      openAtLogin: true,
+      executableWillLaunchAtLogin: true,
+      launchItems: [item(), ...stale.launchItems],
+    });
     mocks.app.getLoginItemSettings
       .mockReturnValueOnce(stale)
-      .mockReturnValueOnce(settings())
+      .mockReturnValueOnce(readyWithStale)
+      .mockReturnValueOnce(readyWithStale)
+      .mockReturnValueOnce(readyWithStale)
       .mockReturnValueOnce(ready);
 
     service('win32', exe).reconcileOnBoot();
@@ -239,6 +326,8 @@ describe('launch at login service', () => {
     });
     mocks.app.getLoginItemSettings
       .mockReturnValueOnce(ready)
+      .mockReturnValueOnce(ready)
+      .mockReturnValueOnce(ready)
       .mockReturnValueOnce(ready);
 
     service('win32', exe).repair();
@@ -256,7 +345,7 @@ describe('launch at login service', () => {
     }));
   });
 
-  it('does not remove the current Windows startup item when Windows reports the display description name', () => {
+  it('keeps a working noncanonical Windows item when canonical verification fails', () => {
     const exe = 'C:\\Users\\Anish\\AppData\\Local\\Programs\\Timo\\Timo.exe';
     const windowsDisplayItem = item({ name: 'Timo time tracker desktop agent', args: [] });
     const state = settings({
@@ -266,6 +355,8 @@ describe('launch at login service', () => {
     });
     mocks.app.getLoginItemSettings
       .mockReturnValueOnce(state)
+      .mockReturnValueOnce(state)
+      .mockReturnValueOnce(state)
       .mockReturnValueOnce(state);
 
     expect(service('win32', exe).repair()).toMatchObject({ ready: true, state: 'READY' });
@@ -274,6 +365,26 @@ describe('launch at login service', () => {
       name: 'Timo time tracker desktop agent',
       path: exe,
     }));
+  });
+
+  it('removes the duplicate Windows identity only after canonical verification succeeds', () => {
+    const exe = 'C:\\Users\\Anish\\AppData\\Local\\Programs\\Timo\\Timo.exe';
+    const duplicate = item({ name: 'Timo time tracker desktop agent', args: [] });
+    const mixed = settings({
+      openAtLogin: true,
+      executableWillLaunchAtLogin: true,
+      launchItems: [item(), duplicate],
+    });
+    mocks.app.getLoginItemSettings.mockReturnValue(mixed);
+
+    expect(service('win32', exe).reconcileOnBoot()).toMatchObject({ ready: true, state: 'READY' });
+    expect(mocks.app.setLoginItemSettings).toHaveBeenCalledWith({
+      openAtLogin: false,
+      enabled: false,
+      name: duplicate.name,
+      path: duplicate.path,
+      args: duplicate.args,
+    });
   });
 
   it('delegates a user-confirmed macOS move to Electron', () => {

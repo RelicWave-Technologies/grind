@@ -93,7 +93,7 @@ function isCurrentWindowsItem(item: WindowsLaunchItem, execPath: string): boolea
 }
 
 function isCanonicalWindowsItem(item: WindowsLaunchItem, execPath: string): boolean {
-  return (item.name === WINDOWS_ITEM_NAME || item.name === WINDOWS_DESCRIPTION_NAME)
+  return item.name === WINDOWS_ITEM_NAME
     && isCurrentWindowsItem(item, execPath)
     && sameArgs(item.args);
 }
@@ -173,12 +173,26 @@ function inspectWindows(deps: LaunchAtLoginDeps, openedAtLogin: boolean): Launch
     const enabledCurrentItem = settings.launchItems.find((item) =>
       isCurrentWindowsItem(item, deps.execPath) && item.enabled === true,
     );
+    const disabledCurrentItem = settings.launchItems.find((item) =>
+      isCurrentWindowsItem(item, deps.execPath) && item.enabled === false,
+    );
     const executableReady = settings.executableWillLaunchAtLogin === true;
-    if (enabledCurrentItem || (settings.openAtLogin && executableReady && canonicalItem?.enabled === true)) {
+    if (canonicalItem?.enabled === false) {
+      return result(deps, openedAtLogin, 'NEEDS_REPAIR', 'ENABLE_STARTUP', true);
+    }
+    if (canonicalItem?.enabled === true || enabledCurrentItem || (settings.openAtLogin && executableReady)) {
       return result(deps, openedAtLogin, 'READY', 'NONE', false);
     }
-    const relatedItem = settings.launchItems.some((item) => isOwnedWindowsStartupItem(item, deps.execPath));
-    if (settings.openAtLogin || relatedItem) {
+    if (disabledCurrentItem) {
+      return result(deps, openedAtLogin, 'NEEDS_REPAIR', 'ENABLE_STARTUP', true);
+    }
+    // Windows actually invoked this process with our private startup argument.
+    // Keep that direct runtime receipt when registry metadata is incomplete.
+    if (openedAtLogin) {
+      return result(deps, openedAtLogin, 'READY', 'NONE', false);
+    }
+    const currentItem = settings.launchItems.some((item) => isCurrentWindowsItem(item, deps.execPath));
+    if (settings.openAtLogin || currentItem) {
       return result(deps, openedAtLogin, 'NEEDS_REPAIR', 'ENABLE_STARTUP', true);
     }
     return result(deps, openedAtLogin, 'NEEDS_REGISTRATION', 'REGISTER', true);
@@ -215,8 +229,7 @@ export function createLaunchAtLoginService(deps: LaunchAtLoginDeps) {
       const settings = deps.app.getLoginItemSettings();
       for (const item of settings.launchItems) {
         const canonical = isCanonicalWindowsItem(item, deps.execPath);
-        const current = isCurrentWindowsItem(item, deps.execPath);
-        if (!canonical && !current && isOwnedWindowsStartupItem(item, deps.execPath)) removeWindowsItem(item);
+        if (!canonical && isOwnedWindowsStartupItem(item, deps.execPath)) removeWindowsItem(item);
       }
     } catch {
       // Keep startup non-fatal; repair() will surface a blocked state.
@@ -267,17 +280,47 @@ export function createLaunchAtLoginService(deps: LaunchAtLoginDeps) {
     }
   }
 
-  function reconcileOnBoot(): LaunchAtLoginHealth {
+  function hasVerifiedCanonicalWindowsRegistration(): boolean {
+    if (deps.platform !== 'win32') return true;
+    try {
+      const settings = deps.app.getLoginItemSettings(canonicalQuery(deps));
+      const canonicalItem = settings.launchItems.find((item) =>
+        isCanonicalWindowsItem(item, deps.execPath) && item.enabled === true,
+      );
+      return Boolean(canonicalItem) || (settings.openAtLogin && settings.executableWillLaunchAtLogin === true);
+    } catch {
+      return false;
+    }
+  }
+
+  function cleanupAfterReady(health: LaunchAtLoginHealth): LaunchAtLoginHealth {
+    if (!health.ready) return health;
+    if (deps.platform === 'win32' && !hasVerifiedCanonicalWindowsRegistration()) {
+      try {
+        deps.app.setLoginItemSettings(canonicalRegistration(deps));
+      } catch {
+        return health;
+      }
+      if (!hasVerifiedCanonicalWindowsRegistration()) return health;
+    }
     cleanupWindowsItems();
+    return inspect();
+  }
+
+  function reconcileOnBoot(): LaunchAtLoginHealth {
     const health = inspect();
-    return health.state === 'NEEDS_REGISTRATION' ? registerAndVerify() : health;
+    if (health.state === 'NEEDS_REGISTRATION') {
+      return cleanupAfterReady(registerAndVerify());
+    }
+    return cleanupAfterReady(health);
   }
 
   function repair(): LaunchAtLoginHealth {
-    cleanupWindowsItems();
     const health = inspect();
-    if (health.state !== 'NEEDS_REGISTRATION' && health.state !== 'NEEDS_REPAIR') return health;
-    return registerAndVerify();
+    if (health.state !== 'NEEDS_REGISTRATION' && health.state !== 'NEEDS_REPAIR') {
+      return cleanupAfterReady(health);
+    }
+    return cleanupAfterReady(registerAndVerify());
   }
 
   function moveToApplicationsFolder(options?: Parameters<App['moveToApplicationsFolder']>[0]): boolean {
