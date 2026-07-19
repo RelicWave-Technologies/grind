@@ -1,0 +1,382 @@
+/* ============================================================================
+   /changelog — public editorial release history.
+   Strictly DESIGN.md (Figma marketing analysis): monochrome chrome, pastel
+   color-block sections, pill CTAs, mono taxonomy, 96px section rhythm,
+   1280px container, hairline elevation only. Tokens resolve to the --fg-*
+   set in styles.css (same hex values as DESIGN.md front matter).
+   Type ramp (DESIGN.md): display-xl 86/340 · display-lg 64/340 · headline
+   26/540 · card-title 24/700 · body-lg 20/330 · body 18/320 · body-sm 16/330
+   · button 20/480 · eyebrow mono 18/400 · caption mono 12/400.
+   ========================================================================== */
+
+html:has(.cl-page) { scroll-behavior: smooth; }
+
+.cl-page {
+  --cl-section: 96px;      /* {spacing.section} */
+  --cl-gutter: 48px;       /* {spacing.xxl} */
+  background: var(--fg-canvas);
+  color: var(--fg-ink);
+  font-family: var(--fg-sans);
+  font-size: 18px;                       /* {typography.body} */
+  font-weight: 320;
+  line-height: 1.45;
+  letter-spacing: -0.26px;
+  font-feature-settings: 'kern' 1;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+.cl-page *, .cl-page *::before, .cl-page *::after { box-sizing: border-box; }
+/* :where() keeps the reset at zero specificity so the role rules below can
+   actually set margins — :is() was silently killing them all. */
+.cl-page :where(h1, h2, h3, p, ul, ol, dl, figure, table) { margin: 0; padding: 0; }
+.cl-page ul { list-style: none; }
+.cl-page a { color: inherit; }
+.cl-page img { display: block; max-width: 100%; }
+
+.cl-container {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding-left: var(--cl-gutter);
+  padding-right: var(--cl-gutter);
+}
+
+/* ---- Type roles (DESIGN.md typography table) ------------------------------ */
+.cl-display-xl {
+  font-size: clamp(48px, 7.4vw, 86px);
+  font-weight: 340;
+  line-height: 1;
+  letter-spacing: -0.02em;               /* -1.72px @ 86px */
+}
+.cl-display-lg {
+  font-size: clamp(40px, 5.2vw, 64px);
+  font-weight: 340;
+  line-height: 1.1;
+  letter-spacing: -0.015em;              /* -0.96px @ 64px */
+}
+.cl-headline { font-size: 26px; font-weight: 540; line-height: 1.35; letter-spacing: -0.01em; }
+.cl-eyebrow {
+  font-family: var(--fg-mono);
+  font-size: 18px; font-weight: 400; line-height: 1.3;
+  letter-spacing: 0.03em; text-transform: uppercase;
+}
+.cl-caption {
+  font-family: var(--fg-mono);
+  font-size: 12px; font-weight: 400; line-height: 1.35;
+  letter-spacing: 0.05em; text-transform: uppercase;
+}
+
+/* ---- Pills (the only button shape) ---------------------------------------- */
+.cl-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  font-family: var(--fg-sans);
+  font-size: 20px; font-weight: 480; line-height: 1.4; letter-spacing: -0.005em;
+  border-radius: var(--fg-r-pill);
+  text-decoration: none; white-space: nowrap;
+  transition: transform var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+}
+.cl-btn:active { transform: scale(0.97); }
+.cl-btn:focus-visible { outline: 2px solid var(--fg-ink); outline-offset: 2px; }
+/* a.cl-btn-* beats the `.cl-page a { color: inherit }` reset. */
+.cl-btn--primary, a.cl-btn--primary { background: var(--fg-ink); color: var(--fg-on-primary); padding: 10px 20px; }
+.cl-btn--primary:hover { transform: translateY(-1px); }
+.cl-btn--secondary, a.cl-btn--secondary { background: var(--fg-canvas); color: var(--fg-ink); padding: 8px 18px 10px; }
+.cl-btn--secondary:hover { background: var(--fg-surface-soft); }
+
+/* ---- Top nav (56px, white, hairline) -------------------------------------- */
+.cl-nav {
+  position: sticky; top: 0; z-index: 20;
+  background: var(--fg-canvas);
+  border-bottom: 1px solid var(--fg-hairline);
+}
+.cl-nav-inner {
+  max-width: 1280px; margin: 0 auto; height: 56px;
+  padding: 0 var(--cl-gutter);
+  display: flex; align-items: center; gap: 32px;
+}
+.cl-nav-brand {
+  display: inline-flex; align-items: center; gap: 10px;
+  font-size: 20px; font-weight: 540; letter-spacing: -0.01em;
+  text-decoration: none;
+}
+.cl-nav-links { display: flex; gap: 28px; margin-left: 8px; }
+.cl-nav-links a {
+  font-size: 16px; font-weight: 330; letter-spacing: -0.14px;
+  text-decoration: none; padding: 8px 0;
+}
+.cl-nav-links a:hover { text-decoration: underline; text-underline-offset: 4px; }
+.cl-nav-ctas { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.cl-nav-ctas .cl-btn { font-size: 16px; }
+.cl-nav-ctas .cl-btn--primary { padding: 8px 16px; }
+.cl-nav-ctas .cl-btn--secondary { padding: 6px 14px 8px; }
+
+/* ---- Hero (white canvas) --------------------------------------------------- */
+.cl-hero { padding: 88px 0 72px; }
+.cl-hero-grid {
+  display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+  gap: var(--cl-gutter); align-items: center;
+}
+.cl-hero-copy .cl-display-xl { margin-top: 20px; }
+.cl-hero-lead {
+  font-size: 20px; font-weight: 330; line-height: 1.4; letter-spacing: -0.14px;
+  max-width: 52ch; margin-top: 28px;
+}
+.cl-hero-ctas { display: flex; gap: 12px; margin-top: 32px; flex-wrap: wrap; }
+
+/* The mascot stage: brand mark on white, thin ink orbit, pastel flecks. */
+.cl-hero-stage {
+  position: relative; justify-self: center;
+  width: min(340px, 100%); aspect-ratio: 1;
+  display: grid; place-items: center;
+}
+.cl-orbit {
+  position: absolute; inset: 12%;
+  border: 1px solid var(--fg-ink); border-radius: 9999px;
+}
+.cl-orbit::after {
+  content: ''; position: absolute; top: -4.5px; left: calc(50% - 4.5px);
+  width: 9px; height: 9px; border-radius: 9999px; background: var(--fg-ink);
+}
+@keyframes cl-orbit-spin { to { transform: rotate(360deg); } }
+.cl-orbit { animation: cl-orbit-spin 16s linear infinite; }
+@keyframes cl-float {
+  0%, 100% { transform: translateY(-7px); }
+  50% { transform: translateY(7px); }
+}
+.cl-mascot { animation: cl-float 5.6s ease-in-out infinite; }
+.cl-fleck {
+  position: absolute; width: 12px; height: 12px; border-radius: 2px; /* sticky-note corner */
+}
+.cl-fleck--1 { background: var(--fg-lime); top: 12%; right: 16%; transform: rotate(-8deg); animation: cl-float 7s ease-in-out infinite; }
+.cl-fleck--2 { background: var(--fg-lilac); bottom: 18%; left: 10%; transform: rotate(6deg); animation: cl-float 8s ease-in-out infinite reverse; }
+.cl-fleck--3 { background: var(--fg-mint); top: 30%; left: 4%; transform: rotate(-4deg); animation: cl-float 6.4s ease-in-out infinite; }
+
+/* ---- Marquee strip (36px black ribbon) ------------------------------------- */
+.cl-marquee {
+  background: var(--fg-ink); color: var(--fg-on-primary);
+  height: 36px; overflow: hidden; display: flex; align-items: center;
+}
+.cl-marquee-track { display: flex; width: max-content; animation: cl-marquee 40s linear infinite; }
+.cl-marquee-run { display: flex; }
+.cl-marquee-item {
+  font-family: var(--fg-mono);
+  font-size: 12px; font-weight: 400; letter-spacing: 0.05em; text-transform: uppercase;
+  white-space: nowrap; padding-right: 56px; position: relative;
+}
+.cl-marquee-item::after { content: '·'; position: absolute; right: 24px; }
+@keyframes cl-marquee { to { transform: translateX(-50%); } }
+
+/* ---- Section rhythm: 96px of white canvas between stories ------------------ */
+.cl-section { margin-top: var(--cl-section); scroll-margin-top: 76px; }
+.cl-section-lead {
+  font-size: 20px; font-weight: 330; line-height: 1.4; letter-spacing: -0.14px;
+  max-width: 60ch; margin-top: 20px;
+}
+
+/* ---- Color-block sections ({rounded.lg} + 48px padding) -------------------- */
+.cl-block {
+  position: relative;
+  border-radius: var(--fg-r-lg);
+  padding: var(--cl-gutter);
+}
+.cl-block--lime { background: var(--fg-lime); }
+.cl-block--coral { background: var(--fg-coral); }
+.cl-block--navy { background: var(--fg-navy); color: #ffffff; }
+.cl-block .cl-headline { margin-top: 20px; max-width: 30ch; }
+.cl-block-meta { margin-top: 12px; }
+.cl-block-sub {
+  font-size: 20px; font-weight: 330; line-height: 1.4; letter-spacing: -0.14px;
+  max-width: 54ch; margin-top: 14px;
+}
+.cl-block-note {
+  font-size: 16px; font-weight: 330; letter-spacing: -0.14px;
+  margin-top: 28px; max-width: 60ch;
+}
+/* Latest block: the mascot peeks over the top edge like a placed sticker. */
+.cl-block-peek {
+  position: absolute; top: -34px; right: 56px;
+  transform: rotate(-5deg);
+  animation: cl-peek 5s ease-in-out infinite;
+}
+@keyframes cl-peek {
+  0%, 100% { transform: rotate(-5deg) translateY(0); }
+  50% { transform: rotate(-3deg) translateY(-6px); }
+}
+
+/* ---- Change lists ----------------------------------------------------------- */
+.cl-changes { margin-top: 28px; display: flex; flex-direction: column; }
+.cl-change {
+  display: flex; align-items: flex-start; gap: 16px;
+  padding: 14px 0;
+}
+.cl-change + .cl-change { border-top: 1px solid rgba(0, 0, 0, 0.1); }
+.cl-changes--inverse .cl-change + .cl-change { border-top-color: rgba(255, 255, 255, 0.16); }
+.cl-change-text { max-width: 66ch; }
+
+/* Tag chips: tiny pastel sticky notes ({rounded.sm}, mono caption, slight tilt). */
+.cl-chip {
+  flex: none;
+  font-family: var(--fg-mono);
+  font-size: 12px; font-weight: 400; letter-spacing: 0.05em; text-transform: uppercase;
+  color: var(--fg-ink);
+  border-radius: 6px;
+  padding: 4px 10px 5px;
+  margin-top: 1px;
+  min-width: 92px; text-align: center;
+  transform: rotate(-1.25deg);
+  transition: transform var(--dur-fast) var(--ease);
+}
+.cl-change:nth-child(even) .cl-chip { transform: rotate(1.25deg); }
+.cl-change:hover .cl-chip { transform: rotate(0deg); }
+.cl-chip--new { background: var(--fg-lime); }
+.cl-chip--improved { background: var(--fg-mint); }
+.cl-chip--fixed { background: var(--fg-cream); }
+.cl-chip--internal { background: var(--fg-surface-soft); border: 1px solid var(--fg-hairline); }
+/* Chips keep their own paper on pastel grounds via a hairline of ink. */
+.cl-block--lime .cl-chip, .cl-block--coral .cl-chip { border: 1px solid rgba(0, 0, 0, 0.18); }
+
+/* ---- Release ledger entries (white canvas, hairline elevation) -------------- */
+.cl-entries { margin-top: 40px; border-top: 1px solid var(--fg-ink); }
+.cl-entry {
+  display: grid; grid-template-columns: 280px minmax(0, 1fr);
+  gap: var(--cl-gutter);
+  padding: 44px 0 48px;
+  border-bottom: 1px solid var(--fg-hairline);
+  scroll-margin-top: 76px;
+}
+.cl-entry-version { font-size: 24px; font-weight: 700; line-height: 1.45; letter-spacing: 0; }
+.cl-entry-name { font-size: 20px; font-weight: 330; line-height: 1.4; letter-spacing: -0.14px; margin-top: 2px; }
+.cl-entry-meta { margin-top: 14px; }
+.cl-entry-lead {
+  font-size: 20px; font-weight: 330; line-height: 1.4; letter-spacing: -0.14px;
+  max-width: 60ch; margin-bottom: 18px;
+}
+.cl-entry-lead + .cl-changes { margin-top: 14px; }
+.cl-entry .cl-changes { margin-top: 0; }
+.cl-entry .cl-change:first-child { padding-top: 0; }
+.cl-entry-lead + .cl-changes .cl-change:first-child { padding-top: 14px; border-top: 1px solid rgba(0, 0, 0, 0.1); }
+
+/* Animated scenes: chromeless, background baked to match the host surface,
+   so they sit in the layout like illustrations — no frame, no border. */
+.cl-artifact { margin-top: 24px; }
+.cl-artifact img { width: min(560px, 100%); height: auto; }
+
+/* ---- Tables (hairline rows, mono taxonomy) ---------------------------------- */
+.cl-table { width: 100%; border-collapse: collapse; margin-top: 28px; }
+.cl-table th {
+  font-family: var(--fg-mono);
+  font-size: 12px; font-weight: 400; letter-spacing: 0.05em; text-transform: uppercase;
+  text-align: left; padding: 0 20px 12px 0;
+  border-bottom: 1px solid var(--fg-ink);
+}
+.cl-table td {
+  font-size: 16px; font-weight: 330; line-height: 1.45; letter-spacing: -0.14px;
+  padding: 14px 20px 14px 0; vertical-align: top;
+  border-bottom: 1px solid var(--fg-hairline-soft);
+}
+.cl-table td:first-child {
+  font-family: var(--fg-mono);
+  font-size: 12px; letter-spacing: 0.05em; text-transform: uppercase;
+  white-space: nowrap; padding-top: 17px;
+}
+.cl-table--foundation { margin-top: 40px; }
+.cl-foundation-note { margin-top: 24px; }
+
+/* ---- Navy platform rows ------------------------------------------------------ */
+.cl-platform { margin-top: 32px; }
+.cl-platform-row {
+  display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 24px;
+  padding: 16px 0; align-items: baseline;
+}
+.cl-platform-row + .cl-platform-row { border-top: 1px solid rgba(255, 255, 255, 0.16); }
+.cl-platform-text { font-size: 16px; font-weight: 330; line-height: 1.45; letter-spacing: -0.14px; max-width: 72ch; }
+
+/* ---- Shipping dl (coral block) ---------------------------------------------- */
+.cl-ship { margin-top: 28px; }
+.cl-ship-row {
+  display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 24px;
+  padding: 14px 0; align-items: baseline;
+}
+.cl-ship-row + .cl-ship-row { border-top: 1px solid rgba(0, 0, 0, 0.14); }
+.cl-ship-row dd { margin: 0; font-size: 16px; font-weight: 330; letter-spacing: -0.14px; max-width: 66ch; }
+
+/* ---- Lilac banner (promo-banner-lilac) --------------------------------------- */
+.cl-banner {
+  background: var(--fg-lilac);
+  border-radius: var(--fg-r-md);
+  padding: 16px 24px 20px;
+}
+.cl-banner-text { font-size: 16px; font-weight: 330; letter-spacing: -0.14px; margin-top: 8px; max-width: 84ch; }
+
+/* ---- End of log --------------------------------------------------------------- */
+.cl-end {
+  margin-top: var(--cl-section);
+  padding: 24px var(--cl-gutter) 0;
+  display: flex; flex-direction: column; align-items: center; gap: 12px;
+  text-align: center;
+}
+.cl-end-mascot { animation: cl-float 5.2s ease-in-out infinite; }
+.cl-end-line { font-size: 18px; font-weight: 320; letter-spacing: -0.26px; }
+.cl-cursor {
+  display: inline-block; width: 9px; height: 18px; margin-left: 7px;
+  background: var(--fg-ink); vertical-align: text-bottom;
+  animation: cl-blink 1.1s steps(2, jump-none) infinite;
+}
+@keyframes cl-blink { 50% { opacity: 0; } }
+
+/* ---- Footer (white, wordmark + caption grid) ---------------------------------- */
+.cl-footer {
+  margin-top: 72px;
+  border-top: 1px solid var(--fg-hairline);
+  padding: 64px 0 40px;
+}
+.cl-footer-grid {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--cl-gutter); align-items: start;
+}
+.cl-footer-wordmark { font-size: 48px; font-weight: 340; line-height: 1; letter-spacing: -0.015em; }
+.cl-footer-cols { display: flex; gap: 64px; flex-wrap: wrap; }
+.cl-footer-col { display: flex; flex-direction: column; gap: 10px; }
+.cl-footer-col a {
+  font-size: 16px; font-weight: 330; letter-spacing: -0.14px; text-decoration: none;
+}
+.cl-footer-col a:hover { text-decoration: underline; text-underline-offset: 4px; }
+.cl-footer-legal { margin-top: 56px; padding-top: 20px; }
+.cl-footer-legal .cl-caption { border-top: 1px solid var(--fg-hairline-soft); padding-top: 20px; }
+
+/* ---- Scroll reveal (thumbnails animate in on scroll — DESIGN.md) -------------- */
+.cl-reveal { opacity: 0; transform: translateY(14px); transition: opacity 600ms var(--ease), transform 600ms var(--ease); }
+.cl-reveal.cl-in { opacity: 1; transform: none; }
+
+/* ---- Reduced motion ------------------------------------------------------------ */
+@media (prefers-reduced-motion: reduce) {
+  html:has(.cl-page) { scroll-behavior: auto; }
+  .cl-orbit, .cl-mascot, .cl-block-peek, .cl-end-mascot, .cl-cursor,
+  .cl-marquee-track, .cl-fleck { animation: none !important; }
+  .cl-reveal { opacity: 1; transform: none; transition: none; }
+}
+
+/* ---- Responsive (DESIGN.md breakpoints) ---------------------------------------- */
+@media (max-width: 960px) {
+  .cl-nav-links { display: none; }
+  .cl-hero { padding-top: 64px; }
+  .cl-hero-grid { grid-template-columns: 1fr; }
+  .cl-hero-stage { width: min(260px, 70vw); }
+  .cl-entry { grid-template-columns: 1fr; gap: 20px; padding: 36px 0 40px; }
+  .cl-footer-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 768px) {
+  /* Color blocks go full-bleed: poster effect, no side corners. */
+  .cl-block { border-radius: 0; margin-left: calc(-1 * var(--cl-gutter)); margin-right: calc(-1 * var(--cl-gutter)); }
+  .cl-block-peek { right: 28px; }
+}
+@media (max-width: 560px) {
+  .cl-page { --cl-gutter: 20px; --cl-section: 64px; }
+  .cl-nav-inner { gap: 12px; }
+  .cl-nav-ctas .cl-btn--secondary { display: none; }
+  .cl-hero-ctas { flex-direction: column; align-items: stretch; }
+  .cl-hero-ctas .cl-btn { width: 100%; }
+  .cl-change { flex-direction: column; gap: 10px; }
+  .cl-chip { align-self: flex-start; }
+  .cl-ship-row, .cl-platform-row { grid-template-columns: 1fr; gap: 6px; }
+  .cl-footer-cols { gap: 32px; }
+}
