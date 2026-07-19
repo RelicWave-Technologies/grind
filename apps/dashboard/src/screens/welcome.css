@@ -1,0 +1,344 @@
+html:has(.wl-page) { scroll-behavior: smooth; }
+
+/* ============================================================================
+   /welcome — single-hero landing page.
+   Strictly DESIGN.md: monochrome chrome (white canvas, ink type, pill CTAs,
+   56px nav, 36px black marquee), display-xl headline at 86/340/-1.72px, mono
+   eyebrow + captions, ONE cream color block ({rounded.lg}, 48px padding) as
+   the stage, and the documented level-2 soft shadow reserved for the floating
+   sticky-note tiles hovering over it. Tokens resolve to --fg-* (styles.css).
+   ========================================================================== */
+
+.wl-page {
+  --wl-gutter: 48px;                     /* {spacing.xxl} */
+  background: var(--fg-canvas);
+  color: var(--fg-ink);
+  font-family: var(--fg-sans);
+  font-size: 18px;                       /* {typography.body} */
+  font-weight: 320;
+  line-height: 1.45;
+  letter-spacing: -0.26px;
+  font-feature-settings: 'kern' 1;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+.wl-page *, .wl-page *::before, .wl-page *::after { box-sizing: border-box; }
+.wl-page :where(h1, p, figure) { margin: 0; padding: 0; }
+.wl-page a { color: inherit; }
+.wl-page img { display: block; max-width: 100%; }
+
+.wl-container {
+  width: 100%;
+  max-width: 1280px;
+  margin: 0 auto;
+  padding-left: var(--wl-gutter);
+  padding-right: var(--wl-gutter);
+}
+
+/* ---- Type roles (DESIGN.md typography table) ------------------------------ */
+/* The headline is always exactly two lines: each sentence is a no-wrap span
+   and the size tracks the copy column via container-query units. */
+.wl-copy { container-type: inline-size; }
+.wl-display {
+  font-size: clamp(34px, 10.6cqw, 86px); /* {typography.display-xl}, column-fit */
+  font-weight: 340;
+  line-height: 1.04;
+  letter-spacing: -0.02em;               /* -1.72px @ 86px */
+}
+.wl-display span { display: block; white-space: nowrap; }
+.wl-eyebrow {
+  font-family: var(--fg-mono);
+  font-size: 18px; font-weight: 400; line-height: 1.3;
+  letter-spacing: 0.03em; text-transform: uppercase;
+}
+.wl-caption {
+  font-family: var(--fg-mono);
+  font-size: 12px; font-weight: 400; line-height: 1.35;
+  letter-spacing: 0.05em; text-transform: uppercase;
+}
+.wl-lead {
+  font-size: 20px; font-weight: 330; line-height: 1.4;  /* {typography.body-lg} */
+  letter-spacing: -0.14px;
+  max-width: 44ch;
+  margin-top: 30px;
+}
+
+/* ---- Pills (the only button shape) ---------------------------------------- */
+.wl-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  font-family: var(--fg-sans);
+  font-size: 20px; font-weight: 480; line-height: 1.4; letter-spacing: -0.005em;
+  border-radius: var(--fg-r-pill);
+  text-decoration: none; white-space: nowrap;
+  transition: transform var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+}
+.wl-btn:active { transform: scale(0.97); }
+.wl-btn:focus-visible { outline: 2px solid var(--fg-ink); outline-offset: 2px; }
+.wl-btn--primary, a.wl-btn--primary { background: var(--fg-ink); color: var(--fg-on-primary); padding: 10px 20px; }
+.wl-btn--primary:hover { transform: translateY(-1px); }
+.wl-btn--secondary, a.wl-btn--secondary { background: var(--fg-canvas); color: var(--fg-ink); padding: 8px 18px 10px; }
+.wl-btn--secondary:hover { background: var(--fg-surface-soft); }
+.wl-btn--dl { gap: 10px; }
+.wl-btn--dl img { display: block; filter: brightness(0) invert(1); }
+
+/* ---- Top nav (56px, white, hairline) -------------------------------------- */
+.wl-nav { background: var(--fg-canvas); border-bottom: 1px solid var(--fg-hairline); }
+.wl-nav-inner {
+  max-width: 1280px; margin: 0 auto; height: 56px;
+  padding: 0 var(--wl-gutter);
+  display: flex; align-items: center; gap: 32px;
+}
+.wl-nav-brand {
+  display: inline-flex; align-items: center; gap: 10px;
+  font-size: 20px; font-weight: 540; letter-spacing: -0.01em;
+  text-decoration: none;
+}
+.wl-nav-links { display: flex; gap: 28px; margin-left: 8px; }
+.wl-nav-links a {
+  font-size: 16px; font-weight: 330; letter-spacing: -0.14px;
+  text-decoration: none; padding: 8px 0;
+}
+.wl-nav-links a:hover { text-decoration: underline; text-underline-offset: 4px; }
+.wl-nav-ctas { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.wl-nav-ctas .wl-btn { font-size: 16px; }
+.wl-nav-ctas .wl-btn--primary { padding: 8px 16px; }
+.wl-nav-ctas .wl-btn--secondary { padding: 6px 14px 8px; }
+
+/* ---- Hero ------------------------------------------------------------------- */
+.wl-hero { padding: 84px 0 24px; }
+.wl-hero-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+  gap: var(--wl-gutter);
+  align-items: center;
+}
+.wl-ctas { display: flex; gap: 12px; margin-top: 36px; flex-wrap: wrap; }
+.wl-copy .wl-caption { margin-top: 22px; }
+
+/* ---- The stage: one cream color block + floating sticky-note scenes -------- */
+.wl-stage {
+  position: relative;
+  justify-self: end;
+  width: min(560px, 100%);
+  height: 520px;
+}
+.wl-stage-block {
+  position: absolute; inset: 0;
+  background: var(--fg-cream);           /* {components.color-block-section} kin */
+  border-radius: var(--fg-r-lg);
+}
+.wl-orbit {
+  position: absolute; top: 8px; left: calc(50% - 104px);
+  width: 208px; height: 208px;
+  border: 1px solid var(--fg-ink); border-radius: 9999px;
+  animation: wl-spin 16s linear infinite;
+}
+.wl-orbit::after {
+  content: ''; position: absolute; top: -4.5px; left: calc(50% - 4.5px);
+  width: 9px; height: 9px; border-radius: 9999px; background: var(--fg-ink);
+}
+@keyframes wl-spin { to { transform: rotate(360deg); } }
+.wl-mascot {
+  position: absolute; top: 48px; left: calc(50% - 62px);
+  animation: wl-float 5.6s ease-in-out infinite;
+}
+@keyframes wl-float {
+  0%, 100% { transform: translateY(-6px); }
+  50% { transform: translateY(6px); }
+}
+.wl-fleck { position: absolute; width: 12px; height: 12px; border-radius: 2px; }
+.wl-fleck--1 { background: var(--fg-lime);  top: 26px;  right: 44px; transform: rotate(-8deg); animation: wl-float 7s ease-in-out infinite; }
+.wl-fleck--2 { background: var(--fg-lilac); top: 178px; left: 26px;  transform: rotate(6deg);  animation: wl-float 8s ease-in-out infinite reverse; }
+.wl-fleck--3 { background: var(--fg-mint);  bottom: 78px; right: 30px; transform: rotate(-4deg); animation: wl-float 6.4s ease-in-out infinite; }
+
+/* Floating tiles: white (or lime) cards, {rounded.md}+, the documented
+   level-2 shadow, slight off-axis rotation — sticky notes on a desk. */
+.wl-card { position: absolute; margin: 0; }
+.wl-card img {
+  border-radius: 12px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06), 0 1px 3px rgba(0, 0, 0, 0.05);
+  transition: transform var(--dur-base) var(--spring), box-shadow var(--dur-base) var(--ease);
+}
+.wl-card--a { top: 56px;  left: 30px;  animation: wl-bob-a 6s   ease-in-out infinite; }
+.wl-card--b { top: 208px; right: 22px; animation: wl-bob-b 7.2s ease-in-out infinite; }
+.wl-card--c { top: 336px; left: 42px;  animation: wl-bob-c 5.4s ease-in-out infinite; }
+.wl-card--a img { transform: rotate(-3deg); border-radius: 16px; }
+.wl-card--b img { transform: rotate(2.2deg); border: 1px solid var(--fg-hairline); }
+.wl-card--c img { transform: rotate(-2deg); border: 1px solid var(--fg-hairline); }
+.wl-card:hover img {
+  transform: rotate(0deg) scale(1.03);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.1), 0 2px 6px rgba(0, 0, 0, 0.06);
+}
+@keyframes wl-bob-a { 0%, 100% { transform: translateY(-4px); } 50% { transform: translateY(4px); } }
+@keyframes wl-bob-b { 0%, 100% { transform: translateY(3px); }  50% { transform: translateY(-5px); } }
+@keyframes wl-bob-c { 0%, 100% { transform: translateY(-3px); } 50% { transform: translateY(5px); } }
+
+.wl-stage-cap {
+  position: absolute; left: 0; right: 0; bottom: 18px;
+  text-align: center; text-decoration: none;
+  font-family: var(--fg-mono);
+  font-size: 12px; font-weight: 400; letter-spacing: 0.05em; text-transform: uppercase;
+  color: var(--fg-ink);
+}
+.wl-stage-cap:hover { text-decoration: underline; text-underline-offset: 4px; }
+
+/* ---- Section rhythm ({spacing.section}) ------------------------------------- */
+.wl-sec { margin-top: 96px; scroll-margin-top: 76px; }
+.wl-display-lg {
+  font-size: clamp(38px, 5vw, 64px);     /* {typography.display-lg} */
+  font-weight: 340; line-height: 1.1; letter-spacing: -0.015em;
+}
+.wl-headline { font-size: 26px; font-weight: 540; line-height: 1.35; letter-spacing: -0.01em; margin-top: 16px; }
+.wl-sec-lead {
+  font-size: 20px; font-weight: 330; line-height: 1.4; letter-spacing: -0.14px;
+  max-width: 54ch; margin-top: 20px;
+}
+
+/* ---- Feature tiles ({components.feature-illustration-tile}) ------------------ */
+.wl-tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.wl-tile {
+  background: var(--fg-surface-soft);
+  border-radius: var(--fg-r-md);
+  padding: 24px;
+}
+.wl-tile p:last-child {
+  font-size: 16px; font-weight: 330; line-height: 1.45; letter-spacing: -0.14px;
+  margin-top: 12px;
+}
+
+/* ---- Color-block sections ({rounded.lg} + 48px padding) ---------------------- */
+.wl-block { border-radius: var(--fg-r-lg); padding: var(--wl-gutter); }
+.wl-block--lime { background: var(--fg-lime); }
+.wl-block--navy { background: var(--fg-navy); color: #ffffff; }
+.wl-block--coral { background: var(--fg-coral); }
+.wl-block-grid {
+  display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+  gap: var(--wl-gutter); align-items: center;
+}
+.wl-block-body {
+  font-size: 19px; font-weight: 330; line-height: 1.5; letter-spacing: -0.12px;
+  max-width: 46ch; margin-top: 16px;
+}
+.wl-block-foot { margin-top: 22px; }
+.wl-block-ctas { margin-top: 26px; }
+.wl-block-scene { justify-self: center; }
+.wl-block-scene img { border-radius: 14px; }
+.wl-block-scene--card img { box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.05); }
+
+/* ---- Product carousel: vertical scroll drives horizontal travel -------------- */
+.wl-carousel { position: relative; height: 240vh; margin-top: 32px; }
+.wl-car-sticky {
+  position: sticky; top: 96px;
+  height: min(70vh, 680px);
+  overflow: hidden;
+  display: flex; flex-direction: column; justify-content: center;
+}
+.wl-car-track {
+  display: flex; align-items: center; gap: 36px;
+  will-change: transform;
+}
+.wl-slide {
+  flex: none; width: min(760px, 62vw); margin: 0;
+  transform-origin: center center;
+  will-change: transform, opacity;
+}
+.wl-slide img {
+  width: 100%; height: auto;
+  border-radius: var(--fg-r-md);
+  border: 1px solid var(--fg-hairline);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
+}
+.wl-slide figcaption { margin-top: 14px; }
+
+/* Editorial HUD: mono counter + hairline progress. */
+.wl-car-hud {
+  display: flex; align-items: center; gap: 18px;
+  margin-top: 26px;
+  padding-left: max(var(--wl-gutter), calc((100vw - 1280px) / 2 + var(--wl-gutter)));
+  padding-right: var(--wl-gutter);
+}
+.wl-car-progress { flex: 1; max-width: 420px; height: 1px; background: var(--fg-hairline); }
+.wl-car-progress-fill { width: 0%; height: 100%; background: var(--fg-ink); }
+
+@media (max-width: 900px) {
+  .wl-carousel { height: auto; margin-top: 28px; }
+  .wl-car-sticky { position: static; height: auto; overflow: visible; }
+  .wl-car-track { flex-direction: column; align-items: stretch; gap: 40px; transform: none !important; padding: 0 var(--wl-gutter); }
+  .wl-slide { width: 100%; }
+  .wl-car-hud { display: none; }
+}
+
+/* ---- Closing CTA -------------------------------------------------------------- */
+.wl-close {
+  margin-top: 96px;
+  padding: 24px var(--wl-gutter) 8px;
+  display: flex; flex-direction: column; align-items: center; text-align: center;
+}
+.wl-close-mascot { animation: wl-float 5.2s ease-in-out infinite; margin-bottom: 18px; }
+.wl-close-lead { max-width: 44ch; }
+.wl-close-ctas { justify-content: center; margin-top: 30px; }
+
+/* ---- Footer (wordmark + caption grid) ----------------------------------------- */
+.wl-footer { margin-top: 88px; border-top: 1px solid var(--fg-hairline); padding: 56px 0 36px; }
+.wl-footer-grid { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--wl-gutter); align-items: start; }
+.wl-footer-wordmark { font-size: 48px; font-weight: 340; line-height: 1; letter-spacing: -0.015em; }
+.wl-footer-cols { display: flex; gap: 64px; flex-wrap: wrap; }
+.wl-footer-col { display: flex; flex-direction: column; gap: 10px; }
+.wl-footer-col a { font-size: 16px; font-weight: 330; letter-spacing: -0.14px; text-decoration: none; }
+.wl-footer-col a:hover { text-decoration: underline; text-underline-offset: 4px; }
+.wl-footer-legal { margin-top: 48px; }
+.wl-footer-legal .wl-caption { border-top: 1px solid var(--fg-hairline-soft); padding-top: 20px; }
+
+/* ---- Scroll reveal ------------------------------------------------------------ */
+.wl-reveal {
+  opacity: 0; transform: translateY(22px) scale(0.985);
+  transition: opacity 800ms cubic-bezier(0.22, 1, 0.36, 1), transform 800ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.wl-reveal.wl-in { opacity: 1; transform: none; }
+
+/* ---- Reduced motion ---------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  .wl-marquee-track, .wl-orbit, .wl-mascot, .wl-fleck, .wl-close-mascot,
+  .wl-card--a, .wl-card--b, .wl-card--c { animation: none !important; }
+  .wl-reveal { opacity: 1; transform: none; transition: none; }
+}
+
+/* ---- Responsive (DESIGN.md breakpoints) --------------------------------------- */
+@media (max-width: 960px) {
+  .wl-nav-links { display: none; }
+  .wl-hero { padding: 48px 0 24px; }
+  .wl-hero-grid { grid-template-columns: 1fr; gap: 56px; }
+  .wl-stage { justify-self: center; }
+  .wl-block-grid { grid-template-columns: 1fr; gap: 32px; }
+  .wl-tiles { grid-template-columns: 1fr; }
+  .wl-shots { grid-template-columns: 1fr; }
+  .wl-footer-grid { grid-template-columns: 1fr; }
+  .wl-sec { margin-top: 72px; }
+}
+@media (max-width: 768px) {
+  /* Color blocks bleed to the edge below tablet — poster effect. The stage's
+     children are all absolutely positioned, so it must stretch explicitly. */
+  .wl-stage {
+    width: auto; justify-self: stretch;
+    margin-left: calc(-1 * var(--wl-gutter)); margin-right: calc(-1 * var(--wl-gutter));
+  }
+  .wl-stage-block { border-radius: 0; }
+  .wl-card--a { left: 7%; }
+  .wl-card--b { right: 5%; }
+  .wl-card--c { left: 10%; }
+}
+@media (max-width: 560px) {
+  .wl-page { --wl-gutter: 20px; }
+  .wl-nav-inner { gap: 12px; }
+  .wl-nav-ctas .wl-btn--secondary { display: none; }
+  .wl-ctas { flex-direction: column; align-items: stretch; }
+  .wl-ctas .wl-btn { width: 100%; }
+  .wl-stage { height: 560px; }
+  .wl-card img { width: min(300px, 82vw); height: auto; }
+  .wl-card--a { top: 220px; left: 6%; }
+  .wl-card--b { top: 330px; right: 4%; }
+  .wl-card--c { top: 434px; left: 9%; }
+  .wl-stage-cap { bottom: 14px; }
+}

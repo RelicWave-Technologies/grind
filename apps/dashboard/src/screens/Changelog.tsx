@@ -361,7 +361,7 @@ export function ChangelogScreen() {
             <a href="#foundation">Foundation</a>
           </div>
           <div className="cl-nav-ctas">
-            <a className="cl-btn cl-btn--secondary" href="/">Open dashboard</a>
+            <a className="cl-btn cl-btn--secondary" href="/home">Open dashboard</a>
             <a className="cl-btn cl-btn--primary" href="https://github.com/RelicWave-Technologies/grind/releases" target="_blank" rel="noreferrer">Get Timo</a>
           </div>
         </div>
@@ -538,7 +538,7 @@ export function ChangelogScreen() {
           <div className="cl-footer-cols">
             <div className="cl-footer-col">
               <p className="cl-caption">PRODUCT</p>
-              <a href="/">Dashboard</a>
+              <a href="/home">Dashboard</a>
               <a href="https://github.com/RelicWave-Technologies/grind/releases" target="_blank" rel="noreferrer">Get Timo</a>
             </div>
             <div className="cl-footer-col">

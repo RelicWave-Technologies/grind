@@ -19,7 +19,7 @@ interface NavEntry {
 }
 
 const NAV: NavEntry[] = [
-  { to: '/', label: 'Home', Icon: Home, show: 'all' },
+  { to: '/home', label: 'Home', Icon: Home, show: 'all' },
   { to: '/overview', label: 'Overview', Icon: Compass, show: { permission: 'overview.read' } },
   { to: '/users', label: 'People', Icon: Users, show: { permission: 'people.read' } },
   { to: '/edit-time', label: 'Edit Time', Icon: Clock4, show: 'all' },
@@ -100,8 +100,8 @@ export function Layout() {
         }
       >
         {visible.map(({ to, label, Icon }) => {
-          const active = to === '/'
-            ? location.pathname === '/'
+          const active = to === '/home'
+            ? location.pathname === '/home'
             : location.pathname.startsWith(to);
           return (
             <NavItem
