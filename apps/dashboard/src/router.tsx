@@ -27,6 +27,7 @@ const OverviewScreen = lazyRouteComponent(() => import('./screens/Overview'), 'O
 const IntegrationsScreen = lazyRouteComponent(() => import('./screens/Integrations'), 'IntegrationsScreen');
 const ReportsScreen = lazyRouteComponent(() => import('./screens/Reports'), 'ReportsScreen');
 const ProfileScreen = lazyRouteComponent(() => import('./screens/Profile'), 'ProfileScreen');
+const ChangelogScreen = lazyRouteComponent(() => import('./screens/Changelog'), 'ChangelogScreen');
 
 interface RouterContext {
   queryClient: QueryClient;
@@ -280,7 +281,16 @@ const loginRoute = createRoute({
   component: LoginScreen,
 });
 
+// Public release history — intentionally outside the auth gate: it carries
+// no workspace data, and employees should be able to read it pre-login.
+const changelogRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/changelog',
+  component: ChangelogScreen,
+});
+
 export const routeTree = rootRoute.addChildren([
   authedRoot.addChildren([homeRoute, overviewRoute, editTimeRoute, meTodayLegacyRoute, reportsRoute, approvalsRoute, profileRoute, teamRoute, attendanceRoute, flagsRoute, usersRoute, teamsAdminRoute, shiftsRoute, policyRoute, integrationsRoute, payrollRoute]),
   loginRoute,
+  changelogRoute,
 ]);
