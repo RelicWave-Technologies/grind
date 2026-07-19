@@ -64,7 +64,7 @@ export function LoginScreen() {
         json: { email, password, deviceName: 'Local dashboard' },
       });
       await me.refetch();
-      navigate({ to: '/' });
+      navigate({ to: '/home' });
     } catch (error) {
       setDevError(error instanceof ApiError ? error.message : 'login_failed');
     } finally {

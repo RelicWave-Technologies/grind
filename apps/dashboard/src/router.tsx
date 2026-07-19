@@ -28,6 +28,7 @@ const IntegrationsScreen = lazyRouteComponent(() => import('./screens/Integratio
 const ReportsScreen = lazyRouteComponent(() => import('./screens/Reports'), 'ReportsScreen');
 const ProfileScreen = lazyRouteComponent(() => import('./screens/Profile'), 'ProfileScreen');
 const ChangelogScreen = lazyRouteComponent(() => import('./screens/Changelog'), 'ChangelogScreen');
+const WelcomeScreen = lazyRouteComponent(() => import('./screens/Welcome'), 'WelcomeScreen');
 
 interface RouterContext {
   queryClient: QueryClient;
@@ -79,7 +80,7 @@ function requireAnyRouteCapability(me: Me | null | undefined, permissions: Array
 
 const homeRoute = createRoute({
   getParentRoute: () => authedRoot,
-  path: '/',
+  path: '/home',
   component: HomeScreen,
 });
 
@@ -172,7 +173,7 @@ const teamRoute = createRoute({
   beforeLoad: ({ context }) => {
     const me = (context as { me?: Me }).me;
     if (!hasCapability(me, 'team.settings.manage')) {
-      throw redirect({ to: '/' });
+      throw redirect({ to: '/home' });
     }
   },
   component: TeamScreen,
@@ -207,7 +208,7 @@ const flagsRoute = createRoute({
       hasCapability(me, 'flags.team.review') ||
       hasCapability(me, 'flags.workspace.review');
     if (!canReview) {
-      throw redirect({ to: '/' });
+      throw redirect({ to: '/home' });
     }
   },
   component: FlagsScreen,
@@ -276,7 +277,7 @@ const loginRoute = createRoute({
   beforeLoad: async ({ context, search }) => {
     if (search.status || search.error) return;
     const me = await context.queryClient.fetchQuery<Me | null>(meQuery);
-    if (me) throw redirect({ to: '/' });
+    if (me) throw redirect({ to: '/home' });
   },
   component: LoginScreen,
 });
@@ -289,8 +290,31 @@ const changelogRoute = createRoute({
   component: ChangelogScreen,
 });
 
+// Public landing page — static marketing surface, no workspace data.
+const welcomeRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/welcome',
+  component: WelcomeScreen,
+});
+
+// The front door. Logged-out visitors get the marketing page at the bare
+// domain; anyone with a session is sent straight into the app. Keeping the
+// landing ON '/' (rather than redirecting) is what makes timo.emiactech.com
+// behave like a normal product site.
+const indexRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/',
+  beforeLoad: async ({ context }) => {
+    const me = await context.queryClient.fetchQuery<Me | null>(meQuery);
+    if (me) throw redirect({ to: '/home' });
+  },
+  component: WelcomeScreen,
+});
+
 export const routeTree = rootRoute.addChildren([
   authedRoot.addChildren([homeRoute, overviewRoute, editTimeRoute, meTodayLegacyRoute, reportsRoute, approvalsRoute, profileRoute, teamRoute, attendanceRoute, flagsRoute, usersRoute, teamsAdminRoute, shiftsRoute, policyRoute, integrationsRoute, payrollRoute]),
   loginRoute,
   changelogRoute,
+  welcomeRoute,
+  indexRoute,
 ]);
