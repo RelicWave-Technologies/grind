@@ -149,8 +149,9 @@ export function WelcomeScreen() {
                 <span>You keep shipping.</span>
               </h1>
               <p className="wl-lead rise-2">
-                One calm tracker for Mac and Windows. Real hours, honest
-                screenshots, approvals in Lark — and zero drama.
+                A time tracker your team won't quietly resent. Real hours,
+                honest screenshots, approvals in Lark, and absolutely no
+                opinions about your lunch break.
               </p>
               <div className="wl-ctas rise-3">
                 <a className="wl-btn wl-btn--primary wl-btn--dl" href={dlHref} target="_blank" rel="noreferrer">
@@ -187,15 +188,15 @@ export function WelcomeScreen() {
             <div className="wl-tiles wl-reveal">
               <div className="wl-tile">
                 <p className="wl-caption">REAL HOURS</p>
-                <p>A timer that survives crashes, sleep and dead Wi-Fi. Idle time gets trimmed, and the “are you still there?” minute never counts. Fair is fair.</p>
+                <p>Survives crashes, sleep, and whatever your Wi-Fi is doing today. Idle time gets trimmed and the “are you still there?” minute never counts — we're not monsters.</p>
               </div>
               <div className="wl-tile">
                 <p className="wl-caption">HONEST SCREENSHOTS</p>
-                <p>Gentle-cadence captures you can see yourself, retired after 60 days. Delete or blur your own — no gotchas, ever.</p>
+                <p>Taken on a gentle cadence, visible to you first, and shredded after 60 days. Blur or delete your own. Nobody is compiling a blooper reel.</p>
               </div>
               <div className="wl-tile">
                 <p className="wl-caption">APPROVALS IN LARK</p>
-                <p>Forgot to track? Ask once, right in chat. Your manager taps approve and everyone moves on with their lives. Paper trail included.</p>
+                <p>Forgot to hit start? Ask once in chat. Your manager taps approve. Nobody schedules a meeting about the meeting you forgot to log.</p>
               </div>
             </div>
           </div>
@@ -210,13 +211,13 @@ export function WelcomeScreen() {
                   <p className="wl-caption">THE CONTRACT</p>
                   <h2 className="wl-headline">Counts, never content.</h2>
                   <p className="wl-block-body">
-                    Timo counts keystrokes, clicks and scroll — it never reads
-                    what you type. No clipboard, no microphone, no camera.
-                    Window titles and URLs stay off unless your admin turns
-                    them on, and tracking never stops silently: if Timo isn't
-                    counting, it says so.
+                    Timo counts keystrokes, clicks and scroll. It has no idea
+                    what you typed, and honestly it isn't curious. No clipboard,
+                    no microphone, no camera. Titles and URLs stay off unless an
+                    admin says otherwise. And if it ever stops counting, it tells
+                    you — loudly, like a smoke alarm with better manners.
                   </p>
-                  <p className="wl-caption wl-block-foot">YOUR SECRETS ARE SAFE — TIMO DOESN'T WANT THEM.</p>
+                  <p className="wl-caption wl-block-foot">YOUR SECRETS ARE SAFE. TIMO ISN'T INTERESTED.</p>
                 </div>
                 <figure className="wl-block-scene" data-plx="0.07">
                   <img src="/brand/timo-card-beta28.gif?v=3" alt="A reliability checklist ticking calmly while Timo nods" loading="lazy" width={420} height={169} />
@@ -229,11 +230,11 @@ export function WelcomeScreen() {
         {/* ---- White: the dashboard, real shots ----------------------------- */}
         <section className="wl-sec" id="dashboard">
           <div className="wl-container">
-            <h2 className="wl-display-lg wl-reveal">The other half is a dashboard.</h2>
+            <h2 className="wl-display-lg wl-reveal">The other half lives in your browser.</h2>
             <p className="wl-sec-lead wl-reveal">
-              Managers get the workspace at a glance; everyone gets their own
-              day, minute by minute. Shot from a demo workspace — the people
-              are fictional, the product isn't.
+              Managers get the whole workspace at a glance. Everyone else gets
+              their own day, minute by minute. These are real screens from a
+              demo workspace — the people are made up, the product isn't.
             </p>
           </div>
           <div className="wl-carousel" ref={carouselRef}>
@@ -269,13 +270,13 @@ export function WelcomeScreen() {
                   <p className="wl-caption">THE ENGINEERING</p>
                   <h2 className="wl-headline">Zero-loss timekeeping.</h2>
                   <p className="wl-block-body">
-                    Every timer move is written to disk before it hits the
-                    screen. The server leases open entries and closes them at
-                    the last proven minute — so a crash, a dead network or a
-                    reinstall can't lose an hour you actually worked. And no
-                    one can invent one either.
+                    Every tick is written to disk before it reaches your screen,
+                    and the server only counts minutes it can actually prove. So
+                    a crash, a dead network or a fresh laptop can't swallow an
+                    hour you really worked — and nobody can conjure one they
+                    didn't. Both directions. That's the point.
                   </p>
-                  <p className="wl-caption wl-block-foot">YOUR HOURS SURVIVE THINGS YOUR LAPTOP WON'T.</p>
+                  <p className="wl-caption wl-block-foot">YOUR HOURS OUTLIVE YOUR LAPTOP.</p>
                 </div>
                 <figure className="wl-block-scene wl-block-scene--seamless" data-plx="0.07">
                   <img src="/brand/timo-scene-timer.gif?v=3" alt="The timer card, still counting" loading="lazy" width={460} height={156} />
@@ -294,9 +295,10 @@ export function WelcomeScreen() {
                   <p className="wl-caption">THE CADENCE</p>
                   <h2 className="wl-headline">Twenty-eight builds in twenty-five days.</h2>
                   <p className="wl-block-body">
-                    Timo updates itself — it checks after launch, quietly, and
-                    installs on “Restart to update”. Every release is written
-                    up like we mean it, because we do.
+                    Timo updates itself. It checks after launch, quietly, and
+                    installs when you say so. Twenty-eight builds in twenty-five
+                    days — some added features, some fixed what the features
+                    broke. We wrote up every single one.
                   </p>
                   <div className="wl-block-ctas">
                     <a className="wl-btn wl-btn--secondary" href="/changelog">Read the changelog</a>
@@ -313,8 +315,8 @@ export function WelcomeScreen() {
         {/* ---- Closing CTA --------------------------------------------------- */}
         <section className="wl-close wl-reveal">
           <img className="wl-close-mascot" src="/brand/timo-mascot.svg" alt="" width={84} height={84} aria-hidden="true" />
-          <h2 className="wl-display-lg">Start keeping time.</h2>
-          <p className="wl-sec-lead wl-close-lead">Install once. It updates itself. Your hours take care of themselves.</p>
+          <h2 className="wl-display-lg">Go on, start the clock.</h2>
+          <p className="wl-sec-lead wl-close-lead">Install it once and forget it exists. That's the whole pitch.</p>
           <div className="wl-ctas wl-close-ctas">
             <a className="wl-btn wl-btn--primary wl-btn--dl" href={dlHref} target="_blank" rel="noreferrer">
               {dlIcon && <img src={dlIcon} alt="" width={17} height={17} />}
