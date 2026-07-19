@@ -305,7 +305,15 @@ const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/',
   beforeLoad: async ({ context }) => {
-    const me = await context.queryClient.fetchQuery<Me | null>(meQuery);
+    // Fail open: the landing page needs no data, so an unreachable API must
+    // still render marketing rather than an error boundary. Only a confirmed
+    // session sends you into the app.
+    let me: Me | null = null;
+    try {
+      me = await context.queryClient.fetchQuery<Me | null>(meQuery);
+    } catch {
+      me = null;
+    }
     if (me) throw redirect({ to: '/home' });
   },
   component: WelcomeScreen,
