@@ -1,5 +1,6 @@
 import './welcome.css';
 import { useEffect, useRef, useState } from 'react';
+import { agentDownloadUrl } from '../lib/downloads';
 
 /**
  * /welcome — public landing page (no auth, no app shell).
@@ -22,7 +23,14 @@ export function WelcomeScreen() {
   });
   const dlLabel = os === 'mac' ? 'Download for Mac' : os === 'win' ? 'Download for Windows' : 'Get Timo';
   const dlIcon = os === 'mac' ? '/brand/apple.svg' : os === 'win' ? '/brand/windows.svg' : null;
-  const dlHref = 'https://github.com/RelicWave-Technologies/grind/releases/latest';
+  // Same endpoint the in-app sidebar uses: it 302s to the current signed
+  // installer, so the click downloads instead of detouring via GitHub.
+  const dlHref = os === 'mac'
+    ? agentDownloadUrl('mac')
+    : os === 'win'
+      ? agentDownloadUrl('windows')
+      : 'https://github.com/RelicWave-Technologies/grind/releases/latest';
+  const dlExternal = os === null;
 
   const carouselRef = useRef<HTMLDivElement>(null);
   const trackRef = useRef<HTMLDivElement>(null);
@@ -131,7 +139,7 @@ export function WelcomeScreen() {
           </div>
           <div className="wl-nav-ctas">
             <a className="wl-btn wl-btn--secondary" href="/home">Open dashboard</a>
-            <a className="wl-btn wl-btn--primary wl-btn--dl" href={dlHref} target="_blank" rel="noreferrer">
+            <a className="wl-btn wl-btn--primary wl-btn--dl" href={dlHref} {...(dlExternal ? { target: '_blank', rel: 'noreferrer' } : {})}>
               {dlIcon && <img src={dlIcon} alt="" width={15} height={15} />}
               Download
             </a>
@@ -154,7 +162,7 @@ export function WelcomeScreen() {
                 opinions about your lunch break.
               </p>
               <div className="wl-ctas rise-3">
-                <a className="wl-btn wl-btn--primary wl-btn--dl" href={dlHref} target="_blank" rel="noreferrer">
+                <a className="wl-btn wl-btn--primary wl-btn--dl" href={dlHref} {...(dlExternal ? { target: '_blank', rel: 'noreferrer' } : {})}>
                   {dlIcon && <img src={dlIcon} alt="" width={17} height={17} />}
                   {dlLabel}
                 </a>
@@ -318,7 +326,7 @@ export function WelcomeScreen() {
           <h2 className="wl-display-lg">Go on, start the clock.</h2>
           <p className="wl-sec-lead wl-close-lead">Install it once and forget it exists. That's the whole pitch.</p>
           <div className="wl-ctas wl-close-ctas">
-            <a className="wl-btn wl-btn--primary wl-btn--dl" href={dlHref} target="_blank" rel="noreferrer">
+            <a className="wl-btn wl-btn--primary wl-btn--dl" href={dlHref} {...(dlExternal ? { target: '_blank', rel: 'noreferrer' } : {})}>
               {dlIcon && <img src={dlIcon} alt="" width={17} height={17} />}
               {dlLabel}
             </a>
