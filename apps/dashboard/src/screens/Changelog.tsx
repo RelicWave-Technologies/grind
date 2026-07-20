@@ -350,7 +350,7 @@ export function ChangelogScreen() {
       {/* ---- Top nav (56px white, pill pair right) ------------------------- */}
       <nav className="cl-nav">
         <div className="cl-nav-inner">
-          <a className="cl-nav-brand" href="#top">
+          <a className="cl-nav-brand" href="/">
             <img src="/brand/timo-mascot.svg" alt="" width={30} height={30} />
             <span>Timo</span>
           </a>
