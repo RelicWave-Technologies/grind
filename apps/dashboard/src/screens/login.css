@@ -1,189 +1,157 @@
 /* ============================================================================
-   LOGIN — strict auth entry surface.
-   Uses the shared dashboard kit for controls and tokens; this file owns only
-   auth-specific composition. Every class is prefixed `lgn-`.
+   /login — DESIGN.md-strict sign-in.
+   White canvas, ONE compact lilac color block ({rounded.lg}, ink text), the
+   black pill CTA, mono taxonomy, hairline inputs, circular back button.
+   Tokens resolve to --fg-* (styles.css).
    ========================================================================== */
 
 .lgn-page {
   min-height: 100vh;
-  min-height: 100dvh;
-  display: grid;
-  place-items: center;
-  padding: clamp(var(--ui-sp-5), 4vw, var(--ui-sp-9));
-  background: var(--ui-surface-sunken);
+  background: var(--fg-canvas);
+  color: var(--fg-ink);
+  font-family: var(--fg-sans);
+  font-feature-settings: 'kern' 1;
+  -webkit-font-smoothing: antialiased;
+  display: flex;
+  flex-direction: column;
+}
+.lgn-page *, .lgn-page *::before, .lgn-page *::after { box-sizing: border-box; }
+
+/* ---- Top chrome: circular back button + wordmark ---------------------------- */
+.lgn-top {
+  display: flex; align-items: center; gap: 14px;
+  padding: 16px 24px;
+}
+.lgn-back {
+  display: grid; place-items: center;
+  width: 40px; height: 40px;                 /* {components.button-icon-circular} */
+  border-radius: 9999px;
+  background: var(--fg-surface-soft);
+  color: var(--fg-ink);
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+}
+.lgn-back:hover { background: var(--fg-ink); color: var(--fg-canvas); }
+.lgn-back:active { transform: scale(0.94); }
+.lgn-brand {
+  display: inline-flex; align-items: center; gap: 9px;
+  font-size: 18px; font-weight: 540; letter-spacing: -0.01em;
+  color: var(--fg-ink); text-decoration: none;
 }
 
+/* ---- Centered shell ---------------------------------------------------------- */
 .lgn-shell {
-  width: min(100%, calc(var(--ui-sp-12) * 10.5));
+  flex: 1;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 24px 20px 48px;
 }
 
-.lgn-card {
-  width: 100%;
-  min-height: min(calc(var(--ui-sp-12) * 9.75), calc(100dvh - var(--ui-sp-12)));
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 0;
-  border-radius: calc(var(--ui-r-lg) * 3);
-  background: var(--ui-surface);
+/* ---- The lilac panel ({color-block-section-lilac}, sized like a card) -------- */
+.lgn-panel {
+  width: min(400px, 100%);
+  background: var(--fg-lilac);
+  border-radius: var(--fg-r-lg);
+  padding: 36px 34px 30px;
+  color: var(--fg-ink);
 }
-
-.lgn-form {
-  width: 100%;
-  max-width: calc(var(--ui-sp-12) * 8.5);
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: var(--ui-sp-10);
+.lgn-mascot { display: block; }
+.lgn-eyebrow {
+  font-family: var(--fg-mono);
+  font-size: 12px; font-weight: 400; line-height: 1.35;
+  letter-spacing: 0.05em; text-transform: uppercase;
+  margin: 18px 0 0;
 }
-
-.lgn-head {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--ui-sp-8);
-  text-align: center;
-}
-
-.lgn-mascot {
-  width: calc(var(--ui-sp-12) * 2.35);
-  height: calc(var(--ui-sp-12) * 2.35);
-  object-fit: contain;
-}
-
-.lgn-copy {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--ui-sp-3);
-}
-
 .lgn-title {
-  color: var(--ui-ink);
-  font-family: var(--ui-font-sans);
-  font-size: calc(var(--ui-sp-8) + var(--ui-sp-2));
-  line-height: 1.08;
-  font-weight: 720;
-  letter-spacing: 0;
+  font-size: 26px; font-weight: 540; line-height: 1.3; letter-spacing: -0.01em;  /* {typography.headline} */
+  margin: 8px 0 0;
 }
-
 .lgn-sub {
-  color: var(--ui-ink-2);
-  font-family: var(--ui-font-sans);
-  font-size: var(--ui-sp-6);
-  line-height: 1.35;
-  font-weight: 420;
-  letter-spacing: 0;
+  font-size: 16px; font-weight: 330; line-height: 1.45; letter-spacing: -0.14px; /* {typography.body-sm} */
+  margin: 10px 0 0;
 }
 
-.lgn-submit.ui-btn--lg {
-  height: calc(var(--ui-sp-12) + var(--ui-sp-6));
-  border-radius: var(--ui-r-full);
-  font-size: var(--ui-sp-6);
-  font-weight: 650;
-  letter-spacing: 0;
+/* Outcome notes: white cards on the lilac ground, mono label + plain words. */
+.lgn-note {
+  display: flex; flex-direction: column; gap: 4px;
+  background: var(--fg-canvas);
+  border-radius: var(--fg-r-md);
+  padding: 12px 14px;
+  margin-top: 18px;
+  font-size: 15px; font-weight: 360; line-height: 1.45; letter-spacing: -0.1px;
 }
-
-.lgn-submit .ui-btn__icon {
-  width: var(--ui-sp-7);
-  height: var(--ui-sp-7);
+.lgn-note-label {
+  font-family: var(--fg-mono);
+  font-size: 11px; font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase;
 }
+.lgn-note--danger .lgn-note-label { color: #c2453a; }
 
-.lgn-lark-icon {
-  display: block;
-  width: var(--ui-sp-7);
-  height: var(--ui-sp-7);
-}
-
-.lgn-dev-form {
-  display: grid;
-  gap: var(--ui-sp-3);
-  margin-top: calc(var(--ui-sp-8) * -0.55);
-}
-
-.lgn-dev-input {
+/* ---- Pills (the only button shape) ------------------------------------------- */
+.lgn-pill {
+  display: inline-flex; align-items: center; justify-content: center; gap: 10px;
   width: 100%;
-  height: calc(var(--ui-sp-10) + var(--ui-sp-1));
-  border: 1px solid var(--ui-line);
-  border-radius: var(--ui-r-md);
-  background: var(--ui-surface);
-  color: var(--ui-ink);
-  font-family: var(--ui-font-sans);
-  font-size: var(--ui-sp-4);
-  font-weight: 520;
-  letter-spacing: 0;
-  padding: 0 var(--ui-sp-5);
-  outline: none;
+  font-family: var(--fg-sans);
+  font-size: 18px; font-weight: 480; line-height: 1.4; letter-spacing: -0.005em;
+  border: 0; border-radius: var(--fg-r-pill);
+  padding: 11px 20px;
+  cursor: pointer; text-decoration: none;
+  transition: transform var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease), opacity var(--dur-fast) var(--ease);
+}
+.lgn-pill:active { transform: scale(0.97); }
+.lgn-pill:disabled { opacity: 0.6; cursor: default; }
+.lgn-pill:focus-visible { outline: 2px solid var(--fg-ink); outline-offset: 2px; }
+.lgn-pill--primary { background: var(--fg-ink); color: var(--fg-on-primary); margin-top: 22px; }
+.lgn-pill--primary:hover:not(:disabled) { transform: translateY(-1px); }
+.lgn-pill--secondary { background: var(--fg-canvas); color: var(--fg-ink); }
+.lgn-lark { display: block; filter: brightness(0) invert(1); }
+
+.lgn-cap {
+  font-family: var(--fg-mono);
+  font-size: 11px; font-weight: 400; letter-spacing: 0.05em; text-transform: uppercase;
+  margin: 12px 0 0; text-align: center;
 }
 
-.lgn-dev-input:focus {
-  border-color: var(--ui-focus);
-  box-shadow: var(--ui-focus-ring);
+/* ---- Dev-only password shim --------------------------------------------------- */
+.lgn-dev {
+  margin-top: 22px; padding-top: 18px;
+  border-top: 1px solid rgba(0, 0, 0, 0.18);
+  display: flex; flex-direction: column; gap: 10px;
 }
+.lgn-dev-cap { margin: 0 0 2px; text-align: left; }
+.lgn-input {
+  width: 100%;
+  background: var(--fg-canvas);
+  color: var(--fg-ink);
+  border: 1px solid var(--fg-hairline);
+  border-radius: var(--fg-r-md);                 /* {components.text-input} */
+  padding: 12px 14px;
+  font-family: var(--fg-sans);
+  font-size: 16px; font-weight: 360; letter-spacing: -0.1px;
+}
+.lgn-input::placeholder { color: var(--fg-ink); opacity: 0.45; }
+.lgn-input:focus-visible { outline: 2px solid var(--fg-ink); outline-offset: 1px; }
 
-.lgn-downloads {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--ui-sp-3);
-  margin-top: calc(var(--ui-sp-10) * -0.45);
+/* ---- Below the panel ----------------------------------------------------------- */
+.lgn-foot {
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  margin-top: 30px;
 }
-
-.lgn-download.ui-btn {
-  height: calc(var(--ui-sp-8) + var(--ui-sp-2));
-  color: var(--ui-ink);
-  text-decoration: none;
-  font-size: var(--ui-sp-4);
-  font-weight: 620;
-  letter-spacing: 0;
+.lgn-foot .lgn-cap { margin: 0; }
+.lgn-downloads { display: flex; gap: 8px; }
+.lgn-downloads .lgn-pill {
+  width: auto;
+  background: var(--fg-surface-soft);
+  color: var(--fg-ink);
+  font-size: 15px;
+  padding: 7px 15px 8px;
 }
-
-.lgn-platform-logo {
-  display: block;
-  width: 17px;
-  height: 17px;
+.lgn-downloads .lgn-pill:hover { background: var(--fg-ink); color: var(--fg-canvas); }
+.lgn-downloads .lgn-pill:hover img { filter: brightness(0) invert(1); }
+.lgn-tour {
+  font-size: 15px; font-weight: 480; letter-spacing: -0.1px;
+  color: var(--fg-ink); text-decoration: none; margin-top: 4px;
 }
+.lgn-tour:hover { text-decoration: underline; text-underline-offset: 4px; }
 
 @media (max-width: 560px) {
-  .lgn-page {
-    align-items: stretch;
-    padding: var(--ui-sp-4);
-  }
-
-  .lgn-shell {
-    display: grid;
-    align-items: center;
-  }
-
-  .lgn-card {
-    min-height: min(calc(var(--ui-sp-12) * 7.5), calc(100dvh - var(--ui-sp-8)));
-    border-radius: calc(var(--ui-r-lg) * 2);
-  }
-
-  .lgn-form {
-    width: 100%;
-    gap: var(--ui-sp-8);
-  }
-
-  .lgn-mascot {
-    width: calc(var(--ui-sp-12) * 1.7);
-    height: calc(var(--ui-sp-12) * 1.7);
-  }
-
-  .lgn-title {
-    font-size: var(--ui-sp-8);
-  }
-
-  .lgn-sub {
-    font-size: var(--ui-sp-5);
-  }
-
-  .lgn-submit.ui-btn--lg {
-    height: var(--ui-sp-12);
-    font-size: var(--ui-sp-5);
-  }
-
-  .lgn-downloads {
-    grid-template-columns: 1fr;
-    margin-top: calc(var(--ui-sp-8) * -0.45);
-  }
+  .lgn-panel { padding: 28px 24px 24px; }
+  .lgn-shell { padding: 12px 16px 40px; }
 }
