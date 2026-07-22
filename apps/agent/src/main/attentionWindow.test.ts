@@ -67,7 +67,7 @@ describe('attention window', () => {
       registerForReassert: false,
     }));
     expect(mocks.window.setBounds).toHaveBeenLastCalledWith(
-      { x: 1104, y: 16, width: 320, height: 176 },
+      { x: 1104, y: 16, width: 360, height: 222 },
       false,
     );
     expect(mocks.window.showInactive).toHaveBeenCalled();

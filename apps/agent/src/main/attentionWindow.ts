@@ -12,7 +12,7 @@ import {
 const SIZES = {
   IDLE_WARNING: { width: 340, height: 280 },
   IDLE: { width: 340, height: 280 },
-  AWAY: { width: 320, height: 176 },
+  AWAY: { width: 360, height: 222 },
   PERMISSION: { width: 480, height: 332 },
 } as const;
 // Fullscreen and Space transitions can settle after the first compositor pass.

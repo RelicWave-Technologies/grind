@@ -1196,10 +1196,19 @@ label.field-label { display: block; font-size: 12px; font-weight: 600; color: va
 }
 .rtw-title { min-width: 0; flex: 1; }
 .rtw-sub { margin-top: 2px; }
-.rtw-actions {
-  display: flex; gap: 8px; margin-top: auto; width: 100%;
+.rtw-task {
+  display: -webkit-box;
+  margin-top: 4px;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
-.rtw-actions .btn { flex: 1; white-space: nowrap; }
+.rtw-task-name { font-weight: 600; }
+.rtw-actions {
+  display: flex; flex: 0 0 auto; gap: 8px; margin-top: auto; width: 100%;
+}
+.rtw-actions .btn { min-width: 0; flex: 1; white-space: nowrap; }
 
 /* fade-in on mount */
 @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
