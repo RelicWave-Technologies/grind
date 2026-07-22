@@ -112,4 +112,21 @@ describe('attention window', () => {
     expect(mocks.window.focus).not.toHaveBeenCalled();
     expect(mocks.appFocus).not.toHaveBeenCalled();
   });
+
+  it('uses only bounded non-activating retries while a prompt is frontmost', async () => {
+    const { attentionPresenter } = await import('./attentionWindow');
+    attentionPresenter.show({ kind: 'IDLE', promptId: 'idle-1', idleStartedAt: 100 });
+    mocks.webListeners.get('did-finish-load')?.();
+    vi.clearAllMocks();
+
+    vi.advanceTimersByTime(999);
+    expect(mocks.assertFloat).toHaveBeenCalledTimes(2);
+    expect(mocks.window.showInactive).toHaveBeenCalledTimes(2);
+    expect(mocks.window.focus).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(1);
+    expect(mocks.assertFloat).toHaveBeenCalledTimes(3);
+    expect(mocks.window.showInactive).toHaveBeenCalledTimes(3);
+    expect(mocks.window.focus).not.toHaveBeenCalled();
+  });
 });

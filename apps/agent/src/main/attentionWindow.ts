@@ -15,7 +15,10 @@ const SIZES = {
   AWAY: { width: 320, height: 176 },
   PERMISSION: { width: 480, height: 332 },
 } as const;
-const RAISE_RETRY_MS = [100, 400] as const;
+// Fullscreen and Space transitions can settle after the first compositor pass.
+// Keep recovery bounded and non-activating: the prompt stays visible without
+// repeatedly stealing focus from the app the person was using.
+const RAISE_RETRY_MS = [100, 400, 1000] as const;
 
 let win: BrowserWindow | null = null;
 let loaded = false;
