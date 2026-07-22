@@ -8,6 +8,10 @@ import {
   topRight,
   type OverlayFloatOptions,
 } from './windows/overlay';
+import {
+  enterMacFullscreenAttention,
+  leaveMacFullscreenAttention,
+} from './windows/macAppIdentity';
 
 const SIZES = {
   IDLE_WARNING: { width: 340, height: 280 },
@@ -46,6 +50,7 @@ function ensure(): BrowserWindow {
     }
   });
   win.on('closed', () => {
+    if (win) leaveMacFullscreenAttention(win);
     win = null;
     loaded = false;
   });
@@ -70,19 +75,10 @@ function applyBounds(window: BrowserWindow, prompt: Exclude<AttentionPrompt, { k
   window.setBounds({ ...point, ...size }, false);
 }
 
-function floatOptionsFor(
-  prompt: AttentionPrompt,
-  options: OverlayFloatOptions = {},
-): OverlayFloatOptions {
-  return prompt.kind === 'PERMISSION'
-    ? { ...options, preserveProcessType: true }
-    : options;
-}
-
 function raise(window: BrowserWindow, options: OverlayFloatOptions = {}): void {
   // Visibility and activation are separate: keep the prompt above other apps
   // without interrupting the user's current keyboard or mouse work.
-  assertOverlayFloat(window, floatOptionsFor(current, options));
+  assertOverlayFloat(window, options);
   if (!window.isVisible()) window.showInactive();
   window.moveTop();
 }
@@ -94,10 +90,14 @@ function presentCurrent(): void {
   publish();
   if (!loaded) return;
   if (current.kind === 'PERMISSION' && current.presentation === 'YIELDED_TO_SETTINGS') {
+    leaveMacFullscreenAttention(window);
     window.setAlwaysOnTop(false);
     window.blur();
     return;
   }
+
+  if (current.kind === 'PERMISSION') leaveMacFullscreenAttention(window);
+  else enterMacFullscreenAttention(window);
 
   const generation = ++presentationGeneration;
   raise(window);
@@ -121,13 +121,17 @@ export const attentionPresenter = {
     presentationGeneration += 1;
     current = { kind: 'NONE' };
     publish();
-    if (win && !win.isDestroyed() && win.isVisible()) win.hide();
+    if (win && !win.isDestroyed()) {
+      if (win.isVisible()) win.hide();
+      leaveMacFullscreenAttention(win);
+    }
   },
   yieldToSystemSettings(prompt: Extract<AttentionPrompt, { kind: 'PERMISSION' }>): void {
     presentationGeneration += 1;
     current = prompt;
     publish();
     if (!win || win.isDestroyed()) return;
+    leaveMacFullscreenAttention(win);
     win.setAlwaysOnTop(false);
     win.blur();
   },

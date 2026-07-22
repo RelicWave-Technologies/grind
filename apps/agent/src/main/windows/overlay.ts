@@ -1,6 +1,5 @@
 import { BrowserWindow, screen } from 'electron';
 import path from 'node:path';
-import { ensureRegularMacApplication } from './macAppIdentity';
 
 /**
  * Foundation for every always-on-top overlay the agent shows: the floating
@@ -53,21 +52,10 @@ export interface OverlayOptions extends Size {
 
 // Live overlays — used by reassertAllOverlays() on wake / display change.
 const registry = new Set<BrowserWindow>();
-// Electron briefly transforms a normal macOS app into a UIElement application
-// while applying fullscreen-Space membership. Remember which presentation
-// policy a window last used so a reused attention window can safely change
-// between a regular recovery prompt and a permission prompt.
-const workspaceVisibilityMode = new WeakMap<BrowserWindow, boolean>();
+const workspaceVisibilityConfigured = new WeakSet<BrowserWindow>();
 
 export interface OverlayFloatOptions {
   refreshWorkspaceVisibility?: boolean;
-  /**
-   * Keep Timo's current macOS process type while registering a window across
-   * Spaces. This is reserved for the permission prompt: it deliberately
-   * yields to System Settings instead of taking the normal recovery-overlay
-   * presentation path.
-   */
-  preserveProcessType?: boolean;
 }
 
 function loadRoute(w: BrowserWindow, hash: string): void {
@@ -121,11 +109,11 @@ export function createOverlayWindow(opts: OverlayOptions): BrowserWindow {
 /**
  * Canonical "float over everything, on every Space" assertion.
  *
- * Normal overlays use Electron's default macOS fullscreen-Space transition.
- * The permission prompt is the deliberate exception: it uses Electron's
- * process-type preservation option so it can yield to System Settings.
- * Normal registration temporarily transforms Timo into a UIElement app, so
- * restore the regular host identity immediately after configuration.
+ * Overlay configuration must not mutate the whole application's macOS process
+ * type. Electron's default all-workspaces path hides/shows the Dock while it
+ * changes activation policy; repeating that path creates stale Dock tiles.
+ * The blocking attention window owns its one deliberate process transition in
+ * macAppIdentity.ts. Every ordinary assertion preserves the host identity.
  */
 export function assertOverlayFloat(
   win: BrowserWindow | null,
@@ -133,17 +121,15 @@ export function assertOverlayFloat(
 ): void {
   if (!win || win.isDestroyed()) return;
   win.setAlwaysOnTop(true, 'screen-saver');
-  const preserveProcessType = options.preserveProcessType === true;
   if (
     options.refreshWorkspaceVisibility
-    || workspaceVisibilityMode.get(win) !== preserveProcessType
+    || !workspaceVisibilityConfigured.has(win)
   ) {
     win.setVisibleOnAllWorkspaces(true, {
       visibleOnFullScreen: true,
-      ...(preserveProcessType ? { skipTransformProcessType: true } : {}),
+      skipTransformProcessType: true,
     });
-    workspaceVisibilityMode.set(win, preserveProcessType);
-    if (!preserveProcessType) ensureRegularMacApplication();
+    workspaceVisibilityConfigured.add(win);
   }
 }
 

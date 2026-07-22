@@ -24,6 +24,8 @@ const mocks = vi.hoisted(() => {
     window,
     create: vi.fn(() => window),
     assertFloat: vi.fn(),
+    enterFullscreen: vi.fn(),
+    leaveFullscreen: vi.fn(),
     appFocus: vi.fn(),
   };
 });
@@ -35,6 +37,10 @@ vi.mock('./windows/overlay', () => ({
   activeWorkArea: () => ({ x: 0, y: 0, width: 1440, height: 900 }),
   center: () => ({ x: 480, y: 284 }),
   topRight: () => ({ x: 1104, y: 16 }),
+}));
+vi.mock('./windows/macAppIdentity', () => ({
+  enterMacFullscreenAttention: mocks.enterFullscreen,
+  leaveMacFullscreenAttention: mocks.leaveFullscreen,
 }));
 
 describe('attention window', () => {
@@ -96,7 +102,7 @@ describe('attention window', () => {
     expect(mocks.appFocus).not.toHaveBeenCalled();
   });
 
-  it('uses the permission presentation policy before yielding to System Settings', async () => {
+  it('keeps permission presentation in the regular app process', async () => {
     const { attentionPresenter } = await import('./attentionWindow');
     attentionPresenter.show({
       kind: 'PERMISSION',
@@ -106,10 +112,9 @@ describe('attention window', () => {
     });
     mocks.webListeners.get('did-finish-load')?.();
 
-    expect(mocks.assertFloat).toHaveBeenCalledWith(
-      mocks.window,
-      { preserveProcessType: true },
-    );
+    expect(mocks.assertFloat).toHaveBeenCalledWith(mocks.window, {});
+    expect(mocks.enterFullscreen).not.toHaveBeenCalled();
+    expect(mocks.leaveFullscreen).toHaveBeenCalledWith(mocks.window);
   });
 
   it('refreshes fullscreen-Space membership without taking focus', async () => {
@@ -144,5 +149,27 @@ describe('attention window', () => {
     expect(mocks.assertFloat).toHaveBeenCalledTimes(3);
     expect(mocks.window.showInactive).toHaveBeenCalledTimes(3);
     expect(mocks.window.focus).not.toHaveBeenCalled();
+  });
+
+  it('acquires fullscreen attention once before bounded raises', async () => {
+    const { attentionPresenter } = await import('./attentionWindow');
+    attentionPresenter.show({ kind: 'IDLE', promptId: 'idle-1', idleStartedAt: 100 });
+    mocks.webListeners.get('did-finish-load')?.();
+
+    vi.runAllTimers();
+
+    expect(mocks.enterFullscreen).toHaveBeenCalledTimes(1);
+    expect(mocks.enterFullscreen).toHaveBeenCalledWith(mocks.window);
+    expect(mocks.leaveFullscreen).not.toHaveBeenCalled();
+  });
+
+  it('releases fullscreen attention when the prompt is hidden', async () => {
+    const { attentionPresenter } = await import('./attentionWindow');
+    attentionPresenter.show({ kind: 'AWAY', promptId: 'away-1', larkTaskGuid: null, stoppedAt: 200, reason: 'lock' });
+    mocks.webListeners.get('did-finish-load')?.();
+
+    attentionPresenter.hide();
+
+    expect(mocks.leaveFullscreen).toHaveBeenCalledWith(mocks.window);
   });
 });
