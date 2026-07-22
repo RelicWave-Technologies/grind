@@ -39,37 +39,4 @@ describe('ensureRegularMacApplication', () => {
     expect(mocks.setActivationPolicy).not.toHaveBeenCalled();
   });
 
-  it('acquires one process-wide fullscreen attention lease idempotently', async () => {
-    setPlatform('darwin');
-    const { enterMacFullscreenAttention } = await import('./macAppIdentity');
-    const window = {
-      isDestroyed: vi.fn(() => false),
-      setVisibleOnAllWorkspaces: vi.fn(),
-    } as unknown as Electron.BrowserWindow;
-
-    enterMacFullscreenAttention(window);
-    enterMacFullscreenAttention(window);
-
-    expect(window.setVisibleOnAllWorkspaces).toHaveBeenCalledOnce();
-    expect(window.setVisibleOnAllWorkspaces).toHaveBeenCalledWith(
-      true,
-      { visibleOnFullScreen: true },
-    );
-  });
-
-  it('restores normal app identity once when the attention lease ends', async () => {
-    setPlatform('darwin');
-    const { enterMacFullscreenAttention, leaveMacFullscreenAttention } = await import('./macAppIdentity');
-    const window = {
-      isDestroyed: vi.fn(() => false),
-      setVisibleOnAllWorkspaces: vi.fn(),
-    } as unknown as Electron.BrowserWindow;
-
-    enterMacFullscreenAttention(window);
-    leaveMacFullscreenAttention(window);
-    leaveMacFullscreenAttention(window);
-
-    expect(mocks.setActivationPolicy).toHaveBeenCalledOnce();
-    expect(mocks.setActivationPolicy).toHaveBeenCalledWith('regular');
-  });
 });

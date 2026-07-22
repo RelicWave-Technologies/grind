@@ -1,4 +1,4 @@
-import type { BrowserWindow } from 'electron';
+import { app, type BrowserWindow } from 'electron';
 import type { AttentionPrompt } from '../shared/attention';
 import {
   activeWorkArea,
@@ -8,10 +8,6 @@ import {
   topRight,
   type OverlayFloatOptions,
 } from './windows/overlay';
-import {
-  enterMacFullscreenAttention,
-  leaveMacFullscreenAttention,
-} from './windows/macAppIdentity';
 
 const SIZES = {
   IDLE_WARNING: { width: 340, height: 280 },
@@ -50,7 +46,6 @@ function ensure(): BrowserWindow {
     }
   });
   win.on('closed', () => {
-    if (win) leaveMacFullscreenAttention(win);
     win = null;
     loaded = false;
   });
@@ -76,11 +71,14 @@ function applyBounds(window: BrowserWindow, prompt: Exclude<AttentionPrompt, { k
 }
 
 function raise(window: BrowserWindow, options: OverlayFloatOptions = {}): void {
-  // Visibility and activation are separate: keep the prompt above other apps
-  // without interrupting the user's current keyboard or mouse work.
+  // This is a blocking attention surface. showInactive() cannot guarantee a
+  // window crosses another app's fullscreen Space, while activating Timo can.
+  // Keep this behavior exclusive to the coordinator-owned prompt.
   assertOverlayFloat(window, options);
-  if (!window.isVisible()) window.showInactive();
+  if (process.platform === 'darwin') app.focus({ steal: true });
+  window.show();
   window.moveTop();
+  window.focus();
 }
 
 function presentCurrent(): void {
@@ -90,14 +88,10 @@ function presentCurrent(): void {
   publish();
   if (!loaded) return;
   if (current.kind === 'PERMISSION' && current.presentation === 'YIELDED_TO_SETTINGS') {
-    leaveMacFullscreenAttention(window);
     window.setAlwaysOnTop(false);
     window.blur();
     return;
   }
-
-  if (current.kind === 'PERMISSION') leaveMacFullscreenAttention(window);
-  else enterMacFullscreenAttention(window);
 
   const generation = ++presentationGeneration;
   raise(window);
@@ -123,7 +117,6 @@ export const attentionPresenter = {
     publish();
     if (win && !win.isDestroyed()) {
       if (win.isVisible()) win.hide();
-      leaveMacFullscreenAttention(win);
     }
   },
   yieldToSystemSettings(prompt: Extract<AttentionPrompt, { kind: 'PERMISSION' }>): void {
@@ -131,7 +124,6 @@ export const attentionPresenter = {
     current = prompt;
     publish();
     if (!win || win.isDestroyed()) return;
-    leaveMacFullscreenAttention(win);
     win.setAlwaysOnTop(false);
     win.blur();
   },

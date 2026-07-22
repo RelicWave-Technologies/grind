@@ -112,8 +112,8 @@ export function createOverlayWindow(opts: OverlayOptions): BrowserWindow {
  * Overlay configuration must not mutate the whole application's macOS process
  * type. Electron's default all-workspaces path hides/shows the Dock while it
  * changes activation policy; repeating that path creates stale Dock tiles.
- * The blocking attention window owns its one deliberate process transition in
- * macAppIdentity.ts. Every ordinary assertion preserves the host identity.
+ * Blocking prompts activate their normal BrowserWindow instead of transforming
+ * the whole process. Every assertion therefore preserves Timo's app identity.
  */
 export function assertOverlayFloat(
   win: BrowserWindow | null,
