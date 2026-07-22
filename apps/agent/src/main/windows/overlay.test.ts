@@ -59,6 +59,40 @@ describe('assertOverlayFloat', () => {
     expect(win.setVisibleOnAllWorkspaces).toHaveBeenCalledTimes(2);
     expect(mocks.ensureRegularMacApplication).toHaveBeenCalledTimes(2);
   });
+
+  it('preserves process type only for a permission presentation', () => {
+    const win = {
+      isDestroyed: vi.fn(() => false),
+      setAlwaysOnTop: vi.fn(),
+      setVisibleOnAllWorkspaces: vi.fn(),
+    } as unknown as Electron.BrowserWindow;
+
+    assertOverlayFloat(win, { preserveProcessType: true });
+
+    expect(win.setVisibleOnAllWorkspaces).toHaveBeenCalledWith(
+      true,
+      { visibleOnFullScreen: true, skipTransformProcessType: true },
+    );
+    expect(mocks.ensureRegularMacApplication).not.toHaveBeenCalled();
+  });
+
+  it('re-registers a reused window when its presentation policy changes', () => {
+    const win = {
+      isDestroyed: vi.fn(() => false),
+      setAlwaysOnTop: vi.fn(),
+      setVisibleOnAllWorkspaces: vi.fn(),
+    } as unknown as Electron.BrowserWindow;
+
+    assertOverlayFloat(win, { preserveProcessType: true });
+    assertOverlayFloat(win);
+
+    expect(win.setVisibleOnAllWorkspaces).toHaveBeenCalledTimes(2);
+    expect(win.setVisibleOnAllWorkspaces).toHaveBeenLastCalledWith(
+      true,
+      { visibleOnFullScreen: true },
+    );
+    expect(mocks.ensureRegularMacApplication).toHaveBeenCalledOnce();
+  });
 });
 
 describe('center', () => {

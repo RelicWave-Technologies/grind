@@ -70,10 +70,19 @@ function applyBounds(window: BrowserWindow, prompt: Exclude<AttentionPrompt, { k
   window.setBounds({ ...point, ...size }, false);
 }
 
+function floatOptionsFor(
+  prompt: AttentionPrompt,
+  options: OverlayFloatOptions = {},
+): OverlayFloatOptions {
+  return prompt.kind === 'PERMISSION'
+    ? { ...options, preserveProcessType: true }
+    : options;
+}
+
 function raise(window: BrowserWindow, options: OverlayFloatOptions = {}): void {
   // Visibility and activation are separate: keep the prompt above other apps
   // without interrupting the user's current keyboard or mouse work.
-  assertOverlayFloat(window, options);
+  assertOverlayFloat(window, floatOptionsFor(current, options));
   if (!window.isVisible()) window.showInactive();
   window.moveTop();
 }

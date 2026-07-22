@@ -54,12 +54,20 @@ export interface OverlayOptions extends Size {
 // Live overlays — used by reassertAllOverlays() on wake / display change.
 const registry = new Set<BrowserWindow>();
 // Electron briefly transforms a normal macOS app into a UIElement application
-// while applying fullscreen-Space membership. Do that once per window during
-// normal presentation; wake/display recovery can explicitly refresh it.
-const workspaceVisibilityConfigured = new WeakSet<BrowserWindow>();
+// while applying fullscreen-Space membership. Remember which presentation
+// policy a window last used so a reused attention window can safely change
+// between a regular recovery prompt and a permission prompt.
+const workspaceVisibilityMode = new WeakMap<BrowserWindow, boolean>();
 
 export interface OverlayFloatOptions {
   refreshWorkspaceVisibility?: boolean;
+  /**
+   * Keep Timo's current macOS process type while registering a window across
+   * Spaces. This is reserved for the permission prompt: it deliberately
+   * yields to System Settings instead of taking the normal recovery-overlay
+   * presentation path.
+   */
+  preserveProcessType?: boolean;
 }
 
 function loadRoute(w: BrowserWindow, hash: string): void {
@@ -113,11 +121,11 @@ export function createOverlayWindow(opts: OverlayOptions): BrowserWindow {
 /**
  * Canonical "float over everything, on every Space" assertion.
  *
- * `setVisibleOnAllWorkspaces` must use Electron's default macOS process-type
- * transition. Skipping that transition is only valid for apps which are
- * already UIElement applications; Timo is a normal foreground app. Electron
- * temporarily transforms the process while configuring fullscreen Spaces, so
- * restore the host identity immediately after every such configuration.
+ * Normal overlays use Electron's default macOS fullscreen-Space transition.
+ * The permission prompt is the deliberate exception: it uses Electron's
+ * process-type preservation option so it can yield to System Settings.
+ * Normal registration temporarily transforms Timo into a UIElement app, so
+ * restore the regular host identity immediately after configuration.
  */
 export function assertOverlayFloat(
   win: BrowserWindow | null,
@@ -125,10 +133,17 @@ export function assertOverlayFloat(
 ): void {
   if (!win || win.isDestroyed()) return;
   win.setAlwaysOnTop(true, 'screen-saver');
-  if (options.refreshWorkspaceVisibility || !workspaceVisibilityConfigured.has(win)) {
-    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-    workspaceVisibilityConfigured.add(win);
-    ensureRegularMacApplication();
+  const preserveProcessType = options.preserveProcessType === true;
+  if (
+    options.refreshWorkspaceVisibility
+    || workspaceVisibilityMode.get(win) !== preserveProcessType
+  ) {
+    win.setVisibleOnAllWorkspaces(true, {
+      visibleOnFullScreen: true,
+      ...(preserveProcessType ? { skipTransformProcessType: true } : {}),
+    });
+    workspaceVisibilityMode.set(win, preserveProcessType);
+    if (!preserveProcessType) ensureRegularMacApplication();
   }
 }
 

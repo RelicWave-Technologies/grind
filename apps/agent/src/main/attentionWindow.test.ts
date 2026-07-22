@@ -96,6 +96,22 @@ describe('attention window', () => {
     expect(mocks.appFocus).not.toHaveBeenCalled();
   });
 
+  it('uses the permission presentation policy before yielding to System Settings', async () => {
+    const { attentionPresenter } = await import('./attentionWindow');
+    attentionPresenter.show({
+      kind: 'PERMISSION',
+      promptId: 'permission-1',
+      intent: 'START_TASK',
+      presentation: 'FRONT',
+    });
+    mocks.webListeners.get('did-finish-load')?.();
+
+    expect(mocks.assertFloat).toHaveBeenCalledWith(
+      mocks.window,
+      { preserveProcessType: true },
+    );
+  });
+
   it('refreshes fullscreen-Space membership without taking focus', async () => {
     const { attentionPresenter, reassertAttentionWindow } = await import('./attentionWindow');
     attentionPresenter.show({ kind: 'AWAY', promptId: 'away-1', larkTaskGuid: null, stoppedAt: 200, reason: 'lock' });
