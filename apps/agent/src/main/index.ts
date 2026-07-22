@@ -26,6 +26,7 @@ import { registerPowerEvents } from './services/power';
 import { IdleMonitor } from './services/idle/monitor';
 import { dismissFloatingBar, reclampFloatingBar, syncFloatingBar } from './floating';
 import { reassertAllOverlays } from './windows/overlay';
+import { ensureRegularMacApplication } from './windows/macAppIdentity';
 import { togglePopover, hidePopover } from './popover';
 import { reassertAttentionWindow } from './attentionWindow';
 import { getTrackingAttentionCoordinator } from './services/trackingAttention';
@@ -146,6 +147,10 @@ function notifyStartupHealth(state: LaunchAtLoginHealth): void {
 }
 
 app.whenReady().then(async () => {
+  // Timo has a Dock icon, a main window, and normal Cmd+Tab behavior. Overlay
+  // setup must never leave the whole app in macOS's UIElement utility mode.
+  ensureRegularMacApplication();
+
   // Recover a session stranded by a prior app identity (Grind->Timo) BEFORE any
   // token read. Windows-only: that's where the productName-based userData dir
   // moved and orphaned tokens.bin.

@@ -1,5 +1,6 @@
 import { BrowserWindow, screen } from 'electron';
 import path from 'node:path';
+import { ensureRegularMacApplication } from './macAppIdentity';
 
 /**
  * Foundation for every always-on-top overlay the agent shows: the floating
@@ -114,9 +115,9 @@ export function createOverlayWindow(opts: OverlayOptions): BrowserWindow {
  *
  * `setVisibleOnAllWorkspaces` must use Electron's default macOS process-type
  * transition. Skipping that transition is only valid for apps which are
- * already UIElement applications; Timo is a normal foreground app. Because
- * the transition may briefly hide the Dock, it is applied once per window and
- * explicitly refreshed only after wake/unlock/display changes.
+ * already UIElement applications; Timo is a normal foreground app. Electron
+ * temporarily transforms the process while configuring fullscreen Spaces, so
+ * restore the host identity immediately after every such configuration.
  */
 export function assertOverlayFloat(
   win: BrowserWindow | null,
@@ -127,6 +128,7 @@ export function assertOverlayFloat(
   if (options.refreshWorkspaceVisibility || !workspaceVisibilityConfigured.has(win)) {
     win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
     workspaceVisibilityConfigured.add(win);
+    ensureRegularMacApplication();
   }
 }
 

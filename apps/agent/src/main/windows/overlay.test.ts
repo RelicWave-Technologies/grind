@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { beforeEach, describe, it, expect, vi } from 'vitest';
 import {
   assertOverlayFloat,
   center,
@@ -7,6 +7,18 @@ import {
   trayPopoverPoint,
   type Rect,
 } from './overlay';
+
+const mocks = vi.hoisted(() => ({
+  ensureRegularMacApplication: vi.fn(),
+}));
+
+vi.mock('./macAppIdentity', () => ({
+  ensureRegularMacApplication: mocks.ensureRegularMacApplication,
+}));
+
+beforeEach(() => {
+  mocks.ensureRegularMacApplication.mockClear();
+});
 
 const SIZE = { width: 320, height: 168 };
 const PRIMARY: Rect = { x: 0, y: 0, width: 1440, height: 900 };
@@ -31,6 +43,7 @@ describe('assertOverlayFloat', () => {
       true,
       { visibleOnFullScreen: true },
     );
+    expect(mocks.ensureRegularMacApplication).toHaveBeenCalledOnce();
   });
 
   it('refreshes fullscreen-Space membership after wake or display changes', () => {
@@ -44,6 +57,7 @@ describe('assertOverlayFloat', () => {
     assertOverlayFloat(win, { refreshWorkspaceVisibility: true });
 
     expect(win.setVisibleOnAllWorkspaces).toHaveBeenCalledTimes(2);
+    expect(mocks.ensureRegularMacApplication).toHaveBeenCalledTimes(2);
   });
 });
 
