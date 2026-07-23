@@ -215,7 +215,38 @@ describe('launch at login service', () => {
     });
   });
 
-  it('repairs a disabled Windows item only after an explicit repair', () => {
+  it('self-heals a disabled Windows item on boot', () => {
+    const exe = 'C:\\Users\\Anish\\AppData\\Local\\Programs\\Timo\\Timo.exe';
+    const disabled = settings({
+      openAtLogin: true,
+      executableWillLaunchAtLogin: false,
+      launchItems: [item({ enabled: false })],
+    });
+    const ready = settings({
+      openAtLogin: true,
+      executableWillLaunchAtLogin: true,
+      launchItems: [item()],
+    });
+    mocks.app.getLoginItemSettings
+      .mockReturnValueOnce(disabled)
+      .mockReturnValueOnce(ready)
+      .mockReturnValueOnce(ready)
+      .mockReturnValueOnce(ready)
+      .mockReturnValueOnce(ready);
+
+    const health = service('win32', exe).reconcileOnBoot();
+
+    expect(mocks.app.setLoginItemSettings).toHaveBeenCalledWith({
+      openAtLogin: true,
+      enabled: true,
+      name: 'Timo',
+      path: exe,
+      args: ['--hidden'],
+    });
+    expect(health).toMatchObject({ ready: true, state: 'READY' });
+  });
+
+  it('repairs a disabled Windows item from the explicit repair action', () => {
     const exe = 'C:\\Users\\Anish\\AppData\\Local\\Programs\\Timo\\Timo.exe';
     const disabled = settings({
       openAtLogin: true,

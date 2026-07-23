@@ -70,6 +70,28 @@ export function isTrackingBlockedError(error: unknown): error is TrackingBlocked
   return error instanceof TrackingBlockedError;
 }
 
+export type SystemIdleState = 'active' | 'idle' | 'locked' | 'unknown';
+
+/**
+ * True when an unhealthy inspection is explainable by a display that is not
+ * rendering rather than by a lost permission. Displays produce blank captures
+ * while powered off, and macOS fires no power event for plain display sleep
+ * (unlike lock/suspend) — so an "empty" capture while the user is not actively
+ * using the machine must not be treated as mid-session revocation. A real
+ * revocation keeps failing after the user is active again.
+ */
+export function isInconclusiveScreenCapture(
+  inspection: ReadinessInspection,
+  idleState: SystemIdleState,
+): boolean {
+  if (idleState === 'active') return false;
+  const { readiness, permissions } = inspection;
+  return readiness.blockingCapabilities.length === 1
+    && readiness.blockingCapabilities[0] === 'SCREEN_RECORDING'
+    && permissions.screen.status === 'granted'
+    && permissions.screen.health === 'empty';
+}
+
 export function createTrackingReadinessService(deps: TrackingReadinessDeps) {
   let screenProbeHealthy: boolean | null = null;
 

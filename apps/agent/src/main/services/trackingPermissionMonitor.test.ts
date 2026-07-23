@@ -9,12 +9,19 @@ const mocks = vi.hoisted(() => ({
   broadcast: vi.fn(),
   heartbeat: vi.fn(),
   setActivityRecording: vi.fn(),
+  idleState: vi.fn(),
 }));
 
+vi.mock('electron', () => ({
+  powerMonitor: { getSystemIdleState: mocks.idleState },
+}));
 vi.mock('./timer', () => ({
   getTimerService: () => ({ status: mocks.status, pauseForPermission: mocks.pauseForPermission }),
 }));
-vi.mock('./trackingReadiness', () => ({
+// Keep the real pure helpers (isInconclusiveScreenCapture) — only the
+// stateful service singleton is replaced.
+vi.mock('./trackingReadiness', async (importOriginal) => ({
+  ...(await importOriginal() as Record<string, unknown>),
   getTrackingReadinessService: () => ({ inspect: mocks.inspect, noteScreenHealth: mocks.noteScreenHealth }),
 }));
 vi.mock('./trackingCommands', () => ({ offerPermissionResume: mocks.offerResume }));
@@ -85,6 +92,7 @@ describe('tracking permission monitor', () => {
     mocks.broadcast.mockReset();
     mocks.heartbeat.mockReset();
     mocks.setActivityRecording.mockReset();
+    mocks.idleState.mockReset().mockReturnValue('active');
   });
 
   afterEach(() => {
@@ -182,6 +190,27 @@ describe('tracking permission monitor', () => {
 
     expect(mocks.pauseForPermission).toHaveBeenCalledWith(lastHealthyAt);
     expect(mocks.offerResume).toHaveBeenCalledTimes(1);
+  });
+
+  it('never pauses for blank captures while the display is asleep or locked', async () => {
+    const running = {
+      state: 'RUNNING', entryId: 'entry-2d', revision: 1, larkTaskGuid: null,
+      startedAt: Date.now(), segmentStartedAt: Date.now(), workedMs: 0, paused: false, pauseReason: null,
+    };
+    mocks.status.mockReturnValue(running);
+    mocks.inspect.mockResolvedValueOnce(inspection(true));
+    startTrackingPermissionMonitor();
+    await vi.advanceTimersByTimeAsync(0);
+
+    // Display sleep: permission still granted, captures come back empty, and
+    // the user has produced no recent input. This must never pause or prompt
+    // no matter how long it lasts — well beyond the confirmation window.
+    mocks.inspect.mockResolvedValue(transientScreenFailureInspection());
+    mocks.idleState.mockReturnValue('idle');
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(mocks.pauseForPermission).not.toHaveBeenCalled();
+    expect(mocks.offerResume).not.toHaveBeenCalled();
   });
 
   it('pauses when the native activity hook remains failed beyond its startup allowance', async () => {

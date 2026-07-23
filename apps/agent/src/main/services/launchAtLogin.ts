@@ -307,12 +307,15 @@ export function createLaunchAtLoginService(deps: LaunchAtLoginDeps) {
     return inspect();
   }
 
+  /**
+   * Boot self-heals the same states as an explicit repair. Field Windows
+   * machines kept losing startup because "Startup apps" / cleanup tools
+   * disabled the item (NEEDS_REPAIR) and nobody opened Settings to press
+   * Repair. States that need a human (approval, install, blocked) are still
+   * only surfaced, never forced.
+   */
   function reconcileOnBoot(): LaunchAtLoginHealth {
-    const health = inspect();
-    if (health.state === 'NEEDS_REGISTRATION') {
-      return cleanupAfterReady(registerAndVerify());
-    }
-    return cleanupAfterReady(health);
+    return repair();
   }
 
   function repair(): LaunchAtLoginHealth {

@@ -178,6 +178,27 @@ app.whenReady().then(async () => {
   const launchAtLoginService = getLaunchAtLoginService();
   const openedAtLogin = launchAtLoginService.shouldStartHidden();
   const launchAtLogin = launchAtLoginService.reconcileOnBoot();
+  if (!launchAtLogin.ready && launchAtLogin.required) {
+    // Field-diagnosable startup failures: capture the OS's own view of the
+    // login items (registry Run/StartupApproved on Windows, SMAppService on
+    // macOS) so a "doesn't start at login" report is solvable from this log.
+    try {
+      const raw = app.getLoginItemSettings();
+      log.warn('launch at login unhealthy after boot reconcile', {
+        state: launchAtLogin.state,
+        remediation: launchAtLogin.remediation,
+        openAtLogin: raw.openAtLogin,
+        executableWillLaunchAtLogin: raw.executableWillLaunchAtLogin,
+        launchItems: raw.launchItems,
+      });
+    } catch (err) {
+      log.warn('launch at login unhealthy after boot reconcile', {
+        state: launchAtLogin.state,
+        remediation: launchAtLogin.remediation,
+        err: String(err),
+      });
+    }
+  }
 
   mainWindow = ensureMainWindow({ startHidden: openedAtLogin });
   setLarkConnectionHandler(() => showMainWindow());
