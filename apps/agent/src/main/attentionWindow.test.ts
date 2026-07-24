@@ -62,6 +62,7 @@ describe('attention window', () => {
   });
 
   it('reuses one physical BrowserWindow across prompt kinds', async () => {
+    setPlatform('win32');
     const { attentionPresenter } = await import('./attentionWindow');
     attentionPresenter.show({ kind: 'IDLE', promptId: 'idle-1', idleStartedAt: 100 });
     mocks.webListeners.get('did-finish-load')?.();
@@ -70,7 +71,6 @@ describe('attention window', () => {
     expect(mocks.create).toHaveBeenCalledTimes(1);
     expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({
       hash: 'attention',
-      activation: 'interactive',
       registerForReassert: false,
     }));
     expect(mocks.window.setBounds).toHaveBeenLastCalledWith(
@@ -104,6 +104,7 @@ describe('attention window', () => {
   });
 
   it('presents permission in front until it yields to System Settings', async () => {
+    setPlatform('win32');
     const { attentionPresenter } = await import('./attentionWindow');
     attentionPresenter.show({
       kind: 'PERMISSION',
@@ -134,7 +135,8 @@ describe('attention window', () => {
     expect(mocks.window.focus).toHaveBeenCalled();
   });
 
-  it('uses only bounded activating retries while a prompt is frontmost', async () => {
+  it('uses only bounded retries while a prompt is frontmost', async () => {
+    setPlatform('win32');
     const { attentionPresenter } = await import('./attentionWindow');
     attentionPresenter.show({ kind: 'IDLE', promptId: 'idle-1', idleStartedAt: 100 });
     mocks.webListeners.get('did-finish-load')?.();
@@ -151,14 +153,18 @@ describe('attention window', () => {
     expect(mocks.window.focus).toHaveBeenCalledTimes(3);
   });
 
-  it('activates Timo on macOS so the prompt cannot remain behind another app', async () => {
+  it('presents on the current Space without activating Timo on macOS', async () => {
     setPlatform('darwin');
     const { attentionPresenter } = await import('./attentionWindow');
     attentionPresenter.show({ kind: 'IDLE', promptId: 'idle-1', idleStartedAt: 100 });
     mocks.webListeners.get('did-finish-load')?.();
 
-    expect(mocks.appFocus).toHaveBeenCalledWith({ steal: true });
-    expect(mocks.window.show).toHaveBeenCalled();
+    // Activating the app (or an activating show) would make macOS switch
+    // Spaces and yank the user out of their fullscreen app. The panel is
+    // shown inactive on the current Space and made key without activation.
+    expect(mocks.appFocus).not.toHaveBeenCalled();
+    expect(mocks.window.show).not.toHaveBeenCalled();
+    expect(mocks.window.showInactive).toHaveBeenCalled();
     expect(mocks.window.moveTop).toHaveBeenCalled();
     expect(mocks.window.focus).toHaveBeenCalled();
   });

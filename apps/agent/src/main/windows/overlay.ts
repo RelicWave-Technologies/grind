@@ -41,9 +41,6 @@ export interface OverlayOptions extends Size {
   /** OS corner rounding. Set false to let CSS own the shape completely, so a
    *  DWM/AppKit corner radius can't mismatch the surface's own border-radius. */
   roundedCorners?: boolean;
-  /** Interactive overlays must be capable of becoming key when clicked.
-   * Passive surfaces use an NSPanel on macOS so they never activate the app. */
-  activation?: 'passive' | 'interactive';
   /** Most overlays share the global wake/display reassertion registry. A
    * coordinator-owned window can opt out when its own state controls whether
    * it should float (for example, while yielding to System Settings). */
@@ -69,8 +66,9 @@ function loadRoute(w: BrowserWindow, hash: string): void {
 /**
  * Create a frameless, transparent overlay window with shared hardened
  * webPreferences. Auto-registers for float re-assertion and deregisters on
- * close. Passive overlays use NSPanel; interactive overlays can become key
- * windows through explicit user interaction.
+ * close. Every overlay is a non-activating NSPanel on macOS: panels float
+ * over other apps' fullscreen Spaces and become key for clicks without
+ * activating the app (which would make macOS switch Spaces).
  */
 export function createOverlayWindow(opts: OverlayOptions): BrowserWindow {
   const win = new BrowserWindow({
@@ -88,9 +86,11 @@ export function createOverlayWindow(opts: OverlayOptions): BrowserWindow {
     fullscreenable: false,
     hasShadow: opts.hasShadow ?? true,
     roundedCorners: opts.roundedCorners ?? true,
-    // NSPanel is correct for passive surfaces, but cannot reliably become the
-    // key window for a permission flow opened from an already-visible window.
-    type: process.platform === 'darwin' && opts.activation !== 'interactive' ? 'panel' : undefined,
+    // Non-activating NSPanel: floats over other apps' fullscreen Spaces and
+    // accepts clicks/key status without activating the app — activating a
+    // regular app from another app's fullscreen Space makes macOS switch
+    // Spaces, yanking the user to the desktop.
+    type: process.platform === 'darwin' ? 'panel' : undefined,
     webPreferences: {
       contextIsolation: true,
       sandbox: true,

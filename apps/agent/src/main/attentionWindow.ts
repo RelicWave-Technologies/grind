@@ -1,4 +1,4 @@
-import { app, type BrowserWindow } from 'electron';
+import type { BrowserWindow } from 'electron';
 import type { AttentionPrompt } from '../shared/attention';
 import {
   activeWorkArea,
@@ -32,7 +32,6 @@ function ensure(): BrowserWindow {
     ...SIZES.PERMISSION,
     hash: 'attention',
     roundedCorners: true,
-    activation: 'interactive',
     registerForReassert: false,
   });
   win.webContents.on('did-finish-load', () => {
@@ -71,11 +70,20 @@ function applyBounds(window: BrowserWindow, prompt: Exclude<AttentionPrompt, { k
 }
 
 function raise(window: BrowserWindow, options: OverlayFloatOptions = {}): void {
-  // This is a blocking attention surface. showInactive() cannot guarantee a
-  // window crosses another app's fullscreen Space, while activating Timo can.
-  // Keep this behavior exclusive to the coordinator-owned prompt.
   assertOverlayFloat(window, options);
-  if (process.platform === 'darwin') app.focus({ steal: true });
+  if (process.platform === 'darwin') {
+    // Never activate the app to present a prompt: activating a regular app
+    // while the user is inside another app's fullscreen Space makes macOS
+    // switch Spaces — the prompt would yank the user back to the desktop.
+    // The window is a non-activating NSPanel that joins all Spaces with
+    // fullScreenAuxiliary, so an inactive show lands it on the Space the
+    // user is currently looking at, and focus() makes the panel key without
+    // activating Timo.
+    window.showInactive();
+    window.moveTop();
+    window.focus();
+    return;
+  }
   window.show();
   window.moveTop();
   window.focus();
