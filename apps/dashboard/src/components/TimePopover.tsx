@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronDown } from 'lucide-react';
-import { instantForZonedDateTime, zonedDateTimeParts } from '@grind/types';
+import { zonedDateTimeParts } from '@grind/types';
 import { usePopover } from '../lib/popover';
+import { buildTimeGrid } from '../lib/timeGrid';
 
 /**
  * Custom time picker. Trigger is an on-brand chip showing "9:25 AM" with a
@@ -50,24 +51,6 @@ function partsFromMs(ms: number, timeZone: string): { h12: number; m: number; am
   return { h12, m: local.minute, ampm };
 }
 
-function msFromParts(baseMs: number, h12: number, m: number, ampm: 'AM' | 'PM', timeZone: string): number | null {
-  const h24 = ampm === 'AM' ? (h12 === 12 ? 0 : h12) : (h12 === 12 ? 12 : h12 + 12);
-  const base = zonedDateTimeParts(baseMs, timeZone);
-  try {
-    return instantForZonedDateTime({
-      year: base.year,
-      month: base.month,
-      day: base.day,
-      hour: h24,
-      minute: m,
-      second: 0,
-    }, timeZone).getTime();
-  } catch {
-    // Spring-forward local times do not exist. Do not silently save a different time.
-    return null;
-  }
-}
-
 function fmt(ms: number, timeZone: string): string {
   return new Intl.DateTimeFormat(undefined, {
     hour: 'numeric',
@@ -83,20 +66,20 @@ export default function TimePopover({ value, timeZone, disabled, onChange, ariaL
   const hourColRef = useRef<HTMLDivElement>(null);
   const minColRef = useRef<HTMLDivElement>(null);
 
-  // A candidate epoch ms is in-range if it falls within [minTime, maxTime].
-  // Either bound is optional. Used to grey out invalid cells.
-  const inRange = (ms: number | null): boolean => {
-    if (ms === null) return false;
-    if (minTime !== undefined && ms < minTime) return false;
-    if (maxTime !== undefined && ms > maxTime) return false;
-    return true;
-  };
+  // Selectable cells + the exact instant each emits. Built only while open —
+  // the grid spans every calendar day the [minTime, maxTime] window touches,
+  // clamps sub-minute bounds, and omits local times that don't exist (DST).
+  const grid = useMemo(
+    () => (pop.open ? buildTimeGrid({ value, minTime, maxTime, timeZone }) : null),
+    [pop.open, value, minTime, maxTime, timeZone],
+  );
   const hourEnabled = (h12: number, ampm: 'AM' | 'PM'): boolean =>
-    MINUTES.some((m) => inRange(msFromParts(value, h12, m, ampm, timeZone)));
+    grid?.hourEnabled(h12, ampm) ?? false;
+  // Pair-accurate: a minute is offered only under the CURRENTLY selected hour,
+  // so an enabled cell always does exactly what the click says.
   const minuteEnabled = (m: number, ampm: 'AM' | 'PM'): boolean =>
-    HOURS.some((h12) => inRange(msFromParts(value, h12, m, ampm, timeZone)));
-  const ampmEnabled = (ampm: 'AM' | 'PM'): boolean =>
-    HOURS.some((h12) => MINUTES.some((m) => inRange(msFromParts(value, h12, m, ampm, timeZone))));
+    grid?.emitFor(parts.h12, m, ampm) !== undefined;
+  const ampmEnabled = (ampm: 'AM' | 'PM'): boolean => grid?.meridiemEnabled(ampm) ?? false;
 
   // Re-anchor `active` to the current value whenever the popover opens.
   useEffect(() => {
@@ -110,23 +93,18 @@ export default function TimePopover({ value, timeZone, disabled, onChange, ariaL
   }, [pop.open, parts.h12]);
 
   function pick(h12: number, m: number, ampm: 'AM' | 'PM'): void {
-    const candidate = msFromParts(value, h12, m, ampm, timeZone);
-    if (candidate !== null && inRange(candidate)) {
-      onChange(candidate);
+    if (!grid) return;
+    const direct = grid.emitFor(h12, m, ampm);
+    if (direct !== undefined) {
+      onChange(direct);
       return;
     }
-    // The exact (h, m, ampm) is out of bounds — try to coerce to the nearest
-    // valid minute within the same hour first (closest 5-min step), then to
-    // any valid minute in that hour. If none, silently no-op (the cell
-    // shouldn't have been clickable in the first place, but defence in depth).
-    const sortedM = [...MINUTES].sort((a, b) => Math.abs(a - m) - Math.abs(b - m));
-    for (const altM of sortedM) {
-      const alt = msFromParts(value, h12, altM, ampm, timeZone);
-      if (alt !== null && inRange(alt)) {
-        onChange(alt);
-        return;
-      }
-    }
+    // The exact (h, m, ampm) has no selectable instant — coerce to the nearest
+    // valid minute in the same hour, else the closest selectable instant in the
+    // meridiem (covers an AM/PM toggle from a far-away time). No-op only when
+    // the whole meridiem is empty, and that button is already disabled.
+    const fallback = grid.nearestValid(h12, m, ampm, value);
+    if (fallback !== undefined) onChange(fallback);
   }
 
   function onKey(e: React.KeyboardEvent): void {
