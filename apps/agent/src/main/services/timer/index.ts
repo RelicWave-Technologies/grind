@@ -16,10 +16,13 @@ import type { TimerOwner } from './types';
 import { TodayLedgerHydrator, type TodayLedgerRefreshReason } from './todayLedgerHydrator';
 import { api } from '../apiClient';
 import { broadcast } from '../../broadcast';
+import { serverAlignedNow } from '../serverClock';
 import { getTodayLedgerMode } from '../agentConfig';
 import type { TodayLedgerMode } from '@grind/types';
 
-const realClock: Clock = { now: () => Date.now() };
+// Server-aligned: timer timestamps are validated (and clamped) by the server,
+// so they must be stamped in the server's frame rather than the laptop's.
+const realClock: Clock = { now: () => serverAlignedNow() };
 const realIds: IdGen = { ulid: () => ulid() };
 
 let service: TimerService | null = null;

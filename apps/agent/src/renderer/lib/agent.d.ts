@@ -117,6 +117,7 @@ declare global {
         setFloatingBarVisible: (enabled: boolean) => Promise<boolean>;
         resetFloatingBarPosition: () => Promise<void>;
         openScreenPrefs: () => Promise<void>;
+        openInputMonitoringPrefs: () => Promise<void>;
         openStartupPrefs: () => Promise<void>;
         onOpen: (cb: () => void) => () => void;
         openDataFolder: () => Promise<void>;

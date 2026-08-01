@@ -2,6 +2,7 @@ import { app } from 'electron';
 import type { DesktopPermissionSnapshot, HeartbeatResponse } from '@grind/types';
 import { AGENT_VERSION, HEARTBEAT_INTERVAL_MS } from '../env';
 import { log } from '../logger';
+import { noteServerTime, serverClockOffsetMs } from './serverClock';
 import { api, UnauthorizedError } from './apiClient';
 import { isLoggedIn } from './auth';
 import { drainActivityNow } from './activity';
@@ -72,8 +73,22 @@ async function tick(): Promise<void> {
       permissions: await currentPermissionSnapshot(),
       startup: currentStartupSnapshot(),
     });
+    const requestStartedAt = Date.now();
     const res = await api<HeartbeatResponse>('/v1/agent/heartbeat', { method: 'POST', body });
     lastHeartbeatAt = res.serverTime;
+    // Keep the timer's clock in the server's frame. Without this, a laptop more
+    // than the server's 2-minute skew tolerance fast has every uploaded
+    // timestamp clamped — and clamped segments whose start and end collapse
+    // together are dropped, silently losing tracked time on every sync.
+    const previousOffset = serverClockOffsetMs();
+    const offset = noteServerTime(res.serverTime, requestStartedAt, Date.now());
+    if (offset !== null && Math.abs(offset - previousOffset) >= 1_000) {
+      log.info('server clock offset updated', {
+        offsetMs: Math.round(offset),
+        previousOffsetMs: Math.round(previousOffset),
+        deviceAheadBySec: Math.round(-offset / 1000),
+      });
+    }
     log.debug('heartbeat ok', { serverTime: res.serverTime, configVersion: res.configVersion });
     if (res.timer?.disposition === 'needs_sync') requestTimerDrain('heartbeat');
     if (res.timer?.disposition === 'finalized' || res.timer?.disposition === 'conflict') {

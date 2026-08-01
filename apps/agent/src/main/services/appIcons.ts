@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { basename, extname, join, normalize, sep } from 'node:path';
 import { promisify } from 'node:util';
 import sharp from 'sharp';
-import { api } from './apiClient';
+import { api, onAuthChange, UnauthorizedError } from './apiClient';
 import { log } from '../logger';
 
 /**
@@ -22,7 +22,15 @@ const pending = new Map<string, { app: string; pngBase64: string }>();
 let flushTimer: NodeJS.Timeout | null = null;
 const ICON_PX = 44;
 const FLUSH_DELAY_MS = 4000;
+const MAX_RETRY_DELAY_MS = 5 * 60_000;
 const MAX_BATCH = 50;
+
+// Retry pacing. A flat 4s retry with no ceiling turned a signed-out session into
+// a 6-hour, 4,239-attempt hot loop that re-serialised base64 icons every time
+// and buried the log. Back off on transport failures, and stop entirely when the
+// failure is "no session" — there is nothing to retry until auth returns.
+let retryDelayMs = FLUSH_DELAY_MS;
+let parkedUntilAuth = false;
 const execFileAsync = promisify(execFile);
 
 type MacBundleInfo = {
@@ -149,12 +157,21 @@ export async function noteRunningApp(input: {
   }
 }
 
-function scheduleFlush(): void {
-  if (flushTimer) return;
+function scheduleFlush(delayMs: number = FLUSH_DELAY_MS): void {
+  if (flushTimer || parkedUntilAuth) return;
   flushTimer = setTimeout(() => {
     void flush();
-  }, FLUSH_DELAY_MS);
+  }, delayMs);
+  flushTimer.unref?.();
 }
+
+// Logged back in: whatever is queued is uploadable again.
+onAuthChange((status) => {
+  if (status !== 'loggedIn') return;
+  parkedUntilAuth = false;
+  retryDelayMs = FLUSH_DELAY_MS;
+  if (pending.size > 0) scheduleFlush();
+});
 
 async function flush(): Promise<void> {
   flushTimer = null;
@@ -168,9 +185,18 @@ async function flush(): Promise<void> {
       uploaded.add(it.bundleId);
       pending.delete(it.bundleId);
     }
+    retryDelayMs = FLUSH_DELAY_MS;
     if (pending.size > 0) scheduleFlush(); // more than one batch waiting
   } catch (err) {
-    log.warn('app icon upload failed — will retry', { err: String(err) });
-    scheduleFlush();
+    if (err instanceof UnauthorizedError) {
+      // Park silently — the queue survives, and the auth listener resumes it.
+      parkedUntilAuth = true;
+      log.info('app icon upload parked until sign-in', { queued: pending.size });
+      return;
+    }
+    log.warn('app icon upload failed — will retry', { err: String(err), retryInMs: retryDelayMs });
+    const delay = retryDelayMs;
+    retryDelayMs = Math.min(retryDelayMs * 2, MAX_RETRY_DELAY_MS);
+    scheduleFlush(delay);
   }
 }

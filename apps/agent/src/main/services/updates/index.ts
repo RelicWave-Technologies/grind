@@ -195,6 +195,12 @@ export function startUpdateService(opts: {
   autoUpdater.autoInstallOnAppQuit = true;
   autoUpdater.allowPrerelease = UPDATE_CHANNEL === 'beta';
   autoUpdater.channel = UPDATE_CHANNEL;
+  // MUST stay after the `channel` assignment: electron-updater's channel setter
+  // unconditionally flips allowDowngrade to true. Left on, a client running a
+  // build newer than the newest PUBLISHED release (a draft release is invisible
+  // to the updater) silently rolls itself backwards seconds after launch —
+  // exactly what happened to the beta.29 testers, who landed back on beta.28.
+  autoUpdater.allowDowngrade = false;
   autoUpdater.logger = {
     info: (msg: unknown) => log.info('electron-updater', { msg: String(msg) }),
     warn: (msg: unknown) => log.warn('electron-updater', { msg: String(msg) }),

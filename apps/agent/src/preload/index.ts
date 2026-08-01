@@ -153,6 +153,7 @@ const api = {
     setFloatingBarVisible: (enabled: boolean): Promise<boolean> => ipcRenderer.invoke('settings:setFloatingBarVisible', enabled),
     resetFloatingBarPosition: (): Promise<void> => ipcRenderer.invoke('settings:resetFloatingBarPosition'),
     openScreenPrefs: (): Promise<void> => ipcRenderer.invoke('settings:openScreenPrefs'),
+    openInputMonitoringPrefs: (): Promise<void> => ipcRenderer.invoke('settings:openInputMonitoringPrefs'),
     openStartupPrefs: (): Promise<void> => ipcRenderer.invoke('settings:openStartupPrefs'),
     onOpen: (cb: () => void): (() => void) => {
       const sub = () => cb();

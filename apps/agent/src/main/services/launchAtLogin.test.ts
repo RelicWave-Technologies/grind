@@ -29,11 +29,19 @@ function settings(patch: Partial<LoginItemSettings> = {}): LoginItemSettings {
   };
 }
 
+/**
+ * A launch item exactly as Electron reports it on Windows.
+ *
+ * `args` defaults to EMPTY on purpose. Electron derives it from Chromium's
+ * CommandLine::GetArgs(), which drops switches — so the `--hidden` we register
+ * with never comes back (electron#31960). Modelling it as ['--hidden'] is what
+ * let a green suite sit on top of a canonical-item check that could never match.
+ */
 function item(patch: Partial<LoginItemSettings['launchItems'][number]> = {}): LoginItemSettings['launchItems'][number] {
   return {
     name: 'Timo',
     path: 'C:\\Users\\Anish\\AppData\\Local\\Programs\\Timo\\Timo.exe',
-    args: ['--hidden'],
+    args: [],
     scope: 'user',
     enabled: true,
     ...patch,

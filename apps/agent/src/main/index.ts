@@ -130,6 +130,26 @@ function showSettingsWindow() {
   broadcast('settings:open:push', {});
 }
 
+/**
+ * Losing the session used to be completely silent: the tray kept ticking, the
+ * capture loop kept queueing, and every upload was rejected — one field log ran
+ * over six hours that way before anyone noticed. Nothing tracked is lost (both
+ * queues are durable and drain after sign-in), but the user has to be told, so
+ * surface the login window plus a notification for when that window lands on a
+ * Space they are not looking at.
+ */
+function announceSignOut(): void {
+  log.warn('signed out — session ended; prompting for sign-in');
+  showMainWindow({ bypassAttention: true });
+  if (!Notification.isSupported()) return;
+  const notification = new Notification({
+    title: 'Timo signed you out',
+    body: 'Sign in again to keep your tracked time syncing.',
+  });
+  notification.on('click', () => showMainWindow({ bypassAttention: true }));
+  notification.show();
+}
+
 function notifyStartupHealth(state: LaunchAtLoginHealth): void {
   if (state.ready || state.state === 'UNAVAILABLE' || state.openedAtLogin || !Notification.isSupported()) return;
   const body = state.state === 'NEEDS_INSTALL'
@@ -172,7 +192,19 @@ app.whenReady().then(async () => {
 
   const launchAtLoginService = getLaunchAtLoginService();
   const openedAtLogin = launchAtLoginService.shouldStartHidden();
+  const launchAtLoginBefore = launchAtLoginService.inspect();
   const launchAtLogin = launchAtLoginService.reconcileOnBoot();
+  if (!launchAtLoginBefore.ready && launchAtLogin.ready) {
+    // Boot reconcile deliberately re-enables a disabled login item: startup is a
+    // deployment requirement for this IT-deployed tracker, and field Windows
+    // machines kept losing it to cleanup tools. But it can also be overriding a
+    // user's own Task Manager choice, so record it rather than changing startup
+    // behaviour silently.
+    log.info('launch at login re-enabled on boot', {
+      previousState: launchAtLoginBefore.state,
+      previousRemediation: launchAtLoginBefore.remediation,
+    });
+  }
 
   mainWindow = ensureMainWindow({ startHidden: openedAtLogin });
   setLarkConnectionHandler(() => showMainWindow());
@@ -347,6 +379,7 @@ app.whenReady().then(async () => {
     } else {
       clearWorkspaceTimeSession();
       resetPermissionSetupOffer();
+      announceSignOut();
     }
   });
   ipcMain.handle('shift:decide', (_e, decision: 'yes' | 'not_yet') => {

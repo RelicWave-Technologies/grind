@@ -81,6 +81,16 @@ export function registerSettingsIpc(): void {
     }
   });
 
+  // Input Monitoring is a SEPARATE TCC service from Accessibility
+  // (kTCCServiceListenEvent vs kTCCServiceAccessibility). macOS exposes no
+  // prompt API for it, so the only thing we can do when the event tap is
+  // refused is take the user straight to the right pane.
+  ipcMain.handle('settings:openInputMonitoringPrefs', async () => {
+    if (process.platform === 'darwin') {
+      await shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent');
+    }
+  });
+
   ipcMain.handle('settings:openStartupPrefs', async () => {
     if (process.platform === 'darwin') {
       await shell.openExternal('x-apple.systempreferences:com.apple.LoginItems-Settings.extension');

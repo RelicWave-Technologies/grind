@@ -59,8 +59,12 @@ mac:
   x64ArchFiles: "**/node_modules/{@img,uiohook-napi,get-windows}/**"
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
-  # Screenshot capture + global input counting need these usage strings so
-  # macOS shows a sensible prompt when it requests TCC permission.
+  # NOTE: neither key below is an Apple-documented Info.plist key — both 404 on
+  # developer.apple.com, and macOS shows FIXED system text for the Screen
+  # Recording and Accessibility TCC dialogs with no purpose string. They are
+  # kept because they are harmless and some inventory tooling reads them, but do
+  # NOT expect these strings to reach the user; the in-app permission prompt is
+  # what actually explains why Timo needs each grant.
   extendInfo:
     NSScreenCaptureUsageDescription: Timo captures periodic screenshots while you are tracking time.
     NSAccessibilityUsageDescription: Timo counts keyboard and mouse activity (never content) while tracking.
