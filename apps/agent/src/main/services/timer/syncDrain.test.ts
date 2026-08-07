@@ -86,4 +86,32 @@ describe('TimerSyncDrain', () => {
 
     expect(flushUnsynced).toHaveBeenCalledTimes(2);
   });
+
+  it('keeps draining while the backlog reports more work', async () => {
+    // flushUnsynced is bounded per call so a long backlog cannot wedge the app.
+    // The drain must therefore keep going instead of waiting a whole interval.
+    const flushUnsynced = vi.fn()
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false);
+    const drain = new TimerSyncDrain({ timer: { flushUnsynced }, isOnline: () => true, intervalMs: 60_000 });
+
+    await drain.drainNow('boot');
+    // The interval is never started here, so this only drives the continuation.
+    await vi.runAllTimersAsync();
+
+    expect(flushUnsynced).toHaveBeenCalledTimes(3);
+    drain.stop();
+  });
+
+  it('stops after a pass that reports an empty backlog', async () => {
+    const flushUnsynced = vi.fn().mockResolvedValue(false);
+    const drain = new TimerSyncDrain({ timer: { flushUnsynced }, isOnline: () => true, intervalMs: 60_000 });
+
+    await drain.drainNow('boot');
+    await vi.runAllTimersAsync();
+
+    expect(flushUnsynced).toHaveBeenCalledTimes(1);
+    drain.stop();
+  });
 });

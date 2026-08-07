@@ -342,6 +342,10 @@ app.whenReady().then(async () => {
   try {
     await initTimerOnBoot();
     startTimerSyncDrain();
+    // Backlog drains in the background. Awaiting it here blocked launch behind
+    // one awaited request per pending entry — the "app hangs on startup / first
+    // sync takes forever" reports.
+    void drainTimerSyncNow('boot');
     void refreshTodayLedger('boot');
   } catch (err) {
     log.warn('initTimerOnBoot failed', { err: String(err) });

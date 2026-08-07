@@ -40,6 +40,10 @@ import type {
  * push. Failures are swallowed here (the entry stays "unsynced" and is retried
  * by `flushUnsynced`), so the timer never blocks on the network.
  */
+// One awaited round-trip per entry, so a pass must stay short enough that the
+// app is never wedged behind it. The drain re-runs until the backlog is empty.
+const FLUSH_BATCH_LIMIT = 25;
+
 export class TimerService {
   private open: TimeEntry | null = null;
   private mutationListener: (() => void) | null = null;
@@ -439,13 +443,28 @@ export class TimerService {
   }
 
   /** Retry pushing any locally-persisted entries that haven't synced yet. */
-  async flushUnsynced(): Promise<void> {
+  /**
+   * Push pending entries to the server, oldest first.
+   *
+   * Bounded per call. Each entry costs one awaited round-trip, so an unbounded
+   * pass over a large backlog (a spell offline, or the signed-out window where
+   * nothing could upload) ran for minutes with no yield. The drain calls this
+   * again on its next tick, so the backlog still clears — it just stops being
+   * one long uninterruptible stretch.
+   *
+   * @returns true when entries remain, so a caller can drain again promptly.
+   */
+  async flushUnsynced(limit = FLUSH_BATCH_LIMIT): Promise<boolean> {
     if (this.backgroundSyncs.size > 0) {
       await Promise.allSettled([...this.backgroundSyncs]);
     }
+    let flushed = 0;
     for (const { entry, syncState } of this.store.getUnsynced()) {
+      if (flushed >= limit) return true;
       await this.trySync(entry, syncState);
+      flushed += 1;
     }
+    return this.store.hasUnsynced();
   }
 
   hasUnsynced(): boolean {
