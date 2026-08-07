@@ -91,6 +91,7 @@ const api = {
     stop: (): Promise<TimerStatus> => ipcRenderer.invoke('timer:stop'),
     resume: (): Promise<TrackingCommandResult> => ipcRenderer.invoke('timer:resume'),
     status: (): Promise<TimerStatus> => ipcRenderer.invoke('timer:status'),
+    lastTaskGuid: (): Promise<string | null> => ipcRenderer.invoke('timer:lastTaskGuid'),
     recoveryNotice: (): Promise<TimerRecoveryNotice | null> => ipcRenderer.invoke('timer:recoveryNotice'),
     dismissRecoveryNotice: (): Promise<{ ok: true }> => ipcRenderer.invoke('timer:dismissRecoveryNotice'),
     today: (): Promise<TodayEntry[]> => ipcRenderer.invoke('timer:today'),

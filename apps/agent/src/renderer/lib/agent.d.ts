@@ -73,6 +73,7 @@ declare global {
         stop: () => Promise<TimerStatus>;
         resume: () => Promise<TrackingCommandResult>;
         status: () => Promise<TimerStatus>;
+        lastTaskGuid: () => Promise<string | null>;
         recoveryNotice: () => Promise<TimerRecoveryNotice | null>;
         dismissRecoveryNotice: () => Promise<{ ok: true }>;
         today: () => Promise<TodayEntry[]>;

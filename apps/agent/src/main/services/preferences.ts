@@ -31,10 +31,19 @@ export interface FloatingBarPreferences {
 
 export interface Preferences {
   floatingBar: FloatingBarPreferences;
+  /**
+   * Lark task guid the user last tracked against, so reopening Timo offers the
+   * work they were actually on. Boot deliberately closes any open entry (see
+   * initTimerOnBoot), so the running timer can never carry this across a
+   * restart — without it the picker fell back to whichever task happened to
+   * sort first, quietly pre-selecting the WRONG task to start next.
+   */
+  lastLarkTaskGuid: string | null;
 }
 
 const DEFAULTS: Preferences = {
   floatingBar: { visible: true, x: null, y: null },
+  lastLarkTaskGuid: null,
 };
 
 let cache: Preferences | null = null;
@@ -55,6 +64,9 @@ function coerce(raw: unknown): Preferences {
       x: typeof fb.x === 'number' && Number.isFinite(fb.x) ? fb.x : null,
       y: typeof fb.y === 'number' && Number.isFinite(fb.y) ? fb.y : null,
     },
+    lastLarkTaskGuid: typeof r.lastLarkTaskGuid === 'string' && r.lastLarkTaskGuid.length > 0
+      ? r.lastLarkTaskGuid
+      : null,
   };
 }
 
@@ -76,7 +88,7 @@ function ensureLoaded(): Preferences {
 export function getPreferences(): Preferences {
   const c = ensureLoaded();
   // Hand back a structural copy so callers can't mutate the cache in place.
-  return { floatingBar: { ...c.floatingBar } };
+  return { floatingBar: { ...c.floatingBar }, lastLarkTaskGuid: c.lastLarkTaskGuid };
 }
 
 /**
@@ -86,6 +98,27 @@ export function getPreferences(): Preferences {
 export function patchFloatingBar(patch: Partial<FloatingBarPreferences>): Preferences {
   const c = ensureLoaded();
   c.floatingBar = { ...c.floatingBar, ...patch };
+  scheduleWrite();
+  const snapshot = getPreferences();
+  for (const fn of listeners) {
+    try {
+      fn(snapshot);
+    } catch (err) {
+      log.warn('preferences: listener threw', { err: String(err) });
+    }
+  }
+  return snapshot;
+}
+
+/**
+ * Remember the task the user is tracking. Called on every start so the choice
+ * survives a quit, a crash, or an update — no-op when it hasn't changed, to
+ * keep the debounced write off the 1s timer tick.
+ */
+export function rememberLastLarkTask(guid: string | null): Preferences {
+  const c = ensureLoaded();
+  if (c.lastLarkTaskGuid === guid) return getPreferences();
+  c.lastLarkTaskGuid = guid;
   scheduleWrite();
   const snapshot = getPreferences();
   for (const fn of listeners) {
