@@ -3,6 +3,7 @@ import request from 'supertest';
 import { prisma } from '@grind/db';
 import { buildApp } from '../src/app';
 import { reconcileExpiredTimersOnce, TIMER_LEASE_MS } from '../src/timeLifecycle';
+import { resolveEffectiveEntrySegmentEnds } from '../src/insights/openSegmentEvidence';
 import { fakeUlid, seedUser } from './helpers';
 
 const app = buildApp();
@@ -304,6 +305,178 @@ describe('timer lifecycle protocol v2', () => {
     });
     expect(response.status).toBe(200);
     expect(response.body.timer).toBeNull();
+  });
+
+  // The reconciler is gated behind TIMO_TIMER_LEASE_RECONCILER_ENABLED, and the
+  // fleet it will first run against is almost entirely beta.28. These three
+  // tests pin down what a beta.28 agent actually experiences, because beta.28
+  // reacts to the disposition alone: `needs_sync` re-drains silently, while
+  // `finalized` stops the timer and shows the user a "Timo stopped this timer"
+  // notice. Getting that split wrong is the difference between an invisible
+  // cleanup and a fleet-wide interruption.
+  it('tells a still-running agent to re-sync rather than stopping its timer', async () => {
+    const user = await seedUser();
+    const startedAt = new Date(Date.now() - 12 * 60_000);
+    const provenAt = new Date(Date.now() - 5 * 60_000);
+    const body = v2Body(startedAt);
+    await request(app).post('/v1/time-entries').set(bearer(user.accessToken)).send(body);
+    await prisma.timeEntry.update({
+      where: { id: body.id },
+      data: { lastProvenAt: provenAt, leaseExpiresAt: new Date(Date.now() - 1_000) },
+    });
+    await reconcileExpiredTimersOnce();
+    await expect(prisma.timeEntry.findUniqueOrThrow({ where: { id: body.id } })).resolves.toMatchObject({
+      closeReason: 'LEASE_EXPIRED',
+    });
+
+    const heartbeat = await request(app).post('/v1/agent/heartbeat').set(bearer(user.accessToken)).send({
+      agentVersion: '0.0.2-beta.28',
+      platform: 'darwin',
+      state: 'RUNNING',
+      trackingProtocolVersion: 2,
+      timerCheckpoint: {
+        entryId: body.id,
+        revision: 1,
+        state: 'RUNNING',
+        observedAt: new Date().toISOString(),
+      },
+    });
+
+    expect(heartbeat.status).toBe(200);
+    expect(heartbeat.body.timer.disposition).toBe('needs_sync');
+    // Ownership is handed straight back, so the agent's next drain reopens the
+    // entry and the person keeps every minute they actually worked.
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: user.userId } })).agentActiveEntryId).toBe(body.id);
+  });
+
+  it('stops a returning agent only at the proven boundary, never at the current time', async () => {
+    const user = await seedUser();
+    const startedAt = new Date(Date.now() - 30 * 60_000);
+    const provenAt = new Date(Date.now() - 20 * 60_000);
+    const body = v2Body(startedAt);
+    await request(app).post('/v1/time-entries').set(bearer(user.accessToken)).send(body);
+    await prisma.timeEntry.update({
+      where: { id: body.id },
+      data: { lastProvenAt: provenAt, leaseExpiresAt: new Date(Date.now() - 1_000) },
+    });
+    await reconcileExpiredTimersOnce();
+
+    // An agent that woke up with nothing newer than the close point — the
+    // abandoned-start shape the reconciler exists to clean up.
+    const heartbeat = await request(app).post('/v1/agent/heartbeat').set(bearer(user.accessToken)).send({
+      agentVersion: '0.0.2-beta.28',
+      platform: 'darwin',
+      state: 'RUNNING',
+      trackingProtocolVersion: 2,
+      timerCheckpoint: {
+        entryId: body.id,
+        revision: 1,
+        state: 'RUNNING',
+        observedAt: new Date(provenAt.getTime() - 60_000).toISOString(),
+      },
+    });
+
+    expect(heartbeat.status).toBe(200);
+    expect(heartbeat.body.timer.disposition).toBe('finalized');
+    // beta.28 calls acceptServerFinalization() with exactly this instant, so the
+    // hours it drops are only the unproven tail — never any proven work.
+    expect(new Date(heartbeat.body.timer.endedAt).getTime()).toBe(provenAt.getTime());
+    expect(heartbeat.body.timer.closeReason).toBe('LEASE_EXPIRED');
+  });
+
+  it('leaves an open entry from a pre-v2 agent completely untouched', async () => {
+    const user = await seedUser();
+    const body = v2Body(new Date(Date.now() - 60 * 60_000));
+    await request(app).post('/v1/time-entries').set(bearer(user.accessToken)).send(body);
+    // Older agents never opt into the lease protocol, so their open entries must
+    // stay open no matter how long ago any stale lease column expired.
+    await prisma.timeEntry.update({
+      where: { id: body.id },
+      data: { trackingProtocolVersion: 1, leaseExpiresAt: new Date(Date.now() - 60 * 60_000) },
+    });
+
+    await reconcileExpiredTimersOnce();
+
+    await expect(prisma.timeEntry.findUniqueOrThrow({ where: { id: body.id } })).resolves.toMatchObject({
+      endedAt: null,
+      closeReason: null,
+    });
+  });
+
+  // The rollout's hard requirement: finalizing an abandoned lease must never
+  // cost anyone a minute. Reports already caps a v2 entry with an expired lease
+  // at `lastProvenAt`, and the reconciler closes at
+  // `max(lastProvenAt, latest segment boundary)` — so the visible total can only
+  // hold steady or grow. These two tests pin that down.
+  it('never reduces the hours a report already shows for the entry it closes', async () => {
+    const user = await seedUser();
+    const startedAt = new Date(Date.now() - 12 * 60_000);
+    const provenAt = new Date(Date.now() - 5 * 60_000);
+    const body = v2Body(startedAt);
+    await request(app).post('/v1/time-entries').set(bearer(user.accessToken)).send(body);
+    await prisma.timeEntry.update({
+      where: { id: body.id },
+      data: { lastProvenAt: provenAt, leaseExpiresAt: new Date(Date.now() - 1_000) },
+    });
+
+    const now = new Date();
+    const before = await prisma.timeEntry.findUniqueOrThrow({
+      where: { id: body.id },
+      include: { segments: { select: { startedAt: true, endedAt: true } } },
+    });
+    const shownBefore = resolveEffectiveEntrySegmentEnds({
+      segments: before.segments,
+      entryEndedAt: before.endedAt,
+      now,
+      lifecycle: before,
+    });
+
+    await reconcileExpiredTimersOnce();
+
+    const after = await prisma.timeEntry.findUniqueOrThrow({
+      where: { id: body.id },
+      include: { segments: { select: { startedAt: true, endedAt: true } } },
+    });
+    const shownAfter = resolveEffectiveEntrySegmentEnds({
+      segments: after.segments,
+      entryEndedAt: after.endedAt,
+      now,
+      lifecycle: after,
+    });
+
+    expect(shownAfter).toHaveLength(shownBefore.length);
+    shownBefore.forEach((endBefore, i) => {
+      const endAfter = shownAfter[i];
+      expect(endAfter).not.toBeNull();
+      expect(endAfter!.getTime()).toBeGreaterThanOrEqual(endBefore!.getTime());
+    });
+    // The reported boundary is exactly where the reconciler closed it.
+    expect(shownAfter[0]!.getTime()).toBe(provenAt.getTime());
+  });
+
+  it('closes entries without deleting a single row of tracked evidence', async () => {
+    const user = await seedUser();
+    const startedAt = new Date(Date.now() - 12 * 60_000);
+    const body = v2Body(startedAt);
+    await request(app).post('/v1/time-entries').set(bearer(user.accessToken)).send(body);
+    await prisma.timeEntry.update({
+      where: { id: body.id },
+      data: { lastProvenAt: new Date(Date.now() - 5 * 60_000), leaseExpiresAt: new Date(Date.now() - 1_000) },
+    });
+
+    const count = async () => ({
+      entries: await prisma.timeEntry.count(),
+      segments: await prisma.timeSegment.count(),
+      samples: await prisma.activitySample.count(),
+      screenshots: await prisma.screenshot.count(),
+    });
+    const before = await count();
+
+    await reconcileExpiredTimersOnce();
+
+    // Finalizing is UPDATE-only: it stamps an end on open rows and never
+    // removes history, so nothing can be lost by turning the worker on.
+    expect(await count()).toEqual(before);
   });
 
   it('rejects protocol-v2 lifecycle metadata on manual entries', async () => {
