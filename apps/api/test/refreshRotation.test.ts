@@ -51,7 +51,7 @@ describe('refresh rotation', () => {
     expect(joined.toLowerCase()).toContain('httponly');
   });
 
-  it('POST /v1/auth/refresh rotates the agent refresh token and treats immediate duplicate as reuse grace', async () => {
+  it('POST /v1/auth/refresh rotates the agent refresh token and replays an immediate duplicate', async () => {
     const { res } = await login();
     const rt = res.body.refreshToken as string;
     const first = await request(app).post('/v1/auth/refresh').send({ refreshToken: rt });
@@ -59,15 +59,33 @@ describe('refresh rotation', () => {
     expect(first.body.accessToken).toBeTruthy();
     expect(first.body.refreshToken).toBeTruthy();
     expect(first.body.refreshToken).not.toBe(rt);
-    // Old token is now spent. An immediate duplicate is rejected as recoverable
-    // reuse grace, so desktop clients can reload the successor already written
-    // by their first refresh instead of logging out.
-    const reuse = await request(app).post('/v1/auth/refresh').send({ refreshToken: rt });
-    expect(reuse.status).toBe(409);
-    expect(reuse.body).toEqual({ error: 'refresh_reuse_grace', reason: 'reuse_grace' });
+    // The old token is spent, but an immediate duplicate inside the grace window
+    // replays the SAME successor rather than answering with a token-less 409.
+    // This is what lets a client whose first response was lost recover.
+    const duplicate = await request(app).post('/v1/auth/refresh').send({ refreshToken: rt });
+    expect(duplicate.status).toBe(200);
+    expect(duplicate.body.refreshToken).toBe(first.body.refreshToken);
 
     const stillLive = await request(app).post('/v1/auth/refresh').send({ refreshToken: first.body.refreshToken });
     expect(stillLive.status).toBe(200);
+  });
+
+  it('a replay does not mint an extra live token in the family', async () => {
+    const { user, res } = await login();
+    const rt = res.body.refreshToken as string;
+    const first = await request(app).post('/v1/auth/refresh').send({ refreshToken: rt });
+    expect(first.status).toBe(200);
+
+    await request(app).post('/v1/auth/refresh').send({ refreshToken: rt });
+
+    // Exactly one live token: the successor. A replayer gets the legitimate
+    // client's token (which dies on the next rotation), never one of its own.
+    const live = await prisma.refreshToken.findMany({
+      where: { userId: user.id, revokedAt: null },
+      select: { tokenHash: true },
+    });
+    expect(live).toHaveLength(1);
+    expect(live[0].tokenHash).toBe(sha256(first.body.refreshToken as string));
   });
 
   it('reuse-detection: replaying a spent token revokes the whole family', async () => {
@@ -117,7 +135,10 @@ describe('refresh rotation', () => {
       .post('/v1/auth/refresh-cookie')
       .set('Cookie', `grind_rt=${rt}`);
     expect(duplicate.status).toBe(200);
-    expect(grindRt(duplicate.headers['set-cookie'] as unknown as string[])).toBeNull();
+    // The duplicate now re-sets the cookie to the same successor the first call
+    // issued, so a tab whose response was lost ends up with a working cookie
+    // instead of silently keeping the spent one.
+    expect(grindRt(duplicate.headers['set-cookie'] as unknown as string[])).toBe(newRt);
 
     const stillLive = await request(app)
       .post('/v1/auth/refresh')

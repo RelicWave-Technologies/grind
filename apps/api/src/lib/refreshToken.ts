@@ -61,6 +61,50 @@ export type RotateResult =
   | { ok: false; reason: 'invalid' | 'expired' | 'reuse' | 'reuse_grace' | 'stale_role' };
 
 /**
+ * Successful rotations, keyed by the hash of the token that was spent, retained
+ * for the reuse-grace window so a replay of that token returns the SAME
+ * successor rather than a bare 409.
+ *
+ * This closes the lost-response hole. The rotation commits inside a
+ * transaction; if the HTTP response is then lost (5xx, dropped socket, client
+ * timeout) the caller still holds a token the server has already revoked, and
+ * has no way to learn the successor. Previously its retry got a token-less 409
+ * during the grace window and a family-nuking 401 immediately after — a single
+ * flaky refresh call forced a re-login ~30s later.
+ *
+ * Returning the same pair is also the tightest option: a replayer gets exactly
+ * what the legitimate client already has (and loses it on the next rotation)
+ * rather than an independent live token of its own.
+ *
+ * In-process only, and deliberately so — no plaintext secret is written at
+ * rest. A cache miss (restart, or a second API instance) simply falls back to
+ * the previous 409 behaviour, so this can only ever help.
+ */
+const recentRotations = new Map<string, { result: RotateResult; cachedAt: number }>();
+
+function rememberRotation(spentTokenHash: string, result: RotateResult, now: number): void {
+  for (const [hash, entry] of recentRotations) {
+    if (now - entry.cachedAt > REFRESH_REUSE_GRACE_MS) recentRotations.delete(hash);
+  }
+  recentRotations.set(spentTokenHash, { result, cachedAt: now });
+}
+
+function replayRotation(spentTokenHash: string, now: number): RotateResult | null {
+  const entry = recentRotations.get(spentTokenHash);
+  if (!entry) return null;
+  if (now - entry.cachedAt > REFRESH_REUSE_GRACE_MS) {
+    recentRotations.delete(spentTokenHash);
+    return null;
+  }
+  return entry.result;
+}
+
+/** Test seam — rotation replay state is process-global. */
+export function __resetRotationReplayCache(): void {
+  recentRotations.clear();
+}
+
+/**
  * Single-use rotation with reuse detection. Validates the presented token,
  * revokes it, and mints a successor in the SAME family — all in one
  * transaction so concurrent rotations can't both succeed.
@@ -72,7 +116,11 @@ export type RotateResult =
  */
 export async function rotateRefreshToken(presented: string): Promise<RotateResult> {
   const tokenHash = sha256(presented);
-  return prisma.$transaction(async (tx): Promise<RotateResult> => {
+  // Set when the result came from the replay cache rather than a fresh rotation,
+  // so repeated replays can't keep pushing the cache entry's expiry forward.
+  let servedFromReplay = false;
+
+  const rotated = await prisma.$transaction(async (tx): Promise<RotateResult> => {
     const row = await tx.refreshToken.findUnique({ where: { tokenHash }, include: { user: true } });
     if (!row) return { ok: false, reason: 'invalid' };
 
@@ -86,7 +134,14 @@ export async function rotateRefreshToken(presented: string): Promise<RotateResul
         select: { id: true },
       });
       if (liveSuccessor && Date.now() - row.revokedAt.getTime() <= REFRESH_REUSE_GRACE_MS) {
-        return { ok: false, reason: 'reuse_grace' };
+        // Already judged benign by the stored revokedAt — the database, not the
+        // cache, decides grace vs. reuse. Hand back the successor this exact
+        // token minted so a caller whose response was lost can recover; if we
+        // no longer hold it, fall back to the old token-less answer.
+        const replayed = replayRotation(tokenHash, Date.now());
+        if (!replayed) return { ok: false, reason: 'reuse_grace' };
+        servedFromReplay = true;
+        return replayed;
       }
       // Reuse detected → nuke the whole family.
       await tx.refreshToken.updateMany({
@@ -121,4 +176,9 @@ export async function rotateRefreshToken(presented: string): Promise<RotateResul
     });
     return { ok: true, accessToken, refreshToken, expiresAt };
   });
+
+  // Only fresh successful rotations are cached: a failure carries no successor
+  // to hand back, and re-caching a replay would roll its expiry forward forever.
+  if (rotated.ok && !servedFromReplay) rememberRotation(tokenHash, rotated, Date.now());
+  return rotated;
 }
