@@ -2,7 +2,7 @@ import { app } from 'electron';
 import type { DesktopPermissionSnapshot, HeartbeatResponse } from '@grind/types';
 import { AGENT_VERSION, HEARTBEAT_INTERVAL_MS } from '../env';
 import { log } from '../logger';
-import { noteServerTime, serverClockOffsetMs } from './serverClock';
+import { hasDeferredServerClockCorrection, noteServerTime, serverClockOffsetMs } from './serverClock';
 import { api, UnauthorizedError } from './apiClient';
 import { isLoggedIn } from './auth';
 import { drainActivityNow } from './activity';
@@ -87,6 +87,11 @@ async function tick(): Promise<void> {
         offsetMs: Math.round(offset),
         previousOffsetMs: Math.round(previousOffset),
         deviceAheadBySec: Math.round(-offset / 1000),
+        // True when a timer is open: the correction is held until it stops so
+        // the entry cannot straddle two clock frames. Worth seeing in logs —
+        // a correction stuck pending across a whole day means the tick that
+        // reports tracking state has stopped running.
+        correctionHeldForRunningTimer: hasDeferredServerClockCorrection(),
       });
     }
     log.debug('heartbeat ok', { serverTime: res.serverTime, configVersion: res.configVersion });

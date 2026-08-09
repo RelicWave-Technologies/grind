@@ -4,6 +4,7 @@ import { createTray, setTrayTitle } from './tray';
 import { createMainWindow } from './window';
 import { registerIpc } from './ipc';
 import { sendHeartbeatNow, startHeartbeatIfAuthed } from './services/heartbeat';
+import { setServerClockTrackingActive } from './services/serverClock';
 import {
   applyTodayLedgerMode,
   drainTimerSyncNow,
@@ -406,6 +407,10 @@ app.whenReady().then(async () => {
       refreshUpdateInstallability();
       const running = s.state === 'RUNNING';
       const accruing = running && !s.paused;
+      // Gate clock corrections on an open entry, not on accrual: stepping the
+      // clock between two segments of the SAME entry would leave the entry
+      // straddling two frames and could invert a segment boundary.
+      setServerClockTrackingActive(running);
       setActivityRecording(accruing, running ? s.entryId : null);
       if (tray) setTrayTitle(tray, running ? fmtShort(s.workedMs) : '');
       syncFloatingBar(s);
