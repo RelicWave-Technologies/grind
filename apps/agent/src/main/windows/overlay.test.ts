@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { beforeEach, describe, it, expect, vi } from 'vitest';
 import {
   assertOverlayFloat,
   center,
@@ -8,13 +8,15 @@ import {
   type Rect,
 } from './overlay';
 
+beforeEach(() => vi.clearAllMocks());
+
 const SIZE = { width: 320, height: 168 };
 const PRIMARY: Rect = { x: 0, y: 0, width: 1440, height: 900 };
 // A second monitor to the right, with a non-zero origin.
 const SECOND: Rect = { x: 1440, y: 0, width: 1920, height: 1080 };
 
 describe('assertOverlayFloat', () => {
-  it('uses Electron fullscreen-Space registration without bypassing its macOS transition', () => {
+  it('registers overlays across fullscreen Spaces without changing process type', () => {
     const win = {
       isDestroyed: vi.fn(() => false),
       setAlwaysOnTop: vi.fn(),
@@ -29,7 +31,7 @@ describe('assertOverlayFloat', () => {
     expect(win.setVisibleOnAllWorkspaces).toHaveBeenCalledOnce();
     expect(win.setVisibleOnAllWorkspaces).toHaveBeenCalledWith(
       true,
-      { visibleOnFullScreen: true },
+      { visibleOnFullScreen: true, skipTransformProcessType: true },
     );
   });
 
@@ -44,6 +46,10 @@ describe('assertOverlayFloat', () => {
     assertOverlayFloat(win, { refreshWorkspaceVisibility: true });
 
     expect(win.setVisibleOnAllWorkspaces).toHaveBeenCalledTimes(2);
+    expect(win.setVisibleOnAllWorkspaces).toHaveBeenLastCalledWith(
+      true,
+      { visibleOnFullScreen: true, skipTransformProcessType: true },
+    );
   });
 });
 

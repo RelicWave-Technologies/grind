@@ -29,8 +29,15 @@ export default function AwayPrompt({ prompt }: { prompt: Extract<AttentionPrompt
         <div className="rtw-title">
           <div className="h3">Welcome back</div>
           <div className="rtw-sub callout secondary">
-            Tracking stopped when {reasonText}{when}. Resume{task ? ` “${task.summary}”` : ' tracking'}?
+            Tracking stopped when {reasonText}{when}.
           </div>
+          {task ? (
+            <div className="rtw-task callout" title={task.summary}>
+              Resume <span className="rtw-task-name">{task.summary}</span>?
+            </div>
+          ) : (
+            <div className="rtw-task callout">Resume tracking?</div>
+          )}
         </div>
       </div>
       <div className="rtw-actions">

@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ActivityCaptureStatus } from './activity';
-import { createTrackingReadinessService, TrackingBlockedError } from './trackingReadiness';
+import {
+  createTrackingReadinessService,
+  isInconclusiveScreenCapture,
+  TrackingBlockedError,
+} from './trackingReadiness';
 import type { CaptureHealth, ScreenStatus } from './permissions';
 
 function accessibility(patch: Partial<ActivityCaptureStatus> = {}): ActivityCaptureStatus {
@@ -107,5 +111,36 @@ describe('TrackingReadinessService', () => {
       accessibility: 'NOT_REQUIRED',
       blockingCapabilities: [],
     });
+  });
+});
+
+describe('isInconclusiveScreenCapture', () => {
+  it('holds the verdict for empty captures while the user is not active', async () => {
+    const { service } = setup({ screenHealth: 'empty', probeHealth: 'empty' });
+    const inspection = await service.inspect({ verifyScreen: true });
+
+    expect(inspection.readiness.blockingCapabilities).toEqual(['SCREEN_RECORDING']);
+    expect(isInconclusiveScreenCapture(inspection, 'idle')).toBe(true);
+    expect(isInconclusiveScreenCapture(inspection, 'locked')).toBe(true);
+    expect(isInconclusiveScreenCapture(inspection, 'unknown')).toBe(true);
+  });
+
+  it('treats empty captures during active use as a real failure', async () => {
+    const { service } = setup({ screenHealth: 'empty', probeHealth: 'empty' });
+    const inspection = await service.inspect({ verifyScreen: true });
+
+    expect(isInconclusiveScreenCapture(inspection, 'active')).toBe(false);
+  });
+
+  it('never masks a revoked permission or an accessibility failure', async () => {
+    const denied = setup({ screenStatus: 'denied' });
+    expect(isInconclusiveScreenCapture(await denied.service.inspect(), 'idle')).toBe(false);
+
+    const twoBlockers = setup({
+      screenHealth: 'empty',
+      probeHealth: 'empty',
+      accessibility: accessibility({ trusted: false }),
+    });
+    expect(isInconclusiveScreenCapture(await twoBlockers.service.inspect({ verifyScreen: true }), 'idle')).toBe(false);
   });
 });

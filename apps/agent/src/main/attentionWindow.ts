@@ -12,10 +12,13 @@ import {
 const SIZES = {
   IDLE_WARNING: { width: 340, height: 280 },
   IDLE: { width: 340, height: 280 },
-  AWAY: { width: 320, height: 176 },
+  AWAY: { width: 360, height: 222 },
   PERMISSION: { width: 480, height: 332 },
 } as const;
-const RAISE_RETRY_MS = [100, 400] as const;
+// Fullscreen and Space transitions can settle after the first compositor pass.
+// Keep recovery bounded and non-activating: the prompt stays visible without
+// repeatedly stealing focus from the app the person was using.
+const RAISE_RETRY_MS = [100, 400, 1000] as const;
 
 let win: BrowserWindow | null = null;
 let loaded = false;
@@ -29,7 +32,6 @@ function ensure(): BrowserWindow {
     ...SIZES.PERMISSION,
     hash: 'attention',
     roundedCorners: true,
-    activation: 'interactive',
     registerForReassert: false,
   });
   win.webContents.on('did-finish-load', () => {
@@ -68,11 +70,23 @@ function applyBounds(window: BrowserWindow, prompt: Exclude<AttentionPrompt, { k
 }
 
 function raise(window: BrowserWindow, options: OverlayFloatOptions = {}): void {
-  // Visibility and activation are separate: keep the prompt above other apps
-  // without interrupting the user's current keyboard or mouse work.
   assertOverlayFloat(window, options);
-  if (!window.isVisible()) window.showInactive();
+  if (process.platform === 'darwin') {
+    // Never activate the app to present a prompt: activating a regular app
+    // while the user is inside another app's fullscreen Space makes macOS
+    // switch Spaces — the prompt would yank the user back to the desktop.
+    // The window is a non-activating NSPanel that joins all Spaces with
+    // fullScreenAuxiliary, so an inactive show lands it on the Space the
+    // user is currently looking at, and focus() makes the panel key without
+    // activating Timo.
+    window.showInactive();
+    window.moveTop();
+    window.focus();
+    return;
+  }
+  window.show();
   window.moveTop();
+  window.focus();
 }
 
 function presentCurrent(): void {
@@ -109,7 +123,9 @@ export const attentionPresenter = {
     presentationGeneration += 1;
     current = { kind: 'NONE' };
     publish();
-    if (win && !win.isDestroyed() && win.isVisible()) win.hide();
+    if (win && !win.isDestroyed()) {
+      if (win.isVisible()) win.hide();
+    }
   },
   yieldToSystemSettings(prompt: Extract<AttentionPrompt, { kind: 'PERMISSION' }>): void {
     presentationGeneration += 1;

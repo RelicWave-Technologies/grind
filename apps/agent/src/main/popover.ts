@@ -1,12 +1,12 @@
 import { screen } from 'electron';
 import type { BrowserWindow, Rectangle } from 'electron';
-import { createOverlayWindow, trayPopoverPoint } from './windows/overlay';
+import { assertOverlayFloat, createOverlayWindow, trayPopoverPoint } from './windows/overlay';
 
 /**
- * Tray popover — anchored under the menu-bar icon. Closes on blur. Unlike the
- * other overlays it is deliberately NOT forced to all-Spaces / over-fullscreen:
- * it belongs to the tray, which lives on the menu-bar display, and should
- * dismiss when the user clicks away.
+ * Tray popover — anchored under the menu-bar icon. Floats like every other
+ * overlay (above fullscreen apps, on every Space) so a tray click always
+ * lands it on the screen the user is looking at, but it stays transient:
+ * it dismisses on blur when the user clicks away.
  */
 
 let win: BrowserWindow | null = null;
@@ -32,6 +32,7 @@ export function togglePopover(trayBounds: Rectangle): void {
   const bounds = w.getBounds();
   const point = trayPopoverPoint(trayBounds, workArea, bounds);
   w.setPosition(point.x, point.y, false);
+  assertOverlayFloat(w); // re-assert on every show — macOS drops the flags
   w.show();
   w.focus();
 }

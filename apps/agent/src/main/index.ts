@@ -27,6 +27,7 @@ import { registerPowerEvents } from './services/power';
 import { IdleMonitor } from './services/idle/monitor';
 import { dismissFloatingBar, reclampFloatingBar, syncFloatingBar } from './floating';
 import { reassertAllOverlays } from './windows/overlay';
+import { ensureRegularMacApplication } from './windows/macAppIdentity';
 import { togglePopover, hidePopover } from './popover';
 import { reassertAttentionWindow } from './attentionWindow';
 import { getTrackingAttentionCoordinator } from './services/trackingAttention';
@@ -171,6 +172,9 @@ function notifyStartupHealth(state: LaunchAtLoginHealth): void {
 app.whenReady().then(async () => {
   // Before any window exists, so the stray Windows menu bar never paints.
   installApplicationMenu();
+  // Timo has a Dock icon, a main window, and normal Cmd+Tab behavior. Overlay
+  // setup must never leave the whole app in macOS's UIElement utility mode.
+  ensureRegularMacApplication();
 
   // Recover a session stranded by a prior app identity (Grind->Timo) BEFORE any
   // token read. Windows-only: that's where the productName-based userData dir
@@ -200,6 +204,8 @@ app.whenReady().then(async () => {
   const openedAtLogin = launchAtLoginService.shouldStartHidden();
   const launchAtLoginBefore = launchAtLoginService.inspect();
   const launchAtLogin = launchAtLoginService.reconcileOnBoot();
+  // The two outcomes of the boot reconcile are logged separately: they are not
+  // alternatives, and either can happen on a given boot.
   if (!launchAtLoginBefore.ready && launchAtLogin.ready) {
     // Boot reconcile deliberately re-enables a disabled login item: startup is a
     // deployment requirement for this IT-deployed tracker, and field Windows
@@ -210,6 +216,27 @@ app.whenReady().then(async () => {
       previousState: launchAtLoginBefore.state,
       previousRemediation: launchAtLoginBefore.remediation,
     });
+  }
+  if (!launchAtLogin.ready && launchAtLogin.required) {
+    // Field-diagnosable startup failures: capture the OS's own view of the
+    // login items (registry Run/StartupApproved on Windows, SMAppService on
+    // macOS) so a "doesn't start at login" report is solvable from this log.
+    try {
+      const raw = app.getLoginItemSettings();
+      log.warn('launch at login unhealthy after boot reconcile', {
+        state: launchAtLogin.state,
+        remediation: launchAtLogin.remediation,
+        openAtLogin: raw.openAtLogin,
+        executableWillLaunchAtLogin: raw.executableWillLaunchAtLogin,
+        launchItems: raw.launchItems,
+      });
+    } catch (err) {
+      log.warn('launch at login unhealthy after boot reconcile', {
+        state: launchAtLogin.state,
+        remediation: launchAtLogin.remediation,
+        err: String(err),
+      });
+    }
   }
 
   mainWindow = ensureMainWindow({ startHidden: openedAtLogin });
