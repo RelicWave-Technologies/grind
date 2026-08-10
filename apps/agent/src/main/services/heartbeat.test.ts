@@ -68,6 +68,11 @@ vi.mock('./capture', () => ({
   getScreenHealth: mocks.getScreenHealth,
 }));
 
+// `trackingReadiness` reaches for `probeScreenCapture` through './capture/capture',
+// a different specifier from the './capture' mock below, so without this the real
+// module loads and pulls in sharp — which then tries to resolve a native binary
+// for the pinned platform rather than the runner's.
+vi.mock('./capture/capture', () => ({ probeScreenCapture: vi.fn(async () => true) }));
 vi.mock('./permissions', () => ({
   screenStatus: mocks.screenStatus,
   screenUiState: mocks.screenUiState,
