@@ -12,7 +12,7 @@ import type { ReactNode } from 'react';
  * with the build it describes. Motion is CSS-first and honors
  * prefers-reduced-motion. The animated release cards are drawn from scratch
  * by .context/create_timo_release_cards.py and, for the latest block,
- * .context/create_timo_card_beta30.py.
+ * .context/create_timo_card_beta31.py.
  */
 
 type Tag = 'new' | 'improved' | 'fixed' | 'internal';
@@ -48,8 +48,8 @@ function Card({ src, alt, w, h }: { src: string; alt: string; w: number; h: numb
 }
 
 const LATEST: Release = {
-  id: 'beta-30',
-  version: 'beta.30',
+  id: 'beta-31',
+  version: 'beta.31',
   name: 'the honest clock update',
   meta: 'AUG 10, 2026 · MAC + WINDOWS',
   changes: [
@@ -277,7 +277,7 @@ const FOUNDATION: Array<[string, ReactNode]> = [
 ];
 
 const MARQUEE = [
-  'BETA.30 — HONEST CLOCK',
+  'BETA.31 — HONEST CLOCK',
   'BETA.28 — RELIABILITY',
   'BETA.27 — ZERO LOSS',
   'BETA.26 — UNSHIPPED',
@@ -393,7 +393,7 @@ export function ChangelogScreen() {
             <p className="cl-eyebrow">TIMO — RELEASE NOTES</p>
             <h1 className="cl-display-xl">Changelog</h1>
             <p className="cl-hero-lead">
-              Every Timo release, in one place. Thirty builds in
+              Every Timo release, in one place. Thirty-one builds in
               forty-nine days — some added features, some fixed what the
               features broke. All of it's here.
             </p>
@@ -430,7 +430,7 @@ export function ChangelogScreen() {
               <h2 className="cl-headline">{LATEST.version} — {LATEST.name}</h2>
               <p className="cl-caption cl-block-meta">{LATEST.meta}</p>
               <ChangeList changes={LATEST.changes} />
-              <Card src="/brand/timo-card-beta30.gif?v=1" alt="Animated scene: two timelines of the same shift — the old one loses a stretch of minutes when the clock is corrected, the new one runs unbroken and keeps them" w={520} h={210} />
+              <Card src="/brand/timo-card-beta31.gif?v=1" alt="Animated scene: two timelines of the same shift — the old one loses a stretch of minutes when the clock is corrected, the new one runs unbroken and keeps them" w={520} h={210} />
               <p className="cl-block-note">
                 You already have this one — Timo updates itself. It checks after
                 launch, and again (quietly) when you open Settings. That's the
