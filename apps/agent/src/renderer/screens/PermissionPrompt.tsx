@@ -4,30 +4,13 @@ import type { CapabilityState } from '../../shared/tracking';
 import type { AttentionPrompt } from '../../shared/attention';
 import timoMascot from '../assets/timo-mascot.svg';
 
-function actionFor(state: CapabilityState): 'enable' | 'settings' | 'restart' | null {
-  if (state === 'NEEDS_GRANT') return 'enable';
-  if (state === 'NEEDS_SETTINGS') return 'settings';
-  if (state === 'NEEDS_RESTART' || state === 'FAILED') return 'restart';
-  return null;
-}
+import { actionFor, isReady, statusText, type Capability } from '../lib/permissionUi';
 
-function isReady(state: CapabilityState): boolean {
-  return state === 'READY' || state === 'NOT_REQUIRED';
-}
-
-function statusText(state: CapabilityState): string {
-  if (state === 'READY' || state === 'NOT_REQUIRED') return 'Ready';
-  if (state === 'NEEDS_GRANT') return 'Permission required';
-  if (state === 'NEEDS_SETTINGS') return 'Enable in System Settings';
-  if (state === 'NEEDS_RESTART') return 'Restart Timo to apply';
-  return 'Permission service needs restart';
-}
-
-function StatusLine({ state }: { state: CapabilityState }) {
+function StatusLine({ state, capability }: { state: CapabilityState; capability: Capability }) {
   return isReady(state) ? (
-    <div className="set-ok"><CheckCircle2 size={13} /> {statusText(state)}</div>
+    <div className="set-ok"><CheckCircle2 size={13} /> {statusText(state, capability)}</div>
   ) : (
-    <div className="set-warn"><AlertCircle size={13} /> {statusText(state)}</div>
+    <div className="set-warn"><AlertCircle size={13} /> {statusText(state, capability)}</div>
   );
 }
 
@@ -54,8 +37,8 @@ export default function PermissionPrompt({ prompt }: { prompt: Extract<Attention
   const state = readiness.data;
   const screenState = state?.screenRecording ?? 'NEEDS_GRANT';
   const accessibilityState = state?.accessibility ?? 'NEEDS_GRANT';
-  const screenAction = actionFor(screenState);
-  const accessibilityAction = actionFor(accessibilityState);
+  const screenAction = actionFor(screenState, 'screen');
+  const accessibilityAction = actionFor(accessibilityState, 'accessibility');
   const ready = state?.ready === true;
   const busy = requestScreen.isPending || requestAccessibility.isPending || retry.isPending;
 
@@ -75,6 +58,8 @@ export default function PermissionPrompt({ prompt }: { prompt: Extract<Attention
   const runAccessibilityAction = async () => {
     if (accessibilityAction === 'enable' || accessibilityAction === 'settings') {
       if (await yieldToSettings()) requestAccessibility.mutate();
+    } else if (accessibilityAction === 'input-monitoring') {
+      if (await yieldToSettings()) await window.agent.settings.openInputMonitoringPrefs();
     } else if (accessibilityAction === 'restart') {
       void window.agent.app.relaunch();
     }
@@ -100,7 +85,7 @@ export default function PermissionPrompt({ prompt }: { prompt: Extract<Attention
           </span>
           <div className="perm-main">
             <div className="set-title">Screen Recording</div>
-            <StatusLine state={screenState} />
+            <StatusLine state={screenState} capability="screen" />
           </div>
           {screenAction ? (
             <button className="btn no-drag" onClick={runScreenAction} disabled={busy}>
@@ -115,11 +100,13 @@ export default function PermissionPrompt({ prompt }: { prompt: Extract<Attention
           </span>
           <div className="perm-main">
             <div className="set-title">Accessibility</div>
-            <StatusLine state={accessibilityState} />
+            <StatusLine state={accessibilityState} capability="accessibility" />
           </div>
           {accessibilityAction ? (
             <button className="btn no-drag" onClick={runAccessibilityAction} disabled={busy}>
-              {accessibilityAction === 'enable' ? 'Enable' : accessibilityAction === 'settings' ? 'Open Settings' : <><RotateCcw size={14} /> Restart</>}
+              {accessibilityAction === 'enable' ? 'Enable'
+                : accessibilityAction === 'settings' || accessibilityAction === 'input-monitoring' ? 'Open Settings'
+                : <><RotateCcw size={14} /> Restart</>}
             </button>
           ) : null}
         </div>

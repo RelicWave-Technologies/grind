@@ -72,6 +72,15 @@ export default function Today() {
       if (!alive) return;
       setTimer(s);
       rememberRunningTask(s);
+      // Boot closes any open entry, so status is never RUNNING here and
+      // rememberRunningTask can't fire. Fall back to the task last tracked so
+      // reopening Timo offers the work the user was actually on.
+      if (s.state !== 'RUNNING') {
+        void window.agent.timer.lastTaskGuid().then((guid) => {
+          if (!alive || !guid) return;
+          setSelectedTaskGuid((current) => (current === '' ? guid : current));
+        });
+      }
     });
     const off = window.agent.timer.onStatusChange((s) => {
       setTimer(s);
@@ -151,10 +160,14 @@ export default function Today() {
   const canUseSavedTasks = larkOffline && tasks.length > 0;
   const taskCatalogAvailable = larkConnected || canUseSavedTasks;
 
-  const allOpenTasks = sortTasks(tasks.filter((t) => !t.completed), running?.larkTaskGuid ?? null);
+  // Pin whatever is selected, not just what is running — after a restart the
+  // restored task must surface at the top instead of being buried in the list.
+  // (Popover already sorts this way.)
+  const pinnedTaskGuid = (running?.larkTaskGuid ?? selectedTaskGuid) || null;
+  const allOpenTasks = sortTasks(tasks.filter((t) => !t.completed), pinnedTaskGuid);
   const q = query.trim().toLowerCase();
   const filtered = tasks.filter((t) => !t.completed && (q === '' || t.summary.toLowerCase().includes(q)));
-  const openTasks = sortTasks(filtered, running?.larkTaskGuid ?? null);
+  const openTasks = sortTasks(filtered, pinnedTaskGuid);
   const totalOpen = allOpenTasks.length;
   const collapsed = !showAll && q === '' && openTasks.length > TASK_COLLAPSE;
   const shownTasks = collapsed ? openTasks.slice(0, TASK_COLLAPSE) : openTasks;

@@ -4,6 +4,7 @@ import { createTray, setTrayTitle } from './tray';
 import { createMainWindow } from './window';
 import { registerIpc } from './ipc';
 import { sendHeartbeatNow, startHeartbeatIfAuthed } from './services/heartbeat';
+import { setServerClockTrackingActive } from './services/serverClock';
 import {
   applyTodayLedgerMode,
   drainTimerSyncNow,
@@ -51,6 +52,8 @@ import { getLaunchAtLoginService, isHiddenLaunch } from './services/launchAtLogi
 import type { LaunchAtLoginHealth } from '../shared/launchAtLogin';
 import { migrateLegacyUserData } from './services/legacyMigration';
 import { broadcast } from './broadcast';
+import { readyToWorkReason } from './readyToWork';
+import { installApplicationMenu } from './applicationMenu';
 import {
   offerPermissionStart,
   offerPermissionSetupOnStartup,
@@ -130,6 +133,26 @@ function showSettingsWindow() {
   broadcast('settings:open:push', {});
 }
 
+/**
+ * Losing the session used to be completely silent: the tray kept ticking, the
+ * capture loop kept queueing, and every upload was rejected — one field log ran
+ * over six hours that way before anyone noticed. Nothing tracked is lost (both
+ * queues are durable and drain after sign-in), but the user has to be told, so
+ * surface the login window plus a notification for when that window lands on a
+ * Space they are not looking at.
+ */
+function announceSignOut(): void {
+  log.warn('signed out — session ended; prompting for sign-in');
+  showMainWindow({ bypassAttention: true });
+  if (!Notification.isSupported()) return;
+  const notification = new Notification({
+    title: 'Timo signed you out',
+    body: 'Sign in again to keep your tracked time syncing.',
+  });
+  notification.on('click', () => showMainWindow({ bypassAttention: true }));
+  notification.show();
+}
+
 function notifyStartupHealth(state: LaunchAtLoginHealth): void {
   if (state.ready || state.state === 'UNAVAILABLE' || state.openedAtLogin || !Notification.isSupported()) return;
   const body = state.state === 'NEEDS_INSTALL'
@@ -146,6 +169,9 @@ function notifyStartupHealth(state: LaunchAtLoginHealth): void {
 }
 
 app.whenReady().then(async () => {
+  // Before any window exists, so the stray Windows menu bar never paints.
+  installApplicationMenu();
+
   // Recover a session stranded by a prior app identity (Grind->Timo) BEFORE any
   // token read. Windows-only: that's where the productName-based userData dir
   // moved and orphaned tokens.bin.
@@ -172,7 +198,19 @@ app.whenReady().then(async () => {
 
   const launchAtLoginService = getLaunchAtLoginService();
   const openedAtLogin = launchAtLoginService.shouldStartHidden();
+  const launchAtLoginBefore = launchAtLoginService.inspect();
   const launchAtLogin = launchAtLoginService.reconcileOnBoot();
+  if (!launchAtLoginBefore.ready && launchAtLogin.ready) {
+    // Boot reconcile deliberately re-enables a disabled login item: startup is a
+    // deployment requirement for this IT-deployed tracker, and field Windows
+    // machines kept losing it to cleanup tools. But it can also be overriding a
+    // user's own Task Manager choice, so record it rather than changing startup
+    // behaviour silently.
+    log.info('launch at login re-enabled on boot', {
+      previousState: launchAtLoginBefore.state,
+      previousRemediation: launchAtLoginBefore.remediation,
+    });
+  }
 
   mainWindow = ensureMainWindow({ startHidden: openedAtLogin });
   setLarkConnectionHandler(() => showMainWindow());
@@ -310,6 +348,10 @@ app.whenReady().then(async () => {
   try {
     await initTimerOnBoot();
     startTimerSyncDrain();
+    // Backlog drains in the background. Awaiting it here blocked launch behind
+    // one awaited request per pending entry — the "app hangs on startup / first
+    // sync takes forever" reports.
+    void drainTimerSyncNow('boot');
     void refreshTodayLedger('boot');
   } catch (err) {
     log.warn('initTimerOnBoot failed', { err: String(err) });
@@ -347,8 +389,10 @@ app.whenReady().then(async () => {
     } else {
       clearWorkspaceTimeSession();
       resetPermissionSetupOffer();
+      announceSignOut();
     }
   });
+  ipcMain.handle('shift:promptReason', () => readyToWorkReason());
   ipcMain.handle('shift:decide', (_e, decision: 'yes' | 'not_yet') => {
     shiftMonitor.onUserDecision(decision);
   });
@@ -369,6 +413,10 @@ app.whenReady().then(async () => {
       refreshUpdateInstallability();
       const running = s.state === 'RUNNING';
       const accruing = running && !s.paused;
+      // Gate clock corrections on an open entry, not on accrual: stepping the
+      // clock between two segments of the SAME entry would leave the entry
+      // straddling two frames and could invert a segment boundary.
+      setServerClockTrackingActive(running);
       setActivityRecording(accruing, running ? s.entryId : null);
       if (tray) setTrayTitle(tray, running ? fmtShort(s.workedMs) : '');
       syncFloatingBar(s);

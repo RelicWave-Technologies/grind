@@ -1,4 +1,21 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+/**
+ * These exercise macOS-only behaviour. `trackingPermissionMonitor` returns
+ * immediately when `process.platform !== 'darwin'`, and `trackingReadiness`
+ * builds its deps from `process.platform`, so on a Linux CI runner the code
+ * under test never does anything and the assertions fail on the runner's OS
+ * rather than on the behaviour. Pin the platform so the test means the same
+ * thing everywhere. (This is why agent CI has been red since 19 July.)
+ */
+const realPlatform = process.platform;
+vi.hoisted(() => {
+  Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
+});
+afterAll(() => {
+  Object.defineProperty(process, 'platform', { value: realPlatform, configurable: true });
+});
+
 
 const mocks = vi.hoisted(() => ({
   status: vi.fn(),

@@ -19,6 +19,16 @@ export type ScreenUiState = 'ok' | 'needs-grant' | 'needs-settings' | 'needs-res
  * required for screen capture to actually start working. The `needs-restart`
  * UI state + relaunch flow handle this.
  */
+/**
+ * macOS 15 (Sequoia) re-asks. Any app that captures the screen now gets a
+ * recurring TCC prompt — weekly at 15.0, relaxed to roughly monthly from 15.1 —
+ * whether or not ScreenCaptureKit is used. If the user dismisses or denies it,
+ * capture returns blank frames exactly like a manual revocation, which is why
+ * the monitor requires several consecutive unhealthy checks (plus an idle test)
+ * before pausing tracking. Suppressing the prompt needs
+ * com.apple.developer.persistent-content-capture, a managed entitlement Apple
+ * neither documents nor offers a public request form for.
+ */
 export function screenStatus(): ScreenStatus {
   if (process.platform !== 'darwin') return 'granted';
   try {
@@ -33,7 +43,27 @@ export function hasScreenAccess(): boolean {
 }
 
 /**
- * Accessibility / Input Monitoring trust — required for global keyboard & mouse
+ * Accessibility trust (macOS) — required for the global keyboard & mouse hook.
+ *
+ * This checks Accessibility (kTCCServiceAccessibility) specifically, which is
+ * the right gate for how libuiohook works: it creates an ACTIVE tap
+ * (kCGEventTapOptionDefault) and gates itself on AXIsProcessTrustedWithOptions.
+ *
+ * Do not assume it covers Input Monitoring. kTCCServiceAccessibility,
+ * kTCCServiceListenEvent (Input Monitoring) and kTCCServicePostEvent are three
+ * independent TCC rows, and Accessibility does not imply Input Monitoring.
+ * Electron exposes no API for the Input Monitoring row, so when a machine does
+ * demand it the only signal is uIOhook.start() failing while
+ * isTrustedAccessibilityClient() still says true — surfaced as FAILED (not
+ * NEEDS_RESTART), with UI copy naming Input Monitoring, because relaunching
+ * cannot supply a grant.
+ *
+ * Windows and Linux need no equivalent grant. One known Windows limitation: a
+ * non-elevated process receives no input events while a UAC-elevated window is
+ * focused, so counts under-report for admin apps. Fixing that would mean
+ * running Timo elevated, which we will not do.
+ *
+ * Original note — Accessibility / Input Monitoring trust — required for global keyboard & mouse
  * counting via uiohook (uIOhook.start() crashes without it). `prompt=true` shows
  * the system dialog. Non-macOS platforms don't gate this.
  */

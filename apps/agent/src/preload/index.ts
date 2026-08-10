@@ -8,7 +8,7 @@ import type {
 import type { LaunchAtLoginHealth, MoveToApplicationsResult } from '../shared/launchAtLogin';
 import type { AttentionAction, AttentionActionResult, AttentionPrompt } from '../shared/attention';
 import type { WorkspaceTimeContext } from '../shared/workspaceTime';
-import type { TodayShiftWindow } from '../shared/shift';
+import type { ShiftPromptReason, TodayShiftWindow } from '../shared/shift';
 
 type AuthStatus = 'loggedIn' | 'loggedOut';
 type LarkOutcome = { kind: 'pending' } | { kind: 'error'; reason: string };
@@ -91,6 +91,7 @@ const api = {
     stop: (): Promise<TimerStatus> => ipcRenderer.invoke('timer:stop'),
     resume: (): Promise<TrackingCommandResult> => ipcRenderer.invoke('timer:resume'),
     status: (): Promise<TimerStatus> => ipcRenderer.invoke('timer:status'),
+    lastTaskGuid: (): Promise<string | null> => ipcRenderer.invoke('timer:lastTaskGuid'),
     recoveryNotice: (): Promise<TimerRecoveryNotice | null> => ipcRenderer.invoke('timer:recoveryNotice'),
     dismissRecoveryNotice: (): Promise<{ ok: true }> => ipcRenderer.invoke('timer:dismissRecoveryNotice'),
     today: (): Promise<TodayEntry[]> => ipcRenderer.invoke('timer:today'),
@@ -122,6 +123,12 @@ const api = {
     decide: (decision: 'yes' | 'not_yet'): Promise<void> => ipcRenderer.invoke('shift:decide', decision),
     refresh: (): Promise<void> => ipcRenderer.invoke('shift:refresh'),
     today: (): Promise<TodayShiftWindow | null> => ipcRenderer.invoke('shift:today'),
+    promptReason: (): Promise<ShiftPromptReason> => ipcRenderer.invoke('shift:promptReason'),
+    onPromptReason: (cb: (reason: ShiftPromptReason) => void): (() => void) => {
+      const handler = (_e: unknown, reason: ShiftPromptReason) => cb(reason);
+      ipcRenderer.on('shift:promptReason', handler);
+      return () => ipcRenderer.removeListener('shift:promptReason', handler);
+    },
   },
   screenshots: {
     recent: (limit?: number): Promise<ScreenshotItem[]> => ipcRenderer.invoke('screenshots:recent', limit),
@@ -153,6 +160,7 @@ const api = {
     setFloatingBarVisible: (enabled: boolean): Promise<boolean> => ipcRenderer.invoke('settings:setFloatingBarVisible', enabled),
     resetFloatingBarPosition: (): Promise<void> => ipcRenderer.invoke('settings:resetFloatingBarPosition'),
     openScreenPrefs: (): Promise<void> => ipcRenderer.invoke('settings:openScreenPrefs'),
+    openInputMonitoringPrefs: (): Promise<void> => ipcRenderer.invoke('settings:openInputMonitoringPrefs'),
     openStartupPrefs: (): Promise<void> => ipcRenderer.invoke('settings:openStartupPrefs'),
     onOpen: (cb: () => void): (() => void) => {
       const sub = () => cb();

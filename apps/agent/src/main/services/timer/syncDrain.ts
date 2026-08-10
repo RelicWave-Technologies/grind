@@ -1,6 +1,6 @@
 import type { TimerService } from './timerService';
 
-export type TimerSyncDrainReason = 'interval' | 'auth' | 'heartbeat' | 'wake' | 'manual';
+export type TimerSyncDrainReason = 'interval' | 'auth' | 'heartbeat' | 'wake' | 'manual' | 'boot';
 
 export const DEFAULT_TIMER_SYNC_DRAIN_INTERVAL_MS = 60_000;
 
@@ -57,8 +57,12 @@ export class TimerSyncDrain {
     }
     this.inFlight = this.deps.timer
       .flushUnsynced()
-      .then(() => {
-        this.logger?.debug('timer sync drain finished', { reason });
+      .then((moreRemaining) => {
+        this.logger?.debug('timer sync drain finished', { reason, moreRemaining: moreRemaining === true });
+        // flushUnsynced is bounded per call so it can't wedge the app behind a
+        // long backlog. Keep going on the next tick of the event loop rather
+        // than waiting a full interval — a backlog should still clear promptly.
+        if (moreRemaining === true) setImmediate(() => void this.drainNow(reason));
       })
       .catch((err) => {
         this.logger?.warn('timer sync drain failed', { reason, err: String(err) });

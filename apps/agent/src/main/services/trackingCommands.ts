@@ -1,6 +1,7 @@
 import type { TrackingCommandResult } from '../../shared/tracking';
 import { broadcast } from '../broadcast';
 import { sendHeartbeatNow } from './heartbeat';
+import { rememberLastLarkTask } from './preferences';
 import { getTimerService } from './timer';
 import { getTrackingAttentionCoordinator } from './trackingAttention';
 import { isTrackingBlockedError } from './trackingReadiness';
@@ -19,6 +20,12 @@ async function execute(command: PendingCommand): Promise<TrackingCommandResult> 
     const status = command.kind === 'START'
       ? await timer.start({ larkTaskGuid: command.larkTaskGuid })
       : await timer.resume();
+    // Persist the choice the moment tracking actually starts. Boot always closes
+    // the open entry, so this file is the only thing that can carry "what was I
+    // working on" across a restart.
+    if (command.kind === 'START' && command.larkTaskGuid) {
+      rememberLastLarkTask(command.larkTaskGuid);
+    }
     pending = null;
     broadcast('timer:status:push', status);
     sendHeartbeatNow();

@@ -80,10 +80,6 @@ function normalizeWindowsName(value: string): string {
   return value.trim().toLowerCase();
 }
 
-function sameArgs(args: string[]): boolean {
-  return args.length === 1 && args[0] === HIDDEN_ARG;
-}
-
 function sameWindowsPath(left: string, right: string): boolean {
   return normalizeWindowsPath(left) === normalizeWindowsPath(right);
 }
@@ -92,10 +88,26 @@ function isCurrentWindowsItem(item: WindowsLaunchItem, execPath: string): boolea
   return sameWindowsPath(item.path, execPath);
 }
 
+/**
+ * Identity of "our" Run entry: the name we register under, pointing at this
+ * executable.
+ *
+ * Deliberately does NOT compare `item.args` against `--hidden`, even though we
+ * register with it. Electron builds `launchItems[].args` from Chromium's
+ * `CommandLine::GetArgs()`, which returns only POSITIONAL arguments — anything
+ * starting with `--`, `-`, or `/` on Windows is classified as a switch and
+ * excluded (electron#31960, closed as not planned). So a Run value of
+ * `"...\Timo.exe" --hidden` always reads back with `args: []`, and an equality
+ * check against `['--hidden']` could never pass.
+ *
+ * The consequence was subtle rather than loud: with this never matching,
+ * hasVerifiedCanonicalWindowsRegistration() could never return true, so
+ * cleanupWindowsItems() was unreachable on Windows and the duplicate/legacy
+ * startup entries it exists to remove were never actually removed.
+ */
 function isCanonicalWindowsItem(item: WindowsLaunchItem, execPath: string): boolean {
   return item.name === WINDOWS_ITEM_NAME
-    && isCurrentWindowsItem(item, execPath)
-    && sameArgs(item.args);
+    && isCurrentWindowsItem(item, execPath);
 }
 
 function isOwnedWindowsStartupItem(item: WindowsLaunchItem, execPath: string): boolean {
@@ -287,7 +299,13 @@ export function createLaunchAtLoginService(deps: LaunchAtLoginDeps) {
       const canonicalItem = settings.launchItems.find((item) =>
         isCanonicalWindowsItem(item, deps.execPath) && item.enabled === true,
       );
-      return Boolean(canonicalItem) || (settings.openAtLogin && settings.executableWillLaunchAtLogin === true);
+      // `settings.openAtLogin` is not a usable second opinion here: Electron
+      // writes the Run value under `settings.name` ("Timo") but reads
+      // openAtLogin back from a value named after the AppUserModelID — a key we
+      // never write, so it reads false forever (electron#33308). Pair the
+      // canonical item with executableWillLaunchAtLogin, which the Electron docs
+      // describe as the flag that ignores args and reflects the run key.
+      return Boolean(canonicalItem) || settings.executableWillLaunchAtLogin === true;
     } catch {
       return false;
     }

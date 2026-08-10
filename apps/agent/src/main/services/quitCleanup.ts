@@ -8,7 +8,8 @@ const QUIT_CLEANUP_TIMEOUT_MS = 5_000;
 
 type TimerForQuit = {
   prepareForQuit(reason: TimerExitReason): Promise<unknown>;
-  flushUnsynced(): Promise<void>;
+  /** `limit` is optional so quit can drain the WHOLE backlog, not one batch. */
+  flushUnsynced(limit?: number): Promise<unknown>;
 };
 
 type QuitCleanupLogger = Pick<typeof log, 'debug' | 'warn'>;
@@ -81,7 +82,9 @@ export class QuitCleanupRunner {
     try {
       const timer = this.deps.getTimer();
       await this.withTimeout('timer finalization', timer.prepareForQuit(reason));
-      await this.withTimeout('timer sync', timer.flushUnsynced());
+      // Quit must push everything it can, so bypass the per-pass batch limit —
+      // the surrounding withTimeout is what bounds how long shutdown waits.
+      await this.withTimeout('timer sync', timer.flushUnsynced(Number.POSITIVE_INFINITY));
     } catch (err) {
       this.logger.warn('quit cleanup timer failed', { reason, err: String(err) });
     }

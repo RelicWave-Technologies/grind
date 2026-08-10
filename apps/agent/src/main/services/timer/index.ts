@@ -16,10 +16,13 @@ import type { TimerOwner } from './types';
 import { TodayLedgerHydrator, type TodayLedgerRefreshReason } from './todayLedgerHydrator';
 import { api } from '../apiClient';
 import { broadcast } from '../../broadcast';
+import { serverAlignedNow } from '../serverClock';
 import { getTodayLedgerMode } from '../agentConfig';
 import type { TodayLedgerMode } from '@grind/types';
 
-const realClock: Clock = { now: () => Date.now() };
+// Server-aligned: timer timestamps are validated (and clamped) by the server,
+// so they must be stamped in the server's frame rather than the laptop's.
+const realClock: Clock = { now: () => serverAlignedNow() };
 const realIds: IdGen = { ulid: () => ulid() };
 
 let service: TimerService | null = null;
@@ -85,7 +88,16 @@ function getTodayLedgerHydrator(): TodayLedgerHydrator {
   return todayLedgerHydrator;
 }
 
-/** Recover any left-open entry on boot, then flush the sync backlog. */
+/**
+ * Recover any left-open entry on boot.
+ *
+ * Deliberately does NOT flush the sync backlog. `flushUnsynced` walks every
+ * pending entry with one awaited round-trip each and no upper bound, so a user
+ * who was offline or signed out for a while came back to a boot that blocked on
+ * hundreds of sequential requests — the app looked hung on launch and "first
+ * sync" appeared to take forever. The backlog is drained in the background by
+ * the sync drain instead, which is single-flighted and chunked.
+ */
 export async function initTimerOnBoot(): Promise<void> {
   const svc = getTimerService();
   const tokens = await loadTokens();
@@ -110,7 +122,6 @@ export async function initTimerOnBoot(): Promise<void> {
       reason: recovered.notice.reason,
     });
   }
-  await svc.flushUnsynced();
 }
 
 export async function bindTimerToStoredSession(claimLegacy = false): Promise<boolean> {

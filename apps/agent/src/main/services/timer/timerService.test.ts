@@ -627,6 +627,35 @@ describe('TimerService offline behaviour', () => {
     expect(store.getUnsynced()).toHaveLength(0);
   });
 
+  it('flushes at most one batch per call and reports that work remains', async () => {
+    // Boot used to await an unbounded pass over the whole backlog — one awaited
+    // round-trip each — so a user returning from an offline spell launched into
+    // an app wedged behind hundreds of requests.
+    sync.failCreateCount = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < 4; i += 1) {
+      await svc.start({ larkTaskGuid: `task-${i}` });
+      clock.advance(1 * MIN);
+      await svc.stop();
+    }
+    const queued = store.getUnsynced().length;
+    expect(queued).toBeGreaterThan(2);
+
+    sync.failCreateCount = 0;
+    const moreRemaining = await svc.flushUnsynced(2);
+
+    expect(moreRemaining).toBe(true);
+    expect(store.getUnsynced().length).toBe(queued - 2);
+  });
+
+  it('reports an empty backlog once the last entry drains', async () => {
+    sync.failCreateCount = 1;
+    await svc.start({});
+    expect(store.getUnsynced()).toHaveLength(1);
+
+    expect(await svc.flushUnsynced(10)).toBe(false);
+    expect(store.getUnsynced()).toHaveLength(0);
+  });
+
   it('creates then closes an entry that was started and stopped offline', async () => {
     sync.failCreateCount = 2;
     await svc.start({});

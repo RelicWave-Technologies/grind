@@ -1,4 +1,5 @@
 import { ipcMain } from 'electron';
+import { getPreferences } from '../services/preferences';
 import { getTimerService } from '../services/timer';
 import { sendHeartbeatNow } from '../services/heartbeat';
 import { broadcast } from '../broadcast';
@@ -33,6 +34,11 @@ export function registerTimerIpc(): void {
   });
 
   ipcMain.handle('timer:status', () => getTimerService().status());
+  // The task the user last tracked. Boot always closes the open entry, so the
+  // timer status can't carry this across a restart — the renderer needs it to
+  // pre-select the work they were actually on instead of the first task in the
+  // list.
+  ipcMain.handle('timer:lastTaskGuid', (): string | null => getPreferences().lastLarkTaskGuid);
   ipcMain.handle('timer:recoveryNotice', () => getTimerService().recoveryNotice());
   ipcMain.handle('timer:dismissRecoveryNotice', () => {
     getTimerService().dismissRecoveryNotice();

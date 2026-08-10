@@ -38,6 +38,60 @@ export async function probeScreenCapture(): Promise<CaptureHealth> {
   }
 }
 
+/**
+ * Swap the B and R bytes of a packed 32-bit BGRA buffer, in place, so sharp can
+ * read it as RGBA.
+ *
+ * `nativeImage.toBitmap()` hands back raw pixels in B,G,R,A order on
+ * little-endian platforms; sharp's `raw` input only speaks RGBA. Reading the
+ * buffer as Uint32 lets one pass over the words do the swap with no per-byte
+ * indexing — a few milliseconds for a full screen.
+ */
+export function bgraToRgbaInPlace(bmp: Buffer): Buffer {
+  const words = new Uint32Array(bmp.buffer, bmp.byteOffset, Math.floor(bmp.byteLength / 4));
+  for (let i = 0; i < words.length; i += 1) {
+    const px = words[i] as number; // in-bounds by construction
+    // Keep A (bits 24-31) and G (bits 8-15); exchange R (16-23) with B (0-7).
+    words[i] = (px & 0xff00ff00) | ((px >>> 16) & 0x000000ff) | ((px & 0x000000ff) << 16);
+  }
+  return bmp;
+}
+
+/**
+ * Pick how sharp should read this frame.
+ *
+ * The fast path feeds raw pixels straight in — no PNG in the middle. The old
+ * path called `toPNG()`, a synchronous main-thread PNG encode of the full frame
+ * that sharp then immediately decoded again just to re-encode as WebP; measured
+ * in the field at ~600ms of blocked main thread every capture.
+ *
+ * Raw only works while `getSize()` agrees with the bitmap's actual dimensions.
+ * They can disagree if a thumbnail ever arrives with a scale factor != 1, and a
+ * mismatch makes sharp reject the buffer outright — losing the screenshot. So
+ * verify the byte count first and fall back to the (slow, but format-carrying)
+ * PNG path rather than dropping the capture.
+ */
+function decodableSource(thumbnail: Electron.NativeImage): {
+  data: Buffer;
+  options: sharp.SharpOptions | undefined;
+} {
+  const { width, height } = thumbnail.getSize();
+  const bmp = thumbnail.toBitmap();
+  if (bmp.byteLength === width * height * 4) {
+    return {
+      data: bgraToRgbaInPlace(bmp),
+      options: { raw: { width, height, channels: 4 } },
+    };
+  }
+  log.warn('screenshot bitmap size mismatch — falling back to PNG decode', {
+    width,
+    height,
+    expectedBytes: width * height * 4,
+    actualBytes: bmp.byteLength,
+  });
+  return { data: thumbnail.toPNG(), options: undefined };
+}
+
 function dayDir(now: number): string {
   return path.join(app.getPath('userData'), 'screenshots', new Date(now).toISOString().slice(0, 10));
 }
@@ -87,7 +141,9 @@ export async function captureNow(
       continue;
     }
     const transformStartedAt = performance.now();
-    const webp = await sharp(s.thumbnail.toPNG())
+    const source = decodableSource(s.thumbnail);
+    const webp = await sharp(source.data, source.options)
+      .removeAlpha()
       .resize({ width: SCREENSHOT_MAX_EDGE, height: SCREENSHOT_MAX_EDGE, fit: 'inside', withoutEnlargement: true })
       .webp({ quality: SCREENSHOT_QUALITY })
       .toBuffer();
