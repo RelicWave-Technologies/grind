@@ -11,7 +11,8 @@ import type { ReactNode } from 'react';
  * the privacy contract. Content is static by design: the changelog ships
  * with the build it describes. Motion is CSS-first and honors
  * prefers-reduced-motion. The animated release cards are drawn from scratch
- * by .context/create_timo_release_cards.py.
+ * by .context/create_timo_release_cards.py and, for the latest block,
+ * .context/create_timo_card_beta30.py.
  */
 
 type Tag = 'new' | 'improved' | 'fixed' | 'internal';
@@ -47,18 +48,19 @@ function Card({ src, alt, w, h }: { src: string; alt: string; w: number; h: numb
 }
 
 const LATEST: Release = {
-  id: 'beta-29',
-  version: 'beta.29',
+  id: 'beta-30',
+  version: 'beta.30',
   name: 'the honest clock update',
   meta: 'AUG 10, 2026 · MAC + WINDOWS',
   changes: [
-    { tag: 'fixed', text: <>Your timer runs on a stopwatch now, not the wall clock. On a laptop whose clock ran fast, putting that clock right used to stop the timer dead for as long as it had been wrong — real minutes, gone quietly. Nothing can move a stopwatch, so nothing can stop your count.</> },
-    { tag: 'new', text: <>Timo speaks up when you are working with the timer off. Ten minutes at your desk mid-shift with nothing running and it asks, once. Step out for lunch and it stays quiet — it watches the time you were actually there, not the clock on the wall.</> },
-    { tag: 'fixed', text: <>The permission prompt stopped sending you in a circle. When macOS refuses the keyboard and mouse hook, the switch you are missing is Input Monitoring — a different list from Accessibility, and one macOS will never offer to flip for you. Timo used to ask you to restart, which could not possibly have helped. It now names the right switch and opens the right page.</> },
-    { tag: 'fixed', text: <>Launch at login works on Windows, for real this time. It is checked against the entry Windows will actually run, and it has stopped asking to be repaired when nothing is broken.</> },
-    { tag: 'fixed', text: <>No more waking up on beta.28. The updater refused to go backwards on paper; now it refuses in practice.</> },
-    { tag: 'improved', text: <>Screenshots stopped stepping on your typing. The image work moved off the thread that draws the app.</> },
-    { tag: 'fixed', text: <>Windows lost a stray File / Edit / View menu bar it never had a use for.</> },
+    { tag: 'fixed', text: <>Your timer runs on a stopwatch now. Correcting a wrong clock used to freeze it mid-count. A stopwatch doesn't know the time, so nobody can lie to it.</> },
+    { tag: 'new', text: <>Timo taps you once if you're working with the timer off. Lunch does not count as working.</> },
+    { tag: 'fixed', text: <>Prompts stopped dragging you out of fullscreen. They show up where you already are.</> },
+    { tag: 'fixed', text: <>No more "Restart Timo" when the screen simply went to sleep. False alarm. Every time.</> },
+    { tag: 'fixed', text: <>The permission prompt stopped asking for a restart that could never help. It names the switch it actually wants: Input Monitoring.</> },
+    { tag: 'fixed', text: <>Launch at login works on Windows, and repairs itself at boot instead of nagging.</> },
+    { tag: 'improved', text: <>Screenshots stopped elbowing your typing.</> },
+    { tag: 'fixed', text: <>Windows lost a menu bar it never used. Mac is back to one Dock icon.</> },
   ],
 };
 
@@ -275,7 +277,7 @@ const FOUNDATION: Array<[string, ReactNode]> = [
 ];
 
 const MARQUEE = [
-  'BETA.29 — HONEST CLOCK',
+  'BETA.30 — HONEST CLOCK',
   'BETA.28 — RELIABILITY',
   'BETA.27 — ZERO LOSS',
   'BETA.26 — UNSHIPPED',
@@ -391,7 +393,7 @@ export function ChangelogScreen() {
             <p className="cl-eyebrow">TIMO — RELEASE NOTES</p>
             <h1 className="cl-display-xl">Changelog</h1>
             <p className="cl-hero-lead">
-              Every Timo release, in one place. Twenty-nine builds in
+              Every Timo release, in one place. Thirty builds in
               forty-nine days — some added features, some fixed what the
               features broke. All of it's here.
             </p>
@@ -428,7 +430,7 @@ export function ChangelogScreen() {
               <h2 className="cl-headline">{LATEST.version} — {LATEST.name}</h2>
               <p className="cl-caption cl-block-meta">{LATEST.meta}</p>
               <ChangeList changes={LATEST.changes} />
-              <Card src="/brand/timo-card-beta29.gif?v=1" alt="Animated scene: two timelines of the same shift — the old one loses a stretch of minutes when the clock is corrected, the new one runs unbroken and keeps them" w={520} h={210} />
+              <Card src="/brand/timo-card-beta30.gif?v=1" alt="Animated scene: two timelines of the same shift — the old one loses a stretch of minutes when the clock is corrected, the new one runs unbroken and keeps them" w={520} h={210} />
               <p className="cl-block-note">
                 You already have this one — Timo updates itself. It checks after
                 launch, and again (quietly) when you open Settings. That's the
