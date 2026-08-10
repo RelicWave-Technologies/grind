@@ -656,6 +656,20 @@ describe('TimerService offline behaviour', () => {
     expect(store.getUnsynced()).toHaveLength(0);
   });
 
+  it('does not ask for another pass over an entry that will not sync', async () => {
+    // "More remaining" used to mean "anything is still pending", which is true
+    // of an entry the server keeps refusing — and true of the entry currently
+    // being tracked, since each checkpoint marks it dirty again. The drain
+    // takes that as "come straight back", so this answer is what put a running
+    // timer into a permanent loop. Only stopping at the batch limit counts.
+    sync.failCreateCount = Number.POSITIVE_INFINITY;
+    await svc.start({});
+    expect(store.getUnsynced()).toHaveLength(1);
+
+    expect(await svc.flushUnsynced(10)).toBe(false);
+    expect(store.getUnsynced()).toHaveLength(1);
+  });
+
   it('creates then closes an entry that was started and stopped offline', async () => {
     sync.failCreateCount = 2;
     await svc.start({});
