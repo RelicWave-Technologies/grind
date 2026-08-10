@@ -45,6 +45,12 @@ vi.mock('./trackingCommands', () => ({ offerPermissionResume: mocks.offerResume 
 vi.mock('./heartbeat', () => ({ sendHeartbeatNow: mocks.heartbeat }));
 vi.mock('../broadcast', () => ({ broadcast: mocks.broadcast }));
 vi.mock('./capture', () => ({ onScreenHealthChange: () => () => undefined }));
+// trackingReadiness pulls probeScreenCapture from './capture/capture', which is
+// a DIFFERENT specifier from './capture' above and so is not covered by that
+// mock. importOriginal() on trackingReadiness therefore loads the real module,
+// which loads sharp — and with the platform pinned to darwin, sharp looks for a
+// macOS binary and dies on a Linux runner.
+vi.mock('./capture/capture', () => ({ probeScreenCapture: vi.fn() }));
 vi.mock('./activity', () => ({
   onActivityCaptureStatusChange: () => () => undefined,
   setActivityRecording: mocks.setActivityRecording,
