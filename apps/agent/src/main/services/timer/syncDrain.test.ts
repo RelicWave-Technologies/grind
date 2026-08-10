@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { TimerSyncDrain } from './syncDrain';
+import { MAX_CHAINED_DRAIN_PASSES, TimerSyncDrain } from './syncDrain';
 
 function deferred() {
   let resolve!: () => void;
@@ -112,6 +112,45 @@ describe('TimerSyncDrain', () => {
     await vi.runAllTimersAsync();
 
     expect(flushUnsynced).toHaveBeenCalledTimes(1);
+    drain.stop();
+  });
+
+  it('gives up chaining when the backlog never reports itself empty', async () => {
+    // The field failure: flushUnsynced answered "more remaining" on every pass,
+    // so the chain never ended. 6,440 passes in 68 minutes, and because each
+    // one held the in-flight slot, 280 scheduled drains were dropped as
+    // "already running". A backlog that will not clear must decay into the
+    // interval, not spin.
+    const flushUnsynced = vi.fn().mockResolvedValue(true);
+    const logger = { debug: vi.fn(), warn: vi.fn() };
+    const drain = new TimerSyncDrain({
+      timer: { flushUnsynced }, isOnline: () => true, intervalMs: 60_000, logger,
+    });
+
+    await drain.drainNow('boot');
+    await vi.runAllTimersAsync();
+
+    expect(flushUnsynced).toHaveBeenCalledTimes(MAX_CHAINED_DRAIN_PASSES);
+    expect(logger.warn).toHaveBeenCalledWith(
+      'timer sync drain still reports a backlog; leaving it to the interval',
+      expect.objectContaining({ passes: MAX_CHAINED_DRAIN_PASSES }),
+    );
+    drain.stop();
+  });
+
+  it('leaves the in-flight slot free once chaining stops', async () => {
+    // Starving the scheduled drains is what actually lost the time, so assert
+    // the slot is reusable rather than just that the chain ended.
+    const flushUnsynced = vi.fn().mockResolvedValue(true);
+    const drain = new TimerSyncDrain({ timer: { flushUnsynced }, isOnline: () => true, intervalMs: 60_000 });
+
+    await drain.drainNow('boot');
+    await vi.runAllTimersAsync();
+    const afterChain = flushUnsynced.mock.calls.length;
+
+    await drain.drainNow('heartbeat');
+
+    expect(flushUnsynced).toHaveBeenCalledTimes(afterChain + 1);
     drain.stop();
   });
 });

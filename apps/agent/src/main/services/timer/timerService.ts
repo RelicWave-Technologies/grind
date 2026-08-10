@@ -460,11 +460,24 @@ export class TimerService {
     }
     let flushed = 0;
     for (const { entry, syncState } of this.store.getUnsynced()) {
+      // Hitting the batch limit is the ONLY reason to ask for another pass.
+      //
+      // This used to end with `return this.store.hasUnsynced()`, which is a
+      // different question: it is true whenever ANY row is still pending, and
+      // the entry currently being tracked is pending by definition — every
+      // checkpoint marks it dirty again. The drain treats `true` as "come
+      // straight back", so a running timer put it in a permanent loop
+      // (6,440 passes in 68 minutes in one field log) which held the in-flight
+      // slot and made every scheduled drain a no-op.
+      //
+      // A row still pending after we tried it is pending because the server
+      // would not take it, or because it is the live entry. Neither is fixed by
+      // retrying immediately; the interval will come back for it.
       if (flushed >= limit) return true;
       await this.trySync(entry, syncState);
       flushed += 1;
     }
-    return this.store.hasUnsynced();
+    return false;
   }
 
   hasUnsynced(): boolean {
