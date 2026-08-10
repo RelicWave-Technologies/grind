@@ -54,6 +54,7 @@ const LATEST: Release = {
   changes: [
     { tag: 'fixed', text: <>Your timer runs on a stopwatch now, not the wall clock. On a laptop whose clock ran fast, putting that clock right used to stop the timer dead for as long as it had been wrong — real minutes, gone quietly. Nothing can move a stopwatch, so nothing can stop your count.</> },
     { tag: 'new', text: <>Timo speaks up when you are working with the timer off. Ten minutes at your desk mid-shift with nothing running and it asks, once. Step out for lunch and it stays quiet — it watches the time you were actually there, not the clock on the wall.</> },
+    { tag: 'fixed', text: <>The permission prompt stopped sending you in a circle. When macOS refuses the keyboard and mouse hook, the switch you are missing is Input Monitoring — a different list from Accessibility, and one macOS will never offer to flip for you. Timo used to ask you to restart, which could not possibly have helped. It now names the right switch and opens the right page.</> },
     { tag: 'fixed', text: <>Launch at login works on Windows, for real this time. It is checked against the entry Windows will actually run, and it has stopped asking to be repaired when nothing is broken.</> },
     { tag: 'fixed', text: <>No more waking up on beta.28. The updater refused to go backwards on paper; now it refuses in practice.</> },
     { tag: 'improved', text: <>Screenshots stopped stepping on your typing. The image work moved off the thread that draws the app.</> },
@@ -73,6 +74,7 @@ const JULY: Release[] = [
       { tag: 'new', text: <>Approved manual time shows up in Today. Desktop and dashboard finally tell the same story about your day.</> },
       { tag: 'fixed', text: <>Windows launch-at-login is now checked against what Windows will actually do — not what it promised.</> },
     ],
+    extra: <Card src="/brand/timo-card-beta28.gif?v=4" alt="Animated scene: a reliability checklist gets calmly ticked while Timo nods along" w={520} h={210} />,
   },
   {
     id: 'beta-27',
@@ -426,7 +428,7 @@ export function ChangelogScreen() {
               <h2 className="cl-headline">{LATEST.version} — {LATEST.name}</h2>
               <p className="cl-caption cl-block-meta">{LATEST.meta}</p>
               <ChangeList changes={LATEST.changes} />
-              <Card src="/brand/timo-card-beta28.gif?v=3" alt="Animated scene: a reliability checklist gets calmly ticked while Timo nods along" w={520} h={210} />
+              <Card src="/brand/timo-card-beta29.gif?v=1" alt="Animated scene: two timelines of the same shift — the old one loses a stretch of minutes when the clock is corrected, the new one runs unbroken and keeps them" w={520} h={210} />
               <p className="cl-block-note">
                 You already have this one — Timo updates itself. It checks after
                 launch, and again (quietly) when you open Settings. That's the
