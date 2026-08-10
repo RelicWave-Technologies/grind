@@ -148,7 +148,13 @@ export class ShiftMonitor {
     if (!timeZone) return;
     // `prompting` mirrors actual visibility — refresh from the window state
     // so a manually-dismissed toast doesn't keep us pinned in `prompting`.
-    this.state = { ...this.state, prompting: isReadyToWorkVisible() };
+    // Only the clock-in toast counts. The same window also renders the
+    // untracked nudge, and treating that as "we are prompting" made the
+    // shift reducer hide a prompt it does not own: outside the buffer window
+    // a visible toast resolves to `hide`, so the nudge was closed within one
+    // poll of appearing.
+    const showingShiftStart = isReadyToWorkVisible() && readyToWorkReason() === 'SHIFT_START';
+    this.state = { ...this.state, prompting: showingShiftStart };
 
     const action = tickShiftMonitor({
       schedule: this.shift.schedule,
@@ -179,6 +185,12 @@ export class ShiftMonitor {
         const clamped = Math.min(ms, 24 * 60 * 60_000);
         if (this.oneShotTimer) clearTimeout(this.oneShotTimer);
         this.oneShotTimer = setTimeout(() => this.tick(), clamped);
+        // `schedule` means "no clock-in question right now", not "nothing to
+        // do". The shift reducer's window is only the buffer after shift
+        // start, so it returns `schedule` for almost the whole shift — which
+        // is exactly when someone can be working with the timer off. Falling
+        // through here is what makes the untracked nudge reachable at all.
+        this.tickUntracked(timeZone);
         break;
       }
       case 'noop':
