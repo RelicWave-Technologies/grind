@@ -56,3 +56,23 @@ export function fakeUlid(prefix = 'id'): string {
 export function iso(ms: number): string {
   return new Date(ms).toISOString();
 }
+
+/**
+ * A fixed-offset zone in which "now" is around midday.
+ *
+ * The overview endpoint buckets by the WORKSPACE timezone, and these tests
+ * seed their segments relative to `Date.now()`. Left on the schema's default
+ * of UTC, every one of them breaks when the suite happens to run within ~90
+ * minutes of UTC midnight — the seeded work lands in yesterday and the day's
+ * totals come back near zero. That is exactly what CI hit at 00:36 UTC.
+ *
+ * Anchoring the workspace to a zone where the current instant is midday keeps
+ * the whole lookback inside one local day whatever time the suite runs. The
+ * `Etc/GMT` zones carry an inverted sign (`Etc/GMT-12` is UTC+12) and have no
+ * DST, so the offset stays put for the length of a test run.
+ */
+export function midDayTimeZone(now = new Date()): string {
+  const offsetHours = 12 - now.getUTCHours();
+  if (offsetHours === 0) return 'Etc/GMT';
+  return offsetHours > 0 ? `Etc/GMT-${offsetHours}` : `Etc/GMT+${-offsetHours}`;
+}

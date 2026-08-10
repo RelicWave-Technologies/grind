@@ -4,7 +4,7 @@ import { prisma } from '@grind/db';
 import { buildApp } from '../src/app';
 import { signAccessToken } from '../src/lib/jwt';
 import { ulid } from 'ulid';
-import { createManagedTeam } from './helpers';
+import { createManagedTeam, midDayTimeZone } from './helpers';
 
 const app = buildApp();
 const bearer = (token: string) => ({ Authorization: `Bearer ${token}` });
@@ -12,11 +12,14 @@ const bearer = (token: string) => ({ Authorization: `Bearer ${token}` });
 const HOUR = 60 * 60 * 1000;
 const MIN = 60 * 1000;
 
+
 let counter = 0;
 async function seed() {
   counter += 1;
   const stamp = `${Date.now()}-${counter}-ov`;
-  const ws = await prisma.workspace.create({ data: { name: `WS ${stamp}` } });
+  const ws = await prisma.workspace.create({
+    data: { name: `WS ${stamp}`, timezone: midDayTimeZone() },
+  });
   const mk = (email: string, role: 'ADMIN' | 'MANAGER' | 'MEMBER') =>
     prisma.user.create({
       data: {
