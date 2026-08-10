@@ -7,7 +7,7 @@ import type {
 import type { LaunchAtLoginHealth, MoveToApplicationsResult } from '../../shared/launchAtLogin';
 import type { AttentionAction, AttentionActionResult, AttentionPrompt } from '../../shared/attention';
 import type { WorkspaceTimeContext } from '../../shared/workspaceTime';
-import type { TodayShiftWindow } from '../../shared/shift';
+import type { ShiftPromptReason, TodayShiftWindow } from '../../shared/shift';
 
 type AuthStatus = 'loggedIn' | 'loggedOut';
 type LarkOutcome = { kind: 'pending' } | { kind: 'error'; reason: string };
@@ -93,6 +93,8 @@ declare global {
         decide: (decision: 'yes' | 'not_yet') => Promise<void>;
         refresh: () => Promise<void>;
         today: () => Promise<TodayShiftWindow | null>;
+        promptReason: () => Promise<ShiftPromptReason>;
+        onPromptReason: (cb: (reason: ShiftPromptReason) => void) => () => void;
       };
       screenshots: {
         recent: (limit?: number) => Promise<ScreenshotItem[]>;

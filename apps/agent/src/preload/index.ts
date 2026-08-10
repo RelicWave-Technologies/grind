@@ -8,7 +8,7 @@ import type {
 import type { LaunchAtLoginHealth, MoveToApplicationsResult } from '../shared/launchAtLogin';
 import type { AttentionAction, AttentionActionResult, AttentionPrompt } from '../shared/attention';
 import type { WorkspaceTimeContext } from '../shared/workspaceTime';
-import type { TodayShiftWindow } from '../shared/shift';
+import type { ShiftPromptReason, TodayShiftWindow } from '../shared/shift';
 
 type AuthStatus = 'loggedIn' | 'loggedOut';
 type LarkOutcome = { kind: 'pending' } | { kind: 'error'; reason: string };
@@ -123,6 +123,12 @@ const api = {
     decide: (decision: 'yes' | 'not_yet'): Promise<void> => ipcRenderer.invoke('shift:decide', decision),
     refresh: (): Promise<void> => ipcRenderer.invoke('shift:refresh'),
     today: (): Promise<TodayShiftWindow | null> => ipcRenderer.invoke('shift:today'),
+    promptReason: (): Promise<ShiftPromptReason> => ipcRenderer.invoke('shift:promptReason'),
+    onPromptReason: (cb: (reason: ShiftPromptReason) => void): (() => void) => {
+      const handler = (_e: unknown, reason: ShiftPromptReason) => cb(reason);
+      ipcRenderer.on('shift:promptReason', handler);
+      return () => ipcRenderer.removeListener('shift:promptReason', handler);
+    },
   },
   screenshots: {
     recent: (limit?: number): Promise<ScreenshotItem[]> => ipcRenderer.invoke('screenshots:recent', limit),

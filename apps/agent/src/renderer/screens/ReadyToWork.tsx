@@ -1,5 +1,6 @@
-import { useMutation } from '@tanstack/react-query';
-import { Sunrise } from 'lucide-react';
+import { useEffect } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Sunrise, Timer } from 'lucide-react';
 
 /**
  * Toast that appears when the user's shift window opens (start +
@@ -13,20 +14,50 @@ import { Sunrise } from 'lucide-react';
  * notify, don't interrupt). Renderer-side bookkeeping is minimal — all
  * lifecycle logic lives in the main-process ShiftMonitor.
  */
+const COPY = {
+  SHIFT_START: {
+    icon: Sunrise,
+    title: 'Ready to work?',
+    sub: 'Your shift just started. Want to clock in?',
+    confirm: 'Yes, start',
+    dismiss: 'Not yet',
+  },
+  UNTRACKED: {
+    icon: Timer,
+    title: 'Are you working?',
+    sub: "You've been active for a while with no timer running.",
+    confirm: 'Start tracking',
+    dismiss: 'Not now',
+  },
+} as const;
+
 export default function ReadyToWork() {
+  const qc = useQueryClient();
   const decide = useMutation({
     mutationFn: (d: 'yes' | 'not_yet') => window.agent.shift.decide(d),
   });
+  const reason = useQuery({
+    queryKey: ['shiftPromptReason'],
+    queryFn: () => window.agent.shift.promptReason(),
+    staleTime: 0,
+  });
+
+  useEffect(() => window.agent.shift.onPromptReason((next) => {
+    qc.setQueryData(['shiftPromptReason'], next);
+  }), [qc]);
+
+  const copy = COPY[reason.data ?? 'SHIFT_START'];
+  const Icon = copy.icon;
 
   return (
     <div className="rtw">
       <div className="rtw-head">
         <span className="rtw-icon" aria-hidden>
-          <Sunrise size={20} strokeWidth={2} />
+          <Icon size={20} strokeWidth={2} />
         </span>
         <div className="rtw-title">
-          <div className="h3">Ready to work?</div>
-          <div className="rtw-sub callout secondary">Your shift just started. Want to clock in?</div>
+          <div className="h3">{copy.title}</div>
+          <div className="rtw-sub callout secondary">{copy.sub}</div>
         </div>
       </div>
       <div className="rtw-actions">
@@ -35,14 +66,14 @@ export default function ReadyToWork() {
           onClick={() => decide.mutate('not_yet')}
           disabled={decide.isPending}
         >
-          Not yet
+          {copy.dismiss}
         </button>
         <button
           className="btn btn-prominent no-drag"
           onClick={() => decide.mutate('yes')}
           disabled={decide.isPending}
         >
-          Yes, start
+          {copy.confirm}
         </button>
       </div>
     </div>

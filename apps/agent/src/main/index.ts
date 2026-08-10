@@ -52,6 +52,7 @@ import { getLaunchAtLoginService, isHiddenLaunch } from './services/launchAtLogi
 import type { LaunchAtLoginHealth } from '../shared/launchAtLogin';
 import { migrateLegacyUserData } from './services/legacyMigration';
 import { broadcast } from './broadcast';
+import { readyToWorkReason } from './readyToWork';
 import {
   offerPermissionStart,
   offerPermissionSetupOnStartup,
@@ -387,6 +388,7 @@ app.whenReady().then(async () => {
       announceSignOut();
     }
   });
+  ipcMain.handle('shift:promptReason', () => readyToWorkReason());
   ipcMain.handle('shift:decide', (_e, decision: 'yes' | 'not_yet') => {
     shiftMonitor.onUserDecision(decision);
   });

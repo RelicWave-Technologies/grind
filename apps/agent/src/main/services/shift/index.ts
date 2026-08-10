@@ -11,7 +11,16 @@ import {
   type ShiftMonitorState,
   resolveShiftWindow,
 } from './decide';
-import { showReadyToWork, hideReadyToWork, isReadyToWorkVisible } from '../../readyToWork';
+import { showReadyToWork, hideReadyToWork, isReadyToWorkVisible, readyToWorkReason } from '../../readyToWork';
+import {
+  tickUntrackedNudge,
+  acceptUntrackedNudge,
+  snoozeUntrackedNudge,
+  UNTRACKED_INITIAL_STATE,
+  type UntrackedNudgeState,
+} from './untracked';
+import { getTimerService } from '../timer';
+import { getTrackingAttentionCoordinator } from '../trackingAttention';
 import { getWorkspaceTimeZone } from '../workspaceTime';
 import type { TodayShiftWindow } from '../../../shared/shift';
 
@@ -40,6 +49,7 @@ const NUDGE_INTERVAL_MS = 5 * 60_000;
 
 export class ShiftMonitor {
   private state: ShiftMonitorState = { ...INITIAL_STATE };
+  private untracked: UntrackedNudgeState = { ...UNTRACKED_INITIAL_STATE };
   private shift: ShiftDto | null = null;
   private pollTimer: NodeJS.Timeout | null = null;
   private oneShotTimer: NodeJS.Timeout | null = null;
@@ -102,6 +112,18 @@ export class ShiftMonitor {
     const now = new Date();
     const timeZone = getWorkspaceTimeZone();
     if (!timeZone) return;
+
+    // One toast, two questions — answer the one actually on screen.
+    if (readyToWorkReason() === 'UNTRACKED') {
+      this.untracked =
+        decision === 'yes'
+          ? acceptUntrackedNudge(this.untracked)
+          : snoozeUntrackedNudge(this.untracked, now.getTime());
+      hideReadyToWork();
+      if (decision === 'yes') this.openMainWindow();
+      return;
+    }
+
     if (decision === 'yes') {
       this.state = ackToday(this.state, this.shift.schedule, now, timeZone);
       hideReadyToWork();
@@ -161,7 +183,38 @@ export class ShiftMonitor {
       }
       case 'noop':
       default:
+        this.tickUntracked(timeZone);
         break;
+    }
+  }
+
+  /**
+   * Mid-shift "Are you working?" nudge.
+   *
+   * Only runs when the shift-start reducer had nothing to say, so the
+   * time-critical clock-in prompt always owns the toast when it wants it.
+   */
+  private tickUntracked(timeZone: string): void {
+    const now = Date.now();
+    const shiftWindow = this.todayWindow(now);
+    const inShift = shiftWindow !== null && now >= shiftWindow.startedAt && now < shiftWindow.endedAt;
+    const showingUntracked = isReadyToWorkVisible() && readyToWorkReason() === 'UNTRACKED';
+
+    const { state, action } = tickUntrackedNudge({
+      state: { ...this.untracked, prompting: showingUntracked },
+      now,
+      inShift,
+      tracking: getTimerService().status().state === 'RUNNING',
+      idleSeconds: powerMonitor.getSystemIdleTime(),
+      attentionBusy: getTrackingAttentionCoordinator().get().kind !== 'NONE',
+    });
+    this.untracked = state;
+
+    if (action.kind === 'show') {
+      log.info('untracked nudge shown', { timeZone });
+      showReadyToWork('UNTRACKED');
+    } else if (action.kind === 'hide' && showingUntracked) {
+      hideReadyToWork();
     }
   }
 }
