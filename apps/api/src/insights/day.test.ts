@@ -697,3 +697,75 @@ describe('buildDayInsight — totals accounting', () => {
     expect(sum).toBe(fullDay);
   });
 });
+
+describe('approved manual time overlapping tracked time', () => {
+  /**
+   * The reported day: tracked 10:40-11:37 with an approved manual entry for
+   * 10:45-11:37 on top. Both rows rendered, and the totals added both, so the
+   * page showed 110 minutes of work inside a 57-minute stretch and disagreed
+   * with its own summary cards.
+   */
+  const TZ = 'Asia/Calcutta';
+  const at = (hhmm: string) => date(`2026-08-10T${hhmm}:00+05:30`);
+  const win = makeWindow('2026-08-10', TZ);
+
+  function build(entries: DayEntryInput[]) {
+    return buildDayInsight({
+      date: '2026-08-10', tz: TZ, now: at('23:59'),
+      entries, pending: [], window: win,
+    });
+  }
+
+  const tracked = (id: string, from: string, to: string): DayEntryInput => ({
+    id, source: 'AUTO', larkTaskGuid: null,
+    segments: [{ kind: 'WORK', startedAt: at(from), endedAt: at(to) }],
+  });
+  const manual = (id: string, from: string, to: string): DayEntryInput => ({
+    id, source: 'MANUAL', larkTaskGuid: null,
+    segments: [{ kind: 'WORK', startedAt: at(from), endedAt: at(to) }],
+  });
+
+  it('counts the contested minutes once, as tracked', () => {
+    const out = build([tracked('t1', '10:40', '11:37'), manual('m1', '10:45', '11:37')]);
+    expect(out.totals.workedMs).toBe(57 * 60_000);
+    expect(out.totals.manualMs).toBe(0);
+  });
+
+  it('renders no overlapping rows — the timeline stays a partition', () => {
+    const out = build([tracked('t1', '10:40', '11:37'), manual('m1', '10:45', '11:37')]);
+    for (let i = 1; i < out.blocks.length; i += 1) {
+      expect(out.blocks[i]!.startedAt).toBeGreaterThanOrEqual(out.blocks[i - 1]!.endedAt);
+    }
+    expect(out.blocks.filter((b) => b.kind === 'MANUAL')).toHaveLength(0);
+  });
+
+  it('keeps the manual stretch that reaches past the tracked one', () => {
+    const out = build([tracked('t1', '10:40', '11:00'), manual('m1', '10:45', '11:30')]);
+    expect(out.totals.workedMs).toBe(20 * 60_000);
+    expect(out.totals.manualMs).toBe(30 * 60_000);
+    const m = out.blocks.filter((b) => b.kind === 'MANUAL');
+    expect(m).toHaveLength(1);
+    expect(m[0]!.startedAt).toBe(at('11:00').getTime());
+  });
+
+  it('no longer opens a gap where the manual claim was trimmed away', () => {
+    // The trimmed minutes belong to the tracked block, not to nothing.
+    const out = build([tracked('t1', '10:40', '11:37'), manual('m1', '10:45', '11:37')]);
+    const gapInside = out.blocks.filter(
+      (b) => b.kind === 'GAP'
+        && b.startedAt >= at('10:40').getTime()
+        && b.endedAt <= at('11:37').getTime(),
+    );
+    expect(gapInside).toEqual([]);
+  });
+
+  it('totals never exceed the wall clock they cover', () => {
+    const out = build([
+      tracked('t1', '09:00', '10:00'),
+      manual('m1', '09:30', '10:30'),
+      tracked('t2', '10:15', '11:00'),
+    ]);
+    const accounted = out.totals.workedMs + out.totals.meetingMs + out.totals.manualMs;
+    expect(accounted).toBe(2 * 60 * 60_000); // 09:00 → 11:00, counted once
+  });
+});

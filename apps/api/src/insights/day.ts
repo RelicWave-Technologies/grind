@@ -18,6 +18,7 @@
  * No prisma/network calls in this file. The route owns I/O; this owns logic.
  */
 
+import { CLAIM_PRIORITY, resolveOverlaps } from './overlap';
 import {
   WEEKDAYS,
   hhmmToMin,
@@ -500,11 +501,26 @@ export function buildDayInsight(input: {
     clippedSolids.push({ ...s, startedAt: c.a, endedAt: c.b, durationMs: c.b - c.a });
   }
 
-  // Activity envelope (real blocks only).
-  const firstActivityAt = clippedSolids.length ? clippedSolids[0]!.startedAt : null;
+  // 3b. Solids can genuinely overlap: an approved manual entry is a real
+  //     TimeEntry, and nothing stopped one from landing on top of tracked
+  //     time. Both rows then survived into the partition and the totals below
+  //     added both, so the same minutes were counted twice — on this page and,
+  //     through the timesheet cells, in payroll.
+  //
+  //     Resolve them the way this file already resolves PENDING: real time
+  //     wins. A manual claim keeps only what is genuinely free.
+  const resolvedSolids = resolveOverlaps(clippedSolids, (b) => (
+    b.kind === 'MANUAL' ? CLAIM_PRIORITY.manual
+      : b.kind === 'IDLE_TRIMMED' ? CLAIM_PRIORITY.idle
+        : CLAIM_PRIORITY.tracked));
+  for (const b of resolvedSolids) b.durationMs = b.endedAt - b.startedAt;
+
+  // Activity envelope (real blocks only). Safe to read off the ends now that
+  // the list is non-overlapping and sorted.
+  const firstActivityAt = resolvedSolids.length ? resolvedSolids[0]!.startedAt : null;
   let lastActivityAt: number | null = null;
-  if (clippedSolids.length) {
-    const lastEnd = clippedSolids[clippedSolids.length - 1]!.endedAt;
+  if (resolvedSolids.length) {
+    const lastEnd = resolvedSolids[resolvedSolids.length - 1]!.endedAt;
     lastActivityAt = isToday ? Math.max(lastEnd, nowMs) : lastEnd;
   }
 
@@ -514,10 +530,10 @@ export function buildDayInsight(input: {
   const blocks: DayBlock[] = [];
   if (!isFuture) {
     const carved: DayBlock[] = [];
-    for (const stretch of emptyStretches(clippedSolids, dayStart, gapCap)) {
+    for (const stretch of emptyStretches(resolvedSolids, dayStart, gapCap)) {
       carveGap(stretch.a, stretch.b, pendingIv, carved);
     }
-    blocks.push(...clippedSolids, ...carved);
+    blocks.push(...resolvedSolids, ...carved);
     blocks.sort((x, y) => x.startedAt - y.startedAt);
   }
 
