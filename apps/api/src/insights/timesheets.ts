@@ -1,4 +1,5 @@
 import { localDayWindow } from './day';
+import { CLAIM_PRIORITY, resolveOverlaps } from './overlap';
 import {
   groupInvalidationsByUser,
   subtractInvalidations,
@@ -41,6 +42,30 @@ export interface TimesheetMatrix {
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * One owner per instant, per person. Overlap only ever happens within a single
+ * user's own timeline, so users are resolved independently — two people working
+ * the same hour is not a conflict.
+ */
+function resolveSegmentOverlapsPerUser(
+  segments: readonly TimesheetSegmentInput[],
+): TimesheetSegmentInput[] {
+  const byUser = new Map<string, TimesheetSegmentInput[]>();
+  for (const s of segments) {
+    const list = byUser.get(s.userId);
+    if (list) list.push(s);
+    else byUser.set(s.userId, [s]);
+  }
+  const out: TimesheetSegmentInput[] = [];
+  for (const list of byUser.values()) {
+    out.push(...resolveOverlaps(list, (s) => (
+      s.source === 'MANUAL' ? CLAIM_PRIORITY.manual
+        : s.segmentKind === 'IDLE_TRIMMED' ? CLAIM_PRIORITY.idle
+          : CLAIM_PRIORITY.tracked)));
+  }
+  return out;
+}
 
 /** Add `delta` days to a YYYY-MM-DD string. */
 export function addDays(date: string, delta: number): string {
@@ -94,6 +119,13 @@ export function buildTimesheetMatrix(input: {
   const rangeStart = dayWindows[0]!.startMs;
   const rangeEnd = dayWindows[dayWindows.length - 1]!.endMs;
 
+  // An approved manual entry is a real TimeEntry, so it can sit on top of
+  // tracked time — and this loop adds every segment's duration, which counted
+  // those minutes twice and carried the error into payroll's
+  // workedMs + meetingMs + manualMs. Resolve each user's timeline to a single
+  // owner per instant first; observed time wins, manual keeps what is free.
+  const segments = resolveSegmentOverlapsPerUser(input.segments);
+
   const cells: Record<string, Record<string, TimesheetCell>> = {};
   const invalidationsByUser = groupInvalidationsByUser(input.invalidations);
   const ensure = (userId: string, day: string): TimesheetCell => {
@@ -119,7 +151,7 @@ export function buildTimesheetMatrix(input: {
     return cell;
   };
 
-  for (const s of input.segments) {
+  for (const s of segments) {
     if (s.endedAt <= s.startedAt) continue;
     if (s.endedAt <= rangeStart || s.startedAt >= rangeEnd) continue;
     if (s.segmentKind === 'IDLE_TRIMMED') continue;

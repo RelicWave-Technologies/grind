@@ -114,9 +114,13 @@ describe('GET /v1/admin/payroll/monthly', () => {
     await seedEntry({
       userId: member.id,
       source: 'AUTO',
+      // Sits AFTER the work block, not inside it. One agent runs one timer, so
+      // it cannot produce a meeting that overlaps its own tracked work — and
+      // seeding it that way asserted 9 hours of activity inside an 8-hour
+      // window, which is the double count the overlap resolution now refuses.
       segmentKind: 'MEETING',
-      startedAt: new Date('2026-05-04T13:00:00Z'),
-      endedAt: new Date('2026-05-04T14:00:00Z'),
+      startedAt: new Date('2026-05-04T17:00:00Z'),
+      endedAt: new Date('2026-05-04T18:00:00Z'),
     });
     await seedEntry({
       userId: member.id,
@@ -144,6 +148,22 @@ describe('GET /v1/admin/payroll/monthly', () => {
     expect(memberRow.meetingHours).toBe(1);
     expect(memberRow.manualHours).toBe(2);
     expect(memberRow.totalHours).toBe(15);
+
+    // Manual time laid over already-tracked hours must not inflate the total:
+    // 8h of work + a 2h claim inside it is still 8h of work.
+    await seedEntry({
+      userId: member.id,
+      source: 'MANUAL',
+      segmentKind: 'WORK',
+      startedAt: new Date('2026-05-05T09:00:00Z'),
+      endedAt: new Date('2026-05-05T11:00:00Z'),
+    });
+    const after = await request(app)
+      .get('/v1/admin/payroll/monthly?month=2026-05&tz=UTC')
+      .set(bearer(admin.token));
+    const sameRow = after.body.payroll.rows.find((r: { user: { id: string } }) => r.user.id === member.id);
+    expect(sameRow.totalHours).toBe(15);
+    expect(sameRow.manualHours).toBe(2);
   });
 
   it('excludes invalidated time from payroll totals', async () => {

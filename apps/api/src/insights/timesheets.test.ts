@@ -306,3 +306,68 @@ describe('buildTimesheetMatrix — tz handling', () => {
     expect(m).toBeNull();
   });
 });
+
+describe('overlapping manual time is not counted twice', () => {
+  // Reproduces a real day: tracked 10:40-11:37 with an approved manual entry
+  // for 10:45-11:37 sitting on top of it. Summing both reported 110 minutes of
+  // work inside a 57-minute stretch, and payroll adds workedMs + manualMs.
+  const day = '2026-08-10';
+  const tz = 'Asia/Calcutta';
+  const at = (hhmm: string) => `2026-08-10T${hhmm}:00+05:30`;
+
+  it('credits the contested minutes to tracked time, once', () => {
+    const m = buildTimesheetMatrix({
+      from: day, to: day, tz,
+      segments: [
+        seg('u1', 'AUTO', 'WORK', at('10:40'), at('11:37')),
+        seg('u1', 'MANUAL', 'WORK', at('10:45'), at('11:37')),
+      ],
+    })!;
+    const cell = m.cells.u1![day]!;
+    expect(cell.workedMs).toBe(57 * 60_000);
+    expect(cell.manualMs).toBe(0);
+    expect(cell.totalMs).toBe(57 * 60_000);
+  });
+
+  it('keeps the part of a manual entry that falls outside tracked time', () => {
+    const m = buildTimesheetMatrix({
+      from: day, to: day, tz,
+      segments: [
+        seg('u1', 'AUTO', 'WORK', at('10:40'), at('11:00')),
+        seg('u1', 'MANUAL', 'WORK', at('10:45'), at('11:30')),
+      ],
+    })!;
+    const cell = m.cells.u1![day]!;
+    expect(cell.workedMs).toBe(20 * 60_000);
+    expect(cell.manualMs).toBe(30 * 60_000);
+    expect(cell.totalMs).toBe(50 * 60_000);
+  });
+
+  it('lets manual time reclaim a stretch the agent trimmed as idle', () => {
+    // Correcting a bad idle trim is what manual time is for, so idle must not
+    // outrank it — otherwise the claim would vanish rather than land anywhere.
+    const m = buildTimesheetMatrix({
+      from: day, to: day, tz,
+      segments: [
+        seg('u1', 'AUTO', 'IDLE_TRIMMED', at('14:00'), at('14:30')),
+        seg('u1', 'MANUAL', 'WORK', at('14:00'), at('14:30')),
+      ],
+    })!;
+    const cell = m.cells.u1![day]!;
+    expect(cell.manualMs).toBe(30 * 60_000);
+    expect(cell.totalMs).toBe(30 * 60_000);
+  });
+
+  it('resolves each user separately', () => {
+    // Two people working the same hour is not a conflict.
+    const m = buildTimesheetMatrix({
+      from: day, to: day, tz,
+      segments: [
+        seg('u1', 'AUTO', 'WORK', at('10:00'), at('11:00')),
+        seg('u2', 'AUTO', 'WORK', at('10:00'), at('11:00')),
+      ],
+    })!;
+    expect(m.cells.u1![day]!.totalMs).toBe(60 * 60_000);
+    expect(m.cells.u2![day]!.totalMs).toBe(60 * 60_000);
+  });
+});

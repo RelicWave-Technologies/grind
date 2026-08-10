@@ -1,4 +1,5 @@
 import { prisma } from '@grind/db';
+import { carveManualWindow, segmentCreateData } from './carve';
 import { ulid } from 'ulid';
 import {
   buildCancelledCard,
@@ -199,25 +200,34 @@ export async function decideManualTimeRequest(args: {
       if (existingEntry) {
         timeEntryId = existingEntry.id;
       } else {
-        const teId = ulid();
-        const attendeeIds = req.attendees.map((a) => a.userId);
-        await tx.timeEntry.create({
-          data: {
-            id: teId,
-            clientUuid,
-            userId: req.userId,
-            larkTaskGuid: req.larkTaskGuid,
-            source: 'MANUAL',
-            startedAt: req.requestedStart,
-            endedAt: req.requestedEnd,
-            shiftIdAtStart: requesterShift?.shiftId ?? null,
-            segments: {
-              create: [{ id: ulid(), kind: 'WORK', startedAt: req.requestedStart, endedAt: req.requestedEnd }],
-            },
-            attendees: attendeeIds.length ? { create: attendeeIds.map((userId) => ({ userId })) } : undefined,
-          },
+        // Store only what is not already tracked. Approving a window the agent
+        // already covered must not add those minutes a second time.
+        const { slices } = await carveManualWindow(tx, {
+          userId: req.userId,
+          start: req.requestedStart,
+          end: req.requestedEnd,
         });
-        timeEntryId = teId;
+        if (slices.length > 0) {
+          const teId = ulid();
+          const attendeeIds = req.attendees.map((a) => a.userId);
+          await tx.timeEntry.create({
+            data: {
+              id: teId,
+              clientUuid,
+              userId: req.userId,
+              larkTaskGuid: req.larkTaskGuid,
+              source: 'MANUAL',
+              startedAt: new Date(slices[0]!.startedAt),
+              endedAt: new Date(slices[slices.length - 1]!.endedAt),
+              shiftIdAtStart: requesterShift?.shiftId ?? null,
+              segments: { create: segmentCreateData(slices, ulid) },
+              attendees: attendeeIds.length ? { create: attendeeIds.map((userId) => ({ userId })) } : undefined,
+            },
+          });
+          timeEntryId = teId;
+        }
+        // Nothing free → the decision still stands, it simply adds no time.
+        // The request row keeps what was asked for, so the record is honest.
       }
     }
 

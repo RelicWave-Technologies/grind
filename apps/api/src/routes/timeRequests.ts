@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { prisma } from '@grind/db';
 import { ulid } from 'ulid';
+import { carveManualWindow, segmentCreateData } from '../manualTime/carve';
 import {
   CreateManualTimeRequest,
   ListManualTimeRequestsQuery,
@@ -217,27 +218,34 @@ timeRequestsRouter.post('/', validate(CreateManualTimeRequest, 'body'), async (r
     if (autoApprove) {
       const now = new Date();
       const created = await prisma.$transaction(async (tx) => {
-        const teId = ulid();
-        await tx.timeEntry.create({
-          data: {
-            id: teId,
-            clientUuid: `mtr-auto-${ulid()}`,
-            userId: targetUserId,
-            larkTaskGuid: body.larkTaskGuid ?? null,
-            source: 'MANUAL',
-            startedAt: new Date(start),
-            endedAt: new Date(end),
-            shiftIdAtStart: requester.shiftId ?? null,
-            segments: {
-              create: [
-                { id: ulid(), kind: 'WORK', startedAt: new Date(start), endedAt: new Date(end) },
-              ],
-            },
-            attendees: attendeeIds.length
-              ? { create: attendeeIds.map((uid) => ({ userId: uid })) }
-              : undefined,
-          },
+        // Store only the stretches this user has no real time for yet. A
+        // supervisor entry that lands on top of tracked time must not add
+        // those minutes twice — the totals and payroll sum segments.
+        const { slices } = await carveManualWindow(tx, {
+          userId: targetUserId,
+          start: new Date(start),
+          end: new Date(end),
         });
+        let teId: string | null = null;
+        if (slices.length > 0) {
+          teId = ulid();
+          await tx.timeEntry.create({
+            data: {
+              id: teId,
+              clientUuid: `mtr-auto-${ulid()}`,
+              userId: targetUserId,
+              larkTaskGuid: body.larkTaskGuid ?? null,
+              source: 'MANUAL',
+              startedAt: new Date(slices[0]!.startedAt),
+              endedAt: new Date(slices[slices.length - 1]!.endedAt),
+              shiftIdAtStart: requester.shiftId ?? null,
+              segments: { create: segmentCreateData(slices, ulid) },
+              attendees: attendeeIds.length
+                ? { create: attendeeIds.map((uid) => ({ userId: uid })) }
+                : undefined,
+            },
+          });
+        }
         const row = await tx.manualTimeRequest.create({
           data: {
             clientUuid: body.clientUuid,
@@ -255,7 +263,7 @@ timeRequestsRouter.post('/', validate(CreateManualTimeRequest, 'body'), async (r
             decidedById: req.user!.sub,
             decisionSource: 'AUTO_APPROVE',
             decidedReason: `Added by ${actor.name}`,
-            timeEntryId: teId,
+            timeEntryId: teId,   // null when the window was already fully tracked
             attendees: attendeeIds.length
               ? { create: attendeeIds.map((uid) => ({ userId: uid })) }
             : undefined,
