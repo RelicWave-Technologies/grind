@@ -47,19 +47,33 @@ function Card({ src, alt, w, h }: { src: string; alt: string; w: number; h: numb
 }
 
 const LATEST: Release = {
-  id: 'beta-28',
-  version: 'beta.28',
-  name: 'the reliability update',
-  meta: 'JUL 17, 2026 · MAC + WINDOWS',
+  id: 'beta-29',
+  version: 'beta.29',
+  name: 'the honest clock update',
+  meta: 'AUG 10, 2026 · MAC + WINDOWS',
   changes: [
-    { tag: 'improved', text: <>macOS permission recovery got serious. If Screen Recording access vanishes mid-day, Timo pauses, tells you, and waits for you to say go. No counting in the dark.</> },
-    { tag: 'improved', text: <>The popups formed an orderly queue. Idle, welcome-back and permission prompts now share one calm window and take turns — no stacking, no duplicates, and an outdated prompt can't touch your timer.</> },
-    { tag: 'new', text: <>Approved manual time shows up in Today. Desktop and dashboard finally tell the same story about your day.</> },
-    { tag: 'fixed', text: <>Windows launch-at-login is now checked against what Windows will actually do — not what it promised.</> },
+    { tag: 'fixed', text: <>Your timer runs on a stopwatch now, not the wall clock. On a laptop whose clock ran fast, putting that clock right used to stop the timer dead for as long as it had been wrong — real minutes, gone quietly. Nothing can move a stopwatch, so nothing can stop your count.</> },
+    { tag: 'new', text: <>Timo speaks up when you are working with the timer off. Ten minutes at your desk mid-shift with nothing running and it asks, once. Step out for lunch and it stays quiet — it watches the time you were actually there, not the clock on the wall.</> },
+    { tag: 'fixed', text: <>Launch at login works on Windows, for real this time. It is checked against the entry Windows will actually run, and it has stopped asking to be repaired when nothing is broken.</> },
+    { tag: 'fixed', text: <>No more waking up on beta.28. The updater refused to go backwards on paper; now it refuses in practice.</> },
+    { tag: 'improved', text: <>Screenshots stopped stepping on your typing. The image work moved off the thread that draws the app.</> },
+    { tag: 'fixed', text: <>Windows lost a stray File / Edit / View menu bar it never had a use for.</> },
   ],
 };
 
 const JULY: Release[] = [
+  {
+    id: 'beta-28',
+    version: 'beta.28',
+    name: 'the reliability update',
+    meta: 'JUL 17, 2026 · MAC + WINDOWS',
+    changes: [
+      { tag: 'improved', text: <>macOS permission recovery got serious. If Screen Recording access vanishes mid-day, Timo pauses, tells you, and waits for you to say go. No counting in the dark.</> },
+      { tag: 'improved', text: <>The popups formed an orderly queue. Idle, welcome-back and permission prompts now share one calm window and take turns — no stacking, no duplicates, and an outdated prompt can't touch your timer.</> },
+      { tag: 'new', text: <>Approved manual time shows up in Today. Desktop and dashboard finally tell the same story about your day.</> },
+      { tag: 'fixed', text: <>Windows launch-at-login is now checked against what Windows will actually do — not what it promised.</> },
+    ],
+  },
   {
     id: 'beta-27',
     version: 'beta.27',
@@ -259,6 +273,7 @@ const FOUNDATION: Array<[string, ReactNode]> = [
 ];
 
 const MARQUEE = [
+  'BETA.29 — HONEST CLOCK',
   'BETA.28 — RELIABILITY',
   'BETA.27 — ZERO LOSS',
   'BETA.26 — UNSHIPPED',
@@ -374,8 +389,8 @@ export function ChangelogScreen() {
             <p className="cl-eyebrow">TIMO — RELEASE NOTES</p>
             <h1 className="cl-display-xl">Changelog</h1>
             <p className="cl-hero-lead">
-              Every Timo release, in one place. Twenty-eight builds in
-              twenty-five days — some added features, some fixed what the
+              Every Timo release, in one place. Twenty-nine builds in
+              forty-nine days — some added features, some fixed what the
               features broke. All of it's here.
             </p>
             <div className="cl-hero-ctas">
