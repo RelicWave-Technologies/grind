@@ -1,3 +1,4 @@
+import { powerMonitor } from 'electron';
 import { broadcast } from '../broadcast';
 import {
   onActivityCaptureStatusChange,
@@ -7,13 +8,20 @@ import { onScreenHealthChange } from './capture';
 import { sendHeartbeatNow } from './heartbeat';
 import { getTimerService } from './timer';
 import { offerPermissionResume } from './trackingCommands';
-import { getTrackingReadinessService, type ReadinessInspection } from './trackingReadiness';
+import {
+  getTrackingReadinessService,
+  isInconclusiveScreenCapture,
+  type ReadinessInspection,
+} from './trackingReadiness';
 import { log } from '../logger';
 
 const CHECK_INTERVAL_MS = 2_000;
 const HOOK_START_GRACE_MS = 3_000;
 const SCREEN_FAILURE_GRACE_MS = 10_000;
 const SCREEN_FAILURE_MIN_CHECKS = 3;
+// User counts as "active" if they produced input within this window. Blank
+// captures outside it are treated as display sleep, not revocation.
+const IDLE_STATE_THRESHOLD_SEC = 30;
 
 let timer: NodeJS.Timeout | null = null;
 let removeScreenListener: (() => void) | null = null;
@@ -43,6 +51,16 @@ function shouldDeferScreenFailure(inspection: ReadinessInspection, now: number):
   if (isDefinitiveScreenPermissionLoss(inspection)) {
     resetScreenFailure();
     return false;
+  }
+
+  // Blank captures while the user is away from the machine are a sleeping
+  // display, not revocation — displays produce blank frames when powered off,
+  // and plain display sleep fires no power event. Defer indefinitely without
+  // consuming the confirmation window; a real loss keeps failing once the
+  // user is active again.
+  if (isInconclusiveScreenCapture(inspection, powerMonitor.getSystemIdleState(IDLE_STATE_THRESHOLD_SEC))) {
+    resetScreenFailure();
+    return true;
   }
 
   if (screenFailureStartedAt === null) {

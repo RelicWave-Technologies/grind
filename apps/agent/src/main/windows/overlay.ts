@@ -41,9 +41,6 @@ export interface OverlayOptions extends Size {
   /** OS corner rounding. Set false to let CSS own the shape completely, so a
    *  DWM/AppKit corner radius can't mismatch the surface's own border-radius. */
   roundedCorners?: boolean;
-  /** Interactive overlays must be capable of becoming key when clicked.
-   * Passive surfaces use an NSPanel on macOS so they never activate the app. */
-  activation?: 'passive' | 'interactive';
   /** Most overlays share the global wake/display reassertion registry. A
    * coordinator-owned window can opt out when its own state controls whether
    * it should float (for example, while yielding to System Settings). */
@@ -52,9 +49,6 @@ export interface OverlayOptions extends Size {
 
 // Live overlays — used by reassertAllOverlays() on wake / display change.
 const registry = new Set<BrowserWindow>();
-// Electron briefly transforms a normal macOS app into a UIElement application
-// while applying fullscreen-Space membership. Do that once per window during
-// normal presentation; wake/display recovery can explicitly refresh it.
 const workspaceVisibilityConfigured = new WeakSet<BrowserWindow>();
 
 export interface OverlayFloatOptions {
@@ -72,8 +66,9 @@ function loadRoute(w: BrowserWindow, hash: string): void {
 /**
  * Create a frameless, transparent overlay window with shared hardened
  * webPreferences. Auto-registers for float re-assertion and deregisters on
- * close. Passive overlays use NSPanel; interactive overlays can become key
- * windows through explicit user interaction.
+ * close. Every overlay is a non-activating NSPanel on macOS: panels float
+ * over other apps' fullscreen Spaces and become key for clicks without
+ * activating the app (which would make macOS switch Spaces).
  */
 export function createOverlayWindow(opts: OverlayOptions): BrowserWindow {
   const win = new BrowserWindow({
@@ -91,9 +86,11 @@ export function createOverlayWindow(opts: OverlayOptions): BrowserWindow {
     fullscreenable: false,
     hasShadow: opts.hasShadow ?? true,
     roundedCorners: opts.roundedCorners ?? true,
-    // NSPanel is correct for passive surfaces, but cannot reliably become the
-    // key window for a permission flow opened from an already-visible window.
-    type: process.platform === 'darwin' && opts.activation !== 'interactive' ? 'panel' : undefined,
+    // Non-activating NSPanel: floats over other apps' fullscreen Spaces and
+    // accepts clicks/key status without activating the app — activating a
+    // regular app from another app's fullscreen Space makes macOS switch
+    // Spaces, yanking the user to the desktop.
+    type: process.platform === 'darwin' ? 'panel' : undefined,
     webPreferences: {
       contextIsolation: true,
       sandbox: true,
@@ -112,11 +109,11 @@ export function createOverlayWindow(opts: OverlayOptions): BrowserWindow {
 /**
  * Canonical "float over everything, on every Space" assertion.
  *
- * `setVisibleOnAllWorkspaces` must use Electron's default macOS process-type
- * transition. Skipping that transition is only valid for apps which are
- * already UIElement applications; Timo is a normal foreground app. Because
- * the transition may briefly hide the Dock, it is applied once per window and
- * explicitly refreshed only after wake/unlock/display changes.
+ * Overlay configuration must not mutate the whole application's macOS process
+ * type. Electron's default all-workspaces path hides/shows the Dock while it
+ * changes activation policy; repeating that path creates stale Dock tiles.
+ * Blocking prompts activate their normal BrowserWindow instead of transforming
+ * the whole process. Every assertion therefore preserves Timo's app identity.
  */
 export function assertOverlayFloat(
   win: BrowserWindow | null,
@@ -124,8 +121,14 @@ export function assertOverlayFloat(
 ): void {
   if (!win || win.isDestroyed()) return;
   win.setAlwaysOnTop(true, 'screen-saver');
-  if (options.refreshWorkspaceVisibility || !workspaceVisibilityConfigured.has(win)) {
-    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  if (
+    options.refreshWorkspaceVisibility
+    || !workspaceVisibilityConfigured.has(win)
+  ) {
+    win.setVisibleOnAllWorkspaces(true, {
+      visibleOnFullScreen: true,
+      skipTransformProcessType: true,
+    });
     workspaceVisibilityConfigured.add(win);
   }
 }
