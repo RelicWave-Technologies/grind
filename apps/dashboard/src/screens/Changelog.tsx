@@ -73,6 +73,7 @@ const JULY: Release[] = [
       { tag: 'new', text: <>Approved manual time shows up in Today. Desktop and dashboard finally tell the same story about your day.</> },
       { tag: 'fixed', text: <>Windows launch-at-login is now checked against what Windows will actually do — not what it promised.</> },
     ],
+    extra: <Card src="/brand/timo-card-beta28.gif?v=4" alt="Animated scene: a reliability checklist gets calmly ticked while Timo nods along" w={520} h={210} />,
   },
   {
     id: 'beta-27',
@@ -426,7 +427,7 @@ export function ChangelogScreen() {
               <h2 className="cl-headline">{LATEST.version} — {LATEST.name}</h2>
               <p className="cl-caption cl-block-meta">{LATEST.meta}</p>
               <ChangeList changes={LATEST.changes} />
-              <Card src="/brand/timo-card-beta28.gif?v=3" alt="Animated scene: a reliability checklist gets calmly ticked while Timo nods along" w={520} h={210} />
+              <Card src="/brand/timo-card-beta29.gif?v=1" alt="Animated scene: two timelines of the same shift — the old one loses a stretch of minutes when the clock is corrected, the new one runs unbroken and keeps them" w={520} h={210} />
               <p className="cl-block-note">
                 You already have this one — Timo updates itself. It checks after
                 launch, and again (quietly) when you open Settings. That's the
