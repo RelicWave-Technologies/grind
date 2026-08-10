@@ -53,6 +53,7 @@ import type { LaunchAtLoginHealth } from '../shared/launchAtLogin';
 import { migrateLegacyUserData } from './services/legacyMigration';
 import { broadcast } from './broadcast';
 import { readyToWorkReason } from './readyToWork';
+import { installApplicationMenu } from './applicationMenu';
 import {
   offerPermissionStart,
   offerPermissionSetupOnStartup,
@@ -168,6 +169,9 @@ function notifyStartupHealth(state: LaunchAtLoginHealth): void {
 }
 
 app.whenReady().then(async () => {
+  // Before any window exists, so the stray Windows menu bar never paints.
+  installApplicationMenu();
+
   // Recover a session stranded by a prior app identity (Grind->Timo) BEFORE any
   // token read. Windows-only: that's where the productName-based userData dir
   // moved and orphaned tokens.bin.
