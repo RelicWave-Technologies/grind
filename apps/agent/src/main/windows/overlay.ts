@@ -31,9 +31,29 @@ export interface Size {
   height: number;
 }
 
+/**
+ * Precedence between overlays.
+ *
+ * `ambient` is the always-there furniture (timer bar, tray popover, shift
+ * toast). `prompt` is a surface that is asking the user for something and must
+ * not be buried by the furniture.
+ *
+ * Both ranks float; the rank decides who wins when they overlap. It is enforced
+ * two ways because one is not portable:
+ *
+ *   - macOS: a relative window level, so an ambient `moveTop()` physically
+ *     cannot order itself above a prompt.
+ *   - everywhere (and the only mechanism on Windows, where Electron collapses
+ *     every non-normal always-on-top level into one topmost band): ambient
+ *     raises are suppressed while a prompt is being held. See `holdPrompt()`.
+ */
+export type OverlayRank = 'ambient' | 'prompt';
+
 export interface OverlayOptions extends Size {
   /** Renderer hash-route (e.g. 'floating', 'idle', 'ready-to-work', 'popover'). */
   hash: string;
+  /** Precedence against other overlays. Defaults to `ambient`. */
+  rank?: OverlayRank;
   /** Native OS window shadow. Turn OFF for a surface that draws its own CSS
    *  shadow inside transparent padding — otherwise the OS backing/shadow is
    *  drawn on the full window rect and peeks past the surface's rounded corners. */
@@ -50,6 +70,34 @@ export interface OverlayOptions extends Size {
 // Live overlays — used by reassertAllOverlays() on wake / display change.
 const registry = new Set<BrowserWindow>();
 const workspaceVisibilityConfigured = new WeakSet<BrowserWindow>();
+const ranks = new WeakMap<BrowserWindow, OverlayRank>();
+
+// True while a prompt is on screen and being actively held on top. Ambient
+// overlays stand down for the duration — see OverlayRank.
+let promptHeld = false;
+
+/** macOS window level offset per rank. Ignored on Windows/Linux, where Electron
+ *  has a single topmost band and precedence comes from suppression instead. */
+function relativeLevelFor(rank: OverlayRank): number {
+  return rank === 'prompt' ? 1 : 0;
+}
+
+export function overlayRankOf(win: BrowserWindow): OverlayRank {
+  return ranks.get(win) ?? 'ambient';
+}
+
+/**
+ * Mark that a prompt is being held on top. While held, `ambientRaiseAllowed()`
+ * is false and ambient overlays skip their re-ordering, so the 1 Hz timer-bar
+ * tick cannot walk back over a prompt the user is supposed to answer.
+ */
+export function holdPrompt(held: boolean): void {
+  promptHeld = held;
+}
+
+export function ambientRaiseAllowed(): boolean {
+  return !promptHeld;
+}
 
 export interface OverlayFloatOptions {
   refreshWorkspaceVisibility?: boolean;
@@ -98,6 +146,7 @@ export function createOverlayWindow(opts: OverlayOptions): BrowserWindow {
       preload: path.join(__dirname, '../preload/index.cjs'),
     },
   });
+  ranks.set(win, opts.rank ?? 'ambient');
   loadRoute(win, opts.hash);
   if (opts.registerForReassert !== false) {
     registry.add(win);
@@ -112,15 +161,21 @@ export function createOverlayWindow(opts: OverlayOptions): BrowserWindow {
  * Overlay configuration must not mutate the whole application's macOS process
  * type. Electron's default all-workspaces path hides/shows the Dock while it
  * changes activation policy; repeating that path creates stale Dock tiles.
- * Blocking prompts activate their normal BrowserWindow instead of transforming
- * the whole process. Every assertion therefore preserves Timo's app identity.
+ * `skipTransformProcessType` keeps Timo's app identity intact. Note that every
+ * overlay — prompts included — is a non-activating NSPanel; nothing here
+ * activates the app.
+ *
+ * ORDER MATTERS. The always-on-top level is asserted LAST, after the
+ * all-workspaces call, because that call reconfigures the window's collection
+ * behaviour and is the prime suspect for the level being silently reset —
+ * the failure users see as "the prompt is still there but ordinary windows are
+ * now on top of it". Whoever writes last wins, so the level writes last.
  */
 export function assertOverlayFloat(
   win: BrowserWindow | null,
   options: OverlayFloatOptions = {},
 ): void {
   if (!win || win.isDestroyed()) return;
-  win.setAlwaysOnTop(true, 'screen-saver');
   if (
     options.refreshWorkspaceVisibility
     || !workspaceVisibilityConfigured.has(win)
@@ -131,6 +186,7 @@ export function assertOverlayFloat(
     });
     workspaceVisibilityConfigured.add(win);
   }
+  win.setAlwaysOnTop(true, 'screen-saver', relativeLevelFor(overlayRankOf(win)));
 }
 
 /** Re-assert float on every live overlay (wake / Space / display change). */

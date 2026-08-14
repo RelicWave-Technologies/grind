@@ -1,7 +1,9 @@
 import { beforeEach, describe, it, expect, vi } from 'vitest';
 import {
+  ambientRaiseAllowed,
   assertOverlayFloat,
   center,
+  holdPrompt,
   topRight,
   bottomRight,
   trayPopoverPoint,
@@ -27,12 +29,29 @@ describe('assertOverlayFloat', () => {
     assertOverlayFloat(win);
 
     expect(win.setAlwaysOnTop).toHaveBeenCalledTimes(2);
-    expect(win.setAlwaysOnTop).toHaveBeenLastCalledWith(true, 'screen-saver');
+    expect(win.setAlwaysOnTop).toHaveBeenLastCalledWith(true, 'screen-saver', 0);
     expect(win.setVisibleOnAllWorkspaces).toHaveBeenCalledOnce();
     expect(win.setVisibleOnAllWorkspaces).toHaveBeenCalledWith(
       true,
       { visibleOnFullScreen: true, skipTransformProcessType: true },
     );
+  });
+
+  it('asserts the always-on-top level LAST so nothing can undo it', () => {
+    const order: string[] = [];
+    const win = {
+      isDestroyed: vi.fn(() => false),
+      setAlwaysOnTop: vi.fn(() => void order.push('alwaysOnTop')),
+      setVisibleOnAllWorkspaces: vi.fn(() => void order.push('allWorkspaces')),
+    } as unknown as Electron.BrowserWindow;
+
+    assertOverlayFloat(win);
+
+    // The all-workspaces call reconfigures collection behaviour and is the prime
+    // suspect for silently resetting the window level. Whoever writes last wins,
+    // so the level must write last — otherwise ordinary windows end up on top of
+    // a screen-saver-level prompt.
+    expect(order).toEqual(['allWorkspaces', 'alwaysOnTop']);
   });
 
   it('refreshes fullscreen-Space membership after wake or display changes', () => {
@@ -50,6 +69,22 @@ describe('assertOverlayFloat', () => {
       true,
       { visibleOnFullScreen: true, skipTransformProcessType: true },
     );
+  });
+});
+
+describe('overlay rank', () => {
+  it('makes ambient overlays stand down while a prompt is held', () => {
+    holdPrompt(false);
+    expect(ambientRaiseAllowed()).toBe(true);
+
+    // The timer bar re-orders itself once a second. While a prompt is up that
+    // must not happen, or the pill climbs back over the question the user is
+    // being asked — and on Windows there is no level separation to stop it.
+    holdPrompt(true);
+    expect(ambientRaiseAllowed()).toBe(false);
+
+    holdPrompt(false);
+    expect(ambientRaiseAllowed()).toBe(true);
   });
 });
 

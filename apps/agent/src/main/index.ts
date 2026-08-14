@@ -29,7 +29,6 @@ import { dismissFloatingBar, reclampFloatingBar, syncFloatingBar } from './float
 import { reassertAllOverlays } from './windows/overlay';
 import { ensureRegularMacApplication } from './windows/macAppIdentity';
 import { togglePopover, hidePopover } from './popover';
-import { reassertAttentionWindow } from './attentionWindow';
 import { getTrackingAttentionCoordinator } from './services/trackingAttention';
 import { ShiftMonitor } from './services/shift';
 import { onAuthChange } from './services/apiClient';
@@ -319,16 +318,15 @@ app.whenReady().then(async () => {
       attention.beginMachineAway();
     },
     onWake: () => {
+      // Only the ambient overlays need poking here. An active prompt is kept up
+      // by the attention coordinator's hold loop, which notices a dropped float
+      // on its next tick regardless of which event caused it.
       reassertAllOverlays();
-      reassertAttentionWindow({ refreshWorkspaceVisibility: true });
       checkTrackingPermissionsNow();
       void drainTimerSyncNow('wake');
       void refreshTodayLedger('wake');
       void drainActivityNow('wake');
     },
-    // `resume` can arrive while macOS still owns the lock screen. Reassert once
-    // more on the distinct unlock signal without running timer recovery twice.
-    onVisibilityReturn: () => reassertAttentionWindow({ refreshWorkspaceVisibility: true }),
     // Returned from a lock/sleep that stopped a running timer → offer to resume.
     onReturnFromAway: (info) => {
       if (attention.isPermissionActive()) offerPermissionStart(info.larkTaskGuid);
@@ -342,16 +340,13 @@ app.whenReady().then(async () => {
   screen.on('display-removed', () => {
     reclampFloatingBar();
     reassertAllOverlays();
-    reassertAttentionWindow({ refreshWorkspaceVisibility: true });
   });
   screen.on('display-metrics-changed', () => {
     reclampFloatingBar();
     reassertAllOverlays();
-    reassertAttentionWindow({ refreshWorkspaceVisibility: true });
   });
   screen.on('display-added', () => {
     reassertAllOverlays();
-    reassertAttentionWindow({ refreshWorkspaceVisibility: true });
   });
 
   onAgentConfigChange(({ previous, current }) => {
