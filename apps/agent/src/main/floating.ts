@@ -6,7 +6,6 @@ import { FloatingBarVisibilityPolicy } from './services/floatingBarVisibility';
 import { resolvePosition, type Rect } from './windows/floatingBarPosition';
 import {
   createOverlayWindow,
-  assertOverlayFloat,
   activeWorkArea,
   bottomRight,
   keepOnTop,
@@ -92,20 +91,9 @@ function ensure(): BrowserWindow {
     win = null;
   });
 
-  reassertFloating();
   return win;
 }
 
-/** Keep it above everything, including fullscreen apps and across Spaces. */
-export function reassertFloating(): void {
-  assertOverlayFloat(win);
-}
-
-/**
- * Show the bar (idempotent). Honors the visibility preference: if the user
- * disabled it, this does nothing. Does NOT reposition an already-placed bar —
- * that's what kept snapping it back to the corner.
- */
 /**
  * Show the bar (idempotent). This is called once a second off the main tick, so
  * it must stay cheap: `keepOnTop` is a no-op once the bar is already being held,

@@ -188,7 +188,6 @@ function stopKeeper(): void {
 export function keepOnTop(win: BrowserWindow | null): void {
   if (!win || win.isDestroyed() || kept.has(win)) return;
   kept.add(win);
-  win.once('closed', () => kept.delete(win));
   raiseNow(win);
   startKeeper();
 }
@@ -264,6 +263,12 @@ export function createOverlayWindow(opts: OverlayOptions): BrowserWindow {
     },
   });
   ranks.set(win, opts.rank ?? 'ambient');
+  // Attached once, here — NOT in keepOnTop. A surface can be kept and released
+  // many times over a session (the tray popover does it on every click), and
+  // registering the cleanup per keep stacked a listener that never fires on a
+  // window that never closes, tripping Node's max-listeners warning and leaking
+  // for the lifetime of the process.
+  win.on('closed', () => releaseOnTop(win));
   loadRoute(win, opts.hash);
   if (opts.registerForReassert !== false) {
     registry.add(win);
@@ -306,9 +311,26 @@ export function assertOverlayFloat(
   win.setAlwaysOnTop(true, 'screen-saver', relativeLevelFor(overlayRankOf(win)));
 }
 
-/** Re-assert float on every live overlay (wake / Space / display change). */
+/**
+ * Re-assert float on every live overlay (wake / Space / display change).
+ *
+ * Covers the keeper's windows as well as the reassert registry, and they are
+ * NOT the same set — a coordinator-owned surface like the attention prompt opts
+ * out of the registry so its own state decides whether it should float.
+ *
+ * That distinction matters because the keeper cannot do this itself. Its 1 Hz
+ * raise deliberately calls `assertOverlayFloat` without
+ * `refreshWorkspaceVisibility`, since Electron's all-workspaces path touches
+ * Dock/activation state and must not run at that rate — and the WeakSet inside
+ * makes every call after the first a no-op. So a held prompt would keep its
+ * always-on-top level across a sleep but silently lose the collection
+ * behaviours that put it above a fullscreen app and on every Space.
+ */
 export function reassertAllOverlays(): void {
-  for (const w of registry) {
+  const seen = new Set<BrowserWindow>();
+  for (const w of [...registry, ...kept]) {
+    if (seen.has(w) || w.isDestroyed()) continue;
+    seen.add(w);
     assertOverlayFloat(w, { refreshWorkspaceVisibility: true });
   }
 }

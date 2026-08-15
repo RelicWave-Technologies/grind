@@ -33,6 +33,7 @@ import {
   center,
   createOverlayWindow,
   keepOnTop,
+  reassertAllOverlays,
   releaseOnTop,
   topRight,
   bottomRight,
@@ -180,6 +181,51 @@ describe('overlay keeper', () => {
     __keeperTickForTests();
 
     expect(win.moveTop).not.toHaveBeenCalled();
+  });
+
+  it('refreshes workspace visibility for KEPT windows, not just registry ones', () => {
+    // Regression: the attention prompt opts out of the reassert registry, and
+    // the keeper's 1 Hz raise deliberately skips the all-workspaces call. So a
+    // held prompt kept its always-on-top level across a sleep but silently lost
+    // the collection behaviours that put it above a fullscreen app — until this.
+    const prompt = createOverlayWindow({
+      width: 1, height: 1, hash: 'attention', rank: 'prompt', registerForReassert: false,
+    });
+    keepOnTop(prompt);
+    vi.mocked(prompt.setVisibleOnAllWorkspaces).mockClear();
+
+    reassertAllOverlays();
+
+    expect(prompt.setVisibleOnAllWorkspaces).toHaveBeenCalledWith(
+      true,
+      { visibleOnFullScreen: true, skipTransformProcessType: true },
+    );
+  });
+
+  it('never re-asserts the same overlay twice in one pass', () => {
+    const win = createOverlayWindow({ width: 1, height: 1, hash: 'floating' });
+    keepOnTop(win);
+    vi.mocked(win.setVisibleOnAllWorkspaces).mockClear();
+
+    // In the registry AND kept — it must not be visited once per set.
+    reassertAllOverlays();
+
+    expect(win.setVisibleOnAllWorkspaces).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not stack a listener each time a surface is re-kept', () => {
+    // The tray popover keeps on every click and releases on blur. Registering
+    // the cleanup per keep leaked a listener per toggle on a window that never
+    // closes — it belongs on creation, once.
+    const win = createOverlayWindow({ width: 1, height: 1, hash: 'popover' });
+    const onCalls = vi.mocked(win.on).mock.calls.length;
+
+    for (let i = 0; i < 20; i += 1) {
+      keepOnTop(win);
+      releaseOnTop(win);
+    }
+
+    expect(vi.mocked(win.on).mock.calls.length).toBe(onCalls);
   });
 
   it('drops a destroyed overlay instead of calling into it', () => {

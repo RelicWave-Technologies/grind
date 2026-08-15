@@ -336,6 +336,10 @@ app.whenReady().then(async () => {
       void refreshTodayLedger('wake');
       void drainActivityNow('wake');
     },
+    // `resume` can arrive while macOS still owns the lock screen, where the
+    // collection behaviours do not stick. Refresh once more on the distinct
+    // unlock signal, without re-running timer recovery.
+    onVisibilityReturn: () => reassertAllOverlays(),
     // Returned from a lock/sleep that stopped a running timer → offer to resume.
     onReturnFromAway: (info) => {
       if (attention.isPermissionActive()) offerPermissionStart(info.larkTaskGuid);
