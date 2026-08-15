@@ -11,6 +11,7 @@ import { flushActivity } from './sync';
 import { ActivitySyncDrain, type ActivitySyncDrainReason, type ActivitySyncDrainResult } from './syncDrain';
 import { hasAccessibilityAccess } from '../permissions';
 import { getCapturePolicy } from '../agentConfig';
+import { serverAlignedNow } from '../serverClock';
 import { log } from '../../logger';
 import { getWorkspaceTimeContext } from '../workspaceTime';
 import type { PolicyFlags } from '@grind/types';
@@ -186,12 +187,14 @@ export function startActivityCapture(): void {
     return;
   }
   getStore();
-  sealer = new MinuteSealer({ now: () => Date.now(), persist: persistSample });
+  // bucketStart is the key the server upserts on and filters by window, so it
+  // has to share a clock with the entries it is evidence for.
+  sealer = new MinuteSealer({ now: () => serverAlignedNow(), persist: persistSample });
   sealer.setRecording(recording, recordingEntryId); // seed current state
 
   uIOhook.on('keydown', () => {
     emitTrackedInputActivity();
-    sealer!.onKey(Date.now());
+    sealer!.onKey(serverAlignedNow());
   });
   uIOhook.on('mousedown', () => {
     emitTrackedInputActivity();
@@ -202,7 +205,7 @@ export function startActivityCapture(): void {
     sealer!.onScroll();
   });
   uIOhook.on('mousemove', (e) => {
-    const t = Date.now();
+    const t = serverAlignedNow();
     if (t - lastMoveTs < MOVE_THROTTLE_MS) return;
     lastMoveTs = t;
     emitTrackedInputActivity();
@@ -221,7 +224,7 @@ export function startActivityCapture(): void {
     if (sealer!.tick() == null) {
       // Empty/duplicate minute — still bound the window tracker so it can't
       // drift even during long idle stretches.
-      activeWindow.prune(Math.floor(Date.now() / 60_000) * 60_000);
+      activeWindow.prune(Math.floor(serverAlignedNow() / 60_000) * 60_000);
     }
   }, 60_000);
 }

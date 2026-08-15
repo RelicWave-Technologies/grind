@@ -14,6 +14,7 @@ import { activityPercent } from '../activity/percent';
 import { SCREENSHOT_RETENTION_DAYS } from '../../env';
 import { getScreenshotIntervalSec } from '../agentConfig';
 import { type CaptureHealth } from '../permissions';
+import { serverAlignedNow } from '../serverClock';
 import { log } from '../../logger';
 import { broadcastScreenshotChange } from './events';
 
@@ -170,7 +171,7 @@ async function pruneEmptyDirs(root: string): Promise<void> {
  * (so the gallery never shows a broken thumbnail). Idempotent — safe to run
  * on every boot and daily thereafter.
  */
-export async function runScreenshotRetention(now = Date.now()): Promise<void> {
+export async function runScreenshotRetention(now = serverAlignedNow()): Promise<void> {
   try {
     const root = screenshotsRoot();
     const filesOnDisk = await listWebpFiles(root);

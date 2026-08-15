@@ -97,6 +97,7 @@ async function checkNow(): Promise<void> {
     return;
   }
 
+  // eslint-disable-next-line no-restricted-syntax -- device<->device: compared against accruingSince/lastHealthyAt from this same clock
   const now = Date.now();
   if (activeEntryId !== status.entryId || accruingSince === null) {
     activeEntryId = status.entryId;
