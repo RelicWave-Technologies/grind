@@ -1,10 +1,10 @@
 import Database from 'better-sqlite3';
-import { app } from 'electron';
+import { app, powerMonitor } from 'electron';
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import { ScreenshotStore, type ScreenshotUploadSummary } from './store';
 import { captureNow, thumbDataUrl, fullDataUrl } from './capture';
-import { nextDelayMs } from './scheduler';
+import { CAPTURE_DEFER_MS, nextDelayMs, shouldDeferCapture } from './scheduler';
 import { planScreenshotRetention } from './retention';
 import { startUploader, drainUploads, uploadScreenshotsNow } from './uploader';
 import { getTimerService } from '../timer';
@@ -21,6 +21,8 @@ import { broadcastScreenshotChange } from './events';
 let store: ScreenshotStore | null = null;
 let timer: NodeJS.Timeout | null = null;
 let retentionTimer: NodeJS.Timeout | null = null;
+// How many times the pending capture has been held back for input.
+let captureDeferrals = 0;
 let lastHealth: CaptureHealth = 'unknown';
 const healthListeners = new Set<(health: CaptureHealth) => void>();
 
@@ -83,11 +85,11 @@ export function getScreenshotStore(): ScreenshotStore {
   return getStore();
 }
 
-function schedule() {
+function schedule(overrideDelayMs?: number) {
   if (timer) clearTimeout(timer);
   // Read the live, server-driven cadence each time so a policy change applies
   // from the next scheduled shot onward.
-  const delay = nextDelayMs(getScreenshotIntervalSec() * 1000);
+  const delay = overrideDelayMs ?? nextDelayMs(getScreenshotIntervalSec() * 1000);
   timer = setTimeout(() => void tick(), delay);
   log.info('next screenshot scheduled', { inMs: delay });
 }
@@ -98,6 +100,15 @@ async function tick() {
     const status = getTimerService().status();
     // Only capture while actively tracking (running and not paused).
     if (status.state === 'RUNNING' && !status.paused) {
+      // Capturing blocks the process that owns every window. Wait for a gap in
+      // input so the stutter lands where nobody is looking — bounded, so a
+      // continuously-typing user still gets captured.
+      if (shouldDeferCapture(powerMonitor.getSystemIdleTime(), captureDeferrals)) {
+        captureDeferrals += 1;
+        schedule(CAPTURE_DEFER_MS);
+        return;
+      }
+      captureDeferrals = 0;
       const { rows, health } = await captureNow(status.entryId);
       setScreenHealth(health);
       for (const r of rows) getStore().insert(r);

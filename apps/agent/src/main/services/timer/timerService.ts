@@ -44,8 +44,13 @@ import type {
 // app is never wedged behind it. The drain re-runs until the backlog is empty.
 const FLUSH_BATCH_LIMIT = 25;
 
+/** Backstop only — correctness comes from `ledgerEpoch`, not from this. */
+const LEDGER_MEMO_TTL_MS = 10_000;
+
 export class TimerService {
   private open: TimeEntry | null = null;
+  /** Bumped by every durable write; keys the ledger memo. */
+  private ledgerEpoch = 0;
   private mutationListener: (() => void) | null = null;
   private readonly backgroundSyncs = new Set<Promise<void>>();
   private todayLedgerMode: TodayLedgerMode = 'OFF';
@@ -128,7 +133,7 @@ export class TimerService {
     const recovered = { ...recoverStaleEntry(open, recoveredAt), closeReason: 'AGENT_RECOVERY' as const };
     // Persist only; the caller runs flushUnsynced() next, which performs the
     // single sync. Syncing here too would race that flush on the same entry.
-    this.store.upsert(recovered);
+    this.writeEntry(recovered);
     this.open = null;
     this.store.clearExitIntent();
     const notice: TimerRecoveryNotice = {
@@ -155,7 +160,7 @@ export class TimerService {
 
     const recoveredAt = safeCloseAt(open, away.awayStartedAt);
     const recovered = { ...recoverStaleEntry(open, recoveredAt), closeReason: 'AGENT_RECOVERY' as const };
-    this.store.upsert(recovered);
+    this.writeEntry(recovered);
     this.open = null;
     const recoveredNotice = this.awayNotice(away.reason, recovered.id, recoveredAt);
     this.store.setRecoveryNotice(recoveredNotice);
@@ -235,7 +240,7 @@ export class TimerService {
     // The away boundary must exist durably before memory reports the timer as
     // closed. If SQLite rejects the write, keep `open` intact so the power
     // coordinator's one bounded retry can safely attempt the same boundary.
-    const nextState = this.store.upsert(closed);
+    const nextState = this.writeEntry(closed);
     this.open = null;
     this.store.setRecoveryNotice(this.awayNotice(reason, closed.id, closeAt));
     this.store.clearAwayState();
@@ -430,7 +435,7 @@ export class TimerService {
       closeReason: 'AGENT',
       segments,
     };
-    this.store.upsert(closed);
+    this.writeEntry(closed);
     this.open = null;
     this.store.setRecoveryNotice({
       entryId,
@@ -490,14 +495,14 @@ export class TimerService {
   }
 
   private async commitOpen(entry: TimeEntry, syncState?: PendingEntrySyncState): Promise<void> {
-    const nextState = this.store.upsert(entry, syncState ? { syncState } : undefined);
+    const nextState = this.writeEntry(entry, syncState ? { syncState } : undefined);
     this.open = entry;
     this.notifyMutation();
     this.syncInBackground(entry, nextState);
   }
 
   private async commitClosed(entry: TimeEntry): Promise<void> {
-    const nextState = this.store.upsert(entry);
+    const nextState = this.writeEntry(entry);
     this.open = null;
     this.notifyMutation();
     this.syncInBackground(entry, nextState);
@@ -524,7 +529,7 @@ export class TimerService {
     try {
       const receipt = await this.sync.create(entry);
       if (this.acknowledge(entry, receipt)) return;
-      if (!this.store.markCreated(entry.id, entry)) return;
+      if (!this.markEntryCreated(entry.id, entry)) return;
     } catch {
       // Best-effort: leave it pending_create; flushUnsynced will retry later.
       return;
@@ -538,7 +543,7 @@ export class TimerService {
       this.acknowledge(entry, receipt);
     } catch (err) {
       if (retryCreateOnNotFound && isNotFound(err)) {
-        if (!this.store.markPendingCreate(entry.id, entry)) return;
+        if (!this.markEntryPendingCreate(entry.id, entry)) return;
         await this.tryCreateThenSync(entry);
       }
       // Otherwise best-effort: leave its current pending state for a later flush.
@@ -584,7 +589,7 @@ export class TimerService {
     const corrected = receipt.acceptedRevision >= entry.revision
       && (receipt.correction !== null || receipt.disposition === 'FINALIZED' || receipt.disposition === 'STALE');
     if (!exact && !corrected) return false;
-    const marked = this.store.markSynced(entry.id, entry, {
+    const marked = this.markEntrySynced(entry.id, entry, {
       revision: receipt.acceptedRevision,
       hash: receipt.canonicalHash,
     });
@@ -639,7 +644,64 @@ export class TimerService {
     });
   }
 
+  /**
+   * The day's ledger rows, memoised.
+   *
+   * ONLY the read is memoised — never a computed total. `reconcileTodayLedger`
+   * still runs on every call with the current `now`, so `workedMs` is
+   * bit-identical to what it was before this cache existed. That matters:
+   * the projection unions overlapping intervals, so worked time is NOT
+   * separable into "static plus live" and must not be accumulated.
+   *
+   * The open entry's row is safe to hold, because it does not change as time
+   * passes — its last segment has `endedAt: null` and the accrual comes from
+   * `now` at reconcile time, not from the row.
+   *
+   * Correctness rests on `ledgerEpoch`, which every durable write bumps via the
+   * wrappers below. The TTL is only a backstop: if a future write ever slipped
+   * past a wrapper, the memo self-heals within it rather than drifting, because
+   * this is a memo of a pure read and never an accumulator.
+   */
+  private ledgerMemo: { epoch: number; windowStart: number; readAt: number; rows: ReturnType<TimerService['readLedgerEntries']> } | null = null;
+
   private localLedgerEntries(windowStart: number) {
+    const memo = this.ledgerMemo;
+    if (
+      memo
+      && memo.epoch === this.ledgerEpoch
+      && memo.windowStart === windowStart
+      && this.clock.now() - memo.readAt < LEDGER_MEMO_TTL_MS
+    ) {
+      return memo.rows;
+    }
+    const rows = this.readLedgerEntries(windowStart);
+    this.ledgerMemo = { epoch: this.ledgerEpoch, windowStart, readAt: this.clock.now(), rows };
+    return rows;
+  }
+
+  /** Every durable entry write goes through these, so the memo cannot go stale
+   *  by someone forgetting to invalidate it. */
+  private writeEntry(entry: TimeEntry, opts?: { syncState?: PendingEntrySyncState }) {
+    this.ledgerEpoch += 1;
+    return this.store.upsert(entry, opts);
+  }
+
+  private markEntryCreated(id: string, entry: TimeEntry) {
+    this.ledgerEpoch += 1;
+    return this.store.markCreated(id, entry);
+  }
+
+  private markEntryPendingCreate(id: string, entry: TimeEntry) {
+    this.ledgerEpoch += 1;
+    return this.store.markPendingCreate(id, entry);
+  }
+
+  private markEntrySynced(id: string, entry: TimeEntry, opts: Parameters<EntryStore['markSynced']>[2]) {
+    this.ledgerEpoch += 1;
+    return this.store.markSynced(id, entry, opts);
+  }
+
+  private readLedgerEntries(windowStart: number) {
     return this.store.listLedgerEntries(windowStart).map((item) => ({
       entry: item.entry,
       syncState: item.syncState,

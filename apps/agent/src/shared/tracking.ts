@@ -1,6 +1,10 @@
 export type CapabilityState =
   | 'NOT_REQUIRED'
   | 'READY'
+  /** Granted, but not yet verified this session. NOT a diagnosis — the absence
+   *  of a reading was previously reported as NEEDS_RESTART, which sent people
+   *  round a relaunch loop that could not resolve anything. */
+  | 'CHECKING'
   | 'NEEDS_GRANT'
   | 'NEEDS_SETTINGS'
   | 'NEEDS_RESTART'

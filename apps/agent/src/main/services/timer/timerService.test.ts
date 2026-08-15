@@ -91,7 +91,9 @@ class MemStore implements EntryStore {
       .reverse()
       .map((e) => structuredClone(e));
   }
+  ledgerReads = 0;
   listLedgerEntries(since: number) {
+    this.ledgerReads += 1;
     return this.listSince(since).map((entry) => ({
       entry,
       syncState: this.syncStates.get(entry.id) ?? 'pending_create',
@@ -1328,4 +1330,73 @@ describe('TimerService — a skewed device clock can never over-credit', () => {
       }
     });
   }
+});
+
+
+/**
+ * The ledger memo must never change a number, only how often it is read.
+ *
+ * Worked time is a union of intervals, so it is NOT separable into a static
+ * total plus live accrual — accumulating it would double-count wherever a
+ * manual entry overlaps tracked time. Only the read is memoised; the reconcile
+ * runs fresh with the current clock on every call.
+ */
+describe('TimerService — ledger memo must not change worked time', () => {
+  it('accrues exactly with the clock while the memo is warm', async () => {
+    await svc.start({ larkTaskGuid: 'task-a' });
+
+    // Every one of these lands inside the memo TTL with no mutation between.
+    for (let i = 0; i < 10; i += 1) {
+      clock.advance(MIN);
+      expect(svc.status().workedMs).toBeCloseTo((i + 1) * MIN, -3);
+    }
+  });
+
+  it('reflects a mutation immediately, not after the TTL', async () => {
+    await svc.start({ larkTaskGuid: 'task-a' });
+    clock.advance(5 * MIN);
+    expect(svc.status().workedMs).toBeCloseTo(5 * MIN, -3);
+
+    // Pausing must show up on the very next read, with no clock movement.
+    await svc.pauseForIdle(0);
+    const paused = svc.status();
+    clock.advance(5 * MIN);
+
+    expect(svc.status().workedMs).toBe(paused.workedMs);
+    expect(svc.status().workedMs).toBeCloseTo(5 * MIN, -3);
+  });
+
+  it('gives the same answer as an un-memoised read', async () => {
+    await svc.start({ larkTaskGuid: 'task-a' });
+    clock.advance(3 * MIN);
+    const memoised = svc.status().workedMs;
+
+    // A fresh service over the same store has an empty memo.
+    const fresh = new TimerService(store, sync, clock, ids, allowAccrual);
+    expect(fresh.status().workedMs).toBe(memoised);
+  });
+
+  it('actually reduces reads — the point of the change', async () => {
+    await svc.start({ larkTaskGuid: 'task-a' });
+    store.ledgerReads = 0;
+
+    // The 1s tick calls status() repeatedly with no mutation in between.
+    for (let i = 0; i < 30; i += 1) {
+      clock.advance(100);
+      svc.status();
+    }
+
+    expect(store.ledgerReads).toBeLessThan(30);
+  });
+
+  it('re-reads once a durable write bumps the epoch', async () => {
+    await svc.start({ larkTaskGuid: 'task-a' });
+    svc.status();
+    const before = store.ledgerReads;
+
+    await svc.stop();
+    svc.status();
+
+    expect(store.ledgerReads).toBeGreaterThan(before);
+  });
 });

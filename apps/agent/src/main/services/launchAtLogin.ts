@@ -7,6 +7,7 @@ import type {
   LaunchAtLoginState,
   LaunchOrigin,
 } from '../../shared/launchAtLogin';
+import { log } from '../logger';
 
 const HIDDEN_ARG = '--hidden';
 const WINDOWS_ITEM_NAME = 'Timo';
@@ -178,6 +179,25 @@ function inspectMac(deps: LaunchAtLoginDeps, openedAtLogin: boolean): LaunchAtLo
   }
 }
 
+/**
+ * Log the readings behind a non-READY Windows verdict.
+ *
+ * Eight branches decide this from seven inputs and the module recorded none of
+ * them, so a user reporting "it still says Repair" gave no way to tell which
+ * branch fired — while the macOS path WAS diagnosable in seconds purely because
+ * index.ts happened to log the raw settings once. Same class of bug, opposite
+ * outcome, and the only difference was evidence.
+ *
+ * Deduplicated on the reading shape so a permanent blocker does not flood.
+ */
+let lastWindowsVerdict = '';
+function logWindowsVerdict(state: LaunchAtLoginState, branch: string, fields: Record<string, unknown>): void {
+  const key = `${state}|${branch}|${JSON.stringify(fields)}`;
+  if (key === lastWindowsVerdict) return;
+  lastWindowsVerdict = key;
+  log.warn('launch at login verdict', { state, branch, ...fields });
+}
+
 function inspectWindows(deps: LaunchAtLoginDeps, openedAtLogin: boolean): LaunchAtLoginHealth {
   try {
     const settings = deps.app.getLoginItemSettings(canonicalQuery(deps));
@@ -189,13 +209,24 @@ function inspectWindows(deps: LaunchAtLoginDeps, openedAtLogin: boolean): Launch
       isCurrentWindowsItem(item, deps.execPath) && item.enabled === false,
     );
     const executableReady = settings.executableWillLaunchAtLogin === true;
+    const readings = {
+      canonicalEnabled: canonicalItem?.enabled ?? null,
+      hasEnabledCurrent: Boolean(enabledCurrentItem),
+      hasDisabledCurrent: Boolean(disabledCurrentItem),
+      openAtLogin: settings.openAtLogin,
+      executableWillLaunchAtLogin: settings.executableWillLaunchAtLogin,
+      openedAtLogin,
+      itemCount: settings.launchItems.length,
+    };
     if (canonicalItem?.enabled === false) {
+      logWindowsVerdict('NEEDS_REPAIR', 'canonical-item-disabled', readings);
       return result(deps, openedAtLogin, 'NEEDS_REPAIR', 'ENABLE_STARTUP', true);
     }
     if (canonicalItem?.enabled === true || enabledCurrentItem || (settings.openAtLogin && executableReady)) {
       return result(deps, openedAtLogin, 'READY', 'NONE', false);
     }
     if (disabledCurrentItem) {
+      logWindowsVerdict('NEEDS_REPAIR', 'current-item-disabled', readings);
       return result(deps, openedAtLogin, 'NEEDS_REPAIR', 'ENABLE_STARTUP', true);
     }
     // Windows actually invoked this process with our private startup argument.
@@ -205,10 +236,13 @@ function inspectWindows(deps: LaunchAtLoginDeps, openedAtLogin: boolean): Launch
     }
     const currentItem = settings.launchItems.some((item) => isCurrentWindowsItem(item, deps.execPath));
     if (settings.openAtLogin || currentItem) {
+      logWindowsVerdict('NEEDS_REPAIR', 'related-item-present', readings);
       return result(deps, openedAtLogin, 'NEEDS_REPAIR', 'ENABLE_STARTUP', true);
     }
+    logWindowsVerdict('NEEDS_REGISTRATION', 'no-item-found', readings);
     return result(deps, openedAtLogin, 'NEEDS_REGISTRATION', 'REGISTER', true);
-  } catch {
+  } catch (err) {
+    logWindowsVerdict('BLOCKED', 'getLoginItemSettings-threw', { err: String(err) });
     return result(deps, openedAtLogin, 'BLOCKED', 'OPEN_STARTUP_APPS', false);
   }
 }
