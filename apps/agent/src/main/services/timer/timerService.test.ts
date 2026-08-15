@@ -1275,3 +1275,57 @@ describe('TimerService — device/server clock skew', () => {
     expect(totalWorkedMs(entry, clock.now())).toBeCloseTo(10 * MIN - 6_000, -3);
   });
 });
+
+/**
+ * The direction of error matters more than its size.
+ *
+ * Under-crediting loses a user some minutes and is visible and correctable.
+ * Over-crediting silently bills time nobody worked, which is the failure this
+ * whole subsystem exists to prevent. So whatever the device clock is doing, a
+ * boundary must never credit MORE than the real elapsed time.
+ */
+describe('TimerService — a skewed device clock can never over-credit', () => {
+  for (const skew of [-5 * MIN, 0, 5 * MIN]) {
+    const label = skew === 0 ? 'in sync' : skew > 0 ? 'behind' : 'ahead';
+    const deviceNow = () => clock.now() - skew;
+
+    it(`never credits more than the real elapsed time when the device is ${label}`, async () => {
+      await svc.start({ larkTaskGuid: 'task-a' });
+      clock.advance(10 * MIN);
+
+      // Exactly the caller arithmetic: two device readings, 300s apart.
+      const idleStartedAt = deviceNow() - 300_000;
+      await svc.pauseForIdle(Math.max(0, deviceNow() - idleStartedAt));
+
+      const worked = totalWorkedMs(store.getOpen()!, clock.now());
+      expect(worked).toBeLessThanOrEqual(10 * MIN);
+      expect(worked).toBeCloseTo(10 * MIN - 300_000, -3);
+      expect(validateEntry(store.getOpen()!)).toEqual([]);
+    });
+
+    it(`closes an away boundary without inventing time when the device is ${label}`, async () => {
+      await svc.start({ larkTaskGuid: 'task-a' });
+      clock.advance(10 * MIN);
+
+      const awayStartedAt = deviceNow();
+      await svc.prepareForAway('suspend', Math.max(0, deviceNow() - awayStartedAt));
+
+      const entry = [...store.entries.values()][0]!;
+      expect(totalWorkedMs(entry, clock.now())).toBeLessThanOrEqual(10 * MIN);
+      expect(entry.endedAt!).toBeLessThanOrEqual(clock.now());
+      expect(validateEntry(entry)).toEqual([]);
+    });
+
+    it(`never ends an entry in the future when the device is ${label}`, async () => {
+      await svc.start({ larkTaskGuid: 'task-a' });
+      clock.advance(10 * MIN);
+      await svc.pauseForPermission(Math.max(0, deviceNow() - (deviceNow() - 6_000)));
+      const stopped = [...store.entries.values()][0] ?? store.getOpen()!;
+
+      for (const seg of stopped.segments) {
+        expect(seg.startedAt).toBeLessThanOrEqual(clock.now());
+        if (seg.endedAt !== null) expect(seg.endedAt).toBeLessThanOrEqual(clock.now());
+      }
+    });
+  }
+});

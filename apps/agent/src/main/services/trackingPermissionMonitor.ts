@@ -7,6 +7,7 @@ import {
 import { onScreenHealthChange } from './capture';
 import { sendHeartbeatNow } from './heartbeat';
 import { getTimerService } from './timer';
+import { serverAlignedNow } from './serverClock';
 import { offerPermissionResume } from './trackingCommands';
 import {
   getTrackingReadinessService,
@@ -100,7 +101,13 @@ async function checkNow(): Promise<void> {
   if (activeEntryId !== status.entryId || accruingSince === null) {
     activeEntryId = status.entryId;
     accruingSince = now;
-    lastHealthyAt = status.segmentStartedAt ?? now;
+    // Null, not the segment start: this is a DEVICE-clock reading and
+    // `segmentStartedAt` comes from the timer's server-aligned clock. Seeding it
+    // from the wrong frame made the pause cut back by the clock skew as well as
+    // the unhealthy window — and on a slow device it cut back LESS than the real
+    // gap, crediting unproven time. Until a check verifies healthy, we fall back
+    // to the whole segment measured entirely in the timer's own frame.
+    lastHealthyAt = null;
     resetScreenFailure();
   }
 
@@ -133,12 +140,14 @@ async function checkNow(): Promise<void> {
     return;
   }
 
-  // Elapsed time, not an instant: `lastHealthyAt` is a device-clock reading and
-  // the timer runs on the server-aligned clock. The gap between two device
-  // readings is frame-free; the readings themselves are not. The timer clamps
-  // the result to the segment start, so an over-long gap still cuts no further
-  // back than the segment itself.
-  const unhealthyForMs = Math.max(0, now - (lastHealthyAt ?? now));
+  // Elapsed time, never an instant — the timer runs on the server-aligned clock
+  // and cannot interpret a device reading. Both branches below measure a gap
+  // whose two ends come from the SAME clock, which is what makes the result
+  // meaningful; the timer then clamps it to the segment start, so an over-long
+  // gap still cuts no further back than the segment itself.
+  const unhealthyForMs = lastHealthyAt !== null
+    ? Math.max(0, now - lastHealthyAt)
+    : Math.max(0, serverAlignedNow() - (status.segmentStartedAt ?? serverAlignedNow()));
   const paused = await timerService.pauseForPermission(unhealthyForMs);
   setActivityRecording(false, null);
   broadcast('timer:status:push', paused);
