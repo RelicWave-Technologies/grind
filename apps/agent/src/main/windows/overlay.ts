@@ -72,10 +72,6 @@ const registry = new Set<BrowserWindow>();
 const workspaceVisibilityConfigured = new WeakSet<BrowserWindow>();
 const ranks = new WeakMap<BrowserWindow, OverlayRank>();
 
-// True while a prompt is on screen and being actively held on top. Ambient
-// overlays stand down for the duration — see OverlayRank.
-let promptHeld = false;
-
 /** macOS window level offset per rank. Ignored on Windows/Linux, where Electron
  *  has a single topmost band and precedence comes from suppression instead. */
 function relativeLevelFor(rank: OverlayRank): number {
@@ -86,17 +82,133 @@ export function overlayRankOf(win: BrowserWindow): OverlayRank {
   return ranks.get(win) ?? 'ambient';
 }
 
-/**
- * Mark that a prompt is being held on top. While held, `ambientRaiseAllowed()`
- * is false and ambient overlays skip their re-ordering, so the 1 Hz timer-bar
- * tick cannot walk back over a prompt the user is supposed to answer.
+/* --- The keeper ----------------------------------------------------------
+ *
+ * ONE policy for staying on top, for every overlay.
+ *
+ * This exists because the app already contained the answer. The timer bar has
+ * never fallen behind, and the only thing distinguishing it from the surfaces
+ * that do is that it re-asserted itself roughly twice a second, forever, off
+ * the main tick. The prompt re-asserted four times in its first second and then
+ * stopped; the shift toast raised once per show. Same factory, same window
+ * level, same non-activating panel — the difference was cadence, and one of the
+ * four callers happened to get it right.
+ *
+ * So the module owns the cadence now instead of handing callers `moveTop()` and
+ * hoping. `keepOnTop` / `releaseOnTop` is the whole interface.
+ *
+ * The re-raise is DELIBERATELY UNCONDITIONAL. Gating it on a cheap "am I still
+ * on top?" probe reads better but bets that `isAlwaysOnTop()` detects the real
+ * failure — and it cannot distinguish "still floating but buried" from healthy.
+ * The bar never checks anything, and the bar is the one that works.
+ *
+ * COST. One shared interval, and none at all while nothing is on screen:
+ *   - no overlay shown           -> no timer exists
+ *   - any overlay shown          -> one 1 Hz timer, shared by all of them
+ *   - hidden/destroyed windows   -> skipped without any native call
+ *   - already-kept window        -> keepOnTop() is a no-op, so the 1 Hz
+ *                                   syncFloatingBar() call costs nothing
+ * Per visible overlay per second that is one level assert, one conditional
+ * show, and one order-to-front — slightly fewer native calls than the timer bar
+ * made on its own before this existed.
  */
-export function holdPrompt(held: boolean): void {
-  promptHeld = held;
+const KEEP_INTERVAL_MS = 1_000;
+const kept = new Set<BrowserWindow>();
+let keeperTimer: ReturnType<typeof setInterval> | null = null;
+
+/** True while a visible prompt-ranked overlay is being kept on top. Derived, so
+ *  it cannot drift out of sync with what is actually on screen. */
+function promptHeld(): boolean {
+  for (const win of kept) {
+    if (!win.isDestroyed() && win.isVisible() && overlayRankOf(win) === 'prompt') return true;
+  }
+  return false;
 }
 
+/**
+ * Whether an ambient overlay may re-order itself to the front right now.
+ *
+ * False while a prompt is held: on Windows every always-on-top level collapses
+ * into a single band, so the only thing stopping the timer bar's 1 Hz
+ * `moveTop()` from climbing back over a prompt is declining to make the call.
+ */
 export function ambientRaiseAllowed(): boolean {
-  return !promptHeld;
+  return !promptHeld();
+}
+
+function raiseNow(win: BrowserWindow): void {
+  if (win.isDestroyed()) return;
+  const ambient = overlayRankOf(win) === 'ambient';
+  if (ambient && !ambientRaiseAllowed()) {
+    // Still keep it floating, just don't let it climb over the prompt.
+    assertOverlayFloat(win);
+    return;
+  }
+  assertOverlayFloat(win);
+  if (!win.isVisible()) {
+    win.showInactive();
+  } else if (process.platform === 'darwin' && !win.isFocused()) {
+    // macOS can drop a non-activating panel from the onscreen window list while
+    // Electron still reports it visible after a Space/fullscreen transition.
+    // Skipped when focused so a click-to-dismiss surface keeps its key status.
+    win.showInactive();
+  }
+  win.moveTop();
+}
+
+function keeperTick(): void {
+  for (const win of kept) {
+    if (win.isDestroyed()) {
+      kept.delete(win);
+      continue;
+    }
+    if (!win.isVisible()) continue;
+    raiseNow(win);
+  }
+  if (kept.size === 0) stopKeeper();
+}
+
+function startKeeper(): void {
+  if (keeperTimer) return;
+  keeperTimer = setInterval(keeperTick, KEEP_INTERVAL_MS);
+  keeperTimer.unref?.();
+}
+
+function stopKeeper(): void {
+  if (!keeperTimer) return;
+  clearInterval(keeperTimer);
+  keeperTimer = null;
+}
+
+/**
+ * Hold this overlay at its rank until released. Idempotent: calling it again
+ * for a window already being kept does nothing, which is what makes it safe to
+ * call from the 1 Hz tick.
+ */
+export function keepOnTop(win: BrowserWindow | null): void {
+  if (!win || win.isDestroyed() || kept.has(win)) return;
+  kept.add(win);
+  win.once('closed', () => kept.delete(win));
+  raiseNow(win);
+  startKeeper();
+}
+
+/** Stop holding this overlay. The shared timer stops when the last one goes. */
+export function releaseOnTop(win: BrowserWindow | null): void {
+  if (!win) return;
+  kept.delete(win);
+  if (kept.size === 0) stopKeeper();
+}
+
+/** Test seam: run one keeper pass without waiting on a real timer. */
+export function __keeperTickForTests(): void {
+  keeperTick();
+}
+
+/** Test seam: forget every kept overlay. */
+export function __resetKeeperForTests(): void {
+  kept.clear();
+  stopKeeper();
 }
 
 export interface OverlayFloatOptions {
@@ -132,6 +244,11 @@ export function createOverlayWindow(opts: OverlayOptions): BrowserWindow {
     maximizable: false,
     skipTaskbar: true,
     fullscreenable: false,
+    // Born floating. The original idle prompt (the version that never fell
+    // behind) set this at construction; every rewrite since has relied purely
+    // on a post-construction setAlwaysOnTop, leaving a window in which the
+    // surface exists un-floated. Costs nothing to close that gap.
+    alwaysOnTop: true,
     hasShadow: opts.hasShadow ?? true,
     roundedCorners: opts.roundedCorners ?? true,
     // Non-activating NSPanel: floats over other apps' fullscreen Spaces and

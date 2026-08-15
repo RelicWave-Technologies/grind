@@ -3,8 +3,9 @@ import type { ShiftPromptReason } from '../shared/shift';
 import { broadcast } from './broadcast';
 import {
   createOverlayWindow,
-  assertOverlayFloat,
   activeWorkArea,
+  keepOnTop,
+  releaseOnTop,
   topRight,
 } from './windows/overlay';
 
@@ -24,8 +25,7 @@ let reason: ShiftPromptReason = 'SHIFT_START';
 
 function ensure(): BrowserWindow {
   if (win && !win.isDestroyed()) return win;
-  win = createOverlayWindow({ ...SIZE, hash: 'ready-to-work' });
-  assertOverlayFloat(win);
+  win = createOverlayWindow({ ...SIZE, hash: 'ready-to-work', rank: 'ambient' });
   // If the user closes via window controls (rare; chrome is hidden), treat
   // as a "Not yet" — the renderer's onbeforeunload should beat us to it.
   win.on('closed', () => {
@@ -39,13 +39,15 @@ export function showReadyToWork(next: ShiftPromptReason = 'SHIFT_START'): void {
   const w = ensure();
   const p = topRight(activeWorkArea(), SIZE);
   w.setPosition(p.x, p.y, false);
-  assertOverlayFloat(w); // re-assert: float flags drop after sleep/Space switch
-  // A notification, not a modal — don't steal focus.
-  w.showInactive();
+  // Held by the shared overlay keeper rather than raised once here. Raising
+  // once meant the toast could sit buried until the next 5-minute nudge — the
+  // same defect as the attention prompt, just slower to notice.
+  keepOnTop(w);
   broadcast('shift:promptReason', reason);
 }
 
 export function hideReadyToWork(): void {
+  releaseOnTop(win);
   if (win && !win.isDestroyed() && win.isVisible()) win.hide();
 }
 

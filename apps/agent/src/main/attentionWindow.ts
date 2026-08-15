@@ -3,9 +3,10 @@ import type { AttentionPrompt } from '../shared/attention';
 import { log } from './logger';
 import {
   activeWorkArea,
-  assertOverlayFloat,
   center,
   createOverlayWindow,
+  keepOnTop,
+  releaseOnTop,
   topRight,
 } from './windows/overlay';
 
@@ -54,11 +55,15 @@ export interface OverlayHost {
    *  re-resolving the work area on every raise teleported the prompt to whichever
    *  display the cursor had wandered to. */
   place(spec: PlacementSpec): void;
-  /** Order the surface up at its rank. Never takes focus, never activates. */
-  raise(): void;
-  /** Cheap truth: is the surface still visible AND still floating? A dropped
-   *  always-on-top level reads as false here, which is exactly the failure that
-   *  lets ordinary windows cover a screen-saver-level prompt. */
+  /** Hold the surface at prompt rank until released. Never takes focus, never
+   *  activates. The shared overlay keeper does the repeating. */
+  keep(): void;
+  /** Stop holding. Leaves the surface where it is. */
+  release(): void;
+  /** Observation, not a control: is the surface visible AND still floating?
+   *  Logged as evidence. Deliberately NOT used to decide whether to re-raise —
+   *  it cannot tell "still floating but buried" from healthy, and the timer bar
+   *  proves an unconditional re-raise is what actually holds a window up. */
   onTop(): boolean;
   /** Stand down without hiding — used while the user is in System Settings. */
   lower(): void;
@@ -104,6 +109,30 @@ function ensure(): BrowserWindow {
   return win;
 }
 
+// Last observed float state, so the log records transitions rather than a line
+// every second for as long as a prompt is on screen.
+let lastFloatOk: boolean | null = null;
+
+/**
+ * The evidence that settles why a prompt gets buried, logged only when it
+ * changes.
+ *
+ * `floating: false` while a prompt is being held means the always-on-top level
+ * was lost and something reset it. `floating: true` while the user still
+ * reports the prompt is covered means another application is floating at a
+ * comparable level, and no amount of re-raising at this rank will help.
+ */
+function noteFloatState(window: BrowserWindow): void {
+  const ok = window.isVisible() && window.isAlwaysOnTop();
+  if (ok === lastFloatOk) return;
+  lastFloatOk = ok;
+  log.info('attention float state', {
+    floating: ok,
+    visible: window.isVisible(),
+    alwaysOnTop: window.isAlwaysOnTop(),
+  });
+}
+
 function pointFor(spec: PlacementSpec): { x: number; y: number } {
   const workArea = activeWorkArea();
   const size = { width: spec.width, height: spec.height };
@@ -117,28 +146,14 @@ export const attentionHost: OverlayHost = {
     window.setBounds({ ...point, width: spec.width, height: spec.height }, false);
   },
 
-  raise() {
+  keep() {
     const window = ensure();
-    const onTopBefore = window.isAlwaysOnTop();
-    const visibleBefore = window.isVisible();
+    keepOnTop(window);
+    noteFloatState(window);
+  },
 
-    assertOverlayFloat(window);
-    // macOS: a non-activating panel can be dropped from the onscreen list across
-    // Space/fullscreen transitions while Electron still reports it visible, so
-    // showing is unconditional there and idempotent everywhere else.
-    if (process.platform === 'darwin' || !window.isVisible()) window.showInactive();
-    window.moveTop();
-
-    // The one field that settles why a prompt gets buried: if `onTopBefore` is
-    // false while a prompt is being held, the always-on-top level was lost and
-    // something reset it. If it is true and the prompt is still covered, another
-    // application is floating at a comparable level and rank cannot help.
-    log.info('attention raise', {
-      onTopBefore,
-      visibleBefore,
-      onTopAfter: window.isAlwaysOnTop(),
-      visibleAfter: window.isVisible(),
-    });
+  release() {
+    releaseOnTop(win);
   },
 
   onTop() {
@@ -148,11 +163,13 @@ export const attentionHost: OverlayHost = {
 
   lower() {
     if (!win || win.isDestroyed()) return;
+    releaseOnTop(win);
     win.setAlwaysOnTop(false);
     win.blur();
   },
 
   hide() {
+    releaseOnTop(win);
     if (win && !win.isDestroyed() && win.isVisible()) win.hide();
   },
 

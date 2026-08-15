@@ -1,12 +1,44 @@
 import { beforeEach, describe, it, expect, vi } from 'vitest';
+
+let lastConstructorOptions: Record<string, unknown> | null = null;
+
+vi.mock('electron', () => ({
+  screen: {
+    getCursorScreenPoint: () => ({ x: 0, y: 0 }),
+    getDisplayNearestPoint: () => ({ workArea: { x: 0, y: 0, width: 1440, height: 900 } }),
+    getPrimaryDisplay: () => ({ workArea: { x: 0, y: 0, width: 1440, height: 900 } }),
+  },
+  BrowserWindow: class {
+    constructor(options: Record<string, unknown>) {
+      lastConstructorOptions = options;
+    }
+    isDestroyed = vi.fn(() => false);
+    isVisible = vi.fn(() => true);
+    isFocused = vi.fn(() => false);
+    isAlwaysOnTop = vi.fn(() => true);
+    setAlwaysOnTop = vi.fn();
+    setVisibleOnAllWorkspaces = vi.fn();
+    showInactive = vi.fn();
+    moveTop = vi.fn();
+    on = vi.fn();
+    once = vi.fn();
+    loadURL = vi.fn();
+    loadFile = vi.fn();
+  },
+}));
+
 import {
   ambientRaiseAllowed,
   assertOverlayFloat,
   center,
-  holdPrompt,
+  createOverlayWindow,
+  keepOnTop,
+  releaseOnTop,
   topRight,
   bottomRight,
   trayPopoverPoint,
+  __keeperTickForTests,
+  __resetKeeperForTests,
   type Rect,
 } from './overlay';
 
@@ -72,19 +104,137 @@ describe('assertOverlayFloat', () => {
   });
 });
 
+/**
+ * The keeper is the answer to "why does the timer bar never fall behind, and
+ * everything else does". The bar re-asserted itself roughly twice a second,
+ * forever; the prompt did it four times and stopped; the toast did it once.
+ * Same factory, same level, same non-activating panel — only the cadence
+ * differed, and exactly one of the four callers had it right.
+ */
+function fakeWindow(opts: { visible?: boolean; focused?: boolean } = {}) {
+  return {
+    isDestroyed: vi.fn(() => false),
+    isVisible: vi.fn(() => opts.visible ?? true),
+    isFocused: vi.fn(() => opts.focused ?? false),
+    isAlwaysOnTop: vi.fn(() => true),
+    setAlwaysOnTop: vi.fn(),
+    setVisibleOnAllWorkspaces: vi.fn(),
+    showInactive: vi.fn(),
+    moveTop: vi.fn(),
+    once: vi.fn(),
+  };
+}
+
+describe('overlay keeper', () => {
+  beforeEach(() => __resetKeeperForTests());
+
+  it('keeps re-raising indefinitely — there is no ladder to run out', () => {
+    const win = fakeWindow();
+    keepOnTop(win as unknown as Electron.BrowserWindow);
+    expect(win.moveTop).toHaveBeenCalledTimes(1);
+
+    // Well past the 1000ms ceiling where the prompt's old retry ladder gave up
+    // for the rest of the session.
+    for (let i = 0; i < 60; i += 1) __keeperTickForTests();
+
+    expect(win.moveTop).toHaveBeenCalledTimes(61);
+  });
+
+  it('re-raises unconditionally, without asking whether it is still on top', () => {
+    const win = fakeWindow();
+    keepOnTop(win as unknown as Electron.BrowserWindow);
+    __keeperTickForTests();
+    __keeperTickForTests();
+
+    // Gating on isAlwaysOnTop() cannot tell "still floating but buried" from
+    // healthy. The bar never checked, and the bar is the one that worked.
+    expect(win.isAlwaysOnTop).not.toHaveBeenCalled();
+    expect(win.moveTop).toHaveBeenCalledTimes(3);
+  });
+
+  it('is idempotent, so calling it from the 1 Hz tick costs nothing', () => {
+    const win = fakeWindow();
+    keepOnTop(win as unknown as Electron.BrowserWindow);
+    keepOnTop(win as unknown as Electron.BrowserWindow);
+    keepOnTop(win as unknown as Electron.BrowserWindow);
+
+    expect(win.moveTop).toHaveBeenCalledTimes(1);
+  });
+
+  it('does no work for a hidden overlay', () => {
+    const win = fakeWindow({ visible: false });
+    keepOnTop(win as unknown as Electron.BrowserWindow);
+    win.moveTop.mockClear();
+
+    __keeperTickForTests();
+
+    expect(win.moveTop).not.toHaveBeenCalled();
+  });
+
+  it('stops holding on release', () => {
+    const win = fakeWindow();
+    keepOnTop(win as unknown as Electron.BrowserWindow);
+    releaseOnTop(win as unknown as Electron.BrowserWindow);
+    win.moveTop.mockClear();
+
+    __keeperTickForTests();
+
+    expect(win.moveTop).not.toHaveBeenCalled();
+  });
+
+  it('drops a destroyed overlay instead of calling into it', () => {
+    const win = fakeWindow();
+    keepOnTop(win as unknown as Electron.BrowserWindow);
+    win.isDestroyed.mockReturnValue(true);
+    win.moveTop.mockClear();
+
+    __keeperTickForTests();
+
+    expect(win.moveTop).not.toHaveBeenCalled();
+  });
+});
+
 describe('overlay rank', () => {
-  it('makes ambient overlays stand down while a prompt is held', () => {
-    holdPrompt(false);
+  beforeEach(() => __resetKeeperForTests());
+
+  it('stops an ambient overlay climbing over a held prompt', () => {
+    const bar = fakeWindow();
+    const prompt = createOverlayWindow({ width: 1, height: 1, hash: 'attention', rank: 'prompt' });
+    keepOnTop(bar as unknown as Electron.BrowserWindow);
     expect(ambientRaiseAllowed()).toBe(true);
 
-    // The timer bar re-orders itself once a second. While a prompt is up that
-    // must not happen, or the pill climbs back over the question the user is
-    // being asked — and on Windows there is no level separation to stop it.
-    holdPrompt(true);
+    keepOnTop(prompt);
+    // Rank must be enforced by declining the call, not only by window level:
+    // Windows collapses every always-on-top level into one topmost band, so
+    // there the suppression is the ONLY thing keeping the bar off the prompt.
     expect(ambientRaiseAllowed()).toBe(false);
 
-    holdPrompt(false);
+    bar.moveTop.mockClear();
+    __keeperTickForTests();
+    expect(bar.moveTop).not.toHaveBeenCalled();
+
+    releaseOnTop(prompt);
     expect(ambientRaiseAllowed()).toBe(true);
+    __keeperTickForTests();
+    expect(bar.moveTop).toHaveBeenCalled();
+  });
+
+  it('gives a prompt a higher relative level than ambient on macOS', () => {
+    const ambient = createOverlayWindow({ width: 1, height: 1, hash: 'floating' });
+    const prompt = createOverlayWindow({ width: 1, height: 1, hash: 'attention', rank: 'prompt' });
+
+    assertOverlayFloat(ambient);
+    expect(ambient.setAlwaysOnTop).toHaveBeenLastCalledWith(true, 'screen-saver', 0);
+
+    assertOverlayFloat(prompt);
+    expect(prompt.setAlwaysOnTop).toHaveBeenLastCalledWith(true, 'screen-saver', 1);
+  });
+
+  it('creates every overlay already floating', () => {
+    createOverlayWindow({ width: 1, height: 1, hash: 'floating' });
+    // The original idle prompt set this at construction and never fell behind;
+    // every rewrite since relied purely on a post-construction call.
+    expect(lastConstructorOptions?.alwaysOnTop).toBe(true);
   });
 });
 

@@ -20,14 +20,21 @@ const mocks = vi.hoisted(() => {
     focus: vi.fn(),
     blur: vi.fn(),
   };
-  return { webListeners, window, create: vi.fn(() => window), assertFloat: vi.fn() };
+  return {
+    webListeners,
+    window,
+    create: vi.fn(() => window),
+    keepOnTop: vi.fn(),
+    releaseOnTop: vi.fn(),
+  };
 });
 
 vi.mock('electron', () => ({ app: { focus: vi.fn() } }));
 vi.mock('./logger', () => ({ log: { info: vi.fn(), warn: vi.fn(), debug: vi.fn(), error: vi.fn() } }));
 vi.mock('./windows/overlay', () => ({
   createOverlayWindow: mocks.create,
-  assertOverlayFloat: mocks.assertFloat,
+  keepOnTop: mocks.keepOnTop,
+  releaseOnTop: mocks.releaseOnTop,
   activeWorkArea: () => ({ x: 0, y: 0, width: 1440, height: 900 }),
   center: () => ({ x: 480, y: 284 }),
   topRight: () => ({ x: 1104, y: 16 }),
@@ -45,7 +52,7 @@ describe('attention overlay host', () => {
 
   it('creates the surface at prompt rank, outside the global reassert registry', async () => {
     const { attentionHost } = await import('./attentionWindow');
-    attentionHost.raise();
+    attentionHost.keep();
 
     expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({
       hash: 'attention',
@@ -56,17 +63,29 @@ describe('attention overlay host', () => {
 
   it('never takes focus — on either platform', async () => {
     const { attentionHost } = await import('./attentionWindow');
-    attentionHost.raise();
-    attentionHost.raise();
+    attentionHost.keep();
+    attentionHost.keep();
 
     // Electron's macOS focus() asks the app to activate, which is what made the
     // prompt flash to the front and drop straight back.
     expect(mocks.window.focus).not.toHaveBeenCalled();
   });
 
+  it('hands the surface to the shared keeper rather than raising it itself', async () => {
+    const { attentionHost } = await import('./attentionWindow');
+    attentionHost.keep();
+
+    // Every overlay in the app now uses one cadence — the timer bar's, which is
+    // the only one that never fell behind.
+    expect(mocks.keepOnTop).toHaveBeenCalledWith(mocks.window);
+
+    attentionHost.release();
+    expect(mocks.releaseOnTop).toHaveBeenCalledWith(mocks.window);
+  });
+
   it('reports having lost the top when the always-on-top level is gone', async () => {
     const { attentionHost } = await import('./attentionWindow');
-    attentionHost.raise();
+    attentionHost.keep();
     expect(attentionHost.onTop()).toBe(true);
 
     // Exactly the reported failure: the surface is still there and still in
@@ -78,7 +97,7 @@ describe('attention overlay host', () => {
 
   it('reports having lost the top when the surface is hidden', async () => {
     const { attentionHost } = await import('./attentionWindow');
-    attentionHost.raise();
+    attentionHost.keep();
     mocks.window.isVisible.mockReturnValue(false);
 
     expect(attentionHost.onTop()).toBe(false);
@@ -102,7 +121,7 @@ describe('attention overlay host', () => {
 
   it('stands down without hiding when lowered', async () => {
     const { attentionHost } = await import('./attentionWindow');
-    attentionHost.raise();
+    attentionHost.keep();
     attentionHost.lower();
 
     expect(mocks.window.setAlwaysOnTop).toHaveBeenCalledWith(false);

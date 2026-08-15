@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('../attentionWindow', () => ({ attentionHost: {} }));
-vi.mock('../windows/overlay', () => ({ holdPrompt: vi.fn() }));
 
 import { createTrackingAttentionCoordinator } from './trackingAttention';
 import type { OverlayHost } from '../attentionWindow';
@@ -15,16 +14,17 @@ import type { OverlayHost } from '../attentionWindow';
  * correct while being the bug users were reporting. Here `onTop` is a value the
  * test controls, so losing the top is something a test can cause and assert on.
  */
-function setup(opts: { onTop?: boolean } = {}) {
+function setup() {
   let next = 0;
-  let onTop = opts.onTop ?? true;
+  let onTop = true;
   let readyListener: (() => void) | null = null;
 
   const host: OverlayHost = {
     place: vi.fn(),
-    raise: vi.fn(() => {
+    keep: vi.fn(() => {
       onTop = true;
     }),
+    release: vi.fn(),
     onTop: vi.fn(() => onTop),
     lower: vi.fn(() => {
       onTop = false;
@@ -37,12 +37,10 @@ function setup(opts: { onTop?: boolean } = {}) {
     isReady: vi.fn(() => true),
   };
 
-  const setPromptHeld = vi.fn();
   const coordinator = createTrackingAttentionCoordinator({
     id: () => `prompt-${++next}`,
     host,
-    setPromptHeld,
-    // Timers are never started; tests step the loop explicitly instead.
+    // Timers are never started; tests step the resume poll explicitly.
     setInterval: vi.fn(() => ({ unref: vi.fn() })) as unknown as typeof setInterval,
     clearInterval: vi.fn() as unknown as typeof clearInterval,
   });
@@ -50,12 +48,8 @@ function setup(opts: { onTop?: boolean } = {}) {
   return {
     coordinator,
     host,
-    setPromptHeld,
-    loseTop: () => {
-      onTop = false;
-    },
     fireReady: () => readyListener?.(),
-    tick: () => coordinator.__holdTickForTests(),
+    tick: () => coordinator.__resumeTickForTests(),
   };
 }
 
@@ -128,93 +122,58 @@ describe('TrackingAttentionCoordinator — priority', () => {
   });
 });
 
-describe('TrackingAttentionCoordinator — holding the invariant', () => {
-  it('re-raises when the host reports it has lost the top', () => {
-    const { coordinator, host, tick, loseTop } = setup();
-    coordinator.requestIdle(100);
-    expect(host.raise).toHaveBeenCalledTimes(1);
-
-    loseTop();
-    tick();
-
-    expect(host.raise).toHaveBeenCalledTimes(2);
-  });
-
-  it('keeps holding indefinitely — there is no bounded ladder to run out', () => {
-    const { coordinator, host, tick, loseTop } = setup();
+describe('TrackingAttentionCoordinator — handing off to the keeper', () => {
+  it('places once and hands the surface to the keeper', () => {
+    const { coordinator, host } = setup();
     coordinator.requestIdle(100);
 
-    // Well past the old 1000ms ceiling, which is where enforcement used to stop
-    // for the rest of the session.
-    for (let i = 0; i < 50; i += 1) {
-      loseTop();
-      tick();
-    }
-
-    expect(host.raise).toHaveBeenCalledTimes(51);
-  });
-
-  it('does nothing while the prompt is still on top', () => {
-    const { coordinator, host, tick } = setup();
-    coordinator.requestIdle(100);
-    expect(host.raise).toHaveBeenCalledTimes(1);
-
-    tick();
-    tick();
-    tick();
-
-    expect(host.raise).toHaveBeenCalledTimes(1);
+    // Staying on top is no longer this module's job. It places the surface and
+    // the shared overlay keeper holds it, using the cadence the timer bar
+    // proved in the field.
     expect(host.place).toHaveBeenCalledTimes(1);
+    expect(host.keep).toHaveBeenCalledTimes(1);
   });
 
-  it('resolves bounds once per presentation, not once per raise', () => {
-    const { coordinator, host, tick, loseTop } = setup();
-    coordinator.requestIdle(100);
-
-    loseTop();
-    tick();
-    loseTop();
-    tick();
-
-    // Re-placing on every raise is what let a prompt follow the cursor onto
-    // another display mid-interaction.
-    expect(host.place).toHaveBeenCalledTimes(1);
-    expect(host.raise).toHaveBeenCalledTimes(3);
-  });
-
-  it('stops holding once the prompt is cleared', () => {
-    const { coordinator, host, tick, loseTop } = setup();
+  it('releases the keeper when the prompt is cleared', () => {
+    const { coordinator, host } = setup();
     coordinator.requestIdle(100);
     const prompt = coordinator.get();
     if (prompt.kind === 'NONE') throw new Error('expected a prompt');
 
     coordinator.clear(prompt.promptId);
-    loseTop();
-    tick();
 
-    expect(host.raise).toHaveBeenCalledTimes(1);
+    expect(host.release).toHaveBeenCalled();
+    expect(host.hide).toHaveBeenCalled();
   });
 
-  it('tells ambient overlays to stand down while held, and to resume after', () => {
-    const { coordinator, setPromptHeld } = setup();
-
+  it('releases the keeper when the machine goes away', () => {
+    const { coordinator, host } = setup();
     coordinator.requestIdle(100);
-    expect(setPromptHeld).toHaveBeenLastCalledWith(true);
 
-    const prompt = coordinator.get();
-    if (prompt.kind === 'NONE') throw new Error('expected a prompt');
-    coordinator.clear(prompt.promptId);
-    expect(setPromptHeld).toHaveBeenLastCalledWith(false);
+    coordinator.beginMachineAway();
+
+    expect(host.release).toHaveBeenCalled();
+  });
+
+  it('re-places when a different prompt kind takes over', () => {
+    const { coordinator, host } = setup();
+    coordinator.requestIdle(100);
+    coordinator.requestPermission('SETUP');
+
+    // Each presentation resolves its own bounds once — a permission prompt is a
+    // different size from an idle prompt.
+    expect(host.place).toHaveBeenCalledTimes(2);
+    expect(host.keep).toHaveBeenCalledTimes(2);
   });
 
   it('presents once the renderer finishes loading', () => {
     const { coordinator, host, fireReady } = setup();
     coordinator.requestIdle(100);
-    const raisesBefore = vi.mocked(host.raise).mock.calls.length;
+    const before = vi.mocked(host.keep).mock.calls.length;
 
     fireReady();
 
-    expect(vi.mocked(host.raise).mock.calls.length).toBeGreaterThan(raisesBefore);
+    expect(vi.mocked(host.keep).mock.calls.length).toBeGreaterThan(before);
   });
 });
 
@@ -226,18 +185,19 @@ async function flush(): Promise<void> {
 
 describe('TrackingAttentionCoordinator — suspension', () => {
   it('does not fight System Settings while suspended', () => {
-    const { coordinator, host, tick, setPromptHeld } = setup();
+    const { coordinator, host, tick } = setup();
     const prompt = coordinator.requestPermission('SETUP');
     if (prompt.kind !== 'PERMISSION') throw new Error('expected permission prompt');
 
     coordinator.yieldPermissionToSystemSettings(prompt.promptId);
-    const raisesAfterYield = vi.mocked(host.raise).mock.calls.length;
+    const keepsAfterYield = vi.mocked(host.keep).mock.calls.length;
 
     tick();
     tick();
 
-    expect(vi.mocked(host.raise).mock.calls.length).toBe(raisesAfterYield);
-    expect(setPromptHeld).toHaveBeenLastCalledWith(false);
+    // Lowering releases the keeper, so nothing climbs back over Settings.
+    expect(host.lower).toHaveBeenCalled();
+    expect(vi.mocked(host.keep).mock.calls.length).toBe(keepsAfterYield);
   });
 
   it('comes back by itself once the resume predicate is satisfied', async () => {
@@ -259,7 +219,7 @@ describe('TrackingAttentionCoordinator — suspension', () => {
     await flush();
 
     expect(coordinator.get()).toMatchObject({ presentation: 'FRONT' });
-    expect(host.raise).toHaveBeenCalled();
+    expect(host.keep).toHaveBeenCalled();
   });
 
   it('keeps retrying if the resume predicate throws', async () => {

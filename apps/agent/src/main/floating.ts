@@ -8,8 +8,9 @@ import {
   createOverlayWindow,
   assertOverlayFloat,
   activeWorkArea,
-  ambientRaiseAllowed,
   bottomRight,
+  keepOnTop,
+  releaseOnTop,
 } from './windows/overlay';
 
 /**
@@ -105,28 +106,21 @@ export function reassertFloating(): void {
  * disabled it, this does nothing. Does NOT reposition an already-placed bar —
  * that's what kept snapping it back to the corner.
  */
+/**
+ * Show the bar (idempotent). This is called once a second off the main tick, so
+ * it must stay cheap: `keepOnTop` is a no-op once the bar is already being held,
+ * and the shared keeper does the actual re-ordering from then on.
+ *
+ * This bar's old inline loop — assert, show, moveTop, assert, every second — is
+ * where the keeper's behaviour came from. It was the only overlay that never
+ * fell behind, so its cadence became the one policy every overlay now uses.
+ */
 function showFloatingBar(): void {
-  const w = ensure();
-  reassertFloating();
-  // This runs once a second off the main tick. While a prompt is being held it
-  // must not re-order itself to the front: same-level `moveTop()` at 1 Hz is
-  // how the timer pill used to climb back over an idle or permission prompt.
-  // Becoming visible is still allowed — the bar disappearing during a prompt
-  // would be a worse bug than it sitting behind one.
-  const mayRaise = ambientRaiseAllowed();
-  if (!w.isVisible()) {
-    w.showInactive();
-  } else if (process.platform === 'darwin' && mayRaise) {
-    // macOS can drop a non-activating panel from the onscreen window list while
-    // Electron still reports it as visible after Space/fullscreen transitions.
-    // Re-showing is idempotent and keeps the tracking indicator recoverable.
-    w.showInactive();
-  }
-  if (mayRaise) w.moveTop();
-  reassertFloating();
+  keepOnTop(ensure());
 }
 
 function hideFloatingBar(): void {
+  releaseOnTop(win);
   if (win && !win.isDestroyed() && win.isVisible()) win.hide();
 }
 
