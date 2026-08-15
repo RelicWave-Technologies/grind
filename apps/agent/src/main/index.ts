@@ -259,7 +259,10 @@ app.whenReady().then(async () => {
     },
     onIdle: async (idleStartedAt) => {
       try {
-        await getTimerService().pauseForIdle(idleStartedAt);
+        // The monitor tracks idle on the device clock; the timer runs on the
+        // server-aligned clock. Hand over elapsed time, which means the same
+        // thing on both, rather than an instant, which does not.
+        await getTimerService().pauseForIdle(Math.max(0, Date.now() - idleStartedAt));
       } catch (err) {
         log.warn('pauseForIdle failed', { err: String(err) });
         return false;
@@ -323,6 +326,12 @@ app.whenReady().then(async () => {
       // on its next tick regardless of which event caused it.
       reassertAllOverlays();
       checkTrackingPermissionsNow();
+      // Re-anchor BEFORE pushing anything. The server-aligned clock is driven by
+      // a monotonic source, and a monotonic source does not advance while the
+      // machine is asleep — so on wake it is behind by the whole sleep, and it
+      // stays behind until a heartbeat lands. Draining first would upload
+      // entries stamped from a clock we already know is wrong.
+      sendHeartbeatNow();
       void drainTimerSyncNow('wake');
       void refreshTodayLedger('wake');
       void drainActivityNow('wake');

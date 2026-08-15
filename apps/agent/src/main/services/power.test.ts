@@ -70,7 +70,7 @@ describe('registerPowerEvents', () => {
     mocks.listeners.get('suspend')!();
     await settle();
 
-    expect(mocks.prepareForAway).toHaveBeenCalledWith('suspend', 1_700_000_000_000);
+    expect(mocks.prepareForAway).toHaveBeenCalledWith('suspend', 0);
     expect(mocks.broadcast).toHaveBeenCalledWith('timer:status:push', { state: 'IDLE', workedMs: 0 });
   });
 
@@ -80,7 +80,7 @@ describe('registerPowerEvents', () => {
     mocks.listeners.get('lock-screen')!();
     await settle();
 
-    expect(mocks.prepareForAway).toHaveBeenCalledWith('lock', 1_700_000_000_000);
+    expect(mocks.prepareForAway).toHaveBeenCalledWith('lock', 0);
   });
 
   it('deduplicates resume and unlock into one wake lifecycle', async () => {
@@ -178,7 +178,7 @@ describe('registerPowerEvents', () => {
 
     expect(onAwayStart).toHaveBeenCalledTimes(1);
     expect(mocks.prepareForAway).toHaveBeenCalledTimes(1);
-    expect(mocks.prepareForAway).toHaveBeenCalledWith('lock', 1_700_000_000_000);
+    expect(mocks.prepareForAway).toHaveBeenCalledWith('lock', 0);
   });
 
   it('waits for durable away cleanup before offering resume', async () => {
@@ -206,13 +206,17 @@ describe('registerPowerEvents', () => {
     registerPowerEvents({ onWake: vi.fn(), onReturnFromAway, onReturnComplete });
 
     mocks.listeners.get('suspend')!();
+    // 30 seconds of sleep before the machine comes back. The retry must still
+    // aim at the boundary where the away began, not at the moment it retried —
+    // expressed as elapsed time, that is 30s ago rather than 0s ago.
+    vi.spyOn(Date, 'now').mockReturnValue(1_700_000_030_000);
     mocks.listeners.get('resume')!();
     await settle();
     await settle();
 
     expect(mocks.prepareForAway).toHaveBeenCalledTimes(2);
-    expect(mocks.prepareForAway).toHaveBeenNthCalledWith(1, 'suspend', 1_700_000_000_000);
-    expect(mocks.prepareForAway).toHaveBeenNthCalledWith(2, 'suspend', 1_700_000_000_000);
+    expect(mocks.prepareForAway).toHaveBeenNthCalledWith(1, 'suspend', 0);
+    expect(mocks.prepareForAway).toHaveBeenNthCalledWith(2, 'suspend', 30_000);
     expect(onReturnFromAway).not.toHaveBeenCalled();
     expect(onReturnComplete).toHaveBeenCalledTimes(1);
   });

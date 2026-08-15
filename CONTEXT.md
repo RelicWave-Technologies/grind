@@ -74,3 +74,23 @@ _Avoid_: health, status
 The server-side window during which an open time entry is considered still alive.
 Renewed by the agent's heartbeat; expiry closes the entry server-side.
 _Avoid_: keepalive, TTL
+
+### Time
+
+**Frame**:
+Which clock an instant was read from — the device's or the server-aligned one.
+Two instants are only comparable within the same frame. Instants from different
+frames look identical in the type system and are not.
+_Avoid_: timezone (unrelated), clock source
+
+**Server-aligned clock**:
+The agent's clock for anything the server will judge. Anchored to a known server
+instant and advanced by a monotonic source, so it cannot freeze, run backwards,
+or be moved by editing the device clock.
+_Avoid_: corrected clock, NTP time
+
+**Elapsed**:
+A duration rather than an instant. Frame-free — "idle for 300s" means the same
+on any clock — which is why the timer's interface takes elapsed time and never a
+timestamp.
+_Avoid_: since, at, timestamp

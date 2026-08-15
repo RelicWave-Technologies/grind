@@ -2,7 +2,7 @@ import { app } from 'electron';
 import type { DesktopPermissionSnapshot, HeartbeatResponse } from '@grind/types';
 import { AGENT_VERSION, HEARTBEAT_INTERVAL_MS } from '../env';
 import { log } from '../logger';
-import { hasDeferredServerClockCorrection, noteServerTime, serverClockOffsetMs } from './serverClock';
+import { hasDeferredServerClockCorrection, noteServerTime, serverAlignedNow, serverClockOffsetMs } from './serverClock';
 import { api, UnauthorizedError } from './apiClient';
 import { isLoggedIn } from './auth';
 import { drainActivityNow } from './activity';
@@ -69,7 +69,7 @@ async function tick(): Promise<void> {
       agentVersion: agentVersion(),
       platform: currentPlatform(),
       timerStatus,
-      observedAt: Date.now(),
+      observedAt: serverAlignedNow(),
       permissions: await currentPermissionSnapshot(),
       startup: currentStartupSnapshot(),
     });

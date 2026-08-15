@@ -133,15 +133,20 @@ async function checkNow(): Promise<void> {
     return;
   }
 
-  const cutAt = lastHealthyAt ?? now;
-  const paused = await timerService.pauseForPermission(cutAt);
+  // Elapsed time, not an instant: `lastHealthyAt` is a device-clock reading and
+  // the timer runs on the server-aligned clock. The gap between two device
+  // readings is frame-free; the readings themselves are not. The timer clamps
+  // the result to the segment start, so an over-long gap still cuts no further
+  // back than the segment itself.
+  const unhealthyForMs = Math.max(0, now - (lastHealthyAt ?? now));
+  const paused = await timerService.pauseForPermission(unhealthyForMs);
   setActivityRecording(false, null);
   broadcast('timer:status:push', paused);
   sendHeartbeatNow();
   offerPermissionResume();
   log.warn('tracking paused because required permission became unavailable', {
     entryId: status.entryId,
-    cutAt,
+    unhealthyForMs,
     blockers: inspection.readiness.blockingCapabilities,
     accessibilityError: inspection.accessibilityError,
   });

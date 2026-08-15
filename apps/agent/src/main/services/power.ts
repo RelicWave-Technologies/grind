@@ -37,7 +37,10 @@ export function registerPowerEvents(opts: {
   const prepare = async (reason: TimerAwayReason, awayStartedAt: number): Promise<boolean> => {
     try {
       const timer = getTimerService();
-      await timer.prepareForAway(reason, awayStartedAt);
+      // Hand over elapsed time, never an instant. `awayStartedAt` is a device
+      // clock reading and the timer runs on the server-aligned clock; the two
+      // are not comparable, but the gap between two device readings is.
+      await timer.prepareForAway(reason, Math.max(0, Date.now() - awayStartedAt));
       broadcast('timer:status:push', timer.status());
       log.info('timer stopped for machine away', { reason, awayStartedAt });
       return true;

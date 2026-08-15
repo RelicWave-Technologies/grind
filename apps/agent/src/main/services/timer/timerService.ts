@@ -223,13 +223,13 @@ export class TimerService {
     return this.status();
   }
 
-  async prepareForAway(reason: TimerAwayReason, awayStartedAt: number): Promise<TimerStatus> {
+  async prepareForAway(reason: TimerAwayReason, awayForMs = 0): Promise<TimerStatus> {
     if (!this.open) {
       this.store.clearAwayState();
       return this.status();
     }
     const open = this.open;
-    const closeAt = safeCloseAt(open, awayStartedAt);
+    const closeAt = safeCloseAt(open, this.boundaryAgo(awayForMs));
     this.store.setAwayState({ reason, entryId: open.id, awayStartedAt: closeAt, observedAt: this.clock.now() });
     const closed = closeTimeEntry(open, closeAt);
     // The away boundary must exist durably before memory reports the timer as
@@ -267,17 +267,17 @@ export class TimerService {
    * the user went idle). Worked time freezes there; the idle gap is simply not
    * tracked. The entry stays open (paused) until resume or stop.
    */
-  async pauseForIdle(at: number): Promise<void> {
+  async pauseForIdle(idleForMs: number): Promise<void> {
     if (!this.open) return;
     const open = getOpenSegment(this.open);
     if (!open) return; // already paused
-    const cut = Math.max(at, open.startedAt); // never before the segment start
+    const cut = Math.max(this.boundaryAgo(idleForMs), open.startedAt);
     const paused = { ...closeOpenSegment(this.open, cut), pauseReason: 'IDLE' as const };
     await this.commitOpen(paused);
   }
 
   /** Required capture capability disappeared: freeze at the last healthy proof. */
-  async pauseForPermission(at: number): Promise<TimerStatus> {
+  async pauseForPermission(unhealthyForMs = 0): Promise<TimerStatus> {
     if (!this.open) return this.status();
     const open = getOpenSegment(this.open);
     if (!open) {
@@ -287,7 +287,7 @@ export class TimerService {
       }
       return this.status();
     }
-    const cut = Math.max(open.startedAt, Math.min(at, this.clock.now()));
+    const cut = Math.max(open.startedAt, this.boundaryAgo(unhealthyForMs));
     const paused = { ...closeOpenSegment(this.open, cut), pauseReason: 'PERMISSION_REQUIRED' as const };
     await this.commitOpen(paused);
     return this.status();
@@ -543,6 +543,25 @@ export class TimerService {
       }
       // Otherwise best-effort: leave its current pending state for a later flush.
     }
+  }
+
+  /**
+   * Turn "it happened N ms ago" into an instant in THIS module's frame.
+   *
+   * Callers must never hand in an instant. The timer keeps time on the
+   * server-aligned clock while its callers read the device clock, and an instant
+   * is meaningless without knowing which of the two produced it. On a machine a
+   * few minutes out those two frames are not comparable, and `Math.max(at,
+   * segment.startedAt)` — the guard meant to stop a boundary preceding its own
+   * segment — silently collapses the segment to zero length instead. The server
+   * then drops it and rejects the entry as invalid_segments, forever.
+   *
+   * A duration has no frame. `now - elapsed`, computed here, always lands in the
+   * same frame as the segment it is closing.
+   */
+  private boundaryAgo(elapsedMs: number): number {
+    const now = this.clock.now();
+    return now - Math.max(0, elapsedMs);
   }
 
   private createEntry(larkTaskGuid: string | null, startedAt: number): TimeEntry {

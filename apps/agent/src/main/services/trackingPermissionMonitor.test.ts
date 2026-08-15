@@ -150,7 +150,9 @@ describe('tracking permission monitor', () => {
     mocks.inspect.mockResolvedValue(inspection(false));
     await vi.advanceTimersByTimeAsync(2_000);
 
-    expect(mocks.pauseForPermission).toHaveBeenCalledWith(lastHealthyAt);
+    // Elapsed since the last healthy proof, not the instant itself: the timer
+    // runs on the server-aligned clock and cannot interpret a device reading.
+    expect(mocks.pauseForPermission).toHaveBeenCalledWith(Date.now() - lastHealthyAt);
     expect(mocks.setActivityRecording).toHaveBeenCalledWith(false, null);
     expect(mocks.broadcast).toHaveBeenCalledWith('timer:status:push', paused);
     expect(mocks.offerResume).toHaveBeenCalledTimes(1);
@@ -211,7 +213,9 @@ describe('tracking permission monitor', () => {
     mocks.inspect.mockResolvedValue(transientScreenFailureInspection());
     await vi.advanceTimersByTimeAsync(12_000);
 
-    expect(mocks.pauseForPermission).toHaveBeenCalledWith(lastHealthyAt);
+    // Elapsed since the last healthy proof, not the instant itself: the timer
+    // runs on the server-aligned clock and cannot interpret a device reading.
+    expect(mocks.pauseForPermission).toHaveBeenCalledWith(Date.now() - lastHealthyAt);
     expect(mocks.offerResume).toHaveBeenCalledTimes(1);
   });
 
