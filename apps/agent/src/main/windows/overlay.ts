@@ -1,5 +1,6 @@
 import { BrowserWindow, screen } from 'electron';
 import path from 'node:path';
+import { ensureRegularMacApplication } from './macAppIdentity';
 
 /**
  * Foundation for every always-on-top overlay the agent shows: the floating
@@ -280,12 +281,22 @@ export function createOverlayWindow(opts: OverlayOptions): BrowserWindow {
 /**
  * Canonical "float over everything, on every Space" assertion.
  *
- * Overlay configuration must not mutate the whole application's macOS process
- * type. Electron's default all-workspaces path hides/shows the Dock while it
- * changes activation policy; repeating that path creates stale Dock tiles.
- * `skipTransformProcessType` keeps Timo's app identity intact. Note that every
- * overlay — prompts included — is a non-activating NSPanel; nothing here
- * activates the app.
+ * `setVisibleOnAllWorkspaces` MUST use Electron's default macOS process-type
+ * transition. Skipping it is only valid for apps that are already UIElement
+ * applications, and Timo is a normal foreground app — this rationale was
+ * established in 3a78ab5 ("preserve macOS foreground app identity"), reverted
+ * without discussion inside a large unrelated rework, and is restored here.
+ *
+ * Suppressing the transition is the likeliest reason all-Spaces membership
+ * never really took: the flag reads as set while the window is only a member of
+ * the Spaces that existed at the time, which is exactly the failure people see
+ * after a sleep creates a new one.
+ *
+ * The transition briefly toggles the process to UIElement and back, which can
+ * flicker the Dock tile. That is cosmetic, and `ensureRegularMacApplication()`
+ * restores the identity immediately — that call is the whole reason it exists.
+ * Note that every overlay — prompts included — is a non-activating NSPanel;
+ * nothing here activates the app.
  *
  * ORDER MATTERS. The always-on-top level is asserted LAST, after the
  * all-workspaces call, because that call reconfigures the window's collection
@@ -302,11 +313,9 @@ export function assertOverlayFloat(
     options.refreshWorkspaceVisibility
     || !workspaceVisibilityConfigured.has(win)
   ) {
-    win.setVisibleOnAllWorkspaces(true, {
-      visibleOnFullScreen: true,
-      skipTransformProcessType: true,
-    });
+    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
     workspaceVisibilityConfigured.add(win);
+    ensureRegularMacApplication();
   }
   win.setAlwaysOnTop(true, 'screen-saver', relativeLevelFor(overlayRankOf(win)));
 }

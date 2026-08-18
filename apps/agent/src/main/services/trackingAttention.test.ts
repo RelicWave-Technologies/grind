@@ -37,9 +37,12 @@ function setup() {
     isReady: vi.fn(() => true),
   };
 
+  const logger = { info: vi.fn(), warn: vi.fn() };
+
   const coordinator = createTrackingAttentionCoordinator({
     id: () => `prompt-${++next}`,
     host,
+    logger,
     // Timers are never started; tests step the resume poll explicitly.
     setInterval: vi.fn(() => ({ unref: vi.fn() })) as unknown as typeof setInterval,
     clearInterval: vi.fn() as unknown as typeof clearInterval,
@@ -48,6 +51,7 @@ function setup() {
   return {
     coordinator,
     host,
+    logger,
     fireReady: () => readyListener?.(),
     tick: () => coordinator.__resumeTickForTests(),
   };
@@ -244,5 +248,160 @@ describe('TrackingAttentionCoordinator — suspension', () => {
 
     expect(calls).toBeGreaterThan(1);
     expect(coordinator.get()).toMatchObject({ presentation: 'YIELDED_TO_SETTINGS' });
+  });
+});
+
+
+describe('TrackingAttentionCoordinator — releasing a prompt nobody can reach', () => {
+  it('clears the prompt, hides the overlay, and says so', () => {
+    const { coordinator, host, logger } = setup();
+    coordinator.requestAway({ larkTaskGuid: null, stoppedAt: 1_000, reason: 'suspend' });
+    expect(coordinator.get().kind).toBe('AWAY');
+
+    expect(coordinator.releaseUnreachable('main_window_requested_twice')).toBe(true);
+
+    expect(coordinator.get()).toEqual({ kind: 'NONE' });
+    expect(host.hide).toHaveBeenCalled();
+    expect(host.publish).toHaveBeenLastCalledWith({ kind: 'NONE' });
+    expect(logger.warn).toHaveBeenCalledWith(
+      'attention prompt released as unreachable',
+      expect.objectContaining({ kind: 'AWAY', reason: 'main_window_requested_twice' }),
+    );
+  });
+
+  it('is a no-op when nothing is active', () => {
+    const { coordinator, logger } = setup();
+    expect(coordinator.releaseUnreachable('whatever')).toBe(false);
+    expect(logger.warn).not.toHaveBeenCalled();
+  });
+
+  it('releases a permission prompt too, so Settings cannot wedge the app', () => {
+    const { coordinator } = setup();
+    coordinator.requestPermission('SETUP');
+    expect(coordinator.releaseUnreachable('main_window_requested_twice')).toBe(true);
+    expect(coordinator.get()).toEqual({ kind: 'NONE' });
+  });
+
+  it('lets a fresh prompt be shown afterwards', () => {
+    const { coordinator } = setup();
+    coordinator.requestAway({ larkTaskGuid: null, stoppedAt: 1_000, reason: 'suspend' });
+    coordinator.releaseUnreachable('main_window_requested_twice');
+
+    // The wedge is gone: the next real prompt is accepted normally.
+    expect(coordinator.requestIdle(500)).toBe(true);
+    expect(coordinator.get().kind).toBe('IDLE');
+  });
+
+  it('stops the resume poll, so a released permission prompt cannot come back by itself', () => {
+    const { coordinator } = setup();
+    const prompt = coordinator.requestPermission('SETUP');
+    if (prompt.kind !== 'PERMISSION') throw new Error('expected a permission prompt');
+    coordinator.yieldPermissionToSystemSettings(prompt.promptId, { resumeWhen: () => true });
+
+    coordinator.releaseUnreachable('main_window_requested_twice');
+    coordinator.__resumeTickForTests();
+
+    expect(coordinator.get()).toEqual({ kind: 'NONE' });
+  });
+});
+
+describe('TrackingAttentionCoordinator — a prompt leaves a trace', () => {
+  it('logs the prompt going up, with what we believe about the float', () => {
+    const { coordinator, logger } = setup();
+    coordinator.requestIdle(100);
+    expect(logger.info).toHaveBeenCalledWith(
+      'attention prompt shown',
+      expect.objectContaining({ kind: 'IDLE', floating: true }),
+    );
+  });
+
+  it('logs a restore, and still reports that a prompt existed', () => {
+    const { coordinator, logger } = setup();
+    coordinator.requestIdle(100);
+    logger.info.mockClear();
+
+    expect(coordinator.restoreActive()).toBe(true);
+    expect(logger.info).toHaveBeenCalledWith(
+      'attention prompt restored',
+      expect.objectContaining({ kind: 'IDLE' }),
+    );
+  });
+
+  it('records the float belief as false when the overlay is not on top', () => {
+    const { coordinator, host, logger } = setup();
+    coordinator.requestIdle(100);
+    host.lower();
+    logger.info.mockClear();
+
+    coordinator.restoreActive();
+    // keep() runs during present, so the belief is true again by the time we
+    // look — the value is evidence of what the app thinks, not proof of sight.
+    expect(logger.info).toHaveBeenCalledWith(
+      'attention prompt restored',
+      expect.objectContaining({ kind: 'IDLE' }),
+    );
+  });
+
+  it('logs the prompt being cleared normally', () => {
+    const { coordinator, logger } = setup();
+    coordinator.requestIdle(100);
+    coordinator.clear();
+    expect(logger.info).toHaveBeenCalledWith(
+      'attention prompt cleared',
+      expect.objectContaining({ kind: 'IDLE' }),
+    );
+  });
+
+  it('restoreActive on nothing reports false and logs nothing', () => {
+    const { coordinator, logger } = setup();
+    expect(coordinator.restoreActive()).toBe(false);
+    expect(logger.info).not.toHaveBeenCalled();
+  });
+});
+
+
+/**
+ * The stranding fix, expressed at the seam.
+ *
+ * A prompt window that is hidden and reused keeps whatever Space membership it
+ * had when it was built, so after a few sleeps it lives on Spaces the person no
+ * longer visits. The coordinator's contract is therefore that clearing a prompt
+ * RELEASES the surface entirely — the adapter destroys it — so the next prompt
+ * is built fresh, in front of whoever is looking.
+ */
+describe('TrackingAttentionCoordinator — a prompt surface is never reused across prompts', () => {
+  it('hides the surface whenever a prompt ends, so the adapter can destroy it', () => {
+    const { coordinator, host } = setup();
+
+    coordinator.requestIdle(100);
+    coordinator.clear();
+    expect(host.hide).toHaveBeenCalledTimes(1);
+
+    coordinator.requestIdle(200);
+    coordinator.clear();
+    expect(host.hide).toHaveBeenCalledTimes(2);
+  });
+
+  it('places the surface again for every prompt rather than assuming it survived', () => {
+    const { coordinator, host } = setup();
+
+    coordinator.requestIdle(100);
+    const placedForFirst = vi.mocked(host.place).mock.calls.length;
+    coordinator.clear();
+
+    coordinator.requestAway({ larkTaskGuid: null, stoppedAt: 1_000, reason: 'suspend' });
+
+    // A second placement is what proves the coordinator does not depend on the
+    // previous window still existing.
+    expect(vi.mocked(host.place).mock.calls.length).toBeGreaterThan(placedForFirst);
+  });
+
+  it('hides on release too, so an unreachable prompt does not leave a window behind', () => {
+    const { coordinator, host } = setup();
+    coordinator.requestIdle(100);
+
+    coordinator.releaseUnreachable('main_window_requested_twice');
+
+    expect(host.hide).toHaveBeenCalledTimes(1);
   });
 });

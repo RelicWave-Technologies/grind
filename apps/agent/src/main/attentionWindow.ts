@@ -168,9 +168,27 @@ export const attentionHost: OverlayHost = {
     win.blur();
   },
 
+  /**
+   * Destroy, don't hide.
+   *
+   * A hidden window keeps its Space membership from the moment it was created,
+   * and `canJoinAllSpaces` only ever covered the Spaces that existed then. The
+   * prompt window used to be built once and reused for the life of the process,
+   * so after a few sleeps it belonged to Spaces the person no longer visits —
+   * present and "visible" by every API we can read, and nowhere they can see.
+   *
+   * Building it per prompt costs one renderer load (a few hundred ms, hidden
+   * behind `show: false` and a transparent surface) and buys the guarantee that
+   * a prompt is always born on the Space in front of the person. Stranding then
+   * needs a Space to appear *during* one prompt, rather than at any point since
+   * launch.
+   */
   hide() {
     releaseOnTop(win);
-    if (win && !win.isDestroyed() && win.isVisible()) win.hide();
+    if (win && !win.isDestroyed()) win.destroy();
+    win = null;
+    loaded = false;
+    lastFloatOk = null;
   },
 
   publish(prompt) {

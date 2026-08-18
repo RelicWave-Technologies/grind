@@ -2,6 +2,10 @@ import { app, ipcMain, Notification, safeStorage, screen } from 'electron';
 import type { BrowserWindow, Tray } from 'electron';
 import { createTray, setTrayTitle } from './tray';
 import { createMainWindow } from './window';
+import {
+  decidePromptGate,
+  PROMPT_UNREACHABLE_WINDOW_MS,
+} from './services/promptReachability';
 import { registerIpc } from './ipc';
 import { sendHeartbeatNow, startHeartbeatIfAuthed } from './services/heartbeat';
 import { setServerClockTrackingActive } from './services/serverClock';
@@ -118,9 +122,35 @@ function ensureMainWindow(opts: { startHidden?: boolean } = {}): BrowserWindow {
   return mainWindow;
 }
 
+/** When we last re-presented a prompt because somebody asked for the app. */
+let lastPromptRestoreAt: number | null = null;
+
 function showMainWindow(opts: { bypassAttention?: boolean } = {}) {
   if (isQuitting) return;
-  if (!opts.bypassAttention && getTrackingAttentionCoordinator().restoreActive()) return;
+
+  // A prompt outranks the main window — but only while it can actually be
+  // answered. The rule for deciding that lives in promptReachability, which
+  // explains why it has to be behavioural rather than observed.
+  if (!opts.bypassAttention) {
+    const attention = getTrackingAttentionCoordinator();
+    // Device clock is correct here: both readings are clicks by the same
+    // person on this machine, so the two are always in the same frame.
+    const now = Date.now();
+    const decision = decidePromptGate({
+      hasPrompt: attention.get().kind !== 'NONE',
+      sinceLastRestoreMs: lastPromptRestoreAt === null ? null : now - lastPromptRestoreAt,
+      windowMs: PROMPT_UNREACHABLE_WINDOW_MS,
+    });
+    if (decision === 'restore-prompt') {
+      lastPromptRestoreAt = now;
+      attention.restoreActive();
+      return;
+    }
+    if (decision === 'release-and-show') {
+      lastPromptRestoreAt = null;
+      attention.releaseUnreachable('main_window_requested_twice');
+    }
+  }
   const win = ensureMainWindow({ startHidden: true });
   hidePopover();
   if (win.isMinimized()) win.restore();
@@ -243,7 +273,13 @@ app.whenReady().then(async () => {
   const attention = getTrackingAttentionCoordinator();
   tray = createTray({
     onToggle: (bounds) => {
-      if (!attention.restoreActive()) togglePopover(bounds);
+      // The tray popover is never gated. Refusing it was how an unreachable
+      // prompt turned into "nothing in the whole app opens" — the one control
+      // a person falls back on when a window has gone missing must always
+      // respond. A genuinely on-top prompt still outranks the popover by
+      // window level, so both can be up without conflict.
+      attention.restoreActive();
+      togglePopover(bounds);
     },
     onOpenMain: () => showMainWindow(),
     onInstallUpdate: () => void installUpdateNow(),

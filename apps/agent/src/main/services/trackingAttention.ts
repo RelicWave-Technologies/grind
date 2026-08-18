@@ -1,6 +1,7 @@
 import { ulid } from 'ulid';
 import type { AttentionPrompt, PermissionIntent } from '../../shared/attention';
 import { attentionHost, type OverlayHost, type PlacementSpec } from '../attentionWindow';
+import { log } from '../logger';
 
 /**
  * The single owner of "which prompt is the user being asked to answer".
@@ -31,12 +32,24 @@ type ActivePrompt = Exclude<AttentionPrompt, { kind: 'NONE' }>;
 /** Returns true once the reason for suspending has passed. May be async. */
 export type ResumeWhen = () => boolean | Promise<boolean>;
 
+/**
+ * A Prompt used to leave no trace at all — `idle warning presented` was the only
+ * prompt event the agent ever wrote, which is why a prompt that went up and
+ * never came back was invisible in four days of field logs. Every transition
+ * now says so.
+ */
+export interface TrackingAttentionLogger {
+  info(message: string, meta?: Record<string, unknown>): void;
+  warn(message: string, meta?: Record<string, unknown>): void;
+}
+
 export interface TrackingAttentionDeps {
   id: () => string;
   host: OverlayHost;
   resumePollMs?: number;
   setInterval?: typeof setInterval;
   clearInterval?: typeof clearInterval;
+  logger?: TrackingAttentionLogger;
 }
 
 function specFor(prompt: ActivePrompt): PlacementSpec {
@@ -56,6 +69,22 @@ export function createTrackingAttentionCoordinator(deps: TrackingAttentionDeps) 
   let resumeWhen: ResumeWhen | null = null;
   let resumeCheckInFlight = false;
   let readyHooked = false;
+  const log = deps.logger;
+
+  /**
+   * What the app believes about the overlay. Deliberately NOT called
+   * "visible": `isVisible()` and `isAlwaysOnTop()` are Electron's own
+   * bookkeeping, and both stay true when macOS has parked the window on a
+   * Space the person is not looking at. This is what we can observe, not
+   * proof that anybody can see it.
+   */
+  function floatBelief(): boolean {
+    try {
+      return deps.host.onTop();
+    } catch {
+      return false;
+    }
+  }
 
   /** A prompt that should currently be sitting on top of everything. */
   function isFront(prompt: AttentionPrompt): boolean {
@@ -119,11 +148,18 @@ export function createTrackingAttentionCoordinator(deps: TrackingAttentionDeps) 
   }
 
   function show(next: ActivePrompt): AttentionPrompt {
+    const previous = active.kind;
     active = next;
     stopResumePolling();
     hookReadyOnce();
     deps.host.publish(active);
     presentNow();
+    log?.info('attention prompt shown', {
+      kind: next.kind,
+      promptId: next.promptId,
+      previous,
+      floating: floatBelief(),
+    });
     return active;
   }
 
@@ -185,6 +221,15 @@ export function createTrackingAttentionCoordinator(deps: TrackingAttentionDeps) 
     return true;
   }
 
+  /**
+   * Put the active prompt back in front, and report whether there was one.
+   *
+   * The return value says a prompt EXISTS and was re-presented. It deliberately
+   * does not claim the person can see it: macOS can hold the overlay on a Space
+   * we were never told about, and Electron keeps reporting `isVisible()` true
+   * throughout. Callers must therefore never treat `true` as a reason to leave
+   * the person with no way into the app — see `releaseUnreachable`.
+   */
   function restoreActive(): boolean {
     if (active.kind === 'NONE') return false;
     stopResumePolling();
@@ -193,16 +238,51 @@ export function createTrackingAttentionCoordinator(deps: TrackingAttentionDeps) 
       deps.host.publish(active);
     }
     presentNow();
+    log?.info('attention prompt restored', {
+      kind: active.kind,
+      promptId: active.promptId,
+      floating: floatBelief(),
+    });
+    return true;
+  }
+
+  /**
+   * Give up on a prompt the person evidently cannot reach.
+   *
+   * There is no API that reports "your window is on another Space", so the
+   * evidence is behavioural: they asked for the app again, immediately after we
+   * had just re-presented the prompt. Somebody who can see a prompt answers it;
+   * somebody who cannot keeps clicking. Releasing it costs one unanswered
+   * question and unblocks every route into the app.
+   */
+  function releaseUnreachable(reason: string): boolean {
+    if (active.kind === 'NONE') return false;
+    const released = active.kind;
+    const promptId = active.promptId;
+    stopResumePolling();
+    stopHolding();
+    active = { kind: 'NONE' };
+    deps.host.publish(active);
+    deps.host.hide();
+    log?.warn('attention prompt released as unreachable', {
+      kind: released,
+      promptId,
+      reason,
+      floatingWhenReleased: floatBelief(),
+    });
     return true;
   }
 
   function clear(promptId?: string): boolean {
     if (active.kind === 'NONE') return false;
     if (promptId && active.promptId !== promptId) return false;
+    const cleared = active.kind;
+    const clearedId = active.promptId;
     active = { kind: 'NONE' };
     stopHolding();
     deps.host.publish(active);
     deps.host.hide();
+    log?.info('attention prompt cleared', { kind: cleared, promptId: clearedId });
     return true;
   }
 
@@ -216,6 +296,7 @@ export function createTrackingAttentionCoordinator(deps: TrackingAttentionDeps) 
     requestPermission,
     yieldPermissionToSystemSettings,
     restoreActive,
+    releaseUnreachable,
     clear,
     isPermissionActive: () => active.kind === 'PERMISSION',
     /** Test seam: run one resume poll without waiting on a real timer. */
@@ -227,7 +308,7 @@ let singleton: ReturnType<typeof createTrackingAttentionCoordinator> | null = nu
 
 export function getTrackingAttentionCoordinator() {
   if (!singleton) {
-    singleton = createTrackingAttentionCoordinator({ id: ulid, host: attentionHost });
+    singleton = createTrackingAttentionCoordinator({ id: ulid, host: attentionHost, logger: log });
   }
   return singleton;
 }

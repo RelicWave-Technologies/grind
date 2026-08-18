@@ -1,8 +1,10 @@
 import { beforeEach, describe, it, expect, vi } from 'vitest';
 
 let lastConstructorOptions: Record<string, unknown> | null = null;
+const mocks = vi.hoisted(() => ({ setActivationPolicy: vi.fn() }));
 
 vi.mock('electron', () => ({
+  app: { setActivationPolicy: mocks.setActivationPolicy },
   screen: {
     getCursorScreenPoint: () => ({ x: 0, y: 0 }),
     getDisplayNearestPoint: () => ({ workArea: { x: 0, y: 0, width: 1440, height: 900 } }),
@@ -51,7 +53,7 @@ const PRIMARY: Rect = { x: 0, y: 0, width: 1440, height: 900 };
 const SECOND: Rect = { x: 1440, y: 0, width: 1920, height: 1080 };
 
 describe('assertOverlayFloat', () => {
-  it('registers overlays across fullscreen Spaces without changing process type', () => {
+  it('lets Electron run its process transition, then restores the app identity', () => {
     const win = {
       isDestroyed: vi.fn(() => false),
       setAlwaysOnTop: vi.fn(),
@@ -64,10 +66,14 @@ describe('assertOverlayFloat', () => {
     expect(win.setAlwaysOnTop).toHaveBeenCalledTimes(2);
     expect(win.setAlwaysOnTop).toHaveBeenLastCalledWith(true, 'screen-saver', 0);
     expect(win.setVisibleOnAllWorkspaces).toHaveBeenCalledOnce();
+    // Skipping the transition is only valid for UIElement apps, and Timo is a
+    // normal foreground app — suppressing it is why all-Spaces membership never
+    // really took. Let it run, and put the Dock identity back afterwards.
     expect(win.setVisibleOnAllWorkspaces).toHaveBeenCalledWith(
       true,
-      { visibleOnFullScreen: true, skipTransformProcessType: true },
+      { visibleOnFullScreen: true },
     );
+    expect(mocks.setActivationPolicy).toHaveBeenCalledWith('regular');
   });
 
   it('asserts the always-on-top level LAST so nothing can undo it', () => {
@@ -100,8 +106,10 @@ describe('assertOverlayFloat', () => {
     expect(win.setVisibleOnAllWorkspaces).toHaveBeenCalledTimes(2);
     expect(win.setVisibleOnAllWorkspaces).toHaveBeenLastCalledWith(
       true,
-      { visibleOnFullScreen: true, skipTransformProcessType: true },
+      { visibleOnFullScreen: true },
     );
+    // Identity is restored after every transition, not just the first.
+    expect(mocks.setActivationPolicy).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -198,7 +206,7 @@ describe('overlay keeper', () => {
 
     expect(prompt.setVisibleOnAllWorkspaces).toHaveBeenCalledWith(
       true,
-      { visibleOnFullScreen: true, skipTransformProcessType: true },
+      { visibleOnFullScreen: true },
     );
   });
 
