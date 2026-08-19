@@ -53,7 +53,7 @@ const PRIMARY: Rect = { x: 0, y: 0, width: 1440, height: 900 };
 const SECOND: Rect = { x: 1440, y: 0, width: 1920, height: 1080 };
 
 describe('assertOverlayFloat', () => {
-  it('lets Electron run its process transition, then restores the app identity', () => {
+  it('never lets the all-workspaces call transform the process type', () => {
     const win = {
       isDestroyed: vi.fn(() => false),
       setAlwaysOnTop: vi.fn(),
@@ -66,14 +66,14 @@ describe('assertOverlayFloat', () => {
     expect(win.setAlwaysOnTop).toHaveBeenCalledTimes(2);
     expect(win.setAlwaysOnTop).toHaveBeenLastCalledWith(true, 'screen-saver', 0);
     expect(win.setVisibleOnAllWorkspaces).toHaveBeenCalledOnce();
-    // Skipping the transition is only valid for UIElement apps, and Timo is a
-    // normal foreground app — suppressing it is why all-Spaces membership never
-    // really took. Let it run, and put the Dock identity back afterwards.
+    // Letting the transition run leaves a Dock tile behind on every pass, and
+    // this path runs once per overlay plus once per prompt. beta.35 tried it and
+    // stacked five Timo tiles; the flag is not optional.
     expect(win.setVisibleOnAllWorkspaces).toHaveBeenCalledWith(
       true,
-      { visibleOnFullScreen: true },
+      { visibleOnFullScreen: true, skipTransformProcessType: true },
     );
-    expect(mocks.setActivationPolicy).toHaveBeenCalledWith('regular');
+    expect(mocks.setActivationPolicy).not.toHaveBeenCalled();
   });
 
   it('asserts the always-on-top level LAST so nothing can undo it', () => {
@@ -106,10 +106,8 @@ describe('assertOverlayFloat', () => {
     expect(win.setVisibleOnAllWorkspaces).toHaveBeenCalledTimes(2);
     expect(win.setVisibleOnAllWorkspaces).toHaveBeenLastCalledWith(
       true,
-      { visibleOnFullScreen: true },
+      { visibleOnFullScreen: true, skipTransformProcessType: true },
     );
-    // Identity is restored after every transition, not just the first.
-    expect(mocks.setActivationPolicy).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -206,7 +204,7 @@ describe('overlay keeper', () => {
 
     expect(prompt.setVisibleOnAllWorkspaces).toHaveBeenCalledWith(
       true,
-      { visibleOnFullScreen: true },
+      { visibleOnFullScreen: true, skipTransformProcessType: true },
     );
   });
 

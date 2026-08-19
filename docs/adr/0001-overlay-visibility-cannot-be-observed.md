@@ -71,33 +71,34 @@ re-assertions). Each re-applied a flag that was never lost.
   `attention prompt released as unreachable` log line shows how often the
   degraded path actually fires.
 
-## Amendment (2026-08-19) — the process transition is not optional
+## Amendment (2026-08-19) — the process transition must stay suppressed
 
-`setVisibleOnAllWorkspaces` transforms the macOS process type between UIElement
-and Foreground while it configures Spaces. Suppressing that with
-`skipTransformProcessType: true` is only valid for apps that are *already*
-UIElement applications. **Timo is a normal foreground app**, so suppressing it is
-invalid — and is the likeliest reason all-Spaces membership never really took.
+`setVisibleOnAllWorkspaces` toggles the macOS process type to UIElement and back
+while it configures Spaces. `skipTransformProcessType: true` suppresses that, and
+it is **required**.
 
-This was already established in `3a78ab5` ("preserve macOS foreground app
-identity", 22 July), which let the transition run and called
-`ensureRegularMacApplication()` afterwards to restore the Dock identity. The flag
-was reinstated and the rationale deleted on 15 August inside `b8fa826`, without
-discussion. It is now restored, with the reasoning in the code so a future reader
-cannot remove it by accident again.
+This has now been round-tripped twice, so the loop is recorded here to stop a
+third pass:
 
-`ensureRegularMacApplication()` exists **only** to undo that transition. If the
-transition is ever suppressed again, that call becomes vestigial — treat a
-"pointless" identity force as a signal that this decision has been reverted.
+1. `3a78ab5` (22 Jul) let the transition run and called
+   `ensureRegularMacApplication()` afterwards to restore the Dock identity.
+2. `b8fa826` (15 Aug) added `skipTransformProcessType: true` **because that
+   produced stale Dock tiles** — but deleted the rationale, leaving the identity
+   call looking vestigial.
+3. beta.35 restored the transition on the theory that suppressing it was why
+   all-Spaces membership did not survive a newly-created Space. **Five stacked
+   Timo tiles appeared in the Dock within minutes.** Theory refuted, reverted.
 
-Two further consequences:
+The tell that made this loop possible: `ensureRegularMacApplication()` exists
+only to undo the transition, so once the transition is suppressed it looks
+pointless. It is not — it is the safety net if the flag is ever dropped again.
+Leave it at boot and leave the flag on.
 
-- **A prompt surface is never reused across prompts.** A hidden window keeps the
-  Space membership it had when it was built, so reuse is what let a prompt
-  outlive the Spaces it joined. `attentionHost.hide()` destroys; the next prompt
-  builds a fresh window in front of whoever is looking. Stranding now requires a
-  Space to appear *during a single prompt* rather than at any time since launch.
-- Dock-tile flicker during the transition is accepted as cosmetic.
+Stranding is addressed instead by **never letting a prompt surface outlive the
+Spaces it joined**. A hidden window keeps whatever membership it had when built,
+so `attentionHost.hide()` destroys rather than hides and the next prompt is built
+in front of whoever is looking. That change is unaffected by this revert and
+stays.
 
 ## Do not re-suggest
 

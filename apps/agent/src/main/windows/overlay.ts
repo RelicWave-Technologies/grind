@@ -1,6 +1,5 @@
 import { BrowserWindow, screen } from 'electron';
 import path from 'node:path';
-import { ensureRegularMacApplication } from './macAppIdentity';
 
 /**
  * Foundation for every always-on-top overlay the agent shows: the floating
@@ -281,20 +280,24 @@ export function createOverlayWindow(opts: OverlayOptions): BrowserWindow {
 /**
  * Canonical "float over everything, on every Space" assertion.
  *
- * `setVisibleOnAllWorkspaces` MUST use Electron's default macOS process-type
- * transition. Skipping it is only valid for apps that are already UIElement
- * applications, and Timo is a normal foreground app — this rationale was
- * established in 3a78ab5 ("preserve macOS foreground app identity"), reverted
- * without discussion inside a large unrelated rework, and is restored here.
+ * `skipTransformProcessType` is REQUIRED, and the reason is empirical.
  *
- * Suppressing the transition is the likeliest reason all-Spaces membership
- * never really took: the flag reads as set while the window is only a member of
- * the Spaces that existed at the time, which is exactly the failure people see
- * after a sleep creates a new one.
+ * Electron's default all-workspaces path toggles the macOS process type to
+ * UIElement and back to configure Spaces. Timo has several overlays and now
+ * builds a fresh prompt window per prompt, so that path runs many times per
+ * session — and each run can leave a Dock tile behind. Five stacked Timo tiles
+ * in the Dock is what that looks like.
  *
- * The transition briefly toggles the process to UIElement and back, which can
- * flicker the Dock tile. That is cosmetic, and `ensureRegularMacApplication()`
- * restores the identity immediately — that call is the whole reason it exists.
+ * This has been round-tripped once already, so it is worth being explicit:
+ * 3a78ab5 let the transition run and called `ensureRegularMacApplication()`
+ * after it; b8fa826 then added this flag precisely BECAUSE that produced stale
+ * tiles. beta.35 briefly restored the transition on the theory that suppressing
+ * it was why all-Spaces membership did not survive a new Space — the tiles came
+ * straight back, so the theory is refuted and the flag stays.
+ *
+ * Stranding is addressed instead by never letting a prompt window outlive the
+ * Spaces it joined (see attentionWindow.hide, which destroys rather than hides).
+ *
  * Note that every overlay — prompts included — is a non-activating NSPanel;
  * nothing here activates the app.
  *
@@ -313,9 +316,11 @@ export function assertOverlayFloat(
     options.refreshWorkspaceVisibility
     || !workspaceVisibilityConfigured.has(win)
   ) {
-    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    win.setVisibleOnAllWorkspaces(true, {
+      visibleOnFullScreen: true,
+      skipTransformProcessType: true,
+    });
     workspaceVisibilityConfigured.add(win);
-    ensureRegularMacApplication();
   }
   win.setAlwaysOnTop(true, 'screen-saver', relativeLevelFor(overlayRankOf(win)));
 }
