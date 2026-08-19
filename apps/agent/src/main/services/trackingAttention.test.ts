@@ -25,6 +25,9 @@ function setup() {
       onTop = true;
     }),
     release: vi.fn(),
+    activate: vi.fn(() => {
+      onTop = true;
+    }),
     onTop: vi.fn(() => onTop),
     lower: vi.fn(() => {
       onTop = false;
@@ -363,14 +366,14 @@ describe('TrackingAttentionCoordinator — a prompt leaves a trace', () => {
 /**
  * The stranding fix, expressed at the seam.
  *
- * A prompt window that is hidden and reused keeps whatever Space membership it
- * had when it was built, so after a few sleeps it lives on Spaces the person no
- * longer visits. The coordinator's contract is therefore that clearing a prompt
- * RELEASES the surface entirely — the adapter destroys it — so the next prompt
- * is built fresh, in front of whoever is looking.
+ * A window only reaches a Space it was not built into if something activates
+ * it — on macOS that is `makeKeyAndOrderFront:`, which is what the original
+ * prompt did on every show and what every rewrite since dropped. So the
+ * coordinator's contract is: every presentation activates exactly once, and
+ * holding never does.
  */
-describe('TrackingAttentionCoordinator — a prompt surface is never reused across prompts', () => {
-  it('hides the surface whenever a prompt ends, so the adapter can destroy it', () => {
+describe('TrackingAttentionCoordinator — presentation activates, holding does not', () => {
+  it('releases the surface whenever a prompt ends', () => {
     const { coordinator, host } = setup();
 
     coordinator.requestIdle(100);
@@ -403,5 +406,47 @@ describe('TrackingAttentionCoordinator — a prompt surface is never reused acro
     coordinator.releaseUnreachable('main_window_requested_twice');
 
     expect(host.hide).toHaveBeenCalledTimes(1);
+  });
+});
+
+
+describe('TrackingAttentionCoordinator — activation is rationed to presentation', () => {
+  it('activates when a prompt is shown', () => {
+    const { coordinator, host } = setup();
+    coordinator.requestIdle(100);
+    expect(host.activate).toHaveBeenCalledTimes(1);
+  });
+
+  it('activates again when the prompt is restored, because that is a new ask', () => {
+    const { coordinator, host } = setup();
+    coordinator.requestIdle(100);
+    vi.mocked(host.activate).mockClear();
+
+    coordinator.restoreActive();
+
+    expect(host.activate).toHaveBeenCalledTimes(1);
+  });
+
+  it('does NOT activate for a prompt that is standing down for System Settings', () => {
+    const { coordinator, host } = setup();
+    const prompt = coordinator.requestPermission('SETUP');
+    if (prompt.kind !== 'PERMISSION') throw new Error('expected a permission prompt');
+    vi.mocked(host.activate).mockClear();
+
+    coordinator.yieldPermissionToSystemSettings(prompt.promptId, { resumeWhen: () => false });
+
+    // Yielding is the opposite of asking for attention; stealing focus here
+    // would sit on top of the very Settings pane the person was sent to.
+    expect(host.activate).not.toHaveBeenCalled();
+  });
+
+  it('never activates more than once per presentation', () => {
+    const { coordinator, host } = setup();
+    coordinator.requestIdleWarning({ idleStartedAt: 100, deadlineAt: 200 });
+    expect(host.activate).toHaveBeenCalledTimes(1);
+
+    // The warning becoming a paused idle prompt is a second presentation.
+    coordinator.requestIdle(100);
+    expect(host.activate).toHaveBeenCalledTimes(2);
   });
 });

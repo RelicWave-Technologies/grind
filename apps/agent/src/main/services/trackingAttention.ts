@@ -104,10 +104,17 @@ export function createTrackingAttentionCoordinator(deps: TrackingAttentionDeps) 
     });
   }
 
-  /** Place once, then hand it to the keeper. */
+  /**
+   * Place once, activate once, then hand it to the keeper.
+   *
+   * The activation is the part that survives a Space the window was not built
+   * into — and it belongs here, at a presentation, rather than in the keeper's
+   * ~1 Hz loop, which is where activating became focus-stealing.
+   */
   function presentNow(): void {
     if (!isFront(active)) return;
     deps.host.place(specFor(active as ActivePrompt));
+    deps.host.activate();
     deps.host.keep();
   }
 

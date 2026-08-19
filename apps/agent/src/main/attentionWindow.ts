@@ -1,3 +1,4 @@
+import { app } from 'electron';
 import type { BrowserWindow } from 'electron';
 import type { AttentionPrompt } from '../shared/attention';
 import { log } from './logger';
@@ -21,14 +22,18 @@ import {
  * Everything below is mechanism: put the window somewhere, order it up, report
  * whether it is still up, put it down. The coordinator drives.
  *
- * TWO THINGS DELIBERATELY ABSENT
+ * ACTIVATION IS THE POINT, AND IT IS RATIONED
  *
- *  1. **No focus().** Electron's macOS `focus()` asks the app to activate; from
- *     inside another app's fullscreen Space that makes macOS switch Spaces, and
- *     the deferred activation resolving is what made the prompt flash to the
- *     front and drop back. On Windows it cannot win the foreground lock anyway,
- *     and the `flashFrame` fallback is useless on a `skipTaskbar` window with no
- *     taskbar button to flash. Clicks reach a non-activating panel without it.
+ *  1. **`activate()` exists, and only presentation calls it.** The original idle
+ *     prompt (`ef1620d`) called `focus()` on every show and never fell behind.
+ *     `2f58ba8` strengthened that to `app.focus({steal:true})`; `b8fa826` then
+ *     deleted the whole thing because it "repeatedly steals focus from the app
+ *     the person was using" — and prompts started going missing after sleep.
+ *     Those were the same lever, which nobody wrote down. On macOS the call is
+ *     `makeKeyAndOrderFront:`, the documented remedy for a window that is not a
+ *     member of a Space created after it was built. Rationed to presentation
+ *     moments (show, restore, renderer-ready); the ~1 Hz keeper must never
+ *     activate, which is what made it intolerable before.
  *
  *  2. **No retry ladder, and no `always-on-top-changed` listener.** Both were
  *     attempts to re-raise blind. `onTop()` lets the coordinator look instead,
@@ -65,6 +70,19 @@ export interface OverlayHost {
    *  it cannot tell "still floating but buried" from healthy, and the timer bar
    *  proves an unconditional re-raise is what actually holds a window up. */
   onTop(): boolean;
+  /**
+   * Bring the app and this surface to the front — ONCE per presentation.
+   *
+   * On macOS this is `makeKeyAndOrderFront:` in all but name, which is exactly
+   * Apple's prescribed remedy for a window that belongs to Spaces created
+   * before the one the person is on. It is the single thing the original idle
+   * prompt did that every rewrite since dropped.
+   *
+   * Deliberately NOT part of `keep()`. The keeper runs about once a second; an
+   * activation on that cadence is the focus-stealing that got the call deleted
+   * in the first place. Presentation activates. Holding does not.
+   */
+  activate(): void;
   /** Stand down without hiding — used while the user is in System Settings. */
   lower(): void;
   hide(): void;
@@ -152,6 +170,17 @@ export const attentionHost: OverlayHost = {
     noteFloatState(window);
   },
 
+  activate() {
+    const window = ensure();
+    if (process.platform === 'darwin') {
+      // Only a real activation reaches a Space the window was not born into.
+      app.focus({ steal: true });
+    }
+    window.show();
+    window.focus();
+    noteFloatState(window);
+  },
+
   release() {
     releaseOnTop(win);
   },
@@ -168,27 +197,9 @@ export const attentionHost: OverlayHost = {
     win.blur();
   },
 
-  /**
-   * Destroy, don't hide.
-   *
-   * A hidden window keeps its Space membership from the moment it was created,
-   * and `canJoinAllSpaces` only ever covered the Spaces that existed then. The
-   * prompt window used to be built once and reused for the life of the process,
-   * so after a few sleeps it belonged to Spaces the person no longer visits —
-   * present and "visible" by every API we can read, and nowhere they can see.
-   *
-   * Building it per prompt costs one renderer load (a few hundred ms, hidden
-   * behind `show: false` and a transparent surface) and buys the guarantee that
-   * a prompt is always born on the Space in front of the person. Stranding then
-   * needs a Space to appear *during* one prompt, rather than at any point since
-   * launch.
-   */
   hide() {
     releaseOnTop(win);
-    if (win && !win.isDestroyed()) win.destroy();
-    win = null;
-    loaded = false;
-    lastFloatOk = null;
+    if (win && !win.isDestroyed() && win.isVisible()) win.hide();
   },
 
   publish(prompt) {

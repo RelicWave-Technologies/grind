@@ -100,6 +100,49 @@ so `attentionHost.hide()` destroys rather than hides and the next prompt is buil
 in front of whoever is looking. That change is unaffected by this revert and
 stays.
 
+## Amendment 2 (2026-08-19) — activation was the missing call all along
+
+Git archaeology settles what nine fixes could not.
+
+The original prompt (`ef1620d`, M3) — the one that never fell behind — was
+configured almost exactly as today: `type: 'panel'`, `alwaysOnTop`,
+`screen-saver` level, `canJoinAllSpaces`, **and `skipTransformProcessType: true`
+from day one**. It hid its window and reused it. So neither the process
+transition nor per-prompt window lifetime was ever the differentiator.
+
+The one thing it did that no rewrite since has: it called `focus()` on every
+show.
+
+- `2f58ba8` (23 Jul) strengthened that to `app.focus({ steal: true })` +
+  `show()` + `focus()`, reasoning that a blocking prompt cannot rely on
+  `showInactive()`.
+- `b8fa826` (15 Aug) deleted all of it, because it was "repeatedly stealing
+  focus from the app the person was using".
+
+Both changes were locally correct and nobody recorded that they were the same
+lever. On macOS `focus()` is `makeKeyAndOrderFront:` in all but name — the
+documented remedy for a window that is not a member of a Space created after it
+was built. Removing it removed the only thing that beat the Spaces problem, and
+"click Timo and the prompt works again" is a person performing that call by hand.
+
+**Decision.** `OverlayHost.activate()` exists and is called from presentation
+only — show, restore, renderer-ready. The keeper runs at roughly 1 Hz and must
+never activate; activating on that cadence is precisely the focus-stealing that
+justified deleting it. Presentation activates. Holding does not. A prompt
+standing down for System Settings does not activate either — it is the opposite
+of asking for attention.
+
+Ambient overlays never activate at all.
+
+### What this retires
+
+- The per-prompt destroy trialled in beta.35 is reverted; reuse was never the
+  problem.
+- The process transition stays suppressed (see Amendment 1) — it was present in
+  the working original.
+- The behavioural reachability escalation stays as a backstop, but is expected
+  to fire far less often now that presentation actually reaches the person.
+
 ## Do not re-suggest
 
 Raising harder. `focus()`, `moveTop()`, `show()`, re-applying
