@@ -68,7 +68,8 @@ export async function loadWorkingCalendar(input: {
   const fromDate = fromIsoDate(input.from);
   const toDate = fromIsoDate(input.to);
 
-  const [users, assignments, holidays, leave] = await Promise.all([
+  const [policy, users, assignments, holidays, leave] = await Promise.all([
+    loadOrCreateLeavePolicy(input.workspaceId, db),
     db.user.findMany({
       where: { id: { in: input.userIds } },
       select: { id: true, teamId: true },
@@ -127,6 +128,7 @@ export async function loadWorkingCalendar(input: {
 
   return new WorkingCalendar({
     tz: input.tz,
+    lastSaturdayOff: policy.lastSaturdayOff,
     shiftAssignments,
     userTeamIds,
     holidays: holidays.map((h) => ({ date: toIsoDate(h.date), name: h.name, teamId: h.teamId })),

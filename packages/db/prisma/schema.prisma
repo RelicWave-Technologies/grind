@@ -272,6 +272,11 @@ model User {
   /// anchor. NULL falls back to createdAt — which is only the first Lark
   /// login, so anyone onboarded into Timo after they joined needs this set.
   joinedOn           DateTime?          @db.Date
+  /// Per-person monthly paid-leave grant, in days. NULL inherits the workspace
+  /// policy. Needed because the two companies in this workspace accrue at
+  /// different rates and teams do not divide along company lines — Media Buying
+  /// alone holds people from both — so the rate has to sit on the person.
+  leaveAccrualDaysOverride Float?
 
   /// Currently-assigned shift. Forward-only: changing this does NOT
   /// rewrite history; each TimeEntry snapshots `shiftIdAtStart` so reports
@@ -1233,6 +1238,10 @@ model LeavePolicy {
   allowNegativeBalance Boolean   @default(false)
   /// Accrue for the joining month itself, or start the month after.
   accrueOnJoinMonth    Boolean   @default(true)
+  /// Company-wide: the last Saturday of each month is not a working day. A
+  /// weekly shift pattern has no way to express a monthly exception, so the
+  /// rule lives here and the Working Calendar applies it.
+  lastSaturdayOff      Boolean   @default(false)
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
 }

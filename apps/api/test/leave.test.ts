@@ -433,3 +433,75 @@ describe('a person with no shift assigned', () => {
     expect(res.body.error).toBe('no_working_days');
   });
 });
+
+describe('per-person accrual rate', () => {
+  it('uses the workspace policy when the person has no override', async () => {
+    const u = await seedAdminWithShift(); // joinedOn 2026-01-01, policy 1/month
+    const res = await request(app).get('/v1/leave/me/balance').set(auth(u.accessToken));
+    const withPolicy = res.body.balance.accruedDays;
+    expect(withPolicy).toBeGreaterThan(0);
+
+    const months = await prisma.leaveLedgerEntry.count({
+      where: { userId: u.userId, kind: 'ACCRUAL' },
+    });
+    // One day a month, so the totals have to agree.
+    expect(withPolicy).toBe(months);
+  });
+
+  it('honours a per-person rate of 2 a month', async () => {
+    const u = await seedAdminWithShift();
+    await prisma.user.update({
+      where: { id: u.userId },
+      data: { leaveAccrualDaysOverride: 2 },
+    });
+
+    const res = await request(app).get('/v1/leave/me/balance').set(auth(u.accessToken));
+    const months = await prisma.leaveLedgerEntry.count({
+      where: { userId: u.userId, kind: 'ACCRUAL' },
+    });
+    expect(res.body.balance.accruedDays).toBe(months * 2);
+  });
+
+  it('two people in the same workspace can accrue at different rates', async () => {
+    const one = await seedAdminWithShift();
+    const two = await prisma.user.create({
+      data: {
+        workspaceId: one.workspaceId,
+        email: `two-${Date.now()}@test.local`,
+        name: 'Two',
+        role: 'MEMBER',
+        provisioningStatus: 'ACTIVE',
+        joinedOn: new Date('2026-01-01T00:00:00Z'),
+        leaveAccrualDaysOverride: 2,
+      },
+    });
+    const { signAccessToken } = await import('../src/lib/jwt');
+    const tokenTwo = signAccessToken({ sub: two.id, ws: one.workspaceId, role: 'MEMBER' });
+
+    const a = await request(app).get('/v1/leave/me/balance').set(auth(one.accessToken));
+    const b = await request(app).get('/v1/leave/me/balance').set(auth(tokenTwo));
+
+    // Same workspace, same months, twice the grant.
+    expect(b.body.balance.accruedDays).toBe(a.body.balance.accruedDays * 2);
+  });
+
+  it('a rate change only affects months not already granted', async () => {
+    const u = await seedAdminWithShift();
+    await request(app).get('/v1/leave/me/balance').set(auth(u.accessToken));
+    const before = await prisma.leaveLedgerEntry.count({
+      where: { userId: u.userId, kind: 'ACCRUAL' },
+    });
+
+    // Raising the rate must not silently rewrite history: the months already
+    // written keep their sourceKey and are skipped.
+    await prisma.user.update({
+      where: { id: u.userId }, data: { leaveAccrualDaysOverride: 2 },
+    });
+    const res = await request(app).get('/v1/leave/me/balance').set(auth(u.accessToken));
+
+    expect(await prisma.leaveLedgerEntry.count({
+      where: { userId: u.userId, kind: 'ACCRUAL' },
+    })).toBe(before);
+    expect(res.body.balance.accruedDays).toBe(before);
+  });
+});

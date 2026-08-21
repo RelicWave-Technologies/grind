@@ -79,7 +79,10 @@ export async function ensureAccruals(input: {
   const [user, policy] = await Promise.all([
     db.user.findUnique({
       where: { id: input.userId },
-      select: { id: true, joinedOn: true, createdAt: true, deactivatedAt: true },
+      select: {
+        id: true, joinedOn: true, createdAt: true, deactivatedAt: true,
+        leaveAccrualDaysOverride: true,
+      },
     }),
     loadOrCreateLeavePolicy(input.workspaceId, db),
   ]);
@@ -91,7 +94,8 @@ export async function ensureAccruals(input: {
     joinedOn,
     asOf: input.asOf,
     policy: {
-      monthlyAccrualDays: policy.monthlyAccrualDays,
+      // The person's own rate wins; the workspace policy is the fallback.
+      monthlyAccrualDays: user.leaveAccrualDaysOverride ?? policy.monthlyAccrualDays,
       accrueOnJoinMonth: policy.accrueOnJoinMonth,
       carryForward: policy.carryForward,
       carryForwardCapDays: policy.carryForwardCapDays,

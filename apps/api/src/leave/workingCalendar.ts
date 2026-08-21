@@ -56,6 +56,12 @@ export interface ApprovedLeaveInput {
 
 export interface WorkingCalendarInput {
   tz: string;
+  /**
+   * Company-wide rule: the last Saturday of each month is not a working day.
+   * Applied only to people whose shift says they work that Saturday, so it
+   * cannot invent a working day for somebody already off.
+   */
+  lastSaturdayOff?: boolean;
   /** Per-user shift assignment history, newest or oldest order both fine. */
   shiftAssignments?: Record<string, ShiftAssignmentInput[]>;
   /** Team each user belongs to, for team-scoped holidays. */
@@ -84,8 +90,11 @@ export class WorkingCalendar {
   private readonly leaveByUser: Map<string, ApprovedLeaveInput[]>;
   private readonly dayWindowCache = new Map<string, { startMs: number; endMs: number } | null>();
 
+  private readonly lastSaturdayOff: boolean;
+
   constructor(input: WorkingCalendarInput) {
     this.tz = input.tz;
+    this.lastSaturdayOff = input.lastSaturdayOff ?? false;
     this.shiftAssignments = input.shiftAssignments ?? {};
     this.userTeamIds = input.userTeamIds ?? {};
 
@@ -258,6 +267,11 @@ export class WorkingCalendar {
     if (!parsed.success) return { kind: 'no_shift' };
     const day = parsed.data[weekdayForDate(date)];
     if (!day) return { kind: 'weekly_off', shiftName: assignment.shiftNameSnapshot };
+    // Resolved here rather than at each caller, so "was this a working day"
+    // has one answer for the quote, the timesheet and the payroll worksheet.
+    if (this.lastSaturdayOff && isLastSaturdayOfMonth(date)) {
+      return { kind: 'weekly_off', shiftName: assignment.shiftNameSnapshot };
+    }
     return { kind: 'working', shiftName: assignment.shiftNameSnapshot };
   }
 }
@@ -277,6 +291,23 @@ function base(
     shiftName: opts.shiftName,
     label: null,
   };
+}
+
+/**
+ * Is this the last Saturday of its month?
+ *
+ * The shift schedule is a weekly pattern — seven keys, one per weekday — so it
+ * cannot express "the last Saturday". This is the exception that needs its own
+ * rule: the team works a six-day week, and one Saturday a month is not a working
+ * day. Pure date arithmetic, no clock, so it is the same answer everywhere.
+ */
+export function isLastSaturdayOfMonth(date: string): boolean {
+  if (weekdayForDate(date) !== 'sat') return false;
+  const [yy, mm, dd] = date.split('-').map((n) => Number.parseInt(n, 10));
+  // Day 0 of the next month is the last day of this one.
+  const lastDay = new Date(Date.UTC(yy!, mm!, 0)).getUTCDate();
+  // The last Saturday is the only one within seven days of the month's end.
+  return dd! + 7 > lastDay;
 }
 
 /** Weekday key for a YYYY-MM-DD business date (calendar date, not an instant). */

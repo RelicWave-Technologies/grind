@@ -1,6 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { NINE_TO_SIX, type ShiftSchedule } from '@grind/types';
-import { WorkingCalendar, leaveDateRange, addIsoDays, weekdayForDate } from './workingCalendar';
+import {
+  WorkingCalendar,
+  leaveDateRange,
+  addIsoDays,
+  weekdayForDate,
+  isLastSaturdayOfMonth,
+} from './workingCalendar';
 
 const TZ = 'Asia/Kolkata';
 const U = 'user-1';
@@ -197,5 +203,92 @@ describe('date helpers', () => {
   it('weekdayForDate agrees with the calendar', () => {
     expect(weekdayForDate('2026-08-17')).toBe('mon');
     expect(weekdayForDate('2026-08-22')).toBe('sat');
+  });
+});
+
+
+/** Mon-Sat, the six-day week both companies here actually work. */
+const SIX_DAY: ShiftSchedule = {
+  mon: { start: '09:00', end: '18:00' },
+  tue: { start: '09:00', end: '18:00' },
+  wed: { start: '09:00', end: '18:00' },
+  thu: { start: '09:00', end: '18:00' },
+  fri: { start: '09:00', end: '18:00' },
+  sat: { start: '09:00', end: '18:00' },
+  sun: null,
+};
+
+describe('isLastSaturdayOfMonth', () => {
+  it('knows the last Saturday of August 2026', () => {
+    // Saturdays: 1, 8, 15, 22, 29. August has 31 days.
+    expect(isLastSaturdayOfMonth('2026-08-29')).toBe(true);
+    expect(isLastSaturdayOfMonth('2026-08-22')).toBe(false);
+    expect(isLastSaturdayOfMonth('2026-08-01')).toBe(false);
+  });
+
+  it('is false for every day that is not a Saturday', () => {
+    expect(isLastSaturdayOfMonth('2026-08-28')).toBe(false); // Friday
+    expect(isLastSaturdayOfMonth('2026-08-30')).toBe(false); // Sunday
+  });
+
+  it('handles a month whose last day IS a Saturday', () => {
+    // 2026-10-31 is a Saturday and the last day of October.
+    expect(weekdayForDate('2026-10-31')).toBe('sat');
+    expect(isLastSaturdayOfMonth('2026-10-31')).toBe(true);
+    expect(isLastSaturdayOfMonth('2026-10-24')).toBe(false);
+  });
+
+  it('handles February in a leap year', () => {
+    // 2028 is a leap year; 2028-02-26 is the last Saturday.
+    expect(isLastSaturdayOfMonth('2028-02-26')).toBe(true);
+    expect(isLastSaturdayOfMonth('2028-02-19')).toBe(false);
+  });
+});
+
+describe('WorkingCalendar — the last Saturday is not a working day', () => {
+  function sixDayCal(lastSaturdayOff: boolean) {
+    return new WorkingCalendar({
+      tz: TZ,
+      lastSaturdayOff,
+      shiftAssignments: { [U]: assignment(SIX_DAY) },
+      userTeamIds: { [U]: null },
+    });
+  }
+
+  it('an ordinary Saturday is still a working day on a six-day week', () => {
+    expect(sixDayCal(true).dayStatus(U, '2026-08-22').kind).toBe('WORKING');
+  });
+
+  it('the last Saturday reads as a weekly off', () => {
+    expect(sixDayCal(true).dayStatus(U, '2026-08-29').kind).toBe('WEEKLY_OFF');
+  });
+
+  it('stays a working day when the rule is off', () => {
+    expect(sixDayCal(false).dayStatus(U, '2026-08-29').kind).toBe('WORKING');
+  });
+
+  it('costs nobody any balance, like every other non-working day', () => {
+    const q = sixDayCal(true).quote({
+      userId: U, dates: ['2026-08-29'], portion: 'FULL', kind: 'PAID',
+    });
+    expect(q.chargedDays).toBe(0);
+  });
+
+  it('a week of leave containing it charges one day less', () => {
+    // Mon 24 -> Sat 29 is six working days on this shift, minus the last Saturday.
+    const q = sixDayCal(true).quote({
+      userId: U, dates: leaveDateRange('2026-08-24', '2026-08-29'), portion: 'FULL', kind: 'PAID',
+    });
+    expect(q.chargedDays).toBe(5);
+  });
+
+  it('cannot invent a day off for somebody already not working Saturdays', () => {
+    // NINE_TO_SIX has sat: null, so the rule has nothing to turn off.
+    const c = new WorkingCalendar({
+      tz: TZ, lastSaturdayOff: true,
+      shiftAssignments: { [U]: assignment() },
+      userTeamIds: { [U]: null },
+    });
+    expect(c.dayStatus(U, '2026-08-29').kind).toBe('WEEKLY_OFF');
   });
 });
