@@ -50,7 +50,8 @@ export class SqliteTodayLedgerStore implements ServerLedgerCache {
     owner: TimerOwner,
     window: { start: number; end: number },
     response: TodayLedgerResponse,
-    fetchedAt = Date.now(),
+// eslint-disable-next-line no-restricted-syntax -- device<->device: cache freshness only
+fetchedAt = Date.now(),
   ): void {
     const autoEntries = response.entries.map((raw) => TimeEntryDto.parse(raw));
     const approvedManualEntries = (response.approvedManualEntries ?? []).map((raw) => TimeEntryDto.parse(raw));

@@ -37,7 +37,11 @@ export function registerPowerEvents(opts: {
   const prepare = async (reason: TimerAwayReason, awayStartedAt: number): Promise<boolean> => {
     try {
       const timer = getTimerService();
-      await timer.prepareForAway(reason, awayStartedAt);
+      // Hand over elapsed time, never an instant. `awayStartedAt` is a device
+      // clock reading and the timer runs on the server-aligned clock; the two
+      // are not comparable, but the gap between two device readings is.
+      // eslint-disable-next-line no-restricted-syntax -- device<->device: the GAP is handed to the timer, never the instant
+      await timer.prepareForAway(reason, Math.max(0, Date.now() - awayStartedAt));
       broadcast('timer:status:push', timer.status());
       log.info('timer stopped for machine away', { reason, awayStartedAt });
       return true;
@@ -49,6 +53,7 @@ export function registerPowerEvents(opts: {
 
   const markAway = (reason: TimerAwayReason) => {
     if (awaySession) return;
+    // eslint-disable-next-line no-restricted-syntax -- device<->device: only ever subtracted from a later Date.now()
     const awayStartedAt = Date.now();
     const before = getTimerService().status();
     opts.onAwayStart?.();
@@ -62,6 +67,7 @@ export function registerPowerEvents(opts: {
 
   const markBack = (): void => {
     if (returning) return;
+    // eslint-disable-next-line no-restricted-syntax -- device<->device: wake de-duplication window against lastWakeAt
     const now = Date.now();
     if (!awaySession && now - lastWakeAt < 1_000) return;
     lastWakeAt = now;

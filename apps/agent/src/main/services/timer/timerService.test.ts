@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import type { TimeEntry } from '@grind/core';
-import { closeTimeEntry, totalWorkedMs } from '@grind/core';
+import { clampEntryToServerClock, closeTimeEntry, totalWorkedMs, validateEntry } from '@grind/core';
 import { canonicalTimerEntryPayload } from '@grind/core';
 import { createHash } from 'node:crypto';
 import { dateKeyInTimeZone, localDayWindowInTimeZone, type TimerSyncReceipt } from '@grind/types';
@@ -91,7 +91,9 @@ class MemStore implements EntryStore {
       .reverse()
       .map((e) => structuredClone(e));
   }
+  ledgerReads = 0;
   listLedgerEntries(since: number) {
+    this.ledgerReads += 1;
     return this.listSince(since).map((entry) => ({
       entry,
       syncState: this.syncStates.get(entry.id) ?? 'pending_create',
@@ -502,7 +504,7 @@ describe('TimerService.prepareForQuit', () => {
   it('quits while paused without adding the paused gap as worked time', async () => {
     await svc.start({});
     clock.advance(5 * MIN);
-    await svc.pauseForIdle(clock.now());
+    await svc.pauseForIdle(0);
     clock.advance(20 * MIN);
 
     await svc.prepareForQuit('quit');
@@ -539,7 +541,7 @@ describe('TimerService.prepareForAway', () => {
     await svc.start({});
     clock.advance(5 * MIN);
 
-    const status = await svc.prepareForAway('suspend', clock.now());
+    const status = await svc.prepareForAway('suspend', 0);
 
     expect(status.state).toBe('IDLE');
     expect(store.getOpen()).toBeNull();
@@ -557,10 +559,10 @@ describe('TimerService.prepareForAway', () => {
   it('stops a paused timer without counting the away gap', async () => {
     await svc.start({});
     clock.advance(5 * MIN);
-    await svc.pauseForIdle(clock.now());
+    await svc.pauseForIdle(0);
     clock.advance(20 * MIN);
 
-    await svc.prepareForAway('lock', clock.now());
+    await svc.prepareForAway('lock', 0);
 
     const closed = [...store.entries.values()][0]!;
     expect(closed.endedAt).toBe(T0 + 25 * MIN);
@@ -577,7 +579,7 @@ describe('TimerService.prepareForAway', () => {
     sync.failSyncCount = 1;
     clock.advance(6 * MIN);
 
-    await svc.prepareForAway('suspend', clock.now());
+    await svc.prepareForAway('suspend', 0);
 
     const closed = [...store.entries.values()][0]!;
     expect(closed.endedAt).toBe(T0 + 6 * MIN);
@@ -591,12 +593,12 @@ describe('TimerService.prepareForAway', () => {
     const originalUpsert = store.upsert.bind(store);
     store.upsert = () => { throw new Error('disk unavailable'); };
 
-    await expect(svc.prepareForAway('lock', clock.now())).rejects.toThrow('disk unavailable');
+    await expect(svc.prepareForAway('lock', 0)).rejects.toThrow('disk unavailable');
     expect(svc.status()).toMatchObject({ state: 'RUNNING', larkTaskGuid: 'task-1' });
     expect(store.getAwayState()).toMatchObject({ reason: 'lock', awayStartedAt: T0 + 4 * MIN });
 
     store.upsert = originalUpsert;
-    await svc.prepareForAway('lock', T0 + 4 * MIN);
+    await svc.prepareForAway('lock', clock.now() - (T0 + 4 * MIN));
     expect(svc.status().state).toBe('IDLE');
     expect(store.getAwayState()).toBeNull();
   });
@@ -604,7 +606,7 @@ describe('TimerService.prepareForAway', () => {
   it('is a no-op when away fires while idle', async () => {
     store.setAwayState({ reason: 'suspend', entryId: 'old', awayStartedAt: clock.now(), observedAt: clock.now() });
 
-    const status = await svc.prepareForAway('suspend', clock.now());
+    const status = await svc.prepareForAway('suspend', 0);
 
     expect(status.state).toBe('IDLE');
     expect(store.getAwayState()).toBeNull();
@@ -692,7 +694,7 @@ describe('TimerService offline behaviour', () => {
 
     clock.advance(5 * MIN);
     sync.notFoundSyncCount = 1;
-    await svc.pauseForIdle(clock.now());
+    await svc.pauseForIdle(0);
     await svc.flushUnsynced();
 
     expect(sync.calls.slice(-2)).toEqual([`create:${entry.id}`, `sync:${entry.id}`]);
@@ -722,7 +724,7 @@ describe('TimerService offline behaviour', () => {
     expect(store.getUnsynced()).toMatchObject([{ syncState: 'pending_create' }]);
 
     clock.advance(5 * MIN);
-    await svc.pauseForIdle(clock.now());
+    await svc.pauseForIdle(0);
 
     expect(store.getUnsynced()).toMatchObject([{ syncState: 'pending_create' }]);
     expect(sync.syncs).toHaveLength(0);
@@ -740,7 +742,7 @@ describe('TimerService offline behaviour', () => {
     };
 
     clock.advance(1 * MIN);
-    await svc.pauseForIdle(clock.now());
+    await svc.pauseForIdle(0);
 
     expect(store.getUnsynced()).toMatchObject([{ syncState: 'pending_update' }]);
   });
@@ -806,7 +808,7 @@ describe('TimerService.pauseForIdle / resumeFromIdle', () => {
     const lastHealthyAt = clock.now();
     clock.advance(2 * MIN);
 
-    const paused = await svc.pauseForPermission(lastHealthyAt);
+    const paused = await svc.pauseForPermission(clock.now() - lastHealthyAt);
 
     expect(paused).toMatchObject({
       state: 'RUNNING',
@@ -821,7 +823,7 @@ describe('TimerService.pauseForIdle / resumeFromIdle', () => {
   it('cannot resume a permission pause until the accrual guard is ready', async () => {
     await svc.start({});
     clock.advance(MIN);
-    await svc.pauseForPermission(clock.now());
+    await svc.pauseForPermission(0);
     shouldBlockAccrual = true;
 
     await expect(svc.resume()).rejects.toMatchObject({ code: 'TRACKING_PERMISSIONS_REQUIRED' });
@@ -835,7 +837,7 @@ describe('TimerService.pauseForIdle / resumeFromIdle', () => {
   it('freezes worked time on pause and never counts the idle gap', async () => {
     await svc.start({}); // WORK from T0
     clock.advance(5 * MIN); // worked 5 min
-    await svc.pauseForIdle(clock.now());
+    await svc.pauseForIdle(0);
 
     expect(svc.isPaused()).toBe(true);
     let s = svc.status();
@@ -866,7 +868,7 @@ describe('TimerService.pauseForIdle / resumeFromIdle', () => {
     expect(alreadyRunning).toMatchObject({ state: 'RUNNING', workedMs: 2 * MIN, paused: false });
     expect(sync.syncs).toHaveLength(1);
 
-    await svc.pauseForIdle(clock.now());
+    await svc.pauseForIdle(0);
     clock.advance(8 * MIN);
     const resumed = await svc.resume();
     expect(resumed).toMatchObject({ state: 'RUNNING', workedMs: 2 * MIN, paused: false });
@@ -880,7 +882,7 @@ describe('TimerService.pauseForIdle / resumeFromIdle', () => {
   it('clamps pause time to the segment start (whole-segment idle)', async () => {
     await svc.start({});
     clock.advance(2 * MIN);
-    await svc.pauseForIdle(T0 - 10 * MIN); // idleStart before segment start
+    await svc.pauseForIdle(clock.now() - (T0 - 10 * MIN)); // cut older than the segment
     const s = svc.status();
     if (s.state === 'RUNNING') expect(s.workedMs).toBe(0); // clamped → zero worked
   });
@@ -888,7 +890,7 @@ describe('TimerService.pauseForIdle / resumeFromIdle', () => {
   it('break (stop) after pause finalizes at the frozen time', async () => {
     await svc.start({});
     clock.advance(7 * MIN);
-    await svc.pauseForIdle(clock.now());
+    await svc.pauseForIdle(0);
     clock.advance(20 * MIN); // away
     await svc.stop();
     expect(svc.isRunning()).toBe(false);
@@ -897,12 +899,12 @@ describe('TimerService.pauseForIdle / resumeFromIdle', () => {
   });
 
   it('pause is a no-op when idle or already paused', async () => {
-    await svc.pauseForIdle(T0); // not running
+    await svc.pauseForIdle(clock.now() - T0); // not running
     expect(svc.isRunning()).toBe(false);
     await svc.start({});
-    await svc.pauseForIdle(clock.now());
+    await svc.pauseForIdle(0);
     const before = svc.status();
-    await svc.pauseForIdle(clock.now()); // already paused
+    await svc.pauseForIdle(0); // already paused
     expect(svc.status()).toEqual(before);
   });
 });
@@ -1011,7 +1013,7 @@ describe('TimerService.recover (crash recovery)', () => {
   it('never recovers a paused entry before its latest segment end', async () => {
     await svc.start({});
     clock.advance(10 * MIN);
-    await svc.pauseForIdle(clock.now());
+    await svc.pauseForIdle(0);
     const staleLiveness = T0 + 5 * MIN;
 
     const rebooted = new TimerService(store, sync, clock, ids, allowAccrual);
@@ -1169,5 +1171,232 @@ describe('TimerService workspace business day', () => {
     expect(service.status()).toMatchObject({ state: 'IDLE', workedMs: 30 * MIN });
     expect(service.listToday(clock.now())).toMatchObject([{ id: 'manual-entry', source: 'MANUAL' }]);
     expect(service.workedMsByTask(clock.now()).get('manual-task')).toBe(30 * MIN);
+  });
+});
+
+/**
+ * The frame split.
+ *
+ * The timer keeps time in the SERVER's frame (`realClock` is `serverAlignedNow`).
+ * Every caller that hands it a boundary — idle, permission pause, machine away —
+ * still stamps that boundary with `Date.now()`, the DEVICE's frame. On a machine
+ * whose clock is off by more than a second the two are not comparable, and the
+ * guard that is supposed to stop a boundary preceding its own segment collapses
+ * the segment instead.
+ *
+ * The result reaches the server as a zero-length segment, gets dropped by
+ * `clampEntryToServerClock`, and fails `validateEntry` with
+ * "entry.startedAt !== first segment.startedAt" — a 400 the agent retries every
+ * 60 seconds forever, which users report as "time not matching the server".
+ */
+describe('TimerService — device/server clock skew', () => {
+  /** Device clock five minutes BEHIND the server clock the timer is aligned to. */
+  const SKEW = 5 * MIN;
+  const deviceNow = () => clock.now() - SKEW;
+
+  it('survives an idle pause measured on a device clock that is behind', async () => {
+    await svc.start({ larkTaskGuid: 'task-a' });
+    clock.advance(10 * MIN);
+
+    // Exactly what index.ts does: both readings come from the device clock, so
+    // the gap between them is meaningful even though neither instant is.
+    const idleSeconds = 300;
+    const idleStartedAt = deviceNow() - idleSeconds * 1000;
+    await svc.pauseForIdle(Math.max(0, deviceNow() - idleStartedAt));
+    await svc.stop();
+
+    const entry = [...store.entries.values()][0]!;
+    expect(validateEntry(entry)).toEqual([]);
+
+    // The failure this guards: a boundary from the wrong frame collapsed the
+    // segment to zero length, the clamp dropped it, and the server answered
+    // 400 invalid_segments on every retry, forever.
+    const clamped = clampEntryToServerClock(entry, clock.now());
+    expect(clamped.entry.segments.length).toBe(entry.segments.length);
+    expect(validateEntry(clamped.entry)).toEqual([]);
+  });
+
+  it('credits the full worked time rather than losing the skew', async () => {
+    await svc.start({ larkTaskGuid: 'task-a' });
+    clock.advance(10 * MIN);
+
+    // Just went idle: zero elapsed.
+    await svc.pauseForIdle(0);
+
+    // Before the fix this returned 5 minutes — ten worked, five credited, the
+    // loss exactly equal to the skew.
+    expect(totalWorkedMs(store.getOpen()!, clock.now())).toBeCloseTo(10 * MIN, -3);
+  });
+
+  it('cuts an idle pause back by the elapsed time, no further', async () => {
+    await svc.start({ larkTaskGuid: 'task-a' });
+    clock.advance(10 * MIN);
+
+    await svc.pauseForIdle(4 * MIN);
+
+    expect(totalWorkedMs(store.getOpen()!, clock.now())).toBeCloseTo(6 * MIN, -3);
+  });
+
+  it('never cuts further back than the segment start', async () => {
+    await svc.start({ larkTaskGuid: 'task-a' });
+    clock.advance(2 * MIN);
+
+    // An absurd elapsed value must not invent negative time.
+    await svc.pauseForIdle(60 * MIN);
+
+    expect(totalWorkedMs(store.getOpen()!, clock.now())).toBe(0);
+    expect(validateEntry(store.getOpen()!)).toEqual([]);
+  });
+
+  it('survives a machine-away boundary measured on the device clock', async () => {
+    await svc.start({ larkTaskGuid: 'task-a' });
+    clock.advance(10 * MIN);
+
+    // What power.ts does: the away began at a device reading, and the retry
+    // path converts it to elapsed time.
+    const awayStartedAt = deviceNow();
+    await svc.prepareForAway('suspend', Math.max(0, deviceNow() - awayStartedAt));
+
+    const entry = [...store.entries.values()][0]!;
+    expect(validateEntry(entry)).toEqual([]);
+    expect(clampEntryToServerClock(entry, clock.now()).entry.segments.length).toBe(entry.segments.length);
+    expect(totalWorkedMs(entry, clock.now())).toBeCloseTo(10 * MIN, -3);
+  });
+
+  it('survives a permission pause measured on the device clock', async () => {
+    await svc.start({ larkTaskGuid: 'task-a' });
+    clock.advance(10 * MIN);
+
+    // What trackingPermissionMonitor does: last-healthy and now are both device
+    // readings, six seconds apart.
+    const lastHealthyAt = deviceNow() - 6_000;
+    await svc.pauseForPermission(Math.max(0, deviceNow() - lastHealthyAt));
+
+    const entry = store.getOpen()!;
+    expect(validateEntry(entry)).toEqual([]);
+    expect(totalWorkedMs(entry, clock.now())).toBeCloseTo(10 * MIN - 6_000, -3);
+  });
+});
+
+/**
+ * The direction of error matters more than its size.
+ *
+ * Under-crediting loses a user some minutes and is visible and correctable.
+ * Over-crediting silently bills time nobody worked, which is the failure this
+ * whole subsystem exists to prevent. So whatever the device clock is doing, a
+ * boundary must never credit MORE than the real elapsed time.
+ */
+describe('TimerService — a skewed device clock can never over-credit', () => {
+  for (const skew of [-5 * MIN, 0, 5 * MIN]) {
+    const label = skew === 0 ? 'in sync' : skew > 0 ? 'behind' : 'ahead';
+    const deviceNow = () => clock.now() - skew;
+
+    it(`never credits more than the real elapsed time when the device is ${label}`, async () => {
+      await svc.start({ larkTaskGuid: 'task-a' });
+      clock.advance(10 * MIN);
+
+      // Exactly the caller arithmetic: two device readings, 300s apart.
+      const idleStartedAt = deviceNow() - 300_000;
+      await svc.pauseForIdle(Math.max(0, deviceNow() - idleStartedAt));
+
+      const worked = totalWorkedMs(store.getOpen()!, clock.now());
+      expect(worked).toBeLessThanOrEqual(10 * MIN);
+      expect(worked).toBeCloseTo(10 * MIN - 300_000, -3);
+      expect(validateEntry(store.getOpen()!)).toEqual([]);
+    });
+
+    it(`closes an away boundary without inventing time when the device is ${label}`, async () => {
+      await svc.start({ larkTaskGuid: 'task-a' });
+      clock.advance(10 * MIN);
+
+      const awayStartedAt = deviceNow();
+      await svc.prepareForAway('suspend', Math.max(0, deviceNow() - awayStartedAt));
+
+      const entry = [...store.entries.values()][0]!;
+      expect(totalWorkedMs(entry, clock.now())).toBeLessThanOrEqual(10 * MIN);
+      expect(entry.endedAt!).toBeLessThanOrEqual(clock.now());
+      expect(validateEntry(entry)).toEqual([]);
+    });
+
+    it(`never ends an entry in the future when the device is ${label}`, async () => {
+      await svc.start({ larkTaskGuid: 'task-a' });
+      clock.advance(10 * MIN);
+      await svc.pauseForPermission(Math.max(0, deviceNow() - (deviceNow() - 6_000)));
+      const stopped = [...store.entries.values()][0] ?? store.getOpen()!;
+
+      for (const seg of stopped.segments) {
+        expect(seg.startedAt).toBeLessThanOrEqual(clock.now());
+        if (seg.endedAt !== null) expect(seg.endedAt).toBeLessThanOrEqual(clock.now());
+      }
+    });
+  }
+});
+
+
+/**
+ * The ledger memo must never change a number, only how often it is read.
+ *
+ * Worked time is a union of intervals, so it is NOT separable into a static
+ * total plus live accrual — accumulating it would double-count wherever a
+ * manual entry overlaps tracked time. Only the read is memoised; the reconcile
+ * runs fresh with the current clock on every call.
+ */
+describe('TimerService — ledger memo must not change worked time', () => {
+  it('accrues exactly with the clock while the memo is warm', async () => {
+    await svc.start({ larkTaskGuid: 'task-a' });
+
+    // Every one of these lands inside the memo TTL with no mutation between.
+    for (let i = 0; i < 10; i += 1) {
+      clock.advance(MIN);
+      expect(svc.status().workedMs).toBeCloseTo((i + 1) * MIN, -3);
+    }
+  });
+
+  it('reflects a mutation immediately, not after the TTL', async () => {
+    await svc.start({ larkTaskGuid: 'task-a' });
+    clock.advance(5 * MIN);
+    expect(svc.status().workedMs).toBeCloseTo(5 * MIN, -3);
+
+    // Pausing must show up on the very next read, with no clock movement.
+    await svc.pauseForIdle(0);
+    const paused = svc.status();
+    clock.advance(5 * MIN);
+
+    expect(svc.status().workedMs).toBe(paused.workedMs);
+    expect(svc.status().workedMs).toBeCloseTo(5 * MIN, -3);
+  });
+
+  it('gives the same answer as an un-memoised read', async () => {
+    await svc.start({ larkTaskGuid: 'task-a' });
+    clock.advance(3 * MIN);
+    const memoised = svc.status().workedMs;
+
+    // A fresh service over the same store has an empty memo.
+    const fresh = new TimerService(store, sync, clock, ids, allowAccrual);
+    expect(fresh.status().workedMs).toBe(memoised);
+  });
+
+  it('actually reduces reads — the point of the change', async () => {
+    await svc.start({ larkTaskGuid: 'task-a' });
+    store.ledgerReads = 0;
+
+    // The 1s tick calls status() repeatedly with no mutation in between.
+    for (let i = 0; i < 30; i += 1) {
+      clock.advance(100);
+      svc.status();
+    }
+
+    expect(store.ledgerReads).toBeLessThan(30);
+  });
+
+  it('re-reads once a durable write bumps the epoch', async () => {
+    await svc.start({ larkTaskGuid: 'task-a' });
+    svc.status();
+    const before = store.ledgerReads;
+
+    await svc.stop();
+    svc.status();
+
+    expect(store.ledgerReads).toBeGreaterThan(before);
   });
 });

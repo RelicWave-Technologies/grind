@@ -14,6 +14,7 @@ import {
   resumeTracking,
   startTracking,
 } from '../services/trackingCommands';
+import { getTrackingReadinessService } from '../services/trackingReadiness';
 import { refreshUpdateInstallability } from '../services/updates';
 
 interface AttentionIpcOptions {
@@ -32,7 +33,16 @@ export function registerAttentionIpc(opts: AttentionIpcOptions): void {
   const coordinator = getTrackingAttentionCoordinator();
   ipcMain.handle('attention:get', (): AttentionPrompt => coordinator.get());
   ipcMain.handle('attention:yieldToSystemSettings', (_event, promptId: string) => ({
-    ok: coordinator.yieldPermissionToSystemSettings(promptId),
+    // Standing down for System Settings is a suspension, not a hand-off: the
+    // prompt comes back on its own once both capabilities are ready. Without
+    // this predicate the user granted the permission and the prompt stayed
+    // stranded behind Settings until they happened to click the tray.
+    ok: coordinator.yieldPermissionToSystemSettings(promptId, {
+      resumeWhen: async () => {
+        const { readiness } = await getTrackingReadinessService().inspect({ verifyScreen: true });
+        return readiness.ready;
+      },
+    }),
   }));
   ipcMain.handle(
     'attention:resolve',

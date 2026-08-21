@@ -72,7 +72,8 @@ export class ScreenshotStore {
              last_error=COALESCE(last_error, 'retry limit reached')
          WHERE upload_state='pending' AND attempts >= 5`,
       )
-      .run(Date.now());
+// eslint-disable-next-line no-restricted-syntax -- device<->device: local retry scheduling, never sent
+.run(Date.now());
   }
 
   insert(row: ScreenshotRow): void {
@@ -106,7 +107,8 @@ export class ScreenshotStore {
     return r.n;
   }
 
-  pending(limit: number, now = Date.now()): ScreenshotRow[] {
+// eslint-disable-next-line no-restricted-syntax -- device<->device: compared against nextAttemptAt, written by this same store
+pending(limit: number, now = Date.now()): ScreenshotRow[] {
     const rows = this.db
       .prepare(
         `SELECT * FROM screenshots
@@ -167,7 +169,8 @@ export class ScreenshotStore {
   }
 
   /** Mark a row terminally failed after a hard error or retry cap. */
-  markTerminalFailed(id: string, lastError: string, failedAt = Date.now()): void {
+// eslint-disable-next-line no-restricted-syntax -- device<->device: local failure bookkeeping, never sent
+markTerminalFailed(id: string, lastError: string, failedAt = Date.now()): void {
     this.db
       .prepare(
         `UPDATE screenshots

@@ -21,6 +21,7 @@ import {
 } from '../insights/invalidations';
 import type { EntryLiveEvidenceMap } from '../insights/liveEntryEvidence';
 import { resolveEffectiveEntrySegmentEnds } from '../insights/openSegmentEvidence';
+import type { DayStatus } from '@grind/types';
 import { buildTimesheetMatrix, dateRange, type TimesheetSegmentInput } from '../insights/timesheets';
 import type { RoleTitle } from '../scoring/presets';
 import { scoreMinute } from '../scoring/score';
@@ -184,6 +185,8 @@ export function buildMemberReportDays(input: {
   invalidations?: TimeInvalidationInput[];
   activityRoleTitle?: RoleTitle | null;
   iconFor?: IconResolver;
+  /** Working Calendar lookup, supplied by the route that loaded it. */
+  dayStatusFor?: (userId: string, date: string) => DayStatus | null;
 }): MemberReportDay[] {
   const iconFor = input.iconFor ?? appIconUrl;
   const entries = capOpenEntries(input.entries, input.evidenceByEntry, input.now);
@@ -208,6 +211,8 @@ export function buildMemberReportDays(input: {
     tz: input.range.tz,
     segments,
     invalidations: input.invalidations,
+    dayStatusFor: input.dayStatusFor,
+    userIds: [input.userId],
   });
   const cells = matrix?.cells[input.userId] ?? {};
 
@@ -325,6 +330,7 @@ export function buildMemberReportDays(input: {
       activityPercent: activityPercent(daySamples, input.activityRoleTitle, meetingIntervals),
       screenshots: { count: screenshotCount },
       topApps,
+      dayStatus: input.dayStatusFor?.(input.userId, date) ?? null,
     };
   });
 }

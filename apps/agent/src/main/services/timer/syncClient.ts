@@ -2,6 +2,7 @@ import type { TimeEntry, Segment } from '@grind/core';
 import { TimerSyncReceipt, type TimerSyncReceipt as TimerSyncReceiptValue } from '@grind/types';
 import { api } from '../apiClient';
 import { AGENT_VERSION } from '../../env';
+import { serverAlignedNow } from '../serverClock';
 import type { SyncClient } from './types';
 
 function segIso(s: Segment) {
@@ -23,7 +24,10 @@ function lifecycle(entry: TimeEntry) {
   return {
     trackingProtocolVersion: 2 as const,
     revision: Math.max(1, entry.revision),
-    observedAt: new Date(entry.endedAt ?? Date.now()).toISOString(),
+    // An open entry has no endedAt, so the checkpoint is "now" — and it has to
+    // be the same now the segments were stamped with, or the server records a
+    // lastProvenAt that disagrees with the entry it belongs to.
+    observedAt: new Date(entry.endedAt ?? serverAlignedNow()).toISOString(),
     closeReason: entry.closeReason,
   };
 }

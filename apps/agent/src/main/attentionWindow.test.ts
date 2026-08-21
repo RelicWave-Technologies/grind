@@ -1,13 +1,16 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => {
   const webListeners = new Map<string, (...args: unknown[]) => void>();
-  const windowListeners = new Map<string, (...args: unknown[]) => void>();
   const window = {
     isDestroyed: vi.fn(() => false),
-    isVisible: vi.fn(() => false),
-    webContents: { on: vi.fn((event: string, cb: (...args: unknown[]) => void) => webListeners.set(event, cb)), send: vi.fn() },
-    on: vi.fn((event: string, cb: (...args: unknown[]) => void) => windowListeners.set(event, cb)),
+    isVisible: vi.fn(() => true),
+    isAlwaysOnTop: vi.fn(() => true),
+    webContents: {
+      on: vi.fn((event: string, cb: (...args: unknown[]) => void) => webListeners.set(event, cb)),
+      send: vi.fn(),
+    },
+    on: vi.fn(),
     setBounds: vi.fn(),
     setAlwaysOnTop: vi.fn(),
     show: vi.fn(),
@@ -16,156 +19,126 @@ const mocks = vi.hoisted(() => {
     moveTop: vi.fn(),
     focus: vi.fn(),
     blur: vi.fn(),
-    flashFrame: vi.fn(),
   };
   return {
     webListeners,
-    windowListeners,
     window,
     create: vi.fn(() => window),
-    assertFloat: vi.fn(),
-    appFocus: vi.fn(),
+    keepOnTop: vi.fn(),
+    releaseOnTop: vi.fn(),
   };
 });
 
-vi.mock('electron', () => ({ app: { focus: mocks.appFocus } }));
+vi.mock('electron', () => ({ app: { focus: vi.fn() } }));
+vi.mock('./logger', () => ({ log: { info: vi.fn(), warn: vi.fn(), debug: vi.fn(), error: vi.fn() } }));
 vi.mock('./windows/overlay', () => ({
   createOverlayWindow: mocks.create,
-  assertOverlayFloat: mocks.assertFloat,
+  keepOnTop: mocks.keepOnTop,
+  releaseOnTop: mocks.releaseOnTop,
   activeWorkArea: () => ({ x: 0, y: 0, width: 1440, height: 900 }),
   center: () => ({ x: 480, y: 284 }),
   topRight: () => ({ x: 1104, y: 16 }),
 }));
 
-const originalPlatform = process.platform;
-
-function setPlatform(platform: NodeJS.Platform): void {
-  Object.defineProperty(process, 'platform', { configurable: true, value: platform });
-}
-
-describe('attention window', () => {
+describe('attention overlay host', () => {
   beforeEach(() => {
-    vi.clearAllTimers();
     vi.resetModules();
-    vi.useFakeTimers();
     vi.clearAllMocks();
     mocks.webListeners.clear();
-    mocks.windowListeners.clear();
     mocks.window.isDestroyed.mockReturnValue(false);
-    mocks.window.isVisible.mockReturnValue(false);
+    mocks.window.isVisible.mockReturnValue(true);
+    mocks.window.isAlwaysOnTop.mockReturnValue(true);
   });
 
-  afterEach(() => {
-    setPlatform(originalPlatform);
-    vi.clearAllTimers();
-    vi.useRealTimers();
-  });
+  it('creates the surface at prompt rank, outside the global reassert registry', async () => {
+    const { attentionHost } = await import('./attentionWindow');
+    attentionHost.keep();
 
-  it('reuses one physical BrowserWindow across prompt kinds', async () => {
-    setPlatform('win32');
-    const { attentionPresenter } = await import('./attentionWindow');
-    attentionPresenter.show({ kind: 'IDLE', promptId: 'idle-1', idleStartedAt: 100 });
-    mocks.webListeners.get('did-finish-load')?.();
-    attentionPresenter.show({ kind: 'AWAY', promptId: 'away-1', larkTaskGuid: null, stoppedAt: 200, reason: 'lock' });
-
-    expect(mocks.create).toHaveBeenCalledTimes(1);
     expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({
       hash: 'attention',
+      rank: 'prompt',
       registerForReassert: false,
     }));
+  });
+
+  it('never takes focus — on either platform', async () => {
+    const { attentionHost } = await import('./attentionWindow');
+    attentionHost.keep();
+    attentionHost.keep();
+
+    // Electron's macOS focus() asks the app to activate, which is what made the
+    // prompt flash to the front and drop straight back.
+    expect(mocks.window.focus).not.toHaveBeenCalled();
+  });
+
+  it('hands the surface to the shared keeper rather than raising it itself', async () => {
+    const { attentionHost } = await import('./attentionWindow');
+    attentionHost.keep();
+
+    // Every overlay in the app now uses one cadence — the timer bar's, which is
+    // the only one that never fell behind.
+    expect(mocks.keepOnTop).toHaveBeenCalledWith(mocks.window);
+
+    attentionHost.release();
+    expect(mocks.releaseOnTop).toHaveBeenCalledWith(mocks.window);
+  });
+
+  it('reports having lost the top when the always-on-top level is gone', async () => {
+    const { attentionHost } = await import('./attentionWindow');
+    attentionHost.keep();
+    expect(attentionHost.onTop()).toBe(true);
+
+    // Exactly the reported failure: the surface is still there and still in
+    // place, but ordinary windows are now above it.
+    mocks.window.isAlwaysOnTop.mockReturnValue(false);
+
+    expect(attentionHost.onTop()).toBe(false);
+  });
+
+  it('reports having lost the top when the surface is hidden', async () => {
+    const { attentionHost } = await import('./attentionWindow');
+    attentionHost.keep();
+    mocks.window.isVisible.mockReturnValue(false);
+
+    expect(attentionHost.onTop()).toBe(false);
+  });
+
+  it('places where it is told without consulting a cached prompt', async () => {
+    const { attentionHost } = await import('./attentionWindow');
+
+    attentionHost.place({ width: 360, height: 222, placement: 'topRight' });
     expect(mocks.window.setBounds).toHaveBeenLastCalledWith(
       { x: 1104, y: 16, width: 360, height: 222 },
       false,
     );
-    expect(mocks.window.show).toHaveBeenCalled();
-    expect(mocks.window.focus).toHaveBeenCalled();
+
+    attentionHost.place({ width: 480, height: 332, placement: 'center' });
+    expect(mocks.window.setBounds).toHaveBeenLastCalledWith(
+      { x: 480, y: 284, width: 480, height: 332 },
+      false,
+    );
   });
 
-  it('does not float or steal focus again after yielding to System Settings', async () => {
-    const { attentionPresenter, reassertAttentionWindow } = await import('./attentionWindow');
-    const front = { kind: 'PERMISSION' as const, promptId: 'permission-1', intent: 'START_TASK' as const, presentation: 'FRONT' as const };
-    attentionPresenter.show(front);
-    mocks.webListeners.get('did-finish-load')?.();
-    attentionPresenter.yieldToSystemSettings({ ...front, presentation: 'YIELDED_TO_SETTINGS' });
-    const floatCalls = mocks.assertFloat.mock.calls.length;
-    const showCalls = mocks.window.show.mock.calls.length;
-    const focusCalls = mocks.window.focus.mock.calls.length;
-    const appFocusCalls = mocks.appFocus.mock.calls.length;
-
-    reassertAttentionWindow();
-    vi.runAllTimers();
+  it('stands down without hiding when lowered', async () => {
+    const { attentionHost } = await import('./attentionWindow');
+    attentionHost.keep();
+    attentionHost.lower();
 
     expect(mocks.window.setAlwaysOnTop).toHaveBeenCalledWith(false);
     expect(mocks.window.blur).toHaveBeenCalled();
-    expect(mocks.assertFloat).toHaveBeenCalledTimes(floatCalls);
-    expect(mocks.window.show).toHaveBeenCalledTimes(showCalls);
-    expect(mocks.window.focus).toHaveBeenCalledTimes(focusCalls);
-    expect(mocks.appFocus).toHaveBeenCalledTimes(appFocusCalls);
+    expect(mocks.window.hide).not.toHaveBeenCalled();
   });
 
-  it('presents permission in front until it yields to System Settings', async () => {
-    setPlatform('win32');
-    const { attentionPresenter } = await import('./attentionWindow');
-    attentionPresenter.show({
-      kind: 'PERMISSION',
-      promptId: 'permission-1',
-      intent: 'START_TASK',
-      presentation: 'FRONT',
-    });
+  it('publishes prompt state passed in, holding none of its own', async () => {
+    const { attentionHost } = await import('./attentionWindow');
+    attentionHost.onReady(() => {});
     mocks.webListeners.get('did-finish-load')?.();
 
-    expect(mocks.assertFloat).toHaveBeenCalledWith(mocks.window, {});
-    expect(mocks.window.show).toHaveBeenCalled();
-    expect(mocks.window.focus).toHaveBeenCalled();
-  });
+    attentionHost.publish({ kind: 'IDLE', promptId: 'idle-1', idleStartedAt: 100 });
 
-  it('refreshes fullscreen-Space membership and restores attention', async () => {
-    const { attentionPresenter, reassertAttentionWindow } = await import('./attentionWindow');
-    attentionPresenter.show({ kind: 'AWAY', promptId: 'away-1', larkTaskGuid: null, stoppedAt: 200, reason: 'lock' });
-    mocks.webListeners.get('did-finish-load')?.();
-    vi.clearAllMocks();
-
-    reassertAttentionWindow({ refreshWorkspaceVisibility: true });
-
-    expect(mocks.assertFloat).toHaveBeenCalledWith(
-      mocks.window,
-      { refreshWorkspaceVisibility: true },
+    expect(mocks.window.webContents.send).toHaveBeenCalledWith(
+      'attention:state:push',
+      { kind: 'IDLE', promptId: 'idle-1', idleStartedAt: 100 },
     );
-    expect(mocks.window.moveTop).toHaveBeenCalled();
-    expect(mocks.window.focus).toHaveBeenCalled();
-  });
-
-  it('uses only bounded retries while a prompt is frontmost', async () => {
-    setPlatform('win32');
-    const { attentionPresenter } = await import('./attentionWindow');
-    attentionPresenter.show({ kind: 'IDLE', promptId: 'idle-1', idleStartedAt: 100 });
-    mocks.webListeners.get('did-finish-load')?.();
-    vi.clearAllMocks();
-
-    vi.advanceTimersByTime(999);
-    expect(mocks.assertFloat).toHaveBeenCalledTimes(2);
-    expect(mocks.window.show).toHaveBeenCalledTimes(2);
-    expect(mocks.window.focus).toHaveBeenCalledTimes(2);
-
-    vi.advanceTimersByTime(1);
-    expect(mocks.assertFloat).toHaveBeenCalledTimes(3);
-    expect(mocks.window.show).toHaveBeenCalledTimes(3);
-    expect(mocks.window.focus).toHaveBeenCalledTimes(3);
-  });
-
-  it('presents on the current Space without activating Timo on macOS', async () => {
-    setPlatform('darwin');
-    const { attentionPresenter } = await import('./attentionWindow');
-    attentionPresenter.show({ kind: 'IDLE', promptId: 'idle-1', idleStartedAt: 100 });
-    mocks.webListeners.get('did-finish-load')?.();
-
-    // Activating the app (or an activating show) would make macOS switch
-    // Spaces and yank the user out of their fullscreen app. The panel is
-    // shown inactive on the current Space and made key without activation.
-    expect(mocks.appFocus).not.toHaveBeenCalled();
-    expect(mocks.window.show).not.toHaveBeenCalled();
-    expect(mocks.window.showInactive).toHaveBeenCalled();
-    expect(mocks.window.moveTop).toHaveBeenCalled();
-    expect(mocks.window.focus).toHaveBeenCalled();
   });
 });

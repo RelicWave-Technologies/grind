@@ -2,7 +2,7 @@ import { app } from 'electron';
 import type { DesktopPermissionSnapshot, HeartbeatResponse } from '@grind/types';
 import { AGENT_VERSION, HEARTBEAT_INTERVAL_MS } from '../env';
 import { log } from '../logger';
-import { hasDeferredServerClockCorrection, noteServerTime, serverClockOffsetMs } from './serverClock';
+import { hasDeferredServerClockCorrection, noteServerTime, serverAlignedNow, serverClockOffsetMs } from './serverClock';
 import { api, UnauthorizedError } from './apiClient';
 import { isLoggedIn } from './auth';
 import { drainActivityNow } from './activity';
@@ -69,10 +69,11 @@ async function tick(): Promise<void> {
       agentVersion: agentVersion(),
       platform: currentPlatform(),
       timerStatus,
-      observedAt: Date.now(),
+      observedAt: serverAlignedNow(),
       permissions: await currentPermissionSnapshot(),
       startup: currentStartupSnapshot(),
     });
+    // eslint-disable-next-line no-restricted-syntax -- device<->device: RTT halves, and this is what teaches the server clock its offset
     const requestStartedAt = Date.now();
     const res = await api<HeartbeatResponse>('/v1/agent/heartbeat', { method: 'POST', body });
     lastHeartbeatAt = res.serverTime;
@@ -81,6 +82,7 @@ async function tick(): Promise<void> {
     // timestamp clamped — and clamped segments whose start and end collapse
     // together are dropped, silently losing tracked time on every sync.
     const previousOffset = serverClockOffsetMs();
+    // eslint-disable-next-line no-restricted-syntax -- device<->device: paired with requestStartedAt above to measure round trip
     const offset = noteServerTime(res.serverTime, requestStartedAt, Date.now());
     if (offset !== null && Math.abs(offset - previousOffset) >= 1_000) {
       log.info('server clock offset updated', {

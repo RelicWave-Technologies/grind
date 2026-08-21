@@ -6,6 +6,7 @@ import { decideByUser } from '../lark/decideByUser';
 import { triageRequest, type TriageResult } from '../ai/triage';
 import { explainFlag } from '../ai/explainFlag';
 import { resolveReportRange } from '../reports/member';
+import { timesheetCalendarInputs } from '../leave';
 import {
   addDays as addDaysStr,
   buildTimesheetMatrix,
@@ -1098,7 +1099,10 @@ function resolveTimesheetRange(req: { query: Record<string, unknown> }, workspac
 }
 
 /** Build the matrix + the user list, used by both the JSON and CSV endpoints. */
-async function loadTimesheetData(scope: { userIds: string[] }, range: ResolvedTimesheetRange) {
+async function loadTimesheetData(
+  scope: { userIds: string[]; workspaceId: string },
+  range: ResolvedTimesheetRange,
+) {
   const firstDay = localDayWindow(range.from, range.tz);
   const lastDay = localDayWindow(range.to, range.tz);
   if (!firstDay || !lastDay) throw new Error('timesheet_range_unresolvable');
@@ -1143,7 +1147,21 @@ async function loadTimesheetData(scope: { userIds: string[] }, range: ResolvedTi
     }
   }
 
-  const matrix = buildTimesheetMatrix({ from: range.from, to: range.to, tz: range.tz, segments: segs, invalidations });
+  const calendarInputs = await timesheetCalendarInputs({
+    workspaceId: scope.workspaceId,
+    tz: range.tz,
+    userIds: scope.userIds,
+    from: range.from,
+    to: range.to,
+  });
+  const matrix = buildTimesheetMatrix({
+    from: range.from,
+    to: range.to,
+    tz: range.tz,
+    segments: segs,
+    invalidations,
+    ...calendarInputs,
+  });
   if (matrix) {
     const samples = await prisma.activitySample.findMany({
       where: {

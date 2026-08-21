@@ -78,8 +78,8 @@ export { Spinner, Skeleton, SkeletonTable, SkeletonStat } from './Loading';
 export type { SpinnerProps, SkeletonProps } from './Loading';
 
 // ── §5.16 — floating layers ─────────────────────────────────────────────────
-export { Popover, Menu, Toast } from './Overlay';
-export type { PopoverProps, MenuProps, MenuItemSpec, ToastProps } from './Overlay';
+export { Popover, Menu, Modal, Toast } from './Overlay';
+export type { PopoverProps, MenuProps, MenuItemSpec, ModalProps, ToastProps } from './Overlay';
 
 // ── §5.17 — app chrome ──────────────────────────────────────────────────────
 export { AppShell, Sidebar, SidebarBrand, NavSection, NavItem } from './Shell';

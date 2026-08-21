@@ -14,6 +14,8 @@ export function isReady(state: CapabilityState): boolean {
 }
 
 export function actionFor(state: CapabilityState, capability: Capability): PermissionAction | null {
+  // Still resolving: offering any button here is how the relaunch loop started.
+  if (state === 'CHECKING') return null;
   if (state === 'NEEDS_GRANT') return 'enable';
   if (state === 'NEEDS_SETTINGS') return 'settings';
   // FAILED on the input hook means macOS refused the event tap even though
@@ -27,6 +29,7 @@ export function actionFor(state: CapabilityState, capability: Capability): Permi
 
 export function statusText(state: CapabilityState, capability: Capability): string {
   if (state === 'READY' || state === 'NOT_REQUIRED') return 'Ready';
+  if (state === 'CHECKING') return 'Checking…';
   if (state === 'NEEDS_GRANT') return 'Permission required';
   if (state === 'NEEDS_SETTINGS') return 'Enable in System Settings';
   if (state === 'NEEDS_RESTART') return 'Restart Timo to apply';

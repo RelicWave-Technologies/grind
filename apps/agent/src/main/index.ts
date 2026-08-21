@@ -2,6 +2,10 @@ import { app, ipcMain, Notification, safeStorage, screen } from 'electron';
 import type { BrowserWindow, Tray } from 'electron';
 import { createTray, setTrayTitle } from './tray';
 import { createMainWindow } from './window';
+import {
+  decidePromptGate,
+  PROMPT_UNREACHABLE_WINDOW_MS,
+} from './services/promptReachability';
 import { registerIpc } from './ipc';
 import { sendHeartbeatNow, startHeartbeatIfAuthed } from './services/heartbeat';
 import { setServerClockTrackingActive } from './services/serverClock';
@@ -29,7 +33,6 @@ import { dismissFloatingBar, reclampFloatingBar, syncFloatingBar } from './float
 import { reassertAllOverlays } from './windows/overlay';
 import { ensureRegularMacApplication } from './windows/macAppIdentity';
 import { togglePopover, hidePopover } from './popover';
-import { reassertAttentionWindow } from './attentionWindow';
 import { getTrackingAttentionCoordinator } from './services/trackingAttention';
 import { ShiftMonitor } from './services/shift';
 import { onAuthChange } from './services/apiClient';
@@ -119,9 +122,35 @@ function ensureMainWindow(opts: { startHidden?: boolean } = {}): BrowserWindow {
   return mainWindow;
 }
 
+/** When we last re-presented a prompt because somebody asked for the app. */
+let lastPromptRestoreAt: number | null = null;
+
 function showMainWindow(opts: { bypassAttention?: boolean } = {}) {
   if (isQuitting) return;
-  if (!opts.bypassAttention && getTrackingAttentionCoordinator().restoreActive()) return;
+
+  // A prompt outranks the main window — but only while it can actually be
+  // answered. The rule for deciding that lives in promptReachability, which
+  // explains why it has to be behavioural rather than observed.
+  if (!opts.bypassAttention) {
+    const attention = getTrackingAttentionCoordinator();
+    // Device clock is correct here: both readings are clicks by the same
+    // person on this machine, so the two are always in the same frame.
+    const now = Date.now();
+    const decision = decidePromptGate({
+      hasPrompt: attention.get().kind !== 'NONE',
+      sinceLastRestoreMs: lastPromptRestoreAt === null ? null : now - lastPromptRestoreAt,
+      windowMs: PROMPT_UNREACHABLE_WINDOW_MS,
+    });
+    if (decision === 'restore-prompt') {
+      lastPromptRestoreAt = now;
+      attention.restoreActive();
+      return;
+    }
+    if (decision === 'release-and-show') {
+      lastPromptRestoreAt = null;
+      attention.releaseUnreachable('main_window_requested_twice');
+    }
+  }
   const win = ensureMainWindow({ startHidden: true });
   hidePopover();
   if (win.isMinimized()) win.restore();
@@ -244,7 +273,13 @@ app.whenReady().then(async () => {
   const attention = getTrackingAttentionCoordinator();
   tray = createTray({
     onToggle: (bounds) => {
-      if (!attention.restoreActive()) togglePopover(bounds);
+      // The tray popover is never gated. Refusing it was how an unreachable
+      // prompt turned into "nothing in the whole app opens" — the one control
+      // a person falls back on when a window has gone missing must always
+      // respond. A genuinely on-top prompt still outranks the popover by
+      // window level, so both can be up without conflict.
+      attention.restoreActive();
+      togglePopover(bounds);
     },
     onOpenMain: () => showMainWindow(),
     onInstallUpdate: () => void installUpdateNow(),
@@ -260,7 +295,10 @@ app.whenReady().then(async () => {
     },
     onIdle: async (idleStartedAt) => {
       try {
-        await getTimerService().pauseForIdle(idleStartedAt);
+        // The monitor tracks idle on the device clock; the timer runs on the
+        // server-aligned clock. Hand over elapsed time, which means the same
+        // thing on both, rather than an instant, which does not.
+        await getTimerService().pauseForIdle(Math.max(0, Date.now() - idleStartedAt));
       } catch (err) {
         log.warn('pauseForIdle failed', { err: String(err) });
         return false;
@@ -319,16 +357,25 @@ app.whenReady().then(async () => {
       attention.beginMachineAway();
     },
     onWake: () => {
+      // Only the ambient overlays need poking here. An active prompt is kept up
+      // by the attention coordinator's hold loop, which notices a dropped float
+      // on its next tick regardless of which event caused it.
       reassertAllOverlays();
-      reassertAttentionWindow({ refreshWorkspaceVisibility: true });
       checkTrackingPermissionsNow();
+      // Re-anchor BEFORE pushing anything. The server-aligned clock is driven by
+      // a monotonic source, and a monotonic source does not advance while the
+      // machine is asleep — so on wake it is behind by the whole sleep, and it
+      // stays behind until a heartbeat lands. Draining first would upload
+      // entries stamped from a clock we already know is wrong.
+      sendHeartbeatNow();
       void drainTimerSyncNow('wake');
       void refreshTodayLedger('wake');
       void drainActivityNow('wake');
     },
-    // `resume` can arrive while macOS still owns the lock screen. Reassert once
-    // more on the distinct unlock signal without running timer recovery twice.
-    onVisibilityReturn: () => reassertAttentionWindow({ refreshWorkspaceVisibility: true }),
+    // `resume` can arrive while macOS still owns the lock screen, where the
+    // collection behaviours do not stick. Refresh once more on the distinct
+    // unlock signal, without re-running timer recovery.
+    onVisibilityReturn: () => reassertAllOverlays(),
     // Returned from a lock/sleep that stopped a running timer → offer to resume.
     onReturnFromAway: (info) => {
       if (attention.isPermissionActive()) offerPermissionStart(info.larkTaskGuid);
@@ -342,16 +389,13 @@ app.whenReady().then(async () => {
   screen.on('display-removed', () => {
     reclampFloatingBar();
     reassertAllOverlays();
-    reassertAttentionWindow({ refreshWorkspaceVisibility: true });
   });
   screen.on('display-metrics-changed', () => {
     reclampFloatingBar();
     reassertAllOverlays();
-    reassertAttentionWindow({ refreshWorkspaceVisibility: true });
   });
   screen.on('display-added', () => {
     reassertAllOverlays();
-    reassertAttentionWindow({ refreshWorkspaceVisibility: true });
   });
 
   onAgentConfigChange(({ previous, current }) => {

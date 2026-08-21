@@ -4,7 +4,13 @@ import { getPreferences, patchFloatingBar } from './services/preferences';
 import type { TimerStatus } from './services/timer';
 import { FloatingBarVisibilityPolicy } from './services/floatingBarVisibility';
 import { resolvePosition, type Rect } from './windows/floatingBarPosition';
-import { createOverlayWindow, assertOverlayFloat, activeWorkArea, bottomRight } from './windows/overlay';
+import {
+  createOverlayWindow,
+  activeWorkArea,
+  bottomRight,
+  keepOnTop,
+  releaseOnTop,
+} from './windows/overlay';
 
 /**
  * Always-on-top mini bar shown while tracking (M2).
@@ -60,6 +66,9 @@ function ensure(): BrowserWindow {
     width: SIZE.width,
     height: SIZE.height,
     hash: 'floating',
+    // Furniture, not a question. Ranked below prompts so this window's 1 Hz
+    // re-ordering can never bury something the user is being asked to answer.
+    rank: 'ambient',
     // The pill draws its own CSS shadow inside the transparent padding, and
     // owns its corner radius — so no OS shadow/rounding to mismatch it.
     hasShadow: false,
@@ -82,32 +91,24 @@ function ensure(): BrowserWindow {
     win = null;
   });
 
-  reassertFloating();
   return win;
 }
 
-/** Keep it above everything, including fullscreen apps and across Spaces. */
-export function reassertFloating(): void {
-  assertOverlayFloat(win);
-}
-
 /**
- * Show the bar (idempotent). Honors the visibility preference: if the user
- * disabled it, this does nothing. Does NOT reposition an already-placed bar —
- * that's what kept snapping it back to the corner.
+ * Show the bar (idempotent). This is called once a second off the main tick, so
+ * it must stay cheap: `keepOnTop` is a no-op once the bar is already being held,
+ * and the shared keeper does the actual re-ordering from then on.
+ *
+ * This bar's old inline loop — assert, show, moveTop, assert, every second — is
+ * where the keeper's behaviour came from. It was the only overlay that never
+ * fell behind, so its cadence became the one policy every overlay now uses.
  */
 function showFloatingBar(): void {
-  const w = ensure();
-  reassertFloating();
-  // macOS can drop a non-activating panel from the onscreen window list while
-  // Electron still reports it as visible after Space/fullscreen transitions.
-  // Re-showing is idempotent and keeps the tracking indicator recoverable.
-  if (process.platform === 'darwin' || !w.isVisible()) w.showInactive();
-  w.moveTop();
-  reassertFloating();
+  keepOnTop(ensure());
 }
 
 function hideFloatingBar(): void {
+  releaseOnTop(win);
   if (win && !win.isDestroyed() && win.isVisible()) win.hide();
 }
 

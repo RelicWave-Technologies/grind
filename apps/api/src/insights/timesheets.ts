@@ -1,3 +1,4 @@
+import type { DayStatus } from '@grind/types';
 import { localDayWindow } from './day';
 import { CLAIM_PRIORITY, resolveOverlaps } from './overlap';
 import {
@@ -30,6 +31,16 @@ export interface TimesheetCell {
   lastActivityMs: number | null;
   /** Number of one-minute activity samples captured inside this user-day. */
   activitySampleCount: number;
+  /**
+   * What the Working Calendar says about this user-day — was work expected,
+   * and if not, was it a holiday, a weekly off or approved leave.
+   *
+   * Carried on the cell so every consumer of the matrix (attendance, member
+   * reports, payroll, MCP) gets leave without each one re-deriving it, and
+   * without four subtly different answers to "was this person meant to be
+   * here". `null` when the caller did not supply a calendar.
+   */
+  dayStatus?: DayStatus | null;
 }
 
 export interface TimesheetMatrix {
@@ -102,6 +113,19 @@ export function buildTimesheetMatrix(input: {
   tz: string;
   segments: TimesheetSegmentInput[];
   invalidations?: TimeInvalidationInput[];
+  /**
+   * Resolves a user-day to its calendar status. Passed as a function rather
+   * than a materialised map so the matrix stays independent of how the
+   * calendar is loaded, and so a 60-day x 40-person range does not have to
+   * build 2400 objects the caller may never read.
+   */
+  dayStatusFor?: (userId: string, date: string) => DayStatus | null;
+  /**
+   * Users to materialise cells for even when they tracked nothing. A person on
+   * leave for a whole week has no segments, and without this their leave would
+   * be invisible in exactly the report that most needs to show it.
+   */
+  userIds?: readonly string[];
 }): TimesheetMatrix | null {
   const fromWin = localDayWindow(input.from, input.tz);
   const toWin = localDayWindow(input.to, input.tz);
@@ -145,6 +169,7 @@ export function buildTimesheetMatrix(input: {
         firstActivityMs: null,
         lastActivityMs: null,
         activitySampleCount: 0,
+        dayStatus: input.dayStatusFor?.(userId, day) ?? null,
       };
       perUser[day] = cell;
     }
@@ -174,6 +199,20 @@ export function buildTimesheetMatrix(input: {
         cell.totalMs += dur;
         if (cell.firstActivityMs === null || part.start < cell.firstActivityMs) cell.firstActivityMs = part.start;
         if (cell.lastActivityMs === null || part.end > cell.lastActivityMs) cell.lastActivityMs = part.end;
+      }
+    }
+  }
+
+  // Days a person was absent carry no segments, so nothing above created a
+  // cell for them. Materialise those now — a week of leave must not read as a
+  // week of silence.
+  if (input.dayStatusFor && input.userIds) {
+    for (const userId of input.userIds) {
+      for (const dw of dayWindows) {
+        if (cells[userId]?.[dw.key]) continue;
+        const status = input.dayStatusFor(userId, dw.key);
+        if (!status || status.kind === 'WORKING' || status.kind === 'NO_SHIFT') continue;
+        ensure(userId, dw.key);
       }
     }
   }

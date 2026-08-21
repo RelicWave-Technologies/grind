@@ -2,6 +2,7 @@ import { getTimerService } from '../timer';
 import { recordActiveWindow } from './index';
 import { noteRunningApp } from '../appIcons';
 import { getCapturePolicy } from '../agentConfig';
+import { serverAlignedNow } from '../serverClock';
 import { log } from '../../logger';
 
 /**
@@ -56,7 +57,7 @@ async function tick(): Promise<void> {
     if (!gw) return;
     const win = await gw.activeWindow();
     recordActiveWindow({
-      ts: Date.now(),
+      ts: serverAlignedNow(),
       app: win?.owner?.name ?? null,
       appBundle: win?.owner?.bundleId ?? null,
       title: policy.captureTitles ? win?.title ?? null : null,

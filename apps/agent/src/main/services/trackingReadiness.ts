@@ -13,6 +13,7 @@ import {
   type CaptureHealth,
   type ScreenStatus,
 } from './permissions';
+import { log } from '../logger';
 
 interface TrackingReadinessDeps {
   platform: NodeJS.Platform;
@@ -47,7 +48,10 @@ function screenCapability(status: ScreenStatus, health: CaptureHealth, probeHeal
   if (probeHealthy === false || health === 'empty' || health === 'error' || health === 'no-permission') {
     return 'NEEDS_RESTART';
   }
-  return 'NEEDS_RESTART';
+  // Granted, nothing has failed, and no probe has run yet. That is "not known",
+  // not "broken" — reporting it as NEEDS_RESTART is what told people to relaunch
+  // an app whose permission was already fine.
+  return 'CHECKING';
 }
 
 function accessibilityCapability(status: ActivityCaptureStatus): CapabilityState {
@@ -90,6 +94,16 @@ export function isInconclusiveScreenCapture(
     && readiness.blockingCapabilities[0] === 'SCREEN_RECORDING'
     && permissions.screen.status === 'granted'
     && permissions.screen.health === 'empty';
+}
+
+/** Log a non-ready verdict at most once per distinct shape, so a permanent
+ *  blocker does not flood the log at the poll rate. */
+let lastVerdictKey = '';
+function logReadinessVerdict(fields: Record<string, unknown>): void {
+  const key = JSON.stringify(fields);
+  if (key === lastVerdictKey) return;
+  lastVerdictKey = key;
+  log.warn('tracking readiness not ready', fields);
 }
 
 export function createTrackingReadinessService(deps: TrackingReadinessDeps) {
@@ -138,6 +152,22 @@ export function createTrackingReadinessService(deps: TrackingReadinessDeps) {
     const blockingCapabilities: BlockingCapability[] = [];
     if (screenRecording !== 'READY') blockingCapabilities.push('SCREEN_RECORDING');
     if (accessibility !== 'READY') blockingCapabilities.push('ACCESSIBILITY');
+
+    if (blockingCapabilities.length > 0) {
+      // The verdict alone is undiagnosable in the field: a user reporting
+      // "it says Restart" left no trace at all in the log before this.
+      logReadinessVerdict({
+        screenRecording,
+        accessibility,
+        screenStatus: rawScreenStatus,
+        screenHealth: effectiveScreenHealth,
+        screenProbeHealthy,
+        accessibilityTrusted: rawAccessibility.trusted,
+        accessibilityReady: rawAccessibility.ready,
+        hookRunning: rawAccessibility.hookRunning,
+        lastHookError: rawAccessibility.lastHookError,
+      });
+    }
 
     return {
       readiness: {

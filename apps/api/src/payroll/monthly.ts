@@ -51,7 +51,18 @@ export interface PayrollShiftAssignmentInput {
   scheduleSnapshot: unknown;
 }
 
-export type PayrollDayStatus = 'FULL' | 'HALF' | 'OFF' | 'SCHEDULED_OFF' | 'NO_SHIFT';
+export type PayrollDayStatus =
+  | 'FULL'
+  | 'HALF'
+  | 'OFF'
+  | 'SCHEDULED_OFF'
+  | 'NO_SHIFT'
+  | 'HOLIDAY'
+  | 'PAID_LEAVE'
+  | 'UNPAID_LEAVE';
+
+/** Why a day was credited without tracked time backing it. */
+export type PayrollCreditKind = 'HOLIDAY' | 'PAID_LEAVE' | 'UNPAID_LEAVE';
 export type PayrollDayReason =
   | 'monthly_total_met'
   | 'direct_full'
@@ -60,7 +71,10 @@ export type PayrollDayReason =
   | 'carried_to_full'
   | 'carried_to_half'
   | 'scheduled_off'
-  | 'no_shift';
+  | 'no_shift'
+  | 'company_holiday'
+  | 'paid_leave'
+  | 'unpaid_leave';
 
 export interface PayrollCarryLedger {
   fromDate: string;
@@ -81,6 +95,19 @@ export interface PayrollDayClassification {
   reason: PayrollDayReason;
   carryInMs: number;
   carryOutMs: number;
+  /**
+   * Payable units credited by the calendar rather than earned by tracked time
+   * — a company holiday or approved paid leave. Kept as its own number so a
+   * report can always separate "worked" from "credited"; the moment the two
+   * are added into one column you can no longer answer what was tracked.
+   */
+  leaveUnits: number;
+  /** What credited the day, when something did. */
+  creditKind: PayrollCreditKind | null;
+  /** Which half, for a half-day absence. */
+  leavePortion: 'FULL' | 'FIRST_HALF' | 'SECOND_HALF' | null;
+  /** "Diwali", "Paid leave". */
+  leaveLabel: string | null;
 }
 
 export interface PayrollRow {
@@ -100,6 +127,12 @@ export interface PayrollRow {
   offDays: number;
   scheduledOffDays: number;
   noShiftDays: number;
+  /** Company holidays falling on this person's working days. */
+  holidayDays: number;
+  /** Paid leave drawn, in days on the 0.5 grid. */
+  paidLeaveDays: number;
+  /** Unpaid leave taken, in days. Credited to nobody. */
+  unpaidLeaveDays: number;
   payableUnits: number;
   monthlyGuarantee: boolean;
   payrollDays: PayrollDayClassification[];
@@ -143,6 +176,11 @@ const MS_PER_MIN = 60 * 1000;
 /** Round to 2dp without introducing the float fuzz that Number() leaves. */
 function roundHours(ms: number): number {
   return Math.round((ms / MS_PER_HOUR) * 100) / 100;
+}
+
+/** Round a unit count to 2dp. Halves are exact; this guards a bad input. */
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
 }
 
 export function buildMonthlyPayroll(input: MonthlyPayrollInput, nowMs: number): MonthlyPayroll {
@@ -209,6 +247,9 @@ export function buildMonthlyPayroll(input: MonthlyPayrollInput, nowMs: number): 
       offDays: payroll.offDays,
       scheduledOffDays: payroll.scheduledOffDays,
       noShiftDays: payroll.noShiftDays,
+      holidayDays: payroll.holidayDays,
+      paidLeaveDays: payroll.paidLeaveDays,
+      unpaidLeaveDays: payroll.unpaidLeaveDays,
       payableUnits: payroll.payableUnits,
       monthlyGuarantee: payroll.monthlyGuarantee,
       payrollDays: payroll.days,
@@ -287,6 +328,9 @@ function classifyUserMonth(input: {
   offDays: number;
   scheduledOffDays: number;
   noShiftDays: number;
+  holidayDays: number;
+  paidLeaveDays: number;
+  unpaidLeaveDays: number;
   payableUnits: number;
   monthlyGuarantee: boolean;
 } {
@@ -300,7 +344,60 @@ function classifyUserMonth(input: {
     const rawMs = cell ? cell.workedMs + cell.meetingMs + cell.manualMs : 0;
     const cappedMs = Math.min(rawMs, fullUpperMs);
     const ignoredOverflowMs = Math.max(0, rawMs - fullUpperMs);
-    const shift = resolvePayrollShiftForDay(date, input.tz, input.shiftAssignments);
+
+    // The Working Calendar, when the caller supplied one, already resolved the
+    // shift AND the holiday / leave that outrank it. Prefer it over the local
+    // resolver so payroll cannot disagree with attendance about whether
+    // somebody was meant to be at work.
+    const ds = cell?.dayStatus ?? null;
+    const shift: PayrollShiftForDay = ds
+      ? ds.kind === 'NO_SHIFT'
+        ? { kind: 'no_shift' }
+        : ds.kind === 'WEEKLY_OFF'
+          ? { kind: 'scheduled_off', shiftName: ds.shiftName }
+          : { kind: 'working', shiftName: ds.shiftName }
+      : resolvePayrollShiftForDay(date, input.tz, input.shiftAssignments);
+
+    // A full-day absence is credited by the calendar and takes no part in the
+    // tracked-time carry allocator — there is no tracked time to carry.
+    if (ds && ds.expectedFraction === 0 && (ds.kind === 'HOLIDAY' || ds.kind === 'PAID_LEAVE' || ds.kind === 'UNPAID_LEAVE')) {
+      const creditKind: PayrollCreditKind =
+        ds.kind === 'HOLIDAY' ? 'HOLIDAY' : ds.kind === 'PAID_LEAVE' ? 'PAID_LEAVE' : 'UNPAID_LEAVE';
+      days.push({
+        date,
+        rawMs,
+        cappedMs,
+        ignoredOverflowMs,
+        eligible: false,
+        shiftName: ds.shiftName,
+        status: ds.kind,
+        directStatus: ds.kind,
+        reason:
+          ds.kind === 'HOLIDAY' ? 'company_holiday' : ds.kind === 'PAID_LEAVE' ? 'paid_leave' : 'unpaid_leave',
+        carryInMs: 0,
+        carryOutMs: 0,
+        // Unpaid leave credits nothing, which is the whole difference.
+        leaveUnits: ds.kind === 'UNPAID_LEAVE' ? 0 : 1,
+        creditKind,
+        leavePortion: ds.portion ?? 'FULL',
+        leaveLabel: ds.label,
+      });
+      continue;
+    }
+
+    // A HALF-day absence leaves half a working day behind, so the day stays in
+    // the normal tracked-time path and simply carries 0.5 credited units.
+    const halfLeaveUnits =
+      ds && ds.kind === 'PAID_LEAVE' && ds.expectedFraction === 0.5 ? 0.5 : 0;
+    const halfCredit: Pick<PayrollDayClassification, 'leaveUnits' | 'creditKind' | 'leavePortion' | 'leaveLabel'> =
+      ds && (ds.kind === 'PAID_LEAVE' || ds.kind === 'UNPAID_LEAVE') && ds.expectedFraction === 0.5
+        ? {
+            leaveUnits: halfLeaveUnits,
+            creditKind: ds.kind === 'PAID_LEAVE' ? 'PAID_LEAVE' : 'UNPAID_LEAVE',
+            leavePortion: ds.portion ?? 'FULL',
+            leaveLabel: ds.label,
+          }
+        : { leaveUnits: 0, creditKind: null, leavePortion: null, leaveLabel: null };
 
     if (shift.kind === 'no_shift') {
       days.push({
@@ -315,6 +412,7 @@ function classifyUserMonth(input: {
         reason: 'no_shift',
         carryInMs: 0,
         carryOutMs: 0,
+        ...halfCredit,
       });
       continue;
     }
@@ -331,6 +429,7 @@ function classifyUserMonth(input: {
         reason: 'scheduled_off',
         carryInMs: 0,
         carryOutMs: 0,
+        ...halfCredit,
       });
       continue;
     }
@@ -347,6 +446,7 @@ function classifyUserMonth(input: {
       reason: 'below_half',
       carryInMs: 0,
       carryOutMs: 0,
+      ...halfCredit,
     });
   }
 
@@ -440,6 +540,16 @@ function classifyUserMonth(input: {
   const fullDays = days.filter((d) => d.status === 'FULL').length;
   const halfDays = days.filter((d) => d.status === 'HALF').length;
   const offDays = days.filter((d) => d.status === 'OFF').length;
+  // Units credited by the calendar — holidays and approved paid leave — kept
+  // separate from units earned by tracked time right up to the final sum.
+  const leaveUnits = days.reduce((sum, d) => sum + d.leaveUnits, 0);
+  const holidayDays = days.filter((d) => d.creditKind === 'HOLIDAY').reduce((n, d) => n + d.leaveUnits, 0);
+  const paidLeaveDays = days
+    .filter((d) => d.creditKind === 'PAID_LEAVE')
+    .reduce((n, d) => n + d.leaveUnits, 0);
+  const unpaidLeaveDays = days
+    .filter((d) => d.creditKind === 'UNPAID_LEAVE')
+    .reduce((n, d) => n + (d.leavePortion === 'FULL' ? 1 : 0.5), 0);
   return {
     days,
     carryLedger,
@@ -452,7 +562,10 @@ function classifyUserMonth(input: {
     offDays,
     scheduledOffDays: days.filter((d) => d.status === 'SCHEDULED_OFF').length,
     noShiftDays: days.filter((d) => d.status === 'NO_SHIFT').length,
-    payableUnits: fullDays + halfDays * 0.5,
+    holidayDays: round2(holidayDays),
+    paidLeaveDays: round2(paidLeaveDays),
+    unpaidLeaveDays: round2(unpaidLeaveDays),
+    payableUnits: round2(fullDays + halfDays * 0.5 + leaveUnits),
     monthlyGuarantee,
   };
 }

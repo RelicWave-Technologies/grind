@@ -797,6 +797,47 @@ textarea.ui-control { height: auto; min-height: 80px; padding: var(--ui-sp-3) va
 /* ============================================================================
    §5.16 Popover / Menu / Toast — the floating layers (the ONLY --ui-shadow-pop).
    ========================================================================== */
+/* Modal — popover chrome, centered over the scrim, per §5.16. */
+.ui-modal-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--ui-sp-7);
+  background: var(--ui-overlay);
+  animation: ui-fade-in var(--ui-dur-base) var(--ui-ease) both;
+}
+.ui-modal {
+  width: min(520px, 100%);
+  max-height: calc(100vh - var(--ui-sp-12));
+  overflow-y: auto;
+  background: var(--ui-surface-raised);
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-lg);
+  box-shadow: var(--ui-shadow-pop);
+  padding: var(--ui-sp-7);
+  animation: ui-page-rise var(--ui-dur-base) var(--ui-ease) both;
+}
+.ui-modal__head {
+  padding-bottom: var(--ui-sp-4);
+  margin-bottom: var(--ui-sp-6);
+  border-bottom: 1px solid var(--ui-line-faint);
+}
+.ui-modal__title { margin: 0; }
+.ui-modal__desc { margin: var(--ui-sp-2) 0 0; }
+.ui-modal__body > * + * { margin-top: var(--ui-sp-5); }
+.ui-modal__foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--ui-sp-3);
+  padding-top: var(--ui-sp-6);
+  margin-top: var(--ui-sp-6);
+  border-top: 1px solid var(--ui-line-faint);
+}
+@keyframes ui-fade-in { from { opacity: 0; } to { opacity: 1; } }
+
 .ui-popover-wrap { position: relative; display: inline-flex; }
 .ui-popover {
   position: absolute;

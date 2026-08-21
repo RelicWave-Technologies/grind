@@ -75,7 +75,8 @@ export type ScreenshotUploadFailureDecision =
 export function screenshotUploadFailureDecision(
   row: Pick<ScreenshotRow, 'attempts'>,
   err: unknown,
-  now = Date.now(),
+// eslint-disable-next-line no-restricted-syntax -- device<->device: upload retry backoff
+now = Date.now(),
   rng: () => number = Math.random,
 ): ScreenshotUploadFailureDecision {
   const message = errText(err);

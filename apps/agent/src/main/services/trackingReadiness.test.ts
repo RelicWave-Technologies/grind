@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
+
+vi.mock('../logger', () => ({ log: { info: vi.fn(), warn: vi.fn(), debug: vi.fn(), error: vi.fn() } }));
 import type { ActivityCaptureStatus } from './activity';
 import {
   createTrackingReadinessService,

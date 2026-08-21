@@ -1,6 +1,6 @@
 import { screen } from 'electron';
 import type { BrowserWindow, Rectangle } from 'electron';
-import { assertOverlayFloat, createOverlayWindow, trayPopoverPoint } from './windows/overlay';
+import { createOverlayWindow, keepOnTop, releaseOnTop, trayPopoverPoint } from './windows/overlay';
 
 /**
  * Tray popover — anchored under the menu-bar icon. Floats like every other
@@ -13,8 +13,8 @@ let win: BrowserWindow | null = null;
 
 function ensure(): BrowserWindow {
   if (win && !win.isDestroyed()) return win;
-  win = createOverlayWindow({ width: 300, height: 340, hash: 'popover' });
-  win.on('blur', () => win?.hide());
+  win = createOverlayWindow({ width: 300, height: 340, hash: 'popover', rank: 'ambient' });
+  win.on('blur', () => hidePopover());
   win.on('closed', () => {
     win = null;
   });
@@ -32,11 +32,15 @@ export function togglePopover(trayBounds: Rectangle): void {
   const bounds = w.getBounds();
   const point = trayPopoverPoint(trayBounds, workArea, bounds);
   w.setPosition(point.x, point.y, false);
-  assertOverlayFloat(w); // re-assert on every show — macOS drops the flags
+  // Focus first: this surface dismisses on blur, so it has to be key. The
+  // keeper skips its re-show while a window is focused, so holding it does not
+  // fight that.
   w.show();
   w.focus();
+  keepOnTop(w);
 }
 
 export function hidePopover(): void {
+  releaseOnTop(win);
   if (win && !win.isDestroyed() && win.isVisible()) win.hide();
 }

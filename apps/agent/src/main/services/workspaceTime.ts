@@ -9,6 +9,7 @@ import {
 import type { WorkspaceTimeContext } from '../../shared/workspaceTime';
 import { log } from '../logger';
 import { loadTokens } from './tokenStore';
+import { serverAlignedNow } from './serverClock';
 
 interface PersistedWorkspaceTime {
   workspaceId: string;
@@ -43,7 +44,7 @@ function unavailableContext(): WorkspaceTimeContext {
 }
 
 function notifyListeners(): void {
-  const context = contextAt(Date.now());
+  const context = contextAt(serverAlignedNow());
   for (const listener of listeners) {
     try {
       listener(context);
@@ -109,7 +110,13 @@ function contextAt(now: number): WorkspaceTimeContext {
   };
 }
 
-export function getWorkspaceTimeContext(now = Date.now()): WorkspaceTimeContext {
+/**
+ * Which business day it is. Defaults to the server-aligned clock: four callers
+ * took this default while the timer passed its own clock explicitly, so near
+ * midnight a skewed machine could file a segment under one day and its
+ * screenshots under another.
+ */
+export function getWorkspaceTimeContext(now = serverAlignedNow()): WorkspaceTimeContext {
   return contextAt(now);
 }
 

@@ -45,3 +45,6 @@ test-results/
 geo-deck/
 interactive-product-deck/
 .tmp/
+
+# Local .env backups taken before edits — never commit (they carry secrets).
+.env.bak-*

@@ -1,0 +1,201 @@
+import { describe, it, expect } from 'vitest';
+import { NINE_TO_SIX, type ShiftSchedule } from '@grind/types';
+import { WorkingCalendar, leaveDateRange, addIsoDays, weekdayForDate } from './workingCalendar';
+
+const TZ = 'Asia/Kolkata';
+const U = 'user-1';
+
+/** Mon-Fri 09:00-18:00, assigned from well before any date used here. */
+function assignment(schedule: ShiftSchedule = NINE_TO_SIX, name = 'Day Shift') {
+  return [
+    {
+      shiftId: 'shift-1',
+      effectiveFrom: new Date('2020-01-01T00:00:00Z'),
+      effectiveTo: null,
+      shiftNameSnapshot: name,
+      scheduleSnapshot: schedule,
+    },
+  ];
+}
+
+function cal(over: Partial<ConstructorParameters<typeof WorkingCalendar>[0]> = {}) {
+  return new WorkingCalendar({
+    tz: TZ,
+    shiftAssignments: { [U]: assignment() },
+    userTeamIds: { [U]: null },
+    ...over,
+  });
+}
+
+// 2026-08-17 is a Monday; 2026-08-22 Saturday; 2026-08-23 Sunday.
+describe('WorkingCalendar — the shape of an ordinary week', () => {
+  it('a working weekday is WORKING and expects a full day', () => {
+    const s = cal().dayStatus(U, '2026-08-17');
+    expect(s.kind).toBe('WORKING');
+    expect(s.expectedFraction).toBe(1);
+    expect(s.chargedDays).toBe(0);
+    expect(s.shiftName).toBe('Day Shift');
+  });
+
+  it('a weekend is WEEKLY_OFF and expects nothing', () => {
+    expect(cal().dayStatus(U, '2026-08-22').kind).toBe('WEEKLY_OFF');
+    expect(cal().dayStatus(U, '2026-08-23').expectedFraction).toBe(0);
+  });
+
+  it('a user with no shift assignment is NO_SHIFT, not WORKING', () => {
+    const c = new WorkingCalendar({ tz: TZ });
+    expect(c.dayStatus(U, '2026-08-17').kind).toBe('NO_SHIFT');
+  });
+});
+
+describe('WorkingCalendar — 0.0 is the value doing the real work', () => {
+  it('a company holiday is paid and costs nobody any balance', () => {
+    const c = cal({ holidays: [{ date: '2026-08-19', name: 'Independence Day', teamId: null }] });
+    const s = c.dayStatus(U, '2026-08-19');
+    expect(s.kind).toBe('HOLIDAY');
+    expect(s.paid).toBe(true);
+    expect(s.chargedDays).toBe(0);
+    expect(s.label).toBe('Independence Day');
+  });
+
+  it('a weekly off costs 0 even though nobody is paid for it', () => {
+    const s = cal().dayStatus(U, '2026-08-22');
+    expect(s.chargedDays).toBe(0);
+    expect(s.paid).toBe(false);
+  });
+
+  it('unpaid leave costs 0 balance because it costs no money', () => {
+    const c = cal({
+      approvedLeave: [
+        { userId: U, startDate: '2026-08-17', endDate: '2026-08-17', portion: 'FULL', kind: 'UNPAID', label: 'LWP' },
+      ],
+    });
+    const s = c.dayStatus(U, '2026-08-17');
+    expect(s.kind).toBe('UNPAID_LEAVE');
+    expect(s.paid).toBe(false);
+    expect(s.chargedDays).toBe(0);
+  });
+
+  it('a team holiday does not apply to someone on another team', () => {
+    const c = new WorkingCalendar({
+      tz: TZ,
+      shiftAssignments: { [U]: assignment(), other: assignment() },
+      userTeamIds: { [U]: 'team-a', other: 'team-b' },
+      holidays: [{ date: '2026-08-19', name: 'Team A offsite', teamId: 'team-a' }],
+    });
+    expect(c.dayStatus(U, '2026-08-19').kind).toBe('HOLIDAY');
+    expect(c.dayStatus('other', '2026-08-19').kind).toBe('WORKING');
+  });
+});
+
+describe('WorkingCalendar — precedence', () => {
+  it('a holiday outranks leave, so the leave is free that day', () => {
+    const c = cal({
+      holidays: [{ date: '2026-08-19', name: 'Holi', teamId: null }],
+      approvedLeave: [
+        { userId: U, startDate: '2026-08-17', endDate: '2026-08-21', portion: 'FULL', kind: 'PAID', label: 'Casual' },
+      ],
+    });
+    expect(c.dayStatus(U, '2026-08-19').kind).toBe('HOLIDAY');
+    expect(c.dayStatus(U, '2026-08-19').chargedDays).toBe(0);
+    expect(c.dayStatus(U, '2026-08-18').kind).toBe('PAID_LEAVE');
+  });
+
+  it('a weekly off outranks leave', () => {
+    const c = cal({
+      approvedLeave: [
+        { userId: U, startDate: '2026-08-21', endDate: '2026-08-24', portion: 'FULL', kind: 'PAID', label: null },
+      ],
+    });
+    expect(c.dayStatus(U, '2026-08-22').kind).toBe('WEEKLY_OFF');
+    expect(c.dayStatus(U, '2026-08-23').kind).toBe('WEEKLY_OFF');
+    expect(c.dayStatus(U, '2026-08-24').kind).toBe('PAID_LEAVE');
+  });
+});
+
+describe('WorkingCalendar — halves', () => {
+  it('a first-half absence still expects half a day of work', () => {
+    const c = cal({
+      approvedLeave: [
+        { userId: U, startDate: '2026-08-17', endDate: '2026-08-17', portion: 'FIRST_HALF', kind: 'PAID', label: 'Half Day' },
+      ],
+    });
+    const s = c.dayStatus(U, '2026-08-17');
+    expect(s.portion).toBe('FIRST_HALF');
+    expect(s.chargedDays).toBe(0.5);
+    expect(s.expectedFraction).toBe(0.5);
+  });
+
+  it('second half is distinguishable from first half', () => {
+    const c = cal({
+      approvedLeave: [
+        { userId: U, startDate: '2026-08-17', endDate: '2026-08-17', portion: 'SECOND_HALF', kind: 'PAID', label: null },
+      ],
+    });
+    expect(c.dayStatus(U, '2026-08-17').portion).toBe('SECOND_HALF');
+  });
+});
+
+describe('WorkingCalendar.quote — the Mar 10-12 row', () => {
+  it('three requested days containing a holiday charge 2, not 3', () => {
+    const c = cal({ holidays: [{ date: '2026-08-19', name: 'Holi', teamId: null }] });
+    const q = c.quote({ userId: U, dates: leaveDateRange('2026-08-18', '2026-08-20'), portion: 'FULL', kind: 'PAID' });
+    expect(q.chargedDays).toBe(2);
+    expect(q.days.map((d) => d.kind)).toEqual(['PAID_LEAVE', 'HOLIDAY', 'PAID_LEAVE']);
+  });
+
+  it('a Mon-Fri request spanning a weekend charges only the working days', () => {
+    const c = cal();
+    const q = c.quote({ userId: U, dates: leaveDateRange('2026-08-21', '2026-08-24'), portion: 'FULL', kind: 'PAID' });
+    // Fri + Mon are working; Sat + Sun are not.
+    expect(q.chargedDays).toBe(2);
+  });
+
+  it('a half day quotes 0.5', () => {
+    const q = cal().quote({ userId: U, dates: ['2026-08-17'], portion: 'FIRST_HALF', kind: 'PAID' });
+    expect(q.chargedDays).toBe(0.5);
+  });
+
+  it('an unpaid request quotes 0 however long it is', () => {
+    const q = cal().quote({ userId: U, dates: leaveDateRange('2026-08-17', '2026-08-21'), portion: 'FULL', kind: 'UNPAID' });
+    expect(q.chargedDays).toBe(0);
+  });
+
+  it('halves accumulate exactly — five half days are 2.5, not 2.4999', () => {
+    const c = cal();
+    let total = 0;
+    for (const d of leaveDateRange('2026-08-17', '2026-08-21')) {
+      total += c.quote({ userId: U, dates: [d], portion: 'FIRST_HALF', kind: 'PAID' }).chargedDays;
+    }
+    expect(total).toBe(2.5);
+  });
+
+  it('quoting a range with no shift charges nothing', () => {
+    const c = new WorkingCalendar({ tz: TZ });
+    const q = c.quote({ userId: U, dates: leaveDateRange('2026-08-17', '2026-08-21'), portion: 'FULL', kind: 'PAID' });
+    expect(q.chargedDays).toBe(0);
+  });
+});
+
+describe('date helpers', () => {
+  it('leaveDateRange is inclusive', () => {
+    expect(leaveDateRange('2026-08-17', '2026-08-19')).toEqual(['2026-08-17', '2026-08-18', '2026-08-19']);
+  });
+
+  it('leaveDateRange returns a single day for an equal range', () => {
+    expect(leaveDateRange('2026-08-17', '2026-08-17')).toEqual(['2026-08-17']);
+  });
+
+  it('leaveDateRange returns nothing when to precedes from', () => {
+    expect(leaveDateRange('2026-08-19', '2026-08-17')).toEqual([]);
+  });
+
+  it('addIsoDays crosses a month boundary', () => {
+    expect(addIsoDays('2026-08-31', 1)).toBe('2026-09-01');
+  });
+
+  it('weekdayForDate agrees with the calendar', () => {
+    expect(weekdayForDate('2026-08-17')).toBe('mon');
+    expect(weekdayForDate('2026-08-22')).toBe('sat');
+  });
+});

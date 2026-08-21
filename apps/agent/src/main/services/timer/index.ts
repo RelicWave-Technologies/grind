@@ -114,7 +114,7 @@ export async function initTimerOnBoot(): Promise<void> {
   // never credited. Falls back to now() only if liveness was never written
   // (very first run), which matches the prior conservative behavior.
   const lastAlive = svc.lastLiveness();
-  const recovered = svc.recoverAway() ?? svc.recover(lastAlive ?? Date.now());
+  const recovered = svc.recoverAway() ?? svc.recover(lastAlive ?? serverAlignedNow());
   if (recovered) {
     log.warn('timer recovered stale open entry', {
       entryId: recovered.entryId,

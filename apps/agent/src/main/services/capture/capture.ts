@@ -6,6 +6,7 @@ import { ulid } from 'ulid';
 import { availableParallelism } from 'node:os';
 import { SCREENSHOT_QUALITY, SCREENSHOT_MAX_EDGE } from '../../env';
 import { hasScreenAccess, type CaptureHealth } from '../permissions';
+import { serverAlignedNow } from '../serverClock';
 import { log } from '../../logger';
 import type { ScreenshotRow } from './store';
 import { AsyncLru } from './asyncLru';
@@ -126,7 +127,7 @@ export async function captureNow(
     return { rows: [], health: hasScreenAccess() ? 'error' : 'no-permission' };
   }
 
-  const now = Date.now();
+  const now = serverAlignedNow();
   const sourceMs = performance.now() - startedAt;
   const dir = dayDir(now);
   await fs.mkdir(dir, { recursive: true });

@@ -3,6 +3,7 @@ import { logger } from './logger';
 import { buildApp } from './app';
 import { startCardCallback } from './lark';
 import { startLarkTokenRefreshScheduler } from './lark/refreshScheduler';
+import { startLarkLeaveIngest } from './leave';
 import { startManualTimeLarkOutboxWorker } from './manualTime/larkOutbox';
 import { startPayrollMonthCloseScheduler } from './payroll/scheduler';
 import { startScreenshotRetentionScheduler } from './screenshots/retention';
@@ -18,6 +19,8 @@ app.listen(port, () => {
   // No-op when Lark isn't configured.
   startCardCallback();
   startManualTimeLarkOutboxWorker();
+  // Mirrors leave decided in Lark into Timo; no-op without an approval code.
+  startLarkLeaveIngest();
   startLarkTokenRefreshScheduler();
   startPayrollMonthCloseScheduler();
   startScreenshotRetentionScheduler();
