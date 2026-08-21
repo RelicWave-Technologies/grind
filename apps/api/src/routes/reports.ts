@@ -32,6 +32,7 @@ import { loadTimeInvalidationsForUsers } from '../insights/timeInvalidations';
 import type { TimeInvalidationInput } from '../insights/invalidations';
 import type { RoleTitle } from '../scoring/presets';
 import { loadEntryLiveEvidence, type EntryLiveEvidenceMap } from '../insights/liveEntryEvidence';
+import { timesheetCalendarInputs } from '../leave';
 
 export const reportsRouter = Router();
 reportsRouter.use(requireAccessToken, attachScope, requireCapability('reports.self.read'));
@@ -55,11 +56,19 @@ reportsRouter.get('/me', async (req, res, next) => {
     const now = new Date();
     const data = await loadReportData(req.user.sub, range, now);
     const iconFor = await iconForSamples(data.samples);
+    const calendar = await timesheetCalendarInputs({
+      workspaceId: req.scope.workspaceId,
+      tz: range.tz,
+      userIds: [req.user.sub],
+      from: range.from,
+      to: range.to,
+    });
     const response: MemberReportsMeResponse = {
       from: range.from,
       to: range.to,
       tz: range.tz,
       days: buildMemberReportDays({
+        dayStatusFor: calendar.dayStatusFor,
         userId: req.user.sub,
         range,
         now,
@@ -131,10 +140,18 @@ reportsRouter.get('/team', requireCapability('reports.team.read'), async (req, r
     const now = new Date();
     const reportData = await loadTeamReportData(reportUsers.map((u) => u.id), range, now);
     const iconFor = await iconForSamples([...reportData.values()].flatMap((d) => d.samples));
+    const calendar = await timesheetCalendarInputs({
+      workspaceId: req.scope.workspaceId,
+      tz: range.tz,
+      userIds: reportUsers.map((u) => u.id),
+      from: range.from,
+      to: range.to,
+    });
     const daysByUser = new Map<string, ReturnType<typeof buildMemberReportDays>>();
     for (const user of reportUsersWithRole) {
       const data = reportData.get(user.id) ?? emptyTeamReportData();
       daysByUser.set(user.id, buildMemberReportDays({
+        dayStatusFor: calendar.dayStatusFor,
         userId: user.id,
         range,
         now,
@@ -198,10 +215,18 @@ reportsRouter.get('/team/summary', requireCapability('reports.team.read'), async
 
     const now = new Date();
     const summaryData = await loadTeamReportSummaryData(reportUsers.map((user) => user.id), range, now);
+    const calendar = await timesheetCalendarInputs({
+      workspaceId: req.scope.workspaceId,
+      tz: range.tz,
+      userIds: reportUsers.map((user) => user.id),
+      from: range.from,
+      to: range.to,
+    });
     const daysByUser = new Map<string, ReturnType<typeof buildMemberReportDays>>();
     for (const user of reportUsers) {
       const data = summaryData.buckets.get(user.id) ?? emptyTeamReportSummaryData();
       daysByUser.set(user.id, buildMemberReportDays({
+        dayStatusFor: calendar.dayStatusFor,
         userId: user.id,
         range,
         now,
@@ -248,7 +273,15 @@ reportsRouter.get('/team/member', requireCapability('reports.team.read'), async 
 
     const data = reportData.get(target.user.id) ?? emptyTeamReportData();
     const iconFor = await iconForSamples(data.samples);
+    const calendar = await timesheetCalendarInputs({
+      workspaceId: req.scope.workspaceId,
+      tz: range.tz,
+      userIds: [target.user.id],
+      from: range.from,
+      to: range.to,
+    });
     const days = buildMemberReportDays({
+      dayStatusFor: calendar.dayStatusFor,
       userId: target.user.id,
       range,
       now,

@@ -10,6 +10,7 @@ import {
 } from '@grind/types';
 import { localDayWindow } from '../insights/day';
 import { buildTimesheetMatrix, type TimesheetSegmentInput } from '../insights/timesheets';
+import { timesheetCalendarInputs } from '../leave';
 import { loadTimeInvalidationsForUsers } from '../insights/timeInvalidations';
 import { loadEntryLiveEvidence } from '../insights/liveEntryEvidence';
 import { resolveEffectiveEntrySegmentEnds } from '../insights/openSegmentEvidence';
@@ -260,6 +261,13 @@ export async function buildPayrollPayload(
     tz: range.tz,
     segments: segs,
     invalidations,
+    ...(await timesheetCalendarInputs({
+      workspaceId,
+      tz: range.tz,
+      userIds,
+      from: range.from,
+      to: range.to,
+    })),
   });
   if (!matrix) return { error: 'invalid_date_or_tz' };
 

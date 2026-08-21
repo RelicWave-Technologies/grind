@@ -258,3 +258,94 @@ export interface TimesheetMatrix {
   users: TimesheetUser[];
   cells: Record<string, Record<string, TimesheetCell>>;
 }
+
+// ---------------------------------------------------------------------------
+// Leave, company holidays and balances
+// ---------------------------------------------------------------------------
+
+export type LeavePortion = 'FULL' | 'FIRST_HALF' | 'SECOND_HALF';
+export type LeaveKind = 'PAID' | 'UNPAID';
+export type LeaveRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
+
+export interface HolidayDto {
+  id: string;
+  date: string;
+  name: string;
+  teamId: string | null;
+  teamName: string | null;
+  createdAt: string;
+}
+
+export interface LeaveRequestDto {
+  id: string;
+  userId: string;
+  userName: string;
+  kind: LeaveKind;
+  startDate: string;
+  endDate: string;
+  portion: LeavePortion;
+  chargedDays: number;
+  reason: string;
+  status: LeaveRequestStatus;
+  decisionSource: string | null;
+  decidedAt: string | null;
+  decidedByName: string | null;
+  larkInstanceCode: string | null;
+  createdAt: string;
+}
+
+export interface LeaveBalance {
+  balanceDays: number;
+  accruedDays: number;
+  consumedDays: number;
+  adjustedDays: number;
+}
+
+export interface LeaveStatementRow {
+  kind: 'ACCRUAL' | 'CONSUMPTION' | 'ADJUSTMENT';
+  days: number;
+  effectiveOn: string;
+  reason: string | null;
+}
+
+export interface LeaveBalanceResponse {
+  balance: LeaveBalance & { userId: string; asOf: string };
+  statement: LeaveStatementRow[];
+}
+
+export interface LeaveAwayDay {
+  date: string;
+  kind: 'PAID_LEAVE' | 'UNPAID_LEAVE';
+  portion: LeavePortion | null;
+  label: string | null;
+}
+
+export interface LeaveCalendarResponse {
+  from: string;
+  to: string;
+  tz: string;
+  users: Array<{ id: string; name: string; avatarUrl: string | null; teamId: string | null }>;
+  away: Record<string, LeaveAwayDay[]>;
+  holidays: HolidayDto[];
+}
+
+export interface LeaveQuoteResponse {
+  chargedDays: number;
+  balanceDays: number;
+  balanceAfterDays: number;
+  sufficient: boolean;
+  days: Array<{ date: string; kind: string; portion: LeavePortion | null; label: string | null }>;
+}
+
+export interface LeavePolicyResponse {
+  policy: {
+    monthlyAccrualDays: number;
+    carryForward: boolean;
+    carryForwardCapDays: number | null;
+    allowNegativeBalance: boolean;
+    accrueOnJoinMonth: boolean;
+    updatedAt: string;
+  };
+  approvalGateway: string;
+  decidesInTimo: boolean;
+}

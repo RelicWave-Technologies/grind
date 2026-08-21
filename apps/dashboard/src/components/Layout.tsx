@@ -1,5 +1,5 @@
 import { Outlet, Link, useRouteContext, useNavigate, useLocation } from '@tanstack/react-router';
-import { Home, Clock4, Inbox, LayoutGrid, CalendarCheck, ShieldAlert, Building2, Sunrise, LogOut, ShieldCheck, FileSpreadsheet, Compass, FileText, User, Users, KeyRound } from 'lucide-react';
+import { Home, Clock4, Inbox, LayoutGrid, CalendarCheck, ShieldAlert, Building2, Sunrise, LogOut, ShieldCheck, FileSpreadsheet, Compass, FileText, User, Users, KeyRound, CalendarDays } from 'lucide-react';
 import { hasCapability, useLogout, type Permission } from '../lib/auth';
 import { AGENT_DOWNLOADS, agentDownloadUrl } from '../lib/downloads';
 import {
@@ -28,6 +28,7 @@ const NAV: NavEntry[] = [
   { to: '/profile', label: 'Profile', Icon: User, show: { permission: 'profile.self.read' } },
   { to: '/team', label: 'Team Settings', Icon: LayoutGrid, show: { permission: 'team.settings.manage' } },
   { to: '/attendance', label: 'Attendance', Icon: CalendarCheck, show: { anyPermission: ['reports.team.read', 'reports.workspace.read'] } },
+  { to: '/calendar', label: 'Calendar', Icon: CalendarDays, show: { permission: 'policy.manage' } },
   { to: '/flags', label: 'Anti-cheat', Icon: ShieldAlert, show: { anyPermission: ['flags.team.review', 'flags.workspace.review'] } },
   { to: '/teams', label: 'Org Teams', Icon: Building2, show: { permission: 'teams.manage' } },
   { to: '/shifts', label: 'Shifts', Icon: Sunrise, show: { permission: 'shifts.manage' } },

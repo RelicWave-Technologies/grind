@@ -1,0 +1,266 @@
+/**
+ * Calendar — LAYOUT ONLY.
+ *
+ * The page is composed from the shared "Quiet Datasheet" kit (src/ui). This
+ * file contributes the one pattern the kit has no primitive for — a month grid
+ * — plus the page's vertical rhythm. Prefix: cal-.
+ *
+ * Every value resolves to a --ui-* token. The grid's marks reuse the same
+ * Figma block pastels the kit's StatRow cycles through, so a lime holiday cell
+ * and a lime stat tile are the same lime rather than two greens that nearly
+ * match.
+ */
+
+/* ── Vertical rhythm ────────────────────────────────────────────────────────
+   .ui-page sets the gutter and the mount animation but deliberately does not
+   space its section children, so every page states its own rhythm. Without
+   this the figures, tabs, banner and cards all sit flush against each other.
+   ------------------------------------------------------------------------ */
+
+.cal-page > * + * { margin-top: var(--ui-sp-7); }
+
+/* The tab rail belongs to the content beneath it, so it sits closer to the
+   card it switches than to the figures above it. */
+.cal-page > .ui-tabs { margin-top: var(--ui-sp-8); }
+.cal-page > .ui-tabs + * { margin-top: var(--ui-sp-5); }
+
+/* ── Card interiors ─────────────────────────────────────────────────────────
+   A Card is a bare box: consecutive Toolbars, Fields and Banners inside it
+   touch. This is what put the "Reason" label hard against the date row and
+   let the textarea's resize grip collide with the buttons below it.
+   ------------------------------------------------------------------------ */
+
+.cal-page .ui-card__body > * + * { margin-top: var(--ui-sp-5); }
+
+/* A form row of controls needs a little more air beneath it than a paragraph
+   does, because each control already carries its own label above. */
+.cal-page .ui-card__body > .ui-toolbar + .ui-field,
+.cal-page .ui-card__body > .ui-field + .ui-toolbar { margin-top: var(--ui-sp-6); }
+
+/* A Toolbar sizes its children to content, which left the four leave controls
+   huddled at one end of a wide card. A shared floor makes the row read as a
+   form rather than a scatter, without pinning it to a rigid grid. */
+.cal-page .ui-card__body > .ui-toolbar > .ui-field { min-width: 156px; }
+
+/* Let the reason box grow downward only — a horizontal drag would break the
+   card's column. */
+.cal-page .ui-field textarea { resize: vertical; }
+
+/* The empty state and skeletons are section-level siblings, not card bodies. */
+.cal-page > .ui-empty + *, .cal-page > * + .ui-empty { margin-top: var(--ui-sp-7); }
+
+/* ── Month grid ─────────────────────────────────────────────────────────── */
+
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  /* One hairline between cells, drawn by the container so the outer edge of
+     the grid stays flush with the card. */
+  gap: 1px;
+  background: var(--ui-line);
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-md);
+  overflow: hidden;
+}
+
+/* Weekday rail — mono taxonomy, per DESIGN.md's eyebrow rule. */
+.cal-dow {
+  background: var(--ui-surface);
+  padding: var(--ui-sp-3) var(--ui-sp-4);
+  font-family: var(--ui-font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--ui-ink-3);
+}
+
+.cal-day {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-sp-2);
+  min-height: 116px;
+  /* Faces sit on the floor of the cell so rows line up across a week. */
+  padding: var(--ui-sp-3);
+  background: var(--ui-surface);
+  transition: background var(--ui-dur-fast) var(--ui-ease);
+}
+
+/* Days outside the rendered month recede rather than disappear, so the grid
+   keeps its shape without inviting a click. */
+.cal-day--outside { background: var(--ui-surface-sunken); }
+.cal-day--outside .cal-daynum { color: var(--ui-ink-disabled); }
+
+/* A weekend is quiet ground, not an event — a touch darker than the spill days
+   so the month's shape and its non-working days stay tellable apart. */
+.cal-day--off { background: var(--ui-surface-inset); }
+
+/* ── The date number ────────────────────────────────────────────────────── */
+
+.cal-daynum {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* The cell is a stretch flex column, so without this the pill runs edge to
+     edge instead of hugging the digits. */
+  align-self: flex-start;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 var(--ui-sp-2);
+  border-radius: var(--ui-r-full);
+  font-family: var(--ui-font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--ui-ink-2);
+}
+
+/* Today is the one place the black primary surface appears in the grid —
+   the same fill as a primary pill, so "selected = primary surface" holds. */
+.cal-daynum--today {
+  background: var(--ui-accent);
+  color: var(--ui-on-accent);
+  font-weight: 600;
+}
+
+/* ── Marks — the only saturated colour on the page ──────────────────────── */
+
+.cal-mark {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-sp-2);
+  padding: var(--ui-sp-2) var(--ui-sp-3);
+  border-radius: var(--ui-r-sm);
+  font-family: var(--ui-font-sans);
+  font-size: 11.5px;
+  font-weight: 550;
+  letter-spacing: -0.1px;
+  line-height: 1.3;
+  color: var(--ui-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A company holiday takes the whole cell — it is the one thing on that day. */
+.cal-mark--holiday {
+  background: var(--ui-lime);
+  font-weight: 600;
+}
+
+.cal-mark--paid   { background: var(--ui-lilac); }
+.cal-mark--unpaid { background: var(--ui-pink); }
+
+/* ── Half days ──────────────────────────────────────────────────────────── */
+
+/**
+ * "Which half" is the whole reason portion exists, so on the day modal it is
+ * spelled out; on the grid the faces carry identity and the chip carries the
+ * holiday. A day cell has room for one idea, not three.
+ */
+
+/* ── Faces ──────────────────────────────────────────────────────────────── */
+
+.cal-faces {
+  display: flex;
+  align-items: center;
+  margin-top: auto;
+  padding-top: var(--ui-sp-2);
+}
+
+/* A day worth opening says so on hover and focus; an empty one does not. */
+.cal-day--open { cursor: pointer; }
+.cal-day--open:hover { background: var(--ui-surface-inset); }
+.cal-day--open:focus-visible {
+  outline: none;
+  box-shadow: inset var(--ui-focus-ring);
+}
+/* Keep the holiday's own ground when it is the thing being hovered. */
+.cal-day--open:hover .cal-mark--holiday { background: var(--ui-lime); }
+
+/* ── Legend ─────────────────────────────────────────────────────────────── */
+
+.cal-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ui-sp-5);
+  padding-top: var(--ui-sp-4);
+}
+
+.cal-legend__item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-sp-3);
+  font-family: var(--ui-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--ui-ink-3);
+}
+
+.cal-legend__swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: var(--ui-r-sm);
+  border: 1px solid var(--ui-line);
+}
+
+.cal-legend__swatch--holiday { background: var(--ui-lime); }
+.cal-legend__swatch--paid    { background: var(--ui-lilac); }
+.cal-legend__swatch--unpaid  { background: var(--ui-pink); }
+.cal-legend__swatch--off     { background: var(--ui-surface-inset); }
+
+/* ── Month title ────────────────────────────────────────────────────────── */
+
+.cal-monthbar {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--ui-sp-5);
+  margin-bottom: var(--ui-sp-6);
+}
+
+/* Month name uses the kit's display role; only the pairing with the mono year
+   is page layout. */
+.cal-month {
+  font-family: var(--ui-font-sans);
+  font-size: 28px;
+  line-height: 1.15;
+  font-weight: 650;
+  letter-spacing: -0.4px;
+  color: var(--ui-ink);
+}
+
+.cal-month__year {
+  font-family: var(--ui-font-mono);
+  font-size: 13px;
+  font-weight: 400;
+  letter-spacing: 1px;
+  color: var(--ui-ink-3);
+  margin-left: var(--ui-sp-4);
+}
+
+/* ── Away list ──────────────────────────────────────────────────────────── */
+
+.cal-away__dates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ui-sp-2);
+}
+
+/* ── Responsive ─────────────────────────────────────────────────────────── */
+
+@media (max-width: 900px) {
+  .cal-day { min-height: 92px; padding: var(--ui-sp-2); }
+  .cal-mark { font-size: 10.5px; padding: 2px var(--ui-sp-2); }
+  .cal-month { font-size: 22px; }
+}
+
+@media (max-width: 640px) {
+  /* Below this the seven-column grid stops being readable, so the month
+     scrolls horizontally rather than crushing each day to an unusable width. */
+  .cal-scroll { overflow-x: auto; }
+  .cal-grid { min-width: 640px; }
+}

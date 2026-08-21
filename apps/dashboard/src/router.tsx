@@ -28,6 +28,7 @@ const IntegrationsScreen = lazyRouteComponent(() => import('./screens/Integratio
 const ReportsScreen = lazyRouteComponent(() => import('./screens/Reports'), 'ReportsScreen');
 const ProfileScreen = lazyRouteComponent(() => import('./screens/Profile'), 'ProfileScreen');
 const ChangelogScreen = lazyRouteComponent(() => import('./screens/Changelog'), 'ChangelogScreen');
+const CalendarScreen = lazyRouteComponent(() => import('./screens/Calendar'), 'CalendarScreen');
 const WelcomeScreen = lazyRouteComponent(() => import('./screens/Welcome'), 'WelcomeScreen');
 
 interface RouterContext {
@@ -189,6 +190,21 @@ const attendanceRoute = createRoute({
   component: AttendanceScreen,
 });
 
+/**
+ * Admin-only while leave is still being rolled out. Hiding the nav entry is not
+ * access control on its own — the URL is still typeable — so the route guards
+ * too, and the page's own admin affordances remain gated separately.
+ */
+const calendarRoute = createRoute({
+  getParentRoute: () => authedRoot,
+  path: '/calendar',
+  beforeLoad: ({ context }) => {
+    const me = (context as { me?: Me }).me;
+    requireAnyRouteCapability(me, ['policy.manage']);
+  },
+  component: CalendarScreen,
+});
+
 const teamsAdminRoute = createRoute({
   getParentRoute: () => authedRoot,
   path: '/teams',
@@ -320,7 +336,7 @@ const indexRoute = createRoute({
 });
 
 export const routeTree = rootRoute.addChildren([
-  authedRoot.addChildren([homeRoute, overviewRoute, editTimeRoute, meTodayLegacyRoute, reportsRoute, approvalsRoute, profileRoute, teamRoute, attendanceRoute, flagsRoute, usersRoute, teamsAdminRoute, shiftsRoute, policyRoute, integrationsRoute, payrollRoute]),
+  authedRoot.addChildren([homeRoute, overviewRoute, editTimeRoute, meTodayLegacyRoute, reportsRoute, approvalsRoute, profileRoute, teamRoute, attendanceRoute, calendarRoute, flagsRoute, usersRoute, teamsAdminRoute, shiftsRoute, policyRoute, integrationsRoute, payrollRoute]),
   loginRoute,
   changelogRoute,
   welcomeRoute,

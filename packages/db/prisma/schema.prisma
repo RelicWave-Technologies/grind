@@ -15,25 +15,29 @@ model Workspace {
   timezone  String   @default("UTC")
   createdAt DateTime @default(now())
 
-  users          User[]
-  teams          Team[]
-  teamManagers   TeamManager[]
-  shifts         Shift[]
-  policy         WorkspacePolicy?
-  payrollPolicy  PayrollPolicy?
-  payrollRunLogs PayrollRunLog[]
-  timeInvalidations TimeInvalidation[]
-  monitoringSettingsAudits MonitoringSettingsAudit[]
-  testerOpsConfig TesterOpsConfig?
-  testerOpsAiPolicy TesterOpsAiPolicy?
-  testerOpsMembers TesterOpsMember[]
-  testerOpsEvents TesterOpsEvent[]
-  testerOpsIssues TesterOpsIssue[]
-  testerOpsReminders TesterOpsReminder[]
-  testerOpsOutboxEvents TesterOpsOutboxEvent[]
+  users                     User[]
+  teams                     Team[]
+  teamManagers              TeamManager[]
+  shifts                    Shift[]
+  policy                    WorkspacePolicy?
+  payrollPolicy             PayrollPolicy?
+  payrollRunLogs            PayrollRunLog[]
+  timeInvalidations         TimeInvalidation[]
+  monitoringSettingsAudits  MonitoringSettingsAudit[]
+  testerOpsConfig           TesterOpsConfig?
+  testerOpsAiPolicy         TesterOpsAiPolicy?
+  testerOpsMembers          TesterOpsMember[]
+  testerOpsEvents           TesterOpsEvent[]
+  testerOpsIssues           TesterOpsIssue[]
+  testerOpsReminders        TesterOpsReminder[]
+  testerOpsOutboxEvents     TesterOpsOutboxEvent[]
   testerOpsKnowledgeSources TesterOpsKnowledgeSource[]
-  testerOpsAiRuns TesterOpsAiRun[]
-  apiTokens ApiToken[]
+  testerOpsAiRuns           TesterOpsAiRun[]
+  apiTokens                 ApiToken[]
+  leavePolicy               LeavePolicy?
+  companyHolidays           CompanyHoliday[]
+  leaveRequests             LeaveRequest[]
+  leaveLedgerEntries        LeaveLedgerEntry[]
 }
 
 /// Workspace-wide capture policy. A single row per workspace (unique on
@@ -48,25 +52,25 @@ model Workspace {
 /// setting it to 0 disables retention (every shot kept forever —
 /// generally not what we want).
 model WorkspacePolicy {
-  id                         String   @id @default(cuid())
-  workspaceId                String   @unique
-  workspace                  Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  id                           String    @id @default(cuid())
+  workspaceId                  String    @unique
+  workspace                    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   /// Capture which app is in focus per ActivitySample (process / bundle id).
-  captureApps                Boolean  @default(false)
+  captureApps                  Boolean   @default(false)
   /// Capture the foreground window title (TIGHTER than apps — leaks doc names).
-  captureTitles              Boolean  @default(false)
+  captureTitles                Boolean   @default(false)
   /// Capture the browser URL (TIGHTEST — content).
-  captureUrls                Boolean  @default(false)
+  captureUrls                  Boolean   @default(false)
   /// Days to retain screenshots before the nightly purge deletes them.
-  retentionDaysScreenshots   Int      @default(60)
+  retentionDaysScreenshots     Int       @default(60)
   /// Workspace default screenshot cadence for newly-created members.
   /// Per-member overrides live on User.screenshotIntervalMin.
-  defaultScreenshotIntervalMin Int     @default(3)
+  defaultScreenshotIntervalMin Int       @default(3)
   /// Workspace default idle threshold for newly-created members.
   /// Per-member overrides live on User.idleThresholdMin.
-  defaultIdleThresholdMin     Int      @default(5)
-  createdAt                  DateTime @default(now())
-  updatedAt                  DateTime @updatedAt
+  defaultIdleThresholdMin      Int       @default(5)
+  createdAt                    DateTime  @default(now())
+  updatedAt                    DateTime  @updatedAt
 }
 
 enum PayrollSheetRecipientMode {
@@ -166,14 +170,15 @@ enum AgentRuntimeState {
 /// TeamManager so a team can have multiple managers while each manager owns
 /// at most one team.
 model Team {
-  id          String   @id @default(cuid())
-  workspaceId String
-  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  name        String
-  members     User[]    @relation("TeamMembers")
-  managers    TeamManager[]
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id              String           @id @default(cuid())
+  workspaceId     String
+  workspace       Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  name            String
+  members         User[]           @relation("TeamMembers")
+  managers        TeamManager[]
+  companyHolidays CompanyHoliday[]
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
 
   @@index([workspaceId])
 }
@@ -182,14 +187,14 @@ model Team {
 /// managers, but one user can manage only one team. A non-admin user's
 /// workspace role is derived from this table.
 model TeamManager {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   workspaceId String
   workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   teamId      String
   team        Team      @relation(fields: [teamId], references: [id], onDelete: Cascade)
   userId      String
   user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  createdAt   DateTime @default(now())
+  createdAt   DateTime  @default(now())
 
   @@unique([teamId, userId])
   @@unique([userId])
@@ -214,15 +219,15 @@ model TeamManager {
 /// Forward-only assignment: changing a user's shift does NOT rewrite past
 /// TimeEntries; each entry snapshots `shiftIdAtStart` at creation time.
 model Shift {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   workspaceId String
   workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   name        String
   /// See model-comment for the shape; validated by @grind/types.
   schedule    Json
-  bufferMin   Int      @default(30)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  bufferMin   Int       @default(30)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   members User[] @relation("ShiftMembers")
 
@@ -230,64 +235,68 @@ model Shift {
 }
 
 model User {
-  id           String   @id @default(cuid())
-  workspaceId  String
-  workspace    Workspace @relation(fields: [workspaceId], references: [id])
-  email        String   @unique
-  name         String
-  role         Role     @default(MEMBER)
+  id                 String             @id @default(cuid())
+  workspaceId        String
+  workspace          Workspace          @relation(fields: [workspaceId], references: [id])
+  email              String             @unique
+  name               String
+  role               Role               @default(MEMBER)
   /// Optional team this user belongs to. NULL = workspace-level (no team
   /// scoping applies; admin sees them, no manager does).
-  teamId       String?
-  team         Team?    @relation("TeamMembers", fields: [teamId], references: [id], onDelete: SetNull)
+  teamId             String?
+  team               Team?              @relation("TeamMembers", fields: [teamId], references: [id], onDelete: SetNull)
   /// Deprecated: old direct-manager pointer. v1 org scope and manual-time
   /// approval now resolve through TeamManager + User.teamId.
-  managerId    String?
+  managerId          String?
   /// Legacy email/password hash. NULLABLE: Lark OAuth is the sole identity in
   /// production, so Lark-provisioned users never have one. Retained (not
   /// dropped) so a dev-only password login shim and a clean revert path remain.
-  passwordHash String?
+  passwordHash       String?
   /// JIT provisioning gate. First Lark login creates the user as PENDING (no
   /// session issued) until an admin completes setup or activates access. The
   /// configured bootstrap admin is created ACTIVE. Distinct from deactivatedAt,
   /// which means "was active, now disabled".
   provisioningStatus ProvisioningStatus @default(PENDING)
   /// Avatar URL synced from Lark on each login (stable profile field).
-  avatarUrl    String?
+  avatarUrl          String?
   /// Activity scoring preset. Admin-owned so users cannot self-tune KPI output.
-  activityRoleTitle ActivityRoleTitle @default(OTHER)
+  activityRoleTitle  ActivityRoleTitle  @default(OTHER)
   /// Soft-deactivation: when non-null, the user can't log in, doesn't
   /// appear in scope/admin queries, and (importantly) their *history*
   /// remains queryable for back-dated reports + audit. Reactivation
   /// just clears this timestamp. We intentionally never hard-delete
   /// users — every TimeEntry / approval / flag still points at them.
-  deactivatedAt DateTime?
-  createdAt    DateTime @default(now())
+  deactivatedAt      DateTime?
+  createdAt          DateTime           @default(now())
+  /// Date the person joined the company, used as the paid-leave accrual
+  /// anchor. NULL falls back to createdAt — which is only the first Lark
+  /// login, so anyone onboarded into Timo after they joined needs this set.
+  joinedOn           DateTime?          @db.Date
 
   /// Currently-assigned shift. Forward-only: changing this does NOT
   /// rewrite history; each TimeEntry snapshots `shiftIdAtStart` so reports
   /// remain truthful even after a reassignment.
-  shiftId          String?
-  shift            Shift?    @relation("ShiftMembers", fields: [shiftId], references: [id], onDelete: SetNull)
-  shiftAssignedAt  DateTime?
+  shiftId                       String?
+  shift                         Shift?            @relation("ShiftMembers", fields: [shiftId], references: [id], onDelete: SetNull)
+  shiftAssignedAt               DateTime?
   /// Per-member screenshot-cadence OVERRIDE in minutes. NULL = inherit the
   /// workspace policy default (WorkspacePolicy.defaultScreenshotIntervalMin).
   /// A value is an explicit per-member override set by an admin/manager.
-  screenshotIntervalMin Int?
+  screenshotIntervalMin         Int?
   /// Per-member idle-threshold OVERRIDE in minutes. NULL = inherit the
   /// workspace policy default (WorkspacePolicy.defaultIdleThresholdMin).
-  idleThresholdMin      Int?
+  idleThresholdMin              Int?
   /// Optional early idle warning for this member, in seconds. NULL means the
   /// countdown is disabled. Admins own this setting; the idle threshold still
   /// controls when tracked time is actually paused.
-  idleWarningSeconds    Int?
+  idleWarningSeconds            Int?
   /// Last heartbeat received from the desktop agent. Overview uses this as the
   /// live-status source of truth instead of inferring "green" from open rows.
-  agentLastSeenAt       DateTime?
-  agentState            AgentRuntimeState @default(OFFLINE)
-  agentVersion          String?
-  agentPlatform         String?
-  agentActiveEntryId    String?
+  agentLastSeenAt               DateTime?
+  agentState                    AgentRuntimeState @default(OFFLINE)
+  agentVersion                  String?
+  agentPlatform                 String?
+  agentActiveEntryId            String?
   /// Last known local desktop permission health from agent heartbeat.
   /// Nullable so older agents keep heartbeating and show as Unknown in admin UI.
   agentScreenPermissionStatus   String?
@@ -304,33 +313,38 @@ model User {
   agentLaunchOrigin             String?
   agentLaunchAtLoginUpdatedAt   DateTime?
 
-  refreshTokens   RefreshToken[]
-  timeEntries     TimeEntry[]
-  activitySamples ActivitySample[]
-  shiftAssignments ShiftAssignment[]
-  screenshots      Screenshot[]        @relation("ScreenshotSubject")
-  deletedScreenshots Screenshot[]      @relation("ScreenshotDeletedBy")
-  larkIdentity    LarkIdentity?
-  larkOAuthToken  LarkOAuthToken?
-  agentAuthCodes  AgentAuthCode[]
-  manualTimeRequests       ManualTimeRequest[] @relation("MtrRequester")
-  manualTimeApprovals      ManualTimeRequest[] @relation("MtrApprover")
-  manualTimeDecisions      ManualTimeRequest[] @relation("MtrDecider")
-  managedTeamAssignment    TeamManager?
-  activityFlags            ActivityFlag[]      @relation("FlagSubject")
-  resolvedFlags            ActivityFlag[]      @relation("FlagResolver")
-  timeInvalidations        TimeInvalidation[]  @relation("TimeInvalidationSubject")
-  timeInvalidationsCreated TimeInvalidation[]  @relation("TimeInvalidationActor")
-  monitoringSettingsAuditsCreated MonitoringSettingsAudit[] @relation("MonitoringSettingsAuditActor")
+  refreshTokens                    RefreshToken[]
+  timeEntries                      TimeEntry[]
+  activitySamples                  ActivitySample[]
+  shiftAssignments                 ShiftAssignment[]
+  screenshots                      Screenshot[]              @relation("ScreenshotSubject")
+  deletedScreenshots               Screenshot[]              @relation("ScreenshotDeletedBy")
+  larkIdentity                     LarkIdentity?
+  larkOAuthToken                   LarkOAuthToken?
+  agentAuthCodes                   AgentAuthCode[]
+  manualTimeRequests               ManualTimeRequest[]       @relation("MtrRequester")
+  manualTimeApprovals              ManualTimeRequest[]       @relation("MtrApprover")
+  manualTimeDecisions              ManualTimeRequest[]       @relation("MtrDecider")
+  managedTeamAssignment            TeamManager?
+  activityFlags                    ActivityFlag[]            @relation("FlagSubject")
+  resolvedFlags                    ActivityFlag[]            @relation("FlagResolver")
+  timeInvalidations                TimeInvalidation[]        @relation("TimeInvalidationSubject")
+  timeInvalidationsCreated         TimeInvalidation[]        @relation("TimeInvalidationActor")
+  monitoringSettingsAuditsCreated  MonitoringSettingsAudit[] @relation("MonitoringSettingsAuditActor")
   monitoringSettingsAuditsTargeted MonitoringSettingsAudit[] @relation("MonitoringSettingsAuditTarget")
-  testerOpsMemberships TesterOpsMember[]
-  testerOpsReportedIssues TesterOpsIssue[] @relation("TesterOpsReporter")
+  testerOpsMemberships             TesterOpsMember[]
+  testerOpsReportedIssues          TesterOpsIssue[]          @relation("TesterOpsReporter")
   /// Attendee relations: meetings this user was tagged in (manual-time
   /// requests + live MEETING TimeEntries). Useful for "show me everyone's
   /// meetings I was in" reports.
-  mtrAttendances           MtrAttendee[]       @relation("MtrAttendeeUser")
-  timeEntryAttendances     TimeEntryAttendee[] @relation("TeAttendeeUser")
-  createdApiTokens         ApiToken[]          @relation("ApiTokenCreator")
+  mtrAttendances                   MtrAttendee[]             @relation("MtrAttendeeUser")
+  timeEntryAttendances             TimeEntryAttendee[]       @relation("TeAttendeeUser")
+  createdApiTokens                 ApiToken[]                @relation("ApiTokenCreator")
+  leaveRequests                    LeaveRequest[]            @relation("LeaveRequester")
+  leaveDecisions                   LeaveRequest[]            @relation("LeaveDecider")
+  leaveLedgerEntries               LeaveLedgerEntry[]        @relation("LeaveLedgerSubject")
+  leaveLedgerEntriesCreated        LeaveLedgerEntry[]        @relation("LeaveLedgerActor")
+  companyHolidaysCreated           CompanyHoliday[]          @relation("HolidayCreator")
 
   @@index([workspaceId])
   @@index([teamId])
@@ -364,16 +378,16 @@ model ApiToken {
 /// assignment for fast reads; this table is the audit source for back-dated
 /// reports, because shifts can be edited or users can be reassigned later.
 model ShiftAssignment {
-  id                String   @id @default(cuid())
+  id                String    @id @default(cuid())
   userId            String
-  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   shiftId           String?
-  effectiveFrom     DateTime @default(now())
+  effectiveFrom     DateTime  @default(now())
   effectiveTo       DateTime?
   shiftNameSnapshot String?
   scheduleSnapshot  Json?
   bufferMinSnapshot Int?
-  createdAt         DateTime @default(now())
+  createdAt         DateTime  @default(now())
 
   @@index([userId, effectiveFrom])
   @@index([userId, effectiveTo])
@@ -399,49 +413,49 @@ enum TimeEntryCloseReason {
 }
 
 model TimeEntry {
-  id           String          @id // ULID from agent
-  clientUuid   String          @unique // idempotency key
-  userId       String
-  user         User            @relation(fields: [userId], references: [id])
+  id                      String                @id // ULID from agent
+  clientUuid              String                @unique // idempotency key
+  userId                  String
+  user                    User                  @relation(fields: [userId], references: [id])
   /// Lark task this entry is attributed to (or null for an untagged session).
   /// The "project" / local Task concepts were removed — tasks are Lark-only now.
-  larkTaskGuid String?
-  source       TimeEntrySource @default(AUTO)
-  startedAt    DateTime
-  endedAt      DateTime?
+  larkTaskGuid            String?
+  source                  TimeEntrySource       @default(AUTO)
+  startedAt               DateTime
+  endedAt                 DateTime?
   /// Versioned agent/server lifecycle protocol. NULL means a legacy agent.
   trackingProtocolVersion Int?
   /// Monotonic local timer mutation revision. Used to reject delayed syncs.
-  agentRevision Int?
+  agentRevision           Int?
   /// Latest client checkpoint accepted by the server, clamped to server time.
-  lastProvenAt DateTime?
+  lastProvenAt            DateTime?
   /// Server-time lease deadline. Only protocol-v2 entries are auto-finalized.
-  leaseExpiresAt DateTime?
-  closeReason TimeEntryCloseReason?
+  leaseExpiresAt          DateTime?
+  closeReason             TimeEntryCloseReason?
   /// Audit timestamp for server-side finalization/reconciliation.
-  serverFinalizedAt DateTime?
+  serverFinalizedAt       DateTime?
   /// Free-form user-facing note ("emails", "design review", "fixed bug X").
   /// Shown in the Edit Time table's Reason column. Editable inline; doesn't
   /// require approver review because it's metadata, not new tracked time.
-  notes        String?
-  agentVersion String?
-  platform     String?
+  notes                   String?
+  agentVersion            String?
+  platform                String?
   /// Snapshot of the user's `shiftId` at the moment this TimeEntry started.
   /// Lets reports answer "what shift was Anish on the morning of 2026-06-15"
   /// even after he's been reassigned. No FK to Shift — we preserve the id
   /// string for audit even if the shift row itself is later deleted.
-  shiftIdAtStart String?
-  createdAt    DateTime        @default(now())
-  updatedAt    DateTime        @updatedAt
+  shiftIdAtStart          String?
+  createdAt               DateTime              @default(now())
+  updatedAt               DateTime              @updatedAt
 
-  segments        TimeSegment[]
-  activitySamples ActivitySample[]
+  segments          TimeSegment[]
+  activitySamples   ActivitySample[]
   manualTimeRequest ManualTimeRequest?
   /// Workspace members the requester (or a later retro-tag on a live
   /// MEETING segment) said were in this meeting. Only populated for
   /// blocks that include at least one MEETING segment.
-  attendees       TimeEntryAttendee[]
-  screenshots     Screenshot[]
+  attendees         TimeEntryAttendee[]
+  screenshots       Screenshot[]
 
   @@index([userId, startedAt])
   @@index([larkTaskGuid])
@@ -495,19 +509,19 @@ model TimeSegment {
 }
 
 model ActivitySample {
-  id              String    @id // ULID from agent
-  userId          String
-  user            User      @relation(fields: [userId], references: [id])
-  timeEntryId     String?
-  timeEntry       TimeEntry? @relation(fields: [timeEntryId], references: [id], onDelete: SetNull)
-  bucketStart     DateTime // 1-minute bucket
-  keystrokes      Int
-  clicks          Int
-  mouseDistancePx Int
-  scrollEvents    Int
+  id               String     @id // ULID from agent
+  userId           String
+  user             User       @relation(fields: [userId], references: [id])
+  timeEntryId      String?
+  timeEntry        TimeEntry? @relation(fields: [timeEntryId], references: [id], onDelete: SetNull)
+  bucketStart      DateTime // 1-minute bucket
+  keystrokes       Int
+  clicks           Int
+  mouseDistancePx  Int
+  scrollEvents     Int
   // content-free anti-cheat signals (no key identity / content)
-  ikiCv           Float?
-  moveSpeedCv     Float?
+  ikiCv            Float?
+  moveSpeedCv      Float?
   pathStraightness Float?
 
   // Active app + site for the dominant minute. Captured only when the
@@ -515,12 +529,12 @@ model ActivitySample {
   // dominant app over the minute window and snaps the title/URL of the
   // window that was focused longest. Title/URL are gated by SEPARATE
   // policy flags — apps without titles is the calm default.
-  activeApp       String?  // human-readable app name (e.g. "Google Chrome")
-  activeAppBundle String?  // OS bundle / process identifier
-  activeTitle     String?  // foreground window title (policy-gated)
-  activeUrl       String?  // browser URL (policy-gated; tighter than title)
+  activeApp       String? // human-readable app name (e.g. "Google Chrome")
+  activeAppBundle String? // OS bundle / process identifier
+  activeTitle     String? // foreground window title (policy-gated)
+  activeUrl       String? // browser URL (policy-gated; tighter than title)
 
-  createdAt       DateTime  @default(now())
+  createdAt DateTime @default(now())
 
   @@unique([userId, bucketStart])
   @@index([userId, bucketStart])
@@ -548,22 +562,22 @@ model LarkIdentity {
 /// persisted in the SAME transaction before the access token is used.
 /// On any refresh failure, set reauthRequired=true and surface "reconnect Lark".
 model LarkOAuthToken {
-  id                String    @id @default(cuid())
-  userId            String    @unique
-  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  refreshTokenEnc   String // AES-256-GCM ciphertext (iv:tag:data, base64url)
-  refreshExpiresAt  DateTime
-  scopes            String // space-delimited granted scopes
-  reauthRequired    Boolean   @default(false)
-  lastRefreshedAt   DateTime?
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
+  id               String    @id @default(cuid())
+  userId           String    @unique
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshTokenEnc  String // AES-256-GCM ciphertext (iv:tag:data, base64url)
+  refreshExpiresAt DateTime
+  scopes           String // space-delimited granted scopes
+  reauthRequired   Boolean   @default(false)
+  lastRefreshedAt  DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 }
 
 /// JIT-provisioning lifecycle for Lark-authenticated users.
 enum ProvisioningStatus {
   PENDING // created on first Lark login; no session until setup or activation
-  ACTIVE  // admin completed setup/activated access (or bootstrap admin); may sign in
+  ACTIVE // admin completed setup/activated access (or bootstrap admin); may sign in
 }
 
 /// Short-lived, single-use handoff codes for the DESKTOP AGENT's Lark login.
@@ -635,42 +649,42 @@ enum ManualTimeLarkOutboxStatus {
 /// approver (admin / manager) via a Lark IM interactive card; the manager's
 /// click flips status here and (on APPROVE) creates a TimeEntry(source=MANUAL).
 model ManualTimeRequest {
-  id             String                  @id @default(cuid())
-  clientUuid     String                  @unique // idempotency key from the agent
-  userId         String
-  user           User                    @relation("MtrRequester", fields: [userId], references: [id])
-  larkTaskGuid   String?
+  id               String                      @id @default(cuid())
+  clientUuid       String                      @unique // idempotency key from the agent
+  userId           String
+  user             User                        @relation("MtrRequester", fields: [userId], references: [id])
+  larkTaskGuid     String?
   /// Human task label captured at request time. Lark GUIDs are durable
   /// references, but not readable enough for historical approval rows.
-  taskSummary    String?
-  requestedStart DateTime
-  requestedEnd   DateTime
-  reason         String
-  status         ManualTimeRequestStatus @default(PENDING)
-  version        Int                     @default(1)
-  approverId     String?
-  approver       User?                   @relation("MtrApprover", fields: [approverId], references: [id])
-  decidedById    String?
-  decidedBy      User?                   @relation("MtrDecider", fields: [decidedById], references: [id], onDelete: SetNull)
-  decisionSource ManualTimeDecisionSource?
-  larkMessageId  String?                 // id of the IM card we sent, for in-place update
-  decidedAt      DateTime?
-  decidedReason  String?                 // optional approver note
+  taskSummary      String?
+  requestedStart   DateTime
+  requestedEnd     DateTime
+  reason           String
+  status           ManualTimeRequestStatus     @default(PENDING)
+  version          Int                         @default(1)
+  approverId       String?
+  approver         User?                       @relation("MtrApprover", fields: [approverId], references: [id])
+  decidedById      String?
+  decidedBy        User?                       @relation("MtrDecider", fields: [decidedById], references: [id], onDelete: SetNull)
+  decisionSource   ManualTimeDecisionSource?
+  larkMessageId    String? // id of the IM card we sent, for in-place update
+  decidedAt        DateTime?
+  decidedReason    String? // optional approver note
   /// FK to the TimeEntry created on APPROVE (null until decided / on reject).
-  timeEntryId    String?                 @unique
-  timeEntry      TimeEntry?              @relation(fields: [timeEntryId], references: [id], onDelete: SetNull)
+  timeEntryId      String?                     @unique
+  timeEntry        TimeEntry?                  @relation(fields: [timeEntryId], references: [id], onDelete: SetNull)
   /// True when the request was auto-approved by the requester themselves
   /// (their role was MANAGER+ and policy allows). Distinguishes from a
   /// human approver in the audit trail. Admins can REOPEN auto-approved
   /// requests within 24h via /v1/admin/time-requests/:id/reopen.
-  autoApproved   Boolean                 @default(false)
+  autoApproved     Boolean                     @default(false)
   /// Meeting attendees (workspace members the requester says were in
   /// this meeting). Propagated to TimeEntryAttendee on approval.
-  attendees      MtrAttendee[]
-  larkMessages   ManualTimeLarkMessage[]
+  attendees        MtrAttendee[]
+  larkMessages     ManualTimeLarkMessage[]
   larkOutboxEvents ManualTimeLarkOutboxEvent[]
-  createdAt      DateTime                @default(now())
-  updatedAt      DateTime                @updatedAt
+  createdAt        DateTime                    @default(now())
+  updatedAt        DateTime                    @updatedAt
 
   @@index([userId, status])
   @@index([approverId, status])
@@ -692,7 +706,7 @@ model ManualTimeLarkMessage {
   createdAt       DateTime                    @default(now())
   updatedAt       DateTime                    @updatedAt
 
-  outboxEvents    ManualTimeLarkOutboxEvent[]
+  outboxEvents ManualTimeLarkOutboxEvent[]
 
   @@index([requestId, version])
   @@index([requestId, status])
@@ -700,22 +714,22 @@ model ManualTimeLarkMessage {
 }
 
 model ManualTimeLarkOutboxEvent {
-  id              String                       @id @default(cuid())
+  id              String                     @id @default(cuid())
   requestId       String
-  request         ManualTimeRequest            @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  request         ManualTimeRequest          @relation(fields: [requestId], references: [id], onDelete: Cascade)
   messageLedgerId String?
-  messageLedger   ManualTimeLarkMessage?       @relation(fields: [messageLedgerId], references: [id], onDelete: SetNull)
+  messageLedger   ManualTimeLarkMessage?     @relation(fields: [messageLedgerId], references: [id], onDelete: SetNull)
   kind            ManualTimeLarkOutboxKind
-  status          ManualTimeLarkOutboxStatus   @default(PENDING)
-  payload         Json                         @default("{}")
-  attempts        Int                          @default(0)
-  nextRunAt       DateTime                     @default(now())
+  status          ManualTimeLarkOutboxStatus @default(PENDING)
+  payload         Json                       @default("{}")
+  attempts        Int                        @default(0)
+  nextRunAt       DateTime                   @default(now())
   lockedAt        DateTime?
   lockedBy        String?
   lastError       String?
   processedAt     DateTime?
-  createdAt       DateTime                     @default(now())
-  updatedAt       DateTime                     @updatedAt
+  createdAt       DateTime                   @default(now())
+  updatedAt       DateTime                   @updatedAt
 
   @@index([status, nextRunAt, createdAt])
   @@index([requestId])
@@ -869,33 +883,33 @@ model TesterOpsEvent {
 }
 
 model TesterOpsIssue {
-  id                String                 @id @default(cuid())
-  workspaceId       String
-  workspace         Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  eventId           String?
-  event             TesterOpsEvent?        @relation(fields: [eventId], references: [id], onDelete: SetNull)
-  reporterMemberId  String?
-  reporterMember    TesterOpsMember?       @relation(fields: [reporterMemberId], references: [id], onDelete: SetNull)
-  reporterUserId    String?
-  reporterUser      User?                  @relation("TesterOpsReporter", fields: [reporterUserId], references: [id], onDelete: SetNull)
-  reporterOpenId    String?
-  status            TesterOpsIssueStatus   @default(CANDIDATE)
-  intent            TesterOpsIntent        @default(ISSUE_REPORT)
-  category          String?
-  severity          TesterOpsIssueSeverity @default(LOW)
-  confidence        Float                  @default(0)
-  summary           String
-  sourceMessageText String?
-  sourceMessageId   String?
+  id                 String                 @id @default(cuid())
+  workspaceId        String
+  workspace          Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  eventId            String?
+  event              TesterOpsEvent?        @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  reporterMemberId   String?
+  reporterMember     TesterOpsMember?       @relation(fields: [reporterMemberId], references: [id], onDelete: SetNull)
+  reporterUserId     String?
+  reporterUser       User?                  @relation("TesterOpsReporter", fields: [reporterUserId], references: [id], onDelete: SetNull)
+  reporterOpenId     String?
+  status             TesterOpsIssueStatus   @default(CANDIDATE)
+  intent             TesterOpsIntent        @default(ISSUE_REPORT)
+  category           String?
+  severity           TesterOpsIssueSeverity @default(LOW)
+  confidence         Float                  @default(0)
+  summary            String
+  sourceMessageText  String?
+  sourceMessageId    String?
   clarifyingQuestion String?
-  replyText         String?
-  citations         Json?
-  aiRunId           String?
-  aiRun             TesterOpsAiRun?        @relation(fields: [aiRunId], references: [id], onDelete: SetNull)
-  adminNote         String?
-  resolvedAt        DateTime?
-  createdAt         DateTime               @default(now())
-  updatedAt         DateTime               @updatedAt
+  replyText          String?
+  citations          Json?
+  aiRunId            String?
+  aiRun              TesterOpsAiRun?        @relation(fields: [aiRunId], references: [id], onDelete: SetNull)
+  adminNote          String?
+  resolvedAt         DateTime?
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
 
   @@index([workspaceId, status, createdAt])
   @@index([eventId])
@@ -1047,29 +1061,29 @@ enum FlagStatus {
 }
 
 enum FlagResolution {
-  DISMISSED        // reviewer says the activity was legitimate
-  CONFIRMED        // reviewer agrees it looks like cheating
+  DISMISSED // reviewer says the activity was legitimate
+  CONFIRMED // reviewer agrees it looks like cheating
   TIME_INVALIDATED // reviewer dropped the matching time (future hook)
 }
 
 model ActivityFlag {
-  id           String         @id @default(cuid())
-  userId       String
-  user         User           @relation("FlagSubject", fields: [userId], references: [id])
-  type         FlagType
-  windowStart  DateTime       // start of the minute-window the engine assessed
-  windowEnd    DateTime
-  riskScore    Int            // 0–100 contribution from RISK_WEIGHTS[type]
+  id               String            @id @default(cuid())
+  userId           String
+  user             User              @relation("FlagSubject", fields: [userId], references: [id])
+  type             FlagType
+  windowStart      DateTime // start of the minute-window the engine assessed
+  windowEnd        DateTime
+  riskScore        Int // 0–100 contribution from RISK_WEIGHTS[type]
   /// JSON keyed by signal name (eg ikiCv, pathStraightness, keysPerMin).
   /// Numbers only; the dashboard renders these as small read-only chips.
-  evidence     Json
-  status       FlagStatus     @default(OPEN)
-  resolution   FlagResolution?
-  resolvedById String?
-  resolvedBy   User?          @relation("FlagResolver", fields: [resolvedById], references: [id], onDelete: SetNull)
-  resolvedAt   DateTime?
-  resolvedNote String?
-  createdAt    DateTime       @default(now())
+  evidence         Json
+  status           FlagStatus        @default(OPEN)
+  resolution       FlagResolution?
+  resolvedById     String?
+  resolvedBy       User?             @relation("FlagResolver", fields: [resolvedById], references: [id], onDelete: SetNull)
+  resolvedAt       DateTime?
+  resolvedNote     String?
+  createdAt        DateTime          @default(now())
   timeInvalidation TimeInvalidation?
 
   /// Dedupe key: re-uploading the same window should not double-flag.
@@ -1152,4 +1166,175 @@ model AppIcon {
   png       Bytes
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+// Leave, company holidays and paid-leave balances
+// ---------------------------------------------------------------------------
+
+/// Which part of a working day an absence covers. FULL is a whole day; the two
+/// halves are worth 0.5 each. Which half is irrelevant to the balance and load
+/// bearing everywhere else — a FIRST_HALF absence on a 09:00-18:00 shift means
+/// work is expected from about 13:30, so attendance reads a 1:45 PM start as on
+/// time rather than four hours late. Lark's own leave form encodes the same
+/// thing as AM / PM on the start and end time.
+enum LeavePortion {
+  FULL
+  FIRST_HALF
+  SECOND_HALF
+}
+
+/// PAID draws the balance down; UNPAID does not, because it costs no money.
+/// "charged" and "paid" are deliberately two different columns.
+enum LeaveKind {
+  PAID
+  UNPAID
+}
+
+enum LeaveRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+/// Where a decision came from. LARK_APPROVAL is the company's existing Lark
+/// approval flow (the approval bot card people already use); DASHBOARD is an
+/// admin deciding inside Timo when Lark is not wired up.
+enum LeaveDecisionSource {
+  LARK_APPROVAL
+  DASHBOARD
+  REQUESTER_CANCEL
+}
+
+enum LeaveLedgerKind {
+  ACCRUAL
+  CONSUMPTION
+  ADJUSTMENT
+}
+
+/// Admin-owned leave settings, one row per workspace. Kept separate from
+/// WorkspacePolicy (capture / privacy) and PayrollPolicy (a derived finance
+/// worksheet) for the same reason those two are separate from each other:
+/// different owner, different cadence of change, different blast radius.
+model LeavePolicy {
+  id                   String    @id @default(cuid())
+  workspaceId          String    @unique
+  workspace            Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  /// Days granted per calendar month. Stored on the 0.5 grid like everything else.
+  monthlyAccrualDays   Float     @default(1)
+  /// Whether an unused balance survives the year end. Carry-forward is not
+  /// really a feature — it is what happens when nothing resets — so turning
+  /// this OFF is the case that needs code (an expiry ADJUSTMENT entry).
+  carryForward         Boolean   @default(true)
+  /// Ceiling on the carried balance in days. NULL = uncapped.
+  carryForwardCapDays  Float?
+  /// May an approved request take a balance below zero?
+  allowNegativeBalance Boolean   @default(false)
+  /// Accrue for the joining month itself, or start the month after.
+  accrueOnJoinMonth    Boolean   @default(true)
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+}
+
+/// A company holiday. Paid for everyone and it must never consume anybody's
+/// personal balance — that is the rule that stops a Mon-Fri leave request with
+/// a holiday inside it charging five days instead of four.
+///
+/// `teamId` NULL means the whole workspace. Postgres treats NULLs as distinct
+/// in a unique index, so the unique below only protects team-scoped rows;
+/// workspace-wide duplicates are rejected at the route layer instead.
+model CompanyHoliday {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  /// Business calendar date in the workspace timezone — a date, not an instant.
+  date        DateTime  @db.Date
+  name        String
+  teamId      String?
+  team        Team?     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  createdById String?
+  createdBy   User?     @relation("HolidayCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([workspaceId, date, teamId])
+  @@index([workspaceId, date])
+}
+
+/// A request to be away. Timo owns the record; the decision may come from the
+/// company's Lark approval flow or from an admin in the dashboard.
+model LeaveRequest {
+  id               String               @id @default(cuid())
+  /// Idempotency key from the client, so a retried submit does not duplicate.
+  clientUuid       String               @unique
+  workspaceId      String
+  workspace        Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  userId           String
+  user             User                 @relation("LeaveRequester", fields: [userId], references: [id], onDelete: Cascade)
+  kind             LeaveKind            @default(PAID)
+  /// Inclusive business-date range.
+  startDate        DateTime             @db.Date
+  endDate          DateTime             @db.Date
+  /// A half-day request is always a single date; multi-day requests are FULL.
+  portion          LeavePortion         @default(FULL)
+  /// What this request costs the balance, priced by the Working Calendar when
+  /// it was submitted, so the number the requester saw is the number charged.
+  /// Re-priced at approval, because the calendar can change underneath it.
+  chargedDays      Float                @default(0)
+  reason           String
+  status           LeaveRequestStatus   @default(PENDING)
+  decisionSource   LeaveDecisionSource?
+  decidedById      String?
+  decidedBy        User?                @relation("LeaveDecider", fields: [decidedById], references: [id], onDelete: SetNull)
+  decidedAt        DateTime?
+  decidedReason    String?
+  /// The Lark approval instance backing this request, when there is one.
+  larkInstanceCode String?              @unique
+  larkApprovalCode String?
+  larkSyncedAt     DateTime?
+  ledgerEntries    LeaveLedgerEntry[]
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+
+  @@index([workspaceId, status])
+  @@index([userId, status])
+  @@index([workspaceId, startDate, endDate])
+}
+
+/// One line of the paid-leave ledger.
+///
+/// The balance is the sum of these, never a column we decrement. That makes a
+/// retried approval a no-op (`sourceKey` is unique), makes a cancellation a
+/// visible reversal rather than a silent add-back, makes carry-forward free,
+/// and means a bug is fixed by recomputing rather than by guessing what a
+/// counter should have been.
+model LeaveLedgerEntry {
+  id          String          @id @default(cuid())
+  workspaceId String
+  workspace   Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User            @relation("LeaveLedgerSubject", fields: [userId], references: [id], onDelete: Cascade)
+  kind        LeaveLedgerKind
+  /// Signed days: +1 accrual, -0.5 consumption, ± adjustment. Stored as a
+  /// double because every value is a multiple of 0.5, which is exactly
+  /// representable in binary floating point — the 0.1 + 0.2 drift that makes
+  /// people reach for integer minor-units simply does not arise for halves.
+  days        Float
+  /// Business date the entry counts from, so a past month stays reproducible.
+  effectiveOn DateTime        @db.Date
+  /// Idempotency key — `accrual:<userId>:<YYYY-MM>`, `leave:<requestId>`,
+  /// `leave-reversal:<requestId>`. Unique, so writing the same fact twice
+  /// loses instead of double-counting.
+  sourceKey   String          @unique
+  reason      String?
+  requestId   String?
+  request     LeaveRequest?   @relation(fields: [requestId], references: [id], onDelete: SetNull)
+  createdById String?
+  createdBy   User?           @relation("LeaveLedgerActor", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime        @default(now())
+
+  @@index([userId, effectiveOn])
+  @@index([workspaceId, effectiveOn])
+  @@index([requestId])
 }

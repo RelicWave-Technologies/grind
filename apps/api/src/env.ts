@@ -36,6 +36,13 @@ const EnvSchema = z.object({
   // bootstrap the workspace + grant everyone else's roles). Everyone else is
   // provisioned PENDING. Matching is case-insensitive + trimmed.
   LARK_BOOTSTRAP_ADMIN_EMAILS: z.string().optional(),
+  /// approval_code of the workspace's Lark "Leave" approval. Present = leave is
+  /// decided in Lark; absent = decided in Timo. Deliberately all-or-nothing: a
+  /// half-configured Lark accepts requests that reach nobody.
+  LARK_LEAVE_APPROVAL_CODE: z.string().min(1).optional(),
+  LARK_LEAVE_TYPE_FULL: z.string().min(1).optional(),
+  LARK_LEAVE_TYPE_HALF: z.string().min(1).optional(),
+  LARK_LEAVE_TZ_OFFSET_MIN: z.coerce.number().int().optional(),
   // Fixed id for the single workspace, used with upsert so concurrent first
   // logins never create duplicates.
   WORKSPACE_ID: z.string().min(1).default('ws_default'),

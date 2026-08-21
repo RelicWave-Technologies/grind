@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { DayStatusSchema } from './leave';
 import { ManualTimeRequestDto } from './manualTimeRequests';
 import { SelfProfileResponseSchema } from './profile';
 
@@ -42,6 +43,11 @@ export const MemberReportDaySchema = z.object({
     count: z.number().int().min(0),
   }),
   topApps: z.array(MemberReportTopAppSchema),
+  /**
+   * Calendar status for the day — holiday, weekly off, approved leave — so a
+   * report can show WHY a day is empty instead of showing a blank row.
+   */
+  dayStatus: DayStatusSchema.nullable().optional(),
 });
 export type MemberReportDay = z.infer<typeof MemberReportDaySchema>;
 
