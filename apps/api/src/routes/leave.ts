@@ -7,6 +7,7 @@ import {
   PatchHolidaySchema,
   PatchLeavePolicySchema,
   SignedLeaveDaysSchema,
+  leaveDaysSchema,
   type HolidayDto,
   type LeaveBalanceDto,
 } from '@grind/types';
@@ -456,7 +457,13 @@ adminLeaveRouter.post('/requests/:id/decide', async (req, res, next) => {
   }
 });
 
-/** Balances for everyone in scope — the month-end column. */
+/**
+ * Balances for everyone in scope, with enough to render and edit a row.
+ *
+ * One query for the people and one for the ledger, rather than a balance call
+ * per person: this is the admin's whole-company view and a hundred round trips
+ * would make it feel broken.
+ */
 adminLeaveRouter.get('/balances', async (req, res, next) => {
   try {
     if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
@@ -467,8 +474,106 @@ adminLeaveRouter.get('/balances', async (req, res, next) => {
     for (const userId of req.scope.userIds) {
       await ensureAccruals({ workspaceId: req.scope.workspaceId, userId, asOf });
     }
-    const balances = await loadBalances(req.scope.userIds, asOf);
-    res.json({ asOf, balances });
+
+    const [people, balances, policy] = await Promise.all([
+      prisma.user.findMany({
+        where: { id: { in: req.scope.userIds }, deactivatedAt: null },
+        select: {
+          id: true, name: true, email: true, avatarUrl: true,
+          joinedOn: true, createdAt: true,
+          leaveAccrualDaysOverride: true,
+          lastSaturdayOffOverride: true,
+          team: { select: { name: true } },
+        },
+        orderBy: { name: 'asc' },
+      }),
+      loadBalances(req.scope.userIds, asOf),
+      loadOrCreateLeavePolicy(req.scope.workspaceId),
+    ]);
+
+    res.json({
+      asOf,
+      policy: toLeavePolicyDto(policy),
+      rows: people.map((p) => ({
+        userId: p.id,
+        name: p.name,
+        email: p.email,
+        avatarUrl: p.avatarUrl,
+        teamName: p.team?.name ?? null,
+        // Null means "inherits the workspace policy" — the UI says so rather
+        // than showing the resolved number as if somebody had chosen it.
+        accrualDays: p.leaveAccrualDaysOverride,
+        effectiveAccrualDays: p.leaveAccrualDaysOverride ?? policy.monthlyAccrualDays,
+        lastSaturdayOff: p.lastSaturdayOffOverride,
+        effectiveLastSaturdayOff: p.lastSaturdayOffOverride ?? policy.lastSaturdayOff,
+        accrualStart: toIsoDate(p.joinedOn ?? p.createdAt),
+        joinedOnSet: p.joinedOn !== null,
+        ...(balances[p.id] ?? { balanceDays: 0, accruedDays: 0, consumedDays: 0, adjustedDays: 0 }),
+      })),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+const PatchMemberLeaveSchema = z
+  .object({
+    accrualDays: leaveDaysSchema(31).nullable().optional(),
+    lastSaturdayOff: z.boolean().nullable().optional(),
+    joinedOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u).nullable().optional(),
+  })
+  .refine((v) => Object.keys(v).length > 0, { message: 'nothing_to_update' });
+
+/**
+ * Edit one person's leave settings.
+ *
+ * Deliberately not the balance itself: a balance is the sum of a ledger, and
+ * setting it directly would be the counter this design exists to avoid. To move
+ * a number, post an adjustment — it carries a reason and shows in the statement.
+ */
+adminLeaveRouter.patch('/members/:userId', requireAdmin, async (req, res, next) => {
+  try {
+    if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
+    const parsed = PatchMemberLeaveSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'invalid_body', detail: parsed.error.issues[0]?.message });
+    }
+    const userId = req.params.userId;
+    if (!userId || !req.scope.userIds.includes(userId)) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+
+    const data: Record<string, unknown> = {};
+    if (parsed.data.accrualDays !== undefined) data.leaveAccrualDaysOverride = parsed.data.accrualDays;
+    if (parsed.data.lastSaturdayOff !== undefined) data.lastSaturdayOffOverride = parsed.data.lastSaturdayOff;
+    if (parsed.data.joinedOn !== undefined) {
+      data.joinedOn = parsed.data.joinedOn ? fromIsoDate(parsed.data.joinedOn) : null;
+    }
+
+    const updated = await prisma.user.update({
+      where: { id: userId },
+      data,
+      select: {
+        id: true, joinedOn: true, createdAt: true,
+        leaveAccrualDaysOverride: true, lastSaturdayOffOverride: true,
+      },
+    });
+
+    // Changing the anchor or the rate can make months newly due; write them now
+    // so the row the admin sees next reflects the change immediately.
+    await ensureAccruals({
+      workspaceId: req.scope.workspaceId,
+      userId: updated.id,
+      asOf: today(req.scope.workspaceTimezone),
+    });
+
+    res.json({
+      userId: updated.id,
+      accrualDays: updated.leaveAccrualDaysOverride,
+      lastSaturdayOff: updated.lastSaturdayOffOverride,
+      accrualStart: toIsoDate(updated.joinedOn ?? updated.createdAt),
+      balance: await loadBalance(updated.id),
+    });
   } catch (err) {
     next(err);
   }

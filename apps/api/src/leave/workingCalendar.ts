@@ -57,11 +57,14 @@ export interface ApprovedLeaveInput {
 export interface WorkingCalendarInput {
   tz: string;
   /**
-   * Company-wide rule: the last Saturday of each month is not a working day.
-   * Applied only to people whose shift says they work that Saturday, so it
-   * cannot invent a working day for somebody already off.
+   * Who takes the last Saturday of the month off, by user id.
+   *
+   * Per person rather than per workspace because only one of the two employers
+   * sharing this workspace does it, and teams do not divide along company
+   * lines. Applied only to somebody whose shift says they work that Saturday,
+   * so it can never invent a working day for a person already off.
    */
-  lastSaturdayOff?: boolean;
+  lastSaturdayOffFor?: Record<string, boolean>;
   /** Per-user shift assignment history, newest or oldest order both fine. */
   shiftAssignments?: Record<string, ShiftAssignmentInput[]>;
   /** Team each user belongs to, for team-scoped holidays. */
@@ -90,11 +93,11 @@ export class WorkingCalendar {
   private readonly leaveByUser: Map<string, ApprovedLeaveInput[]>;
   private readonly dayWindowCache = new Map<string, { startMs: number; endMs: number } | null>();
 
-  private readonly lastSaturdayOff: boolean;
+  private readonly lastSaturdayOffFor: Record<string, boolean>;
 
   constructor(input: WorkingCalendarInput) {
     this.tz = input.tz;
-    this.lastSaturdayOff = input.lastSaturdayOff ?? false;
+    this.lastSaturdayOffFor = input.lastSaturdayOffFor ?? {};
     this.shiftAssignments = input.shiftAssignments ?? {};
     this.userTeamIds = input.userTeamIds ?? {};
 
@@ -269,7 +272,7 @@ export class WorkingCalendar {
     if (!day) return { kind: 'weekly_off', shiftName: assignment.shiftNameSnapshot };
     // Resolved here rather than at each caller, so "was this a working day"
     // has one answer for the quote, the timesheet and the payroll worksheet.
-    if (this.lastSaturdayOff && isLastSaturdayOfMonth(date)) {
+    if (this.lastSaturdayOffFor[userId] && isLastSaturdayOfMonth(date)) {
       return { kind: 'weekly_off', shiftName: assignment.shiftNameSnapshot };
     }
     return { kind: 'working', shiftName: assignment.shiftNameSnapshot };

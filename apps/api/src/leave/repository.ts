@@ -72,7 +72,7 @@ export async function loadWorkingCalendar(input: {
     loadOrCreateLeavePolicy(input.workspaceId, db),
     db.user.findMany({
       where: { id: { in: input.userIds } },
-      select: { id: true, teamId: true },
+      select: { id: true, teamId: true, lastSaturdayOffOverride: true },
     }),
     db.shiftAssignment.findMany({
       where: {
@@ -113,7 +113,12 @@ export async function loadWorkingCalendar(input: {
   ]);
 
   const userTeamIds: Record<string, string | null> = {};
-  for (const u of users) userTeamIds[u.id] = u.teamId;
+  const lastSaturdayOffFor: Record<string, boolean> = {};
+  for (const u of users) {
+    userTeamIds[u.id] = u.teamId;
+    // The person's own answer wins; the workspace policy is the fallback.
+    lastSaturdayOffFor[u.id] = u.lastSaturdayOffOverride ?? policy.lastSaturdayOff;
+  }
 
   const shiftAssignments: Record<string, ShiftAssignmentInput[]> = {};
   for (const a of assignments) {
@@ -128,7 +133,7 @@ export async function loadWorkingCalendar(input: {
 
   return new WorkingCalendar({
     tz: input.tz,
-    lastSaturdayOff: policy.lastSaturdayOff,
+    lastSaturdayOffFor,
     shiftAssignments,
     userTeamIds,
     holidays: holidays.map((h) => ({ date: toIsoDate(h.date), name: h.name, teamId: h.teamId })),

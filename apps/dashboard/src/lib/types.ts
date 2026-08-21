@@ -349,3 +349,28 @@ export interface LeavePolicyResponse {
   approvalGateway: string;
   decidesInTimo: boolean;
 }
+
+export interface LeaveBalanceRow {
+  userId: string;
+  name: string;
+  email: string;
+  avatarUrl: string | null;
+  teamName: string | null;
+  /** null = inherits the workspace policy. */
+  accrualDays: number | null;
+  effectiveAccrualDays: number;
+  lastSaturdayOff: boolean | null;
+  effectiveLastSaturdayOff: boolean;
+  accrualStart: string;
+  joinedOnSet: boolean;
+  balanceDays: number;
+  accruedDays: number;
+  consumedDays: number;
+  adjustedDays: number;
+}
+
+export interface LeaveBalancesResponse {
+  asOf: string;
+  policy: LeavePolicyResponse['policy'];
+  rows: LeaveBalanceRow[];
+}

@@ -249,7 +249,7 @@ describe('WorkingCalendar — the last Saturday is not a working day', () => {
   function sixDayCal(lastSaturdayOff: boolean) {
     return new WorkingCalendar({
       tz: TZ,
-      lastSaturdayOff,
+      lastSaturdayOffFor: { [U]: lastSaturdayOff },
       shiftAssignments: { [U]: assignment(SIX_DAY) },
       userTeamIds: { [U]: null },
     });
@@ -285,10 +285,43 @@ describe('WorkingCalendar — the last Saturday is not a working day', () => {
   it('cannot invent a day off for somebody already not working Saturdays', () => {
     // NINE_TO_SIX has sat: null, so the rule has nothing to turn off.
     const c = new WorkingCalendar({
-      tz: TZ, lastSaturdayOff: true,
+      tz: TZ, lastSaturdayOffFor: { [U]: true },
       shiftAssignments: { [U]: assignment() },
       userTeamIds: { [U]: null },
     });
     expect(c.dayStatus(U, '2026-08-29').kind).toBe('WEEKLY_OFF');
+  });
+});
+
+
+describe('WorkingCalendar — the last Saturday is per person, not per workspace', () => {
+  it('only takes it off for the people it applies to', () => {
+    const EMIAC = 'emiac-1';
+    const MACOBS = 'macobs-1';
+    const c = new WorkingCalendar({
+      tz: TZ,
+      // Two employers share this workspace; only one takes the Saturday off.
+      lastSaturdayOffFor: { [EMIAC]: true, [MACOBS]: false },
+      shiftAssignments: { [EMIAC]: assignment(SIX_DAY), [MACOBS]: assignment(SIX_DAY) },
+      userTeamIds: { [EMIAC]: null, [MACOBS]: null },
+    });
+
+    expect(c.dayStatus(EMIAC, '2026-08-29').kind).toBe('WEEKLY_OFF');
+    expect(c.dayStatus(MACOBS, '2026-08-29').kind).toBe('WORKING');
+  });
+
+  it('charges the same week differently for the two of them', () => {
+    const EMIAC = 'emiac-1';
+    const MACOBS = 'macobs-1';
+    const c = new WorkingCalendar({
+      tz: TZ,
+      lastSaturdayOffFor: { [EMIAC]: true, [MACOBS]: false },
+      shiftAssignments: { [EMIAC]: assignment(SIX_DAY), [MACOBS]: assignment(SIX_DAY) },
+      userTeamIds: { [EMIAC]: null, [MACOBS]: null },
+    });
+    const dates = leaveDateRange('2026-08-24', '2026-08-29');
+
+    expect(c.quote({ userId: EMIAC, dates, portion: 'FULL', kind: 'PAID' }).chargedDays).toBe(5);
+    expect(c.quote({ userId: MACOBS, dates, portion: 'FULL', kind: 'PAID' }).chargedDays).toBe(6);
   });
 });

@@ -277,6 +277,14 @@ model User {
   /// different rates and teams do not divide along company lines — Media Buying
   /// alone holds people from both — so the rate has to sit on the person.
   leaveAccrualDaysOverride Float?
+  /// Per-person: is the last Saturday of the month a non-working day? NULL
+  /// inherits the workspace policy. Like the accrual rate, this varies by which
+  /// company somebody belongs to, and teams do not divide along company lines.
+  ///
+  /// Two per-person overrides on the same axis is the shape of a missing
+  /// concept: this workspace holds two employers, and neither Team nor
+  /// Workspace models that. Worth naming properly if a third rule appears.
+  lastSaturdayOffOverride  Boolean?
 
   /// Currently-assigned shift. Forward-only: changing this does NOT
   /// rewrite history; each TimeEntry snapshots `shiftIdAtStart` so reports
