@@ -213,6 +213,60 @@ describe('mirroring Lark leave into the ledger', () => {
     expect((await loadBalance(u.userId)).balanceDays).toBe(afterApproval.balanceDays + 1);
   });
 
+  it('mirrors leave from before the person was accruing, but does not charge it', async () => {
+    // Timo only started tracking this person in August; Lark remembers July.
+    const u = await seedUser({ role: 'MEMBER' });
+    await prisma.workspace.update({ where: { id: u.workspaceId }, data: { timezone: 'Asia/Kolkata' } });
+    await prisma.user.update({ where: { id: u.userId }, data: { joinedOn: new Date('2026-08-10T00:00:00Z') } });
+    await prisma.larkIdentity.create({ data: { userId: u.userId, openId: OPEN_ID } });
+    const shift = await prisma.shift.create({
+      data: { workspaceId: u.workspaceId, name: 'Day', schedule: NINE_TO_SIX as object },
+    });
+    await prisma.shiftAssignment.create({
+      data: {
+        userId: u.userId, shiftId: shift.id,
+        effectiveFrom: new Date('2020-01-01T00:00:00Z'), effectiveTo: null,
+        shiftNameSnapshot: 'Day', scheduleSnapshot: NINE_TO_SIX as object,
+      },
+    });
+
+    installLarkFake({
+      'INST-OLD': {
+        status: 'APPROVED', open_id: OPEN_ID,
+        form: leaveForm({
+          start: ist(2026, 7, 6), end: ist(2026, 7, 7),
+          interval: '1', name: 'Casual Leave', reason: 'before Timo',
+        }),
+      },
+    });
+
+    await ingestLarkLeaveOnce({ now: Date.parse('2026-08-20T00:00:00Z') });
+
+    const row = await prisma.leaveRequest.findUnique({ where: { larkInstanceCode: 'INST-OLD' } });
+    // Visible on the calendar and in reports...
+    expect(row?.status).toBe('APPROVED');
+    expect(row?.startDate.toISOString().slice(0, 10)).toBe('2026-07-06');
+    // ...but it must not bill a balance that had not started accruing.
+    expect(row?.chargedDays).toBe(0);
+    expect((await loadBalance(u.userId)).consumedDays).toBe(0);
+  });
+
+  it('still charges leave taken on or after the accrual start', async () => {
+    const u = await seedLinkedUser(); // joinedOn 2026-01-01
+    installLarkFake({
+      'INST-NEW': {
+        status: 'APPROVED', open_id: OPEN_ID,
+        form: leaveForm({
+          start: ist(2026, 8, 17), end: ist(2026, 8, 18),
+          interval: '1', name: 'Casual Leave', reason: 'after joining',
+        }),
+      },
+    });
+
+    await ingestLarkLeaveOnce({ now: Date.parse('2026-08-20T00:00:00Z') });
+    expect((await loadBalance(u.userId)).consumedDays).toBe(1);
+  });
+
   it('skips somebody with no Lark identity rather than guessing', async () => {
     await seedLinkedUser();
     installLarkFake({

@@ -4,7 +4,7 @@ import { logger } from '../logger';
 import { getLarkConfig, hasLarkCredentials } from '../lark/config';
 import { getTenantAccessToken } from '../lark/tenantToken';
 import { consumptionSourceKey, reversalSourceKey } from './ledger';
-import { fromIsoDate, loadWorkingCalendar } from './repository';
+import { fromIsoDate, loadWorkingCalendar, toIsoDate } from './repository';
 import { leaveDateRange } from './workingCalendar';
 import { decisionFromLarkStatus, type ExternalDecision } from './approvalGateway';
 
@@ -219,9 +219,28 @@ async function mirrorInstance(input: {
 
   const identity = await prisma.larkIdentity.findUnique({
     where: { openId: instance.openId },
-    select: { userId: true, user: { select: { workspaceId: true } } },
+    select: {
+      userId: true,
+      user: { select: { workspaceId: true, joinedOn: true, createdAt: true } },
+    },
   });
   if (!identity || identity.user.workspaceId !== input.workspaceId) return 'unmatched';
+
+  /**
+   * Never charge leave from before the person was accruing.
+   *
+   * Accrual starts at `joinedOn`, falling back to the Timo account date. Lark,
+   * meanwhile, remembers far more history than Timo has existed for — so a
+   * straight import bills months of real leave against a balance that only
+   * began accruing weeks ago, and the whole company lands deep in the negative
+   * through no fault of their own.
+   *
+   * The two sides of the ledger have to cover the same window. Leave that
+   * predates the accrual start is still mirrored, so the calendar and reports
+   * show it, but it is not charged.
+   */
+  const accrualStart = toIsoDate(identity.user.joinedOn ?? identity.user.createdAt);
+  const chargeable = instance.startDate >= accrualStart;
 
   const kind = 'PAID' as const;
   const calendar = await loadWorkingCalendar({
@@ -231,12 +250,13 @@ async function mirrorInstance(input: {
     from: instance.startDate,
     to: instance.endDate,
   });
-  const quote = calendar.quote({
+  const priced = calendar.quote({
     userId: identity.userId,
     dates: leaveDateRange(instance.startDate, instance.endDate, 120),
     portion: instance.portion,
     kind,
   });
+  const quote = chargeable ? priced : { ...priced, chargedDays: 0 };
 
   const status =
     instance.decision === 'APPROVED'
