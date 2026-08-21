@@ -6,6 +6,15 @@ services:
     environment:
       NODE_ENV: production
       API_PORT: 4000
+      # Leave mirroring. These are configuration, not credentials — an approval
+      # identifier, two display names and a UTC offset — so they live in version
+      # control rather than in a write-only secret, where they were silently
+      # dropped on every deploy that regenerated .env.production.
+      # The Lark credentials themselves stay in TIMO_PRODUCTION_ENV.
+      LARK_LEAVE_APPROVAL_CODE: 1A67FD64-F795-4A76-9D45-B37F79A8ABBA
+      LARK_LEAVE_TYPE_FULL: Casual Leave
+      LARK_LEAVE_TYPE_HALF: Half Day
+      LARK_LEAVE_TZ_OFFSET_MIN: "-330"
     ports:
       - "127.0.0.1:4100:4000"
     restart: unless-stopped
