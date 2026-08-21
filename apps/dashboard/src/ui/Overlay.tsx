@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { cloneElement, isValidElement } from 'react';
+import { createPortal } from 'react-dom';
 import type { ReactElement, ReactNode } from 'react';
 import { cx } from './util';
 import type { Status } from './util';
@@ -110,6 +111,17 @@ export interface ModalProps {
 }
 
 export function Modal({ open, onClose, title, description, actions, children }: ModalProps) {
+  /**
+   * Whether the press that is currently in flight began on the scrim.
+   *
+   * Closing on mousedown alone is too eager: a native control rendered over the
+   * dialog — the date picker is the obvious one — can put a mousedown on the
+   * scrim while the person is only picking a date, and the dialog vanishes
+   * under them. A dismissal has to be a press AND a release on the scrim, with
+   * nothing in between.
+   */
+  const pressedScrim = useRef(false);
+
   useEffect(() => {
     if (!open) return undefined;
     const onKey = (e: KeyboardEvent) => {
@@ -128,13 +140,25 @@ export function Modal({ open, onClose, title, description, actions, children }: 
 
   if (!open) return null;
 
-  return (
+  /**
+   * Rendered into <body>, not in place.
+   *
+   * `.ui-page` animates a transform, and a transformed ancestor becomes the
+   * containing block for `position: fixed` descendants — so a scrim with
+   * `inset: 0` sized itself to the page column instead of the viewport and
+   * covered only part of the screen. A portal is the fix that survives whatever
+   * a page does to its own layout.
+   */
+  return createPortal(
     <div
       className="ui-modal-layer"
       onMouseDown={(e) => {
-        // Only a press that both starts AND ends on the scrim dismisses, so a
-        // drag that happens to finish outside the panel does not close it.
-        if (e.target === e.currentTarget) onClose();
+        pressedScrim.current = e.target === e.currentTarget;
+      }}
+      onMouseUp={(e) => {
+        const dismiss = pressedScrim.current && e.target === e.currentTarget;
+        pressedScrim.current = false;
+        if (dismiss) onClose();
       }}
     >
       <div
@@ -150,7 +174,8 @@ export function Modal({ open, onClose, title, description, actions, children }: 
         <div className="ui-modal__body">{children}</div>
         {actions != null && <div className="ui-modal__foot">{actions}</div>}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

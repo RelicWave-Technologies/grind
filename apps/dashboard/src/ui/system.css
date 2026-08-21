@@ -801,11 +801,18 @@ textarea.ui-control { height: auto; min-height: 80px; padding: var(--ui-sp-3) va
 .ui-modal-layer {
   position: fixed;
   inset: 0;
+  /* Belt and braces: even portalled, never let the scrim be shorter than the
+     screen on a page that scrolls. */
+  width: 100vw;
+  min-height: 100vh;
+  min-height: 100dvh;
   z-index: 80;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: var(--ui-sp-7);
+  /* A dialog taller than the viewport scrolls the layer, not the page behind. */
+  overflow-y: auto;
   background: var(--ui-overlay);
   animation: ui-fade-in var(--ui-dur-base) var(--ui-ease) both;
 }
@@ -828,6 +835,10 @@ textarea.ui-control { height: auto; min-height: 80px; padding: var(--ui-sp-3) va
 .ui-modal__title { margin: 0; }
 .ui-modal__desc { margin: var(--ui-sp-2) 0 0; }
 .ui-modal__body > * + * { margin-top: var(--ui-sp-5); }
+/* Native pickers (date, select) open over the dialog; give them room to sit
+   inside it rather than clipping against the panel edge. */
+.ui-modal__body .ui-field { position: relative; }
+.ui-modal__body input[type='date'] { min-height: var(--ui-control-h); }
 .ui-modal__foot {
   display: flex;
   justify-content: flex-end;
