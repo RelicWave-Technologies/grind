@@ -48,21 +48,49 @@ function Card({ src, alt, w, h }: { src: string; alt: string; w: number; h: numb
 }
 
 const LATEST: Release = {
-  id: 'beta-31',
-  version: 'beta.31',
-  name: 'the honest clock update',
-  meta: 'AUG 10, 2026 · MAC + WINDOWS',
+  id: 'beta-37',
+  version: 'beta.37',
+  name: 'the popup that comes back',
+  meta: 'AUG 19, 2026 · MAC + WINDOWS',
   changes: [
-    { tag: 'fixed', text: <>Your timer runs on a stopwatch now. Correcting a wrong clock used to freeze it mid-count. A stopwatch doesn't know the time, so nobody can lie to it.</> },
-    { tag: 'new', text: <>Timo taps you once if you're working with the timer off. Lunch does not count as working.</> },
-    { tag: 'fixed', text: <>Prompts stopped dragging you out of fullscreen. They show up where you already are.</> },
-    { tag: 'fixed', text: <>No more "Restart Timo" when the screen simply went to sleep. False alarm. Every time.</> },
-    { tag: 'fixed', text: <>The permission prompt stopped asking for a restart that could never help. It names the switch it actually wants: Input Monitoring.</> },
-    { tag: 'fixed', text: <>Launch at login works on Windows, and repairs itself at boot instead of nagging.</> },
-    { tag: 'improved', text: <>Screenshots stopped elbowing your typing.</> },
-    { tag: 'fixed', text: <>Windows lost a menu bar it never used. Mac is back to one Dock icon.</> },
+    { tag: 'fixed', text: <>The popup comes back after your Mac sleeps. It used to end up on a desktop you were never going to visit — present, floating, and completely invisible.</> },
+    { tag: 'fixed', text: <>Timo stopped locking you out. If a prompt could not be found, the tray, the dock icon and every other way in stopped responding too, and only quitting helped. The tray always answers now.</> },
+    { tag: 'improved', text: <>Ask for Timo twice and it lets you in. If a prompt is somewhere you cannot reach, Timo gives up on it rather than leaving you outside.</> },
+    { tag: 'fixed', text: <>One Timo in the Dock, not five.</> },
+    { tag: 'improved', text: <>Prompts now leave a trace in the logs — what appeared, when it was answered, and whether it was ever really on screen. The last fault of this kind hid for four days in plain sight.</> },
   ],
 };
+
+const AUGUST: Release[] = [
+  {
+    id: 'beta-34',
+    version: 'beta.34',
+    name: 'the steady hand update',
+    meta: 'AUG 15, 2026 · MAC + WINDOWS',
+    changes: [
+      { tag: 'fixed', text: <>Your timer and your screenshots now agree on what time it is. When they disagreed, a pause could quietly trim minutes you had actually worked.</> },
+      { tag: 'improved', text: <>Timo stopped reading from disk every single second. Quieter fans, longer battery.</> },
+      { tag: 'improved', text: <>Screenshots wait a moment if you are mid-sentence, instead of stealing the keystroke.</> },
+      { tag: 'fixed', text: <>Two silent failures learned to speak up. Both used to happen invisibly and leave you guessing.</> },
+    ],
+  },
+  {
+    id: 'beta-31',
+    version: 'beta.31',
+    name: 'the honest clock update',
+    meta: 'AUG 10, 2026 · MAC + WINDOWS',
+    changes: [
+      { tag: 'fixed', text: <>Your timer runs on a stopwatch now. Correcting a wrong clock used to freeze it mid-count. A stopwatch doesn't know the time, so nobody can lie to it.</> },
+      { tag: 'new', text: <>Timo taps you once if you're working with the timer off. Lunch does not count as working.</> },
+      { tag: 'fixed', text: <>Prompts stopped dragging you out of fullscreen. They show up where you already are.</> },
+      { tag: 'fixed', text: <>No more "Restart Timo" when the screen simply went to sleep. False alarm. Every time.</> },
+      { tag: 'fixed', text: <>The permission prompt stopped asking for a restart that could never help. It names the switch it actually wants: Input Monitoring.</> },
+      { tag: 'fixed', text: <>Launch at login works on Windows, and repairs itself at boot instead of nagging.</> },
+      { tag: 'improved', text: <>Screenshots stopped elbowing your typing.</> },
+      { tag: 'fixed', text: <>Windows lost a menu bar it never used. Mac is back to one Dock icon.</> },
+    ],
+  },
+];
 
 const JULY: Release[] = [
   {
@@ -441,6 +469,15 @@ export function ChangelogScreen() {
         </section>
 
         {/* ---- Release ledgers on white canvas ------------------------------ */}
+        <section className="cl-section" id="august-2026">
+          <div className="cl-container">
+            <h2 className="cl-display-lg cl-reveal">August 2026</h2>
+            <div className="cl-entries">
+              {AUGUST.map((r) => <ReleaseEntry key={r.id} release={r} />)}
+            </div>
+          </div>
+        </section>
+
         <section className="cl-section" id="july-2026">
           <div className="cl-container">
             <h2 className="cl-display-lg cl-reveal">July 2026</h2>
