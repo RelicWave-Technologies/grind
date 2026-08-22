@@ -529,7 +529,7 @@ const PatchMemberLeaveSchema = z
  *
  * Deliberately not the balance itself: a balance is the sum of a ledger, and
  * setting it directly would be the counter this design exists to avoid. To move
- * a number, post an adjustment — it carries a reason and shows in the statement.
+ * a number, post an adjustment — it is a ledger entry and shows in the statement.
  */
 adminLeaveRouter.patch('/members/:userId', requireAdmin, async (req, res, next) => {
   try {
@@ -583,12 +583,13 @@ const AdjustSchema = z.object({
   userId: z.string().min(1),
   days: SignedLeaveDaysSchema,
   effectiveOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
-  reason: z.string().trim().min(1).max(300),
+  reason: z.string().trim().max(300).optional(),
 });
 
 /**
- * An admin correction. Written as a ledger entry with a reason rather than by
- * setting a balance, so the statement still explains how the number got there.
+ * An admin correction. Written as a ledger entry rather than by setting a
+ * balance, so the statement still explains how the number got there. The
+ * reason is optional; without one the statement falls back to the entry kind.
  */
 adminLeaveRouter.post('/adjust', requireAdmin, async (req, res, next) => {
   try {
@@ -610,7 +611,7 @@ adminLeaveRouter.post('/adjust', requireAdmin, async (req, res, next) => {
         effectiveOn: fromIsoDate(parsed.data.effectiveOn),
         // A unique key per adjustment; admins may legitimately make several.
         sourceKey: `adjust:${crypto.randomUUID()}`,
-        reason: parsed.data.reason,
+        reason: parsed.data.reason || null,
         createdById: req.user.sub,
       },
     });

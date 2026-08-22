@@ -767,8 +767,8 @@ function MyLeavePanel({
  *
  * The balance itself is deliberately not editable here. It is the sum of a
  * ledger, and a field that overwrites it would be exactly the counter this
- * design exists to avoid — so a correction is an adjustment with a reason,
- * which shows up in that person's statement.
+ * design exists to avoid — so a correction is an adjustment entry, which
+ * shows up in that person's statement.
  *
  * What IS editable is what produces the balance: the monthly rate, the accrual
  * start, and whether the last Saturday counts as a working day.
@@ -929,10 +929,9 @@ function AdjustModal({
   row, onClose, onSaved,
 }: { row: LeaveBalanceRow | null; onClose: () => void; onSaved: () => void }) {
   const [amount, setAmount] = useState('');
-  const [reason, setReason] = useState('');
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => { setAmount(''); setReason(''); setError(null); }, [row]);
+  useEffect(() => { setAmount(''); setError(null); }, [row]);
 
   const save = useMutation({
     mutationFn: () =>
@@ -942,21 +941,20 @@ function AdjustModal({
           userId: row!.userId,
           days: Number(amount),
           effectiveOn: new Date().toISOString().slice(0, 10),
-          reason: reason.trim(),
         },
       }),
     onSuccess: () => { onSaved(); onClose(); },
     onError: (e: Error) => setError(humanError(e.message)),
   });
 
-  const valid = amount.trim() !== '' && Number(amount) !== 0 && reason.trim() !== '';
+  const valid = amount.trim() !== '' && Number(amount) !== 0;
 
   return (
     <Modal
       open={row !== null}
       onClose={onClose}
       title={row ? `Adjust balance — ${row.name}` : ''}
-      description="Written as a ledger entry with your reason attached, so their statement explains how the number got there."
+      description="Written as a ledger entry, so their statement explains how the number got there."
       actions={
         <>
           <Button variant="secondary" onClick={onClose}>Cancel</Button>
@@ -976,10 +974,6 @@ function AdjustModal({
       <Field label="Days" hint="Negative takes days away. Half days allowed.">
         <Input type="number" step="0.5" value={amount} placeholder="e.g. 1 or -0.5"
                onChange={(e) => setAmount(e.target.value)} />
-      </Field>
-      <Field label="Reason" hint="Shown in their balance statement.">
-        <Input value={reason} placeholder="Comp for weekend release"
-               onChange={(e) => setReason(e.target.value)} />
       </Field>
     </Modal>
   );
