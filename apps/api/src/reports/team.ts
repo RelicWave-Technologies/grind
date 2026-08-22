@@ -7,6 +7,7 @@ import type {
   TeamReportsResponse,
   TeamReportUser,
 } from '@grind/types';
+import { medianMinuteOfDay } from '@grind/types';
 import type { ReportRange } from './member';
 
 const LOW_ACTIVITY_THRESHOLD = 25;
@@ -43,7 +44,8 @@ export function buildTeamReportsSummaryResponse(input: {
   screenshotCountByUser: Map<string, number>;
 }): TeamReportsSummaryResponse {
   const members = input.users.map((user) => {
-    const member = summarizeMember(user, input.daysByUser.get(user.id) ?? []);
+    const days = input.daysByUser.get(user.id) ?? [];
+    const member = summarizeMember(user, days);
     return {
       user: member.user,
       workedMs: member.workedMs,
@@ -58,6 +60,8 @@ export function buildTeamReportsSummaryResponse(input: {
       gapMs: member.gapMs,
       approvals: member.approvals,
       screenshots: input.screenshotCountByUser.get(user.id) ?? 0,
+      typicalPunchInMinute: medianMinuteOfDay(days.map((d) => d.firstActivityMs), input.range.tz),
+      typicalPunchOutMinute: medianMinuteOfDay(days.map((d) => d.lastActivityMs), input.range.tz),
     };
   });
 

@@ -198,3 +198,53 @@ export function dateKeyInTimeZone(value: Date | number | string, timeZone: strin
   const parts = zonedDateTimeParts(date, timeZone);
   return `${parts.year}-${String(parts.month).padStart(2, '0')}-${String(parts.day).padStart(2, '0')}`;
 }
+
+/**
+ * The typical time of day a set of instants falls on, as minutes since local
+ * midnight in `timeZone` — or null when there is nothing to summarise.
+ *
+ * Used for range summaries like "typically punches in around 09:45", where the
+ * answer is a clock reading rather than a moment. Each instant is projected
+ * into the zone and reduced to its minute-of-day BEFORE anything is compared,
+ * because across a date range the instants themselves are not comparable —
+ * only the times of day are. The median is taken rather than the mean so one
+ * 03:00 deploy night cannot drag a whole fortnight's typical start earlier.
+ *
+ * Caveat worth naming: this wraps at local midnight, so a shift that regularly
+ * punches out after 00:00 reports an early-morning punch-out rather than a
+ * "next day" one. That reads correctly for day shifts; night shifts would need
+ * a shift-anchored window instead.
+ *
+ * Lives here rather than in either app because the API computes it for the
+ * live route and the dashboard recomputes it in its legacy-API fallback —
+ * two callers that must agree on the number.
+ */
+export function medianMinuteOfDay(
+  instants: Array<number | null | undefined>,
+  timeZone: string,
+): number | null {
+  const minutes = instants
+    .filter((ms): ms is number => typeof ms === 'number')
+    .map((ms) => minuteOfDayInTimeZone(ms, timeZone))
+    .sort((a, b) => a - b);
+  if (minutes.length === 0) return null;
+  const mid = Math.floor(minutes.length / 2);
+  // Even counts average the middle pair, then round back onto a whole minute.
+  return minutes.length % 2 === 1
+    ? minutes[mid]!
+    : Math.round((minutes[mid - 1]! + minutes[mid]!) / 2);
+}
+
+/** Minutes since local midnight for an instant, in `timeZone`. */
+export function minuteOfDayInTimeZone(ms: number, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(new Date(ms));
+  const hour = Number(parts.find((p) => p.type === 'hour')?.value ?? '0');
+  const minute = Number(parts.find((p) => p.type === 'minute')?.value ?? '0');
+  // Intl renders midnight as 24 in some engines; normalise it to 0.
+  return ((hour % 24) * 60) + minute;
+}

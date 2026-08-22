@@ -110,6 +110,19 @@ export const TeamReportSummaryMemberSchema = z.object({
   gapMs: z.number().int().min(0),
   approvals: TeamReportApprovalCountsSchema,
   screenshots: z.number().int().min(0),
+  /**
+   * Typical punch in / punch out, as minutes since local midnight.
+   *
+   * A range summary cannot carry an instant — "when does this person start?"
+   * is a time of day, not a date. So each day's punch is reduced to its
+   * minute-of-day in the workspace timezone and the median is taken across
+   * days with activity. Median, not mean: one 03:00 deploy night should not
+   * drag a whole fortnight's typical start earlier.
+   *
+   * Null when the person had no active day in the range.
+   */
+  typicalPunchInMinute: z.number().int().min(0).max(1439).nullable(),
+  typicalPunchOutMinute: z.number().int().min(0).max(1439).nullable(),
 });
 export type TeamReportSummaryMember = z.infer<typeof TeamReportSummaryMemberSchema>;
 

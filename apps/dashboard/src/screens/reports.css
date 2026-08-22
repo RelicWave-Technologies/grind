@@ -862,7 +862,9 @@
   text-align: center;
 }
 
-.rep-table .ui-td.rep-col-worked {
+.rep-table .ui-td.rep-col-worked,
+.rep-table .ui-td.rep-col-punch,
+.rep-team-members-table .ui-td.rep-col-punch {
   text-align: center;
 }
 
@@ -899,9 +901,14 @@
   width: calc(var(--ui-sp-10) * 2);
 }
 
-.rep-col-time,
 .rep-col-actions {
   width: calc(var(--ui-sp-12) * 2);
+}
+
+/* A punch time is five glyphs; two narrow columns cost less width than the
+   single combined one they replace. */
+.rep-col-punch {
+  width: calc(var(--ui-sp-9) * 2);
 }
 
 .rep-col-approvals {
@@ -919,11 +926,6 @@
   flex-direction: column;
   gap: var(--ui-sp-1);
   min-width: 0;
-}
-
-.rep-time-range {
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
 }
 
 .rep-actions {

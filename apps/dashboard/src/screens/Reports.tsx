@@ -22,7 +22,7 @@ import {
   X,
 } from 'lucide-react';
 import { api, API_BASE } from '../lib/api';
-import { addDays, fmtAgeShort, fmtDayLabel, fmtDurationMs, fmtTime, todayKey } from '../lib/format';
+import { addDays, fmtAgeShort, fmtDayLabel, fmtDurationMs, fmtMinuteOfDay, fmtTime, todayKey } from '../lib/format';
 import { hasCapability, isManagerOrAbove } from '../lib/auth';
 import {
   dateKeyInTimeZone,
@@ -347,7 +347,8 @@ function SelfReportTable({
                 <Th className="rep-col-date">Date</Th>
                 <Th className="rep-col-worked" align="center">Worked</Th>
                 <Th className="rep-col-start" align="center">Start</Th>
-                <Th className="rep-col-time" align="center">First / last</Th>
+                <Th className="rep-col-punch" align="center">Punch in</Th>
+                <Th className="rep-col-punch" align="center">Punch out</Th>
                 <Th className="rep-col-approvals" align="center">Approvals</Th>
                 <Th className="rep-col-apps" align="center">Apps</Th>
                 <Th className="rep-col-activity" align="center">Activity</Th>
@@ -372,12 +373,11 @@ function SelfReportTable({
                   <Td className="rep-col-start" align="center">
                     <Tag status={statusTag(day.shiftStatus)}>{shiftLabel(day.shiftStatus)}</Tag>
                   </Td>
-                  <Td className="rep-col-time" align="center">
-                    <span className="rep-time-range">
-                      {day.firstActivityMs ? fmtTime(day.firstActivityMs, tz) : '—'}
-                      <span aria-hidden> / </span>
-                      {day.lastActivityMs ? fmtTime(day.lastActivityMs, tz) : '—'}
-                    </span>
+                  <Td className="rep-col-punch" mono>
+                    {day.firstActivityMs ? fmtTime(day.firstActivityMs, tz) : '—'}
+                  </Td>
+                  <Td className="rep-col-punch" mono>
+                    {day.lastActivityMs ? fmtTime(day.lastActivityMs, tz) : '—'}
                   </Td>
                   <Td className="rep-col-approvals" align="center">
                     <ReportApprovalCounts approvals={day.approvals} />
@@ -523,6 +523,8 @@ function TeamMembersTable({ members, onOpenMember }: { members: TeamReportSummar
             <Th>Member</Th>
             <Th align="center">Worked</Th>
             <Th align="center">Approved hours</Th>
+            <Th align="center">Punch in</Th>
+            <Th align="center">Punch out</Th>
             <Th align="center">Starts</Th>
             <Th align="center">Approvals</Th>
             <Th align="center">Gaps</Th>
@@ -548,6 +550,12 @@ function TeamMembersTable({ members, onOpenMember }: { members: TeamReportSummar
               </Td>
               <Td align="center">
                 <span className="ui-mono">{fmtDurationMs(member.manualMs)}</span>
+              </Td>
+              <Td className="rep-col-punch" mono>
+                {member.typicalPunchInMinute === null ? '—' : fmtMinuteOfDay(member.typicalPunchInMinute)}
+              </Td>
+              <Td className="rep-col-punch" mono>
+                {member.typicalPunchOutMinute === null ? '—' : fmtMinuteOfDay(member.typicalPunchOutMinute)}
               </Td>
               <Td align="center"><StartCounts member={member} /></Td>
               <Td align="center">

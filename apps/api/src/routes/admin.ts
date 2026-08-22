@@ -1252,7 +1252,7 @@ adminRouter.get('/timesheets.csv', requireAnyCapability(['reports.team.read', 'r
     const usersById = new Map(users.map((u) => [u.id, u]));
     const lines: string[] = [];
     lines.push(
-      'name,email,role,day,worked_h,meeting_h,manual_h,total_h,invalidated_h,first_activity,last_activity,activity_samples',
+      'name,email,role,day,worked_h,meeting_h,manual_h,total_h,invalidated_h,punch_in,punch_out,activity_samples',
     );
     // Stable ordering: user (role-then-name like the JSON), then day asc.
     for (const u of users) {
@@ -1261,8 +1261,10 @@ adminRouter.get('/timesheets.csv', requireAnyCapability(['reports.team.read', 'r
       for (const day of matrix.days) {
         const cell = row[day];
         if (!cell || cell.totalMs === 0) continue;
-        const first = cell.firstActivityMs ? fmtTimeForTz(cell.firstActivityMs, matrix.tz) : '';
-        const last = cell.lastActivityMs ? fmtTimeForTz(cell.lastActivityMs, matrix.tz) : '';
+        // Punch in / punch out: earliest segment start and latest segment end
+        // inside the local day, which is what firstActivity/lastActivity are.
+        const punchIn = cell.firstActivityMs ? fmtTimeForTz(cell.firstActivityMs, matrix.tz) : '';
+        const punchOut = cell.lastActivityMs ? fmtTimeForTz(cell.lastActivityMs, matrix.tz) : '';
         lines.push(
           [
             csv(u.name),
@@ -1274,8 +1276,8 @@ adminRouter.get('/timesheets.csv', requireAnyCapability(['reports.team.read', 'r
             msToHours(cell.manualMs),
             msToHours(cell.totalMs),
             msToHours(cell.invalidatedMs),
-            first,
-            last,
+            punchIn,
+            punchOut,
             String(cell.activitySampleCount),
           ].join(','),
         );
