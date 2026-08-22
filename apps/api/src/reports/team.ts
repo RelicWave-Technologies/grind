@@ -7,7 +7,7 @@ import type {
   TeamReportsResponse,
   TeamReportUser,
 } from '@grind/types';
-import { medianMinuteOfDay } from '@grind/types';
+import { medianMinute } from '@grind/types';
 import type { ReportRange } from './member';
 
 const LOW_ACTIVITY_THRESHOLD = 25;
@@ -60,8 +60,8 @@ export function buildTeamReportsSummaryResponse(input: {
       gapMs: member.gapMs,
       approvals: member.approvals,
       screenshots: input.screenshotCountByUser.get(user.id) ?? 0,
-      typicalPunchInMinute: medianMinuteOfDay(days.map((d) => d.firstActivityMs), input.range.tz),
-      typicalPunchOutMinute: medianMinuteOfDay(days.map((d) => d.lastActivityMs), input.range.tz),
+      typicalPunchInMinute: medianMinute(days.map((d) => d.punchInMinute)),
+      typicalPunchOutMinute: medianMinute(days.map((d) => d.punchOutMinute)),
     };
   });
 

@@ -187,6 +187,12 @@ export function buildMemberReportDays(input: {
   iconFor?: IconResolver;
   /** Working Calendar lookup, supplied by the route that loaded it. */
   dayStatusFor?: (userId: string, date: string) => DayStatus | null;
+  /**
+   * External punch record lookup, supplied by the route that loaded it. Absent
+   * or returning null means the day has no punch, which stays null rather than
+   * falling back to activity — the two are different measurements.
+   */
+  punchFor?: (userId: string, date: string) => { inMinute: number | null; outMinute: number | null } | null;
 }): MemberReportDay[] {
   const iconFor = input.iconFor ?? appIconUrl;
   const entries = capOpenEntries(input.entries, input.evidenceByEntry, input.now);
@@ -305,6 +311,7 @@ export function buildMemberReportDays(input: {
       share: appUsage.totalMinutes > 0 ? a.minutes / appUsage.totalMinutes : 0,
     }));
     const approvals = countApprovalsForWindow(input.manualRequests, dayStart, dayEnd);
+    const punch = input.punchFor?.(input.userId, date) ?? null;
     const screenshotCount = input.screenshots.filter((s) =>
       s.capturedAt.getTime() >= dayStart && s.capturedAt.getTime() < dayEnd,
     ).length;
@@ -317,6 +324,8 @@ export function buildMemberReportDays(input: {
       invalidatedMs: cell.invalidatedMs,
       firstActivityMs: cell.firstActivityMs,
       lastActivityMs: cell.lastActivityMs,
+      punchInMinute: punch?.inMinute ?? null,
+      punchOutMinute: punch?.outMinute ?? null,
       shiftStatus: computeShiftStatus({
         shift,
         firstActivityMs: cell.firstActivityMs,
@@ -486,6 +495,8 @@ function emptyReportDay(date: string): MemberReportDay {
     invalidatedMs: 0,
     firstActivityMs: null,
     lastActivityMs: null,
+    punchInMinute: null,
+    punchOutMinute: null,
     shiftStatus: 'no_shift',
     gaps: { count: 0, totalMs: 0 },
     approvals: { approved: 0, pending: 0, rejected: 0 },

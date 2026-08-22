@@ -38,6 +38,7 @@ model Workspace {
   companyHolidays           CompanyHoliday[]
   leaveRequests             LeaveRequest[]
   leaveLedgerEntries        LeaveLedgerEntry[]
+  attendancePunches         AttendancePunch[]
 }
 
 /// Workspace-wide capture policy. A single row per workspace (unique on
@@ -235,43 +236,43 @@ model Shift {
 }
 
 model User {
-  id                 String             @id @default(cuid())
-  workspaceId        String
-  workspace          Workspace          @relation(fields: [workspaceId], references: [id])
-  email              String             @unique
-  name               String
-  role               Role               @default(MEMBER)
+  id                       String             @id @default(cuid())
+  workspaceId              String
+  workspace                Workspace          @relation(fields: [workspaceId], references: [id])
+  email                    String             @unique
+  name                     String
+  role                     Role               @default(MEMBER)
   /// Optional team this user belongs to. NULL = workspace-level (no team
   /// scoping applies; admin sees them, no manager does).
-  teamId             String?
-  team               Team?              @relation("TeamMembers", fields: [teamId], references: [id], onDelete: SetNull)
+  teamId                   String?
+  team                     Team?              @relation("TeamMembers", fields: [teamId], references: [id], onDelete: SetNull)
   /// Deprecated: old direct-manager pointer. v1 org scope and manual-time
   /// approval now resolve through TeamManager + User.teamId.
-  managerId          String?
+  managerId                String?
   /// Legacy email/password hash. NULLABLE: Lark OAuth is the sole identity in
   /// production, so Lark-provisioned users never have one. Retained (not
   /// dropped) so a dev-only password login shim and a clean revert path remain.
-  passwordHash       String?
+  passwordHash             String?
   /// JIT provisioning gate. First Lark login creates the user as PENDING (no
   /// session issued) until an admin completes setup or activates access. The
   /// configured bootstrap admin is created ACTIVE. Distinct from deactivatedAt,
   /// which means "was active, now disabled".
-  provisioningStatus ProvisioningStatus @default(PENDING)
+  provisioningStatus       ProvisioningStatus @default(PENDING)
   /// Avatar URL synced from Lark on each login (stable profile field).
-  avatarUrl          String?
+  avatarUrl                String?
   /// Activity scoring preset. Admin-owned so users cannot self-tune KPI output.
-  activityRoleTitle  ActivityRoleTitle  @default(OTHER)
+  activityRoleTitle        ActivityRoleTitle  @default(OTHER)
   /// Soft-deactivation: when non-null, the user can't log in, doesn't
   /// appear in scope/admin queries, and (importantly) their *history*
   /// remains queryable for back-dated reports + audit. Reactivation
   /// just clears this timestamp. We intentionally never hard-delete
   /// users — every TimeEntry / approval / flag still points at them.
-  deactivatedAt      DateTime?
-  createdAt          DateTime           @default(now())
+  deactivatedAt            DateTime?
+  createdAt                DateTime           @default(now())
   /// Date the person joined the company, used as the paid-leave accrual
   /// anchor. NULL falls back to createdAt — which is only the first Lark
   /// login, so anyone onboarded into Timo after they joined needs this set.
-  joinedOn           DateTime?          @db.Date
+  joinedOn                 DateTime?          @db.Date
   /// Per-person monthly paid-leave grant, in days. NULL inherits the workspace
   /// policy. Needed because the two companies in this workspace accrue at
   /// different rates and teams do not divide along company lines — Media Buying
@@ -358,6 +359,7 @@ model User {
   leaveLedgerEntries               LeaveLedgerEntry[]        @relation("LeaveLedgerSubject")
   leaveLedgerEntriesCreated        LeaveLedgerEntry[]        @relation("LeaveLedgerActor")
   companyHolidaysCreated           CompanyHoliday[]          @relation("HolidayCreator")
+  attendancePunches                AttendancePunch[]
 
   @@index([workspaceId])
   @@index([teamId])
@@ -1354,4 +1356,42 @@ model LeaveLedgerEntry {
   @@index([userId, effectiveOn])
   @@index([workspaceId, effectiveOn])
   @@index([requestId])
+}
+
+/// Punch in / punch out as recorded by an EXTERNAL system (biometric reader,
+/// HR export, a hand-maintained sheet) and loaded into Timo.
+///
+/// Deliberately NOT derived from tracked activity. Timo already knows the
+/// first and last segment boundary of a day, and for a while the reports
+/// showed that as "punch in / punch out" — but the two answer different
+/// questions. Activity says when the laptop started working; a punch says
+/// when the person was recorded at the door. They disagree often enough
+/// (working from a phone, forgetting to start the tracker, badging in before
+/// opening the laptop) that collapsing them hides the disagreement, which is
+/// usually the interesting part.
+///
+/// Rows are written externally. `@@unique([userId, date])` makes a re-import
+/// an upsert rather than a duplicate, so re-running a load is safe.
+model AttendancePunch {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Business calendar date in the workspace timezone — a date, not an instant.
+  date        DateTime  @db.Date
+  /// Clock readings local to the workspace timezone — times of day, not
+  /// instants, so nothing is converted on write or on read. Seed them as they
+  /// appear on the punch report: '09:15:00'. Either side may be null: a
+  /// missing punch out is a real thing that happens, and is not a zero.
+  punchInAt   DateTime? @db.Time
+  punchOutAt  DateTime? @db.Time
+  /// Free-form provenance for whoever loaded the row ("biometric export
+  /// 2026-08", "manual fix — badge failed").
+  note        String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([userId, date])
+  @@index([workspaceId, date])
 }

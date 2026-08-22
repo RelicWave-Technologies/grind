@@ -374,10 +374,10 @@ function SelfReportTable({
                     <Tag status={statusTag(day.shiftStatus)}>{shiftLabel(day.shiftStatus)}</Tag>
                   </Td>
                   <Td className="rep-col-punch" mono>
-                    {day.firstActivityMs ? fmtTime(day.firstActivityMs, tz) : '—'}
+                    {day.punchInMinute === null ? '—' : fmtMinuteOfDay(day.punchInMinute)}
                   </Td>
                   <Td className="rep-col-punch" mono>
-                    {day.lastActivityMs ? fmtTime(day.lastActivityMs, tz) : '—'}
+                    {day.punchOutMinute === null ? '—' : fmtMinuteOfDay(day.punchOutMinute)}
                   </Td>
                   <Td className="rep-col-approvals" align="center">
                     <ReportApprovalCounts approvals={day.approvals} />

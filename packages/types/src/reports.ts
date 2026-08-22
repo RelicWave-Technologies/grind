@@ -28,6 +28,15 @@ export const MemberReportDaySchema = z.object({
   invalidatedMs: z.number().int().min(0),
   firstActivityMs: z.number().int().nullable(),
   lastActivityMs: z.number().int().nullable(),
+  /**
+   * Punch in / punch out for the day, as minutes since local midnight, from
+   * the external punch record — NOT from tracked activity. Null when no punch
+   * was recorded, which the UI shows as a dash rather than guessing from
+   * firstActivityMs. The two live side by side on purpose: where they
+   * disagree is usually the interesting part.
+   */
+  punchInMinute: z.number().int().min(0).max(1439).nullable(),
+  punchOutMinute: z.number().int().min(0).max(1439).nullable(),
   shiftStatus: ShiftStatusSchema,
   gaps: z.object({
     count: z.number().int().min(0),
@@ -111,15 +120,15 @@ export const TeamReportSummaryMemberSchema = z.object({
   approvals: TeamReportApprovalCountsSchema,
   screenshots: z.number().int().min(0),
   /**
-   * Typical punch in / punch out, as minutes since local midnight.
+   * Typical punch in / punch out across the range, as minutes since local
+   * midnight, taken from the external punch records.
    *
    * A range summary cannot carry an instant — "when does this person start?"
-   * is a time of day, not a date. So each day's punch is reduced to its
-   * minute-of-day in the workspace timezone and the median is taken across
-   * days with activity. Median, not mean: one 03:00 deploy night should not
-   * drag a whole fortnight's typical start earlier.
+   * is a time of day, not a date — so the median is taken across the days
+   * that have a punch. Median, not mean: one 03:00 badge-in should not drag a
+   * whole fortnight's typical start earlier.
    *
-   * Null when the person had no active day in the range.
+   * Null when no day in the range had a punch recorded.
    */
   typicalPunchInMinute: z.number().int().min(0).max(1439).nullable(),
   typicalPunchOutMinute: z.number().int().min(0).max(1439).nullable(),

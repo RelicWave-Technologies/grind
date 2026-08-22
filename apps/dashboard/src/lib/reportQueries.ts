@@ -1,5 +1,5 @@
 import type { TeamReportsResponse, TeamReportsSummaryResponse } from '@grind/types/reports';
-import { medianMinuteOfDay } from '@grind/types';
+import { medianMinute } from '@grind/types';
 import { api, ApiError } from './api';
 
 const TEAM_SUMMARY_STALE_MS = 5 * 60_000;
@@ -77,8 +77,8 @@ async function loadTeamReportSummary(params: URLSearchParams, hasTeamFilter: boo
         screenshots: member.screenshots,
         // The legacy route carries the raw days, so the same number the new
         // route computes server-side can be derived here rather than lost.
-        typicalPunchInMinute: medianMinuteOfDay(member.days.map((d) => d.firstActivityMs), legacy.tz),
-        typicalPunchOutMinute: medianMinuteOfDay(member.days.map((d) => d.lastActivityMs), legacy.tz),
+        typicalPunchInMinute: medianMinute(member.days.map((d) => d.punchInMinute)),
+        typicalPunchOutMinute: medianMinute(member.days.map((d) => d.punchOutMinute)),
       })),
     };
   }

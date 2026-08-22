@@ -9,6 +9,7 @@ import type {
   TeamReportsSummaryResponse,
   TeamReportUser,
 } from '@grind/types';
+import { loadPunchLookup } from '../attendance/punches';
 import { requireAccessToken } from '../middleware/auth';
 import { attachScope, requireCapability } from '../middleware/scope';
 import {
@@ -63,12 +64,14 @@ reportsRouter.get('/me', async (req, res, next) => {
       from: range.from,
       to: range.to,
     });
+    const punchFor = await loadPunchLookup({ userIds: [req.user.sub], from: range.from, to: range.to });
     const response: MemberReportsMeResponse = {
       from: range.from,
       to: range.to,
       tz: range.tz,
       days: buildMemberReportDays({
         dayStatusFor: calendar.dayStatusFor,
+        punchFor,
         userId: req.user.sub,
         range,
         now,
@@ -147,11 +150,13 @@ reportsRouter.get('/team', requireCapability('reports.team.read'), async (req, r
       from: range.from,
       to: range.to,
     });
+    const punchFor = await loadPunchLookup({ userIds: reportUsers.map((u) => u.id), from: range.from, to: range.to });
     const daysByUser = new Map<string, ReturnType<typeof buildMemberReportDays>>();
     for (const user of reportUsersWithRole) {
       const data = reportData.get(user.id) ?? emptyTeamReportData();
       daysByUser.set(user.id, buildMemberReportDays({
         dayStatusFor: calendar.dayStatusFor,
+        punchFor,
         userId: user.id,
         range,
         now,
@@ -222,11 +227,13 @@ reportsRouter.get('/team/summary', requireCapability('reports.team.read'), async
       from: range.from,
       to: range.to,
     });
+    const punchFor = await loadPunchLookup({ userIds: reportUsers.map((user) => user.id), from: range.from, to: range.to });
     const daysByUser = new Map<string, ReturnType<typeof buildMemberReportDays>>();
     for (const user of reportUsers) {
       const data = summaryData.buckets.get(user.id) ?? emptyTeamReportSummaryData();
       daysByUser.set(user.id, buildMemberReportDays({
         dayStatusFor: calendar.dayStatusFor,
+        punchFor,
         userId: user.id,
         range,
         now,
@@ -280,8 +287,10 @@ reportsRouter.get('/team/member', requireCapability('reports.team.read'), async 
       from: range.from,
       to: range.to,
     });
+    const punchFor = await loadPunchLookup({ userIds: [target.user.id], from: range.from, to: range.to });
     const days = buildMemberReportDays({
       dayStatusFor: calendar.dayStatusFor,
+      punchFor,
       userId: target.user.id,
       range,
       now,

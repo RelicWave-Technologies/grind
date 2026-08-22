@@ -200,51 +200,30 @@ export function dateKeyInTimeZone(value: Date | number | string, timeZone: strin
 }
 
 /**
- * The typical time of day a set of instants falls on, as minutes since local
- * midnight in `timeZone` — or null when there is nothing to summarise.
+ * The median of a set of minute-of-day readings, or null when there is nothing
+ * to summarise. Nulls are skipped rather than counted as midnight.
  *
- * Used for range summaries like "typically punches in around 09:45", where the
- * answer is a clock reading rather than a moment. Each instant is projected
- * into the zone and reduced to its minute-of-day BEFORE anything is compared,
- * because across a date range the instants themselves are not comparable —
- * only the times of day are. The median is taken rather than the mean so one
- * 03:00 deploy night cannot drag a whole fortnight's typical start earlier.
+ * Used for range summaries like "typically punches in around 09:15", where the
+ * answer is a clock reading rather than a moment. Median rather than mean so a
+ * single odd day — one 03:00 badge-in — cannot drag the answer with it.
  *
- * Caveat worth naming: this wraps at local midnight, so a shift that regularly
- * punches out after 00:00 reports an early-morning punch-out rather than a
- * "next day" one. That reads correctly for day shifts; night shifts would need
- * a shift-anchored window instead.
+ * Lives here rather than in either app because two callers must agree on the
+ * number: the API computes it for /reports/team/summary, and the dashboard
+ * recomputes it in the legacy-API fallback.
  *
- * Lives here rather than in either app because the API computes it for the
- * live route and the dashboard recomputes it in its legacy-API fallback —
- * two callers that must agree on the number.
+ * Caveat worth naming: minute-of-day wraps at midnight, so a shift that
+ * regularly ends after 00:00 summarises to an early-morning punch out. That
+ * reads correctly for day shifts; night shifts would need a shift-anchored
+ * window instead.
  */
-export function medianMinuteOfDay(
-  instants: Array<number | null | undefined>,
-  timeZone: string,
-): number | null {
-  const minutes = instants
-    .filter((ms): ms is number => typeof ms === 'number')
-    .map((ms) => minuteOfDayInTimeZone(ms, timeZone))
+export function medianMinute(minutes: Array<number | null | undefined>): number | null {
+  const present = minutes
+    .filter((m): m is number => typeof m === 'number')
     .sort((a, b) => a - b);
-  if (minutes.length === 0) return null;
-  const mid = Math.floor(minutes.length / 2);
+  if (present.length === 0) return null;
+  const mid = Math.floor(present.length / 2);
   // Even counts average the middle pair, then round back onto a whole minute.
-  return minutes.length % 2 === 1
-    ? minutes[mid]!
-    : Math.round((minutes[mid - 1]! + minutes[mid]!) / 2);
-}
-
-/** Minutes since local midnight for an instant, in `timeZone`. */
-export function minuteOfDayInTimeZone(ms: number, timeZone: string): number {
-  const parts = new Intl.DateTimeFormat('en-GB', {
-    timeZone,
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).formatToParts(new Date(ms));
-  const hour = Number(parts.find((p) => p.type === 'hour')?.value ?? '0');
-  const minute = Number(parts.find((p) => p.type === 'minute')?.value ?? '0');
-  // Intl renders midnight as 24 in some engines; normalise it to 0.
-  return ((hour % 24) * 60) + minute;
+  return present.length % 2 === 1
+    ? present[mid]!
+    : Math.round((present[mid - 1]! + present[mid]!) / 2);
 }
