@@ -24,6 +24,7 @@ import {
   X,
 } from 'lucide-react';
 import { api, API_BASE } from '../lib/api';
+import { useMonthReportDownload, fmtMonthShort, fmtMonthLong } from '../lib/useMonthReportDownload';
 import { addDays, fmtAgeShort, fmtDayLabel, fmtDurationMs, fmtMinuteOfDay, fmtTime, todayKey } from '../lib/format';
 import { hasCapability, isManagerOrAbove } from '../lib/auth';
 import {
@@ -107,17 +108,6 @@ const WEEKDAY_LABELS: ReadonlyArray<{ key: Weekday; label: string }> = [
   { key: 'sun', label: 'Sun' },
 ];
 
-/** 'August 2026' from '2026-08', for the month-report button titles. */
-function fmtMonthLabel(month: string): string {
-  const [y, m] = month.split('-').map((n) => Number.parseInt(n, 10));
-  if (!y || !m) return month;
-  return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString('en-US', {
-    month: 'long',
-    year: 'numeric',
-    timeZone: 'UTC',
-  });
-}
-
 export function ReportsScreen() {
   const { me } = useRouteContext({ from: '/authed' });
   const tz = me.workspaceTimezone;
@@ -137,10 +127,9 @@ export function ReportsScreen() {
    * spanning two of them is never ambiguous about which one you get.
    */
   const reportMonth = to.slice(0, 7);
-  function monthPerformanceUrl(ext: 'csv' | 'xlsx'): string {
-    const params = new URLSearchParams({ month: reportMonth });
-    return `${API_BASE}/v1/reports/month-performance.${ext}?${params.toString()}`;
-  }
+
+  const monthReport = useMonthReportDownload();
+
   const [mode, setMode] = useState<ReportsMode>(() => (canReadTeam ? 'team' : 'you'));
   const [memberDrawer, setMemberDrawer] = useState<{ userId: string; from: string; to: string } | null>(null);
   const activeMode: ReportsMode = canReadTeam ? mode : 'you';
@@ -250,28 +239,29 @@ export function ReportsScreen() {
             />
             {activeMode === 'team' && canReadTeam && (
               <>
-                <a
-                  className="ui-btn ui-btn--secondary ui-btn--md"
-                  href={monthPerformanceUrl('xlsx')}
-                  download
-                  title={`Month performance for ${fmtMonthLabel(reportMonth)} — office in/out, hours and status per day`}
+                {/* The month is in the label, not just the tooltip: these follow
+                    the range above, and a button that does not say which month
+                    it will hand you reads as if it ignores the picker. */}
+                <Button
+                  variant="secondary"
+                  icon={<FileSpreadsheet size={14} strokeWidth={2} />}
+                  loading={monthReport.downloading === 'xlsx'}
+                  disabled={monthReport.downloading !== null}
+                  onClick={() => void monthReport.download(reportMonth, 'xlsx')}
+                  title={`Office in and out, hours and status per day, for ${fmtMonthLong(reportMonth)}`}
                 >
-                  <span className="ui-btn__icon">
-                    <FileSpreadsheet size={14} strokeWidth={2} />
-                  </span>
-                  <span className="ui-btn__label">Month report</span>
-                </a>
-                <a
-                  className="ui-btn ui-btn--secondary ui-btn--md"
-                  href={monthPerformanceUrl('csv')}
-                  download
-                  title={`Month performance for ${fmtMonthLabel(reportMonth)} as CSV`}
+                  {`${fmtMonthShort(reportMonth)} · Excel`}
+                </Button>
+                <Button
+                  variant="secondary"
+                  icon={<Sheet size={14} strokeWidth={2} />}
+                  loading={monthReport.downloading === 'csv'}
+                  disabled={monthReport.downloading !== null}
+                  onClick={() => void monthReport.download(reportMonth, 'csv')}
+                  title={`The same report for ${fmtMonthLong(reportMonth)}, as CSV`}
                 >
-                  <span className="ui-btn__icon">
-                    <Sheet size={14} strokeWidth={2} />
-                  </span>
-                  <span className="ui-btn__label">Month CSV</span>
-                </a>
+                  {`${fmtMonthShort(reportMonth)} · CSV`}
+                </Button>
               </>
             )}
           </Toolbar>
@@ -284,6 +274,8 @@ export function ReportsScreen() {
       {activeMode === 'team' && teamQ.isError && (
         <Banner status="danger">Couldn’t load team reports: {(teamQ.error as Error).message}</Banner>
       )}
+
+      {monthReport.error && <Banner status="danger">{monthReport.error}</Banner>}
 
       {activeMode === 'team' ? (
         <TeamReportsView
