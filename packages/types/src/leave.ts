@@ -190,6 +190,12 @@ export const LeavePolicyDtoSchema = z.object({
   allowNegativeBalance: z.boolean(),
   /** Accrue for the joining month itself. */
   accrueOnJoinMonth: z.boolean(),
+  /**
+   * YYYY-MM the workspace started keeping leave in Timo. Months before it
+   * accrue nothing and their ledger entries are left out of every balance.
+   * null accrues from each person's joining month.
+   */
+  ledgerStartMonth: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/u).nullable(),
   updatedAt: z.string(),
 });
 export type LeavePolicyDto = z.infer<typeof LeavePolicyDtoSchema>;
@@ -200,11 +206,13 @@ export const LEAVE_POLICY_DEFAULTS = {
   carryForwardCapDays: null,
   allowNegativeBalance: false,
   accrueOnJoinMonth: true,
+  ledgerStartMonth: null,
 } as const;
 
 export const PatchLeavePolicySchema = z
   .object({
     monthlyAccrualDays: leaveDaysSchema(31).optional(),
+    ledgerStartMonth: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/u, 'must be YYYY-MM').nullable().optional(),
     carryForward: z.boolean().optional(),
     carryForwardCapDays: leaveDaysSchema(365).nullable().optional(),
     allowNegativeBalance: z.boolean().optional(),

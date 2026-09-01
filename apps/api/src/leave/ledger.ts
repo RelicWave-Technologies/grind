@@ -45,6 +45,15 @@ export interface LeaveBalance {
 export function projectBalance(
   entries: readonly LeaveLedgerEntry[],
   asOf?: string,
+  /**
+   * First date that counts, inclusive. Entries effective before it are left
+   * out — the balance opens at zero on that day.
+   *
+   * This is how a company that starts keeping leave in Timo partway through
+   * the year draws its line: the older rows stay in the ledger and stay
+   * auditable, they simply are not part of the number anybody is owed.
+   */
+  since?: string,
 ): LeaveBalance {
   let accrued = 0;
   let consumed = 0;
@@ -52,6 +61,7 @@ export function projectBalance(
 
   for (const e of entries) {
     if (asOf && e.effectiveOn > asOf) continue;
+    if (since && e.effectiveOn < since) continue;
     if (e.kind === 'ACCRUAL') accrued += e.days;
     else if (e.kind === 'CONSUMPTION') consumed += e.days;
     else adjusted += e.days;
@@ -89,6 +99,14 @@ export interface AccrualPolicy {
   accrueOnJoinMonth: boolean;
   carryForward: boolean;
   carryForwardCapDays: number | null;
+  /**
+   * YYYY-MM before which nothing accrues. NULL accrues from the joining month.
+   *
+   * Without this a deleted back-month accrual simply reappears: `accrualsDue`
+   * walks from `joinedOn` every time it runs, and the source key makes the
+   * rewrite silent.
+   */
+  ledgerStartMonth?: string | null;
 }
 
 export interface AccrualDue {
@@ -137,6 +155,9 @@ export function accrualsDue(input: {
   const joinMonth = monthOf(input.joinedOn);
   const lastMonth = monthOf(input.asOf);
   let month = policy.accrueOnJoinMonth ? joinMonth : nextMonth(joinMonth);
+  // Nothing accrues before the month the company started counting.
+  const floor = policy.ledgerStartMonth ?? null;
+  if (floor && month < floor) month = floor;
 
   const out: AccrualDue[] = [];
   // 1200 months is 100 years — a backstop, never a real bound.

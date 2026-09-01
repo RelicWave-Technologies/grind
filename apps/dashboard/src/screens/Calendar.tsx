@@ -251,6 +251,30 @@ export function CalendarScreen() {
 
   const [dayOpen, setDayOpen] = useState<string | null>(null);
 
+  /** 'September 2026' — every panel says which month it is showing. */
+  const monthLabel = useMemo(() => {
+    const [y, m] = month.split('-').map((n) => Number.parseInt(n, 10));
+    return new Date(Date.UTC(y || 1970, (m || 1) - 1, 1))
+      .toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+  }, [month]);
+
+  /** Leave that touches the month on screen. A request spanning the month
+   *  boundary belongs to both, so this is an overlap and not a start-date match. */
+  const mineThisMonth = useMemo(
+    () => (mineQ.data?.requests ?? []).filter((r) => r.startDate <= to && r.endDate >= from),
+    [mineQ.data, from, to],
+  );
+
+  /** Balance charged for leave that touches the month on screen. A request
+   *  straddling the boundary counts in both months, which is the honest answer
+   *  when the tile is labelled with the month rather than pro-rated. */
+  const takenThisMonth = useMemo(
+    () => (mineQ.data?.requests ?? [])
+      .filter((r) => r.status === 'APPROVED' && r.startDate <= to && r.endDate >= from)
+      .reduce((sum, r) => sum + r.chargedDays, 0),
+    [mineQ.data, from, to],
+  );
+
   const awayCount = useMemo(
     () => Object.values(data?.away ?? {}).reduce((n, rows) => n + rows.length, 0),
     [data],
@@ -264,20 +288,36 @@ export function CalendarScreen() {
         subtitle={`Company holidays, approved leave and paid-leave balances — ${tz.replace(/_/g, ' ')}.`}
       />
 
+      {/* Two scopes sit in this row and used to look alike: the balance is a
+          running total, the rest belong to the month on screen. Every hint now
+          says which, because a number whose scope you have to guess is worse
+          than no number. */}
       <StatRow>
         <Stat
           label="Your balance"
           value={balance ? days(balance.balanceDays) : '—'}
           unit="days"
-          hint={policy ? `Accrues ${days(policy.policy.monthlyAccrualDays)} a month` : undefined}
+          hint={
+            policy
+              ? `Running total · accrues ${days(policy.policy.monthlyAccrualDays)} a month`
+              : 'Running total'
+          }
         />
-        <Stat label="Accrued" value={balance ? days(balance.accruedDays) : '—'} unit="days" />
-        <Stat label="Used" value={balance ? days(balance.consumedDays) : '—'} unit="days" />
-        <Stat label="Holidays" value={data ? String(data.holidays.length) : '—'} hint="this month" />
+        <Stat
+          label="You took"
+          value={days(takenThisMonth)}
+          unit="days"
+          hint={monthLabel}
+        />
+        <Stat
+          label="Holidays"
+          value={data ? String(data.holidays.length) : '—'}
+          hint={monthLabel}
+        />
         <Stat
           label="Days away"
           value={data ? days(awayCount) : '—'}
-          hint="across everyone"
+          hint={`${monthLabel} · everyone`}
         />
       </StatRow>
 
@@ -366,11 +406,12 @@ export function CalendarScreen() {
         />
       )}
 
-      {tab === 'balances' && isAdmin && <BalancesPanel />}
+      {tab === 'balances' && isAdmin && <BalancesPanel asOf={to} monthLabel={monthLabel} />}
 
       {tab === 'mine' && (
         <MyLeavePanel
-          requests={mineQ.data?.requests ?? []}
+          requests={mineThisMonth}
+          monthLabel={monthLabel}
           loading={mineQ.isLoading}
           statement={balanceQ.data?.statement ?? []}
           decidedInLark={policy ? !policy.decidesInTimo : false}
@@ -671,17 +712,24 @@ function HolidaysPanel({
 
 function MyLeavePanel({
   requests,
+  monthLabel,
   loading,
   statement,
   decidedInLark,
 }: {
   requests: LeaveRequestDto[];
+  monthLabel: string;
   loading: boolean;
   statement: LeaveBalanceResponse['statement'];
   decidedInLark: boolean;
 }) {
   return (
     <>
+      <p className="cal-scope-note">
+        Showing leave that falls in <strong>{monthLabel}</strong>. Use the month arrows above to
+        look at another one.
+      </p>
+
       {decidedInLark && (
         <Banner status="info">
           Leave is applied for and approved in Lark, exactly as it always has been. Timo mirrors what
@@ -773,14 +821,17 @@ function MyLeavePanel({
  * What IS editable is what produces the balance: the monthly rate, the accrual
  * start, and whether the last Saturday counts as a working day.
  */
-function BalancesPanel() {
+function BalancesPanel({ asOf, monthLabel }: { asOf: string; monthLabel: string }) {
   const qc = useQueryClient();
   const [editing, setEditing] = useState<LeaveBalanceRow | null>(null);
   const [adjusting, setAdjusting] = useState<LeaveBalanceRow | null>(null);
 
+  // Balances as they stood at the end of the month on screen, not today's.
+  // Scrolling back a month and seeing this month's numbers is the bug people
+  // report as "the filter does nothing".
   const q = useQuery({
-    queryKey: ['leave', 'balances'],
-    queryFn: () => api<LeaveBalancesResponse>('/v1/admin/leave/balances'),
+    queryKey: ['leave', 'balances', asOf],
+    queryFn: () => api<LeaveBalancesResponse>(`/v1/admin/leave/balances?asOf=${asOf}`),
   });
 
   if (q.isLoading) return <SkeletonTable rows={8} />;
@@ -792,6 +843,10 @@ function BalancesPanel() {
 
   return (
     <>
+      <p className="cal-scope-note">
+        Balances as they stood at the end of <strong>{monthLabel}</strong>.
+      </p>
+
       {missingJoinDate > 0 && (
         <Banner status="warn">
           {missingJoinDate} {missingJoinDate === 1 ? 'person has' : 'people have'} no joining date,

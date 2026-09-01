@@ -1248,6 +1248,15 @@ model LeavePolicy {
   allowNegativeBalance Boolean   @default(false)
   /// Accrue for the joining month itself, or start the month after.
   accrueOnJoinMonth    Boolean   @default(true)
+  /// The month leave accounting begins, as YYYY-MM. NULL = from each person's
+  /// joining month, which is the original behaviour.
+  ///
+  /// Set when a company starts keeping leave in Timo partway through the year:
+  /// months before it accrue nothing, and any ledger entry effective before it
+  /// is left out of the balance. The rows stay — this is a statement about what
+  /// counts, not an instruction to destroy history, and somebody auditing last
+  /// quarter can still see what was there.
+  ledgerStartMonth     String?
   /// Company-wide: the last Saturday of each month is not a working day. A
   /// weekly shift pattern has no way to express a monthly exception, so the
   /// rule lives here and the Working Calendar applies it.
