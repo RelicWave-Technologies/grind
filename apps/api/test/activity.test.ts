@@ -123,3 +123,65 @@ describe('POST /v1/activity-samples', () => {
     expect(res.body.error).toBe('validation_failed');
   });
 });
+
+describe('a window title cut through an emoji', () => {
+  /**
+   * The production 500: an agent caps `activeTitle` at 300 UTF-16 code units,
+   * the cut lands inside U+1F600, and the orphaned high surrogate cannot be
+   * encoded as UTF-8. Postgres rejected the statement with "unexpected end of
+   * hex escape" and the whole batch was lost — 68,782 times.
+   */
+  const brokenTitle = `${'a'.repeat(299)}\u{1F600}tail`.slice(0, 300);
+
+  /** Titles are policy-gated server-side; this report needs them on. */
+  async function seedUserWithTitles() {
+    const u = await seedUser();
+    await prisma.workspacePolicy.create({
+      data: { workspaceId: u.workspaceId, captureApps: true, captureTitles: true },
+    });
+    return u;
+  }
+
+  it('is not a 500, and does not take the rest of the batch with it', async () => {
+    const u = await seedUserWithTitles();
+    // Confirm the fixture really is the broken shape before relying on it.
+    const last = brokenTitle.charCodeAt(brokenTitle.length - 1);
+    expect(last >= 0xd800 && last <= 0xdbff).toBe(true);
+
+    const res = await request(app)
+      .post('/v1/activity-samples')
+      .set('Authorization', `Bearer ${u.accessToken}`)
+      .send({
+        samples: [
+          sample({ bucketStart: iso(T0), activeApp: 'Chrome', activeTitle: brokenTitle }),
+          sample({ bucketStart: iso(T0 + MIN), activeApp: 'Slack', keystrokes: 11 }),
+        ],
+      });
+
+    expect(res.status).toBe(201);
+    expect(res.body.accepted).toBe(2);
+
+    const rows = await prisma.activitySample.findMany({
+      where: { userId: u.userId },
+      orderBy: { bucketStart: 'asc' },
+    });
+    expect(rows).toHaveLength(2);
+    // The half character is gone; what was stored round-trips through UTF-8.
+    const stored = rows[0]!.activeTitle!;
+    expect(stored).toBe('a'.repeat(299));
+    expect(Buffer.from(stored, 'utf8').toString('utf8')).toBe(stored);
+    // The innocent second sample survived.
+    expect(rows[1]).toMatchObject({ keystrokes: 11 });
+  });
+
+  it('keeps an emoji that arrived whole', async () => {
+    const u = await seedUserWithTitles();
+    const res = await request(app)
+      .post('/v1/activity-samples')
+      .set('Authorization', `Bearer ${u.accessToken}`)
+      .send({ samples: [sample({ bucketStart: iso(T0), activeApp: 'Slack', activeTitle: 'general \u{1F600}' })] });
+    expect(res.status).toBe(201);
+    const row = await prisma.activitySample.findFirst({ where: { userId: u.userId } });
+    expect(row!.activeTitle).toBe('general \u{1F600}');
+  });
+});

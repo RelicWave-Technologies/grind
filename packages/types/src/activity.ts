@@ -14,6 +14,38 @@ export const ACTIVITY_METADATA_MAX_CHARS = {
   activeUrl: 2048,
 } as const;
 
+/**
+ * An unpaired UTF-16 surrogate — half of an astral character such as an emoji.
+ *
+ * Deliberately NOT a `u`-flag regex: unicode mode matches code points, and a
+ * lone surrogate is precisely the thing that is not one. Matching code units
+ * is the point here.
+ */
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+
+/**
+ * Drop any half-character left behind by truncation.
+ *
+ * `String.prototype.slice` cuts on code units, so capping a window title at
+ * 300 can land inside an emoji and leave a lone surrogate. That is a valid JS
+ * string and `JSON.stringify` emits it happily as `"\ud83d"`, but it cannot be
+ * encoded as UTF-8: Postgres's driver rejects the statement with "unexpected
+ * end of hex escape" and the ENTIRE batch of samples is lost, not just the one
+ * bad title.
+ *
+ * Applied here rather than only in the agent because every agent in the field
+ * has to be updated one machine at a time, and the server can defend itself
+ * today. Intact emoji are untouched.
+ */
+export function stripLoneSurrogates(value: string): string {
+  return value.replace(LONE_SURROGATE, '');
+}
+
+/** A metadata string that is length-capped and safe to store. */
+function metadataString(maxChars: number) {
+  return z.string().max(maxChars).transform(stripLoneSurrogates);
+}
+
 export const ActivitySampleInput = z.object({
   id: z.string().min(1),
   timeEntryId: z.string().min(1).nullable().optional(),
@@ -29,10 +61,10 @@ export const ActivitySampleInput = z.object({
   // policy-gated client-side AND server-side strips them when the
   // workspace policy disallows them — so even a misbehaving agent
   // can't sneak titles/URLs in.
-  activeApp: z.string().max(ACTIVITY_METADATA_MAX_CHARS.activeApp).nullable().optional(),
-  activeAppBundle: z.string().max(ACTIVITY_METADATA_MAX_CHARS.activeAppBundle).nullable().optional(),
-  activeTitle: z.string().max(ACTIVITY_METADATA_MAX_CHARS.activeTitle).nullable().optional(),
-  activeUrl: z.string().max(ACTIVITY_METADATA_MAX_CHARS.activeUrl).nullable().optional(),
+  activeApp: metadataString(ACTIVITY_METADATA_MAX_CHARS.activeApp).nullable().optional(),
+  activeAppBundle: metadataString(ACTIVITY_METADATA_MAX_CHARS.activeAppBundle).nullable().optional(),
+  activeTitle: metadataString(ACTIVITY_METADATA_MAX_CHARS.activeTitle).nullable().optional(),
+  activeUrl: metadataString(ACTIVITY_METADATA_MAX_CHARS.activeUrl).nullable().optional(),
 });
 export type ActivitySampleInput = z.infer<typeof ActivitySampleInput>;
 

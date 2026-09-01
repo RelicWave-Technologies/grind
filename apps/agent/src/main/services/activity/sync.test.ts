@@ -107,3 +107,29 @@ describe('flushActivity byte-bounded batching', () => {
     expect(synced).toEqual(['r1']);
   });
 });
+
+describe('capping a title that ends in an emoji', () => {
+  /** U+1F600 is one character stored as TWO UTF-16 code units. Putting it at
+   *  the 300-character boundary makes the cut land inside it. */
+  const withEmojiAtTheCut = `${'a'.repeat(299)}\u{1F600}tail`;
+
+  it('does not leave half an emoji behind', async () => {
+    const { store } = fakeStore([row('r1', { activeTitle: withEmojiAtTheCut })]);
+    await flushActivity(store);
+    const title = bodyOf().samples[0]!.activeTitle!;
+
+    // A trailing high surrogate is what Postgres rejects with "unexpected end
+    // of hex escape", losing every other sample in the batch with it.
+    const last = title.charCodeAt(title.length - 1);
+    expect(last >= 0xd800 && last <= 0xdbff).toBe(false);
+    expect(Buffer.from(title, 'utf8').toString('utf8')).toBe(title);
+    expect(title.length).toBe(299);
+  });
+
+  it('leaves an emoji that fits completely alone', async () => {
+    const fits = 'Slack \u{1F600} general';
+    const { store } = fakeStore([row('r1', { activeTitle: fits })]);
+    await flushActivity(store);
+    expect(bodyOf().samples[0]!.activeTitle).toBe(fits);
+  });
+});
