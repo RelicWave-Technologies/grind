@@ -15,8 +15,21 @@ import type { ActivityStore, ActivityRow } from './store';
 // past the limit.
 const MAX_BATCH_ROWS = 500; // also the server-side schema cap (ActivitySamplesRequest)
 const MAX_BATCH_BYTES = 48 * 1024; // headroom under the API's activity-route limit
+/**
+ * Cap a metadata string without leaving half a character behind.
+ *
+ * `slice` cuts on UTF-16 code units, so capping at 300 can land inside an
+ * emoji and leave a lone high surrogate. That string cannot be encoded as
+ * UTF-8, and the server's driver rejects the whole batch — every sample in it,
+ * not just the one with the bad title. Dropping the orphaned half is enough;
+ * the character was already being truncated away.
+ */
 function cap(s: string | null, maxChars: number): string | null {
-  return s != null && s.length > maxChars ? s.slice(0, maxChars) : s;
+  if (s == null || s.length <= maxChars) return s;
+  const cut = s.slice(0, maxChars);
+  const last = cut.charCodeAt(cut.length - 1);
+  const isHighSurrogate = last >= 0xd800 && last <= 0xdbff;
+  return isHighSurrogate ? cut.slice(0, -1) : cut;
 }
 
 function toInput(r: ActivityRow): ActivitySampleInput {
