@@ -10,11 +10,13 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock4,
+  FileSpreadsheet,
   Images,
   ListTree,
   Mail,
   Maximize2,
   Rows3,
+  Sheet,
   Shield,
   SunMedium,
   UserRound,
@@ -105,6 +107,17 @@ const WEEKDAY_LABELS: ReadonlyArray<{ key: Weekday; label: string }> = [
   { key: 'sun', label: 'Sun' },
 ];
 
+/** 'August 2026' from '2026-08', for the month-report button titles. */
+function fmtMonthLabel(month: string): string {
+  const [y, m] = month.split('-').map((n) => Number.parseInt(n, 10));
+  if (!y || !m) return month;
+  return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString('en-US', {
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'UTC',
+  });
+}
+
 export function ReportsScreen() {
   const { me } = useRouteContext({ from: '/authed' });
   const tz = me.workspaceTimezone;
@@ -113,6 +126,21 @@ export function ReportsScreen() {
   const [to, setTo] = useState(today);
   const [modal, setModal] = useState<ReportModalState | null>(null);
   const canReadTeam = hasCapability(me, 'reports.team.read');
+
+  /**
+   * The month performance report — the monthly attendance grid, with office in
+   * and out, hours worked and a status code per day.
+   *
+   * Always a WHOLE month, taken from the month the range ENDS in, because the
+   * report's own header says "Report Month" and a fortnight of one is not
+   * something anybody can file. The button title names the month so a range
+   * spanning two of them is never ambiguous about which one you get.
+   */
+  const reportMonth = to.slice(0, 7);
+  function monthPerformanceUrl(ext: 'csv' | 'xlsx'): string {
+    const params = new URLSearchParams({ month: reportMonth });
+    return `${API_BASE}/v1/reports/month-performance.${ext}?${params.toString()}`;
+  }
   const [mode, setMode] = useState<ReportsMode>(() => (canReadTeam ? 'team' : 'you'));
   const [memberDrawer, setMemberDrawer] = useState<{ userId: string; from: string; to: string } | null>(null);
   const activeMode: ReportsMode = canReadTeam ? mode : 'you';
@@ -220,6 +248,32 @@ export function ReportsScreen() {
               maxDays={activeMode === 'team' ? 31 : 60}
               onChange={applyCalendarRange}
             />
+            {activeMode === 'team' && canReadTeam && (
+              <>
+                <a
+                  className="ui-btn ui-btn--secondary ui-btn--md"
+                  href={monthPerformanceUrl('xlsx')}
+                  download
+                  title={`Month performance for ${fmtMonthLabel(reportMonth)} — office in/out, hours and status per day`}
+                >
+                  <span className="ui-btn__icon">
+                    <FileSpreadsheet size={14} strokeWidth={2} />
+                  </span>
+                  <span className="ui-btn__label">Month report</span>
+                </a>
+                <a
+                  className="ui-btn ui-btn--secondary ui-btn--md"
+                  href={monthPerformanceUrl('csv')}
+                  download
+                  title={`Month performance for ${fmtMonthLabel(reportMonth)} as CSV`}
+                >
+                  <span className="ui-btn__icon">
+                    <Sheet size={14} strokeWidth={2} />
+                  </span>
+                  <span className="ui-btn__label">Month CSV</span>
+                </a>
+              </>
+            )}
           </Toolbar>
         }
       />
