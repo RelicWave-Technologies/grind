@@ -11,6 +11,7 @@ import {
   affordability,
   consumptionSourceKey,
   projectBalance,
+  birthdayAccrualsDue,
   reversalSourceKey,
 } from './ledger';
 import {
@@ -81,7 +82,7 @@ export async function ensureAccruals(input: {
       where: { id: input.userId },
       select: {
         id: true, joinedOn: true, createdAt: true, deactivatedAt: true,
-        leaveAccrualDaysOverride: true,
+        leaveAccrualDaysOverride: true, birthDate: true,
       },
     }),
     loadOrCreateLeavePolicy(input.workspaceId, db),
@@ -102,20 +103,42 @@ export async function ensureAccruals(input: {
       carryForwardCapDays: policy.carryForwardCapDays,
     },
   });
-  if (due.length === 0) return 0;
+
+  const birthdays = birthdayAccrualsDue({
+    userId: input.userId,
+    birthDate: user.birthDate ? toIsoDate(user.birthDate) : null,
+    joinedOn,
+    asOf: input.asOf,
+    days: policy.birthdayLeaveDays,
+    ledgerStartMonth: policy.ledgerStartMonth,
+  });
+
+  if (due.length === 0 && birthdays.length === 0) return 0;
 
   // skipDuplicates turns "already accrued" into a no-op at the database level,
   // which is the only place it can be enforced against concurrent callers.
+  // Both kinds carry their own source key, so the two never collide.
   const created = await db.leaveLedgerEntry.createMany({
-    data: due.map((d) => ({
-      workspaceId: input.workspaceId,
-      userId: input.userId,
-      kind: 'ACCRUAL' as const,
-      days: d.days,
-      effectiveOn: fromIsoDate(d.effectiveOn),
-      sourceKey: d.sourceKey,
-      reason: `Monthly accrual ${d.month}`,
-    })),
+    data: [
+      ...due.map((d) => ({
+        workspaceId: input.workspaceId,
+        userId: input.userId,
+        kind: 'ACCRUAL' as const,
+        days: d.days,
+        effectiveOn: fromIsoDate(d.effectiveOn),
+        sourceKey: d.sourceKey,
+        reason: `Monthly accrual ${d.month}`,
+      })),
+      ...birthdays.map((d) => ({
+        workspaceId: input.workspaceId,
+        userId: input.userId,
+        kind: 'ACCRUAL' as const,
+        days: d.days,
+        effectiveOn: fromIsoDate(d.effectiveOn),
+        sourceKey: d.sourceKey,
+        reason: `Birthday ${d.effectiveOn}`,
+      })),
+    ],
     skipDuplicates: true,
   });
   return created.count;

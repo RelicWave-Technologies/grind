@@ -3,6 +3,8 @@ import {
   projectBalance,
   accrualsDue,
   accrualSourceKey,
+  birthdayAccrualsDue,
+  birthdaySourceKey,
   consumptionSourceKey,
   reversalSourceKey,
   affordability,
@@ -251,5 +253,76 @@ describe('a workspace that starts counting partway through the year', () => {
       { kind: 'ACCRUAL' as const, days: 1, effectiveOn: '2026-09-01' },
     ];
     expect(projectBalance(entries, '2026-08-31', '2026-08-01').balanceDays).toBe(1);
+  });
+});
+
+describe('the birthday grant', () => {
+  const base = {
+    userId: 'u1',
+    joinedOn: '2026-07-04',
+    asOf: '2026-12-31',
+    days: 1,
+    ledgerStartMonth: '2026-08',
+  };
+
+  it('lands on the birthday itself, not the first of that month', () => {
+    const due = birthdayAccrualsDue({ ...base, birthDate: '1996-09-22' });
+    expect(due).toHaveLength(1);
+    expect(due[0]!.effectiveOn).toBe('2026-09-22');
+    expect(due[0]!.days).toBe(1);
+    expect(due[0]!.sourceKey).toBe(birthdaySourceKey('u1', 2026));
+  });
+
+  it('grants nothing for a birthday before the month the company started counting', () => {
+    // The 56 people whose birthday fell in the first half of the year.
+    expect(birthdayAccrualsDue({ ...base, birthDate: '1996-03-14' })).toEqual([]);
+    expect(birthdayAccrualsDue({ ...base, birthDate: '1996-07-31' })).toEqual([]);
+    // The first day that does count.
+    expect(birthdayAccrualsDue({ ...base, birthDate: '1996-08-01' })).toHaveLength(1);
+  });
+
+  it('does not pay a birthday that has not happened yet', () => {
+    const due = birthdayAccrualsDue({ ...base, asOf: '2026-09-21', birthDate: '1996-09-22' });
+    expect(due).toEqual([]);
+    // And pays it on the day.
+    expect(birthdayAccrualsDue({ ...base, asOf: '2026-09-22', birthDate: '1996-09-22' })).toHaveLength(1);
+  });
+
+  it('grants nothing for a birthday before the person arrived', () => {
+    const due = birthdayAccrualsDue({
+      ...base, joinedOn: '2026-10-01', birthDate: '1996-09-22',
+    });
+    expect(due).toEqual([]);
+  });
+
+  it('gives one a year, each with its own key', () => {
+    const due = birthdayAccrualsDue({ ...base, asOf: '2028-12-31', birthDate: '1996-09-22' });
+    expect(due.map((d) => d.effectiveOn)).toEqual(['2026-09-22', '2027-09-22', '2028-09-22']);
+    expect(new Set(due.map((d) => d.sourceKey)).size).toBe(3);
+  });
+
+  it('keeps a 29 February birthday in February', () => {
+    // 2027 has no 29th. Moving it to 1 March would file the day in the wrong
+    // month on a report that is read by month.
+    const due = birthdayAccrualsDue({
+      ...base, joinedOn: '2026-01-01', ledgerStartMonth: '2026-01',
+      asOf: '2028-12-31', birthDate: '2000-02-29',
+    });
+    expect(due.map((d) => d.effectiveOn)).toEqual(['2026-02-28', '2027-02-28', '2028-02-29']);
+  });
+
+  it('is off when the policy grants zero days, and when no birth date is known', () => {
+    expect(birthdayAccrualsDue({ ...base, days: 0, birthDate: '1996-09-22' })).toEqual([]);
+    expect(birthdayAccrualsDue({ ...base, birthDate: null })).toEqual([]);
+  });
+
+  it('counts toward the balance like any other accrual', () => {
+    const entries = [
+      { kind: 'ACCRUAL' as const, days: 1, effectiveOn: '2026-09-01' },
+      { kind: 'ACCRUAL' as const, days: 1, effectiveOn: '2026-09-22' },
+    ];
+    expect(projectBalance(entries, undefined, '2026-08-01').balanceDays).toBe(2);
+    // ...and is not yet in a balance taken before the birthday.
+    expect(projectBalance(entries, '2026-09-21', '2026-08-01').balanceDays).toBe(1);
   });
 });

@@ -178,6 +178,80 @@ export function accrualSourceKey(userId: string, month: string): string {
   return `accrual:${userId}:${month}`;
 }
 
+/** The idempotency key for a birthday grant. One per person per calendar year. */
+export function birthdaySourceKey(userId: string, year: number): string {
+  return `birthday:${userId}:${year}`;
+}
+
+/**
+ * The birthday grants a person is owed and has not necessarily been given.
+ *
+ * One extra day in the year they have a birthday, credited **on the day
+ * itself** rather than at the start of the month. Somebody checking their
+ * balance on the 5th when their birthday is the 22nd has not had it yet, and
+ * saying otherwise would be a number they cannot spend.
+ *
+ * Three things bound it, and all three are the same bounds the monthly accrual
+ * respects:
+ *
+ *   - the workspace's `ledgerStartMonth`, so a company that starts counting in
+ *     August does not retroactively owe the half of its people whose birthday
+ *     was in March,
+ *   - the person's own start, so a birthday before they arrived grants nothing,
+ *   - `asOf`, so a birthday later this year is not paid early.
+ */
+export function birthdayAccrualsDue(input: {
+  userId: string;
+  /** YYYY-MM-DD, or null for somebody whose date of birth nobody recorded. */
+  birthDate: string | null;
+  joinedOn: string;
+  asOf: string;
+  days: number;
+  ledgerStartMonth?: string | null;
+}): AccrualDue[] {
+  if (!input.birthDate || input.days <= 0) return [];
+
+  const floor = [
+    input.ledgerStartMonth ? firstOfMonth(input.ledgerStartMonth) : null,
+    input.joinedOn,
+  ].filter((d): d is string => d !== null).sort().pop()!;
+
+  const firstYear = Number.parseInt(floor.slice(0, 4), 10);
+  const lastYear = Number.parseInt(input.asOf.slice(0, 4), 10);
+  if (!Number.isFinite(firstYear) || !Number.isFinite(lastYear)) return [];
+
+  const out: AccrualDue[] = [];
+  for (let year = firstYear; year <= lastYear; year++) {
+    const on = birthdayInYear(input.birthDate, year);
+    if (!on || on < floor || on > input.asOf) continue;
+    out.push({
+      month: monthOf(on),
+      effectiveOn: on,
+      days: input.days,
+      sourceKey: birthdaySourceKey(input.userId, year),
+    });
+  }
+  return out;
+}
+
+/**
+ * A birth date's anniversary in a given year, as YYYY-MM-DD.
+ *
+ * 29 February falls on the 28th in the three years out of four that have no
+ * 29th. Granting it on 1 March instead would move somebody's birthday into the
+ * next month, and in a report that is filed by month, that is a visible lie.
+ */
+function birthdayInYear(birthDate: string, year: number): string | null {
+  const [, mm, dd] = birthDate.split('-');
+  if (!mm || !dd) return null;
+  const month = Number.parseInt(mm, 10);
+  const day = Number.parseInt(dd, 10);
+  if (!month || !day) return null;
+  const lastOfMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const safeDay = Math.min(day, lastOfMonth);
+  return `${year}-${mm}-${String(safeDay).padStart(2, '0')}`;
+}
+
 /** The idempotency key tying a consumption entry to the request that caused it. */
 export function consumptionSourceKey(requestId: string): string {
   return `leave:${requestId}`;

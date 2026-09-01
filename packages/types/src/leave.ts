@@ -196,6 +196,8 @@ export const LeavePolicyDtoSchema = z.object({
    * null accrues from each person's joining month.
    */
   ledgerStartMonth: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/u).nullable(),
+  /** Extra days granted on a birthday, once a year. 0 = off. */
+  birthdayLeaveDays: LeaveDaysSchema,
   updatedAt: z.string(),
 });
 export type LeavePolicyDto = z.infer<typeof LeavePolicyDtoSchema>;
@@ -207,12 +209,14 @@ export const LEAVE_POLICY_DEFAULTS = {
   allowNegativeBalance: false,
   accrueOnJoinMonth: true,
   ledgerStartMonth: null,
+  birthdayLeaveDays: 0,
 } as const;
 
 export const PatchLeavePolicySchema = z
   .object({
     monthlyAccrualDays: leaveDaysSchema(31).optional(),
     ledgerStartMonth: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/u, 'must be YYYY-MM').nullable().optional(),
+    birthdayLeaveDays: leaveDaysSchema(31).optional(),
     carryForward: z.boolean().optional(),
     carryForwardCapDays: leaveDaysSchema(365).nullable().optional(),
     allowNegativeBalance: z.boolean().optional(),

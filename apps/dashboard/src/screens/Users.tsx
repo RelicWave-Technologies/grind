@@ -219,7 +219,9 @@ export function UsersScreen() {
   const offlineCount = presenceEligible.length - onlineCount;
   const showDeviceHealth = canEdit;
 
-  const colSpan = (canEdit ? 7 : 6) + (showDeviceHealth ? 2 : 0);
+  // Person, Role, Presence, Team, Shift, Joined = 6, plus the admin-only
+  // Birth date and actions columns, plus the two device-health ones.
+  const colSpan = (canEdit ? 8 : 6) + (showDeviceHealth ? 2 : 0);
 
   return (
     <Page>
@@ -306,6 +308,7 @@ export function UsersScreen() {
                 <col className="usr-col-shift" />
                 {showDeviceHealth && <col className="usr-col-device" />}
                 {showDeviceHealth && <col className="usr-col-permissions" />}
+                {canEdit && <col className="usr-col-birth" />}
                 <col className="usr-col-joined" />
                 {canEdit && <col className="usr-col-actions" />}
               </colgroup>
