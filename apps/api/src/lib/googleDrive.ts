@@ -16,7 +16,15 @@ let cachedAccessToken: { token: string; expiresAtMs: number } | null = null;
  * roughly 7,500 extra round trips a day. The cache is never invalidated: a
  * folder id does not change, and a restart simply re-finds it.
  */
-const monthFolderIds = new Map<string, string>();
+/**
+ * Month name -> the in-flight or settled lookup for its folder id.
+ *
+ * The promise is cached, not the id. Two uploads arriving together on the
+ * first of a month would otherwise both find nothing and both create, leaving
+ * two folders with the same name and a month split across them. Caching the
+ * promise makes the second caller await the first one's answer.
+ */
+const monthFolderIds = new Map<string, Promise<string>>();
 
 /**
  * 'September 2026' for an instant, read in the business timezone.
@@ -50,11 +58,16 @@ async function ensureMonthFolder(name: string): Promise<string | undefined> {
   const cached = monthFolderIds.get(name);
   if (cached) return cached;
 
-  const token = await getAccessToken();
-  const found = await findFolder(token, name, parent);
-  const id = found ?? (await createFolder(token, name, parent));
-  monthFolderIds.set(name, id);
-  return id;
+  const pending = (async () => {
+    const token = await getAccessToken();
+    const found = await findFolder(token, name, parent);
+    return found ?? (await createFolder(token, name, parent));
+  })();
+  // Drop a failed lookup so the next upload retries rather than caching the
+  // error for the life of the process.
+  monthFolderIds.set(name, pending);
+  pending.catch(() => monthFolderIds.delete(name));
+  return pending;
 }
 
 async function findFolder(token: string, name: string, parent: string): Promise<string | undefined> {
