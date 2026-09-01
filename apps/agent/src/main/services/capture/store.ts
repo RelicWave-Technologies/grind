@@ -1,5 +1,12 @@
 import type Database from 'better-sqlite3';
 
+/**
+ * Marker for the one-time requeue of shots written off while the server was
+ * answering storage outages with a 500. Bump the suffix only to run another
+ * one-off recovery — never to re-run this one.
+ */
+const RECOVER_STORAGE_OUTAGE = 'requeue:storage-outage-500';
+
 export type UploadState = 'pending' | 'uploading' | 'uploaded' | 'failed';
 
 export interface ScreenshotRow {
@@ -55,6 +62,10 @@ export class ScreenshotStore {
     }
     this.db.exec(`
       CREATE INDEX IF NOT EXISTS idx_shots_captured ON screenshots(captured_at);
+      CREATE TABLE IF NOT EXISTS capture_meta (
+        key   TEXT PRIMARY KEY,
+        value TEXT
+      );
       CREATE INDEX IF NOT EXISTS idx_shots_upload ON screenshots(upload_state);
       CREATE INDEX IF NOT EXISTS idx_shots_next_attempt ON screenshots(upload_state, next_attempt_at);
     `);
@@ -74,6 +85,51 @@ export class ScreenshotStore {
       )
 // eslint-disable-next-line no-restricted-syntax -- device<->device: local retry scheduling, never sent
 .run(Date.now());
+    this.requeueOnce(RECOVER_STORAGE_OUTAGE);
+  }
+
+  /**
+   * Put every terminally-failed shot back in the queue, once.
+   *
+   * The server used to answer a storage outage with a 500, which the uploader
+   * counts against a shot's five attempts. A full Google shared drive
+   * therefore wrote off tens of thousands of screenshots that were never the
+   * agent's fault, and nothing ever looked at them again — `pending()` only
+   * ever selects `upload_state='pending'`.
+   *
+   * The API now answers 503 for storage failures, which costs no attempt, so
+   * the shots written off under the old behaviour deserve one more pass.
+   *
+   * Guarded by a marker rather than run on every start: a permanent
+   * retry-everything would resurrect genuinely dead rows — a deleted local
+   * file, a shot the server rejected — on every launch, forever. A row whose
+   * file is really gone fails once on ENOENT, which is terminal, and settles
+   * straight back to failed.
+   *
+   * The count lands in `capture_meta` alongside the marker, so how many were
+   * recovered is answerable later without this module needing a logger — and
+   * without a logger it stays testable outside Electron.
+   */
+  private requeueOnce(marker: string): void {
+    const done = this.db
+      .prepare(`SELECT 1 FROM capture_meta WHERE key = ?`)
+      .get(marker) as unknown;
+    if (done) return;
+
+    const requeue = this.db.transaction(() => {
+      const { changes } = this.db
+        .prepare(
+          `UPDATE screenshots
+           SET upload_state='pending', attempts=0, next_attempt_at=NULL,
+               failed_at=NULL, last_error=NULL
+           WHERE upload_state='failed'`,
+        )
+        .run();
+      this.db.prepare(`INSERT OR REPLACE INTO capture_meta (key, value) VALUES (?, ?)`)
+        .run(marker, String(changes));
+      return changes;
+    });
+    requeue();
   }
 
   insert(row: ScreenshotRow): void {
