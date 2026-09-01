@@ -848,10 +848,32 @@ function adjacencyFor(
  * own self-view via /v1/time-requests).
  *
  * Filters:
- *   ?status=PENDING (default) — also accepts APPROVED, REJECTED, CANCELLED, all
+ *   ?status=PENDING (default) — also accepts APPROVED, REJECTED, CANCELLED, ALL
  *
- * Sort: PENDING first (oldest pending bubbles up), then by createdAt desc.
+ * ## What the date range means
+ *
+ * A request is in range when ANY of three things falls inside it: the time it
+ * claims, the moment it was raised, or the moment it was decided.
+ *
+ * Matching only the claimed window — which is what this did — hides most of a
+ * manager's actual work. People routinely claim time from days or weeks back:
+ * in this workspace 41% of requests claim time more than a day from when they
+ * were submitted. The visible consequence was that rejecting a request for old
+ * time made the row vanish on the spot, because its claimed window sat outside
+ * the range the manager was looking at.
+ *
+ * ## Why pending is fetched separately
+ *
+ * Pending requests are the work; everything else is history. They are returned
+ * in full and oldest-first, so the ones that have waited longest are at the top
+ * and none can be pushed out by decided rows. History is capped and newest
+ * first, and `truncated` says so rather than leaving the caller to assume they
+ * have everything — a single `take` over the combined set silently dropped 107
+ * of 124 pending requests behind two thousand approved ones.
  */
+/** How much decided history one page carries. Pending is never capped. */
+const DECIDED_PAGE_SIZE = 200;
+
 adminRouter.get('/manual-time-requests', requireManagerOrAbove, async (req, res, next) => {
   try {
     if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
@@ -862,31 +884,55 @@ adminRouter.get('/manual-time-requests', requireManagerOrAbove, async (req, res,
     }
     const statusParam = typeof req.query.status === 'string' ? req.query.status.toUpperCase() : 'PENDING';
     const validStatuses = ['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED'] as const;
-    const where: Prisma.ManualTimeRequestWhereInput = {
-      userId: { in: req.scope.userIds },
-      ...(range && !('error' in range)
-        ? { requestedStart: { lt: range.rangeEnd }, requestedEnd: { gt: range.rangeStart } }
-        : {}),
-    };
-    if (statusParam !== 'ALL') {
-      if (!(validStatuses as readonly string[]).includes(statusParam)) {
-        return res.status(400).json({ error: 'invalid_status' });
-      }
-      where.status = statusParam as (typeof validStatuses)[number];
+    if (statusParam !== 'ALL' && !(validStatuses as readonly string[]).includes(statusParam)) {
+      return res.status(400).json({ error: 'invalid_status' });
     }
-    const rows = await prisma.manualTimeRequest.findMany({
-      where,
-      include: {
-        user: { select: { id: true, name: true, email: true } },
-        approver: { select: { id: true, name: true, email: true } },
-        larkMessages: { select: { status: true, attempts: true, version: true, createdAt: true } },
-      },
-      orderBy: [
-        // PENDING bubbles to the top of mixed queries via createdAt fallback.
-        { createdAt: 'desc' },
-      ],
-      take: 200,
-    });
+
+    // In range if the claimed time overlaps it, OR it was raised in it, OR it
+    // was decided in it. See the route comment for why all three are needed.
+    const inRange: Prisma.ManualTimeRequestWhereInput = range && !('error' in range)
+      ? {
+          OR: [
+            { requestedStart: { lt: range.rangeEnd }, requestedEnd: { gt: range.rangeStart } },
+            { createdAt: { gte: range.rangeStart, lt: range.rangeEnd } },
+            { decidedAt: { gte: range.rangeStart, lt: range.rangeEnd } },
+          ],
+        }
+      : {};
+    const scoped: Prisma.ManualTimeRequestWhereInput = { userId: { in: req.scope.userIds }, ...inRange };
+
+    const include = {
+      user: { select: { id: true, name: true, email: true } },
+      approver: { select: { id: true, name: true, email: true } },
+      larkMessages: { select: { status: true, attempts: true, version: true, createdAt: true } },
+    } as const;
+
+    const wantsPending = statusParam === 'ALL' || statusParam === 'PENDING';
+    const wantsDecided = statusParam !== 'PENDING';
+
+    // Pending is the queue: never capped, longest-waiting first.
+    const pendingRowsAll = wantsPending
+      ? await prisma.manualTimeRequest.findMany({
+          where: { ...scoped, status: 'PENDING' },
+          include,
+          orderBy: [{ createdAt: 'asc' }],
+        })
+      : [];
+
+    // History: capped, newest first.
+    const decidedStatuses = statusParam === 'ALL'
+      ? (['APPROVED', 'REJECTED', 'CANCELLED'] as const)
+      : ([statusParam] as unknown as readonly (typeof validStatuses)[number][]);
+    const decidedRows = wantsDecided
+      ? await prisma.manualTimeRequest.findMany({
+          where: { ...scoped, status: { in: [...decidedStatuses] } },
+          include,
+          orderBy: [{ createdAt: 'desc' }],
+          take: DECIDED_PAGE_SIZE + 1,
+        })
+      : [];
+    const truncated = decidedRows.length > DECIDED_PAGE_SIZE;
+    const rows = [...pendingRowsAll, ...decidedRows.slice(0, DECIDED_PAGE_SIZE)];
     // Triage enrichment for PENDING rows only (decided rows already have
     // a verdict). Skips entirely if there are no PENDING rows — keeps
     // historical / decided-only queries cheap.
@@ -999,6 +1045,8 @@ adminRouter.get('/manual-time-requests', requireManagerOrAbove, async (req, res,
     res.json({
       requests: out,
       scope: req.scope.scope,
+      // True when decided history was cut short. Pending is never truncated.
+      truncated,
       ...(range && !('error' in range) ? { from: range.from, to: range.to, tz: range.tz } : {}),
     });
   } catch (err) {

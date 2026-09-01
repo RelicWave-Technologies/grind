@@ -152,6 +152,117 @@ describe('GET /v1/admin/manual-time-requests', () => {
     expect(outRangeIds.has(s.mtrB.id)).toBe(false);
   });
 
+  it('keeps a request visible in the range it was decided in, not just the one it claims', async () => {
+    // The reject-vanishing bug: a manager rejects a request for time from weeks
+    // ago, and the row disappears because its CLAIMED window sits outside the
+    // range they are looking at. Deciding it today has to keep it in today.
+    const s = await seed();
+    const old = await prisma.manualTimeRequest.create({
+      data: {
+        clientUuid: `cu-old-${Date.now()}`,
+        userId: s.memA.id,
+        requestedStart: new Date('2026-01-05T09:00:00Z'),
+        requestedEnd: new Date('2026-01-05T10:00:00Z'),
+        reason: 'Claimed time from January',
+        status: 'REJECTED',
+        decidedAt: new Date('2026-05-30T12:00:00Z'),
+        decidedReason: 'not this time',
+      },
+    });
+
+    const res = await request(app)
+      .get('/v1/admin/manual-time-requests?status=ALL&from=2026-05-30&to=2026-05-30&tz=UTC')
+      .set(bearer(s.admin.token));
+    expect(res.status).toBe(200);
+    const ids = new Set(res.body.requests.map((r: { id: string }) => r.id));
+    expect(ids.has(old.id)).toBe(true);
+  });
+
+  it('keeps a request visible in the range it was raised in', async () => {
+    const s = await seed();
+    const raised = await prisma.manualTimeRequest.create({
+      data: {
+        clientUuid: `cu-raised-${Date.now()}`,
+        userId: s.memA.id,
+        requestedStart: new Date('2026-01-05T09:00:00Z'),
+        requestedEnd: new Date('2026-01-05T10:00:00Z'),
+        reason: 'Raised in May for January time',
+        status: 'PENDING',
+        createdAt: new Date('2026-05-30T08:00:00Z'),
+      },
+    });
+
+    const res = await request(app)
+      .get('/v1/admin/manual-time-requests?status=ALL&from=2026-05-30&to=2026-05-30&tz=UTC')
+      .set(bearer(s.admin.token));
+    const ids = new Set(res.body.requests.map((r: { id: string }) => r.id));
+    expect(ids.has(raised.id)).toBe(true);
+  });
+
+  it('puts pending first, longest waiting at the top', async () => {
+    const s = await seed();
+    const mk = (uuid: string, createdAt: Date, status: 'PENDING' | 'APPROVED') =>
+      prisma.manualTimeRequest.create({
+        data: {
+          clientUuid: uuid,
+          userId: s.memA.id,
+          requestedStart: new Date('2026-05-30T09:00:00Z'),
+          requestedEnd: new Date('2026-05-30T10:00:00Z'),
+          reason: uuid,
+          status,
+          createdAt,
+          ...(status === 'APPROVED' ? { decidedAt: createdAt } : {}),
+        },
+      });
+    const stamp = Date.now();
+    const newestApproved = await mk(`cu-appr-${stamp}`, new Date('2026-05-30T23:00:00Z'), 'APPROVED');
+    const oldestPending = await mk(`cu-old-pend-${stamp}`, new Date('2026-05-30T01:00:00Z'), 'PENDING');
+
+    const res = await request(app)
+      .get('/v1/admin/manual-time-requests?status=ALL&from=2026-05-30&to=2026-05-30&tz=UTC')
+      .set(bearer(s.admin.token));
+    const rows = res.body.requests as Array<{ id: string; status: string }>;
+
+    // Every pending row precedes every decided one.
+    const lastPending = rows.map((r) => r.status).lastIndexOf('PENDING');
+    const firstDecided = rows.findIndex((r) => r.status !== 'PENDING');
+    expect(firstDecided).toBeGreaterThan(lastPending);
+    // And the newest approved does not outrank the oldest pending.
+    expect(rows.findIndex((r) => r.id === oldestPending.id))
+      .toBeLessThan(rows.findIndex((r) => r.id === newestApproved.id));
+    // Oldest pending is at the very top.
+    expect(rows[0]!.id).toBe(oldestPending.id);
+  });
+
+  it('never drops pending behind a wall of decided history, and says when history was cut', async () => {
+    const s = await seed();
+    const stamp = Date.now();
+    // 205 decided rows, all newer than the pending one — under a single capped
+    // query ordered by createdAt these would bury it completely.
+    await prisma.manualTimeRequest.createMany({
+      data: Array.from({ length: 205 }, (_, i) => ({
+        clientUuid: `cu-bulk-${stamp}-${i}`,
+        userId: s.memA.id,
+        requestedStart: new Date('2026-05-30T09:00:00Z'),
+        requestedEnd: new Date('2026-05-30T10:00:00Z'),
+        reason: `bulk ${i}`,
+        status: 'APPROVED' as const,
+        createdAt: new Date('2026-05-30T20:00:00Z'),
+        decidedAt: new Date('2026-05-30T20:00:00Z'),
+      })),
+    });
+
+    const res = await request(app)
+      .get('/v1/admin/manual-time-requests?status=ALL&from=2026-05-30&to=2026-05-30&tz=UTC')
+      .set(bearer(s.admin.token));
+    const rows = res.body.requests as Array<{ id: string; status: string }>;
+
+    expect(rows.some((r) => r.id === s.mtrA.id)).toBe(true);
+    expect(res.body.truncated).toBe(true);
+    // The cap applies to history only; pending is returned in full on top.
+    expect(rows.filter((r) => r.status !== 'PENDING')).toHaveLength(200);
+  });
+
   it('invalid status → 400', async () => {
     const s = await seed();
     const res = await request(app)
