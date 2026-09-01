@@ -62,6 +62,8 @@ interface AdminUser {
   deactivatedAt: string | null;
   provisioningStatus?: 'PENDING' | 'ACTIVE';
   createdAt: string;
+  /** YYYY-MM-DD. The API sends this to admins only, so it is null otherwise. */
+  birthDate: string | null;
   agentLastSeenAt: string | null;
   agentPresence: 'ONLINE' | 'OFFLINE' | null;
   agentState: 'IDLE' | 'RUNNING' | 'PAUSED_IDLE' | 'PAUSED_PERMISSION' | 'OFFLINE' | null;
@@ -316,6 +318,7 @@ export function UsersScreen() {
                   <Th>Shift</Th>
                   {showDeviceHealth && <Th>Device</Th>}
                   {showDeviceHealth && <Th>Health</Th>}
+                  {canEdit && <Th align="right">Birth date</Th>}
                   <Th align="right">Joined</Th>
                   {canEdit && <Th align="right">{''}</Th>}
                 </Tr>
@@ -382,6 +385,7 @@ interface RowProps {
     role: Role;
     teamId: string | null;
     shiftId: string | null;
+    birthDate: string | null;
   }>) => void;
   onDeactivate: () => void;
   onReactivate: () => void;
@@ -410,6 +414,7 @@ function PersonRow({
   const [role, setRole] = useState<Role>(user.role === 'MANAGER' ? 'MEMBER' : user.role);
   const [teamId, setTeamId] = useState<string>(user.teamId ?? '');
   const [shiftId, setShiftId] = useState<string>(user.shiftId ?? '');
+  const [birthDate, setBirthDate] = useState<string>(user.birthDate ?? '');
 
   function save() {
     const next: Partial<{
@@ -417,6 +422,7 @@ function PersonRow({
       role: Role;
       teamId: string | null;
       shiftId: string | null;
+      birthDate: string | null;
     }> = {};
     if (name.trim() && name.trim() !== user.name) next.name = name.trim();
     if (user.role !== 'MANAGER' && role !== user.role) next.role = role;
@@ -424,6 +430,10 @@ function PersonRow({
     if (nextTeam !== (user.teamId ?? null)) next.teamId = nextTeam;
     const nextShift = shiftId === '' ? null : shiftId;
     if (nextShift !== (user.shiftId ?? null)) next.shiftId = nextShift;
+    // An emptied field clears the date rather than being ignored, so a wrong
+    // one entered by mistake can actually be taken back out.
+    const nextBirth = birthDate === '' ? null : birthDate;
+    if (nextBirth !== (user.birthDate ?? null)) next.birthDate = nextBirth;
     if (Object.keys(next).length > 0) onSave(next);
     setEditing(false);
   }
@@ -551,6 +561,22 @@ function PersonRow({
         {showDeviceHealth && (
           <Td>
             <PermissionCell user={user} />
+          </Td>
+        )}
+
+        {/* Birth date — admin only, both to see and to change ------------- */}
+        {canEdit && (
+          <Td align="right" mono className="usr-joined">
+            {editing ? (
+              <Input
+                type="date"
+                value={birthDate}
+                onChange={(e) => setBirthDate(e.target.value)}
+                aria-label="Birth date"
+              />
+            ) : (
+              user.birthDate ?? '—'
+            )}
           </Td>
         )}
 

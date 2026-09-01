@@ -214,33 +214,10 @@
 
 /* ── Month title ────────────────────────────────────────────────────────── */
 
-.cal-monthbar {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--ui-sp-5);
-  margin-bottom: var(--ui-sp-6);
-}
 
 /* Month name uses the kit's display role; only the pairing with the mono year
    is page layout. */
-.cal-month {
-  font-family: var(--ui-font-sans);
-  font-size: 28px;
-  line-height: 1.15;
-  font-weight: 650;
-  letter-spacing: -0.4px;
-  color: var(--ui-ink);
-}
 
-.cal-month__year {
-  font-family: var(--ui-font-mono);
-  font-size: 13px;
-  font-weight: 400;
-  letter-spacing: 1px;
-  color: var(--ui-ink-3);
-  margin-left: var(--ui-sp-4);
-}
 
 /* ── Away list ──────────────────────────────────────────────────────────── */
 
@@ -255,7 +232,6 @@
 @media (max-width: 900px) {
   .cal-day { min-height: 92px; padding: var(--ui-sp-2); }
   .cal-mark { font-size: 10.5px; padding: 2px var(--ui-sp-2); }
-  .cal-month { font-size: 22px; }
 }
 
 @media (max-width: 640px) {
@@ -274,3 +250,12 @@
   color: var(--ui-ink-3);
 }
 .cal-scope-note strong { color: var(--ui-ink); font-weight: 600; }
+
+/* The month the whole screen is showing, between the two arrows in the header. */
+.cal-month-label {
+  font-size: 14px;
+  font-weight: 600;
+  min-width: 11ch;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}

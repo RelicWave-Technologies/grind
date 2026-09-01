@@ -200,3 +200,78 @@ describe('GET /v1/admin/users — role-scoped list', () => {
 // Pass through the unused variable references so an eager unused-var lint
 // doesn't fail in dev.
 void hashPassword;
+
+describe('birth date is admin-only, both to read and to write', () => {
+  it('is returned to an admin and withheld from a manager', async () => {
+    const s = await seedWorkspace();
+    await prisma.user.update({
+      where: { id: s.member1.id },
+      data: { birthDate: new Date('1996-04-17T00:00:00.000Z') },
+    });
+
+    const asAdmin = await request(app).get('/v1/admin/users').set(bearer(s.admin.token));
+    const seenByAdmin = asAdmin.body.users.find((u: { id: string }) => u.id === s.member1.id);
+    expect(seenByAdmin.birthDate).toBe('1996-04-17');
+
+    // A manager sees the person but not their date of birth.
+    const asManager = await request(app).get('/v1/admin/users').set(bearer(s.manager.token));
+    const seenByManager = asManager.body.users.find((u: { id: string }) => u.id === s.member1.id);
+    expect(seenByManager).toBeTruthy();
+    expect(seenByManager.birthDate).toBeNull();
+  });
+
+  it('stores the day that was typed, not a shifted instant', async () => {
+    const s = await seedWorkspace();
+    const res = await request(app)
+      .patch(`/v1/admin/users/${s.member1.id}`)
+      .set(bearer(s.admin.token))
+      .send({ birthDate: '2001-01-01' });
+    expect(res.status).toBe(200);
+
+    const row = await prisma.user.findUnique({
+      where: { id: s.member1.id },
+      select: { birthDate: true },
+    });
+    // A DATE stored at UTC midnight reads back as the same calendar day.
+    expect(row!.birthDate!.toISOString().slice(0, 10)).toBe('2001-01-01');
+  });
+
+  it('clears the date when sent null', async () => {
+    const s = await seedWorkspace();
+    await prisma.user.update({
+      where: { id: s.member1.id },
+      data: { birthDate: new Date('1990-12-25T00:00:00.000Z') },
+    });
+    const res = await request(app)
+      .patch(`/v1/admin/users/${s.member1.id}`)
+      .set(bearer(s.admin.token))
+      .send({ birthDate: null });
+    expect(res.status).toBe(200);
+    const row = await prisma.user.findUnique({
+      where: { id: s.member1.id },
+      select: { birthDate: true },
+    });
+    expect(row!.birthDate).toBeNull();
+  });
+
+  it('rejects anything that is not a calendar date', async () => {
+    const s = await seedWorkspace();
+    for (const bad of ['17-04-1996', '1996/04/17', 'yesterday', 12345]) {
+      const res = await request(app)
+        .patch(`/v1/admin/users/${s.member1.id}`)
+        .set(bearer(s.admin.token))
+        .send({ birthDate: bad });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('invalid_birth_date');
+    }
+  });
+
+  it('a manager cannot set one', async () => {
+    const s = await seedWorkspace();
+    const res = await request(app)
+      .patch(`/v1/admin/users/${s.member1.id}`)
+      .set(bearer(s.manager.token))
+      .send({ birthDate: '1996-04-17' });
+    expect(res.status).toBe(403);
+  });
+});
