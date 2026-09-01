@@ -264,3 +264,13 @@
   .cal-scroll { overflow-x: auto; }
   .cal-grid { min-width: 640px; }
 }
+
+/* Says which month a panel is scoped to. Every panel on this screen follows
+   the month picker, and without a line saying so the tables read as "all
+   time" — which is what people report as the filter not working. */
+.cal-scope-note {
+  margin: 0 0 var(--ui-sp-4);
+  font-size: 13px;
+  color: var(--ui-ink-3);
+}
+.cal-scope-note strong { color: var(--ui-ink); font-weight: 600; }

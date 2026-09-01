@@ -97,6 +97,7 @@ export async function ensureAccruals(input: {
       // The person's own rate wins; the workspace policy is the fallback.
       monthlyAccrualDays: user.leaveAccrualDaysOverride ?? policy.monthlyAccrualDays,
       accrueOnJoinMonth: policy.accrueOnJoinMonth,
+      ledgerStartMonth: policy.ledgerStartMonth,
       carryForward: policy.carryForward,
       carryForwardCapDays: policy.carryForwardCapDays,
     },

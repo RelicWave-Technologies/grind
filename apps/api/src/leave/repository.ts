@@ -37,6 +37,7 @@ export function toLeavePolicyDto(row: {
   carryForwardCapDays: number | null;
   allowNegativeBalance: boolean;
   accrueOnJoinMonth: boolean;
+  ledgerStartMonth?: string | null;
   updatedAt: Date;
 }): LeavePolicyDto {
   return {
@@ -44,6 +45,7 @@ export function toLeavePolicyDto(row: {
     carryForward: row.carryForward,
     carryForwardCapDays: row.carryForwardCapDays,
     allowNegativeBalance: row.allowNegativeBalance,
+    ledgerStartMonth: row.ledgerStartMonth ?? null,
     accrueOnJoinMonth: row.accrueOnJoinMonth,
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -166,13 +168,31 @@ export async function loadLedgerEntries(
   }));
 }
 
+/**
+ * First date that counts toward a balance, from the workspace policy.
+ *
+ * Read here rather than passed in by every caller: a balance computed with the
+ * floor in one screen and without it in another is exactly the kind of drift
+ * that makes two pages disagree about what somebody is owed.
+ */
+async function ledgerFloor(
+  workspaceId: string | null,
+  db: Tx | typeof prisma = prisma,
+): Promise<string | undefined> {
+  if (!workspaceId) return undefined;
+  const policy = await loadOrCreateLeavePolicy(workspaceId, db);
+  return policy.ledgerStartMonth ? `${policy.ledgerStartMonth}-01` : undefined;
+}
+
 /** Balance for one person as of a date. */
 export async function loadBalance(
   userId: string,
   asOf?: string,
   db: Tx | typeof prisma = prisma,
 ) {
-  return projectBalance(await loadLedgerEntries(userId, db), asOf);
+  const user = await db.user.findUnique({ where: { id: userId }, select: { workspaceId: true } });
+  const since = await ledgerFloor(user?.workspaceId ?? null, db);
+  return projectBalance(await loadLedgerEntries(userId, db), asOf, since);
 }
 
 /**
@@ -184,6 +204,10 @@ export async function loadBalances(
   asOf: string,
   db: Tx | typeof prisma = prisma,
 ): Promise<Record<string, ReturnType<typeof projectBalance>>> {
+  const first = userIds.length
+    ? await db.user.findFirst({ where: { id: { in: userIds } }, select: { workspaceId: true } })
+    : null;
+  const since = await ledgerFloor(first?.workspaceId ?? null, db);
   const rows = await db.leaveLedgerEntry.findMany({
     where: { userId: { in: userIds }, effectiveOn: { lte: fromIsoDate(asOf) } },
     orderBy: [{ effectiveOn: 'asc' }, { createdAt: 'asc' }],
@@ -203,6 +227,6 @@ export async function loadBalances(
   }
 
   const out: Record<string, ReturnType<typeof projectBalance>> = {};
-  for (const id of userIds) out[id] = projectBalance(byUser.get(id) ?? []);
+  for (const id of userIds) out[id] = projectBalance(byUser.get(id) ?? [], undefined, since);
   return out;
 }

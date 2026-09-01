@@ -200,3 +200,56 @@ describe('month helpers', () => {
   it('nextMonth rolls a year', () => expect(nextMonth('2026-12')).toBe('2027-01'));
   it('nextMonth pads a single digit', () => expect(nextMonth('2026-08')).toBe('2026-09'));
 });
+
+describe('a workspace that starts counting partway through the year', () => {
+  const policy = {
+    monthlyAccrualDays: 1,
+    accrueOnJoinMonth: true,
+    carryForward: true,
+    carryForwardCapDays: null,
+    ledgerStartMonth: '2026-08',
+  };
+
+  it('accrues nothing for months before the start, however long ago they joined', () => {
+    const due = accrualsDue({ userId: 'u1', joinedOn: '2026-03-10', asOf: '2026-09-15', policy });
+    expect(due.map((d) => d.month)).toEqual(['2026-08', '2026-09']);
+  });
+
+  it('still starts at the joining month for somebody who joined after the start', () => {
+    const due = accrualsDue({ userId: 'u1', joinedOn: '2026-09-04', asOf: '2026-09-15', policy });
+    expect(due.map((d) => d.month)).toEqual(['2026-09']);
+  });
+
+  it('accrues from the joining month when no start is set', () => {
+    const due = accrualsDue({
+      userId: 'u1', joinedOn: '2026-06-10', asOf: '2026-08-15',
+      policy: { ...policy, ledgerStartMonth: null },
+    });
+    expect(due.map((d) => d.month)).toEqual(['2026-06', '2026-07', '2026-08']);
+  });
+
+  it('leaves entries before the start out of the balance, without touching them', () => {
+    const entries = [
+      { kind: 'ACCRUAL' as const, days: 1, effectiveOn: '2026-07-01' },
+      { kind: 'CONSUMPTION' as const, days: -2, effectiveOn: '2026-07-20' },
+      { kind: 'ACCRUAL' as const, days: 1, effectiveOn: '2026-08-01' },
+      { kind: 'CONSUMPTION' as const, days: -0.5, effectiveOn: '2026-08-14' },
+    ];
+    // Without the floor July's accrual and its bigger consumption both count.
+    expect(projectBalance(entries).balanceDays).toBe(-0.5);
+    // With it the balance opens at zero on 1 August: +1 accrued, 0.5 taken.
+    const fromAugust = projectBalance(entries, undefined, '2026-08-01');
+    expect(fromAugust.balanceDays).toBe(0.5);
+    expect(fromAugust.accruedDays).toBe(1);
+    expect(fromAugust.consumedDays).toBe(0.5);
+  });
+
+  it('applies the floor and the as-of cutoff together', () => {
+    const entries = [
+      { kind: 'ACCRUAL' as const, days: 1, effectiveOn: '2026-07-01' },
+      { kind: 'ACCRUAL' as const, days: 1, effectiveOn: '2026-08-01' },
+      { kind: 'ACCRUAL' as const, days: 1, effectiveOn: '2026-09-01' },
+    ];
+    expect(projectBalance(entries, '2026-08-31', '2026-08-01').balanceDays).toBe(1);
+  });
+});
