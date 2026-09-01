@@ -38,6 +38,7 @@ export function toLeavePolicyDto(row: {
   allowNegativeBalance: boolean;
   accrueOnJoinMonth: boolean;
   ledgerStartMonth?: string | null;
+  birthdayLeaveDays?: number;
   updatedAt: Date;
 }): LeavePolicyDto {
   return {
@@ -46,6 +47,7 @@ export function toLeavePolicyDto(row: {
     carryForwardCapDays: row.carryForwardCapDays,
     allowNegativeBalance: row.allowNegativeBalance,
     ledgerStartMonth: row.ledgerStartMonth ?? null,
+    birthdayLeaveDays: row.birthdayLeaveDays ?? 0,
     accrueOnJoinMonth: row.accrueOnJoinMonth,
     updatedAt: row.updatedAt.toISOString(),
   };

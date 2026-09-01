@@ -308,6 +308,7 @@ export function UsersScreen() {
                 <col className="usr-col-shift" />
                 {showDeviceHealth && <col className="usr-col-device" />}
                 {showDeviceHealth && <col className="usr-col-permissions" />}
+                {canEdit && <col className="usr-col-birth" />}
                 <col className="usr-col-joined" />
                 {canEdit && <col className="usr-col-actions" />}
               </colgroup>
