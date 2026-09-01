@@ -286,6 +286,27 @@ export function CalendarScreen() {
         eyebrow="Time off"
         title="Calendar"
         subtitle={`Company holidays, approved leave and paid-leave balances — ${tz.replace(/_/g, ' ')}.`}
+        actions={
+          /* Every panel below follows this, so it belongs to the page and not
+             to one tab's card — where it used to sit, leaving the other three
+             tabs with no way to change the month they were showing. */
+          <Toolbar>
+            <IconButton
+              aria-label="Previous month"
+              icon={<ChevronLeft />}
+              onClick={() => setMonth(shiftMonth(month, -1))}
+            />
+            <span className="cal-month-label">{monthLabel}</span>
+            <IconButton
+              aria-label="Next month"
+              icon={<ChevronRight />}
+              onClick={() => setMonth(shiftMonth(month, 1))}
+            />
+            <Button variant="secondary" onClick={() => setMonth(today.slice(0, 7))}>
+              Today
+            </Button>
+          </Toolbar>
+        }
       />
 
       {/* Two scopes sit in this row and used to look alike: the balance is a
@@ -334,28 +355,6 @@ export function CalendarScreen() {
 
       {tab === 'month' && (
         <Card>
-          <div className="cal-monthbar">
-            <div>
-              <span className="cal-month">{monthName(month)}</span>
-              <span className="cal-month__year">{month.slice(0, 4)}</span>
-            </div>
-            <Toolbar>
-              <IconButton
-                aria-label="Previous month"
-                icon={<ChevronLeft />}
-                onClick={() => setMonth(shiftMonth(month, -1))}
-              />
-              <Button variant="secondary" onClick={() => setMonth(today.slice(0, 7))}>
-                Today
-              </Button>
-              <IconButton
-                aria-label="Next month"
-                icon={<ChevronRight />}
-                onClick={() => setMonth(shiftMonth(month, 1))}
-              />
-            </Toolbar>
-          </div>
-
           {calendarQ.isLoading ? (
             <Skeleton h={520} radius={10} />
           ) : (
@@ -839,21 +838,12 @@ function BalancesPanel({ asOf, monthLabel }: { asOf: string; monthLabel: string 
   if (!data) return null;
 
   const refresh = () => qc.invalidateQueries({ queryKey: ['leave'] });
-  const missingJoinDate = data.rows.filter((r) => !r.joinedOnSet).length;
 
   return (
     <>
       <p className="cal-scope-note">
         Balances as they stood at the end of <strong>{monthLabel}</strong>.
       </p>
-
-      {missingJoinDate > 0 && (
-        <Banner status="warn">
-          {missingJoinDate} {missingJoinDate === 1 ? 'person has' : 'people have'} no joining date,
-          so leave accrues from when their Timo account was created rather than from when they
-          actually joined. Set it on a row to correct their balance.
-        </Banner>
-      )}
 
       <Card title={`Balances as of ${data.asOf}`}>
         <Table density="compact">

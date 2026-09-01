@@ -96,6 +96,8 @@ function serializeApiToken(token: ApiTokenRow): ApiTokenDto {
 }
 
 interface UserListEntry {
+  /** Date of birth, YYYY-MM-DD. Null for anyone but an admin — see the select. */
+  birthDate: string | null;
   id: string;
   email: string;
   name: string;
@@ -187,6 +189,7 @@ adminRouter.get('/users', async (req, res, next) => {
         agentLaunchOrigin: true,
         agentLaunchAtLoginUpdatedAt: true,
         idleWarningSeconds: true,
+        birthDate: true,
       },
       orderBy: [{ deactivatedAt: 'asc' }, { role: 'asc' }, { name: 'asc' }],
     });
@@ -206,6 +209,10 @@ adminRouter.get('/users', async (req, res, next) => {
       deactivatedAt: u.deactivatedAt ? u.deactivatedAt.toISOString() : null,
       provisioningStatus: u.provisioningStatus,
       createdAt: u.createdAt.toISOString(),
+      // Personal data with no operational use, so it is gated the same way the
+      // agent-health fields are: admins only. A DATE column carries no time, so
+      // it is sliced rather than serialised as an instant.
+      birthDate: exposeAgentHealth && u.birthDate ? u.birthDate.toISOString().slice(0, 10) : null,
       agentLastSeenAt: exposeAgentHealth && u.agentLastSeenAt ? u.agentLastSeenAt.toISOString() : null,
       agentPresence: exposeAgentHealth
         ? agentPresence(u.agentLastSeenAt, u.agentState, presenceCheckedAt)
@@ -1670,6 +1677,7 @@ adminRouter.patch('/users/:id', requireAdmin, async (req, res, next) => {
       shiftAssignedAt?: Date | null;
       idleWarningSeconds?: number | null;
       provisioningStatus?: 'ACTIVE';
+      birthDate?: Date | null;
     } = {};
     let idleWarningAudit:
       | {
@@ -1694,6 +1702,21 @@ adminRouter.patch('/users/:id', requireAdmin, async (req, res, next) => {
       const name = req.body.name.trim();
       if (name.length === 0 || name.length > 80) return res.status(400).json({ error: 'invalid_name' });
       data.name = name;
+    }
+
+    // birthDate: 'YYYY-MM-DD' to set, null to clear. Parsed at UTC midnight so
+    // the DATE column stores the day that was typed, whatever the server's zone.
+    if (req.body?.birthDate !== undefined) {
+      const raw: unknown = req.body.birthDate;
+      if (raw === null) {
+        data.birthDate = null;
+      } else if (typeof raw === 'string' && /^\d{4}-\d{2}-\d{2}$/u.test(raw)) {
+        const parsed = new Date(`${raw}T00:00:00.000Z`);
+        if (Number.isNaN(parsed.getTime())) return res.status(400).json({ error: 'invalid_birth_date' });
+        data.birthDate = parsed;
+      } else {
+        return res.status(400).json({ error: 'invalid_birth_date' });
+      }
     }
 
     if (typeof req.body?.role === 'string') {

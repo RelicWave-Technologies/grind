@@ -273,6 +273,10 @@ model User {
   /// anchor. NULL falls back to createdAt — which is only the first Lark
   /// login, so anyone onboarded into Timo after they joined needs this set.
   joinedOn                 DateTime?          @db.Date
+  /// Date of birth. A date, not an instant — nobody is born at a timezone.
+  /// Admin-only: it is personal data with no operational use, so it is not
+  /// exposed on the self-profile or to managers.
+  birthDate                DateTime?          @db.Date
   /// Per-person monthly paid-leave grant, in days. NULL inherits the workspace
   /// policy. Needed because the two companies in this workspace accrue at
   /// different rates and teams do not divide along company lines — Media Buying
