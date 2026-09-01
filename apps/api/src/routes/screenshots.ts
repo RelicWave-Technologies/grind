@@ -18,6 +18,7 @@ import {
   uploadScreenshotToDrive,
 } from '../lib/googleDrive';
 import { env } from '../env';
+import { getWorkspaceTimezone } from '../workspace/timezone';
 import { attachScope } from '../middleware/scope';
 
 export const screenshotsRouter = Router();
@@ -38,9 +39,15 @@ screenshotsRouter.post('/direct-upload', async (req, res, next) => {
     const file = extractMultipartFile(raw, String(req.headers['content-type'] ?? ''));
     if (!file || file.byteLength === 0) return res.status(400).json({ error: 'missing_file' });
 
+    // File under the month the shot was TAKEN in, read in the workspace's own
+    // timezone. Without this the upload lands in the flat root folder, which is
+    // how a shared drive reaches its 400,000-item ceiling with nothing anybody
+    // can delete a month at a time.
+    const filing = await screenshotFiling(token.userId, token.id);
     const uploaded = await uploadScreenshotToDrive({
       data: file,
       filename: `${token.userId}-${token.id}.webp`,
+      ...filing,
     });
     const asset = screenshotAssetUrl(uploaded.fileId);
     if (!asset) return res.status(503).json({ error: 'public_app_url_not_configured' });
@@ -282,6 +289,29 @@ async function validateOwnedTimeEntry(userId: string, timeEntryId: string | null
     select: { userId: true },
   });
   return row?.userId === userId ? timeEntryId : false;
+}
+
+/**
+ * When a screenshot was taken and which timezone to read that in, so the Drive
+ * upload can pick its month folder.
+ *
+ * Falls back to the upload moment when the row is somehow missing — a shot with
+ * no home is still better filed under this month than dropped into the root.
+ */
+async function screenshotFiling(
+  userId: string,
+  screenshotId: string,
+): Promise<{ capturedAt: Date; tz: string }> {
+  const row = await prisma.screenshot.findUnique({
+    where: { id: screenshotId },
+    select: { capturedAt: true, user: { select: { workspaceId: true } } },
+  });
+  const workspaceId = row?.user?.workspaceId
+    ?? (await prisma.user.findUnique({ where: { id: userId }, select: { workspaceId: true } }))?.workspaceId;
+  return {
+    capturedAt: row?.capturedAt ?? new Date(),
+    tz: workspaceId ? await getWorkspaceTimezone(workspaceId) : 'UTC',
+  };
 }
 
 async function canWriteScreenshot(userId: string, screenshotId: string): Promise<boolean> {

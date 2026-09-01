@@ -5,8 +5,92 @@ const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const DRIVE_UPLOAD_URL = 'https://www.googleapis.com/upload/drive/v3/files';
 const DRIVE_FILE_URL = 'https://www.googleapis.com/drive/v3/files';
 const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+const FOLDER_MIME = 'application/vnd.google-apps.folder';
 
 let cachedAccessToken: { token: string; expiresAtMs: number } | null = null;
+
+/**
+ * Month folder ids, by folder name, for the life of the process.
+ *
+ * Without this every screenshot would cost a `files.list` before its upload —
+ * roughly 7,500 extra round trips a day. The cache is never invalidated: a
+ * folder id does not change, and a restart simply re-finds it.
+ */
+const monthFolderIds = new Map<string, string>();
+
+/**
+ * 'September 2026' for an instant, read in the business timezone.
+ *
+ * The timezone matters at the edges: a screenshot captured at 00:30 IST on the
+ * 1st is September's, and filing it under August because UTC still said the
+ * 31st would put a person's month in two places.
+ */
+export function driveMonthFolderName(capturedAt: Date, tz: string): string {
+  return new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric', timeZone: tz })
+    .format(capturedAt);
+}
+
+/**
+ * The id of the month folder, creating it the first time it is needed.
+ *
+ * Screenshots used to land in one flat folder, which is how a shared drive
+ * reaches its 400,000-item ceiling with nothing anybody can reasonably delete.
+ * A folder per month gives retention something to remove in one call and gives
+ * a human somewhere to look.
+ *
+ * The `drive.file` scope only sees what this app created, so the lookup finds
+ * folders we made and not ones created by hand in the Drive UI — a manually
+ * created 'September 2026' would be shadowed by one of ours. That is the
+ * trade for not asking for full-drive access.
+ */
+async function ensureMonthFolder(name: string): Promise<string | undefined> {
+  const parent = env.GOOGLE_DRIVE_FOLDER_ID;
+  if (!parent) return undefined;
+
+  const cached = monthFolderIds.get(name);
+  if (cached) return cached;
+
+  const token = await getAccessToken();
+  const found = await findFolder(token, name, parent);
+  const id = found ?? (await createFolder(token, name, parent));
+  monthFolderIds.set(name, id);
+  return id;
+}
+
+async function findFolder(token: string, name: string, parent: string): Promise<string | undefined> {
+  const url = new URL(DRIVE_FILE_URL);
+  // The name is ours, not user input, but a quote in it would still break the
+  // query — escape rather than trust.
+  const safe = name.replace(/'/gu, "\\'");
+  url.searchParams.set('q', `name='${safe}' and mimeType='${FOLDER_MIME}' and '${parent}' in parents and trashed=false`);
+  url.searchParams.set('supportsAllDrives', 'true');
+  url.searchParams.set('includeItemsFromAllDrives', 'true');
+  url.searchParams.set('fields', 'files(id)');
+  url.searchParams.set('pageSize', '1');
+  if (env.GOOGLE_DRIVE_SHARED_DRIVE_ID) {
+    url.searchParams.set('corpora', 'drive');
+    url.searchParams.set('driveId', env.GOOGLE_DRIVE_SHARED_DRIVE_ID);
+  }
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) throw new Error(`google_drive_folder_lookup_failed:${res.status}:${await safeText(res)}`);
+  const json = (await res.json()) as { files?: Array<{ id: string }> };
+  return json.files?.[0]?.id;
+}
+
+async function createFolder(token: string, name: string, parent: string): Promise<string> {
+  const url = new URL(DRIVE_FILE_URL);
+  url.searchParams.set('supportsAllDrives', 'true');
+  url.searchParams.set('fields', 'id');
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, mimeType: FOLDER_MIME, parents: [parent] }),
+  });
+  if (!res.ok) throw new Error(`google_drive_folder_create_failed:${res.status}:${await safeText(res)}`);
+  const json = (await res.json()) as { id?: string };
+  if (!json.id) throw new Error('google_drive_folder_create_missing_id');
+  return json.id;
+}
 
 export function isGoogleDriveConfigured(): boolean {
   return Boolean(
@@ -19,13 +103,20 @@ export function isGoogleDriveConfigured(): boolean {
 export async function uploadScreenshotToDrive(input: {
   data: Buffer;
   filename: string;
+  /** When the shot was taken. Decides which month folder it is filed under. */
+  capturedAt?: Date;
+  /** Business timezone the month is read in. */
+  tz?: string;
 }): Promise<{ fileId: string }> {
   const token = await getAccessToken();
+  const parent = input.capturedAt
+    ? await ensureMonthFolder(driveMonthFolderName(input.capturedAt, input.tz ?? 'UTC'))
+    : env.GOOGLE_DRIVE_FOLDER_ID;
   const boundary = `grind_${crypto.randomBytes(12).toString('hex')}`;
   const metadata: Record<string, unknown> = {
     name: input.filename,
     mimeType: 'image/webp',
-    parents: env.GOOGLE_DRIVE_FOLDER_ID ? [env.GOOGLE_DRIVE_FOLDER_ID] : undefined,
+    parents: parent ? [parent] : undefined,
   };
   const body = Buffer.concat([
     Buffer.from(`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n`),
