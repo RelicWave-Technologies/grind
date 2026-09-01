@@ -18,6 +18,7 @@ import {
   uploadScreenshotToDrive,
 } from '../lib/googleDrive';
 import { env } from '../env';
+import { logger } from '../logger';
 import { getWorkspaceTimezone } from '../workspace/timezone';
 import { attachScope } from '../middleware/scope';
 
@@ -25,6 +26,17 @@ export const screenshotsRouter = Router();
 
 const MAX_SCREENSHOT_UPLOAD_BYTES = 8 * 1024 * 1024;
 const DRIVE_UPLOAD_TTL_SECONDS = 10 * 60;
+
+/**
+ * Did the upload fail because the storage behind us is unhappy?
+ *
+ * Every `google_drive_*` failure qualifies, whatever the status Drive gave:
+ * a 403 quota, a 404 folder, a 401 key, a 500 outage. None of them says the
+ * agent sent something wrong, so none of them should cost the agent an attempt.
+ */
+function isDriveFailure(err: unknown): boolean {
+  return err instanceof Error && err.message.startsWith('google_drive_');
+}
 
 screenshotsRouter.post('/direct-upload', async (req, res, next) => {
   try {
@@ -44,11 +56,25 @@ screenshotsRouter.post('/direct-upload', async (req, res, next) => {
     // how a shared drive reaches its 400,000-item ceiling with nothing anybody
     // can delete a month at a time.
     const filing = await screenshotFiling(token.userId, token.id);
-    const uploaded = await uploadScreenshotToDrive({
-      data: file,
-      filename: `${token.userId}-${token.id}.webp`,
-      ...filing,
-    });
+    let uploaded: { fileId: string };
+    try {
+      uploaded = await uploadScreenshotToDrive({
+        data: file,
+        filename: `${token.userId}-${token.id}.webp`,
+        ...filing,
+      });
+    } catch (err) {
+      if (!isDriveFailure(err)) throw err;
+      // 503, not 500. The agent counts a 5xx against the shot's five attempts
+      // and writes it off for good; a 503 reads as "storage unavailable" and
+      // leaves it queued with the attempt count untouched. Every one of these
+      // is our problem — a full drive, a bad folder id, an expired key — and
+      // none of them is something the agent can fix by trying a different
+      // file. Answering 500 here is what turned a full shared drive into
+      // 69,628 screenshots nobody can recover.
+      logger.error({ err, screenshotId: token.id }, 'screenshot storage unavailable');
+      return res.status(503).json({ error: 'screenshot_storage_unavailable' });
+    }
     const asset = screenshotAssetUrl(uploaded.fileId);
     if (!asset) return res.status(503).json({ error: 'public_app_url_not_configured' });
 
