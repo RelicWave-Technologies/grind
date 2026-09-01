@@ -34,6 +34,9 @@ import type { TimeInvalidationInput } from '../insights/invalidations';
 import type { RoleTitle } from '../scoring/presets';
 import { loadEntryLiveEvidence, type EntryLiveEvidenceMap } from '../insights/liveEntryEvidence';
 import { timesheetCalendarInputs } from '../leave';
+import { formatMonthPerformanceCsv } from '../reports/monthPerformance';
+import { monthPerformanceXlsx } from '../reports/monthPerformanceXlsx';
+import { loadMonthPerformanceReport, resolveReportMonth } from '../reports/monthPerformanceData';
 
 export const reportsRouter = Router();
 reportsRouter.use(requireAccessToken, attachScope, requireCapability('reports.self.read'));
@@ -376,6 +379,54 @@ reportsRouter.get('/team/member/day-screenshots', requireCapability('reports.tea
       toUrl: screenshotUrl,
     });
     res.json(response);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * Month performance — the monthly attendance grid, as a download.
+ *
+ * Deliberately export-only: this is the shape HR already reads in the
+ * attendance machine's own report, and its job is to leave the browser.
+ *
+ * Built from the punch record and the Lark-fed Working Calendar only. Scoped
+ * by `req.scope.userIds`, so a manager gets their team and an admin gets the
+ * workspace. `reports.team.read` because it discloses other people's
+ * attendance, which the self-scoped `/me` capability does not cover.
+ */
+async function monthPerformanceFor(req: Request) {
+  if (!req.scope) return { status: 500 as const, error: 'scope_unresolved' };
+  const range = resolveReportMonth(req.query as Record<string, unknown>, req.scope.workspaceTimezone);
+  if ('error' in range) return { status: 400 as const, error: range.error };
+  const report = await loadMonthPerformanceReport({
+    workspaceId: req.scope.workspaceId,
+    userIds: req.scope.userIds,
+    range,
+  });
+  return { status: 200 as const, report, month: range.month };
+}
+
+reportsRouter.get('/month-performance.csv', requireCapability('reports.team.read'), async (req, res, next) => {
+  try {
+    const result = await monthPerformanceFor(req);
+    if (result.status !== 200) return res.status(result.status).json({ error: result.error });
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="month-performance-${result.month}.csv"`);
+    res.send(formatMonthPerformanceCsv(result.report));
+  } catch (err) {
+    next(err);
+  }
+});
+
+reportsRouter.get('/month-performance.xlsx', requireCapability('reports.team.read'), async (req, res, next) => {
+  try {
+    const result = await monthPerformanceFor(req);
+    if (result.status !== 200) return res.status(result.status).json({ error: result.error });
+    const buffer = await monthPerformanceXlsx(result.report);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="month-performance-${result.month}.xlsx"`);
+    res.send(buffer);
   } catch (err) {
     next(err);
   }

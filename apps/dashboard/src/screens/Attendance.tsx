@@ -2,7 +2,7 @@ import './attendance.css';
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useRouteContext } from '@tanstack/react-router';
-import { CalendarRange } from 'lucide-react';
+import { CalendarRange, FileSpreadsheet, Sheet } from 'lucide-react';
 import { api, API_BASE } from '../lib/api';
 import type { TimesheetMatrix } from '../lib/types';
 import { fmtTime, fmtDurationMs, fmtDayLabel, addDays, todayKey } from '../lib/format';
@@ -40,6 +40,17 @@ const RANGES: Array<{ key: '7' | '14' | '30'; label: string; days: number }> = [
   { key: '14', label: '14d', days: 14 },
   { key: '30', label: '30d', days: 30 },
 ];
+
+/** 'August 2026' from '2026-08', for the month-report button tooltips. */
+function fmtMonthLabel(month: string): string {
+  const [y, m] = month.split('-').map((n) => Number.parseInt(n, 10));
+  if (!y || !m) return month;
+  return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString('en-US', {
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'UTC',
+  });
+}
 
 /** A user-day is "present" when they tracked at least PRESENT_MIN_MS. */
 const PRESENT_MIN_MS = 30 * 60 * 1000;
@@ -80,6 +91,20 @@ export function AttendanceScreen() {
     return `${API_BASE}/v1/admin/timesheets.csv?${params.toString()}`;
   }
 
+  /**
+   * The month performance report — the monthly attendance grid HR reads, with
+   * punch in / punch out, worked hours and a status code per day.
+   *
+   * Always a WHOLE month, taken from the month the anchor sits in, because the
+   * report's own header says "Report Month" and a 14-day slice of one is not a
+   * thing anyone can file. It ignores the range selector above deliberately.
+   */
+  const reportMonth = anchor.slice(0, 7);
+  function monthPerformanceUrl(ext: 'csv' | 'xlsx'): string {
+    const params = new URLSearchParams({ month: reportMonth });
+    return `${API_BASE}/v1/reports/month-performance.${ext}?${params.toString()}`;
+  }
+
   const isToday = anchor === todayKey(tz);
   const today = todayKey(tz);
   const tzLabel = tz.replace(/_/g, ' ');
@@ -116,6 +141,28 @@ export function AttendanceScreen() {
                 <CalendarRange size={14} strokeWidth={2} />
               </span>
               <span className="ui-btn__label">Export CSV</span>
+            </a>
+            <a
+              className="ui-btn ui-btn--secondary ui-btn--md"
+              href={monthPerformanceUrl('xlsx')}
+              download
+              title={`Month performance report for ${fmtMonthLabel(reportMonth)} — punch in/out, hours and status per day`}
+            >
+              <span className="ui-btn__icon">
+                <FileSpreadsheet size={14} strokeWidth={2} />
+              </span>
+              <span className="ui-btn__label">Month report</span>
+            </a>
+            <a
+              className="ui-btn ui-btn--secondary ui-btn--md"
+              href={monthPerformanceUrl('csv')}
+              download
+              title={`Month performance report for ${fmtMonthLabel(reportMonth)} as CSV`}
+            >
+              <span className="ui-btn__icon">
+                <Sheet size={14} strokeWidth={2} />
+              </span>
+              <span className="ui-btn__label">Month CSV</span>
             </a>
           </Toolbar>
         }
