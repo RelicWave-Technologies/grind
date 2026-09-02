@@ -316,3 +316,91 @@ describe('durations are hours, not a time of day', () => {
     expect(fmtMinutes(0)).toBe('00:00');
   });
 });
+
+describe('a human correction to a day', () => {
+  const overrideReport = (opts: {
+    statuses?: Record<string, DayStatus>;
+    tracked?: Record<string, number>;
+    overrides?: Record<string, { code: 'P' | 'A' | 'HD' | 'PL' | 'LWP'; computedCode: string | null }>;
+  }) =>
+    buildMonthPerformance({
+      month: '2026-08',
+      tz: 'Asia/Kolkata',
+      companyName: 'EMIAC',
+      users: [user],
+      dayStatusFor: (_u, date) => opts.statuses?.[date] ?? null,
+      trackedMinutesFor: (_u, date) => opts.tracked?.[date] ?? 0,
+      punchFor: noPunches,
+      overrideFor: (_u, date) => opts.overrides?.[date] ?? null,
+      generatedAtMs: Date.UTC(2026, 8, 1),
+    });
+
+  const dayOf = (r: ReturnType<typeof overrideReport>, date: string) =>
+    r.rows[0]!.days.find((d) => d.date === date)!;
+
+  it('wins over an absent day the machine could not vouch for', () => {
+    // The Pallavi case: badged in all day, agent died at 15:37, nothing tracked.
+    const built = overrideReport({
+      statuses: { '2026-08-31': status('2026-08-31', 'WORKING') },
+      overrides: { '2026-08-31': { code: 'P', computedCode: 'A' } },
+    });
+    const day = dayOf(built, '2026-08-31');
+    expect(day.code).toBe('P');
+    expect(day.override).toEqual({ code: 'P', stale: false });
+  });
+
+  it('wins over the calendar too', () => {
+    const built = overrideReport({
+      statuses: { '2026-08-17': status('2026-08-17', 'PAID_LEAVE', { label: 'Paid leave' }) },
+      overrides: { '2026-08-17': { code: 'P', computedCode: 'PL' } },
+    });
+    expect(dayOf(built, '2026-08-17').code).toBe('P');
+  });
+
+  it('leaves the hours alone — they still report what was tracked', () => {
+    const built = overrideReport({
+      statuses: { '2026-08-31': status('2026-08-31', 'WORKING') },
+      tracked: { '2026-08-31': 337 },
+      overrides: { '2026-08-31': { code: 'P', computedCode: 'A' } },
+    });
+    const day = dayOf(built, '2026-08-31');
+    expect(day.code).toBe('P');
+    expect(fmtMinutes(day.workMinutes)).toBe('05:37');
+  });
+
+  it('flags a day whose computed answer has changed since the correction', () => {
+    // Marked present when the day computed as A. Leave has since arrived from
+    // Lark, so the two no longer agree about a day they once agreed on.
+    const built = overrideReport({
+      statuses: { '2026-08-17': status('2026-08-17', 'PAID_LEAVE') },
+      overrides: { '2026-08-17': { code: 'P', computedCode: 'A' } },
+    });
+    const day = dayOf(built, '2026-08-17');
+    expect(day.code).toBe('P');
+    expect(day.override).toEqual({ code: 'P', stale: true });
+  });
+
+  it('counts the corrected code, not the computed one', () => {
+    const statuses: Record<string, DayStatus> = {};
+    for (const d of monthDates('2026-08')) statuses[d] = status(d, 'WORKING');
+    const built = overrideReport({
+      statuses,
+      overrides: {
+        '2026-08-03': { code: 'P', computedCode: 'A' },
+        '2026-08-04': { code: 'PL', computedCode: 'A' },
+      },
+    });
+    expect(built.rows[0]!.totals.present).toBe(1);
+    expect(built.rows[0]!.totals.paidLeave).toBe(1);
+  });
+
+  it('leaves an uncorrected day exactly as it was', () => {
+    const built = overrideReport({
+      statuses: { '2026-08-03': status('2026-08-03', 'WORKING') },
+      tracked: { '2026-08-03': 480 },
+    });
+    const day = dayOf(built, '2026-08-03');
+    expect(day.code).toBe('P');
+    expect(day.override).toBeNull();
+  });
+});

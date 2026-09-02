@@ -1533,3 +1533,192 @@
     grid-column: 1 / -1;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Attendance status — the day's code, and correcting it
+   ---------------------------------------------------------------------------
+   The chip fills carry the same meaning as the exported workbook's status row,
+   so a person reading the sheet and a person reading the screen see one system.
+   Colour marks the category and never grades it: absence is a different block
+   from presence, not a warning. Ink stays black on every fill.
+   --------------------------------------------------------------------------- */
+
+.rep-col-status { width: 84px; }
+
+.rep-status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-sp-1);
+  min-width: 34px;
+  justify-content: center;
+  padding: 2px var(--ui-sp-3);
+  border-radius: var(--ui-r-sm);
+  font-family: var(--ui-font-mono, ui-monospace, monospace);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  color: var(--ui-ink);
+}
+
+.rep-status-chip--p   { background: var(--ui-lime); }
+.rep-status-chip--hd  { background: var(--ui-cream); }
+.rep-status-chip--a   { background: var(--ui-pink); }
+.rep-status-chip--pl  { background: var(--ui-mint); }
+.rep-status-chip--lwp { background: var(--ui-coral); }
+.rep-status-chip--hl  { background: var(--ui-lilac); }
+.rep-status-chip--wo  { background: var(--ui-surface-sunken); color: var(--ui-ink-2); }
+.rep-status-chip--none{ background: var(--ui-surface-inset); color: var(--ui-ink-3); }
+
+/* A corrected day is a judgement, not a measurement, and has to read as one. */
+.rep-status-chip.is-override { box-shadow: inset 0 0 0 1.5px var(--ui-ink); }
+.rep-status-mark { font-size: 10px; line-height: 1; opacity: 0.75; }
+
+.rep-status-edit {
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  border-radius: var(--ui-r-sm);
+}
+.rep-status-edit:hover .rep-status-chip { box-shadow: inset 0 0 0 1.5px var(--ui-line-strong); }
+.rep-status-edit:hover .rep-status-chip.is-override { box-shadow: inset 0 0 0 1.5px var(--ui-ink); }
+.rep-status-edit:focus-visible { outline: 2px solid var(--ui-accent-ring); outline-offset: 2px; }
+
+/* --- the correction dialog ---------------------------------------------------
+   DESIGN.md's colour blocks are the depth device, so the code keys carry the
+   same fills the status chips and the exported workbook use: one visual idea
+   running from the sheet to the table to this dialog. The panel around them
+   stays white and hairlined, because five saturated pastels competing for a
+   small surface is noise, not a system.
+
+   Selected is the primary surface — the same black an active pill uses. That
+   is the brand pattern for "chosen", and reusing it here means the dialog does
+   not invent a fifth way of saying the same thing.
+   --------------------------------------------------------------------------- */
+
+.rep-modal--override {
+  width: min(460px, calc(100vw - var(--ui-sp-8)));
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-sp-6);
+  padding: var(--ui-sp-7);
+}
+
+/* The day as it stands, before anybody overrules it. */
+.rep-override-now {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-sp-3);
+  padding: var(--ui-sp-4) var(--ui-sp-5);
+  background: var(--ui-surface-sunken);
+  border-radius: var(--ui-r-md);
+}
+.rep-override-now-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-sp-3);
+}
+/* Fixed width so the two eyebrows form a column and the values line up. */
+.rep-override-now-row .ui-t-eyebrow { min-width: 64px; }
+.rep-override-now-label { font-size: 13px; color: var(--ui-ink); }
+.rep-override-now-hours {
+  font-family: var(--ui-font-mono, ui-monospace, monospace);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ui-ink);
+  font-variant-numeric: tabular-nums;
+}
+/* Weight, not grey, carries the drop to secondary — DESIGN.md has no mid-grey
+   body role. */
+.rep-override-now-note { font-size: 12px; font-weight: 330; color: var(--ui-ink-2); }
+
+.rep-override-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-sp-3);
+}
+
+.rep-override-codes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--ui-sp-3);
+}
+/* Present is the common answer, so it takes the full first row. */
+.rep-override-codes > :first-child { grid-column: 1 / -1; }
+
+.rep-override-code {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-sp-4);
+  min-height: 44px;
+  padding: var(--ui-sp-3) var(--ui-sp-4);
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-sm);
+  background: var(--ui-surface);
+  color: var(--ui-ink);
+  cursor: pointer;
+  text-align: left;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.rep-override-code:hover { background: var(--ui-surface-sunken); border-color: var(--ui-line-strong); }
+.rep-override-code:focus-visible { outline: 2px solid var(--ui-accent-ring); outline-offset: 2px; }
+
+.rep-override-code.is-selected {
+  background: var(--ui-accent);
+  border-color: var(--ui-accent);
+  color: var(--ui-on-accent);
+}
+
+/* The key is the same chip the table shows, so the choice and the result read
+   as one thing. It keeps its fill when selected: the black is the button's
+   state, not the code's identity. */
+.rep-override-code-key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 34px;
+  padding: 3px var(--ui-sp-3);
+  border-radius: var(--ui-r-sm);
+  font-family: var(--ui-font-mono, ui-monospace, monospace);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  color: var(--ui-ink);
+}
+.rep-override-code-key--p   { background: var(--ui-lime); }
+.rep-override-code-key--a   { background: var(--ui-pink); }
+.rep-override-code-key--hd  { background: var(--ui-cream); }
+.rep-override-code-key--pl  { background: var(--ui-mint); }
+.rep-override-code-key--lwp { background: var(--ui-coral); }
+
+.rep-override-code-label { font-size: 13.5px; font-weight: 450; }
+
+.rep-override-reason {
+  width: 100%;
+  padding: var(--ui-sp-4);
+  border: 1px solid var(--ui-line-strong);
+  border-radius: var(--ui-r-sm);
+  background: var(--ui-surface);
+  color: var(--ui-ink);
+  font: inherit;
+  font-size: 13.5px;
+  line-height: 1.45;
+  resize: vertical;
+}
+.rep-override-reason::placeholder { color: var(--ui-ink-3); }
+.rep-override-reason:focus-visible {
+  outline: 2px solid var(--ui-accent-ring);
+  outline-offset: 1px;
+  border-color: var(--ui-ink);
+}
+
+.rep-modal-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-sp-4);
+  padding-top: var(--ui-sp-5);
+  border-top: 1px solid var(--ui-line);
+}
+.rep-modal-foot-right { display: flex; gap: var(--ui-sp-3); margin-left: auto; }

@@ -20,6 +20,47 @@ export const MemberReportTopAppSchema = z.object({
 });
 export type MemberReportTopApp = z.infer<typeof MemberReportTopAppSchema>;
 
+/**
+ * The statuses a manager or admin may set by hand.
+ *
+ * Not HOLIDAY or WEEKLY_OFF: those come from the company calendar and the
+ * shift schedule, and a second place to set them would let the same fact be
+ * true in one and false in the other.
+ */
+export const AttendanceOverrideCodeSchema = z.enum(['P', 'A', 'HD', 'PL', 'LWP']);
+export type AttendanceOverrideCode = z.infer<typeof AttendanceOverrideCodeSchema>;
+
+export const AttendanceOverrideDtoSchema = z.object({
+  date: z.string(),
+  code: AttendanceOverrideCodeSchema,
+  reason: z.string(),
+  setByName: z.string().nullable(),
+  setAt: z.string(),
+  /**
+   * True when what the report computes today no longer matches what it
+   * computed when the override was written — leave arrived from Lark, time
+   * synced late. The override still wins; the day is flagged so the
+   * disagreement is visible rather than silent.
+   */
+  stale: z.boolean(),
+});
+export type AttendanceOverrideDto = z.infer<typeof AttendanceOverrideDtoSchema>;
+
+export const SetAttendanceOverrideRequest = z.object({
+  userId: z.string().min(1),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u, 'date must be YYYY-MM-DD'),
+  code: AttendanceOverrideCodeSchema,
+  /** Required. Three months later this is the only question anybody asks. */
+  reason: z.string().trim().min(1).max(500),
+});
+export type SetAttendanceOverrideRequest = z.infer<typeof SetAttendanceOverrideRequest>;
+
+export const ClearAttendanceOverrideRequest = z.object({
+  userId: z.string().min(1),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u, 'date must be YYYY-MM-DD'),
+});
+export type ClearAttendanceOverrideRequest = z.infer<typeof ClearAttendanceOverrideRequest>;
+
 export const MemberReportDaySchema = z.object({
   date: z.string(),
   workedMs: z.number().int().min(0),
@@ -57,6 +98,18 @@ export const MemberReportDaySchema = z.object({
    * report can show WHY a day is empty instead of showing a blank row.
    */
   dayStatus: DayStatusSchema.nullable().optional(),
+  /**
+   * The day's attendance code as the report tells it: a manager's correction
+   * if one was made, otherwise what the calendar and tracked time compute.
+   */
+  attendanceCode: z.enum(['P', 'HD', 'A', 'WO', 'HL', 'PL', 'LWP', '--']).optional(),
+  /** What it would say with nobody's correction, so the UI can show both. */
+  computedAttendanceCode: z.enum(['P', 'HD', 'A', 'WO', 'HL', 'PL', 'LWP', '--']).optional(),
+  /** Present when a human corrected this day. */
+  attendanceOverride: z
+    .object({ code: AttendanceOverrideCodeSchema, stale: z.boolean() })
+    .nullable()
+    .optional(),
 });
 export type MemberReportDay = z.infer<typeof MemberReportDaySchema>;
 

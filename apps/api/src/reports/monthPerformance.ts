@@ -1,4 +1,4 @@
-import type { DayStatus } from '@grind/types';
+import type { AttendanceOverrideCode, DayStatus } from '@grind/types';
 import type { PunchLookup } from '../attendance/punches';
 import { weekdayForDate } from '../leave';
 
@@ -28,7 +28,13 @@ import { weekdayForDate } from '../leave';
  *
  * ## How a day is judged
  *
- * Leave first, hours second. There is no third rule and no threshold.
+ * A human's correction first, then leave, then hours. There is no threshold.
+ *
+ * A manager or admin can say what a day WAS, and that wins outright — the two
+ * computed sources are both capable of being wrong about a real day, and a
+ * person who was there is the better authority. The override never touches the
+ * hours: those keep reporting what Timo tracked, so "the manager says present"
+ * and "the machine recorded 5:37" stay two separate, visible facts.
  *
  *     HL / WO / PL / LWP / HD   whatever the calendar recorded, even when the
  *                               person worked that day anyway
@@ -92,6 +98,12 @@ export interface MonthPerformanceDay {
   code: MonthPerformanceCode;
   /** 'Diwali', 'Paid leave' — whatever the calendar called it. */
   label: string | null;
+  /**
+   * Set when a human corrected this day. `stale` means the computed answer has
+   * changed since the correction was made, so the two now disagree about a day
+   * they once agreed on.
+   */
+  override: { code: AttendanceOverrideCode; stale: boolean } | null;
 }
 
 export interface MonthPerformanceTotals {
@@ -138,6 +150,8 @@ export interface MonthPerformanceInput {
   /** Minutes Timo tracked for this person on this date. */
   trackedMinutesFor: (userId: string, date: string) => number;
   punchFor: PunchLookup;
+  /** A manager's or admin's correction for this person-day, if one exists. */
+  overrideFor?: (userId: string, date: string) => DayOverride | null;
   generatedAtMs: number;
 }
 
@@ -194,6 +208,13 @@ export function fmtMinutes(minutes: number): string {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
+/** A human's correction to one day, if one was made. */
+export interface DayOverride {
+  code: AttendanceOverrideCode;
+  /** What the report computed when the override was written. */
+  computedCode: string | null;
+}
+
 /**
  * The code for one day.
  *
@@ -207,6 +228,23 @@ export function fmtMinutes(minutes: number): string {
  * the tracked time.
  */
 export function codeForDay(
+  status: DayStatus | null,
+  trackedMinutes: number,
+  override?: DayOverride | null,
+): MonthPerformanceCode {
+  if (override) return override.code;
+  return computedCodeForDay(status, trackedMinutes);
+}
+
+/**
+ * What the day would read without anybody's correction.
+ *
+ * Kept separate so an override can be compared against it: the code recorded
+ * when the override was written is checked against this on every render, and a
+ * day whose ground has moved since is flagged rather than silently disagreeing
+ * with the calendar.
+ */
+export function computedCodeForDay(
   status: DayStatus | null,
   trackedMinutes: number,
 ): MonthPerformanceCode {
@@ -259,7 +297,9 @@ export function buildMonthPerformance(input: MonthPerformanceInput): MonthPerfor
       const inMinute = punch?.inMinute ?? null;
       const outMinute = punch?.outMinute ?? null;
       const workMinutes = Math.max(0, Math.round(input.trackedMinutesFor(user.id, date)));
-      const code = codeForDay(status, workMinutes);
+      const override = input.overrideFor?.(user.id, date) ?? null;
+      const computed = computedCodeForDay(status, workMinutes);
+      const code = override ? override.code : computed;
 
       countInto(totals, code);
       totals.workMinutes += workMinutes;
@@ -273,6 +313,9 @@ export function buildMonthPerformance(input: MonthPerformanceInput): MonthPerfor
         workMinutes,
         code,
         label: status?.label ?? null,
+        override: override
+          ? { code: override.code, stale: override.computedCode !== null && override.computedCode !== computed }
+          : null,
       };
     });
     return { user, days, totals };

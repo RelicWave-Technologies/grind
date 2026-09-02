@@ -37,6 +37,7 @@ import {
 import type { SelfProfileResponse } from '@grind/types/profile';
 import type { ShiftSchedule, Weekday } from '@grind/types/shifts';
 import type {
+  AttendanceOverrideCode,
   MemberReportDay,
   MemberReportDayAppsResponse,
   MemberReportDayScreenshotsResponse,
@@ -364,16 +365,73 @@ export function ReportsScreen() {
   );
 }
 
+/** What each attendance code means, spelled out for a tooltip. */
+const ATTENDANCE_LABEL: Record<string, string> = {
+  P: 'Present',
+  HD: 'Half day',
+  A: 'Absent',
+  WO: 'Weekly off',
+  HL: 'Holiday',
+  PL: 'Paid leave',
+  LWP: 'Unpaid leave',
+  '--': 'No shift assigned',
+};
+
+/**
+ * One day's attendance status, and — for a manager or admin — the way to
+ * correct it.
+ *
+ * A corrected day is marked. The point is not decoration: a reader has to be
+ * able to tell a judgement from a measurement, and a day somebody typed is a
+ * different kind of fact from a day the calendar and the clock agreed on.
+ * When the computed answer has moved since the correction was made, the day
+ * says so rather than quietly disagreeing with the calendar.
+ */
+function AttendanceStatusCell({
+  day,
+  onEdit,
+}: {
+  day: MemberReportDay;
+  onEdit?: (day: MemberReportDay) => void;
+}) {
+  const code = day.attendanceCode ?? '--';
+  const override = day.attendanceOverride ?? null;
+  const title = override
+    ? `${ATTENDANCE_LABEL[code] ?? code} — set by hand${override.stale ? '; the computed answer has changed since' : ''}`
+    : (ATTENDANCE_LABEL[code] ?? code);
+
+  const chip = (
+    <span
+      className={`rep-status-chip rep-status-chip--${code === '--' ? 'none' : code.toLowerCase()}${override ? ' is-override' : ''}`}
+      title={title}
+    >
+      {code}
+      {override && <span className="rep-status-mark" aria-hidden="true">{override.stale ? '!' : '\u00b7'}</span>}
+    </span>
+  );
+
+  if (!onEdit) return chip;
+  return (
+    <button type="button" className="rep-status-edit" onClick={() => onEdit(day)} title={`${title} — click to correct`}>
+      {chip}
+    </button>
+  );
+}
+
 function SelfReportTable({
   days,
   loading,
   tz,
   onOpenModal,
+  onEditStatus,
 }: {
   days: MemberReportDay[];
   loading: boolean;
   tz: string;
   onOpenModal: (modal: ReportModalState) => void;
+  /** Present only where the viewer may correct a day — the manager/admin
+   *  drawer. Absent on a person's own report, which is a record, not a form. */
+  onEditStatus?: (day: MemberReportDay) => void;
 }) {
   return (
     <Card variant="flush" className="rep-table-card">
@@ -393,6 +451,7 @@ function SelfReportTable({
                 <Th className="rep-col-date">Date</Th>
                 <Th className="rep-col-worked" align="center">Worked</Th>
                 <Th className="rep-col-start" align="center">Start</Th>
+                <Th className="rep-col-status" align="center">Status</Th>
                 <Th className="rep-col-punch" align="center">Punch in</Th>
                 <Th className="rep-col-punch" align="center">Punch out</Th>
                 <Th className="rep-col-approvals" align="center">Approvals</Th>
@@ -418,6 +477,9 @@ function SelfReportTable({
                   </Td>
                   <Td className="rep-col-start" align="center">
                     <Tag status={statusTag(day.shiftStatus)}>{shiftLabel(day.shiftStatus)}</Tag>
+                  </Td>
+                  <Td className="rep-col-status" align="center">
+                    <AttendanceStatusCell day={day} onEdit={onEditStatus} />
                   </Td>
                   <Td className="rep-col-punch" mono>
                     {day.punchInMinute === null ? '—' : fmtMinuteOfDay(day.punchInMinute)}
@@ -838,6 +900,11 @@ function TeamMemberDrawer({
   const [from, setFrom] = useState(initialFrom);
   const [to, setTo] = useState(initialTo);
   const [tab, setTab] = useState<DrawerTab>('reports');
+  /** The day a manager or admin is correcting, if any. */
+  const [editingDay, setEditingDay] = useState<MemberReportDay | null>(null);
+  // Correcting a day is the same authority as reading somebody else's report:
+  // whoever can see the row can fix it, and nobody else.
+  const canCorrectAttendance = hasCapability(me, 'reports.team.read');
   const canDecideApprovals =
     hasCapability(me, 'approvals.team.decide') ||
     hasCapability(me, 'approvals.workspace.decide');
@@ -931,6 +998,7 @@ function TeamMemberDrawer({
               member={q.data.member}
               tz={tz}
               onOpenModal={(modal) => onOpenModal({ ...modal, userId })}
+              onEditStatus={canCorrectAttendance ? setEditingDay : undefined}
             />
           )}
           {q.data && tab === 'approvals' && (
@@ -953,8 +1021,151 @@ function TeamMemberDrawer({
           )}
         </div>
       </aside>
+      {editingDay && (
+        <AttendanceOverrideDialog
+          day={editingDay}
+          userId={userId}
+          tz={tz}
+          onClose={() => setEditingDay(null)}
+          onSaved={() => {
+            // Every surface that shows this day has to move together, or the
+            // drawer and the table beneath it disagree about the same date.
+            void queryClient.invalidateQueries({ queryKey: ['reports', 'team', 'member', userId] });
+            void queryClient.invalidateQueries({ queryKey: ['reports', 'team'] });
+          }}
+        />
+      )}
     </div>,
     document.body,
+  );
+}
+
+/**
+ * The correction form for one day.
+ *
+ * A reason is required, not decoration: attendance feeds payroll and a person's
+ * record, and three months later "why" is the only question anybody asks. The
+ * computed answer is shown beside the choice so the person correcting it can
+ * see what they are overruling.
+ */
+function AttendanceOverrideDialog({
+  day,
+  userId,
+  tz,
+  onClose,
+  onSaved,
+}: {
+  day: MemberReportDay;
+  userId: string;
+  tz: string;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const existing = day.attendanceOverride;
+  const [code, setCode] = useState<AttendanceOverrideCode>(existing?.code ?? 'P');
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(action: 'save' | 'clear') {
+    setBusy(true);
+    setError(null);
+    try {
+      if (action === 'clear') {
+        await api('/v1/reports/attendance-override', {
+          method: 'DELETE',
+          json: { userId, date: day.date },
+        });
+      } else {
+        await api('/v1/reports/attendance-override', {
+          method: 'PUT',
+          json: { userId, date: day.date, code, reason: reason.trim() },
+        });
+      }
+      onSaved();
+      onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not save');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const computed = day.computedAttendanceCode ?? '--';
+  return (
+    <div className="rep-modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <div className="rep-modal rep-modal--override" role="dialog" aria-modal="true" onMouseDown={(e) => e.stopPropagation()}>
+        <header className="rep-modal-head">
+          <div>
+            <p className="ui-t-eyebrow">{fmtDayLabel(day.date, tz)}</p>
+            <h3 className="ui-t-card-title">Correct this day</h3>
+          </div>
+          <Button size="sm" variant="ghost" icon={<X size={15} strokeWidth={2} />} onClick={onClose} aria-label="Close" />
+        </header>
+
+        {/* What is being overruled, stated before the choice rather than after
+            it — a person correcting a day should see the day first. */}
+        <div className="rep-override-now">
+          <div className="rep-override-now-row">
+            <span className="ui-t-eyebrow">Reads as</span>
+            <span className={`rep-status-chip rep-status-chip--${computed === '--' ? 'none' : computed.toLowerCase()}`}>
+              {computed}
+            </span>
+            <span className="rep-override-now-label">{ATTENDANCE_LABEL[computed] ?? computed}</span>
+          </div>
+          <div className="rep-override-now-row">
+            <span className="ui-t-eyebrow">Tracked</span>
+            <span className="rep-override-now-hours">{fmtDurationMs(totalDayWorkedMs(day))}</span>
+            <span className="rep-override-now-note">hours are not changed by a correction</span>
+          </div>
+        </div>
+
+        <div className="rep-override-field">
+          <span className="ui-t-eyebrow">Correct it to</span>
+          <div className="rep-override-codes">
+            {(['P', 'A', 'HD', 'PL', 'LWP'] as const).map((c) => (
+              <button
+                key={c}
+                type="button"
+                className={`rep-override-code${code === c ? ' is-selected' : ''}`}
+                onClick={() => setCode(c)}
+                aria-pressed={code === c}
+              >
+                <span className={`rep-override-code-key rep-override-code-key--${c.toLowerCase()}`}>{c}</span>
+                <span className="rep-override-code-label">{ATTENDANCE_LABEL[c]}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <label className="rep-override-field">
+          <span className="ui-t-eyebrow">Why</span>
+          <textarea
+            className="rep-override-reason"
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            rows={3}
+            placeholder="Agent was down; present all day"
+          />
+        </label>
+
+        {error && <Banner status="danger">{error}</Banner>}
+
+        <footer className="rep-modal-foot">
+          {existing && (
+            <Button variant="ghost" onClick={() => void submit('clear')} disabled={busy}>
+              Remove correction
+            </Button>
+          )}
+          <div className="rep-modal-foot-right">
+            <Button variant="secondary" onClick={onClose} disabled={busy}>Cancel</Button>
+            <Button variant="primary" onClick={() => void submit('save')} disabled={busy || reason.trim().length === 0} loading={busy}>
+              Save
+            </Button>
+          </div>
+        </footer>
+      </div>
+    </div>
   );
 }
 
@@ -962,10 +1173,12 @@ function TeamMemberReportsPanel({
   member,
   tz,
   onOpenModal,
+  onEditStatus,
 }: {
   member: TeamReportMember;
   tz: string;
   onOpenModal: (modal: ReportModalState) => void;
+  onEditStatus?: (day: MemberReportDay) => void;
 }) {
   const summary = useMemo(() => summarize(member.days), [member.days]);
   return (
@@ -978,7 +1191,7 @@ function TeamMemberReportsPanel({
         <DrawerMetric label="Approvals" value={<ApprovalCounts member={member} />} />
         <DrawerMetric tone="mint" label="Activity" value={percentLabel(member.activityPercent)} />
       </div>
-      <SelfReportTable days={member.days} loading={false} tz={tz} onOpenModal={onOpenModal} />
+      <SelfReportTable days={member.days} loading={false} tz={tz} onOpenModal={onOpenModal} onEditStatus={onEditStatus} />
       {member.days.length === 0 && summary.approvalsTotal === 0 && (
         <EmptyState icon={<CalendarDays size={22} strokeWidth={1.8} />} title="No rows for this range" description="Try widening the date range." />
       )}

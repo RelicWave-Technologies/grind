@@ -39,6 +39,7 @@ model Workspace {
   leaveRequests             LeaveRequest[]
   leaveLedgerEntries        LeaveLedgerEntry[]
   attendancePunches         AttendancePunch[]
+  attendanceOverrides       AttendanceOverride[]
 }
 
 /// Workspace-wide capture policy. A single row per workspace (unique on
@@ -364,6 +365,8 @@ model User {
   leaveLedgerEntriesCreated        LeaveLedgerEntry[]        @relation("LeaveLedgerActor")
   companyHolidaysCreated           CompanyHoliday[]          @relation("HolidayCreator")
   attendancePunches                AttendancePunch[]
+  attendanceOverrides              AttendanceOverride[] @relation("AttendanceOverrideSubject")
+  attendanceOverridesAuthored      AttendanceOverride[] @relation("AttendanceOverrideAuthor")
 
   @@index([workspaceId])
   @@index([teamId])
@@ -1389,6 +1392,54 @@ model LeaveLedgerEntry {
 ///
 /// Rows are written externally. `@@unique([userId, date])` makes a re-import
 /// an upsert rather than a duplicate, so re-running a load is safe.
+/// A human's correction to one day's attendance status.
+///
+/// The report derives a status from the Working Calendar and Timo's tracked
+/// time. Both can be wrong about a real day — an agent that died mid-afternoon
+/// leaves a full day reading absent. A manager or admin says what the day was,
+/// and that answer wins.
+///
+/// Only the codes a person actually corrects live here. HOLIDAY and WEEKLY_OFF
+/// come from CompanyHoliday and the shift schedule; giving them a second home
+/// would let the same fact be true in two places and different in each.
+model AttendanceOverride {
+  id           String                 @id @default(cuid())
+  workspaceId  String
+  workspace    Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User                   @relation("AttendanceOverrideSubject", fields: [userId], references: [id], onDelete: Cascade)
+  /// Business calendar date in the workspace timezone — a date, not an instant.
+  date         DateTime               @db.Date
+  code         AttendanceOverrideCode
+  /// Why the day was corrected. Required: three months later this is the only
+  /// question anybody asks about it.
+  reason       String
+  /// What the report computed at the moment this was written. If today's
+  /// computed answer no longer matches, something underneath has changed —
+  /// leave arriving from Lark, time syncing late — and the report flags the day
+  /// rather than quietly disagreeing with the calendar.
+  computedCode String?
+  /// Who made the call. Nullable so deactivating a manager does not delete the
+  /// corrections they made to other people's months.
+  setById      String?
+  setBy        User?                  @relation("AttendanceOverrideAuthor", fields: [setById], references: [id], onDelete: SetNull)
+  setAt        DateTime               @default(now())
+  updatedAt    DateTime               @updatedAt
+
+  @@unique([userId, date])
+  @@index([workspaceId, date])
+}
+
+/// The statuses a person may set by hand. Deliberately not HOLIDAY or
+/// WEEKLY_OFF — those are configuration, not a judgement about one day.
+enum AttendanceOverrideCode {
+  P
+  A
+  HD
+  PL
+  LWP
+}
+
 model AttendancePunch {
   id          String    @id @default(cuid())
   workspaceId String
