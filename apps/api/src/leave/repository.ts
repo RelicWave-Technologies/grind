@@ -2,6 +2,7 @@ import { prisma, type Prisma } from '@grind/db';
 import { LEAVE_POLICY_DEFAULTS, type LeavePolicyDto } from '@grind/types';
 import { WorkingCalendar, type ShiftAssignmentInput } from './workingCalendar';
 import { projectBalance, type LeaveLedgerEntry } from './ledger';
+import { resolveUnfundedLeaveDays, type ChargeableLeaveDay, type LeaveCredit } from './leaveFunding';
 
 /**
  * The seam between the database and the two pure modules.
@@ -59,6 +60,11 @@ export function toLeavePolicyDto(row: {
  * Approved leave is fetched with an overlap predicate rather than a
  * containment one, so a request that starts before the window and ends inside
  * it still marks its days.
+ *
+ * The window is then widened backwards to the ledger's start month, because
+ * whether September's leave was paid depends on what August's leave already
+ * spent. Asking only about the month on screen would let the same day read as
+ * paid in one report and unpaid in another.
  */
 export async function loadWorkingCalendar(input: {
   workspaceId: string;
@@ -69,14 +75,26 @@ export async function loadWorkingCalendar(input: {
   db?: Tx | typeof prisma;
 }): Promise<WorkingCalendar> {
   const db = input.db ?? prisma;
-  const fromDate = fromIsoDate(input.from);
+
+  // Loaded before the rest rather than alongside it: the ledger start month
+  // decides how far back the other queries have to reach.
+  const policy = await loadOrCreateLeavePolicy(input.workspaceId, db);
+  const fundingFloor = policy.ledgerStartMonth ? `${policy.ledgerStartMonth}-01` : undefined;
+  const loadFrom = fundingFloor && fundingFloor < input.from ? fundingFloor : input.from;
+
+  const fromDate = fromIsoDate(loadFrom);
   const toDate = fromIsoDate(input.to);
 
-  const [policy, users, assignments, holidays, leave] = await Promise.all([
-    loadOrCreateLeavePolicy(input.workspaceId, db),
+  const [users, assignments, holidays, leave, credits] = await Promise.all([
     db.user.findMany({
       where: { id: { in: input.userIds } },
-      select: { id: true, teamId: true, lastSaturdayOffOverride: true },
+      select: {
+        id: true,
+        teamId: true,
+        lastSaturdayOffOverride: true,
+        joinedOn: true,
+        createdAt: true,
+      },
     }),
     db.shiftAssignment.findMany({
       where: {
@@ -114,6 +132,17 @@ export async function loadWorkingCalendar(input: {
         reason: true,
       },
     }),
+    // Only what adds to a balance. Consumption is deliberately left out: the
+    // walk below re-spends the leave day by day, and reading the debits too
+    // would charge every day twice.
+    db.leaveLedgerEntry.findMany({
+      where: {
+        userId: { in: input.userIds },
+        kind: { in: ['ACCRUAL', 'ADJUSTMENT'] },
+        effectiveOn: { lte: toDate },
+      },
+      select: { userId: true, effectiveOn: true, days: true },
+    }),
   ]);
 
   const userTeamIds: Record<string, string | null> = {};
@@ -135,7 +164,7 @@ export async function loadWorkingCalendar(input: {
     });
   }
 
-  return new WorkingCalendar({
+  const shared = {
     tz: input.tz,
     lastSaturdayOffFor,
     shiftAssignments,
@@ -149,7 +178,56 @@ export async function loadWorkingCalendar(input: {
       kind: l.kind,
       label: l.kind === 'PAID' ? 'Paid leave' : 'Unpaid leave',
     })),
+  };
+
+  // Built twice, from one set of rows. The first pass prices each leave day —
+  // a day that was already a weekly off or a holiday costs nothing, and that
+  // rule lives in the calendar, not here. The second pass is the same calendar
+  // told which of those days the balance failed to cover. Constructing is just
+  // indexing, so the second one costs nothing worth avoiding.
+  const priced = new WorkingCalendar(shared);
+
+  const accrualStartFor: Record<string, string | undefined> = {};
+  for (const u of users) accrualStartFor[u.id] = toIsoDate(u.joinedOn ?? u.createdAt);
+
+  const leaveDays: ChargeableLeaveDay[] = [];
+  for (const l of shared.approvedLeave) {
+    if (l.kind !== 'PAID') continue;
+    for (const date of datesBetween(l.startDate, l.endDate)) {
+      if (date > input.to) break;
+      const status = priced.dayStatus(l.userId, date);
+      leaveDays.push({ userId: l.userId, date, cost: status.chargedDays });
+    }
+  }
+
+  const creditRows: LeaveCredit[] = credits.map((c) => ({
+    userId: c.userId,
+    effectiveOn: toIsoDate(c.effectiveOn),
+    days: c.days,
+  }));
+
+  return new WorkingCalendar({
+    ...shared,
+    unfundedLeaveDays: resolveUnfundedLeaveDays({
+      credits: creditRows,
+      leaveDays,
+      since: fundingFloor,
+      accrualStartFor,
+    }),
   });
+}
+
+/** Every YYYY-MM-DD from `start` to `end`, inclusive. */
+function* datesBetween(start: string, end: string): Generator<string> {
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  let t = Date.parse(`${start}T00:00:00.000Z`);
+  const last = Date.parse(`${end}T00:00:00.000Z`);
+  // A malformed bound would otherwise spin forever.
+  if (!Number.isFinite(t) || !Number.isFinite(last)) return;
+  while (t <= last) {
+    yield new Date(t).toISOString().slice(0, 10);
+    t += DAY_MS;
+  }
 }
 
 /** Ledger rows for one person, oldest first, as the pure projection wants them. */
