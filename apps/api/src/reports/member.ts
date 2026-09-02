@@ -22,6 +22,7 @@ import {
 import type { EntryLiveEvidenceMap } from '../insights/liveEntryEvidence';
 import { resolveEffectiveEntrySegmentEnds } from '../insights/openSegmentEvidence';
 import type { DayStatus } from '@grind/types';
+import { computedCodeForDay, type DayOverride } from './monthPerformance';
 import { buildTimesheetMatrix, dateRange, type TimesheetSegmentInput } from '../insights/timesheets';
 import type { RoleTitle } from '../scoring/presets';
 import { scoreMinute } from '../scoring/score';
@@ -193,6 +194,12 @@ export function buildMemberReportDays(input: {
    * falling back to activity — the two are different measurements.
    */
   punchFor?: (userId: string, date: string) => { inMinute: number | null; outMinute: number | null } | null;
+  /**
+   * A manager's or admin's correction for a day, supplied by the route. The
+   * report table shows the corrected code and marks it as corrected, so a
+   * reader can tell a judgement from a measurement.
+   */
+  overrideFor?: (userId: string, date: string) => DayOverride | null;
 }): MemberReportDay[] {
   const iconFor = input.iconFor ?? appIconUrl;
   const entries = capOpenEntries(input.entries, input.evidenceByEntry, input.now);
@@ -312,6 +319,11 @@ export function buildMemberReportDays(input: {
     }));
     const approvals = countApprovalsForWindow(input.manualRequests, dayStart, dayEnd);
     const punch = input.punchFor?.(input.userId, date) ?? null;
+    const dayStatus = input.dayStatusFor?.(input.userId, date) ?? null;
+    const override = input.overrideFor?.(input.userId, date) ?? null;
+    // Total tracked time, in minutes — the same measure the month performance
+    // report bands on, so the two surfaces cannot call a day differently.
+    const computedCode = computedCodeForDay(dayStatus, Math.round(cell.totalMs / 60_000));
     const screenshotCount = input.screenshots.filter((s) =>
       s.capturedAt.getTime() >= dayStart && s.capturedAt.getTime() < dayEnd,
     ).length;
@@ -339,7 +351,16 @@ export function buildMemberReportDays(input: {
       activityPercent: activityPercent(daySamples, input.activityRoleTitle, meetingIntervals),
       screenshots: { count: screenshotCount },
       topApps,
-      dayStatus: input.dayStatusFor?.(input.userId, date) ?? null,
+      dayStatus: dayStatus ?? null,
+      attendanceCode: override ? override.code : computedCode,
+      attendanceOverride: override
+        ? {
+            code: override.code,
+            // The ground moved since somebody made this call.
+            stale: override.computedCode !== null && override.computedCode !== computedCode,
+          }
+        : null,
+      computedAttendanceCode: computedCode,
     };
   });
 }

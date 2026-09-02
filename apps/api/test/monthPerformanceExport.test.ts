@@ -280,3 +280,109 @@ describe('GET /v1/reports/month-performance.xlsx', () => {
     expect(body.length).toBeGreaterThan(1000);
   });
 });
+
+describe('correcting a day by hand', () => {
+  const put = (token: string, body: unknown) =>
+    request(app).put('/v1/reports/attendance-override').set(bearer(token)).send(body);
+  const del = (token: string, body: unknown) =>
+    request(app).delete('/v1/reports/attendance-override').set(bearer(token)).send(body);
+
+  /** The Status row for one person, as the CSV renders it. */
+  async function statusRow(token: string, email: string) {
+    const res = await request(app)
+      .get('/v1/reports/month-performance.csv?month=2026-08')
+      .set(bearer(token));
+    return blockFor(res.text, email)![7]!.split(',');
+  }
+
+  it('turns an absent day present, and the export follows', async () => {
+    const s = await seed();
+    await assignShift(s.ws.id, s.inTeam.id);
+
+    // 2026-08-03 is a Monday with nothing tracked: absent.
+    expect((await statusRow(s.admin.token, s.inTeam.email))[3]).toBe('A');
+
+    const res = await put(s.admin.token, {
+      userId: s.inTeam.id, date: '2026-08-03', code: 'P', reason: 'Agent was down; present all day',
+    });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ ok: true, code: 'P', computedCode: 'A' });
+
+    expect((await statusRow(s.admin.token, s.inTeam.email))[3]).toBe('P');
+  });
+
+  it('clears back to whatever the report computes', async () => {
+    const s = await seed();
+    await assignShift(s.ws.id, s.inTeam.id);
+    await put(s.admin.token, { userId: s.inTeam.id, date: '2026-08-03', code: 'P', reason: 'x' });
+    expect((await statusRow(s.admin.token, s.inTeam.email))[3]).toBe('P');
+
+    const res = await del(s.admin.token, { userId: s.inTeam.id, date: '2026-08-03' });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ ok: true, cleared: true });
+    expect((await statusRow(s.admin.token, s.inTeam.email))[3]).toBe('A');
+  });
+
+  it('replaces a correction rather than stacking a second one', async () => {
+    const s = await seed();
+    await assignShift(s.ws.id, s.inTeam.id);
+    await put(s.admin.token, { userId: s.inTeam.id, date: '2026-08-03', code: 'P', reason: 'first' });
+    await put(s.admin.token, { userId: s.inTeam.id, date: '2026-08-03', code: 'PL', reason: 'actually on leave' });
+
+    const rows = await prisma.attendanceOverride.findMany({ where: { userId: s.inTeam.id } });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ code: 'PL', reason: 'actually on leave' });
+    expect((await statusRow(s.admin.token, s.inTeam.email))[3]).toBe('PL');
+  });
+
+  it('records who made the call and why', async () => {
+    const s = await seed();
+    await assignShift(s.ws.id, s.inTeam.id);
+    await put(s.admin.token, {
+      userId: s.inTeam.id, date: '2026-08-03', code: 'P', reason: 'Badged in; agent crashed',
+    });
+    const row = await prisma.attendanceOverride.findFirst({ where: { userId: s.inTeam.id } });
+    expect(row).toMatchObject({ setById: s.admin.id, reason: 'Badged in; agent crashed', computedCode: 'A' });
+    expect(row!.setAt).toBeInstanceOf(Date);
+  });
+
+  it('refuses a reason-less correction', async () => {
+    const s = await seed();
+    const res = await put(s.admin.token, { userId: s.inTeam.id, date: '2026-08-03', code: 'P', reason: '  ' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('invalid_request');
+  });
+
+  it('refuses a code a person may not set by hand', async () => {
+    const s = await seed();
+    const res = await put(s.admin.token, { userId: s.inTeam.id, date: '2026-08-03', code: 'HL', reason: 'x' });
+    expect(res.status).toBe(400);
+  });
+
+  it('will not let a manager correct somebody outside their team', async () => {
+    const s = await seed();
+    const res = await put(s.manager.token, {
+      userId: s.outsider.id, date: '2026-08-03', code: 'P', reason: 'not mine to correct',
+    });
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe('out_of_scope');
+    expect(await prisma.attendanceOverride.count({ where: { userId: s.outsider.id } })).toBe(0);
+  });
+
+  it('lets a manager correct their own team', async () => {
+    const s = await seed();
+    await assignShift(s.ws.id, s.inTeam.id);
+    const res = await put(s.manager.token, {
+      userId: s.inTeam.id, date: '2026-08-03', code: 'P', reason: 'mine to correct',
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it('refuses a member entirely', async () => {
+    const s = await seed();
+    const res = await put(s.inTeam.token, {
+      userId: s.inTeam.id, date: '2026-08-03', code: 'P', reason: 'self-serve',
+    });
+    expect(res.status).toBe(403);
+  });
+});

@@ -9,6 +9,7 @@ import { buildTimesheetMatrix, type TimesheetSegmentInput } from '../insights/ti
 import { timesheetCalendarInputs } from '../leave';
 import {
   buildMonthPerformance,
+  type DayOverride,
   type MonthPerformanceReport,
   type MonthPerformanceUser,
 } from './monthPerformance';
@@ -62,9 +63,10 @@ export function resolveReportMonth(
 /**
  * Load the month performance grid.
  *
- * Three reads: the tracked time that decides whether a day was worked, the
- * Working Calendar that the Lark leave integration feeds, and the punch records
- * behind the Office In / Office Out rows.
+ * Four reads: the tracked time that decides whether a day was worked, the
+ * Working Calendar that the Lark leave integration feeds, the punch records
+ * behind the Office In / Office Out rows, and any corrections a manager or
+ * admin has made to individual days.
  *
  * The timesheet matrix is built the same way every other surface builds it, so
  * the hours here cannot disagree with the hours on /attendance. What this does
@@ -110,7 +112,7 @@ export async function loadMonthPerformanceReport(input: {
   const lookbackStart = new Date(firstDay.start.getTime() - DAY_MS);
   const lookbackEnd = new Date(lastDay.end.getTime() + DAY_MS);
 
-  const [calendar, punchFor, entries, invalidations] = await Promise.all([
+  const [calendar, punchFor, entries, invalidations, overrides] = await Promise.all([
     timesheetCalendarInputs({
       workspaceId: input.workspaceId,
       tz: range.tz,
@@ -128,7 +130,25 @@ export async function loadMonthPerformanceReport(input: {
       include: { segments: { select: { kind: true, startedAt: true, endedAt: true } } },
     }),
     userIds.length === 0 ? [] : loadTimeInvalidationsForUsers(userIds, lookbackStart, lookbackEnd),
+    userIds.length === 0 ? [] : prisma.attendanceOverride.findMany({
+      where: {
+        userId: { in: userIds },
+        date: { gte: new Date(`${range.from}T00:00:00Z`), lte: new Date(`${range.to}T00:00:00Z`) },
+      },
+      select: { userId: true, date: true, code: true, computedCode: true },
+    }),
   ]);
+
+  const overrideIndex = new Map<string, DayOverride>();
+  for (const o of overrides) {
+    // A DATE column reads back as an epoch-anchored Date; no timezone applies.
+    overrideIndex.set(`${o.userId}|${o.date.toISOString().slice(0, 10)}`, {
+      code: o.code,
+      computedCode: o.computedCode,
+    });
+  }
+  const overrideFor = (userId: string, date: string): DayOverride | null =>
+    overrideIndex.get(`${userId}|${date}`) ?? null;
 
   const nowMs = input.nowMs ?? Date.now();
   const now = new Date(nowMs);
@@ -175,6 +195,7 @@ export async function loadMonthPerformanceReport(input: {
     dayStatusFor: calendar.dayStatusFor,
     trackedMinutesFor,
     punchFor,
+    overrideFor,
     generatedAtMs: nowMs,
   });
 }
