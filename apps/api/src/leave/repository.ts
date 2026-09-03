@@ -145,6 +145,11 @@ export async function loadWorkingCalendar(input: {
         userId: { in: input.userIds },
         kind: { in: ['ACCRUAL', 'ADJUSTMENT'] },
         effectiveOn: { lte: toDate },
+        // The entries a correction wrote are left out on purpose. They exist so
+        // the statement agrees with the report about what a corrected day cost;
+        // the walk below already prices that day from the correction itself, and
+        // reading the entry too would spend the same half day twice.
+        NOT: { sourceKey: { startsWith: 'override:' } },
       },
       select: { userId: true, effectiveOn: true, days: true },
     }),

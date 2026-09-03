@@ -281,11 +281,12 @@ describe('GET /v1/reports/month-performance.xlsx', () => {
   });
 });
 
+const put = (token: string, body: unknown) =>
+  request(app).put('/v1/reports/attendance-override').set(bearer(token)).send(body);
+const del = (token: string, body: unknown) =>
+  request(app).delete('/v1/reports/attendance-override').set(bearer(token)).send(body);
+
 describe('correcting a day by hand', () => {
-  const put = (token: string, body: unknown) =>
-    request(app).put('/v1/reports/attendance-override').set(bearer(token)).send(body);
-  const del = (token: string, body: unknown) =>
-    request(app).delete('/v1/reports/attendance-override').set(bearer(token)).send(body);
 
   /** The Status row for one person, as the CSV renders it. */
   async function statusRow(token: string, email: string) {
@@ -572,5 +573,186 @@ describe('a correction moves the days after it', () => {
     const after = await statusRow(s.admin.token, s.inTeam.email);
     expect(after(10)).toBe('P');
     expect(after(11)).toBe('PL');
+  });
+});
+
+/**
+ * The Bhojraj case, both halves of it.
+ *
+ * A day accrued, a half day of leave from Lark, a manager calling another day
+ * half a day of leave, and a full day after that. Before the correction reached
+ * the ledger the report said three leave days had been taken while the
+ * statement said one and a half, and both numbers were on screen at once.
+ */
+describe('a correction reaches the balance, not just the labels', () => {
+  async function setup() {
+    const s = await seed();
+    await assignShift(s.ws.id, s.inTeam.id);
+    await prisma.user.update({
+      where: { id: s.inTeam.id },
+      data: { joinedOn: new Date('2026-01-01T00:00:00Z') },
+    });
+    await prisma.leavePolicy.create({
+      data: { workspaceId: s.ws.id, monthlyAccrualDays: 1, ledgerStartMonth: '2026-08' },
+    });
+    await prisma.leaveLedgerEntry.create({
+      data: {
+        workspaceId: s.ws.id,
+        userId: s.inTeam.id,
+        kind: 'ACCRUAL',
+        days: 1,
+        effectiveOn: new Date('2026-08-01T00:00:00Z'),
+        sourceKey: `accr-bh-${s.inTeam.id}`,
+      },
+    });
+    return s;
+  }
+
+  /**
+   * Net days of leave the ledger says August cost — everything but the accrual.
+   *
+   * Net, not the sum of the negatives: a correction that hands a day back is a
+   * positive entry, and counting only what was taken would miss it entirely.
+   */
+  const consumedFor = async (userId: string) => {
+    const rows = await prisma.leaveLedgerEntry.findMany({
+      where: {
+        userId,
+        kind: { not: 'ACCRUAL' },
+        effectiveOn: { gte: new Date('2026-08-01T00:00:00Z') },
+      },
+    });
+    const total = rows.reduce((sum, r) => sum + r.days, 0);
+    // `-0` and `0` are different to Object.is, and nobody reading this means
+    // them to be.
+    return total === 0 ? 0 : -total;
+  };
+
+  it('charges a day a manager called leave that nobody had filed', async () => {
+    const s = await setup();
+    await prisma.leaveRequest.create({
+      data: {
+        clientUuid: ulid(),
+        workspaceId: s.ws.id,
+        userId: s.inTeam.id,
+        kind: 'PAID',
+        startDate: new Date('2026-08-10T00:00:00Z'),
+        endDate: new Date('2026-08-10T00:00:00Z'),
+        portion: 'FIRST_HALF',
+        chargedDays: 0.5,
+        reason: 'headache',
+        status: 'APPROVED',
+      },
+    });
+    await prisma.leaveLedgerEntry.create({
+      data: {
+        workspaceId: s.ws.id,
+        userId: s.inTeam.id,
+        kind: 'CONSUMPTION',
+        days: -0.5,
+        effectiveOn: new Date('2026-08-10T00:00:00Z'),
+        sourceKey: `leave-bh-${s.inTeam.id}`,
+      },
+    });
+    expect(await consumedFor(s.inTeam.id)).toBe(0.5);
+
+    await put(s.admin.token, {
+      userId: s.inTeam.id, date: '2026-08-14', code: 'HALF_LEAVE', reason: 'no application',
+    });
+
+    // Half a day more, and the statement now agrees with the grid about how
+    // many days of leave August held.
+    expect(await consumedFor(s.inTeam.id)).toBe(1);
+    const entry = await prisma.leaveLedgerEntry.findUnique({
+      where: { sourceKey: `override:${s.inTeam.id}:2026-08-14` },
+    });
+    expect(entry).toMatchObject({ kind: 'ADJUSTMENT', days: -0.5 });
+  });
+
+  it('hands back what Lark took when a correction says the day was worked', async () => {
+    const s = await setup();
+    await prisma.leaveRequest.create({
+      data: {
+        clientUuid: ulid(),
+        workspaceId: s.ws.id,
+        userId: s.inTeam.id,
+        kind: 'PAID',
+        startDate: new Date('2026-08-10T00:00:00Z'),
+        endDate: new Date('2026-08-10T00:00:00Z'),
+        portion: 'FULL',
+        chargedDays: 1,
+        reason: 'casual',
+        status: 'APPROVED',
+      },
+    });
+    await prisma.leaveLedgerEntry.create({
+      data: {
+        workspaceId: s.ws.id,
+        userId: s.inTeam.id,
+        kind: 'CONSUMPTION',
+        days: -1,
+        effectiveOn: new Date('2026-08-10T00:00:00Z'),
+        sourceKey: `leave-bh2-${s.inTeam.id}`,
+      },
+    });
+
+    await put(s.admin.token, {
+      userId: s.inTeam.id, date: '2026-08-10', code: 'P', reason: 'he was here all day',
+    });
+    const entry = await prisma.leaveLedgerEntry.findUnique({
+      where: { sourceKey: `override:${s.inTeam.id}:2026-08-10` },
+    });
+    expect(entry).toMatchObject({ days: 1 });
+    expect(await consumedFor(s.inTeam.id)).toBe(0);
+  });
+
+  it('writes nothing when the correction agrees with the leave already on file', async () => {
+    const s = await setup();
+    await prisma.leaveRequest.create({
+      data: {
+        clientUuid: ulid(),
+        workspaceId: s.ws.id,
+        userId: s.inTeam.id,
+        kind: 'PAID',
+        startDate: new Date('2026-08-10T00:00:00Z'),
+        endDate: new Date('2026-08-10T00:00:00Z'),
+        portion: 'FULL',
+        chargedDays: 1,
+        reason: 'casual',
+        status: 'APPROVED',
+      },
+    });
+    await put(s.admin.token, {
+      userId: s.inTeam.id, date: '2026-08-10', code: 'FULL_LEAVE', reason: 'confirming it',
+    });
+    // Same answer, so there is no difference to record.
+    expect(await prisma.leaveLedgerEntry.findUnique({
+      where: { sourceKey: `override:${s.inTeam.id}:2026-08-10` },
+    })).toBeNull();
+  });
+
+  it('takes the entry back when the correction is removed', async () => {
+    const s = await setup();
+    await put(s.admin.token, {
+      userId: s.inTeam.id, date: '2026-08-14', code: 'FULL_LEAVE', reason: 'away',
+    });
+    expect(await consumedFor(s.inTeam.id)).toBe(1);
+
+    await del(s.admin.token, { userId: s.inTeam.id, date: '2026-08-14', reason: 'my mistake' });
+    expect(await consumedFor(s.inTeam.id)).toBe(0);
+    expect(await prisma.leaveLedgerEntry.findUnique({
+      where: { sourceKey: `override:${s.inTeam.id}:2026-08-14` },
+    })).toBeNull();
+  });
+
+  it('costs nothing on a day off, whatever a correction says', async () => {
+    const s = await setup();
+    // 2026-08-23 is a Sunday, and the seeded shift has Sunday off.
+    await put(s.admin.token, {
+      userId: s.inTeam.id, date: '2026-08-23', code: 'FULL_LEAVE', reason: 'called in',
+    });
+    expect(await prisma.leaveLedgerEntry.findUnique({
+      where: { sourceKey: `override:${s.inTeam.id}:2026-08-23` },
+    })).toBeNull();
   });
 });

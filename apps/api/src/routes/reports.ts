@@ -482,6 +482,7 @@ reportsRouter.put('/attendance-override', requireCapability('reports.team.read')
       workspaceId: req.scope.workspaceId,
       userId,
       date,
+      tz: range.tz,
       code,
       reason,
       setById: req.user.sub,
