@@ -142,9 +142,13 @@ export async function loadMonthPerformanceReport(input: {
   const overrideIndex = new Map<string, DayOverride>();
   for (const o of overrides) {
     // A DATE column reads back as an epoch-anchored Date; no timezone applies.
-    overrideIndex.set(`${o.userId}|${o.date.toISOString().slice(0, 10)}`, {
+    const date = o.date.toISOString().slice(0, 10);
+    overrideIndex.set(`${o.userId}|${date}`, {
       code: o.code,
       computedCode: o.computedCode,
+      // The correction says the day was leave; this says how much of it the
+      // balance paid for. Same walk that answers it for leave filed in Lark.
+      fundedDays: calendar.fundedDaysFor(o.userId, date),
     });
   }
   const overrideFor = (userId: string, date: string): DayOverride | null =>

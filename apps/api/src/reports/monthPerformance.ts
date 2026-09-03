@@ -1,4 +1,4 @@
-import type { AttendanceOverrideCode, DayStatus } from '@grind/types';
+import { attendanceOverrideShape, type AttendanceOverrideCode, type DayStatus } from '@grind/types';
 import type { PunchLookup } from '../attendance/punches';
 import { weekdayForDate } from '../leave';
 
@@ -228,6 +228,12 @@ export interface DayOverride {
   code: AttendanceOverrideCode;
   /** What the report computed when the override was written. */
   computedCode: string | null;
+  /**
+   * Days of this date's leave a balance covered, when it did not cover the
+   * whole cost. Undefined means covered — or that nobody asked, which reads the
+   * same and is the answer a caller without a ledger should get.
+   */
+  fundedDays?: number;
 }
 
 /**
@@ -247,20 +253,36 @@ export function codeForDay(
   trackedMinutes: number,
   override?: DayOverride | null,
 ): MonthPerformanceCode {
-  if (override) return overrideCode(override.code);
+  if (override) return overrideCode(override);
   return computedCodeForDay(status, trackedMinutes);
 }
 
 /**
- * A hand-set code as the report renders it.
+ * A hand-set correction as the report renders it.
  *
- * Corrections written before half days split into paid and unpaid carry the
- * retired `HD`. They are read as `PL_HD` rather than rewritten in the database:
- * the enum still holds the old value, so an untouched row keeps saying what its
- * author actually chose, and only the rendering moves on.
+ * The correction says what shape the day was — present, absent, half a day
+ * away, a whole day away. Whether the leave was paid is not its to say: that
+ * is the balance's answer, and it arrives as `fundedDays` from the same walk
+ * that decides it for leave filed in Lark. So a manager cannot hand out paid
+ * leave the ledger will not back, and does not have to guess at a balance to
+ * record what they saw.
+ *
+ * Retired spellings are read as the shape they described rather than rewritten
+ * in the database: an untouched row keeps saying what its author chose, and
+ * only the rendering moves on.
  */
-export function overrideCode(code: AttendanceOverrideCode): MonthPerformanceCode {
-  return code === 'HD' ? 'PL_HD' : code;
+export function overrideCode(override: DayOverride): MonthPerformanceCode {
+  const funded = override.fundedDays;
+  switch (attendanceOverrideShape(override.code)) {
+    case 'P': return 'P';
+    case 'A': return 'A';
+    // A half day costs half a day, so a balance either covered it or covered
+    // none of it. There is no third answer to draw.
+    case 'HALF_LEAVE': return funded == null ? 'PL_HD' : 'LWP_HD';
+    case 'FULL_LEAVE':
+      if (funded == null) return 'PL';
+      return funded > 0 ? 'PL_HD/LWP_HD' : 'LWP';
+  }
 }
 
 /**
@@ -335,7 +357,7 @@ export function buildMonthPerformance(input: MonthPerformanceInput): MonthPerfor
       const workMinutes = Math.max(0, Math.round(input.trackedMinutesFor(user.id, date)));
       const override = input.overrideFor?.(user.id, date) ?? null;
       const computed = computedCodeForDay(status, workMinutes);
-      const code = override ? overrideCode(override.code) : computed;
+      const code = override ? overrideCode(override) : computed;
 
       countInto(totals, code);
       totals.workMinutes += workMinutes;

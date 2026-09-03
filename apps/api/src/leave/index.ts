@@ -74,11 +74,14 @@ export async function timesheetCalendarInputs(input: {
   to: string;
 }): Promise<{
   dayStatusFor: (userId: string, date: string) => DayStatus | null;
+  /** Days of that date's leave a balance covered, undefined when it covered all. */
+  fundedDaysFor: (userId: string, date: string) => number | undefined;
   userIds: string[];
 }> {
   const calendar = await loadWorkingCalendar(input);
   return {
     dayStatusFor: (userId, date) => calendar.dayStatus(userId, date),
+    fundedDaysFor: (userId, date) => calendar.fundedDaysFor(userId, date),
     userIds: input.userIds,
   };
 }

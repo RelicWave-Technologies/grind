@@ -352,7 +352,7 @@ export function buildMemberReportDays(input: {
       screenshots: { count: screenshotCount },
       topApps,
       dayStatus: dayStatus ?? null,
-      attendanceCode: override ? overrideCode(override.code) : computedCode,
+      attendanceCode: override ? overrideCode(override) : computedCode,
       attendanceOverride: override
         ? {
             code: override.code,

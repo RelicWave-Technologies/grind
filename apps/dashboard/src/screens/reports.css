@@ -1644,14 +1644,14 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--ui-sp-3);
 }
-/* Present is the common answer, so it takes the full first row. */
-.rep-override-codes > :first-child { grid-column: 1 / -1; }
+/* Two by two: present/absent on top, the two leave shapes under them, so the
+   pair that costs a balance reads as its own row. */
 
 .rep-override-code {
   display: flex;
   align-items: center;
   gap: var(--ui-sp-4);
-  min-height: 44px;
+  min-height: 56px;
   padding: var(--ui-sp-3) var(--ui-sp-4);
   border: 1px solid var(--ui-line);
   border-radius: var(--ui-r-sm);
@@ -1686,13 +1686,111 @@
   letter-spacing: 0.4px;
   color: var(--ui-ink);
 }
-.rep-override-code-key--p   { background: var(--ui-lime); }
-.rep-override-code-key--a   { background: var(--ui-pink); }
-.rep-override-code-key--hd  { background: var(--ui-cream); }
-.rep-override-code-key--pl  { background: var(--ui-mint); }
-.rep-override-code-key--lwp { background: var(--ui-coral); }
+.rep-override-code-key--p          { background: var(--ui-lime); }
+.rep-override-code-key--a          { background: var(--ui-pink); }
+.rep-override-code-key--half_leave { background: var(--ui-cream); }
+.rep-override-code-key--full_leave { background: var(--ui-mint); }
 
-.rep-override-code-label { font-size: 13.5px; font-weight: 450; }
+/* Hierarchy by weight, not by grey: the label carries it and the hint recedes
+   underneath at the same ink. */
+.rep-override-code-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.rep-override-code-label { font-size: 13.5px; font-weight: 520; }
+.rep-override-code-hint { font-size: 12px; font-weight: 330; }
+.rep-override-code:not(.is-selected) .rep-override-code-hint { color: var(--ui-ink-2); }
+
+/* Said only while a leave shape is chosen, because it is only then that
+   somebody might expect to be choosing paid or unpaid. */
+.rep-override-note {
+  margin: 0;
+  padding: var(--ui-sp-3) var(--ui-sp-4);
+  border-radius: var(--ui-r-sm);
+  background: var(--ui-surface-sunken);
+  font-size: 12px;
+  font-weight: 350;
+  line-height: 1.45;
+  color: var(--ui-ink-2);
+}
+
+/* ---- Earlier decisions ------------------------------------------------- */
+
+.rep-override-hist {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-sp-3);
+  padding-top: var(--ui-sp-4);
+  border-top: 1px solid var(--ui-line);
+}
+
+.rep-override-hist-note {
+  margin: 0;
+  font-family: var(--ui-font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ui-ink-2);
+}
+
+.rep-override-hist-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 168px;
+  overflow-y: auto;
+}
+
+.rep-override-hist-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--ui-sp-3) 0;
+}
+.rep-override-hist-row + .rep-override-hist-row { border-top: 1px solid var(--ui-line-faint); }
+
+.rep-override-hist-top {
+  display: flex;
+  align-items: baseline;
+  gap: var(--ui-sp-3);
+}
+
+.rep-override-hist-code { font-size: 13px; font-weight: 520; }
+.rep-override-hist-code.is-cleared { font-weight: 400; font-style: italic; }
+
+.rep-override-hist-by {
+  font-size: 12.5px;
+  font-weight: 350;
+  color: var(--ui-ink-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Mono uppercase for the date, the same taxonomy voice the rest of the app
+   uses for times and ages. */
+.rep-override-hist-at {
+  margin-left: auto;
+  flex: none;
+  font-family: var(--ui-font-mono, ui-monospace, monospace);
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ui-ink-2);
+}
+
+.rep-override-hist-why {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 350;
+  line-height: 1.45;
+  color: var(--ui-ink);
+}
 
 .rep-override-reason {
   width: 100%;
