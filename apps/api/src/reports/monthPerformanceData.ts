@@ -7,6 +7,7 @@ import { resolveEffectiveEntrySegmentEnds } from '../insights/openSegmentEvidenc
 import { loadTimeInvalidationsForUsers } from '../insights/timeInvalidations';
 import { buildTimesheetMatrix, type TimesheetSegmentInput } from '../insights/timesheets';
 import { timesheetCalendarInputs } from '../leave';
+import { loadBalances } from '../leave/repository';
 import {
   buildMonthPerformance,
   type DayOverride,
@@ -191,6 +192,11 @@ export async function loadMonthPerformanceReport(input: {
   const trackedMinutesFor = (userId: string, date: string): number =>
     Math.round((matrix?.cells[userId]?.[date]?.totalMs ?? 0) / 60_000);
 
+  // As of the last day of the month, not today: a report of August has to keep
+  // saying the same thing in October, and a balance read at render time would
+  // drift away from the days printed beside it.
+  const balances = userIds.length === 0 ? {} : await loadBalances(userIds, range.to);
+
   return buildMonthPerformance({
     month: range.month,
     tz: range.tz,
@@ -200,6 +206,7 @@ export async function loadMonthPerformanceReport(input: {
     trackedMinutesFor,
     punchFor,
     overrideFor,
+    balanceFor: (userId) => balances[userId]?.balanceDays,
     generatedAtMs: nowMs,
   });
 }

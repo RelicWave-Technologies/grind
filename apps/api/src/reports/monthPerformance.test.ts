@@ -9,6 +9,7 @@ import {
   formatMonthPerformanceCsv,
   monthDates,
   monthPerformanceBlock,
+  monthPerformanceSummaryPairs,
   type MonthPerformanceUser,
 } from './monthPerformance';
 
@@ -469,5 +470,61 @@ describe('a human correction to a day', () => {
     const day = dayOf(built, '2026-08-03');
     expect(day.code).toBe('P');
     expect(day.override).toBeNull();
+  });
+});
+
+describe('the balance the month left behind', () => {
+  it('prints as the last pair, and only when somebody asked', () => {
+    const withBalance = buildMonthPerformance({
+      month: '2026-08',
+      tz: 'Asia/Kolkata',
+      companyName: 'EMIAC',
+      users: [user],
+      dayStatusFor: () => null,
+      trackedMinutesFor: () => 0,
+      punchFor: noPunches,
+      balanceFor: () => -0.5,
+      generatedAtMs: Date.UTC(2026, 8, 1),
+    });
+    const pairs = monthPerformanceSummaryPairs(withBalance.rows[0]!);
+    expect(pairs[pairs.length - 1]).toEqual(['Leave Balance', '-0.5']);
+    expect(withBalance.rows[0]!.balanceDays).toBe(-0.5);
+  });
+
+  it('says nothing at all when the caller has no ledger', () => {
+    const without = buildMonthPerformance({
+      month: '2026-08',
+      tz: 'Asia/Kolkata',
+      companyName: 'EMIAC',
+      users: [user],
+      dayStatusFor: () => null,
+      trackedMinutesFor: () => 0,
+      punchFor: noPunches,
+      generatedAtMs: Date.UTC(2026, 8, 1),
+    });
+    expect(without.rows[0]!.balanceDays).toBeNull();
+    expect(monthPerformanceSummaryPairs(without.rows[0]!).map((p) => p[0]))
+      .not.toContain('Leave Balance');
+  });
+
+  it('keeps a half day a half, and leaves a whole number whole', () => {
+    const pairFor = (days: number) => {
+      const rep = buildMonthPerformance({
+        month: '2026-08',
+        tz: 'Asia/Kolkata',
+        companyName: 'EMIAC',
+        users: [user],
+        dayStatusFor: () => null,
+        trackedMinutesFor: () => 0,
+        punchFor: noPunches,
+        balanceFor: () => days,
+        generatedAtMs: Date.UTC(2026, 8, 1),
+      });
+      const pairs = monthPerformanceSummaryPairs(rep.rows[0]!);
+      return pairs[pairs.length - 1]![1];
+    };
+    expect(pairFor(2)).toBe('2');
+    expect(pairFor(1.5)).toBe('1.5');
+    expect(pairFor(0)).toBe('0');
   });
 });

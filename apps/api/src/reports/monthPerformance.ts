@@ -140,6 +140,13 @@ export interface MonthPerformanceRow {
   user: MonthPerformanceUser;
   days: MonthPerformanceDay[];
   totals: MonthPerformanceTotals;
+  /**
+   * Paid-leave days left at the end of the month, or null when nobody asked.
+   *
+   * Sits beside the counts rather than inside them: every other number here is
+   * days of this month, and this one is what the month left behind.
+   */
+  balanceDays: number | null;
 }
 
 export interface MonthPerformanceReport {
@@ -167,6 +174,15 @@ export interface MonthPerformanceInput {
   punchFor: PunchLookup;
   /** A manager's or admin's correction for this person-day, if one exists. */
   overrideFor?: (userId: string, date: string) => DayOverride | null;
+  /**
+   * Paid-leave days this person had left at the end of the month, or undefined
+   * when the caller did not ask the ledger.
+   *
+   * At the end, not today: a month's report has to keep saying the same thing
+   * next week, and a balance read at render time would drift away from the days
+   * printed beside it.
+   */
+  balanceFor?: (userId: string) => number | undefined;
   generatedAtMs: number;
 }
 
@@ -376,7 +392,7 @@ export function buildMonthPerformance(input: MonthPerformanceInput): MonthPerfor
           : null,
       };
     });
-    return { user, days, totals };
+    return { user, days, totals, balanceDays: input.balanceFor?.(user.id) ?? null };
   });
 
   return {
@@ -453,7 +469,18 @@ export function monthPerformanceSummaryPairs(row: MonthPerformanceRow): Array<[s
     ['Leave Without Pay', String(row.totals.unpaidLeave)],
     ['Absent', String(row.totals.absent)],
     ['Total Hours', fmtMinutes(row.totals.workMinutes)],
+    // Last, and only when somebody asked for it. Everything before this counts
+    // days inside the month; this is what the month left in the account, and it
+    // reads wrong anywhere but the end of the line.
+    ...(row.balanceDays === null
+      ? []
+      : [['Leave Balance', fmtDays(row.balanceDays)] as [string, string]]),
   ];
+}
+
+/** "2", "1.5", "-0.5" — halves kept, whole numbers left whole. */
+function fmtDays(days: number): string {
+  return Number.isInteger(days) ? String(days) : days.toFixed(1);
 }
 
 /** One person's eight CSV rows — two caption rows, then the grid. */

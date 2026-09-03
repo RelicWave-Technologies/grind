@@ -320,6 +320,9 @@ function buildSummarySheet(wb: ExcelJS.Workbook, report: MonthPerformanceReport)
     { header: 'Absent', key: 'absent', width: 9 },
     { header: 'No shift', key: 'noShift', width: 9 },
     { header: 'Total working hours', key: 'work', width: 18 },
+    // Last, because it is the only column that is not a count of days inside
+    // the month — it is what the month left in the account.
+    { header: 'Leave balance', key: 'balance', width: 14 },
   ];
 
   // Column heads are mono uppercase — DESIGN.md's caption role.
@@ -348,6 +351,7 @@ function buildSummarySheet(wb: ExcelJS.Workbook, report: MonthPerformanceReport)
       absent: row.totals.absent,
       noShift: row.totals.noShift,
       work: fmtMinutes(row.totals.workMinutes),
+      balance: row.balanceDays ?? '',
     });
     added.eachCell((cell, col) => {
       cell.font = col <= 3 ? TYPE.body : TYPE.reading;
