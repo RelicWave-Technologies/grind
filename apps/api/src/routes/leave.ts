@@ -583,7 +583,11 @@ const AdjustSchema = z.object({
   userId: z.string().min(1),
   days: SignedLeaveDaysSchema,
   effectiveOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
-  reason: z.string().trim().max(300).optional(),
+  /**
+   * Required. Somebody's balance moved because a person decided it should, and
+   * the statement is the only place that decision is ever written down.
+   */
+  reason: z.string().trim().min(1).max(300),
 });
 
 /**
@@ -611,7 +615,7 @@ adminLeaveRouter.post('/adjust', requireAdmin, async (req, res, next) => {
         effectiveOn: fromIsoDate(parsed.data.effectiveOn),
         // A unique key per adjustment; admins may legitimately make several.
         sourceKey: `adjust:${crypto.randomUUID()}`,
-        reason: parsed.data.reason || null,
+        reason: parsed.data.reason,
         createdById: req.user.sub,
       },
     });
