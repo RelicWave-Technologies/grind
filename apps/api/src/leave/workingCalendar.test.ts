@@ -325,3 +325,55 @@ describe('WorkingCalendar — the last Saturday is per person, not per workspace
     expect(c.quote({ userId: MACOBS, dates, portion: 'FULL', kind: 'PAID' }).chargedDays).toBe(6);
   });
 });
+
+describe('WorkingCalendar — paid leave is only paid while a balance covers it', () => {
+  const leave = [
+    { userId: U, startDate: '2026-08-17', endDate: '2026-08-18', portion: 'FULL' as const, kind: 'PAID' as const, label: 'Paid leave' },
+  ];
+
+  it('a covered day stays PAID_LEAVE', () => {
+    const s = cal({ approvedLeave: leave }).dayStatus(U, '2026-08-17');
+    expect(s.kind).toBe('PAID_LEAVE');
+    expect(s.paid).toBe(true);
+    expect(s.chargedDays).toBe(1);
+  });
+
+  it('an uncovered day is UNPAID_LEAVE, and only that day', () => {
+    const c = cal({
+      approvedLeave: leave,
+      unfundedLeaveDays: new Map([[U, new Set(['2026-08-18'])]]),
+    });
+    expect(c.dayStatus(U, '2026-08-17').kind).toBe('PAID_LEAVE');
+
+    const s = c.dayStatus(U, '2026-08-18');
+    expect(s.kind).toBe('UNPAID_LEAVE');
+    expect(s.paid).toBe(false);
+    expect(s.chargedDays).toBe(0);
+  });
+
+  it('still expects no work on the uncovered day — unpaid is not absent', () => {
+    const c = cal({
+      approvedLeave: leave,
+      unfundedLeaveDays: new Map([[U, new Set(['2026-08-18'])]]),
+    });
+    expect(c.dayStatus(U, '2026-08-18').expectedFraction).toBe(0);
+  });
+
+  it('never turns a weekly off into unpaid leave', () => {
+    // 2026-08-22 is a Saturday. Precedence puts the weekly off first, and a
+    // funding miss must not be able to reach past it.
+    const c = cal({
+      approvedLeave: [{ ...leave[0]!, startDate: '2026-08-22', endDate: '2026-08-22' }],
+      unfundedLeaveDays: new Map([[U, new Set(['2026-08-22'])]]),
+    });
+    expect(c.dayStatus(U, '2026-08-22').kind).toBe('WEEKLY_OFF');
+  });
+
+  it('leaves another person alone', () => {
+    const c = cal({
+      approvedLeave: leave,
+      unfundedLeaveDays: new Map([['someone-else', new Set(['2026-08-17'])]]),
+    });
+    expect(c.dayStatus(U, '2026-08-17').kind).toBe('PAID_LEAVE');
+  });
+});

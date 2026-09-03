@@ -9,6 +9,7 @@ import {
   type LeavePortion,
 } from '@grind/types';
 import { localDayWindow } from '../insights/day';
+import type { UnfundedLeaveDays } from './leaveFunding';
 
 /**
  * The Working Calendar answers one question for a person and a date:
@@ -71,6 +72,15 @@ export interface WorkingCalendarInput {
   userTeamIds?: Record<string, string | null>;
   holidays?: HolidayInput[];
   approvedLeave?: ApprovedLeaveInput[];
+  /**
+   * Paid-leave days that ran past the person's balance, by user.
+   *
+   * Resolved by `resolveUnfundedLeaveDays` rather than here: the answer needs a
+   * running balance read in date order, and this class is queried in whatever
+   * order a caller happens to render. Handed in as a finished set so a day's
+   * status stays independent of the order it was asked for.
+   */
+  unfundedLeaveDays?: UnfundedLeaveDays;
 }
 
 type ShiftForDay =
@@ -94,10 +104,13 @@ export class WorkingCalendar {
   private readonly dayWindowCache = new Map<string, { startMs: number; endMs: number } | null>();
 
   private readonly lastSaturdayOffFor: Record<string, boolean>;
+  /** userId -> dates whose paid leave had no balance behind it. */
+  private readonly unfundedLeaveDays: UnfundedLeaveDays;
 
   constructor(input: WorkingCalendarInput) {
     this.tz = input.tz;
     this.lastSaturdayOffFor = input.lastSaturdayOffFor ?? {};
+    this.unfundedLeaveDays = input.unfundedLeaveDays ?? new Map();
     this.shiftAssignments = input.shiftAssignments ?? {};
     this.userTeamIds = input.userTeamIds ?? {};
 
@@ -147,7 +160,12 @@ export class WorkingCalendar {
     const leave = this.leaveFor(userId, date);
     if (leave) {
       const away = portionDays(leave.portion);
-      const paid = leave.kind === 'PAID';
+      // Approved as paid, but only paid if a balance actually covered it. A
+      // day past the balance is recorded as unpaid — the ledger still debited
+      // it and is still allowed to sit negative, because the balance says how
+      // far someone is overdrawn and this says which days went unfunded.
+      const funded = !this.unfundedLeaveDays.get(userId)?.has(date);
+      const paid = leave.kind === 'PAID' && funded;
       return {
         date,
         kind: paid ? 'PAID_LEAVE' : 'UNPAID_LEAVE',
