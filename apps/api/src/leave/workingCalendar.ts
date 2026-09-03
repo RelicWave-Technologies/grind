@@ -188,6 +188,34 @@ export class WorkingCalendar {
   }
 
   /**
+   * What this day bills a balance before anybody argues with it — no funding,
+   * no correction, just the shift, the holiday list and the leave on file.
+   *
+   * `chargedDays` on a DayStatus cannot answer this any more: it went to zero
+   * the moment the balance failed to reach the day. Reconciling a correction
+   * needs the bill that was actually raised, so it can hand back exactly that
+   * and no more.
+   */
+  leaveChargeFor(userId: string, date: string): number {
+    if (!this.isChargeableDay(userId, date)) return 0;
+    const leave = this.leaveFor(userId, date);
+    if (!leave || leave.kind !== 'PAID') return 0;
+    return portionDays(leave.portion);
+  }
+
+  /**
+   * Whether this day can cost a balance anything at all.
+   *
+   * A weekly off, a holiday and a day with no shift are free, and that sits
+   * above every other rule — a correction cannot reach past it either.
+   */
+  isChargeableDay(userId: string, date: string): boolean {
+    const shift = this.resolveShiftForDay(userId, date);
+    if (shift.kind !== 'working') return false;
+    return this.holidayFor(userId, date) === null;
+  }
+
+  /**
    * How many days of this date's leave a balance covered, or undefined when it
    * covered the whole cost.
    *

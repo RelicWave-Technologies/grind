@@ -5,6 +5,7 @@ import type {
   DayStatus,
 } from '@grind/types';
 import { loadWorkingCalendar } from '../leave';
+import { overrideDayCost, reconcileOverrideLedger } from '../leave/overrideLedger';
 import { computedCodeForDay, type DayOverride } from './monthPerformance';
 
 /**
@@ -80,12 +81,31 @@ export async function setAttendanceOverride(input: {
   workspaceId: string;
   userId: string;
   date: string;
+  tz: string;
   code: AttendanceOverrideCode;
   reason: string;
   setById: string;
   computedCode: string;
 }): Promise<void> {
   const date = new Date(`${input.date}T00:00:00Z`);
+  // What the leave data bills for this day on its own, so the entry below can
+  // record the difference the correction makes rather than a second full charge
+  // on top of Lark's.
+  const calendar = await loadWorkingCalendar({
+    workspaceId: input.workspaceId,
+    tz: input.tz,
+    userIds: [input.userId],
+    from: input.date,
+    to: input.date,
+  });
+  await reconcileOverrideLedger({
+    workspaceId: input.workspaceId,
+    userId: input.userId,
+    date: input.date,
+    alreadyCharged: calendar.leaveChargeFor(input.userId, input.date),
+    nowCosts: overrideDayCost(input.code, calendar.isChargeableDay(input.userId, input.date)),
+    createdById: input.setById,
+  });
   await prisma.$transaction([
     prisma.attendanceOverrideEvent.create({
       data: {
@@ -175,6 +195,16 @@ export async function clearAttendanceOverride(input: {
     select: { id: true },
   });
   if (!existing) return false;
+  // The leave data goes back to billing the day by itself, so the reconciling
+  // entry has to go rather than sit there charging it a second time.
+  await reconcileOverrideLedger({
+    workspaceId: input.workspaceId,
+    userId: input.userId,
+    date: input.date,
+    alreadyCharged: 0,
+    nowCosts: null,
+    createdById: input.setById,
+  });
   await prisma.$transaction([
     prisma.attendanceOverrideEvent.create({
       data: {
