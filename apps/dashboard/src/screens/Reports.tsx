@@ -370,6 +370,7 @@ const ATTENDANCE_LABEL: Record<string, string> = {
   P: 'Present',
   PL_HD: 'Half day',
   LWP_HD: 'Half day, unpaid',
+  'PL_HD/LWP_HD': 'Half paid, half unpaid',
   // Retired. Kept so a correction written before half days split into paid and
   // unpaid still reads as words rather than as its own code.
   HD: 'Half day',

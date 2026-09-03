@@ -227,6 +227,26 @@ describe('the calendar outranks tracked time', () => {
     expect(c['2026-08-11']).toBe('LWP_HD');
   });
 
+  it('draws a full day the balance reached halfway as both codes at once', () => {
+    const c = codes({
+      statuses: {
+        '2026-08-10': status('2026-08-10', 'PAID_LEAVE', { label: 'Paid leave', fundedDays: 0.5 }),
+        '2026-08-11': status('2026-08-11', 'PAID_LEAVE', { label: 'Paid leave', fundedDays: 1 }),
+      },
+    });
+    expect(c['2026-08-10']).toBe('PL_HD/LWP_HD');
+    expect(c['2026-08-11']).toBe('PL');
+  });
+
+  it('leaves a day alone when nobody asked the ledger about it', () => {
+    // `fundedDays` absent means the caller handed the calendar no ledger, and
+    // approved paid leave is simply paid — the answer before any of this.
+    const c = codes({
+      statuses: { '2026-08-12': status('2026-08-12', 'PAID_LEAVE', { label: 'Paid leave' }) },
+    });
+    expect(c['2026-08-12']).toBe('PL');
+  });
+
   it('counts the two half days separately, and still accounts for every day', () => {
     const half = (date: string, kind: 'PAID_LEAVE' | 'UNPAID_LEAVE') =>
       status(date, kind, { portion: 'SECOND_HALF', expectedFraction: 0.5, chargedDays: 0 });
@@ -294,11 +314,11 @@ describe('totals', () => {
     const totals = report({ statuses, punches, tracked }).rows[0]!.totals;
     expect(totals).toMatchObject({
       present: 18, weeklyOff: 1, holiday: 1, paidLeave: 1, unpaidLeave: 1,
-      paidHalfDay: 1, unpaidHalfDay: 0, noShift: 0,
+      paidHalfDay: 1, unpaidHalfDay: 0, splitLeave: 0, noShift: 0,
     });
     // 31 days, every one accounted for by exactly one code.
     const counted = totals.present + totals.paidHalfDay + totals.unpaidHalfDay
-      + totals.weeklyOff + totals.holiday
+      + totals.splitLeave + totals.weeklyOff + totals.holiday
       + totals.paidLeave + totals.unpaidLeave + totals.absent + totals.noShift;
     expect(counted).toBe(31);
     expect(fmtMinutes(totals.workMinutes)).toBe('148:30'); // 18 x 8:15

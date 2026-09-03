@@ -341,7 +341,7 @@ describe('WorkingCalendar — paid leave is only paid while a balance covers it'
   it('an uncovered day is UNPAID_LEAVE, and only that day', () => {
     const c = cal({
       approvedLeave: leave,
-      unfundedLeaveDays: new Map([[U, new Set(['2026-08-18'])]]),
+      leaveFunding: new Map([[U, new Map([['2026-08-18', 0]])]]),
     });
     expect(c.dayStatus(U, '2026-08-17').kind).toBe('PAID_LEAVE');
 
@@ -354,7 +354,7 @@ describe('WorkingCalendar — paid leave is only paid while a balance covers it'
   it('still expects no work on the uncovered day — unpaid is not absent', () => {
     const c = cal({
       approvedLeave: leave,
-      unfundedLeaveDays: new Map([[U, new Set(['2026-08-18'])]]),
+      leaveFunding: new Map([[U, new Map([['2026-08-18', 0]])]]),
     });
     expect(c.dayStatus(U, '2026-08-18').expectedFraction).toBe(0);
   });
@@ -364,15 +364,33 @@ describe('WorkingCalendar — paid leave is only paid while a balance covers it'
     // funding miss must not be able to reach past it.
     const c = cal({
       approvedLeave: [{ ...leave[0]!, startDate: '2026-08-22', endDate: '2026-08-22' }],
-      unfundedLeaveDays: new Map([[U, new Set(['2026-08-22'])]]),
+      leaveFunding: new Map([[U, new Map([['2026-08-22', 0]])]]),
     });
     expect(c.dayStatus(U, '2026-08-22').kind).toBe('WEEKLY_OFF');
+  });
+
+  it('a day the balance reached halfway is paid, and says how far', () => {
+    // The half a balance could reach is spent on the day, so the report can
+    // draw it as half paid and half not rather than rounding it to either.
+    const c = cal({
+      approvedLeave: leave,
+      leaveFunding: new Map([[U, new Map([['2026-08-18', 0.5]])]]),
+    });
+    const s = c.dayStatus(U, '2026-08-18');
+    expect(s.kind).toBe('PAID_LEAVE');
+    expect(s.paid).toBe(true);
+    expect(s.fundedDays).toBe(0.5);
+  });
+
+  it('reports a fully covered day as funded for its whole cost', () => {
+    const s = cal({ approvedLeave: leave }).dayStatus(U, '2026-08-17');
+    expect(s.fundedDays).toBe(1);
   });
 
   it('leaves another person alone', () => {
     const c = cal({
       approvedLeave: leave,
-      unfundedLeaveDays: new Map([['someone-else', new Set(['2026-08-17'])]]),
+      leaveFunding: new Map([['someone-else', new Map([['2026-08-17', 0]])]]),
     });
     expect(c.dayStatus(U, '2026-08-17').kind).toBe('PAID_LEAVE');
   });

@@ -70,6 +70,8 @@ export type MonthPerformanceCode =
   | 'PL_HD'
   /** Half day of leave the balance did not cover. */
   | 'LWP_HD'
+  /** A full day the balance reached halfway: half of it paid, half of it not. */
+  | 'PL_HD/LWP_HD'
   /** Absent — a working day with no tracked time at all. */
   | 'A'
   /** Weekly off — the assigned shift has this weekday off. */
@@ -120,6 +122,8 @@ export interface MonthPerformanceTotals {
   paidHalfDay: number;
   /** Half days it did not. */
   unpaidHalfDay: number;
+  /** Full days the balance reached halfway — half paid, half not. */
+  splitLeave: number;
   weeklyOff: number;
   holiday: number;
   /** Paid leave days. */
@@ -274,7 +278,13 @@ export function computedCodeForDay(
   switch (status?.kind) {
     case 'HOLIDAY': return 'HL';
     case 'WEEKLY_OFF': return 'WO';
-    case 'PAID_LEAVE': return status.expectedFraction > 0 ? 'PL_HD' : 'PL';
+    case 'PAID_LEAVE': {
+      if (status.expectedFraction > 0) return 'PL_HD';
+      // A full day the balance only reached halfway. `fundedDays` is absent
+      // when nobody asked the ledger, and the day is simply paid then.
+      const funded = status.fundedDays;
+      return funded != null && funded < 1 ? 'PL_HD/LWP_HD' : 'PL';
+    }
     case 'UNPAID_LEAVE': return status.expectedFraction > 0 ? 'LWP_HD' : 'LWP';
     default: break;
   }
@@ -287,7 +297,8 @@ export function computedCodeForDay(
 
 function emptyTotals(): MonthPerformanceTotals {
   return {
-    present: 0, paidHalfDay: 0, unpaidHalfDay: 0, weeklyOff: 0, holiday: 0, paidLeave: 0,
+    present: 0, paidHalfDay: 0, unpaidHalfDay: 0, splitLeave: 0,
+    weeklyOff: 0, holiday: 0, paidLeave: 0,
     unpaidLeave: 0, absent: 0, noShift: 0, workMinutes: 0,
   };
 }
@@ -297,6 +308,7 @@ function countInto(totals: MonthPerformanceTotals, code: MonthPerformanceCode): 
     case 'P': totals.present += 1; break;
     case 'PL_HD': totals.paidHalfDay += 1; break;
     case 'LWP_HD': totals.unpaidHalfDay += 1; break;
+    case 'PL_HD/LWP_HD': totals.splitLeave += 1; break;
     case 'WO': totals.weeklyOff += 1; break;
     case 'HL': totals.holiday += 1; break;
     case 'PL': totals.paidLeave += 1; break;
@@ -412,6 +424,7 @@ export function monthPerformanceSummaryPairs(row: MonthPerformanceRow): Array<[s
     ['Present', String(row.totals.present)],
     ['Half Day Paid', String(row.totals.paidHalfDay)],
     ['Half Day Unpaid', String(row.totals.unpaidHalfDay)],
+    ['Half Paid Half Unpaid', String(row.totals.splitLeave)],
     ['Weekly Off', String(row.totals.weeklyOff)],
     ['Holiday', String(row.totals.holiday)],
     ['Paid Leave', String(row.totals.paidLeave)],
