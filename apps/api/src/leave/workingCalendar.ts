@@ -187,6 +187,19 @@ export class WorkingCalendar {
     return { ...base(date, 'WORKING', { shiftName: shift.shiftName }), expectedFraction: 1 };
   }
 
+  /**
+   * How many days of this date's leave a balance covered, or undefined when it
+   * covered the whole cost.
+   *
+   * The report needs this for a day a manager called leave: the correction says
+   * the day was half a day away, and only the balance can say whether that half
+   * was paid. Undefined rather than the cost itself, because "covered" is the
+   * common answer and the caller knows what it asked for.
+   */
+  fundedDaysFor(userId: string, date: string): number | undefined {
+    return this.leaveFunding.get(userId)?.get(date);
+  }
+
   /** Status for a whole range, in date order. */
   dayStatuses(userId: string, dates: readonly string[]): DayStatus[] {
     return dates.map((d) => this.dayStatus(userId, d));

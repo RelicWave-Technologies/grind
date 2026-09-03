@@ -1,5 +1,9 @@
 import { prisma } from '@grind/db';
-import type { AttendanceOverrideCode, DayStatus } from '@grind/types';
+import type {
+  AttendanceOverrideCode,
+  AttendanceOverrideHistoryEntry,
+  DayStatus,
+} from '@grind/types';
 import { loadWorkingCalendar } from '../leave';
 import { computedCodeForDay, type DayOverride } from './monthPerformance';
 
@@ -24,6 +28,13 @@ export async function loadOverrideLookup(input: {
   userIds: string[];
   from: string;
   to: string;
+  /**
+   * How much of a day's leave the balance covered, from the calendar that
+   * already worked it out. A correction states the shape of a day; this is what
+   * turns that shape into paid or unpaid, and a caller without it gets the
+   * answer for somebody whose balance always reached.
+   */
+  fundedDaysFor?: (userId: string, date: string) => number | undefined;
 }): Promise<(userId: string, date: string) => DayOverride | null> {
   if (input.userIds.length === 0) return () => null;
   const rows = await prisma.attendanceOverride.findMany({
@@ -36,9 +47,11 @@ export async function loadOverrideLookup(input: {
   const index = new Map<string, DayOverride>();
   for (const r of rows) {
     // A DATE column reads back epoch-anchored; no timezone applies to it.
-    index.set(`${r.userId}|${r.date.toISOString().slice(0, 10)}`, {
+    const date = r.date.toISOString().slice(0, 10);
+    index.set(`${r.userId}|${date}`, {
       code: r.code,
       computedCode: r.computedCode,
+      fundedDays: input.fundedDaysFor?.(r.userId, date),
     });
   }
   return (userId, date) => index.get(`${userId}|${date}`) ?? null;
@@ -73,36 +86,108 @@ export async function setAttendanceOverride(input: {
   computedCode: string;
 }): Promise<void> {
   const date = new Date(`${input.date}T00:00:00Z`);
-  await prisma.attendanceOverride.upsert({
-    where: { userId_date: { userId: input.userId, date } },
-    // Re-setting a day replaces the decision rather than stacking a second one
-    // nobody could order, and re-snapshots what the report says right now.
-    update: {
-      code: input.code,
-      reason: input.reason,
-      setById: input.setById,
-      setAt: new Date(),
-      computedCode: input.computedCode,
-    },
-    create: {
-      workspaceId: input.workspaceId,
-      userId: input.userId,
-      date,
-      code: input.code,
-      reason: input.reason,
-      setById: input.setById,
-      computedCode: input.computedCode,
-    },
-  });
+  await prisma.$transaction([
+    prisma.attendanceOverrideEvent.create({
+      data: {
+        workspaceId: input.workspaceId,
+        userId: input.userId,
+        date,
+        code: input.code,
+        reason: input.reason,
+        computedCode: input.computedCode,
+        setById: input.setById,
+      },
+    }),
+    prisma.attendanceOverride.upsert({
+      where: { userId_date: { userId: input.userId, date } },
+      // Re-setting a day replaces the decision in force rather than stacking a
+      // second one nobody could order, and re-snapshots what the report says
+      // right now. The one it replaces survives in the log.
+      update: {
+        code: input.code,
+        reason: input.reason,
+        setById: input.setById,
+        setAt: new Date(),
+        computedCode: input.computedCode,
+      },
+      create: {
+        workspaceId: input.workspaceId,
+        userId: input.userId,
+        date,
+        code: input.code,
+        reason: input.reason,
+        setById: input.setById,
+        computedCode: input.computedCode,
+      },
+    }),
+  ]);
 }
 
-/** Remove a correction, returning the day to whatever the report computes. */
-export async function clearAttendanceOverride(input: {
+/**
+ * Every decision ever made about this person-day, newest first.
+ *
+ * Read from the log rather than from the row in force, because the row only
+ * remembers the last person to touch it. The question three months later is
+ * never "what does it say" but "who decided that, and what did they know".
+ */
+export async function loadOverrideHistory(input: {
   userId: string;
   date: string;
-}): Promise<boolean> {
-  const { count } = await prisma.attendanceOverride.deleteMany({
+}): Promise<AttendanceOverrideHistoryEntry[]> {
+  const rows = await prisma.attendanceOverrideEvent.findMany({
     where: { userId: input.userId, date: new Date(`${input.date}T00:00:00Z`) },
+    orderBy: { setAt: 'desc' },
+    select: {
+      code: true,
+      reason: true,
+      computedCode: true,
+      setAt: true,
+      setBy: { select: { name: true } },
+    },
   });
-  return count > 0;
+  return rows.map((r) => ({
+    code: r.code,
+    reason: r.reason,
+    computedCode: r.computedCode,
+    setAt: r.setAt.toISOString(),
+    setByName: r.setBy?.name ?? null,
+  }));
+}
+
+/**
+ * Remove a correction, returning the day to whatever the report computes.
+ *
+ * Logged with a null code, because taking a correction back is itself a
+ * decision somebody made and will be asked about. Deleting the row and leaving
+ * no trace would make the day look like one nobody had ever questioned.
+ */
+export async function clearAttendanceOverride(input: {
+  workspaceId: string;
+  userId: string;
+  date: string;
+  reason: string;
+  setById: string;
+  computedCode: string | null;
+}): Promise<boolean> {
+  const date = new Date(`${input.date}T00:00:00Z`);
+  const existing = await prisma.attendanceOverride.findUnique({
+    where: { userId_date: { userId: input.userId, date } },
+    select: { id: true },
+  });
+  if (!existing) return false;
+  await prisma.$transaction([
+    prisma.attendanceOverrideEvent.create({
+      data: {
+        workspaceId: input.workspaceId,
+        userId: input.userId,
+        date,
+        code: null,
+        reason: input.reason,
+        computedCode: input.computedCode,
+        setById: input.setById,
+      },
+    }),
+    prisma.attendanceOverride.delete({ where: { id: existing.id } }),
+  ]);
+  return true;
 }

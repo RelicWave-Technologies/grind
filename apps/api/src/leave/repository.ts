@@ -1,5 +1,6 @@
 import { prisma, type Prisma } from '@grind/db';
 import {
+  attendanceOverrideShape,
   LEAVE_POLICY_DEFAULTS,
   type AttendanceOverrideCode,
   type LeavePolicyDto,
@@ -223,12 +224,11 @@ export async function loadWorkingCalendar(input: {
     if (free) return 0;
     const override = overrideFor.get(`${userId}\u0000${date}`);
     if (!override) return status.chargedDays;
-    switch (override) {
-      case 'PL': return 1;
-      // `HD` predates the paid/unpaid split and is read as a paid half day, the
-      // same as the report draws it.
-      case 'PL_HD':
-      case 'HD': return 0.5;
+    switch (attendanceOverrideShape(override)) {
+      case 'FULL_LEAVE': return 1;
+      case 'HALF_LEAVE': return 0.5;
+      // Present or absent: whatever Lark recorded here, the balance stops
+      // paying for it.
       default: return 0;
     }
   };

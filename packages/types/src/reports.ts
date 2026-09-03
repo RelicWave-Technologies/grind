@@ -27,17 +27,56 @@ export type MemberReportTopApp = z.infer<typeof MemberReportTopAppSchema>;
  * shift schedule, and a second place to set them would let the same fact be
  * true in one and false in the other.
  */
+/**
+ * What a manager or admin may say a day was.
+ *
+ * Deliberately a *shape*, not a verdict. "Half a day of leave" is something a
+ * person can know; whether that half was paid is arithmetic on a balance, and
+ * a picker that offered both would let someone hand out paid leave the ledger
+ * cannot back — which is precisely the disagreement the funding rule exists to
+ * remove. The report derives PL_HD / LWP_HD / PL / LWP from the balance, the
+ * same way it does for leave that came from Lark.
+ *
+ * Not HOLIDAY or WEEKLY_OFF: those come from the company calendar and the
+ * shift schedule, and a second place to set them would let the same fact be
+ * true in one and false in the other.
+ *
+ * The paid/unpaid codes below are retired and still accepted. Corrections
+ * written before the shapes existed hold them, and they are read as the shape
+ * they described — the author knew the day was half a day, and the balance can
+ * be asked about the rest.
+ */
 export const AttendanceOverrideCodeSchema = z.enum([
   'P',
   'A',
+  'HALF_LEAVE',
+  'FULL_LEAVE',
+  'HD',
   'PL_HD',
   'LWP_HD',
   'PL',
   'LWP',
-  // Retired, still accepted: corrections written before half days split into
-  // paid and unpaid carry it, and the enum has to keep parsing its own history.
-  'HD',
 ]);
+
+/** The four a picker offers. The rest exist only in rows already written. */
+export const ATTENDANCE_OVERRIDE_SHAPES = ['P', 'A', 'HALF_LEAVE', 'FULL_LEAVE'] as const;
+export type AttendanceOverrideShape = (typeof ATTENDANCE_OVERRIDE_SHAPES)[number];
+
+/** What a stored code means, retired spellings included. */
+export function attendanceOverrideShape(code: AttendanceOverrideCode): AttendanceOverrideShape {
+  switch (code) {
+    case 'HD':
+    case 'PL_HD':
+    case 'LWP_HD':
+      return 'HALF_LEAVE';
+    case 'PL':
+    case 'LWP':
+      return 'FULL_LEAVE';
+    default:
+      return code;
+  }
+}
+
 export type AttendanceOverrideCode = z.infer<typeof AttendanceOverrideCodeSchema>;
 
 export const AttendanceOverrideDtoSchema = z.object({
@@ -59,7 +98,12 @@ export type AttendanceOverrideDto = z.infer<typeof AttendanceOverrideDtoSchema>;
 export const SetAttendanceOverrideRequest = z.object({
   userId: z.string().min(1),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u, 'date must be YYYY-MM-DD'),
-  code: AttendanceOverrideCodeSchema,
+  /**
+   * A shape, never a verdict. The retired paid/unpaid codes parse when read
+   * back but cannot be written: a new correction that claimed a day was paid
+   * would be claiming something only the balance can know.
+   */
+  code: z.enum(ATTENDANCE_OVERRIDE_SHAPES),
   /** Required. Three months later this is the only question anybody asks. */
   reason: z.string().trim().min(1).max(500),
 });
@@ -68,8 +112,26 @@ export type SetAttendanceOverrideRequest = z.infer<typeof SetAttendanceOverrideR
 export const ClearAttendanceOverrideRequest = z.object({
   userId: z.string().min(1),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u, 'date must be YYYY-MM-DD'),
+  /** Taking a correction back is a decision too, and gets asked about too. */
+  reason: z.string().trim().min(1).max(500),
 });
 export type ClearAttendanceOverrideRequest = z.infer<typeof ClearAttendanceOverrideRequest>;
+
+/** One entry in a day's correction log. A null code is a removal. */
+export const AttendanceOverrideHistoryEntrySchema = z.object({
+  code: AttendanceOverrideCodeSchema.nullable(),
+  reason: z.string(),
+  computedCode: z.string().nullable(),
+  setAt: z.string(),
+  setByName: z.string().nullable(),
+});
+export type AttendanceOverrideHistoryEntry = z.infer<typeof AttendanceOverrideHistoryEntrySchema>;
+
+export const AttendanceOverrideHistoryResponseSchema = z.object({
+  date: z.string(),
+  entries: z.array(AttendanceOverrideHistoryEntrySchema),
+});
+export type AttendanceOverrideHistoryResponse = z.infer<typeof AttendanceOverrideHistoryResponseSchema>;
 
 export const MemberReportDaySchema = z.object({
   date: z.string(),

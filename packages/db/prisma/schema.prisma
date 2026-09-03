@@ -41,6 +41,7 @@ model Workspace {
   leaveLedgerEntries        LeaveLedgerEntry[]
   attendancePunches         AttendancePunch[]
   attendanceOverrides       AttendanceOverride[]
+  attendanceOverrideEvents  AttendanceOverrideEvent[]
 }
 
 /// Workspace-wide capture policy. A single row per workspace (unique on
@@ -369,6 +370,8 @@ model User {
   attendancePunches                AttendancePunch[]
   attendanceOverrides              AttendanceOverride[]      @relation("AttendanceOverrideSubject")
   attendanceOverridesAuthored      AttendanceOverride[]      @relation("AttendanceOverrideAuthor")
+  attendanceOverrideEvents         AttendanceOverrideEvent[] @relation("AttendanceOverrideEventSubject")
+  attendanceOverrideEventsAuthored AttendanceOverrideEvent[] @relation("AttendanceOverrideEventAuthor")
 
   @@index([workspaceId])
   @@index([teamId])
@@ -1432,17 +1435,51 @@ model AttendanceOverride {
   @@index([workspaceId, date])
 }
 
+/// Every correction ever made to one person-day, including the removals.
+///
+/// `AttendanceOverride` holds the decision in force. This holds the record of
+/// how it got there. A correction is a judgement about somebody's attendance,
+/// and "why" is only worth writing down if it survives the next person's edit —
+/// the question three months later is never "what does it say" but "who
+/// decided that, and what did they know".
+model AttendanceOverrideEvent {
+  id           String                  @id @default(cuid())
+  workspaceId  String
+  workspace    Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User                    @relation("AttendanceOverrideEventSubject", fields: [userId], references: [id], onDelete: Cascade)
+  /// Business calendar date in the workspace timezone — a date, not an instant.
+  date         DateTime                @db.Date
+  /// Null when the correction was removed and the day handed back to the report.
+  code         AttendanceOverrideCode?
+  reason       String
+  /// What the report computed at the moment this entry was written.
+  computedCode String?
+  setById      String?
+  setBy        User?                   @relation("AttendanceOverrideEventAuthor", fields: [setById], references: [id], onDelete: SetNull)
+  setAt        DateTime                @default(now())
+
+  @@index([userId, date, setAt])
+  @@index([workspaceId, date])
+}
+
 /// The statuses a person may set by hand. Deliberately not HOLIDAY or
 /// WEEKLY_OFF — those are configuration, not a judgement about one day.
 enum AttendanceOverrideCode {
   P
   A
+  /// Half a day of leave. Whether that half was paid is the balance's answer,
+  /// not the setter's.
+  HALF_LEAVE
+  /// A whole day of leave, same rule.
+  FULL_LEAVE
+  /// Retired. Rows written before a correction stated a shape rather than a
+  /// verdict still hold these, and dropping an enum value the data uses is not
+  /// a rename. Each is read as the shape it described.
   PL_HD
   LWP_HD
   PL
   LWP
-  /// Retired in favour of PL_HD / LWP_HD. Kept because rows written before the
-  /// split still hold it, and dropping a value the data uses is not a rename.
   HD
 }
 

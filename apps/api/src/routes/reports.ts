@@ -41,10 +41,15 @@ import { computeMonthPointers, storeMonthPointers } from '../reports/monthPointe
 import {
   clearAttendanceOverride,
   computeDayCode,
+  loadOverrideHistory,
   loadOverrideLookup,
   setAttendanceOverride,
 } from '../reports/attendanceOverrides';
-import { SetAttendanceOverrideRequest, ClearAttendanceOverrideRequest } from '@grind/types';
+import {
+  SetAttendanceOverrideRequest,
+  ClearAttendanceOverrideRequest,
+  type AttendanceOverrideHistoryResponse,
+} from '@grind/types';
 
 export const reportsRouter = Router();
 reportsRouter.use(requireAccessToken, attachScope, requireCapability('reports.self.read'));
@@ -76,7 +81,12 @@ reportsRouter.get('/me', async (req, res, next) => {
       to: range.to,
     });
     const punchFor = await loadPunchLookup({ userIds: [req.user.sub], from: range.from, to: range.to });
-    const overrideFor = await loadOverrideLookup({ userIds: [req.user.sub], from: range.from, to: range.to });
+    const overrideFor = await loadOverrideLookup({
+      userIds: [req.user.sub],
+      from: range.from,
+      to: range.to,
+      fundedDaysFor: calendar.fundedDaysFor,
+    });
     const response: MemberReportsMeResponse = {
       from: range.from,
       to: range.to,
@@ -164,7 +174,12 @@ reportsRouter.get('/team', requireCapability('reports.team.read'), async (req, r
       to: range.to,
     });
     const punchFor = await loadPunchLookup({ userIds: reportUsers.map((u) => u.id), from: range.from, to: range.to });
-    const overrideFor = await loadOverrideLookup({ userIds: reportUsers.map((u) => u.id), from: range.from, to: range.to });
+    const overrideFor = await loadOverrideLookup({
+      userIds: reportUsers.map((u) => u.id),
+      from: range.from,
+      to: range.to,
+      fundedDaysFor: calendar.fundedDaysFor,
+    });
     const daysByUser = new Map<string, ReturnType<typeof buildMemberReportDays>>();
     for (const user of reportUsersWithRole) {
       const data = reportData.get(user.id) ?? emptyTeamReportData();
@@ -478,6 +493,32 @@ reportsRouter.put('/attendance-override', requireCapability('reports.team.read')
   }
 });
 
+/**
+ * Every decision ever made about one person-day, newest first.
+ *
+ * Its own request rather than a field on the day: a month of days carries a
+ * month of logs nobody opened, and the only moment anybody wants this is the
+ * moment they are about to change the day or argue about it.
+ */
+reportsRouter.get('/attendance-override/history', requireCapability('reports.team.read'), async (req, res, next) => {
+  try {
+    if (!req.user || !req.scope) return res.status(401).json({ error: 'unauthorized' });
+    const userId = typeof req.query.userId === 'string' ? req.query.userId : '';
+    const date = typeof req.query.date === 'string' ? req.query.date : '';
+    if (!userId || !/^\d{4}-\d{2}-\d{2}$/u.test(date)) {
+      return res.status(400).json({ error: 'invalid_request' });
+    }
+    if (!req.scope.userIds.includes(userId)) return res.status(403).json({ error: 'out_of_scope' });
+    const response: AttendanceOverrideHistoryResponse = {
+      date,
+      entries: await loadOverrideHistory({ userId, date }),
+    };
+    res.json(response);
+  } catch (err) {
+    next(err);
+  }
+});
+
 /** Drop a correction, returning the day to whatever the report computes. */
 reportsRouter.delete('/attendance-override', requireCapability('reports.team.read'), async (req, res, next) => {
   try {
@@ -485,7 +526,32 @@ reportsRouter.delete('/attendance-override', requireCapability('reports.team.rea
     const parsed = ClearAttendanceOverrideRequest.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: 'invalid_request', details: parsed.error.flatten() });
     if (!req.scope.userIds.includes(parsed.data.userId)) return res.status(403).json({ error: 'out_of_scope' });
-    const cleared = await clearAttendanceOverride(parsed.data);
+    const { userId, date, reason } = parsed.data;
+    const range = resolveReportMonth({ month: date.slice(0, 7) }, req.scope.workspaceTimezone);
+    if ('error' in range) return res.status(400).json({ error: range.error });
+    const report = await loadMonthPerformanceReport({
+      workspaceId: req.scope.workspaceId,
+      userIds: [userId],
+      range,
+    });
+    const day = report.rows[0]?.days.find((d) => d.date === date);
+    const computedCode = day
+      ? await computeDayCode({
+          workspaceId: req.scope.workspaceId,
+          userId,
+          date,
+          tz: range.tz,
+          trackedMinutes: day.workMinutes,
+        })
+      : null;
+    const cleared = await clearAttendanceOverride({
+      workspaceId: req.scope.workspaceId,
+      userId,
+      date,
+      reason,
+      setById: req.user.sub,
+      computedCode,
+    });
     res.json({ ok: true, cleared });
   } catch (err) {
     next(err);

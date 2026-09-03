@@ -317,7 +317,9 @@ describe('correcting a day by hand', () => {
     await put(s.admin.token, { userId: s.inTeam.id, date: '2026-08-03', code: 'P', reason: 'x' });
     expect((await statusRow(s.admin.token, s.inTeam.email))[3]).toBe('P');
 
-    const res = await del(s.admin.token, { userId: s.inTeam.id, date: '2026-08-03' });
+    const res = await del(s.admin.token, {
+      userId: s.inTeam.id, date: '2026-08-03', reason: 'the agent came back with the data',
+    });
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ ok: true, cleared: true });
     expect((await statusRow(s.admin.token, s.inTeam.email))[3]).toBe('A');
@@ -326,13 +328,54 @@ describe('correcting a day by hand', () => {
   it('replaces a correction rather than stacking a second one', async () => {
     const s = await seed();
     await assignShift(s.ws.id, s.inTeam.id);
+    // Accruing before the day, or it sits below the funding floor and is left
+    // alone as leave older than the ledger.
+    await prisma.user.update({
+      where: { id: s.inTeam.id },
+      data: { joinedOn: new Date('2026-01-01T00:00:00Z') },
+    });
     await put(s.admin.token, { userId: s.inTeam.id, date: '2026-08-03', code: 'P', reason: 'first' });
-    await put(s.admin.token, { userId: s.inTeam.id, date: '2026-08-03', code: 'PL', reason: 'actually on leave' });
+    await put(s.admin.token, {
+      userId: s.inTeam.id, date: '2026-08-03', code: 'FULL_LEAVE', reason: 'actually on leave',
+    });
 
     const rows = await prisma.attendanceOverride.findMany({ where: { userId: s.inTeam.id } });
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ code: 'PL', reason: 'actually on leave' });
-    expect((await statusRow(s.admin.token, s.inTeam.email))[3]).toBe('PL');
+    expect(rows[0]).toMatchObject({ code: 'FULL_LEAVE', reason: 'actually on leave' });
+    // No balance behind it, so a full day of leave reads as unpaid. The
+    // correction said how much of the day; the ledger said what it cost.
+    expect((await statusRow(s.admin.token, s.inTeam.email))[3]).toBe('LWP');
+  });
+
+  it('refuses a correction that tries to say whether leave was paid', async () => {
+    const s = await seed();
+    await assignShift(s.ws.id, s.inTeam.id);
+    const res = await put(s.admin.token, {
+      userId: s.inTeam.id, date: '2026-08-03', code: 'PL', reason: 'on leave',
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('keeps every decision, including the one that took a correction back', async () => {
+    const s = await seed();
+    await assignShift(s.ws.id, s.inTeam.id);
+    await put(s.admin.token, { userId: s.inTeam.id, date: '2026-08-03', code: 'P', reason: 'first call' });
+    await put(s.admin.token, { userId: s.inTeam.id, date: '2026-08-03', code: 'HALF_LEAVE', reason: 'second call' });
+    await del(s.admin.token, { userId: s.inTeam.id, date: '2026-08-03', reason: 'neither, my mistake' });
+
+    const res = await request(app)
+      .get(`/v1/reports/attendance-override/history?userId=${s.inTeam.id}&date=2026-08-03`)
+      .set(bearer(s.admin.token));
+    expect(res.status).toBe(200);
+    // Newest first, and the removal is a row of its own rather than a silence.
+    expect(res.body.entries.map((e: { code: string | null; reason: string }) => [e.code, e.reason])).toEqual([
+      [null, 'neither, my mistake'],
+      ['HALF_LEAVE', 'second call'],
+      ['P', 'first call'],
+    ]);
+    expect(res.body.entries[0].setByName).toBe(s.admin.name);
+    // The row in force is gone; the record of it is not.
+    expect(await prisma.attendanceOverride.count({ where: { userId: s.inTeam.id } })).toBe(0);
   });
 
   it('records who made the call and why', async () => {

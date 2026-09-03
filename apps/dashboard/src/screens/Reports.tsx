@@ -1,7 +1,7 @@
 import './reports.css';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { useNavigate, useRouteContext } from '@tanstack/react-router';
 import {
   Building2,
@@ -36,8 +36,11 @@ import {
 } from '@grind/types';
 import type { SelfProfileResponse } from '@grind/types/profile';
 import type { ShiftSchedule, Weekday } from '@grind/types/shifts';
+import { attendanceOverrideShape } from '@grind/types';
 import type {
   AttendanceOverrideCode,
+  AttendanceOverrideHistoryResponse,
+  AttendanceOverrideShape,
   MemberReportDay,
   MemberReportDayAppsResponse,
   MemberReportDayScreenshotsResponse,
@@ -368,19 +371,36 @@ export function ReportsScreen() {
 /** What each attendance code means, spelled out for a tooltip. */
 const ATTENDANCE_LABEL: Record<string, string> = {
   P: 'Present',
-  PL_HD: 'Half day',
+  PL_HD: 'Half day, paid',
   LWP_HD: 'Half day, unpaid',
   'PL_HD/LWP_HD': 'Half paid, half unpaid',
-  // Retired. Kept so a correction written before half days split into paid and
-  // unpaid still reads as words rather than as its own code.
-  HD: 'Half day',
   A: 'Absent',
   WO: 'Weekly off',
   HL: 'Holiday',
   PL: 'Paid leave',
   LWP: 'Unpaid leave',
   '--': 'No shift assigned',
+  // Shapes, as a correction records them. The report never prints these — it
+  // prints what the balance made of them.
+  HALF_LEAVE: 'Half day of leave',
+  FULL_LEAVE: 'Full day of leave',
+  // Retired spellings, so an old log entry reads as words.
+  HD: 'Half day',
 };
+
+/**
+ * What a correction may say, and nothing more.
+ *
+ * Four shapes, not seven verdicts. Whether leave was paid is arithmetic on a
+ * balance — offering it here would let somebody hand out paid leave the ledger
+ * cannot back, and would make them guess at a number the report already knows.
+ */
+const OVERRIDE_SHAPES = [
+  { key: 'P', chip: 'P', label: 'Present', hint: 'They worked the day' },
+  { key: 'A', chip: 'A', label: 'Absent', hint: 'No work and no leave' },
+  { key: 'HALF_LEAVE', chip: 'HD', label: 'Half day of leave', hint: 'Away for half of it' },
+  { key: 'FULL_LEAVE', chip: 'LV', label: 'Full day of leave', hint: 'Away for all of it' },
+] as const;
 
 /**
  * One day's attendance status, and — for a manager or admin — the way to
@@ -1067,10 +1087,22 @@ function AttendanceOverrideDialog({
   onSaved: () => void;
 }) {
   const existing = day.attendanceOverride;
-  const [code, setCode] = useState<AttendanceOverrideCode>(existing?.code ?? 'P');
+  const [code, setCode] = useState<AttendanceOverrideShape>(
+    existing ? attendanceOverrideShape(existing.code) : 'P',
+  );
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Fetched when the dialog opens rather than carried on every day of the
+  // month: this is the one moment anybody wants it.
+  const historyQ = useQuery({
+    queryKey: ['attendance-override-history', userId, day.date],
+    queryFn: () =>
+      api<AttendanceOverrideHistoryResponse>(
+        `/v1/reports/attendance-override/history?userId=${encodeURIComponent(userId)}&date=${day.date}`,
+      ),
+  });
 
   async function submit(action: 'save' | 'clear') {
     setBusy(true);
@@ -1079,7 +1111,7 @@ function AttendanceOverrideDialog({
       if (action === 'clear') {
         await api('/v1/reports/attendance-override', {
           method: 'DELETE',
-          json: { userId, date: day.date },
+          json: { userId, date: day.date, reason: reason.trim() },
         });
       } else {
         await api('/v1/reports/attendance-override', {
@@ -1128,19 +1160,30 @@ function AttendanceOverrideDialog({
         <div className="rep-override-field">
           <span className="ui-t-eyebrow">Correct it to</span>
           <div className="rep-override-codes">
-            {(['P', 'A', 'PL_HD', 'LWP_HD', 'PL', 'LWP'] as const).map((c) => (
+            {OVERRIDE_SHAPES.map((shape) => (
               <button
-                key={c}
+                key={shape.key}
                 type="button"
-                className={`rep-override-code${code === c ? ' is-selected' : ''}`}
-                onClick={() => setCode(c)}
-                aria-pressed={code === c}
+                className={`rep-override-code${code === shape.key ? ' is-selected' : ''}`}
+                onClick={() => setCode(shape.key)}
+                aria-pressed={code === shape.key}
               >
-                <span className={`rep-override-code-key rep-override-code-key--${c.toLowerCase()}`}>{c}</span>
-                <span className="rep-override-code-label">{ATTENDANCE_LABEL[c]}</span>
+                <span className={`rep-override-code-key rep-override-code-key--${shape.key.toLowerCase()}`}>
+                  {shape.chip}
+                </span>
+                <span className="rep-override-code-text">
+                  <span className="rep-override-code-label">{shape.label}</span>
+                  <span className="rep-override-code-hint">{shape.hint}</span>
+                </span>
               </button>
             ))}
           </div>
+          {(code === 'HALF_LEAVE' || code === 'FULL_LEAVE') && (
+            <p className="rep-override-note">
+              Paid or unpaid is worked out from their balance, the same as leave from Lark.
+              You are saying how much of the day they were away.
+            </p>
+          )}
         </div>
 
         <label className="rep-override-field">
@@ -1156,9 +1199,16 @@ function AttendanceOverrideDialog({
 
         {error && <Banner status="danger">{error}</Banner>}
 
+        <OverrideHistory query={historyQ} tz={tz} />
+
         <footer className="rep-modal-foot">
           {existing && (
-            <Button variant="ghost" onClick={() => void submit('clear')} disabled={busy}>
+            <Button
+              variant="ghost"
+              onClick={() => void submit('clear')}
+              disabled={busy || reason.trim().length === 0}
+              title={reason.trim().length === 0 ? 'Say why first — a removal is a decision too' : undefined}
+            >
               Remove correction
             </Button>
           )}
@@ -2452,4 +2502,47 @@ function formatMonthLabel(date: Date, timeZone: string): string {
 
 function formatMonthRange(first: Date, second: Date, timeZone: string): string {
   return `${formatMonthLabel(first, timeZone)} / ${formatMonthLabel(second, timeZone)}`;
+}
+
+/**
+ * Every decision ever made about this day, newest first.
+ *
+ * Shown inside the dialog that is about to make the next one, because the
+ * question somebody is really asking when they open it is not "what does this
+ * say" but "who decided that, and did they know what I know".
+ */
+function OverrideHistory({
+  query,
+  tz,
+}: {
+  query: UseQueryResult<AttendanceOverrideHistoryResponse>;
+  tz: string;
+}) {
+  if (query.isLoading) return <p className="rep-override-hist-note">Loading history…</p>;
+  const entries = query.data?.entries ?? [];
+  if (entries.length === 0) return null;
+
+  return (
+    <section className="rep-override-hist">
+      <span className="ui-t-eyebrow">Earlier decisions</span>
+      <ol className="rep-override-hist-list">
+        {entries.map((e, i) => (
+          <li key={`${e.setAt}-${i}`} className="rep-override-hist-row">
+            <div className="rep-override-hist-top">
+              <span
+                className={`rep-override-hist-code${e.code === null ? ' is-cleared' : ''}`}
+              >
+                {e.code === null ? 'Removed' : (ATTENDANCE_LABEL[e.code] ?? e.code)}
+              </span>
+              <span className="rep-override-hist-by">{e.setByName ?? 'Someone since removed'}</span>
+              <time className="rep-override-hist-at" dateTime={e.setAt}>
+                {fmtDayLabel(e.setAt.slice(0, 10), tz)}
+              </time>
+            </div>
+            <p className="rep-override-hist-why">{e.reason}</p>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
 }
