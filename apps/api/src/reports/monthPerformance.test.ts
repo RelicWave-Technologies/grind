@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import type { DayStatus, WorkingDayKind } from '@grind/types';
+import type { AttendanceOverrideCode, DayStatus, WorkingDayKind } from '@grind/types';
 import type { PunchLookup } from '../attendance/punches';
 import {
   buildMonthPerformance,
@@ -110,7 +110,7 @@ describe('a day is present or absent, with no minimum', () => {
         statuses: { '2026-08-03': working('2026-08-03') },
         tracked: { '2026-08-03': minutes },
       });
-      expect(c['2026-08-03']).not.toBe('HD');
+      expect(c['2026-08-03']).not.toBe('PL_HD');
     }
   });
 
@@ -191,7 +191,7 @@ describe('the calendar outranks tracked time', () => {
     expect(day.label).toBe('Diwali');
   });
 
-  it('reads half-day leave as HD whether or not the other half was worked', () => {
+  it('reads paid half-day leave as PL_HD whether or not the other half was worked', () => {
     const half = (date: string) =>
       status(date, 'PAID_LEAVE', {
         portion: 'FIRST_HALF',
@@ -203,8 +203,42 @@ describe('the calendar outranks tracked time', () => {
       statuses: { '2026-08-10': half('2026-08-10'), '2026-08-11': half('2026-08-11') },
       tracked: { '2026-08-10': 5 * 60 },
     });
-    expect(c['2026-08-10']).toBe('HD');
-    expect(c['2026-08-11']).toBe('HD');
+    expect(c['2026-08-10']).toBe('PL_HD');
+    expect(c['2026-08-11']).toBe('PL_HD');
+  });
+
+  it('separates a half day the balance paid for from one it did not', () => {
+    const half = (date: string, kind: 'PAID_LEAVE' | 'UNPAID_LEAVE') =>
+      status(date, kind, {
+        portion: 'FIRST_HALF',
+        expectedFraction: 0.5,
+        chargedDays: kind === 'PAID_LEAVE' ? 0.5 : 0,
+        label: kind === 'PAID_LEAVE' ? 'Paid leave' : 'Unpaid leave',
+      });
+    const c = codes({
+      statuses: {
+        '2026-08-10': half('2026-08-10', 'PAID_LEAVE'),
+        '2026-08-11': half('2026-08-11', 'UNPAID_LEAVE'),
+      },
+    });
+    // The whole point of the split: before it, both of these read 'HD' and the
+    // report could not say which half day anybody had actually been paid for.
+    expect(c['2026-08-10']).toBe('PL_HD');
+    expect(c['2026-08-11']).toBe('LWP_HD');
+  });
+
+  it('counts the two half days separately, and still accounts for every day', () => {
+    const half = (date: string, kind: 'PAID_LEAVE' | 'UNPAID_LEAVE') =>
+      status(date, kind, { portion: 'SECOND_HALF', expectedFraction: 0.5, chargedDays: 0 });
+    const totals = report({
+      statuses: {
+        '2026-08-03': half('2026-08-03', 'PAID_LEAVE'),
+        '2026-08-04': half('2026-08-04', 'UNPAID_LEAVE'),
+        '2026-08-05': half('2026-08-05', 'UNPAID_LEAVE'),
+      },
+    }).rows[0]!.totals;
+    expect(totals.paidHalfDay).toBe(1);
+    expect(totals.unpaidHalfDay).toBe(2);
   });
 
   it('says nothing about a day with no shift and nothing tracked, rather than absent', () => {
@@ -259,10 +293,12 @@ describe('totals', () => {
 
     const totals = report({ statuses, punches, tracked }).rows[0]!.totals;
     expect(totals).toMatchObject({
-      present: 18, weeklyOff: 1, holiday: 1, paidLeave: 1, unpaidLeave: 1, halfDay: 1, noShift: 0,
+      present: 18, weeklyOff: 1, holiday: 1, paidLeave: 1, unpaidLeave: 1,
+      paidHalfDay: 1, unpaidHalfDay: 0, noShift: 0,
     });
     // 31 days, every one accounted for by exactly one code.
-    const counted = totals.present + totals.halfDay + totals.weeklyOff + totals.holiday
+    const counted = totals.present + totals.paidHalfDay + totals.unpaidHalfDay
+      + totals.weeklyOff + totals.holiday
       + totals.paidLeave + totals.unpaidLeave + totals.absent + totals.noShift;
     expect(counted).toBe(31);
     expect(fmtMinutes(totals.workMinutes)).toBe('148:30'); // 18 x 8:15
@@ -321,7 +357,7 @@ describe('a human correction to a day', () => {
   const overrideReport = (opts: {
     statuses?: Record<string, DayStatus>;
     tracked?: Record<string, number>;
-    overrides?: Record<string, { code: 'P' | 'A' | 'HD' | 'PL' | 'LWP'; computedCode: string | null }>;
+    overrides?: Record<string, { code: AttendanceOverrideCode; computedCode: string | null }>;
   }) =>
     buildMonthPerformance({
       month: '2026-08',
@@ -337,6 +373,17 @@ describe('a human correction to a day', () => {
 
   const dayOf = (r: ReturnType<typeof overrideReport>, date: string) =>
     r.rows[0]!.days.find((d) => d.date === date)!;
+
+  it('reads a correction written before half days split as a paid half day', () => {
+    // `HD` was retired when half days started saying whether a balance paid for
+    // them. The stored value is left alone — its author chose it — and only the
+    // rendering moves on, so an old correction still reads as a half day.
+    const built = overrideReport({
+      statuses: { '2026-08-06': status('2026-08-06', 'WORKING') },
+      overrides: { '2026-08-06': { code: 'HD', computedCode: 'A' } },
+    });
+    expect(dayOf(built, '2026-08-06').code).toBe('PL_HD');
+  });
 
   it('wins over an absent day the machine could not vouch for', () => {
     // The Pallavi case: badged in all day, agent died at 15:37, nothing tracked.

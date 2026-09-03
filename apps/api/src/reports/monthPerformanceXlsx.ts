@@ -64,6 +64,9 @@ const BLOCK_CREAM = 'FFF4ECD6';
 const BLOCK_PINK = 'FFEFD4D4';
 const BLOCK_MINT = 'FFC8E6CD';
 const BLOCK_CORAL = 'FFF3C9B6';
+// Half of LWP's coral, so an unpaid half day reads as a paler kin of the full
+// day rather than as an unrelated fourth colour.
+const BLOCK_PEACH = 'FFF9E4DA';
 
 /**
  * `figmaSans` / `figmaMono` are proprietary, so DESIGN.md's documented
@@ -85,7 +88,8 @@ const MONO = 'JetBrains Mono';
  */
 const CODE_FILL: Record<MonthPerformanceCode, string> = {
   P: BLOCK_LIME,
-  HD: BLOCK_CREAM,
+  PL_HD: BLOCK_CREAM,
+  LWP_HD: BLOCK_PEACH,
   A: BLOCK_PINK,
   PL: BLOCK_MINT,
   LWP: BLOCK_CORAL,
@@ -96,7 +100,9 @@ const CODE_FILL: Record<MonthPerformanceCode, string> = {
 
 /** Wide enough for "Total Working Hours" without truncating it. */
 const LABEL_COL_WIDTH = 21;
-const DAY_COL_WIDTH = 5.6;
+// Six characters, because LWP_HD is six characters. A day column that clips its
+// own code is worse than a grid one notch wider.
+const DAY_COL_WIDTH = 7;
 
 /** A masthead, then one block per person. */
 const HEADER_ROWS = 3;
@@ -298,7 +304,8 @@ function buildSummarySheet(wb: ExcelJS.Workbook, report: MonthPerformanceReport)
     { header: 'Email', key: 'email', width: 30 },
     { header: 'Dept.', key: 'team', width: 24 },
     { header: 'Present', key: 'present', width: 9 },
-    { header: 'Half day', key: 'halfDay', width: 10 },
+    { header: 'Half day paid', key: 'paidHalfDay', width: 14 },
+    { header: 'Half day unpaid', key: 'unpaidHalfDay', width: 16 },
     { header: 'Weekly off', key: 'weeklyOff', width: 11 },
     { header: 'Holiday', key: 'holiday', width: 9 },
     { header: 'Paid leave', key: 'paidLeave', width: 11 },
@@ -324,7 +331,8 @@ function buildSummarySheet(wb: ExcelJS.Workbook, report: MonthPerformanceReport)
       email: row.user.email,
       team: row.user.teamName ?? '',
       present: row.totals.present,
-      halfDay: row.totals.halfDay,
+      paidHalfDay: row.totals.paidHalfDay,
+      unpaidHalfDay: row.totals.unpaidHalfDay,
       weeklyOff: row.totals.weeklyOff,
       holiday: row.totals.holiday,
       paidLeave: row.totals.paidLeave,
@@ -354,7 +362,8 @@ function buildLegendSheet(wb: ExcelJS.Workbook): void {
 
   const legend: Array<[MonthPerformanceCode, string]> = [
     ['P', 'Present — any tracked time on the day'],
-    ['HD', 'Half day — approved leave covering half the day'],
+    ['PL_HD', 'Half day of paid leave — a balance covered it'],
+    ['LWP_HD', 'Half day of leave the balance did not cover'],
     ['A', 'Absent — a working day with no tracked time at all'],
     ['WO', 'Weekly off — the assigned shift has this weekday off'],
     ['HL', 'Company holiday'],

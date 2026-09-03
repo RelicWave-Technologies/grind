@@ -368,6 +368,10 @@ export function ReportsScreen() {
 /** What each attendance code means, spelled out for a tooltip. */
 const ATTENDANCE_LABEL: Record<string, string> = {
   P: 'Present',
+  PL_HD: 'Half day',
+  LWP_HD: 'Half day, unpaid',
+  // Retired. Kept so a correction written before half days split into paid and
+  // unpaid still reads as words rather than as its own code.
   HD: 'Half day',
   A: 'Absent',
   WO: 'Weekly off',
@@ -1123,7 +1127,7 @@ function AttendanceOverrideDialog({
         <div className="rep-override-field">
           <span className="ui-t-eyebrow">Correct it to</span>
           <div className="rep-override-codes">
-            {(['P', 'A', 'HD', 'PL', 'LWP'] as const).map((c) => (
+            {(['P', 'A', 'PL_HD', 'LWP_HD', 'PL', 'LWP'] as const).map((c) => (
               <button
                 key={c}
                 type="button"

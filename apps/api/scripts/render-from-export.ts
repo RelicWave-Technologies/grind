@@ -146,7 +146,8 @@ for (const r of report.rows) {
   const punched = r.days.filter((day) => day.punchInMinute !== null || day.punchOutMinute !== null).length;
   console.log(
     `${r.user.name.slice(0, 22).padEnd(24)}punched ${String(punched).padStart(2)}` +
-    ` · P ${t.present} · HD ${t.halfDay} · WO ${t.weeklyOff} · HL ${t.holiday}` +
+    ` · P ${t.present} · PL_HD ${t.paidHalfDay} · LWP_HD ${t.unpaidHalfDay}` +
+    ` · WO ${t.weeklyOff} · HL ${t.holiday}` +
     ` · PL ${t.paidLeave} · LWP ${t.unpaidLeave} · A ${t.absent}` +
     ` · hours ${Math.floor(t.workMinutes / 60)}:${String(t.workMinutes % 60).padStart(2, '0')}`,
   );

@@ -1437,9 +1437,13 @@ model AttendanceOverride {
 enum AttendanceOverrideCode {
   P
   A
-  HD
+  PL_HD
+  LWP_HD
   PL
   LWP
+  /// Retired in favour of PL_HD / LWP_HD. Kept because rows written before the
+  /// split still hold it, and dropping a value the data uses is not a rename.
+  HD
 }
 
 model AttendancePunch {

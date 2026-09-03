@@ -131,7 +131,7 @@ export function buildMonthPointers(input: MonthPointerInput): MonthPointers {
 
   for (const day of input.days) {
     const isFull = day.code === 'P';
-    const isHalf = day.code === 'HD';
+    const isHalf = day.code === 'PL_HD' || day.code === 'LWP_HD';
     if (!isFull && !isHalf) continue;
 
     out.workedDays += 1;

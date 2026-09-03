@@ -36,8 +36,8 @@ import { weekdayForDate } from '../leave';
  * hours: those keep reporting what Timo tracked, so "the manager says present"
  * and "the machine recorded 5:37" stay two separate, visible facts.
  *
- *     HL / WO / PL / LWP / HD   whatever the calendar recorded, even when the
- *                               person worked that day anyway
+ *     HL / WO / PL / LWP        whatever the calendar recorded, even when the
+ *     PL_HD / LWP_HD            person worked that day anyway
  *     P                         any tracked time at all
  *     A                         a working day with none
  *
@@ -50,9 +50,15 @@ import { weekdayForDate } from '../leave';
 /**
  * What a single day reads as.
  *
- * `HD` and `LWP` are splits the machine does not make — it has no half day, and
- * shows every absence as one code — but the Lark leave data knows which leave
- * was a half day and which was unpaid, and discarding that would be a loss.
+ * The half-day and unpaid splits are ones the machine does not make — it has no
+ * half day, and shows every absence as one code — but the Lark leave data knows
+ * which leave was a half day, and the ledger knows which days a balance paid
+ * for. Discarding either would be a loss.
+ *
+ * A half day carries the same paid/unpaid answer a full day carries, which is
+ * why there is no bare `HD`: a half day taken with nothing left in the balance
+ * used to read exactly like one taken with a balance behind it, so the only
+ * days the report could not account for were the ones it rendered as identical.
  *
  * `PL` rather than `LV` for paid leave: PL is what everybody here already reads
  * on a leave form, and a report is not the place to teach a new abbreviation.
@@ -60,8 +66,10 @@ import { weekdayForDate } from '../leave';
 export type MonthPerformanceCode =
   /** Present — any tracked time on the day. */
   | 'P'
-  /** Half day — approved leave covering half the day. Never inferred from hours. */
-  | 'HD'
+  /** Half day of paid leave — a balance covered it. Never inferred from hours. */
+  | 'PL_HD'
+  /** Half day of leave the balance did not cover. */
+  | 'LWP_HD'
   /** Absent — a working day with no tracked time at all. */
   | 'A'
   /** Weekly off — the assigned shift has this weekday off. */
@@ -108,7 +116,10 @@ export interface MonthPerformanceDay {
 
 export interface MonthPerformanceTotals {
   present: number;
-  halfDay: number;
+  /** Half days a balance paid for. */
+  paidHalfDay: number;
+  /** Half days it did not. */
+  unpaidHalfDay: number;
   weeklyOff: number;
   holiday: number;
   /** Paid leave days. */
@@ -232,8 +243,20 @@ export function codeForDay(
   trackedMinutes: number,
   override?: DayOverride | null,
 ): MonthPerformanceCode {
-  if (override) return override.code;
+  if (override) return overrideCode(override.code);
   return computedCodeForDay(status, trackedMinutes);
+}
+
+/**
+ * A hand-set code as the report renders it.
+ *
+ * Corrections written before half days split into paid and unpaid carry the
+ * retired `HD`. They are read as `PL_HD` rather than rewritten in the database:
+ * the enum still holds the old value, so an untouched row keeps saying what its
+ * author actually chose, and only the rendering moves on.
+ */
+export function overrideCode(code: AttendanceOverrideCode): MonthPerformanceCode {
+  return code === 'HD' ? 'PL_HD' : code;
 }
 
 /**
@@ -251,8 +274,8 @@ export function computedCodeForDay(
   switch (status?.kind) {
     case 'HOLIDAY': return 'HL';
     case 'WEEKLY_OFF': return 'WO';
-    case 'PAID_LEAVE': return status.expectedFraction > 0 ? 'HD' : 'PL';
-    case 'UNPAID_LEAVE': return status.expectedFraction > 0 ? 'HD' : 'LWP';
+    case 'PAID_LEAVE': return status.expectedFraction > 0 ? 'PL_HD' : 'PL';
+    case 'UNPAID_LEAVE': return status.expectedFraction > 0 ? 'LWP_HD' : 'LWP';
     default: break;
   }
   if (trackedMinutes > 0) return 'P';
@@ -264,7 +287,7 @@ export function computedCodeForDay(
 
 function emptyTotals(): MonthPerformanceTotals {
   return {
-    present: 0, halfDay: 0, weeklyOff: 0, holiday: 0, paidLeave: 0,
+    present: 0, paidHalfDay: 0, unpaidHalfDay: 0, weeklyOff: 0, holiday: 0, paidLeave: 0,
     unpaidLeave: 0, absent: 0, noShift: 0, workMinutes: 0,
   };
 }
@@ -272,7 +295,8 @@ function emptyTotals(): MonthPerformanceTotals {
 function countInto(totals: MonthPerformanceTotals, code: MonthPerformanceCode): void {
   switch (code) {
     case 'P': totals.present += 1; break;
-    case 'HD': totals.halfDay += 1; break;
+    case 'PL_HD': totals.paidHalfDay += 1; break;
+    case 'LWP_HD': totals.unpaidHalfDay += 1; break;
     case 'WO': totals.weeklyOff += 1; break;
     case 'HL': totals.holiday += 1; break;
     case 'PL': totals.paidLeave += 1; break;
@@ -299,7 +323,7 @@ export function buildMonthPerformance(input: MonthPerformanceInput): MonthPerfor
       const workMinutes = Math.max(0, Math.round(input.trackedMinutesFor(user.id, date)));
       const override = input.overrideFor?.(user.id, date) ?? null;
       const computed = computedCodeForDay(status, workMinutes);
-      const code = override ? override.code : computed;
+      const code = override ? overrideCode(override.code) : computed;
 
       countInto(totals, code);
       totals.workMinutes += workMinutes;
@@ -386,7 +410,8 @@ export function monthPerformanceGridRows(
 export function monthPerformanceSummaryPairs(row: MonthPerformanceRow): Array<[string, string]> {
   return [
     ['Present', String(row.totals.present)],
-    ['Half Day', String(row.totals.halfDay)],
+    ['Half Day Paid', String(row.totals.paidHalfDay)],
+    ['Half Day Unpaid', String(row.totals.unpaidHalfDay)],
     ['Weekly Off', String(row.totals.weeklyOff)],
     ['Holiday', String(row.totals.holiday)],
     ['Paid Leave', String(row.totals.paidLeave)],

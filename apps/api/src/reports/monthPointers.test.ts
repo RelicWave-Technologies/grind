@@ -96,10 +96,10 @@ describe('buildMonthPointers', () => {
 
   it('counts short and strong half days at the spec boundaries', () => {
     const p = run([
-      day('HD', 120), // exactly 2h — short, the spec says "2 hours or less"
-      day('HD', 121), // over 2h
-      day('HD', 300), // exactly 5h — not strong, the spec says "more than 5"
-      day('HD', 301), // over 5h — strong
+      day('PL_HD', 120), // exactly 2h — short, the spec says "2 hours or less"
+      day('PL_HD', 121), // over 2h
+      day('PL_HD', 300), // exactly 5h — not strong, the spec says "more than 5"
+      day('PL_HD', 301), // over 5h — strong
     ]);
 
     expect(p.halfDaysUpToTwo).toBe(1);
