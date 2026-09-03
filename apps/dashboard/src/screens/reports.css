@@ -1599,10 +1599,28 @@
 
 .rep-modal--override {
   width: min(460px, calc(100vw - var(--ui-sp-8)));
+}
+
+/* The padding and rhythm live here rather than on the dialog, because the
+   dialog is now a fixed head, a scrolling middle and a fixed foot — padding on
+   the outside would scroll the header away with everything else. */
+.rep-override-body {
   display: flex;
   flex-direction: column;
   gap: var(--ui-sp-6);
   padding: var(--ui-sp-7);
+}
+
+.rep-modal--override .rep-modal-head,
+.rep-modal--override .rep-modal-foot {
+  /* Never shrink: these two are what the reader needs to stay reachable when
+     the history is long, and a flex item shrinks by default. */
+  flex: none;
+  padding: var(--ui-sp-5) var(--ui-sp-7);
+}
+
+.rep-modal--override .rep-override-body {
+  flex: 1 1 auto;
 }
 
 /* The day as it stands, before anybody overrules it. */
@@ -1742,8 +1760,6 @@
   margin: 0;
   padding: 0;
   list-style: none;
-  max-height: 168px;
-  overflow-y: auto;
 }
 
 .rep-override-hist-row {

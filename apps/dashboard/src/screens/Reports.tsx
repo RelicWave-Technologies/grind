@@ -1140,6 +1140,9 @@ function AttendanceOverrideDialog({
           <Button size="sm" variant="ghost" icon={<X size={15} strokeWidth={2} />} onClick={onClose} aria-label="Close" />
         </header>
 
+        {/* One scrolling region between a fixed head and foot, so the buttons
+            stay reachable however long the history gets. */}
+        <div className="rep-modal-body rep-override-body">
         {/* What is being overruled, stated before the choice rather than after
             it — a person correcting a day should see the day first. */}
         <div className="rep-override-now">
@@ -1200,6 +1203,7 @@ function AttendanceOverrideDialog({
         {error && <Banner status="danger">{error}</Banner>}
 
         <OverrideHistory query={historyQ} tz={tz} />
+        </div>
 
         <footer className="rep-modal-foot">
           {existing && (
