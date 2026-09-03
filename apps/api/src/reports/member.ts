@@ -22,7 +22,7 @@ import {
 import type { EntryLiveEvidenceMap } from '../insights/liveEntryEvidence';
 import { resolveEffectiveEntrySegmentEnds } from '../insights/openSegmentEvidence';
 import type { DayStatus } from '@grind/types';
-import { computedCodeForDay, type DayOverride } from './monthPerformance';
+import { computedCodeForDay, overrideCode, type DayOverride } from './monthPerformance';
 import { buildTimesheetMatrix, dateRange, type TimesheetSegmentInput } from '../insights/timesheets';
 import type { RoleTitle } from '../scoring/presets';
 import { scoreMinute } from '../scoring/score';
@@ -352,7 +352,7 @@ export function buildMemberReportDays(input: {
       screenshots: { count: screenshotCount },
       topApps,
       dayStatus: dayStatus ?? null,
-      attendanceCode: override ? override.code : computedCode,
+      attendanceCode: override ? overrideCode(override.code) : computedCode,
       attendanceOverride: override
         ? {
             code: override.code,

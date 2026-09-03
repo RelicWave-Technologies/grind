@@ -9,7 +9,7 @@ import {
   type LeavePortion,
 } from '@grind/types';
 import { localDayWindow } from '../insights/day';
-import type { UnfundedLeaveDays } from './leaveFunding';
+import type { LeaveFundingDays } from './leaveFunding';
 
 /**
  * The Working Calendar answers one question for a person and a date:
@@ -73,14 +73,15 @@ export interface WorkingCalendarInput {
   holidays?: HolidayInput[];
   approvedLeave?: ApprovedLeaveInput[];
   /**
-   * Paid-leave days that ran past the person's balance, by user.
+   * How far a balance reached on each paid-leave day that it did not cover
+   * outright, by user.
    *
-   * Resolved by `resolveUnfundedLeaveDays` rather than here: the answer needs a
+   * Resolved by `resolveLeaveFunding` rather than here: the answer needs a
    * running balance read in date order, and this class is queried in whatever
-   * order a caller happens to render. Handed in as a finished set so a day's
-   * status stays independent of the order it was asked for.
+   * order a caller happens to render. Handed in finished so a day's status
+   * stays independent of the order it was asked for.
    */
-  unfundedLeaveDays?: UnfundedLeaveDays;
+  leaveFunding?: LeaveFundingDays;
 }
 
 type ShiftForDay =
@@ -104,13 +105,13 @@ export class WorkingCalendar {
   private readonly dayWindowCache = new Map<string, { startMs: number; endMs: number } | null>();
 
   private readonly lastSaturdayOffFor: Record<string, boolean>;
-  /** userId -> dates whose paid leave had no balance behind it. */
-  private readonly unfundedLeaveDays: UnfundedLeaveDays;
+  /** userId -> date -> days of leave a balance covered, where it fell short. */
+  private readonly leaveFunding: LeaveFundingDays;
 
   constructor(input: WorkingCalendarInput) {
     this.tz = input.tz;
     this.lastSaturdayOffFor = input.lastSaturdayOffFor ?? {};
-    this.unfundedLeaveDays = input.unfundedLeaveDays ?? new Map();
+    this.leaveFunding = input.leaveFunding ?? new Map();
     this.shiftAssignments = input.shiftAssignments ?? {};
     this.userTeamIds = input.userTeamIds ?? {};
 
@@ -160,17 +161,19 @@ export class WorkingCalendar {
     const leave = this.leaveFor(userId, date);
     if (leave) {
       const away = portionDays(leave.portion);
-      // Approved as paid, but only paid if a balance actually covered it. A
-      // day past the balance is recorded as unpaid — the ledger still debited
-      // it and is still allowed to sit negative, because the balance says how
-      // far someone is overdrawn and this says which days went unfunded.
-      const funded = !this.unfundedLeaveDays.get(userId)?.has(date);
-      const paid = leave.kind === 'PAID' && funded;
+      // Approved as paid, but only paid as far as a balance reached. The ledger
+      // still debited the whole day and is still allowed to sit negative — the
+      // balance says how far someone is overdrawn, this says which days it did
+      // not reach, and a day it reached halfway is both at once.
+      const shortfall = leave.kind === 'PAID' ? this.leaveFunding.get(userId)?.get(date) : 0;
+      const fundedDays = shortfall ?? (leave.kind === 'PAID' ? away : 0);
+      const paid = fundedDays > 0;
       return {
         date,
         kind: paid ? 'PAID_LEAVE' : 'UNPAID_LEAVE',
         portion: leave.portion,
         paid,
+        fundedDays,
         // Unpaid leave costs no balance because it costs no money. "charged"
         // and "paid" are two different columns and conflating them is the
         // easiest way to get this wrong.

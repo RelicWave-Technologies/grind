@@ -37,6 +37,7 @@ import { timesheetCalendarInputs } from '../leave';
 import { formatMonthPerformanceCsv } from '../reports/monthPerformance';
 import { monthPerformanceXlsx } from '../reports/monthPerformanceXlsx';
 import { loadMonthPerformanceReport, resolveReportMonth } from '../reports/monthPerformanceData';
+import { computeMonthPointers, storeMonthPointers } from '../reports/monthPointersData';
 import {
   clearAttendanceOverride,
   computeDayCode,
@@ -486,6 +487,101 @@ reportsRouter.delete('/attendance-override', requireCapability('reports.team.rea
     if (!req.scope.userIds.includes(parsed.data.userId)) return res.status(403).json({ error: 'out_of_scope' });
     const cleared = await clearAttendanceOverride(parsed.data);
     res.json({ ok: true, cleared });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * Month pointers — the stored verdict for a month, one row per person.
+ *
+ * Reads what was last computed. It does not compute on the way out: the point
+ * of storing these is that a closed month keeps the verdict it had when it
+ * closed, and a GET that quietly recomputed would defeat that.
+ *
+ * Scoped like every other report: `req.scope.userIds` bounds it, so a manager
+ * sees their team and an admin the workspace.
+ */
+reportsRouter.get('/month-pointers', requireCapability('reports.team.read'), async (req, res, next) => {
+  try {
+    if (!req.scope) return res.status(500).json({ error: 'scope_unresolved' });
+    const range = resolveReportMonth(req.query as Record<string, unknown>, req.scope.workspaceTimezone);
+    if ('error' in range) return res.status(400).json({ error: range.error });
+
+    const stored = await prisma.monthPerformancePointer.findMany({
+      where: { month: range.month, userId: { in: req.scope.userIds } },
+      include: { user: { select: { name: true, email: true, team: { select: { name: true } } } } },
+      orderBy: [{ avgMinutes: 'asc' }],
+    });
+
+    res.json({
+      month: range.month,
+      computedAt: stored[0]?.computedAt?.toISOString() ?? null,
+      rows: stored.map((r) => ({
+        userId: r.userId,
+        name: r.user.name,
+        email: r.user.email,
+        teamName: r.user.team?.name ?? null,
+        band: r.band,
+        workedDays: r.workedDays,
+        fullDays: r.fullDays,
+        halfDays: r.halfDays,
+        workMinutes: r.workMinutes,
+        avgMinutes: r.avgMinutes,
+        fullDaysUnderSix: r.fullDaysUnderSix,
+        halfDaysUpToTwo: r.halfDaysUpToTwo,
+        fullDaysNineOrMore: r.fullDaysNineOrMore,
+        halfDaysOverFive: r.halfDaysOverFive,
+        lateDays: r.lateDays,
+        lateDaysAfterBuffer: r.lateDaysAfterBuffer,
+        earlyDays: r.earlyDays,
+        daysWithoutPunch: r.daysWithoutPunch,
+      })),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * Recompute and store a month's pointers.
+ *
+ * Admin-only, because it overwrites a record other people read. Everything it
+ * writes is derived, so re-running it is safe and is the fix for a month whose
+ * underlying days have since been corrected.
+ */
+reportsRouter.post('/month-pointers/recompute', requireCapability('policy.manage'), async (req, res, next) => {
+  try {
+    if (!req.scope) return res.status(500).json({ error: 'scope_unresolved' });
+    const range = resolveReportMonth(
+      { month: (req.body as Record<string, unknown> | undefined)?.month ?? req.query.month },
+      req.scope.workspaceTimezone,
+    );
+    if ('error' in range) return res.status(400).json({ error: range.error });
+
+    const result = await storeMonthPointers({
+      workspaceId: req.scope.workspaceId,
+      userIds: req.scope.userIds,
+      range,
+    });
+    res.json({ ok: true, month: result.month, written: result.written });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** What the pointers would be right now, without storing them. */
+reportsRouter.get('/month-pointers/preview', requireCapability('reports.team.read'), async (req, res, next) => {
+  try {
+    if (!req.scope) return res.status(500).json({ error: 'scope_unresolved' });
+    const range = resolveReportMonth(req.query as Record<string, unknown>, req.scope.workspaceTimezone);
+    if ('error' in range) return res.status(400).json({ error: range.error });
+    const rows = await computeMonthPointers({
+      workspaceId: req.scope.workspaceId,
+      userIds: req.scope.userIds,
+      range,
+    });
+    res.json({ month: range.month, rows });
   } catch (err) {
     next(err);
   }

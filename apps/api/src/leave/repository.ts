@@ -2,7 +2,7 @@ import { prisma, type Prisma } from '@grind/db';
 import { LEAVE_POLICY_DEFAULTS, type LeavePolicyDto } from '@grind/types';
 import { WorkingCalendar, type ShiftAssignmentInput } from './workingCalendar';
 import { projectBalance, type LeaveLedgerEntry } from './ledger';
-import { resolveUnfundedLeaveDays, type ChargeableLeaveDay, type LeaveCredit } from './leaveFunding';
+import { resolveLeaveFunding, type ChargeableLeaveDay, type LeaveCredit } from './leaveFunding';
 
 /**
  * The seam between the database and the two pure modules.
@@ -208,7 +208,7 @@ export async function loadWorkingCalendar(input: {
 
   return new WorkingCalendar({
     ...shared,
-    unfundedLeaveDays: resolveUnfundedLeaveDays({
+    leaveFunding: resolveLeaveFunding({
       credits: creditRows,
       leaveDays,
       since: fundingFloor,

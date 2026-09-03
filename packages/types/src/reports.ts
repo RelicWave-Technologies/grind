@@ -27,7 +27,17 @@ export type MemberReportTopApp = z.infer<typeof MemberReportTopAppSchema>;
  * shift schedule, and a second place to set them would let the same fact be
  * true in one and false in the other.
  */
-export const AttendanceOverrideCodeSchema = z.enum(['P', 'A', 'HD', 'PL', 'LWP']);
+export const AttendanceOverrideCodeSchema = z.enum([
+  'P',
+  'A',
+  'PL_HD',
+  'LWP_HD',
+  'PL',
+  'LWP',
+  // Retired, still accepted: corrections written before half days split into
+  // paid and unpaid carry it, and the enum has to keep parsing its own history.
+  'HD',
+]);
 export type AttendanceOverrideCode = z.infer<typeof AttendanceOverrideCodeSchema>;
 
 export const AttendanceOverrideDtoSchema = z.object({
@@ -102,9 +112,9 @@ export const MemberReportDaySchema = z.object({
    * The day's attendance code as the report tells it: a manager's correction
    * if one was made, otherwise what the calendar and tracked time compute.
    */
-  attendanceCode: z.enum(['P', 'HD', 'A', 'WO', 'HL', 'PL', 'LWP', '--']).optional(),
+  attendanceCode: z.enum(['P', 'PL_HD', 'LWP_HD', 'PL_HD/LWP_HD', 'A', 'WO', 'HL', 'PL', 'LWP', '--']).optional(),
   /** What it would say with nobody's correction, so the UI can show both. */
-  computedAttendanceCode: z.enum(['P', 'HD', 'A', 'WO', 'HL', 'PL', 'LWP', '--']).optional(),
+  computedAttendanceCode: z.enum(['P', 'PL_HD', 'LWP_HD', 'PL_HD/LWP_HD', 'A', 'WO', 'HL', 'PL', 'LWP', '--']).optional(),
   /** Present when a human corrected this day. */
   attendanceOverride: z
     .object({ code: AttendanceOverrideCodeSchema, stale: z.boolean() })

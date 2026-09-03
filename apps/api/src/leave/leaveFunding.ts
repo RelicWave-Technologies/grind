@@ -10,10 +10,16 @@ import { roundToHalfDay } from '@grind/types';
  * the days a balance covered stay Paid Leave, and the days past it are Leave
  * Without Pay.
  *
+ * A day is funded as far as the balance reaches and no further, which is the
+ * only rule that does not throw away change. A full day met by half a day of
+ * balance is half paid and half not — refusing to split it would either bill a
+ * whole day nobody had, or leave the half day sitting in the balance where a
+ * later, cheaper day would spend it and put the paid days out of order.
+ *
  * This decides a *label*, never a charge. The ledger still debits every
  * approved day and is still allowed to run negative, so the two numbers say
  * different things on purpose — the balance says how far someone is overdrawn,
- * and the LWP count says which specific days went unfunded.
+ * and the unfunded days say which ones the balance did not reach.
  *
  * Pure, and separate from the Working Calendar, because the calendar answers
  * "was this person expected to work" from three sources it owns outright. The
@@ -54,10 +60,15 @@ export interface LeaveFundingInput {
   accrualStartFor?: Readonly<Record<string, string | undefined>>;
 }
 
-/** userId -> the dates whose leave ran past the balance. */
-export type UnfundedLeaveDays = Map<string, Set<string>>;
+/**
+ * userId -> date -> days of that date's leave a balance covered.
+ *
+ * Only days the balance did not cover in full appear. A date that is absent was
+ * paid for outright, which is the common case and not worth a map entry.
+ */
+export type LeaveFundingDays = Map<string, Map<string, number>>;
 
-export function resolveUnfundedLeaveDays(input: LeaveFundingInput): UnfundedLeaveDays {
+export function resolveLeaveFunding(input: LeaveFundingInput): LeaveFundingDays {
   const creditsByUser = new Map<string, LeaveCredit[]>();
   for (const c of input.credits) {
     const list = creditsByUser.get(c.userId);
@@ -72,7 +83,7 @@ export function resolveUnfundedLeaveDays(input: LeaveFundingInput): UnfundedLeav
     else daysByUser.set(d.userId, [d]);
   }
 
-  const out: UnfundedLeaveDays = new Map();
+  const out: LeaveFundingDays = new Map();
 
   for (const [userId, days] of daysByUser) {
     // The floor is whichever starts later: the workspace's ledger start, or
@@ -87,7 +98,7 @@ export function resolveUnfundedLeaveDays(input: LeaveFundingInput): UnfundedLeav
       .filter((c) => !floor || c.effectiveOn >= floor)
       .sort((a, b) => (a.effectiveOn < b.effectiveOn ? -1 : a.effectiveOn > b.effectiveOn ? 1 : 0));
 
-    const unfunded = new Set<string>();
+    const short = new Map<string, number>();
     let budget = 0;
     let nextCredit = 0;
 
@@ -98,11 +109,20 @@ export function resolveUnfundedLeaveDays(input: LeaveFundingInput): UnfundedLeav
         budget = roundToHalfDay(budget + c.days);
         nextCredit += 1;
       }
-      if (budget >= day.cost) budget = roundToHalfDay(budget - day.cost);
-      else unfunded.add(day.date);
+      if (budget >= day.cost) {
+        budget = roundToHalfDay(budget - day.cost);
+        continue;
+      }
+      // Whatever is left pays for as much of the day as it reaches, and is
+      // spent doing it. A balance driven negative by an adjustment buys
+      // nothing, hence the floor at zero rather than a subtraction that would
+      // hand back credit the person does not have.
+      const funded = Math.max(0, roundToHalfDay(budget));
+      short.set(day.date, funded);
+      budget = roundToHalfDay(budget - funded);
     }
 
-    if (unfunded.size > 0) out.set(userId, unfunded);
+    if (short.size > 0) out.set(userId, short);
   }
 
   return out;

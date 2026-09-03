@@ -128,6 +128,16 @@ export const DayStatusSchema = z.object({
    * 1 on a working day, 0.5 on a half-day absence, 0 when fully away.
    */
   expectedFraction: z.number(),
+  /**
+   * How much of `chargedDays` a balance actually covered, in days.
+   *
+   * Absent means nobody asked — a caller that does not hand the calendar a
+   * ledger gets the old answer, where approved paid leave is simply paid.
+   * Present and short of `chargedDays` means the day ran past the balance:
+   * 0 for a day nothing covered, 0.5 for a full day a half balance half
+   * covered. Only then do paid and unpaid both describe the same day.
+   */
+  fundedDays: z.number().optional(),
   /** Name of the shift in force, when one is. */
   shiftName: z.string().nullable(),
   /** Human label — "Diwali", "Casual Leave". */

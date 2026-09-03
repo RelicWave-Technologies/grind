@@ -19,6 +19,7 @@ model Workspace {
   teams                     Team[]
   teamManagers              TeamManager[]
   shifts                    Shift[]
+  monthPointers             MonthPerformancePointer[]
   policy                    WorkspacePolicy?
   payrollPolicy             PayrollPolicy?
   payrollRunLogs            PayrollRunLog[]
@@ -336,6 +337,7 @@ model User {
   timeEntries                      TimeEntry[]
   activitySamples                  ActivitySample[]
   shiftAssignments                 ShiftAssignment[]
+  monthPointers                    MonthPerformancePointer[]
   screenshots                      Screenshot[]              @relation("ScreenshotSubject")
   deletedScreenshots               Screenshot[]              @relation("ScreenshotDeletedBy")
   larkIdentity                     LarkIdentity?
@@ -365,8 +367,8 @@ model User {
   leaveLedgerEntriesCreated        LeaveLedgerEntry[]        @relation("LeaveLedgerActor")
   companyHolidaysCreated           CompanyHoliday[]          @relation("HolidayCreator")
   attendancePunches                AttendancePunch[]
-  attendanceOverrides              AttendanceOverride[] @relation("AttendanceOverrideSubject")
-  attendanceOverridesAuthored      AttendanceOverride[] @relation("AttendanceOverrideAuthor")
+  attendanceOverrides              AttendanceOverride[]      @relation("AttendanceOverrideSubject")
+  attendanceOverridesAuthored      AttendanceOverride[]      @relation("AttendanceOverrideAuthor")
 
   @@index([workspaceId])
   @@index([teamId])
@@ -1435,9 +1437,13 @@ model AttendanceOverride {
 enum AttendanceOverrideCode {
   P
   A
-  HD
+  PL_HD
+  LWP_HD
   PL
   LWP
+  /// Retired in favour of PL_HD / LWP_HD. Kept because rows written before the
+  /// split still hold it, and dropping a value the data uses is not a rename.
+  HD
 }
 
 model AttendancePunch {
@@ -1462,4 +1468,71 @@ model AttendancePunch {
 
   @@unique([userId, date])
   @@index([workspaceId, date])
+}
+
+/// How a person's month read overall. Absent when the month has no worked days
+/// at all — there is nothing to judge, which is not the same as critical.
+enum PerformanceBand {
+  RED
+  YELLOW
+  GREEN
+}
+
+/// One person's performance pointers for one month.
+///
+/// A stored summary of what the month report already shows, kept for two
+/// reasons the report cannot serve on its own. It is a **record**: a closed
+/// month should keep the verdict it had when it closed, rather than quietly
+/// changing months later because somebody corrected an old day. And it is
+/// **queryable**: "who was red in August" is one index scan here, against
+/// rebuilding thirty-one days for a hundred people there.
+///
+/// Everything in it is derived, so it is safe to delete and recompute; nothing
+/// here is a source of truth. `computedAt` says how old the verdict is.
+model MonthPerformancePointer {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// YYYY-MM in the workspace timezone.
+  month       String
+
+  /// `P` + `HD` days — the denominator of the average.
+  workedDays  Int
+  fullDays    Int
+  halfDays    Int
+  workMinutes Int
+  /// Rounded to the minute; 0 when nothing was worked.
+  avgMinutes  Int
+  /// NULL when `workedDays` is 0.
+  band        PerformanceBand?
+
+  /// "Total Full Working Days Less Than 6 Hours"
+  fullDaysUnderSix   Int
+  /// "Total Half Working Days – 2 Hours or Less"
+  halfDaysUpToTwo    Int
+  /// "Total Full Working Days – 9 Hours or More"
+  fullDaysNineOrMore Int
+  /// "Total Half Working Days – More Than 5 Hours"
+  halfDaysOverFive   Int
+
+  /// Punched in after the shift start, and after the shift start plus its grace
+  /// buffer. Both are kept because the workspace has not settled which one it
+  /// means by "late", and the two give very different counts.
+  lateDays            Int
+  lateDaysAfterBuffer Int
+  /// Punched out before the shift end.
+  earlyDays           Int
+  /// Worked days with no usable punch pair, so arrival and departure could not
+  /// be judged. Held apart so a person the biometric machine missed does not
+  /// read as never late.
+  daysWithoutPunch    Int
+
+  computedAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([userId, month])
+  @@index([workspaceId, month, band])
 }
