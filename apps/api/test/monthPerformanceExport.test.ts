@@ -386,3 +386,148 @@ describe('correcting a day by hand', () => {
     expect(res.status).toBe(403);
   });
 });
+
+/**
+ * A manager's correction spends the balance, so the days after it move.
+ *
+ * The case this was written for: one accrual, a half day of leave, a day a
+ * manager called a paid half day, and a full day after that. Before the
+ * correction counted, the full day had half a balance behind it and read as
+ * half paid. After, there is nothing left and it is unpaid outright — which is
+ * the only answer consistent with what the manager said the middle day was.
+ */
+describe('a correction moves the days after it', () => {
+  async function statusRow(token: string, email: string) {
+    const res = await request(app)
+      .get('/v1/reports/month-performance.csv?month=2026-08')
+      .set(bearer(token));
+    expect(res.status).toBe(200);
+    const block = blockFor(res.text, email);
+    expect(block).not.toBeNull();
+    const status = block!.find((l) => l.startsWith('Status,'));
+    expect(status).toBeDefined();
+    // Day 1 is the second cell; index by date to keep the assertions readable.
+    const cells = status!.split(',');
+    return (day: number) => cells[day]?.trim();
+  }
+
+  it('re-spends the balance from the day the correction changed', async () => {
+    const s = await seed();
+    await assignShift(s.ws.id, s.inTeam.id);
+    // Accrual starts before the window, or every August day sits below the
+    // funding floor and is left alone as leave older than the ledger.
+    await prisma.user.update({
+      where: { id: s.inTeam.id },
+      data: { joinedOn: new Date('2026-01-01T00:00:00Z') },
+    });
+    await prisma.leavePolicy.create({
+      data: { workspaceId: s.ws.id, monthlyAccrualDays: 1, ledgerStartMonth: '2026-08' },
+    });
+    await prisma.leaveLedgerEntry.create({
+      data: {
+        workspaceId: s.ws.id,
+        userId: s.inTeam.id,
+        kind: 'ACCRUAL',
+        days: 1,
+        effectiveOn: new Date('2026-08-01T00:00:00Z'),
+        sourceKey: `accr-${s.inTeam.id}-2026-08`,
+      },
+    });
+    const leave = (start: string, end: string, portion: 'FULL' | 'FIRST_HALF', charged: number) =>
+      prisma.leaveRequest.create({
+        data: {
+          clientUuid: ulid(),
+          workspaceId: s.ws.id,
+          userId: s.inTeam.id,
+          kind: 'PAID',
+          startDate: new Date(`${start}T00:00:00Z`),
+          endDate: new Date(`${end}T00:00:00Z`),
+          portion,
+          chargedDays: charged,
+          reason: 'test',
+          status: 'APPROVED',
+        },
+      });
+    await leave('2026-08-10', '2026-08-10', 'FIRST_HALF', 0.5);
+    await leave('2026-08-21', '2026-08-21', 'FULL', 1);
+
+    // The half day spends 0.5, so the full day has 0.5 behind it and splits.
+    expect((await statusRow(s.admin.token, s.inTeam.email))(21)).toBe('PL_HD/LWP_HD');
+
+    await prisma.attendanceOverride.create({
+      data: {
+        workspaceId: s.ws.id,
+        userId: s.inTeam.id,
+        date: new Date('2026-08-14T00:00:00Z'),
+        code: 'PL_HD',
+        reason: 'no application submitted',
+        computedCode: 'A',
+        setById: s.manager.id,
+      },
+    });
+
+    const after = await statusRow(s.admin.token, s.inTeam.email);
+    expect(after(14)).toBe('PL_HD');
+    // The correction took the other half, so nothing is left for the 21st.
+    expect(after(21)).toBe('LWP');
+  });
+
+  it('stops paying for leave on a day a correction calls present', async () => {
+    const s = await seed();
+    await assignShift(s.ws.id, s.inTeam.id);
+    // Accrual starts before the window, or every August day sits below the
+    // funding floor and is left alone as leave older than the ledger.
+    await prisma.user.update({
+      where: { id: s.inTeam.id },
+      data: { joinedOn: new Date('2026-01-01T00:00:00Z') },
+    });
+    await prisma.leavePolicy.create({
+      data: { workspaceId: s.ws.id, monthlyAccrualDays: 1, ledgerStartMonth: '2026-08' },
+    });
+    await prisma.leaveLedgerEntry.create({
+      data: {
+        workspaceId: s.ws.id,
+        userId: s.inTeam.id,
+        kind: 'ACCRUAL',
+        days: 1,
+        effectiveOn: new Date('2026-08-01T00:00:00Z'),
+        sourceKey: `accr2-${s.inTeam.id}-2026-08`,
+      },
+    });
+    for (const date of ['2026-08-10', '2026-08-11']) {
+      await prisma.leaveRequest.create({
+        data: {
+          clientUuid: ulid(),
+          workspaceId: s.ws.id,
+          userId: s.inTeam.id,
+          kind: 'PAID',
+          startDate: new Date(`${date}T00:00:00Z`),
+          endDate: new Date(`${date}T00:00:00Z`),
+          portion: 'FULL',
+          chargedDays: 1,
+          reason: 'test',
+          status: 'APPROVED',
+        },
+      });
+    }
+    // One day of balance, two full days of leave: the second goes unpaid.
+    expect((await statusRow(s.admin.token, s.inTeam.email))(11)).toBe('LWP');
+
+    await prisma.attendanceOverride.create({
+      data: {
+        workspaceId: s.ws.id,
+        userId: s.inTeam.id,
+        date: new Date('2026-08-10T00:00:00Z'),
+        code: 'P',
+        reason: 'he was here',
+        computedCode: 'PL',
+        setById: s.manager.id,
+      },
+    });
+
+    // The 10th no longer spends anything, so the 11th gets the whole day.
+    const after = await statusRow(s.admin.token, s.inTeam.email);
+    expect(after(10)).toBe('P');
+    expect(after(11)).toBe('PL');
+  });
+});

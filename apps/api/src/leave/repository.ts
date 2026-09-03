@@ -1,5 +1,9 @@
 import { prisma, type Prisma } from '@grind/db';
-import { LEAVE_POLICY_DEFAULTS, type LeavePolicyDto } from '@grind/types';
+import {
+  LEAVE_POLICY_DEFAULTS,
+  type AttendanceOverrideCode,
+  type LeavePolicyDto,
+} from '@grind/types';
 import { WorkingCalendar, type ShiftAssignmentInput } from './workingCalendar';
 import { projectBalance, type LeaveLedgerEntry } from './ledger';
 import { resolveLeaveFunding, type ChargeableLeaveDay, type LeaveCredit } from './leaveFunding';
@@ -85,7 +89,7 @@ export async function loadWorkingCalendar(input: {
   const fromDate = fromIsoDate(loadFrom);
   const toDate = fromIsoDate(input.to);
 
-  const [users, assignments, holidays, leave, credits] = await Promise.all([
+  const [users, assignments, holidays, leave, credits, overrides] = await Promise.all([
     db.user.findMany({
       where: { id: { in: input.userIds } },
       select: {
@@ -143,6 +147,17 @@ export async function loadWorkingCalendar(input: {
       },
       select: { userId: true, effectiveOn: true, days: true },
     }),
+    // A manager's correction is a fact about the day, so the balance has to
+    // spend against it the same way it spends against Lark's leave. Loaded
+    // over the funding window, not the visible one: a correction in August
+    // decides what is left for September.
+    db.attendanceOverride.findMany({
+      where: {
+        userId: { in: input.userIds },
+        date: { gte: fromDate, lte: toDate },
+      },
+      select: { userId: true, date: true, code: true },
+    }),
   ]);
 
   const userTeamIds: Record<string, string | null> = {};
@@ -190,15 +205,52 @@ export async function loadWorkingCalendar(input: {
   const accrualStartFor: Record<string, string | undefined> = {};
   for (const u of users) accrualStartFor[u.id] = toIsoDate(u.joinedOn ?? u.createdAt);
 
+  const overrideFor = new Map<string, AttendanceOverrideCode>();
+  for (const o of overrides) overrideFor.set(`${o.userId}\u0000${toIsoDate(o.date)}`, o.code);
+
+  /**
+   * What one day costs the balance, with a manager's correction on top.
+   *
+   * A correction replaces the answer outright rather than adding to it: told a
+   * day was Present, the balance must stop paying for the leave Lark recorded,
+   * and told a day was a paid half, it must start paying for one nobody filed.
+   * Days off still cost nothing — that rule sits above every other, and a
+   * correction cannot reach past it.
+   */
+  const costOf = (userId: string, date: string): number => {
+    const status = priced.dayStatus(userId, date);
+    const free = status.kind === 'WEEKLY_OFF' || status.kind === 'HOLIDAY' || status.kind === 'NO_SHIFT';
+    if (free) return 0;
+    const override = overrideFor.get(`${userId}\u0000${date}`);
+    if (!override) return status.chargedDays;
+    switch (override) {
+      case 'PL': return 1;
+      // `HD` predates the paid/unpaid split and is read as a paid half day, the
+      // same as the report draws it.
+      case 'PL_HD':
+      case 'HD': return 0.5;
+      default: return 0;
+    }
+  };
+
+  const charged = new Set<string>();
   const leaveDays: ChargeableLeaveDay[] = [];
+  const chargeDay = (userId: string, date: string) => {
+    const key = `${userId}\u0000${date}`;
+    if (charged.has(key)) return;
+    charged.add(key);
+    leaveDays.push({ userId, date, cost: costOf(userId, date) });
+  };
+
   for (const l of shared.approvedLeave) {
     if (l.kind !== 'PAID') continue;
     for (const date of datesBetween(l.startDate, l.endDate)) {
       if (date > input.to) break;
-      const status = priced.dayStatus(l.userId, date);
-      leaveDays.push({ userId: l.userId, date, cost: status.chargedDays });
+      chargeDay(l.userId, date);
     }
   }
+  // A day nobody filed leave for, that a manager called paid leave anyway.
+  for (const o of overrides) chargeDay(o.userId, toIsoDate(o.date));
 
   const creditRows: LeaveCredit[] = credits.map((c) => ({
     userId: c.userId,
