@@ -232,6 +232,42 @@ describe('request lifecycle', () => {
     expect(kinds[1]!.days).toBe(1);
   });
 
+  it('posts an adjustment to the date it was given, not to today', async () => {
+    const u = await seedAdminWithShift();
+    await request(app)
+      .post('/v1/admin/leave/adjust')
+      .set(auth(u.accessToken))
+      .send({
+        userId: u.userId,
+        days: 3,
+        effectiveOn: '2026-08-01',
+        reason: 'Opening balance carried in from before August',
+      })
+      .expect(201);
+
+    const row = await prisma.leaveLedgerEntry.findFirst({
+      where: { userId: u.userId, sourceKey: { startsWith: 'adjust:' } },
+    });
+    // An adjustment posted while reading August has to land in August, or the
+    // person who went looking for it in August cannot see it.
+    expect(row!.effectiveOn.toISOString().slice(0, 10)).toBe('2026-08-01');
+    expect(row!.reason).toBe('Opening balance carried in from before August');
+  });
+
+  it('refuses an adjustment with no reason', async () => {
+    const u = await seedAdminWithShift();
+    await request(app)
+      .post('/v1/admin/leave/adjust')
+      .set(auth(u.accessToken))
+      .send({ userId: u.userId, days: 1, effectiveOn: '2026-08-01' })
+      .expect(400);
+    await request(app)
+      .post('/v1/admin/leave/adjust')
+      .set(auth(u.accessToken))
+      .send({ userId: u.userId, days: 1, effectiveOn: '2026-08-01', reason: '   ' })
+      .expect(400);
+  });
+
   it('rejects a request the balance cannot cover', async () => {
     const u = await seedAdminWithShift();
     // Drain the balance to zero with an adjustment.

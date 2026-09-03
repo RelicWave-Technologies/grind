@@ -405,7 +405,7 @@ export function CalendarScreen() {
         />
       )}
 
-      {tab === 'balances' && isAdmin && <BalancesPanel asOf={to} monthLabel={monthLabel} />}
+      {tab === 'balances' && isAdmin && <BalancesPanel asOf={to} month={month} monthLabel={monthLabel} />}
 
       {tab === 'mine' && (
         <MyLeavePanel
@@ -820,7 +820,7 @@ function MyLeavePanel({
  * What IS editable is what produces the balance: the monthly rate, the accrual
  * start, and whether the last Saturday counts as a working day.
  */
-function BalancesPanel({ asOf, monthLabel }: { asOf: string; monthLabel: string }) {
+function BalancesPanel({ asOf, month, monthLabel }: { asOf: string; month: string; monthLabel: string }) {
   const qc = useQueryClient();
   const [editing, setEditing] = useState<LeaveBalanceRow | null>(null);
   const [adjusting, setAdjusting] = useState<LeaveBalanceRow | null>(null);
@@ -903,7 +903,7 @@ function BalancesPanel({ asOf, monthLabel }: { asOf: string; monthLabel: string 
       </Card>
 
       <EditMemberModal row={editing} onClose={() => setEditing(null)} onSaved={refresh} />
-      <AdjustModal row={adjusting} onClose={() => setAdjusting(null)} onSaved={refresh} />
+      <AdjustModal row={adjusting} month={month} onClose={() => setAdjusting(null)} onSaved={refresh} />
     </>
   );
 }
@@ -971,12 +971,22 @@ function EditMemberModal({
 }
 
 function AdjustModal({
-  row, onClose, onSaved,
-}: { row: LeaveBalanceRow | null; onClose: () => void; onSaved: () => void }) {
+  row, month, onClose, onSaved,
+}: { row: LeaveBalanceRow | null; month: string; onClose: () => void; onSaved: () => void }) {
   const [amount, setAmount] = useState('');
+  // The month on screen, not today. An adjustment posted while reading August
+  // is an argument about August, and dating it to now filed it under the wrong
+  // month — where the person looking for it could not see it.
+  const [effectiveOn, setEffectiveOn] = useState(`${month}-01`);
+  const [reason, setReason] = useState('');
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => { setAmount(''); setError(null); }, [row]);
+  useEffect(() => {
+    setAmount('');
+    setReason('');
+    setEffectiveOn(`${month}-01`);
+    setError(null);
+  }, [row, month]);
 
   const save = useMutation({
     mutationFn: () =>
@@ -985,14 +995,15 @@ function AdjustModal({
         json: {
           userId: row!.userId,
           days: Number(amount),
-          effectiveOn: new Date().toISOString().slice(0, 10),
+          effectiveOn,
+          reason: reason.trim(),
         },
       }),
     onSuccess: () => { onSaved(); onClose(); },
     onError: (e: Error) => setError(humanError(e.message)),
   });
 
-  const valid = amount.trim() !== '' && Number(amount) !== 0;
+  const valid = amount.trim() !== '' && Number(amount) !== 0 && reason.trim() !== '';
 
   return (
     <Modal
@@ -1019,6 +1030,16 @@ function AdjustModal({
       <Field label="Days" hint="Negative takes days away. Half days allowed.">
         <Input type="number" step="0.5" value={amount} placeholder="e.g. 1 or -0.5"
                onChange={(e) => setAmount(e.target.value)} />
+      </Field>
+      <Field
+        label="Counts from"
+        hint="The balance changes from this date, so it lands in that month rather than this one."
+      >
+        <Input type="date" value={effectiveOn} onChange={(e) => setEffectiveOn(e.target.value)} />
+      </Field>
+      <Field label="Why" hint="Required. Months later this is the only thing that explains the number.">
+        <Input value={reason} placeholder="Opening balance carried in from before August"
+               onChange={(e) => setReason(e.target.value)} />
       </Field>
     </Modal>
   );
