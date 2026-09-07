@@ -27,8 +27,11 @@ function setup(opts: {
   screenHealth?: CaptureHealth;
   accessibility?: ActivityCaptureStatus;
   probeHealth?: CaptureHealth;
+  /** A previous launch already told the user to relaunch for screen recording. */
+  restartAlreadyAdvised?: boolean;
 } = {}) {
   const probeScreen = vi.fn().mockResolvedValue(opts.probeHealth ?? 'ok');
+  const noteRestartAdvice = vi.fn();
   const service = createTrackingReadinessService({
     platform: opts.platform ?? 'darwin',
     now: () => 1_700_000_000_000,
@@ -36,8 +39,10 @@ function setup(opts: {
     screenHealth: () => opts.screenHealth ?? 'unknown',
     accessibilityStatus: () => opts.accessibility ?? accessibility(),
     probeScreen,
+    restartAlreadyAdvised: () => opts.restartAlreadyAdvised ?? false,
+    noteRestartAdvice,
   });
-  return { service, probeScreen };
+  return { service, probeScreen, noteRestartAdvice };
 }
 
 describe('TrackingReadinessService', () => {
@@ -144,5 +149,73 @@ describe('isInconclusiveScreenCapture', () => {
       accessibility: accessibility({ trusted: false }),
     });
     expect(isInconclusiveScreenCapture(await twoBlockers.service.inspect({ verifyScreen: true }), 'idle')).toBe(false);
+  });
+});
+
+/**
+ * The relaunch loop from 2026-09-07: five boots in two minutes, each one
+ * reporting screen recording as granted, capturing nothing, and telling the
+ * user to restart. Restarting was never going to help — the grant itself was
+ * stale — so the second time round the advice has to change.
+ */
+describe('stale screen grant', () => {
+  const BLANK = { screenStatus: 'granted' as const, screenHealth: 'empty' as const, probeHealth: 'empty' as const };
+
+  it('asks for a restart the first time capture comes back blank', async () => {
+    const { service } = setup(BLANK);
+
+    const { readiness } = await service.inspect({ verifyScreen: true });
+
+    expect(readiness.screenRecording).toBe('NEEDS_RESTART');
+  });
+
+  it('remembers that it advised a restart, so the next launch can judge it', async () => {
+    const { service, noteRestartAdvice } = setup(BLANK);
+
+    await service.inspect({ verifyScreen: true });
+
+    expect(noteRestartAdvice).toHaveBeenCalledWith(1_700_000_000_000);
+  });
+
+  it('stops asking for a restart once one has already been tried', async () => {
+    const { service } = setup({ ...BLANK, restartAlreadyAdvised: true });
+
+    const { readiness } = await service.inspect({ verifyScreen: true });
+
+    expect(readiness.screenRecording).toBe('NEEDS_REGRANT');
+  });
+
+  it('does not escalate its own advice within a single launch', async () => {
+    // The marker is written on the first inspection. Re-reading it on the
+    // second — thirty seconds later, no relaunch in between — would jump
+    // straight to "re-grant" without the restart ever being tried.
+    const { service } = setup(BLANK);
+
+    await service.inspect({ verifyScreen: true });
+    const { readiness } = await service.inspect({ verifyScreen: true });
+
+    expect(readiness.screenRecording).toBe('NEEDS_RESTART');
+  });
+
+  it('clears the marker once capture works, so a later failure starts over', async () => {
+    const { service, noteRestartAdvice } = setup({
+      screenStatus: 'granted',
+      screenHealth: 'ok',
+      restartAlreadyAdvised: true,
+    });
+
+    const { readiness } = await service.inspect({ verifyScreen: true });
+
+    expect(readiness.screenRecording).toBe('READY');
+    expect(noteRestartAdvice).toHaveBeenCalledWith(null);
+  });
+
+  it('still asks for the grant when macOS says it was never given', async () => {
+    // An escalation must not swallow the ordinary first-run case.
+    const { service } = setup({ screenStatus: 'not-determined', restartAlreadyAdvised: true });
+
+    const { readiness } = await service.inspect({ verifyScreen: true });
+
+    expect(readiness.screenRecording).toBe('NEEDS_GRANT');
   });
 });
