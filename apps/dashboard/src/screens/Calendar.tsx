@@ -347,7 +347,7 @@ export function CalendarScreen() {
           { value: 'month' as const, label: 'Month' },
           { value: 'holidays' as const, label: 'Company holidays' },
           { value: 'mine' as const, label: 'My leave' },
-          ...(isAdmin ? [{ value: 'balances' as const, label: 'Balances' }] : []),
+          { value: 'balances' as const, label: 'Balances' },
         ]}
         value={tab}
         onChange={setTab}
@@ -405,7 +405,9 @@ export function CalendarScreen() {
         />
       )}
 
-      {tab === 'balances' && isAdmin && <BalancesPanel asOf={to} month={month} monthLabel={monthLabel} />}
+      {tab === 'balances' && (
+        <BalancesPanel asOf={to} month={month} monthLabel={monthLabel} canManage={isAdmin} />
+      )}
 
       {tab === 'mine' && (
         <MyLeavePanel
@@ -810,7 +812,18 @@ function MyLeavePanel({
 
 
 /**
- * Everybody's balance, and the settings behind it.
+ * Balances for whoever the caller is allowed to see, and the settings behind
+ * them.
+ *
+ * The row list is not filtered here. `/leave/balances` already answers in the
+ * caller's own scope — a member gets themselves, a manager gets their team, an
+ * admin gets the workspace — so this renders whatever came back. Filtering a
+ * second time on the client would be a rule in two places, and the one that
+ * matters is the server's.
+ *
+ * `canManage` only decides whether the two write actions are offered. Both are
+ * admin-only on the server (`requireAdmin`), so hiding them is courtesy rather
+ * than security: a manager who forged the request would still be refused.
  *
  * The balance itself is deliberately not editable here. It is the sum of a
  * ledger, and a field that overwrites it would be exactly the counter this
@@ -820,7 +833,9 @@ function MyLeavePanel({
  * What IS editable is what produces the balance: the monthly rate, the accrual
  * start, and whether the last Saturday counts as a working day.
  */
-function BalancesPanel({ asOf, month, monthLabel }: { asOf: string; month: string; monthLabel: string }) {
+function BalancesPanel({
+  asOf, month, monthLabel, canManage,
+}: { asOf: string; month: string; monthLabel: string; canManage: boolean }) {
   const qc = useQueryClient();
   const [editing, setEditing] = useState<LeaveBalanceRow | null>(null);
   const [adjusting, setAdjusting] = useState<LeaveBalanceRow | null>(null);
@@ -838,11 +853,17 @@ function BalancesPanel({ asOf, month, monthLabel }: { asOf: string; month: strin
   if (!data) return null;
 
   const refresh = () => qc.invalidateQueries({ queryKey: ['leave'] });
+  const scopeNote = canManage
+    ? 'Balances'
+    : data.rows.length === 1
+      ? 'Your balance'
+      : 'Balances for your team';
 
   return (
     <>
       <p className="cal-scope-note">
-        Balances as they stood at the end of <strong>{monthLabel}</strong>.
+        {scopeNote} as {data.rows.length === 1 ? 'it' : 'they'} stood at the end of{' '}
+        <strong>{monthLabel}</strong>.
       </p>
 
       <Card title={`Balances as of ${data.asOf}`}>
@@ -856,7 +877,7 @@ function BalancesPanel({ asOf, month, monthLabel }: { asOf: string; month: strin
               <Th align="right">Adjusted</Th>
               <Th>Rate</Th>
               <Th>Accrues from</Th>
-              <Th align="right">·</Th>
+              {canManage && <Th align="right">·</Th>}
             </Tr>
           </THead>
           <Tbody>
@@ -886,16 +907,18 @@ function BalancesPanel({ asOf, month, monthLabel }: { asOf: string; month: strin
                 <Td mono align="left">
                   {r.joinedOnSet ? r.accrualStart : <Tag status="warn">{r.accrualStart}</Tag>}
                 </Td>
-                <Td align="right">
-                  <Toolbar>
-                    <Button size="sm" variant="ghost" onClick={() => setAdjusting(r)}>
-                      Adjust
-                    </Button>
-                    <Button size="sm" variant="secondary" onClick={() => setEditing(r)}>
-                      Edit
-                    </Button>
-                  </Toolbar>
-                </Td>
+                {canManage && (
+                  <Td align="right">
+                    <Toolbar>
+                      <Button size="sm" variant="ghost" onClick={() => setAdjusting(r)}>
+                        Adjust
+                      </Button>
+                      <Button size="sm" variant="secondary" onClick={() => setEditing(r)}>
+                        Edit
+                      </Button>
+                    </Toolbar>
+                  </Td>
+                )}
               </Tr>
             ))}
           </Tbody>
