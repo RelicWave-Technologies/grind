@@ -338,7 +338,10 @@ export function CalendarScreen() {
         <Stat
           label="Days away"
           value={data ? days(awayCount) : '—'}
-          hint={`${monthLabel} · everyone`}
+          // The calendar answers in the caller's scope, so "everyone" is only
+          // true for an admin. A manager reading it as the whole company would
+          // be reading their own team's number.
+          hint={`${monthLabel} · ${isAdmin ? 'everyone' : 'you and your team'}`}
         />
       </StatRow>
 
