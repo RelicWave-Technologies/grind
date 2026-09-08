@@ -2000,6 +2000,15 @@ adminRouter.post('/users', requireAdmin, async (req, res, next) => {
  * preserved) but can't log in and won't appear in admin/scope queries.
  * Last-ADMIN safety mirrors the PATCH path — you can't lock the
  * workspace out of full privileges via deactivation either.
+ *
+ * Their refresh tokens are revoked in the same transaction, so the session
+ * they are holding right now dies with the flag. Setting the flag alone left
+ * a live agent rotating its token indefinitely; what stopped it was the agent
+ * noticing its own heartbeat had gone unauthorized, which is the client's good
+ * manners rather than the server's decision. Any access token already issued
+ * still works until it expires (JWT_ACCESS_TTL_SECONDS, 15 minutes by
+ * default) — that is the window, and it cannot be closed without a database
+ * read on every authenticated request.
  */
 adminRouter.post('/users/:id/deactivate', requireAdmin, async (req, res, next) => {
   try {
@@ -2030,12 +2039,22 @@ adminRouter.post('/users/:id/deactivate', requireAdmin, async (req, res, next) =
       });
       if (admins <= 1) return res.status(400).json({ error: 'last_admin_protected' });
     }
-    const updated = await prisma.user.update({
-      where: { id },
-      data: { deactivatedAt: new Date() },
-      select: { id: true, deactivatedAt: true },
+    const [updated, revoked] = await prisma.$transaction([
+      prisma.user.update({
+        where: { id },
+        data: { deactivatedAt: new Date() },
+        select: { id: true, deactivatedAt: true },
+      }),
+      prisma.refreshToken.updateMany({
+        where: { userId: id, revokedAt: null },
+        data: { revokedAt: new Date() },
+      }),
+    ]);
+    res.json({
+      id: updated.id,
+      deactivatedAt: updated.deactivatedAt!.toISOString(),
+      sessionsRevoked: revoked.count,
     });
-    res.json({ id: updated.id, deactivatedAt: updated.deactivatedAt!.toISOString() });
   } catch (err) {
     next(err);
   }

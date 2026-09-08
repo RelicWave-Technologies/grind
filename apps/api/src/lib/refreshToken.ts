@@ -58,7 +58,7 @@ export async function revokeRefreshToken(refreshToken: string): Promise<boolean>
 
 export type RotateResult =
   | { ok: true; accessToken: string; refreshToken: string; expiresAt: Date }
-  | { ok: false; reason: 'invalid' | 'expired' | 'reuse' | 'reuse_grace' | 'stale_role' };
+  | { ok: false; reason: 'invalid' | 'expired' | 'reuse' | 'reuse_grace' | 'stale_role' | 'deactivated' };
 
 /**
  * Successful rotations, keyed by the hash of the token that was spent, retained
@@ -151,6 +151,14 @@ export async function rotateRefreshToken(presented: string): Promise<RotateResul
       return { ok: false, reason: 'reuse' };
     }
     if (row.expiresAt < new Date()) return { ok: false, reason: 'expired' };
+
+    // A suspended account must not be able to mint itself a fresh session.
+    // Without this the flag stopped only NEW logins: an agent already holding a
+    // refresh token rotated it forever, so "revoked" access was really just the
+    // shipped agent choosing to stop when its heartbeat came back unauthorized.
+    // The row's user is already loaded for the role check below, so this costs
+    // no extra query.
+    if (row.user.deactivatedAt) return { ok: false, reason: 'deactivated' };
 
     const parsedRole = RoleSchema.safeParse(row.user.role);
     if (!parsedRole.success) return { ok: false, reason: 'stale_role' };
