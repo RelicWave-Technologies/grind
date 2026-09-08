@@ -5,6 +5,8 @@ import { attachScope, requireAdmin, requireAnyCapability, requireCapability, req
 import { decideByUser } from '../lark/decideByUser';
 import { triageRequest, type TriageResult } from '../ai/triage';
 import { explainFlag } from '../ai/explainFlag';
+import { deleteMember, planMemberDeletion } from '../admin/deleteMember';
+import { logger } from '../logger';
 import { resolveReportRange } from '../reports/member';
 import { timesheetCalendarInputs } from '../leave';
 import {
@@ -2036,6 +2038,91 @@ adminRouter.post('/users/:id/deactivate', requireAdmin, async (req, res, next) =
       select: { id: true, deactivatedAt: true },
     });
     res.json({ id: updated.id, deactivatedAt: updated.deactivatedAt!.toISOString() });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /v1/admin/users/:id/deletion-plan
+ *
+ * What deleting this person would destroy, computed and returned without
+ * writing anything. The delete itself is irreversible and production keeps no
+ * backups, so the number of rows about to go is something a human should read
+ * before they confirm — not something they discover afterwards.
+ */
+adminRouter.get('/users/:id/deletion-plan', requireAdmin, async (req, res, next) => {
+  try {
+    if (!req.user || !req.scope) return res.status(401).json({ error: 'unauthorized' });
+    const id = req.params.id;
+    if (!id) return res.status(400).json({ error: 'missing_id' });
+    const result = await planMemberDeletion({
+      workspaceId: req.scope.workspaceId,
+      userId: id,
+      actorId: req.user.sub,
+    });
+    if (!result.ok) {
+      const status = result.error === 'not_found' ? 404 : 400;
+      return res.status(status).json({ error: result.error, teamName: result.teamName });
+    }
+    res.json(result.plan);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * DELETE /v1/admin/users/:id
+ *
+ * Permanent. Deactivation is the reversible option and stays the default in the
+ * UI; this is for a record that must not exist any more.
+ *
+ * The caller must echo the person's email in `confirmEmail`. A member id in a
+ * URL is not something anybody reads, and this endpoint destroys months of a
+ * real person's work — the confirmation is the only thing standing between a
+ * misplaced click and that.
+ */
+adminRouter.delete('/users/:id', requireAdmin, async (req, res, next) => {
+  try {
+    if (!req.user || !req.scope) return res.status(401).json({ error: 'unauthorized' });
+    const id = req.params.id;
+    if (!id) return res.status(400).json({ error: 'missing_id' });
+
+    const confirmEmail = (req.body as { confirmEmail?: unknown } | undefined)?.confirmEmail;
+    if (typeof confirmEmail !== 'string' || confirmEmail.trim().length === 0) {
+      return res.status(400).json({ error: 'confirmation_required' });
+    }
+
+    const planned = await planMemberDeletion({
+      workspaceId: req.scope.workspaceId,
+      userId: id,
+      actorId: req.user.sub,
+    });
+    if (!planned.ok) {
+      const status = planned.error === 'not_found' ? 404 : 400;
+      return res.status(status).json({ error: planned.error, teamName: planned.teamName });
+    }
+    if (confirmEmail.trim().toLowerCase() !== planned.plan.email.toLowerCase()) {
+      return res.status(400).json({ error: 'confirmation_mismatch' });
+    }
+
+    const result = await deleteMember({
+      workspaceId: req.scope.workspaceId,
+      userId: id,
+      actorId: req.user.sub,
+    });
+    if (!result.ok) {
+      const status = result.error === 'not_found' ? 404 : 400;
+      return res.status(status).json({ error: result.error, teamName: result.teamName });
+    }
+
+    // The one durable trace of a deletion, since the row it describes is gone.
+    logger.warn('member deleted', {
+      actorId: req.user.sub,
+      workspaceId: req.scope.workspaceId,
+      deleted: result.plan,
+    });
+    res.json({ ok: true, deleted: result.plan });
   } catch (err) {
     next(err);
   }
