@@ -2,7 +2,7 @@ import './users.css';
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouteContext } from '@tanstack/react-router';
-import { Pencil, Check, X, UserPlus, UserMinus, UserCheck, Users as UsersIcon } from 'lucide-react';
+import { Pencil, Check, X, UserPlus, UserMinus, UserCheck, Trash2, Users as UsersIcon } from 'lucide-react';
 import type { LaunchAtLoginState, LaunchOrigin } from '@grind/types';
 import { api, type ApiError } from '../lib/api';
 import { isAdmin, type Role } from '../lib/auth';
@@ -30,6 +30,7 @@ import {
   Input,
   Select,
   Banner,
+  Modal,
   EmptyState,
   SkeletonTable,
   type Status,
@@ -182,6 +183,8 @@ export function UsersScreen() {
       ),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'users'] }),
   });
+  const [deleting, setDeleting] = useState<AdminUser | null>(null);
+
   const activate = useMutation({
     mutationFn: (id: string) =>
       api<{ id: string; provisioningStatus: 'ACTIVE' }>(
@@ -360,6 +363,7 @@ export function UsersScreen() {
                     onDeactivate={() => deactivate.mutate(u.id)}
                     onReactivate={() => reactivate.mutate(u.id)}
                     onActivate={() => activate.mutate(u.id)}
+                    onDelete={() => setDeleting(u)}
                   />
                 ))}
               </Tbody>
@@ -367,6 +371,15 @@ export function UsersScreen() {
           </div>
         )}
       </Card>
+
+      <DeleteMemberModal
+        user={deleting}
+        onClose={() => setDeleting(null)}
+        onDeleted={() => {
+          setDeleting(null);
+          void qc.invalidateQueries({ queryKey: ['admin', 'users'] });
+        }}
+      />
     </Page>
   );
 }
@@ -393,6 +406,7 @@ interface RowProps {
   onDeactivate: () => void;
   onReactivate: () => void;
   onActivate: () => void;
+  onDelete: () => void;
 }
 
 function PersonRow({
@@ -411,6 +425,7 @@ function PersonRow({
   onDeactivate,
   onReactivate,
   onActivate,
+  onDelete,
 }: RowProps) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(user.name);
@@ -652,6 +667,20 @@ function PersonRow({
                       }}
                     />
                   ) : null}
+                  {/* Deleting is not the everyday action — deactivating is, and
+                      it sits to the left. This one opens a dialog rather than a
+                      confirm() because it has to show what will be destroyed
+                      before anybody agrees to destroy it. */}
+                  {!isSelf && (
+                    <IconButton
+                      icon={<Trash2 size={14} strokeWidth={1.9} />}
+                      aria-label="Delete permanently"
+                      title="Delete this person and all their data"
+                      variant="danger"
+                      disabled={busy}
+                      onClick={onDelete}
+                    />
+                  )}
                 </>
               )}
             </div>
@@ -892,5 +921,154 @@ function InviteForm({ onClose, onCreated }: { onClose: () => void; onCreated: ()
         A temporary password is generated server-side. Share it manually for v1 — magic-link onboarding is on the roadmap.
       </p>
     </Card>
+  );
+}
+
+interface DeletionPlan {
+  userId: string;
+  name: string;
+  email: string;
+  destroys: {
+    timeEntries: number;
+    activitySamples: number;
+    screenshots: number;
+    manualTimeRequests: number;
+    activityFlags: number;
+    leaveRequests: number;
+    leaveLedgerEntries: number;
+    attendancePunches: number;
+    attendanceOverrides: number;
+    sessions: number;
+  };
+  anonymises: { manualTimeRequestsTheyApproved: number };
+  orphanedScreenshotFiles: number;
+}
+
+/** The rows worth naming, in the order somebody would weigh them. */
+const DESTROY_LABELS: Array<[keyof DeletionPlan['destroys'], string]> = [
+  ['timeEntries', 'Time entries'],
+  ['screenshots', 'Screenshots'],
+  ['activitySamples', 'Activity samples'],
+  ['attendancePunches', 'Punch records'],
+  ['manualTimeRequests', 'Manual time requests'],
+  ['leaveRequests', 'Leave requests'],
+  ['leaveLedgerEntries', 'Leave ledger entries'],
+  ['attendanceOverrides', 'Attendance corrections'],
+  ['activityFlags', 'Anti-cheat flags'],
+  ['sessions', 'Signed-in sessions'],
+];
+
+/**
+ * Deleting somebody, with the bill shown first.
+ *
+ * The plan is fetched as soon as the dialog opens and rendered before any
+ * button is enabled, because the counts are the whole point: "delete this
+ * person" means nothing until you can see that it also means four thousand time
+ * entries. Typing the email is the second gate — a name is easy to click past,
+ * an address has to be read off the row.
+ */
+function DeleteMemberModal({
+  user, onClose, onDeleted,
+}: { user: AdminUser | null; onClose: () => void; onDeleted: () => void }) {
+  const [typed, setTyped] = useState('');
+
+  const plan = useQuery({
+    queryKey: ['admin', 'users', user?.id, 'deletion-plan'],
+    queryFn: () => api<DeletionPlan>(`/v1/admin/users/${user!.id}/deletion-plan`),
+    enabled: user !== null,
+    // A stale count would be a lie about what is about to happen.
+    staleTime: 0,
+    gcTime: 0,
+    retry: false,
+  });
+
+  const remove = useMutation({
+    mutationFn: () =>
+      api<{ ok: true }>(`/v1/admin/users/${user!.id}`, {
+        method: 'DELETE',
+        json: { confirmEmail: typed.trim() },
+      }),
+    onSuccess: onDeleted,
+  });
+
+  const close = () => {
+    setTyped('');
+    remove.reset();
+    onClose();
+  };
+
+  const blocked = plan.isError ? ((plan.error as Error | ApiError).message) : null;
+  const matches = plan.data != null && typed.trim().toLowerCase() === plan.data.email.toLowerCase();
+  const totalRows = plan.data
+    ? DESTROY_LABELS.reduce((sum, [k]) => sum + plan.data!.destroys[k], 0)
+    : 0;
+
+  return (
+    <Modal
+      open={user !== null}
+      onClose={close}
+      title={user ? `Delete ${user.name}` : ''}
+      description="This cannot be undone. Deactivating instead keeps their history and lets you reverse it."
+      actions={
+        <>
+          <Button variant="ghost" onClick={close} disabled={remove.isPending}>Cancel</Button>
+          <Button
+            variant="danger"
+            disabled={!matches || plan.isLoading || blocked !== null}
+            loading={remove.isPending}
+            onClick={() => remove.mutate()}
+          >
+            Delete permanently
+          </Button>
+        </>
+      }
+    >
+      {plan.isLoading && <p className="usr-del-note">Working out what this would destroy…</p>}
+
+      {blocked && <Banner status="danger">{blocked}</Banner>}
+
+      {plan.data && !blocked && (
+        <>
+          <ul className="usr-del-list">
+            {DESTROY_LABELS.filter(([k]) => plan.data!.destroys[k] > 0).map(([k, label]) => (
+              <li key={k}>
+                <span>{label}</span>
+                <strong>{plan.data!.destroys[k].toLocaleString()}</strong>
+              </li>
+            ))}
+            {totalRows === 0 && <li><span>Nothing tracked yet</span><strong>0</strong></li>}
+          </ul>
+
+          {plan.data.anonymises.manualTimeRequestsTheyApproved > 0 && (
+            <p className="usr-del-note">
+              {plan.data.anonymises.manualTimeRequestsTheyApproved.toLocaleString()} manual time
+              request{plan.data.anonymises.manualTimeRequestsTheyApproved === 1 ? '' : 's'} they
+              approved for other people will be kept, with their name removed.
+            </p>
+          )}
+          {plan.data.orphanedScreenshotFiles > 0 && (
+            <p className="usr-del-note">
+              {plan.data.orphanedScreenshotFiles.toLocaleString()} screenshot
+              {plan.data.orphanedScreenshotFiles === 1 ? '' : 's'} will be left in storage — only
+              the records pointing at them are removed.
+            </p>
+          )}
+
+          <Field label={`Type ${plan.data.email} to confirm`}>
+            <Input
+              value={typed}
+              onChange={(e) => setTyped(e.target.value)}
+              placeholder={plan.data.email}
+              autoComplete="off"
+              spellCheck={false}
+            />
+          </Field>
+
+          {remove.isError && (
+            <Banner status="danger">{(remove.error as Error | ApiError).message}</Banner>
+          )}
+        </>
+      )}
+    </Modal>
   );
 }
