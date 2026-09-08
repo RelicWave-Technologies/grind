@@ -639,12 +639,14 @@ function PersonRow({
                   ) : !isSelf ? (
                     <IconButton
                       icon={<UserMinus size={14} strokeWidth={1.9} />}
-                      aria-label="Deactivate"
-                      title="Deactivate this person"
+                      aria-label="Suspend"
+                      title="Suspend — revoke their access to Timo"
                       variant="danger"
                       loading={busy}
                       onClick={() => {
-                        if (window.confirm(`Deactivate ${user.name}? Their history stays for reports, but they can't log in until you reactivate.`)) {
+                        if (window.confirm(
+                          `Suspend ${user.name}? They are signed out of Timo now and can't get back in until you reactivate. Their history stays for reports.`,
+                        )) {
                           onDeactivate();
                         }
                       }}
