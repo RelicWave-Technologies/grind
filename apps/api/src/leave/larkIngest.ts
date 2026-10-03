@@ -59,7 +59,7 @@ export interface LeaveIngestResult {
 // Reading Lark
 // ---------------------------------------------------------------------------
 
-async function larkGet(path: string): Promise<Record<string, unknown>> {
+export async function larkGet(path: string): Promise<Record<string, unknown>> {
   const { oauthHost } = getLarkConfig();
   const token = await getTenantAccessToken();
   const res = await fetch(`${oauthHost}${path}`, {

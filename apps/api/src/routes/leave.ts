@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { prisma } from '@grind/db';
 import {
+  AttendanceRuleModeSchema,
   CreateHolidaySchema,
   CreateLeaveRequestSchema,
   DecideLeaveRequestSchema,
@@ -483,6 +484,7 @@ adminLeaveRouter.get('/balances', async (req, res, next) => {
           joinedOn: true, createdAt: true,
           leaveAccrualDaysOverride: true,
           lastSaturdayOffOverride: true,
+          attendanceRuleMode: true,
           team: { select: { name: true } },
         },
         orderBy: { name: 'asc' },
@@ -506,6 +508,7 @@ adminLeaveRouter.get('/balances', async (req, res, next) => {
         effectiveAccrualDays: p.leaveAccrualDaysOverride ?? policy.monthlyAccrualDays,
         lastSaturdayOff: p.lastSaturdayOffOverride,
         effectiveLastSaturdayOff: p.lastSaturdayOffOverride ?? policy.lastSaturdayOff,
+        attendanceRuleMode: p.attendanceRuleMode,
         accrualStart: toIsoDate(p.joinedOn ?? p.createdAt),
         joinedOnSet: p.joinedOn !== null,
         ...(balances[p.id] ?? { balanceDays: 0, accruedDays: 0, consumedDays: 0, adjustedDays: 0 }),
@@ -520,6 +523,7 @@ const PatchMemberLeaveSchema = z
   .object({
     accrualDays: leaveDaysSchema(31).nullable().optional(),
     lastSaturdayOff: z.boolean().nullable().optional(),
+    attendanceRuleMode: AttendanceRuleModeSchema.optional(),
     joinedOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u).nullable().optional(),
   })
   .refine((v) => Object.keys(v).length > 0, { message: 'nothing_to_update' });
@@ -546,6 +550,7 @@ adminLeaveRouter.patch('/members/:userId', requireAdmin, async (req, res, next) 
     const data: Record<string, unknown> = {};
     if (parsed.data.accrualDays !== undefined) data.leaveAccrualDaysOverride = parsed.data.accrualDays;
     if (parsed.data.lastSaturdayOff !== undefined) data.lastSaturdayOffOverride = parsed.data.lastSaturdayOff;
+    if (parsed.data.attendanceRuleMode !== undefined) data.attendanceRuleMode = parsed.data.attendanceRuleMode;
     if (parsed.data.joinedOn !== undefined) {
       data.joinedOn = parsed.data.joinedOn ? fromIsoDate(parsed.data.joinedOn) : null;
     }
@@ -555,7 +560,7 @@ adminLeaveRouter.patch('/members/:userId', requireAdmin, async (req, res, next) 
       data,
       select: {
         id: true, joinedOn: true, createdAt: true,
-        leaveAccrualDaysOverride: true, lastSaturdayOffOverride: true,
+        leaveAccrualDaysOverride: true, lastSaturdayOffOverride: true, attendanceRuleMode: true,
       },
     });
 
@@ -571,6 +576,7 @@ adminLeaveRouter.patch('/members/:userId', requireAdmin, async (req, res, next) 
       userId: updated.id,
       accrualDays: updated.leaveAccrualDaysOverride,
       lastSaturdayOff: updated.lastSaturdayOffOverride,
+      attendanceRuleMode: updated.attendanceRuleMode,
       accrualStart: toIsoDate(updated.joinedOn ?? updated.createdAt),
       balance: await loadBalance(updated.id),
     });

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { AttendanceRuleVerdictSchema } from './attendanceRules';
 import { DayStatusSchema } from './leave';
 import { ManualTimeRequestDto } from './manualTimeRequests';
 import { SelfProfileResponseSchema } from './profile';
@@ -177,6 +178,8 @@ export const MemberReportDaySchema = z.object({
   attendanceCode: z.enum(['P', 'PL_HD', 'LWP_HD', 'PL_HD/LWP_HD', 'A', 'WO', 'HL', 'PL', 'LWP', '--']).optional(),
   /** What it would say with nobody's correction, so the UI can show both. */
   computedAttendanceCode: z.enum(['P', 'PL_HD', 'LWP_HD', 'PL_HD/LWP_HD', 'A', 'WO', 'HL', 'PL', 'LWP', '--']).optional(),
+  /** The attendance rule that made this day leave, when one did. */
+  attendanceRule: AttendanceRuleVerdictSchema.nullable().optional(),
   /** Present when a human corrected this day. */
   attendanceOverride: z
     .object({ code: AttendanceOverrideCodeSchema, stale: z.boolean() })

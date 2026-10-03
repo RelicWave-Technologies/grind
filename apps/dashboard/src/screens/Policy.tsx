@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouteContext } from '@tanstack/react-router';
 import { Check, Clock3, Camera, History, Pencil, Save, X } from 'lucide-react';
 import type {
+  LeavePolicyDto,
   MonitoringSettingsAuditDto,
   MonitoringSettingsAuditListResponse,
   WorkspacePolicyDto,
@@ -94,6 +95,23 @@ export function PolicyScreen() {
 
   const [draft, setDraft] = useState<WorkspacePolicyDto | null>(null);
   const [payrollOpen, setPayrollOpen] = useState(false);
+  const [rulesOpen, setRulesOpen] = useState(false);
+  const leaveQ = useQuery({
+    queryKey: ['admin', 'leave-policy'],
+    queryFn: () => api<LeavePolicyDto>('/v1/admin/leave/policy'),
+  });
+  const rulesMutation = useMutation({
+    mutationFn: (patch: Record<string, unknown>) =>
+      api<LeavePolicyDto>('/v1/admin/leave/policy', { method: 'PATCH', json: patch }),
+    onSuccess: (next) => {
+      qc.setQueryData(['admin', 'leave-policy'], next);
+      // Codes, balances and the exceptions list all move with the rules.
+      qc.invalidateQueries({ queryKey: ['leave'] });
+      qc.invalidateQueries({ queryKey: ['reports'] });
+      qc.invalidateQueries({ queryKey: ['admin', 'attendance-exceptions'] });
+      setRulesOpen(false);
+    },
+  });
   const [policyRiskPrompt, setPolicyRiskPrompt] = useState<{ patch: WorkspacePolicyPatch; next: MonitoringTiming } | null>(null);
   useEffect(() => {
     if (q.data && !draft) setDraft(q.data);
@@ -284,6 +302,41 @@ export function PolicyScreen() {
           )}
         </div>
 
+        {leaveQ.data && (
+          <div className="pol-payroll-grid">
+            <Card
+              title="Attendance rules"
+              className="pol-card-compact"
+              action={<Button size="sm" variant="secondary" icon={<Pencil size={14} />} onClick={() => setRulesOpen(true)}>Edit</Button>}
+            >
+              <div className="pol-payroll-rule-grid">
+                <PolicyRule
+                  label="Applies from"
+                  value={leaveQ.data.attendanceRulesFrom ?? 'Off'}
+                  hint={leaveQ.data.attendanceRulesFrom ? 'Every working day since' : 'No day is charged'}
+                />
+                <PolicyRule label="Full day" value={formatMinutes(leaveQ.data.fullDayMinMinutes)} hint="Less is a half day" />
+                <PolicyRule label="Half day" value={formatMinutes(leaveQ.data.halfDayMinMinutes)} hint="Less is a full leave" />
+              </div>
+            </Card>
+            <Card title="Approvals" className="pol-card-compact" action={<Tag mono>Lark</Tag>}>
+              <div className="pol-payroll-rule-grid">
+                <PolicyRule
+                  label="Work from home"
+                  value={leaveQ.data.wfhRequiresApproval ? 'Required' : 'Optional'}
+                  hint="Tracked time with no punch"
+                />
+                <PolicyRule
+                  label="Late allowed"
+                  value={`${leaveQ.data.lateAllowedPerMonth} / month`}
+                  hint={`Then ½ day each · ${leaveQ.data.lateGraceMinutes}m grace`}
+                />
+                <PolicyRule label="Charged to" value="Balance" hint="LWP once it runs out" />
+              </div>
+            </Card>
+          </div>
+        )}
+
         {payrollQ.isError && (
           <Banner status="danger">Couldn’t load payroll policy: {(payrollQ.error as Error).message}</Banner>
         )}
@@ -425,6 +478,15 @@ export function PolicyScreen() {
             error={payrollMutation.error instanceof Error ? payrollMutation.error.message : null}
             onClose={() => setPayrollOpen(false)}
             onSave={(patch) => payrollMutation.mutate(patch)}
+          />
+        )}
+        {leaveQ.data && rulesOpen && (
+          <AttendanceRulesModal
+            policy={leaveQ.data}
+            saving={rulesMutation.isPending}
+            error={rulesMutation.error instanceof Error ? rulesMutation.error.message : null}
+            onClose={() => setRulesOpen(false)}
+            onSave={(patch) => rulesMutation.mutate(patch)}
           />
         )}
         {policyRiskPrompt && (
@@ -713,6 +775,125 @@ function PayrollPolicyModal({
         <footer className="pol-modal-foot">
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
           <Button variant="primary" icon={<Save size={15} />} onClick={submit} loading={saving}>Save payroll policy</Button>
+        </footer>
+      </section>
+    </div>
+  );
+
+  return createPortal(modal, document.body);
+}
+
+/**
+ * The attendance rules: from when, and how many tracked minutes a day needs.
+ *
+ * Charges are real — a day that falls short draws on the leave balance — so the
+ * dialog says so in plain words before anybody saves.
+ */
+function AttendanceRulesModal({
+  policy,
+  saving,
+  error,
+  onClose,
+  onSave,
+}: {
+  policy: LeavePolicyDto;
+  saving: boolean;
+  error: string | null;
+  onClose: () => void;
+  onSave: (patch: Record<string, unknown>) => void;
+}) {
+  const [from, setFrom] = useState(policy.attendanceRulesFrom ?? '');
+  const [fullDay, setFullDay] = useState(String(policy.fullDayMinMinutes));
+  const [halfDay, setHalfDay] = useState(String(policy.halfDayMinMinutes));
+  const [wfh, setWfh] = useState(policy.wfhRequiresApproval);
+  const [lateAllowed, setLateAllowed] = useState(String(policy.lateAllowedPerMonth));
+  const late = Number.parseInt(lateAllowed, 10);
+  const [graceText, setGraceText] = useState(String(policy.lateGraceMinutes));
+  const grace = Number.parseInt(graceText, 10);
+
+  const full = Number.parseInt(fullDay, 10);
+  const half = Number.parseInt(halfDay, 10);
+  const valid =
+    Number.isFinite(full) && Number.isFinite(half) && half >= 0 && full <= 1440 && half <= full &&
+    Number.isFinite(late) && late >= 0 && late <= 31 &&
+    Number.isFinite(grace) && grace >= 0 && grace <= 240;
+
+  function submit() {
+    onSave({
+      attendanceRulesFrom: from.trim() === '' ? null : from,
+      fullDayMinMinutes: full,
+      halfDayMinMinutes: half,
+      wfhRequiresApproval: wfh,
+      lateAllowedPerMonth: late,
+      lateGraceMinutes: grace,
+    });
+  }
+
+  const modal = (
+    <div className="ui-overlay pol-modal-layer" role="presentation" onMouseDown={onClose}>
+      <section className="pol-modal" role="dialog" aria-modal="true" aria-labelledby="pol-rules-title" onMouseDown={(e) => e.stopPropagation()}>
+        <header className="pol-modal-head">
+          <div className="pol-modal-title">
+            <div className="ui-t-eyebrow">Attendance rules</div>
+            <h2 id="pol-rules-title" className="ui-t-title">Minimum hours and approvals</h2>
+            <p className="ui-t-small">Hours are Timo&rsquo;s tracked time — work, meetings and approved manual time.</p>
+          </div>
+          <IconButton aria-label="Close" icon={<X size={18} />} onClick={onClose} />
+        </header>
+        <div className="pol-modal-body">
+          <section className="pol-form-section" aria-label="Minimum hours">
+            <div className="pol-form-section-head">
+              <div>
+                <h3 className="ui-t-h3">Minimum hours</h3>
+                <p className="ui-t-small">In minutes. Working days only.</p>
+              </div>
+              <Tag mono>Admin</Tag>
+            </div>
+            <div className="pol-form-grid pol-form-grid--rules">
+              <Field label="Applies from" hint="Empty turns the rules off.">
+                <Input className="pol-input-mono" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+              </Field>
+              <Field label="Full day" hint={Number.isFinite(full) ? `${formatMinutes(full)} — less is a half day.` : 'Minutes.'}>
+                <Input className="pol-input-mono" value={fullDay} onChange={(e) => setFullDay(e.target.value)} inputMode="numeric" />
+              </Field>
+              <Field label="Half day" hint={Number.isFinite(half) ? `${formatMinutes(half)} — less is a full leave.` : 'Minutes.'}>
+                <Input className="pol-input-mono" value={halfDay} onChange={(e) => setHalfDay(e.target.value)} inputMode="numeric" />
+              </Field>
+              <Field label="Late allowed" hint="A month. Each one after is half a day.">
+                <Input className="pol-input-mono" value={lateAllowed} onChange={(e) => setLateAllowed(e.target.value)} inputMode="numeric" />
+              </Field>
+              <Field label="Late grace" hint="Minutes after shift start, for everyone.">
+                <Input className="pol-input-mono" value={graceText} onChange={(e) => setGraceText(e.target.value)} inputMode="numeric" />
+              </Field>
+            </div>
+          </section>
+
+          <section className="pol-form-section" aria-label="Approvals">
+            <List>
+              <ListRow
+                title="Work from home needs an approved Lark request"
+                subtitle="A day with tracked time and no punch, without an approved WFH request, counts as leave."
+                trailing={<Toggle checked={wfh} onChange={setWfh} />}
+              />
+            </List>
+          </section>
+
+          <Banner status="info" className="pol-modal-note">
+            A day that falls short becomes leave: paid from the leave balance while it lasts, unpaid after. Absent
+            without approved leave is leave without approval. A manager&rsquo;s correction always wins.
+          </Banner>
+          {!valid && (
+            <Banner status="warn">
+              The half-day minimum has to be at most the full-day minimum, late allowed 0–31 and grace 0–240 minutes.
+            </Banner>
+          )}
+          {error && <Banner status="danger">{error}</Banner>}
+        </div>
+        <footer className="pol-modal-foot">
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button variant="primary" icon={<Save size={15} />} onClick={submit} loading={saving} disabled={!valid}>
+            Save attendance rules
+          </Button>
         </footer>
       </section>
     </div>

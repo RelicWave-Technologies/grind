@@ -250,3 +250,6 @@
     justify-content: flex-start;
   }
 }
+
+/* Rule exceptions: a date reads as one token, never split over lines. */
+.atd-nowrap { white-space: nowrap; }

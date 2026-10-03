@@ -3,7 +3,8 @@ import { logger } from './logger';
 import { buildApp } from './app';
 import { startCardCallback } from './lark';
 import { startLarkTokenRefreshScheduler } from './lark/refreshScheduler';
-import { startLarkLeaveIngest } from './leave';
+import { startAttendanceRulesScheduler } from './attendance/ruleScheduler';
+import { startLarkLeaveIngest, startLarkWfhIngest } from './leave';
 import { startManualTimeLarkOutboxWorker } from './manualTime/larkOutbox';
 import { startPayrollMonthCloseScheduler } from './payroll/scheduler';
 import { startScreenshotRetentionScheduler } from './screenshots/retention';
@@ -21,6 +22,10 @@ app.listen(port, () => {
   startManualTimeLarkOutboxWorker();
   // Mirrors leave decided in Lark into Timo; no-op without an approval code.
   startLarkLeaveIngest();
+  // Mirrors Lark "Work From Home Request" decisions; no-op without a code.
+  startLarkWfhIngest();
+  // Keeps the attendance rules' leave charges current between report loads.
+  startAttendanceRulesScheduler();
   startLarkTokenRefreshScheduler();
   startPayrollMonthCloseScheduler();
   startScreenshotRetentionScheduler();

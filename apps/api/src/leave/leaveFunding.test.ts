@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveLeaveFunding } from './leaveFunding';
+import { resolveLeaveAccounts, resolveLeaveFunding } from './leaveFunding';
 
 const U = 'u1';
 const accrual = (effectiveOn: string, days = 1) => ({ userId: U, effectiveOn, days });
@@ -119,6 +119,17 @@ describe('resolveLeaveFunding', () => {
     expect(unfunded(out)).toEqual([]);
   });
 
+  it('spends the joining month accrual on someone who joined mid-month', () => {
+    // Joined on the 3rd; the month's accrual is dated the 1st, as the ledger writes it.
+    const out = resolveLeaveFunding({
+      credits: [accrual('2026-09-01')],
+      leaveDays: [day('2026-09-05')],
+      since: '2026-08',
+      accrualStartFor: { [U]: '2026-09-03' },
+    });
+    expect(unfunded(out)).toEqual([]);
+  });
+
   it('lets a negative adjustment push a day out of funding', () => {
     const out = resolveLeaveFunding({
       credits: [accrual('2026-08-01'), accrual('2026-08-02', -1)],
@@ -185,5 +196,49 @@ describe('resolveLeaveFunding', () => {
       since: '2026-08',
     });
     expect(funding(out)).toEqual({ '2026-08-10': 0 });
+  });
+});
+
+describe('resolveLeaveAccounts', () => {
+  const window = { from: '2026-09-01', to: '2026-09-30', since: '2026-08' };
+
+  it('opens with what August left, and spends only what it can pay', () => {
+    const out = resolveLeaveAccounts({
+      ...window,
+      credits: [accrual('2026-08-01'), accrual('2026-09-01')],
+      // August spends nothing; September asks for 3 days with 2 behind it.
+      leaveDays: [day('2026-09-05'), day('2026-09-06'), day('2026-09-07')],
+    });
+    expect(out.get(U)).toEqual({ opening: 1, earned: 1, paid: 2, closing: 0 });
+  });
+
+  it('never carries unpaid leave as debt into the closing balance', () => {
+    const out = resolveLeaveAccounts({
+      ...window,
+      credits: [accrual('2026-09-01')],
+      leaveDays: [day('2026-09-02'), day('2026-09-03', 0.5), day('2026-09-04')],
+    });
+    expect(out.get(U)).toEqual({ opening: 0, earned: 1, paid: 1, closing: 0 });
+  });
+
+  it('counts a mid-month joiner\'s first accrual', () => {
+    const out = resolveLeaveAccounts({
+      ...window,
+      credits: [accrual('2026-09-01')],
+      leaveDays: [day('2026-09-10', 0.5)],
+      accrualStartFor: { [U]: '2026-09-03' },
+    });
+    expect(out.get(U)).toEqual({ opening: 0, earned: 1, paid: 0.5, closing: 0.5 });
+  });
+
+  it('agrees with the funding labels', () => {
+    const input = {
+      ...window,
+      credits: [accrual('2026-09-01')],
+      leaveDays: [day('2026-09-02', 0.5), day('2026-09-03')],
+    };
+    const short = resolveLeaveFunding(input).get(U) ?? new Map<string, number>();
+    const paidByLabels = input.leaveDays.reduce((sum, d) => sum + (short.get(d.date) ?? d.cost), 0);
+    expect(resolveLeaveAccounts(input).get(U)!.paid).toBe(paidByLabels);
   });
 });

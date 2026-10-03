@@ -1,13 +1,21 @@
 import { prisma, type Prisma } from '@grind/db';
 import {
+  ATTENDANCE_RULE_DEFAULTS,
   attendanceOverrideShape,
   LEAVE_POLICY_DEFAULTS,
+  roundToHalfDay,
   type AttendanceOverrideCode,
   type LeavePolicyDto,
 } from '@grind/types';
 import { WorkingCalendar, type ShiftAssignmentInput } from './workingCalendar';
 import { projectBalance, type LeaveLedgerEntry } from './ledger';
-import { resolveLeaveFunding, type ChargeableLeaveDay, type LeaveCredit } from './leaveFunding';
+import {
+  resolveLeaveAccounts,
+  resolveLeaveFunding,
+  type ChargeableLeaveDay,
+  type LeaveCredit,
+} from './leaveFunding';
+import { RULE_SOURCE_PREFIX } from '../attendance/ruleLedger';
 
 /**
  * The seam between the database and the two pure modules.
@@ -45,6 +53,12 @@ export function toLeavePolicyDto(row: {
   accrueOnJoinMonth: boolean;
   ledgerStartMonth?: string | null;
   birthdayLeaveDays?: number;
+  attendanceRulesFrom?: string | null;
+  fullDayMinMinutes?: number;
+  halfDayMinMinutes?: number;
+  wfhRequiresApproval?: boolean;
+  lateAllowedPerMonth?: number;
+  lateGraceMinutes?: number;
   updatedAt: Date;
 }): LeavePolicyDto {
   return {
@@ -55,6 +69,12 @@ export function toLeavePolicyDto(row: {
     ledgerStartMonth: row.ledgerStartMonth ?? null,
     birthdayLeaveDays: row.birthdayLeaveDays ?? 0,
     accrueOnJoinMonth: row.accrueOnJoinMonth,
+    attendanceRulesFrom: row.attendanceRulesFrom ?? ATTENDANCE_RULE_DEFAULTS.attendanceRulesFrom,
+    fullDayMinMinutes: row.fullDayMinMinutes ?? ATTENDANCE_RULE_DEFAULTS.fullDayMinMinutes,
+    halfDayMinMinutes: row.halfDayMinMinutes ?? ATTENDANCE_RULE_DEFAULTS.halfDayMinMinutes,
+    wfhRequiresApproval: row.wfhRequiresApproval ?? ATTENDANCE_RULE_DEFAULTS.wfhRequiresApproval,
+    lateAllowedPerMonth: row.lateAllowedPerMonth ?? ATTENDANCE_RULE_DEFAULTS.lateAllowedPerMonth,
+    lateGraceMinutes: row.lateGraceMinutes ?? ATTENDANCE_RULE_DEFAULTS.lateGraceMinutes,
     updatedAt: row.updatedAt.toISOString(),
   };
 }
@@ -90,7 +110,7 @@ export async function loadWorkingCalendar(input: {
   const fromDate = fromIsoDate(loadFrom);
   const toDate = fromIsoDate(input.to);
 
-  const [users, assignments, holidays, leave, credits, overrides] = await Promise.all([
+  const [users, assignments, holidays, leave, credits, overrides, ruleCharges] = await Promise.all([
     db.user.findMany({
       where: { id: { in: input.userIds } },
       select: {
@@ -164,6 +184,17 @@ export async function loadWorkingCalendar(input: {
       },
       select: { userId: true, date: true, code: true },
     }),
+    // Days the attendance rules turned into leave. They spend the balance the
+    // way Lark's leave does, so they join the walk below — priced from the line
+    // itself, which the rule reconcile keeps in step with the verdict.
+    db.leaveLedgerEntry.findMany({
+      where: {
+        userId: { in: input.userIds },
+        sourceKey: { startsWith: RULE_SOURCE_PREFIX },
+        effectiveOn: { gte: fromDate, lte: toDate },
+      },
+      select: { userId: true, effectiveOn: true, days: true },
+    }),
   ]);
 
   const userTeamIds: Record<string, string | null> = {};
@@ -223,12 +254,17 @@ export async function loadWorkingCalendar(input: {
    * Days off still cost nothing — that rule sits above every other, and a
    * correction cannot reach past it.
    */
+  const ruleCostFor = new Map<string, number>();
+  for (const r of ruleCharges) ruleCostFor.set(`${r.userId}\u0000${toIsoDate(r.effectiveOn)}`, -r.days);
+
   const costOf = (userId: string, date: string): number => {
     const status = priced.dayStatus(userId, date);
     const free = status.kind === 'WEEKLY_OFF' || status.kind === 'HOLIDAY' || status.kind === 'NO_SHIFT';
     if (free) return 0;
     const override = overrideFor.get(`${userId}\u0000${date}`);
-    if (!override) return status.chargedDays;
+    // A rule's leave sits on top of whatever was approved: half a day of
+    // approved leave plus half a day the rule added is a whole day spent.
+    if (!override) return roundToHalfDay(status.chargedDays + (ruleCostFor.get(`${userId}\u0000${date}`) ?? 0));
     switch (attendanceOverrideShape(override)) {
       case 'FULL_LEAVE': return 1;
       case 'HALF_LEAVE': return 0.5;
@@ -256,6 +292,8 @@ export async function loadWorkingCalendar(input: {
   }
   // A day nobody filed leave for, that a manager called paid leave anyway.
   for (const o of overrides) chargeDay(o.userId, toIsoDate(o.date));
+  // A day a rule charged, which usually has no leave filed against it either.
+  for (const r of ruleCharges) chargeDay(r.userId, toIsoDate(r.effectiveOn));
 
   const creditRows: LeaveCredit[] = credits.map((c) => ({
     userId: c.userId,
@@ -263,14 +301,11 @@ export async function loadWorkingCalendar(input: {
     days: c.days,
   }));
 
+  const walk = { credits: creditRows, leaveDays, since: fundingFloor, accrualStartFor };
   return new WorkingCalendar({
     ...shared,
-    leaveFunding: resolveLeaveFunding({
-      credits: creditRows,
-      leaveDays,
-      since: fundingFloor,
-      accrualStartFor,
-    }),
+    leaveFunding: resolveLeaveFunding(walk),
+    leaveAccounts: resolveLeaveAccounts({ ...walk, from: input.from, to: input.to }),
   });
 }
 

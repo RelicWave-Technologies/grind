@@ -48,6 +48,13 @@ export {
   type LeaveIngestResult,
 } from './larkIngest';
 export {
+  ingestLarkWfhOnce,
+  startLarkWfhIngest,
+  stopLarkWfhIngest,
+  parseWfhInstance,
+  type LarkWfhInstance,
+} from './larkWfhIngest';
+export {
   decisionFromLarkStatus,
   leaveDecidedInLark,
   setLeaveDecidedInLarkForTests,
@@ -56,6 +63,7 @@ export {
 
 import { loadWorkingCalendar } from './repository';
 import type { DayStatus } from '@grind/types';
+import type { LeaveAccount } from './leaveFunding';
 
 /**
  * The one call every timesheet consumer makes.
@@ -76,12 +84,15 @@ export async function timesheetCalendarInputs(input: {
   dayStatusFor: (userId: string, date: string) => DayStatus | null;
   /** Days of that date's leave a balance covered, undefined when it covered all. */
   fundedDaysFor: (userId: string, date: string) => number | undefined;
+  /** Opening, earned, paid and closing leave over [from, to]. */
+  leaveAccountFor: (userId: string) => LeaveAccount | undefined;
   userIds: string[];
 }> {
   const calendar = await loadWorkingCalendar(input);
   return {
     dayStatusFor: (userId, date) => calendar.dayStatus(userId, date),
     fundedDaysFor: (userId, date) => calendar.fundedDaysFor(userId, date),
+    leaveAccountFor: (userId) => calendar.leaveAccountFor(userId),
     userIds: input.userIds,
   };
 }

@@ -1,6 +1,8 @@
 import { prisma } from '@grind/db';
 import { isValidTimeZone, dateKeyInTimeZone } from '@grind/types';
 import { loadPunchLookup } from '../attendance/punches';
+import { loadAttendanceRuleContext } from '../attendance/ruleContext';
+import { reconcileRuleLedger, verdictKey, type RuleVerdicts } from '../attendance/ruleLedger';
 import { localDayWindow } from '../insights/day';
 import { loadEntryLiveEvidence } from '../insights/liveEntryEvidence';
 import { resolveEffectiveEntrySegmentEnds } from '../insights/openSegmentEvidence';
@@ -113,14 +115,15 @@ export async function loadMonthPerformanceReport(input: {
   const lookbackStart = new Date(firstDay.start.getTime() - DAY_MS);
   const lookbackEnd = new Date(lastDay.end.getTime() + DAY_MS);
 
-  const [calendar, punchFor, entries, invalidations, overrides] = await Promise.all([
-    timesheetCalendarInputs({
-      workspaceId: input.workspaceId,
-      tz: range.tz,
-      userIds,
-      from: range.from,
-      to: range.to,
-    }),
+  const calendarInput = {
+    workspaceId: input.workspaceId,
+    tz: range.tz,
+    userIds,
+    from: range.from,
+    to: range.to,
+  };
+  const [initialCalendar, punchFor, entries, invalidations, overrides] = await Promise.all([
+    timesheetCalendarInputs(calendarInput),
     loadPunchLookup({ userIds, from: range.from, to: range.to }),
     userIds.length === 0 ? [] : prisma.timeEntry.findMany({
       where: {
@@ -140,20 +143,10 @@ export async function loadMonthPerformanceReport(input: {
     }),
   ]);
 
-  const overrideIndex = new Map<string, DayOverride>();
-  for (const o of overrides) {
-    // A DATE column reads back as an epoch-anchored Date; no timezone applies.
-    const date = o.date.toISOString().slice(0, 10);
-    overrideIndex.set(`${o.userId}|${date}`, {
-      code: o.code,
-      computedCode: o.computedCode,
-      // The correction says the day was leave; this says how much of it the
-      // balance paid for. Same walk that answers it for leave filed in Lark.
-      fundedDays: calendar.fundedDaysFor(o.userId, date),
-    });
-  }
-  const overrideFor = (userId: string, date: string): DayOverride | null =>
-    overrideIndex.get(`${userId}|${date}`) ?? null;
+
+  // The attendance rules below may change what the balance paid for, and the
+  // calendar is then read again so the codes agree with the ledger.
+  let calendar = initialCalendar;
 
   const nowMs = input.nowMs ?? Date.now();
   const now = new Date(nowMs);
@@ -192,6 +185,46 @@ export async function loadMonthPerformanceReport(input: {
   const trackedMinutesFor = (userId: string, date: string): number =>
     Math.round((matrix?.cells[userId]?.[date]?.totalMs ?? 0) / 60_000);
 
+  // The attendance rules. Judged here, written to the ledger, and only then is
+  // the month priced: a day a rule turned into leave spends the same balance
+  // Lark's leave does, so a later day may stop being paid because of it.
+  const rules = await loadAttendanceRuleContext({ ...calendarInput, punchFor, nowMs });
+  const overridden = new Set(overrides.map((o) => `${o.userId}|${o.date.toISOString().slice(0, 10)}`));
+  const verdicts: RuleVerdicts = new Map();
+  if (rules.enabled) {
+    for (const userId of userIds) {
+      for (const date of matrix?.days ?? []) {
+        // A corrected day is the corrector's call, and costs what they said.
+        if (overridden.has(`${userId}|${date}`)) continue;
+        const verdict = rules.judge(userId, date, calendar.dayStatusFor(userId, date), trackedMinutesFor(userId, date));
+        if (verdict) verdicts.set(verdictKey(userId, date), verdict);
+      }
+    }
+  }
+  const changed = await reconcileRuleLedger({
+    workspaceId: input.workspaceId,
+    userIds,
+    from: range.from,
+    to: range.to,
+    verdicts,
+  });
+  if (changed.written + changed.removed > 0) calendar = await timesheetCalendarInputs(calendarInput);
+
+  const overrideIndex = new Map<string, DayOverride>();
+  for (const o of overrides) {
+    // A DATE column reads back as an epoch-anchored Date; no timezone applies.
+    const date = o.date.toISOString().slice(0, 10);
+    overrideIndex.set(`${o.userId}|${date}`, {
+      code: o.code,
+      computedCode: o.computedCode,
+      // The correction says the day was leave; this says how much of it the
+      // balance paid for. Same walk that answers it for leave filed in Lark.
+      fundedDays: calendar.fundedDaysFor(o.userId, date),
+    });
+  }
+  const overrideFor = (userId: string, date: string): DayOverride | null =>
+    overrideIndex.get(`${userId}|${date}`) ?? null;
+
   // As of the last day of the month, not today: a report of August has to keep
   // saying the same thing in October, and a balance read at render time would
   // drift away from the days printed beside it.
@@ -207,6 +240,19 @@ export async function loadMonthPerformanceReport(input: {
     punchFor,
     overrideFor,
     balanceFor: (userId) => balances[userId]?.balanceDays,
+    leaveAccountFor: calendar.leaveAccountFor,
+    ruleFor: rules.enabled ? rules.judge : undefined,
+    fundedDaysFor: calendar.fundedDaysFor,
+    lateOrdinalFor: rules.enabled ? rules.lateOrdinalFor : undefined,
+    rulesFrom: rules.enabled ? rules.policy.from : null,
+    ruleMinutes: rules.enabled
+      ? {
+          fullDay: rules.policy.fullDayMinMinutes,
+          halfDay: rules.policy.halfDayMinMinutes,
+          lateAllowed: rules.policy.lateAllowedPerMonth,
+          lateGrace: rules.policy.lateGraceMinutes,
+        }
+      : null,
     generatedAtMs: nowMs,
   });
 }
