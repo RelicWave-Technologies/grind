@@ -122,6 +122,13 @@ async function seedPunch(opts: {
   });
 }
 
+/** The "Salary Cut" figure from one person's caption row. */
+async function salaryCut(token: string, email: string): Promise<string | undefined> {
+  const res = await request(app).get('/v1/reports/month-performance.csv?month=2026-08').set(bearer(token));
+  const caption = blockFor(res.text, email)![1]!.split(',');
+  return caption[caption.indexOf('Salary Cut') + 1];
+}
+
 /** The ten lines for one person, found by their email in the caption row. */
 function blockFor(csv: string, email: string): string[] | null {
   const lines = csv.split('\n');
@@ -205,7 +212,7 @@ describe('GET /v1/reports/month-performance.csv', () => {
     expect(block[4]!.split(',')[3]).toBe('09:28'); // office in, still the badge
     expect(block[6]!.split(',')[3]).toBe('09:00'); // hours, from tracked time
     expect(block[7]!.split(',')[3]).toBe('P');
-    expect(block[1]).toContain('Total Hours,09:00');
+    expect(block[1]).toContain('Present,1');
   });
 
   it('marks a badged day absent only when nothing at all was tracked', async () => {
@@ -226,7 +233,8 @@ describe('GET /v1/reports/month-performance.csv', () => {
     expect(block[4]!.split(',')[4]).toBe('09:55');
     expect(block[5]!.split(',')[4]).toBe('18:12');
     expect(block[6]!.split(',')[4]).toBe('00:00');
-    expect(block[7]!.split(',')[4]).toBe('A');
+    // The sheet calls an unexplained absence leave without approval.
+    expect(block[7]!.split(',')[4]).toBe('LWA');
   });
 
   it('gives a manager their team and nobody else', async () => {
@@ -301,7 +309,7 @@ describe('correcting a day by hand', () => {
     await assignShift(s.ws.id, s.inTeam.id);
 
     // 2026-08-03 is a Monday with nothing tracked: absent.
-    expect((await statusRow(s.admin.token, s.inTeam.email))[3]).toBe('A');
+    expect((await statusRow(s.admin.token, s.inTeam.email))[3]).toBe('LWA');
 
     const res = await put(s.admin.token, {
       userId: s.inTeam.id, date: '2026-08-03', code: 'P', reason: 'Agent was down; present all day',
@@ -323,7 +331,7 @@ describe('correcting a day by hand', () => {
     });
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ ok: true, cleared: true });
-    expect((await statusRow(s.admin.token, s.inTeam.email))[3]).toBe('A');
+    expect((await statusRow(s.admin.token, s.inTeam.email))[3]).toBe('LWA');
   });
 
   it('replaces a correction rather than stacking a second one', async () => {
@@ -343,9 +351,10 @@ describe('correcting a day by hand', () => {
     const rows = await prisma.attendanceOverride.findMany({ where: { userId: s.inTeam.id } });
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ code: 'FULL_LEAVE', reason: 'actually on leave' });
-    // No balance behind it, so a full day of leave reads as unpaid. The
+    // No balance behind it, so the full day of leave is unpaid. The
     // correction said how much of the day; the ledger said what it cost.
-    expect((await statusRow(s.admin.token, s.inTeam.email))[3]).toBe('LWP');
+    expect((await statusRow(s.admin.token, s.inTeam.email))[3]).toBe('L');
+    expect(await salaryCut(s.admin.token, s.inTeam.email)).toBe('1 day');
   });
 
   it('refuses a correction that tries to say whether leave was paid', async () => {
@@ -455,6 +464,11 @@ describe('a correction moves the days after it', () => {
     return (day: number) => cells[day]?.trim();
   }
 
+  /** The sheet keeps paid/unpaid to one figure: the days no balance covered. */
+  async function cut(token: string, email: string) {
+    return salaryCut(token, email);
+  }
+
   it('re-spends the balance from the day the correction changed', async () => {
     const s = await seed();
     await assignShift(s.ws.id, s.inTeam.id);
@@ -496,7 +510,8 @@ describe('a correction moves the days after it', () => {
     await leave('2026-08-21', '2026-08-21', 'FULL', 1);
 
     // The half day spends 0.5, so the full day has 0.5 behind it and splits.
-    expect((await statusRow(s.admin.token, s.inTeam.email))(21)).toBe('PL_HD/LWP_HD');
+    expect((await statusRow(s.admin.token, s.inTeam.email))(21)).toBe('L');
+    expect(await cut(s.admin.token, s.inTeam.email)).toBe('0.5 days');
 
     await prisma.attendanceOverride.create({
       data: {
@@ -511,9 +526,10 @@ describe('a correction moves the days after it', () => {
     });
 
     const after = await statusRow(s.admin.token, s.inTeam.email);
-    expect(after(14)).toBe('PL_HD');
+    expect(after(14)).toBe('HD');
     // The correction took the other half, so nothing is left for the 21st.
-    expect(after(21)).toBe('LWP');
+    expect(after(21)).toBe('L');
+    expect(await cut(s.admin.token, s.inTeam.email)).toBe('1 day');
   });
 
   it('stops paying for leave on a day a correction calls present', async () => {
@@ -555,7 +571,8 @@ describe('a correction moves the days after it', () => {
       });
     }
     // One day of balance, two full days of leave: the second goes unpaid.
-    expect((await statusRow(s.admin.token, s.inTeam.email))(11)).toBe('LWP');
+    expect((await statusRow(s.admin.token, s.inTeam.email))(11)).toBe('L');
+    expect(await cut(s.admin.token, s.inTeam.email)).toBe('1 day');
 
     await prisma.attendanceOverride.create({
       data: {
@@ -572,7 +589,8 @@ describe('a correction moves the days after it', () => {
     // The 10th no longer spends anything, so the 11th gets the whole day.
     const after = await statusRow(s.admin.token, s.inTeam.email);
     expect(after(10)).toBe('P');
-    expect(after(11)).toBe('PL');
+    expect(after(11)).toBe('L');
+    expect(await cut(s.admin.token, s.inTeam.email)).toBe('0 days');
   });
 });
 

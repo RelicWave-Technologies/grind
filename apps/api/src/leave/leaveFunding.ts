@@ -94,8 +94,12 @@ export function resolveLeaveFunding(input: LeaveFundingInput): LeaveFundingDays 
       .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
     if (inScope.length === 0) continue;
 
+    // Credits answer only to the workspace floor, exactly as the ledger balance
+    // does. The accrual for someone's joining month is dated the 1st, before a
+    // mid-month joining date, and dropping it here would leave a day the
+    // balance shows as available unable to pay for anything.
     const credits = (creditsByUser.get(userId) ?? [])
-      .filter((c) => !floor || c.effectiveOn >= floor)
+      .filter((c) => !input.since || c.effectiveOn >= input.since)
       .sort((a, b) => (a.effectiveOn < b.effectiveOn ? -1 : a.effectiveOn > b.effectiveOn ? 1 : 0));
 
     const short = new Map<string, number>();
@@ -139,4 +143,78 @@ function laterOf(a: string | undefined, b: string | undefined): string | undefin
   if (!a) return b;
   if (!b) return a;
   return a > b ? a : b;
+}
+
+/** One person's leave over a window, as the month sheet prints it. */
+export interface LeaveAccount {
+  /** What the balance held when the window opened. */
+  opening: number;
+  /** Accruals and adjustments dated inside the window. */
+  earned: number;
+  /** Leave inside the window the balance actually paid for. */
+  paid: number;
+  /** opening + earned - paid. */
+  closing: number;
+}
+
+/**
+ * The balance as the funding walk spends it, opened and closed around a window.
+ *
+ * The same walk `resolveLeaveFunding` runs, so the account and the paid/unpaid
+ * labels can never disagree: a day the balance could not reach is not paid, and
+ * so it is not spent either. Leave nobody could pay for becomes a salary cut —
+ * it is never carried as debt, which is why `closing` does not go below zero
+ * except by a deliberate negative adjustment.
+ */
+export function resolveLeaveAccounts(
+  input: LeaveFundingInput & { from: string; to: string },
+): Map<string, LeaveAccount> {
+  const userIds = new Set([...input.credits.map((c) => c.userId), ...input.leaveDays.map((d) => d.userId)]);
+  const out = new Map<string, LeaveAccount>();
+
+  for (const userId of userIds) {
+    const floor = laterOf(input.since, input.accrualStartFor?.[userId]);
+    const days = input.leaveDays
+      .filter((d) => d.userId === userId && (!floor || d.date >= floor) && d.date <= input.to)
+      .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+    const credits = input.credits
+      .filter((c) => c.userId === userId && (!input.since || c.effectiveOn >= input.since) && c.effectiveOn <= input.to)
+      .sort((a, b) => (a.effectiveOn < b.effectiveOn ? -1 : a.effectiveOn > b.effectiveOn ? 1 : 0));
+
+    // Merge both streams by date; on the same date a credit lands first, as in
+    // the walk, so an accrual dated the 1st pays for leave taken the 1st.
+    let budget = 0;
+    let opening: number | null = null;
+    let earned = 0;
+    let paid = 0;
+    let c = 0;
+    const open = () => {
+      if (opening === null) opening = budget;
+    };
+    for (const day of days) {
+      for (let next = credits[c]; next && next.effectiveOn <= day.date; next = credits[c]) {
+        if (next.effectiveOn >= input.from) {
+          open();
+          earned = roundToHalfDay(earned + next.days);
+        }
+        budget = roundToHalfDay(budget + next.days);
+        c += 1;
+      }
+      const funded = budget >= day.cost ? day.cost : Math.max(0, roundToHalfDay(budget));
+      if (day.date >= input.from) {
+        open();
+        paid = roundToHalfDay(paid + funded);
+      }
+      budget = roundToHalfDay(budget - funded);
+    }
+    for (const next of credits.slice(c)) {
+      if (next.effectiveOn >= input.from) {
+        open();
+        earned = roundToHalfDay(earned + next.days);
+      }
+      budget = roundToHalfDay(budget + next.days);
+    }
+    out.set(userId, { opening: opening ?? budget, earned, paid, closing: budget });
+  }
+  return out;
 }

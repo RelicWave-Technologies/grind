@@ -9,7 +9,7 @@ import {
   type LeavePortion,
 } from '@grind/types';
 import { localDayWindow } from '../insights/day';
-import type { LeaveFundingDays } from './leaveFunding';
+import type { LeaveAccount, LeaveFundingDays } from './leaveFunding';
 
 /**
  * The Working Calendar answers one question for a person and a date:
@@ -82,6 +82,8 @@ export interface WorkingCalendarInput {
    * stays independent of the order it was asked for.
    */
   leaveFunding?: LeaveFundingDays;
+  /** Each person's leave account over the range the calendar was built for. */
+  leaveAccounts?: Map<string, LeaveAccount>;
 }
 
 type ShiftForDay =
@@ -107,11 +109,13 @@ export class WorkingCalendar {
   private readonly lastSaturdayOffFor: Record<string, boolean>;
   /** userId -> date -> days of leave a balance covered, where it fell short. */
   private readonly leaveFunding: LeaveFundingDays;
+  private readonly leaveAccounts: Map<string, LeaveAccount>;
 
   constructor(input: WorkingCalendarInput) {
     this.tz = input.tz;
     this.lastSaturdayOffFor = input.lastSaturdayOffFor ?? {};
     this.leaveFunding = input.leaveFunding ?? new Map();
+    this.leaveAccounts = input.leaveAccounts ?? new Map();
     this.shiftAssignments = input.shiftAssignments ?? {};
     this.userTeamIds = input.userTeamIds ?? {};
 
@@ -228,6 +232,14 @@ export class WorkingCalendar {
     return this.leaveFunding.get(userId)?.get(date);
   }
 
+  /**
+   * Opening, earned, paid and closing leave over the range this calendar was
+   * built for, or undefined for somebody with no credits and no leave.
+   */
+  leaveAccountFor(userId: string): LeaveAccount | undefined {
+    return this.leaveAccounts.get(userId);
+  }
+
   /** Status for a whole range, in date order. */
   dayStatuses(userId: string, dates: readonly string[]): DayStatus[] {
     return dates.map((d) => this.dayStatus(userId, d));
@@ -312,21 +324,38 @@ export class WorkingCalendar {
     return value;
   }
 
-  private resolveShiftForDay(userId: string, date: string): ShiftForDay {
-    const assignments = this.shiftAssignments[userId];
-    if (!assignments?.length) return { kind: 'no_shift' };
-    const win = this.dayWindow(date);
-    if (!win) return { kind: 'no_shift' };
+  /**
+   * The shift's clock window for a working day — which shift, and its start and
+   * end as HH:MM — or null on a day that is not a working day for this person.
+   * What a late arrival is measured against.
+   */
+  shiftWindowFor(userId: string, date: string): { shiftId: string; start: string; end: string } | null {
+    if (this.resolveShiftForDay(userId, date).kind !== 'working') return null;
+    const assignment = this.assignmentFor(userId, date);
+    if (!assignment?.shiftId) return null;
+    const parsed = ShiftScheduleSchema.safeParse(assignment.scheduleSnapshot);
+    const day = parsed.success ? parsed.data[weekdayForDate(date)] : null;
+    return day ? { shiftId: assignment.shiftId, start: day.start, end: day.end } : null;
+  }
 
-    const assignment =
+  private assignmentFor(userId: string, date: string): ShiftAssignmentInput | null {
+    const assignments = this.shiftAssignments[userId];
+    if (!assignments?.length) return null;
+    const win = this.dayWindow(date);
+    if (!win) return null;
+    return (
       assignments
         .filter(
           (a) =>
             a.effectiveFrom.getTime() < win.endMs &&
             (a.effectiveTo === null || a.effectiveTo.getTime() > win.startMs),
         )
-        .sort((a, b) => b.effectiveFrom.getTime() - a.effectiveFrom.getTime())[0] ?? null;
+        .sort((a, b) => b.effectiveFrom.getTime() - a.effectiveFrom.getTime())[0] ?? null
+    );
+  }
 
+  private resolveShiftForDay(userId: string, date: string): ShiftForDay {
+    const assignment = this.assignmentFor(userId, date);
     if (!assignment?.shiftId) return { kind: 'no_shift' };
     const parsed = ShiftScheduleSchema.safeParse(assignment.scheduleSnapshot);
     if (!parsed.success) return { kind: 'no_shift' };

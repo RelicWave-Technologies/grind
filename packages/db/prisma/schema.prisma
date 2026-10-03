@@ -40,6 +40,7 @@ model Workspace {
   leaveRequests             LeaveRequest[]
   leaveLedgerEntries        LeaveLedgerEntry[]
   attendancePunches         AttendancePunch[]
+  wfhRequests               WfhRequest[]
   attendanceOverrides       AttendanceOverride[]
   attendanceOverrideEvents  AttendanceOverrideEvent[]
 }
@@ -293,6 +294,11 @@ model User {
   /// concept: this workspace holds two employers, and neither Team nor
   /// Workspace models that. Worth naming properly if a third rule appears.
   lastSaturdayOffOverride  Boolean?
+  /// How the attendance rules treat this person. STANDARD gets every rule;
+  /// REMOTE works away from the office by arrangement, so a day with no punch
+  /// is not unapproved work-from-home — the hour and absence rules still apply;
+  /// EXEMPT is outside the rules entirely (founders, people who do not track).
+  attendanceRuleMode       AttendanceRuleMode @default(STANDARD)
 
   /// Currently-assigned shift. Forward-only: changing this does NOT
   /// rewrite history; each TimeEntry snapshots `shiftIdAtStart` so reports
@@ -368,6 +374,7 @@ model User {
   leaveLedgerEntriesCreated        LeaveLedgerEntry[]        @relation("LeaveLedgerActor")
   companyHolidaysCreated           CompanyHoliday[]          @relation("HolidayCreator")
   attendancePunches                AttendancePunch[]
+  wfhRequests                      WfhRequest[]
   attendanceOverrides              AttendanceOverride[]      @relation("AttendanceOverrideSubject")
   attendanceOverridesAuthored      AttendanceOverride[]      @relation("AttendanceOverrideAuthor")
   attendanceOverrideEvents         AttendanceOverrideEvent[] @relation("AttendanceOverrideEventSubject")
@@ -1277,6 +1284,27 @@ model LeavePolicy {
   /// weekly shift pattern has no way to express a monthly exception, so the
   /// rule lives here and the Working Calendar applies it.
   lastSaturdayOff      Boolean   @default(false)
+  /// First business date (YYYY-MM-DD) the attendance rules judge. NULL = the
+  /// rules are off and no day is charged for falling short.
+  ///
+  /// The rules turn a short day, an unapproved work-from-home day or an absence
+  /// with no approved application into leave drawn from this same balance, which
+  /// is why they live beside it rather than on a policy of their own.
+  attendanceRulesFrom  String?
+  /// Tracked minutes a full working day needs. Short of it the day is half a
+  /// day of leave; short of `halfDayMinMinutes` too, a whole one.
+  fullDayMinMinutes    Int       @default(420)
+  /// Tracked minutes the working half of an approved half-day leave needs, and
+  /// the floor below which a full working day becomes a full leave.
+  halfDayMinMinutes    Int       @default(210)
+  /// Working from home without an approved request counts as leave.
+  wfhRequiresApproval  Boolean   @default(true)
+  /// Late arrivals a month that cost nothing. From the next one on, each late
+  /// arrival is half a day of leave.
+  lateAllowedPerMonth  Int       @default(4)
+  /// Minutes after the shift start that still count as on time — the same for
+  /// everyone, whatever buffer an individual shift carries.
+  lateGraceMinutes     Int       @default(30)
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
 }
@@ -1344,6 +1372,43 @@ model LeaveRequest {
   @@index([workspaceId, status])
   @@index([userId, status])
   @@index([workspaceId, startDate, endDate])
+}
+
+enum AttendanceRuleMode {
+  STANDARD
+  REMOTE
+  EXEMPT
+}
+
+/// A request to work from home, mirrored from the company's Lark "Work From
+/// Home Request" approval. Lark decides it; Timo only reads the answer.
+///
+/// Kept apart from LeaveRequest because it is not leave: it costs no balance and
+/// says nothing about whether the person was expected to work. What it changes
+/// is how a day worked away from the office is read — with an approved request
+/// it is an ordinary working day, without one the attendance rules count it as
+/// leave.
+model WfhRequest {
+  id               String             @id @default(cuid())
+  workspaceId      String
+  workspace        Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  userId           String
+  user             User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Inclusive business-date range. Lark's WFH form is full days only.
+  startDate        DateTime           @db.Date
+  endDate          DateTime           @db.Date
+  reason           String
+  status           LeaveRequestStatus @default(PENDING)
+  /// When the person submitted it in Lark — not when Timo first saw it.
+  appliedAt        DateTime?
+  larkInstanceCode String             @unique
+  larkApprovalCode String?
+  larkSyncedAt     DateTime?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  @@index([workspaceId, startDate, endDate])
+  @@index([userId, status])
 }
 
 /// One line of the paid-leave ledger.

@@ -9,6 +9,8 @@ import { deleteMember, planMemberDeletion } from '../admin/deleteMember';
 import { logger } from '../logger';
 import { resolveReportRange } from '../reports/member';
 import { timesheetCalendarInputs } from '../leave';
+import { loadPunchLookup } from '../attendance/punches';
+import { loadAttendanceRuleContext } from '../attendance/ruleContext';
 import {
   addDays as addDaysStr,
   buildTimesheetMatrix,
@@ -30,6 +32,7 @@ import { agentPresence, type AgentPresence } from '../agentPresence';
 import {
   CreateApiTokenRequest,
   API_TOKEN_SCOPES,
+  ATTENDANCE_RULE_LABEL,
   CreateShiftSchema,
   PatchShiftSchema,
   PatchTeamMemberSettingsRequest,
@@ -39,6 +42,7 @@ import {
   dateKeyInTimeZone,
   normalizeScreenshotIntervalMin,
   type ApiTokenDto,
+  type AttendanceRuleVerdict,
   type MonitoringSettingsAuditDto,
   type TeamMemberSettingsDto,
   type TeamSettingsResponse,
@@ -1307,9 +1311,21 @@ adminRouter.get('/timesheets.csv', requireAnyCapability(['reports.team.read', 'r
     if (!matrix) return res.status(400).json({ error: 'invalid_date_or_tz' });
 
     const usersById = new Map(users.map((u) => [u.id, u]));
+    // The attendance rules' reading of each day, so the sheet says which days
+    // fell short without the reader redoing the arithmetic. Empty when the
+    // rules are off or the day was fine.
+    const punchFor = await loadPunchLookup({ userIds: users.map((u) => u.id), from: range.from, to: range.to });
+    const rules = await loadAttendanceRuleContext({
+      workspaceId: req.scope.workspaceId,
+      tz: matrix.tz,
+      userIds: users.map((u) => u.id),
+      from: range.from,
+      to: range.to,
+      punchFor,
+    });
     const lines: string[] = [];
     lines.push(
-      'name,email,role,day,worked_h,meeting_h,manual_h,total_h,invalidated_h,first_activity,last_activity,activity_samples',
+      'name,email,role,day,worked_h,meeting_h,manual_h,total_h,invalidated_h,first_activity,last_activity,activity_samples,remark,rule_leave_days',
     );
     // Stable ordering: user (role-then-name like the JSON), then day asc.
     for (const u of users) {
@@ -1334,6 +1350,7 @@ adminRouter.get('/timesheets.csv', requireAnyCapability(['reports.team.read', 'r
             first,
             last,
             String(cell.activitySampleCount),
+            ...remarkCells(rules.judge(u.id, day, cell.dayStatus ?? null, Math.round(cell.totalMs / 60_000))),
           ].join(','),
         );
       }
@@ -1350,6 +1367,12 @@ adminRouter.get('/timesheets.csv', requireAnyCapability(['reports.team.read', 'r
     next(err);
   }
 });
+
+/** The remark and the leave a rule charged, or two empty cells. */
+function remarkCells(verdict: AttendanceRuleVerdict | null): [string, string] {
+  if (!verdict) return ['', ''];
+  return [csv(ATTENDANCE_RULE_LABEL[verdict.tag]), String(verdict.penaltyDays)];
+}
 
 /** Quote a CSV cell if it contains a comma, quote, or newline. */
 function csv(s: string): string {

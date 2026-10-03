@@ -2,11 +2,11 @@ import { prisma } from '@grind/db';
 import type {
   AttendanceOverrideCode,
   AttendanceOverrideHistoryEntry,
-  DayStatus,
 } from '@grind/types';
 import { loadWorkingCalendar } from '../leave';
 import { overrideDayCost, reconcileOverrideLedger } from '../leave/overrideLedger';
-import { computedCodeForDay, type DayOverride } from './monthPerformance';
+import { ruleLedgerSourceKey } from '../attendance/ruleLedger';
+import type { DayOverride } from './monthPerformance';
 
 /**
  * A manager's or admin's correction to one day's attendance status.
@@ -58,25 +58,6 @@ export async function loadOverrideLookup(input: {
   return (userId, date) => index.get(`${userId}|${date}`) ?? null;
 }
 
-/** What the report would say for this person-day with nobody's correction. */
-export async function computeDayCode(input: {
-  workspaceId: string;
-  userId: string;
-  date: string;
-  tz: string;
-  trackedMinutes: number;
-}): Promise<string> {
-  const calendar = await loadWorkingCalendar({
-    workspaceId: input.workspaceId,
-    tz: input.tz,
-    userIds: [input.userId],
-    from: input.date,
-    to: input.date,
-  });
-  const status: DayStatus | null = calendar.dayStatus(input.userId, input.date);
-  return computedCodeForDay(status, input.trackedMinutes);
-}
-
 export async function setAttendanceOverride(input: {
   workspaceId: string;
   userId: string;
@@ -105,6 +86,12 @@ export async function setAttendanceOverride(input: {
     alreadyCharged: calendar.leaveChargeFor(input.userId, input.date),
     nowCosts: overrideDayCost(input.code, calendar.isChargeableDay(input.userId, input.date)),
     createdById: input.setById,
+  });
+  // A corrected day is the corrector's call: whatever an attendance rule
+  // charged for it goes, or the day would be billed twice. Clearing the
+  // correction hands the day back to the rules on the next reconcile.
+  await prisma.leaveLedgerEntry.deleteMany({
+    where: { sourceKey: ruleLedgerSourceKey(input.userId, input.date) },
   });
   await prisma.$transaction([
     prisma.attendanceOverrideEvent.create({

@@ -38,6 +38,9 @@ function day(
     code,
     label: null,
     override: null,
+    computedCode: code,
+    rule: null,
+    late: null,
   };
 }
 

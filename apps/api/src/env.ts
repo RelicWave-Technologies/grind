@@ -40,6 +40,9 @@ const EnvSchema = z.object({
   /// decided in Lark; absent = decided in Timo. Deliberately all-or-nothing: a
   /// half-configured Lark accepts requests that reach nobody.
   LARK_LEAVE_APPROVAL_CODE: z.string().min(1).optional(),
+  /// approval_code of the Lark "Work From Home Request" approval. Present =
+  /// WFH requests are mirrored into Timo, which the attendance rules read.
+  LARK_WFH_APPROVAL_CODE: z.string().min(1).optional(),
   LARK_LEAVE_TYPE_FULL: z.string().min(1).optional(),
   LARK_LEAVE_TYPE_HALF: z.string().min(1).optional(),
   LARK_LEAVE_TZ_OFFSET_MIN: z.coerce.number().int().optional(),

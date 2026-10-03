@@ -2,8 +2,12 @@ import ExcelJS from 'exceljs';
 import {
   fmtMinutes,
   monthPerformanceGridRows,
+  monthPerformanceLeavePairs,
   monthPerformanceSummaryPairs,
-  type MonthPerformanceCode,
+  salaryCutDays,
+  sheetCode,
+  sheetWhy,
+  type SheetCode,
   type MonthPerformanceDay,
   type MonthPerformanceReport,
   type MonthPerformanceRow,
@@ -61,15 +65,8 @@ const SURFACE_SOFT = 'FFF7F7F5';
 const BLOCK_LIME = 'FFDCEEB1';
 const BLOCK_LILAC = 'FFC5B0F4';
 const BLOCK_CREAM = 'FFF4ECD6';
-const BLOCK_PINK = 'FFEFD4D4';
 const BLOCK_MINT = 'FFC8E6CD';
 const BLOCK_CORAL = 'FFF3C9B6';
-// Half of LWP's coral, so an unpaid half day reads as a paler kin of the full
-// day rather than as an unrelated fourth colour.
-const BLOCK_PEACH = 'FFF9E4DA';
-// Sits between cream and peach: a day that is half of each should not read as
-// belonging wholly to either.
-const BLOCK_SAND = 'FFF6E8DA';
 
 /**
  * `figmaSans` / `figmaMono` are proprietary, so DESIGN.md's documented
@@ -89,15 +86,11 @@ const MONO = 'JetBrains Mono';
  * it is simply a different block from `P`. Days off share the quiet neutrals so
  * the eye reads them as background rather than as events.
  */
-const CODE_FILL: Record<MonthPerformanceCode, string> = {
+const CODE_FILL: Record<SheetCode, string> = {
   P: BLOCK_LIME,
-  PL_HD: BLOCK_CREAM,
-  LWP_HD: BLOCK_PEACH,
-  // Between its two halves, because that is what the day is.
-  'PL_HD/LWP_HD': BLOCK_SAND,
-  A: BLOCK_PINK,
-  PL: BLOCK_MINT,
-  LWP: BLOCK_CORAL,
+  HD: BLOCK_CREAM,
+  L: BLOCK_MINT,
+  LWA: BLOCK_CORAL,
   HL: BLOCK_LILAC,
   WO: SURFACE_SOFT,
   '--': HAIRLINE_SOFT,
@@ -105,17 +98,17 @@ const CODE_FILL: Record<MonthPerformanceCode, string> = {
 
 /** Wide enough for "Total Working Hours" without truncating it. */
 const LABEL_COL_WIDTH = 21;
-// Twelve characters, because PL_HD/LWP_HD is twelve. The grid pays for it in
-// width, and the alternative — a code the reader has to decode, or one clipped
-// by its own column — costs more than the paper does.
-const DAY_COL_WIDTH = 13;
+// Wide enough for "no leave" and a clock reading; the codes are three letters
+// at most, so the month fits on a landscape page.
+const DAY_COL_WIDTH = 9;
 
 /** A masthead, then one block per person. */
 const HEADER_ROWS = 3;
-/** Two caption rows, then the six from `monthPerformanceGridRows`. */
+/** Two caption rows, then the six from `monthPerformanceGridRows` — seven
+ *  once the attendance rules add their Remark row. */
 const CAPTION_ROWS = 2;
 const GRID_ROWS = 6;
-const BLOCK_ROWS = CAPTION_ROWS + GRID_ROWS;
+const blockRows = (report: MonthPerformanceReport) => CAPTION_ROWS + GRID_ROWS + (report.rulesFrom ? 1 : 0);
 /** Whitespace is DESIGN.md's section break. One blank row ran the blocks
  *  together; three lets each person read as their own panel. */
 const BLANK_ROWS_BETWEEN_BLOCKS = 3;
@@ -127,6 +120,7 @@ const DAY_NUMBER_ROW = 2;
 const WEEKDAY_ROW = 3;
 const FIRST_DATA_ROW = 4;
 const STATUS_ROW = 7;
+const REMARK_ROW = 8;
 
 /**
  * How far the identity caption runs before the count strip takes over.
@@ -183,17 +177,6 @@ function fill(cell: ExcelJS.Cell, argb: string): void {
 // ---------------------------------------------------------------------------
 
 /**
- * Counts that print even when they are zero.
- *
- * Present, Absent and Total Hours are the spine of a month — a zero in any of
- * them is itself the finding, so they always appear. The rest are events: a
- * half day, a holiday, leave. Printing "PAID LEAVE 0 · LEAVE WITHOUT PAY 0" on
- * a month where neither happened is three words of noise per person, and on a
- * 109-person sheet it is what turns the strip into a wall.
- */
-const ALWAYS_SHOWN = new Set(['Present', 'Absent', 'Total Hours']);
-
-/**
  * The count strip as rich text: a quiet label, then the number it answers, set
  * larger and bolder so the eye lands on the figure rather than reading the line.
  *
@@ -201,10 +184,11 @@ const ALWAYS_SHOWN = new Set(['Present', 'Absent', 'Total Hours']);
  * weight, a row of dots is scaffolding the type no longer needs — and DESIGN.md
  * reaches for whitespace before it reaches for a separator.
  */
-function countsRichText(row: MonthPerformanceRow): ExcelJS.CellRichTextValue {
+function countsRichText(pairs: Array<[string, string]>): ExcelJS.CellRichTextValue {
   const richText: ExcelJS.RichText[] = [];
-  const shown = monthPerformanceSummaryPairs(row)
-    .filter(([label, value]) => ALWAYS_SHOWN.has(label) || value !== '0');
+  // Every figure, zeros included: the same numbers in the same place for every
+  // person is easier to scan down a sheet than a strip that changes shape.
+  const shown = pairs;
 
   for (const [i, [label, value]] of shown.entries()) {
     if (i > 0) richText.push({ font: TYPE.countLabel, text: '      ' });
@@ -240,7 +224,7 @@ function buildGridSheet(wb: ExcelJS.Workbook, report: MonthPerformanceReport): v
   sheet.getRow(2).getCell(1).font = TYPE.eyebrow;
 
   report.rows.forEach((row, index) => {
-    const blockStart = HEADER_ROWS + index * (BLOCK_ROWS + BLANK_ROWS_BETWEEN_BLOCKS) + 1;
+    const blockStart = HEADER_ROWS + index * (blockRows(report) + BLANK_ROWS_BETWEEN_BLOCKS) + 1;
     sheet.addRow([row.user.name]);
     sheet.addRow([
       [row.user.teamName, row.user.email].filter(Boolean).join('   ·   ').toUpperCase(),
@@ -265,9 +249,16 @@ function buildGridSheet(wb: ExcelJS.Workbook, report: MonthPerformanceReport): v
     // The month's counts sit opposite the name, in mono, as a taxonomy strip.
     if (lastCol > splitAt) {
       const cell = at(IDENTITY_ROW).getCell(splitAt + 1);
-      cell.value = countsRichText(row);
+      cell.value = countsRichText(monthPerformanceSummaryPairs(row));
       mergeAcross(sheet, blockStart + IDENTITY_ROW, splitAt + 1, lastCol);
       cell.alignment = { horizontal: 'right', vertical: 'middle' };
+
+      // The leave account on the line below, opposite the email: the days
+      // above say what happened, this says what it did to the balance.
+      const account = at(META_ROW).getCell(splitAt + 1);
+      account.value = countsRichText(monthPerformanceLeavePairs(row));
+      mergeAcross(sheet, blockStart + META_ROW, splitAt + 1, lastCol);
+      account.alignment = { horizontal: 'right', vertical: 'middle' };
     }
 
     for (const offset of [DAY_NUMBER_ROW, WEEKDAY_ROW]) {
@@ -282,7 +273,8 @@ function buildGridSheet(wb: ExcelJS.Workbook, report: MonthPerformanceReport): v
     // IN / OUT / WORK / Status — mono readings, black ink, centred. Only the
     // status row carries a surface colour.
     const byDate = new Map<string, MonthPerformanceDay>(row.days.map((d) => [d.date, d]));
-    for (let offset = FIRST_DATA_ROW; offset <= STATUS_ROW; offset++) {
+    const lastRow = report.rulesFrom ? REMARK_ROW : STATUS_ROW;
+    for (let offset = FIRST_DATA_ROW; offset <= lastRow; offset++) {
       const sheetRow = at(offset);
       const label = sheetRow.getCell(1);
       label.value = String(label.value ?? '').toUpperCase();
@@ -294,8 +286,8 @@ function buildGridSheet(wb: ExcelJS.Workbook, report: MonthPerformanceReport): v
         cell.alignment = CENTRE;
         cell.font = TYPE.reading;
         if (offset === STATUS_ROW) {
-          const code = byDate.get(report.dates[i]!)?.code ?? '--';
-          fill(cell, CODE_FILL[code]);
+          const day = byDate.get(report.dates[i]!);
+          fill(cell, CODE_FILL[day ? sheetCode(day) : '--']);
           cell.font = TYPE.readingStrong;
         }
       }
@@ -305,24 +297,21 @@ function buildGridSheet(wb: ExcelJS.Workbook, report: MonthPerformanceReport): v
 
 function buildSummarySheet(wb: ExcelJS.Workbook, report: MonthPerformanceReport): void {
   const sheet = wb.addWorksheet('Summary', { views: [{ state: 'frozen', ySplit: 1 }] });
+  // The same six numbers as each block's strip, one row per person.
   sheet.columns = [
     { header: 'Name', key: 'name', width: 26 },
     { header: 'Email', key: 'email', width: 30 },
     { header: 'Dept.', key: 'team', width: 24 },
-    { header: 'Present', key: 'present', width: 9 },
-    { header: 'Half day paid', key: 'paidHalfDay', width: 14 },
-    { header: 'Half day unpaid', key: 'unpaidHalfDay', width: 16 },
-    { header: 'Half paid half unpaid', key: 'splitLeave', width: 21 },
-    { header: 'Weekly off', key: 'weeklyOff', width: 11 },
-    { header: 'Holiday', key: 'holiday', width: 9 },
-    { header: 'Paid leave', key: 'paidLeave', width: 11 },
-    { header: 'Unpaid leave', key: 'unpaidLeave', width: 13 },
-    { header: 'Absent', key: 'absent', width: 9 },
-    { header: 'No shift', key: 'noShift', width: 9 },
-    { header: 'Total working hours', key: 'work', width: 18 },
-    // Last, because it is the only column that is not a count of days inside
-    // the month — it is what the month left in the account.
-    { header: 'Leave balance', key: 'balance', width: 14 },
+    { header: 'Present', key: 'present', width: 10 },
+    { header: 'Half day', key: 'halfDay', width: 10 },
+    { header: 'Leave', key: 'leave', width: 9 },
+    { header: 'LWA', key: 'lwa', width: 8 },
+    { header: 'Late', key: 'late', width: 8 },
+    { header: 'Opening balance', key: 'opening', width: 16 },
+    { header: 'Earned', key: 'earned', width: 9 },
+    { header: 'Paid leave', key: 'paid', width: 11 },
+    { header: 'Closing balance', key: 'closing', width: 16 },
+    { header: 'Salary cut (days)', key: 'cut', width: 17 },
   ];
 
   // Column heads are mono uppercase — DESIGN.md's caption role.
@@ -336,22 +325,21 @@ function buildSummarySheet(wb: ExcelJS.Workbook, report: MonthPerformanceReport)
   });
 
   for (const row of report.rows) {
+    const count = (code: SheetCode) => row.days.filter((d) => sheetCode(d) === code).length;
     const added = sheet.addRow({
       name: row.user.name,
       email: row.user.email,
       team: row.user.teamName ?? '',
-      present: row.totals.present,
-      paidHalfDay: row.totals.paidHalfDay,
-      unpaidHalfDay: row.totals.unpaidHalfDay,
-      splitLeave: row.totals.splitLeave,
-      weeklyOff: row.totals.weeklyOff,
-      holiday: row.totals.holiday,
-      paidLeave: row.totals.paidLeave,
-      unpaidLeave: row.totals.unpaidLeave,
-      absent: row.totals.absent,
-      noShift: row.totals.noShift,
-      work: fmtMinutes(row.totals.workMinutes),
-      balance: row.balanceDays ?? '',
+      present: count('P'),
+      halfDay: count('HD'),
+      leave: count('L'),
+      lwa: count('LWA'),
+      late: row.totals.lateDays,
+      opening: row.leaveAccount?.opening ?? '',
+      earned: row.leaveAccount?.earned ?? '',
+      paid: row.leaveAccount?.paid ?? '',
+      closing: row.leaveAccount?.closing ?? row.balanceDays ?? '',
+      cut: salaryCutDays(row.totals),
     });
     added.eachCell((cell, col) => {
       cell.font = col <= 3 ? TYPE.body : TYPE.reading;
@@ -362,9 +350,9 @@ function buildSummarySheet(wb: ExcelJS.Workbook, report: MonthPerformanceReport)
 }
 
 /** The codes are only obvious to somebody who already knows them. */
-function buildLegendSheet(wb: ExcelJS.Workbook): void {
+function buildLegendSheet(wb: ExcelJS.Workbook, report: MonthPerformanceReport): void {
   const sheet = wb.addWorksheet('Legend');
-  sheet.getColumn(1).width = 8;
+  sheet.getColumn(1).width = 12;
   sheet.getColumn(2).width = 62;
 
   sheet.addRow(['Legend']);
@@ -372,17 +360,14 @@ function buildLegendSheet(wb: ExcelJS.Workbook): void {
   sheet.getRow(1).height = 26;
   sheet.addRow([]);
 
-  const legend: Array<[MonthPerformanceCode, string]> = [
-    ['P', 'Present — any tracked time on the day'],
-    ['PL_HD', 'Half day of paid leave — a balance covered it'],
-    ['LWP_HD', 'Half day of leave the balance did not cover'],
-    ['PL_HD/LWP_HD', 'A full day the balance reached halfway — half paid, half not'],
-    ['A', 'Absent — a working day with no tracked time at all'],
-    ['WO', 'Weekly off — the assigned shift has this weekday off'],
+  const legend: Array<[SheetCode, string]> = [
+    ['P', 'Present — a full day'],
+    ['HD', 'Half day — worked half, the other half was leave'],
+    ['L', 'Leave'],
+    ['LWA', 'Leave without approval — absent with no approved leave'],
     ['HL', 'Company holiday'],
-    ['PL', 'Approved paid leave'],
-    ['LWP', 'Approved unpaid leave'],
-    ['--', 'No shift assignment covers this date, and nothing tracked'],
+    ['WO', 'Weekly off'],
+    ['--', 'No shift assigned'],
   ];
   for (const [code, means] of legend) {
     const row = sheet.addRow({});
@@ -396,15 +381,45 @@ function buildLegendSheet(wb: ExcelJS.Workbook): void {
     row.height = 17;
   }
 
+  if (report.rulesFrom) {
+    sheet.addRow([]);
+    const heading = sheet.addRow(['Why']);
+    heading.getCell(1).font = TYPE.cardTitle;
+    const why = (tag: Parameters<typeof sheetWhy>[1]['rule']) => sheetWhy(report, { rule: tag });
+    const settings = report.ruleMinutes ?? { fullDay: 420, halfDay: 210, lateAllowed: 4, lateGrace: 30 };
+    const reasons: Array<[string, string]> = [
+      [why({ tag: 'SHORT_DAY', penaltyDays: 0.5 }), 'Worked less than a full day, so it counts as a half day'],
+      [why({ tag: 'UNDER_MIN', penaltyDays: 1 }), 'Worked less than half a day, so it counts as leave'],
+      ['WFH', 'Worked from home without an approved WFH request, so it counts as leave'],
+      ['no leave', 'Absent and no leave was applied for'],
+      ['unapproved', 'Absent; leave was applied for but not approved'],
+      [
+        'late 3',
+        `The 3rd late arrival this month — punched in more than ${settings.lateGrace} min after shift start. ` +
+          `The first ${settings.lateAllowed} are free; each one after is a half day`,
+      ],
+    ];
+    for (const [word, means] of reasons) {
+      const row = sheet.addRow([word, means]);
+      row.getCell(1).font = TYPE.readingStrong;
+      row.getCell(1).alignment = CENTRE;
+      row.getCell(2).font = TYPE.body;
+      row.height = 17;
+    }
+  }
+
   sheet.addRow([]);
   const notes = [
-    'Office In / Office Out are the biometric punch record, shown as recorded.',
-    '--:-- means no punch, which is not the same as 00:00.',
-    'Total Working Hours is what Timo tracked — work, meetings and approved',
-    'manual time. It is NOT the gap between the two punches.',
-    'Leave and holidays come from the Lark calendar and win outright — a day',
-    'stays PL or HL even when the person worked, and the hours still show.',
-    'Otherwise: any tracked time reads P, none reads A. There is no minimum.',
+    'Hours are what Timo tracked — work, meetings and approved manual time —',
+    'not the gap between Office In and Office Out. --:-- means no punch.',
+    'Leave account: Opening + Earned - Paid Leave = Closing. Leave the balance could',
+    'not pay for is the Salary Cut (full days 1, halves 0.5) — never a negative balance.',
+    ...(report.rulesFrom
+      ? [
+          `Attendance rules apply from ${report.rulesFrom}. A day is cut once at most: if it is already`,
+          'a half day for short hours, a late arrival that day is counted but not cut again.',
+        ]
+      : []),
   ];
   const firstNote = sheet.rowCount + 1;
   for (const note of notes) {
@@ -422,7 +437,7 @@ export async function monthPerformanceXlsx(report: MonthPerformanceReport): Prom
 
   buildGridSheet(wb, report);
   buildSummarySheet(wb, report);
-  buildLegendSheet(wb);
+  buildLegendSheet(wb, report);
 
   // White canvas everywhere. Excel's default is an unpainted sheet that picks
   // up the viewer's own theme; DESIGN.md's ground is explicitly `{colors.canvas}`.

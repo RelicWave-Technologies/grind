@@ -292,7 +292,7 @@ describe('GET /v1/admin/timesheets.csv', () => {
     expect(res.headers['content-type']).toMatch(/text\/csv/);
     expect(res.headers['content-disposition']).toContain('timesheets-2026-05-26-to-2026-05-27.csv');
     const lines = res.text.trim().split('\n');
-    expect(lines[0]).toBe('name,email,role,day,worked_h,meeting_h,manual_h,total_h,invalidated_h,first_activity,last_activity,activity_samples');
+    expect(lines[0]).toBe('name,email,role,day,worked_h,meeting_h,manual_h,total_h,invalidated_h,first_activity,last_activity,activity_samples,remark,rule_leave_days');
     // 3 active (user, day) pairs from the seed: memA on May 26, memA on May 27, memB on May 26.
     expect(lines.length).toBe(1 + 3);
     // Spot-check a known cell: memA on May 26 = 1.50 worked + 0.50 meeting = 2.00 total.
@@ -306,6 +306,9 @@ describe('GET /v1/admin/timesheets.csv', () => {
     expect(cells[9]).toBe('09:00'); // first_activity
     expect(cells[10]).toBe('11:00'); // last_activity
     expect(cells[11]).toBe('2'); // activity_samples
+    // Attendance rules are off in this workspace, so nothing is remarked.
+    expect(cells[12]).toBe(''); // remark
+    expect(cells[13]).toBe(''); // rule_leave_days
   });
 
   it('manager scope filters out the other team in CSV too', async () => {
