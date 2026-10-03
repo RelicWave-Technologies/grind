@@ -6,6 +6,12 @@ import { CalendarRange, FileSpreadsheet, Sheet } from 'lucide-react';
 import { api, API_BASE } from '../lib/api';
 import { useMonthReportDownload, fmtMonthShort, fmtMonthLong } from '../lib/useMonthReportDownload';
 import type { TimesheetMatrix } from '../lib/types';
+import {
+  ATTENDANCE_RULE_LABEL,
+  ATTENDANCE_RULE_SHORT,
+  type AttendanceRuleExceptionsResponse,
+  type AttendanceRuleTag,
+} from '@grind/types';
 import { fmtTime, fmtDurationMs, fmtDayLabel, addDays, todayKey } from '../lib/format';
 import {
   Page,
@@ -160,6 +166,8 @@ export function AttendanceScreen() {
       {monthReport.error && <Banner status="danger">{monthReport.error}</Banner>}
 
       {hasPeople && <AttendanceSummary data={data!} timeZone={tz} />}
+
+      <RuleExceptions month={reportMonth} timeZone={tz} />
 
       <Card variant="flush" className="atd-card">
         {q.isLoading ? (
@@ -343,6 +351,99 @@ function AttendanceSummary({ data, timeZone }: { data: TimesheetMatrix; timeZone
         <Stat label="Full house" value={perfect} unit={`/ ${total}`} hint="present every day" />
         <Stat label="Days" value={dayCount} hint="in this range" />
       </StatRow>
+    </Card>
+  );
+}
+
+/** Short days are a half; everything else the rules charge is a whole day. */
+const RULE_STATUS: Record<AttendanceRuleTag, 'warn' | 'danger'> = {
+  SHORT_DAY: 'warn',
+  HALF_DAY_SHORT: 'warn',
+  UNDER_MIN: 'danger',
+  WFH_UNAPPROVED: 'danger',
+  NO_APPLICATION: 'danger',
+  LEAVE_NOT_APPROVED: 'danger',
+  LATE: 'warn',
+};
+
+/**
+ * Every day the attendance rules turned into leave this month — the list HR
+ * checks. Read from the same month report the Excel and CSV come from, so the
+ * three always agree. A wrong one is fixed with the day correction in Reports;
+ * the correction wins over every rule.
+ *
+ * Hidden when the rules are off, or when the viewer may not read the team.
+ */
+function RuleExceptions({ month, timeZone }: { month: string; timeZone: string }) {
+  const q = useQuery({
+    queryKey: ['admin', 'attendance-exceptions', month],
+    queryFn: () => api<AttendanceRuleExceptionsResponse>(`/v1/reports/attendance-exceptions?month=${month}`),
+    retry: false,
+  });
+  const data = q.data;
+  if (!data || !data.rulesFrom) return null;
+
+  const people = new Set(data.exceptions.map((e) => e.userId)).size;
+  const days = data.exceptions.reduce((sum, e) => sum + e.penaltyDays, 0);
+
+  return (
+    <Card variant="flush" className="atd-card">
+      <div className="atd-card-head">
+        <div>
+          <h2 className="ui-t-title">Attendance rules · {fmtMonthLong(month)}</h2>
+          <p className="ui-t-small">
+            {data.exceptions.length === 0
+              ? `Nobody fell short. Rules apply from ${data.rulesFrom}.`
+              : `${data.exceptions.length} days across ${people} people became leave — ${days} days charged to leave balances, unpaid once a balance runs out.`}
+          </p>
+        </div>
+      </div>
+      {data.exceptions.length > 0 && (
+        <div className="atd-scroll">
+          <Table density="compact" stickyHead>
+            <THead>
+              <Tr>
+                <Th>Person</Th>
+                <Th>Date</Th>
+                <Th>Rule</Th>
+                <Th align="right">Worked</Th>
+                <Th align="center">Punch</Th>
+                <Th align="center">Status</Th>
+              </Tr>
+            </THead>
+            <Tbody>
+              {data.exceptions.map((e) => (
+                <Tr key={`${e.userId}-${e.date}`}>
+                  <Td>
+                    <Identity name={e.name} subtitle={e.teamName ?? e.email} avatar={<Avatar name={e.name} size={32} />} />
+                  </Td>
+                  <Td>
+                    <span className="ui-mono atd-nowrap">{fmtDayLabel(e.date, timeZone)}</span>
+                  </Td>
+                  <Td>
+                    <span title={ATTENDANCE_RULE_LABEL[e.tag]}>
+                      <Tag status={RULE_STATUS[e.tag]} mono>
+                        {ATTENDANCE_RULE_SHORT[e.tag]}
+                      </Tag>
+                    </span>
+                  </Td>
+                  <Td align="right">
+                    <span className="ui-mono">{fmtDurationMs(e.workMinutes * 60_000)}</span>
+                  </Td>
+                  <Td align="center">
+                    <span className="ui-mono">{e.punched ? 'Yes' : '–'}</span>
+                  </Td>
+                  <Td align="center">
+                    <Tag status="neutral" mono>
+                      {e.code}
+                    </Tag>
+                  </Td>
+                </Tr>
+              ))}
+            </Tbody>
+          </Table>
+        </div>
+      )}
     </Card>
   );
 }

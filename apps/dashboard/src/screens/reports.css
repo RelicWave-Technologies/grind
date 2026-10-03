@@ -1568,6 +1568,27 @@
 .rep-status-chip--hl  { background: var(--ui-lilac); }
 .rep-status-chip--wo  { background: var(--ui-surface-sunken); color: var(--ui-ink-2); }
 .rep-status-chip--none{ background: var(--ui-surface-inset); color: var(--ui-ink-3); }
+/* Half days carry the half-day fill; a day split between paid and unpaid
+   carries the unpaid one, because the unpaid half is the part worth noticing. */
+.rep-status-chip--pl-hd        { background: var(--ui-cream); }
+.rep-status-chip--lwp-hd       { background: var(--ui-coral); }
+.rep-status-chip--pl-hd-lwp-hd { background: var(--ui-coral); }
+
+/* The attendance rule that made a day leave, under its code. */
+.rep-status {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+.rep-status-remark {
+  font-family: var(--ui-font-mono, ui-monospace, monospace);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  color: var(--ui-ink-2);
+  white-space: nowrap;
+}
 
 /* A corrected day is a judgement, not a measurement, and has to read as one. */
 .rep-status-chip.is-override { box-shadow: inset 0 0 0 1.5px var(--ui-ink); }

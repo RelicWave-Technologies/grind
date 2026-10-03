@@ -36,7 +36,7 @@ import {
 } from '@grind/types';
 import type { SelfProfileResponse } from '@grind/types/profile';
 import type { ShiftSchedule, Weekday } from '@grind/types/shifts';
-import { attendanceOverrideShape } from '@grind/types';
+import { ATTENDANCE_RULE_LABEL, ATTENDANCE_RULE_SHORT, attendanceOverrideShape } from '@grind/types';
 import type {
   AttendanceOverrideCode,
   AttendanceOverrideHistoryResponse,
@@ -421,17 +421,24 @@ function AttendanceStatusCell({
 }) {
   const code = day.attendanceCode ?? '--';
   const override = day.attendanceOverride ?? null;
-  const title = override
+  // Why an attendance rule made the day leave — short in the cell, spelled out
+  // in the tooltip, so "LWP" never appears without its reason.
+  const rule = day.attendanceRule ?? null;
+  const base = override
     ? `${ATTENDANCE_LABEL[code] ?? code} — set by hand${override.stale ? '; the computed answer has changed since' : ''}`
     : (ATTENDANCE_LABEL[code] ?? code);
+  const title = rule ? `${base} — ${ATTENDANCE_RULE_LABEL[rule.tag]}` : base;
 
   const chip = (
-    <span
-      className={`rep-status-chip rep-status-chip--${code === '--' ? 'none' : code.toLowerCase()}${override ? ' is-override' : ''}`}
-      title={title}
-    >
-      {code}
-      {override && <span className="rep-status-mark" aria-hidden="true">{override.stale ? '!' : '\u00b7'}</span>}
+    <span className="rep-status">
+      <span
+        className={`rep-status-chip rep-status-chip--${code === '--' ? 'none' : code.toLowerCase().replace(/[^a-z0-9]+/g, '-')}${override ? ' is-override' : ''}`}
+        title={title}
+      >
+        {code}
+        {override && <span className="rep-status-mark" aria-hidden="true">{override.stale ? '!' : '\u00b7'}</span>}
+      </span>
+      {rule && <span className="rep-status-remark">{ATTENDANCE_RULE_SHORT[rule.tag]}</span>}
     </span>
   );
 

@@ -888,7 +888,18 @@ function BalancesPanel({
               <Tr key={r.userId}>
                 <Td>
                   <Identity
-                    name={r.name}
+                    name={
+                      r.attendanceRuleMode === 'STANDARD' ? (
+                        r.name
+                      ) : (
+                        <>
+                          {r.name}{' '}
+                          <Tag status={r.attendanceRuleMode === 'EXEMPT' ? 'neutral' : 'info'} mono>
+                            {r.attendanceRuleMode === 'EXEMPT' ? 'No rules' : 'Remote'}
+                          </Tag>
+                        </>
+                      )
+                    }
                     subtitle={r.teamName ?? r.email}
                     avatar={<Avatar name={r.name} src={r.avatarUrl ?? undefined} size={24} />}
                   />
@@ -940,6 +951,7 @@ function EditMemberModal({
   const [rate, setRate] = useState('');
   const [joined, setJoined] = useState('');
   const [saturday, setSaturday] = useState<'inherit' | 'on' | 'off'>('inherit');
+  const [ruleMode, setRuleMode] = useState<LeaveBalanceRow['attendanceRuleMode']>('STANDARD');
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -947,6 +959,7 @@ function EditMemberModal({
     setRate(row.accrualDays === null ? '' : String(row.accrualDays));
     setJoined(row.joinedOnSet ? row.accrualStart : '');
     setSaturday(row.lastSaturdayOff === null ? 'inherit' : row.lastSaturdayOff ? 'on' : 'off');
+    setRuleMode(row.attendanceRuleMode);
     setError(null);
   }, [row]);
 
@@ -958,6 +971,7 @@ function EditMemberModal({
           accrualDays: rate.trim() === '' ? null : Number(rate),
           joinedOn: joined.trim() === '' ? null : joined,
           lastSaturdayOff: saturday === 'inherit' ? null : saturday === 'on',
+          attendanceRuleMode: ruleMode,
         },
       }),
     onSuccess: () => { onSaved(); onClose(); },
@@ -990,6 +1004,16 @@ function EditMemberModal({
           <option value="inherit">Inherit workspace policy</option>
           <option value="on">Not a working day</option>
           <option value="off">A normal working day</option>
+        </Select>
+      </Field>
+      <Field
+        label="Attendance rules"
+        hint="Remote: no punch expected, so working from home is not leave — the hour and absence rules still apply."
+      >
+        <Select value={ruleMode} onChange={(e) => setRuleMode(e.target.value as typeof ruleMode)}>
+          <option value="STANDARD">All rules apply</option>
+          <option value="REMOTE">Remote — skip the work-from-home rule</option>
+          <option value="EXEMPT">Outside the rules</option>
         </Select>
       </Field>
     </Modal>

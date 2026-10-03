@@ -361,6 +361,8 @@ export interface LeaveBalanceRow {
   effectiveAccrualDays: number;
   lastSaturdayOff: boolean | null;
   effectiveLastSaturdayOff: boolean;
+  /** How the attendance rules treat this person. */
+  attendanceRuleMode: 'STANDARD' | 'REMOTE' | 'EXEMPT';
   accrualStart: string;
   joinedOnSet: boolean;
   balanceDays: number;
