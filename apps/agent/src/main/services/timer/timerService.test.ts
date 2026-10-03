@@ -701,6 +701,21 @@ describe('TimerService offline behaviour', () => {
     expect(store.getUnsynced()).toHaveLength(0);
   });
 
+  it('requeues a clean open entry for create when heartbeat learns the server is missing it', async () => {
+    await svc.start({});
+    const entry = store.getOpen()!;
+    expect(store.getUnsynced()).toHaveLength(0);
+
+    expect(svc.requeueOpenEntryCreate('other-entry')).toBe(false);
+    expect(svc.requeueOpenEntryCreate(entry.id)).toBe(true);
+    expect(store.getUnsynced()).toMatchObject([{ entry: { id: entry.id }, syncState: 'pending_create' }]);
+
+    await svc.flushUnsynced();
+
+    expect(sync.calls.slice(-2)).toEqual([`create:${entry.id}`, `sync:${entry.id}`]);
+    expect(store.getUnsynced()).toHaveLength(0);
+  });
+
   it('keeps pending_update when create succeeds but follow-up sync fails', async () => {
     sync.failCreateCount = 1;
     await svc.start({});

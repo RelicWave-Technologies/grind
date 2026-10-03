@@ -494,6 +494,19 @@ export class TimerService {
     return this.store.isPendingCreate(entryId);
   }
 
+  /**
+   * The heartbeat API returns `needs_sync` with no server revision when it sees
+   * this active entry id in the checkpoint but cannot find a matching server
+   * row. A local entry can be clean at that point because an older create/update
+   * path believed the server had accepted it. Put the exact open row back in
+   * the create queue so the next drain recreates it with its original segments
+   * instead of letting the user keep tracking against a missing parent.
+   */
+  requeueOpenEntryCreate(entryId: string): boolean {
+    if (!this.open || this.open.id !== entryId) return false;
+    return this.markEntryPendingCreate(entryId, this.open);
+  }
+
   private async commitOpen(entry: TimeEntry, syncState?: PendingEntrySyncState): Promise<void> {
     const nextState = this.writeEntry(entry, syncState ? { syncState } : undefined);
     this.open = entry;

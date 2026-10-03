@@ -30,6 +30,10 @@ const mocks = vi.hoisted(() => ({
   screenUiState: vi.fn(),
   logWarn: vi.fn(),
   logDebug: vi.fn(),
+  timerStatus: { state: 'IDLE', paused: false, entryId: null } as Record<string, unknown>,
+  timerHeartbeat: vi.fn(),
+  requeueOpenEntryCreate: vi.fn(),
+  acceptServerFinalization: vi.fn(),
   startupHealth: {
     state: 'READY',
     ready: true,
@@ -55,7 +59,10 @@ vi.mock('./auth', () => ({
 vi.mock('./timer', () => ({
   drainTimerSyncNow: mocks.drainTimerSyncNow,
   getTimerService: () => ({
-    status: () => ({ state: 'IDLE', paused: false, entryId: null }),
+    status: () => mocks.timerStatus,
+    heartbeat: mocks.timerHeartbeat,
+    requeueOpenEntryCreate: mocks.requeueOpenEntryCreate,
+    acceptServerFinalization: mocks.acceptServerFinalization,
   }),
 }));
 
@@ -122,6 +129,10 @@ describe('heartbeat config refresh', () => {
     mocks.screenUiState.mockReset();
     mocks.logWarn.mockReset();
     mocks.logDebug.mockReset();
+    mocks.timerStatus = { state: 'IDLE', paused: false, entryId: null };
+    mocks.timerHeartbeat.mockReset();
+    mocks.requeueOpenEntryCreate.mockReset();
+    mocks.acceptServerFinalization.mockReset();
     mocks.currentVersion = 'version-1';
     mocks.appVersion = '9.8.7';
     mocks.getScreenHealth.mockReturnValue('ok');
@@ -238,6 +249,44 @@ describe('heartbeat config refresh', () => {
     await vi.waitFor(() => expect(mocks.drainActivityNow).toHaveBeenCalledWith('heartbeat'));
     expect(mocks.drainTimerSyncNow).toHaveBeenCalledWith('heartbeat');
     expect(mocks.refreshAgentConfig).not.toHaveBeenCalled();
+  });
+
+  it('requeues a missing active timer for create when the server asks for sync without a revision', async () => {
+    mocks.timerStatus = {
+      state: 'RUNNING',
+      paused: false,
+      entryId: 'entry-missing',
+      revision: 3,
+      startedAt: Date.parse('2026-07-04T09:00:00.000Z'),
+      segmentStartedAt: Date.parse('2026-07-04T09:00:00.000Z'),
+      workedMs: 60_000,
+      larkTaskGuid: null,
+      pauseReason: null,
+    };
+    mocks.requeueOpenEntryCreate.mockReturnValue(true);
+    mocks.api.mockResolvedValue({
+      ok: true,
+      serverTime: '2026-07-04T09:01:00.000Z',
+      configVersion: 'version-1',
+      timer: {
+        disposition: 'needs_sync',
+        entryId: 'entry-missing',
+        serverRevision: null,
+        endedAt: null,
+        closeReason: null,
+      },
+    });
+    const { sendHeartbeatNow } = await import('./heartbeat');
+
+    sendHeartbeatNow();
+
+    await vi.waitFor(() => expect(mocks.requeueOpenEntryCreate).toHaveBeenCalledWith('entry-missing'));
+    expect(mocks.timerHeartbeat).toHaveBeenCalledTimes(1);
+    expect(mocks.drainTimerSyncNow).toHaveBeenCalledWith('heartbeat');
+    expect(mocks.logWarn).toHaveBeenCalledWith(
+      'server is missing active timer; requeued local entry create',
+      { entryId: 'entry-missing' },
+    );
   });
 
   it('keeps heartbeat errors contained when local permission collection fails', async () => {

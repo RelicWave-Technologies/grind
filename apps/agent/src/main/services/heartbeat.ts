@@ -97,7 +97,13 @@ async function tick(): Promise<void> {
       });
     }
     log.debug('heartbeat ok', { serverTime: res.serverTime, configVersion: res.configVersion });
-    if (res.timer?.disposition === 'needs_sync') requestTimerDrain('heartbeat');
+    if (res.timer?.disposition === 'needs_sync') {
+      if (res.timer.serverRevision === null) {
+        const requeued = timerService.requeueOpenEntryCreate(res.timer.entryId);
+        if (requeued) log.warn('server is missing active timer; requeued local entry create', { entryId: res.timer.entryId });
+      }
+      requestTimerDrain('heartbeat');
+    }
     if (res.timer?.disposition === 'finalized' || res.timer?.disposition === 'conflict') {
       log.warn('server rejected active timer checkpoint', {
         entryId: res.timer.entryId,
