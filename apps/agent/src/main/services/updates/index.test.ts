@@ -198,4 +198,25 @@ describe('update service', () => {
     expect(mocks.drainUploads).toHaveBeenCalledOnce();
     expect(mocks.autoUpdater.quitAndInstall).toHaveBeenCalledWith(false, true);
   });
+
+  it('lets a ready update take over a permission restart', async () => {
+    const { installUpdateInsteadOfRelaunch, startUpdateService } = await import('./index');
+    startUpdateService({ showMainWindow: vi.fn(), isMainWindowVisible: () => false });
+    emitUpdater('update-downloaded', { version: '0.0.2-beta.24' });
+
+    await expect(installUpdateInsteadOfRelaunch()).resolves.toBe(true);
+    expect(mocks.autoUpdater.quitAndInstall).toHaveBeenCalledWith(false, true);
+  });
+
+  it('switches install-on-quit off for a plain permission restart', async () => {
+    const { installUpdateInsteadOfRelaunch, startUpdateService } = await import('./index');
+    startUpdateService({ showMainWindow: vi.fn(), isMainWindowVisible: () => false });
+    // Still downloading: nothing is installable, but nothing may start
+    // installing underneath the relaunch either.
+    emitUpdater('update-available', { version: '0.0.2-beta.24' });
+
+    await expect(installUpdateInsteadOfRelaunch()).resolves.toBe(false);
+    expect(mocks.autoUpdater.quitAndInstall).not.toHaveBeenCalled();
+    expect(mocks.autoUpdater.autoInstallOnAppQuit).toBe(false);
+  });
 });

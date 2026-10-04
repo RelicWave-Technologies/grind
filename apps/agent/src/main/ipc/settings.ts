@@ -1,11 +1,13 @@
 import { ipcMain, app, shell, dialog } from 'electron';
 import { screenStatus, hasAccessibilityAccess } from '../services/permissions';
-import { getPreferences } from '../services/preferences';
+import { getPreferences, rememberPermissionRelaunch } from '../services/preferences';
 import { getLaunchAtLoginService } from '../services/launchAtLogin';
 import { applyFloatingBarVisibility, resetFloatingBarPosition } from '../floating';
 import { invalidateQuitCleanup, runQuitCleanup } from '../services/quitCleanup';
 import { getTimerService } from '../services/timer';
 import { moveToApplications } from '../services/moveToApplications';
+import { getTrackingReadinessService, permissionRelaunchReason } from '../services/trackingReadiness';
+import { installUpdateInsteadOfRelaunch } from '../services/updates';
 import type { LaunchAtLoginHealth, MoveToApplicationsResult } from '../../shared/launchAtLogin';
 
 export interface SettingsInfo {
@@ -91,11 +93,8 @@ export function registerSettingsIpc(): void {
   });
 
   ipcMain.handle('settings:openStartupPrefs', async () => {
-    if (process.platform === 'darwin') {
-      await shell.openExternal('x-apple.systempreferences:com.apple.LoginItems-Settings.extension');
-    } else if (process.platform === 'win32') {
-      await shell.openExternal('ms-settings:startupapps');
-    }
+    const url = getLaunchAtLoginService().startupSettingsUrl();
+    if (url) await shell.openExternal(url);
   });
 
   // Prompt the system to add this app to the Accessibility list, then deep-link.
@@ -106,13 +105,20 @@ export function registerSettingsIpc(): void {
     }
   });
 
-  // Relaunch — required for a permission grant to take effect.
-  // In a packaged build this relaunches cleanly. Under `electron-vite dev`,
-  // app.relaunch() spawns Electron without the Vite dev-server URL → a blank
-  // window, so we instead tell the developer to restart the dev process.
+  // Permission restart. The verdict it was pressed for is recorded first, so if
+  // the next boot lands on the same verdict the UI stops offering a restart
+  // that has already failed once. Under `electron-vite dev`, app.relaunch()
+  // spawns Electron without the Vite dev-server URL → a blank window, so we
+  // instead tell the developer to restart the dev process.
   ipcMain.handle('app:relaunch', async () => {
     if (app.isPackaged) {
+      const { readiness } = await getTrackingReadinessService().inspect();
+      if (!readiness.ready) {
+        // Device clock: only ever compared with the next boot's device clock.
+        rememberPermissionRelaunch({ reason: permissionRelaunchReason(readiness), at: Date.now() });
+      }
       await runQuitCleanup('quit');
+      if (await installUpdateInsteadOfRelaunch()) return;
       app.relaunch();
       app.exit(0);
       return;

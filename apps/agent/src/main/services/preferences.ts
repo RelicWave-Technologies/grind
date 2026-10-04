@@ -39,11 +39,23 @@ export interface Preferences {
    * sort first, quietly pre-selecting the WRONG task to start next.
    */
   lastLarkTaskGuid: string | null;
+  /**
+   * The readiness verdict a permission "Restart Timo" was pressed for, and when
+   * (device clock). The next boot compares against it so a restart that did not
+   * fix the verdict is never offered again straight away.
+   */
+  permissionRelaunch: PermissionRelaunch | null;
+}
+
+export interface PermissionRelaunch {
+  reason: string;
+  at: number;
 }
 
 const DEFAULTS: Preferences = {
   floatingBar: { visible: true, x: null, y: null },
   lastLarkTaskGuid: null,
+  permissionRelaunch: null,
 };
 
 let cache: Preferences | null = null;
@@ -58,6 +70,7 @@ function filePath(): string {
 function coerce(raw: unknown): Preferences {
   const r = (raw ?? {}) as Partial<Preferences>;
   const fb = (r.floatingBar ?? {}) as Partial<FloatingBarPreferences>;
+  const relaunch = (r.permissionRelaunch ?? {}) as Partial<PermissionRelaunch>;
   return {
     floatingBar: {
       visible: typeof fb.visible === 'boolean' ? fb.visible : DEFAULTS.floatingBar.visible,
@@ -66,6 +79,9 @@ function coerce(raw: unknown): Preferences {
     },
     lastLarkTaskGuid: typeof r.lastLarkTaskGuid === 'string' && r.lastLarkTaskGuid.length > 0
       ? r.lastLarkTaskGuid
+      : null,
+    permissionRelaunch: typeof relaunch.reason === 'string' && typeof relaunch.at === 'number' && Number.isFinite(relaunch.at)
+      ? { reason: relaunch.reason, at: relaunch.at }
       : null,
   };
 }
@@ -88,7 +104,11 @@ function ensureLoaded(): Preferences {
 export function getPreferences(): Preferences {
   const c = ensureLoaded();
   // Hand back a structural copy so callers can't mutate the cache in place.
-  return { floatingBar: { ...c.floatingBar }, lastLarkTaskGuid: c.lastLarkTaskGuid };
+  return {
+    floatingBar: { ...c.floatingBar },
+    lastLarkTaskGuid: c.lastLarkTaskGuid,
+    permissionRelaunch: c.permissionRelaunch ? { ...c.permissionRelaunch } : null,
+  };
 }
 
 /**
@@ -129,6 +149,12 @@ export function rememberLastLarkTask(guid: string | null): Preferences {
     }
   }
   return snapshot;
+}
+
+/** Record a permission restart. Persisted by the quit cleanup that follows it. */
+export function rememberPermissionRelaunch(relaunch: PermissionRelaunch): void {
+  ensureLoaded().permissionRelaunch = { ...relaunch };
+  scheduleWrite();
 }
 
 export function onPreferencesChange(fn: (prefs: Preferences) => void): () => void {

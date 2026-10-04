@@ -130,6 +130,7 @@ const api = {
   permissions: {
     readiness: (): Promise<TrackingReadiness> => ipcRenderer.invoke('permissions:readiness'),
     requestScreen: (): Promise<TrackingReadiness> => ipcRenderer.invoke('permissions:requestScreen'),
+    recheck: (): Promise<TrackingReadiness> => ipcRenderer.invoke('permissions:recheck'),
     requestAccessibility: (): Promise<void> => ipcRenderer.invoke('permissions:requestAccessibility'),
   },
   settings: {
