@@ -52,6 +52,7 @@ function readCases(): Case[] {
     { method: 'POST', url: '/v1/auth/refresh-cookie' },
     { method: 'GET', url: '/v1/profile/me' },
     { method: 'GET', url: '/v1/workspace/users' },
+    { method: 'GET', url: '/v1/workspace/settings' },
     { method: 'GET', url: '/v1/lark/my-tasks' },
     { method: 'GET', url: `/v1/insights/day?${q({ date: today, tz: 'Asia/Kolkata' })}` },
     { method: 'GET', url: `/v1/insights/day?${q({ date: yday, tz: 'Asia/Kolkata', gapScope: 'calendar-day' })}` },

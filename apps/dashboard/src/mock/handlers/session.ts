@@ -93,6 +93,8 @@ export function registerSession(): void {
     })),
   }));
 
+  get('/v1/workspace/settings', () => ({ id: WORKSPACE.id, name: WORKSPACE.name, timezone: TZ }));
+
   get('/v1/lark/my-tasks', (_req, ctx) => {
     if (ctx.empty) return { tasks: [] };
     const team = teamKeyOf(ctx.me.teamId);

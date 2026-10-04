@@ -24,14 +24,14 @@
 
 .usr-table--device .usr-col-person { width: 17%; }
 .usr-table--device .usr-col-role { width: 9%; }
-.usr-table--device .usr-col-status { width: 8%; }
+.usr-table--device .usr-col-status { width: 10%; }
 .usr-table--device .usr-col-team { width: 9%; }
 .usr-table--device .usr-col-shift { width: 8%; }
 .usr-table--device .usr-col-device { width: 9%; }
 .usr-table--device .usr-col-permissions { width: 11%; }
 .usr-table--device .usr-col-birth { width: 9%; }
 .usr-table--device .usr-col-joined { width: 7%; }
-.usr-table--device .usr-col-actions { width: 13%; }
+.usr-table--device .usr-col-actions { width: 11%; }
 
 .usr-table .ui-table__row {
   height: auto;

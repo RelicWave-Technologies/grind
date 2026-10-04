@@ -295,6 +295,9 @@
 .ui-table__row--rail-danger  > .ui-td:first-child { box-shadow: inset 3px 0 0 var(--color-bad); }
 .ui-table__row--rail-info    > .ui-td:first-child { box-shadow: inset 3px 0 0 var(--color-brand); }
 .ui-table__row--rail-accent  > .ui-td:first-child { box-shadow: inset 3px 0 0 var(--color-brand); }
+.ui-table__row--rail-calm    > .ui-td:first-child { box-shadow: inset 3px 0 0 var(--color-calm); }
+.ui-table__row--rail-alert   > .ui-td:first-child { box-shadow: inset 3px 0 0 var(--color-alert); }
+.ui-table__row--rail-leave   > .ui-td:first-child { box-shadow: inset 3px 0 0 var(--color-leave); }
 
 .ui-table--sticky-head .ui-table__head .ui-th { position: sticky; top: 0; z-index: 2; background: var(--color-white); }
 .ui-table--sticky-col .ui-td:first-child,
@@ -319,6 +322,9 @@
 .ui-list-row--rail-danger  { box-shadow: inset 3px 0 0 var(--color-bad);          padding-left: var(--space-sm); }
 .ui-list-row--rail-info    { box-shadow: inset 3px 0 0 var(--color-brand);        padding-left: var(--space-sm); }
 .ui-list-row--rail-accent  { box-shadow: inset 3px 0 0 var(--color-brand);        padding-left: var(--space-sm); }
+.ui-list-row--rail-calm    { box-shadow: inset 3px 0 0 var(--color-calm);         padding-left: var(--space-sm); }
+.ui-list-row--rail-alert   { box-shadow: inset 3px 0 0 var(--color-alert);        padding-left: var(--space-sm); }
+.ui-list-row--rail-leave   { box-shadow: inset 3px 0 0 var(--color-leave);        padding-left: var(--space-sm); }
 .ui-list-row__leading { flex-shrink: 0; display: flex; align-items: center; }
 .ui-list-row__main { min-width: 0; flex: 1 1 auto; display: flex; flex-direction: column; gap: 2px; }
 .ui-list-row__title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -565,6 +571,9 @@ textarea.ui-control {
 .ui-tag--danger  { background: var(--color-bad-wash);   color: var(--color-bad); }
 .ui-tag--info    { background: var(--color-brand-wash); color: var(--color-brand-deep); }
 .ui-tag--neutral { background: var(--color-sheet-2);    color: var(--color-muted); }
+.ui-tag--calm    { background: var(--color-calm-wash);  color: var(--color-calm); }
+.ui-tag--alert   { background: var(--color-alert-wash); color: var(--color-alert); }
+.ui-tag--leave   { background: var(--color-leave-wash); color: var(--color-leave); }
 /* `mono` keeps its name for the markup, but a badge is `label` type in
    Instrument Sans (DESIGN.md §9 Badges): counts only need tabular figures. */
 .ui-tag--mono { font-variant-numeric: tabular-nums; }
@@ -577,6 +586,9 @@ textarea.ui-control {
 .ui-tag--danger  .ui-tag__dot { background: var(--color-bad); }
 .ui-tag--info    .ui-tag__dot { background: var(--color-brand); }
 .ui-tag--neutral .ui-tag__dot { background: transparent; box-shadow: inset 0 0 0 1.5px var(--color-faint); }
+.ui-tag--calm    .ui-tag__dot { background: var(--color-calm); }
+.ui-tag--alert   .ui-tag__dot { background: var(--color-alert); }
+.ui-tag--leave   .ui-tag__dot { background: var(--color-leave); }
 
 /* ============================================================================
    Avatar — initials on `sheet-2`, a photo with a hairline ring.
@@ -821,6 +833,31 @@ textarea.ui-control {
   font-weight: var(--type-card-title-weight);
   letter-spacing: var(--type-card-title-tracking);
 }
+.ui-sidebar__brand:has(+ .ui-sidebar__workspace) { padding-bottom: var(--space-md); }
+.ui-sidebar__workspace {
+  display: flex; align-items: center; gap: var(--space-xs);
+  margin: 0 0 var(--space-md);
+  padding: var(--space-xs) var(--space-sm) var(--space-xs) var(--space-xs);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-lg);
+  background: var(--color-white);
+  min-width: 0;
+}
+.ui-sidebar__workspace-tile {
+  width: 32px; height: 32px; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: var(--radius-md);
+  background: var(--color-brand-wash);
+  color: var(--color-brand);
+  font-size: var(--type-micro-size);
+  font-weight: var(--type-label-weight);
+  letter-spacing: 0.02em;
+}
+.ui-sidebar__workspace-meta { display: flex; flex-direction: column; min-width: 0; }
+.ui-sidebar__workspace-name,
+.ui-sidebar__workspace-detail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui-sidebar__workspace-name { color: var(--color-ink); }
+.ui-sidebar__workspace-detail { color: var(--color-muted); }
 .ui-nav { display: flex; flex-direction: column; gap: 2px; }
 .ui-nav-section { padding: var(--space-md) var(--space-xs) var(--space-xxs); }
 .ui-nav-item {

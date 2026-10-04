@@ -58,6 +58,22 @@ const appIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="1024" height=
 </svg>`;
 
 /**
+ * The browser-tab icon: the same dark tile and mark, but full bleed on the
+ * logo's 64 grid. The app icon's 100/1024 margin is right for the Dock and
+ * wrong for a 16px tab, where it shrinks the T to a smudge.
+ */
+const faviconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2A2D31"/>
+      <stop offset="1" stop-color="${DARK}"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#tile)"/>
+  <g transform="translate(32 32.5) scale(0.92) translate(-32 -32.5)">${mark('#FFFFFF', BRAND_HI)}</g>
+</svg>`;
+
+/**
  * The macOS menu-bar template: the mark redrawn on a 16 grid so every edge
  * lands on whole pixels at 1x and 2x. Black; the system tints it, so the
  * moment is set apart by a gap rather than a colour.
@@ -93,10 +109,13 @@ async function main() {
   await fs.writeFile(path.join(dashboardBrandDir, 'timo-logo.svg'), logoSvg);
   await renderPng(logoSvg, 512, path.join(dashboardBrandDir, 'timo-logo.png'));
 
-  // The favicon is the app icon, so a browser tab and the Dock match.
+  // The app icon (Dock, apple-touch-icon) and, for browser tabs, the same
+  // tile full bleed so it reads at 16px.
   await fs.writeFile(path.join(buildDir, 'icon.svg'), appIconSvg);
   await fs.writeFile(path.join(dashboardBrandDir, 'timo-icon.svg'), appIconSvg);
   await renderPng(appIconSvg, 512, path.join(dashboardBrandDir, 'timo-icon.png'));
+  await fs.writeFile(path.join(dashboardBrandDir, 'timo-favicon.svg'), faviconSvg);
+  await renderPng(faviconSvg, 32, path.join(dashboardBrandDir, 'timo-favicon-32.png'));
 
   const base = await sharp(Buffer.from(appIconSvg), { density: 144 })
     .resize(1024, 1024, { fit: 'contain', background: TRANSPARENT })

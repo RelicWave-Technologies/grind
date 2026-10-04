@@ -252,3 +252,5 @@
 .atd-num {
   font-variant-numeric: tabular-nums;
 }
+.atd-num--zero { color: var(--color-muted); }
+.atd-count { min-width: 28px; justify-content: center; }

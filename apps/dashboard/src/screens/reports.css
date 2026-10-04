@@ -369,30 +369,14 @@
 .rep-drawer-tabs {
   position: relative;
   z-index: 3;
-  padding: 0 var(--space-lg);
+  padding: var(--space-sm) var(--space-lg);
   border-bottom: 1px solid var(--color-line);
   background: var(--color-white);
 }
 
-.rep-drawer-tabs .ui-tabs {
-  min-height: var(--control-height-lg);
-  align-items: flex-end;
-  gap: var(--space-lg);
-  border-bottom: 0;
-}
-
-.rep-drawer-tabs .ui-tab {
-  height: var(--control-height-lg);
-  display: inline-flex;
-  align-items: center;
-  padding: 0;
-  font-size: var(--type-caption-size);
-  font-weight: var(--type-body-sm-strong-weight);
-}
-
-.rep-drawer-tabs .ui-tab::after {
-  height: 1px;
-}
+/* The tab row itself is the shared `.ui-tabs` pill (system.css). An older
+   underline style used to zero the tab padding here, which left the filled
+   active pill narrower than its label. */
 
 .rep-drawer-body {
   min-height: 0;
@@ -1568,10 +1552,9 @@
 /* ---------------------------------------------------------------------------
    Attendance status — the day's code, and correcting it
    ---------------------------------------------------------------------------
-   The chip fills carry the same meaning as the exported workbook's status row,
-   so a person reading the sheet and a person reading the screen see one system.
-   Colour marks the category and never grades it: absence is a different block
-   from presence, not a warning. Ink stays black on every fill.
+   Each kind of day has its own status hue (DESIGN.md §3) so a column of codes
+   reads at a glance: present, half day, leave, absent, weekly off. The code
+   itself always says the meaning; the colour only helps the eye.
    --------------------------------------------------------------------------- */
 
 .rep-col-status { width: 84px; }
@@ -1591,18 +1574,16 @@
   color: var(--color-ink);
 }
 
-.rep-status-chip--p   { background: var(--color-sheet-soft); }
-.rep-status-chip--hd  { background: var(--color-sheet-soft); }
-.rep-status-chip--a   { background: var(--color-sheet-soft); }
-.rep-status-chip--pl  { background: var(--color-sheet-soft); }
-.rep-status-chip--lwp { background: var(--color-sheet-soft); }
-.rep-status-chip--hl  { background: var(--color-sheet-soft); }
-.rep-status-chip--wo  { background: var(--color-white); color: var(--color-body); }
+.rep-status-chip--p   { background: var(--color-good-wash);  color: var(--color-good); }
+.rep-status-chip--hd  { background: var(--color-calm-wash);  color: var(--color-calm); }
+.rep-status-chip--l,
+.rep-status-chip--pl,
+.rep-status-chip--hl,
+.rep-status-chip--lwp { background: var(--color-leave-wash); color: var(--color-leave); }
+.rep-status-chip--a,
+.rep-status-chip--lwa { background: var(--color-bad-wash);   color: var(--color-bad); }
+.rep-status-chip--wo  { background: var(--color-white); color: var(--color-body); box-shadow: inset 0 0 0 1px var(--color-line); }
 .rep-status-chip--none{ background: var(--color-sheet); color: var(--color-muted); }
-/* The two leave codes the sheet uses, in the same neutral chip: the code
-   carries the meaning, not a colour. */
-.rep-status-chip--l   { background: var(--color-sheet-soft); }
-.rep-status-chip--lwa { background: var(--color-sheet-soft); }
 
 /* The day being changed, stated in one line. */
 .rep-override-now-line {

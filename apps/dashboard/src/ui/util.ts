@@ -13,10 +13,10 @@ export function cx(...parts: unknown[]): string {
 }
 
 /** The fixed status taxonomy (§2). The same hue means the same thing everywhere. */
-export type Status = 'success' | 'warn' | 'danger' | 'info' | 'neutral';
+export type Status = 'success' | 'warn' | 'danger' | 'info' | 'neutral' | 'calm' | 'alert' | 'leave';
 
 /** Rail accent for table rows / list rows — status hues plus the identity accent. */
-export type Rail = 'success' | 'warn' | 'danger' | 'info' | 'accent';
+export type Rail = 'success' | 'warn' | 'danger' | 'info' | 'accent' | 'calm' | 'alert' | 'leave';
 
 /** Initials from a display name, e.g. "A. Suman" → "AS". */
 export function initials(name: string): string {

@@ -42,6 +42,12 @@ colors:
   bad-edge: "#f3c7c7"
   wait: "#6b5400"
   wait-wash: "#fff4c4"
+  calm: "#0f6b63"
+  calm-wash: "#e0f4ef"
+  alert: "#9a4300"
+  alert-wash: "#ffeedb"
+  leave: "#5b3fb5"
+  leave-wash: "#efeafd"
   teal: "#0f6b63"
   tint-teal: "#dff6f2"
   tint-coral: "#fde4e4"
@@ -280,8 +286,11 @@ blocks, words and behaviour exactly as they were. A redesign of a flow is a sepa
 | Placeholder, absent | `faint` | Placeholders, "—", disabled. **Never information** (2.69:1) |
 | Surface | `white`, `sheet-soft`, `sheet`, `sheet-2` | Page and cards → quiet panels → fills → chips and hover |
 | Line | `line-soft`, `line`, `line-strong` | Row dividers → card borders → control borders |
-| Good / bad | `good` + `good-wash`, `bad` + `bad-wash` + `bad-edge` | Approved, tracking, on time / rejected, failed, late, deleting |
+| Good / bad | `good` + `good-wash`, `bad` + `bad-wash` + `bad-edge` | Approved, tracking, on time, present / rejected, failed, absent, deleting |
 | Waiting | `wait` on `wait-wash` | Pending approval, paused, needs attention — waiting, not wrong |
+| Calm | `calm` on `calm-wash` | Early start, half day — fine, but not the plain case |
+| Alert | `alert` on `alert-wash` | Late start, idle — slipped, not failed |
+| Leave | `leave` on `leave-wash` | On leave, any leave code (L, PL, HL, LWP) — away by plan |
 | Tints | `tint-teal`, `tint-coral`, `tint-rose`, `tint-orange` | Identity only: the tile behind a task's icon, the initial behind a missing avatar or app icon. Never status |
 | Tone | `tone-negative`, `tone-neutral`, `tone-positive` | A three-band bar, always beside its numbers |
 | Series | `series-1` … `series-6` | Chart lines and bars, in a fixed order (§10) |
@@ -302,11 +311,17 @@ blocks, words and behaviour exactly as they were. A redesign of a flow is a sepa
 | `good` on `good-wash` | 4.5:1 |
 | `bad` on `bad-wash` | 5.7:1 |
 | `wait` on `wait-wash` | 6.6:1 |
+| `calm` on `calm-wash` | 5.6:1 |
+| `alert` on `alert-wash` | 5.8:1 |
+| `leave` on `leave-wash` | 6.3:1 |
 | white on `brand` | 4.9:1 |
 
 **Rules.**
 
 - `muted` is the floor for anything a person must read.
+- Status colour is how a manager scans a list: each kind of state has its own hue so present, early,
+  late, on leave and absent read apart at a glance. Tints only — a wash behind the word or a small dot,
+  never a filled block — and `brand` stays the one primary action.
 - Status never travels on colour alone. "Approved" says approved, a late arrival says late, a flag
   says its risk in words.
 - No pastel colour blocks. The old lime, lilac, cream, mint, coral and pink zones are gone; a KPI is
@@ -521,8 +536,11 @@ No rule is drawn under a tab row. Page tabs and segmented toggles are the same c
 | --- | --- |
 | Neutral (role, count, tag) | `sheet-2` / `muted`, `full` round, `label` type |
 | Approved, resolved, on time, tracking | `good-wash` / `good` |
-| Rejected, failed, late, high risk | `bad-wash` / `bad` |
+| Rejected, failed, absent, high risk | `bad-wash` / `bad` |
 | Pending, paused, medium risk, needs attention | `wait-wash` / `wait` |
+| Early, half day | `calm-wash` / `calm` |
+| Late, idle | `alert-wash` / `alert` |
+| On leave, leave codes | `leave-wash` / `leave` |
 | Cancelled, low risk, off | `sheet-2` / `muted` |
 | You | `brand-wash` / `brand-deep` with a `brand-edge` ring |
 
@@ -668,7 +686,8 @@ retired a character mascot).
   colour, the gap still setting the moment apart. Never a gradient on the mark, never outlined.
 - **The app icon** is a `dark` tile on Apple's 1024 grid (an 824 body, 185 corner) shading from
   `ink-2` at the top to `dark`, with a 1px white hairline at 8% round its edge and the mark in
-  white and `brand-hi` at 56% of the body. The favicon is the same tile.
+  white and `brand-hi` at 56% of the body. The favicon is the same tile drawn full bleed on the
+  64 grid (no app-icon margin), so the T stays legible in a 16px browser tab.
 - **The menu-bar icon** is the mark redrawn on a 16 grid (4px bar and stem, 1px gap, whole pixels)
   as a black template image the system tints; Windows gets the same grid in `ink` with a `brand`
   moment.

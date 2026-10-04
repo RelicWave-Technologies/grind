@@ -1,12 +1,15 @@
 import { Outlet, Link, useRouteContext, useNavigate, useLocation } from '@tanstack/react-router';
-import { useIsFetching } from '@tanstack/react-query';
+import { useIsFetching, useQuery } from '@tanstack/react-query';
+import type { WorkspaceSettingsDto } from '@grind/types';
 import { Home, Clock4, Inbox, CalendarCheck, ShieldAlert, LogOut, ShieldCheck, FileText, User, Users, CalendarDays, Compass } from 'lucide-react';
 import { hasCapability, useLogout, type Permission } from '../lib/auth';
 import { AGENT_DOWNLOADS, agentDownloadUrl } from '../lib/downloads';
+import { api } from '../lib/api';
 import {
   AppShell,
   Sidebar,
   SidebarBrand,
+  WorkspaceCard,
   useIntroHold,
   NavItem,
   NavSection,
@@ -114,10 +117,32 @@ export function Layout() {
     }
   }
 
+  const workspaceQ = useQuery({
+    queryKey: ['workspace', 'settings'],
+    queryFn: () => api<WorkspaceSettingsDto>('/v1/workspace/settings'),
+    staleTime: 10 * 60_000,
+  });
+  const membersQ = useQuery({
+    queryKey: ['workspace', 'users'],
+    queryFn: () => api<{ users: unknown[] }>('/v1/workspace/users'),
+    staleTime: 10 * 60_000,
+  });
+  const memberCount = membersQ.data?.users.length;
+
   return (
     <AppShell>
       <Sidebar
-        brand={<SidebarBrand name="Timo" />}
+        brand={
+          <>
+            <SidebarBrand name="Timo" />
+            {workspaceQ.data && (
+              <WorkspaceCard
+                name={workspaceQ.data.name}
+                detail={memberCount == null ? null : `${memberCount} ${memberCount === 1 ? 'member' : 'members'}`}
+              />
+            )}
+          </>
+        }
         footer={
           <>
             <div className="ui-sidebar__downloads" aria-label="Download Timo app">

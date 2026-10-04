@@ -30,6 +30,7 @@ import {
   Identity,
   Avatar,
   Tag,
+  type Status,
   EmptyState,
   SkeletonTable,
   Modal,
@@ -441,13 +442,11 @@ function MonthSummary({ month, isAdmin }: { month: string; isAdmin: boolean }) {
                   />
                 </Td>
                 <Td align="right"><span className="atd-num">{r.present}</span></Td>
-                <Td align="right"><span className="atd-num">{r.halfDay}</span></Td>
-                <Td align="right"><span className="atd-num">{r.leave}</span></Td>
-                <Td align="right"><span className="atd-num">{r.lwa}</span></Td>
-                <Td align="right"><span className="atd-num">{r.late}</span></Td>
-                <Td align="right">
-                  <span className="atd-num">{r.salaryCut > 0 ? <strong>{fmtDays(r.salaryCut)}</strong> : '0'}</span>
-                </Td>
+                <Td align="right"><CountCell value={r.halfDay} status="calm" /></Td>
+                <Td align="right"><CountCell value={r.leave} status="leave" /></Td>
+                <Td align="right"><CountCell value={r.lwa} status="danger" /></Td>
+                <Td align="right"><CountCell value={r.late} status="alert" /></Td>
+                <Td align="right"><CountCell value={r.salaryCut} status="danger" /></Td>
                 <Td align="right"><span className="atd-num">{fmtDays(r.account.closing)}</span></Td>
                 <Td align="right">
                   <Button size="sm" variant="secondary" onClick={() => setOpen(r)}>
@@ -462,6 +461,13 @@ function MonthSummary({ month, isAdmin }: { month: string; isAdmin: boolean }) {
       <MonthDetails row={open} month={month} isAdmin={isAdmin} onClose={() => setOpen(null)} />
     </Card>
   );
+}
+
+/** A count in the month summary: zero stays a quiet number; anything above
+    zero wears its column's status colour so the exceptions stand out. */
+function CountCell({ value, status }: { value: number; status: Status }) {
+  if (value <= 0) return <span className="atd-num atd-num--zero">0</span>;
+  return <Tag status={status} mono className="atd-count">{fmtDays(value)}</Tag>;
 }
 
 /** "2", "1.5" — halves kept, whole numbers whole. */

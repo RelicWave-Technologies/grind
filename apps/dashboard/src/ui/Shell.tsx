@@ -55,6 +55,33 @@ export function SidebarBrand({ name, markSrc, className, ...rest }: SidebarBrand
   );
 }
 
+/** The workspace this session belongs to, boxed under the logo: an initials
+    tile, the name (ellipsised) and one quiet line under it. Static — there is
+    one workspace per session, so it is not a switcher. */
+export interface WorkspaceCardProps extends React.HTMLAttributes<HTMLDivElement> {
+  name: string;
+  detail?: ReactNode;
+}
+
+/** "Saffron Loop Studio" → "SL": the first letters of the first two words. */
+function workspaceInitials(name: string): string {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  const letters = words.slice(0, 2).map((w) => w.charAt(0));
+  return (letters.join('') || '?').toUpperCase();
+}
+
+export function WorkspaceCard({ name, detail, className, ...rest }: WorkspaceCardProps) {
+  return (
+    <div className={cx('ui-sidebar__workspace', className)} title={name} {...rest}>
+      <span className="ui-sidebar__workspace-tile" aria-hidden>{workspaceInitials(name)}</span>
+      <span className="ui-sidebar__workspace-meta">
+        <span className="ui-sidebar__workspace-name ui-t-strong">{name}</span>
+        {detail != null && <span className="ui-sidebar__workspace-detail ui-t-small">{detail}</span>}
+      </span>
+    </div>
+  );
+}
+
 /** Eyebrow group head inside the nav. */
 export function NavSection({ label, className, ...rest }: { label: ReactNode } & React.HTMLAttributes<HTMLDivElement>) {
   return (

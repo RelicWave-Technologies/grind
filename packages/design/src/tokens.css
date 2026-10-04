@@ -29,6 +29,12 @@
   --color-bad-edge: #f3c7c7;
   --color-wait: #6b5400;
   --color-wait-wash: #fff4c4;
+  --color-calm: #0f6b63;
+  --color-calm-wash: #e0f4ef;
+  --color-alert: #9a4300;
+  --color-alert-wash: #ffeedb;
+  --color-leave: #5b3fb5;
+  --color-leave-wash: #efeafd;
   --color-teal: #0f6b63;
   --color-tint-teal: #dff6f2;
   --color-tint-coral: #fde4e4;

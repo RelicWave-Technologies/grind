@@ -82,7 +82,7 @@ export { Popover, Menu, Modal } from './Overlay';
 export type { PopoverProps, MenuProps, MenuItemSpec, ModalProps } from './Overlay';
 
 // ── §5.17 — app chrome ──────────────────────────────────────────────────────
-export { AppShell, Sidebar, SidebarBrand, NavSection, NavItem } from './Shell';
+export { AppShell, Sidebar, SidebarBrand, WorkspaceCard, NavSection, NavItem } from './Shell';
 export type {
   AppShellProps,
   SidebarProps,

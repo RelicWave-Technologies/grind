@@ -727,12 +727,16 @@ function presenceTag(
     return { label: 'Online', status: 'success', title: 'Timo is actively tracking and sent a heartbeat within the last 3 minutes.' };
   }
   if (user.agentPresence === 'OFFLINE') {
-    const title = user.agentState === 'IDLE'
-      ? 'Timo is connected but not tracking right now.'
-      : user.agentState === 'PAUSED_IDLE' || user.agentState === 'PAUSED_PERMISSION'
-        ? 'Tracking is paused.'
-        : 'Timo is not actively tracking right now.';
-    return { label: 'Offline', status: 'neutral', title };
+    if (user.agentState === 'PAUSED_IDLE') {
+      return { label: 'Idle', status: 'alert', title: 'Tracking paused itself after no keyboard or mouse activity.' };
+    }
+    if (user.agentState === 'PAUSED_PERMISSION') {
+      return { label: 'Paused', status: 'warn', title: 'Tracking is paused until a macOS permission is granted again.' };
+    }
+    if (user.agentState === 'IDLE') {
+      return { label: 'Connected', status: 'neutral', title: 'Timo is open and connected but not tracking right now.' };
+    }
+    return { label: 'Offline', status: 'neutral', title: 'Timo is not actively tracking right now.' };
   }
   return { label: 'Unknown', status: 'neutral', title: 'Live device presence is visible to workspace admins only.' };
 }

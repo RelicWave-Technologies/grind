@@ -744,7 +744,7 @@ function StartCounts({ member }: { member: TeamMemberCounts }) {
     <CountTagGroup
       ariaLabel={`${member.lateDays} late, ${member.onTimeDays} on time, ${member.offDays} off`}
       items={[
-        { value: member.lateDays, code: 'L', label: 'late', status: member.lateDays > 0 ? 'danger' : 'neutral' },
+        { value: member.lateDays, code: 'L', label: 'late', status: member.lateDays > 0 ? 'alert' : 'neutral' },
         { value: member.onTimeDays, code: 'O', label: 'on time', status: member.onTimeDays > 0 ? 'success' : 'neutral' },
         { value: member.offDays, code: 'F', label: 'off', status: 'neutral' },
       ]}
@@ -2414,22 +2414,24 @@ function formatLongDate(iso: string, timeZone: string) {
 }
 
 function statusTag(status: ShiftStatus): Status {
-  if (status === 'early' || status === 'on_time') return 'success';
-  if (status === 'late') return 'danger';
+  if (status === 'on_time') return 'success';
+  if (status === 'early') return 'calm';
+  if (status === 'late') return 'alert';
   if (status === 'no_activity') return 'warn';
   return 'neutral';
 }
 
 function railForDay(day: MemberReportDay): Rail | undefined {
   const statusRail = railForStatus(day.shiftStatus);
-  if (statusRail === 'danger') return statusRail;
+  if (statusRail === 'alert') return statusRail;
   if (dayNeedsReview(day)) return 'warn';
   return statusRail;
 }
 
 function railForStatus(status: ShiftStatus): Rail | undefined {
-  if (status === 'late') return 'danger';
-  if (status === 'early' || status === 'on_time') return 'success';
+  if (status === 'late') return 'alert';
+  if (status === 'early') return 'calm';
+  if (status === 'on_time') return 'success';
   if (status === 'no_activity') return 'warn';
   return undefined;
 }
