@@ -1,0 +1,281 @@
+<!doctype html>
+<!--
+  Timo hero film, the landing page's first picture: the whole story in one take.
+  A question (where did the day go?), then five chapters the page's tabs follow:
+    Press play          the desktop window: a task picked, the clock running   (plates/desktop)
+    The day fills in    a day drawn on one ribbon, minute by minute             (drawn here)
+    Forgot to start?    a gap in Edit time, a reason, sent for approval         (plates/day)
+                        and the Lark card approved in one tap                   (drawn here)
+    The team, today     the manager's Team today                                (plates/team)
+    The week, honestly  Reports                                                 (plates/team)
+  Then "Timo keeps time. You keep shipping." and the sign. Every person and number is sample
+  data from the Agent Lab and the mock dashboard.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="base.css" />
+    <link rel="stylesheet" href="feature.css" />
+    <style>
+      #hook { top: 420px; font-size: 128px; }
+      .win { position: absolute; }
+      .scene { position: absolute; inset: 0; visibility: hidden; }
+
+      /* The day, on one ribbon. */
+      .rib {
+        position: absolute;
+        top: 470px;
+        left: 220px;
+        width: 1480px;
+        height: 124px;
+        border: 1px solid var(--color-line);
+        border-radius: 24px;
+        background: rgb(255 255 255 / 0.75);
+      }
+      .seg { position: absolute; top: 16px; bottom: 16px; border-radius: 9px; }
+      .seg.work { background: var(--color-ribbon-work); }
+      .seg.meeting { background: var(--color-ribbon-meeting); }
+      .seg.idle { background: var(--color-ribbon-idle); }
+      .seg.manual { background: repeating-linear-gradient(135deg, var(--color-ribbon-manual) 0 10px, var(--color-ribbon-manual-stripe) 10px 13px); }
+      .nowline { position: absolute; top: -14px; bottom: -14px; width: 4px; margin-left: -2px; border-radius: 2px; background: var(--color-ink); }
+      .axis { position: absolute; top: 620px; left: 220px; width: 1480px; display: flex; justify-content: space-between; font: 400 22px/1 var(--font-mono); color: var(--color-muted); }
+      .stats { position: absolute; top: 700px; left: 220px; width: 1480px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; }
+      .stat { padding: 26px 30px; }
+      .stat p { display: flex; align-items: center; gap: 12px; font: 400 22px/1 var(--font-sans); color: var(--color-muted); }
+      .stat p i { width: 16px; height: 16px; border-radius: 5px; }
+      .stat b { display: block; margin-top: 16px; font: 420 54px/1 var(--font-sans); letter-spacing: -0.03em; color: var(--color-ink); font-variant-numeric: tabular-nums; }
+
+      /* The Lark card. */
+      .lark { position: absolute; top: 236px; left: 460px; width: 1000px; padding: 40px; border-radius: 30px; }
+      .lark-head { display: flex; align-items: center; gap: 14px; font: 500 28px/1 var(--font-sans); color: var(--color-ink); }
+      .bot { display: grid; place-items: center; width: 56px; height: 56px; border-radius: 16px; background: var(--color-dark); }
+      .bot svg { width: 34px; height: 34px; }
+      .tag { padding: 4px 10px; border-radius: 8px; background: var(--color-brand-wash); color: var(--color-brand-deep); font-size: 20px; }
+      .time { margin-left: auto; font: 400 22px/1 var(--font-sans); color: var(--color-muted); }
+      .card { margin: 24px 0 0 70px; overflow: hidden; border: 2px solid var(--color-line); border-radius: 22px; background: var(--color-white); }
+      .card-title { padding: 20px 30px; background: var(--color-brand-wash); color: var(--color-brand-deep); font: 500 28px/1 var(--font-sans); }
+      .card dl { display: grid; gap: 14px; padding: 26px 30px 6px; font-size: 26px; }
+      .card dl div { display: grid; grid-template-columns: 130px 1fr; }
+      .card dt { color: var(--color-muted); }
+      .card dd { color: var(--color-ink); }
+      .actions { position: relative; height: 104px; padding: 22px 30px; }
+      .btn { position: absolute; top: 22px; display: inline-flex; align-items: center; height: 60px; padding: 0 30px; border: 2px solid var(--color-line-strong); border-radius: 12px; font: 500 26px/1 var(--font-sans); color: var(--color-ink); }
+      .btn.yes { left: 30px; border-color: var(--color-brand); background: var(--color-brand); color: var(--color-white); }
+      .btn.no { left: 220px; }
+      .done { position: absolute; top: 38px; left: 30px; display: flex; align-items: center; gap: 14px; font: 500 28px/1 var(--font-sans); color: var(--color-good); }
+      .done svg { width: 30px; height: 30px; fill: none; stroke: currentColor; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+      .cursor { position: absolute; width: 34px; height: 34px; z-index: 5; }
+    </style>
+  </head>
+  <body>
+    <div class="film">
+      <div class="scene" id="s-hook"><h2 class="tagline display" id="hook" style="opacity:1"><span>Where</span> <span>did</span> <span>the</span> <span>day</span> <span class="soft">go?</span></h2></div>
+
+      <div class="scene" id="s-day">
+        <div class="rib" id="rib"><span class="nowline" id="nowline"></span></div>
+        <div class="axis"><span>9 AM</span><span>12 PM</span><span>3 PM</span><span>6 PM</span></div>
+        <div class="stats" id="stats"></div>
+      </div>
+
+      <div class="scene" id="s-lark">
+        <div class="lark surface" id="lark">
+          <div class="lark-head">
+            <span class="bot"><svg viewBox="0 0 64 64"><rect x="7" y="10" width="30" height="12" rx="6" fill="#fff" /><rect x="41" y="10" width="16" height="12" rx="6" fill="var(--color-brand-hi)" /><rect x="26" y="26" width="12" height="29" rx="6" fill="#fff" /></svg></span>
+            Timo <span class="tag">Bot</span><span class="time">10:42</span>
+          </div>
+          <div class="card" id="card">
+            <p class="card-title">Manual time request</p>
+            <dl>
+              <div><dt>From</dt><dd>Ananya Raghunathan</dd></div>
+              <div><dt>When</dt><dd>Today, 7:42 – 7:50 AM</dd></div>
+              <div><dt>Reason</dt><dd>Stand-up with the design team</dd></div>
+            </dl>
+            <div class="actions">
+              <span class="btn yes" id="yes">Approve</span><span class="btn no" id="no">Reject</span>
+              <span class="done" id="done"><svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>Approved by Arjun Menon · counts today</span>
+            </div>
+          </div>
+        </div>
+        <svg class="cursor" id="cur" viewBox="0 0 28 28"><path d="M5 3 L5 22 L10 17.5 L13.6 25.2 L16.8 23.8 L13.2 16.3 L20.2 16.3 Z" fill="#111" stroke="#fff" stroke-width="1.7" stroke-linejoin="round" /></svg>
+      </div>
+
+      <div id="caps"></div>
+      <div class="stage3d" id="stage"></div>
+      <h2 class="tagline display" id="tagline">Timo keeps time. <span class="soft">You keep shipping.</span></h2>
+      <div id="sign"></div>
+    </div>
+
+    <script type="module">
+      import { p, mix, clamp, css, ease, show, plateFrame } from './kit.js';
+      import { makeSign, SIGN_LENGTH } from './sign.js';
+      const $ = (id) => document.getElementById(id);
+      const PL = '/tmp/timo-film/plates';
+
+      // ---- Timing, in frames at 30 fps ------------------------------------------------------
+      const S = {
+        hook: [0, 84],
+        desk: [84, 228],
+        day: [228, 342],
+        gap: [342, 498],
+        lark: [498, 586],
+        team: [586, 706],
+        week: [706, 808],
+        tag: [808, 884],
+      };
+      const SIGN = 880;
+      const FRAMES = SIGN + SIGN_LENGTH + 40;
+      const CLEAR = [FRAMES - 22, FRAMES - 10];
+      window.FILM = { frames: FRAMES, poster: S.desk[0] + 110, loop: 16 };
+
+      // ---- Windows: each chapter's app, sliding in from the right and out to the left ------
+      const DESK = { top: 214, left: 360, width: 1200, height: 800 };
+      const DASH = { top: 206, left: 220, width: 1480, height: 925 };
+      const WINDOWS = [
+        { scene: 'desk', plate: 'desktop', count: 300, from: 20, box: DESK, lights: true },
+        { scene: 'gap', plate: 'day', count: 417, from: 198, box: DASH },
+        { scene: 'team', plate: 'team', count: 692, from: 0, box: DASH },
+        { scene: 'week', plate: 'team', count: 692, from: 572, box: DASH },
+      ].map((w) => {
+        const el = document.createElement('div');
+        el.className = 'app window win';
+        el.innerHTML = `${w.lights ? '<span class="lights"><i></i><i></i><i></i></span>' : ''}<img alt="" />`;
+        css(el, { top: `${w.box.top}px`, left: `${w.box.left}px`, width: `${w.box.width}px`, height: `${w.box.height}px` });
+        $('stage').append(el);
+        return { ...w, el, img: el.querySelector('img') };
+      });
+
+      // ---- Captions, one per chapter ------------------------------------------------------
+      const CAPS = [
+        { scene: 'desk', left: DESK.left, eyebrow: 'The desktop app', title: 'Press play. It counts real seconds.' },
+        { scene: 'day', left: DASH.left, eyebrow: 'Your day', title: 'Every minute, where it really was.' },
+        { scene: 'gap', left: DASH.left, eyebrow: 'Forgot to start?', title: 'Say what it was. Send it.' },
+        { scene: 'lark', left: DASH.left, eyebrow: 'Lark', title: 'Approved in one tap. It counts.' },
+        { scene: 'team', left: DASH.left, eyebrow: 'The dashboard', title: "Your team's day, as it happens." },
+        { scene: 'week', left: DASH.left, eyebrow: 'Reports', title: 'The week, honestly.' },
+      ].map((c) => {
+        const el = document.createElement('div');
+        el.className = 'fcap';
+        el.innerHTML = `<span class="eyebrow">${c.eyebrow}</span><h2 class="display">${c.title}</h2>`;
+        css(el, { left: `${c.left}px` });
+        $('caps').append(el);
+        return { ...c, el };
+      });
+
+      // ---- The day ribbon (the landing page's live ribbon draws the same made-up day) -----
+      const DAY = [
+        ['work', 4, 98], ['meeting', 98, 140], ['work', 140, 212], ['idle', 212, 262],
+        ['work', 262, 340], ['manual', 340, 372], ['work', 372, 470], ['meeting', 470, 500], ['work', 500, 532],
+      ];
+      const SPAN = 540, PX = 1480 - 32;
+      const segs = DAY.map(([kind]) => {
+        const el = document.createElement('span');
+        el.className = `seg ${kind}`;
+        $('rib').append(el);
+        return el;
+      });
+      const KEYS = [
+        ['work', 'Work', 'var(--color-ribbon-work)'],
+        ['meeting', 'Meetings', 'var(--color-ribbon-meeting)'],
+        ['manual', 'Manual, approved', 'repeating-linear-gradient(135deg, var(--color-ribbon-manual) 0 4px, var(--color-ribbon-manual-stripe) 4px 6px)'],
+        ['idle', 'Idle, not counted', 'var(--color-ribbon-idle)'],
+      ];
+      const stats = KEYS.map(([kind, label, bg]) => {
+        const el = document.createElement('div');
+        el.className = 'stat surface';
+        el.innerHTML = `<p><i style="background:${bg}"></i>${label}</p><b></b>`;
+        $('stats').append(el);
+        return { kind, el, b: el.querySelector('b') };
+      });
+      const fmt = (m) => (m >= 60 ? `${Math.floor(m / 60)}h ${String(Math.floor(m % 60)).padStart(2, '0')}m` : `${Math.floor(m)}m`);
+
+      const sign = makeSign($('sign'));
+      // Where the cursor taps: the middle of Approve, measured once while nothing is moved.
+      const yr = $('yes').getBoundingClientRect();
+      const yes = { x: yr.left + yr.width / 2 - 6, y: yr.top + yr.height / 2 - 4 };
+      const hookWords = [...$('hook').querySelectorAll('span')];
+      const range = (f, [a, b]) => f >= a - 30 && f <= b + 30;
+
+      window.render = async (f) => {
+        // Hook.
+        $('s-hook').style.visibility = range(f, S.hook) ? 'visible' : 'hidden';
+        hookWords.forEach((w, k) => {
+          const t = p(f, 4 + k * 5, 26 + k * 5, ease.outQuint);
+          css(w, { display: 'inline-block', opacity: String(t), transform: `translateY(${mix(40, 0, t)}px)` });
+        });
+        const hookOut = p(f, S.hook[1] - 22, S.hook[1] - 2, ease.inOut);
+        css($('s-hook'), { opacity: String(1 - hookOut), transform: `translateY(${mix(0, -70, hookOut)}px)` });
+
+        // Windows slide through.
+        for (const w of WINDOWS) {
+          const [a, b] = S[w.scene];
+          const inn = p(f, a - 6, a + 26, ease.outQuint);
+          const out = p(f, b - 16, b + 6, ease.inOut);
+          const on = f >= a - 8 && f <= b + 8;
+          w.el.style.visibility = on ? 'visible' : 'hidden';
+          css(w.el, {
+            opacity: String(clamp(inn * 2) * (1 - out)),
+            transform: `translateX(${mix(260, 0, inn) - mix(0, 260, out)}px) translateY(${mix(60, 0, inn)}px) scale(${mix(0.94, 1, inn)})`,
+          });
+          if (on) await show(w.img, plateFrame(`${PL}/${w.plate}`, w.from + (f - a), w.count));
+        }
+
+        // Captions.
+        for (const c of CAPS) {
+          const [a, b] = S[c.scene];
+          const on = p(f, a, a + 16, ease.outQuint);
+          const off = p(f, b - 14, b);
+          css(c.el, { opacity: String(on * (1 - off)), transform: `translateY(${mix(26, 0, on) - mix(0, 18, off)}px)` });
+        }
+
+        // The day fills in.
+        $('s-day').style.visibility = range(f, S.day) ? 'visible' : 'hidden';
+        const dIn = p(f, S.day[0] - 4, S.day[0] + 20, ease.outQuint);
+        const dOut = p(f, S.day[1] - 16, S.day[1] + 4, ease.inOut);
+        css($('s-day'), { opacity: String(dIn * (1 - dOut)), transform: `translateX(${mix(200, 0, dIn) - mix(0, 200, dOut)}px)` });
+        const t = p(f, S.day[0] + 8, S.day[1] - 22, (x) => 1 - Math.pow(1 - x, 2.2)) * SPAN;
+        const sums = { work: 0, meeting: 0, manual: 0, idle: 0 };
+        DAY.forEach(([kind, a, b], i) => {
+          const shown = Math.max(0, Math.min(t, b) - a);
+          sums[kind] += shown;
+          css(segs[i], { left: `${16 + (a / SPAN) * PX}px`, width: `${(shown / SPAN) * PX}px`, opacity: shown > 0 ? '1' : '0' });
+        });
+        css($('nowline'), { left: `${16 + (t / SPAN) * PX}px`, opacity: t > 0 && t < SPAN ? '1' : '0' });
+        stats.forEach((s, k) => {
+          s.b.textContent = fmt(sums[s.kind]);
+          const st = p(f, S.day[0] + 10 + k * 4, S.day[0] + 28 + k * 4, ease.outQuint);
+          css(s.el, { opacity: String(st), transform: `translateY(${mix(30, 0, st)}px)` });
+        });
+
+        // Approved in Lark: the card arrives, the cursor taps Approve, it turns green.
+        $('s-lark').style.visibility = range(f, S.lark) ? 'visible' : 'hidden';
+        const lIn = p(f, S.lark[0] - 4, S.lark[0] + 22, ease.outQuint);
+        const lOut = p(f, S.lark[1] - 16, S.lark[1] + 4, ease.inOut);
+        css($('s-lark'), { opacity: String(lIn * (1 - lOut)), transform: `translateX(${mix(220, 0, lIn) - mix(0, 220, lOut)}px)` });
+        const press = S.lark[0] + 44;
+        const reach = p(f, S.lark[0] + 14, press - 4, ease.inOut);
+        css($('cur'), {
+          left: `${mix(1500, yes.x, reach)}px`,
+          top: `${mix(900, yes.y, reach) + Math.sin(Math.PI * reach) * -60}px`,
+          opacity: String(p(f, S.lark[0] + 8, S.lark[0] + 16) * (1 - p(f, press + 14, press + 24))),
+          transform: `scale(${f >= press && f < press + 5 ? 0.86 : 1})`,
+        });
+        const approved = f >= press + 4;
+        const pop = p(f, press + 4, press + 18, ease.back);
+        $('yes').style.visibility = approved ? 'hidden' : 'visible';
+        $('no').style.visibility = approved ? 'hidden' : 'visible';
+        css($('yes'), { transform: `scale(${f >= press && f < press + 5 ? 0.94 : 1})` });
+        css($('done'), { visibility: approved ? 'visible' : 'hidden', opacity: String(pop), transform: `translateY(${mix(14, 0, clamp(pop))}px)` });
+        css($('card'), { borderColor: approved ? 'var(--color-good)' : 'var(--color-line)' });
+
+        // Tagline, then the sign.
+        const tg = p(f, S.tag[0] + 4, S.tag[0] + 22, ease.outQuint) * (1 - p(f, S.tag[1] - 14, S.tag[1] - 2, ease.inOut));
+        css($('tagline'), { opacity: String(tg), transform: `translateY(${mix(30, 0, p(f, S.tag[0] + 4, S.tag[0] + 22, ease.outQuint)) - mix(0, 24, p(f, S.tag[1] - 14, S.tag[1] - 2))}px)` });
+        sign(f, SIGN);
+        css($('sign'), { opacity: String(1 - p(f, ...CLEAR, ease.inOut)) });
+      };
+
+      await document.fonts.ready;
+      window.ready = true;
+    </script>
+  </body>
+</html>

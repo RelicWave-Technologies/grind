@@ -1,0 +1,64 @@
+/* feature.css — the section films' shared frame: caption band on top, the app window below. */
+.stage3d {
+  position: absolute;
+  inset: 0;
+  perspective: 2600px;
+  perspective-origin: 50% 20%;
+}
+
+.app {
+  position: absolute;
+  transform-origin: 50% 0%;
+}
+
+.fcap {
+  position: absolute;
+  top: 54px;
+  opacity: 0;
+}
+
+.fcap .eyebrow {
+  display: flex;
+}
+
+.fcap h2 {
+  margin-top: 16px;
+  font-size: 66px;
+  white-space: nowrap;
+}
+
+.fnote {
+  position: absolute;
+  top: 58px;
+  font: 400 17px/1 var(--font-mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-muted);
+}
+
+.opener {
+  position: absolute;
+  inset: 0;
+}
+
+.opener h2 {
+  position: absolute;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: 112px;
+}
+
+.opener h2 span {
+  display: inline-block;
+}
+
+.tagline {
+  position: absolute;
+  top: 470px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: 104px;
+  opacity: 0;
+}

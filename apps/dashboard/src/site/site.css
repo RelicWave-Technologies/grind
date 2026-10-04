@@ -1,0 +1,577 @@
+/*
+ * The public pages' frame (SiteShell.tsx): header, footer, the intro, the
+ * loader and the primitives every public page shares. Tokens only — the
+ * values come from DESIGN.md through @grind/design.
+ */
+
+.site {
+  --site-max: 1200px;
+  --site-gutter: clamp(20px, 4vw, 40px);
+  min-height: 100vh;
+  background: var(--color-white);
+  color: var(--color-body);
+  font-size: var(--type-body-lg-size);
+  line-height: var(--type-body-lg-leading);
+  overflow-x: clip;
+}
+
+.site a {
+  color: inherit;
+}
+
+.site-wrap {
+  width: 100%;
+  max-width: calc(var(--site-max) + 2 * var(--site-gutter));
+  margin: 0 auto;
+  padding-inline: var(--site-gutter);
+}
+
+.site-skip {
+  position: absolute;
+  left: var(--space-md);
+  top: -100px;
+  z-index: 60;
+  padding: var(--space-xs) var(--space-md);
+  border-radius: var(--radius-full);
+  background: var(--color-ink);
+  color: var(--color-white) !important;
+}
+.site-skip:focus {
+  top: var(--space-sm);
+}
+
+/* ---------- The mark ---------- */
+
+.timo-mark rect {
+  transform-box: fill-box;
+}
+.timo-mark-bar,
+.timo-mark-stem {
+  fill: var(--color-ink);
+}
+.timo-mark-bar {
+  transform-origin: left center;
+}
+.timo-mark-stem {
+  transform-origin: center top;
+}
+.timo-mark-now {
+  fill: var(--color-brand);
+  transform-origin: center;
+}
+.timo-mark--on-dark .timo-mark-bar,
+.timo-mark--on-dark .timo-mark-stem {
+  fill: var(--color-white);
+}
+.timo-mark--on-dark .timo-mark-now {
+  fill: var(--color-brand-hi);
+}
+.timo-mark.is-hidden {
+  visibility: hidden;
+}
+
+/* The loader: one turn every 1.8s. */
+.timo-loader {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-md);
+}
+.timo-loader-label {
+  color: var(--color-muted);
+  font-size: var(--type-body-sm-size);
+}
+.timo-mark--loop .timo-mark-bar {
+  animation: mark-bar 1.8s var(--ease-emphasised) infinite;
+}
+.timo-mark--loop .timo-mark-stem {
+  animation: mark-stem 1.8s var(--ease-emphasised) infinite;
+}
+.timo-mark--loop .timo-mark-now {
+  animation: mark-now 1.8s var(--ease-emphasised) infinite;
+}
+@keyframes mark-bar {
+  0% { transform: scaleX(0); opacity: 1; }
+  28%, 78% { transform: scaleX(1); opacity: 1; }
+  100% { transform: scaleX(1); opacity: 0; }
+}
+@keyframes mark-stem {
+  0%, 14% { transform: translateY(-8px) scaleY(0.2); opacity: 0; }
+  40%, 78% { transform: none; opacity: 1; }
+  100% { transform: none; opacity: 0; }
+}
+@keyframes mark-now {
+  0%, 34% { transform: scale(0.2); opacity: 0; }
+  46% { transform: scale(1.18); opacity: 1; }
+  54%, 78% { transform: none; opacity: 1; }
+  100% { transform: none; opacity: 0; }
+}
+
+/* ---------- Buttons ---------- */
+
+.site-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-xs);
+  height: var(--control-height);
+  padding: 0 var(--space-lg);
+  border: 1px solid transparent;
+  border-radius: var(--radius-full);
+  font-size: var(--type-button-size);
+  font-weight: var(--type-button-weight);
+  line-height: var(--type-button-leading);
+  text-decoration: none;
+  white-space: nowrap;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard),
+    transform var(--duration-base) var(--ease-standard);
+}
+.site-btn:active {
+  transform: translateY(1px);
+}
+.site-btn--lg {
+  height: var(--control-height-lg);
+  padding: 0 var(--space-xl);
+  font-size: var(--type-body-lg-strong-size);
+}
+.site .site-btn--primary {
+  background: var(--color-brand);
+  color: var(--color-white);
+}
+.site .site-btn--primary:hover {
+  background: var(--color-brand-deep);
+}
+.site-btn--primary .site-btn-os {
+  filter: brightness(0) invert(1);
+}
+.site .site-btn--quiet {
+  background: var(--color-sheet);
+  color: var(--color-ink);
+}
+.site .site-btn--quiet:hover {
+  background: var(--color-sheet-2);
+}
+.site .site-btn--light {
+  background: var(--color-white);
+  color: var(--color-brand-deep);
+}
+.site .site-btn--light:hover {
+  background: var(--color-brand-wash);
+}
+.site .site-btn--ghost {
+  border-color: rgb(255 255 255 / 0.32);
+  background: rgb(255 255 255 / 0.1);
+  color: var(--color-white);
+}
+.site .site-btn--ghost:hover {
+  background: rgb(255 255 255 / 0.18);
+}
+.site-btn-os {
+  width: 15px;
+  height: 15px;
+  margin-left: -2px;
+}
+.site-signin.is-busy {
+  pointer-events: none;
+}
+
+/* ---------- Header ---------- */
+
+.site-nav {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  border-bottom: 1px solid transparent;
+  background: rgb(255 255 255 / 0.82);
+  backdrop-filter: saturate(1.6) blur(14px);
+  -webkit-backdrop-filter: saturate(1.6) blur(14px);
+  transition: border-color var(--duration-base) var(--ease-standard);
+}
+.site-nav.is-scrolled,
+.site-nav.is-open {
+  border-bottom-color: var(--color-line);
+}
+.site-nav-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xxl);
+  max-width: calc(var(--site-max) + 2 * var(--site-gutter));
+  height: 64px;
+  margin: 0 auto;
+  padding: 0 var(--site-gutter);
+}
+.site-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  color: var(--color-ink);
+  font-size: var(--type-card-title-size);
+  font-weight: var(--type-card-title-weight);
+  letter-spacing: var(--type-card-title-tracking);
+  text-decoration: none;
+}
+.site-brand--lg {
+  font-size: 22px;
+  letter-spacing: -0.02em;
+}
+.site-by {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  /* The chip belongs to the name: close to it, not the bar's gap away. */
+  margin-left: calc(var(--space-xs) - var(--space-xxl));
+  padding: 4px 10px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-full);
+  color: var(--color-muted);
+  font-size: var(--type-micro-size);
+  font-weight: var(--type-label-weight);
+  line-height: 1;
+  text-decoration: none;
+  transition: border-color var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard);
+}
+.site-by span {
+  color: var(--color-faint);
+}
+.site-by img {
+  width: auto;
+  height: 12px;
+}
+.site-by:hover {
+  border-color: var(--color-line-strong);
+  color: var(--color-ink);
+}
+.site-menu {
+  display: flex;
+  gap: var(--space-xxs);
+}
+.site-menu a {
+  padding: var(--space-xs) var(--space-sm);
+  border-radius: var(--radius-full);
+  color: var(--color-ink-2);
+  font-size: var(--type-body-sm-size);
+  text-decoration: none;
+  transition: background-color var(--duration-fast) var(--ease-standard);
+}
+.site-menu a:hover,
+.site-menu a[aria-current='page'] {
+  background: var(--color-sheet);
+}
+.site-nav-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  margin-left: auto;
+}
+.site-burger {
+  display: none;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: transparent;
+  cursor: pointer;
+}
+.site-burger span {
+  display: block;
+  width: 18px;
+  height: 1.5px;
+  margin: 5px auto;
+  border-radius: var(--radius-full);
+  background: var(--color-ink);
+  transition: transform var(--duration-base) var(--ease-standard);
+}
+.is-open .site-burger span:first-child {
+  transform: translateY(3.25px) rotate(45deg);
+}
+.is-open .site-burger span:last-child {
+  transform: translateY(-3.25px) rotate(-45deg);
+}
+.site-mobile {
+  display: grid;
+  gap: var(--space-xxs);
+  padding: var(--space-xs) var(--site-gutter) var(--space-xl);
+}
+.site-mobile[hidden] {
+  display: none;
+}
+.site-mobile > a:not(.site-btn) {
+  padding: var(--space-sm) 0;
+  border-bottom: 1px solid var(--color-line-soft);
+  color: var(--color-ink);
+  font-size: var(--type-card-title-size);
+  text-decoration: none;
+}
+.site-mobile .site-btn {
+  margin-top: var(--space-sm);
+}
+
+@media (min-width: 961px) {
+  .site-mobile {
+    display: none !important;
+  }
+}
+@media (max-width: 960px) {
+  .site-menu,
+  .site-by,
+  .site-signin {
+    display: none;
+  }
+  .site-burger {
+    display: block;
+  }
+}
+@media (max-width: 420px) {
+  .site-nav-actions > .site-btn--primary {
+    display: none;
+  }
+}
+
+/* ---------- Intro ---------- */
+
+.site-intro {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+.site-intro-veil {
+  position: absolute;
+  inset: 0;
+  background: var(--color-white);
+  pointer-events: auto;
+}
+.site-intro-mark {
+  position: relative;
+  width: 112px;
+  height: 112px;
+  transform-origin: 0 0;
+}
+
+/* ---------- Entrance and reveal ---------- */
+
+/* Above the fold: rises in on load (each page staggers its own children). */
+.rise {
+  animation: lp-rise 900ms var(--ease-emphasised) both;
+}
+/* Held still under the intro, and let go as the mark flies to the header. */
+.site.is-waiting .rise,
+.site.is-waiting .rise::before,
+.site.is-waiting .rise::after,
+.site.is-waiting .rise *,
+.site.is-waiting .rise *::before,
+.site.is-waiting .rise *::after {
+  animation-play-state: paused;
+}
+@keyframes lp-rise {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: none; }
+}
+
+.reveal {
+  opacity: 0;
+  transform: translateY(18px);
+  transition:
+    opacity 700ms var(--ease-emphasised),
+    transform 700ms var(--ease-emphasised);
+}
+.reveal.is-in {
+  opacity: 1;
+  transform: none;
+}
+
+/* ---------- Footer ---------- */
+
+.site-foot {
+  margin-top: var(--space-section);
+  border-top: 1px solid var(--color-line);
+}
+.site-foot-inner {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) 2fr;
+  gap: var(--space-xxl);
+  max-width: calc(var(--site-max) + 2 * var(--site-gutter));
+  margin: 0 auto;
+  padding: var(--space-section) var(--site-gutter) var(--space-xxl);
+}
+.site-foot-line {
+  max-width: 280px;
+  margin: var(--space-sm) 0 var(--space-lg);
+  color: var(--color-muted);
+  font-size: var(--type-body-sm-size);
+}
+.site-foot-line a {
+  color: var(--color-ink);
+}
+.site-foot-find {
+  margin: var(--space-xl) 0 0;
+  color: var(--color-muted);
+  font-size: var(--type-caption-size);
+}
+.site-foot-social {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+  margin: var(--space-sm) 0 0;
+}
+.site-foot-social a {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-full);
+  color: var(--color-ink-2);
+  transition: background-color var(--duration-fast) var(--ease-standard), border-color var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard);
+}
+.site-foot-social a:hover {
+  border-color: var(--color-ink);
+  background: var(--color-ink);
+  color: var(--color-white);
+}
+.site-foot-social svg {
+  width: 17px;
+  height: 17px;
+  fill: currentColor;
+}
+.site-foot-social svg.is-line {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+}
+.site-foot-social svg.is-line .dot {
+  fill: currentColor;
+  stroke: none;
+}
+.site-foot-legal {
+  max-width: 240px;
+  margin: var(--space-xl) 0 0;
+  padding: 14px var(--space-md);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-lg);
+  color: var(--color-muted);
+  font-size: var(--type-caption-size);
+  line-height: 1.6;
+}
+.site-foot-legal a {
+  color: var(--color-muted);
+}
+.site-foot-cols {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-xl);
+}
+.site-foot-cols div {
+  display: grid;
+  align-content: start;
+  gap: var(--space-sm);
+}
+.site-foot-cols p {
+  margin: 0 0 var(--space-xxs);
+  color: var(--color-ink);
+  font-size: var(--type-overline-size);
+  font-weight: var(--type-overline-weight);
+  letter-spacing: var(--type-overline-tracking);
+  text-transform: uppercase;
+}
+.site-foot-cols a {
+  color: var(--color-muted);
+  font-size: var(--type-body-sm-size);
+  text-decoration: none;
+}
+.site-foot-cols a:hover {
+  color: var(--color-ink);
+}
+
+/* The sign: mark and wordmark, standing on the page's bottom edge, as the
+   Crux footer's wordmark does (line-height 0.8, the descender-free word cut
+   at its baseline). */
+.site-sign {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  column-gap: 0;
+  margin-top: var(--space-xl);
+  padding: 0 var(--site-gutter);
+  overflow: hidden;
+  font-size: var(--type-wordmark-size);
+  line-height: 0.8;
+  user-select: none;
+  visibility: hidden;
+}
+.site-sign.is-in {
+  visibility: visible;
+}
+.site-sign-mark {
+  flex: none;
+  position: relative;
+  z-index: 1;
+  /* The stem ends at 55/64 of the mark's box: sink the rest below the edge so
+     the T stands on the same ground as the word. */
+  width: 0.72em;
+  height: 0.72em;
+  margin-right: -0.02em;
+  margin-bottom: -0.1em;
+}
+.site-sign-word {
+  display: block;
+  overflow: hidden;
+  margin-bottom: -0.05em;
+}
+.site-sign-word span {
+  display: block;
+  padding-right: 0.04em;
+  background:
+    radial-gradient(26% 50% at 20% 18%, color-mix(in srgb, var(--color-tint-orange) 70%, transparent), transparent 70%),
+    radial-gradient(45% 90% at 80% 10%, color-mix(in srgb, var(--color-brand-hi) 70%, transparent), transparent 65%),
+    linear-gradient(100deg, var(--color-brand-deep) 0%, var(--color-brand) 24%, var(--color-brand-hi) 48%, color-mix(in srgb, var(--color-series-6) 45%, var(--color-white)) 74%, var(--color-brand) 100%);
+  background-size: 200% 100%, 200% 100%, 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  font-weight: var(--type-wordmark-weight);
+  letter-spacing: var(--type-wordmark-tracking);
+  animation: sign-drift 16s ease-in-out infinite alternate;
+}
+@keyframes sign-drift {
+  from { background-position: 0 0, 100% 0, 0 0; }
+  to { background-position: 100% 0, 0 0, 100% 0; }
+}
+/* The page ends on the sign: nothing under it. */
+.site-foot {
+  overflow: hidden;
+}
+
+/* A public page is the shipped site: the mock API's dev chip never shows on it. */
+body:has(.site) #timo-mock-panel {
+  display: none !important;
+}
+
+@media (max-width: 760px) {
+  .site-foot-inner {
+    grid-template-columns: 1fr;
+  }
+  .site-foot-cols {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rise {
+    animation: none;
+  }
+  .reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+  .timo-mark--loop rect {
+    animation: none;
+  }
+}

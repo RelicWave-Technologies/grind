@@ -1,0 +1,142 @@
+<!doctype html>
+<!--
+  Timo "your day" film (landing section 03). The opener draws a day on one ribbon, filling
+  minute by minute. Then the real dashboard (plates/day.mjs, the mock's member Ananya): Edit time,
+  the ribbon, down to a gap nobody tracked, a reason typed in, sent for approval, now Pending.
+  Closes on the sign. Every person and number is the mock's sample data.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="base.css" />
+    <link rel="stylesheet" href="feature.css" />
+    <style>
+      #q { top: 250px; }
+      .rib {
+        position: absolute;
+        top: 560px;
+        left: 260px;
+        width: 1400px;
+        height: 110px;
+        border: 1px solid var(--color-line);
+        border-radius: 22px;
+        background: rgb(255 255 255 / 0.7);
+      }
+      .seg {
+        position: absolute;
+        top: 14px;
+        bottom: 14px;
+        border-radius: 8px;
+      }
+      .seg.work { background: var(--color-ribbon-work); }
+      .seg.meeting { background: var(--color-ribbon-meeting); }
+      .seg.idle { background: var(--color-ribbon-idle); }
+      .seg.manual { background: repeating-linear-gradient(135deg, var(--color-ribbon-manual) 0 10px, var(--color-ribbon-manual-stripe) 10px 13px); }
+      .nowline {
+        position: absolute;
+        top: -12px;
+        bottom: -12px;
+        width: 4px;
+        margin-left: -2px;
+        border-radius: 2px;
+        background: var(--color-ink);
+      }
+      .axis {
+        position: absolute;
+        top: 690px;
+        left: 260px;
+        width: 1400px;
+        display: flex;
+        justify-content: space-between;
+        font: 400 22px/1 var(--font-mono);
+        color: var(--color-muted);
+      }
+      .total {
+        position: absolute;
+        top: 770px;
+        left: 0;
+        right: 0;
+        text-align: center;
+        font: 400 40px/1.2 var(--font-sans);
+        color: var(--color-ink-2);
+        font-variant-numeric: tabular-nums;
+      }
+      .total b { font-weight: 500; color: var(--color-brand); }
+    </style>
+  </head>
+  <body>
+    <div class="film">
+      <div class="opener" id="opener">
+        <h2 class="display" id="q"><span>Every</span> <span>minute,</span> <span class="soft">where</span> <span class="soft">it</span> <span class="soft">really</span> <span class="soft">was.</span></h2>
+        <div class="rib" id="rib"><span class="nowline" id="nowline"></span></div>
+        <div class="axis"><span>9 AM</span><span>12 PM</span><span>3 PM</span><span>6 PM</span></div>
+        <p class="total" id="total"></p>
+      </div>
+      <div id="caps"></div>
+      <div class="stage3d"><div class="app window" id="app"><img id="plate" alt="" /></div></div>
+      <h2 class="tagline display" id="tagline"></h2>
+      <div id="sign"></div>
+    </div>
+    <script type="module">
+      import { p, mix, css, ease } from './kit.js';
+      import { feature } from './feature.js';
+      const $ = (id) => document.getElementById(id);
+      const O = 132;
+      const W = [...$('q').querySelectorAll('span')];
+      // A made-up day, in minutes from 9:00 (the landing page's live ribbon draws the same one).
+      const DAY = [
+        ['work', 4, 98], ['meeting', 98, 140], ['work', 140, 212], ['idle', 212, 262],
+        ['work', 262, 340], ['manual', 340, 372], ['work', 372, 470], ['meeting', 470, 500], ['work', 500, 532],
+      ];
+      const SPAN = 540, PX = 1400 - 28;
+      const segs = DAY.map(([kind]) => {
+        const el = document.createElement('span');
+        el.className = `seg ${kind}`;
+        $('rib').append(el);
+        return el;
+      });
+      const fmt = (m) => `${Math.floor(m / 60)}h ${String(Math.round(m % 60)).padStart(2, '0')}m`;
+
+      function opener(f) {
+        W.forEach((w, k) => {
+          const t = p(f, 4 + k * 4, 24 + k * 4, ease.outQuint);
+          css(w, { opacity: String(t), transform: `translateY(${mix(36, 0, t)}px)` });
+        });
+        const box = p(f, 18, 32, ease.outQuint);
+        css($('rib'), { opacity: String(box), transform: `scaleX(${mix(0.96, 1, box)})` });
+        const t = p(f, 30, 104, (x) => 1 - Math.pow(1 - x, 2.2)) * SPAN;
+        let worked = 0;
+        DAY.forEach(([kind, a, b], i) => {
+          const shown = Math.max(0, Math.min(t, b) - a);
+          if (kind === 'work' || kind === 'manual') worked += shown;
+          css(segs[i], { left: `${14 + (a / SPAN) * PX}px`, width: `${(shown / SPAN) * PX}px`, opacity: shown > 0 ? '1' : '0' });
+        });
+        css($('nowline'), { left: `${14 + (t / SPAN) * PX}px`, opacity: t > 0 && t < SPAN ? '1' : '0' });
+        $('total').innerHTML = `Tracked today <b>${fmt(worked)}</b>`;
+        css($('total'), { opacity: String(p(f, 34, 48)) });
+        const gone = p(f, O - 26, O - 4, ease.inOut);
+        css($('opener'), { opacity: String(1 - gone), transform: `translateY(${mix(0, -80, gone)}px)` });
+        $('opener').style.visibility = f < O + 12 ? 'visible' : 'hidden';
+      }
+
+      // Plate marks: day 0, gap 168, type 261, sent 335 (417 frames).
+      feature({
+        plate: '/tmp/timo-film/plates/day',
+        plateFrames: 417,
+        opener: O,
+        poster: O + 6 + 80,
+        app: { top: 206, left: 220, width: 1480, height: 925 },
+        caps: [
+          { at: 0, eyebrow: 'Edit time', title: 'Your whole day, on one ribbon.' },
+          { at: 168, eyebrow: 'A gap', title: 'Minutes nobody pressed play for.' },
+          { at: 261, eyebrow: 'Manual time', title: 'Say what it was. Send it.' },
+          { at: 335, eyebrow: 'Pending', title: 'It counts once it is approved.' },
+        ],
+        tagline: 'Your day, <span class="soft">minute by minute.</span>',
+        render: opener,
+      });
+      await document.fonts.ready;
+      window.ready = true;
+    </script>
+  </body>
+</html>

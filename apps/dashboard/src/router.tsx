@@ -27,9 +27,10 @@ const OverviewScreen = lazyRouteComponent(() => import('./screens/Overview'), 'O
 const IntegrationsScreen = lazyRouteComponent(() => import('./screens/Integrations'), 'IntegrationsScreen');
 const ReportsScreen = lazyRouteComponent(() => import('./screens/Reports'), 'ReportsScreen');
 const ProfileScreen = lazyRouteComponent(() => import('./screens/Profile'), 'ProfileScreen');
-const ChangelogScreen = lazyRouteComponent(() => import('./screens/Changelog'), 'ChangelogScreen');
+const ChangelogScreen = lazyRouteComponent(() => import('./site/Changelog'), 'ChangelogScreen');
+const PrivacyScreen = lazyRouteComponent(() => import('./site/Privacy'), 'PrivacyScreen');
 const CalendarScreen = lazyRouteComponent(() => import('./screens/Calendar'), 'CalendarScreen');
-const WelcomeScreen = lazyRouteComponent(() => import('./screens/Welcome'), 'WelcomeScreen');
+const LandingScreen = lazyRouteComponent(() => import('./site/Landing'), 'LandingScreen');
 
 interface RouterContext {
   queryClient: QueryClient;
@@ -306,39 +307,33 @@ const changelogRoute = createRoute({
   component: ChangelogScreen,
 });
 
+// The privacy policy — public, linked from every public page's footer.
+const privacyRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/privacy',
+  component: PrivacyScreen,
+});
+
 // Public landing page — static marketing surface, no workspace data.
 const welcomeRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/welcome',
-  component: WelcomeScreen,
+  component: LandingScreen,
 });
 
-// The front door. Logged-out visitors get the marketing page at the bare
-// domain; anyone with a session is sent straight into the app. Keeping the
-// landing ON '/' (rather than redirecting) is what makes timo.emiactech.com
-// behave like a normal product site.
+// The front door: the landing page, for everyone, signed in or not. The app
+// is entered from it (Sign in / Open the dashboard), never instead of it.
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/',
-  beforeLoad: async ({ context }) => {
-    // Fail open: the landing page needs no data, so an unreachable API must
-    // still render marketing rather than an error boundary. Only a confirmed
-    // session sends you into the app.
-    let me: Me | null = null;
-    try {
-      me = await context.queryClient.fetchQuery<Me | null>(meQuery);
-    } catch {
-      me = null;
-    }
-    if (me) throw redirect({ to: landingPath(me) });
-  },
-  component: WelcomeScreen,
+  component: LandingScreen,
 });
 
 export const routeTree = rootRoute.addChildren([
   authedRoot.addChildren([homeRoute, overviewRoute, editTimeRoute, meTodayLegacyRoute, reportsRoute, approvalsRoute, profileRoute, teamRoute, attendanceRoute, calendarRoute, flagsRoute, usersRoute, teamsAdminRoute, shiftsRoute, policyRoute, integrationsRoute, payrollRoute]),
   loginRoute,
   changelogRoute,
+  privacyRoute,
   welcomeRoute,
   indexRoute,
 ]);

@@ -1,0 +1,124 @@
+<!doctype html>
+<!--
+  Timo team film (landing section 05, "The other half lives in your browser"). The opener: the
+  team's day as it happens, five people and who is tracking. Then the real dashboard
+  (plates/team.mjs, the mock's manager Arjun): Team today, the month's attendance, a request
+  approved, the week in reports. Four chapters, which the landing page's tabs follow. Closes on
+  the sign. Every person and number is the mock's sample data.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="base.css" />
+    <link rel="stylesheet" href="feature.css" />
+    <style>
+      #q { top: 250px; }
+      .people {
+        position: absolute;
+        top: 540px;
+        left: 0;
+        right: 0;
+        display: flex;
+        justify-content: center;
+        gap: 28px;
+      }
+      .person {
+        display: grid;
+        justify-items: center;
+        gap: 14px;
+        width: 210px;
+        padding: 30px 0 26px;
+      }
+      .av {
+        position: relative;
+        display: grid;
+        place-items: center;
+        width: 104px;
+        height: 104px;
+        border-radius: 50%;
+        background: var(--color-sheet-2);
+        font: 500 36px/1 var(--font-sans);
+        color: var(--color-ink-2);
+      }
+      .av i {
+        position: absolute;
+        right: 4px;
+        bottom: 4px;
+        width: 26px;
+        height: 26px;
+        border: 4px solid var(--color-white);
+        border-radius: 50%;
+        background: var(--color-faint);
+      }
+      .av i.on { background: var(--color-good); }
+      .person b { font: 500 24px/1 var(--font-sans); color: var(--color-ink); }
+      .person span { font: 400 22px/1 var(--font-mono); color: var(--color-muted); font-variant-numeric: tabular-nums; }
+    </style>
+  </head>
+  <body>
+    <div class="film">
+      <div class="opener" id="opener">
+        <h2 class="display" id="q"><span>Your</span> <span>team's</span> <span>day,</span> <span class="soft">as</span> <span class="soft">it</span> <span class="soft">happens.</span></h2>
+        <div class="people" id="people"></div>
+      </div>
+      <div id="caps"></div>
+      <div class="stage3d"><div class="app window" id="app"><img id="plate" alt="" /></div></div>
+      <h2 class="tagline display" id="tagline"></h2>
+      <div id="sign"></div>
+    </div>
+    <script type="module">
+      import { p, mix, css, ease } from './kit.js';
+      import { feature } from './feature.js';
+      const $ = (id) => document.getElementById(id);
+      const O = 128;
+      const W = [...$('q').querySelectorAll('span')];
+      // The mock's team (made-up people); minutes tracked so far today, and who is tracking now.
+      const TEAM = [['AM', 'Arjun', 342, true], ['VR', 'Vikram', 288, true], ['DO', 'Daniel', 301, false], ['PV', 'Priya', 265, true], ['HT', 'Hiroshi', 236, false]];
+      const cards = TEAM.map(([ini, name, , on]) => {
+        const el = document.createElement('div');
+        el.className = 'person surface';
+        el.innerHTML = `<div class="av">${ini}<i class="${on ? 'on' : ''}"></i></div><b>${name}</b><span></span>`;
+        $('people').append(el);
+        return el;
+      });
+      const fmt = (m) => `${Math.floor(m / 60)}h ${String(Math.floor(m % 60)).padStart(2, '0')}m`;
+
+      function opener(f) {
+        W.forEach((w, k) => {
+          const t = p(f, 4 + k * 4, 24 + k * 4, ease.outQuint);
+          css(w, { opacity: String(t), transform: `translateY(${mix(36, 0, t)}px)` });
+        });
+        cards.forEach((el, k) => {
+          const t = p(f, 26 + k * 5, 46 + k * 5, ease.outQuint);
+          css(el, { opacity: String(t), transform: `translateY(${mix(40, 0, t)}px)` });
+          // Those tracking tick on, a minute every few frames; the others hold still.
+          const [, , base, on] = TEAM[k];
+          el.querySelector('span').textContent = fmt(base + (on ? Math.max(0, f - 40) / 6 : 0));
+        });
+        const gone = p(f, O - 26, O - 4, ease.inOut);
+        css($('opener'), { opacity: String(1 - gone), transform: `translateY(${mix(0, -80, gone)}px)` });
+        $('opener').style.visibility = f < O + 12 ? 'visible' : 'hidden';
+      }
+
+      // Plate marks: today 0, attendance 167, approvals 352, approved 439, reports 558 (692).
+      feature({
+        plate: '/tmp/timo-film/plates/team',
+        plateFrames: 692,
+        opener: O,
+        poster: O + 6 + 90,
+        app: { top: 206, left: 220, width: 1480, height: 925 },
+        caps: [
+          { at: 0, eyebrow: 'Team today', title: 'Who is working, right now.' },
+          { at: 167, eyebrow: 'Attendance', title: 'The month, in the same numbers as the Excel.' },
+          { at: 352, eyebrow: 'Approvals', title: 'Waiting on you. One click.' },
+          { at: 439, eyebrow: 'Approved', title: 'And it counts, straight away.' },
+          { at: 558, eyebrow: 'Reports', title: 'The week, honestly.' },
+        ],
+        tagline: 'The other half <span class="soft">lives in your browser.</span>',
+        render: opener,
+      });
+      await document.fonts.ready;
+      window.ready = true;
+    </script>
+  </body>
+</html>

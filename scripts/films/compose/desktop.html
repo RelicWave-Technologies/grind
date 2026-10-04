@@ -1,0 +1,83 @@
+<!doctype html>
+<!--
+  Timo desktop film (landing section 02, "Install it once"). The opener: "Press play." and a
+  clock that starts. Then the real window (the Agent Lab, plates/desktop.mjs): nothing tracking,
+  a task picked, the clock running in real seconds, then My day with the counts behind it.
+  Closes on the sign. Every person and number is the Lab's sample data.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="base.css" />
+    <link rel="stylesheet" href="feature.css" />
+    <style>
+      #q { top: 300px; }
+      .clock {
+        position: absolute;
+        top: 470px;
+        left: 0;
+        right: 0;
+        text-align: center;
+        font: 400 200px/1 var(--font-sans);
+        letter-spacing: -0.04em;
+        font-variant-numeric: tabular-nums;
+        color: var(--color-ink);
+      }
+      .clock .sep { color: var(--color-line-strong); }
+      .clock .s { color: var(--color-brand); }
+    </style>
+  </head>
+  <body>
+    <div class="film">
+      <div class="opener" id="opener">
+        <h2 class="display" id="q"><span>Press</span> <span class="now">play.</span></h2>
+        <div class="clock" id="clock"></div>
+      </div>
+      <div id="caps"></div>
+      <div class="stage3d"><div class="app window" id="app"><img id="plate" alt="" /></div></div>
+      <h2 class="tagline display" id="tagline"></h2>
+      <div id="sign"></div>
+    </div>
+    <script type="module">
+      import { p, mix, css, ease } from './kit.js';
+      import { feature } from './feature.js';
+      const $ = (id) => document.getElementById(id);
+      const O = 104;
+      const W = [...$('q').querySelectorAll('span')];
+      const two = (n) => String(n).padStart(2, '0');
+
+      function opener(f) {
+        W.forEach((w, k) => {
+          const t = p(f, 6 + k * 6, 28 + k * 6, ease.outQuint);
+          css(w, { opacity: String(t), transform: `translateY(${mix(40, 0, t)}px)` });
+        });
+        // The clock starts at frame 30 and counts real seconds.
+        const c = p(f, 24, 40, ease.outQuint);
+        const secs = Math.max(0, Math.floor((f - 30) / 30));
+        $('clock').innerHTML = `00<span class="sep">:</span>00<span class="sep">:</span><span class="s">${two(secs)}</span>`;
+        css($('clock'), { opacity: String(c), transform: `translateY(${mix(30, 0, c)}px)` });
+        const gone = p(f, O - 26, O - 4, ease.inOut);
+        css($('opener'), { opacity: String(1 - gone), transform: `translateY(${mix(0, -80, gone)}px)` });
+        $('opener').style.visibility = f < O + 12 ? 'visible' : 'hidden';
+      }
+
+      // Plate marks: pick 0, tracking 69, myday 216 (300 frames).
+      feature({
+        plate: '/tmp/timo-film/plates/desktop',
+        plateFrames: 300,
+        opener: O,
+        poster: O + 6 + 150,
+        app: { top: 214, left: 360, width: 1200, height: 800, lights: true },
+        caps: [
+          { at: 0, eyebrow: 'The desktop app', title: 'What are you working on?' },
+          { at: 69, eyebrow: 'Tracking', title: 'Press play. It counts real seconds.' },
+          { at: 216, eyebrow: 'My day', title: 'Keys and clicks counted. Never read.' },
+        ],
+        tagline: 'Install it once. <span class="soft">Forget it exists.</span>',
+        render: opener,
+      });
+      await document.fonts.ready;
+      window.ready = true;
+    </script>
+  </body>
+</html>
