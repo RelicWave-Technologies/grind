@@ -1,71 +1,40 @@
-import { useEffect } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { MonitorCheck, Power, CheckCircle2, AlertCircle, Keyboard, PictureInPicture2, RefreshCw, DownloadCloud } from 'lucide-react';
-import larkIcon from '../assets/lark.svg';
-import { settingsUpdateSubtitle, updateAction, updatePercent } from '../lib/updateUi';
+import { useEffect, useState, type ComponentType } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Info, Plug, ShieldCheck, SlidersHorizontal, X, type LucideIcon } from 'lucide-react';
+import GeneralSection from './settings/General';
+import PermissionsSection from './settings/Permissions';
+import IntegrationsSection from './settings/Integrations';
+import AboutSection from './settings/About';
 
-type SettingsInfo = Awaited<ReturnType<typeof window.agent.settings.get>>;
+type SectionId = 'general' | 'permissions' | 'integrations' | 'about';
 
-export default function Settings() {
+const SECTIONS: ReadonlyArray<{
+  id: SectionId;
+  label: string;
+  description: string;
+  Icon: LucideIcon;
+  Body: ComponentType;
+}> = [
+  { id: 'general', label: 'General', description: 'How Timo starts, and the floating timer bar.', Icon: SlidersHorizontal, Body: GeneralSection },
+  { id: 'permissions', label: 'Permissions', description: 'What your Mac lets Timo see while the timer runs.', Icon: ShieldCheck, Body: PermissionsSection },
+  { id: 'integrations', label: 'Integrations', description: 'Where the tasks you track come from.', Icon: Plug, Body: IntegrationsSection },
+  { id: 'about', label: 'About', description: 'Updates and the version you are running.', Icon: Info, Body: AboutSection },
+];
+
+/**
+ * Settings as a modal with a section list on the left and one section at a
+ * time on the right. A small dot on a section says it needs you (a missing
+ * permission, Lark to reconnect, an update waiting, startup not set up).
+ */
+export default function Settings({ onClose }: { onClose: () => void }) {
   const qc = useQueryClient();
+  const [section, setSection] = useState<SectionId>('general');
+  const needs = useSectionNeeds();
   const info = useQuery({ queryKey: ['settings'], queryFn: () => window.agent.settings.get(), refetchInterval: 4000 });
-  const permissions = useQuery({ queryKey: ['trackingReadiness'], queryFn: () => window.agent.permissions.readiness(), refetchInterval: 4000 });
-  const lark = useQuery({ queryKey: ['larkStatus'], queryFn: () => window.agent.lark.status(), refetchInterval: 4000 });
-  const updates = useQuery({ queryKey: ['updates'], queryFn: () => window.agent.updates.status(), refetchInterval: 60_000 });
-
-  const repairLogin = useMutation({
-    mutationFn: () => window.agent.settings.repairLaunchAtLogin(),
-    onSuccess: (launchAtLogin) => {
-      qc.setQueryData<SettingsInfo | undefined>(
-        ['settings'],
-        (current) => current ? { ...current, launchAtLogin } : current,
-      );
-      if (launchAtLogin.remediation === 'OPEN_LOGIN_ITEMS' || launchAtLogin.remediation === 'OPEN_STARTUP_APPS') {
-        void window.agent.settings.openStartupPrefs();
-      }
-      void qc.invalidateQueries({ queryKey: ['settings'] });
-    },
-  });
-  const moveToApplications = useMutation({
-    mutationFn: () => window.agent.settings.moveToApplications(),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ['settings'] }),
-  });
-
-  const setFloatingBar = useMutation({
-    mutationFn: (v: boolean) => window.agent.settings.setFloatingBarVisible(v),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ['settings'] }),
-  });
-  const resetFloatingBar = useMutation({
-    mutationFn: () => window.agent.settings.resetFloatingBarPosition(),
-  });
-
-  const connectLark = useMutation({
-    mutationFn: () => window.agent.lark.connect(),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ['larkStatus'] }),
-  });
-  const disconnectLark = useMutation({
-    mutationFn: () => window.agent.lark.disconnect(),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ['larkStatus'] }),
-  });
-  const checkUpdates = useMutation({
-    mutationFn: () => window.agent.updates.checkNow(),
-    onSuccess: (s) => qc.setQueryData(['updates'], s),
-  });
-  const installUpdate = useMutation({
-    mutationFn: () => window.agent.updates.installNow(),
-    onSuccess: (s) => qc.setQueryData(['updates'], s),
-  });
 
   useEffect(() => {
     return window.agent.updates.onStatusChange((s) => {
       qc.setQueryData(['updates'], s);
-    });
-  }, [qc]);
-
-  useEffect(() => {
-    return window.agent.lark.onConnectionChange(() => {
-      void qc.invalidateQueries({ queryKey: ['larkStatus'] });
-      void qc.invalidateQueries({ queryKey: ['larkTasks'] });
     });
   }, [qc]);
 
@@ -81,286 +50,58 @@ export default function Settings() {
     };
   }, [qc]);
 
-  const l = lark.data;
-  const larkConnected = !!l?.connected;
-  const larkReauth = !!l?.reauthRequired;
-  const larkSub = !l?.configured
-    ? { ok: false, text: 'Not configured by your workspace' }
-    : larkReauth
-      ? { ok: false, text: 'Reconnect needed — your Lark access changed or expired' }
-      : larkConnected
-        ? { ok: true, text: 'Connected' }
-        : { ok: false, text: 'Connect to attribute time to Lark tasks' };
-
-  const screenState = permissions.data?.screenRecording ?? 'NEEDS_GRANT';
-  const screenReady = screenState === 'READY' || screenState === 'NOT_REQUIRED';
-  const screenText = screenReady
-    ? 'Ready'
-    : screenState === 'NEEDS_GRANT'
-      ? 'Required for screenshots'
-      : screenState === 'NEEDS_SETTINGS'
-        ? 'Enable in System Settings'
-        : 'Restart needed for capture to take effect';
-  const accessibilityState = permissions.data?.accessibility ?? 'NEEDS_GRANT';
-  const accessibilityReady = accessibilityState === 'READY' || accessibilityState === 'NOT_REQUIRED';
-  const accessibilityText = accessibilityReady
-    ? 'Ready — counts while the timer runs'
-    : accessibilityState === 'NEEDS_GRANT'
-      ? 'Needed to count keystrokes & mouse'
-      : accessibilityState === 'NEEDS_SETTINGS'
-        ? 'Enable in System Settings'
-        : 'Restart Timo to start activity tracking';
-  const u = updates.data;
-  const updateBusy = u?.phase === 'checking' || u?.phase === 'downloading' || u?.phase === 'installing' || checkUpdates.isPending;
-  const updatePercentValue = updatePercent(u);
-  const updateSub = settingsUpdateSubtitle(u);
-  const updateButton = updateAction(u, updateBusy || installUpdate.isPending);
-  const inspectedLaunch = info.data?.launchAtLogin;
-  const attemptedLaunch = repairLogin.data;
-  const launch = attemptedLaunch && !attemptedLaunch.ready && inspectedLaunch?.state !== 'READY'
-    ? attemptedLaunch
-    : inspectedLaunch;
-  const launchText = !launch
-    ? 'Checking startup status...'
-    : launch.state === 'READY'
-      ? 'Starts automatically when you sign in'
-      : launch.state === 'NEEDS_INSTALL'
-        ? 'Move Timo to Applications to enable startup'
-        : launch.state === 'NEEDS_APPROVAL'
-          ? 'Approve Timo in Login Items'
-          : launch.state === 'NEEDS_REGISTRATION'
-            ? 'Startup registration is missing'
-            : launch.state === 'NEEDS_REPAIR'
-              ? 'Startup item is disabled or points to the wrong app'
-              : launch.state === 'BLOCKED'
-                ? 'Startup is blocked by system settings'
-                : 'Unavailable in dev mode';
-  const moveError = moveToApplications.data?.ok === false
-    ? moveToApplications.data.reason === 'TRACKING_ACTIVE'
-      ? 'Stop tracking before moving Timo.'
-      : moveToApplications.data.reason === 'MOVE_FAILED'
-        ? 'Timo could not be moved. Check Applications folder access.'
-        : null
-    : null;
-  const launchOk = launch?.ready === true;
-  const launchWarn = !!launch && !launch.ready && launch.state !== 'UNAVAILABLE';
+  const current = SECTIONS.find((s) => s.id === section) ?? SECTIONS[0]!;
+  const Body = current.Body;
 
   return (
-    <>
-      <div className="content-narrow">
-          {/* Permissions */}
-          <div className="section-head"><span className="section-title">Permissions</span></div>
-          <div className="set-card">
-            <div className="set-row">
-              <span className="set-ic">
-                <MonitorCheck size={17} strokeWidth={2} />
-              </span>
-              <div className="set-main">
-                <div className="set-title">Screen Recording</div>
-                <div className="set-sub">
-                  {screenReady ? (
-                    <span className="set-ok"><CheckCircle2 size={13} /> {screenText}</span>
-                  ) : (
-                    <span className="set-warn"><AlertCircle size={13} /> {screenText}</span>
-                  )}
-                </div>
-              </div>
-              {screenState === 'NEEDS_RESTART' || screenState === 'FAILED' ? (
-                <button className="btn btn-prominent no-drag" onClick={() => window.agent.app.relaunch()}>
-                  Restart Timo
-                </button>
-              ) : screenState === 'NEEDS_GRANT' ? (
-                <button className="btn no-drag" onClick={() => window.agent.permissions.requestScreen()}>
-                  Enable
-                </button>
-              ) : !screenReady ? (
-                <button className="btn no-drag" onClick={() => window.agent.settings.openScreenPrefs()}>
-                  Open System Settings
-                </button>
-              ) : null}
-            </div>
-
-            <div className="set-row">
-              <span className="set-ic">
-                <Keyboard size={17} strokeWidth={2} />
-              </span>
-              <div className="set-main">
-                <div className="set-title">Accessibility</div>
-                <div className="set-sub">
-                  {accessibilityReady ? (
-                    <span className="set-ok"><CheckCircle2 size={13} /> {accessibilityText}</span>
-                  ) : (
-                    <span className="set-warn"><AlertCircle size={13} /> {accessibilityText}</span>
-                  )}
-                </div>
-              </div>
-              {accessibilityState === 'NEEDS_RESTART' || accessibilityState === 'FAILED' ? (
-                <button className="btn btn-prominent no-drag" onClick={() => window.agent.app.relaunch()}>
-                  Restart Timo
-                </button>
-              ) : !accessibilityReady ? (
-                <button className="btn no-drag" onClick={() => window.agent.permissions.requestAccessibility()}>
-                  Enable
-                </button>
-              ) : null}
-            </div>
+    <div className="set-modal">
+      <nav className="set-nav" aria-label="Settings sections">
+        <span className="set-nav-eyebrow">Settings</span>
+        {SECTIONS.map(({ id, label, Icon }) => (
+          <button
+            key={id}
+            className={`set-nav-item no-drag${id === section ? ' on' : ''}`}
+            onClick={() => setSection(id)}
+            aria-current={id === section ? 'page' : undefined}
+          >
+            <Icon size={16} strokeWidth={2} />
+            <span className="set-nav-label">{label}</span>
+            {needs[id] && <i className="set-nav-dot" aria-label="Needs attention" />}
+          </button>
+        ))}
+        <span className="set-nav-foot">Timo {info.data?.version ? `v${info.data.version}` : ''}</span>
+      </nav>
+      <section className="set-pane" aria-labelledby="set-pane-title">
+        <header className="set-pane-head">
+          <div className="set-pane-copy">
+            <h2 id="set-pane-title">{current.label}</h2>
+            <p>{current.description}</p>
           </div>
-
-          {/* Integrations */}
-          <div className="section-head"><span className="section-title">Integrations</span></div>
-          <div className="set-card">
-            <div className="set-row">
-              <span className="set-ic">
-                <img className="lark-icon lark-icon--setting" src={larkIcon} alt="" />
-              </span>
-              <div className="set-main">
-                <div className="set-title">Lark</div>
-                <div className="set-sub">
-                  {larkSub.ok ? (
-                    <span className="set-ok"><CheckCircle2 size={13} /> {larkSub.text}</span>
-                  ) : l?.configured === false ? (
-                    <span className="set-sub secondary">{larkSub.text}</span>
-                  ) : (
-                    <span className="set-warn"><AlertCircle size={13} /> {larkSub.text}</span>
-                  )}
-                </div>
-              </div>
-              {l?.configured === false ? null : larkConnected && !larkReauth ? (
-                <button
-                  className="btn no-drag"
-                  onClick={() => disconnectLark.mutate()}
-                  disabled={disconnectLark.isPending}
-                >
-                  Disconnect
-                </button>
-              ) : (
-                <button
-                  className="btn btn-prominent no-drag"
-                  onClick={() => connectLark.mutate()}
-                  disabled={connectLark.isPending}
-                >
-                  {larkReauth ? 'Reconnect' : connectLark.isPending ? 'Opening…' : 'Connect'}
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* General */}
-          <div className="section-head"><span className="section-title">General</span></div>
-          <div className="set-card">
-            <div className="set-row">
-              <span className="set-ic"><Power size={17} strokeWidth={2} /></span>
-              <div className="set-main">
-                <div className="set-title">Launch at login</div>
-                <div className="set-sub">
-                  {launchOk ? (
-                    <span className="set-ok"><CheckCircle2 size={13} /> {launchText}</span>
-                  ) : launchWarn ? (
-                    <span className="set-warn"><AlertCircle size={13} /> {moveError ?? launchText}</span>
-                  ) : (
-                    <span className="secondary">{launchText}</span>
-                  )}
-                </div>
-              </div>
-              {launch?.remediation === 'MOVE_TO_APPLICATIONS' ? (
-                <button
-                  className="btn btn-prominent no-drag"
-                  onClick={() => moveToApplications.mutate()}
-                  disabled={moveToApplications.isPending}
-                >
-                  Move to Applications
-                </button>
-              ) : launch?.remediation === 'OPEN_LOGIN_ITEMS' || launch?.remediation === 'OPEN_STARTUP_APPS' ? (
-                <button className="btn no-drag" onClick={() => window.agent.settings.openStartupPrefs()}>
-                  {launch.remediation === 'OPEN_LOGIN_ITEMS' ? 'Open Login Items' : 'Open Startup Apps'}
-                </button>
-              ) : launch?.canRepair ? (
-                <button
-                  className="btn btn-prominent no-drag"
-                  onClick={() => repairLogin.mutate()}
-                  disabled={repairLogin.isPending}
-                >
-                  Repair
-                </button>
-              ) : null}
-            </div>
-            <div className="set-row">
-              <span className="set-ic"><PictureInPicture2 size={17} strokeWidth={2} /></span>
-              <div className="set-main">
-                <div className="set-title">Floating timer bar</div>
-                <div className="set-sub secondary">
-                  Show the always-on-top mini bar while tracking. Drag it anywhere — it stays put.
-                  {info.data?.floatingBarVisible && (
-                    <>
-                      {' '}
-                      <button
-                        className="link-btn no-drag"
-                        onClick={() => resetFloatingBar.mutate()}
-                        disabled={resetFloatingBar.isPending}
-                      >
-                        Reset position
-                      </button>
-                    </>
-                  )}
-                </div>
-              </div>
-              <button
-                role="switch"
-                aria-checked={!!info.data?.floatingBarVisible}
-                className={`toggle no-drag${info.data?.floatingBarVisible ? ' on' : ''}`}
-                onClick={() => setFloatingBar.mutate(!info.data?.floatingBarVisible)}
-                disabled={setFloatingBar.isPending}
-              >
-                <span className="toggle-knob" />
-              </button>
-            </div>
-          </div>
-
-          {/* About */}
-          <div className="section-head"><span className="section-title">About</span></div>
-          <div className="set-card">
-            <div className="set-row">
-              <span className="set-ic">
-                {u?.phase === 'ready' || u?.phase === 'installing' ? <DownloadCloud size={17} strokeWidth={2} /> : <RefreshCw size={17} strokeWidth={2} />}
-              </span>
-              <div className="set-main">
-                <div className="set-title">Updates</div>
-                <div className="set-sub secondary">
-                  {updateSub}
-                  {u?.phase === 'downloading' && (
-                    <span className="update-progress" aria-label={`Downloading ${updatePercentValue}%`}>
-                      <span style={{ width: `${updatePercentValue}%` }} />
-                    </span>
-                  )}
-                  {u?.phase === 'error' && u.manual && u.error ? ` · ${u.error}` : ''}
-                </div>
-              </div>
-              {updateButton.kind === 'restart' ? (
-                <button
-                  className="btn btn-prominent no-drag"
-                  onClick={() => installUpdate.mutate()}
-                  disabled={updateButton.disabled}
-                >
-                  {updateButton.label}
-                </button>
-              ) : updateButton.kind === 'check' ? (
-                <button
-                  className="btn no-drag"
-                  onClick={() => checkUpdates.mutate()}
-                  disabled={updateButton.disabled}
-                >
-                  {updateButton.label}
-                </button>
-              ) : null}
-            </div>
-            <div className="set-row">
-              <div className="set-main">
-                <div className="set-title">Timo</div>
-                <div className="set-sub secondary">Version {info.data?.version ?? '—'} · {info.data?.platform ?? ''}</div>
-              </div>
-            </div>
-          </div>
-      </div>
-    </>
+          <button className="icon-btn no-drag" onClick={onClose} aria-label="Close" title="Close (Esc)">
+            <X size={16} strokeWidth={2} />
+          </button>
+        </header>
+        <div className="set-pane-body">
+          <Body />
+        </div>
+      </section>
+    </div>
   );
+}
+
+/** Which sections have something for you to do, from the same queries the sections use. */
+function useSectionNeeds(): Record<SectionId, boolean> {
+  const info = useQuery({ queryKey: ['settings'], queryFn: () => window.agent.settings.get(), refetchInterval: 4000 });
+  const permissions = useQuery({ queryKey: ['trackingReadiness'], queryFn: () => window.agent.permissions.readiness(), refetchInterval: 4000 });
+  const lark = useQuery({ queryKey: ['larkStatus'], queryFn: () => window.agent.lark.status(), refetchInterval: 4000 });
+  const updates = useQuery({ queryKey: ['updates'], queryFn: () => window.agent.updates.status(), refetchInterval: 60_000 });
+
+  const ready = (s: string | undefined) => s === undefined || s === 'READY' || s === 'NOT_REQUIRED';
+  const launch = info.data?.launchAtLogin;
+  return {
+    general: !!launch && !launch.ready && launch.state !== 'UNAVAILABLE',
+    permissions: !ready(permissions.data?.screenRecording) || !ready(permissions.data?.accessibility),
+    integrations: lark.data?.configured === true && (!lark.data.connected || lark.data.reauthRequired),
+    about: updates.data?.phase === 'ready',
+  };
 }

@@ -124,8 +124,8 @@ export default function MainLayout() {
         <Sheet open={panel === 'day'} onClose={close} side="right" title="My day">
           <MyDay />
         </Sheet>
-        <Sheet open={panel === 'settings'} onClose={close} title="Settings">
-          <Settings />
+        <Sheet open={panel === 'settings'} onClose={close} side="modal" title="Settings">
+          <Settings onClose={close} />
         </Sheet>
       </div>
     </ToastProvider>
