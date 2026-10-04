@@ -19,6 +19,11 @@
   color: inherit;
 }
 
+/* A section reached by its address clears the sticky header. */
+.site [id] {
+  scroll-margin-top: 80px;
+}
+
 .site-wrap {
   width: 100%;
   max-width: calc(var(--site-max) + 2 * var(--site-gutter));
@@ -329,6 +334,15 @@
   .site-nav-actions > .site-btn--primary {
     display: none;
   }
+}
+
+/* ---------- A page on its way ---------- */
+
+.site-pending {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  background: var(--color-white);
 }
 
 /* ---------- Intro ---------- */

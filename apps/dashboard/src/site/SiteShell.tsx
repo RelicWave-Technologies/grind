@@ -1,5 +1,7 @@
 import './site.css';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import type { MouseEvent } from 'react';
+import { useRouter } from '@tanstack/react-router';
 import type { ReactNode } from 'react';
 import { TimoMark, assembleMark } from './TimoMark';
 import { DownloadButton, useDownload } from './download';
@@ -17,6 +19,30 @@ const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)'
 
 type Page = 'home' | 'changelog' | 'privacy';
 
+// The intro belongs to opening the site: a reload plays it, moving between
+// the public pages inside the app does not.
+let firstPage = true;
+
+/**
+ * Every same-site link on a public page moves inside the app rather than
+ * reloading it: no blank page, no second download, the films keep their
+ * place in the cache. New tabs, downloads and other sites behave as links do.
+ */
+function useInAppLinks() {
+  const router = useRouter();
+  return (event: MouseEvent<HTMLElement>) => {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    const a = (event.target as HTMLElement).closest('a');
+    if (!a || a.target || a.hasAttribute('download')) return;
+    const url = new URL(a.href, window.location.href);
+    if (url.origin !== window.location.origin || url.pathname.startsWith('/v1/') || /\.[a-z0-9]+$/i.test(url.pathname)) return;
+    // A link to a section of the page already open just scrolls there.
+    if (url.pathname === window.location.pathname && url.hash) return;
+    event.preventDefault();
+    router.history.push(url.pathname + url.search + url.hash);
+  };
+}
+
 export function SiteShell({ page, title, intro = false, children }: { page: Page; title: string; intro?: boolean; children: ReactNode }) {
   useEffect(() => {
     const prev = document.title;
@@ -24,15 +50,24 @@ export function SiteShell({ page, title, intro = false, children }: { page: Page
     return () => { document.title = prev; };
   }, [title]);
   useReveal();
+  const onClick = useInAppLinks();
+  // A new page opens at its top, or at the section its address names.
+  useEffect(() => {
+    const id = window.location.hash.slice(1);
+    const target = id ? document.getElementById(id) : null;
+    if (target) target.scrollIntoView();
+    else window.scrollTo(0, 0);
+  }, []);
   // Decided once, in the first render, so the overlay is in the very first
   // paint and the page never flashes before the intro covers it.
-  const [showIntro, setShowIntro] = useState(() => intro && !reducedMotion());
+  const [showIntro, setShowIntro] = useState(() => intro && firstPage && !reducedMotion());
+  useEffect(() => { firstPage = false; }, []);
   // While the mark draws itself the page's own entrance waits, paused, and
   // starts as the mark takes off for the header.
   const [waiting, setWaiting] = useState(showIntro);
 
   return (
-    <div className={`site${waiting ? ' is-waiting' : ''}`}>
+    <div className={`site${waiting ? ' is-waiting' : ''}`} onClick={onClick}>
       <SiteHeader page={page} logoHidden={showIntro} />
       <main id="main">{children}</main>
       <SiteFooter />
@@ -136,6 +171,15 @@ export function TimoLoader({ size, label }: { size: number; label?: string }) {
       <TimoMark size={size} className="timo-mark--loop" />
       {label && <span className="timo-loader-label">{label}</span>}
     </span>
+  );
+}
+
+/** What a public page shows while it is on its way: the mark, turning. */
+export function SitePending() {
+  return (
+    <div className="site-pending" role="status" aria-label="Loading">
+      <TimoLoader size={56} />
+    </div>
   );
 }
 

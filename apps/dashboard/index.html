@@ -9,7 +9,21 @@
     <title>Timo — Dashboard</title>
   </head>
   <body>
-    <div id="root"></div>
+    <!-- Until the app's script has run: the Timo mark, turning, so a first load
+         is never a blank page. React replaces it on its first render. Values are
+         DESIGN.md's (ink, brand, the 1.8s loader turn); the tokens are not loaded yet. -->
+    <style>
+      .boot { position: fixed; inset: 0; display: grid; place-items: center; background: #fff; }
+      .boot rect { transform-box: fill-box; animation: 1.8s cubic-bezier(0.22, 1, 0.36, 1) infinite; }
+      .boot .b { transform-origin: left center; animation-name: boot-b; }
+      .boot .s { transform-origin: center top; animation-name: boot-s; }
+      .boot .n { transform-origin: center; animation-name: boot-n; }
+      @keyframes boot-b { 0% { transform: scaleX(0); } 28%, 78% { transform: none; opacity: 1; } 100% { opacity: 0; } }
+      @keyframes boot-s { 0%, 14% { transform: translateY(-8px) scaleY(0.2); opacity: 0; } 40%, 78% { transform: none; opacity: 1; } 100% { opacity: 0; } }
+      @keyframes boot-n { 0%, 34% { transform: scale(0.2); opacity: 0; } 46% { transform: scale(1.18); opacity: 1; } 54%, 78% { transform: none; opacity: 1; } 100% { opacity: 0; } }
+      @media (prefers-reduced-motion: reduce) { .boot rect { animation: none; } }
+    </style>
+    <div id="root"><div class="boot" role="status" aria-label="Loading"><svg width="56" height="56" viewBox="0 0 64 64" aria-hidden="true"><rect class="b" x="7" y="10" width="30" height="12" rx="6" fill="#111111" /><rect class="n" x="41" y="10" width="16" height="12" rx="6" fill="#2f6fd0" /><rect class="s" x="26" y="26" width="12" height="29" rx="6" fill="#111111" /></svg></div></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

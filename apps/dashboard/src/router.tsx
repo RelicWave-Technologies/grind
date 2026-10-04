@@ -11,6 +11,7 @@ import { hasCapability, landingPath } from './lib/auth';
 import type { Me } from './lib/auth';
 import { Layout } from './components/Layout';
 import { LoginScreen } from './screens/Login';
+import { SitePending } from './site/SiteShell';
 
 const UsersScreen = lazyRouteComponent(() => import('./screens/Users'), 'UsersScreen');
 const HomeScreen = lazyRouteComponent(() => import('./screens/Home'), 'HomeScreen');
@@ -304,6 +305,8 @@ const loginRoute = createRoute({
 const changelogRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/changelog',
+  pendingComponent: SitePending,
+  pendingMs: 120,
   component: ChangelogScreen,
 });
 
@@ -311,6 +314,8 @@ const changelogRoute = createRoute({
 const privacyRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/privacy',
+  pendingComponent: SitePending,
+  pendingMs: 120,
   component: PrivacyScreen,
 });
 
@@ -318,6 +323,8 @@ const privacyRoute = createRoute({
 const welcomeRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/welcome',
+  pendingComponent: SitePending,
+  pendingMs: 120,
   component: LandingScreen,
 });
 
@@ -326,6 +333,8 @@ const welcomeRoute = createRoute({
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/',
+  pendingComponent: SitePending,
+  pendingMs: 120,
   component: LandingScreen,
 });
 
