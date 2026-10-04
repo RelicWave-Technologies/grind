@@ -6,6 +6,10 @@ import type Database from 'better-sqlite3';
  * one-off recovery — never to re-run this one.
  */
 const RECOVER_STORAGE_OUTAGE = 'requeue:storage-outage-500';
+// Before beta.38 a shot was written off after five failures of any kind, so
+// ~15 minutes offline or a server hiccup lost it for good. Those deserve
+// another pass now that only a definitive refusal is terminal.
+const RECOVER_ATTEMPT_CAP = 'requeue:attempt-cap-v38';
 
 export type UploadState = 'pending' | 'uploading' | 'uploaded' | 'failed';
 
@@ -86,6 +90,7 @@ export class ScreenshotStore {
 // eslint-disable-next-line no-restricted-syntax -- device<->device: local retry scheduling, never sent
 .run(Date.now());
     this.requeueOnce(RECOVER_STORAGE_OUTAGE);
+    this.requeueOnce(RECOVER_ATTEMPT_CAP);
   }
 
   /**

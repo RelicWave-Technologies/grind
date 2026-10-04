@@ -77,4 +77,18 @@ describe('recovering a backlog written off during a storage outage', () => {
     expect(db.prepare(`SELECT upload_state FROM screenshots WHERE id='a'`).get())
       .toEqual({ upload_state: 'failed' });
   });
+
+  it('gives shots written off by the old five-attempt cap one more pass after upgrading', () => {
+    const db = new Database(':memory:');
+    openStore(db);
+    // An agent that already ran the storage-outage recovery, then lost shots
+    // to the attempt cap while offline.
+    db.prepare(`DELETE FROM capture_meta WHERE key = 'requeue:attempt-cap-v38'`).run();
+    seed(db, [{ id: 'offline', state: 'failed', attempts: 5 }]);
+    openStore(db);
+
+    expect(db.prepare(`SELECT upload_state, attempts FROM screenshots WHERE id='offline'`).get())
+      .toEqual({ upload_state: 'pending', attempts: 0 });
+  });
 });
+

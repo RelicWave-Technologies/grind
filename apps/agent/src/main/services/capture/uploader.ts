@@ -10,14 +10,15 @@ import { getScreenshotStore } from './index';
 import type { ScreenshotRow } from './store';
 import { broadcastScreenshotChange } from './events';
 
-/** Stop retrying a shot after this many failed attempts (Cloudinary/network). */
-const MAX_ATTEMPTS = 5;
 /** Shots uploaded per drain pass — keeps each pass short and the UI responsive. */
 const BATCH = 5;
 /** Background drain cadence. */
 const DRAIN_INTERVAL_MS = 60_000;
 const RETRY_MIN_MS = 60_000;
 const RETRY_MAX_MS = 60 * 60_000;
+/** Bound every request so one stalled connection cannot hold the drain forever. */
+const API_TIMEOUT_MS = 30_000;
+const UPLOAD_TIMEOUT_MS = 120_000;
 
 let draining = false;
 let timer: NodeJS.Timeout | null = null;
@@ -45,20 +46,35 @@ function isStorageUnavailable(err: unknown): boolean {
   );
 }
 
+/** No answer at all — offline, DNS, reset, or our own timeout. Says nothing about the shot. */
+function isUnreachable(err: unknown): boolean {
+  return err instanceof TypeError
+    || (err instanceof Error && (err.name === 'AbortError' || err.name === 'TimeoutError'));
+}
+
+function isAuthFailure(err: unknown): boolean {
+  return err instanceof UnauthorizedError
+    || (err instanceof HttpError && (err.status === 401 || err.status === 403));
+}
+
 function isNonCountingFailure(err: unknown): boolean {
-  return err instanceof UnauthorizedError || isStorageUnavailable(err);
+  return isAuthFailure(err) || isStorageUnavailable(err) || isUnreachable(err);
 }
 
 function isLocalFileMissing(err: unknown): boolean {
   return typeof err === 'object' && err !== null && 'code' in err && (err as { code?: unknown }).code === 'ENOENT';
 }
 
+/**
+ * Only a definitive refusal of this particular shot writes it off: its file is
+ * gone, or a 4xx that retrying cannot change. Server errors and outages are
+ * retried with backoff for as long as the shot exists — a capped attempt count
+ * is how a bad afternoon used to turn into screenshots lost for good.
+ */
 function isTerminalFailure(err: unknown): boolean {
   if (isLocalFileMissing(err)) return true;
-  if (err instanceof CloudinaryUploadError) {
-    return err.status >= 400 && err.status < 500 && err.status !== 408 && err.status !== 429;
-  }
-  return false;
+  const status = err instanceof CloudinaryUploadError || err instanceof HttpError ? err.status : null;
+  return status !== null && status >= 400 && status < 500 && status !== 408 && status !== 429;
 }
 
 export function screenshotRetryDelayMs(attemptsAfterFailure: number, rng: () => number = Math.random): number {
@@ -85,7 +101,7 @@ now = Date.now(),
   }
 
   const attemptsAfterFailure = row.attempts + 1;
-  if (isTerminalFailure(err) || attemptsAfterFailure >= MAX_ATTEMPTS) {
+  if (isTerminalFailure(err)) {
     return { action: 'failed', lastError: message };
   }
 
@@ -99,6 +115,7 @@ now = Date.now(),
 async function notifyServerFailed(row: ScreenshotRow): Promise<void> {
   await api('/v1/screenshots/complete', {
     method: 'POST',
+    timeoutMs: API_TIMEOUT_MS,
     body: {
       id: row.id,
       timeEntryId: row.timeEntryId ?? null,
@@ -150,6 +167,7 @@ async function uploadOne(row: ScreenshotRow): Promise<void> {
     const signed = await api<SignScreenshotUploadResponse>('/v1/screenshots/sign', {
       method: 'POST',
       body: { id: row.id } satisfies SignScreenshotUploadRequest,
+      timeoutMs: API_TIMEOUT_MS,
     });
 
     store.markUploading(row.id);
@@ -164,7 +182,11 @@ async function uploadOne(row: ScreenshotRow): Promise<void> {
     form.append('folder', signed.folder);
     form.append('signature', signed.signature);
 
-    const res = await fetch(signed.uploadUrl, { method: 'POST', body: form });
+    const res = await fetch(signed.uploadUrl, {
+      method: 'POST',
+      body: form,
+      signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
+    });
     if (!res.ok) {
       const text = await res.text().catch(() => '');
       throw new CloudinaryUploadError(res.status, text);
@@ -178,6 +200,7 @@ async function uploadOne(row: ScreenshotRow): Promise<void> {
 
     await api('/v1/screenshots/complete', {
       method: 'POST',
+      timeoutMs: API_TIMEOUT_MS,
       body: {
         id: row.id,
         timeEntryId: row.timeEntryId ?? null,
@@ -228,7 +251,7 @@ export async function drainUploads(): Promise<void> {
       try {
         await uploadOne(row);
       } catch (err) {
-        // Not logged in or storage not configured: stop this pass, keep attempts untouched.
+        // Signed out, storage down, or no network: stop this pass, keep attempts untouched.
         if (isNonCountingFailure(err)) return;
         log.warn('screenshot upload failed', { id: row.id, err: errText(err) });
       }
