@@ -115,6 +115,15 @@ function canonicalTimestampCeiling(entry: {
   );
 }
 
+/** Closed by the server for silence, not by the agent — the real end is unknown. */
+function isServerFinalized(closeReason: string | null): closeReason is 'LEASE_EXPIRED' | 'SUPERSEDED' {
+  return closeReason === 'LEASE_EXPIRED' || closeReason === 'SUPERSEDED';
+}
+
+function finalizedCorrection(closeReason: 'LEASE_EXPIRED' | 'SUPERSEDED') {
+  return closeReason === 'LEASE_EXPIRED' ? 'LEASE_FINALIZED' as const : 'SUPERSEDED' as const;
+}
+
 function evaluateExistingCreate(args: {
   entry: SerializableTimeEntry;
   body: CreateTimeEntryRequest;
@@ -131,18 +140,16 @@ function evaluateExistingCreate(args: {
   if (!isV2) {
     return { status: 200, payload: serializeTimeEntry(entry) };
   }
-  if (entry.closeReason === 'LEASE_EXPIRED' || entry.closeReason === 'SUPERSEDED') {
+  const currentRevision = entry.agentRevision ?? 0;
+  // A newer revision falls through to ALREADY_APPLIED: "the row exists, PUT
+  // your data", which the sync route then applies over the server's close.
+  if (isServerFinalized(entry.closeReason) && (body.revision ?? 0) <= currentRevision) {
     return {
       status: 200,
-      payload: createTimerSyncReceipt(
-        entry,
-        'FINALIZED',
-        entry.closeReason === 'LEASE_EXPIRED' ? 'LEASE_FINALIZED' : 'SUPERSEDED',
-      ),
+      payload: createTimerSyncReceipt(entry, 'FINALIZED', finalizedCorrection(entry.closeReason)),
     };
   }
 
-  const currentRevision = entry.agentRevision ?? 0;
   if (body.revision === currentRevision) {
     // Reuse the first accepted server boundary. Re-clamping an identical
     // retry against a later Date.now() would manufacture a different hash
@@ -402,29 +409,37 @@ timeEntriesRouter.put('/:id/sync', validate(SyncTimeEntryRequest, 'body'), async
         ? current.lastProvenAt
         : checkpointAt;
       if (current.endedAt) {
-        if (current.closeReason === 'SUPERSEDED') {
-          return { kind: 'receipt' as const, entry: current, disposition: 'FINALIZED' as const, correction: 'SUPERSEDED' as const };
-        }
-
-        if (current.closeReason === 'LEASE_EXPIRED') {
+        if (isServerFinalized(current.closeReason)) {
+          // The server closed this entry because it stopped hearing from the
+          // agent; it never knew the real end. A newer agent revision is that
+          // truth arriving late, so apply it. Overlap with a later entry is
+          // harmless — every report unions intervals.
+          const reopens = clampedEndedAt === null;
           const mayReconcile = isV2
             && body.revision! > currentRevision
-            && observedAt !== null
-            && observedAt > current.endedAt;
+            && (!reopens || (observedAt !== null && observedAt > current.endedAt));
           if (!mayReconcile) {
-            return { kind: 'receipt' as const, entry: current, disposition: 'FINALIZED' as const, correction: 'LEASE_FINALIZED' as const };
+            return {
+              kind: 'receipt' as const,
+              entry: current,
+              disposition: 'FINALIZED' as const,
+              correction: finalizedCorrection(current.closeReason),
+            };
           }
-
-          const otherActive = await tx.timeEntry.findFirst({
-            where: {
-              id: { not: id },
-              userId: current.userId,
-              source: 'AUTO',
-              endedAt: null,
-              trackingProtocolVersion: TIMER_PROTOCOL_VERSION,
-            },
-            select: { id: true },
-          });
+          // Only reopening competes for the single live timer; a closed
+          // snapshot just restores the time the server cut off.
+          const otherActive = reopens
+            ? await tx.timeEntry.findFirst({
+                where: {
+                  id: { not: id },
+                  userId: current.userId,
+                  source: 'AUTO',
+                  endedAt: null,
+                  trackingProtocolVersion: TIMER_PROTOCOL_VERSION,
+                },
+                select: { id: true },
+              })
+            : null;
           if (otherActive) {
             return {
               kind: 'conflict' as const,

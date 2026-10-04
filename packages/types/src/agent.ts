@@ -84,6 +84,16 @@ export const LaunchAtLoginSnapshot = z.object({
 });
 export type LaunchAtLoginSnapshot = z.infer<typeof LaunchAtLoginSnapshot>;
 
+/** Device and local sync-queue health. Lets support see stuck time without the laptop. */
+export const AgentDiagnostics = z.object({
+  osVersion: z.string().max(64),
+  arch: z.string().max(32),
+  syncPending: z.number().int().min(0),
+  syncOldestPendingAt: z.string().datetime().nullable(),
+  syncLastError: z.string().max(200).nullable(),
+});
+export type AgentDiagnostics = z.infer<typeof AgentDiagnostics>;
+
 export const HeartbeatRequest = z.object({
   agentVersion: z.string(),
   platform: Platform,
@@ -93,6 +103,7 @@ export const HeartbeatRequest = z.object({
   timerCheckpoint: TimerCheckpoint.nullable().optional(),
   permissions: DesktopPermissionSnapshot.optional(),
   startup: LaunchAtLoginSnapshot.optional(),
+  diagnostics: AgentDiagnostics.optional(),
 });
 export type HeartbeatRequest = z.infer<typeof HeartbeatRequest>;
 

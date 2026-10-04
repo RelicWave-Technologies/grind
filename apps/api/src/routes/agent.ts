@@ -139,6 +139,16 @@ agentRouter.post('/heartbeat', validate(HeartbeatRequest, 'body'), async (req, r
       data.agentLaunchOrigin = body.startup.origin;
       data.agentLaunchAtLoginUpdatedAt = now;
     }
+    if (body.diagnostics) {
+      data.agentOsVersion = body.diagnostics.osVersion;
+      data.agentArch = body.diagnostics.arch;
+      data.agentSyncPending = body.diagnostics.syncPending;
+      data.agentSyncOldestPendingAt = body.diagnostics.syncOldestPendingAt
+        ? new Date(body.diagnostics.syncOldestPendingAt)
+        : null;
+      data.agentSyncLastError = body.diagnostics.syncLastError;
+      data.agentDiagnosticsUpdatedAt = now;
+    }
     const heartbeatResult = await prisma.$transaction(async (tx): Promise<{
       authorized: boolean;
       timer: TimerCheckpointResult | null;

@@ -339,6 +339,15 @@ model User {
   agentLaunchAtLoginState       String?
   agentLaunchOrigin             String?
   agentLaunchAtLoginUpdatedAt   DateTime?
+  /// Device + local sync-queue health from agent heartbeat. A non-zero
+  /// pending count with an old oldest-pending time means time is stuck on the
+  /// laptop. Nullable for older desktop agents.
+  agentOsVersion                String?
+  agentArch                     String?
+  agentSyncPending              Int?
+  agentSyncOldestPendingAt      DateTime?
+  agentSyncLastError            String?
+  agentDiagnosticsUpdatedAt     DateTime?
 
   refreshTokens                    RefreshToken[]
   timeEntries                      TimeEntry[]

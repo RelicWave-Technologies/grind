@@ -223,4 +223,39 @@ describe('POST /v1/agent/heartbeat', () => {
     expect(second.status).toBe(200);
     expect(second.body.configVersion).not.toBe(first.body.configVersion);
   });
+
+  it('stores device and sync-queue diagnostics, and leaves them alone for older agents', async () => {
+    const user = await seedUser();
+    const oldestPendingAt = new Date(Date.now() - 3 * 24 * 60 * 60_000);
+    const res = await request(app)
+      .post('/v1/agent/heartbeat')
+      .set(bearer(user.accessToken))
+      .send({
+        agentVersion: '0.0.2-beta.38',
+        platform: 'darwin',
+        diagnostics: {
+          osVersion: '12.7.6',
+          arch: 'x64',
+          syncPending: 70,
+          syncOldestPendingAt: oldestPendingAt.toISOString(),
+          syncLastError: 'http_409:timer_conflict',
+        },
+      });
+    expect(res.status).toBe(200);
+
+    await request(app)
+      .post('/v1/agent/heartbeat')
+      .set(bearer(user.accessToken))
+      .send({ agentVersion: '0.0.2-beta.37', platform: 'darwin' });
+
+    const row = await prisma.user.findUniqueOrThrow({ where: { id: user.userId } });
+    expect(row).toMatchObject({
+      agentOsVersion: '12.7.6',
+      agentArch: 'x64',
+      agentSyncPending: 70,
+      agentSyncOldestPendingAt: oldestPendingAt,
+      agentSyncLastError: 'http_409:timer_conflict',
+    });
+    expect(row.agentDiagnosticsUpdatedAt).toBeInstanceOf(Date);
+  });
 });

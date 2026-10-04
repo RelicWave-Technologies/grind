@@ -84,7 +84,7 @@ export async function renewTimerLease(
     };
   }
 
-  if (entry.trackingProtocolVersion !== TIMER_PROTOCOL_VERSION || entry.agentRevision !== checkpoint.revision) {
+  if (entry.trackingProtocolVersion !== TIMER_PROTOCOL_VERSION) {
     return {
       disposition: 'needs_sync',
       entryId: entry.id,
@@ -94,6 +94,12 @@ export async function renewTimerLease(
     };
   }
 
+  // A heartbeat proves the agent is alive and still on this entry, whatever
+  // revision it has reached. Renewing only on an exact revision match let one
+  // lost PUT lapse the lease under a running timer, and reports then cut the
+  // entry at lastProvenAt — a gap in the middle of real work. Liveness renews
+  // here; a revision mismatch still asks the agent to push its data.
+  const revisionMatches = entry.agentRevision === checkpoint.revision;
   const checkpointAt = clampCheckpointAt(checkpoint.observedAt, now, entry.startedAt);
   const lastProvenAt = entry.lastProvenAt && entry.lastProvenAt > checkpointAt
     ? entry.lastProvenAt
@@ -103,7 +109,6 @@ export async function renewTimerLease(
       id: entry.id,
       endedAt: null,
       trackingProtocolVersion: TIMER_PROTOCOL_VERSION,
-      agentRevision: checkpoint.revision,
     },
     data: {
       lastProvenAt,
@@ -126,7 +131,7 @@ export async function renewTimerLease(
   }
 
   return {
-    disposition: 'accepted',
+    disposition: revisionMatches ? 'accepted' : 'needs_sync',
     entryId: entry.id,
     serverRevision: entry.agentRevision,
     endedAt: null,

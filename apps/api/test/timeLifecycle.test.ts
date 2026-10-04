@@ -281,20 +281,115 @@ describe('timer lifecycle protocol v2', () => {
     expect(rejectedOldHeartbeat.body.timer.disposition).toBe('finalized');
     expect((await prisma.user.findUniqueOrThrow({ where: { id: user.userId } })).agentActiveEntryId).toBe(second.id);
 
-    const rejectedOldSync = await request(app).put(`/v1/time-entries/${first.id}/sync`).set(bearer(user.accessToken)).send({
+    const reopenOld = await request(app).put(`/v1/time-entries/${first.id}/sync`).set(bearer(user.accessToken)).send({
       trackingProtocolVersion: 2,
       revision: 2,
       observedAt: new Date().toISOString(),
-      endedAt: new Date().toISOString(),
-      closeReason: 'AGENT',
-      segments: [{ ...first.segments[0], endedAt: new Date().toISOString() }],
+      endedAt: null,
+      closeReason: null,
+      segments: first.segments,
     });
-    expect(rejectedOldSync.status).toBe(200);
-    expect(rejectedOldSync.body).toMatchObject({ disposition: 'FINALIZED', correction: 'SUPERSEDED' });
+    expect(reopenOld.status).toBe(409);
+    expect(reopenOld.body).toMatchObject({ error: 'timer_conflict', activeEntryId: second.id });
 
     const conflict = await request(app).post('/v1/time-entries').set(bearer(user.accessToken)).send(v2Body(new Date()));
     expect(conflict.status).toBe(409);
     expect(conflict.body).toMatchObject({ error: 'active_timer_conflict', activeEntryId: second.id });
+  });
+
+  it('renews the lease from a heartbeat whose revision is ahead, and asks for the data', async () => {
+    const user = await seedUser();
+    const startedAt = new Date(Date.now() - 10 * 60_000);
+    const body = v2Body(startedAt);
+    await request(app).post('/v1/time-entries').set(bearer(user.accessToken)).send(body);
+    await prisma.timeEntry.update({
+      where: { id: body.id },
+      data: { lastProvenAt: startedAt, leaseExpiresAt: new Date(Date.now() + 1_000) },
+    });
+
+    const observedAt = new Date(Date.now() - 1_000);
+    const heartbeat = await request(app).post('/v1/agent/heartbeat').set(bearer(user.accessToken)).send({
+      agentVersion: '0.0.2-beta.37',
+      platform: 'darwin',
+      state: 'RUNNING',
+      trackingProtocolVersion: 2,
+      timerCheckpoint: { entryId: body.id, revision: 4, state: 'RUNNING', observedAt: observedAt.toISOString() },
+    });
+
+    expect(heartbeat.body.timer).toMatchObject({ disposition: 'needs_sync', serverRevision: 1 });
+    const row = await prisma.timeEntry.findUniqueOrThrow({ where: { id: body.id } });
+    expect(row.lastProvenAt?.toISOString()).toBe(observedAt.toISOString());
+    expect(row.leaseExpiresAt!.getTime()).toBeGreaterThan(Date.now() + TIMER_LEASE_MS - 10_000);
+    expect(row.agentRevision).toBe(1);
+  });
+
+  it('restores time the server cut off when the agent later sends the real close', async () => {
+    const user = await seedUser();
+    const first = v2Body(new Date(Date.now() - 40 * 60_000));
+    await request(app).post('/v1/time-entries').set(bearer(user.accessToken)).send(first);
+    await prisma.timeEntry.update({
+      where: { id: first.id },
+      data: { lastProvenAt: new Date(Date.now() - 35 * 60_000), leaseExpiresAt: new Date(Date.now() - 1_000) },
+    });
+    const second = v2Body(new Date(Date.now() - 5 * 60_000));
+    expect((await request(app).post('/v1/time-entries').set(bearer(user.accessToken)).send(second)).status).toBe(201);
+    expect((await prisma.timeEntry.findUniqueOrThrow({ where: { id: first.id } })).closeReason).toBe('SUPERSEDED');
+
+    const realEnd = new Date(Date.now() - 5 * 60_000).toISOString();
+    const late = await request(app).put(`/v1/time-entries/${first.id}/sync`).set(bearer(user.accessToken)).send({
+      trackingProtocolVersion: 2,
+      revision: 2,
+      observedAt: realEnd,
+      endedAt: realEnd,
+      closeReason: 'AGENT',
+      segments: [{ ...first.segments[0], endedAt: realEnd }],
+    });
+
+    expect(late.status).toBe(200);
+    expect(late.body).toMatchObject({ disposition: 'APPLIED', acceptedRevision: 2 });
+    const row = await prisma.timeEntry.findUniqueOrThrow({ where: { id: first.id }, include: { segments: true } });
+    expect(row.endedAt?.toISOString()).toBe(realEnd);
+    expect(row.closeReason).toBe('AGENT');
+    expect(row.serverFinalizedAt).toBeNull();
+    expect(row.segments[0]?.endedAt?.toISOString()).toBe(realEnd);
+  });
+
+  it('still refuses an older or equal revision on a server-closed entry', async () => {
+    const user = await seedUser();
+    const body = v2Body(new Date(Date.now() - 20 * 60_000), 3);
+    await request(app).post('/v1/time-entries').set(bearer(user.accessToken)).send(body);
+    await prisma.timeEntry.update({
+      where: { id: body.id },
+      data: { lastProvenAt: new Date(Date.now() - 15 * 60_000), leaseExpiresAt: new Date(Date.now() - 1_000) },
+    });
+    await reconcileExpiredTimersOnce();
+
+    const closedAt = new Date().toISOString();
+    const same = await request(app).put(`/v1/time-entries/${body.id}/sync`).set(bearer(user.accessToken)).send({
+      trackingProtocolVersion: 2,
+      revision: 3,
+      observedAt: closedAt,
+      endedAt: closedAt,
+      closeReason: 'AGENT',
+      segments: [{ ...body.segments[0], endedAt: closedAt }],
+    });
+    expect(same.body).toMatchObject({ disposition: 'FINALIZED', correction: 'LEASE_FINALIZED' });
+    expect((await prisma.timeEntry.findUniqueOrThrow({ where: { id: body.id } })).closeReason).toBe('LEASE_EXPIRED');
+  });
+
+  it('answers a newer create retry on a server-closed entry so the agent PUTs its data', async () => {
+    const user = await seedUser();
+    const body = v2Body(new Date(Date.now() - 20 * 60_000));
+    await request(app).post('/v1/time-entries').set(bearer(user.accessToken)).send(body);
+    await prisma.timeEntry.update({
+      where: { id: body.id },
+      data: { lastProvenAt: new Date(Date.now() - 15 * 60_000), leaseExpiresAt: new Date(Date.now() - 1_000) },
+    });
+    await reconcileExpiredTimersOnce();
+
+    const retry = await request(app).post('/v1/time-entries').set(bearer(user.accessToken)).send({ ...body, revision: 2 });
+    expect(retry.status).toBe(200);
+    expect(retry.body).toMatchObject({ disposition: 'ALREADY_APPLIED', acceptedRevision: 1 });
   });
 
   it('keeps legacy heartbeats compatible and outside the lease protocol', async () => {
