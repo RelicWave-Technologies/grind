@@ -1,6 +1,7 @@
 packages:
   - apps/*
   - packages/*
+  - legacy/*
 
 nodeLinker: hoisted
 autoInstallPeers: true

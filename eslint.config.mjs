@@ -41,13 +41,13 @@ export default tseslint.config(
      * is how the frame split is now proven not to have come back.
      */
     files: [
-      'apps/agent/src/main/services/timer/**/*.ts',
-      'apps/agent/src/main/services/activity/**/*.ts',
-      'apps/agent/src/main/services/capture/**/*.ts',
-      'apps/agent/src/main/services/heartbeat.ts',
-      'apps/agent/src/main/services/power.ts',
-      'apps/agent/src/main/services/trackingPermissionMonitor.ts',
-      'apps/agent/src/main/services/workspaceTime.ts',
+      'legacy/agent/src/main/services/timer/**/*.ts',
+      'legacy/agent/src/main/services/activity/**/*.ts',
+      'legacy/agent/src/main/services/capture/**/*.ts',
+      'legacy/agent/src/main/services/heartbeat.ts',
+      'legacy/agent/src/main/services/power.ts',
+      'legacy/agent/src/main/services/trackingPermissionMonitor.ts',
+      'legacy/agent/src/main/services/workspaceTime.ts',
     ],
     ignores: ['**/*.test.ts'],
     rules: {

@@ -9,11 +9,11 @@ node_modules
 **/node_modules
 **/dist
 **/out
-apps/agent/release
+legacy/agent/release
 **/*.dmg
 **/*.blockmap
-apps/agent/build/*.icns
-apps/agent/build/*.png
+legacy/agent/build/*.icns
+legacy/agent/build/*.png
 geo-deck
 interactive-product-deck
 test-results

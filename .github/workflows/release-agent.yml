@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Exact apps/agent/package.json version to release
+        description: Exact legacy/agent/package.json version to release
         required: true
       channel:
         description: Release channel
@@ -45,9 +45,9 @@ jobs:
           const fs = require('node:fs');
           const version = process.env.VERSION;
           const channel = process.env.CHANNEL;
-          const pkg = JSON.parse(fs.readFileSync('apps/agent/package.json', 'utf8'));
+          const pkg = JSON.parse(fs.readFileSync('legacy/agent/package.json', 'utf8'));
           if (pkg.version !== version) {
-            console.error(`Version input ${version} must match apps/agent/package.json ${pkg.version}`);
+            console.error(`Version input ${version} must match legacy/agent/package.json ${pkg.version}`);
             process.exit(1);
           }
           const stable = /^\d+\.\d+\.\d+$/;
@@ -129,7 +129,7 @@ jobs:
             "MAIN_VITE_CALLBACK_SCHEME=timo",
             "MAIN_VITE_UPDATE_CHANNEL=${{ needs.prepare.outputs.update_channel }}",
             "MAIN_VITE_AUTO_UPDATE_ENABLED=1"
-          ) | Out-File -FilePath apps/agent/.env.production -Encoding utf8
+          ) | Out-File -FilePath legacy/agent/.env.production -Encoding utf8
 
       - name: Build and publish unsigned Windows x64 installer
         run: pnpm --filter @grind/agent package:win:x64
@@ -137,7 +137,7 @@ jobs:
       - name: Validate Windows updater artifacts
         shell: pwsh
         run: |
-          $release = "apps/agent/release"
+          $release = "legacy/agent/release"
           $metadata = Join-Path $release "${{ needs.prepare.outputs.metadata_file_win }}"
           if (!(Test-Path $metadata)) { throw "Missing Windows update metadata: $metadata" }
           if (-not (Get-ChildItem $release -Filter "*.exe" | Where-Object { $_.Name -like "*setup.exe" })) { throw "Missing Windows NSIS setup exe" }
@@ -147,9 +147,9 @@ jobs:
         with:
           name: timo-windows-x64-${{ inputs.version }}
           path: |
-            apps/agent/release/*.exe
-            apps/agent/release/*.blockmap
-            apps/agent/release/*.yml
+            legacy/agent/release/*.exe
+            legacy/agent/release/*.blockmap
+            legacy/agent/release/*.yml
           if-no-files-found: error
 
   macos:
@@ -209,7 +209,7 @@ jobs:
 
       - name: Write production agent env
         run: |
-          cat > apps/agent/.env.production <<EOF
+          cat > legacy/agent/.env.production <<EOF
           MAIN_VITE_API_URL=${{ inputs.api_url }}
           MAIN_VITE_CALLBACK_SCHEME=timo
           MAIN_VITE_UPDATE_CHANNEL=${{ needs.prepare.outputs.update_channel }}
@@ -221,7 +221,7 @@ jobs:
 
       - name: Validate macOS updater artifacts
         run: |
-          release="apps/agent/release"
+          release="legacy/agent/release"
           test -f "$release/${{ needs.prepare.outputs.metadata_file_mac }}" || (echo "Missing macOS update metadata" >&2; exit 1)
           ls "$release"/*.dmg >/dev/null
           ls "$release"/*.zip >/dev/null
@@ -231,10 +231,10 @@ jobs:
         with:
           name: timo-macos-universal-${{ inputs.version }}
           path: |
-            apps/agent/release/*.dmg
-            apps/agent/release/*.zip
-            apps/agent/release/*.blockmap
-            apps/agent/release/*.yml
+            legacy/agent/release/*.dmg
+            legacy/agent/release/*.zip
+            legacy/agent/release/*.blockmap
+            legacy/agent/release/*.yml
           if-no-files-found: error
 
   summarize:

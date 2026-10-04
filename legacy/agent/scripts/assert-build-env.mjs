@@ -43,7 +43,7 @@ const apiUrl = process.env.MAIN_VITE_API_URL || fileEnv.MAIN_VITE_API_URL || '';
 const scheme = process.env.MAIN_VITE_CALLBACK_SCHEME || fileEnv.MAIN_VITE_CALLBACK_SCHEME || '';
 
 if (!apiUrl) {
-  fail('MAIN_VITE_API_URL is unset. Add it to apps/agent/.env.production (e.g. https://timo.emiactech.com).');
+  fail('MAIN_VITE_API_URL is unset. Add it to legacy/agent/.env.production (e.g. https://timo.emiactech.com).');
 }
 if (/localhost|127\.0\.0\.1/i.test(apiUrl)) {
   fail(`MAIN_VITE_API_URL is localhost ("${apiUrl}") — that ships an agent that can't reach the real API.`);

@@ -16,7 +16,7 @@
 #            APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID). Default: unsigned.
 #   PUBLISH=1 upload artifacts + update metadata to the configured GitHub Release.
 #   UPDATE_CHANNEL=latest|beta controls both the baked app channel and metadata channel.
-#   MAIN_VITE_API_URL is read from apps/agent/.env.production at build time.
+#   MAIN_VITE_API_URL is read from legacy/agent/.env.production at build time.
 #   MAC_TARGETS="zip" optionally overrides the default target list, useful for
 #            local update-feed builds when DMG creation is unavailable.
 set -euo pipefail

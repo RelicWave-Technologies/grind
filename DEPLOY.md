@@ -6,7 +6,7 @@ Three surfaces ship independently:
 |---|---|---|---|
 | `@grind/dashboard` (Vite SPA) | **Vercel** | `vercel.json` | Vercel CLI (`anish877`) |
 | `@grind/api` (Express + Prisma) | **Render** | `render.yaml` | Render dashboard |
-| `@grind/agent` (Electron) | **GitHub Releases** (Mac universal DMG/ZIP + Windows x64 NSIS) | `apps/agent/electron-builder.yml` | GitHub + Apple Developer ID |
+| `@grind/agent` (Electron) | **GitHub Releases** (Mac universal DMG/ZIP + Windows x64 NSIS) | `legacy/agent/electron-builder.yml` | GitHub + Apple Developer ID |
 | Screenshots | **Cloudinary** | API `/v1/screenshots/sign` | Cloudinary account |
 
 Database stays on **Neon** (existing).
@@ -77,7 +77,7 @@ URLs too) and redeploy the API. In production the auth cookie is
 ## 5. Agent desktop releases
 
 The build goes through a `pnpm deploy --prod` staging dir (see
-`apps/agent/scripts/package-mac.sh`). This is **required**: in this pnpm
+`legacy/agent/scripts/package-mac.sh`). This is **required**: in this pnpm
 workspace (shamefully-hoist), the agent's transitive deps — e.g. `color-name`,
 which `sharp` → `color` → `color-convert` needs — live at the hoisted root, not
 beside the requiring package. A plain in-place `electron-builder` run dedupes
@@ -104,7 +104,7 @@ expected until a later code-signing phase.
 
 Use **Actions → Release Agent**. Inputs:
 
-- `version`: must exactly match `apps/agent/package.json`.
+- `version`: must exactly match `legacy/agent/package.json`.
 - `channel`: `stable` requires `1.0.0`; `beta` requires `1.0.1-beta.1`.
 - `api_url`: production API URL to bake into the app.
 - `release_notes`: copied into the draft GitHub Release.
@@ -126,7 +126,7 @@ Required GitHub secrets for the macOS job:
 
 ### Release checklist
 
-1. Bump `apps/agent/package.json` version.
+1. Bump `legacy/agent/package.json` version.
 2. Run the Release Agent workflow as `beta`.
 3. Install beta on Windows x64, Apple Silicon Mac, and Intel Mac.
 4. Verify update from the previous beta on all three targets.
@@ -138,10 +138,10 @@ Required GitHub secrets for the macOS job:
 
 ```bash
 # 1. Bake the production API URL into the app:
-echo 'MAIN_VITE_API_URL=https://grind-xcdr.onrender.com' > apps/agent/.env.production
+echo 'MAIN_VITE_API_URL=https://grind-xcdr.onrender.com' > legacy/agent/.env.production
 
 # 2a. Unsigned (no Apple account) — verified working:
-pnpm --filter @grind/agent package:unsigned        # -> apps/agent/release/Grind-0.0.1-arm64.dmg
+pnpm --filter @grind/agent package:unsigned        # -> legacy/agent/release/Grind-0.0.1-arm64.dmg
 
 # 2b. Signed + notarized — needs a Developer ID cert in the login keychain:
 export APPLE_ID="you@apple.id"
@@ -167,9 +167,9 @@ pnpm --filter @grind/agent package:mac:universal
 ```
 
 The icon is generated from source (`pnpm --filter @grind/agent icon`) and lives
-at `apps/agent/build/icon.svg`, `apps/agent/build/icon.png`, and
-`apps/agent/build/icon.icns`. Entitlements (hardened runtime, JIT, library
-validation off for native modules) are in `apps/agent/build/entitlements.mac.plist`.
+at `legacy/agent/build/icon.svg`, `legacy/agent/build/icon.png`, and
+`legacy/agent/build/icon.icns`. Entitlements (hardened runtime, JIT, library
+validation off for native modules) are in `legacy/agent/build/entitlements.mac.plist`.
 Unsigned apps: users right-click → Open once to bypass Gatekeeper.
 
 ### Local Windows packaging
@@ -178,13 +178,13 @@ Windows v1 is an unsigned internal IT installer. Build the x64 NSIS installer:
 
 ```bash
 # Bake the production API URL into the app:
-echo 'MAIN_VITE_API_URL=https://grind-xcdr.onrender.com' > apps/agent/.env.production
+echo 'MAIN_VITE_API_URL=https://grind-xcdr.onrender.com' > legacy/agent/.env.production
 
 # Unsigned Windows x64 installer:
 pnpm --filter @grind/agent package:win:x64
 ```
 
-The Windows packager (`apps/agent/scripts/package-windows.mjs`) builds the app,
+The Windows packager (`legacy/agent/scripts/package-windows.mjs`) builds the app,
 creates a clean runtime staging package, and runs `npm install --omit=dev` there
 so Windows-native install scripts run on Windows. Prefer running this on a
 Windows machine or Windows CI runner because the agent has native modules
