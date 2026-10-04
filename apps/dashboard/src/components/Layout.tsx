@@ -1,5 +1,5 @@
 import { Outlet, Link, useRouteContext, useNavigate, useLocation } from '@tanstack/react-router';
-import { Home, Clock4, Inbox, LayoutGrid, CalendarCheck, ShieldAlert, Building2, Sunrise, LogOut, ShieldCheck, FileSpreadsheet, Compass, FileText, User, Users, KeyRound, CalendarDays } from 'lucide-react';
+import { Home, Inbox, CalendarCheck, ShieldAlert, LogOut, ShieldCheck, FileText, User, Users, CalendarDays } from 'lucide-react';
 import { hasCapability, useLogout, type Permission } from '../lib/auth';
 import { AGENT_DOWNLOADS, agentDownloadUrl } from '../lib/downloads';
 import {
@@ -7,34 +7,75 @@ import {
   Sidebar,
   SidebarBrand,
   NavItem,
+  NavSection,
+  Tabs,
   Avatar,
   Button,
 } from '../ui';
 
-interface NavEntry {
+type Show = 'all' | { permission: Permission } | { anyPermission: Permission[] };
+
+/** One page inside a sidebar item. Items with several pages get a tab bar. */
+interface NavTab {
   to: string;
   label: string;
-  Icon: typeof Home;
-  show: 'all' | { permission: Permission } | { anyPermission: Permission[] };
+  show: Show;
 }
 
-const NAV: NavEntry[] = [
-  { to: '/home', label: 'Home', Icon: Home, show: 'all' },
-  { to: '/overview', label: 'Overview', Icon: Compass, show: { permission: 'overview.read' } },
-  { to: '/users', label: 'People', Icon: Users, show: { permission: 'people.read' } },
-  { to: '/edit-time', label: 'Edit Time', Icon: Clock4, show: 'all' },
-  { to: '/reports', label: 'Reports', Icon: FileText, show: { permission: 'reports.self.read' } },
-  { to: '/approvals', label: 'Approvals', Icon: Inbox, show: { permission: 'approvals.self.read' } },
-  { to: '/profile', label: 'Profile', Icon: User, show: { permission: 'profile.self.read' } },
-  { to: '/team', label: 'Team Settings', Icon: LayoutGrid, show: { permission: 'team.settings.manage' } },
-  { to: '/attendance', label: 'Attendance', Icon: CalendarCheck, show: { anyPermission: ['reports.team.read', 'reports.workspace.read'] } },
-  { to: '/calendar', label: 'Calendar', Icon: CalendarDays, show: 'all' },
-  { to: '/flags', label: 'Anti-cheat', Icon: ShieldAlert, show: { anyPermission: ['flags.team.review', 'flags.workspace.review'] } },
-  { to: '/teams', label: 'Org Teams', Icon: Building2, show: { permission: 'teams.manage' } },
-  { to: '/shifts', label: 'Shifts', Icon: Sunrise, show: { permission: 'shifts.manage' } },
-  { to: '/policy', label: 'Policy', Icon: ShieldCheck, show: { permission: 'policy.manage' } },
-  { to: '/integrations', label: 'Integrations', Icon: KeyRound, show: { permission: 'api-tokens.manage' } },
-  { to: '/payroll', label: 'Payroll', Icon: FileSpreadsheet, show: { permission: 'payroll.manage' } },
+interface NavEntry {
+  label: string;
+  Icon: typeof Home;
+  tabs: NavTab[];
+}
+
+/**
+ * Three groups, nine places. Pages that answer the same question share one
+ * sidebar item and a tab bar — every old address still works, it just lives
+ * under the item it belongs to.
+ */
+const NAV: Array<{ section: string; items: NavEntry[] }> = [
+  {
+    section: 'My work',
+    items: [
+      { label: 'Today', Icon: Home, tabs: [
+        { to: '/home', label: 'Today', show: 'all' },
+        { to: '/edit-time', label: 'Edit time', show: 'all' },
+      ] },
+      { label: 'Leave', Icon: CalendarDays, tabs: [{ to: '/calendar', label: 'Leave', show: 'all' }] },
+      { label: 'Profile', Icon: User, tabs: [{ to: '/profile', label: 'Profile', show: { permission: 'profile.self.read' } }] },
+    ],
+  },
+  {
+    section: 'Team',
+    items: [
+      { label: 'Attendance', Icon: CalendarCheck, tabs: [
+        { to: '/attendance', label: 'Attendance', show: { anyPermission: ['reports.team.read', 'reports.workspace.read'] } },
+      ] },
+      { label: 'Reports', Icon: FileText, tabs: [
+        { to: '/reports', label: 'Reports', show: { permission: 'reports.self.read' } },
+        { to: '/overview', label: 'Overview', show: { permission: 'overview.read' } },
+      ] },
+      { label: 'Approvals', Icon: Inbox, tabs: [{ to: '/approvals', label: 'Approvals', show: { permission: 'approvals.self.read' } }] },
+      { label: 'Anti-cheat', Icon: ShieldAlert, tabs: [
+        { to: '/flags', label: 'Anti-cheat', show: { anyPermission: ['flags.team.review', 'flags.workspace.review'] } },
+      ] },
+    ],
+  },
+  {
+    section: 'Admin',
+    items: [
+      { label: 'People', Icon: Users, tabs: [
+        { to: '/users', label: 'People', show: { permission: 'people.read' } },
+        { to: '/team', label: 'Team settings', show: { permission: 'team.settings.manage' } },
+      ] },
+      { label: 'Settings', Icon: ShieldCheck, tabs: [
+        { to: '/policy', label: 'Policy & rules', show: { permission: 'policy.manage' } },
+        { to: '/shifts', label: 'Shifts', show: { permission: 'shifts.manage' } },
+        { to: '/teams', label: 'Teams', show: { permission: 'teams.manage' } },
+        { to: '/integrations', label: 'Integrations', show: { permission: 'api-tokens.manage' } },
+      ] },
+    ],
+  },
 ];
 
 export function Layout() {
@@ -43,12 +84,20 @@ export function Layout() {
   const location = useLocation();
   const logout = useLogout();
 
-  const visible = NAV.filter((n) => {
-    if (n.show === 'all') return true;
-    if ('permission' in n.show) return hasCapability(me, n.show.permission);
-    if ('anyPermission' in n.show) return n.show.anyPermission.some((permission) => hasCapability(me, permission));
-    return false;
-  });
+  const allowed = (show: Show) => {
+    if (show === 'all') return true;
+    if ('permission' in show) return hasCapability(me, show.permission);
+    return show.anyPermission.some((permission) => hasCapability(me, permission));
+  };
+  const onPath = (to: string) => (to === '/home' ? location.pathname === '/home' : location.pathname.startsWith(to));
+  const groups = NAV.map((g) => ({
+    section: g.section,
+    items: g.items
+      .map((item) => ({ ...item, tabs: item.tabs.filter((t) => allowed(t.show)) }))
+      .filter((item) => item.tabs.length > 0),
+  })).filter((g) => g.items.length > 0);
+  // The item the current page belongs to, for the tab bar above the page.
+  const current = groups.flatMap((g) => g.items).find((item) => item.tabs.some((t) => onPath(t.to)));
 
   async function onLogout() {
     try {
@@ -100,25 +149,34 @@ export function Layout() {
           </>
         }
       >
-        {visible.map(({ to, label, Icon }) => {
-          const active = to === '/home'
-            ? location.pathname === '/home'
-            : location.pathname.startsWith(to);
-          return (
-            <NavItem
-              key={to}
-              as={Link}
-              to={to}
-              label={label}
-              icon={<Icon size={18} strokeWidth={1.8} />}
-              active={active}
-            />
-          );
-        })}
+        {groups.map((g) => (
+          <div key={g.section}>
+            <NavSection label={g.section} />
+            {g.items.map(({ label, Icon, tabs }) => (
+              <NavItem
+                key={label}
+                as={Link}
+                to={tabs[0]!.to}
+                label={label}
+                icon={<Icon size={18} strokeWidth={1.8} />}
+                active={tabs.some((t) => onPath(t.to))}
+              />
+            ))}
+          </div>
+        ))}
       </Sidebar>
 
       <main className="ui-main">
         <div className="ui-rise">
+          {current && current.tabs.length > 1 && (
+            <div className="ui-section-tabs">
+              <Tabs
+                items={current.tabs.map((t) => ({ value: t.to, label: t.label }))}
+                value={current.tabs.find((t) => onPath(t.to))?.to ?? current.tabs[0]!.to}
+                onChange={(to) => navigate({ to })}
+              />
+            </div>
+          )}
           <Outlet />
         </div>
       </main>

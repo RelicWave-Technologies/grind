@@ -282,7 +282,7 @@ export function CalendarScreen() {
     <Page className="cal-page">
       <PageHeader
         eyebrow="Time off"
-        title="Calendar"
+        title="Leave"
         subtitle={`Company holidays, approved leave and paid-leave balances — ${tz.replace(/_/g, ' ')}.`}
         actions={
           /* Every panel below follows this, so it belongs to the page and not

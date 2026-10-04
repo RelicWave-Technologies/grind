@@ -1017,3 +1017,11 @@ textarea.ui-control { height: auto; min-height: 80px; padding: var(--ui-sp-3) va
 @media (max-width: 980px) {
   .ui-main { padding: var(--ui-sp-7) var(--ui-sp-7) var(--ui-sp-9); }
 }
+
+/* The tab bar above a page that shares one sidebar item with its siblings
+   (Settings: Policy · Shifts · Teams · Integrations). Aligned to the page. */
+.ui-section-tabs {
+  max-width: var(--ui-page-max);
+  margin: 0 auto;
+  padding: 0 var(--ui-sp-8);
+}
