@@ -15,9 +15,10 @@ export type ScreenUiState = 'ok' | 'needs-grant' | 'needs-settings' | 'needs-res
  * systemPreferences (no native module / Linux build issues).
  *
  * NOTE: `getMediaAccessStatus('screen')` can return a STALE value after the user
- * toggles the permission (electron#36722) until the app restarts — which is also
- * required for screen capture to actually start working. The `needs-restart`
- * UI state + relaunch flow handle this.
+ * toggles the permission (electron#36722) until the app restarts. A stale value
+ * lags a grant made while Timo runs; once it reads 'granted' the grant is
+ * already effective in this process, so trackingReadiness never answers a
+ * blank capture under 'granted' with a restart.
  */
 /**
  * macOS 15 (Sequoia) re-asks. Any app that captures the screen now gets a
@@ -77,11 +78,10 @@ export function hasAccessibilityAccess(prompt = false): boolean {
 }
 
 /**
- * Pure decision: given the reported status and the last capture outcome, what
- * should the UI show? Crucially:
+ * Coarse screen state reported in the heartbeat's permission snapshot (the
+ * agent's own surfaces use trackingReadiness instead):
  *  - status granted but captures come back empty/error  → 'needs-restart'
- *    (covers both "granted, not yet effective (needs relaunch)" and
- *     "revoked mid-session" — both are fixed by a relaunch / re-grant).
+ *    (the wire name for "granted but not capturing")
  *  - never asked                                        → 'needs-grant'
  *  - denied / restricted                                → 'needs-settings'
  */

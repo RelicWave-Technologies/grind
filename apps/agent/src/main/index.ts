@@ -184,7 +184,7 @@ function announceSignOut(): void {
 }
 
 function notifyStartupHealth(state: LaunchAtLoginHealth): void {
-  if (state.ready || state.state === 'UNAVAILABLE' || state.openedAtLogin || !Notification.isSupported()) return;
+  if (!getLaunchAtLoginService().shouldNotifyOnBoot(state) || !Notification.isSupported()) return;
   const body = state.state === 'NEEDS_INSTALL'
     ? 'Move Timo to Applications so it can start when you sign in.'
     : state.state === 'NEEDS_APPROVAL'
@@ -436,7 +436,7 @@ app.whenReady().then(async () => {
   startCaptureLoop();
   startActivityCapture();
   startTrackingPermissionMonitor();
-  if (await isLoggedIn()) void offerPermissionSetupOnStartup();
+  if (await isLoggedIn()) void offerPermissionSetupOnStartup({ openedAtLogin });
   startActivitySyncDrain();
   void drainActivityNow('boot');
   startActiveWindowPolling();

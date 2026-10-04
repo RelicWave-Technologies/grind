@@ -48,10 +48,11 @@ function item(patch: Partial<LoginItemSettings['launchItems'][number]> = {}): Lo
   };
 }
 
-function service(platform: NodeJS.Platform, execPath: string, argv: string[] = []) {
+function service(platform: NodeJS.Platform, execPath: string, argv: string[] = [], systemVersion = '14.6.1') {
   return createLaunchAtLoginService({
     app: mocks.app,
     platform,
+    systemVersion,
     execPath,
     argv,
     now: () => Date.parse('2026-07-12T00:00:00.000Z'),
@@ -423,6 +424,57 @@ describe('launch at login service', () => {
       name: duplicate.name,
       path: duplicate.path,
       args: duplicate.args,
+    });
+  });
+
+  describe('macOS before Ventura', () => {
+    const exe = '/Applications/Timo.app/Contents/MacOS/Timo';
+    // What Electron answers on macOS 12 for any query: there is no SMAppService,
+    // so no `status` — only the classic login item's openAtLogin.
+    const monterey = (patch: Partial<LoginItemSettings> = {}) => settings({ status: undefined as never, ...patch });
+
+    it('registers the classic login item on boot and reads it back as ready', () => {
+      mocks.app.getLoginItemSettings
+        .mockReturnValueOnce(monterey())
+        .mockReturnValueOnce(monterey())
+        .mockReturnValue(monterey({ openAtLogin: true }));
+
+      const health = service('darwin', exe, [], '12.7.4').reconcileOnBoot();
+
+      expect(mocks.app.setLoginItemSettings).toHaveBeenCalledWith({ openAtLogin: true });
+      expect(mocks.app.getLoginItemSettings).toHaveBeenCalledWith(undefined);
+      expect(mocks.app.getLoginItemSettings).not.toHaveBeenCalledWith({ type: 'mainAppService' });
+      expect(health).toMatchObject({ ready: true, state: 'READY' });
+    });
+
+    it('asks for registration, not approval, when the item is missing', () => {
+      mocks.app.getLoginItemSettings.mockReturnValue(monterey());
+
+      expect(service('darwin', exe, [], '12.7.4').inspect()).toMatchObject({
+        state: 'NEEDS_REGISTRATION',
+        remediation: 'REGISTER',
+        canRepair: true,
+      });
+    });
+
+    it('never raises the per-boot startup notification', () => {
+      mocks.app.getLoginItemSettings.mockReturnValue(monterey());
+      const launch = service('darwin', exe, [], '11.7.10');
+
+      expect(launch.shouldNotifyOnBoot(launch.reconcileOnBoot())).toBe(false);
+    });
+
+    it('sends the user to Users & Groups, where login items lived', () => {
+      expect(service('darwin', exe, [], '12.7.4').startupSettingsUrl()).toBe('x-apple.systempreferences:com.apple.preferences.users');
+      expect(service('darwin', exe, [], '13.0').startupSettingsUrl()).toBe('x-apple.systempreferences:com.apple.LoginItems-Settings.extension');
+    });
+
+    it('keeps the SMAppService path and its notification from macOS 13', () => {
+      mocks.app.getLoginItemSettings.mockReturnValue(settings({ openAtLogin: true, status: 'requires-approval' }));
+      const launch = service('darwin', exe, [], '13.6.9');
+
+      expect(launch.shouldNotifyOnBoot(launch.reconcileOnBoot())).toBe(true);
+      expect(mocks.app.getLoginItemSettings).toHaveBeenCalledWith({ type: 'mainAppService' });
     });
   });
 

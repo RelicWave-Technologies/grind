@@ -24,8 +24,30 @@ export interface CaptureResult {
   health: CaptureHealth;
 }
 
-/** Permission/readiness probe. It never writes, uploads, or retains pixels. */
+// Waits before the second and third probe attempts.
+const PROBE_RETRY_DELAYS_MS = [500, 1_000];
+
+/**
+ * Permission/readiness probe. It never writes, uploads, or retains pixels.
+ *
+ * A blank reading is retried before it is reported: the first desktopCapturer
+ * call in a fresh process often comes back empty on slow Macs (Intel, macOS
+ * 11–13, launched at login) even though the grant is fine. A single blank
+ * reading at boot is what put people in front of a Restart button every launch.
+ */
 export async function probeScreenCapture(): Promise<CaptureHealth> {
+  let health = await probeOnce();
+  for (const delayMs of PROBE_RETRY_DELAYS_MS) {
+    // Without a grant another attempt reads the same answer — and only delays
+    // the system prompt the caller may be waiting on.
+    if (health === 'ok' || health === 'no-permission' || !hasScreenAccess()) break;
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+    health = await probeOnce();
+  }
+  return health;
+}
+
+async function probeOnce(): Promise<CaptureHealth> {
   try {
     const sources = await desktopCapturer.getSources({
       types: ['screen'],

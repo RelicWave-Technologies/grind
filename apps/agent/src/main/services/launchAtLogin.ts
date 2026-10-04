@@ -33,6 +33,8 @@ interface LaunchAtLoginApp {
 interface LaunchAtLoginDeps {
   app: LaunchAtLoginApp;
   platform: NodeJS.Platform;
+  /** `process.getSystemVersion()`, e.g. "12.7.4" on macOS. */
+  systemVersion: string;
   execPath: string;
   argv: string[];
   now: () => number;
@@ -44,6 +46,7 @@ function defaultDeps(): LaunchAtLoginDeps {
   return {
     app,
     platform: process.platform,
+    systemVersion: process.getSystemVersion(),
     execPath: process.execPath,
     argv: process.argv,
     now: () => Date.now(),
@@ -54,13 +57,25 @@ function supported(platform: NodeJS.Platform): boolean {
   return platform === 'darwin' || platform === 'win32';
 }
 
+/**
+ * SMAppService — `type: 'mainAppService'` — exists from macOS 13. On 11/12
+ * Electron falls back and answers with no status at all, which read as BLOCKED:
+ * startup was never registered and every boot announced that it "needs
+ * attention". Those versions use the classic login item instead.
+ */
+function usesLegacyMacLoginItem(deps: LaunchAtLoginDeps): boolean {
+  return deps.platform === 'darwin' && Number.parseInt(deps.systemVersion, 10) < 13;
+}
+
 function canonicalQuery(deps: LaunchAtLoginDeps): LoginItemSettingsOptions | undefined {
+  if (usesLegacyMacLoginItem(deps)) return undefined;
   if (deps.platform === 'darwin') return { type: 'mainAppService' };
   if (deps.platform === 'win32') return { path: deps.execPath, args: [HIDDEN_ARG] };
   return undefined;
 }
 
 function canonicalRegistration(deps: LaunchAtLoginDeps, openAtLogin = true): Settings {
+  if (usesLegacyMacLoginItem(deps)) return { openAtLogin };
   if (deps.platform === 'darwin') {
     return { openAtLogin, type: 'mainAppService' };
   }
@@ -164,6 +179,11 @@ function inspectMac(deps: LaunchAtLoginDeps, openedAtLogin: boolean): LaunchAtLo
   }
   try {
     const settings = deps.app.getLoginItemSettings(canonicalQuery(deps));
+    if (usesLegacyMacLoginItem(deps)) {
+      return settings.openAtLogin
+        ? result(deps, openedAtLogin, 'READY', 'NONE', false)
+        : result(deps, openedAtLogin, 'NEEDS_REGISTRATION', 'REGISTER', true);
+    }
     if (settings.status === 'enabled' && settings.openAtLogin) {
       return result(deps, openedAtLogin, 'READY', 'NONE', false);
     }
@@ -383,6 +403,27 @@ export function createLaunchAtLoginService(deps: LaunchAtLoginDeps) {
     return deps.app.moveToApplicationsFolder(options);
   }
 
+  /**
+   * Whether a manual launch should raise the "startup needs attention"
+   * notification. A login launch already proves startup works. The legacy
+   * macOS path stays quiet: boot registers it, and if that fails there is
+   * nothing to approve — Settings still shows the state and the pane.
+   */
+  function shouldNotifyOnBoot(health: LaunchAtLoginHealth): boolean {
+    return !health.ready
+      && health.state !== 'UNAVAILABLE'
+      && !health.openedAtLogin
+      && !usesLegacyMacLoginItem(deps);
+  }
+
+  /** Where the user manages login items on this OS, if anywhere. */
+  function startupSettingsUrl(): string | null {
+    if (usesLegacyMacLoginItem(deps)) return 'x-apple.systempreferences:com.apple.preferences.users';
+    if (deps.platform === 'darwin') return 'x-apple.systempreferences:com.apple.LoginItems-Settings.extension';
+    if (deps.platform === 'win32') return 'ms-settings:startupapps';
+    return null;
+  }
+
   function launchOrigin(): LaunchOrigin {
     if (!deps.app.isPackaged || !supported(deps.platform)) return 'UNKNOWN';
     return openedAtLogin ? 'LOGIN_ITEM' : 'USER';
@@ -394,6 +435,8 @@ export function createLaunchAtLoginService(deps: LaunchAtLoginDeps) {
     repair,
     moveToApplicationsFolder,
     launchOrigin,
+    shouldNotifyOnBoot,
+    startupSettingsUrl,
     shouldStartHidden: () => openedAtLogin,
   };
 }

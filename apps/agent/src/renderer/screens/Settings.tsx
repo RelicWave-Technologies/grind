@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { MonitorCheck, Power, CheckCircle2, AlertCircle, Keyboard, PictureInPicture2, RefreshCw, DownloadCloud } from 'lucide-react';
 import larkIcon from '../assets/lark.svg';
 import { settingsUpdateSubtitle, updateAction, updatePercent } from '../lib/updateUi';
+import { actionFor, actionLabel, isReady, statusText, type Capability, type PermissionAction } from '../lib/permissionUi';
 
 type SettingsInfo = Awaited<ReturnType<typeof window.agent.settings.get>>;
 
@@ -25,6 +26,10 @@ export default function Settings() {
       }
       void qc.invalidateQueries({ queryKey: ['settings'] });
     },
+  });
+  const recheckPermissions = useMutation({
+    mutationFn: () => window.agent.permissions.recheck(),
+    onSuccess: (next) => qc.setQueryData(['trackingReadiness'], next),
   });
   const moveToApplications = useMutation({
     mutationFn: () => window.agent.settings.moveToApplications(),
@@ -92,24 +97,26 @@ export default function Settings() {
         ? { ok: true, text: 'Connected' }
         : { ok: false, text: 'Connect to attribute time to Lark tasks' };
 
-  const screenState = permissions.data?.screenRecording ?? 'NEEDS_GRANT';
-  const screenReady = screenState === 'READY' || screenState === 'NOT_REQUIRED';
-  const screenText = screenReady
-    ? 'Ready'
-    : screenState === 'NEEDS_GRANT'
-      ? 'Required for screenshots'
-      : screenState === 'NEEDS_SETTINGS'
-        ? 'Enable in System Settings'
-        : 'Restart needed for capture to take effect';
-  const accessibilityState = permissions.data?.accessibility ?? 'NEEDS_GRANT';
-  const accessibilityReady = accessibilityState === 'READY' || accessibilityState === 'NOT_REQUIRED';
-  const accessibilityText = accessibilityReady
-    ? 'Ready — counts while the timer runs'
-    : accessibilityState === 'NEEDS_GRANT'
-      ? 'Needed to count keystrokes & mouse'
-      : accessibilityState === 'NEEDS_SETTINGS'
-        ? 'Enable in System Settings'
-        : 'Restart Timo to start activity tracking';
+  const permissionRows = ([
+    { capability: 'screen', title: 'Screen Recording', Icon: MonitorCheck, state: permissions.data?.screenRecording ?? 'NEEDS_GRANT', blocker: 'SCREEN_RECORDING' },
+    { capability: 'accessibility', title: 'Accessibility', Icon: Keyboard, state: permissions.data?.accessibility ?? 'NEEDS_GRANT', blocker: 'ACCESSIBILITY' },
+  ] as const).map((row) => {
+    const restartDidNotHelp = permissions.data?.restartDidNotHelp?.includes(row.blocker) ?? false;
+    return {
+      ...row,
+      ready: isReady(row.state),
+      text: statusText(row.state, row.capability, restartDidNotHelp),
+      action: actionFor(row.state, row.capability, restartDidNotHelp),
+    };
+  });
+  const runPermissionAction = (capability: Capability, action: PermissionAction) => {
+    if (action === 'restart') void window.agent.app.relaunch();
+    else if (action === 'check-again') recheckPermissions.mutate();
+    else if (action === 'input-monitoring') void window.agent.settings.openInputMonitoringPrefs();
+    else if (capability === 'accessibility') void window.agent.permissions.requestAccessibility();
+    else if (action === 'enable') void window.agent.permissions.requestScreen();
+    else void window.agent.settings.openScreenPrefs();
+  };
   const u = updates.data;
   const updateBusy = u?.phase === 'checking' || u?.phase === 'downloading' || u?.phase === 'installing' || checkUpdates.isPending;
   const updatePercentValue = updatePercent(u);
@@ -153,59 +160,37 @@ export default function Settings() {
           {/* Permissions */}
           <div className="section-head"><span className="section-title">Permissions</span></div>
           <div className="set-card">
-            <div className="set-row">
-              <span className="set-ic" style={{ background: screenReady ? 'var(--c-green-bg)' : 'var(--c-orange-bg)' }}>
-                <MonitorCheck size={17} strokeWidth={2} />
-              </span>
-              <div className="set-main">
-                <div className="set-title">Screen Recording</div>
-                <div className="set-sub">
-                  {screenReady ? (
-                    <span className="set-ok"><CheckCircle2 size={13} /> {screenText}</span>
-                  ) : (
-                    <span className="set-warn"><AlertCircle size={13} /> {screenText}</span>
-                  )}
+            {permissionRows.map(({ capability, title, Icon, ready, text, action }) => (
+              <div className="set-row" key={capability}>
+                <span className="set-ic" style={{ background: ready ? 'var(--c-green-bg)' : 'var(--c-orange-bg)' }}>
+                  <Icon size={17} strokeWidth={2} />
+                </span>
+                <div className="set-main">
+                  <div className="set-title">{title}</div>
+                  <div className="set-sub">
+                    {ready ? (
+                      <span className="set-ok"><CheckCircle2 size={13} /> {text}</span>
+                    ) : (
+                      <span className="set-warn"><AlertCircle size={13} /> {text}</span>
+                    )}
+                  </div>
                 </div>
+                {action === 'check-again' ? (
+                  <button className="btn no-drag" onClick={() => runPermissionAction(capability, 'settings')}>
+                    {actionLabel('settings')}
+                  </button>
+                ) : null}
+                {action ? (
+                  <button
+                    className={`btn no-drag${action === 'restart' ? ' btn-prominent' : ''}`}
+                    onClick={() => runPermissionAction(capability, action)}
+                    disabled={action === 'check-again' && recheckPermissions.isPending}
+                  >
+                    {action === 'restart' ? 'Restart Timo' : actionLabel(action)}
+                  </button>
+                ) : null}
               </div>
-              {screenState === 'NEEDS_RESTART' || screenState === 'FAILED' ? (
-                <button className="btn btn-prominent no-drag" onClick={() => window.agent.app.relaunch()}>
-                  Restart Timo
-                </button>
-              ) : screenState === 'NEEDS_GRANT' ? (
-                <button className="btn no-drag" onClick={() => window.agent.permissions.requestScreen()}>
-                  Enable
-                </button>
-              ) : !screenReady ? (
-                <button className="btn no-drag" onClick={() => window.agent.settings.openScreenPrefs()}>
-                  Open System Settings
-                </button>
-              ) : null}
-            </div>
-
-            <div className="set-row">
-              <span className="set-ic" style={{ background: accessibilityReady ? 'var(--c-green-bg)' : 'var(--c-orange-bg)' }}>
-                <Keyboard size={17} strokeWidth={2} />
-              </span>
-              <div className="set-main">
-                <div className="set-title">Accessibility</div>
-                <div className="set-sub">
-                  {accessibilityReady ? (
-                    <span className="set-ok"><CheckCircle2 size={13} /> {accessibilityText}</span>
-                  ) : (
-                    <span className="set-warn"><AlertCircle size={13} /> {accessibilityText}</span>
-                  )}
-                </div>
-              </div>
-              {accessibilityState === 'NEEDS_RESTART' || accessibilityState === 'FAILED' ? (
-                <button className="btn btn-prominent no-drag" onClick={() => window.agent.app.relaunch()}>
-                  Restart Timo
-                </button>
-              ) : !accessibilityReady ? (
-                <button className="btn no-drag" onClick={() => window.agent.permissions.requestAccessibility()}>
-                  Enable
-                </button>
-              ) : null}
-            </div>
+            ))}
           </div>
 
           {/* Integrations */}

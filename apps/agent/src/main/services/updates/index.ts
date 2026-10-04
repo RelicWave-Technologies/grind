@@ -336,6 +336,21 @@ export async function installUpdateNow(): Promise<UpdateStatus> {
   return status;
 }
 
+/**
+ * Called just before a permission "Restart Timo". With autoInstallOnAppQuit on,
+ * a staged update can start installing while app.relaunch() brings the old
+ * binary back up — on a slow disk the two race. A ready update takes the
+ * restart over instead (quitAndInstall relaunches on its own); otherwise
+ * install-on-quit is switched off for this exit, and the next launch turns it
+ * back on. Returns true when the update install owns the restart.
+ */
+export async function installUpdateInsteadOfRelaunch(): Promise<boolean> {
+  if (!status.enabled) return false;
+  if ((await installUpdateNow()).phase === 'installing') return true;
+  autoUpdater.autoInstallOnAppQuit = false;
+  return false;
+}
+
 export function stopUpdateServiceForTests(): void {
   if (firstCheckTimer) clearTimeout(firstCheckTimer);
   if (intervalTimer) clearInterval(intervalTimer);
