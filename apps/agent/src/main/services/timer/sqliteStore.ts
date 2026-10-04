@@ -427,17 +427,6 @@ export class SqliteEntryStore implements EntryStore {
     return this.getSyncState(entryId) === 'pending_create';
   }
 
-  listRecent(limit: number): TimeEntry[] {
-    const owner = this.owner;
-    if (!owner) return [];
-    const rows = this.db.prepare(
-      `SELECT json FROM local_entries
-       WHERE owner_user_id = ? AND owner_workspace_id = ?
-       ORDER BY rowid DESC LIMIT ?`,
-    ).all(owner.userId, owner.workspaceId, limit) as { json: string }[];
-    return rows.map((r) => parseEntry(r.json));
-  }
-
   listSince(since: number): TimeEntry[] {
     const owner = this.owner;
     if (!owner) return [];

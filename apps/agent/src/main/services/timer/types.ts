@@ -118,8 +118,6 @@ export interface EntryStore {
   hasUnsynced(): boolean;
   /** True until the entry has been created successfully on the server. */
   isPendingCreate(entryId: string): boolean;
-  /** Most recent entries (newest first), for the day timeline / recent views. */
-  listRecent(limit: number): TimeEntry[];
   /** Entries that overlap or continue after `since`, newest first. */
   listSince(since: number): TimeEntry[];
   listLedgerEntries(since: number): LocalLedgerEntry[];

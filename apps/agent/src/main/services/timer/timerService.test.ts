@@ -117,9 +117,7 @@ class MemStore implements EntryStore {
   isPendingCreate(id: string) {
     return this.syncStates.get(id) === 'pending_create';
   }
-  listRecent(limit: number) {
-    return [...this.entries.values()].reverse().slice(0, limit).map((e) => structuredClone(e));
-  }
+
   listSince(since: number) {
     return [...this.entries.values()]
       .filter((e) => e.endedAt === null || e.endedAt >= since)
@@ -815,38 +813,6 @@ describe('TimerService offline behaviour', () => {
   });
 });
 
-describe('TimerService.discardAway (sleep/lock)', () => {
-  it('trims the away gap and keeps the timer running', async () => {
-    await svc.start({}); // WORK from T0
-    clock.advance(5 * MIN); // worked 5 min, then machine sleeps
-    const awayStart = clock.now();
-    clock.advance(30 * MIN); // asleep 30 min
-    await svc.discardAway(awayStart, clock.now());
-
-    expect(svc.isRunning()).toBe(true);
-    const s = svc.status();
-    if (s.state === 'RUNNING') expect(s.workedMs).toBe(5 * MIN); // sleep not billed
-    // resume + a bit more
-    clock.advance(2 * MIN);
-    const s2 = svc.status();
-    if (s2.state === 'RUNNING') expect(s2.workedMs).toBe(7 * MIN);
-  });
-
-  it('is a no-op when idle', async () => {
-    await svc.discardAway(T0, T0 + 10 * MIN);
-    expect(svc.isRunning()).toBe(false);
-  });
-
-  it('ignores trivially short gaps', async () => {
-    await svc.start({});
-    clock.advance(3 * MIN);
-    const before = svc.status();
-    await svc.discardAway(clock.now(), clock.now() + 500); // <1s
-    const after = svc.status();
-    expect(after).toEqual(before);
-  });
-});
-
 describe('TimerService.pauseForIdle / resumeFromIdle', () => {
   it('freezes at the last healthy proof and records a permission pause', async () => {
     await svc.start({});
@@ -951,38 +917,6 @@ describe('TimerService.pauseForIdle / resumeFromIdle', () => {
     await svc.pauseForIdle(0);
     const before = svc.status();
     await svc.pauseForIdle(0); // already paused
-    expect(svc.status()).toEqual(before);
-  });
-});
-
-describe('TimerService meeting segments', () => {
-  it('switches WORK→MEETING→WORK and counts both as worked', async () => {
-    await svc.start({}); // WORK from T0
-    clock.advance(5 * MIN);
-    await svc.beginMeeting(clock.now()); // MEETING from T0+5
-    expect(svc.isInMeetingSegment()).toBe(true);
-    clock.advance(20 * MIN);
-    await svc.endMeeting(clock.now()); // WORK from T0+25
-    expect(svc.isInMeetingSegment()).toBe(false);
-    clock.advance(3 * MIN);
-    const s = svc.status();
-    if (s.state === 'RUNNING') expect(s.workedMs).toBe(28 * MIN); // 5 + 20 + 3, all counted
-  });
-
-  it('beginMeeting is a no-op when not running or already in a meeting', async () => {
-    await svc.beginMeeting(clock.now()); // not running
-    expect(svc.isRunning()).toBe(false);
-    await svc.start({});
-    await svc.beginMeeting(clock.now());
-    const before = svc.status();
-    await svc.beginMeeting(clock.now()); // already meeting
-    expect(svc.status()).toEqual(before);
-  });
-
-  it('endMeeting is a no-op when not in a meeting', async () => {
-    await svc.start({});
-    const before = svc.status();
-    await svc.endMeeting(clock.now());
     expect(svc.status()).toEqual(before);
   });
 });

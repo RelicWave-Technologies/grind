@@ -1,7 +1,6 @@
 import {
   canonicalTimerEntryPayload,
   reconcileTodayLedger,
-  applyIdleDiscard,
   closeOpenSegment,
   closeTimeEntry,
   createTimeEntry,
@@ -321,55 +320,6 @@ export class TimerService {
   /** True when running but paused (entry open, no open segment). */
   isPaused(): boolean {
     return this.open !== null && getOpenSegment(this.open) === null;
-  }
-
-  /** Currently in a MEETING segment. */
-  isInMeetingSegment(): boolean {
-    if (!this.open) return false;
-    return getOpenSegment(this.open)?.kind === 'MEETING';
-  }
-
-  /** Meeting started: switch the open WORK segment to MEETING. No-op if not
-   *  running, paused, or already in a MEETING segment. */
-  async beginMeeting(at: number): Promise<void> {
-    if (!this.open) return;
-    const open = getOpenSegment(this.open);
-    if (!open || open.kind === 'MEETING') return;
-    await this.accrualGuard.assertCanAccrue();
-    const updated = openSegment(this.open, { kind: 'MEETING', at, segmentId: this.ids.ulid() });
-    await this.commitOpen(updated);
-  }
-
-  /** Meeting ended: switch back to a WORK segment. No-op if not in MEETING. */
-  async endMeeting(at: number): Promise<void> {
-    if (!this.open) return;
-    const open = getOpenSegment(this.open);
-    if (!open || open.kind !== 'MEETING') return;
-    await this.accrualGuard.assertCanAccrue();
-    const updated = openSegment(this.open, { kind: 'WORK', at, segmentId: this.ids.ulid() });
-    await this.commitOpen(updated);
-  }
-
-  /**
-   * The machine was away (slept / locked) from `awayStart` until `resumeAt`.
-   * If a timer is running, trim that gap so the sleep time is never billed —
-   * the open WORK segment ends at `awayStart`, the gap is recorded as
-   * IDLE_TRIMMED, and a fresh WORK segment resumes at `resumeAt`.
-   * No-op if nothing is running or the gap is trivial (<1s).
-   */
-  async discardAway(awayStart: number, resumeAt: number): Promise<void> {
-    if (!this.open) return;
-    if (resumeAt - awayStart < 1000) return;
-    const open = getOpenSegment(this.open);
-    if (!open) return;
-    await this.accrualGuard.assertCanAccrue();
-    const updated = applyIdleDiscard(this.open, {
-      idleStartedAt: Math.max(awayStart, open.startedAt),
-      resumeAt,
-      idleSegmentId: this.ids.ulid(),
-      workSegmentId: this.ids.ulid(),
-    });
-    await this.commitOpen(updated);
   }
 
   status(): TimerStatus {

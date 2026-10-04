@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import {
-  applyIdleDiscard,
   closeOpenSegment,
   closeTimeEntry,
   createTimeEntry,
@@ -133,84 +132,6 @@ describe('totalWorkedMs', () => {
     e = openSegment(e, { kind: 'MEETING', at: T0 + 10 * MIN, segmentId: 's_2' }); // WORK 10m
     e = closeTimeEntry(e, T0 + 25 * MIN); // MEETING 15m
     expect(totalWorkedMs(e)).toBe(25 * MIN);
-  });
-});
-
-describe('applyIdleDiscard', () => {
-  it('trims the idle gap and resumes a fresh WORK segment', () => {
-    // WORK from T0; user active until T0+8m, idle detected, resumes at T0+15m.
-    let e = baseEntry();
-    e = applyIdleDiscard(e, {
-      idleStartedAt: T0 + 8 * MIN,
-      resumeAt: T0 + 15 * MIN,
-      idleSegmentId: 's_idle',
-      workSegmentId: 's_resume',
-    });
-    expect(e.segments.map((s) => s.kind)).toEqual(['WORK', 'IDLE_TRIMMED', 'WORK']);
-    expect(e.segments[0]).toMatchObject({ startedAt: T0, endedAt: T0 + 8 * MIN });
-    expect(e.segments[1]).toMatchObject({ startedAt: T0 + 8 * MIN, endedAt: T0 + 15 * MIN });
-    expect(e.segments[2]).toMatchObject({ startedAt: T0 + 15 * MIN, endedAt: null });
-    expect(validateEntry(e)).toEqual([]);
-
-    // The 7-minute idle gap is NOT counted; only the 8m worked so far + open.
-    expect(totalWorkedMs(e, T0 + 20 * MIN)).toBe(8 * MIN + 5 * MIN);
-    expect(totalIdleTrimmedMs(e)).toBe(7 * MIN);
-  });
-
-  it('drops the whole WORK segment when it was entirely idle', () => {
-    // idleStartedAt before/at the open segment start => whole segment is idle.
-    let e = baseEntry(T0 + 10 * MIN);
-    e = applyIdleDiscard(e, {
-      idleStartedAt: T0 + 5 * MIN, // before segment start
-      resumeAt: T0 + 30 * MIN,
-      idleSegmentId: 's_idle',
-      workSegmentId: 's_resume',
-    });
-    expect(e.segments.map((s) => s.kind)).toEqual(['IDLE_TRIMMED', 'WORK']);
-    expect(e.segments[0]).toMatchObject({ startedAt: T0 + 10 * MIN, endedAt: T0 + 30 * MIN });
-    expect(e.segments[1]).toMatchObject({ startedAt: T0 + 30 * MIN, endedAt: null });
-    expect(validateEntry(e)).toEqual([]);
-    expect(totalWorkedMs(e, T0 + 35 * MIN)).toBe(5 * MIN); // only post-resume work
-  });
-
-  it('handles idleStartedAt exactly at segment start', () => {
-    let e = baseEntry(T0);
-    e = applyIdleDiscard(e, {
-      idleStartedAt: T0,
-      resumeAt: T0 + 12 * MIN,
-      idleSegmentId: 'i',
-      workSegmentId: 'w',
-    });
-    expect(e.segments.map((s) => s.kind)).toEqual(['IDLE_TRIMMED', 'WORK']);
-    expect(validateEntry(e)).toEqual([]);
-  });
-
-  it('throws when resumeAt precedes idleStartedAt', () => {
-    expect(() =>
-      applyIdleDiscard(baseEntry(), {
-        idleStartedAt: T0 + 10 * MIN,
-        resumeAt: T0 + 5 * MIN,
-        idleSegmentId: 'i',
-        workSegmentId: 'w',
-      }),
-    ).toThrow(SegmentError);
-  });
-
-  it('throws when there is no open segment', () => {
-    const closed = closeTimeEntry(baseEntry(), T0 + MIN);
-    expect(() =>
-      applyIdleDiscard(closed, { idleStartedAt: T0, resumeAt: T0 + MIN, idleSegmentId: 'i', workSegmentId: 'w' }),
-    ).toThrow(SegmentError);
-  });
-
-  it('supports repeated idle/resume cycles and stays valid', () => {
-    let e = baseEntry();
-    e = applyIdleDiscard(e, { idleStartedAt: T0 + 5 * MIN, resumeAt: T0 + 10 * MIN, idleSegmentId: 'i1', workSegmentId: 'w1' });
-    e = applyIdleDiscard(e, { idleStartedAt: T0 + 18 * MIN, resumeAt: T0 + 25 * MIN, idleSegmentId: 'i2', workSegmentId: 'w2' });
-    expect(validateEntry(e)).toEqual([]);
-    // worked: [0,5) + [10,18) + [25, now=30) = 5 + 8 + 5 = 18m; idle: 5 + 7 = 12m
-    expect(totalWorkedMs(e, T0 + 30 * MIN)).toBe(18 * MIN);
-    expect(totalIdleTrimmedMs(e)).toBe(12 * MIN);
   });
 });
 

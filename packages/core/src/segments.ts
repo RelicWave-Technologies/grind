@@ -101,60 +101,6 @@ export function closeTimeEntry(entry: TimeEntry, at: number): TimeEntry {
 }
 
 /**
- * User went idle starting at `idleStartedAt` and chose to DISCARD the idle gap.
- * - The open WORK segment is trimmed to end at `idleStartedAt`.
- * - The gap [idleStartedAt, resumeAt) is recorded as IDLE_TRIMMED (audit/timeline; not counted).
- * - A fresh open WORK segment starts at `resumeAt`.
- *
- * Edge: if `idleStartedAt` <= the open segment's start, the whole open segment was
- * idle, so it is dropped entirely and IDLE_TRIMMED covers [origStart, resumeAt).
- */
-export function applyIdleDiscard(
-  entry: TimeEntry,
-  args: { idleStartedAt: number; resumeAt: number; idleSegmentId: string; workSegmentId: string },
-): TimeEntry {
-  if (entry.endedAt !== null) {
-    throw new SegmentError('applyIdleDiscard: entry already closed');
-  }
-  const i = openIndex(entry.segments);
-  if (i === -1) throw new SegmentError('applyIdleDiscard: no open segment');
-  const open = entry.segments[i]!;
-  const { idleStartedAt, resumeAt } = args;
-
-  if (resumeAt < idleStartedAt) {
-    throw new SegmentError(`applyIdleDiscard: resumeAt (${resumeAt}) < idleStartedAt (${idleStartedAt})`);
-  }
-
-  const segments = cloneSegments(entry.segments);
-  // Clamp the idle start so we never produce a negative-length WORK segment.
-  const effectiveIdleStart = Math.max(idleStartedAt, open.startedAt);
-  const idleGapStart = open.startedAt > idleStartedAt ? open.startedAt : effectiveIdleStart;
-
-  if (effectiveIdleStart <= open.startedAt) {
-    // Entire open segment was idle -> drop it; IDLE_TRIMMED covers [origStart, resumeAt).
-    segments.splice(i, 1, {
-      id: args.idleSegmentId,
-      kind: 'IDLE_TRIMMED',
-      startedAt: open.startedAt,
-      endedAt: resumeAt,
-    });
-  } else {
-    // Trim WORK to the idle start, then record the idle gap.
-    segments[i] = { ...open, endedAt: effectiveIdleStart };
-    segments.push({
-      id: args.idleSegmentId,
-      kind: 'IDLE_TRIMMED',
-      startedAt: idleGapStart,
-      endedAt: resumeAt,
-    });
-  }
-
-  // Resume a fresh WORK segment.
-  segments.push({ id: args.workSegmentId, kind: 'WORK', startedAt: resumeAt, endedAt: null });
-  return { ...entry, revision: entry.revision + 1, pauseReason: null, closeReason: null, segments };
-}
-
-/**
  * Crash / unexpected-shutdown recovery: an entry was left with an open segment,
  * but we only trust activity up to `lastKnownActiveAt`. Close the open segment
  * there and finish the entry, so we never over-credit the offline gap.

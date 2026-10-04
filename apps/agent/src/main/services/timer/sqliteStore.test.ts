@@ -127,8 +127,8 @@ describeSqlite('SqliteEntryStore sync state', () => {
     const replacement = { ...entry('replacement'), clientUuid: collision.clientUuid };
     expect(() => store.switchEntry(closed, replacement)).toThrow();
 
-    expect(store.listRecent(10).find((item) => item.id === old.id)?.endedAt).toBeNull();
-    expect(store.listRecent(10).some((item) => item.id === replacement.id)).toBe(false);
+    expect(store.getOpen()?.id).toBe(old.id);
+    expect(store.listSince(0).some((item) => item.id === replacement.id)).toBe(false);
   });
 
   it('migrates old synced rows to synced', () => {
