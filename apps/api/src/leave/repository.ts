@@ -29,6 +29,9 @@ import { RULE_SOURCE_PREFIX } from '../attendance/ruleLedger';
 
 type Tx = Prisma.TransactionClient;
 
+/** Earlier than any leave Timo holds, for a workspace with no ledger start. */
+const WHOLE_HISTORY_FROM = '2000-01-01';
+
 /** A `Date` from a Postgres `date` column, as YYYY-MM-DD. */
 export function toIsoDate(d: Date): string {
   return d.toISOString().slice(0, 10);
@@ -105,7 +108,12 @@ export async function loadWorkingCalendar(input: {
   // decides how far back the other queries have to reach.
   const policy = await loadOrCreateLeavePolicy(input.workspaceId, db);
   const fundingFloor = policy.ledgerStartMonth ? `${policy.ledgerStartMonth}-01` : undefined;
-  const loadFrom = fundingFloor && fundingFloor < input.from ? fundingFloor : input.from;
+  // With no ledger start, every credit since joining counts toward the balance,
+  // so every leave day since then has to be spent against it too — loading
+  // only the visible window would leave old leave unspent and the balance high.
+  const loadFrom = fundingFloor
+    ? (fundingFloor < input.from ? fundingFloor : input.from)
+    : WHOLE_HISTORY_FROM;
 
   const fromDate = fromIsoDate(loadFrom);
   const toDate = fromIsoDate(input.to);

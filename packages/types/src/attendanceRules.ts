@@ -116,3 +116,44 @@ export const AttendanceRuleExceptionsResponseSchema = z.object({
   exceptions: z.array(AttendanceRuleExceptionSchema),
 });
 export type AttendanceRuleExceptionsResponse = z.infer<typeof AttendanceRuleExceptionsResponseSchema>;
+
+/**
+ * What a day reads as to a person — six words HR already uses. The month sheet
+ * and the dashboard chips print these; the detailed codes underneath
+ * (`PL_HD/LWP_HD` and the rest) stay internal, because whether a half was
+ * paid is one Salary Cut figure, not something to decode in every cell.
+ *
+ *   P    present, a full day
+ *   HD   half day — worked half, the other half was leave
+ *   L    leave — approved, or made leave by an attendance rule
+ *   LWA  leave without approval — absent with no approved application
+ *   HL   company holiday
+ *   WO   weekly off
+ *   --   no shift assigned
+ */
+export type DisplayDayCode = 'P' | 'HD' | 'L' | 'LWA' | 'HL' | 'WO' | '--';
+
+export function displayDayCode(code: string, ruleTag?: AttendanceRuleTag | null): DisplayDayCode {
+  switch (code) {
+    case 'P': return 'P';
+    case 'PL_HD':
+    case 'LWP_HD': return 'HD';
+    case 'HL': return 'HL';
+    case 'WO': return 'WO';
+    case '--': return '--';
+    // Absent with nothing approved is exactly what LWA means.
+    case 'A': return 'LWA';
+    default:
+      return ruleTag === 'NO_APPLICATION' || ruleTag === 'LEAVE_NOT_APPROVED' ? 'LWA' : 'L';
+  }
+}
+
+export const DISPLAY_DAY_LABEL: Record<DisplayDayCode, string> = {
+  P: 'Present',
+  HD: 'Half day',
+  L: 'Leave',
+  LWA: 'Leave without approval',
+  HL: 'Holiday',
+  WO: 'Weekly off',
+  '--': 'No shift',
+};

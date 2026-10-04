@@ -215,7 +215,6 @@ export function CalendarScreen() {
     queryFn: () => api<{ requests: LeaveRequestDto[] }>('/v1/leave/me/requests'),
   });
 
-  const balance = balanceQ.data?.balance;
   const policy = policyQ.data;
   const data = calendarQ.data;
 
@@ -315,8 +314,8 @@ export function CalendarScreen() {
           than no number. */}
       <StatRow>
         <Stat
-          label="Your balance"
-          value={balance ? days(balance.balanceDays) : '—'}
+          label="Leave left"
+          value={balanceQ.data ? days(balanceQ.data.leftDays ?? balanceQ.data.balance.balanceDays) : '—'}
           unit="days"
           hint={
             policy
@@ -824,28 +823,19 @@ function MyLeavePanel({
  * second time on the client would be a rule in two places, and the one that
  * matters is the server's.
  *
- * `canManage` only decides whether the two write actions are offered. Both are
- * admin-only on the server (`requireAdmin`), so hiding them is courtesy rather
- * than security: a manager who forged the request would still be refused.
+ * Four numbers a person: at the start of the month, got, used, left — the
+ * same never-negative leave account the month sheet prints, so the two agree.
  *
- * The balance itself is deliberately not editable here. It is the sum of a
- * ledger, and a field that overwrites it would be exactly the counter this
- * design exists to avoid — so a correction is an adjustment entry, which
- * shows up in that person's statement.
- *
- * What IS editable is what produces the balance: the monthly rate, the accrual
- * start, and whether the last Saturday counts as a working day.
+ * `canManage` only decides whether Edit is offered. Its writes are admin-only on
+ * the server (`requireAdmin`), so hiding it is courtesy rather than security.
  */
 function BalancesPanel({
   asOf, month, monthLabel, canManage,
 }: { asOf: string; month: string; monthLabel: string; canManage: boolean }) {
   const qc = useQueryClient();
   const [editing, setEditing] = useState<LeaveBalanceRow | null>(null);
-  const [adjusting, setAdjusting] = useState<LeaveBalanceRow | null>(null);
 
   // Balances as they stood at the end of the month on screen, not today's.
-  // Scrolling back a month and seeing this month's numbers is the bug people
-  // report as "the filter does nothing".
   const q = useQuery({
     queryKey: ['leave', 'balances', asOf],
     queryFn: () => api<LeaveBalancesResponse>(`/v1/admin/leave/balances?asOf=${asOf}`),
@@ -856,31 +846,24 @@ function BalancesPanel({
   if (!data) return null;
 
   const refresh = () => qc.invalidateQueries({ queryKey: ['leave'] });
-  const scopeNote = canManage
-    ? 'Balances'
-    : data.rows.length === 1
-      ? 'Your balance'
-      : 'Balances for your team';
 
   return (
     <>
       <p className="cal-scope-note">
-        {scopeNote} as {data.rows.length === 1 ? 'it' : 'they'} stood at the end of{' '}
-        <strong>{monthLabel}</strong>.
+        Leave for <strong>{monthLabel}</strong>: what they started with, what they got, what they used, what is left.
+        Leave nobody could pay for is a salary cut, so <strong>Left</strong> never goes below zero.
       </p>
 
-      <Card title={`Balances as of ${data.asOf}`}>
+      <Card variant="flush">
         <Table density="compact">
           <THead>
             <Tr>
               <Th>Person</Th>
-              <Th align="right">Balance</Th>
-              <Th align="right">Accrued</Th>
+              <Th align="right">At start</Th>
+              <Th align="right">Got</Th>
               <Th align="right">Used</Th>
-              <Th align="right">Adjusted</Th>
-              <Th>Rate</Th>
-              <Th>Accrues from</Th>
-              {canManage && <Th align="right">·</Th>}
+              <Th align="right">Left</Th>
+              {canManage && <Th align="right" />}
             </Tr>
           </THead>
           <Tbody>
@@ -904,33 +887,15 @@ function BalancesPanel({
                     avatar={<Avatar name={r.name} src={r.avatarUrl ?? undefined} size={24} />}
                   />
                 </Td>
-                <Td align="right" mono>
-                  {r.balanceDays < 0 ? (
-                    <Tag status="danger">{days(r.balanceDays)}</Tag>
-                  ) : (
-                    days(r.balanceDays)
-                  )}
-                </Td>
-                <Td align="right" mono>{days(r.accruedDays)}</Td>
-                <Td align="right" mono>{days(r.consumedDays)}</Td>
-                <Td align="right" mono>{r.adjustedDays === 0 ? '—' : days(r.adjustedDays)}</Td>
-                <Td mono>
-                  {days(r.effectiveAccrualDays)}/mo
-                  {r.accrualDays === null && <span title="inherited from the workspace policy"> ·</span>}
-                </Td>
-                <Td mono align="left">
-                  {r.joinedOnSet ? r.accrualStart : <Tag status="warn">{r.accrualStart}</Tag>}
-                </Td>
+                <Td align="right" mono>{days(r.month.opening)}</Td>
+                <Td align="right" mono>{r.month.earned === 0 ? '—' : `+${days(r.month.earned)}`}</Td>
+                <Td align="right" mono>{r.month.paid === 0 ? '—' : `−${days(r.month.paid)}`}</Td>
+                <Td align="right" mono><strong>{days(r.month.closing)}</strong></Td>
                 {canManage && (
                   <Td align="right">
-                    <Toolbar>
-                      <Button size="sm" variant="ghost" onClick={() => setAdjusting(r)}>
-                        Adjust
-                      </Button>
-                      <Button size="sm" variant="secondary" onClick={() => setEditing(r)}>
-                        Edit
-                      </Button>
-                    </Toolbar>
+                    <Button size="sm" variant="secondary" onClick={() => setEditing(r)}>
+                      Edit
+                    </Button>
                   </Td>
                 )}
               </Tr>
@@ -939,19 +904,28 @@ function BalancesPanel({
         </Table>
       </Card>
 
-      <EditMemberModal row={editing} onClose={() => setEditing(null)} onSaved={refresh} />
-      <AdjustModal row={adjusting} month={month} onClose={() => setAdjusting(null)} onSaved={refresh} />
+      <EditMemberModal row={editing} month={month} onClose={() => setEditing(null)} onSaved={refresh} />
     </>
   );
 }
 
+/**
+ * Everything about one person's leave in one place: how much they get, from
+ * when, whether the last Saturday is off, how the attendance rules treat them,
+ * and — optionally — days added or taken away by hand.
+ *
+ * The added/removed days are a ledger entry with a reason, never an edit of the
+ * balance itself, so the statement can always say how a number got there.
+ */
 function EditMemberModal({
-  row, onClose, onSaved,
-}: { row: LeaveBalanceRow | null; onClose: () => void; onSaved: () => void }) {
+  row, month, onClose, onSaved,
+}: { row: LeaveBalanceRow | null; month: string; onClose: () => void; onSaved: () => void }) {
   const [rate, setRate] = useState('');
   const [joined, setJoined] = useState('');
   const [saturday, setSaturday] = useState<'inherit' | 'on' | 'off'>('inherit');
   const [ruleMode, setRuleMode] = useState<LeaveBalanceRow['attendanceRuleMode']>('STANDARD');
+  const [change, setChange] = useState('');
+  const [why, setWhy] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -960,12 +934,17 @@ function EditMemberModal({
     setJoined(row.joinedOnSet ? row.accrualStart : '');
     setSaturday(row.lastSaturdayOff === null ? 'inherit' : row.lastSaturdayOff ? 'on' : 'off');
     setRuleMode(row.attendanceRuleMode);
+    setChange('');
+    setWhy('');
     setError(null);
   }, [row]);
 
+  const changeDays = change.trim() === '' ? 0 : Number(change);
+  const changeInvalid = Number.isNaN(changeDays) || (changeDays !== 0 && why.trim() === '');
+
   const save = useMutation({
-    mutationFn: () =>
-      api(`/v1/admin/leave/members/${row!.userId}`, {
+    mutationFn: async () => {
+      await api(`/v1/admin/leave/members/${row!.userId}`, {
         method: 'PATCH',
         json: {
           accrualDays: rate.trim() === '' ? null : Number(rate),
@@ -973,7 +952,15 @@ function EditMemberModal({
           lastSaturdayOff: saturday === 'inherit' ? null : saturday === 'on',
           attendanceRuleMode: ruleMode,
         },
-      }),
+      });
+      if (changeDays !== 0) {
+        await api('/v1/admin/leave/adjust', {
+          method: 'POST',
+          // Dated to the month on screen, so it lands where the reader is looking.
+          json: { userId: row!.userId, days: changeDays, effectiveOn: `${month}-01`, reason: why.trim() },
+        });
+      }
+    },
     onSuccess: () => { onSaved(); onClose(); },
     onError: (e: Error) => setError(humanError(e.message)),
   });
@@ -982,115 +969,46 @@ function EditMemberModal({
     <Modal
       open={row !== null}
       onClose={onClose}
-      title={row ? `Leave settings — ${row.name}` : ''}
-      description="These decide what the balance becomes. The balance itself is the sum of the ledger, so to move it, post an adjustment instead."
+      title={row ? row.name : ''}
       actions={
         <>
           <Button variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button disabled={save.isPending} onClick={() => save.mutate()}>Save</Button>
+          <Button disabled={save.isPending || changeInvalid} onClick={() => save.mutate()}>Save</Button>
         </>
       }
     >
       {error && <Banner status="danger">{error}</Banner>}
-      <Field label="Monthly grant (days)" hint="Leave empty to inherit the workspace policy.">
-        <Input type="number" step="0.5" min="0" value={rate} placeholder="inherit"
+      <Field label="Attendance rules">
+        <Select value={ruleMode} onChange={(e) => setRuleMode(e.target.value as typeof ruleMode)}>
+          <option value="STANDARD">Normal — all rules</option>
+          <option value="REMOTE">Remote — no punch needed, no late rule</option>
+          <option value="EXEMPT">No rules</option>
+        </Select>
+      </Field>
+      <Field label="Leave per month" hint="Empty = company default.">
+        <Input type="number" step="0.5" min="0" value={rate} placeholder="default"
                onChange={(e) => setRate(e.target.value)} />
       </Field>
-      <Field label="Accrues from" hint="Their joining date. Empty falls back to the Timo account date.">
+      <Field label="Joined on" hint="Leave starts from this date.">
         <Input type="date" value={joined} onChange={(e) => setJoined(e.target.value)} />
       </Field>
       <Field label="Last Saturday of the month">
         <Select value={saturday} onChange={(e) => setSaturday(e.target.value as typeof saturday)}>
-          <option value="inherit">Inherit workspace policy</option>
-          <option value="on">Not a working day</option>
-          <option value="off">A normal working day</option>
+          <option value="inherit">Company default</option>
+          <option value="on">Off</option>
+          <option value="off">Working day</option>
         </Select>
       </Field>
-      <Field
-        label="Attendance rules"
-        hint="Remote: no punch expected, so working from home is not leave — the hour and absence rules still apply."
-      >
-        <Select value={ruleMode} onChange={(e) => setRuleMode(e.target.value as typeof ruleMode)}>
-          <option value="STANDARD">All rules apply</option>
-          <option value="REMOTE">Remote — skip the work-from-home rule</option>
-          <option value="EXEMPT">Outside the rules</option>
-        </Select>
+      <Field label="Add or remove days" hint="Optional. 1 adds a day, -0.5 removes half.">
+        <Input type="number" step="0.5" value={change} placeholder="0"
+               onChange={(e) => setChange(e.target.value)} />
       </Field>
-    </Modal>
-  );
-}
-
-function AdjustModal({
-  row, month, onClose, onSaved,
-}: { row: LeaveBalanceRow | null; month: string; onClose: () => void; onSaved: () => void }) {
-  const [amount, setAmount] = useState('');
-  // The month on screen, not today. An adjustment posted while reading August
-  // is an argument about August, and dating it to now filed it under the wrong
-  // month — where the person looking for it could not see it.
-  const [effectiveOn, setEffectiveOn] = useState(`${month}-01`);
-  const [reason, setReason] = useState('');
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setAmount('');
-    setReason('');
-    setEffectiveOn(`${month}-01`);
-    setError(null);
-  }, [row, month]);
-
-  const save = useMutation({
-    mutationFn: () =>
-      api('/v1/admin/leave/adjust', {
-        method: 'POST',
-        json: {
-          userId: row!.userId,
-          days: Number(amount),
-          effectiveOn,
-          reason: reason.trim(),
-        },
-      }),
-    onSuccess: () => { onSaved(); onClose(); },
-    onError: (e: Error) => setError(humanError(e.message)),
-  });
-
-  const valid = amount.trim() !== '' && Number(amount) !== 0 && reason.trim() !== '';
-
-  return (
-    <Modal
-      open={row !== null}
-      onClose={onClose}
-      title={row ? `Adjust balance — ${row.name}` : ''}
-      description="Written as a ledger entry, so their statement explains how the number got there."
-      actions={
-        <>
-          <Button variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button disabled={!valid || save.isPending} onClick={() => save.mutate()}>Post adjustment</Button>
-        </>
-      }
-    >
-      {error && <Banner status="danger">{error}</Banner>}
-      {row && (
-        <Banner status="info">
-          Balance is {days(row.balanceDays)} today
-          {amount.trim() !== '' && !Number.isNaN(Number(amount)) && (
-            <> — this makes it {days(row.balanceDays + Number(amount))}.</>
-          )}
-        </Banner>
+      {changeDays !== 0 && !Number.isNaN(changeDays) && (
+        <Field label="Why" hint="Required when adding or removing days.">
+          <Input value={why} placeholder="e.g. Opening balance from before Timo"
+                 onChange={(e) => setWhy(e.target.value)} />
+        </Field>
       )}
-      <Field label="Days" hint="Negative takes days away. Half days allowed.">
-        <Input type="number" step="0.5" value={amount} placeholder="e.g. 1 or -0.5"
-               onChange={(e) => setAmount(e.target.value)} />
-      </Field>
-      <Field
-        label="Counts from"
-        hint="The balance changes from this date, so it lands in that month rather than this one."
-      >
-        <Input type="date" value={effectiveOn} onChange={(e) => setEffectiveOn(e.target.value)} />
-      </Field>
-      <Field label="Why" hint="Required. Months later this is the only thing that explains the number.">
-        <Input value={reason} placeholder="Opening balance carried in from before August"
-               onChange={(e) => setReason(e.target.value)} />
-      </Field>
     </Modal>
   );
 }

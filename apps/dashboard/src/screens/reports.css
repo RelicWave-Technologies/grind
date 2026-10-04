@@ -1568,11 +1568,22 @@
 .rep-status-chip--hl  { background: var(--ui-lilac); }
 .rep-status-chip--wo  { background: var(--ui-surface-sunken); color: var(--ui-ink-2); }
 .rep-status-chip--none{ background: var(--ui-surface-inset); color: var(--ui-ink-3); }
-/* Half days carry the half-day fill; a day split between paid and unpaid
-   carries the unpaid one, because the unpaid half is the part worth noticing. */
-.rep-status-chip--pl-hd        { background: var(--ui-cream); }
-.rep-status-chip--lwp-hd       { background: var(--ui-coral); }
-.rep-status-chip--pl-hd-lwp-hd { background: var(--ui-coral); }
+/* The six display codes the sheet uses: leave in mint, leave without
+   approval in coral, a half day in cream. */
+.rep-status-chip--l   { background: var(--ui-mint); }
+.rep-status-chip--lwa { background: var(--ui-coral); }
+
+/* The day being changed, stated in one line. */
+.rep-override-now-line {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-sp-3);
+  margin: 0;
+}
+.rep-override-past > summary {
+  cursor: pointer;
+  color: var(--ui-ink-2);
+}
 
 /* The attendance rule that made a day leave, under its code. */
 .rep-status {
