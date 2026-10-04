@@ -88,6 +88,27 @@ function ledger(ctx: Ctx, u: DbUser, asOf: string): { rows: LeaveStatementRow[];
   return { rows, accrued: roundToHalfDay(accrued), consumed: roundToHalfDay(consumed), adjusted: roundToHalfDay(adjusted) };
 }
 
+/** The month containing `asOf`, read off the ledger: what it opened with, what came in, what was used. */
+function monthOf(rows: LeaveStatementRow[], asOf: string): LeaveBalanceRow['month'] {
+  const key = asOf.slice(0, 7);
+  const before = rows.filter((r) => r.effectiveOn.slice(0, 7) < key).reduce((sum, r) => sum + r.days, 0);
+  const inMonth = rows.filter((r) => r.effectiveOn.slice(0, 7) === key).sort((a, b) => (a.effectiveOn < b.effectiveOn ? -1 : 1));
+  const earned = inMonth.filter((r) => r.days > 0).reduce((sum, r) => sum + r.days, 0);
+  const paid = -inMonth.filter((r) => r.days < 0).reduce((sum, r) => sum + r.days, 0);
+  const opening = Math.max(0, roundToHalfDay(before));
+  return {
+    opening,
+    earned: roundToHalfDay(earned),
+    paid: roundToHalfDay(paid),
+    closing: Math.max(0, roundToHalfDay(opening + earned - paid)),
+    lines: inMonth.map((r) =>
+      r.days < 0
+        ? { date: r.effectiveOn, kind: 'leave' as const, label: r.reason ?? 'Leave', days: -r.days, paid: -r.days }
+        : { date: r.effectiveOn, kind: 'credit' as const, label: r.reason ?? 'Credit', days: r.days },
+    ),
+  };
+}
+
 function balanceRow(ctx: Ctx, u: DbUser, asOf: string): LeaveBalanceRow {
   const l = ledger(ctx, u, asOf);
   const policy = ctx.db.leavePolicy;
@@ -101,6 +122,8 @@ function balanceRow(ctx: Ctx, u: DbUser, asOf: string): LeaveBalanceRow {
     effectiveAccrualDays: u.leaveAccrualDays ?? policy.monthlyAccrualDays,
     lastSaturdayOff: u.leaveLastSaturdayOff,
     effectiveLastSaturdayOff: u.leaveLastSaturdayOff ?? false,
+    attendanceRuleMode: u.attendanceRuleMode ?? 'STANDARD',
+    month: monthOf(l.rows, asOf),
     accrualStart: accrualStart(u),
     joinedOnSet: u.joinedOn !== null,
     balanceDays: roundToHalfDay(l.accrued - l.consumed + l.adjusted),

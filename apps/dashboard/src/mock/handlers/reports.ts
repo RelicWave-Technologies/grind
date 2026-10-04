@@ -4,6 +4,7 @@ import type {
   AttendanceOverrideDto,
   AttendanceOverrideHistoryResponse,
   MemberReportDayAppsResponse,
+  MonthSummaryResponse,
   MemberReportDayScreenshotsResponse,
   TeamMemberReportsResponse,
   TeamReportAttentionItem,
@@ -26,8 +27,10 @@ import {
   summaryMember,
   teamMember,
   toReportApp,
+  teamNameOf,
   userById,
 } from '../derive';
+import { rngFor } from '../rng';
 import { bodyObject, del, fail, get, put, raw, str, type Ctx } from '../http';
 import { xlsx } from '../xlsx';
 import { range, requireCap, singleDay, targetUser, toCsv } from './common';
@@ -101,6 +104,44 @@ export function registerReports(): void {
 
   get('/v1/reports/me/day-apps', (req, ctx) => dayApps(ctx, ctx.me, singleDay(req)));
   get('/v1/reports/me/day-screenshots', (req, ctx) => dayShots(ctx, ctx.me, singleDay(req)));
+
+  // One row per person for the month: the sheet's counts, the salary cut and
+  // the leave account. Numbers are seeded per person and month, so they hold
+  // still across reloads.
+  get('/v1/reports/month-summary', (req, ctx): MonthSummaryResponse => {
+    requireCap(ctx, 'reports.team.read');
+    const month = req.query.get('month') ?? todayKey().slice(0, 7);
+    const rows = reportUsers(ctx).map((u) => {
+      const r = rngFor('month-summary', u.id, month);
+      const mode = u.attendanceRuleMode ?? 'STANDARD';
+      const leave = mode === 'EXEMPT' ? 0 : r.int(0, 2);
+      const lwa = mode === 'STANDARD' ? r.int(0, 1) : 0;
+      const halfDay = r.int(0, 2);
+      const late = mode === 'STANDARD' ? r.int(0, 4) : 0;
+      const opening = r.int(1, 6);
+      const earned = 1;
+      const paid = Math.min(opening + earned, leave);
+      const lines = [
+        { date: `${month}-01`, kind: 'credit' as const, label: 'Monthly credit', days: earned },
+        ...Array.from({ length: leave }, (_, i) => ({ date: `${month}-${String(6 + i * 7).padStart(2, '0')}`, kind: 'leave' as const, label: 'Casual leave', days: 1, paid: 1, code: 'L' })),
+      ];
+      return {
+        userId: u.id,
+        name: u.name,
+        email: u.email,
+        teamName: teamNameOf(ctx, u.teamId),
+        mode,
+        present: r.int(14, 21),
+        halfDay,
+        leave,
+        lwa,
+        late,
+        salaryCut: lwa + Math.max(0, late - 3) * 0.5,
+        account: { opening, earned, paid, closing: opening + earned - paid, lines },
+      };
+    });
+    return { month, rulesFrom: `${month}-01`, rows };
+  });
 
   get('/v1/reports/team/summary', (req, ctx): TeamReportsSummaryResponse => {
     requireCap(ctx, 'reports.team.read');

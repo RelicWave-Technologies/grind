@@ -37,6 +37,8 @@ export interface DbUser {
   teamId: string | null;
   managerId: string | null;
   avatarUrl: string | null;
+  /** How attendance rules treat this person; unset reads as STANDARD. */
+  attendanceRuleMode?: 'STANDARD' | 'REMOTE' | 'EXEMPT';
   shiftId: string | null;
   shiftAssignedAt: number | null;
   createdAt: number;

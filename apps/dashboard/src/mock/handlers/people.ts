@@ -155,6 +155,7 @@ function memberSettings(ctx: Ctx, u: DbUser): TeamMemberSettingsDto {
     screenshotIntervalMin: effectiveInterval(ctx, u),
     idleThresholdMin: u.idleThresholdMin ?? ctx.db.workspacePolicy.defaultIdleThresholdMin ?? MEMBER_SETTING_DEFAULTS.idleThresholdMin,
     idleWarningSeconds: u.idleWarningSeconds,
+    attendanceRuleMode: u.attendanceRuleMode ?? 'STANDARD',
     createdAt: iso(u.createdAt),
   };
 }
@@ -452,6 +453,7 @@ export function registerPeople(): void {
     if (b.screenshotIntervalMin !== undefined) u.screenshotIntervalMin = b.screenshotIntervalMin === null ? null : (Number(b.screenshotIntervalMin) as 1 | 2 | 3);
     if (b.idleThresholdMin !== undefined) u.idleThresholdMin = b.idleThresholdMin === null ? null : Number(b.idleThresholdMin);
     if (b.idleWarningSeconds !== undefined) u.idleWarningSeconds = b.idleWarningSeconds === null ? null : Number(b.idleWarningSeconds);
+    if (b.attendanceRuleMode === 'STANDARD' || b.attendanceRuleMode === 'REMOTE' || b.attendanceRuleMode === 'EXEMPT') u.attendanceRuleMode = b.attendanceRuleMode;
     const after = { shots: effectiveInterval(ctx, u), idle: u.idleThresholdMin ?? ctx.db.workspacePolicy.defaultIdleThresholdMin, warn: u.idleWarningSeconds };
     const risk = riskOf(after.shots, after.idle);
     const reason = str(b.auditReason)?.trim() || null;

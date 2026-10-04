@@ -63,6 +63,7 @@ function readCases(): Case[] {
     { method: 'GET', url: `/v1/reports/me/day-screenshots?${q({ date: yday, tz: 'Asia/Kolkata' })}` },
     { method: 'GET', url: `/v1/reports/team/summary?${q({ from: addDays(today, -30), to: today, tz: 'Asia/Kolkata' })}`, roles: MGR },
     { method: 'GET', url: `/v1/reports/team/summary?${q({ from: week, to: today, tz: 'Asia/Kolkata', teamId: 'team_design' })}`, roles: ADM },
+    { method: 'GET', url: `/v1/reports/month-summary?${q({ month: today.slice(0, 7) })}`, roles: MGR },
     { method: 'GET', url: `/v1/reports/team?${q({ from: week, to: today, tz: 'Asia/Kolkata' })}`, roles: MGR },
     { method: 'GET', url: `/v1/reports/team/member?${q({ userId: 'usr_vikram', from: week, to: today, tz: 'Asia/Kolkata' })}`, roles: MGR },
     { method: 'GET', url: `/v1/reports/team/member/day-apps?${q({ userId: 'usr_vikram', date: yday, tz: 'Asia/Kolkata' })}`, roles: MGR },
