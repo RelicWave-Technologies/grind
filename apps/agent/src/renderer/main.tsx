@@ -6,6 +6,7 @@ import FloatingBar from './screens/FloatingBar';
 import Popover from './screens/Popover';
 import ReadyToWork from './screens/ReadyToWork';
 import AttentionPrompt from './screens/AttentionPrompt';
+import { startTheme } from './lib/theme';
 // The EMIAC design system (root DESIGN.md): fonts, generated tokens, element
 // defaults. Loaded before the renderer's own stylesheet, which builds on it.
 import '@grind/design';
@@ -31,6 +32,8 @@ const Root =
 if (['floating', 'popover', 'attention', 'ready-to-work'].includes(route)) {
   document.body.classList.add('chrome-window');
 }
+
+startTheme(route);
 
 const root = document.getElementById('root');
 if (!root) throw new Error('#root not found');

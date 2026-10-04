@@ -2,6 +2,7 @@ import { app } from 'electron';
 import { promises as fs, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { log } from '../logger';
+import { DEFAULT_APPEARANCE, isAppTheme, isPillTheme, type Appearance } from '../../shared/appearance';
 
 /**
  * Local, user-scoped preferences — small UI choices that belong to the device,
@@ -39,11 +40,14 @@ export interface Preferences {
    * sort first, quietly pre-selecting the WRONG task to start next.
    */
   lastLarkTaskGuid: string | null;
+  /** Light / dark / system for the app, and the floating pill's own theme. */
+  appearance: Appearance;
 }
 
 const DEFAULTS: Preferences = {
   floatingBar: { visible: true, x: null, y: null },
   lastLarkTaskGuid: null,
+  appearance: DEFAULT_APPEARANCE,
 };
 
 let cache: Preferences | null = null;
@@ -67,6 +71,10 @@ function coerce(raw: unknown): Preferences {
     lastLarkTaskGuid: typeof r.lastLarkTaskGuid === 'string' && r.lastLarkTaskGuid.length > 0
       ? r.lastLarkTaskGuid
       : null,
+    appearance: {
+      app: isAppTheme(r.appearance?.app) ? r.appearance.app : DEFAULT_APPEARANCE.app,
+      pill: isPillTheme(r.appearance?.pill) ? r.appearance.pill : DEFAULT_APPEARANCE.pill,
+    },
   };
 }
 
@@ -80,7 +88,7 @@ function ensureLoaded(): Preferences {
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
       log.warn('preferences: unreadable, using defaults', { err: String(err) });
     }
-    cache = { ...DEFAULTS, floatingBar: { ...DEFAULTS.floatingBar } };
+    cache = { ...DEFAULTS, floatingBar: { ...DEFAULTS.floatingBar }, appearance: { ...DEFAULTS.appearance } };
   }
   return cache;
 }
@@ -88,7 +96,7 @@ function ensureLoaded(): Preferences {
 export function getPreferences(): Preferences {
   const c = ensureLoaded();
   // Hand back a structural copy so callers can't mutate the cache in place.
-  return { floatingBar: { ...c.floatingBar }, lastLarkTaskGuid: c.lastLarkTaskGuid };
+  return { floatingBar: { ...c.floatingBar }, lastLarkTaskGuid: c.lastLarkTaskGuid, appearance: { ...c.appearance } };
 }
 
 /**
@@ -98,6 +106,25 @@ export function getPreferences(): Preferences {
 export function patchFloatingBar(patch: Partial<FloatingBarPreferences>): Preferences {
   const c = ensureLoaded();
   c.floatingBar = { ...c.floatingBar, ...patch };
+  scheduleWrite();
+  const snapshot = getPreferences();
+  for (const fn of listeners) {
+    try {
+      fn(snapshot);
+    } catch (err) {
+      log.warn('preferences: listener threw', { err: String(err) });
+    }
+  }
+  return snapshot;
+}
+
+/** Change the app or pill theme, persist (debounced + atomic) and notify listeners. */
+export function patchAppearance(patch: Partial<Appearance>): Preferences {
+  const c = ensureLoaded();
+  c.appearance = {
+    app: isAppTheme(patch.app) ? patch.app : c.appearance.app,
+    pill: isPillTheme(patch.pill) ? patch.pill : c.appearance.pill,
+  };
   scheduleWrite();
   const snapshot = getPreferences();
   for (const fn of listeners) {

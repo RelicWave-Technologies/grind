@@ -9,6 +9,7 @@ import type { LaunchAtLoginHealth, MoveToApplicationsResult } from '../shared/la
 import type { AttentionAction, AttentionActionResult, AttentionPrompt } from '../shared/attention';
 import type { WorkspaceTimeContext } from '../shared/workspaceTime';
 import type { ShiftPromptReason, TodayShiftWindow } from '../shared/shift';
+import type { Appearance } from '../shared/appearance';
 
 type AuthStatus = 'loggedIn' | 'loggedOut';
 type LarkOutcome = { kind: 'pending' } | { kind: 'error'; reason: string };
@@ -168,6 +169,13 @@ const api = {
       return () => ipcRenderer.off('settings:open:push', sub);
     },
     openDataFolder: (): Promise<void> => ipcRenderer.invoke('settings:openDataFolder'),
+    getAppearance: (): Promise<Appearance> => ipcRenderer.invoke('settings:getAppearance'),
+    setAppearance: (patch: Partial<Appearance>): Promise<Appearance> => ipcRenderer.invoke('settings:setAppearance', patch),
+    onAppearanceChange: (cb: (appearance: Appearance) => void): (() => void) => {
+      const sub = (_event: unknown, appearance: Appearance) => cb(appearance);
+      ipcRenderer.on('appearance:push', sub);
+      return () => ipcRenderer.off('appearance:push', sub);
+    },
   },
   app: {
     relaunch: (): Promise<void> => ipcRenderer.invoke('app:relaunch'),

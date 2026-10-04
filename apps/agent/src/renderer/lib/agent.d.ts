@@ -8,6 +8,7 @@ import type { LaunchAtLoginHealth, MoveToApplicationsResult } from '../../shared
 import type { AttentionAction, AttentionActionResult, AttentionPrompt } from '../../shared/attention';
 import type { WorkspaceTimeContext } from '../../shared/workspaceTime';
 import type { ShiftPromptReason, TodayShiftWindow } from '../../shared/shift';
+import type { Appearance } from '../../shared/appearance';
 
 type AuthStatus = 'loggedIn' | 'loggedOut';
 type LarkOutcome = { kind: 'pending' } | { kind: 'error'; reason: string };
@@ -124,6 +125,9 @@ declare global {
         openStartupPrefs: () => Promise<void>;
         onOpen: (cb: () => void) => () => void;
         openDataFolder: () => Promise<void>;
+        getAppearance: () => Promise<Appearance>;
+        setAppearance: (patch: Partial<Appearance>) => Promise<Appearance>;
+        onAppearanceChange: (cb: (appearance: Appearance) => void) => () => void;
       };
       app: {
         relaunch: () => Promise<void>;

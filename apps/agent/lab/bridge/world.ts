@@ -1,3 +1,4 @@
+import type { Appearance } from '../../src/shared/appearance';
 import { dateKeyInTimeZone, localDayWindowInTimeZone } from '@grind/types';
 import type {
   ScreenshotItem,
@@ -26,7 +27,7 @@ export type Insights = Awaited<ReturnType<AgentBridge['insights']['today']>>;
 export type LarkMode = Scenario['lark'];
 
 /** A world is split into slices so a change only fires the events it affects. */
-export const SLICES = ['auth', 'timer', 'lark', 'tasks', 'shots', 'updates', 'perms', 'settings', 'notice'] as const;
+export const SLICES = ['auth', 'timer', 'lark', 'tasks', 'shots', 'updates', 'perms', 'settings', 'notice', 'appearance'] as const;
 export type Slice = (typeof SLICES)[number];
 
 /** A Lark task as seeded: time logged before today is fixed, today's is derived from entries. */
@@ -67,6 +68,7 @@ export interface World {
     downloadStartedAt: number | null;
   };
   floatingBarVisible: boolean;
+  appearance: Appearance;
 }
 
 // ── Workspace time ──────────────────────────────────────────────────────────

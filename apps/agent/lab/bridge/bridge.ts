@@ -1,3 +1,4 @@
+import type { Appearance } from '../../src/shared/appearance';
 import type { UserDto } from '@grind/types';
 import type { AttentionAction, AttentionPrompt } from '../../src/shared/attention';
 import type { LaunchAtLoginHealth } from '../../src/shared/launchAtLogin';
@@ -54,6 +55,7 @@ interface EventMap {
   settingsOpen: undefined;
   larkConnection: LarkConnectionOutcome;
   workspaceTime: WorkspaceTimeContext;
+  appearance: Appearance;
 }
 
 /** The renderer's `on*(cb)` subscriptions: subscribe, get an unsubscribe back. */
@@ -115,6 +117,7 @@ export function createBridge(store: WorldStore, ctx: FrameContext): AgentBridge 
     if (changed.has('auth') && world.auth !== prev.auth) events.emit('auth', world.auth);
     if (changed.has('timer')) events.emit('timer', timerStatus(world, t));
     if (changed.has('shots')) events.emit('shots', undefined);
+    if (changed.has('appearance')) events.emit('appearance', world.appearance);
     // canInstallNow depends on whether a session is open.
     if (changed.has('updates') || changed.has('timer')) events.emit('updates', updateStatus(world, t));
     if (changed.has('lark') && world.larkMode === 'connected' && prev.larkMode !== 'connected') {
@@ -488,6 +491,14 @@ export function createBridge(store: WorldStore, ctx: FrameContext): AgentBridge 
       openStartupPrefs: async () => effect('System Settings opens on Login Items'),
       onOpen: (cb) => events.on('settingsOpen', () => cb()),
       openDataFolder: async () => effect('Finder opens Timo’s data folder'),
+      getAppearance: async () => ({ ...w().appearance }),
+      setAppearance: async (patch) => {
+        store.commit(['appearance'], (draft) => {
+          draft.appearance = { ...draft.appearance, ...patch };
+        });
+        return { ...w().appearance };
+      },
+      onAppearanceChange: (cb) => events.on('appearance', cb),
     },
     app: {
       relaunch: async () => {

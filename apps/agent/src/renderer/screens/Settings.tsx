@@ -1,12 +1,13 @@
 import { useEffect, useState, type ComponentType } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Info, Plug, ShieldCheck, SlidersHorizontal, X, type LucideIcon } from 'lucide-react';
+import { Info, Palette, Plug, ShieldCheck, SlidersHorizontal, X, type LucideIcon } from 'lucide-react';
+import AppearanceSection from './settings/Appearance';
 import GeneralSection from './settings/General';
 import PermissionsSection from './settings/Permissions';
 import IntegrationsSection from './settings/Integrations';
 import AboutSection from './settings/About';
 
-type SectionId = 'general' | 'permissions' | 'integrations' | 'about';
+type SectionId = 'appearance' | 'general' | 'permissions' | 'integrations' | 'about';
 
 const SECTIONS: ReadonlyArray<{
   id: SectionId;
@@ -15,6 +16,7 @@ const SECTIONS: ReadonlyArray<{
   Icon: LucideIcon;
   Body: ComponentType;
 }> = [
+  { id: 'appearance', label: 'Appearance', description: 'Light or dark, for the app and for the floating timer bar.', Icon: Palette, Body: AppearanceSection },
   { id: 'general', label: 'General', description: 'How Timo starts, and the floating timer bar.', Icon: SlidersHorizontal, Body: GeneralSection },
   { id: 'permissions', label: 'Permissions', description: 'What your Mac lets Timo see while the timer runs.', Icon: ShieldCheck, Body: PermissionsSection },
   { id: 'integrations', label: 'Integrations', description: 'Where the tasks you track come from.', Icon: Plug, Body: IntegrationsSection },
@@ -28,7 +30,7 @@ const SECTIONS: ReadonlyArray<{
  */
 export default function Settings({ onClose }: { onClose: () => void }) {
   const qc = useQueryClient();
-  const [section, setSection] = useState<SectionId>('general');
+  const [section, setSection] = useState<SectionId>('appearance');
   const needs = useSectionNeeds();
   const info = useQuery({ queryKey: ['settings'], queryFn: () => window.agent.settings.get(), refetchInterval: 4000 });
 
@@ -99,6 +101,7 @@ function useSectionNeeds(): Record<SectionId, boolean> {
   const ready = (s: string | undefined) => s === undefined || s === 'READY' || s === 'NOT_REQUIRED';
   const launch = info.data?.launchAtLogin;
   return {
+    appearance: false,
     general: !!launch && !launch.ready && launch.state !== 'UNAVAILABLE',
     permissions: !ready(permissions.data?.screenRecording) || !ready(permissions.data?.accessibility),
     integrations: lark.data?.configured === true && (!lark.data.connected || lark.data.reauthRequired),

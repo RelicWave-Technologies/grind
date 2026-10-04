@@ -32,6 +32,8 @@ colors:
   brand-hi: "#5b93e3"
   brand-wash: "#edf3fd"
   brand-edge: "#c0d5f4"
+  brand-text: "{brand}"
+  on-fill: "#ffffff"
   dark: "#0f1216"
   dark-line: "#262b33"
   on-dark-muted: "#8a93a0"
@@ -78,6 +80,46 @@ colors:
   ribbon-pending-edge: "{wait}"
   ribbon-idle: "{sheet-2}"
   ribbon-gap-edge: "{line-strong}"
+colors-dark:
+  white: "#16191d"
+  ink: "#f2f4f6"
+  ink-2: "#dde1e5"
+  body: "#bfc5cc"
+  muted: "#9198a1"
+  faint: "#646b74"
+  sheet: "#1f2328"
+  sheet-soft: "#1b1e22"
+  sheet-2: "#282c32"
+  line: "#2d3238"
+  line-soft: "#23272c"
+  line-strong: "#3b4148"
+  brand-deep: "#8fb6f0"
+  brand-hi: "#7aa8ea"
+  brand-wash: "#172539"
+  brand-edge: "#2b4a77"
+  brand-text: "#7aa8ea"
+  dark: "#2a2e35"
+  dark-line: "#3b4048"
+  on-dark-muted: "#9aa3ae"
+  good: "#5fcf8f"
+  good-wash: "#14271c"
+  bad: "#f28b8b"
+  bad-wash: "#2e1919"
+  bad-edge: "#5c2b2b"
+  wait: "#e9c46a"
+  wait-wash: "#2b2411"
+  calm: "#5cc8bb"
+  calm-wash: "#112a26"
+  alert: "#f2a65e"
+  alert-wash: "#2e1f10"
+  leave: "#b8a2f7"
+  leave-wash: "#221b3a"
+  teal: "#5cc8bc"
+  tint-teal: "#123431"
+  tint-coral: "#3a1e1e"
+  tint-rose: "#3a1c2f"
+  tint-orange: "#3a2715"
+  heat-2: "#2f5a99"
 
 fonts:
   sans: '"Instrument Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif'
@@ -297,6 +339,8 @@ blocks, words and behaviour exactly as they were. A redesign of a flow is a sepa
 | Sky | `sky-top`, `sky-mid`, `sky-low` | The sky frame only (§9) |
 | Dark | `dark`, `dark-line`, `on-dark-muted` | The toast and the tour offer — the only dark surfaces |
 | Mark | `ink`, `brand`, `white`, `brand-hi`, `dark` | The Timo logo (§9 The logo) |
+| Text on a fill | `on-fill` | White text on a `brand` button or a `dark` toast — stays white in the dark theme |
+| Link and brand text | `brand-text` | Links, the timer's seconds: `brand` on light, `brand-hi` on dark (7.2:1) |
 
 **Measured contrast on white:**
 
@@ -315,6 +359,14 @@ blocks, words and behaviour exactly as they were. A redesign of a flow is a sepa
 | `alert` on `alert-wash` | 5.8:1 |
 | `leave` on `leave-wash` | 6.3:1 |
 | white on `brand` | 4.9:1 |
+
+**Dark theme (desktop app).** `colors-dark` in the front matter overrides the palette under
+`[data-theme="dark"]`; everything else keeps its role. Surfaces go near-black and neutral (`white`
+#16191d → `sheet` → `sheet-2`), text inverts (`ink` #f2f4f6, `muted` #9198a1, 6.0:1), `brand` stays
+the EMIAC blue for fills (white on it 4.9:1) while blue *text* uses `brand-text`, and every status
+keeps its hue as a light text on a deep wash (all ≥ 7:1). The app follows Settings → Appearance
+(System, Light or Dark); the floating pill has its own Light / Dark choice because it sits over
+other apps. The dashboard is light only.
 
 **Rules.**
 
@@ -643,7 +695,7 @@ See §10.
 ### Desktop surfaces
 
 Each overlay window is transparent and frameless; the card fills the window and the OS draws the
-shadow (§6). All of them are white with a 1px `line` edge.
+shadow (§6). All of them are `white` (the theme's surface) with a 1px `line` edge.
 
 - **The main window** is Focus (§5 The desktop window).
 - **Who a task came from.** Every task carries its creator's initials in a circle on that
@@ -668,6 +720,13 @@ shadow (§6). All of them are white with a 1px `line` edge.
 - **Ready to work** (320×168). The same card: the logo at 32px, the question in `card-title`, two
   buttons.
 - **Notices inside the window** are toasts (§ Toasts), never banners across the page.
+- **Not tracking.** Under "What are you working on?", the task last tracked (if still open) sits in
+  a `brand-wash` card with a `brand-edge` border and a large Start (`button-primary`) beside it;
+  search and the other tasks follow. In a window under 600px tall the extra tiles step aside.
+- **Settings** is a centred modal (820×560 at most): a `sheet-soft` section list on the left with
+  the version at its foot and a `wait` dot on any section that needs you, one section on the right
+  under its `section-title` heading and a one-line `muted` description. Choices are a segmented
+  control: a `sheet` track with the chosen item filled `ink`.
 
 ### The logo
 

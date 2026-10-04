@@ -29,6 +29,8 @@ const TARGET = resolve(here, '../src/tokens.css');
  */
 const designSchema = z.object({
   colors: z.record(z.string(), z.string()),
+  /** Dark-theme overrides of `colors` (desktop app). Every key must exist in `colors`. */
+  'colors-dark': z.record(z.string(), z.string()).optional(),
   fonts: z.object({ sans: z.string(), mono: z.string() }),
   typography: z.record(
     z.string(),
@@ -128,6 +130,24 @@ for (const [name, value] of Object.entries(design.elevation)) {
 }
 
 lines.push('}', '');
+
+/**
+ * The dark theme: only the colours that change, under `[data-theme="dark"]`.
+ * Roles that are references (`{brand}`) follow automatically. A key that is
+ * not in `colors` fails, so the dark palette can never invent a colour.
+ */
+const darkColours = design['colors-dark'] ?? {};
+if (Object.keys(darkColours).length > 0) {
+  lines.push(':root[data-theme="dark"] {', '  color-scheme: dark;');
+  for (const [name, value] of Object.entries(darkColours)) {
+    if (!(name in design.colors)) {
+      throw new Error(`colors-dark.${name} overrides a colour that colors does not define.`);
+    }
+    lines.push(`  --color-${name}: ${colourValue(name, value)};`);
+  }
+  lines.push('}', '');
+}
+
 const output = lines.join('\n');
 
 if (process.argv.includes('--check')) {

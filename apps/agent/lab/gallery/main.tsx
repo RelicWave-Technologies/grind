@@ -29,6 +29,8 @@ const CONTROLS: { [K in ScenarioField]: { label: string; options: Record<Scenari
   notice: { label: 'Recovery notice', options: { off: 'None', sleep: 'After sleep', shutdown: 'After crash' } },
   shots: { label: 'Screenshots', options: { uploaded: 'Uploaded', uploading: 'Uploading', failed: 'Failed' } },
   wtime: { label: 'Workspace time', options: { synced: 'Synced', syncing: 'Syncing' } },
+  theme: { label: 'App theme', options: { light: 'Light', dark: 'Dark', system: 'System' } },
+  pill: { label: 'Pill theme', options: { light: 'Light', dark: 'Dark' } },
 };
 
 type Zoom = 1 | 0.75 | 0.5;

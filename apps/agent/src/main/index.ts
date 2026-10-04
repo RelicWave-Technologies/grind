@@ -7,6 +7,7 @@ import {
   PROMPT_UNREACHABLE_WINDOW_MS,
 } from './services/promptReachability';
 import { registerIpc } from './ipc';
+import { applyAppearance, watchSystemAppearance } from './services/appearance';
 import { sendHeartbeatNow, startHeartbeatIfAuthed } from './services/heartbeat';
 import { setServerClockTrackingActive } from './services/serverClock';
 import {
@@ -209,6 +210,11 @@ app.whenReady().then(async () => {
   // token read. Windows-only: that's where the productName-based userData dir
   // moved and orphaned tokens.bin.
   if (process.platform === 'win32') migrateLegacyUserData();
+
+  // The chosen theme, before the first window paints (its backing colour and
+  // prefers-color-scheme both follow nativeTheme).
+  applyAppearance();
+  watchSystemAppearance();
 
   // Boot diagnostics — the first line in every log file. Pinpoints the two
   // known Windows failure modes at a glance: a moved data dir (userData /

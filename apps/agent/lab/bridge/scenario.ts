@@ -15,6 +15,8 @@ export const SCENARIO_OPTIONS = {
   notice: ['off', 'sleep', 'shutdown'],
   shots: ['uploaded', 'uploading', 'failed'],
   wtime: ['synced', 'syncing'],
+  theme: ['light', 'dark', 'system'],
+  pill: ['light', 'dark'],
 } as const;
 
 export type ScenarioField = keyof typeof SCENARIO_OPTIONS;
@@ -33,6 +35,8 @@ export const DEFAULT_SCENARIO: Scenario = {
   notice: 'off',
   shots: 'uploaded',
   wtime: 'synced',
+  theme: 'light',
+  pill: 'light',
 };
 
 function isOption<K extends ScenarioField>(field: K, value: string | null): value is Scenario[K] {

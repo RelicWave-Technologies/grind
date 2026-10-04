@@ -19,7 +19,7 @@
 .timo-mark .tm-moment { fill: var(--tm-moment, var(--color-brand)); }
 
 /* On dark: a white T, the moment one step lighter so it holds on near-black. */
-.timo-mark--night { --tm-body: var(--color-white); --tm-moment: var(--color-brand-hi); }
+.timo-mark--night { --tm-body: var(--color-on-fill); --tm-moment: var(--color-brand-hi); }
 /* One colour, e.g. inside a filled button: the gap still sets the moment apart. */
 .timo-mark--mono { --tm-body: currentColor; --tm-moment: currentColor; }
 

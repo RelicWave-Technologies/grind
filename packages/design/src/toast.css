@@ -28,7 +28,7 @@
   padding: 10px 10px 10px 14px;
   border-radius: var(--radius-xl);
   background: var(--color-dark);
-  color: var(--color-white);
+  color: var(--color-on-fill);
   box-shadow: 0 0 0 1px var(--color-dark-line), var(--elevation-4);
   font-size: var(--type-body-sm-size);
   line-height: 1.4;
@@ -54,8 +54,8 @@
   padding: 0 var(--space-sm);
   border: 0;
   border-radius: var(--radius-full);
-  background: var(--color-white);
-  color: var(--color-ink);
+  background: var(--color-on-fill);
+  color: var(--color-dark);
   font: inherit;
   font-size: var(--type-label-size);
   font-weight: var(--type-label-weight);
@@ -79,7 +79,7 @@
   cursor: pointer;
 }
 
-.toast-close:hover { background: var(--color-dark-line); color: var(--color-white); }
+.toast-close:hover { background: var(--color-dark-line); color: var(--color-on-fill); }
 
 @media (prefers-reduced-motion: reduce) {
   .toast { animation: none; }

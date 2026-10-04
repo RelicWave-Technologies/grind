@@ -226,5 +226,6 @@ export function seedWorld(scenario: Scenario, now: number): World {
     perms: seedPerms(scenario),
     update: seedUpdate(scenario, now),
     floatingBarVisible: true,
+    appearance: { app: scenario.theme, pill: scenario.pill },
   };
 }

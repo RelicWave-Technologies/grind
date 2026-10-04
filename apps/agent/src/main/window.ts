@@ -1,5 +1,6 @@
 import { BrowserWindow } from 'electron';
 import path from 'node:path';
+import { mainWindowBackground } from './services/appearance';
 
 /**
  * The main application window: a real, resizable macOS window with a
@@ -18,9 +19,9 @@ export function createMainWindow(opts: { startHidden?: boolean } = {}): BrowserW
     show: false,
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 16, y: 18 },
-    // Solid light background (no vibrancy) for a consistent premium light look
-    // regardless of the user's desktop wallpaper or system appearance.
-    backgroundColor: '#F2F2F7',
+    // Solid background (no vibrancy) in the chosen theme, so the window never
+    // flashes the other colour before the page paints.
+    backgroundColor: mainWindowBackground(),
     webPreferences: {
       contextIsolation: true,
       sandbox: true,

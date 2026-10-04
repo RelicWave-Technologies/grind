@@ -2,6 +2,8 @@ import { ipcMain, app, shell, dialog } from 'electron';
 import { screenStatus, hasAccessibilityAccess } from '../services/permissions';
 import { getActivityCaptureStatus, type ActivityCaptureStatus } from '../services/activity';
 import { getPreferences } from '../services/preferences';
+import { setAppearance } from '../services/appearance';
+import type { Appearance } from '../../shared/appearance';
 import { getLaunchAtLoginService } from '../services/launchAtLogin';
 import { applyFloatingBarVisibility, resetFloatingBarPosition } from '../floating';
 import { invalidateQuitCleanup, runQuitCleanup } from '../services/quitCleanup';
@@ -74,6 +76,9 @@ export function registerSettingsIpc(): void {
   ipcMain.handle('settings:resetFloatingBarPosition', () => {
     resetFloatingBarPosition();
   });
+
+  ipcMain.handle('settings:getAppearance', (): Appearance => getPreferences().appearance);
+  ipcMain.handle('settings:setAppearance', (_e, patch: Partial<Appearance>): Appearance => setAppearance(patch ?? {}));
 
   ipcMain.handle('settings:openScreenPrefs', async () => {
     if (process.platform === 'darwin') {
