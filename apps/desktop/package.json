@@ -1,0 +1,41 @@
+{
+  "name": "@grind/desktop",
+  "version": "0.0.2-beta.38",
+  "private": true,
+  "type": "module",
+  "productName": "Timo",
+  "description": "Timo time tracker desktop app (Tauri 2 + Rust). The React renderer is the only TypeScript.",
+  "author": "RelicWave Technologies",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -p tsconfig.json --noEmit && vite build",
+    "lab": "vite --config lab/vite.config.ts",
+    "tauri": "tauri",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p lab/tsconfig.json --noEmit",
+    "test": "vitest run",
+    "lint": "eslint src lab",
+    "icon": "node scripts/make-icon.mjs",
+    "bindings": "cargo test -p timo-desktop export_bindings"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "5.59.16",
+    "@tauri-apps/api": "2.12.1",
+    "lucide-react": "0.454.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@grind/design": "workspace:*",
+    "@grind/tsconfig": "workspace:*",
+    "@grind/types": "workspace:*",
+    "@tauri-apps/cli": "2.12.1",
+    "@types/node": "20.16.13",
+    "@types/react": "18.3.12",
+    "@types/react-dom": "18.3.1",
+    "@vitejs/plugin-react": "4.3.3",
+    "sharp": "0.33.5",
+    "typescript": "5.6.3",
+    "vite": "5.4.10",
+    "vitest": "2.1.4"
+  }
+}

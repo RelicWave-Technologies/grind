@@ -1,0 +1,21 @@
+<!doctype html>
+<!--
+  Agent Lab · one renderer surface.
+
+  This file is only the lab's half of the page. On every request the lab's Vite
+  plugin (vite.config.ts, `rendererPage`) serves the REAL index.html (the app's own page)
+  instead, with its relative URLs pointed at / and the script below
+  inserted ahead of the renderer's own entry. So the CSP, the stylesheet link,
+  #root and main.tsx are always exactly what Electron loads, including any later
+  change to that file. Module scripts run in order, so the fake window.agent
+  exists before main.tsx does anything.
+-->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Timo · Agent Lab surface</title>
+  </head>
+  <body>
+    <script type="module" src="./surface.ts"></script>
+  </body>
+</html>

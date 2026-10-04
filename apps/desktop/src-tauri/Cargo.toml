@@ -1,0 +1,32 @@
+[package]
+name = "timo-desktop"
+version = "0.0.2-beta.38"
+description = "Timo desktop shell: windows, tray and IPC wiring. No business logic."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[build-dependencies]
+tauri-build = { workspace = true }
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+ts-rs = { workspace = true }
+tauri = { workspace = true }
+tauri-plugin-autostart = { workspace = true }
+tauri-plugin-deep-link = { workspace = true }
+tauri-plugin-notification = { workspace = true }
+tauri-plugin-process = { workspace = true }
+tauri-plugin-single-instance = { workspace = true }
+tauri-plugin-updater = { workspace = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+tauri-nspanel = { workspace = true }

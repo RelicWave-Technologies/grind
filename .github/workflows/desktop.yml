@@ -1,0 +1,92 @@
+name: Desktop (Tauri)
+
+# The Rust workspace and the Tauri shell on both platforms we ship. Windows is
+# first-class from the first commit (AGENTS.md "Desktop: Tauri + Rust"), so
+# every step runs on windows-latest too, not as a later pass.
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/desktop.yml'
+      - 'apps/desktop/**'
+      - 'crates/**'
+      - 'parity/**'
+      - 'packages/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'clippy.toml'
+      - 'pnpm-lock.yaml'
+  pull_request:
+    paths:
+      - '.github/workflows/desktop.yml'
+      - 'apps/desktop/**'
+      - 'crates/**'
+      - 'parity/**'
+      - 'packages/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'clippy.toml'
+      - 'pnpm-lock.yaml'
+
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  desktop:
+    name: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install JS dependencies
+        run: pnpm install --frozen-lockfile
+
+      # rust-version in Cargo.toml is 1.95; CI pins the same toolchain.
+      - uses: dtolnay/rust-toolchain@1.95.0
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: cargo fmt
+        run: cargo fmt --all --check
+
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: cargo test
+        run: cargo test --workspace
+
+      # ts-rs writes apps/desktop/src/generated/*.ts during `cargo test`; they
+      # are committed, so any drift shows up as a diff here.
+      - name: Generated bindings are committed
+        run: git diff --exit-code -- apps/desktop/src/generated
+
+      - name: Renderer typecheck and tests (bridge included)
+        run: |
+          pnpm --filter @grind/desktop typecheck
+          pnpm --filter @grind/desktop test
+
+      # Builds the frontend (beforeBuildCommand) and the release binary, without
+      # packaging. Bundling (dmg, nsis) and signing belong to the release workflow.
+      - name: tauri build --no-bundle
+        run: pnpm --filter @grind/desktop tauri build --no-bundle

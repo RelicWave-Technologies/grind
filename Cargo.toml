@@ -3,7 +3,7 @@
 # the parity oracle until cutover. Rules: AGENTS.md "Desktop: Tauri + Rust".
 [workspace]
 resolver = "3"
-members = ["crates/*"]
+members = ["crates/*", "apps/desktop/src-tauri"]
 
 [workspace.package]
 edition = "2024"
@@ -14,9 +14,38 @@ publish = false
 # Exact pins (=x.y.z). Add a dependency here, never in a member with a version.
 [workspace.dependencies]
 serde = { version = "=1.0.229", features = ["derive"] }
-serde_json = "=1.0.151"
+# float_roundtrip: parse f64 correctly rounded, as V8 does. Without it serde_json
+# can be one ULP off on long fractional timestamps, which would change the pay.
+serde_json = { version = "=1.0.151", features = ["float_roundtrip"] }
 thiserror = "=2.0.21"
 tracing = "=0.1.44"
+# Root-locale collation: reproduces JavaScript's `String.prototype.localeCompare`
+# (ICU) for the sort tiebreaks in timo-core.
+icu_collator = "=2.3.1"
+# ECMAScript Number::toString (shortest round-trip digits, JS exponent rules).
+ryu-js = "=1.0.3"
+
+# Desktop shell (apps/desktop/src-tauri). Tauri 3 is alpha, so the shell stays on
+# 2.x; the JS side (@tauri-apps/api, @tauri-apps/cli) is pinned to the same 2.12.1.
+tauri = { version = "=2.12.1", features = ["tray-icon", "image-png", "macos-private-api"] }
+tauri-build = "=2.7.1"
+tauri-plugin-autostart = "=2.7.0"
+tauri-plugin-deep-link = "=2.6.1"
+tauri-plugin-notification = "=2.5.1"
+tauri-plugin-process = "=2.4.0"
+tauri-plugin-single-instance = { version = "=2.5.2", features = ["deep-link"] }
+tauri-plugin-updater = "=2.13.1"
+# macOS NSPanel (floating bar + prompt overlays), same pin as Airnote.
+tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", rev = "a3122e894383aa068ec5365a42994e3ac94ba1b6" }
+ts-rs = { version = "=12.0.1", features = ["no-serde-warnings"] }
+tracing-subscriber = "=0.3.23"
+# timo-platform: macOS notifications (NSWorkspace / distributed centre) and the
+# Windows hooks + message window. Same versions Tauri already locks.
+objc2 = "=0.6.4"
+block2 = "=0.6.2"
+objc2-foundation = { version = "=0.3.2", default-features = false, features = ["std", "block2", "NSNotification", "NSDistributedNotificationCenter", "NSOperation", "NSString", "NSObject"] }
+objc2-app-kit = { version = "=0.3.2", default-features = false, features = ["std", "NSWorkspace"] }
+windows = "=0.62.2"
 
 timo-core = { path = "crates/timo-core" }
 timo-store = { path = "crates/timo-store" }

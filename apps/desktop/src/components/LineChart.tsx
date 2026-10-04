@@ -1,0 +1,65 @@
+interface Props {
+  points: number[]; // y-values, 0..max
+  labels: string[];
+  height?: number;
+}
+
+/** Smooth gradient area line chart (sample/static for now). */
+export default function LineChart({ points, labels, height = 200 }: Props) {
+  const w = 640;
+  const h = height;
+  const padX = 24;
+  const padY = 20;
+  const max = Math.max(...points, 1) * 1.15;
+  const stepX = (w - padX * 2) / (points.length - 1);
+  const xy = points.map((p, i) => [padX + i * stepX, h - padY - (p / max) * (h - padY * 2)] as const);
+
+  // Catmull-Rom → cubic bezier smoothing
+  const path = xy
+    .map((pt, i, a) => {
+      if (i === 0) return `M ${pt[0]},${pt[1]}`;
+      const p0 = a[i - 1]!;
+      const cx = (p0[0] + pt[0]) / 2;
+      return `C ${cx},${p0[1]} ${cx},${pt[1]} ${pt[0]},${pt[1]}`;
+    })
+    .join(' ');
+  const area = `${path} L ${xy[xy.length - 1]![0]},${h - padY} L ${xy[0]![0]},${h - padY} Z`;
+
+  // peak marker
+  const peakIdx = points.indexOf(Math.max(...points));
+  const peak = xy[peakIdx]!;
+
+  return (
+    <svg width="100%" viewBox={`0 0 ${w} ${h}`} role="img">
+      {/* gridlines */}
+      {[0, 0.5, 1].map((g) => (
+        <line
+          key={g}
+          x1={padX}
+          x2={w - padX}
+          y1={padY + g * (h - padY * 2)}
+          y2={padY + g * (h - padY * 2)}
+          style={{ stroke: 'var(--color-line-soft)' }}
+          strokeWidth={1}
+        />
+      ))}
+      {/* One series, tracked activity: `series-1` on a flat wash, never a
+          gradient behind data (DESIGN.md §10). */}
+      <path d={area} style={{ fill: 'var(--color-brand-wash)' }} />
+      <path d={path} fill="none" style={{ stroke: 'var(--color-series-1)' }} strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx={peak[0]} cy={peak[1]} r={4.5} style={{ fill: 'var(--color-series-1)', stroke: 'var(--color-white)' }} strokeWidth={2} />
+      {labels.map((l, i) => (
+        <text
+          key={`${i}-${l}`}
+          x={padX + i * stepX}
+          y={h - 2}
+          textAnchor="middle"
+          fontSize="10"
+          style={{ fill: 'var(--color-muted)', fontFamily: 'var(--font-sans)', fontVariantNumeric: 'tabular-nums' }}
+        >
+          {l}
+        </text>
+      ))}
+    </svg>
+  );
+}

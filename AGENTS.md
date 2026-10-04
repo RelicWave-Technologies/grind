@@ -114,7 +114,7 @@ The desktop app is being ported from Electron (`legacy/agent`) to Tauri 2 + Rust
 1. **`legacy/agent` is the oracle and is frozen.** It stays buildable and tested and ships releases until cutover. Do not change its behaviour. If a real bug is found in it, fix it in both, in the same commit, and say so.
 2. **Every ported function names its source.** A doc comment says which TS file/function it matches (`// Port of legacy/agent/src/main/services/timer/timerService.ts::TimerService.pause`). Deliberate quirks are copied, not fixed, and listed in the crate's `PARITY.md` for a post-cutover decision.
 3. **Proof is golden output from the real TypeScript, never a second reading of the code.** `parity/` runs the legacy TS functions (and `packages/core`) over fixed edge cases *and* seeded random scenarios and writes JSON fixtures into the Rust crates' `tests/fixtures/`. `cargo test` must reproduce them byte for byte. The TS unit tests are also ported 1:1 (same names, same cases).
-4. **Numbers: JS semantics, spelled out.** Time is `i64` milliseconds. `Math.round`/`floor`/`ceil`, `toFixed`, integer division, `Date` and `Intl` behaviour go through `timo_core::js` helpers that reproduce JavaScript exactly (`Math.round(-33.5) === -33`; Rust's `f64::round` gives -34). `as` casts are a lint error.
+4. **Numbers: JS semantics, spelled out.** Timer timestamps are **fractional** milliseconds (`f64`) — the Electron clock is `anchorServer + (performance.now() − anchorMono)`, and real `agent.db` rows hold values like `1791133383891.2627` in REAL columns. Port them as `f64` with the identical operations in the identical order; never coerce to integers unless the TS does. JSON must serialize exactly like `JSON.stringify` (ECMAScript Number::toString: `5` not `5.0`, `-0` → `0`, NaN → `null`). `Math.round`/`floor`/`ceil`, `toFixed`, integer division, `Date` and `Intl` behaviour go through `timo_core::js` helpers that reproduce JavaScript exactly (`Math.round(-33.5) === -33`; Rust's `f64::round` gives -34). `as` casts are a lint error.
 5. **Time and ids are injected.** No `SystemTime::now()`/`Instant::now()`/random ids inside `timo-core`; they arrive as arguments or via `Clock`/`IdGen` traits, exactly as the TS `Clock`/`IdGen` seams do.
 6. **Same database.** `timo-store` opens the existing `agent.db` with the identical schema; an upgraded install keeps its entries, queue and liveness.
 7. **Windows is first-class from the first commit, not a later pass.** Every platform feature lands for macOS and Windows together, behind `#[cfg(target_os)]`, with the decision logic in a pure function that tests on any host. CI runs `cargo check` + tests on `windows-latest`.
@@ -141,13 +141,13 @@ Before building ANY user-facing feature, read:
 
 Desktop agent and web dashboard MUST share the same design system. Keep both docs current when the system changes.
 
-## Seeing a UI change without a backend or Electron
+## Seeing a UI change without a backend or the desktop shell
 
 Check every visual change by looking at it (DESIGN.md is the spec; the screen is the proof):
 
 - **Dashboard on dummy data** — `pnpm dev:mock` (Vite + HMR on :5174; if that port is taken, run `pnpm --filter @grind/dashboard exec vite --mode mock --port 5177` instead, because pnpm passes a `--` through to Vite rather than swallowing it). Every `/v1` call is answered in the browser from `apps/dashboard/src/mock/`, with dates relative to today. The DEV panel (bottom-left, Alt+Shift+M) switches Admin / Manager / Member, signed out, latency, empty workspace and errors. Production builds contain none of it.
-- **Desktop app in the browser ("Agent Lab")** — `pnpm lab` → http://localhost:5176/lab/. Every renderer window (main tabs, tray popover, floating bar, prompts, ready-to-work) at its real size on a fake `window.agent` bridge, with scenario switches (tracking, paused, signed out, Lark states, permissions…) and a Palette switch for trying accents. Edits under `apps/agent/src/renderer` hot-reload in every frame. Lives in `apps/agent/lab/`, outside the Electron build.
-- **Brand assets** — `pnpm --filter @grind/agent icon` regenerates the app icon, favicon and menu-bar icons from `apps/agent/src/renderer/assets/timo-logo.svg`.
+- **Desktop app in the browser ("Agent Lab")** — `pnpm lab` → http://localhost:5176/lab/. Every renderer window (main tabs, tray popover, floating bar, prompts, ready-to-work) at its real size on a fake `window.agent` bridge, with scenario switches (tracking, paused, signed out, Lark states, permissions…) and a Palette switch for trying accents. Edits under `apps/desktop/src` hot-reload in every frame. Lives in `apps/desktop/lab/`, outside the Tauri build.
+- **Brand assets** — `pnpm --filter @grind/desktop icon` regenerates the app icon set (Tauri icons, favicon, menu-bar icons) from `apps/desktop/src/assets/timo-logo.svg`.
 
 ## Local paths
 

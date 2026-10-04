@@ -1,0 +1,19 @@
+{
+  "name": "@grind/parity",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Golden-fixture harness for the Rust port: runs the real TypeScript over hand-picked and seeded random cases and writes the results into the Rust crates' tests/fixtures/.",
+  "scripts": {
+    "fixtures": "tsx src/run.ts",
+    "check": "tsx src/run.ts --check",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@grind/core": "workspace:*",
+    "@grind/tsconfig": "workspace:*",
+    "@types/node": "20.16.13",
+    "tsx": "4.19.2",
+    "typescript": "5.6.3"
+  }
+}

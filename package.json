@@ -11,7 +11,7 @@
     "dev": "turbo run dev --parallel",
     "dev:clean": "bash scripts/dev-clean.sh",
     "dev:mock": "pnpm --filter @grind/dashboard dev:mock",
-    "lab": "pnpm --filter @grind/agent lab",
+    "lab": "pnpm --filter @grind/desktop lab",
     "build": "turbo run build",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",

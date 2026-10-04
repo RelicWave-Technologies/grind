@@ -1,0 +1,11 @@
+{
+  // Agent Lab. Pulls in the renderer's bridge declaration so the fake bridge is
+  // checked against the real `Window['agent']`: a bridge change the lab does
+  // not follow fails `pnpm --filter @grind/agent typecheck`.
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "..",
+    "noEmit": true
+  },
+  "include": ["./**/*.ts", "./**/*.tsx", "../src/lib/agent.d.ts"]
+}

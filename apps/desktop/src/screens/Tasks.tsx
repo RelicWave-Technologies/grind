@@ -1,0 +1,148 @@
+import { useEffect, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Search } from 'lucide-react';
+import type { TimerStatus } from '../lib/agent.d';
+import { sortTasks } from '../lib/taskFormat';
+import larkIcon from '../assets/lark.svg';
+import TaskCard from '../components/TaskCard';
+import TaskComposer from '../components/TaskComposer';
+import { useToast } from '../components/ToastDock';
+import { useWorkspaceTime } from '../lib/workspaceTime';
+
+/**
+ * Full Lark task list: open + completed, searchable, with quick create. Lives
+ * in the main window's Tasks sheet, which owns the New task toggle; starting a
+ * task reports back through `onStarted` so the sheet can close onto the timer.
+ */
+export default function Tasks({
+  creating,
+  onCreatingChange,
+  onStarted,
+}: {
+  creating: boolean;
+  onCreatingChange: (creating: boolean) => void;
+  onStarted: () => void;
+}) {
+  const qc = useQueryClient();
+  const larkStatus = useQuery({ queryKey: ['larkStatus'], queryFn: () => window.agent.lark.status(), refetchInterval: 10_000 });
+  const larkTasks = useQuery({ queryKey: ['larkTasks'], queryFn: () => window.agent.lark.tasks(), refetchInterval: 60_000 });
+  const workspaceTime = useWorkspaceTime();
+  const [timer, setTimer] = useState<TimerStatus>({ state: 'IDLE', workedMs: 0 });
+  const [now, setNow] = useState(() => Date.now());
+  const [query, setQuery] = useState('');
+  const [showDone, setShowDone] = useState(false);
+  const toast = useToast();
+
+  useEffect(() => {
+    let alive = true;
+    void window.agent.timer.status().then((s) => alive && setTimer(s));
+    const off = window.agent.timer.onStatusChange((s) => { setTimer(s); setNow(Date.now()); });
+    const tick = setInterval(() => setNow(Date.now()), 30_000);
+    return () => { alive = false; off(); clearInterval(tick); };
+  }, []);
+
+  const start = useMutation({
+    mutationFn: (guid: string) => window.agent.timer.start(guid),
+    onSuccess: (result) => {
+      setTimer(result.status);
+      if (result.ok) onStarted();
+    },
+  });
+  const stop = useMutation({ mutationFn: () => window.agent.timer.stop(), onSuccess: (s) => setTimer(s) });
+  const resume = useMutation({ mutationFn: () => window.agent.timer.resume(), onSuccess: (result) => setTimer(result.status) });
+  const connectLark = useMutation({ mutationFn: () => window.agent.lark.connect() });
+
+  const onCreated = (summary: string) => {
+    onCreatingChange(false);
+    setQuery('');
+    toast({ tone: 'done', text: `Created “${summary}” in Lark` });
+    void qc.invalidateQueries({ queryKey: ['larkTasks'] });
+  };
+
+  const running = timer.state === 'RUNNING' ? timer : null;
+  const tasks = larkTasks.data?.tasks ?? [];
+  const larkConnected = !!larkStatus.data?.connected;
+  const larkOffline = !!larkStatus.data?.offline;
+  const larkConfigured = larkStatus.data?.configured !== false;
+  const taskCatalogAvailable = larkConnected || (larkOffline && tasks.length > 0);
+
+  const q = query.trim().toLowerCase();
+  const match = (s: string) => q === '' || s.toLowerCase().includes(q);
+  const open = sortTasks(tasks.filter((t) => !t.completed && match(t.summary)), running?.larkTaskGuid ?? null);
+  const done = tasks.filter((t) => t.completed && match(t.summary)).sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
+
+  return (
+    <>
+      <div className="content-narrow">
+          {!taskCatalogAvailable ? (
+            <div className="empty rise rise-1">
+              <span className="empty-icon">
+                <img className="lark-icon lark-icon--empty" src={larkIcon} alt="" />
+              </span>
+              <div className="h3">{larkOffline ? 'Offline with no saved tasks' : larkConfigured ? 'Connect Lark to see your tasks' : 'Lark not set up'}</div>
+              <div className="callout secondary">
+                {larkOffline ? 'Reconnect once to refresh your task list.' : larkConfigured ? 'Your Lark tasks become the things you track time against.' : 'Ask your workspace admin to enable the Lark integration.'}
+              </div>
+              {larkConfigured && !larkOffline && (
+                <button className="btn btn-prominent no-drag" style={{ marginTop: 'var(--space-sm)' }} onClick={() => connectLark.mutate()} disabled={connectLark.isPending}>
+                  {connectLark.isPending ? 'Opening…' : 'Connect Lark'}
+                </button>
+              )}
+            </div>
+          ) : (
+            <>
+              {creating && <TaskComposer onCreated={onCreated} timeZone={workspaceTime.data?.timeZone ?? null} />}
+
+              {tasks.length > 6 && (
+                <div className="task-search-bar">
+                  <div className="task-search no-drag">
+                  <Search size={15} strokeWidth={2} className="task-search-ico" />
+                  <input className="task-search-input" type="text" placeholder={`Search ${tasks.length} tasks…`} value={query} onChange={(e) => setQuery(e.target.value)} />
+                  </div>
+                </div>
+              )}
+
+              <div className="section-head"><span className="section-titlewrap"><span className="section-title">Open</span><span className="section-aside">{open.length}</span></span></div>
+              {open.length === 0 ? (
+                <div className="callout secondary" style={{ padding: '0 4px' }}>
+                  {larkTasks.isLoading ? 'Loading…' : q ? 'No open tasks match.' : 'No open tasks.'}
+                </div>
+              ) : (
+                <div className="task-list">
+                  {open.map((t) => (
+                    <TaskCard
+                      key={t.guid}
+                      task={t}
+                      now={now}
+                      timeZone={workspaceTime.data?.timeZone ?? null}
+                      running={!!running && running.larkTaskGuid === t.guid}
+                      paused={!!running && running.larkTaskGuid === t.guid && running.paused}
+                      disabled={start.isPending || stop.isPending || resume.isPending}
+                      onStart={(g) => start.mutate(g)}
+                      onStop={() => stop.mutate()}
+                      onResume={() => resume.mutate()}
+                    />
+                  ))}
+                </div>
+              )}
+
+              {done.length > 0 && (
+                <>
+                  <div className="section-head"><span className="section-titlewrap"><span className="section-title">Completed</span><span className="section-aside">{done.length}</span></span>
+                    <button className="btn btn-ghost no-drag" onClick={() => setShowDone((s) => !s)}>{showDone ? 'Hide' : 'Show'}</button>
+                  </div>
+                  {showDone && (
+                    <div className="task-list task-list-done">
+                      {done.map((t) => (
+                        <TaskCard key={t.guid} task={t} now={now} timeZone={workspaceTime.data?.timeZone ?? null} running={false} disabled={start.isPending || stop.isPending || resume.isPending} onStart={(g) => start.mutate(g)} onStop={() => stop.mutate()} onResume={() => resume.mutate()} />
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </>
+          )}
+      </div>
+    </>
+  );
+}

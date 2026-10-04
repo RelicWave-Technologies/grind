@@ -1,0 +1,15 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "The main Timo window: tabs, settings, sign-in.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "allow-window-open-main",
+    "allow-window-dismiss-floating-bar",
+    "allow-app-relaunch",
+    "allow-settings-open-data-folder",
+    "allow-settings-get"
+  ]
+}
