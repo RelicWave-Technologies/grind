@@ -14,7 +14,6 @@ import type {
   LeavePolicyResponse,
   LeaveRequestDto,
   LeaveBalanceRow,
-  LeaveBalancesResponse,
 } from '../lib/types';
 import {
   Page,
@@ -196,7 +195,7 @@ export function CalendarScreen() {
   const [month, setMonth] = useState<string>(() => today.slice(0, 7));
   const { from, to } = useMemo(() => monthBounds(month), [month]);
   const cells = useMemo(() => monthCells(month), [month]);
-  const [tab, setTab] = useState<'month' | 'holidays' | 'mine' | 'balances'>('month');
+  const [tab, setTab] = useState<'month' | 'holidays' | 'mine'>('month');
 
   const calendarQ = useQuery({
     queryKey: ['leave', 'calendar', from, to],
@@ -349,7 +348,6 @@ export function CalendarScreen() {
           { value: 'month' as const, label: 'Month' },
           { value: 'holidays' as const, label: 'Company holidays' },
           { value: 'mine' as const, label: 'My leave' },
-          { value: 'balances' as const, label: 'Balances' },
         ]}
         value={tab}
         onChange={setTab}
@@ -405,10 +403,6 @@ export function CalendarScreen() {
           canEdit={isAdmin}
           onChanged={() => qc.invalidateQueries({ queryKey: ['leave'] })}
         />
-      )}
-
-      {tab === 'balances' && (
-        <BalancesPanel asOf={to} month={month} monthLabel={monthLabel} canManage={isAdmin} />
       )}
 
       {tab === 'mine' && (
@@ -814,102 +808,6 @@ function MyLeavePanel({
 
 
 /**
- * Balances for whoever the caller is allowed to see, and the settings behind
- * them.
- *
- * The row list is not filtered here. `/leave/balances` already answers in the
- * caller's own scope — a member gets themselves, a manager gets their team, an
- * admin gets the workspace — so this renders whatever came back. Filtering a
- * second time on the client would be a rule in two places, and the one that
- * matters is the server's.
- *
- * Four numbers a person: at the start of the month, got, used, left — the
- * same never-negative leave account the month sheet prints, so the two agree.
- *
- * `canManage` only decides whether Edit is offered. Its writes are admin-only on
- * the server (`requireAdmin`), so hiding it is courtesy rather than security.
- */
-function BalancesPanel({
-  asOf, month, monthLabel, canManage,
-}: { asOf: string; month: string; monthLabel: string; canManage: boolean }) {
-  const qc = useQueryClient();
-  const [editing, setEditing] = useState<LeaveBalanceRow | null>(null);
-
-  // Balances as they stood at the end of the month on screen, not today's.
-  const q = useQuery({
-    queryKey: ['leave', 'balances', asOf],
-    queryFn: () => api<LeaveBalancesResponse>(`/v1/admin/leave/balances?asOf=${asOf}`),
-  });
-
-  if (q.isLoading) return <SkeletonTable rows={8} />;
-  const data = q.data;
-  if (!data) return null;
-
-  const refresh = () => qc.invalidateQueries({ queryKey: ['leave'] });
-
-  return (
-    <>
-      <p className="cal-scope-note">
-        Leave for <strong>{monthLabel}</strong>: what they started with, what they got, what they used, what is left.
-        Leave nobody could pay for is a salary cut, so <strong>Left</strong> never goes below zero.
-      </p>
-
-      <Card variant="flush">
-        <Table density="compact">
-          <THead>
-            <Tr>
-              <Th>Person</Th>
-              <Th align="right">At start</Th>
-              <Th align="right">Got</Th>
-              <Th align="right">Used</Th>
-              <Th align="right">Left</Th>
-              {canManage && <Th align="right" />}
-            </Tr>
-          </THead>
-          <Tbody>
-            {data.rows.map((r) => (
-              <Tr key={r.userId}>
-                <Td>
-                  <Identity
-                    name={
-                      r.attendanceRuleMode === 'STANDARD' ? (
-                        r.name
-                      ) : (
-                        <>
-                          {r.name}{' '}
-                          <Tag status={r.attendanceRuleMode === 'EXEMPT' ? 'neutral' : 'info'} mono>
-                            {r.attendanceRuleMode === 'EXEMPT' ? 'No rules' : 'Remote'}
-                          </Tag>
-                        </>
-                      )
-                    }
-                    subtitle={r.teamName ?? r.email}
-                    avatar={<Avatar name={r.name} src={r.avatarUrl ?? undefined} size={24} />}
-                  />
-                </Td>
-                <Td align="right" mono>{days(r.month.opening)}</Td>
-                <Td align="right" mono>{r.month.earned === 0 ? '—' : `+${days(r.month.earned)}`}</Td>
-                <Td align="right" mono>{r.month.paid === 0 ? '—' : `−${days(r.month.paid)}`}</Td>
-                <Td align="right" mono><strong>{days(r.month.closing)}</strong></Td>
-                {canManage && (
-                  <Td align="right">
-                    <Button size="sm" variant="secondary" onClick={() => setEditing(r)}>
-                      Edit
-                    </Button>
-                  </Td>
-                )}
-              </Tr>
-            ))}
-          </Tbody>
-        </Table>
-      </Card>
-
-      <EditMemberModal row={editing} month={month} onClose={() => setEditing(null)} onSaved={refresh} />
-    </>
-  );
-}
-
-/**
  * Everything about one person's leave in one place: how much they get, from
  * when, whether the last Saturday is off, how the attendance rules treat them,
  * and — optionally — days added or taken away by hand.
@@ -917,13 +815,12 @@ function BalancesPanel({
  * The added/removed days are a ledger entry with a reason, never an edit of the
  * balance itself, so the statement can always say how a number got there.
  */
-function EditMemberModal({
+export function EditMemberModal({
   row, month, onClose, onSaved,
 }: { row: LeaveBalanceRow | null; month: string; onClose: () => void; onSaved: () => void }) {
   const [rate, setRate] = useState('');
   const [joined, setJoined] = useState('');
   const [saturday, setSaturday] = useState<'inherit' | 'on' | 'off'>('inherit');
-  const [ruleMode, setRuleMode] = useState<LeaveBalanceRow['attendanceRuleMode']>('STANDARD');
   const [change, setChange] = useState('');
   const [why, setWhy] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -933,7 +830,6 @@ function EditMemberModal({
     setRate(row.accrualDays === null ? '' : String(row.accrualDays));
     setJoined(row.joinedOnSet ? row.accrualStart : '');
     setSaturday(row.lastSaturdayOff === null ? 'inherit' : row.lastSaturdayOff ? 'on' : 'off');
-    setRuleMode(row.attendanceRuleMode);
     setChange('');
     setWhy('');
     setError(null);
@@ -950,7 +846,6 @@ function EditMemberModal({
           accrualDays: rate.trim() === '' ? null : Number(rate),
           joinedOn: joined.trim() === '' ? null : joined,
           lastSaturdayOff: saturday === 'inherit' ? null : saturday === 'on',
-          attendanceRuleMode: ruleMode,
         },
       });
       if (changeDays !== 0) {
@@ -978,13 +873,6 @@ function EditMemberModal({
       }
     >
       {error && <Banner status="danger">{error}</Banner>}
-      <Field label="Attendance rules">
-        <Select value={ruleMode} onChange={(e) => setRuleMode(e.target.value as typeof ruleMode)}>
-          <option value="STANDARD">Normal — all rules</option>
-          <option value="REMOTE">Remote — no punch needed, no late rule</option>
-          <option value="EXEMPT">No rules</option>
-        </Select>
-      </Field>
       <Field label="Leave per month" hint="Empty = company default.">
         <Input type="number" step="0.5" min="0" value={rate} placeholder="default"
                onChange={(e) => setRate(e.target.value)} />

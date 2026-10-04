@@ -246,6 +246,11 @@ export interface MonthPerformanceInput {
   rulesFrom?: string | null;
   /** See `MonthPerformanceReport.ruleMinutes`. */
   ruleMinutes?: RuleSettings | null;
+  /**
+   * Today, YYYY-MM-DD in the workspace timezone. A working day from today on
+   * with nothing tracked has not happened yet, so it reads `--`, not absent.
+   */
+  today?: string;
   generatedAtMs: number;
 }
 
@@ -467,7 +472,8 @@ export function buildMonthPerformance(input: MonthPerformanceInput): MonthPerfor
       // the computed answer moves — but a corrected day is charged nothing by a
       // rule, because the person who corrected it is the better authority.
       const verdict = input.ruleFor?.(user.id, date, status, workMinutes) ?? null;
-      const computed = computedCodeWithRule(status, workMinutes, verdict, input.fundedDaysFor?.(user.id, date));
+      let computed = computedCodeWithRule(status, workMinutes, verdict, input.fundedDaysFor?.(user.id, date));
+      if (computed === 'A' && input.today && date >= input.today) computed = '--';
       const code = override ? overrideCode(override) : computed;
       const rule = override ? null : verdict;
 
@@ -504,7 +510,7 @@ export function buildMonthPerformance(input: MonthPerformanceInput): MonthPerfor
       // Somebody with nothing earned and nothing taken still has an account:
       // zeros, not a blank.
       leaveAccount: input.leaveAccountFor
-        ? (input.leaveAccountFor(user.id) ?? { opening: 0, earned: 0, paid: 0, closing: 0 })
+        ? (input.leaveAccountFor(user.id) ?? { opening: 0, earned: 0, paid: 0, closing: 0, lines: [] })
         : null,
     };
   });

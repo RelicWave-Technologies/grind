@@ -1,19 +1,17 @@
 import './attendance.css';
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouteContext } from '@tanstack/react-router';
 import { CalendarRange, FileSpreadsheet, Sheet } from 'lucide-react';
 import { api, API_BASE } from '../lib/api';
-import { useMonthReportDownload, fmtMonthShort, fmtMonthLong } from '../lib/useMonthReportDownload';
+import { useMonthReportDownload, fmtMonthLong } from '../lib/useMonthReportDownload';
 import type { TimesheetMatrix } from '../lib/types';
-import {
-  ATTENDANCE_RULE_LABEL,
-  ATTENDANCE_RULE_SHORT,
-  type AttendanceRuleExceptionsResponse,
-  type AttendanceRuleTag,
-} from '@grind/types';
+import type { MonthSummaryResponse, MonthSummaryRow } from '@grind/types';
+import type { LeaveBalanceRow, LeaveBalancesResponse } from '../lib/types';
+import { EditMemberModal } from './Calendar';
 import { fmtTime, fmtDurationMs, fmtDayLabel, addDays, todayKey } from '../lib/format';
 import {
+  Tabs,
   Page,
   PageHeader,
   Toolbar,
@@ -35,6 +33,7 @@ import {
   Tag,
   EmptyState,
   SkeletonTable,
+  Modal,
 } from '../ui';
 
 const SCOPE_LABEL: Record<TimesheetMatrix['scope'], string> = {
@@ -96,7 +95,11 @@ export function AttendanceScreen() {
    * report's own header says "Report Month" and a 14-day slice of one is not a
    * thing anyone can file. It ignores the range selector above deliberately.
    */
-  const reportMonth = anchor.slice(0, 7);
+  // Two views, one at a time: the month as HR closes it (default), and the
+  // day-by-day activity grid.
+  const [view, setView] = useState<'month' | 'daily'>('month');
+  const [reportMonth, setReportMonth] = useState<string>(() => todayKey(tz).slice(0, 7));
+  const thisMonth = todayKey(tz).slice(0, 7);
   const monthReport = useMonthReportDownload();
 
   const isToday = anchor === todayKey(tz);
@@ -105,17 +108,50 @@ export function AttendanceScreen() {
   const data = q.data;
   const hasPeople = !!data && data.users.length > 0;
 
-  const subtitle = data
-    ? `${SCOPE_LABEL[data.scope]} — first and last activity across ${data.days.length} days.`
-    : 'Assembling the attendance matrix…';
+  const subtitle =
+    view === 'month'
+      ? 'Each person’s month — the same numbers as the Excel.'
+      : data
+        ? `${SCOPE_LABEL[data.scope]} — first and last activity across ${data.days.length} days.`
+        : 'Assembling the attendance matrix…';
 
   return (
     <Page>
       <PageHeader
         eyebrow={`Attendance · ${tzLabel}`}
-        title="Who showed up"
+        title="Attendance"
         subtitle={subtitle}
         actions={
+          view === 'month' ? (
+          <Toolbar>
+            <DateStepper
+              value={fmtMonthLong(reportMonth)}
+              onPrev={() => setReportMonth((m) => shiftMonth(m, -1))}
+              onNext={() => setReportMonth((m) => shiftMonth(m, 1))}
+              nextDisabled={reportMonth >= thisMonth}
+              prevLabel="Previous month"
+              nextLabel="Next month"
+            />
+            <Button
+              variant="secondary"
+              icon={<FileSpreadsheet size={14} strokeWidth={2} />}
+              loading={monthReport.downloading === 'xlsx'}
+              disabled={monthReport.downloading !== null}
+              onClick={() => void monthReport.download(reportMonth, 'xlsx')}
+            >
+              Excel
+            </Button>
+            <Button
+              variant="secondary"
+              icon={<Sheet size={14} strokeWidth={2} />}
+              loading={monthReport.downloading === 'csv'}
+              disabled={monthReport.downloading !== null}
+              onClick={() => void monthReport.download(reportMonth, 'csv')}
+            >
+              CSV
+            </Button>
+          </Toolbar>
+          ) : (
           <Toolbar>
             <Segmented
               value={rangeKey}
@@ -136,39 +172,27 @@ export function AttendanceScreen() {
               </span>
               <span className="ui-btn__label">Export CSV</span>
             </a>
-            {/* The month sits in the label, not just the tooltip: these follow
-                the date above, and a button that will not say which month it
-                hands you reads as if it ignores it. */}
-            <Button
-              variant="secondary"
-              icon={<FileSpreadsheet size={14} strokeWidth={2} />}
-              loading={monthReport.downloading === 'xlsx'}
-              disabled={monthReport.downloading !== null}
-              onClick={() => void monthReport.download(reportMonth, 'xlsx')}
-              title={`Office in and out, hours and status per day, for ${fmtMonthLong(reportMonth)}`}
-            >
-              {`${fmtMonthShort(reportMonth)} · Excel`}
-            </Button>
-            <Button
-              variant="secondary"
-              icon={<Sheet size={14} strokeWidth={2} />}
-              loading={monthReport.downloading === 'csv'}
-              disabled={monthReport.downloading !== null}
-              onClick={() => void monthReport.download(reportMonth, 'csv')}
-              title={`The same report for ${fmtMonthLong(reportMonth)}, as CSV`}
-            >
-              {`${fmtMonthShort(reportMonth)} · CSV`}
-            </Button>
           </Toolbar>
+          )
         }
+      />
+
+      <Tabs
+        items={[
+          { value: 'month' as const, label: 'Month summary' },
+          { value: 'daily' as const, label: 'Daily' },
+        ]}
+        value={view}
+        onChange={setView}
       />
 
       {monthReport.error && <Banner status="danger">{monthReport.error}</Banner>}
 
-      {hasPeople && <AttendanceSummary data={data!} timeZone={tz} />}
+      {view === 'month' && <MonthSummary month={reportMonth} isAdmin={me.role === 'ADMIN'} />}
 
-      <RuleExceptions month={reportMonth} timeZone={tz} />
+      {view === 'daily' && hasPeople && <AttendanceSummary data={data!} timeZone={tz} />}
 
+      {view === 'daily' && (
       <Card variant="flush" className="atd-card">
         {q.isLoading ? (
           <SkeletonTable rows={6} />
@@ -306,6 +330,7 @@ export function AttendanceScreen() {
           </>
         )}
       </Card>
+      )}
     </Page>
   );
 }
@@ -355,95 +380,193 @@ function AttendanceSummary({ data, timeZone }: { data: TimesheetMatrix; timeZone
   );
 }
 
-/** Short days are a half; everything else the rules charge is a whole day. */
-const RULE_STATUS: Record<AttendanceRuleTag, 'warn' | 'danger'> = {
-  SHORT_DAY: 'warn',
-  HALF_DAY_SHORT: 'warn',
-  UNDER_MIN: 'danger',
-  WFH_UNAPPROVED: 'danger',
-  NO_APPLICATION: 'danger',
-  LEAVE_NOT_APPROVED: 'danger',
-  LATE: 'warn',
-};
-
 /**
- * Every day the attendance rules turned into leave this month — the list HR
- * checks. Read from the same month report the Excel and CSV come from, so the
- * three always agree. A wrong one is fixed with the day correction in Reports;
- * the correction wins over every rule.
+ * The month on one screen: a row per person with the same numbers as the
+ * Excel — present, half day, leave, leave without approval, late — plus the
+ * salary cut and the leave left. Details opens everything behind the row.
  *
- * Hidden when the rules are off, or when the viewer may not read the team.
+ * Hidden when the viewer may not read the team.
  */
-function RuleExceptions({ month, timeZone }: { month: string; timeZone: string }) {
+function MonthSummary({ month, isAdmin }: { month: string; isAdmin: boolean }) {
+  const [open, setOpen] = useState<MonthSummaryRow | null>(null);
   const q = useQuery({
-    queryKey: ['admin', 'attendance-exceptions', month],
-    queryFn: () => api<AttendanceRuleExceptionsResponse>(`/v1/reports/attendance-exceptions?month=${month}`),
+    queryKey: ['admin', 'month-summary', month],
+    queryFn: () => api<MonthSummaryResponse>(`/v1/reports/month-summary?month=${month}`),
     retry: false,
   });
   const data = q.data;
-  if (!data || !data.rulesFrom) return null;
-
-  const people = new Set(data.exceptions.map((e) => e.userId)).size;
-  const days = data.exceptions.reduce((sum, e) => sum + e.penaltyDays, 0);
+  if (!data) return null;
 
   return (
     <Card variant="flush" className="atd-card">
       <div className="atd-card-head">
         <div>
-          <h2 className="ui-t-title">Attendance rules · {fmtMonthLong(month)}</h2>
+          <h2 className="ui-t-title">Month summary · {fmtMonthLong(month)}</h2>
           <p className="ui-t-small">
-            {data.exceptions.length === 0
-              ? `Nobody fell short. Rules apply from ${data.rulesFrom}.`
-              : `${data.exceptions.length} days across ${people} people became leave — ${days} days charged to leave balances, unpaid once a balance runs out.`}
+            {data.rulesFrom
+              ? 'Same numbers as the Excel. Salary cut is leave the balance could not pay for.'
+              : 'Attendance rules are off — set them in Policy.'}
           </p>
         </div>
       </div>
-      {data.exceptions.length > 0 && (
-        <div className="atd-scroll">
-          <Table density="compact" stickyHead>
+      <div className="atd-scroll">
+        <Table density="compact" stickyHead>
+          <THead>
+            <Tr>
+              <Th>Person</Th>
+              <Th align="right">Present</Th>
+              <Th align="right">Half day</Th>
+              <Th align="right">Leave</Th>
+              <Th align="right">LWA</Th>
+              <Th align="right">Late</Th>
+              <Th align="right">Salary cut</Th>
+              <Th align="right">Leave left</Th>
+              <Th align="right" />
+            </Tr>
+          </THead>
+          <Tbody>
+            {data.rows.map((r) => (
+              <Tr key={r.userId}>
+                <Td>
+                  <Identity
+                    name={
+                      r.mode === 'STANDARD' ? r.name : (
+                        <>
+                          {r.name}{' '}
+                          <Tag status={r.mode === 'EXEMPT' ? 'neutral' : 'info'} mono>
+                            {r.mode === 'EXEMPT' ? 'No rules' : 'Remote'}
+                          </Tag>
+                        </>
+                      )
+                    }
+                    subtitle={r.teamName ?? r.email}
+                    avatar={<Avatar name={r.name} size={32} />}
+                  />
+                </Td>
+                <Td align="right"><span className="ui-mono">{r.present}</span></Td>
+                <Td align="right"><span className="ui-mono">{r.halfDay}</span></Td>
+                <Td align="right"><span className="ui-mono">{r.leave}</span></Td>
+                <Td align="right"><span className="ui-mono">{r.lwa}</span></Td>
+                <Td align="right"><span className="ui-mono">{r.late}</span></Td>
+                <Td align="right">
+                  <span className="ui-mono">{r.salaryCut > 0 ? <strong>{fmtDays(r.salaryCut)}</strong> : '0'}</span>
+                </Td>
+                <Td align="right"><span className="ui-mono">{fmtDays(r.account.closing)}</span></Td>
+                <Td align="right">
+                  <Button size="sm" variant="secondary" onClick={() => setOpen(r)}>
+                    Details
+                  </Button>
+                </Td>
+              </Tr>
+            ))}
+          </Tbody>
+        </Table>
+      </div>
+      <MonthDetails row={open} month={month} isAdmin={isAdmin} onClose={() => setOpen(null)} />
+    </Card>
+  );
+}
+
+/** "2", "1.5" — halves kept, whole numbers whole. */
+function fmtDays(n: number): string {
+  return Number.isInteger(n) ? String(n) : n.toFixed(1);
+}
+
+/**
+ * Everything behind one row: the leave account, then every change this month —
+ * what came in, and each day that became leave with why, what the balance paid
+ * and what was cut from salary. An admin can change the person's leave
+ * settings from here.
+ */
+function MonthDetails({
+  row, month, isAdmin, onClose,
+}: { row: MonthSummaryRow | null; month: string; isAdmin: boolean; onClose: () => void }) {
+  const qc = useQueryClient();
+  const [editing, setEditing] = useState<LeaveBalanceRow | null>(null);
+  const monthEnd = lastDayOf(month);
+  // The settings behind the balance, fetched only when an admin asks to edit.
+  const loadSettings = async () => {
+    const res = await api<LeaveBalancesResponse>(`/v1/admin/leave/balances?asOf=${monthEnd}`);
+    setEditing(res.rows.find((x) => x.userId === row?.userId) ?? null);
+  };
+  const a = row?.account;
+  const signed = (n: number) => (n > 0 ? `+${fmtDays(n)}` : n < 0 ? `−${fmtDays(-n)}` : '0');
+
+  return (
+    <>
+      <Modal
+        open={row !== null && editing === null}
+        onClose={onClose}
+        title={row ? `${row.name} — ${fmtMonthLong(month)}` : ''}
+        description={
+          a
+            ? `Leave: at start ${fmtDays(a.opening)} · got ${signed(a.earned)} · used ${signed(-a.paid)} · left ${fmtDays(a.closing)}` +
+              (row && row.salaryCut > 0 ? ` · salary cut ${fmtDays(row.salaryCut)} days` : '')
+            : undefined
+        }
+        actions={
+          <>
+            {isAdmin && (
+              <Button variant="ghost" onClick={() => void loadSettings()}>
+                Edit leave settings
+              </Button>
+            )}
+            <Button variant="secondary" onClick={onClose}>Close</Button>
+          </>
+        }
+      >
+        {a && a.lines.length === 0 ? (
+          <p className="ui-t-small">Nothing changed this month.</p>
+        ) : (
+          <Table density="compact">
             <THead>
               <Tr>
-                <Th>Person</Th>
                 <Th>Date</Th>
-                <Th>Rule</Th>
-                <Th align="right">Worked</Th>
-                <Th align="center">Punch</Th>
-                <Th align="center">Status</Th>
+                <Th>Day</Th>
+                <Th>What</Th>
+                <Th align="right">Paid</Th>
+                <Th align="right">Salary cut</Th>
               </Tr>
             </THead>
             <Tbody>
-              {data.exceptions.map((e) => (
-                <Tr key={`${e.userId}-${e.date}`}>
-                  <Td>
-                    <Identity name={e.name} subtitle={e.teamName ?? e.email} avatar={<Avatar name={e.name} size={32} />} />
-                  </Td>
-                  <Td>
-                    <span className="ui-mono atd-nowrap">{fmtDayLabel(e.date, timeZone)}</span>
-                  </Td>
-                  <Td>
-                    <span title={ATTENDANCE_RULE_LABEL[e.tag]}>
-                      <Tag status={RULE_STATUS[e.tag]} mono>
-                        {ATTENDANCE_RULE_SHORT[e.tag]}
-                      </Tag>
-                    </span>
-                  </Td>
+              {a?.lines.map((l, i) => (
+                <Tr key={`${l.date}-${i}`}>
+                  <Td><span className="ui-mono atd-nowrap">{l.date.slice(8, 10)}/{l.date.slice(5, 7)}</span></Td>
+                  <Td>{l.kind === 'leave' && l.code ? <Tag mono>{l.code}</Tag> : <Tag status="success" mono>{signed(l.days)}</Tag>}</Td>
+                  <Td>{l.label}</Td>
+                  <Td align="right"><span className="ui-mono">{l.kind === 'leave' ? fmtDays(l.paid ?? 0) : '—'}</span></Td>
                   <Td align="right">
-                    <span className="ui-mono">{fmtDurationMs(e.workMinutes * 60_000)}</span>
-                  </Td>
-                  <Td align="center">
-                    <span className="ui-mono">{e.punched ? 'Yes' : '–'}</span>
-                  </Td>
-                  <Td align="center">
-                    <Tag status="neutral" mono>
-                      {e.code}
-                    </Tag>
+                    <span className="ui-mono">
+                      {l.kind === 'leave' && (l.salaryCut ?? 0) > 0 ? <strong>{fmtDays(l.salaryCut ?? 0)}</strong> : '—'}
+                    </span>
                   </Td>
                 </Tr>
               ))}
             </Tbody>
           </Table>
-        </div>
-      )}
-    </Card>
+        )}
+      </Modal>
+      <EditMemberModal
+        row={editing}
+        month={month}
+        onClose={() => setEditing(null)}
+        onSaved={() => {
+          void qc.invalidateQueries({ queryKey: ['admin', 'month-summary'] });
+          void qc.invalidateQueries({ queryKey: ['leave'] });
+        }}
+      />
+    </>
   );
+}
+
+function lastDayOf(month: string): string {
+  const [y, m] = month.split('-').map(Number);
+  return `${month}-${String(new Date(Date.UTC(y!, m!, 0)).getUTCDate()).padStart(2, '0')}`;
+}
+
+/** "2026-09" moved by n months. */
+function shiftMonth(month: string, n: number): string {
+  const [y, m] = month.split('-').map(Number);
+  const d = new Date(Date.UTC(y!, m! - 1 + n, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
 }

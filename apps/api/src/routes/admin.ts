@@ -341,6 +341,7 @@ type TeamSettingsUserRow = {
   screenshotIntervalMin: number | null;
   idleThresholdMin: number | null;
   idleWarningSeconds: number | null;
+  attendanceRuleMode: 'STANDARD' | 'REMOTE' | 'EXEMPT';
   createdAt: Date;
   team: {
     id: string;
@@ -386,6 +387,7 @@ function serializeTeamSettingsMember(
     screenshotIntervalMin: normalizeScreenshotIntervalMin(user.screenshotIntervalMin, defaults.screenshotIntervalMin),
     idleThresholdMin: user.idleThresholdMin ?? defaults.idleThresholdMin,
     idleWarningSeconds: exposeIdleWarning ? user.idleWarningSeconds : null,
+    attendanceRuleMode: user.attendanceRuleMode,
     createdAt: user.createdAt.toISOString(),
   };
 }
@@ -407,6 +409,7 @@ async function loadTeamSettingsMembers(userIds: string[], exposeIdleWarning = fa
       screenshotIntervalMin: true,
       idleThresholdMin: true,
       idleWarningSeconds: true,
+      attendanceRuleMode: true,
       createdAt: true,
       workspaceId: true,
       team: {
@@ -487,6 +490,11 @@ adminRouter.patch('/team-member-settings/:id', requireCapability('team.settings.
     if (!req.scope.isAdmin && parsed.data.idleWarningSeconds !== undefined) {
       return res.status(403).json({ error: 'admin_required_for_idle_warning' });
     }
+    // Remote / outside the rules changes what a person is paid, so it is an
+    // admin's call, like the leave settings it used to sit beside.
+    if (!req.scope.isAdmin && parsed.data.attendanceRuleMode !== undefined) {
+      return res.status(403).json({ error: 'admin_required_for_attendance_rule_mode' });
+    }
 
     const existing = await prisma.user.findUnique({
       where: { id },
@@ -543,6 +551,7 @@ adminRouter.patch('/team-member-settings/:id', requireCapability('team.settings.
       screenshotIntervalMin?: number | null;
       idleThresholdMin?: number | null;
       idleWarningSeconds?: number | null;
+      attendanceRuleMode?: 'STANDARD' | 'REMOTE' | 'EXEMPT';
       provisioningStatus?: 'ACTIVE';
     } = {};
     let shiftAssignment:
@@ -563,6 +572,9 @@ adminRouter.patch('/team-member-settings/:id', requireCapability('team.settings.
     }
     if (parsed.data.idleWarningSeconds !== undefined) {
       data.idleWarningSeconds = parsed.data.idleWarningSeconds;
+    }
+    if (parsed.data.attendanceRuleMode !== undefined) {
+      data.attendanceRuleMode = parsed.data.attendanceRuleMode;
     }
     if ('shiftId' in parsed.data) {
       const raw = parsed.data.shiftId;

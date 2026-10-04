@@ -69,6 +69,17 @@ export const ATTENDANCE_RULE_LABEL: Record<AttendanceRuleTag, string> = {
 export const AttendanceRuleModeSchema = z.enum(['STANDARD', 'REMOTE', 'EXEMPT']);
 export type AttendanceRuleMode = z.infer<typeof AttendanceRuleModeSchema>;
 
+/** A few words each, for a list where the full sentence would wrap. */
+export const ATTENDANCE_RULE_REASON: Record<AttendanceRuleTag, string> = {
+  SHORT_DAY: 'Short day',
+  UNDER_MIN: 'Under half a day',
+  HALF_DAY_SHORT: 'Half-day leave, short hours',
+  WFH_UNAPPROVED: 'WFH not approved',
+  NO_APPLICATION: 'Absent, no leave applied',
+  LEAVE_NOT_APPROVED: 'Absent, leave not approved',
+  LATE: 'Late arrival',
+};
+
 /** What a rule decided about one person-day. */
 export const AttendanceRuleVerdictSchema = z.object({
   tag: AttendanceRuleTagSchema,
@@ -89,6 +100,50 @@ export const ATTENDANCE_RULE_DEFAULTS = {
   /** Minutes after the shift start that still count as on time. */
   lateGraceMinutes: 30,
 } as const;
+
+/**
+ * One person's month on one row — the same counts as the exported sheet, the
+ * salary cut, and the leave account with every change behind it.
+ */
+export const MonthSummaryRowSchema = z.object({
+  userId: z.string(),
+  name: z.string(),
+  email: z.string(),
+  teamName: z.string().nullable(),
+  mode: z.enum(['STANDARD', 'REMOTE', 'EXEMPT']),
+  present: z.number(),
+  halfDay: z.number(),
+  leave: z.number(),
+  lwa: z.number(),
+  late: z.number(),
+  salaryCut: z.number(),
+  account: z.object({
+    opening: z.number(),
+    earned: z.number(),
+    paid: z.number(),
+    closing: z.number(),
+    lines: z.array(
+      z.object({
+        date: z.string(),
+        kind: z.enum(['credit', 'leave']),
+        label: z.string(),
+        days: z.number(),
+        paid: z.number().optional(),
+        salaryCut: z.number().optional(),
+        /** The day's code on the sheet, for a leave line. */
+        code: z.string().optional(),
+      }),
+    ),
+  }),
+});
+export type MonthSummaryRow = z.infer<typeof MonthSummaryRowSchema>;
+
+export const MonthSummaryResponseSchema = z.object({
+  month: z.string(),
+  rulesFrom: z.string().nullable(),
+  rows: z.array(MonthSummaryRowSchema),
+});
+export type MonthSummaryResponse = z.infer<typeof MonthSummaryResponseSchema>;
 
 /** One charged day, as the exceptions list shows it. */
 export const AttendanceRuleExceptionSchema = z.object({

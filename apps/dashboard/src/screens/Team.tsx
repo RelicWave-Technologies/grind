@@ -53,7 +53,10 @@ type RowDraft = {
   screenshotIntervalMin: ScreenshotIntervalMin;
   idleThresholdMin: number;
   idleWarningSeconds: number | null;
+  attendanceRuleMode: RuleMode;
 } | null;
+type RuleMode = 'STANDARD' | 'REMOTE' | 'EXEMPT';
+const RULE_MODE_LABEL: Record<RuleMode, string> = { STANDARD: 'Office', REMOTE: 'Remote', EXEMPT: 'No rules' };
 type MonitoringRisk = 'NORMAL' | 'CAUTION' | 'HIGH';
 type MonitoringTiming = { screenshotIntervalMin: number; idleThresholdMin: number };
 
@@ -122,6 +125,7 @@ export function TeamScreen() {
       screenshotIntervalMin: member.screenshotIntervalMin,
       idleThresholdMin: member.idleThresholdMin,
       idleWarningSeconds: member.idleWarningSeconds,
+      attendanceRuleMode: member.attendanceRuleMode,
     });
   }
 
@@ -148,6 +152,9 @@ export function TeamScreen() {
     }
     if (rowDraft.idleWarningSeconds !== member.idleWarningSeconds) {
       patch.idleWarningSeconds = rowDraft.idleWarningSeconds;
+    }
+    if (rowDraft.attendanceRuleMode !== member.attendanceRuleMode) {
+      patch.attendanceRuleMode = rowDraft.attendanceRuleMode;
     }
     if (Object.keys(patch).length === 0) {
       setRowDraft(null);
@@ -342,6 +349,7 @@ function TeamSettingsTable({
             <Th className="tm-col-shot" align="center">Screenshot interval</Th>
             <Th className="tm-col-idle" align="center">Idle break</Th>
             {showIdleCountdown && <Th className="tm-col-countdown" align="center">Idle countdown</Th>}
+            <Th className="tm-col-works" align="center">Works from</Th>
             <Th className="tm-col-manager" align="center">Manager</Th>
             <Th className="tm-col-action" align="center">Action</Th>
           </Tr>
@@ -355,6 +363,7 @@ function TeamSettingsTable({
             const screenshotIntervalMin = draft ? draft.screenshotIntervalMin : member.screenshotIntervalMin;
             const idleThresholdMin = draft ? draft.idleThresholdMin : member.idleThresholdMin;
             const idleWarningSeconds = draft ? draft.idleWarningSeconds : member.idleWarningSeconds;
+            const ruleMode = draft ? draft.attendanceRuleMode : member.attendanceRuleMode;
             const shift = shifts.find((s) => s.id === shiftId) ?? null;
             const isCurrentUser = member.id === currentUserId;
             const selfEditLocked = isCurrentUser && currentUserRole !== 'ADMIN';
@@ -424,6 +433,26 @@ function TeamSettingsTable({
                     )}
                   </Td>
                 )}
+                <Td className="tm-col-works" align="center">
+                  {/* Office: all attendance rules. Remote: no punch expected, so
+                      no work-from-home or late rule. Only an admin may change it. */}
+                  {editing && currentUserRole === 'ADMIN' ? (
+                    <div className="tm-setting-control">
+                      <Select
+                        value={ruleMode}
+                        aria-label={`${member.name} works from`}
+                        disabled={rowBusy}
+                        onChange={(e) => onDraftChange(member.id, { attendanceRuleMode: e.target.value as RuleMode })}
+                      >
+                        <option value="STANDARD">Office</option>
+                        <option value="REMOTE">Remote</option>
+                        <option value="EXEMPT">No rules</option>
+                      </Select>
+                    </div>
+                  ) : (
+                    <SettingValue value={RULE_MODE_LABEL[ruleMode]} />
+                  )}
+                </Td>
                 <Td className="tm-col-manager" align="center">
                   <div className="tm-stack tm-stack--center">
                     <span className="ui-t-strong">{member.manager?.name ?? 'No manager'}</span>
