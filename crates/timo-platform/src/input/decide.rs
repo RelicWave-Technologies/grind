@@ -17,16 +17,21 @@
     )
 )]
 
+use std::sync::Mutex;
+
 use super::InputEvent;
 
 /// `CGEventType` values the macOS tap listens for.
 pub(crate) mod cg {
     pub(crate) const LEFT_MOUSE_DOWN: u32 = 1;
+    pub(crate) const LEFT_MOUSE_UP: u32 = 2;
     pub(crate) const RIGHT_MOUSE_DOWN: u32 = 3;
+    pub(crate) const RIGHT_MOUSE_UP: u32 = 4;
     pub(crate) const MOUSE_MOVED: u32 = 5;
     pub(crate) const LEFT_MOUSE_DRAGGED: u32 = 6;
     pub(crate) const RIGHT_MOUSE_DRAGGED: u32 = 7;
     pub(crate) const KEY_DOWN: u32 = 10;
+    pub(crate) const KEY_UP: u32 = 11;
     pub(crate) const FLAGS_CHANGED: u32 = 12;
     /// `NX_SYSDEFINED`: media keys and caps lock. Not a documented `CGEventType`.
     pub(crate) const SYS_DEFINED: u32 = 14;
@@ -40,16 +45,20 @@ pub(crate) mod cg {
 
 /// The `CGEventType`s the tap subscribes to, as a bit mask.
 ///
-/// libuiohook also subscribes to key-up, left/right/other mouse-up (except as
-/// below) and the flag/system events; up events never count, so we leave them out.
+/// Exactly libuiohook's `create_event_runloop_info` mask — including the key-up and
+/// left/right mouse-up types, which [`decode_mac`] then ignores — so the active tap
+/// the oracle creates and this one see the same stream.
 #[must_use]
 pub(crate) fn mac_event_mask() -> u64 {
     [
         cg::KEY_DOWN,
+        cg::KEY_UP,
         cg::FLAGS_CHANGED,
         cg::SYS_DEFINED,
         cg::LEFT_MOUSE_DOWN,
+        cg::LEFT_MOUSE_UP,
         cg::RIGHT_MOUSE_DOWN,
+        cg::RIGHT_MOUSE_UP,
         cg::OTHER_MOUSE_DOWN,
         cg::OTHER_MOUSE_UP,
         cg::MOUSE_MOVED,
@@ -222,7 +231,24 @@ pub(crate) struct WinMouseState {
     last_click: (i32, i32),
 }
 
+/// libuiohook's `last_click` is a file-level `static`: hook stop/start never resets
+/// it. This is its process-wide twin, so a listener restart keeps it too.
+static PROCESS_MOUSE: Mutex<WinMouseState> = Mutex::new(WinMouseState::new());
+
+/// [`WinMouseState::decode`] on the process-wide state. A poisoned lock drops the
+/// event, as the hook callbacks already do when their own lock is unavailable.
+pub(crate) fn decode_win_mouse(message: u32, x: i32, y: i32) -> Option<InputEvent> {
+    PROCESS_MOUSE
+        .lock()
+        .ok()
+        .and_then(|mut state| state.decode(message, x, y))
+}
+
 impl WinMouseState {
+    const fn new() -> Self {
+        Self { last_click: (0, 0) }
+    }
+
     /// `WH_MOUSE_LL` message at screen point `(x, y)` → what legacy counts.
     ///
     /// Port of `mouse_hook_event_proc`. A move to exactly the last click point
@@ -250,15 +276,18 @@ impl WinMouseState {
 /// moves at the pointer's full poll rate, and ~20 Hz is kept.
 ///
 /// `now_ms` is whatever clock the consumer feeds the aggregator (legacy uses
-/// `serverAlignedNow()`); this crate never reads a clock for it.
+/// `serverAlignedNow()`); this crate never reads a clock for it. It is fractional
+/// milliseconds, as in JavaScript: the Electron clock is `anchorServer +
+/// (performance.now() − anchorMono)`, so truncating either timestamp would turn a
+/// 49.5 ms gap (rejected) into a 50 ms one (admitted).
 #[derive(Clone, Copy, Debug, Default)]
 pub struct MoveThrottle {
-    last_move_ms: i64,
+    last_move_ms: f64,
 }
 
 impl MoveThrottle {
     /// Legacy `MOVE_THROTTLE_MS`.
-    pub const INTERVAL_MS: i64 = 50;
+    pub const INTERVAL_MS: f64 = 50.0;
 
     #[must_use]
     pub fn new() -> Self {
@@ -266,8 +295,12 @@ impl MoveThrottle {
     }
 
     /// `if (t - lastMoveTs < MOVE_THROTTLE_MS) return; lastMoveTs = t;`
-    pub fn admit(&mut self, now_ms: i64) -> bool {
-        if now_ms.saturating_sub(self.last_move_ms) < Self::INTERVAL_MS {
+    #[allow(
+        clippy::float_arithmetic,
+        reason = "legacy subtracts two f64 timestamps; the exact IEEE operation is the parity"
+    )]
+    pub fn admit(&mut self, now_ms: f64) -> bool {
+        if now_ms - self.last_move_ms < Self::INTERVAL_MS {
             return false;
         }
         self.last_move_ms = now_ms;
@@ -287,18 +320,19 @@ mod tests {
     }
 
     #[test]
-    fn mac_mask_covers_exactly_the_counted_types() {
-        let mask = mac_event_mask();
-        for ty in [1u32, 3, 5, 6, 7, 10, 12, 14, 22, 25, 26, 27] {
-            assert_ne!(mask & (1u64 << ty), 0, "type {ty} missing");
-        }
-        // key up (11), left/right mouse up (2, 4) are never counted.
-        for ty in [2u32, 4, 11] {
-            assert_eq!(
-                mask & (1u64 << ty),
-                0,
-                "type {ty} should not be listened to"
-            );
+    fn mac_mask_is_libuiohooks_mask() {
+        // kCGEventKeyDown/Up, FlagsChanged, {Left,Right,Other}Mouse{Down,Up,Dragged},
+        // MouseMoved, ScrollWheel, NX_SYSDEFINED — and nothing else.
+        let expected = [1u32, 2, 3, 4, 5, 6, 7, 10, 11, 12, 14, 22, 25, 26, 27]
+            .iter()
+            .fold(0u64, |mask, ty| mask | (1u64 << ty));
+        assert_eq!(mac_event_mask(), expected);
+    }
+
+    #[test]
+    fn up_events_in_the_mask_are_not_counted() {
+        for ty in [cg::KEY_UP, cg::LEFT_MOUSE_UP, cg::RIGHT_MOUSE_UP] {
+            assert_eq!(decode_mac(&raw(ty)), None, "type {ty}");
         }
     }
 
@@ -504,10 +538,36 @@ mod tests {
     fn move_throttle_matches_legacy_arithmetic() {
         let mut th = MoveThrottle::new();
         // lastMoveTs starts at 0, so a first move at t < 50 is dropped.
-        assert!(!th.admit(49));
-        assert!(th.admit(50));
-        assert!(!th.admit(99));
-        assert!(th.admit(100));
-        assert!(th.admit(1_000_000));
+        assert!(!th.admit(49.0));
+        assert!(th.admit(50.0));
+        assert!(!th.admit(99.0));
+        assert!(th.admit(100.0));
+        assert!(th.admit(1_000_000.0));
+    }
+
+    #[test]
+    fn move_throttle_keeps_fractional_milliseconds() {
+        // 1791133383941.25 − 1791133383891.75 = 49.5 in JS: rejected. Truncating
+        // both sides gives 50: admitted.
+        let mut th = MoveThrottle::new();
+        assert!(th.admit(1_791_133_383_891.75));
+        assert!(!th.admit(1_791_133_383_941.25));
+        // The rejected move did not become the new baseline: 50.25 after the first still admits.
+        assert!(th.admit(1_791_133_383_942.0));
+    }
+
+    #[test]
+    fn process_wide_last_click_survives_a_listener_restart() {
+        // Nothing resets PROCESS_MOUSE between "listeners": click, "restart", move.
+        assert_eq!(
+            decode_win_mouse(WM_LBUTTONDOWN, 100, 100),
+            Some(InputEvent::MouseDown)
+        );
+        assert_eq!(decode_win_mouse(WM_MOUSEMOVE, 100, 100), None);
+        assert_eq!(
+            decode_win_mouse(WM_MOUSEMOVE, 101, 100),
+            Some(InputEvent::MouseMove { x: 101, y: 100 })
+        );
+        assert_eq!(decode_win_mouse(WM_MOUSEMOVE, 100, 100), None);
     }
 }

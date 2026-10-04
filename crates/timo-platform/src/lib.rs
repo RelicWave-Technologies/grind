@@ -15,6 +15,8 @@
     reason = "this is the one crate that talks to the OS: CoreGraphics event taps, IOKit, Win32 hooks"
 )]
 
+pub mod capture;
+pub mod dpapi;
 pub mod error;
 pub mod idle;
 pub mod input;

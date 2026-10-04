@@ -7,20 +7,21 @@
 //! # Threading
 //!
 //! * **OS thread** (macOS: a `CFRunLoop` thread; Windows: a `GetMessageW` pump)
-//!   decodes each OS event and pushes it into a bounded queue. Nothing slow runs
+//!   decodes each OS event and pushes it into an unbounded queue. Nothing slow runs
 //!   there: a macOS event tap that stalls is disabled by the system, and a Windows
 //!   low-level hook that takes more than `LowLevelHooksTimeout` is silently removed.
 //! * **Dispatcher thread** pops the queue and calls your sink, so a slow sink
-//!   costs queue depth, not the hook. If the queue overflows (4096 events) the
-//!   newest events are dropped and counted in [`InputStatus::dropped_events`].
+//!   costs queue depth, not the hook. The queue is unbounded and a send never
+//!   blocks or fails, like `uiohook-napi`'s unbounded N-API threadsafe function:
+//!   no event is ever dropped, a stalled sink only grows memory.
 //! * [`InputListener::stop`] stops the OS thread, then lets the dispatcher drain
 //!   what is queued, so every event seen before `stop` returns reaches the sink.
 //!
 //! Only one listener may run per process.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
-use std::sync::mpsc::{self, SyncSender};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
@@ -31,6 +32,8 @@ pub use decide::MoveThrottle;
 
 #[cfg(target_os = "macos")]
 mod mac;
+#[cfg(target_os = "macos")]
+mod mac_read;
 #[cfg(target_os = "macos")]
 use mac as imp;
 
@@ -43,8 +46,6 @@ use windows as imp;
 mod unsupported;
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 use unsupported as imp;
-
-const QUEUE_DEPTH: usize = 4096;
 
 /// What legacy counts. Mirrors the four `uIOhook` events it subscribes to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -77,9 +78,9 @@ where
 /// Whether the OS lets us see input.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InputPermission {
-    /// The event tap was created / the hook installed.
+    /// macOS Accessibility is trusted (the gate libuiohook and legacy use) / the hook installed.
     Granted,
-    /// macOS refused (Input Monitoring missing or revoked).
+    /// macOS Accessibility is missing or revoked, or the tap could not be created.
     Denied,
     /// Windows needs no grant.
     NotRequired,
@@ -114,14 +115,12 @@ pub struct InputStatus {
     pub running: bool,
     pub last_error: Option<String>,
     pub permission: InputPermission,
-    pub dropped_events: u64,
 }
 
 /// State shared between the OS thread, the dispatcher and the handle.
 #[derive(Debug)]
 pub(crate) struct Shared {
     running: AtomicBool,
-    dropped: AtomicU64,
     permission: AtomicU8,
     last_error: Mutex<Option<String>>,
 }
@@ -130,7 +129,6 @@ impl Shared {
     fn new() -> Arc<Self> {
         Arc::new(Self {
             running: AtomicBool::new(false),
-            dropped: AtomicU64::new(0),
             permission: AtomicU8::new(InputPermission::Unknown.to_u8()),
             last_error: Mutex::new(None),
         })
@@ -155,7 +153,6 @@ impl Shared {
             running: self.running.load(Ordering::SeqCst),
             last_error: self.last_error.lock().ok().and_then(|slot| slot.clone()),
             permission: InputPermission::from_u8(self.permission.load(Ordering::SeqCst)),
-            dropped_events: self.dropped.load(Ordering::SeqCst),
         }
     }
 }
@@ -163,20 +160,48 @@ impl Shared {
 /// Handed to the OS thread: a non-blocking way to queue an event.
 #[derive(Clone, Debug)]
 pub(crate) struct EventTx {
-    tx: SyncSender<InputEvent>,
-    shared: Arc<Shared>,
+    tx: Sender<InputEvent>,
 }
 
 impl EventTx {
     pub(crate) fn send(&self, event: InputEvent) {
-        if self.tx.try_send(event).is_err() {
-            self.shared.dropped.fetch_add(1, Ordering::Relaxed);
-        }
+        // An unbounded send fails only once the dispatcher is gone, i.e. after `stop`.
+        self.tx.send(event).ok();
     }
 }
 
 /// Only one listener per process (Windows hook callbacks have no user-data slot).
 static ACTIVE: AtomicBool = AtomicBool::new(false);
+
+/// Ownership of [`ACTIVE`] for one handle. Releasing is idempotent and tied to
+/// *this* guard, so a repeated `stop` or the `Drop` after one can never free the
+/// slot a later listener has since taken.
+#[derive(Debug)]
+struct SingletonGuard {
+    held: bool,
+}
+
+impl SingletonGuard {
+    fn acquire() -> Option<Self> {
+        ACTIVE
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+            .then_some(Self { held: true })
+    }
+
+    /// The running→stopped transition: frees the slot the first time, then does nothing.
+    fn release(&mut self) {
+        if std::mem::take(&mut self.held) {
+            ACTIVE.store(false, Ordering::SeqCst);
+        }
+    }
+}
+
+impl Drop for SingletonGuard {
+    fn drop(&mut self) {
+        self.release();
+    }
+}
 
 /// A running input listener. Dropping it stops it.
 #[derive(Debug)]
@@ -185,6 +210,7 @@ pub struct InputListener {
     backend: Option<imp::Backend>,
     tx: Option<EventTx>,
     dispatcher: Option<JoinHandle<()>>,
+    guard: SingletonGuard,
 }
 
 impl InputListener {
@@ -192,18 +218,12 @@ impl InputListener {
     /// a missing macOS permission is reported here as
     /// [`PlatformError::PermissionDenied`], like `uIOhook.start()` throwing.
     pub fn start(sink: Arc<dyn InputSink>) -> Result<Self, PlatformError> {
-        if ACTIVE
-            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-            .is_err()
-        {
+        let Some(mut guard) = SingletonGuard::acquire() else {
             return Err(PlatformError::AlreadyRunning("input listener"));
-        }
-        let shared = Shared::new();
-        let (tx, rx) = mpsc::sync_channel(QUEUE_DEPTH);
-        let event_tx = EventTx {
-            tx,
-            shared: Arc::clone(&shared),
         };
+        let shared = Shared::new();
+        let (tx, rx) = mpsc::channel();
+        let event_tx = EventTx { tx };
         let dispatcher = spawn_dispatcher(rx, sink, Arc::clone(&shared));
         match imp::Backend::start(event_tx.clone(), Arc::clone(&shared)) {
             Ok(backend) => {
@@ -213,6 +233,7 @@ impl InputListener {
                     backend: Some(backend),
                     tx: Some(event_tx),
                     dispatcher: Some(dispatcher),
+                    guard,
                 })
             }
             Err(error) => {
@@ -220,7 +241,7 @@ impl InputListener {
                 // The failed backend dropped its sender copy; ours is gone too, so
                 // the dispatcher sees the channel close and exits.
                 dispatcher.join().ok();
-                ACTIVE.store(false, Ordering::SeqCst);
+                guard.release();
                 Err(error)
             }
         }
@@ -233,16 +254,19 @@ impl InputListener {
     }
 
     /// Stop the OS hook, deliver everything already queued, and join the threads.
+    /// Only the first call on a handle does anything; later calls (and `Drop`
+    /// after a `stop`) are no-ops, so they cannot release a newer listener's slot.
     pub fn stop(&mut self) {
-        if let Some(mut backend) = self.backend.take() {
-            backend.stop();
-        }
+        let Some(mut backend) = self.backend.take() else {
+            return;
+        };
+        backend.stop();
         self.shared.set_running(false);
         self.tx = None;
         if let Some(handle) = self.dispatcher.take() {
             handle.join().ok();
         }
-        ACTIVE.store(false, Ordering::SeqCst);
+        self.guard.release();
     }
 }
 
@@ -284,17 +308,36 @@ mod tests {
     }
 
     #[test]
-    fn full_queue_drops_and_counts_instead_of_blocking() {
-        let shared = Shared::new();
-        let (tx, _rx) = mpsc::sync_channel(2);
-        let event_tx = EventTx {
-            tx,
-            shared: Arc::clone(&shared),
-        };
-        for _ in 0..5 {
+    fn queue_is_unbounded_and_loses_nothing_while_the_sink_is_stalled() {
+        let (tx, rx) = mpsc::channel();
+        let event_tx = EventTx { tx };
+        for _ in 0..100_000 {
             event_tx.send(InputEvent::KeyDown);
         }
-        assert_eq!(shared.snapshot().dropped_events, 3);
+        drop(event_tx);
+        assert_eq!(rx.iter().count(), 100_000);
+    }
+
+    #[test]
+    fn a_stale_handle_cannot_release_a_newer_listeners_slot() {
+        // start / stop / start / drop-first / start, on the guard `InputListener` holds.
+        let mut first = SingletonGuard::acquire().expect("first acquires");
+        assert!(SingletonGuard::acquire().is_none(), "second is refused");
+        first.release();
+        let mut second = SingletonGuard::acquire().expect("second acquires after first stopped");
+        drop(first); // Drop after stop: must be a no-op
+        assert!(
+            SingletonGuard::acquire().is_none(),
+            "dropping the stopped first handle freed the second's slot"
+        );
+        second.release();
+        second.release(); // repeated stop
+        let third = SingletonGuard::acquire().expect("third acquires after second stopped");
+        drop(third);
+        assert!(
+            SingletonGuard::acquire().is_some(),
+            "dropping a running guard frees the slot"
+        );
     }
 
     #[test]
@@ -308,7 +351,7 @@ mod tests {
             assert!(n != 0, "first event panics on purpose");
             assert_eq!(event, InputEvent::Wheel);
         });
-        let (tx, rx) = mpsc::sync_channel(8);
+        let (tx, rx) = mpsc::channel();
         let handle = spawn_dispatcher(rx, sink, Arc::clone(&shared));
         for _ in 0..3 {
             tx.send(InputEvent::Wheel).ok();

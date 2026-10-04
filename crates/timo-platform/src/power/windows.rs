@@ -7,13 +7,29 @@
 //! | `Suspend` | `WM_POWERBROADCAST` / `PBT_APMSUSPEND` |
 //! | `Resume` | `WM_POWERBROADCAST` / `PBT_APMRESUMEAUTOMATIC` (never `PBT_APMRESUMESUSPEND`, which always follows it) |
 //! | `LockScreen` / `UnlockScreen` | `WM_WTSSESSION_CHANGE` / `WTS_SESSION_LOCK` / `WTS_SESSION_UNLOCK`, current session only |
-//! | `Shutdown` | `WM_ENDSESSION` with `wParam != 0` (Electron emits no `shutdown` on Windows; this is a superset) |
+//!
+//! There is **no `Shutdown` event on Windows**, exactly as in Electron 33 (whose
+//! `powerMonitor` emits `shutdown` on Linux and macOS only). A message-only window
+//! never receives `WM_QUERYENDSESSION` / `WM_ENDSESSION` — those are sent to
+//! top-level windows — so none is claimed here. Session end on Windows is for the
+//! app layer, which owns a top-level window (to be wired in the Tauri app).
 //!
 //! The window is registered for `WTSRegisterSessionNotification(NOTIFY_FOR_THIS_SESSION)`
 //! and `RegisterSuspendResumeNotification(DEVICE_NOTIFY_WINDOW_HANDLE)` (the latter
-//! is what delivers `PBT_APMSUSPEND` on Modern Standby machines). `WM_QUERYENDSESSION`
-//! is always answered "yes": this app never vetoes a shutdown.
+//! is what delivers `PBT_APMSUSPEND` on Modern Standby machines).
+//!
+//! # Startup must not silently lose lock events
+//!
+//! `WTSRegisterSessionNotification` can fail with `RPC_S_INVALID_BINDING` when the
+//! app autostarts at logon before the RPC services are ready. Start therefore
+//! retries that one error with a bounded backoff (see
+//! [`super::session_registration_retry_delay`], ≈ 7.75 s in all) and, if the
+//! registration still fails or fails for any other reason, **returns the error and
+//! tears everything down** instead of announcing a monitor that will never see a
+//! lock. The caller owns any further retry. Unregistration happens on the owner
+//! thread *before* the window is destroyed, as Microsoft requires.
 
+use std::cell::Cell;
 use std::ffi::c_void;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::ptr;
@@ -23,24 +39,22 @@ use std::thread::JoinHandle;
 use windows::Win32::Foundation::{HANDLE, HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Power::{
-    RegisterSuspendResumeNotification, UnregisterSuspendResumeNotification,
+    HPOWERNOTIFY, RegisterSuspendResumeNotification, UnregisterSuspendResumeNotification,
 };
 use windows::Win32::System::RemoteDesktop::{
-    NOTIFY_FOR_THIS_SESSION, ProcessIdToSessionId, WTS_CURRENT_SERVER_HANDLE, WTS_CURRENT_SESSION,
-    WTSFreeMemory, WTSINFOEXW, WTSQuerySessionInformationW, WTSRegisterSessionNotification,
-    WTSSessionInfoEx, WTSUnRegisterSessionNotification,
+    NOTIFY_FOR_THIS_SESSION, WTSRegisterSessionNotification, WTSUnRegisterSessionNotification,
 };
-use windows::Win32::System::Threading::GetCurrentProcessId;
 use windows::Win32::UI::WindowsAndMessaging::{
     CREATESTRUCTW, CreateWindowExW, DEVICE_NOTIFY_WINDOW_HANDLE, DefWindowProcW, DestroyWindow,
     DispatchMessageW, GWLP_USERDATA, GetMessageW, GetWindowLongPtrW, HWND_MESSAGE, MSG,
     PostMessageW, PostQuitMessage, RegisterClassExW, SetWindowLongPtrW, TranslateMessage,
-    UnregisterClassW, WINDOW_EX_STYLE, WINDOW_STYLE, WM_CLOSE, WM_DESTROY, WM_ENDSESSION,
-    WM_NCCREATE, WM_POWERBROADCAST, WM_QUERYENDSESSION, WNDCLASSEXW,
+    UnregisterClassW, WINDOW_EX_STYLE, WINDOW_STYLE, WM_CLOSE, WM_DESTROY, WM_NCCREATE,
+    WM_POWERBROADCAST, WNDCLASSEXW,
 };
-use windows::core::{PCWSTR, PWSTR, w};
+use windows::core::{HRESULT, PCWSTR, w};
 
-use super::{PowerEvent, PowerSink, deliver};
+use super::win_session::{initial_session_locked, is_current_session};
+use super::{PowerEvent, PowerSink, deliver, session_registration_retry_delay};
 use crate::{PlatformError, session};
 
 const CLASS_NAME: PCWSTR = w!("Timo_PowerMonitorHostWindow");
@@ -50,8 +64,6 @@ const WTS_SESSION_LOCK: usize = 0x7;
 const WTS_SESSION_UNLOCK: usize = 0x8;
 const PBT_APMSUSPEND: usize = 0x4;
 const PBT_APMRESUMEAUTOMATIC: usize = 0x12;
-/// `WTS_SESSIONSTATE_LOCK`.
-const SESSION_STATE_LOCK: i32 = 0;
 
 /// What a window message means for our consumers. Pure, so it tests anywhere.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -82,8 +94,14 @@ pub(crate) fn interpret_session_change(wparam: usize, is_current_session: bool) 
     }
 }
 
+/// `RPC_S_INVALID_BINDING`: the RPC service behind WTS is not up yet (early logon).
+const RPC_S_INVALID_BINDING: u32 = 1702;
+
 struct WindowCtx {
     sink: Arc<dyn PowerSink>,
+    /// Registrations to undo on the owner thread while the window is still alive.
+    session_registered: Cell<bool>,
+    suspend_resume: Cell<Option<HPOWERNOTIFY>>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -136,7 +154,11 @@ impl Backend {
 }
 
 fn run(sink: Arc<dyn PowerSink>, ready: &mpsc::Sender<Result<Hwnd, PlatformError>>) {
-    let ctx = Box::into_raw(Box::new(WindowCtx { sink }));
+    let ctx = Box::into_raw(Box::new(WindowCtx {
+        sink,
+        session_registered: Cell::new(false),
+        suspend_resume: Cell::new(None),
+    }));
     let (hwnd, instance) = match create_window(ctx) {
         Ok(created) => created,
         Err(error) => {
@@ -147,32 +169,75 @@ fn run(sink: Arc<dyn PowerSink>, ready: &mpsc::Sender<Result<Hwnd, PlatformError
         }
     };
     session::set_locked(initial_session_locked());
-    // SAFETY: `hwnd` is the window just created on this thread.
-    let session_registered =
-        unsafe { WTSRegisterSessionNotification(hwnd, NOTIFY_FOR_THIS_SESSION) };
-    if session_registered.is_err() {
-        tracing::warn!("WTSRegisterSessionNotification failed; lock/unlock events will not arrive");
-    }
-    // SAFETY: `hwnd` is valid; DEVICE_NOTIFY_WINDOW_HANDLE means the recipient is a window handle.
-    let power_handle =
-        unsafe { RegisterSuspendResumeNotification(HANDLE(hwnd.0), DEVICE_NOTIFY_WINDOW_HANDLE) };
-    if power_handle.is_err() {
-        tracing::warn!(
-            "RegisterSuspendResumeNotification failed; Modern Standby suspend may be missed"
-        );
+    // SAFETY: `ctx` is the live Box created above; only this thread touches it until the pump ends.
+    let registered = register_notifications(hwnd, unsafe { &*ctx });
+    if let Err(error) = registered {
+        // SAFETY: the window was created on this thread and nothing is registered; destroy it before freeing `ctx`.
+        unsafe {
+            DestroyWindow(hwnd).ok();
+            UnregisterClassW(CLASS_NAME, Some(instance)).ok();
+            drop(Box::from_raw(ctx));
+        }
+        ready.send(Err(error)).ok();
+        return;
     }
     ready.send(Ok(Hwnd(hwnd))).ok();
     pump();
-    // SAFETY: unregister what was registered above; the window is already destroyed.
+    // SAFETY: the window is destroyed and its notifications were unregistered in WM_CLOSE; free what is left.
     unsafe {
-        if let Ok(handle) = power_handle {
-            UnregisterSuspendResumeNotification(handle).ok();
-        }
-        if session_registered.is_ok() {
-            WTSUnRegisterSessionNotification(hwnd).ok();
-        }
         UnregisterClassW(CLASS_NAME, Some(instance)).ok();
         drop(Box::from_raw(ctx));
+    }
+}
+
+/// Register for lock/unlock (retrying the logon-time RPC race) and suspend/resume.
+fn register_notifications(hwnd: HWND, ctx: &WindowCtx) -> Result<(), PlatformError> {
+    register_session_notification(hwnd)?;
+    ctx.session_registered.set(true);
+    // SAFETY: `hwnd` is valid; DEVICE_NOTIFY_WINDOW_HANDLE means the recipient is a window handle.
+    match unsafe { RegisterSuspendResumeNotification(HANDLE(hwnd.0), DEVICE_NOTIFY_WINDOW_HANDLE) }
+    {
+        Ok(handle) => ctx.suspend_resume.set(Some(handle)),
+        Err(error) => tracing::warn!(
+            %error,
+            "RegisterSuspendResumeNotification failed; Modern Standby suspend may be missed"
+        ),
+    }
+    Ok(())
+}
+
+fn register_session_notification(hwnd: HWND) -> Result<(), PlatformError> {
+    let mut attempt = 0;
+    loop {
+        // SAFETY: `hwnd` is the window just created on this thread.
+        let registered = unsafe { WTSRegisterSessionNotification(hwnd, NOTIFY_FOR_THIS_SESSION) };
+        let Err(error) = registered else {
+            return Ok(());
+        };
+        let transient = error.code() == HRESULT::from_win32(RPC_S_INVALID_BINDING);
+        let Some(delay) = session_registration_retry_delay(transient, attempt) else {
+            return Err(PlatformError::os("WTSRegisterSessionNotification", error));
+        };
+        tracing::info!(%error, ?delay, "WTS not ready yet; retrying session notification registration");
+        std::thread::sleep(delay);
+        attempt += 1;
+    }
+}
+
+/// Undo the registrations. Must run on the owner thread with the window still alive:
+/// Microsoft requires `WTSUnRegisterSessionNotification` *before* `DestroyWindow`.
+fn unregister_notifications(hwnd: HWND, ctx: &WindowCtx) {
+    if let Some(handle) = ctx.suspend_resume.take() {
+        // SAFETY: `handle` came from RegisterSuspendResumeNotification and is released once.
+        if let Err(error) = unsafe { UnregisterSuspendResumeNotification(handle) } {
+            tracing::warn!(%error, "UnregisterSuspendResumeNotification failed");
+        }
+    }
+    if ctx.session_registered.replace(false) {
+        // SAFETY: `hwnd` was registered on this thread and has not been destroyed yet.
+        if let Err(error) = unsafe { WTSUnRegisterSessionNotification(hwnd) } {
+            tracing::warn!(%error, "WTSUnRegisterSessionNotification failed");
+        }
     }
 }
 
@@ -238,49 +303,6 @@ fn create_window(ctx: *mut WindowCtx) -> Result<(HWND, HINSTANCE), PlatformError
     }
 }
 
-/// Chromium's `IsSessionLocked()`: `WTSInfoEx` session flags equal `WTS_SESSIONSTATE_LOCK`.
-#[allow(
-    clippy::cast_ptr_alignment,
-    reason = "the buffer is read with `read_unaligned`"
-)]
-fn initial_session_locked() -> bool {
-    let mut buffer = PWSTR::null();
-    let mut bytes: u32 = 0;
-    // SAFETY: out-parameters are valid locals; the returned buffer is freed with WTSFreeMemory below.
-    let queried = unsafe {
-        WTSQuerySessionInformationW(
-            Some(WTS_CURRENT_SERVER_HANDLE),
-            WTS_CURRENT_SESSION,
-            WTSSessionInfoEx,
-            &raw mut buffer,
-            &raw mut bytes,
-        )
-    };
-    if queried.is_err() || buffer.is_null() {
-        return false;
-    }
-    let big_enough = usize::try_from(bytes).is_ok_and(|n| n >= size_of::<WTSINFOEXW>());
-    let locked = big_enough && {
-        // SAFETY: the buffer holds at least a WTSINFOEXW, per the size check above; read unaligned to be safe.
-        let info = unsafe { ptr::read_unaligned(buffer.0.cast::<WTSINFOEXW>()) };
-        // SAFETY: Level 1 is the only level WTSInfoEx defines.
-        unsafe { info.Data.WTSInfoExLevel1.SessionFlags == SESSION_STATE_LOCK }
-    };
-    // SAFETY: frees the buffer WTSQuerySessionInformationW allocated.
-    unsafe { WTSFreeMemory(buffer.0.cast()) };
-    locked
-}
-
-/// Electron's `ProcessIdToSessionId` comparison; if the call fails, assume current.
-fn is_current_session(session_id: usize) -> bool {
-    let mut current: u32 = 0;
-    // SAFETY: `current` is a valid out-parameter.
-    if unsafe { ProcessIdToSessionId(GetCurrentProcessId(), &raw mut current) }.is_err() {
-        return true;
-    }
-    usize::try_from(current).is_ok_and(|c| c == session_id)
-}
-
 unsafe extern "system" fn window_proc(
     hwnd: HWND,
     message: u32,
@@ -306,19 +328,20 @@ unsafe extern "system" fn window_proc(
     // SAFETY: reads back the pointer stored at WM_NCCREATE (null before that).
     let raw = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) };
     let ctx = ptr::with_exposed_provenance::<WindowCtx>(usize::from_ne_bytes(raw.to_ne_bytes()));
-    let handled = if ctx.is_null() {
-        None
-    } else {
-        // SAFETY: a non-null user-data pointer is the WindowCtx kept alive by `run` until after the pump ends.
-        let ctx = unsafe { &*ctx };
+    // SAFETY: a non-null user-data pointer is the WindowCtx kept alive by `run` until after the pump ends.
+    let ctx = unsafe { ctx.as_ref() };
+    let handled = ctx.and_then(|ctx| {
         catch_unwind(AssertUnwindSafe(|| handle(ctx, message, wparam, lparam))).unwrap_or(None)
-    };
+    });
     if let Some(result) = handled {
         return result;
     }
     match message {
         WM_CLOSE => {
-            // SAFETY: destroys this window on its own thread.
+            if let Some(ctx) = ctx {
+                unregister_notifications(hwnd, ctx);
+            }
+            // SAFETY: destroys this window on its own thread, after its notifications are gone.
             unsafe { DestroyWindow(hwnd) }.ok();
             LRESULT(0)
         }
@@ -345,13 +368,6 @@ fn handle(ctx: &WindowCtx, message: u32, wparam: WPARAM, lparam: LPARAM) -> Opti
             if let Interpretation::Emit(event) = interpret_session_change(wparam.0, current) {
                 session::set_locked(event == PowerEvent::LockScreen);
                 deliver(&*ctx.sink, event);
-            }
-            Some(LRESULT(0))
-        }
-        WM_QUERYENDSESSION => Some(LRESULT(1)),
-        WM_ENDSESSION => {
-            if wparam.0 != 0 {
-                deliver(&*ctx.sink, PowerEvent::Shutdown);
             }
             Some(LRESULT(0))
         }

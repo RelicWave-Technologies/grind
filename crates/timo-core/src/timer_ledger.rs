@@ -5,7 +5,7 @@
 use serde::Deserialize;
 
 use crate::error::CoreError;
-use crate::js::collate::collator;
+use crate::js::collate::{LocaleCollator, collator};
 use crate::js::date::{self, DateParse};
 use crate::js::json::quote;
 use crate::js::number::{number_to_string as fmt, sort_cmp};
@@ -104,6 +104,15 @@ struct CanonicalSegment<'a> {
 /// Evaluation order is the TypeScript order (segments first, then the entry's
 /// own timestamps), so the first invalid timestamp is the same one.
 pub fn canonical_timer_entry_payload(entry: &CanonicalTimerEntryLike) -> Result<String, CoreError> {
+    canonical_timer_entry_payload_with(entry, &collator()?)
+}
+
+/// [`canonical_timer_entry_payload`] under a given collator: `localeCompare` follows the ICU default
+/// locale of the process, which a test (or a shell that has not set the default) can vary.
+pub fn canonical_timer_entry_payload_with(
+    entry: &CanonicalTimerEntryLike,
+    collator: &LocaleCollator,
+) -> Result<String, CoreError> {
     let mut epochs = Epochs::default();
     let mut segments = Vec::with_capacity(entry.segments.len());
     for segment in &entry.segments {
@@ -117,7 +126,6 @@ pub fn canonical_timer_entry_payload(entry: &CanonicalTimerEntryLike) -> Result<
     let started_at = epochs.epoch(&entry.started_at)?;
     let ended_at = epochs.epoch_or_null(entry.ended_at.as_ref())?;
     epochs.finish()?;
-    let collator = collator()?;
     segments.sort_by(|a, b| {
         sort_cmp(a.started_at, b.started_at).then_with(|| collator.compare(a.id, b.id))
     });

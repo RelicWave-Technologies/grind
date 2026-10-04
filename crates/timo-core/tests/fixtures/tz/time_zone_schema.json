@@ -1,0 +1,1764 @@
+{
+  "fn": "timeZoneSchema",
+  "seed": 4294849872,
+  "cases": [
+    {"input":{"value":"UTC"},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":"UTC "},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":"UTC\t"},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":"UTC\n"},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":"UTC "},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":"UTC　"},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":"UTC﻿"},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":"UTC "},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":"UTC"},"output":{"ok":false}},
+    {"input":{"value":"UTC​"},"output":{"ok":false}},
+    {"input":{"value":"UTC᠎"},"output":{"ok":false}},
+    {"input":{"value":" UTC"},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":" UTC "},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":" UTC\t"},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":" UTC\n"},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":" UTC "},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":" UTC　"},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":" UTC﻿"},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":" UTC "},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":" UTC"},"output":{"ok":false}},
+    {"input":{"value":" UTC​"},"output":{"ok":false}},
+    {"input":{"value":" UTC᠎"},"output":{"ok":false}},
+    {"input":{"value":"\tUTC"},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":"\tUTC "},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":"\tUTC\t"},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":"\tUTC\n"},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":"\tUTC "},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":"\tUTC　"},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":"\tUTC﻿"},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":"\tUTC "},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":"\tUTC"},"output":{"ok":false}},
+    {"input":{"value":"\tUTC​"},"output":{"ok":false}},
+    {"input":{"value":"\tUTC᠎"},"output":{"ok":false}},
+    {"input":{"value":"\nUTC"},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":"\nUTC "},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":"\nUTC\t"},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":"\nUTC\n"},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":"\nUTC "},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":"\nUTC　"},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":"\nUTC﻿"},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":"\nUTC "},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":"\nUTC"},"output":{"ok":false}},
+    {"input":{"value":"\nUTC​"},"output":{"ok":false}},
+    {"input":{"value":"\nUTC᠎"},"output":{"ok":false}},
+    {"input":{"value":" UTC"},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":" UTC "},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":" UTC\t"},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":" UTC\n"},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":" UTC "},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":" UTC　"},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":" UTC﻿"},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":" UTC "},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":" UTC"},"output":{"ok":false}},
+    {"input":{"value":" UTC​"},"output":{"ok":false}},
+    {"input":{"value":" UTC᠎"},"output":{"ok":false}},
+    {"input":{"value":"　UTC"},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":"　UTC "},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":"　UTC\t"},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":"　UTC\n"},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":"　UTC "},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":"　UTC　"},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":"　UTC﻿"},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":"　UTC "},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":"　UTC"},"output":{"ok":false}},
+    {"input":{"value":"　UTC​"},"output":{"ok":false}},
+    {"input":{"value":"　UTC᠎"},"output":{"ok":false}},
+    {"input":{"value":"﻿UTC"},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":"﻿UTC "},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":"﻿UTC\t"},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":"﻿UTC\n"},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":"﻿UTC "},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":"﻿UTC　"},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":"﻿UTC﻿"},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":"﻿UTC "},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":"﻿UTC"},"output":{"ok":false}},
+    {"input":{"value":"﻿UTC​"},"output":{"ok":false}},
+    {"input":{"value":"﻿UTC᠎"},"output":{"ok":false}},
+    {"input":{"value":" UTC"},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":" UTC "},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":" UTC\t"},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":" UTC\n"},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":" UTC "},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":" UTC　"},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":" UTC﻿"},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":" UTC "},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":" UTC"},"output":{"ok":false}},
+    {"input":{"value":" UTC​"},"output":{"ok":false}},
+    {"input":{"value":" UTC᠎"},"output":{"ok":false}},
+    {"input":{"value":"UTC"},"output":{"ok":false}},
+    {"input":{"value":"UTC "},"output":{"ok":false}},
+    {"input":{"value":"UTC\t"},"output":{"ok":false}},
+    {"input":{"value":"UTC\n"},"output":{"ok":false}},
+    {"input":{"value":"UTC "},"output":{"ok":false}},
+    {"input":{"value":"UTC　"},"output":{"ok":false}},
+    {"input":{"value":"UTC﻿"},"output":{"ok":false}},
+    {"input":{"value":"UTC "},"output":{"ok":false}},
+    {"input":{"value":"UTC"},"output":{"ok":false}},
+    {"input":{"value":"UTC​"},"output":{"ok":false}},
+    {"input":{"value":"UTC᠎"},"output":{"ok":false}},
+    {"input":{"value":"​UTC"},"output":{"ok":false}},
+    {"input":{"value":"​UTC "},"output":{"ok":false}},
+    {"input":{"value":"​UTC\t"},"output":{"ok":false}},
+    {"input":{"value":"​UTC\n"},"output":{"ok":false}},
+    {"input":{"value":"​UTC "},"output":{"ok":false}},
+    {"input":{"value":"​UTC　"},"output":{"ok":false}},
+    {"input":{"value":"​UTC﻿"},"output":{"ok":false}},
+    {"input":{"value":"​UTC "},"output":{"ok":false}},
+    {"input":{"value":"​UTC"},"output":{"ok":false}},
+    {"input":{"value":"​UTC​"},"output":{"ok":false}},
+    {"input":{"value":"​UTC᠎"},"output":{"ok":false}},
+    {"input":{"value":"᠎UTC"},"output":{"ok":false}},
+    {"input":{"value":"᠎UTC "},"output":{"ok":false}},
+    {"input":{"value":"᠎UTC\t"},"output":{"ok":false}},
+    {"input":{"value":"᠎UTC\n"},"output":{"ok":false}},
+    {"input":{"value":"᠎UTC "},"output":{"ok":false}},
+    {"input":{"value":"᠎UTC　"},"output":{"ok":false}},
+    {"input":{"value":"᠎UTC﻿"},"output":{"ok":false}},
+    {"input":{"value":"᠎UTC "},"output":{"ok":false}},
+    {"input":{"value":"᠎UTC"},"output":{"ok":false}},
+    {"input":{"value":"᠎UTC​"},"output":{"ok":false}},
+    {"input":{"value":"᠎UTC᠎"},"output":{"ok":false}},
+    {"input":{"value":"Asia/Kolkata"},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":"Asia/Kolkata "},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":"Asia/Kolkata\t"},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":"Asia/Kolkata\n"},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":"Asia/Kolkata "},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":"Asia/Kolkata　"},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":"Asia/Kolkata﻿"},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":"Asia/Kolkata "},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":"Asia/Kolkata"},"output":{"ok":false}},
+    {"input":{"value":"Asia/Kolkata​"},"output":{"ok":false}},
+    {"input":{"value":"Asia/Kolkata᠎"},"output":{"ok":false}},
+    {"input":{"value":" Asia/Kolkata"},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":" Asia/Kolkata "},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":" Asia/Kolkata\t"},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":" Asia/Kolkata\n"},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":" Asia/Kolkata "},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":" Asia/Kolkata　"},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":" Asia/Kolkata﻿"},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":" Asia/Kolkata "},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":" Asia/Kolkata"},"output":{"ok":false}},
+    {"input":{"value":" Asia/Kolkata​"},"output":{"ok":false}},
+    {"input":{"value":" Asia/Kolkata᠎"},"output":{"ok":false}},
+    {"input":{"value":"\tAsia/Kolkata"},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":"\tAsia/Kolkata "},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":"\tAsia/Kolkata\t"},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":"\tAsia/Kolkata\n"},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":"\tAsia/Kolkata "},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":"\tAsia/Kolkata　"},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":"\tAsia/Kolkata﻿"},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":"\tAsia/Kolkata "},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":"\tAsia/Kolkata"},"output":{"ok":false}},
+    {"input":{"value":"\tAsia/Kolkata​"},"output":{"ok":false}},
+    {"input":{"value":"\tAsia/Kolkata᠎"},"output":{"ok":false}},
+    {"input":{"value":"\nAsia/Kolkata"},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":"\nAsia/Kolkata "},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":"\nAsia/Kolkata\t"},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":"\nAsia/Kolkata\n"},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":"\nAsia/Kolkata "},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":"\nAsia/Kolkata　"},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":"\nAsia/Kolkata﻿"},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":"\nAsia/Kolkata "},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":"\nAsia/Kolkata"},"output":{"ok":false}},
+    {"input":{"value":"\nAsia/Kolkata​"},"output":{"ok":false}},
+    {"input":{"value":"\nAsia/Kolkata᠎"},"output":{"ok":false}},
+    {"input":{"value":" Asia/Kolkata"},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":" Asia/Kolkata "},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":" Asia/Kolkata\t"},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":" Asia/Kolkata\n"},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":" Asia/Kolkata "},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":" Asia/Kolkata　"},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":" Asia/Kolkata﻿"},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":" Asia/Kolkata "},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":" Asia/Kolkata"},"output":{"ok":false}},
+    {"input":{"value":" Asia/Kolkata​"},"output":{"ok":false}},
+    {"input":{"value":" Asia/Kolkata᠎"},"output":{"ok":false}},
+    {"input":{"value":"　Asia/Kolkata"},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":"　Asia/Kolkata "},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":"　Asia/Kolkata\t"},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":"　Asia/Kolkata\n"},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":"　Asia/Kolkata "},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":"　Asia/Kolkata　"},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":"　Asia/Kolkata﻿"},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":"　Asia/Kolkata "},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":"　Asia/Kolkata"},"output":{"ok":false}},
+    {"input":{"value":"　Asia/Kolkata​"},"output":{"ok":false}},
+    {"input":{"value":"　Asia/Kolkata᠎"},"output":{"ok":false}},
+    {"input":{"value":"﻿Asia/Kolkata"},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":"﻿Asia/Kolkata "},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":"﻿Asia/Kolkata\t"},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":"﻿Asia/Kolkata\n"},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":"﻿Asia/Kolkata "},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":"﻿Asia/Kolkata　"},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":"﻿Asia/Kolkata﻿"},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":"﻿Asia/Kolkata "},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":"﻿Asia/Kolkata"},"output":{"ok":false}},
+    {"input":{"value":"﻿Asia/Kolkata​"},"output":{"ok":false}},
+    {"input":{"value":"﻿Asia/Kolkata᠎"},"output":{"ok":false}},
+    {"input":{"value":" Asia/Kolkata"},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":" Asia/Kolkata "},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":" Asia/Kolkata\t"},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":" Asia/Kolkata\n"},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":" Asia/Kolkata "},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":" Asia/Kolkata　"},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":" Asia/Kolkata﻿"},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":" Asia/Kolkata "},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":" Asia/Kolkata"},"output":{"ok":false}},
+    {"input":{"value":" Asia/Kolkata​"},"output":{"ok":false}},
+    {"input":{"value":" Asia/Kolkata᠎"},"output":{"ok":false}},
+    {"input":{"value":"Asia/Kolkata"},"output":{"ok":false}},
+    {"input":{"value":"Asia/Kolkata "},"output":{"ok":false}},
+    {"input":{"value":"Asia/Kolkata\t"},"output":{"ok":false}},
+    {"input":{"value":"Asia/Kolkata\n"},"output":{"ok":false}},
+    {"input":{"value":"Asia/Kolkata "},"output":{"ok":false}},
+    {"input":{"value":"Asia/Kolkata　"},"output":{"ok":false}},
+    {"input":{"value":"Asia/Kolkata﻿"},"output":{"ok":false}},
+    {"input":{"value":"Asia/Kolkata "},"output":{"ok":false}},
+    {"input":{"value":"Asia/Kolkata"},"output":{"ok":false}},
+    {"input":{"value":"Asia/Kolkata​"},"output":{"ok":false}},
+    {"input":{"value":"Asia/Kolkata᠎"},"output":{"ok":false}},
+    {"input":{"value":"​Asia/Kolkata"},"output":{"ok":false}},
+    {"input":{"value":"​Asia/Kolkata "},"output":{"ok":false}},
+    {"input":{"value":"​Asia/Kolkata\t"},"output":{"ok":false}},
+    {"input":{"value":"​Asia/Kolkata\n"},"output":{"ok":false}},
+    {"input":{"value":"​Asia/Kolkata "},"output":{"ok":false}},
+    {"input":{"value":"​Asia/Kolkata　"},"output":{"ok":false}},
+    {"input":{"value":"​Asia/Kolkata﻿"},"output":{"ok":false}},
+    {"input":{"value":"​Asia/Kolkata "},"output":{"ok":false}},
+    {"input":{"value":"​Asia/Kolkata"},"output":{"ok":false}},
+    {"input":{"value":"​Asia/Kolkata​"},"output":{"ok":false}},
+    {"input":{"value":"​Asia/Kolkata᠎"},"output":{"ok":false}},
+    {"input":{"value":"᠎Asia/Kolkata"},"output":{"ok":false}},
+    {"input":{"value":"᠎Asia/Kolkata "},"output":{"ok":false}},
+    {"input":{"value":"᠎Asia/Kolkata\t"},"output":{"ok":false}},
+    {"input":{"value":"᠎Asia/Kolkata\n"},"output":{"ok":false}},
+    {"input":{"value":"᠎Asia/Kolkata "},"output":{"ok":false}},
+    {"input":{"value":"᠎Asia/Kolkata　"},"output":{"ok":false}},
+    {"input":{"value":"᠎Asia/Kolkata﻿"},"output":{"ok":false}},
+    {"input":{"value":"᠎Asia/Kolkata "},"output":{"ok":false}},
+    {"input":{"value":"᠎Asia/Kolkata"},"output":{"ok":false}},
+    {"input":{"value":"᠎Asia/Kolkata​"},"output":{"ok":false}},
+    {"input":{"value":"᠎Asia/Kolkata᠎"},"output":{"ok":false}},
+    {"input":{"value":"America/New_York"},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":"America/New_York "},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":"America/New_York\t"},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":"America/New_York\n"},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":"America/New_York "},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":"America/New_York　"},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":"America/New_York﻿"},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":"America/New_York "},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":"America/New_York"},"output":{"ok":false}},
+    {"input":{"value":"America/New_York​"},"output":{"ok":false}},
+    {"input":{"value":"America/New_York᠎"},"output":{"ok":false}},
+    {"input":{"value":" America/New_York"},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":" America/New_York "},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":" America/New_York\t"},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":" America/New_York\n"},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":" America/New_York "},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":" America/New_York　"},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":" America/New_York﻿"},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":" America/New_York "},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":" America/New_York"},"output":{"ok":false}},
+    {"input":{"value":" America/New_York​"},"output":{"ok":false}},
+    {"input":{"value":" America/New_York᠎"},"output":{"ok":false}},
+    {"input":{"value":"\tAmerica/New_York"},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":"\tAmerica/New_York "},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":"\tAmerica/New_York\t"},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":"\tAmerica/New_York\n"},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":"\tAmerica/New_York "},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":"\tAmerica/New_York　"},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":"\tAmerica/New_York﻿"},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":"\tAmerica/New_York "},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":"\tAmerica/New_York"},"output":{"ok":false}},
+    {"input":{"value":"\tAmerica/New_York​"},"output":{"ok":false}},
+    {"input":{"value":"\tAmerica/New_York᠎"},"output":{"ok":false}},
+    {"input":{"value":"\nAmerica/New_York"},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":"\nAmerica/New_York "},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":"\nAmerica/New_York\t"},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":"\nAmerica/New_York\n"},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":"\nAmerica/New_York "},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":"\nAmerica/New_York　"},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":"\nAmerica/New_York﻿"},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":"\nAmerica/New_York "},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":"\nAmerica/New_York"},"output":{"ok":false}},
+    {"input":{"value":"\nAmerica/New_York​"},"output":{"ok":false}},
+    {"input":{"value":"\nAmerica/New_York᠎"},"output":{"ok":false}},
+    {"input":{"value":" America/New_York"},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":" America/New_York "},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":" America/New_York\t"},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":" America/New_York\n"},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":" America/New_York "},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":" America/New_York　"},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":" America/New_York﻿"},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":" America/New_York "},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":" America/New_York"},"output":{"ok":false}},
+    {"input":{"value":" America/New_York​"},"output":{"ok":false}},
+    {"input":{"value":" America/New_York᠎"},"output":{"ok":false}},
+    {"input":{"value":"　America/New_York"},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":"　America/New_York "},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":"　America/New_York\t"},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":"　America/New_York\n"},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":"　America/New_York "},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":"　America/New_York　"},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":"　America/New_York﻿"},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":"　America/New_York "},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":"　America/New_York"},"output":{"ok":false}},
+    {"input":{"value":"　America/New_York​"},"output":{"ok":false}},
+    {"input":{"value":"　America/New_York᠎"},"output":{"ok":false}},
+    {"input":{"value":"﻿America/New_York"},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":"﻿America/New_York "},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":"﻿America/New_York\t"},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":"﻿America/New_York\n"},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":"﻿America/New_York "},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":"﻿America/New_York　"},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":"﻿America/New_York﻿"},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":"﻿America/New_York "},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":"﻿America/New_York"},"output":{"ok":false}},
+    {"input":{"value":"﻿America/New_York​"},"output":{"ok":false}},
+    {"input":{"value":"﻿America/New_York᠎"},"output":{"ok":false}},
+    {"input":{"value":" America/New_York"},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":" America/New_York "},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":" America/New_York\t"},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":" America/New_York\n"},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":" America/New_York "},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":" America/New_York　"},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":" America/New_York﻿"},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":" America/New_York "},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":" America/New_York"},"output":{"ok":false}},
+    {"input":{"value":" America/New_York​"},"output":{"ok":false}},
+    {"input":{"value":" America/New_York᠎"},"output":{"ok":false}},
+    {"input":{"value":"America/New_York"},"output":{"ok":false}},
+    {"input":{"value":"America/New_York "},"output":{"ok":false}},
+    {"input":{"value":"America/New_York\t"},"output":{"ok":false}},
+    {"input":{"value":"America/New_York\n"},"output":{"ok":false}},
+    {"input":{"value":"America/New_York "},"output":{"ok":false}},
+    {"input":{"value":"America/New_York　"},"output":{"ok":false}},
+    {"input":{"value":"America/New_York﻿"},"output":{"ok":false}},
+    {"input":{"value":"America/New_York "},"output":{"ok":false}},
+    {"input":{"value":"America/New_York"},"output":{"ok":false}},
+    {"input":{"value":"America/New_York​"},"output":{"ok":false}},
+    {"input":{"value":"America/New_York᠎"},"output":{"ok":false}},
+    {"input":{"value":"​America/New_York"},"output":{"ok":false}},
+    {"input":{"value":"​America/New_York "},"output":{"ok":false}},
+    {"input":{"value":"​America/New_York\t"},"output":{"ok":false}},
+    {"input":{"value":"​America/New_York\n"},"output":{"ok":false}},
+    {"input":{"value":"​America/New_York "},"output":{"ok":false}},
+    {"input":{"value":"​America/New_York　"},"output":{"ok":false}},
+    {"input":{"value":"​America/New_York﻿"},"output":{"ok":false}},
+    {"input":{"value":"​America/New_York "},"output":{"ok":false}},
+    {"input":{"value":"​America/New_York"},"output":{"ok":false}},
+    {"input":{"value":"​America/New_York​"},"output":{"ok":false}},
+    {"input":{"value":"​America/New_York᠎"},"output":{"ok":false}},
+    {"input":{"value":"᠎America/New_York"},"output":{"ok":false}},
+    {"input":{"value":"᠎America/New_York "},"output":{"ok":false}},
+    {"input":{"value":"᠎America/New_York\t"},"output":{"ok":false}},
+    {"input":{"value":"᠎America/New_York\n"},"output":{"ok":false}},
+    {"input":{"value":"᠎America/New_York "},"output":{"ok":false}},
+    {"input":{"value":"᠎America/New_York　"},"output":{"ok":false}},
+    {"input":{"value":"᠎America/New_York﻿"},"output":{"ok":false}},
+    {"input":{"value":"᠎America/New_York "},"output":{"ok":false}},
+    {"input":{"value":"᠎America/New_York"},"output":{"ok":false}},
+    {"input":{"value":"᠎America/New_York​"},"output":{"ok":false}},
+    {"input":{"value":"᠎America/New_York᠎"},"output":{"ok":false}},
+    {"input":{"value":"Etc/GMT+5"},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":"Etc/GMT+5 "},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":"Etc/GMT+5\t"},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":"Etc/GMT+5\n"},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":"Etc/GMT+5 "},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":"Etc/GMT+5　"},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":"Etc/GMT+5﻿"},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":"Etc/GMT+5 "},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":"Etc/GMT+5"},"output":{"ok":false}},
+    {"input":{"value":"Etc/GMT+5​"},"output":{"ok":false}},
+    {"input":{"value":"Etc/GMT+5᠎"},"output":{"ok":false}},
+    {"input":{"value":" Etc/GMT+5"},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":" Etc/GMT+5 "},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":" Etc/GMT+5\t"},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":" Etc/GMT+5\n"},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":" Etc/GMT+5 "},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":" Etc/GMT+5　"},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":" Etc/GMT+5﻿"},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":" Etc/GMT+5 "},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":" Etc/GMT+5"},"output":{"ok":false}},
+    {"input":{"value":" Etc/GMT+5​"},"output":{"ok":false}},
+    {"input":{"value":" Etc/GMT+5᠎"},"output":{"ok":false}},
+    {"input":{"value":"\tEtc/GMT+5"},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":"\tEtc/GMT+5 "},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":"\tEtc/GMT+5\t"},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":"\tEtc/GMT+5\n"},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":"\tEtc/GMT+5 "},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":"\tEtc/GMT+5　"},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":"\tEtc/GMT+5﻿"},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":"\tEtc/GMT+5 "},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":"\tEtc/GMT+5"},"output":{"ok":false}},
+    {"input":{"value":"\tEtc/GMT+5​"},"output":{"ok":false}},
+    {"input":{"value":"\tEtc/GMT+5᠎"},"output":{"ok":false}},
+    {"input":{"value":"\nEtc/GMT+5"},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":"\nEtc/GMT+5 "},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":"\nEtc/GMT+5\t"},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":"\nEtc/GMT+5\n"},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":"\nEtc/GMT+5 "},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":"\nEtc/GMT+5　"},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":"\nEtc/GMT+5﻿"},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":"\nEtc/GMT+5 "},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":"\nEtc/GMT+5"},"output":{"ok":false}},
+    {"input":{"value":"\nEtc/GMT+5​"},"output":{"ok":false}},
+    {"input":{"value":"\nEtc/GMT+5᠎"},"output":{"ok":false}},
+    {"input":{"value":" Etc/GMT+5"},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":" Etc/GMT+5 "},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":" Etc/GMT+5\t"},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":" Etc/GMT+5\n"},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":" Etc/GMT+5 "},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":" Etc/GMT+5　"},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":" Etc/GMT+5﻿"},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":" Etc/GMT+5 "},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":" Etc/GMT+5"},"output":{"ok":false}},
+    {"input":{"value":" Etc/GMT+5​"},"output":{"ok":false}},
+    {"input":{"value":" Etc/GMT+5᠎"},"output":{"ok":false}},
+    {"input":{"value":"　Etc/GMT+5"},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":"　Etc/GMT+5 "},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":"　Etc/GMT+5\t"},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":"　Etc/GMT+5\n"},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":"　Etc/GMT+5 "},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":"　Etc/GMT+5　"},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":"　Etc/GMT+5﻿"},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":"　Etc/GMT+5 "},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":"　Etc/GMT+5"},"output":{"ok":false}},
+    {"input":{"value":"　Etc/GMT+5​"},"output":{"ok":false}},
+    {"input":{"value":"　Etc/GMT+5᠎"},"output":{"ok":false}},
+    {"input":{"value":"﻿Etc/GMT+5"},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":"﻿Etc/GMT+5 "},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":"﻿Etc/GMT+5\t"},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":"﻿Etc/GMT+5\n"},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":"﻿Etc/GMT+5 "},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":"﻿Etc/GMT+5　"},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":"﻿Etc/GMT+5﻿"},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":"﻿Etc/GMT+5 "},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":"﻿Etc/GMT+5"},"output":{"ok":false}},
+    {"input":{"value":"﻿Etc/GMT+5​"},"output":{"ok":false}},
+    {"input":{"value":"﻿Etc/GMT+5᠎"},"output":{"ok":false}},
+    {"input":{"value":" Etc/GMT+5"},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":" Etc/GMT+5 "},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":" Etc/GMT+5\t"},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":" Etc/GMT+5\n"},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":" Etc/GMT+5 "},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":" Etc/GMT+5　"},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":" Etc/GMT+5﻿"},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":" Etc/GMT+5 "},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":" Etc/GMT+5"},"output":{"ok":false}},
+    {"input":{"value":" Etc/GMT+5​"},"output":{"ok":false}},
+    {"input":{"value":" Etc/GMT+5᠎"},"output":{"ok":false}},
+    {"input":{"value":"Etc/GMT+5"},"output":{"ok":false}},
+    {"input":{"value":"Etc/GMT+5 "},"output":{"ok":false}},
+    {"input":{"value":"Etc/GMT+5\t"},"output":{"ok":false}},
+    {"input":{"value":"Etc/GMT+5\n"},"output":{"ok":false}},
+    {"input":{"value":"Etc/GMT+5 "},"output":{"ok":false}},
+    {"input":{"value":"Etc/GMT+5　"},"output":{"ok":false}},
+    {"input":{"value":"Etc/GMT+5﻿"},"output":{"ok":false}},
+    {"input":{"value":"Etc/GMT+5 "},"output":{"ok":false}},
+    {"input":{"value":"Etc/GMT+5"},"output":{"ok":false}},
+    {"input":{"value":"Etc/GMT+5​"},"output":{"ok":false}},
+    {"input":{"value":"Etc/GMT+5᠎"},"output":{"ok":false}},
+    {"input":{"value":"​Etc/GMT+5"},"output":{"ok":false}},
+    {"input":{"value":"​Etc/GMT+5 "},"output":{"ok":false}},
+    {"input":{"value":"​Etc/GMT+5\t"},"output":{"ok":false}},
+    {"input":{"value":"​Etc/GMT+5\n"},"output":{"ok":false}},
+    {"input":{"value":"​Etc/GMT+5 "},"output":{"ok":false}},
+    {"input":{"value":"​Etc/GMT+5　"},"output":{"ok":false}},
+    {"input":{"value":"​Etc/GMT+5﻿"},"output":{"ok":false}},
+    {"input":{"value":"​Etc/GMT+5 "},"output":{"ok":false}},
+    {"input":{"value":"​Etc/GMT+5"},"output":{"ok":false}},
+    {"input":{"value":"​Etc/GMT+5​"},"output":{"ok":false}},
+    {"input":{"value":"​Etc/GMT+5᠎"},"output":{"ok":false}},
+    {"input":{"value":"᠎Etc/GMT+5"},"output":{"ok":false}},
+    {"input":{"value":"᠎Etc/GMT+5 "},"output":{"ok":false}},
+    {"input":{"value":"᠎Etc/GMT+5\t"},"output":{"ok":false}},
+    {"input":{"value":"᠎Etc/GMT+5\n"},"output":{"ok":false}},
+    {"input":{"value":"᠎Etc/GMT+5 "},"output":{"ok":false}},
+    {"input":{"value":"᠎Etc/GMT+5　"},"output":{"ok":false}},
+    {"input":{"value":"᠎Etc/GMT+5﻿"},"output":{"ok":false}},
+    {"input":{"value":"᠎Etc/GMT+5 "},"output":{"ok":false}},
+    {"input":{"value":"᠎Etc/GMT+5"},"output":{"ok":false}},
+    {"input":{"value":"᠎Etc/GMT+5​"},"output":{"ok":false}},
+    {"input":{"value":"᠎Etc/GMT+5᠎"},"output":{"ok":false}},
+    {"input":{"value":"+05:30"},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":"+05:30 "},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":"+05:30\t"},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":"+05:30\n"},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":"+05:30 "},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":"+05:30　"},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":"+05:30﻿"},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":"+05:30 "},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":"+05:30"},"output":{"ok":false}},
+    {"input":{"value":"+05:30​"},"output":{"ok":false}},
+    {"input":{"value":"+05:30᠎"},"output":{"ok":false}},
+    {"input":{"value":" +05:30"},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":" +05:30 "},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":" +05:30\t"},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":" +05:30\n"},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":" +05:30 "},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":" +05:30　"},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":" +05:30﻿"},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":" +05:30 "},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":" +05:30"},"output":{"ok":false}},
+    {"input":{"value":" +05:30​"},"output":{"ok":false}},
+    {"input":{"value":" +05:30᠎"},"output":{"ok":false}},
+    {"input":{"value":"\t+05:30"},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":"\t+05:30 "},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":"\t+05:30\t"},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":"\t+05:30\n"},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":"\t+05:30 "},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":"\t+05:30　"},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":"\t+05:30﻿"},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":"\t+05:30 "},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":"\t+05:30"},"output":{"ok":false}},
+    {"input":{"value":"\t+05:30​"},"output":{"ok":false}},
+    {"input":{"value":"\t+05:30᠎"},"output":{"ok":false}},
+    {"input":{"value":"\n+05:30"},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":"\n+05:30 "},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":"\n+05:30\t"},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":"\n+05:30\n"},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":"\n+05:30 "},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":"\n+05:30　"},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":"\n+05:30﻿"},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":"\n+05:30 "},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":"\n+05:30"},"output":{"ok":false}},
+    {"input":{"value":"\n+05:30​"},"output":{"ok":false}},
+    {"input":{"value":"\n+05:30᠎"},"output":{"ok":false}},
+    {"input":{"value":" +05:30"},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":" +05:30 "},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":" +05:30\t"},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":" +05:30\n"},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":" +05:30 "},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":" +05:30　"},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":" +05:30﻿"},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":" +05:30 "},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":" +05:30"},"output":{"ok":false}},
+    {"input":{"value":" +05:30​"},"output":{"ok":false}},
+    {"input":{"value":" +05:30᠎"},"output":{"ok":false}},
+    {"input":{"value":"　+05:30"},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":"　+05:30 "},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":"　+05:30\t"},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":"　+05:30\n"},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":"　+05:30 "},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":"　+05:30　"},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":"　+05:30﻿"},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":"　+05:30 "},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":"　+05:30"},"output":{"ok":false}},
+    {"input":{"value":"　+05:30​"},"output":{"ok":false}},
+    {"input":{"value":"　+05:30᠎"},"output":{"ok":false}},
+    {"input":{"value":"﻿+05:30"},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":"﻿+05:30 "},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":"﻿+05:30\t"},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":"﻿+05:30\n"},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":"﻿+05:30 "},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":"﻿+05:30　"},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":"﻿+05:30﻿"},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":"﻿+05:30 "},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":"﻿+05:30"},"output":{"ok":false}},
+    {"input":{"value":"﻿+05:30​"},"output":{"ok":false}},
+    {"input":{"value":"﻿+05:30᠎"},"output":{"ok":false}},
+    {"input":{"value":" +05:30"},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":" +05:30 "},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":" +05:30\t"},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":" +05:30\n"},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":" +05:30 "},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":" +05:30　"},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":" +05:30﻿"},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":" +05:30 "},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":" +05:30"},"output":{"ok":false}},
+    {"input":{"value":" +05:30​"},"output":{"ok":false}},
+    {"input":{"value":" +05:30᠎"},"output":{"ok":false}},
+    {"input":{"value":"+05:30"},"output":{"ok":false}},
+    {"input":{"value":"+05:30 "},"output":{"ok":false}},
+    {"input":{"value":"+05:30\t"},"output":{"ok":false}},
+    {"input":{"value":"+05:30\n"},"output":{"ok":false}},
+    {"input":{"value":"+05:30 "},"output":{"ok":false}},
+    {"input":{"value":"+05:30　"},"output":{"ok":false}},
+    {"input":{"value":"+05:30﻿"},"output":{"ok":false}},
+    {"input":{"value":"+05:30 "},"output":{"ok":false}},
+    {"input":{"value":"+05:30"},"output":{"ok":false}},
+    {"input":{"value":"+05:30​"},"output":{"ok":false}},
+    {"input":{"value":"+05:30᠎"},"output":{"ok":false}},
+    {"input":{"value":"​+05:30"},"output":{"ok":false}},
+    {"input":{"value":"​+05:30 "},"output":{"ok":false}},
+    {"input":{"value":"​+05:30\t"},"output":{"ok":false}},
+    {"input":{"value":"​+05:30\n"},"output":{"ok":false}},
+    {"input":{"value":"​+05:30 "},"output":{"ok":false}},
+    {"input":{"value":"​+05:30　"},"output":{"ok":false}},
+    {"input":{"value":"​+05:30﻿"},"output":{"ok":false}},
+    {"input":{"value":"​+05:30 "},"output":{"ok":false}},
+    {"input":{"value":"​+05:30"},"output":{"ok":false}},
+    {"input":{"value":"​+05:30​"},"output":{"ok":false}},
+    {"input":{"value":"​+05:30᠎"},"output":{"ok":false}},
+    {"input":{"value":"᠎+05:30"},"output":{"ok":false}},
+    {"input":{"value":"᠎+05:30 "},"output":{"ok":false}},
+    {"input":{"value":"᠎+05:30\t"},"output":{"ok":false}},
+    {"input":{"value":"᠎+05:30\n"},"output":{"ok":false}},
+    {"input":{"value":"᠎+05:30 "},"output":{"ok":false}},
+    {"input":{"value":"᠎+05:30　"},"output":{"ok":false}},
+    {"input":{"value":"᠎+05:30﻿"},"output":{"ok":false}},
+    {"input":{"value":"᠎+05:30 "},"output":{"ok":false}},
+    {"input":{"value":"᠎+05:30"},"output":{"ok":false}},
+    {"input":{"value":"᠎+05:30​"},"output":{"ok":false}},
+    {"input":{"value":"᠎+05:30᠎"},"output":{"ok":false}},
+    {"input":{"value":"Pacific/Apia"},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":"Pacific/Apia "},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":"Pacific/Apia\t"},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":"Pacific/Apia\n"},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":"Pacific/Apia "},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":"Pacific/Apia　"},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":"Pacific/Apia﻿"},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":"Pacific/Apia "},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":"Pacific/Apia"},"output":{"ok":false}},
+    {"input":{"value":"Pacific/Apia​"},"output":{"ok":false}},
+    {"input":{"value":"Pacific/Apia᠎"},"output":{"ok":false}},
+    {"input":{"value":" Pacific/Apia"},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":" Pacific/Apia "},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":" Pacific/Apia\t"},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":" Pacific/Apia\n"},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":" Pacific/Apia "},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":" Pacific/Apia　"},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":" Pacific/Apia﻿"},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":" Pacific/Apia "},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":" Pacific/Apia"},"output":{"ok":false}},
+    {"input":{"value":" Pacific/Apia​"},"output":{"ok":false}},
+    {"input":{"value":" Pacific/Apia᠎"},"output":{"ok":false}},
+    {"input":{"value":"\tPacific/Apia"},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":"\tPacific/Apia "},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":"\tPacific/Apia\t"},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":"\tPacific/Apia\n"},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":"\tPacific/Apia "},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":"\tPacific/Apia　"},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":"\tPacific/Apia﻿"},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":"\tPacific/Apia "},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":"\tPacific/Apia"},"output":{"ok":false}},
+    {"input":{"value":"\tPacific/Apia​"},"output":{"ok":false}},
+    {"input":{"value":"\tPacific/Apia᠎"},"output":{"ok":false}},
+    {"input":{"value":"\nPacific/Apia"},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":"\nPacific/Apia "},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":"\nPacific/Apia\t"},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":"\nPacific/Apia\n"},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":"\nPacific/Apia "},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":"\nPacific/Apia　"},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":"\nPacific/Apia﻿"},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":"\nPacific/Apia "},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":"\nPacific/Apia"},"output":{"ok":false}},
+    {"input":{"value":"\nPacific/Apia​"},"output":{"ok":false}},
+    {"input":{"value":"\nPacific/Apia᠎"},"output":{"ok":false}},
+    {"input":{"value":" Pacific/Apia"},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":" Pacific/Apia "},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":" Pacific/Apia\t"},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":" Pacific/Apia\n"},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":" Pacific/Apia "},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":" Pacific/Apia　"},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":" Pacific/Apia﻿"},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":" Pacific/Apia "},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":" Pacific/Apia"},"output":{"ok":false}},
+    {"input":{"value":" Pacific/Apia​"},"output":{"ok":false}},
+    {"input":{"value":" Pacific/Apia᠎"},"output":{"ok":false}},
+    {"input":{"value":"　Pacific/Apia"},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":"　Pacific/Apia "},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":"　Pacific/Apia\t"},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":"　Pacific/Apia\n"},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":"　Pacific/Apia "},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":"　Pacific/Apia　"},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":"　Pacific/Apia﻿"},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":"　Pacific/Apia "},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":"　Pacific/Apia"},"output":{"ok":false}},
+    {"input":{"value":"　Pacific/Apia​"},"output":{"ok":false}},
+    {"input":{"value":"　Pacific/Apia᠎"},"output":{"ok":false}},
+    {"input":{"value":"﻿Pacific/Apia"},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":"﻿Pacific/Apia "},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":"﻿Pacific/Apia\t"},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":"﻿Pacific/Apia\n"},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":"﻿Pacific/Apia "},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":"﻿Pacific/Apia　"},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":"﻿Pacific/Apia﻿"},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":"﻿Pacific/Apia "},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":"﻿Pacific/Apia"},"output":{"ok":false}},
+    {"input":{"value":"﻿Pacific/Apia​"},"output":{"ok":false}},
+    {"input":{"value":"﻿Pacific/Apia᠎"},"output":{"ok":false}},
+    {"input":{"value":" Pacific/Apia"},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":" Pacific/Apia "},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":" Pacific/Apia\t"},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":" Pacific/Apia\n"},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":" Pacific/Apia "},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":" Pacific/Apia　"},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":" Pacific/Apia﻿"},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":" Pacific/Apia "},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":" Pacific/Apia"},"output":{"ok":false}},
+    {"input":{"value":" Pacific/Apia​"},"output":{"ok":false}},
+    {"input":{"value":" Pacific/Apia᠎"},"output":{"ok":false}},
+    {"input":{"value":"Pacific/Apia"},"output":{"ok":false}},
+    {"input":{"value":"Pacific/Apia "},"output":{"ok":false}},
+    {"input":{"value":"Pacific/Apia\t"},"output":{"ok":false}},
+    {"input":{"value":"Pacific/Apia\n"},"output":{"ok":false}},
+    {"input":{"value":"Pacific/Apia "},"output":{"ok":false}},
+    {"input":{"value":"Pacific/Apia　"},"output":{"ok":false}},
+    {"input":{"value":"Pacific/Apia﻿"},"output":{"ok":false}},
+    {"input":{"value":"Pacific/Apia "},"output":{"ok":false}},
+    {"input":{"value":"Pacific/Apia"},"output":{"ok":false}},
+    {"input":{"value":"Pacific/Apia​"},"output":{"ok":false}},
+    {"input":{"value":"Pacific/Apia᠎"},"output":{"ok":false}},
+    {"input":{"value":"​Pacific/Apia"},"output":{"ok":false}},
+    {"input":{"value":"​Pacific/Apia "},"output":{"ok":false}},
+    {"input":{"value":"​Pacific/Apia\t"},"output":{"ok":false}},
+    {"input":{"value":"​Pacific/Apia\n"},"output":{"ok":false}},
+    {"input":{"value":"​Pacific/Apia "},"output":{"ok":false}},
+    {"input":{"value":"​Pacific/Apia　"},"output":{"ok":false}},
+    {"input":{"value":"​Pacific/Apia﻿"},"output":{"ok":false}},
+    {"input":{"value":"​Pacific/Apia "},"output":{"ok":false}},
+    {"input":{"value":"​Pacific/Apia"},"output":{"ok":false}},
+    {"input":{"value":"​Pacific/Apia​"},"output":{"ok":false}},
+    {"input":{"value":"​Pacific/Apia᠎"},"output":{"ok":false}},
+    {"input":{"value":"᠎Pacific/Apia"},"output":{"ok":false}},
+    {"input":{"value":"᠎Pacific/Apia "},"output":{"ok":false}},
+    {"input":{"value":"᠎Pacific/Apia\t"},"output":{"ok":false}},
+    {"input":{"value":"᠎Pacific/Apia\n"},"output":{"ok":false}},
+    {"input":{"value":"᠎Pacific/Apia "},"output":{"ok":false}},
+    {"input":{"value":"᠎Pacific/Apia　"},"output":{"ok":false}},
+    {"input":{"value":"᠎Pacific/Apia﻿"},"output":{"ok":false}},
+    {"input":{"value":"᠎Pacific/Apia "},"output":{"ok":false}},
+    {"input":{"value":"᠎Pacific/Apia"},"output":{"ok":false}},
+    {"input":{"value":"᠎Pacific/Apia​"},"output":{"ok":false}},
+    {"input":{"value":"᠎Pacific/Apia᠎"},"output":{"ok":false}},
+    {"input":{"value":"Not/AZone"},"output":{"ok":false}},
+    {"input":{"value":"Not/AZone "},"output":{"ok":false}},
+    {"input":{"value":"Not/AZone\t"},"output":{"ok":false}},
+    {"input":{"value":"Not/AZone\n"},"output":{"ok":false}},
+    {"input":{"value":"Not/AZone "},"output":{"ok":false}},
+    {"input":{"value":"Not/AZone　"},"output":{"ok":false}},
+    {"input":{"value":"Not/AZone﻿"},"output":{"ok":false}},
+    {"input":{"value":"Not/AZone "},"output":{"ok":false}},
+    {"input":{"value":"Not/AZone"},"output":{"ok":false}},
+    {"input":{"value":"Not/AZone​"},"output":{"ok":false}},
+    {"input":{"value":"Not/AZone᠎"},"output":{"ok":false}},
+    {"input":{"value":" Not/AZone"},"output":{"ok":false}},
+    {"input":{"value":" Not/AZone "},"output":{"ok":false}},
+    {"input":{"value":" Not/AZone\t"},"output":{"ok":false}},
+    {"input":{"value":" Not/AZone\n"},"output":{"ok":false}},
+    {"input":{"value":" Not/AZone "},"output":{"ok":false}},
+    {"input":{"value":" Not/AZone　"},"output":{"ok":false}},
+    {"input":{"value":" Not/AZone﻿"},"output":{"ok":false}},
+    {"input":{"value":" Not/AZone "},"output":{"ok":false}},
+    {"input":{"value":" Not/AZone"},"output":{"ok":false}},
+    {"input":{"value":" Not/AZone​"},"output":{"ok":false}},
+    {"input":{"value":" Not/AZone᠎"},"output":{"ok":false}},
+    {"input":{"value":"\tNot/AZone"},"output":{"ok":false}},
+    {"input":{"value":"\tNot/AZone "},"output":{"ok":false}},
+    {"input":{"value":"\tNot/AZone\t"},"output":{"ok":false}},
+    {"input":{"value":"\tNot/AZone\n"},"output":{"ok":false}},
+    {"input":{"value":"\tNot/AZone "},"output":{"ok":false}},
+    {"input":{"value":"\tNot/AZone　"},"output":{"ok":false}},
+    {"input":{"value":"\tNot/AZone﻿"},"output":{"ok":false}},
+    {"input":{"value":"\tNot/AZone "},"output":{"ok":false}},
+    {"input":{"value":"\tNot/AZone"},"output":{"ok":false}},
+    {"input":{"value":"\tNot/AZone​"},"output":{"ok":false}},
+    {"input":{"value":"\tNot/AZone᠎"},"output":{"ok":false}},
+    {"input":{"value":"\nNot/AZone"},"output":{"ok":false}},
+    {"input":{"value":"\nNot/AZone "},"output":{"ok":false}},
+    {"input":{"value":"\nNot/AZone\t"},"output":{"ok":false}},
+    {"input":{"value":"\nNot/AZone\n"},"output":{"ok":false}},
+    {"input":{"value":"\nNot/AZone "},"output":{"ok":false}},
+    {"input":{"value":"\nNot/AZone　"},"output":{"ok":false}},
+    {"input":{"value":"\nNot/AZone﻿"},"output":{"ok":false}},
+    {"input":{"value":"\nNot/AZone "},"output":{"ok":false}},
+    {"input":{"value":"\nNot/AZone"},"output":{"ok":false}},
+    {"input":{"value":"\nNot/AZone​"},"output":{"ok":false}},
+    {"input":{"value":"\nNot/AZone᠎"},"output":{"ok":false}},
+    {"input":{"value":" Not/AZone"},"output":{"ok":false}},
+    {"input":{"value":" Not/AZone "},"output":{"ok":false}},
+    {"input":{"value":" Not/AZone\t"},"output":{"ok":false}},
+    {"input":{"value":" Not/AZone\n"},"output":{"ok":false}},
+    {"input":{"value":" Not/AZone "},"output":{"ok":false}},
+    {"input":{"value":" Not/AZone　"},"output":{"ok":false}},
+    {"input":{"value":" Not/AZone﻿"},"output":{"ok":false}},
+    {"input":{"value":" Not/AZone "},"output":{"ok":false}},
+    {"input":{"value":" Not/AZone"},"output":{"ok":false}},
+    {"input":{"value":" Not/AZone​"},"output":{"ok":false}},
+    {"input":{"value":" Not/AZone᠎"},"output":{"ok":false}},
+    {"input":{"value":"　Not/AZone"},"output":{"ok":false}},
+    {"input":{"value":"　Not/AZone "},"output":{"ok":false}},
+    {"input":{"value":"　Not/AZone\t"},"output":{"ok":false}},
+    {"input":{"value":"　Not/AZone\n"},"output":{"ok":false}},
+    {"input":{"value":"　Not/AZone "},"output":{"ok":false}},
+    {"input":{"value":"　Not/AZone　"},"output":{"ok":false}},
+    {"input":{"value":"　Not/AZone﻿"},"output":{"ok":false}},
+    {"input":{"value":"　Not/AZone "},"output":{"ok":false}},
+    {"input":{"value":"　Not/AZone"},"output":{"ok":false}},
+    {"input":{"value":"　Not/AZone​"},"output":{"ok":false}},
+    {"input":{"value":"　Not/AZone᠎"},"output":{"ok":false}},
+    {"input":{"value":"﻿Not/AZone"},"output":{"ok":false}},
+    {"input":{"value":"﻿Not/AZone "},"output":{"ok":false}},
+    {"input":{"value":"﻿Not/AZone\t"},"output":{"ok":false}},
+    {"input":{"value":"﻿Not/AZone\n"},"output":{"ok":false}},
+    {"input":{"value":"﻿Not/AZone "},"output":{"ok":false}},
+    {"input":{"value":"﻿Not/AZone　"},"output":{"ok":false}},
+    {"input":{"value":"﻿Not/AZone﻿"},"output":{"ok":false}},
+    {"input":{"value":"﻿Not/AZone "},"output":{"ok":false}},
+    {"input":{"value":"﻿Not/AZone"},"output":{"ok":false}},
+    {"input":{"value":"﻿Not/AZone​"},"output":{"ok":false}},
+    {"input":{"value":"﻿Not/AZone᠎"},"output":{"ok":false}},
+    {"input":{"value":" Not/AZone"},"output":{"ok":false}},
+    {"input":{"value":" Not/AZone "},"output":{"ok":false}},
+    {"input":{"value":" Not/AZone\t"},"output":{"ok":false}},
+    {"input":{"value":" Not/AZone\n"},"output":{"ok":false}},
+    {"input":{"value":" Not/AZone "},"output":{"ok":false}},
+    {"input":{"value":" Not/AZone　"},"output":{"ok":false}},
+    {"input":{"value":" Not/AZone﻿"},"output":{"ok":false}},
+    {"input":{"value":" Not/AZone "},"output":{"ok":false}},
+    {"input":{"value":" Not/AZone"},"output":{"ok":false}},
+    {"input":{"value":" Not/AZone​"},"output":{"ok":false}},
+    {"input":{"value":" Not/AZone᠎"},"output":{"ok":false}},
+    {"input":{"value":"Not/AZone"},"output":{"ok":false}},
+    {"input":{"value":"Not/AZone "},"output":{"ok":false}},
+    {"input":{"value":"Not/AZone\t"},"output":{"ok":false}},
+    {"input":{"value":"Not/AZone\n"},"output":{"ok":false}},
+    {"input":{"value":"Not/AZone "},"output":{"ok":false}},
+    {"input":{"value":"Not/AZone　"},"output":{"ok":false}},
+    {"input":{"value":"Not/AZone﻿"},"output":{"ok":false}},
+    {"input":{"value":"Not/AZone "},"output":{"ok":false}},
+    {"input":{"value":"Not/AZone"},"output":{"ok":false}},
+    {"input":{"value":"Not/AZone​"},"output":{"ok":false}},
+    {"input":{"value":"Not/AZone᠎"},"output":{"ok":false}},
+    {"input":{"value":"​Not/AZone"},"output":{"ok":false}},
+    {"input":{"value":"​Not/AZone "},"output":{"ok":false}},
+    {"input":{"value":"​Not/AZone\t"},"output":{"ok":false}},
+    {"input":{"value":"​Not/AZone\n"},"output":{"ok":false}},
+    {"input":{"value":"​Not/AZone "},"output":{"ok":false}},
+    {"input":{"value":"​Not/AZone　"},"output":{"ok":false}},
+    {"input":{"value":"​Not/AZone﻿"},"output":{"ok":false}},
+    {"input":{"value":"​Not/AZone "},"output":{"ok":false}},
+    {"input":{"value":"​Not/AZone"},"output":{"ok":false}},
+    {"input":{"value":"​Not/AZone​"},"output":{"ok":false}},
+    {"input":{"value":"​Not/AZone᠎"},"output":{"ok":false}},
+    {"input":{"value":"᠎Not/AZone"},"output":{"ok":false}},
+    {"input":{"value":"᠎Not/AZone "},"output":{"ok":false}},
+    {"input":{"value":"᠎Not/AZone\t"},"output":{"ok":false}},
+    {"input":{"value":"᠎Not/AZone\n"},"output":{"ok":false}},
+    {"input":{"value":"᠎Not/AZone "},"output":{"ok":false}},
+    {"input":{"value":"᠎Not/AZone　"},"output":{"ok":false}},
+    {"input":{"value":"᠎Not/AZone﻿"},"output":{"ok":false}},
+    {"input":{"value":"᠎Not/AZone "},"output":{"ok":false}},
+    {"input":{"value":"᠎Not/AZone"},"output":{"ok":false}},
+    {"input":{"value":"᠎Not/AZone​"},"output":{"ok":false}},
+    {"input":{"value":"᠎Not/AZone᠎"},"output":{"ok":false}},
+    {"input":{"value":""},"output":{"ok":false}},
+    {"input":{"value":" "},"output":{"ok":false}},
+    {"input":{"value":"\t"},"output":{"ok":false}},
+    {"input":{"value":"\n"},"output":{"ok":false}},
+    {"input":{"value":" "},"output":{"ok":false}},
+    {"input":{"value":"　"},"output":{"ok":false}},
+    {"input":{"value":"﻿"},"output":{"ok":false}},
+    {"input":{"value":" "},"output":{"ok":false}},
+    {"input":{"value":""},"output":{"ok":false}},
+    {"input":{"value":"​"},"output":{"ok":false}},
+    {"input":{"value":"᠎"},"output":{"ok":false}},
+    {"input":{"value":" "},"output":{"ok":false}},
+    {"input":{"value":"  "},"output":{"ok":false}},
+    {"input":{"value":" \t"},"output":{"ok":false}},
+    {"input":{"value":" \n"},"output":{"ok":false}},
+    {"input":{"value":"  "},"output":{"ok":false}},
+    {"input":{"value":" 　"},"output":{"ok":false}},
+    {"input":{"value":" ﻿"},"output":{"ok":false}},
+    {"input":{"value":"  "},"output":{"ok":false}},
+    {"input":{"value":" "},"output":{"ok":false}},
+    {"input":{"value":" ​"},"output":{"ok":false}},
+    {"input":{"value":" ᠎"},"output":{"ok":false}},
+    {"input":{"value":"\t"},"output":{"ok":false}},
+    {"input":{"value":"\t "},"output":{"ok":false}},
+    {"input":{"value":"\t\t"},"output":{"ok":false}},
+    {"input":{"value":"\t\n"},"output":{"ok":false}},
+    {"input":{"value":"\t "},"output":{"ok":false}},
+    {"input":{"value":"\t　"},"output":{"ok":false}},
+    {"input":{"value":"\t﻿"},"output":{"ok":false}},
+    {"input":{"value":"\t "},"output":{"ok":false}},
+    {"input":{"value":"\t"},"output":{"ok":false}},
+    {"input":{"value":"\t​"},"output":{"ok":false}},
+    {"input":{"value":"\t᠎"},"output":{"ok":false}},
+    {"input":{"value":"\n"},"output":{"ok":false}},
+    {"input":{"value":"\n "},"output":{"ok":false}},
+    {"input":{"value":"\n\t"},"output":{"ok":false}},
+    {"input":{"value":"\n\n"},"output":{"ok":false}},
+    {"input":{"value":"\n "},"output":{"ok":false}},
+    {"input":{"value":"\n　"},"output":{"ok":false}},
+    {"input":{"value":"\n﻿"},"output":{"ok":false}},
+    {"input":{"value":"\n "},"output":{"ok":false}},
+    {"input":{"value":"\n"},"output":{"ok":false}},
+    {"input":{"value":"\n​"},"output":{"ok":false}},
+    {"input":{"value":"\n᠎"},"output":{"ok":false}},
+    {"input":{"value":" "},"output":{"ok":false}},
+    {"input":{"value":"  "},"output":{"ok":false}},
+    {"input":{"value":" \t"},"output":{"ok":false}},
+    {"input":{"value":" \n"},"output":{"ok":false}},
+    {"input":{"value":"  "},"output":{"ok":false}},
+    {"input":{"value":" 　"},"output":{"ok":false}},
+    {"input":{"value":" ﻿"},"output":{"ok":false}},
+    {"input":{"value":"  "},"output":{"ok":false}},
+    {"input":{"value":" "},"output":{"ok":false}},
+    {"input":{"value":" ​"},"output":{"ok":false}},
+    {"input":{"value":" ᠎"},"output":{"ok":false}},
+    {"input":{"value":"　"},"output":{"ok":false}},
+    {"input":{"value":"　 "},"output":{"ok":false}},
+    {"input":{"value":"　\t"},"output":{"ok":false}},
+    {"input":{"value":"　\n"},"output":{"ok":false}},
+    {"input":{"value":"　 "},"output":{"ok":false}},
+    {"input":{"value":"　　"},"output":{"ok":false}},
+    {"input":{"value":"　﻿"},"output":{"ok":false}},
+    {"input":{"value":"　 "},"output":{"ok":false}},
+    {"input":{"value":"　"},"output":{"ok":false}},
+    {"input":{"value":"　​"},"output":{"ok":false}},
+    {"input":{"value":"　᠎"},"output":{"ok":false}},
+    {"input":{"value":"﻿"},"output":{"ok":false}},
+    {"input":{"value":"﻿ "},"output":{"ok":false}},
+    {"input":{"value":"﻿\t"},"output":{"ok":false}},
+    {"input":{"value":"﻿\n"},"output":{"ok":false}},
+    {"input":{"value":"﻿ "},"output":{"ok":false}},
+    {"input":{"value":"﻿　"},"output":{"ok":false}},
+    {"input":{"value":"﻿﻿"},"output":{"ok":false}},
+    {"input":{"value":"﻿ "},"output":{"ok":false}},
+    {"input":{"value":"﻿"},"output":{"ok":false}},
+    {"input":{"value":"﻿​"},"output":{"ok":false}},
+    {"input":{"value":"﻿᠎"},"output":{"ok":false}},
+    {"input":{"value":" "},"output":{"ok":false}},
+    {"input":{"value":"  "},"output":{"ok":false}},
+    {"input":{"value":" \t"},"output":{"ok":false}},
+    {"input":{"value":" \n"},"output":{"ok":false}},
+    {"input":{"value":"  "},"output":{"ok":false}},
+    {"input":{"value":" 　"},"output":{"ok":false}},
+    {"input":{"value":" ﻿"},"output":{"ok":false}},
+    {"input":{"value":"  "},"output":{"ok":false}},
+    {"input":{"value":" "},"output":{"ok":false}},
+    {"input":{"value":" ​"},"output":{"ok":false}},
+    {"input":{"value":" ᠎"},"output":{"ok":false}},
+    {"input":{"value":""},"output":{"ok":false}},
+    {"input":{"value":" "},"output":{"ok":false}},
+    {"input":{"value":"\t"},"output":{"ok":false}},
+    {"input":{"value":"\n"},"output":{"ok":false}},
+    {"input":{"value":" "},"output":{"ok":false}},
+    {"input":{"value":"　"},"output":{"ok":false}},
+    {"input":{"value":"﻿"},"output":{"ok":false}},
+    {"input":{"value":" "},"output":{"ok":false}},
+    {"input":{"value":""},"output":{"ok":false}},
+    {"input":{"value":"​"},"output":{"ok":false}},
+    {"input":{"value":"᠎"},"output":{"ok":false}},
+    {"input":{"value":"​"},"output":{"ok":false}},
+    {"input":{"value":"​ "},"output":{"ok":false}},
+    {"input":{"value":"​\t"},"output":{"ok":false}},
+    {"input":{"value":"​\n"},"output":{"ok":false}},
+    {"input":{"value":"​ "},"output":{"ok":false}},
+    {"input":{"value":"​　"},"output":{"ok":false}},
+    {"input":{"value":"​﻿"},"output":{"ok":false}},
+    {"input":{"value":"​ "},"output":{"ok":false}},
+    {"input":{"value":"​"},"output":{"ok":false}},
+    {"input":{"value":"​​"},"output":{"ok":false}},
+    {"input":{"value":"​᠎"},"output":{"ok":false}},
+    {"input":{"value":"᠎"},"output":{"ok":false}},
+    {"input":{"value":"᠎ "},"output":{"ok":false}},
+    {"input":{"value":"᠎\t"},"output":{"ok":false}},
+    {"input":{"value":"᠎\n"},"output":{"ok":false}},
+    {"input":{"value":"᠎ "},"output":{"ok":false}},
+    {"input":{"value":"᠎　"},"output":{"ok":false}},
+    {"input":{"value":"᠎﻿"},"output":{"ok":false}},
+    {"input":{"value":"᠎ "},"output":{"ok":false}},
+    {"input":{"value":"᠎"},"output":{"ok":false}},
+    {"input":{"value":"᠎​"},"output":{"ok":false}},
+    {"input":{"value":"᠎᠎"},"output":{"ok":false}},
+    {"input":{"value":" "},"output":{"ok":false}},
+    {"input":{"value":"  "},"output":{"ok":false}},
+    {"input":{"value":" \t"},"output":{"ok":false}},
+    {"input":{"value":" \n"},"output":{"ok":false}},
+    {"input":{"value":"  "},"output":{"ok":false}},
+    {"input":{"value":" 　"},"output":{"ok":false}},
+    {"input":{"value":" ﻿"},"output":{"ok":false}},
+    {"input":{"value":"  "},"output":{"ok":false}},
+    {"input":{"value":" "},"output":{"ok":false}},
+    {"input":{"value":" ​"},"output":{"ok":false}},
+    {"input":{"value":" ᠎"},"output":{"ok":false}},
+    {"input":{"value":"  "},"output":{"ok":false}},
+    {"input":{"value":"   "},"output":{"ok":false}},
+    {"input":{"value":"  \t"},"output":{"ok":false}},
+    {"input":{"value":"  \n"},"output":{"ok":false}},
+    {"input":{"value":"   "},"output":{"ok":false}},
+    {"input":{"value":"  　"},"output":{"ok":false}},
+    {"input":{"value":"  ﻿"},"output":{"ok":false}},
+    {"input":{"value":"   "},"output":{"ok":false}},
+    {"input":{"value":"  "},"output":{"ok":false}},
+    {"input":{"value":"  ​"},"output":{"ok":false}},
+    {"input":{"value":"  ᠎"},"output":{"ok":false}},
+    {"input":{"value":"\t "},"output":{"ok":false}},
+    {"input":{"value":"\t  "},"output":{"ok":false}},
+    {"input":{"value":"\t \t"},"output":{"ok":false}},
+    {"input":{"value":"\t \n"},"output":{"ok":false}},
+    {"input":{"value":"\t  "},"output":{"ok":false}},
+    {"input":{"value":"\t 　"},"output":{"ok":false}},
+    {"input":{"value":"\t ﻿"},"output":{"ok":false}},
+    {"input":{"value":"\t  "},"output":{"ok":false}},
+    {"input":{"value":"\t "},"output":{"ok":false}},
+    {"input":{"value":"\t ​"},"output":{"ok":false}},
+    {"input":{"value":"\t ᠎"},"output":{"ok":false}},
+    {"input":{"value":"\n "},"output":{"ok":false}},
+    {"input":{"value":"\n  "},"output":{"ok":false}},
+    {"input":{"value":"\n \t"},"output":{"ok":false}},
+    {"input":{"value":"\n \n"},"output":{"ok":false}},
+    {"input":{"value":"\n  "},"output":{"ok":false}},
+    {"input":{"value":"\n 　"},"output":{"ok":false}},
+    {"input":{"value":"\n ﻿"},"output":{"ok":false}},
+    {"input":{"value":"\n  "},"output":{"ok":false}},
+    {"input":{"value":"\n "},"output":{"ok":false}},
+    {"input":{"value":"\n ​"},"output":{"ok":false}},
+    {"input":{"value":"\n ᠎"},"output":{"ok":false}},
+    {"input":{"value":"  "},"output":{"ok":false}},
+    {"input":{"value":"   "},"output":{"ok":false}},
+    {"input":{"value":"  \t"},"output":{"ok":false}},
+    {"input":{"value":"  \n"},"output":{"ok":false}},
+    {"input":{"value":"   "},"output":{"ok":false}},
+    {"input":{"value":"  　"},"output":{"ok":false}},
+    {"input":{"value":"  ﻿"},"output":{"ok":false}},
+    {"input":{"value":"   "},"output":{"ok":false}},
+    {"input":{"value":"  "},"output":{"ok":false}},
+    {"input":{"value":"  ​"},"output":{"ok":false}},
+    {"input":{"value":"  ᠎"},"output":{"ok":false}},
+    {"input":{"value":"　 "},"output":{"ok":false}},
+    {"input":{"value":"　  "},"output":{"ok":false}},
+    {"input":{"value":"　 \t"},"output":{"ok":false}},
+    {"input":{"value":"　 \n"},"output":{"ok":false}},
+    {"input":{"value":"　  "},"output":{"ok":false}},
+    {"input":{"value":"　 　"},"output":{"ok":false}},
+    {"input":{"value":"　 ﻿"},"output":{"ok":false}},
+    {"input":{"value":"　  "},"output":{"ok":false}},
+    {"input":{"value":"　 "},"output":{"ok":false}},
+    {"input":{"value":"　 ​"},"output":{"ok":false}},
+    {"input":{"value":"　 ᠎"},"output":{"ok":false}},
+    {"input":{"value":"﻿ "},"output":{"ok":false}},
+    {"input":{"value":"﻿  "},"output":{"ok":false}},
+    {"input":{"value":"﻿ \t"},"output":{"ok":false}},
+    {"input":{"value":"﻿ \n"},"output":{"ok":false}},
+    {"input":{"value":"﻿  "},"output":{"ok":false}},
+    {"input":{"value":"﻿ 　"},"output":{"ok":false}},
+    {"input":{"value":"﻿ ﻿"},"output":{"ok":false}},
+    {"input":{"value":"﻿  "},"output":{"ok":false}},
+    {"input":{"value":"﻿ "},"output":{"ok":false}},
+    {"input":{"value":"﻿ ​"},"output":{"ok":false}},
+    {"input":{"value":"﻿ ᠎"},"output":{"ok":false}},
+    {"input":{"value":"  "},"output":{"ok":false}},
+    {"input":{"value":"   "},"output":{"ok":false}},
+    {"input":{"value":"  \t"},"output":{"ok":false}},
+    {"input":{"value":"  \n"},"output":{"ok":false}},
+    {"input":{"value":"   "},"output":{"ok":false}},
+    {"input":{"value":"  　"},"output":{"ok":false}},
+    {"input":{"value":"  ﻿"},"output":{"ok":false}},
+    {"input":{"value":"   "},"output":{"ok":false}},
+    {"input":{"value":"  "},"output":{"ok":false}},
+    {"input":{"value":"  ​"},"output":{"ok":false}},
+    {"input":{"value":"  ᠎"},"output":{"ok":false}},
+    {"input":{"value":" "},"output":{"ok":false}},
+    {"input":{"value":"  "},"output":{"ok":false}},
+    {"input":{"value":" \t"},"output":{"ok":false}},
+    {"input":{"value":" \n"},"output":{"ok":false}},
+    {"input":{"value":"  "},"output":{"ok":false}},
+    {"input":{"value":" 　"},"output":{"ok":false}},
+    {"input":{"value":" ﻿"},"output":{"ok":false}},
+    {"input":{"value":"  "},"output":{"ok":false}},
+    {"input":{"value":" "},"output":{"ok":false}},
+    {"input":{"value":" ​"},"output":{"ok":false}},
+    {"input":{"value":" ᠎"},"output":{"ok":false}},
+    {"input":{"value":"​ "},"output":{"ok":false}},
+    {"input":{"value":"​  "},"output":{"ok":false}},
+    {"input":{"value":"​ \t"},"output":{"ok":false}},
+    {"input":{"value":"​ \n"},"output":{"ok":false}},
+    {"input":{"value":"​  "},"output":{"ok":false}},
+    {"input":{"value":"​ 　"},"output":{"ok":false}},
+    {"input":{"value":"​ ﻿"},"output":{"ok":false}},
+    {"input":{"value":"​  "},"output":{"ok":false}},
+    {"input":{"value":"​ "},"output":{"ok":false}},
+    {"input":{"value":"​ ​"},"output":{"ok":false}},
+    {"input":{"value":"​ ᠎"},"output":{"ok":false}},
+    {"input":{"value":"᠎ "},"output":{"ok":false}},
+    {"input":{"value":"᠎  "},"output":{"ok":false}},
+    {"input":{"value":"᠎ \t"},"output":{"ok":false}},
+    {"input":{"value":"᠎ \n"},"output":{"ok":false}},
+    {"input":{"value":"᠎  "},"output":{"ok":false}},
+    {"input":{"value":"᠎ 　"},"output":{"ok":false}},
+    {"input":{"value":"᠎ ﻿"},"output":{"ok":false}},
+    {"input":{"value":"᠎  "},"output":{"ok":false}},
+    {"input":{"value":"᠎ "},"output":{"ok":false}},
+    {"input":{"value":"᠎ ​"},"output":{"ok":false}},
+    {"input":{"value":"᠎ ᠎"},"output":{"ok":false}},
+    {"input":{"value":"asia/kolkata"},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":"asia/kolkata "},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":"asia/kolkata\t"},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":"asia/kolkata\n"},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":"asia/kolkata "},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":"asia/kolkata　"},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":"asia/kolkata﻿"},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":"asia/kolkata "},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":"asia/kolkata"},"output":{"ok":false}},
+    {"input":{"value":"asia/kolkata​"},"output":{"ok":false}},
+    {"input":{"value":"asia/kolkata᠎"},"output":{"ok":false}},
+    {"input":{"value":" asia/kolkata"},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":" asia/kolkata "},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":" asia/kolkata\t"},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":" asia/kolkata\n"},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":" asia/kolkata "},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":" asia/kolkata　"},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":" asia/kolkata﻿"},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":" asia/kolkata "},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":" asia/kolkata"},"output":{"ok":false}},
+    {"input":{"value":" asia/kolkata​"},"output":{"ok":false}},
+    {"input":{"value":" asia/kolkata᠎"},"output":{"ok":false}},
+    {"input":{"value":"\tasia/kolkata"},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":"\tasia/kolkata "},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":"\tasia/kolkata\t"},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":"\tasia/kolkata\n"},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":"\tasia/kolkata "},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":"\tasia/kolkata　"},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":"\tasia/kolkata﻿"},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":"\tasia/kolkata "},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":"\tasia/kolkata"},"output":{"ok":false}},
+    {"input":{"value":"\tasia/kolkata​"},"output":{"ok":false}},
+    {"input":{"value":"\tasia/kolkata᠎"},"output":{"ok":false}},
+    {"input":{"value":"\nasia/kolkata"},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":"\nasia/kolkata "},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":"\nasia/kolkata\t"},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":"\nasia/kolkata\n"},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":"\nasia/kolkata "},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":"\nasia/kolkata　"},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":"\nasia/kolkata﻿"},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":"\nasia/kolkata "},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":"\nasia/kolkata"},"output":{"ok":false}},
+    {"input":{"value":"\nasia/kolkata​"},"output":{"ok":false}},
+    {"input":{"value":"\nasia/kolkata᠎"},"output":{"ok":false}},
+    {"input":{"value":" asia/kolkata"},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":" asia/kolkata "},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":" asia/kolkata\t"},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":" asia/kolkata\n"},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":" asia/kolkata "},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":" asia/kolkata　"},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":" asia/kolkata﻿"},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":" asia/kolkata "},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":" asia/kolkata"},"output":{"ok":false}},
+    {"input":{"value":" asia/kolkata​"},"output":{"ok":false}},
+    {"input":{"value":" asia/kolkata᠎"},"output":{"ok":false}},
+    {"input":{"value":"　asia/kolkata"},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":"　asia/kolkata "},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":"　asia/kolkata\t"},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":"　asia/kolkata\n"},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":"　asia/kolkata "},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":"　asia/kolkata　"},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":"　asia/kolkata﻿"},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":"　asia/kolkata "},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":"　asia/kolkata"},"output":{"ok":false}},
+    {"input":{"value":"　asia/kolkata​"},"output":{"ok":false}},
+    {"input":{"value":"　asia/kolkata᠎"},"output":{"ok":false}},
+    {"input":{"value":"﻿asia/kolkata"},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":"﻿asia/kolkata "},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":"﻿asia/kolkata\t"},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":"﻿asia/kolkata\n"},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":"﻿asia/kolkata "},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":"﻿asia/kolkata　"},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":"﻿asia/kolkata﻿"},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":"﻿asia/kolkata "},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":"﻿asia/kolkata"},"output":{"ok":false}},
+    {"input":{"value":"﻿asia/kolkata​"},"output":{"ok":false}},
+    {"input":{"value":"﻿asia/kolkata᠎"},"output":{"ok":false}},
+    {"input":{"value":" asia/kolkata"},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":" asia/kolkata "},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":" asia/kolkata\t"},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":" asia/kolkata\n"},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":" asia/kolkata "},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":" asia/kolkata　"},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":" asia/kolkata﻿"},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":" asia/kolkata "},"output":{"ok":true,"data":"asia/kolkata"}},
+    {"input":{"value":" asia/kolkata"},"output":{"ok":false}},
+    {"input":{"value":" asia/kolkata​"},"output":{"ok":false}},
+    {"input":{"value":" asia/kolkata᠎"},"output":{"ok":false}},
+    {"input":{"value":"asia/kolkata"},"output":{"ok":false}},
+    {"input":{"value":"asia/kolkata "},"output":{"ok":false}},
+    {"input":{"value":"asia/kolkata\t"},"output":{"ok":false}},
+    {"input":{"value":"asia/kolkata\n"},"output":{"ok":false}},
+    {"input":{"value":"asia/kolkata "},"output":{"ok":false}},
+    {"input":{"value":"asia/kolkata　"},"output":{"ok":false}},
+    {"input":{"value":"asia/kolkata﻿"},"output":{"ok":false}},
+    {"input":{"value":"asia/kolkata "},"output":{"ok":false}},
+    {"input":{"value":"asia/kolkata"},"output":{"ok":false}},
+    {"input":{"value":"asia/kolkata​"},"output":{"ok":false}},
+    {"input":{"value":"asia/kolkata᠎"},"output":{"ok":false}},
+    {"input":{"value":"​asia/kolkata"},"output":{"ok":false}},
+    {"input":{"value":"​asia/kolkata "},"output":{"ok":false}},
+    {"input":{"value":"​asia/kolkata\t"},"output":{"ok":false}},
+    {"input":{"value":"​asia/kolkata\n"},"output":{"ok":false}},
+    {"input":{"value":"​asia/kolkata "},"output":{"ok":false}},
+    {"input":{"value":"​asia/kolkata　"},"output":{"ok":false}},
+    {"input":{"value":"​asia/kolkata﻿"},"output":{"ok":false}},
+    {"input":{"value":"​asia/kolkata "},"output":{"ok":false}},
+    {"input":{"value":"​asia/kolkata"},"output":{"ok":false}},
+    {"input":{"value":"​asia/kolkata​"},"output":{"ok":false}},
+    {"input":{"value":"​asia/kolkata᠎"},"output":{"ok":false}},
+    {"input":{"value":"᠎asia/kolkata"},"output":{"ok":false}},
+    {"input":{"value":"᠎asia/kolkata "},"output":{"ok":false}},
+    {"input":{"value":"᠎asia/kolkata\t"},"output":{"ok":false}},
+    {"input":{"value":"᠎asia/kolkata\n"},"output":{"ok":false}},
+    {"input":{"value":"᠎asia/kolkata "},"output":{"ok":false}},
+    {"input":{"value":"᠎asia/kolkata　"},"output":{"ok":false}},
+    {"input":{"value":"᠎asia/kolkata﻿"},"output":{"ok":false}},
+    {"input":{"value":"᠎asia/kolkata "},"output":{"ok":false}},
+    {"input":{"value":"᠎asia/kolkata"},"output":{"ok":false}},
+    {"input":{"value":"᠎asia/kolkata​"},"output":{"ok":false}},
+    {"input":{"value":"᠎asia/kolkata᠎"},"output":{"ok":false}},
+    {"input":{"value":"                                                                                UTC                                                                                "},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":"                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    UTC"},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"output":{"ok":false}},
+    {"input":{"value":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"output":{"ok":false}},
+    {"input":{"value":"+05:30                                                                           "},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":"Etc/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"},"output":{"ok":false}},
+    {"input":{"value":"😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"},"output":{"ok":false}},
+    {"input":{"value":"😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"},"output":{"ok":false}},
+    {"input":{"value":"+00"},"output":{"ok":true,"data":"+00"}},
+    {"input":{"value":"-00"},"output":{"ok":true,"data":"-00"}},
+    {"input":{"value":"+0000"},"output":{"ok":true,"data":"+0000"}},
+    {"input":{"value":"-0000"},"output":{"ok":true,"data":"-0000"}},
+    {"input":{"value":"+00:00"},"output":{"ok":true,"data":"+00:00"}},
+    {"input":{"value":"-00:00"},"output":{"ok":true,"data":"-00:00"}},
+    {"input":{"value":"−00:00"},"output":{"ok":true,"data":"−00:00"}},
+    {"input":{"value":"+01"},"output":{"ok":true,"data":"+01"}},
+    {"input":{"value":"+0100"},"output":{"ok":true,"data":"+0100"}},
+    {"input":{"value":"+01:00"},"output":{"ok":true,"data":"+01:00"}},
+    {"input":{"value":"-01"},"output":{"ok":true,"data":"-01"}},
+    {"input":{"value":"-0100"},"output":{"ok":true,"data":"-0100"}},
+    {"input":{"value":"-01:00"},"output":{"ok":true,"data":"-01:00"}},
+    {"input":{"value":"−01:00"},"output":{"ok":true,"data":"−01:00"}},
+    {"input":{"value":"+05"},"output":{"ok":true,"data":"+05"}},
+    {"input":{"value":"+0530"},"output":{"ok":true,"data":"+0530"}},
+    {"input":{"value":"+05:30"},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":"-0530"},"output":{"ok":true,"data":"-0530"}},
+    {"input":{"value":"-05:30"},"output":{"ok":true,"data":"-05:30"}},
+    {"input":{"value":"−05:30"},"output":{"ok":true,"data":"−05:30"}},
+    {"input":{"value":"+0545"},"output":{"ok":true,"data":"+0545"}},
+    {"input":{"value":"+05:45"},"output":{"ok":true,"data":"+05:45"}},
+    {"input":{"value":"-0930"},"output":{"ok":true,"data":"-0930"}},
+    {"input":{"value":"-09:30"},"output":{"ok":true,"data":"-09:30"}},
+    {"input":{"value":"+1245"},"output":{"ok":true,"data":"+1245"}},
+    {"input":{"value":"+12:45"},"output":{"ok":true,"data":"+12:45"}},
+    {"input":{"value":"+14"},"output":{"ok":true,"data":"+14"}},
+    {"input":{"value":"+1400"},"output":{"ok":true,"data":"+1400"}},
+    {"input":{"value":"+14:00"},"output":{"ok":true,"data":"+14:00"}},
+    {"input":{"value":"+15"},"output":{"ok":true,"data":"+15"}},
+    {"input":{"value":"+18"},"output":{"ok":true,"data":"+18"}},
+    {"input":{"value":"+18:00"},"output":{"ok":true,"data":"+18:00"}},
+    {"input":{"value":"+22"},"output":{"ok":true,"data":"+22"}},
+    {"input":{"value":"+2300"},"output":{"ok":true,"data":"+2300"}},
+    {"input":{"value":"+23:00"},"output":{"ok":true,"data":"+23:00"}},
+    {"input":{"value":"+23"},"output":{"ok":true,"data":"+23"}},
+    {"input":{"value":"+2359"},"output":{"ok":true,"data":"+2359"}},
+    {"input":{"value":"+23:59"},"output":{"ok":true,"data":"+23:59"}},
+    {"input":{"value":"-23:59"},"output":{"ok":true,"data":"-23:59"}},
+    {"input":{"value":"-2359"},"output":{"ok":true,"data":"-2359"}},
+    {"input":{"value":"　ETc/gmt+12​"},"output":{"ok":false}},
+    {"input":{"value":"﻿America/El_SaLvador﻿"},"output":{"ok":true,"data":"America/El_SaLvador"}},
+    {"input":{"value":"​Africa/Bujumbura_᠎"},"output":{"ok":false}},
+    {"input":{"value":"᠎Asia/Pyongyang​"},"output":{"ok":false}},
+    {"input":{"value":"eURoPE/PARis"},"output":{"ok":false}},
+    {"input":{"value":"​Australia/Lord_Howe "},"output":{"ok":false}},
+    {"input":{"value":"᠎America/Santiago​"},"output":{"ok":false}},
+    {"input":{"value":"﻿Asia/Calcutta "},"output":{"ok":true,"data":"Asia/Calcutta"}},
+    {"input":{"value":" America/New_York/\t"},"output":{"ok":false}},
+    {"input":{"value":"᠎Etc/GMT+7\n᠎"},"output":{"ok":false}},
+    {"input":{"value":" −2418\t"},"output":{"ok":false}},
+    {"input":{"value":"Asia/Yangon\n"},"output":{"ok":true,"data":"Asia/Yangon"}},
+    {"input":{"value":"Etc/UTC\t"},"output":{"ok":true,"data":"Etc/UTC"}},
+    {"input":{"value":"Etc/GMT0᠎"},"output":{"ok":false}},
+    {"input":{"value":" US/Pacific"},"output":{"ok":false}},
+    {"input":{"value":" Africa/Lome　"},"output":{"ok":true,"data":"Africa/Lome"}},
+    {"input":{"value":"aMerICa/noRtH_dakoTa/NEW_sALEM "},"output":{"ok":true,"data":"aMerICa/noRtH_dakoTa/NEW_sALEM"}},
+    {"input":{"value":"Asia/Calcutta "},"output":{"ok":false}},
+    {"input":{"value":"᠎Antarctica/DumontDURville​"},"output":{"ok":false}},
+    {"input":{"value":" Asia/Yangon﻿"},"output":{"ok":true,"data":"Asia/Yangon"}},
+    {"input":{"value":" GMT+05:00​"},"output":{"ok":false}},
+    {"input":{"value":" Europe/Berlin\n"},"output":{"ok":true,"data":"Europe/Berlin"}},
+    {"input":{"value":"᠎Eur_ope/Dublin "},"output":{"ok":false}},
+    {"input":{"value":"​America/Denver\n"},"output":{"ok":false}},
+    {"input":{"value":" Singapre"},"output":{"ok":false}},
+    {"input":{"value":" Europe/London/\t"},"output":{"ok":false}},
+    {"input":{"value":"﻿Europe/Dublin "},"output":{"ok":true,"data":"Europe/Dublin"}},
+    {"input":{"value":"﻿Europe/Berlin﻿"},"output":{"ok":true,"data":"Europe/Berlin"}},
+    {"input":{"value":"　+18 "},"output":{"ok":true,"data":"+18"}},
+    {"input":{"value":"UxEmbOurG"},"output":{"ok":false}},
+    {"input":{"value":"　amerIcA-mIQUelon\n"},"output":{"ok":false}},
+    {"input":{"value":"᠎Pacific/Norfolk᠎"},"output":{"ok":false}},
+    {"input":{"value":"\nAsia/Calcutta"},"output":{"ok":true,"data":"Asia/Calcutta"}},
+    {"input":{"value":"　Asia/Jerusalem\n"},"output":{"ok":true,"data":"Asia/Jerusalem"}},
+    {"input":{"value":" :: "},"output":{"ok":false}},
+    {"input":{"value":" +05:30​"},"output":{"ok":false}},
+    {"input":{"value":"America/Phoenix　"},"output":{"ok":true,"data":"America/Phoenix"}},
+    {"input":{"value":"Asia/Yangon "},"output":{"ok":true,"data":"Asia/Yangon"}},
+    {"input":{"value":"AFrica/HArArE᠎"},"output":{"ok":false}},
+    {"input":{"value":" US/Eastern​"},"output":{"ok":false}},
+    {"input":{"value":"　America/Havana​"},"output":{"ok":false}},
+    {"input":{"value":"\tcla\t"},"output":{"ok":false}},
+    {"input":{"value":"​+07:41"},"output":{"ok":false}},
+    {"input":{"value":"US/Eastern "},"output":{"ok":true,"data":"US/Eastern"}},
+    {"input":{"value":" America/R0egina\n"},"output":{"ok":false}},
+    {"input":{"value":" Pacific/Tongatapu"},"output":{"ok":true,"data":"Pacific/Tongatapu"}},
+    {"input":{"value":"﻿Africa/Lagos\t"},"output":{"ok":true,"data":"Africa/Lagos"}},
+    {"input":{"value":"\nAsIA/sAmARKaNd"},"output":{"ok":false}},
+    {"input":{"value":" Africa/Cairo﻿"},"output":{"ok":true,"data":"Africa/Cairo"}},
+    {"input":{"value":"​Europe/Istanbul"},"output":{"ok":false}},
+    {"input":{"value":" ATlANtic/rEykjaVIK "},"output":{"ok":true,"data":"ATlANtic/rEykjaVIK"}},
+    {"input":{"value":" pacIFic/nOrfOLk "},"output":{"ok":true,"data":"pacIFic/nOrfOLk"}},
+    {"input":{"value":"﻿Asia/Kathmandu　"},"output":{"ok":true,"data":"Asia/Kathmandu"}},
+    {"input":{"value":" −09:41​"},"output":{"ok":false}},
+    {"input":{"value":"᠎US/Eastern"},"output":{"ok":false}},
+    {"input":{"value":"﻿Africa/Lagos​"},"output":{"ok":false}},
+    {"input":{"value":" America/Si​"},"output":{"ok":false}},
+    {"input":{"value":" −04\n"},"output":{"ok":true,"data":"−04"}},
+    {"input":{"value":"/Minsk "},"output":{"ok":false}},
+    {"input":{"value":" Asia/Dubai "},"output":{"ok":true,"data":"Asia/Dubai"}},
+    {"input":{"value":"Africa/Windhoek\n"},"output":{"ok":true,"data":"Africa/Windhoek"}},
+    {"input":{"value":"​America/RiO_Branco"},"output":{"ok":false}},
+    {"input":{"value":"Australia/Darwin　"},"output":{"ok":true,"data":"Australia/Darwin"}},
+    {"input":{"value":"Pacific/Apia "},"output":{"ok":false}},
+    {"input":{"value":"​Europe﻿"},"output":{"ok":false}},
+    {"input":{"value":" America/New_York "},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":"-17　"},"output":{"ok":true,"data":"-17"}},
+    {"input":{"value":"\njsT"},"output":{"ok":false}},
+    {"input":{"value":" CET\n"},"output":{"ok":true,"data":"CET"}},
+    {"input":{"value":"᠎SySTeMV/Pst8\n​"},"output":{"ok":false}},
+    {"input":{"value":"\tEUroPE/VaTIcAN "},"output":{"ok":true,"data":"EUroPE/VaTIcAN"}},
+    {"input":{"value":"﻿IST "},"output":{"ok":true,"data":"IST"}},
+    {"input":{"value":"Europe/Paris​"},"output":{"ok":false}},
+    {"input":{"value":"−11:20"},"output":{"ok":false}},
+    {"input":{"value":"Africa/Johannesburg "},"output":{"ok":false}},
+    {"input":{"value":"Etc/GMT-14 "},"output":{"ok":false}},
+    {"input":{"value":"America/St_Johns"},"output":{"ok":true,"data":"America/St_Johns"}},
+    {"input":{"value":"Asia/Colombo "},"output":{"ok":false}},
+    {"input":{"value":" America/Curacao_᠎"},"output":{"ok":false}},
+    {"input":{"value":"Etc/GMT+5\n"},"output":{"ok":false}},
+    {"input":{"value":" America/BeLem "},"output":{"ok":true,"data":"America/BeLem"}},
+    {"input":{"value":"\n Asia/Kashgar\t"},"output":{"ok":true,"data":"Asia/Kashgar"}},
+    {"input":{"value":" America/New_York "},"output":{"ok":true,"data":"America/New_York"}},
+    {"input":{"value":"Pacific/Norfolk "},"output":{"ok":true,"data":"Pacific/Norfolk"}},
+    {"input":{"value":"﻿Pacific/Tongatapu​"},"output":{"ok":false}},
+    {"input":{"value":" \tPacific/Fiji᠎"},"output":{"ok":false}},
+    {"input":{"value":" Asia/Dubai\n"},"output":{"ok":true,"data":"Asia/Dubai"}},
+    {"input":{"value":"\n−14:54\n"},"output":{"ok":true,"data":"−14:54"}},
+    {"input":{"value":"᠎America/Caracas"},"output":{"ok":false}},
+    {"input":{"value":"\tAmerica/Denver\t"},"output":{"ok":true,"data":"America/Denver"}},
+    {"input":{"value":"​EUrope/vilNiuS "},"output":{"ok":false}},
+    {"input":{"value":" Pacific/Tongatapu "},"output":{"ok":true,"data":"Pacific/Tongatapu"}},
+    {"input":{"value":"﻿Pacific/Auckland "},"output":{"ok":true,"data":"Pacific/Auckland"}},
+    {"input":{"value":"﻿Pacific/Kiritimati᠎"},"output":{"ok":false}},
+    {"input":{"value":" Pacific/Auckland\t"},"output":{"ok":true,"data":"Pacific/Auckland"}},
+    {"input":{"value":"  America/Indiana/Marengo　"},"output":{"ok":true,"data":"America/Indiana/Marengo"}},
+    {"input":{"value":"Australia/ "},"output":{"ok":false}},
+    {"input":{"value":"᠎Europe/London/​"},"output":{"ok":false}},
+    {"input":{"value":"Etc/GMT+12​"},"output":{"ok":false}},
+    {"input":{"value":"᠎Pacific/Chatham᠎"},"output":{"ok":false}},
+    {"input":{"value":" Asia/Jerusalem"},"output":{"ok":false}},
+    {"input":{"value":" -1261﻿"},"output":{"ok":false}},
+    {"input":{"value":"Americ/Belem\n"},"output":{"ok":false}},
+    {"input":{"value":"Europe/Berlin​"},"output":{"ok":false}},
+    {"input":{"value":" Australia/Darwin "},"output":{"ok":true,"data":"Australia/Darwin"}},
+    {"input":{"value":"﻿Asia/Famagusta᠎"},"output":{"ok":false}},
+    {"input":{"value":"\tIceland　"},"output":{"ok":true,"data":"Iceland"}},
+    {"input":{"value":"Europe/Dublin "},"output":{"ok":false}},
+    {"input":{"value":"　Asia/Pyongyang "},"output":{"ok":true,"data":"Asia/Pyongyang"}},
+    {"input":{"value":" Asia/Kathmandu"},"output":{"ok":false}},
+    {"input":{"value":"᠎aFriCa/ouaGAdOugOu\t"},"output":{"ok":false}},
+    {"input":{"value":"​Pacific/Kiritimati "},"output":{"ok":false}},
+    {"input":{"value":" etC/gmT+12​"},"output":{"ok":false}},
+    {"input":{"value":" −19"},"output":{"ok":false}},
+    {"input":{"value":"　AmeriCa/Scoresbysund᠎"},"output":{"ok":false}},
+    {"input":{"value":" America\\Sao_Paulo "},"output":{"ok":false}},
+    {"input":{"value":" Etc/GMT-1　"},"output":{"ok":true,"data":"Etc/GMT-1"}},
+    {"input":{"value":"​Europe/Istanbul᠎"},"output":{"ok":false}},
+    {"input":{"value":" Europe/London/ "},"output":{"ok":false}},
+    {"input":{"value":"Atarctica/Troll﻿"},"output":{"ok":false}},
+    {"input":{"value":"﻿-00:33"},"output":{"ok":true,"data":"-00:33"}},
+    {"input":{"value":"Asia/Jerusalem"},"output":{"ok":false}},
+    {"input":{"value":"\t Europe/Tirane "},"output":{"ok":true,"data":"Europe/Tirane"}},
+    {"input":{"value":" Etc/GMT"},"output":{"ok":true,"data":"Etc/GMT"}},
+    {"input":{"value":"Africa/Casablanca᠎"},"output":{"ok":false}},
+    {"input":{"value":" aMeRIcA/MeNOmINeex​"},"output":{"ok":false}},
+    {"input":{"value":"Etc/GMT+12​"},"output":{"ok":false}},
+    {"input":{"value":"​Asia/Kathmandu᠎"},"output":{"ok":false}},
+    {"input":{"value":"﻿America/Phoenix　"},"output":{"ok":true,"data":"America/Phoenix"}},
+    {"input":{"value":" Asia/Colombo"},"output":{"ok":true,"data":"Asia/Colombo"}},
+    {"input":{"value":" -0326\t"},"output":{"ok":true,"data":"-0326"}},
+    {"input":{"value":"​Asia/Karachi "},"output":{"ok":false}},
+    {"input":{"value":" SystemV-MST7MDT​"},"output":{"ok":false}},
+    {"input":{"value":"　+13:44 "},"output":{"ok":true,"data":"+13:44"}},
+    {"input":{"value":"America/Caracas　"},"output":{"ok":true,"data":"America/Caracas"}},
+    {"input":{"value":"﻿Asia/Jerusalem "},"output":{"ok":true,"data":"Asia/Jerusalem"}},
+    {"input":{"value":"﻿Utc "},"output":{"ok":true,"data":"Utc"}},
+    {"input":{"value":"\tEurope/Moscow"},"output":{"ok":true,"data":"Europe/Moscow"}},
+    {"input":{"value":" Europe/Dublin"},"output":{"ok":false}},
+    {"input":{"value":"᠎pAcifiC/PITCairn "},"output":{"ok":false}},
+    {"input":{"value":"​AMerica/ARgENTinA/SaN_luIs\n"},"output":{"ok":false}},
+    {"input":{"value":"AMerIcA/gRAnD_tURK　"},"output":{"ok":true,"data":"AMerIcA/gRAnD_tURK"}},
+    {"input":{"value":"﻿aMErICa/moNteVidEo "},"output":{"ok":true,"data":"aMErICa/moNteVidEo"}},
+    {"input":{"value":"Est\t"},"output":{"ok":true,"data":"Est"}},
+    {"input":{"value":" Singapoe"},"output":{"ok":false}},
+    {"input":{"value":"Pacific/Apia\n"},"output":{"ok":false}},
+    {"input":{"value":"᠎Etc/UTC "},"output":{"ok":false}},
+    {"input":{"value":"​Pacific/Kiritimati﻿"},"output":{"ok":false}},
+    {"input":{"value":"​Australia/Lord_Howe "},"output":{"ok":false}},
+    {"input":{"value":"IST᠎"},"output":{"ok":false}},
+    {"input":{"value":" -23:59᠎"},"output":{"ok":false}},
+    {"input":{"value":"OvD "},"output":{"ok":false}},
+    {"input":{"value":" aUSTRalia/BRiSbAne\n"},"output":{"ok":true,"data":"aUSTRalia/BRiSbAne"}},
+    {"input":{"value":"\tAmerica/Anchorage​"},"output":{"ok":false}},
+    {"input":{"value":" IST "},"output":{"ok":true,"data":"IST"}},
+    {"input":{"value":"᠎-03:30᠎"},"output":{"ok":false}},
+    {"input":{"value":"America/Nipgon᠎"},"output":{"ok":false}},
+    {"input":{"value":" EST"},"output":{"ok":true,"data":"EST"}},
+    {"input":{"value":"\tGMT "},"output":{"ok":true,"data":"GMT"}},
+    {"input":{"value":"IST　"},"output":{"ok":false}},
+    {"input":{"value":" US/Eastern﻿"},"output":{"ok":true,"data":"US/Eastern"}},
+    {"input":{"value":"​Asia/Jerusalem "},"output":{"ok":false}},
+    {"input":{"value":" AmericA/Regina﻿"},"output":{"ok":true,"data":"AmericA/Regina"}},
+    {"input":{"value":" AMERica/iNuVik"},"output":{"ok":false}},
+    {"input":{"value":"\n-06:30 "},"output":{"ok":true,"data":"-06:30"}},
+    {"input":{"value":"﻿UTC᠎"},"output":{"ok":false}},
+    {"input":{"value":"᠎-10:28 "},"output":{"ok":false}},
+    {"input":{"value":"\nPacific/Auckland"},"output":{"ok":false}},
+    {"input":{"value":" −06:28᠎"},"output":{"ok":false}},
+    {"input":{"value":"᠎America/New_York "},"output":{"ok":false}},
+    {"input":{"value":"​Asia/Karachi\n"},"output":{"ok":false}},
+    {"input":{"value":"﻿GMT+0 "},"output":{"ok":true,"data":"GMT+0"}},
+    {"input":{"value":"᠎-1735　"},"output":{"ok":false}},
+    {"input":{"value":" +14:00\t"},"output":{"ok":true,"data":"+14:00"}},
+    {"input":{"value":" US/Eastern"},"output":{"ok":true,"data":"US/Eastern"}},
+    {"input":{"value":"​+15﻿"},"output":{"ok":false}},
+    {"input":{"value":"﻿amerICa/corDOBA"},"output":{"ok":true,"data":"amerICa/corDOBA"}},
+    {"input":{"value":" BET"},"output":{"ok":true,"data":"BET"}},
+    {"input":{"value":"​Asia/Almaty\n"},"output":{"ok":false}},
+    {"input":{"value":"Etc/UTC​"},"output":{"ok":false}},
+    {"input":{"value":"　America/Havana "},"output":{"ok":true,"data":"America/Havana"}},
+    {"input":{"value":"+05:30　"},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":"\tPacific/Auckland "},"output":{"ok":true,"data":"Pacific/Auckland"}},
+    {"input":{"value":"​HST "},"output":{"ok":false}},
+    {"input":{"value":" PACific/POHnPEi᠎"},"output":{"ok":false}},
+    {"input":{"value":"​America/Havana "},"output":{"ok":false}},
+    {"input":{"value":"America/Chicago\t"},"output":{"ok":false}},
+    {"input":{"value":"﻿Asia/Pyongyang᠎"},"output":{"ok":false}},
+    {"input":{"value":"\tAUStrALiA/TASmaniA"},"output":{"ok":false}},
+    {"input":{"value":"​Asia/I\t"},"output":{"ok":false}},
+    {"input":{"value":"　Asia/Beirut "},"output":{"ok":true,"data":"Asia/Beirut"}},
+    {"input":{"value":"᠎GMT+0"},"output":{"ok":false}},
+    {"input":{"value":" −0216\n"},"output":{"ok":true,"data":"−0216"}},
+    {"input":{"value":"\t−09:05\n"},"output":{"ok":true,"data":"−09:05"}},
+    {"input":{"value":" Pacific/Norfolk\t"},"output":{"ok":true,"data":"Pacific/Norfolk"}},
+    {"input":{"value":"\n+14:00\t"},"output":{"ok":true,"data":"+14:00"}},
+    {"input":{"value":" Africa/Casablanca "},"output":{"ok":true,"data":"Africa/Casablanca"}},
+    {"input":{"value":"Europe/London"},"output":{"ok":false}},
+    {"input":{"value":"　NaN​"},"output":{"ok":false}},
+    {"input":{"value":"﻿Australia/Adelaide"},"output":{"ok":true,"data":"Australia/Adelaide"}},
+    {"input":{"value":"\t-1620﻿"},"output":{"ok":true,"data":"-1620"}},
+    {"input":{"value":"᠎Asia/Singapore​"},"output":{"ok":false}},
+    {"input":{"value":" America/Los_Angeles "},"output":{"ok":true,"data":"America/Los_Angeles"}},
+    {"input":{"value":"​+12᠎"},"output":{"ok":false}},
+    {"input":{"value":" America/Ar "},"output":{"ok":false}},
+    {"input":{"value":"​Australia/Adelaide"},"output":{"ok":false}},
+    {"input":{"value":"atLANtiC/canaRy　"},"output":{"ok":false}},
+    {"input":{"value":"　sysTeMv/cSt6CdT﻿"},"output":{"ok":true,"data":"sysTeMv/cSt6CdT"}},
+    {"input":{"value":"᠎Australia/Sydney "},"output":{"ok":false}},
+    {"input":{"value":"᠎−14:21​"},"output":{"ok":false}},
+    {"input":{"value":"\nAustralia/Lord_Howe "},"output":{"ok":true,"data":"Australia/Lord_Howe"}},
+    {"input":{"value":"　Europe/London᠎"},"output":{"ok":false}},
+    {"input":{"value":"﻿AtlaNtIc/ReYKJAvIK"},"output":{"ok":false}},
+    {"input":{"value":"UCT​"},"output":{"ok":false}},
+    {"input":{"value":"\tAsia/Gaza﻿"},"output":{"ok":true,"data":"Asia/Gaza"}},
+    {"input":{"value":"+12:50　"},"output":{"ok":true,"data":"+12:50"}},
+    {"input":{"value":"​Europe/Moscow\t"},"output":{"ok":false}},
+    {"input":{"value":"Pacific/Norfolk"},"output":{"ok":false}},
+    {"input":{"value":"−04 "},"output":{"ok":false}},
+    {"input":{"value":"　AMeRicA/la_paZ​"},"output":{"ok":false}},
+    {"input":{"value":"᠎AfrICA/bIsSAU"},"output":{"ok":false}},
+    {"input":{"value":" America/Nuuk　"},"output":{"ok":true,"data":"America/Nuuk"}},
+    {"input":{"value":" America//New_York\t"},"output":{"ok":false}},
+    {"input":{"value":" Europe/Berlin\t"},"output":{"ok":true,"data":"Europe/Berlin"}},
+    {"input":{"value":"᠎Indian/AntanAnarivo﻿"},"output":{"ok":false}},
+    {"input":{"value":" IST "},"output":{"ok":true,"data":"IST"}},
+    {"input":{"value":" Asia/Shanghai "},"output":{"ok":true,"data":"Asia/Shanghai"}},
+    {"input":{"value":"᠎AmeRicA/CosTA_rica﻿"},"output":{"ok":false}},
+    {"input":{"value":" Etc/UTC\t"},"output":{"ok":true,"data":"Etc/UTC"}},
+    {"input":{"value":"Asia/Pyongyang "},"output":{"ok":false}},
+    {"input":{"value":"᠎eUROpE/VOLGOgRaD\t"},"output":{"ok":false}},
+    {"input":{"value":"​Asia/Gaza"},"output":{"ok":false}},
+    {"input":{"value":"\tAMeriCA:COsTa_RICa　"},"output":{"ok":false}},
+    {"input":{"value":"\tAsia/Shanghai"},"output":{"ok":false}},
+    {"input":{"value":" Asia/Jerusalem "},"output":{"ok":true,"data":"Asia/Jerusalem"}},
+    {"input":{"value":"Asia/Calcutta"},"output":{"ok":true,"data":"Asia/Calcutta"}},
+    {"input":{"value":"Asia/Karachi\n"},"output":{"ok":false}},
+    {"input":{"value":"﻿EURope/vilnIUS"},"output":{"ok":true,"data":"EURope/vilnIUS"}},
+    {"input":{"value":"᠎Australia/Lord_Howe﻿"},"output":{"ok":false}},
+    {"input":{"value":"\nAmeric+a/Nassau "},"output":{"ok":false}},
+    {"input":{"value":"\nAsia/Colombo"},"output":{"ok":true,"data":"Asia/Colombo"}},
+    {"input":{"value":" Asia/Beirut"},"output":{"ok":false}},
+    {"input":{"value":" GMT\t"},"output":{"ok":true,"data":"GMT"}},
+    {"input":{"value":"᠎Europe/París﻿"},"output":{"ok":false}},
+    {"input":{"value":"᠎Pacific/Chatham "},"output":{"ok":false}},
+    {"input":{"value":" +05:30\t"},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":"　Europe/Istanbul​"},"output":{"ok":false}},
+    {"input":{"value":"Pacific/Apia "},"output":{"ok":false}},
+    {"input":{"value":"\nIST"},"output":{"ok":true,"data":"IST"}},
+    {"input":{"value":"\tEST "},"output":{"ok":true,"data":"EST"}},
+    {"input":{"value":"　America/Va\u0000ncouver\n"},"output":{"ok":false}},
+    {"input":{"value":"​Eire᠎"},"output":{"ok":false}},
+    {"input":{"value":"﻿Asia/Gaza　"},"output":{"ok":true,"data":"Asia/Gaza"}},
+    {"input":{"value":"﻿AmeRICA/ARgENtIna/buenOs_Aires"},"output":{"ok":true,"data":"AmeRICA/ARgENtIna/buenOs_Aires"}},
+    {"input":{"value":" SystemV/YST9\t"},"output":{"ok":true,"data":"SystemV/YST9"}},
+    {"input":{"value":"\tameRica/pANGNirTunG "},"output":{"ok":true,"data":"ameRica/pANGNirTunG"}},
+    {"input":{"value":"᠎Asia/Shanghai​"},"output":{"ok":false}},
+    {"input":{"value":"﻿Asia/Calcutta"},"output":{"ok":true,"data":"Asia/Calcutta"}},
+    {"input":{"value":"​Asia/Gaza﻿"},"output":{"ok":false}},
+    {"input":{"value":"　UTC"},"output":{"ok":true,"data":"UTC"}},
+    {"input":{"value":"aMERICA/ARaGUAINA"},"output":{"ok":false}},
+    {"input":{"value":"　Pacific/Samoa\n "},"output":{"ok":true,"data":"Pacific/Samoa"}},
+    {"input":{"value":"​-0903 "},"output":{"ok":false}},
+    {"input":{"value":" Europe/Berlin　"},"output":{"ok":true,"data":"Europe/Berlin"}},
+    {"input":{"value":" Pacific/Auckland "},"output":{"ok":true,"data":"Pacific/Auckland"}},
+    {"input":{"value":" Asia/Tokyo"},"output":{"ok":false}},
+    {"input":{"value":"ca/Porto_Acre\t"},"output":{"ok":false}},
+    {"input":{"value":" Europe/İstanbul"},"output":{"ok":false}},
+    {"input":{"value":"　GMT "},"output":{"ok":true,"data":"GMT"}},
+    {"input":{"value":" Africa/Lagos᠎"},"output":{"ok":false}},
+    {"input":{"value":"᠎America/New_York​"},"output":{"ok":false}},
+    {"input":{"value":"−25"},"output":{"ok":false}},
+    {"input":{"value":"auStRaLIa/NortH​"},"output":{"ok":false}},
+    {"input":{"value":" Asia/Kabul "},"output":{"ok":true,"data":"Asia/Kabul"}},
+    {"input":{"value":"\tAMERICA/montrEaL "},"output":{"ok":true,"data":"AMERICA/montrEaL"}},
+    {"input":{"value":"᠎Ｕ"},"output":{"ok":false}},
+    {"input":{"value":" utc​"},"output":{"ok":false}},
+    {"input":{"value":"᠎eTC/gmt-2 "},"output":{"ok":false}},
+    {"input":{"value":"﻿−23:63 "},"output":{"ok":false}},
+    {"input":{"value":"　EUrOpe/BuDaPeSt᠎"},"output":{"ok":false}},
+    {"input":{"value":"　EST "},"output":{"ok":true,"data":"EST"}},
+    {"input":{"value":" Asia/Singapore"},"output":{"ok":true,"data":"Asia/Singapore"}},
+    {"input":{"value":"\n aMEricA/haliFax᠎"},"output":{"ok":false}},
+    {"input":{"value":"\tEET　"},"output":{"ok":true,"data":"EET"}},
+    {"input":{"value":"﻿\tPacific/Fakaofo "},"output":{"ok":true,"data":"Pacific/Fakaofo"}},
+    {"input":{"value":"᠎America/Santiago​"},"output":{"ok":false}},
+    {"input":{"value":"Asia/bARnaul "},"output":{"ok":false}},
+    {"input":{"value":" −1703\t"},"output":{"ok":true,"data":"−1703"}},
+    {"input":{"value":"Australia/Queensland᠎"},"output":{"ok":false}},
+    {"input":{"value":"Australia/Sydney﻿"},"output":{"ok":true,"data":"Australia/Sydney"}},
+    {"input":{"value":" America/Los_Angeles᠎"},"output":{"ok":false}},
+    {"input":{"value":"\tstralia/Eucla"},"output":{"ok":false}},
+    {"input":{"value":" Pacific/Chatham"},"output":{"ok":false}},
+    {"input":{"value":"America/Phoenix "},"output":{"ok":false}},
+    {"input":{"value":"\nAfrica/Johannesburg"},"output":{"ok":true,"data":"Africa/Johannesburg"}},
+    {"input":{"value":"　Australia/Lord_xHowe"},"output":{"ok":false}},
+    {"input":{"value":"Europe/M "},"output":{"ok":false}},
+    {"input":{"value":"​-16:17​"},"output":{"ok":false}},
+    {"input":{"value":" CET"},"output":{"ok":false}},
+    {"input":{"value":"AFRiCa/BaNjUl\t"},"output":{"ok":true,"data":"AFRiCa/BaNjUl"}},
+    {"input":{"value":"\taSiA/jERuSAlem "},"output":{"ok":true,"data":"aSiA/jERuSAlem"}},
+    {"input":{"value":" ist"},"output":{"ok":true,"data":"ist"}},
+    {"input":{"value":" Etc/+GMT-12 "},"output":{"ok":false}},
+    {"input":{"value":"America/Sao_Paulo "},"output":{"ok":false}},
+    {"input":{"value":" Europe/Dublin​"},"output":{"ok":false}},
+    {"input":{"value":"\t\tAmerica/Belize"},"output":{"ok":true,"data":"America/Belize"}},
+    {"input":{"value":"\t😀᠎"},"output":{"ok":false}},
+    {"input":{"value":"Pacific/Tongatapu"},"output":{"ok":true,"data":"Pacific/Tongatapu"}},
+    {"input":{"value":"America/N᠎"},"output":{"ok":false}},
+    {"input":{"value":"fe"},"output":{"ok":false}},
+    {"input":{"value":" Asia/"},"output":{"ok":false}},
+    {"input":{"value":" Asia/Kolkata​"},"output":{"ok":false}},
+    {"input":{"value":"−0657 "},"output":{"ok":false}},
+    {"input":{"value":"​+21:61 "},"output":{"ok":false}},
+    {"input":{"value":" America/Los_Angeles　"},"output":{"ok":true,"data":"America/Los_Angeles"}},
+    {"input":{"value":"᠎Europe/Paris᠎"},"output":{"ok":false}},
+    {"input":{"value":"\tAustralia/Darwin​"},"output":{"ok":false}},
+    {"input":{"value":"᠎uS/MoUntAiN​"},"output":{"ok":false}},
+    {"input":{"value":"\tAmeRICa/rANKIn_INLet᠎"},"output":{"ok":false}},
+    {"input":{"value":"\nAsia/Beirut"},"output":{"ok":true,"data":"Asia/Beirut"}},
+    {"input":{"value":"　Asia/Kolkata\t"},"output":{"ok":true,"data":"Asia/Kolkata"}},
+    {"input":{"value":"᠎Eire﻿"},"output":{"ok":false}},
+    {"input":{"value":"᠎Asia/Yangon​"},"output":{"ok":false}},
+    {"input":{"value":" -27　"},"output":{"ok":false}},
+    {"input":{"value":" In0dian/Maldives"},"output":{"ok":false}},
+    {"input":{"value":"᠎Pacific/Apia "},"output":{"ok":false}},
+    {"input":{"value":"America/Anchorage"},"output":{"ok":false}},
+    {"input":{"value":"﻿euRoPE/MARIEhAMn "},"output":{"ok":true,"data":"euRoPE/MARIEhAMn"}},
+    {"input":{"value":"　America/Santiago"},"output":{"ok":false}},
+    {"input":{"value":"ameRiCa/aRgenTInA/tUcuMAN᠎"},"output":{"ok":false}},
+    {"input":{"value":" Asia/Kabul "},"output":{"ok":true,"data":"Asia/Kabul"}},
+    {"input":{"value":" Australia/Darwin "},"output":{"ok":true,"data":"Australia/Darwin"}},
+    {"input":{"value":"\nAsia/Singapore﻿"},"output":{"ok":true,"data":"Asia/Singapore"}},
+    {"input":{"value":"\tpaCiFIc/KWAjalein "},"output":{"ok":true,"data":"paCiFIc/KWAjalein"}},
+    {"input":{"value":"Asia/Singapore\t"},"output":{"ok":false}},
+    {"input":{"value":" jAmAica᠎"},"output":{"ok":false}},
+    {"input":{"value":" -21\t"},"output":{"ok":true,"data":"-21"}},
+    {"input":{"value":"\t+18:35 "},"output":{"ok":true,"data":"+18:35"}},
+    {"input":{"value":"Africa/Casablanca\t"},"output":{"ok":false}},
+    {"input":{"value":"euROpE/DUBlIN "},"output":{"ok":false}},
+    {"input":{"value":" +14:00\t"},"output":{"ok":true,"data":"+14:00"}},
+    {"input":{"value":"​Asia/Kathmandu "},"output":{"ok":false}},
+    {"input":{"value":"​Europe/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"},"output":{"ok":false}},
+    {"input":{"value":"Etc/GMT-1"},"output":{"ok":false}},
+    {"input":{"value":"\nAsia/Colombo﻿"},"output":{"ok":true,"data":"Asia/Colombo"}},
+    {"input":{"value":"Antarc0tica/Palmer\t"},"output":{"ok":false}},
+    {"input":{"value":"\nAsia/Shanghai "},"output":{"ok":true,"data":"Asia/Shanghai"}},
+    {"input":{"value":"\nEurope/Paris\n"},"output":{"ok":true,"data":"Europe/Paris"}},
+    {"input":{"value":" America/Argntina/Tucuman﻿"},"output":{"ok":false}},
+    {"input":{"value":"\tEtC/GMT-4᠎"},"output":{"ok":false}},
+    {"input":{"value":" Antarctica/Troll\t"},"output":{"ok":true,"data":"Antarctica/Troll"}},
+    {"input":{"value":"　Indian/Maldivesx "},"output":{"ok":false}},
+    {"input":{"value":"​America/Chicago "},"output":{"ok":false}},
+    {"input":{"value":"\n+ "},"output":{"ok":false}},
+    {"input":{"value":"Europe/Dublin "},"output":{"ok":true,"data":"Europe/Dublin"}},
+    {"input":{"value":"\tAmerica/Havana\n"},"output":{"ok":true,"data":"America/Havana"}},
+    {"input":{"value":"\tAsia/Yangon\t"},"output":{"ok":true,"data":"Asia/Yangon"}},
+    {"input":{"value":" Asia/Kathmandu "},"output":{"ok":true,"data":"Asia/Kathmandu"}},
+    {"input":{"value":"᠎−1952"},"output":{"ok":false}},
+    {"input":{"value":"᠎PacIFi/tARaWA　"},"output":{"ok":false}},
+    {"input":{"value":"Africa/Windhoek "},"output":{"ok":true,"data":"Africa/Windhoek"}},
+    {"input":{"value":" Pacific/Tongatapu\n"},"output":{"ok":true,"data":"Pacific/Tongatapu"}},
+    {"input":{"value":" Europe/Paris "},"output":{"ok":true,"data":"Europe/Paris"}},
+    {"input":{"value":"\nEET\t"},"output":{"ok":true,"data":"EET"}},
+    {"input":{"value":" −12:63 "},"output":{"ok":false}},
+    {"input":{"value":"᠎pACIfiC:efaTE"},"output":{"ok":false}},
+    {"input":{"value":"America/Nuuk​"},"output":{"ok":false}},
+    {"input":{"value":" Etc/GMT-14᠎"},"output":{"ok":false}},
+    {"input":{"value":"Pa "},"output":{"ok":false}},
+    {"input":{"value":"\nINdIan/cOCOs\n"},"output":{"ok":true,"data":"INdIan/cOCOs"}},
+    {"input":{"value":"　Etc/GMT+7\t"},"output":{"ok":true,"data":"Etc/GMT+7"}},
+    {"input":{"value":"EST "},"output":{"ok":true,"data":"EST"}},
+    {"input":{"value":"America/Santare"},"output":{"ok":false}},
+    {"input":{"value":"​Asia/Dhaka\n"},"output":{"ok":false}},
+    {"input":{"value":"᠎America/Denver "},"output":{"ok":false}},
+    {"input":{"value":"﻿America/St_Johns​"},"output":{"ok":false}},
+    {"input":{"value":"\nCET᠎"},"output":{"ok":false}},
+    {"input":{"value":" −14:36　"},"output":{"ok":true,"data":"−14:36"}},
+    {"input":{"value":" Pacific/Honolulu  "},"output":{"ok":true,"data":"Pacific/Honolulu"}},
+    {"input":{"value":" ameRIcA/guATEmAlA　"},"output":{"ok":true,"data":"ameRIcA/guATEmAlA"}},
+    {"input":{"value":" Asia/Dhaka　"},"output":{"ok":true,"data":"Asia/Dhaka"}},
+    {"input":{"value":"AfrICa/timBuKtu᠎"},"output":{"ok":false}},
+    {"input":{"value":"　SYsTemv/EsT5 "},"output":{"ok":true,"data":"SYsTemv/EsT5"}},
+    {"input":{"value":"\tAmerica/Argentina/S+alta﻿"},"output":{"ok":false}},
+    {"input":{"value":"Euro"},"output":{"ok":false}},
+    {"input":{"value":"᠎America/St_Johns"},"output":{"ok":false}},
+    {"input":{"value":"​Asia/Harbinx﻿"},"output":{"ok":false}},
+    {"input":{"value":" Antarctica/Troll　"},"output":{"ok":true,"data":"Antarctica/Troll"}},
+    {"input":{"value":"﻿America/Caracas﻿"},"output":{"ok":true,"data":"America/Caracas"}},
+    {"input":{"value":" Mars/Olympus\n"},"output":{"ok":false}},
+    {"input":{"value":"᠎Australia/Lord_Howe"},"output":{"ok":false}},
+    {"input":{"value":" cet　"},"output":{"ok":true,"data":"cet"}},
+    {"input":{"value":"America/Havana "},"output":{"ok":false}},
+    {"input":{"value":"᠎Asia/Shanghai　"},"output":{"ok":false}},
+    {"input":{"value":"​Africa/Casablanca"},"output":{"ok":false}},
+    {"input":{"value":"᠎amErIcajUjuy\n"},"output":{"ok":false}},
+    {"input":{"value":"SystemV/YST9​"},"output":{"ok":false}},
+    {"input":{"value":"᠎Asia/Colombo　"},"output":{"ok":false}},
+    {"input":{"value":"Asia/Dhaka\t"},"output":{"ok":true,"data":"Asia/Dhaka"}},
+    {"input":{"value":"Ame+rica/Recife　"},"output":{"ok":false}},
+    {"input":{"value":"﻿Australia/Lord_Howe​"},"output":{"ok":false}},
+    {"input":{"value":"\nPacific/Fiji "},"output":{"ok":true,"data":"Pacific/Fiji"}},
+    {"input":{"value":"​SYStemv/yST9ydt\t"},"output":{"ok":false}},
+    {"input":{"value":"　America/Lower_Prince/s᠎"},"output":{"ok":false}},
+    {"input":{"value":"᠎Etc/GMT-10᠎"},"output":{"ok":false}},
+    {"input":{"value":"᠎America/Santiago　"},"output":{"ok":false}},
+    {"input":{"value":"\ttc/GMT-5 "},"output":{"ok":false}},
+    {"input":{"value":"Africa/Casablanca　"},"output":{"ok":true,"data":"Africa/Casablanca"}},
+    {"input":{"value":"　Est﻿"},"output":{"ok":true,"data":"Est"}},
+    {"input":{"value":"Pacific/Chatham\n"},"output":{"ok":true,"data":"Pacific/Chatham"}},
+    {"input":{"value":"​eTc/gmt-9　"},"output":{"ok":false}},
+    {"input":{"value":"　-02﻿"},"output":{"ok":true,"data":"-02"}},
+    {"input":{"value":" Pacific/Apia﻿"},"output":{"ok":true,"data":"Pacific/Apia"}},
+    {"input":{"value":"﻿-02᠎"},"output":{"ok":false}},
+    {"input":{"value":" ＵＴＣ\t"},"output":{"ok":false}},
+    {"input":{"value":"᠎AMERicA/ArGENtina/jUjuY"},"output":{"ok":false}},
+    {"input":{"value":"﻿Etc/GMT+12"},"output":{"ok":true,"data":"Etc/GMT+12"}},
+    {"input":{"value":"　America/Godthab\t"},"output":{"ok":true,"data":"America/Godthab"}},
+    {"input":{"value":"\n-23᠎"},"output":{"ok":false}},
+    {"input":{"value":"　Asia/Shanghai᠎"},"output":{"ok":false}},
+    {"input":{"value":" INDIAN:ReuNiOn　"},"output":{"ok":false}},
+    {"input":{"value":"+07 "},"output":{"ok":false}},
+    {"input":{"value":"Australia/Adelaide　"},"output":{"ok":true,"data":"Australia/Adelaide"}},
+    {"input":{"value":"　ST7MDT　"},"output":{"ok":false}},
+    {"input":{"value":"\tAsia/Yangon　"},"output":{"ok":true,"data":"Asia/Yangon"}},
+    {"input":{"value":" MS\u0000T "},"output":{"ok":false}},
+    {"input":{"value":"\tPacific/Auckland᠎"},"output":{"ok":false}},
+    {"input":{"value":" Pacific/Tongatapu​"},"output":{"ok":false}},
+    {"input":{"value":"\nGMT "},"output":{"ok":true,"data":"GMT"}},
+    {"input":{"value":"᠎-22:52​"},"output":{"ok":false}},
+    {"input":{"value":"﻿Asia/Dhaka "},"output":{"ok":true,"data":"Asia/Dhaka"}},
+    {"input":{"value":"　Asia/Yangon　"},"output":{"ok":true,"data":"Asia/Yangon"}},
+    {"input":{"value":"﻿Pacific/Tongatapu﻿"},"output":{"ok":true,"data":"Pacific/Tongatapu"}},
+    {"input":{"value":"\t+05:30 "},"output":{"ok":true,"data":"+05:30"}},
+    {"input":{"value":"　afRIca/JUBa​"},"output":{"ok":false}},
+    {"input":{"value":"　Asia/Kolkata"},"output":{"ok":false}},
+    {"input":{"value":" Asia/Jerusalem​"},"output":{"ok":false}},
+    {"input":{"value":"​America/Santiago\t"},"output":{"ok":false}},
+    {"input":{"value":"Etc/GMT-14᠎"},"output":{"ok":false}},
+    {"input":{"value":"᠎America/Sao_Paulo﻿"},"output":{"ok":false}},
+    {"input":{"value":"᠎ameRicA/AtIKoKAn﻿"},"output":{"ok":false}},
+    {"input":{"value":"　Asia/Dubai "},"output":{"ok":true,"data":"Asia/Dubai"}},
+    {"input":{"value":"\nAsiA/JErUsaLEm　"},"output":{"ok":true,"data":"AsiA/JErUsaLEm"}},
+    {"input":{"value":" Africa/Cairo\n"},"output":{"ok":true,"data":"Africa/Cairo"}},
+    {"input":{"value":"᠎Europe/Berlin"},"output":{"ok":false}},
+    {"input":{"value":"​America-Argentina/Jujuy﻿"},"output":{"ok":false}},
+    {"input":{"value":" EUROPE/LONDON　"},"output":{"ok":true,"data":"EUROPE/LONDON"}},
+    {"input":{"value":"　amERiCA/naSsAU"},"output":{"ok":false}},
+    {"input":{"value":" America/Phoenix​"},"output":{"ok":false}},
+    {"input":{"value":" Asia/Colombo"},"output":{"ok":true,"data":"Asia/Colombo"}},
+    {"input":{"value":"\tAsia/Dubai᠎"},"output":{"ok":false}},
+    {"input":{"value":" America/Los_Angeles\t"},"output":{"ok":true,"data":"America/Los_Angeles"}},
+    {"input":{"value":"﻿Zulu "},"output":{"ok":false}},
+    {"input":{"value":"᠎Etc/GMT+5 "},"output":{"ok":false}},
+    {"input":{"value":"Utc﻿"},"output":{"ok":true,"data":"Utc"}},
+    {"input":{"value":"\tAmerica/Sao_Paulo\n"},"output":{"ok":true,"data":"America/Sao_Paulo"}},
+    {"input":{"value":"᠎AMErICA/i"},"output":{"ok":false}},
+    {"input":{"value":"\nEtc/GMT+12"},"output":{"ok":false}},
+    {"input":{"value":"​−2105᠎"},"output":{"ok":false}},
+    {"input":{"value":"​MET᠎"},"output":{"ok":false}},
+    {"input":{"value":"　Ｕ "},"output":{"ok":false}},
+    {"input":{"value":"​Europe/Paris\t"},"output":{"ok":false}},
+    {"input":{"value":"​+14:00"},"output":{"ok":false}},
+    {"input":{"value":" America/St_Johns"},"output":{"ok":false}},
+    {"input":{"value":"᠎pacIfiC/GAMbIerx﻿"},"output":{"ok":false}},
+    {"input":{"value":"\nAmerica/AtiKokan\n"},"output":{"ok":true,"data":"America/AtiKokan"}},
+    {"input":{"value":"\tAtlantic/St_Helena\n"},"output":{"ok":false}},
+    {"input":{"value":"﻿America/Phoenix "},"output":{"ok":true,"data":"America/Phoenix"}},
+    {"input":{"value":"\nEuRope/Busingen"},"output":{"ok":false}},
+    {"input":{"value":" Asia/Singapore "},"output":{"ok":true,"data":"Asia/Singapore"}},
+    {"input":{"value":"​Pacific/Auckland​"},"output":{"ok":false}},
+    {"input":{"value":" EST5EDT᠎"},"output":{"ok":false}},
+    {"input":{"value":"᠎America/New_York\n᠎"},"output":{"ok":false}},
+    {"input":{"value":"\tAfrica/Casablanca\n"},"output":{"ok":true,"data":"Africa/Casablanca"}},
+    {"input":{"value":"　-01​"},"output":{"ok":false}},
+    {"input":{"value":"Europe/London᠎"},"output":{"ok":false}},
+    {"input":{"value":" UTC; "},"output":{"ok":false}},
+    {"input":{"value":"﻿Etc/GMT+5　"},"output":{"ok":true,"data":"Etc/GMT+5"}},
+    {"input":{"value":"Ｕ "},"output":{"ok":false}},
+    {"input":{"value":"​-18:10:00᠎"},"output":{"ok":false}},
+    {"input":{"value":"​eUrOpe/tirAne᠎"},"output":{"ok":false}},
+    {"input":{"value":"\nAmerica/Caracas​"},"output":{"ok":false}},
+    {"input":{"value":"America/New_Yorkk﻿"},"output":{"ok":false}},
+    {"input":{"value":"​America/New_York"},"output":{"ok":false}},
+    {"input":{"value":" +1401\n"},"output":{"ok":true,"data":"+1401"}},
+    {"input":{"value":"　Asia/Calcutta "},"output":{"ok":true,"data":"Asia/Calcutta"}},
+    {"input":{"value":"　GB "},"output":{"ok":true,"data":"GB"}},
+    {"input":{"value":"EST5EDT\n"},"output":{"ok":false}},
+    {"input":{"value":"　Pacific/Fiji​"},"output":{"ok":false}},
+    {"input":{"value":"﻿Europe/Dublin "},"output":{"ok":true,"data":"Europe/Dublin"}},
+    {"input":{"value":"CET"},"output":{"ok":false}},
+    {"input":{"value":" Pacific/Norfolk "},"output":{"ok":true,"data":"Pacific/Norfolk"}},
+    {"input":{"value":"\namErIcA/NaSsau\t"},"output":{"ok":true,"data":"amErIcA/NaSsau"}},
+    {"input":{"value":" UCT᠎"},"output":{"ok":false}},
+    {"input":{"value":"olis "},"output":{"ok":false}},
+    {"input":{"value":"​Gb "},"output":{"ok":false}},
+    {"input":{"value":" America/Sao_Paulo﻿"},"output":{"ok":true,"data":"America/Sao_Paulo"}},
+    {"input":{"value":" ARcTiC/LonGYeARbYEn "},"output":{"ok":true,"data":"ARcTiC/LonGYeARbYEn"}},
+    {"input":{"value":"​A/BriSBAnE "},"output":{"ok":false}},
+    {"input":{"value":"᠎Europe/Paris\t"},"output":{"ok":false}}
+  ]
+}

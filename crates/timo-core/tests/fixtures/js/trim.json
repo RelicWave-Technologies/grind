@@ -1,0 +1,522 @@
+{
+  "fn": "trim",
+  "seed": 264634055,
+  "cases": [
+    {"input":{"text":""},"output":""},
+    {"input":{"text":" "},"output":""},
+    {"input":{"text":"a"},"output":"a"},
+    {"input":{"text":" a "},"output":"a"},
+    {"input":{"text":" x "},"output":"x"},
+    {"input":{"text":"﻿x﻿"},"output":"x"},
+    {"input":{"text":"x"},"output":"x"},
+    {"input":{"text":"᠎x᠎"},"output":"᠎x᠎"},
+    {"input":{"text":"​x​"},"output":"​x​"},
+    {"input":{"text":" x "},"output":"x"},
+    {"input":{"text":"\t\n\u000b\f\r x"},"output":"x"},
+    {"input":{"text":"              　y"},"output":"y"},
+    {"input":{"text":"é "},"output":"é"},
+    {"input":{"text":" 😀 "},"output":"😀"},
+    {"input":{"text":""},"output":""},
+    {"input":{"text":"﻿"},"output":""},
+    {"input":{"text":"x"},"output":"x"},
+    {"input":{"text":" x aaa\t\n\u000b\f\r x"},"output":"x aaa\t\n\u000b\f\r x"},
+    {"input":{"text":"a"},"output":"a"},
+    {"input":{"text":"é a              　y"},"output":"é a              　y"},
+    {"input":{"text":" x "},"output":"x"},
+    {"input":{"text":"ax​x​"},"output":"ax​x​"},
+    {"input":{"text":" a ﻿x"},"output":"a ﻿x"},
+    {"input":{"text":"᠎x᠎​x​"},"output":"᠎x᠎​x​"},
+    {"input":{"text":"é a​x​"},"output":"é a​x​"},
+    {"input":{"text":"​x​a a aé "},"output":"​x​a a aé"},
+    {"input":{"text":" x a"},"output":"x a"},
+    {"input":{"text":" 😀 "},"output":"😀"},
+    {"input":{"text":"é a﻿x﻿"},"output":"é a﻿x"},
+    {"input":{"text":"a᠎x᠎ax"},"output":"a᠎x᠎ax"},
+    {"input":{"text":" x a\t\n\u000b\f\r xa᠎x᠎a"},"output":"x a\t\n\u000b\f\r xa᠎x᠎a"},
+    {"input":{"text":"              　y x "},"output":"y x"},
+    {"input":{"text":"aa﻿x﻿a\t\n\u000b\f\r xa﻿x﻿"},"output":"aa﻿x﻿a\t\n\u000b\f\r xa﻿x"},
+    {"input":{"text":"              　yaé a x a 😀 a a "},"output":"yaé a x a 😀 a a"},
+    {"input":{"text":" x a x a﻿x﻿a x "},"output":"x a x a﻿x﻿a x"},
+    {"input":{"text":" x aa"},"output":"x aa"},
+    {"input":{"text":" a "},"output":"a"},
+    {"input":{"text":"᠎x᠎a\t\n\u000b\f\r xaaé a\t\n\u000b\f\r x"},"output":"᠎x᠎a\t\n\u000b\f\r xaaé a\t\n\u000b\f\r x"},
+    {"input":{"text":"﻿x﻿x  x a"},"output":"x﻿x  x a"},
+    {"input":{"text":" x  x ᠎x᠎"},"output":"x  x ᠎x᠎"},
+    {"input":{"text":"​x​﻿"},"output":"​x​"},
+    {"input":{"text":" x aa﻿x﻿"},"output":"x aa﻿x"},
+    {"input":{"text":"᠎x᠎"},"output":"᠎x᠎"},
+    {"input":{"text":"\t\n\u000b\f\r x"},"output":"x"},
+    {"input":{"text":"᠎x᠎aa              　y"},"output":"᠎x᠎aa              　y"},
+    {"input":{"text":""},"output":""},
+    {"input":{"text":" "},"output":""},
+    {"input":{"text":" x x"},"output":"x x"},
+    {"input":{"text":"﻿x﻿a x "},"output":"x﻿a x"},
+    {"input":{"text":"x﻿x﻿a"},"output":"x﻿x﻿a"},
+    {"input":{"text":" 😀               　y﻿"},"output":"😀               　y"},
+    {"input":{"text":"\t\n\u000b\f\r x a ﻿x﻿\t\n\u000b\f\r x"},"output":"x a ﻿x﻿\t\n\u000b\f\r x"},
+    {"input":{"text":"x"},"output":"x"},
+    {"input":{"text":"﻿​x​  x "},"output":"​x​  x"},
+    {"input":{"text":""},"output":""},
+    {"input":{"text":"é a᠎x᠎"},"output":"é a᠎x᠎"},
+    {"input":{"text":"᠎x᠎ a   x a"},"output":"᠎x᠎ a   x a"},
+    {"input":{"text":"​x​aaa 😀 "},"output":"​x​aaa 😀"},
+    {"input":{"text":"﻿x﻿"},"output":"x"},
+    {"input":{"text":"᠎x᠎ "},"output":"᠎x᠎"},
+    {"input":{"text":"﻿x﻿ x  x é "},"output":"x﻿ x  x é"},
+    {"input":{"text":" a é "},"output":"a é"},
+    {"input":{"text":"᠎x᠎a᠎x᠎"},"output":"᠎x᠎a᠎x᠎"},
+    {"input":{"text":" x  😀 "},"output":"x  😀"},
+    {"input":{"text":" x a᠎x᠎a\t\n\u000b\f\r xa᠎x᠎a a "},"output":"x a᠎x᠎a\t\n\u000b\f\r xa᠎x᠎a a"},
+    {"input":{"text":"aa 😀 a﻿a​x​"},"output":"aa 😀 a﻿a​x​"},
+    {"input":{"text":" x "},"output":"x"},
+    {"input":{"text":"\t\n\u000b\f\r x\t\n\u000b\f\r x 😀 a"},"output":"x\t\n\u000b\f\r x 😀 a"},
+    {"input":{"text":"᠎x᠎a﻿aaé a\t\n\u000b\f\r x"},"output":"᠎x᠎a﻿aaé a\t\n\u000b\f\r x"},
+    {"input":{"text":"﻿"},"output":""},
+    {"input":{"text":"﻿"},"output":""},
+    {"input":{"text":" xx x x"},"output":"xx x x"},
+    {"input":{"text":" 😀 a"},"output":"😀 a"},
+    {"input":{"text":" x aa\t\n\u000b\f\r xaé a              　y"},"output":"x aa\t\n\u000b\f\r xaé a              　y"},
+    {"input":{"text":"\t\n\u000b\f\r xaa﻿x﻿"},"output":"xaa﻿x"},
+    {"input":{"text":"​x​aa              　ya 😀 a᠎x᠎"},"output":"​x​aa              　ya 😀 a᠎x᠎"},
+    {"input":{"text":" 😀 ᠎x᠎a 😀 "},"output":"😀 ᠎x᠎a 😀"},
+    {"input":{"text":" "},"output":""},
+    {"input":{"text":"              　yaa"},"output":"yaa"},
+    {"input":{"text":"              　ya᠎x᠎a﻿x﻿a x a﻿"},"output":"ya᠎x᠎a﻿x﻿a x a"},
+    {"input":{"text":"a 😀 a 😀 a x a x "},"output":"a 😀 a 😀 a x a x"},
+    {"input":{"text":"x"},"output":"x"},
+    {"input":{"text":"aaa﻿x﻿aa᠎x᠎"},"output":"aaa﻿x﻿aa᠎x᠎"},
+    {"input":{"text":""},"output":""},
+    {"input":{"text":"᠎x᠎ 😀 a"},"output":"᠎x᠎ 😀 a"},
+    {"input":{"text":"﻿axa"},"output":"axa"},
+    {"input":{"text":"​x​"},"output":"​x​"},
+    {"input":{"text":" "},"output":""},
+    {"input":{"text":"﻿x﻿"},"output":"x"},
+    {"input":{"text":"\t\n\u000b\f\r xa 😀 a x a﻿a              　y"},"output":"xa 😀 a x a﻿a              　y"},
+    {"input":{"text":"\t\n\u000b\f\r x a x᠎x᠎"},"output":"\t\n\u000b\f\r x a x᠎x᠎"},
+    {"input":{"text":" 😀 "},"output":"😀"},
+    {"input":{"text":"xa x "},"output":"xa x"},
+    {"input":{"text":"᠎x᠎᠎x᠎é  a "},"output":"᠎x᠎᠎x᠎é  a"},
+    {"input":{"text":""},"output":""},
+    {"input":{"text":"​x​a᠎x᠎a a "},"output":"​x​a᠎x᠎a a"},
+    {"input":{"text":" 😀 "},"output":"😀"},
+    {"input":{"text":" x ﻿﻿"},"output":"x"},
+    {"input":{"text":" a a\t\n\u000b\f\r x"},"output":"a a\t\n\u000b\f\r x"},
+    {"input":{"text":"a              　y​x​"},"output":"a              　y​x​"},
+    {"input":{"text":" x "},"output":"x"},
+    {"input":{"text":"  x  a "},"output":"x  a"},
+    {"input":{"text":" 😀 aaa﻿a"},"output":"😀 aaa﻿a"},
+    {"input":{"text":""},"output":""},
+    {"input":{"text":" x "},"output":"x"},
+    {"input":{"text":" 😀 ​x​"},"output":"😀 ​x​"},
+    {"input":{"text":" x "},"output":"x"},
+    {"input":{"text":" 😀 a a              　yax"},"output":"😀 a a              　yax"},
+    {"input":{"text":"xaaa 😀 "},"output":"xaaa 😀"},
+    {"input":{"text":"xx"},"output":"xx"},
+    {"input":{"text":"              　ya 😀 a 😀 aaé "},"output":"ya 😀 a 😀 aaé"},
+    {"input":{"text":"aé a﻿x﻿a x a x "},"output":"aé a﻿x﻿a x a x"},
+    {"input":{"text":" x a﻿a "},"output":"x a﻿a"},
+    {"input":{"text":"﻿x﻿ x  😀 "},"output":"x﻿ x  😀"},
+    {"input":{"text":"              　y a ﻿x﻿a"},"output":"y a ﻿x﻿a"},
+    {"input":{"text":"\t\n\u000b\f\r xa﻿a a "},"output":"xa﻿a a"},
+    {"input":{"text":"é  x "},"output":"é  x"},
+    {"input":{"text":" x "},"output":"x"},
+    {"input":{"text":" 😀 ﻿x﻿é "},"output":" 😀 ﻿x﻿é"},
+    {"input":{"text":"\t\n\u000b\f\r x ﻿"},"output":"x "},
+    {"input":{"text":"x x "},"output":"x x"},
+    {"input":{"text":"﻿﻿ 😀 "},"output":"😀"},
+    {"input":{"text":" a "},"output":"a"},
+    {"input":{"text":"              　yé ᠎x᠎​x​"},"output":"yé ᠎x᠎​x​"},
+    {"input":{"text":"﻿a x aa"},"output":"a x aa"},
+    {"input":{"text":" "},"output":""},
+    {"input":{"text":"﻿é "},"output":"é"},
+    {"input":{"text":"​x​aé a᠎x᠎a x "},"output":"​x​aé a᠎x᠎a x"},
+    {"input":{"text":"x​x​ 😀 "},"output":"x​x​ 😀"},
+    {"input":{"text":" a ﻿é "},"output":"a ﻿é"},
+    {"input":{"text":"x"},"output":"x"},
+    {"input":{"text":"﻿ a a "},"output":"a a"},
+    {"input":{"text":"​x​a a​x​a a a᠎x᠎"},"output":"​x​a a​x​a a a᠎x᠎"},
+    {"input":{"text":" 😀 a "},"output":"😀 a"},
+    {"input":{"text":"a a "},"output":"a a"},
+    {"input":{"text":"a"},"output":"a"},
+    {"input":{"text":"﻿ x "},"output":"x"},
+    {"input":{"text":" x a x a a a"},"output":"x a x a a a"},
+    {"input":{"text":"﻿é "},"output":"é"},
+    {"input":{"text":"xa"},"output":"xa"},
+    {"input":{"text":" a a​x​"},"output":"a a​x​"},
+    {"input":{"text":"﻿"},"output":""},
+    {"input":{"text":"﻿x﻿"},"output":"x"},
+    {"input":{"text":" x  x ᠎x᠎​x​"},"output":"x  x ᠎x᠎​x​"},
+    {"input":{"text":"᠎x᠎a᠎x᠎"},"output":"᠎x᠎a᠎x᠎"},
+    {"input":{"text":"\t\n\u000b\f\r xa 😀 a 😀 "},"output":"xa 😀 a 😀"},
+    {"input":{"text":" a  x "},"output":"a  x"},
+    {"input":{"text":"﻿ x "},"output":"x "},
+    {"input":{"text":"﻿x﻿"},"output":"x"},
+    {"input":{"text":"​x​"},"output":"​x​"},
+    {"input":{"text":"  a \t\n\u000b\f\r x"},"output":"a \t\n\u000b\f\r x"},
+    {"input":{"text":"﻿x              　y x "},"output":"x              　y x"},
+    {"input":{"text":"﻿"},"output":""},
+    {"input":{"text":" x aaa              　ya﻿x﻿"},"output":"x aaa              　ya﻿x"},
+    {"input":{"text":" a é x              　y"},"output":"a é x              　y"},
+    {"input":{"text":" 😀 a​x​ 😀 "},"output":"😀 a​x​ 😀"},
+    {"input":{"text":"﻿ x ​x​"},"output":" x ​x​"},
+    {"input":{"text":"﻿"},"output":""},
+    {"input":{"text":"᠎x᠎﻿x﻿​x​ a "},"output":"᠎x᠎﻿x﻿​x​ a"},
+    {"input":{"text":" x ᠎x᠎"},"output":"x ᠎x᠎"},
+    {"input":{"text":" x "},"output":"x"},
+    {"input":{"text":" x "},"output":"x"},
+    {"input":{"text":"é é  "},"output":"é é"},
+    {"input":{"text":"              　y᠎x᠎᠎x᠎"},"output":"y᠎x᠎᠎x᠎"},
+    {"input":{"text":""},"output":""},
+    {"input":{"text":" ᠎x᠎a x  😀 "},"output":"᠎x᠎a x  😀"},
+    {"input":{"text":"\t\n\u000b\f\r xaa a ax"},"output":"xaa a ax"},
+    {"input":{"text":"﻿x﻿ a "},"output":"x﻿ a"},
+    {"input":{"text":"x﻿"},"output":"x﻿"},
+    {"input":{"text":"᠎x᠎ a "},"output":"᠎x᠎ a"},
+    {"input":{"text":" 😀 aaa 😀 aaaa"},"output":"😀 aaa 😀 aaaa"},
+    {"input":{"text":" x "},"output":"x"},
+    {"input":{"text":"​x​aa﻿x﻿a "},"output":"​x​aa﻿x﻿a"},
+    {"input":{"text":""},"output":""},
+    {"input":{"text":"x᠎x᠎"},"output":"x᠎x᠎"},
+    {"input":{"text":" 😀  a "},"output":"😀  a"},
+    {"input":{"text":" a "},"output":"a"},
+    {"input":{"text":"a a ﻿x﻿"},"output":"a a ﻿x"},
+    {"input":{"text":" aé aaa              　y"},"output":"aé aaa              　y"},
+    {"input":{"text":" x axaa x "},"output":"x axaa x"},
+    {"input":{"text":"﻿x﻿a᠎x᠎"},"output":"x﻿a᠎x᠎"},
+    {"input":{"text":" x ᠎x᠎ a "},"output":"x ᠎x᠎ a"},
+    {"input":{"text":"​x​a 😀 "},"output":"​x​a 😀"},
+    {"input":{"text":" "},"output":""},
+    {"input":{"text":"a x "},"output":"a x"},
+    {"input":{"text":"aa﻿a x a᠎x᠎a              　y"},"output":"aa﻿a x a᠎x᠎a              　y"},
+    {"input":{"text":" aé a᠎x᠎"},"output":"aé a᠎x᠎"},
+    {"input":{"text":" 😀  😀 "},"output":"😀  😀"},
+    {"input":{"text":"﻿x﻿ "},"output":"x"},
+    {"input":{"text":" a a aaax"},"output":"a a aaax"},
+    {"input":{"text":"a              　yaa\t\n\u000b\f\r x"},"output":"a              　yaa\t\n\u000b\f\r x"},
+    {"input":{"text":"x  x ​x​"},"output":"x  x ​x​"},
+    {"input":{"text":"﻿x﻿  ﻿"},"output":"x"},
+    {"input":{"text":"\t\n\u000b\f\r xaa 😀 a﻿a "},"output":"xaa 😀 a﻿a"},
+    {"input":{"text":"​x​a a "},"output":"​x​a a"},
+    {"input":{"text":" ᠎x᠎ 😀 "},"output":"᠎x᠎ 😀"},
+    {"input":{"text":"\t\n\u000b\f\r x x a x "},"output":"x x a x"},
+    {"input":{"text":"aaé a 😀 "},"output":"aaé a 😀"},
+    {"input":{"text":" x "},"output":"x"},
+    {"input":{"text":"᠎x᠎a x aé a a a x "},"output":"᠎x᠎a x aé a a a x"},
+    {"input":{"text":" "},"output":""},
+    {"input":{"text":" x "},"output":" x"},
+    {"input":{"text":" x é "},"output":"x é"},
+    {"input":{"text":" x "},"output":"x"},
+    {"input":{"text":"​x​"},"output":"​x​"},
+    {"input":{"text":"é aé a a a"},"output":"é aé a a a"},
+    {"input":{"text":" a a᠎x᠎a x a\t\n\u000b\f\r x"},"output":"a a᠎x᠎a x a\t\n\u000b\f\r x"},
+    {"input":{"text":"﻿​x​"},"output":"​x​"},
+    {"input":{"text":" a  a a"},"output":"a  a a"},
+    {"input":{"text":" a a 😀 a\t\n\u000b\f\r xa 😀 "},"output":"a a 😀 a\t\n\u000b\f\r xa 😀"},
+    {"input":{"text":"​x​᠎x᠎\t\n\u000b\f\r x"},"output":"​x​᠎x᠎\t\n\u000b\f\r x"},
+    {"input":{"text":"\t\n\u000b\f\r x x x"},"output":"x x x"},
+    {"input":{"text":"​x​aé "},"output":"​x​aé"},
+    {"input":{"text":" "},"output":""},
+    {"input":{"text":"é é "},"output":"é é"},
+    {"input":{"text":"​x​ a é "},"output":"​x​ a é"},
+    {"input":{"text":"​x​\t\n\u000b\f\r x"},"output":"​x​\t\n\u000b\f\r x"},
+    {"input":{"text":"              　yé "},"output":"yé"},
+    {"input":{"text":"᠎x᠎aaxa﻿"},"output":"᠎x᠎aaxa"},
+    {"input":{"text":"aa\t\n\u000b\f\r xa a a a "},"output":"aa\t\n\u000b\f\r xa a a a"},
+    {"input":{"text":"a"},"output":"a"},
+    {"input":{"text":"᠎x᠎ax"},"output":"᠎x᠎ax"},
+    {"input":{"text":"᠎x᠎"},"output":"᠎x᠎"},
+    {"input":{"text":" x a 😀 aaaa᠎x᠎"},"output":"x a 😀 aaaa᠎x᠎"},
+    {"input":{"text":"aaé a              　ya​x​a x "},"output":"aaé a              　ya​x​a x"},
+    {"input":{"text":"﻿x﻿"},"output":"x"},
+    {"input":{"text":"a᠎x᠎a\t\n\u000b\f\r xa᠎x᠎"},"output":"a᠎x᠎a\t\n\u000b\f\r xa᠎x᠎"},
+    {"input":{"text":"              　y"},"output":"y"},
+    {"input":{"text":"              　yaa              　ya﻿a a "},"output":"yaa              　ya﻿a a"},
+    {"input":{"text":"\t\n\u000b\f\r xa              　ya a axa"},"output":"xa              　ya a axa"},
+    {"input":{"text":" x "},"output":"x"},
+    {"input":{"text":"a\t\n\u000b\f\r xaé "},"output":"a\t\n\u000b\f\r xaé"},
+    {"input":{"text":"᠎x᠎a 😀 a x a              　y"},"output":"᠎x᠎a 😀 a x a              　y"},
+    {"input":{"text":" x x"},"output":"x x"},
+    {"input":{"text":""},"output":""},
+    {"input":{"text":" x  x "},"output":"x  x"},
+    {"input":{"text":" a ﻿x﻿​x​"},"output":"a ﻿x﻿​x​"},
+    {"input":{"text":"​x​a x a x "},"output":"​x​a x a x"},
+    {"input":{"text":" x a\t\n\u000b\f\r xa᠎x᠎a x aa"},"output":"x a\t\n\u000b\f\r xa᠎x᠎a x aa"},
+    {"input":{"text":"​x​a​x​a᠎x᠎axa x "},"output":"​x​a​x​a᠎x᠎axa x"},
+    {"input":{"text":"aa﻿x﻿a              　ya x a a "},"output":"aa﻿x﻿a              　ya x a a"},
+    {"input":{"text":"              　ya​x​a x a​x​aé "},"output":"ya​x​a x a​x​aé"},
+    {"input":{"text":"              　y "},"output":"y"},
+    {"input":{"text":"aaa\t\n\u000b\f\r xa\t\n\u000b\f\r xaa"},"output":"aaa\t\n\u000b\f\r xa\t\n\u000b\f\r xaa"},
+    {"input":{"text":"​x​a x "},"output":"​x​a x"},
+    {"input":{"text":" x "},"output":"x"},
+    {"input":{"text":"é ᠎x᠎﻿a"},"output":"é ᠎x᠎﻿a"},
+    {"input":{"text":"é  a é  😀 "},"output":"é  a é  😀"},
+    {"input":{"text":" 😀 aé "},"output":"😀 aé"},
+    {"input":{"text":" x "},"output":"x"},
+    {"input":{"text":" axaa﻿a﻿x﻿"},"output":"axaa﻿a﻿x"},
+    {"input":{"text":"﻿axa​x​a﻿aa"},"output":"axa​x​a﻿aa"},
+    {"input":{"text":"​x​a﻿a x a᠎x᠎aé "},"output":"​x​a﻿a x a᠎x᠎aé"},
+    {"input":{"text":"﻿x﻿᠎x᠎\t\n\u000b\f\r x a "},"output":"x﻿᠎x᠎\t\n\u000b\f\r x a"},
+    {"input":{"text":"              　yé ᠎x᠎ 😀 "},"output":"yé ᠎x᠎ 😀"},
+    {"input":{"text":"              　ya a "},"output":"ya a"},
+    {"input":{"text":"﻿axa​x​a x a"},"output":"axa​x​a x a"},
+    {"input":{"text":"a​x​"},"output":"a​x​"},
+    {"input":{"text":"a​x​\t\n\u000b\f\r x 😀 "},"output":"a​x​\t\n\u000b\f\r x 😀"},
+    {"input":{"text":"﻿x﻿é               　y"},"output":"x﻿é               　y"},
+    {"input":{"text":" x   x               　y x "},"output":"x   x               　y x"},
+    {"input":{"text":"﻿é ﻿x﻿﻿x﻿              　y"},"output":"é ﻿x﻿﻿x﻿              　y"},
+    {"input":{"text":"x ﻿x﻿"},"output":"x ﻿x"},
+    {"input":{"text":"axaa"},"output":"axaa"},
+    {"input":{"text":" x  😀 "},"output":"x  😀"},
+    {"input":{"text":"​x​a﻿x﻿aaa​x​a 😀 "},"output":"​x​a﻿x﻿aaa​x​a 😀"},
+    {"input":{"text":" aa              　yaa"},"output":"aa              　yaa"},
+    {"input":{"text":" x aaxa﻿x﻿aé "},"output":"x aaxa﻿x﻿aé"},
+    {"input":{"text":"              　y﻿"},"output":"y"},
+    {"input":{"text":"xa​x​"},"output":"xa​x​"},
+    {"input":{"text":"é ᠎x᠎᠎x᠎"},"output":"é ᠎x᠎᠎x᠎"},
+    {"input":{"text":"é a﻿x﻿a﻿x﻿"},"output":"é a﻿x﻿a﻿x"},
+    {"input":{"text":" a a axa"},"output":"a a axa"},
+    {"input":{"text":" a 😀 "},"output":"a 😀"},
+    {"input":{"text":" 😀 a᠎x᠎a\t\n\u000b\f\r xa﻿a​x​"},"output":"😀 a᠎x᠎a\t\n\u000b\f\r xa﻿a​x​"},
+    {"input":{"text":"a\t\n\u000b\f\r x"},"output":"a\t\n\u000b\f\r x"},
+    {"input":{"text":"﻿ a ﻿x﻿ x "},"output":"a ﻿x﻿ x"},
+    {"input":{"text":"᠎x᠎﻿é  "},"output":"᠎x᠎﻿é"},
+    {"input":{"text":"\t\n\u000b\f\r x  😀 "},"output":"\t\n\u000b\f\r x  😀"},
+    {"input":{"text":"              　y x  a ﻿x﻿"},"output":"y x  a ﻿x"},
+    {"input":{"text":" x ﻿x﻿﻿"},"output":"x ﻿x"},
+    {"input":{"text":"﻿x﻿a﻿x﻿a              　yaxa​x​"},"output":"x﻿a﻿x﻿a              　yaxa​x​"},
+    {"input":{"text":"\t\n\u000b\f\r x﻿x﻿"},"output":"x﻿x﻿"},
+    {"input":{"text":"﻿              　y "},"output":"y "},
+    {"input":{"text":"xaé aé "},"output":"xaé aé"},
+    {"input":{"text":" a x a᠎x᠎"},"output":"a x a᠎x᠎"},
+    {"input":{"text":" x ﻿"},"output":"x"},
+    {"input":{"text":"﻿x﻿aaa​x​aaa x "},"output":"x﻿aaa​x​aaa x"},
+    {"input":{"text":" x "},"output":"x"},
+    {"input":{"text":"\t\n\u000b\f\r x"},"output":"x"},
+    {"input":{"text":"\t\n\u000b\f\r xxx é "},"output":"xxx é"},
+    {"input":{"text":""},"output":""},
+    {"input":{"text":"a﻿a              　ya"},"output":"a﻿a              　ya"},
+    {"input":{"text":"              　y"},"output":"y"},
+    {"input":{"text":" 😀  x "},"output":" 😀  x "},
+    {"input":{"text":"﻿é ﻿x"},"output":"é ﻿x"},
+    {"input":{"text":"              　y a  a "},"output":"y a  a"},
+    {"input":{"text":" x "},"output":"x"},
+    {"input":{"text":"aaa﻿"},"output":"aaa"},
+    {"input":{"text":"﻿x﻿"},"output":"x"},
+    {"input":{"text":"​x​﻿x﻿"},"output":"​x​﻿x"},
+    {"input":{"text":" "},"output":""},
+    {"input":{"text":"\t\n\u000b\f\r x x "},"output":"x x"},
+    {"input":{"text":"               　y x ﻿᠎x᠎"},"output":"y x ﻿᠎x᠎"},
+    {"input":{"text":"xaa a "},"output":"xaa a"},
+    {"input":{"text":"xa\t\n\u000b\f\r xa﻿x﻿a 😀 a​x​"},"output":"xa\t\n\u000b\f\r xa﻿x﻿a 😀 a​x​"},
+    {"input":{"text":" aé a x aa"},"output":"aé a x aa"},
+    {"input":{"text":"              　y\t\n\u000b\f\r x"},"output":"y\t\n\u000b\f\r x"},
+    {"input":{"text":" x a a a x a a aé "},"output":"x a a a x a a aé"},
+    {"input":{"text":" x "},"output":"x"},
+    {"input":{"text":"é é "},"output":"é é"},
+    {"input":{"text":" a﻿"},"output":"a"},
+    {"input":{"text":"é "},"output":"é"},
+    {"input":{"text":"​x​aa              　y"},"output":"​x​aa              　y"},
+    {"input":{"text":"é               　y x aé "},"output":"é               　y x aé"},
+    {"input":{"text":"​x​"},"output":"​x​"},
+    {"input":{"text":"aa 😀 "},"output":"aa 😀"},
+    {"input":{"text":"axaé a﻿x﻿ax"},"output":"axaé a﻿x﻿ax"},
+    {"input":{"text":" x ﻿​x​"},"output":"x ﻿​x​"},
+    {"input":{"text":"a\t\n\u000b\f\r x"},"output":"a\t\n\u000b\f\r x"},
+    {"input":{"text":"a\t\n\u000b\f\r xa a﻿x﻿a᠎x᠎"},"output":"a\t\n\u000b\f\r xa a﻿x﻿a᠎x᠎"},
+    {"input":{"text":"​x​a​x​"},"output":"​x​a​x​"},
+    {"input":{"text":"\t\n\u000b\f\r x              　y 😀 "},"output":"x              　y 😀"},
+    {"input":{"text":" ﻿x﻿᠎x᠎"},"output":"x﻿᠎x᠎"},
+    {"input":{"text":"᠎x᠎a"},"output":"᠎x᠎a"},
+    {"input":{"text":"aa "},"output":"aa"},
+    {"input":{"text":"xaxa﻿a x "},"output":"xaxa﻿a x"},
+    {"input":{"text":" 😀               　y"},"output":"😀               　y"},
+    {"input":{"text":"é ﻿"},"output":"é"},
+    {"input":{"text":"﻿a"},"output":"a"},
+    {"input":{"text":" a a a aé "},"output":"a a a aé"},
+    {"input":{"text":"​x​é \t\n\u000b\f\r x"},"output":"​x​é \t\n\u000b\f\r x"},
+    {"input":{"text":"aa x "},"output":"aa x"},
+    {"input":{"text":" a a              　ya﻿axa a "},"output":"a a              　ya﻿axa a"},
+    {"input":{"text":" x "},"output":"x"},
+    {"input":{"text":"x﻿ x   "},"output":"x﻿ x"},
+    {"input":{"text":" a a﻿"},"output":"a a"},
+    {"input":{"text":" x "},"output":" x"},
+    {"input":{"text":"a﻿"},"output":"a"},
+    {"input":{"text":"é "},"output":"é"},
+    {"input":{"text":"aa\t\n\u000b\f\r xa a a x "},"output":"aa\t\n\u000b\f\r xa a a x"},
+    {"input":{"text":"​x​​x​﻿​x​᠎x᠎"},"output":"​x​​x​﻿​x​᠎x᠎"},
+    {"input":{"text":"​x​"},"output":"​x​"},
+    {"input":{"text":"              　ya﻿x﻿a\t\n\u000b\f\r xaa x "},"output":"ya﻿x﻿a\t\n\u000b\f\r xaa x"},
+    {"input":{"text":" x a᠎x᠎a\t\n\u000b\f\r x"},"output":"x a᠎x᠎a\t\n\u000b\f\r x"},
+    {"input":{"text":"é a x "},"output":"é a x"},
+    {"input":{"text":" 😀 a﻿a​x​a a​x​"},"output":"😀 a﻿a​x​a a​x​"},
+    {"input":{"text":"᠎x᠎a a a a a 😀 ax"},"output":"᠎x᠎a a a a a 😀 ax"},
+    {"input":{"text":"\t\n\u000b\f\r x x  x "},"output":"x x  x"},
+    {"input":{"text":"              　yx"},"output":"yx"},
+    {"input":{"text":"xé ​x​"},"output":"xé ​x​"},
+    {"input":{"text":"xaa​x​a "},"output":"xaa​x​a"},
+    {"input":{"text":" 😀 ᠎x᠎​x​\t\n\u000b\f\r x"},"output":"😀 ᠎x᠎​x​\t\n\u000b\f\r x"},
+    {"input":{"text":"é é ᠎x᠎"},"output":"é é ᠎x᠎"},
+    {"input":{"text":"​x​a a "},"output":"​x​a a"},
+    {"input":{"text":" a a x a\t\n\u000b\f\r xaa﻿"},"output":"a a x a\t\n\u000b\f\r xaa"},
+    {"input":{"text":"​x​\t\n\u000b\f\r x"},"output":"​x​\t\n\u000b\f\r x"},
+    {"input":{"text":"\t\n\u000b\f\r xx"},"output":"xx"},
+    {"input":{"text":" a  x "},"output":"a  x"},
+    {"input":{"text":"              　y᠎x᠎ 😀 ​x​﻿x﻿"},"output":"y᠎x᠎ 😀 ​x​﻿x"},
+    {"input":{"text":"᠎x᠎​x​ x ᠎x᠎"},"output":"᠎x᠎​x​ x ᠎x᠎"},
+    {"input":{"text":" "},"output":""},
+    {"input":{"text":""},"output":""},
+    {"input":{"text":"​x​é  😀 "},"output":"​x​é  😀"},
+    {"input":{"text":"﻿a x "},"output":"a x"},
+    {"input":{"text":" x  a  😀 "},"output":"x  a  😀"},
+    {"input":{"text":"﻿x﻿a​x​ a  😀 "},"output":"x﻿a​x​ a  😀"},
+    {"input":{"text":" a​x​a a "},"output":"a​x​a a"},
+    {"input":{"text":"a x a​x​a\t\n\u000b\f\r xa 😀 "},"output":"a x a​x​a\t\n\u000b\f\r xa 😀"},
+    {"input":{"text":"aa﻿x﻿a​x​a a﻿x﻿"},"output":"aa﻿x﻿a​x​a a﻿x"},
+    {"input":{"text":"aa\t\n\u000b\f\r xa﻿x﻿a              　ya "},"output":"aa\t\n\u000b\f\r xa﻿x﻿a              　ya"},
+    {"input":{"text":"aaé a x aa"},"output":"aaé a x aa"},
+    {"input":{"text":"a﻿aé a"},"output":"a﻿aé a"},
+    {"input":{"text":" 😀 aa x ax"},"output":"😀 aa x ax"},
+    {"input":{"text":"﻿"},"output":""},
+    {"input":{"text":" x aax"},"output":"x aax"},
+    {"input":{"text":"᠎x᠎ a "},"output":"᠎x᠎ a"},
+    {"input":{"text":" x "},"output":"x"},
+    {"input":{"text":"᠎x᠎ a é "},"output":"᠎x᠎ a é"},
+    {"input":{"text":"              　ya​x​"},"output":"ya​x​"},
+    {"input":{"text":" a a᠎x᠎a a "},"output":"a a᠎x᠎a a"},
+    {"input":{"text":"a᠎x᠎"},"output":"a᠎x᠎"},
+    {"input":{"text":" a ᠎x᠎ a ​x​"},"output":"a ᠎x᠎ a ​x​"},
+    {"input":{"text":"​x​﻿x﻿​x​              　y"},"output":"​x​﻿x﻿​x​              　y"},
+    {"input":{"text":"aa\t\n\u000b\f\r xa᠎x᠎"},"output":"aa\t\n\u000b\f\r xa᠎x᠎"},
+    {"input":{"text":"\t\n\u000b\f\r xa\t\n\u000b\f\r x"},"output":"xa\t\n\u000b\f\r x"},
+    {"input":{"text":"﻿x﻿aa᠎x᠎a a a "},"output":"x﻿aa᠎x᠎a a a"},
+    {"input":{"text":"​x​\t\n\u000b\f\r x"},"output":"​x​\t\n\u000b\f\r x"},
+    {"input":{"text":"﻿"},"output":""},
+    {"input":{"text":"a 😀 aa᠎x᠎"},"output":"a 😀 aa᠎x᠎"},
+    {"input":{"text":"᠎x᠎a​x​a "},"output":"᠎x᠎a​x​a"},
+    {"input":{"text":" 😀  x \t\n\u000b\f\r x 😀 "},"output":"😀  x \t\n\u000b\f\r x 😀"},
+    {"input":{"text":"a x a 😀 a 😀 aé "},"output":"a x a 😀 a 😀 aé"},
+    {"input":{"text":"x"},"output":"x"},
+    {"input":{"text":"\t\n\u000b\f\r x﻿x\t\n\u000b\f\r x"},"output":"x﻿x\t\n\u000b\f\r x"},
+    {"input":{"text":" a a​x​a a aé a﻿x﻿"},"output":"a a​x​a a aé a﻿x"},
+    {"input":{"text":"﻿ax"},"output":"ax"},
+    {"input":{"text":"é "},"output":"é"},
+    {"input":{"text":"aaa"},"output":"aaa"},
+    {"input":{"text":" a ax"},"output":"a ax"},
+    {"input":{"text":" 😀 a x axa﻿aé "},"output":"😀 a x axa﻿aé"},
+    {"input":{"text":" a x a 😀 aa x "},"output":"a x a 😀 aa x"},
+    {"input":{"text":"              　ya﻿aaaé "},"output":"ya﻿aaaé"},
+    {"input":{"text":"﻿x﻿aa a "},"output":"x﻿aa a"},
+    {"input":{"text":"a᠎x᠎"},"output":"a᠎x᠎"},
+    {"input":{"text":"a              　ya              　y"},"output":"a              　ya              　y"},
+    {"input":{"text":"﻿\t\n\u000b\f\r x x a "},"output":"x x a"},
+    {"input":{"text":"aé x"},"output":"aé x"},
+    {"input":{"text":"              　y"},"output":"y"},
+    {"input":{"text":"é a x "},"output":"é a x"},
+    {"input":{"text":"a\t\n\u000b\f\r xaé a x "},"output":"a\t\n\u000b\f\r xaé a x"},
+    {"input":{"text":" "},"output":""},
+    {"input":{"text":" a ﻿x﻿"},"output":"a ﻿x"},
+    {"input":{"text":"​x​a﻿x﻿a﻿x﻿a"},"output":"​x​a﻿x﻿a﻿x﻿a"},
+    {"input":{"text":"﻿"},"output":""},
+    {"input":{"text":"﻿x﻿axa﻿x﻿aaa"},"output":"x﻿axa﻿x﻿aaa"},
+    {"input":{"text":""},"output":""},
+    {"input":{"text":"a"},"output":"a"},
+    {"input":{"text":"              　y 😀 é  😀 "},"output":"y 😀 é  😀"},
+    {"input":{"text":"a x a\t\n\u000b\f\r x"},"output":"a x a\t\n\u000b\f\r x"},
+    {"input":{"text":"é a﻿"},"output":"é a"},
+    {"input":{"text":"xa a a\t\n\u000b\f\r xa᠎x᠎"},"output":"xa a a\t\n\u000b\f\r xa᠎x᠎"},
+    {"input":{"text":" 😀 a\t\n\u000b\f\r xa a aa"},"output":"😀 a\t\n\u000b\f\r xa a aa"},
+    {"input":{"text":"﻿ 😀 x"},"output":"😀 x"},
+    {"input":{"text":""},"output":""},
+    {"input":{"text":"aa a "},"output":"aa a"},
+    {"input":{"text":"a x a᠎x᠎axa x "},"output":"a x a᠎x᠎axa x"},
+    {"input":{"text":" a​x​a x a 😀 "},"output":"a​x​a x a 😀"},
+    {"input":{"text":" "},"output":""},
+    {"input":{"text":" 😀 "},"output":"😀"},
+    {"input":{"text":"é   a é "},"output":"é   a é"},
+    {"input":{"text":" a x﻿x﻿﻿x﻿"},"output":"a x﻿x﻿﻿x"},
+    {"input":{"text":"é a 😀 a᠎x᠎"},"output":"é a 😀 a᠎x᠎"},
+    {"input":{"text":"﻿x﻿"},"output":"x"},
+    {"input":{"text":"a x a﻿x﻿"},"output":"a x a﻿x"},
+    {"input":{"text":" 😀 é  x ​x​              　y"},"output":"😀 é  x ​x​              　y"},
+    {"input":{"text":" 😀 a x a᠎x᠎a​x​a x "},"output":"😀 a x a᠎x᠎a​x​a x"},
+    {"input":{"text":"a 😀 "},"output":"a 😀"},
+    {"input":{"text":"aa 😀 aé "},"output":"aa 😀 aé"},
+    {"input":{"text":"é "},"output":"é"},
+    {"input":{"text":" x xa              　y"},"output":"x xa              　y"},
+    {"input":{"text":"﻿aaé a              　y"},"output":"aaé a              　y"},
+    {"input":{"text":" 😀  a  "},"output":"😀  a"},
+    {"input":{"text":"x"},"output":"x"},
+    {"input":{"text":"              　ya​x​a﻿x﻿a​x​a "},"output":"ya​x​a﻿x﻿a​x​a"},
+    {"input":{"text":"é aaa​x​"},"output":"é aaa​x​"},
+    {"input":{"text":"aaxa 😀 "},"output":"aaxa 😀"},
+    {"input":{"text":"aa"},"output":"aa"},
+    {"input":{"text":"xa a x a              　y"},"output":"xa a x a              　y"},
+    {"input":{"text":" x "},"output":"x"},
+    {"input":{"text":"﻿x﻿a              　ya              　yaa x "},"output":"x﻿a              　ya              　yaa x"},
+    {"input":{"text":"é  😀 x"},"output":"é  😀 x"},
+    {"input":{"text":" x \t\n\u000b\f\r xx a               　y"},"output":"x \t\n\u000b\f\r xx a               　y"},
+    {"input":{"text":"              　ya﻿aa﻿a"},"output":"ya﻿aa﻿a"},
+    {"input":{"text":" x  😀  ᠎x᠎﻿"},"output":"x  😀  ᠎x᠎"},
+    {"input":{"text":"﻿ x "},"output":"x"},
+    {"input":{"text":"é ﻿"},"output":"é"},
+    {"input":{"text":"a a ﻿x﻿"},"output":"a a ﻿x﻿"},
+    {"input":{"text":"﻿x﻿ 😀 ﻿x﻿ a  a "},"output":"x﻿ 😀 ﻿x﻿ a  a"},
+    {"input":{"text":" 😀 a x aé aaa 😀 "},"output":"😀 a x aé aaa 😀"},
+    {"input":{"text":" 😀 "},"output":"😀"},
+    {"input":{"text":"﻿﻿  a "},"output":"a"},
+    {"input":{"text":"​x​a x a x "},"output":"​x​a x a x"},
+    {"input":{"text":" 😀 a​x​aaa\t\n\u000b\f\r xa a "},"output":"😀 a​x​aaa\t\n\u000b\f\r xa a"},
+    {"input":{"text":" a ﻿x"},"output":"a ﻿x"},
+    {"input":{"text":"﻿x﻿x 😀 "},"output":"x﻿x 😀"},
+    {"input":{"text":" ax"},"output":"ax"},
+    {"input":{"text":"﻿a﻿x﻿a᠎x᠎"},"output":"a﻿x﻿a᠎x᠎"},
+    {"input":{"text":"\t\n\u000b\f\r x"},"output":"x"},
+    {"input":{"text":"              　y\t\n\u000b\f\r x"},"output":"y\t\n\u000b\f\r x"},
+    {"input":{"text":" x  😀  a ﻿"},"output":"x  😀  a"},
+    {"input":{"text":"a"},"output":"a"},
+    {"input":{"text":"              　ya﻿x﻿"},"output":"ya﻿x"},
+    {"input":{"text":" x a﻿x﻿aa"},"output":"x a﻿x﻿aa"},
+    {"input":{"text":""},"output":""},
+    {"input":{"text":" a "},"output":"a"},
+    {"input":{"text":" 😀 "},"output":"😀"},
+    {"input":{"text":"᠎x᠎aaaé "},"output":"᠎x᠎aaaé"},
+    {"input":{"text":" x  x  a "},"output":"x  x  a"},
+    {"input":{"text":"﻿﻿x﻿᠎x᠎​x​"},"output":"﻿x﻿᠎x᠎​x​"},
+    {"input":{"text":"﻿x﻿é  a "},"output":"x﻿é  a"},
+    {"input":{"text":" a "},"output":"a"},
+    {"input":{"text":"﻿x﻿a​x​"},"output":"x﻿a​x​"},
+    {"input":{"text":"xa\t\n\u000b\f\r x"},"output":"xa\t\n\u000b\f\r x"},
+    {"input":{"text":"x\t\n\u000b\f\r x﻿x﻿"},"output":"x\t\n\u000b\f\r x﻿x"},
+    {"input":{"text":"​x​a x a a a​x​a"},"output":"​x​a x a a a​x​a"},
+    {"input":{"text":"é a\t\n\u000b\f\r xa a a﻿a​x​"},"output":"é a\t\n\u000b\f\r xa a a﻿a​x​"},
+    {"input":{"text":"\t\n\u000b\f\r x"},"output":"x"},
+    {"input":{"text":"aa﻿x﻿ x  "},"output":"aa﻿x﻿ x"},
+    {"input":{"text":"é a᠎x᠎"},"output":"é a᠎x᠎"},
+    {"input":{"text":"aé a﻿"},"output":"aé a"},
+    {"input":{"text":" a               　y              　y x "},"output":"a               　y              　y x"},
+    {"input":{"text":"​x​a a ​x​              　y"},"output":"​x​a a ​x​              　y"},
+    {"input":{"text":" x               　y﻿"},"output":"x               　y"},
+    {"input":{"text":" aa"},"output":"aa"},
+    {"input":{"text":"\t\n\u000b\f\r xé               　y"},"output":"xé               　y"},
+    {"input":{"text":"a a "},"output":"a a"},
+    {"input":{"text":"aaxaaaa "},"output":"aaxaaaa"},
+    {"input":{"text":" x a a a 😀 "},"output":"x a a a 😀"},
+    {"input":{"text":"\t\n\u000b\f\r xaaaa﻿"},"output":"xaaaa"},
+    {"input":{"text":"᠎x᠎"},"output":"᠎x᠎"},
+    {"input":{"text":" a  😀  a "},"output":" a  😀  a"},
+    {"input":{"text":" x  😀 "},"output":"x  😀"},
+    {"input":{"text":"᠎x᠎ x "},"output":"᠎x᠎ x"},
+    {"input":{"text":"é "},"output":"é"},
+    {"input":{"text":"              　y﻿x﻿﻿ x "},"output":"y﻿x﻿﻿ x"},
+    {"input":{"text":" a "},"output":"a"},
+    {"input":{"text":" x a\t\n\u000b\f\r xa x aaa\t\n\u000b\f\r x"},"output":"x a\t\n\u000b\f\r xa x aaa\t\n\u000b\f\r x"},
+    {"input":{"text":"᠎x᠎a​x​"},"output":"᠎x᠎a​x​"},
+    {"input":{"text":"​x​a a a a x "},"output":"​x​a a a a x"},
+    {"input":{"text":" a﻿x﻿aé aé a 😀 "},"output":"a﻿x﻿aé aé a 😀"},
+    {"input":{"text":"﻿x﻿a x a x "},"output":"x﻿a x a x"},
+    {"input":{"text":"a x a\t\n\u000b\f\r xa a "},"output":"a x a\t\n\u000b\f\r xa a"},
+    {"input":{"text":"﻿a﻿"},"output":"a"},
+    {"input":{"text":"              　yaaxa﻿"},"output":"yaaxa"},
+    {"input":{"text":"x"},"output":"x"}
+  ]
+}

@@ -9,6 +9,10 @@
 //! golden output from the real engine (`tests/fixtures/js/`).
 pub mod collate;
 pub mod date;
+pub mod iso;
 pub mod json;
+pub mod math;
 pub mod number;
+pub mod path_win32;
 pub mod ser;
+pub mod string;

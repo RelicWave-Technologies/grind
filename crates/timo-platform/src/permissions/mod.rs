@@ -5,6 +5,12 @@
 //! every query reports "granted" there, as legacy does for every non-macOS
 //! platform. Other targets return [`PlatformError::Unsupported`].
 //!
+//! The input listener is gated on **Accessibility** alone, like `uiohook-napi`
+//! (libuiohook creates an active tap and checks `AXIsProcessTrusted` first) and like
+//! legacy's `hasAccessibilityAccess`. The Input Monitoring calls below exist for the
+//! app's own UI and for diagnosing a tap that cannot be created; they do not decide
+//! whether input counting starts.
+//!
 //! Ports of `legacy/agent/src/main/services/permissions.ts` and the openers in
 //! `ipc/settings.ts`.
 

@@ -8,14 +8,17 @@
 //! Type, click, move the mouse and scroll while it runs. To see power events,
 //! lock the screen (Ctrl+Cmd+Q on macOS, Win+L on Windows) or sleep the machine.
 //!
-//! macOS: the *terminal* you run this from needs Input Monitoring
-//! (System Settings → Privacy & Security → Input Monitoring). Without it the
-//! probe prints the exact error and shows zero counts — it never fakes numbers.
+//! macOS: the *terminal* you run this from needs Accessibility (System Settings →
+//! Privacy & Security → Accessibility) — the same grant `uiohook-napi` is gated on.
+//! Without it the probe prints the exact error and shows zero counts — it never
+//! fakes numbers. The main thread pumps its run loop, because macOS delivers the
+//! lock / screensaver notifications there (a real app's main thread does the same).
 #![allow(
+    unsafe_code,
     clippy::print_stdout,
     clippy::float_arithmetic,
     clippy::too_many_lines,
-    reason = "a probe exists to print; the distance is a throwaway float sum"
+    reason = "a probe exists to print; the distance is a throwaway float sum; one CoreFoundation call pumps the main run loop"
 )]
 
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -26,6 +29,32 @@ use timo_platform::idle::{IdleState, system_idle_seconds, system_idle_state};
 use timo_platform::input::{InputEvent, InputListener, MoveThrottle};
 use timo_platform::permissions::{self, ScreenStatus};
 use timo_platform::power::{PowerEvent, PowerMonitor};
+
+/// Wait up to `ms` milliseconds. On macOS that is a slice of the main run loop, which
+/// is what services `NSDistributedNotificationCenter` (lock / unlock / screensaver).
+#[cfg(target_os = "macos")]
+fn pump_main_run_loop(ms: u64) {
+    use std::ffi::c_void;
+    #[link(name = "CoreFoundation", kind = "framework")]
+    unsafe extern "C" {
+        static kCFRunLoopDefaultMode: *const c_void;
+        fn CFRunLoopRunInMode(mode: *const c_void, seconds: f64, return_after_source: bool) -> i32;
+    }
+    // SAFETY: runs the calling (main) thread's loop in the default mode for a short slice.
+    let outcome = unsafe {
+        let seconds = Duration::from_millis(ms).as_secs_f64();
+        CFRunLoopRunInMode(kCFRunLoopDefaultMode, seconds, false)
+    };
+    if outcome == 1 {
+        // kCFRunLoopRunFinished: nothing to service yet, so do not spin.
+        std::thread::sleep(Duration::from_millis(ms));
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn pump_main_run_loop(ms: u64) {
+    std::thread::sleep(Duration::from_millis(ms));
+}
 
 #[derive(Default)]
 struct Counts {
@@ -106,7 +135,7 @@ fn main() {
         }
         InputEvent::MouseMove { x, y } => {
             sink_counts.moves_raw.fetch_add(1, Ordering::Relaxed);
-            let now_ms = i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX);
+            let now_ms = started.elapsed().as_secs_f64() * 1000.0;
             let admitted = throttle.lock().is_ok_and(|mut t| t.admit(now_ms));
             if admitted {
                 sink_counts.moves_throttled.fetch_add(1, Ordering::Relaxed);
@@ -150,7 +179,7 @@ fn main() {
                 system_idle_seconds().ok(),
             );
         }
-        std::thread::sleep(Duration::from_millis(20));
+        pump_main_run_loop(20);
     }
 
     if let Ok(mut l) = listener {

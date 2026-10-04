@@ -102,7 +102,7 @@ pub struct ReconcileInput {
 }
 
 /// Port of `packages/core/src/todayLedger.ts::canonical`.
-fn canonical(entry: &TimeEntry) -> Result<String, CoreError> {
+pub(crate) fn canonical(entry: &TimeEntry) -> Result<String, CoreError> {
     canonical_timer_entry_payload(&CanonicalTimerEntryLike {
         id: entry.id.clone(),
         client_uuid: entry.client_uuid.clone(),

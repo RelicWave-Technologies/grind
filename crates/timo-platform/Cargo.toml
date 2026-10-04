@@ -9,6 +9,16 @@ publish.workspace = true
 [dependencies]
 thiserror.workspace = true
 tracing.workspace = true
+timo-core.workspace = true
+# Screenshot encode pipeline (feature `encode`, on by default). `webp` vendors
+# libwebp's C and cannot be compiled for Windows from a Mac without the MSVC
+# headers, so `--no-default-features` is how a Mac type-checks the Windows OS code.
+webp = { workspace = true, optional = true }
+fast_image_resize = { workspace = true, optional = true }
+
+[features]
+default = ["encode"]
+encode = ["dep:webp", "dep:fast_image_resize"]
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2.workspace = true
@@ -18,18 +28,33 @@ objc2-app-kit.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { workspace = true, features = [
+    "Win32_Devices_Display",
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
     "Win32_Security",
+    "Win32_Security_Cryptography",
     "Win32_System_LibraryLoader",
     "Win32_System_Power",
     "Win32_System_RemoteDesktop",
     "Win32_System_SystemInformation",
     "Win32_System_Threading",
+    "Win32_UI_HiDpi",
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ] }
+
+[dev-dependencies]
+png.workspace = true
+serde_json.workspace = true
+
+[[test]]
+name = "capture_parity"
+required-features = ["encode"]
+
+[[example]]
+name = "capture_probe"
+required-features = ["encode"]
 
 [lints]
 workspace = true

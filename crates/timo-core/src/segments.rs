@@ -20,7 +20,9 @@ use serde::Deserialize;
 
 use crate::error::CoreError;
 use crate::js::number::{add, max, number_to_string as fmt};
-use crate::types::{AgentCloseReason, Segment, SegmentKind, TimeEntry, TimeEntrySource};
+use crate::types::{
+    AgentCloseReason, EntryShape, Segment, SegmentKind, TimeEntry, TimeEntrySource,
+};
 
 fn segment_error(message: String) -> CoreError {
     CoreError::Segment(message)
@@ -67,6 +69,7 @@ pub fn create_time_entry(args: &CreateArgs) -> TimeEntry {
             started_at: args.started_at,
             ended_at: None,
         }],
+        shape: EntryShape::default(),
     }
 }
 

@@ -19,11 +19,19 @@ serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = { version = "=1.0.151", features = ["float_roundtrip"] }
 thiserror = "=2.0.21"
 tracing = "=0.1.44"
-# Root-locale collation: reproduces JavaScript's `String.prototype.localeCompare`
-# (ICU) for the sort tiebreaks in timo-core.
-icu_collator = "=2.3.1"
+# Collation: reproduces JavaScript's `String.prototype.localeCompare` for the sort tiebreaks in
+# timo-core, under the process's ICU default locale. 1.5.0 is the CLDR 44 generation of Electron 33's
+# ICU 74.2 (the oracle); the 2.x data collates as ICU 78 does. See crates/timo-core/PARITY.md, "Locale".
+icu_collator = "=1.5.0"
+# Parses the locale tag the collator is built for (the ICU default locale, see js::collate).
+icu_locid = "=1.5.0"
 # ECMAScript Number::toString (shortest round-trip digits, JS exponent rules).
 ryu-js = "=1.0.3"
+# Business-day maths (timo-core::tz). Electron 33.2.0's ICU carries tzdata 2024a
+# (see crates/timo-core/PARITY.md), so the data crate is pinned to the release
+# that embeds 2024a, not the newest. jiff itself only reads TZif (no bundled db,
+# no system db): the data is exactly jiff-tzdb's, on every OS.
+jiff-tzdb = "=0.1.0"
 
 # Desktop shell (apps/desktop/src-tauri). Tauri 3 is alpha, so the shell stays on
 # 2.x; the JS side (@tauri-apps/api, @tauri-apps/cli) is pinned to the same 2.12.1.
@@ -46,6 +54,43 @@ block2 = "=0.6.2"
 objc2-foundation = { version = "=0.3.2", default-features = false, features = ["std", "block2", "NSNotification", "NSDistributedNotificationCenter", "NSOperation", "NSString", "NSObject"] }
 objc2-app-kit = { version = "=0.3.2", default-features = false, features = ["std", "NSWorkspace"] }
 windows = "=0.62.2"
+
+# timo-sync (HTTP, auth, tokens) and timo-store (SQLite). Exact pins, like the rest.
+# reqwest 0.13.5 and tokio 1.53.2 are what Tauri already locks, so no second copy
+# of either is built. TLS is rustls with the platform verifier (the `tls` feature
+# of timo-sync turns on reqwest's `rustls`), never OpenSSL, so Windows needs no
+# system library. It is a feature because a Mac cannot build aws-lc/ring or
+# SQLite's C for x86_64-pc-windows-msvc (no Windows SDK headers):
+# `cargo clippy -p timo-sync -p timo-store --no-default-features --target
+# x86_64-pc-windows-msvc` checks all the Rust without them.
+reqwest = { version = "=0.13.5", default-features = false, features = ["multipart", "system-proxy"] }
+tokio = { version = "=1.53.2", features = ["rt", "sync", "time", "macros", "fs"] }
+# `bundled` is timo-store's default feature: the SQLite we test is the SQLite we ship.
+rusqlite = { version = "=0.40.2" }
+# OS keychain (macOS Keychain, Windows Credential Manager) for the session.
+keyring = { version = "=4.2.0", default-features = false, features = ["v1"] }
+sha2 = "=0.10.9"
+base64 = "=0.22.1"
+getrandom = "=0.3.4"
+gethostname = "=1.1.0"
+# Chromium os_crypt (Electron safeStorage) decryption, for the one-time import
+# of the Electron agent's tokens.bin / pending-lark-login.bin.
+sha1 = "=0.10.6"
+pbkdf2 = { version = "=0.12.2", default-features = false, features = ["hmac"] }
+aes = "=0.8.4"
+cbc = "=0.1.2"
+aes-gcm = "=0.10.3"
+
+# timo-platform screenshot pipeline: libwebp (the encoder sharp wraps) and a SIMD
+# resizer. `webp` without its default `image` feature: we only need the encoder.
+webp = { version = "=0.3.1", default-features = false }
+fast_image_resize = "=6.1.0"
+# Dev-only: decode the parity fixtures' source frames.
+png = "=0.18.1"
+
+# timo-core timer engine (async driver, shared in-flight futures). The 0.3.34 Tauri
+# already locks.
+futures-util = { version = "=0.3.34", default-features = false, features = ["std", "alloc"] }
 
 timo-core = { path = "crates/timo-core" }
 timo-store = { path = "crates/timo-store" }
@@ -89,3 +134,10 @@ opt-level = "s"
 lto = true
 codegen-units = 1
 strip = true
+
+# Debug builds of the screenshot encoder are ~50x too slow to test at -O0 (libwebp's
+# C is compiled with the package's opt-level too).
+[profile.dev.package.libwebp-sys]
+opt-level = 3
+[profile.dev.package.fast_image_resize]
+opt-level = 3

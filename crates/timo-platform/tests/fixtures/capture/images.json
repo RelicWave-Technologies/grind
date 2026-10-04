@@ -1,0 +1,74 @@
+{
+  "quality": 82,
+  "maxEdge": 2560,
+  "sharp": {
+    "sharp": "0.33.5",
+    "vips": "8.15.3",
+    "webp": "1.4.0"
+  },
+  "images": [
+    {
+      "name": "ui_1920x1080",
+      "width": 1920,
+      "height": 1080,
+      "sourceRgbSha256": "5ea0a89079fa29e9f15cb9f08b741d3d7a43502e60a8be2ed7e91e931e6d951c",
+      "webpWidth": 1920,
+      "webpHeight": 1080,
+      "webpBytes": 12474
+    },
+    {
+      "name": "ui_2560x1655",
+      "width": 2560,
+      "height": 1655,
+      "sourceRgbSha256": "3b93d2b3f6dbecbe8ce45817328e8d3ce9c110734e61137f4048af2348e9228a",
+      "webpWidth": 2560,
+      "webpHeight": 1655,
+      "webpBytes": 18214
+    },
+    {
+      "name": "ui_3456x2234",
+      "width": 3456,
+      "height": 2234,
+      "sourceRgbSha256": "565ac5518da58cc2b85b63da1efdbdb9f88a8dfe44c8a5195e3e42ee8ac66b7f",
+      "webpWidth": 2560,
+      "webpHeight": 1655,
+      "webpBytes": 20824
+    },
+    {
+      "name": "ui_1440x2800",
+      "width": 1440,
+      "height": 2800,
+      "sourceRgbSha256": "cfed9c1ca3f28a4cb68204f6674795a74ce8ecab54d6f337d0b19c695b831d87",
+      "webpWidth": 1317,
+      "webpHeight": 2560,
+      "webpBytes": 20564
+    },
+    {
+      "name": "ui_320x200",
+      "width": 320,
+      "height": 200,
+      "sourceRgbSha256": "1343ffb91f0bdea95df0e259810ba8151b5fefc8339b138d07bd400532aaec3f",
+      "webpWidth": 320,
+      "webpHeight": 200,
+      "webpBytes": 1926
+    },
+    {
+      "name": "photo_640x360",
+      "width": 640,
+      "height": 360,
+      "sourceRgbSha256": "a0787b14472d01bab02650cda513e4af01ab6dae219e7e45a25302aa1c6995b1",
+      "webpWidth": 640,
+      "webpHeight": 360,
+      "webpBytes": 9650
+    },
+    {
+      "name": "photo_2600x900",
+      "width": 2600,
+      "height": 900,
+      "sourceRgbSha256": "c07bf4db3a876b31fc3a0c63b025b92d550771d5186a8dae9bf76f5c96c127e0",
+      "webpWidth": 2560,
+      "webpHeight": 886,
+      "webpBytes": 34090
+    }
+  ]
+}

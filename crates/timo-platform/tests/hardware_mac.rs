@@ -1,6 +1,6 @@
 //! macOS hardware tests: they need a logged-in GUI session and the terminal (or
-//! the test binary's responsible app) to have Input Monitoring *and* Accessibility
-//! (Accessibility is what lets `CGEventPost` inject the synthetic events).
+//! the test binary's responsible app) to have Accessibility — the grant the active
+//! event tap is gated on, and what lets `CGEventPost` inject the synthetic events.
 //!
 //! ```text
 //! cargo test -p timo-platform --test hardware_mac -- --ignored --nocapture --test-threads=1
@@ -100,7 +100,7 @@ fn other_button(kind: u32, at: CGPoint) {
 }
 
 #[test]
-#[ignore = "needs a GUI session with Input Monitoring + Accessibility; see the file header"]
+#[ignore = "needs a GUI session with Accessibility; see the file header"]
 fn synthetic_input_is_counted_exactly_as_legacy_would_count_it() {
     let seen = Arc::new(Mutex::new(Vec::<InputEvent>::new()));
     let sink_seen = Arc::clone(&seen);
@@ -109,7 +109,7 @@ fn synthetic_input_is_counted_exactly_as_legacy_would_count_it() {
             v.push(e);
         }
     }))
-    .expect("listener starts (Input Monitoring granted?)");
+    .expect("listener starts (Accessibility granted?)");
     std::thread::sleep(Duration::from_millis(300));
 
     // A human using the machine adds real events to the stream, so exact counts are
@@ -181,7 +181,7 @@ fn assert_counts(events: &[InputEvent], with_key: bool, hands_off: bool) {
 }
 
 #[test]
-#[ignore = "needs a GUI session with Input Monitoring; see the file header"]
+#[ignore = "needs a GUI session with Accessibility; see the file header"]
 fn stop_is_clean_and_listener_can_restart() {
     for round in 0..3 {
         let mut listener = InputListener::start(Arc::new(|_: InputEvent| {}))
@@ -206,6 +206,26 @@ fn a_second_listener_is_refused() {
         InputListener::start(Arc::new(|_: InputEvent| {})).is_ok(),
         "restart after drop works"
     );
+}
+
+#[test]
+#[ignore = "needs a GUI session with Accessibility; see the file header"]
+fn a_stopped_handle_never_frees_a_newer_listeners_slot() {
+    let sink = || Arc::new(|_: InputEvent| {});
+    let mut first = InputListener::start(sink()).expect("first starts");
+    first.stop();
+    first.stop(); // repeated stop is a no-op
+    let second = InputListener::start(sink()).expect("second starts after first stopped");
+    drop(first); // Drop after stop must not release the second's slot
+    assert!(
+        matches!(
+            InputListener::start(sink()),
+            Err(timo_platform::PlatformError::AlreadyRunning(_))
+        ),
+        "third was admitted while second is still running"
+    );
+    drop(second);
+    assert!(InputListener::start(sink()).is_ok(), "slot is free again");
 }
 
 #[test]

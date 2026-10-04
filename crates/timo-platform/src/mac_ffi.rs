@@ -36,7 +36,7 @@ pub(crate) struct CGPoint {
 // CGEventTapLocation / Placement / Options.
 pub(crate) const K_CG_SESSION_EVENT_TAP: u32 = 1;
 pub(crate) const K_CG_HEAD_INSERT_EVENT_TAP: u32 = 0;
-pub(crate) const K_CG_EVENT_TAP_OPTION_LISTEN_ONLY: u32 = 1;
+pub(crate) const K_CG_EVENT_TAP_OPTION_DEFAULT: u32 = 0;
 
 // CGEventField.
 pub(crate) const K_CG_KEYBOARD_EVENT_KEYCODE: u32 = 9;
@@ -82,7 +82,69 @@ unsafe extern "C" {
         return_after_source: bool,
     ) -> i32;
     pub(crate) fn CFRunLoopStop(rl: CFRunLoopRef);
+    pub(crate) fn CFRunLoopWakeUp(rl: CFRunLoopRef);
+    pub(crate) fn CFRunLoopPerformBlock(rl: CFRunLoopRef, mode: CFTypeRef, block: *const c_void);
+    pub(crate) fn CFRetain(cf: CFTypeRef) -> CFTypeRef;
     pub(crate) fn CFRelease(cf: CFTypeRef);
+}
+
+/// An owned (+1) reference to a worker thread's `CFRunLoop`, so another thread can
+/// ask it to stop without racing the worker's exit.
+///
+/// `CFRunLoopGetCurrent` returns a *borrowed* reference that the run loop's own
+/// thread releases when it exits. Publishing that raw pointer to a stopper thread
+/// is a use-after-free if the worker finishes first. Retaining it here makes the
+/// pointer valid until this value is dropped, whatever the worker does; drop it
+/// only after the worker has been joined.
+#[derive(Debug)]
+pub(crate) struct OwnedRunLoop(CFRunLoopRef);
+
+// SAFETY: the pointer is an owned CF reference; the only calls made through it from other threads are CFRunLoopStop, CFRunLoopPerformBlock, CFRunLoopWakeUp and CFRelease, all documented thread-safe.
+unsafe impl Send for OwnedRunLoop {}
+// SAFETY: as above — every method takes `&self` and calls only thread-safe CoreFoundation functions.
+unsafe impl Sync for OwnedRunLoop {}
+
+impl OwnedRunLoop {
+    /// Retain the calling thread's run loop. `None` if CoreFoundation gave none.
+    pub(crate) fn retain_current() -> Option<Self> {
+        // SAFETY: returns the calling thread's run loop (borrowed); retaining it here makes it ours.
+        let run_loop = unsafe { CFRunLoopGetCurrent() };
+        if run_loop.is_null() {
+            return None;
+        }
+        // SAFETY: `run_loop` is a live CFRunLoop; CFRetain returns the same object with +1.
+        unsafe { CFRetain(run_loop.cast_const()) };
+        Some(Self(run_loop))
+    }
+
+    /// `CFRunLoopStop`: makes the run loop's current `CFRunLoopRunInMode` return.
+    pub(crate) fn stop(&self) {
+        // SAFETY: `self.0` is an owned reference, alive until `self` drops; CFRunLoopStop is thread-safe.
+        unsafe { CFRunLoopStop(self.0) };
+    }
+
+    /// Queue `block` to run on the run loop's own thread (in its default mode) the
+    /// next time it runs, from any thread, and wake it. CoreFoundation copies the
+    /// block, so the caller's reference may be dropped straight away. This is how a
+    /// notification delivered on another thread is handed to the monitor thread.
+    pub(crate) fn perform(&self, block: &block2::Block<dyn Fn()>) {
+        // SAFETY: `self.0` is an owned run loop; `block` is a live Objective-C block that CFRunLoopPerformBlock copies; the mode is a valid CFString constant.
+        unsafe {
+            CFRunLoopPerformBlock(
+                self.0,
+                kCFRunLoopDefaultMode,
+                std::ptr::from_ref(block).cast(),
+            );
+            CFRunLoopWakeUp(self.0);
+        }
+    }
+}
+
+impl Drop for OwnedRunLoop {
+    fn drop(&mut self) {
+        // SAFETY: balances the CFRetain in `retain_current`; the reference is not used afterwards.
+        unsafe { CFRelease(self.0.cast_const()) };
+    }
 }
 
 #[link(name = "CoreGraphics", kind = "framework")]

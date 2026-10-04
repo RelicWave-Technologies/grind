@@ -5,8 +5,9 @@
   "type": "module",
   "description": "Golden-fixture harness for the Rust port: runs the real TypeScript over hand-picked and seeded random cases and writes the results into the Rust crates' tests/fixtures/.",
   "scripts": {
-    "fixtures": "tsx src/run.ts",
-    "check": "tsx src/run.ts --check",
+    "fixtures": "tsx src/run.ts && tsx src/captureFixtures.ts",
+    "check": "tsx src/run.ts --check && tsx src/captureFixtures.ts --check",
+    "capture-fixtures": "tsx src/captureFixtures.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {

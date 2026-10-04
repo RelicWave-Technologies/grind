@@ -9,7 +9,13 @@
 //! | `Shutdown` | `NSWorkspaceWillPowerOffNotification` (shutdown, restart, log out) |
 //! | idle "locked" bit | the lock pair above plus `com.apple.screensaver.didstart` / `didstop` |
 //!
-//! Everything runs on one dedicated thread's run loop; the sink is called there.
+//! The sink is only ever called on the monitor thread. `IOKit` delivers there
+//! directly. The distributed and workspace notifications are delivered by
+//! Foundation on the **main** thread — which therefore must be running its run
+//! loop (it does in a Tauri/AppKit app; a bare `main` has to pump it, see
+//! `examples/probe.rs`). Each one updates the lock flag where it arrives (an
+//! atomic) and hands the sink call to the monitor thread with
+//! `CFRunLoopPerformBlock`, so the sink never runs anywhere else.
 
 use std::ffi::c_void;
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -38,15 +44,11 @@ type Token = Retained<ProtocolObject<dyn NSObjectProtocol>>;
 #[derive(Debug)]
 pub(super) struct Backend {
     stop: Arc<AtomicBool>,
-    run_loop: RunLoop,
+    /// Shared with the notification handlers that post to the monitor thread; the
+    /// run loop is released when the last holder lets go, which is after the join.
+    run_loop: Option<Arc<ffi::OwnedRunLoop>>,
     thread: Option<JoinHandle<()>>,
 }
-
-#[derive(Clone, Copy, Debug)]
-struct RunLoop(ffi::CFRunLoopRef);
-
-// SAFETY: only `CFRunLoopStop` is called through it from other threads, which Apple documents as thread-safe.
-unsafe impl Send for RunLoop {}
 
 struct PowerCtx {
     sink: Arc<dyn PowerSink>,
@@ -75,7 +77,7 @@ impl Backend {
         match ready_rx.recv() {
             Ok(Ok(run_loop)) => Ok(Self {
                 stop,
-                run_loop,
+                run_loop: Some(run_loop),
                 thread: Some(thread),
             }),
             Ok(Err(error)) => {
@@ -92,32 +94,49 @@ impl Backend {
         }
     }
 
+    /// Idempotent. Flag, stop the loop (our retained reference keeps the pointer valid
+    /// even if the worker already exited), join, then let the reference go.
     pub(super) fn stop(&mut self) {
         self.stop.store(true, Ordering::SeqCst);
-        // SAFETY: the run loop belongs to a thread we have not joined yet; `CFRunLoopStop` is thread-safe.
-        unsafe { ffi::CFRunLoopStop(self.run_loop.0) };
+        if let Some(run_loop) = &self.run_loop {
+            run_loop.stop();
+        }
         if let Some(thread) = self.thread.take() {
             thread.join().ok();
         }
+        self.run_loop = None;
+    }
+}
+
+impl Drop for Backend {
+    fn drop(&mut self) {
+        self.stop();
     }
 }
 
 fn run(
     sink: &Arc<dyn PowerSink>,
     stop: &AtomicBool,
-    ready: &mpsc::Sender<Result<RunLoop, PlatformError>>,
+    ready: &mpsc::Sender<Result<Arc<ffi::OwnedRunLoop>, PlatformError>>,
 ) {
     autoreleasepool(|_| {
-        let registration = match register(sink) {
+        let Some(run_loop) = ffi::OwnedRunLoop::retain_current().map(Arc::new) else {
+            ready
+                .send(Err(PlatformError::os(
+                    "CFRunLoopGetCurrent",
+                    "returned null",
+                )))
+                .ok();
+            return;
+        };
+        let registration = match register(sink, &run_loop) {
             Ok(registration) => registration,
             Err(error) => {
                 ready.send(Err(error)).ok();
                 return;
             }
         };
-        // SAFETY: returns the current thread's run loop.
-        let run_loop = unsafe { ffi::CFRunLoopGetCurrent() };
-        ready.send(Ok(RunLoop(run_loop))).ok();
+        ready.send(Ok(run_loop)).ok();
         while !stop.load(Ordering::SeqCst) {
             // SAFETY: running this thread's loop in the default mode for a short slice.
             let outcome = unsafe {
@@ -127,12 +146,18 @@ fn run(
                 std::thread::sleep(std::time::Duration::from_millis(50));
             }
         }
+        // Flush blocks already queued for this thread so a lock event that beat `stop` is delivered.
+        // SAFETY: a zero-length slice of this thread's loop in the default mode.
+        unsafe { ffi::CFRunLoopRunInMode(ffi::kCFRunLoopDefaultMode, 0.0, false) };
         // SAFETY: the loop has exited; `registration` came from `register` and is torn down once.
         unsafe { unregister(&registration) };
     });
 }
 
-fn register(sink: &Arc<dyn PowerSink>) -> Result<Registration, PlatformError> {
+fn register(
+    sink: &Arc<dyn PowerSink>,
+    run_loop: &Arc<ffi::OwnedRunLoop>,
+) -> Result<Registration, PlatformError> {
     let ctx = Box::into_raw(Box::new(PowerCtx {
         sink: Arc::clone(sink),
         gate: Mutex::new(SuspendGate::default()),
@@ -167,19 +192,29 @@ fn register(sink: &Arc<dyn PowerSink>) -> Result<Registration, PlatformError> {
         ctx,
         port,
         notifier,
-        centers: observe_notifications(sink),
+        centers: observe_notifications(sink, run_loop),
     })
 }
 
 type Handler = Box<dyn Fn()>;
 
-/// A handler that updates a session flag, then (optionally) tells the sink.
-fn session_handler(sink: &Arc<dyn PowerSink>, update: fn(), event: Option<PowerEvent>) -> Handler {
+/// A handler that updates a session flag where the notification arrives (an atomic,
+/// so the idle state is current at once) and hands the sink call to the monitor
+/// thread. It runs on whatever thread Foundation delivers on — the main thread.
+fn session_handler(
+    sink: &Arc<dyn PowerSink>,
+    run_loop: &Arc<ffi::OwnedRunLoop>,
+    update: fn(),
+    event: Option<PowerEvent>,
+) -> Handler {
     let sink = Arc::clone(sink);
+    let run_loop = Arc::clone(run_loop);
     Box::new(move || {
         update();
         if let Some(event) = event {
-            deliver(&*sink, event);
+            let sink = Arc::clone(&sink);
+            let block = RcBlock::new(move || deliver(&*sink, event));
+            run_loop.perform(&block);
         }
     })
 }
@@ -187,6 +222,7 @@ fn session_handler(sink: &Arc<dyn PowerSink>, update: fn(), event: Option<PowerE
 /// Subscribe to the lock/unlock/screensaver and power-off notifications.
 fn observe_notifications(
     sink: &Arc<dyn PowerSink>,
+    run_loop: &Arc<ffi::OwnedRunLoop>,
 ) -> Vec<(Retained<NSNotificationCenter>, Token)> {
     let distributed: Retained<NSNotificationCenter> =
         NSDistributedNotificationCenter::defaultCenter().into_super();
@@ -196,6 +232,7 @@ fn observe_notifications(
             "com.apple.screenIsLocked",
             session_handler(
                 sink,
+                run_loop,
                 || session::set_locked(true),
                 Some(PowerEvent::LockScreen),
             ),
@@ -204,17 +241,18 @@ fn observe_notifications(
             "com.apple.screenIsUnlocked",
             session_handler(
                 sink,
+                run_loop,
                 || session::set_locked(false),
                 Some(PowerEvent::UnlockScreen),
             ),
         ),
         (
             "com.apple.screensaver.didstart",
-            session_handler(sink, || session::set_screensaver(true), None),
+            session_handler(sink, run_loop, || session::set_screensaver(true), None),
         ),
         (
             "com.apple.screensaver.didstop",
-            session_handler(sink, || session::set_screensaver(false), None),
+            session_handler(sink, run_loop, || session::set_screensaver(false), None),
         ),
     ];
     let mut centers: Vec<_> = on_distributed
@@ -226,7 +264,7 @@ fn observe_notifications(
         .collect();
     // SAFETY: reading an immutable AppKit string constant.
     let power_off = unsafe { NSWorkspaceWillPowerOffNotification };
-    let shutdown = session_handler(sink, || {}, Some(PowerEvent::Shutdown));
+    let shutdown = session_handler(sink, run_loop, || {}, Some(PowerEvent::Shutdown));
     centers.push((
         workspace.clone(),
         add_observer(&workspace, power_off, shutdown),
@@ -236,7 +274,7 @@ fn observe_notifications(
 
 fn add_observer(center: &NSNotificationCenter, name: &NSString, handler: Handler) -> Token {
     let block = RcBlock::new(move |_: NonNull<NSNotification>| handler());
-    // SAFETY: nil object and queue are allowed (the block then runs on the posting thread); the block is 'static.
+    // SAFETY: nil object and queue are allowed (the block then runs on the delivering thread, the main one; the handlers hop to the monitor thread); the block is 'static.
     unsafe { center.addObserverForName_object_queue_usingBlock(Some(name), None, None, &block) }
 }
 

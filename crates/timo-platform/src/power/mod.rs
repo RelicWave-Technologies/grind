@@ -12,6 +12,12 @@
 //! thread, before the OS is told it may proceed** — on macOS before
 //! `IOAllowPowerChange`, on Windows before the window procedure returns.
 //!
+//! **macOS needs the main run loop running.** Foundation delivers the lock,
+//! screensaver and power-off notifications on the main thread, so a host whose main
+//! thread never runs its run loop never sees them. A Tauri/AppKit app does; a bare
+//! `main` must pump it (`examples/probe.rs` does). The monitor then hands each one
+//! to its own thread, so the sink is still only ever called there.
+//!
 //! That ordering is the reliability guarantee: legacy stamps "when did the user
 //! go away" with `Date.now()` inside the `suspend` handler, and a handler that
 //! ran after the machine had slept would bill the whole sleep. So the sink must
@@ -19,7 +25,9 @@
 //! that blocks delays sleep (macOS allows up to 30 s) or shutdown. Panics in the
 //! sink are contained and logged; they never stop delivery or power transitions.
 //!
-//! Events arrive in the order the OS emitted them.
+//! Events from one source arrive in the order the OS emitted them. On macOS the
+//! lock and shutdown notifications take a hop through the main thread, so they can
+//! arrive a moment after a suspend/resume that the OS emitted later.
 
 use std::sync::Arc;
 
@@ -30,6 +38,8 @@ mod mac;
 #[cfg(target_os = "macos")]
 use mac as imp;
 
+#[cfg(target_os = "windows")]
+mod win_session;
 #[cfg(target_os = "windows")]
 mod windows;
 #[cfg(target_os = "windows")]
@@ -51,7 +61,8 @@ pub enum PowerEvent {
     LockScreen,
     /// `unlock-screen`
     UnlockScreen,
-    /// `shutdown`: the machine is powering off or the user is logging out.
+    /// `shutdown`: the machine is powering off or the user is logging out. Emitted on
+    /// macOS only, as in Electron 33; on Windows session end is the app layer's.
     Shutdown,
 }
 
@@ -127,6 +138,32 @@ pub(crate) fn deliver(sink: &dyn PowerSink, event: PowerEvent) {
     }
 }
 
+/// How long to wait before retrying `WTSRegisterSessionNotification`, if at all.
+///
+/// Only `RPC_S_INVALID_BINDING` (`transient`) is retried: it is what the call returns
+/// when the app autostarts at logon before the RPC services are ready. `attempt` counts
+/// the retries already made; after five, or for any other error, the failure is final.
+#[cfg_attr(
+    not(target_os = "windows"),
+    allow(
+        dead_code,
+        reason = "only the Windows source registers for session notifications"
+    )
+)]
+pub(crate) fn session_registration_retry_delay(
+    transient: bool,
+    attempt: u32,
+) -> Option<std::time::Duration> {
+    const DELAYS_MS: [u64; 5] = [250, 500, 1000, 2000, 4000];
+    if !transient {
+        return None;
+    }
+    let index = usize::try_from(attempt).ok()?;
+    DELAYS_MS
+        .get(index)
+        .map(|&ms| std::time::Duration::from_millis(ms))
+}
+
 /// Chromium's `base::PowerMonitor` suspend/resume de-duplication.
 ///
 /// `NotifySuspend` fires only if not already suspended; `NotifyResume` only if
@@ -177,6 +214,25 @@ mod tests {
         assert_eq!(PowerEvent::LockScreen.electron_name(), "lock-screen");
         assert_eq!(PowerEvent::UnlockScreen.electron_name(), "unlock-screen");
         assert_eq!(PowerEvent::Shutdown.electron_name(), "shutdown");
+    }
+
+    #[test]
+    fn session_registration_retries_only_the_logon_race_and_gives_up() {
+        use std::time::Duration;
+        let total: Duration = (0..)
+            .map_while(|n| session_registration_retry_delay(true, n))
+            .sum();
+        assert_eq!(total, Duration::from_millis(7750), "bounded backoff");
+        assert_eq!(
+            session_registration_retry_delay(true, 0),
+            Some(Duration::from_millis(250))
+        );
+        assert_eq!(session_registration_retry_delay(true, 5), None);
+        assert_eq!(
+            session_registration_retry_delay(false, 0),
+            None,
+            "any other error is final"
+        );
     }
 
     #[test]

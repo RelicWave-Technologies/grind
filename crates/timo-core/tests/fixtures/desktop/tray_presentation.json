@@ -1,0 +1,517 @@
+{
+  "fn": "trayPresentation",
+  "seed": 3962603340,
+  "cases": [
+    {"input":{},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":""},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"00:42"},"output":{"title":" 00:42","tooltip":"Timo 00:42"}},
+    {"input":{"elapsedText":"","hasIcon":false},"output":{"title":"Timo","tooltip":"Timo"}},
+    {"input":{"elapsedText":"00:42","hasIcon":false},"output":{"title":"Timo 00:42","tooltip":"Timo 00:42"}},
+    {"input":{"elapsedText":null},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":null,"hasIcon":false},"output":{"title":"Timo","tooltip":"Timo"}},
+    {"input":{"elapsedText":"  "},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"  ","hasIcon":false},"output":{"title":"Timo","tooltip":"Timo"}},
+    {"input":{"hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"hasIcon":false},"output":{"title":"Timo","tooltip":"Timo"}},
+    {"input":{},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":" z"},"output":{"title":" z","tooltip":"Timo z"}},
+    {"input":{"hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"           x﻿x﻿"},"output":{"title":" x﻿x","tooltip":"Timo x﻿x"}},
+    {"input":{"elapsedText":" x 0:           "},"output":{"title":" x 0:","tooltip":"Timo x 0:"}},
+    {"input":{"elapsedText":null,"hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":null,"hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"00:᠎x᠎","hasIcon":true},"output":{"title":" 00:᠎x᠎","tooltip":"Timo 00:᠎x᠎"}},
+    {"input":{"elapsedText":"﻿x  ","hasIcon":false},"output":{"title":"Timo x","tooltip":"Timo x"}},
+    {"input":{"elapsedText":"  "},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":""},"output":{"title":" ","tooltip":"Timo "}},
+    {"input":{"hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"0x x ","hasIcon":true},"output":{"title":" 0x x","tooltip":"Timo 0x x"}},
+    {"input":{"hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"a12:34 00:42 "},"output":{"title":" a12:34 00:42","tooltip":"Timo a12:34 00:42"}},
+    {"input":{"elapsedText":"a","hasIcon":true},"output":{"title":" a","tooltip":"Timo a"}},
+    {"input":{"elapsedText":"᠎x᠎0:  "},"output":{"title":" ᠎x᠎0:","tooltip":"Timo ᠎x᠎0:"}},
+    {"input":{"elapsedText":"　y　","hasIcon":false},"output":{"title":"Timo y","tooltip":"Timo y"}},
+    {"input":{"elapsedText":"","hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"  "},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"a b\t1:02:03\n"},"output":{"title":" a b\t1:02:03","tooltip":"Timo a b\t1:02:03"}},
+    {"input":{"elapsedText":null},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"　y　0"},"output":{"title":" y　0","tooltip":"Timo y　0"}},
+    {"input":{"elapsedText":"᠎x᠎0: 00:42 "},"output":{"title":" ᠎x᠎0: 00:42","tooltip":"Timo ᠎x᠎0: 00:42"}},
+    {"input":{"elapsedText":"᠎","hasIcon":true},"output":{"title":" ᠎","tooltip":"Timo ᠎"}},
+    {"input":{"elapsedText":"  12:34﻿x﻿"},"output":{"title":" 12:34﻿x","tooltip":"Timo 12:34﻿x"}},
+    {"input":{"elapsedText":"  x᠎x᠎"},"output":{"title":" x᠎x᠎","tooltip":"Timo x᠎x᠎"}},
+    {"input":{"elapsedText":"  x","hasIcon":true},"output":{"title":" x","tooltip":"Timo x"}},
+    {"input":{"elapsedText":"a","hasIcon":true},"output":{"title":" a","tooltip":"Timo a"}},
+    {"input":{"elapsedText":"  "},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"  "},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"0x  "},"output":{"title":" 0x","tooltip":"Timo 0x"}},
+    {"input":{"elapsedText":"  "},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":null,"hasIcon":false},"output":{"title":"Timo","tooltip":"Timo"}},
+    {"input":{},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":null,"hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"hasIcon":false},"output":{"title":"Timo","tooltip":"Timo"}},
+    {"input":{"elapsedText":"  ","hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":null,"hasIcon":false},"output":{"title":"Timo","tooltip":"Timo"}},
+    {"input":{"elapsedText":null},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"0x0"},"output":{"title":" 0x0","tooltip":"Timo 0x0"}},
+    {"input":{"elapsedText":"\t1:02:03\n"},"output":{"title":" 1:02:03","tooltip":"Timo 1:02:03"}},
+    {"input":{"elapsedText":null},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":""},"output":{"title":" ","tooltip":"Timo "}},
+    {"input":{},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":" z"},"output":{"title":" z","tooltip":"Timo z"}},
+    {"input":{"elapsedText":"\t1:02:03\n😀"},"output":{"title":" 1:02:03\n😀","tooltip":"Timo 1:02:03\n😀"}},
+    {"input":{"elapsedText":"00:42x x "},"output":{"title":" 00:42x x","tooltip":"Timo 00:42x x"}},
+    {"input":{"hasIcon":false},"output":{"title":"Timo","tooltip":"Timo"}},
+    {"input":{"elapsedText":"0","hasIcon":true},"output":{"title":" 0","tooltip":"Timo 0"}},
+    {"input":{"elapsedText":null},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"00:420:","hasIcon":false},"output":{"title":"Timo 00:420:","tooltip":"Timo 00:420:"}},
+    {"input":{},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":""},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"  ","hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":null,"hasIcon":false},"output":{"title":"Timo","tooltip":"Timo"}},
+    {"input":{"elapsedText":"᠎x᠎","hasIcon":false},"output":{"title":"Timo ᠎x᠎","tooltip":"Timo ᠎x᠎"}},
+    {"input":{},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"᠎","hasIcon":false},"output":{"title":"Timo ᠎","tooltip":"Timo ᠎"}},
+    {"input":{"elapsedText":"﻿xa","hasIcon":true},"output":{"title":" xa","tooltip":"Timo xa"}},
+    {"input":{"elapsedText":"x","hasIcon":false},"output":{"title":"Timo x","tooltip":"Timo x"}},
+    {"input":{},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":null},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"😀","hasIcon":false},"output":{"title":"Timo 😀","tooltip":"Timo 😀"}},
+    {"input":{"elapsedText":"﻿x﻿x"},"output":{"title":" x﻿x","tooltip":"Timo x﻿x"}},
+    {"input":{"hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"a b0:﻿"},"output":{"title":" a b0:","tooltip":"Timo a b0:"}},
+    {"input":{"elapsedText":"0xa b","hasIcon":false},"output":{"title":"Timo 0xa b","tooltip":"Timo 0xa b"}},
+    {"input":{"elapsedText":"᠎","hasIcon":true},"output":{"title":" ᠎","tooltip":"Timo ᠎"}},
+    {"input":{"elapsedText":"           "},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":null,"hasIcon":false},"output":{"title":"Timo","tooltip":"Timo"}},
+    {"input":{"elapsedText":"​x​x  "},"output":{"title":" ​x​x","tooltip":"Timo ​x​x"}},
+    {"input":{"elapsedText":"x\u000b\f","hasIcon":true},"output":{"title":" x","tooltip":"Timo x"}},
+    {"input":{"elapsedText":"00:42x  ","hasIcon":true},"output":{"title":" 00:42x","tooltip":"Timo 00:42x"}},
+    {"input":{"elapsedText":" x ünï"},"output":{"title":" x ünï","tooltip":"Timo x ünï"}},
+    {"input":{"elapsedText":"x z","hasIcon":false},"output":{"title":"Timo x z","tooltip":"Timo x z"}},
+    {"input":{"elapsedText":" x "},"output":{"title":" x","tooltip":"Timo x"}},
+    {"input":{"hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":" x "},"output":{"title":" x","tooltip":"Timo x"}},
+    {"input":{"elapsedText":"12:34﻿","hasIcon":false},"output":{"title":"Timo 12:34","tooltip":"Timo 12:34"}},
+    {"input":{"elapsedText":"\t1:02:03\n12:34 x "},"output":{"title":" 1:02:03\n12:34 x","tooltip":"Timo 1:02:03\n12:34 x"}},
+    {"input":{"elapsedText":"\u000b\fx😀","hasIcon":true},"output":{"title":" x😀","tooltip":"Timo x😀"}},
+    {"input":{"elapsedText":null,"hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"a b","hasIcon":false},"output":{"title":"Timo a b","tooltip":"Timo a b"}},
+    {"input":{"elapsedText":"a b0:x","hasIcon":true},"output":{"title":" a b0:x","tooltip":"Timo a b0:x"}},
+    {"input":{"elapsedText":"00:4212:34﻿","hasIcon":false},"output":{"title":"Timo 00:4212:34","tooltip":"Timo 00:4212:34"}},
+    {"input":{"elapsedText":""},"output":{"title":" ","tooltip":"Timo "}},
+    {"input":{"elapsedText":"\t1:02:03\n"},"output":{"title":" 1:02:03","tooltip":"Timo 1:02:03"}},
+    {"input":{"elapsedText":"᠎x᠎"},"output":{"title":" ᠎x᠎","tooltip":"Timo ᠎x᠎"}},
+    {"input":{"elapsedText":" z","hasIcon":false},"output":{"title":"Timo z","tooltip":"Timo z"}},
+    {"input":{"elapsedText":" z"},"output":{"title":" z","tooltip":"Timo z"}},
+    {"input":{"elapsedText":null,"hasIcon":false},"output":{"title":"Timo","tooltip":"Timo"}},
+    {"input":{"elapsedText":" x x           "},"output":{"title":" x x","tooltip":"Timo x x"}},
+    {"input":{"elapsedText":"᠎"},"output":{"title":" ᠎","tooltip":"Timo ᠎"}},
+    {"input":{"elapsedText":"xx\t1:02:03\n"},"output":{"title":" xx\t1:02:03","tooltip":"Timo xx\t1:02:03"}},
+    {"input":{"elapsedText":"x","hasIcon":true},"output":{"title":" x","tooltip":"Timo x"}},
+    {"input":{"elapsedText":" 00:42 xünï","hasIcon":false},"output":{"title":"Timo 00:42 xünï","tooltip":"Timo 00:42 xünï"}},
+    {"input":{"elapsedText":"           x"},"output":{"title":" x","tooltip":"Timo x"}},
+    {"input":{"elapsedText":"᠎"},"output":{"title":" ᠎","tooltip":"Timo ᠎"}},
+    {"input":{"elapsedText":"᠎x᠎","hasIcon":false},"output":{"title":"Timo ᠎x᠎","tooltip":"Timo ᠎x᠎"}},
+    {"input":{"elapsedText":"12:34a b"},"output":{"title":" 12:34a b","tooltip":"Timo 12:34a b"}},
+    {"input":{"elapsedText":"a b"},"output":{"title":" a b","tooltip":"Timo a b"}},
+    {"input":{"elapsedText":"  0:᠎x᠎","hasIcon":false},"output":{"title":"Timo 0:᠎x᠎","tooltip":"Timo 0:᠎x᠎"}},
+    {"input":{},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":null,"hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":null},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"a b"},"output":{"title":" a b","tooltip":"Timo a b"}},
+    {"input":{"elapsedText":null,"hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":null},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":null},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"\t1:02:03\nxünï"},"output":{"title":" 1:02:03\nxünï","tooltip":"Timo 1:02:03\nxünï"}},
+    {"input":{"elapsedText":"a b12:34 x ","hasIcon":true},"output":{"title":" a b12:34 x","tooltip":"Timo a b12:34 x"}},
+    {"input":{"elapsedText":" x   ","hasIcon":false},"output":{"title":"Timo x","tooltip":"Timo x"}},
+    {"input":{"elapsedText":"\u000b\fa b","hasIcon":false},"output":{"title":"Timo a b","tooltip":"Timo a b"}},
+    {"input":{"elapsedText":"00:420:a"},"output":{"title":" 00:420:a","tooltip":"Timo 00:420:a"}},
+    {"input":{"elapsedText":" x ","hasIcon":true},"output":{"title":" x","tooltip":"Timo x"}},
+    {"input":{"elapsedText":""},"output":{"title":" ","tooltip":"Timo "}},
+    {"input":{"elapsedText":"00:42᠎x᠎"},"output":{"title":" 00:42᠎x᠎","tooltip":"Timo 00:42᠎x᠎"}},
+    {"input":{"hasIcon":false},"output":{"title":"Timo","tooltip":"Timo"}},
+    {"input":{"elapsedText":null,"hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":""},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"\t1:02:03\nx00:42"},"output":{"title":" 1:02:03\nx00:42","tooltip":"Timo 1:02:03\nx00:42"}},
+    {"input":{"elapsedText":"  12:34 00:42 ","hasIcon":true},"output":{"title":" 12:34 00:42","tooltip":"Timo 12:34 00:42"}},
+    {"input":{"elapsedText":"᠎"},"output":{"title":" ᠎","tooltip":"Timo ᠎"}},
+    {"input":{"elapsedText":" x 0:           "},"output":{"title":" x 0:","tooltip":"Timo x 0:"}},
+    {"input":{"elapsedText":"　y　"},"output":{"title":" y","tooltip":"Timo y"}},
+    {"input":{"elapsedText":"\t1:02:03\n0:x","hasIcon":false},"output":{"title":"Timo 1:02:03\n0:x","tooltip":"Timo 1:02:03\n0:x"}},
+    {"input":{"elapsedText":"﻿x﻿","hasIcon":false},"output":{"title":"Timo x","tooltip":"Timo x"}},
+    {"input":{"elapsedText":"  x           ","hasIcon":true},"output":{"title":" x","tooltip":"Timo x"}},
+    {"input":{"elapsedText":null,"hasIcon":false},"output":{"title":"Timo","tooltip":"Timo"}},
+    {"input":{"elapsedText":" zünï"},"output":{"title":" zünï","tooltip":"Timo zünï"}},
+    {"input":{"elapsedText":null,"hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"0","hasIcon":false},"output":{"title":"Timo 0","tooltip":"Timo 0"}},
+    {"input":{"elapsedText":"᠎x᠎12:3400:42"},"output":{"title":" ᠎x᠎12:3400:42","tooltip":"Timo ᠎x᠎12:3400:42"}},
+    {"input":{},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":null},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"\u000b\f12:34 x "},"output":{"title":" 12:34 x","tooltip":"Timo 12:34 x"}},
+    {"input":{"elapsedText":"           "},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"﻿x﻿"},"output":{"title":" x","tooltip":"Timo x"}},
+    {"input":{"elapsedText":""},"output":{"title":" ","tooltip":"Timo "}},
+    {"input":{"elapsedText":"\t1:02:03\n\t1:02:03\n"},"output":{"title":" 1:02:03\n\t1:02:03","tooltip":"Timo 1:02:03\n\t1:02:03"}},
+    {"input":{"hasIcon":false},"output":{"title":"Timo","tooltip":"Timo"}},
+    {"input":{"elapsedText":"᠎0:ünï","hasIcon":true},"output":{"title":" ᠎0:ünï","tooltip":"Timo ᠎0:ünï"}},
+    {"input":{"elapsedText":null,"hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":" 00:42 ","hasIcon":true},"output":{"title":" 00:42","tooltip":"Timo 00:42"}},
+    {"input":{"elapsedText":"᠎12:34"},"output":{"title":" ᠎12:34","tooltip":"Timo ᠎12:34"}},
+    {"input":{"elapsedText":"​x​x\u000b\f"},"output":{"title":" ​x​x","tooltip":"Timo ​x​x"}},
+    {"input":{"elapsedText":null},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":null},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"           12:34","hasIcon":true},"output":{"title":" 12:34","tooltip":"Timo 12:34"}},
+    {"input":{"elapsedText":"　y　xa","hasIcon":true},"output":{"title":" y　xa","tooltip":"Timo y　xa"}},
+    {"input":{"elapsedText":"","hasIcon":false},"output":{"title":"Timo ","tooltip":"Timo "}},
+    {"input":{"elapsedText":null,"hasIcon":false},"output":{"title":"Timo","tooltip":"Timo"}},
+    {"input":{},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"00:42           ","hasIcon":true},"output":{"title":" 00:42","tooltip":"Timo 00:42"}},
+    {"input":{"elapsedText":null},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":null},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"᠎x","hasIcon":true},"output":{"title":" ᠎x","tooltip":"Timo ᠎x"}},
+    {"input":{"hasIcon":false},"output":{"title":"Timo","tooltip":"Timo"}},
+    {"input":{"hasIcon":false},"output":{"title":"Timo","tooltip":"Timo"}},
+    {"input":{"hasIcon":false},"output":{"title":"Timo","tooltip":"Timo"}},
+    {"input":{"elapsedText":"00:42x\u000b\f","hasIcon":false},"output":{"title":"Timo 00:42x","tooltip":"Timo 00:42x"}},
+    {"input":{"elapsedText":" z"},"output":{"title":" z","tooltip":"Timo z"}},
+    {"input":{"elapsedText":null},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"012:34​x​"},"output":{"title":" 012:34​x​","tooltip":"Timo 012:34​x​"}},
+    {"input":{},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":null,"hasIcon":false},"output":{"title":"Timo","tooltip":"Timo"}},
+    {"input":{},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"  ","hasIcon":false},"output":{"title":"Timo","tooltip":"Timo"}},
+    {"input":{"elapsedText":"           0:"},"output":{"title":" 0:","tooltip":"Timo 0:"}},
+    {"input":{"elapsedText":null,"hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"xx"},"output":{"title":" xx","tooltip":"Timo xx"}},
+    {"input":{"elapsedText":"xx᠎","hasIcon":true},"output":{"title":" xx᠎","tooltip":"Timo xx᠎"}},
+    {"input":{"elapsedText":"  "},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"00:42","hasIcon":false},"output":{"title":"Timo 00:42","tooltip":"Timo 00:42"}},
+    {"input":{"elapsedText":"　y　"},"output":{"title":" y","tooltip":"Timo y"}},
+    {"input":{"elapsedText":"a0:\u000b\f","hasIcon":true},"output":{"title":" a0:","tooltip":"Timo a0:"}},
+    {"input":{"elapsedText":"a12:34᠎"},"output":{"title":" a12:34᠎","tooltip":"Timo a12:34᠎"}},
+    {"input":{"hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"﻿x﻿"},"output":{"title":" x","tooltip":"Timo x"}},
+    {"input":{"hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"  x  ","hasIcon":false},"output":{"title":"Timo x","tooltip":"Timo x"}},
+    {"input":{"elapsedText":"   x "},"output":{"title":" x","tooltip":"Timo x"}},
+    {"input":{"elapsedText":"           0"},"output":{"title":" 0","tooltip":"Timo 0"}},
+    {"input":{"elapsedText":"  "},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"a0"},"output":{"title":" a0","tooltip":"Timo a0"}},
+    {"input":{"elapsedText":null},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"a"},"output":{"title":" a","tooltip":"Timo a"}},
+    {"input":{"elapsedText":null},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"᠎"},"output":{"title":" ᠎","tooltip":"Timo ᠎"}},
+    {"input":{"elapsedText":"\u000b\fx　y　"},"output":{"title":" x　y","tooltip":"Timo x　y"}},
+    {"input":{"hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"00:42","hasIcon":true},"output":{"title":" 00:42","tooltip":"Timo 00:42"}},
+    {"input":{"elapsedText":"᠎x᠎x\t1:02:03\n","hasIcon":false},"output":{"title":"Timo ᠎x᠎x\t1:02:03","tooltip":"Timo ᠎x᠎x\t1:02:03"}},
+    {"input":{"elapsedText":"  00:42"},"output":{"title":" 00:42","tooltip":"Timo 00:42"}},
+    {"input":{"elapsedText":"ünï","hasIcon":false},"output":{"title":"Timo ünï","tooltip":"Timo ünï"}},
+    {"input":{"elapsedText":"\u000b\f"},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"x\t1:02:03\n"},"output":{"title":" x\t1:02:03","tooltip":"Timo x\t1:02:03"}},
+    {"input":{"elapsedText":null,"hasIcon":false},"output":{"title":"Timo","tooltip":"Timo"}},
+    {"input":{"hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":" z\t1:02:03\n"},"output":{"title":" z\t1:02:03","tooltip":"Timo z\t1:02:03"}},
+    {"input":{"hasIcon":false},"output":{"title":"Timo","tooltip":"Timo"}},
+    {"input":{},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":" x x z","hasIcon":false},"output":{"title":"Timo x x z","tooltip":"Timo x x z"}},
+    {"input":{"elapsedText":"ünï           ","hasIcon":false},"output":{"title":"Timo ünï","tooltip":"Timo ünï"}},
+    {"input":{"elapsedText":""},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"  0:​x​","hasIcon":false},"output":{"title":"Timo 0:​x​","tooltip":"Timo 0:​x​"}},
+    {"input":{"hasIcon":false},"output":{"title":"Timo","tooltip":"Timo"}},
+    {"input":{"elapsedText":""},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"ünï"},"output":{"title":" ünï","tooltip":"Timo ünï"}},
+    {"input":{"elapsedText":"x"},"output":{"title":" x","tooltip":"Timo x"}},
+    {"input":{"elapsedText":null,"hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"00:42"},"output":{"title":" 00:42","tooltip":"Timo 00:42"}},
+    {"input":{"elapsedText":null},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"\u000b\f"},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"ünï12:34  ","hasIcon":true},"output":{"title":" ünï12:34","tooltip":"Timo ünï12:34"}},
+    {"input":{"elapsedText":null},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"  "},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":null,"hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":null,"hasIcon":false},"output":{"title":"Timo","tooltip":"Timo"}},
+    {"input":{"hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"﻿x﻿","hasIcon":false},"output":{"title":"Timo x","tooltip":"Timo x"}},
+    {"input":{"elapsedText":" x ","hasIcon":true},"output":{"title":" x","tooltip":"Timo x"}},
+    {"input":{},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":null},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"12:34😀"},"output":{"title":" 12:34😀","tooltip":"Timo 12:34😀"}},
+    {"input":{"elapsedText":"​x​","hasIcon":true},"output":{"title":" ​x​","tooltip":"Timo ​x​"}},
+    {"input":{"elapsedText":"a"},"output":{"title":" a","tooltip":"Timo a"}},
+    {"input":{"elapsedText":"0"},"output":{"title":" 0","tooltip":"Timo 0"}},
+    {"input":{"hasIcon":false},"output":{"title":"Timo","tooltip":"Timo"}},
+    {"input":{"elapsedText":"x12:34 00:42 ","hasIcon":false},"output":{"title":"Timo x12:34 00:42","tooltip":"Timo x12:34 00:42"}},
+    {"input":{"hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"\u000b\f","hasIcon":true},"output":{"title":" ","tooltip":"Timo "}},
+    {"input":{"elapsedText":"            x ","hasIcon":false},"output":{"title":"Timo x","tooltip":"Timo x"}},
+    {"input":{"elapsedText":null},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":null,"hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":null},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"﻿"},"output":{"title":" ","tooltip":"Timo "}},
+    {"input":{"elapsedText":null,"hasIcon":false},"output":{"title":"Timo","tooltip":"Timo"}},
+    {"input":{"elapsedText":""},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"             ","hasIcon":false},"output":{"title":"Timo","tooltip":"Timo"}},
+    {"input":{"elapsedText":"x"},"output":{"title":" x","tooltip":"Timo x"}},
+    {"input":{"elapsedText":"　y　"},"output":{"title":" y","tooltip":"Timo y"}},
+    {"input":{"elapsedText":"᠎\u000b\f","hasIcon":false},"output":{"title":"Timo ᠎","tooltip":"Timo ᠎"}},
+    {"input":{"elapsedText":"  "},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":""},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"　y　 x "},"output":{"title":" y　 x","tooltip":"Timo y　 x"}},
+    {"input":{"hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"           ","hasIcon":false},"output":{"title":"Timo","tooltip":"Timo"}},
+    {"input":{"elapsedText":null},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":" x ﻿x﻿","hasIcon":true},"output":{"title":" x ﻿x","tooltip":"Timo x ﻿x"}},
+    {"input":{"elapsedText":"  ","hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"​x​"},"output":{"title":" ​x​","tooltip":"Timo ​x​"}},
+    {"input":{"elapsedText":"a b"},"output":{"title":" a b","tooltip":"Timo a b"}},
+    {"input":{"elapsedText":"　y　12:34\t1:02:03\n","hasIcon":false},"output":{"title":"Timo y　12:34\t1:02:03","tooltip":"Timo y　12:34\t1:02:03"}},
+    {"input":{"elapsedText":"　y　","hasIcon":false},"output":{"title":"Timo y","tooltip":"Timo y"}},
+    {"input":{"elapsedText":null},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"00:420:00:42"},"output":{"title":" 00:420:00:42","tooltip":"Timo 00:420:00:42"}},
+    {"input":{"elapsedText":"00:42"},"output":{"title":" 00:42","tooltip":"Timo 00:42"}},
+    {"input":{"elapsedText":"\u000b\f"},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":null},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"  xünï","hasIcon":false},"output":{"title":"Timo xünï","tooltip":"Timo xünï"}},
+    {"input":{"elapsedText":"​x​"},"output":{"title":" ​x​","tooltip":"Timo ​x​"}},
+    {"input":{"elapsedText":" x x​x​","hasIcon":false},"output":{"title":"Timo x x​x​","tooltip":"Timo x x​x​"}},
+    {"input":{"elapsedText":"x"},"output":{"title":" x","tooltip":"Timo x"}},
+    {"input":{},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":" z"},"output":{"title":" z","tooltip":"Timo z"}},
+    {"input":{"elapsedText":" x "},"output":{"title":" x","tooltip":"Timo x"}},
+    {"input":{"elapsedText":"\u000b\f","hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"😀","hasIcon":true},"output":{"title":" 😀","tooltip":"Timo 😀"}},
+    {"input":{"elapsedText":"0:00:42"},"output":{"title":" 0:00:42","tooltip":"Timo 0:00:42"}},
+    {"input":{"elapsedText":"᠎"},"output":{"title":" ᠎","tooltip":"Timo ᠎"}},
+    {"input":{"elapsedText":"a bünï"},"output":{"title":" a bünï","tooltip":"Timo a bünï"}},
+    {"input":{"elapsedText":null,"hasIcon":false},"output":{"title":"Timo","tooltip":"Timo"}},
+    {"input":{"elapsedText":"a","hasIcon":false},"output":{"title":"Timo a","tooltip":"Timo a"}},
+    {"input":{"elapsedText":null},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":null,"hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"  12:34a b"},"output":{"title":" 12:34a b","tooltip":"Timo 12:34a b"}},
+    {"input":{"elapsedText":" z"},"output":{"title":" z","tooltip":"Timo z"}},
+    {"input":{"elapsedText":null,"hasIcon":false},"output":{"title":"Timo","tooltip":"Timo"}},
+    {"input":{"elapsedText":"ünï"},"output":{"title":" ünï","tooltip":"Timo ünï"}},
+    {"input":{"elapsedText":" x   ","hasIcon":true},"output":{"title":" x","tooltip":"Timo x"}},
+    {"input":{"elapsedText":null,"hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"﻿"},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":" z","hasIcon":true},"output":{"title":" z","tooltip":"Timo z"}},
+    {"input":{"elapsedText":" x ","hasIcon":true},"output":{"title":" x","tooltip":"Timo x"}},
+    {"input":{"hasIcon":false},"output":{"title":"Timo","tooltip":"Timo"}},
+    {"input":{"elapsedText":null,"hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"hasIcon":false},"output":{"title":"Timo","tooltip":"Timo"}},
+    {"input":{"elapsedText":"᠎a"},"output":{"title":" ᠎a","tooltip":"Timo ᠎a"}},
+    {"input":{"elapsedText":" x ","hasIcon":true},"output":{"title":" x","tooltip":"Timo x"}},
+    {"input":{"elapsedText":null},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"ünï"},"output":{"title":" ünï","tooltip":"Timo ünï"}},
+    {"input":{"elapsedText":"\u000b\f"},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":null},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":null,"hasIcon":false},"output":{"title":"Timo","tooltip":"Timo"}},
+    {"input":{"elapsedText":"ünïx           ","hasIcon":false},"output":{"title":"Timo ünïx","tooltip":"Timo ünïx"}},
+    {"input":{"elapsedText":null},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"0x\u000b\f","hasIcon":false},"output":{"title":"Timo 0x","tooltip":"Timo 0x"}},
+    {"input":{"elapsedText":"00:           "},"output":{"title":" 00:","tooltip":"Timo 00:"}},
+    {"input":{"hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"᠎x᠎0:  ","hasIcon":false},"output":{"title":"Timo ᠎x᠎0:","tooltip":"Timo ᠎x᠎0:"}},
+    {"input":{"elapsedText":" x "},"output":{"title":" x","tooltip":"Timo x"}},
+    {"input":{},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"　y　","hasIcon":true},"output":{"title":" y","tooltip":"Timo y"}},
+    {"input":{"elapsedText":null},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"  ","hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"hasIcon":false},"output":{"title":"Timo","tooltip":"Timo"}},
+    {"input":{"hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":null},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":null,"hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":null,"hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"😀᠎","hasIcon":true},"output":{"title":" 😀᠎","tooltip":"Timo 😀᠎"}},
+    {"input":{"elapsedText":null},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"a b"},"output":{"title":" a b","tooltip":"Timo a b"}},
+    {"input":{"elapsedText":"😀","hasIcon":true},"output":{"title":" 😀","tooltip":"Timo 😀"}},
+    {"input":{"elapsedText":"\t1:02:03\nx","hasIcon":false},"output":{"title":"Timo 1:02:03\nx","tooltip":"Timo 1:02:03\nx"}},
+    {"input":{"elapsedText":"᠎x᠎"},"output":{"title":" ᠎x᠎","tooltip":"Timo ᠎x᠎"}},
+    {"input":{"elapsedText":"           ","hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"           ","hasIcon":false},"output":{"title":"Timo","tooltip":"Timo"}},
+    {"input":{"elapsedText":"00:420:  ","hasIcon":true},"output":{"title":" 00:420:","tooltip":"Timo 00:420:"}},
+    {"input":{"elapsedText":"  ","hasIcon":false},"output":{"title":"Timo","tooltip":"Timo"}},
+    {"input":{"elapsedText":"᠎x᠎","hasIcon":false},"output":{"title":"Timo ᠎x᠎","tooltip":"Timo ᠎x᠎"}},
+    {"input":{"elapsedText":" x ","hasIcon":false},"output":{"title":"Timo x","tooltip":"Timo x"}},
+    {"input":{"elapsedText":null},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":" x "},"output":{"title":" x","tooltip":"Timo x"}},
+    {"input":{"hasIcon":false},"output":{"title":"Timo","tooltip":"Timo"}},
+    {"input":{"elapsedText":"ünï12:34a b","hasIcon":false},"output":{"title":"Timo ünï12:34a b","tooltip":"Timo ünï12:34a b"}},
+    {"input":{"elapsedText":"  ","hasIcon":false},"output":{"title":"Timo","tooltip":"Timo"}},
+    {"input":{},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"ünï"},"output":{"title":" ünï","tooltip":"Timo ünï"}},
+    {"input":{"elapsedText":" x 12:34x","hasIcon":true},"output":{"title":" x 12:34x","tooltip":"Timo x 12:34x"}},
+    {"input":{"elapsedText":" x ","hasIcon":false},"output":{"title":"Timo x","tooltip":"Timo x"}},
+    {"input":{"elapsedText":"　y　0:😀","hasIcon":false},"output":{"title":"Timo y　0:😀","tooltip":"Timo y　0:😀"}},
+    {"input":{"elapsedText":"  x"},"output":{"title":" x","tooltip":"Timo x"}},
+    {"input":{"elapsedText":"​x​x  "},"output":{"title":" ​x​x","tooltip":"Timo ​x​x"}},
+    {"input":{},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":" x x😀","hasIcon":true},"output":{"title":" x x😀","tooltip":"Timo x x😀"}},
+    {"input":{"elapsedText":" x "},"output":{"title":" x","tooltip":"Timo x"}},
+    {"input":{},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":" x "},"output":{"title":" x","tooltip":"Timo x"}},
+    {"input":{"hasIcon":false},"output":{"title":"Timo","tooltip":"Timo"}},
+    {"input":{"elapsedText":"           "},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"x"},"output":{"title":" x","tooltip":"Timo x"}},
+    {"input":{"elapsedText":"00:4212:34 z","hasIcon":false},"output":{"title":"Timo 00:4212:34 z","tooltip":"Timo 00:4212:34 z"}},
+    {"input":{"elapsedText":null},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"  ","hasIcon":false},"output":{"title":"Timo","tooltip":"Timo"}},
+    {"input":{"hasIcon":false},"output":{"title":"Timo","tooltip":"Timo"}},
+    {"input":{"elapsedText":null},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"᠎12:34᠎x᠎"},"output":{"title":" ᠎12:34᠎x᠎","tooltip":"Timo ᠎12:34᠎x᠎"}},
+    {"input":{"elapsedText":"\t1:02:03\n"},"output":{"title":" 1:02:03","tooltip":"Timo 1:02:03"}},
+    {"input":{"elapsedText":null},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"\u000b\f","hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"00:42x 00:42 "},"output":{"title":" 00:42x 00:42","tooltip":"Timo 00:42x 00:42"}},
+    {"input":{"elapsedText":"᠎","hasIcon":true},"output":{"title":" ᠎","tooltip":"Timo ᠎"}},
+    {"input":{"elapsedText":"012:34 z","hasIcon":false},"output":{"title":"Timo 012:34 z","tooltip":"Timo 012:34 z"}},
+    {"input":{"elapsedText":"ünï","hasIcon":false},"output":{"title":"Timo ünï","tooltip":"Timo ünï"}},
+    {"input":{"elapsedText":"a bxx"},"output":{"title":" a bxx","tooltip":"Timo a bxx"}},
+    {"input":{"elapsedText":"﻿","hasIcon":false},"output":{"title":"Timo","tooltip":"Timo"}},
+    {"input":{"elapsedText":"a b12:34　y　","hasIcon":true},"output":{"title":" a b12:34　y","tooltip":"Timo a b12:34　y"}},
+    {"input":{"elapsedText":"x","hasIcon":true},"output":{"title":" x","tooltip":"Timo x"}},
+    {"input":{"hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"hasIcon":false},"output":{"title":"Timo","tooltip":"Timo"}},
+    {"input":{"elapsedText":"0:"},"output":{"title":" 0:","tooltip":"Timo 0:"}},
+    {"input":{"elapsedText":" x 0:"},"output":{"title":" x 0:","tooltip":"Timo x 0:"}},
+    {"input":{"elapsedText":"\t1:02:03\n","hasIcon":true},"output":{"title":" 1:02:03","tooltip":"Timo 1:02:03"}},
+    {"input":{"elapsedText":"😀0: 00:42 "},"output":{"title":" 😀0: 00:42","tooltip":"Timo 😀0: 00:42"}},
+    {"input":{"elapsedText":"\t1:02:03\n","hasIcon":true},"output":{"title":" 1:02:03","tooltip":"Timo 1:02:03"}},
+    {"input":{"elapsedText":null,"hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":" x 0:00:42"},"output":{"title":" x 0:00:42","tooltip":"Timo x 0:00:42"}},
+    {"input":{"elapsedText":"😀x  ","hasIcon":true},"output":{"title":" 😀x","tooltip":"Timo 😀x"}},
+    {"input":{"elapsedText":"x12:34᠎x᠎"},"output":{"title":" x12:34᠎x᠎","tooltip":"Timo x12:34᠎x᠎"}},
+    {"input":{"elapsedText":"　y　","hasIcon":false},"output":{"title":"Timo y","tooltip":"Timo y"}},
+    {"input":{"elapsedText":" z","hasIcon":true},"output":{"title":" z","tooltip":"Timo z"}},
+    {"input":{"hasIcon":false},"output":{"title":"Timo","tooltip":"Timo"}},
+    {"input":{"elapsedText":"᠎ x "},"output":{"title":" ᠎ x","tooltip":"Timo ᠎ x"}},
+    {"input":{"elapsedText":"a bxa b","hasIcon":false},"output":{"title":"Timo a bxa b","tooltip":"Timo a bxa b"}},
+    {"input":{"elapsedText":"😀0:a b","hasIcon":true},"output":{"title":" 😀0:a b","tooltip":"Timo 😀0:a b"}},
+    {"input":{"elapsedText":"᠎　y　"},"output":{"title":" ᠎　y","tooltip":"Timo ᠎　y"}},
+    {"input":{"elapsedText":"x","hasIcon":false},"output":{"title":"Timo x","tooltip":"Timo x"}},
+    {"input":{"elapsedText":null,"hasIcon":false},"output":{"title":"Timo","tooltip":"Timo"}},
+    {"input":{"elapsedText":"﻿x﻿","hasIcon":false},"output":{"title":"Timo x","tooltip":"Timo x"}},
+    {"input":{"elapsedText":null,"hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"　y　"},"output":{"title":" y","tooltip":"Timo y"}},
+    {"input":{"elapsedText":" z"},"output":{"title":" z","tooltip":"Timo z"}},
+    {"input":{"elapsedText":"x","hasIcon":false},"output":{"title":"Timo x","tooltip":"Timo x"}},
+    {"input":{"elapsedText":null},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":null},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":null,"hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"　y　","hasIcon":false},"output":{"title":"Timo y","tooltip":"Timo y"}},
+    {"input":{},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"　y　","hasIcon":false},"output":{"title":"Timo y","tooltip":"Timo y"}},
+    {"input":{"elapsedText":"​x​","hasIcon":false},"output":{"title":"Timo ​x​","tooltip":"Timo ​x​"}},
+    {"input":{"hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":" x  00:42 ","hasIcon":false},"output":{"title":"Timo x  00:42","tooltip":"Timo x  00:42"}},
+    {"input":{"elapsedText":"᠎x᠎","hasIcon":false},"output":{"title":"Timo ᠎x᠎","tooltip":"Timo ᠎x᠎"}},
+    {"input":{"elapsedText":" 00:42 x﻿x﻿","hasIcon":false},"output":{"title":"Timo 00:42 x﻿x","tooltip":"Timo 00:42 x﻿x"}},
+    {"input":{"hasIcon":false},"output":{"title":"Timo","tooltip":"Timo"}},
+    {"input":{"elapsedText":"  0","hasIcon":true},"output":{"title":" 0","tooltip":"Timo 0"}},
+    {"input":{},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"﻿","hasIcon":false},"output":{"title":"Timo","tooltip":"Timo"}},
+    {"input":{"elapsedText":"﻿😀","hasIcon":true},"output":{"title":" 😀","tooltip":"Timo 😀"}},
+    {"input":{"elapsedText":"\u000b\f","hasIcon":false},"output":{"title":"Timo","tooltip":"Timo"}},
+    {"input":{"elapsedText":"\t1:02:03\n","hasIcon":true},"output":{"title":" 1:02:03","tooltip":"Timo 1:02:03"}},
+    {"input":{"elapsedText":"axx"},"output":{"title":" axx","tooltip":"Timo axx"}},
+    {"input":{"elapsedText":"​x​"},"output":{"title":" ​x​","tooltip":"Timo ​x​"}},
+    {"input":{},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"᠎x᠎","hasIcon":false},"output":{"title":"Timo ᠎x᠎","tooltip":"Timo ᠎x᠎"}},
+    {"input":{"hasIcon":false},"output":{"title":"Timo","tooltip":"Timo"}},
+    {"input":{"elapsedText":"           0: z"},"output":{"title":" 0: z","tooltip":"Timo 0: z"}},
+    {"input":{"elapsedText":null},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"😀12:340"},"output":{"title":" 😀12:340","tooltip":"Timo 😀12:340"}},
+    {"input":{"elapsedText":"a b"},"output":{"title":" a b","tooltip":"Timo a b"}},
+    {"input":{"elapsedText":"a bxa","hasIcon":false},"output":{"title":"Timo a bxa","tooltip":"Timo a bxa"}},
+    {"input":{"elapsedText":"᠎x᠎0:  ","hasIcon":true},"output":{"title":" ᠎x᠎0:","tooltip":"Timo ᠎x᠎0:"}},
+    {"input":{"elapsedText":" z"},"output":{"title":" z","tooltip":"Timo z"}},
+    {"input":{"elapsedText":"a12:34﻿x﻿","hasIcon":false},"output":{"title":"Timo a12:34﻿x","tooltip":"Timo a12:34﻿x"}},
+    {"input":{"elapsedText":"a","hasIcon":true},"output":{"title":" a","tooltip":"Timo a"}},
+    {"input":{"elapsedText":" x ","hasIcon":true},"output":{"title":" x","tooltip":"Timo x"}},
+    {"input":{"elapsedText":" z\u000b\f"},"output":{"title":" z","tooltip":"Timo z"}},
+    {"input":{"elapsedText":" z","hasIcon":false},"output":{"title":"Timo z","tooltip":"Timo z"}},
+    {"input":{"elapsedText":"　y　"},"output":{"title":" y","tooltip":"Timo y"}},
+    {"input":{"elapsedText":null},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"﻿x﻿","hasIcon":false},"output":{"title":"Timo x","tooltip":"Timo x"}},
+    {"input":{"elapsedText":null},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":null,"hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":" x "},"output":{"title":" x","tooltip":"Timo x"}},
+    {"input":{"hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"a","hasIcon":true},"output":{"title":" a","tooltip":"Timo a"}},
+    {"input":{"elapsedText":"\u000b\f"},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":null},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"12:34ünï","hasIcon":true},"output":{"title":" 12:34ünï","tooltip":"Timo 12:34ünï"}},
+    {"input":{"elapsedText":"  ","hasIcon":false},"output":{"title":"Timo","tooltip":"Timo"}},
+    {"input":{"elapsedText":" x ","hasIcon":false},"output":{"title":"Timo x","tooltip":"Timo x"}},
+    {"input":{"elapsedText":"\t1:02:03\n","hasIcon":false},"output":{"title":"Timo 1:02:03","tooltip":"Timo 1:02:03"}},
+    {"input":{"elapsedText":"\t1:02:03\n","hasIcon":false},"output":{"title":"Timo 1:02:03","tooltip":"Timo 1:02:03"}},
+    {"input":{"elapsedText":" x ","hasIcon":false},"output":{"title":"Timo x","tooltip":"Timo x"}},
+    {"input":{"elapsedText":"\u000b\f"},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"0x᠎","hasIcon":false},"output":{"title":"Timo 0x᠎","tooltip":"Timo 0x᠎"}},
+    {"input":{"elapsedText":"﻿"},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":null,"hasIcon":false},"output":{"title":"Timo","tooltip":"Timo"}},
+    {"input":{},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"  "},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":" x ","hasIcon":true},"output":{"title":" x","tooltip":"Timo x"}},
+    {"input":{"elapsedText":null},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"x0","hasIcon":true},"output":{"title":" x0","tooltip":"Timo x0"}},
+    {"input":{"elapsedText":"xa b","hasIcon":false},"output":{"title":"Timo xa b","tooltip":"Timo xa b"}},
+    {"input":{"elapsedText":"᠎","hasIcon":false},"output":{"title":"Timo ᠎","tooltip":"Timo ᠎"}},
+    {"input":{"elapsedText":"﻿x﻿12:34﻿","hasIcon":false},"output":{"title":"Timo x﻿12:34","tooltip":"Timo x﻿12:34"}},
+    {"input":{"elapsedText":"x","hasIcon":false},"output":{"title":"Timo x","tooltip":"Timo x"}},
+    {"input":{"elapsedText":""},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":" x "},"output":{"title":" x","tooltip":"Timo x"}},
+    {"input":{"elapsedText":null},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":null},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"\t1:02:03\n"},"output":{"title":" 1:02:03","tooltip":"Timo 1:02:03"}},
+    {"input":{"elapsedText":null,"hasIcon":false},"output":{"title":"Timo","tooltip":"Timo"}},
+    {"input":{"elapsedText":null,"hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":"\t1:02:03\n12:34 x ","hasIcon":true},"output":{"title":" 1:02:03\n12:34 x","tooltip":"Timo 1:02:03\n12:34 x"}},
+    {"input":{"elapsedText":null,"hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":null,"hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":null,"hasIcon":true},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":" x x﻿","hasIcon":true},"output":{"title":" x x","tooltip":"Timo x x"}},
+    {"input":{"elapsedText":"\t1:02:03\nx 00:42 "},"output":{"title":" 1:02:03\nx 00:42","tooltip":"Timo 1:02:03\nx 00:42"}},
+    {"input":{"elapsedText":"᠎","hasIcon":false},"output":{"title":"Timo ᠎","tooltip":"Timo ᠎"}},
+    {"input":{"elapsedText":null},"output":{"title":"","tooltip":"Timo"}},
+    {"input":{"elapsedText":" x 12:34 x "},"output":{"title":" x 12:34 x","tooltip":"Timo x 12:34 x"}},
+    {"input":{"elapsedText":"0:","hasIcon":false},"output":{"title":"Timo 0:","tooltip":"Timo 0:"}}
+  ]
+}

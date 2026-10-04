@@ -36,6 +36,7 @@ fn entry(id: &str, revision: f64, span: (f64, Option<f64>), source: TimeEntrySou
             started_at: start,
             ended_at: end,
         }],
+        shape: timo_core::types::EntryShape::default(),
     }
 }
 

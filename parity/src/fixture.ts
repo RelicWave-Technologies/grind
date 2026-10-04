@@ -5,6 +5,15 @@ import { Rng, seedFor } from './prng';
 
 const here = dirname(fileURLToPath(import.meta.url));
 export const FIXTURE_ROOT = process.env.PARITY_FIXTURE_ROOT ?? join(here, '..', '..', 'crates', 'timo-core', 'tests', 'fixtures');
+/** The crate whose `tests/fixtures/` a function's golden output is written to. */
+export type FixtureCrate = 'timo-core' | 'timo-sync' | 'timo-store';
+/** Where a crate's fixtures live. `PARITY_FIXTURE_ROOT` (a scratch dump) holds one subdirectory per other crate. */
+export function fixtureRoot(crate: FixtureCrate = 'timo-core'): string {
+  if (crate === 'timo-core') return FIXTURE_ROOT;
+  return process.env.PARITY_FIXTURE_ROOT
+    ? join(process.env.PARITY_FIXTURE_ROOT, crate)
+    : join(here, '..', '..', 'crates', crate, 'tests', 'fixtures');
+}
 /** XORed into every seed: `PARITY_SALT=7` explores different random cases (never committed). */
 const SALT = Number(process.env.PARITY_SALT ?? 0);
 
@@ -20,6 +29,8 @@ export interface Case {
  * become `{ error: message }`.
  */
 export interface FnSpec<I> {
+  /** Which crate's fixtures this belongs to (default `timo-core`). */
+  crate?: FixtureCrate;
   module: string;
   fn: string;
   edge: () => I[];
@@ -155,8 +166,8 @@ export function serialize(fixture: Fixture): string {
   ].join('\n');
 }
 
-export function fixturePath(module: string, fn: string): string {
-  return join(FIXTURE_ROOT, module, `${snake(fn)}.json`);
+export function fixturePath(module: string, fn: string, crate: FixtureCrate = 'timo-core'): string {
+  return join(fixtureRoot(crate), module, `${snake(fn)}.json`);
 }
 
 /** camelCase to snake_case, the Rust spelling of the function name. */
@@ -174,16 +185,17 @@ export function readIfExists(path: string): string | null {
 }
 
 /** Every `.json` fixture currently on disk, as paths relative to the root. */
-export function listFixtures(): string[] {
+export function listFixtures(crate: FixtureCrate = 'timo-core'): string[] {
+  const root = fixtureRoot(crate);
   const found: string[] = [];
   const walk = (dir: string): void => {
     if (!existsSync(dir)) return;
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const full = join(dir, entry.name);
       if (entry.isDirectory()) walk(full);
-      else if (entry.name.endsWith('.json')) found.push(relative(FIXTURE_ROOT, full));
+      else if (entry.name.endsWith('.json')) found.push(relative(root, full));
     }
   };
-  walk(FIXTURE_ROOT);
+  walk(root);
   return found.sort();
 }

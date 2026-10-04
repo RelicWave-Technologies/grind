@@ -28,6 +28,7 @@ fn entry(started_at: Option<f64>, ended_at: Option<f64>, segments: Vec<Segment>)
         pause_reason: None,
         close_reason: None,
         segments,
+        shape: timo_core::types::EntryShape::default(),
     }
 }
 

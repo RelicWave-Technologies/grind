@@ -1,10 +1,16 @@
-//! macOS input counting: a listen-only `CGEventTap` on its own `CFRunLoop` thread.
+//! macOS input counting: an *active* `CGEventTap` on its own `CFRunLoop` thread —
+//! exactly what `uiohook-napi` creates, so the permission story is the oracle's.
 //!
-//! Differences from `uiohook-napi` (which creates an *active* tap, which is why
-//! legacy gates on Accessibility): this tap is listen-only, so it needs Input
-//! Monitoring, not Accessibility. The events counted are identical — see
-//! `decide.rs`. The tap callback does no work beyond decoding one event and
-//! queueing it; the loop re-arms the tap if macOS switches it off.
+//! Mirrors libuiohook `darwin/input_hook.c`: `kCGSessionEventTap`,
+//! `kCGHeadInsertEventTap`, `kCGEventTapOptionDefault` (active, not listen-only),
+//! the same event mask (`decide::mac_event_mask`), and `hook_run`'s gate on
+//! Accessibility (`is_accessibility_enabled`) before the tap is created. Legacy
+//! gates on the same grant (`hasAccessibilityAccess(false)`). A non-null tap is
+//! never taken as proof of permission: `Granted` is reported only after that gate.
+//!
+//! An active tap must answer promptly or macOS disables it, so the callback does
+//! no work beyond decoding one event and queueing it, and always returns the event
+//! unmodified. The loop re-arms the tap if macOS switches it off.
 
 use std::ffi::c_void;
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -14,12 +20,8 @@ use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 use std::sync::mpsc;
 use std::thread::JoinHandle;
 
-use objc2::encode::{Encoding, RefEncode};
-use objc2::msg_send;
-use objc2::rc::{Retained, autoreleasepool};
-use objc2::runtime::{AnyClass, AnyObject};
-
-use super::decide::{self, MacRaw, cg};
+use super::decide;
+use super::mac_read::read_raw;
 use super::{EventTx, InputPermission, Shared};
 use crate::mac_ffi as ffi;
 use crate::{PermissionKind, PlatformError};
@@ -30,17 +32,10 @@ const SLICE_SECONDS: f64 = 0.25;
 #[derive(Debug)]
 pub(super) struct Backend {
     stop: Arc<AtomicBool>,
-    run_loop: RunLoop,
+    /// Owned (+1) reference; released only after the worker thread has been joined.
+    run_loop: Option<ffi::OwnedRunLoop>,
     thread: Option<JoinHandle<()>>,
 }
-
-/// A `CFRunLoopRef` that may be handed to another thread: `CFRunLoopStop` is
-/// documented thread-safe.
-#[derive(Clone, Copy, Debug)]
-struct RunLoop(ffi::CFRunLoopRef);
-
-// SAFETY: only `CFRunLoopStop` is called through it from other threads, which Apple documents as thread-safe.
-unsafe impl Send for RunLoop {}
 
 struct TapContext {
     tx: EventTx,
@@ -59,7 +54,7 @@ impl Backend {
         match ready_rx.recv() {
             Ok(Ok(run_loop)) => Ok(Self {
                 stop,
-                run_loop,
+                run_loop: Some(run_loop),
                 thread: Some(thread),
             }),
             Ok(Err(error)) => {
@@ -76,13 +71,23 @@ impl Backend {
         }
     }
 
+    /// Idempotent. Order matters: flag, stop the loop (our retained reference keeps the
+    /// pointer valid even if the worker has already exited), join, and only then release.
     pub(super) fn stop(&mut self) {
         self.stop.store(true, Ordering::SeqCst);
-        // SAFETY: the run loop belongs to a thread we still own (not yet joined); `CFRunLoopStop` is thread-safe.
-        unsafe { ffi::CFRunLoopStop(self.run_loop.0) };
+        if let Some(run_loop) = &self.run_loop {
+            run_loop.stop();
+        }
         if let Some(thread) = self.thread.take() {
             thread.join().ok();
         }
+        self.run_loop = None;
+    }
+}
+
+impl Drop for Backend {
+    fn drop(&mut self) {
+        self.stop();
     }
 }
 
@@ -90,8 +95,12 @@ fn run(
     tx: EventTx,
     shared: &Shared,
     stop: &AtomicBool,
-    ready: &mpsc::Sender<Result<RunLoop, PlatformError>>,
+    ready: &mpsc::Sender<Result<ffi::OwnedRunLoop, PlatformError>>,
 ) {
+    if let Some(error) = accessibility_gate(shared) {
+        ready.send(Err(error)).ok();
+        return;
+    }
     let context = Box::into_raw(Box::new(TapContext {
         tx,
         tap: AtomicPtr::new(ptr::null_mut()),
@@ -120,17 +129,44 @@ fn run(
             .ok();
         return;
     }
-    // SAFETY: the current run loop and common-modes constant are valid for this thread's lifetime.
-    let run_loop = unsafe { ffi::CFRunLoopGetCurrent() };
+    let Some(owned) = ffi::OwnedRunLoop::retain_current() else {
+        // SAFETY: tear down exactly what was created above.
+        unsafe { destroy(tap, source, context) };
+        ready
+            .send(Err(PlatformError::os(
+                "CFRunLoopGetCurrent",
+                "returned null",
+            )))
+            .ok();
+        return;
+    };
+    arm(tap, source, shared);
+    ready.send(Ok(owned)).ok();
+
+    service_loop(tap, shared, stop);
+    shared.set_error(None);
+    // SAFETY: loop has exited; tear down in reverse creation order.
+    unsafe { destroy(tap, source, context) };
+}
+
+/// Attach the tap to this thread's loop and switch it on. Only after the Accessibility
+/// gate and a successful create is permission reported as granted.
+fn arm(tap: ffi::CFMachPortRef, source: ffi::CFRunLoopSourceRef, shared: &Shared) {
     // SAFETY: `source` and `tap` are valid; adding the source to this thread's loop is the documented use.
     unsafe {
-        ffi::CFRunLoopAddSource(run_loop, source, ffi::kCFRunLoopCommonModes);
+        ffi::CFRunLoopAddSource(
+            ffi::CFRunLoopGetCurrent(),
+            source,
+            ffi::kCFRunLoopCommonModes,
+        );
         ffi::CGEventTapEnable(tap, true);
     }
     shared.set_permission(InputPermission::Granted);
     shared.set_error(None);
-    ready.send(Ok(RunLoop(run_loop))).ok();
+}
 
+/// Run this thread's loop in short slices until asked to stop, watching the tap.
+fn service_loop(tap: ffi::CFMachPortRef, shared: &Shared, stop: &AtomicBool) {
     while !stop.load(Ordering::SeqCst) {
         // SAFETY: running the current thread's loop in the default mode for a short slice.
         let outcome =
@@ -140,12 +176,22 @@ fn run(
         }
         check_tap_health(tap, shared);
     }
-    shared.set_error(None);
-    // SAFETY: loop has exited; tear down in reverse creation order.
-    unsafe { destroy(tap, source, context) };
 }
 
-/// Create the listen-only tap for the counted event types.
+/// `hook_run`'s `is_accessibility_enabled()` gate, without the prompt (legacy checks
+/// `hasAccessibilityAccess(false)` first, so libuiohook's own prompt never fires).
+fn accessibility_gate(shared: &Shared) -> Option<PlatformError> {
+    if crate::permissions::accessibility_trusted(false).unwrap_or(false) {
+        return None;
+    }
+    shared.set_permission(InputPermission::Denied);
+    shared.set_error(Some("Accessibility permission is not granted".to_owned()));
+    Some(PlatformError::PermissionDenied(
+        PermissionKind::Accessibility,
+    ))
+}
+
+/// Create the active tap for the counted event types, as libuiohook does.
 ///
 /// # Safety
 /// `context` must stay valid for as long as the tap exists.
@@ -155,7 +201,7 @@ unsafe fn create_tap(context: *mut TapContext) -> ffi::CFMachPortRef {
         ffi::CGEventTapCreate(
             ffi::K_CG_SESSION_EVENT_TAP,
             ffi::K_CG_HEAD_INSERT_EVENT_TAP,
-            ffi::K_CG_EVENT_TAP_OPTION_LISTEN_ONLY,
+            ffi::K_CG_EVENT_TAP_OPTION_DEFAULT,
             decide::mac_event_mask(),
             tap_callback,
             context.cast(),
@@ -163,21 +209,22 @@ unsafe fn create_tap(context: *mut TapContext) -> ffi::CFMachPortRef {
     }
 }
 
-/// `CGEventTapCreate` returns null without Input Monitoring; the preflight call
-/// tells that apart from other failures.
+/// `CGEventTapCreate` returned null although Accessibility is trusted (libuiohook's
+/// `UIOHOOK_ERROR_CREATE_EVENT_PORT`). Legacy's note: a machine that additionally
+/// demands Input Monitoring shows up exactly like this, so the preflight tells the
+/// two apart for the message. Permission stays not-granted either way.
 fn tap_creation_error(shared: &Shared) -> PlatformError {
+    shared.set_permission(InputPermission::Denied);
     // SAFETY: no arguments, no preconditions.
-    let granted = unsafe { ffi::CGPreflightListenEventAccess() };
-    if granted {
+    if unsafe { ffi::CGPreflightListenEventAccess() } {
         shared.set_error(Some("CGEventTapCreate returned null".to_owned()));
         PlatformError::os(
             "CGEventTapCreate",
-            "returned null although Input Monitoring is granted",
+            "returned null although Accessibility is granted",
         )
     } else {
-        shared.set_permission(InputPermission::Denied);
         shared.set_error(Some(
-            "Input Monitoring permission is not granted".to_owned(),
+            "event tap refused: Input Monitoring is also required on this Mac".to_owned(),
         ));
         PlatformError::PermissionDenied(PermissionKind::InputMonitoring)
     }
@@ -221,7 +268,7 @@ fn check_tap_health(tap: ffi::CFMachPortRef, shared: &Shared) {
             tracing::info!("input tap was disabled by macOS and has been re-enabled");
             return;
         }
-        let granted = ffi::CGPreflightListenEventAccess();
+        let granted = crate::permissions::accessibility_trusted(false).unwrap_or(false);
         shared.set_permission(if granted {
             InputPermission::Granted
         } else {
@@ -230,7 +277,7 @@ fn check_tap_health(tap: ffi::CFMachPortRef, shared: &Shared) {
         shared.set_error(Some(if granted {
             "event tap is disabled and could not be re-enabled".to_owned()
         } else {
-            "Input Monitoring permission was revoked".to_owned()
+            "Accessibility permission was revoked".to_owned()
         }));
     }
 }
@@ -272,144 +319,5 @@ unsafe fn handle(event_type: u32, event: ffi::CGEventRef, user_info: *mut c_void
     let raw = unsafe { read_raw(event_type, event) };
     if let Some(decoded) = decide::decode_mac(&raw) {
         context.tx.send(decoded);
-    }
-}
-
-/// Read only the fields the decision for this event type needs. Key codes are
-/// read for modifier changes alone; ordinary key presses are never inspected.
-///
-/// # Safety
-/// `event` must be a live `CGEvent`.
-unsafe fn read_raw(kind: u32, event: ffi::CGEventRef) -> MacRaw {
-    let mut raw = MacRaw {
-        kind,
-        ..MacRaw::default()
-    };
-    // SAFETY: `event` is live per this function's contract.
-    unsafe {
-        match kind {
-            cg::FLAGS_CHANGED => {
-                raw.keycode =
-                    ffi::CGEventGetIntegerValueField(event, ffi::K_CG_KEYBOARD_EVENT_KEYCODE);
-                raw.flags = ffi::CGEventGetFlags(event);
-            }
-            cg::MOUSE_MOVED
-            | cg::LEFT_MOUSE_DRAGGED
-            | cg::RIGHT_MOUSE_DRAGGED
-            | cg::OTHER_MOUSE_DRAGGED => {
-                let point = ffi::CGEventGetLocation(event);
-                raw.x = point.x;
-                raw.y = point.y;
-            }
-            cg::SCROLL_WHEEL => {
-                raw.scroll_axis_1 = ffi::CGEventGetIntegerValueField(
-                    event,
-                    ffi::K_CG_SCROLL_WHEEL_EVENT_DELTA_AXIS_1,
-                );
-                raw.scroll_axis_2 = ffi::CGEventGetIntegerValueField(
-                    event,
-                    ffi::K_CG_SCROLL_WHEEL_EVENT_DELTA_AXIS_2,
-                );
-            }
-            cg::SYS_DEFINED => raw.system_defined = system_defined_fields(event),
-            _ => {}
-        }
-    }
-    raw
-}
-
-/// An opaque `CGEventRef` target with the encoding `NSEvent +eventWithCGEvent:` expects.
-#[repr(C)]
-struct OpaqueCgEvent {
-    _private: [u8; 0],
-}
-
-// SAFETY: matches the Objective-C type encoding `^{__CGEvent=}` of a `CGEventRef`.
-unsafe impl RefEncode for OpaqueCgEvent {
-    const ENCODING_REF: Encoding = Encoding::Pointer(&Encoding::Struct("__CGEvent", &[]));
-}
-
-/// `(NSEvent.subtype, NSEvent.data1)` for an `NX_SYSDEFINED` event — how
-/// libuiohook (built with `USE_OBJC`, as `uiohook-napi` is) reads media keys.
-///
-/// # Safety
-/// `event` must be a live `CGEvent`.
-unsafe fn system_defined_fields(event: ffi::CGEventRef) -> Option<(i64, i64)> {
-    autoreleasepool(|_| {
-        let class = AnyClass::get(c"NSEvent")?;
-        // SAFETY: `+eventWithCGEvent:` takes a CGEventRef and returns an autoreleased NSEvent or nil.
-        let ns_event: Option<Retained<AnyObject>> =
-            unsafe { msg_send![class, eventWithCGEvent: event.cast::<OpaqueCgEvent>()] };
-        let ns_event = ns_event?;
-        // SAFETY: `-subtype` returns a short and `-data1` an NSInteger on any NSEvent.
-        let (subtype, data1): (i16, isize) =
-            unsafe { (msg_send![&*ns_event, subtype], msg_send![&*ns_event, data1]) };
-        Some((i64::from(subtype), i64::try_from(data1).ok()?))
-    })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use objc2_foundation::NSPoint;
-
-    /// Build a real `NSEvent` of type system-defined, take its `CGEvent`, and read
-    /// the fields back through the same code the tap uses — on a non-main thread,
-    /// as the tap does.
-    fn read_back(subtype: i16, data1: isize) -> Option<(i64, i64)> {
-        std::thread::spawn(move || {
-            autoreleasepool(|_| {
-                let class = AnyClass::get(c"NSEvent")?;
-                // SAFETY: documented factory method; arguments match its Objective-C signature.
-                let ns_event: Option<Retained<AnyObject>> = unsafe {
-                    msg_send![
-                        class,
-                        otherEventWithType: 14usize,
-                        location: NSPoint::new(0.0, 0.0),
-                        modifierFlags: 0usize,
-                        timestamp: 0.0f64,
-                        windowNumber: 0isize,
-                        context: std::ptr::null::<AnyObject>(),
-                        subtype: subtype,
-                        data1: data1,
-                        data2: 0isize
-                    ]
-                };
-                let ns_event = ns_event?;
-                // SAFETY: `-CGEvent` returns the event's CGEventRef, valid while `ns_event` lives.
-                let cg: *mut OpaqueCgEvent = unsafe { msg_send![&*ns_event, CGEvent] };
-                if cg.is_null() {
-                    return None;
-                }
-                // SAFETY: `cg` is a live CGEvent for the duration of this call.
-                unsafe { system_defined_fields(cg.cast()) }
-            })
-        })
-        .join()
-        .ok()
-        .flatten()
-    }
-
-    #[test]
-    fn media_key_fields_survive_the_cg_event_round_trip() {
-        let data1 = (19isize << 16) | (0x0A << 8); // fast-forward, key down
-        assert_eq!(
-            read_back(8, data1),
-            Some((8, i64::try_from(data1).unwrap()))
-        );
-    }
-
-    #[test]
-    fn round_tripped_fields_drive_the_decision() {
-        let down = read_back(8, (7isize << 16) | (0x0A << 8)).expect("fields");
-        assert!(
-            decide::system_defined_is_press(down.0, down.1),
-            "mute down counts"
-        );
-        let up = read_back(8, (7isize << 16) | (0x0B << 8)).expect("fields");
-        assert!(
-            !decide::system_defined_is_press(up.0, up.1),
-            "mute up does not"
-        );
     }
 }

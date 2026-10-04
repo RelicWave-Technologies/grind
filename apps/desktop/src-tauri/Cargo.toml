@@ -17,6 +17,7 @@ tauri-build = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+timo-core = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 ts-rs = { workspace = true }

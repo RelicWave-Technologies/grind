@@ -1,11 +1,11 @@
-//! Where an overlay window goes. Pure geometry on whole physical pixels, so it
-//! tests on any host.
-//!
-//! Port of the placement helpers in legacy/agent/src/main/windows/overlay.ts
-//! (`center`, `topRight`, `bottomRight`, `trayPopoverPoint`). Electron works in
-//! DIPs with `Math.round`; here everything is whole pixels, and the one place a
-//! half pixel can appear (centring) is rounded the way `Math.round` does
-//! (half toward +infinity) by doubling instead of using floats.
+//! Where an overlay window goes. The geometry lives in `timo_core::placement`
+//! (a port of the placement helpers in legacy/agent/src/main/windows/overlay.ts,
+//! fixture-checked against the TypeScript); this module only converts the shell's
+//! whole physical pixels to the JavaScript numbers that port works on and back.
+//! Screen coordinates are far below 2^53, so the conversions are exact.
+
+use timo_core::js::number::{f64_to_i64, i64_to_f64};
+use timo_core::placement as core;
 
 /// A rectangle in physical pixels.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -30,62 +30,68 @@ pub struct Point {
     pub y: i64,
 }
 
-/// `Math.round(doubled / 2)` for an integer `doubled`: halves go up, as in JS.
-fn round_half(doubled: i64) -> i64 {
-    (doubled + 1).div_euclid(2)
+/// An exact `i64` pixel count as a JavaScript number. A screen never exceeds
+/// 2^53 pixels; `NaN` (which `to_px` maps to `0`) is only a fallback.
+fn num(n: i64) -> f64 {
+    i64_to_f64(n).unwrap_or(f64::NAN)
 }
 
-/// JS `Math.max(min, Math.min(n, max))`.
-fn clamp(n: i64, min: i64, max: i64) -> i64 {
-    min.max(n.min(max))
+/// A JavaScript pixel result back to whole pixels (`0` for a non-integer).
+fn to_px(x: f64) -> i64 {
+    f64_to_i64(x).unwrap_or(0)
+}
+
+fn rect(r: Rect) -> core::Rect {
+    core::Rect {
+        x: num(r.x),
+        y: num(r.y),
+        width: num(r.width),
+        height: num(r.height),
+    }
+}
+
+fn size(s: Size) -> core::Size {
+    core::Size {
+        width: num(s.width),
+        height: num(s.height),
+    }
+}
+
+fn point(p: core::Point) -> Point {
+    Point {
+        x: to_px(p.x),
+        y: to_px(p.y),
+    }
 }
 
 /// Centred in the work area: blocking attention prompts.
 #[must_use]
-pub fn center(work: Rect, size: Size) -> Point {
-    Point {
-        x: round_half(2 * work.x + work.width - size.width),
-        y: round_half(2 * work.y + work.height - size.height),
-    }
+pub fn center(work: Rect, window: Size) -> Point {
+    point(core::center(rect(work), size(window)))
 }
 
 /// Top-right with a gutter: the "ready to work?" toast.
 #[must_use]
-pub fn top_right(work: Rect, size: Size, gutter: i64) -> Point {
-    Point {
-        x: work.x + work.width - size.width - gutter,
-        y: work.y + gutter,
-    }
+pub fn top_right(work: Rect, window: Size, gutter: i64) -> Point {
+    point(core::top_right(rect(work), size(window), num(gutter)))
 }
 
 /// Bottom-right with a gutter: the floating bar's default home.
 #[must_use]
-pub fn bottom_right(work: Rect, size: Size, gutter: i64) -> Point {
-    Point {
-        x: work.x + work.width - size.width - gutter,
-        y: work.y + work.height - size.height - gutter,
-    }
+pub fn bottom_right(work: Rect, window: Size, gutter: i64) -> Point {
+    point(core::bottom_right(rect(work), size(window), num(gutter)))
 }
 
 /// Tray popover: centred under the icon, below a top menu bar or above a bottom
 /// taskbar, clamped inside the work area.
 #[must_use]
-pub fn tray_popover_point(tray: Rect, work: Rect, size: Size, gutter: i64) -> Point {
-    let min_x = work.x + gutter;
-    let max_x = work.x + work.width - size.width - gutter;
-    // Doubled so a half-pixel centre stays exact until the final rounding.
-    let centred_x2 = 2 * tray.x + tray.width - size.width;
-    let x = round_half(clamp(centred_x2, 2 * min_x, 2 * min_x.max(max_x)));
-
-    let min_y = work.y + gutter;
-    let max_y = work.y + work.height - size.height - gutter;
-    let below_y = tray.y + tray.height + gutter;
-    let above_y = tray.y - size.height - gutter;
-    let fits_below = below_y + size.height <= work.y + work.height - gutter;
-    let preferred_y = if fits_below { below_y } else { above_y };
-    let y = clamp(preferred_y, min_y, min_y.max(max_y));
-
-    Point { x, y }
+pub fn tray_popover_point(tray: Rect, work: Rect, window: Size, gutter: i64) -> Point {
+    point(core::tray_popover_point(
+        rect(tray),
+        rect(work),
+        size(window),
+        num(gutter),
+    ))
 }
 
 #[cfg(test)]
@@ -102,9 +108,20 @@ mod tests {
     #[test]
     fn math_round_halves_go_up_even_when_negative() {
         // JS: Math.round(-33.5) === -33, Math.round(33.5) === 34, Math.round(-0.5) === 0
-        assert_eq!(round_half(-67), -33);
-        assert_eq!(round_half(67), 34);
-        assert_eq!(round_half(-1), 0);
+        let work = |x| Rect {
+            x,
+            y: 0,
+            width: 0,
+            height: 0,
+        };
+        let one = Size {
+            width: 1,
+            height: 0,
+        };
+        // x = round(work.x + (0 - 1) / 2) = round(work.x - 0.5)
+        assert_eq!(center(work(-33), one).x, -33);
+        assert_eq!(center(work(34), one).x, 34);
+        assert_eq!(center(work(0), one).x, 0);
     }
 
     #[test]
