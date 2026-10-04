@@ -80,6 +80,10 @@
   width: calc(var(--space-section) * 2 + var(--space-xxl));
 }
 
+.tm-col-works {
+  width: calc(var(--space-section) * 2 + var(--space-xl));
+}
+
 .tm-col-manager {
   width: calc(var(--space-section) * 3);
 }

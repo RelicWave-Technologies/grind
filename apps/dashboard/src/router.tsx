@@ -7,7 +7,7 @@ import {
 } from '@tanstack/react-router';
 import type { QueryClient } from '@tanstack/react-query';
 import { api, ApiError } from './lib/api';
-import { hasCapability } from './lib/auth';
+import { hasCapability, landingPath } from './lib/auth';
 import type { Me } from './lib/auth';
 import { Layout } from './components/Layout';
 import { LoginScreen } from './screens/Login';
@@ -293,7 +293,7 @@ const loginRoute = createRoute({
   beforeLoad: async ({ context, search }) => {
     if (search.status || search.error) return;
     const me = await context.queryClient.fetchQuery<Me | null>(meQuery);
-    if (me) throw redirect({ to: '/home' });
+    if (me) throw redirect({ to: landingPath(me) });
   },
   component: LoginScreen,
 });
@@ -330,7 +330,7 @@ const indexRoute = createRoute({
     } catch {
       me = null;
     }
-    if (me) throw redirect({ to: '/home' });
+    if (me) throw redirect({ to: landingPath(me) });
   },
   component: WelcomeScreen,
 });

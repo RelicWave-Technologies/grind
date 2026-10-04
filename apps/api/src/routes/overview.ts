@@ -40,6 +40,8 @@ interface OverviewFlagItem {
   windowStart: string;
   riskScore: number;
   createdAt: string;
+  /** Minutes flagged for this person, day and signal. */
+  count: number;
 }
 
 interface OverviewResponse {
@@ -186,17 +188,32 @@ overviewRouter.get('/', async (req, res, next) => {
     }
 
     // --- Recent flags ----------------------------------------------------
-    const openFlags = userIds.length === 0
+    // Counted the way the review queue shows them: one per person, day and
+    // signal. The detector raises a flag per offending minute, and "5835 open"
+    // describes the detector, not the work waiting for a reviewer.
+    const openFlagRows = userIds.length === 0
       ? []
       : await prisma.activityFlag.findMany({
           where: { status: 'OPEN', userId: { in: userIds } },
-          include: { user: { select: { id: true, name: true } } },
+          select: {
+            id: true, type: true, windowStart: true, riskScore: true, createdAt: true,
+            user: { select: { id: true, name: true } },
+          },
           orderBy: { createdAt: 'desc' },
-          take: 8,
         });
-    const flagCount = userIds.length === 0
-      ? 0
-      : await prisma.activityFlag.count({ where: { status: 'OPEN', userId: { in: userIds } } });
+    const flagGroups = new Map<string, { first: (typeof openFlagRows)[number]; count: number; riskScore: number }>();
+    for (const f of openFlagRows) {
+      const key = `${f.user.id}|${dateKeyInTimeZone(f.windowStart, tz)}|${f.type}`;
+      const g = flagGroups.get(key);
+      if (g) {
+        g.count += 1;
+        g.riskScore = Math.max(g.riskScore, f.riskScore);
+      } else {
+        flagGroups.set(key, { first: f, count: 1, riskScore: f.riskScore });
+      }
+    }
+    const openFlags = [...flagGroups.values()].slice(0, 8);
+    const flagCount = flagGroups.size;
 
     // --- Recent rejections (last 5) for the "what's been pushed back" -----
     const rejected = userIds.length === 0
@@ -232,13 +249,14 @@ overviewRouter.get('/', async (req, res, next) => {
       },
       flags: {
         openTotal: flagCount,
-        recent: openFlags.map((f) => ({
-          id: f.id,
-          user: f.user,
-          type: f.type,
-          windowStart: f.windowStart.toISOString(),
-          riskScore: f.riskScore,
-          createdAt: f.createdAt.toISOString(),
+        recent: openFlags.map((g) => ({
+          id: g.first.id,
+          user: g.first.user,
+          type: g.first.type,
+          windowStart: g.first.windowStart.toISOString(),
+          riskScore: g.riskScore,
+          createdAt: g.first.createdAt.toISOString(),
+          count: g.count,
         })),
       },
       recentRejected: rejected.map((r) => ({

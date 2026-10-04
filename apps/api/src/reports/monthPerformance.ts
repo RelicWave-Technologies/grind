@@ -1,5 +1,14 @@
-import { attendanceOverrideShape, type AttendanceOverrideCode, type DayStatus } from '@grind/types';
+import {
+  displayDayCode,
+  attendanceOverrideShape,
+  type DisplayDayCode,
+  type AttendanceOverrideCode,
+  type AttendanceRuleVerdict,
+  type DayStatus,
+} from '@grind/types';
 import type { PunchLookup } from '../attendance/punches';
+import type { LeaveAccount } from '../leave/leaveFunding';
+import { ruleCode } from '../attendance/rules';
 import { weekdayForDate } from '../leave';
 
 /**
@@ -41,10 +50,13 @@ import { weekdayForDate } from '../leave';
  *     P                         any tracked time at all
  *     A                         a working day with none
  *
- * Deliberately no minimum. A floor at four or eight hours only decides which
- * side of an arbitrary line a real working day falls on, and every hour of it
- * is already printed on the row above — the reader can see six hours and judge
- * six hours. The status answers "did they work", the hours answer "how much".
+ * Until the attendance rules are switched on there is no minimum: the status
+ * answers "did they work", the hours answer "how much". From the date the
+ * leave policy names, the company's rules apply instead (see
+ * `attendance/rules.ts`) — a day short of the minimums, worked from home
+ * without approval or missed without an approved application is leave, paid or
+ * unpaid by the balance like any other, and the day's `rule` says which rule
+ * made it so. The hours still print exactly what was tracked.
  */
 
 /**
@@ -85,6 +97,13 @@ export type MonthPerformanceCode =
   /** No shift assignment covers this date, and nothing tracked either. */
   | '--';
 
+export interface RuleSettings {
+  fullDay: number;
+  halfDay: number;
+  lateAllowed: number;
+  lateGrace: number;
+}
+
 export interface MonthPerformanceUser {
   id: string;
   name: string;
@@ -114,6 +133,12 @@ export interface MonthPerformanceDay {
    * they once agreed on.
    */
   override: { code: AttendanceOverrideCode; stale: boolean } | null;
+  /** What the day reads as with nobody's correction. */
+  computedCode: MonthPerformanceCode;
+  /** The attendance rule that charged this day, when one did. */
+  rule: AttendanceRuleVerdict | null;
+  /** The month's Nth late arrival, when this day was one. */
+  late: number | null;
 }
 
 export interface MonthPerformanceTotals {
@@ -134,6 +159,17 @@ export interface MonthPerformanceTotals {
   noShift: number;
   /** Sum of the WORK row. */
   workMinutes: number;
+  /** Days each attendance rule charged, by rule. */
+  shortDay: number;
+  underMin: number;
+  halfDayShort: number;
+  wfhUnapproved: number;
+  /** Absent with no approved application — pending and rejected included. */
+  leaveWithoutApproval: number;
+  /** Leave days the rules charged in total, on the 0.5 grid. */
+  ruleDays: number;
+  /** Late arrivals this month, charged or not. */
+  lateDays: number;
 }
 
 export interface MonthPerformanceRow {
@@ -147,6 +183,11 @@ export interface MonthPerformanceRow {
    * days of this month, and this one is what the month left behind.
    */
   balanceDays: number | null;
+  /**
+   * The month's leave account — opening, earned, paid, closing — from the same
+   * walk that decides which days were paid. null when nobody asked.
+   */
+  leaveAccount: LeaveAccount | null;
 }
 
 export interface MonthPerformanceReport {
@@ -160,6 +201,16 @@ export interface MonthPerformanceReport {
   /** Every day of the month, in order. The column axis for every row. */
   dates: string[];
   rows: MonthPerformanceRow[];
+  /**
+   * First date the attendance rules judge, when they are on for any day of
+   * this month. null keeps the report exactly as it was before the rules.
+   */
+  rulesFrom: string | null;
+  /**
+   * The rules' settings, for the sheet's Why row ("<7h") and its legend:
+   * minimum minutes, free late arrivals a month, and the late grace.
+   */
+  ruleMinutes: RuleSettings | null;
 }
 
 export interface MonthPerformanceInput {
@@ -183,6 +234,23 @@ export interface MonthPerformanceInput {
    * printed beside it.
    */
   balanceFor?: (userId: string) => number | undefined;
+  /** The month's leave account per person. */
+  leaveAccountFor?: (userId: string) => LeaveAccount | undefined;
+  /** The attendance rules' verdict for a person-day, null when nothing is charged. */
+  ruleFor?: (userId: string, date: string, status: DayStatus | null, trackedMinutes: number) => AttendanceRuleVerdict | null;
+  /** How much of a day's cost a balance covered, undefined when it covered all. */
+  fundedDaysFor?: (userId: string, date: string) => number | undefined;
+  /** The month's Nth late arrival on this day, null when on time. */
+  lateOrdinalFor?: (userId: string, date: string) => number | null;
+  /** See `MonthPerformanceReport.rulesFrom`. */
+  rulesFrom?: string | null;
+  /** See `MonthPerformanceReport.ruleMinutes`. */
+  ruleMinutes?: RuleSettings | null;
+  /**
+   * Today, YYYY-MM-DD in the workspace timezone. A working day from today on
+   * with nothing tracked has not happened yet, so it reads `--`, not absent.
+   */
+  today?: string;
   generatedAtMs: number;
 }
 
@@ -333,12 +401,40 @@ export function computedCodeForDay(
   return 'A';
 }
 
+/**
+ * The computed code once the attendance rules have had their say. A day no rule
+ * charged reads exactly as it did before the rules existed.
+ */
+export function computedCodeWithRule(
+  status: DayStatus | null,
+  trackedMinutes: number,
+  rule: AttendanceRuleVerdict | null,
+  fundedDays: number | undefined,
+): MonthPerformanceCode {
+  if (rule && status) return ruleCode(status, rule, fundedDays);
+  return computedCodeForDay(status, trackedMinutes);
+}
+
 function emptyTotals(): MonthPerformanceTotals {
   return {
     present: 0, paidHalfDay: 0, unpaidHalfDay: 0, splitLeave: 0,
     weeklyOff: 0, holiday: 0, paidLeave: 0,
     unpaidLeave: 0, absent: 0, noShift: 0, workMinutes: 0,
+    shortDay: 0, underMin: 0, halfDayShort: 0, wfhUnapproved: 0,
+    leaveWithoutApproval: 0, ruleDays: 0, lateDays: 0,
   };
+}
+
+function countRuleInto(totals: MonthPerformanceTotals, rule: AttendanceRuleVerdict): void {
+  switch (rule.tag) {
+    case 'SHORT_DAY': totals.shortDay += 1; break;
+    case 'UNDER_MIN': totals.underMin += 1; break;
+    case 'HALF_DAY_SHORT': totals.halfDayShort += 1; break;
+    case 'WFH_UNAPPROVED': totals.wfhUnapproved += 1; break;
+    case 'NO_APPLICATION':
+    case 'LEAVE_NOT_APPROVED': totals.leaveWithoutApproval += 1; break;
+  }
+  totals.ruleDays += rule.penaltyDays;
 }
 
 function countInto(totals: MonthPerformanceTotals, code: MonthPerformanceCode): void {
@@ -372,10 +468,21 @@ export function buildMonthPerformance(input: MonthPerformanceInput): MonthPerfor
       const outMinute = punch?.outMinute ?? null;
       const workMinutes = Math.max(0, Math.round(input.trackedMinutesFor(user.id, date)));
       const override = input.overrideFor?.(user.id, date) ?? null;
-      const computed = computedCodeForDay(status, workMinutes);
+      // Judged even under a correction, so the correction can be flagged when
+      // the computed answer moves — but a corrected day is charged nothing by a
+      // rule, because the person who corrected it is the better authority.
+      const verdict = input.ruleFor?.(user.id, date, status, workMinutes) ?? null;
+      let computed = computedCodeWithRule(status, workMinutes, verdict, input.fundedDaysFor?.(user.id, date));
+      if (computed === 'A' && input.today && date >= input.today) computed = '--';
       const code = override ? overrideCode(override) : computed;
+      const rule = override ? null : verdict;
+
+      // A correction answers for the whole day, lateness included.
+      const late = override ? null : (input.lateOrdinalFor?.(user.id, date) ?? null);
 
       countInto(totals, code);
+      if (rule) countRuleInto(totals, rule);
+      if (late !== null) totals.lateDays += 1;
       totals.workMinutes += workMinutes;
 
       return {
@@ -390,9 +497,22 @@ export function buildMonthPerformance(input: MonthPerformanceInput): MonthPerfor
         override: override
           ? { code: override.code, stale: override.computedCode !== null && override.computedCode !== computed }
           : null,
+        computedCode: computed,
+        rule,
+        late,
       };
     });
-    return { user, days, totals, balanceDays: input.balanceFor?.(user.id) ?? null };
+    return {
+      user,
+      days,
+      totals,
+      balanceDays: input.balanceFor?.(user.id) ?? null,
+      // Somebody with nothing earned and nothing taken still has an account:
+      // zeros, not a blank.
+      leaveAccount: input.leaveAccountFor
+        ? (input.leaveAccountFor(user.id) ?? { opening: 0, earned: 0, paid: 0, closing: 0, lines: [] })
+        : null,
+    };
   });
 
   return {
@@ -403,7 +523,59 @@ export function buildMonthPerformance(input: MonthPerformanceInput): MonthPerfor
     generatedAtMs: input.generatedAtMs,
     dates,
     rows,
+    rulesFrom: input.rulesFrom ?? null,
+    ruleMinutes: input.ruleMinutes ?? null,
   };
+}
+
+// ---------------------------------------------------------------------------
+// The sheet's vocabulary
+// ---------------------------------------------------------------------------
+
+/** What a day reads as on the exported sheet — see `displayDayCode`. */
+export type SheetCode = DisplayDayCode;
+
+export function sheetCode(day: Pick<MonthPerformanceDay, 'code' | 'rule'>): SheetCode {
+  return displayDayCode(day.code, day.rule?.tag);
+}
+
+/** "7h", "3.5h" — a minimum as people say it. */
+function hoursWord(minutes: number): string {
+  const h = minutes / 60;
+  return `${Number.isInteger(h) ? h : Number(h.toFixed(1))}h`;
+}
+
+/**
+ * Why a rule made the day leave, in two or three plain words. Empty when no
+ * rule did. The thresholds come from the policy, so the words stay true when
+ * the minimums change.
+ */
+export function sheetWhy(
+  report: Pick<MonthPerformanceReport, 'ruleMinutes'>,
+  day: Pick<MonthPerformanceDay, 'rule'> & { late?: number | null },
+): string {
+  // A late arrival is worth showing even when it costs nothing yet: "late 3"
+  // tells the reader how close the month is to the 5th.
+  if (!day.rule || day.rule.tag === 'LATE') return day.late ? `late ${day.late}` : '';
+  const m = report.ruleMinutes ?? { fullDay: 420, halfDay: 210, lateAllowed: 4, lateGrace: 30 };
+  switch (day.rule.tag) {
+    case 'SHORT_DAY': return `<${hoursWord(m.fullDay)}`;
+    case 'UNDER_MIN':
+    case 'HALF_DAY_SHORT': return `<${hoursWord(m.halfDay)}`;
+    case 'WFH_UNAPPROVED': return 'WFH';
+    case 'NO_APPLICATION': return 'no leave';
+    case 'LEAVE_NOT_APPROVED': return 'unapproved';
+    default: return '';
+  }
+}
+
+/**
+ * Days of the month that went unpaid — the one number payroll needs. A full
+ * day the balance did not cover is 1, an unpaid half is 0.5, and a full day the
+ * balance reached halfway is 0.5.
+ */
+export function salaryCutDays(totals: MonthPerformanceTotals): number {
+  return totals.unpaidLeave + 0.5 * (totals.unpaidHalfDay + totals.splitLeave);
 }
 
 // ---------------------------------------------------------------------------
@@ -444,7 +616,10 @@ export function monthPerformanceGridRows(
     ['Office In', ...cells((d) => fmtClock(d?.punchInMinute ?? null))],
     ['Office Out', ...cells((d) => fmtClock(d?.punchOutMinute ?? null))],
     ['Total Working Hours', ...cells((d) => fmtMinutes(d?.workMinutes ?? 0))],
-    ['Status', ...cells((d) => d?.code ?? '--')],
+    ['Status', ...cells((d) => (d ? sheetCode(d) : '--'))],
+    // Why a rule made the day leave. Only once the rules are on, so a month
+    // before them keeps the layout it always had.
+    ...(report.rulesFrom ? [['Why', ...cells((d) => (d ? sheetWhy(report, d) : ''))]] : []),
   ];
 }
 
@@ -453,29 +628,45 @@ export function monthPerformanceGridRows(
  * One list, so the CSV row and the workbook caption cannot disagree about which
  * counts exist or what they are called.
  *
- * Spelled out — "Half Day", not "HD". The status row has to abbreviate because
- * a day column is five characters wide; the summary strip has the whole width
- * of the sheet and no reason to make anybody decode it.
+ * Six numbers, counted in the sheet's own vocabulary so they always match the
+ * codes printed above them: the four kinds of working day, the salary cut, and
+ * the balance. Holidays and weekly offs are left to the grid — nobody needs
+ * them added up to decide anything.
  */
 export function monthPerformanceSummaryPairs(row: MonthPerformanceRow): Array<[string, string]> {
+  const count = (code: SheetCode) => row.days.filter((d) => sheetCode(d) === code).length;
   return [
-    ['Present', String(row.totals.present)],
-    ['Half Day Paid', String(row.totals.paidHalfDay)],
-    ['Half Day Unpaid', String(row.totals.unpaidHalfDay)],
-    ['Half Paid Half Unpaid', String(row.totals.splitLeave)],
-    ['Weekly Off', String(row.totals.weeklyOff)],
-    ['Holiday', String(row.totals.holiday)],
-    ['Paid Leave', String(row.totals.paidLeave)],
-    ['Leave Without Pay', String(row.totals.unpaidLeave)],
-    ['Absent', String(row.totals.absent)],
-    ['Total Hours', fmtMinutes(row.totals.workMinutes)],
-    // Last, and only when somebody asked for it. Everything before this counts
-    // days inside the month; this is what the month left in the account, and it
-    // reads wrong anywhere but the end of the line.
-    ...(row.balanceDays === null
-      ? []
-      : [['Leave Balance', fmtDays(row.balanceDays)] as [string, string]]),
+    ['Present', String(count('P'))],
+    ['Half Day', String(count('HD'))],
+    ['Leave', String(count('L'))],
+    ['LWA', String(count('LWA'))],
+    ['Late', String(row.totals.lateDays)],
+    // The paid/unpaid split every cell above leaves out, as the one figure
+    // that decides pay.
+    ['Salary Cut', `${fmtDays(salaryCutDays(row.totals))} ${salaryCutDays(row.totals) === 1 ? 'day' : 'days'}`],
   ];
+}
+
+/**
+ * The month's leave account as one line: what the balance opened with, what
+ * the month added, what it paid for, and what is left. The four add up —
+ * Opening + Earned - Paid = Closing — and leave the balance could not pay for
+ * is the Salary Cut beside them, never a negative balance.
+ *
+ * Falls back to the plain ledger balance for a caller that built the report
+ * without the walk.
+ */
+export function monthPerformanceLeavePairs(row: MonthPerformanceRow): Array<[string, string]> {
+  const a = row.leaveAccount;
+  if (a) {
+    return [
+      ['Opening Balance', fmtDays(a.opening)],
+      ['Earned', fmtDays(a.earned)],
+      ['Paid Leave', fmtDays(a.paid)],
+      ['Closing Balance', fmtDays(a.closing)],
+    ];
+  }
+  return row.balanceDays === null ? [] : [['Leave Balance', fmtDays(row.balanceDays)]];
 }
 
 /** "2", "1.5", "-0.5" — halves kept, whole numbers left whole. */
@@ -493,6 +684,7 @@ export function monthPerformanceBlock(
     [
       'Email', row.user.email, '', 'Name', row.user.name, '',
       ...monthPerformanceSummaryPairs(row).flat(),
+      ...monthPerformanceLeavePairs(row).flat(),
     ],
     ...monthPerformanceGridRows(report, row),
   ];

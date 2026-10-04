@@ -22,6 +22,9 @@ Grind
 ├── Grind — References/
 │    └── Time Tracker — Architecture & Tech Plan
 └── Grind — Updates/
+     ├── Attendance Rules (Sept 2026)/
+     │    ├── Plan
+     │    └── Updates
      └── Time Tracker MVP/
           ├── Plan
           ├── Updates
@@ -45,6 +48,9 @@ Grind
 | Time Tracker MVP — Updates | `N7vkdocUsoNgB7xmcIUlWCWigyh` | `J0HLw1Lrni5cyPkK58YlbIn1gth` |
 | Time Tracker MVP — Meeting Updates | `ASuwdpd59obMm6xS1MOlet3eg4b` | `E36Fw9BkLiphzCkgvMtl0DX8gIg` |
 | Time Tracker MVP — Build Plan (Tracker + Dashboard) | `EVded8JgToBkXVxLvOfle6BygUc` | `UicZwET2Oi9vKJkQR9tlMG0BgHf` |
+| Feature: Attendance Rules (folder) | `HbjxdygzAo5k3jxQEtMlbDHYgvg` | `FfMpw3EKHipTaMkkLHKlIHnygeb` |
+| Attendance Rules — Plan | `QH1OdrshDoqhjhx73KKlJnvsgkh` | `M1lIw2JmliENc2ktblFlRoWrgzc` |
+| Attendance Rules — Updates | `TzdxdXR0Tou3kLxePeKlAtp7gkh` | `QRXbwrFEpiVrdtkugf0lq4hvgxn` |
 
 **Wiki space ID:** `7635896570625396443` (Tech Hub)
 **Project node token:** `CNhTwn36iiIr8JkaFj2lOIHhgOg`

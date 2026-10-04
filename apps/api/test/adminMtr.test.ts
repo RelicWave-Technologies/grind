@@ -143,13 +143,22 @@ describe('GET /v1/admin/manual-time-requests', () => {
     expect(inRange.body.to).toBe('2026-05-30');
     expect(inRange.body.tz).toBe('UTC');
 
+    // Pending is the queue, not history: a range that misses it must still
+    // show it, or a request left waiting falls out of sight.
     const outOfRange = await request(app)
       .get('/v1/admin/manual-time-requests?status=ALL&from=2026-06-01&to=2026-06-01&tz=UTC')
       .set(bearer(s.admin.token));
     expect(outOfRange.status).toBe(200);
     const outRangeIds = new Set(outOfRange.body.requests.map((r: { id: string }) => r.id));
-    expect(outRangeIds.has(s.mtrA.id)).toBe(false);
-    expect(outRangeIds.has(s.mtrB.id)).toBe(false);
+    expect(outRangeIds.has(s.mtrA.id)).toBe(true);
+    expect(outRangeIds.has(s.mtrB.id)).toBe(true);
+
+    // Decided history, by contrast, still follows the range.
+    await prisma.manualTimeRequest.update({ where: { id: s.mtrA.id }, data: { status: 'APPROVED', decidedAt: new Date('2026-05-30T12:00:00Z') } });
+    const history = await request(app)
+      .get('/v1/admin/manual-time-requests?status=ALL&from=2026-06-01&to=2026-06-01&tz=UTC')
+      .set(bearer(s.admin.token));
+    expect(new Set(history.body.requests.map((r: { id: string }) => r.id)).has(s.mtrA.id)).toBe(false);
   });
 
   it('keeps a request visible in the range it was decided in, not just the one it claims', async () => {

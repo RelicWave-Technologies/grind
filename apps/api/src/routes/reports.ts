@@ -1,7 +1,11 @@
 import { Router, type Request } from 'express';
 import { prisma } from '@grind/db';
 import type {
+  AttendanceRuleException,
+  AttendanceRuleExceptionsResponse,
   ManualTimeRequestDto,
+  MonthSummaryResponse,
+  MonthSummaryRow,
   MemberReportDayAppsResponse,
   MemberReportDayScreenshotsResponse,
   MemberReportsMeResponse,
@@ -10,6 +14,7 @@ import type {
   TeamReportUser,
 } from '@grind/types';
 import { loadPunchLookup } from '../attendance/punches';
+import { loadAttendanceRuleContext } from '../attendance/ruleContext';
 import { requireAccessToken } from '../middleware/auth';
 import { attachScope, requireCapability } from '../middleware/scope';
 import {
@@ -34,13 +39,12 @@ import type { TimeInvalidationInput } from '../insights/invalidations';
 import type { RoleTitle } from '../scoring/presets';
 import { loadEntryLiveEvidence, type EntryLiveEvidenceMap } from '../insights/liveEntryEvidence';
 import { timesheetCalendarInputs } from '../leave';
-import { formatMonthPerformanceCsv } from '../reports/monthPerformance';
+import { formatMonthPerformanceCsv, salaryCutDays, sheetCode } from '../reports/monthPerformance';
 import { monthPerformanceXlsx } from '../reports/monthPerformanceXlsx';
 import { loadMonthPerformanceReport, resolveReportMonth } from '../reports/monthPerformanceData';
 import { computeMonthPointers, storeMonthPointers } from '../reports/monthPointersData';
 import {
   clearAttendanceOverride,
-  computeDayCode,
   loadOverrideHistory,
   loadOverrideLookup,
   setAttendanceOverride,
@@ -81,6 +85,14 @@ reportsRouter.get('/me', async (req, res, next) => {
       to: range.to,
     });
     const punchFor = await loadPunchLookup({ userIds: [req.user.sub], from: range.from, to: range.to });
+    const rules = await loadAttendanceRuleContext({
+      workspaceId: req.scope!.workspaceId,
+      tz: range.tz,
+      userIds: [req.user.sub],
+      from: range.from,
+      to: range.to,
+      punchFor,
+    });
     const overrideFor = await loadOverrideLookup({
       userIds: [req.user.sub],
       from: range.from,
@@ -93,6 +105,8 @@ reportsRouter.get('/me', async (req, res, next) => {
       tz: range.tz,
       days: buildMemberReportDays({
         dayStatusFor: calendar.dayStatusFor,
+        ruleFor: rules.judge,
+        fundedDaysFor: calendar.fundedDaysFor,
         punchFor,
         overrideFor,
         userId: req.user.sub,
@@ -174,6 +188,14 @@ reportsRouter.get('/team', requireCapability('reports.team.read'), async (req, r
       to: range.to,
     });
     const punchFor = await loadPunchLookup({ userIds: reportUsers.map((u) => u.id), from: range.from, to: range.to });
+    const rules = await loadAttendanceRuleContext({
+      workspaceId: req.scope!.workspaceId,
+      tz: range.tz,
+      userIds: reportUsers.map((u) => u.id),
+      from: range.from,
+      to: range.to,
+      punchFor,
+    });
     const overrideFor = await loadOverrideLookup({
       userIds: reportUsers.map((u) => u.id),
       from: range.from,
@@ -185,6 +207,8 @@ reportsRouter.get('/team', requireCapability('reports.team.read'), async (req, r
       const data = reportData.get(user.id) ?? emptyTeamReportData();
       daysByUser.set(user.id, buildMemberReportDays({
         dayStatusFor: calendar.dayStatusFor,
+        ruleFor: rules.judge,
+        fundedDaysFor: calendar.fundedDaysFor,
         punchFor,
         overrideFor,
         userId: user.id,
@@ -258,12 +282,22 @@ reportsRouter.get('/team/summary', requireCapability('reports.team.read'), async
       to: range.to,
     });
     const punchFor = await loadPunchLookup({ userIds: reportUsers.map((user) => user.id), from: range.from, to: range.to });
+    const rules = await loadAttendanceRuleContext({
+      workspaceId: req.scope!.workspaceId,
+      tz: range.tz,
+      userIds: reportUsers.map((user) => user.id),
+      from: range.from,
+      to: range.to,
+      punchFor,
+    });
     const overrideFor = await loadOverrideLookup({ userIds: reportUsers.map((user) => user.id), from: range.from, to: range.to });
     const daysByUser = new Map<string, ReturnType<typeof buildMemberReportDays>>();
     for (const user of reportUsers) {
       const data = summaryData.buckets.get(user.id) ?? emptyTeamReportSummaryData();
       daysByUser.set(user.id, buildMemberReportDays({
         dayStatusFor: calendar.dayStatusFor,
+        ruleFor: rules.judge,
+        fundedDaysFor: calendar.fundedDaysFor,
         punchFor,
         overrideFor,
         userId: user.id,
@@ -320,9 +354,19 @@ reportsRouter.get('/team/member', requireCapability('reports.team.read'), async 
       to: range.to,
     });
     const punchFor = await loadPunchLookup({ userIds: [target.user.id], from: range.from, to: range.to });
+    const rules = await loadAttendanceRuleContext({
+      workspaceId: req.scope!.workspaceId,
+      tz: range.tz,
+      userIds: [target.user.id],
+      from: range.from,
+      to: range.to,
+      punchFor,
+    });
     const overrideFor = await loadOverrideLookup({ userIds: [target.user.id], from: range.from, to: range.to });
     const days = buildMemberReportDays({
       dayStatusFor: calendar.dayStatusFor,
+      ruleFor: rules.judge,
+      fundedDaysFor: calendar.fundedDaysFor,
       punchFor,
       overrideFor,
       userId: target.user.id,
@@ -469,14 +513,9 @@ reportsRouter.put('/attendance-override', requireCapability('reports.team.read')
     if (!day) return res.status(400).json({ error: 'date_outside_month' });
 
     // What the report would say without any correction — including this one,
-    // if it is being replaced.
-    const computedCode = await computeDayCode({
-      workspaceId: req.scope.workspaceId,
-      userId,
-      date,
-      tz: range.tz,
-      trackedMinutes: day.workMinutes,
-    });
+    // if it is being replaced. The report already judged it, attendance rules
+    // included, so ask it rather than working it out a second, different way.
+    const computedCode = day.computedCode;
 
     await setAttendanceOverride({
       workspaceId: req.scope.workspaceId,
@@ -536,15 +575,7 @@ reportsRouter.delete('/attendance-override', requireCapability('reports.team.rea
       range,
     });
     const day = report.rows[0]?.days.find((d) => d.date === date);
-    const computedCode = day
-      ? await computeDayCode({
-          workspaceId: req.scope.workspaceId,
-          userId,
-          date,
-          tz: range.tz,
-          trackedMinutes: day.workMinutes,
-        })
-      : null;
+    const computedCode = day ? day.computedCode : null;
     const cleared = await clearAttendanceOverride({
       workspaceId: req.scope.workspaceId,
       userId,
@@ -553,6 +584,10 @@ reportsRouter.delete('/attendance-override', requireCapability('reports.team.rea
       setById: req.user.sub,
       computedCode,
     });
+    // The day is the rules' again: rebuilding reconciles their charge for it.
+    if (cleared) {
+      await loadMonthPerformanceReport({ workspaceId: req.scope.workspaceId, userIds: [userId], range });
+    }
     res.json({ ok: true, cleared });
   } catch (err) {
     next(err);
@@ -661,6 +696,92 @@ reportsRouter.get('/month-performance.csv', requireCapability('reports.team.read
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="month-performance-${result.month}.csv"`);
     res.send(formatMonthPerformanceCsv(result.report));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * Every day the attendance rules charged this month, for the people in scope.
+ *
+ * The list HR works through: each line is a day that became leave and why, so
+ * it can be checked and, where the machine got it wrong, corrected by hand with
+ * the same override the grid uses. Built from the month report itself, so it can
+ * never disagree with the export.
+ */
+reportsRouter.get('/attendance-exceptions', requireCapability('reports.team.read'), async (req, res, next) => {
+  try {
+    const result = await monthPerformanceFor(req);
+    if (result.status !== 200) return res.status(result.status).json({ error: result.error });
+    const exceptions: AttendanceRuleException[] = [];
+    for (const row of result.report.rows) {
+      for (const day of row.days) {
+        if (!day.rule) continue;
+        exceptions.push({
+          userId: row.user.id,
+          name: row.user.name,
+          email: row.user.email,
+          teamName: row.user.teamName,
+          date: day.date,
+          tag: day.rule.tag,
+          penaltyDays: day.rule.penaltyDays,
+          workMinutes: day.workMinutes,
+          punched: day.punchInMinute !== null || day.punchOutMinute !== null,
+          code: day.code,
+        });
+      }
+    }
+    exceptions.sort((a, b) => (a.date === b.date ? a.name.localeCompare(b.name) : a.date < b.date ? 1 : -1));
+    const response: AttendanceRuleExceptionsResponse = {
+      month: result.month,
+      rulesFrom: result.report.rulesFrom,
+      exceptions,
+    };
+    res.json(response);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * The month on one screen: a row per person with the sheet's counts, the salary
+ * cut and the leave account — every change behind it included, each leave day
+ * tagged with its code. Built from the month report itself, so it can never
+ * disagree with the Excel.
+ */
+reportsRouter.get('/month-summary', requireCapability('reports.team.read'), async (req, res, next) => {
+  try {
+    const result = await monthPerformanceFor(req);
+    if (result.status !== 200) return res.status(result.status).json({ error: result.error });
+    const modes = await prisma.user.findMany({
+      where: { id: { in: result.report.rows.map((r) => r.user.id) } },
+      select: { id: true, attendanceRuleMode: true },
+    });
+    const modeOf = new Map(modes.map((m) => [m.id, m.attendanceRuleMode]));
+    const rows: MonthSummaryRow[] = result.report.rows.map((row) => {
+      const codeOn = new Map(row.days.map((d) => [d.date, sheetCode(d)]));
+      const count = (code: string) => row.days.filter((d) => sheetCode(d) === code).length;
+      const account = row.leaveAccount ?? { opening: 0, earned: 0, paid: 0, closing: 0, lines: [] };
+      return {
+        userId: row.user.id,
+        name: row.user.name,
+        email: row.user.email,
+        teamName: row.user.teamName,
+        mode: modeOf.get(row.user.id) ?? 'STANDARD',
+        present: count('P'),
+        halfDay: count('HD'),
+        leave: count('L'),
+        lwa: count('LWA'),
+        late: row.totals.lateDays,
+        salaryCut: salaryCutDays(row.totals),
+        account: {
+          ...account,
+          lines: account.lines.map((l) => (l.kind === 'leave' ? { ...l, code: codeOn.get(l.date) } : l)),
+        },
+      };
+    });
+    const response: MonthSummaryResponse = { month: result.month, rulesFrom: result.report.rulesFrom, rows };
+    res.json(response);
   } catch (err) {
     next(err);
   }

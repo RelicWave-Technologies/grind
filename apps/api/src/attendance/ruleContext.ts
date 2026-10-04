@@ -1,0 +1,160 @@
+import { prisma } from '@grind/db';
+import { dateKeyInTimeZone, type AttendanceRuleVerdict, type DayStatus } from '@grind/types';
+import { leaveDateRange } from '../leave/workingCalendar';
+import { loadOrCreateLeavePolicy, loadWorkingCalendar } from '../leave/repository';
+import { loadPunchLookup, type PunchLookup } from './punches';
+import { isLateArrival, judgeDay, withLateRule, type AttendanceRulePolicy } from './rules';
+
+/**
+ * Everything the attendance rules need beyond the calendar and the hours,
+ * loaded once for a set of people over a range: the policy, which dates the
+ * punch import covers, approved work-from-home, leave that was applied for but
+ * not approved, and each person's late arrivals counted from the start of the
+ * month.
+ *
+ * The rows are read here and the decision is made in `rules.ts`, so the rules
+ * themselves stay testable without a database.
+ */
+export interface AttendanceRuleContext {
+  policy: AttendanceRulePolicy & { lateAllowedPerMonth: number; lateGraceMinutes: number };
+  /** Whether the rules can judge anything at all. */
+  enabled: boolean;
+  judge: (userId: string, date: string, status: DayStatus | null, trackedMinutes: number) => AttendanceRuleVerdict | null;
+  /** 1 for the month's first late arrival, 2 for the second…; null when on time. */
+  lateOrdinalFor: (userId: string, date: string) => number | null;
+}
+
+export async function loadAttendanceRuleContext(input: {
+  workspaceId: string;
+  tz: string;
+  userIds: string[];
+  from: string;
+  to: string;
+  punchFor: PunchLookup;
+  nowMs?: number;
+}): Promise<AttendanceRuleContext> {
+  const leavePolicy = await loadOrCreateLeavePolicy(input.workspaceId);
+  const policy = {
+    from: leavePolicy.attendanceRulesFrom ?? null,
+    fullDayMinMinutes: leavePolicy.fullDayMinMinutes,
+    halfDayMinMinutes: leavePolicy.halfDayMinMinutes,
+    wfhRequiresApproval: leavePolicy.wfhRequiresApproval,
+    lateAllowedPerMonth: leavePolicy.lateAllowedPerMonth,
+    lateGraceMinutes: leavePolicy.lateGraceMinutes,
+  };
+  if (!policy.from || policy.from > input.to || input.userIds.length === 0) {
+    return { policy, enabled: false, judge: () => null, lateOrdinalFor: () => null };
+  }
+
+  const fromDate = new Date(`${input.from}T00:00:00Z`);
+  const toDate = new Date(`${input.to}T00:00:00Z`);
+  const overlap = { startDate: { lte: toDate }, endDate: { gte: fromDate } };
+  // Late arrivals are counted per calendar month, so the count for a day in the
+  // middle of the range needs every day since its month began.
+  const monthStart = `${input.from.slice(0, 7)}-01`;
+  const lateFrom = monthStart > policy.from ? monthStart : policy.from;
+
+  const [coveredDates, wfh, unapprovedLeave, people, calendar, punches, overrides] = await Promise.all([
+    prisma.attendancePunch.groupBy({
+      by: ['date'],
+      where: { workspaceId: input.workspaceId, date: { gte: fromDate, lte: toDate } },
+    }),
+    prisma.wfhRequest.findMany({
+      where: { workspaceId: input.workspaceId, userId: { in: input.userIds }, status: 'APPROVED', ...overlap },
+      select: { userId: true, startDate: true, endDate: true },
+    }),
+    prisma.leaveRequest.findMany({
+      where: {
+        workspaceId: input.workspaceId,
+        userId: { in: input.userIds },
+        status: { in: ['PENDING', 'REJECTED'] },
+        ...overlap,
+      },
+      select: { userId: true, startDate: true, endDate: true },
+    }),
+    prisma.user.findMany({
+      where: { id: { in: input.userIds } },
+      select: { id: true, attendanceRuleMode: true },
+    }),
+    loadWorkingCalendar({ workspaceId: input.workspaceId, tz: input.tz, userIds: input.userIds, from: lateFrom, to: input.to }),
+    loadPunchLookup({ userIds: input.userIds, from: lateFrom, to: input.to }),
+    prisma.attendanceOverride.findMany({
+      where: {
+        userId: { in: input.userIds },
+        date: { gte: new Date(`${lateFrom}T00:00:00Z`), lte: toDate },
+      },
+      select: { userId: true, date: true },
+    }),
+  ]);
+  const modeOf = new Map(people.map((p) => [p.id, p.attendanceRuleMode]));
+
+  const coverage = new Set(coveredDates.map((r) => r.date.toISOString().slice(0, 10)));
+  const ranges = (rows: Array<{ userId: string; startDate: Date; endDate: Date }>) => {
+    const byUser = new Map<string, Array<[string, string]>>();
+    for (const r of rows) {
+      const list = byUser.get(r.userId) ?? [];
+      list.push([r.startDate.toISOString().slice(0, 10), r.endDate.toISOString().slice(0, 10)]);
+      byUser.set(r.userId, list);
+    }
+    return (userId: string, date: string) =>
+      (byUser.get(userId) ?? []).some(([s, e]) => date >= s && date <= e);
+  };
+  const wfhApproved = ranges(wfh);
+  const leaveApplied = ranges(unapprovedLeave);
+  const today = dateKeyInTimeZone(new Date(input.nowMs ?? Date.now()), input.tz);
+
+  // Late arrivals, numbered within each month in date order, against each
+  // person's own shift start and one grace period for everyone.
+  const dates = input.to < lateFrom ? [] : leaveDateRange(lateFrom, input.to, 400);
+  const overridden = new Set(overrides.map((o) => `${o.userId}|${o.date.toISOString().slice(0, 10)}`));
+
+  const lateOrdinal = new Map<string, number>();
+  for (const userId of input.userIds) {
+    let month = '';
+    let count = 0;
+    for (const date of dates) {
+      if (date.slice(0, 7) !== month) {
+        month = date.slice(0, 7);
+        count = 0;
+      }
+      if (date >= today) break;
+      const key = `${userId}|${date}`;
+      // A corrected day is the corrector's call, lateness included.
+      if (overridden.has(key)) continue;
+      const late = isLateArrival({
+        status: calendar.dayStatus(userId, date),
+        mode: modeOf.get(userId) ?? 'STANDARD',
+        punchInMinute: punches(userId, date)?.inMinute ?? null,
+        shiftStart: calendar.shiftWindowFor(userId, date)?.start ?? null,
+        graceMinutes: policy.lateGraceMinutes,
+      });
+      if (late) {
+        count += 1;
+        lateOrdinal.set(key, count);
+      }
+    }
+  }
+  const lateOrdinalFor = (userId: string, date: string) => lateOrdinal.get(`${userId}|${date}`) ?? null;
+
+  return {
+    policy,
+    enabled: true,
+    lateOrdinalFor,
+    judge: (userId, date, status, trackedMinutes) => {
+      const punch = input.punchFor(userId, date);
+      const base = judgeDay(policy, {
+        date,
+        today,
+        status,
+        trackedMinutes,
+        punched: punch !== null && (punch.inMinute !== null || punch.outMinute !== null),
+        punchCoverage: coverage.has(date),
+        wfhApproved: wfhApproved(userId, date),
+        leaveApplied: leaveApplied(userId, date),
+        mode: modeOf.get(userId) ?? 'STANDARD',
+      });
+      if (!policy.from || date < policy.from || date >= today) return base;
+      return withLateRule(base, lateOrdinalFor(userId, date), policy.lateAllowedPerMonth);
+    },
+  };
+}

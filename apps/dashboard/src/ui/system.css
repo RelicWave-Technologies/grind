@@ -880,3 +880,10 @@ textarea.ui-control {
   .ui-sidebar__downloads, .ui-sidebar__me-meta { display: none; }
   .ui-main { padding: var(--space-xl) var(--space-md) var(--space-section-sm); }
 }
+
+/* The tab bar above a page that shares one sidebar item with its siblings
+   (Settings: Policy · Shifts · Teams · Integrations). Aligned to the page. */
+.ui-section-tabs {
+  max-width: var(--layout-page-max);
+  margin: 0 auto;
+}

@@ -310,6 +310,8 @@ export interface LeaveStatementRow {
 
 export interface LeaveBalanceResponse {
   balance: LeaveBalance & { userId: string; asOf: string };
+  /** Leave left to take today — never below zero. */
+  leftDays?: number;
   statement: LeaveStatementRow[];
 }
 
@@ -361,6 +363,24 @@ export interface LeaveBalanceRow {
   effectiveAccrualDays: number;
   lastSaturdayOff: boolean | null;
   effectiveLastSaturdayOff: boolean;
+  /** How the attendance rules treat this person. */
+  attendanceRuleMode: 'STANDARD' | 'REMOTE' | 'EXEMPT';
+  /** The month's leave: at start, got, used (paid), left. Never negative. */
+  month: {
+    opening: number;
+    earned: number;
+    paid: number;
+    closing: number;
+    /** Every change this month, in date order. */
+    lines: Array<{
+      date: string;
+      kind: 'credit' | 'leave';
+      label: string;
+      days: number;
+      paid?: number;
+      salaryCut?: number;
+    }>;
+  };
   accrualStart: string;
   joinedOnSet: boolean;
   balanceDays: number;

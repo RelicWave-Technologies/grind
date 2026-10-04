@@ -1,13 +1,24 @@
 import { prisma, type Prisma } from '@grind/db';
 import {
+  ATTENDANCE_RULE_DEFAULTS,
+  ATTENDANCE_RULE_LABEL,
+  ATTENDANCE_RULE_REASON,
+  AttendanceRuleTagSchema,
   attendanceOverrideShape,
   LEAVE_POLICY_DEFAULTS,
+  roundToHalfDay,
   type AttendanceOverrideCode,
   type LeavePolicyDto,
 } from '@grind/types';
 import { WorkingCalendar, type ShiftAssignmentInput } from './workingCalendar';
 import { projectBalance, type LeaveLedgerEntry } from './ledger';
-import { resolveLeaveFunding, type ChargeableLeaveDay, type LeaveCredit } from './leaveFunding';
+import {
+  resolveLeaveAccounts,
+  resolveLeaveFunding,
+  type ChargeableLeaveDay,
+  type LeaveCredit,
+} from './leaveFunding';
+import { RULE_SOURCE_PREFIX } from '../attendance/ruleLedger';
 
 /**
  * The seam between the database and the two pure modules.
@@ -20,6 +31,9 @@ import { resolveLeaveFunding, type ChargeableLeaveDay, type LeaveCredit } from '
  */
 
 type Tx = Prisma.TransactionClient;
+
+/** Earlier than any leave Timo holds, for a workspace with no ledger start. */
+const WHOLE_HISTORY_FROM = '2000-01-01';
 
 /** A `Date` from a Postgres `date` column, as YYYY-MM-DD. */
 export function toIsoDate(d: Date): string {
@@ -45,6 +59,12 @@ export function toLeavePolicyDto(row: {
   accrueOnJoinMonth: boolean;
   ledgerStartMonth?: string | null;
   birthdayLeaveDays?: number;
+  attendanceRulesFrom?: string | null;
+  fullDayMinMinutes?: number;
+  halfDayMinMinutes?: number;
+  wfhRequiresApproval?: boolean;
+  lateAllowedPerMonth?: number;
+  lateGraceMinutes?: number;
   updatedAt: Date;
 }): LeavePolicyDto {
   return {
@@ -55,6 +75,12 @@ export function toLeavePolicyDto(row: {
     ledgerStartMonth: row.ledgerStartMonth ?? null,
     birthdayLeaveDays: row.birthdayLeaveDays ?? 0,
     accrueOnJoinMonth: row.accrueOnJoinMonth,
+    attendanceRulesFrom: row.attendanceRulesFrom ?? ATTENDANCE_RULE_DEFAULTS.attendanceRulesFrom,
+    fullDayMinMinutes: row.fullDayMinMinutes ?? ATTENDANCE_RULE_DEFAULTS.fullDayMinMinutes,
+    halfDayMinMinutes: row.halfDayMinMinutes ?? ATTENDANCE_RULE_DEFAULTS.halfDayMinMinutes,
+    wfhRequiresApproval: row.wfhRequiresApproval ?? ATTENDANCE_RULE_DEFAULTS.wfhRequiresApproval,
+    lateAllowedPerMonth: row.lateAllowedPerMonth ?? ATTENDANCE_RULE_DEFAULTS.lateAllowedPerMonth,
+    lateGraceMinutes: row.lateGraceMinutes ?? ATTENDANCE_RULE_DEFAULTS.lateGraceMinutes,
     updatedAt: row.updatedAt.toISOString(),
   };
 }
@@ -85,12 +111,17 @@ export async function loadWorkingCalendar(input: {
   // decides how far back the other queries have to reach.
   const policy = await loadOrCreateLeavePolicy(input.workspaceId, db);
   const fundingFloor = policy.ledgerStartMonth ? `${policy.ledgerStartMonth}-01` : undefined;
-  const loadFrom = fundingFloor && fundingFloor < input.from ? fundingFloor : input.from;
+  // With no ledger start, every credit since joining counts toward the balance,
+  // so every leave day since then has to be spent against it too — loading
+  // only the visible window would leave old leave unspent and the balance high.
+  const loadFrom = fundingFloor
+    ? (fundingFloor < input.from ? fundingFloor : input.from)
+    : WHOLE_HISTORY_FROM;
 
   const fromDate = fromIsoDate(loadFrom);
   const toDate = fromIsoDate(input.to);
 
-  const [users, assignments, holidays, leave, credits, overrides] = await Promise.all([
+  const [users, assignments, holidays, leave, credits, overrides, ruleCharges] = await Promise.all([
     db.user.findMany({
       where: { id: { in: input.userIds } },
       select: {
@@ -151,7 +182,7 @@ export async function loadWorkingCalendar(input: {
         // reading the entry too would spend the same half day twice.
         NOT: { sourceKey: { startsWith: 'override:' } },
       },
-      select: { userId: true, effectiveOn: true, days: true },
+      select: { userId: true, effectiveOn: true, days: true, sourceKey: true, reason: true },
     }),
     // A manager's correction is a fact about the day, so the balance has to
     // spend against it the same way it spends against Lark's leave. Loaded
@@ -163,6 +194,17 @@ export async function loadWorkingCalendar(input: {
         date: { gte: fromDate, lte: toDate },
       },
       select: { userId: true, date: true, code: true },
+    }),
+    // Days the attendance rules turned into leave. They spend the balance the
+    // way Lark's leave does, so they join the walk below — priced from the line
+    // itself, which the rule reconcile keeps in step with the verdict.
+    db.leaveLedgerEntry.findMany({
+      where: {
+        userId: { in: input.userIds },
+        sourceKey: { startsWith: RULE_SOURCE_PREFIX },
+        effectiveOn: { gte: fromDate, lte: toDate },
+      },
+      select: { userId: true, effectiveOn: true, days: true, reason: true },
     }),
   ]);
 
@@ -223,12 +265,37 @@ export async function loadWorkingCalendar(input: {
    * Days off still cost nothing — that rule sits above every other, and a
    * correction cannot reach past it.
    */
+  const ruleCostFor = new Map<string, number>();
+  const ruleReasonFor = new Map<string, string>();
+  for (const r of ruleCharges) {
+    ruleCostFor.set(`${r.userId}\u0000${toIsoDate(r.effectiveOn)}`, -r.days);
+    if (r.reason) ruleReasonFor.set(`${r.userId}\u0000${toIsoDate(r.effectiveOn)}`, r.reason);
+  }
+
+  /** Why a day was leave, in words — for the leave details list. */
+  const labelOf = (userId: string, date: string): string => {
+    const key = `${userId}\u0000${date}`;
+    if (overrideFor.has(key)) return 'Changed by a manager';
+    const status = priced.dayStatus(userId, date);
+    const parts: string[] = [];
+    if (status.chargedDays > 0) parts.push(status.portion === 'FULL' ? 'Leave (Lark)' : 'Half-day leave (Lark)');
+    const rule = ruleReasonFor.get(key);
+    if (rule) {
+      // The ledger line holds the full sentence; the list wants the few words.
+      const tag = AttendanceRuleTagSchema.options.find((t) => ATTENDANCE_RULE_LABEL[t] === rule);
+      parts.push(tag ? ATTENDANCE_RULE_REASON[tag] : rule);
+    }
+    return parts.join(' + ') || 'Leave';
+  };
+
   const costOf = (userId: string, date: string): number => {
     const status = priced.dayStatus(userId, date);
     const free = status.kind === 'WEEKLY_OFF' || status.kind === 'HOLIDAY' || status.kind === 'NO_SHIFT';
     if (free) return 0;
     const override = overrideFor.get(`${userId}\u0000${date}`);
-    if (!override) return status.chargedDays;
+    // A rule's leave sits on top of whatever was approved: half a day of
+    // approved leave plus half a day the rule added is a whole day spent.
+    if (!override) return roundToHalfDay(status.chargedDays + (ruleCostFor.get(`${userId}\u0000${date}`) ?? 0));
     switch (attendanceOverrideShape(override)) {
       case 'FULL_LEAVE': return 1;
       case 'HALF_LEAVE': return 0.5;
@@ -244,7 +311,7 @@ export async function loadWorkingCalendar(input: {
     const key = `${userId}\u0000${date}`;
     if (charged.has(key)) return;
     charged.add(key);
-    leaveDays.push({ userId, date, cost: costOf(userId, date) });
+    leaveDays.push({ userId, date, cost: costOf(userId, date), label: labelOf(userId, date) });
   };
 
   for (const l of shared.approvedLeave) {
@@ -256,22 +323,31 @@ export async function loadWorkingCalendar(input: {
   }
   // A day nobody filed leave for, that a manager called paid leave anyway.
   for (const o of overrides) chargeDay(o.userId, toIsoDate(o.date));
+  // A day a rule charged, which usually has no leave filed against it either.
+  for (const r of ruleCharges) chargeDay(r.userId, toIsoDate(r.effectiveOn));
 
   const creditRows: LeaveCredit[] = credits.map((c) => ({
     userId: c.userId,
     effectiveOn: toIsoDate(c.effectiveOn),
     days: c.days,
+    label: creditLabel(c.sourceKey, c.days, c.reason),
   }));
 
+  const walk = { credits: creditRows, leaveDays, since: fundingFloor, accrualStartFor };
   return new WorkingCalendar({
     ...shared,
-    leaveFunding: resolveLeaveFunding({
-      credits: creditRows,
-      leaveDays,
-      since: fundingFloor,
-      accrualStartFor,
-    }),
+    leaveFunding: resolveLeaveFunding(walk),
+    leaveAccounts: resolveLeaveAccounts({ ...walk, from: input.from, to: input.to }),
   });
+}
+
+/** A ledger credit in words, for the leave details list. */
+function creditLabel(sourceKey: string, days: number, reason: string | null): string {
+  if (sourceKey.startsWith('accrual:')) return 'Monthly leave';
+  if (sourceKey.startsWith('birthday:')) return 'Birthday leave';
+  if (sourceKey.startsWith('leave-reversal:')) return 'Leave cancelled — returned';
+  const who = days >= 0 ? 'Added by admin' : 'Removed by admin';
+  return reason ? `${who}: ${reason}` : who;
 }
 
 /** Every YYYY-MM-DD from `start` to `end`, inclusive. */

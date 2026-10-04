@@ -9,6 +9,7 @@ import {
   formatMonthPerformanceCsv,
   monthDates,
   monthPerformanceBlock,
+  monthPerformanceLeavePairs,
   monthPerformanceSummaryPairs,
   type MonthPerformanceUser,
 } from './monthPerformance';
@@ -473,26 +474,9 @@ describe('a human correction to a day', () => {
   });
 });
 
-describe('the balance the month left behind', () => {
-  it('prints as the last pair, and only when somebody asked', () => {
-    const withBalance = buildMonthPerformance({
-      month: '2026-08',
-      tz: 'Asia/Kolkata',
-      companyName: 'EMIAC',
-      users: [user],
-      dayStatusFor: () => null,
-      trackedMinutesFor: () => 0,
-      punchFor: noPunches,
-      balanceFor: () => -0.5,
-      generatedAtMs: Date.UTC(2026, 8, 1),
-    });
-    const pairs = monthPerformanceSummaryPairs(withBalance.rows[0]!);
-    expect(pairs[pairs.length - 1]).toEqual(['Leave Balance', '-0.5']);
-    expect(withBalance.rows[0]!.balanceDays).toBe(-0.5);
-  });
-
-  it('says nothing at all when the caller has no ledger', () => {
-    const without = buildMonthPerformance({
+describe('the leave account the month left behind', () => {
+  const build = (extra: Partial<Parameters<typeof buildMonthPerformance>[0]>) =>
+    buildMonthPerformance({
       month: '2026-08',
       tz: 'Asia/Kolkata',
       companyName: 'EMIAC',
@@ -501,30 +485,42 @@ describe('the balance the month left behind', () => {
       trackedMinutesFor: () => 0,
       punchFor: noPunches,
       generatedAtMs: Date.UTC(2026, 8, 1),
+      ...extra,
     });
-    expect(without.rows[0]!.balanceDays).toBeNull();
-    expect(monthPerformanceSummaryPairs(without.rows[0]!).map((p) => p[0]))
-      .not.toContain('Leave Balance');
+
+  it('prints opening, earned, paid and closing — and they add up', () => {
+    const rep = build({ leaveAccountFor: () => ({ opening: 1.5, earned: 1, paid: 2, closing: 0.5, lines: [] }) });
+    expect(monthPerformanceLeavePairs(rep.rows[0]!)).toEqual([
+      ['Opening Balance', '1.5'],
+      ['Earned', '1'],
+      ['Paid Leave', '2'],
+      ['Closing Balance', '0.5'],
+    ]);
   });
 
-  it('keeps a half day a half, and leaves a whole number whole', () => {
-    const pairFor = (days: number) => {
-      const rep = buildMonthPerformance({
-        month: '2026-08',
-        tz: 'Asia/Kolkata',
-        companyName: 'EMIAC',
-        users: [user],
-        dayStatusFor: () => null,
-        trackedMinutesFor: () => 0,
-        punchFor: noPunches,
-        balanceFor: () => days,
-        generatedAtMs: Date.UTC(2026, 8, 1),
-      });
-      const pairs = monthPerformanceSummaryPairs(rep.rows[0]!);
-      return pairs[pairs.length - 1]![1];
-    };
-    expect(pairFor(2)).toBe('2');
-    expect(pairFor(1.5)).toBe('1.5');
-    expect(pairFor(0)).toBe('0');
+  it('gives somebody with no leave history an account of zeros, not a blank', () => {
+    const rep = build({ leaveAccountFor: () => undefined });
+    expect(rep.rows[0]!.leaveAccount).toEqual({ opening: 0, earned: 0, paid: 0, closing: 0, lines: [] });
+  });
+
+  it('counts the sheet codes and turns unpaid leave into one salary-cut figure', () => {
+    const rep = build({
+      dayStatusFor: (_u, date) =>
+        date === '2026-08-03' ? status(date, 'UNPAID_LEAVE') : date === '2026-08-04' ? status(date, 'WORKING') : null,
+      trackedMinutesFor: (_u, date) => (date === '2026-08-04' ? 480 : 0),
+    });
+    expect(monthPerformanceSummaryPairs(rep.rows[0]!)).toEqual([
+      ['Present', '1'],
+      ['Half Day', '0'],
+      ['Leave', '1'],
+      ['LWA', '0'],
+      ['Late', '0'],
+      ['Salary Cut', '1 day'],
+    ]);
+  });
+
+  it('falls back to the ledger balance without the walk, and says nothing with neither', () => {
+    expect(monthPerformanceLeavePairs(build({ balanceFor: () => 2 }).rows[0]!)).toEqual([['Leave Balance', '2']]);
+    expect(monthPerformanceLeavePairs(build({}).rows[0]!)).toEqual([]);
   });
 });

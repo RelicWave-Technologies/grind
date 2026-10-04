@@ -21,8 +21,8 @@ import {
 } from '../insights/invalidations';
 import type { EntryLiveEvidenceMap } from '../insights/liveEntryEvidence';
 import { resolveEffectiveEntrySegmentEnds } from '../insights/openSegmentEvidence';
-import type { DayStatus } from '@grind/types';
-import { computedCodeForDay, overrideCode, type DayOverride } from './monthPerformance';
+import type { AttendanceRuleVerdict, DayStatus } from '@grind/types';
+import { computedCodeWithRule, overrideCode, type DayOverride } from './monthPerformance';
 import { buildTimesheetMatrix, dateRange, type TimesheetSegmentInput } from '../insights/timesheets';
 import type { RoleTitle } from '../scoring/presets';
 import { scoreMinute } from '../scoring/score';
@@ -200,6 +200,10 @@ export function buildMemberReportDays(input: {
    * reader can tell a judgement from a measurement.
    */
   overrideFor?: (userId: string, date: string) => DayOverride | null;
+  /** The attendance rules' verdict for a day, when the rules are on. */
+  ruleFor?: (userId: string, date: string, status: DayStatus | null, trackedMinutes: number) => AttendanceRuleVerdict | null;
+  /** How much of a day's cost a balance covered, undefined when it covered all. */
+  fundedDaysFor?: (userId: string, date: string) => number | undefined;
 }): MemberReportDay[] {
   const iconFor = input.iconFor ?? appIconUrl;
   const entries = capOpenEntries(input.entries, input.evidenceByEntry, input.now);
@@ -323,7 +327,14 @@ export function buildMemberReportDays(input: {
     const override = input.overrideFor?.(input.userId, date) ?? null;
     // Total tracked time, in minutes — the same measure the month performance
     // report bands on, so the two surfaces cannot call a day differently.
-    const computedCode = computedCodeForDay(dayStatus, Math.round(cell.totalMs / 60_000));
+    const trackedMinutes = Math.round(cell.totalMs / 60_000);
+    const rule = input.ruleFor?.(input.userId, date, dayStatus, trackedMinutes) ?? null;
+    const computedCode = computedCodeWithRule(
+      dayStatus,
+      trackedMinutes,
+      rule,
+      input.fundedDaysFor?.(input.userId, date),
+    );
     const screenshotCount = input.screenshots.filter((s) =>
       s.capturedAt.getTime() >= dayStart && s.capturedAt.getTime() < dayEnd,
     ).length;
@@ -361,6 +372,8 @@ export function buildMemberReportDays(input: {
           }
         : null,
       computedAttendanceCode: computedCode,
+      // A corrected day is the corrector's call; no rule speaks for it.
+      attendanceRule: override ? null : rule,
     };
   });
 }

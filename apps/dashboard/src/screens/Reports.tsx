@@ -36,7 +36,13 @@ import {
 } from '@grind/types';
 import type { SelfProfileResponse } from '@grind/types/profile';
 import type { ShiftSchedule, Weekday } from '@grind/types/shifts';
-import { attendanceOverrideShape } from '@grind/types';
+import {
+  ATTENDANCE_RULE_LABEL,
+  ATTENDANCE_RULE_SHORT,
+  DISPLAY_DAY_LABEL,
+  attendanceOverrideShape,
+  displayDayCode,
+} from '@grind/types';
 import type {
   AttendanceOverrideCode,
   AttendanceOverrideHistoryResponse,
@@ -83,6 +89,9 @@ import {
   Banner,
   EmptyState,
   SkeletonTable,
+  Field,
+  Input,
+  Select,
 } from '../ui';
 
 type ModalKind = 'apps' | 'activity' | 'timeline';
@@ -396,10 +405,10 @@ const ATTENDANCE_LABEL: Record<string, string> = {
  * cannot back, and would make them guess at a number the report already knows.
  */
 const OVERRIDE_SHAPES = [
-  { key: 'P', chip: 'P', label: 'Present', hint: 'They worked the day' },
-  { key: 'A', chip: 'A', label: 'Absent', hint: 'No work and no leave' },
-  { key: 'HALF_LEAVE', chip: 'HD', label: 'Half day of leave', hint: 'Away for half of it' },
-  { key: 'FULL_LEAVE', chip: 'LV', label: 'Full day of leave', hint: 'Away for all of it' },
+  { key: 'P', label: 'P — Present' },
+  { key: 'HALF_LEAVE', label: 'HD — Half day' },
+  { key: 'FULL_LEAVE', label: 'L — Leave' },
+  { key: 'A', label: 'LWA — Absent, no approved leave' },
 ] as const;
 
 /**
@@ -419,19 +428,27 @@ function AttendanceStatusCell({
   day: MemberReportDay;
   onEdit?: (day: MemberReportDay) => void;
 }) {
-  const code = day.attendanceCode ?? '--';
   const override = day.attendanceOverride ?? null;
-  const title = override
-    ? `${ATTENDANCE_LABEL[code] ?? code} — set by hand${override.stale ? '; the computed answer has changed since' : ''}`
-    : (ATTENDANCE_LABEL[code] ?? code);
+  // Why an attendance rule made the day leave — short in the cell, spelled out
+  // in the tooltip, so a leave never appears without its reason.
+  const rule = day.attendanceRule ?? null;
+  // The same six words the exported sheet prints.
+  const code = displayDayCode(day.attendanceCode ?? '--', rule?.tag);
+  const base = override
+    ? `${DISPLAY_DAY_LABEL[code]} — corrected by hand${override.stale ? '; the computed answer has changed since' : ''}`
+    : DISPLAY_DAY_LABEL[code];
+  const title = rule ? `${base} — ${ATTENDANCE_RULE_LABEL[rule.tag]}` : base;
 
   const chip = (
-    <span
-      className={`rep-status-chip rep-status-chip--${code === '--' ? 'none' : code.toLowerCase()}${override ? ' is-override' : ''}`}
-      title={title}
-    >
-      {code}
-      {override && <span className="rep-status-mark" aria-hidden="true">{override.stale ? '!' : '\u00b7'}</span>}
+    <span className="rep-status">
+      <span
+        className={`rep-status-chip rep-status-chip--${code === '--' ? 'none' : code.toLowerCase()}${override ? ' is-override' : ''}`}
+        title={title}
+      >
+        {code}
+        {override && <span className="rep-status-mark" aria-hidden="true">{override.stale ? '!' : '\u00b7'}</span>}
+      </span>
+      {rule && <span className="rep-status-remark">{ATTENDANCE_RULE_SHORT[rule.tag]}</span>}
     </span>
   );
 
@@ -1128,81 +1145,51 @@ function AttendanceOverrideDialog({
     }
   }
 
-  const computed = day.computedAttendanceCode ?? '--';
+  const nowCode = displayDayCode(day.computedAttendanceCode ?? '--', day.attendanceRule?.tag);
+  const history = historyQ.data?.entries ?? [];
   return (
     <div className="rep-modal-backdrop" role="presentation" onMouseDown={onClose}>
       <div className="rep-modal rep-modal--override" role="dialog" aria-modal="true" onMouseDown={(e) => e.stopPropagation()}>
         <header className="rep-modal-head">
           <div>
             <p className="ui-t-eyebrow">{fmtDayLabel(day.date, tz)}</p>
-            <h3 className="ui-t-card-title">Correct this day</h3>
+            <h3 className="ui-t-card-title">Change this day</h3>
           </div>
           <Button size="sm" variant="ghost" icon={<X size={15} strokeWidth={2} />} onClick={onClose} aria-label="Close" />
         </header>
 
-        {/* One scrolling region between a fixed head and foot, so the buttons
-            stay reachable however long the history gets. */}
         <div className="rep-modal-body rep-override-body">
-        {/* What is being overruled, stated before the choice rather than after
-            it — a person correcting a day should see the day first. */}
-        <div className="rep-override-now">
-          <div className="rep-override-now-row">
-            <span className="ui-t-eyebrow">Reads as</span>
-            <span className={`rep-status-chip rep-status-chip--${computed === '--' ? 'none' : computed.toLowerCase()}`}>
-              {computed}
+          {/* The day as it stands, in one line: code, hours, and the reason if a rule made it. */}
+          <p className="rep-override-now-line">
+            <span className={`rep-status-chip rep-status-chip--${nowCode === '--' ? 'none' : nowCode.toLowerCase()}`}>
+              {nowCode}
             </span>
-            <span className="rep-override-now-label">{ATTENDANCE_LABEL[computed] ?? computed}</span>
-          </div>
-          <div className="rep-override-now-row">
-            <span className="ui-t-eyebrow">Tracked</span>
-            <span className="rep-override-now-hours">{fmtDurationMs(totalDayWorkedMs(day))}</span>
-            <span className="rep-override-now-note">hours are not changed by a correction</span>
-          </div>
-        </div>
+            <span>
+              {DISPLAY_DAY_LABEL[nowCode]} · {fmtDurationMs(totalDayWorkedMs(day))} worked
+              {day.attendanceRule ? ` · ${ATTENDANCE_RULE_LABEL[day.attendanceRule.tag]}` : ''}
+            </span>
+          </p>
 
-        <div className="rep-override-field">
-          <span className="ui-t-eyebrow">Correct it to</span>
-          <div className="rep-override-codes">
-            {OVERRIDE_SHAPES.map((shape) => (
-              <button
-                key={shape.key}
-                type="button"
-                className={`rep-override-code${code === shape.key ? ' is-selected' : ''}`}
-                onClick={() => setCode(shape.key)}
-                aria-pressed={code === shape.key}
-              >
-                <span className={`rep-override-code-key rep-override-code-key--${shape.key.toLowerCase()}`}>
-                  {shape.chip}
-                </span>
-                <span className="rep-override-code-text">
-                  <span className="rep-override-code-label">{shape.label}</span>
-                  <span className="rep-override-code-hint">{shape.hint}</span>
-                </span>
-              </button>
-            ))}
-          </div>
-          {(code === 'HALF_LEAVE' || code === 'FULL_LEAVE') && (
-            <p className="rep-override-note">
-              Paid or unpaid is worked out from their balance, the same as leave from Lark.
-              You are saying how much of the day they were away.
-            </p>
+          <Field label="Mark as" hint="Paid or unpaid comes from their leave balance.">
+            <Select value={code} onChange={(e) => setCode(e.target.value as AttendanceOverrideShape)}>
+              {OVERRIDE_SHAPES.map((shape) => (
+                <option key={shape.key} value={shape.key}>{shape.label}</option>
+              ))}
+            </Select>
+          </Field>
+
+          <Field label="Reason" hint="Required.">
+            <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Agent was down, present all day" />
+          </Field>
+
+          {error && <Banner status="danger">{error}</Banner>}
+
+          {history.length > 0 && (
+            <details className="rep-override-past">
+              <summary>Past changes ({history.length})</summary>
+              <OverrideHistory query={historyQ} tz={tz} />
+            </details>
           )}
-        </div>
-
-        <label className="rep-override-field">
-          <span className="ui-t-eyebrow">Why</span>
-          <textarea
-            className="rep-override-reason"
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-            rows={3}
-            placeholder="Agent was down; present all day"
-          />
-        </label>
-
-        {error && <Banner status="danger">{error}</Banner>}
-
-        <OverrideHistory query={historyQ} tz={tz} />
         </div>
 
         <footer className="rep-modal-foot">
@@ -1211,9 +1198,9 @@ function AttendanceOverrideDialog({
               variant="ghost"
               onClick={() => void submit('clear')}
               disabled={busy || reason.trim().length === 0}
-              title={reason.trim().length === 0 ? 'Say why first — a removal is a decision too' : undefined}
+              title={reason.trim().length === 0 ? 'Write a reason first' : undefined}
             >
-              Remove correction
+              Undo change
             </Button>
           )}
           <div className="rep-modal-foot-right">

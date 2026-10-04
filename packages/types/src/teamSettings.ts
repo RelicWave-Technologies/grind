@@ -63,6 +63,8 @@ export const TeamMemberSettingsDtoSchema = z.object({
   screenshotIntervalMin: ScreenshotIntervalMinSchema,
   idleThresholdMin: z.number().int().min(IDLE_THRESHOLD_MIN).max(IDLE_THRESHOLD_MAX),
   idleWarningSeconds: z.number().int().min(5).max(120).nullable(),
+  /** How the attendance rules treat them: office, remote (no punch), or outside the rules. */
+  attendanceRuleMode: z.enum(['STANDARD', 'REMOTE', 'EXEMPT']).default('STANDARD'),
   createdAt: z.string().datetime({ offset: true }),
 });
 
@@ -84,6 +86,7 @@ export const PatchTeamMemberSettingsRequest = z
     screenshotIntervalMin: ScreenshotIntervalMinSchema.nullable().optional(),
     idleThresholdMin: z.number().int().min(IDLE_THRESHOLD_MIN).max(IDLE_THRESHOLD_MAX).nullable().optional(),
     idleWarningSeconds: z.number().int().min(5).max(120).nullable().optional(),
+    attendanceRuleMode: z.enum(['STANDARD', 'REMOTE', 'EXEMPT']).optional(),
     auditReason: z.string().max(500).optional(),
   })
   .refine(
@@ -91,7 +94,8 @@ export const PatchTeamMemberSettingsRequest = z
       v.shiftId !== undefined ||
       v.screenshotIntervalMin !== undefined ||
       v.idleThresholdMin !== undefined ||
-      v.idleWarningSeconds !== undefined,
+      v.idleWarningSeconds !== undefined ||
+      v.attendanceRuleMode !== undefined,
     { message: 'nothing_to_update' },
   );
 

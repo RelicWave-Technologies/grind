@@ -208,6 +208,22 @@ export const LeavePolicyDtoSchema = z.object({
   ledgerStartMonth: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/u).nullable(),
   /** Extra days granted on a birthday, once a year. 0 = off. */
   birthdayLeaveDays: LeaveDaysSchema,
+  /**
+   * First YYYY-MM-DD the attendance rules judge. null = rules off. From this
+   * date a working day short of the minimums, worked from home without approval
+   * or missed without an approved application is charged as leave.
+   */
+  attendanceRulesFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u).nullable(),
+  /** Tracked minutes a full working day needs. */
+  fullDayMinMinutes: z.number().int(),
+  /** Tracked minutes half a working day needs. */
+  halfDayMinMinutes: z.number().int(),
+  /** Working from home without an approved request is leave. */
+  wfhRequiresApproval: z.boolean(),
+  /** Late arrivals a month that cost nothing; each one after is half a day. */
+  lateAllowedPerMonth: z.number().int(),
+  /** Minutes after the shift start that still count as on time, for everyone. */
+  lateGraceMinutes: z.number().int(),
   updatedAt: z.string(),
 });
 export type LeavePolicyDto = z.infer<typeof LeavePolicyDtoSchema>;
@@ -222,6 +238,8 @@ export const LEAVE_POLICY_DEFAULTS = {
   birthdayLeaveDays: 0,
 } as const;
 
+const MinutesOfDaySchema = z.number().int().min(0).max(24 * 60);
+
 export const PatchLeavePolicySchema = z
   .object({
     monthlyAccrualDays: leaveDaysSchema(31).optional(),
@@ -231,8 +249,21 @@ export const PatchLeavePolicySchema = z
     carryForwardCapDays: leaveDaysSchema(365).nullable().optional(),
     allowNegativeBalance: z.boolean().optional(),
     accrueOnJoinMonth: z.boolean().optional(),
+    attendanceRulesFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u, 'must be YYYY-MM-DD').nullable().optional(),
+    fullDayMinMinutes: MinutesOfDaySchema.optional(),
+    halfDayMinMinutes: MinutesOfDaySchema.optional(),
+    wfhRequiresApproval: z.boolean().optional(),
+    lateAllowedPerMonth: z.number().int().min(0).max(31).optional(),
+    lateGraceMinutes: z.number().int().min(0).max(240).optional(),
   })
-  .refine((v) => Object.keys(v).length > 0, { message: 'nothing_to_update' });
+  .refine((v) => Object.keys(v).length > 0, { message: 'nothing_to_update' })
+  .refine(
+    (v) =>
+      v.fullDayMinMinutes === undefined ||
+      v.halfDayMinMinutes === undefined ||
+      v.halfDayMinMinutes <= v.fullDayMinMinutes,
+    { message: 'half_day_min_must_be_lte_full_day_min' },
+  );
 export type PatchLeavePolicy = z.infer<typeof PatchLeavePolicySchema>;
 
 // ---------------------------------------------------------------------------

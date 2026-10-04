@@ -363,3 +363,73 @@ describe('POST /v1/admin/flags/:id/resolve', () => {
     expect(res.body.invalidatedMs).toBe(0);
   });
 });
+
+describe('grouped review queue', () => {
+  /** One open flag per minute, the way the detector raises them. */
+  async function minuteFlags(userId: string, startIso: string, minutes: number, type: 'IMPOSSIBLE_RATE' | 'METRONOMIC') {
+    const start = Date.parse(startIso);
+    for (let i = 0; i < minutes; i++) {
+      await prisma.activityFlag.create({
+        data: {
+          userId,
+          type,
+          windowStart: new Date(start + i * 60_000),
+          windowEnd: new Date(start + (i + 1) * 60_000),
+          riskScore: 60 + i,
+          evidence: { peakKeysPerMin: 1200 + i },
+        },
+      });
+    }
+  }
+
+  it('shows one card per person, day and signal, carrying every minute in it', async () => {
+    const s = await seed();
+    await minuteFlags(s.memA.id, '2026-05-30T09:00:00Z', 5, 'IMPOSSIBLE_RATE');
+    await minuteFlags(s.memA.id, '2026-05-30T11:00:00Z', 3, 'METRONOMIC');
+    await minuteFlags(s.memA.id, '2026-05-31T09:00:00Z', 2, 'IMPOSSIBLE_RATE');
+    await minuteFlags(s.memB.id, '2026-05-30T09:00:00Z', 4, 'IMPOSSIBLE_RATE');
+
+    const res = await request(app).get('/v1/admin/flags/groups').set(auth(s.admin.token));
+    expect(res.status).toBe(200);
+    expect(res.body.total).toBe(14);
+    expect(res.body.groups).toHaveLength(4);
+    const big = res.body.groups.find((g: { count: number }) => g.count === 5);
+    expect(big).toMatchObject({ type: 'IMPOSSIBLE_RATE', riskScore: 64 });
+    expect(big.flagIds).toHaveLength(5);
+
+    // A manager sees only their team's cards.
+    const mgr = await request(app).get('/v1/admin/flags/groups').set(auth(s.mgrA.token));
+    expect(mgr.body.groups.every((g: { user: { id: string } }) => g.user.id === s.memA.id)).toBe(true);
+  });
+
+  it('resolves a whole card at once, and refuses someone outside the scope', async () => {
+    const s = await seed();
+    await minuteFlags(s.memA.id, '2026-05-30T09:00:00Z', 5, 'IMPOSSIBLE_RATE');
+    await minuteFlags(s.memB.id, '2026-05-30T09:00:00Z', 2, 'IMPOSSIBLE_RATE');
+    const groups = (await request(app).get('/v1/admin/flags/groups').set(auth(s.admin.token))).body.groups as Array<{ user: { id: string }; flagIds: string[] }>;
+    const mine = groups.find((g) => g.user.id === s.memA.id)!;
+    const theirs = groups.find((g) => g.user.id === s.memB.id)!;
+
+    const denied = await request(app)
+      .post('/v1/admin/flags/resolve-many')
+      .set(auth(s.mgrA.token))
+      .send({ flagIds: theirs.flagIds, resolution: 'DISMISSED' });
+    expect(denied.status).toBe(403);
+
+    const ok = await request(app)
+      .post('/v1/admin/flags/resolve-many')
+      .set(auth(s.mgrA.token))
+      .send({ flagIds: mine.flagIds, resolution: 'TIME_INVALIDATED', note: 'macro confirmed' });
+    expect(ok.status).toBe(200);
+    expect(ok.body.resolved).toBe(5);
+    expect(await prisma.activityFlag.count({ where: { userId: s.memA.id, status: 'OPEN' } })).toBe(0);
+    expect(await prisma.timeInvalidation.count({ where: { userId: s.memA.id } })).toBe(5);
+
+    // A retry is harmless: nothing left open to resolve.
+    const again = await request(app)
+      .post('/v1/admin/flags/resolve-many')
+      .set(auth(s.mgrA.token))
+      .send({ flagIds: mine.flagIds, resolution: 'DISMISSED' });
+    expect(again.body.resolved).toBe(0);
+  });
+});
