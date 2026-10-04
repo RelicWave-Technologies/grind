@@ -935,10 +935,13 @@ adminRouter.get('/manual-time-requests', requireManagerOrAbove, async (req, res,
     const wantsPending = statusParam === 'ALL' || statusParam === 'PENDING';
     const wantsDecided = statusParam !== 'PENDING';
 
-    // Pending is the queue: never capped, longest-waiting first.
+    // Pending is the queue: never capped, longest-waiting first, and never
+    // hidden by the date range. A request left waiting two months is the one
+    // that most needs a decision, and a range that ends last week used to put
+    // it out of sight while the overview still counted it as stuck.
     const pendingRowsAll = wantsPending
       ? await prisma.manualTimeRequest.findMany({
-          where: { ...scoped, status: 'PENDING' },
+          where: { userId: { in: req.scope.userIds }, status: 'PENDING' },
           include,
           orderBy: [{ createdAt: 'asc' }],
         })
@@ -2336,6 +2339,149 @@ adminRouter.get('/flags', requireAnyCapability(['flags.team.review', 'flags.work
       createdAt: r.createdAt.toISOString(),
     }));
     res.json({ flags, scope: req.scope.scope });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /v1/admin/flags/groups?status=OPEN|RESOLVED
+ *
+ * The same flags, one row per person, day and kind of signal. The detector
+ * raises a flag for every offending minute, so one stuck key on one afternoon
+ * is forty cards; a reviewer decides about the afternoon, not each minute.
+ * Each group carries its highest-risk flag's evidence and explanation, the
+ * window it spans, and the ids a verdict will apply to.
+ */
+adminRouter.get('/flags/groups', requireAnyCapability(['flags.team.review', 'flags.workspace.review']), async (req, res, next) => {
+  try {
+    if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
+    const status = typeof req.query.status === 'string' ? req.query.status.toUpperCase() : 'OPEN';
+    if (status !== 'OPEN' && status !== 'RESOLVED') return res.status(400).json({ error: 'invalid_status' });
+    const tz = req.scope.workspaceTimezone;
+    const rows = await prisma.activityFlag.findMany({
+      where: { userId: { in: req.scope.userIds }, status },
+      include: {
+        user: { select: { id: true, name: true, email: true, avatarUrl: true } },
+        resolvedBy: { select: { id: true, name: true } },
+      },
+      orderBy: [{ windowStart: 'asc' }],
+      // Resolved history is only ever skimmed; keep it bounded.
+      ...(status === 'RESOLVED' ? { take: 2000 } : {}),
+    });
+
+    type Row = (typeof rows)[number];
+    const groups = new Map<string, Row[]>();
+    for (const r of rows) {
+      const key = `${r.userId}|${dateKeyInTimeZone(r.windowStart, tz)}|${r.type}`;
+      const list = groups.get(key);
+      if (list) list.push(r);
+      else groups.set(key, [r]);
+    }
+
+    const out = [...groups.entries()].map(([key, list]) => {
+      const peak = list.reduce((a, b) => (b.riskScore > a.riskScore ? b : a));
+      const first = list[0]!;
+      const last = list[list.length - 1]!;
+      return {
+        key,
+        user: { id: first.user.id, name: first.user.name, email: first.user.email, avatarUrl: first.user.avatarUrl },
+        date: dateKeyInTimeZone(first.windowStart, tz),
+        type: first.type,
+        count: list.length,
+        windowStart: first.windowStart.toISOString(),
+        windowEnd: last.windowEnd.toISOString(),
+        riskScore: peak.riskScore,
+        evidence: peak.evidence,
+        explanation: explainFlag({
+          type: peak.type,
+          evidence: (peak.evidence ?? {}) as Record<string, number>,
+          riskScore: peak.riskScore,
+        }),
+        flagIds: list.map((f) => f.id),
+        resolution: status === 'RESOLVED' ? peak.resolution : null,
+        resolvedBy: status === 'RESOLVED' && peak.resolvedBy ? { id: peak.resolvedBy.id, name: peak.resolvedBy.name } : null,
+        resolvedAt: status === 'RESOLVED' && peak.resolvedAt ? peak.resolvedAt.toISOString() : null,
+        resolvedNote: status === 'RESOLVED' ? peak.resolvedNote : null,
+      };
+    });
+    // Riskiest and largest first for open; most recent first for resolved.
+    out.sort((a, b) =>
+      status === 'OPEN'
+        ? b.riskScore - a.riskScore || b.count - a.count || (a.date < b.date ? 1 : -1)
+        : (a.resolvedAt ?? '') < (b.resolvedAt ?? '') ? 1 : -1,
+    );
+    res.json({ groups: out, total: rows.length, scope: req.scope.scope });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /v1/admin/flags/resolve-many
+ * Body: { flagIds: string[], resolution, note? }
+ *
+ * One verdict for a whole group. Each flag is resolved exactly as the single
+ * endpoint would — scope-checked, OPEN only, and an invalidation per flag
+ * window when time is invalidated. Flags already resolved are skipped, so a
+ * retry is harmless.
+ */
+adminRouter.post('/flags/resolve-many', requireAnyCapability(['flags.team.review', 'flags.workspace.review']), async (req, res, next) => {
+  try {
+    if (!req.scope || !req.user) return res.status(401).json({ error: 'unauthorized' });
+    const ids = Array.isArray(req.body?.flagIds) ? (req.body.flagIds as unknown[]).filter((x): x is string => typeof x === 'string') : [];
+    if (ids.length === 0 || ids.length > 5000) return res.status(400).json({ error: 'invalid_flag_ids' });
+    const resolution = typeof req.body?.resolution === 'string' ? req.body.resolution : '';
+    if (!(VALID_RESOLUTIONS as readonly string[]).includes(resolution)) {
+      return res.status(400).json({ error: 'invalid_resolution' });
+    }
+    const note = typeof req.body?.note === 'string' ? req.body.note.trim().slice(0, 500) || null : null;
+    if (resolution === 'TIME_INVALIDATED' && !note) {
+      return res.status(400).json({ error: 'missing_resolution_note' });
+    }
+
+    const flags = await prisma.activityFlag.findMany({
+      where: { id: { in: ids }, status: 'OPEN' },
+      include: { user: { select: { workspaceId: true } } },
+    });
+    if (flags.some((f) => !req.scope!.userIds.includes(f.userId))) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+
+    let invalidatedMs = 0;
+    if (resolution === 'TIME_INVALIDATED') {
+      for (const f of flags) {
+        invalidatedMs += await calculateInvalidatedMsForWindow(prisma, f.userId, f.windowStart, f.windowEnd);
+      }
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.activityFlag.updateMany({
+        where: { id: { in: flags.map((f) => f.id) }, status: 'OPEN' },
+        data: {
+          status: 'RESOLVED',
+          resolution: resolution as FlagResolution,
+          resolvedById: req.user!.sub,
+          resolvedAt: new Date(),
+          resolvedNote: note,
+        },
+      });
+      if (resolution === 'TIME_INVALIDATED') {
+        await tx.timeInvalidation.createMany({
+          data: flags.map((f) => ({
+            workspaceId: f.user.workspaceId,
+            flagId: f.id,
+            userId: f.userId,
+            windowStart: f.windowStart,
+            windowEnd: f.windowEnd,
+            invalidatedById: req.user!.sub,
+            reason: note!,
+          })),
+        });
+      }
+    });
+
+    res.json({ resolved: flags.length, resolution, timeInvalidated: resolution === 'TIME_INVALIDATED', invalidatedMs });
   } catch (err) {
     next(err);
   }

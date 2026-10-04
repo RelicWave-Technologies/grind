@@ -1,7 +1,7 @@
 import './login.css';
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearch } from '@tanstack/react-router';
-import { useMe, larkLoginUrl } from '../lib/auth';
+import { useMe, larkLoginUrl, landingPath } from '../lib/auth';
 import { api, ApiError } from '../lib/api';
 import { AGENT_DOWNLOADS, agentDownloadUrl } from '../lib/downloads';
 
@@ -39,7 +39,7 @@ export function LoginScreen() {
   // Already logged in? Bounce straight to the dashboard.
   useEffect(() => {
     if (me.data) {
-      navigate({ to: '/home' });
+      navigate({ to: landingPath(me.data) });
     }
   }, [me.data, navigate]);
 
@@ -52,7 +52,7 @@ export function LoginScreen() {
   async function signIn() {
     const current = await me.refetch();
     if (current.data) {
-      navigate({ to: '/home' });
+      navigate({ to: landingPath(current.data) });
       return;
     }
     // Top-level navigation (not a fetch) so the OAuth redirect chain works.
@@ -68,8 +68,8 @@ export function LoginScreen() {
         method: 'POST',
         json: { email, password, deviceName: 'Local dashboard' },
       });
-      await me.refetch();
-      navigate({ to: '/home' });
+      const refreshed = await me.refetch();
+      navigate({ to: landingPath(refreshed.data) });
     } catch (error) {
       setDevError(error instanceof ApiError ? error.message : 'login_failed');
     } finally {

@@ -1,5 +1,5 @@
 import { Outlet, Link, useRouteContext, useNavigate, useLocation } from '@tanstack/react-router';
-import { Home, Inbox, CalendarCheck, ShieldAlert, LogOut, ShieldCheck, FileText, User, Users, CalendarDays } from 'lucide-react';
+import { Home, Inbox, CalendarCheck, ShieldAlert, LogOut, ShieldCheck, FileText, User, Users, CalendarDays, Compass } from 'lucide-react';
 import { hasCapability, useLogout, type Permission } from '../lib/auth';
 import { AGENT_DOWNLOADS, agentDownloadUrl } from '../lib/downloads';
 import {
@@ -48,12 +48,14 @@ const NAV: Array<{ section: string; items: NavEntry[] }> = [
   {
     section: 'Team',
     items: [
+      { label: 'Team today', Icon: Compass, tabs: [
+        { to: '/overview', label: 'Team today', show: { permission: 'overview.read' } },
+      ] },
       { label: 'Attendance', Icon: CalendarCheck, tabs: [
         { to: '/attendance', label: 'Attendance', show: { anyPermission: ['reports.team.read', 'reports.workspace.read'] } },
       ] },
       { label: 'Reports', Icon: FileText, tabs: [
         { to: '/reports', label: 'Reports', show: { permission: 'reports.self.read' } },
-        { to: '/overview', label: 'Overview', show: { permission: 'overview.read' } },
       ] },
       { label: 'Approvals', Icon: Inbox, tabs: [{ to: '/approvals', label: 'Approvals', show: { permission: 'approvals.self.read' } }] },
       { label: 'Anti-cheat', Icon: ShieldAlert, tabs: [
@@ -67,11 +69,11 @@ const NAV: Array<{ section: string; items: NavEntry[] }> = [
       { label: 'People', Icon: Users, tabs: [
         { to: '/users', label: 'People', show: { permission: 'people.read' } },
         { to: '/team', label: 'Team settings', show: { permission: 'team.settings.manage' } },
+        { to: '/teams', label: 'Teams', show: { permission: 'teams.manage' } },
       ] },
       { label: 'Settings', Icon: ShieldCheck, tabs: [
         { to: '/policy', label: 'Policy & rules', show: { permission: 'policy.manage' } },
         { to: '/shifts', label: 'Shifts', show: { permission: 'shifts.manage' } },
-        { to: '/teams', label: 'Teams', show: { permission: 'teams.manage' } },
         { to: '/integrations', label: 'Integrations', show: { permission: 'api-tokens.manage' } },
       ] },
     ],
@@ -89,7 +91,7 @@ export function Layout() {
     if ('permission' in show) return hasCapability(me, show.permission);
     return show.anyPermission.some((permission) => hasCapability(me, permission));
   };
-  const onPath = (to: string) => (to === '/home' ? location.pathname === '/home' : location.pathname.startsWith(to));
+  const onPath = (to: string) => location.pathname === to || location.pathname.startsWith(`${to}/`);
   const groups = NAV.map((g) => ({
     section: g.section,
     items: g.items

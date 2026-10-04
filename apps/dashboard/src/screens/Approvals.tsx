@@ -110,7 +110,8 @@ export function ApprovalsScreen() {
   const activeMode: ApprovalMode = canReview ? mode : 'you';
   const [from, setFrom] = useState(() => addDays(today, -6));
   const [to, setTo] = useState(today);
-  const [filter, setFilter] = useState<ApprovalFilter>('ALL');
+  // A reviewer opens on the queue: everything still waiting, whatever its date.
+  const [filter, setFilter] = useState<ApprovalFilter>(() => (canReview ? 'PENDING' : 'ALL'));
   const [selectedRow, setSelectedRow] = useState<ApprovalTableRow | null>(null);
 
   const selfQ = useQuery({
