@@ -1,0 +1,62 @@
+# Timo desktop: Tauri app + Rust crates. The React renderer stays in TypeScript;
+# everything else the desktop app does lives here. legacy/agent (Electron) is
+# the parity oracle until cutover. Rules: AGENTS.md "Desktop: Tauri + Rust".
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.95"
+license = "UNLICENSED"
+publish = false
+
+# Exact pins (=x.y.z). Add a dependency here, never in a member with a version.
+[workspace.dependencies]
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.151"
+thiserror = "=2.0.21"
+tracing = "=0.1.44"
+
+timo-core = { path = "crates/timo-core" }
+timo-store = { path = "crates/timo-store" }
+timo-platform = { path = "crates/timo-platform" }
+timo-sync = { path = "crates/timo-sync" }
+
+[workspace.lints.rust]
+# deny, not forbid: timo-platform needs FFI and opts in at its crate root with a
+# reason. Every other crate re-forbids it in lib.rs.
+unsafe_code = "deny"
+unsafe_op_in_unsafe_fn = "deny"
+missing_debug_implementations = "warn"
+unused_must_use = "deny"
+
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+indexing_slicing = "deny"
+# Parity: every numeric conversion is spelled out (JS numbers are f64; ours are
+# i64 milliseconds), so a silent `as` truncation cannot change someone's pay.
+as_conversions = "deny"
+float_arithmetic = "warn"
+dbg_macro = "deny"
+print_stdout = "deny"
+print_stderr = "deny"
+let_underscore_must_use = "deny"
+string_slice = "deny"
+undocumented_unsafe_blocks = "deny"
+allow_attributes_without_reason = "deny"
+module_name_repetitions = "allow"
+missing_errors_doc = "allow"
+too_many_lines = "deny"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true

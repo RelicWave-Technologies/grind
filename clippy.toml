@@ -1,0 +1,8 @@
+# Functions 50 lines, 4 parameters: lint errors, not a reviewer's judgement.
+too-many-lines-threshold = 50
+too-many-arguments-threshold = 4
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+allow-indexing-slicing-in-tests = true
+doc-valid-idents = ["macOS", "WebView2", "NSPanel", "SQLite", "WebP", "Lark", ".."]

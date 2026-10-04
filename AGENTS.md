@@ -100,10 +100,38 @@ lark-cli wiki +node-create --space-id 7635896570625396443 --parent-node-token <P
 
 ## Project quick facts
 
-- **Stack:** Electron 31+ TS agent · Express + Prisma + Postgres + S3 backend · React + Vite dashboard · pnpm workspaces + Turborepo
+- **Stack:** Desktop app moving from Electron (`legacy/agent`) to Tauri 2 + Rust (`apps/desktop` + `crates/`) · Express + Prisma + Postgres + S3 backend · React + Vite dashboard · pnpm workspaces + Turborepo
 - **Scope:** Internal-use Hubstaff-style tracker — screenshots + time tracking only. No payroll, no invoicing.
 - **Privacy contract:** count keystrokes/mouse, never content. Window titles + URLs default OFF. 60-day screenshot retention.
 - **Signing:** macOS signing via Apple Developer account. Windows ships unsigned for v1 (internal IT deployment).
+
+## MANDATORY: Desktop — Tauri + Rust
+
+The desktop app is being ported from Electron (`legacy/agent`) to Tauri 2 + Rust. **Only the React renderer stays TypeScript.** Everything else the desktop app does — timer engine, ledgers, SQLite, activity counting, idle/sleep/lock, screenshots, sync, auth, updater, windows, tray — is Rust.
+
+**Tracked time pays salaries. The port must reproduce the TypeScript behaviour exactly — not "equivalently", exactly.** These rules exist for that:
+
+1. **`legacy/agent` is the oracle and is frozen.** It stays buildable and tested and ships releases until cutover. Do not change its behaviour. If a real bug is found in it, fix it in both, in the same commit, and say so.
+2. **Every ported function names its source.** A doc comment says which TS file/function it matches (`// Port of legacy/agent/src/main/services/timer/timerService.ts::TimerService.pause`). Deliberate quirks are copied, not fixed, and listed in the crate's `PARITY.md` for a post-cutover decision.
+3. **Proof is golden output from the real TypeScript, never a second reading of the code.** `parity/` runs the legacy TS functions (and `packages/core`) over fixed edge cases *and* seeded random scenarios and writes JSON fixtures into the Rust crates' `tests/fixtures/`. `cargo test` must reproduce them byte for byte. The TS unit tests are also ported 1:1 (same names, same cases).
+4. **Numbers: JS semantics, spelled out.** Time is `i64` milliseconds. `Math.round`/`floor`/`ceil`, `toFixed`, integer division, `Date` and `Intl` behaviour go through `timo_core::js` helpers that reproduce JavaScript exactly (`Math.round(-33.5) === -33`; Rust's `f64::round` gives -34). `as` casts are a lint error.
+5. **Time and ids are injected.** No `SystemTime::now()`/`Instant::now()`/random ids inside `timo-core`; they arrive as arguments or via `Clock`/`IdGen` traits, exactly as the TS `Clock`/`IdGen` seams do.
+6. **Same database.** `timo-store` opens the existing `agent.db` with the identical schema; an upgraded install keeps its entries, queue and liveness.
+7. **Windows is first-class from the first commit, not a later pass.** Every platform feature lands for macOS and Windows together, behind `#[cfg(target_os)]`, with the decision logic in a pure function that tests on any host. CI runs `cargo check` + tests on `windows-latest`.
+
+**Crates:** `timo-core` (pure logic, no I/O, `forbid(unsafe_code)`) · `timo-store` (rusqlite) · `timo-sync` (HTTP client, sync drains, uploader, auth) · `timo-platform` (macOS/Windows FFI; the only crate allowed `unsafe`, each block with a `// SAFETY:` comment) · `apps/desktop/src-tauri` (windows, tray, IPC commands, wiring only — no business logic).
+
+**Code rules** (lint-enforced in `Cargo.toml`/`clippy.toml`): no `unwrap`/`expect`/`panic`/indexing in non-test code; functions ≤ 50 lines and ≤ 4 parameters; files ≤ 300 code lines — split, don't raise; errors via `thiserror`, no `anyhow`; `#[allow]` needs a `reason`; dependencies pinned exactly (`=x.y.z`) in the workspace `Cargo.toml` only. Small single-purpose modules; no abstraction with one implementation.
+
+**Tauri pitfalls already paid for** (from Airnote, `~/Desktop/Cluster/Projects/Airnote spread`):
+- Creating a WebView2 window inside an IPC handler deadlocks on Windows (wry #583): create every window hidden during `setup`, then only show/hide.
+- Window operations from a command freeze Windows (tao #381): always `run_on_main_thread`.
+- `async` commands exhaust WebView2's ~6-connection pool: keep cheap getters synchronous.
+- A panic inside an AppKit callback aborts the process: wrap tray/window/main-thread callbacks in `catch_unwind` (`guard_panics`).
+- NSPanel: `can_join_all_spaces + full_screen_auxiliary`, never with `stationary` (Tauri #5566). `no_activate` hides the app; restore after.
+- The Windows low-level hook thread must pump messages; the macOS event tap is disabled on timeout and must be re-armed.
+
+**Gates before every commit:** `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, the parity fixtures regenerated and unchanged, and `pnpm typecheck`. Commit bodies state what was proven and name anything not provable.
 
 ## MANDATORY: Design & product consistency
 
