@@ -57,19 +57,22 @@ window.agent = createBridge(new WorldStore(scenarioFromParams(params)), {
   reason,
 });
 
-const TAB_LABELS: Record<string, string> = { tasks: 'Tasks', reports: 'Reports', settings: 'Settings' };
+const TAB_LABELS: Record<string, string> = { tasks: 'Tasks', reports: 'My day', settings: 'Settings' };
 const tabLabel = surface === 'main' ? TAB_LABELS[params.get('tab') ?? ''] : undefined;
 
 /**
- * The main window's tab is React state with no outside switch, so the lab
- * presses the sidebar button, exactly as a person would. It does so again
+ * The main window's sheets are React state with no outside switch, so the lab
+ * presses the corner's button (by its words or its aria-label), exactly as a
+ * person would. It does so again
  * whenever the layout remounts (sign out → sign in), and never fights a tab
  * chosen by hand afterwards.
  */
 if (tabLabel) {
   const pressed = new WeakSet<Element>();
   const press = () => {
-    const button = Array.from(document.querySelectorAll('button')).find((el) => el.textContent?.trim() === tabLabel);
+    const button = Array.from(document.querySelectorAll('button')).find(
+      (el) => el.textContent?.trim() === tabLabel || el.getAttribute('aria-label') === tabLabel,
+    );
     if (!button || pressed.has(button)) return;
     pressed.add(button);
     button.click();

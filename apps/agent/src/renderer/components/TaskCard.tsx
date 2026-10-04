@@ -1,11 +1,11 @@
-import { Play, Square, ListTodo, Clock, CalendarClock, User } from 'lucide-react';
-import { projectStyle } from '../lib/projectStyle';
+import { Play, Square, Clock, CalendarClock } from 'lucide-react';
+import TaskOwner from './TaskOwner';
 import { dueInfo, fmtDate, fmtDuration, type LarkTaskItem } from '../lib/taskFormat';
 import { taskTimerAction, taskTimerLabel, taskTimerState } from '../lib/timerUi';
 
 /**
  * A single Lark task row. Click to start tracking (or stop, if it's the one
- * running). Shows per-task color, creator + created date, and due / time-logged
+ * running). Shows who it came from, creator + created date, and due / time-logged
  * chips. Presentational — all state lives in the parent.
  */
 export default function TaskCard({
@@ -29,7 +29,6 @@ export default function TaskCard({
   onStop: () => void;
   onResume?: () => void;
 }) {
-  const st = projectStyle(task.guid);
   const due = task.due != null && timeZone ? dueInfo(task.due, now, timeZone) : null;
   const timerState = taskTimerState({ running, paused });
   const timerAction = taskTimerAction(timerState);
@@ -46,14 +45,11 @@ export default function TaskCard({
       }}
       disabled={disabled}
     >
-      <span className="task-icon" style={{ background: st.color }}>
-        <ListTodo size={20} strokeWidth={2} />
-      </span>
+      <TaskOwner task={task} size={36} />
       <span className="task-main">
         <span className="task-title" style={{ display: 'block' }}>{task.summary}</span>
         {(task.creatorName || task.createdAt) && (
           <span className="task-meta">
-            <User size={11} strokeWidth={2} />
             {[task.creatorName ? `By ${task.creatorName}` : null, task.createdAt ? fmtDate(task.createdAt, timeZone) : null]
               .filter(Boolean)
               .join(' · ')}

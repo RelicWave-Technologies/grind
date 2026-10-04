@@ -147,9 +147,7 @@ export default function Settings() {
 
   return (
     <>
-      <div className="toolbar"><span className="h1 no-drag">Settings</span></div>
-      <div className="content-scroll">
-        <div className="content-narrow">
+      <div className="content-narrow">
           {/* Permissions */}
           <div className="section-head"><span className="section-title">Permissions</span></div>
           <div className="set-card">
@@ -362,7 +360,6 @@ export default function Settings() {
               </div>
             </div>
           </div>
-        </div>
       </div>
     </>
   );

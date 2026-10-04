@@ -11,53 +11,6 @@
   gap: var(--space-xl);
 }
 
-/* ── Page overview ---------------------------------------------------------- */
-.shf-overview {
-  display: grid;
-  grid-template-columns: minmax(240px, 1.35fr) repeat(3, minmax(150px, 1fr));
-  gap: var(--space-sm);
-  align-items: stretch;
-}
-
-.shf-overview__lead,
-.shf-overview__metric {
-  min-width: 0;
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-card);
-  padding: var(--space-lg);
-}
-
-.shf-overview__lead {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: var(--space-xs);
-  background: var(--color-sheet-soft);
-  border-color: transparent;
-}
-
-.shf-overview__metric {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: var(--space-xs);
-  background: var(--color-white);
-}
-
-.shf-overview__metric:nth-child(3) {
-  border-top-color: var(--color-tone-neutral);
-}
-
-.shf-overview__metric:nth-child(4) {
-  border-top-color: var(--color-brand);
-}
-
-.shf-overview__metric .ui-t-strong {
-  font-size: 20px;
-  line-height: 1.1;
-  letter-spacing: -0.3px;
-}
-
 .shf-section-head {
   display: flex;
   align-items: flex-end;
@@ -433,27 +386,28 @@
 /* ── 7-day readout strip ──────────────────────────────────────────────────── */
 .shf-week {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
-  gap: var(--space-xs);
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  border-top: 1px solid var(--color-line-soft);
+  padding-top: var(--space-sm);
 }
+/* Seven days in one strip, divided by hairlines — not seven boxes inside the
+   shift's card (DESIGN.md §9: a card never sits inside a card). */
 .shf-day {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 2px;
-  padding: var(--space-sm) var(--space-xxs);
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-md);
+  padding: var(--space-xs) var(--space-xxs);
   text-align: center;
 }
-.shf-day.is-off {
-  background: var(--color-white);
+.shf-day + .shf-day {
+  border-left: 1px solid var(--color-line-soft);
 }
 .shf-day-label {
   margin-bottom: 2px;
 }
 .shf-day-time {
-  font-size: 12px;
+  font-size: var(--type-micro-size);
   line-height: 1.4;
   white-space: nowrap;
 }
@@ -468,9 +422,6 @@
 
 /* ── Responsive ───────────────────────────────────────────────────────────── */
 @media (max-width: 760px) {
-  .shf-overview {
-    grid-template-columns: 1fr;
-  }
   .shf-modal-layer {
     align-items: stretch;
     padding: var(--space-md);

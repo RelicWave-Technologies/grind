@@ -2,7 +2,7 @@ import './calendar.css';
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouteContext } from '@tanstack/react-router';
-import { CalendarDays, ChevronLeft, ChevronRight, Plus, Trash2 } from 'lucide-react';
+import { CalendarDays, Plus, Trash2 } from 'lucide-react';
 import { api } from '../lib/api';
 import { hasCapability } from '../lib/auth';
 import { todayKey, fmtDayLabel } from '../lib/format';
@@ -20,7 +20,7 @@ import {
   PageHeader,
   Toolbar,
   Button,
-  IconButton,
+  DateStepper,
   Card,
   StatRow,
   Stat,
@@ -288,16 +288,12 @@ export function CalendarScreen() {
              to one tab's card — where it used to sit, leaving the other three
              tabs with no way to change the month they were showing. */
           <Toolbar>
-            <IconButton
-              aria-label="Previous month"
-              icon={<ChevronLeft />}
-              onClick={() => setMonth(shiftMonth(month, -1))}
-            />
-            <span className="cal-month-label">{monthLabel}</span>
-            <IconButton
-              aria-label="Next month"
-              icon={<ChevronRight />}
-              onClick={() => setMonth(shiftMonth(month, 1))}
+            <DateStepper
+              value={monthLabel}
+              prevLabel="Previous month"
+              nextLabel="Next month"
+              onPrev={() => setMonth(shiftMonth(month, -1))}
+              onNext={() => setMonth(shiftMonth(month, 1))}
             />
             <Button variant="secondary" onClick={() => setMonth(today.slice(0, 7))}>
               Today
@@ -353,9 +349,9 @@ export function CalendarScreen() {
       />
 
       {tab === 'month' && (
-        <Card>
+        <Card variant="flush" className="cal-month-card">
           {calendarQ.isLoading ? (
-            <Skeleton h={520} radius={10} />
+            <Skeleton h={520} radius="var(--radius-md)" />
           ) : (
             <div className="cal-scroll">
               <div className="cal-grid" role="grid" aria-label={`${monthName(month)} ${month.slice(0, 4)}`}>

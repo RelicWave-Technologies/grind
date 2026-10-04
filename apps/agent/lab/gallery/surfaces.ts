@@ -28,7 +28,7 @@ export interface SurfaceSpec {
 }
 
 export const GROUPS: { id: GroupId; title: string; note: string }[] = [
-  { id: 'main', title: 'Main window', note: 'Titled window, hidden-inset title bar. Tabs are React state; the lab presses the sidebar for you.' },
+  { id: 'main', title: 'Main window', note: 'Focus: one screen, hidden-inset title bar. Tasks, My day and Settings are sheets; the lab opens them for you.' },
   { id: 'popover', title: 'Menu-bar popover', note: 'Frameless and transparent; the card draws its own edge.' },
   { id: 'floating', title: 'Floating bar', note: 'Always on top while tracking. No OS shadow; the pill fills the window.' },
   { id: 'prompts', title: 'Prompts', note: 'One attention window, sized per prompt. Answering hides it; the lab brings it back.' },
@@ -38,9 +38,9 @@ export const GROUPS: { id: GroupId; title: string; note: string }[] = [
 const signedIn = (scenario: Scenario) => scenario.auth === 'in';
 
 export const SURFACES: SurfaceSpec[] = [
-  { id: 'main-today', group: 'main', title: 'Today', width: 960, height: 640, route: '', params: { tab: 'today' }, chrome: 'window', shownWhen: signedIn },
+  { id: 'main-today', group: 'main', title: 'Focus', width: 960, height: 640, route: '', params: { tab: 'today' }, chrome: 'window', shownWhen: signedIn },
   { id: 'main-tasks', group: 'main', title: 'Tasks', width: 960, height: 640, route: '', params: { tab: 'tasks' }, chrome: 'window', shownWhen: signedIn },
-  { id: 'main-reports', group: 'main', title: 'Reports', width: 960, height: 640, route: '', params: { tab: 'reports' }, chrome: 'window', shownWhen: signedIn },
+  { id: 'main-reports', group: 'main', title: 'My day', width: 960, height: 640, route: '', params: { tab: 'reports' }, chrome: 'window', shownWhen: signedIn },
   { id: 'main-settings', group: 'main', title: 'Settings', width: 960, height: 640, route: '', params: { tab: 'settings' }, chrome: 'window', shownWhen: signedIn },
   { id: 'main-login', group: 'main', title: 'Sign in', width: 960, height: 640, route: '', chrome: 'window', shownWhen: (s) => !signedIn(s) },
   { id: 'popover', group: 'popover', title: 'Popover', width: 300, height: 340, route: 'popover', chrome: 'overlay' },

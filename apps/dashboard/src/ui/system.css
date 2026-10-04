@@ -100,6 +100,11 @@
   margin: 0 auto;
   animation: ui-page-rise var(--duration-slow) var(--ease-standard) both;
 }
+/* The page's rhythm: blocks after the header sit 20px apart (DESIGN.md §5,
+   "cards 20px apart"). Zero specificity, so a screen can still set its own. */
+.ui-page > :where(:not(.ui-page-head) + *) {
+  margin-top: var(--space-lg);
+}
 
 /* ============================================================================
    PageHeader — title, then the sentence under it. No rule beneath: the
@@ -191,18 +196,39 @@
 .ui-stat__delta--down { color: var(--color-bad); }
 .ui-stat__hint { color: var(--color-muted); }
 
+/* Up to six tiles stay on one row across the 1280 page; they wrap only on a
+   narrow window. */
 .ui-stat-row {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(136px, 1fr));
   gap: var(--space-lg);
   align-items: stretch;
 }
 .ui-stat-row > .ui-stat {
-  padding: var(--space-lg) var(--space-xl);
+  padding: var(--space-lg);
   background: var(--color-white);
   border: 1px solid var(--color-line);
   border-radius: var(--radius-card);
 }
+/* A long figure ("45h 43m") steps down a size in a narrow tile instead of
+   wrapping onto two lines: `title`, then `section-title` (DESIGN.md §4). */
+.ui-stat-row > .ui-stat { container-type: inline-size; }
+/* Six tiles in a row get a 16px inset so their figures keep room. */
+.ui-stat-row:has(> .ui-stat:nth-child(6)) > .ui-stat { padding: var(--space-md); }
+@container (max-width: 170px) {
+  .ui-stat .ui-t-num {
+    font-size: var(--type-title-size);
+    line-height: var(--type-title-leading);
+  }
+}
+@container (max-width: 96px) {
+  .ui-stat .ui-t-num {
+    font-size: var(--type-section-title-size);
+    line-height: var(--type-section-title-leading);
+  }
+}
+.ui-stat .ui-t-num { white-space: nowrap; }
+
 /* The flush Card that hosts the tiles is only a layout shell. */
 .ui-card--flush:has(.ui-stat-row) { background: transparent; border-color: transparent; border-radius: 0; }
 
@@ -228,8 +254,8 @@
   white-space: nowrap;
   vertical-align: middle;
 }
-.ui-th--right { text-align: right; }
-.ui-th--center { text-align: center; }
+.ui-table__head .ui-th--right { text-align: right; }
+.ui-table__head .ui-th--center { text-align: center; }
 .ui-th--sortable { cursor: pointer; user-select: none; }
 .ui-th--sortable:hover { color: var(--color-ink-2); }
 .ui-th__sort { display: inline-flex; align-items: center; gap: var(--space-xxs); }
@@ -361,6 +387,8 @@
 
 .ui-btn.is-loading { color: transparent; pointer-events: none; }
 .ui-btn.is-loading .ui-btn__label { visibility: hidden; }
+/* The label hides by going transparent; the mark draws in the text colour, so it sets its own. */
+.ui-btn.is-loading .ui-spinner { color: var(--color-ink-2); }
 .ui-btn__spin { position: absolute; inset: 0; display: inline-flex; align-items: center; justify-content: center; }
 
 /* IconButton — a circle, ghost by default. */
@@ -525,7 +553,8 @@ textarea.ui-control {
   display: inline-flex; align-items: center; gap: var(--space-xxs);
   height: 22px; padding: 0 var(--space-xs);
   border-radius: var(--radius-full);
-  font-size: var(--type-micro-size);
+  font-family: var(--font-sans);
+  font-size: var(--type-label-size);
   font-weight: var(--type-label-weight);
   line-height: 1;
   white-space: nowrap;
@@ -536,7 +565,9 @@ textarea.ui-control {
 .ui-tag--danger  { background: var(--color-bad-wash);   color: var(--color-bad); }
 .ui-tag--info    { background: var(--color-brand-wash); color: var(--color-brand-deep); }
 .ui-tag--neutral { background: var(--color-sheet-2);    color: var(--color-muted); }
-.ui-tag--mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+/* `mono` keeps its name for the markup, but a badge is `label` type in
+   Instrument Sans (DESIGN.md §9 Badges): counts only need tabular figures. */
+.ui-tag--mono { font-variant-numeric: tabular-nums; }
 
 /* Dot variant — the word with a 7px dot, no fill (the tracking-state look). */
 .ui-tag--dot { background: transparent; color: var(--color-body); padding: 0; height: auto; }
@@ -580,7 +611,7 @@ textarea.ui-control {
   flex-shrink: 0;
 }
 
-.ui-identity { display: inline-flex; align-items: center; gap: var(--space-xs); min-width: 0; }
+.ui-identity { display: inline-flex; align-items: center; gap: var(--space-xs); min-width: 0; max-width: 100%; }
 .ui-identity__meta { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .ui-identity__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ui-identity__sub { color: var(--color-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -650,19 +681,7 @@ textarea.ui-control {
 .ui-skeleton-table { display: flex; flex-direction: column; gap: var(--space-sm); padding: var(--space-lg) var(--space-xl); }
 .ui-skeleton-stat { display: flex; flex-direction: column; gap: var(--space-xs); padding: var(--space-lg) var(--space-xl); }
 
-.ui-spinner {
-  display: inline-block;
-  border-radius: var(--radius-full);
-  border: 2px solid var(--color-line);
-  border-top-color: var(--color-muted);
-  animation: ui-spin 0.7s linear infinite;
-}
-@keyframes ui-spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .ui-spinner { animation-duration: 1.4s; } }
-.ui-btn--primary .ui-spinner {
-  border-color: color-mix(in srgb, var(--color-white) 40%, transparent);
-  border-top-color: var(--color-white);
-}
+.ui-spinner { display: inline-flex; flex-shrink: 0; vertical-align: middle; color: var(--color-muted); }
 
 /* ============================================================================
    Banner — a one-line notice (DESIGN.md §9 Cards, notices).
@@ -879,11 +898,4 @@ textarea.ui-control {
   .ui-sidebar__foot { margin: 0 0 0 auto; padding: 0; border: 0; flex-direction: row; align-items: center; }
   .ui-sidebar__downloads, .ui-sidebar__me-meta { display: none; }
   .ui-main { padding: var(--space-xl) var(--space-md) var(--space-section-sm); }
-}
-
-/* The tab bar above a page that shares one sidebar item with its siblings
-   (Settings: Policy · Shifts · Teams · Integrations). Aligned to the page. */
-.ui-section-tabs {
-  max-width: var(--layout-page-max);
-  margin: 0 auto;
 }

@@ -262,7 +262,7 @@ export function TeamScreen() {
           <Card variant="flush" className="tm-members-card">
             <div className="tm-card-head">
               <div>
-                <h2 className="ui-t-title">Members</h2>
+                <h2 className="ui-t-h3">Members</h2>
                 <p className="ui-t-small">Edit settings with the pencil, then confirm with the tick.</p>
               </div>
               <Tag mono>{members.length}</Tag>
@@ -345,13 +345,13 @@ function TeamSettingsTable({
         <THead>
           <Tr>
             <Th className="tm-col-member">Member</Th>
-            <Th className="tm-col-shift" align="center">Shift</Th>
-            <Th className="tm-col-shot" align="center">Screenshot interval</Th>
-            <Th className="tm-col-idle" align="center">Idle break</Th>
-            {showIdleCountdown && <Th className="tm-col-countdown" align="center">Idle countdown</Th>}
-            <Th className="tm-col-works" align="center">Works from</Th>
-            <Th className="tm-col-manager" align="center">Manager</Th>
-            <Th className="tm-col-action" align="center">Action</Th>
+            <Th className="tm-col-shift">Shift</Th>
+            <Th className="tm-col-shot">Screenshot interval</Th>
+            <Th className="tm-col-idle">Idle break</Th>
+            {showIdleCountdown && <Th className="tm-col-countdown">Idle countdown</Th>}
+            <Th className="tm-col-works">Works from</Th>
+            <Th className="tm-col-manager">Manager</Th>
+            <Th className="tm-col-action" align="right">Action</Th>
           </Tr>
         </THead>
         <Tbody>
@@ -377,7 +377,7 @@ function TeamSettingsTable({
                     subtitle={member.team?.name ?? member.email}
                   />
                 </Td>
-                <Td className="tm-col-shift" align="center">
+                <Td className="tm-col-shift">
                   {editing ? (
                     <ShiftSelect
                       memberName={member.name}
@@ -390,7 +390,7 @@ function TeamSettingsTable({
                     <SettingValue value={shift?.name ?? 'No shift'} />
                   )}
                 </Td>
-                <Td className="tm-col-shot" align="center">
+                <Td className="tm-col-shot">
                   {editing ? (
                     <CadenceSelect
                       ariaLabel={`${member.name} screenshot interval`}
@@ -404,7 +404,7 @@ function TeamSettingsTable({
                     <SettingValue label="Every" value={formatCadence(screenshotIntervalMin)} />
                   )}
                 </Td>
-                <Td className="tm-col-idle" align="center">
+                <Td className="tm-col-idle">
                   {editing ? (
                     <CadenceSelect
                       ariaLabel={`${member.name} idle break threshold`}
@@ -419,7 +419,7 @@ function TeamSettingsTable({
                   )}
                 </Td>
                 {showIdleCountdown && (
-                  <Td className="tm-col-countdown" align="center">
+                  <Td className="tm-col-countdown">
                     {editing ? (
                       <IdleWarningControl
                         memberName={member.name}
@@ -433,7 +433,7 @@ function TeamSettingsTable({
                     )}
                   </Td>
                 )}
-                <Td className="tm-col-works" align="center">
+                <Td className="tm-col-works">
                   {/* Office: all attendance rules. Remote: no punch expected, so
                       no work-from-home or late rule. Only an admin may change it. */}
                   {editing && currentUserRole === 'ADMIN' ? (
@@ -453,13 +453,13 @@ function TeamSettingsTable({
                     <SettingValue value={RULE_MODE_LABEL[ruleMode]} />
                   )}
                 </Td>
-                <Td className="tm-col-manager" align="center">
-                  <div className="tm-stack tm-stack--center">
+                <Td className="tm-col-manager">
+                  <div className="tm-stack">
                     <span className="ui-t-strong">{member.manager?.name ?? 'No manager'}</span>
                     <span className="ui-t-small ui-ink-3">{member.manager?.email ?? 'Workspace scope'}</span>
                   </div>
                 </Td>
-                <Td className="tm-col-action" align="center">
+                <Td className="tm-col-action" align="right">
                   <div className="tm-row-actions">
                     {editing ? (
                       <>
@@ -513,7 +513,7 @@ function TeamSettingsTable({
 
 function SettingValue({ label, value }: { label?: string; value: string }) {
   return (
-    <span className="tm-setting-display">
+    <span className="tm-setting-display" title={label ? `${label} ${value}` : value}>
       {label && <span className="tm-setting-display__label">{label}</span>}
       <span className="tm-setting-display__value">{value}</span>
     </span>
@@ -635,10 +635,10 @@ function IdleWarningControl({
 }
 
 function IdleWarningValue({ value }: { value: number | null }) {
-  return (
-    <Tag status={value == null ? 'neutral' : 'info'}>
-      {value == null ? 'Off' : `${value}s`}
-    </Tag>
+  return value == null ? (
+    <span className="tm-setting-display tm-setting-display--off">Off</span>
+  ) : (
+    <SettingValue value={`${value}s`} />
   );
 }
 

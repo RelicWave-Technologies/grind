@@ -5,13 +5,6 @@
    compact intra-cell stacks. Prefix: atd-.
    ========================================================================== */
 
-/* Vertical rhythm between the header, KPI strip, and matrix card.
-   (.ui-page sets the gutter + mount; it does not space its section children.) */
-.ui-page > .ui-page-head + .ui-card,
-.ui-page > .ui-card + .ui-card {
-  margin-top: var(--space-xl);
-}
-
 .atd-card {
   overflow: hidden;
 }
@@ -21,8 +14,8 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--space-md);
-  padding: var(--space-md) var(--space-lg);
-  border-bottom: 1px solid var(--color-line);
+  padding: var(--space-lg) var(--space-xl);
+  border-bottom: 1px solid var(--color-line-soft);
 }
 
 .atd-card-head h2,
@@ -253,3 +246,9 @@
 
 /* Rule exceptions: a date reads as one token, never split over lines. */
 .atd-nowrap { white-space: nowrap; }
+
+/* Counts in the month summary: tabular Instrument Sans like every other
+   table; Geist Mono stays for the times and dates (DESIGN.md §4). */
+.atd-num {
+  font-variant-numeric: tabular-nums;
+}

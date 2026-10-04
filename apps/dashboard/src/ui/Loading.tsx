@@ -1,23 +1,21 @@
 import { cx } from './util';
+import { TimoMark } from './Mark';
 
 /* §5.14 Skeleton + Spinner — the only loading treatments.
    Never a full-page spinner: page chrome renders, content fills with skeletons
-   sized to the final element. Spinner is for inline button-busy only. */
+   sized to the final element. The spinner is the mark writing itself, in one
+   colour (it takes the text colour, so it reads inside a filled button). */
 
-export interface SpinnerProps extends React.HTMLAttributes<HTMLSpanElement> {
-  /** Diameter in px. Default 14 (the button-busy size). */
+export interface SpinnerProps extends Omit<React.HTMLAttributes<HTMLSpanElement>, 'children'> {
+  /** Size in px. Default 14 (the button-busy size). */
   size?: number;
 }
 
-export function Spinner({ size = 14, className, style, ...rest }: SpinnerProps) {
+export function Spinner({ size = 14, className, ...rest }: SpinnerProps) {
   return (
-    <span
-      className={cx('ui-spinner', className)}
-      role="status"
-      aria-label="Loading"
-      style={{ width: size, height: size, ...style }}
-      {...rest}
-    />
+    <span className={cx('ui-spinner', className)} role="status" aria-label="Loading" {...rest}>
+      <TimoMark size={size} motion="write" tone="mono" />
+    </span>
   );
 }
 

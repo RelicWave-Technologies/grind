@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import timoLogo from '../assets/timo-logo.svg';
+import TimoMark from '../components/TimoMark';
+import { introTarget } from '../components/AppIntro';
 import larkIcon from '../assets/lark.svg';
 
 /** Friendly copy for non-success Lark outcomes pushed from the main process. */
@@ -51,7 +52,7 @@ export default function Login() {
     <div className="login">
       <div className="login-card">
         <div className="login-logo">
-          <img src={timoLogo} alt="Timo" width={82} height={82} />
+          <TimoMark size={82} role="img" aria-hidden={false} aria-label="Timo" {...introTarget} />
         </div>
         <div className="login-title">
           <div className="h2">Sign in to Timo</div>

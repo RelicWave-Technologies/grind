@@ -10,7 +10,7 @@
 }
 
 .tm-summary-card {
-  margin-bottom: var(--space-md);
+  margin-bottom: var(--space-lg);
 }
 
 .tm-members-card {
@@ -22,8 +22,8 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--space-md);
-  padding: var(--space-md) var(--space-lg);
-  border-bottom: 1px solid var(--color-line);
+  padding: var(--space-lg);
+  border-bottom: 1px solid var(--color-line-soft);
 }
 
 .tm-card-head h2,
@@ -45,12 +45,9 @@
   table-layout: fixed;
 }
 
+/* Eight columns fit the 1280 page; below it the table scrolls sideways. */
 .tm-members-table--countdown {
-  min-width: calc(var(--space-section) * 16);
-}
-
-.tm-members-table.ui-table--compact .ui-table__row {
-  height: calc(var(--control-height-lg) + var(--space-xxxl));
+  min-width: calc(var(--space-section) * 14 + var(--space-xxl));
 }
 
 .tm-members-table .ui-th,
@@ -59,37 +56,37 @@
   vertical-align: middle;
 }
 
-.tm-members-table .ui-td {
-  height: calc(var(--control-height-lg) + var(--space-xxxl));
+.tm-members-table .ui-th:first-child,
+.tm-members-table .ui-td:first-child {
+  padding-left: var(--space-lg);
 }
 
-.tm-col-member {
-  width: calc(var(--space-section) * 3 + var(--space-xxl));
+.tm-members-table .ui-th:last-child,
+.tm-members-table .ui-td:last-child {
+  padding-right: var(--space-lg);
 }
 
-.tm-col-shift {
-  width: calc(var(--space-section) * 2 + var(--space-xl));
+.tm-members-table .ui-table__row {
+  height: calc(var(--control-height-lg) + var(--space-md));
 }
 
-.tm-col-shot,
-.tm-col-idle {
-  width: calc(var(--space-section) * 2 + var(--space-xxxl));
-}
+.tm-col-member { width: 20%; }
+.tm-col-shift { width: 13%; }
+.tm-col-shot { width: 11%; }
+.tm-col-idle { width: 9%; }
+.tm-col-countdown { width: 10%; }
+.tm-col-works { width: 9%; }
+.tm-col-manager { width: 15%; }
+.tm-col-action { width: 13%; }
 
-.tm-col-countdown {
-  width: calc(var(--space-section) * 2 + var(--space-xxl));
-}
+/* Without the admin-only countdown column the others share its width; the
+   two row actions keep their room. */
+.tm-members-table:not(.tm-members-table--countdown) .tm-col-action { width: 16%; }
 
-.tm-col-works {
-  width: calc(var(--space-section) * 2 + var(--space-xl));
-}
-
-.tm-col-manager {
-  width: calc(var(--space-section) * 3);
-}
-
-.tm-col-action {
-  width: calc(var(--space-section) * 2 + var(--space-xxl));
+/* A long header ("Screenshot interval") wraps rather than clipping. */
+.tm-members-table .ui-th {
+  white-space: normal;
+  vertical-align: bottom;
 }
 
 .tm-member-row {
@@ -104,13 +101,11 @@
   gap: 2px;
 }
 
-.tm-stack--center {
-  align-items: center;
-  text-align: center;
-}
-
 .tm-stack > * {
   max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tm-setting-control {
@@ -118,42 +113,33 @@
   min-width: 0;
   display: inline-flex;
   align-items: center;
-  justify-content: center;
   width: 100%;
-  max-width: calc(var(--space-section) * 2 + var(--space-xl));
 }
 
 .tm-setting-control .ui-control {
   width: 100%;
   min-width: 0;
-  height: calc(var(--control-height) - 2px);
-  text-align: center;
-  text-align-last: center;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  font-weight: 600;
   font-variant-numeric: tabular-nums;
   padding-inline: var(--space-sm) var(--space-xxl);
 }
 
+/* A setting at rest is a value in a table cell: `body-sm`, tabular, with its
+   word ("Every", "After") in `muted`. Not a pill — it is not a control. */
 .tm-setting-display {
   min-width: 0;
-  width: 100%;
-  max-width: calc(var(--space-section) * 2 + var(--space-xl));
-  min-height: calc(var(--control-height) - 2px);
+  max-width: 100%;
   display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 2px;
-  padding: 0 var(--space-xs);
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-card);
-  background: var(--color-sheet);
-  font-family: var(--font-mono);
-  font-size: 12px;
-  font-weight: 650;
+  align-items: baseline;
+  gap: var(--space-xxs);
+  color: var(--color-ink-2);
+  font-size: var(--type-body-sm-size);
+  line-height: var(--type-body-sm-leading);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+.tm-setting-display--off {
+  color: var(--color-muted);
 }
 
 .tm-setting-display__label {
@@ -178,7 +164,6 @@
   min-width: 0;
   display: inline-flex;
   align-items: center;
-  justify-content: center;
   gap: var(--space-xxs);
   width: 100%;
 }
@@ -195,9 +180,6 @@
   min-width: calc(var(--space-section) + var(--space-sm));
   height: calc(var(--control-height) - 2px);
   text-align: center;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  font-weight: 650;
   font-variant-numeric: tabular-nums;
   padding-inline: var(--space-xxs);
 }
@@ -205,7 +187,7 @@
 .tm-row-actions {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-end;
   gap: var(--space-xxs);
   min-width: 0;
 }

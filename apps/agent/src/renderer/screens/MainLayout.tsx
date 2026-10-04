@@ -1,58 +1,43 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CalendarClock, ListTodo, PieChart, Settings as SettingsIcon, LogOut, Gauge, Clock, Keyboard, MousePointer2, ExternalLink, RefreshCw } from 'lucide-react';
-import timoLogo from '../assets/timo-logo.svg';
-import Today from './Today';
+import { CalendarDays, ExternalLink, ListTodo, LogOut, Plus, RefreshCw, Settings as SettingsIcon, X } from 'lucide-react';
+import Now from './Now';
 import Tasks from './Tasks';
+import MyDay from './MyDay';
 import Settings from './Settings';
-import LineChart from '../components/LineChart';
-import ScreenshotGrid from '../components/ScreenshotGrid';
+import Sheet from '../components/Sheet';
+import SyncButton from '../components/SyncButton';
+import TimoMark from '../components/TimoMark';
+import { introTarget } from '../components/AppIntro';
 import { updateReadyBannerText } from '../lib/updateUi';
-import { useWorkspaceTime, workspaceTimeReady } from '../lib/workspaceTime';
 
-type Tab = 'today' | 'tasks' | 'reports' | 'settings';
+type Panel = 'none' | 'tasks' | 'day' | 'settings';
 
-const NAV: { id: Tab; label: string; icon: typeof CalendarClock }[] = [
-  { id: 'today', label: 'Today', icon: CalendarClock },
-  { id: 'tasks', label: 'Tasks', icon: ListTodo },
-  { id: 'reports', label: 'Reports', icon: PieChart },
-  { id: 'settings', label: 'Settings', icon: SettingsIcon },
-];
-
+/**
+ * The main window, Focus (DESIGN.md §5 The desktop window): one screen that
+ * changes with what you are doing, the mark in the title bar, and a corner
+ * that opens the task list, your day and settings as sheets.
+ */
 export default function MainLayout() {
   const qc = useQueryClient();
-  const [tab, setTab] = useState<Tab>('today');
+  const [panel, setPanel] = useState<Panel>('none');
+  const [creating, setCreating] = useState(false);
+  const close = () => setPanel('none');
 
-  const logout = useMutation({
-    mutationFn: () => window.agent.auth.logout(),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ['authStatus'] }),
-  });
-
-  const openDashboard = useMutation({ mutationFn: () => window.agent.app.openDashboard() });
   const installUpdate = useMutation({
     mutationFn: () => window.agent.updates.installNow(),
     onSuccess: (s) => qc.setQueryData(['updates'], s),
   });
-  const updates = useQuery({
-    queryKey: ['updates'],
-    queryFn: () => window.agent.updates.status(),
-    refetchInterval: 60_000,
-  });
-
-  const me = useQuery({ queryKey: ['me'], queryFn: () => window.agent.auth.me(), staleTime: 5 * 60_000 });
-  const [avatarFailed, setAvatarFailed] = useState(false);
-  const meName = me.data?.name ?? 'Account';
-  const meInitial = meName.trim().slice(0, 1).toUpperCase() || 'A';
-  const showAvatar = !!me.data?.avatarUrl && !avatarFailed;
+  const updates = useQuery({ queryKey: ['updates'], queryFn: () => window.agent.updates.status(), refetchInterval: 60_000 });
+  const larkStatus = useQuery({ queryKey: ['larkStatus'], queryFn: () => window.agent.lark.status(), refetchInterval: 10_000 });
   const updateReady = updates.data?.phase === 'ready' || updates.data?.phase === 'installing' ? updates.data : null;
-  const updateBannerText = updateReadyBannerText(updateReady ?? undefined);
 
   useEffect(() => {
     const offStatus = window.agent.updates.onStatusChange((s) => {
       qc.setQueryData(['updates'], s);
     });
-    const offOpenSettings = window.agent.updates.onOpenSettings(() => setTab('settings'));
-    const offStartupSettings = window.agent.settings.onOpen(() => setTab('settings'));
+    const offOpenSettings = window.agent.updates.onOpenSettings(() => setPanel('settings'));
+    const offStartupSettings = window.agent.settings.onOpen(() => setPanel('settings'));
     return () => {
       offStatus();
       offOpenSettings();
@@ -61,161 +46,120 @@ export default function MainLayout() {
   }, [qc]);
 
   return (
-    <div className="layout">
-      <aside className="sidebar">
-        <div className="sidebar-top">
-          <span className="brand-mark"><img src={timoLogo} alt="" /></span>
-          <span className="brand-name">Timo</span>
-        </div>
-
-        <nav className="nav">
-          {NAV.map(({ id, label, icon: Icon }) => (
-            <button key={id} className={`nav-item${tab === id ? ' active' : ''}`} onClick={() => setTab(id)}>
-              <Icon size={18} strokeWidth={2} />
-              <span>{label}</span>
-            </button>
-          ))}
+    <div className="shell">
+      <header className="shell-bar">
+        <span className="shell-brand">
+          <TimoMark size={22} {...introTarget} />
+          <span className="shell-brand-name">Timo</span>
+        </span>
+        <nav className="shell-corner no-drag" aria-label="Timo">
+          <button className={`btn btn-ghost btn-sm${panel === 'tasks' ? ' on' : ''}`} onClick={() => setPanel('tasks')}>
+            <ListTodo size={15} strokeWidth={2} /> Tasks
+          </button>
+          <button className={`btn btn-ghost btn-sm${panel === 'day' ? ' on' : ''}`} onClick={() => setPanel('day')}>
+            <CalendarDays size={15} strokeWidth={2} /> My day
+          </button>
+          <button className={`icon-btn${panel === 'settings' ? ' on' : ''}`} onClick={() => setPanel('settings')} aria-label="Settings" title="Settings">
+            <SettingsIcon size={17} strokeWidth={2} />
+          </button>
+          <AccountMenu />
         </nav>
+      </header>
 
-        <div className="sidebar-spacer" />
+      {updateReady && (
+        <div className="update-banner no-drag">
+          <RefreshCw size={15} strokeWidth={2.2} />
+          <span>{updateReadyBannerText(updateReady)}</span>
+          {updateReady.phase === 'ready' && updateReady.canInstallNow && (
+            <button className="btn btn-prominent no-drag" onClick={() => installUpdate.mutate()} disabled={installUpdate.isPending}>
+              Restart to update
+            </button>
+          )}
+        </div>
+      )}
 
-        <button
-          className="nav-item no-drag"
-          onClick={() => openDashboard.mutate()}
-          disabled={openDashboard.isPending}
-          title={openDashboard.data && !openDashboard.data.ok ? 'Dashboard URL not available yet' : 'Open the web dashboard in your browser'}
-        >
-          <ExternalLink size={18} strokeWidth={2} />
-          <span>{openDashboard.isPending ? 'Opening…' : 'Dashboard'}</span>
-        </button>
+      <Now onOpenTasks={() => setPanel('tasks')} />
 
-        <button className="sidebar-user" onClick={() => logout.mutate()} title="Sign out">
-          <span className="avatar">
-            {showAvatar ? <img src={me.data!.avatarUrl!} alt="" onError={() => setAvatarFailed(true)} /> : meInitial}
-          </span>
-          <span style={{ flex: 1, minWidth: 0 }}>
-            <span className="callout" style={{ display: 'block' }}>{meName}</span>
-            <span className="small secondary">Sign out</span>
-          </span>
-          <LogOut size={16} strokeWidth={2} color="var(--color-muted)" />
-        </button>
-      </aside>
-
-      <main className="content">
-        {updateReady && (
-          <div className="update-banner no-drag">
-            <RefreshCw size={15} strokeWidth={2.2} />
-            <span>{updateBannerText}</span>
-            {updateReady.phase === 'ready' && updateReady.canInstallNow && (
-              <button className="btn btn-prominent no-drag" onClick={() => installUpdate.mutate()} disabled={installUpdate.isPending}>
-                Restart to update
+      <Sheet
+        open={panel === 'tasks'}
+        onClose={close}
+        side="bottom"
+        title="Tasks"
+        actions={
+          larkStatus.data?.connected && (
+            <>
+              <SyncButton />
+              <button className="btn btn-soft btn-sm no-drag" onClick={() => setCreating((s) => !s)}>
+                {creating ? <><X size={14} strokeWidth={2.5} /> Cancel</> : <><Plus size={14} strokeWidth={2.5} /> New task</>}
               </button>
-            )}
-          </div>
-        )}
-        {tab === 'today' && <Today />}
-        {tab === 'tasks' && <Tasks />}
-        {tab === 'reports' && <Reports />}
-        {tab === 'settings' && <Settings />}
-      </main>
+            </>
+          )
+        }
+      >
+        <Tasks creating={creating} onCreatingChange={setCreating} onStarted={close} />
+      </Sheet>
+      <Sheet open={panel === 'day'} onClose={close} side="right" title="My day">
+        <MyDay />
+      </Sheet>
+      <Sheet open={panel === 'settings'} onClose={close} title="Settings">
+        <Settings />
+      </Sheet>
     </div>
   );
 }
 
-function fmtHM(min: number): { h: number; m: number } {
-  return { h: Math.floor(min / 60), m: min % 60 };
-}
+/** The account: who is signed in, the web dashboard, sign out. */
+function AccountMenu() {
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [avatarFailed, setAvatarFailed] = useState(false);
+  const ref = useRef<HTMLSpanElement>(null);
+  const me = useQuery({ queryKey: ['me'], queryFn: () => window.agent.auth.me(), staleTime: 5 * 60_000 });
+  const openDashboard = useMutation({ mutationFn: () => window.agent.app.openDashboard() });
+  const logout = useMutation({
+    mutationFn: () => window.agent.auth.logout(),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['authStatus'] }),
+  });
 
-function Reports() {
-  const insights = useQuery({ queryKey: ['insightsToday'], queryFn: () => window.agent.insights.today(), refetchInterval: 15_000 });
-  const allShots = useQuery({ queryKey: ['shotsAll'], queryFn: () => window.agent.screenshots.recent(200) });
-  const workspaceTime = useWorkspaceTime();
-  const d = insights.data;
-  const tracked = fmtHM(d?.score.trackedMinutes ?? 0);
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: PointerEvent) => {
+      if (ref.current && e.target instanceof Node && !ref.current.contains(e.target)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
+    window.addEventListener('pointerdown', onDown);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('pointerdown', onDown);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
 
-  const timeContext = workspaceTime.data;
-  const hasWorkspaceTime = workspaceTimeReady(timeContext);
-  const timeZone = hasWorkspaceTime ? timeContext.timeZone : null;
-  const todayShots = hasWorkspaceTime
-    ? (allShots.data ?? []).filter((shot) => shot.capturedAt >= timeContext.dayStart && shot.capturedAt < timeContext.dayEnd)
-    : [];
-
-  // The backend returns workspace-local hourly buckets for the whole day.
-  // Keep the full 24-hour frame visible so early/late activity is not hidden.
-  const HOURS = Array.from({ length: 24 }, (_, i) => i);
-  const points = HOURS.map((h) => d?.byHour?.[h] ?? 0);
-  const labels = HOURS.map((h) => (h % 2 === 0 ? formatHourLabel(h) : ''));
-  const hasData = (d?.score.trackedMinutes ?? 0) > 0;
+  const name = me.data?.name ?? 'Account';
+  const initial = name.trim().slice(0, 1).toUpperCase() || 'A';
+  const showAvatar = !!me.data?.avatarUrl && !avatarFailed;
+  const dashboardUnavailable = openDashboard.data && !openDashboard.data.ok;
 
   return (
-    <>
-      <div className="toolbar">
-        <span className="h1 no-drag">Productivity</span>
-      </div>
-      <div className="content-scroll">
-        <div className="content-narrow">
-          <div className="stat-grid rise rise-1">
-            <div className="stat">
-              <div className="stat-top">
-                <span className="stat-chip"><Gauge size={17} /></span>
-                <span className="stat-label">Productivity</span>
-              </div>
-              <div className="stat-value">{d?.score.score ?? 0}<span className="unit"> /100</span></div>
-            </div>
-            <div className="stat">
-              <div className="stat-top">
-                <span className="stat-chip"><Clock size={17} /></span>
-                <span className="stat-label">Active time</span>
-              </div>
-              <div className="stat-value">{tracked.h}<span className="unit">h </span>{tracked.m}<span className="unit">m</span></div>
-            </div>
-            <div className="stat">
-              <div className="stat-top">
-                <span className="stat-chip"><Keyboard size={17} /></span>
-                <span className="stat-label">Keystrokes</span>
-              </div>
-              <div className="stat-value">{(d?.totals.keystrokes ?? 0).toLocaleString()}</div>
-            </div>
-            <div className="stat">
-              <div className="stat-top">
-                <span className="stat-chip"><MousePointer2 size={17} /></span>
-                <span className="stat-label">Clicks</span>
-              </div>
-              <div className="stat-value">{(d?.totals.clicks ?? 0).toLocaleString()}</div>
-            </div>
+    <span className="account" ref={ref}>
+      <button className="account-btn" onClick={() => setOpen((v) => !v)} aria-label="Account" aria-expanded={open}>
+        <span className="avatar">{showAvatar ? <img src={me.data!.avatarUrl!} alt="" onError={() => setAvatarFailed(true)} /> : initial}</span>
+      </button>
+      {open && (
+        <div className="account-menu" role="menu">
+          <div className="account-who">
+            <span className="account-name">{name}</span>
+            <span className="account-mail">Signed in with Lark</span>
           </div>
-
-          <div className="section-head"><span className="section-title">Activity by hour</span></div>
-          {hasData ? (
-            <div className="chart-card rise rise-2">
-              <LineChart points={points} labels={labels} />
-            </div>
-          ) : (
-            <div className="empty rise rise-2">
-              <span className="empty-icon">
-                <PieChart size={26} strokeWidth={2} />
-              </span>
-              <div className="h3">No activity yet today</div>
-              <div className="callout secondary">Keystroke &amp; mouse activity appears once you track with Accessibility enabled.</div>
-            </div>
-          )}
-
-          <div className="section-head">
-            <span className="section-titlewrap"><span className="section-title">Screenshots</span><span className="section-aside">{hasWorkspaceTime ? `${todayShots.length} today` : 'Syncing time...'}</span></span>
-          </div>
-          {todayShots.length > 0 && timeZone ? (
-            <ScreenshotGrid shots={todayShots} timeZone={timeZone} />
-          ) : (
-            <div className="shot-empty callout secondary">No screenshots captured today yet.</div>
-          )}
+          <button className="account-item" role="menuitem" onClick={() => openDashboard.mutate()} disabled={openDashboard.isPending}>
+            <ExternalLink size={15} strokeWidth={2} />
+            {openDashboard.isPending ? 'Opening…' : dashboardUnavailable ? 'Dashboard not available yet' : 'Open web dashboard'}
+          </button>
+          <button className="account-item" role="menuitem" onClick={() => logout.mutate()} disabled={logout.isPending}>
+            <LogOut size={15} strokeWidth={2} /> Sign out
+          </button>
         </div>
-      </div>
-    </>
+      )}
+    </span>
   );
-}
-
-function formatHourLabel(hour: number): string {
-  if (hour === 0) return '12a';
-  if (hour === 12) return '12p';
-  return `${hour % 12}${hour < 12 ? 'a' : 'p'}`;
 }

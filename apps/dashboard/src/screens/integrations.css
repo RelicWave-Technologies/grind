@@ -44,16 +44,28 @@
   gap: var(--space-xxs);
 }
 
+/* A scope choice is a pill (DESIGN.md §9 Pills): white, `line-strong`,
+   `label` type, its checkbox inside. */
 .int-scope {
   min-width: 0;
   height: var(--control-height);
   display: inline-flex;
   align-items: center;
-  gap: var(--space-xxs);
-  padding: 0 var(--space-xs);
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-md);
-  background: var(--color-sheet);
+  gap: var(--space-xs);
+  padding: 0 var(--space-md) 0 var(--space-sm);
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-full);
+  background: var(--color-white);
+  color: var(--color-ink);
+  font-size: var(--type-label-size);
+  font-weight: var(--type-label-weight);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color var(--duration-fast) var(--ease-standard);
+}
+
+.int-scope:hover {
+  border-color: var(--color-ink);
 }
 
 .int-token-name span {
@@ -64,7 +76,7 @@
 
 .int-token-name strong {
   color: var(--color-ink);
-  font-weight: 620;
+  font-weight: var(--type-body-sm-strong-weight);
   line-height: 1.2;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -73,7 +85,7 @@
 
 .int-token-name small {
   color: var(--color-muted);
-  font-size: var(--space-sm);
+  font-size: var(--type-micro-size);
   line-height: 1.25;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -120,7 +132,7 @@
   background: var(--color-white);
   color: var(--color-ink);
   font-family: var(--font-mono);
-  font-size: var(--space-sm);
+  font-size: var(--type-micro-size);
   white-space: nowrap;
   overflow-x: auto;
 }
@@ -199,7 +211,7 @@
 .int-date-stamp small,
 .int-date-empty {
   color: var(--color-muted);
-  font-size: var(--space-sm);
+  font-size: var(--type-micro-size);
   line-height: 1.15;
 }
 

@@ -12,14 +12,13 @@
   justify-content: center;
   gap: var(--space-xxs);
   min-width: calc(var(--space-section) * 3);
-  padding: 0 var(--space-lg);
-  border: 1px solid transparent;
+  padding: 0 var(--space-md);
+  border: 1px solid var(--color-line-strong);
   border-radius: var(--radius-full);
-  background: var(--color-sheet);
+  background: var(--color-white);
   color: var(--color-ink);
-  font-family: var(--font-mono);
-  font-size: 12.5px;
-  font-weight: 500;
+  font-size: var(--type-body-sm-strong-size);
+  font-weight: var(--type-body-sm-strong-weight);
   font-variant-numeric: tabular-nums;
   cursor: pointer;
   transition:
@@ -29,8 +28,7 @@
 
 .rep-date-trigger:hover,
 .rep-date-trigger.is-open {
-  background: var(--color-white);
-  border-color: var(--color-line);
+  border-color: var(--color-ink);
 }
 
 .rep-date-trigger:focus-visible {
@@ -75,8 +73,8 @@
   margin-bottom: var(--space-xs);
   text-align: center;
   font-family: var(--font-sans);
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--type-caption-size);
+  font-weight: var(--type-body-sm-strong-weight);
   color: var(--color-ink);
 }
 
@@ -89,9 +87,8 @@
 
 .rep-calendar-weekdays {
   margin-bottom: var(--space-xxs);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 600;
+  font-size: var(--type-overline-size);
+  font-weight: var(--type-body-sm-strong-weight);
   color: var(--color-muted);
   text-align: center;
 }
@@ -105,9 +102,8 @@
   border-radius: var(--radius-full);
   background: transparent;
   color: var(--color-ink);
-  font-family: var(--font-mono);
-  font-size: 12.5px;
-  font-weight: 500;
+  font-size: var(--type-caption-size);
+  font-weight: var(--type-body-sm-strong-weight);
   font-variant-numeric: tabular-nums;
   cursor: pointer;
   transition:
@@ -139,8 +135,9 @@
   cursor: not-allowed;
 }
 
+/* Clip the sticky header's white cells to the card's 20px corners. */
 .rep-table-card {
-  margin-top: var(--space-md);
+  overflow: hidden;
 }
 
 .rep-team {
@@ -152,38 +149,50 @@
 .rep-team-summary {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: var(--space-sm);
+  gap: var(--space-lg);
+}
+
+/* The kit's stat tile: white, hairline, 20px corners (DESIGN.md §9 Stat). */
+.rep-team-kpi {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  padding: var(--space-lg);
+  border-radius: var(--radius-card);
+  border: 1px solid var(--color-line);
+  background: var(--color-white);
 }
 
 .rep-team-kpi {
-  min-height: calc(var(--control-height-lg) * 2);
-  display: grid;
-  align-content: space-between;
-  gap: var(--space-sm);
-  padding: var(--space-md);
-  border-radius: var(--radius-xl);
-  border: 1px solid transparent;
+  container-type: inline-size;
 }
 
 .rep-team-kpi strong {
-  line-height: 1;
-  letter-spacing: 0;
   color: var(--color-ink);
+  white-space: nowrap;
 }
 
-.rep-team-kpi--lime { background: var(--color-sheet-soft); }
-.rep-team-kpi--mint { background: var(--color-sheet-soft); }
-.rep-team-kpi--cream { background: var(--color-sheet-soft); }
-.rep-team-kpi--coral { background: var(--color-sheet-soft); }
-.rep-team-kpi--pink { background: var(--color-sheet-soft); }
+/* A long duration ("511h 21m") steps down to `title` in a narrow tile rather
+   than spilling out of it. */
+@container (max-width: 190px) {
+  .rep-team-kpi strong {
+    font-size: var(--type-title-size);
+    line-height: var(--type-title-leading);
+  }
+}
+
+.rep-team-kpi .ui-t-small {
+  color: var(--color-muted);
+}
 
 .rep-team-card-head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--space-md);
-  padding: var(--space-lg) var(--space-xl) var(--space-sm);
-  border-bottom: 1px solid var(--color-line);
+  padding: var(--space-lg) var(--space-xl);
+  border-bottom: 1px solid var(--color-line-soft);
 }
 
 .rep-team-card-head > div {
@@ -192,10 +201,6 @@
 
 .rep-team-members-card {
   min-width: 0;
-}
-
-.rep-team-members-card {
-  margin-top: 2px;
 }
 
 .rep-team-members-table {
@@ -254,7 +259,6 @@
   align-items: baseline;
   justify-content: center;
   min-width: 0;
-  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
 
@@ -382,8 +386,8 @@
   display: inline-flex;
   align-items: center;
   padding: 0;
-  font-size: 13px;
-  font-weight: 620;
+  font-size: var(--type-caption-size);
+  font-weight: var(--type-body-sm-strong-weight);
 }
 
 .rep-drawer-tabs .ui-tab::after {
@@ -709,8 +713,8 @@
 .rep-approval-detail-section p {
   margin: 0;
   color: var(--color-ink);
-  font-size: 13px;
-  font-weight: 430;
+  font-size: var(--type-caption-size);
+  font-weight: var(--type-body-sm-weight);
   line-height: 1.45;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -728,7 +732,7 @@
   max-width: 100%;
   color: var(--color-body);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--type-overline-size);
   line-height: 1.45;
   word-break: break-all;
 }
@@ -795,9 +799,9 @@
 
 .rep-profile-fact strong {
   margin-top: 2px;
-  font-size: 14px;
+  font-size: var(--type-body-sm-size);
   line-height: 1.35;
-  font-weight: 620;
+  font-weight: var(--type-body-sm-strong-weight);
 }
 
 .rep-profile-fact strong,
@@ -839,6 +843,36 @@
   overflow-x: auto;
 }
 
+/* Durations and counts in a report table: tabular Instrument Sans, one line. */
+.rep-num {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.rep-team-members-table .ui-td {
+  white-space: nowrap;
+}
+
+/* The longest name should not set the width of the whole table. */
+.rep-team-members-table .ui-identity {
+  max-width: calc(var(--space-section) * 2 + var(--space-xxxl));
+}
+
+/* Ten columns fit the page at 1440: tighter cells, headers that may wrap. */
+.rep-team-members-table .ui-th,
+.rep-team-members-table .ui-td {
+  padding-inline: var(--space-xs);
+}
+
+.rep-team-members-table .ui-th:first-child,
+.rep-team-members-table .ui-td:first-child {
+  padding-left: var(--space-lg);
+}
+
+.rep-team-members-table .ui-th {
+  white-space: normal;
+}
+
 .rep-table {
   min-width: calc(var(--space-section) * 15);
 }
@@ -877,11 +911,9 @@
 
 .rep-invalidated-note {
   color: var(--color-muted);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 500;
-  line-height: 1.2;
-  text-transform: uppercase;
+  font-size: var(--type-micro-size);
+  font-weight: var(--type-micro-weight);
+  line-height: var(--type-micro-leading);
 }
 
 .rep-table .ui-td.rep-col-apps,
@@ -970,8 +1002,6 @@
 }
 
 .rep-activity-value {
-  font-family: var(--font-mono);
-  font-weight: 650;
   font-variant-numeric: tabular-nums;
 }
 
@@ -1169,10 +1199,11 @@
 
 .rep-activity-score {
   margin-top: var(--space-xxs);
-  font-family: var(--font-mono);
-  font-size: calc(var(--space-xxl) + 2px);
-  line-height: 1;
-  font-weight: 650;
+  font-size: var(--type-figure-size);
+  line-height: var(--type-figure-leading);
+  font-weight: var(--type-figure-weight);
+  letter-spacing: var(--type-figure-tracking);
+  font-variant-numeric: tabular-nums;
   color: var(--color-ink);
 }
 
@@ -1357,7 +1388,8 @@
 }
 
 .rep-shot-metric .ui-t-num {
-  font-size: calc(var(--space-md) + 2px);
+  font-size: var(--type-card-title-size);
+  line-height: var(--type-card-title-leading);
 }
 
 .rep-shot-facts {
@@ -1553,8 +1585,8 @@
   padding: 2px var(--space-xs);
   border-radius: var(--radius-md);
   font-family: var(--font-mono);
-  font-size: 11.5px;
-  font-weight: 700;
+  font-size: var(--type-micro-size);
+  font-weight: var(--type-body-sm-strong-weight);
   letter-spacing: 0.4px;
   color: var(--color-ink);
 }
@@ -1602,7 +1634,7 @@
 
 /* A corrected day is a judgement, not a measurement, and has to read as one. */
 .rep-status-chip.is-override { box-shadow: inset 0 0 0 1.5px var(--color-ink); }
-.rep-status-mark { font-size: 10px; line-height: 1; opacity: 0.75; }
+.rep-status-mark { font-size: var(--type-overline-size); line-height: 1; opacity: 0.75; }
 
 .rep-status-edit {
   appearance: none;
@@ -1670,17 +1702,17 @@
 }
 /* Fixed width so the two eyebrows form a column and the values line up. */
 .rep-override-now-row .ui-t-eyebrow { min-width: 64px; }
-.rep-override-now-label { font-size: 13px; color: var(--color-ink); }
+.rep-override-now-label { font-size: var(--type-caption-size); color: var(--color-ink); }
 .rep-override-now-hours {
   font-family: var(--font-mono);
-  font-size: 13px;
-  font-weight: 700;
+  font-size: var(--type-caption-size);
+  font-weight: var(--type-body-sm-strong-weight);
   color: var(--color-ink);
   font-variant-numeric: tabular-nums;
 }
 /* Weight, not grey, carries the drop to secondary — DESIGN.md has no mid-grey
    body role. */
-.rep-override-now-note { font-size: 12px; font-weight: 330; color: var(--color-body); }
+.rep-override-now-note { font-size: var(--type-micro-size); font-weight: var(--type-body-sm-weight); color: var(--color-body); }
 
 .rep-override-field {
   display: flex;
@@ -1730,8 +1762,8 @@
   padding: 3px var(--space-xs);
   border-radius: var(--radius-md);
   font-family: var(--font-mono);
-  font-size: 11.5px;
-  font-weight: 700;
+  font-size: var(--type-micro-size);
+  font-weight: var(--type-body-sm-strong-weight);
   letter-spacing: 0.4px;
   color: var(--color-ink);
 }
@@ -1748,8 +1780,8 @@
   gap: 1px;
   min-width: 0;
 }
-.rep-override-code-label { font-size: 13.5px; font-weight: 520; }
-.rep-override-code-hint { font-size: 12px; font-weight: 330; }
+.rep-override-code-label { font-size: var(--type-body-sm-size); font-weight: var(--type-body-sm-strong-weight); }
+.rep-override-code-hint { font-size: var(--type-micro-size); font-weight: var(--type-body-sm-weight); }
 .rep-override-code:not(.is-selected) .rep-override-code-hint { color: var(--color-body); }
 
 /* Said only while a leave shape is chosen, because it is only then that
@@ -1759,8 +1791,8 @@
   padding: var(--space-xs) var(--space-sm);
   border-radius: var(--radius-md);
   background: var(--color-white);
-  font-size: 12px;
-  font-weight: 350;
+  font-size: var(--type-micro-size);
+  font-weight: var(--type-body-sm-weight);
   line-height: 1.45;
   color: var(--color-body);
 }
@@ -1778,7 +1810,7 @@
 .rep-override-hist-note {
   margin: 0;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--type-overline-size);
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--color-body);
@@ -1807,12 +1839,12 @@
   gap: var(--space-xs);
 }
 
-.rep-override-hist-code { font-size: 13px; font-weight: 520; }
-.rep-override-hist-code.is-cleared { font-weight: 400; font-style: italic; }
+.rep-override-hist-code { font-size: var(--type-caption-size); font-weight: var(--type-body-sm-strong-weight); }
+.rep-override-hist-code.is-cleared { font-weight: var(--type-body-sm-weight); font-style: italic; }
 
 .rep-override-hist-by {
-  font-size: 12.5px;
-  font-weight: 350;
+  font-size: var(--type-caption-size);
+  font-weight: var(--type-body-sm-weight);
   color: var(--color-body);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1825,7 +1857,7 @@
   margin-left: auto;
   flex: none;
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: var(--type-overline-size);
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--color-body);
@@ -1833,8 +1865,8 @@
 
 .rep-override-hist-why {
   margin: 0;
-  font-size: 12.5px;
-  font-weight: 350;
+  font-size: var(--type-caption-size);
+  font-weight: var(--type-body-sm-weight);
   line-height: 1.45;
   color: var(--color-ink);
 }
@@ -1847,7 +1879,7 @@
   background: var(--color-white);
   color: var(--color-ink);
   font: inherit;
-  font-size: 13.5px;
+  font-size: var(--type-body-sm-size);
   line-height: 1.45;
   resize: vertical;
 }

@@ -16,11 +16,11 @@
    this the figures, tabs, banner and cards all sit flush against each other.
    ------------------------------------------------------------------------ */
 
-.cal-page > * + * { margin-top: var(--space-xl); }
+.cal-page > * + * { margin-top: var(--space-lg); }
 
 /* The tab rail belongs to the content beneath it, so it sits closer to the
    card it switches than to the figures above it. */
-.cal-page > .ui-tabs { margin-top: var(--space-xxl); }
+.cal-page > .ui-tabs { margin-top: var(--space-xl); }
 .cal-page > .ui-tabs + * { margin-top: var(--space-md); }
 
 /* ── Card interiors ─────────────────────────────────────────────────────────
@@ -50,27 +50,26 @@
 
 /* ── Month grid ─────────────────────────────────────────────────────────── */
 
+/* The month runs edge to edge inside a flush card (DESIGN.md §9 Tables): the
+   card is the only box, the cells are divided by hairlines. */
+.cal-month-card { overflow: hidden; }
+
 .cal-grid {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
-  /* One hairline between cells, drawn by the container so the outer edge of
-     the grid stays flush with the card. */
+  /* One hairline between cells, drawn by the container's ground. */
   gap: 1px;
-  background: var(--color-line);
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-card);
-  overflow: hidden;
+  background: var(--color-line-soft);
+  border-bottom: 1px solid var(--color-line-soft);
 }
 
-/* Weekday rail — mono taxonomy, per DESIGN.md's eyebrow rule. */
+/* Weekday rail — the table-header look: `label`, `muted`. */
 .cal-dow {
   background: var(--color-white);
-  padding: var(--space-xs) var(--space-sm);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.6px;
-  text-transform: uppercase;
+  padding: var(--space-sm) var(--space-md);
+  font-size: var(--type-label-size);
+  line-height: var(--type-label-leading);
+  font-weight: var(--type-label-weight);
   color: var(--color-muted);
 }
 
@@ -108,34 +107,30 @@
   height: 22px;
   padding: 0 var(--space-xxs);
   border-radius: var(--radius-full);
-  font-family: var(--font-mono);
-  font-size: 12px;
-  font-weight: 500;
+  font-size: var(--type-caption-size);
+  font-weight: var(--type-body-sm-strong-weight);
   font-variant-numeric: tabular-nums;
   color: var(--color-body);
 }
 
-/* Today is the one place the black primary surface appears in the grid —
-   the same fill as a primary pill, so "selected = primary surface" holds. */
+/* Today is marked the way the ribbon marks now: in `ink`, not blue — blue is
+   for tracked time and the primary action (DESIGN.md §2). */
 .cal-daynum--today {
-  background: var(--color-brand);
+  background: var(--color-ink);
   color: var(--color-white);
-  font-weight: 600;
+  font-weight: var(--type-body-sm-strong-weight);
 }
 
 /* ── Marks — the only saturated colour on the page ──────────────────────── */
 
+/* Block, not flex, so a long holiday name ends in an ellipsis. */
 .cal-mark {
-  display: flex;
-  align-items: center;
-  gap: var(--space-xxs);
+  display: block;
   padding: var(--space-xxs) var(--space-xs);
-  border-radius: var(--radius-md);
-  font-family: var(--font-sans);
-  font-size: 11.5px;
-  font-weight: 550;
-  letter-spacing: -0.1px;
-  line-height: 1.3;
+  border-radius: var(--radius-sm);
+  font-size: var(--type-micro-size);
+  font-weight: var(--type-label-weight);
+  line-height: var(--type-micro-leading);
   color: var(--color-ink);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -144,8 +139,7 @@
 
 /* A company holiday takes the whole cell — it is the one thing on that day. */
 .cal-mark--holiday {
-  background: var(--color-sheet-soft);
-  font-weight: 600;
+  background: var(--color-sheet-2);
 }
 
 /* ── Half days ──────────────────────────────────────────────────────────── */
@@ -173,37 +167,35 @@
   box-shadow: inset 0 0 0 3px color-mix(in srgb, var(--color-brand) 12%, transparent);
 }
 /* Keep the holiday's own ground when it is the thing being hovered. */
-.cal-day--open:hover .cal-mark--holiday { background: var(--color-sheet-soft); }
+.cal-day--open:hover .cal-mark--holiday { background: var(--color-sheet-2); }
 
 /* ── Legend ─────────────────────────────────────────────────────────────── */
 
+/* The ribbon's legend: 8px swatches, words in `caption` `body`. */
 .cal-legend {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-md);
-  padding-top: var(--space-sm);
+  padding: var(--space-sm) var(--space-xl) var(--space-md);
 }
 
 .cal-legend__item {
   display: inline-flex;
   align-items: center;
   gap: var(--space-xs);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: 0.5px;
-  text-transform: uppercase;
-  color: var(--color-muted);
+  font-size: var(--type-caption-size);
+  color: var(--color-body);
 }
 
 .cal-legend__swatch {
-  width: 14px;
-  height: 14px;
-  border-radius: var(--radius-md);
+  width: var(--space-xs);
+  height: var(--space-xs);
+  border-radius: var(--radius-xs);
   border: 1px solid var(--color-line);
 }
 
-.cal-legend__swatch--holiday { background: var(--color-sheet-soft); }
+.cal-legend__swatch--holiday { background: var(--color-sheet-2); }
 .cal-legend__swatch--paid    { background: var(--color-sheet-soft); }
 .cal-legend__swatch--unpaid  { background: var(--color-sheet-soft); }
 .cal-legend__swatch--off     { background: var(--color-sheet); }
@@ -212,7 +204,7 @@
 
 @media (max-width: 900px) {
   .cal-day { min-height: 92px; padding: var(--space-xxs); }
-  .cal-mark { font-size: 10.5px; padding: 2px var(--space-xxs); }
+  .cal-mark { font-size: var(--type-overline-size); padding: 2px var(--space-xxs); }
 }
 
 @media (max-width: 640px) {
@@ -227,16 +219,7 @@
    time" — which is what people report as the filter not working. */
 .cal-scope-note {
   margin: 0 0 var(--space-sm);
-  font-size: 13px;
+  font-size: var(--type-caption-size);
   color: var(--color-muted);
 }
-.cal-scope-note strong { color: var(--color-ink); font-weight: 600; }
-
-/* The month the whole screen is showing, between the two arrows in the header. */
-.cal-month-label {
-  font-size: 14px;
-  font-weight: 600;
-  min-width: 11ch;
-  text-align: center;
-  font-variant-numeric: tabular-nums;
-}
+.cal-scope-note strong { color: var(--color-ink); font-weight: var(--type-body-sm-strong-weight); }

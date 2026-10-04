@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { createContext, useContext, type ReactNode } from 'react';
 import { cx } from './util';
 
 /* §5.1 Page — the centered column every page lives in. Sets max-width, gutter,
@@ -14,6 +14,12 @@ export function Page({ children, className, ...rest }: PageProps) {
     </div>
   );
 }
+
+/* The tab bar for pages that share one sidebar item (People · Team settings ·
+   Teams). The app layout provides it; the page's own header draws it under the
+   title, where every other tab row sits, so the title stays the first thing in
+   the content column (DESIGN.md §5). */
+export const SectionTabsContext = createContext<ReactNode>(null);
 
 /* §5.2 PageHeader — the single header construct for all 13 pages.
    Eyebrow → Title → optional subtitle on the left; an `actions` slot (a Toolbar)
@@ -35,9 +41,19 @@ export function PageHeader({
   className,
   ...rest
 }: PageHeaderProps) {
+  const sectionTabs = useContext(SectionTabsContext);
+  const tabRow =
+    sectionTabs != null && tabs != null ? (
+      <>
+        {sectionTabs}
+        {tabs}
+      </>
+    ) : (
+      sectionTabs ?? tabs
+    );
   return (
     <header
-      className={cx('ui-page-head', tabs && 'ui-page-head--with-tabs', className)}
+      className={cx('ui-page-head', tabRow != null && 'ui-page-head--with-tabs', className)}
       {...rest}
     >
       <div className="ui-page-head__text">
@@ -50,7 +66,7 @@ export function PageHeader({
         )}
       </div>
       {actions != null && <div className="ui-page-head__actions">{actions}</div>}
-      {tabs != null && <div className="ui-page-head__tabs">{tabs}</div>}
+      {tabRow != null && <div className="ui-page-head__tabs">{tabRow}</div>}
     </header>
   );
 }

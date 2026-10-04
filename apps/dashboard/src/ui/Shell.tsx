@@ -1,3 +1,5 @@
+import { TimoMark } from './Mark';
+import { introTarget } from './Intro';
 import type { ReactNode } from 'react';
 import { cx } from './util';
 
@@ -39,13 +41,14 @@ export function Sidebar({ brand, footer, className, children, ...rest }: Sidebar
 /** Brand block: the Timo logo mark + wordmark (DESIGN.md §9 The logo). */
 export interface SidebarBrandProps extends React.HTMLAttributes<HTMLDivElement> {
   name: ReactNode;
+  /** An image to show instead of the Timo mark. Unset: the mark, which the app-load intro lands on. */
   markSrc?: string;
 }
-export function SidebarBrand({ name, markSrc = '/brand/timo-logo.svg', className, ...rest }: SidebarBrandProps) {
+export function SidebarBrand({ name, markSrc, className, ...rest }: SidebarBrandProps) {
   return (
     <div className={cx('ui-sidebar__brand', className)} {...rest}>
       <span className="ui-sidebar__mark" aria-hidden>
-        <img src={markSrc} alt="" />
+        {markSrc ? <img src={markSrc} alt="" /> : <TimoMark size={26} {...introTarget} />}
       </span>
       <span className="ui-sidebar__wordmark">{name}</span>
     </div>

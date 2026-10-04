@@ -633,7 +633,7 @@ function TeamReportsView({
       <Card variant="flush" className="rep-team-members-card">
         <div className="rep-team-card-head">
           <div>
-            <h2 className="ui-t-title">Members</h2>
+            <h2 className="ui-t-h3">Members</h2>
             <p className="ui-t-small">Range totals, punctuality, approvals, evidence counts, and member drill-in.</p>
           </div>
           <Tag mono>{data.members.length}</Tag>
@@ -694,12 +694,12 @@ function TeamMembersTable({ members, onOpenMember }: { members: TeamReportSummar
               </Td>
               <Td align="center">
                 <div className="rep-metric-stack">
-                  <span className="ui-mono">{fmtDurationMs(member.workedMs)}</span>
+                  <span className="rep-num">{fmtDurationMs(member.workedMs)}</span>
                   {member.invalidatedMs > 0 && <span className="rep-invalidated-note">{fmtDurationMs(member.invalidatedMs)} excluded</span>}
                 </div>
               </Td>
               <Td align="center">
-                <span className="ui-mono">{fmtDurationMs(member.manualMs)}</span>
+                <span className="rep-num">{fmtDurationMs(member.manualMs)}</span>
               </Td>
               <Td className="rep-col-punch" mono>
                 {member.typicalPunchInMinute === null ? '—' : fmtMinuteOfDay(member.typicalPunchInMinute)}
@@ -712,11 +712,11 @@ function TeamMembersTable({ members, onOpenMember }: { members: TeamReportSummar
                 <ApprovalCounts member={member} />
               </Td>
               <Td align="center">
-                <span className="ui-mono">{member.gapCount}</span>
+                <span className="rep-num">{member.gapCount}</span>
                 {member.gapMs > 0 && <span className="ui-t-small ui-ink-3"> · {fmtDurationMs(member.gapMs)}</span>}
               </Td>
               <Td align="center">
-                <span className="ui-mono">{member.screenshots}</span>
+                <span className="rep-num">{member.screenshots}</span>
               </Td>
               <Td align="center">
                 <Button
@@ -757,9 +757,9 @@ function ApprovalCounts({ member }: { member: TeamMemberApprovals }) {
     <CountTagGroup
       ariaLabel={`${member.approvals.pending} pending, ${member.approvals.approved} accepted, ${member.approvals.rejected} rejected`}
       items={[
-        { value: member.approvals.pending, code: 'P', label: 'pending', status: 'warn' },
-        { value: member.approvals.approved, code: 'A', label: 'accepted', status: 'success' },
-        { value: member.approvals.rejected, code: 'R', label: 'rejected', status: 'danger' },
+        { value: member.approvals.pending, code: 'P', label: 'pending', status: member.approvals.pending > 0 ? 'warn' : 'neutral' },
+        { value: member.approvals.approved, code: 'A', label: 'accepted', status: member.approvals.approved > 0 ? 'success' : 'neutral' },
+        { value: member.approvals.rejected, code: 'R', label: 'rejected', status: member.approvals.rejected > 0 ? 'danger' : 'neutral' },
       ]}
     />
   );
@@ -770,9 +770,9 @@ function ReportApprovalCounts({ approvals }: { approvals: MemberReportDay['appro
     <CountTagGroup
       ariaLabel={`${approvals.approved} accepted, ${approvals.rejected} rejected, ${approvals.pending} pending`}
       items={[
-        { value: approvals.approved, code: 'A', label: 'accepted', status: 'success' },
-        { value: approvals.rejected, code: 'R', label: 'rejected', status: 'danger' },
-        { value: approvals.pending, code: 'P', label: 'pending', status: 'warn' },
+        { value: approvals.approved, code: 'A', label: 'accepted', status: approvals.approved > 0 ? 'success' : 'neutral' },
+        { value: approvals.rejected, code: 'R', label: 'rejected', status: approvals.rejected > 0 ? 'danger' : 'neutral' },
+        { value: approvals.pending, code: 'P', label: 'pending', status: approvals.pending > 0 ? 'warn' : 'neutral' },
       ]}
     />
   );

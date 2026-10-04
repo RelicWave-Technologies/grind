@@ -481,12 +481,12 @@ export function MeTodayScreen() {
               <table className="myd-table">
                 <thead>
                   <tr>
-                    <th className="ui-t-eyebrow myd-col-kind">Kind</th>
-                    <th className="ui-t-eyebrow myd-col-time">Time</th>
-                    <th className="ui-t-eyebrow myd-col-duration">Duration</th>
-                    <th className="ui-t-eyebrow myd-col-task">Task</th>
-                    <th className="ui-t-eyebrow">Notes / Reason</th>
-                    <th className="ui-t-eyebrow myd-col-actions" />
+                    <th className="myd-col-kind">Kind</th>
+                    <th className="myd-col-time">Time</th>
+                    <th className="myd-col-duration">Duration</th>
+                    <th className="myd-col-task">Task</th>
+                    <th>Notes / Reason</th>
+                    <th className="myd-col-actions" />
                   </tr>
                 </thead>
                 <tbody key={`${targetUserId}:${date}`}>

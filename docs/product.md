@@ -18,7 +18,7 @@ An **internal** time tracker + screenshot monitor for the agency (~50–200 empl
 5. **Calm, premium, mature.** See DESIGN.md.
 
 ## The three surfaces (desktop agent)
-1. **Main window** — the real app: Today (timer + day timeline), Projects, Reports; later task management, screenshots review. Resizable, hidden-inset title bar.
+1. **Main window** — Focus: one screen that is the timer while you track and "What are you working on?" when you don't, with today's ribbon along the bottom. The Lark task list, My day (numbers, activity, screenshots) and Settings open as sheets from the corner. Resizable, hidden-inset title bar (DESIGN.md §5).
 2. **Menu-bar item** — live elapsed-time ticker; click toggles the window; quick popover (start/stop/switch) planned.
 3. **Floating bar** — always-on-top timer control for the current entry (survives fullscreen). It stays visible while paused, supports pause/resume in place, and has an explicit close action that hides only the current entry's bar without changing tracked time.
 

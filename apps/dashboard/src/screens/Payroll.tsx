@@ -309,9 +309,9 @@ export function PayrollScreen() {
                         <Td mono>{r.cappedHours.toFixed(1)}h</Td>
                         <Td align="center">
                           <div className="pay-day-pills">
-                            <Tag status="success" mono>{r.fullDays}F</Tag>
-                            <Tag status="warn" mono>{r.halfDays}H</Tag>
-                            <Tag status="danger" mono>{r.offDays}O</Tag>
+                            <Tag status={r.fullDays > 0 ? 'success' : 'neutral'} mono>{r.fullDays}F</Tag>
+                            <Tag status={r.halfDays > 0 ? 'warn' : 'neutral'} mono>{r.halfDays}H</Tag>
+                            <Tag status={r.offDays > 0 ? 'danger' : 'neutral'} mono>{r.offDays}O</Tag>
                           </div>
                         </Td>
                         <Td mono>{r.payableUnits.toFixed(1)}</Td>

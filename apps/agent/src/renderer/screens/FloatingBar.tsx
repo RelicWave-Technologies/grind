@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Pause, Play, GripVertical, X } from 'lucide-react';
 import type { TimerStatus } from '../lib/agent.d';
-import { fmtClock } from './Today';
+import { fmtClock } from '../lib/timerUi';
 
 /** Always-on-top mini bar shown while tracking. */
 export default function FloatingBar() {

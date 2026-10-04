@@ -98,10 +98,11 @@ const SCOPE_LABEL: Record<UsersResponse['scope'], string> = {
 const ROLE_RANK: Record<Role, number> = { ADMIN: 0, MANAGER: 1, MEMBER: 2 };
 const EDITABLE_ROLES: Role[] = ['ADMIN', 'MEMBER'];
 
-// Role → fixed status taxonomy (§2): one hue per role, never the accent.
+// A role is a neutral badge (DESIGN.md §9 Badges): colour is for status —
+// approved, waiting, failed — and a role is none of those.
 const ROLE_STATUS: Record<Role, Status> = {
-  ADMIN: 'warn',
-  MANAGER: 'success',
+  ADMIN: 'neutral',
+  MANAGER: 'neutral',
   MEMBER: 'neutral',
 };
 
@@ -495,7 +496,7 @@ function PersonRow({
               avatar={<Avatar name={user.name} src={user.avatarUrl ?? undefined} size={32} />}
               name={
                 <span className="usr-name-line">
-                  {user.name}
+                  <span className="usr-name-text">{user.name}</span>
                   {isSelf && <Tag status="info" className="usr-you">You</Tag>}
                 </span>
               }

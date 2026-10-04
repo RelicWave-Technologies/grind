@@ -1,4 +1,5 @@
 import { Outlet, Link, useRouteContext, useNavigate, useLocation } from '@tanstack/react-router';
+import { useIsFetching } from '@tanstack/react-query';
 import { Home, Clock4, Inbox, CalendarCheck, ShieldAlert, LogOut, ShieldCheck, FileText, User, Users, CalendarDays, Compass } from 'lucide-react';
 import { hasCapability, useLogout, type Permission } from '../lib/auth';
 import { AGENT_DOWNLOADS, agentDownloadUrl } from '../lib/downloads';
@@ -6,9 +7,11 @@ import {
   AppShell,
   Sidebar,
   SidebarBrand,
+  useIntroHold,
   NavItem,
   NavSection,
   Tabs,
+  SectionTabsContext,
   Avatar,
   Button,
 } from '../ui';
@@ -83,6 +86,10 @@ export function Layout() {
   const navigate = useNavigate();
   const location = useLocation();
   const logout = useLogout();
+  // The intro lands on a finished page: it waits while any query is loading for
+  // the first time. Background refetches already have data, so they never hold it.
+  const firstLoads = useIsFetching({ predicate: (q) => q.state.data === undefined });
+  useIntroHold(firstLoads > 0);
 
   const allowed = (show: Show) => {
     if (show === 'all') return true;
@@ -168,16 +175,22 @@ export function Layout() {
 
       <main className="ui-main">
         <div className="ui-rise">
-          {current && current.tabs.length > 1 && (
-            <div className="ui-section-tabs">
-              <Tabs
-                items={current.tabs.map((t) => ({ value: t.to, label: t.label }))}
-                value={current.tabs.find((t) => onPath(t.to))?.to ?? current.tabs[0]!.to}
-                onChange={(to) => navigate({ to })}
-              />
-            </div>
-          )}
-          <Outlet />
+          {/* Pages that share a sidebar item get a tab bar; their PageHeader
+              draws it under the title. */}
+          <SectionTabsContext.Provider
+            value={
+              current && current.tabs.length > 1 ? (
+                <Tabs
+                  aria-label={current.label}
+                  items={current.tabs.map((t) => ({ value: t.to, label: t.label }))}
+                  value={current.tabs.find((t) => onPath(t.to))?.to ?? current.tabs[0]!.to}
+                  onChange={(to) => navigate({ to })}
+                />
+              ) : null
+            }
+          >
+            <Outlet />
+          </SectionTabsContext.Provider>
         </div>
       </main>
     </AppShell>

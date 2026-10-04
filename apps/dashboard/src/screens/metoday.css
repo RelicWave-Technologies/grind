@@ -26,7 +26,6 @@
 
 .myd-stage-card {
   background: var(--color-white);
-  padding: var(--space-md) var(--space-lg);
 }
 
 /* ---- Header date picker --------------------------------------------------- */
@@ -97,9 +96,8 @@
 
 .myd-calendar-weekdays {
   margin-bottom: var(--space-xxs);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 600;
+  font-size: var(--type-overline-size);
+  font-weight: var(--type-body-sm-strong-weight);
   color: var(--color-muted);
   text-align: center;
 }
@@ -113,9 +111,8 @@
   border-radius: var(--radius-full);
   background: transparent;
   color: var(--color-ink);
-  font-family: var(--font-mono);
-  font-size: 12.5px;
-  font-weight: 500;
+  font-size: var(--type-caption-size);
+  font-weight: var(--type-body-sm-strong-weight);
   font-variant-numeric: tabular-nums;
   cursor: pointer;
   transition:
@@ -223,11 +220,10 @@
 .myd-legend .ui-tag--neutral .ui-tag__dot { background: var(--color-ribbon-idle); box-shadow: none; }
 
 /* The well the ribbon + heatmap live in — inset surface, hairline, no shadow. */
+/* The ribbon and heatmap draw their own tracks; no second box inside the
+   card (DESIGN.md §9: a card never sits inside a card). */
 .myd-canvas {
   background: var(--color-white);
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-card);
-  padding: var(--space-xs) var(--space-sm);
 }
 
 .myd-stage-card .ribbon {
@@ -272,8 +268,8 @@
   justify-content: space-between;
   gap: var(--space-md);
   flex-wrap: wrap;
-  padding: var(--space-md) var(--space-lg);
-  border-bottom: 1px solid var(--color-line);
+  padding: var(--space-lg) var(--space-xl);
+  border-bottom: 1px solid var(--color-line-soft);
   background: var(--color-white);
 }
 .myd-sheet-titling {
@@ -288,10 +284,13 @@
   width: 100%;
   border-collapse: collapse;
 }
-/* Column heads: eyebrow look comes from the kit's .ui-t-eyebrow utility on the
-   <th>; here we only place + colour the hairline + gutter. */
+/* Column heads: the kit's table-header look — `label`, `muted`, sentence case
+   (DESIGN.md §9 Tables). */
 .myd-table thead th {
   text-align: left;
+  font-size: var(--type-label-size);
+  line-height: var(--type-label-leading);
+  font-weight: var(--type-label-weight);
   color: var(--color-muted);
   padding: var(--space-sm) var(--space-xl);
   border-bottom: 1px solid var(--color-line);

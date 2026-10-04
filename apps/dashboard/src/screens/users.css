@@ -17,20 +17,21 @@
   table-layout: fixed;
 }
 
+/* Ten columns fit the 1280 page; on a narrower window the table scrolls. */
 .usr-table--device {
-  min-width: calc(var(--space-section) * 24);
+  min-width: calc(var(--space-section) * 17);
 }
 
-.usr-table--device .usr-col-person { width: 18%; }
+.usr-table--device .usr-col-person { width: 17%; }
 .usr-table--device .usr-col-role { width: 9%; }
 .usr-table--device .usr-col-status { width: 8%; }
 .usr-table--device .usr-col-team { width: 9%; }
-.usr-table--device .usr-col-shift { width: 7%; }
-.usr-table--device .usr-col-device { width: 11%; }
-.usr-table--device .usr-col-permissions { width: 12%; }
+.usr-table--device .usr-col-shift { width: 8%; }
+.usr-table--device .usr-col-device { width: 9%; }
+.usr-table--device .usr-col-permissions { width: 11%; }
 .usr-table--device .usr-col-birth { width: 9%; }
 .usr-table--device .usr-col-joined { width: 7%; }
-.usr-table--device .usr-col-actions { width: 10%; }
+.usr-table--device .usr-col-actions { width: 13%; }
 
 .usr-table .ui-table__row {
   height: auto;
@@ -74,13 +75,27 @@
   min-width: 0;
 }
 
-/* Name + "You" tag share a baseline row in the identity first-cell. */
+/* Name + "You" tag share a baseline row in the identity first-cell; the name
+   gives way with an ellipsis, the tag keeps its size. */
 .usr-name-line {
   display: inline-flex;
   align-items: center;
   gap: var(--space-xs);
   min-width: 0;
+  max-width: 100%;
 }
+
+.usr-name-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usr-name-line > .ui-tag { flex-shrink: 0; }
+
+/* Without the admin columns, the person column takes the room it needs. */
+.usr-table:not(.usr-table--device) .usr-col-person { width: 30%; }
 
 .usr-role-stack {
   display: inline-flex;
@@ -123,10 +138,9 @@
 }
 
 .usr-device-fallback {
-  font-family: var(--font-mono);
-  font-size: 9px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
+  font-size: var(--type-overline-size);
+  font-weight: var(--type-overline-weight);
+  letter-spacing: var(--type-overline-tracking);
 }
 
 .usr-device-copy {
@@ -138,16 +152,18 @@
 }
 
 .usr-device-name {
-  font-weight: 600;
+  font-weight: var(--type-body-sm-strong-weight);
   color: var(--color-ink);
   white-space: nowrap;
 }
 
 .usr-device-version,
 .usr-device-empty {
-  font-size: 11px;
+  font-size: var(--type-micro-size);
+  font-weight: var(--type-micro-weight);
   color: var(--color-muted);
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 .usr-permissions {

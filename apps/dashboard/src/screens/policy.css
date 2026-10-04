@@ -15,28 +15,12 @@
   margin-bottom: 0;
 }
 
-.pol-summary .ui-stat-row {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: var(--space-sm);
-}
-
-.pol-summary .ui-stat-row > .ui-stat {
-  min-height: calc(var(--control-height) * 3);
-  padding: var(--space-md);
-  gap: var(--space-xs);
-  justify-content: center;
-}
-
-.pol-summary .ui-t-num {
-  font-size: var(--space-xl);
-  line-height: 1;
-  font-weight: 640;
-}
+/* The summary is the kit's stat row, as on every other screen. */
 
 .pol-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--space-md);
+  gap: var(--space-lg);
   align-items: start;
 }
 
@@ -47,23 +31,10 @@
 .pol-payroll-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--space-md);
+  gap: var(--space-lg);
   align-items: stretch;
 }
 
-.pol-card-compact.ui-card {
-  padding: var(--space-md) var(--space-lg);
-}
-
-.pol-card-compact .ui-card__head {
-  padding-bottom: var(--space-xs);
-  margin-bottom: var(--space-sm);
-}
-
-.pol-card-compact .ui-card__title {
-  font-size: calc(var(--space-md) + 2px);
-  line-height: 1.22;
-}
 
 .pol-payroll-rule-grid {
   display: grid;
@@ -85,9 +56,10 @@
 
 .pol-payroll-rule strong {
   color: var(--color-ink);
-  font-size: var(--space-md);
-  line-height: 1.15;
-  font-weight: 630;
+  font-size: var(--type-body-lg-strong-size);
+  line-height: var(--type-body-lg-strong-leading);
+  font-weight: var(--type-body-lg-strong-weight);
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -112,10 +84,6 @@
 .pol-select {
   width: calc(var(--control-height) * 4);
   min-width: calc(var(--control-height) * 4);
-  text-align: center;
-  text-align-last: center;
-  font-family: var(--font-mono);
-  font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
 
@@ -129,8 +97,6 @@
 .pol-field-control .ui-control {
   width: calc(var(--control-height) * 3);
   text-align: right;
-  font-family: var(--font-mono);
-  font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
 
@@ -302,8 +268,6 @@
 }
 
 .pol-input-mono {
-  font-family: var(--font-mono);
-  font-weight: 500;
   font-variant-numeric: tabular-nums;
 }
 

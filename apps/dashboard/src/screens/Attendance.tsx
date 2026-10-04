@@ -216,7 +216,7 @@ export function AttendanceScreen() {
           <>
             <div className="atd-card-head">
               <div>
-                <h2 className="ui-t-title">Attendance</h2>
+                <h2 className="ui-t-h3">Attendance</h2>
                 <p className="ui-t-small">Present means at least 30m tracked in the local day.</p>
               </div>
               <div className="atd-legend">
@@ -401,7 +401,7 @@ function MonthSummary({ month, isAdmin }: { month: string; isAdmin: boolean }) {
     <Card variant="flush" className="atd-card">
       <div className="atd-card-head">
         <div>
-          <h2 className="ui-t-title">Month summary · {fmtMonthLong(month)}</h2>
+          <h2 className="ui-t-h3">Month summary · {fmtMonthLong(month)}</h2>
           <p className="ui-t-small">
             {data.rulesFrom
               ? 'Same numbers as the Excel. Salary cut is leave the balance could not pay for.'
@@ -433,7 +433,7 @@ function MonthSummary({ month, isAdmin }: { month: string; isAdmin: boolean }) {
                       r.mode === 'STANDARD' ? r.name : (
                         <>
                           {r.name}{' '}
-                          <Tag status={r.mode === 'EXEMPT' ? 'neutral' : 'info'} mono>
+                          <Tag status="neutral" mono>
                             {r.mode === 'EXEMPT' ? 'No rules' : 'Remote'}
                           </Tag>
                         </>
@@ -443,15 +443,15 @@ function MonthSummary({ month, isAdmin }: { month: string; isAdmin: boolean }) {
                     avatar={<Avatar name={r.name} size={32} />}
                   />
                 </Td>
-                <Td align="right"><span className="ui-mono">{r.present}</span></Td>
-                <Td align="right"><span className="ui-mono">{r.halfDay}</span></Td>
-                <Td align="right"><span className="ui-mono">{r.leave}</span></Td>
-                <Td align="right"><span className="ui-mono">{r.lwa}</span></Td>
-                <Td align="right"><span className="ui-mono">{r.late}</span></Td>
+                <Td align="right"><span className="atd-num">{r.present}</span></Td>
+                <Td align="right"><span className="atd-num">{r.halfDay}</span></Td>
+                <Td align="right"><span className="atd-num">{r.leave}</span></Td>
+                <Td align="right"><span className="atd-num">{r.lwa}</span></Td>
+                <Td align="right"><span className="atd-num">{r.late}</span></Td>
                 <Td align="right">
-                  <span className="ui-mono">{r.salaryCut > 0 ? <strong>{fmtDays(r.salaryCut)}</strong> : '0'}</span>
+                  <span className="atd-num">{r.salaryCut > 0 ? <strong>{fmtDays(r.salaryCut)}</strong> : '0'}</span>
                 </Td>
-                <Td align="right"><span className="ui-mono">{fmtDays(r.account.closing)}</span></Td>
+                <Td align="right"><span className="atd-num">{fmtDays(r.account.closing)}</span></Td>
                 <Td align="right">
                   <Button size="sm" variant="secondary" onClick={() => setOpen(r)}>
                     Details

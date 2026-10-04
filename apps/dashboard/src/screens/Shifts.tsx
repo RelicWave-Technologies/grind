@@ -28,6 +28,8 @@ import {
   Skeleton,
   Avatar,
   List,
+  Stat,
+  StatRow,
 } from '../ui';
 
 const WEEK: { key: WeekdayKey; label: string }[] = [
@@ -149,22 +151,22 @@ export function ShiftsScreen() {
 
       <div className="shf-stack">
         {q.data && (
-          <section className="shf-overview ui-rise-1" aria-label="Shift overview">
-            <div className="shf-overview__lead">
-              <span className="ui-t-eyebrow">Configured shifts</span>
-              <strong className="ui-t-num">{count}</strong>
-              <span className="ui-t-small">
-                {count === 0 ? 'No schedule templates yet' : 'Templates available for people assignment'}
-              </span>
-            </div>
-            <ShiftMetric label="Assigned members" value={assignedMembers} hint="people using shifts" />
-            <ShiftMetric label="Avg buffer" value={avgBufferMin == null ? '—' : `${avgBufferMin}m`} hint="nudge window" />
-            <ShiftMetric
-              label="Avg week"
-              value={avgWorkingDays == null ? '—' : `${formatNumber(avgWorkingDays)}/7`}
-              hint="working days"
-            />
-          </section>
+          <Card variant="flush" className="ui-rise-1" aria-label="Shift overview">
+            <StatRow>
+              <Stat
+                label="Configured shifts"
+                value={count}
+                hint={count === 0 ? 'No schedule templates yet' : 'Templates available for people assignment'}
+              />
+              <Stat label="Assigned members" value={assignedMembers} hint="people using shifts" />
+              <Stat label="Avg buffer" value={avgBufferMin == null ? '—' : `${avgBufferMin}m`} hint="nudge window" />
+              <Stat
+                label="Avg week"
+                value={avgWorkingDays == null ? '—' : `${formatNumber(avgWorkingDays)}/7`}
+                hint="working days"
+              />
+            </StatRow>
+          </Card>
         )}
 
         <section className="shf-stack ui-rise-2">
@@ -259,16 +261,6 @@ export function ShiftsScreen() {
 // ---------------------------------------------------------------------------
 // Create modal — name/buffer fields + the 7-day editor in a focused layer
 // ---------------------------------------------------------------------------
-
-function ShiftMetric({ label, value, hint }: { label: string; value: string | number; hint: string }) {
-  return (
-    <div className="shf-overview__metric">
-      <span className="ui-t-eyebrow">{label}</span>
-      <strong className="ui-t-strong">{value}</strong>
-      <span className="ui-t-small">{hint}</span>
-    </div>
-  );
-}
 
 function ShiftCreateModal({
   busy,
@@ -467,7 +459,7 @@ function ShiftRow({
             ) : (
               <Tag mono>Buffer {shift.bufferMin}m</Tag>
             )}
-            <Tag status="info">
+            <Tag>
               {workingDays} working {workingDays === 1 ? 'day' : 'days'}
             </Tag>
           </div>

@@ -239,7 +239,7 @@ export function ApprovalsScreen() {
       <Card variant="flush" className="apv-table-card">
         <div className="apv-table-head">
           <div>
-            <h2 className="ui-t-title">{activeMode === 'team' ? 'Team approvals' : 'Your approvals'}</h2>
+            <h2 className="ui-t-h3">{activeMode === 'team' ? 'Team approvals' : 'Your approvals'}</h2>
             <p className="ui-t-small">
               {activeMode === 'team'
                 ? 'Approve or reject pending manual time directly from the row.'

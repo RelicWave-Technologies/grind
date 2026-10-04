@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { createContext, useContext, type ReactNode } from 'react';
 import { cx } from './util';
 import type { Rail } from './util';
 
@@ -42,10 +42,15 @@ export function Table({
   );
 }
 
+/* A row inside THead is a header row, not a data row: it takes no row height,
+   hover or rail, so a screen that sets its body rows taller never stretches
+   the header with them. */
+const InHead = createContext(false);
+
 export function THead({ children, className, ...rest }: React.HTMLAttributes<HTMLTableSectionElement>) {
   return (
     <thead className={cx('ui-table__head', className)} {...rest}>
-      {children}
+      <InHead.Provider value>{children}</InHead.Provider>
     </thead>
   );
 }
@@ -103,6 +108,14 @@ export interface TrProps extends React.HTMLAttributes<HTMLTableRowElement> {
 
 export function Tr({ selected, rail, className, onClick, children, ...rest }: TrProps) {
   const clickable = onClick != null;
+  const inHead = useContext(InHead);
+  if (inHead) {
+    return (
+      <tr className={cx('ui-table__head-row', className)} {...rest}>
+        {children}
+      </tr>
+    );
+  }
   return (
     <tr
       className={cx(

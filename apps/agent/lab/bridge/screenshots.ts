@@ -194,9 +194,9 @@ export function screenshotDataUrl(id: string): string {
 export function avatarDataUrl(name: string): string {
   const initials = name.split(/\s+/).map((part) => part[0] ?? '').join('').slice(0, 2).toUpperCase();
   const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">'
-    + '<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#7c5cff"/><stop offset="1" stop-color="#ff7ab0"/></linearGradient></defs>'
-    + '<rect width="128" height="128" fill="url(#g)"/>'
-    + `<text x="64" y="64" dy=".35em" text-anchor="middle" font-family="-apple-system, system-ui, sans-serif" font-size="52" font-weight="600" fill="#ffffff">${initials}</text>`
+    // DESIGN.md: a missing photo is the initials on an `ink-2` circle.
+    + '<rect width="128" height="128" fill="#2a2d31"/>'
+    + `<text x="64" y="64" dy=".35em" text-anchor="middle" font-family="-apple-system, system-ui, sans-serif" font-size="52" font-weight="500" fill="#ffffff">${initials}</text>`
     + '</svg>';
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }

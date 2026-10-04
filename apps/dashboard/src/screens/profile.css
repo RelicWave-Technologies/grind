@@ -7,9 +7,6 @@
 
 .prf-page {
   --prf-leading-col: var(--space-xxxl);
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-lg);
 }
 
 .prf-summary .ui-stat-row {
@@ -27,6 +24,17 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Team, manager and shift are names, not numbers: they take the `title` step
+   so "General · 10 to 7" fits its tile instead of truncating at `figure`. */
+.prf-summary .prf-stat--name .ui-t-num {
+  font-size: var(--type-section-title-size);
+  line-height: var(--type-section-title-leading);
+  font-weight: var(--type-section-title-weight);
+  letter-spacing: var(--type-section-title-tracking);
+  white-space: normal;
+  text-wrap: balance;
 }
 
 .prf-main-grid,
@@ -75,41 +83,38 @@
   white-space: nowrap;
 }
 
+/* The week as one strip of seven days divided by hairlines — the same strip
+   the Shifts screen draws — rather than seven boxes inside the card. */
 .prf-week {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(calc(var(--space-section) * 4), 1fr));
-  gap: var(--space-xs);
+  grid-template-columns: repeat(7, minmax(0, 1fr));
 }
 
 .prf-week__day {
   min-width: 0;
   display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  min-height: var(--control-height-lg);
-  padding: var(--space-sm);
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-md);
-  background: var(--color-sheet);
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-xxs);
+  padding: var(--space-xs) var(--space-sm);
 }
 
-.prf-week__day.is-today {
-  border-color: var(--color-line-strong);
-  background: var(--color-white);
+.prf-week__day:first-child {
+  padding-left: 0;
 }
 
-.prf-week__label {
-  width: var(--space-xxl);
-  flex: none;
+.prf-week__day + .prf-week__day {
+  border-left: 1px solid var(--color-line-soft);
 }
 
 .prf-week__value {
   min-width: 0;
-  flex: 1 1 auto;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--color-ink);
+  max-width: 100%;
+  color: var(--color-ink-2);
+  font-size: var(--type-body-sm-size);
+  line-height: var(--type-body-sm-leading);
+  font-variant-numeric: tabular-nums;
+  text-wrap: balance;
 }
 
 .prf-skeleton-id {
@@ -146,7 +151,12 @@
   }
 
   .prf-week {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .prf-week__day:nth-child(5) {
+    border-left: 0;
+    padding-left: 0;
   }
 }
 
@@ -162,13 +172,9 @@
 }
 
 @media (max-width: 560px) {
-  .prf-week__day {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: var(--space-xxs);
-  }
-
-  .prf-week__label {
-    width: auto;
+  .prf-week__day,
+  .prf-week__day + .prf-week__day {
+    border-left: 0;
+    padding-left: 0;
   }
 }

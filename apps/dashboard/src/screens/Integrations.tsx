@@ -38,11 +38,13 @@ const SCOPE_LABELS: Record<ApiTokenScope, string> = {
   'read:manual-time': 'Manual time',
 };
 
+// A scope is a neutral badge: green, yellow and blue mean approved, waiting
+// and tracked (DESIGN.md §3), and a scope is none of those.
 const SCOPE_STATUS: Record<ApiTokenScope, 'neutral' | 'info' | 'success' | 'warn'> = {
   'read:people': 'neutral',
-  'read:device-health': 'info',
-  'read:time-summary': 'success',
-  'read:manual-time': 'warn',
+  'read:device-health': 'neutral',
+  'read:time-summary': 'neutral',
+  'read:manual-time': 'neutral',
 };
 
 const MCP_PACKAGE = '@anish23_05/timo-mcp@latest';
@@ -219,7 +221,7 @@ export function IntegrationsScreen() {
                     checked={scopes.includes(scope)}
                     onChange={() => toggleScope(scope)}
                   />
-                  <Tag status={SCOPE_STATUS[scope]}>{SCOPE_LABELS[scope]}</Tag>
+                  <span>{SCOPE_LABELS[scope]}</span>
                 </label>
               ))}
             </div>
@@ -315,7 +317,7 @@ export function IntegrationsScreen() {
                           </span>
                         </div>
                       </Td>
-                      <Td mono className="int-prefix-cell">{token.tokenPrefix}</Td>
+                      <Td className="int-prefix-cell ui-mono">{token.tokenPrefix}</Td>
                       <Td>
                         <div className="int-tags">
                           {token.scopes.map((scope) => (

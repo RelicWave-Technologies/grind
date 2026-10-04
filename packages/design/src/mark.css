@@ -1,0 +1,108 @@
+/*
+ * The Timo mark and its motion (DESIGN.md §9 The logo, Motion). The markup is
+ * an <svg class="timo-mark"> with three parts, .tm-bar, .tm-moment, .tm-stem,
+ * drawn from TIMO_MARK in intro.ts. Waiting is the mark writing itself; there
+ * is no spinner, no dots and no orbiting logo anywhere in Timo.
+ */
+
+.timo-mark {
+  --timo-mark-cycle: 2000ms; /* intro.ts MARK_CYCLE_MS */
+  display: inline-block;
+  flex-shrink: 0;
+  overflow: visible;
+  vertical-align: middle;
+}
+
+.timo-mark * { transform-box: view-box; }
+.timo-mark .tm-bar,
+.timo-mark .tm-stem { fill: var(--tm-body, var(--color-ink)); }
+.timo-mark .tm-moment { fill: var(--tm-moment, var(--color-brand)); }
+
+/* On dark: a white T, the moment one step lighter so it holds on near-black. */
+.timo-mark--night { --tm-body: var(--color-white); --tm-moment: var(--color-brand-hi); }
+/* One colour, e.g. inside a filled button: the gap still sets the moment apart. */
+.timo-mark--mono { --tm-body: currentColor; --tm-moment: currentColor; }
+
+/* ---------- writing: bar, stem, moment, hold, fade; the loop restarts unseen ---------- */
+
+.timo-mark--write .tm-bar { transform-origin: 7px 16px; animation: tm-bar var(--timo-mark-cycle) var(--ease-emphasised) infinite; }
+.timo-mark--write .tm-stem { transform-origin: 32px 26px; animation: tm-stem var(--timo-mark-cycle) var(--ease-emphasised) infinite; }
+.timo-mark--write .tm-moment { transform-origin: 49px 16px; animation: tm-moment var(--timo-mark-cycle) var(--ease-emphasised) infinite; }
+
+@keyframes tm-bar {
+  0% { transform: scaleX(0); opacity: 1; }
+  22%, 82% { transform: none; opacity: 1; }
+  92%, 100% { transform: none; opacity: 0; }
+}
+
+@keyframes tm-stem {
+  0%, 14% { transform: scaleY(0); opacity: 1; }
+  40%, 84% { transform: none; opacity: 1; }
+  94%, 100% { transform: none; opacity: 0; }
+}
+
+@keyframes tm-moment {
+  0%, 36% { transform: scale(0); opacity: 1; }
+  48% { transform: scale(1.22); }
+  56%, 86% { transform: none; opacity: 1; }
+  96%, 100% { transform: none; opacity: 0; }
+}
+
+/* ---------- the app-load intro ---------- */
+
+.timo-intro {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  background: var(--color-white);
+}
+
+.timo-intro__mark {
+  width: 96px;
+  height: 96px;
+  transform-origin: 0 0;
+}
+
+.timo-intro__mark .timo-mark { width: 100%; height: 100%; }
+
+/* The real logo the mark flies into stays hidden until the mark lands on it. */
+.is-intro-hidden { visibility: hidden; }
+
+/* ---------- page loader: only after 250ms, so a fast load never flashes it ---------- */
+
+.timo-page-loader {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-sm);
+  padding: var(--space-section-sm) 0;
+  color: var(--color-muted);
+  font-size: var(--type-label-size);
+  animation: timo-loader-in var(--duration-slow) var(--ease-emphasised) 250ms both;
+}
+
+@keyframes timo-loader-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ---------- entrance: rows of a shell settle in, 6px, staggered by the caller ---------- */
+
+.timo-enter {
+  animation: timo-enter var(--duration-slow) var(--ease-emphasised) both;
+  animation-delay: var(--timo-enter-delay, 0ms);
+}
+
+@keyframes timo-enter {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .timo-mark--write * { animation: none; }
+  .timo-page-loader,
+  .timo-enter { animation: none; }
+}

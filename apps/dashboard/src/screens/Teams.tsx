@@ -37,6 +37,8 @@ import {
   PageHeader,
   Select,
   SkeletonTable,
+  Stat,
+  StatRow,
   Tag,
   Toolbar,
 } from '../ui';
@@ -178,11 +180,13 @@ export function TeamsScreen() {
       />
 
       {teamsQ.data && (
-        <section className="tms-summary tms-rise" aria-label="Team overview">
-          <SummaryItem label="Teams" value={teamCount} hint={teamCount === 1 ? 'team in the org' : 'teams in the org'} />
-          <SummaryItem label="Managed" value={`${managedTeams}/${teamCount}`} hint="teams with a manager" />
-          <SummaryItem label="People" value={totalMembers} hint={totalMembers === 1 ? 'assigned person' : 'assigned people'} />
-        </section>
+        <Card variant="flush" className="tms-rise" aria-label="Team overview">
+          <StatRow>
+            <Stat label="Teams" value={teamCount} hint={teamCount === 1 ? 'team in the org' : 'teams in the org'} />
+            <Stat label="Managed" value={`${managedTeams}/${teamCount}`} hint="teams with a manager" />
+            <Stat label="People" value={totalMembers} hint={totalMembers === 1 ? 'assigned person' : 'assigned people'} />
+          </StatRow>
+        </Card>
       )}
 
       <Card
@@ -285,16 +289,6 @@ export function TeamsScreen() {
         />
       )}
     </Page>
-  );
-}
-
-function SummaryItem({ label, value, hint }: { label: string; value: number | string; hint: string }) {
-  return (
-    <div className="tms-summary__item">
-      <span className="tms-summary__label ui-t-eyebrow">{label}</span>
-      <strong className="tms-summary__value ui-t-num">{value}</strong>
-      <span className="tms-summary__hint ui-t-small">{hint}</span>
-    </div>
   );
 }
 
@@ -456,7 +450,7 @@ function TeamRow({
               </span>
             )}
           </span>
-          <span className="tms-row-count ui-mono">{memberMeta}</span>
+          <span className="tms-row-count">{memberMeta}</span>
           <ChevronRight className="tms-chevron" size={18} strokeWidth={1.8} aria-hidden />
         </button>
 

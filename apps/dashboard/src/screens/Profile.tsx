@@ -82,16 +82,19 @@ function ProfileBody({ profile, timezone }: { profile: SelfProfileResponse; time
       <Card variant="flush" className="prf-summary ui-rise-1">
         <StatRow>
           <Stat
+            className="prf-stat--name"
             label="Team"
             value={profile.team?.name ?? '—'}
             hint={profile.team ? `${profile.team.memberCount} members` : 'workspace-level'}
           />
           <Stat
+            className="prf-stat--name"
             label="Manager"
             value={profile.manager ? shortName(profile.manager.name) : '—'}
             hint={profile.manager?.email ?? roleLine(profile.user.displayRole)}
           />
           <Stat
+            className="prf-stat--name"
             label="Shift"
             value={profile.shift?.name ?? '—'}
             hint={profile.shift ? todayWindow : 'no shift assigned'}
@@ -185,7 +188,7 @@ function ProfileBody({ profile, timezone }: { profile: SelfProfileResponse; time
                   className={`prf-week__day${isToday ? ' is-today' : ''}`}
                 >
                   <span className="prf-week__label ui-t-eyebrow">{day.label}</span>
-                  <span className="prf-week__value ui-mono">{formatScheduleRange(slot)}</span>
+                  <span className="prf-week__value">{formatScheduleRange(slot)}</span>
                   {isToday && <Tag mono>Today</Tag>}
                 </div>
               );

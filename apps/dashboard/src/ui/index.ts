@@ -11,7 +11,7 @@
 export type { Status, Rail } from './util';
 
 // ── §5.1 / §5.2 — frame + header ───────────────────────────────────────────
-export { Page, PageHeader } from './Page';
+export { Page, PageHeader, SectionTabsContext } from './Page';
 export type { PageProps, PageHeaderProps } from './Page';
 
 // ── §5.3 — surface container ────────────────────────────────────────────────
@@ -89,3 +89,7 @@ export type {
   SidebarBrandProps,
   NavItemProps,
 } from './Shell';
+
+// ── The mark, its loader and the app-load intro (DESIGN.md §9 The logo, Motion) ──
+export { TimoMark, PageLoader } from './Mark';
+export { IntroProvider, useIntroHold, introTarget } from './Intro';

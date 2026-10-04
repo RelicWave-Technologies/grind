@@ -319,7 +319,7 @@ function HomeMetric({
   return (
     <div className={`hm-home-metric hm-home-metric--${tone}${featured ? ' is-featured' : ''}`}>
       <span className="ui-t-eyebrow">{label}</span>
-      <span className="hm-home-metric__value ui-t-display">{value}</span>
+      <span className="hm-home-metric__value ui-t-num">{value}</span>
       {sub != null && <span className="hm-home-metric__sub ui-t-small">{sub}</span>}
     </div>
   );
@@ -397,7 +397,7 @@ function InfoPill({ label, value }: { label: string; value: string }) {
   return (
     <div className="hm-info-pill">
       <span className="ui-t-eyebrow">{label}</span>
-      <span className="hm-info-value ui-mono">{value}</span>
+      <span className="hm-info-value">{value}</span>
     </div>
   );
 }
@@ -413,7 +413,7 @@ function AppUsageChip({ app }: { app: AppUsageEntry }) {
     >
       <AppIcon name={app.app} iconUrl={app.iconUrl} />
       <span className="hm-app-chip__name ui-t-small">{app.app}</span>
-      <span className="hm-app-chip__time ui-mono">{fmtDurationMs(app.minutes * 60_000)}</span>
+      <span className="hm-app-chip__time">{fmtDurationMs(app.minutes * 60_000)}</span>
     </span>
   );
 }

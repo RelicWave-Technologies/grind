@@ -78,6 +78,21 @@ fonts:
   mono: '"Geist Mono", ui-monospace, "SF Mono", Menlo, monospace'
 
 typography:
+  hero:
+    fontSize: clamp(44px, 6.2vw, 76px)
+    fontWeight: 430
+    lineHeight: 1.02
+    letterSpacing: -0.035em
+  headline:
+    fontSize: clamp(32px, 4.2vw, 50px)
+    fontWeight: 440
+    lineHeight: 1.06
+    letterSpacing: -0.028em
+  wordmark:
+    fontSize: clamp(120px, 27vw, 420px)
+    fontWeight: 480
+    lineHeight: 0.9
+    letterSpacing: -0.055em
   display:
     fontSize: 40px
     fontWeight: 440
@@ -306,6 +321,9 @@ for times, dates and codes where a screen already sets them apart.
 
 | Step | Size / weight | Use |
 | --- | --- | --- |
+| `hero` | 44–76 / 430, fluid | The landing page's one `h1`, and the changelog's and privacy page's titles |
+| `headline` | 32–50 / 440, fluid | A landing section's title, the film captions' size on the page |
+| `wordmark` | 120–420 / 480, fluid | The giant "Timo" at the foot of every public page, nowhere else |
 | `display` | 40 / 440 | Sign-in and marketing titles |
 | `page-title` | 36 / 460 | One per dashboard screen |
 | `title` | 28 / 460 | A page-state heading; **the screen title inside the desktop window** (sections under it use `card-title`) |
@@ -361,16 +379,31 @@ Headings balance their lines. **Every number, time and duration uses
 
 ### The desktop window
 
-The main window (960×640, min 720×460) is the same shell at desktop density:
+The main window (960×640, min 720×460) is **Focus**: one white screen that changes with what you
+are doing, not a set of pages. Chosen 2026-10-04 from five structures.
 
-- **Rail.** White, `layout.desktop-rail-width` (232px), a hairline on its right. Its top row is
-  `layout.desktop-toolbar-height` (48px) tall, so the logo and "Timo" sit on the same line as the
-  macOS traffic lights, and leave 76px for them. Items, the current item and the account foot are
-  the dashboard rail's (§5).
-- **Toolbar.** `layout.desktop-toolbar-height` (48px), white, no hairline: the screen's title and its
-  one or two actions. It is the window's drag handle.
-- **Content.** White, 32px side gutters, a 720px column for Today and Tasks. The window
-background is `white`, not macOS grey. A screen's title is `title` (28px), not `page-title`.
+- **Title bar.** 52px, the window's drag handle. The mark (22px) and "Timo" sit beside the macOS
+  traffic lights, 84px in. On the right, the **corner**: one white pill with a hairline and
+  `elevation-1` holding Tasks and My day (ghost `sm` buttons), Settings (an icon button) and the
+  account (initials or photo; its menu says who is signed in, opens the web dashboard, signs out).
+- **Stage.** Centred. While tracking: the status line (the tracking dot, "Tracking · since 2:21
+  PM", between two hairlines that fade at both ends; `wait` when paused), the task name in
+  `section-title` (a button that opens the task picker), the clock, then Pause or Resume, Stop
+  and Switch task as `lg` buttons. Not tracking: "Not tracking", "What are you working on?" in
+  `display`, a search pill, and the four tasks most likely next as tiles (two by two, `xl` round,
+  1px `line`, the owner badge, the name, then "Last tracked" in `brand-deep` or the due date in
+  `bad` / `wait`); "All n tasks" under them. Without Lark: the reason and Connect Lark.
+- **The clock.** `timer` weight, `clamp(64px, 19vh, 128px)`, each digit in a fixed 0.6em cell so it
+  never jitters, the colons at 30%. Hours and minutes in `ink`, **the seconds in `brand`**: the part
+  that moves is the part that means tracking. Paused, the whole clock is at 45%.
+- **Floor.** Today's total and productivity on one line, then the day ribbon (§ The day ribbon),
+  full width, 32px gutters.
+- **Sheets.** The task list slides up from the bottom (86% tall, `card` round on top), My day in
+  from the right (420px), Settings drops from under the title bar (560px, `card` round). Each has a
+  52px head with its title in `card-title`, its actions and a close button; the window behind dims
+  to `ink` at 16%; Escape closes. The task list's search stays pinned while the list scrolls.
+  Starting a task from the list closes it onto the clock.
+- **Banners** (syncing workspace time, recovered time, update ready) sit at the top of the stage.
 
 ## 6. Elevation
 
@@ -408,12 +441,16 @@ Nothing in between.
 
 ## 8. Motion
 
-- Curve: `ease-standard` (the landing's `cubic-bezier(0.2, 0.7, 0.2, 1)`).
+- Curve: `ease-standard` (the landing's `cubic-bezier(0.2, 0.7, 0.2, 1)`); things arriving use
+  `ease-emphasised` (`cubic-bezier(0.22, 1, 0.36, 1)`).
 - Timing: `duration-fast` 150ms for colour and borders, `duration-base` 200ms for panels and
-  chevrons, `duration-slow` 320ms for disclosures.
+  chevrons, `duration-slow` 320ms for disclosures and sheets.
 - Rows settle in with a 6px rise.
-- The live tracking dot breathes (opacity 1 → 0.45 over 1.8s). Nothing else loops.
-- Under `prefers-reduced-motion`, everything shows its finished state and the dot holds still.
+- The live tracking dot breathes (opacity 1 → 0.45 over 1.8s).
+- **Waiting is the mark writing itself** (§9 The logo). No spinner, dots or orbiting logo anywhere.
+- **Opening the app** plays the intro once (§9 The logo); moving between pages never replays it.
+- Under `prefers-reduced-motion`, everything shows its finished state: the dot holds still, the
+  mark is drawn and still, the intro does not fly.
 
 ## 9. Components
 
@@ -435,8 +472,9 @@ type, `full` round, 0 16px padding.
 | Icon | A 32px circle, ghost by default |
 | Disabled | Drains to `sheet` with `faint` text. It never turns a paler blue |
 
-**Start / Stop.** The timer's start button is the screen's primary (blue). While tracking, Stop is
-a secondary button, and Pause/Resume sit beside it as ghosts. Stopping is not a danger.
+**Start / Stop.** Starting and resuming are the screen's primary (blue). On the Focus stage, Stop is
+an `ink` pill and Pause a white one with a hairline; on the small surfaces (popover, floating bar,
+task rows) Stop is secondary. Stopping is not a danger and is never red.
 
 ### Pills, menus and pickers
 
@@ -572,12 +610,13 @@ See §10.
 Each overlay window is transparent and frameless; the card fills the window and the OS draws the
 shadow (§6). All of them are white with a 1px `line` edge.
 
-- **The timer card** (Today). A white card: the time in `timer` (48) tabular `ink`; under it the
-  tracking dot and the task name in `body-sm` `body`. Its actions are 44px circles on the right:
-  Start and Resume are primary (`brand`), Stop is secondary (white, `line-strong` edge, an `ink`
-  square). Stopping is not a danger and is never red.
-- **Task rows.** White tiles, `xl` round, 1px `line`, 16px padding: a 40px `md`-round identity
-  tile (a tint, §3) with its icon in `ink-2`, the title in `body-sm-strong`, meta in `caption`
+- **The main window** is Focus (§5 The desktop window).
+- **Who a task came from.** Every task carries its creator's initials in a circle on that
+  person's tint (§3 Tints, hashed from the person, so one person is one colour everywhere), in
+  `label` weight, `ink-2`. A task with no known creator shows its own first letter on `sheet`.
+  Never a decorative icon.
+- **Task rows.** White tiles, `xl` round, 1px `line`, 16px padding: the owner badge (36px), the
+  title in `body-sm-strong`, meta in `caption`
   `muted`, then badges. The row being tracked has a `brand` edge. The row's action is a 34px
   circle: secondary at rest, `brand` on hover for Start, `ink` edge for Stop.
 - **Tray popover** (300×340). `xl` round. The timer in `figure` (36) tabular; the task in
@@ -617,6 +656,19 @@ retired a character mascot).
 - **The menu-bar icon** is the mark redrawn on a 16 grid (4px bar and stem, 1px gap, whole pixels)
   as a black template image the system tints; Windows gets the same grid in `ink` with a `brand`
   moment.
+
+- **The loader** is the mark writing itself, 2s a loop on `ease-emphasised`: the bar draws left
+  to right, the stem drops, the moment pops in (to 122%, then settles), all three hold, then
+  fade, and the loop restarts unseen. In a button it is one colour, the button's text colour; as a
+  page loader it is 48px and appears only after 250ms, so a fast load never flashes it.
+- **The intro.** Opening the app (the desktop main window; the dashboard on an app page, never a
+  public page) shows the mark at 96px writing itself on a white cover while the session and the
+  first screen's data load. The first loop always reaches its full shape; then, on a fully drawn
+  frame, it flies into the logo it belongs to (`data-intro-target`: the title-bar mark, the
+  sidebar mark, the sign-in mark) over 780ms on `ease-emphasised` while the cover fades over
+  520ms from 260ms in, and the page appears beneath it. After 8s it goes anyway. Geometry and
+  timing live in `@grind/design` (`intro.ts`, `mark.css`); each app renders it with its own
+  `TimoMark`.
 
 | Where | Size |
 | --- | --- |

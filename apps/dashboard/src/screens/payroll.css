@@ -11,7 +11,7 @@
 
 /* Section rhythm between body blocks below the PageHeader (spec §4: 24px). */
 .pay-block + .pay-block {
-  margin-top: var(--space-xl);
+  margin-top: var(--space-lg);
 }
 
 /* Loading placeholder for the KPI row: four SkeletonStats spread evenly to
@@ -27,8 +27,14 @@
   overflow-x: auto;
 }
 
+/* Eight columns fit the page at 1440; narrower windows scroll. */
 .pay-table {
-  min-width: calc(var(--space-section) * 18);
+  min-width: calc(var(--space-section) * 15);
+}
+
+/* The longest name should not set the width of the whole table. */
+.pay-table .ui-identity {
+  max-width: calc(var(--space-section) * 4);
 }
 
 .pay-table .ui-table__row {
@@ -46,14 +52,11 @@
   vertical-align: middle;
 }
 
-.pay-table .ui-th:not(:first-child),
-.pay-table .ui-td:not(:first-child),
-.pay-table .ui-td.ui-td--num {
-  text-align: center;
-}
-
-.pay-table .ui-td:not(:first-child) > * {
-  margin-inline: auto;
+/* Columns follow their header's alignment: numbers right (DESIGN.md §9
+   Tables), the day chips and the action centred. */
+.pay-table .ui-th:first-child,
+.pay-table .ui-td:first-child {
+  padding-left: var(--space-lg);
 }
 
 .pay-day-pills,
@@ -157,17 +160,17 @@
   display: grid;
   align-content: space-between;
   gap: var(--space-xs);
-  padding: var(--space-sm);
+  padding: var(--space-md);
   border: 1px solid var(--color-line);
-  border-radius: var(--radius-card);
-  background: var(--color-sheet);
+  border-radius: var(--radius-lg);
+  background: var(--color-white);
 }
 
 .pay-drawer-metric strong {
-  font-family: var(--font-mono);
-  font-size: 20px;
-  line-height: 1;
-  font-weight: 650;
+  font-size: var(--type-section-title-size);
+  line-height: var(--type-section-title-leading);
+  font-weight: var(--type-section-title-weight);
+  letter-spacing: var(--type-section-title-tracking);
   font-variant-numeric: tabular-nums;
   color: var(--color-ink);
 }
@@ -211,7 +214,7 @@
 
 .pay-date-cell span {
   color: var(--color-body);
-  font-size: 12px;
+  font-size: var(--type-micro-size);
 }
 
 .pay-ledger-table .pay-note {

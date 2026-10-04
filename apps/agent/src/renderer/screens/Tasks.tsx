@@ -1,16 +1,27 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Search, Plus, X } from 'lucide-react';
+import { Search } from 'lucide-react';
 import type { TimerStatus } from '../lib/agent.d';
 import { sortTasks } from '../lib/taskFormat';
 import larkIcon from '../assets/lark.svg';
 import TaskCard from '../components/TaskCard';
 import TaskComposer from '../components/TaskComposer';
-import SyncButton from '../components/SyncButton';
 import { useWorkspaceTime } from '../lib/workspaceTime';
 
-/** Full Lark task list: open + completed, searchable, with quick create. */
-export default function Tasks() {
+/**
+ * Full Lark task list: open + completed, searchable, with quick create. Lives
+ * in the main window's Tasks sheet, which owns the New task toggle; starting a
+ * task reports back through `onStarted` so the sheet can close onto the timer.
+ */
+export default function Tasks({
+  creating,
+  onCreatingChange,
+  onStarted,
+}: {
+  creating: boolean;
+  onCreatingChange: (creating: boolean) => void;
+  onStarted: () => void;
+}) {
   const qc = useQueryClient();
   const larkStatus = useQuery({ queryKey: ['larkStatus'], queryFn: () => window.agent.lark.status(), refetchInterval: 10_000 });
   const larkTasks = useQuery({ queryKey: ['larkTasks'], queryFn: () => window.agent.lark.tasks(), refetchInterval: 60_000 });
@@ -18,7 +29,6 @@ export default function Tasks() {
   const [timer, setTimer] = useState<TimerStatus>({ state: 'IDLE', workedMs: 0 });
   const [now, setNow] = useState(() => Date.now());
   const [query, setQuery] = useState('');
-  const [showCreate, setShowCreate] = useState(false);
   const [showDone, setShowDone] = useState(false);
   const [justCreated, setJustCreated] = useState<string | null>(null);
 
@@ -30,13 +40,19 @@ export default function Tasks() {
     return () => { alive = false; off(); clearInterval(tick); };
   }, []);
 
-  const start = useMutation({ mutationFn: (guid: string) => window.agent.timer.start(guid), onSuccess: (result) => setTimer(result.status) });
+  const start = useMutation({
+    mutationFn: (guid: string) => window.agent.timer.start(guid),
+    onSuccess: (result) => {
+      setTimer(result.status);
+      if (result.ok) onStarted();
+    },
+  });
   const stop = useMutation({ mutationFn: () => window.agent.timer.stop(), onSuccess: (s) => setTimer(s) });
   const resume = useMutation({ mutationFn: () => window.agent.timer.resume(), onSuccess: (result) => setTimer(result.status) });
   const connectLark = useMutation({ mutationFn: () => window.agent.lark.connect() });
 
   const onCreated = (summary: string) => {
-    setShowCreate(false);
+    onCreatingChange(false);
     setQuery('');
     setJustCreated(summary);
     void qc.invalidateQueries({ queryKey: ['larkTasks'] });
@@ -57,19 +73,7 @@ export default function Tasks() {
 
   return (
     <>
-      <div className="toolbar">
-        <span className="h1 no-drag">Tasks</span>
-        {larkConnected && (
-          <span className="toolbar-actions no-drag">
-            <SyncButton />
-            <button className="btn btn-soft no-drag" onClick={() => setShowCreate((s) => !s)}>
-              {showCreate ? <><X size={14} strokeWidth={2.5} /> Cancel</> : <><Plus size={14} strokeWidth={2.5} /> New task</>}
-            </button>
-          </span>
-        )}
-      </div>
-      <div className="content-scroll">
-        <div className="content-narrow">
+      <div className="content-narrow">
           {!taskCatalogAvailable ? (
             <div className="empty rise rise-1">
               <span className="empty-icon">
@@ -87,15 +91,17 @@ export default function Tasks() {
             </div>
           ) : (
             <>
-              {showCreate && <TaskComposer onCreated={onCreated} timeZone={workspaceTime.data?.timeZone ?? null} />}
-              {justCreated && !showCreate && (
+              {creating && <TaskComposer onCreated={onCreated} timeZone={workspaceTime.data?.timeZone ?? null} />}
+              {justCreated && !creating && (
                 <div className="create-toast rise" role="status"><span className="create-toast-dot" /> Created “{justCreated}” in Lark</div>
               )}
 
               {tasks.length > 6 && (
-                <div className="task-search no-drag" style={{ marginTop: 'var(--space-xxs)' }}>
+                <div className="task-search-bar">
+                  <div className="task-search no-drag">
                   <Search size={15} strokeWidth={2} className="task-search-ico" />
                   <input className="task-search-input" type="text" placeholder={`Search ${tasks.length} tasks…`} value={query} onChange={(e) => setQuery(e.target.value)} />
+                  </div>
                 </div>
               )}
 
@@ -139,7 +145,6 @@ export default function Tasks() {
               )}
             </>
           )}
-        </div>
       </div>
     </>
   );

@@ -6,58 +6,48 @@
 
 .hm-page {
   --hm-leading-col: var(--space-xxl);
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-lg);
 }
 
 .hm-command-card .ui-card__body {
   min-width: 0;
 }
 
+/* The Today card's four numbers: cells in one row divided by hairlines
+   (DESIGN.md §9 Stat), equal widths so "2:05 AM" never truncates. */
 .hm-command {
   min-width: 0;
   display: grid;
-  grid-template-columns: minmax(0, 2fr) repeat(3, minmax(0, 1fr));
-  gap: var(--space-xs);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   align-items: stretch;
 }
 
 .hm-home-metric {
   min-width: 0;
-  min-height: calc(var(--space-section) * 2);
-  display: grid;
-  grid-template-rows: auto 1fr auto;
-  align-items: start;
-  gap: var(--space-sm);
-  padding: var(--space-lg);
-  border: 1px solid transparent;
-  border-radius: var(--radius-card);
-  background: var(--color-white);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  padding: var(--space-xxs) var(--space-lg);
 }
 
-.hm-home-metric.is-featured {
-  padding-inline: var(--space-xl);
+.hm-home-metric:first-child {
+  padding-left: 0;
 }
 
-.hm-home-metric--lime {
-  background: var(--color-sheet-soft);
+.hm-home-metric + .hm-home-metric {
+  border-left: 1px solid var(--color-line-soft);
 }
 
-.hm-home-metric--cream {
-  background: var(--color-sheet-soft);
-}
 
-.hm-home-metric--coral {
-  background: var(--color-sheet-soft);
-}
 
-.hm-home-metric--mint {
-  background: var(--color-sheet-soft);
-}
+
+
+
+
+
+
+
 
 .hm-home-metric__value {
-  align-self: center;
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -71,6 +61,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: var(--color-muted);
 }
 
 .hm-grid {
@@ -79,7 +70,7 @@
   grid-template-areas:
     "timeline actions"
     "approval context";
-  gap: var(--space-md);
+  gap: var(--space-lg);
   align-items: stretch;
 }
 
@@ -146,23 +137,28 @@
   color: var(--color-muted);
 }
 
+/* First / last, meetings, top app: three facts in a hairline-divided row,
+   the name over the value so neither has to truncate. */
 .hm-day-brief {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--space-xs);
-  margin-bottom: var(--space-sm);
+  margin-bottom: var(--space-md);
 }
 
 .hm-info-pill {
   min-width: 0;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-xs);
-  padding: var(--space-xs) var(--space-sm);
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-md);
-  background: var(--color-sheet);
+  flex-direction: column;
+  gap: var(--space-xxs);
+  padding: 0 var(--space-md);
+}
+
+.hm-info-pill:first-child {
+  padding-left: 0;
+}
+
+.hm-info-pill + .hm-info-pill {
+  border-left: 1px solid var(--color-line-soft);
 }
 
 .hm-info-value {
@@ -171,14 +167,14 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--color-ink);
+  font-size: var(--type-body-sm-strong-size);
+  font-weight: var(--type-body-sm-strong-weight);
+  font-variant-numeric: tabular-nums;
 }
 
+/* The ribbon draws its own track; no second box around it inside the card. */
 .hm-ribbon-shell {
   min-width: 0;
-  padding: var(--space-xs) var(--space-sm);
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-card);
-  background: var(--color-white);
 }
 
 .hm-ribbon-shell .ribbon {
@@ -235,11 +231,12 @@
   max-width: 100%;
   display: inline-flex;
   align-items: center;
-  gap: var(--space-xxs);
-  padding: var(--space-xxs) var(--space-xs);
+  gap: var(--space-xs);
+  height: var(--control-height-sm);
+  padding: 0 var(--space-sm) 0 var(--space-xxs);
   border: 1px solid var(--color-line);
   border-radius: var(--radius-full);
-  background: var(--color-sheet);
+  background: var(--color-white);
   color: var(--color-ink);
 }
 
@@ -253,7 +250,9 @@
 
 .hm-app-chip__time {
   flex: 0 0 auto;
-  color: var(--color-body);
+  color: var(--color-muted);
+  font-size: var(--type-caption-size);
+  font-variant-numeric: tabular-nums;
 }
 
 .hm-app-empty {
@@ -266,14 +265,14 @@
   gap: var(--space-sm);
 }
 
+/* What is waiting, as the head of the card's list — not a box inside it. */
 .hm-approval-summary {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--space-xs);
-  padding: var(--space-md);
-  border-radius: var(--radius-card);
-  background: var(--color-sheet-soft);
+  gap: var(--space-xxs);
+  padding-bottom: var(--space-sm);
+  border-bottom: 1px solid var(--color-line-soft);
 }
 
 .hm-approval-summary__value {
@@ -309,15 +308,11 @@
   }
 
   .hm-home-metric,
-  .hm-home-metric.is-featured {
-    min-height: auto;
-    padding: var(--space-md);
-  }
-
-  .hm-info-pill {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 2px;
+  .hm-info-pill,
+  .hm-home-metric + .hm-home-metric,
+  .hm-info-pill + .hm-info-pill {
+    padding: var(--space-xs) 0;
+    border-left: 0;
   }
 
   .hm-page .ui-list-row__meta {

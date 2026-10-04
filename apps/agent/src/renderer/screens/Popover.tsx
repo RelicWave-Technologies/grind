@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { Play, Square, ExternalLink, ListTodo, Search } from 'lucide-react';
+import { Play, Square, ExternalLink, Search } from 'lucide-react';
 import timoLogo from '../assets/timo-logo.svg';
 import type { TimerStatus } from '../lib/agent.d';
-import { projectStyle } from '../lib/projectStyle';
+import TaskOwner from '../components/TaskOwner';
 import { sortTasks } from '../lib/taskFormat';
-import { fmtClock } from './Today';
+import { fmtClock } from '../lib/timerUi';
 
 function trackedTaskGuid(status: TimerStatus): string | null {
   return status.state === 'RUNNING' ? status.larkTaskGuid : null;
@@ -118,13 +118,10 @@ export default function Popover() {
                   <div className="pop-task-empty">No matching tasks</div>
                 ) : (
                   visibleTasks.map((task) => {
-                    const ps = projectStyle(task.guid);
                     const selected = task.guid === selectedTaskGuid;
                     return (
                       <div className={`pop-task-row${selected ? ' selected' : ''}`} role="listitem" key={task.guid}>
-                        <span className="pop-task-icon" style={{ background: ps.color }}>
-                          <ListTodo size={12} strokeWidth={2.2} />
-                        </span>
+                        <TaskOwner task={task} size={22} />
                         <span className="pop-task-name" title={task.summary}>{task.summary}</span>
                         <button
                           type="button"

@@ -39,7 +39,7 @@ body { color: var(--color-ink); }
 }
 
 /* Text helpers still used by the Edit Time rows and pickers. */
-.small { font-size: 11px; }
+.small { font-size: var(--type-overline-size); }
 .secondary { color: var(--color-body); }
 .tertiary { color: var(--color-muted); }
 
@@ -110,7 +110,7 @@ body { color: var(--color-ink); }
 .ribbon-tick-hover { z-index: 2; }
 .ribbon-tick-line-hover { background: var(--color-brand); height: 8px; width: 1.5px; }
 .ribbon-tick-label-hover {
-  font-size: 10.5px;
+  font-size: var(--type-overline-size);
   font-weight: var(--type-label-weight);
   color: var(--color-brand-deep);
   background: var(--color-white);
@@ -199,7 +199,7 @@ body { color: var(--color-ink); }
   width: 1px; height: 6px;
   background: var(--color-line-strong);
 }
-.ribbon-tick-label { font-size: 10px; letter-spacing: 0.02em; }
+.ribbon-tick-label { font-size: var(--type-overline-size); letter-spacing: 0.02em; }
 
 /* ============================================================================
    Edit Time — timesheet rows
@@ -209,8 +209,8 @@ body { color: var(--color-ink); }
 /* Minimal kind label: 6px coloured dot + plain text, no pill. */
 .kind-chip {
   display: inline-flex; align-items: center; gap: 7px;
-  font-size: 12px;
-  font-weight: 500;
+  font-size: var(--type-micro-size);
+  font-weight: var(--type-body-sm-strong-weight);
   color: var(--color-body);
   background: transparent;
   padding: 0;
@@ -248,8 +248,8 @@ body { color: var(--color-ink); }
   align-items: center;
   gap: var(--space-xxs);
   font-family: var(--font-sans);
-  font-size: 12.5px;
-  font-weight: 600;
+  font-size: var(--type-caption-size);
+  font-weight: var(--type-body-sm-strong-weight);
   line-height: 1;
   letter-spacing: -0.1px;
   transition:
@@ -277,8 +277,10 @@ body { color: var(--color-ink); }
   transition: transform var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard);
 }
 .et-chip-trigger[aria-expanded="true"] .et-chip-caret { transform: rotate(180deg); color: var(--color-ink); }
+/* An editable time reads like the fixed times beside it: `body-sm`, tabular. */
 .et-chip-trigger-time {
-  font-family: var(--font-mono);
+  font-size: var(--type-body-sm-size);
+  font-weight: var(--type-body-sm-weight);
   font-variant-numeric: tabular-nums;
   min-width: calc(var(--space-section-sm) + var(--space-xxl) + var(--space-xxs));
   justify-content: center;
@@ -320,12 +322,12 @@ body { color: var(--color-ink); }
 .tp-cell {
   min-height: calc(var(--control-height) - var(--space-xxs));
   font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums; font-size: 12.5px;
+  font-variant-numeric: tabular-nums; font-size: var(--type-caption-size);
   padding: 0 var(--space-xs); border-radius: var(--radius-md); cursor: pointer; text-align: center;
   background: transparent; border: 0; color: var(--color-ink);
 }
 .tp-cell:not(:disabled):hover { background: var(--color-sheet-2); color: var(--color-brand); }
-.tp-cell[aria-selected="true"]:not(:disabled) { background: var(--color-brand); color: var(--color-white); font-weight: 600; }
+.tp-cell[aria-selected="true"]:not(:disabled) { background: var(--color-ink); color: var(--color-white); font-weight: var(--type-body-sm-strong-weight); }
 .tp-cell[data-active="true"]:not(:disabled) { box-shadow: inset 0 0 0 1px var(--color-line-strong); }
 .tp-cell:disabled { color: var(--color-faint); opacity: 1; cursor: not-allowed; }
 .tp-meridiem {
@@ -337,7 +339,7 @@ body { color: var(--color-ink); }
 .tp-meridiem-btn {
   flex: 1; height: calc(var(--control-height) - var(--space-xxs) - 2px); padding: 0;
   border-radius: var(--radius-md); border: 0; background: transparent; cursor: pointer;
-  font-size: 11px; font-weight: 600; color: var(--color-body);
+  font-size: var(--type-overline-size); font-weight: var(--type-body-sm-strong-weight); color: var(--color-body);
 }
 .tp-meridiem-btn[aria-pressed="true"] { background: var(--color-white); color: var(--color-ink); }
 .tp-meridiem-btn:disabled { opacity: 0.35; cursor: not-allowed; }
@@ -352,7 +354,7 @@ body { color: var(--color-ink); }
 .tc-search {
   width: 100%; box-sizing: border-box;
   font-family: var(--font-sans);
-  font-size: 13px;
+  font-size: var(--type-caption-size);
   padding: var(--space-xs) 0;
   border: 0;
   background: transparent; color: var(--color-ink); outline: none;
@@ -364,15 +366,15 @@ body { color: var(--color-ink); }
 .tc-list::-webkit-scrollbar-thumb { background: var(--color-line-strong); border-radius: var(--radius-full); }
 .tc-item {
   min-height: var(--control-height-lg);
-  font-size: 13px; padding: 0 var(--space-xs); border-radius: var(--radius-md); cursor: pointer;
+  font-size: var(--type-caption-size); padding: 0 var(--space-xs); border-radius: var(--radius-md); cursor: pointer;
   background: transparent; border: 0; color: var(--color-ink);
   display: flex; align-items: center; gap: var(--space-xs); text-align: left;
 }
 .tc-item:hover, .tc-item[data-active="true"] { background: var(--color-sheet-2); color: var(--color-brand); }
-.tc-item[aria-selected="true"] { font-weight: 600; }
+.tc-item[aria-selected="true"] { font-weight: var(--type-body-sm-strong-weight); }
 .tc-item-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tc-item-untracked { color: var(--color-muted); font-style: italic; border-bottom: 1px solid var(--color-line); border-radius: var(--radius-md) var(--radius-md) 0 0; }
-.tc-empty { padding: var(--space-sm); color: var(--color-muted); font-size: 12px; text-align: center; }
+.tc-empty { padding: var(--space-sm); color: var(--color-muted); font-size: var(--type-micro-size); text-align: center; }
 
 /* AttendeePicker — same et-pop chrome but multi-select rows + clear-all */
 .et-chip-trigger-attendees { min-width: 18ch; max-width: 32ch; }
@@ -404,7 +406,7 @@ body { color: var(--color-ink); }
   display: flex; align-items: center; gap: var(--space-xs);
   padding: 0 var(--space-xs);
 }
-.ap-row.is-selected { background: var(--color-sheet-2); color: var(--color-brand); font-weight: 600; }
+.ap-row.is-selected { background: var(--color-sheet-2); color: var(--color-brand); font-weight: var(--type-body-sm-strong-weight); }
 .ap-row.is-selected:hover { background: var(--color-sheet-2); }
 .ap-avatar {
   width: var(--space-xl); height: var(--space-xl);
@@ -413,7 +415,7 @@ body { color: var(--color-ink); }
   background: var(--color-brand);
   color: var(--color-white);
   display: flex; align-items: center; justify-content: center;
-  font-size: 10px; font-weight: 700;
+  font-size: var(--type-overline-size); font-weight: var(--type-body-sm-strong-weight);
   flex-shrink: 0;
   letter-spacing: 0.3px;
 }
@@ -429,19 +431,19 @@ body { color: var(--color-ink); }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.ap-check { color: var(--color-brand); font-weight: 700; }
+.ap-check { color: var(--color-brand); font-weight: var(--type-body-sm-strong-weight); }
 
 /* Attendee summary chip row (collapsed read-only view on entries) */
 .attendee-chips { display: inline-flex; flex-wrap: wrap; gap: var(--space-xxs); align-items: center; color: var(--color-muted); }
 .attendee-chips > svg { flex-shrink: 0; }
 .attendee-chip {
   display: inline-flex; align-items: center; gap: var(--space-xxs);
-  font-size: 11.5px;
+  font-size: var(--type-micro-size);
   padding: 2px var(--space-xs);
   border-radius: var(--radius-full);
   background: var(--color-sheet-2);
   color: var(--color-muted);
-  font-weight: 500;
+  font-weight: var(--type-body-sm-strong-weight);
   white-space: nowrap;
 }
 .attendee-chip-more {
@@ -469,7 +471,7 @@ body { color: var(--color-ink); }
 .et-row-gap td       { color: var(--color-body); }
 
 .et-row .et-reason {
-  font-family: var(--font-sans); font-size: 13px;
+  font-family: var(--font-sans); font-size: var(--type-caption-size);
   padding: var(--space-xs); border-radius: var(--radius-md);
   border: 1px solid transparent; background: transparent;
   color: var(--color-ink);
@@ -495,12 +497,12 @@ body { color: var(--color-ink); }
 .et-attendees { margin-top: var(--space-xs); }
 .et-review-note { margin-top: 2px; }
 .et-row-err {
-  font-size: 12.5px; color: var(--color-bad);
+  font-size: var(--type-caption-size); color: var(--color-bad);
   margin-top: var(--space-xxs);
 }
 .et-time-cell { white-space: nowrap; }
 .et-times-inline { display: inline-flex; align-items: center; gap: var(--space-xxs); }
-.et-times-sep { color: var(--color-muted); font-size: 12px; }
+.et-times-sep { color: var(--color-muted); font-size: var(--type-micro-size); }
 
 /* ============================================================================
    Activity heatmap — the ten-minute grid under the ribbon
@@ -536,6 +538,6 @@ body { color: var(--color-ink); }
 }
 .heatmap-foot {
   margin-top: var(--space-xs);
-  font-size: 10.5px;
+  font-size: var(--type-overline-size);
   letter-spacing: 0.02em;
 }

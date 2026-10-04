@@ -23,8 +23,8 @@
   align-items: flex-end;
   justify-content: space-between;
   gap: var(--space-md);
-  padding: var(--space-md) var(--space-lg);
-  border-bottom: 1px solid var(--color-line);
+  padding: var(--space-lg) var(--space-xl);
+  border-bottom: 1px solid var(--color-line-soft);
 }
 
 .apv-table-head > div {
@@ -243,13 +243,13 @@
   align-items: center;
   justify-content: center;
   gap: var(--space-xxs);
-  padding: 0 var(--space-lg);
-  border: 1px solid transparent;
+  padding: 0 var(--space-md);
+  border: 1px solid var(--color-line-strong);
   border-radius: var(--radius-full);
-  background: var(--color-sheet);
+  background: var(--color-white);
   color: var(--color-ink);
-  font-family: var(--font-mono);
-  font-weight: 500;
+  font-size: var(--type-body-sm-strong-size);
+  font-weight: var(--type-body-sm-strong-weight);
   font-variant-numeric: tabular-nums;
   cursor: pointer;
   transition:
@@ -259,8 +259,7 @@
 
 .apv-date-trigger:hover,
 .apv-date-trigger.is-open {
-  background: var(--color-white);
-  border-color: var(--color-line);
+  border-color: var(--color-ink);
 }
 
 .apv-date-trigger:focus-visible {
@@ -315,8 +314,7 @@
 
 .apv-calendar-weekdays {
   margin-bottom: var(--space-xxs);
-  font-family: var(--font-mono);
-  font-weight: 600;
+  font-weight: var(--type-body-sm-strong-weight);
   color: var(--color-muted);
   text-align: center;
 }
@@ -330,8 +328,7 @@
   border-radius: var(--radius-full);
   background: transparent;
   color: var(--color-ink);
-  font-family: var(--font-mono);
-  font-weight: 500;
+  font-weight: var(--type-body-sm-strong-weight);
   font-variant-numeric: tabular-nums;
   cursor: pointer;
   transition:
@@ -460,7 +457,7 @@
 .apv-detail-section p {
   margin: 0;
   color: var(--color-ink);
-  font-weight: 430;
+  font-weight: var(--type-body-sm-weight);
   line-height: 1.45;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
