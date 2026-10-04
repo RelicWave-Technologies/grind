@@ -235,7 +235,13 @@ function Pick({
 }) {
   const [query, setQuery] = useState('');
   const q = query.trim().toLowerCase();
-  const shown = tasks.filter((t) => q === '' || t.summary.toLowerCase().includes(q)).slice(0, 4);
+  // The task you last tracked, ready to go again with one press. Only while it
+  // is still open; a finished task is never offered back.
+  const ready = lastGuid ? tasks.find((t) => t.guid === lastGuid) : undefined;
+  const others = ready ? tasks.filter((t) => t.guid !== ready.guid) : tasks;
+  // With the ready card on screen the tiles get one row, so the window still
+  // fits at its smallest size.
+  const shown = others.filter((t) => q === '' || t.summary.toLowerCase().includes(q)).slice(0, ready && q === '' ? 2 : 4);
 
   if (!loading && !catalogAvailable) {
     return (
@@ -260,17 +266,35 @@ function Pick({
   }
 
   return (
-    <div className="focus-center focus-pick">
+    <div className={`focus-center focus-pick${ready ? ' focus-pick--ready' : ''}`}>
       <span className="focus-status focus-status--off">Not tracking</span>
       <h2>What are you working on?</h2>
+      {ready && (
+        <div className="focus-ready">
+          <TaskOwner task={ready} size={36} />
+          <span className="focus-tile-main">
+            <span className="focus-ready-name">{ready.summary}</span>
+            <span className="focus-tile-meta focus-tile-meta--last">Last tracked</span>
+          </span>
+          <button
+            className="btn btn-prominent btn-lg focus-ready-start no-drag"
+            onClick={() => onStart(ready.guid)}
+            disabled={disabled}
+          >
+            <Play size={16} fill="currentColor" strokeWidth={0} /> Start
+          </button>
+        </div>
+      )}
       <label className="focus-find no-drag">
         <Search size={16} strokeWidth={2} />
         <input
-          placeholder={tasks.length > 0 ? `Search ${tasks.length} tasks` : 'Search tasks'}
+          placeholder={ready ? 'Or find another task' : tasks.length > 0 ? `Search ${tasks.length} tasks` : 'Search tasks'}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && shown[0] && !disabled) onStart(shown[0].guid);
+            if (e.key !== 'Enter' || disabled) return;
+            if (q === '' && ready) onStart(ready.guid);
+            else if (shown[0]) onStart(shown[0].guid);
           }}
         />
       </label>
@@ -281,7 +305,7 @@ function Pick({
       ) : tasks.length === 0 ? (
         <p className="focus-note">No open tasks. New Lark tasks assigned to you will show up here.</p>
       ) : shown.length === 0 ? (
-        <p className="focus-note">No tasks match “{query}”.</p>
+        q === '' ? null : <p className="focus-note">No tasks match “{query}”.</p>
       ) : (
         <div className="focus-tiles">
           {shown.map((t) => {
@@ -301,8 +325,8 @@ function Pick({
           })}
         </div>
       )}
-      {tasks.length > 4 && (
-        <button className="btn btn-ghost no-drag" onClick={onAll}>All {tasks.length} tasks</button>
+      {tasks.length > (ready ? 3 : 4) && (
+        <button className="btn btn-ghost no-drag focus-all" onClick={onAll}>All {tasks.length} tasks</button>
       )}
     </div>
   );
