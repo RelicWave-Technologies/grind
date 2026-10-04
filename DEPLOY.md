@@ -1,80 +1,66 @@
 # Grind — Deployment Runbook
 
-Three surfaces ship independently:
+| Surface | Target | Config |
+|---|---|---|
+| `@grind/api` (Express + Prisma) | VPS, Docker container behind host Nginx | `infra/vps/Dockerfile.api` |
+| `@grind/dashboard` (Vite SPA) | VPS, Nginx container | `infra/vps/Dockerfile.dashboard` |
+| `@grind/agent` (Electron) | GitHub Releases (Mac universal DMG/ZIP + Windows x64 NSIS) | `apps/agent/electron-builder.yml` |
 
-| Surface | Target | Config | Auth |
-|---|---|---|---|
-| `@grind/dashboard` (Vite SPA) | **Vercel** | `vercel.json` | Vercel CLI (`anish877`) |
-| `@grind/api` (Express + Prisma) | **Render** | `render.yaml` | Render dashboard |
-| `@grind/agent` (Electron) | **GitHub Releases** (Mac universal DMG/ZIP + Windows x64 NSIS) | `apps/agent/electron-builder.yml` | GitHub + Apple Developer ID |
-| Screenshots | **Cloudinary** | API `/v1/screenshots/sign` | Cloudinary account |
-
-Database stays on **Neon** (existing).
-
-There is a small cyclic dependency in the origins: the API needs the dashboard
-URL (CORS + cross-site cookie), and the dashboard needs the API URL. Resolve it
-by deploying the API first, then the dashboard, then setting `DASHBOARD_URL` on
-the API and redeploying it.
+Both server surfaces are served from one domain, `https://timo.emiactech.com`.
 
 ---
 
-## 0. Prerequisites (you provide)
+## 1. API + dashboard (VPS)
 
-- **Neon**: `DATABASE_URL` (pooled, `?pgbouncer=true`) + `DIRECT_URL` (direct).
-- **Cloudinary**: Cloud name, API key, API secret (Dashboard → Account Details).
-- **Apple Developer**: a *Developer ID Application* cert installed in the login
-  keychain, plus `APPLE_ID`, an app-specific password, and `APPLE_TEAM_ID`.
+Deploys run through `.github/workflows/deploy-vps.yml` (**Deploy VPS**). It
+triggers on every push to `main` that touches `apps/api`, `apps/dashboard`,
+`packages`, `infra/vps`, or the root workspace/lockfile config, and can also be
+run manually (`workflow_dispatch`).
 
----
+### Build job
 
-## 1. Cloudinary
+Builds two images and pushes them to GHCR, tagged with the commit SHA and `main`:
 
-1. Create a free account at cloudinary.com.
-2. Copy **Cloud name**, **API Key**, **API Secret** from the dashboard.
-3. (Optional) Pre-create the folder `grind/screenshots` — Cloudinary also
-   auto-creates it on first upload.
+- `ghcr.io/relicwave-technologies/grind-api` from `infra/vps/Dockerfile.api`
+  (installs the api + db closure, `prisma generate`, tsup build, runs
+  `pnpm --filter @grind/api start` on port 4000).
+- `ghcr.io/relicwave-technologies/grind-dashboard` from
+  `infra/vps/Dockerfile.dashboard` (Vite build with `VITE_API_BASE` empty, so
+  the SPA calls the API on the same origin; served by Nginx using
+  `infra/vps/dashboard-nginx.conf`).
 
-No code changes needed — the API signs uploads and the agent pushes bytes
-directly. These values go into Render env (step 2).
+### Deploy job (`production` environment)
 
-## 2. Render (API)
+Over SSH to the VPS:
 
-The repo ships `render.yaml` as a Blueprint.
+1. Ensures `/opt/grind` is a git checkout of `main` and fast-forwards it.
+2. Writes `infra/vps/.env.production` from the `PRODUCTION_ENV` secret (plus
+   `TIMO_PRODUCTION_ENV` when set) and `infra/vps/.deploy.env` with the image
+   names + tag.
+3. Pulls the new images, stops `api` + `dashboard`, takes a `pg_dump` of
+   `DATABASE_URL` into `/opt/grind/backups/` (verified with `pg_restore --list`),
+   then runs `prisma migrate deploy` in a one-off `api` container and a few
+   sanity SQL checks.
+4. Starts the stack with `docker compose -f infra/vps/docker-compose.prod.yml up -d`.
+   If anything fails, the previous containers are restarted.
+5. Installs the host Nginx site (`infra/vps/nginx-timo.emiactech.com.conf`;
+   the `.http.conf` variant is used once to obtain the Let's Encrypt cert via
+   certbot). Nginx proxies `/v1/`, `/health`, `/healthz` to the API on
+   `127.0.0.1:4100` and everything else to the dashboard on `127.0.0.1:4101`.
+6. Verifies `https://timo.emiactech.com/healthz` and `/`.
 
-1. Push this branch to GitHub (Render builds from the repo).
-2. Render Dashboard → **New → Blueprint** → pick the `grind` repo → it reads
-   `render.yaml` and proposes the `grind-api` web service.
-3. Fill the `sync: false` env vars when prompted:
-   - `DATABASE_URL`, `DIRECT_URL` — from Neon
-   - `DASHBOARD_URL` — leave blank for now; set after step 3
-   - `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`
-   - Lark vars — optional, leave blank to keep Lark disabled
-   - `JWT_SECRET` is generated automatically.
-4. Deploy. The build runs `prisma generate → tsup build → prisma migrate deploy`
-   against Neon, then `node dist/index.cjs`. Health check: `GET /healthz`.
-5. Note the service URL, e.g. `https://grind-api.onrender.com`.
+Required GitHub secrets: `VPS_HOST`, `VPS_USER`, `VPS_SSH_PRIVATE_KEY`,
+`PRODUCTION_ENV` (the API env file: `DATABASE_URL`, `JWT_SECRET`,
+`DASHBOARD_URL`, screenshot storage, Lark, … — see `.env.example` and
+`apps/api/src/env.ts`), and optionally `TIMO_PRODUCTION_ENV`.
 
-## 3. Vercel (dashboard)
+Non-secret API config (Lark approval codes etc.) lives in the `environment:`
+block of `infra/vps/docker-compose.prod.yml`.
 
-Done via the Vercel CLI (already logged in as `anish877`). From the repo root:
+`infra/vps/docker-compose.yml` is the build-from-source variant of the same
+stack, for running it on a box without the CI-built images.
 
-```bash
-# Point the SPA at the Render API (build-time inlined by Vite):
-vercel env add VITE_API_BASE production   # paste https://grind-api.onrender.com
-vercel --prod                              # builds @grind/dashboard, deploys dist
-```
-
-`vercel.json` handles the monorepo build (`pnpm --filter @grind/dashboard build`,
-output `apps/dashboard/dist`) and SPA rewrites. Note the deployed URL, e.g.
-`https://grind-dashboard.vercel.app`.
-
-## 4. Close the CORS/cookie loop
-
-Set `DASHBOARD_URL` on Render to the Vercel URL (comma-separate to allow preview
-URLs too) and redeploy the API. In production the auth cookie is
-`SameSite=None; Secure`, so both must be HTTPS (they are).
-
-## 5. Agent desktop releases
+## 2. Agent desktop releases
 
 The build goes through a `pnpm deploy --prod` staging dir (see
 `apps/agent/scripts/package-mac.sh`). This is **required**: in this pnpm
@@ -90,7 +76,7 @@ The production update feed is GitHub Releases using `electron-updater`.
 Release builds bake three desktop env values:
 
 ```bash
-MAIN_VITE_API_URL=https://grind-xcdr.onrender.com
+MAIN_VITE_API_URL=https://timo.emiactech.com
 MAIN_VITE_UPDATE_CHANNEL=latest     # latest for stable, beta for beta
 MAIN_VITE_AUTO_UPDATE_ENABLED=1     # release builds only
 ```
@@ -124,6 +110,10 @@ Required GitHub secrets for the macOS job:
 - `APPLE_APP_SPECIFIC_PASSWORD`.
 - `APPLE_TEAM_ID`.
 
+For a one-off unsigned Windows installer without creating a release, use
+**Actions → Package Windows Agent** (`.github/workflows/package-windows.yml`);
+it uploads the installer as a workflow artifact.
+
 ### Release checklist
 
 1. Bump `apps/agent/package.json` version.
@@ -138,7 +128,7 @@ Required GitHub secrets for the macOS job:
 
 ```bash
 # 1. Bake the production API URL into the app:
-echo 'MAIN_VITE_API_URL=https://grind-xcdr.onrender.com' > apps/agent/.env.production
+echo 'MAIN_VITE_API_URL=https://timo.emiactech.com' > apps/agent/.env.production
 
 # 2a. Unsigned (no Apple account) — verified working:
 pnpm --filter @grind/agent package:unsigned        # -> apps/agent/release/Grind-0.0.1-arm64.dmg
@@ -178,7 +168,7 @@ Windows v1 is an unsigned internal IT installer. Build the x64 NSIS installer:
 
 ```bash
 # Bake the production API URL into the app:
-echo 'MAIN_VITE_API_URL=https://grind-xcdr.onrender.com' > apps/agent/.env.production
+echo 'MAIN_VITE_API_URL=https://timo.emiactech.com' > apps/agent/.env.production
 
 # Unsigned Windows x64 installer:
 pnpm --filter @grind/agent package:win:x64

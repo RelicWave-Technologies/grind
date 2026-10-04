@@ -29,7 +29,6 @@ delete process.env.LARK_OAUTH_REDIRECT_URI;
 // private-DM smoke config.
 process.env.TIMO_TESTER_BOT_ENABLED = 'true';
 process.env.TIMO_TESTER_GROUP_CHAT_ID = 'oc_configured_status';
-process.env.TIMO_TESTER_GROUP_TIMEZONE = 'UTC';
 process.env.TIMO_TESTER_PING_TIMES = '11:00,17:00';
 process.env.TIMO_PASSIVE_ISSUE_DETECTION_ENABLED = 'true';
 

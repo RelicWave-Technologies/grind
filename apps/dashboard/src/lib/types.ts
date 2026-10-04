@@ -331,14 +331,6 @@ export interface LeaveCalendarResponse {
   holidays: HolidayDto[];
 }
 
-export interface LeaveQuoteResponse {
-  chargedDays: number;
-  balanceDays: number;
-  balanceAfterDays: number;
-  sufficient: boolean;
-  days: Array<{ date: string; kind: string; portion: LeavePortion | null; label: string | null }>;
-}
-
 export interface LeavePolicyResponse {
   policy: {
     monthlyAccrualDays: number;

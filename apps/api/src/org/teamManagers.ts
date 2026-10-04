@@ -15,23 +15,6 @@ export type OrgMutationResult =
       managedTeamName?: string;
     };
 
-export type TeamManagerUser = {
-  id: string;
-  name: string;
-  email: string;
-  avatarUrl: string | null;
-  role: 'ADMIN' | 'MANAGER' | 'MEMBER';
-  teamId: string | null;
-};
-
-export type TeamManagerAssignment = {
-  id: string;
-  teamId: string;
-  userId: string;
-  createdAt: Date;
-  user: TeamManagerUser;
-};
-
 export function normalizeManagerIds(input: unknown): string[] {
   const raw =
     Array.isArray(input)
@@ -61,14 +44,6 @@ export async function syncDerivedRole(tx: Tx, userId: string): Promise<void> {
   if (Object.keys(data).length > 0) {
     await tx.user.update({ where: { id: userId }, data });
   }
-}
-
-export async function syncWorkspaceDerivedRoles(tx: Tx, workspaceId: string): Promise<void> {
-  const users = await tx.user.findMany({
-    where: { workspaceId, role: { not: 'ADMIN' } },
-    select: { id: true },
-  });
-  for (const user of users) await syncDerivedRole(tx, user.id);
 }
 
 export async function assertTeamInWorkspace(tx: Tx, workspaceId: string, teamId: string) {
@@ -230,14 +205,6 @@ export async function deleteTeam(tx: Tx, args: {
     await syncDerivedRole(tx, manager.userId);
   }
   return { ok: true };
-}
-
-export async function managedTeamIdsForUser(userId: string): Promise<string[]> {
-  const assignment = await prisma.teamManager.findUnique({
-    where: { userId },
-    select: { teamId: true },
-  });
-  return assignment ? [assignment.teamId] : [];
 }
 
 export async function activeManagersForHomeTeam(workspaceId: string, teamId: string, excludeUserId?: string): Promise<Array<{

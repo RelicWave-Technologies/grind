@@ -1,5 +1,4 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { UserDto } from '@grind/types';
 import type {
   TimerStatus,
   TrackingCommandResult,
@@ -12,10 +11,9 @@ import type { ShiftPromptReason, TodayShiftWindow } from '../shared/shift';
 
 type AuthStatus = 'loggedIn' | 'loggedOut';
 type LarkOutcome = { kind: 'pending' } | { kind: 'error'; reason: string };
-type AgentStatus = { state: 'IDLE' | 'OFFLINE'; lastHeartbeatAt: string | null };
-type TimerRecoveryNotice = { entryId: string; recoveredAt: number; reason: 'unexpected_shutdown' | 'sleep_stop' | 'lock_stop' | 'server_finalized'; observedAt: number };
-type TodaySegment = { kind: 'WORK' | 'MEETING' | 'IDLE_TRIMMED'; startedAt: number; endedAt: number | null };
-type TodayEntry = { id: string; source: 'AUTO' | 'MANUAL'; larkTaskGuid: string | null; segments: TodaySegment[] };
+export type TimerRecoveryNotice = { entryId: string; recoveredAt: number; reason: 'unexpected_shutdown' | 'sleep_stop' | 'lock_stop' | 'server_finalized' | 'server_clock_corrected'; observedAt: number };
+export type TodaySegment = { kind: 'WORK' | 'MEETING' | 'IDLE_TRIMMED'; startedAt: number; endedAt: number | null };
+export type TodayEntry = { id: string; source: 'AUTO' | 'MANUAL'; larkTaskGuid: string | null; segments: TodaySegment[] };
 type ScreenshotItem = {
   id: string;
   capturedAt: number;
@@ -26,16 +24,8 @@ type ScreenshotItem = {
   lastError: string | null;
 };
 type ScreenshotUploadSummary = { pending: number; uploading: number; failed: number };
-type AccessibilityStatus = {
-  trusted: boolean;
-  capturing: boolean;
-  ready: boolean;
-  recording: boolean;
-  hookRunning: boolean;
-  lastHookError: string | null;
-};
 type UpdatePhase = 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'installing' | 'not-available' | 'error';
-type UpdateStatus = {
+export type UpdateStatus = {
   phase: UpdatePhase;
   enabled: boolean;
   currentVersion: string;
@@ -51,8 +41,6 @@ type UpdateStatus = {
 
 const api = {
   auth: {
-    login: (email: string, password: string): Promise<UserDto> =>
-      ipcRenderer.invoke('auth:login', { email, password }),
     loginWithLark: (): Promise<{ ok: true }> => ipcRenderer.invoke('auth:loginWithLark'),
     logout: (): Promise<{ ok: true }> => ipcRenderer.invoke('auth:logout'),
     status: (): Promise<AuthStatus> => ipcRenderer.invoke('auth:status'),
@@ -72,9 +60,6 @@ const api = {
         ipcRenderer.off('auth:lark:push', sub);
       };
     },
-  },
-  agent: {
-    status: (): Promise<AgentStatus> => ipcRenderer.invoke('agent:status'),
   },
   workspaceTime: {
     get: (): Promise<WorkspaceTimeContext> => ipcRenderer.invoke('workspaceTime:get'),
@@ -121,7 +106,6 @@ const api = {
   },
   shift: {
     decide: (decision: 'yes' | 'not_yet'): Promise<void> => ipcRenderer.invoke('shift:decide', decision),
-    refresh: (): Promise<void> => ipcRenderer.invoke('shift:refresh'),
     today: (): Promise<TodayShiftWindow | null> => ipcRenderer.invoke('shift:today'),
     promptReason: (): Promise<ShiftPromptReason> => ipcRenderer.invoke('shift:promptReason'),
     onPromptReason: (cb: (reason: ShiftPromptReason) => void): (() => void) => {
@@ -132,7 +116,6 @@ const api = {
   },
   screenshots: {
     recent: (limit?: number): Promise<ScreenshotItem[]> => ipcRenderer.invoke('screenshots:recent', limit),
-    countToday: (): Promise<number> => ipcRenderer.invoke('screenshots:countToday'),
     captureOnce: (): Promise<number> => ipcRenderer.invoke('screenshots:captureOnce'),
     thumbnail: (id: string): Promise<string | null> => ipcRenderer.invoke('screenshots:thumbnail', id),
     full: (id: string): Promise<string | null> => ipcRenderer.invoke('screenshots:full', id),
@@ -147,9 +130,6 @@ const api = {
   permissions: {
     readiness: (): Promise<TrackingReadiness> => ipcRenderer.invoke('permissions:readiness'),
     requestScreen: (): Promise<TrackingReadiness> => ipcRenderer.invoke('permissions:requestScreen'),
-    screen: (): Promise<{ status: string; health: string; state: 'ok' | 'needs-grant' | 'needs-settings' | 'needs-restart' }> =>
-      ipcRenderer.invoke('permissions:screen'),
-    accessibility: (): Promise<AccessibilityStatus> => ipcRenderer.invoke('permissions:accessibility'),
     requestAccessibility: (): Promise<void> => ipcRenderer.invoke('permissions:requestAccessibility'),
   },
   settings: {
@@ -167,7 +147,6 @@ const api = {
       ipcRenderer.on('settings:open:push', sub);
       return () => ipcRenderer.off('settings:open:push', sub);
     },
-    openDataFolder: (): Promise<void> => ipcRenderer.invoke('settings:openDataFolder'),
   },
   app: {
     relaunch: (): Promise<void> => ipcRenderer.invoke('app:relaunch'),
@@ -202,7 +181,7 @@ const api = {
     }> => ipcRenderer.invoke('insights:today'),
   },
   lark: {
-    status: (): Promise<{ configured: boolean; connected: boolean; reauthRequired: boolean; scopes: string[]; offline?: boolean }> =>
+    status: (): Promise<{ configured: boolean; connected: boolean; reauthRequired: boolean; scopes: string[]; missingScopes?: string[]; offline?: boolean }> =>
       ipcRenderer.invoke('lark:status'),
     connect: (): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('lark:connect'),
     disconnect: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('lark:disconnect'),

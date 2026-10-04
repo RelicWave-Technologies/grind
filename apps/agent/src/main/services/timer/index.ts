@@ -150,12 +150,6 @@ export function startTimerSyncDrain(): void {
   getTodayLedgerHydrator().start();
 }
 
-export function stopTimerSyncDrain(): void {
-  timerRuntimeStarted = false;
-  syncDrain?.stop();
-  todayLedgerHydrator?.stop();
-}
-
 export function applyTodayLedgerMode(mode: TodayLedgerMode): void {
   configuredTodayLedgerMode = mode;
   if (!service || !service.setTodayLedgerMode(mode)) return;

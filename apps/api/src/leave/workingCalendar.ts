@@ -1,5 +1,4 @@
 import {
-  LEAVE_DAY_STEP,
   ShiftScheduleSchema,
   WEEKDAYS,
   portionDays,
@@ -429,6 +428,3 @@ export function addIsoDays(date: string, delta: number): string {
   d.setUTCDate(d.getUTCDate() + delta);
   return d.toISOString().slice(0, 10);
 }
-
-/** Half a day, exported so callers never hand-write the literal. */
-export const HALF_DAY = LEAVE_DAY_STEP;

@@ -5,24 +5,6 @@ import { getTesterOpsLarkMessenger } from './larkRuntime';
 
 type Tx = Prisma.TransactionClient;
 
-export async function enqueueTesterOpsText(
-  tx: Tx,
-  args: { workspaceId: string; chatId?: string | null; openId?: string | null; text: string; idempotencyKey: string },
-) {
-  await tx.testerOpsOutboxEvent.upsert({
-    where: { idempotencyKey: args.idempotencyKey },
-    update: {},
-    create: {
-      workspaceId: args.workspaceId,
-      kind: 'SEND_TEXT',
-      idempotencyKey: args.idempotencyKey,
-      chatId: args.chatId ?? null,
-      openId: args.openId ?? null,
-      payload: { text: redactText(args.text) },
-    },
-  });
-}
-
 export async function enqueueTesterOpsCard(
   tx: Tx,
   args: { workspaceId: string; chatId?: string | null; openId?: string | null; card: Record<string, unknown>; idempotencyKey: string },

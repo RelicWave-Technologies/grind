@@ -38,8 +38,3 @@ export async function getTenantAccessToken(nowMs = Date.now()): Promise<string> 
   };
   return cached.token;
 }
-
-/** Drop the cached token — used by tests and by an auth-failure retry path. */
-export function resetTenantAccessToken(): void {
-  cached = null;
-}

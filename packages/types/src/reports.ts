@@ -399,26 +399,6 @@ export type MemberReportDayScreenshotsResponse = z.infer<typeof MemberReportDayS
 export const ScreenshotUploadStateSchema = z.enum(['PENDING', 'UPLOADED', 'FAILED']);
 export type ScreenshotUploadState = z.infer<typeof ScreenshotUploadStateSchema>;
 
-export const PendingScreenshotUploadRequest = z.object({
-  id: z.string().min(1),
-  timeEntryId: z.string().min(1).nullable().optional(),
-  displayId: z.string().max(120).nullable().optional(),
-  capturedAt: z.string().datetime({ offset: true }),
-  bytes: z.number().int().min(0).nullable().optional(),
-  width: z.number().int().min(0).nullable().optional(),
-  height: z.number().int().min(0).nullable().optional(),
-  blurred: z.boolean().optional(),
-});
-export type PendingScreenshotUploadRequest = z.infer<typeof PendingScreenshotUploadRequest>;
-
-export const PendingScreenshotUploadResponse = z.object({
-  id: z.string(),
-  uploadState: z.literal('PENDING'),
-  uploadUrl: z.string().nullable(),
-  uploadHeaders: z.record(z.string()),
-});
-export type PendingScreenshotUploadResponse = z.infer<typeof PendingScreenshotUploadResponse>;
-
 export const CompleteScreenshotUploadRequest = z.object({
   id: z.string().min(1),
   timeEntryId: z.string().min(1).nullable().optional(),

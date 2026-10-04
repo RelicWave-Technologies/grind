@@ -3,7 +3,6 @@ import {
   PAYROLL_POLICY_DEFAULTS,
   ShiftScheduleSchema,
   WEEKDAYS,
-  type ShiftSchedule,
 } from '@grind/types';
 import { localDayWindow } from '../insights/day';
 

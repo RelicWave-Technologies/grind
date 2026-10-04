@@ -1,6 +1,5 @@
 import { ipcMain } from 'electron';
 import { registerAuthIpc } from './auth';
-import { registerStatusIpc } from './status';
 import { registerTimerIpc } from './timer';
 import { registerCaptureIpc } from './capture';
 import { registerSettingsIpc } from './settings';
@@ -18,7 +17,6 @@ export function registerIpc(opts: {
   onIdleResolved: () => void;
 }): void {
   registerAuthIpc();
-  registerStatusIpc();
   registerTimerIpc();
   registerCaptureIpc();
   registerSettingsIpc();

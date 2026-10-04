@@ -44,7 +44,6 @@ import {
   displayDayCode,
 } from '@grind/types';
 import type {
-  AttendanceOverrideCode,
   AttendanceOverrideHistoryResponse,
   AttendanceOverrideShape,
   MemberReportDay,

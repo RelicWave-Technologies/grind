@@ -52,8 +52,6 @@ export interface TimesheetMatrix {
   cells: Record<string, Record<string, TimesheetCell>>;
 }
 
-const DAY_MS = 24 * 60 * 60 * 1000;
-
 /**
  * One owner per instant, per person. Overlap only ever happens within a single
  * user's own timeline, so users are resolved independently — two people working
@@ -219,6 +217,3 @@ export function buildTimesheetMatrix(input: {
 
   return { from: input.from, to: input.to, tz: input.tz, days, cells };
 }
-
-/** Helper exposed for tests + a deterministic helper for the route layer. */
-export const TIMESHEETS_DAY_MS = DAY_MS;

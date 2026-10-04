@@ -1,7 +1,6 @@
-import os from 'node:os';
 import crypto from 'node:crypto';
 import { shell } from 'electron';
-import type { AgentLarkExchangeResponse, LoginResponse, LogoutResponse, UserDto } from '@grind/types';
+import type { AgentLarkExchangeResponse, LogoutResponse } from '@grind/types';
 import { api, UnauthorizedError } from './apiClient';
 import { API_URL, CALLBACK_SCHEME } from '../env';
 import { log } from '../logger';
@@ -142,22 +141,6 @@ export async function completeLarkLogin(code: string): Promise<boolean> {
 export function cancelLarkLogin(): void {
   clearPendingLarkLoginMemory();
   void clearStoredPendingLarkLogin();
-}
-
-export async function login(email: string, password: string): Promise<UserDto> {
-  const res = await api<LoginResponse>('/v1/auth/login', {
-    method: 'POST',
-    auth: false,
-    body: { email, password, deviceName: `${os.hostname()} (${process.platform})` },
-  });
-  await saveTokens({
-    accessToken: res.accessToken,
-    refreshToken: res.refreshToken,
-    userId: res.user.id,
-    workspaceId: res.user.workspaceId,
-  });
-  clearWorkspaceTimeSession();
-  return res.user;
 }
 
 export async function logout(): Promise<void> {

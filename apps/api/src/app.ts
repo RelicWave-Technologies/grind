@@ -37,9 +37,9 @@ export function buildApp() {
   app.use(compression());
   // CORS: allow credentials so the dashboard (separate origin) can ship the
   // grind_at cookie. In production, restrict to the configured dashboard
-  // origin(s) — DASHBOARD_URL may be a comma-separated list (e.g. the prod
-  // domain plus Vercel preview URLs). In dev with nothing configured we
-  // reflect the request origin so localhost:5174 just works.
+  // origin(s) — DASHBOARD_URL may be a comma-separated list. In dev with
+  // nothing configured we reflect the request origin so localhost:5174 just
+  // works.
   const allowlist = (process.env.DASHBOARD_URL ?? '')
     .split(',')
     .map((s) => s.trim().replace(/\/$/, ''))

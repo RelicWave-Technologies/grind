@@ -99,11 +99,6 @@ function replayRotation(spentTokenHash: string, now: number): RotateResult | nul
   return entry.result;
 }
 
-/** Test seam — rotation replay state is process-global. */
-export function __resetRotationReplayCache(): void {
-  recentRotations.clear();
-}
-
 /**
  * Single-use rotation with reuse detection. Validates the presented token,
  * revokes it, and mints a successor in the SAME family — all in one

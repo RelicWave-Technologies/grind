@@ -8,7 +8,6 @@ import { CAPTURE_DEFER_MS, nextDelayMs, shouldDeferCapture } from './scheduler';
 import { planScreenshotRetention } from './retention';
 import { startUploader, drainUploads, uploadScreenshotsNow } from './uploader';
 import { getTimerService } from '../timer';
-import { getWorkspaceTimeContext } from '../workspaceTime';
 import { getActivityStore } from '../activity';
 import { activityPercent } from '../activity/percent';
 import { SCREENSHOT_RETENTION_DAYS } from '../../env';
@@ -283,11 +282,6 @@ export async function fullScreenshot(id: string): Promise<string | null> {
   const row = getStore().find(id);
   if (!row) return null;
   return fullDataUrl(row.filePath);
-}
-
-export function todayScreenshotCount(): number {
-  const context = getWorkspaceTimeContext();
-  return context.ready && context.dayStart !== null ? getStore().countSince(context.dayStart) : 0;
 }
 
 export function screenshotUploadSummary(): ScreenshotUploadSummary {

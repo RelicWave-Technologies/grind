@@ -15,7 +15,6 @@ import { getTrackingReadinessService } from './trackingReadiness';
 import { getLaunchAtLoginService } from './launchAtLogin';
 
 let timer: NodeJS.Timeout | null = null;
-let lastHeartbeatAt: string | null = null;
 
 function agentVersion(): string {
   try {
@@ -76,7 +75,6 @@ async function tick(): Promise<void> {
     // eslint-disable-next-line no-restricted-syntax -- device<->device: RTT halves, and this is what teaches the server clock its offset
     const requestStartedAt = Date.now();
     const res = await api<HeartbeatResponse>('/v1/agent/heartbeat', { method: 'POST', body });
-    lastHeartbeatAt = res.serverTime;
     // Keep the timer's clock in the server's frame. Without this, a laptop more
     // than the server's 2-minute skew tolerance fast has every uploaded
     // timestamp clamped — and clamped segments whose start and end collapse
@@ -145,8 +143,4 @@ export function stopHeartbeat(): void {
 
 export async function startHeartbeatIfAuthed(): Promise<void> {
   if (await isLoggedIn()) startHeartbeat();
-}
-
-export function getStatus(): { lastHeartbeatAt: string | null; running: boolean } {
-  return { lastHeartbeatAt, running: timer !== null };
 }

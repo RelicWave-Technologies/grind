@@ -2,10 +2,10 @@ import type { Response } from 'express';
 import { env } from '../env';
 
 /**
- * The dashboard's httpOnly access-token cookie. In production the dashboard
- * (Vercel) and API (Render) are different sites, so the cookie must be
- * `SameSite=None; Secure` to travel on the dashboard's credentialed fetches; in
- * dev they share localhost → `Lax`. One definition shared by every issuer
+ * The dashboard's httpOnly access-token cookie. In production the cookie is
+ * `SameSite=None; Secure` so it still travels on credentialed fetches if the
+ * dashboard and API are ever served from different sites; in dev they share
+ * localhost → `Lax`. One definition shared by every issuer
  * (dev-shim password login + Lark login) and the logout clear so the attributes
  * always match (a mismatch makes the browser refuse to clear the cookie).
  */

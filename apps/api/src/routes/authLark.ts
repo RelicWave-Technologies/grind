@@ -34,8 +34,7 @@ import { logger } from '../logger';
 /**
  * Lark OAuth LOGIN routes (distinct from the /v1/lark connect flow). Mounted
  * before requireAccessToken — /start and /callback are browser-facing and
- * unauthenticated; the session is issued by the callback. See
- * docs/auth-lark-plan.md §3.
+ * unauthenticated; the session is issued by the callback.
  */
 export const authLarkRouter = Router();
 

@@ -131,7 +131,3 @@ export async function getLatestAgentDownloadUrl(platform: AgentDownloadPlatform)
   const asset = pickLatestAgentAsset(await fetchReleases(), platform);
   return asset?.browser_download_url ?? null;
 }
-
-export function clearAgentDownloadCacheForTests(): void {
-  releaseCache = null;
-}

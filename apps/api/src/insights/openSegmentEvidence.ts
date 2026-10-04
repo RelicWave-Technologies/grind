@@ -98,16 +98,3 @@ export function resolveEffectiveEntrySegmentEnds(input: {
 
   return resolved;
 }
-
-/** Backward-compatible name while callers converge on the shared resolver. */
-export const cappedOpenEndedAt = resolveEffectiveSegmentEnd;
-
-export function openSegmentIsFresh(input: {
-  startedAt: Date;
-  endedAt: Date | null;
-  now: Date;
-  evidence?: EntryLiveEvidence | null;
-  lifecycle?: TimerLifecycleEvidence | null;
-}): boolean {
-  return input.endedAt === null && resolveEffectiveSegmentEnd(input) === null;
-}

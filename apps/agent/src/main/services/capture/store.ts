@@ -156,13 +156,6 @@ export class ScreenshotStore {
     return r ? mapRow(r) : null;
   }
 
-  countSince(sinceMs: number): number {
-    const r = this.db
-      .prepare(`SELECT COUNT(*) AS n FROM screenshots WHERE captured_at >= ?`)
-      .get(sinceMs) as { n: number };
-    return r.n;
-  }
-
 // eslint-disable-next-line no-restricted-syntax -- device<->device: compared against nextAttemptAt, written by this same store
 pending(limit: number, now = Date.now()): ScreenshotRow[] {
     const rows = this.db

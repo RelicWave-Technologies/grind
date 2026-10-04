@@ -1,6 +1,5 @@
 import { ipcMain, app, shell, dialog } from 'electron';
 import { screenStatus, hasAccessibilityAccess } from '../services/permissions';
-import { getActivityCaptureStatus, type ActivityCaptureStatus } from '../services/activity';
 import { getPreferences } from '../services/preferences';
 import { getLaunchAtLoginService } from '../services/launchAtLogin';
 import { applyFloatingBarVisibility, resetFloatingBarPosition } from '../floating';
@@ -99,19 +98,12 @@ export function registerSettingsIpc(): void {
     }
   });
 
-  // Accessibility (global keyboard/mouse counting via uiohook).
-  ipcMain.handle('permissions:accessibility', (): ActivityCaptureStatus => getActivityCaptureStatus());
-
   // Prompt the system to add this app to the Accessibility list, then deep-link.
   ipcMain.handle('permissions:requestAccessibility', async () => {
     hasAccessibilityAccess(true); // shows the macOS prompt / registers the app
     if (process.platform === 'darwin') {
       await shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility');
     }
-  });
-
-  ipcMain.handle('settings:openDataFolder', async () => {
-    await shell.openPath(app.getPath('userData'));
   });
 
   // Relaunch — required for a permission grant to take effect.

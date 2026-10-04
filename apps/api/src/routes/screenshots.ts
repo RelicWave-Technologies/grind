@@ -4,8 +4,6 @@ import { prisma } from '@grind/db';
 import {
   CompleteScreenshotUploadRequest,
   CompleteScreenshotUploadResponse,
-  PendingScreenshotUploadRequest,
-  PendingScreenshotUploadResponse,
   SignScreenshotUploadRequest,
   SignScreenshotUploadResponse,
 } from '@grind/types';
@@ -194,56 +192,6 @@ screenshotsRouter.post('/sign', validate(SignScreenshotUploadRequest, 'body'), a
       thumbTransform: signed.thumbTransform,
     };
     res.json(response);
-  } catch (err) {
-    next(err);
-  }
-});
-
-screenshotsRouter.post('/pending', validate(PendingScreenshotUploadRequest, 'body'), async (req, res, next) => {
-  try {
-    if (!req.user) return res.status(401).json({ error: 'unauthorized' });
-    const body = req.body as PendingScreenshotUploadRequest;
-    if (!(await canWriteScreenshot(req.user.sub, body.id))) {
-      return res.status(409).json({ error: 'screenshot_id_conflict' });
-    }
-    const timeEntryId = await validateOwnedTimeEntry(req.user.sub, body.timeEntryId ?? null);
-    if (timeEntryId === false) return res.status(400).json({ error: 'time_entry_out_of_scope' });
-
-    const row = await prisma.screenshot.upsert({
-      where: { id: body.id },
-      create: {
-        id: body.id,
-        userId: req.user.sub,
-        timeEntryId,
-        displayId: body.displayId ?? null,
-        capturedAt: new Date(body.capturedAt),
-        bytes: body.bytes ?? null,
-        width: body.width ?? null,
-        height: body.height ?? null,
-        blurred: body.blurred ?? false,
-        uploadState: 'PENDING',
-      },
-      update: {
-        userId: req.user.sub,
-        timeEntryId,
-        displayId: body.displayId ?? null,
-        capturedAt: new Date(body.capturedAt),
-        bytes: body.bytes ?? null,
-        width: body.width ?? null,
-        height: body.height ?? null,
-        blurred: body.blurred ?? false,
-        uploadState: 'PENDING',
-      },
-      select: { id: true },
-    });
-
-    const response: PendingScreenshotUploadResponse = {
-      id: row.id,
-      uploadState: 'PENDING',
-      uploadUrl: null,
-      uploadHeaders: {},
-    };
-    res.status(201).json(response);
   } catch (err) {
     next(err);
   }

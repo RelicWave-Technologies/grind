@@ -1,6 +1,5 @@
 import type { ServerLedgerEntry, TimeEntry } from '@grind/core';
 import type { TimerSyncReceipt } from '@grind/types';
-import type { TrackingReadiness } from '../../../shared/tracking';
 
 export type EntrySyncState = 'pending_create' | 'pending_update' | 'synced';
 export type PendingEntrySyncState = Exclude<EntrySyncState, 'synced'>;
@@ -75,11 +74,6 @@ export interface TrackingAccrualGuard {
 
 export interface BusinessDayProvider {
   window(now: number): { start: number; end: number } | null;
-}
-
-export interface TrackingBlockedErrorLike extends Error {
-  code: 'TRACKING_PERMISSIONS_REQUIRED';
-  readiness: TrackingReadiness;
 }
 
 /**

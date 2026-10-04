@@ -467,7 +467,6 @@ app.whenReady().then(async () => {
   ipcMain.handle('shift:decide', (_e, decision: 'yes' | 'not_yet') => {
     shiftMonitor.onUserDecision(decision);
   });
-  ipcMain.handle('shift:refresh', () => shiftMonitor.refreshShift());
   ipcMain.handle('shift:today', async () => {
     await shiftMonitor.refreshShift();
     return shiftMonitor.todayWindow();

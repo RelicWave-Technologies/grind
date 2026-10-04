@@ -1,5 +1,5 @@
 import { ipcMain } from 'electron';
-import { login, logout, isLoggedIn, startLarkLogin, ensureSession } from '../services/auth';
+import { logout, isLoggedIn, startLarkLogin, ensureSession } from '../services/auth';
 import { onAuthChange, api } from '../services/apiClient';
 import { startHeartbeat, stopHeartbeat } from '../services/heartbeat';
 import { broadcast } from '../broadcast';
@@ -29,17 +29,6 @@ async function fetchImageAsDataUrl(url: string): Promise<string | null> {
 }
 
 export function registerAuthIpc(): void {
-  ipcMain.handle('auth:login', async (_e, payload: { email: string; password: string }) => {
-    const user = await login(payload.email, payload.password);
-    await bindTimerToStoredSession(false);
-    await drainTimerSyncNow('auth');
-    await refreshAgentConfig();
-    void refreshTodayLedger('auth');
-    startHeartbeat();
-    broadcast('auth:status:push', 'loggedIn');
-    return user;
-  });
-
   // Start the Lark login flow: opens the system browser. The custom deep-link
   // (handled in services/deepLink) completes it and broadcasts the outcome.
   ipcMain.handle('auth:loginWithLark', async () => {
