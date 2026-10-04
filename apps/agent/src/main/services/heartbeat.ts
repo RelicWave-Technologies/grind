@@ -1,9 +1,10 @@
 import { app } from 'electron';
+import { release } from 'node:os';
 import type { DesktopPermissionSnapshot, HeartbeatResponse } from '@grind/types';
 import { AGENT_VERSION, HEARTBEAT_INTERVAL_MS } from '../env';
 import { log } from '../logger';
 import { hasDeferredServerClockCorrection, noteServerTime, serverAlignedNow, serverClockOffsetMs } from './serverClock';
-import { api, UnauthorizedError } from './apiClient';
+import { api } from './apiClient';
 import { isLoggedIn } from './auth';
 import { drainActivityNow } from './activity';
 import { drainTimerSyncNow, getTimerService } from './timer';
@@ -58,9 +59,25 @@ function requestAgentConfigRefresh(serverVersion: string): void {
     .catch((err) => log.warn('heartbeat config refresh trigger failed', { err: String(err) }));
 }
 
+function currentDiagnostics() {
+  const backlog = getTimerService().syncBacklog();
+  return {
+    // getSystemVersion is Electron's (macOS "12.7.6"); plain Node has only the kernel release.
+    osVersion: typeof process.getSystemVersion === 'function' ? process.getSystemVersion() : release(),
+    arch: process.arch,
+    syncPending: backlog.pending,
+    syncOldestPendingAt: backlog.oldestPendingAt === null ? null : new Date(backlog.oldestPendingAt).toISOString(),
+    syncLastError: backlog.lastError,
+  };
+}
+
+/**
+ * One liveness report. It never waits on the sync drain: the server renews the
+ * lease from this alone, so a slow backlog can no longer let a running timer's
+ * lease lapse. The drain is kicked afterwards and runs on its own.
+ */
 async function tick(): Promise<void> {
   try {
-    await drainTimerSyncNow('heartbeat');
     const timerService = getTimerService();
     const timerStatus = timerService.status();
     if (timerStatus.state === 'RUNNING' && !timerStatus.paused) timerService.heartbeat();
@@ -71,10 +88,11 @@ async function tick(): Promise<void> {
       observedAt: serverAlignedNow(),
       permissions: await currentPermissionSnapshot(),
       startup: currentStartupSnapshot(),
+      diagnostics: currentDiagnostics(),
     });
     // eslint-disable-next-line no-restricted-syntax -- device<->device: RTT halves, and this is what teaches the server clock its offset
     const requestStartedAt = Date.now();
-    const res = await api<HeartbeatResponse>('/v1/agent/heartbeat', { method: 'POST', body });
+    const res = await api<HeartbeatResponse>('/v1/agent/heartbeat', { method: 'POST', body, timeoutMs: 15_000 });
     // Keep the timer's clock in the server's frame. Without this, a laptop more
     // than the server's 2-minute skew tolerance fast has every uploaded
     // timestamp clamped — and clamped segments whose start and end collapse
@@ -95,28 +113,31 @@ async function tick(): Promise<void> {
       });
     }
     log.debug('heartbeat ok', { serverTime: res.serverTime, configVersion: res.configVersion });
-    if (res.timer?.disposition === 'needs_sync') requestTimerDrain('heartbeat');
-    if (res.timer?.disposition === 'finalized' || res.timer?.disposition === 'conflict') {
+    const checkpoint = res.timer;
+    const closedForSilence = checkpoint?.closeReason === 'LEASE_EXPIRED' || checkpoint?.closeReason === 'SUPERSEDED';
+    if (checkpoint?.disposition === 'needs_sync' || (checkpoint?.disposition === 'finalized' && closedForSilence)) {
+      // Missing, behind, or closed because the server stopped hearing from us:
+      // local is the truth, so send it rather than giving up the time.
+      await timerService.resyncFromServer(checkpoint.entryId, checkpoint.serverRevision);
+    } else if ((checkpoint?.disposition === 'finalized' || checkpoint?.disposition === 'conflict') && checkpoint.endedAt) {
+      // Another live timer owns this user (a second device), or the entry was
+      // already closed on purpose: stop visibly at the server's boundary.
       log.warn('server rejected active timer checkpoint', {
-        entryId: res.timer.entryId,
-        disposition: res.timer.disposition,
-        endedAt: res.timer.endedAt,
-        closeReason: res.timer.closeReason,
+        entryId: checkpoint.entryId,
+        disposition: checkpoint.disposition,
+        endedAt: checkpoint.endedAt,
+        closeReason: checkpoint.closeReason,
       });
-      if (res.timer.endedAt) {
-        const status = getTimerService().acceptServerFinalization(res.timer.entryId, new Date(res.timer.endedAt).getTime());
-        broadcast('timer:status:push', status);
-      }
+      const status = timerService.acceptServerFinalization(checkpoint.entryId, new Date(checkpoint.endedAt).getTime());
+      broadcast('timer:status:push', status);
     }
     requestAgentConfigRefresh(res.configVersion);
+    requestTimerDrain('heartbeat');
     requestActivityDrain('heartbeat');
   } catch (err: unknown) {
-    if (err instanceof UnauthorizedError) {
-      log.warn('heartbeat unauthorized; stopping');
-      stopHeartbeat();
-    } else {
-      log.warn('heartbeat failed', { err: String(err) });
-    }
+    // Keep ticking through every failure, including a token read that failed
+    // once. A real sign-out stops the heartbeat through the auth listener.
+    log.warn('heartbeat failed', { err: String(err) });
   }
 }
 

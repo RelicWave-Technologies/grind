@@ -21,6 +21,7 @@ import type {
   IdGen,
   PendingEntrySyncState,
   StartArgs,
+  SyncBacklog,
   SyncClient,
   TrackingAccrualGuard,
   TimerAwayReason,
@@ -43,6 +44,14 @@ import type {
 // One awaited round-trip per entry, so a pass must stay short enough that the
 // app is never wedged behind it. The drain re-runs until the backlog is empty.
 const FLUSH_BATCH_LIMIT = 25;
+
+/** Wait after the Nth consecutive failure: 30s, 1m, 2m, 4m, 8m, then 15m. */
+export function syncRetryDelayMs(failures: number): number {
+  return Math.min(15 * 60_000, 30_000 * 2 ** Math.max(0, failures - 1));
+}
+
+/** How far back the one-time beta.38 resync looks for server-truncated entries. */
+const RESYNC_LOOKBACK_MS = 30 * 24 * 60 * 60_000;
 
 /** Backstop only — correctness comes from `ledgerEpoch`, not from this. */
 const LEDGER_MEMO_TTL_MS = 10_000;
@@ -198,8 +207,9 @@ export class TimerService {
       const [closedState, nextState] = this.store.switchEntry(closed, next);
       this.open = next;
       this.notifyMutation();
-      this.syncInBackground(closed, closedState);
-      this.syncInBackground(next, nextState);
+      // In order: while the old entry is still open on the server, creating
+      // the new one is refused as a second live timer.
+      this.syncInBackground([closed, closedState], [next, nextState]);
       return this.status();
     }
     const entry = this.createEntry(nextTaskGuid, now);
@@ -245,7 +255,7 @@ export class TimerService {
     this.store.setRecoveryNotice(this.awayNotice(reason, closed.id, closeAt));
     this.store.clearAwayState();
     this.notifyMutation();
-    this.syncInBackground(closed, nextState);
+    this.syncInBackground([closed, nextState]);
     return this.status();
   }
 
@@ -415,9 +425,32 @@ export class TimerService {
     this.store.clearRecoveryNotice();
   }
 
-  /** Accept an authoritative non-recoverable server finalization and stop the
-   * local timer visibly. Lease-expired entries use normal sync reconciliation
-   * instead and never call this path. */
+  /**
+   * The server's copy of the open entry is missing, behind, or was closed by
+   * the server because it stopped hearing from us. Local is the truth: push it.
+   * A server close can only be overridden by a newer revision, so when the
+   * server already holds ours, bump it.
+   */
+  async resyncFromServer(entryId: string, serverRevision: number | null): Promise<void> {
+    const open = this.open;
+    if (!open || open.id !== entryId) return;
+    if (serverRevision === null) {
+      this.store.requeue(entryId, 'pending_create');
+      return;
+    }
+    if (serverRevision >= open.revision) {
+      await this.commitOpen({ ...open, revision: serverRevision + 1 });
+      return;
+    }
+    this.store.requeue(entryId, 'pending_update');
+  }
+
+  /**
+   * The server will not take this entry back — another live timer owns the
+   * user (a second device), or it was closed on purpose — so stop visibly at
+   * the server's boundary. A close for silence goes through resyncFromServer
+   * instead and loses nothing.
+   */
   acceptServerFinalization(entryId: string, endedAt: number): TimerStatus {
     if (!this.open || this.open.id !== entryId) return this.status();
     const boundary = Math.max(this.open.startedAt, endedAt);
@@ -464,7 +497,7 @@ export class TimerService {
       await Promise.allSettled([...this.backgroundSyncs]);
     }
     let flushed = 0;
-    for (const { entry, syncState } of this.store.getUnsynced()) {
+    for (const { entry, syncState, attempts } of this.store.getUnsynced(this.clock.now())) {
       // Hitting the batch limit is the ONLY reason to ask for another pass.
       //
       // This used to end with `return this.store.hasUnsynced()`, which is a
@@ -479,7 +512,7 @@ export class TimerService {
       // would not take it, or because it is the live entry. Neither is fixed by
       // retrying immediately; the interval will come back for it.
       if (flushed >= limit) return true;
-      await this.trySync(entry, syncState);
+      await this.trySync(entry, syncState, attempts);
       flushed += 1;
     }
     return false;
@@ -487,6 +520,34 @@ export class TimerService {
 
   hasUnsynced(): boolean {
     return this.store.hasUnsynced();
+  }
+
+  syncBacklog(): SyncBacklog {
+    return this.store.syncBacklog();
+  }
+
+  /**
+   * One-time repair for agents before beta.38. They accepted a server close
+   * for silence as final, so a closed entry can sit "synced" locally while the
+   * server holds a shorter copy. Re-send every recent closed entry whose local
+   * copy no longer matches what the server acknowledged; the server applies a
+   * newer revision over its own close. Entries this agent closed by recovery
+   * are skipped: their local end is a guess that may be shorter than the
+   * server's proven one.
+   */
+  resyncTruncatedOnce(): number {
+    if (!this.store.markOnce('resync_server_truncated_v38')) return 0;
+    let resent = 0;
+    const since = this.clock.now() - RESYNC_LOOKBACK_MS;
+    for (const row of this.store.listLedgerEntries(since)) {
+      const { entry } = row;
+      if (row.syncState !== 'synced' || entry.endedAt === null || entry.source !== 'AUTO') continue;
+      if (entry.closeReason !== 'AGENT') continue;
+      if (row.acknowledgedHash !== null && row.acknowledgedHash === this.hashWithTask(entry, entry.larkTaskGuid ?? null)) continue;
+      this.writeEntry({ ...entry, revision: Math.max(entry.revision, row.acknowledgedRevision ?? 0) + 1 });
+      resent += 1;
+    }
+    return resent;
   }
 
   /** Activity linked to this entry must wait until its server parent exists. */
@@ -498,55 +559,65 @@ export class TimerService {
     const nextState = this.writeEntry(entry, syncState ? { syncState } : undefined);
     this.open = entry;
     this.notifyMutation();
-    this.syncInBackground(entry, nextState);
+    this.syncInBackground([entry, nextState]);
   }
 
   private async commitClosed(entry: TimeEntry): Promise<void> {
     const nextState = this.writeEntry(entry);
     this.open = null;
     this.notifyMutation();
-    this.syncInBackground(entry, nextState);
+    this.syncInBackground([entry, nextState]);
   }
 
-  private syncInBackground(entry: TimeEntry, syncState: PendingEntrySyncState): void {
-    const pending = this.trySync(entry, syncState).catch(() => {
-      // The durable row stays pending and the drain retries it later.
-    }).finally(() => {
+  /** Push now, in order, without making the caller wait on the network. */
+  private syncInBackground(...items: Array<[TimeEntry, PendingEntrySyncState]>): void {
+    const pending = (async () => {
+      for (const [entry, syncState] of items) await this.trySync(entry, syncState, 0);
+    })().finally(() => {
       this.backgroundSyncs.delete(pending);
     });
     this.backgroundSyncs.add(pending);
   }
 
-  private async trySync(entry: TimeEntry, syncState: PendingEntrySyncState): Promise<void> {
-    if (syncState === 'pending_create') {
-      await this.tryCreateThenSync(entry);
-      return;
-    }
-    await this.tryUpdate(entry, true);
-  }
-
-  private async tryCreateThenSync(entry: TimeEntry): Promise<void> {
+  /**
+   * One push attempt. Never throws: a row the server did not acknowledge is
+   * recorded with its error and held back for a while, so the drain moves on
+   * to the rest and support can see why it is stuck.
+   */
+  private async trySync(entry: TimeEntry, syncState: PendingEntrySyncState, attempts: number): Promise<void> {
+    let error: string | null;
     try {
-      const receipt = await this.sync.create(entry);
-      if (this.acknowledge(entry, receipt)) return;
-      if (!this.markEntryCreated(entry.id, entry)) return;
-    } catch {
-      // Best-effort: leave it pending_create; flushUnsynced will retry later.
-      return;
-    }
-    await this.tryUpdate(entry, false);
-  }
-
-  private async tryUpdate(entry: TimeEntry, retryCreateOnNotFound: boolean): Promise<void> {
-    try {
-      const receipt = await this.sync.sync(entry);
-      this.acknowledge(entry, receipt);
+      const settled = syncState === 'pending_create'
+        ? await this.createThenUpdate(entry)
+        : await this.update(entry, true);
+      error = settled ? null : 'unacknowledged_receipt';
     } catch (err) {
-      if (retryCreateOnNotFound && isNotFound(err)) {
-        if (!this.markEntryPendingCreate(entry.id, entry)) return;
-        await this.tryCreateThenSync(entry);
-      }
-      // Otherwise best-effort: leave its current pending state for a later flush.
+      error = describeSyncError(err);
+    }
+    if (error === null) return;
+    try {
+      this.store.noteSyncFailure(entry.id, error, this.clock.now() + syncRetryDelayMs(attempts + 1));
+    } catch {
+      // Bookkeeping only; the row stays pending either way.
+    }
+  }
+
+  /** @returns false when the server answered but did not acknowledge this snapshot. */
+  private async createThenUpdate(entry: TimeEntry): Promise<boolean> {
+    const receipt = await this.sync.create(entry);
+    if (this.acknowledge(entry, receipt)) return true;
+    // A newer local write replaced this snapshot; that write pushes itself.
+    if (!this.markEntryCreated(entry.id, entry)) return true;
+    return this.update(entry, false);
+  }
+
+  private async update(entry: TimeEntry, retryCreateOnNotFound: boolean): Promise<boolean> {
+    try {
+      return this.acknowledge(entry, await this.sync.sync(entry));
+    } catch (err) {
+      if (!retryCreateOnNotFound || !isNotFound(err)) throw err;
+      if (!this.markEntryPendingCreate(entry.id, entry)) return true;
+      return this.createThenUpdate(entry);
     }
   }
 
@@ -583,9 +654,29 @@ export class TimerService {
     });
   }
 
+  /**
+   * @returns true when this snapshot is settled: acknowledged, or superseded
+   * by a newer local write that will push itself.
+   */
   private acknowledge(entry: TimeEntry, receipt: TimerSyncReceipt): boolean {
-    const localHash = createHash('sha256').update(canonicalTimerEntryPayload(entry)).digest('hex');
+    // Task attribution can be edited on the dashboard and is never pushed, so
+    // compare against the server's — it is metadata, not tracked time.
+    const localHash = this.hashWithTask(entry, receipt.canonicalEntry.larkTaskGuid);
     const exact = receipt.acceptedRevision === entry.revision && receipt.canonicalHash === localHash;
+    if (!exact && receipt.disposition === 'FINALIZED' && isServerClosedForSilence(receipt)) {
+      // The server closed this entry because it stopped hearing from us and
+      // never learned the real end. Accepting that would lose the difference
+      // for good. Re-send with a newer revision, which the server applies over
+      // its own close; if it already refused a newer one, back off instead.
+      if (entry.revision > receipt.acceptedRevision) return false;
+      // Only from the snapshot we hold; a newer local write pushes itself.
+      const isOpen = this.open?.id === entry.id;
+      if (isOpen && JSON.stringify(this.open) !== JSON.stringify(entry)) return true;
+      const resent = { ...entry, revision: receipt.acceptedRevision + 1 };
+      this.writeEntry(resent);
+      if (isOpen) this.open = resent;
+      return true;
+    }
     const corrected = receipt.acceptedRevision >= entry.revision
       && (receipt.correction !== null || receipt.disposition === 'FINALIZED' || receipt.disposition === 'STALE');
     if (!exact && !corrected) return false;
@@ -603,6 +694,10 @@ export class TimerService {
       });
     }
     return marked;
+  }
+
+  private hashWithTask(entry: TimeEntry, larkTaskGuid: string | null): string {
+    return createHash('sha256').update(canonicalTimerEntryPayload({ ...entry, larkTaskGuid })).digest('hex');
   }
 
   private notifyMutation(): void {
@@ -753,4 +848,24 @@ function safeCloseAt(entry: TimeEntry, at: number): number {
 
 function isNotFound(err: unknown): boolean {
   return err instanceof HttpError && err.status === 404;
+}
+
+function isServerClosedForSilence(receipt: TimerSyncReceipt): boolean {
+  const reason = receipt.canonicalEntry.closeReason;
+  return reason === 'LEASE_EXPIRED' || reason === 'SUPERSEDED';
+}
+
+/** Short, stable reason for the heartbeat diagnostics, e.g. `http_409:timer_conflict`. */
+function describeSyncError(err: unknown): string {
+  if (err instanceof HttpError) {
+    let code = '';
+    try {
+      const body = JSON.parse(err.body) as { error?: unknown };
+      if (typeof body.error === 'string') code = `:${body.error}`;
+    } catch {
+      // Not JSON; the status alone still says enough.
+    }
+    return `http_${err.status}${code}`;
+  }
+  return err instanceof Error ? `${err.name}:${err.message}`.slice(0, 200) : 'unknown_error';
 }

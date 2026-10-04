@@ -74,12 +74,6 @@ export class TodayLedgerHydrator {
       || this.deps.timer.currentOwner()?.workspaceId !== owner.workspaceId
     ) return;
 
-    try {
-      await this.deps.timer.flushUnsynced();
-    } catch (err) {
-      this.deps.log.debug('today ledger continuing with pending local rows', { reason, err: String(err) });
-    }
-
     const query = new URLSearchParams({
       from: new Date(window.start).toISOString(),
       to: new Date(window.end).toISOString(),

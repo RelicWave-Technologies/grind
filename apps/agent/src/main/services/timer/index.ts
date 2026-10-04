@@ -122,6 +122,8 @@ export async function initTimerOnBoot(): Promise<void> {
       reason: recovered.notice.reason,
     });
   }
+  const resent = svc.resyncTruncatedOnce();
+  if (resent > 0) log.info('re-sending entries the server had cut short', { resent });
 }
 
 export async function bindTimerToStoredSession(claimLegacy = false): Promise<boolean> {

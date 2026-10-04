@@ -41,6 +41,15 @@ export interface TimerRecoveryResult {
 export interface UnsyncedEntry {
   entry: TimeEntry;
   syncState: PendingEntrySyncState;
+  /** Consecutive failed pushes since the row last changed or synced. */
+  attempts: number;
+}
+
+/** What is still waiting on this machine, for the heartbeat's diagnostics. */
+export interface SyncBacklog {
+  pending: number;
+  oldestPendingAt: number | null;
+  lastError: string | null;
 }
 
 export interface TimerOwner {
@@ -97,8 +106,15 @@ export interface EntryStore {
   switchEntry(closed: TimeEntry, next: TimeEntry): [PendingEntrySyncState, PendingEntrySyncState];
   /** The currently-open entry (endedAt === null), if any. */
   getOpen(): TimeEntry | null;
-  /** Entries that still need to be pushed to the server. */
-  getUnsynced(): UnsyncedEntry[];
+  /**
+   * Entries due a push at `now`, the open entry first and then oldest first.
+   * Rows backing off after a failure are left out until their retry time, so
+   * one entry the server keeps refusing can never starve the rest.
+   */
+  getUnsynced(now: number): UnsyncedEntry[];
+  /** Count the failure and hold the row back until `retryAt`. */
+  noteSyncFailure(entryId: string, error: string, retryAt: number): void;
+  syncBacklog(): SyncBacklog;
   hasUnsynced(): boolean;
   /** True until the entry has been created successfully on the server. */
   isPendingCreate(entryId: string): boolean;
@@ -109,6 +125,11 @@ export interface EntryStore {
   listLedgerEntries(since: number): LocalLedgerEntry[];
   /** Mark this exact snapshot as created remotely; stale responses cannot dirty newer JSON. */
   markCreated(entryId: string, expectedEntry: TimeEntry): boolean;
+  /**
+   * Push this entry again now, whatever its state or backoff — the server told
+   * us its copy is missing or behind. Never demotes a pending create.
+   */
+  requeue(entryId: string, syncState: PendingEntrySyncState): boolean;
   /** Mark this exact snapshot as requiring a create retry. */
   markPendingCreate(entryId: string, expectedEntry: TimeEntry): boolean;
   /**
@@ -135,6 +156,8 @@ export interface EntryStore {
   setAwayState(state: TimerAwayState): void;
   getAwayState(): TimerAwayState | null;
   clearAwayState(): void;
+  /** True the first time `key` is marked for the bound owner, false after. */
+  markOnce(key: string): boolean;
   setRecoveryNotice(notice: TimerRecoveryNotice): void;
   getRecoveryNotice(): TimerRecoveryNotice | null;
   clearRecoveryNotice(): void;

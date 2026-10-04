@@ -5,7 +5,7 @@ import { canonicalTimerEntryPayload } from '@grind/core';
 import { createHash } from 'node:crypto';
 import { dateKeyInTimeZone, localDayWindowInTimeZone, type TimerSyncReceipt } from '@grind/types';
 import { HttpError } from '../apiClient';
-import { TimerService } from './timerService';
+import { syncRetryDelayMs, TimerService } from './timerService';
 import { TrackingBlockedError } from '../trackingReadiness';
 import type {
   Clock,
@@ -23,6 +23,9 @@ import type {
 
 const T0 = 1_700_000_000_000;
 const MIN = 60_000;
+
+/** Let background pushes (which now run in order) finish. */
+const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 class FakeClock implements Clock {
   constructor(public t = T0) {}
@@ -47,6 +50,8 @@ class MemStore implements EntryStore {
   failNextUpsert = false;
   entries = new Map<string, TimeEntry>();
   syncStates = new Map<string, EntrySyncState>();
+  failures = new Map<string, { attempts: number; retryAt: number; error: string }>();
+  onceKeys = new Set<string>();
   bindOwner(owner: TimerOwner | null) { this.owner = owner; }
   currentOwner() { return this.owner; }
   claimUnownedEntries() { return 0; }
@@ -60,6 +65,7 @@ class MemStore implements EntryStore {
     const nextState = opts?.syncState ?? (existing === 'pending_create' ? 'pending_create' : existing ? 'pending_update' : 'pending_create');
     this.entries.set(e.id, structuredClone(e));
     this.syncStates.set(e.id, nextState);
+    this.failures.delete(e.id);
     return nextState;
   }
   switchEntry(closed: TimeEntry, next: TimeEntry): [PendingEntrySyncState, PendingEntrySyncState] {
@@ -73,10 +79,39 @@ class MemStore implements EntryStore {
     for (const e of this.entries.values()) if (e.endedAt === null) return structuredClone(e);
     return null;
   }
-  getUnsynced(): UnsyncedEntry[] {
+  getUnsynced(now = Number.MAX_SAFE_INTEGER): UnsyncedEntry[] {
     return [...this.entries.values()]
-      .map((e) => ({ entry: structuredClone(e), syncState: this.syncStates.get(e.id) ?? 'pending_create' }))
-      .filter((r): r is UnsyncedEntry => r.syncState === 'pending_create' || r.syncState === 'pending_update');
+      .map((e) => ({
+        entry: structuredClone(e),
+        syncState: this.syncStates.get(e.id) ?? 'pending_create',
+        attempts: this.failures.get(e.id)?.attempts ?? 0,
+      }))
+      .filter((r): r is UnsyncedEntry => r.syncState === 'pending_create' || r.syncState === 'pending_update')
+      .filter((r) => (this.failures.get(r.entry.id)?.retryAt ?? 0) <= now)
+      .sort((a, b) => Number(b.entry.endedAt === null) - Number(a.entry.endedAt === null));
+  }
+  noteSyncFailure(id: string, error: string, retryAt: number) {
+    if (this.syncStates.get(id) === 'synced') return;
+    this.failures.set(id, { attempts: (this.failures.get(id)?.attempts ?? 0) + 1, retryAt, error });
+  }
+  syncBacklog() {
+    const pending = this.getUnsynced();
+    return {
+      pending: pending.length,
+      oldestPendingAt: pending.length ? Math.min(...pending.map((r) => r.entry.startedAt)) : null,
+      lastError: [...this.failures.values()].at(-1)?.error ?? null,
+    };
+  }
+  requeue(id: string, syncState: PendingEntrySyncState) {
+    if (!this.entries.has(id)) return false;
+    if (this.syncStates.get(id) !== 'pending_create') this.syncStates.set(id, syncState);
+    this.failures.delete(id);
+    return true;
+  }
+  markOnce(key: string) {
+    if (this.onceKeys.has(key)) return false;
+    this.onceKeys.add(key);
+    return true;
   }
   hasUnsynced() { return this.getUnsynced().length > 0; }
   isPendingCreate(id: string) {
@@ -97,8 +132,8 @@ class MemStore implements EntryStore {
     return this.listSince(since).map((entry) => ({
       entry,
       syncState: this.syncStates.get(entry.id) ?? 'pending_create',
-      acknowledgedRevision: null,
-      acknowledgedHash: null,
+      acknowledgedRevision: this.acks.get(entry.id)?.revision ?? null,
+      acknowledgedHash: this.acks.get(entry.id)?.hash ?? null,
     }));
   }
   markCreated(id: string, expectedEntry: TimeEntry) {
@@ -114,10 +149,13 @@ class MemStore implements EntryStore {
     this.syncStates.set(id, 'pending_create');
     return true;
   }
-  markSynced(id: string, expectedEntry: TimeEntry) {
+  acks = new Map<string, { revision: number; hash: string }>();
+  markSynced(id: string, expectedEntry: TimeEntry, ack: { revision: number; hash: string }) {
     const current = this.entries.get(id);
     if (!current || JSON.stringify(current) !== JSON.stringify(expectedEntry)) return false;
     this.syncStates.set(id, 'synced');
+    this.failures.delete(id);
+    this.acks.set(id, ack);
     return true;
   }
   liveness: number | null = null;
@@ -340,6 +378,8 @@ describe('TimerService.start', () => {
     expect(newEntry.endedAt).toBeNull();
     expect(newEntry.startedAt).toBe(T0 + 10 * MIN);
     expect(store.getOpen()?.larkTaskGuid).toBe('task-b');
+    await settle();
+    expect(sync.calls.indexOf(`sync:${oldEntry.id}`)).toBeLessThan(sync.calls.indexOf(`create:${newEntry.id}`));
     expect(sync.creates).toEqual([oldEntry.id, newEntry.id]);
     expect(sync.syncs).toEqual([oldEntry.id, oldEntry.id, newEntry.id]);
   });
@@ -620,9 +660,10 @@ describe('TimerService offline behaviour', () => {
     await svc.start({});
     expect(svc.isRunning()).toBe(true); // timer unaffected by network
     expect(sync.creates).toHaveLength(0);
-    expect(store.getUnsynced()).toMatchObject([{ syncState: 'pending_create' }]);
+    expect(store.getUnsynced()).toMatchObject([{ syncState: 'pending_create', attempts: 1 }]);
 
-    // Network recovers; flush retries.
+    // Network recovers; flush retries once the backoff has passed.
+    clock.advance(MIN);
     await svc.flushUnsynced();
     expect(sync.creates).toHaveLength(1);
     expect(sync.syncs).toHaveLength(1);
@@ -653,6 +694,7 @@ describe('TimerService offline behaviour', () => {
     sync.failCreateCount = 1;
     await svc.start({});
     expect(store.getUnsynced()).toHaveLength(1);
+    clock.advance(MIN);
 
     expect(await svc.flushUnsynced(10)).toBe(false);
     expect(store.getUnsynced()).toHaveLength(0);
@@ -681,6 +723,7 @@ describe('TimerService offline behaviour', () => {
     expect(entry.endedAt).toBe(T0 + 10 * MIN);
     expect(store.getUnsynced()).toMatchObject([{ syncState: 'pending_create' }]);
 
+    clock.advance(MIN);
     await svc.flushUnsynced();
 
     expect(sync.calls).toEqual([`create:${entry.id}`, `sync:${entry.id}`]);
@@ -707,12 +750,14 @@ describe('TimerService offline behaviour', () => {
     expect(store.getUnsynced()).toMatchObject([{ syncState: 'pending_create' }]);
 
     sync.failSyncCount = 1;
+    clock.advance(MIN);
     await svc.flushUnsynced();
 
     expect(sync.creates).toHaveLength(1);
     expect(sync.syncs).toHaveLength(0);
     expect(store.getUnsynced()).toMatchObject([{ syncState: 'pending_update' }]);
 
+    clock.advance(5 * MIN);
     await svc.flushUnsynced();
     expect(sync.syncs).toHaveLength(1);
     expect(store.getUnsynced()).toHaveLength(0);
@@ -761,6 +806,7 @@ describe('TimerService offline behaviour', () => {
       return result;
     };
 
+    clock.advance(MIN);
     await svc.flushUnsynced();
 
     expect(sync.creates).toHaveLength(1);
@@ -1400,3 +1446,146 @@ describe('TimerService — ledger memo must not change worked time', () => {
     expect(store.ledgerReads).toBeGreaterThan(before);
   });
 });
+
+describe('sync that converges (beta.38)', () => {
+  /** What the server holds after an upload: ISO strings, so whole milliseconds. */
+  function serverCopy(entry: TimeEntry): TimeEntry {
+    const ms = (value: number) => new Date(new Date(value).toISOString()).getTime();
+    return {
+      ...entry,
+      startedAt: ms(entry.startedAt),
+      endedAt: entry.endedAt === null ? null : ms(entry.endedAt),
+      segments: entry.segments.map((segment) => ({
+        ...segment,
+        startedAt: ms(segment.startedAt),
+        endedAt: segment.endedAt === null ? null : ms(segment.endedAt),
+      })),
+    };
+  }
+
+  it('acknowledges a row stamped with fractional milliseconds', async () => {
+    const fractional = closeTimeEntry(createOpenEntry(T0 + 0.37), T0 + 10 * MIN + 0.5);
+    store.upsert(fractional, { syncState: 'pending_update' });
+    sync.sync = async (e) => receipt(serverCopy(e), { disposition: 'ALREADY_APPLIED' });
+
+    await svc.flushUnsynced();
+
+    expect(store.getUnsynced()).toHaveLength(0);
+  });
+
+  it('pushes the open entry before a backlog the server keeps refusing', async () => {
+    for (let i = 0; i < 30; i += 1) {
+      store.upsert(closeTimeEntry(createOpenEntry(T0 - (40 - i) * MIN, `old_${i}`), T0 - (39 - i) * MIN), { syncState: 'pending_update' });
+    }
+    sync.sync = async (e) => {
+      sync.calls.push(`sync:${e.id}`);
+      throw new HttpError(`/v1/time-entries/${e.id}/sync`, 400, '{"error":"invalid_segments"}');
+    };
+    sync.failCreateCount = 1;
+    await svc.start({});
+    const open = store.getOpen()!;
+    clock.advance(MIN);
+
+    await svc.flushUnsynced(25);
+
+    expect(sync.creates).toEqual([open.id]);
+    expect(store.syncBacklog()).toMatchObject({ lastError: 'http_400:invalid_segments' });
+    // The 24 old rows refused in that pass now wait; the next pass reaches the
+    // 6 it never got to instead of spending itself on them again.
+    const before = sync.calls.length;
+    await svc.flushUnsynced(25);
+    expect(sync.calls.length - before).toBe(6);
+  });
+
+  it('backs off 30s, 1m, 2m … up to 15 minutes', () => {
+    expect([1, 2, 3, 4, 5, 6, 12].map(syncRetryDelayMs)).toEqual([
+      30_000, 60_000, 120_000, 240_000, 480_000, 900_000, 900_000,
+    ]);
+  });
+
+  it('re-sends instead of accepting a server close for silence that cut time off', async () => {
+    await svc.start({});
+    clock.advance(30 * MIN);
+    await svc.stop();
+    const local = store.entries.values().next().value!;
+    const cut = { ...local, endedAt: T0 + 5 * MIN };
+    const finalized = receipt(cut, {
+      disposition: 'FINALIZED',
+      correction: 'LEASE_FINALIZED',
+      acceptedRevision: local.revision,
+    });
+    finalized.canonicalEntry.closeReason = 'LEASE_EXPIRED';
+    const applied: number[] = [];
+    sync.sync = async (e) => {
+      applied.push(e.revision);
+      return e.revision > local.revision ? receipt(e) : finalized;
+    };
+    store.requeue(local.id, 'pending_update');
+
+    await svc.flushUnsynced();
+    await svc.flushUnsynced();
+
+    expect(applied).toEqual([local.revision, local.revision + 1]);
+    expect(store.entries.get(local.id)!.endedAt).toBe(T0 + 30 * MIN);
+    expect(store.getUnsynced()).toHaveLength(0);
+  });
+
+  it('acknowledges an entry whose task was re-attributed on the dashboard', async () => {
+    sync.sync = async (e) => {
+      const edited = receipt({ ...e, larkTaskGuid: 'task-from-dashboard' });
+      return edited;
+    };
+    await svc.start({ larkTaskGuid: 'task-a' });
+    clock.advance(MIN);
+    await svc.stop();
+    await settle();
+
+    expect(store.getUnsynced()).toHaveLength(0);
+  });
+
+  it('pushes the open entry again when the server says its copy is missing or behind', async () => {
+    await svc.start({});
+    await settle();
+    const open = store.getOpen()!;
+    expect(store.getUnsynced()).toHaveLength(0);
+
+    await svc.resyncFromServer(open.id, null);
+    expect(store.getUnsynced()).toMatchObject([{ syncState: 'pending_create' }]);
+
+    store.markSynced(open.id, store.getOpen()!, { revision: open.revision, hash: 'x' });
+    await svc.resyncFromServer(open.id, open.revision);
+    await settle();
+    expect(store.getOpen()!.revision).toBe(open.revision + 1);
+  });
+
+  it('re-sends recent entries the server had cut short, once', async () => {
+    await svc.start({});
+    clock.advance(20 * MIN);
+    await svc.stop();
+    await settle();
+    const entry = store.entries.values().next().value!;
+    // A pre-beta.38 agent accepted the server's shorter copy as final.
+    store.acks.set(entry.id, { revision: entry.revision, hash: 'server-copy-was-shorter' });
+
+    expect(svc.resyncTruncatedOnce()).toBe(1);
+    expect(store.getUnsynced()).toMatchObject([{ entry: { id: entry.id, revision: entry.revision + 1 } }]);
+    expect(svc.resyncTruncatedOnce()).toBe(0);
+  });
+});
+
+function createOpenEntry(startedAt: number, id = 'fractional'): TimeEntry {
+  return {
+    id,
+    clientUuid: `client_${id}`,
+    userId: 'test-user',
+    larkTaskGuid: null,
+    source: 'AUTO',
+    revision: 1,
+    startedAt,
+    endedAt: null,
+    pauseReason: null,
+    closeReason: null,
+    segments: [{ id: `segment_${id}`, kind: 'WORK', startedAt, endedAt: null }],
+  };
+}
+

@@ -110,9 +110,12 @@ async function refreshFailureReason(res: Response): Promise<string | null> {
 }
 
 async function refreshTokens(current: StoredTokens): Promise<RefreshOutcome> {
+  // Bounded like every other call: an unanswered refresh would otherwise hold
+  // the single-flight slot, and every request waiting on it, for minutes.
   const res = await rawFetch('/v1/auth/refresh', {
     method: 'POST',
     body: { refreshToken: current.refreshToken },
+    timeoutMs: 15_000,
   });
   if (!res.ok) {
     const reason = await refreshFailureReason(res);

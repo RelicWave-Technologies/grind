@@ -70,6 +70,8 @@ interface Anchor {
   serverMs: number;
   /** Monotonic reading taken at the same moment. */
   monoMs: number;
+  /** Device wall clock at the same moment; only used to re-anchor after sleep. */
+  wallMs: number;
 }
 
 /**
@@ -110,26 +112,44 @@ export function noteServerTime(
   // the midpoint — wrong by at most half the RTT, orders of magnitude below the
   // drift this exists to correct.
   const rttMs = Math.max(0, receivedAtMs - requestStartedAtMs);
-  const candidate: Anchor = { serverMs: stampedMs + rttMs / 2, monoMs: monotonicNowMs() };
+  const candidate: Anchor = { serverMs: stampedMs + rttMs / 2, monoMs: monotonicNowMs(), wallMs: Date.now() };
 
   samples += 1;
+  applyCandidate(candidate);
+  return serverClockOffsetMs();
+}
 
+/**
+ * The machine woke from sleep. The monotonic source stood still the whole time
+ * it slept, so the anchored clock is now behind by the full sleep — a timer
+ * started before the next heartbeat lands would be stamped in the past (an
+ * entry "starting" at lid-close time). Re-anchor from the device wall clock,
+ * which did keep running, carrying over the server offset last measured
+ * against it. Treated like any other correction: held while an entry is open.
+ */
+export function noteSystemResumed(): void {
+  if (!anchor) return;
+  const offsetMs = anchor.serverMs - anchor.wallMs;
+  const wallMs = Date.now();
+  applyCandidate({ serverMs: wallMs + offsetMs, monoMs: monotonicNowMs(), wallMs });
+}
+
+function applyCandidate(candidate: Anchor): void {
   const driftMs = candidate.serverMs - project(candidate.monoMs);
   if (Math.abs(driftMs) < MIN_SIGNIFICANT_OFFSET_MS) {
     deferred = null;
-    return serverClockOffsetMs();
+    return;
   }
 
   // Stepping mid-session would add or destroy worked time. Hold it instead;
   // the clock keeps advancing at real rate from the existing anchor.
   if (trackingActive) {
     deferred = candidate;
-    return serverClockOffsetMs();
+    return;
   }
 
   anchor = candidate;
   deferred = null;
-  return serverClockOffsetMs();
 }
 
 /**
@@ -142,7 +162,10 @@ export function noteServerTime(
  * merely in the wrong frame, which the first server sample corrects.
  */
 function project(monoMs: number): number {
-  if (!anchor) anchor = { serverMs: Date.now(), monoMs };
+  if (!anchor) {
+    const wallMs = Date.now();
+    anchor = { serverMs: wallMs, monoMs, wallMs };
+  }
   return anchor.serverMs + (monoMs - anchor.monoMs);
 }
 
@@ -179,13 +202,19 @@ export function hasDeferredServerClockCorrection(): boolean {
 }
 
 /**
- * Server-aligned "now". Between anchors it advances at exactly real rate — it
- * can never freeze, never run backwards, and is unmoved by edits to the device
- * clock. It starts from the device clock and is corrected onto the server's
- * frame by the first sample that lands while no timer is running.
+ * Server-aligned "now", in whole milliseconds. Between anchors it advances at
+ * exactly real rate — it can never freeze, never run backwards, and is unmoved
+ * by edits to the device clock. It starts from the device clock and is
+ * corrected onto the server's frame by the first sample that lands while no
+ * timer is running.
+ *
+ * Whole milliseconds because the server stores whole milliseconds: a
+ * fractional timestamp (monotonic readings and rtt/2 both have fractions) hashed
+ * differently from the server's copy of the same entry, so no timer entry was
+ * ever acknowledged and the sync queue filled with rows that never cleared.
  */
 export function serverAlignedNow(): number {
-  return project(monotonicNowMs());
+  return Math.trunc(project(monotonicNowMs()));
 }
 
 /** Test seam — module state is process-global. */

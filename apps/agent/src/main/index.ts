@@ -8,7 +8,7 @@ import {
 } from './services/promptReachability';
 import { registerIpc } from './ipc';
 import { sendHeartbeatNow, startHeartbeatIfAuthed } from './services/heartbeat';
-import { setServerClockTrackingActive } from './services/serverClock';
+import { noteSystemResumed, setServerClockTrackingActive } from './services/serverClock';
 import {
   applyTodayLedgerMode,
   drainTimerSyncNow,
@@ -366,7 +366,11 @@ app.whenReady().then(async () => {
       // a monotonic source, and a monotonic source does not advance while the
       // machine is asleep — so on wake it is behind by the whole sleep, and it
       // stays behind until a heartbeat lands. Draining first would upload
-      // entries stamped from a clock we already know is wrong.
+      // entries stamped from a clock we already know is wrong. Catch up from
+      // the wall clock right away too: the heartbeat may not land before the
+      // user resumes. The away handler already closed any running entry.
+      setServerClockTrackingActive(getTimerService().isRunning());
+      noteSystemResumed();
       sendHeartbeatNow();
       void drainTimerSyncNow('wake');
       void refreshTodayLedger('wake');

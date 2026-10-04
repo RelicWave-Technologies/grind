@@ -33,4 +33,32 @@ describe('canonicalTimerEntryPayload', () => {
 
     expect(second).toBe(first);
   });
+
+  it('hashes a fractional agent timestamp the same as the server copy of it', () => {
+    const agent = canonicalTimerEntryPayload({
+      id: 'entry',
+      clientUuid: 'client',
+      source: 'AUTO',
+      revision: 3,
+      startedAt: 1787573214428.37,
+      endedAt: null,
+      closeReason: null,
+      segments: [{ id: 'a', kind: 'WORK', startedAt: 1787573214428.37, endedAt: null }],
+    });
+    // What the server stored: the agent sent ISO strings, and Date truncates.
+    const startedAt = new Date(1787573214428.37).toISOString();
+    const server = canonicalTimerEntryPayload({
+      id: 'entry',
+      clientUuid: 'client',
+      source: 'AUTO',
+      revision: 3,
+      startedAt,
+      endedAt: null,
+      closeReason: null,
+      segments: [{ id: 'a', kind: 'WORK', startedAt, endedAt: null }],
+    });
+
+    expect(agent).toBe(server);
+  });
 });
+

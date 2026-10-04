@@ -19,11 +19,17 @@ export interface CanonicalTimerEntryLike {
   }>;
 }
 
+/**
+ * Whole milliseconds, the precision the server stores. Agents before beta.38
+ * persisted fractional timestamps; truncating here lets those rows hash equal
+ * to the server's copy instead of staying unacknowledged forever.
+ */
 function epoch(value: Timestamp): number {
-  if (typeof value === 'number') return value;
-  const parsed = value instanceof Date ? value.getTime() : new Date(value).getTime();
+  const parsed = typeof value === 'number'
+    ? value
+    : value instanceof Date ? value.getTime() : new Date(value).getTime();
   if (!Number.isFinite(parsed)) throw new Error('invalid_timer_timestamp');
-  return parsed;
+  return Math.trunc(parsed);
 }
 
 /** Stable agent-owned payload used for exact revision acknowledgement. */

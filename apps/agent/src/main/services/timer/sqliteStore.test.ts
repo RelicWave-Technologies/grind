@@ -59,11 +59,11 @@ describeSqlite('SqliteEntryStore sync state', () => {
 
     expect(store.upsert(e)).toBe('pending_create');
     expect(store.isPendingCreate(e.id)).toBe(true);
-    expect(store.getUnsynced()).toMatchObject([{ syncState: 'pending_create' }]);
+    expect(store.getUnsynced(Number.MAX_SAFE_INTEGER)).toMatchObject([{ syncState: 'pending_create' }]);
 
     store.markSynced(e.id, e, { revision: e.revision, hash: 'a'.repeat(64) });
     expect(store.isPendingCreate(e.id)).toBe(false);
-    expect(store.getUnsynced()).toHaveLength(0);
+    expect(store.getUnsynced(Number.MAX_SAFE_INTEGER)).toHaveLength(0);
   });
 
   it('does not mark synced when the local snapshot changed during sync', () => {
@@ -75,7 +75,7 @@ describeSqlite('SqliteEntryStore sync state', () => {
     store.upsert(changed);
 
     expect(store.markSynced(e.id, e, { revision: e.revision, hash: 'a'.repeat(64) })).toBe(false);
-    expect(store.getUnsynced()).toMatchObject([{ syncState: 'pending_update' }]);
+    expect(store.getUnsynced(Number.MAX_SAFE_INTEGER)).toMatchObject([{ syncState: 'pending_update' }]);
   });
 
   it('does not let an old create response downgrade a newer local snapshot', () => {
@@ -87,7 +87,7 @@ describeSqlite('SqliteEntryStore sync state', () => {
     store.upsert(changed);
 
     expect(store.markCreated(original.id, original)).toBe(false);
-    expect(store.getUnsynced()).toMatchObject([{ entry: { revision: changed.revision }, syncState: 'pending_create' }]);
+    expect(store.getUnsynced(Number.MAX_SAFE_INTEGER)).toMatchObject([{ entry: { revision: changed.revision }, syncState: 'pending_create' }]);
   });
 
   it('dirty rows preserve pending_create until remote creation is confirmed', () => {
@@ -99,7 +99,7 @@ describeSqlite('SqliteEntryStore sync state', () => {
     const closed = closeTimeEntry(e, T0 + 10 * MIN);
 
     expect(store.upsert(closed)).toBe('pending_create');
-    expect(store.getUnsynced()).toMatchObject([{ syncState: 'pending_create' }]);
+    expect(store.getUnsynced(Number.MAX_SAFE_INTEGER)).toMatchObject([{ syncState: 'pending_create' }]);
   });
 
   it('dirty rows become pending_update after remote creation is confirmed', () => {
@@ -112,7 +112,7 @@ describeSqlite('SqliteEntryStore sync state', () => {
     const closed = closeTimeEntry(e, T0 + 10 * MIN);
 
     expect(store.upsert(closed)).toBe('pending_update');
-    expect(store.getUnsynced()).toMatchObject([{ syncState: 'pending_update' }]);
+    expect(store.getUnsynced(Number.MAX_SAFE_INTEGER)).toMatchObject([{ syncState: 'pending_update' }]);
   });
 
   it('rolls back the old-task close when the replacement task cannot persist', () => {
@@ -145,7 +145,7 @@ describeSqlite('SqliteEntryStore sync state', () => {
     const store = ownedStore(db);
     store.claimUnownedEntries({ userId: 'user-1', workspaceId: 'workspace-1' });
 
-    expect(store.getUnsynced()).toHaveLength(0);
+    expect(store.getUnsynced(Number.MAX_SAFE_INTEGER)).toHaveLength(0);
   });
 
   it('migrates old unsynced rows to pending_create', () => {
@@ -162,7 +162,7 @@ describeSqlite('SqliteEntryStore sync state', () => {
     const store = ownedStore(db);
     store.claimUnownedEntries({ userId: 'user-1', workspaceId: 'workspace-1' });
 
-    expect(store.getUnsynced()).toMatchObject([{ syncState: 'pending_create' }]);
+    expect(store.getUnsynced(Number.MAX_SAFE_INTEGER)).toMatchObject([{ syncState: 'pending_create' }]);
   });
 
   it('persists exit intent, away state, and recovery notice metadata', () => {
@@ -208,7 +208,7 @@ describeSqlite('SqliteEntryStore sync state', () => {
 
     store.bindOwner({ userId: 'user-2', workspaceId: 'workspace-1' });
     expect(store.getOpen()).toBeNull();
-    expect(store.getUnsynced()).toEqual([]);
+    expect(store.getUnsynced(Number.MAX_SAFE_INTEGER)).toEqual([]);
 
     store.bindOwner({ userId: 'user-1', workspaceId: 'workspace-1' });
     expect(store.getOpen()?.id).toBe('private-entry');
@@ -225,10 +225,10 @@ describeSqlite('SqliteEntryStore sync state', () => {
       JSON.stringify(legacy),
     );
     const store = ownedStore(db);
-    expect(store.getUnsynced()).toEqual([]);
+    expect(store.getUnsynced(Number.MAX_SAFE_INTEGER)).toEqual([]);
 
     expect(store.claimUnownedEntries({ userId: 'user-1', workspaceId: 'workspace-1' })).toBe(0);
-    expect(store.getUnsynced()).toEqual([]);
+    expect(store.getUnsynced(Number.MAX_SAFE_INTEGER)).toEqual([]);
   });
 
   it('claims an unowned legacy row only when it already names the authenticated user', () => {
@@ -244,7 +244,7 @@ describeSqlite('SqliteEntryStore sync state', () => {
     const store = ownedStore(db);
 
     expect(store.claimUnownedEntries({ userId: 'user-1', workspaceId: 'workspace-1' })).toBe(1);
-    expect(store.getUnsynced()[0]?.entry.userId).toBe('user-1');
+    expect(store.getUnsynced(Number.MAX_SAFE_INTEGER)[0]?.entry.userId).toBe('user-1');
   });
 
   it('claims an unknown row only when the server proves its exact id and client UUID', () => {
@@ -261,8 +261,69 @@ describeSqlite('SqliteEntryStore sync state', () => {
     const owner = { userId: 'user-1', workspaceId: 'workspace-1' };
 
     expect(store.claimServerMatchedEntries(owner, [{ id: legacy.id, clientUuid: 'wrong-client' }])).toBe(0);
-    expect(store.getUnsynced()).toEqual([]);
+    expect(store.getUnsynced(Number.MAX_SAFE_INTEGER)).toEqual([]);
     expect(store.claimServerMatchedEntries(owner, [{ id: legacy.id, clientUuid: legacy.clientUuid }])).toBe(1);
-    expect(store.getUnsynced()[0]?.entry.userId).toBe(owner.userId);
+    expect(store.getUnsynced(Number.MAX_SAFE_INTEGER)[0]?.entry.userId).toBe(owner.userId);
+  });
+
+  it('hands out the open entry first, however many older rows are waiting', () => {
+    const db = new Database(':memory:');
+    const store = ownedStore(db);
+    for (let i = 0; i < 30; i += 1) store.upsert(closeTimeEntry(entry(`old_${i}`), T0 + MIN));
+    store.upsert(entry('live'));
+
+    const due = store.getUnsynced(T0);
+    expect(due).toHaveLength(31);
+    expect(due[0]?.entry.id).toBe('live');
+    expect(due[1]?.entry.id).toBe('old_0');
+  });
+
+  it('holds a failing row back until its retry time, and a local change releases it', () => {
+    const db = new Database(':memory:');
+    const store = ownedStore(db);
+    const e = closeTimeEntry(entry(), T0 + MIN);
+    store.upsert(e);
+
+    store.noteSyncFailure(e.id, 'http_400:invalid_segments', T0 + 5 * MIN);
+    expect(store.getUnsynced(T0)).toEqual([]);
+    expect(store.getUnsynced(T0 + 5 * MIN)).toMatchObject([{ attempts: 1 }]);
+    expect(store.syncBacklog()).toEqual({ pending: 1, oldestPendingAt: T0, lastError: 'http_400:invalid_segments' });
+
+    store.upsert({ ...e, revision: e.revision + 1 });
+    expect(store.getUnsynced(T0)).toMatchObject([{ attempts: 0 }]);
+  });
+
+  it('requeues on demand without demoting a pending create, and clears the error once synced', () => {
+    const db = new Database(':memory:');
+    const store = ownedStore(db);
+    const e = entry();
+    store.upsert(e, { syncState: 'pending_create' });
+    store.noteSyncFailure(e.id, 'TypeError:fetch failed', T0 + 15 * MIN);
+
+    expect(store.requeue(e.id, 'pending_update')).toBe(true);
+    expect(store.getUnsynced(T0)).toMatchObject([{ syncState: 'pending_create', attempts: 0 }]);
+
+    store.markSynced(e.id, e, { revision: e.revision, hash: 'a'.repeat(64) });
+    expect(store.syncBacklog()).toEqual({ pending: 0, oldestPendingAt: null, lastError: null });
+    expect(store.requeue(e.id, 'pending_update')).toBe(true);
+    expect(store.getUnsynced(T0)).toMatchObject([{ syncState: 'pending_update' }]);
+  });
+
+  it('adds the retry columns to a database from an older agent', () => {
+    const db = new Database(':memory:');
+    oldSchema(db);
+    ownedStore(db);
+    const names = (db.prepare(`PRAGMA table_info(local_entries)`).all() as { name: string }[]).map((c) => c.name);
+    expect(names).toEqual(expect.arrayContaining(['sync_attempts', 'next_attempt_at', 'last_error']));
+  });
+
+  it('marks a one-time step once per owner', () => {
+    const db = new Database(':memory:');
+    const store = ownedStore(db);
+    expect(store.markOnce('resync')).toBe(true);
+    expect(store.markOnce('resync')).toBe(false);
+    store.bindOwner({ userId: 'user-2', workspaceId: 'workspace-1' });
+    expect(store.markOnce('resync')).toBe(true);
   });
 });
+
