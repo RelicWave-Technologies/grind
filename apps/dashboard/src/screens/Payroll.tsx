@@ -8,7 +8,9 @@ import { api, API_BASE } from '../lib/api';
 import { dateKeyInTimeZone, instantForZonedDateTime } from '@grind/types';
 import {
   Avatar,
-  Banner,
+  LoadError,
+  Note,
+  useToast,
   Button,
   Card,
   DateStepper,
@@ -190,6 +192,7 @@ export function PayrollScreen() {
   const timeZone = me.workspaceTimezone;
   const [month, setMonth] = useState<string>(() => thisMonth(timeZone));
   const [downloading, setDownloading] = useState(false);
+  const toast = useToast();
   const [selectedRow, setSelectedRow] = useState<PayrollRow | null>(null);
 
   const q = useQuery({
@@ -205,9 +208,19 @@ export function PayrollScreen() {
 
   async function downloadCsv() {
     setDownloading(true);
+    const fail = (reason: string) =>
+      toast({
+        id: 'payroll-csv',
+        tone: 'bad',
+        text: `Couldn’t download the payroll CSV — ${reason}`,
+        action: { label: 'Retry', onClick: () => void downloadCsv() },
+      });
     try {
       const res = await fetch(`${API_BASE}/v1/admin/payroll/monthly.csv?month=${month}`, { credentials: 'include' });
-      if (!res.ok) return;
+      if (!res.ok) {
+        fail(res.status === 403 ? 'you do not have permission to download it.' : `it could not be built (${res.status}).`);
+        return;
+      }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -217,6 +230,9 @@ export function PayrollScreen() {
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
+      toast({ id: 'payroll-csv', tone: 'done', text: 'Downloaded the payroll CSV' });
+    } catch {
+      fail('it could not be reached. Check your connection and try again.');
     } finally {
       setDownloading(false);
     }
@@ -250,10 +266,10 @@ export function PayrollScreen() {
         }
       />
 
-      {q.isError ? (
-        <Banner status="danger" className="pay-block" action={<Button variant="ghost" size="sm" onClick={() => q.refetch()}>Retry</Button>}>
-          Couldn&apos;t load payroll: {(q.error as Error).message}
-        </Banner>
+      {q.isError && !q.data ? (
+        <Card variant="flush" className="pay-block">
+          <LoadError what="payroll" error={q.error} onRetry={() => q.refetch()} />
+        </Card>
       ) : (
         <>
           <Card variant="flush" className="pay-block">
@@ -396,9 +412,7 @@ function PayrollDrawer({ row, month, timeZone, onClose }: { row: PayrollRow; mon
               </Table>
             </div>
           </Card>
-          <Banner status="info">
-            Carry credits are payroll audit only. They do not rewrite timesheets.
-          </Banner>
+          <Note>Carry credits are payroll audit only. They do not rewrite timesheets.</Note>
         </div>
       </aside>
     </div>

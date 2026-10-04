@@ -1,15 +1,14 @@
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { AlertTriangle, Check, RefreshCw, X } from 'lucide-react';
-import TimoMark from './TimoMark';
+import { TimoMark } from './Mark';
 
 /**
- * Notices in the main window are toasts in a dock at the bottom centre, never
- * banners across the page (DESIGN.md §9 Toasts). Two kinds share the dock:
- * standing toasts, which the shell derives from app state and which stay until
- * that state resolves, and passing toasts, which any screen raises with
- * `useToast()` and which leave by themselves. The dock's height is published
- * as `--dock-h` so the window lifts its floor above it: a toast never covers
- * the controls or the ribbon.
+ * Notices are toasts in a dock at the bottom centre of the viewport, never
+ * banners across the page (DESIGN.md §9 Toasts). Any screen raises one with
+ * `useToast()`: a save that failed, a decision recorded, a download that broke.
+ * Passing toasts leave by themselves; `standing` ones (from app state) stay
+ * until it resolves. The dock's height is published as `--dock-h` so a page
+ * can keep its last row clear of it.
  */
 export type ToastTone = 'info' | 'wait' | 'done' | 'busy' | 'bad';
 
@@ -30,7 +29,7 @@ export function useToast(): Raise {
   return useContext(ToastContext);
 }
 
-export function ToastProvider({ standing, children }: { standing: Toast[]; children: ReactNode }) {
+export function ToastProvider({ standing = [], children }: { standing?: Toast[]; children: ReactNode }) {
   const [passing, setPassing] = useState<Toast[]>([]);
   const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
@@ -74,7 +73,7 @@ export function ToastProvider({ standing, children }: { standing: Toast[]; child
     <ToastContext.Provider value={raise}>
       <div className="toast-host" style={{ '--dock-h': `${dockHeight}px` } as CSSProperties}>
         {children}
-        <div className="toast-dock" ref={dock} aria-live="polite">
+        <div className="toast-dock toast-dock--page" ref={dock} aria-live="polite">
           {toasts.map((t) => (
             <ToastPill key={t.id} toast={t} />
           ))}
@@ -100,12 +99,12 @@ function ToastPill({ toast }: { toast: Toast }) {
       </span>
       <span className="toast-text">{toast.text}</span>
       {toast.action && (
-        <button className="toast-action no-drag" onClick={toast.action.onClick} disabled={toast.action.disabled}>
+        <button className="toast-action" onClick={toast.action.onClick} disabled={toast.action.disabled}>
           {toast.action.label}
         </button>
       )}
       {toast.onDismiss && (
-        <button className="toast-close no-drag" onClick={toast.onDismiss} aria-label="Dismiss" title="Dismiss">
+        <button className="toast-close" onClick={toast.onDismiss} aria-label="Dismiss" title="Dismiss">
           <X size={14} strokeWidth={2.4} />
         </button>
       )}

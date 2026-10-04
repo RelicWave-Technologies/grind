@@ -86,7 +86,9 @@ import {
   Segmented,
   Avatar,
   Identity,
-  Banner,
+  LoadError,
+  errorMessage,
+  useToast,
   EmptyState,
   SkeletonTable,
   Field,
@@ -281,16 +283,15 @@ export function ReportsScreen() {
         }
       />
 
-      {activeMode === 'you' && reportQ.isError && (
-        <Banner status="danger">Couldn’t load reports: {(reportQ.error as Error).message}</Banner>
-      )}
-      {activeMode === 'team' && teamQ.isError && (
-        <Banner status="danger">Couldn’t load team reports: {(teamQ.error as Error).message}</Banner>
-      )}
-
-      {monthReport.error && <Banner status="danger">{monthReport.error}</Banner>}
-
-      {activeMode === 'team' ? (
+      {activeMode === 'team' && teamQ.isError && !teamQ.data ? (
+        <Card variant="flush">
+          <LoadError what="team reports" error={teamQ.error} onRetry={() => teamQ.refetch()} />
+        </Card>
+      ) : activeMode === 'you' && reportQ.isError && !reportQ.data ? (
+        <Card variant="flush">
+          <LoadError what="your reports" error={reportQ.error} onRetry={() => reportQ.refetch()} />
+        </Card>
+      ) : activeMode === 'team' ? (
         <TeamReportsView
           data={teamQ.data}
           loading={teamQ.isLoading}
@@ -336,7 +337,7 @@ export function ReportsScreen() {
           onClose={() => setModal(null)}
         >
           {appsQ.isLoading && <SkeletonTable rows={5} />}
-          {appsQ.isError && <Banner status="danger">{(appsQ.error as Error).message}</Banner>}
+          {appsQ.isError && <LoadError what="apps" error={appsQ.error} onRetry={() => appsQ.refetch()} />}
           {appsQ.data && <AppsPanel data={appsQ.data} />}
         </ReportModal>
       )}
@@ -349,7 +350,7 @@ export function ReportsScreen() {
           onClose={() => setModal(null)}
         >
           {activityQ.isLoading && <SkeletonTable rows={4} />}
-          {activityQ.isError && <Banner status="danger">{(activityQ.error as Error).message}</Banner>}
+          {activityQ.isError && <LoadError what="activity" error={activityQ.error} onRetry={() => activityQ.refetch()} />}
           {activityQ.data && <ActivityPanel data={activityQ.data} tz={tz} />}
         </ReportModal>
       )}
@@ -362,7 +363,7 @@ export function ReportsScreen() {
           onClose={() => setModal(null)}
         >
           {timelineQ.isLoading && <SkeletonTable rows={4} />}
-          {timelineQ.isError && <Banner status="danger">{(timelineQ.error as Error).message}</Banner>}
+          {timelineQ.isError && <LoadError what="the timeline" error={timelineQ.error} onRetry={() => timelineQ.refetch()} />}
           {timelineQ.data && (
             <div className="rep-timeline-modal">
               <DayRibbon day={timelineQ.data} now={Date.now()} timeZone={tz} editable={false} />
@@ -878,7 +879,7 @@ export function TeamMemberDetailDrawer({
           onClose={() => setModal(null)}
         >
           {appsQ.isLoading && <SkeletonTable rows={5} />}
-          {appsQ.isError && <Banner status="danger">{(appsQ.error as Error).message}</Banner>}
+          {appsQ.isError && <LoadError what="apps" error={appsQ.error} onRetry={() => appsQ.refetch()} />}
           {appsQ.data && <AppsPanel data={appsQ.data} />}
         </ReportModal>
       )}
@@ -891,7 +892,7 @@ export function TeamMemberDetailDrawer({
           onClose={() => setModal(null)}
         >
           {activityQ.isLoading && <SkeletonTable rows={4} />}
-          {activityQ.isError && <Banner status="danger">{(activityQ.error as Error).message}</Banner>}
+          {activityQ.isError && <LoadError what="activity" error={activityQ.error} onRetry={() => activityQ.refetch()} />}
           {activityQ.data && <ActivityPanel data={activityQ.data} tz={tz} />}
         </ReportModal>
       )}
@@ -904,7 +905,7 @@ export function TeamMemberDetailDrawer({
           onClose={() => setModal(null)}
         >
           {timelineQ.isLoading && <SkeletonTable rows={4} />}
-          {timelineQ.isError && <Banner status="danger">{(timelineQ.error as Error).message}</Banner>}
+          {timelineQ.isError && <LoadError what="the timeline" error={timelineQ.error} onRetry={() => timelineQ.refetch()} />}
           {timelineQ.data && (
             <div className="rep-timeline-modal">
               <DayRibbon day={timelineQ.data} now={Date.now()} timeZone={tz} editable={false} />
@@ -962,24 +963,33 @@ function TeamMemberDrawer({
     refetchOnWindowFocus: false,
   });
 
+  const toast = useToast();
   const decide = useMutation({
     mutationFn: async (vars: { id: string; action: ApprovalDecisionAction }) =>
       api(`/v1/admin/manual-time-requests/${vars.id}/decide`, {
         method: 'POST',
         json: { action: vars.action },
       }),
-    onSuccess: () => {
+    onSuccess: (_result, vars) => {
       queryClient.invalidateQueries({ queryKey: ['reports', 'team', 'member', userId] });
       queryClient.invalidateQueries({ queryKey: reportQueryKeys.teamSummaryRoot });
       queryClient.invalidateQueries({ queryKey: ['approvals', 'team'] });
       queryClient.invalidateQueries({ queryKey: ['overview'] });
+      toast({ id: `decide-${vars.id}`, tone: 'done', text: vars.action === 'approve' ? 'Request approved' : 'Request rejected' });
+    },
+    onError: (error, vars) => {
+      toast({
+        id: `decide-${vars.id}`,
+        tone: 'bad',
+        text: `Couldn’t ${vars.action} the request — ${errorMessage(error)}`,
+        action: { label: 'Retry', onClick: () => decide.mutate(vars) },
+      });
     },
   });
 
   if (typeof document === 'undefined') return null;
 
   const member = q.data?.member;
-  const decisionError = decide.isError ? (decide.error as Error).message : null;
   const identity = member ? (
     <Identity
       avatar={<Avatar name={member.user.name} src={member.user.avatarUrl ?? undefined} size={40} />}
@@ -1033,7 +1043,7 @@ function TeamMemberDrawer({
         </div>
 
         <div className={`rep-drawer-body rep-drawer-body--${tab}`}>
-          {q.isError && <Banner status="danger">Couldn’t load member detail: {(q.error as Error).message}</Banner>}
+          {q.isError && <LoadError what="member detail" error={q.error} onRetry={() => q.refetch()} />}
           {q.isLoading && <SkeletonTable rows={7} />}
           {q.data && tab === 'reports' && (
             <TeamMemberReportsPanel
@@ -1050,7 +1060,6 @@ function TeamMemberDrawer({
               canDecide={canDecideApprovals}
               currentUserId={me.id}
               canSelfApproveOwn={canSelfApproveOwn}
-              decisionError={decisionError}
               busyRequestId={decide.isPending ? decide.variables?.id ?? null : null}
               busyAction={decide.isPending ? decide.variables?.action ?? null : null}
               onApprove={(id) => decide.mutate({ id, action: 'approve' })}
@@ -1109,7 +1118,7 @@ function AttendanceOverrideDialog({
   );
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const toast = useToast();
 
   // Fetched when the dialog opens rather than carried on every day of the
   // month: this is the one moment anybody wants it.
@@ -1123,7 +1132,6 @@ function AttendanceOverrideDialog({
 
   async function submit(action: 'save' | 'clear') {
     setBusy(true);
-    setError(null);
     try {
       if (action === 'clear') {
         await api('/v1/reports/attendance-override', {
@@ -1136,10 +1144,19 @@ function AttendanceOverrideDialog({
           json: { userId, date: day.date, code, reason: reason.trim() },
         });
       }
+      toast({
+        id: `attendance-override-${userId}-${day.date}`,
+        tone: 'done',
+        text: action === 'clear' ? `Restored the computed day for ${fmtDayLabel(day.date, tz)}` : `Changed ${fmtDayLabel(day.date, tz)}`,
+      });
       onSaved();
       onClose();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not save');
+      toast({
+        id: `attendance-override-${userId}-${day.date}`,
+        tone: 'bad',
+        text: `Couldn’t ${action === 'clear' ? 'clear' : 'save'} the change — ${errorMessage(e) || 'try again'}`,
+      });
     } finally {
       setBusy(false);
     }
@@ -1181,8 +1198,6 @@ function AttendanceOverrideDialog({
           <Field label="Reason" hint="Required.">
             <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Agent was down, present all day" />
           </Field>
-
-          {error && <Banner status="danger">{error}</Banner>}
 
           {history.length > 0 && (
             <details className="rep-override-past">
@@ -1274,7 +1289,6 @@ function TeamMemberApprovalsPanel({
   canDecide,
   currentUserId,
   canSelfApproveOwn,
-  decisionError,
   busyRequestId,
   busyAction,
   onApprove,
@@ -1286,7 +1300,6 @@ function TeamMemberApprovalsPanel({
   canDecide: boolean;
   currentUserId: string;
   canSelfApproveOwn: boolean;
-  decisionError: string | null;
   busyRequestId: string | null;
   busyAction: ApprovalDecisionAction | null;
   onApprove: (id: string) => void;
@@ -1312,7 +1325,6 @@ function TeamMemberApprovalsPanel({
         <DrawerMetric tone="mint" label="Accepted" value={summary.approved} hint={fmtDurationMs(summary.approvedMs)} />
         <DrawerMetric tone="pink" label="Rejected" value={summary.rejected} hint={fmtDurationMs(summary.rejectedMs)} />
       </div>
-      {decisionError && <Banner status="danger">Decision failed — {decisionError}</Banner>}
       <div className="rep-table-wrap">
         <Table density="compact" stickyHead className="rep-drawer-approvals-table">
           <THead>

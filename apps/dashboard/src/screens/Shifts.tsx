@@ -3,7 +3,7 @@ import { type ReactNode, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { CalendarClock, CalendarDays, Check, Clock3, Mail, Pencil, Plus, Trash2, UserRound, Users2, X } from 'lucide-react';
-import { api, ApiError } from '../lib/api';
+import { api } from '../lib/api';
 import type { Shift, ShiftSchedule, DaySchedule, WeekdayKey } from '../lib/types';
 import {
   Page,
@@ -23,7 +23,10 @@ import {
   Tr,
   Th,
   Td,
-  Banner,
+  LoadError,
+  Note,
+  errorMessage,
+  useToast,
   EmptyState,
   Skeleton,
   Avatar,
@@ -86,32 +89,69 @@ export function ShiftsScreen() {
     queryFn: () => api<{ users: AdminUser[] }>('/v1/admin/users'),
   });
 
+  const toast = useToast();
+  const shiftName = (id: string) => q.data?.shifts.find((shift) => shift.id === id)?.name ?? 'the shift';
+  const userName = (id: string) => usersQ.data?.users.find((user) => user.id === id)?.name ?? 'this person';
+
   const create = useMutation({
     mutationFn: (body: { name: string; schedule: ShiftSchedule; bufferMin: number }) =>
       api<Shift>('/v1/admin/shifts', { method: 'POST', json: body }),
-    onSuccess: () => {
+    onSuccess: (_shift, body) => {
       qc.invalidateQueries({ queryKey: ['admin', 'shifts'] });
       setCreateOpen(false);
+      toast({ id: 'shift-create', tone: 'done', text: `Created ${body.name}` });
+    },
+    onError: (error) => {
+      toast({ id: 'shift-create', tone: 'bad', text: `Couldn’t create the shift — ${errorMessage(error)}` });
     },
   });
   const patch = useMutation({
     mutationFn: (vars: { id: string; patch: Partial<{ name: string; schedule: ShiftSchedule; bufferMin: number }> }) =>
       api<Shift>(`/v1/admin/shifts/${vars.id}`, { method: 'PATCH', json: vars.patch }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'shifts'] }),
+    onSuccess: (shift) => {
+      qc.invalidateQueries({ queryKey: ['admin', 'shifts'] });
+      toast({ id: `shift-${shift.id}`, tone: 'done', text: `Saved ${shift.name}` });
+    },
+    onError: (error, vars) => {
+      toast({
+        id: `shift-${vars.id}`,
+        tone: 'bad',
+        text: `Couldn’t save ${shiftName(vars.id)} — ${errorMessage(error)}`,
+        action: { label: 'Retry', onClick: () => patch.mutate(vars) },
+      });
+    },
   });
   const del = useMutation({
     mutationFn: (id: string) => api(`/v1/admin/shifts/${id}`, { method: 'DELETE' }),
-    onSuccess: () => {
+    onSuccess: (_result, id) => {
+      toast({ id: `shift-${id}`, tone: 'done', text: `Deleted ${shiftName(id)}` });
       qc.invalidateQueries({ queryKey: ['admin', 'shifts'] });
       setSelectedShiftId(null);
+    },
+    onError: (error, id) => {
+      toast({ id: `shift-${id}`, tone: 'bad', text: `Couldn’t delete ${shiftName(id)} — ${errorMessage(error)}` });
     },
   });
   const patchUser = useMutation({
     mutationFn: (vars: { id: string; shiftId: string | null }) =>
       api<AdminUser>(`/v1/admin/users/${vars.id}`, { method: 'PATCH', json: { shiftId: vars.shiftId } }),
-    onSuccess: () => {
+    onSuccess: (_user, vars) => {
+      toast({
+        id: `shift-member-${vars.id}`,
+        tone: 'done',
+        text: vars.shiftId ? `Moved ${userName(vars.id)} onto ${shiftName(vars.shiftId)}` : `Removed ${userName(vars.id)} from the shift`,
+      });
       qc.invalidateQueries({ queryKey: ['admin', 'users'] });
       qc.invalidateQueries({ queryKey: ['admin', 'shifts'] });
+    },
+    onError: (error, vars) => {
+      toast({
+        id: `shift-member-${vars.id}`,
+        tone: 'bad',
+        text: vars.shiftId
+          ? `Couldn’t add ${userName(vars.id)} to ${shiftName(vars.shiftId)} — ${errorMessage(error)}`
+          : `Couldn’t remove ${userName(vars.id)} from the shift — ${errorMessage(error)}`,
+      });
     },
   });
 
@@ -186,8 +226,10 @@ export function ShiftsScreen() {
               </div>
             </Card>
           )}
-          {q.isError && (
-            <Banner status="danger">Couldn&apos;t load shifts: {(q.error as Error).message}</Banner>
+          {q.isError && !q.data && (
+            <Card variant="flush">
+              <LoadError what="shifts" error={q.error} onRetry={() => q.refetch()} />
+            </Card>
           )}
           {q.data && q.data.shifts.length === 0 && (
             <EmptyState
@@ -212,12 +254,6 @@ export function ShiftsScreen() {
                   key={sh.id}
                   shift={sh}
                   busy={(patch.isPending && patch.variables?.id === sh.id) || (del.isPending && del.variables === sh.id)}
-                  error={
-                    (patch.isError && patch.variables?.id === sh.id
-                      ? (patch.error as Error | ApiError).message
-                      : null) ||
-                    (del.isError && del.variables === sh.id ? (del.error as Error | ApiError).message : null)
-                  }
                   onPatch={(p) => patch.mutate({ id: sh.id, patch: p })}
                   onDelete={() => del.mutate(sh.id)}
                   onOpen={() => setSelectedShiftId(sh.id)}
@@ -231,7 +267,6 @@ export function ShiftsScreen() {
       {createOpen && (
         <ShiftCreateModal
           busy={create.isPending}
-          error={create.isError ? (create.error as Error | ApiError).message : null}
           onCreate={(vars) => create.mutate(vars)}
           onClose={() => setCreateOpen(false)}
         />
@@ -243,11 +278,10 @@ export function ShiftsScreen() {
           members={selectedShiftMembers}
           availableUsers={selectedShiftAvailableUsers}
           shiftBusy={patch.isPending && patch.variables?.id === selectedShift.id}
-          shiftError={patch.isError && patch.variables?.id === selectedShift.id ? (patch.error as Error | ApiError).message : null}
           usersLoading={usersQ.isLoading}
-          usersError={usersQ.isError ? (usersQ.error as Error | ApiError).message : null}
+          usersError={usersQ.isError ? usersQ.error : null}
+          onRetryUsers={() => usersQ.refetch()}
           busyUserId={patchUser.isPending ? patchUser.variables?.id ?? null : null}
-          assignmentError={patchUser.isError ? (patchUser.error as Error | ApiError).message : null}
           onPatch={(nextPatch) => patch.mutate({ id: selectedShift.id, patch: nextPatch })}
           onAdd={(userId) => patchUser.mutate({ id: userId, shiftId: selectedShift.id })}
           onRemove={(userId) => patchUser.mutate({ id: userId, shiftId: null })}
@@ -264,12 +298,10 @@ export function ShiftsScreen() {
 
 function ShiftCreateModal({
   busy,
-  error,
   onCreate,
   onClose,
 }: {
   busy: boolean;
-  error: string | null;
   onCreate: (vars: { name: string; schedule: ShiftSchedule; bufferMin: number }) => void;
   onClose: () => void;
 }) {
@@ -338,8 +370,6 @@ function ShiftCreateModal({
           </div>
 
           <ScheduleEditor value={schedule} onChange={setSchedule} />
-
-          {error && <Banner status="danger">{error}</Banner>}
         </div>
 
         <div className="shf-modal-actions">
@@ -369,14 +399,12 @@ function ShiftCreateModal({
 function ShiftRow({
   shift,
   busy,
-  error,
   onPatch,
   onDelete,
   onOpen,
 }: {
   shift: Shift;
   busy: boolean;
-  error: string | null;
   onPatch: (patch: Partial<{ name: string; schedule: ShiftSchedule; bufferMin: number }>) => void;
   onDelete: () => void;
   onOpen: () => void;
@@ -493,12 +521,6 @@ function ShiftRow({
         </div>
       </div>
 
-      {error && (
-        <Banner status="danger" className="shf-row-banner">
-          {error}
-        </Banner>
-      )}
-
       <div className="shf-row-body">
         {editing ? (
           <div onClick={(event) => event.stopPropagation()}>
@@ -517,11 +539,10 @@ function ShiftDrawer({
   members,
   availableUsers,
   shiftBusy,
-  shiftError,
   usersLoading,
   usersError,
+  onRetryUsers,
   busyUserId,
-  assignmentError,
   onPatch,
   onAdd,
   onRemove,
@@ -531,11 +552,10 @@ function ShiftDrawer({
   members: AdminUser[];
   availableUsers: AdminUser[];
   shiftBusy: boolean;
-  shiftError: string | null;
   usersLoading: boolean;
-  usersError: string | null;
+  usersError: unknown;
+  onRetryUsers: () => void;
   busyUserId: string | null;
-  assignmentError: string | null;
   onPatch: (patch: Partial<{ name: string; schedule: ShiftSchedule; bufferMin: number }>) => void;
   onAdd: (userId: string) => void;
   onRemove: (userId: string) => void;
@@ -642,7 +662,6 @@ function ShiftDrawer({
               </div>
               <Tag mono>{activeBufferMin}m buffer</Tag>
             </div>
-            {shiftError && <Banner status="danger">{shiftError}</Banner>}
             {editing ? (
               <div className="shf-drawer-edit">
                 <div className="shf-modal-fields">
@@ -690,9 +709,9 @@ function ShiftDrawer({
               </Button>
             </div>
 
-            {usersError && <Banner status="danger">{usersError}</Banner>}
-            {assignmentError && <Banner status="danger">{assignmentError}</Banner>}
-            {usersLoading ? (
+            {usersError ? (
+              <LoadError what="people" error={usersError} onRetry={onRetryUsers} />
+            ) : usersLoading ? (
               <div className="shf-skel">
                 <Skeleton w="100%" h={44} />
                 <Skeleton w="100%" h={44} />
@@ -736,7 +755,6 @@ function ShiftDrawer({
             shift={shift}
             users={availableUsers}
             busyUserId={busyUserId}
-            error={assignmentError}
             onAdd={(userId) => {
               onAdd(userId);
               setAddOpen(false);
@@ -767,14 +785,12 @@ function ShiftAddMemberModal({
   shift,
   users,
   busyUserId,
-  error,
   onAdd,
   onClose,
 }: {
   shift: Shift;
   users: AdminUser[];
   busyUserId: string | null;
-  error: string | null;
   onAdd: (userId: string) => void;
   onClose: () => void;
 }) {
@@ -817,8 +833,7 @@ function ShiftAddMemberModal({
               ))}
             </Select>
           </Field>
-          <Banner status="info">Adding a person moves them onto this shift.</Banner>
-          {error && <Banner status="danger">{error}</Banner>}
+          <Note>Adding a person moves them onto this shift.</Note>
         </div>
         <div className="shf-modal-actions">
           <Button variant="ghost" onClick={onClose} disabled={Boolean(busyUserId)}>

@@ -549,8 +549,8 @@ the message, at most one action (a white `sm` pill) and a dismiss (a 26px ghost 
 `on-dark-muted`). They rise 10px into place over `duration-slow`.
 
 - **Standing** toasts describe a state (a recovered timer, syncing, an update waiting) and stay
-  until it resolves or is dismissed. **Passing** toasts confirm an action ("Created … in Lark")
-  and leave after 4.5s.
+  until it resolves or is dismissed. **Passing** toasts report an action: a confirmation ("Created
+  … in Lark") leaves after 4.5s; a failure (`tone-negative` icon) stays until dismissed.
 - The dock sits above any open sheet, and the window lifts its floor by the dock's height, so a
   toast never covers a control or the ribbon.
 - A form's own validation error stays with the field; that is the only inline message.
@@ -575,9 +575,9 @@ White, 1px `line`, `lg`/`xl` round, `elevation-4`, `caption` type. Items are `md
   forward as a secondary button when there is one. Never a big illustration.
 - **Loading.** Skeleton bars on `sheet-2`, `xs` round, pulsing 1 → 0.45 over 1.8s.
   `role="status"` with a label.
-- **Error.** A notice-error with one sentence and a retry.
-- **Toast.** `ink` background, white text, `full` round, `elevation-4`, bottom centre. An error
-  toast is `bad`. A confirmation leaves after 5s; an error stays.
+- **Error.** A screen or section that cannot load shows its error state where the data would
+  be: the empty state's shape with one sentence and Retry. Never a banner.
+- **Toast.** Every notice: an action's result, a sync, an update (§ Toasts).
 
 ### The day ribbon — `DayRibbon`, `DayTimeline`
 

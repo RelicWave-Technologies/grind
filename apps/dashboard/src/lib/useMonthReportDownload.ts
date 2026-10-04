@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { API_BASE } from './api';
+import { useToast } from '../ui';
 
 export type MonthReportFormat = 'csv' | 'xlsx';
 
@@ -12,15 +13,23 @@ export type MonthReportFormat = 'csv' | 'xlsx';
  * navigated the tab to a page of JSON instead of saying what went wrong.
  *
  * `downloading` names the format in flight, so the button that was pressed is
- * the one that spins.
+ * the one that spins. The result is a toast (DESIGN.md §9 Toasts): the file
+ * is on its way, or why it is not, with Retry.
  */
 export function useMonthReportDownload() {
   const [downloading, setDownloading] = useState<MonthReportFormat | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const toast = useToast();
 
   async function download(month: string, format: MonthReportFormat): Promise<void> {
+    const id = `month-report-${month}-${format}`;
+    const fail = (reason: string) =>
+      toast({
+        id,
+        tone: 'bad',
+        text: `Couldn’t download the ${fmtMonthShort(month)} report — ${reason}`,
+        action: { label: 'Retry', onClick: () => void download(month, format) },
+      });
     setDownloading(format);
-    setError(null);
     try {
       const params = new URLSearchParams({ month });
       const res = await fetch(
@@ -30,12 +39,12 @@ export function useMonthReportDownload() {
       if (!res.ok) {
         const body: unknown = await res.json().catch(() => null);
         const code = (body as { error?: string } | null)?.error;
-        setError(
+        fail(
           code === 'invalid_month'
-            ? 'That month could not be read. Pick a date inside a single month.'
+            ? 'that month could not be read. Pick a date inside a single month.'
             : res.status === 403
-              ? 'You do not have permission to download this report.'
-              : `The report could not be built (${res.status}).`,
+              ? 'you do not have permission to download this report.'
+              : `the report could not be built (${res.status}).`,
         );
         return;
       }
@@ -48,14 +57,15 @@ export function useMonthReportDownload() {
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
+      toast({ id, tone: 'done', text: `Downloaded the ${fmtMonthShort(month)} report (${format.toUpperCase()})` });
     } catch {
-      setError('The report could not be reached. Check your connection and try again.');
+      fail('the report could not be reached. Check your connection and try again.');
     } finally {
       setDownloading(null);
     }
   }
 
-  return { download, downloading, error };
+  return { download, downloading };
 }
 
 /** 'Aug 2026' from '2026-08' — short enough to sit inside a button label. */

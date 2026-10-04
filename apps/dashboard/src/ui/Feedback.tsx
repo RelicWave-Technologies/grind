@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
-import { AlertTriangle, Info, CheckCircle2, XCircle } from 'lucide-react';
+import { AlertTriangle, Info } from 'lucide-react';
 import { cx } from './util';
+import { Button } from './Button';
 
 /* §5.13 EmptyState — the one empty/zero-data treatment for every empty
    list/table/page. `tone='danger'` doubles as the page-level error treatment. */
@@ -31,33 +32,65 @@ export function EmptyState({
   );
 }
 
-/* §5.15 Banner — an inline error/warn/info/success notice within a page.
-   Distinct from the floating Toast. */
-export type BannerStatus = 'danger' | 'warn' | 'info' | 'success';
+/* App states — Error (DESIGN.md §9): a screen or section that cannot load
+   shows its error state where the data would be — the empty state's shape,
+   one sentence and Retry. Never a banner. */
+export interface LoadErrorProps {
+  /** What could not load, as it reads after "Couldn't load": "approvals". */
+  what: ReactNode;
+  error?: unknown;
+  onRetry?: () => void;
+  icon?: ReactNode;
+  className?: string;
+}
 
-const BANNER_ICON: Record<BannerStatus, ReactNode> = {
-  danger: <XCircle size={16} strokeWidth={1.9} />,
-  warn: <AlertTriangle size={16} strokeWidth={1.9} />,
-  info: <Info size={16} strokeWidth={1.9} />,
-  success: <CheckCircle2 size={16} strokeWidth={1.9} />,
-};
+export function LoadError({ what, error, onRetry, icon, className }: LoadErrorProps) {
+  const reason = errorMessage(error);
+  return (
+    <EmptyState
+      tone="danger"
+      className={cx('ui-empty--compact', className)}
+      icon={icon ?? <AlertTriangle size={20} strokeWidth={1.7} />}
+      title={<>Couldn&rsquo;t load {what}</>}
+      description={reason || undefined}
+      action={
+        onRetry ? (
+          <Button variant="secondary" size="sm" onClick={onRetry}>
+            Retry
+          </Button>
+        ) : undefined
+      }
+      role="alert"
+    />
+  );
+}
 
-export interface BannerProps extends React.HTMLAttributes<HTMLDivElement> {
-  status: BannerStatus;
-  action?: ReactNode;
+/* A quiet note about the page's current state or how something works:
+   muted caption text with an optional icon, beside the control it concerns.
+   Content, not a notice — no coloured box. */
+export interface NoteProps extends React.HTMLAttributes<HTMLParagraphElement> {
+  icon?: 'info' | 'warn' | null;
   children: ReactNode;
 }
 
-export function Banner({ status, action, className, children, ...rest }: BannerProps) {
+export function Note({ icon = null, className, children, ...rest }: NoteProps) {
   return (
-    <div
-      className={cx('ui-banner', `ui-banner--${status}`, className)}
-      role={status === 'danger' ? 'alert' : 'status'}
-      {...rest}
-    >
-      <span className="ui-banner__icon" aria-hidden>{BANNER_ICON[status]}</span>
-      <div className="ui-banner__body">{children}</div>
-      {action != null && <div className="ui-banner__action">{action}</div>}
-    </div>
+    <p className={cx('ui-note', icon === 'warn' && 'ui-note--warn', className)} {...rest}>
+      {icon === 'warn' && <AlertTriangle className="ui-note__icon" size={14} strokeWidth={1.9} aria-hidden />}
+      {icon === 'info' && <Info className="ui-note__icon" size={14} strokeWidth={1.9} aria-hidden />}
+      <span>{children}</span>
+    </p>
   );
 }
+
+/** The human reason inside an unknown thrown value. */
+export function errorMessage(error: unknown): string {
+  if (error == null) return '';
+  if (typeof error === 'string') return error;
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'object' && 'message' in error && typeof (error as { message: unknown }).message === 'string') {
+    return (error as { message: string }).message;
+  }
+  return String(error);
+}
+

@@ -181,10 +181,6 @@
 /* Deactivated rows read quieter — step ink down (token), no new colour. */
 .usr-row-off > .ui-td { color: var(--color-muted); }
 
-/* The inline error row carries the Banner full-bleed under its person row. */
-.usr-row-err > .ui-td { padding-top: var(--space-xxs); padding-bottom: var(--space-xs); }
-.usr-row-err > .ui-td:hover { background: transparent; }
-
 /* ---- Invite card form layout --------------------------------------------- */
 .usr-invite-form {
   display: flex;
@@ -200,7 +196,6 @@
   gap: var(--space-xs);
   margin-left: auto;
 }
-.usr-invite-banner { margin-top: var(--space-md); }
 .usr-invite-hint { margin: var(--space-md) 0 0; max-width: 66ch; }
 
 /* ---- Delete confirmation -------------------------------------------------

@@ -17,7 +17,10 @@ import { api } from '../lib/api';
 import type { Role } from '../lib/auth';
 import {
   Avatar,
-  Banner,
+  LoadError,
+  Note,
+  errorMessage,
+  useToast,
   Button,
   Card,
   Checkbox,
@@ -88,6 +91,7 @@ export function TeamScreen() {
     queryFn: () => api<WorkspacePolicyDto>('/v1/admin/workspace-policy'),
   });
 
+  const toast = useToast();
   const updateMember = useMutation({
     mutationFn: ({ userId, patch }: { userId: string; patch: PatchTeamMemberSettingsRequest }) =>
       api<TeamMemberSettingsDto>(`/v1/admin/team-member-settings/${userId}`, { method: 'PATCH', json: patch }),
@@ -101,6 +105,15 @@ export function TeamScreen() {
       });
       setRowDraft((current) => (current?.userId === variables.userId ? null : current));
       setRiskPrompt((current) => (current?.member.id === variables.userId ? null : current));
+      toast({ id: `member-settings-${variables.userId}`, tone: 'done', text: `Saved ${updated.name}’s settings` });
+    },
+    onError: (error, variables) => {
+      const name = settingsQ.data?.members.find((member) => member.id === variables.userId)?.name ?? 'the member';
+      toast({
+        id: `member-settings-${variables.userId}`,
+        tone: 'bad',
+        text: `Couldn’t save ${name}’s settings — ${errorMessage(error)}`,
+      });
     },
     onSettled: () => setPendingEdit(null),
   });
@@ -201,33 +214,10 @@ export function TeamScreen() {
         }
       />
 
-      {settingsQ.isError && (
-        <Banner
-          status="danger"
-          action={
-            <Button variant="ghost" size="sm" onClick={() => settingsQ.refetch()}>
-              Retry
-            </Button>
-          }
-        >
-          Couldn&apos;t load team settings: {(settingsQ.error as Error).message}
-        </Banner>
-      )}
-
-      {updateMember.isError && (
-        <Banner status="danger">Couldn&apos;t save the member setting: {(updateMember.error as Error).message}</Banner>
-      )}
-
-      {rowDraft && draftRisk === 'HIGH' && (
-        <Banner status="danger">
-          This edit sets 1-minute monitoring for a member. Saving it requires an audit reason.
-        </Banner>
-      )}
-
-      {rowDraft && draftRisk === 'CAUTION' && (
-        <Banner status="warn">
-          This edit uses a short monitoring cadence. It will be audit-logged when saved.
-        </Banner>
+      {settingsQ.isError && !settingsQ.data && (
+        <Card variant="flush">
+          <LoadError what="team settings" error={settingsQ.error} onRetry={() => settingsQ.refetch()} />
+        </Card>
       )}
 
       {settingsQ.isLoading && (
@@ -264,6 +254,16 @@ export function TeamScreen() {
               <div>
                 <h2 className="ui-t-h3">Members</h2>
                 <p className="ui-t-small">Edit settings with the pencil, then confirm with the tick.</p>
+                {rowDraft && draftRisk === 'HIGH' && (
+                  <Note icon="warn" className="tm-risk-note">
+                    This edit sets 1-minute monitoring for a member. Saving it asks for an audit reason.
+                  </Note>
+                )}
+                {rowDraft && draftRisk === 'CAUTION' && (
+                  <Note icon="warn" className="tm-risk-note">
+                    This edit uses a short monitoring cadence. It will be audit-logged when saved.
+                  </Note>
+                )}
               </div>
               <Tag mono>{members.length}</Tag>
             </div>
@@ -300,7 +300,6 @@ export function TeamScreen() {
           member={riskPrompt.member}
           next={riskPrompt.next}
           saving={updateMember.isPending}
-          error={updateMember.error instanceof Error ? updateMember.error.message : null}
           onClose={() => setRiskPrompt(null)}
           onConfirm={(auditReason) => patchMember(riskPrompt.member.id, 'settings', { ...riskPrompt.patch, auditReason })}
         />
@@ -698,14 +697,12 @@ function TeamMonitoringRiskModal({
   member,
   next,
   saving,
-  error,
   onClose,
   onConfirm,
 }: {
   member: TeamMemberSettingsDto;
   next: MonitoringTiming;
   saving: boolean;
-  error: string | null;
   onClose: () => void;
   onConfirm: (auditReason: string) => void;
 }) {
@@ -725,9 +722,9 @@ function TeamMonitoringRiskModal({
           <IconButton aria-label="Close" icon={<X size={18} />} onClick={onClose} />
         </header>
         <div className="tm-risk-body">
-          <Banner status="danger">
+          <Note icon="warn">
             1-minute monitoring is exceptional. Record why this member needs it before saving.
-          </Banner>
+          </Note>
           <Field label="Audit reason" hint="Required. Visible to admins in policy audit history.">
             <Textarea
               value={reason}
@@ -737,7 +734,6 @@ function TeamMonitoringRiskModal({
               autoFocus
             />
           </Field>
-          {error && <Banner status="danger">{error}</Banner>}
         </div>
         <footer className="tm-risk-foot">
           <Button variant="ghost" onClick={onClose}>Cancel</Button>

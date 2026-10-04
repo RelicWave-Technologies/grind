@@ -3,7 +3,7 @@
 
    The page is composed entirely from the shared ui/ kit (src/ui, styled
    by the root DESIGN.md): PageHeader, Toolbar, DateStepper, Card, StatRow/Stat,
-   Table, Identity, Tag, Banner, EmptyState. No colours / type / borders /
+   Table, Identity, Tag, EmptyState. No colours / type / borders /
    shadows live here — those come from the kit + tokens. This file only places
    the body blocks in vertical rhythm, spreads the loading skeletons across the
    stat row, and guards the wide ledger from overflow.

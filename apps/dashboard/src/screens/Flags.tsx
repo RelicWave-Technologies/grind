@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouteContext } from '@tanstack/react-router';
 import { ShieldAlert, Check, X, AlertOctagon, ShieldCheck, Sparkles, Ban } from 'lucide-react';
-import { api, type ApiError } from '../lib/api';
+import { api } from '../lib/api';
 import type { ActivityFlag, FlagResolution, FlagType } from '../lib/types';
 import {
   Page,
@@ -16,9 +16,11 @@ import {
   Button,
   Field,
   Input,
-  Banner,
   EmptyState,
+  LoadError,
   SkeletonTable,
+  errorMessage,
+  useToast,
 } from '../ui';
 import type { Status } from '../ui';
 import { fmtTime, fmtDayLabel, fmtDurationMs, fmtDateShort } from '../lib/format';
@@ -90,8 +92,8 @@ function verdictStatus(resolution: FlagResolution): Status {
 /**
  * Anti-cheat review queue (MANAGER+), composed entirely from the shared kit
  * (src/ui). Each flag is a Card: an Identity ←→ a mono risk readout,
- * the flag TYPE as a status Tag, a mono Window row, the AI read in an info
- * Banner, mono Evidence chips, and inline Dismiss / Confirm-cheat actions.
+ * the flag TYPE as a status Tag, a mono Window row, the AI read as plain
+ * text, mono Evidence chips, and inline Dismiss / Confirm-cheat actions.
  * Resolved flags carry a verdict Tag + audit stamp. Risk severity rides the
  * fixed status taxonomy (danger ≥ threshold, warn below, neutral once resolved);
  * we never auto-delete time — the verdict lands on a row. Presentation only.
@@ -100,8 +102,8 @@ export function FlagsScreen() {
   const { me } = useRouteContext({ from: '/authed' });
   const timeZone = me.workspaceTimezone;
   const [tab, setTab] = useState<'OPEN' | 'RESOLVED'>('OPEN');
-  const [lastInvalidation, setLastInvalidation] = useState<null | { id: string; invalidatedMs: number }>(null);
   const qc = useQueryClient();
+  const toast = useToast();
 
   const q = useQuery({
     queryKey: ['admin', 'flags', 'groups', tab],
@@ -115,8 +117,24 @@ export function FlagsScreen() {
         { method: 'POST', json: { flagIds: vars.flagIds, resolution: vars.resolution, note: vars.note } },
       ),
     onSuccess: (data, vars) => {
-      setLastInvalidation(data.timeInvalidated ? { id: vars.key, invalidatedMs: data.invalidatedMs } : null);
+      toast({
+        id: `flag-${vars.key}`,
+        tone: 'done',
+        text: data.timeInvalidated
+          ? `Time invalidated: ${fmtDurationMs(data.invalidatedMs)} excluded from reports and KPIs`
+          : vars.resolution === 'CONFIRMED'
+            ? 'Flag confirmed'
+            : 'Flag dismissed',
+      });
       qc.invalidateQueries({ queryKey: ['admin', 'flags'] });
+    },
+    onError: (error, vars) => {
+      toast({
+        id: `flag-${vars.key}`,
+        tone: 'bad',
+        text: `Couldn’t record the verdict — ${errorMessage(error)}`,
+        action: { label: 'Retry', onClick: () => resolve.mutate(vars) },
+      });
     },
   });
 
@@ -150,14 +168,10 @@ export function FlagsScreen() {
         </Card>
       )}
 
-      {q.isError && (
-        <Banner status="danger">Couldn&apos;t load flags — {(q.error as Error).message}</Banner>
-      )}
-
-      {lastInvalidation && (
-        <Banner status="warn">
-          Time invalidated: {fmtDurationMs(lastInvalidation.invalidatedMs)} excluded from reports and KPIs.
-        </Banner>
+      {q.isError && !q.data && (
+        <Card variant="flush">
+          <LoadError what="flags" error={q.error} onRetry={() => q.refetch()} />
+        </Card>
       )}
 
       {q.data && q.data.groups.length === 0 && (
@@ -180,11 +194,6 @@ export function FlagsScreen() {
               flag={g}
               timeZone={timeZone}
               busy={resolve.isPending && resolve.variables?.key === g.key}
-              error={
-                resolve.isError && resolve.variables?.key === g.key
-                  ? (resolve.error as Error | ApiError).message
-                  : null
-              }
               onResolve={(resolution, note) => resolve.mutate({ key: g.key, flagIds: g.flagIds, resolution, note })}
             />
           ))}
@@ -198,13 +207,11 @@ function FlagCard({
   flag,
   timeZone,
   busy,
-  error,
   onResolve,
 }: {
   flag: FlagGroup;
   timeZone: string;
   busy: boolean;
-  error: string | null;
   onResolve: (resolution: FlagResolution, note?: string) => void;
 }) {
   const [composing, setComposing] = useState<null | FlagResolution>(null);
@@ -257,15 +264,15 @@ function FlagCard({
 
       {/* AI read / pattern */}
       {flag.explanation?.headline ? (
-        <Banner status="info">
-          <span className="flg-ai__cap">
+        <div className="flg-def">
+          <span className="ui-t-eyebrow flg-ai__cap">
             <Sparkles size={11} strokeWidth={2.2} /> AI read
           </span>
-          <span className="ui-t-body flg-ai__head">{flag.explanation.headline}</span>
+          <span className="ui-t-body flg-def__val">{flag.explanation.headline}</span>
           {flag.explanation.detail && (
-            <span className="ui-t-small flg-ai__detail">{flag.explanation.detail}</span>
+            <span className="ui-t-small flg-def__val">{flag.explanation.detail}</span>
           )}
-        </Banner>
+        </div>
       ) : (
         <div className="flg-def">
           <span className="ui-t-eyebrow">Pattern</span>
@@ -315,9 +322,6 @@ function FlagCard({
           )}
         </div>
       )}
-
-      {/* Per-card error */}
-      {error && <Banner status="danger">Failed — {error}</Banner>}
 
       {/* Open: inline triage actions */}
       {!isResolved &&

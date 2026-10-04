@@ -25,7 +25,10 @@ import {
   Tag,
   Button,
   IconButton,
-  Banner,
+  LoadError,
+  Note,
+  errorMessage,
+  useToast,
   EmptyState,
   Toolbar,
   Skeleton,
@@ -80,6 +83,7 @@ export function PolicyScreen() {
   const { me } = useRouteContext({ from: '/authed' });
   const timeZone = me.workspaceTimezone;
   const qc = useQueryClient();
+  const toast = useToast();
   const q = useQuery({
     queryKey: ['workspace-policy'],
     queryFn: () => api<WorkspacePolicyDto>('/v1/admin/workspace-policy'),
@@ -110,6 +114,10 @@ export function PolicyScreen() {
       qc.invalidateQueries({ queryKey: ['reports'] });
       qc.invalidateQueries({ queryKey: ['admin', 'attendance-exceptions'] });
       setRulesOpen(false);
+      toast({ id: 'attendance-rules', tone: 'done', text: 'Attendance rules saved' });
+    },
+    onError: (error) => {
+      toast({ id: 'attendance-rules', tone: 'bad', text: `Couldn’t save the attendance rules — ${errorMessage(error)}` });
     },
   });
   const [policyRiskPrompt, setPolicyRiskPrompt] = useState<{ patch: WorkspacePolicyPatch; next: MonitoringTiming } | null>(null);
@@ -125,6 +133,15 @@ export function PolicyScreen() {
       setDraft(next);
       qc.invalidateQueries({ queryKey: ['admin', 'monitoring-settings-audits'] });
       setPolicyRiskPrompt(null);
+      toast({ id: 'workspace-policy', tone: 'done', text: 'Policy saved' });
+    },
+    onError: (error, patch) => {
+      toast({
+        id: 'workspace-policy',
+        tone: 'bad',
+        text: `Couldn’t save the policy — ${errorMessage(error)}`,
+        action: { label: 'Retry', onClick: () => m.mutate(patch) },
+      });
     },
   });
   const payrollMutation = useMutation({
@@ -134,6 +151,10 @@ export function PolicyScreen() {
       qc.setQueryData(['payroll-policy'], next);
       qc.invalidateQueries({ queryKey: ['admin', 'payroll'] });
       setPayrollOpen(false);
+      toast({ id: 'payroll-policy', tone: 'done', text: 'Payroll policy saved' });
+    },
+    onError: (error) => {
+      toast({ id: 'payroll-policy', tone: 'bad', text: `Couldn’t save the payroll policy — ${errorMessage(error)}` });
     },
   });
 
@@ -145,6 +166,16 @@ export function PolicyScreen() {
     />
   );
 
+  if (q.isError && !draft) {
+    return (
+      <Page>
+        {header}
+        <Card variant="flush">
+          <LoadError what="the policy" error={q.error} onRetry={() => q.refetch()} />
+        </Card>
+      </Page>
+    );
+  }
   if (q.isLoading || !draft) {
     return (
       <Page>
@@ -167,18 +198,7 @@ export function PolicyScreen() {
     );
   }
 
-  if (q.isError) {
-    return (
-      <Page>
-        {header}
-        <EmptyState
-          tone="danger"
-          title="Couldn’t load policy"
-          description={(q.error as Error).message}
-        />
-      </Page>
-    );
-  }
+
 
   const dirty =
     draft.captureApps !== q.data?.captureApps ||
@@ -216,7 +236,7 @@ export function PolicyScreen() {
       setPolicyRiskPrompt({ patch, next: nextTiming });
       return;
     }
-    await m.mutateAsync(patch);
+    m.mutate(patch);
   }
 
   const saved = m.isSuccess && !dirty;
@@ -260,18 +280,12 @@ export function PolicyScreen() {
           </StatRow>
         </Card>
 
-        {currentRisk === 'HIGH' ? (
-          <Banner status="danger">
-            1-minute monitoring is active in this draft. Saving a timing change at this level requires an audit reason.
-          </Banner>
-        ) : currentRisk === 'CAUTION' ? (
-          <Banner status="warn">
-            This draft uses a short monitoring cadence. The change will be audit-logged when saved.
-          </Banner>
-        ) : null}
-
         <div className="pol-payroll-grid">
-          {payrollQ.isLoading || !payrollQ.data ? (
+          {payrollQ.isError ? (
+            <Card title="Payroll policy" className="pol-card-compact">
+              <LoadError what="the payroll policy" error={payrollQ.error} onRetry={() => payrollQ.refetch()} />
+            </Card>
+          ) : payrollQ.isLoading || !payrollQ.data ? (
             <Card title="Payroll policy">
               <List>
                 <ListRow title={<Skeleton w={180} h={14} />} subtitle={<Skeleton w={320} h={12} />} />
@@ -335,10 +349,6 @@ export function PolicyScreen() {
               </div>
             </Card>
           </div>
-        )}
-
-        {payrollQ.isError && (
-          <Banner status="danger">Couldn’t load payroll policy: {(payrollQ.error as Error).message}</Banner>
         )}
 
         <div className="pol-grid">
@@ -406,6 +416,15 @@ export function PolicyScreen() {
                 }
               />
             </List>
+            {currentRisk === 'HIGH' ? (
+              <Note icon="warn" className="pol-risk-note">
+                1-minute monitoring is set in this draft. Saving a timing change at this level asks for an audit reason.
+              </Note>
+            ) : currentRisk === 'CAUTION' ? (
+              <Note icon="warn" className="pol-risk-note">
+                This draft uses a short monitoring cadence. The change will be audit-logged when saved.
+              </Note>
+            ) : null}
           </Card>
 
           <Card title="Capture & privacy" className="pol-card-compact" action={<Tag mono>{captureCount}/3 enabled</Tag>}>
@@ -439,9 +458,6 @@ export function PolicyScreen() {
           </Card>
         </div>
 
-        {m.isError && (
-          <Banner status="danger">Couldn’t save: {(m.error as Error).message}</Banner>
-        )}
         <Card title="Monitoring audit" className="pol-card-compact" action={<Tag mono>Recent</Tag>}>
           {auditQ.isLoading ? (
             <List>
@@ -456,7 +472,7 @@ export function PolicyScreen() {
               ))}
             </List>
           ) : auditQ.isError ? (
-            <Banner status="danger">Couldn’t load monitoring audit: {(auditQ.error as Error).message}</Banner>
+            <LoadError what="the monitoring audit" error={auditQ.error} onRetry={() => auditQ.refetch()} />
           ) : auditQ.data && auditQ.data.audits.length > 0 ? (
             <List>
               {auditQ.data.audits.map((audit) => (
@@ -475,7 +491,6 @@ export function PolicyScreen() {
           <PayrollPolicyModal
             policy={payrollQ.data}
             saving={payrollMutation.isPending}
-            error={payrollMutation.error instanceof Error ? payrollMutation.error.message : null}
             onClose={() => setPayrollOpen(false)}
             onSave={(patch) => payrollMutation.mutate(patch)}
           />
@@ -484,7 +499,6 @@ export function PolicyScreen() {
           <AttendanceRulesModal
             policy={leaveQ.data}
             saving={rulesMutation.isPending}
-            error={rulesMutation.error instanceof Error ? rulesMutation.error.message : null}
             onClose={() => setRulesOpen(false)}
             onSave={(patch) => rulesMutation.mutate(patch)}
           />
@@ -494,7 +508,6 @@ export function PolicyScreen() {
             title="Confirm 1-minute monitoring"
             description={`This changes workspace defaults to screenshots every ${formatMinutes(policyRiskPrompt.next.screenshotIntervalMin)} and idle break after ${formatMinutes(policyRiskPrompt.next.idleThresholdMin)}.`}
             saving={m.isPending}
-            error={m.error instanceof Error ? m.error.message : null}
             onClose={() => setPolicyRiskPrompt(null)}
             onConfirm={(auditReason) => m.mutate({ ...policyRiskPrompt.patch, auditReason })}
           />
@@ -597,14 +610,12 @@ function MonitoringRiskModal({
   title,
   description,
   saving,
-  error,
   onClose,
   onConfirm,
 }: {
   title: string;
   description: string;
   saving: boolean;
-  error: string | null;
   onClose: () => void;
   onConfirm: (auditReason: string) => void;
 }) {
@@ -622,9 +633,9 @@ function MonitoringRiskModal({
           <IconButton aria-label="Close" icon={<X size={18} />} onClick={onClose} />
         </header>
         <div className="pol-modal-body">
-          <Banner status="danger">
+          <Note icon="warn">
             1-minute monitoring is exceptional. Record why this is needed before saving.
-          </Banner>
+          </Note>
           <Field label="Audit reason" hint="Required. Be specific enough for later review.">
             <Textarea
               value={reason}
@@ -634,7 +645,6 @@ function MonitoringRiskModal({
               autoFocus
             />
           </Field>
-          {error && <Banner status="danger">{error}</Banner>}
         </div>
         <footer className="pol-modal-foot">
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
@@ -671,13 +681,11 @@ function payrollPolicyToForm(policy: PayrollPolicyDto): PayrollFormState {
 function PayrollPolicyModal({
   policy,
   saving,
-  error,
   onClose,
   onSave,
 }: {
   policy: PayrollPolicyDto;
   saving: boolean;
-  error: string | null;
   onClose: () => void;
   onSave: (patch: Record<string, unknown>) => void;
 }) {
@@ -767,10 +775,7 @@ function PayrollPolicyModal({
             </div>
           </section>
 
-          <Banner status="info" className="pol-modal-note">
-            Reminders go to the member/requester and manager/approver. Payroll sheets go to admins.
-          </Banner>
-          {error && <Banner status="danger">{error}</Banner>}
+          <Note>Reminders go to the member/requester and manager/approver. Payroll sheets go to admins.</Note>
         </div>
         <footer className="pol-modal-foot">
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
@@ -792,13 +797,11 @@ function PayrollPolicyModal({
 function AttendanceRulesModal({
   policy,
   saving,
-  error,
   onClose,
   onSave,
 }: {
   policy: LeavePolicyDto;
   saving: boolean;
-  error: string | null;
   onClose: () => void;
   onSave: (patch: Record<string, unknown>) => void;
 }) {
@@ -878,16 +881,15 @@ function AttendanceRulesModal({
             </List>
           </section>
 
-          <Banner status="info" className="pol-modal-note">
+          <Note>
             A day that falls short becomes leave: paid from the leave balance while it lasts, unpaid after. Absent
             without approved leave is leave without approval. A manager&rsquo;s correction always wins.
-          </Banner>
+          </Note>
           {!valid && (
-            <Banner status="warn">
+            <Note icon="warn" role="alert">
               The half-day minimum has to be at most the full-day minimum, late allowed 0–31 and grace 0–240 minutes.
-            </Banner>
+            </Note>
           )}
-          {error && <Banner status="danger">{error}</Banner>}
         </div>
         <footer className="pol-modal-foot">
           <Button variant="ghost" onClick={onClose}>Cancel</Button>

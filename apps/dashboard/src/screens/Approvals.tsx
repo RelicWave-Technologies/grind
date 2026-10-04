@@ -5,7 +5,7 @@ import { createPortal } from 'react-dom';
 import { useNavigate, useRouteContext } from '@tanstack/react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CalendarDays, Check, ChevronLeft, ChevronRight, Clock4, Inbox, X } from 'lucide-react';
-import { api, type ApiError } from '../lib/api';
+import { api } from '../lib/api';
 import { hasCapability, isManagerOrAbove } from '../lib/auth';
 import type { DecideResult, ManualTimeRequest, MtrStatus, MtrUserSummary } from '../lib/types';
 import { addDays, fmtAgeShort, fmtDayLabel, fmtDurationMs, fmtTime, todayKey } from '../lib/format';
@@ -13,12 +13,12 @@ import { reportQueryKeys } from '../lib/reportQueries';
 import type { TaskOption } from '../components/TaskCombo';
 import {
   Avatar,
-  Banner,
   Button,
   Card,
   EmptyState,
   IconButton,
   Identity,
+  LoadError,
   Page,
   PageHeader,
   Segmented,
@@ -34,6 +34,8 @@ import {
   THead,
   Toolbar,
   Tr,
+  errorMessage,
+  useToast,
 } from '../ui';
 import type { Rail, Status } from '../ui';
 
@@ -152,6 +154,7 @@ export function ApprovalsScreen() {
     return map;
   }, [tasksQ.data?.tasks]);
 
+  const toast = useToast();
   const decide = useMutation({
     mutationFn: async (vars: { id: string; action: 'approve' | 'reject' }) => {
       return api<DecideResult>(`/v1/admin/manual-time-requests/${vars.id}/decide`, {
@@ -159,10 +162,19 @@ export function ApprovalsScreen() {
         json: { action: vars.action },
       });
     },
-    onSuccess: () => {
+    onSuccess: (_result, vars) => {
       queryClient.invalidateQueries({ queryKey: ['approvals', 'team'] });
       queryClient.invalidateQueries({ queryKey: ['reports', 'team', 'member'] });
       queryClient.invalidateQueries({ queryKey: reportQueryKeys.teamSummaryRoot });
+      toast({ id: `decide-${vars.id}`, tone: 'done', text: vars.action === 'approve' ? 'Request approved' : 'Request rejected' });
+    },
+    onError: (error, vars) => {
+      toast({
+        id: `decide-${vars.id}`,
+        tone: 'bad',
+        text: `Couldn’t ${vars.action} the request — ${errorMessage(error)}`,
+        action: { label: 'Retry', onClick: () => decide.mutate(vars) },
+      });
     },
   });
 
@@ -184,10 +196,6 @@ export function ApprovalsScreen() {
 
   const summary = useMemo(() => summarizeApprovals(rows.map((row) => row.req)), [rows]);
   const activeQuery = activeMode === 'team' ? teamQ : selfQ;
-  const decisionError =
-    decide.isError && decide.variables
-      ? (decide.error as Error | ApiError).message
-      : null;
 
   return (
     <Page className="apv-page">
@@ -255,20 +263,10 @@ export function ApprovalsScreen() {
           />
         </div>
 
-        {activeQuery.isError && (
-          <div className="apv-table-banner">
-            <Banner status="danger">Couldn&apos;t load approvals — {(activeQuery.error as Error).message}</Banner>
-          </div>
-        )}
-
-        {decisionError && (
-          <div className="apv-table-banner">
-            <Banner status="danger">Decision failed — {decisionError}</Banner>
-          </div>
-        )}
-
         {activeQuery.isLoading ? (
           <SkeletonTable rows={7} />
+        ) : activeQuery.isError && !activeQuery.data ? (
+          <LoadError what="approvals" error={activeQuery.error} onRetry={() => activeQuery.refetch()} />
         ) : visible.length === 0 ? (
           <EmptyState
             icon={<Inbox size={22} strokeWidth={1.8} />}

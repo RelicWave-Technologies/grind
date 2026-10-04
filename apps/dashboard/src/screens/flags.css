@@ -59,19 +59,12 @@
   gap: var(--space-xxs);
 }
 
-/* AI-read Banner internals — stack its lines. */
-.flg-ai__cap,
-.flg-ai__head,
-.flg-ai__detail {
-  display: block;
-}
+/* "AI read" eyebrow carries its sparkle. */
 .flg-ai__cap {
   display: inline-flex;
   align-items: center;
   gap: var(--space-xxs);
-  margin-bottom: var(--space-xxs);
 }
-.flg-ai__detail { margin-top: var(--space-xxs); }
 
 /* Resolved verdict + audit stamp on one line. */
 .flg-verdict {

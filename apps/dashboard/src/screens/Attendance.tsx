@@ -15,7 +15,6 @@ import {
   Page,
   PageHeader,
   Toolbar,
-  Banner,
   Segmented,
   DateStepper,
   Button,
@@ -57,7 +56,7 @@ const PRESENT_MIN_MS = 30 * 60 * 1000;
  * per-person present count.
  *
  * Composed entirely from the shared ui/ kit (PageHeader, Toolbar,
- * Stat, Table, Identity, Tag, Banner, EmptyState, …): one header, a flush KPI
+ * Stat, Table, Identity, Tag, EmptyState, …): one header, a flush KPI
  * StatRow, and one sticky Table where each user-day shows mono
  * first → last times and a present count rail. No bespoke colour, type, or
  * component styling — tokens and kit primitives only.
@@ -185,8 +184,6 @@ export function AttendanceScreen() {
         value={view}
         onChange={setView}
       />
-
-      {monthReport.error && <Banner status="danger">{monthReport.error}</Banner>}
 
       {view === 'month' && <MonthSummary month={reportMonth} isAdmin={me.role === 'ADMIN'} />}
 

@@ -5,7 +5,7 @@ import type { ReactElement, ReactNode } from 'react';
 import { cx } from './util';
 import type { Status } from './util';
 
-/* §5.16 Popover / Menu / Toast — the only components that use --ui-shadow-pop.
+/* §5.16 Popover / Menu / Modal — the only components that use --ui-shadow-pop.
    Dropdowns, action menus, select menus, transient toasts. */
 
 export interface PopoverProps {
@@ -176,18 +176,5 @@ export function Modal({ open, onClose, title, description, actions, children }: 
       </div>
     </div>,
     document.body,
-  );
-}
-
-export interface ToastProps extends React.HTMLAttributes<HTMLDivElement> {
-  status?: Status;
-  children: ReactNode;
-}
-
-export function Toast({ status = 'neutral', className, children, ...rest }: ToastProps) {
-  return (
-    <div className={cx('ui-toast', `ui-toast--${status}`, className)} role="status" {...rest}>
-      {children}
-    </div>
   );
 }

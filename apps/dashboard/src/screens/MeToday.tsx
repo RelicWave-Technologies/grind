@@ -21,7 +21,8 @@ import {
   DateStepper,
   IconButton,
   Tag,
-  Banner,
+  LoadError,
+  Note,
   Stat,
   StatRow,
   SkeletonTable,
@@ -375,8 +376,12 @@ export function MeTodayScreen() {
         }
       />
 
-      {dayQ.isError && (
-        <Banner status="danger">Couldn’t load the day: {(dayQ.error as Error).message}</Banner>
+      {dayQ.isError && !dayQ.data && (
+        <div className="myd-stack">
+          <Card variant="flush" className="ui-rise-1">
+            <LoadError what="the day" error={dayQ.error} onRetry={() => dayQ.refetch()} />
+          </Card>
+        </div>
       )}
 
       {dayQ.isLoading && (
@@ -460,11 +465,9 @@ export function MeTodayScreen() {
             </div>
 
             {!editable && (
-              <div className="myd-readonly">
-                <Banner status="info">
-                  Viewing {targetUser?.name}’s day without edit access.
-                </Banner>
-              </div>
+              <Note icon="info" className="myd-readonly">
+                Viewing {targetUser?.name}’s day without edit access.
+              </Note>
             )}
           </Card>
 

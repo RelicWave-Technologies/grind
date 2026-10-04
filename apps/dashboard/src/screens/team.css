@@ -35,6 +35,11 @@
   margin-top: 2px;
 }
 
+/* The cadence warning for the row being edited, under the card's own line. */
+.tm-card-head .tm-risk-note {
+  margin-top: var(--space-xs);
+}
+
 .tm-table-wrap {
   overflow-x: auto;
 }

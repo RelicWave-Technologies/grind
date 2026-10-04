@@ -16,7 +16,7 @@ import {
   ListRow,
   Tag,
   EmptyState,
-  Banner,
+  LoadError,
   SkeletonStat,
   SkeletonTable,
 } from '../ui';
@@ -25,7 +25,7 @@ import {
  * /overview — the MANAGER+ command center (M16). Composed entirely from the
  * shared ui/ kit (src/ui/*): PageHeader for context, a flush
  * StatRow for today's headline numbers, Card + List for the attention queues
- * and the rejected ledger, Tag for status, Banner/EmptyState/Skeleton for the
+ * and the rejected ledger, Tag for status, EmptyState/LoadError/Skeleton for the
  * loading/error/empty states. The page file contributes layout only — no
  * bespoke colour, type, border, or shadow (see overview.css).
  *
@@ -146,11 +146,12 @@ export function OverviewScreen() {
       />
 
       <div className="ov-sections">
-        {q.isError && (
-          <Banner status="danger">
-            Couldn&apos;t load the overview: {(q.error as Error).message}
-          </Banner>
-        )}
+        {q.isError && !q.data ? (
+          <Card variant="flush">
+            <LoadError what="the overview" error={q.error} onRetry={() => q.refetch()} />
+          </Card>
+        ) : (
+        <>
 
         {/* Today's headline numbers */}
         <Card variant="flush" className="ui-rise-1">
@@ -307,6 +308,8 @@ export function OverviewScreen() {
               ))}
             </List>
           </Card>
+        )}
+        </>
         )}
       </div>
     </Page>

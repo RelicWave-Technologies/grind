@@ -69,17 +69,17 @@ export type { AvatarProps, AvatarGroupProps, IdentityProps, AvatarSize } from '.
 export { Toolbar, ToolbarDivider, DateStepper } from './Toolbar';
 export type { ToolbarProps, DateStepperProps } from './Toolbar';
 
-// ── §5.13 / §5.15 — empty + inline notices ──────────────────────────────────
-export { EmptyState, Banner } from './Feedback';
-export type { EmptyStateProps, BannerProps, BannerStatus } from './Feedback';
+// ── §5.13 — empty, load-error and note states ──────────────────────────────────
+export { EmptyState, LoadError, Note, errorMessage } from './Feedback';
+export type { EmptyStateProps, LoadErrorProps, NoteProps } from './Feedback';
 
 // ── §5.14 — loading ─────────────────────────────────────────────────────────
 export { Spinner, Skeleton, SkeletonTable, SkeletonStat } from './Loading';
 export type { SpinnerProps, SkeletonProps } from './Loading';
 
 // ── §5.16 — floating layers ─────────────────────────────────────────────────
-export { Popover, Menu, Modal, Toast } from './Overlay';
-export type { PopoverProps, MenuProps, MenuItemSpec, ModalProps, ToastProps } from './Overlay';
+export { Popover, Menu, Modal } from './Overlay';
+export type { PopoverProps, MenuProps, MenuItemSpec, ModalProps } from './Overlay';
 
 // ── §5.17 — app chrome ──────────────────────────────────────────────────────
 export { AppShell, Sidebar, SidebarBrand, NavSection, NavItem } from './Shell';
@@ -93,3 +93,5 @@ export type {
 // ── The mark, its loader and the app-load intro (DESIGN.md §9 The logo, Motion) ──
 export { TimoMark, PageLoader } from './Mark';
 export { IntroProvider, useIntroHold, introTarget } from './Intro';
+export { ToastProvider, useToast } from './Toast';
+export type { Toast, ToastTone } from './Toast';

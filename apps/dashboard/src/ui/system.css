@@ -666,6 +666,21 @@ textarea.ui-control {
 .ui-empty__action { margin-top: var(--space-xs); }
 .ui-empty--danger .ui-empty__icon { background: var(--color-bad-wash); color: var(--color-bad); }
 .ui-empty--danger .ui-empty__title { color: var(--color-bad); }
+/* The error state inside a card or a section: same shape, less air. */
+.ui-empty--compact { padding: var(--space-xl) var(--space-lg); }
+
+/* Note — a quiet line about the page's current state or how something works
+   (DESIGN.md §9 App states): muted caption, never a coloured box. */
+.ui-note {
+  display: flex; align-items: flex-start; gap: var(--space-xs);
+  margin: 0;
+  font-size: var(--type-caption-size);
+  line-height: var(--type-caption-leading);
+  font-weight: var(--type-caption-weight);
+  color: var(--color-muted);
+}
+.ui-note__icon { flex-shrink: 0; margin-top: 2px; color: var(--color-muted); }
+.ui-note--warn .ui-note__icon { color: var(--color-wait); }
 
 /* ============================================================================
    Skeleton + spinner — `sheet-2` bars pulsing 1 → 0.45 over 1.8s.
@@ -682,26 +697,6 @@ textarea.ui-control {
 .ui-skeleton-stat { display: flex; flex-direction: column; gap: var(--space-xs); padding: var(--space-lg) var(--space-xl); }
 
 .ui-spinner { display: inline-flex; flex-shrink: 0; vertical-align: middle; color: var(--color-muted); }
-
-/* ============================================================================
-   Banner — a one-line notice (DESIGN.md §9 Cards, notices).
-   ========================================================================== */
-.ui-banner {
-  display: flex; align-items: center; gap: var(--space-xs);
-  padding: var(--space-sm) var(--space-md);
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--color-line-soft);
-  background: var(--color-sheet-soft);
-  color: var(--color-body);
-  font-size: var(--type-body-sm-size);
-}
-.ui-banner__icon { flex-shrink: 0; display: inline-flex; align-items: center; }
-.ui-banner__body { flex: 1 1 auto; min-width: 0; }
-.ui-banner__action { flex-shrink: 0; margin-left: auto; }
-.ui-banner--success { background: var(--color-good-wash);  border-color: transparent;              color: var(--color-good); }
-.ui-banner--warn    { background: var(--color-wait-wash);  border-color: transparent;              color: var(--color-wait); }
-.ui-banner--danger  { background: var(--color-bad-wash);   border-color: var(--color-bad-edge);    color: var(--color-bad); }
-.ui-banner--info    { background: var(--color-sheet-soft); border-color: var(--color-line-soft);   color: var(--color-body); }
 
 /* ============================================================================
    Floating layers — modal, popover, menu, toast. The only shadows
@@ -780,25 +775,6 @@ textarea.ui-control {
 .ui-menu-item--danger:hover { color: var(--color-bad); }
 .ui-menu-item:disabled { color: var(--color-faint); cursor: not-allowed; background: transparent; }
 
-/* Toast — an ink pill at the bottom centre; an error is `bad`. */
-.ui-toast {
-  position: fixed;
-  left: 50%;
-  translate: -50% 0;
-  bottom: var(--space-xl);
-  z-index: 100;
-  max-width: min(480px, calc(100vw - var(--space-xxl)));
-  background: var(--color-ink);
-  color: var(--color-white);
-  border-radius: var(--radius-full);
-  box-shadow: var(--elevation-4);
-  padding: var(--space-sm) var(--space-lg);
-  font-size: var(--type-body-sm-size);
-  display: flex; align-items: center; gap: var(--space-xs);
-  animation: ui-page-rise var(--duration-base) var(--ease-standard) both;
-}
-.ui-toast .lucide { color: inherit; }
-.ui-toast--danger { background: var(--color-bad); }
 
 .ui-overlay {
   position: fixed; inset: 0; z-index: 90;
@@ -899,3 +875,7 @@ textarea.ui-control {
   .ui-sidebar__downloads, .ui-sidebar__me-meta { display: none; }
   .ui-main { padding: var(--space-xl) var(--space-md) var(--space-section-sm); }
 }
+
+/* The toast dock (the toast itself: @grind/design toast.css) is fixed to the
+   viewport, since dashboard pages scroll; it floats above drawers and modals. */
+.toast-dock--page { position: fixed; bottom: var(--space-lg); z-index: 1200; }

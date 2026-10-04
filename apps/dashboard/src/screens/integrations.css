@@ -92,10 +92,6 @@
   white-space: nowrap;
 }
 
-.int-inline-banner {
-  padding: var(--space-sm) var(--space-xl) 0;
-}
-
 .int-token-once {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

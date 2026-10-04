@@ -29,7 +29,9 @@ import {
   Field,
   Input,
   Select,
-  Banner,
+  LoadError,
+  errorMessage,
+  useToast,
   Modal,
   EmptyState,
   SkeletonTable,
@@ -154,6 +156,9 @@ export function UsersScreen() {
     enabled: canEdit,
   });
 
+  const toast = useToast();
+  const personName = (id: string) => usersQ.data?.users.find((u) => u.id === id)?.name ?? 'this person';
+
   const patch = useMutation({
     mutationFn: (vars: {
       id: string;
@@ -165,7 +170,18 @@ export function UsersScreen() {
       }>;
     }) =>
       api<AdminUser>(`/v1/admin/users/${vars.id}`, { method: 'PATCH', json: vars.patch }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'users'] }),
+    onSuccess: (user) => {
+      toast({ id: `user-${user.id}`, tone: 'done', text: `Saved ${user.name}` });
+      return qc.invalidateQueries({ queryKey: ['admin', 'users'] });
+    },
+    onError: (error, vars) => {
+      toast({
+        id: `user-${vars.id}`,
+        tone: 'bad',
+        text: `Couldn’t save ${personName(vars.id)} — ${errorMessage(error)}`,
+        action: { label: 'Retry', onClick: () => patch.mutate(vars) },
+      });
+    },
   });
 
   const deactivate = useMutation({
@@ -174,7 +190,13 @@ export function UsersScreen() {
         `/v1/admin/users/${id}/deactivate`,
         { method: 'POST' },
       ),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'users'] }),
+    onSuccess: (_result, id) => {
+      toast({ id: `user-${id}`, tone: 'done', text: `Deactivated ${personName(id)}` });
+      return qc.invalidateQueries({ queryKey: ['admin', 'users'] });
+    },
+    onError: (error, id) => {
+      toast({ id: `user-${id}`, tone: 'bad', text: `Couldn’t deactivate ${personName(id)} — ${errorMessage(error)}` });
+    },
   });
   const reactivate = useMutation({
     mutationFn: (id: string) =>
@@ -182,7 +204,13 @@ export function UsersScreen() {
         `/v1/admin/users/${id}/reactivate`,
         { method: 'POST' },
       ),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'users'] }),
+    onSuccess: (_result, id) => {
+      toast({ id: `user-${id}`, tone: 'done', text: `Reactivated ${personName(id)}` });
+      return qc.invalidateQueries({ queryKey: ['admin', 'users'] });
+    },
+    onError: (error, id) => {
+      toast({ id: `user-${id}`, tone: 'bad', text: `Couldn’t reactivate ${personName(id)} — ${errorMessage(error)}` });
+    },
   });
   const [deleting, setDeleting] = useState<AdminUser | null>(null);
 
@@ -192,7 +220,13 @@ export function UsersScreen() {
         `/v1/admin/users/${id}/activate`,
         { method: 'POST' },
       ),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'users'] }),
+    onSuccess: (_result, id) => {
+      toast({ id: `user-${id}`, tone: 'done', text: `Activated ${personName(id)}` });
+      return qc.invalidateQueries({ queryKey: ['admin', 'users'] });
+    },
+    onError: (error, id) => {
+      toast({ id: `user-${id}`, tone: 'bad', text: `Couldn’t activate ${personName(id)} — ${errorMessage(error)}` });
+    },
   });
 
   const teamName = (id: string | null): string => {
@@ -225,7 +259,6 @@ export function UsersScreen() {
 
   // Person, Role, Presence, Team, Shift, Joined = 6, plus the admin-only
   // Birth date and actions columns, plus the two device-health ones.
-  const colSpan = (canEdit ? 8 : 6) + (showDeviceHealth ? 2 : 0);
 
   return (
     <Page>
@@ -337,7 +370,6 @@ export function UsersScreen() {
                     user={u}
                     isSelf={u.id === me.id}
                     canEdit={canEdit}
-                    colSpan={colSpan}
                     showDeviceHealth={showDeviceHealth}
                     teams={teamsQ.data?.teams ?? []}
                     teamName={teamName(u.teamId)}
@@ -348,17 +380,6 @@ export function UsersScreen() {
                       (deactivate.isPending && deactivate.variables === u.id) ||
                       (reactivate.isPending && reactivate.variables === u.id) ||
                       (activate.isPending && activate.variables === u.id)
-                    }
-                    error={
-                      (patch.isError && patch.variables?.id === u.id
-                        ? (patch.error as Error | ApiError).message
-                        : null) ||
-                      (deactivate.isError && deactivate.variables === u.id
-                        ? (deactivate.error as Error | ApiError).message
-                        : null) ||
-                      (reactivate.isError && reactivate.variables === u.id
-                        ? (reactivate.error as Error | ApiError).message
-                        : null)
                     }
                     onSave={(p) => patch.mutate({ id: u.id, patch: p })}
                     onDeactivate={() => deactivate.mutate(u.id)}
@@ -389,14 +410,12 @@ interface RowProps {
   user: AdminUser;
   isSelf: boolean;
   canEdit: boolean;
-  colSpan: number;
   showDeviceHealth: boolean;
   teams: Team[];
   teamName: string;
   shifts: Shift[];
   shiftName: string;
   busy: boolean;
-  error: string | null;
   onSave: (patch: Partial<{
     name: string;
     role: Role;
@@ -414,14 +433,12 @@ function PersonRow({
   user,
   isSelf,
   canEdit,
-  colSpan,
   showDeviceHealth,
   teams,
   teamName,
   shifts,
   shiftName,
   busy,
-  error,
   onSave,
   onDeactivate,
   onReactivate,
@@ -688,13 +705,6 @@ function PersonRow({
           </Td>
         )}
       </Tr>
-      {error && (
-        <tr className="usr-row-err">
-          <Td colSpan={colSpan}>
-            <Banner status="danger">{error}</Banner>
-          </Td>
-        </tr>
-      )}
     </>
   );
 }
@@ -834,24 +844,30 @@ function accessibilityPermissionTag(user: AdminUser): { label: string; status: S
 
 // -----------------------------------------------------------------------------
 // Invite form — a calm Card above the roster. Escape cancels the email field,
-// errors render in a Banner. Same mutation + contract.
+// the result is a toast. Same mutation + contract.
 
 function InviteForm({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
   const [role, setRole] = useState<Role>('MEMBER');
+  const toast = useToast();
   const m = useMutation({
     mutationFn: (vars: { email: string; name: string; role: Role }) =>
       api<AdminUser>('/v1/admin/users', { method: 'POST', json: { ...vars, activityRoleTitle: 'OTHER' } }),
-    onSuccess: () => onCreated(),
+    onSuccess: (_user, vars) => {
+      toast({ id: 'user-invite', tone: 'done', text: `Invited ${vars.name}` });
+      onCreated();
+    },
+    onError: (error) => {
+      toast({
+        id: 'user-invite',
+        tone: 'bad',
+        text: `Couldn’t invite them — ${
+          (error as ApiError).status === 409 ? 'that email is already in use.' : errorMessage(error)
+        }`,
+      });
+    },
   });
-
-  const err =
-    m.isError
-      ? (m.error as ApiError).status === 409
-        ? 'That email is already in use.'
-        : (m.error as Error).message
-      : null;
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -913,11 +929,6 @@ function InviteForm({ onClose, onCreated }: { onClose: () => void; onCreated: ()
           </Button>
         </div>
       </form>
-      {err && (
-        <Banner status="danger" className="usr-invite-banner">
-          {err}
-        </Banner>
-      )}
       <p className="usr-invite-hint ui-t-small">
         A temporary password is generated server-side. Share it manually for v1 — magic-link onboarding is on the roadmap.
       </p>
@@ -972,6 +983,7 @@ function DeleteMemberModal({
   user, onClose, onDeleted,
 }: { user: AdminUser | null; onClose: () => void; onDeleted: () => void }) {
   const [typed, setTyped] = useState('');
+  const toast = useToast();
 
   const plan = useQuery({
     queryKey: ['admin', 'users', user?.id, 'deletion-plan'],
@@ -989,7 +1001,13 @@ function DeleteMemberModal({
         method: 'DELETE',
         json: { confirmEmail: typed.trim() },
       }),
-    onSuccess: onDeleted,
+    onSuccess: () => {
+      toast({ id: 'user-delete', tone: 'done', text: `Deleted ${user?.name ?? 'them'} permanently` });
+      onDeleted();
+    },
+    onError: (error) => {
+      toast({ id: 'user-delete', tone: 'bad', text: `Couldn’t delete ${user?.name ?? 'them'} — ${errorMessage(error)}` });
+    },
   });
 
   const close = () => {
@@ -998,7 +1016,7 @@ function DeleteMemberModal({
     onClose();
   };
 
-  const blocked = plan.isError ? ((plan.error as Error | ApiError).message) : null;
+  const blocked = plan.isError;
   const matches = plan.data != null && typed.trim().toLowerCase() === plan.data.email.toLowerCase();
   const totalRows = plan.data
     ? DESTROY_LABELS.reduce((sum, [k]) => sum + plan.data!.destroys[k], 0)
@@ -1015,7 +1033,7 @@ function DeleteMemberModal({
           <Button variant="ghost" onClick={close} disabled={remove.isPending}>Cancel</Button>
           <Button
             variant="danger"
-            disabled={!matches || plan.isLoading || blocked !== null}
+            disabled={!matches || plan.isLoading || blocked}
             loading={remove.isPending}
             onClick={() => remove.mutate()}
           >
@@ -1026,7 +1044,9 @@ function DeleteMemberModal({
     >
       {plan.isLoading && <p className="usr-del-note">Working out what this would destroy…</p>}
 
-      {blocked && <Banner status="danger">{blocked}</Banner>}
+      {blocked && (
+        <LoadError what="what this would delete" error={plan.error} onRetry={() => plan.refetch()} />
+      )}
 
       {plan.data && !blocked && (
         <>
@@ -1064,10 +1084,6 @@ function DeleteMemberModal({
               spellCheck={false}
             />
           </Field>
-
-          {remove.isError && (
-            <Banner status="danger">{(remove.error as Error | ApiError).message}</Banner>
-          )}
         </>
       )}
     </Modal>

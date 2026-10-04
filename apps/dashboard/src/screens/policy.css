@@ -280,18 +280,9 @@
   line-height: 1.25;
 }
 
-.pol-modal-note.ui-banner {
-  background: var(--color-sheet);
-  border-color: var(--color-line);
-  color: var(--color-body);
-}
-
-.pol-modal-note.ui-banner {
-  padding: var(--space-xs) var(--space-sm);
-}
-
-.pol-modal-note .ui-banner__icon {
-  color: var(--color-muted);
+/* The cadence warning sits under the controls it concerns. */
+.pol-risk-note {
+  margin-top: var(--space-sm);
 }
 
 @media (prefers-reduced-motion: reduce) {

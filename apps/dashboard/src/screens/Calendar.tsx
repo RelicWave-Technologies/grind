@@ -37,7 +37,8 @@ import {
   Field,
   Input,
   Select,
-  Banner,
+  Note,
+  useToast,
   Modal,
   EmptyState,
   Skeleton,
@@ -580,14 +581,13 @@ function HolidaysPanel({
   const [open, setOpen] = useState(false);
   const [date, setDate] = useState('');
   const [name, setName] = useState('');
-  const [error, setError] = useState<string | null>(null);
+  const toast = useToast();
 
   /** Leaving the dialog must not leave a half-typed holiday behind it. */
   function closeModal() {
     setOpen(false);
     setDate('');
     setName('');
-    setError(null);
   }
 
   const create = useMutation({
@@ -597,15 +597,19 @@ function HolidaysPanel({
         json: { date, name },
       }),
     onSuccess: () => {
+      toast({ id: 'holiday-add', tone: 'done', text: `Added ${name.trim()} as a holiday` });
       closeModal();
       onChanged();
     },
-    onError: (e: Error) => setError(humanError(e.message)),
+    onError: (e: Error) =>
+      toast({ id: 'holiday-add', tone: 'bad', text: `Couldn’t add the holiday — ${humanError(e.message)}` }),
   });
 
   const remove = useMutation({
     mutationFn: (id: string) => api(`/v1/admin/leave/holidays/${id}`, { method: 'DELETE' }),
     onSuccess: onChanged,
+    onError: (e: Error) =>
+      toast({ id: 'holiday-remove', tone: 'bad', text: `Couldn’t remove the holiday — ${humanError(e.message)}` }),
   });
 
   if (loading) return <SkeletonTable rows={4} />;
@@ -638,7 +642,6 @@ function HolidaysPanel({
           </>
         }
       >
-        {error && <Banner status="danger">{error}</Banner>}
         <Field label="Date">
           <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
         </Field>
@@ -723,11 +726,11 @@ function MyLeavePanel({
       </p>
 
       {decidedInLark && (
-        <Banner status="info">
+        <Note>
           Leave is applied for and approved in Lark, exactly as it always has been. Timo mirrors what
           Lark decided, usually within ten minutes, and keeps the balance — the one thing Lark does
           not track.
-        </Banner>
+        </Note>
       )}
 
       {loading ? (
@@ -818,7 +821,7 @@ export function EditMemberModal({
   const [saturday, setSaturday] = useState<'inherit' | 'on' | 'off'>('inherit');
   const [change, setChange] = useState('');
   const [why, setWhy] = useState('');
-  const [error, setError] = useState<string | null>(null);
+  const toast = useToast();
 
   useEffect(() => {
     if (!row) return;
@@ -827,7 +830,6 @@ export function EditMemberModal({
     setSaturday(row.lastSaturdayOff === null ? 'inherit' : row.lastSaturdayOff ? 'on' : 'off');
     setChange('');
     setWhy('');
-    setError(null);
   }, [row]);
 
   const changeDays = change.trim() === '' ? 0 : Number(change);
@@ -851,8 +853,13 @@ export function EditMemberModal({
         });
       }
     },
-    onSuccess: () => { onSaved(); onClose(); },
-    onError: (e: Error) => setError(humanError(e.message)),
+    onSuccess: () => {
+      toast({ id: 'leave-member', tone: 'done', text: `Saved leave for ${row?.name ?? 'this person'}` });
+      onSaved();
+      onClose();
+    },
+    onError: (e: Error) =>
+      toast({ id: 'leave-member', tone: 'bad', text: `Couldn’t save leave for ${row?.name ?? 'this person'} — ${humanError(e.message)}` }),
   });
 
   return (
@@ -867,7 +874,6 @@ export function EditMemberModal({
         </>
       }
     >
-      {error && <Banner status="danger">{error}</Banner>}
       <Field label="Leave per month" hint="Empty = company default.">
         <Input type="number" step="0.5" min="0" value={rate} placeholder="default"
                onChange={(e) => setRate(e.target.value)} />

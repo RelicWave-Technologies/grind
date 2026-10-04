@@ -3,7 +3,7 @@ import ReactDOM from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RouterProvider, createRouter } from '@tanstack/react-router';
 import { routeTree } from './router';
-import { IntroProvider, useIntroHold } from './ui';
+import { IntroProvider, ToastProvider, useIntroHold } from './ui';
 // The EMIAC design system (root DESIGN.md): fonts, generated tokens, element
 // defaults. Everything below builds on it.
 import '@grind/design';
@@ -59,8 +59,10 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
       <IntroProvider enabled={opensApp}>
-        <FirstRoute />
-        <RouterProvider router={router} />
+        <ToastProvider>
+          <FirstRoute />
+          <RouterProvider router={router} />
+        </ToastProvider>
       </IntroProvider>
     </QueryClientProvider>
   </React.StrictMode>,

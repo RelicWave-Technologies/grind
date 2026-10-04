@@ -44,10 +44,6 @@
   flex: none;
 }
 
-.apv-table-banner {
-  padding: var(--space-sm) var(--space-lg) 0;
-}
-
 .apv-table-wrap {
   overflow-x: auto;
 }

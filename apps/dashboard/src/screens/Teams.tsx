@@ -17,7 +17,7 @@ import {
   Users2,
   X,
 } from 'lucide-react';
-import { api, type ApiError } from '../lib/api';
+import { api } from '../lib/api';
 import { addDays, fmtDurationMs, todayKey } from '../lib/format';
 import type { Team } from '../lib/types';
 import type { Role } from '../lib/auth';
@@ -25,7 +25,10 @@ import type { TeamReportSummaryMember } from '@grind/types/reports';
 import { reportQueryKeys, teamReportSummaryQuery } from '../lib/reportQueries';
 import {
   Avatar,
-  Banner,
+  LoadError,
+  Note,
+  errorMessage,
+  useToast,
   Button,
   Card,
   EmptyState,
@@ -112,45 +115,102 @@ export function TeamsScreen() {
     return performanceQ.data.members;
   }, [performanceQ.data]);
 
+  const toast = useToast();
+  const teamName = (id: string | null | undefined) => (id ? teamsById.get(id)?.name : undefined) ?? 'the team';
+  const userName = (id: string) => users.find((user) => user.id === id)?.name ?? 'this person';
+
   const create = useMutation({
     mutationFn: (vars: { name: string; managerIds: string[] }) =>
       api<Team>('/v1/admin/teams', { method: 'POST', json: vars }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'teams'] }),
+    onSuccess: (team) => {
+      qc.invalidateQueries({ queryKey: ['admin', 'teams'] });
+      toast({ id: 'team-create', tone: 'done', text: `Created ${team.name}` });
+    },
+    onError: (error) => {
+      toast({ id: 'team-create', tone: 'bad', text: `Couldn’t create the team — ${errorMessage(error)}` });
+    },
   });
   const patch = useMutation({
     mutationFn: (vars: { id: string; patch: TeamPatch }) =>
       api<Team>(`/v1/admin/teams/${vars.id}`, { method: 'PATCH', json: vars.patch }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'teams'] }),
+    onSuccess: (team) => {
+      qc.invalidateQueries({ queryKey: ['admin', 'teams'] });
+      toast({ id: `team-${team.id}`, tone: 'done', text: `Saved ${team.name}` });
+    },
+    onError: (error, vars) => {
+      toast({
+        id: `team-${vars.id}`,
+        tone: 'bad',
+        text: `Couldn’t save ${teamName(vars.id)} — ${errorMessage(error)}`,
+        action: { label: 'Retry', onClick: () => patch.mutate(vars) },
+      });
+    },
   });
   const del = useMutation({
     mutationFn: (id: string) => api(`/v1/admin/teams/${id}`, { method: 'DELETE' }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'teams'] }),
+    onSuccess: (_result, id) => {
+      toast({ id: `team-${id}`, tone: 'done', text: `Deleted ${teamName(id)}` });
+      qc.invalidateQueries({ queryKey: ['admin', 'teams'] });
+    },
+    onError: (error, id) => {
+      toast({ id: `team-${id}`, tone: 'bad', text: `Couldn’t delete ${teamName(id)} — ${errorMessage(error)}` });
+    },
   });
   const patchUser = useMutation({
     mutationFn: (vars: { id: string; patch: UserPatch }) =>
       api(`/v1/admin/users/${vars.id}`, { method: 'PATCH', json: vars.patch }),
-    onSuccess: () => {
+    onSuccess: (_result, vars) => {
+      toast({
+        id: `team-member-${vars.id}`,
+        tone: 'done',
+        text: vars.patch.teamId ? `Moved ${userName(vars.id)} into ${teamName(vars.patch.teamId)}` : `Removed ${userName(vars.id)} from the team`,
+      });
       qc.invalidateQueries({ queryKey: ['admin', 'users'] });
       qc.invalidateQueries({ queryKey: ['admin', 'teams'] });
       qc.invalidateQueries({ queryKey: reportQueryKeys.teamSummaryRoot });
+    },
+    onError: (error, vars) => {
+      toast({
+        id: `team-member-${vars.id}`,
+        tone: 'bad',
+        text: vars.patch.teamId
+          ? `Couldn’t add ${userName(vars.id)} to ${teamName(vars.patch.teamId)} — ${errorMessage(error)}`
+          : `Couldn’t remove ${userName(vars.id)} from the team — ${errorMessage(error)}`,
+      });
     },
   });
   const addManager = useMutation({
     mutationFn: (vars: { teamId: string; userId: string }) =>
       api<Team>(`/v1/admin/teams/${vars.teamId}/managers`, { method: 'POST', json: { userId: vars.userId } }),
-    onSuccess: () => {
+    onSuccess: (_team, vars) => {
+      toast({ id: `team-manager-${vars.userId}`, tone: 'done', text: `${userName(vars.userId)} now manages ${teamName(vars.teamId)}` });
       qc.invalidateQueries({ queryKey: ['admin', 'users'] });
       qc.invalidateQueries({ queryKey: ['admin', 'teams'] });
       qc.invalidateQueries({ queryKey: reportQueryKeys.teamSummaryRoot });
+    },
+    onError: (error, vars) => {
+      toast({
+        id: `team-manager-${vars.userId}`,
+        tone: 'bad',
+        text: `Couldn’t make ${userName(vars.userId)} a manager of ${teamName(vars.teamId)} — ${errorMessage(error)}`,
+      });
     },
   });
   const removeManager = useMutation({
     mutationFn: (vars: { teamId: string; userId: string }) =>
       api<Team>(`/v1/admin/teams/${vars.teamId}/managers/${vars.userId}`, { method: 'DELETE' }),
-    onSuccess: () => {
+    onSuccess: (_team, vars) => {
+      toast({ id: `team-manager-${vars.userId}`, tone: 'done', text: `${userName(vars.userId)} no longer manages ${teamName(vars.teamId)}` });
       qc.invalidateQueries({ queryKey: ['admin', 'users'] });
       qc.invalidateQueries({ queryKey: ['admin', 'teams'] });
       qc.invalidateQueries({ queryKey: reportQueryKeys.teamSummaryRoot });
+    },
+    onError: (error, vars) => {
+      toast({
+        id: `team-manager-${vars.userId}`,
+        tone: 'bad',
+        text: `Couldn’t remove ${userName(vars.userId)} as a manager — ${errorMessage(error)}`,
+      });
     },
   });
 
@@ -199,10 +259,8 @@ export function TeamsScreen() {
           <div className="tms-pad">
             <SkeletonTable rows={4} />
           </div>
-        ) : teamsQ.isError ? (
-          <div className="tms-pad">
-            <Banner status="danger">Couldn&apos;t load teams: {(teamsQ.error as Error).message}</Banner>
-          </div>
+        ) : teamsQ.isError && !teamsQ.data ? (
+          <LoadError what="teams" error={teamsQ.error} onRetry={() => teamsQ.refetch()} />
         ) : teams.length === 0 ? (
           <EmptyState
             icon={<Users2 size={22} strokeWidth={1.8} />}
@@ -216,12 +274,6 @@ export function TeamsScreen() {
                 key={team.id}
                 team={team}
                 busy={(patch.isPending && patch.variables?.id === team.id) || (del.isPending && del.variables === team.id)}
-                error={
-                  (patch.isError && patch.variables?.id === team.id
-                    ? (patch.error as Error | ApiError).message
-                    : null) ||
-                  (del.isError && del.variables === team.id ? (del.error as Error | ApiError).message : null)
-                }
                 onOpen={() => setSelectedTeamId(team.id)}
                 onPatch={(nextPatch) => patch.mutate({ id: team.id, patch: nextPatch })}
                 onDelete={() =>
@@ -242,7 +294,6 @@ export function TeamsScreen() {
           users={users}
           teamByManagerId={teamByManagerId}
           busy={create.isPending}
-          error={create.isError ? (create.error as Error | ApiError).message : null}
           onCreate={(vars) =>
             create.mutate(vars, {
               onSuccess: () => setCreateOpen(false),
@@ -263,7 +314,8 @@ export function TeamsScreen() {
           performanceFrom={performanceFrom}
           performanceTo={performanceTo}
           performanceLoading={performanceQ.isLoading}
-          performanceError={performanceQ.isError ? (performanceQ.error as Error).message : null}
+          performanceError={performanceQ.isError ? performanceQ.error : null}
+          onRetryPerformance={() => performanceQ.refetch()}
           managerMutationUserId={
             addManager.isPending && addManager.variables?.teamId === selectedTeam.id
               ? addManager.variables.userId
@@ -271,16 +323,7 @@ export function TeamsScreen() {
                 ? removeManager.variables.userId
                 : null
           }
-          managerMutationError={
-            (addManager.isError && addManager.variables?.teamId === selectedTeam.id
-              ? (addManager.error as Error | ApiError).message
-              : null) ||
-            (removeManager.isError && removeManager.variables?.teamId === selectedTeam.id
-              ? (removeManager.error as Error | ApiError).message
-              : null)
-          }
           memberMutationUserId={patchUser.isPending ? patchUser.variables?.id ?? null : null}
-          memberMutationError={patchUser.isError ? (patchUser.error as Error | ApiError).message : null}
           onAddManager={(userId) => addManager.mutate({ teamId: selectedTeam.id, userId })}
           onRemoveManager={(userId) => removeManager.mutate({ teamId: selectedTeam.id, userId })}
           onAddMember={(userId) => patchUser.mutate({ id: userId, patch: { teamId: selectedTeam.id } })}
@@ -296,14 +339,12 @@ function NewTeamModal({
   users,
   teamByManagerId,
   busy,
-  error,
   onCreate,
   onClose,
 }: {
   users: AdminUser[];
   teamByManagerId: Map<string, Team>;
   busy: boolean;
-  error: string | null;
   onCreate: (vars: { name: string; managerIds: string[] }) => void;
   onClose: () => void;
 }) {
@@ -363,8 +404,7 @@ function NewTeamModal({
               ))}
             </Select>
           </Field>
-          <Banner status="info">A team can have multiple managers. Non-admin managers are moved into the team they manage.</Banner>
-          {error && <Banner status="danger">{error}</Banner>}
+          <Note>A team can have multiple managers. Non-admin managers are moved into the team they manage.</Note>
         </div>
 
         <div className="tms-layer-actions">
@@ -390,14 +430,12 @@ function NewTeamModal({
 function TeamRow({
   team,
   busy,
-  error,
   onOpen,
   onPatch,
   onDelete,
 }: {
   team: Team;
   busy: boolean;
-  error: string | null;
   onOpen: () => void;
   onPatch: (patch: TeamPatch) => void;
   onDelete: () => void;
@@ -508,27 +546,17 @@ function TeamRow({
 
       {pendingDelete && !editing && (
         <div className="tms-confirm" onClick={stopRowClick}>
-          <Banner
-            status="danger"
-            action={
-              <div className="tms-confirm-actions">
-                <Button variant="ghost" size="sm" onClick={() => setPendingDelete(false)} disabled={busy}>
-                  Cancel
-                </Button>
-                <Button variant="danger" size="sm" onClick={onDelete} loading={busy}>
-                  Delete team
-                </Button>
-              </div>
-            }
-          >
+          <p className="ui-t-small tms-confirm-text">
             Delete <strong>{team.name}</strong>? Members keep their accounts but lose this team assignment.
-          </Banner>
-        </div>
-      )}
-
-      {error && (
-        <div className="tms-row-err">
-          <Banner status="danger">{error}</Banner>
+          </p>
+          <div className="tms-confirm-actions">
+            <Button variant="ghost" size="sm" onClick={() => setPendingDelete(false)} disabled={busy}>
+              Cancel
+            </Button>
+            <Button variant="danger" size="sm" onClick={onDelete} loading={busy}>
+              Delete team
+            </Button>
+          </div>
         </div>
       )}
     </div>
@@ -546,10 +574,9 @@ function TeamDrawer({
   performanceTo,
   performanceLoading,
   performanceError,
+  onRetryPerformance,
   managerMutationUserId,
-  managerMutationError,
   memberMutationUserId,
-  memberMutationError,
   onAddManager,
   onRemoveManager,
   onAddMember,
@@ -565,11 +592,10 @@ function TeamDrawer({
   performanceFrom: string;
   performanceTo: string;
   performanceLoading: boolean;
-  performanceError: string | null;
+  performanceError: unknown;
+  onRetryPerformance: () => void;
   managerMutationUserId: string | null;
-  managerMutationError: string | null;
   memberMutationUserId: string | null;
-  memberMutationError: string | null;
   onAddManager: (userId: string) => void;
   onRemoveManager: (userId: string) => void;
   onAddMember: (userId: string) => void;
@@ -618,6 +644,7 @@ function TeamDrawer({
             to={performanceTo}
             loading={performanceLoading}
             error={performanceError}
+            onRetry={onRetryPerformance}
           />
 
           <section className="tms-section">
@@ -627,7 +654,6 @@ function TeamDrawer({
                 Add
               </Button>
             </div>
-            {managerMutationError && <Banner status="danger">{managerMutationError}</Banner>}
             {team.managers.length > 0 ? (
               <div className="tms-person-list">
                 {team.managers.map((manager) => (
@@ -661,7 +687,6 @@ function TeamDrawer({
                 Add
               </Button>
             </div>
-            {memberMutationError && <Banner status="danger">{memberMutationError}</Banner>}
             {members.length === 0 ? (
               <div className="tms-empty-line ui-t-small">No members are assigned to this team yet.</div>
             ) : (
@@ -707,7 +732,6 @@ function TeamDrawer({
           users={availableUsers}
           teamsById={teamsById}
           busyUserId={memberMutationUserId}
-          error={memberMutationError}
           onAdd={(userId) => {
             onAddMember(userId);
             setAddingMember(false);
@@ -721,7 +745,6 @@ function TeamDrawer({
           users={managerOptions}
           teamByManagerId={teamByManagerId}
           busyUserId={managerMutationUserId}
-          error={managerMutationError}
           onAdd={(userId) => {
             onAddManager(userId);
             setAddingManager(false);
@@ -741,13 +764,15 @@ function TeamPerformance({
   to,
   loading,
   error,
+  onRetry,
 }: {
   members: TeamReportSummaryMember[];
   memberCount: number;
   from: string;
   to: string;
   loading: boolean;
-  error: string | null;
+  error: unknown;
+  onRetry: () => void;
 }) {
   const performance = summarizePerformance(members);
 
@@ -763,7 +788,7 @@ function TeamPerformance({
       {loading ? (
         <div className="tms-empty-line ui-t-small">Loading recent performance…</div>
       ) : error ? (
-        <Banner status="danger">Couldn&apos;t load performance: {error}</Banner>
+        <LoadError what="performance" error={error} onRetry={onRetry} />
       ) : (
         <>
           <div className="tms-performance-grid">
@@ -793,7 +818,6 @@ function AddMemberModal({
   users,
   teamsById,
   busyUserId,
-  error,
   onAdd,
   onClose,
 }: {
@@ -801,7 +825,6 @@ function AddMemberModal({
   users: AdminUser[];
   teamsById: Map<string, Team>;
   busyUserId: string | null;
-  error: string | null;
   onAdd: (userId: string) => void;
   onClose: () => void;
 }) {
@@ -846,8 +869,7 @@ function AddMemberModal({
               })}
             </Select>
           </Field>
-          <Banner status="info">Adding a person moves them into this team. Managers of another team are locked to that team.</Banner>
-          {error && <Banner status="danger">{error}</Banner>}
+          <Note>Adding a person moves them into this team. Managers of another team are locked to that team.</Note>
         </div>
         <div className="tms-layer-actions">
           <Button variant="ghost" onClick={onClose} disabled={Boolean(busyUserId)}>
@@ -873,7 +895,6 @@ function AddManagerModal({
   users,
   teamByManagerId,
   busyUserId,
-  error,
   onAdd,
   onClose,
 }: {
@@ -881,7 +902,6 @@ function AddManagerModal({
   users: AdminUser[];
   teamByManagerId: Map<string, Team>;
   busyUserId: string | null;
-  error: string | null;
   onAdd: (userId: string) => void;
   onClose: () => void;
 }) {
@@ -926,8 +946,7 @@ function AddManagerModal({
               })}
             </Select>
           </Field>
-          <Banner status="info">Adding a manager also moves them into this team.</Banner>
-          {error && <Banner status="danger">{error}</Banner>}
+          <Note>Adding a manager also moves them into this team.</Note>
         </div>
         <div className="tms-layer-actions">
           <Button variant="ghost" onClick={onClose} disabled={Boolean(busyUserId)}>

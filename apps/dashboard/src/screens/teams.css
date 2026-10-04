@@ -127,10 +127,15 @@
 }
 
 .tms-edit,
-.tms-confirm,
-.tms-row-err {
+.tms-confirm {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
   padding: 0 var(--space-xl) var(--space-md) calc(var(--space-xl) + var(--space-section-sm));
 }
+.tms-confirm-text { margin: 0; color: var(--color-ink-2); }
 
 .tms-edit-grid {
   display: grid;
@@ -456,8 +461,7 @@
   }
 
   .tms-edit,
-  .tms-confirm,
-  .tms-row-err {
+  .tms-confirm {
     padding-left: var(--space-md);
     padding-right: var(--space-md);
   }

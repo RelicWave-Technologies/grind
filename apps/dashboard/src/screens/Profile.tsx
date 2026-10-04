@@ -17,7 +17,7 @@ import {
   Avatar,
   Identity,
   Tag,
-  Banner,
+  LoadError,
   EmptyState,
   Skeleton,
 } from '../ui';
@@ -48,12 +48,12 @@ export function ProfileScreen() {
         subtitle="Your reporting line, shift, workspace, and capture settings."
       />
 
-      {profileQ.isError && (
-        <Banner status="danger">Couldn’t load your profile: {(profileQ.error as Error).message}</Banner>
-      )}
-
       {profileQ.isLoading ? (
         <ProfileSkeleton />
+      ) : profileQ.isError && !profileQ.data ? (
+        <Card variant="flush">
+          <LoadError what="your profile" error={profileQ.error} onRetry={() => profileQ.refetch()} />
+        </Card>
       ) : profileQ.data ? (
         <ProfileBody profile={profileQ.data} timezone={tz} />
       ) : (

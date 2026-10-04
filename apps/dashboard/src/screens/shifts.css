@@ -341,9 +341,6 @@
   gap: var(--space-xxs);
   flex: none;
 }
-.shf-row-banner {
-  margin-top: var(--space-sm);
-}
 .shf-row-body {
   margin-top: var(--space-md);
 }

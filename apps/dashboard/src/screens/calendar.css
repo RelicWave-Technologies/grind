@@ -24,7 +24,7 @@
 .cal-page > .ui-tabs + * { margin-top: var(--space-md); }
 
 /* ── Card interiors ─────────────────────────────────────────────────────────
-   A Card is a bare box: consecutive Toolbars, Fields and Banners inside it
+   A Card is a bare box: consecutive Toolbars, Fields and Notes inside it
    touch. This is what put the "Reason" label hard against the date row and
    let the textarea's resize grip collide with the buttons below it.
    ------------------------------------------------------------------------ */

@@ -17,7 +17,6 @@ import {
   Checkbox,
   Button,
   IconButton,
-  Banner,
   EmptyState,
   Table,
   THead,
@@ -28,6 +27,8 @@ import {
   Tag,
   Toolbar,
   SkeletonTable,
+  errorMessage,
+  useToast,
 } from '../ui';
 import './integrations.css';
 
@@ -131,6 +132,7 @@ export function IntegrationsScreen() {
     }, null, 2);
   }, [createdToken]);
 
+  const toast = useToast();
   const createToken = useMutation({
     mutationFn: () =>
       api<CreateApiTokenResponse>('/v1/admin/api-tokens', {
@@ -145,6 +147,9 @@ export function IntegrationsScreen() {
       setCopiedConfig(false);
       qc.invalidateQueries({ queryKey: ['admin', 'api-tokens'] });
     },
+    onError: (error) => {
+      toast({ id: 'api-token-create', tone: 'bad', text: `Couldn’t create the token — ${errorMessage(error)}` });
+    },
   });
 
   const revokeToken = useMutation({
@@ -153,6 +158,10 @@ export function IntegrationsScreen() {
     onSuccess: () => {
       setConfirmRevokeId(null);
       qc.invalidateQueries({ queryKey: ['admin', 'api-tokens'] });
+      toast({ id: 'api-token-revoke', tone: 'done', text: 'Token revoked' });
+    },
+    onError: (error) => {
+      toast({ id: 'api-token-revoke', tone: 'bad', text: `Couldn’t revoke the token — ${errorMessage(error)}` });
     },
   });
 
@@ -237,14 +246,6 @@ export function IntegrationsScreen() {
             Create
           </Button>
         </div>
-
-        {createToken.isError && (
-          <div className="int-inline-banner">
-            <Banner status="danger">
-              {(createToken.error as Error).message}
-            </Banner>
-          </div>
-        )}
 
         {createdToken && (
           <div className="int-token-once" role="status" aria-live="polite">
