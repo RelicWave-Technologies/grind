@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertCircle, CheckCircle2, Keyboard, Lock, MonitorCheck, RotateCcw, X } from 'lucide-react';
 import type { CapabilityState } from '../../shared/tracking';
 import type { AttentionPrompt } from '../../shared/attention';
-import timoMascot from '../assets/timo-mascot.svg';
+import timoLogo from '../assets/timo-logo.svg';
 
 import { actionFor, isReady, statusText, type Capability } from '../lib/permissionUi';
 
@@ -68,7 +68,7 @@ export default function PermissionPrompt({ prompt }: { prompt: Extract<Attention
   return (
     <div className="perm-shell drag">
       <header className="perm-head">
-        <span className="brand-mark perm-mascot"><img src={timoMascot} alt="" /></span>
+        <span className="brand-mark perm-mark"><img src={timoLogo} alt="" /></span>
         <div className="perm-title-wrap">
           <div className="h2">Permissions needed</div>
           <div className="callout secondary">Timo needs both services ready before tracking can start.</div>

@@ -95,7 +95,7 @@ export function Menu({ items, className }: MenuProps) {
 
 /* §5.16 Modal — the kit's one centered overlay.
 
-   SYSTEM.md already specified the shape ("modals reuse the popover chrome
+   The kit's spec already specified the shape ("modals reuse the popover chrome
    centered over the scrim") but no component existed, so pages were solving it
    privately: Users renders its invite form inline, Payroll built a bespoke
    drawer in payroll.css. This is that component, so the next page does not

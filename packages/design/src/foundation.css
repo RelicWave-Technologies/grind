@@ -1,0 +1,102 @@
+/*
+ * The ground both apps stand on: what a bare element looks like before any
+ * class touches it. Everything reads from tokens.css, which is generated from
+ * DESIGN.md. A literal colour or size here is a bug: it means a decision was
+ * made somewhere other than the design source.
+ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-white);
+  color: var(--color-ink-2);
+  font-family: var(--font-sans);
+  font-size: var(--type-body-sm-size);
+  line-height: var(--type-body-sm-leading);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/*
+ * Never bold (DESIGN.md §2). A browser draws every heading at 700 and every
+ * `<strong>` at "bolder"; the house style sets headlines at 460. A class that
+ * names a type step still sets its own weight — these only decide what an
+ * unstyled element looks like.
+ */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  color: var(--color-ink);
+  font-weight: var(--type-card-title-weight);
+  text-wrap: balance;
+}
+
+strong,
+b,
+th {
+  font-weight: var(--type-body-sm-strong-weight);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+::selection {
+  background: var(--color-brand-wash);
+  color: var(--color-ink);
+}
+
+::placeholder {
+  color: var(--color-faint);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-brand);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
+}
+
+/*
+ * One stroke for every icon, the landing page's 1.6px (DESIGN.md §12). An icon
+ * is a word rendered as a shape; it takes the colour of the text beside it.
+ * `.lucide` is the class lucide-react puts on every SVG, and a CSS
+ * `stroke-width` outranks the attribute the library writes, so no component
+ * has to pass a prop.
+ */
+.lucide {
+  stroke-width: 1.6;
+}
+
+/* Every number, time and duration is tabular (DESIGN.md §4), so a ticking
+   timer never jitters. Opt in per element with this class or the property. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

@@ -51,9 +51,9 @@ const PRESENT_MIN_MS = 30 * 60 * 1000;
  * present/absent matrix (people × days) with first/last activity times and a
  * per-person present count.
  *
- * Composed entirely from the shared "Quiet Datasheet" kit (PageHeader, Toolbar,
+ * Composed entirely from the shared ui/ kit (PageHeader, Toolbar,
  * Stat, Table, Identity, Tag, Banner, EmptyState, …): one header, a flush KPI
- * StatRow, and one sticky datasheet Table where each user-day shows mono
+ * StatRow, and one sticky Table where each user-day shows mono
  * first → last times and a present count rail. No bespoke colour, type, or
  * component styling — tokens and kit primitives only.
  *

@@ -102,14 +102,22 @@ lark-cli wiki +node-create --space-id 7635896570625396443 --parent-node-token <P
 ## MANDATORY: Design & product consistency
 
 Before building ANY user-facing feature, read:
-- **`docs/design.md`** — the design system (tokens, components, patterns). Light/premium/violet, day-timeline hero, no progress rings. Use tokens; never hardcode hex/px/fonts. If a value isn't there, add a token first.
+- **`DESIGN.md`** (repo root) — the design system: Timo in the EMIAC house style (white and quiet, EMIAC blue for tracked time and the one primary action, Instrument Sans never bold, 20px hairline cards). Its front matter generates the CSS tokens in `@grind/design` (`packages/design`) that both apps import. Use tokens; never hardcode hex/px/fonts. If a value isn't there, add it to `DESIGN.md` first.
 - **`docs/product.md`** — what we're building, who for, principles, scope guards, the three surfaces, privacy contract.
 
 Desktop agent and web dashboard MUST share the same design system. Keep both docs current when the system changes.
 
+## Seeing a UI change without a backend or Electron
+
+Check every visual change by looking at it (DESIGN.md is the spec; the screen is the proof):
+
+- **Dashboard on dummy data** — `pnpm dev:mock` (Vite + HMR on :5174; if that port is taken, run `pnpm --filter @grind/dashboard exec vite --mode mock --port 5177` instead, because pnpm passes a `--` through to Vite rather than swallowing it). Every `/v1` call is answered in the browser from `apps/dashboard/src/mock/`, with dates relative to today. The DEV panel (bottom-left, Alt+Shift+M) switches Admin / Manager / Member, signed out, latency, empty workspace and errors. Production builds contain none of it.
+- **Desktop app in the browser ("Agent Lab")** — `pnpm lab` → http://localhost:5176/lab/. Every renderer window (main tabs, tray popover, floating bar, prompts, ready-to-work) at its real size on a fake `window.agent` bridge, with scenario switches (tracking, paused, signed out, Lark states, permissions…) and a Palette switch for trying accents. Edits under `apps/agent/src/renderer` hot-reload in every frame. Lives in `apps/agent/lab/`, outside the Electron build.
+- **Brand assets** — `pnpm --filter @grind/agent icon` regenerates the app icon, favicon and menu-bar icons from `apps/agent/src/renderer/assets/timo-logo.svg`.
+
 ## Local paths
 
-- `docs/design.md` — design system (canonical, in-repo)
+- `DESIGN.md` — design system (canonical, in-repo; `docs/design.md` points to it, old systems in `docs/archive/`)
 - `docs/product.md` — product overview (canonical, in-repo)
 - `tracker-plan/PLAN.md` — local copy of the architectural plan (also pushed to wiki under References)
 - `.context/` — scratch dir for wiki-sync snapshots; do not commit large files here

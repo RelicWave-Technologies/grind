@@ -23,7 +23,7 @@ import {
 
 /**
  * /overview — the MANAGER+ command center (M16). Composed entirely from the
- * shared "Quiet Datasheet" kit (src/ui/*): PageHeader for context, a flush
+ * shared ui/ kit (src/ui/*): PageHeader for context, a flush
  * StatRow for today's headline numbers, Card + List for the attention queues
  * and the rejected ledger, Tag for status, Banner/EmptyState/Skeleton for the
  * loading/error/empty states. The page file contributes layout only — no

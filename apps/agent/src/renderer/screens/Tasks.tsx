@@ -72,7 +72,7 @@ export default function Tasks() {
         <div className="content-narrow">
           {!taskCatalogAvailable ? (
             <div className="empty rise rise-1">
-              <span className="empty-icon" style={{ background: 'var(--violet-tint)', color: 'var(--violet)' }}>
+              <span className="empty-icon">
                 <img className="lark-icon lark-icon--empty" src={larkIcon} alt="" />
               </span>
               <div className="h3">{larkOffline ? 'Offline with no saved tasks' : larkConfigured ? 'Connect Lark to see your tasks' : 'Lark not set up'}</div>
@@ -80,7 +80,7 @@ export default function Tasks() {
                 {larkOffline ? 'Reconnect once to refresh your task list.' : larkConfigured ? 'Your Lark tasks become the things you track time against.' : 'Ask your workspace admin to enable the Lark integration.'}
               </div>
               {larkConfigured && !larkOffline && (
-                <button className="btn btn-prominent no-drag" style={{ marginTop: 'var(--sp-4)' }} onClick={() => connectLark.mutate()} disabled={connectLark.isPending}>
+                <button className="btn btn-prominent no-drag" style={{ marginTop: 'var(--space-sm)' }} onClick={() => connectLark.mutate()} disabled={connectLark.isPending}>
                   {connectLark.isPending ? 'Opening…' : 'Connect Lark'}
                 </button>
               )}
@@ -93,7 +93,7 @@ export default function Tasks() {
               )}
 
               {tasks.length > 6 && (
-                <div className="task-search no-drag" style={{ marginTop: 'var(--sp-2)' }}>
+                <div className="task-search no-drag" style={{ marginTop: 'var(--space-xxs)' }}>
                   <Search size={15} strokeWidth={2} className="task-search-ico" />
                   <input className="task-search-input" type="text" placeholder={`Search ${tasks.length} tasks…`} value={query} onChange={(e) => setQuery(e.target.value)} />
                 </div>

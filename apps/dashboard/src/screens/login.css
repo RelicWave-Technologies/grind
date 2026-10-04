@@ -2,14 +2,14 @@
    /login — DESIGN.md-strict sign-in.
    White canvas, ONE compact lilac color block ({rounded.lg}, ink text), the
    black pill CTA, mono taxonomy, hairline inputs, circular back button.
-   Tokens resolve to --fg-* (styles.css).
+   Tokens come from the root DESIGN.md (@grind/design).
    ========================================================================== */
 
 .lgn-page {
   min-height: 100vh;
-  background: var(--fg-canvas);
-  color: var(--fg-ink);
-  font-family: var(--fg-sans);
+  background: var(--color-white);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
   font-feature-settings: 'kern' 1;
   -webkit-font-smoothing: antialiased;
   display: flex;
@@ -26,16 +26,16 @@
   display: grid; place-items: center;
   width: 40px; height: 40px;                 /* {components.button-icon-circular} */
   border-radius: 9999px;
-  background: var(--fg-surface-soft);
-  color: var(--fg-ink);
-  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+  background: var(--color-sheet-soft);
+  color: var(--color-ink);
+  transition: background var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard), transform var(--duration-fast) var(--ease-standard);
 }
-.lgn-back:hover { background: var(--fg-ink); color: var(--fg-canvas); }
+.lgn-back:hover { background: var(--color-ink); color: var(--color-white); }
 .lgn-back:active { transform: scale(0.94); }
 .lgn-brand {
   display: inline-flex; align-items: center; gap: 9px;
   font-size: 18px; font-weight: 540; letter-spacing: -0.01em;
-  color: var(--fg-ink); text-decoration: none;
+  color: var(--color-ink); text-decoration: none;
 }
 
 /* ---- Centered shell ---------------------------------------------------------- */
@@ -48,14 +48,14 @@
 /* ---- The lilac panel ({color-block-section-lilac}, sized like a card) -------- */
 .lgn-panel {
   width: min(400px, 100%);
-  background: var(--fg-lilac);
-  border-radius: var(--fg-r-lg);
+  background: var(--color-sheet-soft);
+  border-radius: var(--radius-card);
   padding: 36px 34px 30px;
-  color: var(--fg-ink);
+  color: var(--color-ink);
 }
-.lgn-mascot { display: block; }
+.lgn-mark { display: block; }
 .lgn-eyebrow {
-  font-family: var(--fg-mono);
+  font-family: var(--font-mono);
   font-size: 12px; font-weight: 400; line-height: 1.35;
   letter-spacing: 0.05em; text-transform: uppercase;
   margin: 18px 0 0;
@@ -72,14 +72,14 @@
 /* Outcome notes: white cards on the lilac ground, mono label + plain words. */
 .lgn-note {
   display: flex; flex-direction: column; gap: 4px;
-  background: var(--fg-canvas);
-  border-radius: var(--fg-r-md);
+  background: var(--color-white);
+  border-radius: var(--radius-md);
   padding: 12px 14px;
   margin-top: 18px;
   font-size: 15px; font-weight: 360; line-height: 1.45; letter-spacing: -0.1px;
 }
 .lgn-note-label {
-  font-family: var(--fg-mono);
+  font-family: var(--font-mono);
   font-size: 11px; font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase;
 }
 .lgn-note--danger .lgn-note-label { color: #c2453a; }
@@ -88,23 +88,23 @@
 .lgn-pill {
   display: inline-flex; align-items: center; justify-content: center; gap: 10px;
   width: 100%;
-  font-family: var(--fg-sans);
+  font-family: var(--font-sans);
   font-size: 18px; font-weight: 480; line-height: 1.4; letter-spacing: -0.005em;
-  border: 0; border-radius: var(--fg-r-pill);
+  border: 0; border-radius: var(--radius-full);
   padding: 11px 20px;
   cursor: pointer; text-decoration: none;
-  transition: transform var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease), opacity var(--dur-fast) var(--ease);
+  transition: transform var(--duration-fast) var(--ease-standard), background var(--duration-fast) var(--ease-standard), opacity var(--duration-fast) var(--ease-standard);
 }
 .lgn-pill:active { transform: scale(0.97); }
 .lgn-pill:disabled { opacity: 0.6; cursor: default; }
-.lgn-pill:focus-visible { outline: 2px solid var(--fg-ink); outline-offset: 2px; }
-.lgn-pill--primary { background: var(--fg-ink); color: var(--fg-on-primary); margin-top: 22px; }
+.lgn-pill:focus-visible { outline: 2px solid var(--color-ink); outline-offset: 2px; }
+.lgn-pill--primary { background: var(--color-ink); color: var(--color-white); margin-top: 22px; }
 .lgn-pill--primary:hover:not(:disabled) { transform: translateY(-1px); }
-.lgn-pill--secondary { background: var(--fg-canvas); color: var(--fg-ink); }
+.lgn-pill--secondary { background: var(--color-white); color: var(--color-ink); }
 .lgn-lark { display: block; filter: brightness(0) invert(1); }
 
 .lgn-cap {
-  font-family: var(--fg-mono);
+  font-family: var(--font-mono);
   font-size: 11px; font-weight: 400; letter-spacing: 0.05em; text-transform: uppercase;
   margin: 12px 0 0; text-align: center;
 }
@@ -118,16 +118,16 @@
 .lgn-dev-cap { margin: 0 0 2px; text-align: left; }
 .lgn-input {
   width: 100%;
-  background: var(--fg-canvas);
-  color: var(--fg-ink);
-  border: 1px solid var(--fg-hairline);
-  border-radius: var(--fg-r-md);                 /* {components.text-input} */
+  background: var(--color-white);
+  color: var(--color-ink);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);                 /* {components.text-input} */
   padding: 12px 14px;
-  font-family: var(--fg-sans);
+  font-family: var(--font-sans);
   font-size: 16px; font-weight: 360; letter-spacing: -0.1px;
 }
-.lgn-input::placeholder { color: var(--fg-ink); opacity: 0.45; }
-.lgn-input:focus-visible { outline: 2px solid var(--fg-ink); outline-offset: 1px; }
+.lgn-input::placeholder { color: var(--color-ink); opacity: 0.45; }
+.lgn-input:focus-visible { outline: 2px solid var(--color-ink); outline-offset: 1px; }
 
 /* ---- Below the panel ----------------------------------------------------------- */
 .lgn-foot {
@@ -138,16 +138,16 @@
 .lgn-downloads { display: flex; gap: 8px; }
 .lgn-downloads .lgn-pill {
   width: auto;
-  background: var(--fg-surface-soft);
-  color: var(--fg-ink);
+  background: var(--color-sheet-soft);
+  color: var(--color-ink);
   font-size: 15px;
   padding: 7px 15px 8px;
 }
-.lgn-downloads .lgn-pill:hover { background: var(--fg-ink); color: var(--fg-canvas); }
+.lgn-downloads .lgn-pill:hover { background: var(--color-ink); color: var(--color-white); }
 .lgn-downloads .lgn-pill:hover img { filter: brightness(0) invert(1); }
 .lgn-tour {
   font-size: 15px; font-weight: 480; letter-spacing: -0.1px;
-  color: var(--fg-ink); text-decoration: none; margin-top: 4px;
+  color: var(--color-ink); text-decoration: none; margin-top: 4px;
 }
 .lgn-tour:hover { text-decoration: underline; text-underline-offset: 4px; }
 

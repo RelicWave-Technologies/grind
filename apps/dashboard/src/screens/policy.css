@@ -8,7 +8,7 @@
 .pol-body {
   display: flex;
   flex-direction: column;
-  gap: var(--ui-sp-6);
+  gap: var(--space-lg);
 }
 
 .pol-summary {
@@ -17,18 +17,18 @@
 
 .pol-summary .ui-stat-row {
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: var(--ui-sp-4);
+  gap: var(--space-sm);
 }
 
 .pol-summary .ui-stat-row > .ui-stat {
-  min-height: calc(var(--ui-control-h) * 3);
-  padding: var(--ui-sp-5);
-  gap: var(--ui-sp-3);
+  min-height: calc(var(--control-height) * 3);
+  padding: var(--space-md);
+  gap: var(--space-xs);
   justify-content: center;
 }
 
 .pol-summary .ui-t-num {
-  font-size: var(--ui-sp-7);
+  font-size: var(--space-xl);
   line-height: 1;
   font-weight: 640;
 }
@@ -36,7 +36,7 @@
 .pol-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--ui-sp-5);
+  gap: var(--space-md);
   align-items: start;
 }
 
@@ -47,28 +47,28 @@
 .pol-payroll-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--ui-sp-5);
+  gap: var(--space-md);
   align-items: stretch;
 }
 
 .pol-card-compact.ui-card {
-  padding: var(--ui-sp-5) var(--ui-sp-6);
+  padding: var(--space-md) var(--space-lg);
 }
 
 .pol-card-compact .ui-card__head {
-  padding-bottom: var(--ui-sp-3);
-  margin-bottom: var(--ui-sp-4);
+  padding-bottom: var(--space-xs);
+  margin-bottom: var(--space-sm);
 }
 
 .pol-card-compact .ui-card__title {
-  font-size: calc(var(--ui-sp-5) + var(--ui-sp-1));
+  font-size: calc(var(--space-md) + 2px);
   line-height: 1.22;
 }
 
 .pol-payroll-rule-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--ui-sp-4);
+  gap: var(--space-sm);
   align-items: start;
 }
 
@@ -79,13 +79,13 @@
 .pol-payroll-rule {
   min-width: 0;
   display: grid;
-  gap: var(--ui-sp-2);
+  gap: var(--space-xxs);
   align-content: start;
 }
 
 .pol-payroll-rule strong {
-  color: var(--ui-ink);
-  font-size: var(--ui-sp-5);
+  color: var(--color-ink);
+  font-size: var(--space-md);
   line-height: 1.15;
   font-weight: 630;
   white-space: nowrap;
@@ -94,27 +94,27 @@
 }
 
 .pol-payroll-rule .ui-t-small {
-  color: var(--ui-ink-2);
+  color: var(--color-body);
   max-width: 18ch;
 }
 
 .pol-icon {
   display: inline-grid;
   place-items: center;
-  width: var(--ui-sp-7);
-  height: var(--ui-sp-7);
-  border: 1px solid var(--ui-line);
-  border-radius: var(--ui-r-full);
-  background: var(--ui-surface-inset);
-  color: var(--ui-ink-2);
+  width: var(--space-xl);
+  height: var(--space-xl);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-full);
+  background: var(--color-sheet);
+  color: var(--color-body);
 }
 
 .pol-select {
-  width: calc(var(--ui-control-h) * 4);
-  min-width: calc(var(--ui-control-h) * 4);
+  width: calc(var(--control-height) * 4);
+  min-width: calc(var(--control-height) * 4);
   text-align: center;
   text-align-last: center;
-  font-family: var(--ui-font-mono);
+  font-family: var(--font-mono);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
@@ -123,13 +123,13 @@
   display: inline-flex;
   align-items: center;
   justify-content: flex-end;
-  gap: var(--ui-sp-3);
+  gap: var(--space-xs);
 }
 
 .pol-field-control .ui-control {
-  width: calc(var(--ui-control-h) * 3);
+  width: calc(var(--control-height) * 3);
   text-align: right;
-  font-family: var(--ui-font-mono);
+  font-family: var(--font-mono);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
@@ -138,7 +138,7 @@
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: var(--ui-sp-2);
+  gap: var(--space-xxs);
 }
 
 .pol-audit-sub {
@@ -146,7 +146,7 @@
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: var(--ui-sp-2);
+  gap: var(--space-xxs);
 }
 
 .pol-audit-sub > span {
@@ -158,9 +158,9 @@
 }
 
 .pol-card-compact .ui-list-row {
-  min-height: calc(var(--ui-row-h) + var(--ui-sp-4));
-  padding: var(--ui-sp-3) 0;
-  gap: var(--ui-sp-4);
+  min-height: calc(var(--control-height-lg) + var(--space-sm));
+  padding: var(--space-xs) 0;
+  gap: var(--space-sm);
 }
 
 .pol-card-compact .ui-list-row--rail-success,
@@ -168,11 +168,11 @@
 .pol-card-compact .ui-list-row--rail-danger,
 .pol-card-compact .ui-list-row--rail-info,
 .pol-card-compact .ui-list-row--rail-accent {
-  padding-left: var(--ui-sp-5);
+  padding-left: var(--space-md);
 }
 
 .pol-card-compact .ui-list-row__main {
-  gap: var(--ui-sp-2);
+  gap: var(--space-xxs);
 }
 
 .pol-card-compact .ui-list-row__title {
@@ -189,18 +189,18 @@
 }
 
 .pol-card-compact .ui-toggle {
-  width: calc(var(--ui-control-h) + var(--ui-sp-5));
+  width: calc(var(--control-height) + var(--space-md));
 }
 
 .pol-modal-layer {
   z-index: 120;
-  padding: var(--ui-sp-5);
+  padding: var(--space-md);
 }
 
 @keyframes pol-modal-enter {
   from {
     opacity: 0;
-    transform: translateY(var(--ui-sp-3)) scale(0.985);
+    transform: translateY(var(--space-xs)) scale(0.985);
   }
   to {
     opacity: 1;
@@ -209,20 +209,20 @@
 }
 
 .pol-modal {
-  width: min(calc(var(--ui-sp-12) * 10), 100%);
-  max-height: min(84dvh, calc(var(--ui-sp-12) * 11));
+  width: min(calc(var(--space-section) * 10), 100%);
+  max-height: min(84dvh, calc(var(--space-section) * 11));
   display: flex;
   flex-direction: column;
-  background: var(--ui-surface-raised);
-  border: 1px solid var(--ui-line);
-  border-radius: var(--ui-r-lg);
+  background: var(--color-white);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-xl);
   overflow: hidden;
-  box-shadow: var(--ui-shadow-pop);
-  animation: pol-modal-enter var(--ui-dur-slow) var(--ui-ease) both;
+  box-shadow: var(--elevation-4);
+  animation: pol-modal-enter var(--duration-slow) var(--ease-standard) both;
 }
 
 .pol-risk-modal {
-  width: min(calc(var(--ui-sp-12) * 8), 100%);
+  width: min(calc(var(--space-section) * 8), 100%);
 }
 
 .pol-modal-head,
@@ -230,15 +230,15 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--ui-sp-5);
-  padding: var(--ui-sp-5);
-  border-bottom: 1px solid var(--ui-line);
+  gap: var(--space-md);
+  padding: var(--space-md);
+  border-bottom: 1px solid var(--color-line);
 }
 
 .pol-modal-title {
   min-width: 0;
   display: grid;
-  gap: var(--ui-sp-1);
+  gap: 2px;
 }
 
 .pol-modal-title h2,
@@ -250,18 +250,18 @@
 
 .pol-modal-title p,
 .pol-form-section-head p {
-  color: var(--ui-ink-2);
+  color: var(--color-body);
 }
 
 .pol-modal-body {
-  padding: var(--ui-sp-5);
+  padding: var(--space-md);
   overflow: auto;
   display: grid;
-  gap: var(--ui-sp-4);
+  gap: var(--space-sm);
 }
 
 .pol-modal-foot {
-  border-top: 1px solid var(--ui-line);
+  border-top: 1px solid var(--color-line);
   border-bottom: 0;
   justify-content: flex-end;
 }
@@ -269,32 +269,32 @@
 .pol-form-section {
   min-width: 0;
   display: grid;
-  gap: var(--ui-sp-4);
-  padding: var(--ui-sp-4);
-  border: 1px solid var(--ui-line);
-  border-radius: var(--ui-r-md);
-  background: var(--ui-surface);
+  gap: var(--space-sm);
+  padding: var(--space-sm);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-card);
+  background: var(--color-white);
 }
 
 .pol-form-section-head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: var(--ui-sp-4);
-  padding-bottom: var(--ui-sp-3);
-  border-bottom: 1px solid var(--ui-line-faint);
+  gap: var(--space-sm);
+  padding-bottom: var(--space-xs);
+  border-bottom: 1px solid var(--color-line-soft);
 }
 
 .pol-form-section-head p {
-  margin-top: var(--ui-sp-2);
+  margin-top: var(--space-xxs);
   line-height: 1.35;
 }
 
 .pol-form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  column-gap: var(--ui-sp-4);
-  row-gap: var(--ui-sp-3);
+  column-gap: var(--space-sm);
+  row-gap: var(--space-xs);
 }
 
 .pol-form-grid--rules {
@@ -302,32 +302,32 @@
 }
 
 .pol-input-mono {
-  font-family: var(--ui-font-mono);
+  font-family: var(--font-mono);
   font-weight: 500;
   font-variant-numeric: tabular-nums;
 }
 
 .pol-modal .ui-control {
-  height: calc(var(--ui-control-h) - var(--ui-sp-2));
+  height: calc(var(--control-height) - var(--space-xxs));
 }
 
 .pol-modal .ui-field__hint {
-  margin-top: var(--ui-sp-2);
+  margin-top: var(--space-xxs);
   line-height: 1.25;
 }
 
 .pol-modal-note.ui-banner {
-  background: var(--ui-surface-inset);
-  border-color: var(--ui-line);
-  color: var(--ui-ink-2);
+  background: var(--color-sheet);
+  border-color: var(--color-line);
+  color: var(--color-body);
 }
 
 .pol-modal-note.ui-banner {
-  padding: var(--ui-sp-3) var(--ui-sp-4);
+  padding: var(--space-xs) var(--space-sm);
 }
 
 .pol-modal-note .ui-banner__icon {
-  color: var(--ui-ink-3);
+  color: var(--color-muted);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -375,6 +375,6 @@
   }
 
   .pol-modal-layer {
-    padding: var(--ui-sp-4);
+    padding: var(--space-sm);
   }
 }

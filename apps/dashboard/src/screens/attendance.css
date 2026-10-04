@@ -1,6 +1,6 @@
 /* ============================================================================
    ATTENDANCE — LAYOUT ONLY.
-   The page is composed from the shared "Quiet Datasheet" kit (src/ui). This
+   The page is composed from the shared ui/ kit (src/ui). This
    file contributes pure placement: stable matrix columns, row rhythm, and
    compact intra-cell stacks. Prefix: atd-.
    ========================================================================== */
@@ -9,7 +9,7 @@
    (.ui-page sets the gutter + mount; it does not space its section children.) */
 .ui-page > .ui-page-head + .ui-card,
 .ui-page > .ui-card + .ui-card {
-  margin-top: var(--ui-sp-7);
+  margin-top: var(--space-xl);
 }
 
 .atd-card {
@@ -20,9 +20,9 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: var(--ui-sp-5);
-  padding: var(--ui-sp-5) var(--ui-sp-6);
-  border-bottom: 1px solid var(--ui-line);
+  gap: var(--space-md);
+  padding: var(--space-md) var(--space-lg);
+  border-bottom: 1px solid var(--color-line);
 }
 
 .atd-card-head h2,
@@ -31,7 +31,7 @@
 }
 
 .atd-card-head p {
-  margin-top: var(--ui-sp-1);
+  margin-top: 2px;
 }
 
 /* Legend — compact kit Tags in the card head. */
@@ -39,7 +39,7 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: var(--ui-sp-3);
+  gap: var(--space-xs);
   flex-wrap: wrap;
 }
 
@@ -50,9 +50,9 @@
 }
 
 .atd-table {
-  --atd-person-w: calc(var(--ui-sp-12) * 4 + var(--ui-sp-5));
-  --atd-day-w: calc(var(--ui-sp-12) * 2 + var(--ui-sp-6));
-  --atd-present-w: calc(var(--ui-sp-12) * 2 + var(--ui-sp-5));
+  --atd-person-w: calc(var(--space-section) * 4 + var(--space-md));
+  --atd-day-w: calc(var(--space-section) * 2 + var(--space-lg));
+  --atd-present-w: calc(var(--space-section) * 2 + var(--space-md));
 
   width: max-content;
   min-width: 100%;
@@ -72,18 +72,18 @@
 }
 
 .atd-table.ui-table--compact .ui-table__row {
-  height: calc(var(--ui-row-h) + var(--ui-sp-8));
+  height: calc(var(--control-height-lg) + var(--space-xxl));
 }
 
 .atd-table .ui-table__head .ui-th {
-  height: calc(var(--ui-row-h) + var(--ui-sp-9));
-  padding: var(--ui-sp-4) var(--ui-sp-3);
+  height: calc(var(--control-height-lg) + var(--space-xxxl));
+  padding: var(--space-sm) var(--space-xs);
   vertical-align: middle;
 }
 
 .atd-table .ui-td {
-  height: calc(var(--ui-row-h) + var(--ui-sp-8));
-  padding-inline: var(--ui-sp-3);
+  height: calc(var(--control-height-lg) + var(--space-xxl));
+  padding-inline: var(--space-xs);
   vertical-align: middle;
 }
 
@@ -107,7 +107,7 @@
 
 .atd-table.ui-table--sticky-col .ui-th:first-child,
 .atd-table.ui-table--sticky-col .ui-td:first-child {
-  border-right: 1px solid var(--ui-line);
+  border-right: 1px solid var(--color-line);
 }
 
 .atd-table.ui-table--sticky-col .ui-th:first-child {
@@ -123,16 +123,16 @@
   display: inline-flex;
   flex-direction: column;
   align-items: center;
-  gap: var(--ui-sp-1);
+  gap: 2px;
   justify-content: center;
-  min-height: calc(var(--ui-row-h) + var(--ui-sp-4));
+  min-height: calc(var(--control-height-lg) + var(--space-sm));
   width: 100%;
 }
 .atd-dayhead__dow {
-  color: var(--ui-ink-3);
+  color: var(--color-muted);
 }
 .atd-dayhead__num {
-  color: var(--ui-ink);
+  color: var(--color-ink);
 }
 
 .atd-today-tag {
@@ -145,28 +145,28 @@
   max-width: 100%;
   margin-inline: auto;
   min-width: 0;
-  min-height: calc(var(--ui-control-h) + var(--ui-sp-2));
+  min-height: calc(var(--control-height) + var(--space-xxs));
   display: inline-flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: var(--ui-sp-2);
-  padding: var(--ui-sp-3) var(--ui-sp-4);
+  gap: var(--space-xxs);
+  padding: var(--space-xs) var(--space-sm);
   border: 1px solid transparent;
-  border-radius: var(--ui-r-md);
+  border-radius: var(--radius-card);
   overflow: hidden;
 }
 
 .atd-cell--present {
-  background: var(--ui-success-bg);
+  background: var(--color-good-wash);
   border-color: transparent;
-  color: var(--ui-success-ink);
+  color: var(--color-good);
 }
 
 .atd-cell--review {
-  background: var(--ui-warn-bg);
+  background: var(--color-wait-wash);
   border-color: transparent;
-  color: var(--ui-warn-ink);
+  color: var(--color-wait);
 }
 
 .atd-cell__times {
@@ -187,13 +187,13 @@
 .atd-cell__arrow,
 .atd-cell__dur,
 .atd-cell__evidence {
-  color: var(--ui-success-ink);
+  color: var(--color-good);
 }
 
 .atd-cell--review .atd-cell__arrow,
 .atd-cell--review .atd-cell__dur,
 .atd-cell--review .atd-cell__evidence {
-  color: var(--ui-warn-ink);
+  color: var(--color-wait);
 }
 
 .atd-cell__arrow {
@@ -203,10 +203,10 @@
 .atd-cell__dur {
   display: inline-flex;
   align-items: center;
-  min-height: var(--ui-sp-6);
-  padding: 0 var(--ui-sp-4);
-  border-radius: var(--ui-r-full);
-  background: var(--ui-surface);
+  min-height: var(--space-lg);
+  padding: 0 var(--space-sm);
+  border-radius: var(--radius-full);
+  background: var(--color-white);
   font-size: 0.86em;
   line-height: 1;
 }
@@ -221,8 +221,8 @@
   align-items: center;
   justify-content: center;
   width: 100%;
-  min-height: calc(var(--ui-control-h) + var(--ui-sp-3));
-  color: var(--ui-ink-3);
+  min-height: calc(var(--control-height) + var(--space-xs));
+  color: var(--color-muted);
 }
 
 /* Present count column — n/total numeral next to the percentage Tag. */
@@ -230,7 +230,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: flex-end;
-  gap: var(--ui-sp-3);
+  gap: var(--space-xs);
 }
 
 .atd-present__count {
@@ -238,7 +238,7 @@
 }
 
 .atd-present__of {
-  color: var(--ui-ink-3);
+  color: var(--color-muted);
 }
 
 @media (max-width: 42rem) {

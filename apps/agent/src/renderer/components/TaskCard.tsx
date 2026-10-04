@@ -71,7 +71,7 @@ export default function TaskCard({
             </span>
           )}
           {loggedTodayMs > 0 && (
-            <span className="tag tag-chip" style={{ background: 'var(--violet-tint)', color: 'var(--violet-700)' }}>
+            <span className="tag tag-chip tag-logged">
               <Clock size={11} strokeWidth={2.5} /> Today {fmtDuration(loggedTodayMs)}
             </span>
           )}

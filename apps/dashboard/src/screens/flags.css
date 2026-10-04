@@ -8,14 +8,14 @@
 .flg-queue {
   display: flex;
   flex-direction: column;
-  gap: var(--ui-sp-5);
+  gap: var(--space-md);
 }
 
 /* Inside each flag Card, stack the composed rows with even rhythm. */
 .flg-queue .ui-card__body {
   display: flex;
   flex-direction: column;
-  gap: var(--ui-sp-5);
+  gap: var(--space-md);
 }
 
 /* Top: Identity ←→ risk readout. */
@@ -23,14 +23,14 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: var(--ui-sp-5);
+  gap: var(--space-md);
   flex-wrap: wrap;
 }
 .flg-risk {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: var(--ui-sp-2);
+  gap: var(--space-xxs);
   flex: none;
 }
 .flg-risk__cap { display: block; }
@@ -40,14 +40,14 @@
 .flg-type {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--ui-sp-3);
+  gap: var(--space-xs);
 }
 
 /* Definition row: eyebrow label above a value (Window / Pattern / Evidence / Note). */
 .flg-def {
   display: flex;
   flex-direction: column;
-  gap: var(--ui-sp-2);
+  gap: var(--space-xxs);
   min-width: 0;
 }
 .flg-def__val { min-width: 0; }
@@ -56,7 +56,7 @@
 .flg-chips {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--ui-sp-2);
+  gap: var(--space-xxs);
 }
 
 /* AI-read Banner internals — stack its lines. */
@@ -68,17 +68,17 @@
 .flg-ai__cap {
   display: inline-flex;
   align-items: center;
-  gap: var(--ui-sp-2);
-  margin-bottom: var(--ui-sp-2);
+  gap: var(--space-xxs);
+  margin-bottom: var(--space-xxs);
 }
-.flg-ai__detail { margin-top: var(--ui-sp-2); }
+.flg-ai__detail { margin-top: var(--space-xxs); }
 
 /* Resolved verdict + audit stamp on one line. */
 .flg-verdict {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: var(--ui-sp-3);
+  gap: var(--space-xs);
 }
 
 /* Inline triage actions: a row of kit Buttons, right-aligned. */
@@ -87,7 +87,7 @@
   align-items: center;
   justify-content: flex-end;
   flex-wrap: wrap;
-  gap: var(--ui-sp-3);
+  gap: var(--space-xs);
 }
 
 /* Compose form: the note Field grows, actions trail. */
@@ -95,7 +95,7 @@
   display: flex;
   align-items: flex-end;
   flex-wrap: wrap;
-  gap: var(--ui-sp-3);
+  gap: var(--space-xs);
 }
 .flg-form__field {
   flex: 1 1 260px;

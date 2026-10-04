@@ -1,6 +1,6 @@
 # Grind — Product
 
-> What we're building and why. Read this with [design.md](./design.md) before building any feature. Canonical plan + progress live in the Lark Wiki (see [AGENTS.md](../AGENTS.md)); this is the durable in-repo summary.
+> What we're building and why. Read this with [DESIGN.md](../DESIGN.md) before building any feature. Canonical plan + progress live in the Lark Wiki (see [AGENTS.md](../AGENTS.md)); this is the durable in-repo summary.
 
 ## What it is
 An **internal** time tracker + screenshot monitor for the agency (~50–200 employees, mostly Mac, some Windows). Hubstaff/WebWork-class, focused on **screenshots + time tracking**, with an admin-only payroll worksheet for classifying payable days. No payment execution, invoicing, or billing. Built on our existing Express + Prisma + Postgres + S3 stack with an Electron + TypeScript desktop agent, a React web dashboard, and deep **Lark** integration.
@@ -15,7 +15,7 @@ An **internal** time tracker + screenshot monitor for the agency (~50–200 empl
 2. **Privacy contract (hard line).** Count keystrokes/mouse/scroll — **never content**. No clipboard, no microphone, no camera. Window titles + URLs default **OFF** (admin opt-in). Anti-cheat signals are content-free and employee-visible/auditable.
 3. **Honest visuals.** Show real tracked data (the day-timeline ribbon, real heatmaps), never fake progress metaphors.
 4. **Fair measurement.** Activity scoring is **role-aware** (developers ≠ designers ≠ sales); meetings and reading are protected, not penalized.
-5. **Calm, premium, mature.** See design.md.
+5. **Calm, premium, mature.** See DESIGN.md.
 
 ## The three surfaces (desktop agent)
 1. **Main window** — the real app: Today (timer + day timeline), Projects, Reports; later task management, screenshots review. Resizable, hidden-inset title bar.

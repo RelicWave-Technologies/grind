@@ -172,11 +172,10 @@ export default function Today() {
   const collapsed = !showAll && q === '' && openTasks.length > TASK_COLLAPSE;
   const shownTasks = collapsed ? openTasks.slice(0, TASK_COLLAPSE) : openTasks;
 
-  const heroColor = running?.larkTaskGuid ? projectStyle(running.larkTaskGuid).color : 'var(--violet)';
   const isPaused = !!running?.paused;
   const selectedTask = allOpenTasks.find((t) => t.guid === selectedTaskGuid) ?? allOpenTasks[0] ?? null;
   const selectedTaskValue = selectedTask?.guid ?? '';
-  const selectedTaskColor = selectedTask ? projectStyle(selectedTask.guid).color : 'var(--violet)';
+  const selectedTaskColor = selectedTask ? projectStyle(selectedTask.guid).color : 'var(--color-sheet-2)';
   const pickerQuery = taskPickerQuery.trim().toLowerCase();
   const pickerTasks = pickerQuery === '' ? allOpenTasks : allOpenTasks.filter((task) => task.summary.toLowerCase().includes(pickerQuery));
   const canStartSelectedTask = !!selectedTask && !start.isPending;
@@ -203,13 +202,13 @@ export default function Today() {
             </div>
           )}
           {/* Hero = live timer + stop control (no separate page) */}
-          <div className={`hero-running rise rise-1${running ? ' on' : ''}`}>
+          <div className={`hero-running rise rise-1${running ? ' on' : ''}${isPaused ? ' is-paused' : ''}`}>
             <div className="hero-copy">
               <div className="hero-time tabular">{fmtClock(timer.workedMs)}</div>
               <div className="hero-proj">
                 {running ? (
                   <>
-                    <i className="dt-dot" style={{ background: heroColor }} />
+                    <i className="dt-dot" />
                     <span className="hero-proj-name" title={runningTask?.summary ?? 'Tracking'}>{runningTask?.summary ?? 'Tracking'}</span>
                   </>
                 ) : larkTasks.isLoading ? (
@@ -359,7 +358,7 @@ export default function Today() {
 
           {!taskCatalogAvailable ? (
             <div className="empty rise rise-1">
-              <span className="empty-icon" style={{ background: 'var(--violet-tint)', color: 'var(--violet)' }}>
+              <span className="empty-icon">
                 <img className="lark-icon lark-icon--empty" src={larkIcon} alt="" />
               </span>
               <div className="h3">{larkOffline ? 'Offline with no saved tasks' : larkConfigured ? 'Connect Lark to see your tasks' : 'Lark not set up'}</div>
@@ -367,7 +366,7 @@ export default function Today() {
                 {larkOffline ? 'Reconnect once to refresh your task list.' : larkConfigured ? 'Your Lark tasks become the things you track time against.' : 'Ask your workspace admin to enable the Lark integration.'}
               </div>
               {larkConfigured && !larkOffline && (
-                <button className="btn btn-prominent no-drag" style={{ marginTop: 'var(--sp-4)' }} onClick={() => connectLark.mutate()} disabled={connectLark.isPending}>
+                <button className="btn btn-prominent no-drag" style={{ marginTop: 'var(--space-sm)' }} onClick={() => connectLark.mutate()} disabled={connectLark.isPending}>
                   {connectLark.isPending ? 'Opening…' : 'Connect Lark'}
                 </button>
               )}
@@ -376,7 +375,7 @@ export default function Today() {
             <div className="callout secondary" style={{ padding: '0 4px' }}>Loading tasks…</div>
           ) : totalOpen === 0 ? (
             <div className="empty rise rise-1">
-              <span className="empty-icon" style={{ background: 'var(--violet-tint)', color: 'var(--violet)' }}>
+              <span className="empty-icon">
                 <ListTodo size={26} strokeWidth={2} />
               </span>
               <div className="h3">No open tasks</div>
@@ -407,7 +406,7 @@ export default function Today() {
                 ))}
               </div>
               {q === '' && openTasks.length > TASK_COLLAPSE && (
-                <button className="btn btn-ghost btn-block no-drag" style={{ marginTop: 'var(--sp-3)' }} onClick={() => setShowAll((s) => !s)}>
+                <button className="btn btn-ghost btn-block no-drag" style={{ marginTop: 'var(--space-xs)' }} onClick={() => setShowAll((s) => !s)}>
                   {collapsed ? `Show all ${openTasks.length} tasks` : 'Show less'}
                 </button>
               )}

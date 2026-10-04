@@ -16,7 +16,7 @@
 .myd-stack {
   display: flex;
   flex-direction: column;
-  gap: var(--ui-sp-6);
+  gap: var(--space-lg);
 }
 
 .myd-stage-card,
@@ -25,8 +25,8 @@
 }
 
 .myd-stage-card {
-  background: var(--ui-surface);
-  padding: var(--ui-sp-5) var(--ui-sp-6);
+  background: var(--color-white);
+  padding: var(--space-md) var(--space-lg);
 }
 
 /* ---- Header date picker --------------------------------------------------- */
@@ -44,9 +44,9 @@
 }
 
 .myd-user-select {
-  width: min(calc(var(--ui-sp-12) * 4), calc(100vw - var(--ui-sp-8)));
-  min-width: calc(var(--ui-sp-10) * 4);
-  flex: 0 1 calc(var(--ui-sp-12) * 4);
+  width: min(calc(var(--space-section) * 4), calc(100vw - var(--space-xxl)));
+  min-width: calc(var(--space-section-sm) * 4);
+  flex: 0 1 calc(var(--space-section) * 4);
 }
 
 .myd-date-picker {
@@ -58,20 +58,20 @@
 
 .myd-date-popover {
   position: absolute;
-  top: calc(100% + var(--ui-sp-3));
+  top: calc(100% + var(--space-xs));
   right: 0;
   z-index: 30;
-  width: min(calc(var(--ui-sp-12) * 5), calc(100vw - var(--ui-sp-8)));
-  padding: var(--ui-sp-5);
-  border: 1px solid var(--ui-line);
-  border-radius: var(--ui-r-lg);
-  background: var(--ui-surface);
-  box-shadow: var(--ui-shadow-pop);
-  animation: myd-popover-in var(--ui-dur-base) var(--ui-ease) both;
+  width: min(calc(var(--space-section) * 5), calc(100vw - var(--space-xxl)));
+  padding: var(--space-md);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-xl);
+  background: var(--color-white);
+  box-shadow: var(--elevation-4);
+  animation: myd-popover-in var(--duration-base) var(--ease-standard) both;
 }
 
 @keyframes myd-popover-in {
-  from { opacity: 0; transform: translateY(calc(var(--ui-sp-2) * -1)); }
+  from { opacity: 0; transform: translateY(calc(var(--space-xxs) * -1)); }
   to { opacity: 1; transform: translateY(0); }
 }
 
@@ -79,28 +79,28 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--ui-sp-4);
-  padding-bottom: var(--ui-sp-4);
-  border-bottom: 1px solid var(--ui-line-faint);
+  gap: var(--space-sm);
+  padding-bottom: var(--space-sm);
+  border-bottom: 1px solid var(--color-line-soft);
 }
 
 .myd-calendar {
-  padding-top: var(--ui-sp-5);
+  padding-top: var(--space-md);
 }
 
 .myd-calendar-weekdays,
 .myd-calendar-days {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
-  gap: var(--ui-sp-1);
+  gap: 2px;
 }
 
 .myd-calendar-weekdays {
-  margin-bottom: var(--ui-sp-2);
-  font-family: var(--ui-font-mono);
+  margin-bottom: var(--space-xxs);
+  font-family: var(--font-mono);
   font-size: 10px;
   font-weight: 600;
-  color: var(--ui-ink-3);
+  color: var(--color-muted);
   text-align: center;
 }
 
@@ -108,43 +108,43 @@
   appearance: none;
   display: grid;
   place-items: center;
-  height: var(--ui-sp-8);
+  height: var(--space-xxl);
   border: 1px solid transparent;
-  border-radius: var(--ui-r-full);
+  border-radius: var(--radius-full);
   background: transparent;
-  color: var(--ui-ink);
-  font-family: var(--ui-font-mono);
+  color: var(--color-ink);
+  font-family: var(--font-mono);
   font-size: 12.5px;
   font-weight: 500;
   font-variant-numeric: tabular-nums;
   cursor: pointer;
   transition:
-    background var(--ui-dur-fast) var(--ui-ease),
-    border-color var(--ui-dur-fast) var(--ui-ease),
-    color var(--ui-dur-fast) var(--ui-ease);
+    background var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
 }
 
 .myd-calendar-day:hover:not(:disabled) {
-  background: var(--ui-surface-inset);
+  background: var(--color-sheet);
 }
 
 .myd-calendar-day.is-selected {
-  background: var(--ui-accent);
-  color: var(--ui-on-accent);
+  background: var(--color-brand);
+  color: var(--color-white);
 }
 
 .myd-calendar-day.is-today:not(.is-selected) {
-  border-color: var(--ui-line-strong);
+  border-color: var(--color-line-strong);
 }
 
 .myd-calendar-day:disabled {
-  color: var(--ui-ink-disabled);
+  color: var(--color-faint);
   cursor: not-allowed;
 }
 
 .myd-calendar-day:focus-visible {
   outline: none;
-  box-shadow: var(--ui-focus-ring);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-brand) 12%, transparent);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -171,7 +171,7 @@
   .myd-date-popover {
     right: auto;
     left: 0;
-    width: calc(100vw - var(--ui-sp-6));
+    width: calc(100vw - var(--space-lg));
   }
 }
 
@@ -181,21 +181,21 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--ui-sp-4);
+  gap: var(--space-sm);
   flex-wrap: wrap;
-  margin-bottom: var(--ui-sp-4);
+  margin-bottom: var(--space-sm);
 }
 
 /* Shift chip + compact context above the canvas. */
 .myd-stage-meta {
   display: flex;
   align-items: center;
-  gap: var(--ui-sp-3);
+  gap: var(--space-xs);
   flex-wrap: wrap;
   min-width: 0;
 }
 .myd-stage-note {
-  color: var(--ui-ink-3);
+  color: var(--color-muted);
 }
 
 /* Inline legend cluster docked in the card head's action slot. */
@@ -203,60 +203,53 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: var(--ui-sp-3);
+  gap: var(--space-xs);
   flex-wrap: wrap;
   min-width: 0;
 }
-.myd-legend .ui-tag__dot {
-  width: 8px;
-  height: 8px;
-  border-radius: var(--ui-r-sm);
-}
-.myd-legend .ui-tag--success {
-  background: var(--timeline-work-bg);
-  color: var(--timeline-work-ink);
-}
-.myd-legend .ui-tag--success .ui-tag__dot {
-  background: var(--timeline-work-bg);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--timeline-work-ink) 32%, transparent);
-}
-.myd-legend .ui-tag--warn {
-  background: var(--timeline-manual-bg);
-  color: var(--timeline-manual-ink);
-}
+/* The legend is swatch + word, never a filled chip (DESIGN.md §9 The day
+   ribbon): each swatch is the ribbon's own fill for that kind. */
+.myd-legend .ui-tag { background: transparent; color: var(--color-body); padding: 0; height: auto; }
+.myd-legend .ui-tag__dot { width: 10px; height: 10px; border-radius: 3px; }
+.myd-legend .ui-tag--success .ui-tag__dot { background: var(--color-ribbon-work); }
+.myd-legend .ui-tag--info .ui-tag__dot { background: var(--color-ribbon-meeting); }
 .myd-legend .ui-tag--warn .ui-tag__dot {
-  background: var(--timeline-manual-bg);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--timeline-manual-ink) 32%, transparent);
+  background: repeating-linear-gradient(45deg, var(--color-ribbon-manual-stripe) 0 1.5px, var(--color-ribbon-manual) 1.5px 5px);
 }
+.myd-legend .ui-tag--danger .ui-tag__dot {
+  background: var(--color-ribbon-pending);
+  outline: 1px dashed var(--color-ribbon-pending-edge); outline-offset: -1px;
+}
+.myd-legend .ui-tag--neutral .ui-tag__dot { background: var(--color-ribbon-idle); box-shadow: none; }
 
 /* The well the ribbon + heatmap live in — inset surface, hairline, no shadow. */
 .myd-canvas {
-  background: var(--ui-surface);
-  border: 1px solid var(--ui-line);
-  border-radius: var(--ui-r-md);
-  padding: var(--ui-sp-3) var(--ui-sp-4);
+  background: var(--color-white);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-card);
+  padding: var(--space-xs) var(--space-sm);
 }
 
 .myd-stage-card .ribbon {
-  --ribbon-h: calc(var(--ui-sp-8) + var(--ui-sp-2));
-  padding: var(--ui-sp-2) 0 var(--ui-sp-6);
+  --ribbon-h: calc(var(--space-xxl) + var(--space-xxs));
+  padding: var(--space-xxs) 0 var(--space-lg);
 }
 
 .myd-stage-card .ribbon-track {
-  border-radius: var(--ui-r-sm);
+  border-radius: var(--radius-md);
 }
 
 .myd-stage-card .ribbon-ticks {
-  height: var(--ui-sp-5);
+  height: var(--space-md);
 }
 
 .myd-stage-card .heatmap {
-  margin-top: var(--ui-sp-3);
-  padding-top: var(--ui-sp-3);
+  margin-top: var(--space-xs);
+  padding-top: var(--space-xs);
 }
 
 .myd-stage-card .heatmap-row {
-  height: var(--ui-sp-4);
+  height: var(--space-sm);
 }
 
 .myd-stage-card .heatmap-foot {
@@ -265,7 +258,7 @@
 
 /* Read-only notice sits below the canvas. */
 .myd-readonly {
-  margin-top: var(--ui-sp-5);
+  margin-top: var(--space-md);
 }
 
 /* ============================================================================
@@ -277,16 +270,16 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--ui-sp-5);
+  gap: var(--space-md);
   flex-wrap: wrap;
-  padding: var(--ui-sp-5) var(--ui-sp-6);
-  border-bottom: 1px solid var(--ui-line);
-  background: var(--ui-surface-sunken);
+  padding: var(--space-md) var(--space-lg);
+  border-bottom: 1px solid var(--color-line);
+  background: var(--color-white);
 }
 .myd-sheet-titling {
   display: inline-flex;
   align-items: baseline;
-  gap: var(--ui-sp-4);
+  gap: var(--space-sm);
 }
 .myd-table-wrap {
   overflow-x: auto;
@@ -299,21 +292,21 @@
    <th>; here we only place + colour the hairline + gutter. */
 .myd-table thead th {
   text-align: left;
-  color: var(--ui-ink-3);
-  padding: var(--ui-sp-4) var(--ui-sp-7);
-  border-bottom: 1px solid var(--ui-line);
+  color: var(--color-muted);
+  padding: var(--space-sm) var(--space-xl);
+  border-bottom: 1px solid var(--color-line);
   white-space: nowrap;
   vertical-align: middle;
 }
-.myd-col-kind { width: calc(var(--ui-sp-10) * 2); }
-.myd-col-time { width: calc(var(--ui-sp-10) * 4); }
-.myd-col-duration { width: calc(var(--ui-sp-10) * 2); }
-.myd-col-task { width: calc(var(--ui-sp-10) * 5); }
-.myd-col-actions { width: calc(var(--ui-sp-10) * 5); }
+.myd-col-kind { width: calc(var(--space-section-sm) * 2); }
+.myd-col-time { width: calc(var(--space-section-sm) * 4); }
+.myd-col-duration { width: calc(var(--space-section-sm) * 2); }
+.myd-col-task { width: calc(var(--space-section-sm) * 5); }
+.myd-col-actions { width: calc(var(--space-section-sm) * 5); }
 /* Interior dividers for the bespoke (idle / rejected) rows; the EntryRow rows
    carry their own padding + rail from styles.css. */
 .myd-table tbody td {
-  border-bottom: 1px solid var(--ui-line-faint);
+  border-bottom: 1px solid var(--color-line-soft);
   vertical-align: middle;
 }
 .myd-table tbody tr:last-child td {
@@ -321,6 +314,6 @@
 }
 .myd-table tbody tr.entry-row-idle_trimmed td,
 .myd-table tbody tr.entry-row-rejected td {
-  padding: var(--ui-sp-4) var(--ui-sp-7);
+  padding: var(--space-sm) var(--space-xl);
   vertical-align: middle;
 }

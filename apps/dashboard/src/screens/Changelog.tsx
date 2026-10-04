@@ -4,7 +4,8 @@ import type { ReactNode } from 'react';
 
 /**
  * /changelog — public editorial release history (no auth, no app shell).
- * Built strictly to DESIGN.md (the Figma marketing analysis): monochrome
+ * Built on the root DESIGN.md tokens (EMIAC house style). Originally drawn to
+ * the Figma marketing analysis (docs/archive/), whose section names remain:
  * chrome (white canvas, black ink, pill CTAs, mono taxonomy) interrupted by
  * full-width pastel color-block sections — lime for the latest build, navy
  * for the platform story, coral for shipping mechanics, a lilac banner for
@@ -398,7 +399,7 @@ export function ChangelogScreen() {
       <nav className="cl-nav">
         <div className="cl-nav-inner">
           <a className="cl-nav-brand" href="/">
-            <img src="/brand/timo-mascot.svg" alt="" width={30} height={30} />
+            <img src="/brand/timo-logo.svg" alt="" width={30} height={30} />
             <span>Timo</span>
           </a>
           <div className="cl-nav-links">
@@ -432,7 +433,7 @@ export function ChangelogScreen() {
           </div>
           <div className="cl-hero-stage rise-2" aria-hidden="true">
             <div className="cl-orbit" />
-            <img className="cl-mascot" src="/brand/timo-mascot.svg" alt="" width={190} height={190} />
+            <img className="cl-mark" src="/brand/timo-logo.svg" alt="" width={190} height={190} />
             <span className="cl-fleck cl-fleck--1" />
             <span className="cl-fleck cl-fleck--2" />
             <span className="cl-fleck cl-fleck--3" />
@@ -453,7 +454,7 @@ export function ChangelogScreen() {
         <section className="cl-section" id="latest">
           <div className="cl-container">
             <div className="cl-block cl-block--lime cl-reveal">
-              <img className="cl-block-peek" src="/brand/timo-mascot.svg" alt="" width={96} height={96} aria-hidden="true" />
+              <img className="cl-block-peek" src="/brand/timo-logo.svg" alt="" width={96} height={96} aria-hidden="true" />
               <p className="cl-caption">LATEST · CURRENT BUILD</p>
               <h2 className="cl-headline">{LATEST.version} — {LATEST.name}</h2>
               <p className="cl-caption cl-block-meta">{LATEST.meta}</p>
@@ -579,7 +580,7 @@ export function ChangelogScreen() {
 
         {/* ---- End of log --------------------------------------------------- */}
         <section className="cl-end cl-reveal">
-          <img className="cl-end-mascot" src="/brand/timo-mascot.svg" alt="" width={72} height={72} aria-hidden="true" />
+          <img className="cl-end-mark" src="/brand/timo-logo.svg" alt="" width={72} height={72} aria-hidden="true" />
           <p className="cl-caption">END OF LOG</p>
           <p className="cl-end-line">
             Timo keeps time. You keep shipping.<span className="cl-cursor" aria-hidden="true" />

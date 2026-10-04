@@ -48,3 +48,8 @@ interactive-product-deck/
 
 # Local .env backups taken before edits — never commit (they carry secrets).
 .env.bak-*
+
+# personal working ledger
+todos.md
+
+# design-review screenshots served by the Agent Lab (regenerated, not source)

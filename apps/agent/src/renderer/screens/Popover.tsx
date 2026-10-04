@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Play, Square, ExternalLink, ListTodo, Search } from 'lucide-react';
-import timoMascot from '../assets/timo-mascot.svg';
+import timoLogo from '../assets/timo-logo.svg';
 import type { TimerStatus } from '../lib/agent.d';
 import { projectStyle } from '../lib/projectStyle';
 import { sortTasks } from '../lib/taskFormat';
@@ -55,7 +55,6 @@ export default function Popover() {
   const tasks = larkTasks.data?.tasks ?? [];
   const running = timer.state === 'RUNNING' ? timer : null;
   const runningTask = running?.larkTaskGuid ? tasks.find((t) => t.guid === running.larkTaskGuid) : undefined;
-  const st = running?.larkTaskGuid ? projectStyle(running.larkTaskGuid) : null;
   const openTasks = useMemo(
     () => sortTasks(tasks.filter((task) => !task.completed), (running?.larkTaskGuid ?? selectedTaskGuid) || null),
     [running?.larkTaskGuid, selectedTaskGuid, tasks],
@@ -69,18 +68,18 @@ export default function Popover() {
   return (
     <div className="pop">
       <div className="pop-head">
-        <span className="brand-mark" style={{ width: 32, height: 32 }}><img src={timoMascot} alt="" /></span>
-        <span className="brand-name" style={{ fontSize: 14 }}>Timo</span>
+        <span className="brand-mark"><img src={timoLogo} alt="" /></span>
+        <span className="brand-name">Timo</span>
         <button className="pop-open no-drag" title="Open Timo" onClick={() => window.agent.window.openMain()}>
           <ExternalLink size={15} strokeWidth={2} />
         </button>
       </div>
 
       {running ? (
-        <div className="pop-running">
+        <div className={`pop-running${running.paused ? ' is-paused' : ''}`}>
           <div className="pop-time tabular">{fmtClock(running.workedMs)}</div>
           <div className="pop-proj">
-            {st && <i className="dt-dot" style={{ background: st.color }} />}
+            <i className="dt-dot" />
             {runningTask?.summary ?? 'Tracking'}{running.paused ? ' · paused' : ''}
           </div>
           <div className="pop-actions">
@@ -89,7 +88,7 @@ export default function Popover() {
                 <Play size={13} strokeWidth={2.5} fill="currentColor" /> Resume
               </button>
             )}
-            <button className="btn btn-danger btn-block no-drag" onClick={() => stop.mutate()} disabled={stop.isPending}>
+            <button className="btn btn-block no-drag" onClick={() => stop.mutate()} disabled={stop.isPending}>
               <Square size={13} strokeWidth={2.5} fill="currentColor" /> Stop
             </button>
           </div>

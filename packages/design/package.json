@@ -1,0 +1,25 @@
+{
+  "name": "@grind/design",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Timo's design tokens and fonts, generated from the root DESIGN.md. Imported by the dashboard and the desktop app.",
+  "exports": {
+    ".": "./src/index.css",
+    "./tokens.css": "./src/tokens.css",
+    "./fonts.css": "./src/fonts.css",
+    "./foundation.css": "./src/foundation.css"
+  },
+  "scripts": {
+    "tokens": "tsx scripts/generate-tokens.ts",
+    "typecheck": "tsx scripts/generate-tokens.ts --check && tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@grind/tsconfig": "workspace:*",
+    "@types/node": "20.16.13",
+    "tsx": "4.19.2",
+    "typescript": "5.6.3",
+    "yaml": "2.6.1",
+    "zod": "3.25.76"
+  }
+}

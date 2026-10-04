@@ -129,7 +129,7 @@ export function WelcomeScreen() {
       <nav className="wl-nav">
         <div className="wl-nav-inner">
           <a className="wl-nav-brand" href="/">
-            <img src="/brand/timo-mascot.svg" alt="" width={30} height={30} />
+            <img src="/brand/timo-logo.svg" alt="" width={30} height={30} />
             <span>Timo</span>
           </a>
           <div className="wl-nav-links">
@@ -322,7 +322,7 @@ export function WelcomeScreen() {
 
         {/* ---- Closing CTA --------------------------------------------------- */}
         <section className="wl-close wl-reveal">
-          <img className="wl-close-mascot" src="/brand/timo-mascot.svg" alt="" width={84} height={84} aria-hidden="true" />
+          <img className="wl-close-mark" src="/brand/timo-logo.svg" alt="" width={84} height={84} aria-hidden="true" />
           <h2 className="wl-display-lg">Go on, start the clock.</h2>
           <p className="wl-sec-lead wl-close-lead">Install it once and forget it exists. That's the whole pitch.</p>
           <div className="wl-ctas wl-close-ctas">

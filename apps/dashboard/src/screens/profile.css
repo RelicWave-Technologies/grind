@@ -1,15 +1,15 @@
 /* ============================================================================
    PROFILE — layout only.
 
-   This screen uses the shared Quiet Datasheet kit for every visual choice.
+   This screen uses the shared ui/ kit for every visual choice.
    The page CSS only arranges cards, stacks, and the weekly schedule grid.
    ========================================================================= */
 
 .prf-page {
-  --prf-leading-col: var(--ui-sp-9);
+  --prf-leading-col: var(--space-xxxl);
   display: flex;
   flex-direction: column;
-  gap: var(--ui-sp-6);
+  gap: var(--space-lg);
 }
 
 .prf-summary .ui-stat-row {
@@ -17,7 +17,7 @@
 }
 
 .prf-summary .ui-stat {
-  min-height: calc(var(--ui-sp-12) * 2);
+  min-height: calc(var(--space-section) * 2);
   justify-content: space-between;
 }
 
@@ -33,7 +33,7 @@
 .prf-secondary-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: var(--ui-sp-5);
+  gap: var(--space-md);
   align-items: start;
 }
 
@@ -46,14 +46,14 @@
 
 .prf-profile-head {
   align-items: center;
-  padding-bottom: var(--ui-sp-5);
-  margin-bottom: var(--ui-sp-2);
-  border-bottom: 1px solid var(--ui-line-faint);
+  padding-bottom: var(--space-md);
+  margin-bottom: var(--space-xxs);
+  border-bottom: 1px solid var(--color-line-soft);
 }
 
 .prf-profile-head .ui-identity {
   width: 100%;
-  gap: var(--ui-sp-4);
+  gap: var(--space-sm);
 }
 
 .prf-page .ui-list-row__leading {
@@ -65,7 +65,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: var(--ui-ink-3);
+  color: var(--color-muted);
 }
 
 .prf-page .ui-list-row__meta {
@@ -77,29 +77,29 @@
 
 .prf-week {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(calc(var(--ui-sp-12) * 4), 1fr));
-  gap: var(--ui-sp-3);
+  grid-template-columns: repeat(auto-fit, minmax(calc(var(--space-section) * 4), 1fr));
+  gap: var(--space-xs);
 }
 
 .prf-week__day {
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: var(--ui-sp-4);
-  min-height: var(--ui-row-h);
-  padding: var(--ui-sp-4);
-  border: 1px solid var(--ui-line);
-  border-radius: var(--ui-r-sm);
-  background: var(--ui-surface-inset);
+  gap: var(--space-sm);
+  min-height: var(--control-height-lg);
+  padding: var(--space-sm);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  background: var(--color-sheet);
 }
 
 .prf-week__day.is-today {
-  border-color: var(--ui-line-strong);
-  background: var(--ui-surface);
+  border-color: var(--color-line-strong);
+  background: var(--color-white);
 }
 
 .prf-week__label {
-  width: var(--ui-sp-8);
+  width: var(--space-xxl);
   flex: none;
 }
 
@@ -109,30 +109,30 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--ui-ink);
+  color: var(--color-ink);
 }
 
 .prf-skeleton-id {
   align-items: center;
-  gap: var(--ui-sp-4);
+  gap: var(--space-sm);
 }
 
 .prf-skeleton-copy {
   min-width: 0;
   flex-direction: column;
-  gap: var(--ui-sp-2);
+  gap: var(--space-xxs);
 }
 
 .prf-skeleton-card {
   flex-direction: column;
-  gap: var(--ui-sp-4);
+  gap: var(--space-sm);
 }
 
 .prf-skeleton-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--ui-sp-4);
+  gap: var(--space-sm);
 }
 
 @media (max-width: 1080px) {
@@ -165,7 +165,7 @@
   .prf-week__day {
     align-items: flex-start;
     flex-direction: column;
-    gap: var(--ui-sp-2);
+    gap: var(--space-xxs);
   }
 
   .prf-week__label {

@@ -1,0 +1,536 @@
+.o5-corner {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.o5-corner .lx-account { margin-left: 8px; }
+.o5-corner .lx-btn--ghost.on { background: var(--color-sheet); color: var(--color-ink); }
+
+.o5-stage {
+  position: absolute;
+  top: 52px;
+  right: 0;
+  bottom: 120px;
+  left: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.o5-center {
+  display: flex;
+  max-width: 640px;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.o5-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  color: var(--color-brand-deep);
+  font-size: var(--type-label-size);
+}
+
+.o5--paused .o5-status { color: var(--color-wait); }
+
+.o5 .o5-center .lx-picker-trigger {
+  margin: 0;
+  padding: 4px 12px;
+  text-align: center;
+}
+
+.o5-task {
+  display: -webkit-box;
+  overflow: hidden;
+  max-width: 560px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  color: var(--color-ink-2);
+  font-size: var(--type-section-title-size);
+  font-weight: var(--type-section-title-weight);
+  letter-spacing: var(--type-section-title-tracking);
+  line-height: 1.3;
+}
+
+.o5-caret { flex-shrink: 0; color: var(--color-faint); }
+
+.o5-clock {
+  margin: 18px 0 30px;
+  color: var(--color-ink);
+  font-size: 120px;
+  font-weight: var(--type-timer-weight);
+  letter-spacing: -0.045em;
+  line-height: 1;
+}
+
+.o5--paused .o5-clock { color: var(--color-muted); }
+
+.o5-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.o5-actions .lx-transport-btn { min-width: 120px; }
+
+/* ---------- the floor: today's ribbon ---------- */
+
+.o5-floor {
+  position: absolute;
+  right: 40px;
+  bottom: 24px;
+  left: 40px;
+}
+
+.o5-floor-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.o5-floor-line span {
+  color: var(--color-muted);
+  font-size: var(--type-label-size);
+}
+
+.o5-floor-line b {
+  margin-left: 4px;
+  color: var(--color-ink);
+  font-size: var(--type-body-lg-size);
+  font-weight: var(--type-body-lg-strong-weight);
+}
+
+.o5-floor-line .o5-floor-aside { color: var(--color-faint); }
+
+/* ---------- not tracking: pick something ---------- */
+
+.o5-pick h2 {
+  margin: 0 0 20px;
+  color: var(--color-ink);
+  font-size: var(--type-title-size);
+  font-weight: var(--type-title-weight);
+  letter-spacing: var(--type-title-tracking);
+}
+
+.o5-find {
+  width: 480px;
+  height: var(--control-height-lg);
+  margin-bottom: 16px;
+  border-radius: var(--radius-lg);
+}
+
+.o5-find input { font-size: var(--type-body-lg-size); }
+
+.o5-tiles {
+  display: grid;
+  width: 600px;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.o5-tile {
+  position: relative;
+  display: flex;
+  height: 84px;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 44px 14px 14px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-xl);
+  background: var(--color-white);
+  text-align: left;
+  transition: background var(--duration-fast) var(--ease-standard), border-color var(--duration-fast) var(--ease-standard);
+}
+
+.o5-tile:hover { border-color: var(--color-line-strong); background: var(--color-sheet-soft); }
+
+.o5-tile-main {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.o5-tile-name {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  color: var(--color-ink);
+  font-weight: var(--type-body-sm-strong-weight);
+  line-height: 1.35;
+}
+
+.o5-tile-meta { font-size: var(--type-micro-size); }
+.o5-tile-last { color: var(--color-brand-deep); }
+
+.o5-tile-play {
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  padding-left: 2px;
+  border-radius: 50%;
+  background: var(--color-brand);
+  color: var(--color-white);
+  opacity: 0;
+  transform: translateY(-50%);
+  transition: opacity var(--duration-fast) var(--ease-standard);
+}
+
+.o5-tile:hover .o5-tile-play { opacity: 1; }
+
+/* ---------- sheets ---------- */
+
+.o5-all {
+  display: flex;
+  max-width: 720px;
+  flex-direction: column;
+  margin: 0 auto;
+}
+
+.o5-all h4,
+.o5-day h4 {
+  margin: 18px 0 6px 6px;
+  color: var(--color-muted);
+  font-size: var(--type-overline-size);
+  font-weight: var(--type-overline-weight);
+  letter-spacing: var(--type-overline-tracking);
+  text-transform: uppercase;
+}
+
+.o5-all-row {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  text-align: left;
+}
+
+.o5-all-row:hover { background: var(--color-sheet-soft); }
+.o5-all-row.on { background: var(--color-brand-wash); }
+
+.o5-all-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.o5-all-now {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-brand-deep);
+  font-size: var(--type-micro-size);
+}
+
+.o5-all-time {
+  width: 60px;
+  color: var(--color-muted);
+  font-size: var(--type-micro-size);
+  text-align: right;
+}
+
+.o5-day h4 { margin: 22px 0 10px; }
+.o5-day h4:first-child { margin-top: 0; }
+
+.o5-figs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.o5-figs span {
+  display: flex;
+  flex-direction: column;
+  color: var(--color-muted);
+  font-size: var(--type-micro-size);
+}
+
+.o5-figs b {
+  color: var(--color-ink);
+  font-size: var(--type-section-title-size);
+  font-weight: var(--type-section-title-weight);
+  letter-spacing: var(--type-section-title-tracking);
+}
+
+/* =====================================================================
+   Premium pass (2026-10-04): the EMIAC landing page's hero glow, a blue
+   wash from the top with a warm orange light in it, at half strength.
+   Type stays Timo's own Instrument Sans. Exploration only; if it is kept,
+   the glow colours move into DESIGN.md first.
+   ===================================================================== */
+
+.o5 {
+  --o5-display: var(--font-sans);
+  --o5-text: var(--font-sans);
+  --o5-warm: var(--color-series-2);
+  --o5-glass: color-mix(in srgb, var(--color-white) 72%, transparent);
+  --o5-hair: color-mix(in srgb, var(--color-ink) 9%, transparent);
+  font-family: var(--o5-text);
+}
+
+/* ---------- the glow ---------- */
+
+.o5-glow {
+  position: absolute;
+  top: -60px;
+  right: 0;
+  left: 0;
+  z-index: 0;
+  height: 560px;
+  filter: blur(44px);
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.o5-glow i {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+/* Wide blue wash, narrowing to a point under the timer. */
+.o5-glow i:nth-child(1) {
+  width: 140%;
+  height: 520px;
+  background: linear-gradient(to bottom, color-mix(in srgb, var(--color-brand-hi) 50%, transparent), color-mix(in srgb, var(--color-brand-hi) 22%, transparent) 60%, transparent);
+  clip-path: polygon(0 0, 100% 0, 50% 100%);
+}
+
+/* The deeper blue core. */
+.o5-glow i:nth-child(2) {
+  width: 92%;
+  height: 300px;
+  background: linear-gradient(to bottom, color-mix(in srgb, var(--color-brand) 55%, transparent), color-mix(in srgb, var(--color-brand-hi) 30%, transparent) 60%, transparent);
+  clip-path: polygon(0 0, 100% 0, 50% 100%);
+}
+
+/* The warm light: orange, right of centre, where the landing page has its peach. */
+.o5-glow i:nth-child(3) {
+  top: 110px;
+  left: 64%;
+  width: 460px;
+  height: 230px;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--o5-warm) 55%, transparent), transparent);
+}
+
+/* A second, fainter warm pool low on the left, so the tint carries down the window. */
+.o5-glow i:nth-child(4) {
+  top: 300px;
+  left: 22%;
+  width: 420px;
+  height: 220px;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--o5-warm) 28%, transparent), transparent);
+}
+
+.o5-rings {
+  position: absolute;
+  top: 70px;
+  left: 50%;
+  z-index: 0;
+  width: 900px;
+  height: 900px;
+  border-radius: 50%;
+  background: repeating-radial-gradient(circle, transparent 0 58px, color-mix(in srgb, var(--color-brand) 8%, transparent) 59px 60px);
+  transform: translateX(-50%);
+  pointer-events: none;
+  mask-image: radial-gradient(closest-side, #000 25%, transparent 75%);
+}
+
+.o5-grain {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  opacity: 0.05;
+  mix-blend-mode: multiply;
+  pointer-events: none;
+}
+
+.o5-stage,
+.o5-floor { z-index: 2; }
+
+/* ---------- corner: one frosted pill ---------- */
+
+.o5-corner {
+  top: 10px;
+  right: 12px;
+  padding: 3px;
+  border-radius: var(--radius-full);
+  background: var(--o5-glass);
+  box-shadow: 0 0 0 1px var(--o5-hair), 0 6px 18px -10px color-mix(in srgb, var(--color-ink) 25%, transparent);
+  backdrop-filter: blur(14px) saturate(1.4);
+}
+
+.o5-corner .lx-btn--ghost { color: var(--color-ink-2); }
+.o5-corner .lx-btn--ghost:hover,
+.o5-corner .lx-btn--ghost.on { background: color-mix(in srgb, var(--color-white) 80%, transparent); }
+.o5-corner .lx-account { margin-left: 4px; }
+
+/* ---------- the eyebrow: hairlines above and below, as on the landing page ---------- */
+
+.o5-status {
+  gap: 7px;
+  margin-bottom: 18px;
+  padding: 8px 30px;
+  background:
+    linear-gradient(90deg, transparent, color-mix(in srgb, var(--color-brand) 40%, transparent), transparent) top / 100% 1px no-repeat,
+    linear-gradient(90deg, transparent, color-mix(in srgb, var(--color-brand) 40%, transparent), transparent) bottom / 100% 1px no-repeat;
+  color: var(--color-brand);
+  font-size: var(--type-body-sm-size);
+}
+
+.o5--paused .o5-status {
+  background:
+    linear-gradient(90deg, transparent, color-mix(in srgb, var(--color-wait) 40%, transparent), transparent) top / 100% 1px no-repeat,
+    linear-gradient(90deg, transparent, color-mix(in srgb, var(--color-wait) 40%, transparent), transparent) bottom / 100% 1px no-repeat;
+}
+
+.o5-status--off { color: var(--color-muted); }
+.o5-status-sep { color: var(--color-faint); font-style: normal; }
+
+/* ---------- task + clock ---------- */
+
+.o5-task {
+  color: var(--color-ink-2);
+  font-family: var(--o5-text);
+  font-size: 19px;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+}
+
+.o5-clock {
+  display: inline-flex;
+  margin: 10px 0 28px;
+  color: var(--color-ink);
+  font-family: var(--o5-display);
+  font-size: 128px;
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+
+.o5-digit {
+  display: inline-block;
+  width: 0.6em;
+  text-align: center;
+}
+
+.o5-colon {
+  align-self: center;
+  display: inline-block;
+  width: 0.24em;
+  text-align: center;
+  color: var(--color-ink);
+  opacity: 0.3;
+  font-size: 0.72em;
+  transform: translateY(-0.12em);
+}
+
+.o5--paused .o5-clock { opacity: 0.45; }
+
+.o5-sec { color: var(--color-brand); }
+
+/* ---------- buttons: ink pill + white pill, as on the landing page ---------- */
+
+.o5 .o5-actions .lx-btn--lg {
+  height: 48px;
+  padding: 0 26px;
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.o5 .o5-actions .lx-transport-btn:not(.lx-btn--ink):not(.lx-btn--primary) {
+  background: var(--color-white);
+  box-shadow: 0 0 0 1px var(--color-line), 0 4px 14px -8px color-mix(in srgb, var(--color-ink) 30%, transparent);
+}
+
+.o5 .o5-actions .lx-btn--ink { box-shadow: 0 8px 20px -10px color-mix(in srgb, var(--color-ink) 70%, transparent); }
+.o5 .o5-actions .lx-btn--primary { box-shadow: 0 8px 22px -10px var(--color-brand); }
+.o5 .o5-switch { color: var(--color-ink-2); }
+
+/* ---------- the floor ---------- */
+
+.o5-floor {
+  right: 0;
+  bottom: 0;
+  left: 0;
+  padding: 14px 40px 20px;
+  background: linear-gradient(to bottom, transparent, color-mix(in srgb, var(--color-white) 85%, transparent) 30%);
+  --lx-ribbon-bg: var(--color-white);
+}
+
+.o5-floor .lx-ribbon-track {
+  background: color-mix(in srgb, var(--color-sheet) 70%, transparent);
+}
+
+/* ---------- not tracking ---------- */
+
+.o5-pick h2 {
+  margin-bottom: 24px;
+  font-family: var(--o5-display);
+  font-size: 44px;
+  font-weight: 440;
+  letter-spacing: -0.025em;
+  line-height: 1.05;
+}
+
+.o5-find {
+  height: 50px;
+  padding: 0 18px;
+  border-radius: var(--radius-full);
+  background: var(--o5-glass);
+  box-shadow: 0 0 0 1px var(--o5-hair), 0 10px 30px -18px color-mix(in srgb, var(--color-ink) 35%, transparent);
+  backdrop-filter: blur(14px);
+}
+
+.o5-tile {
+  border-color: var(--o5-hair);
+  background: var(--o5-glass);
+  backdrop-filter: blur(14px);
+}
+
+.o5-tile:hover {
+  border-color: var(--color-line-strong);
+  background: color-mix(in srgb, var(--color-white) 92%, transparent);
+}
+
+.o5-sheet-fonts,
+.o5 .lx-sheet { font-family: var(--o5-text); }
+
+/* The search stays put while the list scrolls under it. The sheet body has 20px padding,
+   so the bar sticks at -20px and paints its own white over that gap. */
+.o5-all-search {
+  position: sticky;
+  top: -20px;
+  z-index: 2;
+  margin: -20px 0 0;
+  padding: 20px 0 10px;
+  background: var(--color-white);
+}

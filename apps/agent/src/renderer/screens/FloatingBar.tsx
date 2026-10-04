@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Pause, Play, GripVertical, X } from 'lucide-react';
 import type { TimerStatus } from '../lib/agent.d';
-import { projectStyle } from '../lib/projectStyle';
 import { fmtClock } from './Today';
 
 /** Always-on-top mini bar shown while tracking. */
@@ -17,7 +16,6 @@ export default function FloatingBar() {
 
   if (timer.state !== 'RUNNING') return <div className="fbar" />;
   const task = timer.larkTaskGuid ? larkTasks.data?.tasks.find((t) => t.guid === timer.larkTaskGuid) : undefined;
-  const st = timer.larkTaskGuid ? projectStyle(timer.larkTaskGuid) : null;
   const togglePaused = async () => {
     if (timer.paused) {
       const result = await window.agent.timer.resume();
@@ -30,14 +28,14 @@ export default function FloatingBar() {
 
   // The grip is the drag region; the remaining controls are normal buttons.
   return (
-    <div className="fbar">
+    <div className={`fbar${timer.paused ? ' is-paused' : ''}`}>
       <span className="fbar-grip" title="Drag to move"><GripVertical size={14} strokeWidth={2} /></span>
       <button
         className="fbar-body no-drag"
         title="Open Timo"
         onClick={() => window.agent.window.openMain()}
       >
-        <span className="fbar-dot" style={{ background: st?.color ?? 'var(--violet)' }} />
+        <span className="fbar-dot" />
         <span className="fbar-time tabular">{fmtClock(timer.workedMs)}</span>
         <span className="fbar-proj">{task?.summary ?? 'Tracking'}{timer.paused ? ' · paused' : ''}</span>
       </button>

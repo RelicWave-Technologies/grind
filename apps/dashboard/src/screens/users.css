@@ -13,12 +13,12 @@
 }
 
 .usr-table {
-  min-width: calc(var(--ui-sp-12) * 14);
+  min-width: calc(var(--space-section) * 14);
   table-layout: fixed;
 }
 
 .usr-table--device {
-  min-width: calc(var(--ui-sp-12) * 24);
+  min-width: calc(var(--space-section) * 24);
 }
 
 .usr-table--device .usr-col-person { width: 18%; }
@@ -37,14 +37,14 @@
 }
 
 .usr-table .ui-td {
-  padding-top: var(--ui-sp-4);
-  padding-bottom: var(--ui-sp-4);
+  padding-top: var(--space-sm);
+  padding-bottom: var(--space-sm);
 }
 
 .usr-table .ui-th,
 .usr-table .ui-td {
-  padding-left: var(--ui-sp-4);
-  padding-right: var(--ui-sp-4);
+  padding-left: var(--space-sm);
+  padding-right: var(--space-sm);
   overflow: hidden;
   vertical-align: middle;
 }
@@ -52,7 +52,7 @@
 .usr-actions {
   display: inline-flex;
   align-items: center;
-  gap: var(--ui-sp-2);
+  gap: var(--space-xxs);
   justify-content: flex-end;
   white-space: nowrap;
 }
@@ -70,7 +70,7 @@
 .usr-person-edit {
   display: flex;
   align-items: center;
-  gap: var(--ui-sp-3);
+  gap: var(--space-xs);
   min-width: 0;
 }
 
@@ -78,7 +78,7 @@
 .usr-name-line {
   display: inline-flex;
   align-items: center;
-  gap: var(--ui-sp-3);
+  gap: var(--space-xs);
   min-width: 0;
 }
 
@@ -86,7 +86,7 @@
   display: inline-flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: var(--ui-sp-1);
+  gap: 2px;
   max-width: 100%;
   min-width: 0;
 }
@@ -100,19 +100,19 @@
 .usr-device {
   display: inline-flex;
   align-items: center;
-  gap: var(--ui-sp-3);
+  gap: var(--space-xs);
   min-width: 0;
 }
 
 .usr-device-icon {
-  width: var(--ui-sp-7);
-  height: var(--ui-sp-7);
+  width: var(--space-xl);
+  height: var(--space-xl);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid var(--ui-line);
-  border-radius: var(--ui-r-full);
-  color: var(--ui-ink);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-full);
+  color: var(--color-ink);
   flex-shrink: 0;
 }
 
@@ -123,7 +123,7 @@
 }
 
 .usr-device-fallback {
-  font-family: var(--ui-font-mono);
+  font-family: var(--font-mono);
   font-size: 9px;
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -132,21 +132,21 @@
 .usr-device-copy {
   display: inline-flex;
   flex-direction: column;
-  gap: var(--ui-sp-1);
+  gap: 2px;
   min-width: 0;
   line-height: 1.2;
 }
 
 .usr-device-name {
   font-weight: 600;
-  color: var(--ui-ink);
+  color: var(--color-ink);
   white-space: nowrap;
 }
 
 .usr-device-version,
 .usr-device-empty {
   font-size: 11px;
-  color: var(--ui-ink-3);
+  color: var(--color-muted);
   white-space: nowrap;
 }
 
@@ -154,7 +154,7 @@
   display: inline-flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: var(--ui-sp-2);
+  gap: var(--space-xxs);
   min-width: 0;
 }
 
@@ -163,10 +163,10 @@
 }
 
 /* Deactivated rows read quieter — step ink down (token), no new colour. */
-.usr-row-off > .ui-td { color: var(--ui-ink-3); }
+.usr-row-off > .ui-td { color: var(--color-muted); }
 
 /* The inline error row carries the Banner full-bleed under its person row. */
-.usr-row-err > .ui-td { padding-top: var(--ui-sp-2); padding-bottom: var(--ui-sp-3); }
+.usr-row-err > .ui-td { padding-top: var(--space-xxs); padding-bottom: var(--space-xs); }
 .usr-row-err > .ui-td:hover { background: transparent; }
 
 /* ---- Invite card form layout --------------------------------------------- */
@@ -174,18 +174,18 @@
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
-  gap: var(--ui-sp-4);
+  gap: var(--space-sm);
 }
 .usr-invite-email { flex: 2 1 220px; }
 .usr-invite-name { flex: 2 1 180px; }
 .usr-invite-actions {
   display: inline-flex;
   align-items: flex-end;
-  gap: var(--ui-sp-3);
+  gap: var(--space-xs);
   margin-left: auto;
 }
-.usr-invite-banner { margin-top: var(--ui-sp-5); }
-.usr-invite-hint { margin: var(--ui-sp-5) 0 0; max-width: 66ch; }
+.usr-invite-banner { margin-top: var(--space-md); }
+.usr-invite-hint { margin: var(--space-md) 0 0; max-width: 66ch; }
 
 /* ---- Delete confirmation -------------------------------------------------
    The counts are the argument this dialog is making, so they are set in the
@@ -195,28 +195,28 @@
   list-style: none;
   margin: 0;
   padding: 0;
-  border: 1px solid var(--ui-line);
-  border-radius: var(--ui-r-sm);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
   overflow: hidden;
 }
 .usr-del-list li {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: var(--ui-sp-4);
-  padding: var(--ui-sp-2) var(--ui-sp-4);
-  border-bottom: 1px solid var(--ui-line-faint);
+  gap: var(--space-sm);
+  padding: var(--space-xxs) var(--space-sm);
+  border-bottom: 1px solid var(--color-line-soft);
 }
 .usr-del-list li:last-child { border-bottom: 0; }
-.usr-del-list span { color: var(--ui-ink-2); }
+.usr-del-list span { color: var(--color-body); }
 .usr-del-list strong {
-  font-family: var(--ui-font-mono);
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  color: var(--ui-danger-ink);
+  color: var(--color-bad);
 }
 .usr-del-note {
-  margin: var(--ui-sp-4) 0 0;
-  color: var(--ui-ink-3);
+  margin: var(--space-sm) 0 0;
+  color: var(--color-muted);
   max-width: 62ch;
 }
-.usr-del-list + .usr-del-note { margin-top: var(--ui-sp-3); }
+.usr-del-list + .usr-del-note { margin-top: var(--space-xs); }

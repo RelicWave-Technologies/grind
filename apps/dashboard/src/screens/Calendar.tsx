@@ -49,13 +49,12 @@ import {
 /**
  * Calendar — company holidays, who is away, and a person's paid-leave balance.
  *
- * Composed from the shared "Quiet Datasheet" kit, like the other pages: the KPI
- * strip is the kit's StatRow (which cycles the Figma block pastels across its
- * tiles), the tables and tags are kit primitives, and this file contributes
- * layout only.
+ * Composed from the shared ui/ kit, like the other pages: the KPI strip is the
+ * kit's StatRow (white stat cards), the tables and tags are kit primitives,
+ * and this file contributes layout only.
  *
  * The month grid is the one pattern the kit has no primitive for, so it lives
- * in calendar.css — built entirely from --ui-* tokens, no bespoke colour, type,
+ * in calendar.css — built entirely from the DESIGN.md tokens, no bespoke colour, type,
  * radius or shadow. Its own palette is borrowed from the same block pastels the
  * StatRow uses, so a lime holiday on the grid and a lime tile above it are the
  * same lime.

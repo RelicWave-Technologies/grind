@@ -60,8 +60,8 @@ interface AdminUser {
 }
 
 /**
- * /shifts — ADMIN-only screen, composed entirely from the shared "Quiet
- * Datasheet" kit (Page / PageHeader / Card / Field / Table / Tag / Button …).
+ * /shifts — ADMIN-only screen, composed entirely from the shared ui/
+ * kit (Page / PageHeader / Card / Field / Table / Tag / Button …).
  * The page contributes layout only; every colour, type, border and radius
  * comes from the kit + tokens. Behaviour is untouched: same queries,
  * mutations, save-diff logic, time pickers, day toggles, clamps and all

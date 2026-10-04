@@ -6,14 +6,14 @@ html:has(.wl-page) { scroll-behavior: smooth; }
    56px nav, 36px black marquee), display-xl headline at 86/340/-1.72px, mono
    eyebrow + captions, ONE cream color block ({rounded.lg}, 48px padding) as
    the stage, and the documented level-2 soft shadow reserved for the floating
-   sticky-note tiles hovering over it. Tokens resolve to --fg-* (styles.css).
+   sticky-note tiles hovering over it. Tokens come from the root DESIGN.md.
    ========================================================================== */
 
 .wl-page {
   --wl-gutter: 48px;                     /* {spacing.xxl} */
-  background: var(--fg-canvas);
-  color: var(--fg-ink);
-  font-family: var(--fg-sans);
+  background: var(--color-white);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
   font-size: 18px;                       /* {typography.body} */
   font-weight: 320;
   line-height: 1.45;
@@ -48,13 +48,8 @@ html:has(.wl-page) { scroll-behavior: smooth; }
   letter-spacing: -0.02em;               /* -1.72px @ 86px */
 }
 .wl-display span { display: block; white-space: nowrap; }
-.wl-eyebrow {
-  font-family: var(--fg-mono);
-  font-size: 18px; font-weight: 400; line-height: 1.3;
-  letter-spacing: 0.03em; text-transform: uppercase;
-}
 .wl-caption {
-  font-family: var(--fg-mono);
+  font-family: var(--font-mono);
   font-size: 12px; font-weight: 400; line-height: 1.35;
   letter-spacing: 0.05em; text-transform: uppercase;
 }
@@ -68,23 +63,23 @@ html:has(.wl-page) { scroll-behavior: smooth; }
 /* ---- Pills (the only button shape) ---------------------------------------- */
 .wl-btn {
   display: inline-flex; align-items: center; justify-content: center;
-  font-family: var(--fg-sans);
+  font-family: var(--font-sans);
   font-size: 20px; font-weight: 480; line-height: 1.4; letter-spacing: -0.005em;
-  border-radius: var(--fg-r-pill);
+  border-radius: var(--radius-full);
   text-decoration: none; white-space: nowrap;
-  transition: transform var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+  transition: transform var(--duration-fast) var(--ease-standard), background var(--duration-fast) var(--ease-standard);
 }
 .wl-btn:active { transform: scale(0.97); }
-.wl-btn:focus-visible { outline: 2px solid var(--fg-ink); outline-offset: 2px; }
-.wl-btn--primary, a.wl-btn--primary { background: var(--fg-ink); color: var(--fg-on-primary); padding: 10px 20px; }
+.wl-btn:focus-visible { outline: 2px solid var(--color-ink); outline-offset: 2px; }
+.wl-btn--primary, a.wl-btn--primary { background: var(--color-ink); color: var(--color-white); padding: 10px 20px; }
 .wl-btn--primary:hover { transform: translateY(-1px); }
-.wl-btn--secondary, a.wl-btn--secondary { background: var(--fg-canvas); color: var(--fg-ink); padding: 8px 18px 10px; }
-.wl-btn--secondary:hover { background: var(--fg-surface-soft); }
+.wl-btn--secondary, a.wl-btn--secondary { background: var(--color-white); color: var(--color-ink); padding: 8px 18px 10px; }
+.wl-btn--secondary:hover { background: var(--color-sheet-soft); }
 .wl-btn--dl { gap: 10px; }
 .wl-btn--dl img { display: block; filter: brightness(0) invert(1); }
 
 /* ---- Top nav (56px, white, hairline) -------------------------------------- */
-.wl-nav { background: var(--fg-canvas); border-bottom: 1px solid var(--fg-hairline); }
+.wl-nav { background: var(--color-white); border-bottom: 1px solid var(--color-line); }
 .wl-nav-inner {
   max-width: 1280px; margin: 0 auto; height: 56px;
   padding: 0 var(--wl-gutter);
@@ -126,32 +121,17 @@ html:has(.wl-page) { scroll-behavior: smooth; }
 }
 .wl-stage-block {
   position: absolute; inset: 0;
-  background: var(--fg-cream);           /* {components.color-block-section} kin */
-  border-radius: var(--fg-r-lg);
-}
-.wl-orbit {
-  position: absolute; top: 8px; left: calc(50% - 104px);
-  width: 208px; height: 208px;
-  border: 1px solid var(--fg-ink); border-radius: 9999px;
-  animation: wl-spin 16s linear infinite;
-}
-.wl-orbit::after {
-  content: ''; position: absolute; top: -4.5px; left: calc(50% - 4.5px);
-  width: 9px; height: 9px; border-radius: 9999px; background: var(--fg-ink);
-}
-@keyframes wl-spin { to { transform: rotate(360deg); } }
-.wl-mascot {
-  position: absolute; top: 48px; left: calc(50% - 62px);
-  animation: wl-float 5.6s ease-in-out infinite;
+  background: var(--color-sheet-soft);           /* {components.color-block-section} kin */
+  border-radius: var(--radius-card);
 }
 @keyframes wl-float {
   0%, 100% { transform: translateY(-6px); }
   50% { transform: translateY(6px); }
 }
 .wl-fleck { position: absolute; width: 12px; height: 12px; border-radius: 2px; }
-.wl-fleck--1 { background: var(--fg-lime);  top: 26px;  right: 44px; transform: rotate(-8deg); animation: wl-float 7s ease-in-out infinite; }
-.wl-fleck--2 { background: var(--fg-lilac); top: 178px; left: 26px;  transform: rotate(6deg);  animation: wl-float 8s ease-in-out infinite reverse; }
-.wl-fleck--3 { background: var(--fg-mint);  bottom: 78px; right: 30px; transform: rotate(-4deg); animation: wl-float 6.4s ease-in-out infinite; }
+.wl-fleck--1 { background: var(--color-sheet-soft);  top: 26px;  right: 44px; transform: rotate(-8deg); animation: wl-float 7s ease-in-out infinite; }
+.wl-fleck--2 { background: var(--color-sheet-soft); top: 178px; left: 26px;  transform: rotate(6deg);  animation: wl-float 8s ease-in-out infinite reverse; }
+.wl-fleck--3 { background: var(--color-sheet-soft);  bottom: 78px; right: 30px; transform: rotate(-4deg); animation: wl-float 6.4s ease-in-out infinite; }
 
 /* Floating tiles: white (or lime) cards, {rounded.md}+, the documented
    level-2 shadow, slight off-axis rotation — sticky notes on a desk. */
@@ -159,14 +139,14 @@ html:has(.wl-page) { scroll-behavior: smooth; }
 .wl-card img {
   border-radius: 12px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06), 0 1px 3px rgba(0, 0, 0, 0.05);
-  transition: transform var(--dur-base) var(--spring), box-shadow var(--dur-base) var(--ease);
+  transition: transform var(--duration-base) var(--ease-emphasised), box-shadow var(--duration-base) var(--ease-standard);
 }
 .wl-card--a { top: 56px;  left: 30px;  animation: wl-bob-a 6s   ease-in-out infinite; }
 .wl-card--b { top: 208px; right: 22px; animation: wl-bob-b 7.2s ease-in-out infinite; }
 .wl-card--c { top: 336px; left: 42px;  animation: wl-bob-c 5.4s ease-in-out infinite; }
 .wl-card--a img { transform: rotate(-3deg); border-radius: 16px; }
-.wl-card--b img { transform: rotate(2.2deg); border: 1px solid var(--fg-hairline); }
-.wl-card--c img { transform: rotate(-2deg); border: 1px solid var(--fg-hairline); }
+.wl-card--b img { transform: rotate(2.2deg); border: 1px solid var(--color-line); }
+.wl-card--c img { transform: rotate(-2deg); border: 1px solid var(--color-line); }
 .wl-card:hover img {
   transform: rotate(0deg) scale(1.03);
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.1), 0 2px 6px rgba(0, 0, 0, 0.06);
@@ -178,9 +158,9 @@ html:has(.wl-page) { scroll-behavior: smooth; }
 .wl-stage-cap {
   position: absolute; left: 0; right: 0; bottom: 18px;
   text-align: center; text-decoration: none;
-  font-family: var(--fg-mono);
+  font-family: var(--font-mono);
   font-size: 12px; font-weight: 400; letter-spacing: 0.05em; text-transform: uppercase;
-  color: var(--fg-ink);
+  color: var(--color-ink);
 }
 .wl-stage-cap:hover { text-decoration: underline; text-underline-offset: 4px; }
 
@@ -199,8 +179,8 @@ html:has(.wl-page) { scroll-behavior: smooth; }
 /* ---- Feature tiles ({components.feature-illustration-tile}) ------------------ */
 .wl-tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
 .wl-tile {
-  background: var(--fg-surface-soft);
-  border-radius: var(--fg-r-md);
+  background: var(--color-sheet-soft);
+  border-radius: var(--radius-md);
   padding: 24px;
 }
 .wl-tile p:last-child {
@@ -209,10 +189,10 @@ html:has(.wl-page) { scroll-behavior: smooth; }
 }
 
 /* ---- Color-block sections ({rounded.lg} + 48px padding) ---------------------- */
-.wl-block { border-radius: var(--fg-r-lg); padding: var(--wl-gutter); }
-.wl-block--lime { background: var(--fg-lime); }
-.wl-block--navy { background: var(--fg-navy); color: #ffffff; }
-.wl-block--coral { background: var(--fg-coral); }
+.wl-block { border-radius: var(--radius-card); padding: var(--wl-gutter); }
+.wl-block--lime { background: var(--color-sheet-soft); }
+.wl-block--navy { background: var(--color-dark); color: #ffffff; }
+.wl-block--coral { background: var(--color-sheet-soft); }
 .wl-block-grid {
   display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
   gap: var(--wl-gutter); align-items: center;
@@ -246,8 +226,8 @@ html:has(.wl-page) { scroll-behavior: smooth; }
 }
 .wl-slide img {
   width: 100%; height: auto;
-  border-radius: var(--fg-r-md);
-  border: 1px solid var(--fg-hairline);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-line);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
 }
 .wl-slide figcaption { margin-top: 14px; }
@@ -259,8 +239,8 @@ html:has(.wl-page) { scroll-behavior: smooth; }
   padding-left: max(var(--wl-gutter), calc((100vw - 1280px) / 2 + var(--wl-gutter)));
   padding-right: var(--wl-gutter);
 }
-.wl-car-progress { flex: 1; max-width: 420px; height: 1px; background: var(--fg-hairline); }
-.wl-car-progress-fill { width: 0%; height: 100%; background: var(--fg-ink); }
+.wl-car-progress { flex: 1; max-width: 420px; height: 1px; background: var(--color-line); }
+.wl-car-progress-fill { width: 0%; height: 100%; background: var(--color-ink); }
 
 @media (max-width: 900px) {
   .wl-carousel { height: auto; margin-top: 28px; }
@@ -276,12 +256,12 @@ html:has(.wl-page) { scroll-behavior: smooth; }
   padding: 24px var(--wl-gutter) 8px;
   display: flex; flex-direction: column; align-items: center; text-align: center;
 }
-.wl-close-mascot { animation: wl-float 5.2s ease-in-out infinite; margin-bottom: 18px; }
+.wl-close-mark { animation: wl-float 5.2s ease-in-out infinite; margin-bottom: 18px; }
 .wl-close-lead { max-width: 44ch; }
 .wl-close-ctas { justify-content: center; margin-top: 30px; }
 
 /* ---- Footer (wordmark + caption grid) ----------------------------------------- */
-.wl-footer { margin-top: 88px; border-top: 1px solid var(--fg-hairline); padding: 56px 0 36px; }
+.wl-footer { margin-top: 88px; border-top: 1px solid var(--color-line); padding: 56px 0 36px; }
 .wl-footer-grid { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--wl-gutter); align-items: start; }
 .wl-footer-wordmark { font-size: 48px; font-weight: 340; line-height: 1; letter-spacing: -0.015em; }
 .wl-footer-cols { display: flex; gap: 64px; flex-wrap: wrap; }
@@ -289,7 +269,7 @@ html:has(.wl-page) { scroll-behavior: smooth; }
 .wl-footer-col a { font-size: 16px; font-weight: 330; letter-spacing: -0.14px; text-decoration: none; }
 .wl-footer-col a:hover { text-decoration: underline; text-underline-offset: 4px; }
 .wl-footer-legal { margin-top: 48px; }
-.wl-footer-legal .wl-caption { border-top: 1px solid var(--fg-hairline-soft); padding-top: 20px; }
+.wl-footer-legal .wl-caption { border-top: 1px solid var(--color-line-soft); padding-top: 20px; }
 
 /* ---- Scroll reveal ------------------------------------------------------------ */
 .wl-reveal {
@@ -300,7 +280,7 @@ html:has(.wl-page) { scroll-behavior: smooth; }
 
 /* ---- Reduced motion ---------------------------------------------------------- */
 @media (prefers-reduced-motion: reduce) {
-  .wl-marquee-track, .wl-orbit, .wl-mascot, .wl-fleck, .wl-close-mascot,
+  .wl-fleck, .wl-close-mark,
   .wl-card--a, .wl-card--b, .wl-card--c { animation: none !important; }
   .wl-reveal { opacity: 1; transform: none; transition: none; }
 }
@@ -313,7 +293,6 @@ html:has(.wl-page) { scroll-behavior: smooth; }
   .wl-stage { justify-self: center; }
   .wl-block-grid { grid-template-columns: 1fr; gap: 32px; }
   .wl-tiles { grid-template-columns: 1fr; }
-  .wl-shots { grid-template-columns: 1fr; }
   .wl-footer-grid { grid-template-columns: 1fr; }
   .wl-sec { margin-top: 72px; }
 }

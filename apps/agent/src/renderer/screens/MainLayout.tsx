@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CalendarClock, ListTodo, PieChart, Settings as SettingsIcon, LogOut, Gauge, Clock, Keyboard, MousePointer2, ExternalLink, RefreshCw } from 'lucide-react';
-import timoMascot from '../assets/timo-mascot.svg';
+import timoLogo from '../assets/timo-logo.svg';
 import Today from './Today';
 import Tasks from './Tasks';
 import Settings from './Settings';
@@ -64,7 +64,7 @@ export default function MainLayout() {
     <div className="layout">
       <aside className="sidebar">
         <div className="sidebar-top">
-          <span className="brand-mark"><img src={timoMascot} alt="" /></span>
+          <span className="brand-mark"><img src={timoLogo} alt="" /></span>
           <span className="brand-name">Timo</span>
         </div>
 
@@ -94,10 +94,10 @@ export default function MainLayout() {
             {showAvatar ? <img src={me.data!.avatarUrl!} alt="" onError={() => setAvatarFailed(true)} /> : meInitial}
           </span>
           <span style={{ flex: 1, minWidth: 0 }}>
-            <span className="callout" style={{ display: 'block', fontWeight: 600 }}>{meName}</span>
+            <span className="callout" style={{ display: 'block' }}>{meName}</span>
             <span className="small secondary">Sign out</span>
           </span>
-          <LogOut size={16} strokeWidth={2} color="var(--label-tertiary)" />
+          <LogOut size={16} strokeWidth={2} color="var(--color-muted)" />
         </button>
       </aside>
 
@@ -157,28 +157,28 @@ function Reports() {
           <div className="stat-grid rise rise-1">
             <div className="stat">
               <div className="stat-top">
-                <span className="stat-chip" style={{ background: 'var(--c-violet-bg)' }}><Gauge size={17} /></span>
+                <span className="stat-chip"><Gauge size={17} /></span>
                 <span className="stat-label">Productivity</span>
               </div>
               <div className="stat-value">{d?.score.score ?? 0}<span className="unit"> /100</span></div>
             </div>
             <div className="stat">
               <div className="stat-top">
-                <span className="stat-chip" style={{ background: 'var(--c-green-bg)' }}><Clock size={17} /></span>
+                <span className="stat-chip"><Clock size={17} /></span>
                 <span className="stat-label">Active time</span>
               </div>
               <div className="stat-value">{tracked.h}<span className="unit">h </span>{tracked.m}<span className="unit">m</span></div>
             </div>
             <div className="stat">
               <div className="stat-top">
-                <span className="stat-chip" style={{ background: 'var(--c-amber-bg)' }}><Keyboard size={17} /></span>
+                <span className="stat-chip"><Keyboard size={17} /></span>
                 <span className="stat-label">Keystrokes</span>
               </div>
               <div className="stat-value">{(d?.totals.keystrokes ?? 0).toLocaleString()}</div>
             </div>
             <div className="stat">
               <div className="stat-top">
-                <span className="stat-chip" style={{ background: 'var(--c-orange-bg)' }}><MousePointer2 size={17} /></span>
+                <span className="stat-chip"><MousePointer2 size={17} /></span>
                 <span className="stat-label">Clicks</span>
               </div>
               <div className="stat-value">{(d?.totals.clicks ?? 0).toLocaleString()}</div>
@@ -192,7 +192,7 @@ function Reports() {
             </div>
           ) : (
             <div className="empty rise rise-2">
-              <span className="empty-icon" style={{ background: 'var(--violet-tint)', color: 'var(--violet)' }}>
+              <span className="empty-icon">
                 <PieChart size={26} strokeWidth={2} />
               </span>
               <div className="h3">No activity yet today</div>

@@ -11,7 +11,7 @@ import { buildTimeGrid } from '../lib/timeGrid';
  * two columns (Hour 1–12, Minute in 5-min steps) and an AM/PM toggle.
  *
  * Why custom: native <input type="time"> draws OS chrome that doesn't match
- * the design system (light/premium/violet, rounded numerals), can't be
+ * the design system (DESIGN.md: white, Azure, Instrument Sans), can't be
  * keyboard-styled, and has different behaviors across platforms. This
  * component keeps the chrome on-brand and lets us add nice touches like the
  * "active" border on the currently-selected cell + the AM/PM segmented toggle.

@@ -5,12 +5,14 @@
   "type": "module",
   "scripts": {
     "dev": "vite --port 5174",
+    "dev:mock": "vite --port 5174 --mode mock",
     "build": "tsc -p tsconfig.json --noEmit && vite build",
     "preview": "vite preview --port 5174",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src"
   },
   "dependencies": {
+    "@grind/design": "workspace:*",
     "@grind/types": "workspace:*",
     "@tanstack/react-query": "5.59.16",
     "@tanstack/react-router": "1.81.5",

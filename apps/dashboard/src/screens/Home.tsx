@@ -187,7 +187,7 @@ export function HomeScreen() {
           </div>
 
           <div className="hm-ribbon-shell">
-            {dayQ.isLoading && <Skeleton h={84} radius="var(--ui-r-sm)" />}
+            {dayQ.isLoading && <Skeleton h={84} radius="var(--radius-md)" />}
             {day && <DayRibbon day={day} now={Date.now()} timeZone={tz} editable={false} />}
           </div>
 

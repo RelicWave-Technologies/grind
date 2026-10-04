@@ -35,7 +35,7 @@ interface BaseProps {
   /** Tick counter from the parent — when bumped, gap row syncs to fresh preset. */
   presetTick?: number;
   preset?: { startedAt: number; endedAt: number };
-  /** Hover-link from the ribbon. When set, the row paints a soft violet rail. */
+  /** Hover-link from the ribbon. When set, the row paints a soft Azure rail. */
   rowId?: string;
   highlighted?: boolean;
   /** Workspace directory for the attendee picker (id+name+email). */

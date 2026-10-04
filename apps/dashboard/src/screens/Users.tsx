@@ -37,8 +37,8 @@ import {
 } from '../ui';
 
 /**
- * /users — people management, composed entirely from the shared "Quiet
- * Datasheet" kit so it reads as one product with every other page. A
+ * /users — people management, composed entirely from the shared ui/
+ * kit so it reads as one product with every other page. A
  * PageHeader (scope eyebrow · People · count) carries the Active/All status
  * Segmented and the primary Invite action; a flush StatRow summarises active vs
  * deactivated; the roster is the kit Table (Identity first-cell, taxonomy Tags

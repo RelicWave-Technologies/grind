@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="apps/dashboard/public/brand/timo-mascot.svg" width="96" alt="Timo">
+<img src="apps/dashboard/public/brand/timo-logo.svg" width="96" alt="Timo">
 
 # Timo
 
@@ -126,7 +126,7 @@ pnpm dev
 ## Docs
 
 - [`docs/product.md`](docs/product.md) — what we're building, for whom, and the scope guards
-- [`docs/design.md`](docs/design.md) — the design system both surfaces share
+- [`DESIGN.md`](DESIGN.md) — the design system both surfaces share (Timo in the EMIAC house style)
 - [`AGENTS.md`](AGENTS.md) — how AI coding sessions work on this repo
 
 ---

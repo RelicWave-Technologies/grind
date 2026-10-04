@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none">
+  <title>Timo</title>
+  <!-- The Timo mark (DESIGN.md §9 The logo): a capital T whose bar is a day
+       ribbon, with the blue moment, now, at its end. Ink #111111, brand #2f6fd0. -->
+  <rect x="7" y="10" width="30" height="12" rx="6" fill="#111111"/>
+  <rect x="41" y="10" width="16" height="12" rx="6" fill="#2F6FD0"/>
+  <rect x="26" y="26" width="12" height="29" rx="6" fill="#111111"/>
+</svg>

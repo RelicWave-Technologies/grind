@@ -31,16 +31,6 @@ export default function LineChart({ points, labels, height = 200 }: Props) {
 
   return (
     <svg width="100%" viewBox={`0 0 ${w} ${h}`} role="img">
-      <defs>
-        <linearGradient id="lcLine" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" stopColor="#ff7ab0" />
-          <stop offset="100%" stopColor="#ff3d8b" />
-        </linearGradient>
-        <linearGradient id="lcArea" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="rgba(255,61,139,0.18)" />
-          <stop offset="100%" stopColor="rgba(255,61,139,0)" />
-        </linearGradient>
-      </defs>
       {/* gridlines */}
       {[0, 0.5, 1].map((g) => (
         <line
@@ -49,13 +39,15 @@ export default function LineChart({ points, labels, height = 200 }: Props) {
           x2={w - padX}
           y1={padY + g * (h - padY * 2)}
           y2={padY + g * (h - padY * 2)}
-          stroke="rgba(40,36,56,0.06)"
+          style={{ stroke: 'var(--color-line-soft)' }}
           strokeWidth={1}
         />
       ))}
-      <path d={area} fill="url(#lcArea)" />
-      <path d={path} fill="none" stroke="url(#lcLine)" strokeWidth={3} strokeLinecap="round" />
-      <circle cx={peak[0]} cy={peak[1]} r={5} fill="#fff" stroke="#ff3d8b" strokeWidth={3} />
+      {/* One series, tracked activity: `series-1` on a flat wash, never a
+          gradient behind data (DESIGN.md §10). */}
+      <path d={area} style={{ fill: 'var(--color-brand-wash)' }} />
+      <path d={path} fill="none" style={{ stroke: 'var(--color-series-1)' }} strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx={peak[0]} cy={peak[1]} r={4.5} style={{ fill: 'var(--color-series-1)', stroke: 'var(--color-white)' }} strokeWidth={2} />
       {labels.map((l, i) => (
         <text
           key={`${i}-${l}`}
@@ -63,8 +55,7 @@ export default function LineChart({ points, labels, height = 200 }: Props) {
           y={h - 2}
           textAnchor="middle"
           fontSize="10"
-          fill="rgba(40,36,56,0.36)"
-          fontFamily="var(--font-sans)"
+          style={{ fill: 'var(--color-muted)', fontFamily: 'var(--font-sans)', fontVariantNumeric: 'tabular-nums' }}
         >
           {l}
         </text>

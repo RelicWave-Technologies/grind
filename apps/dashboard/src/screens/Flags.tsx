@@ -67,7 +67,7 @@ function verdictStatus(resolution: FlagResolution): Status {
 
 /**
  * Anti-cheat review queue (MANAGER+), composed entirely from the shared kit
- * ("Quiet Datasheet"). Each flag is a Card: an Identity ←→ a mono risk readout,
+ * (src/ui). Each flag is a Card: an Identity ←→ a mono risk readout,
  * the flag TYPE as a status Tag, a mono Window row, the AI read in an info
  * Banner, mono Evidence chips, and inline Dismiss / Confirm-cheat actions.
  * Resolved flags carry a verdict Tag + audit stamp. Risk severity rides the

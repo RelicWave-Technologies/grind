@@ -1,0 +1,5 @@
+/* Everything an app needs from the design system, in order: the faces, the
+   tokens generated from DESIGN.md, then the element defaults built on both. */
+@import "./fonts.css";
+@import "./tokens.css";
+@import "./foundation.css";

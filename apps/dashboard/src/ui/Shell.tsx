@@ -36,12 +36,12 @@ export function Sidebar({ brand, footer, className, children, ...rest }: Sidebar
   );
 }
 
-/** Brand block: mascot mark + wordmark. */
+/** Brand block: the Timo logo mark + wordmark (DESIGN.md §9 The logo). */
 export interface SidebarBrandProps extends React.HTMLAttributes<HTMLDivElement> {
   name: ReactNode;
   markSrc?: string;
 }
-export function SidebarBrand({ name, markSrc = '/brand/timo-mascot.svg', className, ...rest }: SidebarBrandProps) {
+export function SidebarBrand({ name, markSrc = '/brand/timo-logo.svg', className, ...rest }: SidebarBrandProps) {
   return (
     <div className={cx('ui-sidebar__brand', className)} {...rest}>
       <span className="ui-sidebar__mark" aria-hidden>

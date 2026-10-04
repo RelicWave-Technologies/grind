@@ -6,6 +6,9 @@ import FloatingBar from './screens/FloatingBar';
 import Popover from './screens/Popover';
 import ReadyToWork from './screens/ReadyToWork';
 import AttentionPrompt from './screens/AttentionPrompt';
+// The EMIAC design system (root DESIGN.md): fonts, generated tokens, element
+// defaults. Loaded before the renderer's own stylesheet, which builds on it.
+import '@grind/design';
 import './styles.css';
 
 const qc = new QueryClient({

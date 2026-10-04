@@ -13,7 +13,7 @@ interface Props {
  * bucket spanning the day. Colour encodes productivity score 0-100:
  *   null  → grey (no samples — the agent wasn't running)
  *   0     → light grey (samples landed but the user was idle)
- *   1-100 → green scale, darker as more productive
+ *   1-100 → the DESIGN.md heat ramp (`heat-1`…`heat-4`), deeper as more productive
  *
  * a11y note: heatmap is `aria-hidden`. Numeric totals on the entries table
  * convey the same information to screen readers.
@@ -53,13 +53,12 @@ export function ActivityHeatmap({ day, heatmap, window }: Props) {
   );
 }
 
-/** Pure-CSS heat ramp: 1 → faint green, 100 → saturated green. */
+/**
+ * The heat ramp (DESIGN.md §9 Activity heatmap): four steps of the brand
+ * ramp for 1–100, so activity reads in the same blue as tracked time on the
+ * ribbon above it. `heat-0` (no activity) is the empty/idle cells' CSS.
+ */
 function cellStyle(v: number): React.CSSProperties {
-  // Map 1..100 → 0.15..0.85 for fill opacity. We can't use a hue-rotate
-  // because the tokens are already brand-locked to var(--c-green).
-  const opacity = 0.15 + (Math.min(100, Math.max(1, v)) / 100) * 0.7;
-  return {
-    background: `rgba(33, 193, 122, ${opacity})`,
-    borderColor: `rgba(33, 193, 122, ${Math.min(1, opacity + 0.1)})`,
-  };
+  const step = Math.min(4, Math.max(1, Math.ceil(Math.min(100, v) / 25)));
+  return { background: `var(--color-heat-${step})`, borderColor: `var(--color-heat-${step})` };
 }

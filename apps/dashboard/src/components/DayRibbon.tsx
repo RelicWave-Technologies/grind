@@ -86,7 +86,7 @@ function previewForHover(args: {
 /**
  * Read-only 24h day ribbon with hover affordances:
  *   - Hovering over the track shows a ghost block where a click would land
- *     (gap preview, in violet) + a tooltip label with the snapped time.
+ *     (gap preview, in Azure) + a tooltip label with the snapped time.
  *   - Hovering over a tracked/meeting/manual/pending block calls
  *     `onHoverRowId` so the parent can highlight the matching table row.
  *   - Clicking on a gap (or pre-/post-activity dead space) fires

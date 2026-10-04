@@ -87,7 +87,7 @@ export function LoginScreen() {
           </svg>
         </a>
         <a className="lgn-brand" href="/">
-          <img src="/brand/timo-mascot.svg" alt="" width={26} height={26} />
+          <img src="/brand/timo-logo.svg" alt="" width={26} height={26} />
           <span>Timo</span>
         </a>
       </header>
@@ -95,7 +95,7 @@ export function LoginScreen() {
       <main className="lgn-shell rise" aria-label="Sign in to Timo">
         {/* The one color block on this page: a compact lilac panel. */}
         <section className="lgn-panel">
-          <img className="lgn-mascot" src="/brand/timo-mascot.svg" alt="" width={56} height={56} />
+          <img className="lgn-mark" src="/brand/timo-logo.svg" alt="" width={56} height={56} />
           <p className="lgn-eyebrow">TIMO — SIGN IN</p>
           <h1 className="lgn-title">Back on the clock.</h1>
           <p className="lgn-sub">

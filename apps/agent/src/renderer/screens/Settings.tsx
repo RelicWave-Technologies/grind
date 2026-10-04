@@ -154,7 +154,7 @@ export default function Settings() {
           <div className="section-head"><span className="section-title">Permissions</span></div>
           <div className="set-card">
             <div className="set-row">
-              <span className="set-ic" style={{ background: screenReady ? 'var(--c-green-bg)' : 'var(--c-orange-bg)' }}>
+              <span className="set-ic">
                 <MonitorCheck size={17} strokeWidth={2} />
               </span>
               <div className="set-main">
@@ -183,7 +183,7 @@ export default function Settings() {
             </div>
 
             <div className="set-row">
-              <span className="set-ic" style={{ background: accessibilityReady ? 'var(--c-green-bg)' : 'var(--c-orange-bg)' }}>
+              <span className="set-ic">
                 <Keyboard size={17} strokeWidth={2} />
               </span>
               <div className="set-main">
@@ -212,7 +212,7 @@ export default function Settings() {
           <div className="section-head"><span className="section-title">Integrations</span></div>
           <div className="set-card">
             <div className="set-row">
-              <span className="set-ic" style={{ background: larkConnected ? 'var(--c-green-bg)' : 'var(--c-violet-bg)' }}>
+              <span className="set-ic">
                 <img className="lark-icon lark-icon--setting" src={larkIcon} alt="" />
               </span>
               <div className="set-main">
@@ -251,7 +251,7 @@ export default function Settings() {
           <div className="section-head"><span className="section-title">General</span></div>
           <div className="set-card">
             <div className="set-row">
-              <span className="set-ic" style={{ background: launchOk ? 'var(--c-green-bg)' : launchWarn ? 'var(--c-orange-bg)' : 'var(--c-violet-bg)' }}><Power size={17} strokeWidth={2} /></span>
+              <span className="set-ic"><Power size={17} strokeWidth={2} /></span>
               <div className="set-main">
                 <div className="set-title">Launch at login</div>
                 <div className="set-sub">
@@ -287,7 +287,7 @@ export default function Settings() {
               ) : null}
             </div>
             <div className="set-row">
-              <span className="set-ic" style={{ background: 'var(--c-blue-bg)' }}><PictureInPicture2 size={17} strokeWidth={2} /></span>
+              <span className="set-ic"><PictureInPicture2 size={17} strokeWidth={2} /></span>
               <div className="set-main">
                 <div className="set-title">Floating timer bar</div>
                 <div className="set-sub secondary">
@@ -322,7 +322,7 @@ export default function Settings() {
           <div className="section-head"><span className="section-title">About</span></div>
           <div className="set-card">
             <div className="set-row">
-              <span className="set-ic" style={{ background: u?.phase === 'ready' || u?.phase === 'installing' ? 'var(--c-green-bg)' : 'var(--c-violet-bg)' }}>
+              <span className="set-ic">
                 {u?.phase === 'ready' || u?.phase === 'installing' ? <DownloadCloud size={17} strokeWidth={2} /> : <RefreshCw size={17} strokeWidth={2} />}
               </span>
               <div className="set-main">
