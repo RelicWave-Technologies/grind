@@ -423,12 +423,18 @@ importers:
 
   parity:
     devDependencies:
+      '@grind/agent':
+        specifier: workspace:*
+        version: link:../legacy/agent
       '@grind/core':
         specifier: workspace:*
         version: link:../packages/core
       '@grind/tsconfig':
         specifier: workspace:*
         version: link:../packages/tsconfig
+      '@grind/types':
+        specifier: workspace:*
+        version: link:../packages/types
       '@types/node':
         specifier: 20.16.13
         version: 20.16.13
