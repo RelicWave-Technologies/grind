@@ -403,7 +403,8 @@ are doing, not a set of pages. Chosen 2026-10-04 from five structures.
   52px head with its title in `card-title`, its actions and a close button; the window behind dims
   to `ink` at 16%; Escape closes. The task list's search stays pinned while the list scrolls.
   Starting a task from the list closes it onto the clock.
-- **Banners** (syncing workspace time, recovered time, update ready) sit at the top of the stage.
+- **Notices** (syncing workspace time, recovered time, update ready, a task created) are toasts in
+  the dock (§9 Toasts), never banners.
 
 ## 6. Elevation
 
@@ -538,6 +539,22 @@ No rule is drawn under a tab row. Page tabs and segmented toggles are the same c
 - **Switch.** A 32×18 `full` track, `sheet-2` off and `brand` on, a white knob with `elevation-1`.
 - **Select.** A text input carrying the chevron in `muted`.
 
+### Toasts
+
+**A notice is a toast, never a banner across the page.** Toasts live in a dock at the bottom
+centre of the window: `dark` pills, `xl` round, a 1px `dark-line` edge and `elevation-4`, 10px
+padding, white `body-sm` text. From the left: the icon (`tone-neutral` for something you should
+know, `tone-positive` for done, `brand-hi` for an update, the mark writing for work in progress),
+the message, at most one action (a white `sm` pill) and a dismiss (a 26px ghost circle in
+`on-dark-muted`). They rise 10px into place over `duration-slow`.
+
+- **Standing** toasts describe a state (a recovered timer, syncing, an update waiting) and stay
+  until it resolves or is dismissed. **Passing** toasts confirm an action ("Created … in Lark")
+  and leave after 4.5s.
+- The dock sits above any open sheet, and the window lifts its floor by the dock's height, so a
+  toast never covers a control or the ribbon.
+- A form's own validation error stays with the field; that is the only inline message.
+
 ### Drawers, modals, lightbox
 
 - **Scrim.** `ink` at 20%.
@@ -632,8 +649,7 @@ shadow (§6). All of them are white with a 1px `line` edge.
   tabular. Actions at the foot: the safe choice is `button-primary`, the rest secondary.
 - **Ready to work** (320×168). The same card: the logo at 32px, the question in `card-title`, two
   buttons.
-- **Banners inside the window** (update ready, recovery, syncing) are notices (§ Cards), full
-  width at the top of the content.
+- **Notices inside the window** are toasts (§ Toasts), never banners across the page.
 
 ### The logo
 

@@ -6,6 +6,7 @@ import { sortTasks } from '../lib/taskFormat';
 import larkIcon from '../assets/lark.svg';
 import TaskCard from '../components/TaskCard';
 import TaskComposer from '../components/TaskComposer';
+import { useToast } from '../components/ToastDock';
 import { useWorkspaceTime } from '../lib/workspaceTime';
 
 /**
@@ -30,7 +31,7 @@ export default function Tasks({
   const [now, setNow] = useState(() => Date.now());
   const [query, setQuery] = useState('');
   const [showDone, setShowDone] = useState(false);
-  const [justCreated, setJustCreated] = useState<string | null>(null);
+  const toast = useToast();
 
   useEffect(() => {
     let alive = true;
@@ -54,9 +55,8 @@ export default function Tasks({
   const onCreated = (summary: string) => {
     onCreatingChange(false);
     setQuery('');
-    setJustCreated(summary);
+    toast({ tone: 'done', text: `Created “${summary}” in Lark` });
     void qc.invalidateQueries({ queryKey: ['larkTasks'] });
-    window.setTimeout(() => setJustCreated(null), 5000);
   };
 
   const running = timer.state === 'RUNNING' ? timer : null;
@@ -92,9 +92,6 @@ export default function Tasks({
           ) : (
             <>
               {creating && <TaskComposer onCreated={onCreated} timeZone={workspaceTime.data?.timeZone ?? null} />}
-              {justCreated && !creating && (
-                <div className="create-toast rise" role="status"><span className="create-toast-dot" /> Created “{justCreated}” in Lark</div>
-              )}
 
               {tasks.length > 6 && (
                 <div className="task-search-bar">

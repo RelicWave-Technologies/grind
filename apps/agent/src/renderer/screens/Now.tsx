@@ -1,15 +1,14 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, ArrowLeftRight, Check, ChevronDown, Clock, Pause, Play, Search, Square, X } from 'lucide-react';
+import { ArrowLeftRight, Check, ChevronDown, Pause, Play, Search, Square } from 'lucide-react';
 import type { TimerStatus } from '../lib/agent.d';
 import TaskOwner from '../components/TaskOwner';
-import { timerRecoveryNoticeText } from '../lib/recoveryNotice';
 import { dueInfo, fmtDuration, sortTasks, type LarkTaskItem } from '../lib/taskFormat';
 import larkIcon from '../assets/lark.svg';
 import DayTimeline from '../components/DayTimeline';
 import { useIntroHold } from '../components/AppIntro';
 import { fmtClock } from '../lib/timerUi';
-import { formatWorkspaceRecoveryTime, useWorkspaceTime, workspaceTimeReady } from '../lib/workspaceTime';
+import { useWorkspaceTime, workspaceTimeReady } from '../lib/workspaceTime';
 
 /** Hours and minutes in ink, the seconds in Azure: the part that moves is the part that means tracking. */
 function TimerClock({ ms }: { ms: number }) {
@@ -44,7 +43,6 @@ export default function Now({ onOpenTasks }: { onOpenTasks: () => void }) {
   const larkStatus = useQuery({ queryKey: ['larkStatus'], queryFn: () => window.agent.lark.status(), refetchInterval: 10_000 });
   const larkTasks = useQuery({ queryKey: ['larkTasks'], queryFn: () => window.agent.lark.tasks(), refetchInterval: 60_000 });
   const insights = useQuery({ queryKey: ['insightsToday'], queryFn: () => window.agent.insights.today(), refetchInterval: 15_000 });
-  const recoveryNotice = useQuery({ queryKey: ['timerRecoveryNotice'], queryFn: () => window.agent.timer.recoveryNotice() });
   const workspaceTime = useWorkspaceTime();
   const timeContext = workspaceTime.data;
   const hasWorkspaceTime = workspaceTimeReady(timeContext);
@@ -104,10 +102,6 @@ export default function Now({ onOpenTasks }: { onOpenTasks: () => void }) {
   const stop = useMutation({ mutationFn: () => window.agent.timer.stop(), onSuccess: settle });
   const pause = useMutation({ mutationFn: () => window.agent.timer.pause(), onSuccess: settle });
   const resume = useMutation({ mutationFn: () => window.agent.timer.resume(), onSuccess: (r) => settle(r.status) });
-  const dismissRecovery = useMutation({
-    mutationFn: () => window.agent.timer.dismissRecoveryNotice(),
-    onSuccess: () => qc.setQueryData(['timerRecoveryNotice'], null),
-  });
   const connectLark = useMutation({ mutationFn: () => window.agent.lark.connect() });
   const busy = start.isPending || stop.isPending || pause.isPending || resume.isPending;
 
@@ -129,24 +123,6 @@ export default function Now({ onOpenTasks }: { onOpenTasks: () => void }) {
 
   return (
     <div className={`focus${running?.paused ? ' focus--paused' : ''}`}>
-      <div className="focus-notices">
-        {!hasWorkspaceTime && (
-          <div className="recovery-banner" role="status">
-            <Clock size={16} strokeWidth={2.2} />
-            <span>Syncing workspace time…</span>
-          </div>
-        )}
-        {recoveryNotice.data && (
-          <div className="recovery-banner" role="status">
-            <AlertTriangle size={16} strokeWidth={2.2} />
-            <span>{timerRecoveryNoticeText(recoveryNotice.data, (value) => formatWorkspaceRecoveryTime(value, timeZone))}</span>
-            <button className="recovery-dismiss no-drag" onClick={() => dismissRecovery.mutate()} disabled={dismissRecovery.isPending} title="Dismiss">
-              <X size={14} strokeWidth={2.4} />
-            </button>
-          </div>
-        )}
-      </div>
-
       <main className="focus-stage">
         {running ? (
           <div className="focus-center">

@@ -10,7 +10,8 @@
     "./fonts.css": "./src/fonts.css",
     "./foundation.css": "./src/foundation.css",
     "./mark.css": "./src/mark.css",
-    "./intro": "./src/intro.ts"
+    "./intro": "./src/intro.ts",
+    "./toast.css": "./src/toast.css"
   },
   "scripts": {
     "tokens": "tsx scripts/generate-tokens.ts",

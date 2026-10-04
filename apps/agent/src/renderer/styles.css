@@ -129,38 +129,6 @@ body.chrome-window { background: transparent; }
 }
 .avatar img { width: 100%; height: 100%; object-fit: cover; }
 
-.update-banner {
-  margin: var(--space-sm) var(--space-xxl) 0;
-  padding: var(--space-xs) var(--space-xs) var(--space-xs) var(--space-md);
-  display: flex; align-items: center; gap: var(--space-xs);
-  min-height: 48px;
-  border: 1px solid var(--color-line-soft);
-  border-radius: var(--radius-lg);
-  background: var(--color-sheet-soft);
-  color: var(--color-ink-2);
-  font-size: var(--type-body-sm-size);
-}
-.update-banner span { flex: 1; min-width: 0; }
-.update-banner .btn { height: var(--control-height-sm); padding: 0 var(--space-sm); flex-shrink: 0; }
-/* A waiting notice: recovered time, syncing workspace time. */
-.recovery-banner {
-  display: flex; align-items: center; gap: var(--space-xs);
-  margin: var(--space-sm) 0 0; padding: var(--space-xs) var(--space-xs) var(--space-xs) var(--space-md);
-  min-height: 44px;
-  border-radius: var(--radius-lg);
-  background: var(--color-wait-wash);
-  color: var(--color-wait);
-  font-size: var(--type-body-sm-size);
-}
-.recovery-banner:first-child { margin: 0 0 var(--space-sm); }
-.recovery-banner span { flex: 1; min-width: 0; }
-.recovery-dismiss {
-  width: 28px; height: 28px; border-radius: var(--radius-full); border: 0;
-  display: inline-flex; align-items: center; justify-content: center;
-  background: transparent; color: currentColor;
-  transition: background var(--duration-fast) var(--ease-standard);
-}
-.recovery-dismiss:hover:not(:disabled) { background: color-mix(in srgb, var(--color-wait) 10%, transparent); }
 
 /* Manual Lark sync control (shared by Today + Tasks toolbars). */
 .sync-wrap { display: inline-flex; align-items: center; gap: var(--space-xs); }
@@ -321,7 +289,6 @@ body.chrome-window { background: transparent; }
   font-weight: var(--type-card-title-weight); letter-spacing: var(--type-card-title-tracking);
   color: var(--color-ink);
 }
-.see-all { -webkit-app-region: no-drag; background: none; border: none; color: var(--color-brand); font: inherit; font-weight: var(--type-label-weight); cursor: default; }
 
 .task-list { display: flex; flex-direction: column; gap: var(--space-xs); }
 .task {
@@ -422,14 +389,7 @@ body.chrome-window { background: transparent; }
 .section-titlewrap { display: inline-flex; align-items: baseline; gap: var(--space-xs); }
 .section-aside { font-size: var(--type-caption-size); color: var(--color-muted); }
 
-/* Create success notice */
-.create-toast {
-  display: flex; align-items: center; gap: var(--space-xs);
-  margin: 0 0 var(--space-sm); padding: var(--space-sm) var(--space-md);
-  background: var(--color-good-wash); color: var(--color-good); border-radius: var(--radius-lg);
-  font-size: var(--type-body-sm-size);
-}
-.create-toast-dot { width: 7px; height: 7px; border-radius: var(--radius-full); background: var(--color-good); flex: none; }
+
 /* A row's action: a secondary circle; Start turns `brand` on hover. */
 .task-play {
   width: 34px; height: 34px; border-radius: var(--radius-full);
@@ -515,11 +475,6 @@ body.chrome-window { background: transparent; }
   background: var(--color-sheet-soft); border: 1px solid var(--color-line-soft); border-radius: var(--radius-lg);
   color: var(--color-body);
 }
-.perm-banner {
-  display: flex; align-items: center; gap: var(--space-xs); padding: var(--space-sm) var(--space-md);
-  background: var(--color-wait-wash); color: var(--color-wait); border-radius: var(--radius-lg); margin-bottom: var(--space-xxs);
-}
-.perm-banner .secondary { color: var(--color-wait); opacity: 0.85; }
 
 /* ============================================================================
    Settings — hairline-divided rows in one card per group
@@ -947,17 +902,9 @@ body.chrome-window { background: transparent; }
 .account-item:hover:not(:disabled) { background: var(--color-sheet); color: var(--color-ink); }
 .account-item:disabled { color: var(--color-faint); }
 
-.shell .update-banner { margin: 0 var(--space-xxl) var(--space-xs); }
-
 /* ---- the stage ---- */
 .focus { position: relative; display: flex; flex: 1; min-height: 0; flex-direction: column; }
-.focus-notices {
-  position: absolute; top: 0; left: 50%; z-index: 3;
-  display: flex; flex-direction: column; gap: var(--space-xs);
-  width: min(560px, calc(100% - 48px));
-  transform: translateX(-50%);
-}
-.focus-notices .recovery-banner { margin: 0; }
+
 .focus-stage { display: flex; flex: 1; min-height: 0; align-items: center; justify-content: center; padding: var(--space-md) var(--space-xxl); overflow-y: auto; }
 .focus-center { display: flex; max-width: 640px; flex-direction: column; align-items: center; text-align: center; }
 
@@ -1064,7 +1011,10 @@ body.chrome-window { background: transparent; }
 .focus-tile:hover:not(:disabled) .focus-tile-play { opacity: 1; }
 
 /* ---- the floor: today's ribbon ---- */
-.focus-floor { flex-shrink: 0; padding: var(--space-sm) var(--space-xxl) var(--space-lg); }
+.focus-floor {
+  flex-shrink: 0; padding: var(--space-sm) var(--space-xxl) calc(var(--space-lg) + var(--dock-h, 0px));
+  transition: padding-bottom var(--duration-slow) var(--ease-emphasised);
+}
 .focus-floor-line { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-md); margin-bottom: var(--space-xxs); }
 .focus-floor-line span { color: var(--color-muted); font-size: var(--type-label-size); }
 .focus-floor-line b { margin-left: var(--space-xxs); color: var(--color-ink); font-size: var(--type-body-lg-size); font-weight: var(--type-body-lg-strong-weight); }
@@ -1129,3 +1079,11 @@ body.chrome-window { background: transparent; }
   font-weight: var(--type-label-weight); letter-spacing: 0.02em; line-height: 1;
 }
 .task .task-owner { align-self: flex-start; }
+
+/* ============================================================================
+   The toast dock's place in the main window (the toast itself: @grind/design
+   toast.css). It sits at the window's bottom edge above any open sheet; the
+   floor lifts by the dock's height (--dock-h), so a toast never covers anything.
+   ========================================================================== */
+.toast-host { position: relative; height: 100%; }
+.toast-dock { bottom: var(--space-sm); z-index: 45; }

@@ -1,0 +1,86 @@
+/*
+ * Toasts (DESIGN.md §9 Toasts): every notice is a dark pill in a dock at the
+ * bottom centre, never a banner across the page. Each app places the dock
+ * (.toast-dock's bottom offset and z-index) and renders the pills with this
+ * markup: .toast.toast--{info|wait|done|busy} > .toast-icon, .toast-text,
+ * .toast-action?, .toast-close?.
+ */
+
+.toast-dock {
+  position: absolute;
+  bottom: var(--space-lg);
+  left: 50%;
+  z-index: 900;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-xs);
+  width: min(560px, calc(100% - 48px));
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.toast {
+  display: flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 10px 10px 14px;
+  border-radius: var(--radius-xl);
+  background: var(--color-dark);
+  color: var(--color-white);
+  box-shadow: 0 0 0 1px var(--color-dark-line), var(--elevation-4);
+  font-size: var(--type-body-sm-size);
+  line-height: 1.4;
+  pointer-events: auto;
+  animation: toast-in var(--duration-slow) var(--ease-emphasised) both;
+  -webkit-app-region: no-drag;
+}
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.98); }
+}
+
+.toast-icon { display: inline-flex; flex-shrink: 0; color: var(--color-on-dark-muted); }
+.toast--wait .toast-icon { color: var(--color-tone-neutral); }
+.toast--done .toast-icon { color: var(--color-tone-positive); }
+.toast--info .toast-icon { color: var(--color-brand-hi); }
+.toast--bad .toast-icon { color: var(--color-tone-negative); }
+.toast-text { flex: 1; min-width: 0; }
+
+.toast-action {
+  flex-shrink: 0;
+  height: var(--control-height-sm);
+  padding: 0 var(--space-sm);
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--color-white);
+  color: var(--color-ink);
+  font: inherit;
+  font-size: var(--type-label-size);
+  font-weight: var(--type-label-weight);
+  cursor: pointer;
+}
+
+.toast-action:hover:not(:disabled) { background: var(--color-sheet); }
+.toast-action:disabled { opacity: 0.6; }
+
+.toast-close {
+  display: inline-flex;
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--color-on-dark-muted);
+  cursor: pointer;
+}
+
+.toast-close:hover { background: var(--color-dark-line); color: var(--color-white); }
+
+@media (prefers-reduced-motion: reduce) {
+  .toast { animation: none; }
+}
