@@ -29,6 +29,7 @@ import {
   Toolbar,
   Tag,
   Skeleton,
+  LoadError,
 } from '../ui';
 
 interface ListResponse<T> {
@@ -116,6 +117,8 @@ export function HomeScreen() {
         subtitle={
           dayQ.isLoading
             ? 'Loading your current day.'
+            : dayQ.isError
+            ? 'Today’s numbers didn’t load — retry from the timeline below.'
             : totalMs > 0
             ? `You've tracked ${fmtDurationMs(totalMs)} today — keep the rhythm.`
             : 'No tracked time yet. Start the agent or review missing time.'
@@ -143,20 +146,20 @@ export function HomeScreen() {
       <Card
         title="Today"
         className="hm-command-card ui-rise-1"
-        action={status ? <Tag status={status.status} mono>{status.label}</Tag> : <Tag mono>Loading</Tag>}
+        action={status ? <Tag status={status.status} mono>{status.label}</Tag> : dayQ.isError ? null : <Tag mono>Loading</Tag>}
       >
         <div className="hm-command">
           <HomeMetric
             label="Tracked today"
-            value={dayQ.isLoading ? '—' : fmtDurationMs(totalMs)}
-            sub={firstLast === '—' ? 'No activity window yet' : firstLast}
+            value={day ? fmtDurationMs(totalMs) : '—'}
+            sub={dayQ.isError ? 'Not loaded' : firstLast === '—' ? 'No activity window yet' : firstLast}
             tone="lime"
             featured
           />
           <HomeMetric
             label="Started"
             value={startedLabel}
-            sub={status?.label ?? 'Loading status'}
+            sub={status?.label ?? (dayQ.isError ? 'Not loaded' : 'Loading status')}
             tone="mint"
           />
           <HomeMetric
@@ -167,8 +170,8 @@ export function HomeScreen() {
           />
           <HomeMetric
             label="Missing time"
-            value={gapMs > 0 ? fmtDurationMs(gapMs) : 'None'}
-            sub={gapCount > 0 ? `${gapCount} gap${gapCount === 1 ? '' : 's'} to review` : 'Timeline is clean'}
+            value={!day ? '—' : gapMs > 0 ? fmtDurationMs(gapMs) : 'None'}
+            sub={!day ? (dayQ.isError ? 'Not loaded' : 'Loading') : gapCount > 0 ? `${gapCount} gap${gapCount === 1 ? '' : 's'} to review` : 'Timeline is clean'}
             tone="coral"
           />
         </div>
@@ -189,6 +192,7 @@ export function HomeScreen() {
           <div className="hm-ribbon-shell">
             {dayQ.isLoading && <Skeleton h={84} radius="var(--radius-md)" />}
             {day && <DayRibbon day={day} now={Date.now()} timeZone={tz} editable={false} />}
+            {dayQ.isError && <LoadError what="today’s timeline" error={dayQ.error} onRetry={() => void dayQ.refetch()} />}
           </div>
 
           <div className="hm-timeline-insights">

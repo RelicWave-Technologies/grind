@@ -75,6 +75,8 @@ function readCases(): Case[] {
     { method: 'GET', url: `/v1/admin/manual-time-requests?${q({ status: 'ALL', from: week, to: today, tz: 'Asia/Kolkata' })}`, roles: MGR },
     { method: 'GET', url: '/v1/admin/flags?status=OPEN', roles: MGR },
     { method: 'GET', url: '/v1/admin/flags?status=RESOLVED', roles: MGR },
+    { method: 'GET', url: '/v1/admin/flags/groups?status=OPEN', roles: MGR },
+    { method: 'GET', url: '/v1/admin/flags/groups?status=RESOLVED', roles: MGR },
     { method: 'GET', url: `/v1/admin/timesheets?${q({ from: addDays(today, -13), to: today, tz: 'Asia/Kolkata' })}`, roles: MGR },
     { method: 'GET', url: `/v1/admin/timesheets.csv?${q({ from: week, to: today, tz: 'Asia/Kolkata' })}`, roles: MGR },
     { method: 'GET', url: '/v1/admin/users', roles: MGR },
@@ -110,6 +112,7 @@ function writeCases(): Array<Case & { as: Role; pick?: () => string }> {
   const engIds = new Set(db.users.filter((u) => u.teamId === 'team_eng' && u.id !== 'usr_arjun').map((u) => u.id));
   const teamPending = db.requests.filter((r) => engIds.has(r.userId) && r.status === 'PENDING').map((r) => r.id);
   const openFlag = db.flags.find((f) => engIds.has(f.userId) && f.status === 'OPEN')?.id ?? 'missing';
+  const groupFlags = db.flags.filter((f) => engIds.has(f.userId) && f.status === 'OPEN' && f.id !== openFlag).slice(0, 2).map((f) => f.id);
   const yday = prevWeekday(addDays(todayKey(), -1));
   const ydayEntry = `te_ananya_${yday.replace(/-/g, '')}_0`;
   const manual = db.manualEntries.find((m) => m.userId === 'usr_ananya')?.id ?? 'missing';
@@ -125,6 +128,7 @@ function writeCases(): Array<Case & { as: Role; pick?: () => string }> {
     { as: 'MANAGER', method: 'POST', url: `/v1/admin/manual-time-requests/${teamPending[0] ?? 'missing'}/decide`, body: { action: 'approve' } },
     { as: 'MANAGER', method: 'POST', url: `/v1/admin/manual-time-requests/${teamPending[1] ?? 'missing'}/decide`, body: { action: 'reject' } },
     { as: 'MANAGER', method: 'POST', url: `/v1/admin/flags/${openFlag}/resolve`, body: { resolution: 'DISMISSED', note: 'Typing drill' } },
+    { as: 'MANAGER', method: 'POST', url: '/v1/admin/flags/resolve-many', body: { flagIds: groupFlags, resolution: 'CONFIRMED' } },
     { as: 'MANAGER', method: 'PUT', url: '/v1/reports/attendance-override', body: { userId: 'usr_priya', date: absent, code: 'HALF_LEAVE', reason: 'Self-test' } },
     { as: 'MANAGER', method: 'DELETE', url: '/v1/reports/attendance-override', body: { userId: 'usr_priya', date: absent, reason: 'Self-test undo' } },
     { as: 'MANAGER', method: 'PATCH', url: '/v1/admin/team-member-settings/usr_priya', body: { screenshotIntervalMin: 2, idleThresholdMin: 10 } },

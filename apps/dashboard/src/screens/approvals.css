@@ -59,7 +59,7 @@
 }
 
 .apv-table--team {
-  min-width: calc(var(--space-section) * 16);
+  min-width: calc(var(--space-section) * 14 + var(--space-xl));
 }
 
 .apv-table.ui-table--compact .ui-table__row {
@@ -84,7 +84,7 @@
 }
 
 .apv-col-member {
-  width: calc(var(--space-section) * 3 + var(--space-xxl));
+  width: calc(var(--space-section) * 3);
 }
 
 .apv-col-date {
@@ -96,11 +96,11 @@
 }
 
 .apv-col-status {
-  width: calc(var(--space-section) * 2 + var(--space-lg));
+  width: calc(var(--space-section) * 2);
 }
 
 .apv-col-actions {
-  width: calc(var(--space-section) * 3 + var(--space-sm));
+  width: calc(var(--space-section) * 3);
 }
 
 .apv-col-reason {

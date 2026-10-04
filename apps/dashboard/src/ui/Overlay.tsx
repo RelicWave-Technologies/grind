@@ -3,7 +3,6 @@ import { cloneElement, isValidElement } from 'react';
 import { createPortal } from 'react-dom';
 import type { ReactElement, ReactNode } from 'react';
 import { cx } from './util';
-import type { Status } from './util';
 
 /* §5.16 Popover / Menu / Modal — the only components that use --ui-shadow-pop.
    Dropdowns, action menus, select menus, transient toasts. */

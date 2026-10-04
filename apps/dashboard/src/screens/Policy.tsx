@@ -35,7 +35,6 @@ import {
   Stat,
   StatRow,
 } from '../ui';
-import type { Rail } from '../ui';
 import './policy.css';
 
 interface PayrollPolicyDto {
@@ -430,14 +429,12 @@ export function PolicyScreen() {
           <Card title="Capture & privacy" className="pol-card-compact" action={<Tag mono>{captureCount}/3 enabled</Tag>}>
             <List>
               <PolicyToggleRow
-                sensitivity="low"
                 title="Capture apps"
                 help="App name and bundle ID for usage reports."
                 checked={draft.captureApps}
                 onChange={(v) => setDraft({ ...draft, captureApps: v })}
               />
               <PolicyToggleRow
-                sensitivity="medium"
                 title="Capture window titles"
                 help="May reveal document or customer names."
                 checked={draft.captureTitles}
@@ -446,7 +443,6 @@ export function PolicyScreen() {
                 disabledHint="Enable app capture first."
               />
               <PolicyToggleRow
-                sensitivity="high"
                 title="Capture browser URLs"
                 help="Current browser URL. Keep off unless documented."
                 checked={draft.captureUrls}
@@ -944,12 +940,6 @@ function SelectRow<T extends number>({
   );
 }
 
-const SENSITIVITY_RAIL: Record<'low' | 'medium' | 'high', Rail> = {
-  low: 'success',
-  medium: 'warn',
-  high: 'danger',
-};
-
 function PolicyToggleRow({
   title,
   help,
@@ -957,7 +947,6 @@ function PolicyToggleRow({
   onChange,
   disabled,
   disabledHint,
-  sensitivity,
 }: {
   title: string;
   help: string;
@@ -965,12 +954,10 @@ function PolicyToggleRow({
   onChange: (v: boolean) => void;
   disabled?: boolean;
   disabledHint?: string;
-  sensitivity: 'low' | 'medium' | 'high';
 }) {
   const effective = disabled ? false : checked;
   return (
     <ListRow
-      rail={SENSITIVITY_RAIL[sensitivity]}
       title={title}
       subtitle={disabled && disabledHint ? `${help} ${disabledHint}` : help}
       trailing={<Toggle checked={effective} disabled={disabled} onChange={onChange} />}

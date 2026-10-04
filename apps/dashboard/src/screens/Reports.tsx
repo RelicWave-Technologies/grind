@@ -44,7 +44,6 @@ import {
   displayDayCode,
 } from '@grind/types';
 import type {
-  AttendanceOverrideCode,
   AttendanceOverrideHistoryResponse,
   AttendanceOverrideShape,
   MemberReportDay,
@@ -304,7 +303,7 @@ export function ReportsScreen() {
               <Stat label="Worked" value={fmtDurationMs(summary.workedMs)} />
               <Stat label="Manual" value={fmtDurationMs(summary.manualMs)} />
               <Stat label="Excluded" value={fmtDurationMs(summary.invalidatedMs)} />
-              <Stat label="Gaps" value={fmtDurationMs(summary.gapMs)} unit={`${summary.gapCount}`} />
+              <Stat label="Gaps" value={fmtDurationMs(summary.gapMs)} hint={`${summary.gapCount} gap${summary.gapCount === 1 ? '' : 's'}`} />
               <Stat label="Approvals" value={summary.approvalsTotal} hint={`${summary.approved} accepted · ${summary.pending} pending · ${summary.rejected} rejected`} />
               <Stat label="Activity" value={summary.activityPercent === null ? '—' : `${summary.activityPercent}%`} />
             </StatRow>

@@ -196,8 +196,9 @@
 }
 
 .cal-legend__swatch--holiday { background: var(--color-sheet-2); }
-.cal-legend__swatch--paid    { background: var(--color-sheet-soft); }
-.cal-legend__swatch--unpaid  { background: var(--color-sheet-soft); }
+/* Leave is drawn as faces on the grid, so its swatch is a face's circle;
+   paid or unpaid is said in the day sheet, not by colour. */
+.cal-legend__swatch--away    { background: var(--color-white); border-color: var(--color-muted); border-radius: var(--radius-full); }
 .cal-legend__swatch--off     { background: var(--color-sheet); }
 
 /* ── Responsive ─────────────────────────────────────────────────────────── */

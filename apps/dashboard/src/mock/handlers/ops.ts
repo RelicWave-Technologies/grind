@@ -10,7 +10,7 @@ import {
   type WorkspacePolicyDto,
 } from '@grind/types';
 import type { ActivityFlag, DecideResult, TimesheetMatrix } from '../../lib/types';
-import { DAY, HOUR, iso, todayKey } from '../clock';
+import { DAY, HOUR, dateKeyOf, iso, todayKey } from '../clock';
 import { persist, type DbFlag, type DbToken } from '../db';
 import { computeDay, inScope, person, reportUsers, requestDto, scopeKind, scopeUsers, timesheetCell, userById } from '../derive';
 import { bodyObject, fail, get, patch, post, raw, str, withStatus, type Ctx } from '../http';
@@ -198,6 +198,73 @@ export function registerOps(): void {
           .filter((f) => f.status === status && inScope(ctx, f.userId))
           .sort((a, b) => (status === 'OPEN' ? b.riskScore - a.riskScore : (b.resolvedAt ?? 0) - (a.resolvedAt ?? 0)));
     return { flags: flags.map((f) => flagDto(ctx, f)), scope: scopeKind(ctx) };
+  });
+
+  // One row per person, day and kind of signal, as the API groups them: the
+  // riskiest flag's evidence, the window it spans, the ids a verdict covers.
+  get('/v1/admin/flags/groups', (req, ctx) => {
+    requireCap(ctx, 'flags.team.review', 'flags.workspace.review');
+    const status = req.query.get('status') === 'RESOLVED' ? 'RESOLVED' : 'OPEN';
+    const rows = ctx.empty
+      ? []
+      : ctx.db.flags.filter((f) => f.status === status && inScope(ctx, f.userId)).sort((a, b) => a.windowStart - b.windowStart);
+    const byKey = new Map<string, DbFlag[]>();
+    for (const f of rows) {
+      const key = `${f.userId}|${dateKeyOf(f.windowStart)}|${f.type}`;
+      byKey.set(key, [...(byKey.get(key) ?? []), f]);
+    }
+    const groups = [...byKey.entries()].map(([key, list]) => {
+      const peak = list.reduce((a, b) => (b.riskScore > a.riskScore ? b : a));
+      const dto = flagDto(ctx, peak);
+      const resolved = status === 'RESOLVED';
+      return {
+        key,
+        user: dto.user,
+        date: dateKeyOf(list[0]!.windowStart),
+        type: peak.type,
+        count: list.length,
+        windowStart: iso(list[0]!.windowStart),
+        windowEnd: iso(list[list.length - 1]!.windowEnd),
+        riskScore: peak.riskScore,
+        evidence: peak.evidence,
+        explanation: peak.explanation ?? { headline: 'Unusual input pattern', detail: 'The detector raised this window for review.' },
+        flagIds: list.map((f) => f.id),
+        resolution: resolved ? peak.resolution : null,
+        resolvedBy: resolved ? dto.resolvedBy : null,
+        resolvedAt: resolved ? dto.resolvedAt : null,
+        resolvedNote: resolved ? peak.resolvedNote : null,
+      };
+    });
+    groups.sort((a, b) =>
+      status === 'OPEN'
+        ? b.riskScore - a.riskScore || b.count - a.count || (a.date < b.date ? 1 : -1)
+        : (a.resolvedAt ?? '') < (b.resolvedAt ?? '') ? 1 : -1,
+    );
+    return { groups, total: rows.length, scope: scopeKind(ctx) };
+  });
+
+  post('/v1/admin/flags/resolve-many', (req, ctx) => {
+    requireCap(ctx, 'flags.team.review', 'flags.workspace.review');
+    const b = bodyObject(req);
+    const ids = Array.isArray(b.flagIds) ? b.flagIds.filter((x): x is string => typeof x === 'string') : [];
+    if (ids.length === 0) fail(400, 'invalid_flag_ids');
+    const resolution = str(b.resolution);
+    if (resolution !== 'DISMISSED' && resolution !== 'CONFIRMED' && resolution !== 'TIME_INVALIDATED') fail(400, 'invalid_resolution');
+    const note = str(b.note)?.trim() || null;
+    if (resolution === 'TIME_INVALIDATED' && !note) fail(400, 'missing_resolution_note');
+    const flags = ctx.db.flags.filter((f) => ids.includes(f.id) && f.status === 'OPEN');
+    if (flags.some((f) => !inScope(ctx, f.userId))) fail(403, 'forbidden');
+    let invalidatedMs = 0;
+    for (const f of flags) {
+      f.status = 'RESOLVED';
+      f.resolution = resolution as DbFlag['resolution'];
+      f.resolvedById = ctx.me.id;
+      f.resolvedAt = ctx.now;
+      f.resolvedNote = note;
+      if (resolution === 'TIME_INVALIDATED') invalidatedMs += f.windowEnd - f.windowStart;
+    }
+    persist();
+    return { resolved: flags.length, timeInvalidated: resolution === 'TIME_INVALIDATED', invalidatedMs };
   });
 
   post('/v1/admin/flags/:id/resolve', (req, ctx) => {

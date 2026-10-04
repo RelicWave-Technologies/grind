@@ -232,19 +232,19 @@ function ProfileBody({ profile, timezone }: { profile: SelfProfileResponse; time
               leading={<LeadingIcon icon={<Shield size={16} strokeWidth={1.8} />} />}
               title="Foreground apps"
               subtitle="Which application is active"
-              trailing={<Tag status={profile.policy.captureApps ? 'success' : 'neutral'}>{profile.policy.captureApps ? 'On' : 'Off'}</Tag>}
+              trailing={<Tag status={profile.policy.captureApps ? 'info' : 'neutral'}>{profile.policy.captureApps ? 'On' : 'Off'}</Tag>}
             />
             <ListRow
               leading={<LeadingIcon icon={<Shield size={16} strokeWidth={1.8} />} />}
               title="Window titles"
               subtitle="Document and tab names"
-              trailing={<Tag status={profile.policy.captureTitles ? 'warn' : 'neutral'}>{profile.policy.captureTitles ? 'On' : 'Off'}</Tag>}
+              trailing={<Tag status={profile.policy.captureTitles ? 'info' : 'neutral'}>{profile.policy.captureTitles ? 'On' : 'Off'}</Tag>}
             />
             <ListRow
               leading={<LeadingIcon icon={<Shield size={16} strokeWidth={1.8} />} />}
               title="Browser URLs"
               subtitle="The strictest capture setting"
-              trailing={<Tag status={profile.policy.captureUrls ? 'danger' : 'neutral'}>{profile.policy.captureUrls ? 'On' : 'Off'}</Tag>}
+              trailing={<Tag status={profile.policy.captureUrls ? 'info' : 'neutral'}>{profile.policy.captureUrls ? 'On' : 'Off'}</Tag>}
             />
             <ListRow
               leading={<LeadingIcon icon={<CalendarDays size={16} strokeWidth={1.8} />} />}

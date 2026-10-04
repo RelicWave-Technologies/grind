@@ -4,7 +4,7 @@ import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate, useRouteContext } from '@tanstack/react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CalendarDays, Check, ChevronLeft, ChevronRight, Clock4, Inbox, X } from 'lucide-react';
+import { CalendarDays, ChevronLeft, ChevronRight, Clock4, Inbox, X } from 'lucide-react';
 import { api } from '../lib/api';
 import { hasCapability, isManagerOrAbove } from '../lib/auth';
 import type { DecideResult, ManualTimeRequest, MtrStatus, MtrUserSummary } from '../lib/types';
@@ -515,7 +515,6 @@ function TeamDecisionCell({
       <Button
         size="sm"
         variant="danger"
-        icon={<X size={13} strokeWidth={2} />}
         loading={busyAction === 'reject'}
         disabled={busy && busyAction !== 'reject'}
         onClick={(e) => {
@@ -527,8 +526,7 @@ function TeamDecisionCell({
       </Button>
       <Button
         size="sm"
-        variant="primary"
-        icon={<Check size={13} strokeWidth={2.2} />}
+        variant="secondary"
         loading={busyAction === 'approve'}
         disabled={busy && busyAction !== 'approve'}
         onClick={(e) => {

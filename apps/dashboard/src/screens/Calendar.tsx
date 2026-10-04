@@ -44,6 +44,7 @@ import {
   Skeleton,
   SkeletonTable,
   Tabs,
+  LoadError,
 } from '../ui';
 
 /**
@@ -353,6 +354,8 @@ export function CalendarScreen() {
         <Card variant="flush" className="cal-month-card">
           {calendarQ.isLoading ? (
             <Skeleton h={520} radius="var(--radius-md)" />
+          ) : calendarQ.isError ? (
+            <LoadError what="the calendar" error={calendarQ.error} onRetry={() => void calendarQ.refetch()} />
           ) : (
             <div className="cal-scroll">
               <div className="cal-grid" role="grid" aria-label={`${monthName(month)} ${month.slice(0, 4)}`}>
@@ -377,8 +380,7 @@ export function CalendarScreen() {
 
           <div className="cal-legend">
             <LegendItem kind="holiday" label="Company holiday" />
-            <LegendItem kind="paid" label="Paid leave" />
-            <LegendItem kind="unpaid" label="Unpaid leave" />
+            <LegendItem kind="away" label="On leave" />
             <LegendItem kind="off" label="Weekend" />
           </div>
         </Card>

@@ -5,7 +5,7 @@ import { useRouteContext } from '@tanstack/react-router';
 import { Pencil, Check, X, UserPlus, UserMinus, UserCheck, Trash2, Users as UsersIcon } from 'lucide-react';
 import type { LaunchAtLoginState, LaunchOrigin } from '@grind/types';
 import { api, type ApiError } from '../lib/api';
-import { isAdmin, type Role } from '../lib/auth';
+import { hasCapability, isAdmin, type Role } from '../lib/auth';
 import type { Team, Shift } from '../lib/types';
 import {
   Page,
@@ -102,6 +102,12 @@ const EDITABLE_ROLES: Role[] = ['ADMIN', 'MEMBER'];
 
 // A role is a neutral badge (DESIGN.md §9 Badges): colour is for status —
 // approved, waiting, failed — and a role is none of those.
+const ROLE_LABEL: Record<Role, string> = {
+  ADMIN: 'Admin',
+  MANAGER: 'Manager',
+  MEMBER: 'Member',
+};
+
 const ROLE_STATUS: Record<Role, Status> = {
   ADMIN: 'neutral',
   MANAGER: 'neutral',
@@ -144,16 +150,18 @@ export function UsersScreen() {
       ),
     refetchInterval: canEdit ? 60_000 : false,
   });
-  // Only admins need the team + shift lists — pickers are hidden for everyone else.
+  // The team + shift lists feed the admin's pickers and every reader's Team and
+  // Shift columns, so anyone allowed to read them fetches them; without them a
+  // manager would see raw ids like `team_eng`.
   const teamsQ = useQuery({
     queryKey: ['admin', 'teams'],
     queryFn: () => api<{ teams: Team[] }>('/v1/admin/teams'),
-    enabled: canEdit,
+    enabled: hasCapability(me, 'teams.read'),
   });
   const shiftsQ = useQuery({
     queryKey: ['admin', 'shifts'],
     queryFn: () => api<{ shifts: Shift[] }>('/v1/admin/shifts'),
-    enabled: canEdit,
+    enabled: hasCapability(me, 'shifts.read'),
   });
 
   const toast = useToast();
@@ -526,7 +534,7 @@ function PersonRow({
         <Td>
           {editing ? (
             user.role === 'MANAGER' ? (
-              <Tag status={ROLE_STATUS[user.role]}>{user.role}</Tag>
+              <Tag status={ROLE_STATUS[user.role]}>{ROLE_LABEL[user.role]}</Tag>
             ) : (
               <Select value={role} onChange={(e) => setRole(e.target.value as Role)} aria-label="Role">
                 {EDITABLE_ROLES.map((r) => (
@@ -538,7 +546,7 @@ function PersonRow({
             )
           ) : (
             <span className="usr-role-stack">
-              <Tag status={ROLE_STATUS[user.role]}>{user.role}</Tag>
+              <Tag status={ROLE_STATUS[user.role]}>{ROLE_LABEL[user.role]}</Tag>
               {user.managesTeamName && <span className="ui-t-small ui-ink-3">Manages {user.managesTeamName}</span>}
             </span>
           )}
