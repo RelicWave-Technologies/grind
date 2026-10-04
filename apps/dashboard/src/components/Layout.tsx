@@ -1,5 +1,5 @@
 import { Outlet, Link, useRouteContext, useNavigate, useLocation } from '@tanstack/react-router';
-import { Home, Inbox, CalendarCheck, ShieldAlert, LogOut, ShieldCheck, FileText, User, Users, CalendarDays, Compass } from 'lucide-react';
+import { Home, Clock4, Inbox, CalendarCheck, ShieldAlert, LogOut, ShieldCheck, FileText, User, Users, CalendarDays, Compass } from 'lucide-react';
 import { hasCapability, useLogout, type Permission } from '../lib/auth';
 import { AGENT_DOWNLOADS, agentDownloadUrl } from '../lib/downloads';
 import {
@@ -37,10 +37,8 @@ const NAV: Array<{ section: string; items: NavEntry[] }> = [
   {
     section: 'My work',
     items: [
-      { label: 'Today', Icon: Home, tabs: [
-        { to: '/home', label: 'Today', show: 'all' },
-        { to: '/edit-time', label: 'Edit time', show: 'all' },
-      ] },
+      { label: 'Today', Icon: Home, tabs: [{ to: '/home', label: 'Today', show: 'all' }] },
+      { label: 'Edit time', Icon: Clock4, tabs: [{ to: '/edit-time', label: 'Edit time', show: 'all' }] },
       { label: 'Leave', Icon: CalendarDays, tabs: [{ to: '/calendar', label: 'Leave', show: 'all' }] },
       { label: 'Profile', Icon: User, tabs: [{ to: '/profile', label: 'Profile', show: { permission: 'profile.self.read' } }] },
     ],
