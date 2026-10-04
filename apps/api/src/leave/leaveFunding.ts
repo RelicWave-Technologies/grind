@@ -34,6 +34,8 @@ export interface LeaveCredit {
   effectiveOn: string;
   /** Signed days: accruals positive, adjustments either way. */
   days: number;
+  /** What it was, in words, for the leave details list. */
+  label?: string;
 }
 
 export interface ChargeableLeaveDay {
@@ -42,6 +44,8 @@ export interface ChargeableLeaveDay {
   date: string;
   /** What the day costs a balance: 1 for a full day, 0.5 for a half. */
   cost: number;
+  /** Why the day was leave, in words, for the leave details list. */
+  label?: string;
 }
 
 export interface LeaveFundingInput {
@@ -155,6 +159,25 @@ export interface LeaveAccount {
   paid: number;
   /** opening + earned - paid. */
   closing: number;
+  /**
+   * Every change inside the window, in date order: what came in, and each day
+   * of leave with how much of it the balance paid and how much became a
+   * salary cut. Adds up to the four totals above.
+   */
+  lines: LeaveAccountLine[];
+}
+
+export interface LeaveAccountLine {
+  /** YYYY-MM-DD. */
+  date: string;
+  kind: 'credit' | 'leave';
+  label: string;
+  /** Signed: + for a credit, − for a leave day's cost. */
+  days: number;
+  /** For a leave day: how much the balance paid. */
+  paid?: number;
+  /** For a leave day: how much the balance could not pay. */
+  salaryCut?: number;
 }
 
 /**
@@ -188,6 +211,11 @@ export function resolveLeaveAccounts(
     let earned = 0;
     let paid = 0;
     let c = 0;
+    const lines: LeaveAccountLine[] = [];
+    const credit = (next: LeaveCredit) => {
+      if (next.effectiveOn < input.from) return;
+      lines.push({ date: next.effectiveOn, kind: 'credit', label: next.label ?? (next.days >= 0 ? 'Leave added' : 'Leave removed'), days: next.days });
+    };
     const open = () => {
       if (opening === null) opening = budget;
     };
@@ -197,6 +225,7 @@ export function resolveLeaveAccounts(
           open();
           earned = roundToHalfDay(earned + next.days);
         }
+        credit(next);
         budget = roundToHalfDay(budget + next.days);
         c += 1;
       }
@@ -204,6 +233,16 @@ export function resolveLeaveAccounts(
       if (day.date >= input.from) {
         open();
         paid = roundToHalfDay(paid + funded);
+        if (day.cost > 0) {
+          lines.push({
+            date: day.date,
+            kind: 'leave',
+            label: day.label ?? 'Leave',
+            days: -day.cost,
+            paid: funded,
+            salaryCut: roundToHalfDay(day.cost - funded),
+          });
+        }
       }
       budget = roundToHalfDay(budget - funded);
     }
@@ -212,9 +251,10 @@ export function resolveLeaveAccounts(
         open();
         earned = roundToHalfDay(earned + next.days);
       }
+      credit(next);
       budget = roundToHalfDay(budget + next.days);
     }
-    out.set(userId, { opening: opening ?? budget, earned, paid, closing: budget });
+    out.set(userId, { opening: opening ?? budget, earned, paid, closing: budget, lines });
   }
   return out;
 }

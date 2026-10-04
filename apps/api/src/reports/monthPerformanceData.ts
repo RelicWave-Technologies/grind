@@ -241,6 +241,7 @@ export async function loadMonthPerformanceReport(input: {
     overrideFor,
     balanceFor: (userId) => balances[userId]?.balanceDays,
     leaveAccountFor: calendar.leaveAccountFor,
+    today: dateKeyInTimeZone(new Date(nowMs), range.tz),
     ruleFor: rules.enabled ? rules.judge : undefined,
     fundedDaysFor: calendar.fundedDaysFor,
     lateOrdinalFor: rules.enabled ? rules.lateOrdinalFor : undefined,

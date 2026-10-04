@@ -97,6 +97,14 @@ export function isManagerOrAbove(role: Role | undefined): boolean {
   return role === 'ADMIN' || role === 'MANAGER';
 }
 
+/**
+ * Where someone lands after signing in: a manager or admin starts on the team's
+ * day, everyone else on their own.
+ */
+export function landingPath(me: Pick<Me, 'capabilities'> | null | undefined): '/overview' | '/home' {
+  return hasCapability(me, 'overview.read') ? '/overview' : '/home';
+}
+
 export function hasCapability(me: Pick<Me, 'capabilities'> | null | undefined, permission: Permission): boolean {
   return !!me?.capabilities?.includes(permission);
 }

@@ -1,6 +1,9 @@
 import { prisma, type Prisma } from '@grind/db';
 import {
   ATTENDANCE_RULE_DEFAULTS,
+  ATTENDANCE_RULE_LABEL,
+  ATTENDANCE_RULE_REASON,
+  AttendanceRuleTagSchema,
   attendanceOverrideShape,
   LEAVE_POLICY_DEFAULTS,
   roundToHalfDay,
@@ -179,7 +182,7 @@ export async function loadWorkingCalendar(input: {
         // reading the entry too would spend the same half day twice.
         NOT: { sourceKey: { startsWith: 'override:' } },
       },
-      select: { userId: true, effectiveOn: true, days: true },
+      select: { userId: true, effectiveOn: true, days: true, sourceKey: true, reason: true },
     }),
     // A manager's correction is a fact about the day, so the balance has to
     // spend against it the same way it spends against Lark's leave. Loaded
@@ -201,7 +204,7 @@ export async function loadWorkingCalendar(input: {
         sourceKey: { startsWith: RULE_SOURCE_PREFIX },
         effectiveOn: { gte: fromDate, lte: toDate },
       },
-      select: { userId: true, effectiveOn: true, days: true },
+      select: { userId: true, effectiveOn: true, days: true, reason: true },
     }),
   ]);
 
@@ -263,7 +266,27 @@ export async function loadWorkingCalendar(input: {
    * correction cannot reach past it.
    */
   const ruleCostFor = new Map<string, number>();
-  for (const r of ruleCharges) ruleCostFor.set(`${r.userId}\u0000${toIsoDate(r.effectiveOn)}`, -r.days);
+  const ruleReasonFor = new Map<string, string>();
+  for (const r of ruleCharges) {
+    ruleCostFor.set(`${r.userId}\u0000${toIsoDate(r.effectiveOn)}`, -r.days);
+    if (r.reason) ruleReasonFor.set(`${r.userId}\u0000${toIsoDate(r.effectiveOn)}`, r.reason);
+  }
+
+  /** Why a day was leave, in words — for the leave details list. */
+  const labelOf = (userId: string, date: string): string => {
+    const key = `${userId}\u0000${date}`;
+    if (overrideFor.has(key)) return 'Changed by a manager';
+    const status = priced.dayStatus(userId, date);
+    const parts: string[] = [];
+    if (status.chargedDays > 0) parts.push(status.portion === 'FULL' ? 'Leave (Lark)' : 'Half-day leave (Lark)');
+    const rule = ruleReasonFor.get(key);
+    if (rule) {
+      // The ledger line holds the full sentence; the list wants the few words.
+      const tag = AttendanceRuleTagSchema.options.find((t) => ATTENDANCE_RULE_LABEL[t] === rule);
+      parts.push(tag ? ATTENDANCE_RULE_REASON[tag] : rule);
+    }
+    return parts.join(' + ') || 'Leave';
+  };
 
   const costOf = (userId: string, date: string): number => {
     const status = priced.dayStatus(userId, date);
@@ -288,7 +311,7 @@ export async function loadWorkingCalendar(input: {
     const key = `${userId}\u0000${date}`;
     if (charged.has(key)) return;
     charged.add(key);
-    leaveDays.push({ userId, date, cost: costOf(userId, date) });
+    leaveDays.push({ userId, date, cost: costOf(userId, date), label: labelOf(userId, date) });
   };
 
   for (const l of shared.approvedLeave) {
@@ -307,6 +330,7 @@ export async function loadWorkingCalendar(input: {
     userId: c.userId,
     effectiveOn: toIsoDate(c.effectiveOn),
     days: c.days,
+    label: creditLabel(c.sourceKey, c.days, c.reason),
   }));
 
   const walk = { credits: creditRows, leaveDays, since: fundingFloor, accrualStartFor };
@@ -315,6 +339,15 @@ export async function loadWorkingCalendar(input: {
     leaveFunding: resolveLeaveFunding(walk),
     leaveAccounts: resolveLeaveAccounts({ ...walk, from: input.from, to: input.to }),
   });
+}
+
+/** A ledger credit in words, for the leave details list. */
+function creditLabel(sourceKey: string, days: number, reason: string | null): string {
+  if (sourceKey.startsWith('accrual:')) return 'Monthly leave';
+  if (sourceKey.startsWith('birthday:')) return 'Birthday leave';
+  if (sourceKey.startsWith('leave-reversal:')) return 'Leave cancelled — returned';
+  const who = days >= 0 ? 'Added by admin' : 'Removed by admin';
+  return reason ? `${who}: ${reason}` : who;
 }
 
 /** Every YYYY-MM-DD from `start` to `end`, inclusive. */

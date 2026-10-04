@@ -80,6 +80,10 @@
   width: calc(var(--ui-sp-12) * 2 + var(--ui-sp-8));
 }
 
+.tm-col-works {
+  width: calc(var(--ui-sp-12) * 2 + var(--ui-sp-7));
+}
+
 .tm-col-manager {
   width: calc(var(--ui-sp-12) * 3);
 }

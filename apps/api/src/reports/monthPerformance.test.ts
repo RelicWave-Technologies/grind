@@ -489,7 +489,7 @@ describe('the leave account the month left behind', () => {
     });
 
   it('prints opening, earned, paid and closing — and they add up', () => {
-    const rep = build({ leaveAccountFor: () => ({ opening: 1.5, earned: 1, paid: 2, closing: 0.5 }) });
+    const rep = build({ leaveAccountFor: () => ({ opening: 1.5, earned: 1, paid: 2, closing: 0.5, lines: [] }) });
     expect(monthPerformanceLeavePairs(rep.rows[0]!)).toEqual([
       ['Opening Balance', '1.5'],
       ['Earned', '1'],
@@ -500,7 +500,7 @@ describe('the leave account the month left behind', () => {
 
   it('gives somebody with no leave history an account of zeros, not a blank', () => {
     const rep = build({ leaveAccountFor: () => undefined });
-    expect(rep.rows[0]!.leaveAccount).toEqual({ opening: 0, earned: 0, paid: 0, closing: 0 });
+    expect(rep.rows[0]!.leaveAccount).toEqual({ opening: 0, earned: 0, paid: 0, closing: 0, lines: [] });
   });
 
   it('counts the sheet codes and turns unpaid leave into one salary-cut figure', () => {

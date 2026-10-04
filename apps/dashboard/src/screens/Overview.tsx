@@ -67,6 +67,7 @@ interface OverviewResponse {
       type: string;
       windowStart: string;
       riskScore: number;
+      count?: number;
       createdAt: string;
     }>;
   };
@@ -272,7 +273,7 @@ export function OverviewScreen() {
                     key={f.id}
                     rail="danger"
                     title={f.user.name}
-                    subtitle={f.type.toLowerCase().replace(/_/g, ' ')}
+                    subtitle={`${f.type.toLowerCase().replace(/_/g, ' ')}${f.count && f.count > 1 ? ` · ${f.count} minutes` : ''}`}
                     meta={fmtAgeShort(Date.now() - new Date(f.createdAt).getTime())}
                     trailing={<Tag status="danger" mono>{`risk ${f.riskScore}`}</Tag>}
                     onClick={() => navigate({ to: '/flags' })}

@@ -392,5 +392,21 @@ describe('attendance rules — HTTP surfaces', () => {
 
     const xlsx = await request(app).get('/v1/reports/month-performance.xlsx?month=2026-09').set(auth);
     expect(xlsx.status).toBe(200);
+
+    // The month on one row per person, with the leave account behind it.
+    const sum = await request(app).get('/v1/reports/month-summary?month=2026-09').set(auth);
+    expect(sum.status).toBe(200);
+    const me = (sum.body.rows as Array<Record<string, unknown>>).find((r) => r.email === s.member.email) as {
+      present: number; halfDay: number; leave: number; lwa: number; salaryCut: number;
+      account: { opening: number; earned: number; paid: number; closing: number; lines: Array<{ kind: string; days: number; paid?: number; code?: string }> };
+    };
+    expect(me.halfDay).toBe(1);
+    expect(me.lwa).toBeGreaterThanOrEqual(2);
+    const a = me.account;
+    const credits = a.lines.filter((l) => l.kind === 'credit').reduce((x, l) => x + l.days, 0);
+    const paid = a.lines.filter((l) => l.kind === 'leave').reduce((x, l) => x + (l.paid ?? 0), 0);
+    expect(a.opening + credits - paid).toBe(a.closing);
+    expect(a.closing).toBeGreaterThanOrEqual(0);
+    expect(a.lines.find((l) => l.kind === 'leave')?.code).toBe('HD');
   });
 });

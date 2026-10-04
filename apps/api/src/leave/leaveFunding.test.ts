@@ -209,7 +209,7 @@ describe('resolveLeaveAccounts', () => {
       // August spends nothing; September asks for 3 days with 2 behind it.
       leaveDays: [day('2026-09-05'), day('2026-09-06'), day('2026-09-07')],
     });
-    expect(out.get(U)).toEqual({ opening: 1, earned: 1, paid: 2, closing: 0 });
+    expect(out.get(U)).toMatchObject({ opening: 1, earned: 1, paid: 2, closing: 0 });
   });
 
   it('never carries unpaid leave as debt into the closing balance', () => {
@@ -218,7 +218,14 @@ describe('resolveLeaveAccounts', () => {
       credits: [accrual('2026-09-01')],
       leaveDays: [day('2026-09-02'), day('2026-09-03', 0.5), day('2026-09-04')],
     });
-    expect(out.get(U)).toEqual({ opening: 0, earned: 1, paid: 1, closing: 0 });
+    expect(out.get(U)).toMatchObject({ opening: 0, earned: 1, paid: 1, closing: 0 });
+    // Every change, in order, with what was paid and what became a salary cut.
+    expect(out.get(U)!.lines).toEqual([
+      { date: '2026-09-01', kind: 'credit', label: 'Leave added', days: 1 },
+      { date: '2026-09-02', kind: 'leave', label: 'Leave', days: -1, paid: 1, salaryCut: 0 },
+      { date: '2026-09-03', kind: 'leave', label: 'Leave', days: -0.5, paid: 0, salaryCut: 0.5 },
+      { date: '2026-09-04', kind: 'leave', label: 'Leave', days: -1, paid: 0, salaryCut: 1 },
+    ]);
   });
 
   it('counts a mid-month joiner\'s first accrual', () => {
@@ -228,7 +235,7 @@ describe('resolveLeaveAccounts', () => {
       leaveDays: [day('2026-09-10', 0.5)],
       accrualStartFor: { [U]: '2026-09-03' },
     });
-    expect(out.get(U)).toEqual({ opening: 0, earned: 1, paid: 0.5, closing: 0.5 });
+    expect(out.get(U)).toMatchObject({ opening: 0, earned: 1, paid: 0.5, closing: 0.5 });
   });
 
   it('agrees with the funding labels', () => {

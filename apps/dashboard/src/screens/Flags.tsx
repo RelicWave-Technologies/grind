@@ -22,10 +22,32 @@ import {
 } from '../ui';
 import type { Status } from '../ui';
 import { fmtTime, fmtDayLabel, fmtDurationMs, fmtDateShort } from '../lib/format';
-import { dateKeyInTimeZone } from '@grind/types';
+
+/**
+ * One person, one day, one kind of signal. The detector raises a flag per
+ * offending minute; a reviewer judges the afternoon, so the queue is grouped.
+ */
+interface FlagGroup {
+  key: string;
+  user: ActivityFlag['user'];
+  date: string;
+  type: FlagType;
+  count: number;
+  windowStart: string;
+  windowEnd: string;
+  riskScore: number;
+  evidence: Record<string, unknown>;
+  explanation: { headline: string; detail: string };
+  flagIds: string[];
+  resolution: FlagResolution | null;
+  resolvedBy: { id: string; name: string } | null;
+  resolvedAt: string | null;
+  resolvedNote: string | null;
+}
 
 interface ListResponse {
-  flags: ActivityFlag[];
+  groups: FlagGroup[];
+  total: number;
   scope: 'self' | 'team' | 'workspace';
 }
 
@@ -82,30 +104,30 @@ export function FlagsScreen() {
   const qc = useQueryClient();
 
   const q = useQuery({
-    queryKey: ['admin', 'flags', tab],
-    queryFn: () => api<ListResponse>(`/v1/admin/flags?status=${tab}`),
+    queryKey: ['admin', 'flags', 'groups', tab],
+    queryFn: () => api<ListResponse>(`/v1/admin/flags/groups?status=${tab}`),
   });
 
   const resolve = useMutation({
-    mutationFn: async (vars: { id: string; resolution: FlagResolution; note?: string }) =>
-      api<{ id: string; status: 'RESOLVED'; resolution: FlagResolution; timeInvalidated: boolean; invalidatedMs: number }>(
-        `/v1/admin/flags/${vars.id}/resolve`,
-        { method: 'POST', json: { resolution: vars.resolution, note: vars.note } },
+    mutationFn: async (vars: { key: string; flagIds: string[]; resolution: FlagResolution; note?: string }) =>
+      api<{ resolved: number; timeInvalidated: boolean; invalidatedMs: number }>(
+        `/v1/admin/flags/resolve-many`,
+        { method: 'POST', json: { flagIds: vars.flagIds, resolution: vars.resolution, note: vars.note } },
       ),
-    onSuccess: (data) => {
-      setLastInvalidation(data.timeInvalidated ? { id: data.id, invalidatedMs: data.invalidatedMs } : null);
+    onSuccess: (data, vars) => {
+      setLastInvalidation(data.timeInvalidated ? { id: vars.key, invalidatedMs: data.invalidatedMs } : null);
       qc.invalidateQueries({ queryKey: ['admin', 'flags'] });
     },
   });
 
-  const count = q.data?.flags.length ?? 0;
+  const count = q.data?.groups.length ?? 0;
 
   return (
     <Page>
       <PageHeader
         eyebrow={`${q.data ? SCOPE_LABEL[q.data.scope] : 'Loading'} · Anti-cheat`}
         title="Risk flags"
-        subtitle="Content-free behavioural signals only. Every verdict is auditable — nothing is deleted automatically."
+        subtitle="One card per person, day and signal. A verdict applies to every minute in the card; nothing is deleted automatically."
         tabs={
           <Tabs
             aria-label="Flag status"
@@ -138,7 +160,7 @@ export function FlagsScreen() {
         </Banner>
       )}
 
-      {q.data && q.data.flags.length === 0 && (
+      {q.data && q.data.groups.length === 0 && (
         <EmptyState
           icon={<ShieldCheck size={26} strokeWidth={1.8} />}
           title={tab === 'OPEN' ? 'Clean shop' : 'Nothing resolved yet'}
@@ -150,20 +172,20 @@ export function FlagsScreen() {
         />
       )}
 
-      {q.data && q.data.flags.length > 0 && (
+      {q.data && q.data.groups.length > 0 && (
         <div className="flg-queue">
-          {q.data.flags.map((f) => (
+          {q.data.groups.map((g) => (
             <FlagCard
-              key={f.id}
-              flag={f}
+              key={g.key}
+              flag={g}
               timeZone={timeZone}
-              busy={resolve.isPending && resolve.variables?.id === f.id}
+              busy={resolve.isPending && resolve.variables?.key === g.key}
               error={
-                resolve.isError && resolve.variables?.id === f.id
+                resolve.isError && resolve.variables?.key === g.key
                   ? (resolve.error as Error | ApiError).message
                   : null
               }
-              onResolve={(resolution, note) => resolve.mutate({ id: f.id, resolution, note })}
+              onResolve={(resolution, note) => resolve.mutate({ key: g.key, flagIds: g.flagIds, resolution, note })}
             />
           ))}
         </div>
@@ -179,7 +201,7 @@ function FlagCard({
   error,
   onResolve,
 }: {
-  flag: ActivityFlag;
+  flag: FlagGroup;
   timeZone: string;
   busy: boolean;
   error: string | null;
@@ -190,8 +212,8 @@ function FlagCard({
 
   const start = new Date(flag.windowStart);
   const end = new Date(flag.windowEnd);
-  const day = dateKeyInTimeZone(start, timeZone);
-  const isResolved = flag.status === 'RESOLVED';
+  const day = flag.date;
+  const isResolved = flag.resolution !== null;
   const sev = riskStatus(flag.riskScore, isResolved);
   const evidence = Object.entries(flag.evidence);
 
@@ -228,6 +250,8 @@ function FlagCard({
         <span className="ui-t-eyebrow">Window</span>
         <span className="ui-mono flg-def__val">
           {fmtDayLabel(day, timeZone)} · {fmtTime(start.getTime(), timeZone)} – {fmtTime(end.getTime(), timeZone)}
+          {' · '}
+          {flag.count === 1 ? '1 minute flagged' : `${flag.count} minutes flagged`}
         </span>
       </div>
 

@@ -533,7 +533,7 @@ adminLeaveRouter.get('/balances', async (req, res, next) => {
         accrualStart: toIsoDate(p.joinedOn ?? p.createdAt),
         joinedOnSet: p.joinedOn !== null,
         ...(balances[p.id] ?? { balanceDays: 0, accruedDays: 0, consumedDays: 0, adjustedDays: 0 }),
-        month: calendar.leaveAccountFor(p.id) ?? { opening: 0, earned: 0, paid: 0, closing: 0 },
+        month: calendar.leaveAccountFor(p.id) ?? { opening: 0, earned: 0, paid: 0, closing: 0, lines: [] },
       })),
     });
   } catch (err) {
