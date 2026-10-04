@@ -462,6 +462,14 @@
 .site-foot-legal a {
   color: var(--color-muted);
 }
+/* The company name a shade darker, so the full stop in INC. can be seen. */
+.site-foot-legal b {
+  color: var(--color-ink-2);
+  font-weight: var(--type-body-sm-strong-weight);
+}
+.site-nowrap {
+  white-space: nowrap;
+}
 .site-foot-cols {
   display: grid;
   grid-template-columns: repeat(3, 1fr);

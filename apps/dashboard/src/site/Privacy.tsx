@@ -41,7 +41,7 @@ const SECTIONS: Array<{ id: string; title: string; body: ReactNode }> = [
     body: (
       <>
         <p>
-          Timo is a time tracker made by EMIAC Technologies for EMIAC's own teams. It has two parts: a desktop app for
+          Timo is a time tracker made by EMIAC INC. for EMIAC's own teams. It has two parts: a desktop app for
           Mac and Windows that counts working time, and a dashboard in the browser, at this address.
         </p>
         <p>
