@@ -68,13 +68,24 @@ leaveRouter.get('/me/balance', async (req, res, next) => {
     if (!req.user || !req.scope) return res.status(401).json({ error: 'unauthorized' });
     const asOf = today(req.scope.workspaceTimezone);
     await ensureAccruals({ workspaceId: req.scope.workspaceId, userId: req.user.sub, asOf });
-    const [balance, entries] = await Promise.all([
+    const [balance, entries, calendar] = await Promise.all([
       loadBalance(req.user.sub, asOf),
       loadLedgerEntries(req.user.sub),
+      loadWorkingCalendar({
+        workspaceId: req.scope.workspaceId,
+        tz: req.scope.workspaceTimezone,
+        userIds: [req.user.sub],
+        from: `${asOf.slice(0, 7)}-01`,
+        to: asOf,
+      }),
     ]);
     const dto: LeaveBalanceDto = { userId: req.user.sub, asOf, ...balance };
     res.json({
       balance: dto,
+      // What is left to take, as the month sheet and the balances table count
+      // it: leave nothing could pay for is a salary cut, never a debt, so this
+      // does not go below zero the way the raw ledger total can.
+      leftDays: calendar.leaveAccountFor(req.user.sub)?.closing ?? 0,
       // The statement IS the answer to "why is my balance 1.5?".
       statement: entries.map((e) => ({
         kind: e.kind,
@@ -476,6 +487,16 @@ adminLeaveRouter.get('/balances', async (req, res, next) => {
       await ensureAccruals({ workspaceId: req.scope.workspaceId, userId, asOf });
     }
 
+    // The month the balance is read at the end of, as a leave account — the
+    // same never-negative walk the month sheet prints, so the two agree.
+    const calendar = await loadWorkingCalendar({
+      workspaceId: req.scope.workspaceId,
+      tz: req.scope.workspaceTimezone,
+      userIds: req.scope.userIds,
+      from: `${asOf.slice(0, 7)}-01`,
+      to: asOf,
+    });
+
     const [people, balances, policy] = await Promise.all([
       prisma.user.findMany({
         where: { id: { in: req.scope.userIds }, deactivatedAt: null },
@@ -512,6 +533,7 @@ adminLeaveRouter.get('/balances', async (req, res, next) => {
         accrualStart: toIsoDate(p.joinedOn ?? p.createdAt),
         joinedOnSet: p.joinedOn !== null,
         ...(balances[p.id] ?? { balanceDays: 0, accruedDays: 0, consumedDays: 0, adjustedDays: 0 }),
+        month: calendar.leaveAccountFor(p.id) ?? { opening: 0, earned: 0, paid: 0, closing: 0 },
       })),
     });
   } catch (err) {

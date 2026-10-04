@@ -1,5 +1,7 @@
 import {
+  displayDayCode,
   attendanceOverrideShape,
+  type DisplayDayCode,
   type AttendanceOverrideCode,
   type AttendanceRuleVerdict,
   type DayStatus,
@@ -524,38 +526,11 @@ export function buildMonthPerformance(input: MonthPerformanceInput): MonthPerfor
 // The sheet's vocabulary
 // ---------------------------------------------------------------------------
 
-/**
- * What a day reads as on the exported sheet — six words HR already uses.
- *
- * The report itself keeps the full answer (`PL_HD/LWP_HD` and the rest),
- * because the dashboard and the pointers need to know which half was paid. The
- * sheet does not: it is read by somebody deciding salary, and for them the
- * paid/unpaid split is one number at the end of the line ("Salary cut"), not a
- * code to decode in every cell. So each day says only what it WAS.
- *
- *   P    present, a full day
- *   HD   half day — worked half, the other half was leave
- *   L    leave — approved, or made leave by an attendance rule
- *   LWA  leave without approval — absent with no approved application
- *   HL   company holiday
- *   WO   weekly off
- *   --   no shift assigned
- */
-export type SheetCode = 'P' | 'HD' | 'L' | 'LWA' | 'HL' | 'WO' | '--';
+/** What a day reads as on the exported sheet — see `displayDayCode`. */
+export type SheetCode = DisplayDayCode;
 
 export function sheetCode(day: Pick<MonthPerformanceDay, 'code' | 'rule'>): SheetCode {
-  switch (day.code) {
-    case 'P': return 'P';
-    case 'PL_HD':
-    case 'LWP_HD': return 'HD';
-    case 'HL': return 'HL';
-    case 'WO': return 'WO';
-    case '--': return '--';
-    // Absent with nothing approved is exactly what LWA means.
-    case 'A': return 'LWA';
-    default:
-      return day.rule?.tag === 'NO_APPLICATION' || day.rule?.tag === 'LEAVE_NOT_APPROVED' ? 'LWA' : 'L';
-  }
+  return displayDayCode(day.code, day.rule?.tag);
 }
 
 /** "7h", "3.5h" — a minimum as people say it. */
