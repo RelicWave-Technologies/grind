@@ -42,7 +42,8 @@ export type UpdateStatus = {
 const api = {
   auth: {
     loginWithLark: (): Promise<{ ok: true }> => ipcRenderer.invoke('auth:loginWithLark'),
-    logout: (): Promise<{ ok: true }> => ipcRenderer.invoke('auth:logout'),
+    logout: (): Promise<{ ok: true } | { ok: false; reason: 'time_waiting_to_sync' }> =>
+      ipcRenderer.invoke('auth:logout'),
     status: (): Promise<AuthStatus> => ipcRenderer.invoke('auth:status'),
     me: (): Promise<{ name: string; avatarUrl: string | null } | null> => ipcRenderer.invoke('auth:me'),
     onStatusChange: (cb: (s: AuthStatus) => void): (() => void) => {
