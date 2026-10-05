@@ -15,6 +15,8 @@ function status(patch: Partial<UpdateStatus>): UpdateStatus {
     readyAt: null,
     manual: false,
     canInstallNow: true,
+    installScope: 'user',
+    blockedReason: null,
     ...patch,
   };
 }
@@ -48,6 +50,19 @@ describe('update UI decisions', () => {
     expect(updateAction(s)).toEqual({ kind: 'restart', label: 'Restarting…', disabled: true });
     expect(settingsUpdateSubtitle(s)).toBe('Restarting Timo…');
     expect(updateReadyBannerText(s)).toBe('Restarting Timo…');
+  });
+
+  it('offers the installer download when a Program Files install cannot update itself', () => {
+    const s = status({ enabled: false, installScope: 'machine', blockedReason: 'machine-install' });
+    expect(settingsUpdateSubtitle(s)).toBe('Timo can’t update itself here — download the new installer');
+    expect(updateAction(s)).toEqual({ kind: 'download', label: 'Download installer', disabled: false });
+    expect(updateReadyBannerText(s)).toBeNull();
+  });
+
+  it('keeps the plain disabled copy for builds without release updates', () => {
+    const s = status({ enabled: false, installScope: 'unknown' });
+    expect(settingsUpdateSubtitle(s)).toBe('Release updates are off in this build');
+    expect(updateAction(s)).toMatchObject({ kind: 'check', disabled: true });
   });
 
   it('surfaces manual up-to-date and manual error states inline', () => {

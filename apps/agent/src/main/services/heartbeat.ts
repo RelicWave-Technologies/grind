@@ -14,6 +14,7 @@ import { broadcast } from '../broadcast';
 import { getTrackingReadinessService } from './trackingReadiness';
 import { getLaunchAtLoginService } from './launchAtLogin';
 import { handleRemoteCommands } from './remoteCommands';
+import { getUpdateDiagnostics } from './updates/diagnostics';
 
 let timer: NodeJS.Timeout | null = null;
 
@@ -68,6 +69,9 @@ function currentDiagnostics() {
     syncPending: backlog.pending,
     syncOldestPendingAt: backlog.oldestPendingAt === null ? null : new Date(backlog.oldestPendingAt).toISOString(),
     syncLastError: backlog.lastError,
+    // Why a Windows machine is stuck on an old version: a Program Files
+    // install cannot update itself, and the last updater failure says the rest.
+    ...getUpdateDiagnostics(),
   };
 }
 

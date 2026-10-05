@@ -37,6 +37,8 @@ export type UpdateStatus = {
   readyAt: number | null;
   manual: boolean;
   canInstallNow: boolean;
+  installScope: 'user' | 'machine' | 'unknown';
+  blockedReason: 'machine-install' | null;
 };
 
 const api = {
@@ -158,6 +160,7 @@ const api = {
     checkNow: (): Promise<UpdateStatus> => ipcRenderer.invoke('updates:checkNow'),
     checkQuietly: (): Promise<UpdateStatus> => ipcRenderer.invoke('updates:checkQuietly'),
     installNow: (): Promise<UpdateStatus> => ipcRenderer.invoke('updates:installNow'),
+    openInstallerDownload: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('updates:openInstallerDownload'),
     onStatusChange: (cb: (s: UpdateStatus) => void): (() => void) => {
       const sub = (_e: unknown, s: UpdateStatus) => cb(s);
       ipcRenderer.on('updates:status:push', sub);

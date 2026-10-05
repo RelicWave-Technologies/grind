@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   applyUpdateEvent,
   canInstallUpdate,
+  describeUpdateError,
+  effectiveUpdateChannel,
   initialUpdateStatus,
   isVersionNewer,
   nextRetryDelayMs,
@@ -85,5 +87,51 @@ describe('update state transitions', () => {
     expect(ready.phase).toBe('not-available');
     expect(ready.availableVersion).toBeNull();
     expect(ready.readyAt).toBeNull();
+  });
+});
+
+describe('effective update channel', () => {
+  it('keeps the baked channel for stable versions and beta builds', () => {
+    expect(effectiveUpdateChannel('latest', '1.0.0')).toBe('latest');
+    expect(effectiveUpdateChannel('beta', '1.0.0')).toBe('beta');
+    expect(effectiveUpdateChannel('beta', '0.0.2-beta.38')).toBe('beta');
+  });
+
+  it('moves a prerelease build mis-baked as latest onto beta', () => {
+    // On "latest" electron-updater only asks for the newest non-prerelease
+    // release, and every Timo release is a beta: it would never update.
+    expect(effectiveUpdateChannel('latest', '0.0.2-beta.38')).toBe('beta');
+  });
+
+  it('leaves other prerelease names and unparseable versions alone', () => {
+    expect(effectiveUpdateChannel('latest', '1.0.0-rc.1')).toBe('latest');
+    expect(effectiveUpdateChannel('latest', 'dev')).toBe('latest');
+  });
+});
+
+describe('update error description', () => {
+  it('leads with the electron-updater code', () => {
+    const err = Object.assign(new Error('Cannot find beta.yml in the latest release artifacts\nstack...'), {
+      code: 'ERR_UPDATER_CHANNEL_FILE_NOT_FOUND',
+    });
+    expect(describeUpdateError(err)).toBe(
+      'ERR_UPDATER_CHANNEL_FILE_NOT_FOUND: Cannot find beta.yml in the latest release artifacts',
+    );
+  });
+
+  it('does not repeat a code the message already carries', () => {
+    const err = Object.assign(new Error('net::ERR_INTERNET_DISCONNECTED'), { code: 'ERR_INTERNET_DISCONNECTED' });
+    expect(describeUpdateError(err)).toBe('net::ERR_INTERNET_DISCONNECTED');
+  });
+
+  it('handles non-errors and empty messages', () => {
+    expect(describeUpdateError('offline')).toBe('offline');
+    expect(describeUpdateError(new Error(''))).toBe('unknown error');
+  });
+
+  it('fits the 200-character diagnostics column', () => {
+    const line = describeUpdateError(Object.assign(new Error('x'.repeat(500)), { code: 'EACCES' }));
+    expect(line.length).toBe(200);
+    expect(line.startsWith('EACCES: xxx')).toBe(true);
   });
 });
