@@ -80,6 +80,9 @@ async function tick(): Promise<void> {
   try {
     const timerService = getTimerService();
     const timerStatus = timerService.status();
+    // Read before this tick writes a fresh one: a server close for silence is
+    // only overridden for time this process can prove it was alive for.
+    const provenAliveAt = timerService.lastLiveness();
     if (timerStatus.state === 'RUNNING' && !timerStatus.paused) timerService.heartbeat();
     const body = buildHeartbeatRequest({
       agentVersion: agentVersion(),
@@ -118,7 +121,11 @@ async function tick(): Promise<void> {
     if (checkpoint?.disposition === 'needs_sync' || (checkpoint?.disposition === 'finalized' && closedForSilence)) {
       // Missing, behind, or closed because the server stopped hearing from us:
       // local is the truth, so send it rather than giving up the time.
-      await timerService.resyncFromServer(checkpoint.entryId, checkpoint.serverRevision);
+      await timerService.resyncFromServer(checkpoint.entryId, checkpoint.serverRevision, {
+        serverEndedAt: checkpoint.endedAt ? new Date(checkpoint.endedAt).getTime() : null,
+        provenAliveAt,
+      });
+      broadcast('timer:status:push', timerService.status());
     } else if ((checkpoint?.disposition === 'finalized' || checkpoint?.disposition === 'conflict') && checkpoint.endedAt) {
       // Another live timer owns this user (a second device), or the entry was
       // already closed on purpose: stop visibly at the server's boundary.

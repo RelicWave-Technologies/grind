@@ -62,6 +62,12 @@ export class TimerService {
   private mutationListener: (() => void) | null = null;
   private readonly backgroundSyncs = new Set<Promise<void>>();
   private todayLedgerMode: TodayLedgerMode = 'OFF';
+  /**
+   * The entry THIS process opened and has been accruing. An open row read back
+   * from disk (a previous run, or another account's session on this machine)
+   * never qualifies: its time since the last proof of life is unproven.
+   */
+  private liveEntryId: string | null = null;
 
   constructor(
     private readonly store: EntryStore,
@@ -80,10 +86,51 @@ export class TimerService {
     this.store.bindOwner(owner);
     if (owner && claimLegacy) this.store.claimUnownedEntries(owner);
     this.open = this.store.getOpen();
+    if (this.open?.id !== this.liveEntryId) this.liveEntryId = null;
   }
 
   currentOwner(): TimerOwner | null {
     return this.store.currentOwner();
+  }
+
+  /**
+   * Bind to the signed-in session, closing whatever is left open on either
+   * side of an account change.
+   *
+   * Rebinding used to swap owners and nothing else. User A's open entry stayed
+   * open on disk; when A signed in again it was read back as running and the
+   * whole time in between — hours of B's session, or the machine switched off
+   * — was credited on the next resume or resync. So on any owner change:
+   *  - the previous owner's open entry is closed at its last proof of life,
+   *    durably and without syncing (A's tokens are gone; the row stays bound
+   *    to A and uploads when A signs in again);
+   *  - an open entry the new owner left behind is closed the same way, exactly
+   *    as boot recovery does.
+   * Rebinding the same owner leaves a running timer alone.
+   */
+  switchOwner(owner: TimerOwner | null, claimLegacy = false): TimerRecoveryResult[] {
+    const previous = this.store.currentOwner();
+    if (sameOwner(previous, owner)) {
+      this.bindOwner(owner, claimLegacy);
+      return [];
+    }
+    const recovered: TimerRecoveryResult[] = [];
+    if (previous) {
+      const closed = this.recoverAtLastProofOfLife();
+      if (closed) recovered.push(closed);
+    }
+    this.bindOwner(owner, claimLegacy);
+    if (owner) {
+      const closed = this.recoverAtLastProofOfLife();
+      if (closed) recovered.push(closed);
+    }
+    return recovered;
+  }
+
+  /** Close the bound owner's open entry at the last liveness tick written while it accrued. */
+  recoverAtLastProofOfLife(): TimerRecoveryResult | null {
+    // Falls back to now() only if liveness was never written (very first run).
+    return this.recoverAway() ?? this.recover(this.lastLiveness() ?? this.clock.now());
   }
 
   claimServerMatchedEntries(matches: Array<{ id: string; clientUuid: string }>): number {
@@ -205,6 +252,7 @@ export class TimerService {
       const next = this.createEntry(nextTaskGuid, now);
       const [closedState, nextState] = this.store.switchEntry(closed, next);
       this.open = next;
+      this.liveEntryId = next.id;
       this.notifyMutation();
       // In order: while the old entry is still open on the server, creating
       // the new one is refused as a second live timer.
@@ -213,6 +261,7 @@ export class TimerService {
     }
     const entry = this.createEntry(nextTaskGuid, now);
     await this.commitOpen(entry, 'pending_create');
+    this.liveEntryId = entry.id;
     return this.status();
   }
 
@@ -380,10 +429,35 @@ export class TimerService {
    * the server because it stopped hearing from us. Local is the truth: push it.
    * A server close can only be overridden by a newer revision, so when the
    * server already holds ours, bump it.
+   *
+   * Local is only the truth for time this process actually watched. An entry
+   * it did not open is never pushed over the server's close, and one whose last
+   * proof of life is older than that close is closed at the proof instead —
+   * otherwise a gap nobody tracked (sleep the away handler missed, another
+   * account's session) would be re-credited by the resend.
+   *
+   * @param check.serverEndedAt where the server closed it, when it did.
+   * @param check.provenAliveAt the liveness tick as it stood BEFORE this
+   *   heartbeat wrote a fresh one.
    */
-  async resyncFromServer(entryId: string, serverRevision: number | null): Promise<void> {
+  async resyncFromServer(
+    entryId: string,
+    serverRevision: number | null,
+    check: { serverEndedAt?: number | null; provenAliveAt?: number | null } = {},
+  ): Promise<void> {
     const open = this.open;
     if (!open || open.id !== entryId) return;
+    if (open.id !== this.liveEntryId) return;
+    const { serverEndedAt = null, provenAliveAt = null } = check;
+    if (
+      getOpenSegment(open)
+      && serverEndedAt !== null
+      && provenAliveAt !== null
+      && provenAliveAt < serverEndedAt
+    ) {
+      this.recover(provenAliveAt);
+      return;
+    }
     if (serverRevision === null) {
       this.store.requeue(entryId, 'pending_create');
       return;
@@ -783,6 +857,11 @@ function intervalUnionMs(values: Array<{ start: number; end: number }>): number 
     }
   }
   return current ? total + current.end - current.start : total;
+}
+
+function sameOwner(a: TimerOwner | null, b: TimerOwner | null): boolean {
+  if (!a || !b) return a === b;
+  return a.userId === b.userId && a.workspaceId === b.workspaceId;
 }
 
 function latestSegmentBoundary(entry: TimeEntry): number {
