@@ -12,6 +12,7 @@ import { startScreenshotRetentionScheduler } from './screenshots/retention';
 import { startTesterOpsSchedulers } from './testerOps/scheduler';
 import { startTimerLifecycleScheduler } from './timeLifecycle';
 import { installGracefulShutdown } from './lib/lifecycle';
+import { startPruneScheduler } from './maintenance/prune';
 
 const app = buildApp();
 
@@ -33,6 +34,8 @@ const server = app.listen(port, () => {
   startScreenshotRetentionScheduler();
   startTesterOpsSchedulers();
   startTimerLifecycleScheduler(env.TIMO_TIMER_LEASE_RECONCILER_ENABLED === 'true');
+  // Daily: drop spent refresh tokens, expired agent codes, settled outbox rows.
+  startPruneScheduler();
 });
 
 // SIGTERM (deploy) / SIGINT: stop schedulers, finish in-flight requests,
