@@ -5,7 +5,7 @@ import { canonicalTimerEntryPayload } from '@grind/core';
 import { createHash } from 'node:crypto';
 import { dateKeyInTimeZone, localDayWindowInTimeZone, type TimerSyncReceipt } from '@grind/types';
 import { HttpError } from '../apiClient';
-import { syncRetryDelayMs, TimerService } from './timerService';
+import { CLOCK_CORRECTION_NOTICE_MS, syncRetryDelayMs, TimerService } from './timerService';
 import { TrackingBlockedError } from '../trackingReadiness';
 import type {
   Clock,
@@ -360,18 +360,6 @@ describe('TimerService.start', () => {
     expect(pendingEntry.id).toBe(store.getOpen()?.id);
   });
 
-  it('records a visible notice for an acknowledged server clock correction', async () => {
-    const correctingSync: SyncClient = {
-      create: async (entryValue) => receipt(entryValue, { correction: 'CLOCK_CLAMP' }),
-      sync: async (entryValue) => receipt(entryValue),
-    };
-    const correctingService = new TimerService(store, correctingSync, clock, ids, allowAccrual);
-
-    await correctingService.start({});
-    await correctingService.flushUnsynced();
-
-    expect(correctingService.recoveryNotice()).toMatchObject({ reason: 'server_clock_corrected' });
-  });
 
   it('switches to another task without requiring a stop first', async () => {
     await svc.start({ larkTaskGuid: 'task-a' });
@@ -1539,3 +1527,233 @@ function createOpenEntry(startedAt: number, id = 'fractional'): TimeEntry {
   };
 }
 
+
+/** No closed segment in any stored row starts and ends in the same millisecond. */
+function expectNoZeroLengthSegments(target: MemStore) {
+  for (const entry of target.entries.values()) {
+    for (const segment of entry.segments) {
+      if (segment.endedAt !== null) expect(Math.trunc(segment.endedAt)).toBeGreaterThan(Math.trunc(segment.startedAt));
+    }
+    expect(validateEntry(entry)).toEqual([]);
+  }
+}
+
+describe('zero-length segments are never produced (one rule, core segments.ts)', () => {
+  /** Records the segment lists the server was sent. */
+  function recordingSync() {
+    const sent: Array<{ op: 'create' | 'sync'; entry: TimeEntry }> = [];
+    const client: SyncClient = {
+      create: async (e) => {
+        sent.push({ op: 'create', entry: structuredClone(e) });
+        return receipt(e);
+      },
+      sync: async (e) => {
+        sent.push({ op: 'sync', entry: structuredClone(e) });
+        return receipt(e);
+      },
+    };
+    return { sent, client };
+  }
+
+  it('an idle cut that lands on the segment start removes the segment and keeps the timer paused', async () => {
+    const { sent, client } = recordingSync();
+    const service = new TimerService(store, client, clock, ids, allowAccrual);
+    await service.start({});
+    clock.advance(2 * MIN);
+
+    await service.pauseForIdle(10 * MIN); // went idle before the segment began
+    await settle();
+
+    const open = store.getOpen()!;
+    expect(open.segments).toEqual([]);
+    expect(open.pauseReason).toBe('IDLE');
+    const status = service.status();
+    expect(status).toMatchObject({ state: 'RUNNING', paused: true, startedAt: T0, workedMs: 0 });
+    expect(sent.at(-1)!.entry.segments).toEqual([]);
+    expectNoZeroLengthSegments(store);
+
+    clock.advance(MIN);
+    await service.resume();
+    clock.advance(3 * MIN);
+    await service.stop();
+    await settle();
+    const [closed] = [...store.entries.values()];
+    expect(closed!.startedAt).toBe(T0);
+    expect(closed!.segments).toHaveLength(1);
+    expect(closed!.segments[0]!.startedAt).toBe(T0 + 3 * MIN);
+    expect(totalWorkedMs(closed!)).toBe(3 * MIN);
+    expectNoZeroLengthSegments(store);
+  });
+
+  it('a permission cut at the segment start removes it', async () => {
+    await svc.start({});
+    clock.advance(MIN);
+    await svc.pauseForPermission(5 * MIN);
+    expect(store.getOpen()!.segments).toEqual([]);
+    expect(store.getOpen()!.pauseReason).toBe('PERMISSION_REQUIRED');
+    expectNoZeroLengthSegments(store);
+  });
+
+  it('a manual pause in the same millisecond as the start removes the segment', async () => {
+    await svc.start({});
+    await svc.pause();
+    expect(store.getOpen()!.segments).toEqual([]);
+    expect(svc.isPaused()).toBe(true);
+    expectNoZeroLengthSegments(store);
+  });
+
+  it('start then stop in the same millisecond leaves a closed entry with no segments, still synced', async () => {
+    const { sent, client } = recordingSync();
+    const service = new TimerService(store, client, clock, ids, allowAccrual);
+    await service.start({});
+    await service.stop();
+    await settle();
+    await service.flushUnsynced();
+
+    const [closed] = [...store.entries.values()];
+    expect(closed).toMatchObject({ startedAt: T0, endedAt: T0, segments: [] });
+    // The server already holds the open copy, so the close must reach it.
+    expect(sent.some((call) => call.entry.endedAt === T0 && call.entry.segments.length === 0)).toBe(true);
+    expect(store.getUnsynced()).toHaveLength(0);
+    expectNoZeroLengthSegments(store);
+  });
+
+  it('switching task in the same millisecond closes the first entry without an empty segment', async () => {
+    await svc.start({ larkTaskGuid: 'task-a' });
+    await svc.start({ larkTaskGuid: 'task-b' });
+    await settle();
+    const closed = [...store.entries.values()].find((entry) => entry.endedAt !== null)!;
+    expect(closed.larkTaskGuid).toBe('task-a');
+    expect(closed.segments).toEqual([]);
+    expect(store.getOpen()!.segments).toHaveLength(1);
+    expectNoZeroLengthSegments(store);
+  });
+
+  it('crash recovery and an away boundary at the segment start leave no empty segment', async () => {
+    await svc.start({});
+    clock.advance(10 * MIN);
+    await svc.pause();
+    clock.advance(MIN);
+    await svc.resume();
+    // Recovered at a liveness tick older than the resumed segment's start.
+    svc.recover(T0 + 5 * MIN);
+    const recovered = [...store.entries.values()][0]!;
+    expect(recovered.segments).toHaveLength(1);
+    expect(recovered.endedAt).toBe(T0 + 11 * MIN);
+    expectNoZeroLengthSegments(store);
+
+    const awayStore = new MemStore();
+    const away = new TimerService(awayStore, new SpySync(), clock, new SeqIdGen(), allowAccrual);
+    await away.start({});
+    await away.prepareForAway('suspend', 30 * MIN);
+    const awayEntry = [...awayStore.entries.values()][0]!;
+    expect(awayEntry.segments).toEqual([]);
+    expect(awayEntry.endedAt).toBe(awayEntry.startedAt);
+    expectNoZeroLengthSegments(awayStore);
+  });
+
+  it('a server finalization at a segment start drops that segment instead of keeping it empty', async () => {
+    const running = await svc.start({});
+    if (running.state !== 'RUNNING') throw new Error('expected running timer');
+    clock.advance(5 * MIN);
+    await svc.pause();
+    clock.advance(MIN);
+    await svc.resume(); // second segment starts at T0 + 6m
+    clock.advance(MIN);
+
+    svc.acceptServerFinalization(running.entryId, T0 + 6 * MIN);
+
+    const closed = [...store.entries.values()][0]!;
+    expect(closed.endedAt).toBe(T0 + 6 * MIN);
+    expect(closed.segments.map((segment) => [segment.startedAt, segment.endedAt])).toEqual([[T0, T0 + 5 * MIN]]);
+    expectNoZeroLengthSegments(store);
+  });
+
+  it('acknowledges a server receipt that dropped a zero-length segment an older build stored locally', async () => {
+    // A row written by beta.38: a pause on the segment start kept an empty span.
+    const legacy: TimeEntry = {
+      ...closeTimeEntry(createOpenEntry(T0, 'legacy'), T0 + 10 * MIN),
+      segments: [
+        { id: 'legacy_z', kind: 'WORK', startedAt: T0, endedAt: T0 },
+        { id: 'legacy_w', kind: 'WORK', startedAt: T0, endedAt: T0 + 10 * MIN },
+      ],
+    };
+    store.upsert(legacy, { syncState: 'pending_update' });
+    // The server stores it without the empty span and says nothing about it.
+    sync.sync = async (e) => receipt({ ...e, segments: e.segments.filter((x) => x.endedAt !== x.startedAt) });
+
+    await svc.flushUnsynced();
+
+    expect(store.getUnsynced()).toHaveLength(0);
+    expect(svc.recoveryNotice()).toBeNull();
+  });
+});
+
+describe('server clock correction notice', () => {
+  /** A receipt whose copy of the entry ends `pulledBackMs` earlier than ours. */
+  function clampedReceipt(entry: TimeEntry, pulledBackMs: number): TimerSyncReceipt {
+    const end = entry.endedAt! - pulledBackMs;
+    return receipt(
+      {
+        ...entry,
+        endedAt: end,
+        segments: entry.segments.map((segment) => ({
+          ...segment,
+          endedAt: segment.endedAt !== null && segment.endedAt > end ? end : segment.endedAt,
+        })),
+      },
+      { correction: 'CLOCK_CLAMP' },
+    );
+  }
+
+  async function stopWith(pulledBackMs: number, service = svc) {
+    await service.start({});
+    clock.advance(30 * MIN);
+    sync.sync = async (e) => (e.endedAt === null ? receipt(e) : clampedReceipt(e, pulledBackMs));
+    await service.stop();
+    await settle();
+    await service.flushUnsynced();
+  }
+
+  it('tells the person when the server moved the end by more than a minute', async () => {
+    await stopWith(10 * MIN);
+    expect(store.getUnsynced()).toHaveLength(0);
+    expect(svc.recoveryNotice()).toMatchObject({
+      reason: 'server_clock_corrected',
+      recoveredAt: T0 + 20 * MIN,
+    });
+  });
+
+  it('stays silent for a correction of a minute or less, but still settles the row', async () => {
+    await stopWith(CLOCK_CORRECTION_NOTICE_MS);
+    expect(store.getUnsynced()).toHaveLength(0);
+    expect(svc.recoveryNotice()).toBeNull();
+  });
+
+  it('stays silent when the receipt says CLOCK_CLAMP but nothing moved (an older server dropping a segment)', async () => {
+    await stopWith(0);
+    expect(store.getUnsynced()).toHaveLength(0);
+    expect(svc.recoveryNotice()).toBeNull();
+  });
+
+  it('never overwrites an unread crash or server notice', async () => {
+    const crash: TimerRecoveryNotice = { entryId: 'earlier', recoveredAt: T0 - MIN, reason: 'unexpected_shutdown', observedAt: T0 };
+    store.setRecoveryNotice(crash);
+    await stopWith(10 * MIN);
+    expect(svc.recoveryNotice()).toEqual(crash);
+  });
+
+  it('measures an open entry by its latest instant (a clamped future segment start)', async () => {
+    const future = T0 + 30 * MIN;
+    const open: TimeEntry = createOpenEntry(future, 'ahead');
+    store.upsert(open, { syncState: 'pending_create' });
+    sync.create = async (e) => receipt(
+      { ...e, startedAt: T0 + 2 * MIN, segments: e.segments.map((segment) => ({ ...segment, startedAt: T0 + 2 * MIN })) },
+      { correction: 'CLOCK_CLAMP' },
+    );
+
+    await svc.flushUnsynced();
+
+    expect(svc.recoveryNotice()).toMatchObject({ reason: 'server_clock_corrected', recoveredAt: T0 + 2 * MIN });
+  });
+});

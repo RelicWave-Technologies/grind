@@ -6,6 +6,7 @@ import {
   closeOpenSegment,
   closeTimeEntry,
   createTimeEntry,
+  dropZeroLengthSegments,
   getOpenSegment,
   openSegment,
   recoverStaleEntry,
@@ -51,6 +52,9 @@ const FLUSH_BATCH_LIMIT = 25;
 export function syncRetryDelayMs(failures: number): number {
   return Math.min(15 * 60_000, 30_000 * 2 ** Math.max(0, failures - 1));
 }
+
+/** A server clock correction smaller than this is not worth a banner. */
+export const CLOCK_CORRECTION_NOTICE_MS = 60_000;
 
 /** How far back the one-time beta.38 resync looks for server-truncated entries. */
 const RESYNC_LOOKBACK_MS = 30 * 24 * 60 * 60_000;
@@ -378,13 +382,14 @@ export class TimerService {
     if (!this.open) return { state: 'IDLE', workedMs };
     const open = this.open;
     const activeSegment = getOpenSegment(open);
-    const firstSeg = open.segments[0]!;
     return {
       state: 'RUNNING',
       entryId: open.id,
       revision: open.revision,
       larkTaskGuid: open.larkTaskGuid ?? null,
-      startedAt: firstSeg.startedAt,
+      // The entry's own start: a pause that landed on the first segment's
+      // start removed that segment, so there may be no segment to read.
+      startedAt: open.startedAt,
       segmentStartedAt: activeSegment?.startedAt ?? null,
       workedMs,
       paused: activeSegment === null,
@@ -486,12 +491,18 @@ export class TimerService {
   acceptServerFinalization(entryId: string, endedAt: number): TimerStatus {
     if (!this.open || this.open.id !== entryId) return this.status();
     const boundary = Math.max(this.open.startedAt, endedAt);
-    const segments = this.open.segments
-      .filter((segment) => segment.startedAt <= boundary)
-      .map((segment) => ({
-        ...segment,
-        endedAt: segment.endedAt === null || segment.endedAt > boundary ? boundary : segment.endedAt,
-      }));
+    // Cut at the boundary; whatever that leaves empty is removed, not kept as
+    // a zero-length span (ZERO-LENGTH SEGMENTS in @grind/core segments.ts).
+    const { entry: cut } = dropZeroLengthSegments({
+      ...this.open,
+      segments: this.open.segments
+        .filter((segment) => segment.startedAt <= boundary)
+        .map((segment) => ({
+          ...segment,
+          endedAt: segment.endedAt === null || segment.endedAt > boundary ? boundary : segment.endedAt,
+        })),
+    });
+    const segments = cut.segments;
     const closed: TimeEntry = {
       ...this.open,
       revision: this.open.revision + 1,
@@ -736,8 +747,8 @@ export class TimerService {
    * is meaningless without knowing which of the two produced it. On a machine a
    * few minutes out those two frames are not comparable, and `Math.max(at,
    * segment.startedAt)` — the guard meant to stop a boundary preceding its own
-   * segment — silently collapses the segment to zero length instead. The server
-   * then drops it and rejects the entry as invalid_segments, forever.
+   * segment — silently collapses the segment to nothing instead, losing the
+   * time it held.
    *
    * A duration has no frame. `now - elapsed`, computed here, always lands in the
    * same frame as the segment it is closing.
@@ -791,16 +802,31 @@ export class TimerService {
       revision: receipt.acceptedRevision,
       hash: receipt.canonicalHash,
     });
-    if (marked && receipt.correction === 'CLOCK_CLAMP') {
-      const correctedAt = new Date(receipt.canonicalEntry.endedAt ?? receipt.serverTime).getTime();
-      this.store.setRecoveryNotice({
-        entryId: entry.id,
-        recoveredAt: Number.isFinite(correctedAt) ? correctedAt : this.clock.now(),
-        reason: 'server_clock_corrected',
-        observedAt: this.clock.now(),
-      });
-    }
+    if (marked && receipt.correction === 'CLOCK_CLAMP') this.noteClockCorrection(entry, receipt);
     return marked;
+  }
+
+  /**
+   * Tell the person the server moved this timer's end — only when it moved it
+   * far enough to notice. CLOCK_CLAMP means a timestamp sat past the server's
+   * now plus its skew allowance; a correction of seconds changes nothing the
+   * person can see, so it stays silent. A crash or server notice still unread
+   * matters more and is never overwritten.
+   */
+  private noteClockCorrection(entry: TimeEntry, receipt: TimerSyncReceipt): void {
+    // Measured without zero-length segments: a server that drops one (and an
+    // older server also called that a clamp) has not moved anything.
+    const localBoundary = latestBoundary(dropZeroLengthSegments(entry).entry);
+    const serverBoundary = latestBoundary(receipt.canonicalEntry);
+    if (serverBoundary === null || localBoundary === null) return;
+    if (localBoundary - serverBoundary <= CLOCK_CORRECTION_NOTICE_MS) return;
+    if (this.store.getRecoveryNotice()) return;
+    this.store.setRecoveryNotice({
+      entryId: entry.id,
+      recoveredAt: serverBoundary,
+      reason: 'server_clock_corrected',
+      observedAt: this.clock.now(),
+    });
   }
 
   private hashWithTask(entry: TimeEntry, larkTaskGuid: string | null): string {
@@ -937,6 +963,26 @@ function latestSegmentBoundary(entry: TimeEntry): number {
     const end = segment.endedAt ?? segment.startedAt;
     return Math.max(latest, segment.startedAt, end);
   }, entry.startedAt);
+}
+
+/**
+ * The latest instant an entry claims, local (epoch ms) or from a receipt (ISO
+ * strings) alike — where a clock clamp would have pulled it back to. Null when
+ * a receipt timestamp does not parse.
+ */
+function latestBoundary(entry: {
+  startedAt: number | string;
+  endedAt: number | string | null;
+  segments: Array<{ startedAt: number | string; endedAt: number | string | null }>;
+}): number | null {
+  const ms = (value: number | string) => (typeof value === 'number' ? value : Date.parse(value));
+  let latest = ms(entry.startedAt);
+  if (entry.endedAt !== null) latest = Math.max(latest, ms(entry.endedAt));
+  for (const segment of entry.segments) {
+    latest = Math.max(latest, ms(segment.startedAt));
+    if (segment.endedAt !== null) latest = Math.max(latest, ms(segment.endedAt));
+  }
+  return Number.isFinite(latest) ? latest : null;
 }
 
 function safeCloseAt(entry: TimeEntry, at: number): number {
