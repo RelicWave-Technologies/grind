@@ -23,6 +23,9 @@ export function actionFor(state: CapabilityState, capability: Capability): Permi
   // separate TCC service (kTCCServiceListenEvent) with no prompt API.
   // Relaunching cannot supply it, so send the user to that pane instead.
   if (state === 'FAILED' && capability === 'accessibility') return 'input-monitoring';
+  // A stale grant is not fixed by relaunching — offering that button again is
+  // the loop. Send them to the pane where the entry can be removed and re-added.
+  if (state === 'NEEDS_REGRANT') return 'settings';
   if (state === 'NEEDS_RESTART' || state === 'FAILED') return 'restart';
   return null;
 }
@@ -33,6 +36,11 @@ export function statusText(state: CapabilityState, capability: Capability): stri
   if (state === 'NEEDS_GRANT') return 'Permission required';
   if (state === 'NEEDS_SETTINGS') return 'Enable in System Settings';
   if (state === 'NEEDS_RESTART') return 'Restart Timo to apply';
+  // Names the actual remedy. "Restarting did not work" is the one thing this
+  // user already knows, so the copy skips it and says what to do instead.
+  if (state === 'NEEDS_REGRANT') {
+    return 'Remove Timo under Screen Recording, then add it back';
+  }
   return capability === 'accessibility'
     ? 'Also allow Timo under Input Monitoring'
     : 'Permission service needs restart';

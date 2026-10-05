@@ -29,8 +29,21 @@ export interface FloatingBarPreferences {
   y: number | null;
 }
 
+export interface ScreenRecoveryPreferences {
+  /**
+   * When we last told the user that relaunching would fix screen recording.
+   *
+   * Read once at boot. If it is set and capture is still failing, the relaunch
+   * already happened and did not work — so the advice escalates from "restart"
+   * to "re-grant" instead of repeating itself forever. Cleared the moment
+   * capture succeeds.
+   */
+  advisedRestartAt: number | null;
+}
+
 export interface Preferences {
   floatingBar: FloatingBarPreferences;
+  screenRecovery: ScreenRecoveryPreferences;
   /**
    * Lark task guid the user last tracked against, so reopening Timo offers the
    * work they were actually on. Boot deliberately closes any open entry (see
@@ -43,6 +56,7 @@ export interface Preferences {
 
 const DEFAULTS: Preferences = {
   floatingBar: { visible: true, x: null, y: null },
+  screenRecovery: { advisedRestartAt: null },
   lastLarkTaskGuid: null,
 };
 
@@ -67,6 +81,13 @@ function coerce(raw: unknown): Preferences {
     lastLarkTaskGuid: typeof r.lastLarkTaskGuid === 'string' && r.lastLarkTaskGuid.length > 0
       ? r.lastLarkTaskGuid
       : null,
+    screenRecovery: {
+      advisedRestartAt:
+        typeof (r.screenRecovery as Partial<ScreenRecoveryPreferences> | undefined)?.advisedRestartAt === 'number'
+        && Number.isFinite(r.screenRecovery!.advisedRestartAt)
+          ? r.screenRecovery!.advisedRestartAt
+          : null,
+    },
   };
 }
 
@@ -80,7 +101,11 @@ function ensureLoaded(): Preferences {
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
       log.warn('preferences: unreadable, using defaults', { err: String(err) });
     }
-    cache = { ...DEFAULTS, floatingBar: { ...DEFAULTS.floatingBar } };
+    cache = {
+      ...DEFAULTS,
+      floatingBar: { ...DEFAULTS.floatingBar },
+      screenRecovery: { ...DEFAULTS.screenRecovery },
+    };
   }
   return cache;
 }
@@ -88,7 +113,11 @@ function ensureLoaded(): Preferences {
 export function getPreferences(): Preferences {
   const c = ensureLoaded();
   // Hand back a structural copy so callers can't mutate the cache in place.
-  return { floatingBar: { ...c.floatingBar }, lastLarkTaskGuid: c.lastLarkTaskGuid };
+  return {
+    floatingBar: { ...c.floatingBar },
+    lastLarkTaskGuid: c.lastLarkTaskGuid,
+    screenRecovery: { ...c.screenRecovery },
+  };
 }
 
 /**
@@ -129,6 +158,22 @@ export function rememberLastLarkTask(guid: string | null): Preferences {
     }
   }
   return snapshot;
+}
+
+/**
+ * Record — or clear — that the user has been told a relaunch will fix screen
+ * recording.
+ *
+ * Written rather than held in memory because the whole point is to survive the
+ * relaunch: the next launch is where "did restarting actually help?" gets
+ * answered.
+ */
+export function noteScreenRestartAdvice(at: number | null): Preferences {
+  const c = ensureLoaded();
+  if (c.screenRecovery.advisedRestartAt === at) return getPreferences();
+  c.screenRecovery.advisedRestartAt = at;
+  scheduleWrite();
+  return getPreferences();
 }
 
 export function onPreferencesChange(fn: (prefs: Preferences) => void): () => void {

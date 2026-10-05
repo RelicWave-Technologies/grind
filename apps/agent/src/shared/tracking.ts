@@ -8,6 +8,18 @@ export type CapabilityState =
   | 'NEEDS_GRANT'
   | 'NEEDS_SETTINGS'
   | 'NEEDS_RESTART'
+  /**
+   * macOS says the permission is granted, but capture keeps coming back empty
+   * AND a relaunch has already been tried without fixing it.
+   *
+   * This is a stale TCC grant: the entry in System Settings survives, so
+   * `CGPreflightScreenCaptureAccess` answers yes, while the capture the app
+   * actually gets is blank. Only removing Timo from Screen Recording and adding
+   * it back clears it. Reporting this as NEEDS_RESTART is what put a user
+   * through five relaunches in two minutes, each one ending exactly where it
+   * started.
+   */
+  | 'NEEDS_REGRANT'
   | 'FAILED';
 
 export type BlockingCapability = 'SCREEN_RECORDING' | 'ACCESSIBILITY';

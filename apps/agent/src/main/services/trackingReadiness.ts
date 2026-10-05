@@ -13,6 +13,7 @@ import {
   type CaptureHealth,
   type ScreenStatus,
 } from './permissions';
+import { getPreferences, noteScreenRestartAdvice } from './preferences';
 import { log } from '../logger';
 
 interface TrackingReadinessDeps {
@@ -22,6 +23,12 @@ interface TrackingReadinessDeps {
   screenHealth: () => CaptureHealth;
   accessibilityStatus: () => ActivityCaptureStatus;
   probeScreen: () => Promise<CaptureHealth>;
+  /** True when a previous launch already told the user to relaunch for screen
+   *  recording. Read once at construction — a value written during THIS launch
+   *  must not escalate the advice it just produced. */
+  restartAlreadyAdvised: () => boolean;
+  /** Persist (`at`) or clear (`null`) the "we advised a relaunch" marker. */
+  noteRestartAdvice: (at: number | null) => void;
 }
 
 export interface ReadinessInspection {
@@ -38,15 +45,26 @@ function defaultDeps(): TrackingReadinessDeps {
     screenHealth: getScreenHealth,
     accessibilityStatus: getActivityCaptureStatus,
     probeScreen: probeScreenCapture,
+    restartAlreadyAdvised: () => getPreferences().screenRecovery.advisedRestartAt !== null,
+    noteRestartAdvice: (at) => void noteScreenRestartAdvice(at),
   };
 }
 
-function screenCapability(status: ScreenStatus, health: CaptureHealth, probeHealthy: boolean | null): CapabilityState {
+function screenCapability(
+  status: ScreenStatus,
+  health: CaptureHealth,
+  probeHealthy: boolean | null,
+  restartAlreadyTried: boolean,
+): CapabilityState {
   if (status === 'not-determined' || status === 'unknown') return 'NEEDS_GRANT';
   if (status === 'denied' || status === 'restricted') return 'NEEDS_SETTINGS';
   if (probeHealthy === true || health === 'ok') return 'READY';
   if (probeHealthy === false || health === 'empty' || health === 'error' || health === 'no-permission') {
-    return 'NEEDS_RESTART';
+    // macOS says granted and capture is still blank. A relaunch is the usual
+    // cure — the grant is only picked up at launch — but only the FIRST time.
+    // If we already sent this user round once and the capture is still blank,
+    // the grant itself is stale and no number of relaunches will change that.
+    return restartAlreadyTried ? 'NEEDS_REGRANT' : 'NEEDS_RESTART';
   }
   // Granted, nothing has failed, and no probe has run yet. That is "not known",
   // not "broken" — reporting it as NEEDS_RESTART is what told people to relaunch
@@ -108,6 +126,15 @@ function logReadinessVerdict(fields: Record<string, unknown>): void {
 
 export function createTrackingReadinessService(deps: TrackingReadinessDeps) {
   let screenProbeHealthy: boolean | null = null;
+  /**
+   * Whether a relaunch was advised BEFORE this launch began.
+   *
+   * Captured once, here, rather than read on each inspection: the marker gets
+   * written the moment we first say NEEDS_RESTART, and re-reading it would
+   * escalate our own advice thirty seconds later without the user having
+   * restarted anything.
+   */
+  let restartAdvisedBeforeThisLaunch = deps.restartAlreadyAdvised();
 
   async function inspect(opts: { verifyScreen?: boolean } = {}): Promise<ReadinessInspection> {
     const rawScreenStatus = deps.screenStatus();
@@ -146,7 +173,23 @@ export function createTrackingReadinessService(deps: TrackingReadinessDeps) {
       screenProbeHealthy = rawScreenHealth === 'ok';
     }
 
-    const screenRecording = screenCapability(rawScreenStatus, rawScreenHealth, screenProbeHealthy);
+    const screenRecording = screenCapability(
+      rawScreenStatus,
+      rawScreenHealth,
+      screenProbeHealthy,
+      restartAdvisedBeforeThisLaunch,
+    );
+
+    // Screen capture works: forget everything we advised. A failure after this
+    // is a fresh problem and deserves the ordinary "restart" answer first,
+    // not an escalation inherited from weeks ago.
+    if (screenRecording === 'READY') {
+      restartAdvisedBeforeThisLaunch = false;
+      deps.noteRestartAdvice(null);
+    } else if (screenRecording === 'NEEDS_RESTART') {
+      // Remember that we said it, so the next launch can tell whether it helped.
+      deps.noteRestartAdvice(deps.now());
+    }
     const accessibility = accessibilityCapability(rawAccessibility);
     const effectiveScreenHealth: CaptureHealth = screenProbeHealthy === true ? 'ok' : rawScreenHealth;
     const blockingCapabilities: BlockingCapability[] = [];

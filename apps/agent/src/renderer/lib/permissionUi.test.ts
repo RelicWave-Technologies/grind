@@ -36,3 +36,22 @@ describe('permission prompt copy and actions', () => {
     expect(statusText('NOT_REQUIRED', 'screen')).toBe('Ready');
   });
 });
+
+describe('a stale grant', () => {
+  it('does not offer the button that already failed', () => {
+    // The whole bug: NEEDS_RESTART offers "restart", the user restarts, and
+    // lands back on the same screen. NEEDS_REGRANT must not do that again.
+    expect(actionFor('NEEDS_REGRANT', 'screen')).toBe('settings');
+    expect(actionFor('NEEDS_REGRANT', 'screen')).not.toBe('restart');
+  });
+
+  it('tells the user what to actually do', () => {
+    expect(statusText('NEEDS_REGRANT', 'screen')).toBe(
+      'Remove Timo under Screen Recording, then add it back',
+    );
+  });
+
+  it('is not a ready state', () => {
+    expect(isReady('NEEDS_REGRANT')).toBe(false);
+  });
+});
