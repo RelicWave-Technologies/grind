@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { reportError, _resetSentryForTests } from './errorReporter';
+import { reportError, reportMessage, _resetSentryForTests } from './errorReporter';
 
 const ORIGINAL_DSN = process.env.SENTRY_DSN;
 
@@ -61,5 +61,32 @@ describe('reportError', () => {
     await reportError('a string was thrown');
     const body = String((fetchSpy.mock.calls[0]![1] as RequestInit).body);
     expect(body).toContain('a string was thrown');
+  });
+});
+
+describe('reportMessage', () => {
+  it('no-ops cleanly when SENTRY_DSN is unset', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch');
+    await reportMessage('Timo sync stuck');
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('POSTs a warning-level message event', async () => {
+    process.env.SENTRY_DSN = 'https://abc123@sentry.example.com/42';
+    _resetSentryForTests();
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(new Response('ok'));
+    await reportMessage('Timo sync stuck', { userId: 'u1', extras: { pending: 3 } });
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    const body = String((fetchSpy.mock.calls[0]![1] as RequestInit).body);
+    const event = JSON.parse(body.trim().split('\n')[2]!);
+    expect(event).toMatchObject({ level: 'warning', message: { formatted: 'Timo sync stuck' }, user: { id: 'u1' }, extra: { pending: 3 } });
+    expect(event.exception).toBeUndefined();
+  });
+
+  it('swallows fetch failures (best-effort)', async () => {
+    process.env.SENTRY_DSN = 'https://abc123@sentry.example.com/42';
+    _resetSentryForTests();
+    vi.spyOn(global, 'fetch').mockRejectedValue(new Error('network down'));
+    await expect(reportMessage('x')).resolves.toBeUndefined();
   });
 });
