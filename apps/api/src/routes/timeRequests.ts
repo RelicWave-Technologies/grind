@@ -220,7 +220,7 @@ timeRequestsRouter.post('/', validate(CreateManualTimeRequest, 'body'), async (r
       const created = await prisma.$transaction(async (tx) => {
         // Store only the stretches this user has no real time for yet. A
         // supervisor entry that lands on top of tracked time must not add
-        // those minutes twice — the totals and payroll sum segments.
+        // those minutes twice — the totals and reports sum segments.
         await lockManualCarve(tx, targetUserId);
         const { slices } = await carveManualWindow(tx, {
           userId: targetUserId,

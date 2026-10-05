@@ -140,7 +140,7 @@ function dispatchTesterEvent(eventId: string): void {
 /**
  * Process one event at most once. The PENDING -> PROCESSING claim is a
  * conditional update, so when the same event is dispatched twice (websocket +
- * poll, Lark redelivery, a replay racing an ingest) only the caller that wins
+ * poll, Lark redelivery) only the caller that wins
  * the claim gets anywhere near the AI or the chat; everyone else gets
  * `{ skipped: true }`.
  */

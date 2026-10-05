@@ -178,8 +178,8 @@ export const PatchHolidaySchema = z
 
 /**
  * Admin-owned leave settings, one row per workspace. Kept separate from
- * WorkspacePolicy (capture / privacy) and PayrollPolicy (a derived finance
- * worksheet) for the same reason those two are separate from each other.
+ * WorkspacePolicy (capture / privacy): leave is an HR ledger, not a capture
+ * setting.
  */
 export const LeavePolicyDtoSchema = z.object({
   /** Days granted per calendar month. */

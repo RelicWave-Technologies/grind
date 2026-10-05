@@ -27,10 +27,6 @@ export interface ResolvedReportMonth {
 /**
  * Read the requested month off a query string, defaulting to the month it is
  * now in the workspace's own timezone.
- *
- * Local to this module rather than borrowed from payroll: this report no longer
- * has anything to do with payroll, and sharing a helper would be the thread by
- * which the dependency crept back.
  */
 export function resolveReportMonth(
   query: Record<string, unknown>,
@@ -191,9 +187,9 @@ export async function reconcileMonthRules(input: {
  * admin has made to individual days.
  *
  * The timesheet matrix is built the same way every other surface builds it, so
- * the hours here cannot disagree with the hours on /attendance. What this does
- * NOT load is the payroll classifier: its monthly guarantee and carry allocator
- * would quietly rewrite days, and an attendance record has to stay literal.
+ * the hours here cannot disagree with the hours on /attendance. Nothing here
+ * applies a monthly guarantee or carries time between days: either would
+ * quietly rewrite days, and an attendance record has to stay literal.
  *
  * Scoped by `userIds` rather than by workspace, so a manager pulling this
  * export gets their team and nobody else.

@@ -14,7 +14,7 @@ import { loadEntryLiveEvidence } from '../insights/liveEntryEvidence';
  * An approved request becomes a real TimeEntry, and nothing stopped one from
  * covering minutes the agent had already tracked. Every reader that sums
  * durations then counted those minutes twice — the day totals, the timesheet
- * cells, and through them payroll.
+ * cells, and through them the month report.
  *
  * Trimming here rather than at read time means the overlap never exists in the
  * first place: exports, the MCP surface, Lark cards and anything written later

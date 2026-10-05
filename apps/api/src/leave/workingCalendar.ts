@@ -20,8 +20,8 @@ import type { LeaveAccount, LeaveFundingDays } from './leaveFunding';
  * holiday list, and approved leave — and it owns the precedence between them.
  * Keeping that precedence in one module is the point: the rule that *nobody is
  * charged for a day they were never expected to work* has to hold identically
- * in the request quote, the ledger write, the timesheet and the payroll
- * worksheet. Spread across four callers it would be four subtly different
+ * in the request quote, the ledger write, the timesheet and the month
+ * report. Spread across four callers it would be four subtly different
  * rules, and the balances would disagree.
  *
  * Everything here is pure — no DB, no clock. Callers load the rows and hand
@@ -325,7 +325,7 @@ export class WorkingCalendar {
     const day = parsed.data[weekdayForDate(date)];
     if (!day) return { kind: 'weekly_off', shiftName: assignment.shiftNameSnapshot };
     // Resolved here rather than at each caller, so "was this a working day"
-    // has one answer for the quote, the timesheet and the payroll worksheet.
+    // has one answer for the quote, the timesheet and the month report.
     if (this.lastSaturdayOffFor[userId] && isLastSaturdayOfMonth(date)) {
       return { kind: 'weekly_off', shiftName: assignment.shiftNameSnapshot };
     }

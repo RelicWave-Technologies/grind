@@ -29,11 +29,10 @@ import { weekdayForDate } from '../leave';
  * badged in at 09:55, tracked two hours — the row shows both and the reader can
  * see the gap rather than having it silently resolved.
  *
- * The payroll classifier is deliberately NOT used. Its monthly guarantee
- * upgrades every eligible day once the month total clears a floor, and its
- * carry allocator moves surplus time between days. Both are right for deciding
- * pay and both would make an attendance record untrue. Every day here is judged
- * on its own tracked time and nothing else.
+ * Nothing upgrades a day: no monthly guarantee that lifts every eligible day
+ * once the month total clears a floor, no carry allocator moving surplus time
+ * between days. Either would make an attendance record untrue. Every day here
+ * is judged on its own tracked time and nothing else.
  *
  * ## How a day is judged
  *

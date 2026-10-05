@@ -71,7 +71,7 @@ export const attachScope: RequestHandler = async (req, res, next) => {
 
     if (isAdmin) {
       scope = 'workspace';
-      // Skip deactivated users so the admin queue, /overview, payroll, etc.
+      // Skip deactivated users so the admin queue, /overview, reports, etc.
       // don't surface offboarded teammates. Their history stays
       // queryable through direct user-id lookups.
       const users = await prisma.user.findMany({

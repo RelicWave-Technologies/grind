@@ -5,7 +5,7 @@ import { normalizeEmail, type LarkProfile } from '../lark/profile';
 
 /** Unique-constraint violation, duck-typed (the runtime Prisma class isn't
  *  re-exported from @grind/db — see its index.ts). Matches the convention in
- *  routes/admin.ts + payroll/scheduler.ts. */
+ *  routes/admin.ts. */
 function isUniqueViolation(err: unknown): boolean {
   return typeof err === 'object' && err !== null && (err as { code?: string }).code === 'P2002';
 }

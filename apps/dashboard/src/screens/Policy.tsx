@@ -236,13 +236,13 @@ export function PolicyScreen() {
         ) : null}
 
         {leaveQ.data && (
-          <div className="pol-payroll-grid">
+          <div className="pol-rules-grid">
             <Card
               title="Attendance rules"
               className="pol-card-compact"
               action={<Button size="sm" variant="secondary" icon={<Pencil size={14} />} onClick={() => setRulesOpen(true)}>Edit</Button>}
             >
-              <div className="pol-payroll-rule-grid">
+              <div className="pol-rule-grid">
                 <PolicyRule
                   label="Applies from"
                   value={leaveQ.data.attendanceRulesFrom ?? 'Off'}
@@ -253,7 +253,7 @@ export function PolicyScreen() {
               </div>
             </Card>
             <Card title="Approvals" className="pol-card-compact" action={<Tag mono>Lark</Tag>}>
-              <div className="pol-payroll-rule-grid">
+              <div className="pol-rule-grid">
                 <PolicyRule
                   label="Work from home"
                   value={leaveQ.data.wfhRequiresApproval ? 'Required' : 'Optional'}
@@ -436,7 +436,7 @@ function formatMinutes(minutes: number): string {
 
 function PolicyRule({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
-    <div className="pol-payroll-rule">
+    <div className="pol-rule">
       <span className="ui-t-eyebrow">{label}</span>
       <strong>{value}</strong>
       {hint && <span className="ui-t-small">{hint}</span>}

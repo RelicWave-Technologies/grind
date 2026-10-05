@@ -21,8 +21,8 @@ import {
  *
  * The assertions that matter most are the ones about which source wins. A
  * calendar day off has to beat tracked time, tracked time has to beat a badge
- * reading, and neither may be quietly upgraded the way payroll would upgrade
- * it — that last one is what makes this an attendance record rather than a
+ * reading, and neither may be quietly upgraded the way a pay calculation would
+ * upgrade it — that last one is what makes this an attendance record rather than a
  * pay sheet.
  */
 
@@ -147,7 +147,7 @@ describe('a day is present or absent, with no minimum', () => {
   });
 
   it('never upgrades a thin day because the month total was good', () => {
-    // Payroll's monthly guarantee would upgrade every day once the month total
+    // A monthly pay guarantee would upgrade every day once the month total
     // cleared a floor. Nothing here does that — each day stands on its own.
     const statuses: Record<string, DayStatus> = {};
     const tracked: Record<string, number> = {};

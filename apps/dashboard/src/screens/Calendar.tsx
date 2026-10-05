@@ -76,27 +76,9 @@ const PORTION_LABEL: Record<string, string> = {
 
 const DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
-/**
- * Turn an API error code into something a person can act on.
- *
- * `no_working_days` and `no_shift_assigned` are the pair worth separating:
- * the first is "you picked a weekend", the second is "nobody has told Timo
- * when you work", which is an admin problem the requester cannot fix and must
- * not be told to try.
- */
+/** Turn an API error code into something a person can act on. */
 const ERROR_TEXT: Record<string, string> = {
-  no_shift_assigned:
-    'Timo does not know your working days yet — you have no shift assigned. Ask an admin to set one in Shifts; leave cannot be priced until then.',
-  no_working_days:
-    'Those dates are all non-working days for you — weekends, or a company holiday. Pick a day you would normally work.',
-  overlapping_request:
-    'You already have a leave request covering one of those dates.',
-  insufficient_balance:
-    'That is more paid leave than your balance covers.',
   invalid_range: 'Check the dates — the end cannot be before the start.',
-  approval_dispatch_failed:
-    'Timo could not reach the approver. Nothing was saved; try again shortly.',
-  external_approval: 'This request is decided in Lark, not here.',
   holiday_exists: 'There is already a holiday on that date.',
   forbidden: 'You do not have permission to do that.',
 };

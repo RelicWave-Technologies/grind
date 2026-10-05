@@ -313,7 +313,7 @@ describe('buildTimesheetMatrix — tz handling', () => {
 describe('overlapping manual time is not counted twice', () => {
   // Reproduces a real day: tracked 10:40-11:37 with an approved manual entry
   // for 10:45-11:37 sitting on top of it. Summing both reported 110 minutes of
-  // work inside a 57-minute stretch, and payroll adds workedMs + manualMs.
+  // work inside a 57-minute stretch, and day totals add workedMs + manualMs.
   const day = '2026-08-10';
   const tz = 'Asia/Calcutta';
   const at = (hhmm: string) => `2026-08-10T${hhmm}:00+05:30`;

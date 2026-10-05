@@ -46,7 +46,7 @@ const EmailListSchema = z
 
 const EnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
-  // PORT is injected by most PaaS hosts (Render, Heroku, Railway). When set it
+  // PORT is injected by most PaaS hosts (Heroku, Railway, ...). When set it
   // wins over API_PORT so the service binds where the platform expects.
   PORT: z.coerce.number().int().min(1).max(65535).optional(),
   API_PORT: z.coerce.number().int().min(1).max(65535).default(4000),

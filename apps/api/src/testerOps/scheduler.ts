@@ -170,7 +170,7 @@ async function maybeRunMaintenance(): Promise<void> {
  *
  * - Events stuck in PROCESSING (the worker died mid-reply) are closed as
  *   FAILED rather than re-answered — a late duplicate answer is worse than
- *   none, and the row keeps the message for an admin to replay.
+ *   none, and the row keeps the message for inspection.
  * - TesterOpsEvent / TesterOpsAiRun rows and DONE outbox rows older than 90
  *   days are deleted. Issues survive: their event/aiRun links are SET NULL and
  *   they carry their own copy of the source text. FAILED / DEAD_LETTER outbox

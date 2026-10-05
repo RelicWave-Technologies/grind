@@ -28,7 +28,7 @@ import type { LeaveAccount } from './leaveFunding';
  *
  * Returns the two arguments `buildTimesheetMatrix` needs to carry calendar
  * status on its cells. Wrapped in a helper so attendance, member reports,
- * payroll and MCP cannot drift into loading the calendar four slightly
+ * the month report and MCP cannot drift into loading the calendar four slightly
  * different ways — the failure mode being a person who reads as on leave in
  * one screen and absent in another.
  */

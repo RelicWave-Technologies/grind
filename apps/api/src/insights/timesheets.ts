@@ -2,7 +2,7 @@ import { bucketByDay, emptyDayBucket, resolveTimeline, type DayBucket } from '@g
 import { dateKeysBetween, type DayStatus } from '@grind/types';
 import { localDayWindow } from './day';
 
-/** A reviewer invalidation in the timesheet's (payroll-era) input shape. */
+/** A reviewer invalidation in the timesheet's input shape. */
 export interface TimeInvalidationInput {
   userId: string;
   startedAt: number;
@@ -38,7 +38,7 @@ interface TimesheetCell {
    * and if not, was it a holiday, a weekly off or approved leave.
    *
    * Carried on the cell so every consumer of the matrix (attendance, member
-   * reports, payroll, MCP) gets leave without each one re-deriving it, and
+   * reports, the month report, MCP) gets leave without each one re-deriving it, and
    * without four subtly different answers to "was this person meant to be
    * here". `null` when the caller did not supply a calendar.
    */

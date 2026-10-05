@@ -44,7 +44,7 @@
   min-width: 0;
 }
 
-.pol-payroll-grid {
+.pol-rules-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--ui-sp-5);
@@ -65,21 +65,21 @@
   line-height: 1.22;
 }
 
-.pol-payroll-rule-grid {
+.pol-rule-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--ui-sp-4);
   align-items: start;
 }
 
-.pol-payroll-rule {
+.pol-rule {
   min-width: 0;
   display: grid;
   gap: var(--ui-sp-2);
   align-content: start;
 }
 
-.pol-payroll-rule strong {
+.pol-rule strong {
   color: var(--ui-ink);
   font-size: var(--ui-sp-5);
   line-height: 1.15;
@@ -89,7 +89,7 @@
   text-overflow: ellipsis;
 }
 
-.pol-payroll-rule .ui-t-small {
+.pol-rule .ui-t-small {
   color: var(--ui-ink-2);
   max-width: 18ch;
 }
@@ -338,7 +338,7 @@
   }
 
   .pol-grid,
-  .pol-payroll-grid {
+  .pol-rules-grid {
     grid-template-columns: 1fr;
   }
 }
@@ -363,7 +363,7 @@
     width: 100%;
   }
 
-  .pol-payroll-rule-grid,
+  .pol-rule-grid,
   .pol-form-grid--rules,
   .pol-form-grid {
     grid-template-columns: 1fr;
