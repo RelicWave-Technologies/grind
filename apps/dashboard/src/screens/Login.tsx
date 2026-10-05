@@ -1,6 +1,6 @@
 import './login.css';
 import { useEffect, useState } from 'react';
-import { useNavigate, useSearch } from '@tanstack/react-router';
+import { useNavigate, useRouter, useSearch } from '@tanstack/react-router';
 import { useMe, larkLoginUrl, landingPath } from '../lib/auth';
 import { api, ApiError } from '../lib/api';
 import { AGENT_DOWNLOADS, agentDownloadUrl } from '../lib/downloads';
@@ -27,10 +27,23 @@ const OUTCOME_COPY: Record<string, { kind: 'info' | 'warn' | 'danger'; label: st
 
 const DEV_PASSWORD_LOGIN = import.meta.env.DEV && import.meta.env.VITE_ENABLE_PASSWORD_LOGIN === 'true';
 
+/**
+ * The page the auth gate bounced us from (`?next=`), if it is a same-origin
+ * path. Mirrors the API's own check so Lark's callback will honour it too.
+ */
+function safeNext(value: string | undefined): string | null {
+  // Backslashes are rejected too: URL parsers read "/\evil.com" as "//evil.com".
+  if (!value || !value.startsWith('/') || value.startsWith('//') || value.includes('\\')) return null;
+  if (/[\u0000-\u001F\u007F]/u.test(value) || value.startsWith('/login')) return null;
+  return value;
+}
+
 export function LoginScreen() {
   const navigate = useNavigate();
+  const router = useRouter();
   const search = useSearch({ from: '/login' });
   const me = useMe();
+  const next = safeNext(search.next);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [devError, setDevError] = useState<string | null>(null);
@@ -38,10 +51,10 @@ export function LoginScreen() {
 
   // Already logged in? Bounce straight to the dashboard.
   useEffect(() => {
-    if (me.data) {
-      navigate({ to: landingPath(me.data) });
-    }
-  }, [me.data, navigate]);
+    if (!me.data) return;
+    if (next) router.history.push(next);
+    else navigate({ to: landingPath(me.data) });
+  }, [me.data, navigate, next, router]);
 
   const outcome = search.status === 'pending'
     ? OUTCOME_COPY.pending
@@ -52,11 +65,14 @@ export function LoginScreen() {
   async function signIn() {
     const current = await me.refetch();
     if (current.data) {
-      navigate({ to: landingPath(current.data) });
+      if (next) router.history.push(next);
+      else navigate({ to: landingPath(current.data) });
       return;
     }
     // Top-level navigation (not a fetch) so the OAuth redirect chain works.
-    window.location.assign(larkLoginUrl());
+    // Carry `next` so a deep link (an approval row, a Lark card) lands where
+    // it pointed after sign-in instead of on the default page.
+    window.location.assign(larkLoginUrl(next ?? undefined));
   }
 
   async function signInWithPassword(event: React.FormEvent<HTMLFormElement>) {
