@@ -1,4 +1,4 @@
-import { isLate } from '@grind/core';
+import { dayCredit, isLate } from '@grind/core';
 import {
   roundToHalfDay,
   type AttendanceRuleMode,
@@ -95,7 +95,8 @@ export function judgeDay(
 
   // The working half of an approved half-day leave.
   if (expected < 1) {
-    return minutes >= policy.halfDayMinMinutes ? null : verdict('HALF_DAY_SHORT', expected);
+    const half = dayCredit(minutes, { fullDayMinutes: policy.fullDayMinMinutes, halfDayMinutes: policy.halfDayMinMinutes });
+    return half !== 'NONE' ? null : verdict('HALF_DAY_SHORT', expected);
   }
 
   // Nobody at the door and nothing tracked: away, and the only question is
@@ -110,8 +111,14 @@ export function judgeDay(
     return verdict('WFH_UNAPPROVED', expected);
   }
 
-  if (minutes >= policy.fullDayMinMinutes) return null;
-  if (minutes >= policy.halfDayMinMinutes) return verdict('SHORT_DAY', 0.5);
+  // Full day 7 h, half day 3 h 30 unless the policy names its own minimums —
+  // the one definition in @grind/core.
+  const credit = dayCredit(minutes, {
+    fullDayMinutes: policy.fullDayMinMinutes,
+    halfDayMinutes: policy.halfDayMinMinutes,
+  });
+  if (credit === 'FULL') return null;
+  if (credit === 'HALF') return verdict('SHORT_DAY', 0.5);
   return verdict('UNDER_MIN', 1);
 }
 
