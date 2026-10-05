@@ -9,7 +9,7 @@ import {
   type ApprovalAction,
 } from '../lark/cards';
 import { logger } from '../logger';
-import { queueManualTimeApprovalCard, queueManualTimeFinalizeCards } from './larkOutbox';
+import { creditedMsOf, queueManualTimeApprovalCard, queueManualTimeFinalizeCards } from './larkOutbox';
 
 type ManualTimeStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
 type ManualTimeNoop =
@@ -45,6 +45,7 @@ function finalCard(req: {
   decidedAt: Date | null;
   user: { name: string; workspace: { timezone: string } };
   approver: { name: string } | null;
+  timeEntry?: { segments: Array<{ startedAt: Date; endedAt: Date | null }> } | null;
 }, now: Date): Record<string, unknown> {
   const common = {
     requestId: req.id,
@@ -66,6 +67,7 @@ function finalCard(req: {
     decision: req.status === 'REJECTED' ? 'REJECTED' : 'APPROVED',
     decidedByName: req.approver?.name ?? 'Approver',
     decidedAt: (req.decidedAt ?? now).getTime(),
+    creditedMs: creditedMsOf(req),
   });
 }
 
@@ -106,6 +108,7 @@ export async function decideManualTimeRequest(args: {
         },
         approver: { include: { larkIdentity: { select: { openId: true } } } },
         attendees: { select: { userId: true } },
+        timeEntry: { select: { segments: { select: { startedAt: true, endedAt: true } } } },
       },
     });
 
@@ -253,6 +256,7 @@ export async function decideManualTimeRequest(args: {
       include: {
         user: { select: { name: true, workspace: { select: { timezone: true } } } },
         approver: { select: { name: true } },
+        timeEntry: { select: { segments: { select: { startedAt: true, endedAt: true } } } },
       },
     });
     await queueManualTimeFinalizeCards(tx, req.id);

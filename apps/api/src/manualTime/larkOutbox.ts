@@ -70,8 +70,21 @@ async function loadRequest(requestId: string) {
     include: {
       user: { select: { name: true, workspace: { select: { timezone: true } } }, },
       approver: { select: { name: true } },
+      timeEntry: { select: { segments: { select: { startedAt: true, endedAt: true } } } },
     },
   });
+}
+
+/** What an approved request actually added: the segments its entry holds. */
+export function creditedMsOf(req: {
+  status: string;
+  timeEntry?: { segments: Array<{ startedAt: Date; endedAt: Date | null }> } | null;
+}): number | null {
+  if (req.status !== 'APPROVED') return null;
+  return (req.timeEntry?.segments ?? []).reduce(
+    (sum, s) => sum + Math.max(0, (s.endedAt ?? s.startedAt).getTime() - s.startedAt.getTime()),
+    0,
+  );
 }
 
 async function handleSendCard(event: { id: string; requestId: string; messageLedgerId: string | null; payload: Prisma.JsonValue }): Promise<void> {
@@ -121,6 +134,7 @@ async function handleSendCard(event: { id: string; requestId: string; messageLed
             decision: req.status === 'REJECTED' ? 'REJECTED' : 'APPROVED',
             decidedByName: req.approver?.name ?? 'Approver',
             decidedAt: (req.decidedAt ?? new Date()).getTime(),
+            creditedMs: creditedMsOf(req),
           })
       : message.kind === 'UPDATED_APPROVAL'
         ? buildUpdatedApprovalCard({ ...common, diff })
@@ -233,6 +247,7 @@ async function handleFinalizeCards(event: { requestId: string }): Promise<void> 
           decision: req.status === 'REJECTED' ? 'REJECTED' : 'APPROVED',
           decidedByName: req.approver?.name ?? 'Approver',
           decidedAt: (req.decidedAt ?? new Date()).getTime(),
+          creditedMs: creditedMsOf(req),
         });
   const nextStatus = req.status === 'CANCELLED' ? 'CANCELLED' : 'DECIDED';
 

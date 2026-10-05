@@ -31,6 +31,12 @@ export interface DecidedCardInput extends ApprovalCardInput {
   decision: 'APPROVED' | 'REJECTED';
   decidedByName: string;
   decidedAt: number; // epoch ms
+  /**
+   * What the approval actually added (the free stretches it carved). When it
+   * differs from the window asked for, the card says so instead of claiming
+   * the whole window.
+   */
+  creditedMs?: number | null;
 }
 
 export interface UnavailableRequestCardInput {
@@ -120,10 +126,18 @@ function truncate(s: string, n: number): string {
   return `${s.slice(0, n - 1).trimEnd()}…`;
 }
 
-function detailFields(req: ApprovalCardInput) {
+function durationText(req: ApprovalCardInput & { creditedMs?: number | null }): string {
+  const asked = req.endedAt - req.startedAt;
+  if (req.creditedMs === undefined || req.creditedMs === null || req.creditedMs === asked) {
+    return fmtDurationMinutes(asked);
+  }
+  return `${fmtDurationMinutes(req.creditedMs)} credited (${fmtDurationMinutes(asked)} asked; the rest was already tracked)`;
+}
+
+function detailFields(req: ApprovalCardInput & { creditedMs?: number | null }) {
   const fields: Array<{ is_short: boolean; text: { tag: 'lark_md'; content: string } }> = [
     { is_short: true, text: { tag: 'lark_md', content: `**Who**\n${req.requesterName}` } },
-    { is_short: true, text: { tag: 'lark_md', content: `**Duration**\n${fmtDurationMinutes(req.endedAt - req.startedAt)}` } },
+    { is_short: true, text: { tag: 'lark_md', content: `**Duration**\n${durationText(req)}` } },
     { is_short: false, text: { tag: 'lark_md', content: `**When**\n${fmtRange(req.startedAt, req.endedAt, req.timeZone)}` } },
   ];
   fields.push({

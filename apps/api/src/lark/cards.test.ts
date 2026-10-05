@@ -123,6 +123,18 @@ describe('buildDecidedCard — post-decision', () => {
     expect(findTextContaining(card, 'Manager Mira')).toBe(true);
   });
 
+  it('shows the credited time, not the window, when tracked time covered part of it', () => {
+    const card = buildDecidedCard({
+      ...REQ,
+      decision: 'APPROVED',
+      decidedByName: 'Manager Mira',
+      decidedAt,
+      creditedMs: 30 * 60_000,
+    });
+    expect(findTextContaining(card, '30 min credited')).toBe(true);
+    expect(findTextContaining(card, '1h 30m asked')).toBe(true);
+  });
+
   it('shows the rejected state with a red template', () => {
     const card = buildDecidedCard({ ...REQ, decision: 'REJECTED', decidedByName: 'Manager Mira', decidedAt });
     expect((card.header as Record<string, unknown>).template).toBe('red');
