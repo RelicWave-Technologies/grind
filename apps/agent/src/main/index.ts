@@ -464,6 +464,7 @@ app.whenReady().then(async () => {
     } else {
       clearWorkspaceTimeSession();
       resetPermissionSetupOffer();
+      shiftMonitor.clearShift();
       // Pressing Sign out is not news; only a session the server ended is.
       if (info.reason !== 'manual') announceSignOut();
     }
