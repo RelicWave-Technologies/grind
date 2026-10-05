@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => {
     show: vi.fn(),
     showInactive: vi.fn(),
     hide: vi.fn(),
+    destroy: vi.fn(),
     moveTop: vi.fn(),
     focus: vi.fn(),
     blur: vi.fn(),
@@ -127,6 +128,30 @@ describe('attention overlay host', () => {
     expect(mocks.window.setAlwaysOnTop).toHaveBeenCalledWith(false);
     expect(mocks.window.blur).toHaveBeenCalled();
     expect(mocks.window.hide).not.toHaveBeenCalled();
+  });
+
+  it('discards the surface on hide and builds a fresh one for the next prompt', async () => {
+    const { attentionHost } = await import('./attentionWindow');
+    attentionHost.place({ width: 340, height: 280, placement: 'center' });
+
+    attentionHost.hide();
+    expect(mocks.window.destroy).toHaveBeenCalledTimes(1);
+    expect(mocks.releaseOnTop).toHaveBeenCalledWith(mocks.window);
+
+    attentionHost.place({ width: 340, height: 280, placement: 'center' });
+    expect(mocks.create).toHaveBeenCalledTimes(2);
+  });
+
+  it('is not ready again until the fresh surface has loaded', async () => {
+    const { attentionHost } = await import('./attentionWindow');
+    attentionHost.onReady(() => {});
+    const firstLoad = mocks.webListeners.get('did-finish-load')!;
+    firstLoad();
+    expect(attentionHost.isReady()).toBe(true);
+
+    attentionHost.hide();
+    attentionHost.place({ width: 340, height: 280, placement: 'center' });
+    expect(attentionHost.isReady()).toBe(false);
   });
 
   it('publishes prompt state passed in, holding none of its own', async () => {

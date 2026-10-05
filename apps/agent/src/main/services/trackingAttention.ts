@@ -8,8 +8,13 @@ import { log } from '../logger';
  *
  * Staying on top is NOT this module's job — the overlay keeper does that for
  * every overlay, using the cadence the timer bar proved in the field. This
- * module decides which prompt wins, places it once, and tells the keeper to
- * hold it until it is answered.
+ * module decides which prompt wins, presents it on a fresh surface, and tells
+ * the keeper to hold it until it is answered.
+ *
+ * Every presentation (a new prompt, a restore) discards the previous surface
+ * and builds a new one. A window only belongs to the Spaces that existed when
+ * it was built, so a reused window is how a prompt got stranded on a Space the
+ * person had left. Building one is cheap; a stranded prompt is not.
  *
  * The only timer here runs while a prompt is suspended for System Settings, to
  * poll the resume predicate. It exists for at most as long as the user is in
@@ -28,6 +33,9 @@ const SIZES = {
 } as const;
 
 type ActivePrompt = Exclude<AttentionPrompt, { kind: 'NONE' }>;
+
+/** Told about every change of the active prompt, by whatever path caused it. */
+export type AttentionListener = (next: AttentionPrompt, previous: AttentionPrompt) => void;
 
 /** Returns true once the reason for suspending has passed. May be async. */
 export type ResumeWhen = () => boolean | Promise<boolean>;
@@ -69,7 +77,25 @@ export function createTrackingAttentionCoordinator(deps: TrackingAttentionDeps) 
   let resumeWhen: ResumeWhen | null = null;
   let resumeCheckInFlight = false;
   let readyHooked = false;
+  // Activation is decided when a presentation starts but can only happen once
+  // the renderer has loaded, so it is carried across that wait.
+  let activateWhenReady = false;
+  const listeners = new Set<AttentionListener>();
   const log = deps.logger;
+
+  /** The only writer of `active`, so no path can change the prompt unseen. */
+  function setActive(next: AttentionPrompt): void {
+    const previous = active;
+    active = next;
+    if (previous === next) return;
+    for (const listener of listeners) {
+      try {
+        listener(next, previous);
+      } catch (err) {
+        log?.warn('attention listener failed', { err: String(err) });
+      }
+    }
+  }
 
   /**
    * What the app believes about the overlay. Deliberately NOT called
@@ -100,21 +126,34 @@ export function createTrackingAttentionCoordinator(deps: TrackingAttentionDeps) 
     deps.host.onReady(() => {
       if (active.kind === 'NONE') return;
       deps.host.publish(active);
-      if (isFront(active)) presentNow();
+      revealWhenReady();
     });
   }
 
   /**
-   * Place once, activate once, then hand it to the keeper.
+   * Start a presentation on a fresh surface.
    *
-   * The activation is the part that survives a Space the window was not built
-   * into — and it belongs here, at a presentation, rather than in the keeper's
-   * ~1 Hz loop, which is where activating became focus-stealing.
+   * Only a prompt that blocks tracking until it is answered (PERMISSION) takes
+   * focus. The idle and welcome-back prompts are non-activating panels: they
+   * accept a click without pulling the person out of the app — or the
+   * fullscreen Space — they were in. A fresh surface reaches the current Space
+   * without activating, which is what activation was being used for before.
    */
-  function presentNow(): void {
+  function present(opts: { activate: boolean }): void {
+    if (!isFront(active)) return;
+    deps.host.hide();
+    activateWhenReady = opts.activate;
+    revealWhenReady();
+  }
+
+  /** Place, then reveal once the renderer can paint — never an empty window. */
+  function revealWhenReady(): void {
     if (!isFront(active)) return;
     deps.host.place(specFor(active as ActivePrompt));
-    deps.host.activate();
+    // Not loaded yet: the ready hook calls back in here once it has.
+    if (!deps.host.isReady()) return;
+    if (activateWhenReady) deps.host.activate();
+    activateWhenReady = false;
     deps.host.keep();
   }
 
@@ -143,7 +182,9 @@ export function createTrackingAttentionCoordinator(deps: TrackingAttentionDeps) 
     void Promise.resolve()
       .then(predicate)
       .then((done) => {
-        if (done && resumeWhen === predicate) restoreActive();
+        // Coming back from System Settings is the one restore that should take
+        // focus: the person is answering this prompt next.
+        if (done && resumeWhen === predicate) restoreActive({ activate: true });
       })
       .catch(() => {
         // A failing predicate must not wedge the prompt in a suspended state
@@ -156,11 +197,11 @@ export function createTrackingAttentionCoordinator(deps: TrackingAttentionDeps) 
 
   function show(next: ActivePrompt): AttentionPrompt {
     const previous = active.kind;
-    active = next;
+    setActive(next);
     stopResumePolling();
+    present({ activate: next.kind === 'PERMISSION' });
     hookReadyOnce();
     deps.host.publish(active);
-    presentNow();
     log?.info('attention prompt shown', {
       kind: next.kind,
       promptId: next.promptId,
@@ -193,10 +234,20 @@ export function createTrackingAttentionCoordinator(deps: TrackingAttentionDeps) 
 
   function beginMachineAway(): void {
     if (active.kind === 'IDLE_WARNING' || active.kind === 'IDLE' || active.kind === 'AWAY') {
-      active = { kind: 'NONE' };
+      setActive({ kind: 'NONE' });
       stopHolding();
       deps.host.hide();
     }
+  }
+
+  /**
+   * The timer was just started, resumed, paused or stopped by the person.
+   * Whatever an idle or welcome-back prompt was asking has been answered, so
+   * leaving one up only invites a stale click on it.
+   */
+  function clearTimerPrompts(): boolean {
+    if (active.kind !== 'IDLE_WARNING' && active.kind !== 'IDLE' && active.kind !== 'AWAY') return false;
+    return clear(active.promptId);
   }
 
   function requestAway(info: { larkTaskGuid: string | null; stoppedAt: number; reason: 'suspend' | 'lock' }): boolean {
@@ -219,7 +270,7 @@ export function createTrackingAttentionCoordinator(deps: TrackingAttentionDeps) 
    */
   function yieldPermissionToSystemSettings(promptId: string, opts: { resumeWhen?: ResumeWhen } = {}): boolean {
     if (active.kind !== 'PERMISSION' || active.promptId !== promptId) return false;
-    active = { ...active, presentation: 'YIELDED_TO_SETTINGS' };
+    setActive({ ...active, presentation: 'YIELDED_TO_SETTINGS' });
     stopResumePolling();
     resumeWhen = opts.resumeWhen ?? null;
     deps.host.publish(active);
@@ -232,19 +283,21 @@ export function createTrackingAttentionCoordinator(deps: TrackingAttentionDeps) 
    * Put the active prompt back in front, and report whether there was one.
    *
    * The return value says a prompt EXISTS and was re-presented. It deliberately
-   * does not claim the person can see it: macOS can hold the overlay on a Space
-   * we were never told about, and Electron keeps reporting `isVisible()` true
-   * throughout. Callers must therefore never treat `true` as a reason to leave
-   * the person with no way into the app — see `releaseUnreachable`.
+   * does not claim the person can see it: Electron cannot tell us which Space
+   * a window is on. Callers must therefore never treat `true` as a reason to
+   * leave the person with no way into the app — see `releaseUnreachable`.
+   *
+   * Does not take focus unless asked: a tray click must not yank the person
+   * out of whatever they were doing every time they open the menu.
    */
-  function restoreActive(): boolean {
+  function restoreActive(opts: { activate?: boolean } = {}): boolean {
     if (active.kind === 'NONE') return false;
     stopResumePolling();
     if (active.kind === 'PERMISSION' && active.presentation === 'YIELDED_TO_SETTINGS') {
-      active = { ...active, presentation: 'FRONT' };
+      setActive({ ...active, presentation: 'FRONT' });
       deps.host.publish(active);
     }
-    presentNow();
+    present({ activate: opts.activate === true });
     log?.info('attention prompt restored', {
       kind: active.kind,
       promptId: active.promptId,
@@ -268,7 +321,7 @@ export function createTrackingAttentionCoordinator(deps: TrackingAttentionDeps) 
     const promptId = active.promptId;
     stopResumePolling();
     stopHolding();
-    active = { kind: 'NONE' };
+    setActive({ kind: 'NONE' });
     deps.host.publish(active);
     deps.host.hide();
     log?.warn('attention prompt released as unreachable', {
@@ -285,7 +338,7 @@ export function createTrackingAttentionCoordinator(deps: TrackingAttentionDeps) 
     if (promptId && active.promptId !== promptId) return false;
     const cleared = active.kind;
     const clearedId = active.promptId;
-    active = { kind: 'NONE' };
+    setActive({ kind: 'NONE' });
     stopHolding();
     deps.host.publish(active);
     deps.host.hide();
@@ -293,8 +346,21 @@ export function createTrackingAttentionCoordinator(deps: TrackingAttentionDeps) 
     return true;
   }
 
+  /** The displays changed under a prompt: put it back on one that exists. */
+  function placeOnScreen(): void {
+    if (isFront(active)) deps.host.place(specFor(active as ActivePrompt));
+  }
+
+  function onChange(listener: AttentionListener): () => void {
+    listeners.add(listener);
+    return () => listeners.delete(listener);
+  }
+
   return {
     get: (): AttentionPrompt => active,
+    onChange,
+    clearTimerPrompts,
+    placeOnScreen,
     requestIdleWarning,
     requestIdle,
     clearIdleWarning,

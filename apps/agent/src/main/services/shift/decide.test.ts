@@ -251,3 +251,61 @@ describe('full lifecycle', () => {
     expect(parts(r.nextAt).day).toBe(2);
   });
 });
+
+describe('tickShiftMonitor — something already answered the question', () => {
+  const inBuffer = at('2026-06-01T09:05:00');
+
+  it('a running timer counts as "Yes"', () => {
+    const r = tickShiftMonitor({ schedule: NINE_TO_SIX, bufferMin: 30, state: INITIAL_STATE, now: inBuffer, tracking: true });
+    expect(r).toEqual({ kind: 'ack' });
+  });
+
+  it('stays quiet while another prompt is on screen', () => {
+    const r = tickShiftMonitor({ schedule: NINE_TO_SIX, bufferMin: 30, state: INITIAL_STATE, now: inBuffer, attentionBusy: true });
+    expect(r).toEqual({ kind: 'noop' });
+  });
+
+  it('stands aside if a prompt appears while it is up', () => {
+    const r = tickShiftMonitor({
+      schedule: NINE_TO_SIX,
+      bufferMin: 30,
+      state: { ...INITIAL_STATE, prompting: true },
+      now: inBuffer,
+      attentionBusy: true,
+    });
+    expect(r).toEqual({ kind: 'yield' });
+  });
+});
+
+describe('night shifts that cross midnight', () => {
+  const NIGHT: ShiftSchedule = {
+    mon: { start: '22:00', end: '06:00' },
+    tue: null, wed: null, thu: null, fri: null, sat: null, sun: null,
+  };
+
+  it('resolves the shift starting this evening', () => {
+    expect(resolveShiftWindow(NIGHT, at('2026-06-01T21:00:00'), TIME_ZONE)).toEqual({
+      start: '22:00',
+      end: '06:00',
+      startedAt: at('2026-06-01T22:00:00').getTime(),
+      endedAt: at('2026-06-02T06:00:00').getTime(),
+    });
+  });
+
+  it('is still last night\'s shift after midnight, until it ends', () => {
+    expect(resolveShiftWindow(NIGHT, at('2026-06-02T02:00:00'), TIME_ZONE)?.startedAt)
+      .toBe(at('2026-06-01T22:00:00').getTime());
+    expect(resolveShiftWindow(NIGHT, at('2026-06-02T07:00:00'), TIME_ZONE)).toBeNull();
+  });
+
+  it('asks at the start of a late shift whose buffer runs past midnight', () => {
+    const LATE: ShiftSchedule = { ...NIGHT, mon: { start: '23:50', end: '07:00' } };
+    const r = tickShiftMonitor({ schedule: LATE, bufferMin: 30, state: INITIAL_STATE, now: at('2026-06-02T00:10:00') });
+    expect(r.kind).toBe('show');
+  });
+
+  it('acks the night shift that is under way', () => {
+    const next = ackToday(INITIAL_STATE, NIGHT, at('2026-06-01T22:10:00'));
+    expect(next.ackedFor).toBe(at('2026-06-01T22:00:00').getTime());
+  });
+});

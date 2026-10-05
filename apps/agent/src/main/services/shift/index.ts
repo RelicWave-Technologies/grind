@@ -21,6 +21,8 @@ import {
 } from './untracked';
 import { getTimerService } from '../timer';
 import { getTrackingAttentionCoordinator } from '../trackingAttention';
+import { startTracking } from '../trackingCommands';
+import { getPreferences } from '../preferences';
 import { getWorkspaceTimeZone } from '../workspaceTime';
 import type { TodayShiftWindow } from '../../../shared/shift';
 
@@ -32,12 +34,13 @@ import type { TodayShiftWindow } from '../../../shared/shift';
  *  - Poll the reducer every 30 s. The reducer returns:
  *      show     → render the toast (top-right, non-stealing focus)
  *      hide     → buffer expired; close the toast, run `expire()`
- *      schedule → outside the window; set a one-shot timer for the next
- *                 start so we stop spinning the 30 s interval
+ *      ack      → a timer is already running; count it as "Yes"
+ *      yield    → another prompt is up; close the toast until it is gone
+ *      schedule → outside the window (the 30 s poll covers the next start)
  *      noop     → silence
  *  - `onUserDecision('yes' | 'not_yet')` is called by the renderer via
- *    IPC; we apply ackToday / snooze respectively and the next tick
- *    quiets the toast.
+ *    IPC. "Yes" starts tracking (permissions permitting) and acks;
+ *    "Not yet" snoozes.
  *
  * The state lives in memory — fresh on each agent boot is fine. A user
  * who killed the agent mid-buffer will get the toast again on relaunch
@@ -52,12 +55,10 @@ export class ShiftMonitor {
   private untracked: UntrackedNudgeState = { ...UNTRACKED_INITIAL_STATE };
   private shift: ShiftDto | null = null;
   private pollTimer: NodeJS.Timeout | null = null;
-  private oneShotTimer: NodeJS.Timeout | null = null;
   private started = false;
 
-  /** Called whenever the user clicks "Yes" (opens the main window) so the
-   *  agent owner can plug in main-window-show logic without coupling this
-   *  service to it. */
+  /** Opened after "Yes" when there is no task to start on, so the person can
+   *  pick one — and as the fallback if starting fails outright. */
   constructor(private readonly openMainWindow: () => void) {}
 
   async start(): Promise<void> {
@@ -77,9 +78,7 @@ export class ShiftMonitor {
   stop(): void {
     this.started = false;
     if (this.pollTimer) clearInterval(this.pollTimer);
-    if (this.oneShotTimer) clearTimeout(this.oneShotTimer);
     this.pollTimer = null;
-    this.oneShotTimer = null;
     hideReadyToWork();
   }
 
@@ -120,14 +119,14 @@ export class ShiftMonitor {
           ? acceptUntrackedNudge(this.untracked)
           : snoozeUntrackedNudge(this.untracked, now.getTime());
       hideReadyToWork();
-      if (decision === 'yes') this.openMainWindow();
+      if (decision === 'yes') void this.startTracking();
       return;
     }
 
     if (decision === 'yes') {
       this.state = ackToday(this.state, this.shift.schedule, now, timeZone);
       hideReadyToWork();
-      this.openMainWindow();
+      void this.startTracking();
     } else {
       this.state = snooze(this.state, now, NUDGE_INTERVAL_MS);
       hideReadyToWork();
@@ -135,6 +134,22 @@ export class ShiftMonitor {
     // After a user decision, immediately reschedule for the next tick
     // boundary so the popup doesn't bounce back accidentally.
     this.tick();
+  }
+
+  /**
+   * "Yes, start" / "Start tracking" start tracking, on the task the person
+   * last tracked. A missing permission is handled the same way as any other
+   * start: the permission prompt opens and the start resumes once granted.
+   */
+  private async startTracking(): Promise<void> {
+    const larkTaskGuid = getPreferences().lastLarkTaskGuid;
+    try {
+      await startTracking(larkTaskGuid);
+      if (!larkTaskGuid) this.openMainWindow();
+    } catch (err) {
+      log.warn('start from ready-to-work failed', { err: String(err) });
+      this.openMainWindow();
+    }
   }
 
   private startPolling(): void {
@@ -156,21 +171,20 @@ export class ShiftMonitor {
     const showingShiftStart = isReadyToWorkVisible() && readyToWorkReason() === 'SHIFT_START';
     this.state = { ...this.state, prompting: showingShiftStart };
 
+    const now = new Date();
     const action = tickShiftMonitor({
       schedule: this.shift.schedule,
       bufferMin: this.shift.bufferMin,
       state: this.state,
-      now: new Date(),
+      now,
       timeZone,
       nudgeIntervalMs: NUDGE_INTERVAL_MS,
+      tracking: getTimerService().status().state === 'RUNNING',
+      attentionBusy: getTrackingAttentionCoordinator().get().kind !== 'NONE',
     });
 
     switch (action.kind) {
       case 'show':
-        if (this.oneShotTimer) {
-          clearTimeout(this.oneShotTimer);
-          this.oneShotTimer = null;
-        }
         showReadyToWork();
         this.state = { ...this.state, prompting: true };
         break;
@@ -178,21 +192,20 @@ export class ShiftMonitor {
         hideReadyToWork();
         this.state = expire(this.state);
         break;
-      case 'schedule': {
-        const ms = Math.max(0, action.nextAt - Date.now());
-        // Bound to a sensible max (1 day) so a long sleep doesn't get a
-        // huge integer to chew on.
-        const clamped = Math.min(ms, 24 * 60 * 60_000);
-        if (this.oneShotTimer) clearTimeout(this.oneShotTimer);
-        this.oneShotTimer = setTimeout(() => this.tick(), clamped);
+      case 'ack':
+        if (showingShiftStart) hideReadyToWork();
+        this.state = ackToday(this.state, this.shift.schedule, now, timeZone);
+        break;
+      case 'yield':
+        hideReadyToWork();
+        this.state = { ...this.state, prompting: false };
+        break;
+      case 'schedule':
         // `schedule` means "no clock-in question right now", not "nothing to
         // do". The shift reducer's window is only the buffer after shift
         // start, so it returns `schedule` for almost the whole shift — which
         // is exactly when someone can be working with the timer off. Falling
         // through here is what makes the untracked nudge reachable at all.
-        this.tickUntracked(timeZone);
-        break;
-      }
       case 'noop':
       default:
         this.tickUntracked(timeZone);

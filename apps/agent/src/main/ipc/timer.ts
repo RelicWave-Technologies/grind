@@ -1,9 +1,7 @@
 import { ipcMain } from 'electron';
 import { getPreferences } from '../services/preferences';
 import { getTimerService } from '../services/timer';
-import { sendHeartbeatNow } from '../services/heartbeat';
-import { broadcast } from '../broadcast';
-import { clearPendingTrackingCommand, resumeTracking, startTracking } from '../services/trackingCommands';
+import { pauseTracking, resumeTracking, startTracking, stopTracking } from '../services/trackingCommands';
 
 export function registerTimerIpc(): void {
   ipcMain.handle(
@@ -13,21 +11,9 @@ export function registerTimerIpc(): void {
     },
   );
 
-  ipcMain.handle('timer:stop', async () => {
-    clearPendingTrackingCommand();
-    const status = await getTimerService().stop();
-    broadcast('timer:status:push', status);
-    sendHeartbeatNow();
-    return status;
-  });
+  ipcMain.handle('timer:stop', () => stopTracking());
 
-  ipcMain.handle('timer:pause', async () => {
-    clearPendingTrackingCommand();
-    const status = await getTimerService().pause();
-    broadcast('timer:status:push', status);
-    sendHeartbeatNow();
-    return status;
-  });
+  ipcMain.handle('timer:pause', () => pauseTracking());
 
   ipcMain.handle('timer:resume', async () => {
     return resumeTracking();

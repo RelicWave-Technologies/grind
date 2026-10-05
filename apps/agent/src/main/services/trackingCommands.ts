@@ -1,4 +1,4 @@
-import type { TrackingCommandResult } from '../../shared/tracking';
+import type { TimerStatus, TrackingCommandResult } from '../../shared/tracking';
 import { broadcast } from '../broadcast';
 import { sendHeartbeatNow } from './heartbeat';
 import { rememberLastLarkTask } from './preferences';
@@ -25,6 +25,19 @@ let startupPromptOffered = false;
 // Bumped by a sign-out so a delayed offer from the old session stands down.
 let setupOfferGeneration = 0;
 
+/**
+ * Every surface (main window, popover, floating bar, prompts) changes the timer
+ * through here, so a successful command is the one place that can retire the
+ * idle and welcome-back prompts it just answered. Left up, they invite a stale
+ * click — "Take a break" on an idle prompt for a timer resumed elsewhere
+ * stopped that running timer.
+ */
+function settled(status: TimerStatus): void {
+  getTrackingAttentionCoordinator().clearTimerPrompts();
+  broadcast('timer:status:push', status);
+  sendHeartbeatNow();
+}
+
 async function execute(command: PendingCommand): Promise<TrackingCommandResult> {
   try {
     const timer = getTimerService();
@@ -38,8 +51,7 @@ async function execute(command: PendingCommand): Promise<TrackingCommandResult> 
       rememberLastLarkTask(command.larkTaskGuid);
     }
     pending = null;
-    broadcast('timer:status:push', status);
-    sendHeartbeatNow();
+    settled(status);
     return { ok: true, status };
   } catch (error) {
     if (!isTrackingBlockedError(error)) throw error;
@@ -61,6 +73,20 @@ export function startTracking(larkTaskGuid?: string | null): Promise<TrackingCom
 
 export function resumeTracking(): Promise<TrackingCommandResult> {
   return execute({ kind: 'RESUME' });
+}
+
+export async function stopTracking(): Promise<TimerStatus> {
+  pending = null;
+  const status = await getTimerService().stop();
+  settled(status);
+  return status;
+}
+
+export async function pauseTracking(): Promise<TimerStatus> {
+  pending = null;
+  const status = await getTimerService().pause();
+  settled(status);
+  return status;
 }
 
 export function retryPendingTrackingCommand(): Promise<TrackingCommandResult | null> {

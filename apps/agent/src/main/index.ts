@@ -56,7 +56,7 @@ import { getLaunchAtLoginService, isHiddenLaunch } from './services/launchAtLogi
 import type { LaunchAtLoginHealth } from '../shared/launchAtLogin';
 import { migrateLegacyUserData } from './services/legacyMigration';
 import { broadcast } from './broadcast';
-import { readyToWorkReason } from './readyToWork';
+import { placeReadyToWorkOnScreen, readyToWorkReason } from './readyToWork';
 import { installApplicationMenu } from './applicationMenu';
 import {
   offerPermissionStart,
@@ -164,6 +164,24 @@ function showSettingsWindow() {
 }
 
 /**
+ * Notifications are held until closed: a garbage-collected Notification drops
+ * its click handler, so clicking it did nothing.
+ */
+const liveNotifications = new Set<Notification>();
+
+function showNotification(options: Electron.NotificationConstructorOptions, onClick: () => void): void {
+  const notification = new Notification(options);
+  liveNotifications.add(notification);
+  const forget = () => liveNotifications.delete(notification);
+  notification.on('click', () => {
+    forget();
+    onClick();
+  });
+  notification.on('close', forget);
+  notification.show();
+}
+
+/**
  * Losing the session used to be completely silent: the tray kept ticking, the
  * capture loop kept queueing, and every upload was rejected — one field log ran
  * over six hours that way before anyone noticed. Nothing tracked is lost (both
@@ -175,12 +193,10 @@ function announceSignOut(): void {
   log.warn('signed out — session ended; prompting for sign-in');
   showMainWindow({ bypassAttention: true });
   if (!Notification.isSupported()) return;
-  const notification = new Notification({
+  showNotification({
     title: 'Timo signed you out',
     body: 'Sign in again to keep your tracked time syncing.',
-  });
-  notification.on('click', () => showMainWindow({ bypassAttention: true }));
-  notification.show();
+  }, () => showMainWindow({ bypassAttention: true }));
 }
 
 function notifyStartupHealth(state: LaunchAtLoginHealth): void {
@@ -190,12 +206,7 @@ function notifyStartupHealth(state: LaunchAtLoginHealth): void {
     : state.state === 'NEEDS_APPROVAL'
       ? 'Approve Timo in Login Items so it can start when you sign in.'
       : 'Open Timo Settings to repair Launch at Login.';
-  const notification = new Notification({
-    title: 'Timo startup needs attention',
-    body,
-  });
-  notification.on('click', showSettingsWindow);
-  notification.show();
+  showNotification({ title: 'Timo startup needs attention', body }, showSettingsWindow);
 }
 
 app.whenReady().then(async () => {
@@ -293,21 +304,23 @@ app.whenReady().then(async () => {
     onWarningCancelled: () => {
       attention.clearIdleWarning();
     },
-    onIdle: async (idleStartedAt) => {
-      try {
-        // The monitor tracks idle on the device clock; the timer runs on the
-        // server-aligned clock. Hand over elapsed time, which means the same
-        // thing on both, rather than an instant, which does not.
-        await getTimerService().pauseForIdle(Math.max(0, Date.now() - idleStartedAt));
-      } catch (err) {
-        log.warn('pauseForIdle failed', { err: String(err) });
-        return false;
-      }
-      const accepted = attention.requestIdle(idleStartedAt);
+    onIdlePause: async (idleStartedAt) => {
+      // The monitor tracks idle on the device clock; the timer runs on the
+      // server-aligned clock. Hand over elapsed time, which means the same
+      // thing on both, rather than an instant, which does not.
+      await getTimerService().pauseForIdle(Math.max(0, Date.now() - idleStartedAt));
       broadcast('timer:status:push', getTimerService().status());
       sendHeartbeatNow();
-      return accepted;
     },
+    onIdlePrompt: (idleStartedAt) => attention.requestIdle(idleStartedAt),
+  });
+  // However an idle prompt goes away — answered, replaced by a permission
+  // prompt, released as unreachable, cleared by a timer command — the monitor
+  // has to hear about it, or idle detection stays off for the rest of the run.
+  attention.onChange((next, previous) => {
+    const wasIdle = previous.kind === 'IDLE' || previous.kind === 'IDLE_WARNING';
+    const isIdle = next.kind === 'IDLE' || next.kind === 'IDLE_WARNING';
+    if (wasIdle && !isIdle) idleMonitor.resolve();
   });
   idleMonitor.start();
   onTrackedInputActivity(() => idleMonitor.noteActivity());
@@ -315,7 +328,6 @@ app.whenReady().then(async () => {
   registerIpc({
     onOpenMainWindow: () => showMainWindow(),
     onDismissFloatingBar: () => dismissFloatingBar(),
-    onIdleResolved: () => idleMonitor.resolve(),
   });
   onWorkspaceTimeChange((context) => {
     broadcast('workspaceTime:push', context);
@@ -357,9 +369,8 @@ app.whenReady().then(async () => {
       attention.beginMachineAway();
     },
     onWake: () => {
-      // Only the ambient overlays need poking here. An active prompt is kept up
-      // by the attention coordinator's hold loop, which notices a dropped float
-      // on its next tick regardless of which event caused it.
+      // Covers a held prompt too: the shared keeper re-raises it every second,
+      // and this refreshes the all-Spaces flags the keeper does not touch.
       reassertAllOverlays();
       checkTrackingPermissionsNow();
       // Re-anchor BEFORE pushing anything. The server-aligned clock is driven by
@@ -389,18 +400,16 @@ app.whenReady().then(async () => {
   });
 
   // When monitors change (unplug / resolution switch): re-float all overlays
-  // and re-home the floating bar onto a still-visible display.
-  screen.on('display-removed', () => {
+  // and re-home every visible surface onto a display that still exists.
+  const onDisplaysChanged = () => {
     reclampFloatingBar();
+    attention.placeOnScreen();
+    placeReadyToWorkOnScreen();
     reassertAllOverlays();
-  });
-  screen.on('display-metrics-changed', () => {
-    reclampFloatingBar();
-    reassertAllOverlays();
-  });
-  screen.on('display-added', () => {
-    reassertAllOverlays();
-  });
+  };
+  screen.on('display-removed', onDisplaysChanged);
+  screen.on('display-metrics-changed', onDisplaysChanged);
+  screen.on('display-added', onDisplaysChanged);
 
   onAgentConfigChange(({ previous, current }) => {
     applyActivityCapturePolicy(current);
@@ -480,11 +489,19 @@ app.whenReady().then(async () => {
   // + a throttled durable liveness tick (crash-recovery bound).
   let tick = 0;
   const LIVENESS_EVERY_TICKS = 15; // persist "proof of life" ~every 15s
+  let lastTimerState: string | null = null;
   setInterval(() => {
     try {
       tick += 1;
+      // One status() per tick: it reconciles the day's ledger, which is the
+      // expensive part of this loop.
       const s = getTimerService().status();
-      refreshUpdateInstallability();
+      // Installability only depends on whether a timer is open, so only a
+      // change of state can change it.
+      if (s.state !== lastTimerState) {
+        lastTimerState = s.state;
+        refreshUpdateInstallability();
+      }
       const running = s.state === 'RUNNING';
       const accruing = running && !s.paused;
       // Gate clock corrections on an open entry, not on accrual: stepping the
@@ -494,7 +511,10 @@ app.whenReady().then(async () => {
       setActivityRecording(accruing, running ? s.entryId : null);
       if (tray) setTrayTitle(tray, running ? fmtShort(s.workedMs) : '');
       syncFloatingBar(s);
-      if (running) broadcast('timer:status:push', s);
+      // A hidden main window has nothing to repaint; it reads status afresh
+      // the next second it is shown. Every state change is still pushed to
+      // it by the command that caused it.
+      if (running) broadcast('timer:status:push', s, { skipIfHidden: mainWindow });
       // Liveness: only while genuinely accruing, throttled. The next boot
       // closes any dangling entry at the last tick so a crash/hard-off never
       // over-credits the dead gap. Worst-case over-count ≈ 15s.

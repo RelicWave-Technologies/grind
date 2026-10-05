@@ -1,7 +1,8 @@
-import { useMemo } from 'react';
+import { useId, useMemo } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { Coffee } from 'lucide-react';
 import type { AttentionPrompt } from '../../shared/attention';
+import { usePromptKeys } from '../lib/promptA11y';
 
 function fmtAgo(ms: number): string {
   const totalSec = Math.max(0, Math.round(ms / 1000));
@@ -17,16 +18,23 @@ function fmtAgo(ms: number): string {
 
 /**
  * Shown after the idle threshold. The timer is already PAUSED (idle time is
- * never counted). The user either continues (resume) or takes a break (stop).
+ * never counted). The user either continues (resume) or stops the timer.
  *
  * The label shows how long you'd been idle WHEN the prompt appeared — a stable
  * snapshot, not a live counter. (It used to tick up every second, so a prompt
  * left on screen would balloon to "11 minutes" while you read it.)
  */
 export default function IdlePrompt({ prompt }: { prompt: Extract<AttentionPrompt, { kind: 'IDLE' }> }) {
+  const titleId = useId();
+  const subId = useId();
   const resolve = useMutation({
     mutationFn: (action: 'IDLE_CONTINUE' | 'IDLE_BREAK') =>
       window.agent.attention.resolve(prompt.promptId, action),
+  });
+  usePromptKeys({
+    primary: () => resolve.mutate('IDLE_CONTINUE'),
+    secondary: () => resolve.mutate('IDLE_BREAK'),
+    disabled: resolve.isPending,
   });
 
   const idleStart = prompt.idleStartedAt;
@@ -39,17 +47,18 @@ export default function IdlePrompt({ prompt }: { prompt: Extract<AttentionPrompt
   );
 
   return (
-    <div className="idle">
-      <span className="idle-icon"><Coffee size={24} strokeWidth={2} /></span>
-      <div className="h3">Timer paused</div>
-      <div className="idle-sub callout secondary">
+    <div className="idle" role="dialog" aria-labelledby={titleId} aria-describedby={subId}>
+      <span className="idle-icon" aria-hidden><Coffee size={24} strokeWidth={2} /></span>
+      <div className="h3" id={titleId}>Timer paused</div>
+      <div className="idle-sub callout secondary" id={subId}>
         No activity for <b>{fmtAgo(awayMs)}</b>. This idle time isn&rsquo;t counted.
       </div>
       <div className="idle-actions">
+        {/* This stops the timer — the label used to say "Take a break". */}
         <button className="btn no-drag" onClick={() => resolve.mutate('IDLE_BREAK')} disabled={resolve.isPending}>
-          Take a break
+          Stop timer
         </button>
-        <button className="btn btn-prominent no-drag" onClick={() => resolve.mutate('IDLE_CONTINUE')} disabled={resolve.isPending}>
+        <button className="btn btn-prominent no-drag" onClick={() => resolve.mutate('IDLE_CONTINUE')} disabled={resolve.isPending} autoFocus>
           Continue
         </button>
       </div>

@@ -251,18 +251,25 @@ export class TimerService {
     // coordinator's one bounded retry can safely attempt the same boundary.
     const nextState = this.writeEntry(closed);
     this.open = null;
-    this.store.setRecoveryNotice(this.awayNotice(reason, closed.id, closeAt));
+    // No recovery notice: the welcome-back prompt already tells the person,
+    // and a notice here overwrote any crash or server notice still unread
+    // and left a banner that outlived the prompt.
     this.store.clearAwayState();
     this.notifyMutation();
     this.syncInBackground([closed, nextState]);
     return this.status();
   }
 
-  /** Resume a paused open entry. No-op when idle or already accruing. */
+  /**
+   * Resume a paused open entry with a fresh WORK segment from now. No-op when
+   * idle or already accruing.
+   */
   async resume(): Promise<TimerStatus> {
     if (!this.open) return this.status();
     if (getOpenSegment(this.open)) return this.status();
-    await this.resumeFromIdle(this.clock.now());
+    await this.accrualGuard.assertCanAccrue();
+    const resumed = openSegment(this.open, { kind: 'WORK', at: this.clock.now(), segmentId: this.ids.ulid() });
+    await this.commitOpen(resumed);
     return this.status();
   }
 
@@ -305,16 +312,6 @@ export class TimerService {
     const paused = { ...closeOpenSegment(this.open, cut), pauseReason: 'PERMISSION_REQUIRED' as const };
     await this.commitOpen(paused);
     return this.status();
-  }
-
-  /** Resume from a paused (idle) state: open a fresh WORK segment at `at`. */
-  async resumeFromIdle(at: number): Promise<void> {
-    if (!this.open) return;
-    if (getOpenSegment(this.open)) return; // not paused
-    await this.accrualGuard.assertCanAccrue();
-    const readyAt = Math.max(at, this.clock.now());
-    const resumed = openSegment(this.open, { kind: 'WORK', at: readyAt, segmentId: this.ids.ulid() });
-    await this.commitOpen(resumed);
   }
 
   /** True when running but paused (entry open, no open segment). */
@@ -430,7 +427,6 @@ export class TimerService {
     return this.status();
   }
 
-  /** Retry pushing any locally-persisted entries that haven't synced yet. */
   /**
    * Push pending entries to the server, oldest first.
    *

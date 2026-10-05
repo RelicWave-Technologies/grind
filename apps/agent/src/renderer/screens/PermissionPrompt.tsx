@@ -193,7 +193,7 @@ export default function PermissionPrompt({ prompt }: { prompt: Extract<Attention
         ) : (
           <div className="perm-gate-note">
             <Lock size={14} strokeWidth={2} />
-            <span>Tracking stays paused until both permissions are ready.</span>
+            <span>{prompt.intent === 'SETUP' ? 'Timo can track once both permissions are ready.' : 'Tracking stays paused until both permissions are ready.'}</span>
           </div>
         )}
       </footer>
