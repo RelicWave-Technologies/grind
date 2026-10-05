@@ -22,7 +22,6 @@ const TeamsScreen = lazyRouteComponent(() => import('./screens/Teams'), 'TeamsSc
 const FlagsScreen = lazyRouteComponent(() => import('./screens/Flags'), 'FlagsScreen');
 const ShiftsScreen = lazyRouteComponent(() => import('./screens/Shifts'), 'ShiftsScreen');
 const PolicyScreen = lazyRouteComponent(() => import('./screens/Policy'), 'PolicyScreen');
-const PayrollScreen = lazyRouteComponent(() => import('./screens/Payroll'), 'PayrollScreen');
 const OverviewScreen = lazyRouteComponent(() => import('./screens/Overview'), 'OverviewScreen');
 const IntegrationsScreen = lazyRouteComponent(() => import('./screens/Integrations'), 'IntegrationsScreen');
 const ReportsScreen = lazyRouteComponent(() => import('./screens/Reports'), 'ReportsScreen');
@@ -260,16 +259,6 @@ const integrationsRoute = createRoute({
   component: IntegrationsScreen,
 });
 
-const payrollRoute = createRoute({
-  getParentRoute: () => authedRoot,
-  path: '/payroll',
-  beforeLoad: ({ context }) => {
-    const me = (context as { me?: Me }).me;
-    requireAnyRouteCapability(me, ['payroll.manage']);
-  },
-  component: PayrollScreen,
-});
-
 const overviewRoute = createRoute({
   getParentRoute: () => authedRoot,
   path: '/overview',
@@ -336,7 +325,7 @@ const indexRoute = createRoute({
 });
 
 export const routeTree = rootRoute.addChildren([
-  authedRoot.addChildren([homeRoute, overviewRoute, editTimeRoute, meTodayLegacyRoute, reportsRoute, approvalsRoute, profileRoute, teamRoute, attendanceRoute, calendarRoute, flagsRoute, usersRoute, teamsAdminRoute, shiftsRoute, policyRoute, integrationsRoute, payrollRoute]),
+  authedRoot.addChildren([homeRoute, overviewRoute, editTimeRoute, meTodayLegacyRoute, reportsRoute, approvalsRoute, profileRoute, teamRoute, attendanceRoute, calendarRoute, flagsRoute, usersRoute, teamsAdminRoute, shiftsRoute, policyRoute, integrationsRoute]),
   loginRoute,
   changelogRoute,
   welcomeRoute,

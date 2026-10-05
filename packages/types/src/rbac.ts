@@ -20,7 +20,6 @@ export const PERMISSIONS = [
   'approvals.workspace.decide',
   'flags.team.review',
   'flags.workspace.review',
-  'payroll.manage',
   'overview.read',
   'tester-ops.manage',
   'api-tokens.manage',

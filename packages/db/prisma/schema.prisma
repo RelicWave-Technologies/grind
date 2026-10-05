@@ -85,6 +85,7 @@ enum PayrollSheetRecipientMode {
 /// Admin-owned payroll classification settings. This is intentionally
 /// separate from WorkspacePolicy because payroll is a derived finance
 /// worksheet, while WorkspacePolicy controls capture/privacy behavior.
+/// Unused since 2026-10-05 (payroll removed); drop in a later migration.
 model PayrollPolicy {
   id                   String                    @id @default(cuid())
   workspaceId          String                    @unique
@@ -119,6 +120,7 @@ enum PayrollRunStatus {
 /// One row per scheduled month-close send. The unique key is the
 /// idempotency boundary so API restarts do not resend Lark reminders or
 /// payroll sheets for the same workspace/month/scheduled instant.
+/// Unused since 2026-10-05 (payroll removed); drop in a later migration.
 model PayrollRunLog {
   id                     String           @id @default(cuid())
   workspaceId            String
