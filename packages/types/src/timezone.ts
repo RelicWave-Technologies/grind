@@ -1,8 +1,6 @@
 import { z } from 'zod';
 import { WEEKDAYS, type Weekday } from './shifts';
 
-export const DEFAULT_TIME_ZONE = 'UTC';
-
 export interface ZonedDateTimeParts {
   year: number;
   month: number;
@@ -55,8 +53,6 @@ export const TimeZoneSchema = z
   .min(1)
   .max(80)
   .refine(isValidTimeZone, { message: 'invalid_timezone' });
-
-export type TimeZone = z.infer<typeof TimeZoneSchema>;
 
 export function zonedDateTimeParts(value: Date | number | string, timeZone: string): ZonedDateTimeParts {
   const date = value instanceof Date ? value : new Date(value);

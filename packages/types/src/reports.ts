@@ -94,7 +94,6 @@ export const AttendanceOverrideDtoSchema = z.object({
    */
   stale: z.boolean(),
 });
-export type AttendanceOverrideDto = z.infer<typeof AttendanceOverrideDtoSchema>;
 
 export const SetAttendanceOverrideRequest = z.object({
   userId: z.string().min(1),
@@ -211,7 +210,6 @@ export const TeamReportApprovalCountsSchema = z.object({
   pending: z.number().int().min(0),
   rejected: z.number().int().min(0),
 });
-export type TeamReportApprovalCounts = z.infer<typeof TeamReportApprovalCountsSchema>;
 
 export const TeamReportMemberSchema = z.object({
   user: TeamReportUserSchema,
@@ -294,7 +292,6 @@ export const TeamReportAttentionKindSchema = z.enum([
   'missing_activity',
   'low_activity',
 ]);
-export type TeamReportAttentionKind = z.infer<typeof TeamReportAttentionKindSchema>;
 
 export const TeamReportAttentionItemSchema = z.object({
   id: z.string(),
@@ -364,7 +361,6 @@ export const ReportActivityHeatmapSchema = z.object({
   buckets: z.array(z.number().int().min(0).max(100).nullable()),
   sampleCounts: z.array(z.number().int().min(0)),
 });
-export type ReportActivityHeatmap = z.infer<typeof ReportActivityHeatmapSchema>;
 
 export const MemberReportScreenshotSchema = z.object({
   id: z.string(),
@@ -397,7 +393,6 @@ export const MemberReportDayScreenshotsResponseSchema = z.object({
 export type MemberReportDayScreenshotsResponse = z.infer<typeof MemberReportDayScreenshotsResponseSchema>;
 
 export const ScreenshotUploadStateSchema = z.enum(['PENDING', 'UPLOADED', 'FAILED']);
-export type ScreenshotUploadState = z.infer<typeof ScreenshotUploadStateSchema>;
 
 export const CompleteScreenshotUploadRequest = z.object({
   id: z.string().min(1),

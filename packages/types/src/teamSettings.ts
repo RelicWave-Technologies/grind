@@ -34,14 +34,10 @@ export const TeamSettingsPersonSchema = z.object({
   avatarUrl: z.string().nullable().default(null),
 });
 
-export type TeamSettingsPerson = z.infer<typeof TeamSettingsPersonSchema>;
-
 export const TeamSettingsTeamSchema = z.object({
   id: z.string(),
   name: z.string(),
 });
-
-export type TeamSettingsTeam = z.infer<typeof TeamSettingsTeamSchema>;
 
 export const TeamMemberSettingsDtoSchema = z.object({
   id: z.string(),

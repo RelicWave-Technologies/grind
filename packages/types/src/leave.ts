@@ -163,7 +163,6 @@ export const CreateHolidaySchema = z.object({
   name: z.string().trim().min(1).max(120),
   teamId: z.string().nullable().optional(),
 });
-export type CreateHoliday = z.infer<typeof CreateHolidaySchema>;
 
 export const PatchHolidaySchema = z
   .object({
@@ -172,7 +171,6 @@ export const PatchHolidaySchema = z
     teamId: z.string().nullable().optional(),
   })
   .refine((v) => Object.keys(v).length > 0, { message: 'nothing_to_update' });
-export type PatchHoliday = z.infer<typeof PatchHolidaySchema>;
 
 // ---------------------------------------------------------------------------
 // Leave policy
@@ -258,7 +256,6 @@ export const PatchLeavePolicySchema = z
       v.halfDayMinMinutes <= v.fullDayMinMinutes,
     { message: 'half_day_min_must_be_lte_full_day_min' },
   );
-export type PatchLeavePolicy = z.infer<typeof PatchLeavePolicySchema>;
 
 // ---------------------------------------------------------------------------
 // Ledger
@@ -282,7 +279,6 @@ export const LeaveLedgerEntryDtoSchema = z.object({
   reason: z.string().nullable(),
   createdAt: z.string(),
 });
-export type LeaveLedgerEntryDto = z.infer<typeof LeaveLedgerEntryDtoSchema>;
 
 export const LeaveBalanceDtoSchema = z.object({
   userId: z.string(),
@@ -312,7 +308,6 @@ export const LeaveDecisionSourceSchema = z.enum([
   'DASHBOARD',
   'REQUESTER_CANCEL',
 ]);
-export type LeaveDecisionSource = z.infer<typeof LeaveDecisionSourceSchema>;
 
 /** Paid draws down the balance; unpaid does not. */
 export const LeaveKindSchema = z.enum(['PAID', 'UNPAID']);

@@ -15,8 +15,6 @@ export const CreateApiTokenRequest = z.object({
   scopes: z.array(ApiTokenScopeSchema).min(1).max(API_TOKEN_SCOPES.length),
 });
 
-export type CreateApiTokenRequestDto = z.infer<typeof CreateApiTokenRequest>;
-
 export interface ApiTokenDto {
   id: string;
   name: string;

@@ -75,8 +75,6 @@ export const PatchShiftSchema = z
   })
   .refine((v) => Object.keys(v).length > 0, { message: 'nothing_to_update' });
 
-export type PatchShift = z.infer<typeof PatchShiftSchema>;
-
 /** GET /v1/me/shift response (or null if unassigned). */
 export const MyShiftResponseSchema = z.object({
   shift: ShiftDtoSchema.nullable(),
