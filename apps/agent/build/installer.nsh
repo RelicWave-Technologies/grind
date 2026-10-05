@@ -10,6 +10,20 @@
 ; call is a fragile, easily-stale backstop). We also delete the pre-rebrand
 ; grind:// association so the browser can't route the old scheme to a dead app.
 
+;
+; customInstallMode: always install per-user (electron-builder multiUserUi.nsh
+; calls this from the install-mode page's pre-function; setting
+; $isForceCurrentInstall skips the page and picks "only for me"). A Program
+; Files install cannot update itself — see electron-builder.yml. Installer
+; only: the uninstaller keeps its own choice so the per-user uninstaller can
+; still offer to remove an old all-users copy. Silent installs never reach the
+; page; they follow the existing install's registry entry.
+!macro customInstallMode
+  !ifndef BUILD_UNINSTALLER
+    StrCpy $isForceCurrentInstall "1"
+  !endif
+!macroend
+
 !macro customInstall
   DeleteRegKey HKCU "Software\Classes\timo"
   WriteRegStr HKCU "Software\Classes\timo" "" "URL:timo Protocol"
