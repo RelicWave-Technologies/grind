@@ -120,7 +120,8 @@ export function MeTodayScreen() {
     retry: false,
   });
 
-  const dayKey = ['insights', 'day', date, tz, targetUserId, 'calendar-day-gaps'];
+  // Memoised: a fresh array every render made anything depending on it unstable.
+  const dayKey = useMemo(() => ['insights', 'day', date, tz, targetUserId, 'calendar-day-gaps'], [date, tz, targetUserId]);
   const dayQ = useQuery({
     queryKey: dayKey,
     queryFn: () => {
@@ -131,9 +132,12 @@ export function MeTodayScreen() {
     refetchInterval: date === todayKey(tz) ? 15_000 : false,
   });
 
+  // Prefixes, not just this page's dayKey: Today and Reports cache the same
+  // day under sibling keys, and Today's pending list under ['time-requests'].
   const invalidate = useCallback(() => {
-    qc.invalidateQueries({ queryKey: dayKey });
-  }, [qc, dayKey]);
+    qc.invalidateQueries({ queryKey: ['insights', 'day'] });
+    qc.invalidateQueries({ queryKey: ['time-requests'] });
+  }, [qc]);
 
   // ---- Mutations (self-only) -------------------------------------------------
 
