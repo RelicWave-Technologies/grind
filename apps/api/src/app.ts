@@ -137,15 +137,19 @@ export function buildApp() {
   app.use('/v1/screenshots', screenshotsRouter);
   app.use('/v1/downloads', downloadsRouter);
   app.use('/v1/mcp', mcpRouter);
-  app.use('/v1/admin', adminRouter);
-  app.use('/v1/workspace', workspaceRouter);
+  // The /v1/admin/* sub-routers go BEFORE the generic admin router. Mounted
+  // after it, every request to them first ran adminRouter's auth + scope
+  // middleware (a user lookup and a workspace-wide user list) and then its own
+  // again, for nothing.
   app.use('/v1/admin/workspace-policy', workspacePolicyRouter);
   app.use('/v1/admin/leave', adminLeaveRouter);
-  app.use('/v1/leave', leaveRouter);
   app.use('/v1/admin/digests', digestsRouter);
   app.use('/v1/admin/payroll', payrollRouter);
   app.use('/v1/admin/overview', overviewRouter);
   app.use('/v1/admin/tester-ops', testerOpsRouter);
+  app.use('/v1/admin', adminRouter);
+  app.use('/v1/workspace', workspaceRouter);
+  app.use('/v1/leave', leaveRouter);
 
   app.use(errorHandler);
 
