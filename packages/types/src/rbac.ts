@@ -21,7 +21,6 @@ export const PERMISSIONS = [
   'flags.team.review',
   'flags.workspace.review',
   'overview.read',
-  'tester-ops.manage',
   'api-tokens.manage',
 ] as const;
 

@@ -24,7 +24,6 @@ import { workspaceRouter } from './routes/workspace';
 import { workspacePolicyRouter } from './routes/workspacePolicy';
 import { adminLeaveRouter, leaveRouter } from './routes/leave';
 import { overviewRouter } from './routes/overview';
-import { testerOpsRouter } from './routes/testerOps';
 import { downloadsRouter } from './routes/downloads';
 import { errorHandler } from './middleware/errorHandler';
 
@@ -139,7 +138,6 @@ export function buildApp() {
   app.use('/v1/admin/leave', adminLeaveRouter);
   app.use('/v1/leave', leaveRouter);
   app.use('/v1/admin/overview', overviewRouter);
-  app.use('/v1/admin/tester-ops', testerOpsRouter);
 
   app.use(errorHandler);
 
