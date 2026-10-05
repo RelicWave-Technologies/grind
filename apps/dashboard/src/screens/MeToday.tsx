@@ -120,7 +120,8 @@ export function MeTodayScreen() {
     retry: false,
   });
 
-  const dayKey = ['insights', 'day', date, tz, targetUserId, 'calendar-day-gaps'];
+  // Memoised: a fresh array every render made anything depending on it unstable.
+  const dayKey = useMemo(() => ['insights', 'day', date, tz, targetUserId, 'calendar-day-gaps'], [date, tz, targetUserId]);
   const dayQ = useQuery({
     queryKey: dayKey,
     queryFn: () => {
@@ -131,9 +132,12 @@ export function MeTodayScreen() {
     refetchInterval: date === todayKey(tz) ? 15_000 : false,
   });
 
+  // Prefixes, not just this page's dayKey: Today and Reports cache the same
+  // day under sibling keys, and Today's pending list under ['time-requests'].
   const invalidate = useCallback(() => {
-    qc.invalidateQueries({ queryKey: dayKey });
-  }, [qc, dayKey]);
+    qc.invalidateQueries({ queryKey: ['insights', 'day'] });
+    qc.invalidateQueries({ queryKey: ['time-requests'] });
+  }, [qc]);
 
   // ---- Mutations (self-only) -------------------------------------------------
 
@@ -147,9 +151,10 @@ export function MeTodayScreen() {
   });
 
   const createRequest = useMutation({
-    mutationFn: (vars: { requestedStart: number; requestedEnd: number; larkTaskGuid: string | null; taskSummary: string | null; reason: string; attendeeIds?: string[] }) => {
+    // clientUuid comes from the gap row's form so a retry reuses it (idempotent).
+    mutationFn: (vars: { clientUuid: string; requestedStart: number; requestedEnd: number; larkTaskGuid: string | null; taskSummary: string | null; reason: string; attendeeIds?: string[] }) => {
       const body: Record<string, unknown> = {
-        clientUuid: `web-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+        clientUuid: vars.clientUuid,
         requestedStart: new Date(vars.requestedStart).toISOString(),
         requestedEnd: new Date(vars.requestedEnd).toISOString(),
         larkTaskGuid: vars.larkTaskGuid,
@@ -228,7 +233,7 @@ export function MeTodayScreen() {
     focusRow(dayBlockRowId(hit));
     if (editable && hit.kind === 'GAP') {
       setGapPreset({
-        blockKey: `${hit.startedAt}-${hit.endedAt}`,
+        blockKey: String(hit.startedAt),
         range: { startedAt: hit.startedAt, endedAt: hit.endedAt },
         tick: (gapPreset?.tick ?? 0) + 1,
       });
@@ -272,7 +277,7 @@ export function MeTodayScreen() {
         const endedAt = Math.min(block.endedAt, focusEndMs ?? block.endedAt);
         if (endedAt > startedAt) {
           setGapPreset((previous) => ({
-            blockKey: `${block.startedAt}-${block.endedAt}`,
+            blockKey: String(block.startedAt),
             range: { startedAt, endedAt },
             tick: (previous?.tick ?? 0) + 1,
           }));
@@ -494,7 +499,7 @@ export function MeTodayScreen() {
                       idle · pending, contiguous and non-overlapping. */}
                   {day.blocks.map((b) => {
                     if (b.kind === 'GAP') {
-                      const blockKey = `${b.startedAt}-${b.endedAt}`;
+                      const blockKey = String(b.startedAt); // gap identity = its start (end tracks now)
                       const rowId = dayBlockRowId(b);
                       return (
                         <EntryRow

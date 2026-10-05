@@ -189,11 +189,6 @@ const attendanceRoute = createRoute({
   component: AttendanceScreen,
 });
 
-/**
- * Admin-only while leave is still being rolled out. Hiding the nav entry is not
- * access control on its own — the URL is still typeable — so the route guards
- * too, and the page's own admin affordances remain gated separately.
- */
 // Open to anybody signed in. Every read behind it is scoped by the caller's
 // own `req.scope.userIds` — a member's month grid and balance row are their
 // own, a manager's are their team's — and every write on the page is

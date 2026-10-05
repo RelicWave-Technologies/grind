@@ -110,10 +110,17 @@ export function TeamsScreen() {
     return performanceQ.data.members;
   }, [performanceQ.data]);
 
+  const invalidateTeamsAndPeople = () => {
+    qc.invalidateQueries({ queryKey: ['admin', 'users'] });
+    qc.invalidateQueries({ queryKey: ['admin', 'teams'] });
+    qc.invalidateQueries({ queryKey: reportQueryKeys.teamSummaryRoot });
+  };
   const create = useMutation({
     mutationFn: (vars: { name: string; managerIds: string[] }) =>
       api<Team>('/v1/admin/teams', { method: 'POST', json: vars }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'teams'] }),
+    // Managers named at creation are moved onto the team and their role is
+    // re-derived server-side, so the people list changes too.
+    onSuccess: invalidateTeamsAndPeople,
   });
   const patch = useMutation({
     mutationFn: (vars: { id: string; patch: TeamPatch }) =>
@@ -122,7 +129,8 @@ export function TeamsScreen() {
   });
   const del = useMutation({
     mutationFn: (id: string) => api(`/v1/admin/teams/${id}`, { method: 'DELETE' }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'teams'] }),
+    // Deleting a team un-assigns its members and re-derives managers' roles.
+    onSuccess: invalidateTeamsAndPeople,
   });
   const patchUser = useMutation({
     mutationFn: (vars: { id: string; patch: UserPatch }) =>

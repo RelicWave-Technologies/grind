@@ -22,9 +22,14 @@ describe('dayBlockRowId', () => {
       .toBe(dayBlockRowId(workBlock({ endedAt: 9_000 })));
   });
 
+  it("keeps today's trailing gap stable while its end tracks now", () => {
+    expect(dayBlockRowId(workBlock({ kind: 'GAP', timeEntryId: undefined, endedAt: 2_000 })))
+      .toBe(dayBlockRowId(workBlock({ kind: 'GAP', timeEntryId: undefined, endedAt: 17_000 })));
+  });
+
   it('keeps each non-entry block in its own stable namespace', () => {
     expect(dayBlockRowId(workBlock({ kind: 'GAP', timeEntryId: undefined })))
-      .toBe('gap-1000-2000');
+      .toBe('gap-1000');
     expect(dayBlockRowId(workBlock({ kind: 'PENDING', requestId: 'request-1' })))
       .toBe('pending-request-1');
     expect(dayBlockRowId(workBlock({ kind: 'IDLE_TRIMMED', timeEntryId: undefined })))

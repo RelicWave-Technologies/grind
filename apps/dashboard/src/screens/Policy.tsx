@@ -76,7 +76,10 @@ export function PolicyScreen() {
       // Codes, balances and the exceptions list all move with the rules.
       qc.invalidateQueries({ queryKey: ['leave'] });
       qc.invalidateQueries({ queryKey: ['reports'] });
-      qc.invalidateQueries({ queryKey: ['admin', 'attendance-exceptions'] });
+      // Attendance views judge days by these rules (no query is keyed
+      // 'attendance-exceptions'; the month summary and the attendance grid are).
+      qc.invalidateQueries({ queryKey: ['admin', 'month-summary'] });
+      qc.invalidateQueries({ queryKey: ['admin', 'attendance'] });
       setRulesOpen(false);
     },
   });
@@ -90,6 +93,8 @@ export function PolicyScreen() {
       api<WorkspacePolicyDto>('/v1/admin/workspace-policy', { method: 'PATCH', json: patch }),
     onSuccess: (next) => {
       qc.setQueryData(['workspace-policy'], next);
+      // Team settings reads the same policy under its own key.
+      qc.invalidateQueries({ queryKey: ['admin', 'workspace-policy'] });
       setDraft(next);
       qc.invalidateQueries({ queryKey: ['admin', 'monitoring-settings-audits'] });
       setPolicyRiskPrompt(null);
@@ -103,6 +108,21 @@ export function PolicyScreen() {
       subtitle="Admin defaults for capture, screenshots, idle breaks, and attendance rules."
     />
   );
+
+  // Checked before the skeleton: on a failed load `draft` is never set, so the
+  // skeleton branch used to win and the page said "Loading policy" forever.
+  if (q.isError && !draft) {
+    return (
+      <Page>
+        {header}
+        <EmptyState
+          tone="danger"
+          title="Couldn’t load policy"
+          description={(q.error as Error).message}
+        />
+      </Page>
+    );
+  }
 
   if (q.isLoading || !draft) {
     return (
@@ -122,19 +142,6 @@ export function PolicyScreen() {
             </List>
           </Card>
         </div>
-      </Page>
-    );
-  }
-
-  if (q.isError) {
-    return (
-      <Page>
-        {header}
-        <EmptyState
-          tone="danger"
-          title="Couldn’t load policy"
-          description={(q.error as Error).message}
-        />
       </Page>
     );
   }

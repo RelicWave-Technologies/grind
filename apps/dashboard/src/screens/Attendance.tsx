@@ -1,9 +1,9 @@
 import './attendance.css';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouteContext } from '@tanstack/react-router';
 import { CalendarRange, FileSpreadsheet, Sheet } from 'lucide-react';
-import { api, API_BASE } from '../lib/api';
+import { api, ApiError, API_BASE } from '../lib/api';
 import { useMonthReportDownload, fmtMonthLong } from '../lib/useMonthReportDownload';
 import type { TimesheetMatrix } from '../lib/types';
 import type { MonthSummaryResponse, MonthSummaryRow } from '@grind/types';
@@ -395,7 +395,26 @@ function MonthSummary({ month, isAdmin }: { month: string; isAdmin: boolean }) {
     retry: false,
   });
   const data = q.data;
-  if (!data) return null;
+  // Hidden only when the viewer may not read the team (403). Loading and
+  // other failures used to return null too, leaving this — the default
+  // view — as a blank page with no spinner, error or retry.
+  if (!data) {
+    if (q.error instanceof ApiError && q.error.status === 403) return null;
+    return (
+      <Card variant="flush" className="atd-card">
+        {q.isError ? (
+          <EmptyState
+            tone="danger"
+            title="Couldn’t load the month summary"
+            description={(q.error as Error).message}
+            action={<Button variant="secondary" onClick={() => void q.refetch()}>Retry</Button>}
+          />
+        ) : (
+          <SkeletonTable rows={6} />
+        )}
+      </Card>
+    );
+  }
 
   return (
     <Card variant="flush" className="atd-card">
@@ -485,9 +504,20 @@ function MonthDetails({
   const [editing, setEditing] = useState<LeaveBalanceRow | null>(null);
   const monthEnd = lastDayOf(month);
   // The settings behind the balance, fetched only when an admin asks to edit.
+  const [settingsError, setSettingsError] = useState<string | null>(null);
+  useEffect(() => setSettingsError(null), [row?.userId]);
   const loadSettings = async () => {
-    const res = await api<LeaveBalancesResponse>(`/v1/admin/leave/balances?asOf=${monthEnd}`);
-    setEditing(res.rows.find((x) => x.userId === row?.userId) ?? null);
+    // Used to be fire-and-forget: a failed fetch was an unhandled rejection
+    // and a missing row left editing null, so the button did nothing.
+    setSettingsError(null);
+    try {
+      const res = await api<LeaveBalancesResponse>(`/v1/admin/leave/balances?asOf=${monthEnd}`);
+      const found = res.rows.find((x) => x.userId === row?.userId) ?? null;
+      if (!found) setSettingsError('No leave settings found for this person.');
+      setEditing(found);
+    } catch (e) {
+      setSettingsError(e instanceof Error ? e.message : 'Could not load leave settings.');
+    }
   };
   const a = row?.account;
   const signed = (n: number) => (n > 0 ? `+${fmtDays(n)}` : n < 0 ? `−${fmtDays(-n)}` : '0');
@@ -515,6 +545,7 @@ function MonthDetails({
           </>
         }
       >
+        {settingsError && <Banner status="danger">{settingsError}</Banner>}
         {a && a.lines.length === 0 ? (
           <p className="ui-t-small">Nothing changed this month.</p>
         ) : (

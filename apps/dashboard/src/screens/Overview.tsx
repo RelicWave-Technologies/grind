@@ -154,7 +154,12 @@ export function OverviewScreen() {
 
         {/* Today's headline numbers */}
         <Card variant="flush" className="ui-rise-1">
-          {q.isLoading || !t ? (
+          {!t && q.isError ? (
+            // The banner above explains it; a skeleton here would spin forever.
+            <StatRow>
+              <Stat label="Today" value="—" />
+            </StatRow>
+          ) : q.isLoading || !t ? (
             <StatRow>
               <SkeletonStat />
               <SkeletonStat />
@@ -243,12 +248,12 @@ export function OverviewScreen() {
                   />
                 ))}
               </List>
-            ) : (
+            ) : q.data ? (
               <EmptyState
                 title="No pending approvals"
                 description="Nothing waiting on you. Nice work."
               />
-            )}
+            ) : null}
           </Card>
 
           <Card
@@ -280,9 +285,9 @@ export function OverviewScreen() {
                   />
                 ))}
               </List>
-            ) : (
+            ) : q.data ? (
               <EmptyState title="No open flags" description="No open risk flags." />
-            )}
+            ) : null}
           </Card>
         </div>
 
