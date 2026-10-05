@@ -5,6 +5,7 @@ import { getTokenManager } from './index';
 import { isLarkConfigured } from './config';
 import { LarkReauthRequiredError, LarkTransientError } from './oauthClient';
 import type { TokenManager } from './tokenManager';
+import { onShutdown } from '../lib/lifecycle';
 
 const CHECK_INTERVAL_MS = 5 * 60_000;
 const INITIAL_DELAY_MS = 15_000;
@@ -39,7 +40,12 @@ export function startLarkTokenRefreshScheduler(): void {
   };
   const handle = setInterval(tick, CHECK_INTERVAL_MS);
   handle.unref?.();
-  setTimeout(tick, INITIAL_DELAY_MS).unref?.();
+  const first = setTimeout(tick, INITIAL_DELAY_MS);
+  first.unref?.();
+  onShutdown(() => {
+    clearInterval(handle);
+    clearTimeout(first);
+  });
 }
 
 export async function runLarkTokenRefreshOnce(

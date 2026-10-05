@@ -1,3 +1,4 @@
+import { prisma } from '@grind/db';
 import { env } from './env';
 import { logger } from './logger';
 import { buildApp } from './app';
@@ -10,11 +11,12 @@ import { startPayrollMonthCloseScheduler } from './payroll/scheduler';
 import { startScreenshotRetentionScheduler } from './screenshots/retention';
 import { startTesterOpsSchedulers } from './testerOps/scheduler';
 import { startTimerLifecycleScheduler } from './timeLifecycle';
+import { installGracefulShutdown } from './lib/lifecycle';
 
 const app = buildApp();
 
 const port = env.PORT ?? env.API_PORT;
-app.listen(port, () => {
+const server = app.listen(port, () => {
   logger.info({ port, env: env.NODE_ENV }, 'api listening');
   // Subscribe to Lark card.action.trigger over long-connection WebSocket.
   // No-op when Lark isn't configured.
@@ -32,3 +34,7 @@ app.listen(port, () => {
   startTesterOpsSchedulers();
   startTimerLifecycleScheduler(env.TIMO_TIMER_LEASE_RECONCILER_ENABLED === 'true');
 });
+
+// SIGTERM (deploy) / SIGINT: stop schedulers, finish in-flight requests,
+// disconnect Prisma, exit 0 — instead of dying mid-request.
+installGracefulShutdown({ server, disconnect: () => prisma.$disconnect() });
