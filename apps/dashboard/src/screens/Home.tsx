@@ -29,6 +29,7 @@ import {
   Toolbar,
   Tag,
   Skeleton,
+  Banner,
 } from '../ui';
 
 interface ListResponse<T> {
@@ -62,6 +63,8 @@ export function HomeScreen() {
   });
 
   const day = dayQ.data;
+  // A failed load must not read as "no tracked time / nothing pending".
+  const dayFailed = dayQ.isError && !day;
   const trackedMs = dayQ.data?.totals.workedMs ?? 0;
   const meetingMs = dayQ.data?.totals.meetingMs ?? 0;
   const manualMs = dayQ.data?.totals.manualMs ?? 0;
@@ -116,6 +119,8 @@ export function HomeScreen() {
         subtitle={
           dayQ.isLoading
             ? 'Loading your current day.'
+            : dayFailed
+            ? 'Your day could not be loaded right now.'
             : totalMs > 0
             ? `You've tracked ${fmtDurationMs(totalMs)} today — keep the rhythm.`
             : 'No tracked time yet. Start the agent or review missing time.'
@@ -140,15 +145,29 @@ export function HomeScreen() {
         }
       />
 
+      {(dayFailed || pendingApprovalsQ.isError) && (
+        <Banner
+          status="danger"
+          action={
+            <Button variant="secondary" size="sm" onClick={() => { void dayQ.refetch(); void pendingApprovalsQ.refetch(); }}>
+              Retry
+            </Button>
+          }
+        >
+          Couldn’t load {dayFailed ? 'today’s time' : 'your pending approvals'}
+          {' '}— the numbers below may be incomplete.
+        </Banner>
+      )}
+
       <Card
         title="Today"
         className="hm-command-card ui-rise-1"
-        action={status ? <Tag status={status.status} mono>{status.label}</Tag> : <Tag mono>Loading</Tag>}
+        action={status ? <Tag status={status.status} mono>{status.label}</Tag> : <Tag mono>{dayFailed ? 'Unavailable' : 'Loading'}</Tag>}
       >
         <div className="hm-command">
           <HomeMetric
             label="Tracked today"
-            value={dayQ.isLoading ? '—' : fmtDurationMs(totalMs)}
+            value={dayQ.isLoading || dayFailed ? '—' : fmtDurationMs(totalMs)}
             sub={firstLast === '—' ? 'No activity window yet' : firstLast}
             tone="lime"
             featured

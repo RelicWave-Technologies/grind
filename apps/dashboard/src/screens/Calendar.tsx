@@ -217,6 +217,19 @@ export function CalendarScreen() {
   const policy = policyQ.data;
   const data = calendarQ.data;
 
+  // Without this a failed load rendered as an empty month, "No holidays this
+  // month" and "You took 0 days" — indistinguishable from a quiet month.
+  const loadQueries = [
+    { q: calendarQ, label: 'the calendar' },
+    { q: balanceQ, label: 'your balance' },
+    { q: policyQ, label: 'the leave policy' },
+    { q: mineQ, label: 'your leave requests' },
+  ];
+  const loadFailures = loadQueries.filter(({ q }) => q.isError).map(({ label }) => label);
+  const retryFailed = () => {
+    for (const { q } of loadQueries) if (q.isError) void q.refetch();
+  };
+
   /** date -> the holiday that lands on it. */
   const holidayByDate = useMemo(() => {
     const map = new Map<string, HolidayDto>();
@@ -306,6 +319,19 @@ export function CalendarScreen() {
           </Toolbar>
         }
       />
+
+      {loadFailures.length > 0 && (
+        <Banner
+          status="danger"
+          action={
+            <Button variant="secondary" size="sm" onClick={retryFailed}>
+              Retry
+            </Button>
+          }
+        >
+          Couldn’t load {loadFailures.join(', ')}. What is shown below may be incomplete.
+        </Banner>
+      )}
 
       {/* Two scopes sit in this row and used to look alike: the balance is a
           running total, the rest belong to the month on screen. Every hint now
@@ -608,9 +634,13 @@ function HolidaysPanel({
     onError: (e: Error) => setError(humanError(e.message)),
   });
 
+  const [removeError, setRemoveError] = useState<string | null>(null);
   const remove = useMutation({
     mutationFn: (id: string) => api(`/v1/admin/leave/holidays/${id}`, { method: 'DELETE' }),
+    onMutate: () => setRemoveError(null),
     onSuccess: onChanged,
+    // A failed removal used to do nothing visible: the row just stayed.
+    onError: (e: Error) => setRemoveError(humanError(e.message)),
   });
 
   if (loading) return <SkeletonTable rows={4} />;
@@ -659,6 +689,8 @@ function HolidaysPanel({
           />
         </Field>
       </Modal>
+
+      {removeError && <Banner status="danger">{removeError}</Banner>}
 
       {holidays.length === 0 ? (
         <EmptyState
@@ -815,6 +847,10 @@ function MyLeavePanel({
  * The added/removed days are a ledger entry with a reason, never an edit of the
  * balance itself, so the statement can always say how a number got there.
  */
+function isHalfStep(n: number): boolean {
+  return Number.isFinite(n) && Number.isInteger(n * 2);
+}
+
 export function EditMemberModal({
   row, month, onClose, onSaved,
 }: { row: LeaveBalanceRow | null; month: string; onClose: () => void; onSaved: () => void }) {
@@ -836,7 +872,14 @@ export function EditMemberModal({
   }, [row]);
 
   const changeDays = change.trim() === '' ? 0 : Number(change);
-  const changeInvalid = Number.isNaN(changeDays) || (changeDays !== 0 && why.trim() === '');
+  // The API only takes half-day steps (and 0–31 for the monthly rate). Check
+  // here: the PATCH commits before the adjustment is sent, so a "0.3" used to
+  // save the rate and then fail half-way; a non-number rate was sent as null
+  // (JSON has no NaN) and silently reset the person to the company default.
+  const rateNumber = Number(rate);
+  const rateInvalid = rate.trim() !== '' && (!isHalfStep(rateNumber) || rateNumber < 0 || rateNumber > 31);
+  const changeStepInvalid = !isHalfStep(changeDays);
+  const changeInvalid = changeStepInvalid || (changeDays !== 0 && why.trim() === '');
 
   const save = useMutation({
     mutationFn: async () => {
@@ -857,7 +900,11 @@ export function EditMemberModal({
       }
     },
     onSuccess: () => { onSaved(); onClose(); },
-    onError: (e: Error) => setError(humanError(e.message)),
+    onError: (e: Error) => {
+      setError(humanError(e.message));
+      // The member PATCH may have landed before the adjustment failed.
+      onSaved();
+    },
   });
 
   return (
@@ -868,12 +915,12 @@ export function EditMemberModal({
       actions={
         <>
           <Button variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button disabled={save.isPending || changeInvalid} onClick={() => save.mutate()}>Save</Button>
+          <Button disabled={save.isPending || changeInvalid || rateInvalid} onClick={() => save.mutate()}>Save</Button>
         </>
       }
     >
       {error && <Banner status="danger">{error}</Banner>}
-      <Field label="Leave per month" hint="Empty = company default.">
+      <Field label="Leave per month" hint="Empty = company default." error={rateInvalid ? 'Use half-day steps between 0 and 31.' : undefined}>
         <Input type="number" step="0.5" min="0" value={rate} placeholder="default"
                onChange={(e) => setRate(e.target.value)} />
       </Field>
@@ -887,7 +934,7 @@ export function EditMemberModal({
           <option value="off">Working day</option>
         </Select>
       </Field>
-      <Field label="Add or remove days" hint="Optional. 1 adds a day, -0.5 removes half.">
+      <Field label="Add or remove days" hint="Optional. 1 adds a day, -0.5 removes half." error={changeStepInvalid ? 'Use half-day steps, like 1 or -0.5.' : undefined}>
         <Input type="number" step="0.5" value={change} placeholder="0"
                onChange={(e) => setChange(e.target.value)} />
       </Field>
