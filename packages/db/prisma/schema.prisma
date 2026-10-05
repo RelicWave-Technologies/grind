@@ -43,6 +43,7 @@ model Workspace {
   wfhRequests               WfhRequest[]
   attendanceOverrides       AttendanceOverride[]
   attendanceOverrideEvents  AttendanceOverrideEvent[]
+  agentCommands             AgentCommand[]
 }
 
 /// Workspace-wide capture policy. A single row per workspace (unique on
@@ -390,6 +391,8 @@ model User {
   attendanceOverridesAuthored      AttendanceOverride[]      @relation("AttendanceOverrideAuthor")
   attendanceOverrideEvents         AttendanceOverrideEvent[] @relation("AttendanceOverrideEventSubject")
   attendanceOverrideEventsAuthored AttendanceOverrideEvent[] @relation("AttendanceOverrideEventAuthor")
+  agentCommands                    AgentCommand[]            @relation("AgentCommandTarget")
+  agentCommandsRequested           AgentCommand[]            @relation("AgentCommandRequester")
 
   @@index([workspaceId])
   @@index([teamId])
@@ -1668,4 +1671,48 @@ model MonthPerformancePointer {
 
   @@unique([userId, month])
   @@index([workspaceId, month, band])
+}
+
+enum AgentCommandType {
+  /// Re-send the laptop's local time, activity and screenshots for a date range.
+  RESYNC
+}
+
+enum AgentCommandStatus {
+  /// Waiting for the target's next heartbeat.
+  PENDING
+  /// Handed to the agent; no result yet. Handed again after 10 minutes.
+  DELIVERED
+  DONE
+  FAILED
+  /// Never completed within 7 days (the daily prune).
+  EXPIRED
+}
+
+/// A developer's request for one person's desktop agent to do something, such
+/// as re-sending its local data for a date range. The agent pulls commands on
+/// its heartbeat and posts the outcome back here, so nothing has to reach into
+/// the laptop. Developer-only (DEVELOPER_EMAILS); the person is not notified.
+model AgentCommand {
+  id            String             @id @default(cuid())
+  workspaceId   String
+  workspace     Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  /// The person whose agent runs it.
+  userId        String
+  user          User               @relation("AgentCommandTarget", fields: [userId], references: [id], onDelete: Cascade)
+  requestedById String
+  requestedBy   User               @relation("AgentCommandRequester", fields: [requestedById], references: [id], onDelete: Cascade)
+  type          AgentCommandType
+  /// RESYNC: { from: YYYY-MM-DD, to: YYYY-MM-DD, timeZone }.
+  params        Json
+  status        AgentCommandStatus @default(PENDING)
+  createdAt     DateTime           @default(now())
+  deliveredAt   DateTime?
+  completedAt   DateTime?
+  /// What the agent reported: counts requeued, still pending, errors, device.
+  result        Json?
+  error         String?
+
+  @@index([userId, status])
+  @@index([workspaceId, createdAt])
 }
