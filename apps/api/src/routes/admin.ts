@@ -12,22 +12,27 @@ import { timesheetCalendarInputs } from '../leave';
 import { loadPunchLookup } from '../attendance/punches';
 import { loadAttendanceRuleContext } from '../attendance/ruleContext';
 import {
-  addDays as addDaysStr,
-  buildTimesheetMatrix,
   dateRange,
+  timesheetMatrixFromBuckets,
   type TimesheetMatrix,
-  type TimesheetSegmentInput,
 } from '../insights/timesheets';
 import { localDayWindow } from '../insights/day';
 import {
-  groupInvalidationsByUser,
-  isInvalidatedAt,
-  invalidatedOverlapMs,
-  type TimeInvalidationInput,
-} from '../insights/invalidations';
-import { loadTimeInvalidationsForUsers } from '../insights/timeInvalidations';
-import { loadEntryLiveEvidence } from '../insights/liveEntryEvidence';
-import { resolveEffectiveEntrySegmentEnds } from '../insights/openSegmentEvidence';
+  countedMs,
+  intersectIntervals,
+  isCounted,
+  isTracked as isTrackedPiece,
+  mergeIntervals,
+  unionMs,
+  type TimelineInvalidation,
+} from '@grind/core';
+import {
+  invalidatedAt,
+  loadTimeline,
+  loadTimelineWindow,
+  piecesForUser,
+  type TimelineRowPiece,
+} from '../time';
 import { agentPresence, type AgentPresence } from '../agentPresence';
 import {
   CreateApiTokenRequest,
@@ -39,7 +44,9 @@ import {
   IdleWarningSecondsSchema,
   ShiftScheduleSchema,
   WORKSPACE_POLICY_DEFAULTS,
+  addDays,
   dateKeyInTimeZone,
+  isYmd,
   normalizeScreenshotIntervalMin,
   type ApiTokenDto,
   type AttendanceRuleVerdict,
@@ -752,17 +759,16 @@ interface MtrListEntry {
 
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 
-/** UTC day-start (midnight) for a given timestamp — used by triage's adjacency window. */
-function dayStartMs(d: Date): number {
-  const t = d.getTime();
-  return t - (t % (24 * 60 * 60 * 1000));
-}
-
 /**
- * Compute per-user 30-day approval / rejection / daily-average context
- * in a single batched DB pass. Used to enrich PENDING rows with triage.
+ * Per-user 30-day approval / rejection / daily-average context. The average is
+ * counted time from the shared timeline — idle never counts, overlaps count
+ * once, invalidated time is excluded — the same figure the reports show.
  */
-async function buildTriageContextByUser(userIds: string[], now: number) {
+async function buildTriageContextByUser(
+  userIds: string[],
+  now: number,
+  pieces: readonly TimelineRowPiece[],
+) {
   if (userIds.length === 0) {
     return new Map<string, { avgDailyTotalMs: number; approved: number; rejected: number }>();
   }
@@ -776,49 +782,10 @@ async function buildTriageContextByUser(userIds: string[], now: number) {
     _count: { _all: true },
   });
 
-  // Trailing-30-day TOTAL AUTO + MANUAL tracked ms per user. Heuristic:
-  // sum segment durations directly; segment.endedAt may be null for
-  // an open entry but we clamp to `now`.
-  const entries = await prisma.timeEntry.findMany({
-    where: {
-      userId: { in: userIds },
-      segments: { some: { startedAt: { gte: since } } },
-    },
-    select: {
-      id: true,
-      userId: true,
-      endedAt: true,
-      trackingProtocolVersion: true,
-      lastProvenAt: true,
-      leaseExpiresAt: true,
-      segments: {
-        where: { startedAt: { gte: since } },
-        select: { startedAt: true, endedAt: true },
-        orderBy: { startedAt: 'asc' },
-      },
-    },
-  });
-  const nowDate = new Date(now);
-  const evidenceByEntry = await loadEntryLiveEvidence(entries, nowDate);
-  const totalByUser = new Map<string, number>();
-  for (const entry of entries) {
-    const effectiveEnds = resolveEffectiveEntrySegmentEnds({
-      segments: entry.segments,
-      entryEndedAt: entry.endedAt,
-      now: nowDate,
-      evidence: evidenceByEntry.get(entry.id),
-      lifecycle: entry,
-    });
-    for (const [index, segment] of entry.segments.entries()) {
-      const end = (effectiveEnds[index] ?? nowDate).getTime();
-      const dur = Math.max(0, end - segment.startedAt.getTime());
-      totalByUser.set(entry.userId, (totalByUser.get(entry.userId) ?? 0) + dur);
-    }
-  }
-
+  const window = { start: since.getTime(), end: now };
   const out = new Map<string, { avgDailyTotalMs: number; approved: number; rejected: number }>();
   for (const uid of userIds) {
-    const total = totalByUser.get(uid) ?? 0;
+    const total = countedMs(piecesForUser(pieces, uid), window);
     const approved = counts
       .filter((c) => c.userId === uid && c.status === 'APPROVED')
       .reduce((n, c) => n + c._count._all, 0);
@@ -835,12 +802,11 @@ async function buildTriageContextByUser(userIds: string[], now: number) {
 }
 
 /**
- * Per-request "same-day AUTO totals + closest-edge" computed against
- * a single user's segment list. Pure — the caller pre-fetches segments
- * once per (workspace, day window).
+ * Per-request "same-day tracked total + closest tracked edge", read from the
+ * user's resolved timeline (agent-tracked work and meetings, not invalidated).
  */
 function adjacencyFor(
-  segments: Array<{ startedAt: number; endedAt: number; userId: string }>,
+  pieces: readonly TimelineRowPiece[],
   userId: string,
   reqStart: number,
   reqEnd: number,
@@ -849,14 +815,14 @@ function adjacencyFor(
 ): { autoTrackedSameDayMs: number; closestAutoEdgeMs: number } {
   let same = 0;
   let closest = Number.POSITIVE_INFINITY;
-  for (const s of segments) {
-    if (s.userId !== userId) continue;
-    const a = Math.max(dayStart, s.startedAt);
-    const b = Math.min(dayEnd, s.endedAt);
+  for (const p of pieces) {
+    if (p.userId !== userId || !isTrackedPiece(p)) continue;
+    const a = Math.max(dayStart, p.start);
+    const b = Math.min(dayEnd, p.end);
     if (b > a) same += b - a;
-    // Distance from this segment to the request window (0 if overlapping).
-    if (s.endedAt < reqStart) closest = Math.min(closest, reqStart - s.endedAt);
-    else if (s.startedAt > reqEnd) closest = Math.min(closest, s.startedAt - reqEnd);
+    // Distance from this stretch to the request window (0 if overlapping).
+    if (p.end < reqStart) closest = Math.min(closest, reqStart - p.end);
+    else if (p.start > reqEnd) closest = Math.min(closest, p.start - reqEnd);
     else closest = 0;
   }
   return {
@@ -969,58 +935,33 @@ adminRouter.get('/manual-time-requests', requireManagerOrAbove, async (req, res,
     if (pendingRows.length > 0) {
       const now = Date.now();
       const userIds = Array.from(new Set(pendingRows.map((r) => r.userId)));
-      const perUser = await buildTriageContextByUser(userIds, now);
-
-      // One segments query per page-load for the pending-day windows.
-      const earliestDay = pendingRows.reduce((min, r) => Math.min(min, dayStartMs(r.requestedStart)), Infinity);
-      const latestDay = pendingRows.reduce((max, r) => Math.max(max, dayStartMs(r.requestedStart) + 24 * 3_600_000), 0);
-      const triageEntries = await prisma.timeEntry.findMany({
-        where: {
-          userId: { in: userIds },
-          source: 'AUTO',
-          startedAt: { lt: new Date(latestDay) },
-          OR: [{ endedAt: null }, { endedAt: { gt: new Date(earliestDay) } }],
-        },
-        select: {
-          id: true,
-          userId: true,
-          endedAt: true,
-          trackingProtocolVersion: true,
-          lastProvenAt: true,
-          leaseExpiresAt: true,
-          segments: {
-            where: {
-              startedAt: { lt: new Date(latestDay) },
-              OR: [{ endedAt: null }, { endedAt: { gt: new Date(earliestDay) } }],
-            },
-            select: { startedAt: true, endedAt: true },
-            orderBy: { startedAt: 'asc' },
-          },
-        },
+      const tz = req.scope.workspaceTimezone;
+      const dayOf = (at: Date) => localDayWindow(dateKeyInTimeZone(at, tz), tz);
+      // One timeline read covers the 30-day average and every pending day.
+      const earliest = pendingRows.reduce(
+        (min, r) => Math.min(min, dayOf(r.requestedStart)?.start.getTime() ?? r.requestedStart.getTime()),
+        now - THIRTY_DAYS_MS,
+      );
+      const latest = pendingRows.reduce(
+        (max, r) => Math.max(max, dayOf(r.requestedStart)?.end.getTime() ?? r.requestedEnd.getTime()),
+        now,
+      );
+      const triageTimeline = await loadTimelineWindow({
+        userIds,
+        start: new Date(earliest),
+        end: new Date(latest),
+        now: new Date(now),
       });
-      const triageNow = new Date(now);
-      const triageEvidence = await loadEntryLiveEvidence(triageEntries, triageNow);
-      const segLite = triageEntries.flatMap((entry) => {
-        const effectiveEnds = resolveEffectiveEntrySegmentEnds({
-          segments: entry.segments,
-          entryEndedAt: entry.endedAt,
-          now: triageNow,
-          evidence: triageEvidence.get(entry.id),
-          lifecycle: entry,
-        });
-        return entry.segments.map((segment, index) => ({
-          startedAt: segment.startedAt.getTime(),
-          endedAt: (effectiveEnds[index] ?? triageNow).getTime(),
-          userId: entry.userId,
-        }));
-      });
+      const perUser = await buildTriageContextByUser(userIds, now, triageTimeline.pieces);
 
       triageByRequest = new Map<string, TriageResult>();
       for (const r of pendingRows) {
         const reqStart = r.requestedStart.getTime();
         const reqEnd = r.requestedEnd.getTime();
-        const dayStart = dayStartMs(r.requestedStart);
-        const adj = adjacencyFor(segLite, r.userId, reqStart, reqEnd, dayStart, dayStart + 24 * 3_600_000);
+        const day = dayOf(r.requestedStart);
+        const dayStart = day?.start.getTime() ?? reqStart;
+        const dayEnd = day?.end.getTime() ?? reqEnd;
+        const adj = adjacencyFor(triageTimeline.pieces, r.userId, reqStart, reqEnd, dayStart, dayEnd);
         const ctx = perUser.get(r.userId) ?? { avgDailyTotalMs: 0, approved: 0, rejected: 0 };
         const triage = triageRequest({
           requestedStartMs: reqStart,
@@ -1128,10 +1069,6 @@ adminRouter.post('/manual-time-requests/:id/decide', requireManagerOrAbove, asyn
 const TIMESHEETS_MAX_DAYS = 60;
 const TIMESHEETS_DEFAULT_DAYS = 14;
 
-function isYmd(s: unknown): s is string {
-  return typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
-}
-
 interface ResolvedTimesheetRange {
   from: string;
   to: string;
@@ -1164,7 +1101,7 @@ function resolveTimesheetRange(req: { query: Record<string, unknown> }, workspac
   const todayKey = dateKeyInTimeZone(new Date(), tz);
 
   const to = isYmd(req.query.to) ? (req.query.to as string) : todayKey;
-  const from = isYmd(req.query.from) ? (req.query.from as string) : addDaysStr(to, -(TIMESHEETS_DEFAULT_DAYS - 1));
+  const from = isYmd(req.query.from) ? (req.query.from as string) : addDays(to, -(TIMESHEETS_DEFAULT_DAYS - 1));
 
   if (from > to) return { status: 400, error: 'invalid_range' };
   const len = dateRange(from, to).length;
@@ -1179,76 +1116,37 @@ async function loadTimesheetData(
   scope: { userIds: string[]; workspaceId: string },
   range: ResolvedTimesheetRange,
 ) {
-  const firstDay = localDayWindow(range.from, range.tz);
-  const lastDay = localDayWindow(range.to, range.tz);
-  if (!firstDay || !lastDay) throw new Error('timesheet_range_unresolvable');
-
-  // Query an extra calendar day on both sides for entries/invalidations that
-  // overlap a local-day boundary. These are instants in the workspace zone,
-  // never server-midnight guesses.
-  const lookbackStart = new Date(firstDay.start.getTime() - 24 * 60 * 60 * 1000);
-  const lookbackEnd = new Date(lastDay.end.getTime() + 24 * 60 * 60 * 1000);
-
-  const [entries, invalidations] = await Promise.all([
-    prisma.timeEntry.findMany({
-      where: {
-        userId: { in: scope.userIds },
-        startedAt: { lt: lookbackEnd },
-        OR: [{ endedAt: null }, { endedAt: { gt: lookbackStart } }],
-      },
-      include: { segments: { select: { kind: true, startedAt: true, endedAt: true } } },
-    }),
-    loadTimeInvalidationsForUsers(scope.userIds, lookbackStart, lookbackEnd),
-  ]);
-
-  const now = new Date();
-  const evidenceByEntry = await loadEntryLiveEvidence(entries, now);
-  const segs: TimesheetSegmentInput[] = [];
-  for (const e of entries) {
-    const effectiveEnds = resolveEffectiveEntrySegmentEnds({
-      segments: e.segments,
-      entryEndedAt: e.endedAt,
-      now,
-      evidence: evidenceByEntry.get(e.id),
-      lifecycle: e,
-    });
-    for (const [index, s] of e.segments.entries()) {
-      segs.push({
-        userId: e.userId,
-        source: e.source as 'AUTO' | 'MANUAL',
-        segmentKind: s.kind as 'WORK' | 'MEETING' | 'IDLE_TRIMMED',
-        startedAt: s.startedAt.getTime(),
-        endedAt: (effectiveEnds[index] ?? now).getTime(),
-      });
-    }
+  if (!localDayWindow(range.from, range.tz) || !localDayWindow(range.to, range.tz)) {
+    throw new Error('timesheet_range_unresolvable');
   }
 
-  const calendarInputs = await timesheetCalendarInputs({
-    workspaceId: scope.workspaceId,
-    tz: range.tz,
-    userIds: scope.userIds,
+  const [timeline, calendarInputs] = await Promise.all([
+    loadTimeline({ userIds: scope.userIds, from: range.from, to: range.to, tz: range.tz }),
+    timesheetCalendarInputs({
+      workspaceId: scope.workspaceId,
+      tz: range.tz,
+      userIds: scope.userIds,
+      from: range.from,
+      to: range.to,
+    }),
+  ]);
+  const matrix = timesheetMatrixFromBuckets({
     from: range.from,
     to: range.to,
-  });
-  const matrix = buildTimesheetMatrix({
-    from: range.from,
-    to: range.to,
     tz: range.tz,
-    segments: segs,
-    invalidations,
+    days: timeline.days,
+    buckets: timeline.buckets,
     ...calendarInputs,
   });
-  if (matrix) {
-    const samples = await prisma.activitySample.findMany({
-      where: {
-        userId: { in: scope.userIds },
-        bucketStart: { gte: lookbackStart, lt: lookbackEnd },
-      },
-      select: { userId: true, bucketStart: true },
-      orderBy: [{ userId: 'asc' }, { bucketStart: 'asc' }],
-    });
-    attachActivitySampleCounts(matrix, samples, invalidations);
-  }
+  const samples = await prisma.activitySample.findMany({
+    where: {
+      userId: { in: scope.userIds },
+      bucketStart: { gte: timeline.start, lt: timeline.end },
+    },
+    select: { userId: true, bucketStart: true },
+    orderBy: [{ userId: 'asc' }, { bucketStart: 'asc' }],
+  });
+  attachActivitySampleCounts(matrix, samples, timeline.invalidations);
   const users = await prisma.user.findMany({
     where: { id: { in: scope.userIds } },
     select: { id: true, name: true, email: true, avatarUrl: true, role: true },
@@ -1260,9 +1158,9 @@ async function loadTimesheetData(
 function attachActivitySampleCounts(
   matrix: TimesheetMatrix,
   samples: Array<{ userId: string; bucketStart: Date }>,
-  invalidations: TimeInvalidationInput[] = [],
+  invalidations: TimelineInvalidation[] = [],
 ) {
-  const invalidationsByUser = groupInvalidationsByUser(invalidations);
+  const invalidated = invalidatedAt(invalidations);
   const windows = matrix.days
     .map((day) => {
       const win = localDayWindow(day, matrix.tz);
@@ -1276,7 +1174,7 @@ function attachActivitySampleCounts(
     const userCells = matrix.cells[sample.userId];
     if (!userCells) continue;
     const t = sample.bucketStart.getTime();
-    if (isInvalidatedAt(invalidationsByUser, sample.userId, t)) continue;
+    if (invalidated(sample.userId, t)) continue;
     for (const win of windows) {
       if (t < win.startMs || t >= win.endMs) continue;
       const cell = userCells[win.day];
@@ -2448,12 +2346,7 @@ adminRouter.post('/flags/resolve-many', requireAnyCapability(['flags.team.review
       return res.status(403).json({ error: 'forbidden' });
     }
 
-    let invalidatedMs = 0;
-    if (resolution === 'TIME_INVALIDATED') {
-      for (const f of flags) {
-        invalidatedMs += await calculateInvalidatedMsForWindow(prisma, f.userId, f.windowStart, f.windowEnd);
-      }
-    }
+    const invalidatedMs = resolution === 'TIME_INVALIDATED' ? await calculateInvalidatedMs(flags) : 0;
 
     await prisma.$transaction(async (tx) => {
       await tx.activityFlag.updateMany({
@@ -2526,14 +2419,7 @@ adminRouter.post('/flags/:id/resolve', requireAnyCapability(['flags.team.review'
     if (!req.scope.userIds.includes(existing.userId)) return res.status(403).json({ error: 'forbidden' });
     if (existing.status !== 'OPEN') return res.status(409).json({ error: 'already_resolved', resolution: existing.resolution });
 
-    const invalidatedMs = resolution === 'TIME_INVALIDATED'
-      ? await calculateInvalidatedMsForWindow(
-          prisma,
-          existing.userId,
-          existing.windowStart,
-          existing.windowEnd,
-        )
-      : 0;
+    const invalidatedMs = resolution === 'TIME_INVALIDATED' ? await calculateInvalidatedMs([existing]) : 0;
 
     const updated = await prisma.$transaction(async (tx) => {
       const row = await tx.activityFlag.update({
@@ -2576,54 +2462,29 @@ adminRouter.post('/flags/:id/resolve', requireAnyCapability(['flags.team.review'
   }
 });
 
-async function calculateInvalidatedMsForWindow(
-  db: Pick<Prisma.TransactionClient, 'timeEntry'>,
-  userId: string,
-  windowStart: Date,
-  windowEnd: Date,
+/**
+ * How much counted time invalidating these windows will remove: the counted
+ * minutes of each user's resolved timeline inside the union of the windows,
+ * minus what an earlier invalidation already removed. Overlapping flags count
+ * each minute once, and a minute two entries both claim counts once.
+ */
+async function calculateInvalidatedMs(
+  windows: ReadonlyArray<{ userId: string; windowStart: Date; windowEnd: Date }>,
 ): Promise<number> {
-  const now = new Date();
-  const rows = await db.timeEntry.findMany({
-    where: {
-      userId,
-      startedAt: { lt: windowEnd },
-      OR: [{ endedAt: null }, { endedAt: { gt: windowStart } }],
-    },
-    select: {
-      id: true,
-      userId: true,
-      endedAt: true,
-      trackingProtocolVersion: true,
-      lastProvenAt: true,
-      leaseExpiresAt: true,
-      segments: {
-        select: { kind: true, startedAt: true, endedAt: true },
-        orderBy: { startedAt: 'asc' },
-      },
-    },
-  });
-  const evidenceByEntry = await loadEntryLiveEvidence(rows, now);
-  const grouped = groupInvalidationsByUser([
-    {
-      userId,
-      startedAt: windowStart.getTime(),
-      endedAt: windowEnd.getTime(),
-    },
-  ]);
+  if (windows.length === 0) return 0;
+  const userIds = [...new Set(windows.map((w) => w.userId))];
+  const start = new Date(Math.min(...windows.map((w) => w.windowStart.getTime())));
+  const end = new Date(Math.max(...windows.map((w) => w.windowEnd.getTime())));
+  const timeline = await loadTimelineWindow({ userIds, start, end });
   let total = 0;
-  for (const row of rows) {
-    const effectiveEnds = resolveEffectiveEntrySegmentEnds({
-      segments: row.segments,
-      entryEndedAt: row.endedAt,
-      now,
-      evidence: evidenceByEntry.get(row.id),
-      lifecycle: row,
-    });
-    for (const [index, s] of row.segments.entries()) {
-      if (s.kind === 'IDLE_TRIMMED') continue;
-      const endedAt = effectiveEnds[index] ?? now;
-      total += invalidatedOverlapMs(grouped, userId, s.startedAt.getTime(), endedAt.getTime());
-    }
+  for (const userId of userIds) {
+    const cuts = mergeIntervals(
+      windows
+        .filter((w) => w.userId === userId)
+        .map((w) => ({ start: w.windowStart.getTime(), end: w.windowEnd.getTime() })),
+    );
+    const counted = piecesForUser(timeline.pieces, userId).filter(isCounted);
+    total += unionMs(intersectIntervals(counted, cuts));
   }
   return total;
 }

@@ -79,12 +79,12 @@ export function firstStretchStartWithin(merged: readonly Interval[], lo: number,
  * stretch running into the first day is recognised as a continuation.
  */
 export function bucketByDay(
-  pieces: readonly TimelinePiece[],
+  pieces: ReadonlyArray<TimelinePiece<unknown>>,
   tz: string,
   days: readonly string[],
 ): Map<string, Map<string, DayBucket>> {
-  const windows = dayWindowsFor(days, tz);
-  const byUser = new Map<string, TimelinePiece[]>();
+  const windows = dayWindowsFor(days, tz).sort((a, b) => a.start - b.start);
+  const byUser = new Map<string, Array<TimelinePiece<unknown>>>();
   for (const piece of pieces) {
     const list = byUser.get(piece.userId) ?? [];
     list.push(piece);
@@ -92,13 +92,19 @@ export function bucketByDay(
   }
 
   const out = new Map<string, Map<string, DayBucket>>();
-  for (const [userId, list] of byUser) {
+  for (const [userId, unsorted] of byUser) {
+    // One owner per instant: sorted by start, the pieces are also sorted by
+    // end, so each day only has to look at the pieces from a moving cursor.
+    const list = [...unsorted].sort((a, b) => a.start - b.start || a.end - b.end);
     const tracked = mergeIntervals(list.filter(isTracked));
     const counted = mergeIntervals(list.filter(isCounted));
     const perDay = new Map<string, DayBucket>();
+    let cursor = 0;
     for (const day of windows) {
+      while (cursor < list.length && list[cursor]!.end <= day.start) cursor += 1;
       const bucket = emptyDayBucket();
-      for (const piece of list) {
+      for (let i = cursor; i < list.length && list[i]!.start < day.end; i += 1) {
+        const piece = list[i]!;
         const iv = clipInterval(piece, day.start, day.end);
         if (!iv) continue;
         const ms = iv.end - iv.start;

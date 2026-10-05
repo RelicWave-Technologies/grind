@@ -54,7 +54,7 @@ export interface TimelineInvalidation {
   end: number;
 }
 
-export interface TimelinePiece<E extends TimelineEntry = TimelineEntry> {
+export interface TimelinePiece<E = TimelineEntry> {
   userId: string;
   entry: E;
   kind: TimelineKind;
@@ -200,7 +200,7 @@ export function invalidationsByUser(
  * day: a minute two tasks both claim belongs to one of them.
  */
 export function totalsByTask(
-  pieces: readonly TimelinePiece[],
+  pieces: ReadonlyArray<TimelinePiece<{ larkTaskGuid?: string | null }>>,
   window?: Interval,
 ): Map<string, number> {
   const out = new Map<string, number>();
@@ -216,7 +216,7 @@ export function totalsByTask(
 }
 
 /** Counted milliseconds of `pieces` inside `window` (whole timeline when unset). */
-export function countedMs(pieces: readonly TimelinePiece[], window?: Interval): number {
+export function countedMs(pieces: ReadonlyArray<TimelinePiece<unknown>>, window?: Interval): number {
   let total = 0;
   for (const piece of pieces) {
     if (!isCounted(piece)) continue;

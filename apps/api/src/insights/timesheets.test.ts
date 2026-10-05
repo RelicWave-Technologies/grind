@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { buildTimesheetMatrix, dateRange, addDays } from './timesheets';
+import { addDays } from '@grind/types';
+import { buildTimesheetMatrix, dateRange } from './timesheets';
 
 /** Build a fake segment for terseness. */
 function seg(
@@ -171,7 +172,9 @@ describe('buildTimesheetMatrix — firstActivityMs / lastActivityMs', () => {
     expect(cell.lastActivityMs).toBe(new Date('2026-05-25T10:30:00Z').getTime());
   });
 
-  it('clipped midnight-crossing segments use clipped boundaries, not the raw segment ends', () => {
+  // Rule change (time module): work spilling past midnight is a continuation,
+  // not the next day's first activity — so the next day has no 00:00 start.
+  it('clipped midnight-crossing segments clip the last activity; the spill-over is not a first activity', () => {
     const m = buildTimesheetMatrix({
       from: '2026-05-25',
       to: '2026-05-26',
@@ -180,7 +183,7 @@ describe('buildTimesheetMatrix — firstActivityMs / lastActivityMs', () => {
     });
     expect(m!.cells.u1!['2026-05-25']!.firstActivityMs).toBe(new Date('2026-05-25T23:00:00Z').getTime());
     expect(m!.cells.u1!['2026-05-25']!.lastActivityMs).toBe(new Date('2026-05-26T00:00:00Z').getTime());
-    expect(m!.cells.u1!['2026-05-26']!.firstActivityMs).toBe(new Date('2026-05-26T00:00:00Z').getTime());
+    expect(m!.cells.u1!['2026-05-26']!.firstActivityMs).toBeNull();
     expect(m!.cells.u1!['2026-05-26']!.lastActivityMs).toBe(new Date('2026-05-26T02:00:00Z').getTime());
   });
 });
