@@ -117,6 +117,21 @@ function canonicalTimestampCeiling(entry: {
   );
 }
 
+/**
+ * The answer for a revision the server already holds. A same-revision snapshot
+ * reaches here only after its normalized payload matched what is stored, so the
+ * agent has nothing more to send — but agents up to beta.37 hashed fractional
+ * milliseconds the server never stores, never matched our hash, and kept the
+ * row pending forever (head-of-line blocking whole queues). They do accept a
+ * STALE receipt whose revision is not behind theirs, so answer STALE: true for
+ * them ("nothing newer than what I have"), harmless for current agents, which
+ * match the hash first. A strictly newer revision still gets ALREADY_APPLIED,
+ * which tells the agent to PUT its data.
+ */
+function receiptForExistingRevision(bodyRevision: number, currentRevision: number): 'STALE' | 'ALREADY_APPLIED' {
+  return bodyRevision <= currentRevision ? 'STALE' : 'ALREADY_APPLIED';
+}
+
 /** Closed by the server for silence, not by the agent — the real end is unknown. */
 function isServerFinalized(closeReason: string | null): closeReason is 'LEASE_EXPIRED' | 'SUPERSEDED' {
   return closeReason === 'LEASE_EXPIRED' || closeReason === 'SUPERSEDED';
@@ -192,11 +207,7 @@ function evaluateExistingCreate(args: {
 
   return {
     status: 200,
-    payload: createTimerSyncReceipt(
-      entry,
-      (body.revision ?? 0) < currentRevision ? 'STALE' : 'ALREADY_APPLIED',
-      null,
-    ),
+    payload: createTimerSyncReceipt(entry, receiptForExistingRevision(body.revision ?? 0, currentRevision), null),
   };
 }
 
@@ -218,8 +229,15 @@ timeEntriesRouter.post('/', validate(CreateTimeEntryRequest, 'body'), async (req
     }
 
     // Idempotency: existing clientUuid => return as-is.
+    // An entry can also exist under the agent's id with a different clientUuid:
+    // time restored by hand for an agent whose create never arrived keeps the
+    // agent's entry id, so a late create must land on it instead of failing
+    // on the primary key forever.
     const existing = await prisma.timeEntry.findUnique({
       where: { clientUuid: body.clientUuid },
+      include: { segments: true },
+    }) ?? await prisma.timeEntry.findUnique({
+      where: { id: body.id },
       include: { segments: true },
     });
     if (existing) {
@@ -474,7 +492,12 @@ timeEntriesRouter.put('/:id/sync', validate(SyncTimeEntryRequest, 'body'), async
             payload: { error: 'revision_payload_conflict', revision: currentRevision },
           };
         }
-        return { kind: 'receipt' as const, entry: current, disposition: 'ALREADY_APPLIED' as const, correction: null };
+        return {
+          kind: 'receipt' as const,
+          entry: current,
+          disposition: receiptForExistingRevision(body.revision!, currentRevision),
+          correction: null,
+        };
       }
 
       const foreignSegment = incomingIds.length === 0

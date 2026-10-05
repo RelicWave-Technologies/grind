@@ -75,7 +75,8 @@ describe('timer lifecycle protocol v2', () => {
     const retry = await request(app).post('/v1/time-entries').set(bearer(user.accessToken)).send(body);
     expect(retry.status).toBe(200);
     expect(retry.body).toMatchObject({
-      disposition: 'ALREADY_APPLIED',
+      disposition: 'STALE',
+      acceptedRevision: 1,
       canonicalHash: first.body.canonicalHash,
     });
   });
@@ -390,6 +391,56 @@ describe('timer lifecycle protocol v2', () => {
     const retry = await request(app).post('/v1/time-entries').set(bearer(user.accessToken)).send({ ...body, revision: 2 });
     expect(retry.status).toBe(200);
     expect(retry.body).toMatchObject({ disposition: 'ALREADY_APPLIED', acceptedRevision: 1 });
+  });
+
+  it('lets a pre-beta.38 agent settle a revision the server already holds', async () => {
+    // beta.37 hashed fractional milliseconds and never matched our hash; it
+    // settles a receipt that is STALE (or corrected) and not behind its revision.
+    const user = await seedUser();
+    const body = v2Body(new Date(Date.now() - 10 * 60_000));
+    await request(app).post('/v1/time-entries').set(bearer(user.accessToken)).send(body);
+    const closedAt = new Date(Date.now() - 60_000).toISOString();
+    const closed = {
+      trackingProtocolVersion: 2,
+      revision: 2,
+      observedAt: closedAt,
+      endedAt: closedAt,
+      closeReason: 'AGENT',
+      segments: [{ ...body.segments[0], endedAt: closedAt }],
+    };
+    const applied = await request(app).put(`/v1/time-entries/${body.id}/sync`).set(bearer(user.accessToken)).send(closed);
+    expect(applied.body).toMatchObject({ disposition: 'APPLIED', acceptedRevision: 2 });
+
+    const again = await request(app).put(`/v1/time-entries/${body.id}/sync`).set(bearer(user.accessToken)).send(closed);
+    expect(again.status).toBe(200);
+    expect(again.body).toMatchObject({ disposition: 'STALE', acceptedRevision: 2, canonicalHash: applied.body.canonicalHash });
+    const beta37Settles = again.body.acceptedRevision >= closed.revision
+      && (again.body.correction !== null || ['FINALIZED', 'STALE'].includes(again.body.disposition));
+    expect(beta37Settles).toBe(true);
+  });
+
+  it('lands a late create on time restored by hand under the agent entry id', async () => {
+    const user = await seedUser();
+    const body = v2Body(new Date(Date.now() - 60 * 60_000));
+    const restoredEnd = new Date(Date.now() - 10 * 60_000);
+    await prisma.timeEntry.create({
+      data: {
+        id: body.id,
+        clientUuid: fakeUlid('restored-by-hand'),
+        userId: user.userId,
+        source: 'AUTO',
+        startedAt: new Date(body.startedAt),
+        endedAt: restoredEnd,
+        closeReason: 'LEGACY_RECONCILED',
+        segments: { create: { id: fakeUlid('restored-seg'), kind: 'WORK', startedAt: new Date(body.startedAt), endedAt: restoredEnd } },
+      },
+    });
+
+    const late = await request(app).post('/v1/time-entries').set(bearer(user.accessToken)).send(body);
+
+    expect(late.status).toBe(200);
+    expect(late.body).toMatchObject({ disposition: 'ALREADY_APPLIED', acceptedRevision: 0 });
+    expect(await prisma.timeEntry.count({ where: { userId: user.userId } })).toBe(1);
   });
 
   it('keeps legacy heartbeats compatible and outside the lease protocol', async () => {
