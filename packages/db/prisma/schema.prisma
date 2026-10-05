@@ -579,8 +579,9 @@ model ActivitySample {
 
   createdAt DateTime @default(now())
 
+  // The unique constraint is already a (userId, bucketStart) btree; a second
+  // identical index only doubled the write cost of every sample.
   @@unique([userId, bucketStart])
-  @@index([userId, bucketStart])
   @@index([timeEntryId])
   @@index([userId, activeApp])
 }
