@@ -6,6 +6,7 @@ import type {
 } from '../../shared/tracking';
 import {
   getActivityCaptureStatus,
+  retryActivityHook,
   startActivityCapture,
   type ActivityCaptureStatus,
 } from './activity';
@@ -37,6 +38,8 @@ interface TrackingReadinessDeps {
   screenHealth: () => CaptureHealth;
   accessibilityStatus: () => ActivityCaptureStatus;
   startActivityCapture: () => void;
+  /** Clear a stored hook failure and try the hook once now. */
+  retryActivityHook: () => ActivityCaptureStatus;
   probeScreen: () => Promise<CaptureHealth>;
   lastPermissionRelaunch: () => PermissionRelaunch | null;
 }
@@ -55,6 +58,7 @@ function defaultDeps(): TrackingReadinessDeps {
     screenHealth: getScreenHealth,
     accessibilityStatus: getActivityCaptureStatus,
     startActivityCapture: () => startActivityCapture(),
+    retryActivityHook: () => retryActivityHook(),
     probeScreen: probeScreenCapture,
     lastPermissionRelaunch: () => getPreferences().permissionRelaunch,
   };
@@ -128,16 +132,6 @@ export function isInconclusiveScreenCapture(
     && permissions.screen.health === 'empty';
 }
 
-/** Log a non-ready verdict at most once per distinct shape, so a permanent
- *  blocker does not flood the log at the poll rate. */
-let lastVerdictKey = '';
-function logReadinessVerdict(fields: Record<string, unknown>): void {
-  const key = JSON.stringify(fields);
-  if (key === lastVerdictKey) return;
-  lastVerdictKey = key;
-  log.warn('tracking readiness not ready', fields);
-}
-
 export function createTrackingReadinessService(deps: TrackingReadinessDeps) {
   let screenProbeHealthy: boolean | null = null;
   // Latest failed reading from a probe or the capture loop. A throttled inspect
@@ -145,14 +139,40 @@ export function createTrackingReadinessService(deps: TrackingReadinessDeps) {
   let screenFailure: CaptureHealth | null = null;
   let screenProbeFailures = 0;
   let lastProbeAt: number | null = null;
+  let probeInFlight: Promise<CaptureHealth> | null = null;
   let lastActivityStartError = '';
+  let lastVerdictKey = '';
 
-  async function probe(): Promise<CaptureHealth> {
-    const health = await deps.probeScreen();
+  /**
+   * One probe at a time, shared by every caller. The prompt (1s), Settings
+   * (4s), the monitor (2s) and the resume poll (2s) all verify the screen; when
+   * each started its own probe — and the spacing was only stamped after the
+   * await — three overlapping blank readings landed within ~2s and a slow Mac
+   * went straight to FAILED. Stamped before awaiting, joined while in flight,
+   * each probe counts once.
+   */
+  function probe(): Promise<CaptureHealth> {
+    if (probeInFlight) return probeInFlight;
     lastProbeAt = deps.now();
-    noteScreenHealth(health);
-    if (health !== 'ok') screenProbeFailures += 1;
-    return health;
+    probeInFlight = (async () => {
+      try {
+        const health = await deps.probeScreen();
+        noteScreenHealth(health);
+        if (health !== 'ok') screenProbeFailures += 1;
+        return health;
+      } finally {
+        probeInFlight = null;
+      }
+    })();
+    return probeInFlight;
+  }
+
+  /** Log a non-ready verdict once per verdict — not per probe count or other
+   *  detail — so a standing blocker does not add a line at the poll rate. */
+  function logReadinessVerdict(verdict: string, fields: Record<string, unknown>): void {
+    if (verdict === lastVerdictKey) return;
+    lastVerdictKey = verdict;
+    log.warn('tracking readiness not ready', fields);
   }
 
   function probeDue(): boolean {
@@ -184,10 +204,16 @@ export function createTrackingReadinessService(deps: TrackingReadinessDeps) {
     return ageMs >= 0 && ageMs < RESTART_LOOP_WINDOW_MS ? relaunch.reason.split(',') : [];
   }
 
-  async function inspect(opts: { verifyScreen?: boolean } = {}): Promise<ReadinessInspection> {
+  async function inspect(opts: { verifyScreen?: boolean; retryHook?: boolean } = {}): Promise<ReadinessInspection> {
     const rawScreenStatus = deps.screenStatus();
     const rawScreenHealth = deps.screenHealth();
     let rawAccessibility = deps.accessibilityStatus();
+
+    // A stored hook failure otherwise stands until quit: the hook is only
+    // started while recording, and recording cannot resume past the failure.
+    if (opts.retryHook && rawAccessibility.trusted && rawAccessibility.ready && rawAccessibility.lastHookError) {
+      rawAccessibility = deps.retryActivityHook();
+    }
 
     if (deps.platform !== 'darwin') {
       const readiness: TrackingReadiness = {
@@ -224,7 +250,7 @@ export function createTrackingReadinessService(deps: TrackingReadinessDeps) {
       screenProbeFailures = 0;
     }
 
-    if (opts.verifyScreen && rawScreenStatus === 'granted' && screenProbeHealthy !== true && probeDue()) {
+    if (opts.verifyScreen && rawScreenStatus === 'granted' && screenProbeHealthy !== true && (probeInFlight || probeDue())) {
       await probe();
     }
 
@@ -239,10 +265,12 @@ export function createTrackingReadinessService(deps: TrackingReadinessDeps) {
       verdictToken(capability, capability === 'SCREEN_RECORDING' ? screenRecording : accessibility),
     ));
 
-    if (blockingCapabilities.length > 0) {
+    if (blockingCapabilities.length === 0) {
+      lastVerdictKey = '';
+    } else {
       // The verdict alone is undiagnosable in the field: a user reporting
       // "it says Restart" left no trace at all in the log before this.
-      logReadinessVerdict({
+      logReadinessVerdict(`${screenRecording}|${accessibility}`, {
         screenRecording,
         accessibility,
         screenStatus: rawScreenStatus,
@@ -284,10 +312,11 @@ export function createTrackingReadinessService(deps: TrackingReadinessDeps) {
     };
   }
 
-  /** Verify now, ignoring the re-probe spacing — for an explicit user action. */
+  /** Verify now, ignoring the re-probe spacing and the hook's retry backoff —
+   *  for an explicit user action ("Check again", Start, Resume). */
   function recheck(): Promise<ReadinessInspection> {
     lastProbeAt = null;
-    return inspect({ verifyScreen: true });
+    return inspect({ verifyScreen: true, retryHook: true });
   }
 
   async function assertCanAccrue(): Promise<void> {

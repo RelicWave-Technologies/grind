@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
-vi.mock('../logger', () => ({ log: { info: vi.fn(), warn: vi.fn(), debug: vi.fn(), error: vi.fn() } }));
+const logMocks = vi.hoisted(() => ({ warn: vi.fn() }));
+vi.mock('../logger', () => ({ log: { info: vi.fn(), warn: logMocks.warn, debug: vi.fn(), error: vi.fn() } }));
 import type { ActivityCaptureStatus } from './activity';
 import {
   createTrackingReadinessService,
@@ -37,6 +38,7 @@ function setup(opts: {
   const probeScreen = vi.fn().mockResolvedValue(opts.probeHealth ?? 'ok');
   const startActivityCapture = vi.fn();
   const accessibilityStatus = vi.fn(() => opts.accessibility ?? accessibility());
+  const retryActivityHook = vi.fn(() => accessibilityStatus());
   const service = createTrackingReadinessService({
     platform: opts.platform ?? 'darwin',
     now: () => clock.now,
@@ -44,10 +46,11 @@ function setup(opts: {
     screenHealth: () => opts.screenHealth ?? 'unknown',
     accessibilityStatus,
     startActivityCapture,
+    retryActivityHook,
     probeScreen,
     lastPermissionRelaunch: () => opts.relaunch ?? null,
   });
-  return { service, probeScreen, startActivityCapture, accessibilityStatus, clock };
+  return { service, probeScreen, startActivityCapture, retryActivityHook, accessibilityStatus, clock };
 }
 
 describe('TrackingReadinessService', () => {
@@ -190,6 +193,101 @@ describe('TrackingReadinessService', () => {
       relaunch: { reason: 'ACCESSIBILITY:NEEDS_GRANT', at: T0 - 10_000 },
     });
     expect((await other.service.inspect({ verifyScreen: true })).readiness.restartDidNotHelp).toEqual([]);
+  });
+
+  it('shares one in-flight probe between overlapping callers and counts it once', async () => {
+    const { service, probeScreen, clock } = setup();
+    let finish!: (health: CaptureHealth) => void;
+    probeScreen.mockImplementation(() => new Promise<CaptureHealth>((resolve) => {
+      finish = resolve;
+    }));
+
+    // Prompt, Settings, monitor and resume poll all verifying at once — and the
+    // clock moving past the re-probe spacing while the first probe is slow.
+    const first = service.inspect({ verifyScreen: true });
+    clock.now = T0 + 6_000;
+    const others = [
+      service.inspect({ verifyScreen: true }),
+      service.inspect({ verifyScreen: true }),
+      service.recheck(),
+    ];
+    finish('empty');
+    const results = await Promise.all([first, ...others]);
+
+    expect(probeScreen).toHaveBeenCalledTimes(1);
+    expect(results.map((result) => result.readiness.screenRecording)).toEqual(['CHECKING', 'CHECKING', 'CHECKING', 'CHECKING']);
+  });
+
+  it('spaces probes from when they started, not when they finished', async () => {
+    const { service, probeScreen, clock } = setup({ probeHealth: 'empty' });
+    probeScreen.mockImplementation(async () => {
+      clock.now += 3_000; // a slow probe
+      return 'empty';
+    });
+
+    await service.inspect({ verifyScreen: true });
+    clock.now = T0 + 5_000;
+    await service.inspect({ verifyScreen: true });
+
+    expect(probeScreen).toHaveBeenCalledTimes(2);
+  });
+
+  it('retries a failed input hook on an explicit check and clears the failure', async () => {
+    const { service, accessibilityStatus, retryActivityHook } = setup({
+      accessibility: accessibility({ lastHookError: 'native hook denied' }),
+    });
+    expect((await service.inspect({ verifyScreen: true })).readiness.accessibility).toBe('FAILED');
+    // A passive poll never touches the native hook.
+    expect(retryActivityHook).not.toHaveBeenCalled();
+
+    retryActivityHook.mockImplementation(() => {
+      accessibilityStatus.mockReturnValue(accessibility());
+      return accessibility();
+    });
+    const result = await service.recheck();
+
+    expect(retryActivityHook).toHaveBeenCalledOnce();
+    expect(result.readiness.accessibility).toBe('READY');
+    expect(result.accessibilityError).toBeNull();
+  });
+
+  it('lets Start resume past a hook failure that a retry clears', async () => {
+    const { service, accessibilityStatus, retryActivityHook } = setup({
+      accessibility: accessibility({ lastHookError: 'native hook denied' }),
+    });
+    retryActivityHook.mockImplementation(() => {
+      accessibilityStatus.mockReturnValue(accessibility());
+      return accessibility();
+    });
+
+    await expect(service.assertCanAccrue()).resolves.toBeUndefined();
+  });
+
+  it('stays FAILED when the explicit hook retry fails again', async () => {
+    const { service, retryActivityHook } = setup({
+      accessibility: accessibility({ lastHookError: 'native hook denied' }),
+    });
+
+    const result = await service.recheck();
+
+    expect(retryActivityHook).toHaveBeenCalledOnce();
+    expect(result.readiness.accessibility).toBe('FAILED');
+    expect(result.accessibilityError).toBe('native hook denied');
+  });
+
+  it('logs a standing verdict once, not once per probe', async () => {
+    logMocks.warn.mockClear();
+    const { service, clock } = setup({ probeHealth: 'empty' });
+
+    for (let i = 0; i < 6; i += 1) {
+      clock.now = T0 + i * 5_000;
+      await service.inspect({ verifyScreen: true });
+    }
+
+    const verdicts = logMocks.warn.mock.calls
+      .filter(([message]) => message === 'tracking readiness not ready')
+      .map(([, fields]) => (fields as { screenRecording: string }).screenRecording);
+    expect(verdicts).toEqual(['CHECKING', 'FAILED']);
   });
 
   it('blocks accrual with a typed, serializable readiness payload', async () => {
