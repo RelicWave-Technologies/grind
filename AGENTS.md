@@ -22,6 +22,9 @@ Grind
 ├── Grind — References/
 │    └── Time Tracker — Architecture & Tech Plan
 └── Grind — Updates/
+     ├── Agent Remote Resync/
+     │    ├── Plan
+     │    └── Updates
      ├── Attendance Rules (Sept 2026)/
      │    ├── Plan
      │    └── Updates
@@ -51,6 +54,9 @@ Grind
 | Feature: Attendance Rules (folder) | `HbjxdygzAo5k3jxQEtMlbDHYgvg` | `FfMpw3EKHipTaMkkLHKlIHnygeb` |
 | Attendance Rules — Plan | `QH1OdrshDoqhjhx73KKlJnvsgkh` | `M1lIw2JmliENc2ktblFlRoWrgzc` |
 | Attendance Rules — Updates | `TzdxdXR0Tou3kLxePeKlAtp7gkh` | `QRXbwrFEpiVrdtkugf0lq4hvgxn` |
+| Feature: Agent Remote Resync (folder) | `BMbkdBPxnonc5VxRrKWluPRdgGq` | `Oh6Gw9BdNiSzRRkN1xClVuTZgRf` |
+| Agent Remote Resync — Plan | `YHy8d3dVJoK6PZxqzl8llhw3gVb` | `Pc8Lw8ZbdiNTgrkPWHelCVu2grU` |
+| Agent Remote Resync — Updates | `SYkZd3GekoGtwmxE0Nflg7CHgWh` | `CeyowRLO1i7VvektvwVlx7yqgMf` |
 
 **Wiki space ID:** `7635896570625396443` (Tech Hub)
 **Project node token:** `CNhTwn36iiIr8JkaFj2lOIHhgOg`
