@@ -295,20 +295,20 @@ export function PolicyScreen() {
               <ListRow
                 leading={<PolicyIcon><Camera size={16} /></PolicyIcon>}
                 title="Screenshot retention"
-                subtitle="Nightly screenshot purge. Set 0 to keep forever."
+                subtitle="Screenshots older than this are deleted nightly. 1 to 60 days."
                 trailing={
                   <div className="pol-field-control">
                     <Input
                       type="number"
-                      min={0}
-                      max={3650}
+                      min={1}
+                      max={60}
                       value={draft.retentionDaysScreenshots}
                       onChange={(e) =>
                         setDraft({
                           ...draft,
                           retentionDaysScreenshots: Math.max(
-                            0,
-                            Math.min(3650, Number(e.target.value) || 0),
+                            1,
+                            Math.min(60, Number(e.target.value) || 1),
                           ),
                         })
                       }
