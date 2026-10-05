@@ -176,7 +176,6 @@ leaveRouter.get('/policy', async (req, res, next) => {
     const policy = await loadOrCreateLeavePolicy(req.scope.workspaceId);
     res.json({
       policy: toLeavePolicyDto(policy),
-      approvalGateway: leaveDecidedInLark() ? 'lark' : 'dashboard',
       decidesInTimo: !leaveDecidedInLark(),
     });
   } catch (err) {

@@ -340,7 +340,6 @@ export interface LeavePolicyResponse {
     accrueOnJoinMonth: boolean;
     updatedAt: string;
   };
-  approvalGateway: string;
   decidesInTimo: boolean;
 }
 

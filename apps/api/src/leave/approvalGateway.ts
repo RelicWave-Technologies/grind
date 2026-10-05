@@ -1,3 +1,4 @@
+import { larkLeaveApprovalCode } from '../env';
 import { hasLarkCredentials } from '../lark/config';
 
 /**
@@ -59,13 +60,11 @@ export function setLeaveDecidedInLarkForTests(value: boolean | null): void {
 }
 
 /**
- * Is leave owned by Lark? True whenever an approval code is configured.
- *
- * The UI uses this to decide whether to offer anything, and the service uses it
- * to refuse a local application. All-or-nothing on purpose: a half-configured
- * Lark would accept requests that reach nobody.
+ * Is leave owned by Lark? True whenever an approval code and Lark credentials
+ * are configured. `/v1/leave/policy` reports it as `decidesInTimo: false`, which
+ * the Calendar uses to explain that leave is applied for in Lark.
  */
 export function leaveDecidedInLark(): boolean {
   if (testOverride !== null) return testOverride;
-  return Boolean(process.env.LARK_LEAVE_APPROVAL_CODE?.trim()) && hasLarkCredentials();
+  return Boolean(larkLeaveApprovalCode()) && hasLarkCredentials();
 }
