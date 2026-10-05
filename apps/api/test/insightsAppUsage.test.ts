@@ -28,6 +28,13 @@ async function seedSamples(
     activeUrl?: string | null;
   }>,
 ) {
+  // Stored app/site context is only shown while the workspace captures it.
+  const user = await prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { workspaceId: true } });
+  await prisma.workspacePolicy.upsert({
+    where: { workspaceId: user.workspaceId },
+    create: { workspaceId: user.workspaceId, captureApps: true, captureTitles: true, captureUrls: true },
+    update: {},
+  });
   for (const r of rows) {
     await prisma.activitySample.create({
       data: {

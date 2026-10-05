@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { prisma } from '@grind/db';
+import { hideDisallowedActiveFields, policyFlagsForUser } from '../workspacePolicy/readScrub';
 import { requireAccessToken } from '../middleware/auth';
 import { attachScope } from '../middleware/scope';
 import { scoreDay } from '../scoring/score';
@@ -258,7 +259,12 @@ insightsRouter.get('/day', async (req, res, next) => {
       loadTimeInvalidationsForUsers([userId], win.start, win.end),
     ]);
     const invalidationsByUser = groupInvalidationsByUser(invalidations);
-    const samples = samplesRaw.filter((s) => !isInvalidatedAt(invalidationsByUser, userId, s.bucketStart.getTime()));
+    // Hide what the workspace's CURRENT policy does not capture, whatever an
+    // earlier, wider policy stored.
+    const samples = hideDisallowedActiveFields(
+      samplesRaw.filter((s) => !isInvalidatedAt(invalidationsByUser, userId, s.bucketStart.getTime())),
+      await policyFlagsForUser(userId),
+    );
     const evidenceByEntry = await loadEntryLiveEvidence(entries, now);
     const insightEntries = entries.map((e) => {
       const effectiveEnds = resolveEffectiveEntrySegmentEnds({

@@ -19,8 +19,9 @@ import {
  * to actually flow — there's no point in titles without an app context.
  * The server validates this at PATCH time (see refine below).
  *
- * retentionDaysScreenshots drives the nightly screenshot purge. Default
- * 60 per the privacy contract; setting it to 0 keeps shots forever.
+ * retentionDaysScreenshots drives the nightly screenshot purge: 1–60 days,
+ * default 60 per the privacy contract. Nothing is kept longer — a 0 ("keep
+ * forever") or anything past 60, from older clients or older rows, reads as 60.
  */
 export const WorkspacePolicyDto = z.object({
   workspaceId: z.string().min(1),
@@ -41,7 +42,15 @@ export const PatchWorkspacePolicyRequest = z
     captureApps: z.boolean().optional(),
     captureTitles: z.boolean().optional(),
     captureUrls: z.boolean().optional(),
-    retentionDaysScreenshots: z.number().int().min(0).max(3650).optional(),
+    // Older dashboards still offer 0 ("forever") and up to 3650; accept them
+    // and store what the privacy contract allows.
+    retentionDaysScreenshots: z
+      .number()
+      .int()
+      .min(0)
+      .max(3650)
+      .transform((days) => effectiveScreenshotRetentionDays(days))
+      .optional(),
     defaultScreenshotIntervalMin: ScreenshotIntervalMinSchema.optional(),
     defaultIdleThresholdMin: z.number().int().min(IDLE_THRESHOLD_MIN).max(IDLE_THRESHOLD_MAX).optional(),
     auditReason: z.string().max(500).optional(),
@@ -57,6 +66,20 @@ export const PatchWorkspacePolicyRequest = z
     { message: 'at_least_one_field_required' },
   );
 export type PatchWorkspacePolicyRequest = z.infer<typeof PatchWorkspacePolicyRequest>;
+
+/** The privacy contract's ceiling on how long a screenshot is kept. */
+export const SCREENSHOT_RETENTION_MAX_DAYS = 60;
+
+/**
+ * Days a workspace's screenshots are actually kept: 1–60. "Keep forever" (0)
+ * and anything longer than the contract's 60 days become 60.
+ */
+export function effectiveScreenshotRetentionDays(days: number | null | undefined): number {
+  if (days === null || days === undefined || !Number.isFinite(days)) return SCREENSHOT_RETENTION_MAX_DAYS;
+  const whole = Math.floor(days);
+  if (whole < 1 || whole > SCREENSHOT_RETENTION_MAX_DAYS) return SCREENSHOT_RETENTION_MAX_DAYS;
+  return whole;
+}
 
 /**
  * Defaults applied when no row exists for a workspace yet — kept here so

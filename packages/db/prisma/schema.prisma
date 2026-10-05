@@ -1175,6 +1175,8 @@ model MonitoringSettingsAudit {
   nextIdleWarningSeconds        Int?
   riskLevel                     MonitoringSettingsRiskLevel
   reason                        String?
+  /// Capture-policy flags changed in the same edit: { field: { from, to } }.
+  policyChanges                 Json?
   createdAt                     DateTime                    @default(now())
 
   @@index([workspaceId, createdAt])

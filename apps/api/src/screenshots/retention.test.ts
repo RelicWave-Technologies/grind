@@ -59,6 +59,7 @@ describe('screenshot retention', () => {
   it('soft-deletes expired uploaded screenshots and finalizes storage cleanup', async () => {
     const now = new Date('2026-07-03T00:00:00.000Z');
     const { user } = await seedWorkspace({ retentionDays: 30 });
+    // "Keep forever" from an older dashboard: kept 60 days, like everyone.
     const disabled = await seedWorkspace({ retentionDays: 0 });
     const defaultPolicy = await seedWorkspace({ retentionDays: null });
     const trashed: string[] = [];
@@ -111,13 +112,12 @@ describe('screenshot retention', () => {
     const result = await runScreenshotRetentionOnce(now, trash);
 
     expect(result.checkedWorkspaces).toBe(3);
-    expect(result.skippedDisabledWorkspaces).toBe(1);
-    expect(result.rowsSoftDeleted).toBe(4);
-    expect(result.rowsFinalized).toBe(4);
-    expect(result.driveFilesTrashed).toBe(4);
+    expect(result.rowsSoftDeleted).toBe(5);
+    expect(result.rowsFinalized).toBe(5);
+    expect(result.driveFilesTrashed).toBe(5);
     expect(result.driveFilesMissing).toBe(1);
     expect(trashed.sort()).toEqual(
-      ['default-old-full', 'drive-full', 'drive-missing', 'drive-thumb', 'pending-old-full'].sort(),
+      ['default-old-full', 'disabled-old-full', 'drive-full', 'drive-missing', 'drive-thumb', 'pending-old-full'].sort(),
     );
 
     const rows = await prisma.screenshot.findMany({ orderBy: { id: 'asc' } });
@@ -130,7 +130,7 @@ describe('screenshot retention', () => {
     expect(byId.get('pending-old')?.deletedAt).toBeTruthy();
     expect(byId.get('pending-old')?.s3Key).toBeNull();
     expect(byId.get('pending-unuploaded')?.deletedAt).toBeNull();
-    expect(byId.get('disabled-old')?.deletedAt).toBeNull();
+    expect(byId.get('disabled-old')?.deletedAt).toBeTruthy();
   });
 
   it('keeps storage keys for retry when trashing fails, then finalizes on the next run', async () => {

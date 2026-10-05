@@ -27,6 +27,10 @@ async function seedReportDay() {
   counter += 1;
   const stamp = `${Date.now()}-${counter}`;
   const ws = await prisma.workspace.create({ data: { name: `WS-report-${stamp}` } });
+  // Stored app/site context is only shown while the workspace captures it.
+  await prisma.workspacePolicy.create({
+    data: { workspaceId: ws.id, captureApps: true, captureTitles: true, captureUrls: true },
+  });
   const member = await prisma.user.create({
     data: {
       workspaceId: ws.id,
@@ -213,6 +217,10 @@ async function seedTeamReport() {
   counter += 1;
   const stamp = `${Date.now()}-${counter}`;
   const ws = await prisma.workspace.create({ data: { name: `WS-team-report-${stamp}` } });
+  // Stored app/site context is only shown while the workspace captures it.
+  await prisma.workspacePolicy.create({
+    data: { workspaceId: ws.id, captureApps: true, captureTitles: true, captureUrls: true },
+  });
   const manager = await prisma.user.create({
     data: {
       workspaceId: ws.id,
