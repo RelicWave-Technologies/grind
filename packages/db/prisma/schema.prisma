@@ -1183,18 +1183,22 @@ model MonitoringSettingsAudit {
 }
 
 model RefreshToken {
-  id         String    @id @default(cuid())
-  userId     String
-  user       User      @relation(fields: [userId], references: [id])
-  tokenHash  String    @unique
-  deviceName String?
+  id           String    @id @default(cuid())
+  userId       String
+  user         User      @relation(fields: [userId], references: [id])
+  tokenHash    String    @unique
+  deviceName   String?
   // Rotation family: every token minted by rotating an earlier one inherits the
   // same familyId. Presenting an already-revoked token (replay/theft) revokes
   // the whole family — OAuth 2.0 BCP refresh-token reuse detection.
-  familyId   String
-  expiresAt  DateTime
-  revokedAt  DateTime?
-  createdAt  DateTime  @default(now())
+  familyId     String
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  /// The token minted when this one was spent. A replay of a just-spent token
+  /// whose successor has never been used is a lost response, not a theft: it
+  /// rotates again from here instead of revoking the family.
+  replacedById String?
+  createdAt    DateTime  @default(now())
 
   @@index([userId])
   @@index([familyId])
