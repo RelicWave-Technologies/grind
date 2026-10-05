@@ -147,9 +147,10 @@ export function MeTodayScreen() {
   });
 
   const createRequest = useMutation({
-    mutationFn: (vars: { requestedStart: number; requestedEnd: number; larkTaskGuid: string | null; taskSummary: string | null; reason: string; attendeeIds?: string[] }) => {
+    // clientUuid comes from the gap row's form so a retry reuses it (idempotent).
+    mutationFn: (vars: { clientUuid: string; requestedStart: number; requestedEnd: number; larkTaskGuid: string | null; taskSummary: string | null; reason: string; attendeeIds?: string[] }) => {
       const body: Record<string, unknown> = {
-        clientUuid: `web-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+        clientUuid: vars.clientUuid,
         requestedStart: new Date(vars.requestedStart).toISOString(),
         requestedEnd: new Date(vars.requestedEnd).toISOString(),
         larkTaskGuid: vars.larkTaskGuid,

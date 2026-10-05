@@ -74,6 +74,8 @@ interface GapRowProps extends BaseProps {
   kind: 'gap';
   block: DayBlock;
   onCreate: (vars: {
+    /** Idempotency key for POST /v1/time-requests — one per composed request. */
+    clientUuid: string;
     requestedStart: number;
     requestedEnd: number;
     larkTaskGuid: string | null;
@@ -92,6 +94,13 @@ interface RejectedRowProps {
 }
 
 export type EntryRowProps = TrackedRowProps | PendingRowProps | GapRowProps | RejectedRowProps;
+
+function newClientUuid(): string {
+  const random = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
+  return `web-${random}`;
+}
 
 /** Order-independent equality check for two string arrays. */
 function sameStringSet(a: string[], b: string[]): boolean {
@@ -462,6 +471,11 @@ function GapRow({ block, tasks, timeZone, disabled, preset, presetTick, onCreate
   const [attendees, setAttendees] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // One idempotency key per request being composed: a retry after a lost
+  // response (or a double click) re-sends the SAME key, so the server returns
+  // the request it already created instead of filing a duplicate. A new key is
+  // minted only once a request has gone through or the row is reset.
+  const [clientUuid, setClientUuid] = useState(newClientUuid);
 
   // When the parent fires a click-to-fill (presetTick changes), snap to that preset.
   useEffect(() => {
@@ -480,6 +494,7 @@ function GapRow({ block, tasks, timeZone, disabled, preset, presetTick, onCreate
     setReason('');
     setAttendees([]);
     setErr(null);
+    setClientUuid(newClientUuid());
   }, [block.startedAt, block.endedAt]);
 
   const duration = Math.max(0, end - start);
@@ -497,6 +512,7 @@ function GapRow({ block, tasks, timeZone, disabled, preset, presetTick, onCreate
     setErr(null);
     try {
       await onCreate({
+        clientUuid,
         requestedStart: start,
         requestedEnd: end,
         larkTaskGuid: task || null,
@@ -511,6 +527,7 @@ function GapRow({ block, tasks, timeZone, disabled, preset, presetTick, onCreate
       setTask('');
       setReason('');
       setAttendees([]);
+      setClientUuid(newClientUuid());
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Send failed');
     } finally {
