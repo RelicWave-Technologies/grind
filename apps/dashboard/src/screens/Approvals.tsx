@@ -9,7 +9,7 @@ import { api, type ApiError } from '../lib/api';
 import { hasCapability, isManagerOrAbove } from '../lib/auth';
 import type { DecideResult, ManualTimeRequest, MtrStatus, MtrUserSummary } from '../lib/types';
 import { addDays, fmtAgeShort, fmtDayLabel, fmtDurationMs, fmtTime, todayKey } from '../lib/format';
-import { daysBetween } from '@grind/types';
+import { dateKeyInTimeZone, daysBetween } from '@grind/types';
 import { reportQueryKeys } from '../lib/reportQueries';
 import type { TaskOption } from '../components/TaskCombo';
 import {
@@ -910,19 +910,6 @@ function editTimeSearch(date: string, req: ApprovalRequest, userId?: string) {
   };
   if (userId) search.userId = userId;
   return search;
-}
-
-function dateKeyInTimeZone(ms: number, tz: string): string {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: tz,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(new Date(ms));
-  const year = parts.find((part) => part.type === 'year')?.value;
-  const month = parts.find((part) => part.type === 'month')?.value;
-  const day = parts.find((part) => part.type === 'day')?.value;
-  return year && month && day ? `${year}-${month}-${day}` : new Date(ms).toISOString().slice(0, 10);
 }
 
 function cleanTaskLabel(value: string | null | undefined): string | null {

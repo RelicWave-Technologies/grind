@@ -7,6 +7,8 @@ export type ScreenshotIntervalMin = (typeof SCREENSHOT_INTERVAL_OPTIONS)[number]
 export const DEFAULT_SCREENSHOT_INTERVAL_MIN: ScreenshotIntervalMin = 3;
 export const IDLE_THRESHOLD_MIN = 1;
 export const IDLE_THRESHOLD_MAX = 120;
+/** The idle-threshold minutes the dashboard offers, workspace default and per member. */
+export const IDLE_THRESHOLD_OPTIONS = [1, 3, 5, 10, 15, 30, 45, 60, 120] as const;
 
 export function isScreenshotIntervalMin(value: unknown): value is ScreenshotIntervalMin {
   return typeof value === 'number' &&

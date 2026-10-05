@@ -1,7 +1,12 @@
-import { addDays, instantForZonedDateTime, todayKey } from '@grind/types';
+import { addDays, dateKeyInTimeZone, instantForZonedDateTime, todayKey, weekdayForDate, type Weekday } from '@grind/types';
 
 /** Calendar-key arithmetic is the shared one in @grind/types. */
 export { addDays, todayKey };
+
+/** The weekday an instant falls on in a business timezone. */
+export function weekdayInTimeZone(date: Date, timeZone: string): Weekday {
+  return weekdayForDate(dateKeyInTimeZone(date, timeZone));
+}
 
 /**
  * Tiny time/duration formatters for the dashboard. Match the agent's
@@ -31,6 +36,16 @@ export function fmtMinuteOfDay(minute: number): string {
     minute: '2-digit',
     timeZone: 'UTC',
   }).format(d);
+}
+
+/** A shift's wall-clock "HH:MM" on the 12h clock, e.g. "9:30 AM". */
+export function fmtShiftClock(hhmm: string): string {
+  const [hourRaw, minuteRaw] = hhmm.split(':').map((part) => Number.parseInt(part, 10));
+  const hour24 = hourRaw ?? 0;
+  const minute = minuteRaw ?? 0;
+  const suffix = hour24 >= 12 ? 'PM' : 'AM';
+  const hour12 = hour24 % 12 || 12;
+  return `${hour12}:${String(minute).padStart(2, '0')} ${suffix}`;
 }
 
 export function fmtDateShort(ms: number, timeZone: string): string {

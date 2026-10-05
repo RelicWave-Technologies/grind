@@ -9,7 +9,7 @@ import type {
   MonitoringSettingsAuditListResponse,
   WorkspacePolicyDto,
 } from '@grind/types';
-import { SCREENSHOT_INTERVAL_OPTIONS } from '@grind/types';
+import { IDLE_THRESHOLD_OPTIONS, SCREENSHOT_INTERVAL_OPTIONS } from '@grind/types';
 import { api } from '../lib/api';
 import {
   Page,
@@ -35,7 +35,6 @@ import {
 import type { Rail } from '../ui';
 import './policy.css';
 
-const IDLE_THRESHOLD_OPTIONS = [1, 3, 5, 10, 15, 30, 45, 60, 120];
 const RETENTION_OPTIONS = [30, 60, 90, 180, 365];
 type MonitoringRisk = 'NORMAL' | 'CAUTION' | 'HIGH';
 type MonitoringTiming = { screenshotIntervalMin: number; idleThresholdMin: number };

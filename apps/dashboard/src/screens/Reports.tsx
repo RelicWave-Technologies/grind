@@ -25,7 +25,18 @@ import {
 } from 'lucide-react';
 import { api, API_BASE } from '../lib/api';
 import { useMonthReportDownload, fmtMonthShort, fmtMonthLong } from '../lib/useMonthReportDownload';
-import { addDays, calendarDateInstant, fmtAgeShort, fmtDayLabel, fmtDurationMs, fmtMinuteOfDay, fmtTime, todayKey } from '../lib/format';
+import {
+  addDays,
+  calendarDateInstant,
+  fmtAgeShort,
+  fmtDayLabel,
+  fmtDurationMs,
+  fmtMinuteOfDay,
+  fmtShiftClock,
+  fmtTime,
+  todayKey,
+  weekdayInTimeZone,
+} from '../lib/format';
 import { hasCapability, isManagerOrAbove } from '../lib/auth';
 import {
   anchorDateKey as localDateKey,
@@ -33,7 +44,6 @@ import {
   dateKeyInTimeZone,
   daysBetween,
   localDayWindowInTimeZone,
-  weekdayForDate,
   type ManualTimeRequestDto,
 } from '@grind/types';
 import type { SelfProfileResponse } from '@grind/types/profile';
@@ -1661,7 +1671,7 @@ function ReportApprovalDetailField({ label, children }: { label: string; childre
 }
 
 function TeamMemberProfilePanel({ profile, timezone }: { profile: SelfProfileResponse; timezone: string }) {
-  const todayWindow = profile.shift ? formatScheduleRange(profile.shift.schedule[weekdayKey(new Date(), timezone)]) : 'Day off';
+  const todayWindow = profile.shift ? formatScheduleRange(profile.shift.schedule[weekdayInTimeZone(new Date(), timezone)]) : 'Day off';
   const workingDays = profile.shift ? countWorkingDays(profile.shift.schedule) : 0;
   const captureCount = [profile.policy.captureApps, profile.policy.captureTitles, profile.policy.captureUrls].filter(Boolean).length;
   return (
@@ -1688,7 +1698,7 @@ function TeamMemberProfilePanel({ profile, timezone }: { profile: SelfProfileRes
       {profile.shift && (
         <div className="rep-drawer-week">
           {WEEKDAY_LABELS.map((day) => {
-            const isToday = day.key === weekdayKey(new Date(), timezone);
+            const isToday = day.key === weekdayInTimeZone(new Date(), timezone);
             return (
               <div key={day.key} className={`rep-drawer-week-day${isToday ? ' is-today' : ''}`}>
                 <span className="ui-t-eyebrow">{day.label}</span>
@@ -2374,26 +2384,13 @@ function friendlyRole(role: SelfProfileResponse['user']['displayRole']) {
   return 'Member';
 }
 
-function weekdayKey(date: Date, timeZone: string): Weekday {
-  return weekdayForDate(dateKeyInTimeZone(date, timeZone));
-}
-
 function formatScheduleRange(slot: ShiftSchedule[Weekday] | undefined) {
   if (!slot) return 'Day off';
-  return `${formatShiftClock(slot.start)} - ${formatShiftClock(slot.end)}`;
+  return `${fmtShiftClock(slot.start)} - ${fmtShiftClock(slot.end)}`;
 }
 
 function countWorkingDays(schedule: ShiftSchedule) {
   return WEEKDAY_LABELS.filter((day) => schedule[day.key] !== null).length;
-}
-
-function formatShiftClock(hhmm: string) {
-  const [hourRaw, minuteRaw] = hhmm.split(':').map((part) => Number.parseInt(part, 10));
-  const hour24 = hourRaw ?? 0;
-  const minute = minuteRaw ?? 0;
-  const suffix = hour24 >= 12 ? 'PM' : 'AM';
-  const hour12 = hour24 % 12 || 12;
-  return `${hour12}:${String(minute).padStart(2, '0')} ${suffix}`;
 }
 
 function formatLongDate(iso: string, timeZone: string) {
