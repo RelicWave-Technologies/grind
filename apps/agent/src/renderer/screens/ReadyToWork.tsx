@@ -1,12 +1,13 @@
-import { useEffect } from 'react';
+import { useEffect, useId } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Sunrise, Timer } from 'lucide-react';
+import { usePromptKeys } from '../lib/promptA11y';
 
 /**
  * Toast that appears when the user's shift window opens (start +
  * bufferMin). Two choices:
- *   - **Yes** → opens the main agent window (the picker / Today screen).
- *     The popup hides; ShiftMonitor ack-marks today as handled.
+ *   - **Yes** → starts tracking on the last task (or opens the main window
+ *     to pick one). The popup hides; ShiftMonitor ack-marks today as handled.
  *   - **Not yet** → 5-min snooze. Popup hides; if the user is still inside
  *     the buffer when the snooze expires, it re-shows.
  *
@@ -48,16 +49,23 @@ export default function ReadyToWork() {
 
   const copy = COPY[reason.data ?? 'SHIFT_START'];
   const Icon = copy.icon;
+  const titleId = useId();
+  const subId = useId();
+  usePromptKeys({
+    primary: () => decide.mutate('yes'),
+    secondary: () => decide.mutate('not_yet'),
+    disabled: decide.isPending,
+  });
 
   return (
-    <div className="rtw">
+    <div className="rtw" role="dialog" aria-labelledby={titleId} aria-describedby={subId}>
       <div className="rtw-head">
         <span className="rtw-icon" aria-hidden>
           <Icon size={20} strokeWidth={2} />
         </span>
         <div className="rtw-title">
-          <div className="h3">{copy.title}</div>
-          <div className="rtw-sub callout secondary">{copy.sub}</div>
+          <div className="h3" id={titleId}>{copy.title}</div>
+          <div className="rtw-sub callout secondary" id={subId}>{copy.sub}</div>
         </div>
       </div>
       <div className="rtw-actions">
@@ -72,6 +80,7 @@ export default function ReadyToWork() {
           className="btn btn-prominent no-drag"
           onClick={() => decide.mutate('yes')}
           disabled={decide.isPending}
+          autoFocus
         >
           {copy.confirm}
         </button>
