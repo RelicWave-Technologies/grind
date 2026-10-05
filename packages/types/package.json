@@ -9,6 +9,7 @@
     ".": "./src/index.ts",
     "./auth": "./src/auth.ts",
     "./agent": "./src/agent.ts",
+    "./agentCommands": "./src/agentCommands.ts",
     "./timeEntries": "./src/timeEntries.ts",
     "./activity": "./src/activity.ts",
     "./rbac": "./src/rbac.ts",

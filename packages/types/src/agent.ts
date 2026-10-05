@@ -4,6 +4,7 @@ import {
   ScreenshotIntervalMinSchema,
 } from './teamSettings';
 import { TimeZoneSchema } from './timezone';
+import { AgentCommandWire } from './agentCommands';
 
 export const AgentState = z.enum(['IDLE', 'RUNNING', 'PAUSED_IDLE', 'PAUSED_PERMISSION', 'OFFLINE']);
 export type AgentState = z.infer<typeof AgentState>;
@@ -147,6 +148,11 @@ export const HeartbeatResponse = z.object({
     endedAt: z.string().nullable(),
     closeReason: z.enum(['AGENT', 'AGENT_RECOVERY', 'LEASE_EXPIRED', 'SUPERSEDED', 'LEGACY_RECONCILED']).nullable(),
   }).nullable().optional(),
+  /**
+   * Developer commands waiting for this agent (see ./agentCommands). Absent
+   * when there are none; older agents never read it.
+   */
+  commands: z.array(AgentCommandWire).optional(),
 });
 export type HeartbeatResponse = z.infer<typeof HeartbeatResponse>;
 

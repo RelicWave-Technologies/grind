@@ -28,6 +28,18 @@ export const UserDto = z.object({
 });
 export type UserDto = z.infer<typeof UserDto>;
 
+/**
+ * GET /v1/auth/me. `isDeveloper` is true only for emails in the API's
+ * DEVELOPER_EMAILS allowlist — it unlocks the hidden developer tools.
+ */
+export const MeUserDto = UserDto.extend({
+  isDeveloper: z.boolean(),
+});
+export type MeUserDto = z.infer<typeof MeUserDto>;
+
+export const MeResponse = z.object({ user: MeUserDto });
+export type MeResponse = z.infer<typeof MeResponse>;
+
 export const LoginRequest = z.object({
   email: z.string().email(),
   password: z.string().min(1).max(200),
