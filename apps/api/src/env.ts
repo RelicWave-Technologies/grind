@@ -28,6 +28,22 @@ const UrlListSchema = z
     return parts.length > 0 && parseUrlList(v).length === parts.length;
   }, 'must be one URL or a comma-separated list of URLs');
 
+/** Split a comma-separated email allowlist: trimmed, lowercased, blanks dropped. */
+export function parseEmailList(raw: string | undefined | null): string[] {
+  return (raw ?? '')
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+const EmailListSchema = z
+  .string()
+  .optional()
+  .refine(
+    (v) => parseEmailList(v).every((e) => z.string().email().safeParse(e).success),
+    'must be one email or a comma-separated list of emails',
+  );
+
 const EnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   // PORT is injected by most PaaS hosts (Render, Heroku, Railway). When set it
@@ -73,6 +89,12 @@ const EnvSchema = z.object({
   /// approval_code of the Lark "Work From Home Request" approval. Present =
   /// WFH requests are mirrored into Timo, which the attendance rules read.
   LARK_WFH_APPROVAL_CODE: z.string().min(1).optional(),
+  // --- Developer tools ---
+  // Comma-separated emails allowed to use the hidden developer tools (remote
+  // agent resync at /dev/resync). Empty or unset = the feature is off and its
+  // routes answer 404. Matching is case-insensitive + trimmed. Read it through
+  // developerEmails(), never process.env directly.
+  DEVELOPER_EMAILS: EmailListSchema,
   // Fixed id for the single workspace, used with upsert so concurrent first
   // logins never create duplicates.
   WORKSPACE_ID: z.string().min(1).default('ws_default'),
@@ -143,4 +165,17 @@ export const env = parsed.data;
  */
 export function dashboardOrigins(): string[] {
   return parseUrlList(process.env.DASHBOARD_URL ?? env.DASHBOARD_URL);
+}
+
+/**
+ * The developer allowlist, lowercased. Parsed on each call (like
+ * dashboardOrigins) so a value set after this module loaded is honoured.
+ */
+export function developerEmails(): string[] {
+  return parseEmailList(process.env.DEVELOPER_EMAILS ?? env.DEVELOPER_EMAILS);
+}
+
+export function isDeveloperEmail(email: string | null | undefined): boolean {
+  if (!email) return false;
+  return developerEmails().includes(email.trim().toLowerCase());
 }

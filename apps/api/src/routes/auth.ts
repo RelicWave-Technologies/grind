@@ -7,6 +7,7 @@ import {
   Role as RoleSchema,
   roleCapabilities,
   type LoginResponse,
+  type MeResponse,
   type RefreshResponse,
   type UserDto,
 } from '@grind/types';
@@ -22,7 +23,7 @@ import {
   clearRefreshCookie,
   REFRESH_COOKIE,
 } from '../lib/cookies';
-import { env } from '../env';
+import { env, isDeveloperEmail } from '../env';
 
 export const authRouter = Router();
 
@@ -150,7 +151,8 @@ authRouter.get('/me', requireAccessToken, async (req, res, next) => {
     if (!user) return res.status(401).json({ error: 'unauthorized' });
     const payloadUser = serializeAuthUser(user);
     if (!payloadUser) return res.status(503).json({ error: 'stale_role_migration_required' });
-    res.json({ user: payloadUser });
+    const response: MeResponse = { user: { ...payloadUser, isDeveloper: isDeveloperEmail(user.email) } };
+    res.json(response);
   } catch (err) {
     next(err);
   }

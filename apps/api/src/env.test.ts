@@ -1,10 +1,13 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { dashboardOrigins, parseUrlList } from './env';
+import { dashboardOrigins, developerEmails, isDeveloperEmail, parseEmailList, parseUrlList } from './env';
 
 const prev = process.env.DASHBOARD_URL;
+const prevDevelopers = process.env.DEVELOPER_EMAILS;
 afterEach(() => {
   if (prev === undefined) delete process.env.DASHBOARD_URL;
   else process.env.DASHBOARD_URL = prev;
+  if (prevDevelopers === undefined) delete process.env.DEVELOPER_EMAILS;
+  else process.env.DEVELOPER_EMAILS = prevDevelopers;
 });
 
 describe('DASHBOARD_URL', () => {
@@ -22,5 +25,22 @@ describe('DASHBOARD_URL', () => {
   it('dashboardOrigins reads the current value', () => {
     process.env.DASHBOARD_URL = 'https://x.example/,https://y.example';
     expect(dashboardOrigins()).toEqual(['https://x.example', 'https://y.example']);
+  });
+});
+
+describe('DEVELOPER_EMAILS', () => {
+  it('parses a trimmed, lowercased, comma-separated list', () => {
+    expect(parseEmailList(' Dev@Example.com , ops@example.com ,')).toEqual(['dev@example.com', 'ops@example.com']);
+    expect(parseEmailList('')).toEqual([]);
+    expect(parseEmailList(undefined)).toEqual([]);
+  });
+
+  it('matches case-insensitively and is off when empty', () => {
+    process.env.DEVELOPER_EMAILS = 'dev@example.com';
+    expect(developerEmails()).toEqual(['dev@example.com']);
+    expect(isDeveloperEmail(' DEV@example.com')).toBe(true);
+    expect(isDeveloperEmail('other@example.com')).toBe(false);
+    process.env.DEVELOPER_EMAILS = '';
+    expect(isDeveloperEmail('dev@example.com')).toBe(false);
   });
 });

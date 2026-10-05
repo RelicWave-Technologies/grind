@@ -19,6 +19,10 @@ import { onShutdown } from '../lib/lifecycle';
  *     cancelled, stale) and untouched for 90 days — the request was settled
  *     long ago and the card will not change again.
  *
+ *   - AgentCommand: a developer command the agent never completed within
+ *     7 days is marked EXPIRED (not deleted, so the developer page shows it);
+ *     completed ones (DONE/FAILED/EXPIRED) are deleted 30 days after that.
+ *
  * Activity samples are deliberately NOT pruned here: they are the evidence
  * behind every report, production has no backups, and how long to keep them
  * is a workspace-policy decision rather than housekeeping.
@@ -32,6 +36,8 @@ const DAY_MS = 24 * 60 * 60_000;
 export const REFRESH_TOKEN_RETENTION_MS = 7 * DAY_MS;
 export const OUTBOX_DONE_RETENTION_MS = 30 * DAY_MS;
 export const LARK_MESSAGE_TERMINAL_RETENTION_MS = 90 * DAY_MS;
+export const AGENT_COMMAND_EXPIRY_MS = 7 * DAY_MS;
+export const AGENT_COMMAND_RETENTION_MS = 30 * DAY_MS;
 export const TERMINAL_LARK_MESSAGE_STATUSES = ['SUPERSEDED', 'DECIDED', 'CANCELLED', 'STALE'] as const;
 
 const PRUNE_LOCK_NAMESPACE = 742019652;
@@ -60,6 +66,14 @@ export function prunePredicates(now: Date) {
       status: { in: [...TERMINAL_LARK_MESSAGE_STATUSES] },
       updatedAt: { lt: ago(LARK_MESSAGE_TERMINAL_RETENTION_MS) },
     } satisfies Prisma.ManualTimeLarkMessageWhereInput,
+    agentCommandToExpire: {
+      status: { in: ['PENDING', 'DELIVERED'] },
+      createdAt: { lt: ago(AGENT_COMMAND_EXPIRY_MS) },
+    } satisfies Prisma.AgentCommandWhereInput,
+    agentCommand: {
+      status: { in: ['DONE', 'FAILED', 'EXPIRED'] },
+      completedAt: { lt: ago(AGENT_COMMAND_RETENTION_MS) },
+    } satisfies Prisma.AgentCommandWhereInput,
   };
 }
 
@@ -68,6 +82,8 @@ export interface PruneResult {
   agentAuthCodes: number;
   manualTimeOutboxEvents: number;
   manualTimeLarkMessages: number;
+  agentCommandsExpired: number;
+  agentCommands: number;
 }
 
 type Tx = Prisma.TransactionClient;
@@ -115,7 +131,23 @@ export async function runPruneOnce(now: Date = new Date()): Promise<PruneResult 
       () => tx.manualTimeLarkMessage.findMany({ where: where.manualTimeLarkMessage, select, take }),
       (ids) => tx.manualTimeLarkMessage.deleteMany({ where: { id: { in: ids } } }),
     );
-    return { refreshTokens, agentAuthCodes, manualTimeOutboxEvents, manualTimeLarkMessages };
+    // Expire first, stamping completedAt, so the 30-day clock starts now.
+    const { count: agentCommandsExpired } = await tx.agentCommand.updateMany({
+      where: where.agentCommandToExpire,
+      data: { status: 'EXPIRED', completedAt: now },
+    });
+    const agentCommands = await deleteBatched(
+      () => tx.agentCommand.findMany({ where: where.agentCommand, select, take }),
+      (ids) => tx.agentCommand.deleteMany({ where: { id: { in: ids } } }),
+    );
+    return {
+      refreshTokens,
+      agentAuthCodes,
+      manualTimeOutboxEvents,
+      manualTimeLarkMessages,
+      agentCommandsExpired,
+      agentCommands,
+    };
   }, { timeout: PRUNE_TX_TIMEOUT_MS, maxWait: 10_000 });
 }
 

@@ -26,6 +26,7 @@ import { workspacePolicyRouter } from './routes/workspacePolicy';
 import { adminLeaveRouter, leaveRouter } from './routes/leave';
 import { overviewRouter } from './routes/overview';
 import { downloadsRouter } from './routes/downloads';
+import { devRouter } from './routes/dev';
 import { errorHandler } from './middleware/errorHandler';
 
 export function buildApp() {
@@ -142,6 +143,8 @@ export function buildApp() {
   app.use('/v1/admin', adminRouter);
   app.use('/v1/workspace', workspaceRouter);
   app.use('/v1/leave', leaveRouter);
+  // Developer-only tools (DEVELOPER_EMAILS); 404 for everyone else.
+  app.use('/v1/dev', devRouter);
 
   app.use(errorHandler);
 

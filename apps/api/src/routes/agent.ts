@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import {
   AgentAppIconsRequest,
+  AgentCommandResultRequest,
   HeartbeatRequest,
   TodayLedgerQuery,
   WORKSPACE_POLICY_DEFAULTS,
@@ -20,6 +21,7 @@ import { loadEntryLiveEvidence } from '../insights/liveEntryEvidence';
 import { loadInvalidations } from '../time';
 import { resolveTodayLedgerMode } from '../agent/todayLedgerMode';
 import { agentPermissionColumns } from '../agentPermissionColumns';
+import { deliverAgentCommands, recordAgentCommandResult } from '../agent/commands';
 
 export const agentRouter = Router();
 
@@ -184,13 +186,40 @@ agentRouter.post('/heartbeat', validate(HeartbeatRequest, 'body'), async (req, r
     if (!heartbeatResult.authorized) return res.status(401).json({ error: 'unauthorized' });
     const config = await buildAgentConfig(req.user.sub, req.user.ws);
     if (!config) return res.status(401).json({ error: 'unauthorized' });
+    const commands = await deliverAgentCommands(req.user.sub, now);
     const response: HeartbeatResponse = {
       ok: true,
       serverTime: now.toISOString(),
       configVersion: config.configVersion,
       timer: heartbeatResult.timer,
+      ...(commands.length > 0 ? { commands } : {}),
     };
     res.json(response);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * The agent's outcome for a developer command it was handed on a heartbeat.
+ * Only the command's target can report it; repeats are answered as success.
+ */
+agentRouter.post('/commands/:id/result', validate(AgentCommandResultRequest, 'body'), async (req, res, next) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: 'unauthorized' });
+    const body = req.body as AgentCommandResultRequest;
+    const outcome = await recordAgentCommandResult({
+      id: req.params.id!,
+      userId: req.user.sub,
+      workspaceId: req.user.ws,
+      body,
+      now: new Date(),
+    });
+    if (outcome.kind === 'not_found') return res.status(404).json({ error: 'not_found' });
+    if (outcome.kind === 'recorded') {
+      req.log?.info({ commandId: req.params.id, status: body.status }, 'agent command completed');
+    }
+    res.json({ ok: true as const, status: outcome.status, alreadyCompleted: outcome.kind === 'already_completed' });
   } catch (err) {
     next(err);
   }
