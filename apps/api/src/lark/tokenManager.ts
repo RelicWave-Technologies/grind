@@ -158,10 +158,23 @@ export class TokenManager {
     });
   }
 
-  /** Exchange an authorization code for the first token pair and store it. */
-  async connect(userId: string, code: string, redirectUri: string): Promise<void> {
+  /**
+   * Exchange an authorization code for the first token pair and store it.
+   *
+   * `verify` runs after the exchange and BEFORE anything is persisted: it is
+   * where the caller proves the Lark account behind the new token is the user
+   * who started the flow. If it throws, nothing is stored and the error
+   * propagates.
+   */
+  async connect(
+    userId: string,
+    code: string,
+    redirectUri: string,
+    verify?: (tokens: LarkTokenResponse) => Promise<void>,
+  ): Promise<void> {
     await this.withTokenMutationLock(userId, async (db) => {
       const res = await this.deps.client.exchangeCode(code, redirectUri);
+      if (verify) await verify(res);
       await this.persist(db, userId, res);
     });
   }
