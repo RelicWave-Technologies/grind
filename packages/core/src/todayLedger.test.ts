@@ -54,6 +54,19 @@ describe('reconcileTodayLedger', () => {
     });
   });
 
+  it('subtracts server invalidations from the day total', () => {
+    const tracked = entry('tracked', 1, 0, 60_000);
+    const projection = reconcileTodayLedger({
+      local: [{ entry: tracked, syncState: 'synced' }],
+      server: [server(tracked)],
+      windowStart: 0,
+      windowEnd: 100_000,
+      now: 100_000,
+      invalidations: [{ start: 10_000, end: 30_000 }, { start: 20_000, end: 40_000 }],
+    });
+    expect(projection.workedMs).toBe(30_000);
+  });
+
   it('adds pending local time without duplicating server-confirmed time', () => {
     const confirmed = entry('confirmed', 2, 0, 4.5 * 60 * 60_000);
     const pending = entry('pending', 1, 4.5 * 60 * 60_000, 5 * 60 * 60_000);

@@ -288,6 +288,10 @@ importers:
         version: 2.1.4(@types/node@20.16.13)
 
   packages/core:
+    dependencies:
+      '@grind/types':
+        specifier: workspace:*
+        version: link:../types
     devDependencies:
       '@grind/tsconfig':
         specifier: workspace:*
