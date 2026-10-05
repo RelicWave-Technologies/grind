@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
-import { ScreenshotStore } from './store';
+import { ScreenshotStore, relativeScreenshotPath, type ScreenshotRow } from './store';
 
 describe('ScreenshotStore migrations', () => {
   it('adds retry columns before creating indexes on older local databases', () => {
@@ -92,3 +92,140 @@ describe('recovering a backlog written off during a storage outage', () => {
   });
 });
 
+
+describe('ScreenshotStore upload queue', () => {
+  const OWNER = { userId: 'u1', workspaceId: 'w1' };
+  const OTHER = { userId: 'u2', workspaceId: 'w1' };
+
+  const shot = (id: string, over: Partial<ScreenshotRow> = {}): ScreenshotRow => ({
+    id,
+    timeEntryId: null,
+    displayId: 'd1',
+    capturedAt: 1_000,
+    filePath: `2026-10-05/${id}.webp`,
+    bytes: 1,
+    width: 1,
+    height: 1,
+    uploadState: 'pending',
+    attempts: 0,
+    s3Key: null,
+    lastError: null,
+    nextAttemptAt: null,
+    failedAt: null,
+    ownerUserId: OWNER.userId,
+    ownerWorkspaceId: OWNER.workspaceId,
+    ...over,
+  });
+
+  /** The timer's table, as the timer store creates it in the same agent.db. */
+  const withLocalEntries = (db: InstanceType<typeof Database>) => {
+    db.exec(`CREATE TABLE local_entries (
+      id TEXT PRIMARY KEY, sync_state TEXT NOT NULL, owner_user_id TEXT, owner_workspace_id TEXT
+    )`);
+    return db;
+  };
+
+  it('claims a shot for upload exactly once', () => {
+    const store = new ScreenshotStore(new Database(':memory:'));
+    store.insert(shot('a'));
+    expect(store.claimForUpload('a')).toBe(true);
+    // A second pass racing for the same shot is refused.
+    expect(store.claimForUpload('a')).toBe(false);
+    expect(store.find('a')?.uploadState).toBe('uploading');
+  });
+
+  it('puts a shot left mid-upload by a crash back in the queue on open', () => {
+    const db = new Database(':memory:');
+    const store = new ScreenshotStore(db);
+    store.insert(shot('a'));
+    store.claimForUpload('a');
+    expect(new ScreenshotStore(db).find('a')?.uploadState).toBe('pending');
+  });
+
+  it('keeps retrying shots past five attempts across restarts', () => {
+    const db = new Database(':memory:');
+    new ScreenshotStore(db).insert(shot('a', { attempts: 9 }));
+    expect(new ScreenshotStore(db).find('a')?.uploadState).toBe('pending');
+  });
+
+  it('queues and lists only the signed-in account\'s shots', () => {
+    const store = new ScreenshotStore(new Database(':memory:'));
+    store.insert(shot('mine'));
+    store.insert(shot('theirs', { ownerUserId: OTHER.userId, ownerWorkspaceId: OTHER.workspaceId }));
+    store.insert(shot('legacy', { ownerUserId: null, ownerWorkspaceId: null }));
+
+    expect(store.pending(OWNER, 10, 2_000).map((r) => r.id)).toEqual(['mine']);
+    expect(store.recent(OWNER, 10).map((r) => r.id)).toEqual(['mine']);
+    expect(store.inRange(OTHER, 0, 2_000).map((r) => r.id)).toEqual(['theirs']);
+    expect(store.uploadSummary(OWNER)).toEqual({ pending: 1, uploading: 0, failed: 0 });
+    expect(store.uploadSummary(null)).toEqual({ pending: 0, uploading: 0, failed: 0 });
+  });
+
+  it('claims legacy shots only through timer entries proven to be the owner\'s', () => {
+    const db = withLocalEntries(new Database(':memory:'));
+    db.prepare(`INSERT INTO local_entries VALUES ('e-mine', 'synced', 'u1', 'w1'), ('e-theirs', 'synced', 'u2', 'w1')`).run();
+    const store = new ScreenshotStore(db);
+    store.insert(shot('a', { ownerUserId: null, ownerWorkspaceId: null, timeEntryId: 'e-mine' }));
+    store.insert(shot('b', { ownerUserId: null, ownerWorkspaceId: null, timeEntryId: 'e-theirs' }));
+    store.insert(shot('c', { ownerUserId: null, ownerWorkspaceId: null, timeEntryId: null }));
+
+    expect(store.claimUnowned(OWNER)).toBe(1);
+    expect(store.find('a')?.ownerUserId).toBe('u1');
+    expect(store.find('b')?.ownerUserId).toBeNull();
+    expect(store.find('c')?.ownerUserId).toBeNull();
+  });
+
+  it('holds a shot whose entry is still being created for an hour, without stalling the rest', () => {
+    const db = withLocalEntries(new Database(':memory:'));
+    db.prepare(`INSERT INTO local_entries VALUES ('e-new', 'pending_create', 'u1', 'w1'), ('e-ok', 'synced', 'u1', 'w1')`).run();
+    const store = new ScreenshotStore(db);
+    const HOUR = 60 * 60_000;
+    const now = 10 * HOUR;
+    // Five held shots ahead of a ready one: the batch must still reach it.
+    for (let i = 0; i < 5; i++) store.insert(shot(`held-${i}`, { timeEntryId: 'e-new', capturedAt: now - 10 * 60_000 + i }));
+    store.insert(shot('ready', { timeEntryId: 'e-ok', capturedAt: now - 60_000 }));
+    store.insert(shot('stale', { timeEntryId: 'e-new', capturedAt: now - 2 * HOUR }));
+    store.insert(shot('no-entry', { capturedAt: now - 30_000 }));
+
+    expect(store.pending(OWNER, 5, now).map((r) => r.id)).toEqual(['stale', 'ready', 'no-entry']);
+  });
+
+  it('rewrites absolute file paths as relative to the screenshots dir', () => {
+    const db = new Database(':memory:');
+    new ScreenshotStore(db);
+    const insert = db.prepare(
+      `INSERT INTO screenshots (id, display_id, captured_at, file_path, bytes, width, height) VALUES (?, 'd', 1, ?, 1, 1, 1)`,
+    );
+    insert.run('mac', '/Users/me/Library/Application Support/Grind/screenshots/2026-10-01/mac.webp');
+    insert.run('win', 'C:\\Users\\me\\AppData\\Roaming\\Timo\\screenshots\\2026-10-01\\win.webp');
+    insert.run('rel', '2026-10-01/rel.webp');
+    insert.run('odd', '/somewhere/else/odd.webp');
+
+    const store = new ScreenshotStore(db);
+    expect(store.find('mac')?.filePath).toBe('2026-10-01/mac.webp');
+    expect(store.find('win')?.filePath).toBe('2026-10-01\\win.webp');
+    expect(store.find('rel')?.filePath).toBe('2026-10-01/rel.webp');
+    expect(store.find('odd')?.filePath).toBe('/somewhere/else/odd.webp');
+  });
+
+  it('offers uploaded shots for a local trim only after they have been on the server a while', () => {
+    const store = new ScreenshotStore(new Database(':memory:'));
+    store.insert(shot('old'));
+    store.insert(shot('fresh'));
+    store.insert(shot('waiting'));
+    store.markUploaded('old', 'k1', 1_000);
+    store.markUploaded('fresh', 'k2', 9_000);
+
+    expect(store.uploadedToTrim(5_000, 10).map((r) => r.id)).toEqual(['old']);
+    store.markTrimmed('old', 10, 6_000);
+    expect(store.uploadedToTrim(10_000, 10).map((r) => r.id)).toEqual(['fresh']);
+    expect(store.find('old')).toMatchObject({ localTrimmedAt: 6_000, bytes: 10, uploadState: 'uploaded' });
+  });
+});
+
+describe('relativeScreenshotPath', () => {
+  it('keeps everything below the last screenshots folder', () => {
+    expect(relativeScreenshotPath('/home/screenshots/x/Grind/screenshots/2026-10-01/a.webp')).toBe('2026-10-01/a.webp');
+    expect(relativeScreenshotPath('2026-10-01/a.webp')).toBeNull();
+  });
+});

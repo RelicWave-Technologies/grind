@@ -128,7 +128,6 @@ function fmtHM(min: number): { h: number; m: number } {
 
 function Reports() {
   const insights = useQuery({ queryKey: ['insightsToday'], queryFn: () => window.agent.insights.today(), refetchInterval: 15_000 });
-  const allShots = useQuery({ queryKey: ['shotsAll'], queryFn: () => window.agent.screenshots.recent(200) });
   const workspaceTime = useWorkspaceTime();
   const d = insights.data;
   const tracked = fmtHM(d?.score.trackedMinutes ?? 0);
@@ -136,9 +135,16 @@ function Reports() {
   const timeContext = workspaceTime.data;
   const hasWorkspaceTime = workspaceTimeReady(timeContext);
   const timeZone = hasWorkspaceTime ? timeContext.timeZone : null;
-  const todayShots = hasWorkspaceTime
-    ? (allShots.data ?? []).filter((shot) => shot.capturedAt >= timeContext.dayStart && shot.capturedAt < timeContext.dayEnd)
-    : [];
+  // The whole workspace day, however many shots it holds — a fixed "latest
+  // 200" cut a busy day (several displays, short cadence) off at midday.
+  const dayStart = hasWorkspaceTime ? timeContext.dayStart : null;
+  const dayEnd = hasWorkspaceTime ? timeContext.dayEnd : null;
+  const allShots = useQuery({
+    queryKey: ['shotsAll', dayStart, dayEnd],
+    queryFn: () => window.agent.screenshots.range(dayStart as number, dayEnd as number),
+    enabled: dayStart !== null && dayEnd !== null,
+  });
+  const todayShots = allShots.data ?? [];
 
   // The backend returns workspace-local hourly buckets for the whole day.
   // Keep the full 24-hour frame visible so early/late activity is not hidden.
