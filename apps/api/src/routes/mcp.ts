@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { prisma, type Prisma } from '@grind/db';
 import { z } from 'zod';
-import { TimeZoneSchema, addDays, todayKey } from '@grind/types';
+import { ManualTimeRequestStatus, Role, TimeZoneSchema, addDays, todayKey } from '@grind/types';
 import {
   LIVE_HEARTBEAT_FRESH_MS,
   clipInterval,
@@ -707,7 +707,7 @@ mcpRouter.get('/people', requireApiToken(['read:people', 'read:device-health']),
   try {
     const query = z.object({
       q: OptionalTextSchema,
-      role: z.enum(['ADMIN', 'MANAGER', 'MEMBER']).optional(),
+      role: Role.optional(),
       limit: LimitSchema,
     }).safeParse(req.query);
     if (!query.success) return res.status(400).json({ error: 'invalid_query', issues: query.error.issues });
@@ -1123,7 +1123,7 @@ mcpRouter.get('/break-summary', requireApiToken(['read:people', 'read:time-summa
   try {
     const query = z.object({
       q: OptionalTextSchema,
-      role: z.enum(['ADMIN', 'MANAGER', 'MEMBER']).optional(),
+      role: Role.optional(),
       from: DateSchema.optional(),
       to: DateSchema.optional(),
       tz: OptionalTimezoneSchema,
@@ -1326,7 +1326,7 @@ mcpRouter.get('/time-summary', requireApiToken(['read:time-summary']), async (re
 mcpRouter.get('/manual-time-requests', requireApiToken(['read:manual-time']), async (req, res, next) => {
   try {
     const query = z.object({
-      status: z.enum(['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED']).optional(),
+      status: ManualTimeRequestStatus.optional(),
       from: DateSchema.optional(),
       to: DateSchema.optional(),
       tz: OptionalTimezoneSchema,

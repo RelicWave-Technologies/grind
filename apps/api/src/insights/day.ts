@@ -196,13 +196,6 @@ export function shiftDayWindow(
   }
 }
 
-/** Clip [a,b) by [lo,hi) → returns null when disjoint. */
-function clip(a: number, b: number, lo: number, hi: number): { a: number; b: number } | null {
-  const start = Math.max(a, lo);
-  const end = Math.min(b, hi);
-  return end > start ? { a: start, b: end } : null;
-}
-
 interface PendingIv {
   id: string;
   a: number;
@@ -498,9 +491,9 @@ export function buildDayInsight(input: {
   // 3. Clip solids to the frame.
   const clippedSolids: DayBlock[] = [];
   for (const s of solids) {
-    const c = clip(s.startedAt, s.endedAt, dayStart, dayEnd);
+    const c = clipInterval({ start: s.startedAt, end: s.endedAt }, dayStart, dayEnd);
     if (!c) continue;
-    clippedSolids.push({ ...s, startedAt: c.a, endedAt: c.b, durationMs: c.b - c.a });
+    clippedSolids.push({ ...s, startedAt: c.start, endedAt: c.end, durationMs: c.end - c.start });
   }
 
   // Activity envelope: counted time only, and a stretch that started before
@@ -564,12 +557,12 @@ export function buildDayInsight(input: {
 
   const recentRejected = rejected
     .map((r) => {
-      const c = clip(r.requestedStart.getTime(), r.requestedEnd.getTime(), dayStart, dayEnd);
+      const c = clipInterval({ start: r.requestedStart.getTime(), end: r.requestedEnd.getTime() }, dayStart, dayEnd);
       if (!c) return null;
       return {
         id: r.id,
-        requestedStart: c.a,
-        requestedEnd: c.b,
+        requestedStart: c.start,
+        requestedEnd: c.end,
         reason: r.reason,
         decidedReason: r.decidedReason,
         larkTaskGuid: r.larkTaskGuid,

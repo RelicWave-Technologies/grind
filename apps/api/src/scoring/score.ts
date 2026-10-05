@@ -34,7 +34,7 @@ export const READING_CREDIT = 0.5;
 const READING_INTENSITY_CEIL = 0.2;
 const READING_SCROLL_MIN = 8;
 // A minute is "idle" only when there is essentially no input of any kind.
-const IDLE_MOUSE_PX = 50;
+export const IDLE_MOUSE_PX = 50;
 
 const CHANNELS: Channel[] = ['keystrokes', 'clicks', 'scrollEvents', 'mouseDistancePx'];
 

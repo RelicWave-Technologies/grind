@@ -19,6 +19,8 @@
  *   - FIXED_INTERVAL   event-gap grid clustering (needs fixedIntervalScore)
  */
 
+import { IDLE_MOUSE_PX } from '../scoring/score';
+
 export type FlagType =
   | 'IMPOSSIBLE_RATE'
   | 'METRONOMIC'
@@ -58,7 +60,6 @@ const LINEAR_STRAIGHTNESS = 0.97;
 const LINEAR_SPEED_CV = 0.05;
 const MIN_MOVE_PX = 500;
 const JIGGLER_SPEED_CV = 0.1;
-const IDLE_MOUSE_PX = 50;
 export const MIN_WINDOW_FOR_PATTERN = 5; // need enough minutes to claim a pattern
 const SINGLE_CHANNEL_MIN_VOLUME = 200; // total of the active channel
 
