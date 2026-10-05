@@ -50,6 +50,7 @@ import {
   LARK_LOGIN_REUSE_TTL_MS,
   cancelLarkLogin,
   completeLarkLogin,
+  logout,
   startLarkLogin,
 } from './auth';
 
@@ -196,5 +197,37 @@ describe('Lark agent login flow', () => {
         codeVerifier: stored.verifier,
       },
     });
+  });
+});
+
+describe('logout', () => {
+  beforeEach(() => {
+    mocks.api.mockReset();
+    mocks.loadTokens.mockReset();
+    mocks.clearTokens.mockReset();
+  });
+
+  it('revokes the refresh token the request is actually sent with, as a manual sign-out', async () => {
+    mocks.loadTokens.mockResolvedValue({ accessToken: 'a0', refreshToken: 'r0', userId: 'u', workspaceId: 'w' });
+    mocks.api.mockResolvedValue({ ok: true });
+
+    await logout();
+
+    const [path, opts] = mocks.api.mock.calls[0]!;
+    expect(path).toBe('/v1/auth/logout');
+    expect(opts.body).toBeUndefined();
+    // After a rotation the live token is r1, not the r0 we started with.
+    expect(opts.bodyFromTokens({ refreshToken: 'r1' })).toEqual({ refreshToken: 'r1' });
+    expect(opts.signOutReason).toBe('manual');
+    expect(mocks.clearTokens).toHaveBeenCalledOnce();
+  });
+
+  it('clears the local session even when the server cannot be reached', async () => {
+    mocks.loadTokens.mockResolvedValue({ accessToken: 'a0', refreshToken: 'r0', userId: 'u', workspaceId: 'w' });
+    mocks.api.mockRejectedValue(new TypeError('offline'));
+
+    await logout();
+
+    expect(mocks.clearTokens).toHaveBeenCalledOnce();
   });
 });

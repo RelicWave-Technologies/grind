@@ -1,22 +1,18 @@
 import { ipcMain } from 'electron';
 import { logout, isLoggedIn, startLarkLogin, ensureSession } from '../services/auth';
-import { onAuthChange, api } from '../services/apiClient';
-import { startHeartbeat, stopHeartbeat } from '../services/heartbeat';
+import { onAuthChange, notifyAuth, api } from '../services/apiClient';
+import { stopHeartbeat } from '../services/heartbeat';
+import { networkFetch } from '../services/network';
+import { activateSignedInSession } from '../services/signIn';
 import { broadcast } from '../broadcast';
 import { log } from '../logger';
-import { refreshAgentConfig } from '../services/agentConfig';
-import {
-  bindTimerToStoredSession,
-  drainTimerSyncNow,
-  getTimerService,
-  refreshTodayLedger,
-} from '../services/timer';
+import { bindTimerToStoredSession, drainTimerSyncNow, getTimerService } from '../services/timer';
 
 /** Fetch a remote image and return it as a `data:` URL (renderer CSP allows
  *  data: but not remote img). Returns null on any failure or oversized image. */
 async function fetchImageAsDataUrl(url: string): Promise<string | null> {
   try {
-    const res = await fetch(url);
+    const res = await networkFetch(url, { signal: AbortSignal.timeout(10_000) });
     if (!res.ok) return null;
     const buf = Buffer.from(await res.arrayBuffer());
     if (buf.length === 0 || buf.length > 1_000_000) return null;
@@ -33,12 +29,7 @@ export function registerAuthIpc(): void {
   // (handled in services/deepLink) completes it and broadcasts the outcome.
   ipcMain.handle('auth:loginWithLark', async () => {
     if (await ensureSession()) {
-      await bindTimerToStoredSession(false);
-      await drainTimerSyncNow('auth');
-      await refreshAgentConfig();
-      void refreshTodayLedger('auth');
-      startHeartbeat();
-      broadcast('auth:status:push', 'loggedIn');
+      await activateSignedInSession('stored_session');
       return { ok: true };
     }
     await startLarkLogin();
@@ -54,8 +45,8 @@ export function registerAuthIpc(): void {
     }
     stopHeartbeat();
     await logout();
-    timer.bindOwner(null);
-    broadcast('auth:status:push', 'loggedOut');
+    await bindTimerToStoredSession(false);
+    notifyAuth('loggedOut', { reason: 'manual' });
     return { ok: true };
   });
 
@@ -81,8 +72,8 @@ export function registerAuthIpc(): void {
     }
   });
 
-  onAuthChange((status) => {
-    log.info('auth status change pushed', { status });
+  onAuthChange((status, info) => {
+    log.info('auth status change pushed', { status, reason: info.reason ?? null });
     broadcast('auth:status:push', status);
     if (status === 'loggedOut') stopHeartbeat();
   });

@@ -13,6 +13,8 @@ type FetchOptions = {
    */
   bodyFromTokens?: (tokens: StoredTokens) => unknown;
   auth?: boolean;
+  /** Reported to auth listeners if this request ends the session (default `session_ended`). */
+  signOutReason?: SignOutReason;
   /** Per-call override of {@link DEFAULT_TIMEOUT_MS}. */
   timeoutMs?: number;
 };
@@ -119,12 +121,12 @@ async function loadNewerTokens(current: StoredTokens): Promise<StoredTokens | nu
   return tokenChanged(current, latest) ? latest : null;
 }
 
-async function clearTokensIfUnchanged(current: StoredTokens): Promise<boolean> {
+async function clearTokensIfUnchanged(current: StoredTokens, reason: SignOutReason): Promise<boolean> {
   if (!await clearTokensIfMatch(current)) {
     log.info('skipped logout because newer stored tokens exist');
     return false;
   }
-  notifyAuth('loggedOut', { reason: 'session_ended' });
+  notifyAuth('loggedOut', { reason });
   return true;
 }
 
@@ -255,7 +257,7 @@ export async function api<T>(path: string, opts: FetchOptions = {}): Promise<T> 
     if (outcome.terminal) {
       const recovered = await retryWithNewerTokens<T>(path, opts, tokens);
       if (recovered.recovered) return recovered.value;
-      await clearTokensIfUnchanged(tokens);
+      await clearTokensIfUnchanged(tokens, opts.signOutReason ?? 'session_ended');
       throw new UnauthorizedError('refresh_failed');
     }
     throw new HttpError('/v1/auth/refresh', 503, 'refresh_transient');
@@ -266,7 +268,7 @@ export async function api<T>(path: string, opts: FetchOptions = {}): Promise<T> 
     if (secondRes.status === 401) {
       const recovered = await retryWithNewerTokens<T>(path, opts, outcome.tokens);
       if (recovered.recovered) return recovered.value;
-      await clearTokensIfUnchanged(outcome.tokens);
+      await clearTokensIfUnchanged(outcome.tokens, opts.signOutReason ?? 'session_ended');
     }
     const text = await secondRes.text().catch(() => '');
     throw new HttpError(path, secondRes.status, text);

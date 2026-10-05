@@ -14,6 +14,20 @@ const ERROR_COPY: Record<string, string> = {
   config: 'Single sign-on isn’t configured yet. Contact your admin.',
 };
 
+const DEFAULT_API_HOST = 'timo.emiactech.com';
+
+/** Network failures name the host, because the fix is an allow-list entry. */
+function networkErrorCopy(reason: string, host: string | undefined): string | null {
+  const target = host || DEFAULT_API_HOST;
+  if (reason === 'network_intercepted') {
+    return `Your network is intercepting secure connections — ask IT to allow ${target}.`;
+  }
+  if (reason === 'network_unreachable') {
+    return `Timo couldn’t reach ${target}. Check your connection, then try again.`;
+  }
+  return null;
+}
+
 export default function Login() {
   const [phase, setPhase] = useState<'idle' | 'waiting' | 'pending' | 'error'>('idle');
   const [message, setMessage] = useState<string | null>(null);
@@ -27,7 +41,7 @@ export default function Login() {
         setMessage(null);
       } else {
         setPhase('error');
-        setMessage(ERROR_COPY[o.reason] ?? 'Sign-in failed. Please try again.');
+        setMessage(networkErrorCopy(o.reason, o.host) ?? ERROR_COPY[o.reason] ?? 'Sign-in failed. Please try again.');
       }
     });
   }, []);

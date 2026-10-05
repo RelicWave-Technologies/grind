@@ -454,17 +454,18 @@ app.whenReady().then(async () => {
   } catch (err) {
     log.warn('shift monitor start failed', { err: String(err) });
   }
-  // Re-fetch the shift + capture config whenever auth state flips (login/refresh).
-  onAuthChange((status) => {
+  // Sign-in follow-up. The sign-in itself (services/signIn) has already bound
+  // the timer, refreshed the agent config, and started the heartbeat.
+  onAuthChange((status, info) => {
     if (status === 'loggedIn') {
       void shiftMonitor.refreshShift();
-      void refreshAgentConfig();
       void drainActivityNow('auth');
       void offerPermissionSetupOnStartup();
     } else {
       clearWorkspaceTimeSession();
       resetPermissionSetupOffer();
-      announceSignOut();
+      // Pressing Sign out is not news; only a session the server ended is.
+      if (info.reason !== 'manual') announceSignOut();
     }
   });
   ipcMain.handle('shift:promptReason', () => readyToWorkReason());
