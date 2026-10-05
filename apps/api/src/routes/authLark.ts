@@ -54,9 +54,21 @@ function dashboardBase(): string {
 type Terminal = { error?: LarkLoginOutcome; status?: 'pending' };
 type AgentCallbackScheme = 'grind' | 'timo';
 
-function safeDashboardNext(value: unknown): string | undefined {
+/**
+ * A same-origin path to land on after sign-in, or nothing. URL parsing treats
+ * `\` like `/`, so `/\evil.com` used to resolve to https://evil.com: check the
+ * resolved origin, not just the leading characters.
+ */
+export function safeDashboardNext(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
-  if (!value.startsWith('/') || value.startsWith('//') || /[\u0000-\u001F\u007F]/u.test(value)) return undefined;
+  if (!value.startsWith('/') || value.startsWith('//') || value.includes('\\')) return undefined;
+  if (/[\u0000-\u001F\u007F]/u.test(value)) return undefined;
+  const base = new URL(`${dashboardBase()}/`);
+  try {
+    if (new URL(value, base).origin !== base.origin) return undefined;
+  } catch {
+    return undefined;
+  }
   return value;
 }
 
