@@ -144,6 +144,10 @@ agentRouter.post('/heartbeat', validate(HeartbeatRequest, 'body'), async (req, r
         ? new Date(body.diagnostics.syncOldestPendingAt)
         : null;
       data.agentSyncLastError = body.diagnostics.syncLastError;
+      // Update health arrived with beta.38: an older agent's diagnostics leave
+      // these columns as they were rather than wiping them.
+      if (body.diagnostics.installScope !== undefined) data.agentInstallScope = body.diagnostics.installScope;
+      if (body.diagnostics.updateError !== undefined) data.agentUpdateError = body.diagnostics.updateError;
       data.agentDiagnosticsUpdatedAt = now;
     }
     const heartbeatResult = await prisma.$transaction(async (tx): Promise<{
