@@ -6,7 +6,9 @@ import { attachScope, requireManagerOrAbove } from '../middleware/scope';
 import { localDayWindow } from '../insights/day';
 import { heartbeatIsFresh, loadEntryLiveEvidence } from '../insights/liveEntryEvidence';
 import { resolveEffectiveEntrySegmentEnds } from '../insights/openSegmentEvidence';
-import { DEFAULT_STUCK_THRESHOLD_MS } from '../digests/pendingDigest';
+
+/** A pending approval older than this counts as stuck. */
+const STUCK_THRESHOLD_MS = 48 * 60 * 60 * 1000;
 
 /**
  * Manager+ workspace overview (M16). One round-trip that powers the
@@ -167,7 +169,7 @@ overviewRouter.get('/', async (req, res, next) => {
     const recentPending: OverviewRecentItem[] = pendingRows.slice(0, 8).map((r) => {
       const ageMs = Math.max(0, pendingNow - r.createdAt.getTime());
       if (ageMs > oldestPendingAge) oldestPendingAge = ageMs;
-      const isStuck = ageMs >= DEFAULT_STUCK_THRESHOLD_MS;
+      const isStuck = ageMs >= STUCK_THRESHOLD_MS;
       if (isStuck) pendingStuck += 1;
       return {
         id: r.id,
@@ -180,7 +182,7 @@ overviewRouter.get('/', async (req, res, next) => {
     });
     // Stuck count is across all PENDING rows, not just the 8 we render.
     pendingStuck = pendingRows.reduce((n, r) => {
-      return n + (pendingNow - r.createdAt.getTime() >= DEFAULT_STUCK_THRESHOLD_MS ? 1 : 0);
+      return n + (pendingNow - r.createdAt.getTime() >= STUCK_THRESHOLD_MS ? 1 : 0);
     }, 0);
     if (pendingRows.length > 0) {
       const oldest = Math.max(0, pendingNow - pendingRows[0]!.createdAt.getTime());

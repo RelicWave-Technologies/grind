@@ -23,7 +23,6 @@ import { mcpRouter } from './routes/mcp';
 import { workspaceRouter } from './routes/workspace';
 import { workspacePolicyRouter } from './routes/workspacePolicy';
 import { adminLeaveRouter, leaveRouter } from './routes/leave';
-import { digestsRouter } from './routes/digests';
 import { overviewRouter } from './routes/overview';
 import { testerOpsRouter } from './routes/testerOps';
 import { downloadsRouter } from './routes/downloads';
@@ -139,7 +138,6 @@ export function buildApp() {
   app.use('/v1/admin/workspace-policy', workspacePolicyRouter);
   app.use('/v1/admin/leave', adminLeaveRouter);
   app.use('/v1/leave', leaveRouter);
-  app.use('/v1/admin/digests', digestsRouter);
   app.use('/v1/admin/overview', overviewRouter);
   app.use('/v1/admin/tester-ops', testerOpsRouter);
 
