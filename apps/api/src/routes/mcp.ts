@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { prisma, type Prisma } from '@grind/db';
 import { z } from 'zod';
-import { TimeZoneSchema, addDays, dateKeyInTimeZone } from '@grind/types';
+import { TimeZoneSchema, addDays, todayKey } from '@grind/types';
 import {
   LIVE_HEARTBEAT_FRESH_MS,
   clipInterval,
@@ -170,12 +170,8 @@ function userSearch(q: string | undefined): Prisma.UserWhereInput {
   };
 }
 
-function todayForTz(tz: string): string {
-  return dateKeyInTimeZone(new Date(), tz);
-}
-
 function yesterdayForTz(tz: string): string {
-  const today = todayForTz(tz);
+  const today = todayKey(tz);
   return addDays(today, -1);
 }
 
@@ -195,7 +191,7 @@ function resolveOptionalRange(input: { from?: string; to?: string; tz: string })
     return range ?? { error: 'invalid_date_range' as const, maxDays: MAX_SUMMARY_DAYS };
   }
 
-  const today = todayForTz(input.tz);
+  const today = todayKey(input.tz);
   const range = validateRange({ from: today, to: today, tz: input.tz });
   return range ?? { error: 'invalid_date_range' as const, maxDays: MAX_SUMMARY_DAYS };
 }

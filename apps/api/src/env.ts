@@ -43,7 +43,6 @@ const EnvSchema = z.object({
   /// approval_code of the Lark "Work From Home Request" approval. Present =
   /// WFH requests are mirrored into Timo, which the attendance rules read.
   LARK_WFH_APPROVAL_CODE: z.string().min(1).optional(),
-  LARK_LEAVE_TZ_OFFSET_MIN: z.coerce.number().int().optional(),
   // Fixed id for the single workspace, used with upsert so concurrent first
   // logins never create duplicates.
   WORKSPACE_ID: z.string().min(1).default('ws_default'),

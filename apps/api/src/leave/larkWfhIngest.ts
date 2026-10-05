@@ -1,5 +1,7 @@
 import { prisma } from '@grind/db';
+import { dateKeyInTimeZone } from '@grind/types';
 import { logger } from '../logger';
+import { requestRuleReconcile } from '../attendance/ruleScheduler';
 import { hasLarkCredentials } from '../lark/config';
 import { decisionFromLarkStatus, type ExternalDecision } from './approvalGateway';
 import { INGEST_LOOKBACK_DAYS, larkGet, listLeaveInstanceCodes } from './larkIngest';
@@ -37,9 +39,9 @@ export interface WfhIngestResult {
   unmatched: number;
 }
 
-/** Business date for an instant, in the workspace's offset (Lark's sign: IST = -330). */
-function localDate(ms: number, tzOffsetMin: number): string {
-  return new Date(ms - tzOffsetMin * 60_000).toISOString().slice(0, 10);
+/** Business date for an instant, in the workspace's IANA timezone. */
+function localDate(ms: number, tz: string): string {
+  return dateKeyInTimeZone(ms, tz);
 }
 
 /**
@@ -49,7 +51,7 @@ function localDate(ms: number, tzOffsetMin: number): string {
 export function parseWfhInstance(
   instanceCode: string,
   data: { status?: string; open_id?: string; user_id?: string; form?: string; start_time?: string },
-  tzOffsetMin: number,
+  tz: string,
 ): LarkWfhInstance | null {
   let value: Record<string, unknown> | null = null;
   let reason = '';
@@ -70,8 +72,8 @@ export function parseWfhInstance(
   const endMs = Date.parse(String(value.end ?? ''));
   if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return null;
 
-  const startDate = localDate(startMs, tzOffsetMin);
-  const endDate = localDate(endMs, tzOffsetMin);
+  const startDate = localDate(startMs, tz);
+  const endDate = localDate(endMs, tz);
   const appliedAtMs = Number.parseInt(String(data.start_time ?? ''), 10);
 
   return {
@@ -86,15 +88,13 @@ export function parseWfhInstance(
   };
 }
 
-async function fetchWfhInstance(instanceCode: string, tzOffsetMin: number): Promise<LarkWfhInstance | null> {
+async function fetchWfhInstanceBody(instanceCode: string): Promise<Record<string, string> | null> {
   const body = await larkGet(`/open-apis/approval/v4/instances/${encodeURIComponent(instanceCode)}?locale=en-US`);
   if (body.code !== 0) {
     logger.warn({ instanceCode, code: body.code, msg: body.msg }, 'lark wfh instance unreadable');
     return null;
   }
-  const parsed = parseWfhInstance(instanceCode, (body.data ?? {}) as Record<string, string>, tzOffsetMin);
-  if (!parsed) logger.warn({ instanceCode }, 'lark wfh instance has no readable date range');
-  return parsed;
+  return (body.data ?? {}) as Record<string, string>;
 }
 
 function statusFor(decision: ExternalDecision): 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED' {
@@ -136,11 +136,10 @@ export async function ingestLarkWfhOnce(input?: { lookbackDays?: number; now?: n
   const approvalCode = process.env.LARK_WFH_APPROVAL_CODE?.trim();
   if (!approvalCode || !hasLarkCredentials()) return empty;
 
-  const tzOffsetMin = Number.parseInt(process.env.LARK_LEAVE_TZ_OFFSET_MIN ?? '-330', 10);
   const now = input?.now ?? Date.now();
   const fromMs = now - (input?.lookbackDays ?? INGEST_LOOKBACK_DAYS) * 24 * 60 * 60 * 1000;
 
-  const workspaces = await prisma.workspace.findMany({ select: { id: true } });
+  const workspaces = await prisma.workspace.findMany({ select: { id: true, timezone: true } });
   if (workspaces.length === 0) return empty;
 
   let codes: string[];
@@ -152,22 +151,33 @@ export async function ingestLarkWfhOnce(input?: { lookbackDays?: number; now?: n
   }
 
   const result: WfhIngestResult = { seen: codes.length, linked: 0, unmatched: 0 };
+  const touched = new Set<string>();
   for (const code of codes) {
-    let instance: LarkWfhInstance | null;
+    let data: Record<string, string> | null;
     try {
-      instance = await fetchWfhInstance(code, tzOffsetMin);
+      data = await fetchWfhInstanceBody(code);
     } catch (err) {
       logger.warn({ err: String(err), code }, 'lark wfh instance fetch failed');
       continue;
     }
-    if (!instance || !instance.openId) continue;
+    if (!data) continue;
     for (const ws of workspaces) {
+      // Each workspace reads the dates on its own calendar.
+      const instance = parseWfhInstance(code, data, ws.timezone);
+      if (!instance) {
+        logger.warn({ instanceCode: code }, 'lark wfh instance has no readable date range');
+        break;
+      }
+      if (!instance.openId) break;
       if (await mirrorWfh(ws.id, instance)) {
         result.linked += 1;
+        touched.add(ws.id);
         break;
       }
     }
   }
+  // Approved WFH decides whether a remote day is charged.
+  for (const workspaceId of touched) requestRuleReconcile(workspaceId);
   result.unmatched = result.seen - result.linked;
   logger.info(result, 'lark wfh ingested');
   return result;

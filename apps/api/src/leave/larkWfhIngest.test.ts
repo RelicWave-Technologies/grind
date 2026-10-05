@@ -20,7 +20,7 @@ function form(start: string, end: string, interval: number) {
   ]);
 }
 
-const IST = -330;
+const KOLKATA = 'Asia/Kolkata';
 
 describe('parseWfhInstance', () => {
   it('reads a one-day request as that single IST date', () => {
@@ -32,7 +32,7 @@ describe('parseWfhInstance', () => {
         start_time: '1790925638854',
         form: form('2026-09-29T18:30:00Z', '2026-09-29T18:30:00Z', 1),
       },
-      IST,
+      KOLKATA,
     );
     expect(parsed).toEqual({
       instanceCode: 'A',
@@ -49,7 +49,7 @@ describe('parseWfhInstance', () => {
     const parsed = parseWfhInstance(
       'B',
       { status: 'PENDING', open_id: 'ou_y', form: form('2026-10-01T18:30:00Z', '2026-10-02T18:30:00Z', 2) },
-      IST,
+      KOLKATA,
     );
     expect(parsed?.startDate).toBe('2026-10-02');
     expect(parsed?.endDate).toBe('2026-10-03');
@@ -61,13 +61,13 @@ describe('parseWfhInstance', () => {
     const parsed = parseWfhInstance(
       'C',
       { status: 'CANCELED', open_id: 'ou_z', form: form('2026-09-29T18:30:00Z', '2026-09-29T18:30:00Z', 1) },
-      IST,
+      KOLKATA,
     );
     expect(parsed?.decision).toBe('CANCELLED');
   });
 
   it('returns null when the form has no date range', () => {
-    expect(parseWfhInstance('D', { status: 'APPROVED', form: '[]' }, IST)).toBeNull();
-    expect(parseWfhInstance('E', { status: 'APPROVED', form: 'not json' }, IST)).toBeNull();
+    expect(parseWfhInstance('D', { status: 'APPROVED', form: '[]' }, KOLKATA)).toBeNull();
+    expect(parseWfhInstance('E', { status: 'APPROVED', form: 'not json' }, KOLKATA)).toBeNull();
   });
 });

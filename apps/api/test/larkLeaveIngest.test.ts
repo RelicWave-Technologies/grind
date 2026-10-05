@@ -84,7 +84,6 @@ beforeEach(() => {
   process.env.LARK_APP_ID = 'cli_test';
   process.env.LARK_APP_SECRET = 'secret';
   process.env.LARK_TOKEN_KEY = 'k'.repeat(32);
-  process.env.LARK_LEAVE_TZ_OFFSET_MIN = String(IST);
 });
 
 afterEach(() => {
@@ -183,6 +182,60 @@ describe('mirroring Lark leave into the ledger', () => {
       await prisma.leaveLedgerEntry.count({ where: { userId: u.userId, kind: 'CONSUMPTION' } }),
     ).toBe(1);
     expect((await loadBalance(u.userId)).consumedDays).toBe(1);
+  });
+
+  it('follows a re-price on the ledger: a holiday added later gives the day back', async () => {
+    const u = await seedLinkedUser();
+    // Mon 17 -> Wed 19 inclusive: three working days.
+    installLarkFake({
+      'INST-RP': {
+        status: 'APPROVED', open_id: OPEN_ID,
+        form: leaveForm({
+          start: ist(2026, 8, 17), end: ist(2026, 8, 20),
+          interval: '3', name: 'Casual Leave', reason: 'trip',
+        }),
+      },
+    });
+    await ingestLarkLeaveOnce({ now: Date.parse('2026-08-25T00:00:00Z') });
+    expect((await loadBalance(u.userId)).consumedDays).toBe(3);
+
+    await prisma.companyHoliday.create({
+      data: { workspaceId: u.workspaceId, date: new Date('2026-08-18T00:00:00Z'), name: 'Added later' },
+    });
+    await ingestLarkLeaveOnce({ now: Date.parse('2026-08-25T00:00:00Z') });
+
+    const row = await prisma.leaveRequest.findUnique({ where: { larkInstanceCode: 'INST-RP' } });
+    expect(row?.chargedDays).toBe(2);
+    // The one consumption line follows the price; nothing is charged twice.
+    const lines = await prisma.leaveLedgerEntry.findMany({ where: { userId: u.userId, kind: 'CONSUMPTION' } });
+    expect(lines.map((l) => l.days)).toEqual([-2]);
+    expect((await loadBalance(u.userId)).consumedDays).toBe(2);
+  });
+
+  it('stamps decidedAt when a request first seen pending is approved later', async () => {
+    const u = await seedLinkedUser();
+    const pending = {
+      status: 'PENDING', open_id: OPEN_ID,
+      form: leaveForm({
+        start: ist(2026, 8, 17), end: ist(2026, 8, 18),
+        interval: '1', name: 'Casual Leave', reason: 'x',
+      }),
+    };
+    installLarkFake({ 'INST-DA': pending });
+    await ingestLarkLeaveOnce({ now: Date.parse('2026-08-20T00:00:00Z') });
+    expect((await prisma.leaveRequest.findUnique({ where: { larkInstanceCode: 'INST-DA' } }))?.decidedAt).toBeNull();
+
+    installLarkFake({ 'INST-DA': { ...pending, status: 'APPROVED' } });
+    await ingestLarkLeaveOnce({ now: Date.parse('2026-08-20T00:00:00Z') });
+    const approved = await prisma.leaveRequest.findUnique({ where: { larkInstanceCode: 'INST-DA' } });
+    expect(approved?.status).toBe('APPROVED');
+    expect(approved?.decidedAt).toBeInstanceOf(Date);
+    expect((await loadBalance(u.userId)).consumedDays).toBe(1);
+
+    // Swept again unchanged: the decision keeps its first timestamp.
+    await ingestLarkLeaveOnce({ now: Date.parse('2026-08-20T00:00:00Z') });
+    const again = await prisma.leaveRequest.findUnique({ where: { larkInstanceCode: 'INST-DA' } });
+    expect(again?.decidedAt?.getTime()).toBe(approved?.decidedAt?.getTime());
   });
 
   it('gives the days back when Lark later reports it withdrawn', async () => {

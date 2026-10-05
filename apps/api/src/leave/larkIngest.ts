@@ -1,6 +1,7 @@
 import { prisma } from '@grind/db';
-import { roundToHalfDay, type LeavePortion } from '@grind/types';
+import { dateKeyInTimeZone, roundToHalfDay, zonedDateTimeParts, type LeavePortion } from '@grind/types';
 import { logger } from '../logger';
+import { requestRuleReconcile } from '../attendance/ruleScheduler';
 import { getLarkConfig, hasLarkCredentials } from '../lark/config';
 import { getTenantAccessToken } from '../lark/tenantToken';
 import { consumptionSourceKey, reversalSourceKey } from './ledger';
@@ -112,10 +113,9 @@ export async function listLeaveInstanceCodes(input: {
  * need: the range, the duration on the 0.5 grid, and which half of the day,
  * carried as the AM/PM of the start time rather than as a field.
  */
-export async function fetchLeaveInstance(
+export async function fetchLeaveInstanceBody(
   instanceCode: string,
-  tzOffsetMin: number,
-): Promise<LarkLeaveInstance | null> {
+): Promise<{ status?: string; open_id?: string; user_id?: string; form?: string } | null> {
   const body = await larkGet(
     `/open-apis/approval/v4/instances/${encodeURIComponent(instanceCode)}?locale=en-US`,
   );
@@ -123,8 +123,20 @@ export async function fetchLeaveInstance(
     logger.warn({ instanceCode, code: body.code, msg: body.msg }, 'lark leave instance unreadable');
     return null;
   }
-  const data = (body.data ?? {}) as { status?: string; open_id?: string; user_id?: string; form?: string };
+  return (body.data ?? {}) as { status?: string; open_id?: string; user_id?: string; form?: string };
+}
 
+/**
+ * Read one instance into our own shape, on a workspace's calendar.
+ *
+ * Dates and the half of the day are read in the workspace's IANA timezone —
+ * the same zone every other business date uses — never a fixed offset.
+ */
+export function parseLeaveInstance(
+  instanceCode: string,
+  data: { status?: string; open_id?: string; user_id?: string; form?: string },
+  tz: string,
+): LarkLeaveInstance | null {
   let value: Record<string, unknown> | null = null;
   try {
     const form = JSON.parse(data.form ?? '[]') as Array<{ type?: string; value?: unknown }>;
@@ -153,18 +165,24 @@ export async function fetchLeaveInstance(
     instanceCode,
     openId: String(data.open_id ?? data.user_id ?? ''),
     decision: decisionFromLarkStatus(data.status),
-    startDate: localDate(startMs, tzOffsetMin),
-    endDate: endDateOf(endMs, tzOffsetMin),
-    portion: portionFor(larkDays, startMs, tzOffsetMin),
+    startDate: localDate(startMs, tz),
+    endDate: endDateOf(endMs, tz),
+    portion: portionFor(larkDays, startMs, tz),
     larkDays,
     leaveTypeName: String(value.name ?? 'Leave'),
     reason: String(value.reason ?? '').trim(),
   };
 }
 
-/** Business date for an instant, in the workspace's offset. */
-function localDate(ms: number, tzOffsetMin: number): string {
-  return new Date(ms - tzOffsetMin * 60_000).toISOString().slice(0, 10);
+/** Fetch and read one instance on a workspace's calendar. */
+export async function fetchLeaveInstance(instanceCode: string, tz: string): Promise<LarkLeaveInstance | null> {
+  const data = await fetchLeaveInstanceBody(instanceCode);
+  return data ? parseLeaveInstance(instanceCode, data, tz) : null;
+}
+
+/** Business date for an instant, in the workspace's timezone. */
+function localDate(ms: number, tz: string): string {
+  return dateKeyInTimeZone(ms, tz);
 }
 
 /**
@@ -179,8 +197,8 @@ function localDate(ms: number, tzOffsetMin: number): string {
  * part-days too, where the end is a wall-clock time rather than a midnight
  * (an afternoon half-day ends at the following midnight, a morning one at noon).
  */
-function endDateOf(endMs: number, tzOffsetMin: number): string {
-  return localDate(endMs - 1, tzOffsetMin);
+function endDateOf(endMs: number, tz: string): string {
+  return localDate(endMs - 1, tz);
 }
 
 export { endDateOf as __endDateOfForTests };
@@ -192,9 +210,9 @@ export { endDateOf as __endDateOfForTests };
  * "Half Day PM" arrives as a start time in the afternoon. Anything worth a full
  * day or more is FULL.
  */
-export function portionFor(larkDays: number, startMs: number, tzOffsetMin: number): LeavePortion {
+export function portionFor(larkDays: number, startMs: number, tz: string): LeavePortion {
   if (larkDays >= 1) return 'FULL';
-  const localHour = new Date(startMs - tzOffsetMin * 60_000).getUTCHours();
+  const localHour = zonedDateTimeParts(startMs, tz).hour;
   return localHour < 12 ? 'FIRST_HALF' : 'SECOND_HALF';
 }
 
@@ -265,6 +283,18 @@ async function mirrorInstance(input: {
         ? 'REJECTED'
         : 'PENDING';
 
+  const existing = await prisma.leaveRequest.findUnique({
+    where: { larkInstanceCode: instance.instanceCode },
+    select: { status: true, decidedAt: true },
+  });
+  // A decision Lark made after we first saw the request is decided now; an
+  // unchanged decision keeps the moment it was first recorded.
+  const decidedAt = status === 'PENDING'
+    ? null
+    : existing && existing.status === status && existing.decidedAt
+      ? existing.decidedAt
+      : new Date();
+
   const request = await prisma.leaveRequest.upsert({
     where: { larkInstanceCode: instance.instanceCode },
     create: {
@@ -279,13 +309,14 @@ async function mirrorInstance(input: {
       reason: instance.reason || instance.leaveTypeName,
       status,
       decisionSource: 'LARK_APPROVAL',
-      decidedAt: status === 'PENDING' ? null : new Date(),
+      decidedAt,
       larkInstanceCode: instance.instanceCode,
       larkApprovalCode: process.env.LARK_LEAVE_APPROVAL_CODE ?? null,
       larkSyncedAt: new Date(),
     },
     update: {
       status,
+      decidedAt,
       chargedDays: quote.chargedDays,
       portion: instance.portion,
       startDate: fromIsoDate(instance.startDate),
@@ -295,6 +326,28 @@ async function mirrorInstance(input: {
     },
     select: { id: true, userId: true, status: true },
   });
+
+  // Re-priced since it was charged (a holiday added, dates moved, the
+  // accrual start changed): the consumption line follows the price, so the
+  // balance does not drift from what the request now costs.
+  if (status === 'APPROVED') {
+    const charge = await prisma.leaveLedgerEntry.findUnique({
+      where: { sourceKey: consumptionSourceKey(request.id) },
+      select: { id: true, days: true },
+    });
+    const days = roundToHalfDay(-quote.chargedDays);
+    if (charge && charge.days !== days) {
+      await prisma.leaveLedgerEntry.update({
+        where: { id: charge.id },
+        data: {
+          days,
+          effectiveOn: fromIsoDate(instance.startDate),
+          reason: `${instance.leaveTypeName} (Lark, re-priced)`,
+        },
+      });
+      return 'charged';
+    }
+  }
 
   if (status === 'APPROVED' && quote.chargedDays > 0) {
     const created = await prisma.leaveLedgerEntry.createMany({
@@ -355,7 +408,6 @@ export async function ingestLarkLeaveOnce(input?: {
   const approvalCode = process.env.LARK_LEAVE_APPROVAL_CODE?.trim();
   if (!approvalCode || !hasLarkCredentials()) return empty;
 
-  const tzOffsetMin = Number.parseInt(process.env.LARK_LEAVE_TZ_OFFSET_MIN ?? '-330', 10);
   const now = input?.now ?? Date.now();
   const fromMs = now - (input?.lookbackDays ?? INGEST_LOOKBACK_DAYS) * 24 * 60 * 60 * 1000;
 
@@ -372,18 +424,22 @@ export async function ingestLarkLeaveOnce(input?: {
 
   const result: LeaveIngestResult = { seen: codes.length, linked: 0, unmatched: 0, charged: 0 };
 
+  const touched = new Set<string>();
   for (const code of codes) {
-    let instance: LarkLeaveInstance | null;
+    let data: Awaited<ReturnType<typeof fetchLeaveInstanceBody>>;
     try {
-      instance = await fetchLeaveInstance(code, tzOffsetMin);
+      data = await fetchLeaveInstanceBody(code);
     } catch (err) {
       logger.warn({ err: String(err), code }, 'lark leave instance fetch failed');
       continue;
     }
-    if (!instance || !instance.openId) continue;
+    if (!data) continue;
 
     // One tenant, but be explicit rather than assuming a single workspace.
+    // Each workspace reads the dates on its own calendar.
     for (const ws of workspaces) {
+      const instance = parseLeaveInstance(code, data, ws.timezone);
+      if (!instance || !instance.openId) break;
       const outcome = await mirrorInstance({
         workspaceId: ws.id,
         tz: ws.timezone,
@@ -391,10 +447,13 @@ export async function ingestLarkLeaveOnce(input?: {
       });
       if (outcome === 'unmatched') continue;
       result.linked += 1;
+      touched.add(ws.id);
       if (outcome === 'charged') result.charged += 1;
       break;
     }
   }
+  // Leave decides which days the attendance rules may charge.
+  for (const workspaceId of touched) requestRuleReconcile(workspaceId);
 
   result.unmatched = result.seen - result.linked;
   logger.info(result, 'lark leave ingested');

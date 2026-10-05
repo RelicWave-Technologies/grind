@@ -9,6 +9,7 @@ import {
   PatchLeavePolicySchema,
   SignedLeaveDaysSchema,
   leaveDaysSchema,
+  todayKey,
   type HolidayDto,
   type LeaveBalanceDto,
 } from '@grind/types';
@@ -54,9 +55,6 @@ const RangeQuery = z.object({
 /** Longest window any calendar query may span. */
 const MAX_RANGE_DAYS = 120;
 
-function today(tz: string): string {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date());
-}
 
 // ---------------------------------------------------------------------------
 // Self-service
@@ -66,7 +64,7 @@ function today(tz: string): string {
 leaveRouter.get('/me/balance', async (req, res, next) => {
   try {
     if (!req.user || !req.scope) return res.status(401).json({ error: 'unauthorized' });
-    const asOf = today(req.scope.workspaceTimezone);
+    const asOf = todayKey(req.scope.workspaceTimezone);
     await ensureAccruals({ workspaceId: req.scope.workspaceId, userId: req.user.sub, asOf });
     const [balance, entries, calendar] = await Promise.all([
       loadBalance(req.user.sub, asOf),
@@ -481,7 +479,7 @@ adminLeaveRouter.get('/balances', async (req, res, next) => {
     if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
     const asOf = typeof req.query.asOf === 'string' && /^\d{4}-\d{2}-\d{2}$/u.test(req.query.asOf)
       ? req.query.asOf
-      : today(req.scope.workspaceTimezone);
+      : todayKey(req.scope.workspaceTimezone);
 
     for (const userId of req.scope.userIds) {
       await ensureAccruals({ workspaceId: req.scope.workspaceId, userId, asOf });
@@ -591,7 +589,7 @@ adminLeaveRouter.patch('/members/:userId', requireAdmin, async (req, res, next) 
     await ensureAccruals({
       workspaceId: req.scope.workspaceId,
       userId: updated.id,
-      asOf: today(req.scope.workspaceTimezone),
+      asOf: todayKey(req.scope.workspaceTimezone),
     });
 
     res.json({

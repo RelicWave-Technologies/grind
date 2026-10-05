@@ -23,7 +23,11 @@ type ToolResult = {
 };
 
 const LimitSchema = z.number().int().min(1).max(200).optional();
-const TzSchema = z.string().trim().min(1).max(80).default('UTC');
+/**
+ * Optional. Omitted, the API reads the token workspace's own business calendar
+ * — a UTC default here silently split every non-UTC workspace's days.
+ */
+const TzSchema = z.string().trim().min(1).max(80).optional();
 const DateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 
 const CapabilitiesInput = z.object({});
@@ -110,7 +114,7 @@ const CAPABILITIES = {
     maxRows: 200,
     maxSummaryDays: 31,
     dates: 'YYYY-MM-DD',
-    timezone: 'IANA timezone string, default UTC',
+    timezone: 'Optional IANA timezone string; omitted = the workspace timezone',
     breakSummary: 'Defaults to yesterday. Breaks are inferred from gaps between tracked blocks; lunch is the longest qualifying candidate only. Gap evidence includes previous/next tracked blocks plus manual-time request reasons when available.',
   },
   scopes: {
