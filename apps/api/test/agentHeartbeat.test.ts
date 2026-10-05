@@ -91,6 +91,54 @@ describe('POST /v1/agent/heartbeat', () => {
     expect(row.agentLaunchAtLoginUpdatedAt).toBeInstanceOf(Date);
   });
 
+  it("folds the agent's permission verdict into the stored permission columns", async () => {
+    const user = await seedUser();
+    const send = (verdict: unknown, platform = 'darwin') => request(app)
+      .post('/v1/agent/heartbeat')
+      .set(bearer(user.accessToken))
+      .send({
+        agentVersion: '0.0.2-beta.39',
+        platform,
+        state: 'IDLE',
+        permissions: {
+          // Paused for a refused hook: the raw fields alone look healthy.
+          screen: { status: 'granted', health: 'ok', state: 'ok' },
+          accessibility: { trusted: true, ready: true, recording: false, capturing: false, hookRunning: false },
+          verdict,
+        },
+      });
+    const stored = () => prisma.user.findUniqueOrThrow({
+      where: { id: user.userId },
+      select: { agentAccessibilityTrusted: true, agentAccessibilityReady: true, agentScreenPermissionState: true },
+    });
+
+    expect((await send({ screenRecording: 'READY', accessibility: 'FAILED', accessibilityError: 'native hook denied' })).status).toBe(200);
+    await expect(stored()).resolves.toEqual({
+      agentAccessibilityTrusted: true,
+      agentAccessibilityReady: false,
+      agentScreenPermissionState: 'ok',
+    });
+
+    expect((await send({ screenRecording: 'FAILED', accessibility: 'READY', accessibilityError: null })).status).toBe(200);
+    await expect(stored()).resolves.toEqual({
+      agentAccessibilityTrusted: true,
+      agentAccessibilityReady: true,
+      agentScreenPermissionState: 'needs-restart',
+    });
+
+    // Windows: nothing to grant, but a hook that will not start still shows.
+    expect((await send({ screenRecording: 'NOT_REQUIRED', accessibility: 'FAILED', accessibilityError: 'hook refused' }, 'win32')).status).toBe(200);
+    await expect(stored()).resolves.toMatchObject({ agentAccessibilityReady: false });
+
+    // A verdict this server cannot read is dropped, never the heartbeat.
+    expect((await send({ screenRecording: 'SOMETHING_NEW', accessibility: 'FAILED', accessibilityError: null })).status).toBe(200);
+    await expect(stored()).resolves.toEqual({
+      agentAccessibilityTrusted: true,
+      agentAccessibilityReady: true,
+      agentScreenPermissionState: 'ok',
+    });
+  });
+
   it('accepts a permission-enforced pause without changing legacy entry ownership checks', async () => {
     const user = await seedUser();
     await prisma.timeEntry.create({

@@ -1,4 +1,4 @@
-import type { DesktopPermissionSnapshot } from '@grind/types';
+import { DESKTOP_PERMISSION_ERROR_MAX, type DesktopPermissionSnapshot } from '@grind/types';
 import type {
   BlockingCapability,
   CapabilityState,
@@ -56,6 +56,10 @@ function defaultDeps(): TrackingReadinessDeps {
     retryActivityHook: () => retryActivityHook(),
     probeScreen: probeScreenCapture,
   };
+}
+
+function wireError(error: string | null): string | null {
+  return error === null ? null : error.slice(0, DESKTOP_PERMISSION_ERROR_MAX);
 }
 
 function screenCapability(status: ScreenStatus, probeHealthy: boolean | null, failedProbes: number): CapabilityState {
@@ -190,6 +194,10 @@ export function createTrackingReadinessService(deps: TrackingReadinessDeps) {
     }
 
     if (deps.platform !== 'darwin') {
+      // Nothing to grant here, so nothing blocks tracking — but a hook that
+      // will not start still means no input counts. Report it so the
+      // dashboard can show it instead of a silent "ready".
+      const hookError = rawAccessibility.lastHookError;
       const readiness: TrackingReadiness = {
         ready: true,
         checkedAt: new Date(deps.now()).toISOString(),
@@ -208,8 +216,13 @@ export function createTrackingReadinessService(deps: TrackingReadinessDeps) {
             capturing: rawAccessibility.capturing,
             hookRunning: rawAccessibility.hookRunning,
           },
+          verdict: {
+            screenRecording: 'NOT_REQUIRED',
+            accessibility: hookError ? 'FAILED' : 'NOT_REQUIRED',
+            accessibilityError: wireError(hookError),
+          },
         },
-        accessibilityError: null,
+        accessibilityError: hookError,
       };
     }
 
@@ -276,6 +289,11 @@ export function createTrackingReadinessService(deps: TrackingReadinessDeps) {
           recording: rawAccessibility.recording,
           capturing: rawAccessibility.capturing,
           hookRunning: rawAccessibility.hookRunning,
+        },
+        verdict: {
+          screenRecording,
+          accessibility,
+          accessibilityError: wireError(accessibilityError),
         },
       },
       accessibilityError,

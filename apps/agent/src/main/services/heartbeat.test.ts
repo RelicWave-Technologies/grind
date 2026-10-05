@@ -200,6 +200,11 @@ describe('heartbeat config refresh', () => {
                 capturing: false,
                 hookRunning: false,
               },
+              verdict: {
+                screenRecording: 'CHECKING',
+                accessibility: 'FAILED',
+                accessibilityError: 'native hook stopped',
+              },
             },
           }),
         }),

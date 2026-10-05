@@ -298,6 +298,49 @@ describe('TrackingReadinessService', () => {
   });
 });
 
+describe('permission verdict sent with the heartbeat', () => {
+  it('carries a refused hook on macOS so the dashboard does not read it as OK', async () => {
+    const { service } = setup({ accessibility: accessibility({ lastHookError: 'native hook denied' }) });
+
+    const { permissions } = await service.inspect({ verifyScreen: true });
+
+    // The raw fields alone look healthy: trusted, ready, not recording.
+    expect(permissions.accessibility).toMatchObject({ trusted: true, ready: true, recording: false });
+    expect(permissions.verdict).toEqual({
+      screenRecording: 'READY',
+      accessibility: 'FAILED',
+      accessibilityError: 'native hook denied',
+    });
+  });
+
+  it('surfaces a Windows hook failure without blocking tracking there', async () => {
+    const { service } = setup({
+      platform: 'win32',
+      accessibility: accessibility({ recording: true, lastHookError: 'x'.repeat(500) }),
+    });
+
+    const result = await service.inspect({ verifyScreen: true });
+
+    expect(result.readiness.ready).toBe(true);
+    expect(result.accessibilityError).toBe('x'.repeat(500));
+    expect(result.permissions.verdict).toEqual({
+      screenRecording: 'NOT_REQUIRED',
+      accessibility: 'FAILED',
+      accessibilityError: 'x'.repeat(200),
+    });
+  });
+
+  it('reports a healthy Windows hook as not required', async () => {
+    const { service } = setup({ platform: 'win32' });
+
+    expect((await service.inspect()).permissions.verdict).toEqual({
+      screenRecording: 'NOT_REQUIRED',
+      accessibility: 'NOT_REQUIRED',
+      accessibilityError: null,
+    });
+  });
+});
+
 describe('isInconclusiveScreenCapture', () => {
   it('holds the verdict for empty captures while the user is not active', async () => {
     const { service } = setup({ screenHealth: 'empty', probeHealth: 'empty' });

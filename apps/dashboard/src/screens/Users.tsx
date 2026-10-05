@@ -708,6 +708,15 @@ function presenceTag(
     return { label: 'Online', status: 'success', title: 'Timo is actively tracking and sent a heartbeat within the last 3 minutes.' };
   }
   if (user.agentPresence === 'OFFLINE') {
+    // Paused because a permission stopped working is not "offline": the person
+    // is at the machine and cannot track until it is fixed.
+    if (user.agentState === 'PAUSED_PERMISSION' && isHeartbeatFresh(user.agentLastSeenAt)) {
+      return {
+        label: 'Blocked: permission',
+        status: 'danger',
+        title: 'Tracking is paused until Screen Recording or Accessibility works again on this device.',
+      };
+    }
     const title = user.agentState === 'IDLE'
       ? 'Timo is connected but not tracking right now.'
       : user.agentState === 'PAUSED_IDLE' || user.agentState === 'PAUSED_PERMISSION'
@@ -716,6 +725,14 @@ function presenceTag(
     return { label: 'Offline', status: 'neutral', title };
   }
   return { label: 'Unknown', status: 'neutral', title: 'Live device presence is visible to workspace admins only.' };
+}
+
+// Mirrors the API's AGENT_HEARTBEAT_FRESH_MS: a state older than this is
+// whatever the device last said, not what it is doing now.
+const AGENT_HEARTBEAT_FRESH_MS = 3 * 60 * 1000;
+
+function isHeartbeatFresh(lastSeenAt: string | null): boolean {
+  return lastSeenAt !== null && Date.now() - Date.parse(lastSeenAt) <= AGENT_HEARTBEAT_FRESH_MS;
 }
 
 function DeviceCell({ user }: { user: AdminUser }) {
@@ -801,7 +818,12 @@ function screenPermissionTag(user: AdminUser): { label: string; status: Status; 
   }
   if (user.agentScreenPermissionState === 'ok') return { label: 'Screen OK', status: 'success', title: 'Screen Recording is ready.' };
   if (user.agentScreenPermissionState === 'needs-restart') {
-    return { label: 'Screen restart', status: 'warn', title: 'Permission changed; Timo needs a restart.' };
+    // Wire name kept for older agents; it means granted but not capturing.
+    return {
+      label: 'Screen not verified',
+      status: 'warn',
+      title: 'Screen Recording is granted, but Timo has not captured a working frame yet.',
+    };
   }
   if (user.agentScreenPermissionState === 'needs-settings') {
     return { label: 'Screen off', status: 'danger', title: 'Screen Recording is denied or restricted.' };
@@ -812,6 +834,14 @@ function screenPermissionTag(user: AdminUser): { label: string; status: Status; 
 function accessibilityPermissionTag(user: AdminUser): { label: string; status: Status; title: string } {
   if (!user.agentPlatform) return { label: 'Access ?', status: 'neutral', title: 'No desktop heartbeat yet.' };
   if (user.agentPlatform !== 'darwin') {
+    // No grant exists here, but the keyboard & mouse hook can still fail.
+    if (user.agentPermissionsUpdatedAt && user.agentAccessibilityReady === false) {
+      return {
+        label: 'Input failed',
+        status: 'warn',
+        title: 'Timo could not start its keyboard & mouse counter on this device, so activity counts are missing.',
+      };
+    }
     return {
       label: 'Access N/A',
       status: 'neutral',
@@ -823,10 +853,14 @@ function accessibilityPermissionTag(user: AdminUser): { label: string; status: S
   }
   if (!user.agentAccessibilityTrusted) return { label: 'Access off', status: 'danger', title: 'Accessibility is not granted.' };
   if (!user.agentAccessibilityReady) {
-    return { label: 'Access restart', status: 'warn', title: 'Accessibility is granted, but Timo needs a restart.' };
+    return {
+      label: 'Access blocked',
+      status: 'danger',
+      title: 'Blocked: permission. Accessibility is granted, but macOS refused Timo\'s keyboard & mouse hook. Turn Timo off and on under Accessibility.',
+    };
   }
   if (user.agentAccessibilityRecording && !user.agentAccessibilityHookRunning) {
-    return { label: 'Access restart', status: 'danger', title: 'Timo is tracking, but the input hook is not running.' };
+    return { label: 'Access blocked', status: 'danger', title: 'Timo is tracking, but the input hook is not running.' };
   }
   return { label: 'Access OK', status: 'success', title: 'Accessibility is ready.' };
 }

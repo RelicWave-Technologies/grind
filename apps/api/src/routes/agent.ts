@@ -18,6 +18,7 @@ import { serializeTimeEntry } from '../timeEntries/wire';
 import { loadEntryLiveEvidence } from '../insights/liveEntryEvidence';
 import { resolveEffectiveEntrySegmentEnds } from '../insights/openSegmentEvidence';
 import { resolveTodayLedgerMode } from '../agent/todayLedgerMode';
+import { agentPermissionColumns } from '../agentPermissionColumns';
 
 export const agentRouter = Router();
 
@@ -124,14 +125,7 @@ agentRouter.post('/heartbeat', validate(HeartbeatRequest, 'body'), async (req, r
       agentPlatform: body.platform,
     };
     if (body.permissions) {
-      data.agentScreenPermissionStatus = body.permissions.screen.status;
-      data.agentScreenCaptureHealth = body.permissions.screen.health;
-      data.agentScreenPermissionState = body.permissions.screen.state;
-      data.agentAccessibilityTrusted = body.permissions.accessibility.trusted;
-      data.agentAccessibilityReady = body.permissions.accessibility.ready;
-      data.agentAccessibilityRecording = body.permissions.accessibility.recording;
-      data.agentAccessibilityCapturing = body.permissions.accessibility.capturing;
-      data.agentAccessibilityHookRunning = body.permissions.accessibility.hookRunning;
+      Object.assign(data, agentPermissionColumns(body.permissions));
       data.agentPermissionsUpdatedAt = now;
     }
     if (body.startup) {
