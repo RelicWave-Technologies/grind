@@ -351,6 +351,15 @@ model User {
   agentSyncOldestPendingAt      DateTime?
   agentSyncLastError            String?
   agentDiagnosticsUpdatedAt     DateTime?
+  /// Server time the sync queue was first reported non-empty, carried across
+  /// uninterrupted heartbeats; null when empty. Server clock, so a wrong
+  /// laptop clock cannot make sync look stuck (apps/api/src/agent/syncHealth.ts).
+  agentSyncPendingSince         DateTime?
+  /// Server time agentSyncLastError was first reported with its current value.
+  agentSyncErrorSince           DateTime?
+  /// When the stuck-sync alert fired for this person; cleared once the queue
+  /// empties, so the next time they get stuck alerts again.
+  agentSyncAlertedAt            DateTime?
 
   refreshTokens                    RefreshToken[]
   timeEntries                      TimeEntry[]

@@ -34,6 +34,7 @@ import {
   type TimelineRowPiece,
 } from '../time';
 import { agentPresence, type AgentPresence } from '../agentPresence';
+import { classifySyncHealth, SYNC_HEALTH_SELECT, type SyncHealthDto } from '../agent/syncHealth';
 import {
   CreateApiTokenRequest,
   API_TOKEN_SCOPES,
@@ -143,6 +144,11 @@ interface UserListEntry {
   agentLaunchOrigin: string | null;
   agentLaunchAtLoginUpdatedAt: string | null;
   idleWarningSeconds?: number | null;
+  /**
+   * Is this person's tracked time reaching the server? Managers (their team)
+   * and admins only; null for a member's own row and for deactivated people.
+   */
+  sync: SyncHealthDto | null;
 }
 
 /**
@@ -160,6 +166,10 @@ adminRouter.get('/users', async (req, res, next) => {
     const includeDeactivated =
       req.scope.isAdmin && req.query.includeDeactivated === 'true';
     const exposeAgentHealth = req.scope.isAdmin;
+    // Sync health is operational, not personal: whoever can see the person's
+    // reports (a manager's team, an admin's workspace) sees whether their time
+    // is arriving. The row set is already scoped above.
+    const exposeSyncHealth = req.scope.scope !== 'self';
     // ?status=pending → the admin "Needs setup" view (Lark-provisioned users
     // awaiting a team/role + activation).
     const pendingOnly = req.scope.isAdmin && req.query.status === 'pending';
@@ -172,6 +182,7 @@ adminRouter.get('/users', async (req, res, next) => {
     const users = await prisma.user.findMany({
       where,
       select: {
+        ...SYNC_HEALTH_SELECT,
         id: true,
         email: true,
         name: true,
@@ -252,6 +263,7 @@ adminRouter.get('/users', async (req, res, next) => {
           ? u.agentLaunchAtLoginUpdatedAt.toISOString()
           : null,
       ...(exposeAgentHealth ? { idleWarningSeconds: u.idleWarningSeconds } : {}),
+      sync: exposeSyncHealth && u.deactivatedAt === null ? classifySyncHealth(u, presenceCheckedAt) : null,
     }));
     res.json({ users: out, scope: req.scope.scope });
   } catch (err) {

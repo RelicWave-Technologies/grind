@@ -22,6 +22,7 @@ import { loadInvalidations } from '../time';
 import { resolveTodayLedgerMode } from '../agent/todayLedgerMode';
 import { agentPermissionColumns } from '../agentPermissionColumns';
 import { deliverAgentCommands, recordAgentCommandResult } from '../agent/commands';
+import { nextSyncTrackingColumns, SYNC_TRACKING_SELECT } from '../agent/syncHealth';
 
 export const agentRouter = Router();
 
@@ -152,9 +153,11 @@ agentRouter.post('/heartbeat', validate(HeartbeatRequest, 'body'), async (req, r
     }> => {
       const user = await tx.user.findFirst({
         where: { id: req.user!.sub, workspaceId: req.user!.ws, deactivatedAt: null },
-        select: { id: true },
+        select: { id: true, ...SYNC_TRACKING_SELECT },
       });
       if (!user) return { authorized: false, timer: null };
+      // Server-clock sync bookkeeping; also caps a pending count the column can't hold.
+      const syncTracking = body.diagnostics ? nextSyncTrackingColumns(user, body.diagnostics, now) : {};
       const timer = body.timerCheckpoint
         ? await renewTimerLease(tx, req.user!.sub, body.timerCheckpoint, now)
         : null;
@@ -173,6 +176,7 @@ agentRouter.post('/heartbeat', validate(HeartbeatRequest, 'body'), async (req, r
         where: { id: user.id },
         data: {
           ...data,
+          ...syncTracking,
           ...(timerStateAccepted
             ? {
                 agentState: body.state,
