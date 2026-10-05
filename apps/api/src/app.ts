@@ -51,7 +51,9 @@ export function buildApp() {
             // Allow same-origin / non-browser callers (no Origin header), e.g.
             // the agent and health probes.
             if (!origin || allowlist.includes(origin.replace(/\/$/, ''))) return cb(null, true);
-            return cb(new Error('not_allowed_by_cors'));
+            // A 403 the error handler answers as such — not a 500 that pages
+            // Sentry every time a stray origin probes the API.
+            return cb(Object.assign(new Error('not_allowed_by_cors'), { status: 403, code: 'cors_rejected' }));
           }
         : true,
       credentials: true,
