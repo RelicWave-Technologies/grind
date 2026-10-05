@@ -1,5 +1,10 @@
 name: Package Windows Agent
 
+# Not a duplicate of release-agent.yml's Windows job: this builds a one-off
+# unsigned installer as a workflow artifact only — no version check, no GitHub
+# Release, no macOS signing secrets, no updater metadata published
+# (DEPLOY.md, "one-off unsigned Windows installer").
+
 on:
   workflow_dispatch:
     inputs:
@@ -24,6 +29,12 @@ jobs:
         with:
           node-version: 20.18
           cache: pnpm
+
+      # Same pin as release-agent.yml: Python 3.12+ removed distutils, which
+      # node-gyp needs to rebuild native deps (get-windows / better-sqlite3).
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
       - run: pnpm install --frozen-lockfile
 
