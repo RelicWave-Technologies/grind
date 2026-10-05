@@ -165,6 +165,11 @@ async function finalizeLockedEntry(
     row.startedAt.getTime(),
   );
   const closeAt = new Date(Math.max(row.lastProvenAt?.getTime() ?? 0, latestBoundaryMs));
+  // An open segment that would close at its own start carried no time; it is
+  // removed, never stored as a zero-length span (ZERO-LENGTH SEGMENTS, core).
+  await tx.timeSegment.deleteMany({
+    where: { timeEntryId: row.id, endedAt: null, startedAt: { gte: closeAt } },
+  });
   await tx.timeSegment.updateMany({
     where: { timeEntryId: row.id, endedAt: null },
     data: { endedAt: closeAt },

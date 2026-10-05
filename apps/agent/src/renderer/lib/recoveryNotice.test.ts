@@ -28,9 +28,9 @@ describe('timerRecoveryNoticeText', () => {
     );
   });
 
-  it('renders an acknowledged server clock correction', () => {
+  it('renders an acknowledged server clock correction without blaming the device clock', () => {
     expect(timerRecoveryNoticeText({ entryId: 'e', recoveredAt: 1, reason: 'server_clock_corrected', observedAt: 2 }, fmt)).toBe(
-      'Timo corrected this timer at 09:30 because the device clock was ahead of server time.',
+      "Timo adjusted this timer's end to the server's time (09:30).",
     );
   });
 });

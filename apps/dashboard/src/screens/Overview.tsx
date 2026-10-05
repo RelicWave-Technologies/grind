@@ -1,7 +1,7 @@
 import './overview.css';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate, useRouteContext } from '@tanstack/react-router';
-import { Clock4, LayoutGrid, CalendarCheck } from 'lucide-react';
+import { Clock4, LayoutGrid, CalendarCheck, CloudOff } from 'lucide-react';
 import { api } from '../lib/api';
 import { fmtAgeShort } from '../lib/format';
 import {
@@ -58,6 +58,11 @@ interface OverviewResponse {
       ageMs: number;
       isStuck: boolean;
     }>;
+  };
+  /** People in scope whose Timo uploads are stuck / behind. Absent from older APIs. */
+  agentSync?: {
+    stuck: number;
+    behind: number;
   };
   flags: {
     openTotal: number;
@@ -212,6 +217,14 @@ export function OverviewScreen() {
           )}
         </Card>
 
+        {/* Timo sync — people whose tracked time is not reaching the server */}
+        {q.data?.agentSync && (
+          <SyncCard
+            sync={q.data.agentSync}
+            onOpen={(filter) => navigate({ to: '/users', search: filter ? { sync: filter } : {} })}
+          />
+        )}
+
         {/* Attention queues — pending approvals + open flags */}
         <div className="ov-queues ui-rise-2">
           <Card
@@ -315,6 +328,48 @@ export function OverviewScreen() {
         )}
       </div>
     </Page>
+  );
+}
+
+/**
+ * "Timo sync stuck: N" — one row, linking to People filtered to whoever needs
+ * a look (stuck first, else behind, else everyone).
+ */
+function SyncCard({
+  sync,
+  onOpen,
+}: {
+  sync: NonNullable<OverviewResponse['agentSync']>;
+  onOpen: (filter: 'stuck' | 'behind' | null) => void;
+}) {
+  const filter = sync.stuck > 0 ? 'stuck' : sync.behind > 0 ? 'behind' : null;
+  return (
+    <Card variant="flush" className="ui-rise-2">
+      <List>
+        <ListRow
+          rail={sync.stuck > 0 ? 'danger' : sync.behind > 0 ? 'warn' : 'success'}
+          leading={<CloudOff size={16} strokeWidth={1.8} aria-hidden />}
+          title={`Timo sync stuck: ${sync.stuck}`}
+          subtitle={
+            sync.stuck > 0
+              ? 'Tracked time has waited on their laptop for hours, or keeps failing to upload.'
+              : sync.behind > 0
+                ? `${sync.behind} behind by more than 10 minutes — usually catches up on its own.`
+                : 'Everyone’s tracked time is reaching the server.'
+          }
+          trailing={
+            sync.stuck > 0 ? (
+              <Tag status="danger" mono>{`${sync.stuck} stuck`}</Tag>
+            ) : sync.behind > 0 ? (
+              <Tag status="warn" mono>{`${sync.behind} behind`}</Tag>
+            ) : (
+              <Tag status="success" dot>All synced</Tag>
+            )
+          }
+          onClick={() => onOpen(filter)}
+        />
+      </List>
+    </Card>
   );
 }
 

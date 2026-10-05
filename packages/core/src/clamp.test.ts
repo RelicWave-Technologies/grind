@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { clampEntryToServerClock, DEFAULT_CLOCK_SKEW_MS } from './clamp';
+import { validateEntry } from './segments';
 import type { TimeEntry } from './types';
 
 const NOW = 1_700_000_000_000;
@@ -30,6 +31,7 @@ describe('clampEntryToServerClock', () => {
     const r = clampEntryToServerClock(e, NOW);
     expect(r.adjusted).toBe(false);
     expect(r.notes).toEqual([]);
+    expect(r.dropped).toEqual([]);
     expect(r.entry).toEqual(e);
   });
 
@@ -93,7 +95,65 @@ describe('clampEntryToServerClock', () => {
     });
     const r = clampEntryToServerClock(e, NOW);
     expect(r.entry.segments).toHaveLength(0);
-    expect(r.notes.some((n) => n.includes('dropped'))).toBe(true);
+    expect(r.dropped).toEqual(['s1']);
+    // The timestamps really were in the future: that is a clock clamp.
+    expect(r.adjusted).toBe(true);
+  });
+
+  it('drops a zero-length segment as sent without calling it a clock clamp', () => {
+    // What agents up to beta.38 send after a pause lands on the segment start.
+    const e = entry({
+      startedAt: NOW - 10 * MIN,
+      endedAt: NOW - MIN,
+      segments: [
+        { id: 'z', kind: 'WORK', startedAt: NOW - 10 * MIN, endedAt: NOW - 10 * MIN },
+        { id: 's2', kind: 'WORK', startedAt: NOW - 5 * MIN, endedAt: NOW - MIN },
+      ],
+    });
+    const r = clampEntryToServerClock(e, NOW);
+    expect(r.adjusted).toBe(false);
+    expect(r.notes).toEqual([]);
+    expect(r.dropped).toEqual(['z']);
+    expect(r.entry.segments.map((s) => s.id)).toEqual(['s2']);
+    expect(r.entry.startedAt).toBe(NOW - 10 * MIN);
+    expect(validateEntry(r.entry)).toEqual([]);
+  });
+
+  it('keeps an entry whose only segment was zero-length, with no segments', () => {
+    const e = entry({
+      startedAt: NOW - 10 * MIN,
+      endedAt: NOW - 10 * MIN,
+      segments: [{ id: 'z', kind: 'WORK', startedAt: NOW - 10 * MIN, endedAt: NOW - 10 * MIN }],
+    });
+    const r = clampEntryToServerClock(e, NOW);
+    expect(r.entry.segments).toEqual([]);
+    expect(r.entry.endedAt).toBe(NOW - 10 * MIN);
+    expect(r.adjusted).toBe(false);
+    expect(validateEntry(r.entry)).toEqual([]);
+  });
+
+  it('agrees with validateEntry: a valid entry is still valid after clamping', () => {
+    const shapes: TimeEntry[] = [
+      entry({ startedAt: NOW, endedAt: null, segments: [{ id: 'a', kind: 'WORK', startedAt: NOW, endedAt: null }] }),
+      entry({ startedAt: NOW + 30 * MIN, endedAt: null, segments: [
+        { id: 'a', kind: 'WORK', startedAt: NOW + 30 * MIN, endedAt: NOW + 40 * MIN },
+        { id: 'b', kind: 'WORK', startedAt: NOW + 50 * MIN, endedAt: null },
+      ] }),
+      entry({ startedAt: NOW - 5 * MIN, endedAt: NOW + 60 * MIN, segments: [
+        { id: 'a', kind: 'WORK', startedAt: NOW - 5 * MIN, endedAt: NOW - 5 * MIN },
+        { id: 'b', kind: 'MEETING', startedAt: NOW - 5 * MIN, endedAt: NOW + 10 * MIN },
+        { id: 'c', kind: 'WORK', startedAt: NOW + 10 * MIN, endedAt: NOW + 60 * MIN },
+      ] }),
+      entry({ startedAt: NOW - 5 * MIN, endedAt: null, segments: [] }),
+    ];
+    for (const shape of shapes) {
+      expect(validateEntry(shape)).toEqual([]);
+      for (const skew of [0, DEFAULT_CLOCK_SKEW_MS]) {
+        const r = clampEntryToServerClock(shape, NOW, skew);
+        expect(validateEntry(r.entry)).toEqual([]);
+        expect(r.entry.segments.some((s) => s.endedAt !== null && s.endedAt <= s.startedAt)).toBe(false);
+      }
+    }
   });
 
   it('clamps only the offending segment in a mixed set', () => {

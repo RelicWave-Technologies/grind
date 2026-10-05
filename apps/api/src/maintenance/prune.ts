@@ -2,6 +2,7 @@ import { prisma, type Prisma } from '@grind/db';
 import { env } from '../env';
 import { logger } from '../logger';
 import { onShutdown } from '../lib/lifecycle';
+import { runSyncHealthAlertOnce } from './syncHealthAlert';
 
 /**
  * Daily prune of bookkeeping rows that only ever grow.
@@ -27,6 +28,10 @@ import { onShutdown } from '../lib/lifecycle';
  * behind every report, production has no backups, and how long to keep them
  * is a workspace-policy decision rather than housekeeping.
  *
+ * The same scheduler runs the stuck-sync alert every 5 minutes
+ * (./syncHealthAlert.ts) — maintenance on a faster beat, with its own
+ * multi-instance guard.
+ *
  * One scheduler; multi-instance safe. Each run takes a transaction-scoped
  * advisory lock with try-lock semantics, so a second instance whose timer fires
  * at the same moment skips instead of deleting alongside.
@@ -46,6 +51,8 @@ const PRUNE_BATCH_SIZE = 10_000;
 const PRUNE_TX_TIMEOUT_MS = 10 * 60_000;
 const PRUNE_INTERVAL_MS = DAY_MS;
 const PRUNE_INITIAL_DELAY_MS = 10 * 60_000;
+/** The stuck-sync alert rides the same scheduler on a faster beat. */
+const SYNC_ALERT_INTERVAL_MS = 5 * 60_000;
 
 /** What gets deleted, as of `now`. Pure, so the predicates are testable alone. */
 export function prunePredicates(now: Date) {
@@ -173,8 +180,26 @@ export function startPruneScheduler(): void {
   handle.unref?.();
   const first = setTimeout(() => void tick(), PRUNE_INITIAL_DELAY_MS);
   first.unref?.();
+
+  let syncActive = false;
+  const syncTick = async () => {
+    if (syncActive) return;
+    syncActive = true;
+    try {
+      const result = await runSyncHealthAlertOnce();
+      if (result.cleared > 0) logger.info({ cleared: result.cleared }, 'timo sync recovered; stuck alert re-armed');
+    } catch (err) {
+      logger.warn({ err: String(err) }, 'sync health alert pass failed');
+    } finally {
+      syncActive = false;
+    }
+  };
+  const syncHandle = setInterval(() => void syncTick(), SYNC_ALERT_INTERVAL_MS);
+  syncHandle.unref?.();
+
   onShutdown(() => {
     clearInterval(handle);
     clearTimeout(first);
+    clearInterval(syncHandle);
   });
 }

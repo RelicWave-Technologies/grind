@@ -6,6 +6,7 @@ import { attachScope, requireManagerOrAbove } from '../middleware/scope';
 import { clipInterval, heartbeatIsFresh, isCounted } from '@grind/core';
 import { localDayWindow } from '../insights/day';
 import { loadTimelineWindow } from '../time';
+import { classifySyncHealth, SYNC_HEALTH_SELECT } from '../agent/syncHealth';
 
 /** A pending approval older than this counts as stuck. */
 const STUCK_THRESHOLD_MS = 48 * 60 * 60 * 1000;
@@ -68,6 +69,11 @@ interface OverviewResponse {
   flags: {
     openTotal: number;
     recent: OverviewFlagItem[];
+  };
+  /** People in scope whose Timo uploads are stuck / behind (agent/syncHealth.ts). */
+  agentSync: {
+    stuck: number;
+    behind: number;
   };
   recentRejected: Array<{
     id: string;
@@ -191,6 +197,20 @@ overviewRouter.get('/', async (req, res, next) => {
           take: 5,
         });
 
+    // --- Timo sync health (scoped; deactivated people are not in scope) --
+    const syncRows = userIds.length === 0
+      ? []
+      : await prisma.user.findMany({
+          where: { id: { in: userIds }, deactivatedAt: null },
+          select: SYNC_HEALTH_SELECT,
+        });
+    const agentSync = { stuck: 0, behind: 0 };
+    for (const row of syncRows) {
+      const { status } = classifySyncHealth(row, now);
+      if (status === 'STUCK') agentSync.stuck += 1;
+      else if (status === 'BEHIND') agentSync.behind += 1;
+    }
+
     // --- Active users tally — userIds.length is "total in scope" --------
     const totalUsers = userIds.length;
 
@@ -225,6 +245,7 @@ overviewRouter.get('/', async (req, res, next) => {
           count: g.count,
         })),
       },
+      agentSync,
       recentRejected: rejected.map((r) => ({
         id: r.id,
         user: r.user,

@@ -60,5 +60,29 @@ describe('canonicalTimerEntryPayload', () => {
 
     expect(agent).toBe(server);
   });
-});
 
+  it('leaves zero-length segments out, the way the server stores the entry', () => {
+    const base = {
+      id: 'entry',
+      clientUuid: 'client',
+      source: 'AUTO' as const,
+      revision: 4,
+      startedAt: 1_000,
+      endedAt: 5_000,
+      closeReason: 'AGENT' as const,
+    };
+    const local = canonicalTimerEntryPayload({
+      ...base,
+      segments: [
+        { id: 'z', kind: 'WORK', startedAt: 1_000, endedAt: 1_000 },
+        { id: 'sub', kind: 'WORK', startedAt: 2_000.1, endedAt: 2_000.8 },
+        { id: 'a', kind: 'WORK', startedAt: 3_000, endedAt: 5_000 },
+      ],
+    });
+    const stored = canonicalTimerEntryPayload({
+      ...base,
+      segments: [{ id: 'a', kind: 'WORK', startedAt: 3_000, endedAt: 5_000 }],
+    });
+    expect(local).toBe(stored);
+  });
+});

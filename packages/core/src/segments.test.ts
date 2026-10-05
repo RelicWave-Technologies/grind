@@ -3,7 +3,9 @@ import {
   closeOpenSegment,
   closeTimeEntry,
   createTimeEntry,
+  dropZeroLengthSegments,
   getOpenSegment,
+  isZeroLengthSegment,
   openSegment,
   recoverStaleEntry,
   SegmentError,
@@ -146,7 +148,9 @@ describe('recoverStaleEntry (crash recovery)', () => {
 
   it('never produces a negative segment when lastKnownActive precedes start', () => {
     const e = recoverStaleEntry(baseEntry(T0 + 10 * MIN), T0); // lastActive before start
-    expect(e.endedAt).toBe(T0 + 10 * MIN); // clamped to segment start => zero-length
+    expect(e.endedAt).toBe(T0 + 10 * MIN); // clamped to segment start
+    // ...where the segment would be zero-length, so it is removed instead.
+    expect(e.segments).toEqual([]);
     expect(totalWorkedMs(e)).toBe(0);
     expect(validateEntry(e)).toEqual([]);
   });
@@ -184,10 +188,16 @@ describe('validateEntry (invariant guard)', () => {
     expect(validateEntry(e).join(';')).toMatch(/endedAt.*<.*startedAt/);
   });
 
-  it('flags entry.startedAt mismatch with first segment', () => {
+  it('flags an entry that starts after its first segment', () => {
+    const e = baseEntry();
+    e.startedAt = T0 + MIN;
+    expect(validateEntry(e).join(';')).toMatch(/entry.startedAt/);
+  });
+
+  it('accepts an entry that starts before its first segment (a dropped zero-length start)', () => {
     const e = baseEntry();
     e.startedAt = T0 - MIN;
-    expect(validateEntry(e).join(';')).toMatch(/entry.startedAt/);
+    expect(validateEntry(e)).toEqual([]);
   });
 
   it('flags a closed entry that still has an open segment', () => {
@@ -213,5 +223,95 @@ describe('validateEntry (invariant guard)', () => {
     e = openSegment(e, { kind: 'MEETING', at: T0 + 10 * MIN, segmentId: 's2' });
     e = closeTimeEntry(e, T0 + 25 * MIN);
     expect(validateEntry(e)).toEqual([]);
+  });
+});
+
+describe('zero-length segments (one rule, see segments.ts)', () => {
+  it('closing a segment at its own start removes it instead of keeping an empty span', () => {
+    const e = closeOpenSegment(baseEntry(), T0);
+    expect(e.segments).toEqual([]);
+    expect(e.revision).toBe(2);
+    expect(e.endedAt).toBeNull();
+    expect(validateEntry(e)).toEqual([]);
+  });
+
+  it('stopping in the same millisecond leaves a closed entry with no segments', () => {
+    const e = closeTimeEntry(baseEntry(), T0);
+    expect(e.endedAt).toBe(T0);
+    expect(e.startedAt).toBe(T0);
+    expect(e.segments).toEqual([]);
+    expect(totalWorkedMs(e)).toBe(0);
+    expect(validateEntry(e)).toEqual([]);
+  });
+
+  it('switching segment kind in the same millisecond replaces the empty one', () => {
+    const e = openSegment(baseEntry(), { kind: 'MEETING', at: T0, segmentId: 's_2' });
+    expect(e.segments.map((s) => s.id)).toEqual(['s_2']);
+    expect(validateEntry(e)).toEqual([]);
+  });
+
+  it('only the empty segment is removed; earlier work is kept', () => {
+    let e = closeOpenSegment(baseEntry(), T0 + 10 * MIN);
+    e = openSegment(e, { kind: 'WORK', at: T0 + 20 * MIN, segmentId: 's_2' });
+    e = closeTimeEntry(e, T0 + 20 * MIN);
+    expect(e.segments.map((s) => s.id)).toEqual(['s_1']);
+    expect(e.endedAt).toBe(T0 + 20 * MIN);
+    expect(totalWorkedMs(e)).toBe(10 * MIN);
+    expect(validateEntry(e)).toEqual([]);
+  });
+
+  it('a paused-at-start entry resumes later and still validates', () => {
+    let e = closeOpenSegment(baseEntry(), T0); // paused the instant it started
+    e = openSegment(e, { kind: 'WORK', at: T0 + 5 * MIN, segmentId: 's_2' });
+    expect(e.startedAt).toBe(T0);
+    expect(e.segments[0]!.startedAt).toBe(T0 + 5 * MIN);
+    expect(validateEntry(e)).toEqual([]);
+    expect(totalWorkedMs(e, T0 + 8 * MIN)).toBe(3 * MIN);
+  });
+
+  it('validateEntry tolerates a zero-length segment from an older agent', () => {
+    const e: TimeEntry = {
+      ...baseEntry(),
+      endedAt: T0 + 10 * MIN,
+      segments: [
+        { id: 'z', kind: 'WORK', startedAt: T0, endedAt: T0 },
+        { id: 'a', kind: 'WORK', startedAt: T0, endedAt: T0 + 10 * MIN },
+      ],
+    };
+    expect(validateEntry(e)).toEqual([]);
+  });
+
+  it('dropZeroLengthSegments removes exactly the empty spans and keeps the revision', () => {
+    const e: TimeEntry = {
+      ...baseEntry(),
+      revision: 7,
+      endedAt: T0 + 10 * MIN,
+      segments: [
+        { id: 'z1', kind: 'WORK', startedAt: T0, endedAt: T0 },
+        { id: 'a', kind: 'WORK', startedAt: T0, endedAt: T0 + 10 * MIN },
+        { id: 'z2', kind: 'IDLE_TRIMMED', startedAt: T0 + 10 * MIN, endedAt: T0 + 10 * MIN },
+      ],
+    };
+    const r = dropZeroLengthSegments(e);
+    expect(r.droppedIds).toEqual(['z1', 'z2']);
+    expect(r.entry.segments.map((s) => s.id)).toEqual(['a']);
+    expect(r.entry.revision).toBe(7);
+    expect(r.entry.startedAt).toBe(T0);
+    expect(e.segments).toHaveLength(3); // input untouched
+    const clean = closeTimeEntry(baseEntry(), T0 + MIN);
+    expect(dropZeroLengthSegments(clean).entry).toBe(clean);
+  });
+
+  it('judges zero-length at the wire resolution (sub-millisecond spans vanish)', () => {
+    const fractional = createTimeEntry({ id: 'f', clientUuid: 'f', userId: 'u', startedAt: T0 + 0.2, segmentId: 'sf' });
+    const e = closeOpenSegment(fractional, T0 + 0.9);
+    expect(e.segments).toEqual([]);
+    const kept = closeOpenSegment(fractional, T0 + 1.1);
+    expect(kept.segments).toHaveLength(1);
+  });
+
+  it('an open segment is never zero-length', () => {
+    expect(isZeroLengthSegment({ id: 'o', kind: 'WORK', startedAt: T0, endedAt: null })).toBe(false);
+    expect(isZeroLengthSegment({ id: 'z', kind: 'WORK', startedAt: T0, endedAt: T0 })).toBe(true);
   });
 });
