@@ -4,7 +4,7 @@ import { prisma } from '@grind/db';
 import { ulid } from 'ulid';
 import { buildApp } from '../src/app';
 import { signAccessToken } from '../src/lib/jwt';
-import { loadMonthPerformanceReport, resolveReportMonth } from '../src/reports/monthPerformanceData';
+import { loadMonthPerformanceReport, reconcileMonthRules, resolveReportMonth } from '../src/reports/monthPerformanceData';
 import { loadBalances } from '../src/leave/repository';
 
 /**
@@ -29,9 +29,14 @@ const SIX_DAY = {
   sun: null,
 };
 
-/** Hours of work starting 10:00 IST on a date. */
-async function work(userId: string, date: string, hours: number) {
-  const startedAt = new Date(`${date}T04:30:00Z`);
+/**
+ * Hours of work on a date, starting at an IST wall clock (09:00 by default —
+ * on time for the 09:00 shift). Lateness is judged on this first tracked
+ * activity, not on the punch.
+ */
+async function work(userId: string, date: string, hours: number, startIst = '09:00') {
+  const [h, m] = startIst.split(':').map(Number) as [number, number];
+  const startedAt = new Date(Date.parse(`${date}T00:00:00Z`) + ((h * 60 + m) - 330) * 60_000);
   const endedAt = new Date(startedAt.getTime() + hours * 3_600_000);
   await prisma.timeEntry.create({
     data: {
@@ -105,9 +110,14 @@ async function seed() {
   return { ws, admin, member, adminToken: signAccessToken({ sub: admin.id, ws: ws.id, role: 'ADMIN' }) };
 }
 
+/**
+ * Reconcile the rules (what the scheduler does) and read the month. Reading
+ * alone never writes the ledger — see 'the month report is read-only'.
+ */
 async function september(s: Awaited<ReturnType<typeof seed>>) {
   const range = resolveReportMonth({ month: '2026-09' }, 'Asia/Kolkata');
   if ('error' in range) throw new Error(range.error);
+  await reconcileMonthRules({ workspaceId: s.ws.id, userIds: [s.member.id], range, nowMs: NOW });
   const report = await loadMonthPerformanceReport({
     workspaceId: s.ws.id,
     userIds: [s.member.id],
@@ -130,14 +140,14 @@ async function ruleLines(userId: string) {
 /** A week where every rule fires once, Tue 1 – Tue 8 September. */
 async function seedWeek(s: Awaited<ReturnType<typeof seed>>) {
   const { ws, member, admin } = s;
-  // Full day at the office.
-  await work(member.id, '2026-09-01', 8);
+  // Full day at the office, started late (09:55 against 09:00 + 30 min grace).
+  await work(member.id, '2026-09-01', 8, '09:55');
   await punch(ws.id, member.id, '2026-09-01');
   // Short day: 5 h.
-  await work(member.id, '2026-09-02', 5);
+  await work(member.id, '2026-09-02', 5, '09:55');
   await punch(ws.id, member.id, '2026-09-02');
   // Under half a day: 2 h.
-  await work(member.id, '2026-09-03', 2);
+  await work(member.id, '2026-09-03', 2, '09:55');
   await punch(ws.id, member.id, '2026-09-03');
   // A full day from home, no request. Somebody else punched, so the import ran.
   await work(member.id, '2026-09-04', 8);
@@ -285,20 +295,43 @@ describe('attendance rules — the month report', () => {
   });
 });
 
+describe('attendance rules — the month report is read-only', () => {
+  it('a GET of the month never writes the leave ledger; the reconcile does', async () => {
+    const s = await seed();
+    await seedWeek(s);
+    const before = await prisma.leaveLedgerEntry.findMany({ where: { userId: s.member.id }, orderBy: { id: 'asc' } });
+
+    const res = await request(app)
+      .get('/v1/reports/month-performance.csv?month=2026-09')
+      .set({ Authorization: `Bearer ${s.adminToken}` });
+    expect(res.status).toBe(200);
+    const range = resolveReportMonth({ month: '2026-09' }, 'Asia/Kolkata');
+    if ('error' in range) throw new Error(range.error);
+    await loadMonthPerformanceReport({ workspaceId: s.ws.id, userIds: [s.member.id], range, nowMs: NOW });
+    const after = await prisma.leaveLedgerEntry.findMany({ where: { userId: s.member.id }, orderBy: { id: 'asc' } });
+    expect(after).toEqual(before);
+    expect((await ruleLines(s.member.id)).size).toBe(0);
+
+    await reconcileMonthRules({ workspaceId: s.ws.id, userIds: [s.member.id], range, nowMs: NOW });
+    expect((await ruleLines(s.member.id)).get('2026-09-02')).toBe(-0.5);
+  });
+});
+
 describe('attendance rules — late arrivals', () => {
   it('lets four go, charges half a day from the fifth, and cuts a day only once', async () => {
     const s = await seed();
-    // Punched 09:55 against a 09:00 shift with the default 30-minute grace: late.
+    // Tracked work from 09:55 against a 09:00 shift with the default
+    // 30-minute grace: late.
     const lateDays = ['2026-09-01', '2026-09-02', '2026-09-03', '2026-09-04', '2026-09-05', '2026-09-07'];
     for (const date of lateDays) {
-      await work(s.member.id, date, 8);
+      await work(s.member.id, date, 8, '09:55');
       await punch(s.ws.id, s.member.id, date);
     }
     // The 7th late arrival is also a short day: one cut, not two.
-    await work(s.member.id, '2026-09-08', 5);
+    await work(s.member.id, '2026-09-08', 5, '09:55');
     await punch(s.ws.id, s.member.id, '2026-09-08');
     // On time on the 9th: inside the grace.
-    await work(s.member.id, '2026-09-09', 8);
+    await work(s.member.id, '2026-09-09', 8, '09:25');
     await prisma.attendancePunch.create({
       data: {
         workspaceId: s.ws.id,
@@ -328,7 +361,7 @@ describe('attendance rules — late arrivals', () => {
   it('gives everyone the policy grace, even on a shift whose own buffer is 0', async () => {
     const s = await seed();
     await prisma.shift.updateMany({ where: { workspaceId: s.ws.id }, data: { bufferMin: 0 } });
-    await work(s.member.id, '2026-09-01', 8);
+    await work(s.member.id, '2026-09-01', 8, '09:29');
     await prisma.attendancePunch.create({
       data: {
         workspaceId: s.ws.id,
@@ -344,16 +377,60 @@ describe('attendance rules — late arrivals', () => {
     expect((await september(s)).day('2026-09-01').late).toBe(1);
   });
 
-  it('never counts a remote person late', async () => {
+  // Rule change (time module): lateness is first tracked activity, so a
+  // remote person is judged too — only an exempt person never is.
+  it('counts a remote person late by tracked time, never an exempt one', async () => {
     const s = await seed();
     await prisma.user.update({ where: { id: s.member.id }, data: { attendanceRuleMode: 'REMOTE' } });
     for (const date of ['2026-09-01', '2026-09-02', '2026-09-03', '2026-09-04', '2026-09-05', '2026-09-07']) {
-      await work(s.member.id, date, 8);
-      await punch(s.ws.id, s.member.id, date);
+      await work(s.member.id, date, 8, '09:55');
     }
-    const { row } = await september(s);
-    expect(row.totals.lateDays).toBe(0);
-    expect(row.days.filter((d) => d.rule?.tag === 'LATE')).toHaveLength(0);
+    const remote = await september(s);
+    expect(remote.row.totals.lateDays).toBe(6);
+    expect(remote.row.days.filter((d) => d.rule?.tag === 'LATE')).toHaveLength(2);
+
+    await prisma.user.update({ where: { id: s.member.id }, data: { attendanceRuleMode: 'EXEMPT' } });
+    const exempt = await september(s);
+    expect(exempt.row.totals.lateDays).toBe(0);
+    expect(exempt.row.days.filter((d) => d.rule?.tag === 'LATE')).toHaveLength(0);
+  });
+
+  it('is never late on leave, holidays or first-half leave; manual time does not start a day', async () => {
+    const s = await seed();
+    await prisma.companyHoliday.create({ data: { workspaceId: s.ws.id, date: new Date('2026-09-01T00:00:00Z'), name: 'Holiday' } });
+    await work(s.member.id, '2026-09-01', 8, '11:00');
+    await prisma.leaveRequest.create({
+      data: {
+        clientUuid: ulid(),
+        workspaceId: s.ws.id,
+        userId: s.member.id,
+        startDate: new Date('2026-09-02T00:00:00Z'),
+        endDate: new Date('2026-09-02T00:00:00Z'),
+        portion: 'FIRST_HALF',
+        reason: 'Dentist',
+        status: 'APPROVED',
+      },
+    });
+    await work(s.member.id, '2026-09-02', 4, '14:00');
+    // Manual time from 09:00 does not make a 12:00 tracked start on time.
+    const manualStart = new Date('2026-09-03T03:30:00Z');
+    const manualEnd = new Date('2026-09-03T06:30:00Z');
+    await prisma.timeEntry.create({
+      data: {
+        id: ulid(),
+        clientUuid: ulid(),
+        userId: s.member.id,
+        source: 'MANUAL',
+        startedAt: manualStart,
+        endedAt: manualEnd,
+        segments: { create: [{ id: ulid(), kind: 'WORK', startedAt: manualStart, endedAt: manualEnd }] },
+      },
+    });
+    await work(s.member.id, '2026-09-03', 5, '12:00');
+    const { day } = await september(s);
+    expect(day('2026-09-01').late).toBeNull();
+    expect(day('2026-09-02').late).toBeNull();
+    expect(day('2026-09-03').late).toBe(1);
   });
 });
 
@@ -361,6 +438,8 @@ describe('attendance rules — HTTP surfaces', () => {
   it('lists the exceptions and prints a Why row in the CSV', async () => {
     const s = await seed();
     await seedWeek(s);
+    // The reports read what the reconcile wrote; a GET no longer writes it.
+    await september(s);
     const auth = { Authorization: `Bearer ${s.adminToken}` };
 
     const ex = await request(app).get('/v1/reports/attendance-exceptions?month=2026-09').set(auth);

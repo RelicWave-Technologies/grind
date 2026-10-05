@@ -2,15 +2,16 @@ import { prisma } from '@grind/db';
 import { dateKeyInTimeZone, type AttendanceRuleVerdict, type DayStatus } from '@grind/types';
 import { leaveDateRange } from '../leave/workingCalendar';
 import { loadOrCreateLeavePolicy, loadWorkingCalendar } from '../leave/repository';
-import { loadPunchLookup, type PunchLookup } from './punches';
+import type { PunchLookup } from './punches';
 import { isLateArrival, judgeDay, withLateRule, type AttendanceRulePolicy } from './rules';
+import { loadDayFacts } from '../time';
 
 /**
  * Everything the attendance rules need beyond the calendar and the hours,
  * loaded once for a set of people over a range: the policy, which dates the
  * punch import covers, approved work-from-home, leave that was applied for but
- * not approved, and each person's late arrivals counted from the start of the
- * month.
+ * not approved, and each person's late arrivals (by first tracked activity)
+ * counted from the start of the month.
  *
  * The rows are read here and the decision is made in `rules.ts`, so the rules
  * themselves stay testable without a database.
@@ -54,7 +55,7 @@ export async function loadAttendanceRuleContext(input: {
   const monthStart = `${input.from.slice(0, 7)}-01`;
   const lateFrom = monthStart > policy.from ? monthStart : policy.from;
 
-  const [coveredDates, wfh, unapprovedLeave, people, calendar, punches, overrides] = await Promise.all([
+  const [coveredDates, wfh, unapprovedLeave, people, calendar, overrides] = await Promise.all([
     prisma.attendancePunch.groupBy({
       by: ['date'],
       where: { workspaceId: input.workspaceId, date: { gte: fromDate, lte: toDate } },
@@ -77,7 +78,6 @@ export async function loadAttendanceRuleContext(input: {
       select: { id: true, attendanceRuleMode: true },
     }),
     loadWorkingCalendar({ workspaceId: input.workspaceId, tz: input.tz, userIds: input.userIds, from: lateFrom, to: input.to }),
-    loadPunchLookup({ userIds: input.userIds, from: lateFrom, to: input.to }),
     prisma.attendanceOverride.findMany({
       where: {
         userId: { in: input.userIds },
@@ -103,9 +103,25 @@ export async function loadAttendanceRuleContext(input: {
   const leaveApplied = ranges(unapprovedLeave);
   const today = dateKeyInTimeZone(new Date(input.nowMs ?? Date.now()), input.tz);
 
-  // Late arrivals, numbered within each month in date order, against each
-  // person's own shift start and one grace period for everyone.
+  // Late arrivals, numbered within each month in date order: first tracked
+  // activity against the shift assigned for that date, one grace for everyone.
   const dates = input.to < lateFrom ? [] : leaveDateRange(lateFrom, input.to, 400);
+  const facts = dates.length === 0
+    ? null
+    : await loadDayFacts({
+        workspaceId: input.workspaceId,
+        userIds: input.userIds,
+        from: lateFrom,
+        to: input.to,
+        tz: input.tz,
+        now: new Date(input.nowMs ?? Date.now()),
+        calendar: {
+          dayStatusFor: (userId, date) => calendar.dayStatus(userId, date),
+          fundedDaysFor: (userId, date) => calendar.fundedDaysFor(userId, date),
+          leaveAccountFor: (userId) => calendar.leaveAccountFor(userId),
+          userIds: input.userIds,
+        },
+      });
   const overridden = new Set(overrides.map((o) => `${o.userId}|${o.date.toISOString().slice(0, 10)}`));
 
   const lateOrdinal = new Map<string, number>();
@@ -121,11 +137,12 @@ export async function loadAttendanceRuleContext(input: {
       const key = `${userId}|${date}`;
       // A corrected day is the corrector's call, lateness included.
       if (overridden.has(key)) continue;
+      const day = facts!.factsFor(userId, date);
       const late = isLateArrival({
-        status: calendar.dayStatus(userId, date),
+        status: day.status,
         mode: modeOf.get(userId) ?? 'STANDARD',
-        punchInMinute: punches(userId, date)?.inMinute ?? null,
-        shiftStart: calendar.shiftWindowFor(userId, date)?.start ?? null,
+        firstTrackedMs: day.bucket.firstTracked,
+        shiftStartMs: day.shift?.startMs ?? null,
         graceMinutes: policy.lateGraceMinutes,
       });
       if (late) {

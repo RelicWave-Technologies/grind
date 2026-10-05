@@ -1,3 +1,4 @@
+import { isLate } from '@grind/core';
 import {
   roundToHalfDay,
   type AttendanceRuleMode,
@@ -20,9 +21,10 @@ import type { MonthPerformanceCode } from '../reports/monthPerformance';
  *      half-day leave would cost more than taking nothing and working an hour.
  *   3. Working from home without an approved WFH request is leave.
  *   4. Absent without an approved leave application is leave without approval.
- *   5. Arriving after the shift start plus the grace period is a late arrival.
- *      A few a month are allowed; each one after that is half a day of leave —
- *      unless another rule already charged that day, which is the one cut.
+ *   5. Starting tracked work after the shift start plus the grace period is a
+ *      late arrival. A few a month are allowed; each one after that is half a
+ *      day of leave — unless another rule already charged that day, which is
+ *      the one cut.
  *
  * A verdict is a number of days of leave, never a new kind of day. Whether that
  * leave is paid is the balance's answer, decided by the same funding walk that
@@ -114,25 +116,29 @@ export function judgeDay(
 }
 
 /**
- * Was this arrival late? After the shift's start plus the grace, by the punch.
- * Measured only on an ordinary full working day by somebody who punches: a
- * half-day leave moves the start, and a remote person has no door to be late
- * through.
+ * Was this arrival late, for the rules' count?
+ *
+ * The one company definition from `@grind/core`: the first real tracked
+ * activity (agent-observed work or a meeting, never manual time) after the
+ * start of the shift assigned for that date plus the policy grace. Never on a
+ * holiday, a weekly off, full-day leave or first-half leave. Somebody the rules
+ * exempt is never counted late; a remote person is, by their tracked time —
+ * lateness no longer depends on a door they never walk through.
  */
 export function isLateArrival(input: {
   status: DayStatus | null;
   mode: AttendanceRuleMode;
-  punchInMinute: number | null;
-  shiftStart: string | null;
+  firstTrackedMs: number | null;
+  shiftStartMs: number | null;
   graceMinutes: number;
 }): boolean {
-  if (input.mode !== 'STANDARD') return false;
-  if (input.status?.kind !== 'WORKING' || input.status.expectedFraction < 1) return false;
-  if (input.punchInMinute === null || !input.shiftStart) return false;
-  const m = /^(\d{2}):(\d{2})$/u.exec(input.shiftStart);
-  if (!m) return false;
-  const start = Number.parseInt(m[1]!, 10) * 60 + Number.parseInt(m[2]!, 10);
-  return input.punchInMinute > start + input.graceMinutes;
+  if (input.mode === 'EXEMPT') return false;
+  return isLate({
+    firstTrackedMs: input.firstTrackedMs,
+    shiftStartMs: input.shiftStartMs,
+    graceMinutes: input.graceMinutes,
+    status: input.status,
+  });
 }
 
 /**

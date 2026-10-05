@@ -28,20 +28,19 @@ import {
   type ReportRange,
   type ReportShiftAssignment,
   type ReportScreenshotRow,
-  type ReportTimeEntry,
+  type ReportTimelinePiece,
 } from '../reports/member';
 import { buildTeamReportsResponse, buildTeamReportsSummaryResponse } from '../reports/team';
 import { loadProfileForUser } from '../profile/service';
 import { resolveAppIcon, storedIconDataUrls } from '../insights/appIcon';
 import type { IconResolver } from '../reports/member';
-import { loadTimeInvalidationsForUsers } from '../insights/timeInvalidations';
-import type { TimeInvalidationInput } from '../insights/invalidations';
+import type { TimelineInvalidation } from '@grind/core';
+import { loadInvalidations, loadTimeline, withEntryMeta } from '../time';
 import type { RoleTitle } from '../scoring/presets';
-import { loadEntryLiveEvidence, type EntryLiveEvidenceMap } from '../insights/liveEntryEvidence';
 import { timesheetCalendarInputs } from '../leave';
 import { formatMonthPerformanceCsv, salaryCutDays, sheetCode } from '../reports/monthPerformance';
 import { monthPerformanceXlsx } from '../reports/monthPerformanceXlsx';
-import { loadMonthPerformanceReport, resolveReportMonth } from '../reports/monthPerformanceData';
+import { loadMonthPerformanceReport, reconcileMonthRules, resolveReportMonth } from '../reports/monthPerformanceData';
 import { computeMonthPointers, storeMonthPointers } from '../reports/monthPointersData';
 import {
   clearAttendanceOverride,
@@ -112,12 +111,12 @@ reportsRouter.get('/me', async (req, res, next) => {
         userId: req.user.sub,
         range,
         now,
-        entries: data.entries,
+        timeline: data.timeline,
         manualRequests: data.manualRequests,
         samples: data.samples,
         screenshots: data.screenshots,
-        evidenceByEntry: data.evidenceByEntry,
         shiftAssignments: data.shiftAssignments,
+        lateGraceMinutes: rules.policy.lateGraceMinutes,
         invalidations: data.invalidations,
         activityRoleTitle: data.activityRoleTitle,
         iconFor,
@@ -214,12 +213,12 @@ reportsRouter.get('/team', requireCapability('reports.team.read'), async (req, r
         userId: user.id,
         range,
         now,
-        entries: data.entries,
+        timeline: data.timeline,
         manualRequests: data.manualRequests,
         samples: data.samples,
         screenshots: data.screenshots,
-        evidenceByEntry: data.evidenceByEntry,
         shiftAssignments: data.shiftAssignments,
+        lateGraceMinutes: rules.policy.lateGraceMinutes,
         invalidations: data.invalidations,
         activityRoleTitle: user.activityRoleTitle,
         iconFor,
@@ -303,12 +302,12 @@ reportsRouter.get('/team/summary', requireCapability('reports.team.read'), async
         userId: user.id,
         range,
         now,
-        entries: data.entries,
+        timeline: data.timeline,
         manualRequests: data.manualRequests,
         samples: [],
         screenshots: [],
-        evidenceByEntry: data.evidenceByEntry,
         shiftAssignments: data.shiftAssignments,
+        lateGraceMinutes: rules.policy.lateGraceMinutes,
         invalidations: data.invalidations,
       }));
     }
@@ -372,12 +371,12 @@ reportsRouter.get('/team/member', requireCapability('reports.team.read'), async 
       userId: target.user.id,
       range,
       now,
-      entries: data.entries,
+      timeline: data.timeline,
       manualRequests: data.manualRequests,
       samples: data.samples,
       screenshots: data.screenshots,
-      evidenceByEntry: data.evidenceByEntry,
       shiftAssignments: data.shiftAssignments,
+      lateGraceMinutes: rules.policy.lateGraceMinutes,
       invalidations: data.invalidations,
       activityRoleTitle: target.user.activityRoleTitle,
       iconFor,
@@ -415,7 +414,7 @@ reportsRouter.get('/team/member/day-apps', requireCapability('reports.team.read'
     if ('error' in range) return res.status(range.status).json({ error: range.error, ...(range.extras ?? {}) });
     const [samples, invalidations] = await Promise.all([
       loadSamples(target.user.id, range),
-      loadTimeInvalidationsForUsers([target.user.id], range.rangeStart, range.rangeEnd),
+      loadInvalidations([target.user.id], range.rangeStart, range.rangeEnd),
     ]);
     const response: MemberReportDayAppsResponse = buildMemberReportApps({
       userId: target.user.id,
@@ -446,9 +445,7 @@ reportsRouter.get('/team/member/day-screenshots', requireCapability('reports.tea
       range,
       samples: data.samples,
       screenshots: data.screenshots,
-      entries: data.entries,
-      evidenceByEntry: data.evidenceByEntry,
-      now,
+      timeline: data.timeline,
       invalidations: data.invalidations,
       activityRoleTitle: target.user.activityRoleTitle,
       toUrl: screenshotUrl,
@@ -527,6 +524,8 @@ reportsRouter.put('/attendance-override', requireCapability('reports.team.read')
       setById: req.user.sub,
       computedCode,
     });
+    // The corrector's call replaces the rules' for that day: take its charge off.
+    await reconcileMonthRules({ workspaceId: req.scope.workspaceId, userIds: [userId], range });
     res.json({ ok: true, date, code, computedCode });
   } catch (err) {
     next(err);
@@ -584,9 +583,9 @@ reportsRouter.delete('/attendance-override', requireCapability('reports.team.rea
       setById: req.user.sub,
       computedCode,
     });
-    // The day is the rules' again: rebuilding reconciles their charge for it.
+    // The day is the rules' again: reconcile their charge for it.
     if (cleared) {
-      await loadMonthPerformanceReport({ workspaceId: req.scope.workspaceId, userIds: [userId], range });
+      await reconcileMonthRules({ workspaceId: req.scope.workspaceId, userIds: [userId], range });
     }
     res.json({ ok: true, cleared });
   } catch (err) {
@@ -808,7 +807,7 @@ reportsRouter.get('/me/day-apps', async (req, res, next) => {
     if ('error' in range) return res.status(range.status).json({ error: range.error, ...(range.extras ?? {}) });
     const [samples, invalidations] = await Promise.all([
       loadSamples(req.user.sub, range),
-      loadTimeInvalidationsForUsers([req.user.sub], range.rangeStart, range.rangeEnd),
+      loadInvalidations([req.user.sub], range.rangeStart, range.rangeEnd),
     ]);
     const response: MemberReportDayAppsResponse = buildMemberReportApps({
       userId: req.user.sub,
@@ -957,9 +956,7 @@ reportsRouter.get('/me/day-screenshots', async (req, res, next) => {
       range,
       samples: data.samples,
       screenshots: data.screenshots,
-      entries: data.entries,
-      evidenceByEntry: data.evidenceByEntry,
-      now,
+      timeline: data.timeline,
       invalidations: data.invalidations,
       activityRoleTitle: data.activityRoleTitle,
       toUrl: screenshotUrl,
@@ -971,112 +968,37 @@ reportsRouter.get('/me/day-screenshots', async (req, res, next) => {
 });
 
 async function loadReportData(userId: string, range: ReportRange, now = new Date()) {
-  const [user, entries, manualRequests, samples, screenshots, shiftAssignments, invalidations] = await Promise.all([
+  const [user, buckets] = await Promise.all([
     prisma.user.findUnique({
       where: { id: userId },
       select: { activityRoleTitle: true },
     }),
-    prisma.timeEntry.findMany({
-      where: {
-        userId,
-        startedAt: { lt: range.rangeEnd },
-        OR: [{ endedAt: null }, { endedAt: { gt: range.rangeStart } }],
-      },
-      select: {
-        id: true,
-        userId: true,
-        source: true,
-        larkTaskGuid: true,
-        notes: true,
-        endedAt: true,
-        trackingProtocolVersion: true,
-        lastProvenAt: true,
-        leaseExpiresAt: true,
-        segments: {
-          select: { kind: true, startedAt: true, endedAt: true },
-          orderBy: { startedAt: 'asc' },
-        },
-        attendees: { select: { userId: true } },
-      },
-      orderBy: { startedAt: 'asc' },
-    }),
-    prisma.manualTimeRequest.findMany({
-      where: {
-        userId,
-        requestedStart: { lt: range.rangeEnd },
-        requestedEnd: { gt: range.rangeStart },
-        status: { in: ['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED'] },
-      },
-      select: {
-        id: true,
-        status: true,
-        requestedStart: true,
-        requestedEnd: true,
-        reason: true,
-        larkTaskGuid: true,
-        decidedReason: true,
-        attendees: { select: { userId: true } },
-      },
-    }),
-    loadSamples(userId, range),
-    loadScreenshots(userId, range),
-    prisma.shiftAssignment.findMany({
-      where: {
-        userId,
-        effectiveFrom: { lt: range.rangeEnd },
-        OR: [{ effectiveTo: null }, { effectiveTo: { gt: range.rangeStart } }],
-      },
-      select: {
-        shiftId: true,
-        effectiveFrom: true,
-        effectiveTo: true,
-        shiftNameSnapshot: true,
-        scheduleSnapshot: true,
-        bufferMinSnapshot: true,
-      },
-      orderBy: { effectiveFrom: 'asc' },
-    }),
-    loadTimeInvalidationsForUsers([userId], range.rangeStart, range.rangeEnd),
+    loadTeamReportData([userId], range, now),
   ]);
-  const evidenceByEntry = await loadEntryLiveEvidence(entries, now);
   return {
     activityRoleTitle: (user?.activityRoleTitle ?? 'OTHER') as RoleTitle,
-    entries: entries.map((e) => ({
-      ...e,
-      source: e.source as 'AUTO' | 'MANUAL',
-      segments: e.segments.map((s) => ({
-        ...s,
-        kind: s.kind as 'WORK' | 'MEETING' | 'IDLE_TRIMMED',
-      })),
-    })),
-    manualRequests,
-    samples,
-    screenshots,
-    evidenceByEntry,
-    shiftAssignments,
-    invalidations,
+    ...(buckets.get(userId) ?? emptyTeamReportData()),
   };
 }
 
 interface TeamReportDataBucket {
-  entries: ReportTimeEntry[];
+  /** This person's resolved timeline (with a day of lookback). */
+  timeline: ReportTimelinePiece[];
   manualRequests: ReportManualRequest[];
   samples: ReportActivitySample[];
   screenshots: ReportScreenshotRow[];
   shiftAssignments: ReportShiftAssignment[];
-  invalidations: TimeInvalidationInput[];
-  evidenceByEntry: EntryLiveEvidenceMap;
+  invalidations: TimelineInvalidation[];
 }
 
 function emptyTeamReportData(): TeamReportDataBucket {
   return {
-    entries: [],
+    timeline: [],
     manualRequests: [],
     samples: [],
     screenshots: [],
     shiftAssignments: [],
     invalidations: [],
-    evidenceByEntry: new Map(),
   };
 }
 
@@ -1084,12 +1006,26 @@ type TeamReportSummaryDataBucket = Omit<TeamReportDataBucket, 'samples' | 'scree
 
 function emptyTeamReportSummaryData(): TeamReportSummaryDataBucket {
   return {
-    entries: [],
+    timeline: [],
     manualRequests: [],
     shiftAssignments: [],
     invalidations: [],
-    evidenceByEntry: new Map(),
   };
+}
+
+/** Each person's timeline + invalidations, from one shared read. */
+async function loadTimelinesByUser(
+  userIds: string[],
+  range: ReportRange,
+  now: Date,
+): Promise<Map<string, { timeline: ReportTimelinePiece[]; invalidations: TimelineInvalidation[] }>> {
+  const loaded = await loadTimeline({ userIds, from: range.from, to: range.to, tz: range.tz, now });
+  const pieces = withEntryMeta(loaded.pieces);
+  const out = new Map<string, { timeline: ReportTimelinePiece[]; invalidations: TimelineInvalidation[] }>();
+  for (const userId of userIds) out.set(userId, { timeline: [], invalidations: [] });
+  for (const piece of pieces) out.get(piece.userId)?.timeline.push(piece);
+  for (const inv of loaded.invalidations) out.get(inv.userId)?.invalidations.push(inv);
+  return out;
 }
 
 async function loadTeamReportSummaryData(
@@ -1104,31 +1040,8 @@ async function loadTeamReportSummaryData(
   for (const userId of userIds) buckets.set(userId, emptyTeamReportSummaryData());
   if (userIds.length === 0) return { buckets, screenshotCountByUser: new Map() };
 
-  const [entries, manualRequests, shiftAssignments, invalidations, screenshotCounts] = await Promise.all([
-    prisma.timeEntry.findMany({
-      where: {
-        userId: { in: userIds },
-        startedAt: { lt: range.rangeEnd },
-        OR: [{ endedAt: null }, { endedAt: { gt: range.rangeStart } }],
-      },
-      select: {
-        id: true,
-        userId: true,
-        source: true,
-        larkTaskGuid: true,
-        notes: true,
-        endedAt: true,
-        trackingProtocolVersion: true,
-        lastProvenAt: true,
-        leaseExpiresAt: true,
-        segments: {
-          select: { kind: true, startedAt: true, endedAt: true },
-          orderBy: { startedAt: 'asc' },
-        },
-        attendees: { select: { userId: true } },
-      },
-      orderBy: [{ userId: 'asc' }, { startedAt: 'asc' }],
-    }),
+  const [timelines, manualRequests, shiftAssignments, screenshotCounts] = await Promise.all([
+    loadTimelinesByUser(userIds, range, now),
     prisma.manualTimeRequest.findMany({
       where: {
         userId: { in: userIds },
@@ -1165,7 +1078,6 @@ async function loadTeamReportSummaryData(
       },
       orderBy: [{ userId: 'asc' }, { effectiveFrom: 'asc' }],
     }),
-    loadTimeInvalidationsForUsers(userIds, range.rangeStart, range.rangeEnd),
     prisma.screenshot.groupBy({
       by: ['userId'],
       where: {
@@ -1178,17 +1090,9 @@ async function loadTeamReportSummaryData(
     }),
   ]);
 
-  const evidenceByEntry = await loadEntryLiveEvidence(entries, now);
-  for (const bucket of buckets.values()) bucket.evidenceByEntry = evidenceByEntry;
-  for (const entry of entries) {
-    buckets.get(entry.userId)?.entries.push({
-      ...entry,
-      source: entry.source as 'AUTO' | 'MANUAL',
-      segments: entry.segments.map((segment) => ({
-        ...segment,
-        kind: segment.kind as 'WORK' | 'MEETING' | 'IDLE_TRIMMED',
-      })),
-    });
+  for (const [userId, t] of timelines) {
+    const bucket = buckets.get(userId);
+    if (bucket) Object.assign(bucket, t);
   }
   for (const row of manualRequests) {
     const { userId, ...manualRequest } = row;
@@ -1198,7 +1102,6 @@ async function loadTeamReportSummaryData(
     const { userId, ...assignment } = row;
     buckets.get(userId)?.shiftAssignments.push(assignment);
   }
-  for (const invalidation of invalidations) buckets.get(invalidation.userId)?.invalidations.push(invalidation);
 
   return {
     buckets,
@@ -1222,31 +1125,8 @@ async function loadTeamReportData(
   for (const userId of userIds) grouped.set(userId, emptyTeamReportData());
   if (userIds.length === 0) return grouped;
 
-  const [entries, manualRequests, samples, screenshots, shiftAssignments, invalidations] = await Promise.all([
-    prisma.timeEntry.findMany({
-      where: {
-        userId: { in: userIds },
-        startedAt: { lt: range.rangeEnd },
-        OR: [{ endedAt: null }, { endedAt: { gt: range.rangeStart } }],
-      },
-      select: {
-        id: true,
-        userId: true,
-        source: true,
-        larkTaskGuid: true,
-        notes: true,
-        endedAt: true,
-        trackingProtocolVersion: true,
-        lastProvenAt: true,
-        leaseExpiresAt: true,
-        segments: {
-          select: { kind: true, startedAt: true, endedAt: true },
-          orderBy: { startedAt: 'asc' },
-        },
-        attendees: { select: { userId: true } },
-      },
-      orderBy: [{ userId: 'asc' }, { startedAt: 'asc' }],
-    }),
+  const [timelines, manualRequests, samples, screenshots, shiftAssignments] = await Promise.all([
+    loadTimelinesByUser(userIds, range, now),
     prisma.manualTimeRequest.findMany({
       where: {
         userId: { in: userIds },
@@ -1326,20 +1206,11 @@ async function loadTeamReportData(
       },
       orderBy: [{ userId: 'asc' }, { effectiveFrom: 'asc' }],
     }),
-    loadTimeInvalidationsForUsers(userIds, range.rangeStart, range.rangeEnd),
   ]);
 
-  const evidenceByEntry = await loadEntryLiveEvidence(entries, now);
-  for (const bucket of grouped.values()) bucket.evidenceByEntry = evidenceByEntry;
-  for (const entry of entries) {
-    grouped.get(entry.userId)?.entries.push({
-      ...entry,
-      source: entry.source as 'AUTO' | 'MANUAL',
-      segments: entry.segments.map((s) => ({
-        ...s,
-        kind: s.kind as 'WORK' | 'MEETING' | 'IDLE_TRIMMED',
-      })),
-    });
+  for (const [userId, t] of timelines) {
+    const bucket = grouped.get(userId);
+    if (bucket) Object.assign(bucket, t);
   }
   for (const row of manualRequests) {
     const { userId, ...request } = row;
@@ -1356,9 +1227,6 @@ async function loadTeamReportData(
   for (const row of shiftAssignments) {
     const { userId, ...assignment } = row;
     grouped.get(userId)?.shiftAssignments.push(assignment);
-  }
-  for (const row of invalidations) {
-    grouped.get(row.userId)?.invalidations.push(row);
   }
   return grouped;
 }
@@ -1381,32 +1249,6 @@ async function loadSamples(userId: string, range: ReportRange): Promise<ReportAc
       activeUrl: true,
     },
     orderBy: { bucketStart: 'asc' },
-  });
-}
-
-async function loadScreenshots(userId: string, range: ReportRange): Promise<ReportScreenshotRow[]> {
-  return prisma.screenshot.findMany({
-    where: {
-      userId,
-      uploadState: 'UPLOADED',
-      deletedAt: null,
-      capturedAt: { gte: range.rangeStart, lt: range.rangeEnd },
-    },
-    select: {
-      id: true,
-      timeEntryId: true,
-      displayId: true,
-      capturedAt: true,
-      s3Key: true,
-      thumbS3Key: true,
-      fullUrl: true,
-      thumbUrl: true,
-      bytes: true,
-      width: true,
-      height: true,
-      blurred: true,
-    },
-    orderBy: { capturedAt: 'asc' },
   });
 }
 
