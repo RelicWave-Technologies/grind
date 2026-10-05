@@ -143,16 +143,29 @@ export function cancelLarkLogin(): void {
   void clearStoredPendingLarkLogin();
 }
 
+/**
+ * Revoke this device's session on the server, then forget it locally.
+ *
+ * The server only revokes the exact refresh token it is handed (there is no
+ * revoke-the-family endpoint), and a 401 on this call makes api() rotate the
+ * refresh token first. A body built up front then named the token that
+ * rotation had just spent — the revoke was a no-op and the fresh successor
+ * stayed live for its whole lifetime. The body is built from the session the
+ * request is actually sent with, so the live token is the one revoked.
+ */
 export async function logout(): Promise<void> {
   const tokens = await loadTokens();
   if (tokens) {
     try {
       await api<LogoutResponse>('/v1/auth/logout', {
         method: 'POST',
-        body: { refreshToken: tokens.refreshToken },
+        bodyFromTokens: (current) => ({ refreshToken: current.refreshToken }),
+        // The user asked for this; a rejected refresh on the way out is not news.
+        signOutReason: 'manual',
       });
-    } catch {
+    } catch (err) {
       // best-effort; clear locally regardless
+      log.warn('server sign-out failed; clearing the local session anyway', { err: String(err) });
     }
   }
   await clearTokens();

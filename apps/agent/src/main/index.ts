@@ -1,5 +1,5 @@
-import { app, ipcMain, Notification, safeStorage, screen } from 'electron';
-import type { BrowserWindow, Tray } from 'electron';
+import { app, BrowserWindow, ipcMain, safeStorage, screen } from 'electron';
+import type { RenderProcessGoneDetails, Tray, WebContents } from 'electron';
 import { createTray, setTrayTitle } from './tray';
 import { createMainWindow } from './window';
 import {
@@ -7,7 +7,7 @@ import {
   PROMPT_UNREACHABLE_WINDOW_MS,
 } from './services/promptReachability';
 import { registerIpc } from './ipc';
-import { sendHeartbeatNow, startHeartbeatIfAuthed } from './services/heartbeat';
+import { sendHeartbeatNow, startHeartbeat } from './services/heartbeat';
 import { noteSystemResumed, setServerClockTrackingActive } from './services/serverClock';
 import {
   applyTodayLedgerMode,
@@ -36,7 +36,7 @@ import { togglePopover, hidePopover } from './popover';
 import { getTrackingAttentionCoordinator } from './services/trackingAttention';
 import { ShiftMonitor } from './services/shift';
 import { onAuthChange } from './services/apiClient';
-import { isLoggedIn } from './services/auth';
+import { loadTokens } from './services/tokenStore';
 import { onAgentConfigChange, refreshAgentConfig } from './services/agentConfig';
 import {
   registerProtocol,
@@ -45,7 +45,10 @@ import {
   flushQueuedDeepLink,
   setLarkConnectionHandler,
 } from './services/deepLink';
-import { hasQuitCleanupCompleted, registerGracefulQuitHandler, runQuitCleanup } from './services/quitCleanup';
+import { hasQuitCleanupCompleted, registerGracefulQuitHandler, runQuitCleanupIfNeeded } from './services/quitCleanup';
+import { attachWindowsSessionEnd } from './services/updates/sessionEnd';
+import { showNotification } from './notifications';
+import { runBoot } from './boot';
 import {
   getUpdateStatus,
   installUpdateNow,
@@ -90,6 +93,20 @@ if (!gotLock) {
   process.exit(0);
 }
 
+// A stray throw or rejection anywhere in the main process used to end up as
+// Electron's default crash dialog (or, for a rejection, nowhere at all). Log it
+// with enough to diagnose and keep running: the timer, the queues, and the
+// tray are all still fine, and quitting would cut off tracked time.
+process.on('uncaughtException', (err) => {
+  log.error('uncaught exception in main process', { err: String(err), stack: err?.stack ?? null });
+});
+process.on('unhandledRejection', (reason) => {
+  log.error('unhandled promise rejection in main process', {
+    err: String(reason),
+    stack: reason instanceof Error ? reason.stack ?? null : null,
+  });
+});
+
 // Register the custom auth callback for Lark login. Must happen before whenReady, and the
 // macOS open-url handler must be attached early — the OS can deliver the
 // deep-link before the app finishes booting (handleDeepLink queues it).
@@ -102,6 +119,10 @@ app.on('open-url', (event, url) => {
 let tray: Tray | null = null;
 let mainWindow: BrowserWindow | null = null;
 let isQuitting = false;
+/** Window + tray exist, so showing the main window is safe. */
+let uiReady = false;
+/** A second launch asked for the window before the UI existed. */
+let showMainWhenReady = false;
 
 function attachMainWindowHandlers(win: BrowserWindow): void {
   win.on('close', (e) => {
@@ -112,6 +133,20 @@ function attachMainWindowHandlers(win: BrowserWindow): void {
   });
   win.on('closed', () => {
     if (mainWindow === win) mainWindow = null;
+  });
+  // Windows shutdown/sign-off: powerMonitor 'shutdown' does not fire there.
+  attachWindowsSessionEnd(win, {
+    onQueryEnd: () => {
+      // The shutdown can still be vetoed by another app; only refresh the
+      // proof of life so recovery is exact if Windows kills us mid-way.
+      const timer = getTimerService();
+      if (timer.isRunning() && !timer.isPaused()) timer.heartbeat();
+    },
+    onEnd: () => {
+      isQuitting = true;
+      log.info('windows session ending; finalizing tracked time');
+      void runQuitCleanupIfNeeded('shutdown');
+    },
   });
 }
 
@@ -158,27 +193,48 @@ function showMainWindow(opts: { bypassAttention?: boolean } = {}) {
   win.focus();
 }
 
+/** Main-window renderer crashes in the last minute; past the limit we stop recreating. */
+const mainRendererCrashes: number[] = [];
+const MAIN_RENDERER_CRASH_LIMIT = 3;
+
+/**
+ * A crashed renderer used to leave a blank window that stayed blank until the
+ * app restarted — or, for the floating bar, an invisible always-on-top husk.
+ * The main window is rebuilt in place (and shown again if it was showing); any
+ * other window is destroyed, and its owner recreates it on next use (the
+ * floating bar on the next tick, the popover on the next tray click).
+ */
+function handleRenderProcessGone(contents: WebContents, details: RenderProcessGoneDetails): void {
+  const win = BrowserWindow.fromWebContents(contents);
+  const isMain = !!win && win === mainWindow;
+  log.error('renderer process gone', {
+    reason: details.reason,
+    exitCode: details.exitCode,
+    window: isMain ? 'main' : 'other',
+  });
+  if (isQuitting || details.reason === 'clean-exit' || !win || win.isDestroyed()) return;
+  if (!isMain) {
+    win.destroy();
+    return;
+  }
+  const now = Date.now();
+  while (mainRendererCrashes.length && now - mainRendererCrashes[0]! > 60_000) mainRendererCrashes.shift();
+  mainRendererCrashes.push(now);
+  const wasVisible = win.isVisible();
+  mainWindow = null;
+  win.destroy();
+  if (mainRendererCrashes.length > MAIN_RENDERER_CRASH_LIMIT) {
+    // Crash loop: leave it closed; the tray (or a click) recreates it on demand.
+    log.error('main window renderer keeps crashing; not recreating it automatically');
+    return;
+  }
+  const next = ensureMainWindow({ startHidden: !wasVisible });
+  if (wasVisible) next.show();
+}
+
 function showSettingsWindow() {
   showMainWindow({ bypassAttention: true });
   broadcast('settings:open:push', {});
-}
-
-/**
- * Notifications are held until closed: a garbage-collected Notification drops
- * its click handler, so clicking it did nothing.
- */
-const liveNotifications = new Set<Notification>();
-
-function showNotification(options: Electron.NotificationConstructorOptions, onClick: () => void): void {
-  const notification = new Notification(options);
-  liveNotifications.add(notification);
-  const forget = () => liveNotifications.delete(notification);
-  notification.on('click', () => {
-    forget();
-    onClick();
-  });
-  notification.on('close', forget);
-  notification.show();
 }
 
 /**
@@ -192,7 +248,6 @@ function showNotification(options: Electron.NotificationConstructorOptions, onCl
 function announceSignOut(): void {
   log.warn('signed out — session ended; prompting for sign-in');
   showMainWindow({ bypassAttention: true });
-  if (!Notification.isSupported()) return;
   showNotification({
     title: 'Timo signed you out',
     body: 'Sign in again to keep your tracked time syncing.',
@@ -200,13 +255,56 @@ function announceSignOut(): void {
 }
 
 function notifyStartupHealth(state: LaunchAtLoginHealth): void {
-  if (!getLaunchAtLoginService().shouldNotifyOnBoot(state) || !Notification.isSupported()) return;
+  if (!getLaunchAtLoginService().shouldNotifyOnBoot(state)) return;
   const body = state.state === 'NEEDS_INSTALL'
     ? 'Move Timo to Applications so it can start when you sign in.'
     : state.state === 'NEEDS_APPROVAL'
       ? 'Approve Timo in Login Items so it can start when you sign in.'
       : 'Open Timo Settings to repair Launch at Login.';
   showNotification({ title: 'Timo startup needs attention', body }, showSettingsWindow);
+}
+
+/** Single 1s heartbeat: tray ticker + floating-bar visibility + live broadcast
+ *  + a throttled durable liveness tick (crash-recovery bound). */
+function startTick(): void {
+  let tick = 0;
+  const LIVENESS_EVERY_TICKS = 15; // persist "proof of life" ~every 15s
+  let lastTimerState: string | null = null;
+  setInterval(() => {
+    try {
+      tick += 1;
+      // One status() per tick: it reconciles the day's ledger, which is the
+      // expensive part of this loop.
+      const s = getTimerService().status();
+      // Installability only depends on whether a timer is open, so only a
+      // change of state can change it.
+      if (s.state !== lastTimerState) {
+        lastTimerState = s.state;
+        refreshUpdateInstallability();
+      }
+      const running = s.state === 'RUNNING';
+      const accruing = running && !s.paused;
+      // Gate clock corrections on an open entry, not on accrual: stepping the
+      // clock between two segments of the SAME entry would leave the entry
+      // straddling two frames and could invert a segment boundary.
+      setServerClockTrackingActive(running);
+      setActivityRecording(accruing, running ? s.entryId : null);
+      if (tray) setTrayTitle(tray, running ? fmtShort(s.workedMs) : '');
+      syncFloatingBar(s);
+      // A hidden main window has nothing to repaint; it reads status afresh
+      // the next second it is shown. Every state change is still pushed to
+      // it by the command that caused it.
+      if (running) broadcast('timer:status:push', s, { skipIfHidden: mainWindow });
+      // Liveness: only while genuinely accruing, throttled. The next boot
+      // closes any dangling entry at the last tick so a crash/hard-off never
+      // over-credits the dead gap. Worst-case over-count ≈ 15s.
+      if (accruing && tick % LIVENESS_EVERY_TICKS === 0) {
+        getTimerService().heartbeat();
+      }
+    } catch {
+      /* timer not ready */
+    }
+  }, 1000);
 }
 
 app.whenReady().then(async () => {
@@ -337,14 +435,12 @@ app.whenReady().then(async () => {
     showMainWindow: () => showMainWindow(),
     isMainWindowVisible: () => !!mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible(),
   });
-
-  // Deep-link delivery is now safe (window + IPC are up). Process any Lark login
-  // callback ASAP — BEFORE the heavy awaited boot work below — so a slow network
-  // call can't delay or drop it. Flush anything queued during boot (macOS
-  // open-url) and pick up a cold-start argv link (Windows/Linux).
-  flushQueuedDeepLink();
-  const coldStartLink = deepLinkFromArgv(process.argv);
-  if (coldStartLink) void handleDeepLink(coldStartLink);
+  app.on('render-process-gone', (_event, contents, details) => handleRenderProcessGone(contents, details));
+  uiReady = true;
+  if (showMainWhenReady) {
+    showMainWhenReady = false;
+    showMainWindow();
+  }
 
   registerGracefulQuitHandler({
     app,
@@ -355,7 +451,9 @@ app.whenReady().then(async () => {
   });
   (app as Electron.App & { on(event: 'before-quit-for-update', listener: () => void): Electron.App }).on('before-quit-for-update', () => {
     isQuitting = true;
-    void runQuitCleanup('update');
+    // installUpdateNow already ran this; only run it again if it no longer
+    // holds (a timer was started while the install was getting ready).
+    void runQuitCleanupIfNeeded('update');
   });
   app.on('activate', () => {
     showMainWindow();
@@ -419,61 +517,23 @@ app.whenReady().then(async () => {
     }
   });
 
-  // Resolve the canonical workspace clock before timer recovery and renderer
-  // totals. A validated on-disk timezone is available immediately offline;
-  // an online config refresh upgrades it to the current server value.
-  try {
-    await initializeWorkspaceTime();
-    await refreshAgentConfig();
-  } catch (err) {
-    log.warn('refreshAgentConfig failed', { err: String(err) });
-  }
-
-  try {
-    await initTimerOnBoot();
-    startTimerSyncDrain();
-    // Backlog drains in the background. Awaiting it here blocked launch behind
-    // one awaited request per pending entry — the "app hangs on startup / first
-    // sync takes forever" reports.
-    void drainTimerSyncNow('boot');
-    void refreshTodayLedger('boot');
-  } catch (err) {
-    log.warn('initTimerOnBoot failed', { err: String(err) });
-  }
-  try {
-    await startHeartbeatIfAuthed();
-  } catch (err) {
-    log.warn('startHeartbeatIfAuthed failed', { err: String(err) });
-  }
-
-  startCaptureLoop();
-  startActivityCapture();
-  startTrackingPermissionMonitor();
-  if (await isLoggedIn()) void offerPermissionSetupOnStartup({ openedAtLogin });
-  startActivitySyncDrain();
-  void drainActivityNow('boot');
-  startActiveWindowPolling();
-
   // Shift monitor — fetches the user's assigned shift and fires the
   // "Ready to work?" toast at start time (+ 5-min nudges until buffer
-  // expiry). Safely no-ops if the user is not logged in or unassigned.
+  // expiry). Started in the online boot phase; its IPC is live right away.
   const shiftMonitor = new ShiftMonitor(() => showMainWindow());
-  try {
-    await shiftMonitor.start();
-  } catch (err) {
-    log.warn('shift monitor start failed', { err: String(err) });
-  }
-  // Re-fetch the shift + capture config whenever auth state flips (login/refresh).
-  onAuthChange((status) => {
+  // Sign-in follow-up. The sign-in itself (services/signIn) has already bound
+  // the timer, refreshed the agent config, and started the heartbeat.
+  onAuthChange((status, info) => {
     if (status === 'loggedIn') {
       void shiftMonitor.refreshShift();
-      void refreshAgentConfig();
       void drainActivityNow('auth');
       void offerPermissionSetupOnStartup();
     } else {
       clearWorkspaceTimeSession();
       resetPermissionSetupOffer();
-      announceSignOut();
+      shiftMonitor.clearShift();
+      // Pressing Sign out is not news; only a session the server ended is.
+      if (info.reason !== 'manual') announceSignOut();
     }
   });
   ipcMain.handle('shift:promptReason', () => readyToWorkReason());
@@ -485,54 +545,53 @@ app.whenReady().then(async () => {
     return shiftMonitor.todayWindow();
   });
 
-  // Single 1s heartbeat: tray ticker + floating-bar visibility + live broadcast
-  // + a throttled durable liveness tick (crash-recovery bound).
-  let tick = 0;
-  const LIVENESS_EVERY_TICKS = 15; // persist "proof of life" ~every 15s
-  let lastTimerState: string | null = null;
-  setInterval(() => {
-    try {
-      tick += 1;
-      // One status() per tick: it reconciles the day's ledger, which is the
-      // expensive part of this loop.
-      const s = getTimerService().status();
-      // Installability only depends on whether a timer is open, so only a
-      // change of state can change it.
-      if (s.state !== lastTimerState) {
-        lastTimerState = s.state;
-        refreshUpdateInstallability();
-      }
-      const running = s.state === 'RUNNING';
-      const accruing = running && !s.paused;
-      // Gate clock corrections on an open entry, not on accrual: stepping the
-      // clock between two segments of the SAME entry would leave the entry
-      // straddling two frames and could invert a segment boundary.
-      setServerClockTrackingActive(running);
-      setActivityRecording(accruing, running ? s.entryId : null);
-      if (tray) setTrayTitle(tray, running ? fmtShort(s.workedMs) : '');
-      syncFloatingBar(s);
-      // A hidden main window has nothing to repaint; it reads status afresh
-      // the next second it is shown. Every state change is still pushed to
-      // it by the command that caused it.
-      if (running) broadcast('timer:status:push', s, { skipIfHidden: mainWindow });
-      // Liveness: only while genuinely accruing, throttled. The next boot
-      // closes any dangling entry at the last tick so a crash/hard-off never
-      // over-credits the dead gap. Worst-case over-count ≈ 15s.
-      if (accruing && tick % LIVENESS_EVERY_TICKS === 0) {
-        getTimerService().heartbeat();
-      }
-    } catch {
-      /* timer not ready */
-    }
-  }, 1000);
-
-  log.info('agent ready', {
-    platform: process.platform,
-    version: app.getVersion(),
-    openedAtLogin,
-    launchAtLoginStatus: launchAtLogin.state,
+  // See boot.ts for why the order is what it is.
+  await runBoot({
+    // A validated on-disk timezone is available immediately offline; the
+    // online config refresh upgrades it to the current server value.
+    initializeWorkspaceTime,
+    initTimerOnBoot,
+    startTimerSyncDrain,
+    startTick,
+    startLocalServices: () => {
+      startCaptureLoop();
+      startActivityCapture();
+      startTrackingPermissionMonitor();
+      startActivitySyncDrain();
+      startActiveWindowPolling();
+    },
+    onLocalReady: () => {
+      // Deep links wait for the timer to be bound to the stored owner, so a
+      // sign-in callback can never race boot recovery. Flush anything queued
+      // during boot (macOS open-url) and a cold-start argv link (Windows/Linux).
+      flushQueuedDeepLink();
+      const coldStartLink = deepLinkFromArgv(process.argv);
+      if (coldStartLink) void handleDeepLink(coldStartLink);
+      log.info('agent ready', {
+        platform: process.platform,
+        version: app.getVersion(),
+        openedAtLogin,
+        launchAtLoginStatus: launchAtLogin.state,
+      });
+      notifyStartupHealth(launchAtLogin);
+    },
+    refreshAgentConfig,
+    drainBacklogs: () => {
+      // Backlogs drain in the background, never awaited: one request per
+      // pending entry used to hold the whole launch.
+      void drainTimerSyncNow('boot');
+      void refreshTodayLedger('boot');
+      void drainActivityNow('boot');
+    },
+    // A stored session is enough to start: the heartbeat itself validates it,
+    // and a dead one signs out through the auth listener. Boot used to make
+    // three /auth/me round-trips to learn the same thing.
+    hasStoredSession: async () => (await loadTokens()) !== null,
+    startHeartbeat,
+    offerPermissionSetup: () => void offerPermissionSetupOnStartup({ openedAtLogin }),
+    startShiftMonitor: () => shiftMonitor.start(),
+    log,
   });
-  notifyStartupHealth(launchAtLogin);
 });
 
 app.on('window-all-closed', () => {
@@ -541,8 +600,17 @@ app.on('window-all-closed', () => {
 // On Windows/Linux the deep-link arrives as argv of a second launch.
 app.on('second-instance', (_e, argv) => {
   const url = deepLinkFromArgv(argv);
+  // Queued by deepLink until boot has bound the timer.
   if (url) void handleDeepLink(url);
-  if (!isHiddenLaunch(argv)) showMainWindow();
+  if (isHiddenLaunch(argv)) return;
+  // A second launch during boot (double-clicking the icon while the first is
+  // still starting) used to reach for a window and attention coordinator that
+  // did not exist yet. Remember the request; boot shows the window once ready.
+  if (!uiReady) {
+    showMainWhenReady = true;
+    return;
+  }
+  showMainWindow();
 });
 
 void tray;

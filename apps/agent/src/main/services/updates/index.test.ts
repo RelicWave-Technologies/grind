@@ -29,6 +29,7 @@ const mocks = vi.hoisted(() => {
     broadcast: vi.fn(),
     drainUploads: vi.fn(),
     runQuitCleanup: vi.fn(),
+    invalidateQuitCleanup: vi.fn(),
     logInfo: vi.fn(),
     logWarn: vi.fn(),
     logError: vi.fn(),
@@ -84,6 +85,7 @@ vi.mock('../capture/uploader', () => ({
 
 vi.mock('../quitCleanup', () => ({
   runQuitCleanup: mocks.runQuitCleanup,
+  invalidateQuitCleanup: mocks.invalidateQuitCleanup,
 }));
 
 vi.mock('../timer', () => ({
@@ -115,6 +117,7 @@ describe('update service', () => {
     mocks.broadcast.mockReset();
     mocks.drainUploads.mockReset().mockResolvedValue(undefined);
     mocks.runQuitCleanup.mockReset().mockResolvedValue(undefined);
+    mocks.invalidateQuitCleanup.mockReset();
     mocks.logInfo.mockReset();
     mocks.logWarn.mockReset();
     mocks.logError.mockReset();
@@ -218,5 +221,28 @@ describe('update service', () => {
     await expect(installUpdateInsteadOfRelaunch()).resolves.toBe(false);
     expect(mocks.autoUpdater.quitAndInstall).not.toHaveBeenCalled();
     expect(mocks.autoUpdater.autoInstallOnAppQuit).toBe(false);
+  });
+
+  it('invalidates the early quit cleanup when the install then fails', async () => {
+    const { getUpdateStatus, installUpdateNow, startUpdateService } = await import('./index');
+    startUpdateService({ showMainWindow: vi.fn(), isMainWindowVisible: () => false });
+    emitUpdater('update-downloaded', { version: '0.0.2-beta.24' });
+    await installUpdateNow();
+    expect(mocks.runQuitCleanup).toHaveBeenCalledWith('update');
+
+    emitUpdater('error', new Error('installer could not start'));
+
+    // The app keeps running; the next Quit has to finalize the timer again.
+    expect(mocks.invalidateQuitCleanup).toHaveBeenCalledOnce();
+    expect(getUpdateStatus().phase).toBe('error');
+  });
+
+  it('does not invalidate anything for an ordinary failed check', async () => {
+    const { startUpdateService } = await import('./index');
+    startUpdateService({ showMainWindow: vi.fn(), isMainWindowVisible: () => false });
+
+    emitUpdater('error', new Error('offline'));
+
+    expect(mocks.invalidateQuitCleanup).not.toHaveBeenCalled();
   });
 });

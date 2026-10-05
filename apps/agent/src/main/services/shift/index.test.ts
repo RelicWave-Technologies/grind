@@ -233,3 +233,62 @@ describe('"Ready to work?" at shift start', () => {
     expect(mocks.startTracking).toHaveBeenCalledWith('task-last');
   });
 });
+
+describe('shift fetch failures', () => {
+  function shiftClearedBy(err: unknown) {
+    mocks.api.mockRejectedValueOnce(err);
+    return monitor.refreshShift().then(() => monitor.todayWindow(MID_SHIFT));
+  }
+
+  it('keeps the last good shift when a refresh times out or the server errors', async () => {
+    expect(monitor.todayWindow(MID_SHIFT)).not.toBeNull();
+
+    await expect(shiftClearedBy(new TypeError('timeout'))).resolves.not.toBeNull();
+    await expect(shiftClearedBy(Object.assign(new Error('boom'), { name: 'HttpError', status: 503 }))).resolves.not.toBeNull();
+  });
+
+  it('drops the shift when the session is gone', async () => {
+    await expect(shiftClearedBy(Object.assign(new Error('no_tokens'), { name: 'UnauthorizedError' }))).resolves.toBeNull();
+  });
+
+  it('drops the shift when the server refuses the session', async () => {
+    await expect(shiftClearedBy(Object.assign(new Error('401'), { name: 'HttpError', status: 401 }))).resolves.toBeNull();
+  });
+
+  it('retries from the 30 s poll after a boot fetch got no answer', async () => {
+    monitor.stop();
+    mocks.api.mockReset();
+    mocks.api.mockRejectedValueOnce(new TypeError('offline')).mockResolvedValue({ shift: SHIFT });
+    monitor = new ShiftMonitor(mocks.openMainWindow);
+    await monitor.start();
+    expect(monitor.todayWindow(MID_SHIFT)).toBeNull();
+
+    await vi.advanceTimersByTimeAsync(POLL_MS);
+
+    expect(mocks.api).toHaveBeenCalledTimes(2);
+    expect(monitor.todayWindow(MID_SHIFT)).not.toBeNull();
+  });
+
+  it('stops asking once the server has answered, even with no shift', async () => {
+    monitor.stop();
+    mocks.api.mockReset();
+    mocks.api.mockResolvedValue({ shift: null });
+    monitor = new ShiftMonitor(mocks.openMainWindow);
+    await monitor.start();
+
+    await vi.advanceTimersByTimeAsync(3 * POLL_MS);
+
+    expect(mocks.api).toHaveBeenCalledTimes(1);
+  });
+
+  it('shares one request between overlapping refreshes', async () => {
+    mocks.api.mockClear();
+    await Promise.all([monitor.refreshShift(), monitor.refreshShift()]);
+    expect(mocks.api).toHaveBeenCalledOnce();
+  });
+
+  it('forgets the shift at sign-out', () => {
+    monitor.clearShift();
+    expect(monitor.todayWindow(MID_SHIFT)).toBeNull();
+  });
+});

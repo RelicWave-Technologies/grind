@@ -1,10 +1,11 @@
-import { app, BrowserWindow, Notification } from 'electron';
+import { app, BrowserWindow } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import { AUTO_UPDATE_ENABLED, UPDATE_CHANNEL } from '../../env';
 import { broadcast } from '../../broadcast';
 import { log } from '../../logger';
 import { drainUploads } from '../capture/uploader';
-import { runQuitCleanup } from '../quitCleanup';
+import { invalidateQuitCleanup, runQuitCleanup } from '../quitCleanup';
+import { showNotification } from '../../notifications';
 import { getTimerService } from '../timer';
 import {
   applyUpdateEvent,
@@ -103,16 +104,16 @@ function handleReadyNotification(): void {
   if (readyNotificationVersion === version) return;
   readyNotificationVersion = version;
 
-  if (isMainWindowVisible?.() || !Notification.isSupported()) return;
-  const notification = new Notification({
+  if (isMainWindowVisible?.()) return;
+  // Retained until clicked: an unreferenced Notification is collected after
+  // show() and its click silently does nothing.
+  showNotification({
     title: 'Timo update ready',
     body: 'Restart Timo when you finish tracking.',
-  });
-  notification.on('click', () => {
+  }, () => {
     showMainWindow?.();
     broadcast('updates:open-settings', {});
   });
-  notification.show();
 }
 
 function wireUpdaterEvents(): void {
@@ -158,6 +159,9 @@ function handleUpdateError(err: unknown, manual: boolean): void {
   log.warn('update check failed', { err: message, manual, installing });
   if (manual || installing) {
     clearInstallTimers();
+    // The install ran the quit cleanup up front and then failed to quit. The
+    // app keeps running, so that cleanup no longer stands for the next Quit.
+    if (installing) invalidateQuitCleanup();
     updateStatus({ type: 'error', message, manual: true, at: now() });
     return;
   }
@@ -323,6 +327,11 @@ function scheduleInstallFallbacks(): void {
     autoUpdater.autoInstallOnAppQuit = true;
     app.quit();
   }, INSTALL_FALLBACK_QUIT_MS);
+}
+
+/** True from the moment an install starts until it quits or fails. */
+export function isInstallingUpdate(): boolean {
+  return status.phase === 'installing';
 }
 
 export async function installUpdateNow(): Promise<UpdateStatus> {

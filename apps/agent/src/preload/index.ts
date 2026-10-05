@@ -10,7 +10,7 @@ import type { WorkspaceTimeContext } from '../shared/workspaceTime';
 import type { ShiftPromptReason, TodayShiftWindow } from '../shared/shift';
 
 type AuthStatus = 'loggedIn' | 'loggedOut';
-type LarkOutcome = { kind: 'pending' } | { kind: 'error'; reason: string };
+type LarkOutcome = { kind: 'pending' } | { kind: 'error'; reason: string; host?: string };
 export type TimerRecoveryNotice = { entryId: string; recoveredAt: number; reason: 'unexpected_shutdown' | 'sleep_stop' | 'lock_stop' | 'server_finalized' | 'server_clock_corrected'; observedAt: number };
 export type TodaySegment = { kind: 'WORK' | 'MEETING' | 'IDLE_TRIMMED'; startedAt: number; endedAt: number | null };
 export type TodayEntry = { id: string; source: 'AUTO' | 'MANUAL'; larkTaskGuid: string | null; segments: TodaySegment[] };
@@ -42,7 +42,8 @@ export type UpdateStatus = {
 const api = {
   auth: {
     loginWithLark: (): Promise<{ ok: true }> => ipcRenderer.invoke('auth:loginWithLark'),
-    logout: (): Promise<{ ok: true }> => ipcRenderer.invoke('auth:logout'),
+    logout: (): Promise<{ ok: true } | { ok: false; reason: 'time_waiting_to_sync' }> =>
+      ipcRenderer.invoke('auth:logout'),
     status: (): Promise<AuthStatus> => ipcRenderer.invoke('auth:status'),
     me: (): Promise<{ name: string; avatarUrl: string | null } | null> => ipcRenderer.invoke('auth:me'),
     onStatusChange: (cb: (s: AuthStatus) => void): (() => void) => {

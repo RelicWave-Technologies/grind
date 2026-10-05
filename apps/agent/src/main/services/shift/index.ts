@@ -48,12 +48,26 @@ import type { TodayShiftWindow } from '../../../shared/shift';
  */
 
 const POLL_MS = 30_000;
+
+/** No session, or the server refused it — the only failures that mean "no shift". */
+function isSignedOutError(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const { name, status } = err as { name?: unknown; status?: unknown };
+  return name === 'UnauthorizedError' || status === 401;
+}
 const NUDGE_INTERVAL_MS = 5 * 60_000;
 
 export class ShiftMonitor {
   private state: ShiftMonitorState = { ...INITIAL_STATE };
   private untracked: UntrackedNudgeState = { ...UNTRACKED_INITIAL_STATE };
   private shift: ShiftDto | null = null;
+  /**
+   * True once the server has answered for the current session, even with "no
+   * shift". False after a failed fetch with nothing to fall back on: the 30 s
+   * poll keeps asking until it gets an answer.
+   */
+  private shiftKnown = false;
+  private refreshInFlight: Promise<void> | null = null;
   private pollTimer: NodeJS.Timeout | null = null;
   private started = false;
 
@@ -83,18 +97,51 @@ export class ShiftMonitor {
   }
 
   /** External hook so the agent can refetch when the user is reassigned
-   *  in the dashboard without restarting the app. */
-  async refreshShift(): Promise<void> {
+   *  in the dashboard without restarting the app. Single-flight. */
+  refreshShift(): Promise<void> {
+    this.refreshInFlight ??= this.fetchShift().finally(() => {
+      this.refreshInFlight = null;
+    });
+    return this.refreshInFlight;
+  }
+
+  /** Forget the shift at sign-out; the next account fetches its own. */
+  clearShift(): void {
+    this.shift = null;
+    this.shiftKnown = false;
+    hideReadyToWork();
+  }
+
+  /**
+   * One failed request used to wipe the shift for the rest of the day: the
+   * catch set it to null and nothing retried until the next wake. A timeout
+   * or a 5xx says nothing about the assignment, so the last good shift is
+   * kept; only "not signed in" (no session, or the server refusing it) clears
+   * it. While no answer has come back at all, the poll retries.
+   */
+  private async fetchShift(): Promise<void> {
     try {
       const res = await api<MyShiftResponse>('/v1/auth/me/shift');
       this.shift = res.shift;
+      this.shiftKnown = true;
       log.info('shift refreshed', { hasShift: this.shift !== null, name: this.shift?.name });
     } catch (err) {
-      // No tokens / 401 → treat as "no shift" silently. We re-try after
-      // the next powerMonitor resume / next start() call.
-      log.warn('shift refresh failed (non-fatal)', { err: String(err) });
-      this.shift = null;
+      if (isSignedOutError(err)) {
+        log.info('shift refresh skipped: not signed in');
+        this.shift = null;
+        this.shiftKnown = false;
+        return;
+      }
+      log.warn('shift refresh failed; keeping the last known shift', {
+        err: String(err),
+        hasShift: this.shift !== null,
+      });
     }
+  }
+
+  /** Whether the poll should ask the server again before ticking. */
+  needsRetry(): boolean {
+    return !this.shiftKnown && this.shift === null;
   }
 
   todayWindow(now = Date.now()): TodayShiftWindow | null {
@@ -154,7 +201,15 @@ export class ShiftMonitor {
 
   private startPolling(): void {
     if (this.pollTimer) return;
-    this.pollTimer = setInterval(() => this.tick(), POLL_MS);
+    this.pollTimer = setInterval(() => this.poll(), POLL_MS);
+  }
+
+  private poll(): void {
+    if (!this.needsRetry()) {
+      this.tick();
+      return;
+    }
+    void this.refreshShift().then(() => this.tick());
   }
 
   private tick(): void {
