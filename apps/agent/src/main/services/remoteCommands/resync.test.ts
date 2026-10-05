@@ -12,7 +12,7 @@ function deps(over: Partial<ResyncDeps> & { timerPending?: number[]; activityPen
     owner: () => OWNER,
     timeZone: () => 'Asia/Kolkata',
     timer: {
-      resyncRange: vi.fn(() => ({ requeued: 4, openRequeued: true })),
+      resyncRange: vi.fn(() => ({ requeued: 4, openRequeued: true, skippedRecovered: 0 })),
       rangeBacklog: vi.fn(() => ({ pending: next(timerPending), lastErrors: [] })),
     },
     activity: {
@@ -53,7 +53,7 @@ describe('runResync', () => {
         startAt: '2026-10-03T18:30:00.000Z',
         endAt: '2026-10-05T18:30:00.000Z',
       },
-      timer: { requeued: 4, openRequeued: true, pendingAfter: 0, lastErrors: [] },
+      timer: { requeued: 4, openRequeued: true, skippedRecovered: 0, pendingAfter: 0, lastErrors: [] },
       activity: { requeued: 120, pendingAfter: 0 },
       screenshots: { requeued: 3, uploaded: 42, failed: 0, pendingAfter: 1 },
       appVersion: '0.0.2-beta.39',

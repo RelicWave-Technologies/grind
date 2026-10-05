@@ -595,10 +595,11 @@ export class TimerService {
    *
    * Backoff is cleared on every row touched, so the next drain sends them all.
    */
-  resyncRange(startMs: number, endMs: number): { requeued: number; openRequeued: boolean } {
+  resyncRange(startMs: number, endMs: number): { requeued: number; openRequeued: boolean; skippedRecovered: number } {
     if (!this.store.currentOwner()) throw new Error('timer_owner_unavailable');
     let requeued = 0;
     let openRequeued = false;
+    let skippedRecovered = 0;
     for (const row of this.store.listLedgerEntries(startMs)) {
       const { entry } = row;
       if (entry.startedAt >= endMs) continue;
@@ -619,6 +620,13 @@ export class TimerService {
         openRequeued = true;
         continue;
       }
+      // A crash-recovered entry's end is this agent's estimate (its last
+      // liveness); the server may hold a longer, proven copy. Re-sending it with
+      // a newer revision would replace that with the shorter guess.
+      if (entry.closeReason === 'AGENT_RECOVERY' && row.syncState === 'synced') {
+        skippedRecovered += 1;
+        continue;
+      }
       if (row.syncState === 'pending_create') {
         this.store.requeue(entry.id, 'pending_create');
         this.ledgerEpoch += 1;
@@ -628,7 +636,7 @@ export class TimerService {
       requeued += 1;
     }
     if (requeued > 0 || openRequeued) this.notifyMutation();
-    return { requeued, openRequeued };
+    return { requeued, openRequeued, skippedRecovered };
   }
 
   /** Closed entries in [startMs, endMs) the server has not acknowledged yet. */

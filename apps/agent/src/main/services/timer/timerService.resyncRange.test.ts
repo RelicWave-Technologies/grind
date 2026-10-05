@@ -81,6 +81,18 @@ beforeEach(() => {
 });
 
 describe('TimerService.resyncRange', () => {
+  it('leaves a synced crash-recovered entry alone, but still sends one the server never got', () => {
+    const recovered = { ...closedEntry(ALICE, 'a_rec', DAY_START + 9 * 60 * MIN, DAY_START + 10 * 60 * MIN), closeReason: 'AGENT_RECOVERY' as const };
+    const recoveredNew = { ...closedEntry(ALICE, 'a_rec_new', DAY_START + 11 * 60 * MIN, DAY_START + 12 * 60 * MIN), closeReason: 'AGENT_RECOVERY' as const };
+    seed(ALICE, recovered, { revision: 3 });
+    seed(ALICE, recoveredNew, 'pending_create');
+
+    svc.bindOwner(ALICE);
+    expect(svc.resyncRange(DAY_START, DAY_END)).toEqual({ requeued: 1, openRequeued: false, skippedRecovered: 1 });
+    expect(row(ALICE, 'a_rec')).toMatchObject({ syncState: 'synced', entry: { revision: recovered.revision } });
+    expect(row(ALICE, 'a_rec_new')!.syncState).toBe('pending_create');
+  });
+
   it("requeues the owner's closed entries in range with a revision above the server's", () => {
     const inRange = closedEntry(ALICE, 'a_in', DAY_START + 9 * 60 * MIN, DAY_START + 10 * 60 * MIN);
     const notCreated = closedEntry(ALICE, 'a_new', DAY_START + 11 * 60 * MIN, DAY_START + 11 * 60 * MIN + 30 * MIN);
@@ -98,7 +110,7 @@ describe('TimerService.resyncRange', () => {
     svc.bindOwner(ALICE);
     const result = svc.resyncRange(DAY_START, DAY_END);
 
-    expect(result).toEqual({ requeued: 3, openRequeued: false });
+    expect(result).toEqual({ requeued: 3, openRequeued: false, skippedRecovered: 0 });
     const resent = row(ALICE, 'a_in')!;
     expect(resent.syncState).toBe('pending_update');
     // Local revision was 1 (one close); the server had acknowledged 7.
@@ -144,7 +156,7 @@ describe('TimerService.resyncRange', () => {
 
     const result = svc.resyncRange(DAY_START, DAY_END);
 
-    expect(result).toEqual({ requeued: 0, openRequeued: true });
+    expect(result).toEqual({ requeued: 0, openRequeued: true, skippedRecovered: 0 });
     const after = row(ALICE, entryId)!;
     expect(after.syncState).toBe('pending_update');
     expect(after.entry.revision).toBe(open.revision + 1);
@@ -161,7 +173,7 @@ describe('TimerService.resyncRange', () => {
     await svc.start({});
     const entryId = (svc.status() as { entryId: string }).entryId;
 
-    expect(svc.resyncRange(DAY_START, DAY_END)).toEqual({ requeued: 0, openRequeued: true });
+    expect(svc.resyncRange(DAY_START, DAY_END)).toEqual({ requeued: 0, openRequeued: true, skippedRecovered: 0 });
     expect(row(ALICE, entryId)!.syncState).toBe('pending_create');
   });
 

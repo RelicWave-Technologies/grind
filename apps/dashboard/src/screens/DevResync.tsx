@@ -295,7 +295,7 @@ function summarize(result: Record<string, unknown> | null): Array<[string, strin
   const errors = Array.isArray(timer.lastErrors) ? timer.lastErrors.filter((e) => typeof e === 'string') : [];
   const seconds = typeof result.durationMs === 'number' ? `${(result.durationMs / 1000).toFixed(1)} s` : '—';
   return [
-    ['Time entries', `${num(timer.requeued)} re-sent · ${num(timer.pendingAfter)} still queued${timer.openRequeued ? ' · running one too' : ''}`],
+    ['Time entries', `${num(timer.requeued)} re-sent · ${num(timer.pendingAfter)} still queued${timer.openRequeued ? ' · running one too' : ''}${timer.skippedRecovered ? ` · ${num(timer.skippedRecovered)} crash-recovered kept as is` : ''}`],
     ['Activity minutes', `${num(activity.requeued)} re-sent · ${num(activity.pendingAfter)} still queued`],
     ['Screenshots', `${num(shots.requeued)} re-queued · ${num(shots.uploaded)} uploaded · ${num(shots.failed)} failed · ${num(shots.pendingAfter)} waiting`],
     ['Agent', `${String(result.appVersion ?? '—')} · ${String(result.os ?? '—')} ${String(result.arch ?? '')} · ${seconds}`],

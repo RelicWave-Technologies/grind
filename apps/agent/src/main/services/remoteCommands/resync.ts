@@ -29,7 +29,7 @@ export interface ResyncDeps {
   /** The workspace timezone this agent is running on, when known. */
   timeZone(): string | null;
   timer: {
-    resyncRange(startMs: number, endMs: number): { requeued: number; openRequeued: boolean };
+    resyncRange(startMs: number, endMs: number): { requeued: number; openRequeued: boolean; skippedRecovered: number };
     rangeBacklog(startMs: number, endMs: number): { pending: number; lastErrors: string[] };
   };
   activity: {
@@ -104,6 +104,7 @@ export async function runResync(rawParams: unknown, deps: ResyncDeps): Promise<R
     timer: {
       requeued: timer.requeued,
       openRequeued: timer.openRequeued,
+      skippedRecovered: timer.skippedRecovered,
       pendingAfter: timerAfter.pending,
       lastErrors: timerAfter.lastErrors,
     },

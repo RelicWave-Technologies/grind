@@ -78,6 +78,8 @@ export interface ResyncCommandResult {
     requeued: number;
     /** Whether the running entry was queued again too. */
     openRequeued: boolean;
+    /** Crash-recovered entries left alone: their local end is an estimate the server may beat. */
+    skippedRecovered?: number;
     /** Closed entries in the range still not acknowledged by the server. */
     pendingAfter: number;
     lastErrors: string[];
