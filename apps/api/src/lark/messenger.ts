@@ -30,8 +30,12 @@ export interface ListChatMessagesResult {
 }
 
 export interface LarkMessenger {
-  /** Send an interactive card to a Lark user by their open_id. */
-  sendCard(receiveOpenId: string, card: Record<string, unknown>): Promise<SendCardResult>;
+  /**
+   * Send an interactive card to a Lark user by their open_id. `uuid` is Lark's
+   * idempotency key: a repeat send with the same uuid within an hour is
+   * dropped by Lark rather than delivered twice.
+   */
+  sendCard(receiveOpenId: string, card: Record<string, unknown>, uuid?: string): Promise<SendCardResult>;
   /** Send an interactive card to a Lark group by chat_id. */
   sendCardToChat(chatId: string, card: Record<string, unknown>, uuid?: string): Promise<SendCardResult>;
   /** Replace an already-sent card in place (used by the decision flow). */
@@ -62,8 +66,8 @@ export class HttpLarkMessenger implements LarkMessenger {
     return getTenantAccessToken();
   }
 
-  async sendCard(receiveOpenId: string, card: Record<string, unknown>): Promise<SendCardResult> {
-    return this.sendMessage('open_id', receiveOpenId, 'interactive', JSON.stringify(card));
+  async sendCard(receiveOpenId: string, card: Record<string, unknown>, uuid?: string): Promise<SendCardResult> {
+    return this.sendMessage('open_id', receiveOpenId, 'interactive', JSON.stringify(card), uuid);
   }
 
   async sendCardToChat(chatId: string, card: Record<string, unknown>, uuid?: string): Promise<SendCardResult> {

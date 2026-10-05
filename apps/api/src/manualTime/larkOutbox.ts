@@ -9,6 +9,8 @@ import {
   type DiffEntry,
 } from '../lark';
 import { logger } from '../logger';
+import { onShutdown } from '../lib/lifecycle';
+import { reclaimStaleOutboxClaims } from '../lib/outboxReclaim';
 
 type Tx = Prisma.TransactionClient;
 type LarkMessageKind = 'APPROVAL' | 'UPDATED_APPROVAL' | 'DECIDED_NOTICE';
@@ -86,6 +88,11 @@ async function handleSendCard(event: { id: string; requestId: string; messageLed
   if (!message) throw new Error('message_ledger_not_found');
   if (!req) throw new Error('manual_time_request_not_found');
 
+  // Already delivered: a retry after the send succeeded but before the event
+  // was marked DONE (crash, reclaimed claim, failed settle) must not post the
+  // approver a second card.
+  if (message.status === 'SENT' && message.messageId) return;
+
   if (message.kind !== 'DECIDED_NOTICE' && (req.status !== 'PENDING' || message.version !== req.version)) {
     await prisma.manualTimeLarkMessage.update({
       where: { id: message.id },
@@ -127,7 +134,10 @@ async function handleSendCard(event: { id: string; requestId: string; messageLed
         : buildApprovalCard(common);
 
   try {
-    const { messageId } = await messenger.sendCard(message.recipientOpenId, card);
+    // The ledger id doubles as Lark's idempotency key, so a resend that slips
+    // past the check above (send landed, ledger write did not) is deduplicated
+    // by Lark instead of reaching the approver twice.
+    const { messageId } = await messenger.sendCard(message.recipientOpenId, card, message.id);
     await prisma.$transaction(async (tx) => {
       await tx.manualTimeLarkMessage.update({
         where: { id: message.id },
@@ -265,7 +275,18 @@ async function handleEvent(event: {
   return handleFinalizeCards(event);
 }
 
+/** Hand claims a dead worker left PROCESSING back to the queue. */
+export async function reclaimStaleManualTimeLarkOutboxClaims(now: Date = new Date()): Promise<number> {
+  return reclaimStaleOutboxClaims('manual_time_lark', (cutoff) =>
+    prisma.manualTimeLarkOutboxEvent.updateMany({
+      where: { status: 'PROCESSING', lockedAt: { lt: cutoff } },
+      data: { status: 'PENDING', lockedAt: null, lockedBy: null },
+    }),
+  now);
+}
+
 export async function processManualTimeLarkOutboxOnce(limit = 10): Promise<number> {
+  await reclaimStaleManualTimeLarkOutboxClaims();
   const now = new Date();
   const workerId = `${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
   const due = await prisma.manualTimeLarkOutboxEvent.findMany({
@@ -318,4 +339,8 @@ export function startManualTimeLarkOutboxWorker(intervalMs = 5000): void {
     });
   }, intervalMs);
   timer.unref?.();
+  onShutdown(() => {
+    if (timer) clearInterval(timer);
+    timer = null;
+  });
 }
