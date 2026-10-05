@@ -3,6 +3,7 @@ import {
   attendanceOverrideShape,
   type DisplayDayCode,
   type AttendanceOverrideCode,
+  type AttendanceRuleTag,
   type AttendanceRuleVerdict,
   type DayStatus,
 } from '@grind/types';
@@ -555,10 +556,18 @@ export function sheetWhy(
   day: Pick<MonthPerformanceDay, 'rule'> & { late?: number | null },
 ): string {
   // A late arrival is worth showing even when it costs nothing yet: "late 3"
-  // tells the reader how close the month is to the 5th.
-  if (!day.rule || day.rule.tag === 'LATE') return day.late ? `late ${day.late}` : '';
+  // tells the reader how close the month is to the 5th. On a day another rule
+  // already cut, it is shown beside that reason, so the late numbers on the row
+  // still count up 1, 2, 3 with none missing.
+  const late = day.late ? `late ${day.late}` : '';
+  if (!day.rule || day.rule.tag === 'LATE') return late;
+  const reason = ruleReason(report, day.rule.tag);
+  return late && reason ? `${reason} · ${late}` : reason || late;
+}
+
+function ruleReason(report: Pick<MonthPerformanceReport, 'ruleMinutes'>, tag: AttendanceRuleTag): string {
   const m = report.ruleMinutes ?? { fullDay: 420, halfDay: 210, lateAllowed: 4, lateGrace: 30 };
-  switch (day.rule.tag) {
+  switch (tag) {
     case 'SHORT_DAY': return `<${hoursWord(m.fullDay)}`;
     case 'UNDER_MIN':
     case 'HALF_DAY_SHORT': return `<${hoursWord(m.halfDay)}`;
@@ -569,11 +578,6 @@ export function sheetWhy(
   }
 }
 
-/**
- * Days of the month that went unpaid — the one number payroll needs. A full
- * day the balance did not cover is 1, an unpaid half is 0.5, and a full day the
- * balance reached halfway is 0.5.
- */
 export function salaryCutDays(totals: MonthPerformanceTotals): number {
   return totals.unpaidLeave + 0.5 * (totals.unpaidHalfDay + totals.splitLeave);
 }

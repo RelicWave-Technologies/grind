@@ -5,6 +5,7 @@ import { ulid } from 'ulid';
 import { buildApp } from '../src/app';
 import { signAccessToken } from '../src/lib/jwt';
 import { loadMonthPerformanceReport, resolveReportMonth } from '../src/reports/monthPerformanceData';
+import { sheetWhy } from '../src/reports/monthPerformance';
 import { loadBalances } from '../src/leave/repository';
 
 /**
@@ -317,6 +318,10 @@ describe('attendance rules — late arrivals', () => {
     expect(day('2026-09-08')).toMatchObject({ late: 7, rule: { tag: 'SHORT_DAY', penaltyDays: 0.5 } });
     expect(day('2026-09-09')).toMatchObject({ late: null, code: 'P', rule: null });
     expect(row.totals.lateDays).toBe(7);
+    // The Why row keeps the late count running on a day another rule cut.
+    const { report } = await september(s);
+    expect(sheetWhy(report, day('2026-09-04'))).toBe('late 4');
+    expect(sheetWhy(report, day('2026-09-08'))).toBe('<7h · late 7');
 
     const lines = await ruleLines(s.member.id);
     expect(lines.get('2026-09-05')).toBe(-0.5);
@@ -415,8 +420,9 @@ describe('attendance rules — HTTP surfaces', () => {
     const status = block.find((l) => l.startsWith('Status,'));
     const why = block.find((l) => l.startsWith('Why,'));
     expect(status?.split(',').slice(1, 9)).toEqual(['P', 'HD', 'L', 'L', 'P', 'WO', 'LWA', 'LWA']);
-    // The 1st is a late arrival that costs nothing yet: shown so the count is visible.
-    expect(why?.split(',').slice(1, 9)).toEqual(['late 1', '<7h', '<3.5h', 'WFH', '', '', 'no leave', 'unapproved']);
+    // The 1st is a late arrival that costs nothing yet: shown so the count is
+    // visible. The 2nd and 3rd were late too, shown beside the hours cut.
+    expect(why?.split(',').slice(1, 9)).toEqual(['late 1', '<7h · late 2', '<3.5h · late 3', 'WFH', '', '', 'no leave', 'unapproved']);
     expect(block[0]).toContain('Salary Cut');
 
     const xlsx = await request(app).get('/v1/reports/month-performance.xlsx?month=2026-09').set(auth);
