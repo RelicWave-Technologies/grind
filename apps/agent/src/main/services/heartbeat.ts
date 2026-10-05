@@ -5,7 +5,6 @@ import { AGENT_VERSION, HEARTBEAT_INTERVAL_MS } from '../env';
 import { log } from '../logger';
 import { hasDeferredServerClockCorrection, noteServerTime, serverAlignedNow, serverClockOffsetMs } from './serverClock';
 import { api } from './apiClient';
-import { isLoggedIn } from './auth';
 import { drainActivityNow } from './activity';
 import { drainTimerSyncNow, getTimerService } from './timer';
 import { buildHeartbeatRequest, currentPlatform } from './heartbeatPayload';
@@ -167,8 +166,4 @@ export function stopHeartbeat(): void {
     timer = null;
     log.info('heartbeat stopped');
   }
-}
-
-export async function startHeartbeatIfAuthed(): Promise<void> {
-  if (await isLoggedIn()) startHeartbeat();
 }
