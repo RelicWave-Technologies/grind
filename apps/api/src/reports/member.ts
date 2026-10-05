@@ -31,8 +31,8 @@ import { dateRange } from '../insights/timesheets';
 import type { RoleTitle } from '../scoring/presets';
 import { scoreMinute } from '../scoring/score';
 
-export const MEMBER_REPORT_MAX_DAYS = 60;
-export const MEMBER_REPORT_DEFAULT_DAYS = 7;
+const MEMBER_REPORT_MAX_DAYS = 60;
+const MEMBER_REPORT_DEFAULT_DAYS = 7;
 
 export interface ReportRange {
   from: string;

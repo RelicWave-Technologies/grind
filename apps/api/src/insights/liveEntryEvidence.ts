@@ -7,11 +7,8 @@ import {
 } from '@grind/core';
 
 export {
-  CLIENT_CLOCK_SKEW_MS,
-  LIVE_HEARTBEAT_FRESH_MS,
   heartbeatIsFresh,
   trustedObservedAt,
-  type EntryLiveEvidence,
   type EntryLiveEvidenceMap,
 } from '@grind/core';
 

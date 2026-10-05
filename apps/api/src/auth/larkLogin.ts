@@ -51,7 +51,7 @@ const LOGIN_USER_SELECT = {
 } as const;
 
 /** Parsed, normalized bootstrap-admin allowlist from env (case-insensitive). */
-export function bootstrapAdminEmails(): string[] {
+function bootstrapAdminEmails(): string[] {
   return (process.env.LARK_BOOTSTRAP_ADMIN_EMAILS || env.LARK_BOOTSTRAP_ADMIN_EMAILS || '')
     .split(',')
     .map((e) => normalizeEmail(e))

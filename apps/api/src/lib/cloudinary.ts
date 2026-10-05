@@ -15,7 +15,7 @@ import { env } from '../env';
  */
 
 /** The on-the-fly transformation used to derive a gallery thumbnail URL. */
-export const THUMB_TRANSFORM = 'c_fill,w_400,h_250,q_auto,f_auto';
+const THUMB_TRANSFORM = 'c_fill,w_400,h_250,q_auto,f_auto';
 
 export function isCloudinaryConfigured(): boolean {
   return Boolean(env.CLOUDINARY_CLOUD_NAME && env.CLOUDINARY_API_KEY && env.CLOUDINARY_API_SECRET);

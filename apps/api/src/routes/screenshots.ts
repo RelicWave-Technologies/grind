@@ -660,5 +660,3 @@ function extractMultipartFile(body: Buffer, contentType: string): Buffer | null 
   }
   return null;
 }
-
-export default screenshotsRouter;

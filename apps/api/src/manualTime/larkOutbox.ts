@@ -291,7 +291,7 @@ async function handleEvent(event: {
 }
 
 /** Hand claims a dead worker left PROCESSING back to the queue. */
-export async function reclaimStaleManualTimeLarkOutboxClaims(now: Date = new Date()): Promise<number> {
+async function reclaimStaleManualTimeLarkOutboxClaims(now: Date = new Date()): Promise<number> {
   return reclaimStaleOutboxClaims('manual_time_lark', (cutoff) =>
     prisma.manualTimeLarkOutboxEvent.updateMany({
       where: { status: 'PROCESSING', lockedAt: { lt: cutoff } },

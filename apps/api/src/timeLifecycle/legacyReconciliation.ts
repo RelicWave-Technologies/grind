@@ -6,7 +6,7 @@ export const DEFAULT_LEGACY_STALE_MINUTES = 15;
 
 type PlanDb = Pick<typeof prisma, 'timeEntry' | 'user'>;
 
-export interface LegacyReconciliationEntry {
+interface LegacyReconciliationEntry {
   entryId: string;
   userId: string;
   userName: string;
@@ -22,13 +22,13 @@ export interface LegacyReconciliationEntry {
   reconciledDurationMs: number;
 }
 
-export interface LegacyReconciliationSkip {
+interface LegacyReconciliationSkip {
   entryId: string;
   userId: string;
   reason: 'FRESH_HEARTBEAT' | 'FUTURE_EVIDENCE';
 }
 
-export interface LegacyPointerRepair {
+interface LegacyPointerRepair {
   userId: string;
   userName: string;
   userEmail: string;

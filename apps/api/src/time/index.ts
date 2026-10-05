@@ -55,7 +55,7 @@ const TIMELINE_ENTRY_SELECT = {
   manualTimeRequest: { select: { id: true } },
 } satisfies Prisma.TimeEntrySelect;
 
-export type TimelineRow = Prisma.TimeEntryGetPayload<{ select: typeof TIMELINE_ENTRY_SELECT }>;
+type TimelineRow = Prisma.TimeEntryGetPayload<{ select: typeof TIMELINE_ENTRY_SELECT }>;
 export type TimelineRowPiece = TimelinePiece<TimelineRow>;
 
 export interface LoadedTimeline {
@@ -155,7 +155,7 @@ export async function loadTimeline(input: {
 }
 
 /** Attribute an already-loaded timeline to workspace dates. */
-export function withDays(loaded: LoadedTimeline, tz: string, from: string, to: string): LoadedTimelineDays {
+function withDays(loaded: LoadedTimeline, tz: string, from: string, to: string): LoadedTimelineDays {
   const days = dateKeysBetween(from, to);
   const buckets = bucketByDay(loaded.pieces, tz, days);
   return {
@@ -225,7 +225,7 @@ export async function loadShiftAssignments(
 // Day facts
 // ---------------------------------------------------------------------------
 
-export interface DayFacts {
+interface DayFacts {
   bucket: DayBucket;
   status: DayStatus | null;
   shift: ShiftDay<ShiftAssignmentRow> | null;
@@ -244,7 +244,7 @@ export interface DayFactsSource {
 }
 
 /** The pure part of day facts — everything handed in. */
-export function dayFactsOf(input: {
+function dayFactsOf(input: {
   bucket: DayBucket;
   status: DayStatus | null;
   shift: ShiftDay<ShiftAssignmentRow> | null;

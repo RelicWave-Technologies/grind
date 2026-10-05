@@ -48,9 +48,9 @@ const GeneralAnswerSchema = z.object({
   citations: z.array(z.object({ title: z.string(), url: z.string().nullable() })),
 });
 
-export type GeneralAnswer = z.infer<typeof GeneralAnswerSchema>;
+type GeneralAnswer = z.infer<typeof GeneralAnswerSchema>;
 
-export interface TesterMessageInput {
+interface TesterMessageInput {
   workspaceId: string;
   eventId?: string;
   messageText: string;
@@ -59,14 +59,14 @@ export interface TesterMessageInput {
   usageSnapshot?: unknown;
 }
 
-export interface DocAnswerInput {
+interface DocAnswerInput {
   workspaceId: string;
   eventId?: string;
   question: string;
   chunks: Array<{ title: string; url: string | null; content: string }>;
 }
 
-export interface GeneralAnswerInput extends TesterMessageInput {
+interface GeneralAnswerInput extends TesterMessageInput {
   decisionSummary?: string | null;
 }
 

@@ -36,7 +36,7 @@ interface HeaderIcon {
   preferMascot?: boolean;
 }
 
-export interface TesterIssueListItem {
+interface TesterIssueListItem {
   status: string;
   severity: TesterDecision['severity'];
   category: string | null;

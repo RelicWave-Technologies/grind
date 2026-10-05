@@ -207,5 +207,3 @@ function changedPolicyFlags(
   }
   return Object.keys(changes).length > 0 ? changes : null;
 }
-
-export default workspacePolicyRouter;

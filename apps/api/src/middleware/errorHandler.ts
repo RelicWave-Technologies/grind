@@ -18,7 +18,7 @@ const CLIENT_ERROR_CODES: Record<string, string> = {
  * gate tags its rejection with 403. Those are the caller's mistake, not ours:
  * answering them 500 and paging Sentry hid real failures behind noise.
  */
-export function clientErrorStatus(err: unknown): number | null {
+function clientErrorStatus(err: unknown): number | null {
   if (!err || typeof err !== 'object') return null;
   const e = err as { status?: unknown; statusCode?: unknown };
   const status = typeof e.status === 'number' ? e.status : typeof e.statusCode === 'number' ? e.statusCode : null;

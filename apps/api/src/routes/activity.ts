@@ -40,7 +40,7 @@ interface IngestRow {
  * which replaced the head the server already had). Timing CVs follow the
  * report with more of the input they were measured on.
  */
-export function mergeMinuteReports(a: IngestRow, b: IngestRow): IngestRow {
+function mergeMinuteReports(a: IngestRow, b: IngestRow): IngestRow {
   const keysFromB = b.keystrokes >= a.keystrokes;
   const movesFromB = b.mouseDistancePx >= a.mouseDistancePx;
   return {

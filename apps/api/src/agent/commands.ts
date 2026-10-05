@@ -17,7 +17,7 @@ import type {
  * re-posts the result.
  */
 
-export const REDELIVER_AFTER_MS = 10 * 60_000;
+const REDELIVER_AFTER_MS = 10 * 60_000;
 /** Per heartbeat; the agent runs them one at a time anyway. */
 const MAX_DELIVERED_PER_HEARTBEAT = 5;
 
@@ -32,7 +32,7 @@ function asRecord(value: Prisma.JsonValue | null): Record<string, unknown> | nul
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
 }
 
-export function serializeAgentCommand(row: CommandRow): AgentCommandDto {
+function serializeAgentCommand(row: CommandRow): AgentCommandDto {
   return {
     id: row.id,
     type: row.type,

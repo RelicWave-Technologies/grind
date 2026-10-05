@@ -36,7 +36,7 @@ export interface RiskSample {
   pathStraightness?: number | null;
 }
 
-export interface RiskFlag {
+interface RiskFlag {
   type: FlagType;
   /** 0–100 contribution to the window's cumulative risk. */
   riskScore: number;

@@ -34,7 +34,7 @@ export const authRouter = Router();
  */
 const PASSWORD_LOGIN_ENABLED = env.NODE_ENV !== 'production' && env.ALLOW_PASSWORD_LOGIN === 'true';
 
-export type AuthUserRow = {
+type AuthUserRow = {
   id: string;
   email: string;
   name: string;

@@ -36,14 +36,14 @@ import {
 } from '@grind/core';
 import { localDayWindowInTimeZone, type ShiftSchedule } from '@grind/types';
 
-export type SegmentKind = 'WORK' | 'MEETING' | 'IDLE_TRIMMED';
+type SegmentKind = 'WORK' | 'MEETING' | 'IDLE_TRIMMED';
 /**
  * Every minute of the day belongs to exactly ONE block kind — the timeline is a
  * single partition (Time-Doctor style), no overlapping layers. PENDING requests
  * are carved out of the gaps they sit in, so a pending slot is never *also* a
  * gap row (that was the old "duplicacy").
  */
-export type BlockKind = SegmentKind | 'MANUAL' | 'PENDING' | 'GAP';
+type BlockKind = SegmentKind | 'MANUAL' | 'PENDING' | 'GAP';
 
 /** What a day block needs to know about the entry behind it. */
 export interface DayEntryMeta {
@@ -83,7 +83,7 @@ export interface RejectedRequestInput extends PendingRequestInput {
   decidedReason: string | null;
 }
 
-export interface DayBlock {
+interface DayBlock {
   kind: BlockKind;
   startedAt: number; // epoch ms
   endedAt: number; // epoch ms (exclusive)
@@ -248,7 +248,7 @@ function carvePending(pendingIv: PendingIv[], occupied: Interval[], lo: number, 
  *  same-kind + same-task work merges into one continuous block. Time-Doctor
  *  style — totals are computed from the raw partition BEFORE this, so folding a
  *  short idle into work never changes the hour counts. */
-export const COALESCE_MIN_MS = 120_000; // 2 minutes
+const COALESCE_MIN_MS = 120_000; // 2 minutes
 
 function isTracked(k: BlockKind): boolean {
   return k === 'WORK' || k === 'MEETING' || k === 'MANUAL';
@@ -326,7 +326,7 @@ function emitRun(run: DayBlock[], minMs: number): DayBlock[] {
  * Totals are computed from the RAW partition before this, so folding never
  * changes the hour counts.
  */
-export function coalesceForDisplay(blocks: DayBlock[], minMs: number): DayBlock[] {
+function coalesceForDisplay(blocks: DayBlock[], minMs: number): DayBlock[] {
   const out: DayBlock[] = [];
   let i = 0;
   while (i < blocks.length) {

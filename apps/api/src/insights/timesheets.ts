@@ -18,7 +18,7 @@ export interface TimesheetSegmentInput {
   endedAt: number;
 }
 
-export interface TimesheetCell {
+interface TimesheetCell {
   workedMs: number;
   meetingMs: number;
   manualMs: number;

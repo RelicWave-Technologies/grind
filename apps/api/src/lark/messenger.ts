@@ -14,7 +14,7 @@ export interface SendCardResult {
   messageId: string;
 }
 
-export interface LarkChatMessage {
+interface LarkChatMessage {
   messageId: string;
   chatId: string | null;
   senderOpenId: string | null;

@@ -19,7 +19,7 @@ import {
  * `req.user` is set.
  */
 
-export type Scope = 'self' | 'team' | 'workspace';
+type Scope = 'self' | 'team' | 'workspace';
 
 export interface ResolvedScope {
   scope: Scope;

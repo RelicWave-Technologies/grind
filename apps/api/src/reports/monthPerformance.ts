@@ -97,7 +97,7 @@ export type MonthPerformanceCode =
   /** No shift assignment covers this date, and nothing tracked either. */
   | '--';
 
-export interface RuleSettings {
+interface RuleSettings {
   fullDay: number;
   halfDay: number;
   lateAllowed: number;
@@ -264,7 +264,7 @@ const WEEKDAY_LABEL: Record<string, string> = {
 };
 
 /** 'August-2026' from '2026-08'. */
-export function monthLabelOf(month: string): string {
+function monthLabelOf(month: string): string {
   const [y, m] = month.split('-').map((n) => Number.parseInt(n, 10));
   const name = MONTH_NAMES[(m ?? 1) - 1];
   return name && y ? `${name}-${y}` : month;
@@ -377,7 +377,7 @@ export function overrideCode(override: DayOverride): MonthPerformanceCode {
  * day whose ground has moved since is flagged rather than silently disagreeing
  * with the calendar.
  */
-export function computedCodeForDay(
+function computedCodeForDay(
   status: DayStatus | null,
   trackedMinutes: number,
 ): MonthPerformanceCode {

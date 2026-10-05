@@ -279,5 +279,3 @@ authLarkRouter.post('/exchange', validate(AgentLarkExchangeRequest, 'body'), asy
     next(err);
   }
 });
-
-export default authLarkRouter;

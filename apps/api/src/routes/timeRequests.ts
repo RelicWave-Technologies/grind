@@ -538,5 +538,3 @@ timeRequestsRouter.post('/:id/cancel', attachScope, async (req, res, next) => {
     next(err);
   }
 });
-
-export default timeRequestsRouter;

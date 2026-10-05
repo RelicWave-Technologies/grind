@@ -19,7 +19,7 @@ export interface AppUsageSample {
   clicks: number;
 }
 
-export interface AppUsageEntry {
+interface AppUsageEntry {
   app: string;
   appBundle: string | null;
   domain?: string;
@@ -118,7 +118,7 @@ export function appUsageIdentity(sample: Pick<AppUsageSample, 'activeApp' | 'act
   };
 }
 
-export function domainFromActiveUrl(value: string | null | undefined): string | null {
+function domainFromActiveUrl(value: string | null | undefined): string | null {
   if (!value) return null;
   try {
     const url = new URL(value);

@@ -19,7 +19,7 @@ import { fromIsoDate } from './repository';
  * Idempotent: `WfhRequest.larkInstanceCode` is unique, so a re-ingest updates.
  */
 
-export const DEFAULT_WFH_INGEST_INTERVAL_MS = 10 * 60_000;
+const DEFAULT_WFH_INGEST_INTERVAL_MS = 10 * 60_000;
 
 export interface LarkWfhInstance {
   instanceCode: string;
@@ -33,7 +33,7 @@ export interface LarkWfhInstance {
   appliedAtMs: number | null;
 }
 
-export interface WfhIngestResult {
+interface WfhIngestResult {
   seen: number;
   linked: number;
   unmatched: number;
@@ -131,7 +131,7 @@ async function mirrorWfh(workspaceId: string, instance: LarkWfhInstance): Promis
   return true;
 }
 
-export async function ingestLarkWfhOnce(input?: { lookbackDays?: number; now?: number }): Promise<WfhIngestResult> {
+async function ingestLarkWfhOnce(input?: { lookbackDays?: number; now?: number }): Promise<WfhIngestResult> {
   const empty: WfhIngestResult = { seen: 0, linked: 0, unmatched: 0 };
   const approvalCode = process.env.LARK_WFH_APPROVAL_CODE?.trim();
   if (!approvalCode || !hasLarkCredentials()) return empty;
@@ -202,10 +202,4 @@ export function startLarkWfhIngest(intervalMs = DEFAULT_WFH_INGEST_INTERVAL_MS):
   timer = setInterval(run, intervalMs);
   timer.unref?.();
   logger.info({ intervalMs }, 'lark wfh ingest started');
-}
-
-export function stopLarkWfhIngest(): void {
-  if (!timer) return;
-  clearInterval(timer);
-  timer = null;
 }

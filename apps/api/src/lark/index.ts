@@ -16,9 +16,8 @@ export {
 } from './config';
 export { TokenManager } from './tokenManager';
 export { LarkReauthRequiredError, LarkTransientError } from './oauthClient';
-export type { OAuthClient, LarkTokenResponse } from './oauthClient';
 export { resolveIdentity } from './identity';
-export type { TenantClient, ResolvedLarkUser } from './identity';
+export type { TenantClient } from './identity';
 export {
   signOAuthState,
   verifyOAuthState,
@@ -27,10 +26,9 @@ export {
   verifyLoginState,
   verifyExpiredAgentLoginRouteHint,
 } from './oauth';
-export type { AgentLoginRouteHint, LarkLoginStatePayload } from './oauth';
-export type { ProfileClient, LarkProfile } from './profile';
-export { loggedMsByGuid, loggedMsFromTimeline, LarkTaskApiError } from './tasks';
-export type { UserTaskClient, LarkTaskDto, CreateLarkTaskInput } from './tasks';
+export type { ProfileClient } from './profile';
+export { loggedMsFromTimeline, LarkTaskApiError } from './tasks';
+export type { UserTaskClient } from './tasks';
 export {
   buildApprovalCard,
   buildDecidedCard,
@@ -39,17 +37,7 @@ export {
   buildStaleRequestCard,
 } from './cards';
 export { startCardCallback } from './cardCallback';
-export type {
-  ApprovalCardInput,
-  DecidedCardInput,
-  ApprovalAction,
-  SupersededCardInput,
-  UpdatedApprovalCardInput,
-  DiffEntry,
-  CancelledCardInput,
-  UnavailableRequestCardInput,
-  StaleRequestCardInput,
-} from './cards';
+export type { DiffEntry } from './cards';
 export type { LarkMessenger, SendCardResult } from './messenger';
 
 let manager: TokenManager | null = null;

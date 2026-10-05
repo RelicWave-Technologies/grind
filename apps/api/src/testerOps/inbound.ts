@@ -46,19 +46,6 @@ export async function ingestHistoryMessage(args: {
   });
 }
 
-export async function replayTesterMessage(args: { workspaceId: string; messageText: string; directMention?: boolean }) {
-  const event = await prisma.testerOpsEvent.create({
-    data: {
-      workspaceId: args.workspaceId,
-      source: 'MANUAL_REPLAY',
-      sourceId: `replay:${Date.now()}:${Math.random().toString(36).slice(2)}`,
-      messageText: args.messageText,
-      status: 'PENDING',
-    },
-  });
-  return processTesterEvent(event.id, args.directMention);
-}
-
 async function ingestTesterMessage(args: {
   workspaceId?: string;
   source: 'LARK_EVENT' | 'HISTORY_POLL';
@@ -157,7 +144,7 @@ function dispatchTesterEvent(eventId: string): void {
  * the claim gets anywhere near the AI or the chat; everyone else gets
  * `{ skipped: true }`.
  */
-export async function processTesterEvent(eventId: string, forceDirectMention?: boolean) {
+export async function processTesterEvent(eventId: string) {
   const claimed = await prisma.testerOpsEvent.updateMany({
     where: { id: eventId, status: 'PENDING' },
     data: { status: 'PROCESSING' },
@@ -168,7 +155,7 @@ export async function processTesterEvent(eventId: string, forceDirectMention?: b
     return { skipped: true as const };
   }
   try {
-    return await runClaimedTesterEvent(eventId, forceDirectMention);
+    return await runClaimedTesterEvent(eventId);
   } catch (err) {
     // Never leave a claimed row in PROCESSING: that would read as "someone is
     // still answering" forever.
@@ -182,7 +169,7 @@ export async function processTesterEvent(eventId: string, forceDirectMention?: b
   }
 }
 
-async function runClaimedTesterEvent(eventId: string, forceDirectMention?: boolean) {
+async function runClaimedTesterEvent(eventId: string) {
   const event = await prisma.testerOpsEvent.findUnique({ where: { id: eventId }, include: { member: true } });
   if (!event) throw new Error('event_not_found');
   const cfg = await loadOrCreateTesterOpsConfig(event.workspaceId);
@@ -190,7 +177,7 @@ async function runClaimedTesterEvent(eventId: string, forceDirectMention?: boole
   const rawChatType = event.raw && typeof event.raw === 'object'
     ? getLarkMessageChatType(event.raw)
     : null;
-  const directMention = forceDirectMention ?? isDirectTesterMessage(event.messageText, rawChatType);
+  const directMention = isDirectTesterMessage(event.messageText, rawChatType);
   const replyChatId = event.chatId ?? cfg.chatId;
   if (!directMention && !cfg.passiveIssueDetectionEnabled) {
     await prisma.testerOpsEvent.update({ where: { id: event.id }, data: { status: 'IGNORED', processedAt: new Date() } });

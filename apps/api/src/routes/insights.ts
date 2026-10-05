@@ -337,8 +337,6 @@ insightsRouter.get('/day', async (req, res, next) => {
   }
 });
 
-export default insightsRouter;
-
 function isInMeeting(intervals: Array<{ a: number; b: number }>, epochMs: number): boolean {
   return intervals.some((iv) => epochMs >= iv.a && epochMs < iv.b);
 }

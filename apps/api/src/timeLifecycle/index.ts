@@ -6,7 +6,7 @@ import { onShutdown } from '../lib/lifecycle';
 
 export const TIMER_PROTOCOL_VERSION = 2;
 export const TIMER_LEASE_MS = 3 * 60 * 1000;
-export const TIMER_RECONCILE_INTERVAL_MS = 60 * 1000;
+const TIMER_RECONCILE_INTERVAL_MS = 60 * 1000;
 const RECONCILE_BATCH_SIZE = 100;
 
 type Tx = Prisma.TransactionClient;

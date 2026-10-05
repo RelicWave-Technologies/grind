@@ -2711,5 +2711,3 @@ adminRouter.post('/manual-time-requests/:id/reopen', requireAdmin, async (req, r
     next(err);
   }
 });
-
-export default adminRouter;

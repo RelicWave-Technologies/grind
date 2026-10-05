@@ -43,9 +43,9 @@ export type ConnectionStatus = {
 
 // Refresh a bit early so an in-flight request never races token expiry.
 const ACCESS_SKEW_MS = 60_000;
-export const LARK_REFRESH_LOCK_NAMESPACE = 742019651;
-export const LARK_GRANT_PROACTIVE_MIN_MS = 5 * 60_000;
-export const LARK_GRANT_PROACTIVE_MAX_MS = 24 * 60 * 60_000;
+const LARK_REFRESH_LOCK_NAMESPACE = 742019651;
+const LARK_GRANT_PROACTIVE_MIN_MS = 5 * 60_000;
+const LARK_GRANT_PROACTIVE_MAX_MS = 24 * 60 * 60_000;
 const LARK_GRANT_PROACTIVE_RATIO = 0.15;
 const LARK_GRANT_PROACTIVE_MAX_RATIO = 0.5;
 const DB_LOCK_TIMEOUT_MS = 20_000;
@@ -63,7 +63,7 @@ function missingRequiredScopes(scopes: string): string[] {
   return LARK_SCOPES.filter((scope) => !granted.has(scope));
 }
 
-export function proactiveRefreshWindowMs(grantLifetimeMs: number): number {
+function proactiveRefreshWindowMs(grantLifetimeMs: number): number {
   return Math.min(
     LARK_GRANT_PROACTIVE_MAX_MS,
     Math.max(LARK_GRANT_PROACTIVE_MIN_MS, Math.floor(grantLifetimeMs * LARK_GRANT_PROACTIVE_RATIO)),
@@ -71,14 +71,14 @@ export function proactiveRefreshWindowMs(grantLifetimeMs: number): number {
   );
 }
 
-export function grantRefreshDueAtMs(row: RefreshGrantRow): number {
+function grantRefreshDueAtMs(row: RefreshGrantRow): number {
   const issuedAtMs = (row.lastRefreshedAt ?? row.createdAt).getTime();
   const expiresAtMs = row.refreshExpiresAt.getTime();
   const lifetimeMs = Math.max(0, expiresAtMs - issuedAtMs);
   return expiresAtMs - proactiveRefreshWindowMs(lifetimeMs);
 }
 
-export function isGrantRefreshDue(row: RefreshGrantRow, nowMs: number): boolean {
+function isGrantRefreshDue(row: RefreshGrantRow, nowMs: number): boolean {
   return nowMs >= grantRefreshDueAtMs(row);
 }
 

@@ -41,7 +41,7 @@ export async function enqueueTesterOpsCard(
  * `attempts` counts claims, so a row whose worker keeps crashing still runs
  * out of attempts instead of looping forever.
  */
-export const TESTER_OPS_OUTBOX_MAX_ATTEMPTS = 10;
+const TESTER_OPS_OUTBOX_MAX_ATTEMPTS = 10;
 const STALE_LOCK_MS = 5 * 60_000;
 const TERMINAL_ERRORS = new Set(['missing_lark_recipient', 'missing_text_payload', 'missing_card_payload']);
 

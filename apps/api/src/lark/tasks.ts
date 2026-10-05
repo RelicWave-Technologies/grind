@@ -87,7 +87,7 @@ export function toEpochMs(ts: string | undefined | null): number | null {
   return n < 1e12 ? n * 1000 : n;
 }
 
-export type RawTasksPage = {
+type RawTasksPage = {
   code?: number;
   msg?: string;
   data?: { items?: RawLarkTask[]; page_token?: string; has_more?: boolean };

@@ -330,5 +330,3 @@ larkRouter.post('/disconnect', async (req, res, next) => {
     next(err);
   }
 });
-
-export default larkRouter;

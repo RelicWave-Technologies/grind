@@ -43,7 +43,7 @@ const monthFolderIds = new Map<string, Promise<string>>();
  * 1st is September's, and filing it under August because UTC still said the
  * 31st would put a person's month in two places.
  */
-export function driveMonthFolderName(capturedAt: Date, tz: string): string {
+function driveMonthFolderName(capturedAt: Date, tz: string): string {
   return new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric', timeZone: tz })
     .format(capturedAt);
 }

@@ -9,7 +9,7 @@ import { prisma } from '@grind/db';
  * door. Keeping them apart is the point — where they disagree is usually the
  * interesting part of an attendance question.
  */
-export interface DayPunch {
+interface DayPunch {
   /** Minutes since local midnight, or null when that side was not recorded. */
   inMinute: number | null;
   outMinute: number | null;

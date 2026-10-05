@@ -10,7 +10,7 @@ const BATCH_SIZE = 100;
 const DAY_MS = 86_400_000;
 const RETENTION_REASON = 'retention_expired';
 
-export type ScreenshotTrashResult = 'trashed' | 'missing';
+type ScreenshotTrashResult = 'trashed' | 'missing';
 export type ScreenshotTrashFn = (fileId: string) => Promise<ScreenshotTrashResult>;
 
 export interface ScreenshotRetentionResult {

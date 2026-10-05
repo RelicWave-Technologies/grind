@@ -1274,5 +1274,3 @@ function screenshotUrl(row: ReportScreenshotRow, variant: 'full' | 'thumb'): str
   if (variant === 'thumb' && !hasThumb) return null;
   return `/v1/screenshots/${encodeURIComponent(row.id)}/image?variant=${variant}`;
 }
-
-export default reportsRouter;

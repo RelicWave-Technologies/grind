@@ -20,7 +20,7 @@ type Tx = Prisma.TransactionClient;
  * One row per corrected person-day, keyed so that re-deciding a day replaces
  * its entry instead of stacking a second one nobody could order.
  */
-export function overrideLedgerSourceKey(userId: string, date: string): string {
+function overrideLedgerSourceKey(userId: string, date: string): string {
   return `override:${userId}:${date}`;
 }
 

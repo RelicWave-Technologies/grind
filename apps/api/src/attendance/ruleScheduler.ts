@@ -15,7 +15,7 @@ import { reconcileMonthRules, resolveReportMonth } from '../reports/monthPerform
 
 const INTERVAL_MS = 30 * 60_000;
 
-export async function reconcileAttendanceRulesOnce(nowMs = Date.now(), onlyWorkspaceId?: string): Promise<number> {
+async function reconcileAttendanceRulesOnce(nowMs = Date.now(), onlyWorkspaceId?: string): Promise<number> {
   const policies = await prisma.leavePolicy.findMany({
     where: { attendanceRulesFrom: { not: null }, ...(onlyWorkspaceId ? { workspaceId: onlyWorkspaceId } : {}) },
     select: { workspaceId: true, attendanceRulesFrom: true, workspace: { select: { timezone: true } } },

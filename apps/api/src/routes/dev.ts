@@ -29,7 +29,7 @@ const featureEnabled: RequestHandler = (req, res, next) => {
   next();
 };
 
-export const requireDeveloper: RequestHandler = async (req, res, next) => {
+const requireDeveloper: RequestHandler = async (req, res, next) => {
   try {
     if (!req.user) return notFound(req, res, next);
     const caller = await prisma.user.findFirst({

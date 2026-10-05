@@ -1,6 +1,5 @@
 import ExcelJS from 'exceljs';
 import {
-  fmtMinutes,
   monthPerformanceGridRows,
   monthPerformanceLeavePairs,
   monthPerformanceSummaryPairs,
@@ -10,7 +9,6 @@ import {
   type SheetCode,
   type MonthPerformanceDay,
   type MonthPerformanceReport,
-  type MonthPerformanceRow,
 } from './monthPerformance';
 
 /**
@@ -455,6 +453,3 @@ export async function monthPerformanceXlsx(report: MonthPerformanceReport): Prom
   const out = await wb.xlsx.writeBuffer();
   return Buffer.from(out);
 }
-
-export { fmtMinutes };
-export type { MonthPerformanceRow };

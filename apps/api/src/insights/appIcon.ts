@@ -23,7 +23,7 @@ export function resolveAppIcon(app: string, bundle: string | null, stored: Map<s
   return appIconUrl(app, bundle);
 }
 
-export function siteFaviconUrl(domain: string): string {
+function siteFaviconUrl(domain: string): string {
   return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64`;
 }
 

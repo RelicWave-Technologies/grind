@@ -31,12 +31,12 @@ import { decisionFromLarkStatus, type ExternalDecision } from './approvalGateway
 
 /** How far back a routine sweep looks. Lark requires a bounded window. */
 export const INGEST_LOOKBACK_DAYS = 90;
-export const DEFAULT_INGEST_INTERVAL_MS = 10 * 60_000;
+const DEFAULT_INGEST_INTERVAL_MS = 10 * 60_000;
 
 /** Instances fetched per page. Lark caps this at 100. */
 const PAGE_SIZE = 50;
 
-export interface LarkLeaveInstance {
+interface LarkLeaveInstance {
   instanceCode: string;
   openId: string;
   decision: ExternalDecision;
@@ -113,7 +113,7 @@ export async function listLeaveInstanceCodes(input: {
  * need: the range, the duration on the 0.5 grid, and which half of the day,
  * carried as the AM/PM of the start time rather than as a field.
  */
-export async function fetchLeaveInstanceBody(
+async function fetchLeaveInstanceBody(
   instanceCode: string,
 ): Promise<{ status?: string; open_id?: string; user_id?: string; form?: string } | null> {
   const body = await larkGet(
@@ -132,7 +132,7 @@ export async function fetchLeaveInstanceBody(
  * Dates and the half of the day are read in the workspace's IANA timezone —
  * the same zone every other business date uses — never a fixed offset.
  */
-export function parseLeaveInstance(
+function parseLeaveInstance(
   instanceCode: string,
   data: { status?: string; open_id?: string; user_id?: string; form?: string },
   tz: string,
@@ -172,12 +172,6 @@ export function parseLeaveInstance(
     leaveTypeName: String(value.name ?? 'Leave'),
     reason: String(value.reason ?? '').trim(),
   };
-}
-
-/** Fetch and read one instance on a workspace's calendar. */
-export async function fetchLeaveInstance(instanceCode: string, tz: string): Promise<LarkLeaveInstance | null> {
-  const data = await fetchLeaveInstanceBody(instanceCode);
-  return data ? parseLeaveInstance(instanceCode, data, tz) : null;
 }
 
 /** Business date for an instant, in the workspace's timezone. */
@@ -475,10 +469,4 @@ export function startLarkLeaveIngest(intervalMs = DEFAULT_INGEST_INTERVAL_MS): v
   }, intervalMs);
   timer.unref?.();
   logger.info({ intervalMs }, 'lark leave ingest started');
-}
-
-export function stopLarkLeaveIngest(): void {
-  if (!timer) return;
-  clearInterval(timer);
-  timer = null;
 }

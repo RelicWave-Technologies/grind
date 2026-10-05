@@ -2,7 +2,7 @@ import { prisma } from '@grind/db';
 import { WORKSPACE_POLICY_DEFAULTS, type PolicyFlags } from '@grind/types';
 
 /** The capture flags in force for a workspace (defaults when it never set any). */
-export async function policyFlagsForWorkspace(workspaceId: string): Promise<PolicyFlags> {
+async function policyFlagsForWorkspace(workspaceId: string): Promise<PolicyFlags> {
   const row = await prisma.workspacePolicy.findUnique({
     where: { workspaceId },
     select: { captureApps: true, captureTitles: true, captureUrls: true },

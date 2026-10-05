@@ -48,7 +48,7 @@ export async function lockManualCarve(tx: Client, userId: string): Promise<void>
 }
 
 /** Everything this user already has in `[start, end)`, idle excluded. */
-export async function occupiedTime(
+async function occupiedTime(
   tx: Client,
   args: { userId: string; start: Date; end: Date; ignoreEntryId?: string | null; now?: Date },
 ): Promise<Interval[]> {
