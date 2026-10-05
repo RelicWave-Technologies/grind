@@ -56,7 +56,7 @@ import { getLaunchAtLoginService, isHiddenLaunch } from './services/launchAtLogi
 import type { LaunchAtLoginHealth } from '../shared/launchAtLogin';
 import { migrateLegacyUserData } from './services/legacyMigration';
 import { broadcast } from './broadcast';
-import { readyToWorkReason } from './readyToWork';
+import { placeReadyToWorkOnScreen, readyToWorkReason } from './readyToWork';
 import { installApplicationMenu } from './applicationMenu';
 import {
   offerPermissionStart,
@@ -293,21 +293,23 @@ app.whenReady().then(async () => {
     onWarningCancelled: () => {
       attention.clearIdleWarning();
     },
-    onIdle: async (idleStartedAt) => {
-      try {
-        // The monitor tracks idle on the device clock; the timer runs on the
-        // server-aligned clock. Hand over elapsed time, which means the same
-        // thing on both, rather than an instant, which does not.
-        await getTimerService().pauseForIdle(Math.max(0, Date.now() - idleStartedAt));
-      } catch (err) {
-        log.warn('pauseForIdle failed', { err: String(err) });
-        return false;
-      }
-      const accepted = attention.requestIdle(idleStartedAt);
+    onIdlePause: async (idleStartedAt) => {
+      // The monitor tracks idle on the device clock; the timer runs on the
+      // server-aligned clock. Hand over elapsed time, which means the same
+      // thing on both, rather than an instant, which does not.
+      await getTimerService().pauseForIdle(Math.max(0, Date.now() - idleStartedAt));
       broadcast('timer:status:push', getTimerService().status());
       sendHeartbeatNow();
-      return accepted;
     },
+    onIdlePrompt: (idleStartedAt) => attention.requestIdle(idleStartedAt),
+  });
+  // However an idle prompt goes away — answered, replaced by a permission
+  // prompt, released as unreachable, cleared by a timer command — the monitor
+  // has to hear about it, or idle detection stays off for the rest of the run.
+  attention.onChange((next, previous) => {
+    const wasIdle = previous.kind === 'IDLE' || previous.kind === 'IDLE_WARNING';
+    const isIdle = next.kind === 'IDLE' || next.kind === 'IDLE_WARNING';
+    if (wasIdle && !isIdle) idleMonitor.resolve();
   });
   idleMonitor.start();
   onTrackedInputActivity(() => idleMonitor.noteActivity());
@@ -315,7 +317,6 @@ app.whenReady().then(async () => {
   registerIpc({
     onOpenMainWindow: () => showMainWindow(),
     onDismissFloatingBar: () => dismissFloatingBar(),
-    onIdleResolved: () => idleMonitor.resolve(),
   });
   onWorkspaceTimeChange((context) => {
     broadcast('workspaceTime:push', context);
@@ -357,9 +358,8 @@ app.whenReady().then(async () => {
       attention.beginMachineAway();
     },
     onWake: () => {
-      // Only the ambient overlays need poking here. An active prompt is kept up
-      // by the attention coordinator's hold loop, which notices a dropped float
-      // on its next tick regardless of which event caused it.
+      // Covers a held prompt too: the shared keeper re-raises it every second,
+      // and this refreshes the all-Spaces flags the keeper does not touch.
       reassertAllOverlays();
       checkTrackingPermissionsNow();
       // Re-anchor BEFORE pushing anything. The server-aligned clock is driven by
@@ -389,18 +389,16 @@ app.whenReady().then(async () => {
   });
 
   // When monitors change (unplug / resolution switch): re-float all overlays
-  // and re-home the floating bar onto a still-visible display.
-  screen.on('display-removed', () => {
+  // and re-home every visible surface onto a display that still exists.
+  const onDisplaysChanged = () => {
     reclampFloatingBar();
+    attention.placeOnScreen();
+    placeReadyToWorkOnScreen();
     reassertAllOverlays();
-  });
-  screen.on('display-metrics-changed', () => {
-    reclampFloatingBar();
-    reassertAllOverlays();
-  });
-  screen.on('display-added', () => {
-    reassertAllOverlays();
-  });
+  };
+  screen.on('display-removed', onDisplaysChanged);
+  screen.on('display-metrics-changed', onDisplaysChanged);
+  screen.on('display-added', onDisplaysChanged);
 
   onAgentConfigChange(({ previous, current }) => {
     applyActivityCapturePolicy(current);
