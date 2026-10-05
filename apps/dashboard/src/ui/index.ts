@@ -15,12 +15,12 @@ export { Page, PageHeader } from './Page';
 export type { PageProps, PageHeaderProps } from './Page';
 
 // ── §5.3 — surface container ────────────────────────────────────────────────
-export { Card, Panel } from './Card';
+export { Card } from './Card';
 export type { CardProps, CardVariant } from './Card';
 
 // ── §5.4 — metric pattern ───────────────────────────────────────────────────
-export { Stat, StatRow, StatGrid } from './Stat';
-export type { StatProps, StatRowProps, StatGridProps, StatDelta } from './Stat';
+export { Stat, StatRow } from './Stat';
+export type { StatProps, StatRowProps, StatDelta } from './Stat';
 
 // ── §5.5 — data grid ────────────────────────────────────────────────────────
 export { Table, THead, Tbody, Th, Tr, Td } from './Table';
@@ -46,7 +46,7 @@ export { Tabs, Segmented } from './Tabs';
 export type { TabsProps, SegmentedProps, TabItem } from './Tabs';
 
 // ── §5.9 — forms ────────────────────────────────────────────────────────────
-export { Field, Input, Select, Textarea, Toggle, Checkbox, Radio } from './Field';
+export { Field, Input, Select, Textarea, Toggle, Checkbox } from './Field';
 export type {
   FieldProps,
   InputProps,
@@ -54,11 +54,10 @@ export type {
   TextareaProps,
   ToggleProps,
   CheckboxProps,
-  RadioProps,
 } from './Field';
 
 // ── §5.10 — status & labels ─────────────────────────────────────────────────
-export { Tag, Badge } from './Tag';
+export { Tag } from './Tag';
 export type { TagProps } from './Tag';
 
 // ── §5.11 — people ──────────────────────────────────────────────────────────
@@ -66,7 +65,7 @@ export { Avatar, AvatarGroup, Identity } from './Avatar';
 export type { AvatarProps, AvatarGroupProps, IdentityProps, AvatarSize } from './Avatar';
 
 // ── §5.12 — control clusters ────────────────────────────────────────────────
-export { Toolbar, ToolbarDivider, DateStepper } from './Toolbar';
+export { Toolbar, DateStepper } from './Toolbar';
 export type { ToolbarProps, DateStepperProps } from './Toolbar';
 
 // ── §5.13 / §5.15 — empty + inline notices ──────────────────────────────────
@@ -74,12 +73,12 @@ export { EmptyState, Banner } from './Feedback';
 export type { EmptyStateProps, BannerProps, BannerStatus } from './Feedback';
 
 // ── §5.14 — loading ─────────────────────────────────────────────────────────
-export { Spinner, Skeleton, SkeletonTable, SkeletonStat } from './Loading';
-export type { SpinnerProps, SkeletonProps } from './Loading';
+export { Skeleton, SkeletonTable, SkeletonStat } from './Loading';
+export type { SkeletonProps } from './Loading';
 
-// ── §5.16 — floating layers ─────────────────────────────────────────────────
-export { Popover, Menu, Modal, Toast } from './Overlay';
-export type { PopoverProps, MenuProps, MenuItemSpec, ModalProps, ToastProps } from './Overlay';
+// ── §5.16 — modal ───────────────────────────────────────────────────────────
+export { Modal } from './Overlay';
+export type { ModalProps } from './Overlay';
 
 // ── §5.17 — app chrome ──────────────────────────────────────────────────────
 export { AppShell, Sidebar, SidebarBrand, NavSection, NavItem } from './Shell';
