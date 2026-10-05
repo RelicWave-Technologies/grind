@@ -14,14 +14,14 @@ import {
   signOAuthState,
   verifyOAuthState,
   buildAuthorizeUrl,
-  loggedMsByGuid,
+  loggedMsFromTimeline,
   LARK_SCOPES,
   LarkReauthRequiredError,
   LarkTransientError,
   LarkTaskApiError,
 } from '../lark';
 import { localDayWindow } from '../insights/day';
-import { loadEntryLiveEvidence } from '../insights/liveEntryEvidence';
+import { loadTimelineWindow } from '../time';
 
 export const larkRouter = Router();
 
@@ -188,30 +188,29 @@ larkRouter.get('/my-tasks', async (req, res, next) => {
     const dayWindow = rawDate || rawTz ? localDayWindow(rawDate ?? dateKeyInTimeZone(nowMs, timezone), timezone) : null;
     if ((rawDate || rawTz) && !dayWindow) return res.status(400).json({ error: 'invalid_date_or_tz' });
 
-    // Enrich with time already tracked against each task via Grind.
+    // Enrich with time already tracked against each task via Grind — read
+    // from the person's shared timeline (every entry, not only these tasks'),
+    // so contested minutes land on one task and invalidated time is excluded.
     const guids = tasks.map((t) => t.guid);
     if (guids.length) {
-      const entries = await prisma.timeEntry.findMany({
+      const first = await prisma.timeEntry.aggregate({
         where: { userId: req.user.sub, larkTaskGuid: { in: guids } },
-        select: {
-          id: true,
-          userId: true,
-          endedAt: true,
-          larkTaskGuid: true,
-          trackingProtocolVersion: true,
-          lastProvenAt: true,
-          leaseExpiresAt: true,
-          segments: { select: { kind: true, startedAt: true, endedAt: true } },
-        },
+        _min: { startedAt: true },
       });
-      const evidenceByEntry = await loadEntryLiveEvidence(entries, new Date(nowMs));
-      const loggedTotal = loggedMsByGuid(entries, nowMs, { evidenceByEntry });
-      const loggedToday = dayWindow
-        ? loggedMsByGuid(entries, nowMs, {
-            evidenceByEntry,
-            windowStart: dayWindow.start.getTime(),
-            windowEnd: dayWindow.end.getTime(),
+      const since = first._min.startedAt;
+      const timeline = since
+        ? await loadTimelineWindow({
+            userIds: [req.user.sub],
+            start: since,
+            end: new Date(nowMs),
+            now: new Date(nowMs),
+            lookbackMs: 0,
           })
+        : null;
+      const pieces = timeline?.pieces ?? [];
+      const loggedTotal = loggedMsFromTimeline(pieces);
+      const loggedToday = dayWindow
+        ? loggedMsFromTimeline(pieces, { start: dayWindow.start.getTime(), end: dayWindow.end.getTime() })
         : loggedTotal;
       for (const t of tasks) {
         t.loggedTodayMs = loggedToday.get(t.guid) ?? 0;

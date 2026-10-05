@@ -21,6 +21,8 @@ import { requireAccessToken } from '../middleware/auth';
 import { attachScope } from '../middleware/scope';
 import { authorizeTimeEditForUser } from '../authz/timeEdit';
 import { queueManualTimeFinalizeCards } from '../manualTime/larkOutbox';
+import { lockManualCarve, refillFreedManualTime } from '../manualTime/carve';
+import { ulid } from 'ulid';
 import { logger } from '../logger';
 import {
   lockTimerOwner,
@@ -658,6 +660,16 @@ timeEntriesRouter.delete('/:id', attachScope, async (req, res, next) => {
 
     const now = new Date();
     await prisma.$transaction(async (tx) => {
+      // Same lock order as an approval (request row, then the person's carve
+      // lock) so the two can never deadlock.
+      if (existing.manualTimeRequest) {
+        await tx.$queryRaw`SELECT id FROM "ManualTimeRequest" WHERE id = ${existing.manualTimeRequest.id} FOR UPDATE`;
+      }
+      await lockManualCarve(tx, existing.userId);
+      const freed = await tx.timeSegment.findMany({
+        where: { timeEntryId: id, kind: { not: 'IDLE_TRIMMED' } },
+        select: { startedAt: true, endedAt: true },
+      });
       if (existing.manualTimeRequest) {
         await tx.manualTimeRequest.update({
           where: { id: existing.manualTimeRequest.id },
@@ -674,6 +686,14 @@ timeEntriesRouter.delete('/:id', attachScope, async (req, res, next) => {
         await queueManualTimeFinalizeCards(tx, existing.manualTimeRequest.id);
       }
       await tx.timeEntry.delete({ where: { id } });
+      // Other approved requests carved around this entry; give them back the
+      // minutes it was holding, so its deletion does not leave a hole.
+      await refillFreedManualTime(tx, {
+        userId: existing.userId,
+        freed: freed.map((s) => ({ start: s.startedAt.getTime(), end: (s.endedAt ?? s.startedAt).getTime() })),
+        nextId: ulid,
+        now,
+      });
     });
 
     res.json({ ok: true });

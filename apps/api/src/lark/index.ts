@@ -31,7 +31,7 @@ export {
 export type { AgentLoginRouteHint, LarkLoginStatePayload } from './oauth';
 export type { ProfileClient, LarkProfile } from './profile';
 export { normalizeEmail } from './profile';
-export { mapTasks, loggedMsByGuid, toEpochMs, buildCreateTaskPayload, LarkTaskApiError } from './tasks';
+export { mapTasks, loggedMsByGuid, loggedMsFromTimeline, toEpochMs, buildCreateTaskPayload, LarkTaskApiError } from './tasks';
 export type { UserTaskClient, LarkTaskDto, CreateLarkTaskInput } from './tasks';
 export {
   buildApprovalCard,

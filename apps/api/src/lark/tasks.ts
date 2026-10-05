@@ -1,6 +1,11 @@
 import { getLarkConfig } from './config';
-import { collectEffectiveIntervals, intervalUnionMs, type EffectiveInterval } from '../insights/effectiveIntervals';
-import type { EntryLiveEvidenceMap } from '../insights/liveEntryEvidence';
+import {
+  resolveTimeline,
+  totalsByTask,
+  type EntryLiveEvidenceMap,
+  type Interval,
+  type TimelinePiece,
+} from '@grind/core';
 
 /**
  * Lark Task v2 — fetch the signed-in user's tasks for the agent's task picker.
@@ -127,11 +132,20 @@ export function buildCreateTaskPayload(input: CreateLarkTaskInput): Record<strin
   return payload;
 }
 
-/** Worked duration (WORK/MEETING segments) per larkTaskGuid, summed across entries. */
+/**
+ * Counted time per larkTaskGuid for ONE person's entries: work, meetings and
+ * approved manual time, open ends proven, invalidated minutes excluded.
+ *
+ * Resolved on the person's whole timeline, not per task: a minute two tasks
+ * both claim belongs to one of them, so the task totals can never add up to
+ * more than the day. Pass every entry overlapping the window (not only the
+ * tasks being listed) so contested minutes land on the right task.
+ */
 export function loggedMsByGuid(
   entries: Array<{
     id?: string;
     larkTaskGuid: string | null;
+    source?: string;
     endedAt?: Date | null;
     trackingProtocolVersion?: number | null;
     lastProvenAt?: Date | null;
@@ -143,28 +157,33 @@ export function loggedMsByGuid(
     windowStart?: number;
     windowEnd?: number;
     evidenceByEntry?: EntryLiveEvidenceMap;
+    /** Reviewer invalidations for this person. */
+    invalidations?: readonly Interval[];
   } = {},
 ): Map<string, number> {
-  const intervalsByGuid = new Map<string, EffectiveInterval[]>();
-  const windowStart = options.windowStart ?? Number.NEGATIVE_INFINITY;
-  const windowEnd = options.windowEnd ?? now;
-  const nowDate = new Date(now);
-  for (const e of entries) {
-    if (!e.larkTaskGuid) continue;
-    const intervals = collectEffectiveIntervals(e, {
-      now: nowDate,
-      windowStart,
-      windowEnd,
-      evidenceByEntry: options.evidenceByEntry,
-      includeSegment: (segment) => segment.kind === 'WORK' || segment.kind === 'MEETING',
-    });
-    const existing = intervalsByGuid.get(e.larkTaskGuid) ?? [];
-    existing.push(...intervals);
-    intervalsByGuid.set(e.larkTaskGuid, existing);
-  }
-  return new Map(
-    Array.from(intervalsByGuid.entries()).map(([guid, intervals]) => [guid, intervalUnionMs(intervals)]),
+  const pieces = resolveTimeline(
+    entries.map((e, index) => ({ ...e, id: e.id ?? `entry-${index}`, userId: 'self', source: e.source ?? 'AUTO' })),
+    {
+      now,
+      evidence: options.evidenceByEntry ?? new Map(),
+      invalidations: (options.invalidations ?? []).map((iv) => ({ userId: 'self', ...iv })),
+    },
   );
+  const totals = loggedMsFromTimeline(pieces, {
+    start: options.windowStart ?? Number.NEGATIVE_INFINITY,
+    end: options.windowEnd ?? now,
+  });
+  // Every task that was asked about gets an answer, zero included.
+  for (const e of entries) if (e.larkTaskGuid && !totals.has(e.larkTaskGuid)) totals.set(e.larkTaskGuid, 0);
+  return totals;
+}
+
+/** Task totals straight from an already-resolved timeline. */
+export function loggedMsFromTimeline(
+  pieces: ReadonlyArray<TimelinePiece<{ larkTaskGuid?: string | null }>>,
+  window?: Interval,
+): Map<string, number> {
+  return totalsByTask(pieces, window);
 }
 
 /** Real client: paginates `my_tasks` with the user token. */

@@ -3,9 +3,9 @@ import { prisma } from '@grind/db';
 import { dateKeyInTimeZone, isValidTimeZone } from '@grind/types';
 import { requireAccessToken } from '../middleware/auth';
 import { attachScope, requireManagerOrAbove } from '../middleware/scope';
+import { clipInterval, heartbeatIsFresh, isCounted } from '@grind/core';
 import { localDayWindow } from '../insights/day';
-import { heartbeatIsFresh, loadEntryLiveEvidence } from '../insights/liveEntryEvidence';
-import { resolveEffectiveEntrySegmentEnds } from '../insights/openSegmentEvidence';
+import { loadTimelineWindow } from '../time';
 import { DEFAULT_STUCK_THRESHOLD_MS } from '../digests/pendingDigest';
 
 /**
@@ -92,65 +92,29 @@ overviewRouter.get('/', async (req, res, next) => {
 
     const userIds = req.scope.userIds;
 
-    // --- Today's totals (per-user totalMs threshold for "active") --------
-    const entries = userIds.length === 0
-      ? []
-      : await prisma.timeEntry.findMany({
-          where: {
-            userId: { in: userIds },
-            startedAt: { lt: win.end },
-            OR: [{ endedAt: null }, { endedAt: { gt: win.start } }],
-          },
-          select: {
-            id: true,
-            userId: true,
-            source: true,
-            startedAt: true,
-            endedAt: true,
-            trackingProtocolVersion: true,
-            lastProvenAt: true,
-            leaseExpiresAt: true,
-            segments: {
-              where: {
-                startedAt: { lt: win.end },
-                OR: [{ endedAt: null }, { endedAt: { gt: win.start } }],
-              },
-              select: { kind: true, startedAt: true, endedAt: true },
-              orderBy: { startedAt: 'asc' },
-            },
-          },
-        });
-    const evidenceByEntry = await loadEntryLiveEvidence(entries, now);
-
-    const dayStart = win.start.getTime();
-    const dayEnd = win.end.getTime();
-    const liveCap = Math.min(dayEnd, now.getTime());
+    // --- Today's totals --------------------------------------------------
+    // The shared timeline: one owner per minute (a manual claim on top of
+    // tracked time is not counted twice), open ends proven, invalidated time
+    // excluded — the same hours Edit Time and the reports show.
+    const timeline = await loadTimelineWindow({ userIds, start: win.start, end: win.end, now });
+    const sofar = { start: win.start.getTime(), end: Math.min(win.end.getTime(), now.getTime()) };
     let workedMs = 0;
     let meetingMs = 0;
     let manualMs = 0;
     const usersWithTime = new Set<string>();
     const usersTrackingNow = new Set<string>();
-    for (const entry of entries) {
-      const evidence = evidenceByEntry.get(entry.id);
-      if (heartbeatIsFresh(evidence, now, entry.startedAt)) usersTrackingNow.add(entry.userId);
-      const effectiveEnds = resolveEffectiveEntrySegmentEnds({
-        segments: entry.segments,
-        entryEndedAt: entry.endedAt,
-        now,
-        evidence,
-        lifecycle: entry,
-      });
-      for (const [index, segment] of entry.segments.entries()) {
-        const a = Math.max(dayStart, segment.startedAt.getTime());
-        const b = Math.min(liveCap, (effectiveEnds[index] ?? new Date(liveCap)).getTime());
-        const dur = b - a;
-        if (dur <= 0) continue;
-        usersWithTime.add(entry.userId);
-        if (entry.source === 'MANUAL') manualMs += dur;
-        else if (segment.kind === 'MEETING') meetingMs += dur;
-        else if (segment.kind === 'WORK') workedMs += dur;
-        // IDLE_TRIMMED never counts toward billed time.
-      }
+    for (const entry of timeline.entries) {
+      if (heartbeatIsFresh(timeline.evidence.get(entry.id), now, entry.startedAt)) usersTrackingNow.add(entry.userId);
+    }
+    for (const piece of timeline.pieces) {
+      if (!isCounted(piece)) continue;
+      const iv = clipInterval(piece, sofar.start, sofar.end);
+      if (!iv) continue;
+      const dur = iv.end - iv.start;
+      usersWithTime.add(piece.userId);
+      if (piece.kind === 'MANUAL') manualMs += dur;
+      else if (piece.kind === 'MEETING') meetingMs += dur;
+      else workedMs += dur;
     }
 
     // --- Pending approvals (scoped) --------------------------------------

@@ -1,7 +1,13 @@
 import { bucketByDay, emptyDayBucket, resolveTimeline, type DayBucket } from '@grind/core';
 import { dateKeysBetween, type DayStatus } from '@grind/types';
 import { localDayWindow } from './day';
-import type { TimeInvalidationInput } from './invalidations';
+
+/** A reviewer invalidation in the timesheet's (payroll-era) input shape. */
+export interface TimeInvalidationInput {
+  userId: string;
+  startedAt: number;
+  endedAt: number;
+}
 
 export interface TimesheetSegmentInput {
   userId: string;

@@ -61,18 +61,45 @@ describe('loggedMsByGuid', () => {
   const now = 1_700_000_100_000;
   const d = (ms: number) => new Date(ms);
 
+  // Rule change (time module): tasks share one timeline, so b's open segment
+  // no longer overlaps a's work (a minute two tasks claim belongs to one).
   it('sums WORK + MEETING durations per guid, ignoring idle', () => {
     const entries = [
       { larkTaskGuid: 'a', segments: [
-        { kind: 'WORK', startedAt: d(now - 60_000), endedAt: d(now) },
-        { kind: 'IDLE_TRIMMED', startedAt: d(now - 30_000), endedAt: d(now) },
+        { kind: 'WORK', startedAt: d(now - 70_000), endedAt: d(now - 10_000) },
+        { kind: 'IDLE_TRIMMED', startedAt: d(now - 40_000), endedAt: d(now - 10_000) },
       ] },
-      { larkTaskGuid: 'a', segments: [{ kind: 'MEETING', startedAt: d(now - 120_000), endedAt: d(now - 60_000) }] },
+      { larkTaskGuid: 'a', segments: [{ kind: 'MEETING', startedAt: d(now - 130_000), endedAt: d(now - 70_000) }] },
       { larkTaskGuid: 'b', segments: [{ kind: 'WORK', startedAt: d(now - 10_000), endedAt: null }] },
     ];
     const m = loggedMsByGuid(entries, now);
     expect(m.get('a')).toBe(120_000); // 60s work + 60s meeting, idle excluded
     expect(m.get('b')).toBe(10_000); // open segment counts to now
+  });
+
+  it('gives a minute two tasks both claim to one task, so the totals never exceed the day', () => {
+    const entries = [
+      { larkTaskGuid: 'a', segments: [{ kind: 'WORK', startedAt: d(now - 60 * 60_000), endedAt: d(now - 20 * 60_000) }] },
+      { larkTaskGuid: 'b', segments: [{ kind: 'WORK', startedAt: d(now - 40 * 60_000), endedAt: d(now) }] },
+      { larkTaskGuid: 'c', source: 'MANUAL', segments: [{ kind: 'WORK', startedAt: d(now - 70 * 60_000), endedAt: d(now - 50 * 60_000) }] },
+    ];
+    const m = loggedMsByGuid(entries, now);
+    expect(m.get('a')).toBe(40 * 60_000);
+    expect(m.get('b')).toBe(20 * 60_000);
+    // Manual time keeps only what tracked time did not already cover.
+    expect(m.get('c')).toBe(10 * 60_000);
+    const total = [...m.values()].reduce((x, y) => x + y, 0);
+    expect(total).toBe(70 * 60_000);
+  });
+
+  it('excludes invalidated minutes', () => {
+    const entries = [
+      { larkTaskGuid: 'a', segments: [{ kind: 'WORK', startedAt: d(now - 60 * 60_000), endedAt: d(now) }] },
+    ];
+    const m = loggedMsByGuid(entries, now, {
+      invalidations: [{ start: now - 30 * 60_000, end: now - 20 * 60_000 }],
+    });
+    expect(m.get('a')).toBe(50 * 60_000);
   });
 
   it('skips entries without a guid', () => {

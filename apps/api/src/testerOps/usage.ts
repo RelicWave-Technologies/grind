@@ -1,8 +1,8 @@
 import { prisma } from '@grind/db';
 import { dateKeyInTimeZone } from '@grind/types';
 import { localDayWindow } from '../insights/day';
-import { collectEffectiveIntervals, intervalUnionMs, type EffectiveInterval } from '../insights/effectiveIntervals';
-import { loadEntryLiveEvidence, LIVE_HEARTBEAT_FRESH_MS } from '../insights/liveEntryEvidence';
+import { LIVE_HEARTBEAT_FRESH_MS, countedMs } from '@grind/core';
+import { loadTimelineWindow, piecesForUser } from '../time';
 
 export async function buildTesterUsageSnapshot(workspaceId: string, timezone: string) {
   const now = new Date();
@@ -23,23 +23,9 @@ export async function buildTesterUsageSnapshot(workspaceId: string, timezone: st
     orderBy: { name: 'asc' },
   });
   const userIds = users.map((u) => u.id);
-  const entries = await prisma.timeEntry.findMany({
-    where: {
-      userId: { in: userIds },
-      startedAt: { lt: win.end },
-      OR: [{ endedAt: null }, { endedAt: { gt: win.start } }],
-    },
-    select: {
-      id: true,
-      userId: true,
-      source: true,
-      endedAt: true,
-      trackingProtocolVersion: true,
-      lastProvenAt: true,
-      leaseExpiresAt: true,
-      segments: { select: { kind: true, startedAt: true, endedAt: true } },
-    },
-  });
+  // Today's counted time from the shared timeline (overlaps once, open ends
+  // proven, invalidated time excluded) — the same total every screen shows.
+  const timeline = await loadTimelineWindow({ userIds, start: win.start, end: win.end, now });
   const screenshots = await prisma.screenshot.groupBy({
     by: ['userId'],
     where: {
@@ -51,23 +37,8 @@ export async function buildTesterUsageSnapshot(workspaceId: string, timezone: st
   });
 
   const screenshotCount = new Map(screenshots.map((s) => [s.userId, s._count._all]));
-  const evidenceByEntry = await loadEntryLiveEvidence(entries, now);
-  const intervalsByUser = new Map<string, EffectiveInterval[]>();
-  for (const entry of entries) {
-    const intervals = collectEffectiveIntervals(entry, {
-      now,
-      windowStart: win.start.getTime(),
-      windowEnd: win.end.getTime(),
-      evidenceByEntry,
-      includeSegment: (segment) => entry.source === 'MANUAL' || segment.kind !== 'IDLE_TRIMMED',
-    });
-    const existing = intervalsByUser.get(entry.userId) ?? [];
-    existing.push(...intervals);
-    intervalsByUser.set(entry.userId, existing);
-  }
-  const totals = new Map(
-    Array.from(intervalsByUser.entries()).map(([userId, intervals]) => [userId, intervalUnionMs(intervals)]),
-  );
+  const today = { start: win.start.getTime(), end: win.end.getTime() };
+  const totals = new Map(userIds.map((userId) => [userId, countedMs(piecesForUser(timeline.pieces, userId), today)]));
 
   const testers = users.map((u) => {
     const lastSeen = u.agentLastSeenAt;
