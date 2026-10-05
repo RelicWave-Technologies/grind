@@ -185,6 +185,14 @@ export function buildMemberReportDays(input: {
   ruleFor?: (userId: string, date: string, status: DayStatus | null, trackedMinutes: number) => AttendanceRuleVerdict | null;
   /** How much of a day's cost a balance covered, undefined when it covered all. */
   fundedDaysFor?: (userId: string, date: string) => number | undefined;
+  /**
+   * The attendance rules' late count, when the rules are on. From `from` on, a
+   * day reads Late exactly when the rules counted a late arrival — first
+   * tracked activity past the shift start plus the policy's grace, by the one
+   * core rule — so the Start column and the month sheet's Late number cannot
+   * disagree.
+   */
+  lateFor?: { from: string; ordinalFor: (userId: string, date: string) => number | null };
 }): MemberReportDay[] {
   const iconFor = input.iconFor ?? appIconUrl;
   const pieces = input.timeline.filter((p) => p.userId === input.userId);
@@ -288,13 +296,18 @@ export function buildMemberReportDays(input: {
       punchInMinute: punch?.inMinute ?? null,
       punchOutMinute: punch?.outMinute ?? null,
       // One late rule everywhere: first tracked activity (never manual) after
-      // the shift assigned for this date plus the company grace.
+      // the shift assigned for this date plus the company grace. With the
+      // attendance rules on, Late is what the rules counted, so the Start
+      // column and the month sheet agree day for day.
       shiftStatus: shiftStatusFor({
         shiftStartMs: shift?.startMs ?? null,
         firstTrackedMs: bucket.firstTracked,
         countedMs: bucket.counted,
         graceMinutes: grace,
         status: dayStatus,
+        late: input.lateFor && date >= input.lateFor.from
+          ? input.lateFor.ordinalFor(input.userId, date) !== null
+          : undefined,
       }),
       gaps: {
         count: gaps.length,

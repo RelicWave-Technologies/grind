@@ -89,6 +89,13 @@ export function shiftStatusFor(input: {
   countedMs: number;
   graceMinutes?: number | null;
   status?: (LateStatusFacts & Partial<Pick<DayStatus, 'expectedFraction'>>) | null;
+  /**
+   * Whether the attendance rules counted this day as a late arrival, when the
+   * rules are on. They apply {@link isLate} and then leave out what they do
+   * not judge (an exempt person, a corrected day, today), so the label reads
+   * Late exactly when the month sheet counts one.
+   */
+  late?: boolean;
 }): ShiftStatus {
   if (input.shiftStartMs === null) return 'no_shift';
   const offAllDay = input.status
@@ -99,6 +106,10 @@ export function shiftStatusFor(input: {
     : false;
   if (input.countedMs <= 0) return offAllDay ? 'no_shift' : 'no_activity';
   if (input.firstTrackedMs === null) return 'on_time';
+  if (input.late !== undefined) {
+    if (input.late) return 'late';
+    return input.firstTrackedMs < input.shiftStartMs ? 'early' : 'on_time';
+  }
   if (input.firstTrackedMs < input.shiftStartMs) return 'early';
   return isLate({
     firstTrackedMs: input.firstTrackedMs,

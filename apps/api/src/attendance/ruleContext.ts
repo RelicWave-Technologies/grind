@@ -175,3 +175,8 @@ export async function loadAttendanceRuleContext(input: {
     },
   };
 }
+
+/** The late lookup the member report reads, or undefined when the rules are off. */
+export function lateLookup(rules: AttendanceRuleContext): { from: string; ordinalFor: (userId: string, date: string) => number | null } | undefined {
+  return rules.enabled && rules.policy.from ? { from: rules.policy.from, ordinalFor: rules.lateOrdinalFor } : undefined;
+}

@@ -275,6 +275,13 @@ describe('late rule', () => {
       status: { kind: 'HOLIDAY', portion: null, expectedFraction: 0 },
     })).toBe('on_time');
   });
+
+  it('reads Late exactly as the rules counted it when they say', () => {
+    // Late by the clock, but the rules did not count it (exempt / corrected).
+    expect(shiftStatusFor({ shiftStartMs, firstTrackedMs: shiftStartMs + H, countedMs: H, late: false })).toBe('on_time');
+    expect(shiftStatusFor({ shiftStartMs, firstTrackedMs: shiftStartMs - MIN, countedMs: H, late: false })).toBe('early');
+    expect(shiftStatusFor({ shiftStartMs, firstTrackedMs: shiftStartMs + H, countedMs: H, late: true })).toBe('late');
+  });
 });
 
 describe('day thresholds', () => {

@@ -5,6 +5,7 @@ import { ulid } from 'ulid';
 import { buildApp } from '../src/app';
 import { signAccessToken } from '../src/lib/jwt';
 import { loadMonthPerformanceReport, reconcileMonthRules, resolveReportMonth } from '../src/reports/monthPerformanceData';
+import { sheetWhy } from '../src/reports/monthPerformance';
 import { loadBalances } from '../src/leave/repository';
 
 /**
@@ -350,6 +351,10 @@ describe('attendance rules — late arrivals', () => {
     expect(day('2026-09-08')).toMatchObject({ late: 7, rule: { tag: 'SHORT_DAY', penaltyDays: 0.5 } });
     expect(day('2026-09-09')).toMatchObject({ late: null, code: 'P', rule: null });
     expect(row.totals.lateDays).toBe(7);
+    // The Why row keeps the late count running on a day another rule cut.
+    const { report } = await september(s);
+    expect(sheetWhy(report, day('2026-09-04'))).toBe('late 4');
+    expect(sheetWhy(report, day('2026-09-08'))).toBe('<7h · late 7');
 
     const lines = await ruleLines(s.member.id);
     expect(lines.get('2026-09-05')).toBe(-0.5);
@@ -375,6 +380,46 @@ describe('attendance rules — late arrivals', () => {
 
     await prisma.leavePolicy.update({ where: { workspaceId: s.ws.id }, data: { lateGraceMinutes: 15 } });
     expect((await september(s)).day('2026-09-01').late).toBe(1);
+  });
+
+  // From main (#148), adapted to the unified rule: lateness is the first
+  // TRACKED activity, so the two days now differ by when work started rather
+  // than by the punch. The intent is unchanged — Start reads Late exactly when
+  // the rules counted a late arrival.
+  it('shows Start as Late on the dashboard exactly when the rule counted a late arrival', async () => {
+    const s = await seed();
+    // Both days punched at 09:55; only when tracked work started differs.
+    await work(s.member.id, '2026-09-01', 8, '09:25');
+    await punch(s.ws.id, s.member.id, '2026-09-01');
+    await work(s.member.id, '2026-09-02', 8, '09:55');
+    await punch(s.ws.id, s.member.id, '2026-09-02');
+
+    const params = new URLSearchParams({ userId: s.member.id, from: '2026-09-01', to: '2026-09-02', tz: 'Asia/Kolkata' });
+    const res = await request(app)
+      .get(`/v1/reports/team/member?${params.toString()}`)
+      .set({ Authorization: `Bearer ${s.adminToken}` });
+    expect(res.status).toBe(200);
+    const status = (res.body.member.days as Array<{ date: string; shiftStatus: string }>).map((d) => [d.date, d.shiftStatus]);
+    expect(status).toEqual([
+      ['2026-09-01', 'on_time'],
+      ['2026-09-02', 'late'],
+    ]);
+    expect(res.body.member.lateDays).toBe(1);
+    // And the month sheet counted the same one.
+    expect((await september(s)).day('2026-09-02').late).toBe(1);
+  });
+
+  it('reads Start as on time for a late start the rules do not count (exempt person)', async () => {
+    const s = await seed();
+    await prisma.user.update({ where: { id: s.member.id }, data: { attendanceRuleMode: 'EXEMPT' } });
+    await work(s.member.id, '2026-09-02', 8, '11:00');
+    const params = new URLSearchParams({ userId: s.member.id, from: '2026-09-02', to: '2026-09-02' });
+    const res = await request(app)
+      .get(`/v1/reports/team/member?${params.toString()}`)
+      .set({ Authorization: `Bearer ${s.adminToken}` });
+    expect(res.status).toBe(200);
+    expect(res.body.member.days[0].shiftStatus).toBe('on_time');
+    expect(res.body.member.lateDays).toBe(0);
   });
 
   // Rule change (time module): lateness is first tracked activity, so a
@@ -465,8 +510,9 @@ describe('attendance rules — HTTP surfaces', () => {
     const status = block.find((l) => l.startsWith('Status,'));
     const why = block.find((l) => l.startsWith('Why,'));
     expect(status?.split(',').slice(1, 9)).toEqual(['P', 'HD', 'L', 'L', 'P', 'WO', 'LWA', 'LWA']);
-    // The 1st is a late arrival that costs nothing yet: shown so the count is visible.
-    expect(why?.split(',').slice(1, 9)).toEqual(['late 1', '<7h', '<3.5h', 'WFH', '', '', 'no leave', 'unapproved']);
+    // The 1st is a late arrival that costs nothing yet: shown so the count is
+    // visible. The 2nd and 3rd were late too, shown beside the hours cut.
+    expect(why?.split(',').slice(1, 9)).toEqual(['late 1', '<7h · late 2', '<3.5h · late 3', 'WFH', '', '', 'no leave', 'unapproved']);
     expect(block[0]).toContain('Salary Cut');
 
     const xlsx = await request(app).get('/v1/reports/month-performance.xlsx?month=2026-09').set(auth);

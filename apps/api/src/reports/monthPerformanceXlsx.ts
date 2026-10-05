@@ -279,9 +279,14 @@ function buildGridSheet(wb: ExcelJS.Workbook, report: MonthPerformanceReport): v
       label.font = TYPE.eyebrow;
       label.alignment = { horizontal: 'left', vertical: 'middle' };
       sheetRow.height = offset === STATUS_ROW ? 17 : 14;
+      // "<7h · late 2" is wider than a day column: let the Why row wrap onto a
+      // second line rather than clip, and only grow when a cell needs it.
+      const wraps = offset === REMARK_ROW
+        && report.dates.some((_, i) => String(sheetRow.getCell(i + 2).value ?? '').includes(' · '));
+      if (wraps) sheetRow.height = 26;
       for (let i = 0; i < dayCount; i++) {
         const cell = sheetRow.getCell(i + 2);
-        cell.alignment = CENTRE;
+        cell.alignment = wraps ? { ...CENTRE, wrapText: true } : CENTRE;
         cell.font = TYPE.reading;
         if (offset === STATUS_ROW) {
           const day = byDate.get(report.dates[i]!);
@@ -393,8 +398,12 @@ function buildLegendSheet(wb: ExcelJS.Workbook, report: MonthPerformanceReport):
       ['unapproved', 'Absent; leave was applied for but not approved'],
       [
         'late 3',
-        `The 3rd late arrival this month — punched in more than ${settings.lateGrace} min after shift start. ` +
+        `The 3rd late arrival this month — tracked work started more than ${settings.lateGrace} min after shift start. ` +
           `The first ${settings.lateAllowed} are free; each one after is a half day`,
+      ],
+      [
+        `${why({ tag: 'SHORT_DAY', penaltyDays: 0.5 })} · late 2`,
+        'Both on one day: short hours and the 2nd late arrival. The day is cut once, for the hours',
       ],
     ];
     for (const [word, means] of reasons) {

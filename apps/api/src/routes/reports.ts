@@ -14,7 +14,7 @@ import type {
   TeamReportUser,
 } from '@grind/types';
 import { loadPunchLookup } from '../attendance/punches';
-import { loadAttendanceRuleContext } from '../attendance/ruleContext';
+import { lateLookup, loadAttendanceRuleContext } from '../attendance/ruleContext';
 import { requireAccessToken } from '../middleware/auth';
 import { hideDisallowedActiveFields, policyFlagsForUser } from '../workspacePolicy/readScrub';
 import { attachScope, requireCapability } from '../middleware/scope';
@@ -106,6 +106,7 @@ reportsRouter.get('/me', async (req, res, next) => {
       days: buildMemberReportDays({
         dayStatusFor: calendar.dayStatusFor,
         ruleFor: rules.judge,
+        lateFor: lateLookup(rules),
         fundedDaysFor: calendar.fundedDaysFor,
         punchFor,
         overrideFor,
@@ -208,6 +209,7 @@ reportsRouter.get('/team', requireCapability('reports.team.read'), async (req, r
       daysByUser.set(user.id, buildMemberReportDays({
         dayStatusFor: calendar.dayStatusFor,
         ruleFor: rules.judge,
+        lateFor: lateLookup(rules),
         fundedDaysFor: calendar.fundedDaysFor,
         punchFor,
         overrideFor,
@@ -297,6 +299,7 @@ reportsRouter.get('/team/summary', requireCapability('reports.team.read'), async
       daysByUser.set(user.id, buildMemberReportDays({
         dayStatusFor: calendar.dayStatusFor,
         ruleFor: rules.judge,
+        lateFor: lateLookup(rules),
         fundedDaysFor: calendar.fundedDaysFor,
         punchFor,
         overrideFor,
@@ -366,6 +369,7 @@ reportsRouter.get('/team/member', requireCapability('reports.team.read'), async 
     const days = buildMemberReportDays({
       dayStatusFor: calendar.dayStatusFor,
       ruleFor: rules.judge,
+      lateFor: lateLookup(rules),
       fundedDaysFor: calendar.fundedDaysFor,
       punchFor,
       overrideFor,
