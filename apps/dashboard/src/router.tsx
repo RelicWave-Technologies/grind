@@ -29,6 +29,7 @@ const ProfileScreen = lazyRouteComponent(() => import('./screens/Profile'), 'Pro
 const ChangelogScreen = lazyRouteComponent(() => import('./screens/Changelog'), 'ChangelogScreen');
 const CalendarScreen = lazyRouteComponent(() => import('./screens/Calendar'), 'CalendarScreen');
 const WelcomeScreen = lazyRouteComponent(() => import('./screens/Welcome'), 'WelcomeScreen');
+const DevResyncScreen = lazyRouteComponent(() => import('./screens/DevResync'), 'DevResyncScreen');
 
 interface RouterContext {
   queryClient: QueryClient;
@@ -254,6 +255,18 @@ const integrationsRoute = createRoute({
   component: IntegrationsScreen,
 });
 
+// Hidden developer tool (DEVELOPER_EMAILS on the API). Reached by URL only —
+// no nav entry — and anyone else lands where they normally would.
+const devResyncRoute = createRoute({
+  getParentRoute: () => authedRoot,
+  path: '/dev/resync',
+  beforeLoad: ({ context }) => {
+    const me = (context as { me?: Me }).me;
+    if (!me?.isDeveloper) throw redirect({ to: landingPath(me) });
+  },
+  component: DevResyncScreen,
+});
+
 const overviewRoute = createRoute({
   getParentRoute: () => authedRoot,
   path: '/overview',
@@ -320,7 +333,7 @@ const indexRoute = createRoute({
 });
 
 export const routeTree = rootRoute.addChildren([
-  authedRoot.addChildren([homeRoute, overviewRoute, editTimeRoute, meTodayLegacyRoute, reportsRoute, approvalsRoute, profileRoute, teamRoute, attendanceRoute, calendarRoute, flagsRoute, usersRoute, teamsAdminRoute, shiftsRoute, policyRoute, integrationsRoute]),
+  authedRoot.addChildren([homeRoute, overviewRoute, editTimeRoute, meTodayLegacyRoute, reportsRoute, approvalsRoute, profileRoute, teamRoute, attendanceRoute, calendarRoute, flagsRoute, usersRoute, teamsAdminRoute, shiftsRoute, policyRoute, integrationsRoute, devResyncRoute]),
   loginRoute,
   changelogRoute,
   welcomeRoute,

@@ -33,6 +33,8 @@ export interface Me {
   managesTeamName?: string | null;
   provisioningStatus: 'PENDING' | 'ACTIVE';
   avatarUrl: string | null;
+  /** In the API's DEVELOPER_EMAILS: unlocks the hidden /dev tools. Absent on older APIs. */
+  isDeveloper?: boolean;
 }
 
 /**
