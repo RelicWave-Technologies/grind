@@ -792,6 +792,9 @@ enum TesterOpsEventSource {
 
 enum TesterOpsEventStatus {
   PENDING
+  /// Claimed by one worker (PENDING -> PROCESSING via a conditional update)
+  /// before any AI call or reply, so a message can never be answered twice.
+  PROCESSING
   PROCESSED
   IGNORED
   FAILED
@@ -854,7 +857,12 @@ model TesterOpsConfig {
   pingTimes                    String[]  @default(["11:00", "17:00"])
   passiveIssueDetectionEnabled Boolean   @default(false)
   announcementSentAt           DateTime?
+  /// Unused. Lark history page tokens only make sense inside one query, so the
+  /// poller pages within a tick and resumes from `lastHistoryPollAt` instead.
   pollCursor                   String?
+  /// createTime of the newest history message the poller has handled; the next
+  /// poll starts here (never at wall-clock "now", which would skip anything
+  /// still unread when a tick stopped early).
   lastHistoryPollAt            DateTime?
   createdAt                    DateTime  @default(now())
   updatedAt                    DateTime  @updatedAt
@@ -921,6 +929,10 @@ model TesterOpsEvent {
   aiRuns TesterOpsAiRun[]
 
   @@unique([workspaceId, source, sourceId])
+  /// One Lark message is one event, whichever path saw it first: the websocket
+  /// delivers it keyed by event_id, the history poll by message_id. NULLs stay
+  /// distinct in Postgres, so manual replays (no messageId) are unaffected.
+  @@unique([workspaceId, messageId])
   @@index([workspaceId, status, receivedAt])
   @@index([messageId])
 }
