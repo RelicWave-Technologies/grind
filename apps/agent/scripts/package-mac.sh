@@ -30,8 +30,19 @@ AGENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ROOT_DIR="$(cd "$AGENT_DIR/../.." && pwd)"
 STAGE="${STAGE_DIR:-/tmp/grind-agent-deploy}"
 ELECTRON_VERSION="33.2.0"
-CHANNEL="${UPDATE_CHANNEL:-${MAIN_VITE_UPDATE_CHANNEL:-latest}}"
-if [[ "$CHANNEL" != "beta" ]]; then CHANNEL="latest"; fi
+# The channel must agree with the version: on "latest" electron-updater only
+# sees non-prerelease releases, so a -beta.N build there never finds an update.
+VERSION="$(node -p "require('$AGENT_DIR/package.json').version")"
+if [[ "$VERSION" =~ -beta\.[0-9]+$ ]]; then VERSION_CHANNEL="beta"; else VERSION_CHANNEL="latest"; fi
+CHANNEL="${UPDATE_CHANNEL:-${MAIN_VITE_UPDATE_CHANNEL:-$VERSION_CHANNEL}}"
+if [[ "$CHANNEL" != "beta" && "$CHANNEL" != "latest" ]]; then
+  echo "Unknown update channel '$CHANNEL'. Use beta or latest." >&2
+  exit 1
+fi
+if [[ "$CHANNEL" == "latest" && "$VERSION_CHANNEL" == "beta" ]]; then
+  echo "Version $VERSION is a beta, but the update channel is latest: that build would never find an update. Use UPDATE_CHANNEL=beta (or unset it)." >&2
+  exit 1
+fi
 export MAIN_VITE_UPDATE_CHANNEL="$CHANNEL"
 if [[ "${PUBLISH:-0}" == "1" ]]; then
   export MAIN_VITE_AUTO_UPDATE_ENABLED=1
