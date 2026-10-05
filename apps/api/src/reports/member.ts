@@ -204,6 +204,13 @@ export function buildMemberReportDays(input: {
   ruleFor?: (userId: string, date: string, status: DayStatus | null, trackedMinutes: number) => AttendanceRuleVerdict | null;
   /** How much of a day's cost a balance covered, undefined when it covered all. */
   fundedDaysFor?: (userId: string, date: string) => number | undefined;
+  /**
+   * The attendance rules' late count, when the rules are on. From `from` on, a
+   * day reads Late exactly when the rules counted a late arrival — punch-in
+   * past the shift start plus the policy's grace — so the Start column and the
+   * month sheet's Late number cannot disagree.
+   */
+  lateFor?: { from: string; ordinalFor: (userId: string, date: string) => number | null };
 }): MemberReportDay[] {
   const iconFor = input.iconFor ?? appIconUrl;
   const entries = capOpenEntries(input.entries, input.evidenceByEntry, input.now);
@@ -349,11 +356,19 @@ export function buildMemberReportDays(input: {
       lastActivityMs: cell.lastActivityMs,
       punchInMinute: punch?.inMinute ?? null,
       punchOutMinute: punch?.outMinute ?? null,
-      shiftStatus: computeShiftStatus({
-        shift,
-        firstActivityMs: cell.firstActivityMs,
-        nowMs,
-      }),
+      shiftStatus:
+        input.lateFor && date >= input.lateFor.from
+          ? ruleShiftStatus({
+              shift,
+              firstActivityMs: cell.firstActivityMs,
+              punchInMinute: punch?.inMinute ?? null,
+              late: input.lateFor.ordinalFor(input.userId, date) !== null,
+            })
+          : computeShiftStatus({
+              shift,
+              firstActivityMs: cell.firstActivityMs,
+              nowMs,
+            }),
       gaps: {
         count: gaps.length,
         totalMs: gaps.reduce((sum, g) => sum + g.durationMs, 0),
@@ -692,6 +707,29 @@ function computeShiftStatus(input: {
   if (input.firstActivityMs < startMs) return 'early';
   const bufferMs = Math.max(0, input.shift.bufferMin) * 60_000;
   return input.firstActivityMs <= startMs + bufferMs ? 'on_time' : 'late';
+}
+
+/**
+ * Start status under the attendance rules: Late only when the rules counted a
+ * late arrival. Otherwise early when the punch (or, with no punch, the first
+ * activity) came before the shift start, on time when it came after.
+ */
+function ruleShiftStatus(input: {
+  shift: ResolvedShiftForDay;
+  firstActivityMs: number | null;
+  punchInMinute: number | null;
+  late: boolean;
+}): ShiftStatus {
+  if (!input.shift.assignment || !input.shift.schedule || !input.shift.window) return 'no_shift';
+  if (input.punchInMinute === null && input.firstActivityMs === null) return 'no_activity';
+  if (input.late) return 'late';
+  const m = /^(\d{2}):(\d{2})$/u.exec(input.shift.label?.start ?? '');
+  if (input.punchInMinute !== null && m) {
+    const start = Number.parseInt(m[1]!, 10) * 60 + Number.parseInt(m[2]!, 10);
+    return input.punchInMinute < start ? 'early' : 'on_time';
+  }
+  if (input.firstActivityMs !== null && input.firstActivityMs < input.shift.window.start.getTime()) return 'early';
+  return 'on_time';
 }
 
 function weekdayForDate(date: string): (typeof WEEKDAYS)[number] {

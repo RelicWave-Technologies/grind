@@ -344,6 +344,35 @@ describe('attendance rules — late arrivals', () => {
     expect((await september(s)).day('2026-09-01').late).toBe(1);
   });
 
+  it('shows Start as Late on the dashboard exactly when the rule counted a late arrival', async () => {
+    const s = await seed();
+    // Work starts 10:00 on both days; only the punch differs.
+    await work(s.member.id, '2026-09-01', 8);
+    await prisma.attendancePunch.create({
+      data: {
+        workspaceId: s.ws.id,
+        userId: s.member.id,
+        date: new Date('2026-09-01T00:00:00Z'),
+        punchInAt: new Date('1970-01-01T09:25:00Z'),
+        punchOutAt: new Date('1970-01-01T18:00:00Z'),
+      },
+    });
+    await work(s.member.id, '2026-09-02', 8);
+    await punch(s.ws.id, s.member.id, '2026-09-02');
+
+    const params = new URLSearchParams({ userId: s.member.id, from: '2026-09-01', to: '2026-09-02', tz: 'Asia/Kolkata' });
+    const res = await request(app)
+      .get(`/v1/reports/team/member?${params.toString()}`)
+      .set({ Authorization: `Bearer ${s.adminToken}` });
+    expect(res.status).toBe(200);
+    const status = (res.body.member.days as Array<{ date: string; shiftStatus: string }>).map((d) => [d.date, d.shiftStatus]);
+    expect(status).toEqual([
+      ['2026-09-01', 'on_time'],
+      ['2026-09-02', 'late'],
+    ]);
+    expect(res.body.member.lateDays).toBe(1);
+  });
+
   it('never counts a remote person late', async () => {
     const s = await seed();
     await prisma.user.update({ where: { id: s.member.id }, data: { attendanceRuleMode: 'REMOTE' } });
