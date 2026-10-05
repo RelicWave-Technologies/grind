@@ -5,6 +5,7 @@ import {
   type ActivitySamplesResponse,
   applyPolicyToActive,
   WORKSPACE_POLICY_DEFAULTS,
+  type PolicyFlags,
 } from '@grind/types';
 import { validate } from '../middleware/validate';
 import { requireAccessToken } from '../middleware/auth';
@@ -67,7 +68,7 @@ const INGEST_COLUMNS = 15;
  * {@link mergeMinuteReports} and runs atomically per row, so two requests
  * carrying the same minute cannot lose either one's counts.
  */
-async function upsertMinutes(userId: string, rows: IngestRow[]): Promise<void> {
+async function upsertMinutes(userId: string, rows: IngestRow[], policy: PolicyFlags): Promise<void> {
   if (rows.length === 0) return;
   const params: unknown[] = [];
   const tuples = rows.map((r, i) => {
@@ -84,6 +85,10 @@ async function upsertMinutes(userId: string, rows: IngestRow[]): Promise<void> {
       $${o + 12}::text, $${o + 13}::text, $${o + 14}::text, $${o + 15}::text)`;
   });
   const cur = '"ActivitySample"';
+  // A field the policy does not capture is cleared, not kept from an earlier
+  // report: what is stored must match the policy in force when it is written.
+  const keep = (column: string, allowed: boolean) =>
+    allowed ? `COALESCE(EXCLUDED."${column}", ${cur}."${column}")` : 'NULL';
   await prisma.$executeRawUnsafe(
     `INSERT INTO "ActivitySample" ("id", "userId", "timeEntryId", "bucketStart",
        "keystrokes", "clicks", "mouseDistancePx", "scrollEvents",
@@ -103,10 +108,10 @@ async function upsertMinutes(userId: string, rows: IngestRow[]): Promise<void> {
        "pathStraightness" = CASE WHEN EXCLUDED."mouseDistancePx" >= ${cur}."mouseDistancePx"
          THEN COALESCE(EXCLUDED."pathStraightness", ${cur}."pathStraightness")
          ELSE COALESCE(${cur}."pathStraightness", EXCLUDED."pathStraightness") END,
-       "activeApp" = COALESCE(EXCLUDED."activeApp", ${cur}."activeApp"),
-       "activeAppBundle" = COALESCE(EXCLUDED."activeAppBundle", ${cur}."activeAppBundle"),
-       "activeTitle" = COALESCE(EXCLUDED."activeTitle", ${cur}."activeTitle"),
-       "activeUrl" = COALESCE(EXCLUDED."activeUrl", ${cur}."activeUrl")`,
+       "activeApp" = ${keep('activeApp', policy.captureApps)},
+       "activeAppBundle" = ${keep('activeAppBundle', policy.captureApps)},
+       "activeTitle" = ${keep('activeTitle', policy.captureApps && policy.captureTitles)},
+       "activeUrl" = ${keep('activeUrl', policy.captureApps && policy.captureUrls)}`,
     ...params,
   );
 }
@@ -186,7 +191,7 @@ activityRouter.post('/', validate(ActivitySamplesRequest, 'body'), async (req, r
       const seen = byMinute.get(key);
       byMinute.set(key, seen ? mergeMinuteReports(seen, row) : row);
     }
-    await upsertMinutes(userId, [...byMinute.values()]);
+    await upsertMinutes(userId, [...byMinute.values()], policy);
 
     if (detached > 0) {
       logger.warn({ userId, detached, submitted: samples.length }, 'activity samples detached from unavailable timer entries');
