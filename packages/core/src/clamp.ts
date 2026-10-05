@@ -21,10 +21,21 @@ import type { Segment, TimeEntry } from './types';
 
 export interface ClampResult {
   entry: TimeEntry;
-  /** True if any timestamp was pulled back to the ceiling. */
+  /**
+   * True only if a timestamp sat beyond `now + skew` and was pulled back to
+   * the ceiling — a real clock correction. Dropping a zero-length segment does
+   * NOT set it (see `dropped`).
+   */
   adjusted: boolean;
-  /** Per-field notes, for telemetry / abuse detection. Empty when clean. */
+  /** One note per clamped timestamp, for telemetry / abuse detection. Empty when clean. */
   notes: string[];
+  /**
+   * Ids of segments left out because they carry no time: zero-length as sent
+   * (older agents produce them), or collapsed to zero by the clamp itself.
+   * The same rule `validateEntry` and `dropZeroLengthSegments` follow, so a
+   * valid entry stays valid after clamping. Not a clock correction on its own.
+   */
+  dropped: string[];
 }
 
 export const DEFAULT_CLOCK_SKEW_MS = 2 * 60 * 1000;
@@ -36,6 +47,7 @@ export function clampEntryToServerClock(
 ): ClampResult {
   const ceiling = nowMs + Math.max(0, skewMs);
   const notes: string[] = [];
+  const dropped: string[] = [];
 
   const clampTs = (ts: number, label: string): number => {
     if (ts > ceiling) {
@@ -52,10 +64,10 @@ export function clampEntryToServerClock(
   for (const s of entry.segments) {
     const startedAt = clampTs(s.startedAt, `seg[${s.id}].startedAt`);
     const endedAt = s.endedAt === null ? null : clampTs(s.endedAt, `seg[${s.id}].endedAt`);
-    // A segment whose end clamped back to/under its start carries no real
-    // worked time — drop it rather than persist a zero/negative span.
-    if (endedAt !== null && endedAt <= startedAt) {
-      notes.push(`seg[${s.id}] dropped (zero-length after clamp)`);
+    // A zero-length segment carries no worked time — whether it arrived that
+    // way or the clamp collapsed it — so it is never persisted.
+    if (endedAt !== null && Math.trunc(endedAt) <= Math.trunc(startedAt)) {
+      dropped.push(s.id);
       continue;
     }
     segments.push({ ...s, startedAt, endedAt });
@@ -65,5 +77,6 @@ export function clampEntryToServerClock(
     entry: { ...entry, startedAt: entryStart, endedAt: entryEnd, segments },
     adjusted: notes.length > 0,
     notes,
+    dropped,
   };
 }

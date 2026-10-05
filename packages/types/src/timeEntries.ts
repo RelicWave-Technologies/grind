@@ -37,7 +37,12 @@ export const CreateTimeEntryRequest = z.object({
   agentVersion: z.string().max(50).optional(),
   platform: z.enum(['darwin', 'win32', 'linux']).optional(),
   closeReason: AgentTimeEntryCloseReason.nullable().optional(),
-  segments: z.array(SegmentDto).min(1),
+  /**
+   * May be empty: a segment closed at its own start is removed rather than
+   * sent as a zero-length span, which can leave an entry with none (started
+   * and stopped or paused in the same instant). See segments.ts.
+   */
+  segments: z.array(SegmentDto),
 });
 export type CreateTimeEntryRequest = z.infer<typeof CreateTimeEntryRequest>;
 
@@ -93,7 +98,8 @@ export const SyncTimeEntryRequest = z.object({
   observedAt: Iso.optional(),
   endedAt: Iso.nullable().optional(),
   closeReason: AgentTimeEntryCloseReason.nullable().optional(),
-  segments: z.array(SegmentDto).min(1),
+  /** May be empty — see CreateTimeEntryRequest.segments. */
+  segments: z.array(SegmentDto),
 });
 export type SyncTimeEntryRequest = z.infer<typeof SyncTimeEntryRequest>;
 

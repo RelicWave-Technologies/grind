@@ -13,6 +13,7 @@ import {
 import {
   validateEntry,
   clampEntryToServerClock,
+  type ClampResult,
   type Segment,
   type TimeEntry as CoreEntry,
 } from '@grind/core';
@@ -71,6 +72,28 @@ function toCoreEntry(args: {
     closeReason: args.closeReason ?? null,
     segments,
   };
+}
+
+/**
+ * A clock clamp (a timestamp beyond server now + skew) is a WARN and the only
+ * thing that earns the CLOCK_CLAMP correction on the receipt. A dropped
+ * zero-length segment is routine — agents up to beta.38 send them whenever a
+ * pause lands on a segment's start — so it is counted at info, never reported
+ * as a clock problem (the agent shows CLOCK_CLAMP to the person).
+ */
+function logClampOutcome(route: 'create' | 'sync', userId: string, entryId: string, clamped: ClampResult): void {
+  if (clamped.adjusted) {
+    logger.warn(
+      { userId, entryId, notes: clamped.notes },
+      `time-entry ${route}: clamped future timestamps to server clock`,
+    );
+  }
+  if (clamped.dropped.length > 0) {
+    logger.info(
+      { userId, entryId, droppedZeroLengthSegments: clamped.dropped.length, segmentIds: clamped.dropped.slice(0, 20) },
+      `time-entry ${route}: dropped zero-length segments`,
+    );
+  }
 }
 
 function hasCompleteV2Lifecycle(input: {
@@ -263,12 +286,7 @@ timeEntriesRouter.post('/', validate(CreateTimeEntryRequest, 'body'), async (req
     // Server-authoritative clock clamp: never trust the laptop's clock to push
     // time into the future. A fast/tampered client clock can't inflate hours.
     const clamped = clampEntryToServerClock(core, Date.now());
-    if (clamped.adjusted) {
-      logger.warn(
-        { userId: req.user.sub, entryId: body.id, notes: clamped.notes },
-        'time-entry create: clamped future timestamps to server clock',
-      );
-    }
+    logClampOutcome('create', req.user.sub, body.id, clamped);
 
     const now = new Date();
     const lastProvenAt = isV2
@@ -403,12 +421,7 @@ timeEntriesRouter.put('/:id/sync', validate(SyncTimeEntryRequest, 'body'), async
     // Server-authoritative clock clamp (same guard as create): the agent owns
     // the running entry's segments, but never the right to bill future time.
     const clamped = clampEntryToServerClock(core, Date.now());
-    if (clamped.adjusted) {
-      logger.warn(
-        { userId: req.user.sub, entryId: id, notes: clamped.notes },
-        'time-entry sync: clamped future timestamps to server clock',
-      );
-    }
+    logClampOutcome('sync', req.user.sub, id, clamped);
     const clampedSegments = clamped.entry.segments;
     const clampedEndedAt = clamped.entry.endedAt;
 
