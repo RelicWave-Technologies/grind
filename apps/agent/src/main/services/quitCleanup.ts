@@ -147,18 +147,64 @@ export function invalidateQuitCleanup(): void {
   defaultRunner.invalidate();
 }
 
+function timerIsRunning(): boolean {
+  try {
+    return getTimerService().isRunning();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A finished cleanup only vouches for the timer as it was when it ran. The
+ * update install runs it early and then waits for the installer to quit the
+ * app; if the install fails, or the person starts tracking again meanwhile, a
+ * "completed" flag would let the next Quit skip finalizing a running timer.
+ */
+function cleanupStillCovers(hasCompleted: () => boolean, isTimerRunning: () => boolean): boolean {
+  return hasCompleted() && !isTimerRunning();
+}
+
+/**
+ * Run the quit cleanup unless one already finished and still holds. For exit
+ * paths that cannot wait (before-quit-for-update, Windows session end): the
+ * timer close is written synchronously before the first await, so starting it
+ * is what matters. Shares the in-flight run, so no path runs it twice.
+ */
+export function runQuitCleanupIfNeeded(
+  reason: TimerExitReason,
+  opts: { hasCleanupCompleted?: () => boolean; isTimerRunning?: () => boolean; runCleanup?: (reason: TimerExitReason) => Promise<void> } = {},
+): Promise<void> {
+  const hasCompleted = opts.hasCleanupCompleted ?? hasQuitCleanupCompleted;
+  const isTimerRunning = opts.isTimerRunning ?? timerIsRunning;
+  if (cleanupStillCovers(hasCompleted, isTimerRunning)) return Promise.resolve();
+  return (opts.runCleanup ?? runQuitCleanup)(reason);
+}
+
 export function registerGracefulQuitHandler(opts: {
   app: AppQuitLike;
   runCleanup?: (reason: TimerExitReason) => Promise<void>;
   hasCleanupCompleted?: () => boolean;
+  isTimerRunning?: () => boolean;
   markQuitting?: () => void;
 }): void {
   const runCleanup = opts.runCleanup ?? runQuitCleanup;
   const hasCleanupCompleted = opts.hasCleanupCompleted ?? hasQuitCleanupCompleted;
+  const isTimerRunning = opts.isTimerRunning ?? timerIsRunning;
+  // The quit we re-issue after our own cleanup always goes through, even if
+  // that cleanup could not stop the timer — otherwise Quit would loop.
+  let reissuing = false;
   opts.app.on('before-quit', (event) => {
     opts.markQuitting?.();
-    if (hasCleanupCompleted()) return;
+    if (reissuing || cleanupStillCovers(hasCleanupCompleted, isTimerRunning)) return;
     event.preventDefault();
-    void runCleanup('quit').finally(() => opts.app.quit());
+    void runCleanup('quit').finally(() => {
+      reissuing = true;
+      try {
+        opts.app.quit();
+      } finally {
+        reissuing = false;
+      }
+    });
   });
 }

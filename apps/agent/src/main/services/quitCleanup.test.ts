@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { QuitCleanupRunner, registerGracefulQuitHandler, type BeforeQuitEventLike } from './quitCleanup';
+import { QuitCleanupRunner, registerGracefulQuitHandler, runQuitCleanupIfNeeded, type BeforeQuitEventLike } from './quitCleanup';
 
 function deferred<T = void>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -141,5 +141,60 @@ describe('registerGracefulQuitHandler', () => {
 
     expect(preventDefault).not.toHaveBeenCalled();
     expect(app.quit).not.toHaveBeenCalled();
+  });
+});
+
+describe('a completed cleanup that no longer holds', () => {
+  function quitApp() {
+    const listeners = new Map<string, (event: BeforeQuitEventLike) => void>();
+    const app = {
+      on: vi.fn((event: 'before-quit', listener: (event: BeforeQuitEventLike) => void) => {
+        listeners.set(event, listener);
+      }),
+      quit: vi.fn(() => listeners.get('before-quit')!({ preventDefault: vi.fn() })),
+    };
+    return { app, fire: (preventDefault = vi.fn()) => {
+      listeners.get('before-quit')!({ preventDefault });
+      return preventDefault;
+    } };
+  }
+
+  it('runs cleanup again on Quit when a timer was started after an earlier cleanup', async () => {
+    const { app, fire } = quitApp();
+    let running = true;
+    const runCleanup = vi.fn(async () => {
+      running = false;
+    });
+    registerGracefulQuitHandler({ app, runCleanup, hasCleanupCompleted: () => true, isTimerRunning: () => running });
+
+    const preventDefault = fire();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(preventDefault).toHaveBeenCalledOnce();
+    expect(runCleanup).toHaveBeenCalledWith('quit');
+    expect(app.quit).toHaveBeenCalledOnce();
+  });
+
+  it('does not loop when the cleanup could not stop the timer', async () => {
+    const { app, fire } = quitApp();
+    const runCleanup = vi.fn(async () => undefined);
+    registerGracefulQuitHandler({ app, runCleanup, hasCleanupCompleted: () => true, isTimerRunning: () => true });
+
+    fire();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(runCleanup).toHaveBeenCalledOnce();
+    expect(app.quit).toHaveBeenCalledOnce();
+  });
+
+  it('skips a second cleanup on the update exit path when the first still holds', async () => {
+    const runCleanup = vi.fn(async () => undefined);
+
+    await runQuitCleanupIfNeeded('update', { hasCleanupCompleted: () => true, isTimerRunning: () => false, runCleanup });
+    expect(runCleanup).not.toHaveBeenCalled();
+
+    await runQuitCleanupIfNeeded('update', { hasCleanupCompleted: () => true, isTimerRunning: () => true, runCleanup });
+    expect(runCleanup).toHaveBeenCalledWith('update');
   });
 });
