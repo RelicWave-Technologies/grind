@@ -20,4 +20,6 @@ ENV NODE_ENV=production
 ENV API_PORT=4000
 EXPOSE 4000
 
-CMD ["pnpm", "--filter", "@grind/api", "start"]
+# Run node directly so SIGTERM reaches the API (which drains requests on it)
+# instead of stopping at a pnpm wrapper process.
+CMD ["node", "apps/api/dist/index.cjs"]

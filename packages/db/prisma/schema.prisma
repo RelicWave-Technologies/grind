@@ -581,8 +581,9 @@ model ActivitySample {
 
   createdAt DateTime @default(now())
 
+  // The unique constraint is already a (userId, bucketStart) btree; a second
+  // identical index only doubled the write cost of every sample.
   @@unique([userId, bucketStart])
-  @@index([userId, bucketStart])
   @@index([timeEntryId])
   @@index([userId, activeApp])
 }
@@ -1199,18 +1200,22 @@ model MonitoringSettingsAudit {
 }
 
 model RefreshToken {
-  id         String    @id @default(cuid())
-  userId     String
-  user       User      @relation(fields: [userId], references: [id])
-  tokenHash  String    @unique
-  deviceName String?
+  id           String    @id @default(cuid())
+  userId       String
+  user         User      @relation(fields: [userId], references: [id])
+  tokenHash    String    @unique
+  deviceName   String?
   // Rotation family: every token minted by rotating an earlier one inherits the
   // same familyId. Presenting an already-revoked token (replay/theft) revokes
   // the whole family — OAuth 2.0 BCP refresh-token reuse detection.
-  familyId   String
-  expiresAt  DateTime
-  revokedAt  DateTime?
-  createdAt  DateTime  @default(now())
+  familyId     String
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  /// The token minted when this one was spent. A replay of a just-spent token
+  /// whose successor has never been used is a lost response, not a theft: it
+  /// rotates again from here instead of revoking the family.
+  replacedById String?
+  createdAt    DateTime  @default(now())
 
   @@index([userId])
   @@index([familyId])
@@ -1218,7 +1223,8 @@ model RefreshToken {
 
 /// Cached real app icons, keyed by macOS/Windows bundle id. Workspace-agnostic —
 /// an app's icon is the same for everyone, so agents upload the PNG once per
-/// bundle (idempotent upsert) and the insights API inlines it as a data URL.
+/// bundle (insert-only: the first upload wins, nobody overwrites it) and the
+/// insights API inlines it as a data URL.
 model AppIcon {
   bundleId  String   @id
   app       String

@@ -6,6 +6,7 @@ import cookieParser from 'cookie-parser';
 import pinoHttp from 'pino-http';
 import { prisma } from '@grind/db';
 import { logger } from './logger';
+import { dashboardOrigins } from './env';
 import { API_VERSION, START_TIME_MS } from './lib/version';
 import { authRouter } from './routes/auth';
 import { authLarkRouter } from './routes/authLark';
@@ -37,10 +38,7 @@ export function buildApp() {
   // origin(s) — DASHBOARD_URL may be a comma-separated list. In dev with
   // nothing configured we reflect the request origin so localhost:5174 just
   // works.
-  const allowlist = (process.env.DASHBOARD_URL ?? '')
-    .split(',')
-    .map((s) => s.trim().replace(/\/$/, ''))
-    .filter(Boolean);
+  const allowlist = dashboardOrigins();
   app.use(
     cors({
       origin: allowlist.length
@@ -48,7 +46,9 @@ export function buildApp() {
             // Allow same-origin / non-browser callers (no Origin header), e.g.
             // the agent and health probes.
             if (!origin || allowlist.includes(origin.replace(/\/$/, ''))) return cb(null, true);
-            return cb(new Error('not_allowed_by_cors'));
+            // A 403 the error handler answers as such — not a 500 that pages
+            // Sentry every time a stray origin probes the API.
+            return cb(Object.assign(new Error('not_allowed_by_cors'), { status: 403, code: 'cors_rejected' }));
           }
         : true,
       credentials: true,
@@ -132,12 +132,16 @@ export function buildApp() {
   app.use('/v1/screenshots', screenshotsRouter);
   app.use('/v1/downloads', downloadsRouter);
   app.use('/v1/mcp', mcpRouter);
-  app.use('/v1/admin', adminRouter);
-  app.use('/v1/workspace', workspaceRouter);
+  // The /v1/admin/* sub-routers go BEFORE the generic admin router. Mounted
+  // after it, every request to them first ran adminRouter's auth + scope
+  // middleware (a user lookup and a workspace-wide user list) and then its own
+  // again, for nothing.
   app.use('/v1/admin/workspace-policy', workspacePolicyRouter);
   app.use('/v1/admin/leave', adminLeaveRouter);
-  app.use('/v1/leave', leaveRouter);
   app.use('/v1/admin/overview', overviewRouter);
+  app.use('/v1/admin', adminRouter);
+  app.use('/v1/workspace', workspaceRouter);
+  app.use('/v1/leave', leaveRouter);
 
   app.use(errorHandler);
 

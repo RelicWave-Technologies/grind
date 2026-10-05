@@ -28,7 +28,7 @@ import { signAccessToken } from '../lib/jwt';
 import { issueRefreshToken } from '../lib/refreshToken';
 import { setSessionCookie, setRefreshCookie } from '../lib/cookies';
 import { validate } from '../middleware/validate';
-import { env } from '../env';
+import { dashboardOrigins } from '../env';
 import { logger } from '../logger';
 
 /**
@@ -47,8 +47,7 @@ function crossSite(): boolean {
 
 /** Canonical dashboard origin for post-login redirects (never a user param). */
 function dashboardBase(): string {
-  const first = (process.env.DASHBOARD_URL || env.DASHBOARD_URL || '').split(',')[0]?.trim().replace(/\/$/u, '');
-  return first || 'http://localhost:5174';
+  return dashboardOrigins()[0] || 'http://localhost:5174';
 }
 
 type Terminal = { error?: LarkLoginOutcome; status?: 'pending' };

@@ -9,6 +9,7 @@ import {
   getLarkConfig,
   getTokenManager,
   getTenantClient,
+  getProfileClient,
   getUserTaskClient,
   resolveIdentity,
   signOAuthState,
@@ -22,6 +23,7 @@ import {
 } from '../lark';
 import { localDayWindow } from '../insights/day';
 import { loadEntryLiveEvidence } from '../insights/liveEntryEvidence';
+import { assertLarkProfileBelongsToUser, LarkIdentityMismatchError } from '../lark/connectIdentity';
 
 export const larkRouter = Router();
 
@@ -46,14 +48,24 @@ function parseAgentCallbackScheme(value: unknown): 'grind' | 'timo' | null {
 function finishOAuthConnect(
   res: Response,
   state: { returnTo: 'browser' | 'agent'; agentCallbackScheme?: 'grind' | 'timo' },
-  outcome: 'connected' | 'cancelled' | 'failed',
+  outcome: 'connected' | 'cancelled' | 'failed' | 'wrong_account',
 ): void {
   if (state.returnTo === 'agent' && state.agentCallbackScheme) {
-    res.redirect(`${state.agentCallbackScheme}://lark?status=${outcome}`);
+    // The agent only knows connected / cancelled / failed; a wrong account is a
+    // failed connect as far as it is concerned.
+    const status = outcome === 'wrong_account' ? 'failed' : outcome;
+    res.redirect(`${state.agentCallbackScheme}://lark?status=${status}`);
     return;
   }
   if (outcome === 'connected') {
     res.status(200).send(closeTabPage('Lark connected', 'You can close this tab and return to Timo.'));
+    return;
+  }
+  if (outcome === 'wrong_account') {
+    res.status(403).send(closeTabPage(
+      'Different Lark account',
+      'This Lark account does not belong to the person signed in to Timo. Sign in to Lark as yourself and connect again.',
+    ));
     return;
   }
   res.status(outcome === 'cancelled' ? 400 : 500).send(closeTabPage(
@@ -88,7 +100,22 @@ larkRouter.get('/oauth/callback', async (req, res) => {
     if (!connectRedirectUri) throw new Error('LARK_CONNECT_REDIRECT_URI not set');
 
     const tm = getTokenManager()!;
-    await tm.connect(userId, code, connectRedirectUri);
+    const profiles = getProfileClient();
+    if (!profiles) throw new Error('lark profile client unavailable');
+    try {
+      // Who actually authorized? Their Lark account must be this Timo user's,
+      // or nothing is stored.
+      await tm.connect(userId, code, connectRedirectUri, async (tokens) => {
+        const profile = await profiles.getProfile(tokens.accessToken);
+        await assertLarkProfileBelongsToUser(prisma, userId, profile);
+      });
+    } catch (err) {
+      if (err instanceof LarkIdentityMismatchError) {
+        logger.warn({ userId, reason: err.reason }, 'lark connect rejected: authorized account is not this user');
+        return finishOAuthConnect(res, oauthState, 'wrong_account');
+      }
+      throw err;
+    }
 
     // Best-effort identity resolution; the OAuth connection still succeeds if
     // the tenant lookup fails (e.g. missing contact scope on the app).

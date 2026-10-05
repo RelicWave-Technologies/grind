@@ -1,6 +1,7 @@
 import { getLarkConfig } from './config';
 import { collectEffectiveIntervals, intervalUnionMs, type EffectiveInterval } from '../insights/effectiveIntervals';
 import type { EntryLiveEvidenceMap } from '../insights/liveEntryEvidence';
+import { outboundTimeoutSignal } from '../lib/outboundTimeout';
 
 /**
  * Lark Task v2 — fetch the signed-in user's tasks for the agent's task picker.
@@ -179,7 +180,7 @@ export class HttpUserTaskClient implements UserTaskClient {
       url.searchParams.set('type', 'my_tasks');
       url.searchParams.set('page_size', '100');
       if (pageToken) url.searchParams.set('page_token', pageToken);
-      const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+      const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` }, signal: outboundTimeoutSignal() });
       const body = (await res.json().catch(() => ({}))) as RawTasksPage;
       if (body.code !== 0) throw new LarkTaskApiError('list', body.code, body.msg);
       all.push(...mapTasks(body.data?.items));
@@ -196,6 +197,7 @@ export class HttpUserTaskClient implements UserTaskClient {
       method: 'POST',
       headers: { 'Content-Type': 'application/json; charset=utf-8', Authorization: `Bearer ${accessToken}` },
       body: JSON.stringify(payload),
+      signal: outboundTimeoutSignal(),
     });
     const body = (await res.json().catch(() => ({}))) as { code?: number; msg?: string; data?: { task?: RawLarkTask } };
     if (body.code !== 0 || !body.data?.task) throw new LarkTaskApiError('create', body.code, body.msg);
@@ -208,6 +210,7 @@ export class HttpUserTaskClient implements UserTaskClient {
     const { oauthHost } = getLarkConfig();
     const res = await fetch(`${oauthHost}/open-apis/authen/v1/user_info`, {
       headers: { Authorization: `Bearer ${accessToken}` },
+      signal: outboundTimeoutSignal(),
     });
     const body = (await res.json().catch(() => ({}))) as { code?: number; data?: { open_id?: string } };
     return body.code === 0 ? body.data?.open_id ?? null : null;

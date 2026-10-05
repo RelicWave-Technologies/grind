@@ -1,5 +1,6 @@
 import { getLarkConfig } from './config';
 import { getTenantAccessToken } from './tenantToken';
+import { outboundTimeoutSignal } from '../lib/outboundTimeout';
 
 /**
  * Sends Lark IM messages on the bot's behalf. Injected into routes so the
@@ -29,8 +30,12 @@ export interface ListChatMessagesResult {
 }
 
 export interface LarkMessenger {
-  /** Send an interactive card to a Lark user by their open_id. */
-  sendCard(receiveOpenId: string, card: Record<string, unknown>): Promise<SendCardResult>;
+  /**
+   * Send an interactive card to a Lark user by their open_id. `uuid` is Lark's
+   * idempotency key: a repeat send with the same uuid within an hour is
+   * dropped by Lark rather than delivered twice.
+   */
+  sendCard(receiveOpenId: string, card: Record<string, unknown>, uuid?: string): Promise<SendCardResult>;
   /** Send an interactive card to a Lark group by chat_id. */
   sendCardToChat(chatId: string, card: Record<string, unknown>, uuid?: string): Promise<SendCardResult>;
   /** Replace an already-sent card in place (used by the decision flow). */
@@ -61,8 +66,8 @@ export class HttpLarkMessenger implements LarkMessenger {
     return getTenantAccessToken();
   }
 
-  async sendCard(receiveOpenId: string, card: Record<string, unknown>): Promise<SendCardResult> {
-    return this.sendMessage('open_id', receiveOpenId, 'interactive', JSON.stringify(card));
+  async sendCard(receiveOpenId: string, card: Record<string, unknown>, uuid?: string): Promise<SendCardResult> {
+    return this.sendMessage('open_id', receiveOpenId, 'interactive', JSON.stringify(card), uuid);
   }
 
   async sendCardToChat(chatId: string, card: Record<string, unknown>, uuid?: string): Promise<SendCardResult> {
@@ -92,6 +97,7 @@ export class HttpLarkMessenger implements LarkMessenger {
       method: 'POST',
       headers: { 'Content-Type': 'application/json; charset=utf-8', Authorization: `Bearer ${token}` },
       body: JSON.stringify({ receive_id: receiveId, msg_type: msgType, content, ...(uuid ? { uuid } : {}) }),
+      signal: outboundTimeoutSignal(),
     });
     const body = (await res.json().catch(() => ({}))) as SendBody;
     if (body.code !== 0 || !body.data?.message_id) {
@@ -107,6 +113,7 @@ export class HttpLarkMessenger implements LarkMessenger {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json; charset=utf-8', Authorization: `Bearer ${token}` },
       body: JSON.stringify({ content: JSON.stringify(card) }),
+      signal: outboundTimeoutSignal(),
     });
     const body = (await res.json().catch(() => ({}))) as { code?: number; msg?: string };
     if (body.code !== 0) throw new Error(`lark updateCard: ${body.msg ?? body.code}`);
@@ -131,7 +138,7 @@ export class HttpLarkMessenger implements LarkMessenger {
     if (args.end) url.searchParams.set('end_time', String(Math.floor(args.end.getTime() / 1000)));
     if (args.pageToken) url.searchParams.set('page_token', args.pageToken);
 
-    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` }, signal: outboundTimeoutSignal() });
     const body = (await res.json().catch(() => ({}))) as {
       code?: number;
       msg?: string;
