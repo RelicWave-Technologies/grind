@@ -3,9 +3,9 @@ import { Router, type Request, type Response } from 'express';
 import { prisma } from '@grind/db';
 import {
   CompleteScreenshotUploadRequest,
-  CompleteScreenshotUploadResponse,
   SignScreenshotUploadRequest,
-  SignScreenshotUploadResponse,
+  type CompleteScreenshotUploadResponse,
+  type SignScreenshotUploadResponse,
 } from '@grind/types';
 import { requireAccessToken } from '../middleware/auth';
 import { validate } from '../middleware/validate';
