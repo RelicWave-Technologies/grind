@@ -15,10 +15,107 @@ export const activityRouter = Router();
 
 activityRouter.use(requireAccessToken);
 
+interface IngestRow {
+  id: string;
+  timeEntryId: string | null;
+  bucketStart: Date;
+  keystrokes: number;
+  clicks: number;
+  mouseDistancePx: number;
+  scrollEvents: number;
+  ikiCv: number | null;
+  moveSpeedCv: number | null;
+  pathStraightness: number | null;
+  activeApp: string | null;
+  activeAppBundle: string | null;
+  activeTitle: string | null;
+  activeUrl: string | null;
+}
+
+/**
+ * Two reports of one minute → the minute. Counts keep the larger value, so a
+ * re-sent total is idempotent and a partial can never overwrite the fuller
+ * report of its minute (an agent restarted mid-minute used to send its tail,
+ * which replaced the head the server already had). Timing CVs follow the
+ * report with more of the input they were measured on.
+ */
+export function mergeMinuteReports(a: IngestRow, b: IngestRow): IngestRow {
+  const keysFromB = b.keystrokes >= a.keystrokes;
+  const movesFromB = b.mouseDistancePx >= a.mouseDistancePx;
+  return {
+    id: a.id,
+    timeEntryId: b.timeEntryId ?? a.timeEntryId,
+    bucketStart: a.bucketStart,
+    keystrokes: Math.max(a.keystrokes, b.keystrokes),
+    clicks: Math.max(a.clicks, b.clicks),
+    mouseDistancePx: Math.max(a.mouseDistancePx, b.mouseDistancePx),
+    scrollEvents: Math.max(a.scrollEvents, b.scrollEvents),
+    ikiCv: keysFromB ? b.ikiCv ?? a.ikiCv : a.ikiCv ?? b.ikiCv,
+    moveSpeedCv: movesFromB ? b.moveSpeedCv ?? a.moveSpeedCv : a.moveSpeedCv ?? b.moveSpeedCv,
+    pathStraightness: movesFromB ? b.pathStraightness ?? a.pathStraightness : a.pathStraightness ?? b.pathStraightness,
+    activeApp: b.activeApp ?? a.activeApp,
+    activeAppBundle: b.activeAppBundle ?? a.activeAppBundle,
+    activeTitle: b.activeTitle ?? a.activeTitle,
+    activeUrl: b.activeUrl ?? a.activeUrl,
+  };
+}
+
+const INGEST_COLUMNS = 15;
+
+/**
+ * Insert-or-merge a batch in one statement. The merge is the SQL twin of
+ * {@link mergeMinuteReports} and runs atomically per row, so two requests
+ * carrying the same minute cannot lose either one's counts.
+ */
+async function upsertMinutes(userId: string, rows: IngestRow[]): Promise<void> {
+  if (rows.length === 0) return;
+  const params: unknown[] = [];
+  const tuples = rows.map((r, i) => {
+    const o = i * INGEST_COLUMNS;
+    params.push(
+      r.id, userId, r.timeEntryId, r.bucketStart.toISOString(),
+      r.keystrokes, r.clicks, r.mouseDistancePx, r.scrollEvents,
+      r.ikiCv, r.moveSpeedCv, r.pathStraightness,
+      r.activeApp, r.activeAppBundle, r.activeTitle, r.activeUrl,
+    );
+    return `($${o + 1}::text, $${o + 2}::text, $${o + 3}::text, ($${o + 4}::timestamptz AT TIME ZONE 'UTC'),
+      $${o + 5}::int, $${o + 6}::int, $${o + 7}::int, $${o + 8}::int,
+      $${o + 9}::double precision, $${o + 10}::double precision, $${o + 11}::double precision,
+      $${o + 12}::text, $${o + 13}::text, $${o + 14}::text, $${o + 15}::text)`;
+  });
+  const cur = '"ActivitySample"';
+  await prisma.$executeRawUnsafe(
+    `INSERT INTO "ActivitySample" ("id", "userId", "timeEntryId", "bucketStart",
+       "keystrokes", "clicks", "mouseDistancePx", "scrollEvents",
+       "ikiCv", "moveSpeedCv", "pathStraightness",
+       "activeApp", "activeAppBundle", "activeTitle", "activeUrl")
+     VALUES ${tuples.join(',\n')}
+     ON CONFLICT ("userId", "bucketStart") DO UPDATE SET
+       "timeEntryId" = COALESCE(EXCLUDED."timeEntryId", ${cur}."timeEntryId"),
+       "keystrokes" = GREATEST(${cur}."keystrokes", EXCLUDED."keystrokes"),
+       "clicks" = GREATEST(${cur}."clicks", EXCLUDED."clicks"),
+       "mouseDistancePx" = GREATEST(${cur}."mouseDistancePx", EXCLUDED."mouseDistancePx"),
+       "scrollEvents" = GREATEST(${cur}."scrollEvents", EXCLUDED."scrollEvents"),
+       "ikiCv" = CASE WHEN EXCLUDED."keystrokes" >= ${cur}."keystrokes"
+         THEN COALESCE(EXCLUDED."ikiCv", ${cur}."ikiCv") ELSE COALESCE(${cur}."ikiCv", EXCLUDED."ikiCv") END,
+       "moveSpeedCv" = CASE WHEN EXCLUDED."mouseDistancePx" >= ${cur}."mouseDistancePx"
+         THEN COALESCE(EXCLUDED."moveSpeedCv", ${cur}."moveSpeedCv") ELSE COALESCE(${cur}."moveSpeedCv", EXCLUDED."moveSpeedCv") END,
+       "pathStraightness" = CASE WHEN EXCLUDED."mouseDistancePx" >= ${cur}."mouseDistancePx"
+         THEN COALESCE(EXCLUDED."pathStraightness", ${cur}."pathStraightness")
+         ELSE COALESCE(${cur}."pathStraightness", EXCLUDED."pathStraightness") END,
+       "activeApp" = COALESCE(EXCLUDED."activeApp", ${cur}."activeApp"),
+       "activeAppBundle" = COALESCE(EXCLUDED."activeAppBundle", ${cur}."activeAppBundle"),
+       "activeTitle" = COALESCE(EXCLUDED."activeTitle", ${cur}."activeTitle"),
+       "activeUrl" = COALESCE(EXCLUDED."activeUrl", ${cur}."activeUrl")`,
+    ...params,
+  );
+}
+
 /**
  * Batch-ingest per-minute activity samples. Idempotent on (userId, bucketStart):
- * re-uploading the same minute updates in place, so agent retries never
- * duplicate. Samples are content-free counts + timing CVs.
+ * a minute reported again is MERGED (larger counts win), so agent retries never
+ * duplicate and a late partial never erases what the minute already had.
+ * Samples are content-free counts + timing CVs.
  */
 activityRouter.post('/', validate(ActivitySamplesRequest, 'body'), async (req, res, next) => {
   try {
@@ -52,55 +149,44 @@ activityRouter.post('/', validate(ActivitySamplesRequest, 'body'), async (req, r
     const ownedEntryIds = new Set(ownedEntries.map((entry) => entry.id));
     let detached = 0;
 
-    await prisma.$transaction(
-      samples.map((s) => {
-        const timeEntryId = s.timeEntryId && ownedEntryIds.has(s.timeEntryId) ? s.timeEntryId : null;
-        if (s.timeEntryId && timeEntryId === null) detached += 1;
-        const scrubbed = applyPolicyToActive(
-          {
-            activeApp: s.activeApp ?? null,
-            activeAppBundle: s.activeAppBundle ?? null,
-            activeTitle: s.activeTitle ?? null,
-            activeUrl: s.activeUrl ?? null,
-          },
-          policy,
-        );
-        return prisma.activitySample.upsert({
-          where: { userId_bucketStart: { userId, bucketStart: new Date(s.bucketStart) } },
-          create: {
-            id: s.id,
-            userId,
-            timeEntryId,
-            bucketStart: new Date(s.bucketStart),
-            keystrokes: s.keystrokes,
-            clicks: s.clicks,
-            mouseDistancePx: s.mouseDistancePx,
-            scrollEvents: s.scrollEvents,
-            ikiCv: s.ikiCv ?? null,
-            moveSpeedCv: s.moveSpeedCv ?? null,
-            pathStraightness: s.pathStraightness ?? null,
-            activeApp: scrubbed.activeApp,
-            activeAppBundle: scrubbed.activeAppBundle,
-            activeTitle: scrubbed.activeTitle,
-            activeUrl: scrubbed.activeUrl,
-          },
-          update: {
-            timeEntryId,
-            keystrokes: s.keystrokes,
-            clicks: s.clicks,
-            mouseDistancePx: s.mouseDistancePx,
-            scrollEvents: s.scrollEvents,
-            ikiCv: s.ikiCv ?? null,
-            moveSpeedCv: s.moveSpeedCv ?? null,
-            pathStraightness: s.pathStraightness ?? null,
-            activeApp: scrubbed.activeApp,
-            activeAppBundle: scrubbed.activeAppBundle,
-            activeTitle: scrubbed.activeTitle,
-            activeUrl: scrubbed.activeUrl,
-          },
-        });
-      }),
-    );
+    // One row per minute: a batch may carry the same minute twice (older
+    // agents stored a minute once per seal), and one statement cannot touch
+    // a row twice.
+    const byMinute = new Map<number, IngestRow>();
+    for (const s of samples) {
+      const timeEntryId = s.timeEntryId && ownedEntryIds.has(s.timeEntryId) ? s.timeEntryId : null;
+      if (s.timeEntryId && timeEntryId === null) detached += 1;
+      const scrubbed = applyPolicyToActive(
+        {
+          activeApp: s.activeApp ?? null,
+          activeAppBundle: s.activeAppBundle ?? null,
+          activeTitle: s.activeTitle ?? null,
+          activeUrl: s.activeUrl ?? null,
+        },
+        policy,
+      );
+      const bucketStart = new Date(s.bucketStart);
+      const row: IngestRow = {
+        id: s.id,
+        timeEntryId,
+        bucketStart,
+        keystrokes: s.keystrokes,
+        clicks: s.clicks,
+        mouseDistancePx: s.mouseDistancePx,
+        scrollEvents: s.scrollEvents,
+        ikiCv: s.ikiCv ?? null,
+        moveSpeedCv: s.moveSpeedCv ?? null,
+        pathStraightness: s.pathStraightness ?? null,
+        activeApp: scrubbed.activeApp ?? null,
+        activeAppBundle: scrubbed.activeAppBundle ?? null,
+        activeTitle: scrubbed.activeTitle ?? null,
+        activeUrl: scrubbed.activeUrl ?? null,
+      };
+      const key = bucketStart.getTime();
+      const seen = byMinute.get(key);
+      byMinute.set(key, seen ? mergeMinuteReports(seen, row) : row);
+    }
+    await upsertMinutes(userId, [...byMinute.values()]);
 
     if (detached > 0) {
       logger.warn({ userId, detached, submitted: samples.length }, 'activity samples detached from unavailable timer entries');

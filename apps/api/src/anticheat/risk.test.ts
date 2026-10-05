@@ -155,3 +155,22 @@ describe('cumulative risk', () => {
     expect(r.riskScore).toBe(100); // capped
   });
 });
+
+describe('zero-activity tracked minutes', () => {
+  const quiet = () => s({});
+
+  it('a long stretch of quiet tracked minutes is clean', () => {
+    expect(assessWindow(repeat(60, quiet()))).toEqual({ hardReject: false, riskScore: 0, flags: [] });
+  });
+
+  it('quiet minutes do not let one busy minute claim a pattern', () => {
+    // One minute of typing, padded to "enough minutes" by zeros: not keyboard-only evidence.
+    const w = [s({ keystrokes: 250, ikiCv: 0.6 }), ...repeat(9, quiet())];
+    expect(assessWindow(w).flags).toHaveLength(0);
+  });
+
+  it('do not hide a real pattern either', () => {
+    const w = [...repeat(6, s({ keystrokes: 100, ikiCv: 0.6 })), ...repeat(20, quiet())];
+    expect(assessWindow(w).flags.map((f) => f.type)).toContain('SINGLE_CHANNEL');
+  });
+});
