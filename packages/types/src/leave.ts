@@ -55,12 +55,6 @@ export function roundToHalfDay(days: number): number {
   return Math.round(days / LEAVE_DAY_STEP) * LEAVE_DAY_STEP + 0;
 }
 
-/** Render a day amount the way reports and cards show it: "1", "0.5", "2.5". */
-export function formatLeaveDays(days: number): string {
-  const r = roundToHalfDay(days);
-  return Number.isInteger(r) ? String(r) : r.toFixed(1);
-}
-
 // ---------------------------------------------------------------------------
 // Portion — which half of the day
 // ---------------------------------------------------------------------------

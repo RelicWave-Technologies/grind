@@ -5,7 +5,7 @@ import { createTimoAiModel, resolveAiSettings } from './provider';
 import { env } from '../../env';
 import { redactJson, redactText } from '../redact';
 
-export const SafeActionSchema = z.enum([
+const SafeActionSchema = z.enum([
   'NONE',
   'LOG_ISSUE',
   'ASK_CLARIFICATION',
@@ -16,7 +16,7 @@ export const SafeActionSchema = z.enum([
   'LIST_ISSUES',
 ]);
 
-export const TesterDecisionSchema = z.object({
+const TesterDecisionSchema = z.object({
   intent: z.enum(['ISSUE_REPORT', 'DOC_QUESTION', 'USAGE_STATUS', 'PING_REQUEST', 'GENERAL_HELP', 'ISSUE_LIST', 'IRRELEVANT']),
   confidence: z.number().min(0).max(1),
   language: z.string().min(2).max(40),
@@ -32,7 +32,7 @@ export const TesterDecisionSchema = z.object({
 
 export type TesterDecision = z.infer<typeof TesterDecisionSchema>;
 
-export const DocAnswerSchema = z.object({
+const DocAnswerSchema = z.object({
   confidence: z.number().min(0).max(1),
   answer: z.string().max(1600).nullable(),
   missingInfo: z.string().max(500).nullable(),
@@ -42,7 +42,7 @@ export const DocAnswerSchema = z.object({
 
 export type DocAnswer = z.infer<typeof DocAnswerSchema>;
 
-export const GeneralAnswerSchema = z.object({
+const GeneralAnswerSchema = z.object({
   confidence: z.number().min(0).max(1),
   answer: z.string().max(1600),
   citations: z.array(z.object({ title: z.string(), url: z.string().nullable() })),

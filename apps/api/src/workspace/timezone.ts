@@ -14,7 +14,7 @@ export async function getWorkspaceTimezone(workspaceId: string): Promise<string>
   return workspace.timezone;
 }
 
-export async function setWorkspaceTimezone(
+async function setWorkspaceTimezone(
   tx: Prisma.TransactionClient,
   workspaceId: string,
   timezone: string,

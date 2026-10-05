@@ -25,7 +25,6 @@ export const PERMISSIONS = [
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
-export type DisplayRole = Role;
 
 const MEMBER_CAPABILITIES = [
   'profile.self.read',
@@ -63,12 +62,4 @@ export function hasPermission(roleOrCapabilities: Role | readonly Permission[], 
       ? ROLE_CAPABILITIES[roleOrCapabilities]
       : roleOrCapabilities;
   return capabilities.includes(permission);
-}
-
-export function isAdminRole(role: Role): boolean {
-  return role === 'ADMIN';
-}
-
-export function isManagerOrAboveRole(role: Role): boolean {
-  return role === 'ADMIN' || role === 'MANAGER';
 }

@@ -279,5 +279,3 @@ overviewRouter.get('/', async (req, res, next) => {
 function roundH(ms: number): number {
   return Math.round((ms / HOUR) * 100) / 100;
 }
-
-export default overviewRouter;

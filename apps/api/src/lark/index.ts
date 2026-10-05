@@ -8,7 +8,6 @@ import { HttpLarkMessenger, type LarkMessenger } from './messenger';
 import { HttpProfileClient, type ProfileClient } from './profile';
 
 export {
-  hasLarkCredentials,
   isLarkConfigured,
   isLarkLoginConfigured,
   getLarkConfig,
@@ -30,20 +29,16 @@ export {
 } from './oauth';
 export type { AgentLoginRouteHint, LarkLoginStatePayload } from './oauth';
 export type { ProfileClient, LarkProfile } from './profile';
-export { normalizeEmail } from './profile';
-export { mapTasks, loggedMsByGuid, toEpochMs, buildCreateTaskPayload, LarkTaskApiError } from './tasks';
+export { loggedMsByGuid, LarkTaskApiError } from './tasks';
 export type { UserTaskClient, LarkTaskDto, CreateLarkTaskInput } from './tasks';
 export {
   buildApprovalCard,
   buildDecidedCard,
-  buildSupersededCard,
   buildUpdatedApprovalCard,
   buildCancelledCard,
-  buildUnavailableRequestCard,
   buildStaleRequestCard,
 } from './cards';
-export { decideRequest } from './decide';
-export { startCardCallback, startLarkEventHarness } from './cardCallback';
+export { startCardCallback } from './cardCallback';
 export type {
   ApprovalCardInput,
   DecidedCardInput,

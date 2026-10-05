@@ -30,10 +30,6 @@ export function fmtMinuteOfDay(minute: number): string {
   }).format(d);
 }
 
-export function fmtRange(startMs: number, endMs: number, timeZone: string): string {
-  return `${fmtTime(startMs, timeZone)} – ${fmtTime(endMs, timeZone)}`;
-}
-
 export function fmtDateShort(ms: number, timeZone: string): string {
   return new Intl.DateTimeFormat(undefined, {
     month: 'short',

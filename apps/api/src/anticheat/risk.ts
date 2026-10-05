@@ -52,15 +52,15 @@ export interface WindowAssessment {
 
 // --- Tunable thresholds (exported so the review UI / tests reference one source) ---
 export const IMPOSSIBLE_KEYS_PER_MIN = 1100;
-export const METRONOMIC_IKI_CV = 0.1;
-export const MIN_KEYS_FOR_IKI = 30;
-export const LINEAR_STRAIGHTNESS = 0.97;
-export const LINEAR_SPEED_CV = 0.05;
-export const MIN_MOVE_PX = 500;
-export const JIGGLER_SPEED_CV = 0.1;
-export const IDLE_MOUSE_PX = 50;
+const METRONOMIC_IKI_CV = 0.1;
+const MIN_KEYS_FOR_IKI = 30;
+const LINEAR_STRAIGHTNESS = 0.97;
+const LINEAR_SPEED_CV = 0.05;
+const MIN_MOVE_PX = 500;
+const JIGGLER_SPEED_CV = 0.1;
+const IDLE_MOUSE_PX = 50;
 export const MIN_WINDOW_FOR_PATTERN = 5; // need enough minutes to claim a pattern
-export const SINGLE_CHANNEL_MIN_VOLUME = 200; // total of the active channel
+const SINGLE_CHANNEL_MIN_VOLUME = 200; // total of the active channel
 
 export const RISK_WEIGHTS: Record<FlagType, number> = {
   IMPOSSIBLE_RATE: 100,
