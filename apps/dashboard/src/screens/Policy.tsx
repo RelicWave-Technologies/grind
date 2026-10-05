@@ -35,33 +35,6 @@ import {
 import type { Rail } from '../ui';
 import './policy.css';
 
-interface PayrollPolicyDto {
-  halfDayLowerMin: number;
-  halfDayUpperMin: number;
-  fullDayLowerMin: number;
-  fullDayUpperMin: number;
-  monthlyLowerMin: number;
-  timezone: string;
-  approvalReminderDays: number[];
-  approvalReminderTime: string;
-  payrollSheetSendDay: number;
-  payrollSheetSendTime: string;
-  sendPayrollSheetTo: 'all_admins';
-  updatedAt: string;
-}
-
-interface PayrollFormState {
-  halfDayLowerMin: string;
-  fullDayLowerMin: string;
-  fullDayUpperMin: string;
-  monthlyLowerMin: string;
-  timezone: string;
-  approvalReminderDays: string;
-  approvalReminderTime: string;
-  payrollSheetSendDay: string;
-  payrollSheetSendTime: string;
-}
-
 const IDLE_THRESHOLD_OPTIONS = [1, 3, 5, 10, 15, 30, 45, 60, 120];
 const RETENTION_OPTIONS = [30, 60, 90, 180, 365];
 type MonitoringRisk = 'NORMAL' | 'CAUTION' | 'HIGH';
@@ -84,17 +57,12 @@ export function PolicyScreen() {
     queryKey: ['workspace-policy'],
     queryFn: () => api<WorkspacePolicyDto>('/v1/admin/workspace-policy'),
   });
-  const payrollQ = useQuery({
-    queryKey: ['payroll-policy'],
-    queryFn: () => api<PayrollPolicyDto>('/v1/admin/payroll/policy'),
-  });
   const auditQ = useQuery({
     queryKey: ['admin', 'monitoring-settings-audits'],
     queryFn: () => api<MonitoringSettingsAuditListResponse>('/v1/admin/monitoring-settings-audits?limit=20'),
   });
 
   const [draft, setDraft] = useState<WorkspacePolicyDto | null>(null);
-  const [payrollOpen, setPayrollOpen] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
   const leaveQ = useQuery({
     queryKey: ['admin', 'leave-policy'],
@@ -127,21 +95,12 @@ export function PolicyScreen() {
       setPolicyRiskPrompt(null);
     },
   });
-  const payrollMutation = useMutation({
-    mutationFn: (patch: Record<string, unknown>) =>
-      api<PayrollPolicyDto>('/v1/admin/payroll/policy', { method: 'PATCH', json: patch }),
-    onSuccess: (next) => {
-      qc.setQueryData(['payroll-policy'], next);
-      qc.invalidateQueries({ queryKey: ['admin', 'payroll'] });
-      setPayrollOpen(false);
-    },
-  });
 
   const header = (
     <PageHeader
       eyebrow="Admin · Policy"
       title="Workspace policy"
-      subtitle="Admin defaults for capture, screenshots, idle breaks, payroll, and Lark close."
+      subtitle="Admin defaults for capture, screenshots, idle breaks, and attendance rules."
     />
   );
 
@@ -231,7 +190,7 @@ export function PolicyScreen() {
       <PageHeader
         eyebrow="Admin · Policy"
         title="Workspace policy"
-        subtitle="Admin defaults for capture, screenshots, idle breaks, payroll, and Lark close."
+        subtitle="Admin defaults for capture, screenshots, idle breaks, and attendance rules."
         actions={
           <Toolbar>
             <Tag status={dirty ? 'warn' : 'success'} dot>
@@ -270,38 +229,6 @@ export function PolicyScreen() {
           </Banner>
         ) : null}
 
-        <div className="pol-payroll-grid">
-          {payrollQ.isLoading || !payrollQ.data ? (
-            <Card title="Payroll policy">
-              <List>
-                <ListRow title={<Skeleton w={180} h={14} />} subtitle={<Skeleton w={320} h={12} />} />
-                <ListRow title={<Skeleton w={180} h={14} />} subtitle={<Skeleton w={320} h={12} />} />
-              </List>
-            </Card>
-          ) : (
-            <>
-              <Card
-                title="Payroll rules"
-                className="pol-card-compact"
-                action={<Button size="sm" variant="secondary" icon={<Pencil size={14} />} onClick={() => setPayrollOpen(true)}>Edit</Button>}
-              >
-                <div className="pol-payroll-rule-grid">
-                  <PolicyRule label="Half day" value={`${formatMinutes(payrollQ.data.halfDayLowerMin)} - ${formatMinutes(payrollQ.data.halfDayUpperMin)}`} />
-                  <PolicyRule label="Full day" value={`${formatMinutes(payrollQ.data.fullDayLowerMin)} - ${formatMinutes(payrollQ.data.fullDayUpperMin)}`} />
-                  <PolicyRule label="Monthly lower" value={formatMinutes(payrollQ.data.monthlyLowerMin)} />
-                </div>
-              </Card>
-              <Card title="Month close" className="pol-card-compact" action={<Tag mono>Lark</Tag>}>
-                <div className="pol-payroll-rule-grid pol-payroll-rule-grid--close">
-                  <PolicyRule label="Reminders" value={`${payrollQ.data.approvalReminderDays.join(', ')} · ${payrollQ.data.approvalReminderTime}`} hint="Members + managers" />
-                  <PolicyRule label="Sheet send" value={`${payrollQ.data.payrollSheetSendDay} · ${payrollQ.data.payrollSheetSendTime}`} hint="Admins" />
-                  <PolicyRule label="Timezone" value={payrollQ.data.timezone} hint="Close jobs" />
-                </div>
-              </Card>
-            </>
-          )}
-        </div>
-
         {leaveQ.data && (
           <div className="pol-payroll-grid">
             <Card
@@ -335,10 +262,6 @@ export function PolicyScreen() {
               </div>
             </Card>
           </div>
-        )}
-
-        {payrollQ.isError && (
-          <Banner status="danger">Couldn’t load payroll policy: {(payrollQ.error as Error).message}</Banner>
         )}
 
         <div className="pol-grid">
@@ -471,15 +394,6 @@ export function PolicyScreen() {
             />
           )}
         </Card>
-        {payrollQ.data && payrollOpen && (
-          <PayrollPolicyModal
-            policy={payrollQ.data}
-            saving={payrollMutation.isPending}
-            error={payrollMutation.error instanceof Error ? payrollMutation.error.message : null}
-            onClose={() => setPayrollOpen(false)}
-            onSave={(patch) => payrollMutation.mutate(patch)}
-          />
-        )}
         {leaveQ.data && rulesOpen && (
           <AttendanceRulesModal
             policy={leaveQ.data}
@@ -651,135 +565,6 @@ function MonitoringRiskModal({
       </section>
     </div>
   );
-  return createPortal(modal, document.body);
-}
-
-function payrollPolicyToForm(policy: PayrollPolicyDto): PayrollFormState {
-  return {
-    halfDayLowerMin: String(policy.halfDayLowerMin),
-    fullDayLowerMin: String(policy.fullDayLowerMin),
-    fullDayUpperMin: String(policy.fullDayUpperMin),
-    monthlyLowerMin: String(policy.monthlyLowerMin),
-    timezone: policy.timezone,
-    approvalReminderDays: policy.approvalReminderDays.join(', '),
-    approvalReminderTime: policy.approvalReminderTime,
-    payrollSheetSendDay: String(policy.payrollSheetSendDay),
-    payrollSheetSendTime: policy.payrollSheetSendTime,
-  };
-}
-
-function PayrollPolicyModal({
-  policy,
-  saving,
-  error,
-  onClose,
-  onSave,
-}: {
-  policy: PayrollPolicyDto;
-  saving: boolean;
-  error: string | null;
-  onClose: () => void;
-  onSave: (patch: Record<string, unknown>) => void;
-}) {
-  const [form, setForm] = useState<PayrollFormState>(() => payrollPolicyToForm(policy));
-  const set = (key: keyof PayrollFormState, value: string) => setForm((f) => ({ ...f, [key]: value }));
-
-  function submit() {
-    const fullDayLowerMin = Number.parseInt(form.fullDayLowerMin, 10);
-    onSave({
-      halfDayLowerMin: Number.parseInt(form.halfDayLowerMin, 10),
-      halfDayUpperMin: fullDayLowerMin,
-      fullDayLowerMin,
-      fullDayUpperMin: Number.parseInt(form.fullDayUpperMin, 10),
-      monthlyLowerMin: Number.parseInt(form.monthlyLowerMin, 10),
-      timezone: form.timezone.trim(),
-      approvalReminderDays: form.approvalReminderDays
-        .split(',')
-        .map((day) => Number.parseInt(day.trim(), 10))
-        .filter((day) => Number.isFinite(day)),
-      approvalReminderTime: form.approvalReminderTime,
-      payrollSheetSendDay: Number.parseInt(form.payrollSheetSendDay, 10),
-      payrollSheetSendTime: form.payrollSheetSendTime,
-      sendPayrollSheetTo: 'all_admins',
-    });
-  }
-
-  const modal = (
-    <div className="ui-overlay pol-modal-layer" role="presentation" onMouseDown={onClose}>
-      <section className="pol-modal" role="dialog" aria-modal="true" aria-labelledby="pol-payroll-title" onMouseDown={(e) => e.stopPropagation()}>
-        <header className="pol-modal-head">
-          <div className="pol-modal-title">
-            <div className="ui-t-eyebrow">Payroll policy</div>
-            <h2 id="pol-payroll-title" className="ui-t-title">Rules and Lark month close</h2>
-            <p className="ui-t-small">Set thresholds and Lark close timing.</p>
-          </div>
-          <IconButton aria-label="Close" icon={<X size={18} />} onClick={onClose} />
-        </header>
-        <div className="pol-modal-body">
-          <section className="pol-form-section" aria-label="Payable day rules">
-            <div className="pol-form-section-head">
-              <div>
-                <h3 className="ui-t-h3">Payable day rules</h3>
-                <p className="ui-t-small">Shift-working days only.</p>
-              </div>
-              <Tag mono>Admin</Tag>
-            </div>
-            <div className="pol-form-grid pol-form-grid--rules">
-              <Field label="Half lower" hint="Min for Half.">
-                <Input className="pol-input-mono" value={form.halfDayLowerMin} onChange={(e) => set('halfDayLowerMin', e.target.value)} inputMode="numeric" />
-              </Field>
-              <Field label="Full lower" hint="Half upper too.">
-                <Input className="pol-input-mono" value={form.fullDayLowerMin} onChange={(e) => set('fullDayLowerMin', e.target.value)} inputMode="numeric" />
-              </Field>
-              <Field label="Full upper" hint="Extra ignored.">
-                <Input className="pol-input-mono" value={form.fullDayUpperMin} onChange={(e) => set('fullDayUpperMin', e.target.value)} inputMode="numeric" />
-              </Field>
-              <Field label="Monthly lower" hint="Guarantee line.">
-                <Input className="pol-input-mono" value={form.monthlyLowerMin} onChange={(e) => set('monthlyLowerMin', e.target.value)} inputMode="numeric" />
-              </Field>
-            </div>
-          </section>
-
-          <section className="pol-form-section" aria-label="Lark month close">
-            <div className="pol-form-section-head">
-              <div>
-                <h3 className="ui-t-h3">Lark month close</h3>
-                <p className="ui-t-small">Reminders notify member + manager. Sheets go to admins.</p>
-              </div>
-              <Tag mono>Lark</Tag>
-            </div>
-            <div className="pol-form-grid pol-form-grid--close">
-              <Field label="Timezone" hint="IANA zone.">
-                <Input className="pol-input-mono" value={form.timezone} onChange={(e) => set('timezone', e.target.value)} />
-              </Field>
-              <Field label="Reminder days" hint="Month days.">
-                <Input className="pol-input-mono" value={form.approvalReminderDays} onChange={(e) => set('approvalReminderDays', e.target.value)} />
-              </Field>
-              <Field label="Reminder time" hint="Member + manager.">
-                <Input className="pol-input-mono" type="time" value={form.approvalReminderTime} onChange={(e) => set('approvalReminderTime', e.target.value)} />
-              </Field>
-              <Field label="Sheet day" hint="Month day.">
-                <Input className="pol-input-mono" value={form.payrollSheetSendDay} onChange={(e) => set('payrollSheetSendDay', e.target.value)} inputMode="numeric" />
-              </Field>
-              <Field label="Sheet time" hint="Admins.">
-                <Input className="pol-input-mono" type="time" value={form.payrollSheetSendTime} onChange={(e) => set('payrollSheetSendTime', e.target.value)} />
-              </Field>
-            </div>
-          </section>
-
-          <Banner status="info" className="pol-modal-note">
-            Reminders go to the member/requester and manager/approver. Payroll sheets go to admins.
-          </Banner>
-          {error && <Banner status="danger">{error}</Banner>}
-        </div>
-        <footer className="pol-modal-foot">
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button variant="primary" icon={<Save size={15} />} onClick={submit} loading={saving}>Save payroll policy</Button>
-        </footer>
-      </section>
-    </div>
-  );
-
   return createPortal(modal, document.body);
 }
 

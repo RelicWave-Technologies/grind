@@ -69,5 +69,3 @@ workspaceRouter.get('/users', async (req, res, next) => {
     next(err);
   }
 });
-
-export default workspaceRouter;

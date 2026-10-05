@@ -55,12 +55,6 @@ export function roundToHalfDay(days: number): number {
   return Math.round(days / LEAVE_DAY_STEP) * LEAVE_DAY_STEP + 0;
 }
 
-/** Render a day amount the way reports and cards show it: "1", "0.5", "2.5". */
-export function formatLeaveDays(days: number): string {
-  const r = roundToHalfDay(days);
-  return Number.isInteger(r) ? String(r) : r.toFixed(1);
-}
-
 // ---------------------------------------------------------------------------
 // Portion — which half of the day
 // ---------------------------------------------------------------------------
@@ -346,32 +340,3 @@ export const LeaveRequestDtoSchema = z.object({
 });
 export type LeaveRequestDto = z.infer<typeof LeaveRequestDtoSchema>;
 
-export const CreateLeaveRequestSchema = z
-  .object({
-    startDate: IsoDateSchema,
-    endDate: IsoDateSchema,
-    portion: LeavePortionSchema.default('FULL'),
-    kind: LeaveKindSchema.default('PAID'),
-    reason: z.string().trim().min(1).max(1000),
-  })
-  .refine((v) => v.endDate >= v.startDate, { message: 'endDate must not be before startDate' })
-  .refine((v) => v.portion === 'FULL' || v.startDate === v.endDate, {
-    message: 'a half-day request must start and end on the same date',
-  });
-export type CreateLeaveRequest = z.infer<typeof CreateLeaveRequestSchema>;
-
-export const DecideLeaveRequestSchema = z.object({
-  decision: z.enum(['APPROVE', 'REJECT']),
-  note: z.string().trim().max(500).optional(),
-});
-export type DecideLeaveRequest = z.infer<typeof DecideLeaveRequestSchema>;
-
-/** Quote returned before submitting, so the requester sees the real cost. */
-export const LeaveQuoteSchema = z.object({
-  chargedDays: z.number(),
-  balanceDays: z.number(),
-  balanceAfterDays: z.number(),
-  sufficient: z.boolean(),
-  days: z.array(DayStatusSchema),
-});
-export type LeaveQuote = z.infer<typeof LeaveQuoteSchema>;

@@ -18,11 +18,6 @@ export function Toolbar({ children, className, ...rest }: ToolbarProps) {
   );
 }
 
-/** A hairline divider for grouping controls inside a Toolbar. */
-export function ToolbarDivider({ className, ...rest }: React.HTMLAttributes<HTMLSpanElement>) {
-  return <span className={cx('ui-toolbar__divider', className)} aria-hidden {...rest} />;
-}
-
 /* DateStepper — two IconButtons around a mono date pill. */
 export interface DateStepperProps {
   value: ReactNode;

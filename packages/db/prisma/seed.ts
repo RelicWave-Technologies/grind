@@ -88,25 +88,6 @@ async function main() {
     },
   });
 
-  await prisma.payrollPolicy.upsert({
-    where: { workspaceId: ws.id },
-    update: { timezone: 'Asia/Kolkata' },
-    create: {
-      workspaceId: ws.id,
-      halfDayLowerMin: 240,
-      halfDayUpperMin: 480,
-      fullDayLowerMin: 480,
-      fullDayUpperMin: 600,
-      monthlyLowerMin: 9_600,
-      timezone: 'Asia/Kolkata',
-      approvalReminderDays: [3, 4],
-      approvalReminderTime: '00:00',
-      payrollSheetSendDay: 5,
-      payrollSheetSendTime: '00:00',
-      sendPayrollSheetTo: 'ALL_ADMINS',
-    },
-  });
-
   const payrollUser = await prisma.user.upsert({
     where: { email: 'payroll-may-cases@grind.local' },
     update: {

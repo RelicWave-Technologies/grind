@@ -1,46 +1,4 @@
-import { createHash } from 'node:crypto';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { prisma } from '@grind/db';
-import { redactText } from './redact';
-
-const execFileAsync = promisify(execFile);
-
-export async function refreshKnowledgeSource(sourceId: string) {
-  const source = await prisma.testerOpsKnowledgeSource.findUnique({ where: { id: sourceId } });
-  if (!source || !source.enabled) throw new Error('knowledge_source_not_found');
-  try {
-    const { stdout } = await execFileAsync(
-      'lark-cli',
-      ['docs', '+fetch', '--api-version', 'v2', '--doc', source.token, '--doc-format', 'markdown', '--as', 'user'],
-      { timeout: 30_000, maxBuffer: 1024 * 1024 },
-    );
-    const content = parseLarkFetch(stdout);
-    const chunks = chunkMarkdown(content);
-    await prisma.$transaction(async (tx) => {
-      await tx.testerOpsKnowledgeChunk.deleteMany({ where: { sourceId } });
-      await tx.testerOpsKnowledgeChunk.createMany({
-        data: chunks.map((chunk, ordinal) => ({
-          sourceId,
-          ordinal,
-          title: chunk.title || source.title,
-          content: chunk.content,
-          contentHash: sha256(chunk.content),
-          tokenCount: Math.ceil(chunk.content.length / 4),
-        })),
-      });
-      await tx.testerOpsKnowledgeSource.update({
-        where: { id: sourceId },
-        data: { lastFetchedAt: new Date(), lastError: null, contentHash: sha256(content) },
-      });
-    });
-    return { chunks: chunks.length };
-  } catch (err) {
-    const lastError = redactText(err instanceof Error ? err.message : String(err));
-    await prisma.testerOpsKnowledgeSource.update({ where: { id: sourceId }, data: { lastError } });
-    throw new Error(lastError);
-  }
-}
 
 export async function retrieveKnowledgeChunks(workspaceId: string, query: string, take = 8) {
   const chunks = await prisma.testerOpsKnowledgeChunk.findMany({
@@ -66,36 +24,6 @@ export async function retrieveKnowledgeChunks(workspaceId: string, query: string
     .sort((a, b) => b.score - a.score)
     .slice(0, take)
     .map(({ score: _score, ...chunk }) => chunk);
-}
-
-function parseLarkFetch(stdout: string): string {
-  try {
-    const parsed = JSON.parse(stdout) as { data?: { document?: { content?: unknown } } };
-    if (typeof parsed.data?.document?.content === 'string') return parsed.data.document.content;
-  } catch {
-    // Some CLI versions may print markdown directly.
-  }
-  return stdout;
-}
-
-function chunkMarkdown(content: string): Array<{ title: string; content: string }> {
-  const lines = content.split(/\r?\n/);
-  const chunks: Array<{ title: string; content: string }> = [];
-  let title = 'Overview';
-  let buf: string[] = [];
-  for (const line of lines) {
-    const heading = /^(#{1,3})\s+(.+)$/.exec(line);
-    if (heading && buf.join('\n').trim()) {
-      chunks.push({ title, content: buf.join('\n').trim().slice(0, 4000) });
-      buf = [];
-      title = heading[2]!.trim();
-    } else if (heading) {
-      title = heading[2]!.trim();
-    }
-    buf.push(line);
-  }
-  if (buf.join('\n').trim()) chunks.push({ title, content: buf.join('\n').trim().slice(0, 4000) });
-  return chunks.slice(0, 200);
 }
 
 function terms(input: string): Set<string> {
@@ -145,7 +73,3 @@ const STOPWORDS = new Set([
   'timo',
   'please',
 ]);
-
-function sha256(input: string): string {
-  return createHash('sha256').update(input).digest('hex');
-}

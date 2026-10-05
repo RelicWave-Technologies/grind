@@ -2,7 +2,7 @@ import { forwardRef } from 'react';
 import type { ReactNode } from 'react';
 import { cx } from './util';
 
-/* §5.9 Field (+ Input / Select / Textarea / Toggle / Checkbox / Radio).
+/* §5.9 Field (+ Input / Select / Textarea / Toggle / Checkbox).
    <Field> wraps any control with an eyebrow label, hint, or error. Controls
    share the .ui-control base: one height, hairline border, accent focus ring. */
 
@@ -116,13 +116,4 @@ export const Checkbox = forwardRef<HTMLInputElement, CheckboxProps>(function Che
   ref,
 ) {
   return <input ref={ref} type="checkbox" className={cx('ui-checkbox', className)} {...rest} />;
-});
-
-export type RadioProps = Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type'>;
-
-export const Radio = forwardRef<HTMLInputElement, RadioProps>(function Radio(
-  { className, ...rest },
-  ref,
-) {
-  return <input ref={ref} type="radio" className={cx('ui-radio', className)} {...rest} />;
 });

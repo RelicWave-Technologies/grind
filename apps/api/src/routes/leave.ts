@@ -3,8 +3,6 @@ import { prisma } from '@grind/db';
 import {
   AttendanceRuleModeSchema,
   CreateHolidaySchema,
-  CreateLeaveRequestSchema,
-  DecideLeaveRequestSchema,
   PatchHolidaySchema,
   PatchLeavePolicySchema,
   SignedLeaveDaysSchema,
@@ -16,8 +14,6 @@ import { z } from 'zod';
 import { requireAccessToken } from '../middleware/auth';
 import { attachScope, requireAdmin } from '../middleware/scope';
 import {
-  cancelLeaveRequest,
-  decideLeaveRequest,
   ensureAccruals,
   leaveDecidedInLark,
   leaveDateRange,
@@ -26,8 +22,6 @@ import {
   loadLedgerEntries,
   loadOrCreateLeavePolicy,
   loadWorkingCalendar,
-  quoteLeave,
-  submitLeaveRequest,
   toLeavePolicyDto,
   toIsoDate,
   fromIsoDate,
@@ -110,75 +104,6 @@ leaveRouter.get('/me/requests', async (req, res, next) => {
       take: 100,
     });
     res.json({ requests: rows.map(toLeaveRequestDto) });
-  } catch (err) {
-    next(err);
-  }
-});
-
-/** Price a prospective request before submitting it. */
-leaveRouter.post('/quote', async (req, res, next) => {
-  try {
-    if (!req.user || !req.scope) return res.status(401).json({ error: 'unauthorized' });
-    const parsed = CreateLeaveRequestSchema.safeParse(req.body);
-    if (!parsed.success) {
-      return res.status(400).json({ error: 'invalid_body', detail: parsed.error.issues[0]?.message });
-    }
-    const result = await quoteLeave({
-      workspaceId: req.scope.workspaceId,
-      userId: req.user.sub,
-      tz: req.scope.workspaceTimezone,
-      body: parsed.data,
-    });
-    if (!result.ok) return res.status(400).json({ error: result.error, detail: result.detail });
-    res.json(result.value);
-  } catch (err) {
-    next(err);
-  }
-});
-
-/** Submit a request. */
-leaveRouter.post('/requests', async (req, res, next) => {
-  try {
-    if (!req.user || !req.scope) return res.status(401).json({ error: 'unauthorized' });
-    const clientUuid = typeof req.body?.clientUuid === 'string' && req.body.clientUuid.trim()
-      ? req.body.clientUuid.trim()
-      : crypto.randomUUID();
-
-    const result = await submitLeaveRequest({
-      workspaceId: req.scope.workspaceId,
-      userId: req.user.sub,
-      tz: req.scope.workspaceTimezone,
-      clientUuid,
-      body: req.body,
-    });
-    if (!result.ok) {
-      const status = result.error === 'approval_dispatch_failed' ? 502 : 400;
-      return res.status(status).json({ error: result.error, detail: result.detail });
-    }
-    res.status(201).json(result.value);
-  } catch (err) {
-    next(err);
-  }
-});
-
-/** Cancel my own request. */
-leaveRouter.post('/requests/:id/cancel', async (req, res, next) => {
-  try {
-    if (!req.user) return res.status(401).json({ error: 'unauthorized' });
-    const existing = await prisma.leaveRequest.findUnique({
-      where: { id: req.params.id },
-      select: { userId: true },
-    });
-    if (!existing) return res.status(404).json({ error: 'not_found' });
-    if (existing.userId !== req.user.sub) return res.status(403).json({ error: 'forbidden' });
-
-    const result = await cancelLeaveRequest({
-      requestId: req.params.id,
-      actorId: req.user.sub,
-      isSelf: true,
-    });
-    if (!result.ok) return res.status(400).json({ error: result.error });
-    res.json(result.value);
   } catch (err) {
     next(err);
   }
@@ -403,67 +328,6 @@ adminLeaveRouter.patch('/policy', requireAdmin, async (req, res, next) => {
       data: parsed.data,
     });
     res.json(toLeavePolicyDto(updated));
-  } catch (err) {
-    next(err);
-  }
-});
-
-adminLeaveRouter.get('/requests', async (req, res, next) => {
-  try {
-    if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
-    const status = typeof req.query.status === 'string' ? req.query.status.toUpperCase() : null;
-    const rows = await prisma.leaveRequest.findMany({
-      where: {
-        workspaceId: req.scope.workspaceId,
-        userId: { in: req.scope.userIds },
-        ...(status && ['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED'].includes(status)
-          ? { status: status as 'PENDING' }
-          : {}),
-      },
-      include: REQUEST_INCLUDE,
-      orderBy: { createdAt: 'desc' },
-      take: 200,
-    });
-    res.json({ requests: rows.map(toLeaveRequestDto) });
-  } catch (err) {
-    next(err);
-  }
-});
-
-/**
- * Decide a request from inside Timo. Refused when Lark owns approval — a
- * request must not read APPROVED here while it is still sitting in somebody's
- * Lark inbox.
- */
-adminLeaveRouter.post('/requests/:id/decide', async (req, res, next) => {
-  try {
-    if (!req.user || !req.scope) return res.status(401).json({ error: 'unauthorized' });
-    const parsed = DecideLeaveRequestSchema.safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ error: 'invalid_body' });
-
-    const target = await prisma.leaveRequest.findFirst({
-      where: { id: req.params.id, workspaceId: req.scope.workspaceId },
-      select: { userId: true },
-    });
-    if (!target) return res.status(404).json({ error: 'not_found' });
-    if (!req.scope.userIds.includes(target.userId)) return res.status(403).json({ error: 'forbidden' });
-    if (target.userId === req.user.sub && !req.scope.isAdmin) {
-      return res.status(403).json({ error: 'self_approval_forbidden' });
-    }
-
-    const result = await decideLeaveRequest({
-      requestId: req.params.id,
-      decision: parsed.data.decision,
-      deciderId: req.user.sub,
-      source: 'DASHBOARD',
-      note: parsed.data.note,
-      tz: req.scope.workspaceTimezone,
-    });
-    if (!result.ok) {
-      const status = result.error === 'external_approval' ? 409 : 400;
-      return res.status(status).json({ error: result.error, detail: result.detail });
-    }
-    res.json(result.value);
   } catch (err) {
     next(err);
   }

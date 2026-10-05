@@ -40,6 +40,3 @@ export function Card({
     </div>
   );
 }
-
-/** Alias — the spec names this pattern "Card/Panel". */
-export const Panel = Card;

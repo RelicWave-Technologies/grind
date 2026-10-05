@@ -9,7 +9,7 @@ import { env } from '../env';
  * (dev-shim password login + Lark login) and the logout clear so the attributes
  * always match (a mismatch makes the browser refuse to clear the cookie).
  */
-export const SESSION_COOKIE = 'grind_at';
+const SESSION_COOKIE = 'grind_at';
 
 /**
  * The dashboard's httpOnly refresh-token cookie. Scoped to `/v1/auth` so it's

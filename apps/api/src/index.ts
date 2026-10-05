@@ -6,7 +6,6 @@ import { startLarkTokenRefreshScheduler } from './lark/refreshScheduler';
 import { startAttendanceRulesScheduler } from './attendance/ruleScheduler';
 import { startLarkLeaveIngest, startLarkWfhIngest } from './leave';
 import { startManualTimeLarkOutboxWorker } from './manualTime/larkOutbox';
-import { startPayrollMonthCloseScheduler } from './payroll/scheduler';
 import { startScreenshotRetentionScheduler } from './screenshots/retention';
 import { startTesterOpsSchedulers } from './testerOps/scheduler';
 import { startTimerLifecycleScheduler } from './timeLifecycle';
@@ -27,7 +26,6 @@ app.listen(port, () => {
   // Keeps the attendance rules' leave charges current between report loads.
   startAttendanceRulesScheduler();
   startLarkTokenRefreshScheduler();
-  startPayrollMonthCloseScheduler();
   startScreenshotRetentionScheduler();
   startTesterOpsSchedulers();
   startTimerLifecycleScheduler(env.TIMO_TIMER_LEASE_RECONCILER_ENABLED === 'true');

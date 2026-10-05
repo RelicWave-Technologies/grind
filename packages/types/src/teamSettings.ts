@@ -2,16 +2,9 @@ import { z } from 'zod';
 import { Role } from './auth';
 import { ShiftDtoSchema } from './shifts';
 
-export const MEMBER_SETTING_DEFAULTS = {
-  screenshotIntervalMin: 3,
-  idleThresholdMin: 5,
-} as const;
-
 export const SCREENSHOT_INTERVAL_OPTIONS = [1, 2, 3] as const;
 export type ScreenshotIntervalMin = (typeof SCREENSHOT_INTERVAL_OPTIONS)[number];
 export const DEFAULT_SCREENSHOT_INTERVAL_MIN: ScreenshotIntervalMin = 3;
-export const SCREENSHOT_INTERVAL_MIN = 1;
-export const SCREENSHOT_INTERVAL_MAX = 3;
 export const IDLE_THRESHOLD_MIN = 1;
 export const IDLE_THRESHOLD_MAX = 120;
 

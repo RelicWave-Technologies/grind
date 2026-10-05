@@ -123,5 +123,3 @@ export function startCardCallback(): void {
     .then(() => logger.info('lark card callback subscriber started'))
     .catch((err) => logger.error({ err: String(err) }, 'lark card callback subscriber failed to start'));
 }
-
-export const startLarkEventHarness = startCardCallback;
