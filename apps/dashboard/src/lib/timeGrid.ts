@@ -31,7 +31,7 @@ import { possibleInstantsForZonedDateTime, zonedDateTimeParts } from '@grind/typ
  *     offers whichever of its two instants actually fits the window.
  */
 
-export type Meridiem = 'AM' | 'PM';
+type Meridiem = 'AM' | 'PM';
 
 export interface TimeGridInput {
   /** Current picker value (epoch ms). Anchors the preferred calendar day. */

@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import type { ActivityRoleTitle } from '@grind/types/auth';
 import type { Permission } from '@grind/types/rbac';
 import { api, ApiError, API_BASE } from './api';
 
@@ -12,7 +13,6 @@ export function larkLoginUrl(next?: string): string {
 }
 
 export type Role = 'ADMIN' | 'MANAGER' | 'MEMBER';
-export type ActivityRoleTitle = 'DEVELOPER' | 'DESIGNER' | 'SALES' | 'OTHER';
 // One source of truth with the API's RBAC table, so a new capability can't
 // exist server-side and be untypeable here (or vice versa).
 export type { Permission } from '@grind/types/rbac';

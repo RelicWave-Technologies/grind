@@ -26,7 +26,7 @@ import { Button } from '../ui';
  * scoped RBAC; the API repeats the same check server-side.
  */
 
-export type RowKind = 'tracked' | 'manual_approved' | 'pending' | 'gap';
+type RowKind = 'tracked' | 'manual_approved' | 'pending' | 'gap';
 
 interface BaseProps {
   tasks: TaskOption[];

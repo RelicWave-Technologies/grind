@@ -5,7 +5,7 @@
  * @grind/db (no Prisma in the browser bundle).
  */
 
-export type BlockKind = 'WORK' | 'MEETING' | 'MANUAL' | 'IDLE_TRIMMED' | 'PENDING' | 'GAP';
+type BlockKind = 'WORK' | 'MEETING' | 'MANUAL' | 'IDLE_TRIMMED' | 'PENDING' | 'GAP';
 
 export interface DayBlock {
   kind: BlockKind;
@@ -54,7 +54,7 @@ export interface AppUsageEntry {
   clicks: number;
 }
 
-export interface AppUsageInsight {
+interface AppUsageInsight {
   totalMinutes: number;
   topApps: AppUsageEntry[];
 }
@@ -115,15 +115,15 @@ export interface MtrUserSummary {
   avatarUrl?: string | null;
 }
 
-export type TriageVerdict = 'approve' | 'review' | 'reject';
+type TriageVerdict = 'approve' | 'review' | 'reject';
 
-export interface TriageSignal {
+interface TriageSignal {
   id: string;
   text: string;
   weight: number;
 }
 
-export interface TriageResult {
+interface TriageResult {
   verdict: TriageVerdict;
   confidence: number;
   signals: TriageSignal[];
@@ -159,7 +159,7 @@ export interface DecideResult {
 // Timesheets matrix
 // ---------------------------------------------------------------------------
 
-export interface TimesheetCell {
+interface TimesheetCell {
   workedMs: number;
   meetingMs: number;
   manualMs: number;
@@ -170,7 +170,7 @@ export interface TimesheetCell {
   activitySampleCount: number;
 }
 
-export interface TimesheetUser {
+interface TimesheetUser {
   id: string;
   name: string;
   email: string;
@@ -183,7 +183,7 @@ export interface TimesheetUser {
 // ---------------------------------------------------------------------------
 
 export type FlagType = 'IMPOSSIBLE_RATE' | 'METRONOMIC' | 'LINEAR_MOUSE' | 'SINGLE_CHANNEL' | 'JIGGLER';
-export type FlagStatus = 'OPEN' | 'RESOLVED';
+type FlagStatus = 'OPEN' | 'RESOLVED';
 export type FlagResolution = 'DISMISSED' | 'CONFIRMED' | 'TIME_INVALIDATED';
 
 export interface ActivityFlag {
@@ -205,8 +205,6 @@ export interface ActivityFlag {
   resolvedNote: string | null;
   createdAt: string;
 }
-
-export type ActivityRoleTitle = 'DEVELOPER' | 'DESIGNER' | 'SALES' | 'OTHER';
 
 // ---------------------------------------------------------------------------
 // Admin CRUD: Teams + User patches
@@ -265,9 +263,9 @@ export interface TimesheetMatrix {
 // Leave, company holidays and balances
 // ---------------------------------------------------------------------------
 
-export type LeavePortion = 'FULL' | 'FIRST_HALF' | 'SECOND_HALF';
-export type LeaveKind = 'PAID' | 'UNPAID';
-export type LeaveRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
+type LeavePortion = 'FULL' | 'FIRST_HALF' | 'SECOND_HALF';
+type LeaveKind = 'PAID' | 'UNPAID';
+type LeaveRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
 
 export interface HolidayDto {
   id: string;
@@ -296,14 +294,14 @@ export interface LeaveRequestDto {
   createdAt: string;
 }
 
-export interface LeaveBalance {
+interface LeaveBalance {
   balanceDays: number;
   accruedDays: number;
   consumedDays: number;
   adjustedDays: number;
 }
 
-export interface LeaveStatementRow {
+interface LeaveStatementRow {
   kind: 'ACCRUAL' | 'CONSUMPTION' | 'ADJUSTMENT';
   days: number;
   effectiveOn: string;
