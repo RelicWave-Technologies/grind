@@ -1,5 +1,6 @@
 import { prisma } from '@grind/db';
 import { dateKeyInTimeZone } from '@grind/types';
+import { larkWfhApprovalCode } from '../env';
 import { logger } from '../logger';
 import { requestRuleReconcile } from '../attendance/ruleScheduler';
 import { hasLarkCredentials } from '../lark/config';
@@ -124,7 +125,7 @@ async function mirrorWfh(workspaceId: string, instance: LarkWfhInstance): Promis
       workspaceId,
       userId: identity.userId,
       larkInstanceCode: instance.instanceCode,
-      larkApprovalCode: process.env.LARK_WFH_APPROVAL_CODE ?? null,
+      larkApprovalCode: larkWfhApprovalCode() ?? null,
     },
     update: fields,
   });
@@ -133,7 +134,7 @@ async function mirrorWfh(workspaceId: string, instance: LarkWfhInstance): Promis
 
 async function ingestLarkWfhOnce(input?: { lookbackDays?: number; now?: number }): Promise<WfhIngestResult> {
   const empty: WfhIngestResult = { seen: 0, linked: 0, unmatched: 0 };
-  const approvalCode = process.env.LARK_WFH_APPROVAL_CODE?.trim();
+  const approvalCode = larkWfhApprovalCode();
   if (!approvalCode || !hasLarkCredentials()) return empty;
 
   const now = input?.now ?? Date.now();
@@ -187,7 +188,7 @@ let timer: NodeJS.Timeout | null = null;
 
 export function startLarkWfhIngest(intervalMs = DEFAULT_WFH_INGEST_INTERVAL_MS): void {
   if (timer || process.env.NODE_ENV === 'test') return;
-  if (!process.env.LARK_WFH_APPROVAL_CODE?.trim() || !hasLarkCredentials()) {
+  if (!larkWfhApprovalCode() || !hasLarkCredentials()) {
     logger.info('lark wfh ingest not started — no approval code configured');
     return;
   }

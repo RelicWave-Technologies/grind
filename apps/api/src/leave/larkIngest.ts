@@ -1,5 +1,6 @@
 import { prisma } from '@grind/db';
 import { dateKeyInTimeZone, roundToHalfDay, zonedDateTimeParts, type LeavePortion } from '@grind/types';
+import { larkLeaveApprovalCode } from '../env';
 import { logger } from '../logger';
 import { requestRuleReconcile } from '../attendance/ruleScheduler';
 import { getLarkConfig, hasLarkCredentials } from '../lark/config';
@@ -305,7 +306,7 @@ async function mirrorInstance(input: {
       decisionSource: 'LARK_APPROVAL',
       decidedAt,
       larkInstanceCode: instance.instanceCode,
-      larkApprovalCode: process.env.LARK_LEAVE_APPROVAL_CODE ?? null,
+      larkApprovalCode: larkLeaveApprovalCode() ?? null,
       larkSyncedAt: new Date(),
     },
     update: {
@@ -399,7 +400,7 @@ export async function ingestLarkLeaveOnce(input?: {
   now?: number;
 }): Promise<LeaveIngestResult> {
   const empty: LeaveIngestResult = { seen: 0, linked: 0, unmatched: 0, charged: 0 };
-  const approvalCode = process.env.LARK_LEAVE_APPROVAL_CODE?.trim();
+  const approvalCode = larkLeaveApprovalCode();
   if (!approvalCode || !hasLarkCredentials()) return empty;
 
   const now = input?.now ?? Date.now();
@@ -458,7 +459,7 @@ let timer: NodeJS.Timeout | null = null;
 
 export function startLarkLeaveIngest(intervalMs = DEFAULT_INGEST_INTERVAL_MS): void {
   if (timer || process.env.NODE_ENV === 'test') return;
-  if (!process.env.LARK_LEAVE_APPROVAL_CODE?.trim() || !hasLarkCredentials()) {
+  if (!larkLeaveApprovalCode() || !hasLarkCredentials()) {
     logger.info('lark leave ingest not started — no approval code configured');
     return;
   }

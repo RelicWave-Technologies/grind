@@ -18,7 +18,7 @@ import {
   trashScreenshotInDrive,
   uploadScreenshotToDrive,
 } from '../lib/googleDrive';
-import { env } from '../env';
+import { dashboardOrigins, env } from '../env';
 import { logger } from '../logger';
 import { getWorkspaceTimezone } from '../workspace/timezone';
 import { attachScope } from '../middleware/scope';
@@ -607,7 +607,7 @@ function screenshotAssetUrl(fileId: string): string | null {
 }
 
 function publicAppUrl(): string | null {
-  const raw = env.PUBLIC_APP_URL ?? env.DASHBOARD_URL?.split(',')[0]?.trim();
+  const raw = env.PUBLIC_APP_URL ?? dashboardOrigins()[0];
   return raw ? raw.replace(/\/$/u, '') : null;
 }
 

@@ -83,11 +83,11 @@ const EnvSchema = z.object({
   // provisioned PENDING. Matching is case-insensitive + trimmed.
   LARK_BOOTSTRAP_ADMIN_EMAILS: z.string().optional(),
   /// approval_code of the workspace's Lark "Leave" approval. Present = leave is
-  /// decided in Lark; absent = decided in Timo. Deliberately all-or-nothing: a
-  /// half-configured Lark accepts requests that reach nobody.
+  /// mirrored from Lark into the ledger. Read it through larkLeaveApprovalCode().
   LARK_LEAVE_APPROVAL_CODE: z.string().min(1).optional(),
   /// approval_code of the Lark "Work From Home Request" approval. Present =
   /// WFH requests are mirrored into Timo, which the attendance rules read.
+  /// Read it through larkWfhApprovalCode().
   LARK_WFH_APPROVAL_CODE: z.string().min(1).optional(),
   // --- Developer tools ---
   // Comma-separated emails allowed to use the hidden developer tools (remote
@@ -173,6 +173,20 @@ export function dashboardOrigins(): string[] {
  */
 export function developerEmails(): string[] {
   return parseEmailList(process.env.DEVELOPER_EMAILS ?? env.DEVELOPER_EMAILS);
+}
+
+/**
+ * The Lark "Leave" approval_code, trimmed; undefined when unset or blank.
+ * Parsed on each call (like dashboardOrigins) so a value set after this module
+ * loaded is honoured.
+ */
+export function larkLeaveApprovalCode(): string | undefined {
+  return (process.env.LARK_LEAVE_APPROVAL_CODE ?? env.LARK_LEAVE_APPROVAL_CODE)?.trim() || undefined;
+}
+
+/** The Lark "Work From Home Request" approval_code; see larkLeaveApprovalCode. */
+export function larkWfhApprovalCode(): string | undefined {
+  return (process.env.LARK_WFH_APPROVAL_CODE ?? env.LARK_WFH_APPROVAL_CODE)?.trim() || undefined;
 }
 
 export function isDeveloperEmail(email: string | null | undefined): boolean {
