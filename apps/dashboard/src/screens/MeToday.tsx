@@ -229,7 +229,7 @@ export function MeTodayScreen() {
     focusRow(dayBlockRowId(hit));
     if (editable && hit.kind === 'GAP') {
       setGapPreset({
-        blockKey: `${hit.startedAt}-${hit.endedAt}`,
+        blockKey: String(hit.startedAt),
         range: { startedAt: hit.startedAt, endedAt: hit.endedAt },
         tick: (gapPreset?.tick ?? 0) + 1,
       });
@@ -273,7 +273,7 @@ export function MeTodayScreen() {
         const endedAt = Math.min(block.endedAt, focusEndMs ?? block.endedAt);
         if (endedAt > startedAt) {
           setGapPreset((previous) => ({
-            blockKey: `${block.startedAt}-${block.endedAt}`,
+            blockKey: String(block.startedAt),
             range: { startedAt, endedAt },
             tick: (previous?.tick ?? 0) + 1,
           }));
@@ -495,7 +495,7 @@ export function MeTodayScreen() {
                       idle · pending, contiguous and non-overlapping. */}
                   {day.blocks.map((b) => {
                     if (b.kind === 'GAP') {
-                      const blockKey = `${b.startedAt}-${b.endedAt}`;
+                      const blockKey = String(b.startedAt); // gap identity = its start (end tracks now)
                       const rowId = dayBlockRowId(b);
                       return (
                         <EntryRow

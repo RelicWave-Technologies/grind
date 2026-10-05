@@ -11,7 +11,9 @@ import type { DayBlock } from './types';
 export function dayBlockRowId(block: Pick<DayBlock, 'kind' | 'startedAt' | 'endedAt' | 'timeEntryId' | 'requestId'>): string {
   switch (block.kind) {
     case 'GAP':
-      return `gap-${block.startedAt}-${block.endedAt}`;
+      // Today's trailing gap ends at "now" and grows on every refetch; keying
+      // on the end remounted the row (and lost the user's draft) each time.
+      return `gap-${block.startedAt}`;
     case 'PENDING':
       return `pending-${block.requestId ?? block.startedAt}`;
     case 'IDLE_TRIMMED':

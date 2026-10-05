@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Send, Check, X, AlertCircle, RotateCcw, Trash2 } from 'lucide-react';
 import TimePopover from './TimePopover';
 import TaskCombo, { type TaskOption } from './TaskCombo';
@@ -485,8 +485,14 @@ function GapRow({ block, tasks, timeZone, disabled, preset, presetTick, onCreate
     }
   }, [presetTick]);
 
-  // Reset on block change (different gap row entirely).
+  // Reset only when this row now describes a different gap (new start). Not on
+  // mount (that would discard a click-to-fill preset) and not when only the
+  // end moves: today's trailing gap ends at "now", so its end changes on every
+  // 15s refetch, and resetting then wiped whatever the user was typing.
+  const gapStartRef = useRef(block.startedAt);
   useEffect(() => {
+    if (gapStartRef.current === block.startedAt) return;
+    gapStartRef.current = block.startedAt;
     const r = defaultRange(block);
     setStart(r.startedAt);
     setEnd(r.endedAt);
@@ -495,7 +501,14 @@ function GapRow({ block, tasks, timeZone, disabled, preset, presetTick, onCreate
     setAttendees([]);
     setErr(null);
     setClientUuid(newClientUuid());
-  }, [block.startedAt, block.endedAt]);
+  }, [block.startedAt]);
+
+  // The gap can also shrink (a timer started inside it): keep the draft, just
+  // pull the selected range back inside the gap.
+  useEffect(() => {
+    setEnd((e) => Math.min(e, block.endedAt));
+    setStart((st) => Math.min(st, block.endedAt));
+  }, [block.endedAt]);
 
   const duration = Math.max(0, end - start);
 
