@@ -83,7 +83,7 @@ function transientScreenFailureInspection() {
   const value = inspection(true);
   return {
     ...value,
-    readiness: { ...value.readiness, ready: false, screenRecording: 'NEEDS_RESTART', blockingCapabilities: ['SCREEN_RECORDING'] },
+    readiness: { ...value.readiness, ready: false, screenRecording: 'CHECKING', blockingCapabilities: ['SCREEN_RECORDING'] },
     permissions: {
       ...value.permissions,
       screen: { status: 'granted', health: 'empty', state: 'needs-restart' },

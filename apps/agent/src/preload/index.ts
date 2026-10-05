@@ -134,14 +134,13 @@ const api = {
     requestAccessibility: (): Promise<void> => ipcRenderer.invoke('permissions:requestAccessibility'),
   },
   settings: {
-    get: (): Promise<{ version: string; platform: string; launchAtLogin: LaunchAtLoginHealth; screenStatus: string; floatingBarVisible: boolean }> =>
+    get: (): Promise<{ version: string; platform: string; launchAtLogin: LaunchAtLoginHealth; floatingBarVisible: boolean }> =>
       ipcRenderer.invoke('settings:get'),
     repairLaunchAtLogin: (): Promise<LaunchAtLoginHealth> => ipcRenderer.invoke('settings:repairLaunchAtLogin'),
     moveToApplications: (): Promise<MoveToApplicationsResult> => ipcRenderer.invoke('settings:moveToApplications'),
     setFloatingBarVisible: (enabled: boolean): Promise<boolean> => ipcRenderer.invoke('settings:setFloatingBarVisible', enabled),
     resetFloatingBarPosition: (): Promise<void> => ipcRenderer.invoke('settings:resetFloatingBarPosition'),
     openScreenPrefs: (): Promise<void> => ipcRenderer.invoke('settings:openScreenPrefs'),
-    openInputMonitoringPrefs: (): Promise<void> => ipcRenderer.invoke('settings:openInputMonitoringPrefs'),
     openStartupPrefs: (): Promise<void> => ipcRenderer.invoke('settings:openStartupPrefs'),
     onOpen: (cb: () => void): (() => void) => {
       const sub = () => cb();

@@ -6,11 +6,9 @@ import type { ActivityCaptureStatus } from './activity';
 import {
   createTrackingReadinessService,
   isInconclusiveScreenCapture,
-  permissionRelaunchReason,
   TrackingBlockedError,
 } from './trackingReadiness';
 import type { CaptureHealth, ScreenStatus } from './permissions';
-import type { PermissionRelaunch } from './preferences';
 
 const T0 = 1_700_000_000_000;
 
@@ -32,7 +30,6 @@ function setup(opts: {
   screenHealth?: CaptureHealth;
   accessibility?: ActivityCaptureStatus;
   probeHealth?: CaptureHealth;
-  relaunch?: PermissionRelaunch;
 } = {}) {
   const clock = { now: T0 };
   const probeScreen = vi.fn().mockResolvedValue(opts.probeHealth ?? 'ok');
@@ -48,7 +45,6 @@ function setup(opts: {
     startActivityCapture,
     retryActivityHook,
     probeScreen,
-    lastPermissionRelaunch: () => opts.relaunch ?? null,
   });
   return { service, probeScreen, startActivityCapture, retryActivityHook, accessibilityStatus, clock };
 }
@@ -154,11 +150,13 @@ describe('TrackingReadinessService', () => {
 
   it('requires accessibility trust and an initialized native activity service', async () => {
     const untrusted = setup({ accessibility: accessibility({ trusted: false }) });
-    const restart = setup({ accessibility: accessibility({ ready: false }) });
+    const notStarted = setup({ accessibility: accessibility({ ready: false }) });
     const failed = setup({ accessibility: accessibility({ lastHookError: 'native hook denied' }) });
 
     expect((await untrusted.service.inspect({ verifyScreen: true })).readiness.accessibility).toBe('NEEDS_GRANT');
-    expect((await restart.service.inspect({ verifyScreen: true })).readiness.accessibility).toBe('NEEDS_RESTART');
+    // Trusted, but the activity service still would not start in-process.
+    expect((await notStarted.service.inspect({ verifyScreen: true })).readiness.accessibility).toBe('FAILED');
+    expect(notStarted.startActivityCapture).toHaveBeenCalled();
     expect((await failed.service.inspect({ verifyScreen: true })).readiness.accessibility).toBe('FAILED');
     expect(untrusted.startActivityCapture).not.toHaveBeenCalled();
   });
@@ -173,26 +171,6 @@ describe('TrackingReadinessService', () => {
 
     expect(startActivityCapture).toHaveBeenCalledOnce();
     expect(result.readiness.accessibility).toBe('READY');
-  });
-
-  it('marks a verdict that survived a restart within two minutes', async () => {
-    const before = setup({ accessibility: accessibility({ ready: false }) });
-    const verdict = (await before.service.inspect({ verifyScreen: true })).readiness;
-    const reason = permissionRelaunchReason(verdict);
-    expect(reason).toBe('ACCESSIBILITY:NEEDS_RESTART');
-
-    const soon = setup({ accessibility: accessibility({ ready: false }), relaunch: { reason, at: T0 - 119_000 } });
-    expect((await soon.service.inspect({ verifyScreen: true })).readiness.restartDidNotHelp).toEqual(['ACCESSIBILITY']);
-
-    const later = setup({ accessibility: accessibility({ ready: false }), relaunch: { reason, at: T0 - 120_000 } });
-    expect((await later.service.inspect({ verifyScreen: true })).readiness.restartDidNotHelp).toEqual([]);
-
-    // A restart for a different verdict says nothing about this one.
-    const other = setup({
-      accessibility: accessibility({ ready: false }),
-      relaunch: { reason: 'ACCESSIBILITY:NEEDS_GRANT', at: T0 - 10_000 },
-    });
-    expect((await other.service.inspect({ verifyScreen: true })).readiness.restartDidNotHelp).toEqual([]);
   });
 
   it('shares one in-flight probe between overlapping callers and counts it once', async () => {

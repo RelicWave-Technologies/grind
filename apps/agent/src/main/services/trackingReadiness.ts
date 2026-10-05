@@ -18,7 +18,6 @@ import {
   type CaptureHealth,
   type ScreenStatus,
 } from './permissions';
-import { getPreferences, type PermissionRelaunch } from './preferences';
 import { log } from '../logger';
 
 // A blank probe is re-run at most this often while the screen is unverified,
@@ -26,13 +25,10 @@ import { log } from '../logger';
 const SCREEN_REPROBE_INTERVAL_MS = 5_000;
 // Consecutive blank probes before "still checking" becomes "not working".
 const SCREEN_FAILED_AFTER_PROBES = 3;
-// A verdict that is still standing this soon after a permission restart was not
-// fixed by that restart.
-const RESTART_LOOP_WINDOW_MS = 2 * 60_000;
 
 interface TrackingReadinessDeps {
   platform: NodeJS.Platform;
-  /** Device clock: probe spacing and the relaunch record are device↔device gaps. */
+  /** Device clock: probe spacing is a device↔device gap. */
   now: () => number;
   screenStatus: () => ScreenStatus;
   screenHealth: () => CaptureHealth;
@@ -41,7 +37,6 @@ interface TrackingReadinessDeps {
   /** Clear a stored hook failure and try the hook once now. */
   retryActivityHook: () => ActivityCaptureStatus;
   probeScreen: () => Promise<CaptureHealth>;
-  lastPermissionRelaunch: () => PermissionRelaunch | null;
 }
 
 export interface ReadinessInspection {
@@ -60,7 +55,6 @@ function defaultDeps(): TrackingReadinessDeps {
     startActivityCapture: () => startActivityCapture(),
     retryActivityHook: () => retryActivityHook(),
     probeScreen: probeScreenCapture,
-    lastPermissionRelaunch: () => getPreferences().permissionRelaunch,
   };
 }
 
@@ -78,23 +72,10 @@ function screenCapability(status: ScreenStatus, probeHealthy: boolean | null, fa
 
 function accessibilityCapability(status: ActivityCaptureStatus): CapabilityState {
   if (!status.trusted) return 'NEEDS_GRANT';
-  if (!status.ready) return 'NEEDS_RESTART';
-  if (status.lastHookError) return 'FAILED';
+  // Trusted, but the activity service would not start in-process (it is
+  // retried on every inspect) or the hook was refused (retried on Check again).
+  if (!status.ready || status.lastHookError) return 'FAILED';
   return 'READY';
-}
-
-function verdictToken(capability: BlockingCapability, state: CapabilityState): string {
-  return `${capability}:${state}`;
-}
-
-/** The verdict a permission restart is meant to clear, as a stable string. */
-export function permissionRelaunchReason(readiness: TrackingReadiness): string {
-  return readiness.blockingCapabilities
-    .map((capability) => verdictToken(
-      capability,
-      capability === 'SCREEN_RECORDING' ? readiness.screenRecording : readiness.accessibility,
-    ))
-    .join(',');
 }
 
 export class TrackingBlockedError extends Error {
@@ -197,13 +178,6 @@ export function createTrackingReadinessService(deps: TrackingReadinessDeps) {
     return deps.accessibilityStatus();
   }
 
-  function recentRelaunchVerdict(): string[] {
-    const relaunch = deps.lastPermissionRelaunch();
-    if (!relaunch) return [];
-    const ageMs = deps.now() - relaunch.at;
-    return ageMs >= 0 && ageMs < RESTART_LOOP_WINDOW_MS ? relaunch.reason.split(',') : [];
-  }
-
   async function inspect(opts: { verifyScreen?: boolean; retryHook?: boolean } = {}): Promise<ReadinessInspection> {
     const rawScreenStatus = deps.screenStatus();
     const rawScreenHealth = deps.screenHealth();
@@ -260,10 +234,8 @@ export function createTrackingReadinessService(deps: TrackingReadinessDeps) {
     const blockingCapabilities: BlockingCapability[] = [];
     if (screenRecording !== 'READY') blockingCapabilities.push('SCREEN_RECORDING');
     if (accessibility !== 'READY') blockingCapabilities.push('ACCESSIBILITY');
-    const relaunchVerdict = blockingCapabilities.length > 0 ? recentRelaunchVerdict() : [];
-    const restartDidNotHelp = blockingCapabilities.filter((capability) => relaunchVerdict.includes(
-      verdictToken(capability, capability === 'SCREEN_RECORDING' ? screenRecording : accessibility),
-    ));
+    const accessibilityError = rawAccessibility.lastHookError
+      ?? (rawAccessibility.trusted && !rawAccessibility.ready && lastActivityStartError ? lastActivityStartError : null);
 
     if (blockingCapabilities.length === 0) {
       lastVerdictKey = '';
@@ -280,8 +252,7 @@ export function createTrackingReadinessService(deps: TrackingReadinessDeps) {
         accessibilityTrusted: rawAccessibility.trusted,
         accessibilityReady: rawAccessibility.ready,
         hookRunning: rawAccessibility.hookRunning,
-        lastHookError: rawAccessibility.lastHookError,
-        restartDidNotHelp,
+        accessibilityError,
       });
     }
 
@@ -292,7 +263,6 @@ export function createTrackingReadinessService(deps: TrackingReadinessDeps) {
         screenRecording,
         accessibility,
         blockingCapabilities,
-        restartDidNotHelp,
       },
       permissions: {
         screen: {
@@ -308,7 +278,7 @@ export function createTrackingReadinessService(deps: TrackingReadinessDeps) {
           hookRunning: rawAccessibility.hookRunning,
         },
       },
-      accessibilityError: rawAccessibility.lastHookError,
+      accessibilityError,
     };
   }
 

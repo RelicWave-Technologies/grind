@@ -1,9 +1,18 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { MonitorCheck, Power, CheckCircle2, AlertCircle, Keyboard, PictureInPicture2, RefreshCw, DownloadCloud } from 'lucide-react';
 import larkIcon from '../assets/lark.svg';
 import { settingsUpdateSubtitle, updateAction, updatePercent } from '../lib/updateUi';
-import { actionFor, actionLabel, isReady, statusText, type Capability, type PermissionAction } from '../lib/permissionUi';
+import {
+  actionFor,
+  actionLabel,
+  isReady,
+  offersRestart,
+  RESTART_LABEL,
+  statusText,
+  type Capability,
+  type PermissionAction,
+} from '../lib/permissionUi';
 
 type SettingsInfo = Awaited<ReturnType<typeof window.agent.settings.get>>;
 
@@ -27,9 +36,15 @@ export default function Settings() {
       void qc.invalidateQueries({ queryKey: ['settings'] });
     },
   });
+  // Restart is only a fallback here too — see offersRestart.
+  const [checkedAgain, setCheckedAgain] = useState(false);
+  const [visitedScreenSettings, setVisitedScreenSettings] = useState(false);
   const recheckPermissions = useMutation({
     mutationFn: () => window.agent.permissions.recheck(),
-    onSuccess: (next) => qc.setQueryData(['trackingReadiness'], next),
+    onSuccess: (next) => {
+      qc.setQueryData(['trackingReadiness'], next);
+      setCheckedAgain(true);
+    },
   });
   const moveToApplications = useMutation({
     mutationFn: () => window.agent.settings.moveToApplications(),
@@ -98,24 +113,26 @@ export default function Settings() {
         : { ok: false, text: 'Connect to attribute time to Lark tasks' };
 
   const permissionRows = ([
-    { capability: 'screen', title: 'Screen Recording', Icon: MonitorCheck, state: permissions.data?.screenRecording ?? 'NEEDS_GRANT', blocker: 'SCREEN_RECORDING' },
-    { capability: 'accessibility', title: 'Accessibility', Icon: Keyboard, state: permissions.data?.accessibility ?? 'NEEDS_GRANT', blocker: 'ACCESSIBILITY' },
-  ] as const).map((row) => {
-    const restartDidNotHelp = permissions.data?.restartDidNotHelp?.includes(row.blocker) ?? false;
-    return {
-      ...row,
-      ready: isReady(row.state),
-      text: statusText(row.state, row.capability, restartDidNotHelp),
-      action: actionFor(row.state, row.capability, restartDidNotHelp),
-    };
-  });
+    { capability: 'screen', title: 'Screen Recording', Icon: MonitorCheck, state: permissions.data?.screenRecording ?? 'NEEDS_GRANT' },
+    { capability: 'accessibility', title: 'Accessibility', Icon: Keyboard, state: permissions.data?.accessibility ?? 'NEEDS_GRANT' },
+  ] as const).map((row) => ({
+    ...row,
+    ready: isReady(row.state),
+    text: statusText(row.state, row.capability),
+    action: actionFor(row.state),
+    restart: offersRestart(row.state, row.capability, {
+      checkedAgain,
+      returnedFromSettings: row.capability === 'screen' && visitedScreenSettings,
+    }),
+  }));
   const runPermissionAction = (capability: Capability, action: PermissionAction) => {
-    if (action === 'restart') void window.agent.app.relaunch();
-    else if (action === 'check-again') recheckPermissions.mutate();
-    else if (action === 'input-monitoring') void window.agent.settings.openInputMonitoringPrefs();
+    if (action === 'check-again') recheckPermissions.mutate();
     else if (capability === 'accessibility') void window.agent.permissions.requestAccessibility();
-    else if (action === 'enable') void window.agent.permissions.requestScreen();
-    else void window.agent.settings.openScreenPrefs();
+    else {
+      setVisitedScreenSettings(true);
+      if (action === 'enable') void window.agent.permissions.requestScreen();
+      else void window.agent.settings.openScreenPrefs();
+    }
   };
   const u = updates.data;
   const updateBusy = u?.phase === 'checking' || u?.phase === 'downloading' || u?.phase === 'installing' || checkUpdates.isPending;
@@ -160,7 +177,7 @@ export default function Settings() {
           {/* Permissions */}
           <div className="section-head"><span className="section-title">Permissions</span></div>
           <div className="set-card">
-            {permissionRows.map(({ capability, title, Icon, ready, text, action }) => (
+            {permissionRows.map(({ capability, title, Icon, ready, text, action, restart }) => (
               <div className="set-row" key={capability}>
                 <span className="set-ic" style={{ background: ready ? 'var(--c-green-bg)' : 'var(--c-orange-bg)' }}>
                   <Icon size={17} strokeWidth={2} />
@@ -175,6 +192,11 @@ export default function Settings() {
                     )}
                   </div>
                 </div>
+                {restart ? (
+                  <button className="btn no-drag" onClick={() => void window.agent.app.relaunch()}>
+                    {RESTART_LABEL}
+                  </button>
+                ) : null}
                 {action === 'check-again' ? (
                   <button className="btn no-drag" onClick={() => runPermissionAction(capability, 'settings')}>
                     {actionLabel('settings')}
@@ -182,11 +204,11 @@ export default function Settings() {
                 ) : null}
                 {action ? (
                   <button
-                    className={`btn no-drag${action === 'restart' ? ' btn-prominent' : ''}`}
+                    className="btn no-drag"
                     onClick={() => runPermissionAction(capability, action)}
                     disabled={action === 'check-again' && recheckPermissions.isPending}
                   >
-                    {action === 'restart' ? 'Restart Timo' : actionLabel(action)}
+                    {actionLabel(action)}
                   </button>
                 ) : null}
               </div>
