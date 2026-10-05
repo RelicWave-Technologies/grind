@@ -5,15 +5,20 @@ import { attachScope } from '../middleware/scope';
 import { scoreDay } from '../scoring/score';
 import { assessWindow, type RiskSample } from '../anticheat/risk';
 import type { RoleTitle } from '../scoring/presets';
-import { buildDayInsight, localDayWindow, shiftDayWindow } from '../insights/day';
-import { loadEntryLiveEvidence, type EntryLiveEvidenceMap } from '../insights/liveEntryEvidence';
-import { resolveEffectiveEntrySegmentEnds } from '../insights/openSegmentEvidence';
-import { WEEKDAYS, dateKeyInTimeZone, isValidTimeZone, zonedDateTimeParts, type ShiftSchedule } from '@grind/types';
+import { buildDayInsight, localDayWindow } from '../insights/day';
+import { shiftTimesFromSchedule, shiftWindowFor } from '@grind/core';
+import { dateKeyInTimeZone, isValidTimeZone, zonedDateTimeParts, type ShiftSchedule } from '@grind/types';
 import { buildHeatmap, DEFAULT_BUCKET_MS, type HeatmapSample } from '../insights/heatmap';
 import { buildAppUsage } from '../insights/appUsage';
 import { resolveAppIcon, storedIconDataUrls } from '../insights/appIcon';
-import { groupInvalidationsByUser, isInvalidatedAt, invalidatedOverlapMs } from '../insights/invalidations';
-import { loadTimeInvalidationsForUsers } from '../insights/timeInvalidations';
+import {
+  invalidatedAt,
+  loadShiftAssignments,
+  loadTimeline,
+  meetingIntervals,
+  piecesForUser,
+  withEntryMeta,
+} from '../time';
 
 export const insightsRouter = Router();
 // /day accepts an optional ?userId= so admins/managers can pull a team
@@ -61,7 +66,7 @@ insightsRouter.get('/score', async (req, res, next) => {
     const win = dayWindow(requestedDay, timezone);
     if (!win) return res.status(400).json({ error: 'invalid_day' });
 
-    const [user, samplesRaw, entries, invalidations] = await Promise.all([
+    const [user, samplesRaw, timeline] = await Promise.all([
       prisma.user.findUnique({
         where: { id: req.user.sub },
         select: { activityRoleTitle: true },
@@ -81,35 +86,17 @@ insightsRouter.get('/score', async (req, res, next) => {
           pathStraightness: true,
         },
       }),
-      prisma.timeEntry.findMany({
-        where: {
-          userId: req.user.sub,
-          startedAt: { lt: win.end },
-          OR: [{ endedAt: null }, { endedAt: { gt: win.start } }],
-        },
-        select: {
-          id: true,
-          userId: true,
-          endedAt: true,
-          trackingProtocolVersion: true,
-          lastProvenAt: true,
-          leaseExpiresAt: true,
-          segments: { select: { kind: true, startedAt: true, endedAt: true } },
-        },
-      }),
-      loadTimeInvalidationsForUsers([req.user.sub], win.start, win.end),
+      loadTimeline({ userIds: [req.user.sub], from: requestedDay, to: requestedDay, tz: timezone }),
     ]);
 
     const role = (user?.activityRoleTitle ?? 'OTHER') as RoleTitle;
-    const invalidationsByUser = groupInvalidationsByUser(invalidations);
-    const scoreNow = new Date();
-    const scoreEvidence = await loadEntryLiveEvidence(entries, scoreNow);
-    const meetingIntervals = meetingIntervalsForEntries(entries, scoreEvidence, scoreNow);
+    const invalidated = invalidatedAt(timeline.invalidations);
+    const meetings = meetingIntervals(timeline.pieces);
     const samples = samplesRaw
-      .filter((s) => !isInvalidatedAt(invalidationsByUser, req.user!.sub, s.bucketStart.getTime()))
+      .filter((s) => !invalidated(req.user!.sub, s.bucketStart.getTime()))
       .map((s) => ({
         ...s,
-        isProtectedMeeting: isInMeeting(meetingIntervals, s.bucketStart.getTime()),
+        isProtectedMeeting: isInMeeting(meetings, s.bucketStart.getTime()),
       }));
     const day = scoreDay(samples, { role });
     const anticheat = assessWindow(samples as RiskSample[]);
@@ -175,42 +162,36 @@ insightsRouter.get('/day', async (req, res, next) => {
 
     const now = new Date();
 
-    // Resolve the assigned shift independently from the requested gap scope.
-    // Most consumers retain shift-scoped gap metrics. Edit Time explicitly asks
-    // for a calendar-day partition so its outside-shift empty intervals use the
-    // same gap composer without redefining Home/Reports attendance semantics.
-    const userRow = await prisma.user.findUnique({
-      where: { id: userId },
-      select: {
-        activityRoleTitle: true,
-        shift: { select: { name: true, schedule: true } },
-      },
-    });
-    const schedule = (userRow?.shift?.schedule as ShiftSchedule | null | undefined) ?? null;
-    const shiftWin = schedule ? shiftDayWindow(date, tz, schedule) : null;
+    // Resolve the shift assigned FOR THIS DATE (assignment history), separately
+    // from the requested gap scope. Most consumers retain shift-scoped gap
+    // metrics. Edit Time explicitly asks for a calendar-day partition so its
+    // outside-shift empty intervals use the same gap composer without
+    // redefining Home/Reports attendance semantics.
+    const [userRow, assignments, timeline] = await Promise.all([
+      prisma.user.findUnique({
+        where: { id: userId },
+        select: {
+          activityRoleTitle: true,
+          shift: { select: { name: true, schedule: true } },
+        },
+      }),
+      loadShiftAssignments([userId], win.start, win.end),
+      loadTimeline({ userIds: [userId], from: date, to: date, tz, now }),
+    ]);
+    const userAssignments = assignments.get(userId) ?? [];
+    const assigned = shiftWindowFor(userAssignments, date, tz);
+    // Accounts that predate assignment history only have their current shift.
+    const legacy = userAssignments.length === 0 && userRow?.shift
+      ? shiftTimesFromSchedule(userRow.shift.schedule as ShiftSchedule, date, tz)
+      : null;
+    const shiftTimes = assigned ?? legacy;
+    const shiftWin = shiftTimes ? { start: new Date(shiftTimes.startMs), end: new Date(shiftTimes.endMs) } : null;
     const frame = gapScope === 'calendar-day' ? win : shiftWin ?? win;
-    let shiftLabel: { name: string; start: string; end: string } | null = null;
-    if (shiftWin && schedule && userRow?.shift) {
-      const [yy, mm, dd] = date.split('-').map((n) => parseInt(n, 10));
-      const weekday = WEEKDAYS[new Date(Date.UTC(yy!, mm! - 1, dd!)).getUTCDay()]!;
-      const day = schedule[weekday];
-      if (day) shiftLabel = { name: userRow.shift.name, start: day.start, end: day.end };
-    }
-
-    // Pull every TimeEntry that overlaps the window, including its segments.
-    const entries = await prisma.timeEntry.findMany({
-      where: {
-        userId,
-        startedAt: { lt: win.end },
-        OR: [{ endedAt: null }, { endedAt: { gt: win.start } }],
-      },
-      include: {
-        segments: { orderBy: { startedAt: 'asc' } },
-        attendees: { select: { userId: true } },
-        manualTimeRequest: { select: { id: true } },
-      },
-      orderBy: { startedAt: 'asc' },
-    });
+    const shiftLabel: { name: string; start: string; end: string } | null = assigned
+      ? { name: assigned.name, start: assigned.start, end: assigned.end }
+      : legacy && userRow?.shift
+        ? { name: userRow.shift.name, start: legacy.start, end: legacy.end }
+        : null;
 
     // PENDING manual requests overlapping the window (for the stripe overlay).
     const pending = await prisma.manualTimeRequest.findMany({
@@ -236,52 +217,27 @@ insightsRouter.get('/day', async (req, res, next) => {
       orderBy: { requestedStart: 'asc' },
     });
 
-    const [samplesRaw, invalidations] = await Promise.all([
-      prisma.activitySample.findMany({
-        where: {
-          userId,
-          bucketStart: { gte: win.start, lt: win.end },
-        },
-        select: {
-          timeEntryId: true,
-          bucketStart: true,
-          keystrokes: true,
-          clicks: true,
-          scrollEvents: true,
-          mouseDistancePx: true,
-          activeApp: true,
-          activeAppBundle: true,
-          activeUrl: true,
-        },
-        orderBy: { bucketStart: 'asc' },
-      }),
-      loadTimeInvalidationsForUsers([userId], win.start, win.end),
-    ]);
-    const invalidationsByUser = groupInvalidationsByUser(invalidations);
-    const samples = samplesRaw.filter((s) => !isInvalidatedAt(invalidationsByUser, userId, s.bucketStart.getTime()));
-    const evidenceByEntry = await loadEntryLiveEvidence(entries, now);
-    const insightEntries = entries.map((e) => {
-      const effectiveEnds = resolveEffectiveEntrySegmentEnds({
-        segments: e.segments,
-        entryEndedAt: e.endedAt,
-        now,
-        evidence: evidenceByEntry.get(e.id),
-        lifecycle: e,
-      });
-      return {
-        id: e.id,
-        source: e.source as 'AUTO' | 'MANUAL',
-        requestId: e.manualTimeRequest?.id ?? null,
-        larkTaskGuid: e.larkTaskGuid,
-        notes: e.notes ?? null,
-        attendeeIds: e.attendees.map((a) => a.userId),
-        segments: e.segments.map((s, index) => ({
-          kind: s.kind as 'WORK' | 'MEETING' | 'IDLE_TRIMMED',
-          startedAt: s.startedAt,
-          endedAt: effectiveEnds[index]!,
-        })),
-      };
+    const samplesRaw = await prisma.activitySample.findMany({
+      where: {
+        userId,
+        bucketStart: { gte: win.start, lt: win.end },
+      },
+      select: {
+        timeEntryId: true,
+        bucketStart: true,
+        keystrokes: true,
+        clicks: true,
+        scrollEvents: true,
+        mouseDistancePx: true,
+        activeApp: true,
+        activeAppBundle: true,
+        activeUrl: true,
+      },
+      orderBy: { bucketStart: 'asc' },
     });
+    const invalidated = invalidatedAt(timeline.invalidations);
+    const samples = samplesRaw.filter((s) => !invalidated(userId, s.bucketStart.getTime()));
+    const userPieces = piecesForUser(timeline.pieces, userId);
 
     const result = buildDayInsight({
       date,
@@ -291,7 +247,7 @@ insightsRouter.get('/day', async (req, res, next) => {
       calendarDay: win,
       shift: shiftLabel,
       shiftWindow: shiftWin,
-      entries: insightEntries,
+      timeline: withEntryMeta(userPieces),
       pending: pending.map((p) => ({
         id: p.id,
         requestedStart: p.requestedStart,
@@ -315,28 +271,12 @@ insightsRouter.get('/day', async (req, res, next) => {
     // Activity heatmap: 10-min productivity buckets across the day window.
     // Averages scoreMinute() per bucket. Returns null where no samples landed
     // — distinct from "samples scored 0" (idle) so the dashboard can render
-    // dead air differently. The
-    // schema doesn't (yet) carry isProtectedMeeting on each sample — we
-    // derive it post-hoc by checking whether the minute overlaps a
-    // MEETING segment in the entries we already fetched. Cheap because
-    // both lists are sorted + small.
-    const meetingIntervals: Array<{ a: number; b: number }> = [];
-    for (const e of insightEntries) {
-      for (const s of e.segments) {
-        if (s.kind === 'MEETING' && s.endedAt) {
-          meetingIntervals.push({ a: s.startedAt.getTime(), b: s.endedAt.getTime() });
-        }
-      }
-    }
-    const invalidatedMs = invalidatedTrackedMsForEntries(insightEntries, invalidationsByUser, userId);
-    const resultForResponse = {
-      ...result,
-      totals: { ...result.totals, invalidatedMs },
-    };
-
+    // dead air differently. A minute inside a MEETING piece of the resolved
+    // timeline is scored as a protected meeting.
+    const meetings = meetingIntervals(userPieces);
     const heatmapInput: HeatmapSample[] = samples.map((s) => {
       const t = s.bucketStart.getTime();
-      const inMeeting = meetingIntervals.some((iv) => t >= iv.a && t < iv.b);
+      const inMeeting = isInMeeting(meetings, t);
       return {
         bucketStartMs: t,
         keystrokes: s.keystrokes,
@@ -385,7 +325,7 @@ insightsRouter.get('/day', async (req, res, next) => {
       })),
     };
 
-    res.json({ ...resultForResponse, activity: heatmap, fullDayActivity, appUsage });
+    res.json({ ...result, activity: heatmap, fullDayActivity, appUsage });
   } catch (err) {
     next(err);
   }
@@ -393,60 +333,6 @@ insightsRouter.get('/day', async (req, res, next) => {
 
 export default insightsRouter;
 
-function meetingIntervalsForEntries(
-  entries: Array<{
-    id: string;
-    endedAt: Date | null;
-    trackingProtocolVersion: number | null;
-    lastProvenAt: Date | null;
-    leaseExpiresAt: Date | null;
-    segments: Array<{ kind: string; startedAt: Date; endedAt: Date | null }>;
-  }>,
-  evidenceByEntry: EntryLiveEvidenceMap,
-  now: Date,
-): Array<{ a: number; b: number }> {
-  const out: Array<{ a: number; b: number }> = [];
-  for (const entry of entries) {
-    const effectiveEnds = resolveEffectiveEntrySegmentEnds({
-      segments: entry.segments,
-      entryEndedAt: entry.endedAt,
-      now,
-      evidence: evidenceByEntry.get(entry.id),
-      lifecycle: entry,
-    });
-    for (const [index, segment] of entry.segments.entries()) {
-      if (segment.kind !== 'MEETING') continue;
-      const a = segment.startedAt.getTime();
-      const b = (effectiveEnds[index] ?? now).getTime();
-      if (b > a) out.push({ a, b });
-    }
-  }
-  return out;
-}
-
 function isInMeeting(intervals: Array<{ a: number; b: number }>, epochMs: number): boolean {
   return intervals.some((iv) => epochMs >= iv.a && epochMs < iv.b);
-}
-
-function invalidatedTrackedMsForEntries(
-  entries: Array<{
-    segments: Array<{
-      kind: 'WORK' | 'MEETING' | 'IDLE_TRIMMED';
-      startedAt: Date;
-      endedAt: Date | null;
-    }>;
-  }>,
-  invalidationsByUser: ReturnType<typeof groupInvalidationsByUser>,
-  userId: string,
-): number {
-  let total = 0;
-  for (const entry of entries) {
-    for (const segment of entry.segments) {
-      if (segment.kind === 'IDLE_TRIMMED') continue;
-      const start = segment.startedAt.getTime();
-      const end = segment.endedAt?.getTime() ?? Date.now();
-      total += invalidatedOverlapMs(invalidationsByUser, userId, start, end);
-    }
-  }
-  return total;
 }

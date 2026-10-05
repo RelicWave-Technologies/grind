@@ -1,48 +1,26 @@
 import { prisma } from '@grind/db';
 
-const MIN = 60 * 1000;
+import {
+  CLIENT_CLOCK_SKEW_MS,
+  trustedObservedAt,
+  type EntryLiveEvidenceMap,
+} from '@grind/core';
 
-export const LIVE_HEARTBEAT_FRESH_MS = 3 * MIN;
-export const CLIENT_CLOCK_SKEW_MS = 2 * MIN;
+export {
+  CLIENT_CLOCK_SKEW_MS,
+  LIVE_HEARTBEAT_FRESH_MS,
+  heartbeatIsFresh,
+  trustedObservedAt,
+  type EntryLiveEvidence,
+  type EntryLiveEvidenceMap,
+} from '@grind/core';
+
+const MIN = 60 * 1000;
 
 export interface EntryRef {
   id: string;
   userId: string;
   endedAt?: Date | null;
-}
-
-export interface EntryLiveEvidence {
-  latestStoredProofAt: Date | null;
-  latestHeartbeatAt: Date | null;
-}
-
-export type EntryLiveEvidenceMap = Map<string, EntryLiveEvidence>;
-
-export function heartbeatIsFresh(
-  evidence: EntryLiveEvidence | null | undefined,
-  now: Date,
-  notBefore?: Date,
-): boolean {
-  const heartbeatMs = evidence?.latestHeartbeatAt?.getTime();
-  return heartbeatMs !== undefined
-    && heartbeatMs <= now.getTime()
-    && heartbeatMs >= now.getTime() - LIVE_HEARTBEAT_FRESH_MS
-    && (notBefore === undefined || heartbeatMs >= notBefore.getTime());
-}
-
-export function trustedObservedAt(input: {
-  observedAt: Date;
-  receivedAt: Date;
-  now: Date;
-}): Date | null {
-  const observedMs = input.observedAt.getTime();
-  const receivedMs = input.receivedAt.getTime();
-  const nowMs = input.now.getTime();
-  if (!Number.isFinite(observedMs) || !Number.isFinite(receivedMs)) return null;
-  if (observedMs > receivedMs + CLIENT_CLOCK_SKEW_MS || observedMs > nowMs + CLIENT_CLOCK_SKEW_MS) {
-    return null;
-  }
-  return new Date(Math.min(observedMs, receivedMs, nowMs));
 }
 
 /**
