@@ -478,11 +478,19 @@ app.whenReady().then(async () => {
   // + a throttled durable liveness tick (crash-recovery bound).
   let tick = 0;
   const LIVENESS_EVERY_TICKS = 15; // persist "proof of life" ~every 15s
+  let lastTimerState: string | null = null;
   setInterval(() => {
     try {
       tick += 1;
+      // One status() per tick: it reconciles the day's ledger, which is the
+      // expensive part of this loop.
       const s = getTimerService().status();
-      refreshUpdateInstallability();
+      // Installability only depends on whether a timer is open, so only a
+      // change of state can change it.
+      if (s.state !== lastTimerState) {
+        lastTimerState = s.state;
+        refreshUpdateInstallability();
+      }
       const running = s.state === 'RUNNING';
       const accruing = running && !s.paused;
       // Gate clock corrections on an open entry, not on accrual: stepping the
@@ -492,7 +500,10 @@ app.whenReady().then(async () => {
       setActivityRecording(accruing, running ? s.entryId : null);
       if (tray) setTrayTitle(tray, running ? fmtShort(s.workedMs) : '');
       syncFloatingBar(s);
-      if (running) broadcast('timer:status:push', s);
+      // A hidden main window has nothing to repaint; it reads status afresh
+      // the next second it is shown. Every state change is still pushed to
+      // it by the command that caused it.
+      if (running) broadcast('timer:status:push', s, { skipIfHidden: mainWindow });
       // Liveness: only while genuinely accruing, throttled. The next boot
       // closes any dangling entry at the last tick so a crash/hard-off never
       // over-credits the dead gap. Worst-case over-count ≈ 15s.
