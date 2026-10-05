@@ -12,7 +12,7 @@ import type {
   TeamSettingsResponse,
   WorkspacePolicyDto,
 } from '@grind/types';
-import { SCREENSHOT_INTERVAL_OPTIONS, dateKeyInTimeZone } from '@grind/types';
+import { SCREENSHOT_INTERVAL_OPTIONS, addDays, dateKeyInTimeZone } from '@grind/types';
 import { api } from '../lib/api';
 import type { Role } from '../lib/auth';
 import {
@@ -111,7 +111,7 @@ export function TeamScreen() {
   const policy = policyQ.data;
   const tz = me.workspaceTimezone;
   const today = dateKeyInTimeZone(Date.now(), tz);
-  const drawerFrom = addLocalDays(today, -6);
+  const drawerFrom = addDays(today, -6);
 
   function patchMember(userId: string, field: PendingField, patch: PatchTeamMemberSettingsRequest) {
     setPendingEdit({ userId, field });
@@ -757,14 +757,3 @@ function TeamMonitoringRiskModal({
   );
 }
 
-function localDateKey(d = new Date()): string {
-  return d.toISOString().slice(0, 10);
-}
-
-function addLocalDays(key: string, delta: number): string {
-  const parts = key.split('-').map(Number);
-  const y = parts[0] ?? new Date().getUTCFullYear();
-  const m = parts[1] ?? 1;
-  const d = parts[2] ?? 1;
-  return localDateKey(new Date(Date.UTC(y, m - 1, d + delta, 12)));
-}

@@ -2,7 +2,7 @@ import './profile.css';
 import { useQuery } from '@tanstack/react-query';
 import { CalendarDays, Clock3, Building2, Shield, Users, User, Mail, SunMedium } from 'lucide-react';
 import { useRouteContext } from '@tanstack/react-router';
-import { zonedDateTimeParts } from '@grind/types';
+import { dateKeyInTimeZone, weekdayForDate } from '@grind/types';
 import { api } from '../lib/api';
 import type { SelfProfileResponse } from '@grind/types/profile';
 import type { ShiftSchedule, Weekday } from '@grind/types/shifts';
@@ -323,9 +323,7 @@ function roleLine(role: SelfProfileResponse['user']['displayRole']) {
 }
 
 function weekdayKey(date: Date, timeZone: string): Weekday {
-  const local = zonedDateTimeParts(date, timeZone);
-  const weekday = new Date(Date.UTC(local.year, local.month - 1, local.day)).getUTCDay();
-  return ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'][weekday] as Weekday;
+  return weekdayForDate(dateKeyInTimeZone(date, timeZone));
 }
 
 function formatScheduleRange(slot: ShiftSchedule[Weekday] | undefined) {

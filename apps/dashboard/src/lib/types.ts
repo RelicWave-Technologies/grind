@@ -17,6 +17,8 @@ export interface DayBlock {
   taskSummary?: string | null;
   notes?: string | null;
   isOpen?: boolean;
+  /** A reviewer invalidated these minutes: still drawn, never in the totals. */
+  invalidated?: boolean;
   attendeeIds?: string[];
   /** ManualTimeRequest id for PENDING and approved MANUAL blocks. */
   requestId?: string;

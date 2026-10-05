@@ -8,6 +8,7 @@ import { hasCapability, isManagerOrAbove } from '../lib/auth';
 import { dayBlockRowId } from '../lib/dayBlockIdentity';
 import type { DayInsight, WorkspaceUser } from '../lib/types';
 import { addDays, calendarDateInstant, fmtDayLabel, fmtDurationMs, fmtTime, todayKey } from '../lib/format';
+import { anchorDateKey as localDateKey, dateKeyAnchor as parseDateKey } from '@grind/types';
 import { DayRibbon } from '../components/DayRibbon';
 import { ActivityHeatmap } from '../components/ActivityHeatmap';
 import { EntryRow } from '../components/EntryRow';
@@ -762,15 +763,6 @@ function CalendarMonth({
       </div>
     </section>
   );
-}
-
-function parseDateKey(key: string): Date {
-  const [year, month, day] = key.split('-').map((part) => Number.parseInt(part, 10));
-  return new Date(Date.UTC(year!, month! - 1, day!, 12));
-}
-
-function localDateKey(date: Date): string {
-  return date.toISOString().slice(0, 10);
 }
 
 function compareDateKeys(a: string, b: string): number {

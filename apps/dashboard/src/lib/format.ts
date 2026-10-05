@@ -1,4 +1,7 @@
-import { dateKeyInTimeZone, instantForZonedDateTime } from '@grind/types';
+import { addDays, instantForZonedDateTime, todayKey } from '@grind/types';
+
+/** Calendar-key arithmetic is the shared one in @grind/types. */
+export { addDays, todayKey };
 
 /**
  * Tiny time/duration formatters for the dashboard. Match the agent's
@@ -65,22 +68,6 @@ export function fmtDayLabel(yyyyMmDd: string, timeZone: string): string {
     day: 'numeric',
     timeZone,
   }).format(d);
-}
-
-/** Shift a YYYY-MM-DD string by a number of calendar days. */
-export function addDays(yyyyMmDd: string, delta: number): string {
-  const d = parseDateKey(yyyyMmDd);
-  d.setUTCDate(d.getUTCDate() + delta);
-  return d.toISOString().slice(0, 10);
-}
-
-export function todayKey(timeZone: string): string {
-  return dateKeyInTimeZone(new Date(), timeZone);
-}
-
-function parseDateKey(key: string): Date {
-  const [year, month, day] = key.split('-').map((part) => Number.parseInt(part, 10));
-  return new Date(Date.UTC(year!, month! - 1, day!, 12));
 }
 
 /** A formatting-only local-noon instant. Noon is valid through DST changes,

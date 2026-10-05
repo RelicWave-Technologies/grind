@@ -25,13 +25,15 @@ import {
 } from 'lucide-react';
 import { api, API_BASE } from '../lib/api';
 import { useMonthReportDownload, fmtMonthShort, fmtMonthLong } from '../lib/useMonthReportDownload';
-import { addDays, fmtAgeShort, fmtDayLabel, fmtDurationMs, fmtMinuteOfDay, fmtTime, todayKey } from '../lib/format';
+import { addDays, calendarDateInstant, fmtAgeShort, fmtDayLabel, fmtDurationMs, fmtMinuteOfDay, fmtTime, todayKey } from '../lib/format';
 import { hasCapability, isManagerOrAbove } from '../lib/auth';
 import {
+  anchorDateKey as localDateKey,
+  dateKeyAnchor as parseDateKey,
   dateKeyInTimeZone,
-  instantForZonedDateTime,
+  daysBetween,
   localDayWindowInTimeZone,
-  zonedDateTimeParts,
+  weekdayForDate,
   type ManualTimeRequestDto,
 } from '@grind/types';
 import type { SelfProfileResponse } from '@grind/types/profile';
@@ -2369,9 +2371,7 @@ function friendlyRole(role: SelfProfileResponse['user']['displayRole']) {
 }
 
 function weekdayKey(date: Date, timeZone: string): Weekday {
-  const local = zonedDateTimeParts(date, timeZone);
-  const weekday = new Date(Date.UTC(local.year, local.month - 1, local.day)).getUTCDay();
-  return ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'][weekday] as Weekday;
+  return weekdayForDate(dateKeyInTimeZone(date, timeZone));
 }
 
 function formatScheduleRange(slot: ShiftSchedule[Weekday] | undefined) {
@@ -2429,23 +2429,8 @@ function shiftLabel(status: ShiftStatus): string {
   return status.slice(0, 1).toUpperCase() + status.slice(1);
 }
 
-function localDateKey(d: Date): string {
-  return d.toISOString().slice(0, 10);
-}
-
-function parseDateKey(key: string): Date {
-  const [y, m, d] = key.split('-').map((n) => Number.parseInt(n, 10));
-  return new Date(Date.UTC(y!, m! - 1, d!, 12));
-}
-
 function compareDateKeys(a: string, b: string): number {
   return a.localeCompare(b);
-}
-
-function daysBetween(a: string, b: string): number {
-  const start = parseDateKey(a).getTime();
-  const end = parseDateKey(b).getTime();
-  return Math.round((end - start) / (24 * 60 * 60 * 1000));
 }
 
 function monthStart(date: Date): Date {
@@ -2465,11 +2450,6 @@ function calendarCells(month: Date): Array<string | null> {
     cells.push(localDateKey(new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), day, 12))));
   }
   return cells;
-}
-
-function calendarDateInstant(key: string, timeZone: string): Date {
-  const [year, month, day] = key.split('-').map((part) => Number.parseInt(part, 10));
-  return instantForZonedDateTime({ year: year!, month: month!, day: day!, hour: 12, minute: 0, second: 0 }, timeZone);
 }
 
 function formatRangeLabel(from: string, to: string, timeZone: string): string {

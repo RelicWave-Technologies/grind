@@ -9,6 +9,7 @@ import { api, type ApiError } from '../lib/api';
 import { hasCapability, isManagerOrAbove } from '../lib/auth';
 import type { DecideResult, ManualTimeRequest, MtrStatus, MtrUserSummary } from '../lib/types';
 import { addDays, fmtAgeShort, fmtDayLabel, fmtDurationMs, fmtTime, todayKey } from '../lib/format';
+import { daysBetween } from '@grind/types';
 import { reportQueryKeys } from '../lib/reportQueries';
 import type { TaskOption } from '../components/TaskCombo';
 import {
@@ -969,10 +970,6 @@ function monthStart(date: Date): Date {
 
 function addMonths(date: Date, delta: number): Date {
   return new Date(date.getFullYear(), date.getMonth() + delta, 1);
-}
-
-function daysBetween(a: string, b: string): number {
-  return Math.round((parseDateKey(b).getTime() - parseDateKey(a).getTime()) / (24 * 60 * 60 * 1000));
 }
 
 function calendarCells(month: Date): Array<string | null> {
