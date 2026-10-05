@@ -1,4 +1,5 @@
 import type { UpdateChannel } from '../../env';
+import type { InstallScope } from './installScope';
 
 export type UpdatePhase =
   | 'idle'
@@ -22,6 +23,14 @@ export interface UpdateStatus {
   readyAt: number | null;
   manual: boolean;
   canInstallNow: boolean;
+  /** Windows install location class; "unknown" elsewhere. */
+  installScope: InstallScope;
+  /**
+   * Why updates are off even though this is a release build. "machine-install":
+   * Timo sits under Program Files and cannot update itself — the person has to
+   * run the current installer (which installs per-user).
+   */
+  blockedReason: 'machine-install' | null;
 }
 
 export type TimerInstallState =
@@ -43,6 +52,8 @@ export function initialUpdateStatus(args: {
   currentVersion: string;
   channel: UpdateChannel;
   canInstallNow?: boolean;
+  installScope?: InstallScope;
+  blockedReason?: 'machine-install' | null;
 }): UpdateStatus {
   return {
     phase: 'idle',
@@ -56,7 +67,39 @@ export function initialUpdateStatus(args: {
     readyAt: null,
     manual: false,
     canInstallNow: args.canInstallNow ?? true,
+    installScope: args.installScope ?? 'unknown',
+    blockedReason: args.blockedReason ?? null,
   };
+}
+
+/**
+ * The channel the updater should actually follow. A prerelease build baked
+ * with "latest" can never update: electron-updater then asks GitHub for the
+ * newest NON-prerelease release (GitHubProvider.getLatestTagName), and every
+ * Timo release so far is a beta. Follow the build's own prerelease channel
+ * instead, so a mis-baked installer still finds its updates.
+ */
+export function effectiveUpdateChannel(baked: UpdateChannel, currentVersion: string): UpdateChannel {
+  if (baked === 'beta') return 'beta';
+  const pre = parseVersion(currentVersion)?.prerelease[0];
+  return pre === 'beta' ? 'beta' : baked;
+}
+
+const MAX_UPDATE_ERROR_LENGTH = 200;
+
+/**
+ * One line for logs and the heartbeat: electron-updater's error code (e.g.
+ * ERR_UPDATER_CHANNEL_FILE_NOT_FOUND, ENOTFOUND) first, then the message's
+ * first line. Fits the API's 200-character diagnostics field.
+ */
+export function describeUpdateError(err: unknown): string {
+  const code = typeof (err as { code?: unknown } | null)?.code === 'string'
+    ? (err as { code: string }).code
+    : null;
+  const raw = err instanceof Error ? err.message : String(err);
+  const message = (raw.split('\n')[0] ?? '').trim() || 'unknown error';
+  const line = code && !message.includes(code) ? `${code}: ${message}` : message;
+  return line.length > MAX_UPDATE_ERROR_LENGTH ? `${line.slice(0, MAX_UPDATE_ERROR_LENGTH - 1)}…` : line;
 }
 
 export function canInstallUpdate(timer: TimerInstallState): boolean {

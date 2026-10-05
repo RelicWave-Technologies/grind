@@ -344,7 +344,15 @@ export default function Settings() {
                   {u?.phase === 'error' && u.manual && u.error ? ` · ${u.error}` : ''}
                 </div>
               </div>
-              {updateButton.kind === 'restart' ? (
+              {updateButton.kind === 'download' ? (
+                <button
+                  className="btn btn-prominent no-drag"
+                  onClick={() => void window.agent.updates.openInstallerDownload()}
+                  disabled={updateButton.disabled}
+                >
+                  {updateButton.label}
+                </button>
+              ) : updateButton.kind === 'restart' ? (
                 <button
                   className="btn btn-prominent no-drag"
                   onClick={() => installUpdate.mutate()}

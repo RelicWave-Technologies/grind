@@ -142,7 +142,11 @@ Required GitHub secrets for the macOS job:
 
 For a one-off unsigned Windows installer without creating a release, use
 **Actions → Package Windows Agent** (`.github/workflows/package-windows.yml`);
-it uploads the installer as a workflow artifact.
+it uploads the installer as a workflow artifact. The installed app still
+updates itself from **published** releases (input `auto_update`, default on),
+on the channel its version implies (`-beta.N` → beta). Before this, one-off
+builds shipped with updates off and channel `latest` — a machine set up from
+one never updated.
 
 ### Release checklist
 
@@ -153,6 +157,94 @@ it uploads the installer as a workflow artifact.
 5. While tracking, verify the update downloads but restart waits until Stop.
 6. Publish the draft stable release only after beta QA passes.
 7. Verify stable update from the previous stable build.
+
+### Windows auto-update
+
+**How it works.** `electron-updater` (GitHub provider) runs in the agent
+(`apps/agent/src/main/services/updates/`). It checks 5 s after launch, every
+6 h, and when Settings opens. A beta build asks GitHub's releases feed for the
+newest *published* prerelease and reads its `beta.yml`; a stable build reads
+`latest.yml` from GitHub's "latest" release (which never includes
+prereleases, so a beta build must never run on `latest` — the packager refuses
+that combination and the app corrects it at runtime). Draft releases are
+invisible to every client. The installer downloads in the background and is
+installed when the person clicks **Restart to update** (Settings, the banner,
+or the tray), when they Quit Timo, or — Windows — at the next launch: an update
+that is ready within 3 minutes of launch while no timer is running is
+installed silently and Timo restarts (once per version, so a failing install
+can never loop). It is never installed during a Windows shutdown/sign-off:
+Electron does not emit `quit` then, and the agent also holds install-on-quit
+on `session-end` so a half-run installer can't remove the old files without
+writing the new ones.
+
+**Per-user installs only.** The NSIS installer always installs to
+`%LOCALAPPDATA%\Programs\Timo` (`nsis.allowElevation: false`,
+`allowToChangeInstallationDirectory: false`, and `build/installer.nsh`
+`customInstallMode` forcing "only for me", which also skips the "who is this
+for" page). Reason: the update feed never sets `isAdminRightsRequired` (only
+`perMachine` builds get it), so `electron-updater` runs the installer with
+Timo's own unelevated token. An install under Program Files then needs a UAC
+prompt on every update — a standard user cannot answer it, so the update never
+lands — and earlier installers offered "Anyone who uses this computer" on first
+install *and on every interactive update*, which is how machines ended up
+there (`C:\Program Files\Grind\Timo` = a pre-rebrand all-users install).
+
+**A Program Files install cannot update itself.** Beta.38+ detects this
+(`process.execPath` under `%ProgramFiles%`/`%ProgramFiles(x86)%`), does not
+start the updater, shows a one-time notice *"Timo can't update itself here —
+download the new installer"*, keeps a **Download installer** button in
+Settings → Updates, and reports it in the heartbeat. What to tell the person:
+
+1. Download the current installer (dashboard sidebar → Windows, or
+   `https://timo.emiactech.com/v1/downloads/agent/windows`) and run it. It
+   installs Timo just for them in `%LOCALAPPDATA%\Programs\Timo` and Timo
+   updates itself from then on. No admin rights needed.
+2. Nothing is lost: sign-in, the local database (unsynced time, queued
+   screenshots) and preferences live in `%APPDATA%\Timo` (Electron
+   `userData`, named after the product), not in the install folder, and the
+   new install reads the same folder. A pre-rebrand `%APPDATA%\Grind` is
+   migrated on first launch (`legacyMigration.ts`).
+3. Afterwards, someone with admin rights removes the old all-users copy from
+   Settings → Apps → Installed apps ("Timo", or "Grind" for pre-rebrand
+   installs). Until then there are two Timo shortcuts; the old one starts the
+   old version.
+
+Beta.37 and older agents on Program Files that click **Restart to update**
+get the same per-user install through the new installer's forced "only for
+me"; their silent install-on-quit still asks for UAC and usually goes nowhere.
+
+**Finding stuck machines.** Heartbeat diagnostics (beta.38+) fill
+`User.agentInstallScope` (`user` / `machine` / `unknown`) and
+`User.agentUpdateError` (last updater failure as `CODE: message`, null once a
+check succeeds). Older agents only report `agentVersion`:
+
+```sql
+SELECT email, "agentVersion", "agentInstallScope", "agentUpdateError", "agentLastSeenAt"
+FROM "User"
+WHERE "agentPlatform" = 'win32' AND "deactivatedAt" IS NULL
+  AND ("agentInstallScope" = 'machine' OR "agentUpdateError" IS NOT NULL
+       OR "agentVersion" <> '<newest published version>')
+ORDER BY "agentLastSeenAt" DESC;
+```
+
+On the machine itself, `%APPDATA%\Timo\logs\main.log` has `updates enabled`
+(channel, install scope), `update failed` (with the error `code`) and
+`updates blocked: per-machine install cannot update itself`.
+
+**Verifying a release's Windows feed** (after publishing the draft):
+
+```bash
+TAG=v0.0.2-beta.38
+gh release view "$TAG" --json isDraft,isPrerelease --jq .   # isDraft must be false
+gh release download "$TAG" -p beta.yml -O -                 # latest.yml for stable
+```
+
+The feed must name the release's version, a `path:` that is one of the
+release's `Timo-<version>-x64-setup.exe` assets, and no
+`isAdminRightsRequired: true`. The Release Agent workflow checks the same
+before uploading. Then on a Windows machine running the previous version:
+Settings → Updates → **Check for updates** downloads it, and the log shows
+`update available` → `update downloaded`.
 
 ### Local macOS packaging
 

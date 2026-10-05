@@ -82,10 +82,24 @@ win:
 dmg:
   title: Timo ${version}
   artifactName: Timo-${version}-${arch}.dmg
+# Per-user installs ONLY (%LOCALAPPDATA%\Programs\Timo). electron-updater runs
+# the update installer with the app's own unelevated token, and our feed never
+# asks for elevation (isAdminRightsRequired is only written for perMachine
+# builds), so an install under Program Files cannot update itself: every quit
+# raises a UAC prompt a standard user can't answer. The assisted installer used
+# to offer "Anyone who uses this computer" — on first install and again on
+# every interactive update — which is how machines ended up there.
+#  - allowElevation: false             → the "all users" choice is greyed out
+#                                         for a non-admin run
+#  - allowToChangeInstallationDirectory: false → no hand-picked folder either
+#  - build/installer.nsh customInstallMode    → forces "only for me" even when
+#                                         the installer runs as admin, and
+#                                         skips the who-is-this-for page
 nsis:
   oneClick: false
   perMachine: false
-  allowToChangeInstallationDirectory: true
+  allowElevation: false
+  allowToChangeInstallationDirectory: false
   createDesktopShortcut: true
   createStartMenuShortcut: true
   shortcutName: Timo

@@ -114,6 +114,9 @@ export const LaunchAtLoginSnapshot = z.object({
 });
 export type LaunchAtLoginSnapshot = z.infer<typeof LaunchAtLoginSnapshot>;
 
+export const AgentInstallScope = z.enum(['user', 'machine', 'unknown']);
+export type AgentInstallScope = z.infer<typeof AgentInstallScope>;
+
 /** Device and local sync-queue health. Lets support see stuck time without the laptop. */
 export const AgentDiagnostics = z.object({
   osVersion: z.string().max(64),
@@ -121,6 +124,14 @@ export const AgentDiagnostics = z.object({
   syncPending: z.number().int().min(0),
   syncOldestPendingAt: z.string().datetime().nullable(),
   syncLastError: z.string().max(200).nullable(),
+  /**
+   * Windows install location: "user" (%LOCALAPPDATA%\Programs, self-updates),
+   * "machine" (Program Files — cannot update itself), "unknown" (custom
+   * directory, or not Windows). Optional: agents before beta.38 omit it.
+   */
+  installScope: AgentInstallScope.optional(),
+  /** Last auto-update failure ("CODE: message"), null once a check succeeds. */
+  updateError: z.string().max(200).nullable().optional(),
 });
 export type AgentDiagnostics = z.infer<typeof AgentDiagnostics>;
 

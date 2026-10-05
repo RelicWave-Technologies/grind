@@ -1,6 +1,7 @@
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, dialog, shell } from 'electron';
 import { autoUpdater } from 'electron-updater';
-import { AUTO_UPDATE_ENABLED, UPDATE_CHANNEL } from '../../env';
+import path from 'node:path';
+import { API_URL, AUTO_UPDATE_ENABLED, UPDATE_CHANNEL, type UpdateChannel } from '../../env';
 import { broadcast } from '../../broadcast';
 import { log } from '../../logger';
 import { drainUploads } from '../capture/uploader';
@@ -10,10 +11,26 @@ import { getTimerService } from '../timer';
 import {
   applyUpdateEvent,
   canInstallUpdate,
+  describeUpdateError,
+  effectiveUpdateChannel,
   initialUpdateStatus,
   nextRetryDelayMs,
   type UpdateStatus,
 } from './state';
+import { detectInstallScope, type InstallScope } from './installScope';
+import {
+  currentInstallScope,
+  getUpdateDiagnostics,
+  noteInstallScope,
+  noteUpdateError,
+  resetUpdateDiagnosticsForTests,
+} from './diagnostics';
+import {
+  claimLaunchInstall,
+  claimMachineInstallNotice,
+  createUpdateMemory,
+  type UpdateMemoryStore,
+} from './memory';
 
 const FIRST_CHECK_DELAY_MS = 5_000;
 const NORMAL_CHECK_INTERVAL_MS = 6 * 60 * 60_000;
@@ -21,6 +38,15 @@ const QUIET_CHECK_MIN_INTERVAL_MS = 60_000;
 const INSTALL_FLUSH_TIMEOUT_MS = 5_000;
 const INSTALL_RETRY_DELAY_MS = 3_000;
 const INSTALL_FALLBACK_QUIT_MS = 12_000;
+/**
+ * An update that turns up ready this soon after launch was staged by an
+ * earlier session (electron-updater re-validates its cached download within
+ * seconds), so the person has not started work yet: install it now.
+ */
+const LAUNCH_INSTALL_WINDOW_MS = 3 * 60_000;
+const MACHINE_INSTALL_NOTICE_DELAY_MS = 15_000;
+const MACHINE_INSTALL_ERROR =
+  'UPDATES_BLOCKED_MACHINE_INSTALL: installed for all users under Program Files; cannot update itself';
 
 type UpdateInfoLike = { version?: string | null } | null | undefined;
 type ProgressLike = { percent?: number | null };
@@ -31,6 +57,14 @@ let status: UpdateStatus = initialUpdateStatus({
   channel: UPDATE_CHANNEL,
 });
 let started = false;
+let startedAt: number | null = null;
+let platform: NodeJS.Platform = process.platform;
+let updateChannel: UpdateChannel = UPDATE_CHANNEL;
+let installScope: InstallScope = 'unknown';
+/** electron-updater reports a failed check twice (event + rejection) with the same object. */
+let lastHandledError: object | null = null;
+let memory: UpdateMemoryStore | null = null;
+let noticeTimer: NodeJS.Timeout | null = null;
 let checking = false;
 let lastCheckStartedAt: number | null = null;
 let firstCheckTimer: NodeJS.Timeout | null = null;
@@ -118,7 +152,7 @@ function handleReadyNotification(): void {
 
 function wireUpdaterEvents(): void {
   autoUpdater.on('checking-for-update', () => {
-    log.info('update check started', { channel: UPDATE_CHANNEL });
+    log.info('update check started', { channel: updateChannel });
   });
   autoUpdater.on('update-available', (info: UpdateInfoLike) => {
     automaticErrorCount = 0;
@@ -131,6 +165,7 @@ function wireUpdaterEvents(): void {
   });
   autoUpdater.on('update-downloaded', (info: UpdateInfoLike) => {
     automaticErrorCount = 0;
+    noteUpdateError(null);
     clearRetryTimer();
     clearInstallTimers();
     const next = updateStatus({
@@ -140,23 +175,47 @@ function wireUpdaterEvents(): void {
       at: now(),
     });
     log.info('update downloaded', { version: next.availableVersion, canInstallNow: next.canInstallNow });
+    if (maybeInstallAtLaunch()) return;
     handleReadyNotification();
   });
   autoUpdater.on('update-not-available', () => {
     automaticErrorCount = 0;
+    noteUpdateError(null);
     clearRetryTimer();
     updateStatus({ type: 'not-available', manual: status.manual, at: now() });
-    log.info('no update available', { channel: UPDATE_CHANNEL });
+    log.info('no update available', { channel: updateChannel });
   });
   autoUpdater.on('error', (err: Error) => {
     handleUpdateError(err, status.manual);
   });
 }
 
+function errorCode(err: unknown): string | null {
+  const code = (err as { code?: unknown } | null)?.code;
+  return typeof code === 'string' ? code : null;
+}
+
 function handleUpdateError(err: unknown, manual: boolean): void {
-  const message = err instanceof Error ? err.message : String(err);
+  // A failed check is both emitted as 'error' and thrown from checkForUpdates()
+  // (electron-updater AppUpdater.checkForUpdates). Counting it twice skipped
+  // the 15-minute retry and gave up after a single failure.
+  if (err !== null && typeof err === 'object') {
+    if (err === lastHandledError) return;
+    lastHandledError = err;
+  }
+  const message = describeUpdateError(err);
+  noteUpdateError(message);
   const installing = status.phase === 'installing';
-  log.warn('update check failed', { err: message, manual, installing });
+  log.warn('update failed', {
+    err: message,
+    code: errorCode(err),
+    phase: status.phase,
+    manual,
+    installing,
+    channel: updateChannel,
+    installScope: currentInstallScope(),
+    version: status.currentVersion,
+  });
   if (manual || installing) {
     clearInstallTimers();
     // The install ran the quit cleanup up front and then failed to quit. The
@@ -169,36 +228,155 @@ function handleUpdateError(err: unknown, manual: boolean): void {
   scheduleRetry();
 }
 
+function updateMemory(): UpdateMemoryStore | null {
+  if (memory) return memory;
+  try {
+    memory = createUpdateMemory(path.join(app.getPath('userData'), 'update-state.json'));
+  } catch (err) {
+    log.warn('update memory unavailable', { err: String(err) });
+  }
+  return memory;
+}
+
+/** The API redirect that always serves the newest published installer. */
+export function installerDownloadUrl(forPlatform: NodeJS.Platform = platform): string {
+  const target = forPlatform === 'darwin' ? 'mac' : 'windows';
+  return `${API_URL.replace(/\/+$/, '')}/v1/downloads/agent/${target}`;
+}
+
+export async function openInstallerDownload(): Promise<{ ok: boolean }> {
+  const url = installerDownloadUrl();
+  try {
+    await shell.openExternal(url);
+    log.info('opened installer download', { url });
+    return { ok: true };
+  } catch (err) {
+    log.warn('could not open installer download', { url, err: String(err) });
+    return { ok: false };
+  }
+}
+
+/**
+ * One-time notice for a Program Files install. Settings keeps offering the
+ * download afterwards; the dialog itself is never repeated for this install.
+ */
+async function showMachineInstallNotice(): Promise<void> {
+  const store = updateMemory();
+  if (!store || !claimMachineInstallNotice(store, process.execPath)) return;
+  log.info('showing machine-install update notice', { execPath: process.execPath });
+  try {
+    const { response } = await dialog.showMessageBox({
+      type: 'info',
+      title: 'Update Timo',
+      message: 'Timo can’t update itself here — download the new installer',
+      detail:
+        'Timo is installed for all users (in Program Files), so it can’t install updates on its own. ' +
+        'Download and run the new installer: it installs Timo just for you, keeps your sign-in and ' +
+        'your tracked time, and updates itself from then on.',
+      buttons: ['Download installer', 'Later'],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true,
+    });
+    if (response === 0) await openInstallerDownload();
+  } catch (err) {
+    log.warn('machine-install update notice failed', { err: String(err) });
+  }
+}
+
+/**
+ * A ready update found right after launch was staged by an earlier session
+ * that ended without installing it. On Windows that is the usual case, not the
+ * exception: people shut down or sign off rather than Quit Timo, and Electron
+ * does not emit `quit` for a Windows shutdown/sign-off, so install-on-quit
+ * never runs and the update waited for a "Restart to update" click that rarely
+ * came. Install it now, before the person starts tracking. Once per version,
+ * so an install that fails can never turn into a restart loop.
+ */
+function maybeInstallAtLaunch(): boolean {
+  if (platform !== 'win32' || status.phase !== 'ready' || !status.canInstallNow) return false;
+  if (startedAt == null || now() - startedAt > LAUNCH_INSTALL_WINDOW_MS) return false;
+  const version = status.availableVersion;
+  const store = updateMemory();
+  if (!version || !store || !claimLaunchInstall(store, version)) return false;
+  log.info('installing staged update at launch', { version, sinceLaunchMs: now() - startedAt });
+  void installUpdateNow({ silent: true, reason: 'launch' });
+  return true;
+}
+
 export function startUpdateService(opts: {
   showMainWindow: () => void;
   isMainWindowVisible?: () => boolean;
+  /** Test seams; production reads the real process. */
+  platform?: NodeJS.Platform;
+  execPath?: string;
+  env?: Record<string, string | undefined>;
+  memory?: UpdateMemoryStore;
 }): UpdateStatus {
   if (started) return status;
   started = true;
+  startedAt = now();
   showMainWindow = opts.showMainWindow;
   isMainWindowVisible = opts.isMainWindowVisible ?? (() => BrowserWindow.getAllWindows().some((w) => w.isVisible()));
+  platform = opts.platform ?? process.platform;
+  if (opts.memory) memory = opts.memory;
+  installScope = detectInstallScope(opts.execPath ?? process.execPath, opts.env ?? process.env, platform);
+  noteInstallScope(installScope);
 
-  const enabled = app.isPackaged && AUTO_UPDATE_ENABLED;
+  const currentVersion = app.getVersion();
+  updateChannel = effectiveUpdateChannel(UPDATE_CHANNEL, currentVersion);
+  if (updateChannel !== UPDATE_CHANNEL) {
+    log.warn('update channel follows the prerelease version', {
+      bakedChannel: UPDATE_CHANNEL,
+      channel: updateChannel,
+      version: currentVersion,
+    });
+  }
+  const releaseBuild = app.isPackaged && AUTO_UPDATE_ENABLED;
+  const blockedReason = releaseBuild && installScope === 'machine' ? 'machine-install' as const : null;
+  const enabled = releaseBuild && blockedReason === null;
   status = initialUpdateStatus({
     enabled,
-    currentVersion: app.getVersion(),
-    channel: UPDATE_CHANNEL,
+    currentVersion,
+    channel: updateChannel,
     canInstallNow: currentCanInstallNow(),
+    installScope,
+    blockedReason,
   });
+
+  if (blockedReason) {
+    // Never start electron-updater here: it runs the installer unelevated, so
+    // every update of a Program Files install needs a UAC prompt at quit time —
+    // one a standard user cannot answer, and an install that does not finish
+    // leaves a broken app behind. Ask for a per-user reinstall instead.
+    noteUpdateError(MACHINE_INSTALL_ERROR);
+    log.warn('updates blocked: per-machine install cannot update itself', {
+      execPath: opts.execPath ?? process.execPath,
+      installScope,
+      version: currentVersion,
+      downloadUrl: installerDownloadUrl(),
+    });
+    noticeTimer = setTimeout(() => {
+      noticeTimer = null;
+      void showMachineInstallNotice();
+    }, MACHINE_INSTALL_NOTICE_DELAY_MS);
+    return status;
+  }
 
   if (!enabled) {
     log.info('updates disabled', {
       packaged: app.isPackaged,
       autoUpdateEnabled: AUTO_UPDATE_ENABLED,
-      channel: UPDATE_CHANNEL,
+      channel: updateChannel,
+      installScope,
     });
     return status;
   }
 
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
-  autoUpdater.allowPrerelease = UPDATE_CHANNEL === 'beta';
-  autoUpdater.channel = UPDATE_CHANNEL;
+  autoUpdater.allowPrerelease = updateChannel === 'beta';
+  autoUpdater.channel = updateChannel;
   // MUST stay after the `channel` assignment: electron-updater's channel setter
   // unconditionally flips allowDowngrade to true. Left on, a client running a
   // build newer than the newest PUBLISHED release (a draft release is invisible
@@ -215,8 +393,30 @@ export function startUpdateService(opts: {
 
   firstCheckTimer = setTimeout(() => void checkForUpdates(false), FIRST_CHECK_DELAY_MS);
   intervalTimer = setInterval(() => void checkForUpdates(false), NORMAL_CHECK_INTERVAL_MS);
-  log.info('updates enabled', { channel: UPDATE_CHANNEL, version: app.getVersion() });
+  log.info('updates enabled', {
+    channel: updateChannel,
+    version: currentVersion,
+    installScope,
+    allowDowngrade: autoUpdater.allowDowngrade,
+  });
   return status;
+}
+
+export { getUpdateDiagnostics };
+
+/**
+ * Windows is ending the session (shutdown, restart, sign-off). An installer
+ * started now would be killed part-way — after the old version's files are
+ * removed, before the new ones are written. Electron documents that `quit`
+ * (which install-on-quit hangs off) is not emitted for a session end, but the
+ * quit cleanup that runs here must never be the thing that starts one, so
+ * install-on-quit is switched off for the rest of this process. The staged
+ * update stays cached; the next launch installs it (maybeInstallAtLaunch).
+ */
+export function holdUpdateInstallForSessionEnd(): void {
+  if (!status.enabled) return;
+  autoUpdater.autoInstallOnAppQuit = false;
+  log.info('update install held for session end', { phase: status.phase, version: status.availableVersion });
 }
 
 export function getUpdateStatus(): UpdateStatus {
@@ -235,7 +435,10 @@ export async function checkForUpdates(manual: boolean): Promise<UpdateStatus> {
   lastCheckStartedAt = now();
   updateStatus({ type: 'checking', manual, at: now() });
   try {
-    await autoUpdater.checkForUpdates();
+    const result = await autoUpdater.checkForUpdates();
+    // The download runs on after the check resolves; its failure arrives as an
+    // 'error' event. Without this its rejected promise is also left unhandled.
+    result?.downloadPromise?.catch(() => undefined);
   } catch (err) {
     handleUpdateError(err, manual);
   } finally {
@@ -287,7 +490,7 @@ export async function flushBeforeUpdateInstall(): Promise<void> {
   });
 }
 
-function requestQuitAndInstall(reason: string): void {
+function requestQuitAndInstall(reason: string, silent = false): void {
   try {
     if (process.platform === 'darwin') {
       // On macOS the native updater can still be staging when electron-updater
@@ -298,22 +501,24 @@ function requestQuitAndInstall(reason: string): void {
     }
     log.info('requesting downloaded update install', {
       reason,
+      silent,
       version: status.availableVersion,
       channel: status.channel,
       platform: process.platform,
     });
-    autoUpdater.quitAndInstall(false, true);
+    // isForceRunAfter: Timo comes back up after the installer finishes.
+    autoUpdater.quitAndInstall(silent, true);
   } catch (err) {
     handleUpdateError(err, true);
   }
 }
 
-function scheduleInstallFallbacks(): void {
+function scheduleInstallFallbacks(reason: string, silent: boolean): void {
   clearInstallTimers();
   installRetryTimer = setTimeout(() => {
     installRetryTimer = null;
     if (status.phase !== 'installing') return;
-    requestQuitAndInstall('manual-retry');
+    requestQuitAndInstall(`${reason}-retry`, silent);
   }, INSTALL_RETRY_DELAY_MS);
 
   installFallbackQuitTimer = setTimeout(() => {
@@ -334,14 +539,22 @@ export function isInstallingUpdate(): boolean {
   return status.phase === 'installing';
 }
 
-export async function installUpdateNow(): Promise<UpdateStatus> {
+/**
+ * Install the ready update now. A person's click runs the installer with its
+ * window (progress is visible); the launch-time install runs it silently.
+ */
+export async function installUpdateNow(
+  opts: { silent?: boolean; reason?: string } = {},
+): Promise<UpdateStatus> {
   refreshUpdateInstallability();
   if (status.phase === 'installing') return status;
   if (!status.enabled || status.phase !== 'ready' || !status.canInstallNow) return status;
+  const reason = opts.reason ?? 'manual';
+  const silent = opts.silent ?? false;
   updateStatus({ type: 'installing', at: now() });
   await flushBeforeUpdateInstall();
-  scheduleInstallFallbacks();
-  requestQuitAndInstall('manual');
+  scheduleInstallFallbacks(reason, silent);
+  requestQuitAndInstall(reason, silent);
   return status;
 }
 
@@ -363,9 +576,16 @@ export async function installUpdateInsteadOfRelaunch(): Promise<boolean> {
 export function stopUpdateServiceForTests(): void {
   if (firstCheckTimer) clearTimeout(firstCheckTimer);
   if (intervalTimer) clearInterval(intervalTimer);
+  if (noticeTimer) clearTimeout(noticeTimer);
   clearRetryTimer();
   clearInstallTimers();
   firstCheckTimer = null;
   intervalTimer = null;
+  noticeTimer = null;
   started = false;
+  startedAt = null;
+  installScope = 'unknown';
+  lastHandledError = null;
+  resetUpdateDiagnosticsForTests();
+  memory = null;
 }

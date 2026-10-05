@@ -351,6 +351,11 @@ model User {
   agentSyncOldestPendingAt      DateTime?
   agentSyncLastError            String?
   agentDiagnosticsUpdatedAt     DateTime?
+  /// Auto-update health from agent heartbeat (beta.38+). "machine" = a Windows
+  /// Program Files install that cannot update itself; agentUpdateError is the
+  /// last updater failure, null once a check succeeds. Nullable for older agents.
+  agentInstallScope             String?
+  agentUpdateError              String?
 
   refreshTokens                    RefreshToken[]
   timeEntries                      TimeEntry[]

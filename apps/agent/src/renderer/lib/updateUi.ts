@@ -1,6 +1,6 @@
 import type { UpdateStatus } from './agent.d';
 
-export type UpdateAction = 'check' | 'restart' | 'none';
+export type UpdateAction = 'check' | 'restart' | 'download' | 'none';
 
 export function updatePercent(status?: UpdateStatus): number {
   return Math.round(status?.percent ?? 0);
@@ -9,6 +9,9 @@ export function updatePercent(status?: UpdateStatus): number {
 export function settingsUpdateSubtitle(status?: UpdateStatus): string {
   const percent = updatePercent(status);
   if (!status) return 'Checking update status…';
+  if (status.blockedReason === 'machine-install') {
+    return 'Timo can’t update itself here — download the new installer';
+  }
   if (!status.enabled) return 'Release updates are off in this build';
   if (status.phase === 'checking') return 'Checking for updates…';
   if (status.phase === 'available') return `Downloading ${status.availableVersion ?? 'update'}…`;
@@ -25,6 +28,9 @@ export function settingsUpdateSubtitle(status?: UpdateStatus): string {
 }
 
 export function updateAction(status?: UpdateStatus, busy = false): { kind: UpdateAction; label: string; disabled: boolean } {
+  if (status?.blockedReason === 'machine-install') {
+    return { kind: 'download', label: 'Download installer', disabled: false };
+  }
   if (status?.phase === 'ready' && status.canInstallNow) {
     return { kind: 'restart', label: 'Restart to update', disabled: busy };
   }

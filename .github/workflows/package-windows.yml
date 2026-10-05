@@ -4,6 +4,12 @@ name: Package Windows Agent
 # unsigned installer as a workflow artifact only — no version check, no GitHub
 # Release, no macOS signing secrets, no updater metadata published
 # (DEPLOY.md, "one-off unsigned Windows installer").
+#
+# The installed app still follows the PUBLISHED release feed, so a machine set
+# up from one of these artifacts joins the normal update stream instead of
+# being stranded on it. Its update channel comes from the package version
+# (package-windows.mjs: -beta.N → beta); it used to be baked as "latest" with
+# updates off, a combination that can never update.
 
 on:
   workflow_dispatch:
@@ -12,6 +18,11 @@ on:
         description: Production API URL baked into the agent
         required: true
         default: https://timo.emiactech.com
+      auto_update:
+        description: Let the installed app update itself from published releases
+        required: true
+        type: boolean
+        default: true
 
 jobs:
   package:
@@ -41,11 +52,12 @@ jobs:
       - name: Write production agent env
         shell: pwsh
         run: |
-          @(
+          $lines = @(
             "MAIN_VITE_API_URL=${{ inputs.api_url }}",
-            "MAIN_VITE_CALLBACK_SCHEME=timo",
-            "MAIN_VITE_UPDATE_CHANNEL=latest"
-          ) | Out-File -FilePath apps/agent/.env.production -Encoding utf8
+            "MAIN_VITE_CALLBACK_SCHEME=timo"
+          )
+          if ("${{ inputs.auto_update }}" -eq "true") { $lines += "MAIN_VITE_AUTO_UPDATE_ENABLED=1" }
+          $lines | Out-File -FilePath apps/agent/.env.production -Encoding utf8
 
       - name: Build unsigned Windows x64 installer
         run: pnpm --filter @grind/agent package:win:x64

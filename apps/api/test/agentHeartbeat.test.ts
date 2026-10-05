@@ -306,4 +306,69 @@ describe('POST /v1/agent/heartbeat', () => {
     });
     expect(row.agentDiagnosticsUpdatedAt).toBeInstanceOf(Date);
   });
+
+  it('stores auto-update health, and keeps it when an older agent omits it', async () => {
+    const user = await seedUser();
+    const diagnostics = {
+      osVersion: '10.0.22631',
+      arch: 'x64',
+      syncPending: 0,
+      syncOldestPendingAt: null,
+      syncLastError: null,
+    };
+    const res = await request(app)
+      .post('/v1/agent/heartbeat')
+      .set(bearer(user.accessToken))
+      .send({
+        agentVersion: '0.0.2-beta.38',
+        platform: 'win32',
+        diagnostics: {
+          ...diagnostics,
+          installScope: 'machine',
+          updateError: 'UPDATES_BLOCKED_MACHINE_INSTALL: installed for all users under Program Files; cannot update itself',
+        },
+      });
+    expect(res.status).toBe(200);
+
+    let row = await prisma.user.findUniqueOrThrow({ where: { id: user.userId } });
+    expect(row).toMatchObject({
+      agentInstallScope: 'machine',
+      agentUpdateError: 'UPDATES_BLOCKED_MACHINE_INSTALL: installed for all users under Program Files; cannot update itself',
+    });
+
+    // A beta.37 agent sends diagnostics without the update fields.
+    await request(app)
+      .post('/v1/agent/heartbeat')
+      .set(bearer(user.accessToken))
+      .send({ agentVersion: '0.0.2-beta.37', platform: 'win32', diagnostics });
+    row = await prisma.user.findUniqueOrThrow({ where: { id: user.userId } });
+    expect(row).toMatchObject({ agentInstallScope: 'machine', agentArch: 'x64' });
+
+    // After a per-user reinstall the error clears.
+    await request(app)
+      .post('/v1/agent/heartbeat')
+      .set(bearer(user.accessToken))
+      .send({
+        agentVersion: '0.0.2-beta.39',
+        platform: 'win32',
+        diagnostics: { ...diagnostics, installScope: 'user', updateError: null },
+      });
+    row = await prisma.user.findUniqueOrThrow({ where: { id: user.userId } });
+    expect(row).toMatchObject({ agentInstallScope: 'user', agentUpdateError: null });
+  });
+
+  it('rejects an unknown install scope and an oversized update error', async () => {
+    const user = await seedUser();
+    const base = { osVersion: '10.0.22631', arch: 'x64', syncPending: 0, syncOldestPendingAt: null, syncLastError: null };
+    const badScope = await request(app)
+      .post('/v1/agent/heartbeat')
+      .set(bearer(user.accessToken))
+      .send({ agentVersion: '0.0.2-beta.38', platform: 'win32', diagnostics: { ...base, installScope: 'everyone' } });
+    expect(badScope.status).toBe(400);
+    const longError = await request(app)
+      .post('/v1/agent/heartbeat')
+      .set(bearer(user.accessToken))
+      .send({ agentVersion: '0.0.2-beta.38', platform: 'win32', diagnostics: { ...base, updateError: 'x'.repeat(201) } });
+    expect(longError.status).toBe(400);
+  });
 });

@@ -51,6 +51,7 @@ import { showNotification } from './notifications';
 import { runBoot } from './boot';
 import {
   getUpdateStatus,
+  holdUpdateInstallForSessionEnd,
   installUpdateNow,
   refreshUpdateInstallability,
   startUpdateService,
@@ -144,6 +145,9 @@ function attachMainWindowHandlers(win: BrowserWindow): void {
     },
     onEnd: () => {
       isQuitting = true;
+      // Never let a staged update start installing as Windows tears the
+      // session down; the next launch installs it instead.
+      holdUpdateInstallForSessionEnd();
       log.info('windows session ending; finalizing tracked time');
       void runQuitCleanupIfNeeded('shutdown');
     },
