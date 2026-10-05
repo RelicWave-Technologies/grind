@@ -20,6 +20,8 @@ const mocks = vi.hoisted(() => ({
   visible: vi.fn(() => false),
   reason: vi.fn(() => 'SHIFT_START'),
   openMainWindow: vi.fn(),
+  startTracking: vi.fn(),
+  lastTask: vi.fn((): string | null => 'task-last'),
 }));
 
 vi.mock('electron', () => ({
@@ -40,6 +42,8 @@ vi.mock('../trackingAttention', () => ({
   getTrackingAttentionCoordinator: () => ({ get: () => ({ kind: mocks.attentionKind() }) }),
 }));
 vi.mock('../workspaceTime', () => ({ getWorkspaceTimeZone: () => 'UTC' }));
+vi.mock('../trackingCommands', () => ({ startTracking: mocks.startTracking }));
+vi.mock('../preferences', () => ({ getPreferences: () => ({ lastLarkTaskGuid: mocks.lastTask() }) }));
 
 const { ShiftMonitor } = await import('./index');
 
@@ -74,6 +78,8 @@ beforeEach(async () => {
   mocks.attentionKind.mockReturnValue('NONE');
   mocks.visible.mockReturnValue(false);
   mocks.reason.mockReturnValue('SHIFT_START');
+  mocks.startTracking.mockResolvedValue({ ok: true });
+  mocks.lastTask.mockReturnValue('task-last');
   vi.useFakeTimers();
   vi.setSystemTime(MID_SHIFT);
   monitor = new ShiftMonitor(mocks.openMainWindow);
@@ -141,5 +147,89 @@ describe('mid-shift untracked nudge', () => {
     await poll(2);
 
     expect(mocks.hide).not.toHaveBeenCalled();
+  });
+});
+
+// Wednesday 09:00 UTC: the clock-in buffer (09:00–09:30) has just opened.
+const SHIFT_START = Date.UTC(2026, 7, 12, 9, 0, 0);
+
+function shiftStartShown() {
+  return mocks.show.mock.calls.some(([reason]) => reason === undefined || reason === 'SHIFT_START');
+}
+
+describe('"Ready to work?" at shift start', () => {
+  async function startAt(ms: number) {
+    monitor.stop();
+    vi.clearAllMocks();
+    vi.setSystemTime(ms);
+    monitor = new ShiftMonitor(mocks.openMainWindow);
+    await monitor.start();
+  }
+
+  it('asks when nothing is tracking', async () => {
+    await startAt(SHIFT_START);
+    expect(shiftStartShown()).toBe(true);
+  });
+
+  it('never asks someone who is already tracking, even after they stop', async () => {
+    mocks.timerState.mockReturnValue('RUNNING');
+    await startAt(SHIFT_START);
+    expect(shiftStartShown()).toBe(false);
+
+    // A running timer was the answer; stopping later is not a new question.
+    mocks.timerState.mockReturnValue('STOPPED');
+    await poll(5);
+    expect(shiftStartShown()).toBe(false);
+  });
+
+  it('does not stack on an idle, away or permission prompt', async () => {
+    mocks.attentionKind.mockReturnValue('AWAY');
+    await startAt(SHIFT_START);
+    expect(shiftStartShown()).toBe(false);
+
+    mocks.attentionKind.mockReturnValue('NONE');
+    await poll(0.5);
+    expect(shiftStartShown()).toBe(true);
+  });
+
+  it('stands aside when a prompt appears while it is up', async () => {
+    await startAt(SHIFT_START);
+    mocks.visible.mockReturnValue(true);
+    mocks.attentionKind.mockReturnValue('IDLE');
+    mocks.hide.mockClear();
+
+    await poll(0.5);
+
+    expect(mocks.hide).toHaveBeenCalled();
+  });
+
+  it('"Yes, start" starts tracking on the last task instead of only opening the window', async () => {
+    await startAt(SHIFT_START);
+
+    monitor.onUserDecision('yes');
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(mocks.startTracking).toHaveBeenCalledWith('task-last');
+    expect(mocks.openMainWindow).not.toHaveBeenCalled();
+  });
+
+  it('opens the window to pick a task when there is no task to resume', async () => {
+    mocks.lastTask.mockReturnValue(null);
+    await startAt(SHIFT_START);
+
+    monitor.onUserDecision('yes');
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(mocks.startTracking).toHaveBeenCalledWith(null);
+    expect(mocks.openMainWindow).toHaveBeenCalledTimes(1);
+  });
+
+  it('"Start tracking" on the untracked nudge starts tracking too', async () => {
+    mocks.reason.mockReturnValue('UNTRACKED');
+
+    monitor.onUserDecision('yes');
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(mocks.startTracking).toHaveBeenCalledWith('task-last');
   });
 });
