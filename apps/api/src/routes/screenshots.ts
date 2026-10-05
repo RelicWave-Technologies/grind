@@ -9,7 +9,7 @@ import {
 } from '@grind/types';
 import { requireAccessToken } from '../middleware/auth';
 import { validate } from '../middleware/validate';
-import { isCloudinaryConfigured, signScreenshotUpload } from '../lib/cloudinary';
+import { isCloudinaryConfigured } from '../lib/cloudinary';
 import {
   downloadScreenshotFromDrive,
   getDriveFileName,
@@ -177,9 +177,9 @@ screenshotsRouter.get('/assets/:fileId', attachScope, async (req, res, next) => 
 });
 
 /**
- * Mint a short-lived upload target. Google Drive is preferred when configured,
- * but the response intentionally keeps the Cloudinary-shaped contract so
- * already-installed agents can upload without a desktop rebuild.
+ * Mint a short-lived upload target on Google Drive. The response keeps the
+ * Cloudinary-shaped contract the agent was built against, so installed agents
+ * upload without a desktop rebuild.
  */
 screenshotsRouter.post('/sign', validate(SignScreenshotUploadRequest, 'body'), async (req, res, next) => {
   try {
@@ -205,24 +205,7 @@ screenshotsRouter.post('/sign', validate(SignScreenshotUploadRequest, 'body'), a
       return res.json(response);
     }
 
-    if (!isCloudinaryConfigured()) {
-      return res.status(503).json({ error: 'screenshot_storage_not_configured' });
-    }
-
-    // Namespace the public_id under the user so re-uploads overwrite in place
-    // and shots from different users never collide.
-    const signed = signScreenshotUpload(`${req.user.sub}/${body.id}`);
-    const response: SignScreenshotUploadResponse = {
-      cloudName: signed.cloudName,
-      apiKey: signed.apiKey,
-      uploadUrl: signed.uploadUrl,
-      timestamp: signed.timestamp,
-      signature: signed.signature,
-      publicId: signed.publicId,
-      folder: signed.folder,
-      thumbTransform: signed.thumbTransform,
-    };
-    res.json(response);
+    return res.status(503).json({ error: 'screenshot_storage_not_configured' });
   } catch (err) {
     next(err);
   }

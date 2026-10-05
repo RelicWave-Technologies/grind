@@ -419,10 +419,9 @@ export const CompleteScreenshotUploadResponse = z.object({
 export type CompleteScreenshotUploadResponse = z.infer<typeof CompleteScreenshotUploadResponse>;
 
 /**
- * Ask the API to mint a short-lived Cloudinary signature so the agent can
- * upload a screenshot directly to Cloudinary without ever holding the
- * api_secret. The agent supplies the screenshot id; the server derives the
- * public_id + folder and signs the upload params.
+ * Ask the API for a short-lived upload target for one screenshot. The agent
+ * supplies the screenshot id; the server answers with a signed Google Drive
+ * upload URL in the Cloudinary-shaped contract the agent was built against.
  */
 export const SignScreenshotUploadRequest = z.object({
   id: z.string().min(1),
@@ -430,7 +429,7 @@ export const SignScreenshotUploadRequest = z.object({
 export type SignScreenshotUploadRequest = z.infer<typeof SignScreenshotUploadRequest>;
 
 export const SignScreenshotUploadResponse = z.object({
-  // Cloudinary unsigned-upload coordinates the agent POSTs the file to.
+  // Upload coordinates the agent POSTs the file to (Cloudinary-shaped).
   cloudName: z.string(),
   apiKey: z.string(),
   uploadUrl: z.string().url(),

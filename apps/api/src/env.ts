@@ -130,19 +130,19 @@ const EnvSchema = z.object({
   // --- Screenshots (optional; direct URLs on Screenshot rows also work) ---
   PUBLIC_APP_URL: z.string().url().optional(),
 
-  // --- Cloudinary (screenshot storage) ---
-  // When all three are set, /v1/screenshots/sign mints signed direct-upload
-  // params for the agent. The api_secret never leaves the server.
+  // --- Cloudinary (legacy screenshot storage) ---
+  // New shots go to Google Drive. These only let the screenshot routes keep
+  // serving and completing rows uploaded to Cloudinary before that switch.
   CLOUDINARY_CLOUD_NAME: z.string().min(1).optional(),
   CLOUDINARY_API_KEY: z.string().min(1).optional(),
   CLOUDINARY_API_SECRET: z.string().min(1).optional(),
-  // Folder screenshots land in. Defaults to "grind/screenshots".
+  // Folder legacy screenshots were filed in. Defaults to "grind/screenshots".
   CLOUDINARY_FOLDER: z.string().min(1).default('grind/screenshots'),
 
   // --- Google Drive (screenshot storage) ---
-  // When configured, /v1/screenshots/sign returns a Grind upload URL that the
-  // existing agent posts to with its Cloudinary-shaped multipart body. The API
-  // stores bytes in Drive using this service account.
+  // /v1/screenshots/sign returns a Grind upload URL that the agent posts to
+  // with its Cloudinary-shaped multipart body. The API stores the bytes in
+  // Drive using this service account. Unset = screenshot upload is off.
   GOOGLE_DRIVE_CLIENT_EMAIL: z.string().email().optional(),
   GOOGLE_DRIVE_PRIVATE_KEY: z.string().min(1).optional(),
   GOOGLE_DRIVE_PRIVATE_KEY_BASE64: z.string().min(1).optional(),
