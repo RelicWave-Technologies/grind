@@ -1752,7 +1752,11 @@ adminRouter.patch('/users/:id', requireAdmin, async (req, res, next) => {
         data.birthDate = null;
       } else if (typeof raw === 'string' && /^\d{4}-\d{2}-\d{2}$/u.test(raw)) {
         const parsed = new Date(`${raw}T00:00:00.000Z`);
-        if (Number.isNaN(parsed.getTime())) return res.status(400).json({ error: 'invalid_birth_date' });
+        // Date rolls an impossible day over ("2026-02-31" became 3 March), so
+        // the round trip must give back exactly what was typed.
+        if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== raw) {
+          return res.status(400).json({ error: 'invalid_birth_date' });
+        }
         data.birthDate = parsed;
       } else {
         return res.status(400).json({ error: 'invalid_birth_date' });
