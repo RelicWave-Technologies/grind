@@ -1,5 +1,6 @@
 import { getLarkConfig } from './config';
 import { getTenantAccessToken } from './tenantToken';
+import { outboundTimeoutSignal } from '../lib/outboundTimeout';
 
 /**
  * Sends Lark IM messages on the bot's behalf. Injected into routes so the
@@ -92,6 +93,7 @@ export class HttpLarkMessenger implements LarkMessenger {
       method: 'POST',
       headers: { 'Content-Type': 'application/json; charset=utf-8', Authorization: `Bearer ${token}` },
       body: JSON.stringify({ receive_id: receiveId, msg_type: msgType, content, ...(uuid ? { uuid } : {}) }),
+      signal: outboundTimeoutSignal(),
     });
     const body = (await res.json().catch(() => ({}))) as SendBody;
     if (body.code !== 0 || !body.data?.message_id) {
@@ -107,6 +109,7 @@ export class HttpLarkMessenger implements LarkMessenger {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json; charset=utf-8', Authorization: `Bearer ${token}` },
       body: JSON.stringify({ content: JSON.stringify(card) }),
+      signal: outboundTimeoutSignal(),
     });
     const body = (await res.json().catch(() => ({}))) as { code?: number; msg?: string };
     if (body.code !== 0) throw new Error(`lark updateCard: ${body.msg ?? body.code}`);
@@ -131,7 +134,7 @@ export class HttpLarkMessenger implements LarkMessenger {
     if (args.end) url.searchParams.set('end_time', String(Math.floor(args.end.getTime() / 1000)));
     if (args.pageToken) url.searchParams.set('page_token', args.pageToken);
 
-    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` }, signal: outboundTimeoutSignal() });
     const body = (await res.json().catch(() => ({}))) as {
       code?: number;
       msg?: string;

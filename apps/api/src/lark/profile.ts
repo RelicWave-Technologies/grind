@@ -1,4 +1,5 @@
 import { getLarkConfig } from './config';
+import { outboundTimeoutSignal } from '../lib/outboundTimeout';
 
 /**
  * The identity Grind reads from Lark at login. Sourced from a single call to
@@ -44,6 +45,7 @@ export class HttpProfileClient implements ProfileClient {
     try {
       const res = await fetch(`${oauthHost}/open-apis/authen/v1/user_info`, {
         headers: { Authorization: `Bearer ${accessToken}` },
+        signal: outboundTimeoutSignal(),
       });
       body = (await res.json().catch(() => ({}))) as RawUserInfo;
     } catch {
