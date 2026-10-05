@@ -32,6 +32,22 @@
 .usr-table--device .usr-col-joined { width: 7%; }
 .usr-table--device .usr-col-actions { width: 10%; }
 
+/* Sync adds one column: the device table gives it room by narrowing others. */
+.usr-table--sync {
+  min-width: calc(var(--ui-sp-12) * 16);
+}
+.usr-table--device.usr-table--sync {
+  min-width: calc(var(--ui-sp-12) * 26);
+}
+.usr-table--device.usr-table--sync .usr-col-person { width: 16%; }
+.usr-table--device.usr-table--sync .usr-col-role { width: 8%; }
+.usr-table--device.usr-table--sync .usr-col-team { width: 8%; }
+.usr-table--device.usr-table--sync .usr-col-device { width: 10%; }
+.usr-table--device.usr-table--sync .usr-col-permissions { width: 11%; }
+.usr-table--device.usr-table--sync .usr-col-sync { width: 9%; }
+.usr-table--device.usr-table--sync .usr-col-birth { width: 8%; }
+.usr-table--device.usr-table--sync .usr-col-actions { width: 8%; }
+
 .usr-table .ui-table__row {
   height: auto;
 }
