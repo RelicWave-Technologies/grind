@@ -1,4 +1,6 @@
 import { prisma, type Prisma } from '@grind/db';
+import { isGoogleDriveConfigured, trashScreenshotInDrive } from '../lib/googleDrive';
+import { logger } from '../logger';
 
 /**
  * Permanently delete one member and everything that belongs to them.
@@ -28,12 +30,20 @@ import { prisma, type Prisma } from '@grind/db';
  * resolved, holidays they created, corrections they made. That is deliberate —
  * deleting a leaver must not rewrite everybody else's history.
  *
- * ## What this does NOT do
+ * ## Storage files
  *
- * Screenshot rows cascade, but the image files behind them (`s3Key`,
- * `thumbS3Key`) are not touched. The count and the keys come back in the
- * result so the caller can log them; deleting the objects themselves is a
- * separate job with its own failure modes.
+ * When screenshots live in Google Drive, the files behind them (`s3Key`,
+ * `thumbS3Key`) are moved to the Drive trash after the rows are gone —
+ * best-effort, like retention: a file Drive will not trash is counted and
+ * logged, never a reason to keep the person. Other storage is left alone and
+ * reported as orphaned in the plan, as before.
+ *
+ * ## Size
+ *
+ * A long-serving member has hundreds of thousands of activity samples. Deleting
+ * them inside the transaction blew through its 5s default and rolled the whole
+ * delete back, so samples and screenshot rows — nothing points at either — are
+ * removed in batches first, and the transaction itself gets a longer budget.
  */
 
 export interface MemberDeletionPlan {
@@ -62,6 +72,13 @@ export interface MemberDeletionPlan {
    * them. Reported rather than silently orphaned.
    */
   orphanedScreenshotFiles: number;
+}
+
+/** What happened to the screenshot files in storage. */
+export interface MemberDeletionStorage {
+  driveFilesTrashed: number;
+  driveFilesMissing: number;
+  driveTrashFailures: number;
 }
 
 export type DeletionRefusal =
@@ -141,15 +158,78 @@ export async function planMemberDeletion(input: {
  * `Restrict` relations each block `user.delete()` until their rows are gone,
  * and `approverId` has to be nulled rather than followed.
  */
+const DELETE_BATCH_SIZE = 5_000;
+const DELETE_TX_TIMEOUT_MS = 60_000;
+
+/** Delete rows in id batches until none are left. */
+async function deleteInBatches(
+  findIds: () => Promise<Array<{ id: string }>>,
+  deleteIds: (ids: string[]) => Promise<unknown>,
+): Promise<void> {
+  for (;;) {
+    const rows = await findIds();
+    if (rows.length === 0) return;
+    await deleteIds(rows.map((r) => r.id));
+  }
+}
+
+/** Move this person's screenshot files to the Drive trash. Never throws. */
+async function trashDriveFiles(
+  fileIds: string[],
+  trash: (fileId: string) => Promise<'trashed' | 'missing'>,
+): Promise<MemberDeletionStorage> {
+  const out: MemberDeletionStorage = { driveFilesTrashed: 0, driveFilesMissing: 0, driveTrashFailures: 0 };
+  for (const fileId of fileIds) {
+    try {
+      if ((await trash(fileId)) === 'missing') out.driveFilesMissing += 1;
+      else out.driveFilesTrashed += 1;
+    } catch (err) {
+      out.driveTrashFailures += 1;
+      logger.warn({ err: String(err), fileId }, 'member delete: failed to trash screenshot file');
+    }
+  }
+  return out;
+}
+
 export async function deleteMember(input: {
   workspaceId: string;
   userId: string;
   actorId: string;
-}): Promise<{ ok: true; plan: MemberDeletionPlan } | { ok: false; error: DeletionRefusal; teamName?: string }> {
+  /** Test seam; defaults to Drive when it is configured, otherwise no trashing. */
+  trashFile?: ((fileId: string) => Promise<'trashed' | 'missing'>) | null;
+}): Promise<
+  | { ok: true; plan: MemberDeletionPlan; storage: MemberDeletionStorage }
+  | { ok: false; error: DeletionRefusal; teamName?: string }
+> {
   const planned = await planMemberDeletion(input);
   if (!planned.ok) return planned;
 
   const { userId } = input;
+  const trashFile = input.trashFile !== undefined
+    ? input.trashFile
+    : isGoogleDriveConfigured() ? trashScreenshotInDrive : null;
+
+  // The file ids have to be read before their rows go.
+  const fileIds = trashFile
+    ? [...new Set(
+        (await prisma.screenshot.findMany({
+          where: { userId, OR: [{ s3Key: { not: null } }, { thumbS3Key: { not: null } }] },
+          select: { s3Key: true, thumbS3Key: true },
+        })).flatMap((s) => [s.s3Key, s.thumbS3Key]).filter((v): v is string => Boolean(v)),
+      )]
+    : [];
+
+  // The bulk, outside the transaction. Nothing else references a sample or a
+  // screenshot row, and every refusal was decided above, so this cannot leave
+  // anybody else's data inconsistent.
+  await deleteInBatches(
+    () => prisma.activitySample.findMany({ where: { userId }, select: { id: true }, take: DELETE_BATCH_SIZE }),
+    (ids) => prisma.activitySample.deleteMany({ where: { id: { in: ids } } }),
+  );
+  await deleteInBatches(
+    () => prisma.screenshot.findMany({ where: { userId }, select: { id: true }, take: DELETE_BATCH_SIZE }),
+    (ids) => prisma.screenshot.deleteMany({ where: { id: { in: ids } } }),
+  );
 
   await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
     // Other people's requests that this person approved. Nulling first, because
@@ -176,7 +256,11 @@ export async function deleteMember(input: {
     // Lark identity, API tokens) or SetNull (the audit trail), so the row can
     // finally go.
     await tx.user.delete({ where: { id: userId } });
-  });
+  }, { timeout: DELETE_TX_TIMEOUT_MS, maxWait: 10_000 });
 
-  return planned;
+  const storage = trashFile
+    ? await trashDriveFiles(fileIds, trashFile)
+    : { driveFilesTrashed: 0, driveFilesMissing: 0, driveTrashFailures: 0 };
+
+  return { ...planned, storage };
 }

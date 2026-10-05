@@ -2174,11 +2174,13 @@ adminRouter.delete('/users/:id', requireAdmin, async (req, res, next) => {
     }
 
     // The one durable trace of a deletion, since the row it describes is gone.
-    logger.warn('member deleted', {
+    // pino takes the fields first; given second they were silently dropped.
+    logger.warn({
       actorId: req.user.sub,
       workspaceId: req.scope.workspaceId,
       deleted: result.plan,
-    });
+      storage: result.storage,
+    }, 'member deleted');
     res.json({ ok: true, deleted: result.plan });
   } catch (err) {
     next(err);
