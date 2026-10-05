@@ -15,8 +15,9 @@ import { prisma, type Prisma } from '@grind/db';
 import { env } from '../env';
 import { renewTimerLease, TIMER_PROTOCOL_VERSION, type TimerCheckpointResult } from '../timeLifecycle';
 import { serializeTimeEntry } from '../timeEntries/wire';
+import { effectiveEntrySegmentEnds } from '@grind/core';
 import { loadEntryLiveEvidence } from '../insights/liveEntryEvidence';
-import { resolveEffectiveEntrySegmentEnds } from '../insights/openSegmentEvidence';
+import { loadInvalidations } from '../time';
 import { resolveTodayLedgerMode } from '../agent/todayLedgerMode';
 
 export const agentRouter = Router();
@@ -251,12 +252,13 @@ agentRouter.get('/today-ledger', validate(TodayLedgerQuery, 'query'), async (req
     }
 
     const now = new Date();
+    const invalidations = await loadInvalidations([req.user.sub], from, to);
     const autoEntries = allEntries.filter((entry) => entry.source === 'AUTO');
     const approvedManualEntries = allEntries.filter((entry) => entry.source === 'MANUAL');
     const evidence = await loadEntryLiveEvidence(autoEntries, now);
     const serialized = autoEntries.map(serializeTimeEntry);
     const effectiveEntries = autoEntries.map((entry) => {
-      const effectiveEnds = resolveEffectiveEntrySegmentEnds({
+      const effectiveEnds = effectiveEntrySegmentEnds({
         segments: entry.segments,
         entryEndedAt: entry.endedAt,
         now,
@@ -281,6 +283,10 @@ agentRouter.get('/today-ledger', validate(TodayLedgerQuery, 'query'), async (req
       entries: serialized,
       approvedManualEntries: approvedManualEntries.map(serializeTimeEntry),
       effectiveEntries,
+      invalidations: invalidations.map((iv) => ({
+        startedAt: new Date(iv.start).toISOString(),
+        endedAt: new Date(iv.end).toISOString(),
+      })),
     };
     return res.json(response);
   } catch (err) {

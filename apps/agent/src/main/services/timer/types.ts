@@ -66,6 +66,8 @@ export interface LocalLedgerEntry {
 
 export interface ServerLedgerCache {
   list(owner: TimerOwner, windowStart: number, windowEnd: number, now: number): ServerLedgerEntry[];
+  /** Reviewer-invalidated windows from the same snapshot (never counted). */
+  invalidations?(owner: TimerOwner, windowStart: number, windowEnd: number): Array<{ start: number; end: number }>;
 }
 
 /** Injected dependencies so TimerService is testable without Electron/SQLite. */

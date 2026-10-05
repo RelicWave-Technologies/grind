@@ -3,7 +3,7 @@ import Database from 'better-sqlite3';
 import path from 'node:path';
 import { api } from '../services/apiClient';
 import { log } from '../logger';
-import { dateKeyInTimeZone } from '@grind/types';
+import { todayKey as businessToday } from '@grind/types';
 import { getWorkspaceTimeZone } from '../services/workspaceTime';
 import { getTimerService, refreshTodayLedger } from '../services/timer';
 import { refreshAgentConfig } from '../services/agentConfig';
@@ -57,10 +57,11 @@ async function cacheTasks(tasks: LarkTask[]): Promise<void> {
   if (tokens) getTaskCache().replace(tokens, tasks);
 }
 
+/** Today on the workspace calendar (the shared helper), never the laptop's. */
 function todayKey(): string {
   const timeZone = getWorkspaceTimeZone();
   if (!timeZone) throw new Error('workspace_time_unavailable');
-  return dateKeyInTimeZone(new Date(), timeZone);
+  return businessToday(timeZone);
 }
 
 function myTasksPath(): string {

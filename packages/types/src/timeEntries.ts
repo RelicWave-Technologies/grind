@@ -164,5 +164,14 @@ export const TodayLedgerResponse = z.object({
       endedAt: Iso.nullable(),
     })),
   })).max(2_000),
+  /**
+   * Windows a reviewer invalidated. The entries stay as they are; these
+   * minutes simply never count toward the day — the same rule every server
+   * surface applies. Absent from older APIs (treat as none).
+   */
+  invalidations: z.array(z.object({
+    startedAt: Iso,
+    endedAt: Iso,
+  })).max(2_000).optional(),
 });
 export type TodayLedgerResponse = z.infer<typeof TodayLedgerResponse>;

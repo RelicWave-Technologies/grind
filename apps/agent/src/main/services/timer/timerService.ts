@@ -1,6 +1,8 @@
 import {
   canonicalTimerEntryPayload,
   reconcileTodayLedger,
+  subtractIntervals,
+  unionMs,
   closeOpenSegment,
   closeTimeEntry,
   createTimeEntry,
@@ -118,6 +120,7 @@ export class TimerService {
     const mergedProjection = reconcileTodayLedger({
       ...shared,
       server: this.serverCache.list(owner, window.start, window.end, now),
+      invalidations: this.serverCache.invalidations?.(owner, window.start, window.end) ?? [],
     });
     return {
       localMs: localProjection.workedMs,
@@ -364,7 +367,14 @@ export class TimerService {
       }
       intervals.set(entry.larkTaskGuid, taskIntervals);
     }
-    return new Map([...intervals].map(([taskGuid, values]) => [taskGuid, intervalUnionMs(values)]));
+    const owner = this.store.currentOwner();
+    const invalidated = owner && this.todayLedgerMode === 'VISIBLE'
+      ? this.serverCache.invalidations?.(owner, window.start, window.end) ?? []
+      : [];
+    return new Map([...intervals].map(([taskGuid, values]) => [
+      taskGuid,
+      unionMs(subtractIntervals(values, invalidated)),
+    ]));
   }
 
   recoveryNotice(): TimerRecoveryNotice | null {
@@ -676,12 +686,12 @@ export class TimerService {
   private todayProjection(now: number, window: { start: number; end: number }) {
     const owner = this.store.currentOwner();
     const local = this.localLedgerEntries(window.start);
-    const server = owner && this.todayLedgerMode === 'VISIBLE'
-      ? this.serverCache.list(owner, window.start, window.end, now)
-      : [];
+    const visible = owner && this.todayLedgerMode === 'VISIBLE' ? owner : null;
+    const server = visible ? this.serverCache.list(visible, window.start, window.end, now) : [];
     return reconcileTodayLedger({
       local,
       server,
+      invalidations: visible ? this.serverCache.invalidations?.(visible, window.start, window.end) ?? [] : [],
       activeLocalEntryId: this.open?.id ?? null,
       windowStart: window.start,
       windowEnd: window.end,
@@ -769,21 +779,6 @@ const UTC_DAY_PROVIDER: BusinessDayProvider = {
 const EMPTY_SERVER_CACHE: ServerLedgerCache = {
   list: () => [],
 };
-
-function intervalUnionMs(values: Array<{ start: number; end: number }>): number {
-  values.sort((a, b) => a.start - b.start || a.end - b.end);
-  let total = 0;
-  let current: { start: number; end: number } | null = null;
-  for (const value of values) {
-    if (!current) current = { ...value };
-    else if (value.start <= current.end) current.end = Math.max(current.end, value.end);
-    else {
-      total += current.end - current.start;
-      current = { ...value };
-    }
-  }
-  return current ? total + current.end - current.start : total;
-}
 
 function latestSegmentBoundary(entry: TimeEntry): number {
   return entry.segments.reduce((latest, segment) => {

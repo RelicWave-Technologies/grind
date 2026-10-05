@@ -68,6 +68,18 @@ function approvedManualEntry(): NonNullable<TodayLedgerResponse['approvedManualE
 }
 
 describe('SqliteTodayLedgerStore', () => {
+  it('keeps the snapshot invalidations so the day total can leave them out', () => {
+    const db = new Database(':memory:');
+    const store = new SqliteTodayLedgerStore(db);
+    expect(store.invalidations(owner, window.start, window.end)).toEqual([]);
+    store.replaceSnapshot(owner, window, snapshot({
+      invalidations: [{ startedAt: new Date(2_000).toISOString(), endedAt: new Date(3_000).toISOString() }],
+    }));
+    expect(store.invalidations(owner, window.start, window.end)).toEqual([{ start: 2_000, end: 3_000 }]);
+    // A different window is a different snapshot.
+    expect(store.invalidations(owner, window.start, window.end + 1)).toEqual([]);
+  });
+
   it('caches approved manual rows as closed server-only ledger evidence', () => {
     const db = new Database(':memory:');
     const store = new SqliteTodayLedgerStore(db);
