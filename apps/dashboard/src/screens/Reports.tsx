@@ -971,7 +971,8 @@ function TeamMemberDrawer({
       queryClient.invalidateQueries({ queryKey: ['reports', 'team', 'member', userId] });
       queryClient.invalidateQueries({ queryKey: reportQueryKeys.teamSummaryRoot });
       queryClient.invalidateQueries({ queryKey: ['approvals', 'team'] });
-      queryClient.invalidateQueries({ queryKey: ['overview'] });
+      // The overview is cached as ['admin', 'overview', tz]; ['overview'] matched nothing.
+      queryClient.invalidateQueries({ queryKey: ['admin', 'overview'] });
     },
   });
 
