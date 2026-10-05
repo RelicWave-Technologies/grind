@@ -5,7 +5,7 @@ import {
 } from '@grind/types';
 import { api } from '../apiClient';
 import { log } from '../../logger';
-import type { ActivityStore, ActivityRow } from './store';
+import type { ActivityOwner, ActivityStore, ActivityRow } from './store';
 
 // A batch must stay comfortably under the API's body-size limit. If it doesn't,
 // the POST is rejected with 413 and — because a count-based batch never shrinks
@@ -51,18 +51,28 @@ function toInput(r: ActivityRow): ActivitySampleInput {
   };
 }
 
+export interface FlushActivityOptions {
+  /** The signed-in account; only its samples are sent. None → nothing is sent. */
+  owner: ActivityOwner | null;
+  /**
+   * Belt and braces over the store's own SQL filter: a sample whose timer
+   * entry is still waiting to be created stays queued.
+   */
+  isTimeEntryPendingCreate?: (entryId: string) => boolean;
+}
+
 /**
  * Push unsynced activity samples to the API in a byte-bounded batch. Returns the
  * number of rows synced (0 when nothing is pending). The remaining backlog
  * drains on subsequent calls (the sync drain loops), so a large backlog clears
  * in safe chunks instead of one oversized — and rejected — request.
  */
-export async function flushActivity(
-  store: ActivityStore,
-  isTimeEntryPendingCreate: (entryId: string) => boolean = () => false,
-): Promise<number> {
+export async function flushActivity(store: ActivityStore, options: FlushActivityOptions): Promise<number> {
+  const { owner, isTimeEntryPendingCreate = () => false } = options;
+  if (!owner) return 0;
+  store.claimUnowned(owner);
   const rows = store
-    .unsynced(MAX_BATCH_ROWS)
+    .unsynced(MAX_BATCH_ROWS, owner)
     .filter((row) => row.timeEntryId === null || !isTimeEntryPendingCreate(row.timeEntryId));
   if (rows.length === 0) return 0;
 

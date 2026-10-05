@@ -404,3 +404,87 @@ describe('POST /v1/activity-samples — policy-gated active fields', () => {
     expect(row?.activeUrl).toBeNull();
   });
 });
+
+describe('workspace policy — privacy of what is already stored', () => {
+  async function storedSample(userId: string, at: Date) {
+    return prisma.activitySample.create({
+      data: {
+        id: ulid(),
+        userId,
+        bucketStart: at,
+        keystrokes: 5,
+        clicks: 1,
+        mouseDistancePx: 10,
+        scrollEvents: 0,
+        activeApp: 'Google Chrome',
+        activeAppBundle: 'com.google.Chrome',
+        activeTitle: 'Inbox · me@example.com',
+        activeUrl: 'https://mail.google.com/inbox',
+      },
+    });
+  }
+
+  it('clears stored titles and URLs when the workspace turns them off', async () => {
+    const { admin, member } = await seedWorkspace();
+    await request(app)
+      .patch('/v1/admin/workspace-policy')
+      .set(bearer(admin.token))
+      .send({ captureApps: true, captureTitles: true, captureUrls: true });
+    const s = await storedSample(member.id, new Date('2026-06-01T10:00:00.000Z'));
+
+    await request(app).patch('/v1/admin/workspace-policy').set(bearer(admin.token)).send({ captureUrls: false });
+    let row = await prisma.activitySample.findUniqueOrThrow({ where: { id: s.id } });
+    expect(row.activeUrl).toBeNull();
+    expect(row.activeTitle).toBe('Inbox · me@example.com');
+
+    await request(app).patch('/v1/admin/workspace-policy').set(bearer(admin.token)).send({ captureTitles: false });
+    row = await prisma.activitySample.findUniqueOrThrow({ where: { id: s.id } });
+    expect(row.activeTitle).toBeNull();
+    expect(row.activeApp).toBe('Google Chrome');
+  });
+
+  it('hides fields the current policy disallows at read time', async () => {
+    const { ws, member } = await seedWorkspace();
+    // Stored under a wider policy; the workspace now captures apps only.
+    await prisma.workspacePolicy.create({
+      data: { workspaceId: ws.id, captureApps: true, captureTitles: false, captureUrls: false },
+    });
+    await storedSample(member.id, new Date('2026-06-01T10:00:00.000Z'));
+
+    const res = await request(app)
+      .get('/v1/reports/me/day-apps?date=2026-06-01&tz=UTC')
+      .set(bearer(member.token));
+    expect(res.status).toBe(200);
+    expect(res.body.apps.map((a: { app: string }) => a.app)).toContain('Google Chrome');
+    expect(JSON.stringify(res.body)).not.toContain('mail.google.com');
+  });
+
+  it('audits every capture-policy change, not only timing', async () => {
+    const { ws, admin } = await seedWorkspace();
+    await request(app)
+      .patch('/v1/admin/workspace-policy')
+      .set(bearer(admin.token))
+      .send({ captureApps: true, captureTitles: true, retentionDaysScreenshots: 30 });
+
+    const audits = await prisma.monitoringSettingsAudit.findMany({ where: { workspaceId: ws.id } });
+    expect(audits).toHaveLength(1);
+    expect(audits[0]!.actorId).toBe(admin.id);
+    expect(audits[0]!.policyChanges).toEqual({
+      captureApps: { from: false, to: true },
+      captureTitles: { from: false, to: true },
+      retentionDaysScreenshots: { from: 60, to: 30 },
+    });
+  });
+
+  it('keeps screenshot retention within 1–60 days', async () => {
+    const { admin } = await seedWorkspace();
+    for (const [sent, kept] of [[0, 60], [365, 60], [7, 7]] as const) {
+      const res = await request(app)
+        .patch('/v1/admin/workspace-policy')
+        .set(bearer(admin.token))
+        .send({ retentionDaysScreenshots: sent });
+      expect(res.status).toBe(200);
+      expect(res.body.retentionDaysScreenshots).toBe(kept);
+    }
+  });
+});

@@ -59,6 +59,7 @@ describe('screenshot retention', () => {
   it('soft-deletes expired uploaded screenshots and finalizes storage cleanup', async () => {
     const now = new Date('2026-07-03T00:00:00.000Z');
     const { user } = await seedWorkspace({ retentionDays: 30 });
+    // "Keep forever" from an older dashboard: kept 60 days, like everyone.
     const disabled = await seedWorkspace({ retentionDays: 0 });
     const defaultPolicy = await seedWorkspace({ retentionDays: null });
     const trashed: string[] = [];
@@ -81,11 +82,21 @@ describe('screenshot retention', () => {
       s3Key: 'drive-missing',
     });
     await seedShot({ userId: user.id, id: 'recent', capturedAt: new Date('2026-06-20T00:00:00.000Z') });
+    // Bytes reached Drive, /complete never came: the file still expires.
     await seedShot({
       userId: user.id,
       id: 'pending-old',
       capturedAt: new Date('2026-05-30T00:00:00.000Z'),
       uploadState: 'PENDING',
+    });
+    // Never uploaded: nothing in storage, nothing to expire.
+    await prisma.screenshot.create({
+      data: {
+        id: 'pending-unuploaded',
+        userId: user.id,
+        capturedAt: new Date('2026-05-30T00:00:00.000Z'),
+        uploadState: 'PENDING',
+      },
     });
     await seedShot({
       userId: disabled.user.id,
@@ -101,12 +112,13 @@ describe('screenshot retention', () => {
     const result = await runScreenshotRetentionOnce(now, trash);
 
     expect(result.checkedWorkspaces).toBe(3);
-    expect(result.skippedDisabledWorkspaces).toBe(1);
-    expect(result.rowsSoftDeleted).toBe(3);
-    expect(result.rowsFinalized).toBe(3);
-    expect(result.driveFilesTrashed).toBe(3);
+    expect(result.rowsSoftDeleted).toBe(5);
+    expect(result.rowsFinalized).toBe(5);
+    expect(result.driveFilesTrashed).toBe(5);
     expect(result.driveFilesMissing).toBe(1);
-    expect(trashed.sort()).toEqual(['default-old-full', 'drive-full', 'drive-missing', 'drive-thumb'].sort());
+    expect(trashed.sort()).toEqual(
+      ['default-old-full', 'disabled-old-full', 'drive-full', 'drive-missing', 'drive-thumb', 'pending-old-full'].sort(),
+    );
 
     const rows = await prisma.screenshot.findMany({ orderBy: { id: 'asc' } });
     const byId = new Map(rows.map((row) => [row.id, row]));
@@ -115,8 +127,10 @@ describe('screenshot retention', () => {
     expect(byId.get('expired')?.s3Key).toBeNull();
     expect(byId.get('default-old')?.deletedAt).toBeTruthy();
     expect(byId.get('recent')?.deletedAt).toBeNull();
-    expect(byId.get('pending-old')?.deletedAt).toBeNull();
-    expect(byId.get('disabled-old')?.deletedAt).toBeNull();
+    expect(byId.get('pending-old')?.deletedAt).toBeTruthy();
+    expect(byId.get('pending-old')?.s3Key).toBeNull();
+    expect(byId.get('pending-unuploaded')?.deletedAt).toBeNull();
+    expect(byId.get('disabled-old')?.deletedAt).toBeTruthy();
   });
 
   it('keeps storage keys for retry when trashing fails, then finalizes on the next run', async () => {

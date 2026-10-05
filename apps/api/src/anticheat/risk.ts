@@ -157,12 +157,23 @@ function jiggler(w: RiskSample[]): RiskFlag | null {
   });
 }
 
+/** A tracked minute with no input at all — stored so activity % counts it, not evidence of anything. */
+function isEmptyMinute(s: RiskSample): boolean {
+  return s.keystrokes === 0 && s.clicks === 0 && s.scrollEvents === 0 && s.mouseDistancePx === 0;
+}
+
 /**
  * Assess a window (chronological run) of per-minute samples. Returns the raised
  * flags, the cumulative risk (capped 100), and whether any interval must be
  * hard-rejected. An empty window is clean.
+ *
+ * Agents now also store tracked minutes with no input (all zeros). Those are
+ * left out: the detectors were written for minutes with input, and quiet
+ * minutes would otherwise make a window long enough to "claim a pattern" from
+ * a single busy minute (SINGLE_CHANNEL) or loosen the per-minute thresholds.
  */
-export function assessWindow(window: RiskSample[]): WindowAssessment {
+export function assessWindow(samples: RiskSample[]): WindowAssessment {
+  const window = samples.filter((s) => !isEmptyMinute(s));
   const flags: RiskFlag[] = [];
   for (const detect of [impossibleRate, metronomic, linearMouse, singleChannel, jiggler]) {
     const f = detect(window);

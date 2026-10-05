@@ -117,11 +117,11 @@ const api = {
   },
   screenshots: {
     recent: (limit?: number): Promise<ScreenshotItem[]> => ipcRenderer.invoke('screenshots:recent', limit),
-    captureOnce: (): Promise<number> => ipcRenderer.invoke('screenshots:captureOnce'),
+    /** Every shot captured in [fromMs, toMs) — the gallery loads a whole day. */
+    range: (fromMs: number, toMs: number): Promise<ScreenshotItem[]> => ipcRenderer.invoke('screenshots:range', fromMs, toMs),
     thumbnail: (id: string): Promise<string | null> => ipcRenderer.invoke('screenshots:thumbnail', id),
     full: (id: string): Promise<string | null> => ipcRenderer.invoke('screenshots:full', id),
     uploadSummary: (): Promise<ScreenshotUploadSummary> => ipcRenderer.invoke('screenshots:uploadSummary'),
-    retryFailedUploads: (): Promise<{ reset: number }> => ipcRenderer.invoke('screenshots:retryFailedUploads'),
     onChange: (cb: () => void): (() => void) => {
       const sub = () => cb();
       ipcRenderer.on('screenshots:changed', sub);

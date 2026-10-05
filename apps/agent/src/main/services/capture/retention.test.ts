@@ -78,3 +78,15 @@ describe('planScreenshotRetention', () => {
     expect(p).toMatchObject({ filesToDelete: [], rowIdsToDelete: [], expired: 0, orphanFiles: 0, danglingRows: 0 });
   });
 });
+
+describe('planScreenshotRetention racing a capture', () => {
+  it('never deletes a file too new to have its row yet', () => {
+    const p = plan({
+      rows: [row('a', '/s/a.webp', 1)],
+      filesOnDisk: ['/s/a.webp', '/s/just-written.webp'],
+      protectedFiles: ['/s/just-written.webp'],
+    });
+    expect(p.filesToDelete).toEqual([]);
+    expect(p.orphanFiles).toBe(0);
+  });
+});

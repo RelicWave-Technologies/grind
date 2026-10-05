@@ -4,6 +4,7 @@ import {
   WORKSPACE_POLICY_DEFAULTS,
   PatchWorkspacePolicyRequest,
   ActivitySampleInput,
+  effectiveScreenshotRetentionDays,
 } from '@grind/types';
 
 describe('applyPolicyToActive', () => {
@@ -90,9 +91,22 @@ describe('PatchWorkspacePolicyRequest', () => {
     expect(out.success).toBe(false);
   });
 
-  it('accepts retentionDaysScreenshots = 0 (no purge)', () => {
-    const out = PatchWorkspacePolicyRequest.safeParse({ retentionDaysScreenshots: 0 });
-    expect(out.success).toBe(true);
+  it('stores the privacy contract\'s 60 days for "keep forever" (0) and anything longer', () => {
+    for (const days of [0, 61, 3650]) {
+      const out = PatchWorkspacePolicyRequest.safeParse({ retentionDaysScreenshots: days });
+      expect(out.success).toBe(true);
+      expect(out.success && out.data.retentionDaysScreenshots).toBe(60);
+    }
+    const kept = PatchWorkspacePolicyRequest.safeParse({ retentionDaysScreenshots: 14 });
+    expect(kept.success && kept.data.retentionDaysScreenshots).toBe(14);
+  });
+
+  it('reads any stored retention as 1–60 days', () => {
+    expect(effectiveScreenshotRetentionDays(0)).toBe(60);
+    expect(effectiveScreenshotRetentionDays(null)).toBe(60);
+    expect(effectiveScreenshotRetentionDays(400)).toBe(60);
+    expect(effectiveScreenshotRetentionDays(1)).toBe(1);
+    expect(effectiveScreenshotRetentionDays(30)).toBe(30);
   });
 
   it('accepts workspace default tracking knobs inside member override ranges', () => {

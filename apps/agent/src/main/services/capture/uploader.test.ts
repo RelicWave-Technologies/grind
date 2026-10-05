@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { HttpError, UnauthorizedError } from '../apiClient';
 import {
-  CloudinaryUploadError,
+  UploadTargetError,
   screenshotRetryDelayMs,
   screenshotUploadFailureDecision,
+  shouldHoldForEntry,
 } from './uploader';
 
 describe('screenshot uploader retry decisions', () => {
@@ -74,21 +75,60 @@ describe('screenshot uploader retry decisions', () => {
       .toMatchObject({ action: 'pending' });
   });
 
-  it('treats local missing files and Cloudinary hard 4xx responses as terminal', () => {
+  it('treats local missing files and upload-target hard 4xx responses as terminal', () => {
     expect(screenshotUploadFailureDecision({ attempts: 0 }, { code: 'ENOENT', message: 'missing' }, 1_000))
       .toMatchObject({ action: 'failed' });
-    expect(screenshotUploadFailureDecision({ attempts: 0 }, new CloudinaryUploadError(401, 'bad signature'), 1_000))
-      .toEqual({ action: 'failed', lastError: 'cloudinary 401: bad signature' });
+    expect(screenshotUploadFailureDecision({ attempts: 0 }, new UploadTargetError(401, 'bad signature'), 1_000))
+      .toEqual({ action: 'failed', lastError: 'upload target 401: bad signature' });
   });
 
-  it('keeps throttling-style Cloudinary 4xx responses retryable', () => {
+  it('keeps throttling-style upload-target 4xx responses retryable', () => {
     const decision = screenshotUploadFailureDecision(
       { attempts: 0 },
-      new CloudinaryUploadError(429, 'too many requests'),
+      new UploadTargetError(429, 'too many requests'),
       1_000,
       () => 0,
     );
 
-    expect(decision).toEqual({ action: 'retry', lastError: 'cloudinary 429: too many requests', nextAttemptAt: 61_000 });
+    expect(decision).toEqual({ action: 'retry', lastError: 'upload target 429: too many requests', nextAttemptAt: 61_000 });
+  });
+
+  it('reads a 503 from the upload target as storage unavailable — no attempt spent', () => {
+    // /direct-upload answers a full or broken Drive with 503; the bytes POST
+    // bypasses api(), so it arrives as an UploadTargetError, not an HttpError.
+    const decision = screenshotUploadFailureDecision(
+      { attempts: 2 },
+      new UploadTargetError(503, '{"error":"screenshot_storage_unavailable"}'),
+      1_000,
+      () => 0,
+    );
+    expect(decision).toMatchObject({ action: 'pending', nextAttemptAt: 61_000 });
+  });
+
+  it('reads screenshot_storage_unavailable in any error as storage unavailable', () => {
+    const decision = screenshotUploadFailureDecision(
+      { attempts: 2 },
+      new Error('upload target 500: {"error":"screenshot_storage_unavailable"}'),
+      1_000,
+    );
+    expect(decision.action).toBe('pending');
+  });
+});
+
+describe('holding a shot for its timer entry', () => {
+  const HOUR = 60 * 60_000;
+  const pendingCreate = (id: string) => id === 'local-only';
+
+  it('holds a fresh shot whose entry has not reached the server', () => {
+    expect(shouldHoldForEntry({ timeEntryId: 'local-only', capturedAt: 0 }, pendingCreate, 10 * 60_000)).toBe(true);
+  });
+
+  it('uploads it anyway (detached) once it is an hour old', () => {
+    expect(shouldHoldForEntry({ timeEntryId: 'local-only', capturedAt: 0 }, pendingCreate, HOUR)).toBe(false);
+  });
+
+  it('never holds a shot whose entry is on the server, or that has none', () => {
+    expect(shouldHoldForEntry({ timeEntryId: 'synced', capturedAt: 0 }, pendingCreate, 1)).toBe(false);
+    expect(shouldHoldForEntry({ timeEntryId: null, capturedAt: 0 }, pendingCreate, 1)).toBe(false);
   });
 });
