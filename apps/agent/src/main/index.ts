@@ -164,6 +164,24 @@ function showSettingsWindow() {
 }
 
 /**
+ * Notifications are held until closed: a garbage-collected Notification drops
+ * its click handler, so clicking it did nothing.
+ */
+const liveNotifications = new Set<Notification>();
+
+function showNotification(options: Electron.NotificationConstructorOptions, onClick: () => void): void {
+  const notification = new Notification(options);
+  liveNotifications.add(notification);
+  const forget = () => liveNotifications.delete(notification);
+  notification.on('click', () => {
+    forget();
+    onClick();
+  });
+  notification.on('close', forget);
+  notification.show();
+}
+
+/**
  * Losing the session used to be completely silent: the tray kept ticking, the
  * capture loop kept queueing, and every upload was rejected — one field log ran
  * over six hours that way before anyone noticed. Nothing tracked is lost (both
@@ -175,12 +193,10 @@ function announceSignOut(): void {
   log.warn('signed out — session ended; prompting for sign-in');
   showMainWindow({ bypassAttention: true });
   if (!Notification.isSupported()) return;
-  const notification = new Notification({
+  showNotification({
     title: 'Timo signed you out',
     body: 'Sign in again to keep your tracked time syncing.',
-  });
-  notification.on('click', () => showMainWindow({ bypassAttention: true }));
-  notification.show();
+  }, () => showMainWindow({ bypassAttention: true }));
 }
 
 function notifyStartupHealth(state: LaunchAtLoginHealth): void {
@@ -190,12 +206,7 @@ function notifyStartupHealth(state: LaunchAtLoginHealth): void {
     : state.state === 'NEEDS_APPROVAL'
       ? 'Approve Timo in Login Items so it can start when you sign in.'
       : 'Open Timo Settings to repair Launch at Login.';
-  const notification = new Notification({
-    title: 'Timo startup needs attention',
-    body,
-  });
-  notification.on('click', showSettingsWindow);
-  notification.show();
+  showNotification({ title: 'Timo startup needs attention', body }, showSettingsWindow);
 }
 
 app.whenReady().then(async () => {
