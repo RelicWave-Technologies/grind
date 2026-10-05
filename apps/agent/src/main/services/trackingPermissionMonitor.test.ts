@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => ({
   heartbeat: vi.fn(),
   setActivityRecording: vi.fn(),
   idleState: vi.fn(),
+  warn: vi.fn(),
 }));
 
 vi.mock('electron', () => ({
@@ -55,7 +56,7 @@ vi.mock('./activity', () => ({
   onActivityCaptureStatusChange: () => () => undefined,
   setActivityRecording: mocks.setActivityRecording,
 }));
-vi.mock('../logger', () => ({ log: { warn: vi.fn() } }));
+vi.mock('../logger', () => ({ log: { warn: mocks.warn } }));
 
 import {
   startTrackingPermissionMonitor,
@@ -79,11 +80,11 @@ function inspection(ready: boolean) {
   };
 }
 
-function transientScreenFailureInspection() {
+function blankScreenInspection(screenRecording: 'CHECKING' | 'FAILED') {
   const value = inspection(true);
   return {
     ...value,
-    readiness: { ...value.readiness, ready: false, screenRecording: 'CHECKING', blockingCapabilities: ['SCREEN_RECORDING'] },
+    readiness: { ...value.readiness, ready: false, screenRecording, blockingCapabilities: ['SCREEN_RECORDING'] },
     permissions: {
       ...value.permissions,
       screen: { status: 'granted', health: 'empty', state: 'needs-restart' },
@@ -116,6 +117,7 @@ describe('tracking permission monitor', () => {
     mocks.heartbeat.mockReset();
     mocks.setActivityRecording.mockReset();
     mocks.idleState.mockReset().mockReturnValue('active');
+    mocks.warn.mockReset();
   });
 
   afterEach(() => {
@@ -177,7 +179,7 @@ describe('tracking permission monitor', () => {
     expect(mocks.offerResume).not.toHaveBeenCalled();
   });
 
-  it('does not pause for a granted-but-empty screen capture before the confirmation window expires', async () => {
+  it('does not pause while readiness is still checking a granted-but-blank screen', async () => {
     const running = {
       state: 'RUNNING', entryId: 'entry-2b', revision: 1, larkTaskGuid: null,
       startedAt: Date.now(), segmentStartedAt: Date.now(), workedMs: 0, paused: false, pauseReason: null,
@@ -187,14 +189,15 @@ describe('tracking permission monitor', () => {
     startTrackingPermissionMonitor();
     await vi.advanceTimersByTimeAsync(0);
 
-    mocks.inspect.mockResolvedValue(transientScreenFailureInspection());
-    await vi.advanceTimersByTimeAsync(6_000);
+    // However long it lasts: readiness alone decides when CHECKING is FAILED.
+    mocks.inspect.mockResolvedValue(blankScreenInspection('CHECKING'));
+    await vi.advanceTimersByTimeAsync(60_000);
 
     expect(mocks.pauseForPermission).not.toHaveBeenCalled();
     expect(mocks.offerResume).not.toHaveBeenCalled();
   });
 
-  it('pauses after a granted-but-empty screen capture stays failed through the confirmation window', async () => {
+  it('pauses as soon as readiness calls a granted-but-blank screen FAILED', async () => {
     const running = {
       state: 'RUNNING', entryId: 'entry-2c', revision: 1, larkTaskGuid: null,
       startedAt: Date.now(), segmentStartedAt: Date.now(), workedMs: 0, paused: false, pauseReason: null,
@@ -210,8 +213,8 @@ describe('tracking permission monitor', () => {
     await vi.advanceTimersByTimeAsync(0);
     const lastHealthyAt = Date.now();
 
-    mocks.inspect.mockResolvedValue(transientScreenFailureInspection());
-    await vi.advanceTimersByTimeAsync(12_000);
+    mocks.inspect.mockResolvedValue(blankScreenInspection('FAILED'));
+    await vi.advanceTimersByTimeAsync(2_000);
 
     // Elapsed since the last healthy proof, not the instant itself: the timer
     // runs on the server-aligned clock and cannot interpret a device reading.
@@ -232,7 +235,7 @@ describe('tracking permission monitor', () => {
     // Display sleep: permission still granted, captures come back empty, and
     // the user has produced no recent input. This must never pause or prompt
     // no matter how long it lasts — well beyond the confirmation window.
-    mocks.inspect.mockResolvedValue(transientScreenFailureInspection());
+    mocks.inspect.mockResolvedValue(blankScreenInspection('FAILED'));
     mocks.idleState.mockReturnValue('idle');
     await vi.advanceTimersByTimeAsync(60_000);
 
@@ -260,5 +263,74 @@ describe('tracking permission monitor', () => {
 
     expect(mocks.pauseForPermission).toHaveBeenCalledTimes(1);
     expect(mocks.offerResume).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not relabel a pause the user made while readiness was being checked', async () => {
+    const running = {
+      state: 'RUNNING', entryId: 'entry-4', revision: 1, larkTaskGuid: null,
+      startedAt: Date.now(), segmentStartedAt: Date.now(), workedMs: 0, paused: false, pauseReason: null,
+    };
+    const manuallyPaused = { ...running, revision: 2, paused: true, pauseReason: 'MANUAL' };
+    mocks.status.mockReturnValue(running);
+    mocks.inspect.mockResolvedValueOnce(inspection(true));
+    startTrackingPermissionMonitor();
+    await vi.advanceTimersByTimeAsync(0);
+
+    // The verdict arrives after the user paused (or idle paused) the timer.
+    mocks.inspect.mockImplementation(async () => {
+      mocks.status.mockReturnValue(manuallyPaused);
+      return inspection(false);
+    });
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    expect(mocks.inspect).toHaveBeenCalledTimes(3);
+    expect(mocks.pauseForPermission).not.toHaveBeenCalled();
+    expect(mocks.setActivityRecording).not.toHaveBeenCalled();
+    expect(mocks.offerResume).not.toHaveBeenCalled();
+  });
+
+  it('does not pause an entry it never inspected', async () => {
+    const running = {
+      state: 'RUNNING', entryId: 'entry-5', revision: 1, larkTaskGuid: null,
+      startedAt: Date.now(), segmentStartedAt: Date.now(), workedMs: 0, paused: false, pauseReason: null,
+    };
+    mocks.status.mockReturnValue(running);
+    mocks.inspect.mockResolvedValueOnce(inspection(true));
+    startTrackingPermissionMonitor();
+    await vi.advanceTimersByTimeAsync(0);
+
+    mocks.inspect.mockImplementation(async () => {
+      mocks.status.mockReturnValue({ ...running, entryId: 'entry-6' });
+      return inspection(false);
+    });
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    expect(mocks.inspect).toHaveBeenCalledTimes(3);
+    expect(mocks.pauseForPermission).not.toHaveBeenCalled();
+    expect(mocks.warn).not.toHaveBeenCalled();
+  });
+
+  it('logs, instead of leaking, a pause that throws', async () => {
+    const running = {
+      state: 'RUNNING', entryId: 'entry-7', revision: 1, larkTaskGuid: null,
+      startedAt: Date.now(), segmentStartedAt: Date.now(), workedMs: 0, paused: false, pauseReason: null,
+    };
+    const unhandled = vi.fn();
+    process.on('unhandledRejection', unhandled);
+    try {
+      mocks.status.mockReturnValue(running);
+      mocks.inspect.mockResolvedValue(inspection(false));
+      mocks.pauseForPermission.mockRejectedValue(new Error('disk full'));
+
+      startTrackingPermissionMonitor();
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(2_000);
+
+      expect(mocks.pauseForPermission).toHaveBeenCalled();
+      expect(mocks.warn).toHaveBeenCalledWith('tracking permission check failed', { err: 'Error: disk full' });
+      expect(unhandled).not.toHaveBeenCalled();
+    } finally {
+      process.off('unhandledRejection', unhandled);
+    }
   });
 });
