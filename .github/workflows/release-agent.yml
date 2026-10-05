@@ -142,6 +142,16 @@ jobs:
           if (!(Test-Path $metadata)) { throw "Missing Windows update metadata: $metadata" }
           if (-not (Get-ChildItem $release -Filter "*.exe" | Where-Object { $_.Name -like "*setup.exe" })) { throw "Missing Windows NSIS setup exe" }
           if (-not (Get-ChildItem $release -Filter "*.exe.blockmap")) { throw "Missing Windows blockmap" }
+          # The feed a Windows client reads must name THIS version and an
+          # installer that was built alongside it (a stale setup.exe from an
+          # earlier run once rode along on beta.24).
+          $feed = Get-Content $metadata -Raw
+          if ($feed -notmatch "(?m)^version: ${{ inputs.version }}\s*$") { throw "$metadata does not declare version ${{ inputs.version }}:`n$feed" }
+          if ($feed -notmatch "(?m)^path: (.+)$") { throw "$metadata has no installer path:`n$feed" }
+          $installer = $Matches[1].Trim()
+          if (!(Test-Path (Join-Path $release $installer))) { throw "$metadata points at $installer, which was not built" }
+          if ($feed -match "isAdminRightsRequired: true") { throw "$metadata asks for admin rights; Timo must stay a per-user install" }
+          Write-Output "Windows feed OK:`n$feed"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -252,3 +262,4 @@ jobs:
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,isPrerelease,assets,url \
             --jq '"Draft: \(.isDraft)\nPrerelease: \(.isPrerelease)\nURL: \(.url)\nAssets:\n\(.assets[].name)"'
           echo "Review the draft release in GitHub, install beta/stable candidates, then publish manually."
+          echo "Agents cannot see a draft: Windows and macOS clients only update once it is published."
