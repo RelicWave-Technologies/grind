@@ -6,6 +6,7 @@ import cookieParser from 'cookie-parser';
 import pinoHttp from 'pino-http';
 import { prisma } from '@grind/db';
 import { logger } from './logger';
+import { dashboardOrigins } from './env';
 import { API_VERSION, START_TIME_MS } from './lib/version';
 import { authRouter } from './routes/auth';
 import { authLarkRouter } from './routes/authLark';
@@ -40,10 +41,7 @@ export function buildApp() {
   // origin(s) — DASHBOARD_URL may be a comma-separated list. In dev with
   // nothing configured we reflect the request origin so localhost:5174 just
   // works.
-  const allowlist = (process.env.DASHBOARD_URL ?? '')
-    .split(',')
-    .map((s) => s.trim().replace(/\/$/, ''))
-    .filter(Boolean);
+  const allowlist = dashboardOrigins();
   app.use(
     cors({
       origin: allowlist.length

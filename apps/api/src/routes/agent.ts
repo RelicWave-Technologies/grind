@@ -12,7 +12,7 @@ import {
 import { validate } from '../middleware/validate';
 import { requireAccessToken } from '../middleware/auth';
 import { prisma, type Prisma } from '@grind/db';
-import { env } from '../env';
+import { dashboardOrigins, env } from '../env';
 import { renewTimerLease, TIMER_PROTOCOL_VERSION, type TimerCheckpointResult } from '../timeLifecycle';
 import { serializeTimeEntry } from '../timeEntries/wire';
 import { loadEntryLiveEvidence } from '../insights/liveEntryEvidence';
@@ -25,7 +25,7 @@ agentRouter.use(requireAccessToken);
 
 /** First entry of the (possibly comma-separated) DASHBOARD_URL, trailing-slash trimmed. */
 function dashboardOrigin(): string {
-  return (env.DASHBOARD_URL ?? '').split(',')[0]?.trim().replace(/\/$/u, '') ?? '';
+  return dashboardOrigins()[0] ?? '';
 }
 
 async function buildAgentConfig(userId: string, workspaceId: string): Promise<AgentConfigResponse | null> {

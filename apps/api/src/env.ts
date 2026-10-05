@@ -1,6 +1,33 @@
 import 'dotenv/config';
 import { z } from 'zod';
 
+/**
+ * Split a comma-separated list of origins, trimming whitespace and trailing
+ * slashes. Entries that are not absolute URLs are dropped.
+ */
+export function parseUrlList(raw: string | undefined | null): string[] {
+  return (raw ?? '')
+    .split(',')
+    .map((s) => s.trim().replace(/\/+$/u, ''))
+    .filter((s) => {
+      if (!s) return false;
+      try {
+        return Boolean(new URL(s).host);
+      } catch {
+        return false;
+      }
+    });
+}
+
+const UrlListSchema = z
+  .string()
+  .optional()
+  .refine((v) => {
+    if (!v || !v.trim()) return true;
+    const parts = v.split(',').map((s) => s.trim()).filter(Boolean);
+    return parts.length > 0 && parseUrlList(v).length === parts.length;
+  }, 'must be one URL or a comma-separated list of URLs');
+
 const EnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   // PORT is injected by most PaaS hosts (Render, Heroku, Railway). When set it
@@ -29,7 +56,10 @@ const EnvSchema = z.object({
   LARK_CONNECT_REDIRECT_URI: z.string().url().optional(),
   // Legacy single-redirect config. Prefer the two flow-specific values above.
   LARK_OAUTH_REDIRECT_URI: z.string().url().optional(),
-  DASHBOARD_URL: z.string().url().optional(),
+  // Dashboard origin(s): CORS allowlist + post-login redirects (first entry).
+  // One URL or a comma-separated list; empty means unset. Read it through
+  // dashboardOrigins(), never process.env directly.
+  DASHBOARD_URL: UrlListSchema,
 
   // --- Lark login provisioning ---
   // Comma-separated emails created as ACTIVE ADMIN on first Lark login (they
@@ -106,3 +136,12 @@ if (!parsed.success) {
 }
 
 export const env = parsed.data;
+
+/**
+ * The configured dashboard origins, first one canonical. Parsed on each call so
+ * a value set after this module loaded (a test, a process manager) is honoured
+ * the same way at every read site.
+ */
+export function dashboardOrigins(): string[] {
+  return parseUrlList(process.env.DASHBOARD_URL ?? env.DASHBOARD_URL);
+}
