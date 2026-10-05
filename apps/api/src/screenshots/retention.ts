@@ -103,9 +103,14 @@ async function processWorkspace(
       where: {
         ...(processedIds.size > 0 ? { id: { notIn: [...processedIds] } } : {}),
         user: { workspaceId },
-        uploadState: 'UPLOADED',
         OR: [
-          { deletedAt: null, capturedAt: { lt: cutoff } },
+          // A shot whose bytes reached Drive but whose agent never sent
+          // /complete still holds a file — it expires like any other.
+          {
+            deletedAt: null,
+            capturedAt: { lt: cutoff },
+            OR: [{ uploadState: 'UPLOADED' }, { s3Key: { not: null } }],
+          },
           {
             deletedReason: RETENTION_REASON,
             OR: [{ s3Key: { not: null } }, { thumbS3Key: { not: null } }],
