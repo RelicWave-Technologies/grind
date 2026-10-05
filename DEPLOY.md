@@ -60,6 +60,36 @@ block of `infra/vps/docker-compose.prod.yml`.
 `infra/vps/docker-compose.yml` is the build-from-source variant of the same
 stack, for running it on a box without the CI-built images.
 
+### Remote resync (developer)
+
+A developer can ask one person's Timo to re-send its local time entries,
+activity and screenshots for a date range, without touching their laptop —
+for when a day looks wrong or empty on the dashboard. The agent picks the
+request up on its next heartbeat (≤ 60 s), runs it silently (no notification,
+one line in the agent log) and reports counts back. It needs an agent build
+that includes it (the next release after beta.38); older agents ignore the
+request and it expires after 7 days.
+
+1. **Allow yourself.** Set `DEVELOPER_EMAILS` (comma-separated,
+   case-insensitive) for the API. `.env.production` on the VPS is rewritten
+   from the secrets on every deploy, so put it in the `TIMO_PRODUCTION_ENV`
+   (or `PRODUCTION_ENV`) GitHub secret, or uncomment the line in the
+   `environment:` block of `infra/vps/docker-compose.prod.yml`. Then redeploy
+   (or `docker compose -f infra/vps/docker-compose.prod.yml up -d api`).
+   Unset or empty = feature off: `/v1/dev/*` answers 404 for everyone.
+2. **Open `https://timo.emiactech.com/dev/resync`.** There is no nav link;
+   anyone not on the list is sent to their home page.
+3. Pick the person and the dates (workspace calendar, at most 31 days) and
+   press **Re-send**. Status goes *Waiting for agent* → *Running* →
+   *Done*/*Failed*; expand a row for what was re-sent, what is still queued,
+   sync errors, and the agent's version/OS. *Still uploading* means the
+   2-minute wait ended with data still queued — it keeps syncing in the
+   background.
+
+API: `POST/GET /v1/dev/agent-commands`, `GET /v1/dev/agent-commands/:id`,
+`GET /v1/dev/people` (developer only); the agent reports to
+`POST /v1/agent/commands/:id/result`.
+
 ## 2. Agent desktop releases
 
 The build goes through a `pnpm deploy --prod` staging dir (see
