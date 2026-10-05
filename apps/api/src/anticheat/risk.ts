@@ -52,15 +52,15 @@ export interface WindowAssessment {
 
 // --- Tunable thresholds (exported so the review UI / tests reference one source) ---
 export const IMPOSSIBLE_KEYS_PER_MIN = 1100;
-export const METRONOMIC_IKI_CV = 0.1;
-export const MIN_KEYS_FOR_IKI = 30;
-export const LINEAR_STRAIGHTNESS = 0.97;
-export const LINEAR_SPEED_CV = 0.05;
-export const MIN_MOVE_PX = 500;
-export const JIGGLER_SPEED_CV = 0.1;
-export const IDLE_MOUSE_PX = 50;
+const METRONOMIC_IKI_CV = 0.1;
+const MIN_KEYS_FOR_IKI = 30;
+const LINEAR_STRAIGHTNESS = 0.97;
+const LINEAR_SPEED_CV = 0.05;
+const MIN_MOVE_PX = 500;
+const JIGGLER_SPEED_CV = 0.1;
+const IDLE_MOUSE_PX = 50;
 export const MIN_WINDOW_FOR_PATTERN = 5; // need enough minutes to claim a pattern
-export const SINGLE_CHANNEL_MIN_VOLUME = 200; // total of the active channel
+const SINGLE_CHANNEL_MIN_VOLUME = 200; // total of the active channel
 
 export const RISK_WEIGHTS: Record<FlagType, number> = {
   IMPOSSIBLE_RATE: 100,
@@ -157,12 +157,23 @@ function jiggler(w: RiskSample[]): RiskFlag | null {
   });
 }
 
+/** A tracked minute with no input at all — stored so activity % counts it, not evidence of anything. */
+function isEmptyMinute(s: RiskSample): boolean {
+  return s.keystrokes === 0 && s.clicks === 0 && s.scrollEvents === 0 && s.mouseDistancePx === 0;
+}
+
 /**
  * Assess a window (chronological run) of per-minute samples. Returns the raised
  * flags, the cumulative risk (capped 100), and whether any interval must be
  * hard-rejected. An empty window is clean.
+ *
+ * Agents now also store tracked minutes with no input (all zeros). Those are
+ * left out: the detectors were written for minutes with input, and quiet
+ * minutes would otherwise make a window long enough to "claim a pattern" from
+ * a single busy minute (SINGLE_CHANNEL) or loosen the per-minute thresholds.
  */
-export function assessWindow(window: RiskSample[]): WindowAssessment {
+export function assessWindow(samples: RiskSample[]): WindowAssessment {
+  const window = samples.filter((s) => !isEmptyMinute(s));
   const flags: RiskFlag[] = [];
   for (const detect of [impossibleRate, metronomic, linearMouse, singleChannel, jiggler]) {
     const f = detect(window);

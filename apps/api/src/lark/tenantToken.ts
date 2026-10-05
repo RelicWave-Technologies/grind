@@ -1,4 +1,5 @@
 import { getLarkConfig } from './config';
+import { outboundTimeoutSignal } from '../lib/outboundTimeout';
 
 /**
  * One owner of the bot's `tenant_access_token`.
@@ -22,6 +23,7 @@ export async function getTenantAccessToken(nowMs = Date.now()): Promise<string> 
     method: 'POST',
     headers: { 'Content-Type': 'application/json; charset=utf-8' },
     body: JSON.stringify({ app_id: appId, app_secret: appSecret }),
+    signal: outboundTimeoutSignal(),
   });
   const body = (await res.json().catch(() => ({}))) as {
     code?: number;

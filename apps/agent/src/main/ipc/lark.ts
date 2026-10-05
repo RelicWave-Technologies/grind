@@ -1,7 +1,7 @@
 import { app, ipcMain, shell } from 'electron';
 import Database from 'better-sqlite3';
 import path from 'node:path';
-import { api } from '../services/apiClient';
+import { api, HttpError } from '../services/apiClient';
 import { log } from '../logger';
 import { todayKey as businessToday } from '@grind/types';
 import { getWorkspaceTimeZone } from '../services/workspaceTime';
@@ -74,19 +74,26 @@ function myTasksPath(): string {
   return `/v1/lark/my-tasks?${params.toString()}`;
 }
 
-function createTaskErrorMessage(raw: string): string {
-  if (raw.includes('409')) return 'reauth_required';
-  const jsonStart = raw.indexOf('{');
-  if (jsonStart >= 0) {
-    try {
-      const body = JSON.parse(raw.slice(jsonStart)) as { error?: string; detail?: string };
-      if (body.detail) return body.detail;
-      if (body.error === 'lark_create_failed') return 'Lark rejected the task';
-      if (body.error === 'internal_error') return raw;
-      if (body.error) return body.error;
-    } catch {
-      // Fall through to a generic message below.
-    }
+/**
+ * The backend answers 409 when the user's Lark grant needs re-authorising.
+ * Read the status off the error: matching "409" in the message also matched
+ * any URL, date, or response body that happened to contain those digits.
+ */
+function isReauthRequired(err: unknown): boolean {
+  return err instanceof HttpError && err.status === 409;
+}
+
+function createTaskErrorMessage(err: unknown): string {
+  if (isReauthRequired(err)) return 'reauth_required';
+  if (!(err instanceof HttpError)) return 'Could not create task in Lark';
+  try {
+    const body = JSON.parse(err.body) as { error?: string; detail?: string };
+    if (body.detail) return body.detail;
+    if (body.error === 'lark_create_failed') return 'Lark rejected the task';
+    if (body.error === 'internal_error') return err.message;
+    if (body.error) return body.error;
+  } catch {
+    // Fall through to a generic message below.
   }
   return 'Could not create task in Lark';
 }
@@ -139,7 +146,7 @@ export function registerLarkIpc(): void {
       return { tasks: withProjectedToday(tasks), reauthRequired: false };
     } catch (err) {
       const msg = String(err);
-      if (msg.includes('409')) return { tasks: [], reauthRequired: true };
+      if (isReauthRequired(err)) return { tasks: [], reauthRequired: true };
       const tasks = withProjectedToday(await cachedTasks());
       log.warn('lark:tasks unavailable', { cachedTasks: tasks.length, err: msg });
       return { tasks, reauthRequired: false, offline: true };
@@ -174,7 +181,7 @@ export function registerLarkIpc(): void {
         };
       } catch (err) {
         const msg = String(err);
-        if (msg.includes('409')) {
+        if (isReauthRequired(err)) {
           return { ok: false, connected: true, reauthRequired: true, ...empty, error: 'reauth_required' };
         }
         lastErr = msg;
@@ -191,9 +198,8 @@ export function registerLarkIpc(): void {
       const { task } = await api<{ task: LarkTask }>('/v1/lark/tasks', { method: 'POST', body: input });
       return { ok: true, task };
     } catch (err) {
-      const msg = String(err);
-      log.warn('lark:createTask failed', { err: msg });
-      return { ok: false, error: createTaskErrorMessage(msg) };
+      log.warn('lark:createTask failed', { err: String(err) });
+      return { ok: false, error: createTaskErrorMessage(err) };
     }
   });
 

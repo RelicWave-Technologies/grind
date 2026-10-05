@@ -72,10 +72,6 @@
   align-items: start;
 }
 
-.pol-payroll-rule-grid--close {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
 .pol-payroll-rule {
   min-width: 0;
   display: grid;
@@ -368,7 +364,6 @@
   }
 
   .pol-payroll-rule-grid,
-  .pol-payroll-rule-grid--close,
   .pol-form-grid--rules,
   .pol-form-grid {
     grid-template-columns: 1fr;

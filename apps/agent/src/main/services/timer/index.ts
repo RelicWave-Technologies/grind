@@ -12,7 +12,8 @@ import { log } from '../../logger';
 import { getTrackingReadinessService } from '../trackingReadiness';
 import { getWorkspaceTimeContext } from '../workspaceTime';
 import { loadTokens } from '../tokenStore';
-import type { TimerOwner } from './types';
+import type { TimerOwner, TimerRecoveryResult } from './types';
+import { setPreferencesOwner } from '../preferences';
 import { TodayLedgerHydrator, type TodayLedgerRefreshReason } from './todayLedgerHydrator';
 import { api } from '../apiClient';
 import { broadcast } from '../../broadcast';
@@ -88,6 +89,32 @@ function getTodayLedgerHydrator(): TodayLedgerHydrator {
   return todayLedgerHydrator;
 }
 
+function ownerFromTokens(tokens: Awaited<ReturnType<typeof loadTokens>>): TimerOwner | null {
+  return tokens ? { userId: tokens.userId, workspaceId: tokens.workspaceId } : null;
+}
+
+function logRecovered(recovered: TimerRecoveryResult[], context: string): void {
+  for (const item of recovered) {
+    log.warn('timer recovered stale open entry', {
+      context,
+      entryId: item.entryId,
+      recoveredAt: item.recoveredAt,
+      reason: item.notice.reason,
+    });
+  }
+}
+
+/**
+ * Point the timer, and the per-account preferences, at `owner`. Any entry left
+ * open on either side of an owner change is closed at its last proof of life
+ * first (see TimerService.switchOwner).
+ */
+function bindOwner(owner: TimerOwner | null, claimLegacy: boolean, context: string): void {
+  const recovered = getTimerService().switchOwner(owner, claimLegacy);
+  setPreferencesOwner(owner, { claimLegacy });
+  logRecovered(recovered, context);
+}
+
 /**
  * Recover any left-open entry on boot.
  *
@@ -97,43 +124,34 @@ function getTodayLedgerHydrator(): TodayLedgerHydrator {
  * hundreds of sequential requests — the app looked hung on launch and "first
  * sync" appeared to take forever. The backlog is drained in the background by
  * the sync drain instead, which is single-flighted and chunked.
+ *
+ * Local only — no network — so the boot can bind the owner and start the tick
+ * before anything online has answered.
  */
 export async function initTimerOnBoot(): Promise<void> {
   const svc = getTimerService();
-  const tokens = await loadTokens();
-  if (!tokens) {
-    svc.bindOwner(null);
-    return;
-  }
-  const owner: TimerOwner = { userId: tokens.userId, workspaceId: tokens.workspaceId };
-  svc.bindOwner(owner, true);
-  // Close any dangling entry at the LAST PROOF OF LIFE — the most recent
-  // liveness tick written while the timer was accruing. On a clean restart
-  // this is ~seconds ago; after an ungraceful shutdown (battery death,
+  // A fresh service has no owner yet, so binding the stored one counts as an
+  // owner change and closes any dangling entry at the LAST PROOF OF LIFE — the
+  // most recent liveness tick written while the timer was accruing. On a clean
+  // restart this is ~seconds ago; after an ungraceful shutdown (battery death,
   // force-quit, panic) it's whenever the machine died — so the dead gap is
-  // never credited. Falls back to now() only if liveness was never written
-  // (very first run), which matches the prior conservative behavior.
-  const lastAlive = svc.lastLiveness();
-  const recovered = svc.recoverAway() ?? svc.recover(lastAlive ?? serverAlignedNow());
-  if (recovered) {
-    log.warn('timer recovered stale open entry', {
-      entryId: recovered.entryId,
-      recoveredAt: recovered.recoveredAt,
-      reason: recovered.notice.reason,
-    });
-  }
+  // never credited.
+  bindOwner(ownerFromTokens(await loadTokens()), true, 'boot');
+  if (!svc.currentOwner()) return;
   const resent = svc.resyncTruncatedOnce();
   if (resent > 0) log.info('re-sending entries the server had cut short', { resent });
 }
 
+/**
+ * Rebind after a sign-in. When the stored session belongs to someone else than
+ * the bound owner (an account switch, or a sign-in after a session ended), the
+ * previous owner's open entry is closed at its last proof of life BEFORE the
+ * new owner is bound — never left open to be resumed over the gap later.
+ */
 export async function bindTimerToStoredSession(claimLegacy = false): Promise<boolean> {
-  const tokens = await loadTokens();
-  if (!tokens) {
-    getTimerService().bindOwner(null);
-    return false;
-  }
-  getTimerService().bindOwner({ userId: tokens.userId, workspaceId: tokens.workspaceId }, claimLegacy);
-  return true;
+  const owner = ownerFromTokens(await loadTokens());
+  bindOwner(owner, claimLegacy, 'sign-in');
+  return owner !== null;
 }
 
 function getTimerSyncDrain(): TimerSyncDrain {

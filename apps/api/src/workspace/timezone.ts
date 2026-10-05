@@ -1,9 +1,9 @@
 import { prisma, type Prisma } from '@grind/db';
 
 /**
- * The Workspace owns the business calendar. PayrollPolicy and TesterOpsConfig
- * retain their timezone columns only for backward-compatible reads; whenever
- * the canonical value changes, both mirrors move in the same transaction.
+ * The Workspace owns the business calendar. TesterOpsConfig retains its
+ * timezone column only for backward-compatible reads; whenever the canonical
+ * value changes, the mirror moves in the same transaction.
  */
 export async function getWorkspaceTimezone(workspaceId: string): Promise<string> {
   const workspace = await prisma.workspace.findUnique({
@@ -14,7 +14,7 @@ export async function getWorkspaceTimezone(workspaceId: string): Promise<string>
   return workspace.timezone;
 }
 
-export async function setWorkspaceTimezone(
+async function setWorkspaceTimezone(
   tx: Prisma.TransactionClient,
   workspaceId: string,
   timezone: string,
@@ -25,16 +25,10 @@ export async function setWorkspaceTimezone(
     select: { id: true, name: true, timezone: true },
   });
 
-  await Promise.all([
-    tx.payrollPolicy.updateMany({
-      where: { workspaceId },
-      data: { timezone: workspace.timezone },
-    }),
-    tx.testerOpsConfig.updateMany({
-      where: { workspaceId },
-      data: { timezone: workspace.timezone },
-    }),
-  ]);
+  await tx.testerOpsConfig.updateMany({
+    where: { workspaceId },
+    data: { timezone: workspace.timezone },
+  });
 
   return workspace;
 }

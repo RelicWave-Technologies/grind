@@ -3,7 +3,7 @@ import request from 'supertest';
 import { prisma } from '@grind/db';
 import { buildApp } from '../src/app';
 import { reconcileExpiredTimersOnce, TIMER_LEASE_MS } from '../src/timeLifecycle';
-import { resolveEffectiveEntrySegmentEnds } from '../src/insights/openSegmentEvidence';
+import { effectiveEntrySegmentEnds as resolveEffectiveEntrySegmentEnds } from '@grind/core';
 import { fakeUlid, seedUser } from './helpers';
 
 const app = buildApp();

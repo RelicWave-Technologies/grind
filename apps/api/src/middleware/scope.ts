@@ -52,6 +52,9 @@ declare global {
  */
 export const attachScope: RequestHandler = async (req, res, next) => {
   if (!req.user) return res.status(401).json({ error: 'unauthorized' });
+  // Already resolved for this request (a router nested under another that
+  // attached it): the answer cannot have changed, so don't query it again.
+  if (req.scope) return next();
   try {
     const workspaceId = req.user.ws;
     const currentUser = await prisma.user.findFirst({

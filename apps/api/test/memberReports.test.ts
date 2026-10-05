@@ -7,6 +7,12 @@ import { signAccessToken } from '../src/lib/jwt';
 import { NINE_TO_SIX, TeamReportsSummaryResponseSchema } from '@grind/types';
 import { createManagedTeam } from './helpers';
 
+// Legacy screenshot rows point at this deployment's own Cloudinary account —
+// the only remote host the image route will fetch from.
+vi.hoisted(() => {
+  process.env.CLOUDINARY_CLOUD_NAME = 'timo-test';
+});
+
 const app = buildApp();
 const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
 const iso = (s: string) => new Date(s);
@@ -21,6 +27,10 @@ async function seedReportDay() {
   counter += 1;
   const stamp = `${Date.now()}-${counter}`;
   const ws = await prisma.workspace.create({ data: { name: `WS-report-${stamp}` } });
+  // Stored app/site context is only shown while the workspace captures it.
+  await prisma.workspacePolicy.create({
+    data: { workspaceId: ws.id, captureApps: true, captureTitles: true, captureUrls: true },
+  });
   const member = await prisma.user.create({
     data: {
       workspaceId: ws.id,
@@ -181,8 +191,8 @@ async function seedReportDay() {
         userId: member.id,
         timeEntryId: autoEntry.id,
         capturedAt: iso('2026-06-01T09:10:30Z'),
-        fullUrl: 'https://assets.example.test/member.webp',
-        thumbUrl: 'https://assets.example.test/member-thumb.webp',
+        fullUrl: 'https://res.cloudinary.com/timo-test/image/upload/v1/member.webp',
+        thumbUrl: 'https://res.cloudinary.com/timo-test/image/upload/c_fill/v1/member.webp',
         uploadState: 'UPLOADED',
       },
       {
@@ -207,6 +217,10 @@ async function seedTeamReport() {
   counter += 1;
   const stamp = `${Date.now()}-${counter}`;
   const ws = await prisma.workspace.create({ data: { name: `WS-team-report-${stamp}` } });
+  // Stored app/site context is only shown while the workspace captures it.
+  await prisma.workspacePolicy.create({
+    data: { workspaceId: ws.id, captureApps: true, captureTitles: true, captureUrls: true },
+  });
   const manager = await prisma.user.create({
     data: {
       workspaceId: ws.id,
@@ -441,7 +455,7 @@ describe('/v1/reports/me', () => {
     const shot = shots.body.screenshots[0];
     expect(shot.fullUrl).toBe(`/v1/screenshots/${encodeURIComponent(shot.id)}/image?variant=full`);
     expect(shot.thumbUrl).toBe(`/v1/screenshots/${encodeURIComponent(shot.id)}/image?variant=thumb`);
-    expect(shot.fullUrl).not.toContain('assets.example.test');
+    expect(shot.fullUrl).not.toContain('res.cloudinary.com');
     expect(shot.dominantApp).toBe('Code');
     expect(shot.keystrokes).toBe(12);
     expect(shot.clicks).toBe(4);
@@ -468,7 +482,10 @@ describe('/v1/reports/me', () => {
     expect(image.status).toBe(200);
     expect(image.headers['content-type']).toContain('image/webp');
     expect(Buffer.from(image.body)).toEqual(Buffer.from([1, 2, 3]));
-    expect(fetchMock).toHaveBeenCalledWith(new URL('https://assets.example.test/member.webp'));
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://res.cloudinary.com/timo-test/image/upload/v1/member.webp',
+      expect.objectContaining({ redirect: 'error' }),
+    );
 
     const invalidVariant = await request(app)
       .get(`/v1/screenshots/${encodeURIComponent(shot.id)}/image?variant=poster`)

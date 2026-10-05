@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { activityWindowForShot } from './index';
+import { activityWindowForShot, previousShotOnSameDisplay } from './index';
 
 const DAY_DEFAULT = 30 * 60_000;
 
@@ -58,5 +58,26 @@ describe('activityWindowForShot', () => {
       // partitionFrom = older + 60s; that's earlier than (now - 60s), so it wins.
       expect(w.from).toBe(older + 60_000);
     });
+  });
+});
+
+describe('previousShotOnSameDisplay', () => {
+  it('pairs each shot with the previous shot of its own display, not the other monitor', () => {
+    const MIN = 60_000;
+    // Two displays captured together every 3 minutes; newest first.
+    const rows = [
+      { id: 'b2', displayId: 'B', capturedAt: 6 * MIN },
+      { id: 'a2', displayId: 'A', capturedAt: 6 * MIN },
+      { id: 'b1', displayId: 'B', capturedAt: 3 * MIN },
+      { id: 'a1', displayId: 'A', capturedAt: 3 * MIN },
+    ];
+    const older = previousShotOnSameDisplay(rows, (displayId) => (displayId === 'A' ? 0 : null));
+    expect(older.get('a2')).toBe(3 * MIN);
+    expect(older.get('b2')).toBe(3 * MIN);
+    expect(older.get('a1')).toBe(0); // from before the loaded range
+    expect(older.get('b1')).toBeUndefined();
+
+    const w = activityWindowForShot({ capturedAt: 6 * MIN, olderCapturedAt: older.get('b2'), defaultWindowMs: DAY_DEFAULT });
+    expect(w).toEqual({ from: 4 * MIN, to: 7 * MIN });
   });
 });

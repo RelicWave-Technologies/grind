@@ -4,8 +4,6 @@ import type {
   AttentionActionResult,
   AttentionPrompt,
 } from '../../shared/attention';
-import { broadcast } from '../broadcast';
-import { sendHeartbeatNow } from '../services/heartbeat';
 import { getTimerService } from '../services/timer';
 import { getTrackingAttentionCoordinator } from '../services/trackingAttention';
 import {
@@ -13,13 +11,10 @@ import {
   retryPendingTrackingCommand,
   resumeTracking,
   startTracking,
+  stopTracking,
 } from '../services/trackingCommands';
 import { getTrackingReadinessService } from '../services/trackingReadiness';
 import { refreshUpdateInstallability } from '../services/updates';
-
-interface AttentionIpcOptions {
-  onIdleResolved: () => void;
-}
 
 function allowed(kind: AttentionPrompt['kind'], action: AttentionAction): boolean {
   if (kind === 'IDLE_WARNING') return action === 'IDLE_WARNING_CONTINUE';
@@ -29,7 +24,7 @@ function allowed(kind: AttentionPrompt['kind'], action: AttentionAction): boolea
   return false;
 }
 
-export function registerAttentionIpc(opts: AttentionIpcOptions): void {
+export function registerAttentionIpc(): void {
   const coordinator = getTrackingAttentionCoordinator();
   ipcMain.handle('attention:get', (): AttentionPrompt => coordinator.get());
   ipcMain.handle('attention:yieldToSystemSettings', (_event, promptId: string) => ({
@@ -56,22 +51,27 @@ export function registerAttentionIpc(opts: AttentionIpcOptions): void {
       }
       if (!allowed(prompt.kind, input.action)) return { ok: false, reason: 'ACTION_NOT_ALLOWED' };
 
+      // Clearing an idle prompt — here or by any other path — also tells the
+      // idle monitor it was answered; main/index.ts listens for that.
       if (prompt.kind === 'IDLE_WARNING') {
-        opts.onIdleResolved();
         coordinator.clear(prompt.promptId);
         return { ok: true };
       }
 
+      // A prompt can outlive the state it was asked about: the timer may have
+      // been resumed, started or stopped somewhere else since. Answering it
+      // must never act on a timer that is no longer the one it described.
+      const timer = getTimerService().status();
+
       if (prompt.kind === 'IDLE') {
+        if (timer.state !== 'RUNNING' || !timer.paused) {
+          coordinator.clear(prompt.promptId);
+          return { ok: true, command: { ok: true, status: timer } };
+        }
         const command = input.action === 'IDLE_CONTINUE'
           ? await resumeTracking()
-          : { ok: true as const, status: await getTimerService().stop() };
-        opts.onIdleResolved();
+          : { ok: true as const, status: await stopTracking() };
         if (command.ok) coordinator.clear(prompt.promptId);
-        if (input.action === 'IDLE_BREAK') {
-          broadcast('timer:status:push', command.status);
-          sendHeartbeatNow();
-        }
         refreshUpdateInstallability();
         return { ok: true, command };
       }
@@ -80,6 +80,12 @@ export function registerAttentionIpc(opts: AttentionIpcOptions): void {
         if (input.action === 'AWAY_DISMISS') {
           coordinator.clear(prompt.promptId);
           return { ok: true };
+        }
+        // Already tracking again: resuming the old task would switch away
+        // from whatever the person chose since.
+        if (timer.state === 'RUNNING') {
+          coordinator.clear(prompt.promptId);
+          return { ok: true, command: { ok: true, status: timer } };
         }
         const command = await startTracking(prompt.larkTaskGuid);
         if (command.ok) coordinator.clear(prompt.promptId);

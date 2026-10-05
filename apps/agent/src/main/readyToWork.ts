@@ -34,16 +34,25 @@ function ensure(): BrowserWindow {
   return win;
 }
 
+function placeTopRight(w: BrowserWindow): void {
+  const p = topRight(activeWorkArea(), SIZE);
+  w.setPosition(p.x, p.y, false);
+}
+
 export function showReadyToWork(next: ShiftPromptReason = 'SHIFT_START'): void {
   reason = next;
   const w = ensure();
-  const p = topRight(activeWorkArea(), SIZE);
-  w.setPosition(p.x, p.y, false);
+  placeTopRight(w);
   // Held by the shared overlay keeper rather than raised once here. Raising
   // once meant the toast could sit buried until the next 5-minute nudge — the
   // same defect as the attention prompt, just slower to notice.
   keepOnTop(w);
   broadcast('shift:promptReason', reason);
+}
+
+/** The displays changed: move a visible toast onto one that still exists. */
+export function placeReadyToWorkOnScreen(): void {
+  if (isReadyToWorkVisible()) placeTopRight(win!);
 }
 
 export function hideReadyToWork(): void {

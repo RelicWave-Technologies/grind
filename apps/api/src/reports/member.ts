@@ -18,6 +18,8 @@ import {
   type Interval,
   type TimelineInvalidation,
   type TimelinePiece,
+  activityPercentOverTrackedMinutes,
+  clipInterval,
 } from '@grind/core';
 import { appUsageIdentity, buildAppUsage } from '../insights/appUsage';
 import { appIconUrl } from '../insights/appIcon';
@@ -299,7 +301,12 @@ export function buildMemberReportDays(input: {
         totalMs: gaps.reduce((sum, g) => sum + g.durationMs, 0),
       },
       approvals,
-      activityPercent: activityPercent(daySamples, input.activityRoleTitle, meetings),
+      activityPercent: activityPercent(
+        daySamples,
+        input.activityRoleTitle,
+        meetings,
+        Math.round(bucket.worked / 60_000),
+      ),
       screenshots: { count: screenshotCount },
       topApps,
       dayStatus: dayStatus ?? null,
@@ -391,7 +398,8 @@ export function buildMemberReportScreenshots(input: {
   const dayEnd = win?.end.getTime() ?? 0;
   const invalidated = invalidatedLookup(input.invalidations, input.userId);
   const samples = samplesForWindow(input.samples, dayStart, dayEnd, invalidated);
-  const meetingIntervals = meetingIntervalsOf((input.timeline ?? []).filter((p) => p.userId === input.userId));
+  const userPieces = (input.timeline ?? []).filter((p) => p.userId === input.userId);
+  const meetingIntervals = meetingIntervalsOf(userPieces);
   const heatmap = buildHeatmap({
     dayStart,
     dayEnd,
@@ -427,7 +435,12 @@ export function buildMemberReportScreenshots(input: {
   return {
     date: input.range.from,
     tz: input.range.tz,
-    activityPercent: activityPercent(samples, input.activityRoleTitle, meetingIntervals),
+    activityPercent: activityPercent(
+      samples,
+      input.activityRoleTitle,
+      meetingIntervals,
+      input.timeline ? trackedWorkMinutes(userPieces, dayStart, dayEnd) : null,
+    ),
     heatmap,
     screenshots,
   };
@@ -490,17 +503,50 @@ function heatmapSamples(samples: ReportActivitySample[], meetingIntervals: Array
   }));
 }
 
+/**
+ * 0–100 over the minutes the person was TRACKED, through the one shared
+ * definition (@grind/core). `trackedWorkMinutes` is agent work time from the
+ * timer (meetings excluded — a meeting minute counts where it was sampled, at
+ * full credit). Dividing by stored samples instead read a day of one busy
+ * minute in ten as 100%: older agents stored nothing for a quiet minute.
+ * Null when there is no activity data at all (e.g. input capture was off).
+ */
 function activityPercent(
   samples: ReportActivitySample[],
   role: RoleTitle | null | undefined,
   meetingIntervals: Array<{ a: number; b: number }>,
+  trackedWorkMinutes: number | null,
 ): number | null {
   if (samples.length === 0) return null;
-  let sum = 0;
+  let scoreSum = 0;
+  let activeMinutes = 0;
+  let meetingMinutes = 0;
   for (const s of samples) {
-    sum += scoreSample(s, role, meetingIntervals);
+    const score = scoreSample(s, role, meetingIntervals);
+    scoreSum += score;
+    if (score > 0) activeMinutes += 1;
+    if (isInMeeting(meetingIntervals, s.bucketStart.getTime())) meetingMinutes += 1;
   }
-  return Math.round((100 * sum) / samples.length);
+  return activityPercentOverTrackedMinutes(scoreSum, {
+    sampledMinutes: samples.length,
+    trackedMinutes: trackedWorkMinutes === null ? null : trackedWorkMinutes + meetingMinutes,
+    activeMinutes,
+  });
+}
+
+/**
+ * Agent WORK time inside [startMs, endMs), in minutes — read from the resolved
+ * timeline, so invalidated minutes and minutes another entry owns are excluded
+ * (the same figure as the day's `workedMs`).
+ */
+function trackedWorkMinutes(pieces: readonly ReportTimelinePiece[], startMs: number, endMs: number): number {
+  let ms = 0;
+  for (const piece of pieces) {
+    if (piece.kind !== 'WORK' || piece.invalidated) continue;
+    const iv = clipInterval(piece, startMs, endMs);
+    if (iv) ms += iv.end - iv.start;
+  }
+  return Math.round(ms / 60_000);
 }
 
 function scoreSample(

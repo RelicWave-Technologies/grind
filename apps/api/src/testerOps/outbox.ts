@@ -23,22 +23,64 @@ export async function enqueueTesterOpsCard(
   });
 }
 
+/**
+ * Outbox row lifecycle
+ *
+ *   PENDING      queued, never tried.
+ *   PROCESSING   claimed by one worker (lockedAt/lockedBy set). A worker that
+ *                dies mid-send leaves the row here; once lockedAt is older
+ *                than STALE_LOCK_MS any worker may reclaim it.
+ *   DONE         delivered (or delivered via the plain-text fallback).
+ *   FAILED       RETRYABLE. The last attempt failed with something that may
+ *                pass next time (network, Lark 5xx, rate limit); retried at
+ *                nextRunAt with exponential backoff.
+ *   DEAD_LETTER  TERMINAL. Either MAX_ATTEMPTS were spent, or the row can
+ *                never succeed (no recipient, malformed payload). Never
+ *                retried automatically; lastError says why.
+ *
+ * `attempts` counts claims, so a row whose worker keeps crashing still runs
+ * out of attempts instead of looping forever.
+ */
+export const TESTER_OPS_OUTBOX_MAX_ATTEMPTS = 10;
+const STALE_LOCK_MS = 5 * 60_000;
+const TERMINAL_ERRORS = new Set(['missing_lark_recipient', 'missing_text_payload', 'missing_card_payload']);
+
 export async function processTesterOpsOutbox(limit = 10): Promise<number> {
   const messenger = getTesterOpsLarkMessenger();
   if (!messenger) return 0;
   const workerId = `tester-ops-${process.pid}-${randomUUID()}`;
+  const now = new Date();
   const due = await prisma.testerOpsOutboxEvent.findMany({
-    where: { status: { in: ['PENDING', 'FAILED'] }, nextRunAt: { lte: new Date() } },
+    where: {
+      OR: [
+        { status: { in: ['PENDING', 'FAILED'] }, nextRunAt: { lte: now } },
+        { status: 'PROCESSING', lockedAt: { lt: new Date(now.getTime() - STALE_LOCK_MS) } },
+      ],
+    },
     orderBy: { createdAt: 'asc' },
     take: limit,
   });
   let processed = 0;
-  for (const event of due) {
+  for (const candidate of due) {
+    // Conditional on the exact state we read, so two workers (or a worker and
+    // a stale-lock reclaim) can never both win the same row.
     const claimed = await prisma.testerOpsOutboxEvent.updateMany({
-      where: { id: event.id, status: event.status },
-      data: { status: 'PROCESSING', lockedAt: new Date(), lockedBy: workerId },
+      where: {
+        id: candidate.id,
+        status: candidate.status,
+        ...(candidate.status === 'PROCESSING' ? { lockedAt: candidate.lockedAt } : {}),
+      },
+      data: { status: 'PROCESSING', lockedAt: new Date(), lockedBy: workerId, attempts: { increment: 1 } },
     });
     if (claimed.count !== 1) continue;
+    const event = { ...candidate, attempts: candidate.attempts + 1 };
+    if (candidate.status === 'PROCESSING' && event.attempts > TESTER_OPS_OUTBOX_MAX_ATTEMPTS) {
+      await prisma.testerOpsOutboxEvent.update({
+        where: { id: event.id },
+        data: { status: 'DEAD_LETTER', lastError: candidate.lastError ?? 'stale_lock_attempts_exhausted', lockedAt: null, lockedBy: null },
+      });
+      continue;
+    }
     try {
       const payload = event.payload && typeof event.payload === 'object' && !Array.isArray(event.payload)
         ? (event.payload as { text?: unknown; card?: unknown })
@@ -51,10 +93,11 @@ export async function processTesterOpsOutbox(limit = 10): Promise<number> {
         where: { id: event.id },
         data: {
           status: 'DONE',
-          attempts: { increment: 1 },
           messageId: result.messageId,
           processedAt: new Date(),
           lastError: null,
+          lockedAt: null,
+          lockedBy: null,
         },
       });
       processed += 1;
@@ -73,24 +116,24 @@ export async function processTesterOpsOutbox(limit = 10): Promise<number> {
           where: { id: event.id },
           data: {
             status: 'DONE',
-            attempts: { increment: 1 },
             messageId: fallback.messageId,
             processedAt: new Date(),
             lastError: `rich_card_fallback: ${errorText}`,
+            lockedAt: null,
+            lockedBy: null,
           },
         });
         processed += 1;
         continue;
       }
 
-      const attempts = event.attempts + 1;
+      const terminal = TERMINAL_ERRORS.has(errorText) || event.attempts >= TESTER_OPS_OUTBOX_MAX_ATTEMPTS;
       await prisma.testerOpsOutboxEvent.update({
         where: { id: event.id },
         data: {
-          status: attempts >= 10 ? 'DEAD_LETTER' : 'FAILED',
-          attempts,
+          status: terminal ? 'DEAD_LETTER' : 'FAILED',
           lastError: errorText,
-          nextRunAt: new Date(Date.now() + retryDelayMs(attempts)),
+          nextRunAt: new Date(Date.now() + retryDelayMs(event.attempts)),
           lockedAt: null,
           lockedBy: null,
         },

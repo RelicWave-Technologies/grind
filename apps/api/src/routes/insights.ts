@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { prisma } from '@grind/db';
+import { hideDisallowedActiveFields, policyFlagsForUser } from '../workspacePolicy/readScrub';
 import { requireAccessToken } from '../middleware/auth';
 import { attachScope } from '../middleware/scope';
 import { scoreDay } from '../scoring/score';
@@ -236,7 +237,12 @@ insightsRouter.get('/day', async (req, res, next) => {
       orderBy: { bucketStart: 'asc' },
     });
     const invalidated = invalidatedAt(timeline.invalidations);
-    const samples = samplesRaw.filter((s) => !invalidated(userId, s.bucketStart.getTime()));
+    // Hide what the workspace's CURRENT policy does not capture, whatever an
+    // earlier, wider policy stored.
+    const samples = hideDisallowedActiveFields(
+      samplesRaw.filter((s) => !invalidated(userId, s.bucketStart.getTime())),
+      await policyFlagsForUser(userId),
+    );
     const userPieces = piecesForUser(timeline.pieces, userId);
 
     const result = buildDayInsight({

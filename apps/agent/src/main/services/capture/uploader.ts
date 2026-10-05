@@ -6,8 +6,9 @@ import type {
 } from '@grind/types';
 import { api, HttpError, UnauthorizedError } from '../apiClient';
 import { log } from '../../logger';
-import { getScreenshotStore } from './index';
-import type { ScreenshotRow } from './store';
+import { getTimerService } from '../timer';
+import { getScreenshotStore, resolveScreenshotPath } from './index';
+import { ENTRY_WAIT_MS, type CaptureOwner, type ScreenshotRow } from './store';
 import { broadcastScreenshotChange } from './events';
 
 /** Shots uploaded per drain pass — keeps each pass short and the UI responsive. */
@@ -20,16 +21,22 @@ const RETRY_MAX_MS = 60 * 60_000;
 const API_TIMEOUT_MS = 30_000;
 const UPLOAD_TIMEOUT_MS = 120_000;
 
-let draining = false;
 let timer: NodeJS.Timeout | null = null;
+/** The one upload pass allowed to run; every caller shares it. */
+let inflight: Promise<void> | null = null;
+/** Someone asked for a pass while one was running — run another after it. */
+let rerun = false;
+/** Freshly captured shots to try before the backlog. */
+const preferred = new Set<string>();
 
-export class CloudinaryUploadError extends Error {
+/** The upload target (the server's upload endpoint or Cloudinary) refused or failed the bytes. */
+export class UploadTargetError extends Error {
   constructor(
     public readonly status: number,
-    body: string,
+    public readonly body: string,
   ) {
-    super(`cloudinary ${status}: ${body.slice(0, 200)}`);
-    this.name = 'CloudinaryUploadError';
+    super(`upload target ${status}: ${body.slice(0, 200)}`);
+    this.name = 'UploadTargetError';
   }
 }
 
@@ -41,6 +48,10 @@ function isStorageUnavailable(err: unknown): boolean {
   const msg = errText(err);
   return (
     (err instanceof HttpError && err.status === 503) ||
+    // The bytes go to the upload target, not through `api()`, so its 503
+    // arrives as an UploadTargetError — still "storage down", not this shot.
+    (err instanceof UploadTargetError && err.status === 503) ||
+    msg.includes('screenshot_storage_unavailable') ||
     msg.includes('cloudinary_not_configured') ||
     msg.includes('storage_not_configured')
   );
@@ -73,7 +84,7 @@ function isLocalFileMissing(err: unknown): boolean {
  */
 function isTerminalFailure(err: unknown): boolean {
   if (isLocalFileMissing(err)) return true;
-  const status = err instanceof CloudinaryUploadError || err instanceof HttpError ? err.status : null;
+  const status = err instanceof UploadTargetError || err instanceof HttpError ? err.status : null;
   return status !== null && status >= 400 && status < 500 && status !== 408 && status !== 429;
 }
 
@@ -155,24 +166,24 @@ async function handleUploadFailure(row: ScreenshotRow, err: unknown): Promise<vo
 }
 
 /**
- * Push one screenshot to Cloudinary: ask the API to sign the upload, POST the
- * bytes straight to Cloudinary, then tell the API where they landed. The
- * api_secret stays on the server; only a per-shot signature crosses the wire.
+ * Push one claimed screenshot: ask the API to sign the upload, POST the bytes
+ * to the upload target it names, then tell the API the shot is complete. The
+ * server records where the bytes landed; the location echoed back here is only
+ * kept for the local row.
  */
 async function uploadOne(row: ScreenshotRow): Promise<void> {
   const store = getScreenshotStore();
 
   try {
-    // 1. Sign first — this also surfaces "not logged in" / "cloudinary off".
+    // 1. Sign first — this also surfaces "not logged in" / "storage off".
     const signed = await api<SignScreenshotUploadResponse>('/v1/screenshots/sign', {
       method: 'POST',
       body: { id: row.id } satisfies SignScreenshotUploadRequest,
       timeoutMs: API_TIMEOUT_MS,
     });
 
-    store.markUploading(row.id);
     broadcastScreenshotChange();
-    const buf = await fs.readFile(row.filePath);
+    const buf = await fs.readFile(resolveScreenshotPath(row.filePath));
 
     const form = new FormData();
     form.append('file', new Blob([buf], { type: 'image/webp' }), `${row.id}.webp`);
@@ -189,14 +200,17 @@ async function uploadOne(row: ScreenshotRow): Promise<void> {
     });
     if (!res.ok) {
       const text = await res.text().catch(() => '');
-      throw new CloudinaryUploadError(res.status, text);
+      throw new UploadTargetError(res.status, text);
     }
     const json = (await res.json()) as { secure_url?: string; public_id?: string };
     const fullUrl = json.secure_url;
-    if (!fullUrl) throw new Error('cloudinary response missing secure_url');
+    if (!fullUrl) throw new Error('upload target response missing secure_url');
 
-    // Derive a gallery thumbnail via an on-the-fly transformation.
-    const thumbUrl = fullUrl.replace('/image/upload/', `/image/upload/${signed.thumbTransform}/`);
+    // Cloudinary derives a thumbnail via an on-the-fly transformation; the
+    // server's own target has none (thumbTransform is empty).
+    const thumbUrl = signed.thumbTransform
+      ? fullUrl.replace('/image/upload/', `/image/upload/${signed.thumbTransform}/`)
+      : fullUrl;
 
     await api('/v1/screenshots/complete', {
       method: 'POST',
@@ -225,40 +239,104 @@ async function uploadOne(row: ScreenshotRow): Promise<void> {
   }
 }
 
-/** Try to upload freshly captured rows immediately, before older backlog. */
-export async function uploadScreenshotsNow(rows: ScreenshotRow[]): Promise<void> {
-  for (const row of rows) {
-    try {
-      await uploadOne(row);
-    } catch (err) {
-      if (isNonCountingFailure(err)) return;
-      log.warn('screenshot upload failed', { id: row.id, err: errText(err) });
-    }
+/**
+ * Hold a shot while its timer entry is still only local: its /complete would
+ * reach the server before the entry does. After {@link ENTRY_WAIT_MS} it goes
+ * up regardless and the server keeps it detached from the entry.
+ */
+export function shouldHoldForEntry(
+  row: Pick<ScreenshotRow, 'timeEntryId' | 'capturedAt'>,
+  isPendingCreate: (entryId: string) => boolean,
+  now: number,
+): boolean {
+  if (!row.timeEntryId) return false;
+  if (now - row.capturedAt >= ENTRY_WAIT_MS) return false;
+  return isPendingCreate(row.timeEntryId);
+}
+
+function currentOwner(): CaptureOwner | null {
+  try {
+    return getTimerService().currentOwner();
+  } catch {
+    return null;
   }
 }
 
-/**
- * Drain the local pending queue. No-ops when logged out or Cloudinary is
- * unconfigured (shots stay local and are retried next pass). Safe to call
- * concurrently — overlapping calls are skipped.
- */
-export async function drainUploads(): Promise<void> {
-  if (draining) return;
-  draining = true;
-  try {
-    const rows = getScreenshotStore().pending(BATCH);
-    for (const row of rows) {
-      try {
-        await uploadOne(row);
-      } catch (err) {
-        // Signed out, storage down, or no network: stop this pass, keep attempts untouched.
-        if (isNonCountingFailure(err)) return;
-        log.warn('screenshot upload failed', { id: row.id, err: errText(err) });
-      }
-    }
-  } finally {
-    draining = false;
+type PassResult = 'done' | 'paused';
+
+/** One pass: fresh shots first, then a batch of backlog — each claimed before it is touched. */
+async function drainPass(): Promise<PassResult> {
+  const owner = currentOwner();
+  if (!owner) {
+    preferred.clear();
+    return 'done';
   }
+  const store = getScreenshotStore();
+  store.claimUnowned(owner);
+  const timerService = getTimerService();
+  // eslint-disable-next-line no-restricted-syntax -- device<->device: compared with local capture times
+  const now = Date.now();
+
+  const fresh = [...preferred]
+    .map((id) => store.find(id))
+    .filter((row): row is ScreenshotRow => row !== null);
+  preferred.clear();
+  const seen = new Set<string>();
+  const rows: ScreenshotRow[] = [];
+  for (const row of [...fresh, ...store.pending(owner, BATCH, now)]) {
+    if (seen.has(row.id)) continue;
+    seen.add(row.id);
+    if (row.ownerUserId !== owner.userId || row.ownerWorkspaceId !== owner.workspaceId) continue;
+    rows.push(row);
+  }
+
+  for (const row of rows) {
+    if (shouldHoldForEntry(row, (entryId) => timerService.isPendingCreate(entryId), now)) continue;
+    // Atomic pending → uploading; anything else already has (or had) it.
+    if (!store.claimForUpload(row.id)) continue;
+    try {
+      await uploadOne(row);
+    } catch (err) {
+      // Signed out, storage down, or no network: stop this pass, keep attempts untouched.
+      if (isNonCountingFailure(err)) return 'paused';
+      log.warn('screenshot upload failed', { id: row.id, err: errText(err) });
+    }
+  }
+  return 'done';
+}
+
+/** Try to upload freshly captured rows promptly, ahead of older backlog. */
+export function uploadScreenshotsNow(rows: ScreenshotRow[]): Promise<void> {
+  for (const row of rows) preferred.add(row.id);
+  return drainUploads();
+}
+
+/**
+ * Drain the local pending queue. Single-flight: the capture tick, the
+ * background timer and any other caller share one pass, so two passes can
+ * never pick up the same shot. A call made while a pass is running schedules
+ * one more pass after it. No-ops when signed out; stops early when storage or
+ * the network is down (shots stay queued and are retried next pass).
+ */
+export function drainUploads(): Promise<void> {
+  if (inflight) {
+    rerun = true;
+    return inflight;
+  }
+  inflight = (async () => {
+    try {
+      let result: PassResult;
+      do {
+        rerun = false;
+        result = await drainPass();
+      } while (rerun && result === 'done');
+    } catch (err) {
+      log.warn('screenshot upload pass failed', { err: errText(err) });
+    } finally {
+      inflight = null;
+    }
+  })();
+  return inflight;
 }
 
 /** Start the periodic uploader. Idempotent. */

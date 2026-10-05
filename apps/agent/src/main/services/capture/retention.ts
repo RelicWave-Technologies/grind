@@ -2,8 +2,9 @@
  * Pure retention + reconciliation planner for the LOCAL screenshot cache
  * (no Electron / no fs), so it's fully unit-testable.
  *
- * Since screenshots are local-only today (no S3 upload yet), the cache must be
- * self-bounding and self-healing, like Hubstaff/Time Doctor's local caches:
+ * The local cache holds every shot until it is uploaded (and a small copy for
+ * the gallery after), so it must be self-bounding and self-healing, like
+ * Hubstaff/Time Doctor's local caches:
  *
  *  - **Retention**: files + rows older than `retentionDays` are pruned so disk
  *    can't grow without bound (brutal at the fast dogfood cadence).
@@ -21,10 +22,22 @@ export interface RetentionRow {
   capturedAt: number;
 }
 
+/** A `.webp` found under the screenshots dir. */
+export interface DiskFile {
+  path: string;
+  mtimeMs: number;
+}
+
 export interface RetentionInput {
+  /** Rows read BEFORE the disk was listed, with absolute file paths. */
   rows: RetentionRow[];
   /** Absolute paths of `.webp` files found under the screenshots dir. */
   filesOnDisk: string[];
+  /**
+   * Files too new to judge: a capture may have written the file and not yet
+   * inserted its row. Never deleted as orphans.
+   */
+  protectedFiles?: string[];
   now: number;
   /** Days to keep. <= 0 disables time-based expiry (reconcile-only). */
   retentionDays: number;
@@ -48,6 +61,7 @@ export function planScreenshotRetention(input: RetentionInput): RetentionPlan {
 
   const diskSet = new Set(filesOnDisk);
   const rowPaths = new Set(rows.map((r) => r.filePath));
+  const protectedSet = new Set(input.protectedFiles ?? []);
 
   const filesToDelete = new Set<string>();
   const rowIdsToDelete = new Set<string>();
@@ -68,7 +82,7 @@ export function planScreenshotRetention(input: RetentionInput): RetentionPlan {
 
   let orphanFiles = 0;
   for (const f of filesOnDisk) {
-    if (!rowPaths.has(f)) {
+    if (!rowPaths.has(f) && !protectedSet.has(f)) {
       orphanFiles++;
       filesToDelete.add(f);
     }

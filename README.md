@@ -65,7 +65,7 @@ Managers get the workspace at a glance. Everyone else gets their own day, minute
 | **Screenshots** | Fullscreen-safe, gentle cadence, high quality, 60-day retention, self-serve delete and blur. |
 | **Activity** | Content-free keystroke/mouse/scroll counts, role-aware productivity scoring, and anti-cheat that flags for human review — it never convicts on its own. |
 | **Lark integration** | Per-user OAuth, task attribution, meeting detection, and manual-time approvals decided right in chat. |
-| **Dashboard** | My Day, team timesheets, activity heatmaps, attendance, reports, CSV export, teams/policy admin, and an admin-only payroll worksheet. |
+| **Dashboard** | My Day, team timesheets, activity heatmaps, attendance, reports, CSV export, and teams/policy admin. |
 | **Ships itself** | Signed and notarized on macOS; the app checks for updates after launch and installs on restart. |
 
 ---
@@ -80,7 +80,7 @@ Managers get the workspace at a glance. Everyone else gets their own day, minute
 ```
 apps/
   agent/       Electron desktop app (tracking, screenshots, activity)
-  api/         Express API, Lark integration, payroll, reports
+  api/         Express API, Lark integration, reports
   dashboard/   React dashboard + public landing & changelog pages
   mcp/         MCP server exposing tracker data to AI tools
 packages/

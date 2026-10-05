@@ -12,13 +12,14 @@ import {
 import { validate } from '../middleware/validate';
 import { requireAccessToken } from '../middleware/auth';
 import { prisma, type Prisma } from '@grind/db';
-import { env } from '../env';
+import { dashboardOrigins, env } from '../env';
 import { renewTimerLease, TIMER_PROTOCOL_VERSION, type TimerCheckpointResult } from '../timeLifecycle';
 import { serializeTimeEntry } from '../timeEntries/wire';
 import { effectiveEntrySegmentEnds } from '@grind/core';
 import { loadEntryLiveEvidence } from '../insights/liveEntryEvidence';
 import { loadInvalidations } from '../time';
 import { resolveTodayLedgerMode } from '../agent/todayLedgerMode';
+import { agentPermissionColumns } from '../agentPermissionColumns';
 
 export const agentRouter = Router();
 
@@ -26,7 +27,7 @@ agentRouter.use(requireAccessToken);
 
 /** First entry of the (possibly comma-separated) DASHBOARD_URL, trailing-slash trimmed. */
 function dashboardOrigin(): string {
-  return (env.DASHBOARD_URL ?? '').split(',')[0]?.trim().replace(/\/$/u, '') ?? '';
+  return dashboardOrigins()[0] ?? '';
 }
 
 async function buildAgentConfig(userId: string, workspaceId: string): Promise<AgentConfigResponse | null> {
@@ -125,14 +126,7 @@ agentRouter.post('/heartbeat', validate(HeartbeatRequest, 'body'), async (req, r
       agentPlatform: body.platform,
     };
     if (body.permissions) {
-      data.agentScreenPermissionStatus = body.permissions.screen.status;
-      data.agentScreenCaptureHealth = body.permissions.screen.health;
-      data.agentScreenPermissionState = body.permissions.screen.state;
-      data.agentAccessibilityTrusted = body.permissions.accessibility.trusted;
-      data.agentAccessibilityReady = body.permissions.accessibility.ready;
-      data.agentAccessibilityRecording = body.permissions.accessibility.recording;
-      data.agentAccessibilityCapturing = body.permissions.accessibility.capturing;
-      data.agentAccessibilityHookRunning = body.permissions.accessibility.hookRunning;
+      Object.assign(data, agentPermissionColumns(body.permissions));
       data.agentPermissionsUpdatedAt = now;
     }
     if (body.startup) {
@@ -296,9 +290,10 @@ agentRouter.get('/today-ledger', validate(TodayLedgerQuery, 'query'), async (req
 
 /**
  * Agents upload real extracted app icons (PNG, base64), keyed by bundle id.
- * Idempotent upsert — icons are workspace-agnostic, so the latest upload for a
- * bundle wins. Oversized/empty payloads are skipped, not rejected, so one bad
- * icon never fails the batch.
+ * Insert-only — icons are workspace-agnostic, so the first upload for a bundle
+ * is kept and later uploads are ignored. Oversized/empty payloads are skipped,
+ * not rejected, so one bad icon never fails the batch. The body stays under the
+ * global 64kb JSON cap; a bigger batch is answered 413 for the agent to split.
  */
 agentRouter.post('/app-icons', validate(AgentAppIconsRequest, 'body'), async (req, res, next) => {
   try {
@@ -311,17 +306,15 @@ agentRouter.post('/app-icons', validate(AgentAppIconsRequest, 'body'), async (re
       return res.json({ ok: true as const, stored: 0 });
     }
     const { icons } = req.body as AgentAppIconsRequest;
-    let stored = 0;
-    for (const it of icons) {
-      const png = Buffer.from(it.pngBase64, 'base64');
-      if (png.length === 0 || png.length > 150_000) continue;
-      await prisma.appIcon.upsert({
-        where: { bundleId: it.bundleId },
-        create: { bundleId: it.bundleId, app: it.app, png },
-        update: { app: it.app, png },
-      });
-      stored += 1;
-    }
+    // Icons are shared by every workspace, keyed only by bundle id. Insert-only:
+    // the first upload of a bundle wins and nobody's agent — in this workspace
+    // or another — can overwrite the icon everyone else is shown.
+    const rows = icons
+      .map((it) => ({ bundleId: it.bundleId, app: it.app, png: Buffer.from(it.pngBase64, 'base64') }))
+      .filter((row) => row.png.length > 0 && row.png.length <= 150_000);
+    const { count: stored } = rows.length
+      ? await prisma.appIcon.createMany({ data: rows, skipDuplicates: true })
+      : { count: 0 };
     res.json({ ok: true as const, stored });
   } catch (err) {
     next(err);

@@ -56,6 +56,7 @@ vi.mock('./timer', () => ({
   drainTimerSyncNow: mocks.drainTimerSyncNow,
   getTimerService: () => ({
     status: () => ({ state: 'IDLE', paused: false, entryId: null }),
+    lastLiveness: () => null,
     syncBacklog: () => ({ pending: 0, oldestPendingAt: null, lastError: null }),
   }),
 }));
@@ -199,6 +200,11 @@ describe('heartbeat config refresh', () => {
                 recording: true,
                 capturing: false,
                 hookRunning: false,
+              },
+              verdict: {
+                screenRecording: 'CHECKING',
+                accessibility: 'FAILED',
+                accessibilityError: 'native hook stopped',
               },
             },
           }),

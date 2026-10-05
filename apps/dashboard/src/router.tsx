@@ -22,7 +22,6 @@ const TeamsScreen = lazyRouteComponent(() => import('./screens/Teams'), 'TeamsSc
 const FlagsScreen = lazyRouteComponent(() => import('./screens/Flags'), 'FlagsScreen');
 const ShiftsScreen = lazyRouteComponent(() => import('./screens/Shifts'), 'ShiftsScreen');
 const PolicyScreen = lazyRouteComponent(() => import('./screens/Policy'), 'PolicyScreen');
-const PayrollScreen = lazyRouteComponent(() => import('./screens/Payroll'), 'PayrollScreen');
 const OverviewScreen = lazyRouteComponent(() => import('./screens/Overview'), 'OverviewScreen');
 const IntegrationsScreen = lazyRouteComponent(() => import('./screens/Integrations'), 'IntegrationsScreen');
 const ReportsScreen = lazyRouteComponent(() => import('./screens/Reports'), 'ReportsScreen');
@@ -190,11 +189,6 @@ const attendanceRoute = createRoute({
   component: AttendanceScreen,
 });
 
-/**
- * Admin-only while leave is still being rolled out. Hiding the nav entry is not
- * access control on its own — the URL is still typeable — so the route guards
- * too, and the page's own admin affordances remain gated separately.
- */
 // Open to anybody signed in. Every read behind it is scoped by the caller's
 // own `req.scope.userIds` — a member's month grid and balance row are their
 // own, a manager's are their team's — and every write on the page is
@@ -258,16 +252,6 @@ const integrationsRoute = createRoute({
     requireAnyRouteCapability(me, ['api-tokens.manage']);
   },
   component: IntegrationsScreen,
-});
-
-const payrollRoute = createRoute({
-  getParentRoute: () => authedRoot,
-  path: '/payroll',
-  beforeLoad: ({ context }) => {
-    const me = (context as { me?: Me }).me;
-    requireAnyRouteCapability(me, ['payroll.manage']);
-  },
-  component: PayrollScreen,
 });
 
 const overviewRoute = createRoute({
@@ -336,7 +320,7 @@ const indexRoute = createRoute({
 });
 
 export const routeTree = rootRoute.addChildren([
-  authedRoot.addChildren([homeRoute, overviewRoute, editTimeRoute, meTodayLegacyRoute, reportsRoute, approvalsRoute, profileRoute, teamRoute, attendanceRoute, calendarRoute, flagsRoute, usersRoute, teamsAdminRoute, shiftsRoute, policyRoute, integrationsRoute, payrollRoute]),
+  authedRoot.addChildren([homeRoute, overviewRoute, editTimeRoute, meTodayLegacyRoute, reportsRoute, approvalsRoute, profileRoute, teamRoute, attendanceRoute, calendarRoute, flagsRoute, usersRoute, teamsAdminRoute, shiftsRoute, policyRoute, integrationsRoute]),
   loginRoute,
   changelogRoute,
   welcomeRoute,

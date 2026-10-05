@@ -1650,7 +1650,11 @@ adminRouter.patch('/users/:id', requireAdmin, async (req, res, next) => {
         data.birthDate = null;
       } else if (typeof raw === 'string' && /^\d{4}-\d{2}-\d{2}$/u.test(raw)) {
         const parsed = new Date(`${raw}T00:00:00.000Z`);
-        if (Number.isNaN(parsed.getTime())) return res.status(400).json({ error: 'invalid_birth_date' });
+        // Date rolls an impossible day over ("2026-02-31" became 3 March), so
+        // the round trip must give back exactly what was typed.
+        if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== raw) {
+          return res.status(400).json({ error: 'invalid_birth_date' });
+        }
         data.birthDate = parsed;
       } else {
         return res.status(400).json({ error: 'invalid_birth_date' });
@@ -2072,11 +2076,13 @@ adminRouter.delete('/users/:id', requireAdmin, async (req, res, next) => {
     }
 
     // The one durable trace of a deletion, since the row it describes is gone.
-    logger.warn('member deleted', {
+    // pino takes the fields first; given second they were silently dropped.
+    logger.warn({
       actorId: req.user.sub,
       workspaceId: req.scope.workspaceId,
       deleted: result.plan,
-    });
+      storage: result.storage,
+    }, 'member deleted');
     res.json({ ok: true, deleted: result.plan });
   } catch (err) {
     next(err);
@@ -2345,6 +2351,10 @@ adminRouter.post('/flags/resolve-many', requireAnyCapability(['flags.team.review
     if (flags.some((f) => !req.scope!.userIds.includes(f.userId))) {
       return res.status(403).json({ error: 'forbidden' });
     }
+    // A manager is in their own scope; their own flags go to an admin.
+    if (!req.scope.isAdmin && flags.some((f) => f.userId === req.user!.sub)) {
+      return res.status(403).json({ error: 'self_resolution_forbidden' });
+    }
 
     const invalidatedMs = resolution === 'TIME_INVALIDATED' ? await calculateInvalidatedMs(flags) : 0;
 
@@ -2417,6 +2427,10 @@ adminRouter.post('/flags/:id/resolve', requireAnyCapability(['flags.team.review'
     });
     if (!existing) return res.status(404).json({ error: 'not_found' });
     if (!req.scope.userIds.includes(existing.userId)) return res.status(403).json({ error: 'forbidden' });
+    // A manager is in their own scope; their own flags go to an admin.
+    if (!req.scope.isAdmin && existing.userId === req.user.sub) {
+      return res.status(403).json({ error: 'self_resolution_forbidden' });
+    }
     if (existing.status !== 'OPEN') return res.status(409).json({ error: 'already_resolved', resolution: existing.resolution });
 
     const invalidatedMs = resolution === 'TIME_INVALIDATED' ? await calculateInvalidatedMs([existing]) : 0;

@@ -1,12 +1,11 @@
 import { ipcMain, app, shell, dialog } from 'electron';
-import { screenStatus, hasAccessibilityAccess } from '../services/permissions';
-import { getPreferences, rememberPermissionRelaunch } from '../services/preferences';
+import { hasAccessibilityAccess } from '../services/permissions';
+import { getPreferences } from '../services/preferences';
 import { getLaunchAtLoginService } from '../services/launchAtLogin';
 import { applyFloatingBarVisibility, resetFloatingBarPosition } from '../floating';
 import { invalidateQuitCleanup, runQuitCleanup } from '../services/quitCleanup';
 import { getTimerService } from '../services/timer';
 import { moveToApplications } from '../services/moveToApplications';
-import { getTrackingReadinessService, permissionRelaunchReason } from '../services/trackingReadiness';
 import { installUpdateInsteadOfRelaunch } from '../services/updates';
 import type { LaunchAtLoginHealth, MoveToApplicationsResult } from '../../shared/launchAtLogin';
 
@@ -14,7 +13,6 @@ export interface SettingsInfo {
   version: string;
   platform: string;
   launchAtLogin: LaunchAtLoginHealth;
-  screenStatus: string;
   /** Per-device UI pref (M2 floating bar). */
   floatingBarVisible: boolean;
 }
@@ -24,7 +22,6 @@ export function registerSettingsIpc(): void {
     version: app.getVersion(),
     platform: process.platform,
     launchAtLogin: getLaunchAtLoginService().inspect(),
-    screenStatus: screenStatus(),
     floatingBarVisible: getPreferences().floatingBar.visible,
   }));
 
@@ -82,16 +79,6 @@ export function registerSettingsIpc(): void {
     }
   });
 
-  // Input Monitoring is a SEPARATE TCC service from Accessibility
-  // (kTCCServiceListenEvent vs kTCCServiceAccessibility). macOS exposes no
-  // prompt API for it, so the only thing we can do when the event tap is
-  // refused is take the user straight to the right pane.
-  ipcMain.handle('settings:openInputMonitoringPrefs', async () => {
-    if (process.platform === 'darwin') {
-      await shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent');
-    }
-  });
-
   ipcMain.handle('settings:openStartupPrefs', async () => {
     const url = getLaunchAtLoginService().startupSettingsUrl();
     if (url) await shell.openExternal(url);
@@ -105,18 +92,12 @@ export function registerSettingsIpc(): void {
     }
   });
 
-  // Permission restart. The verdict it was pressed for is recorded first, so if
-  // the next boot lands on the same verdict the UI stops offering a restart
-  // that has already failed once. Under `electron-vite dev`, app.relaunch()
-  // spawns Electron without the Vite dev-server URL → a blank window, so we
-  // instead tell the developer to restart the dev process.
+  // Permission restart — the fallback once Check again did not help. Under
+  // `electron-vite dev`, app.relaunch() spawns Electron without the Vite
+  // dev-server URL → a blank window, so we instead tell the developer to
+  // restart the dev process.
   ipcMain.handle('app:relaunch', async () => {
     if (app.isPackaged) {
-      const { readiness } = await getTrackingReadinessService().inspect();
-      if (!readiness.ready) {
-        // Device clock: only ever compared with the next boot's device clock.
-        rememberPermissionRelaunch({ reason: permissionRelaunchReason(readiness), at: Date.now() });
-      }
       await runQuitCleanup('quit');
       if (await installUpdateInsteadOfRelaunch()) return;
       app.relaunch();

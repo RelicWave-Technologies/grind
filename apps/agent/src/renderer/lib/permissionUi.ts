@@ -9,47 +9,61 @@ import type { CapabilityState } from '../../shared/tracking';
  */
 export type Capability = 'screen' | 'accessibility';
 /** `check-again` re-verifies in place and comes with an Open Settings link. */
-export type PermissionAction = 'enable' | 'settings' | 'restart' | 'input-monitoring' | 'check-again';
+export type PermissionAction = 'enable' | 'settings' | 'check-again';
 
 export function isReady(state: CapabilityState): boolean {
   return state === 'READY' || state === 'NOT_REQUIRED';
 }
 
-/**
- * @param restartDidNotHelp the same verdict already stood before a restart a
- *   moment ago — offering another one is how a relaunch loop starts.
- */
-export function actionFor(state: CapabilityState, capability: Capability, restartDidNotHelp = false): PermissionAction | null {
+export function actionFor(state: CapabilityState): PermissionAction | null {
   // Still resolving: offering any button here is how the relaunch loop started.
   if (state === 'CHECKING') return null;
   if (state === 'NEEDS_GRANT') return 'enable';
   if (state === 'NEEDS_SETTINGS') return 'settings';
-  // FAILED on the input hook means macOS refused the event tap even though
-  // Accessibility is trusted — the missing grant is Input Monitoring, a
-  // separate TCC service (kTCCServiceListenEvent) with no prompt API.
-  // Relaunching cannot supply it, so send the user to that pane instead.
-  if (state === 'FAILED' && capability === 'accessibility') return 'input-monitoring';
-  // FAILED on the screen means granted but every probe stays blank. The grant
-  // is already effective in this process, so a restart cannot help either.
+  // Granted, yet not working: a screen whose probes stay blank, or an input
+  // hook macOS refused. Check again re-probes the screen and retries the hook.
   if (state === 'FAILED') return 'check-again';
-  if (state === 'NEEDS_RESTART') return restartDidNotHelp ? 'check-again' : 'restart';
   return null;
 }
 
-export function statusText(state: CapabilityState, capability: Capability, restartDidNotHelp = false): string {
+/**
+ * Whether to add a plain "Restart Timo" link beside the row's own action. Only
+ * as a fallback, never first:
+ *  - FAILED, once Check again has run and the verdict still stands;
+ *  - Screen Recording still not granted after the user came back from System
+ *    Settings — macOS can keep reporting a grant made while Timo runs as
+ *    missing until the app relaunches (electron#36722).
+ * Never for CHECKING: a granted-but-blank screen is not fixed by a restart.
+ */
+export function offersRestart(
+  state: CapabilityState,
+  capability: Capability,
+  context: { checkedAgain: boolean; returnedFromSettings: boolean },
+): boolean {
+  if (state === 'FAILED') return context.checkedAgain;
+  if (capability === 'screen' && (state === 'NEEDS_GRANT' || state === 'NEEDS_SETTINGS')) {
+    return context.returnedFromSettings;
+  }
+  return false;
+}
+
+export function statusText(state: CapabilityState, capability: Capability): string {
   if (state === 'READY' || state === 'NOT_REQUIRED') return 'Ready';
   if (state === 'CHECKING') return 'Checking…';
   if (state === 'NEEDS_GRANT') return 'Permission required';
   if (state === 'NEEDS_SETTINGS') return 'Enable in System Settings';
-  if (state === 'NEEDS_RESTART') return restartDidNotHelp ? 'Still not ready after restart' : 'Restart Timo to apply';
+  // libuiohook's event tap is gated on Accessibility trust. When macOS says
+  // trusted but refuses the tap, the trust entry is stale (typically after an
+  // update replaced the binary); toggling it off and on re-issues it.
   return capability === 'accessibility'
-    ? 'Also allow Timo under Input Monitoring'
+    ? 'Not responding — turn Timo off and on under Accessibility'
     : 'Not capturing yet — check System Settings';
 }
 
 export function actionLabel(action: PermissionAction): string {
   if (action === 'enable') return 'Enable';
-  if (action === 'restart') return 'Restart';
   if (action === 'check-again') return 'Check again';
   return 'Open Settings';
 }
+
+export const RESTART_LABEL = 'Restart Timo';

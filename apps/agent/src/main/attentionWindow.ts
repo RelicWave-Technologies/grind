@@ -22,20 +22,22 @@ import {
  * Everything below is mechanism: put the window somewhere, order it up, report
  * whether it is still up, put it down. The coordinator drives.
  *
- * ACTIVATION IS THE POINT, AND IT IS RATIONED
+ * ONE WINDOW PER PRESENTATION
  *
- *  1. **`activate()` exists, and only presentation calls it.** The original idle
- *     prompt (`ef1620d`) called `focus()` on every show and never fell behind.
- *     `2f58ba8` strengthened that to `app.focus({steal:true})`; `b8fa826` then
- *     deleted the whole thing because it "repeatedly steals focus from the app
- *     the person was using" — and prompts started going missing after sleep.
- *     Those were the same lever, which nobody wrote down. On macOS the call is
- *     `makeKeyAndOrderFront:`, the documented remedy for a window that is not a
- *     member of a Space created after it was built. Rationed to presentation
- *     moments (show, restore, renderer-ready); the ~1 Hz keeper must never
- *     activate, which is what made it intolerable before.
+ *  1. **`hide()` destroys.** A window joins the Spaces that exist when it is
+ *     built and no others, so a prompt window kept alive across prompts ends
+ *     up stranded on a Space the person has left. The coordinator therefore
+ *     discards the surface before every presentation and the next `place()`
+ *     builds a fresh one. That is cheap, and it is what reaches the current
+ *     Space — without activating the app.
  *
- *  2. **No retry ladder, and no `always-on-top-changed` listener.** Both were
+ *  2. **`activate()` is for blocking prompts only.** `app.focus({steal:true})`
+ *     pulls the person out of whatever they were in, including a fullscreen
+ *     Space. Only a prompt that blocks tracking (PERMISSION) earns that; the
+ *     idle and welcome-back prompts are shown inactive by the keeper. The ~1 Hz
+ *     keeper must never activate.
+ *
+ *  3. **No retry ladder, and no `always-on-top-changed` listener.** Both were
  *     attempts to re-raise blind. `onTop()` lets the coordinator look instead,
  *     and the listener actively re-triggered the all-workspaces call that is the
  *     prime suspect for dropping the level in the first place.
@@ -56,12 +58,14 @@ export interface PlacementSpec {
  * test could observe z-order and every previous fix went green while broken.
  */
 export interface OverlayHost {
-  /** Position and size the surface. Called once per presentation, not per raise:
-   *  re-resolving the work area on every raise teleported the prompt to whichever
-   *  display the cursor had wandered to. */
+  /** Position and size the surface, building it if there is none. Called per
+   *  presentation (and when the displays change), not per raise: re-resolving
+   *  the work area on every raise teleported the prompt to whichever display
+   *  the cursor had wandered to. */
   place(spec: PlacementSpec): void;
-  /** Hold the surface at prompt rank until released. Never takes focus, never
-   *  activates. The shared overlay keeper does the repeating. */
+  /** Show the surface inactive and hold it at prompt rank until released.
+   *  Never takes focus, never activates. The shared overlay keeper does the
+   *  repeating. */
   keep(): void;
   /** Stop holding. Leaves the surface where it is. */
   release(): void;
@@ -71,20 +75,15 @@ export interface OverlayHost {
    *  proves an unconditional re-raise is what actually holds a window up. */
   onTop(): boolean;
   /**
-   * Bring the app and this surface to the front — ONCE per presentation.
-   *
-   * On macOS this is `makeKeyAndOrderFront:` in all but name, which is exactly
-   * Apple's prescribed remedy for a window that belongs to Spaces created
-   * before the one the person is on. It is the single thing the original idle
-   * prompt did that every rewrite since dropped.
-   *
-   * Deliberately NOT part of `keep()`. The keeper runs about once a second; an
-   * activation on that cadence is the focus-stealing that got the call deleted
-   * in the first place. Presentation activates. Holding does not.
+   * Bring the app and this surface to the front and give it keyboard focus.
+   * Only for a prompt that blocks tracking until answered, and only once per
+   * presentation — never from the keeper, whose ~1 Hz cadence is what turned
+   * activation into focus-stealing before.
    */
   activate(): void;
   /** Stand down without hiding — used while the user is in System Settings. */
   lower(): void;
+  /** Discard the surface. The next `place()` builds a fresh one. */
   hide(): void;
   /** Push prompt state to the renderer. Takes the prompt as an argument rather
    *  than reading a cached copy — this module stores no prompt state. */
@@ -103,33 +102,39 @@ let win: BrowserWindow | null = null;
 let loaded = false;
 const readyListeners = new Set<() => void>();
 
+// Last observed float state, so the log records transitions rather than a line
+// every second for as long as a prompt is on screen.
+let lastFloatOk: boolean | null = null;
+
 function ensure(): BrowserWindow {
   if (win && !win.isDestroyed()) return win;
   loaded = false;
-  win = createOverlayWindow({
+  lastFloatOk = null;
+  const created = createOverlayWindow({
     ...INITIAL_SIZE,
     hash: 'attention',
     roundedCorners: true,
     rank: 'prompt',
-    // The coordinator's hold loop owns this window's float; it must not also be
-    // swept by the global wake/display re-assertion, which knows nothing about
-    // whether the prompt is currently yielded to System Settings.
+    // The coordinator owns this window's float; it must not also be swept by
+    // the global wake/display re-assertion, which knows nothing about whether
+    // the prompt is currently yielded to System Settings.
     registerForReassert: false,
   });
-  win.webContents.on('did-finish-load', () => {
+  win = created;
+  created.webContents.on('did-finish-load', () => {
+    // A load finishing for a surface that has since been discarded is not
+    // the current surface becoming ready.
+    if (win !== created) return;
     loaded = true;
     for (const listener of readyListeners) listener();
   });
-  win.on('closed', () => {
+  created.on('closed', () => {
+    if (win !== created) return;
     win = null;
     loaded = false;
   });
-  return win;
+  return created;
 }
-
-// Last observed float state, so the log records transitions rather than a line
-// every second for as long as a prompt is on screen.
-let lastFloatOk: boolean | null = null;
 
 /**
  * The evidence that settles why a prompt gets buried, logged only when it
@@ -198,8 +203,12 @@ export const attentionHost: OverlayHost = {
   },
 
   hide() {
-    releaseOnTop(win);
-    if (win && !win.isDestroyed() && win.isVisible()) win.hide();
+    const discarded = win;
+    win = null;
+    loaded = false;
+    if (!discarded) return;
+    releaseOnTop(discarded);
+    if (!discarded.isDestroyed()) discarded.destroy();
   },
 
   publish(prompt) {

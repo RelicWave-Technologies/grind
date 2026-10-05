@@ -38,6 +38,32 @@ export type CaptureHealth = z.infer<typeof CaptureHealth>;
 export const ScreenPermissionState = z.enum(['ok', 'needs-grant', 'needs-settings', 'needs-restart']);
 export type ScreenPermissionState = z.infer<typeof ScreenPermissionState>;
 
+/** The desktop app's own readiness verdict for one capability. */
+export const TrackingCapabilityState = z.enum([
+  'NOT_REQUIRED',
+  'READY',
+  'CHECKING',
+  'NEEDS_GRANT',
+  'NEEDS_SETTINGS',
+  'FAILED',
+]);
+export type TrackingCapabilityState = z.infer<typeof TrackingCapabilityState>;
+
+export const DESKTOP_PERMISSION_ERROR_MAX = 200;
+
+/**
+ * What the agent concluded from the raw snapshot: the raw fields alone read as
+ * "Access OK" for a user whose input hook was refused and who is paused for it.
+ * Optional — older agents do not send it.
+ */
+export const DesktopPermissionVerdict = z.object({
+  screenRecording: TrackingCapabilityState,
+  accessibility: TrackingCapabilityState,
+  /** Why the input hook / activity service would not start, when it would not. */
+  accessibilityError: z.string().max(DESKTOP_PERMISSION_ERROR_MAX).nullable(),
+});
+export type DesktopPermissionVerdict = z.infer<typeof DesktopPermissionVerdict>;
+
 export const DesktopPermissionSnapshot = z.object({
   screen: z.object({
     status: ScreenPermissionStatus,
@@ -51,6 +77,9 @@ export const DesktopPermissionSnapshot = z.object({
     capturing: z.boolean(),
     hookRunning: z.boolean(),
   }),
+  // A verdict this server cannot read (a newer agent's state, say) is dropped
+  // rather than failing the whole heartbeat.
+  verdict: DesktopPermissionVerdict.optional().catch(undefined),
 });
 export type DesktopPermissionSnapshot = z.infer<typeof DesktopPermissionSnapshot>;
 

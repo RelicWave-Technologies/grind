@@ -16,6 +16,7 @@ import type {
 import { loadPunchLookup } from '../attendance/punches';
 import { loadAttendanceRuleContext } from '../attendance/ruleContext';
 import { requireAccessToken } from '../middleware/auth';
+import { hideDisallowedActiveFields, policyFlagsForUser } from '../workspacePolicy/readScrub';
 import { attachScope, requireCapability } from '../middleware/scope';
 import {
   buildMemberReportApps,
@@ -498,6 +499,9 @@ reportsRouter.put('/attendance-override', requireCapability('reports.team.read')
     if (!parsed.success) return res.status(400).json({ error: 'invalid_request', details: parsed.error.flatten() });
     const { userId, date, code, reason } = parsed.data;
     if (!req.scope.userIds.includes(userId)) return res.status(403).json({ error: 'out_of_scope' });
+    // A manager's scope includes themselves, which made them the one person
+    // who could rewrite their own attendance. Only an admin may.
+    if (!req.scope.isAdmin && userId === req.user.sub) return res.status(403).json({ error: 'self_override_forbidden' });
 
     const range = resolveReportMonth({ month: date.slice(0, 7) }, req.scope.workspaceTimezone);
     if ('error' in range) return res.status(400).json({ error: range.error });
@@ -565,6 +569,9 @@ reportsRouter.delete('/attendance-override', requireCapability('reports.team.rea
     const parsed = ClearAttendanceOverrideRequest.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: 'invalid_request', details: parsed.error.flatten() });
     if (!req.scope.userIds.includes(parsed.data.userId)) return res.status(403).json({ error: 'out_of_scope' });
+    if (!req.scope.isAdmin && parsed.data.userId === req.user.sub) {
+      return res.status(403).json({ error: 'self_override_forbidden' });
+    }
     const { userId, date, reason } = parsed.data;
     const range = resolveReportMonth({ month: date.slice(0, 7) }, req.scope.workspaceTimezone);
     if ('error' in range) return res.status(400).json({ error: range.error });
@@ -1216,7 +1223,9 @@ async function loadTeamReportData(
     const { userId, ...request } = row;
     grouped.get(userId)?.manualRequests.push(request);
   }
-  for (const row of samples) {
+  // One workspace per scope: hide what its current capture policy disallows.
+  const policy = await policyFlagsForUser(userIds[0]!);
+  for (const row of hideDisallowedActiveFields(samples, policy)) {
     const { userId, ...sample } = row;
     grouped.get(userId)?.samples.push(sample);
   }
@@ -1232,6 +1241,12 @@ async function loadTeamReportData(
 }
 
 async function loadSamples(userId: string, range: ReportRange): Promise<ReportActivitySample[]> {
+  const [samples, policy] = await Promise.all([loadStoredSamples(userId, range), policyFlagsForUser(userId)]);
+  // Stored under an earlier, wider policy is not the same as allowed now.
+  return hideDisallowedActiveFields(samples, policy);
+}
+
+async function loadStoredSamples(userId: string, range: ReportRange): Promise<ReportActivitySample[]> {
   return prisma.activitySample.findMany({
     where: {
       userId,

@@ -269,6 +269,16 @@ export function IntegrationsScreen() {
           </div>
         )}
 
+        {revokeToken.isError && (
+          // Without this a failed revoke just stopped spinning, which reads as
+          // "revoked" while the token is in fact still live.
+          <div className="int-inline-banner">
+            <Banner status="danger">
+              Couldn’t revoke the token — it is still active. {(revokeToken.error as Error).message}
+            </Banner>
+          </div>
+        )}
+
         {tokensQ.isLoading ? (
           <SkeletonTable rows={5} />
         ) : tokensQ.isError ? (

@@ -1,24 +1,52 @@
+import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertCircle, CheckCircle2, Keyboard, Lock, MonitorCheck, RotateCcw, X } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Keyboard, Lock, MonitorCheck, X } from 'lucide-react';
 import type { CapabilityState } from '../../shared/tracking';
 import type { AttentionPrompt } from '../../shared/attention';
 import timoMascot from '../assets/timo-mascot.svg';
 
-import { actionFor, actionLabel, isReady, statusText, type Capability, type PermissionAction } from '../lib/permissionUi';
+import {
+  actionFor,
+  actionLabel,
+  isReady,
+  offersRestart,
+  RESTART_LABEL,
+  statusText,
+  type Capability,
+  type PermissionAction,
+} from '../lib/permissionUi';
 
-function StatusLine({ state, capability, restartDidNotHelp }: { state: CapabilityState; capability: Capability; restartDidNotHelp: boolean }) {
+function StatusLine({ state, capability }: { state: CapabilityState; capability: Capability }) {
   return isReady(state) ? (
     <div className="set-ok"><CheckCircle2 size={13} /> {statusText(state, capability)}</div>
   ) : (
-    <div className="set-warn"><AlertCircle size={13} /> {statusText(state, capability, restartDidNotHelp)}</div>
+    <div className="set-warn"><AlertCircle size={13} /> {statusText(state, capability)}</div>
   );
 }
 
-function ActionButton({ action, onClick, disabled }: { action: PermissionAction; onClick: () => void; disabled: boolean }) {
+/** The secondary links under a row: Open Settings beside Check again, and
+ *  Restart Timo once it is the remaining fallback. */
+function RowLinks({ settings, restart, onSettings, disabled }: {
+  settings: boolean;
+  restart: boolean;
+  onSettings: () => void;
+  disabled: boolean;
+}) {
+  if (!settings && !restart) return null;
   return (
-    <button className="btn no-drag" onClick={onClick} disabled={disabled}>
-      {action === 'restart' ? <><RotateCcw size={14} /> {actionLabel(action)}</> : actionLabel(action)}
-    </button>
+    <div className="set-sub">
+      {settings ? (
+        <button className="link-btn no-drag" onClick={onSettings} disabled={disabled}>
+          {actionLabel('settings')}
+        </button>
+      ) : null}
+      {settings && restart ? ' · ' : null}
+      {restart ? (
+        <button className="link-btn no-drag" onClick={() => void window.agent.app.relaunch()} disabled={disabled}>
+          {RESTART_LABEL}
+        </button>
+      ) : null}
+    </div>
   );
 }
 
@@ -34,9 +62,16 @@ export default function PermissionPrompt({ prompt }: { prompt: Extract<Attention
     mutationFn: () => window.agent.permissions.requestScreen(),
     onSuccess: (next) => qc.setQueryData(['trackingReadiness'], next),
   });
+  // Restart is only ever a fallback: after Check again left a FAILED verdict
+  // standing, or after a trip to System Settings left the screen not granted.
+  const [checkedAgain, setCheckedAgain] = useState(false);
+  const [returnedFromScreenSettings, setReturnedFromScreenSettings] = useState(false);
   const recheck = useMutation({
     mutationFn: () => window.agent.permissions.recheck(),
-    onSuccess: (next) => qc.setQueryData(['trackingReadiness'], next),
+    onSuccess: (next) => {
+      qc.setQueryData(['trackingReadiness'], next);
+      setCheckedAgain(true);
+    },
   });
   const requestAccessibility = useMutation({
     mutationFn: () => window.agent.permissions.requestAccessibility(),
@@ -49,10 +84,16 @@ export default function PermissionPrompt({ prompt }: { prompt: Extract<Attention
   const state = readiness.data;
   const screenState = state?.screenRecording ?? 'NEEDS_GRANT';
   const accessibilityState = state?.accessibility ?? 'NEEDS_GRANT';
-  const screenRestartDidNotHelp = state?.restartDidNotHelp?.includes('SCREEN_RECORDING') ?? false;
-  const accessibilityRestartDidNotHelp = state?.restartDidNotHelp?.includes('ACCESSIBILITY') ?? false;
-  const screenAction = actionFor(screenState, 'screen', screenRestartDidNotHelp);
-  const accessibilityAction = actionFor(accessibilityState, 'accessibility', accessibilityRestartDidNotHelp);
+  const screenAction = actionFor(screenState);
+  const accessibilityAction = actionFor(accessibilityState);
+  const screenRestart = offersRestart(screenState, 'screen', {
+    checkedAgain,
+    returnedFromSettings: returnedFromScreenSettings,
+  });
+  const accessibilityRestart = offersRestart(accessibilityState, 'accessibility', {
+    checkedAgain,
+    returnedFromSettings: false,
+  });
   const ready = state?.ready === true;
   const busy = requestScreen.isPending || requestAccessibility.isPending || recheck.isPending || retry.isPending;
 
@@ -62,11 +103,15 @@ export default function PermissionPrompt({ prompt }: { prompt: Extract<Attention
   };
   const runScreenAction = async (action: PermissionAction) => {
     if (action === 'enable') {
-      if (await yieldToSettings()) requestScreen.mutate();
+      if (await yieldToSettings()) {
+        setReturnedFromScreenSettings(true);
+        requestScreen.mutate();
+      }
     } else if (action === 'settings') {
-      if (await yieldToSettings()) await window.agent.settings.openScreenPrefs();
-    } else if (action === 'restart') {
-      void window.agent.app.relaunch();
+      if (await yieldToSettings()) {
+        setReturnedFromScreenSettings(true);
+        await window.agent.settings.openScreenPrefs();
+      }
     } else if (action === 'check-again') {
       recheck.mutate();
     }
@@ -74,10 +119,6 @@ export default function PermissionPrompt({ prompt }: { prompt: Extract<Attention
   const runAccessibilityAction = async (action: PermissionAction) => {
     if (action === 'enable' || action === 'settings') {
       if (await yieldToSettings()) requestAccessibility.mutate();
-    } else if (action === 'input-monitoring') {
-      if (await yieldToSettings()) await window.agent.settings.openInputMonitoringPrefs();
-    } else if (action === 'restart') {
-      void window.agent.app.relaunch();
     } else if (action === 'check-again') {
       recheck.mutate();
     }
@@ -103,17 +144,18 @@ export default function PermissionPrompt({ prompt }: { prompt: Extract<Attention
           </span>
           <div className="perm-main">
             <div className="set-title">Screen Recording</div>
-            <StatusLine state={screenState} capability="screen" restartDidNotHelp={screenRestartDidNotHelp} />
-            {screenAction === 'check-again' ? (
-              <div className="set-sub">
-                <button className="link-btn no-drag" onClick={() => runScreenAction('settings')} disabled={busy}>
-                  {actionLabel('settings')}
-                </button>
-              </div>
-            ) : null}
+            <StatusLine state={screenState} capability="screen" />
+            <RowLinks
+              settings={screenAction === 'check-again'}
+              restart={screenRestart}
+              onSettings={() => runScreenAction('settings')}
+              disabled={busy}
+            />
           </div>
           {screenAction ? (
-            <ActionButton action={screenAction} onClick={() => runScreenAction(screenAction)} disabled={busy} />
+            <button className="btn no-drag" onClick={() => runScreenAction(screenAction)} disabled={busy}>
+              {actionLabel(screenAction)}
+            </button>
           ) : null}
         </div>
 
@@ -123,17 +165,18 @@ export default function PermissionPrompt({ prompt }: { prompt: Extract<Attention
           </span>
           <div className="perm-main">
             <div className="set-title">Accessibility</div>
-            <StatusLine state={accessibilityState} capability="accessibility" restartDidNotHelp={accessibilityRestartDidNotHelp} />
-            {accessibilityAction === 'check-again' ? (
-              <div className="set-sub">
-                <button className="link-btn no-drag" onClick={() => runAccessibilityAction('settings')} disabled={busy}>
-                  {actionLabel('settings')}
-                </button>
-              </div>
-            ) : null}
+            <StatusLine state={accessibilityState} capability="accessibility" />
+            <RowLinks
+              settings={accessibilityAction === 'check-again'}
+              restart={accessibilityRestart}
+              onSettings={() => runAccessibilityAction('settings')}
+              disabled={busy}
+            />
           </div>
           {accessibilityAction ? (
-            <ActionButton action={accessibilityAction} onClick={() => runAccessibilityAction(accessibilityAction)} disabled={busy} />
+            <button className="btn no-drag" onClick={() => runAccessibilityAction(accessibilityAction)} disabled={busy}>
+              {actionLabel(accessibilityAction)}
+            </button>
           ) : null}
         </div>
       </div>
@@ -150,7 +193,7 @@ export default function PermissionPrompt({ prompt }: { prompt: Extract<Attention
         ) : (
           <div className="perm-gate-note">
             <Lock size={14} strokeWidth={2} />
-            <span>Tracking stays paused until both permissions are ready.</span>
+            <span>{prompt.intent === 'SETUP' ? 'Timo can track once both permissions are ready.' : 'Tracking stays paused until both permissions are ready.'}</span>
           </div>
         )}
       </footer>

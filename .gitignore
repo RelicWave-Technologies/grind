@@ -34,10 +34,8 @@ Thumbs.db
 packages/db/node_modules/.prisma/
 
 # electron
-out/
 dist-electron/
 release/
-.vercel
 
 # local scratch / tooling — not part of the app
 .claude/

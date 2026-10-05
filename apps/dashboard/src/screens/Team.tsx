@@ -133,7 +133,9 @@ export function TeamScreen() {
     setRowDraft((current) => {
       if (current?.userId !== memberId) return current;
       const next = { ...current, ...patch };
-      if (next.idleWarningSeconds != null) {
+      // The countdown is admin-only (hidden from managers, and the API 403s a
+      // manager who sends it), so only an admin's edit may reshape it.
+      if (next.idleWarningSeconds != null && me.role === 'ADMIN') {
         next.idleWarningSeconds = clampIdleWarningSeconds(next.idleWarningSeconds, next.idleThresholdMin);
       }
       return next;
@@ -150,7 +152,7 @@ export function TeamScreen() {
     if (rowDraft.idleThresholdMin !== member.idleThresholdMin) {
       patch.idleThresholdMin = rowDraft.idleThresholdMin;
     }
-    if (rowDraft.idleWarningSeconds !== member.idleWarningSeconds) {
+    if (me.role === 'ADMIN' && rowDraft.idleWarningSeconds !== member.idleWarningSeconds) {
       patch.idleWarningSeconds = rowDraft.idleWarningSeconds;
     }
     if (rowDraft.attendanceRuleMode !== member.attendanceRuleMode) {

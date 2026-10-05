@@ -10,7 +10,7 @@ import type { WorkspaceTimeContext } from '../shared/workspaceTime';
 import type { ShiftPromptReason, TodayShiftWindow } from '../shared/shift';
 
 type AuthStatus = 'loggedIn' | 'loggedOut';
-type LarkOutcome = { kind: 'pending' } | { kind: 'error'; reason: string };
+type LarkOutcome = { kind: 'pending' } | { kind: 'error'; reason: string; host?: string };
 export type TimerRecoveryNotice = { entryId: string; recoveredAt: number; reason: 'unexpected_shutdown' | 'sleep_stop' | 'lock_stop' | 'server_finalized' | 'server_clock_corrected'; observedAt: number };
 export type TodaySegment = { kind: 'WORK' | 'MEETING' | 'IDLE_TRIMMED'; startedAt: number; endedAt: number | null };
 export type TodayEntry = { id: string; source: 'AUTO' | 'MANUAL'; larkTaskGuid: string | null; segments: TodaySegment[] };
@@ -42,7 +42,8 @@ export type UpdateStatus = {
 const api = {
   auth: {
     loginWithLark: (): Promise<{ ok: true }> => ipcRenderer.invoke('auth:loginWithLark'),
-    logout: (): Promise<{ ok: true }> => ipcRenderer.invoke('auth:logout'),
+    logout: (): Promise<{ ok: true } | { ok: false; reason: 'time_waiting_to_sync' }> =>
+      ipcRenderer.invoke('auth:logout'),
     status: (): Promise<AuthStatus> => ipcRenderer.invoke('auth:status'),
     me: (): Promise<{ name: string; avatarUrl: string | null } | null> => ipcRenderer.invoke('auth:me'),
     onStatusChange: (cb: (s: AuthStatus) => void): (() => void) => {
@@ -116,11 +117,11 @@ const api = {
   },
   screenshots: {
     recent: (limit?: number): Promise<ScreenshotItem[]> => ipcRenderer.invoke('screenshots:recent', limit),
-    captureOnce: (): Promise<number> => ipcRenderer.invoke('screenshots:captureOnce'),
+    /** Every shot captured in [fromMs, toMs) — the gallery loads a whole day. */
+    range: (fromMs: number, toMs: number): Promise<ScreenshotItem[]> => ipcRenderer.invoke('screenshots:range', fromMs, toMs),
     thumbnail: (id: string): Promise<string | null> => ipcRenderer.invoke('screenshots:thumbnail', id),
     full: (id: string): Promise<string | null> => ipcRenderer.invoke('screenshots:full', id),
     uploadSummary: (): Promise<ScreenshotUploadSummary> => ipcRenderer.invoke('screenshots:uploadSummary'),
-    retryFailedUploads: (): Promise<{ reset: number }> => ipcRenderer.invoke('screenshots:retryFailedUploads'),
     onChange: (cb: () => void): (() => void) => {
       const sub = () => cb();
       ipcRenderer.on('screenshots:changed', sub);
@@ -134,14 +135,13 @@ const api = {
     requestAccessibility: (): Promise<void> => ipcRenderer.invoke('permissions:requestAccessibility'),
   },
   settings: {
-    get: (): Promise<{ version: string; platform: string; launchAtLogin: LaunchAtLoginHealth; screenStatus: string; floatingBarVisible: boolean }> =>
+    get: (): Promise<{ version: string; platform: string; launchAtLogin: LaunchAtLoginHealth; floatingBarVisible: boolean }> =>
       ipcRenderer.invoke('settings:get'),
     repairLaunchAtLogin: (): Promise<LaunchAtLoginHealth> => ipcRenderer.invoke('settings:repairLaunchAtLogin'),
     moveToApplications: (): Promise<MoveToApplicationsResult> => ipcRenderer.invoke('settings:moveToApplications'),
     setFloatingBarVisible: (enabled: boolean): Promise<boolean> => ipcRenderer.invoke('settings:setFloatingBarVisible', enabled),
     resetFloatingBarPosition: (): Promise<void> => ipcRenderer.invoke('settings:resetFloatingBarPosition'),
     openScreenPrefs: (): Promise<void> => ipcRenderer.invoke('settings:openScreenPrefs'),
-    openInputMonitoringPrefs: (): Promise<void> => ipcRenderer.invoke('settings:openInputMonitoringPrefs'),
     openStartupPrefs: (): Promise<void> => ipcRenderer.invoke('settings:openStartupPrefs'),
     onOpen: (cb: () => void): (() => void) => {
       const sub = () => cb();

@@ -2,7 +2,7 @@ import { prisma } from '@grind/db';
 import { env } from '../env';
 import { getWorkspaceTimezone } from '../workspace/timezone';
 
-export function envPingTimes(): string[] {
+function envPingTimes(): string[] {
   return env.TIMO_TESTER_PING_TIMES
     .split(',')
     .map((s) => s.trim())

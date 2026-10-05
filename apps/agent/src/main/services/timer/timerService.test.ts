@@ -575,7 +575,7 @@ describe('TimerService.prepareForQuit', () => {
 });
 
 describe('TimerService.prepareForAway', () => {
-  it('stops a running timer at sleep start and records a sleep notice', async () => {
+  it('stops a running timer at sleep start without a recovery notice', async () => {
     await svc.start({});
     clock.advance(5 * MIN);
 
@@ -587,11 +587,19 @@ describe('TimerService.prepareForAway', () => {
     const closed = [...store.entries.values()][0]!;
     expect(closed.endedAt).toBe(T0 + 5 * MIN);
     expect(totalWorkedMs(closed)).toBe(5 * MIN);
-    expect(store.getRecoveryNotice()).toMatchObject({
-      entryId: closed.id,
-      recoveredAt: T0 + 5 * MIN,
-      reason: 'sleep_stop',
-    });
+    // The welcome-back prompt says so; a banner as well never went away.
+    expect(store.getRecoveryNotice()).toBeNull();
+  });
+
+  it('leaves an unread crash notice alone', async () => {
+    await svc.start({});
+    const crash = { entryId: 'older', recoveredAt: T0 - MIN, reason: 'unexpected_shutdown' as const, observedAt: T0 };
+    store.setRecoveryNotice(crash);
+    clock.advance(MIN);
+
+    await svc.prepareForAway('lock', 0);
+
+    expect(store.getRecoveryNotice()).toEqual(crash);
   });
 
   it('stops a paused timer without counting the away gap', async () => {
@@ -605,11 +613,6 @@ describe('TimerService.prepareForAway', () => {
     const closed = [...store.entries.values()][0]!;
     expect(closed.endedAt).toBe(T0 + 25 * MIN);
     expect(totalWorkedMs(closed)).toBe(5 * MIN);
-    expect(store.getRecoveryNotice()).toMatchObject({
-      entryId: closed.id,
-      recoveredAt: T0 + 25 * MIN,
-      reason: 'lock_stop',
-    });
   });
 
   it('leaves the closed row pending when sleep-stop sync fails', async () => {
@@ -813,7 +816,7 @@ describe('TimerService offline behaviour', () => {
   });
 });
 
-describe('TimerService.pauseForIdle / resumeFromIdle', () => {
+describe('TimerService.pauseForIdle / resume', () => {
   it('freezes at the last healthy proof and records a permission pause', async () => {
     await svc.start({});
     clock.advance(5 * MIN);
@@ -862,7 +865,7 @@ describe('TimerService.pauseForIdle / resumeFromIdle', () => {
     if (s.state === 'RUNNING') expect(s.workedMs).toBe(5 * MIN);
 
     // Continue: resume a fresh WORK segment; idle gap excluded.
-    await svc.resumeFromIdle(clock.now());
+    await svc.resume();
     expect(svc.isPaused()).toBe(false);
     clock.advance(3 * MIN);
     s = svc.status();

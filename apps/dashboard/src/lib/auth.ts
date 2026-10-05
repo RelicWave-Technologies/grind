@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import type { Permission } from '@grind/types/rbac';
 import { api, ApiError, API_BASE } from './api';
 
 /** Full-page URL that starts the Lark OAuth login (a top-level navigation, not
@@ -12,30 +13,9 @@ export function larkLoginUrl(next?: string): string {
 
 export type Role = 'ADMIN' | 'MANAGER' | 'MEMBER';
 export type ActivityRoleTitle = 'DEVELOPER' | 'DESIGNER' | 'SALES' | 'OTHER';
-export type Permission =
-  | 'profile.self.read'
-  | 'reports.self.read'
-  | 'reports.team.read'
-  | 'reports.workspace.read'
-  | 'time.self.edit'
-  | 'time.team.edit'
-  | 'people.read'
-  | 'people.manage'
-  | 'teams.read'
-  | 'teams.manage'
-  | 'team.settings.manage'
-  | 'shifts.read'
-  | 'shifts.manage'
-  | 'policy.manage'
-  | 'approvals.self.read'
-  | 'approvals.team.decide'
-  | 'approvals.workspace.decide'
-  | 'flags.team.review'
-  | 'flags.workspace.review'
-  | 'payroll.manage'
-  | 'overview.read'
-  | 'tester-ops.manage'
-  | 'api-tokens.manage';
+// One source of truth with the API's RBAC table, so a new capability can't
+// exist server-side and be untypeable here (or vice versa).
+export type { Permission } from '@grind/types/rbac';
 
 export interface Me {
   id: string;

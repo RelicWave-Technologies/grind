@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => {
     prepareForAway: vi.fn(),
     discardAway: vi.fn(),
     status: vi.fn(),
+    idleSeconds: vi.fn(() => 0),
     runQuitCleanup: vi.fn(),
     broadcast: vi.fn(),
     info: vi.fn(),
@@ -20,7 +21,7 @@ const mocks = vi.hoisted(() => {
 
 vi.mock('electron', () => ({
   app: { quit: mocks.quit },
-  powerMonitor: { on: mocks.powerOn },
+  powerMonitor: { on: mocks.powerOn, getSystemIdleTime: mocks.idleSeconds },
 }));
 
 vi.mock('./timer', () => ({
@@ -58,6 +59,7 @@ describe('registerPowerEvents', () => {
     mocks.prepareForAway.mockResolvedValue({ state: 'IDLE', workedMs: 0 });
     mocks.status.mockReturnValue({ state: 'IDLE', workedMs: 0 });
     mocks.runQuitCleanup.mockResolvedValue(undefined);
+    mocks.idleSeconds.mockReturnValue(0);
   });
 
   afterEach(() => {
@@ -219,5 +221,63 @@ describe('registerPowerEvents', () => {
     expect(mocks.prepareForAway).toHaveBeenNthCalledWith(2, 'suspend', 30_000);
     expect(onReturnFromAway).not.toHaveBeenCalled();
     expect(onReturnComplete).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not offer resume for a timer that was already paused', async () => {
+    const onReturnFromAway = vi.fn();
+    mocks.status.mockReturnValue({ state: 'RUNNING', entryId: 'e1', larkTaskGuid: 'task-1', paused: true, pauseReason: 'MANUAL' });
+    registerPowerEvents({ onWake: vi.fn(), onReturnFromAway });
+
+    mocks.listeners.get('lock-screen')!();
+    await settle();
+    mocks.listeners.get('unlock-screen')!();
+    await settle();
+
+    // The paused entry is still closed by the away, but nothing asks to resume it.
+    expect(mocks.prepareForAway).toHaveBeenCalledWith('lock', 0);
+    expect(onReturnFromAway).not.toHaveBeenCalled();
+  });
+
+  it('still retries closing a paused timer when the first close failed', async () => {
+    mocks.status.mockReturnValue({ state: 'RUNNING', larkTaskGuid: 'task-1', paused: true });
+    mocks.prepareForAway.mockRejectedValueOnce(new Error('disk unavailable'));
+    registerPowerEvents({ onWake: vi.fn() });
+
+    mocks.listeners.get('suspend')!();
+    mocks.listeners.get('resume')!();
+    await settle();
+    await settle();
+
+    expect(mocks.prepareForAway).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not bill the idle stretch before an auto-lock', async () => {
+    const onReturnFromAway = vi.fn();
+    mocks.status.mockReturnValue({ state: 'RUNNING', larkTaskGuid: 'task-1', paused: false });
+    mocks.idleSeconds.mockReturnValue(120); // no input for 2 min, then the screen locked
+    registerPowerEvents({ onWake: vi.fn(), onReturnFromAway });
+
+    mocks.listeners.get('lock-screen')!();
+    await settle();
+
+    // Handed over as elapsed time: the boundary is two minutes before the lock.
+    expect(mocks.prepareForAway).toHaveBeenCalledWith('lock', 120_000);
+
+    mocks.listeners.get('unlock-screen')!();
+    await settle();
+    expect(onReturnFromAway).toHaveBeenCalledWith(expect.objectContaining({
+      stoppedAt: 1_700_000_000_000 - 120_000,
+    }));
+  });
+
+  it('keeps counting a short pause between keystrokes before a manual lock', async () => {
+    mocks.status.mockReturnValue({ state: 'RUNNING', larkTaskGuid: 'task-1', paused: false });
+    mocks.idleSeconds.mockReturnValue(5);
+    registerPowerEvents({ onWake: vi.fn() });
+
+    mocks.listeners.get('lock-screen')!();
+    await settle();
+
+    expect(mocks.prepareForAway).toHaveBeenCalledWith('lock', 0);
   });
 });

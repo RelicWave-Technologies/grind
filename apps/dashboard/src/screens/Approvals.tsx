@@ -164,6 +164,9 @@ export function ApprovalsScreen() {
       queryClient.invalidateQueries({ queryKey: ['approvals', 'team'] });
       queryClient.invalidateQueries({ queryKey: ['reports', 'team', 'member'] });
       queryClient.invalidateQueries({ queryKey: reportQueryKeys.teamSummaryRoot });
+      // Team today's pending queue and the person's day both move with a decision.
+      queryClient.invalidateQueries({ queryKey: ['admin', 'overview'] });
+      queryClient.invalidateQueries({ queryKey: ['insights', 'day'] });
     },
   });
 

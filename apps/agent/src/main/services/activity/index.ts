@@ -3,10 +3,10 @@ import { app } from 'electron';
 import path from 'node:path';
 import { ulid } from 'ulid';
 import { uIOhook } from 'uiohook-napi';
-import { MinuteSealer } from './minuteSealer';
+import { MinuteSealer, minuteFloor } from './minuteSealer';
 import type { ActivitySample } from './aggregator';
 import { ActiveWindowTracker, type ActiveWindowObservation } from './activeWindow';
-import { ActivityStore } from './store';
+import { ActivityStore, type ActivityOwner } from './store';
 import { flushActivity } from './sync';
 import { ActivitySyncDrain, type ActivitySyncDrainReason, type ActivitySyncDrainResult } from './syncDrain';
 import { hasAccessibilityAccess } from '../permissions';
@@ -27,6 +27,14 @@ let started = false;
 // for no benefit (events no-op unless recording), which heats the CPU.
 let hookRunning = false;
 let lastHookError: string | null = null;
+// A failed hook start is retried on a backoff, not on every 1s recording tick:
+// on Windows a hook that will not start was retried and logged every second
+// for as long as the timer ran. Device clock: only ever compared with itself.
+const HOOK_RETRY_MIN_MS = 2_000;
+const HOOK_RETRY_MAX_MS = 5 * 60_000;
+let hookRetryDelayMs = 0;
+let nextHookRetryAt = 0;
+let lastLoggedHookError: string | null = null;
 const captureStatusListeners = new Set<(status: ActivityCaptureStatus) => void>();
 const trackedInputListeners = new Set<() => void>();
 // Throttle mousemove processing: the OS fires it at the pointer's full poll rate
@@ -59,10 +67,23 @@ function getStore(): ActivityStore {
   return store;
 }
 
+/** The account the timer is signed in as — every local sample is scoped to it. */
+function currentOwner(): ActivityOwner | null {
+  try {
+    return getTimerService().currentOwner();
+  } catch {
+    return null;
+  }
+}
+
 const activitySyncDrain = new ActivitySyncDrain({
   getStore,
   beforeFlush: () => drainTimerSyncNow('manual'),
-  flush: (activityStore) => flushActivity(activityStore, (entryId) => getTimerService().isPendingCreate(entryId)),
+  flush: (activityStore) =>
+    flushActivity(activityStore, {
+      owner: currentOwner(),
+      isTimeEntryPendingCreate: (entryId) => getTimerService().isPendingCreate(entryId),
+    }),
   logger: log,
 });
 
@@ -107,30 +128,71 @@ function syncHook(): void {
     return;
   }
   if (recording && !hookRunning) {
-    try {
-      uIOhook.start();
-      hookRunning = true;
-      lastHookError = null;
-    } catch (err) {
-      hookRunning = false;
-      lastHookError = String(err);
-      log.warn('uIOhook.start failed', { err: String(err) });
-    }
+    // eslint-disable-next-line no-restricted-syntax -- device<->device: compared with nextHookRetryAt from this same clock
+    if (lastHookError === null || Date.now() >= nextHookRetryAt) startHook();
   } else if (!recording && hookRunning) {
-    try {
-      uIOhook.stop();
-    } catch {
-      /* ignore */
-    }
-    hookRunning = false;
+    stopHook();
     lastHookError = null;
   }
   emitCaptureStatus();
 }
 
-/** Whether the global input hook is actually running (Accessibility granted). */
-export function isActivityCapturing(): boolean {
-  return hookRunning;
+function stopHook(): void {
+  try {
+    uIOhook.stop();
+  } catch {
+    /* ignore */
+  }
+  hookRunning = false;
+}
+
+function resetHookBackoff(): void {
+  hookRetryDelayMs = 0;
+  nextHookRetryAt = 0;
+  lastLoggedHookError = null;
+}
+
+/** One attempt at the native hook. A failure is stored, logged only when it
+ *  changes, and pushes the next automatic attempt back exponentially. */
+function startHook(): boolean {
+  try {
+    uIOhook.start();
+    hookRunning = true;
+    if (lastHookError !== null) log.info('uIOhook started after an earlier failure');
+    lastHookError = null;
+    resetHookBackoff();
+    return true;
+  } catch (err) {
+    hookRunning = false;
+    lastHookError = String(err);
+    hookRetryDelayMs = hookRetryDelayMs === 0
+      ? HOOK_RETRY_MIN_MS
+      : Math.min(hookRetryDelayMs * 2, HOOK_RETRY_MAX_MS);
+    // eslint-disable-next-line no-restricted-syntax -- device<->device: only compared with Date.now() in syncHook
+    nextHookRetryAt = Date.now() + hookRetryDelayMs;
+    if (lastHookError !== lastLoggedHookError) {
+      lastLoggedHookError = lastHookError;
+      log.warn('uIOhook.start failed', { err: lastHookError, nextRetryMs: hookRetryDelayMs });
+    }
+    return false;
+  }
+}
+
+/**
+ * An explicit "check again" for a stored hook failure: forget it and try the
+ * hook once now, ignoring the backoff. Without this a single failed start
+ * blocked tracking until quit — the hook is only started while recording, and
+ * recording cannot resume while the failure stands. When not recording the
+ * hook is stopped again straight away; the attempt only proves it can start.
+ */
+export function retryActivityHook(): ActivityCaptureStatus {
+  if (!started || hookRunning || lastHookError === null || !hasAccessibilityAccess(false)) {
+    return getActivityCaptureStatus();
+  }
+  lastHookError = null;
+  if (startHook() && !recording) stopHook();
+  emitCaptureStatus();
+  return getActivityCaptureStatus();
 }
 
 export interface ActivityCaptureStatus {
@@ -189,7 +251,12 @@ export function startActivityCapture(): void {
   getStore();
   // bucketStart is the key the server upserts on and filters by window, so it
   // has to share a clock with the entries it is evidence for.
-  sealer = new MinuteSealer({ now: () => serverAlignedNow(), persist: persistSample });
+  sealer = new MinuteSealer({
+    now: () => serverAlignedNow(),
+    persist: persistSample,
+    // A tracked minute only counts as a quiet minute if we were listening.
+    isCapturing: () => hookRunning,
+  });
   sealer.setRecording(recording, recordingEntryId); // seed current state
 
   uIOhook.on('keydown', () => {
@@ -217,27 +284,38 @@ export function startActivityCapture(): void {
   syncHook();
   log.info('activity capture ready', { recording });
 
-  // Seal one bucket per minute. The sealer guarantees a non-empty minute is
-  // always persisted (events are recording-gated at the source, so they're
-  // legitimate work) and never double-emits a bucket.
-  flushTimer = setInterval(() => {
-    if (sealer!.tick() == null) {
-      // Empty/duplicate minute — still bound the window tracker so it can't
-      // drift even during long idle stretches.
-      activeWindow.prune(Math.floor(serverAlignedNow() / 60_000) * 60_000);
+  // Seal one bucket per minute, just after each wall-clock boundary. Every
+  // tracked minute is stored — a quiet one as zeros — and a minute sealed
+  // twice adds up rather than overwriting (see MinuteSealer).
+  scheduleMinuteSeal();
+}
+
+/** Fire just after the next minute boundary — a plain 60s interval drifts against the clock. */
+function scheduleMinuteSeal(): void {
+  if (flushTimer) clearTimeout(flushTimer);
+  const now = serverAlignedNow();
+  const delay = minuteFloor(now) + 60_000 - now + 250;
+  flushTimer = setTimeout(() => {
+    flushTimer = null;
+    if (sealer && sealer.tick() == null) {
+      // Nothing to seal — still bound the window tracker so it can't drift
+      // during long untracked stretches.
+      activeWindow.prune(minuteFloor(serverAlignedNow()));
     }
-  }, 60_000);
+    if (started) scheduleMinuteSeal();
+  }, delay);
 }
 
 /**
- * Durably write a sealed minute to the local queue and kick a best-effort sync.
- * Called by the sealer at most once per bucket (see {@link MinuteSealer}).
+ * Durably write a sealed minute to the local queue — added to the minute
+ * already stored, if any — and kick a best-effort sync.
  */
 function persistSample(sample: ActivitySample, entryId: string | null): void {
   const dom = activeWindow.dominantFor(sample.bucketStart, sample.bucketStart + 60_000);
   const policy = getCapturePolicy();
+  const owner = currentOwner();
   activeWindow.prune(sample.bucketStart + 60_000);
-  getStore().insert({
+  const written = getStore().persistMinute({
     id: ulid(),
     timeEntryId: entryId,
     bucketStart: sample.bucketStart,
@@ -253,8 +331,10 @@ function persistSample(sample: ActivitySample, entryId: string | null): void {
     activeTitle: policy.captureApps && policy.captureTitles ? dom.activeTitle : null,
     activeUrl: policy.captureApps && policy.captureUrls ? dom.activeUrl : null,
     synced: 0,
+    ownerUserId: owner?.userId ?? null,
+    ownerWorkspaceId: owner?.workspaceId ?? null,
   });
-  void drainActivityNow('sample');
+  if (written) void drainActivityNow('sample');
 }
 
 /**
@@ -267,26 +347,21 @@ export function flushPartialActivity(): void {
 }
 
 export function stopActivityCapture(): void {
-  if (flushTimer) clearInterval(flushTimer);
+  if (flushTimer) clearTimeout(flushTimer);
   flushTimer = null;
-  if (hookRunning) {
-    try {
-      uIOhook.stop();
-    } catch {
-      /* ignore */
-    }
-    hookRunning = false;
-  }
+  if (hookRunning) stopHook();
   started = false;
   lastHookError = null;
+  resetHookBackoff();
   emitCaptureStatus();
 }
 
 /** Today's input totals (for an in-app summary). */
 export function todayActivity(): { keystrokes: number; clicks: number; scrollEvents: number } {
   const context = getWorkspaceTimeContext();
-  return context.ready && context.dayStart !== null
-    ? getStore().countSince(context.dayStart)
+  const owner = currentOwner();
+  return context.ready && context.dayStart !== null && owner
+    ? getStore().countSince(context.dayStart, owner)
     : { keystrokes: 0, clicks: 0, scrollEvents: 0 };
 }
 

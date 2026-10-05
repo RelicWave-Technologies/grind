@@ -25,7 +25,7 @@ export function normalizeManagerIds(input: unknown): string[] {
   return [...new Set(raw.map((id) => (typeof id === 'string' ? id.trim() : '')).filter(Boolean))];
 }
 
-export async function syncDerivedRole(tx: Tx, userId: string): Promise<void> {
+async function syncDerivedRole(tx: Tx, userId: string): Promise<void> {
   const user = await tx.user.findUnique({
     where: { id: userId },
     select: { id: true, role: true, teamId: true, managerId: true },
@@ -46,7 +46,7 @@ export async function syncDerivedRole(tx: Tx, userId: string): Promise<void> {
   }
 }
 
-export async function assertTeamInWorkspace(tx: Tx, workspaceId: string, teamId: string) {
+async function assertTeamInWorkspace(tx: Tx, workspaceId: string, teamId: string) {
   const team = await tx.team.findFirst({
     where: { id: teamId, workspaceId },
     select: { id: true, workspaceId: true },
@@ -54,7 +54,7 @@ export async function assertTeamInWorkspace(tx: Tx, workspaceId: string, teamId:
   return team;
 }
 
-export async function assertManagerCandidate(tx: Tx, workspaceId: string, userId: string) {
+async function assertManagerCandidate(tx: Tx, workspaceId: string, userId: string) {
   return tx.user.findFirst({
     where: {
       id: userId,

@@ -1,5 +1,6 @@
 import type { PrismaClient } from '@grind/db';
 import { getLarkConfig } from './config';
+import { outboundTimeoutSignal } from '../lib/outboundTimeout';
 
 /**
  * Resolves Grind users to their Lark identity (email -> open_id), using a
@@ -67,6 +68,7 @@ export class HttpTenantClient implements TenantClient {
       method: 'POST',
       headers: { 'Content-Type': 'application/json; charset=utf-8' },
       body: JSON.stringify({ app_id: appId, app_secret: appSecret }),
+      signal: outboundTimeoutSignal(),
     });
     const body = (await res.json().catch(() => ({}))) as TenantTokenBody;
     if (body.code !== 0 || !body.tenant_access_token) {
@@ -93,7 +95,7 @@ export class HttpTenantClient implements TenantClient {
       const url = new URL('/open-apis/contact/v3/users/batch', oauthHost);
       url.searchParams.set('user_id_type', 'open_id');
       for (const id of chunk) url.searchParams.append('user_ids', id);
-      const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` }, signal: outboundTimeoutSignal() });
       const body = (await res.json().catch(() => ({}))) as {
         code?: number;
         data?: { items?: Array<{ open_id?: string; name?: string }> };
@@ -118,6 +120,7 @@ export class HttpTenantClient implements TenantClient {
         Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify({ emails: [email] }),
+      signal: outboundTimeoutSignal(),
     });
     const body = (await res.json().catch(() => ({}))) as BatchGetIdBody;
     if (body.code !== 0) throw new Error(`batch_get_id error: ${body.msg ?? body.code}`);

@@ -9,7 +9,6 @@ export * from './rbac';
 export * from './reports';
 export * from './profile';
 export * from './teamSettings';
-export * from './payroll';
 export * from './monitoringSettings';
 export * from './apiTokens';
 export * from './timezone';

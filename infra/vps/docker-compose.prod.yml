@@ -6,6 +6,8 @@ services:
     environment:
       NODE_ENV: production
       API_PORT: 4000
+      # The commit this image was built from, so /healthz names what is running.
+      GIT_SHA: ${IMAGE_TAG}
       # Leave mirroring. These are configuration, not credentials — approval
       # identifiers and a UTC offset — so they live in version
       # control rather than in a write-only secret, where they were silently
@@ -13,10 +15,18 @@ services:
       # The Lark credentials themselves stay in TIMO_PRODUCTION_ENV.
       LARK_LEAVE_APPROVAL_CODE: 1A67FD64-F795-4A76-9D45-B37F79A8ABBA
       LARK_WFH_APPROVAL_CODE: 0B48AD43-AF0D-4F93-8442-5CF789D3FBE7
-      LARK_LEAVE_TZ_OFFSET_MIN: "-330"
     ports:
       - "127.0.0.1:4100:4000"
     restart: unless-stopped
+    # Readiness, not liveness: /healthz is 200 only when the database answers.
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/healthz').then((r)=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    # The API drains in-flight requests on SIGTERM for up to 25s before exiting.
+    stop_grace_period: 30s
 
   dashboard:
     image: ${GRIND_DASHBOARD_IMAGE}:${IMAGE_TAG}

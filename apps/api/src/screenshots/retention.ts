@@ -1,5 +1,5 @@
 import { prisma } from '@grind/db';
-import { WORKSPACE_POLICY_DEFAULTS } from '@grind/types';
+import { effectiveScreenshotRetentionDays } from '@grind/types';
 import { env } from '../env';
 import { isGoogleDriveConfigured, trashScreenshotInDrive } from '../lib/googleDrive';
 import { logger } from '../logger';
@@ -15,7 +15,6 @@ export type ScreenshotTrashFn = (fileId: string) => Promise<ScreenshotTrashResul
 
 export interface ScreenshotRetentionResult {
   checkedWorkspaces: number;
-  skippedDisabledWorkspaces: number;
   scannedScreenshots: number;
   newlyExpiredScreenshots: number;
   retriedDeletedScreenshots: number;
@@ -67,7 +66,6 @@ export async function runScreenshotRetentionOnce(
   });
   const result: ScreenshotRetentionResult = {
     checkedWorkspaces: workspaces.length,
-    skippedDisabledWorkspaces: 0,
     scannedScreenshots: 0,
     newlyExpiredScreenshots: 0,
     retriedDeletedScreenshots: 0,
@@ -79,11 +77,9 @@ export async function runScreenshotRetentionOnce(
   };
 
   for (const workspace of workspaces) {
-    const retentionDays = workspace.policy?.retentionDaysScreenshots ?? WORKSPACE_POLICY_DEFAULTS.retentionDaysScreenshots;
-    if (retentionDays <= 0) {
-      result.skippedDisabledWorkspaces += 1;
-      continue;
-    }
+    // 1–60 days, always: a stored 0 ("forever") or a longer value from an
+    // older dashboard no longer exempts a workspace from the privacy contract.
+    const retentionDays = effectiveScreenshotRetentionDays(workspace.policy?.retentionDaysScreenshots);
     const cutoff = new Date(now.getTime() - retentionDays * DAY_MS);
     await processWorkspace(workspace.id, cutoff, trashFile, result);
   }
@@ -103,9 +99,14 @@ async function processWorkspace(
       where: {
         ...(processedIds.size > 0 ? { id: { notIn: [...processedIds] } } : {}),
         user: { workspaceId },
-        uploadState: 'UPLOADED',
         OR: [
-          { deletedAt: null, capturedAt: { lt: cutoff } },
+          // A shot whose bytes reached Drive but whose agent never sent
+          // /complete still holds a file — it expires like any other.
+          {
+            deletedAt: null,
+            capturedAt: { lt: cutoff },
+            OR: [{ uploadState: 'UPLOADED' }, { s3Key: { not: null } }],
+          },
           {
             deletedReason: RETENTION_REASON,
             OR: [{ s3Key: { not: null } }, { thumbS3Key: { not: null } }],

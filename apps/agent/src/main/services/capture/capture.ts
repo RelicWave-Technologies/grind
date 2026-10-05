@@ -115,8 +115,9 @@ function decodableSource(thumbnail: Electron.NativeImage): {
   return { data: thumbnail.toPNG(), options: undefined };
 }
 
-function dayDir(now: number): string {
-  return path.join(app.getPath('userData'), 'screenshots', new Date(now).toISOString().slice(0, 10));
+/** The day folder below the screenshots dir — what rows store, so a moved userData still resolves. */
+function dayFolder(now: number): string {
+  return new Date(now).toISOString().slice(0, 10);
 }
 
 /**
@@ -151,7 +152,8 @@ export async function captureNow(
 
   const now = serverAlignedNow();
   const sourceMs = performance.now() - startedAt;
-  const dir = dayDir(now);
+  const folder = dayFolder(now);
+  const dir = path.join(app.getPath('userData'), 'screenshots', folder);
   await fs.mkdir(dir, { recursive: true });
 
   let sawEmpty = false;
@@ -172,9 +174,9 @@ export async function captureNow(
       .toBuffer();
     transformMs += performance.now() - transformStartedAt;
     const id = ulid();
-    const filePath = path.join(dir, `${id}.webp`);
+    const filePath = path.join(folder, `${id}.webp`);
     const writeStartedAt = performance.now();
-    await fs.writeFile(filePath, webp, { mode: 0o600 });
+    await fs.writeFile(path.join(dir, `${id}.webp`), webp, { mode: 0o600 });
     writeMs += performance.now() - writeStartedAt;
     const size = s.thumbnail.getSize();
     rows.push({

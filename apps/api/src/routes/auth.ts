@@ -48,7 +48,7 @@ export type AuthUserRow = {
 };
 
 /** Minimal Prisma `select` that satisfies {@link serializeAuthUser}. */
-export const AUTH_USER_SELECT = {
+const AUTH_USER_SELECT = {
   id: true,
   email: true,
   name: true,
@@ -62,7 +62,7 @@ export const AUTH_USER_SELECT = {
   workspace: { select: { timezone: true } },
 } as const;
 
-export function serializeAuthUser(user: AuthUserRow): UserDto | null {
+function serializeAuthUser(user: AuthUserRow): UserDto | null {
   const parsedRole = RoleSchema.safeParse(user.role);
   if (!parsedRole.success) return null;
   const role = parsedRole.data;
