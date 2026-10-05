@@ -69,7 +69,16 @@ export function buildApp() {
     pinoHttp({
       logger,
       redact: {
-        paths: ['req.headers.authorization', 'req.body.password', 'req.body.refreshToken'],
+        // Cookies carry the dashboard session (grind_at / grind_rt), and
+        // Set-Cookie hands out a fresh 90-day refresh token: anyone reading
+        // the logs could take over a session.
+        paths: [
+          'req.headers.authorization',
+          'req.headers.cookie',
+          'res.headers["set-cookie"]',
+          'req.body.password',
+          'req.body.refreshToken',
+        ],
         censor: '[redacted]',
       },
     }),
