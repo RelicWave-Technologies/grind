@@ -8,7 +8,8 @@
     "build": "tsc -p tsconfig.json --noEmit && vite build",
     "preview": "vite preview --port 5174",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "eslint src"
+    "lint": "eslint src",
+    "test": "vitest run"
   },
   "dependencies": {
     "@grind/types": "workspace:*",
@@ -24,6 +25,7 @@
     "@types/react-dom": "18.3.1",
     "@vitejs/plugin-react": "4.3.3",
     "typescript": "5.6.3",
-    "vite": "5.4.10"
+    "vite": "5.4.10",
+    "vitest": "2.1.4"
   }
 }
