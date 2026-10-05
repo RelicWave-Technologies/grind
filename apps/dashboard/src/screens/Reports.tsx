@@ -1074,6 +1074,9 @@ function TeamMemberDrawer({
             // drawer and the table beneath it disagree about the same date.
             void queryClient.invalidateQueries({ queryKey: ['reports', 'team', 'member', userId] });
             void queryClient.invalidateQueries({ queryKey: ['reports', 'team'] });
+            // Attendance's month summary and this dialog's own history list too.
+            void queryClient.invalidateQueries({ queryKey: ['admin', 'month-summary'] });
+            void queryClient.invalidateQueries({ queryKey: ['attendance-override-history', userId] });
           }}
         />
       )}
