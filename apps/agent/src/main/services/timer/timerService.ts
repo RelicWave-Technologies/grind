@@ -21,6 +21,7 @@ import type {
   EntryStore,
   IdGen,
   PendingEntrySyncState,
+  RangeBacklog,
   StartArgs,
   SyncBacklog,
   SyncClient,
@@ -578,6 +579,74 @@ export class TimerService {
       resent += 1;
     }
     return resent;
+  }
+
+  /**
+   * Developer-requested resend of everything this owner tracked in
+   * [startMs, endMs): local is the truth, so put it back on the upload queue
+   * and let the drain push it again.
+   *
+   * - A closed entry the server already has gets a revision above anything the
+   *   server acknowledged, so it replaces whatever copy the server holds (the
+   *   server applies a newer revision over its own close). One never created
+   *   stays a pending create.
+   * - The running entry is queued again; its revision is bumped only when this
+   *   process has been watching it (see resyncFromServer for why).
+   *
+   * Backoff is cleared on every row touched, so the next drain sends them all.
+   */
+  resyncRange(startMs: number, endMs: number): { requeued: number; openRequeued: boolean } {
+    if (!this.store.currentOwner()) throw new Error('timer_owner_unavailable');
+    let requeued = 0;
+    let openRequeued = false;
+    for (const row of this.store.listLedgerEntries(startMs)) {
+      const { entry } = row;
+      if (entry.startedAt >= endMs) continue;
+      if (entry.endedAt !== null && entry.endedAt <= startMs) continue;
+      const nextRevision = Math.max(entry.revision, row.acknowledgedRevision ?? 0) + 1;
+      if (entry.endedAt === null) {
+        // Only the entry this service holds open is live; any other open row
+        // is closed by recovery on the next owner bind, not resent here.
+        if (!this.open || this.open.id !== entry.id) continue;
+        if (row.syncState === 'synced' && entry.id === this.liveEntryId) {
+          const bumped = { ...this.open, revision: Math.max(this.open.revision, nextRevision) };
+          this.writeEntry(bumped);
+          this.open = bumped;
+        } else {
+          this.store.requeue(entry.id, row.syncState === 'pending_create' ? 'pending_create' : 'pending_update');
+          this.ledgerEpoch += 1;
+        }
+        openRequeued = true;
+        continue;
+      }
+      if (row.syncState === 'pending_create') {
+        this.store.requeue(entry.id, 'pending_create');
+        this.ledgerEpoch += 1;
+      } else {
+        this.writeEntry({ ...entry, revision: nextRevision });
+      }
+      requeued += 1;
+    }
+    if (requeued > 0 || openRequeued) this.notifyMutation();
+    return { requeued, openRequeued };
+  }
+
+  /** Closed entries in [startMs, endMs) the server has not acknowledged yet. */
+  rangeBacklog(startMs: number, endMs: number): RangeBacklog {
+    return this.store.rangeBacklog(startMs, endMs);
+  }
+
+  /** True the first time `key` is marked for the bound owner. */
+  markOnce(key: string): boolean {
+    return this.store.markOnce(key);
+  }
+
+  getNote(key: string): string | null {
+    return this.store.getNote(key);
+  }
+
+  setNote(key: string, value: string): void {
+    this.store.setNote(key, value);
   }
 
   /** Activity linked to this entry must wait until its server parent exists. */

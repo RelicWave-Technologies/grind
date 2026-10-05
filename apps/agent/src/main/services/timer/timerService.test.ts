@@ -113,6 +113,19 @@ class MemStore implements EntryStore {
     this.onceKeys.add(key);
     return true;
   }
+  notes = new Map<string, string>();
+  getNote(key: string) {
+    return this.notes.get(key) ?? null;
+  }
+  setNote(key: string, value: string) {
+    this.notes.set(key, value);
+  }
+  rangeBacklog(startMs: number, endMs: number) {
+    const pending = this.getUnsynced().filter(
+      (r) => r.entry.endedAt !== null && r.entry.endedAt > startMs && r.entry.startedAt < endMs,
+    );
+    return { pending: pending.length, lastErrors: [] };
+  }
   hasUnsynced() { return this.getUnsynced().length > 0; }
   isPendingCreate(id: string) {
     return this.syncStates.get(id) === 'pending_create';

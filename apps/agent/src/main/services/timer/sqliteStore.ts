@@ -5,6 +5,7 @@ import type {
   EntrySyncState,
   LocalLedgerEntry,
   PendingEntrySyncState,
+  RangeBacklog,
   SyncBacklog,
   TimerOwner,
   TimerAwayState,
@@ -284,6 +285,22 @@ export class SqliteEntryStore implements EntryStore {
     return info.changes > 0;
   }
 
+  getNote(key: string): string | null {
+    const owner = this.owner;
+    if (!owner) return null;
+    const row = this.db.prepare(`SELECT value FROM timer_meta WHERE key = ?`)
+      .get(this.ownerMetaKey(owner, `note:${key}`)) as { value: string } | undefined;
+    return row?.value ?? null;
+  }
+
+  setNote(key: string, value: string): void {
+    const owner = this.requireOwner();
+    this.db.prepare(
+      `INSERT INTO timer_meta (key, value) VALUES (@key, @value)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    ).run({ key: this.ownerMetaKey(owner, `note:${key}`), value });
+  }
+
   setRecoveryNotice(notice: TimerRecoveryNotice): void {
     this.setJsonMeta('recovery_notice', notice);
   }
@@ -410,6 +427,24 @@ export class SqliteEntryStore implements EntryStore {
        ORDER BY rowid DESC LIMIT 1`,
     ).get(owner.userId, owner.workspaceId) as { last_error: string } | undefined;
     return { pending: summary.pending, oldestPendingAt: summary.oldest, lastError: failing?.last_error ?? null };
+  }
+
+  rangeBacklog(startMs: number, endMs: number): RangeBacklog {
+    const owner = this.owner;
+    if (!owner) return { pending: 0, lastErrors: [] };
+    const where = `owner_user_id = @userId AND owner_workspace_id = @workspaceId
+      AND sync_state IN ('pending_create', 'pending_update')
+      AND ended_at IS NOT NULL AND ended_at > @startMs
+      AND CAST(json_extract(json, '$.startedAt') AS INTEGER) < @endMs`;
+    const params = { userId: owner.userId, workspaceId: owner.workspaceId, startMs, endMs };
+    const summary = this.db.prepare(`SELECT COUNT(*) AS pending FROM local_entries WHERE ${where}`)
+      .get(params) as { pending: number };
+    const errors = this.db.prepare(
+      `SELECT last_error FROM local_entries
+       WHERE ${where} AND last_error IS NOT NULL
+       GROUP BY last_error ORDER BY MAX(rowid) DESC LIMIT 5`,
+    ).all(params) as Array<{ last_error: string }>;
+    return { pending: summary.pending, lastErrors: errors.map((row) => row.last_error) };
   }
 
   hasUnsynced(): boolean {

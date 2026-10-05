@@ -229,3 +229,49 @@ describe('relativeScreenshotPath', () => {
     expect(relativeScreenshotPath('2026-10-01/a.webp')).toBeNull();
   });
 });
+
+describe('ScreenshotStore range resend', () => {
+  const OWNER = { userId: 'u1', workspaceId: 'w1' };
+  const OTHER = { userId: 'u2', workspaceId: 'w1' };
+  const shot = (id: string, capturedAt: number, over: Partial<ScreenshotRow> = {}): ScreenshotRow => ({
+    id,
+    timeEntryId: null,
+    displayId: 'd1',
+    capturedAt,
+    filePath: `2026-10-05/${id}.webp`,
+    bytes: 1,
+    width: 1,
+    height: 1,
+    uploadState: 'pending',
+    attempts: 0,
+    s3Key: null,
+    lastError: null,
+    nextAttemptAt: null,
+    failedAt: null,
+    ownerUserId: OWNER.userId,
+    ownerWorkspaceId: OWNER.workspaceId,
+    ...over,
+  });
+
+  it('requeues failed and backed-off shots in range, counts uploaded ones, and leaves others alone', () => {
+    const db = new Database(':memory:');
+    const store = new ScreenshotStore(db);
+    store.insert(shot('failed', 1_000, { uploadState: 'failed', attempts: 5, failedAt: 9, lastError: 'boom' }));
+    store.insert(shot('waiting', 2_000, { attempts: 3, nextAttemptAt: Number.MAX_SAFE_INTEGER, lastError: 'http_500' }));
+    store.insert(shot('done', 3_000, { uploadState: 'uploaded', s3Key: 'k' }));
+    store.insert(shot('outside', 9_000, { uploadState: 'failed', attempts: 5 }));
+    store.insert(shot('theirs', 1_500, { uploadState: 'failed', ownerUserId: OTHER.userId, ownerWorkspaceId: OTHER.workspaceId }));
+
+    expect(store.requeueRange(OWNER, 0, 5_000)).toEqual({ requeued: 2, uploaded: 1 });
+
+    const state = (id: string) =>
+      db.prepare('SELECT upload_state, attempts, next_attempt_at, last_error FROM screenshots WHERE id = ?').get(id);
+    expect(state('failed')).toEqual({ upload_state: 'pending', attempts: 0, next_attempt_at: null, last_error: null });
+    expect(state('waiting')).toEqual({ upload_state: 'pending', attempts: 0, next_attempt_at: null, last_error: null });
+    expect(state('done')).toMatchObject({ upload_state: 'uploaded' });
+    expect(state('outside')).toMatchObject({ upload_state: 'failed' });
+    expect(state('theirs')).toMatchObject({ upload_state: 'failed' });
+    expect(store.rangeSummary(OWNER, 0, 5_000)).toEqual({ pending: 2, uploaded: 1, failed: 0 });
+    expect(store.pending(OWNER, 10, 0).map((r) => r.id)).toEqual(['failed', 'waiting']);
+  });
+});

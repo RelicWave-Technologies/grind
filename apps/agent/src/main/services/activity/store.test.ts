@@ -140,4 +140,21 @@ describe('ActivityStore on a real database', () => {
     expect(totals.minutes).toBe(4);
     expect(activityPercent(totals).keyboard).toBe(25);
   });
+
+  it('requeues only the owner\'s minutes in a range for a resend, and counts what is left', () => {
+    const db = new Database(':memory:');
+    const store = new ActivityStore(db);
+    const OTHER = { userId: 'u2', workspaceId: 'w1' };
+    store.insert(minute(1_000));
+    store.insert(minute(2_000));
+    store.insert(minute(5_000));
+    store.insert(minute(2_000, { ownerUserId: OTHER.userId, ownerWorkspaceId: OTHER.workspaceId }));
+    db.prepare('UPDATE activity_samples SET synced = 1').run();
+
+    expect(store.unsyncedInRange(OWNER, 0, 3_000)).toBe(0);
+    expect(store.markUnsyncedInRange(OWNER, 1_000, 5_000)).toBe(2);
+    expect(store.unsyncedInRange(OWNER, 0, 10_000)).toBe(2);
+    expect(store.unsyncedInRange(OTHER, 0, 10_000)).toBe(0);
+    expect(store.unsynced(10, OWNER).map((r) => r.bucketStart)).toEqual([1_000, 2_000]);
+  });
 });

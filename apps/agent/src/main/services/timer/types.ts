@@ -45,6 +45,13 @@ export interface UnsyncedEntry {
   attempts: number;
 }
 
+/** Closed entries in a time range still waiting on the server. */
+export interface RangeBacklog {
+  pending: number;
+  /** Distinct recent push errors among them, newest first. */
+  lastErrors: string[];
+}
+
 /** What is still waiting on this machine, for the heartbeat's diagnostics. */
 export interface SyncBacklog {
   pending: number;
@@ -117,6 +124,8 @@ export interface EntryStore {
   /** Count the failure and hold the row back until `retryAt`. */
   noteSyncFailure(entryId: string, error: string, retryAt: number): void;
   syncBacklog(): SyncBacklog;
+  /** Closed entries overlapping [startMs, endMs) not yet acknowledged by the server. */
+  rangeBacklog(startMs: number, endMs: number): RangeBacklog;
   hasUnsynced(): boolean;
   /** True until the entry has been created successfully on the server. */
   isPendingCreate(entryId: string): boolean;
@@ -158,6 +167,9 @@ export interface EntryStore {
   clearAwayState(): void;
   /** True the first time `key` is marked for the bound owner, false after. */
   markOnce(key: string): boolean;
+  /** Small owner-scoped notes (remote command outcomes). Null when unset or signed out. */
+  getNote(key: string): string | null;
+  setNote(key: string, value: string): void;
   setRecoveryNotice(notice: TimerRecoveryNotice): void;
   getRecoveryNotice(): TimerRecoveryNotice | null;
   clearRecoveryNotice(): void;

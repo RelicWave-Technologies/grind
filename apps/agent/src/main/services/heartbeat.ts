@@ -13,6 +13,7 @@ import { getAgentConfigVersion, refreshAgentConfig } from './agentConfig';
 import { broadcast } from '../broadcast';
 import { getTrackingReadinessService } from './trackingReadiness';
 import { getLaunchAtLoginService } from './launchAtLogin';
+import { handleRemoteCommands } from './remoteCommands';
 
 let timer: NodeJS.Timeout | null = null;
 
@@ -140,6 +141,9 @@ async function tick(): Promise<void> {
     requestAgentConfigRefresh(res.configVersion);
     requestTimerDrain('heartbeat');
     requestActivityDrain('heartbeat');
+    // Developer commands (and any result still owed) run in the background,
+    // one at a time; the heartbeat never waits on them.
+    handleRemoteCommands(res.commands);
   } catch (err: unknown) {
     // Keep ticking through every failure, including a token read that failed
     // once. A real sign-out stops the heartbeat through the auth listener.

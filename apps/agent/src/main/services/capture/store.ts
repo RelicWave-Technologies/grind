@@ -384,6 +384,46 @@ markTerminalFailed(id: string, lastError: string, failedAt = Date.now()): void {
       .run({ id, lastError, failedAt });
   }
 
+  /**
+   * A developer-requested resend of the owner's shots in [fromMs, toMs):
+   * anything pending or written off goes back on the queue with a clean
+   * slate. Uploaded shots are only counted — their local copy may already be
+   * trimmed to a thumbnail, so they are never sent again.
+   */
+  requeueRange(owner: CaptureOwner, fromMs: number, toMs: number): { requeued: number; uploaded: number } {
+    const requeue = this.db.transaction(() => {
+      const { changes } = this.db
+        .prepare(
+          `UPDATE screenshots
+           SET upload_state='pending', attempts=0, next_attempt_at=NULL, failed_at=NULL, last_error=NULL
+           WHERE owner_user_id = ? AND owner_workspace_id = ? AND captured_at >= ? AND captured_at < ?
+             AND upload_state IN ('pending', 'failed')`,
+        )
+        .run(owner.userId, owner.workspaceId, fromMs, toMs);
+      return Number(changes ?? 0);
+    });
+    const requeued = requeue();
+    return { requeued, uploaded: this.rangeSummary(owner, fromMs, toMs).uploaded };
+  }
+
+  /** The owner's shots in [fromMs, toMs) by upload state (uploading counts as pending). */
+  rangeSummary(owner: CaptureOwner, fromMs: number, toMs: number): { pending: number; uploaded: number; failed: number } {
+    const rows = this.db
+      .prepare(
+        `SELECT upload_state AS state, COUNT(*) AS n FROM screenshots
+         WHERE owner_user_id = ? AND owner_workspace_id = ? AND captured_at >= ? AND captured_at < ?
+         GROUP BY upload_state`,
+      )
+      .all(owner.userId, owner.workspaceId, fromMs, toMs) as { state: string; n: number }[];
+    const out = { pending: 0, uploaded: 0, failed: 0 };
+    for (const row of rows) {
+      if (row.state === 'pending' || row.state === 'uploading') out.pending += Number(row.n);
+      else if (row.state === 'uploaded') out.uploaded += Number(row.n);
+      else if (row.state === 'failed') out.failed += Number(row.n);
+    }
+    return out;
+  }
+
   uploadSummary(owner: CaptureOwner | null): ScreenshotUploadSummary {
     const out: ScreenshotUploadSummary = { pending: 0, uploading: 0, failed: 0 };
     if (!owner) return out;

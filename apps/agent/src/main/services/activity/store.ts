@@ -206,6 +206,32 @@ export class ActivityStore {
     return rows.map(map);
   }
 
+  /**
+   * Put the owner's minutes in [fromMs, toMs) back on the upload queue (a
+   * developer-requested resend). Safe to repeat: the server keeps the larger
+   * of what it has and what arrives. Returns how many minutes were queued.
+   */
+  markUnsyncedInRange(owner: ActivityOwner, fromMs: number, toMs: number): number {
+    const info = this.db
+      .prepare(
+        `UPDATE activity_samples SET synced = 0
+         WHERE owner_user_id = ? AND owner_workspace_id = ? AND bucket_start >= ? AND bucket_start < ?`,
+      )
+      .run(owner.userId, owner.workspaceId, fromMs, toMs);
+    return Number(info.changes ?? 0);
+  }
+
+  /** The owner's minutes in [fromMs, toMs) still waiting to upload. */
+  unsyncedInRange(owner: ActivityOwner, fromMs: number, toMs: number): number {
+    const row = this.db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM activity_samples
+         WHERE synced = 0 AND owner_user_id = ? AND owner_workspace_id = ? AND bucket_start >= ? AND bucket_start < ?`,
+      )
+      .get(owner.userId, owner.workspaceId, fromMs, toMs) as { n: number };
+    return Number(row.n);
+  }
+
   markSynced(ids: string[]): void {
     if (ids.length === 0) return;
     const stmt = this.db.prepare(`UPDATE activity_samples SET synced = 1 WHERE id = ?`);

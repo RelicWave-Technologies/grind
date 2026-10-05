@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   api: vi.fn(),
   drainTimerSyncNow: vi.fn(),
   drainActivityNow: vi.fn(),
+  handleRemoteCommands: vi.fn(),
   getActivityCaptureStatus: vi.fn(),
   currentVersion: 'version-1',
   refreshAgentConfig: vi.fn(),
@@ -59,6 +60,10 @@ vi.mock('./timer', () => ({
     lastLiveness: () => null,
     syncBacklog: () => ({ pending: 0, oldestPendingAt: null, lastError: null }),
   }),
+}));
+
+vi.mock('./remoteCommands', () => ({
+  handleRemoteCommands: mocks.handleRemoteCommands,
 }));
 
 vi.mock('./activity', () => ({
@@ -117,6 +122,7 @@ describe('heartbeat config refresh', () => {
     mocks.api.mockReset();
     mocks.drainTimerSyncNow.mockReset();
     mocks.drainActivityNow.mockReset();
+    mocks.handleRemoteCommands.mockReset();
     mocks.getActivityCaptureStatus.mockReset();
     mocks.refreshAgentConfig.mockReset();
     mocks.getScreenHealth.mockReset();
@@ -245,6 +251,25 @@ describe('heartbeat config refresh', () => {
     await vi.waitFor(() => expect(mocks.drainActivityNow).toHaveBeenCalledWith('heartbeat'));
     expect(mocks.drainTimerSyncNow).toHaveBeenCalledWith('heartbeat');
     expect(mocks.refreshAgentConfig).not.toHaveBeenCalled();
+  });
+
+  it('hands developer commands to the background runner without waiting on them', async () => {
+    const commands = [{ id: 'cmd_1', type: 'RESYNC', params: { from: '2026-10-01', to: '2026-10-01' } }];
+    mocks.api.mockResolvedValue({ ok: true, serverTime: '2026-07-04T00:00:00.000Z', configVersion: 'version-1', commands });
+    const { sendHeartbeatNow } = await import('./heartbeat');
+
+    sendHeartbeatNow();
+
+    await vi.waitFor(() => expect(mocks.handleRemoteCommands).toHaveBeenCalledWith(commands));
+  });
+
+  it('still calls the runner (for owed results) when the response has no commands', async () => {
+    mocks.api.mockResolvedValue({ ok: true, serverTime: '2026-07-04T00:00:00.000Z', configVersion: 'version-1' });
+    const { sendHeartbeatNow } = await import('./heartbeat');
+
+    sendHeartbeatNow();
+
+    await vi.waitFor(() => expect(mocks.handleRemoteCommands).toHaveBeenCalledWith(undefined));
   });
 
   it('keeps heartbeat errors contained when local permission collection fails', async () => {
