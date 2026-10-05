@@ -27,6 +27,14 @@ let started = false;
 // for no benefit (events no-op unless recording), which heats the CPU.
 let hookRunning = false;
 let lastHookError: string | null = null;
+// A failed hook start is retried on a backoff, not on every 1s recording tick:
+// on Windows a hook that will not start was retried and logged every second
+// for as long as the timer ran. Device clock: only ever compared with itself.
+const HOOK_RETRY_MIN_MS = 2_000;
+const HOOK_RETRY_MAX_MS = 5 * 60_000;
+let hookRetryDelayMs = 0;
+let nextHookRetryAt = 0;
+let lastLoggedHookError: string | null = null;
 const captureStatusListeners = new Set<(status: ActivityCaptureStatus) => void>();
 const trackedInputListeners = new Set<() => void>();
 // Throttle mousemove processing: the OS fires it at the pointer's full poll rate
@@ -107,30 +115,71 @@ function syncHook(): void {
     return;
   }
   if (recording && !hookRunning) {
-    try {
-      uIOhook.start();
-      hookRunning = true;
-      lastHookError = null;
-    } catch (err) {
-      hookRunning = false;
-      lastHookError = String(err);
-      log.warn('uIOhook.start failed', { err: String(err) });
-    }
+    // eslint-disable-next-line no-restricted-syntax -- device<->device: compared with nextHookRetryAt from this same clock
+    if (lastHookError === null || Date.now() >= nextHookRetryAt) startHook();
   } else if (!recording && hookRunning) {
-    try {
-      uIOhook.stop();
-    } catch {
-      /* ignore */
-    }
-    hookRunning = false;
+    stopHook();
     lastHookError = null;
   }
   emitCaptureStatus();
 }
 
-/** Whether the global input hook is actually running (Accessibility granted). */
-export function isActivityCapturing(): boolean {
-  return hookRunning;
+function stopHook(): void {
+  try {
+    uIOhook.stop();
+  } catch {
+    /* ignore */
+  }
+  hookRunning = false;
+}
+
+function resetHookBackoff(): void {
+  hookRetryDelayMs = 0;
+  nextHookRetryAt = 0;
+  lastLoggedHookError = null;
+}
+
+/** One attempt at the native hook. A failure is stored, logged only when it
+ *  changes, and pushes the next automatic attempt back exponentially. */
+function startHook(): boolean {
+  try {
+    uIOhook.start();
+    hookRunning = true;
+    if (lastHookError !== null) log.info('uIOhook started after an earlier failure');
+    lastHookError = null;
+    resetHookBackoff();
+    return true;
+  } catch (err) {
+    hookRunning = false;
+    lastHookError = String(err);
+    hookRetryDelayMs = hookRetryDelayMs === 0
+      ? HOOK_RETRY_MIN_MS
+      : Math.min(hookRetryDelayMs * 2, HOOK_RETRY_MAX_MS);
+    // eslint-disable-next-line no-restricted-syntax -- device<->device: only compared with Date.now() in syncHook
+    nextHookRetryAt = Date.now() + hookRetryDelayMs;
+    if (lastHookError !== lastLoggedHookError) {
+      lastLoggedHookError = lastHookError;
+      log.warn('uIOhook.start failed', { err: lastHookError, nextRetryMs: hookRetryDelayMs });
+    }
+    return false;
+  }
+}
+
+/**
+ * An explicit "check again" for a stored hook failure: forget it and try the
+ * hook once now, ignoring the backoff. Without this a single failed start
+ * blocked tracking until quit — the hook is only started while recording, and
+ * recording cannot resume while the failure stands. When not recording the
+ * hook is stopped again straight away; the attempt only proves it can start.
+ */
+export function retryActivityHook(): ActivityCaptureStatus {
+  if (!started || hookRunning || lastHookError === null || !hasAccessibilityAccess(false)) {
+    return getActivityCaptureStatus();
+  }
+  lastHookError = null;
+  if (startHook() && !recording) stopHook();
+  emitCaptureStatus();
+  return getActivityCaptureStatus();
 }
 
 export interface ActivityCaptureStatus {
@@ -269,16 +318,10 @@ export function flushPartialActivity(): void {
 export function stopActivityCapture(): void {
   if (flushTimer) clearInterval(flushTimer);
   flushTimer = null;
-  if (hookRunning) {
-    try {
-      uIOhook.stop();
-    } catch {
-      /* ignore */
-    }
-    hookRunning = false;
-  }
+  if (hookRunning) stopHook();
   started = false;
   lastHookError = null;
+  resetHookBackoff();
   emitCaptureStatus();
 }
 
