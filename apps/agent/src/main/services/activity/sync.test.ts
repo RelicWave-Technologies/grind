@@ -6,6 +6,7 @@ vi.mock('../apiClient', () => ({ api: mocks.api }));
 vi.mock('../../logger', () => ({ log: { debug: vi.fn(), warn: vi.fn(), info: vi.fn(), error: vi.fn() } }));
 
 const { flushActivity } = await import('./sync');
+const OWNER = { userId: 'u1', workspaceId: 'w1' };
 
 type Row = Record<string, unknown>;
 function row(id: string, over: Row = {}): Row {
@@ -17,8 +18,11 @@ function row(id: string, over: Row = {}): Row {
 }
 function fakeStore(rows: Row[]) {
   const synced: string[] = [];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const store = { unsynced: (n: number) => rows.slice(0, n), markSynced: (ids: string[]) => synced.push(...ids) } as any;
+  const store = {
+    unsynced: (n: number) => rows.slice(0, n),
+    markSynced: (ids: string[]) => synced.push(...ids),
+    claimUnowned: () => 0,
+  } as unknown as Parameters<typeof flushActivity>[0];
   return { store, synced };
 }
 const bodyOf = () =>
@@ -48,7 +52,7 @@ beforeEach(() => {
 describe('flushActivity byte-bounded batching', () => {
   it('sends nothing when there is no backlog', async () => {
     const { store } = fakeStore([]);
-    expect(await flushActivity(store)).toBe(0);
+    expect(await flushActivity(store, { owner: OWNER })).toBe(0);
     expect(mocks.api).not.toHaveBeenCalled();
   });
 
@@ -57,7 +61,7 @@ describe('flushActivity byte-bounded batching', () => {
     const rows = Array.from({ length: 500 }, (_, i) => row('r' + i, { activeUrl: bigUrl }));
     const { store, synced } = fakeStore(rows);
 
-    const sent = await flushActivity(store);
+    const sent = await flushActivity(store, { owner: OWNER });
     expect(Buffer.byteLength(JSON.stringify(bodyOf()))).toBeLessThan(64 * 1024); // under the server cap
     expect(sent).toBeGreaterThan(0);
     expect(sent).toBeLessThan(500); // did not cram all 500 into one request
@@ -71,7 +75,7 @@ describe('flushActivity byte-bounded batching', () => {
       activeTitle: 't'.repeat(301),
       activeUrl: 'u'.repeat(5000),
     })]);
-    await flushActivity(store);
+    await flushActivity(store, { owner: OWNER });
     const [sample] = bodyOf().samples;
     expect(sample!.activeApp!.length).toBe(120);
     expect(sample!.activeAppBundle!.length).toBe(200);
@@ -81,7 +85,7 @@ describe('flushActivity byte-bounded batching', () => {
 
   it('always sends at least one sample even if it alone is large', async () => {
     const { store, synced } = fakeStore([row('r1', { activeUrl: 'u'.repeat(5000) })]);
-    expect(await flushActivity(store)).toBe(1);
+    expect(await flushActivity(store, { owner: OWNER })).toBe(1);
     expect(synced).toEqual(['r1']);
   });
 
@@ -92,18 +96,24 @@ describe('flushActivity byte-bounded batching', () => {
       row('unlinked', { timeEntryId: null, bucketStart: 120_000 }),
     ]);
 
-    expect(await flushActivity(store, (entryId) => entryId === 'pending-parent')).toBe(2);
+    expect(await flushActivity(store, { owner: OWNER, isTimeEntryPendingCreate: (entryId) => entryId === 'pending-parent' })).toBe(2);
 
     const sent = bodyOf().samples as unknown as { id: string }[];
     expect(sent.map((sample) => sample.id)).toEqual(['ready', 'unlinked']);
     expect(synced).toEqual(['ready', 'unlinked']);
   });
 
+  it('sends nothing while signed out', async () => {
+    const { store } = fakeStore([row('r1')]);
+    expect(await flushActivity(store, { owner: null })).toBe(0);
+    expect(mocks.api).not.toHaveBeenCalled();
+  });
+
   it('remains compatible with an older API response without detached count', async () => {
     mocks.api.mockResolvedValue({ accepted: 1 });
     const { store, synced } = fakeStore([row('r1')]);
 
-    expect(await flushActivity(store)).toBe(1);
+    expect(await flushActivity(store, { owner: OWNER })).toBe(1);
     expect(synced).toEqual(['r1']);
   });
 });
@@ -115,7 +125,7 @@ describe('capping a title that ends in an emoji', () => {
 
   it('does not leave half an emoji behind', async () => {
     const { store } = fakeStore([row('r1', { activeTitle: withEmojiAtTheCut })]);
-    await flushActivity(store);
+    await flushActivity(store, { owner: OWNER });
     const title = bodyOf().samples[0]!.activeTitle!;
 
     // A trailing high surrogate is what Postgres rejects with "unexpected end
@@ -129,7 +139,7 @@ describe('capping a title that ends in an emoji', () => {
   it('leaves an emoji that fits completely alone', async () => {
     const fits = 'Slack \u{1F600} general';
     const { store } = fakeStore([row('r1', { activeTitle: fits })]);
-    await flushActivity(store);
+    await flushActivity(store, { owner: OWNER });
     expect(bodyOf().samples[0]!.activeTitle).toBe(fits);
   });
 });

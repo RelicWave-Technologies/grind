@@ -240,6 +240,8 @@ export async function recentScreenshots(limit: number): Promise<
 > {
   const rows = getStore().recent(limit); // newest-first
   const activity = getActivityStore();
+  const owner = getTimerService().currentOwner();
+  if (!owner) return [];
   const DEFAULT_WINDOW_MS = 30 * 60_000;
   return Promise.all(
     rows.map(async (r, i) => {
@@ -252,7 +254,7 @@ export async function recentScreenshots(limit: number): Promise<
       let keyboardPct = 0;
       let mousePct = 0;
       try {
-        const agg = activity.aggregate(from, to);
+        const agg = activity.aggregate(from, to, owner);
         ({ keyboard: keyboardPct, mouse: mousePct } = activityPercent(agg));
       } catch {
         /* activity store may be empty/unavailable */

@@ -3,10 +3,10 @@ import { app } from 'electron';
 import path from 'node:path';
 import { ulid } from 'ulid';
 import { uIOhook } from 'uiohook-napi';
-import { MinuteSealer } from './minuteSealer';
+import { MinuteSealer, minuteFloor } from './minuteSealer';
 import type { ActivitySample } from './aggregator';
 import { ActiveWindowTracker, type ActiveWindowObservation } from './activeWindow';
-import { ActivityStore } from './store';
+import { ActivityStore, type ActivityOwner } from './store';
 import { flushActivity } from './sync';
 import { ActivitySyncDrain, type ActivitySyncDrainReason, type ActivitySyncDrainResult } from './syncDrain';
 import { hasAccessibilityAccess } from '../permissions';
@@ -59,10 +59,23 @@ function getStore(): ActivityStore {
   return store;
 }
 
+/** The account the timer is signed in as — every local sample is scoped to it. */
+function currentOwner(): ActivityOwner | null {
+  try {
+    return getTimerService().currentOwner();
+  } catch {
+    return null;
+  }
+}
+
 const activitySyncDrain = new ActivitySyncDrain({
   getStore,
   beforeFlush: () => drainTimerSyncNow('manual'),
-  flush: (activityStore) => flushActivity(activityStore, (entryId) => getTimerService().isPendingCreate(entryId)),
+  flush: (activityStore) =>
+    flushActivity(activityStore, {
+      owner: currentOwner(),
+      isTimeEntryPendingCreate: (entryId) => getTimerService().isPendingCreate(entryId),
+    }),
   logger: log,
 });
 
@@ -189,7 +202,12 @@ export function startActivityCapture(): void {
   getStore();
   // bucketStart is the key the server upserts on and filters by window, so it
   // has to share a clock with the entries it is evidence for.
-  sealer = new MinuteSealer({ now: () => serverAlignedNow(), persist: persistSample });
+  sealer = new MinuteSealer({
+    now: () => serverAlignedNow(),
+    persist: persistSample,
+    // A tracked minute only counts as a quiet minute if we were listening.
+    isCapturing: () => hookRunning,
+  });
   sealer.setRecording(recording, recordingEntryId); // seed current state
 
   uIOhook.on('keydown', () => {
@@ -217,27 +235,38 @@ export function startActivityCapture(): void {
   syncHook();
   log.info('activity capture ready', { recording });
 
-  // Seal one bucket per minute. The sealer guarantees a non-empty minute is
-  // always persisted (events are recording-gated at the source, so they're
-  // legitimate work) and never double-emits a bucket.
-  flushTimer = setInterval(() => {
-    if (sealer!.tick() == null) {
-      // Empty/duplicate minute — still bound the window tracker so it can't
-      // drift even during long idle stretches.
-      activeWindow.prune(Math.floor(serverAlignedNow() / 60_000) * 60_000);
+  // Seal one bucket per minute, just after each wall-clock boundary. Every
+  // tracked minute is stored — a quiet one as zeros — and a minute sealed
+  // twice adds up rather than overwriting (see MinuteSealer).
+  scheduleMinuteSeal();
+}
+
+/** Fire just after the next minute boundary — a plain 60s interval drifts against the clock. */
+function scheduleMinuteSeal(): void {
+  if (flushTimer) clearTimeout(flushTimer);
+  const now = serverAlignedNow();
+  const delay = minuteFloor(now) + 60_000 - now + 250;
+  flushTimer = setTimeout(() => {
+    flushTimer = null;
+    if (sealer && sealer.tick() == null) {
+      // Nothing to seal — still bound the window tracker so it can't drift
+      // during long untracked stretches.
+      activeWindow.prune(minuteFloor(serverAlignedNow()));
     }
-  }, 60_000);
+    if (started) scheduleMinuteSeal();
+  }, delay);
 }
 
 /**
- * Durably write a sealed minute to the local queue and kick a best-effort sync.
- * Called by the sealer at most once per bucket (see {@link MinuteSealer}).
+ * Durably write a sealed minute to the local queue — added to the minute
+ * already stored, if any — and kick a best-effort sync.
  */
 function persistSample(sample: ActivitySample, entryId: string | null): void {
   const dom = activeWindow.dominantFor(sample.bucketStart, sample.bucketStart + 60_000);
   const policy = getCapturePolicy();
+  const owner = currentOwner();
   activeWindow.prune(sample.bucketStart + 60_000);
-  getStore().insert({
+  const written = getStore().persistMinute({
     id: ulid(),
     timeEntryId: entryId,
     bucketStart: sample.bucketStart,
@@ -253,8 +282,10 @@ function persistSample(sample: ActivitySample, entryId: string | null): void {
     activeTitle: policy.captureApps && policy.captureTitles ? dom.activeTitle : null,
     activeUrl: policy.captureApps && policy.captureUrls ? dom.activeUrl : null,
     synced: 0,
+    ownerUserId: owner?.userId ?? null,
+    ownerWorkspaceId: owner?.workspaceId ?? null,
   });
-  void drainActivityNow('sample');
+  if (written) void drainActivityNow('sample');
 }
 
 /**
@@ -267,7 +298,7 @@ export function flushPartialActivity(): void {
 }
 
 export function stopActivityCapture(): void {
-  if (flushTimer) clearInterval(flushTimer);
+  if (flushTimer) clearTimeout(flushTimer);
   flushTimer = null;
   if (hookRunning) {
     try {
@@ -285,8 +316,9 @@ export function stopActivityCapture(): void {
 /** Today's input totals (for an in-app summary). */
 export function todayActivity(): { keystrokes: number; clicks: number; scrollEvents: number } {
   const context = getWorkspaceTimeContext();
-  return context.ready && context.dayStart !== null
-    ? getStore().countSince(context.dayStart)
+  const owner = currentOwner();
+  return context.ready && context.dayStart !== null && owner
+    ? getStore().countSince(context.dayStart, owner)
     : { keystrokes: 0, clicks: 0, scrollEvents: 0 };
 }
 
