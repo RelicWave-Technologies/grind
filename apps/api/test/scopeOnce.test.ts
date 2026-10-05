@@ -24,15 +24,26 @@ describe('attachScope runs once per request', () => {
   it('a /v1/admin sub-router resolves the scope once, not twice', async () => {
     const app = buildApp();
     const admin = await seedUser({ role: 'ADMIN' });
-    // Prisma delegates are proxies: spying replaces the method for the rest of
-    // this file, so this stays the last test and calls through explicitly.
-    const original = prisma.user.findFirst.bind(prisma.user);
-    const findFirst = vi.spyOn(prisma.user, 'findFirst').mockImplementation(((args: never) => original(args)) as never);
-    const res = await request(app)
-      .get('/v1/admin/workspace-policy')
-      .set('Authorization', `Bearer ${admin.accessToken}`);
+    // Count the scope lookups by wrapping the delegate method by hand and
+    // putting it back. The Prisma client is a process-wide singleton shared by
+    // every test file, so a vi.spyOn left on it leaks into the files after.
+    const delegate = prisma.user;
+    const original = delegate.findFirst;
+    const calls: unknown[] = [];
+    delegate.findFirst = ((args: unknown) => {
+      calls.push(args);
+      return (original as (a: unknown) => unknown).call(delegate, args);
+    }) as typeof original;
+    let res: request.Response;
+    try {
+      res = await request(app)
+        .get('/v1/admin/workspace-policy')
+        .set('Authorization', `Bearer ${admin.accessToken}`);
+    } finally {
+      delegate.findFirst = original;
+    }
     expect(res.status).toBe(200);
-    const scopeLookups = findFirst.mock.calls.filter(([args]) => {
+    const scopeLookups = calls.filter((args) => {
       const where = (args as { where?: Record<string, unknown> } | undefined)?.where;
       return where?.id === admin.userId && 'deactivatedAt' in where;
     });
