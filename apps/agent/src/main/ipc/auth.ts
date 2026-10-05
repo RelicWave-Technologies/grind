@@ -9,7 +9,7 @@ import { log } from '../logger';
 import { bindTimerToStoredSession, drainTimerSyncNow, getTimerService } from '../services/timer';
 
 /** What the Sign out button gets back. A refusal leaves the timer untouched. */
-export type LogoutResult = { ok: true } | { ok: false; reason: 'time_waiting_to_sync' };
+type LogoutResult = { ok: true } | { ok: false; reason: 'time_waiting_to_sync' };
 
 /** Fetch a remote image and return it as a `data:` URL (renderer CSP allows
  *  data: but not remote img). Returns null on any failure or oversized image. */

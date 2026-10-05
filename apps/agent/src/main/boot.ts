@@ -53,7 +53,7 @@ async function step(steps: BootSteps, name: string, run: () => unknown): Promise
   }
 }
 
-export async function runLocalBootPhase(steps: BootSteps): Promise<void> {
+async function runLocalBootPhase(steps: BootSteps): Promise<void> {
   await step(steps, 'workspace time', () => steps.initializeWorkspaceTime());
   if (await step(steps, 'timer recovery', () => steps.initTimerOnBoot())) {
     await step(steps, 'timer sync drain', () => steps.startTimerSyncDrain());
@@ -63,7 +63,7 @@ export async function runLocalBootPhase(steps: BootSteps): Promise<void> {
   await step(steps, 'local ready', () => steps.onLocalReady());
 }
 
-export async function runOnlineBootPhase(steps: BootSteps): Promise<void> {
+async function runOnlineBootPhase(steps: BootSteps): Promise<void> {
   await step(steps, 'agent config', () => steps.refreshAgentConfig());
   await step(steps, 'backlog drains', () => steps.drainBacklogs());
   let signedIn = false;

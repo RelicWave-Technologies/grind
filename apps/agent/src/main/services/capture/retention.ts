@@ -16,7 +16,7 @@
  * The planner takes the current DB rows + the files actually on disk and returns
  * exactly what to delete; the thin shell executes it.
  */
-export interface RetentionRow {
+interface RetentionRow {
   id: string;
   filePath: string;
   capturedAt: number;

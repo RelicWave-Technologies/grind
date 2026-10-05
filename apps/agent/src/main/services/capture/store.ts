@@ -11,7 +11,7 @@ const RECOVER_STORAGE_OUTAGE = 'requeue:storage-outage-500';
 // another pass now that only a definitive refusal is terminal.
 const RECOVER_ATTEMPT_CAP = 'requeue:attempt-cap-v38';
 
-export type UploadState = 'pending' | 'uploading' | 'uploaded' | 'failed';
+type UploadState = 'pending' | 'uploading' | 'uploaded' | 'failed';
 
 /** The signed-in account a local row was captured for. */
 export interface CaptureOwner {

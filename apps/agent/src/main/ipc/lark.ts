@@ -11,7 +11,7 @@ import { loadTokens } from '../services/tokenStore';
 import { LarkTaskCache, type CachedLarkTask } from '../services/larkTaskCache';
 import { CALLBACK_SCHEME } from '../env';
 
-export type LarkStatus = {
+type LarkStatus = {
   configured: boolean;
   connected: boolean;
   reauthRequired: boolean;
@@ -21,11 +21,11 @@ export type LarkStatus = {
   offline?: boolean;
 };
 
-export type LarkTask = CachedLarkTask;
+type LarkTask = CachedLarkTask;
 
-export type CreateTaskInput = { summary: string; due?: number | null; description?: string | null };
+type CreateTaskInput = { summary: string; due?: number | null; description?: string | null };
 
-export type LarkSyncResult = {
+type LarkSyncResult = {
   ok: boolean;
   connected: boolean;
   reauthRequired: boolean;

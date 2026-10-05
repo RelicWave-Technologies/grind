@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { instantForZonedDateTime } from '@grind/types';
 import type { WorkspaceTimeContext } from '../../shared/workspaceTime';
 
-export const WORKSPACE_TIME_QUERY_KEY = ['workspaceTime'] as const;
+const WORKSPACE_TIME_QUERY_KEY = ['workspaceTime'] as const;
 
 export function useWorkspaceTime() {
   const queryClient = useQueryClient();

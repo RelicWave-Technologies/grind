@@ -43,7 +43,7 @@ import {
  *     prime suspect for dropping the level in the first place.
  */
 
-export type Placement = 'center' | 'topRight';
+type Placement = 'center' | 'topRight';
 
 export interface PlacementSpec {
   width: number;

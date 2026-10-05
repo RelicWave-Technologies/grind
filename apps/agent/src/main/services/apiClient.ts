@@ -50,7 +50,7 @@ export type AuthStatus = 'loggedIn' | 'loggedOut';
  * Why the session ended. `manual` is the user pressing Sign out — they know,
  * so nothing announces it. `session_ended` is the server refusing the session.
  */
-export type SignOutReason = 'manual' | 'session_ended';
+type SignOutReason = 'manual' | 'session_ended';
 export type AuthChangeInfo = { reason?: SignOutReason };
 type AuthListener = (status: AuthStatus, info: AuthChangeInfo) => void;
 const authListeners = new Set<AuthListener>();

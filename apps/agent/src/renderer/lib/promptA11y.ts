@@ -32,7 +32,7 @@ export function usePromptKeys(keys: {
 }
 
 /** How often a running countdown is read out. */
-export const COUNTDOWN_ANNOUNCE_EVERY_SEC = 10;
+const COUNTDOWN_ANNOUNCE_EVERY_SEC = 10;
 
 /**
  * What a screen reader should hear for a countdown at `remaining` seconds, or

@@ -65,7 +65,7 @@ function apiHost(): string {
  * TLS-inspecting proxy is called out by name: "sign-in failed, try again"
  * sends people round in circles when the fix is an IT allow-list entry.
  */
-export function loginFailureOutcome(err: unknown): { kind: 'error'; reason: string; host?: string } {
+function loginFailureOutcome(err: unknown): { kind: 'error'; reason: string; host?: string } {
   const info = describeNetworkError(err);
   if (info.tlsIntercepted) return { kind: 'error', reason: 'network_intercepted', host: apiHost() };
   if (err instanceof ApiNetworkError) return { kind: 'error', reason: 'network_unreachable', host: apiHost() };

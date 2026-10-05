@@ -9,10 +9,10 @@ import type { TimerAwayReason } from './timer/types';
 export type AwayReturn = { larkTaskGuid: string | null; stoppedAt: number; reason: TimerAwayReason };
 
 /** System idle at least this long when the machine goes away is not billed. */
-export const AWAY_IDLE_BACKDATE_MIN_SEC = 30;
+const AWAY_IDLE_BACKDATE_MIN_SEC = 30;
 
 /** How far before the lock/sleep the person actually stopped working. */
-export function idleBeforeAwayMs(systemIdleSec: number): number {
+function idleBeforeAwayMs(systemIdleSec: number): number {
   if (!Number.isFinite(systemIdleSec) || systemIdleSec < AWAY_IDLE_BACKDATE_MIN_SEC) return 0;
   return systemIdleSec * 1000;
 }

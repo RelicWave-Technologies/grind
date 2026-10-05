@@ -5,7 +5,7 @@ import { IDLE_POLL_MS } from '../../env';
 import { getIdleThresholdSec, getIdleWarningSeconds } from '../agentConfig';
 import { log } from '../../logger';
 
-export interface IdleWarningInfo {
+interface IdleWarningInfo {
   idleStartedAt: number;
   deadlineAt: number;
 }

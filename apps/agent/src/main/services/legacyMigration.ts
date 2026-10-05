@@ -88,7 +88,7 @@ function hasPathPrefix(value: string, prefix: string): boolean {
  *
  * @returns how many rows were repointed.
  */
-export function repointScreenshotPaths(dbPath: string, fromDir: string, toDir: string): number {
+function repointScreenshotPaths(dbPath: string, fromDir: string, toDir: string): number {
   let db: Database.Database | null = null;
   try {
     db = new Database(dbPath, { fileMustExist: true });

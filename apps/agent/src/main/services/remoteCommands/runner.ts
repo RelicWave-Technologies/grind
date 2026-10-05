@@ -28,7 +28,7 @@ export interface RemoteCommandMemory {
   save(id: string, value: string): void;
 }
 
-export interface RemoteCommandLogger {
+interface RemoteCommandLogger {
   info(message: string, meta?: Record<string, unknown>): void;
   warn(message: string, meta?: Record<string, unknown>): void;
 }

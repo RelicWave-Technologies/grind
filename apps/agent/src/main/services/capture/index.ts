@@ -218,7 +218,7 @@ async function pruneEmptyDirs(root: string): Promise<void> {
  * the server has held for a few days to a small local copy. Idempotent — safe
  * to run on every boot and daily thereafter.
  */
-export async function runScreenshotRetention(now = serverAlignedNow()): Promise<void> {
+async function runScreenshotRetention(now = serverAlignedNow()): Promise<void> {
   try {
     const root = screenshotsRoot();
     // Rows BEFORE files: a capture racing this run writes its file first and

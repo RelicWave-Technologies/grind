@@ -23,7 +23,7 @@ export interface TrackingReadiness {
   blockingCapabilities: BlockingCapability[];
 }
 
-export type TimerPauseReason = 'IDLE' | 'MANUAL' | 'PERMISSION_REQUIRED';
+type TimerPauseReason = 'IDLE' | 'MANUAL' | 'PERMISSION_REQUIRED';
 
 export type TimerStatus =
   | { state: 'IDLE'; workedMs: number }

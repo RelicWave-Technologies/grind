@@ -46,7 +46,7 @@ export type ResumeWhen = () => boolean | Promise<boolean>;
  * never came back was invisible in four days of field logs. Every transition
  * now says so.
  */
-export interface TrackingAttentionLogger {
+interface TrackingAttentionLogger {
   info(message: string, meta?: Record<string, unknown>): void;
   warn(message: string, meta?: Record<string, unknown>): void;
 }

@@ -9,7 +9,7 @@ import { moveToApplications } from '../services/moveToApplications';
 import { installUpdateInsteadOfRelaunch } from '../services/updates';
 import type { LaunchAtLoginHealth, MoveToApplicationsResult } from '../../shared/launchAtLogin';
 
-export interface SettingsInfo {
+interface SettingsInfo {
   version: string;
   platform: string;
   launchAtLogin: LaunchAtLoginHealth;

@@ -14,7 +14,7 @@ import { loadTokens, type StoredTokens } from './tokenStore';
 
 export type CapturePolicy = PolicyFlags;
 
-export interface RuntimeAgentConfig {
+interface RuntimeAgentConfig {
   configVersion: string | null;
   screenshotIntervalSec: number;
   idleThresholdSec: number;

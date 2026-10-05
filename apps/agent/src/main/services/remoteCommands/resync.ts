@@ -19,7 +19,7 @@ import {
  * and activity backlog of that range to clear before reporting counts.
  */
 
-export interface ResyncOwner {
+interface ResyncOwner {
   userId: string;
   workspaceId: string;
 }
@@ -51,8 +51,8 @@ export interface ResyncDeps {
   pollMs?: number;
 }
 
-export const RESYNC_WAIT_MS = 120_000;
-export const RESYNC_POLL_MS = 5_000;
+const RESYNC_WAIT_MS = 120_000;
+const RESYNC_POLL_MS = 5_000;
 
 export async function runResync(rawParams: unknown, deps: ResyncDeps): Promise<ResyncCommandResult> {
   const startedAt = deps.now();

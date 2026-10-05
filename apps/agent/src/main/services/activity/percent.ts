@@ -12,8 +12,8 @@ import { perTrackedMinute } from '@grind/core';
 
 export const KEYS_SAT_PER_MIN = 120; // ~2 keys/sec sustained = 100%
 export const CLICKS_SAT_PER_MIN = 40;
-export const SCROLL_SAT_PER_MIN = 40;
-export const MOUSE_PX_SAT_PER_MIN = 6000;
+const SCROLL_SAT_PER_MIN = 40;
+const MOUSE_PX_SAT_PER_MIN = 6000;
 
 export interface ActivityWindow {
   /** Stored minutes, zero-activity tracked minutes included. */
