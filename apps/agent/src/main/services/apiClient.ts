@@ -86,6 +86,9 @@ async function rawFetch(path: string, opts: FetchOptions, tokens?: StoredTokens 
       method: opts.method ?? 'GET',
       headers,
       body: body !== undefined ? JSON.stringify(body) : undefined,
+      // Bearer tokens only, as with Node's fetch: Chromium's stack would
+      // otherwise keep and replay any Set-Cookie in the app session.
+      credentials: 'omit',
       signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (err) {
