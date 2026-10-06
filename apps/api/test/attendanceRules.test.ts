@@ -458,7 +458,7 @@ describe('attendance rules — HTTP surfaces', () => {
     // The 1st is a late arrival that costs nothing yet: shown so the count is
     // visible. The 2nd and 3rd were late too, shown beside the hours cut.
     expect(why?.split(',').slice(1, 9)).toEqual(['late 1', '<7h · late 2', '<3.5h · late 3', 'WFH', '', '', 'no leave', 'unapproved']);
-    expect(block[0]).toContain('Salary Cut');
+    expect(block[0]).toContain('Payable Days');
 
     const xlsx = await request(app).get('/v1/reports/month-performance.xlsx?month=2026-09').set(auth);
     expect(xlsx.status).toBe(200);

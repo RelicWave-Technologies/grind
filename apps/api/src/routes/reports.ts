@@ -39,7 +39,7 @@ import type { TimeInvalidationInput } from '../insights/invalidations';
 import type { RoleTitle } from '../scoring/presets';
 import { loadEntryLiveEvidence, type EntryLiveEvidenceMap } from '../insights/liveEntryEvidence';
 import { timesheetCalendarInputs } from '../leave';
-import { formatMonthPerformanceCsv, salaryCutDays, sheetCode } from '../reports/monthPerformance';
+import { earnedParts, formatMonthPerformanceCsv, payableDays, salaryCutDays, sheetCode } from '../reports/monthPerformance';
 import { monthPerformanceXlsx } from '../reports/monthPerformanceXlsx';
 import { loadMonthPerformanceReport, resolveReportMonth } from '../reports/monthPerformanceData';
 import { computeMonthPointers, storeMonthPointers } from '../reports/monthPointersData';
@@ -766,6 +766,7 @@ reportsRouter.get('/month-summary', requireCapability('reports.team.read'), asyn
       const codeOn = new Map(row.days.map((d) => [d.date, sheetCode(d)]));
       const count = (code: string) => row.days.filter((d) => sheetCode(d) === code).length;
       const account = row.leaveAccount ?? { opening: 0, earned: 0, paid: 0, closing: 0, lines: [] };
+      const parts = earnedParts(account);
       return {
         userId: row.user.id,
         name: row.user.name,
@@ -774,12 +775,17 @@ reportsRouter.get('/month-summary', requireCapability('reports.team.read'), asyn
         mode: modeOf.get(row.user.id) ?? 'STANDARD',
         present: count('P'),
         halfDay: count('HD'),
+        pl: count('PL'),
         leave: count('L'),
         lwa: count('LWA'),
         late: row.totals.lateDays,
         salaryCut: salaryCutDays(row.totals),
+        payableDays: payableDays(result.report, row),
         account: {
           ...account,
+          earnedMonthly: parts.monthly,
+          earnedBirthday: parts.birthday,
+          earnedOther: parts.other,
           lines: account.lines.map((l) => (l.kind === 'leave' ? { ...l, code: codeOn.get(l.date) } : l)),
         },
       };

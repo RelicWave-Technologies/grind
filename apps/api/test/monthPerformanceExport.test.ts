@@ -122,11 +122,15 @@ async function seedPunch(opts: {
   });
 }
 
-/** The "Salary Cut" figure from one person's caption row. */
+/** The unpaid days from one person's caption row: "Payable Days, 30 of 31" -> "1 day". */
 async function salaryCut(token: string, email: string): Promise<string | undefined> {
   const res = await request(app).get('/v1/reports/month-performance.csv?month=2026-08').set(bearer(token));
   const caption = blockFor(res.text, email)![1]!.split(',');
-  return caption[caption.indexOf('Salary Cut') + 1];
+  const payable = caption[caption.indexOf('Payable Days') + 1];
+  const m = /^([\d.]+) of (\d+)$/u.exec(payable ?? '');
+  if (!m) return undefined;
+  const cut = Number(m[2]) - Number(m[1]);
+  return `${Number.isInteger(cut) ? cut : cut.toFixed(1)} ${cut === 1 ? 'day' : 'days'}`;
 }
 
 /** The ten lines for one person, found by their email in the caption row. */
@@ -589,7 +593,8 @@ describe('a correction moves the days after it', () => {
     // The 10th no longer spends anything, so the 11th gets the whole day.
     const after = await statusRow(s.admin.token, s.inTeam.email);
     expect(after(10)).toBe('P');
-    expect(after(11)).toBe('L');
+    // Fully paid now, so it reads as paid leave.
+    expect(after(11)).toBe('PL');
     expect(await cut(s.admin.token, s.inTeam.email)).toBe('0 days');
   });
 });

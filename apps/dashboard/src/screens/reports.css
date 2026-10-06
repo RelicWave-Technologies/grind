@@ -1568,9 +1568,9 @@
 .rep-status-chip--hl  { background: var(--ui-lilac); }
 .rep-status-chip--wo  { background: var(--ui-surface-sunken); color: var(--ui-ink-2); }
 .rep-status-chip--none{ background: var(--ui-surface-inset); color: var(--ui-ink-3); }
-/* The six display codes the sheet uses: leave in mint, leave without
-   approval in coral, a half day in cream. */
-.rep-status-chip--l   { background: var(--ui-mint); }
+/* The display codes the sheet uses: paid leave (pl, above) in mint, leave
+   the balance did not cover in pink, leave without approval in coral. */
+.rep-status-chip--l   { background: var(--ui-pink); }
 .rep-status-chip--lwa { background: var(--ui-coral); }
 
 /* The day being changed, stated in one line. */

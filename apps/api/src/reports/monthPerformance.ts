@@ -639,18 +639,45 @@ export function monthPerformanceGridRows(
  * the balance. Holidays and weekly offs are left to the grid — nobody needs
  * them added up to decide anything.
  */
-export function monthPerformanceSummaryPairs(row: MonthPerformanceRow): Array<[string, string]> {
+export function monthPerformanceSummaryPairs(
+  report: Pick<MonthPerformanceReport, 'dates'>,
+  row: MonthPerformanceRow,
+): Array<[string, string]> {
   const count = (code: SheetCode) => row.days.filter((d) => sheetCode(d) === code).length;
+  const payable = payableDays(report, row);
   return [
     ['Present', String(count('P'))],
     ['Half Day', String(count('HD'))],
+    ['PL', String(count('PL'))],
     ['Leave', String(count('L'))],
     ['LWA', String(count('LWA'))],
     ['Late', String(row.totals.lateDays)],
-    // The paid/unpaid split every cell above leaves out, as the one figure
-    // that decides pay.
-    ['Salary Cut', `${fmtDays(salaryCutDays(row.totals))} ${salaryCutDays(row.totals) === 1 ? 'day' : 'days'}`],
+    // The one figure that decides pay: every day of the month, less the
+    // leave the balance could not pay for.
+    ['Payable Days', `${fmtDays(payable)} of ${report.dates.length}`],
   ];
+}
+
+/**
+ * Days of the month salary is paid for: every calendar day — weekly offs,
+ * holidays and paid leave included — less the salary cut.
+ */
+export function payableDays(report: Pick<MonthPerformanceReport, 'dates'>, row: Pick<MonthPerformanceRow, 'totals'>): number {
+  return Math.max(0, report.dates.length - salaryCutDays(row.totals));
+}
+
+/** What the month added to the balance, by where it came from. */
+export function earnedParts(account: Pick<LeaveAccount, 'lines'>): { monthly: number; birthday: number; other: number } {
+  let monthly = 0;
+  let birthday = 0;
+  let other = 0;
+  for (const line of account.lines) {
+    if (line.kind !== 'credit') continue;
+    if (line.label === 'Monthly leave') monthly += line.days;
+    else if (line.label === 'Birthday leave') birthday += line.days;
+    else other += line.days;
+  }
+  return { monthly, birthday, other };
 }
 
 /**
@@ -665,9 +692,14 @@ export function monthPerformanceSummaryPairs(row: MonthPerformanceRow): Array<[s
 export function monthPerformanceLeavePairs(row: MonthPerformanceRow): Array<[string, string]> {
   const a = row.leaveAccount;
   if (a) {
+    const parts = earnedParts(a);
     return [
       ['Opening Balance', fmtDays(a.opening)],
-      ['Earned', fmtDays(a.earned)],
+      ['Monthly Leave', fmtDays(parts.monthly)],
+      ['Birthday Leave', fmtDays(parts.birthday)],
+      // Admin additions, removals and cancelled leave given back — only when
+      // there were any, so the line stays short for nearly everyone.
+      ...(parts.other !== 0 ? [['Adjusted', fmtDays(parts.other)] as [string, string]] : []),
       ['Paid Leave', fmtDays(a.paid)],
       ['Closing Balance', fmtDays(a.closing)],
     ];
@@ -689,7 +721,7 @@ export function monthPerformanceBlock(
     ['Dept. Name', row.user.teamName ?? '', '', 'CompName', report.companyName, '', 'Report Month', report.monthLabel],
     [
       'Email', row.user.email, '', 'Name', row.user.name, '',
-      ...monthPerformanceSummaryPairs(row).flat(),
+      ...monthPerformanceSummaryPairs(report, row).flat(),
       ...monthPerformanceLeavePairs(row).flat(),
     ],
     ...monthPerformanceGridRows(report, row),
