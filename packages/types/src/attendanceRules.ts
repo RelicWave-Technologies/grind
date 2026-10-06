@@ -99,6 +99,8 @@ export const ATTENDANCE_RULE_DEFAULTS = {
   lateAllowedPerMonth: 4,
   /** Minutes after the shift start that still count as on time. */
   lateGraceMinutes: 30,
+  /** On a first-half leave day, punch-in after 14:00 is late — no grace. */
+  halfDayLateAfterMinute: 840,
 } as const;
 
 /**

@@ -103,6 +103,8 @@ export interface RuleSettings {
   halfDay: number;
   lateAllowed: number;
   lateGrace: number;
+  /** First-half leave day: late after this minute of the day. Absent on older reports. */
+  halfDayLateAfter?: number;
 }
 
 export interface MonthPerformanceUser {

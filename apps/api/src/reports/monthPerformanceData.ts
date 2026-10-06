@@ -252,6 +252,7 @@ export async function loadMonthPerformanceReport(input: {
           halfDay: rules.policy.halfDayMinMinutes,
           lateAllowed: rules.policy.lateAllowedPerMonth,
           lateGrace: rules.policy.lateGraceMinutes,
+          halfDayLateAfter: rules.policy.halfDayLateAfterMinute,
         }
       : null,
     generatedAtMs: nowMs,

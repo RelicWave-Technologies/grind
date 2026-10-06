@@ -16,7 +16,7 @@ import { isLateArrival, judgeDay, withLateRule, type AttendanceRulePolicy } from
  * themselves stay testable without a database.
  */
 export interface AttendanceRuleContext {
-  policy: AttendanceRulePolicy & { lateAllowedPerMonth: number; lateGraceMinutes: number };
+  policy: AttendanceRulePolicy & { lateAllowedPerMonth: number; lateGraceMinutes: number; halfDayLateAfterMinute: number };
   /** Whether the rules can judge anything at all. */
   enabled: boolean;
   judge: (userId: string, date: string, status: DayStatus | null, trackedMinutes: number) => AttendanceRuleVerdict | null;
@@ -41,6 +41,7 @@ export async function loadAttendanceRuleContext(input: {
     wfhRequiresApproval: leavePolicy.wfhRequiresApproval,
     lateAllowedPerMonth: leavePolicy.lateAllowedPerMonth,
     lateGraceMinutes: leavePolicy.lateGraceMinutes,
+    halfDayLateAfterMinute: leavePolicy.halfDayLateAfterMinute,
   };
   if (!policy.from || policy.from > input.to || input.userIds.length === 0) {
     return { policy, enabled: false, judge: () => null, lateOrdinalFor: () => null };
@@ -127,6 +128,7 @@ export async function loadAttendanceRuleContext(input: {
         punchInMinute: punches(userId, date)?.inMinute ?? null,
         shiftStart: calendar.shiftWindowFor(userId, date)?.start ?? null,
         graceMinutes: policy.lateGraceMinutes,
+        halfDayLateAfterMinute: policy.halfDayLateAfterMinute,
       });
       if (late) {
         count += 1;
