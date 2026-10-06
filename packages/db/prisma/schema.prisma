@@ -1305,6 +1305,9 @@ model LeavePolicy {
   /// Minutes after the shift start that still count as on time — the same for
   /// everyone, whatever buffer an individual shift carries.
   lateGraceMinutes     Int       @default(30)
+  /// On a first-half leave day, the clock time (minutes after midnight) a
+  /// punch-in must beat — no grace. 840 = 14:00.
+  halfDayLateAfterMinute Int     @default(840)
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
 }

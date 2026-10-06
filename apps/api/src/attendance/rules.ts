@@ -125,10 +125,18 @@ export function isLateArrival(input: {
   punchInMinute: number | null;
   shiftStart: string | null;
   graceMinutes: number;
+  /** First-half leave day: late after this minute of the day, no grace. */
+  halfDayLateAfterMinute: number;
 }): boolean {
   if (input.mode !== 'STANDARD') return false;
+  if (input.punchInMinute === null) return false;
+  // Off for the morning, due in the afternoon: one fixed time for everyone.
+  // A second-half leave day is not checked.
+  if (input.status?.portion === 'FIRST_HALF' && input.status.expectedFraction > 0) {
+    return input.punchInMinute > input.halfDayLateAfterMinute;
+  }
   if (input.status?.kind !== 'WORKING' || input.status.expectedFraction < 1) return false;
-  if (input.punchInMinute === null || !input.shiftStart) return false;
+  if (!input.shiftStart) return false;
   const m = /^(\d{2}):(\d{2})$/u.exec(input.shiftStart);
   if (!m) return false;
   const start = Number.parseInt(m[1]!, 10) * 60 + Number.parseInt(m[2]!, 10);

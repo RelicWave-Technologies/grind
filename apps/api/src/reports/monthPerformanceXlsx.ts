@@ -401,7 +401,8 @@ function buildLegendSheet(wb: ExcelJS.Workbook, report: MonthPerformanceReport):
       [
         'late 3',
         `The 3rd late arrival this month — punched in more than ${settings.lateGrace} min after shift start. ` +
-          `The first ${settings.lateAllowed} are free; each one after is a half day`,
+          `The first ${settings.lateAllowed} are free; each one after is a half day. ` +
+          `On a first-half leave day, late means punched in after ${clockWord(settings.halfDayLateAfter ?? 840)}, no grace`,
       ],
       [
         `${why({ tag: 'SHORT_DAY', penaltyDays: 0.5 })} · late 2`,
@@ -467,3 +468,10 @@ export async function monthPerformanceXlsx(report: MonthPerformanceReport): Prom
 
 export { fmtMinutes };
 export type { MonthPerformanceRow };
+
+/** 840 → "14:00". */
+function clockWord(minuteOfDay: number): string {
+  const h = Math.floor(minuteOfDay / 60);
+  const m = minuteOfDay % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}

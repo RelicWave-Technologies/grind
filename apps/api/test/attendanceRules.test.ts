@@ -378,6 +378,41 @@ describe('attendance rules — late arrivals', () => {
     expect(res.body.member.lateDays).toBe(1);
   });
 
+  it('on a first-half leave day counts a punch after 14:00 as late, with no grace', async () => {
+    const s = await seed();
+    for (const date of ['2026-09-01', '2026-09-02']) {
+      await prisma.leaveRequest.create({
+        data: {
+          clientUuid: ulid(),
+          workspaceId: s.ws.id,
+          userId: s.member.id,
+          startDate: new Date(`${date}T00:00:00Z`),
+          endDate: new Date(`${date}T00:00:00Z`),
+          portion: 'FIRST_HALF',
+          reason: 'Morning off',
+          status: 'APPROVED',
+        },
+      });
+      await work(s.member.id, date, 4);
+    }
+    const punchAt = (date: string, hhmm: string) =>
+      prisma.attendancePunch.create({
+        data: {
+          workspaceId: s.ws.id,
+          userId: s.member.id,
+          date: new Date(`${date}T00:00:00Z`),
+          punchInAt: new Date(`1970-01-01T${hhmm}:00Z`),
+          punchOutAt: new Date('1970-01-01T18:30:00Z'),
+        },
+      });
+    await punchAt('2026-09-01', '13:55');
+    await punchAt('2026-09-02', '14:10');
+
+    const { day } = await september(s);
+    expect(day('2026-09-01').late).toBeNull();
+    expect(day('2026-09-02').late).toBe(1);
+  });
+
   it('never counts a remote person late', async () => {
     const s = await seed();
     await prisma.user.update({ where: { id: s.member.id }, data: { attendanceRuleMode: 'REMOTE' } });

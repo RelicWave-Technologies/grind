@@ -224,6 +224,8 @@ export const LeavePolicyDtoSchema = z.object({
   lateAllowedPerMonth: z.number().int(),
   /** Minutes after the shift start that still count as on time, for everyone. */
   lateGraceMinutes: z.number().int(),
+  /** First-half leave day: late when punched in after this minute of the day (840 = 14:00), no grace. */
+  halfDayLateAfterMinute: z.number().int(),
   updatedAt: z.string(),
 });
 export type LeavePolicyDto = z.infer<typeof LeavePolicyDtoSchema>;
@@ -255,6 +257,7 @@ export const PatchLeavePolicySchema = z
     wfhRequiresApproval: z.boolean().optional(),
     lateAllowedPerMonth: z.number().int().min(0).max(31).optional(),
     lateGraceMinutes: z.number().int().min(0).max(240).optional(),
+    halfDayLateAfterMinute: z.number().int().min(0).max(1439).optional(),
   })
   .refine((v) => Object.keys(v).length > 0, { message: 'nothing_to_update' })
   .refine(

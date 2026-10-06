@@ -65,6 +65,7 @@ export function toLeavePolicyDto(row: {
   wfhRequiresApproval?: boolean;
   lateAllowedPerMonth?: number;
   lateGraceMinutes?: number;
+  halfDayLateAfterMinute?: number;
   updatedAt: Date;
 }): LeavePolicyDto {
   return {
@@ -81,6 +82,7 @@ export function toLeavePolicyDto(row: {
     wfhRequiresApproval: row.wfhRequiresApproval ?? ATTENDANCE_RULE_DEFAULTS.wfhRequiresApproval,
     lateAllowedPerMonth: row.lateAllowedPerMonth ?? ATTENDANCE_RULE_DEFAULTS.lateAllowedPerMonth,
     lateGraceMinutes: row.lateGraceMinutes ?? ATTENDANCE_RULE_DEFAULTS.lateGraceMinutes,
+    halfDayLateAfterMinute: row.halfDayLateAfterMinute ?? ATTENDANCE_RULE_DEFAULTS.halfDayLateAfterMinute,
     updatedAt: row.updatedAt.toISOString(),
   };
 }
