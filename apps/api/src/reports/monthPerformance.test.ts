@@ -535,6 +535,15 @@ describe('the leave account the month left behind', () => {
     ]);
   });
 
+  it('counts payable days only from the person\'s start date', () => {
+    const rep = build({
+      users: [{ ...user, startDate: '2026-08-22' }],
+      dayStatusFor: (_u, date) => (date === '2026-08-24' ? status(date, 'UNPAID_LEAVE') : null),
+    });
+    // 22–31 August is 10 days; one of them unpaid.
+    expect(monthPerformanceSummaryPairs(rep, rep.rows[0]!)).toContainEqual(['Payable Days', '9 of 10']);
+  });
+
   it('falls back to the ledger balance without the walk, and says nothing with neither', () => {
     expect(monthPerformanceLeavePairs(build({ balanceFor: () => 2 }).rows[0]!)).toEqual([['Leave Balance', '2']]);
     expect(monthPerformanceLeavePairs(build({}).rows[0]!)).toEqual([]);
