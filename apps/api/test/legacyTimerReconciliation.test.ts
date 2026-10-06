@@ -132,6 +132,31 @@ describe('legacy timer reconciliation', () => {
     ]);
   });
 
+  it('ignores a running heartbeat far past the last stored proof', async () => {
+    const user = await seedUser();
+    const entryId = await createLegacyEntry({
+      userId: user.userId,
+      startedAt: new Date('2026-07-10T09:00:00.000Z'),
+      sampleAt: new Date('2026-07-10T09:50:00.000Z'),
+    });
+    // The agent kept saying "running" on this entry for days with nothing stored.
+    await prisma.user.update({
+      where: { id: user.userId },
+      data: { agentState: 'RUNNING', agentLastSeenAt: new Date('2026-07-13T09:00:00.000Z') },
+    });
+
+    const plan = await buildLegacyReconciliationPlan({ now });
+
+    expect(plan.entries).toEqual([
+      expect.objectContaining({
+        entryId,
+        proposedEndedAt: '2026-07-10T09:51:00.000Z',
+        latestRunningHeartbeatAt: null,
+        reconciledDurationMs: 51 * 60_000,
+      }),
+    ]);
+  });
+
   it('does not count a paused heartbeat as work evidence', async () => {
     const user = await seedUser();
     const entryId = await createLegacyEntry({ userId: user.userId });
