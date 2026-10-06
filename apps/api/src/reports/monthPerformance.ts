@@ -113,6 +113,12 @@ export interface MonthPerformanceUser {
   email: string;
   /** Team name — the report's "Dept. Name". */
   teamName: string | null;
+  /**
+   * YYYY-MM-DD the person started: their joining date, else the day their
+   * account was made — the same start the leave balance accrues from. Days
+   * before it are not paid. Absent = counted from the 1st.
+   */
+  startDate?: string | null;
 }
 
 export interface MonthPerformanceDay {
@@ -645,6 +651,7 @@ export function monthPerformanceSummaryPairs(
 ): Array<[string, string]> {
   const count = (code: SheetCode) => row.days.filter((d) => sheetCode(d) === code).length;
   const payable = payableDays(report, row);
+  const of = payableBaseDays(report, row);
   return [
     ['Present', String(count('P'))],
     ['Half Day', String(count('HD'))],
@@ -654,16 +661,28 @@ export function monthPerformanceSummaryPairs(
     ['Late', String(row.totals.lateDays)],
     // The one figure that decides pay: every day of the month, less the
     // leave the balance could not pay for.
-    ['Payable Days', `${fmtDays(payable)} of ${report.dates.length}`],
+    ['Payable Days', `${fmtDays(payable)} of ${of}`],
   ];
 }
 
 /**
- * Days of the month salary is paid for: every calendar day — weekly offs,
- * holidays and paid leave included — less the salary cut.
+ * Days of the month salary is paid for: every calendar day from the person's
+ * start — weekly offs, holidays and paid leave included — less the salary cut.
  */
-export function payableDays(report: Pick<MonthPerformanceReport, 'dates'>, row: Pick<MonthPerformanceRow, 'totals'>): number {
-  return Math.max(0, report.dates.length - salaryCutDays(row.totals));
+export function payableDays(
+  report: Pick<MonthPerformanceReport, 'dates'>,
+  row: Pick<MonthPerformanceRow, 'totals' | 'user'>,
+): number {
+  return Math.max(0, payableBaseDays(report, row) - salaryCutDays(row.totals));
+}
+
+/** Calendar days of the month on or after the person's start. */
+export function payableBaseDays(
+  report: Pick<MonthPerformanceReport, 'dates'>,
+  row: Pick<MonthPerformanceRow, 'user'>,
+): number {
+  const start = row.user.startDate;
+  return start ? report.dates.filter((d) => d >= start).length : report.dates.length;
 }
 
 /** What the month added to the balance, by where it came from. */

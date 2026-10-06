@@ -93,7 +93,7 @@ export async function loadMonthPerformanceReport(input: {
       ? []
       : prisma.user.findMany({
           where: { id: { in: input.userIds }, workspaceId: input.workspaceId, deactivatedAt: null },
-          select: { id: true, name: true, email: true, team: { select: { name: true } } },
+          select: { id: true, name: true, email: true, joinedOn: true, createdAt: true, team: { select: { name: true } } },
           orderBy: [{ name: 'asc' }, { email: 'asc' }],
         }),
   ]);
@@ -103,6 +103,8 @@ export async function loadMonthPerformanceReport(input: {
     name: u.name,
     email: u.email,
     teamName: u.team?.name ?? null,
+    // The leave balance's own start (see loadWorkingCalendar's accrualStartFor).
+    startDate: (u.joinedOn ?? u.createdAt).toISOString().slice(0, 10),
   }));
   const userIds = reportUsers.map((u) => u.id);
 
