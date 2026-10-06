@@ -488,14 +488,28 @@ describe('the leave account the month left behind', () => {
       ...extra,
     });
 
-  it('prints opening, earned, paid and closing — and they add up', () => {
-    const rep = build({ leaveAccountFor: () => ({ opening: 1.5, earned: 1, paid: 2, closing: 0.5, lines: [] }) });
+  it('prints opening, monthly, birthday, paid and closing — and they add up', () => {
+    const lines = [
+      { date: '2026-08-01', kind: 'credit' as const, label: 'Monthly leave', days: 1 },
+      { date: '2026-08-12', kind: 'credit' as const, label: 'Birthday leave', days: 1 },
+    ];
+    const rep = build({ leaveAccountFor: () => ({ opening: 1.5, earned: 2, paid: 2, closing: 1.5, lines }) });
     expect(monthPerformanceLeavePairs(rep.rows[0]!)).toEqual([
       ['Opening Balance', '1.5'],
-      ['Earned', '1'],
+      ['Monthly Leave', '1'],
+      ['Birthday Leave', '1'],
       ['Paid Leave', '2'],
-      ['Closing Balance', '0.5'],
+      ['Closing Balance', '1.5'],
     ]);
+  });
+
+  it('shows admin changes as Adjusted only when there were any', () => {
+    const lines = [
+      { date: '2026-08-01', kind: 'credit' as const, label: 'Monthly leave', days: 1 },
+      { date: '2026-08-20', kind: 'credit' as const, label: 'Added by admin: Diwali bonus', days: 2 },
+    ];
+    const rep = build({ leaveAccountFor: () => ({ opening: 0, earned: 3, paid: 0, closing: 3, lines }) });
+    expect(monthPerformanceLeavePairs(rep.rows[0]!)).toContainEqual(['Adjusted', '2']);
   });
 
   it('gives somebody with no leave history an account of zeros, not a blank', () => {
@@ -503,19 +517,21 @@ describe('the leave account the month left behind', () => {
     expect(rep.rows[0]!.leaveAccount).toEqual({ opening: 0, earned: 0, paid: 0, closing: 0, lines: [] });
   });
 
-  it('counts the sheet codes and turns unpaid leave into one salary-cut figure', () => {
+  it('counts the sheet codes and turns unpaid leave into payable days', () => {
     const rep = build({
       dayStatusFor: (_u, date) =>
         date === '2026-08-03' ? status(date, 'UNPAID_LEAVE') : date === '2026-08-04' ? status(date, 'WORKING') : null,
       trackedMinutesFor: (_u, date) => (date === '2026-08-04' ? 480 : 0),
     });
-    expect(monthPerformanceSummaryPairs(rep.rows[0]!)).toEqual([
+    expect(monthPerformanceSummaryPairs(rep, rep.rows[0]!)).toEqual([
       ['Present', '1'],
       ['Half Day', '0'],
+      ['PL', '0'],
       ['Leave', '1'],
       ['LWA', '0'],
       ['Late', '0'],
-      ['Salary Cut', '1 day'],
+      // August has 31 days; one unpaid day.
+      ['Payable Days', '30 of 31'],
     ]);
   });
 

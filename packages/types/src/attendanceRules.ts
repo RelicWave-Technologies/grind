@@ -115,13 +115,21 @@ export const MonthSummaryRowSchema = z.object({
   mode: z.enum(['STANDARD', 'REMOTE', 'EXEMPT']),
   present: z.number(),
   halfDay: z.number(),
+  /** Full days of leave the balance paid for. */
+  pl: z.number(),
   leave: z.number(),
   lwa: z.number(),
   late: z.number(),
   salaryCut: z.number(),
+  /** Days of the month salary is paid for: days in the month − salary cut. */
+  payableDays: z.number(),
   account: z.object({
     opening: z.number(),
     earned: z.number(),
+    /** `earned`, split by where it came from. */
+    earnedMonthly: z.number(),
+    earnedBirthday: z.number(),
+    earnedOther: z.number(),
     paid: z.number(),
     closing: z.number(),
     lines: z.array(
@@ -182,13 +190,14 @@ export type AttendanceRuleExceptionsResponse = z.infer<typeof AttendanceRuleExce
  *
  *   P    present, a full day
  *   HD   half day — worked half, the other half was leave
- *   L    leave — approved, or made leave by an attendance rule
+ *   PL   paid leave — a full day of leave the balance paid for
+ *   L    leave the balance did not (fully) pay for — approved, or made leave by a rule
  *   LWA  leave without approval — absent with no approved application
  *   HL   company holiday
  *   WO   weekly off
  *   --   no shift assigned
  */
-export type DisplayDayCode = 'P' | 'HD' | 'L' | 'LWA' | 'HL' | 'WO' | '--';
+export type DisplayDayCode = 'P' | 'HD' | 'PL' | 'L' | 'LWA' | 'HL' | 'WO' | '--';
 
 export function displayDayCode(code: string, ruleTag?: AttendanceRuleTag | null): DisplayDayCode {
   switch (code) {
@@ -200,15 +209,17 @@ export function displayDayCode(code: string, ruleTag?: AttendanceRuleTag | null)
     case '--': return '--';
     // Absent with nothing approved is exactly what LWA means.
     case 'A': return 'LWA';
-    default:
-      return ruleTag === 'NO_APPLICATION' || ruleTag === 'LEAVE_NOT_APPROVED' ? 'LWA' : 'L';
   }
+  if (ruleTag === 'NO_APPLICATION' || ruleTag === 'LEAVE_NOT_APPROVED') return 'LWA';
+  // A full day the balance paid for in full; anything short of that is L.
+  return code === 'PL' ? 'PL' : 'L';
 }
 
 export const DISPLAY_DAY_LABEL: Record<DisplayDayCode, string> = {
   P: 'Present',
   HD: 'Half day',
-  L: 'Leave',
+  PL: 'Paid leave',
+  L: 'Leave — not covered by the balance',
   LWA: 'Leave without approval',
   HL: 'Holiday',
   WO: 'Weekly off',

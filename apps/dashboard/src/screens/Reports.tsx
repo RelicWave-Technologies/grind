@@ -407,7 +407,7 @@ const ATTENDANCE_LABEL: Record<string, string> = {
 const OVERRIDE_SHAPES = [
   { key: 'P', label: 'P — Present' },
   { key: 'HALF_LEAVE', label: 'HD — Half day' },
-  { key: 'FULL_LEAVE', label: 'L — Leave' },
+  { key: 'FULL_LEAVE', label: 'PL / L — Leave (PL when the balance pays it)' },
   { key: 'A', label: 'LWA — Absent, no approved leave' },
 ] as const;
 

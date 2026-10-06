@@ -5,6 +5,8 @@ import {
   monthPerformanceLeavePairs,
   monthPerformanceSummaryPairs,
   salaryCutDays,
+  payableDays,
+  earnedParts,
   sheetCode,
   sheetWhy,
   type SheetCode,
@@ -67,6 +69,7 @@ const BLOCK_LILAC = 'FFC5B0F4';
 const BLOCK_CREAM = 'FFF4ECD6';
 const BLOCK_MINT = 'FFC8E6CD';
 const BLOCK_CORAL = 'FFF3C9B6';
+const BLOCK_PINK = 'FFEFD4D4';
 
 /**
  * `figmaSans` / `figmaMono` are proprietary, so DESIGN.md's documented
@@ -89,7 +92,8 @@ const MONO = 'JetBrains Mono';
 const CODE_FILL: Record<SheetCode, string> = {
   P: BLOCK_LIME,
   HD: BLOCK_CREAM,
-  L: BLOCK_MINT,
+  PL: BLOCK_MINT,
+  L: BLOCK_PINK,
   LWA: BLOCK_CORAL,
   HL: BLOCK_LILAC,
   WO: SURFACE_SOFT,
@@ -249,7 +253,7 @@ function buildGridSheet(wb: ExcelJS.Workbook, report: MonthPerformanceReport): v
     // The month's counts sit opposite the name, in mono, as a taxonomy strip.
     if (lastCol > splitAt) {
       const cell = at(IDENTITY_ROW).getCell(splitAt + 1);
-      cell.value = countsRichText(monthPerformanceSummaryPairs(row));
+      cell.value = countsRichText(monthPerformanceSummaryPairs(report, row));
       mergeAcross(sheet, blockStart + IDENTITY_ROW, splitAt + 1, lastCol);
       cell.alignment = { horizontal: 'right', vertical: 'middle' };
 
@@ -309,14 +313,18 @@ function buildSummarySheet(wb: ExcelJS.Workbook, report: MonthPerformanceReport)
     { header: 'Dept.', key: 'team', width: 24 },
     { header: 'Present', key: 'present', width: 10 },
     { header: 'Half day', key: 'halfDay', width: 10 },
+    { header: 'PL', key: 'pl', width: 7 },
     { header: 'Leave', key: 'leave', width: 9 },
     { header: 'LWA', key: 'lwa', width: 8 },
     { header: 'Late', key: 'late', width: 8 },
     { header: 'Opening balance', key: 'opening', width: 16 },
-    { header: 'Earned', key: 'earned', width: 9 },
+    { header: 'Monthly leave', key: 'monthly', width: 14 },
+    { header: 'Birthday leave', key: 'birthday', width: 15 },
+    { header: 'Adjusted', key: 'other', width: 10 },
     { header: 'Paid leave', key: 'paid', width: 11 },
     { header: 'Closing balance', key: 'closing', width: 16 },
-    { header: 'Salary cut (days)', key: 'cut', width: 17 },
+    { header: 'Unpaid days', key: 'cut', width: 12 },
+    { header: 'Payable days', key: 'payable', width: 13 },
   ];
 
   // Column heads are mono uppercase — DESIGN.md's caption role.
@@ -331,20 +339,25 @@ function buildSummarySheet(wb: ExcelJS.Workbook, report: MonthPerformanceReport)
 
   for (const row of report.rows) {
     const count = (code: SheetCode) => row.days.filter((d) => sheetCode(d) === code).length;
+    const parts = row.leaveAccount ? earnedParts(row.leaveAccount) : null;
     const added = sheet.addRow({
       name: row.user.name,
       email: row.user.email,
       team: row.user.teamName ?? '',
       present: count('P'),
       halfDay: count('HD'),
+      pl: count('PL'),
       leave: count('L'),
       lwa: count('LWA'),
       late: row.totals.lateDays,
       opening: row.leaveAccount?.opening ?? '',
-      earned: row.leaveAccount?.earned ?? '',
+      monthly: parts?.monthly ?? '',
+      birthday: parts?.birthday ?? '',
+      other: parts?.other ?? '',
       paid: row.leaveAccount?.paid ?? '',
       closing: row.leaveAccount?.closing ?? row.balanceDays ?? '',
       cut: salaryCutDays(row.totals),
+      payable: payableDays(report, row),
     });
     added.eachCell((cell, col) => {
       cell.font = col <= 3 ? TYPE.body : TYPE.reading;
@@ -368,7 +381,8 @@ function buildLegendSheet(wb: ExcelJS.Workbook, report: MonthPerformanceReport):
   const legend: Array<[SheetCode, string]> = [
     ['P', 'Present — a full day'],
     ['HD', 'Half day — worked half, the other half was leave'],
-    ['L', 'Leave'],
+    ['PL', 'Paid leave — a full day of leave paid from the leave balance'],
+    ['L', 'Leave the balance could not (fully) pay for — those days are unpaid'],
     ['LWA', 'Leave without approval — absent with no approved leave'],
     ['HL', 'Company holiday'],
     ['WO', 'Weekly off'],
@@ -422,8 +436,9 @@ function buildLegendSheet(wb: ExcelJS.Workbook, report: MonthPerformanceReport):
   const notes = [
     'Hours are what Timo tracked — work, meetings and approved manual time —',
     'not the gap between Office In and Office Out. --:-- means no punch.',
-    'Leave account: Opening + Earned - Paid Leave = Closing. Leave the balance could',
-    'not pay for is the Salary Cut (full days 1, halves 0.5) — never a negative balance.',
+    'Leave account: Opening + Monthly + Birthday (+ Adjusted) - Paid Leave = Closing.',
+    'Leave the balance could not pay for is unpaid (full days 1, halves 0.5) — never a',
+    'negative balance. Payable Days = days in the month - unpaid days.',
     ...(report.rulesFrom
       ? [
           `Attendance rules apply from ${report.rulesFrom}. A day is cut once at most: if it is already`,

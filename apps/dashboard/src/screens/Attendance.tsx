@@ -382,8 +382,9 @@ function AttendanceSummary({ data, timeZone }: { data: TimesheetMatrix; timeZone
 
 /**
  * The month on one screen: a row per person with the same numbers as the
- * Excel — present, half day, leave, leave without approval, late — plus the
- * salary cut and the leave left. Details opens everything behind the row.
+ * Excel — present, half day, paid leave, leave, leave without approval, late —
+ * plus the days salary is paid for and the leave left. Details opens everything
+ * behind the row.
  *
  * Hidden when the viewer may not read the team.
  */
@@ -404,7 +405,7 @@ function MonthSummary({ month, isAdmin }: { month: string; isAdmin: boolean }) {
           <h2 className="ui-t-title">Month summary · {fmtMonthLong(month)}</h2>
           <p className="ui-t-small">
             {data.rulesFrom
-              ? 'Same numbers as the Excel. Salary cut is leave the balance could not pay for.'
+              ? 'Same numbers as the Excel. Payable days = days in the month − leave the balance could not pay for.'
               : 'Attendance rules are off — set them in Policy.'}
           </p>
         </div>
@@ -416,10 +417,11 @@ function MonthSummary({ month, isAdmin }: { month: string; isAdmin: boolean }) {
               <Th>Person</Th>
               <Th align="right">Present</Th>
               <Th align="right">Half day</Th>
+              <Th align="right">PL</Th>
               <Th align="right">Leave</Th>
               <Th align="right">LWA</Th>
               <Th align="right">Late</Th>
-              <Th align="right">Salary cut</Th>
+              <Th align="right">Payable days</Th>
               <Th align="right">Leave left</Th>
               <Th align="right" />
             </Tr>
@@ -445,11 +447,14 @@ function MonthSummary({ month, isAdmin }: { month: string; isAdmin: boolean }) {
                 </Td>
                 <Td align="right"><span className="ui-mono">{r.present}</span></Td>
                 <Td align="right"><span className="ui-mono">{r.halfDay}</span></Td>
+                <Td align="right"><span className="ui-mono">{r.pl}</span></Td>
                 <Td align="right"><span className="ui-mono">{r.leave}</span></Td>
                 <Td align="right"><span className="ui-mono">{r.lwa}</span></Td>
                 <Td align="right"><span className="ui-mono">{r.late}</span></Td>
                 <Td align="right">
-                  <span className="ui-mono">{r.salaryCut > 0 ? <strong>{fmtDays(r.salaryCut)}</strong> : '0'}</span>
+                  <span className="ui-mono" title={r.salaryCut > 0 ? `${fmtDays(r.salaryCut)} unpaid` : undefined}>
+                    {r.salaryCut > 0 ? <strong>{fmtDays(r.payableDays)}</strong> : fmtDays(r.payableDays)}
+                  </span>
                 </Td>
                 <Td align="right"><span className="ui-mono">{fmtDays(r.account.closing)}</span></Td>
                 <Td align="right">
@@ -500,8 +505,10 @@ function MonthDetails({
         title={row ? `${row.name} — ${fmtMonthLong(month)}` : ''}
         description={
           a
-            ? `Leave: at start ${fmtDays(a.opening)} · got ${signed(a.earned)} · used ${signed(-a.paid)} · left ${fmtDays(a.closing)}` +
-              (row && row.salaryCut > 0 ? ` · salary cut ${fmtDays(row.salaryCut)} days` : '')
+            ? `Leave: at start ${fmtDays(a.opening)} · monthly ${signed(a.earnedMonthly)} · birthday ${signed(a.earnedBirthday)}` +
+              (a.earnedOther !== 0 ? ` · adjusted ${signed(a.earnedOther)}` : '') +
+              ` · used ${signed(-a.paid)} · left ${fmtDays(a.closing)}` +
+              (row ? ` · salary for ${fmtDays(row.payableDays)} days${row.salaryCut > 0 ? ` (${fmtDays(row.salaryCut)} unpaid)` : ''}` : '')
             : undefined
         }
         actions={
@@ -525,7 +532,7 @@ function MonthDetails({
                 <Th>Day</Th>
                 <Th>What</Th>
                 <Th align="right">Paid</Th>
-                <Th align="right">Salary cut</Th>
+                <Th align="right">Unpaid</Th>
               </Tr>
             </THead>
             <Tbody>
