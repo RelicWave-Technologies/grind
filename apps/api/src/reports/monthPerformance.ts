@@ -119,6 +119,11 @@ export interface MonthPerformanceUser {
    * before it are not paid. Absent = counted from the 1st.
    */
   startDate?: string | null;
+  /**
+   * YYYY-MM-DD of the last day they belonged here — the day they were
+   * suspended. Days after it are not paid. Absent = still here.
+   */
+  endDate?: string | null;
 }
 
 export interface MonthPerformanceDay {
@@ -676,13 +681,13 @@ export function payableDays(
   return Math.max(0, payableBaseDays(report, row) - salaryCutDays(row.totals));
 }
 
-/** Calendar days of the month on or after the person's start. */
+/** Calendar days of the month from the person's start to their suspension. */
 export function payableBaseDays(
   report: Pick<MonthPerformanceReport, 'dates'>,
   row: Pick<MonthPerformanceRow, 'user'>,
 ): number {
-  const start = row.user.startDate;
-  return start ? report.dates.filter((d) => d >= start).length : report.dates.length;
+  const { startDate: start, endDate: end } = row.user;
+  return report.dates.filter((d) => (!start || d >= start) && (!end || d <= end)).length;
 }
 
 /** What the month added to the balance, by where it came from. */
