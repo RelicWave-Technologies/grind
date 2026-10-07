@@ -533,6 +533,10 @@ reportsRouter.put('/attendance-override', requireCapability('reports.team.read')
     if (!parsed.success) return res.status(400).json({ error: 'invalid_request', details: parsed.error.flatten() });
     const { userId, date, code, reason } = parsed.data;
     if (!req.scope.userIds.includes(userId)) return res.status(403).json({ error: 'out_of_scope' });
+    // Nobody but an admin corrects their own attendance: a manager is in their
+    // own scope, and marking your own LWA day present is exactly what this
+    // must not allow.
+    if (!req.scope.isAdmin && userId === req.user.sub) return res.status(403).json({ error: 'self_override_forbidden' });
 
     const range = resolveReportMonth({ month: date.slice(0, 7) }, req.scope.workspaceTimezone);
     if ('error' in range) return res.status(400).json({ error: range.error });
@@ -598,6 +602,9 @@ reportsRouter.delete('/attendance-override', requireCapability('reports.team.rea
     const parsed = ClearAttendanceOverrideRequest.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: 'invalid_request', details: parsed.error.flatten() });
     if (!req.scope.userIds.includes(parsed.data.userId)) return res.status(403).json({ error: 'out_of_scope' });
+    if (!req.scope.isAdmin && parsed.data.userId === req.user.sub) {
+      return res.status(403).json({ error: 'self_override_forbidden' });
+    }
     const { userId, date, reason } = parsed.data;
     const range = resolveReportMonth({ month: date.slice(0, 7) }, req.scope.workspaceTimezone);
     if ('error' in range) return res.status(400).json({ error: range.error });
