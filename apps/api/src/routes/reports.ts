@@ -480,10 +480,38 @@ async function monthPerformanceFor(req: Request) {
   if ('error' in range) return { status: 400 as const, error: range.error };
   const report = await loadMonthPerformanceReport({
     workspaceId: req.scope.workspaceId,
-    userIds: req.scope.userIds,
+    userIds: [...req.scope.userIds, ...(await suspendedInScope(req, range.from))],
     range,
   });
   return { status: 200 as const, report, month: range.month };
+}
+
+/**
+ * People the caller could see before they were suspended, suspended on or
+ * after `from`'s month. The scope leaves suspended people out everywhere else;
+ * a month they worked part of still needs them. The loader drops anyone
+ * suspended before the month starts.
+ */
+async function suspendedInScope(req: Request, from: string): Promise<string[]> {
+  if (!req.scope || !req.user) return [];
+  const since = new Date(`${from.slice(0, 7)}-01T00:00:00Z`);
+  // A day of slack for the workspace's offset; the loader applies the exact bound.
+  since.setUTCDate(since.getUTCDate() - 1);
+  if (req.scope.scope === 'workspace') {
+    const rows = await prisma.user.findMany({
+      where: { workspaceId: req.scope.workspaceId, deactivatedAt: { gte: since } },
+      select: { id: true },
+    });
+    return rows.map((r) => r.id);
+  }
+  if (req.scope.scope === 'team') {
+    const managed = await prisma.teamManager.findUnique({
+      where: { userId: req.user.sub },
+      select: { team: { select: { members: { where: { deactivatedAt: { gte: since } }, select: { id: true } } } } },
+    });
+    return managed?.team.members.map((m) => m.id) ?? [];
+  }
+  return [];
 }
 
 /**

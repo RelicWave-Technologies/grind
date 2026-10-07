@@ -87,13 +87,26 @@ export async function loadMonthPerformanceReport(input: {
 }): Promise<MonthPerformanceReport> {
   const { range } = input;
 
+  const firstDay = localDayWindow(range.from, range.tz);
+  const lastDay = localDayWindow(range.to, range.tz);
+  if (!firstDay || !lastDay) throw new Error('invalid_date_or_tz');
+
   const [workspace, users] = await Promise.all([
     prisma.workspace.findUnique({ where: { id: input.workspaceId }, select: { name: true } }),
     input.userIds.length === 0
       ? []
       : prisma.user.findMany({
-          where: { id: { in: input.userIds }, workspaceId: input.workspaceId, deactivatedAt: null },
-          select: { id: true, name: true, email: true, joinedOn: true, createdAt: true, team: { select: { name: true } } },
+          // Somebody suspended during or after this month still worked part of
+          // it, so they stay on its report; suspended before it, they do not.
+          where: {
+            id: { in: input.userIds },
+            workspaceId: input.workspaceId,
+            OR: [{ deactivatedAt: null }, { deactivatedAt: { gte: new Date(firstDay.start) } }],
+          },
+          select: {
+            id: true, name: true, email: true, joinedOn: true, createdAt: true, deactivatedAt: true,
+            team: { select: { name: true } },
+          },
           orderBy: [{ name: 'asc' }, { email: 'asc' }],
         }),
   ]);
@@ -105,12 +118,10 @@ export async function loadMonthPerformanceReport(input: {
     teamName: u.team?.name ?? null,
     // The leave balance's own start (see loadWorkingCalendar's accrualStartFor).
     startDate: (u.joinedOn ?? u.createdAt).toISOString().slice(0, 10),
+    endDate: u.deactivatedAt ? dateKeyInTimeZone(u.deactivatedAt, range.tz) : null,
   }));
   const userIds = reportUsers.map((u) => u.id);
 
-  const firstDay = localDayWindow(range.from, range.tz);
-  const lastDay = localDayWindow(range.to, range.tz);
-  if (!firstDay || !lastDay) throw new Error('invalid_date_or_tz');
   // A calendar day of slack on both sides: an entry that crosses local midnight
   // belongs partly to a day inside the month, and a query bounded exactly at
   // the month's edges would drop it.

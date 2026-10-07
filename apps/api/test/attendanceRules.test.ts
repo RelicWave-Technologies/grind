@@ -5,7 +5,7 @@ import { ulid } from 'ulid';
 import { buildApp } from '../src/app';
 import { signAccessToken } from '../src/lib/jwt';
 import { loadMonthPerformanceReport, resolveReportMonth } from '../src/reports/monthPerformanceData';
-import { sheetWhy } from '../src/reports/monthPerformance';
+import { payableDays, sheetCode, sheetWhy } from '../src/reports/monthPerformance';
 import { loadBalances } from '../src/leave/repository';
 
 /**
@@ -423,6 +423,43 @@ describe('attendance rules — late arrivals', () => {
     const { row } = await september(s);
     expect(row.totals.lateDays).toBe(0);
     expect(row.days.filter((d) => d.rule?.tag === 'LATE')).toHaveLength(0);
+  });
+});
+
+describe('attendance rules — a suspended person', () => {
+  it('stays on the month they were suspended in, with every later day out of the count', async () => {
+    const s = await seed();
+    for (const date of ['2026-09-01', '2026-09-02', '2026-09-03', '2026-09-04', '2026-09-05', '2026-09-07', '2026-09-08', '2026-09-09', '2026-09-10']) {
+      await work(s.member.id, date, 8);
+      await prisma.attendancePunch.create({
+        data: {
+          workspaceId: s.ws.id,
+          userId: s.member.id,
+          date: new Date(`${date}T00:00:00Z`),
+          punchInAt: new Date('1970-01-01T09:00:00Z'),
+          punchOutAt: new Date('1970-01-01T18:00:00Z'),
+        },
+      });
+    }
+    // Suspended the evening of the 10th (IST).
+    await prisma.user.update({ where: { id: s.member.id }, data: { deactivatedAt: new Date('2026-09-10T13:00:00Z') } });
+
+    const { day, row } = await september(s);
+    expect(day('2026-09-10')).toMatchObject({ code: 'P', rule: null });
+    expect(day('2026-09-11')).toMatchObject({ code: '--', rule: null });
+    expect(day('2026-09-30')).toMatchObject({ code: '--', rule: null });
+    expect(row.days.filter((d) => d.rule)).toHaveLength(0);
+    expect(sheetCode(day('2026-09-15'))).toBe('--');
+    expect(payableDays({ dates: Array.from({ length: 30 }, (_, i) => `2026-09-${String(i + 1).padStart(2, '0')}`) }, row)).toBe(10);
+    expect((await ruleLines(s.member.id)).size).toBe(0);
+
+    // The admin's export still lists them for September, but not for October.
+    const auth = { Authorization: `Bearer ${s.adminToken}` };
+    const sept = await request(app).get('/v1/reports/month-performance.csv?month=2026-09').set(auth);
+    expect(sept.text).toContain(s.member.email);
+    expect(sept.text).toContain('Payable Days,10 of 10');
+    const oct = await request(app).get('/v1/reports/month-performance.csv?month=2026-10').set(auth);
+    expect(oct.text).not.toContain(s.member.email);
   });
 });
 
