@@ -2,6 +2,7 @@ export { leaveDateRange, weekdayForDate } from './workingCalendar';
 export { consumptionSourceKey } from './ledger';
 export {
   loadWorkingCalendar,
+  loadApprovedWfh,
   loadBalance,
   loadBalances,
   loadLedgerEntries,

@@ -204,6 +204,87 @@ describe('calendar view', () => {
     expect(cal.body.away[u.userId]).toEqual([
       { date: '2026-08-17', kind: 'PAID_LEAVE', portion: 'SECOND_HALF', label: 'Paid leave' },
     ]);
+    expect(cal.body.wfh).toEqual({});
+  });
+
+  /** A WFH request as the Lark ingest writes it: whole days, end inclusive. */
+  async function wfh(workspaceId: string, userId: string, start: string, end: string, status: 'APPROVED' | 'PENDING' = 'APPROVED') {
+    await prisma.wfhRequest.create({
+      data: {
+        workspaceId,
+        userId,
+        startDate: new Date(`${start}T00:00:00Z`),
+        endDate: new Date(`${end}T00:00:00Z`),
+        reason: 'x',
+        status,
+        larkInstanceCode: `wfh-${userId}-${start}-${status}`,
+      },
+    });
+  }
+
+  it('reports approved work-from-home on working days, apart from leave', async () => {
+    const u = await seedAdminWithShift();
+    await request(app).get('/v1/leave/me/balance').set(auth(u.accessToken)).expect(200);
+
+    // Starts before the window: only its days inside it count.
+    await wfh(u.workspaceId, u.userId, '2026-09-10', '2026-09-15');
+    // Fri to Mon: the end is inclusive, and the weekend between asks for no work.
+    await wfh(u.workspaceId, u.userId, '2026-09-18', '2026-09-21');
+    // Not approved yet, so not on the calendar.
+    await wfh(u.workspaceId, u.userId, '2026-09-23', '2026-09-23', 'PENDING');
+    // WFH and leave on the same day: leave wins.
+    await wfh(u.workspaceId, u.userId, '2026-09-24', '2026-09-24');
+    await prisma.leaveRequest.create({
+      data: {
+        clientUuid: `cal-wfh-${u.userId}`,
+        workspaceId: u.workspaceId,
+        userId: u.userId,
+        startDate: new Date('2026-09-24T00:00:00Z'),
+        endDate: new Date('2026-09-24T00:00:00Z'),
+        portion: 'FULL',
+        chargedDays: 1,
+        reason: 'x',
+        status: 'APPROVED',
+        decisionSource: 'LARK_APPROVAL',
+        decidedAt: new Date(),
+      },
+    });
+
+    const cal = await request(app)
+      .get('/v1/leave/calendar?from=2026-09-14&to=2026-09-27')
+      .set(auth(u.accessToken));
+    expect(cal.status).toBe(200);
+    expect(cal.body.wfh).toEqual({ [u.userId]: ['2026-09-14', '2026-09-15', '2026-09-18', '2026-09-21'] });
+    expect(cal.body.away[u.userId].map((d: { date: string }) => d.date)).toEqual(['2026-09-24']);
+  });
+
+  it('shows work-from-home only for the people in the caller’s scope', async () => {
+    const admin = await seedAdminWithShift();
+    const member = await prisma.user.create({
+      data: {
+        workspaceId: admin.workspaceId,
+        email: `m-${Date.now()}@test.local`,
+        name: 'Member',
+        role: 'MEMBER',
+        provisioningStatus: 'ACTIVE',
+      },
+    });
+    await giveShift(admin.workspaceId, member.id);
+    await wfh(admin.workspaceId, admin.userId, '2026-09-16', '2026-09-16');
+    await wfh(admin.workspaceId, member.id, '2026-09-17', '2026-09-17');
+    const { signAccessToken } = await import('../src/lib/jwt');
+    const memberToken = signAccessToken({ sub: member.id, ws: admin.workspaceId, role: 'MEMBER' });
+
+    const mine = await request(app)
+      .get('/v1/leave/calendar?from=2026-09-14&to=2026-09-20')
+      .set(auth(memberToken));
+    expect(mine.status).toBe(200);
+    expect(mine.body.wfh).toEqual({ [member.id]: ['2026-09-17'] });
+
+    const everyone = await request(app)
+      .get('/v1/leave/calendar?from=2026-09-14&to=2026-09-20')
+      .set(auth(admin.accessToken));
+    expect(everyone.body.wfh).toEqual({ [admin.userId]: ['2026-09-16'], [member.id]: ['2026-09-17'] });
   });
 });
 

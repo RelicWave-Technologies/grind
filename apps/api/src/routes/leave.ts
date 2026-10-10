@@ -19,6 +19,7 @@ import {
   leaveDecidedInLark,
   leaveDateRange,
   loadBalance,
+  loadApprovedWfh,
   loadBalances,
   loadLedgerEntries,
   loadOrCreateLeavePolicy,
@@ -109,8 +110,8 @@ leaveRouter.get('/me/requests', async (req, res, next) => {
 });
 
 /**
- * Who is away across a range, for everyone in scope. Powers the calendar
- * screen's "who is on leave today" and the day-cell markers.
+ * Who is away or working from home across a range, for everyone in scope.
+ * Powers the calendar screen's day-cell markers and its day list.
  */
 leaveRouter.get('/calendar', async (req, res, next) => {
   try {
@@ -122,10 +123,16 @@ leaveRouter.get('/calendar', async (req, res, next) => {
       return res.status(400).json({ error: 'range_too_long', maxDays: MAX_RANGE_DAYS });
     }
 
-    const [calendar, users, holidays] = await Promise.all([
+    const [calendar, wfhApproved, users, holidays] = await Promise.all([
       loadWorkingCalendar({
         workspaceId: req.scope.workspaceId,
         tz: req.scope.workspaceTimezone,
+        userIds: req.scope.userIds,
+        from: parsed.data.from,
+        to: parsed.data.to,
+      }),
+      loadApprovedWfh({
+        workspaceId: req.scope.workspaceId,
         userIds: req.scope.userIds,
         from: parsed.data.from,
         to: parsed.data.to,
@@ -149,12 +156,20 @@ leaveRouter.get('/calendar', async (req, res, next) => {
     // calendar screen renders absence, and a full matrix of "WORKING" would be
     // mostly noise on the wire.
     const away: Record<string, Array<{ date: string; kind: string; portion: string | null; label: string | null }>> = {};
+    // Approved work-from-home, only on days the person was due to work — the
+    // same days the attendance rules look at it. A weekly off or a holiday asks
+    // for no work, so a WFH range spanning one says nothing about it. Leave
+    // wins over WFH: a leave day is never WORKING, and leave is what the
+    // balance and the month sheet charge, so that is what the day must read as.
+    const wfh: Record<string, string[]> = {};
     for (const u of users) {
-      const rows = calendar
-        .dayStatuses(u.id, dates)
+      const statuses = calendar.dayStatuses(u.id, dates);
+      const rows = statuses
         .filter((d) => d.kind === 'PAID_LEAVE' || d.kind === 'UNPAID_LEAVE')
         .map((d) => ({ date: d.date, kind: d.kind, portion: d.portion, label: d.label }));
       if (rows.length) away[u.id] = rows;
+      const home = statuses.filter((d) => d.kind === 'WORKING' && wfhApproved(u.id, d.date)).map((d) => d.date);
+      if (home.length) wfh[u.id] = home;
     }
 
     res.json({
@@ -163,6 +178,7 @@ leaveRouter.get('/calendar', async (req, res, next) => {
       tz: req.scope.workspaceTimezone,
       users,
       away,
+      wfh,
       holidays: holidays.map(toHolidayDto),
     });
   } catch (err) {

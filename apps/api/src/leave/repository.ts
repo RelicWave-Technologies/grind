@@ -362,6 +362,42 @@ export async function loadWorkingCalendar(input: {
   });
 }
 
+/**
+ * Approved work-from-home for a set of people over [from, to], as a lookup.
+ *
+ * The one reader of `WfhRequest`: the attendance rules (is this remote day
+ * covered?) and the calendar (who is at home today?) both ask here, so the two
+ * cannot disagree about which days a request covers. Overlap, not containment,
+ * for the same reason as leave — a request that starts before the window still
+ * covers its days inside it. The stored range is inclusive at both ends.
+ */
+export async function loadApprovedWfh(input: {
+  workspaceId: string;
+  userIds: string[];
+  from: string;
+  to: string;
+}): Promise<(userId: string, date: string) => boolean> {
+  const rows = input.userIds.length === 0
+    ? []
+    : await prisma.wfhRequest.findMany({
+        where: {
+          workspaceId: input.workspaceId,
+          userId: { in: input.userIds },
+          status: 'APPROVED',
+          startDate: { lte: fromIsoDate(input.to) },
+          endDate: { gte: fromIsoDate(input.from) },
+        },
+        select: { userId: true, startDate: true, endDate: true },
+      });
+  const byUser = new Map<string, Array<[string, string]>>();
+  for (const r of rows) {
+    const list = byUser.get(r.userId) ?? [];
+    list.push([toIsoDate(r.startDate), toIsoDate(r.endDate)]);
+    byUser.set(r.userId, list);
+  }
+  return (userId, date) => (byUser.get(userId) ?? []).some(([s, e]) => date >= s && date <= e);
+}
+
 /** A ledger credit in words, for the leave details list. */
 function creditLabel(sourceKey: string, days: number, reason: string | null): string {
   if (sourceKey.startsWith('accrual:')) return 'Monthly leave';

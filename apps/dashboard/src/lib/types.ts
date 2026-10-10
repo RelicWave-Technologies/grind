@@ -328,6 +328,12 @@ export interface LeaveCalendarResponse {
   tz: string;
   users: Array<{ id: string; name: string; avatarUrl: string | null; teamId: string | null }>;
   away: Record<string, LeaveAwayDay[]>;
+  /**
+   * userId -> the YYYY-MM-DD days of approved work-from-home in range. Working
+   * days only, and never a day that is also leave (leave wins). These people
+   * are working, so they are kept apart from `away`.
+   */
+  wfh: Record<string, string[]>;
   holidays: HolidayDto[];
 }
 

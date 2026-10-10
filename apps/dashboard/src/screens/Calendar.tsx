@@ -107,12 +107,15 @@ function requestStanding(r: LeaveRequestDto): { label: string; status: 'success'
     : { label: 'Waiting for approval', status: 'warn' };
 }
 
-/** Somebody away on a given day, ready to render. */
-export interface AwayPerson extends LeaveAwayDay {
+/** Somebody on the calendar, with enough to draw a face. */
+interface CalendarPerson {
   userId: string;
   name: string;
   avatarUrl: string | null;
 }
+
+/** Somebody away on a given day, ready to render. */
+export interface AwayPerson extends LeaveAwayDay, CalendarPerson {}
 
 interface MonthCell {
   date: string;
@@ -219,27 +222,30 @@ export function CalendarScreen() {
     return map;
   }, [data]);
 
-  /** date -> everyone away that day, with enough to draw a face. */
-  const awayByDate = useMemo(() => {
-    const map = new Map<string, AwayPerson[]>();
-    if (!data) return map;
-    const person = new Map(data.users.map((u) => [u.id, u] as const));
+  /**
+   * date -> everyone away that day, and date -> everyone working from home.
+   * Kept as two lists because they mean opposite things: the first is not
+   * working, the second is — just not at the office.
+   */
+  const { awayByDate, wfhByDate } = useMemo(() => {
+    const away = new Map<string, AwayPerson[]>();
+    const wfh = new Map<string, CalendarPerson[]>();
+    if (!data) return { awayByDate: away, wfhByDate: wfh };
+    const users = new Map(data.users.map((u) => [u.id, u] as const));
+    const person = (userId: string): CalendarPerson => ({
+      userId,
+      name: users.get(userId)?.name ?? 'Someone',
+      avatarUrl: users.get(userId)?.avatarUrl ?? null,
+    });
     for (const [userId, rows] of Object.entries(data.away)) {
-      const u = person.get(userId);
-      for (const row of rows) {
-        const list = map.get(row.date) ?? [];
-        list.push({
-          ...row,
-          userId,
-          name: u?.name ?? 'Someone',
-          avatarUrl: u?.avatarUrl ?? null,
-        });
-        map.set(row.date, list);
-      }
+      for (const row of rows) away.set(row.date, [...(away.get(row.date) ?? []), { ...row, ...person(userId) }]);
+    }
+    for (const [userId, dates] of Object.entries(data.wfh)) {
+      for (const date of dates) wfh.set(date, [...(wfh.get(date) ?? []), person(userId)]);
     }
     // Stable order so the same faces sit in the same place every render.
-    for (const list of map.values()) list.sort((a, b) => a.name.localeCompare(b.name));
-    return map;
+    for (const list of [...away.values(), ...wfh.values()]) list.sort((a, b) => a.name.localeCompare(b.name));
+    return { awayByDate: away, wfhByDate: wfh };
   }, [data]);
 
   const [dayOpen, setDayOpen] = useState<string | null>(null);
@@ -278,7 +284,7 @@ export function CalendarScreen() {
       <PageHeader
         eyebrow="Time off"
         title="Leave"
-        subtitle={`Company holidays, approved leave and paid-leave balances — ${tz.replace(/_/g, ' ')}.`}
+        subtitle={`Company holidays, approved leave, work from home and paid-leave balances — ${tz.replace(/_/g, ' ')}.`}
         actions={
           /* Every panel below follows this, so it belongs to the page and not
              to one tab's card — where it used to sit, leaving the other three
@@ -380,6 +386,7 @@ export function CalendarScreen() {
                     isToday={cell.date === today}
                     holiday={holidayByDate.get(cell.date) ?? null}
                     away={awayByDate.get(cell.date) ?? []}
+                    wfh={wfhByDate.get(cell.date) ?? []}
                     onOpen={() => setDayOpen(cell.date)}
                   />
                 ))}
@@ -391,6 +398,7 @@ export function CalendarScreen() {
             <LegendItem kind="holiday" label="Company holiday" />
             <LegendItem kind="paid" label="Paid leave" />
             <LegendItem kind="unpaid" label="Unpaid leave" />
+            <LegendItem kind="wfh" label="Working from home" />
             <LegendItem kind="off" label="Weekend" />
           </div>
         </Card>
@@ -399,6 +407,7 @@ export function CalendarScreen() {
       <DayModal
         date={dayOpen}
         away={dayOpen ? (awayByDate.get(dayOpen) ?? []) : []}
+        wfh={dayOpen ? (wfhByDate.get(dayOpen) ?? []) : []}
         holiday={dayOpen ? (holidayByDate.get(dayOpen) ?? null) : null}
         tz={tz}
         onClose={() => setDayOpen(null)}
@@ -445,12 +454,14 @@ function DayCell({
   isToday,
   holiday,
   away,
+  wfh,
   onOpen,
 }: {
   cell: MonthCell;
   isToday: boolean;
   holiday: HolidayDto | null;
   away: AwayPerson[];
+  wfh: CalendarPerson[];
   onOpen: () => void;
 }) {
   const classes = ['cal-day'];
@@ -458,12 +469,12 @@ function DayCell({
   // A holiday paints its own cell, so it must not also read as quiet ground.
   if (cell.weekend && !holiday) classes.push('cal-day--off');
 
-  const interactive = holiday !== null || away.length > 0;
+  const interactive = holiday !== null || away.length > 0 || wfh.length > 0;
   if (interactive) classes.push('cal-day--open');
 
   const label = `${cell.date}${holiday ? `, ${holiday.name}` : ''}${
     away.length ? `, ${away.length} away` : ''
-  }`;
+  }${wfh.length ? `, ${wfh.length} working from home` : ''}`;
 
   return (
     <div
@@ -493,6 +504,14 @@ function DayCell({
         </span>
       )}
 
+      {/* Faces are for people who are away; somebody at home is working, so
+          they get a chip of their own rather than a face in the same row. */}
+      {wfh.length > 0 && (
+        <span className="cal-mark cal-mark--wfh" title={wfh.map((p) => p.name).join(', ')}>
+          WFH · {wfh.length === 1 ? wfh[0]!.name : `${wfh.length} people`}
+        </span>
+      )}
+
       {away.length > 0 && (
         <span className="cal-faces">
           <AvatarGroup max={MAX_FACES} size={24}>
@@ -512,16 +531,18 @@ function DayCell({
   );
 }
 
-/** Everyone away on one day. */
+/** Everyone away on one day, and everyone working from home. */
 function DayModal({
   date,
   away,
+  wfh,
   holiday,
   tz,
   onClose,
 }: {
   date: string | null;
   away: AwayPerson[];
+  wfh: CalendarPerson[];
   holiday: HolidayDto | null;
   tz: string;
   onClose: () => void;
@@ -551,7 +572,7 @@ function DayModal({
         <Table density="compact">
           <THead>
             <Tr>
-              <Th>Person</Th>
+              <Th>On leave</Th>
               <Th>Portion</Th>
               <Th align="right">Days</Th>
             </Tr>
@@ -569,6 +590,25 @@ function DayModal({
                 <Td>{PORTION_LABEL[a.portion ?? 'FULL']}</Td>
                 <Td align="right" mono>
                   {days(a.portion === 'FULL' ? 1 : 0.5)}
+                </Td>
+              </Tr>
+            ))}
+          </Tbody>
+        </Table>
+      )}
+      {/* Its own group, not more rows of "away": these people are working. */}
+      {wfh.length > 0 && (
+        <Table density="compact">
+          <THead>
+            <Tr>
+              <Th>Working from home</Th>
+            </Tr>
+          </THead>
+          <Tbody>
+            {wfh.map((p) => (
+              <Tr key={p.userId}>
+                <Td>
+                  <Identity name={p.name} avatar={<Avatar name={p.name} src={p.avatarUrl ?? undefined} size={24} />} />
                 </Td>
               </Tr>
             ))}
