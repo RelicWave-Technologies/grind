@@ -21,6 +21,12 @@ services:
     ports:
       - "127.0.0.1:4100:4000"
     restart: unless-stopped
+    # Docker keeps json logs forever by default; the API's filled the disk.
+    logging: &bounded-logs
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
     # Readiness, not liveness: /healthz is 200 only when the database answers.
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/healthz').then((r)=>process.exit(r.ok?0:1),()=>process.exit(1))"]
@@ -36,3 +42,4 @@ services:
     ports:
       - "127.0.0.1:4101:80"
     restart: unless-stopped
+    logging: *bounded-logs

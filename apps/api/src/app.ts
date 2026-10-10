@@ -6,6 +6,7 @@ import cookieParser from 'cookie-parser';
 import pinoHttp from 'pino-http';
 import { prisma } from '@grind/db';
 import { logger } from './logger';
+import { requestLogLevel } from './lib/requestLogLevel';
 import { dashboardOrigins } from './env';
 import { API_VERSION, START_TIME_MS } from './lib/version';
 import { authRouter } from './routes/auth';
@@ -74,6 +75,8 @@ export function buildApp() {
   app.use(
     pinoHttp({
       logger,
+      customLogLevel: (req, res, err) =>
+        requestLogLevel(req.method, (req as express.Request).originalUrl ?? req.url, res.statusCode, err),
       redact: {
         // Cookies carry the dashboard session (grind_at / grind_rt), and
         // Set-Cookie hands out a fresh 90-day refresh token: anyone reading
