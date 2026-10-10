@@ -308,13 +308,21 @@ screenshotsRouter.post('/complete', validate(CompleteScreenshotUploadRequest, 'b
   }
 });
 
+/**
+ * The entry a screenshot may link to: the claimed one when it is the caller's,
+ * none when it has not reached the server yet, `false` only when it belongs to
+ * someone else. An agent whose timer sync is behind still uploads its shots;
+ * rejecting them made agents up to beta.37 give up after five tries and lose
+ * the screenshot, so it is kept unlinked instead.
+ */
 async function validateOwnedTimeEntry(userId: string, timeEntryId: string | null): Promise<string | null | false> {
   if (!timeEntryId) return null;
   const row = await prisma.timeEntry.findUnique({
     where: { id: timeEntryId },
     select: { userId: true },
   });
-  return row?.userId === userId ? timeEntryId : false;
+  if (!row) return null;
+  return row.userId === userId ? timeEntryId : false;
 }
 
 /**
