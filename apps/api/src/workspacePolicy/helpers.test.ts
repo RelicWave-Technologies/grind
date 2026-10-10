@@ -144,14 +144,18 @@ describe('ActivitySampleInput (M14 fields)', () => {
     expect(out.success).toBe(true);
   });
 
-  it('rejects a title longer than 300 chars', () => {
+  it('cuts a title longer than 300 chars instead of rejecting the sample', () => {
     const out = ActivitySampleInput.safeParse({ ...base, activeTitle: 'x'.repeat(301) });
-    expect(out.success).toBe(false);
+    expect(out.success && out.data.activeTitle).toBe('x'.repeat(300));
   });
 
-  it('rejects a URL longer than 2048 chars', () => {
+  it('cuts a URL longer than 2048 chars instead of rejecting the sample', () => {
     const out = ActivitySampleInput.safeParse({ ...base, activeUrl: 'https://example.com/' + 'x'.repeat(2050) });
-    expect(out.success).toBe(false);
+    expect(out.success && out.data.activeUrl?.length).toBe(2048);
+  });
+
+  it('still rejects metadata past any agent cap', () => {
+    expect(ActivitySampleInput.safeParse({ ...base, activeTitle: 'x'.repeat(4_097) }).success).toBe(false);
   });
 
   it('accepts nulls', () => {
