@@ -58,12 +58,14 @@ export function buildApp() {
     }),
   );
   app.use(cookieParser());
-  // The activity-samples endpoint batch-ingests up to 500 samples (see
-  // ActivitySamplesRequest); that body legitimately outgrows the default cap, so
-  // parse THIS route with a right-sized limit while every other route stays tight
-  // at 64kb. Registered first on purpose — express.json is a no-op once the body
-  // has been parsed, so the global parser below skips an already-parsed body.
-  app.use('/v1/activity-samples', express.json({ limit: '1mb' }));
+  // Agent upload routes whose bodies legitimately outgrow the default cap: up to
+  // 500 activity samples, up to 50 app icons of up to 200k each, and a long
+  // day's entry with hundreds of segments. A 413 there is never fixed by a
+  // retry, so the agent resent the same body forever and queued work behind it.
+  // Every other route stays tight at 64kb. Registered first on purpose —
+  // express.json is a no-op once the body has been parsed, so the global parser
+  // below skips an already-parsed body.
+  app.use(['/v1/activity-samples', '/v1/agent/app-icons', '/v1/time-entries'], express.json({ limit: '1mb' }));
   app.use(express.json({ limit: '64kb' }));
   app.use(
     pinoHttp({

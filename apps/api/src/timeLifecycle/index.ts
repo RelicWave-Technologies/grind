@@ -1,6 +1,7 @@
 import { prisma, type Prisma, type TimeEntryCloseReason } from '@grind/db';
 import type { TimerCheckpoint, TimerCheckpointDisposition } from '@grind/types';
 import { logger } from '../logger';
+import { START_TIME_MS } from '../lib/version';
 
 export const TIMER_PROTOCOL_VERSION = 2;
 export const TIMER_LEASE_MS = 3 * 60 * 1000;
@@ -84,7 +85,7 @@ export async function renewTimerLease(
     };
   }
 
-  if (entry.trackingProtocolVersion !== TIMER_PROTOCOL_VERSION || entry.agentRevision !== checkpoint.revision) {
+  if (entry.trackingProtocolVersion !== TIMER_PROTOCOL_VERSION) {
     return {
       disposition: 'needs_sync',
       entryId: entry.id,
@@ -94,6 +95,12 @@ export async function renewTimerLease(
     };
   }
 
+  // A heartbeat proves the agent is alive and still on this entry, whatever
+  // revision it has reached. Renewing only on an exact revision match let one
+  // lost PUT lapse the lease under a running timer, and reports then cut the
+  // entry at lastProvenAt — a gap in the middle of real work. Liveness renews
+  // here; a revision mismatch still asks the agent to push its data.
+  const revisionMatches = entry.agentRevision === checkpoint.revision;
   const checkpointAt = clampCheckpointAt(checkpoint.observedAt, now, entry.startedAt);
   const lastProvenAt = entry.lastProvenAt && entry.lastProvenAt > checkpointAt
     ? entry.lastProvenAt
@@ -103,7 +110,6 @@ export async function renewTimerLease(
       id: entry.id,
       endedAt: null,
       trackingProtocolVersion: TIMER_PROTOCOL_VERSION,
-      agentRevision: checkpoint.revision,
     },
     data: {
       lastProvenAt,
@@ -126,7 +132,7 @@ export async function renewTimerLease(
   }
 
   return {
-    disposition: 'accepted',
+    disposition: revisionMatches ? 'accepted' : 'needs_sync',
     entryId: entry.id,
     serverRevision: entry.agentRevision,
     endedAt: null,
@@ -229,12 +235,24 @@ export async function reconcileExpiredTimersOnce(now = new Date()): Promise<numb
 
 let schedulerStarted = false;
 
+/**
+ * True for one lease length after this process started.
+ *
+ * A deploy takes the API away for a while; every running timer's lease keeps
+ * ticking down meanwhile, because agents cannot reach us to renew it. Sweeping
+ * the moment we come back would close all of them for an outage that was ours.
+ * One lease length is exactly the time a live agent needs to checkpoint again.
+ */
+export function inStartupGrace(nowMs: number, processStartMs: number = START_TIME_MS): boolean {
+  return nowMs - processStartMs < TIMER_LEASE_MS;
+}
+
 export function startTimerLifecycleScheduler(enabled: boolean): void {
   if (!enabled || schedulerStarted) return;
   schedulerStarted = true;
   let active = false;
   const tick = async () => {
-    if (active) return;
+    if (active || inStartupGrace(Date.now())) return;
     active = true;
     try {
       const finalized = await reconcileExpiredTimersOnce();
