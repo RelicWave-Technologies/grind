@@ -19,9 +19,8 @@ import {
   localDayWindowInTimeZone,
   type DayStatus,
 } from '@grind/types';
+import { punchInMs, type PunchLookup } from '../attendance/punches';
 import { loadEntryLiveEvidence } from '../insights/liveEntryEvidence';
-import { timesheetCalendarInputs } from '../leave';
-import { loadOrCreateLeavePolicy } from '../leave/repository';
 
 /**
  * The one way the API reads tracked time.
@@ -287,86 +286,36 @@ export async function loadShiftAssignments(
 // ---------------------------------------------------------------------------
 
 interface DayFacts {
-  bucket: DayBucket;
   status: DayStatus | null;
   shift: ShiftDay<ShiftAssignmentRow> | null;
-  /** Counted minutes (work + meetings + manual), rounded. */
-  trackedMinutes: number;
-}
-
-export interface DayFactsSource {
-  timeline: LoadedTimelineDays;
-  graceMinutes: number;
-  calendar: Awaited<ReturnType<typeof timesheetCalendarInputs>>;
-  shiftFor(userId: string, date: string): ShiftDay<ShiftAssignmentRow> | null;
-  factsFor(userId: string, date: string): DayFacts;
+  /** The door punch-in as an instant (see `punchInMs`); null when nobody punched in. */
+  punchInMs: number | null;
 }
 
 /**
- * The pure part of day facts — everything handed in. Lateness is judged by the
- * caller (`isLateArrival`), which knows the person's attendance-rule mode.
- */
-function dayFactsOf(input: {
-  bucket: DayBucket;
-  status: DayStatus | null;
-  shift: ShiftDay<ShiftAssignmentRow> | null;
-}): DayFacts {
-  return {
-    bucket: input.bucket,
-    status: input.status,
-    shift: input.shift,
-    trackedMinutes: Math.round(input.bucket.counted / 60_000),
-  };
-}
-
-/**
- * Everything a day is judged on, for `userIds` over `[from, to]`: the counted
- * time, the Working Calendar status, the shift assigned for that date and the
- * company grace — the inputs to the one late/full/half definition in core.
+ * What a day's arrival is judged on, for `userIds` over `[from, to]`: the
+ * Working Calendar status, the shift assigned for that date and the door
+ * punch-in — the inputs to the one late definition in core. Lateness itself is
+ * judged by the caller (`isLateArrival`), which knows the person's
+ * attendance-rule mode and the policy.
  */
 export async function loadDayFacts(input: {
-  workspaceId: string;
   userIds: readonly string[];
   from: string;
   to: string;
   tz: string;
-  now?: Date;
-  /** Reuse a timeline the caller already loaded for the same range. */
-  timeline?: LoadedTimelineDays;
-  calendar?: Awaited<ReturnType<typeof timesheetCalendarInputs>>;
-}): Promise<DayFactsSource> {
-  const userIds = [...new Set(input.userIds)];
+  calendar: { dayStatusFor(userId: string, date: string): DayStatus | null };
+  punchFor: PunchLookup;
+}): Promise<{ factsFor(userId: string, date: string): DayFacts }> {
   const first = localDayWindowInTimeZone(input.from, input.tz);
   const last = localDayWindowInTimeZone(input.to, input.tz);
   if (!first || !last) throw new Error('invalid_date_or_tz');
-  const [timeline, calendar, assignments, policy] = await Promise.all([
-    input.timeline ?? loadTimeline({ userIds, from: input.from, to: input.to, tz: input.tz, now: input.now }),
-    input.calendar ?? timesheetCalendarInputs({
-      workspaceId: input.workspaceId,
-      tz: input.tz,
-      userIds,
-      from: input.from,
-      to: input.to,
-    }),
-    loadShiftAssignments(userIds, first.start, last.end),
-    loadOrCreateLeavePolicy(input.workspaceId),
-  ]);
-  const graceMinutes = policy.lateGraceMinutes;
-  const shiftCache = new Map<string, ShiftDay<ShiftAssignmentRow> | null>();
-  const shiftFor = (userId: string, date: string) => {
-    const key = `${userId}|${date}`;
-    if (!shiftCache.has(key)) shiftCache.set(key, shiftWindowFor(assignments.get(userId) ?? [], date, input.tz));
-    return shiftCache.get(key)!;
-  };
+  const assignments = await loadShiftAssignments([...new Set(input.userIds)], first.start, last.end);
   return {
-    timeline,
-    graceMinutes,
-    calendar,
-    shiftFor,
-    factsFor: (userId, date) => dayFactsOf({
-      bucket: timeline.bucket(userId, date),
-      status: calendar.dayStatusFor(userId, date),
-      shift: shiftFor(userId, date),
+    factsFor: (userId, date) => ({
+      status: input.calendar.dayStatusFor(userId, date),
+      shift: shiftWindowFor(assignments.get(userId) ?? [], date, input.tz),
+      punchInMs: punchInMs(input.punchFor(userId, date), date, input.tz),
     }),
   };
 }

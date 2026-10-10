@@ -20,7 +20,7 @@ import { z } from 'zod';
  *   WFH_UNAPPROVED      worked away from the office with no approved WFH request
  *   NO_APPLICATION      nothing worked, nothing applied for
  *   LEAVE_NOT_APPROVED  nothing worked; leave was applied for but is pending or rejected
- *   LATE                arrived after the shift start plus its grace, past the month's allowance
+ *   LATE                punched in after the shift start plus its grace, past the month's allowance
  */
 export const AttendanceRuleTagSchema = z.enum([
   'SHORT_DAY',
@@ -99,7 +99,7 @@ export const ATTENDANCE_RULE_DEFAULTS = {
   lateAllowedPerMonth: 4,
   /** Minutes after the shift start that still count as on time. */
   lateGraceMinutes: 30,
-  /** On a first-half leave day, tracked work starting after 14:00 is late — no grace. */
+  /** On a first-half leave day, a punch-in after 14:00 is late — no grace. */
   halfDayLateAfterMinute: 840,
 } as const;
 

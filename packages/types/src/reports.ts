@@ -150,6 +150,10 @@ export const MemberReportDaySchema = z.object({
    */
   punchInMinute: z.number().int().min(0).max(1439).nullable(),
   punchOutMinute: z.number().int().min(0).max(1439).nullable(),
+  /**
+   * Early / late against the shift start, judged on `punchInMinute` (the door),
+   * never on `firstActivityMs`. A worked day with no punch-in is `on_time`.
+   */
   shiftStatus: ShiftStatusSchema,
   gaps: z.object({
     count: z.number().int().min(0),

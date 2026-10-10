@@ -1363,11 +1363,12 @@ model LeavePolicy {
   /// Late arrivals a month that cost nothing. From the next one on, each late
   /// arrival is half a day of leave.
   lateAllowedPerMonth  Int       @default(4)
-  /// Minutes after the shift start that still count as on time — the same for
-  /// everyone, whatever buffer an individual shift carries.
+  /// Minutes after the shift start that a punch-in still counts as on time —
+  /// the same for everyone, whatever buffer an individual shift carries.
+  /// Lateness is judged by the door punch-in, not by when Timo work started.
   lateGraceMinutes     Int       @default(30)
   /// On a first-half leave day, the clock time (minutes after midnight) the
-  /// first tracked work must beat — no grace. 840 = 14:00.
+  /// punch-in must beat — no grace. 840 = 14:00.
   halfDayLateAfterMinute Int     @default(840)
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
@@ -1624,6 +1625,8 @@ model AttendancePunch {
   /// instants, so nothing is converted on write or on read. Seed them as they
   /// appear on the punch report: '09:15:00'. Either side may be null: a
   /// missing punch out is a real thing that happens, and is not a zero.
+  /// Lateness is judged on punchInAt: that clock time on `date`, read in the
+  /// workspace timezone.
   punchInAt   DateTime? @db.Time
   punchOutAt  DateTime? @db.Time
   /// Free-form provenance for whoever loaded the row ("biometric export

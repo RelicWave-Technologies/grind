@@ -1,6 +1,6 @@
 import { localDayWindowInTimeZone } from '@grind/types';
 import { clipInterval, mergeIntervals, type Interval } from './intervals';
-import { isCounted, isTracked, type TimelinePiece } from './timeline';
+import { isCounted, type TimelinePiece } from './timeline';
 
 /**
  * Attribute a resolved timeline to workspace calendar days.
@@ -29,12 +29,10 @@ export interface DayBucket {
   /** worked + meeting + manual: the day's total. */
   counted: number;
   /**
-   * When the first stretch of real, tracked activity began on this day —
-   * manual time excluded. A stretch that started yesterday and ran past
-   * midnight is a continuation, not a start, so it never makes a day "early".
+   * First counted stretch (tracked or manual) that began on this day. A
+   * stretch that started yesterday and ran past midnight is a continuation,
+   * not a start.
    */
-  firstTracked: number | null;
-  /** First counted stretch (tracked or manual) that began on this day. */
   first: number | null;
   /** End of the last counted time on this day (clipped to the day). */
   last: number | null;
@@ -48,7 +46,6 @@ export function emptyDayBucket(): DayBucket {
     idle: 0,
     invalidated: 0,
     counted: 0,
-    firstTracked: null,
     first: null,
     last: null,
   };
@@ -96,7 +93,6 @@ export function bucketByDay(
     // One owner per instant: sorted by start, the pieces are also sorted by
     // end, so each day only has to look at the pieces from a moving cursor.
     const list = [...unsorted].sort((a, b) => a.start - b.start || a.end - b.end);
-    const tracked = mergeIntervals(list.filter(isTracked));
     const counted = mergeIntervals(list.filter(isCounted));
     const perDay = new Map<string, DayBucket>();
     let cursor = 0;
@@ -122,7 +118,6 @@ export function bucketByDay(
         bucket.counted += ms;
         if (bucket.last === null || iv.end > bucket.last) bucket.last = iv.end;
       }
-      bucket.firstTracked = firstStretchStartWithin(tracked, day.start, day.end);
       bucket.first = firstStretchStartWithin(counted, day.start, day.end);
       perDay.set(day.date, bucket);
     }

@@ -31,11 +31,7 @@ const SIX_DAY = {
   sun: null,
 };
 
-/**
- * Hours of work on a date, starting at an IST wall clock (09:00 by default —
- * on time for the 09:00 shift). Lateness is judged on this first tracked
- * activity, not on the punch.
- */
+/** Hours of tracked work on a date, starting at an IST wall clock (09:00 by default). */
 async function work(userId: string, date: string, hours: number, startIst = '09:00') {
   const [h, m] = startIst.split(':').map(Number) as [number, number];
   const startedAt = new Date(Date.parse(`${date}T00:00:00Z`) + ((h * 60 + m) - 330) * 60_000);
@@ -55,13 +51,18 @@ async function work(userId: string, date: string, hours: number, startIst = '09:
   });
 }
 
-async function punch(workspaceId: string, userId: string, date: string) {
+/**
+ * A door punch as the eTime import writes it: the IST wall clock stored as a
+ * time of day (09:55 by default — late for the 09:00 shift). Lateness is judged
+ * on this punch-in, not on when tracked work started.
+ */
+async function punch(workspaceId: string, userId: string, date: string, inIst = '09:55') {
   await prisma.attendancePunch.create({
     data: {
       workspaceId,
       userId,
       date: new Date(`${date}T00:00:00Z`),
-      punchInAt: new Date('1970-01-01T09:55:00Z'),
+      punchInAt: new Date(`1970-01-01T${inIst}:00Z`),
       punchOutAt: new Date('1970-01-01T18:05:00Z'),
     },
   });
@@ -142,7 +143,7 @@ async function ruleLines(userId: string) {
 /** A week where every rule fires once, Tue 1 – Tue 8 September. */
 async function seedWeek(s: Awaited<ReturnType<typeof seed>>) {
   const { ws, member, admin } = s;
-  // Full day at the office, started late (09:55 against 09:00 + 30 min grace).
+  // Full day at the office, punched in late (09:55 against 09:00 + 30 min grace).
   await work(member.id, '2026-09-01', 8, '09:55');
   await punch(ws.id, member.id, '2026-09-01');
   // Short day: 5 h.
@@ -322,8 +323,8 @@ describe('attendance rules — the month report is read-only', () => {
 describe('attendance rules — late arrivals', () => {
   it('lets four go, charges half a day from the fifth, and cuts a day only once', async () => {
     const s = await seed();
-    // Tracked work from 09:55 against a 09:00 shift with the default
-    // 30-minute grace: late.
+    // Punched in at 09:55 against a 09:00 shift with the default 30-minute
+    // grace: late.
     const lateDays = ['2026-09-01', '2026-09-02', '2026-09-03', '2026-09-04', '2026-09-05', '2026-09-07'];
     for (const date of lateDays) {
       await work(s.member.id, date, 8, '09:55');
@@ -334,15 +335,7 @@ describe('attendance rules — late arrivals', () => {
     await punch(s.ws.id, s.member.id, '2026-09-08');
     // On time on the 9th: inside the grace.
     await work(s.member.id, '2026-09-09', 8, '09:25');
-    await prisma.attendancePunch.create({
-      data: {
-        workspaceId: s.ws.id,
-        userId: s.member.id,
-        date: new Date('2026-09-09T00:00:00Z'),
-        punchInAt: new Date('1970-01-01T09:25:00Z'),
-        punchOutAt: new Date('1970-01-01T18:00:00Z'),
-      },
-    });
+    await punch(s.ws.id, s.member.id, '2026-09-09', '09:25');
 
     const { day, row } = await september(s);
     expect(lateDays.map((d) => day(d).late)).toEqual([1, 2, 3, 4, 5, 6]);
@@ -368,32 +361,23 @@ describe('attendance rules — late arrivals', () => {
     const s = await seed();
     await prisma.shift.updateMany({ where: { workspaceId: s.ws.id }, data: { bufferMin: 0 } });
     await work(s.member.id, '2026-09-01', 8, '09:29');
-    await prisma.attendancePunch.create({
-      data: {
-        workspaceId: s.ws.id,
-        userId: s.member.id,
-        date: new Date('2026-09-01T00:00:00Z'),
-        punchInAt: new Date('1970-01-01T09:29:00Z'),
-        punchOutAt: new Date('1970-01-01T18:00:00Z'),
-      },
-    });
+    await punch(s.ws.id, s.member.id, '2026-09-01', '09:29');
     expect((await september(s)).day('2026-09-01').late).toBeNull();
 
     await prisma.leavePolicy.update({ where: { workspaceId: s.ws.id }, data: { lateGraceMinutes: 15 } });
     expect((await september(s)).day('2026-09-01').late).toBe(1);
   });
 
-  // From main (#148), adapted to the unified rule: lateness is the first
-  // TRACKED activity, so the two days now differ by when work started rather
-  // than by the punch. The intent is unchanged — Start reads Late exactly when
-  // the rules counted a late arrival.
-  it('shows Start as Late on the dashboard exactly when the rule counted a late arrival', async () => {
+  // Start reads Late exactly when the rules counted a late arrival, and both
+  // go by the door. The 1st is Naina's 2026-10-09: punched in 09:20, Timo
+  // started 09:33 — on time. The 2nd is the reverse: Timo from 09:25 but
+  // punched in at 09:55 — late.
+  it('shows Start as Late on the dashboard exactly when the rule counted a late punch-in', async () => {
     const s = await seed();
-    // Both days punched at 09:55; only when tracked work started differs.
-    await work(s.member.id, '2026-09-01', 8, '09:25');
-    await punch(s.ws.id, s.member.id, '2026-09-01');
-    await work(s.member.id, '2026-09-02', 8, '09:55');
-    await punch(s.ws.id, s.member.id, '2026-09-02');
+    await work(s.member.id, '2026-09-01', 8, '09:33');
+    await punch(s.ws.id, s.member.id, '2026-09-01', '09:20');
+    await work(s.member.id, '2026-09-02', 8, '09:25');
+    await punch(s.ws.id, s.member.id, '2026-09-02', '09:55');
 
     const params = new URLSearchParams({ userId: s.member.id, from: '2026-09-01', to: '2026-09-02', tz: 'Asia/Kolkata' });
     const res = await request(app)
@@ -407,13 +391,29 @@ describe('attendance rules — late arrivals', () => {
     ]);
     expect(res.body.member.lateDays).toBe(1);
     // And the month sheet counted the same one.
-    expect((await september(s)).day('2026-09-02').late).toBe(1);
+    const { day } = await september(s);
+    expect(day('2026-09-01').late).toBeNull();
+    expect(day('2026-09-02').late).toBe(1);
   });
 
-  it('reads Start as on time for a late start the rules do not count (exempt person)', async () => {
+  it('never calls a day without a punch-in late or early, however late work started', async () => {
+    const s = await seed();
+    await work(s.member.id, '2026-09-01', 7, '10:30');
+    await work(s.member.id, '2026-09-02', 8, '08:30');
+    const params = new URLSearchParams({ userId: s.member.id, from: '2026-09-01', to: '2026-09-02', tz: 'Asia/Kolkata' });
+    const res = await request(app)
+      .get(`/v1/reports/team/member?${params.toString()}`)
+      .set({ Authorization: `Bearer ${s.adminToken}` });
+    expect(res.status).toBe(200);
+    expect((res.body.member.days as Array<{ shiftStatus: string }>).map((d) => d.shiftStatus)).toEqual(['on_time', 'on_time']);
+    expect((await september(s)).day('2026-09-01').late).toBeNull();
+  });
+
+  it('reads Start as on time for a late punch-in the rules do not count (exempt person)', async () => {
     const s = await seed();
     await prisma.user.update({ where: { id: s.member.id }, data: { attendanceRuleMode: 'EXEMPT' } });
     await work(s.member.id, '2026-09-02', 8, '11:00');
+    await punch(s.ws.id, s.member.id, '2026-09-02', '11:00');
     const params = new URLSearchParams({ userId: s.member.id, from: '2026-09-02', to: '2026-09-02' });
     const res = await request(app)
       .get(`/v1/reports/team/member?${params.toString()}`)
@@ -423,12 +423,13 @@ describe('attendance rules — late arrivals', () => {
     expect(res.body.member.lateDays).toBe(0);
   });
 
-  // From main (#150), on the unified rule: on a first-half leave day the
-  // afternoon is due at 14:00, so tracked work starting after it is late — no
-  // grace — and Start reads Late on the same day the sheet counts it.
-  it('on a first-half leave day counts tracked work starting after 14:00 as late, with no grace', async () => {
+  // From main (#150): on a first-half leave day the afternoon is due at 14:00,
+  // so a punch-in after it is late — no grace — and Start reads Late on the
+  // same day the sheet counts it. Tracked work starts at 14:20 both days: the
+  // door decides.
+  it('on a first-half leave day counts a punch-in after 14:00 as late, with no grace', async () => {
     const s = await seed();
-    for (const [date, start] of [['2026-09-01', '13:55'], ['2026-09-02', '14:10']] as const) {
+    for (const [date, punchIn] of [['2026-09-01', '13:55'], ['2026-09-02', '14:10']] as const) {
       await prisma.leaveRequest.create({
         data: {
           clientUuid: ulid(),
@@ -441,7 +442,8 @@ describe('attendance rules — late arrivals', () => {
           status: 'APPROVED',
         },
       });
-      await work(s.member.id, date, 4, start);
+      await work(s.member.id, date, 4, '14:20');
+      await punch(s.ws.id, s.member.id, date, punchIn);
     }
 
     const { day } = await september(s);
@@ -468,6 +470,7 @@ describe('attendance rules — late arrivals', () => {
     await prisma.user.update({ where: { id: s.member.id }, data: { attendanceRuleMode: 'REMOTE' } });
     for (const date of ['2026-09-01', '2026-09-02', '2026-09-03', '2026-09-04', '2026-09-05', '2026-09-07']) {
       await work(s.member.id, date, 8, '09:55');
+      await punch(s.ws.id, s.member.id, date, '09:55');
     }
     const remote = await september(s);
     expect(remote.row.totals.lateDays).toBe(0);
@@ -510,13 +513,15 @@ describe('attendance rules — late arrivals', () => {
       },
     });
     await work(s.member.id, '2026-09-02', 4, '11:00');
+    await punch(s.ws.id, s.member.id, '2026-09-02', '11:00');
     expect((await september(s)).day('2026-09-02').late).toBeNull();
   });
 
-  it('is never late on leave, holidays or first-half leave; manual time does not start a day', async () => {
+  it('is never late on a holiday or before 14:00 on first-half leave; late by the door, not the tracker', async () => {
     const s = await seed();
     await prisma.companyHoliday.create({ data: { workspaceId: s.ws.id, date: new Date('2026-09-01T00:00:00Z'), name: 'Holiday' } });
     await work(s.member.id, '2026-09-01', 8, '11:00');
+    await punch(s.ws.id, s.member.id, '2026-09-01', '11:00');
     await prisma.leaveRequest.create({
       data: {
         clientUuid: ulid(),
@@ -530,21 +535,10 @@ describe('attendance rules — late arrivals', () => {
       },
     });
     await work(s.member.id, '2026-09-02', 4, '14:00');
-    // Manual time from 09:00 does not make a 12:00 tracked start on time.
-    const manualStart = new Date('2026-09-03T03:30:00Z');
-    const manualEnd = new Date('2026-09-03T06:30:00Z');
-    await prisma.timeEntry.create({
-      data: {
-        id: ulid(),
-        clientUuid: ulid(),
-        userId: s.member.id,
-        source: 'MANUAL',
-        startedAt: manualStart,
-        endedAt: manualEnd,
-        segments: { create: [{ id: ulid(), kind: 'WORK', startedAt: manualStart, endedAt: manualEnd }] },
-      },
-    });
-    await work(s.member.id, '2026-09-03', 5, '12:00');
+    await punch(s.ws.id, s.member.id, '2026-09-02', '14:00');
+    // Tracked from 09:00, but badged in at 12:00: late.
+    await work(s.member.id, '2026-09-03', 8, '09:00');
+    await punch(s.ws.id, s.member.id, '2026-09-03', '12:00');
     const { day } = await september(s);
     expect(day('2026-09-01').late).toBeNull();
     expect(day('2026-09-02').late).toBeNull();

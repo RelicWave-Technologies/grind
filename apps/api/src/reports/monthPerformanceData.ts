@@ -1,6 +1,5 @@
 import { prisma } from '@grind/db';
 import { dateKeyInTimeZone, dateKeysBetween, isValidTimeZone, localDayWindowInTimeZone, type DayStatus } from '@grind/types';
-import { loadPunchLookup } from '../attendance/punches';
 import { loadAttendanceRuleContext, type AttendanceRuleContext } from '../attendance/ruleContext';
 import { reconcileRuleLedger, verdictKey, type RuleVerdicts } from '../attendance/ruleLedger';
 import { timesheetCalendarInputs } from '../leave';
@@ -59,7 +58,6 @@ interface MonthInputs {
   userIds: string[];
   companyName: string;
   calendarInput: { workspaceId: string; tz: string; userIds: string[]; from: string; to: string };
-  punchFor: Awaited<ReturnType<typeof loadPunchLookup>>;
   overrides: Array<{ userId: string; date: Date; code: DayOverride['code']; computedCode: DayOverride['computedCode'] }>;
   /** Counted milliseconds (work, meetings, approved manual; invalidated excluded). */
   trackedMsFor: (userId: string, date: string) => number;
@@ -121,8 +119,7 @@ async function loadMonthInputs(input: {
   // Time comes from the shared timeline: the same owner-per-minute, proven
   // open ends and invalidations as Edit Time and the reports, so the hours
   // here cannot disagree with the hours anywhere else.
-  const [punchFor, timeline, overrides] = await Promise.all([
-    loadPunchLookup({ userIds, from: range.from, to: range.to }),
+  const [timeline, overrides] = await Promise.all([
     loadTimeline({ userIds, from: range.from, to: range.to, tz: range.tz, now: new Date(nowMs) }),
     userIds.length === 0 ? [] : prisma.attendanceOverride.findMany({
       where: {
@@ -132,14 +129,13 @@ async function loadMonthInputs(input: {
       select: { userId: true, date: true, code: true, computedCode: true },
     }),
   ]);
-  const rules = await loadAttendanceRuleContext({ ...calendarInput, punchFor, nowMs });
+  const rules = await loadAttendanceRuleContext({ ...calendarInput, nowMs });
 
   return {
     reportUsers,
     userIds,
     companyName: workspace?.name ?? '',
     calendarInput,
-    punchFor,
     overrides,
     trackedMsFor: (userId, date) => timeline.bucket(userId, date).counted,
     rules,
@@ -225,7 +221,7 @@ export async function loadMonthPerformanceReport(input: {
 }): Promise<MonthPerformanceReport> {
   const { range } = input;
   const m = await loadMonthInputs(input);
-  const { reportUsers, userIds, punchFor, overrides, trackedMsFor, rules, nowMs } = m;
+  const { reportUsers, userIds, overrides, trackedMsFor, rules, nowMs } = m;
   // Read-only: the ledger lines the rules wrote are whatever the last
   // reconcile left (see `reconcileMonthRules`), and the calendar prices the
   // month from them.
@@ -257,7 +253,7 @@ export async function loadMonthPerformanceReport(input: {
     users: reportUsers,
     dayStatusFor: calendar.dayStatusFor,
     trackedMsFor,
-    punchFor,
+    punchFor: rules.punchFor,
     overrideFor,
     balanceFor: (userId) => balances[userId]?.balanceDays,
     leaveAccountFor: calendar.leaveAccountFor,

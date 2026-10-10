@@ -8,8 +8,9 @@ import {
   type MemberReportScreenshot,
 } from '@grind/types';
 import {
+  DEFAULT_HALF_DAY_LATE_AFTER_MINUTE,
   DEFAULT_LATE_GRACE_MINUTES,
-  halfDayLateAfterMs,
+  instantForLocalMinute,
   bucketByDay,
   containsInstant,
   emptyDayBucket,
@@ -22,6 +23,7 @@ import {
   activityPercentOverTrackedMinutes,
   clipInterval,
 } from '@grind/core';
+import { punchInMs, type PunchLookup } from '../attendance/punches';
 import { appUsageIdentity, buildAppUsage } from '../insights/appUsage';
 import { appIconUrl } from '../insights/appIcon';
 import { buildDayInsight, localDayWindow, type DayEntryMeta } from '../insights/day';
@@ -175,9 +177,10 @@ export function buildMemberReportDays(input: {
   /**
    * External punch record lookup, supplied by the route that loaded it. Absent
    * or returning null means the day has no punch, which stays null rather than
-   * falling back to activity — the two are different measurements.
+   * falling back to activity — the two are different measurements. The
+   * punch-in is also what the Start column judges early and late on.
    */
-  punchFor?: (userId: string, date: string) => { inMinute: number | null; outMinute: number | null } | null;
+  punchFor?: PunchLookup;
   /**
    * A manager's or admin's correction for a day, supplied by the route. The
    * report table shows the corrected code and marks it as corrected, so a
@@ -190,9 +193,9 @@ export function buildMemberReportDays(input: {
   fundedDaysFor?: (userId: string, date: string) => number | undefined;
   /**
    * The attendance rules' late count, when the rules are on. From `from` on, a
-   * day reads Late exactly when the rules counted a late arrival — first
-   * tracked activity past the shift start plus the policy's grace, by the one
-   * core rule — so the Start column and the month sheet's Late number cannot
+   * day reads Late exactly when the rules counted a late arrival — the door
+   * punch-in past the shift start plus the policy's grace, by the one core
+   * rule — so the Start column and the month sheet's Late number cannot
    * disagree.
    */
   lateFor?: { from: string; ordinalFor: (userId: string, date: string) => number | null };
@@ -303,17 +306,21 @@ export function buildMemberReportDays(input: {
       lastActivityMs: bucket.last,
       punchInMinute: punch?.inMinute ?? null,
       punchOutMinute: punch?.outMinute ?? null,
-      // One late rule everywhere: first tracked activity (never manual) after
-      // the shift assigned for this date plus the company grace — on a
-      // first-half leave day, after the afternoon time — for a STANDARD
-      // person only. With the attendance rules on, Late is what the rules
-      // counted, so the Start column and the month sheet agree day for day.
+      // One late rule everywhere: the door punch-in after the shift assigned
+      // for this date plus the company grace — on a first-half leave day,
+      // after the afternoon time — for a STANDARD person only. With the
+      // attendance rules on, Late is what the rules counted, so the Start
+      // column and the month sheet agree day for day.
       shiftStatus: shiftStatusFor({
         shiftStartMs: shift?.startMs ?? null,
-        firstTrackedMs: bucket.firstTracked,
+        punchInMs: punchInMs(punch, date, input.range.tz),
         countedMs: bucket.counted,
         graceMinutes: grace,
-        halfDayLateAfterMs: halfDayLateAfterMs(date, input.range.tz, input.halfDayLateAfterMinute),
+        halfDayLateAfterMs: instantForLocalMinute(
+          date,
+          input.halfDayLateAfterMinute ?? DEFAULT_HALF_DAY_LATE_AFTER_MINUTE,
+          input.range.tz,
+        ),
         status: dayStatus,
         mode: input.attendanceModeFor?.(input.userId),
         late: input.lateFor && date >= input.lateFor.from

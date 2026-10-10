@@ -657,10 +657,10 @@ function AttendanceRulesModal({
               <Field label="Late allowed" hint="A month. Each one after is half a day.">
                 <Input className="pol-input-mono" value={lateAllowed} onChange={(e) => setLateAllowed(e.target.value)} inputMode="numeric" />
               </Field>
-              <Field label="Late grace" hint="Minutes after shift start, for everyone.">
+              <Field label="Late grace" hint="Minutes a punch-in may run past shift start, for everyone.">
                 <Input className="pol-input-mono" value={graceText} onChange={(e) => setGraceText(e.target.value)} inputMode="numeric" />
               </Field>
-              <Field label="Late on half-day leave" hint="First-half leave: tracked work starting after this time is late. No grace.">
+              <Field label="Late on half-day leave" hint="First-half leave: punching in after this time is late. No grace.">
                 <Input className="pol-input-mono" type="time" value={halfLateText} onChange={(e) => setHalfLateText(e.target.value)} />
               </Field>
             </div>

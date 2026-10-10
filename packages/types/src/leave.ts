@@ -216,7 +216,7 @@ export const LeavePolicyDtoSchema = z.object({
   lateAllowedPerMonth: z.number().int(),
   /** Minutes after the shift start that still count as on time, for everyone. */
   lateGraceMinutes: z.number().int(),
-  /** First-half leave day: late when tracked work starts after this minute of the day (840 = 14:00), no grace. */
+  /** First-half leave day: late when the punch-in is after this minute of the day (840 = 14:00), no grace. */
   halfDayLateAfterMinute: z.number().int(),
   updatedAt: z.string(),
 });

@@ -1,18 +1,19 @@
 import { ATTENDANCE_RULE_DEFAULTS, type AttendanceRuleMode, type DayStatus, type ShiftStatus } from '@grind/types';
-import { instantForLocalMinute } from './shift';
 
 /**
  * The facts a day is judged on — late, full, half — with one definition each,
  * shared by the reports, the team rollups and the month report.
  *
- * **Late** is the first real *tracked* activity (agent-observed work or a
- * meeting; never manual time) starting after the shift start plus the
- * company's grace. The shift is the one assigned for that date. On leave for
- * the first half you are due in the afternoon instead: late is tracked
- * activity starting after one fixed clock time (14:00 unless the policy names
- * its own), with no grace. A day nobody judged at the shift start — a holiday,
- * a weekly off, full-day leave, leave for the second half — is never late, and
- * only people the attendance rules treat as STANDARD can be late at all.
+ * **Late** is judged by the door: the punch-in recorded for that date, after
+ * the shift start plus the company's grace. When Timo work started does not
+ * matter — somebody who badged in at 09:20 and opened the laptop at 09:33 was
+ * on time. The shift is the one assigned for that date. On leave for the first
+ * half you are due in the afternoon instead: late is a punch-in after one
+ * fixed clock time (14:00 unless the policy names its own), with no grace. A
+ * day with no punch-in is never late, and neither is a day nobody judged at
+ * the shift start — a holiday, a weekly off, full-day leave, leave for the
+ * second half. Only people the attendance rules treat as STANDARD can be late
+ * at all.
  *
  * **Full day** is 7 h of counted time, **half day** 3 h 30, unless the leave
  * policy names its own minimums.
@@ -31,18 +32,6 @@ function firstHalfLeave(status: LateStatusFacts | null | undefined): boolean {
 }
 
 /**
- * The instant a first-half leave day's afternoon is due: the policy's clock
- * time (minutes after midnight, 14:00 by default) on that date.
- */
-export function halfDayLateAfterMs(
-  date: string,
-  tz: string,
-  minuteOfDay: number = DEFAULT_HALF_DAY_LATE_AFTER_MINUTE,
-): number | null {
-  return instantForLocalMinute(date, minuteOfDay, tz);
-}
-
-/**
  * Is this day outside the shift-start check? Only an ordinary working day is
  * judged at the shift start. Any leave is not: full-day leave expects nobody,
  * first-half leave is judged at the afternoon time instead (see
@@ -56,8 +45,11 @@ export function lateExempt(status: LateStatusFacts | null | undefined): boolean 
 }
 
 export interface LateFacts {
-  /** First tracked activity that began on the day (see `DayBucket.firstTracked`). */
-  firstTrackedMs: number | null;
+  /**
+   * The door punch-in for that date, as an instant: its clock reading on that
+   * date in the workspace timezone. Null when nobody punched in.
+   */
+  punchInMs: number | null;
   /** The assigned shift's start on that date, or null when none applied. */
   shiftStartMs: number | null;
   /** Company grace after the shift start. Defaults to 30 minutes. */
@@ -65,9 +57,9 @@ export interface LateFacts {
   /** What the Working Calendar says about the day, when known. */
   status?: LateStatusFacts | null;
   /**
-   * On a first-half leave day, the instant after which the first tracked
-   * activity is late (see {@link halfDayLateAfterMs}); no grace. Without it
-   * such a day is not judged.
+   * On a first-half leave day, the instant after which the punch-in is late:
+   * the policy's afternoon clock time on that date; no grace. Without it such
+   * a day is not judged.
    */
   halfDayLateAfterMs?: number | null;
   /**
@@ -79,16 +71,16 @@ export interface LateFacts {
 }
 
 export function isLate(facts: LateFacts): boolean {
-  if (facts.firstTrackedMs === null) return false;
+  if (facts.punchInMs === null) return false;
   if (facts.mode && facts.mode !== 'STANDARD') return false;
   // Off for the morning, due in the afternoon: one fixed time for everyone,
   // whatever the shift.
   if (firstHalfLeave(facts.status)) {
-    return facts.halfDayLateAfterMs != null && facts.firstTrackedMs > facts.halfDayLateAfterMs;
+    return facts.halfDayLateAfterMs != null && facts.punchInMs > facts.halfDayLateAfterMs;
   }
   if (facts.shiftStartMs === null || lateExempt(facts.status)) return false;
   const grace = Math.max(0, facts.graceMinutes ?? DEFAULT_LATE_GRACE_MINUTES);
-  return facts.firstTrackedMs > facts.shiftStartMs + grace * 60_000;
+  return facts.punchInMs > facts.shiftStartMs + grace * 60_000;
 }
 
 export type DayCredit = 'FULL' | 'HALF' | 'NONE';
@@ -116,13 +108,16 @@ export function dayCredit(minutes: number, thresholds: DayThresholds = DEFAULT_D
  *
  *  - `no_shift`     no shift applied, or the day was off for the whole day
  *  - `no_activity`  a day somebody was expected and nothing was counted
- *  - `early`        tracked activity began before the shift start
+ *  - `early`        punched in before the shift start
  *  - `late`         see {@link isLate}
- *  - `on_time`      anything else with counted time
+ *  - `on_time`      anything else with counted time, including a day with no
+ *                   punch-in — without a door reading there is no arrival to
+ *                   call early or late
  */
 export function shiftStatusFor(input: {
   shiftStartMs: number | null;
-  firstTrackedMs: number | null;
+  /** The door punch-in for the day (see {@link LateFacts.punchInMs}). */
+  punchInMs: number | null;
   countedMs: number;
   graceMinutes?: number | null;
   halfDayLateAfterMs?: number | null;
@@ -145,20 +140,15 @@ export function shiftStatusFor(input: {
       || input.status.expectedFraction === 0
     : false;
   if (input.countedMs <= 0) return offAllDay ? 'no_shift' : 'no_activity';
-  if (input.firstTrackedMs === null) return 'on_time';
-  if (input.late !== undefined) {
-    if (input.late) return 'late';
-    return input.firstTrackedMs < input.shiftStartMs ? 'early' : 'on_time';
-  }
-  if (input.firstTrackedMs < input.shiftStartMs) return 'early';
-  return isLate({
-    firstTrackedMs: input.firstTrackedMs,
+  if (input.punchInMs === null) return 'on_time';
+  const late = input.late ?? isLate({
+    punchInMs: input.punchInMs,
     shiftStartMs: input.shiftStartMs,
     graceMinutes: input.graceMinutes,
     halfDayLateAfterMs: input.halfDayLateAfterMs,
     status: input.status,
     mode: input.mode,
-  })
-    ? 'late'
-    : 'on_time';
+  });
+  if (late) return 'late';
+  return input.punchInMs < input.shiftStartMs ? 'early' : 'on_time';
 }

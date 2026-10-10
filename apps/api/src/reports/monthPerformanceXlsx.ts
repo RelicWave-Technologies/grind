@@ -413,9 +413,9 @@ function buildLegendSheet(wb: ExcelJS.Workbook, report: MonthPerformanceReport):
       ['unapproved', 'Absent; leave was applied for but not approved'],
       [
         'late 3',
-        `The 3rd late arrival this month — tracked work started more than ${settings.lateGrace} min after shift start. ` +
+        `The 3rd late arrival this month — punched in more than ${settings.lateGrace} min after shift start. ` +
           `The first ${settings.lateAllowed} are free; each one after is a half day. ` +
-          `On a first-half leave day, late means tracked work started after ` +
+          `On a first-half leave day, late means punching in after ` +
           `${minToHhmm(settings.halfDayLateAfter ?? ATTENDANCE_RULE_DEFAULTS.halfDayLateAfterMinute)}, no grace`,
       ],
       [

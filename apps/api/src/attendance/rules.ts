@@ -21,8 +21,8 @@ import type { MonthPerformanceCode } from '../reports/monthPerformance';
  *      half-day leave would cost more than taking nothing and working an hour.
  *   3. Working from home without an approved WFH request is leave.
  *   4. Absent without an approved leave application is leave without approval.
- *   5. Starting tracked work after the shift start plus the grace period is a
- *      late arrival — on a first-half leave day, after the afternoon time
+ *   5. Punching in at the door after the shift start plus the grace period is
+ *      a late arrival — on a first-half leave day, after the afternoon time
  *      (14:00 by default), no grace. A few a month are allowed; each one after
  *      that is half a day of leave — unless another rule already charged that
  *      day, which is the one cut.
@@ -126,24 +126,25 @@ export function judgeDay(
 /**
  * Was this arrival late, for the rules' count?
  *
- * The one company definition from `@grind/core`: the first real tracked
- * activity (agent-observed work or a meeting, never manual time) after the
+ * The one company definition from `@grind/core`: the door punch-in after the
  * start of the shift assigned for that date plus the policy grace; on a
  * first-half leave day, after the policy's afternoon time with no grace. Never
- * on a holiday, a weekly off, full-day or second-half leave, and only for a
- * STANDARD person — REMOTE and EXEMPT people are never counted late.
+ * without a punch-in, never on a holiday, a weekly off, full-day or
+ * second-half leave, and only for a STANDARD person — REMOTE and EXEMPT people
+ * are never counted late.
  */
 export function isLateArrival(input: {
   status: DayStatus | null;
   mode: AttendanceRuleMode;
-  firstTrackedMs: number | null;
+  /** The door punch-in as an instant (see `punchInMs`). */
+  punchInMs: number | null;
   shiftStartMs: number | null;
   graceMinutes: number;
-  /** First-half leave day: late after this instant, no grace (see `halfDayLateAfterMs`). */
+  /** First-half leave day: late after this instant (the policy's afternoon time), no grace. */
   halfDayLateAfterMs: number | null;
 }): boolean {
   return isLate({
-    firstTrackedMs: input.firstTrackedMs,
+    punchInMs: input.punchInMs,
     shiftStartMs: input.shiftStartMs,
     graceMinutes: input.graceMinutes,
     halfDayLateAfterMs: input.halfDayLateAfterMs,

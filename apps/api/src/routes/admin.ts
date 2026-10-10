@@ -9,7 +9,6 @@ import { deleteMember, planMemberDeletion } from '../admin/deleteMember';
 import { logger } from '../logger';
 import { resolveReportRange } from '../reports/member';
 import { timesheetCalendarInputs } from '../leave';
-import { loadPunchLookup } from '../attendance/punches';
 import { loadAttendanceRuleContext } from '../attendance/ruleContext';
 import { loadOverrideLookup } from '../reports/attendanceOverrides';
 import {
@@ -1243,7 +1242,6 @@ adminRouter.get('/timesheets.csv', requireAnyCapability(['reports.team.read', 'r
     // rules are off, the day was fine, or a manager corrected it — a
     // corrected day is the corrector's call, as on the reports.
     const userIds = users.map((u) => u.id);
-    const punchFor = await loadPunchLookup({ userIds, from: range.from, to: range.to });
     const [rules, overrideFor] = await Promise.all([
       loadAttendanceRuleContext({
         workspaceId: req.scope.workspaceId,
@@ -1251,7 +1249,6 @@ adminRouter.get('/timesheets.csv', requireAnyCapability(['reports.team.read', 'r
         userIds,
         from: range.from,
         to: range.to,
-        punchFor,
       }),
       loadOverrideLookup({ userIds, from: range.from, to: range.to }),
     ]);

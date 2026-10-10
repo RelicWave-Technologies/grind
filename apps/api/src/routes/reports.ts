@@ -13,7 +13,6 @@ import type {
   TeamReportsSummaryResponse,
   TeamReportUser,
 } from '@grind/types';
-import { loadPunchLookup } from '../attendance/punches';
 import { lateLookup, loadAttendanceRuleContext } from '../attendance/ruleContext';
 import { requireAccessToken } from '../middleware/auth';
 import { hideDisallowedActiveFields, policyFlagsForUser } from '../workspacePolicy/readScrub';
@@ -84,14 +83,12 @@ reportsRouter.get('/me', async (req, res, next) => {
       from: range.from,
       to: range.to,
     });
-    const punchFor = await loadPunchLookup({ userIds: [req.user.sub], from: range.from, to: range.to });
     const rules = await loadAttendanceRuleContext({
       workspaceId: req.scope!.workspaceId,
       tz: range.tz,
       userIds: [req.user.sub],
       from: range.from,
       to: range.to,
-      punchFor,
     });
     const overrideFor = await loadOverrideLookup({
       userIds: [req.user.sub],
@@ -109,7 +106,7 @@ reportsRouter.get('/me', async (req, res, next) => {
         lateFor: lateLookup(rules),
         attendanceModeFor: rules.modeFor,
         fundedDaysFor: calendar.fundedDaysFor,
-        punchFor,
+        punchFor: rules.punchFor,
         overrideFor,
         userId: req.user.sub,
         range,
@@ -181,14 +178,12 @@ reportsRouter.get('/team/summary', requireCapability('reports.team.read'), async
       from: range.from,
       to: range.to,
     });
-    const punchFor = await loadPunchLookup({ userIds: reportUsers.map((user) => user.id), from: range.from, to: range.to });
     const rules = await loadAttendanceRuleContext({
       workspaceId: req.scope!.workspaceId,
       tz: range.tz,
       userIds: reportUsers.map((user) => user.id),
       from: range.from,
       to: range.to,
-      punchFor,
     });
     const overrideFor = await loadOverrideLookup({ userIds: reportUsers.map((user) => user.id), from: range.from, to: range.to });
     const daysByUser = new Map<string, ReturnType<typeof buildMemberReportDays>>();
@@ -200,7 +195,7 @@ reportsRouter.get('/team/summary', requireCapability('reports.team.read'), async
         lateFor: lateLookup(rules),
         attendanceModeFor: rules.modeFor,
         fundedDaysFor: calendar.fundedDaysFor,
-        punchFor,
+        punchFor: rules.punchFor,
         overrideFor,
         userId: user.id,
         range,
@@ -256,14 +251,12 @@ reportsRouter.get('/team/member', requireCapability('reports.team.read'), async 
       from: range.from,
       to: range.to,
     });
-    const punchFor = await loadPunchLookup({ userIds: [target.user.id], from: range.from, to: range.to });
     const rules = await loadAttendanceRuleContext({
       workspaceId: req.scope!.workspaceId,
       tz: range.tz,
       userIds: [target.user.id],
       from: range.from,
       to: range.to,
-      punchFor,
     });
     const overrideFor = await loadOverrideLookup({ userIds: [target.user.id], from: range.from, to: range.to });
     const days = buildMemberReportDays({
@@ -272,7 +265,7 @@ reportsRouter.get('/team/member', requireCapability('reports.team.read'), async 
       lateFor: lateLookup(rules),
       attendanceModeFor: rules.modeFor,
       fundedDaysFor: calendar.fundedDaysFor,
-      punchFor,
+      punchFor: rules.punchFor,
       overrideFor,
       userId: target.user.id,
       range,
