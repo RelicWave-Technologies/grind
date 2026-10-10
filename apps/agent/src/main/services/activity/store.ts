@@ -27,6 +27,12 @@ export interface ActivityRow {
   /** Who recorded it. Rows from before owner scoping are null until claimed. */
   ownerUserId?: string | null;
   ownerWorkspaceId?: string | null;
+  /**
+   * Bumped every time the minute's counts change. A sync marks a row synced
+   * only if its rev is still the one it sent, so a tail merged in while the
+   * request was in flight is never marked as uploaded.
+   */
+  rev?: number;
 }
 
 export interface ActivityWindowTotals {
@@ -68,6 +74,7 @@ export class ActivityStore {
       'active_url TEXT',
       'owner_user_id TEXT',
       'owner_workspace_id TEXT',
+      'rev INTEGER NOT NULL DEFAULT 0',
     ]) {
       try {
         this.db.exec(`ALTER TABLE activity_samples ADD COLUMN ${col}`);
@@ -133,7 +140,7 @@ export class ActivityStore {
              scroll_events = @scrollEvents, iki_cv = @ikiCv, move_speed_cv = @moveSpeedCv,
              path_straight = @pathStraightness, time_entry_id = @timeEntryId,
              active_app = @activeApp, active_app_bundle = @activeAppBundle,
-             active_title = @activeTitle, active_url = @activeUrl, synced = 0
+             active_title = @activeTitle, active_url = @activeUrl, synced = 0, rev = rev + 1
            WHERE id = @id`,
         )
         .run({
@@ -232,11 +239,27 @@ export class ActivityStore {
     return Number(row.n);
   }
 
-  markSynced(ids: string[]): void {
-    if (ids.length === 0) return;
-    const stmt = this.db.prepare(`UPDATE activity_samples SET synced = 1 WHERE id = ?`);
-    const tx = this.db.transaction((list: string[]) => list.forEach((id) => stmt.run(id)));
-    tx(ids);
+  /**
+   * Mark the rows a sync sent as synced — each only if it is still the version
+   * that was sent. A minute whose tail was merged in meanwhile (its rev moved
+   * on) stays queued and goes up again with its new total. Returns how many
+   * rows were marked.
+   */
+  markSynced(sent: Array<Pick<ActivityRow, 'id' | 'rev'>>): number {
+    if (sent.length === 0) return 0;
+    const stmt = this.db.prepare(`UPDATE activity_samples SET synced = 1 WHERE id = ? AND rev = ?`);
+    const tx = this.db.transaction((list: Array<Pick<ActivityRow, 'id' | 'rev'>>) =>
+      list.reduce((marked, row) => marked + Number(stmt.run(row.id, row.rev ?? 0).changes ?? 0), 0),
+    );
+    return tx(sent);
+  }
+
+  /** Drop synced minutes older than `beforeMs` (local retention). Unsynced ones are never pruned. */
+  pruneSynced(beforeMs: number): number {
+    const info = this.db
+      .prepare(`DELETE FROM activity_samples WHERE synced = 1 AND bucket_start < ?`)
+      .run(beforeMs);
+    return Number(info.changes ?? 0);
   }
 
   scrubActiveFields(policy: PolicyFlags): number {
@@ -299,5 +322,6 @@ function map(r: Record<string, unknown>): ActivityRow {
     synced: Number(r.synced),
     ownerUserId: r.owner_user_id == null ? null : String(r.owner_user_id),
     ownerWorkspaceId: r.owner_workspace_id == null ? null : String(r.owner_workspace_id),
+    rev: r.rev == null ? 0 : Number(r.rev),
   };
 }

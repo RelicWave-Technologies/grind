@@ -20,7 +20,7 @@ function fakeStore(rows: Row[]) {
   const synced: string[] = [];
   const store = {
     unsynced: (n: number) => rows.slice(0, n),
-    markSynced: (ids: string[]) => synced.push(...ids),
+    markSynced: (sent: Array<{ id: string }>) => synced.push(...sent.map((r) => r.id)),
     claimUnowned: () => 0,
   } as unknown as Parameters<typeof flushActivity>[0];
   return { store, synced };
@@ -101,6 +101,27 @@ describe('flushActivity byte-bounded batching', () => {
     const sent = bodyOf().samples as unknown as { id: string }[];
     expect(sent.map((sample) => sample.id)).toEqual(['ready', 'unlinked']);
     expect(synced).toEqual(['ready', 'unlinked']);
+  });
+
+  it('sends nothing when the signed-in account changed after the rows were read', async () => {
+    const { store, synced } = fakeStore([row('r1')]);
+    expect(await flushActivity(store, { owner: OWNER, stillOwner: async () => false })).toBe(0);
+    expect(mocks.api).not.toHaveBeenCalled();
+    expect(synced).toEqual([]);
+  });
+
+  it('marks synced with the rev it sent, and claims through the caller\'s once-per-owner hook', async () => {
+    const marked: unknown[] = [];
+    const claim = vi.fn();
+    const store = {
+      unsynced: () => [row('r1', { rev: 3 })],
+      markSynced: (sent: unknown[]) => marked.push(...sent),
+      claimUnowned: () => { throw new Error('per-flush claim must not run'); },
+    } as unknown as Parameters<typeof flushActivity>[0];
+
+    expect(await flushActivity(store, { owner: OWNER, claimUnowned: claim, stillOwner: async () => true })).toBe(1);
+    expect(claim).toHaveBeenCalledWith(OWNER);
+    expect(marked).toEqual([{ id: 'r1', rev: 3 }]);
   });
 
   it('sends nothing while signed out', async () => {

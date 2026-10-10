@@ -59,6 +59,13 @@ export interface FlushActivityOptions {
    * entry is still waiting to be created stays queued.
    */
   isTimeEntryPendingCreate?: (entryId: string) => boolean;
+  /** Claim legacy unowned samples for `owner` (the caller runs it once per owner change). */
+  claimUnowned?: (owner: ActivityOwner) => void;
+  /**
+   * Checked right before the request: the API sends whichever session is
+   * current, so samples read for one account must not go up under another.
+   */
+  stillOwner?: () => Promise<boolean>;
 }
 
 /**
@@ -70,7 +77,8 @@ export interface FlushActivityOptions {
 export async function flushActivity(store: ActivityStore, options: FlushActivityOptions): Promise<number> {
   const { owner, isTimeEntryPendingCreate = () => false } = options;
   if (!owner) return 0;
-  store.claimUnowned(owner);
+  if (options.claimUnowned) options.claimUnowned(owner);
+  else store.claimUnowned(owner);
   const rows = store
     .unsynced(MAX_BATCH_ROWS, owner)
     .filter((row) => row.timeEntryId === null || !isTimeEntryPendingCreate(row.timeEntryId));
@@ -78,14 +86,19 @@ export async function flushActivity(store: ActivityStore, options: FlushActivity
 
   // Pack the longest prefix whose JSON stays under the byte budget — always at
   // least one row, so a single large sample still makes forward progress.
-  const batch: { id: string; input: ActivitySampleInput }[] = [];
+  const batch: { id: string; rev: number | undefined; input: ActivitySampleInput }[] = [];
   let bytes = 20; // {"samples":[ ... ]} envelope
   for (const r of rows) {
     const input = toInput(r);
     const size = Buffer.byteLength(JSON.stringify(input), 'utf8') + 1; // + comma
     if (batch.length > 0 && bytes + size > MAX_BATCH_BYTES) break;
-    batch.push({ id: r.id, input });
+    batch.push({ id: r.id, rev: r.rev, input });
     bytes += size;
+  }
+
+  if (options.stillOwner && !(await options.stillOwner())) {
+    log.info('activity flush skipped: the signed-in account changed');
+    return 0;
   }
 
   try {
@@ -93,7 +106,8 @@ export async function flushActivity(store: ActivityStore, options: FlushActivity
       method: 'POST',
       body: { samples: batch.map((b) => b.input) },
     });
-    store.markSynced(batch.map((b) => b.id));
+    // Only what is still the version we sent: a tail merged in meanwhile stays queued.
+    store.markSynced(batch.map((b) => ({ id: b.id, rev: b.rev })));
     if ((response?.detached ?? 0) > 0) {
       log.warn('activity samples accepted without unavailable timer parent', { count: response.detached });
     }

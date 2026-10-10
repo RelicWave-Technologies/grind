@@ -3,7 +3,7 @@ import { app } from 'electron';
 import path from 'node:path';
 import { ulid } from 'ulid';
 import { uIOhook } from 'uiohook-napi';
-import { MinuteSealer, minuteFloor } from './minuteSealer';
+import { MinuteSealer, minuteFloor, type SealOwner } from './minuteSealer';
 import type { ActivitySample } from './aggregator';
 import { ActiveWindowTracker, type ActiveWindowObservation } from './activeWindow';
 import { ActivityStore, type ActivityOwner } from './store';
@@ -16,6 +16,8 @@ import { log } from '../../logger';
 import { getWorkspaceTimeContext } from '../workspaceTime';
 import type { PolicyFlags } from '@grind/types';
 import { drainTimerSyncNow, getTimerService } from '../timer';
+import { currentOwner, oncePerOwner, sameOwner } from '../capture/owner';
+import { loadTokens } from '../tokenStore';
 
 let store: ActivityStore | null = null;
 let sealer: MinuteSealer | null = null;
@@ -45,6 +47,8 @@ const MOVE_THROTTLE_MS = 50;
 // created after the first recording tick can be seeded with current state.
 let recording = false;
 let recordingEntryId: string | null = null;
+/** The account signed in when recording last started — a minute belongs to it. */
+let recordingOwner: SealOwner | null = null;
 
 /**
  * Called by the meeting/window poller (~every 10s) with the foreground
@@ -67,23 +71,24 @@ function getStore(): ActivityStore {
   return store;
 }
 
-/** The account the timer is signed in as — every local sample is scoped to it. */
-function currentOwner(): ActivityOwner | null {
-  try {
-    return getTimerService().currentOwner();
-  } catch {
-    return null;
-  }
-}
+/** Claim pre-owner-scoping samples for an account — once per owner change, not per flush or query. */
+export const claimUnownedActivity: (owner: ActivityOwner) => void = oncePerOwner((owner) => {
+  getStore().claimUnowned(owner);
+});
 
 const activitySyncDrain = new ActivitySyncDrain({
   getStore,
   beforeFlush: () => drainTimerSyncNow('manual'),
-  flush: (activityStore) =>
-    flushActivity(activityStore, {
-      owner: currentOwner(),
+  flush: (activityStore) => {
+    const owner = currentOwner();
+    return flushActivity(activityStore, {
+      owner,
       isTimeEntryPendingCreate: (entryId) => getTimerService().isPendingCreate(entryId),
-    }),
+      claimUnowned: claimUnownedActivity,
+      stillOwner: async () =>
+        sameOwner(owner, currentOwner()) && sameOwner(owner, await loadTokens().catch(() => null)),
+    });
+  },
   logger: log,
 });
 
@@ -103,7 +108,10 @@ export function drainActivityNow(reason: ActivitySyncDrainReason): Promise<Activ
 export function setActivityRecording(on: boolean, entryId: string | null = null): void {
   recording = on;
   if (on && entryId) recordingEntryId = entryId;
-  sealer?.setRecording(on, entryId);
+  // Stamp the account now, while it is recording — at seal time a sign-out or
+  // account switch may already have happened.
+  if (on) recordingOwner = currentOwner();
+  sealer?.setRecording(on, entryId, recordingOwner);
   syncHook();
 }
 
@@ -257,7 +265,7 @@ export function startActivityCapture(): void {
     // A tracked minute only counts as a quiet minute if we were listening.
     isCapturing: () => hookRunning,
   });
-  sealer.setRecording(recording, recordingEntryId); // seed current state
+  sealer.setRecording(recording, recordingEntryId, recordingOwner); // seed current state
 
   uIOhook.on('keydown', () => {
     emitTrackedInputActivity();
@@ -297,12 +305,19 @@ function scheduleMinuteSeal(): void {
   const delay = minuteFloor(now) + 60_000 - now + 250;
   flushTimer = setTimeout(() => {
     flushTimer = null;
-    if (sealer && sealer.tick() == null) {
-      // Nothing to seal — still bound the window tracker so it can't drift
-      // during long untracked stretches.
-      activeWindow.prune(minuteFloor(serverAlignedNow()));
+    try {
+      if (sealer && sealer.tick() == null) {
+        // Nothing to seal — still bound the window tracker so it can't drift
+        // during long untracked stretches.
+        activeWindow.prune(minuteFloor(serverAlignedNow()));
+      }
+    } catch (err) {
+      // A failed seal (a locked or full database) must not stop every later
+      // minute from sealing.
+      log.error('activity minute seal failed', { err: String(err) });
+    } finally {
+      if (started) scheduleMinuteSeal();
     }
-    if (started) scheduleMinuteSeal();
   }, delay);
 }
 
@@ -310,10 +325,9 @@ function scheduleMinuteSeal(): void {
  * Durably write a sealed minute to the local queue — added to the minute
  * already stored, if any — and kick a best-effort sync.
  */
-function persistSample(sample: ActivitySample, entryId: string | null): void {
+function persistSample(sample: ActivitySample, entryId: string | null, owner: SealOwner | null): void {
   const dom = activeWindow.dominantFor(sample.bucketStart, sample.bucketStart + 60_000);
   const policy = getCapturePolicy();
-  const owner = currentOwner();
   activeWindow.prune(sample.bucketStart + 60_000);
   const written = getStore().persistMinute({
     id: ulid(),

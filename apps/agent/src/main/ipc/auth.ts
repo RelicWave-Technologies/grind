@@ -7,6 +7,7 @@ import { activateSignedInSession } from '../services/signIn';
 import { broadcast } from '../broadcast';
 import { log } from '../logger';
 import { bindTimerToStoredSession, drainTimerSyncNow, getTimerService } from '../services/timer';
+import { resumeUploads, stopUploads } from '../services/capture/uploader';
 
 /** What the Sign out button gets back. A refusal leaves the timer untouched. */
 type LogoutResult = { ok: true } | { ok: false; reason: 'time_waiting_to_sync' };
@@ -64,10 +65,19 @@ async function signOutSafely(): Promise<LogoutResult> {
     }
   }
 
-  stopHeartbeat();
-  await logout();
-  // Tokens are gone, so this binds no owner.
-  await bindTimerToStoredSession(false);
+  // A screenshot pass still running would send its next request with whatever
+  // session is current. Stop it and wait for it before the tokens change; the
+  // interrupted shot stays queued for this account's next sign-in.
+  await stopUploads();
+  try {
+    stopHeartbeat();
+    await logout();
+    // Tokens are gone, so this binds no owner.
+    await bindTimerToStoredSession(false);
+  } finally {
+    // Passes no-op without an owner; the next sign-in's uploads start normally.
+    resumeUploads();
+  }
   notifyAuth('loggedOut', { reason: 'manual' });
   return { ok: true };
 }

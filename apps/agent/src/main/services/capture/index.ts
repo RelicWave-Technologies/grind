@@ -1,16 +1,19 @@
 import Database from 'better-sqlite3';
 import { app, powerMonitor } from 'electron';
 import path from 'node:path';
-import { promises as fs } from 'node:fs';
+import { existsSync, promises as fs } from 'node:fs';
 import sharp from 'sharp';
+import { effectiveScreenshotRetentionDays } from '@grind/types';
 import { ScreenshotStore, type CaptureOwner, type ScreenshotRow, type ScreenshotUploadSummary } from './store';
-import { captureNow, thumbDataUrl, fullDataUrl } from './capture';
+import { captureNow, isDiskFullError, thumbDataUrl, fullDataUrl } from './capture';
 import { CAPTURE_DEFER_MS, nextDelayMs, shouldDeferCapture } from './scheduler';
-import { planScreenshotRetention, type DiskFile } from './retention';
+import { localRetentionDays, planScreenshotRetention, type DiskFile } from './retention';
 import { startUploader, uploadScreenshotsNow } from './uploader';
+import { currentOwner, oncePerOwner } from './owner';
 import { getTimerService } from '../timer';
-import { getActivityStore } from '../activity';
+import { claimUnownedActivity, getActivityStore } from '../activity';
 import { activityPercent } from '../activity/percent';
+import { api } from '../apiClient';
 import { SCREENSHOT_RETENTION_DAYS } from '../../env';
 import { getScreenshotIntervalSec } from '../agentConfig';
 import { type CaptureHealth } from '../permissions';
@@ -28,7 +31,13 @@ const TRIM_BATCH = 200;
 /** A file this new may still be waiting for its row — never judge it an orphan. */
 const ORPHAN_MIN_AGE_MS = 5 * 60_000;
 let timer: NodeJS.Timeout | null = null;
-let retentionTimer: NodeJS.Timeout | null = null;
+let retentionStarted = false;
+/** The workspace's screenshot retention, as last read from the server (null until then). */
+let policyRetentionDays: number | null = null;
+/** Shots past the retention window still waiting to upload — kept, and surfaced. */
+let overdueUnuploaded = 0;
+/** The last capture could not be stored because the disk (or the database) is full. */
+let diskFull = false;
 // How many times the pending capture has been held back for input.
 let captureDeferrals = 0;
 let lastHealth: CaptureHealth = 'unknown';
@@ -81,20 +90,27 @@ function setScreenHealth(health: CaptureHealth): void {
   for (const listener of healthListeners) listener(health);
 }
 
-/** The account the timer is signed in as — every local row is scoped to it. */
-function currentOwner(): CaptureOwner | null {
-  try {
-    return getTimerService().currentOwner();
-  } catch {
-    return null;
-  }
-}
-
 function getStore(): ScreenshotStore {
   if (store) return store;
   const db = new Database(path.join(app.getPath('userData'), 'agent.db'));
   store = new ScreenshotStore(db);
+  try {
+    const requeued = store.requeueFailedWithFileOnce((filePath) => existsSync(resolveScreenshotPath(filePath)));
+    if (requeued > 0) log.info('requeued written-off screenshots whose file is still on disk', { requeued });
+  } catch (err) {
+    log.warn('requeue of written-off screenshots failed', { err: String(err) });
+  }
   return store;
+}
+
+/** Claim pre-owner-scoping rows for an account — once per owner change, not per query. */
+export const claimUnownedScreenshots: (owner: CaptureOwner) => void = oncePerOwner((owner) => {
+  getStore().claimUnowned(owner);
+});
+
+function noteDiskFull(err: unknown, where: string): void {
+  if (!diskFull) log.error('screenshot could not be stored: disk full', { where, err: String(err) });
+  diskFull = true;
 }
 
 /** Shared accessor so the uploader can drain the same local queue. */
@@ -126,8 +142,9 @@ async function tick() {
         return;
       }
       captureDeferrals = 0;
-      const { rows: captured, health } = await captureNow(status.entryId);
+      const { rows: captured, health, diskFull: noSpace } = await captureNow(status.entryId);
       setScreenHealth(health);
+      if (noSpace) noteDiskFull('file', 'capture');
       const owner = currentOwner();
       const rows = captured.map((r) => ({
         ...r,
@@ -135,13 +152,16 @@ async function tick() {
         ownerWorkspaceId: owner?.workspaceId ?? null,
       }));
       for (const r of rows) getStore().insert(r);
+      if (rows.length && !noSpace) diskFull = false;
       if (rows.length) broadcastScreenshotChange();
       // Push fresh shots promptly, through the same single pass the
       // background drain uses (no-op if signed out or storage is off).
       if (rows.length) void uploadScreenshotsNow(rows);
     }
   } catch (err) {
-    log.warn('screenshot tick failed', { err: String(err) });
+    // A full disk (file or SQLite) must not stop the loop — note it and carry on.
+    if (isDiskFullError(err)) noteDiskFull(err, 'tick');
+    else log.warn('screenshot tick failed', { err: String(err) });
   } finally {
     schedule();
   }
@@ -212,14 +232,35 @@ async function pruneEmptyDirs(root: string): Promise<void> {
 }
 
 /**
- * Prune the local screenshot cache: expire old shots, delete orphan files
- * (crash between write and DB insert), and drop rows whose file vanished
- * (so the gallery never shows a broken thumbnail). Then shrink uploaded shots
- * the server has held for a few days to a small local copy. Idempotent — safe
+ * The workspace's screenshot retention, bounded to the privacy contract's
+ * 1–60 days. Falls back to the last value read (or none) when signed out or
+ * offline — the agent's own cap then applies.
+ */
+async function refreshPolicyRetentionDays(): Promise<number | null> {
+  if (!currentOwner()) return policyRetentionDays;
+  try {
+    const profile = await api<{ policy?: { retentionDaysScreenshots?: number | null } }>('/v1/profile/me', {
+      timeoutMs: 15_000,
+    });
+    policyRetentionDays = effectiveScreenshotRetentionDays(profile.policy?.retentionDaysScreenshots);
+  } catch (err) {
+    log.debug('screenshot retention policy unavailable; keeping last known', { err: String(err) });
+  }
+  return policyRetentionDays;
+}
+
+/**
+ * Prune the local screenshot cache: expire old uploaded shots, delete orphan
+ * files (crash between write and DB insert), and drop rows whose file vanished
+ * (so the gallery never shows a broken thumbnail). A shot the server does not
+ * have yet is never deleted — past the window it is only counted. Then shrink
+ * uploaded shots the server has held for a few days to a small local copy, and
+ * prune synced activity minutes as old as the expired shots. Idempotent — safe
  * to run on every boot and daily thereafter.
  */
 async function runScreenshotRetention(now = serverAlignedNow()): Promise<void> {
   try {
+    const retentionDays = localRetentionDays(await refreshPolicyRetentionDays(), SCREENSHOT_RETENTION_DAYS);
     const root = screenshotsRoot();
     // Rows BEFORE files: a capture racing this run writes its file first and
     // its row second, so a row read here always has its file on the listing
@@ -236,8 +277,15 @@ async function runScreenshotRetention(now = serverAlignedNow()): Promise<void> {
       // The same capture can also have written its file and not yet its row.
       protectedFiles: filesOnDisk.filter((f) => f.mtimeMs > youngerThan).map((f) => f.path),
       now,
-      retentionDays: SCREENSHOT_RETENTION_DAYS,
+      retentionDays,
     });
+    overdueUnuploaded = plan.overdueUnuploaded;
+    if (plan.overdueUnuploaded > 0) {
+      log.warn('screenshots past retention kept: not uploaded yet', {
+        count: plan.overdueUnuploaded,
+        retentionDays,
+      });
+    }
 
     // Delete rows first: if we crash mid-unlink, the leftover files become
     // orphans the next run reaps — never dangling rows pointing at gone files.
@@ -253,9 +301,19 @@ async function runScreenshotRetention(now = serverAlignedNow()): Promise<void> {
     }
     await pruneEmptyDirs(root);
     const trimmed = await trimUploadedFiles();
+    let activityPruned = 0;
+    if (retentionDays > 0) {
+      try {
+        activityPruned = getActivityStore().pruneSynced(now - retentionDays * DAY_MS);
+      } catch (err) {
+        log.debug('activity prune failed', { err: String(err) });
+      }
+    }
 
-    if (plan.rowIdsToDelete.length || plan.filesToDelete.length || trimmed) {
+    if (plan.rowIdsToDelete.length || plan.filesToDelete.length || trimmed || activityPruned) {
       log.info('screenshot retention', {
+        retentionDays,
+        activityPruned,
         expired: plan.expired,
         orphanFiles: plan.orphanFiles,
         danglingRows: plan.danglingRows,
@@ -308,9 +366,11 @@ async function trimUploadedFiles(): Promise<number> {
 export function startCaptureLoop(): void {
   if (timer) return;
   getStore();
-  void runScreenshotRetention(); // reap stale/orphan files on boot
-  retentionTimer = setInterval(() => void runScreenshotRetention(), 24 * 60 * 60 * 1000);
-  void retentionTimer;
+  if (!retentionStarted) {
+    retentionStarted = true;
+    void runScreenshotRetention(); // reap stale/orphan files on boot
+    setInterval(() => void runScreenshotRetention(), DAY_MS);
+  }
   startUploader(); // drain the local queue to the upload target in the background
   schedule();
 }
@@ -359,7 +419,7 @@ export function previousShotOnSameDisplay(
 function toListItems(owner: CaptureOwner, rows: ScreenshotRow[]): ScreenshotListItem[] {
   const activity = getActivityStore();
   try {
-    activity.claimUnowned(owner);
+    claimUnownedActivity(owner);
   } catch {
     /* activity store unavailable — bars read 0 */
   }
@@ -395,7 +455,7 @@ function toListItems(owner: CaptureOwner, rows: ScreenshotRow[]): ScreenshotList
 export async function recentScreenshots(limit: number): Promise<ScreenshotListItem[]> {
   const owner = currentOwner();
   if (!owner) return [];
-  getStore().claimUnowned(owner);
+  claimUnownedScreenshots(owner);
   return toListItems(owner, getStore().recent(owner, limit));
 }
 
@@ -403,7 +463,7 @@ export async function recentScreenshots(limit: number): Promise<ScreenshotListIt
 export async function screenshotsInRange(fromMs: number, toMs: number): Promise<ScreenshotListItem[]> {
   const owner = currentOwner();
   if (!owner || !Number.isFinite(fromMs) || !Number.isFinite(toMs) || toMs <= fromMs) return [];
-  getStore().claimUnowned(owner);
+  claimUnownedScreenshots(owner);
   return toListItems(owner, getStore().inRange(owner, fromMs, toMs));
 }
 
@@ -429,6 +489,14 @@ export async function fullScreenshot(id: string): Promise<string | null> {
   return fullDataUrl(resolveScreenshotPath(row.filePath));
 }
 
-export function screenshotUploadSummary(): ScreenshotUploadSummary {
-  return getStore().uploadSummary(currentOwner());
+/** The upload queue plus the local-storage signals worth surfacing next to it. */
+export interface ScreenshotSyncHealth extends ScreenshotUploadSummary {
+  /** Shots past the retention window kept only because they have not uploaded. */
+  overdueUnuploaded: number;
+  /** The last capture could not be stored: the disk is full. */
+  diskFull: boolean;
+}
+
+export function screenshotUploadSummary(): ScreenshotSyncHealth {
+  return { ...getStore().uploadSummary(currentOwner()), overdueUnuploaded, diskFull };
 }

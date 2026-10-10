@@ -38,6 +38,14 @@ const mocks = vi.hoisted(() => {
     ensureSession: vi.fn(async () => false),
     startLarkLogin: vi.fn(async () => undefined),
     activate: vi.fn(async () => true),
+    stopUploads: vi.fn(async () => {
+      calls.push('stopUploads:start');
+      await new Promise((resolve) => setTimeout(resolve, 5)); // the running pass winds down
+      calls.push('stopUploads:done');
+    }),
+    resumeUploads: vi.fn(() => {
+      calls.push('resumeUploads');
+    }),
   };
 });
 
@@ -62,6 +70,11 @@ vi.mock('../services/timer', () => ({
   bindTimerToStoredSession: mocks.bind,
   drainTimerSyncNow: mocks.drain,
   getTimerService: () => mocks.timer,
+}));
+
+vi.mock('../services/capture/uploader', () => ({
+  stopUploads: mocks.stopUploads,
+  resumeUploads: mocks.resumeUploads,
 }));
 
 const { registerAuthIpc } = await import('./auth');
@@ -97,9 +110,12 @@ describe('auth:logout', () => {
       'drain',
       'stop',
       'drain',
+      'stopUploads:start',
+      'stopUploads:done',
       'stopHeartbeat',
       'logout',
       'bind',
+      'resumeUploads',
       'notify:loggedOut:{"reason":"manual"}',
     ]);
   });
@@ -119,7 +135,25 @@ describe('auth:logout', () => {
     await expect(invoke('auth:logout')).resolves.toEqual({ ok: true });
 
     expect(mocks.timer.stop).not.toHaveBeenCalled();
-    expect(mocks.calls).toEqual(['drain', 'stopHeartbeat', 'logout', 'bind', 'notify:loggedOut:{"reason":"manual"}']);
+    expect(mocks.calls).toEqual([
+      'drain',
+      'stopUploads:start',
+      'stopUploads:done',
+      'stopHeartbeat',
+      'logout',
+      'bind',
+      'resumeUploads',
+      'notify:loggedOut:{"reason":"manual"}',
+    ]);
+  });
+
+  it('lets screenshot uploads run again even when logout throws', async () => {
+    mocks.logout.mockRejectedValueOnce(new Error('disk'));
+
+    await expect(invoke('auth:logout')).rejects.toThrow('disk');
+
+    expect(mocks.stopUploads).toHaveBeenCalledOnce();
+    expect(mocks.resumeUploads).toHaveBeenCalledOnce();
   });
 
   it('runs one sign-out for a double click', async () => {
