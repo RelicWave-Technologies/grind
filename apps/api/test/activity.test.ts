@@ -275,6 +275,36 @@ describe('a window title cut through an emoji', () => {
     expect(rows[1]).toMatchObject({ keystrokes: 11 });
   });
 
+  it('cuts metadata from older agents to the caps instead of refusing the batch', async () => {
+    // Agents up to beta.26 cap every field at 1,024 chars. One long Windows
+    // app path used to 400 the batch, and the agent re-sent it forever.
+    const u = await seedUserWithTitles();
+    const res = await request(app)
+      .post('/v1/activity-samples')
+      .set('Authorization', `Bearer ${u.accessToken}`)
+      .send({
+        samples: [
+          sample({ bucketStart: iso(T0), activeApp: 'A'.repeat(1_024), activeAppBundle: 'B'.repeat(1_024), activeTitle: 'T'.repeat(1_024), activeUrl: 'https://x.example/'.padEnd(3_000, 'u') }),
+          sample({ bucketStart: iso(T0 + MIN), keystrokes: 11 }),
+        ],
+      });
+
+    expect(res.status).toBe(201);
+    expect(res.body.accepted).toBe(2);
+    const [first, second] = await prisma.activitySample.findMany({ where: { userId: u.userId }, orderBy: { bucketStart: 'asc' } });
+    expect(first).toMatchObject({ activeApp: 'A'.repeat(120), activeAppBundle: 'B'.repeat(200), activeTitle: 'T'.repeat(300) });
+    expect(second).toMatchObject({ keystrokes: 11 });
+  });
+
+  it('still refuses absurdly long metadata', async () => {
+    const u = await seedUser();
+    const res = await request(app)
+      .post('/v1/activity-samples')
+      .set('Authorization', `Bearer ${u.accessToken}`)
+      .send({ samples: [sample({ activeApp: 'A'.repeat(5_000) })] });
+    expect(res.status).toBe(400);
+  });
+
   it('keeps an emoji that arrived whole', async () => {
     const u = await seedUserWithTitles();
     const res = await request(app)

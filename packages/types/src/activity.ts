@@ -41,9 +41,19 @@ export function stripLoneSurrogates(value: string): string {
   return value.replace(LONE_SURROGATE, '');
 }
 
-/** A metadata string that is length-capped and safe to store. */
+/**
+ * Longest metadata value accepted before it is cut to its cap. Agents up to
+ * beta.26 capped every field at 1,024 chars, not at these limits; rejecting
+ * one long app name 400'd the whole batch, and those agents re-send the same
+ * batch forever — four people sent no activity for two months.
+ */
+const METADATA_RAW_MAX_CHARS = 4_096;
+
+/** A metadata string cut to its cap (never rejected for length) and safe to store. */
 function metadataString(maxChars: number) {
-  return z.string().max(maxChars).transform(stripLoneSurrogates);
+  return z.string()
+    .max(Math.max(maxChars, METADATA_RAW_MAX_CHARS))
+    .transform((value) => stripLoneSurrogates(value.slice(0, maxChars)));
 }
 
 export const ActivitySampleInput = z.object({
