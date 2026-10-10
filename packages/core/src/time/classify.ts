@@ -1,4 +1,4 @@
-import { ATTENDANCE_RULE_DEFAULTS, type DayStatus, type ShiftStatus } from '@grind/types';
+import { ATTENDANCE_RULE_DEFAULTS, type AttendanceRuleMode, type DayStatus, type ShiftStatus } from '@grind/types';
 import { instantForLocalMinute } from './shift';
 
 /**
@@ -10,8 +10,9 @@ import { instantForLocalMinute } from './shift';
  * company's grace. The shift is the one assigned for that date. On leave for
  * the first half you are due in the afternoon instead: late is tracked
  * activity starting after one fixed clock time (14:00 unless the policy names
- * its own), with no grace. A day nobody expected you at all — a holiday, a
- * weekly off, full-day leave — is never late.
+ * its own), with no grace. A day nobody judged at the shift start — a holiday,
+ * a weekly off, full-day leave, leave for the second half — is never late, and
+ * only people the attendance rules treat as STANDARD can be late at all.
  *
  * **Full day** is 7 h of counted time, **half day** 3 h 30, unless the leave
  * policy names its own minimums.
@@ -41,20 +42,17 @@ export function halfDayLateAfterMs(
   return instantForLocalMinute(date, minuteOfDay, tz);
 }
 
-/** Was nobody expected at the shift start on this day? */
+/**
+ * Is this day outside the shift-start check? Only an ordinary working day is
+ * judged at the shift start. Any leave is not: full-day leave expects nobody,
+ * first-half leave is judged at the afternoon time instead (see
+ * {@link isLate}), and second-half leave is not checked — the company rule
+ * production has always applied.
+ */
 export function lateExempt(status: LateStatusFacts | null | undefined): boolean {
   if (!status) return false;
-  switch (status.kind) {
-    case 'WORKING':
-      return false;
-    case 'PAID_LEAVE':
-    case 'UNPAID_LEAVE':
-      // Leave for the afternoon still expects you at the start of the shift.
-      return status.portion !== 'SECOND_HALF';
-    default:
-      // HOLIDAY, WEEKLY_OFF, NO_SHIFT.
-      return true;
-  }
+  // HOLIDAY, WEEKLY_OFF, NO_SHIFT and every kind of leave.
+  return status.kind !== 'WORKING';
 }
 
 export interface LateFacts {
@@ -72,12 +70,19 @@ export interface LateFacts {
    * such a day is not judged.
    */
   halfDayLateAfterMs?: number | null;
+  /**
+   * How the attendance rules treat this person. Absent = STANDARD. REMOTE and
+   * EXEMPT people are never late: the rules only ever judged STANDARD people,
+   * and every surface (the month sheet's count, the Start column) must agree.
+   */
+  mode?: AttendanceRuleMode | null;
 }
 
 export function isLate(facts: LateFacts): boolean {
   if (facts.firstTrackedMs === null) return false;
+  if (facts.mode && facts.mode !== 'STANDARD') return false;
   // Off for the morning, due in the afternoon: one fixed time for everyone,
-  // whatever the shift. A second-half leave day still expects the shift start.
+  // whatever the shift.
   if (firstHalfLeave(facts.status)) {
     return facts.halfDayLateAfterMs != null && facts.firstTrackedMs > facts.halfDayLateAfterMs;
   }
@@ -122,6 +127,8 @@ export function shiftStatusFor(input: {
   graceMinutes?: number | null;
   halfDayLateAfterMs?: number | null;
   status?: (LateStatusFacts & Partial<Pick<DayStatus, 'expectedFraction'>>) | null;
+  /** The person's attendance-rule mode (see {@link LateFacts.mode}). */
+  mode?: AttendanceRuleMode | null;
   /**
    * Whether the attendance rules counted this day as a late arrival, when the
    * rules are on. They apply {@link isLate} and then leave out what they do
@@ -150,6 +157,7 @@ export function shiftStatusFor(input: {
     graceMinutes: input.graceMinutes,
     halfDayLateAfterMs: input.halfDayLateAfterMs,
     status: input.status,
+    mode: input.mode,
   })
     ? 'late'
     : 'on_time';

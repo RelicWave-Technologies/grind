@@ -43,6 +43,7 @@ vi.mock('../src/lib/googleDrive', async (importOriginal) => {
 const { buildApp } = await import('../src/app');
 const { capturedAtFromScreenshotId } = await import('../src/routes/screenshots');
 const { seedUser, createManagedTeam } = await import('./helpers');
+const { linkClaimedEvidence, linkClaimsIfEntriesArrived } = await import('../src/timeEntries/claimedEvidence');
 
 let app: Express;
 beforeAll(() => {
@@ -118,7 +119,7 @@ describe('POST /v1/screenshots/direct-upload', () => {
 });
 
 describe('POST /v1/screenshots/complete', () => {
-  it('keeps a shot whose timer entry the server does not have, detached from it', async () => {
+  it('keeps a shot whose timer entry the server does not have, remembering the entry', async () => {
     const u = await seedUser();
     const up = await directUpload(await sign(u.accessToken, SHOT_AUG));
 
@@ -131,7 +132,79 @@ describe('POST /v1/screenshots/complete', () => {
 
     expect(res.status).toBe(201);
     const row = await prisma.screenshot.findUniqueOrThrow({ where: { id: SHOT_AUG } });
-    expect(row).toMatchObject({ timeEntryId: null, uploadState: 'UPLOADED', s3Key: 'drive-file-1' });
+    expect(row).toMatchObject({
+      timeEntryId: null,
+      claimedTimeEntryId: 'entry-still-being-created',
+      uploadState: 'UPLOADED',
+      s3Key: 'drive-file-1',
+    });
+  });
+
+  it('links shots that arrived before their entry once the agent creates it', async () => {
+    // The 2026-10-09 incident: the entry create sat in a stuck sync queue while
+    // every shot after it named that entry.
+    const u = await seedUser();
+    const entryId = '01KZ3H1R80ENTRYSTUCKQUEUE1';
+    await directUpload(await sign(u.accessToken, SHOT_AUG));
+    await directUpload(await sign(u.accessToken, SHOT_AUG_2));
+    expect((await complete(u.accessToken, { id: SHOT_AUG, timeEntryId: entryId })).status).toBe(201);
+    // An old agent that already gave up reports the shot FAILED: still kept.
+    expect((await complete(u.accessToken, { id: SHOT_AUG_2, timeEntryId: entryId, uploadState: 'FAILED' })).status)
+      .toBe(201);
+
+    const startedAt = '2026-08-03T09:55:00.000Z';
+    const created = await request(app)
+      .post('/v1/time-entries')
+      .set('Authorization', `Bearer ${u.accessToken}`)
+      .send({
+        id: entryId,
+        clientUuid: 'client-stuck-queue',
+        source: 'AUTO',
+        startedAt,
+        endedAt: null,
+        segments: [{ id: 'segment-stuck-queue', kind: 'WORK', startedAt, endedAt: null }],
+      });
+    expect(created.status).toBe(201);
+
+    const rows = await prisma.screenshot.findMany({ where: { userId: u.userId }, orderBy: { id: 'asc' } });
+    expect(rows.map((row) => [row.timeEntryId, row.claimedTimeEntryId, row.uploadState])).toEqual([
+      [entryId, null, 'UPLOADED'],
+      [entryId, null, 'UPLOADED'],
+    ]);
+  });
+
+  it('refuses a shot naming another user\'s entry, and never links another user\'s claim', async () => {
+    const owner = await seedUser();
+    const other = await seedUser();
+    const foreign = await prisma.timeEntry.create({
+      data: { id: 'entry-foreign', clientUuid: 'client-foreign', userId: owner.userId, source: 'AUTO', startedAt: new Date() },
+    });
+    await directUpload(await sign(other.accessToken, SHOT_AUG));
+    const res = await complete(other.accessToken, { id: SHOT_AUG, timeEntryId: foreign.id });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('time_entry_out_of_scope');
+
+    // `other` claims an id that `owner` later creates: it stays a claim.
+    await directUpload(await sign(other.accessToken, SHOT_AUG_2));
+    await complete(other.accessToken, { id: SHOT_AUG_2, timeEntryId: 'entry-later' });
+    await linkClaimedEvidence(await prisma.timeEntry.create({
+      data: { id: 'entry-later', clientUuid: 'client-later', userId: owner.userId, source: 'AUTO', startedAt: new Date() },
+    }));
+    const row = await prisma.screenshot.findUniqueOrThrow({ where: { id: SHOT_AUG_2 } });
+    expect([row.timeEntryId, row.claimedTimeEntryId]).toEqual([null, 'entry-later']);
+  });
+
+  it('links a claim whose entry was created while the shot was being stored', async () => {
+    const u = await seedUser();
+    await directUpload(await sign(u.accessToken, SHOT_AUG));
+    await complete(u.accessToken, { id: SHOT_AUG, timeEntryId: 'entry-raced' });
+    // The entry commits without linking (its link ran before the claim landed).
+    await prisma.timeEntry.create({
+      data: { id: 'entry-raced', clientUuid: 'client-raced', userId: u.userId, source: 'AUTO', startedAt: new Date() },
+    });
+    await linkClaimsIfEntriesArrived(u.userId, ['entry-raced']);
+    const row = await prisma.screenshot.findUniqueOrThrow({ where: { id: SHOT_AUG } });
+    expect([row.timeEntryId, row.claimedTimeEntryId]).toEqual(['entry-raced', null]);
   });
 
   it('attaches the shot to an entry the user owns', async () => {

@@ -1,8 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
 import { prisma } from '@grind/db';
 import { buildApp } from '../src/app';
 import { reconcileExpiredTimersOnce, TIMER_LEASE_MS } from '../src/timeLifecycle';
+import { logger } from '../src/logger';
 import { effectiveEntrySegmentEnds as resolveEffectiveEntrySegmentEnds } from '@grind/core';
 import { fakeUlid, seedUser } from './helpers';
 
@@ -334,8 +335,11 @@ describe('timer lifecycle protocol v2', () => {
     });
     const second = v2Body(new Date(Date.now() - 5 * 60_000));
     expect((await request(app).post('/v1/time-entries').set(bearer(user.accessToken)).send(second)).status).toBe(201);
-    expect((await prisma.timeEntry.findUniqueOrThrow({ where: { id: first.id } })).closeReason).toBe('SUPERSEDED');
+    const closed = await prisma.timeEntry.findUniqueOrThrow({ where: { id: first.id } });
+    expect(closed.closeReason).toBe('SUPERSEDED');
+    expect(closed.serverFinalizedAt).toBeInstanceOf(Date);
 
+    const info = vi.spyOn(logger, 'info');
     const realEnd = new Date(Date.now() - 5 * 60_000).toISOString();
     const late = await request(app).put(`/v1/time-entries/${first.id}/sync`).set(bearer(user.accessToken)).send({
       trackingProtocolVersion: 2,
@@ -351,8 +355,21 @@ describe('timer lifecycle protocol v2', () => {
     const row = await prisma.timeEntry.findUniqueOrThrow({ where: { id: first.id }, include: { segments: true } });
     expect(row.endedAt?.toISOString()).toBe(realEnd);
     expect(row.closeReason).toBe('AGENT');
-    expect(row.serverFinalizedAt).toBeNull();
+    // The agent's time wins, but the record that the server had closed it stays.
+    expect(row.serverFinalizedAt?.toISOString()).toBe(closed.serverFinalizedAt!.toISOString());
     expect(row.segments[0]?.endedAt?.toISOString()).toBe(realEnd);
+    expect(info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: user.userId,
+        entryId: first.id,
+        serverCloseReason: 'SUPERSEDED',
+        serverClosedAt: closed.endedAt!.toISOString(),
+        agentEndedAt: realEnd,
+        restoredMinutes: 30,
+      }),
+      'time-entry sync: agent revision restored time after a server close',
+    );
+    info.mockRestore();
   });
 
   it('still refuses an older or equal revision on a server-closed entry', async () => {

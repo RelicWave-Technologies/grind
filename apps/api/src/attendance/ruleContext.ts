@@ -1,6 +1,11 @@
 import { prisma } from '@grind/db';
 import { halfDayLateAfterMs } from '@grind/core';
-import { dateKeyInTimeZone, type AttendanceRuleVerdict, type DayStatus } from '@grind/types';
+import {
+  dateKeyInTimeZone,
+  type AttendanceRuleMode,
+  type AttendanceRuleVerdict,
+  type DayStatus,
+} from '@grind/types';
 import { leaveDateRange } from '../leave/workingCalendar';
 import { loadOrCreateLeavePolicy, loadWorkingCalendar } from '../leave/repository';
 import type { PunchLookup } from './punches';
@@ -24,6 +29,11 @@ export interface AttendanceRuleContext {
   judge: (userId: string, date: string, status: DayStatus | null, trackedMinutes: number) => AttendanceRuleVerdict | null;
   /** 1 for the month's first late arrival, 2 for the second…; null when on time. */
   lateOrdinalFor: (userId: string, date: string) => number | null;
+  /**
+   * How the rules treat a person, loaded even while the rules are off: the
+   * Start column's Late label follows the same mode rule as the count.
+   */
+  modeFor: (userId: string) => AttendanceRuleMode;
 }
 
 export async function loadAttendanceRuleContext(input: {
@@ -45,8 +55,16 @@ export async function loadAttendanceRuleContext(input: {
     lateGraceMinutes: leavePolicy.lateGraceMinutes,
     halfDayLateAfterMinute: leavePolicy.halfDayLateAfterMinute,
   };
+  const people = input.userIds.length === 0
+    ? []
+    : await prisma.user.findMany({
+        where: { id: { in: input.userIds } },
+        select: { id: true, attendanceRuleMode: true },
+      });
+  const modeOf = new Map(people.map((p) => [p.id, p.attendanceRuleMode]));
+  const modeFor = (userId: string): AttendanceRuleMode => modeOf.get(userId) ?? 'STANDARD';
   if (!policy.from || policy.from > input.to || input.userIds.length === 0) {
-    return { policy, enabled: false, judge: () => null, lateOrdinalFor: () => null };
+    return { policy, enabled: false, judge: () => null, lateOrdinalFor: () => null, modeFor };
   }
 
   const fromDate = new Date(`${input.from}T00:00:00Z`);
@@ -57,7 +75,7 @@ export async function loadAttendanceRuleContext(input: {
   const monthStart = `${input.from.slice(0, 7)}-01`;
   const lateFrom = monthStart > policy.from ? monthStart : policy.from;
 
-  const [coveredDates, wfh, unapprovedLeave, people, calendar, overrides] = await Promise.all([
+  const [coveredDates, wfh, unapprovedLeave, calendar, overrides] = await Promise.all([
     prisma.attendancePunch.groupBy({
       by: ['date'],
       where: { workspaceId: input.workspaceId, date: { gte: fromDate, lte: toDate } },
@@ -75,10 +93,6 @@ export async function loadAttendanceRuleContext(input: {
       },
       select: { userId: true, startDate: true, endDate: true },
     }),
-    prisma.user.findMany({
-      where: { id: { in: input.userIds } },
-      select: { id: true, attendanceRuleMode: true },
-    }),
     loadWorkingCalendar({ workspaceId: input.workspaceId, tz: input.tz, userIds: input.userIds, from: lateFrom, to: input.to }),
     prisma.attendanceOverride.findMany({
       where: {
@@ -88,7 +102,6 @@ export async function loadAttendanceRuleContext(input: {
       select: { userId: true, date: true },
     }),
   ]);
-  const modeOf = new Map(people.map((p) => [p.id, p.attendanceRuleMode]));
 
   const coverage = new Set(coveredDates.map((r) => r.date.toISOString().slice(0, 10)));
   const ranges = (rows: Array<{ userId: string; startDate: Date; endDate: Date }>) => {
@@ -143,7 +156,7 @@ export async function loadAttendanceRuleContext(input: {
       const day = facts!.factsFor(userId, date);
       const late = isLateArrival({
         status: day.status,
-        mode: modeOf.get(userId) ?? 'STANDARD',
+        mode: modeFor(userId),
         firstTrackedMs: day.bucket.firstTracked,
         shiftStartMs: day.shift?.startMs ?? null,
         graceMinutes: policy.lateGraceMinutes,
@@ -161,6 +174,7 @@ export async function loadAttendanceRuleContext(input: {
     policy,
     enabled: true,
     lateOrdinalFor,
+    modeFor,
     judge: (userId, date, status, trackedMinutes) => {
       const punch = input.punchFor(userId, date);
       const base = judgeDay(policy, {
@@ -172,7 +186,7 @@ export async function loadAttendanceRuleContext(input: {
         punchCoverage: coverage.has(date),
         wfhApproved: wfhApproved(userId, date),
         leaveApplied: leaveApplied(userId, date),
-        mode: modeOf.get(userId) ?? 'STANDARD',
+        mode: modeFor(userId),
       });
       if (!policy.from || date < policy.from || date >= today) return base;
       return withLateRule(base, lateOrdinalFor(userId, date), policy.lateAllowedPerMonth);

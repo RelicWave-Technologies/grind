@@ -13,6 +13,7 @@ import {
 import {
   validateEntry,
   clampEntryToServerClock,
+  totalWorkedMs,
   type ClampResult,
   type Segment,
   type TimeEntry as CoreEntry,
@@ -37,6 +38,7 @@ import {
   serializeTimeEntry,
   type SerializableTimeEntry,
 } from '../timeEntries/wire';
+import { linkClaimedEvidence } from '../timeEntries/claimedEvidence';
 
 export const timeEntriesRouter = Router();
 
@@ -363,6 +365,13 @@ timeEntriesRouter.post('/', validate(CreateTimeEntryRequest, 'body'), async (req
       const decision = evaluateExistingCreate({ entry: outcome.entry, body, userId: req.user.sub, isV2 });
       return res.status(decision.status).json(decision.payload);
     }
+    // The entry is committed: attach the screenshots and minutes that named it
+    // while its create sat in the agent's queue. A failure here leaves them
+    // detached (the backfill script can still link them) and must not turn a
+    // stored entry into an error the agent would retry.
+    await linkClaimedEvidence(outcome.entry).catch((err: unknown) => {
+      logger.warn({ err, userId: req.user!.sub, entryId: outcome.entry.id }, 'linking claimed evidence failed');
+    });
     res.status(201).json(isV2
       ? createTimerSyncReceipt(outcome.entry, 'APPLIED', clamped.adjusted ? 'CLOCK_CLAMP' : null, now)
       : serializeTimeEntry(outcome.entry));
@@ -526,6 +535,26 @@ timeEntriesRouter.put('/:id/sync', validate(SyncTimeEntryRequest, 'body'), async
         };
       }
 
+      // Applying a newer revision over a server close (see above). The agent's
+      // time wins, but the record that the server had closed it stays:
+      // serverFinalizedAt is kept, and the restore is logged below.
+      const serverClose = current.endedAt && isServerFinalized(current.closeReason)
+        ? {
+            closeReason: current.closeReason,
+            closedAt: current.endedAt,
+            finalizedAt: current.serverFinalizedAt,
+            workedMs: totalWorkedMs({
+              ...clamped.entry,
+              segments: current.segments.map((segment) => ({
+                id: segment.id,
+                kind: segment.kind,
+                startedAt: segment.startedAt.getTime(),
+                endedAt: segment.endedAt?.getTime() ?? null,
+              })),
+            }, now.getTime()),
+          }
+        : null;
+
       // Incoming ids owned by another entry are rejected above. Never delete
       // another entry's audit rows while replacing this entry's snapshot.
       await tx.timeSegment.deleteMany({ where: { timeEntryId: id } });
@@ -542,7 +571,6 @@ timeEntriesRouter.put('/:id/sync', validate(SyncTimeEntryRequest, 'body'), async
           closeReason: clampedEndedAt !== null
             ? (body.closeReason ?? (isV2 ? 'AGENT' : current.closeReason))
             : null,
-          serverFinalizedAt: null,
         },
       });
       await tx.timeSegment.createMany({
@@ -560,10 +588,27 @@ timeEntriesRouter.put('/:id/sync', validate(SyncTimeEntryRequest, 'body'), async
         entry: updated,
         disposition: 'APPLIED' as const,
         correction: clamped.adjusted ? 'CLOCK_CLAMP' as const : null,
+        serverClose,
       };
     });
 
     if (outcome.kind === 'conflict') return res.status(409).json(outcome.payload);
+    if ('serverClose' in outcome && outcome.serverClose) {
+      const restoredMs = totalWorkedMs(clamped.entry, now.getTime()) - outcome.serverClose.workedMs;
+      logger.info(
+        {
+          userId: entry.userId,
+          entryId: id,
+          serverCloseReason: outcome.serverClose.closeReason,
+          serverClosedAt: outcome.serverClose.closedAt.toISOString(),
+          serverFinalizedAt: outcome.serverClose.finalizedAt?.toISOString() ?? null,
+          agentEndedAt: clampedEndedAt === null ? null : new Date(clampedEndedAt).toISOString(),
+          agentRevision: body.revision ?? null,
+          restoredMinutes: Math.round(restoredMs / 60_000),
+        },
+        'time-entry sync: agent revision restored time after a server close',
+      );
+    }
     res.json(isV2
       ? createTimerSyncReceipt(outcome.entry, outcome.disposition, outcome.correction, now)
       : serializeTimeEntry(outcome.entry));

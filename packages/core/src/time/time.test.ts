@@ -246,7 +246,7 @@ describe('late rule', () => {
     expect(isLate({ firstTrackedMs: shiftStartMs + 3 * H, shiftStartMs: null })).toBe(false);
   });
 
-  it('is never late on leave or holidays — but can be on second-half leave', () => {
+  it('is never late on leave or holidays, second-half leave included', () => {
     const lateStart = shiftStartMs + 2 * H;
     const facts = (kind: string, portion: string | null) => ({
       firstTrackedMs: lateStart,
@@ -257,9 +257,22 @@ describe('late rule', () => {
     expect(isLate(facts('WEEKLY_OFF', null))).toBe(false);
     expect(isLate(facts('PAID_LEAVE', 'FULL'))).toBe(false);
     expect(isLate(facts('UNPAID_LEAVE', 'FULL'))).toBe(false);
-    expect(isLate(facts('PAID_LEAVE', 'SECOND_HALF'))).toBe(true);
+    // Production's rule: a second-half leave day is not checked at all.
+    expect(isLate(facts('PAID_LEAVE', 'SECOND_HALF'))).toBe(false);
+    expect(isLate(facts('UNPAID_LEAVE', 'SECOND_HALF'))).toBe(false);
     expect(isLate(facts('WORKING', null))).toBe(true);
     expect(lateExempt(null)).toBe(false);
+  });
+
+  it('only judges a STANDARD person', () => {
+    const lateStart = shiftStartMs + 2 * H;
+    expect(isLate({ firstTrackedMs: lateStart, shiftStartMs, mode: 'STANDARD' })).toBe(true);
+    expect(isLate({ firstTrackedMs: lateStart, shiftStartMs, mode: null })).toBe(true);
+    expect(isLate({ firstTrackedMs: lateStart, shiftStartMs, mode: 'REMOTE' })).toBe(false);
+    expect(isLate({ firstTrackedMs: lateStart, shiftStartMs, mode: 'EXEMPT' })).toBe(false);
+    // The label agrees: a remote person past the start is on time, not late.
+    expect(shiftStatusFor({ shiftStartMs, firstTrackedMs: lateStart, countedMs: H, mode: 'REMOTE' })).toBe('on_time');
+    expect(shiftStatusFor({ shiftStartMs, firstTrackedMs: lateStart, countedMs: H, mode: 'STANDARD' })).toBe('late');
   });
 
   it('on first-half leave is late only after the afternoon time, with no grace', () => {

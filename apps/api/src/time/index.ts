@@ -5,10 +5,7 @@ import {
   emptyDayBucket,
   invalidationsByUser,
   resolveTimeline,
-  shiftStatusFor,
   shiftWindowFor,
-  isLate,
-  halfDayLateAfterMs,
   type DayBucket,
   type EntryLiveEvidenceMap,
   type ShiftDay,
@@ -19,7 +16,6 @@ import {
   dateKeysBetween,
   localDayWindowInTimeZone,
   type DayStatus,
-  type ShiftStatus,
 } from '@grind/types';
 import { loadEntryLiveEvidence } from '../insights/liveEntryEvidence';
 import { timesheetCalendarInputs } from '../leave';
@@ -232,8 +228,6 @@ interface DayFacts {
   shift: ShiftDay<ShiftAssignmentRow> | null;
   /** Counted minutes (work + meetings + manual), rounded. */
   trackedMinutes: number;
-  late: boolean;
-  shiftStatus: ShiftStatus;
 }
 
 export interface DayFactsSource {
@@ -244,44 +238,27 @@ export interface DayFactsSource {
   factsFor(userId: string, date: string): DayFacts;
 }
 
-/** The pure part of day facts — everything handed in. */
+/**
+ * The pure part of day facts — everything handed in. Lateness is judged by the
+ * caller (`isLateArrival`), which knows the person's attendance-rule mode.
+ */
 function dayFactsOf(input: {
   bucket: DayBucket;
   status: DayStatus | null;
   shift: ShiftDay<ShiftAssignmentRow> | null;
-  graceMinutes: number;
-  /** First-half leave day: late after this instant, no grace. */
-  halfDayLateAfterMs: number | null;
 }): DayFacts {
-  const shiftStartMs = input.shift?.startMs ?? null;
   return {
     bucket: input.bucket,
     status: input.status,
     shift: input.shift,
     trackedMinutes: Math.round(input.bucket.counted / 60_000),
-    late: isLate({
-      firstTrackedMs: input.bucket.firstTracked,
-      shiftStartMs,
-      graceMinutes: input.graceMinutes,
-      halfDayLateAfterMs: input.halfDayLateAfterMs,
-      status: input.status,
-    }),
-    shiftStatus: shiftStatusFor({
-      shiftStartMs,
-      firstTrackedMs: input.bucket.firstTracked,
-      countedMs: input.bucket.counted,
-      graceMinutes: input.graceMinutes,
-      halfDayLateAfterMs: input.halfDayLateAfterMs,
-      status: input.status,
-    }),
   };
 }
 
 /**
  * Everything a day is judged on, for `userIds` over `[from, to]`: the counted
- * time, the Working Calendar status, the shift assigned for that date, the
- * company grace and the first-half leave afternoon time — combined by the one
- * late/full/half definition in core.
+ * time, the Working Calendar status, the shift assigned for that date and the
+ * company grace — the inputs to the one late/full/half definition in core.
  */
 export async function loadDayFacts(input: {
   workspaceId: string;
@@ -326,8 +303,6 @@ export async function loadDayFacts(input: {
       bucket: timeline.bucket(userId, date),
       status: calendar.dayStatusFor(userId, date),
       shift: shiftFor(userId, date),
-      graceMinutes,
-      halfDayLateAfterMs: halfDayLateAfterMs(date, input.tz, policy.halfDayLateAfterMinute),
     }),
   };
 }
