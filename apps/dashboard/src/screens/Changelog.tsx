@@ -48,20 +48,37 @@ function Card({ src, alt, w, h }: { src: string; alt: string; w: number; h: numb
 }
 
 const LATEST: Release = {
-  id: 'beta-37',
-  version: 'beta.37',
-  name: 'the popup that comes back',
-  meta: 'AUG 19, 2026 · MAC + WINDOWS',
+  id: 'beta-38',
+  version: 'beta.38',
+  name: 'the hours come home',
+  meta: 'OCT 10, 2026 · MAC + WINDOWS',
   changes: [
-    { tag: 'fixed', text: <>The popup comes back after your Mac sleeps. It used to end up on a desktop you were never going to visit — present, floating, and completely invisible.</> },
-    { tag: 'fixed', text: <>Timo stopped locking you out. If a prompt could not be found, the tray, the dock icon and every other way in stopped responding too, and only quitting helped. The tray always answers now.</> },
-    { tag: 'improved', text: <>Ask for Timo twice and it lets you in. If a prompt is somewhere you cannot reach, Timo gives up on it rather than leaving you outside.</> },
-    { tag: 'fixed', text: <>One Timo in the Dock, not five.</> },
-    { tag: 'improved', text: <>Prompts now leave a trace in the logs — what appeared, when it was answered, and whether it was ever really on screen. The last fault of this kind hid for four days in plain sight.</> },
+    { tag: 'fixed', text: <>Hours that went missing came back. When the server stopped hearing from Timo for a while, it closed your timer early — and kept the shorter version even after Timo sent the real one. It now takes the real one.</> },
+    { tag: 'fixed', text: <>A sleeping laptop is not a working laptop. Windows does not always announce that it is going to sleep; Timo now notices on its own and stops counting.</> },
+    { tag: 'fixed', text: <>Screenshots stopped disappearing. A shot whose time entry had not reached the server yet was refused and, after five tries, thrown away. Now it waits, uploads, and joins its entry when the entry arrives.</> },
+    { tag: 'improved', text: <>Screenshots upload on office networks that inspect traffic (Fortinet and friends), and are never deleted from your laptop before they reach us.</> },
+    { tag: 'fixed', text: <>Timo stopped vanishing. A startup hiccup used to leave it running with no window and no tray — alive, invisible, and impossible to reopen.</> },
+    { tag: 'fixed', text: <>Updates wait for you. An update never quits Timo while you are tracking, and Timo comes back on its own once the update is in.</> },
+    { tag: 'fixed', text: <>The permission restart loop is gone. If a restart did not fix screen recording, Timo stops offering it and tells you exactly what to toggle instead.</> },
+    { tag: 'fixed', text: <>Two clicks on Start no longer open two timers.</> },
+    { tag: 'improved', text: <>Cmd+Q asks first while your timer is running.</> },
   ],
 };
 
 const AUGUST: Release[] = [
+  {
+    id: 'beta-37',
+    version: 'beta.37',
+    name: 'the popup that comes back',
+    meta: 'AUG 19, 2026 · MAC + WINDOWS',
+    changes: [
+      { tag: 'fixed', text: <>The popup comes back after your Mac sleeps. It used to end up on a desktop you were never going to visit — present, floating, and completely invisible.</> },
+      { tag: 'fixed', text: <>Timo stopped locking you out. If a prompt could not be found, the tray, the dock icon and every other way in stopped responding too, and only quitting helped. The tray always answers now.</> },
+      { tag: 'improved', text: <>Ask for Timo twice and it lets you in. If a prompt is somewhere you cannot reach, Timo gives up on it rather than leaving you outside.</> },
+      { tag: 'fixed', text: <>One Timo in the Dock, not five.</> },
+      { tag: 'improved', text: <>Prompts now leave a trace in the logs — what appeared, when it was answered, and whether it was ever really on screen. The last fault of this kind hid for four days in plain sight.</> },
+    ],
+  },
   {
     id: 'beta-34',
     version: 'beta.34',
@@ -282,6 +299,8 @@ const JUNE: Release[] = [
 ];
 
 const PLATFORM: Array<{ date: string; text: ReactNode }> = [
+  { date: 'OCT 10', text: <>Old Timo builds had been re-sending months-old entries every few seconds — thousands a minute — and real heartbeats queued behind them. The server now answers those in one cheap read; the queue drained and about 150 stuck hours landed where they belong.</> },
+  { date: 'OCT 10', text: <>Late is judged by your door punch-in again, not by when Timo started. Approved work-from-home days show on the calendar.</> },
   { date: 'JUL 18', text: <>The screenshot carousel stopped gaslighting you. Arrows and keyboard keys now move the photo, timestamp and stats together — never an old frame wearing a new caption.</> },
   { date: 'JUL 16', text: <>The dashboard got fast: team pages answer with summaries first, routes load lazily, JSON travels compressed, assets cache hard. Answers first, details on click.</> },
   { date: 'JUL 15', text: <>The data-safety train reached production — timer lifecycle, runtime health, one canonical timezone. Additive only, backups verified. Not one tracked row rewritten.</> },
@@ -305,6 +324,7 @@ const FOUNDATION: Array<[string, ReactNode]> = [
 ];
 
 const MARQUEE = [
+  'BETA.38 — THE HOURS COME HOME',
   'BETA.31 — HONEST CLOCK',
   'BETA.28 — RELIABILITY',
   'BETA.27 — ZERO LOSS',
