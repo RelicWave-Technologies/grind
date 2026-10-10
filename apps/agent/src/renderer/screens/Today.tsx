@@ -11,6 +11,7 @@ import TaskCard from '../components/TaskCard';
 import TaskComposer from '../components/TaskComposer';
 import SyncButton from '../components/SyncButton';
 import { formatWorkspaceRecoveryTime, useWorkspaceTime, workspaceTimeReady } from '../lib/workspaceTime';
+import { useLarkConnectionRefresh, useLarkStatus, useLarkTasks } from '../lib/larkQueries';
 
 export function fmtClock(ms: number): string {
   const t = Math.floor(ms / 1000);
@@ -38,8 +39,9 @@ const TASK_COLLAPSE = 8;
 export default function Today() {
   const qc = useQueryClient();
   const today = useQuery({ queryKey: ['today'], queryFn: () => window.agent.timer.today(), refetchInterval: 3000 });
-  const larkStatus = useQuery({ queryKey: ['larkStatus'], queryFn: () => window.agent.lark.status(), refetchInterval: 10_000 });
-  const larkTasks = useQuery({ queryKey: ['larkTasks'], queryFn: () => window.agent.lark.tasks(), refetchInterval: 60_000 });
+  const larkStatus = useLarkStatus();
+  const larkTasks = useLarkTasks();
+  useLarkConnectionRefresh();
   const recoveryNotice = useQuery({ queryKey: ['timerRecoveryNotice'], queryFn: () => window.agent.timer.recoveryNotice() });
   const workspaceTime = useWorkspaceTime();
   const timeContext = workspaceTime.data;

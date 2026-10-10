@@ -1,6 +1,4 @@
-import { app, ipcMain, shell } from 'electron';
-import Database from 'better-sqlite3';
-import path from 'node:path';
+import { ipcMain, shell } from 'electron';
 import { api, HttpError } from '../services/apiClient';
 import { log } from '../logger';
 import { todayKey as businessToday } from '@grind/types';
@@ -9,6 +7,7 @@ import { getTimerService, refreshTodayLedger } from '../services/timer';
 import { refreshAgentConfig } from '../services/agentConfig';
 import { loadTokens } from '../services/tokenStore';
 import { LarkTaskCache, type CachedLarkTask } from '../services/larkTaskCache';
+import { openAgentDb } from '../services/agentDb';
 import { CALLBACK_SCHEME } from '../env';
 
 type LarkStatus = {
@@ -38,7 +37,7 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
 let taskCache: LarkTaskCache | null = null;
 
 function getTaskCache(): LarkTaskCache {
-  if (!taskCache) taskCache = new LarkTaskCache(new Database(path.join(app.getPath('userData'), 'agent.db')));
+  if (!taskCache) taskCache = new LarkTaskCache(openAgentDb());
   return taskCache;
 }
 

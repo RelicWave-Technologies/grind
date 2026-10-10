@@ -4,6 +4,7 @@ import { MonitorCheck, Power, CheckCircle2, AlertCircle, Keyboard, PictureInPict
 import larkIcon from '../assets/lark.svg';
 import { restartDidNotHelp } from '../../shared/permissionRelaunch';
 import { settingsUpdateSubtitle, updateAction, updatePercent } from '../lib/updateUi';
+import { useLarkConnectionRefresh, useLarkStatus } from '../lib/larkQueries';
 import {
   actionFor,
   actionLabel,
@@ -27,7 +28,8 @@ export default function Settings() {
     queryFn: () => window.agent.app.permissionRelaunch(),
     staleTime: Number.POSITIVE_INFINITY,
   });
-  const lark = useQuery({ queryKey: ['larkStatus'], queryFn: () => window.agent.lark.status(), refetchInterval: 4000 });
+  const lark = useLarkStatus();
+  useLarkConnectionRefresh();
   const updates = useQuery({ queryKey: ['updates'], queryFn: () => window.agent.updates.status(), refetchInterval: 60_000 });
 
   const repairLogin = useMutation({
@@ -86,13 +88,6 @@ export default function Settings() {
   useEffect(() => {
     return window.agent.updates.onStatusChange((s) => {
       qc.setQueryData(['updates'], s);
-    });
-  }, [qc]);
-
-  useEffect(() => {
-    return window.agent.lark.onConnectionChange(() => {
-      void qc.invalidateQueries({ queryKey: ['larkStatus'] });
-      void qc.invalidateQueries({ queryKey: ['larkTasks'] });
     });
   }, [qc]);
 
