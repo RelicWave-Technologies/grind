@@ -1,4 +1,5 @@
 import { prisma } from '@grind/db';
+import { halfDayLateAfterMs } from '@grind/core';
 import { dateKeyInTimeZone, type AttendanceRuleVerdict, type DayStatus } from '@grind/types';
 import { leaveDateRange } from '../leave/workingCalendar';
 import { loadOrCreateLeavePolicy, loadWorkingCalendar } from '../leave/repository';
@@ -17,7 +18,7 @@ import { loadDayFacts } from '../time';
  * themselves stay testable without a database.
  */
 export interface AttendanceRuleContext {
-  policy: AttendanceRulePolicy & { lateAllowedPerMonth: number; lateGraceMinutes: number };
+  policy: AttendanceRulePolicy & { lateAllowedPerMonth: number; lateGraceMinutes: number; halfDayLateAfterMinute: number };
   /** Whether the rules can judge anything at all. */
   enabled: boolean;
   judge: (userId: string, date: string, status: DayStatus | null, trackedMinutes: number) => AttendanceRuleVerdict | null;
@@ -42,6 +43,7 @@ export async function loadAttendanceRuleContext(input: {
     wfhRequiresApproval: leavePolicy.wfhRequiresApproval,
     lateAllowedPerMonth: leavePolicy.lateAllowedPerMonth,
     lateGraceMinutes: leavePolicy.lateGraceMinutes,
+    halfDayLateAfterMinute: leavePolicy.halfDayLateAfterMinute,
   };
   if (!policy.from || policy.from > input.to || input.userIds.length === 0) {
     return { policy, enabled: false, judge: () => null, lateOrdinalFor: () => null };
@@ -104,7 +106,8 @@ export async function loadAttendanceRuleContext(input: {
   const today = dateKeyInTimeZone(new Date(input.nowMs ?? Date.now()), input.tz);
 
   // Late arrivals, numbered within each month in date order: first tracked
-  // activity against the shift assigned for that date, one grace for everyone.
+  // activity against the shift assigned for that date, one grace for everyone
+  // (on a first-half leave day, the policy's afternoon time instead).
   const dates = input.to < lateFrom ? [] : leaveDateRange(lateFrom, input.to, 400);
   const facts = dates.length === 0
     ? null
@@ -144,6 +147,7 @@ export async function loadAttendanceRuleContext(input: {
         firstTrackedMs: day.bucket.firstTracked,
         shiftStartMs: day.shift?.startMs ?? null,
         graceMinutes: policy.lateGraceMinutes,
+        halfDayLateAfterMs: halfDayLateAfterMs(date, input.tz, policy.halfDayLateAfterMinute),
       });
       if (late) {
         count += 1;

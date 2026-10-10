@@ -16,6 +16,7 @@ import {
   HALF_DAY_MINUTES,
   dayCredit,
   isLate,
+  halfDayLateAfterMs,
   lateExempt,
   shiftStatusFor,
 } from './classify';
@@ -245,7 +246,7 @@ describe('late rule', () => {
     expect(isLate({ firstTrackedMs: shiftStartMs + 3 * H, shiftStartMs: null })).toBe(false);
   });
 
-  it('is never late on leave, holidays or first-half leave — but can be on second-half leave', () => {
+  it('is never late on leave or holidays — but can be on second-half leave', () => {
     const lateStart = shiftStartMs + 2 * H;
     const facts = (kind: string, portion: string | null) => ({
       firstTrackedMs: lateStart,
@@ -256,10 +257,36 @@ describe('late rule', () => {
     expect(isLate(facts('WEEKLY_OFF', null))).toBe(false);
     expect(isLate(facts('PAID_LEAVE', 'FULL'))).toBe(false);
     expect(isLate(facts('UNPAID_LEAVE', 'FULL'))).toBe(false);
-    expect(isLate(facts('PAID_LEAVE', 'FIRST_HALF'))).toBe(false);
     expect(isLate(facts('PAID_LEAVE', 'SECOND_HALF'))).toBe(true);
     expect(isLate(facts('WORKING', null))).toBe(true);
     expect(lateExempt(null)).toBe(false);
+  });
+
+  it('on first-half leave is late only after the afternoon time, with no grace', () => {
+    const afternoon = halfDayLateAfterMs('2026-07-10', 'Asia/Kolkata')!;
+    expect(new Date(afternoon).toISOString()).toBe('2026-07-10T08:30:00.000Z'); // 14:00 IST
+    const firstHalf = (kind: string, firstTrackedMs: number, after: number | null = afternoon) => isLate({
+      firstTrackedMs,
+      shiftStartMs,
+      graceMinutes: 30,
+      halfDayLateAfterMs: after,
+      status: { kind, portion: 'FIRST_HALF' } as never,
+    });
+    expect(firstHalf('PAID_LEAVE', afternoon)).toBe(false);
+    expect(firstHalf('PAID_LEAVE', afternoon + MIN)).toBe(true);
+    expect(firstHalf('UNPAID_LEAVE', afternoon + H)).toBe(true);
+    // Past the shift start plus grace, but before the afternoon: on time.
+    expect(firstHalf('PAID_LEAVE', shiftStartMs + 3 * H)).toBe(false);
+    // Without an afternoon time the day is not judged.
+    expect(firstHalf('PAID_LEAVE', afternoon + H, null)).toBe(false);
+    expect(halfDayLateAfterMs('2026-07-10', 'Asia/Kolkata', 15 * 60)).toBe(afternoon + H);
+    expect(shiftStatusFor({
+      shiftStartMs,
+      firstTrackedMs: afternoon + MIN,
+      countedMs: H,
+      halfDayLateAfterMs: afternoon,
+      status: { kind: 'PAID_LEAVE', portion: 'FIRST_HALF', expectedFraction: 0.5 },
+    })).toBe('late');
   });
 
   it('labels the day the same way the rule does', () => {

@@ -9,6 +9,7 @@ import {
 } from '@grind/types';
 import {
   DEFAULT_LATE_GRACE_MINUTES,
+  halfDayLateAfterMs,
   bucketByDay,
   containsInstant,
   emptyDayBucket,
@@ -165,6 +166,8 @@ export function buildMemberReportDays(input: {
   shiftAssignments: ReportShiftAssignment[];
   /** Company grace after the shift start (leave policy). Defaults to 30. */
   lateGraceMinutes?: number;
+  /** First-half leave day: late after this minute of the day (leave policy). Defaults to 14:00. */
+  halfDayLateAfterMinute?: number;
   activityRoleTitle?: RoleTitle | null;
   iconFor?: IconResolver;
   /** Working Calendar lookup, supplied by the route that loaded it. */
@@ -296,14 +299,16 @@ export function buildMemberReportDays(input: {
       punchInMinute: punch?.inMinute ?? null,
       punchOutMinute: punch?.outMinute ?? null,
       // One late rule everywhere: first tracked activity (never manual) after
-      // the shift assigned for this date plus the company grace. With the
-      // attendance rules on, Late is what the rules counted, so the Start
-      // column and the month sheet agree day for day.
+      // the shift assigned for this date plus the company grace — on a
+      // first-half leave day, after the afternoon time. With the attendance
+      // rules on, Late is what the rules counted, so the Start column and the
+      // month sheet agree day for day.
       shiftStatus: shiftStatusFor({
         shiftStartMs: shift?.startMs ?? null,
         firstTrackedMs: bucket.firstTracked,
         countedMs: bucket.counted,
         graceMinutes: grace,
+        halfDayLateAfterMs: halfDayLateAfterMs(date, input.range.tz, input.halfDayLateAfterMinute),
         status: dayStatus,
         late: input.lateFor && date >= input.lateFor.from
           ? input.lateFor.ordinalFor(input.userId, date) !== null

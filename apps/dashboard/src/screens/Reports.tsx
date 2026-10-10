@@ -418,7 +418,7 @@ const ATTENDANCE_LABEL: Record<string, string> = {
 const OVERRIDE_SHAPES = [
   { key: 'P', label: 'P — Present' },
   { key: 'HALF_LEAVE', label: 'HD — Half day' },
-  { key: 'FULL_LEAVE', label: 'L — Leave' },
+  { key: 'FULL_LEAVE', label: 'PL / L — Leave (PL when the balance pays it)' },
   { key: 'A', label: 'LWA — Absent, no approved leave' },
 ] as const;
 
@@ -956,8 +956,9 @@ function TeamMemberDrawer({
   /** The day a manager or admin is correcting, if any. */
   const [editingDay, setEditingDay] = useState<MemberReportDay | null>(null);
   // Correcting a day is the same authority as reading somebody else's report:
-  // whoever can see the row can fix it, and nobody else.
-  const canCorrectAttendance = hasCapability(me, 'reports.team.read');
+  // whoever can see the row can fix it, and nobody else. Never your own days —
+  // a manager is in their own scope, and only an admin corrects a manager.
+  const canCorrectAttendance = hasCapability(me, 'reports.team.read') && (me.role === 'ADMIN' || userId !== me.id);
   const canDecideApprovals =
     hasCapability(me, 'approvals.team.decide') ||
     hasCapability(me, 'approvals.workspace.decide');

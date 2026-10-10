@@ -65,6 +65,7 @@ export function toLeavePolicyDto(row: {
   wfhRequiresApproval?: boolean;
   lateAllowedPerMonth?: number;
   lateGraceMinutes?: number;
+  halfDayLateAfterMinute?: number;
   updatedAt: Date;
 }): LeavePolicyDto {
   return {
@@ -81,6 +82,7 @@ export function toLeavePolicyDto(row: {
     wfhRequiresApproval: row.wfhRequiresApproval ?? ATTENDANCE_RULE_DEFAULTS.wfhRequiresApproval,
     lateAllowedPerMonth: row.lateAllowedPerMonth ?? ATTENDANCE_RULE_DEFAULTS.lateAllowedPerMonth,
     lateGraceMinutes: row.lateGraceMinutes ?? ATTENDANCE_RULE_DEFAULTS.lateGraceMinutes,
+    halfDayLateAfterMinute: row.halfDayLateAfterMinute ?? ATTENDANCE_RULE_DEFAULTS.halfDayLateAfterMinute,
     updatedAt: row.updatedAt.toISOString(),
   };
 }
@@ -130,6 +132,7 @@ export async function loadWorkingCalendar(input: {
         lastSaturdayOffOverride: true,
         joinedOn: true,
         createdAt: true,
+        deactivatedAt: true,
       },
     }),
     db.shiftAssignment.findMany({
@@ -216,12 +219,19 @@ export async function loadWorkingCalendar(input: {
     lastSaturdayOffFor[u.id] = u.lastSaturdayOffOverride ?? policy.lastSaturdayOff;
   }
 
+  // A suspended person's shift ends when they were suspended: the day itself
+  // still counts, every day after has no shift — so it is "--" on the sheet, no
+  // rule charges it and no balance pays for it.
+  const deactivatedAt = new Map(users.flatMap((u) => (u.deactivatedAt ? [[u.id, u.deactivatedAt] as const] : [])));
   const shiftAssignments: Record<string, ShiftAssignmentInput[]> = {};
   for (const a of assignments) {
+    const endedAt = deactivatedAt.get(a.userId);
+    if (endedAt && a.effectiveFrom >= endedAt) continue;
+    const effectiveTo = endedAt && (a.effectiveTo === null || a.effectiveTo > endedAt) ? endedAt : a.effectiveTo;
     (shiftAssignments[a.userId] ??= []).push({
       shiftId: a.shiftId,
       effectiveFrom: a.effectiveFrom,
-      effectiveTo: a.effectiveTo,
+      effectiveTo,
       shiftNameSnapshot: a.shiftNameSnapshot,
       scheduleSnapshot: a.scheduleSnapshot,
     });

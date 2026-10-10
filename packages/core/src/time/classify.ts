@@ -1,4 +1,5 @@
 import { ATTENDANCE_RULE_DEFAULTS, type DayStatus, type ShiftStatus } from '@grind/types';
+import { instantForLocalMinute } from './shift';
 
 /**
  * The facts a day is judged on — late, full, half — with one definition each,
@@ -6,9 +7,11 @@ import { ATTENDANCE_RULE_DEFAULTS, type DayStatus, type ShiftStatus } from '@gri
  *
  * **Late** is the first real *tracked* activity (agent-observed work or a
  * meeting; never manual time) starting after the shift start plus the
- * company's grace. The shift is the one assigned for that date. A day nobody
- * expected you at the start of — a holiday, a weekly off, full-day leave, or
- * leave for the first half — is never late.
+ * company's grace. The shift is the one assigned for that date. On leave for
+ * the first half you are due in the afternoon instead: late is tracked
+ * activity starting after one fixed clock time (14:00 unless the policy names
+ * its own), with no grace. A day nobody expected you at all — a holiday, a
+ * weekly off, full-day leave — is never late.
  *
  * **Full day** is 7 h of counted time, **half day** 3 h 30, unless the leave
  * policy names its own minimums.
@@ -17,8 +20,26 @@ import { ATTENDANCE_RULE_DEFAULTS, type DayStatus, type ShiftStatus } from '@gri
 export const FULL_DAY_MINUTES: number = ATTENDANCE_RULE_DEFAULTS.fullDayMinMinutes;
 export const HALF_DAY_MINUTES: number = ATTENDANCE_RULE_DEFAULTS.halfDayMinMinutes;
 export const DEFAULT_LATE_GRACE_MINUTES: number = ATTENDANCE_RULE_DEFAULTS.lateGraceMinutes;
+export const DEFAULT_HALF_DAY_LATE_AFTER_MINUTE: number = ATTENDANCE_RULE_DEFAULTS.halfDayLateAfterMinute;
 
 export type LateStatusFacts = Pick<DayStatus, 'kind' | 'portion'>;
+
+/** Off for the morning, due in the afternoon. */
+function firstHalfLeave(status: LateStatusFacts | null | undefined): boolean {
+  return (status?.kind === 'PAID_LEAVE' || status?.kind === 'UNPAID_LEAVE') && status.portion === 'FIRST_HALF';
+}
+
+/**
+ * The instant a first-half leave day's afternoon is due: the policy's clock
+ * time (minutes after midnight, 14:00 by default) on that date.
+ */
+export function halfDayLateAfterMs(
+  date: string,
+  tz: string,
+  minuteOfDay: number = DEFAULT_HALF_DAY_LATE_AFTER_MINUTE,
+): number | null {
+  return instantForLocalMinute(date, minuteOfDay, tz);
+}
 
 /** Was nobody expected at the shift start on this day? */
 export function lateExempt(status: LateStatusFacts | null | undefined): boolean {
@@ -45,11 +66,22 @@ export interface LateFacts {
   graceMinutes?: number | null;
   /** What the Working Calendar says about the day, when known. */
   status?: LateStatusFacts | null;
+  /**
+   * On a first-half leave day, the instant after which the first tracked
+   * activity is late (see {@link halfDayLateAfterMs}); no grace. Without it
+   * such a day is not judged.
+   */
+  halfDayLateAfterMs?: number | null;
 }
 
 export function isLate(facts: LateFacts): boolean {
-  if (facts.firstTrackedMs === null || facts.shiftStartMs === null) return false;
-  if (lateExempt(facts.status)) return false;
+  if (facts.firstTrackedMs === null) return false;
+  // Off for the morning, due in the afternoon: one fixed time for everyone,
+  // whatever the shift. A second-half leave day still expects the shift start.
+  if (firstHalfLeave(facts.status)) {
+    return facts.halfDayLateAfterMs != null && facts.firstTrackedMs > facts.halfDayLateAfterMs;
+  }
+  if (facts.shiftStartMs === null || lateExempt(facts.status)) return false;
   const grace = Math.max(0, facts.graceMinutes ?? DEFAULT_LATE_GRACE_MINUTES);
   return facts.firstTrackedMs > facts.shiftStartMs + grace * 60_000;
 }
@@ -88,6 +120,7 @@ export function shiftStatusFor(input: {
   firstTrackedMs: number | null;
   countedMs: number;
   graceMinutes?: number | null;
+  halfDayLateAfterMs?: number | null;
   status?: (LateStatusFacts & Partial<Pick<DayStatus, 'expectedFraction'>>) | null;
   /**
    * Whether the attendance rules counted this day as a late arrival, when the
@@ -115,6 +148,7 @@ export function shiftStatusFor(input: {
     firstTrackedMs: input.firstTrackedMs,
     shiftStartMs: input.shiftStartMs,
     graceMinutes: input.graceMinutes,
+    halfDayLateAfterMs: input.halfDayLateAfterMs,
     status: input.status,
   })
     ? 'late'

@@ -5,7 +5,7 @@ import { ulid } from 'ulid';
 import { buildApp } from '../src/app';
 import { signAccessToken } from '../src/lib/jwt';
 import { loadMonthPerformanceReport, reconcileMonthRules, resolveReportMonth } from '../src/reports/monthPerformanceData';
-import { sheetWhy } from '../src/reports/monthPerformance';
+import { payableDays, sheetCode, sheetWhy } from '../src/reports/monthPerformance';
 import { loadBalances } from '../src/leave/repository';
 
 /**
@@ -422,8 +422,45 @@ describe('attendance rules — late arrivals', () => {
     expect(res.body.member.lateDays).toBe(0);
   });
 
-  // Rule change (time module): lateness is first tracked activity, so a
-  // remote person is judged too — only an exempt person never is.
+  // From main (#150), on the unified rule: on a first-half leave day the
+  // afternoon is due at 14:00, so tracked work starting after it is late — no
+  // grace — and Start reads Late on the same day the sheet counts it.
+  it('on a first-half leave day counts tracked work starting after 14:00 as late, with no grace', async () => {
+    const s = await seed();
+    for (const [date, start] of [['2026-09-01', '13:55'], ['2026-09-02', '14:10']] as const) {
+      await prisma.leaveRequest.create({
+        data: {
+          clientUuid: ulid(),
+          workspaceId: s.ws.id,
+          userId: s.member.id,
+          startDate: new Date(`${date}T00:00:00Z`),
+          endDate: new Date(`${date}T00:00:00Z`),
+          portion: 'FIRST_HALF',
+          reason: 'Morning off',
+          status: 'APPROVED',
+        },
+      });
+      await work(s.member.id, date, 4, start);
+    }
+
+    const { day } = await september(s);
+    expect(day('2026-09-01').late).toBeNull();
+    expect(day('2026-09-02').late).toBe(1);
+
+    const params = new URLSearchParams({ userId: s.member.id, from: '2026-09-01', to: '2026-09-02', tz: 'Asia/Kolkata' });
+    const res = await request(app)
+      .get(`/v1/reports/team/member?${params.toString()}`)
+      .set({ Authorization: `Bearer ${s.adminToken}` });
+    expect(res.status).toBe(200);
+    const status = (res.body.member.days as Array<{ date: string; shiftStatus: string }>).map((d) => [d.date, d.shiftStatus]);
+    expect(status).toEqual([
+      ['2026-09-01', 'on_time'],
+      ['2026-09-02', 'late'],
+    ]);
+  });
+
+  // Lateness is first tracked activity, so a remote person is judged too —
+  // only an exempt person never is.
   it('counts a remote person late by tracked time, never an exempt one', async () => {
     const s = await seed();
     await prisma.user.update({ where: { id: s.member.id }, data: { attendanceRuleMode: 'REMOTE' } });
@@ -479,6 +516,43 @@ describe('attendance rules — late arrivals', () => {
   });
 });
 
+describe('attendance rules — a suspended person', () => {
+  it('stays on the month they were suspended in, with every later day out of the count', async () => {
+    const s = await seed();
+    for (const date of ['2026-09-01', '2026-09-02', '2026-09-03', '2026-09-04', '2026-09-05', '2026-09-07', '2026-09-08', '2026-09-09', '2026-09-10']) {
+      await work(s.member.id, date, 8);
+      await prisma.attendancePunch.create({
+        data: {
+          workspaceId: s.ws.id,
+          userId: s.member.id,
+          date: new Date(`${date}T00:00:00Z`),
+          punchInAt: new Date('1970-01-01T09:00:00Z'),
+          punchOutAt: new Date('1970-01-01T18:00:00Z'),
+        },
+      });
+    }
+    // Suspended the evening of the 10th (IST).
+    await prisma.user.update({ where: { id: s.member.id }, data: { deactivatedAt: new Date('2026-09-10T13:00:00Z') } });
+
+    const { day, row } = await september(s);
+    expect(day('2026-09-10')).toMatchObject({ code: 'P', rule: null });
+    expect(day('2026-09-11')).toMatchObject({ code: '--', rule: null });
+    expect(day('2026-09-30')).toMatchObject({ code: '--', rule: null });
+    expect(row.days.filter((d) => d.rule)).toHaveLength(0);
+    expect(sheetCode(day('2026-09-15'))).toBe('--');
+    expect(payableDays({ dates: Array.from({ length: 30 }, (_, i) => `2026-09-${String(i + 1).padStart(2, '0')}`) }, row)).toBe(10);
+    expect((await ruleLines(s.member.id)).size).toBe(0);
+
+    // The admin's export still lists them for September, but not for October.
+    const auth = { Authorization: `Bearer ${s.adminToken}` };
+    const sept = await request(app).get('/v1/reports/month-performance.csv?month=2026-09').set(auth);
+    expect(sept.text).toContain(s.member.email);
+    expect(sept.text).toContain('Payable Days,10 of 10');
+    const oct = await request(app).get('/v1/reports/month-performance.csv?month=2026-10').set(auth);
+    expect(oct.text).not.toContain(s.member.email);
+  });
+});
+
 describe('attendance rules — HTTP surfaces', () => {
   it('lists the exceptions and prints a Why row in the CSV', async () => {
     const s = await seed();
@@ -513,7 +587,7 @@ describe('attendance rules — HTTP surfaces', () => {
     // The 1st is a late arrival that costs nothing yet: shown so the count is
     // visible. The 2nd and 3rd were late too, shown beside the hours cut.
     expect(why?.split(',').slice(1, 9)).toEqual(['late 1', '<7h · late 2', '<3.5h · late 3', 'WFH', '', '', 'no leave', 'unapproved']);
-    expect(block[0]).toContain('Salary Cut');
+    expect(block[0]).toContain('Payable Days');
 
     const xlsx = await request(app).get('/v1/reports/month-performance.xlsx?month=2026-09').set(auth);
     expect(xlsx.status).toBe(200);

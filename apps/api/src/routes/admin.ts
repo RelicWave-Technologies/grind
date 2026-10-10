@@ -2363,9 +2363,9 @@ adminRouter.post('/flags/resolve-many', requireAnyCapability(['flags.team.review
     if (flags.some((f) => !req.scope!.userIds.includes(f.userId))) {
       return res.status(403).json({ error: 'forbidden' });
     }
-    // A manager is in their own scope; their own flags go to an admin.
+    // A manager is in their own scope; their own flags are an admin's call.
     if (!req.scope.isAdmin && flags.some((f) => f.userId === req.user!.sub)) {
-      return res.status(403).json({ error: 'self_resolution_forbidden' });
+      return res.status(403).json({ error: 'self_review_forbidden' });
     }
 
     const invalidatedMs = resolution === 'TIME_INVALIDATED' ? await calculateInvalidatedMs(flags) : 0;
@@ -2439,9 +2439,9 @@ adminRouter.post('/flags/:id/resolve', requireAnyCapability(['flags.team.review'
     });
     if (!existing) return res.status(404).json({ error: 'not_found' });
     if (!req.scope.userIds.includes(existing.userId)) return res.status(403).json({ error: 'forbidden' });
-    // A manager is in their own scope; their own flags go to an admin.
+    // A manager is in their own scope; their own flags are an admin's call.
     if (!req.scope.isAdmin && existing.userId === req.user.sub) {
-      return res.status(403).json({ error: 'self_resolution_forbidden' });
+      return res.status(403).json({ error: 'self_review_forbidden' });
     }
     if (existing.status !== 'OPEN') return res.status(409).json({ error: 'already_resolved', resolution: existing.resolution });
 

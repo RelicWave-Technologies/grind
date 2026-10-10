@@ -2,6 +2,13 @@ import { createHash } from 'node:crypto';
 import { prisma } from '@grind/db';
 
 const ACTIVITY_SAMPLE_MS = 60_000;
+/**
+ * How far past the last stored proof (sample, screenshot, segment) a running
+ * heartbeat may extend an entry. An old agent can keep reporting "running" with
+ * a stale entry pointer for weeks while nothing is recorded against it; trusting
+ * that heartbeat once closed a one-hour entry 56 days later.
+ */
+export const LEGACY_HEARTBEAT_MAX_GAP_MS = 30 * 60_000;
 export const DEFAULT_LEGACY_STALE_MINUTES = 15;
 
 type PlanDb = Pick<typeof prisma, 'timeEntry' | 'user'>;
@@ -156,7 +163,7 @@ export async function buildLegacyReconciliationPlan(args: {
     const latestSampleAt = row.activitySamples[0]?.bucketStart ?? null;
     const latestSampleEndMs = latestSampleAt ? latestSampleAt.getTime() + ACTIVITY_SAMPLE_MS : 0;
     const latestScreenshotAt = row.screenshots[0]?.capturedAt ?? null;
-    const latestRunningHeartbeatAt = row.user.agentState === 'RUNNING'
+    const runningHeartbeatAt = row.user.agentState === 'RUNNING'
       && row.user.agentActiveEntryId === row.id
       ? row.user.agentLastSeenAt
       : null;
@@ -168,14 +175,20 @@ export async function buildLegacyReconciliationPlan(args: {
       (latest, segment) => Math.max(latest, segment.startedAt.getTime()),
       row.startedAt.getTime(),
     );
-    const latestEvidenceMs = Math.max(
+    const latestStoredProofMs = Math.max(
       row.startedAt.getTime(),
       latestSegmentStartMs,
       latestClosedSegmentEnd?.getTime() ?? 0,
       latestSampleEndMs,
       latestScreenshotAt?.getTime() ?? 0,
-      latestRunningHeartbeatAt?.getTime() ?? 0,
     );
+    // A heartbeat proves the app was open, not that work was recorded: it only
+    // counts close to the last thing actually stored for this entry.
+    const latestRunningHeartbeatAt = runningHeartbeatAt
+      && runningHeartbeatAt.getTime() - latestStoredProofMs <= LEGACY_HEARTBEAT_MAX_GAP_MS
+      ? runningHeartbeatAt
+      : null;
+    const latestEvidenceMs = Math.max(latestStoredProofMs, latestRunningHeartbeatAt?.getTime() ?? 0);
     if (latestEvidenceMs > now.getTime()) {
       skipped.push({ entryId: row.id, userId: row.userId, reason: 'FUTURE_EVIDENCE' });
       continue;

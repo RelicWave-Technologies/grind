@@ -1,5 +1,5 @@
 import { prisma } from '@grind/db';
-import { dateKeyInTimeZone, dateKeysBetween, isValidTimeZone, type DayStatus } from '@grind/types';
+import { dateKeyInTimeZone, dateKeysBetween, isValidTimeZone, localDayWindowInTimeZone, type DayStatus } from '@grind/types';
 import { loadPunchLookup } from '../attendance/punches';
 import { loadAttendanceRuleContext, type AttendanceRuleContext } from '../attendance/ruleContext';
 import { reconcileRuleLedger, verdictKey, type RuleVerdicts } from '../attendance/ruleLedger';
@@ -77,13 +77,25 @@ async function loadMonthInputs(input: {
   const { range } = input;
   const nowMs = input.nowMs ?? Date.now();
 
+  const firstDay = localDayWindowInTimeZone(range.from, range.tz);
+  if (!firstDay) throw new Error('invalid_date_or_tz');
+
   const [workspace, users] = await Promise.all([
     prisma.workspace.findUnique({ where: { id: input.workspaceId }, select: { name: true } }),
     input.userIds.length === 0
       ? []
       : prisma.user.findMany({
-          where: { id: { in: input.userIds }, workspaceId: input.workspaceId, deactivatedAt: null },
-          select: { id: true, name: true, email: true, team: { select: { name: true } } },
+          // Somebody suspended during or after this month still worked part of
+          // it, so they stay on its report; suspended before it, they do not.
+          where: {
+            id: { in: input.userIds },
+            workspaceId: input.workspaceId,
+            OR: [{ deactivatedAt: null }, { deactivatedAt: { gte: firstDay.start } }],
+          },
+          select: {
+            id: true, name: true, email: true, joinedOn: true, createdAt: true, deactivatedAt: true,
+            team: { select: { name: true } },
+          },
           orderBy: [{ name: 'asc' }, { email: 'asc' }],
         }),
   ]);
@@ -93,6 +105,9 @@ async function loadMonthInputs(input: {
     name: u.name,
     email: u.email,
     teamName: u.team?.name ?? null,
+    // The leave balance's own start (see loadWorkingCalendar's accrualStartFor).
+    startDate: (u.joinedOn ?? u.createdAt).toISOString().slice(0, 10),
+    endDate: u.deactivatedAt ? dateKeyInTimeZone(u.deactivatedAt, range.tz) : null,
   }));
   const userIds = reportUsers.map((u) => u.id);
 
@@ -252,6 +267,7 @@ export async function loadMonthPerformanceReport(input: {
           halfDay: rules.policy.halfDayMinMinutes,
           lateAllowed: rules.policy.lateAllowedPerMonth,
           lateGrace: rules.policy.lateGraceMinutes,
+          halfDayLateAfter: rules.policy.halfDayLateAfterMinute,
         }
       : null,
     generatedAtMs: nowMs,

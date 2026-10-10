@@ -191,7 +191,12 @@ export function FlagsScreen() {
                   ? (resolve.error as Error | ApiError).message
                   : null
               }
-              onResolve={(resolution, note) => resolve.mutate({ key: g.key, flagIds: g.flagIds, resolution, note })}
+              // Your own flags are an admin's call; the server refuses them too.
+              onResolve={
+                me.role !== 'ADMIN' && g.user.id === me.id
+                  ? undefined
+                  : (resolution, note) => resolve.mutate({ key: g.key, flagIds: g.flagIds, resolution, note })
+              }
             />
           ))}
         </div>
@@ -211,7 +216,8 @@ function FlagCard({
   timeZone: string;
   busy: boolean;
   error: string | null;
-  onResolve: (resolution: FlagResolution, note?: string) => void;
+  /** Absent when the viewer may not decide this card — their own flags. */
+  onResolve?: (resolution: FlagResolution, note?: string) => void;
 }) {
   const [composing, setComposing] = useState<null | FlagResolution>(null);
   const [note, setNote] = useState('');
@@ -325,8 +331,12 @@ function FlagCard({
       {/* Per-card error */}
       {error && <Banner status="danger">Failed — {error}</Banner>}
 
+      {!isResolved && !onResolve && (
+        <p className="ui-t-small ui-ink-3">These are your own flags — an admin reviews them.</p>
+      )}
+
       {/* Open: inline triage actions */}
-      {!isResolved &&
+      {!isResolved && onResolve &&
         (composing ? (
           <form
             className="flg-form"

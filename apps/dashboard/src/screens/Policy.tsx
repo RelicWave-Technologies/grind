@@ -9,7 +9,7 @@ import type {
   MonitoringSettingsAuditListResponse,
   WorkspacePolicyDto,
 } from '@grind/types';
-import { IDLE_THRESHOLD_OPTIONS, SCREENSHOT_INTERVAL_OPTIONS } from '@grind/types';
+import { IDLE_THRESHOLD_OPTIONS, SCREENSHOT_INTERVAL_OPTIONS, minToHhmm } from '@grind/types';
 import { api } from '../lib/api';
 import {
   Page,
@@ -262,7 +262,7 @@ export function PolicyScreen() {
                 <PolicyRule
                   label="Late allowed"
                   value={`${leaveQ.data.lateAllowedPerMonth} / month`}
-                  hint={`Then ½ day each · ${leaveQ.data.lateGraceMinutes}m grace`}
+                  hint={`Then ½ day each · ${leaveQ.data.lateGraceMinutes}m grace · half-day after ${minToHhmm(leaveQ.data.halfDayLateAfterMinute)}`}
                 />
                 <PolicyRule label="Charged to" value="Balance" hint="LWP once it runs out" />
               </div>
@@ -601,13 +601,16 @@ function AttendanceRulesModal({
   const late = Number.parseInt(lateAllowed, 10);
   const [graceText, setGraceText] = useState(String(policy.lateGraceMinutes));
   const grace = Number.parseInt(graceText, 10);
+  const [halfLateText, setHalfLateText] = useState(minToHhmm(policy.halfDayLateAfterMinute));
+  const halfLate = clockMinutes(halfLateText);
 
   const full = Number.parseInt(fullDay, 10);
   const half = Number.parseInt(halfDay, 10);
   const valid =
     Number.isFinite(full) && Number.isFinite(half) && half >= 0 && full <= 1440 && half <= full &&
     Number.isFinite(late) && late >= 0 && late <= 31 &&
-    Number.isFinite(grace) && grace >= 0 && grace <= 240;
+    Number.isFinite(grace) && grace >= 0 && grace <= 240 &&
+    halfLate !== null;
 
   function submit() {
     onSave({
@@ -617,6 +620,7 @@ function AttendanceRulesModal({
       wfhRequiresApproval: wfh,
       lateAllowedPerMonth: late,
       lateGraceMinutes: grace,
+      halfDayLateAfterMinute: halfLate,
     });
   }
 
@@ -656,6 +660,9 @@ function AttendanceRulesModal({
               <Field label="Late grace" hint="Minutes after shift start, for everyone.">
                 <Input className="pol-input-mono" value={graceText} onChange={(e) => setGraceText(e.target.value)} inputMode="numeric" />
               </Field>
+              <Field label="Late on half-day leave" hint="First-half leave: tracked work starting after this time is late. No grace.">
+                <Input className="pol-input-mono" type="time" value={halfLateText} onChange={(e) => setHalfLateText(e.target.value)} />
+              </Field>
             </div>
           </section>
 
@@ -675,7 +682,8 @@ function AttendanceRulesModal({
           </Banner>
           {!valid && (
             <Banner status="warn">
-              The half-day minimum has to be at most the full-day minimum, late allowed 0–31 and grace 0–240 minutes.
+              The half-day minimum has to be at most the full-day minimum, late allowed 0–31, grace 0–240 minutes,
+              and the half-day late time a valid time.
             </Banner>
           )}
           {error && <Banner status="danger">{error}</Banner>}
@@ -769,4 +777,13 @@ function PolicyToggleRow({
 
 function PolicyIcon({ children }: { children: ReactNode }) {
   return <span className="pol-icon" aria-hidden>{children}</span>;
+}
+
+/** "14:00" → 840; null when it is not a time. */
+function clockMinutes(text: string): number | null {
+  const m = /^(\d{1,2}):(\d{2})$/u.exec(text.trim());
+  if (!m) return null;
+  const h = Number.parseInt(m[1]!, 10);
+  const min = Number.parseInt(m[2]!, 10);
+  return h < 24 && min < 60 ? h * 60 + min : null;
 }

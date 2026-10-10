@@ -39,7 +39,7 @@ import type { TimelineInvalidation } from '@grind/core';
 import { loadInvalidations, loadTimeline, withEntryMeta } from '../time';
 import type { RoleTitle } from '../scoring/presets';
 import { timesheetCalendarInputs } from '../leave';
-import { formatMonthPerformanceCsv, salaryCutDays, sheetCode } from '../reports/monthPerformance';
+import { earnedParts, formatMonthPerformanceCsv, payableDays, salaryCutDays, sheetCode } from '../reports/monthPerformance';
 import { monthPerformanceXlsx } from '../reports/monthPerformanceXlsx';
 import { loadMonthPerformanceReport, reconcileMonthRules, resolveReportMonth } from '../reports/monthPerformanceData';
 import { computeMonthPointers, storeMonthPointers } from '../reports/monthPointersData';
@@ -119,6 +119,7 @@ reportsRouter.get('/me', async (req, res, next) => {
         screenshots: data.screenshots,
         shiftAssignments: data.shiftAssignments,
         lateGraceMinutes: rules.policy.lateGraceMinutes,
+        halfDayLateAfterMinute: rules.policy.halfDayLateAfterMinute,
         invalidations: data.invalidations,
         activityRoleTitle: data.activityRoleTitle,
         iconFor,
@@ -222,6 +223,7 @@ reportsRouter.get('/team', requireCapability('reports.team.read'), async (req, r
         screenshots: data.screenshots,
         shiftAssignments: data.shiftAssignments,
         lateGraceMinutes: rules.policy.lateGraceMinutes,
+        halfDayLateAfterMinute: rules.policy.halfDayLateAfterMinute,
         invalidations: data.invalidations,
         activityRoleTitle: user.activityRoleTitle,
         iconFor,
@@ -312,6 +314,7 @@ reportsRouter.get('/team/summary', requireCapability('reports.team.read'), async
         screenshots: [],
         shiftAssignments: data.shiftAssignments,
         lateGraceMinutes: rules.policy.lateGraceMinutes,
+        halfDayLateAfterMinute: rules.policy.halfDayLateAfterMinute,
         invalidations: data.invalidations,
       }));
     }
@@ -382,6 +385,7 @@ reportsRouter.get('/team/member', requireCapability('reports.team.read'), async 
       screenshots: data.screenshots,
       shiftAssignments: data.shiftAssignments,
       lateGraceMinutes: rules.policy.lateGraceMinutes,
+      halfDayLateAfterMinute: rules.policy.halfDayLateAfterMinute,
       invalidations: data.invalidations,
       activityRoleTitle: target.user.activityRoleTitle,
       iconFor,
@@ -478,10 +482,38 @@ async function monthPerformanceFor(req: Request) {
   if ('error' in range) return { status: 400 as const, error: range.error };
   const report = await loadMonthPerformanceReport({
     workspaceId: req.scope.workspaceId,
-    userIds: req.scope.userIds,
+    userIds: [...req.scope.userIds, ...(await suspendedInScope(req, range.from))],
     range,
   });
   return { status: 200 as const, report, month: range.month };
+}
+
+/**
+ * People the caller could see before they were suspended, suspended on or
+ * after `from`'s month. The scope leaves suspended people out everywhere else;
+ * a month they worked part of still needs them. The loader drops anyone
+ * suspended before the month starts.
+ */
+async function suspendedInScope(req: Request, from: string): Promise<string[]> {
+  if (!req.scope || !req.user) return [];
+  const since = new Date(`${from.slice(0, 7)}-01T00:00:00Z`);
+  // A day of slack for the workspace's offset; the loader applies the exact bound.
+  since.setUTCDate(since.getUTCDate() - 1);
+  if (req.scope.scope === 'workspace') {
+    const rows = await prisma.user.findMany({
+      where: { workspaceId: req.scope.workspaceId, deactivatedAt: { gte: since } },
+      select: { id: true },
+    });
+    return rows.map((r) => r.id);
+  }
+  if (req.scope.scope === 'team') {
+    const managed = await prisma.teamManager.findUnique({
+      where: { userId: req.user.sub },
+      select: { team: { select: { members: { where: { deactivatedAt: { gte: since } }, select: { id: true } } } } },
+    });
+    return managed?.team.members.map((m) => m.id) ?? [];
+  }
+  return [];
 }
 
 /**
@@ -503,8 +535,9 @@ reportsRouter.put('/attendance-override', requireCapability('reports.team.read')
     if (!parsed.success) return res.status(400).json({ error: 'invalid_request', details: parsed.error.flatten() });
     const { userId, date, code, reason } = parsed.data;
     if (!req.scope.userIds.includes(userId)) return res.status(403).json({ error: 'out_of_scope' });
-    // A manager's scope includes themselves, which made them the one person
-    // who could rewrite their own attendance. Only an admin may.
+    // Nobody but an admin corrects their own attendance: a manager is in their
+    // own scope, and marking your own LWA day present is exactly what this
+    // must not allow.
     if (!req.scope.isAdmin && userId === req.user.sub) return res.status(403).json({ error: 'self_override_forbidden' });
 
     const range = resolveReportMonth({ month: date.slice(0, 7) }, req.scope.workspaceTimezone);
@@ -772,6 +805,7 @@ reportsRouter.get('/month-summary', requireCapability('reports.team.read'), asyn
       const codeOn = new Map(row.days.map((d) => [d.date, sheetCode(d)]));
       const count = (code: string) => row.days.filter((d) => sheetCode(d) === code).length;
       const account = row.leaveAccount ?? { opening: 0, earned: 0, paid: 0, closing: 0, lines: [] };
+      const parts = earnedParts(account);
       return {
         userId: row.user.id,
         name: row.user.name,
@@ -780,12 +814,17 @@ reportsRouter.get('/month-summary', requireCapability('reports.team.read'), asyn
         mode: modeOf.get(row.user.id) ?? 'STANDARD',
         present: count('P'),
         halfDay: count('HD'),
+        pl: count('PL'),
         leave: count('L'),
         lwa: count('LWA'),
         late: row.totals.lateDays,
         salaryCut: salaryCutDays(row.totals),
+        payableDays: payableDays(result.report, row),
         account: {
           ...account,
+          earnedMonthly: parts.monthly,
+          earnedBirthday: parts.birthday,
+          earnedOther: parts.other,
           lines: account.lines.map((l) => (l.kind === 'leave' ? { ...l, code: codeOn.get(l.date) } : l)),
         },
       };

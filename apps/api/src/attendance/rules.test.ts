@@ -202,27 +202,37 @@ describe('ruleCode — paid as far as the balance reaches', () => {
 });
 
 describe('late arrivals', () => {
-  // Rule change (time module): lateness is the first TRACKED activity after
-  // the shift start + grace, no longer the punch-in. Remote people are judged
-  // by their tracked time too; exempt people never; first-half leave never,
-  // second-half leave still expects the shift start.
+  // Lateness is the first TRACKED activity after the shift start + grace, not
+  // the punch-in. Remote people are judged by their tracked time too; exempt
+  // people never. First-half leave is late after the afternoon time (14:00),
+  // no grace; second-half leave still expects the shift start.
   const shiftStartMs = Date.parse('2026-09-01T03:30:00Z'); // 09:00 IST
+  const afternoonMs = Date.parse('2026-09-01T08:30:00Z'); // 14:00 IST
   const at = (minutesAfterStart: number) => shiftStartMs + minutesAfterStart * 60_000;
-  const base = { status: WORKING, mode: 'STANDARD' as const, shiftStartMs, graceMinutes: 30 };
+  const base = { status: WORKING, mode: 'STANDARD' as const, shiftStartMs, graceMinutes: 30, halfDayLateAfterMs: afternoonMs };
 
   it('is late only past the start plus the grace', () => {
     expect(isLateArrival({ ...base, firstTrackedMs: at(30) })).toBe(false);
     expect(isLateArrival({ ...base, firstTrackedMs: at(31) })).toBe(true);
   });
 
-  it('is never late for an exempt person, without tracked time, or on first-half leave', () => {
+  it('is never late for an exempt person or without tracked time', () => {
     expect(isLateArrival({ ...base, mode: 'EXEMPT', firstTrackedMs: at(120) })).toBe(false);
     expect(isLateArrival({ ...base, firstTrackedMs: null })).toBe(false);
-    expect(isLateArrival({ ...base, status: HALF_PAID, firstTrackedMs: at(300) })).toBe(false);
+  });
+
+  it('on a first-half leave day is late only after 14:00, with no grace', () => {
+    expect(isLateArrival({ ...base, status: HALF_PAID, firstTrackedMs: afternoonMs })).toBe(false);
+    expect(isLateArrival({ ...base, status: HALF_PAID, firstTrackedMs: afternoonMs + 60_000 })).toBe(true);
+    expect(isLateArrival({ ...base, status: status('UNPAID_LEAVE', 0.5, 'FIRST_HALF'), firstTrackedMs: at(6 * 60) })).toBe(true);
+    // Hours past the shift start, still before the afternoon: on time.
+    expect(isLateArrival({ ...base, status: HALF_PAID, firstTrackedMs: at(240) })).toBe(false);
+    expect(isLateArrival({ ...base, status: HALF_PAID, mode: 'EXEMPT', firstTrackedMs: at(6 * 60) })).toBe(false);
   });
 
   it('judges a remote person by tracked time, and second-half leave by the shift start', () => {
     expect(isLateArrival({ ...base, mode: 'REMOTE', firstTrackedMs: at(120) })).toBe(true);
+    expect(isLateArrival({ ...base, status: HALF_PAID, mode: 'REMOTE', firstTrackedMs: at(6 * 60) })).toBe(true);
     expect(isLateArrival({
       ...base,
       status: status('PAID_LEAVE', 0.5, 'SECOND_HALF'),
