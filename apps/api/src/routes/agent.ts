@@ -289,8 +289,14 @@ agentRouter.get('/today-ledger', validate(TodayLedgerQuery, 'query'), async (req
       where: {
         userId: req.user.sub,
         source: { in: ['AUTO', 'MANUAL'] },
-        startedAt: { lt: to },
-        OR: [{ endedAt: null }, { endedAt: { gt: from } }],
+        OR: [
+          { startedAt: { lt: to }, OR: [{ endedAt: null }, { endedAt: { gt: from } }] },
+          // An entry the server corrected today may still sit in the agent's
+          // journal with today's times (a restore refused, a stale row put
+          // back). Sending it lets the agent see the newer server copy instead
+          // of counting its own.
+          { source: 'AUTO', updatedAt: { gte: from } },
+        ],
       },
       orderBy: [{ startedAt: 'asc' }, { id: 'asc' }],
       take: 2_001,

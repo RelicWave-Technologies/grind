@@ -154,6 +154,23 @@ describe('reconcileTodayLedger', () => {
     expect(projection.entries[0]).toMatchObject({ origin: 'LOCAL', pending: false });
   });
 
+  it('a newer server copy ending before the day stops a stale local row from counting today', () => {
+    const DAY = 24 * 60 * 60_000;
+    const dayStart = 100 * DAY;
+    // The journal still says this row ran from two months ago until 15h into today.
+    const stale = entry('stale', 2, dayStart - 60 * DAY, dayStart + 15 * 60 * 60_000);
+    const corrected = entry('stale', 3, dayStart - 60 * DAY, dayStart - 60 * DAY + 60 * 60_000);
+    const today = entry('today', 1, dayStart + 15 * 60 * 60_000, dayStart + 16 * 60 * 60_000);
+    const projection = reconcileTodayLedger({
+      local: [{ entry: stale, syncState: 'synced' }, { entry: today, syncState: 'synced' }],
+      server: [server(corrected), server(today)],
+      windowStart: dayStart,
+      windowEnd: dayStart + DAY,
+      now: dayStart + 16 * 60 * 60_000,
+    });
+    expect(projection.workedMs).toBe(60 * 60_000);
+  });
+
   it('applies only a server correction that was explicitly acknowledged', () => {
     const localEntry = entry('corrected', 2, 0, 80_000);
     const corrected = entry('corrected', 2, 0, 60_000);

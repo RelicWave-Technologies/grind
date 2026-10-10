@@ -3,10 +3,12 @@ import type { TimerCheckpoint, TimerCheckpointDisposition } from '@grind/types';
 import { logger } from '../logger';
 import { START_TIME_MS } from '../lib/version';
 import { onShutdown } from '../lib/lifecycle';
+import { sweepAbandonedLegacyTimersOnce } from './legacyReconciliation';
 
 export const TIMER_PROTOCOL_VERSION = 2;
 export const TIMER_LEASE_MS = 3 * 60 * 1000;
 const TIMER_RECONCILE_INTERVAL_MS = 60 * 1000;
+const LEGACY_SWEEP_INTERVAL_MS = 60 * 60 * 1000;
 const RECONCILE_BATCH_SIZE = 100;
 
 type Tx = Prisma.TransactionClient;
@@ -276,6 +278,16 @@ export function startTimerLifecycleScheduler(enabled: boolean): void {
   schedulerStarted = true;
   let active = false;
   const clock: ReconcileClock = { resumedAtMs: START_TIME_MS, lastOkAtMs: null };
+  let lastLegacySweepAtMs = Number.NEGATIVE_INFINITY;
+  // Old builds leave entries open forever; its failure must not stop lease work.
+  const sweepLegacy = async (at: Date) => {
+    try {
+      const swept = await sweepAbandonedLegacyTimersOnce(at);
+      if (swept.applied > 0 || swept.repairedPointers > 0) logger.warn(swept, 'abandoned legacy timers closed');
+    } catch (err) {
+      logger.error({ err: String(err) }, 'legacy timer sweep failed');
+    }
+  };
   const tick = async () => {
     if (active) return;
     active = true;
@@ -289,6 +301,10 @@ export function startTimerLifecycleScheduler(enabled: boolean): void {
       if (gate.finalize) {
         const finalized = await reconcileExpiredTimersOnce(new Date(now));
         if (finalized > 0) logger.warn({ finalized }, 'expired timer leases finalized');
+        if (now - lastLegacySweepAtMs >= LEGACY_SWEEP_INTERVAL_MS) {
+          lastLegacySweepAtMs = now;
+          await sweepLegacy(new Date(now));
+        }
       } else {
         // Waiting out the grace still has to notice the database is back.
         await prisma.$queryRaw`SELECT 1`;

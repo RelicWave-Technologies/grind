@@ -10,6 +10,12 @@ const ACTIVITY_SAMPLE_MS = 60_000;
  */
 export const LEGACY_HEARTBEAT_MAX_GAP_MS = 30 * 60_000;
 export const DEFAULT_LEGACY_STALE_MINUTES = 15;
+/**
+ * The scheduler closes only entries nobody has touched for half a day: an old
+ * agent that is merely offline for a while keeps its entry open, and can still
+ * extend one the sweep closed (LEGACY_RECONCILED stays restorable).
+ */
+export const LEGACY_SWEEP_STALE_MINUTES = 12 * 60;
 
 type PlanDb = Pick<typeof prisma, 'timeEntry' | 'user'>;
 
@@ -32,7 +38,7 @@ interface LegacyReconciliationEntry {
 interface LegacyReconciliationSkip {
   entryId: string;
   userId: string;
-  reason: 'FRESH_HEARTBEAT' | 'FUTURE_EVIDENCE';
+  reason: 'FRESH_HEARTBEAT' | 'FUTURE_EVIDENCE' | 'RECENT_EVIDENCE';
 }
 
 interface LegacyPointerRepair {
@@ -204,6 +210,11 @@ export async function buildLegacyReconciliationPlan(args: {
       skipped.push({ entryId: row.id, userId: row.userId, reason: 'FUTURE_EVIDENCE' });
       continue;
     }
+    // Work stored this recently may still be going on; it is not abandoned yet.
+    if (latestEvidenceMs >= staleBefore.getTime()) {
+      skipped.push({ entryId: row.id, userId: row.userId, reason: 'RECENT_EVIDENCE' });
+      continue;
+    }
 
     const proposedEndedAt = new Date(latestEvidenceMs);
     entries.push({
@@ -350,4 +361,20 @@ export async function applyLegacyReconciliationPlan(args: {
     // It locks and rewrites every entry and pointer in the plan, then rebuilds
     // the plan under those locks: far past Prisma's 5s default on a real fleet.
   }, { timeout: 60_000 });
+}
+
+/**
+ * One scheduled sweep: close legacy entries abandoned for half a day at their
+ * last proof — the same end every report already counts them to. A plan that
+ * changes under us (new evidence mid-sweep) is simply retried next time.
+ */
+export async function sweepAbandonedLegacyTimersOnce(now: Date): Promise<{ applied: number; repairedPointers: number }> {
+  const plan = await buildLegacyReconciliationPlan({ now, staleMinutes: LEGACY_SWEEP_STALE_MINUTES });
+  if (plan.entries.length === 0 && plan.pointerRepairs.length === 0) return { applied: 0, repairedPointers: 0 };
+  const { applied, repairedPointers } = await applyLegacyReconciliationPlan({
+    planHash: plan.planHash,
+    staleMinutes: LEGACY_SWEEP_STALE_MINUTES,
+    now,
+  });
+  return { applied, repairedPointers };
 }

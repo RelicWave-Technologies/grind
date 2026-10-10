@@ -3,6 +3,7 @@ import { prisma } from '@grind/db';
 import {
   applyLegacyReconciliationPlan,
   buildLegacyReconciliationPlan,
+  sweepAbandonedLegacyTimersOnce,
 } from '../src/timeLifecycle/legacyReconciliation';
 import { fakeUlid, seedUser } from './helpers';
 
@@ -356,5 +357,44 @@ describe('legacy timer reconciliation', () => {
     });
     expect((await prisma.user.findUniqueOrThrow({ where: { id: user.userId } })).agentActiveEntryId).toBeNull();
     expect(await prisma.timeEntry.findUnique({ where: { id: entryId } })).not.toBeNull();
+  });
+
+  it('leaves an entry with work stored inside the stale window open', async () => {
+    const user = await seedUser();
+    const entryId = await createLegacyEntry({
+      userId: user.userId,
+      activePointer: null,
+      sampleAt: new Date(now.getTime() - 5 * 60_000),
+    });
+
+    const plan = await buildLegacyReconciliationPlan({ now });
+
+    expect(plan.entries).toHaveLength(0);
+    expect(plan.skipped).toEqual([{ entryId, userId: user.userId, reason: 'RECENT_EVIDENCE' }]);
+  });
+
+  it('the scheduled sweep closes only entries abandoned for half a day, at their last proof', async () => {
+    const user = await seedUser();
+    const abandoned = await createLegacyEntry({
+      userId: user.userId,
+      activePointer: null,
+      startedAt: new Date('2026-06-01T09:00:00.000Z'),
+      sampleAt: new Date('2026-06-01T11:00:00.000Z'),
+    });
+    const other = await seedUser();
+    const recent = await createLegacyEntry({
+      userId: other.userId,
+      activePointer: null,
+      startedAt: new Date('2026-07-13T08:00:00.000Z'),
+      sampleAt: new Date('2026-07-13T09:00:00.000Z'),
+    });
+
+    await expect(sweepAbandonedLegacyTimersOnce(now)).resolves.toEqual({ applied: 1, repairedPointers: 0 });
+
+    const closed = await prisma.timeEntry.findUniqueOrThrow({ where: { id: abandoned }, include: { segments: true } });
+    expect(closed).toMatchObject({ endedAt: new Date('2026-06-01T11:01:00.000Z'), closeReason: 'LEGACY_RECONCILED' });
+    expect(closed.segments.every((segment) => segment.endedAt?.getTime() === closed.endedAt!.getTime())).toBe(true);
+    expect((await prisma.timeEntry.findUniqueOrThrow({ where: { id: recent } })).endedAt).toBeNull();
+    await expect(sweepAbandonedLegacyTimersOnce(now)).resolves.toEqual({ applied: 0, repairedPointers: 0 });
   });
 });

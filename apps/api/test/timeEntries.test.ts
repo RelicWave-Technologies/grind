@@ -406,6 +406,36 @@ describe('GET /v1/agent/today-ledger', () => {
     ))).toBe(true);
   });
 
+  it('includes an entry outside the window that the server corrected since it began', async () => {
+    const u = await seedUser();
+    const nowMs = Date.now();
+    const day = 24 * 60 * MIN;
+    const entryAt = async (name: string, startedAtMs: number) => prisma.timeEntry.create({
+      data: {
+        id: fakeUlid(`${name}-entry`),
+        clientUuid: fakeUlid(`${name}-client`),
+        userId: u.userId,
+        source: 'AUTO',
+        startedAt: new Date(startedAtMs),
+        endedAt: new Date(startedAtMs + 60 * MIN),
+        segments: { create: [{ id: fakeUlid(`${name}-segment`), kind: 'WORK', startedAt: new Date(startedAtMs), endedAt: new Date(startedAtMs + 60 * MIN) }] },
+      },
+    });
+    const corrected = await entryAt('corrected', nowMs - 60 * day);
+    const untouched = await entryAt('untouched', nowMs - 30 * day);
+    await prisma.$executeRaw`UPDATE "TimeEntry" SET "updatedAt" = ${new Date(nowMs - 29 * day)} WHERE id = ${untouched.id}`;
+
+    const response = await auth(request(app).get('/v1/agent/today-ledger'), u.accessToken).query({
+      from: iso(nowMs - 2 * 60 * MIN),
+      to: iso(nowMs + 20 * 60 * MIN),
+    });
+
+    expect(response.status).toBe(200);
+    const ids = response.body.entries.map((entry: { id: string }) => entry.id);
+    expect(ids).toEqual([corrected.id]);
+    expect(response.body.effectiveEntries.map((entry: { entryId: string }) => entry.entryId)).toEqual([corrected.id]);
+  });
+
   it('rejects unbounded ranges without touching any data', async () => {
     const u = await seedUser();
     const response = await auth(request(app).get('/v1/agent/today-ledger'), u.accessToken).query({
