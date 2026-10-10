@@ -215,6 +215,24 @@ export function totalsByTask(
   return out;
 }
 
+/**
+ * Who is tracking right now, and on which entry (userId → entry id).
+ *
+ * A live piece is a running segment whose end is `now` — proven by the same
+ * rule that lets it count (a fresh heartbeat, or a v2 lease), so "tracking
+ * now" cannot disagree with the minutes the screens are adding up. An
+ * invalidated stretch still has a running timer; manual and idle time never do.
+ */
+export function trackingNow<E extends { id: string }>(
+  pieces: ReadonlyArray<Pick<TimelinePiece<E>, 'userId' | 'entry' | 'kind' | 'live'>>,
+): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const piece of pieces) {
+    if (piece.live && (piece.kind === 'WORK' || piece.kind === 'MEETING')) out.set(piece.userId, piece.entry.id);
+  }
+  return out;
+}
+
 /** Counted milliseconds of `pieces` inside `window` (whole timeline when unset). */
 export function countedMs(pieces: ReadonlyArray<TimelinePiece<unknown>>, window?: Interval): number {
   let total = 0;

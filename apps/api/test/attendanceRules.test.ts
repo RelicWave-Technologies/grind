@@ -7,6 +7,7 @@ import { signAccessToken } from '../src/lib/jwt';
 import { loadMonthPerformanceReport, reconcileMonthRules, resolveReportMonth } from '../src/reports/monthPerformanceData';
 import { payableDays, sheetCode, sheetWhy } from '../src/reports/monthPerformance';
 import { loadBalances } from '../src/leave/repository';
+import { ATTENDANCE_RULE_LABEL } from '@grind/types';
 
 /**
  * The attendance rules end to end: tracked time, punches, Lark leave and WFH go
@@ -589,6 +590,37 @@ describe('attendance rules — a suspended person', () => {
 });
 
 describe('attendance rules — HTTP surfaces', () => {
+  it('the timesheet CSV keeps charged empty days and drops the charge on a corrected day', async () => {
+    const s = await seed();
+    await seedWeek(s);
+    const auth = { Authorization: `Bearer ${s.adminToken}` };
+    const corrected = await request(app)
+      .put('/v1/reports/attendance-override')
+      .set(auth)
+      .send({ userId: s.member.id, date: '2026-09-03', code: 'P', reason: 'Was at a client site all day' });
+    expect(corrected.status).toBe(200);
+
+    const res = await request(app).get('/v1/admin/timesheets.csv?from=2026-09-01&to=2026-09-08').set(auth);
+    expect(res.status).toBe(200);
+    const rows = new Map(
+      res.text.trim().split('\n').slice(1)
+        .map((line) => line.split(','))
+        .filter((cells) => cells[1] === s.member.email)
+        .map((cells) => [cells[3], { total: cells[7], remark: cells[12], leave: cells[13] }]),
+    );
+    // Corrected: the manager's call stands, no rule speaks for the day.
+    expect(rows.get('2026-09-03')).toMatchObject({ remark: '', leave: '' });
+    // Nothing tracked and nothing applied for: the row the export is for.
+    expect(rows.get('2026-09-07')).toEqual({
+      total: '0.00',
+      remark: ATTENDANCE_RULE_LABEL.NO_APPLICATION,
+      leave: '1',
+    });
+    expect(rows.get('2026-09-08')?.remark).toBe(ATTENDANCE_RULE_LABEL.LEAVE_NOT_APPROVED);
+    // A weekly off with no time has nothing to say.
+    expect(rows.has('2026-09-06')).toBe(false);
+  });
+
   it('lists the exceptions and prints a Why row in the CSV', async () => {
     const s = await seed();
     await seedWeek(s);

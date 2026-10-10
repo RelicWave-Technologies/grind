@@ -1,7 +1,7 @@
 import { prisma } from '@grind/db';
 import { dateKeyInTimeZone } from '@grind/types';
 import { localDayWindow } from '../insights/day';
-import { LIVE_HEARTBEAT_FRESH_MS, countedMs } from '@grind/core';
+import { countedMs, trackingNow } from '@grind/core';
 import { loadTimelineWindow, piecesForUser } from '../time';
 
 export async function buildTesterUsageSnapshot(workspaceId: string, timezone: string) {
@@ -39,13 +39,11 @@ export async function buildTesterUsageSnapshot(workspaceId: string, timezone: st
   const screenshotCount = new Map(screenshots.map((s) => [s.userId, s._count._all]));
   const today = { start: win.start.getTime(), end: win.end.getTime() };
   const totals = new Map(userIds.map((userId) => [userId, countedMs(piecesForUser(timeline.pieces, userId), today)]));
+  const live = trackingNow(timeline.pieces);
 
   const testers = users.map((u) => {
-    const lastSeen = u.agentLastSeenAt;
-    const agentLastSeenAt = lastSeen?.toISOString() ?? null;
-    const isLiveNow = u.agentState === 'RUNNING'
-      && lastSeen !== null
-      && now.getTime() - lastSeen.getTime() <= LIVE_HEARTBEAT_FRESH_MS;
+    const agentLastSeenAt = u.agentLastSeenAt?.toISOString() ?? null;
+    const isLiveNow = live.has(u.id);
 
     return {
       userId: u.id,

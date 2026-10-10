@@ -29,7 +29,7 @@ export {
 } from './oauth';
 export type { AgentCallbackScheme } from './oauth';
 export type { ProfileClient } from './profile';
-export { loggedMsFromTimeline, LarkTaskApiError } from './tasks';
+export { LarkTaskApiError } from './tasks';
 export type { UserTaskClient } from './tasks';
 export {
   buildApprovalCard,

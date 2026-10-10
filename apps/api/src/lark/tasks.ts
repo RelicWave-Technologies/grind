@@ -1,9 +1,4 @@
 import { getLarkConfig } from './config';
-import {
-  totalsByTask,
-  type Interval,
-  type TimelinePiece,
-} from '@grind/core';
 import { outboundTimeoutSignal } from '../lib/outboundTimeout';
 
 /**
@@ -129,14 +124,6 @@ export function buildCreateTaskPayload(input: CreateLarkTaskInput): Record<strin
     payload.members = [{ id: input.assigneeOpenId, type: 'user', role: 'assignee' }];
   }
   return payload;
-}
-
-/** Task totals straight from an already-resolved timeline. */
-export function loggedMsFromTimeline(
-  pieces: ReadonlyArray<TimelinePiece<{ larkTaskGuid?: string | null }>>,
-  window?: Interval,
-): Map<string, number> {
-  return totalsByTask(pieces, window);
 }
 
 /** Real client: paginates `my_tasks` with the user token. */

@@ -209,7 +209,7 @@ export function registerTimoTools(server: McpServer, client: TimoClient): void {
     {
       title: 'Timo Running Users',
       description:
-        'List users whose desktop agent is currently RUNNING with a fresh heartbeat. Stale RUNNING heartbeats are intentionally excluded so the answer reflects live tracking, not old state.',
+        'List users tracking right now: a running timer proven live (fresh heartbeat for that entry, or a valid lease) — the same rule that decides the minutes counted. An agent reporting RUNNING without a proven timer is excluded, so the answer reflects live tracking, not old state.',
       inputSchema: {},
     },
     async () => run('Timo Running Users', () => client.get('/v1/mcp/running-users')),

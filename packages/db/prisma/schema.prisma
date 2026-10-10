@@ -562,6 +562,8 @@ model Screenshot {
   @@index([userId, capturedAt])
   @@index([timeEntryId])
   @@index([claimedTimeEntryId])
+  // Latest screenshot per open entry (live evidence).
+  @@index([timeEntryId, capturedAt])
 }
 
 model TimeSegment {
@@ -611,6 +613,8 @@ model ActivitySample {
   // identical index only doubled the write cost of every sample.
   @@unique([userId, bucketStart])
   @@index([timeEntryId])
+  // Latest sample per open entry (live evidence).
+  @@index([timeEntryId, bucketStart])
   @@index([userId, activeApp])
 }
 

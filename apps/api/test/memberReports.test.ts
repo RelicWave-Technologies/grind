@@ -510,29 +510,7 @@ describe('/v1/reports/me', () => {
   });
 });
 
-describe('/v1/reports/team', () => {
-  it('returns a manager-scoped team report without leaking other teams or self', async () => {
-    const s = await seedTeamReport();
-    const res = await request(app)
-      .get('/v1/reports/team?from=2026-06-01&to=2026-06-01&tz=UTC')
-      .set('Accept-Encoding', 'gzip')
-      .set(auth(s.managerToken));
-    expect(res.status).toBe(200);
-    expect(res.headers['content-encoding']).toBe('gzip');
-    expect(res.body.summary.memberCount).toBe(1);
-    expect(res.body.members).toHaveLength(1);
-    expect(res.body.members[0].user.id).toBe(s.member.id);
-    expect(res.body.members.map((m: { user: { id: string } }) => m.user.id)).not.toContain(s.manager.id);
-    expect(res.body.members.map((m: { user: { id: string } }) => m.user.id)).not.toContain(s.outsider.id);
-    expect(res.body.members[0].workedMs).toBe(60 * 60_000);
-    expect(res.body.members[0].onTimeDays).toBe(1);
-    expect(res.body.members[0].offDays).toBe(0);
-    expect(res.body.members[0].approvals.pending).toBe(1);
-    expect(res.body.members[0].screenshots).toBe(1);
-    expect(res.body.members[0].days[0].topApps[0].app).toBe('Code');
-    expect(res.body.attention.some((item: { kind: string }) => item.kind === 'pending_approval')).toBe(true);
-  });
-
+describe('/v1/reports/team/*', () => {
   it('returns a compact summary without loading evidence details and supports scoped team filtering', async () => {
     const s = await seedTeamReport();
     await prisma.activitySample.deleteMany({ where: { userId: s.member.id } });
@@ -574,26 +552,17 @@ describe('/v1/reports/team', () => {
     expect(outsideScope.body.members).toEqual([]);
   });
 
-  it('flags automatic tracked time when activity samples are missing', async () => {
+  it('leaves activity unscored when automatic time has no samples', async () => {
     const s = await seedTeamReport();
     await prisma.activitySample.deleteMany({ where: { userId: s.member.id } });
 
     const res = await request(app)
-      .get('/v1/reports/team?from=2026-06-01&to=2026-06-01&tz=UTC')
+      .get(`/v1/reports/team/member?${new URLSearchParams({ userId: s.member.id, from: '2026-06-01', to: '2026-06-01', tz: 'UTC' }).toString()}`)
       .set(auth(s.managerToken));
 
     expect(res.status).toBe(200);
-    expect(res.body.members[0].days[0].activityPercent).toBeNull();
-    expect(res.body.attention).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          userId: s.member.id,
-          date: '2026-06-01',
-          kind: 'missing_activity',
-          severity: 'warn',
-        }),
-      ]),
-    );
+    expect(res.body.member.workedMs).toBe(60 * 60_000);
+    expect(res.body.member.days[0].activityPercent).toBeNull();
   });
 
   it('returns scoped member drawer data and day details for managers only', async () => {
@@ -609,6 +578,9 @@ describe('/v1/reports/team', () => {
       .set(auth(s.managerToken));
     expect(detail.status).toBe(200);
     expect(detail.body.member.user.id).toBe(s.member.id);
+    expect(detail.body.member.workedMs).toBe(60 * 60_000);
+    expect(detail.body.member.screenshots).toBe(1);
+    expect(detail.body.member.days[0].topApps[0].app).toBe('Code');
     expect(detail.body.member.onTimeDays).toBe(1);
     expect(detail.body.member.offDays).toBe(0);
     expect(detail.body.approvals).toHaveLength(1);
@@ -654,11 +626,6 @@ describe('/v1/reports/team', () => {
 
   it('rejects members and overlong team ranges', async () => {
     const s = await seedTeamReport();
-    const memberRes = await request(app)
-      .get('/v1/reports/team?from=2026-06-01&to=2026-06-01&tz=UTC')
-      .set(auth(s.memberToken));
-    expect(memberRes.status).toBe(403);
-
     const memberSummary = await request(app)
       .get('/v1/reports/team/summary?from=2026-06-01&to=2026-06-01&tz=UTC')
       .set(auth(s.memberToken));
@@ -671,7 +638,7 @@ describe('/v1/reports/team', () => {
     expect(invalidTeam.body.error).toBe('invalid_team_id');
 
     const tooLong = await request(app)
-      .get('/v1/reports/team?from=2026-06-01&to=2026-07-10&tz=UTC')
+      .get('/v1/reports/team/summary?from=2026-06-01&to=2026-07-10&tz=UTC')
       .set(auth(s.managerToken));
     expect(tooLong.status).toBe(400);
     expect(tooLong.body.error).toBe('range_too_long');

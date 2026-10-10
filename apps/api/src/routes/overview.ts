@@ -3,7 +3,7 @@ import { prisma } from '@grind/db';
 import { dateKeyInTimeZone, isValidTimeZone } from '@grind/types';
 import { requireAccessToken } from '../middleware/auth';
 import { attachScope, requireManagerOrAbove } from '../middleware/scope';
-import { clipInterval, heartbeatIsFresh, isCounted } from '@grind/core';
+import { clipInterval, isCounted, trackingNow } from '@grind/core';
 import { localDayWindow } from '../insights/day';
 import { loadTimelineWindow } from '../time';
 import { classifySyncHealth, SYNC_HEALTH_SELECT } from '../agent/syncHealth';
@@ -110,10 +110,7 @@ overviewRouter.get('/', async (req, res, next) => {
     let meetingMs = 0;
     let manualMs = 0;
     const usersWithTime = new Set<string>();
-    const usersTrackingNow = new Set<string>();
-    for (const entry of timeline.entries) {
-      if (heartbeatIsFresh(timeline.evidence.get(entry.id), now, entry.startedAt)) usersTrackingNow.add(entry.userId);
-    }
+    const usersTrackingNow = trackingNow(timeline.pieces);
     for (const piece of timeline.pieces) {
       if (!isCounted(piece)) continue;
       const iv = clipInterval(piece, sofar.start, sofar.end);

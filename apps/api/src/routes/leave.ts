@@ -26,6 +26,7 @@ import {
   toLeavePolicyDto,
   toIsoDate,
   fromIsoDate,
+  accrualStartDate,
   REQUEST_INCLUDE,
   toLeaveRequestDto,
 } from '../leave';
@@ -340,9 +341,10 @@ adminLeaveRouter.patch('/policy', requireAdmin, async (req, res, next) => {
 adminLeaveRouter.get('/balances', async (req, res, next) => {
   try {
     if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
+    const tz = req.scope.workspaceTimezone;
     const asOf = typeof req.query.asOf === 'string' && /^\d{4}-\d{2}-\d{2}$/u.test(req.query.asOf)
       ? req.query.asOf
-      : todayKey(req.scope.workspaceTimezone);
+      : todayKey(tz);
 
     for (const userId of req.scope.userIds) {
       await ensureAccruals({ workspaceId: req.scope.workspaceId, userId, asOf });
@@ -391,7 +393,7 @@ adminLeaveRouter.get('/balances', async (req, res, next) => {
         lastSaturdayOff: p.lastSaturdayOffOverride,
         effectiveLastSaturdayOff: p.lastSaturdayOffOverride ?? policy.lastSaturdayOff,
         attendanceRuleMode: p.attendanceRuleMode,
-        accrualStart: toIsoDate(p.joinedOn ?? p.createdAt),
+        accrualStart: accrualStartDate(p, tz),
         joinedOnSet: p.joinedOn !== null,
         ...(balances[p.id] ?? { balanceDays: 0, accruedDays: 0, consumedDays: 0, adjustedDays: 0 }),
         month: calendar.leaveAccountFor(p.id) ?? { opening: 0, earned: 0, paid: 0, closing: 0, lines: [] },
@@ -460,7 +462,7 @@ adminLeaveRouter.patch('/members/:userId', requireAdmin, async (req, res, next) 
       accrualDays: updated.leaveAccrualDaysOverride,
       lastSaturdayOff: updated.lastSaturdayOffOverride,
       attendanceRuleMode: updated.attendanceRuleMode,
-      accrualStart: toIsoDate(updated.joinedOn ?? updated.createdAt),
+      accrualStart: accrualStartDate(updated, req.scope.workspaceTimezone),
       balance: await loadBalance(updated.id),
     });
   } catch (err) {

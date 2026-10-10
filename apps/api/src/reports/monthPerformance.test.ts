@@ -76,7 +76,7 @@ function report(opts: {
     companyName: 'EMIAC TECHNOLOGIES PRIVATE LIMITED',
     users: [user],
     dayStatusFor: (_u, date) => opts.statuses?.[date] ?? null,
-    trackedMinutesFor: (_u, date) => opts.tracked?.[date] ?? 0,
+    trackedMsFor: (_u, date) => (opts.tracked?.[date] ?? 0) * 60_000,
     punchFor,
     generatedAtMs: Date.UTC(2026, 8, 1),
   });
@@ -333,6 +333,18 @@ describe('totals', () => {
     }).rows[0]!.totals;
     expect(fmtMinutes(totals.workMinutes)).toBe('11:58');
   });
+
+  it('rounds the month total once, not day by day', () => {
+    // Four days of 8h 0m 20s: each day reads 08:00, the month 32:01 — not
+    // 32:00 from adding four rounded days.
+    const dates = ['2026-08-03', '2026-08-04', '2026-08-05', '2026-08-06'];
+    const row = report({
+      statuses: Object.fromEntries(dates.map((d) => [d, status(d, 'WORKING')])),
+      tracked: Object.fromEntries(dates.map((d) => [d, 8 * 60 + 1 / 3])),
+    }).rows[0]!;
+    expect(fmtMinutes(row.days.find((d) => d.date === '2026-08-03')!.workMinutes)).toBe('08:00');
+    expect(fmtMinutes(row.totals.workMinutes)).toBe('32:01');
+  });
 });
 
 describe('the grid', () => {
@@ -387,7 +399,7 @@ describe('a human correction to a day', () => {
       companyName: 'EMIAC',
       users: [user],
       dayStatusFor: (_u, date) => opts.statuses?.[date] ?? null,
-      trackedMinutesFor: (_u, date) => opts.tracked?.[date] ?? 0,
+      trackedMsFor: (_u, date) => (opts.tracked?.[date] ?? 0) * 60_000,
       punchFor: noPunches,
       overrideFor: (_u, date) => opts.overrides?.[date] ?? null,
       generatedAtMs: Date.UTC(2026, 8, 1),
@@ -482,7 +494,7 @@ describe('the leave account the month left behind', () => {
       companyName: 'EMIAC',
       users: [user],
       dayStatusFor: () => null,
-      trackedMinutesFor: () => 0,
+      trackedMsFor: () => 0,
       punchFor: noPunches,
       generatedAtMs: Date.UTC(2026, 8, 1),
       ...extra,
@@ -521,7 +533,7 @@ describe('the leave account the month left behind', () => {
     const rep = build({
       dayStatusFor: (_u, date) =>
         date === '2026-08-03' ? status(date, 'UNPAID_LEAVE') : date === '2026-08-04' ? status(date, 'WORKING') : null,
-      trackedMinutesFor: (_u, date) => (date === '2026-08-04' ? 480 : 0),
+      trackedMsFor: (_u, date) => (date === '2026-08-04' ? 480 * 60_000 : 0),
     });
     expect(monthPerformanceSummaryPairs(rep, rep.rows[0]!)).toEqual([
       ['Present', '1'],

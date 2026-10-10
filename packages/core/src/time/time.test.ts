@@ -7,7 +7,7 @@ import {
   splitByIntervals,
   subtractIntervals,
 } from './intervals';
-import { countedMs, resolveTimeline, totalsByTask, type TimelineEntry } from './timeline';
+import { countedMs, resolveTimeline, totalsByTask, trackingNow, type TimelineEntry } from './timeline';
 import { bucketByDay } from './days';
 import { assignmentForDate, shiftWindowFor } from './shift';
 import {
@@ -127,6 +127,22 @@ describe('resolveTimeline', () => {
     expect(sum).toBe(countedMs(pieces));
     expect(byTask.get('task-a')).toBe(60 * MIN + 15 * MIN);
     expect(byTask.get('task-b')).toBe(30 * MIN);
+    // A window counts only what falls inside it.
+    const window = { start: ms('2026-07-11T09:45:00Z'), end: ms('2026-07-11T10:45:00Z') };
+    expect(totalsByTask(pieces, window).get('task-a')).toBe(15 * MIN + 15 * MIN);
+    expect(totalsByTask(pieces, window).get('task-b')).toBe(30 * MIN);
+  });
+
+  it('is tracking now only on a live, tracked piece', () => {
+    const pieces = resolveTimeline([
+      entry('live', [['WORK', '2026-07-11T17:00:00Z', null]]),
+      { ...entry('stale', [['WORK', '2026-07-11T08:00:00Z', null]]), userId: 'u2' },
+      { ...entry('done', [['WORK', '2026-07-11T08:00:00Z', '2026-07-11T09:00:00Z']]), userId: 'u3' },
+    ], {
+      now,
+      evidence: new Map([['live', { latestStoredProofAt: null, latestHeartbeatAt: at('2026-07-11T17:59:00Z') }]]),
+    });
+    expect(trackingNow(pieces)).toEqual(new Map([['u1', 'live']]));
   });
 });
 

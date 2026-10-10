@@ -15,7 +15,6 @@ import {
   signOAuthState,
   verifyOAuthState,
   buildAuthorizeUrl,
-  loggedMsFromTimeline,
   LARK_SCOPES,
   LarkReauthRequiredError,
   LarkTransientError,
@@ -23,6 +22,7 @@ import {
   parseAgentCallbackScheme,
 } from '../lark';
 import { localDayWindow } from '../insights/day';
+import { totalsByTask } from '@grind/core';
 import { loadTimelineWindow } from '../time';
 import { assertLarkProfileBelongsToUser, LarkIdentityMismatchError } from '../lark/connectIdentity';
 
@@ -232,9 +232,9 @@ larkRouter.get('/my-tasks', async (req, res, next) => {
           })
         : null;
       const pieces = timeline?.pieces ?? [];
-      const loggedTotal = loggedMsFromTimeline(pieces);
+      const loggedTotal = totalsByTask(pieces);
       const loggedToday = dayWindow
-        ? loggedMsFromTimeline(pieces, { start: dayWindow.start.getTime(), end: dayWindow.end.getTime() })
+        ? totalsByTask(pieces, { start: dayWindow.start.getTime(), end: dayWindow.end.getTime() })
         : loggedTotal;
       for (const t of tasks) {
         t.loggedTodayMs = loggedToday.get(t.guid) ?? 0;

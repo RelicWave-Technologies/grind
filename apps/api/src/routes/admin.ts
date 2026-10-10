@@ -11,9 +11,11 @@ import { resolveReportRange } from '../reports/member';
 import { timesheetCalendarInputs } from '../leave';
 import { loadPunchLookup } from '../attendance/punches';
 import { loadAttendanceRuleContext } from '../attendance/ruleContext';
+import { loadOverrideLookup } from '../reports/attendanceOverrides';
 import {
   dateRange,
   timesheetMatrixFromBuckets,
+  emptyTimesheetCell,
   type TimesheetMatrix,
 } from '../insights/timesheets';
 import { localDayWindow } from '../insights/day';
@@ -1164,7 +1166,7 @@ async function loadTimesheetData(
     select: { id: true, name: true, email: true, avatarUrl: true, role: true },
     orderBy: [{ role: 'asc' }, { name: 'asc' }],
   });
-  return { matrix, users };
+  return { matrix, users, calendar: calendarInputs };
 }
 
 function attachActivitySampleCounts(
@@ -1223,42 +1225,48 @@ adminRouter.get('/timesheets', requireAnyCapability(['reports.team.read', 'repor
  * GET /v1/admin/timesheets.csv?from=&to=&tz=
  *
  * Same scope + range + validation as the JSON endpoint, but emits a row-per-
- * (user, day) CSV that opens cleanly in Excel/Sheets. Cells where the user
- * tracked nothing are dropped (zero rows, not blank rows) — managers
- * exporting a 30-day audit don't want to scroll through "Sat: 0".
+ * (user, day) CSV that opens cleanly in Excel/Sheets. A day with no time and
+ * nothing to say is dropped — managers exporting a 30-day audit don't want to
+ * scroll through "Sat: 0" — but a day the rules charged (leave nobody
+ * applied for) stays, with no hours: that is the row the export is for.
  */
 adminRouter.get('/timesheets.csv', requireAnyCapability(['reports.team.read', 'reports.workspace.read']), async (req, res, next) => {
   try {
     if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
     const range = resolveTimesheetRange(req, req.scope.workspaceTimezone);
     if ('error' in range) return res.status(range.status).json({ error: range.error, ...(range.extras ?? {}) });
-    const { matrix, users } = await loadTimesheetData(req.scope, range);
+    const { matrix, users, calendar } = await loadTimesheetData(req.scope, range);
     if (!matrix) return res.status(400).json({ error: 'invalid_date_or_tz' });
 
-    const usersById = new Map(users.map((u) => [u.id, u]));
     // The attendance rules' reading of each day, so the sheet says which days
     // fell short without the reader redoing the arithmetic. Empty when the
-    // rules are off or the day was fine.
-    const punchFor = await loadPunchLookup({ userIds: users.map((u) => u.id), from: range.from, to: range.to });
-    const rules = await loadAttendanceRuleContext({
-      workspaceId: req.scope.workspaceId,
-      tz: matrix.tz,
-      userIds: users.map((u) => u.id),
-      from: range.from,
-      to: range.to,
-      punchFor,
-    });
+    // rules are off, the day was fine, or a manager corrected it — a
+    // corrected day is the corrector's call, as on the reports.
+    const userIds = users.map((u) => u.id);
+    const punchFor = await loadPunchLookup({ userIds, from: range.from, to: range.to });
+    const [rules, overrideFor] = await Promise.all([
+      loadAttendanceRuleContext({
+        workspaceId: req.scope.workspaceId,
+        tz: matrix.tz,
+        userIds,
+        from: range.from,
+        to: range.to,
+        punchFor,
+      }),
+      loadOverrideLookup({ userIds, from: range.from, to: range.to }),
+    ]);
     const lines: string[] = [];
     lines.push(
       'name,email,role,day,worked_h,meeting_h,manual_h,total_h,invalidated_h,first_activity,last_activity,activity_samples,remark,rule_leave_days',
     );
     // Stable ordering: user (role-then-name like the JSON), then day asc.
     for (const u of users) {
-      const row = matrix.cells[u.id];
-      if (!row) continue;
       for (const day of matrix.days) {
-        const cell = row[day];
-        if (!cell || cell.totalMs === 0) continue;
+        const cell = matrix.cells[u.id]?.[day] ?? emptyTimesheetCell();
+        const verdict = overrideFor(u.id, day)
+          ? null
+          : rules.judge(u.id, day, calendar.dayStatusFor(u.id, day), Math.round(cell.totalMs / 60_000));
+        if (cell.totalMs === 0 && !verdict) continue;
         const first = cell.firstActivityMs ? fmtTimeForTz(cell.firstActivityMs, matrix.tz) : '';
         const last = cell.lastActivityMs ? fmtTimeForTz(cell.lastActivityMs, matrix.tz) : '';
         lines.push(
@@ -1275,14 +1283,11 @@ adminRouter.get('/timesheets.csv', requireAnyCapability(['reports.team.read', 'r
             first,
             last,
             String(cell.activitySampleCount),
-            ...remarkCells(rules.judge(u.id, day, cell.dayStatus ?? null, Math.round(cell.totalMs / 60_000))),
+            ...remarkCells(verdict),
           ].join(','),
         );
       }
     }
-    // Voider for usersById to suppress unused-warning since we use users
-    // directly. Keeps the lookup if a future column needs it.
-    void usersById;
 
     const filename = `timesheets-${range.from}-to-${range.to}.csv`;
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');

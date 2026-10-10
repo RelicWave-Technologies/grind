@@ -233,8 +233,8 @@ export interface MonthPerformanceInput {
   users: MonthPerformanceUser[];
   /** The Working Calendar's answer for a person-day. null = it has none. */
   dayStatusFor: (userId: string, date: string) => DayStatus | null;
-  /** Minutes Timo tracked for this person on this date. */
-  trackedMinutesFor: (userId: string, date: string) => number;
+  /** Counted milliseconds for this person on this date (work, meetings, approved manual). */
+  trackedMsFor: (userId: string, date: string) => number;
   punchFor: PunchLookup;
   /** A manager's or admin's correction for this person-day, if one exists. */
   overrideFor?: (userId: string, date: string) => DayOverride | null;
@@ -453,12 +453,16 @@ export function buildMonthPerformance(input: MonthPerformanceInput): MonthPerfor
 
   const rows: MonthPerformanceRow[] = input.users.map((user) => {
     const totals = emptyTotals();
+    // The month's hours are the sum of the time, rounded once. Adding up the
+    // rounded days drifts from the team report by up to half a minute a day.
+    let trackedMs = 0;
     const days: MonthPerformanceDay[] = dates.map((date) => {
       const punch = input.punchFor(user.id, date);
       const status = input.dayStatusFor(user.id, date);
       const inMinute = punch?.inMinute ?? null;
       const outMinute = punch?.outMinute ?? null;
-      const workMinutes = Math.max(0, Math.round(input.trackedMinutesFor(user.id, date)));
+      const dayMs = Math.max(0, input.trackedMsFor(user.id, date));
+      const workMinutes = Math.round(dayMs / 60_000);
       const override = input.overrideFor?.(user.id, date) ?? null;
       // Judged even under a correction, so the correction can be flagged when
       // the computed answer moves — but a corrected day is charged nothing by a
@@ -475,7 +479,7 @@ export function buildMonthPerformance(input: MonthPerformanceInput): MonthPerfor
       countInto(totals, code);
       if (rule) countRuleInto(totals, rule);
       if (late !== null) totals.lateDays += 1;
-      totals.workMinutes += workMinutes;
+      trackedMs += dayMs;
 
       return {
         date,
@@ -494,6 +498,7 @@ export function buildMonthPerformance(input: MonthPerformanceInput): MonthPerfor
         late,
       };
     });
+    totals.workMinutes = Math.round(trackedMs / 60_000);
     return {
       user,
       days,
@@ -660,7 +665,7 @@ export function payableDays(
 }
 
 /** Calendar days of the month from the person's start to their suspension. */
-export function payableBaseDays(
+function payableBaseDays(
   report: Pick<MonthPerformanceReport, 'dates'>,
   row: Pick<MonthPerformanceRow, 'user'>,
 ): number {

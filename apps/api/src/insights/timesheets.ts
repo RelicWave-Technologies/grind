@@ -1,24 +1,7 @@
-import { bucketByDay, emptyDayBucket, resolveTimeline, type DayBucket } from '@grind/core';
+import { emptyDayBucket, type DayBucket } from '@grind/core';
 import { dateKeysBetween, type DayStatus } from '@grind/types';
-import { localDayWindow } from './day';
 
-/** A reviewer invalidation in the timesheet's input shape. */
-export interface TimeInvalidationInput {
-  userId: string;
-  startedAt: number;
-  endedAt: number;
-}
-
-export interface TimesheetSegmentInput {
-  userId: string;
-  /** TimeEntry.source — AUTO becomes WORK/MEETING by segment.kind; MANUAL collapses to MANUAL regardless. */
-  source: 'AUTO' | 'MANUAL';
-  segmentKind: 'WORK' | 'MEETING' | 'IDLE_TRIMMED';
-  startedAt: number;
-  endedAt: number;
-}
-
-interface TimesheetCell {
+export interface TimesheetCell {
   workedMs: number;
   meetingMs: number;
   manualMs: number;
@@ -73,6 +56,11 @@ function cellOf(bucket: DayBucket, dayStatus: DayStatus | null): TimesheetCell {
   };
 }
 
+/** A user-day with no time and no calendar status. */
+export function emptyTimesheetCell(): TimesheetCell {
+  return cellOf(emptyDayBucket(), null);
+}
+
 /**
  * The matrix from day buckets already attributed by `@grind/core`'s
  * `bucketByDay` — the same buckets every other surface reads, so a cell here
@@ -112,64 +100,4 @@ export function timesheetMatrixFromBuckets(input: {
   }
 
   return { from: input.from, to: input.to, tz: input.tz, days: input.days, cells };
-}
-
-/**
- * Aggregate segment durations into a per-user × per-day matrix.
- *
- * The segments' ends must already be effective (open segments resolved by the
- * caller). They are resolved to one owner per instant by `@grind/core` —
- * observed time wins, manual keeps what is free, idle never counts — and
- * invalidated time is reported in `invalidatedMs`, never in the totals.
- */
-export function buildTimesheetMatrix(input: {
-  from: string;
-  to: string;
-  tz: string;
-  segments: TimesheetSegmentInput[];
-  invalidations?: TimeInvalidationInput[];
-  /**
-   * Resolves a user-day to its calendar status. Passed as a function rather
-   * than a materialised map so the matrix stays independent of how the
-   * calendar is loaded, and so a 60-day x 40-person range does not have to
-   * build 2400 objects the caller may never read.
-   */
-  dayStatusFor?: (userId: string, date: string) => DayStatus | null;
-  /**
-   * Users to materialise cells for even when they tracked nothing. A person on
-   * leave for a whole week has no segments, and without this their leave would
-   * be invisible in exactly the report that most needs to show it.
-   */
-  userIds?: readonly string[];
-}): TimesheetMatrix | null {
-  const fromWin = localDayWindow(input.from, input.tz);
-  const toWin = localDayWindow(input.to, input.tz);
-  if (!fromWin || !toWin) return null;
-  if (toWin.end <= fromWin.start) return null;
-
-  const days = dateRange(input.from, input.to);
-  for (const day of days) if (!localDayWindow(day, input.tz)) return null;
-
-  const pieces = resolveTimeline(
-    input.segments.map((s, index) => ({
-      id: `segment-${index}`,
-      userId: s.userId,
-      source: s.source,
-      segments: [{ kind: s.segmentKind, startedAt: new Date(s.startedAt), endedAt: new Date(s.endedAt) }],
-    })),
-    {
-      now: Number.POSITIVE_INFINITY,
-      trustOpenSegments: true,
-      invalidations: (input.invalidations ?? []).map((iv) => ({ userId: iv.userId, start: iv.startedAt, end: iv.endedAt })),
-    },
-  );
-  return timesheetMatrixFromBuckets({
-    from: input.from,
-    to: input.to,
-    tz: input.tz,
-    days,
-    buckets: bucketByDay(pieces, input.tz, days),
-    dayStatusFor: input.dayStatusFor,
-    userIds: input.userIds,
-  });
 }

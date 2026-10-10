@@ -9,6 +9,7 @@ export {
   toLeavePolicyDto,
   toIsoDate,
   fromIsoDate,
+  accrualStartDate,
 } from './repository';
 export {
   ensureAccruals,
@@ -26,7 +27,7 @@ import type { LeaveAccount } from './leaveFunding';
 /**
  * The one call every timesheet consumer makes.
  *
- * Returns the two arguments `buildTimesheetMatrix` needs to carry calendar
+ * Returns what `timesheetMatrixFromBuckets` needs to carry calendar
  * status on its cells. Wrapped in a helper so attendance, member reports,
  * the month report and MCP cannot drift into loading the calendar four slightly
  * different ways — the failure mode being a person who reads as on leave in

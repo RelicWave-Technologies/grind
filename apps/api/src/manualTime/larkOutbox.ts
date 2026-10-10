@@ -11,6 +11,7 @@ import {
 import { logger } from '../logger';
 import { onShutdown } from '../lib/lifecycle';
 import { reclaimStaleOutboxClaims } from '../lib/outboxReclaim';
+import { loadCreditedManualMs } from '../time';
 
 type Tx = Prisma.TransactionClient;
 type LarkMessageKind = 'APPROVAL' | 'UPDATED_APPROVAL' | 'DECIDED_NOTICE';
@@ -72,21 +73,20 @@ async function loadRequest(requestId: string) {
     include: {
       user: { select: { name: true, workspace: { select: { timezone: true } } }, },
       approver: { select: { name: true } },
-      timeEntry: { select: { segments: { select: { startedAt: true, endedAt: true } } } },
     },
   });
 }
 
-/** What an approved request actually added: the segments its entry holds. */
-export function creditedMsOf(req: {
+/** What an approved request actually added, for its card; null when it was not approved. */
+export async function loadCardCreditedMs(req: {
+  id: string;
+  userId: string;
   status: string;
-  timeEntry?: { segments: Array<{ startedAt: Date; endedAt: Date | null }> } | null;
-}): number | null {
+  requestedStart: Date;
+  requestedEnd: Date;
+}): Promise<number | null> {
   if (req.status !== 'APPROVED') return null;
-  return (req.timeEntry?.segments ?? []).reduce(
-    (sum, s) => sum + Math.max(0, (s.endedAt ?? s.startedAt).getTime() - s.startedAt.getTime()),
-    0,
-  );
+  return (await loadCreditedManualMs([req])).get(req.id) ?? 0;
 }
 
 async function handleSendCard(event: { id: string; requestId: string; messageLedgerId: string | null; payload: Prisma.JsonValue }): Promise<void> {
@@ -141,7 +141,7 @@ async function handleSendCard(event: { id: string; requestId: string; messageLed
             decision: req.status === 'REJECTED' ? 'REJECTED' : 'APPROVED',
             decidedByName: req.approver?.name ?? 'Approver',
             decidedAt: (req.decidedAt ?? new Date()).getTime(),
-            creditedMs: creditedMsOf(req),
+            creditedMs: await loadCardCreditedMs(req),
           })
       : message.kind === 'UPDATED_APPROVAL'
         ? buildUpdatedApprovalCard({ ...common, diff })
@@ -257,7 +257,7 @@ async function handleFinalizeCards(event: { requestId: string }): Promise<void> 
           decision: req.status === 'REJECTED' ? 'REJECTED' : 'APPROVED',
           decidedByName: req.approver?.name ?? 'Approver',
           decidedAt: (req.decidedAt ?? new Date()).getTime(),
-          creditedMs: creditedMsOf(req),
+          creditedMs: await loadCardCreditedMs(req),
         });
   const nextStatus = req.status === 'CANCELLED' ? 'CANCELLED' : 'DECIDED';
 
