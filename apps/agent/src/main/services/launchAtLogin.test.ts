@@ -353,6 +353,22 @@ describe('launch at login service', () => {
     expect(mocks.app.setLoginItemSettings).toHaveBeenCalledWith(expect.objectContaining({ openAtLogin: false, name: 'Timo Legacy', path: 'C:\\Old\\Timo\\Timo.exe' }));
   });
 
+  it('never lets a failing legacy cleanup throw out of the boot reconcile', () => {
+    // This ran before the tray and window existed; a throw here left an
+    // invisible Timo holding the single-instance lock.
+    const exe = 'C:\\Users\\Anish\\AppData\\Local\\Programs\\Timo\\Timo.exe';
+    const ready = settings({ openAtLogin: true, executableWillLaunchAtLogin: true, launchItems: [item()] });
+    mocks.app.getLoginItemSettings.mockReturnValue(ready);
+    mocks.app.setLoginItemSettings.mockImplementation((s: { name?: string }) => {
+      if (s.name === 'Grind' || s.name === '@grind/agent') throw new Error('registry access denied');
+    });
+
+    expect(() => service('win32', exe).reconcileOnBoot()).not.toThrow();
+    // Both legacy names were still attempted.
+    expect(mocks.app.setLoginItemSettings).toHaveBeenCalledWith(expect.objectContaining({ name: 'Grind' }));
+    expect(mocks.app.setLoginItemSettings).toHaveBeenCalledWith(expect.objectContaining({ name: '@grind/agent' }));
+  });
+
   it('keeps the canonical Windows startup item while removing duplicate Timo rows', () => {
     const exe = 'C:\\Users\\Anish\\AppData\\Local\\Programs\\Timo\\Timo.exe';
     const duplicate = item({

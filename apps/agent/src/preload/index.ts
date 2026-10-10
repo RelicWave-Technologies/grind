@@ -8,6 +8,7 @@ import type { LaunchAtLoginHealth, MoveToApplicationsResult } from '../shared/la
 import type { AttentionAction, AttentionActionResult, AttentionPrompt } from '../shared/attention';
 import type { WorkspaceTimeContext } from '../shared/workspaceTime';
 import type { ShiftPromptReason, TodayShiftWindow } from '../shared/shift';
+import type { PermissionRelaunchRecord } from '../shared/permissionRelaunch';
 
 type AuthStatus = 'loggedIn' | 'loggedOut';
 type LarkOutcome = { kind: 'pending' } | { kind: 'error'; reason: string; host?: string };
@@ -153,6 +154,8 @@ const api = {
   },
   app: {
     relaunch: (): Promise<void> => ipcRenderer.invoke('app:relaunch'),
+    /** The permission restart that led to this boot, if any (loop breaker). */
+    permissionRelaunch: (): Promise<PermissionRelaunchRecord | null> => ipcRenderer.invoke('app:permissionRelaunch'),
     openDashboard: (): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('app:openDashboard'),
   },
   updates: {

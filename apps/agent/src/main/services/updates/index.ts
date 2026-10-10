@@ -5,7 +5,7 @@ import { API_URL, AUTO_UPDATE_ENABLED, UPDATE_CHANNEL, type UpdateChannel } from
 import { broadcast } from '../../broadcast';
 import { log } from '../../logger';
 import { drainUploads } from '../capture/uploader';
-import { invalidateQuitCleanup, runQuitCleanup } from '../quitCleanup';
+import { getAppLifecycle } from '../../appLifecycle';
 import { showNotification } from '../../notifications';
 import { getTimerService } from '../timer';
 import {
@@ -39,11 +39,14 @@ const INSTALL_FLUSH_TIMEOUT_MS = 5_000;
 const INSTALL_RETRY_DELAY_MS = 3_000;
 const INSTALL_FALLBACK_QUIT_MS = 12_000;
 /**
- * An update that turns up ready this soon after launch was staged by an
- * earlier session (electron-updater re-validates its cached download within
- * seconds), so the person has not started work yet: install it now.
+ * An update that turns up ready this soon after launch, without downloading
+ * anything this session, was staged by an earlier session (electron-updater
+ * re-validates its cached download within seconds), so the person has not
+ * started work yet: install it now.
  */
 const LAUNCH_INSTALL_WINDOW_MS = 3 * 60_000;
+/** electron-updater's log line for a download it actually performed. */
+const FRESH_DOWNLOAD_LOG = /^New version \S+ has been downloaded to /u;
 const MACHINE_INSTALL_NOTICE_DELAY_MS = 15_000;
 const MACHINE_INSTALL_ERROR =
   'UPDATES_BLOCKED_MACHINE_INSTALL: installed for all users under Program Files; cannot update itself';
@@ -75,6 +78,13 @@ let installFallbackQuitTimer: NodeJS.Timeout | null = null;
 let automaticErrorCount = 0;
 let readyNotificationVersion: string | null = null;
 let showMainWindow: (() => void) | null = null;
+/**
+ * This session downloaded an update itself (progress events, or electron-updater
+ * logging a completed download) rather than finding one cached. A fresh
+ * download is never installed at launch: the first check runs seconds after
+ * start, and a silent restart then is just Timo closing by itself.
+ */
+let downloadedThisSession = false;
 let isMainWindowVisible: (() => boolean) | null = null;
 
 function now(): number {
@@ -161,6 +171,7 @@ function wireUpdaterEvents(): void {
     log.info('update available', { version: next.availableVersion, channel: next.channel });
   });
   autoUpdater.on('download-progress', (progress: ProgressLike) => {
+    downloadedThisSession = true;
     updateStatus({ type: 'download-progress', percent: Number(progress.percent ?? 0) });
   });
   autoUpdater.on('update-downloaded', (info: UpdateInfoLike) => {
@@ -220,7 +231,7 @@ function handleUpdateError(err: unknown, manual: boolean): void {
     clearInstallTimers();
     // The install ran the quit cleanup up front and then failed to quit. The
     // app keeps running, so that cleanup no longer stands for the next Quit.
-    if (installing) invalidateQuitCleanup();
+    if (installing) getAppLifecycle().abortExit('update-install-failed');
     updateStatus({ type: 'error', message, manual: true, at: now() });
     return;
   }
@@ -285,8 +296,8 @@ async function showMachineInstallNotice(): Promise<void> {
 }
 
 /**
- * A ready update found right after launch was staged by an earlier session
- * that ended without installing it. On Windows that is the usual case, not the
+ * A ready update found right after launch — and not downloaded by this
+ * session — was staged by an earlier session that ended without installing it. On Windows that is the usual case, not the
  * exception: people shut down or sign off rather than Quit Timo, and Electron
  * does not emit `quit` for a Windows shutdown/sign-off, so install-on-quit
  * never runs and the update waited for a "Restart to update" click that rarely
@@ -296,6 +307,10 @@ async function showMachineInstallNotice(): Promise<void> {
 function maybeInstallAtLaunch(): boolean {
   if (platform !== 'win32' || status.phase !== 'ready' || !status.canInstallNow) return false;
   if (startedAt == null || now() - startedAt > LAUNCH_INSTALL_WINDOW_MS) return false;
+  if (downloadedThisSession) {
+    log.info('not installing a freshly downloaded update at launch', { version: status.availableVersion });
+    return false;
+  }
   const version = status.availableVersion;
   const store = updateMemory();
   if (!version || !store || !claimLaunchInstall(store, version)) return false;
@@ -374,7 +389,6 @@ export function startUpdateService(opts: {
   }
 
   autoUpdater.autoDownload = true;
-  autoUpdater.autoInstallOnAppQuit = true;
   autoUpdater.allowPrerelease = updateChannel === 'beta';
   autoUpdater.channel = updateChannel;
   // MUST stay after the `channel` assignment: electron-updater's channel setter
@@ -384,12 +398,17 @@ export function startUpdateService(opts: {
   // exactly what happened to the beta.29 testers, who landed back on beta.28.
   autoUpdater.allowDowngrade = false;
   autoUpdater.logger = {
-    info: (msg: unknown) => log.info('electron-updater', { msg: String(msg) }),
+    info: (msg: unknown) => {
+      if (FRESH_DOWNLOAD_LOG.test(String(msg))) downloadedThisSession = true;
+      log.info('electron-updater', { msg: String(msg) });
+    },
     warn: (msg: unknown) => log.warn('electron-updater', { msg: String(msg) }),
     error: (msg: unknown) => log.error('electron-updater', { msg: String(msg) }),
     debug: (msg: unknown) => log.debug('electron-updater', { msg: String(msg) }),
   };
   wireUpdaterEvents();
+  // Install-on-quit is switched on (and off) only by the app lifecycle.
+  getAppLifecycle().attachUpdater({ updater: autoUpdater, installReadyUpdate: installReadyUpdateForRestart });
 
   firstCheckTimer = setTimeout(() => void checkForUpdates(false), FIRST_CHECK_DELAY_MS);
   intervalTimer = setInterval(() => void checkForUpdates(false), NORMAL_CHECK_INTERVAL_MS);
@@ -404,21 +423,6 @@ export function startUpdateService(opts: {
 
 export { getUpdateDiagnostics };
 
-/**
- * Windows is ending the session (shutdown, restart, sign-off). An installer
- * started now would be killed part-way — after the old version's files are
- * removed, before the new ones are written. Electron documents that `quit`
- * (which install-on-quit hangs off) is not emitted for a session end, but the
- * quit cleanup that runs here must never be the thing that starts one, so
- * install-on-quit is switched off for the rest of this process. The staged
- * update stays cached; the next launch installs it (maybeInstallAtLaunch).
- */
-export function holdUpdateInstallForSessionEnd(): void {
-  if (!status.enabled) return;
-  autoUpdater.autoInstallOnAppQuit = false;
-  log.info('update install held for session end', { phase: status.phase, version: status.availableVersion });
-}
-
 export function getUpdateStatus(): UpdateStatus {
   if (status.phase === 'ready') refreshUpdateInstallability();
   return status;
@@ -428,7 +432,9 @@ export async function checkForUpdates(manual: boolean): Promise<UpdateStatus> {
   if (!status.enabled) {
     return status;
   }
-  if (checking) {
+  // A check mid-install would knock the status off 'installing' and with it
+  // the install's own fallbacks.
+  if (checking || status.phase === 'installing') {
     return status;
   }
   checking = true;
@@ -483,7 +489,7 @@ function withTimeout<T>(label: string, task: Promise<T>, ms: number): Promise<T 
 }
 
 export async function flushBeforeUpdateInstall(): Promise<void> {
-  await runQuitCleanup('update');
+  await getAppLifecycle().prepareExit('update');
 
   await withTimeout('screenshot queue', drainUploads(), INSTALL_FLUSH_TIMEOUT_MS).catch((err) => {
     log.warn('update flush screenshots failed', { err: String(err) });
@@ -492,13 +498,6 @@ export async function flushBeforeUpdateInstall(): Promise<void> {
 
 function requestQuitAndInstall(reason: string, silent = false): void {
   try {
-    if (process.platform === 'darwin') {
-      // On macOS the native updater can still be staging when electron-updater
-      // emits "update-downloaded". Toggling this before a manual install makes
-      // MacUpdater ask the native updater to finish preparing instead of
-      // waiting quietly for a later app quit.
-      autoUpdater.autoInstallOnAppQuit = false;
-    }
     log.info('requesting downloaded update install', {
       reason,
       silent,
@@ -506,11 +505,26 @@ function requestQuitAndInstall(reason: string, silent = false): void {
       channel: status.channel,
       platform: process.platform,
     });
-    // isForceRunAfter: Timo comes back up after the installer finishes.
-    autoUpdater.quitAndInstall(silent, true);
+    getAppLifecycle().installUpdate(reason, { silent });
   } catch (err) {
     handleUpdateError(err, true);
   }
+}
+
+/**
+ * Stop an install that has not quit the app, and carry on running with the
+ * update still ready. Its early cleanup no longer stands for the next Quit.
+ */
+function abortInstall(why: string): void {
+  clearInstallTimers();
+  getAppLifecycle().abortExit(`update-install-${why}`);
+  getAppLifecycle().allowUpdateInstallOnQuit(`install-aborted:${why}`);
+  updateStatus({ type: 'install-aborted', canInstallNow: currentCanInstallNow() });
+  log.warn('update install abandoned; Timo keeps running', {
+    why,
+    version: status.availableVersion,
+    platform: process.platform,
+  });
 }
 
 function scheduleInstallFallbacks(reason: string, silent: boolean): void {
@@ -524,13 +538,25 @@ function scheduleInstallFallbacks(reason: string, silent: boolean): void {
   installFallbackQuitTimer = setTimeout(() => {
     installFallbackQuitTimer = null;
     if (status.phase !== 'installing') return;
+    // The person may have started tracking in the seconds since they clicked.
+    // Quitting now would cut that timer off for an install that is not even
+    // running, so leave the update ready instead.
+    if (!currentCanInstallNow()) {
+      abortInstall('timer-started');
+      return;
+    }
+    // Nobody asked for the launch-time install; never turn it into a quit.
+    if (reason === 'launch') {
+      abortInstall('launch-did-not-quit');
+      return;
+    }
     log.warn('update install request did not quit app; falling back to app quit', {
+      reason,
       version: status.availableVersion,
       channel: status.channel,
       platform: process.platform,
     });
-    autoUpdater.autoInstallOnAppQuit = true;
-    app.quit();
+    getAppLifecycle().quitToInstallUpdate(reason);
   }, INSTALL_FALLBACK_QUIT_MS);
 }
 
@@ -559,18 +585,13 @@ export async function installUpdateNow(
 }
 
 /**
- * Called just before a permission "Restart Timo". With autoInstallOnAppQuit on,
- * a staged update can start installing while app.relaunch() brings the old
- * binary back up — on a slow disk the two race. A ready update takes the
- * restart over instead (quitAndInstall relaunches on its own); otherwise
- * install-on-quit is switched off for this exit, and the next launch turns it
- * back on. Returns true when the update install owns the restart.
+ * A restart is about to happen (the permission "Restart Timo"). A ready update
+ * takes it over — quitAndInstall relaunches on its own. Returns true when the
+ * update install owns the restart; the lifecycle relaunches otherwise.
  */
-export async function installUpdateInsteadOfRelaunch(): Promise<boolean> {
+async function installReadyUpdateForRestart(): Promise<boolean> {
   if (!status.enabled) return false;
-  if ((await installUpdateNow()).phase === 'installing') return true;
-  autoUpdater.autoInstallOnAppQuit = false;
-  return false;
+  return (await installUpdateNow({ reason: 'restart' })).phase === 'installing';
 }
 
 export function stopUpdateServiceForTests(): void {
@@ -584,6 +605,7 @@ export function stopUpdateServiceForTests(): void {
   noticeTimer = null;
   started = false;
   startedAt = null;
+  downloadedThisSession = false;
   installScope = 'unknown';
   lastHandledError = null;
   resetUpdateDiagnosticsForTests();

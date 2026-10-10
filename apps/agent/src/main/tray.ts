@@ -60,6 +60,8 @@ export function trayGuidForPlatform(
 export function createTray(opts: {
   onToggle: (bounds: Rectangle) => void;
   onOpenMain: () => void;
+  /** Quit Timo through the app lifecycle (runs the quit cleanup). */
+  onQuit: () => void;
   onInstallUpdate?: () => void;
   getUpdateStatus?: () => UpdateStatus;
 }): Tray {
@@ -85,7 +87,7 @@ export function createTray(opts: {
     }
     template.push(
       { type: 'separator' },
-      { label: 'Quit Timo', click: () => app.quit() },
+      { label: 'Quit Timo', click: () => opts.onQuit() },
     );
     const menu = Menu.buildFromTemplate(template);
     tray.popUpContextMenu(menu);

@@ -50,6 +50,9 @@ const mocks = vi.hoisted(() => {
     logDebug: vi.fn(),
     showMessageBox: vi.fn(),
     openExternal: vi.fn(),
+    appQuit: vi.fn(),
+    appRelaunch: vi.fn(),
+    appExit: vi.fn(),
   };
 });
 
@@ -60,7 +63,10 @@ vi.mock('electron', () => ({
     },
     getVersion: () => mocks.appVersion,
     getPath: () => os.tmpdir(),
-    quit: vi.fn(),
+    quit: mocks.appQuit,
+    relaunch: mocks.appRelaunch,
+    exit: mocks.appExit,
+    on: vi.fn(),
   },
   dialog: {
     showMessageBox: mocks.showMessageBox,
@@ -101,6 +107,7 @@ vi.mock('../../logger', () => ({
     error: mocks.logError,
     debug: mocks.logDebug,
   },
+  flushLogs: vi.fn(),
 }));
 
 vi.mock('../capture/uploader', () => ({
@@ -110,6 +117,12 @@ vi.mock('../capture/uploader', () => ({
 vi.mock('../quitCleanup', () => ({
   runQuitCleanup: mocks.runQuitCleanup,
   invalidateQuitCleanup: mocks.invalidateQuitCleanup,
+  hasQuitCleanupCompleted: () => false,
+}));
+
+// The real app lifecycle runs; only the input hook it stops on exit is faked.
+vi.mock('../activity', () => ({
+  stopActivityCapture: vi.fn(),
 }));
 
 vi.mock('../timer', () => ({
@@ -159,6 +172,9 @@ describe('update service', () => {
     mocks.logDebug.mockReset();
     mocks.showMessageBox.mockReset().mockResolvedValue({ response: 1 });
     mocks.openExternal.mockReset().mockResolvedValue(undefined);
+    mocks.appQuit.mockReset();
+    mocks.appRelaunch.mockReset();
+    mocks.appExit.mockReset();
     memoryDir = fs.mkdtempSync(path.join(os.tmpdir(), 'timo-updates-'));
   });
 
@@ -249,24 +265,79 @@ describe('update service', () => {
   });
 
   it('lets a ready update take over a permission restart', async () => {
-    const { installUpdateInsteadOfRelaunch, startUpdateService } = await import('./index');
+    const { startUpdateService } = await import('./index');
+    const { getAppLifecycle } = await import('../../appLifecycle');
     startUpdateService({ showMainWindow: vi.fn(), isMainWindowVisible: () => false });
     emitUpdater('update-downloaded', { version: '0.0.2-beta.24' });
 
-    await expect(installUpdateInsteadOfRelaunch()).resolves.toBe(true);
+    await getAppLifecycle().relaunch('permission');
+
     expect(mocks.autoUpdater.quitAndInstall).toHaveBeenCalledWith(false, true);
+    expect(mocks.appRelaunch).not.toHaveBeenCalled();
+    expect(mocks.appExit).not.toHaveBeenCalled();
   });
 
   it('switches install-on-quit off for a plain permission restart', async () => {
-    const { installUpdateInsteadOfRelaunch, startUpdateService } = await import('./index');
+    const { startUpdateService } = await import('./index');
+    const { getAppLifecycle } = await import('../../appLifecycle');
     startUpdateService({ showMainWindow: vi.fn(), isMainWindowVisible: () => false });
     // Still downloading: nothing is installable, but nothing may start
     // installing underneath the relaunch either.
     emitUpdater('update-available', { version: '0.0.2-beta.24' });
 
-    await expect(installUpdateInsteadOfRelaunch()).resolves.toBe(false);
+    await getAppLifecycle().relaunch('permission');
+
     expect(mocks.autoUpdater.quitAndInstall).not.toHaveBeenCalled();
     expect(mocks.autoUpdater.autoInstallOnAppQuit).toBe(false);
+    expect(mocks.appRelaunch).toHaveBeenCalledOnce();
+    expect(mocks.appExit).toHaveBeenCalledWith(0);
+  });
+
+  describe('an install request that does not quit the app', () => {
+    it('relaunches as it falls back to quitting, so Timo comes back after the install', async () => {
+      const { installUpdateNow, startUpdateService } = await import('./index');
+      startUpdateService({ showMainWindow: vi.fn(), isMainWindowVisible: () => false });
+      emitUpdater('update-downloaded', { version: '0.0.2-beta.24' });
+      await installUpdateNow();
+      mocks.autoUpdater.autoInstallOnAppQuit = false;
+
+      await vi.advanceTimersByTimeAsync(12_000);
+
+      expect(mocks.autoUpdater.autoInstallOnAppQuit).toBe(true);
+      expect(mocks.appRelaunch).toHaveBeenCalledOnce();
+      expect(mocks.appQuit).toHaveBeenCalledOnce();
+      expect(mocks.appRelaunch.mock.invocationCallOrder[0]).toBeLessThan(mocks.appQuit.mock.invocationCallOrder[0]!);
+    });
+
+    it('gives up instead of quitting when a timer was started meanwhile', async () => {
+      const { getUpdateStatus, installUpdateNow, startUpdateService } = await import('./index');
+      startUpdateService({ showMainWindow: vi.fn(), isMainWindowVisible: () => false });
+      emitUpdater('update-downloaded', { version: '0.0.2-beta.24' });
+      await installUpdateNow();
+
+      mocks.timerStatus = { state: 'RUNNING', paused: false };
+      await vi.advanceTimersByTimeAsync(12_000);
+
+      expect(mocks.appQuit).not.toHaveBeenCalled();
+      expect(mocks.appRelaunch).not.toHaveBeenCalled();
+      // The early cleanup no longer covers the running timer.
+      expect(mocks.invalidateQuitCleanup).toHaveBeenCalledOnce();
+      expect(getUpdateStatus()).toMatchObject({ phase: 'ready', canInstallNow: false, availableVersion: '0.0.2-beta.24' });
+    });
+
+    it('keeps Timo running when the launch-time install did not quit', async () => {
+      const { getUpdateStatus, startUpdateService } = await import('./index');
+      startUpdateService({ showMainWindow: vi.fn(), platform: 'win32', execPath: USER_EXE, env: WINDOWS_ENV, memory: memory() });
+      emitUpdater('update-downloaded', { version: '0.0.2-beta.24' });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mocks.autoUpdater.quitAndInstall).toHaveBeenCalledWith(true, true);
+
+      await vi.advanceTimersByTimeAsync(12_000);
+
+      expect(mocks.appQuit).not.toHaveBeenCalled();
+      expect(mocks.appRelaunch).not.toHaveBeenCalled();
+      expect(getUpdateStatus().phase).toBe('ready');
+    });
   });
 
   it('invalidates the early quit cleanup when the install then fails', async () => {
@@ -457,22 +528,25 @@ describe('update service', () => {
 
   describe('Windows session end and launch install', () => {
     it('holds install-on-quit when the Windows session ends', async () => {
-      const { holdUpdateInstallForSessionEnd, startUpdateService } = await import('./index');
+      const { startUpdateService } = await import('./index');
+      const { getAppLifecycle } = await import('../../appLifecycle');
       startUpdateService({ showMainWindow: vi.fn(), platform: 'win32', execPath: USER_EXE, env: WINDOWS_ENV, memory: memory() });
+      await vi.advanceTimersByTimeAsync(4 * 60_000);
       emitUpdater('update-downloaded', { version: '0.0.2-beta.24' });
       expect(mocks.autoUpdater.autoInstallOnAppQuit).toBe(true);
 
-      holdUpdateInstallForSessionEnd();
+      await getAppLifecycle().endSession('test');
 
       expect(mocks.autoUpdater.autoInstallOnAppQuit).toBe(false);
     });
 
     it('is a no-op when updates are off', async () => {
       mocks.appIsPackaged = false;
-      const { holdUpdateInstallForSessionEnd, startUpdateService } = await import('./index');
+      const { startUpdateService } = await import('./index');
+      const { getAppLifecycle } = await import('../../appLifecycle');
       startUpdateService({ showMainWindow: vi.fn() });
       mocks.autoUpdater.autoInstallOnAppQuit = true;
-      holdUpdateInstallForSessionEnd();
+      await getAppLifecycle().endSession('test');
       expect(mocks.autoUpdater.autoInstallOnAppQuit).toBe(true);
     });
 
@@ -499,6 +573,31 @@ describe('update service', () => {
       await vi.advanceTimersByTimeAsync(0);
       expect(mocks.autoUpdater.quitAndInstall).not.toHaveBeenCalled();
       expect(second.getUpdateStatus().phase).toBe('ready');
+    });
+
+    it('never installs an update this session downloaded itself, however soon after launch', async () => {
+      const { getUpdateStatus, startUpdateService } = await import('./index');
+      startUpdateService({ showMainWindow: vi.fn(), platform: 'win32', execPath: USER_EXE, env: WINDOWS_ENV, memory: memory() });
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      emitUpdater('download-progress', { percent: 100 });
+      emitUpdater('update-downloaded', { version: '0.0.2-beta.24' });
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(mocks.autoUpdater.quitAndInstall).not.toHaveBeenCalled();
+      expect(getUpdateStatus().phase).toBe('ready');
+    });
+
+    it('treats electron-updater\'s completed-download log line as a fresh download too', async () => {
+      const { startUpdateService } = await import('./index');
+      startUpdateService({ showMainWindow: vi.fn(), platform: 'win32', execPath: USER_EXE, env: WINDOWS_ENV, memory: memory() });
+      const logger = mocks.autoUpdater.logger as { info(msg: unknown): void };
+
+      logger.info('New version 0.0.2-beta.24 has been downloaded to C:\\Users\\asha\\AppData\\Local\\timo-updater\\pending\\Timo-Setup.exe');
+      emitUpdater('update-downloaded', { version: '0.0.2-beta.24' });
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(mocks.autoUpdater.quitAndInstall).not.toHaveBeenCalled();
     });
 
     it('leaves an update that arrives later in the day for the person to restart', async () => {

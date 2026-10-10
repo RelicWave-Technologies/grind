@@ -55,6 +55,18 @@ describe('update state transitions', () => {
     expect(installing.error).toBeNull();
   });
 
+  it('puts an abandoned install back to ready', () => {
+    const ready = applyUpdateEvent(base(), { type: 'downloaded', version: '1.0.1', canInstallNow: true, at: 30 });
+    const installing = applyUpdateEvent(ready, { type: 'installing', at: 40 });
+    const aborted = applyUpdateEvent(installing, { type: 'install-aborted', canInstallNow: false });
+
+    expect(aborted.phase).toBe('ready');
+    expect(aborted.availableVersion).toBe('1.0.1');
+    expect(aborted.canInstallNow).toBe(false);
+    // Only an install in progress can be abandoned.
+    expect(applyUpdateEvent(ready, { type: 'install-aborted', canInstallNow: true })).toBe(ready);
+  });
+
   it('uses the requested automatic error backoff', () => {
     expect(nextRetryDelayMs(1)).toBe(15 * 60_000);
     expect(nextRetryDelayMs(2)).toBe(60 * 60_000);

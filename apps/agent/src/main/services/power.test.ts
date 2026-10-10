@@ -36,6 +36,10 @@ vi.mock('./quitCleanup', () => ({
   runQuitCleanup: mocks.runQuitCleanup,
 }));
 
+vi.mock('../appLifecycle', () => ({
+  getAppLifecycle: () => ({ quit: mocks.quit }),
+}));
+
 vi.mock('../broadcast', () => ({
   broadcast: mocks.broadcast,
 }));

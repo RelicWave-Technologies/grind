@@ -3,10 +3,11 @@ import { hasAccessibilityAccess } from '../services/permissions';
 import { getPreferences } from '../services/preferences';
 import { getLaunchAtLoginService } from '../services/launchAtLogin';
 import { applyFloatingBarVisibility, resetFloatingBarPosition } from '../floating';
-import { invalidateQuitCleanup, runQuitCleanup } from '../services/quitCleanup';
+import { getAppLifecycle } from '../appLifecycle';
 import { getTimerService } from '../services/timer';
 import { moveToApplications } from '../services/moveToApplications';
-import { installUpdateInsteadOfRelaunch } from '../services/updates';
+import { getPermissionRelaunchMemory } from '../services/permissionRelaunch';
+import { getTrackingReadinessService } from '../services/trackingReadiness';
 import type { LaunchAtLoginHealth, MoveToApplicationsResult } from '../../shared/launchAtLogin';
 
 interface SettingsInfo {
@@ -43,8 +44,8 @@ export function registerSettingsIpc(): void {
         });
         return confirmation.response === 0;
       },
-      cleanup: () => runQuitCleanup('quit'),
-      invalidateCleanup: invalidateQuitCleanup,
+      cleanup: () => getAppLifecycle().prepareExit('quit'),
+      invalidateCleanup: () => getAppLifecycle().abortExit('move-to-applications'),
       move: () => getLaunchAtLoginService().moveToApplicationsFolder({
         conflictHandler: (conflictType) => {
           const useExisting = conflictType === 'existsAndRunning';
@@ -79,6 +80,10 @@ export function registerSettingsIpc(): void {
     }
   });
 
+  // A permission restart from the last couple of minutes, if it was pressed
+  // just before this process started. The UI compares it with the live verdict.
+  ipcMain.handle('app:permissionRelaunch', () => getPermissionRelaunchMemory().forThisBoot());
+
   ipcMain.handle('settings:openStartupPrefs', async () => {
     const url = getLaunchAtLoginService().startupSettingsUrl();
     if (url) await shell.openExternal(url);
@@ -92,16 +97,21 @@ export function registerSettingsIpc(): void {
     }
   });
 
-  // Permission restart — the fallback once Check again did not help. Under
-  // `electron-vite dev`, app.relaunch() spawns Electron without the Vite
-  // dev-server URL → a blank window, so we instead tell the developer to
-  // restart the dev process.
+  // Permission restart — the fallback once Check again did not help. The
+  // verdict it was pressed for is recorded first, so the next boot can tell a
+  // restart that did not help and offer the remove-and-re-add guidance instead
+  // of another restart. Under `electron-vite dev`, app.relaunch() spawns
+  // Electron without the Vite dev-server URL → a blank window, so we instead
+  // tell the developer to restart the dev process.
   ipcMain.handle('app:relaunch', async () => {
     if (app.isPackaged) {
-      await runQuitCleanup('quit');
-      if (await installUpdateInsteadOfRelaunch()) return;
-      app.relaunch();
-      app.exit(0);
+      try {
+        const { readiness } = await getTrackingReadinessService().inspect();
+        getPermissionRelaunchMemory().remember(readiness);
+      } catch {
+        // Only the loop breaker is lost; the restart itself still happens.
+      }
+      await getAppLifecycle().relaunch('permission');
       return;
     }
     await dialog.showMessageBox({

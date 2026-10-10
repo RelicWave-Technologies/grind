@@ -34,12 +34,15 @@ export function actionFor(state: CapabilityState): PermissionAction | null {
  *    Settings — macOS can keep reporting a grant made while Timo runs as
  *    missing until the app relaunches (electron#36722).
  * Never for CHECKING: a granted-but-blank screen is not fixed by a restart.
+ * Never once a restart was already tried for this exact verdict and it came
+ * straight back (`restartDidNotHelp`): removeAndReAddText says what to do then.
  */
 export function offersRestart(
   state: CapabilityState,
   capability: Capability,
-  context: { checkedAgain: boolean; returnedFromSettings: boolean },
+  context: { checkedAgain: boolean; returnedFromSettings: boolean; restartDidNotHelp?: boolean },
 ): boolean {
+  if (context.restartDidNotHelp) return false;
   if (state === 'FAILED') return context.checkedAgain;
   if (capability === 'screen' && (state === 'NEEDS_GRANT' || state === 'NEEDS_SETTINGS')) {
     return context.returnedFromSettings;
@@ -67,3 +70,15 @@ export function actionLabel(action: PermissionAction): string {
 }
 
 export const RESTART_LABEL = 'Restart Timo';
+
+/**
+ * What to do once a restart did not clear the verdict. macOS keeps the grant
+ * for the binary it was given to; after an update replaced that binary the
+ * entry can look switched on and still be refused — on macOS 11/12 and Intel
+ * Macs especially. Removing Timo from the list and adding it back re-issues
+ * it. Worded for both System Settings and the older System Preferences.
+ */
+export function removeAndReAddText(capability: Capability): string {
+  const pane = capability === 'screen' ? 'Screen Recording' : 'Accessibility';
+  return `Restarting didn’t fix this. In System Settings (System Preferences on older macOS) › Privacy & Security › ${pane}, select Timo, remove it with −, then add it back with + and switch it on.`;
+}

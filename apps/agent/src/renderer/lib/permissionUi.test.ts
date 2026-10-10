@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { actionFor, actionLabel, isReady, offersRestart, statusText } from './permissionUi';
+import { actionFor, actionLabel, isReady, offersRestart, removeAndReAddText, statusText } from './permissionUi';
 
 const fresh = { checkedAgain: false, returnedFromSettings: false };
 
@@ -42,6 +42,22 @@ describe('permission prompt copy and actions', () => {
     expect(offersRestart('NEEDS_GRANT', 'screen', back)).toBe(true);
     // Accessibility trust is read live; a restart adds nothing there.
     expect(offersRestart('NEEDS_SETTINGS', 'accessibility', back)).toBe(false);
+  });
+
+  it('stops offering Restart once a restart already failed to clear the verdict', () => {
+    // The restart loop on older Macs: same verdict after every restart.
+    const tried = { checkedAgain: true, returnedFromSettings: true, restartDidNotHelp: true };
+    expect(offersRestart('FAILED', 'screen', tried)).toBe(false);
+    expect(offersRestart('NEEDS_GRANT', 'screen', tried)).toBe(false);
+    expect(offersRestart('FAILED', 'accessibility', tried)).toBe(false);
+  });
+
+  it('then says to remove Timo from the list and add it back, for old and new macOS alike', () => {
+    expect(removeAndReAddText('screen')).toMatch(/Screen Recording/);
+    expect(removeAndReAddText('accessibility')).toMatch(/Accessibility/);
+    expect(removeAndReAddText('screen')).toMatch(/System Preferences/);
+    expect(removeAndReAddText('screen')).toMatch(/remove it/);
+    expect(removeAndReAddText('screen')).not.toMatch(/restart timo/i);
   });
 
   it('never offers a restart while a granted screen is still being checked', () => {
