@@ -57,6 +57,15 @@ Required GitHub secrets: `VPS_HOST`, `VPS_USER`, `VPS_SSH_PRIVATE_KEY`,
 Non-secret API config (Lark approval codes etc.) lives in the `environment:`
 block of `infra/vps/docker-compose.prod.yml`.
 
+`TIMO_TIMER_LEASE_RECONCILER_ENABLED` (in `PRODUCTION_ENV`, default `false`)
+turns on the job that closes protocol-v2 timers whose agent stopped
+checkpointing (`LEASE_EXPIRED`). Check its value in the running container
+(`docker exec vps-api-1 printenv TIMO_TIMER_LEASE_RECONCILER_ENABLED`) before
+reasoning about closed timers. When on, it waits one lease length (3 min)
+after the API starts, and again after any stretch of more than a lease in
+which it could not reach the database, so agents can checkpoint first — a
+deploy or a database outage never closes running timers by itself.
+
 `infra/vps/docker-compose.yml` is the build-from-source variant of the same
 stack, for running it on a box without the CI-built images.
 

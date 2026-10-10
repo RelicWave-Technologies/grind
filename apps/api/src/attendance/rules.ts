@@ -130,9 +130,8 @@ export function judgeDay(
  * activity (agent-observed work or a meeting, never manual time) after the
  * start of the shift assigned for that date plus the policy grace; on a
  * first-half leave day, after the policy's afternoon time with no grace. Never
- * on a holiday, a weekly off or full-day leave. Somebody the rules exempt is
- * never counted late; a remote person is, by their tracked time — lateness no
- * longer depends on a door they never walk through.
+ * on a holiday, a weekly off, full-day or second-half leave, and only for a
+ * STANDARD person — REMOTE and EXEMPT people are never counted late.
  */
 export function isLateArrival(input: {
   status: DayStatus | null;
@@ -143,13 +142,13 @@ export function isLateArrival(input: {
   /** First-half leave day: late after this instant, no grace (see `halfDayLateAfterMs`). */
   halfDayLateAfterMs: number | null;
 }): boolean {
-  if (input.mode === 'EXEMPT') return false;
   return isLate({
     firstTrackedMs: input.firstTrackedMs,
     shiftStartMs: input.shiftStartMs,
     graceMinutes: input.graceMinutes,
     halfDayLateAfterMs: input.halfDayLateAfterMs,
     status: input.status,
+    mode: input.mode,
   });
 }
 

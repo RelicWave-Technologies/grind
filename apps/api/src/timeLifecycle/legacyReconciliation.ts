@@ -1,5 +1,5 @@
-import { createHash } from 'node:crypto';
 import { prisma } from '@grind/db';
+import { sha256Hex } from '../lib/hash';
 
 const ACTIVITY_SAMPLE_MS = 60_000;
 /**
@@ -100,7 +100,7 @@ function hashPlan(
       staleEntryEndedAt: repair.staleEntryEndedAt,
     })),
   };
-  return createHash('sha256').update(JSON.stringify(stable)).digest('hex');
+  return sha256Hex(JSON.stringify(stable));
 }
 
 export async function buildLegacyReconciliationPlan(args: {
@@ -154,8 +154,19 @@ export async function buildLegacyReconciliationPlan(args: {
 
   const entries: LegacyReconciliationEntry[] = [];
   const skipped: LegacyReconciliationSkip[] = [];
+  // Rows come oldest first, so the last one seen per person is their newest.
+  const newestOpenByUser = new Map(rows.map((row) => [row.userId, row.id]));
   for (const row of rows) {
-    if (row.user.agentLastSeenAt && row.user.agentLastSeenAt >= staleBefore) {
+    // A fresh heartbeat protects only the entry the agent is on: the one it
+    // names, or — paused or idle agents name none — the person's newest open
+    // entry. Skipping every legacy entry of anybody whose app is open left
+    // their old, long-abandoned entries open for as long as they used Timo.
+    const agentEntryId = row.user.agentActiveEntryId ?? newestOpenByUser.get(row.userId);
+    if (
+      row.user.agentLastSeenAt
+      && row.user.agentLastSeenAt >= staleBefore
+      && agentEntryId === row.id
+    ) {
       skipped.push({ entryId: row.id, userId: row.userId, reason: 'FRESH_HEARTBEAT' });
       continue;
     }
@@ -336,5 +347,7 @@ export async function applyLegacyReconciliationPlan(args: {
       repairedPointers: lockedPlan.pointerRepairs.length,
       planHash: lockedPlan.planHash,
     };
-  });
+    // It locks and rewrites every entry and pointer in the plan, then rebuilds
+    // the plan under those locks: far past Prisma's 5s default on a real fleet.
+  }, { timeout: 60_000 });
 }

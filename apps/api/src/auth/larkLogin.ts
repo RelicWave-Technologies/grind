@@ -2,13 +2,8 @@ import crypto from 'node:crypto';
 import { prisma, type Prisma } from '@grind/db';
 import { env } from '../env';
 import { normalizeEmail, type LarkProfile } from '../lark/profile';
-
-/** Unique-constraint violation, duck-typed (the runtime Prisma class isn't
- *  re-exported from @grind/db — see its index.ts). Matches the convention in
- *  routes/admin.ts. */
-function isUniqueViolation(err: unknown): boolean {
-  return typeof err === 'object' && err !== null && (err as { code?: string }).code === 'P2002';
-}
+import { sha256Hex } from '../lib/hash';
+import { isUniqueViolation } from '../lib/prismaErrors';
 
 /**
  * Lark-login identity + provisioning service.
@@ -99,7 +94,10 @@ export async function resolveUser(profile: LarkProfile): Promise<ResolvedLoginUs
       const again = await prisma.larkIdentity.findUnique({ where: { openId: profile.openId } });
       if (again) return syncAndReturn(again.userId, profile);
       const byEmailAgain = await prisma.user.findUnique({ where: { email }, select: { id: true } });
-      if (byEmailAgain) return syncAndReturn(byEmailAgain.id, profile);
+      if (byEmailAgain) {
+        await linkIdentity(byEmailAgain.id, profile);
+        return syncAndReturn(byEmailAgain.id, profile);
+      }
     }
     throw err;
   }
@@ -136,11 +134,25 @@ async function createUser(profile: LarkProfile, email: string): Promise<Resolved
   });
 }
 
+/**
+ * The email matched a Timo user already linked to a DIFFERENT Lark account.
+ * Linking anyway would hand that person's account to whoever holds this one —
+ * a recycled or re-assigned mailbox, a second tenant — so the login is refused.
+ */
+export class LarkIdentityConflictError extends Error {
+  constructor(readonly userId: string) {
+    super('lark_identity_conflict');
+  }
+}
+
+/** Link `profile` to an email-matched user, unless they already have another Lark identity. */
 async function linkIdentity(userId: string, profile: LarkProfile): Promise<void> {
+  const existing = await prisma.larkIdentity.findUnique({ where: { userId }, select: { openId: true } });
+  if (existing && existing.openId !== profile.openId) throw new LarkIdentityConflictError(userId);
   await prisma.larkIdentity.upsert({
     where: { userId },
     create: { userId, openId: profile.openId, unionId: profile.unionId },
-    update: { openId: profile.openId, unionId: profile.unionId },
+    update: { unionId: profile.unionId },
   });
 }
 
@@ -207,16 +219,12 @@ export class AgentCodeError extends Error {
   }
 }
 
-function sha256hex(s: string): string {
-  return crypto.createHash('sha256').update(s).digest('hex');
-}
-
 /** Mint a single-use deep-link code bound to the agent's PKCE challenge. */
 export async function createAgentAuthCode(userId: string, challenge: string): Promise<string> {
   const code = crypto.randomBytes(32).toString('base64url');
   await prisma.agentAuthCode.create({
     data: {
-      codeHash: sha256hex(code),
+      codeHash: sha256Hex(code),
       userId,
       challenge,
       expiresAt: new Date(Date.now() + AGENT_CODE_TTL_MS),
@@ -231,7 +239,7 @@ export async function createAgentAuthCode(userId: string, challenge: string): Pr
  * it can't redeem without the agent's verifier.
  */
 export async function redeemAgentAuthCode(code: string, codeVerifier: string): Promise<string> {
-  const row = await prisma.agentAuthCode.findUnique({ where: { codeHash: sha256hex(code) } });
+  const row = await prisma.agentAuthCode.findUnique({ where: { codeHash: sha256Hex(code) } });
   if (!row || row.consumedAt || row.expiresAt.getTime() <= Date.now()) {
     throw new AgentCodeError('code_invalid');
   }

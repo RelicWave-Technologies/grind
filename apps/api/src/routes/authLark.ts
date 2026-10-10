@@ -17,16 +17,19 @@ import {
   verifyExpiredAgentLoginRouteHint,
   LARK_SCOPE_STRING,
   LarkTransientError,
+  parseAgentCallbackScheme,
+  type AgentCallbackScheme,
 } from '../lark';
 import {
   resolveUser,
   createAgentAuthCode,
   redeemAgentAuthCode,
   AgentCodeError,
+  LarkIdentityConflictError,
 } from '../auth/larkLogin';
 import { signAccessToken } from '../lib/jwt';
 import { issueRefreshToken } from '../lib/refreshToken';
-import { setSessionCookie, setRefreshCookie } from '../lib/cookies';
+import { crossSite, setSessionCookie, setRefreshCookie } from '../lib/cookies';
 import { validate } from '../middleware/validate';
 import { dashboardOrigins } from '../env';
 import { logger } from '../logger';
@@ -41,17 +44,12 @@ export const authLarkRouter = Router();
 const STATE_COOKIE = 'grind_login_state';
 const STATE_COOKIE_MAX_AGE_MS = 10 * 60 * 1000;
 
-function crossSite(): boolean {
-  return process.env.NODE_ENV === 'production';
-}
-
 /** Canonical dashboard origin for post-login redirects (never a user param). */
 function dashboardBase(): string {
   return dashboardOrigins()[0] || 'http://localhost:5174';
 }
 
 type Terminal = { error?: LarkLoginOutcome; status?: 'pending' };
-type AgentCallbackScheme = 'grind' | 'timo';
 
 /**
  * A same-origin path to land on after sign-in, or nothing. URL parsing treats
@@ -77,10 +75,6 @@ function dashboardUrl(path: string, params?: Record<string, string | undefined>)
     if (value) url.searchParams.set(key, value);
   }
   return url.toString();
-}
-
-function parseAgentCallbackScheme(value: unknown): AgentCallbackScheme {
-  return value === 'timo' ? 'timo' : 'grind';
 }
 
 /** Deliver a terminal outcome to the right client surface. */
@@ -127,7 +121,7 @@ function clearStateCookie(res: Response): void {
  */
 authLarkRouter.get('/start', (req, res) => {
   const client = req.query.client === 'agent' ? 'agent' : 'dashboard';
-  const agentCallbackScheme = client === 'agent' ? parseAgentCallbackScheme(req.query.callback_scheme) : 'grind';
+  const agentCallbackScheme = client === 'agent' ? (parseAgentCallbackScheme(req.query.callback_scheme) ?? 'grind') : 'grind';
   if (!isLarkLoginConfigured()) return finish(res, client, { error: 'config' }, agentCallbackScheme);
   const cfg = getLarkConfig();
   if (!cfg.loginRedirectUri) return finish(res, client, { error: 'config' }, agentCallbackScheme);
@@ -214,17 +208,29 @@ authLarkRouter.get('/callback', async (req, res, next) => {
     if (!profile.email) return finish(res, client, { error: 'no_email' }, agentCallbackScheme, payload.nextPath);
 
     // 3. Resolve / provision.
-    const user = await resolveUser(profile);
-
-    // 4. Persist Lark tokens before redirecting so login leaves task/approval
-    // features connected. Failure is still non-terminal: the next login can
-    // re-grant a fresh single-use refresh token.
-    await tm
-      .persistTokens(user.id, tokens)
-      .catch((err) => logger.warn({ err: String(err), userId: user.id }, 'lark login: token persist failed'));
+    let user;
+    try {
+      user = await resolveUser(profile);
+    } catch (err) {
+      if (!(err instanceof LarkIdentityConflictError)) throw err;
+      logger.warn(
+        { openId: profile.openId, userId: err.userId, client },
+        'lark login: email matches a user linked to another Lark account; refused',
+      );
+      return finish(res, client, { error: 'identity_conflict' }, agentCallbackScheme, payload.nextPath);
+    }
 
     if (user.deactivatedAt) return finish(res, client, { error: 'deactivated' }, agentCallbackScheme, payload.nextPath);
     if (user.provisioningStatus !== 'ACTIVE') return finish(res, client, { status: 'pending' }, agentCallbackScheme, payload.nextPath);
+
+    // 4. Persist Lark tokens before redirecting so login leaves task/approval
+    // features connected — only for someone who is let in: a suspended or
+    // not-yet-activated account must not hold live Lark credentials here.
+    // Failure is still non-terminal: the next login can re-grant a fresh
+    // single-use refresh token.
+    await tm
+      .persistTokens(user.id, tokens)
+      .catch((err) => logger.warn({ err: String(err), userId: user.id }, 'lark login: token persist failed'));
 
     // 5. Issue the Timo session.
     const accessToken = signAccessToken({ sub: user.id, ws: user.workspaceId, role: user.role });

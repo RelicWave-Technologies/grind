@@ -20,6 +20,7 @@ const OUTCOME_COPY: Record<string, { kind: 'info' | 'warn' | 'danger'; label: st
   auth_failed: { kind: 'danger', label: 'TRY AGAIN', text: "That didn't work. The clock isn't going anywhere." },
   no_email: { kind: 'danger', label: 'MISSING EMAIL', text: "Lark wouldn't share your email. Ask your admin to grant the email permission." },
   deactivated: { kind: 'danger', label: 'LOCKED', text: 'This account is deactivated. Your workspace admin holds the keys.' },
+  identity_conflict: { kind: 'danger', label: 'WRONG ACCOUNT', text: 'This Timo account is linked to a different Lark account. Ask your admin.' },
   state_invalid: { kind: 'warn', label: 'EXPIRED', text: "That sign-in link expired. A fresh one is a click away." },
   invalid_request: { kind: 'warn', label: 'HMM', text: 'Something went sideways starting sign-in. Try again.' },
   config: { kind: 'danger', label: 'NOT WIRED', text: "Single sign-on isn't configured yet. Poke your admin." },

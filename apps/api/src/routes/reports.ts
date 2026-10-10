@@ -17,7 +17,7 @@ import { loadPunchLookup } from '../attendance/punches';
 import { lateLookup, loadAttendanceRuleContext } from '../attendance/ruleContext';
 import { requireAccessToken } from '../middleware/auth';
 import { hideDisallowedActiveFields, policyFlagsForUser } from '../workspacePolicy/readScrub';
-import { attachScope, requireCapability } from '../middleware/scope';
+import { attachScope, canReadEvidenceOf, requireCapability } from '../middleware/scope';
 import {
   buildMemberReportApps,
   buildMemberReportDays,
@@ -107,6 +107,7 @@ reportsRouter.get('/me', async (req, res, next) => {
         dayStatusFor: calendar.dayStatusFor,
         ruleFor: rules.judge,
         lateFor: lateLookup(rules),
+        attendanceModeFor: rules.modeFor,
         fundedDaysFor: calendar.fundedDaysFor,
         punchFor,
         overrideFor,
@@ -211,6 +212,7 @@ reportsRouter.get('/team', requireCapability('reports.team.read'), async (req, r
         dayStatusFor: calendar.dayStatusFor,
         ruleFor: rules.judge,
         lateFor: lateLookup(rules),
+        attendanceModeFor: rules.modeFor,
         fundedDaysFor: calendar.fundedDaysFor,
         punchFor,
         overrideFor,
@@ -302,6 +304,7 @@ reportsRouter.get('/team/summary', requireCapability('reports.team.read'), async
         dayStatusFor: calendar.dayStatusFor,
         ruleFor: rules.judge,
         lateFor: lateLookup(rules),
+        attendanceModeFor: rules.modeFor,
         fundedDaysFor: calendar.fundedDaysFor,
         punchFor,
         overrideFor,
@@ -373,6 +376,7 @@ reportsRouter.get('/team/member', requireCapability('reports.team.read'), async 
       dayStatusFor: calendar.dayStatusFor,
       ruleFor: rules.judge,
       lateFor: lateLookup(rules),
+      attendanceModeFor: rules.modeFor,
       fundedDaysFor: calendar.fundedDaysFor,
       punchFor,
       overrideFor,
@@ -441,7 +445,7 @@ reportsRouter.get('/team/member/day-apps', requireCapability('reports.team.read'
 reportsRouter.get('/team/member/day-screenshots', requireCapability('reports.team.read'), async (req, res, next) => {
   try {
     if (!req.user || !req.scope) return res.status(401).json({ error: 'unauthorized' });
-    const target = await resolveScopedReportUser(req, req.query.userId);
+    const target = await resolveScopedReportUser(req, req.query.userId, { evidence: true });
     if (!target.ok) return res.status(target.status).json({ error: target.error });
     if (!req.scope) return res.status(500).json({ error: 'scope_unresolved' });
     const range = resolveSingleReportDay(req.query as Record<string, unknown>, req.scope.workspaceTimezone);
@@ -875,6 +879,8 @@ reportsRouter.get('/me/day-apps', async (req, res, next) => {
 async function resolveScopedReportUser(
   req: Request,
   rawUserId: unknown,
+  /** Evidence (screenshots): an admin may also open a suspended person's. */
+  opts: { evidence?: boolean } = {},
 ): Promise<
   | { ok: true; user: TeamReportUser & { activityRoleTitle: RoleTitle } }
   | { ok: false; status: 400 | 401 | 403 | 404; error: string }
@@ -884,14 +890,15 @@ async function resolveScopedReportUser(
     return { ok: false, status: 400, error: 'missing_user_id' };
   }
   const userId = rawUserId.trim();
-  if (!req.scope.userIds.includes(userId)) {
+  const allowed = opts.evidence ? await canReadEvidenceOf(req, userId) : req.scope.userIds.includes(userId);
+  if (!allowed) {
     return { ok: false, status: 403, error: 'forbidden' };
   }
   const user = await prisma.user.findFirst({
     where: {
       id: userId,
       workspaceId: req.user.ws,
-      deactivatedAt: null,
+      ...(opts.evidence ? {} : { deactivatedAt: null }),
     },
     select: {
       id: true,

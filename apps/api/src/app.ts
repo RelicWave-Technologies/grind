@@ -6,6 +6,7 @@ import cookieParser from 'cookie-parser';
 import pinoHttp from 'pino-http';
 import { prisma } from '@grind/db';
 import { logger } from './logger';
+import { requestLogLevel } from './lib/requestLogLevel';
 import { dashboardOrigins } from './env';
 import { API_VERSION, START_TIME_MS } from './lib/version';
 import { authRouter } from './routes/auth';
@@ -31,14 +32,20 @@ import { errorHandler } from './middleware/errorHandler';
 
 export function buildApp() {
   const app = express();
+  // nginx on the host terminates every request and appends the client to
+  // X-Forwarded-For. Trust only the hops in front of us — loopback, plus the
+  // Docker bridge gateway (a private address) that the published
+  // 127.0.0.1:4100 port forwards through — so req.ip is the client, and a
+  // client-sent X-Forwarded-For can never stand in for it.
+  app.set('trust proxy', ['loopback', 'uniquelocal']);
 
   app.use(helmet());
   app.use(compression());
   // CORS: allow credentials so the dashboard (separate origin) can ship the
-  // grind_at cookie. In production, restrict to the configured dashboard
-  // origin(s) — DASHBOARD_URL may be a comma-separated list. In dev with
-  // nothing configured we reflect the request origin so localhost:5174 just
-  // works.
+  // grind_at cookie. Restricted to the configured dashboard origin(s) —
+  // DASHBOARD_URL may be a comma-separated list, and env.ts refuses to start
+  // production without it. In dev with nothing configured we reflect the
+  // request origin so localhost:5174 just works.
   const allowlist = dashboardOrigins();
   app.use(
     cors({
@@ -56,16 +63,20 @@ export function buildApp() {
     }),
   );
   app.use(cookieParser());
-  // The activity-samples endpoint batch-ingests up to 500 samples (see
-  // ActivitySamplesRequest); that body legitimately outgrows the default cap, so
-  // parse THIS route with a right-sized limit while every other route stays tight
-  // at 64kb. Registered first on purpose — express.json is a no-op once the body
-  // has been parsed, so the global parser below skips an already-parsed body.
-  app.use('/v1/activity-samples', express.json({ limit: '1mb' }));
+  // Agent upload routes whose bodies legitimately outgrow the default cap: up to
+  // 500 activity samples, up to 50 app icons of up to 200k each, and a long
+  // day's entry with hundreds of segments. A 413 there is never fixed by a
+  // retry, so the agent resent the same body forever and queued work behind it.
+  // Every other route stays tight at 64kb. Registered first on purpose —
+  // express.json is a no-op once the body has been parsed, so the global parser
+  // below skips an already-parsed body.
+  app.use(['/v1/activity-samples', '/v1/agent/app-icons', '/v1/time-entries'], express.json({ limit: '1mb' }));
   app.use(express.json({ limit: '64kb' }));
   app.use(
     pinoHttp({
       logger,
+      customLogLevel: (req, res, err) =>
+        requestLogLevel(req.method, (req as express.Request).originalUrl ?? req.url, res.statusCode, err),
       redact: {
         // Cookies carry the dashboard session (grind_at / grind_rt), and
         // Set-Cookie hands out a fresh 90-day refresh token: anyone reading

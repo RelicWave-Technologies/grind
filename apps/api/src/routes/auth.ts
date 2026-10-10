@@ -15,7 +15,8 @@ import { validate } from '../middleware/validate';
 import { requireAccessToken } from '../middleware/auth';
 import { signAccessToken } from '../lib/jwt';
 import { verifyPassword } from '../lib/password';
-import { issueRefreshToken, revokeRefreshToken, rotateRefreshToken } from '../lib/refreshToken';
+import { issueRefreshToken, revokeRefreshToken, rotateRefreshToken, type RotateResult } from '../lib/refreshToken';
+import { logger } from '../logger';
 import {
   setSessionCookie,
   clearSessionCookie,
@@ -196,6 +197,16 @@ authRouter.get('/me/shift', requireAccessToken, async (req, res, next) => {
 });
 
 /**
+ * A failed rotation, with the session it belonged to. A reused token revokes
+ * its whole family and signs the person out everywhere, so that one — and a
+ * suspended or stale-role account — is a warning; the rest are routine.
+ */
+function logRefreshFailure(via: 'bearer' | 'cookie', result: Extract<RotateResult, { ok: false }>): void {
+  const level = result.reason === 'invalid' || result.reason === 'expired' || result.reason === 'reuse_grace' ? 'info' : 'warn';
+  logger[level]({ via, reason: result.reason, familyId: result.familyId, userId: result.userId }, 'refresh token rotation failed');
+}
+
+/**
  * Bearer-token refresh for the agent (and any non-browser client). Rotates the
  * refresh token in the request body with reuse detection and returns the new
  * pair as JSON. The dashboard uses /refresh-cookie instead (httpOnly cookies).
@@ -205,6 +216,7 @@ authRouter.post('/refresh', validate(RefreshRequest, 'body'), async (req, res, n
     const { refreshToken } = req.body as RefreshRequest;
     const result = await rotateRefreshToken(refreshToken);
     if (!result.ok) {
+      logRefreshFailure('bearer', result);
       if (result.reason === 'stale_role') return res.status(503).json({ error: 'stale_role_migration_required' });
       if (result.reason === 'reuse_grace') {
         return res.status(409).json({ error: 'refresh_reuse_grace', reason: result.reason });
@@ -230,6 +242,7 @@ authRouter.post('/refresh-cookie', async (req, res, next) => {
     if (!presented) return res.status(401).json({ error: 'no_refresh' });
     const result = await rotateRefreshToken(presented);
     if (!result.ok) {
+      logRefreshFailure('cookie', result);
       if (result.reason === 'reuse_grace') return res.json({ ok: true as const });
       clearSessionCookie(res);
       clearRefreshCookie(res);

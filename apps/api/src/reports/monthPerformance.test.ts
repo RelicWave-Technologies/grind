@@ -3,7 +3,7 @@ import type { AttendanceOverrideCode, DayStatus, WorkingDayKind } from '@grind/t
 import type { PunchLookup } from '../attendance/punches';
 import {
   buildMonthPerformance,
-  codeForDay,
+  computedCodeWithRule,
   fmtClock,
   fmtMinutes,
   formatMonthPerformanceCsv,
@@ -277,9 +277,9 @@ describe('the calendar outranks tracked time', () => {
   });
 
   it('is a pure function of the two inputs', () => {
-    expect(codeForDay(null, 1)).toBe('P');
-    expect(codeForDay(null, 0)).toBe('--');
-    expect(codeForDay(status('2026-08-03', 'WORKING'), 0)).toBe('A');
+    expect(computedCodeWithRule(null, 1, null, undefined)).toBe('P');
+    expect(computedCodeWithRule(null, 0, null, undefined)).toBe('--');
+    expect(computedCodeWithRule(status('2026-08-03', 'WORKING'), 0, null, undefined)).toBe('A');
   });
 });
 

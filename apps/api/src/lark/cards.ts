@@ -146,37 +146,6 @@ export function buildApprovalCard(req: ApprovalCardInput): Record<string, unknow
   };
 }
 
-/**
- * Used when the requester EDITS a pending request. The previous card is
- * rewritten with this "superseded" variant: grey header, no Approve/Reject
- * buttons, and a clear note pointing the approver at the new card. Prevents
- * an in-flight approver from clicking stale buttons.
- */
-export interface SupersededCardInput extends ApprovalCardInput {
-  /** When the supersession happened (epoch ms). */
-  supersededAt: number;
-}
-export function buildSupersededCard(req: SupersededCardInput): Record<string, unknown> {
-  return {
-    config: { wide_screen_mode: true, update_multi: true },
-    header: {
-      title: { tag: 'plain_text', content: 'Manual time request — updated' },
-      template: 'grey',
-    },
-    elements: [
-      { tag: 'div', fields: detailFields(req) },
-      { tag: 'hr' },
-      {
-        tag: 'div',
-        text: {
-          tag: 'lark_md',
-          content: `**This request was updated** at ${fmtTimestamp(req.supersededAt, req.timeZone)}. See the new card below — these buttons no longer apply.`,
-        },
-      },
-    ],
-  };
-}
-
 /** A single "old → new" entry in the diff section on an updated card. */
 export interface DiffEntry {
   label: string;

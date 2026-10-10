@@ -95,6 +95,7 @@ export const LarkLoginOutcome = z.enum([
   'auth_failed', // code exchange / token error
   'no_email', // Lark profile had no email (scope not granted)
   'deactivated', // user exists but is deactivated
+  'identity_conflict', // email matches a user already linked to another Lark account
   'config', // Lark not configured on the server
 ]);
 export type LarkLoginOutcome = z.infer<typeof LarkLoginOutcome>;

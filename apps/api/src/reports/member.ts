@@ -26,7 +26,7 @@ import { appUsageIdentity, buildAppUsage } from '../insights/appUsage';
 import { appIconUrl } from '../insights/appIcon';
 import { buildDayInsight, localDayWindow, type DayEntryMeta } from '../insights/day';
 import { buildHeatmap, DEFAULT_BUCKET_MS, type HeatmapSample } from '../insights/heatmap';
-import type { AttendanceRuleVerdict, DayStatus } from '@grind/types';
+import type { AttendanceRuleMode, AttendanceRuleVerdict, DayStatus } from '@grind/types';
 import { computedCodeWithRule, overrideCode, type DayOverride } from './monthPerformance';
 import { dateRange } from '../insights/timesheets';
 import type { RoleTitle } from '../scoring/presets';
@@ -196,6 +196,11 @@ export function buildMemberReportDays(input: {
    * disagree.
    */
   lateFor?: { from: string; ordinalFor: (userId: string, date: string) => number | null };
+  /**
+   * How the attendance rules treat the person. A REMOTE or EXEMPT person never
+   * reads Late, rules on or off — the rules never count them late.
+   */
+  attendanceModeFor?: (userId: string) => AttendanceRuleMode;
 }): MemberReportDay[] {
   const iconFor = input.iconFor ?? appIconUrl;
   const pieces = input.timeline.filter((p) => p.userId === input.userId);
@@ -300,9 +305,9 @@ export function buildMemberReportDays(input: {
       punchOutMinute: punch?.outMinute ?? null,
       // One late rule everywhere: first tracked activity (never manual) after
       // the shift assigned for this date plus the company grace — on a
-      // first-half leave day, after the afternoon time. With the attendance
-      // rules on, Late is what the rules counted, so the Start column and the
-      // month sheet agree day for day.
+      // first-half leave day, after the afternoon time — for a STANDARD
+      // person only. With the attendance rules on, Late is what the rules
+      // counted, so the Start column and the month sheet agree day for day.
       shiftStatus: shiftStatusFor({
         shiftStartMs: shift?.startMs ?? null,
         firstTrackedMs: bucket.firstTracked,
@@ -310,6 +315,7 @@ export function buildMemberReportDays(input: {
         graceMinutes: grace,
         halfDayLateAfterMs: halfDayLateAfterMs(date, input.range.tz, input.halfDayLateAfterMinute),
         status: dayStatus,
+        mode: input.attendanceModeFor?.(input.userId),
         late: input.lateFor && date >= input.lateFor.from
           ? input.lateFor.ordinalFor(input.userId, date) !== null
           : undefined,

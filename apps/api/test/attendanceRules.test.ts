@@ -459,22 +459,57 @@ describe('attendance rules — late arrivals', () => {
     ]);
   });
 
-  // Lateness is first tracked activity, so a remote person is judged too —
-  // only an exempt person never is.
-  it('counts a remote person late by tracked time, never an exempt one', async () => {
+  // Production's rule (#150): only a STANDARD person can be late. Remote and
+  // exempt people are never counted, and the Start column agrees — rules on
+  // or off.
+  it('never counts a remote or exempt person late, and Start never says Late for them', async () => {
     const s = await seed();
     await prisma.user.update({ where: { id: s.member.id }, data: { attendanceRuleMode: 'REMOTE' } });
     for (const date of ['2026-09-01', '2026-09-02', '2026-09-03', '2026-09-04', '2026-09-05', '2026-09-07']) {
       await work(s.member.id, date, 8, '09:55');
     }
     const remote = await september(s);
-    expect(remote.row.totals.lateDays).toBe(6);
-    expect(remote.row.days.filter((d) => d.rule?.tag === 'LATE')).toHaveLength(2);
+    expect(remote.row.totals.lateDays).toBe(0);
+    expect(remote.row.days.filter((d) => d.rule?.tag === 'LATE')).toHaveLength(0);
+
+    const start = async () => {
+      const params = new URLSearchParams({ userId: s.member.id, from: '2026-09-01', to: '2026-09-02', tz: 'Asia/Kolkata' });
+      const res = await request(app)
+        .get(`/v1/reports/team/member?${params.toString()}`)
+        .set({ Authorization: `Bearer ${s.adminToken}` });
+      expect(res.status).toBe(200);
+      return (res.body.member.days as Array<{ shiftStatus: string }>).map((d) => d.shiftStatus);
+    };
+    expect(await start()).toEqual(['on_time', 'on_time']);
+    // With the rules off the label falls back to the core rule — same answer.
+    await prisma.leavePolicy.update({ where: { workspaceId: s.ws.id }, data: { attendanceRulesFrom: null } });
+    expect(await start()).toEqual(['on_time', 'on_time']);
+    await prisma.user.update({ where: { id: s.member.id }, data: { attendanceRuleMode: 'STANDARD' } });
+    expect(await start()).toEqual(['late', 'late']);
+    await prisma.leavePolicy.update({ where: { workspaceId: s.ws.id }, data: { attendanceRulesFrom: '2026-09-01' } });
 
     await prisma.user.update({ where: { id: s.member.id }, data: { attendanceRuleMode: 'EXEMPT' } });
     const exempt = await september(s);
     expect(exempt.row.totals.lateDays).toBe(0);
     expect(exempt.row.days.filter((d) => d.rule?.tag === 'LATE')).toHaveLength(0);
+  });
+
+  it('never checks a second-half leave day against the shift start', async () => {
+    const s = await seed();
+    await prisma.leaveRequest.create({
+      data: {
+        clientUuid: ulid(),
+        workspaceId: s.ws.id,
+        userId: s.member.id,
+        startDate: new Date('2026-09-02T00:00:00Z'),
+        endDate: new Date('2026-09-02T00:00:00Z'),
+        portion: 'SECOND_HALF',
+        reason: 'Errand',
+        status: 'APPROVED',
+      },
+    });
+    await work(s.member.id, '2026-09-02', 4, '11:00');
+    expect((await september(s)).day('2026-09-02').late).toBeNull();
   });
 
   it('is never late on leave, holidays or first-half leave; manual time does not start a day', async () => {

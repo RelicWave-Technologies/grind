@@ -21,7 +21,9 @@ import {
 import { dashboardOrigins, env } from '../env';
 import { logger } from '../logger';
 import { getWorkspaceTimezone } from '../workspace/timezone';
-import { attachScope } from '../middleware/scope';
+import { attachScope, canReadEvidenceOf } from '../middleware/scope';
+import { isUniqueViolation } from '../lib/prismaErrors';
+import { classifyEntryClaims, linkClaimsIfEntriesArrived } from '../timeEntries/claimedEvidence';
 
 export const screenshotsRouter = Router();
 
@@ -135,7 +137,7 @@ screenshotsRouter.get('/:id/image', attachScope, async (req, res, next) => {
     if (!row || row.deletedAt || row.uploadState !== 'UPLOADED') {
       return res.status(404).json({ error: 'screenshot_not_found' });
     }
-    if (!req.scope.userIds.includes(row.userId)) return res.status(403).json({ error: 'forbidden' });
+    if (!(await canReadEvidenceOf(req, row.userId))) return res.status(403).json({ error: 'forbidden' });
 
     const data = await loadScreenshotImage(row, variant);
     if (!data) return res.status(404).json({ error: 'screenshot_not_found' });
@@ -161,7 +163,8 @@ screenshotsRouter.get('/assets/:fileId', attachScope, async (req, res, next) => 
       select: { id: true, userId: true },
       take: 10,
     });
-    const visible = rows.filter((row) => req.scope!.userIds.includes(row.userId));
+    const visible = [];
+    for (const row of rows) if (await canReadEvidenceOf(req, row.userId)) visible.push(row);
     if (rows.length > 0 && visible.length === 0) return res.status(403).json({ error: 'forbidden' });
     for (const row of visible) {
       if (!(await driveFileBelongsTo(fileId, row.userId, row.id))) continue;
@@ -224,13 +227,23 @@ screenshotsRouter.post('/complete', validate(CompleteScreenshotUploadRequest, 'b
       return res.status(409).json({ error: 'screenshot_id_conflict' });
     }
 
-    // A shot whose timer entry the server does not have (yet) — still being
-    // created, rejected, or someone else's — is kept, detached from the entry,
-    // exactly like activity samples are. Refusing it used to make the agent
-    // write the shot off while its file sat orphaned in Drive.
-    const timeEntryId = await validateOwnedTimeEntry(userId, body.timeEntryId ?? null);
-    if (timeEntryId === false) {
-      logger.warn({ userId, screenshotId: body.id }, 'screenshot detached from unavailable timer entry');
+    // A shot whose entry the server does not have yet — its create still in
+    // the agent's sync queue — is kept detached and remembers the entry, which
+    // links it when the entry arrives. Refusing it made installed agents count
+    // five failures and write the shot off while its file sat in Drive. Only
+    // somebody else's entry is out of scope.
+    const claim = body.timeEntryId
+      ? (await classifyEntryClaims(userId, [body.timeEntryId])).get(body.timeEntryId)!
+      : null;
+    if (claim?.kind === 'foreign') {
+      logger.warn({ userId, screenshotId: body.id }, 'screenshot names another user\'s time entry');
+      return res.status(400).json({ error: 'time_entry_out_of_scope' });
+    }
+    if (claim?.kind === 'claimed') {
+      logger.info(
+        { userId, screenshotId: body.id, claimedTimeEntryId: claim.claimedTimeEntryId },
+        'screenshot stored ahead of its time entry',
+      );
     }
 
     let storage: StoredScreenshotLocation;
@@ -249,7 +262,8 @@ screenshotsRouter.post('/complete', validate(CompleteScreenshotUploadRequest, 'b
     const phash = body.phash !== undefined && body.phash !== null ? BigInt(body.phash) : null;
     const metadata = {
       userId,
-      timeEntryId: timeEntryId === false ? null : timeEntryId,
+      timeEntryId: claim?.kind === 'owned' ? claim.timeEntryId : null,
+      claimedTimeEntryId: claim?.kind === 'claimed' ? claim.claimedTimeEntryId : null,
       displayId: body.displayId ?? null,
       capturedAt: new Date(body.capturedAt),
       bytes: body.bytes ?? null,
@@ -266,6 +280,7 @@ screenshotsRouter.post('/complete', validate(CompleteScreenshotUploadRequest, 'b
       update: { ...metadata, ...storage.location },
       select: { id: true, uploadState: true },
     });
+    if (claim?.kind === 'claimed') await linkClaimsIfEntriesArrived(userId, [claim.claimedTimeEntryId]);
 
     const response: CompleteScreenshotUploadResponse = {
       id: row.id,
@@ -390,24 +405,11 @@ async function recordDriveFile(input: {
   return row?.s3Key ?? input.fileId;
 }
 
-function isUniqueViolation(err: unknown): boolean {
-  return typeof err === 'object' && err !== null && (err as { code?: unknown }).code === 'P2002';
-}
-
 function sendDriveUploadResult(res: Response, fileId: string) {
   const asset = screenshotAssetUrl(fileId);
   if (!asset) return res.status(503).json({ error: 'public_app_url_not_configured' });
   // Cloudinary-compatible shape for the existing agent uploader.
   return res.json({ secure_url: asset, public_id: fileId });
-}
-
-async function validateOwnedTimeEntry(userId: string, timeEntryId: string | null): Promise<string | null | false> {
-  if (!timeEntryId) return null;
-  const row = await prisma.timeEntry.findUnique({
-    where: { id: timeEntryId },
-    select: { userId: true },
-  });
-  return row?.userId === userId ? timeEntryId : false;
 }
 
 /** The business timezone a user's screenshots are filed in. */

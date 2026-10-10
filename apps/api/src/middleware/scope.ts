@@ -1,4 +1,4 @@
-import type { RequestHandler } from 'express';
+import type { Request, RequestHandler } from 'express';
 import { prisma } from '@grind/db';
 import {
   hasPermission,
@@ -103,6 +103,24 @@ export const attachScope: RequestHandler = async (req, res, next) => {
     next(err);
   }
 };
+
+/**
+ * May the caller read this person's evidence (screenshots)? Everyone in scope,
+ * plus — for an admin — a suspended person of the same workspace. Scope leaves
+ * suspended people out so lists stay current, but the month report keeps them
+ * on the months they worked, and an admin reviewing those months must be able
+ * to open what they captured. Managers never see past their live team.
+ */
+export async function canReadEvidenceOf(req: Request, userId: string): Promise<boolean> {
+  if (!req.scope) return false;
+  if (req.scope.userIds.includes(userId)) return true;
+  if (!req.scope.isAdmin) return false;
+  const suspended = await prisma.user.findFirst({
+    where: { id: userId, workspaceId: req.scope.workspaceId, deactivatedAt: { not: null } },
+    select: { id: true },
+  });
+  return suspended !== null;
+}
 
 /** Gate a route to ADMIN only. Use after attachScope. */
 export const requireAdmin: RequestHandler = (req, res, next) => {

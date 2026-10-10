@@ -1,5 +1,53 @@
 import { describe, it, expect } from 'vitest';
-import { buildCreateTaskPayload, mapTasks, toEpochMs, loggedMsByGuid, type RawLarkTask } from './tasks';
+import { resolveTimeline, type EntryLiveEvidenceMap, type Interval } from '@grind/core';
+import { buildCreateTaskPayload, loggedMsFromTimeline, mapTasks, toEpochMs, type RawLarkTask } from './tasks';
+
+/**
+ * Test fixture: counted time per larkTaskGuid for ONE person's entries, the way
+ * the task routes compute it (resolveTimeline, then loggedMsFromTimeline).
+ *
+ * Resolved on the person's whole timeline, not per task: a minute two tasks
+ * both claim belongs to one of them, so the task totals can never add up to
+ * more than the day. Pass every entry overlapping the window (not only the
+ * tasks being listed) so contested minutes land on the right task.
+ */
+function loggedMsByGuid(
+  entries: Array<{
+    id?: string;
+    larkTaskGuid: string | null;
+    source?: string;
+    endedAt?: Date | null;
+    trackingProtocolVersion?: number | null;
+    lastProvenAt?: Date | null;
+    leaseExpiresAt?: Date | null;
+    segments: Array<{ kind: string; startedAt: Date; endedAt: Date | null }>;
+  }>,
+  now: number,
+  options: {
+    windowStart?: number;
+    windowEnd?: number;
+    evidenceByEntry?: EntryLiveEvidenceMap;
+    /** Reviewer invalidations for this person. */
+    invalidations?: readonly Interval[];
+  } = {},
+): Map<string, number> {
+  const pieces = resolveTimeline(
+    entries.map((e, index) => ({ ...e, id: e.id ?? `entry-${index}`, userId: 'self', source: e.source ?? 'AUTO' })),
+    {
+      now,
+      evidence: options.evidenceByEntry ?? new Map(),
+      invalidations: (options.invalidations ?? []).map((iv) => ({ userId: 'self', ...iv })),
+    },
+  );
+  const totals = loggedMsFromTimeline(pieces, {
+    start: options.windowStart ?? Number.NEGATIVE_INFINITY,
+    end: options.windowEnd ?? now,
+  });
+  // Every task that was asked about gets an answer, zero included.
+  for (const e of entries) if (e.larkTaskGuid && !totals.has(e.larkTaskGuid)) totals.set(e.larkTaskGuid, 0);
+  return totals;
+}
+
 
 describe('mapTasks', () => {
   it('returns [] for undefined or empty input', () => {

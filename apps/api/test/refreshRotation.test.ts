@@ -1,9 +1,11 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import request from 'supertest';
 import { prisma } from '@grind/db';
 import { buildApp } from '../src/app';
 import { hashPassword } from '../src/lib/password';
-import { REFRESH_REUSE_GRACE_MS, sha256 } from '../src/lib/refreshToken';
+import { REFRESH_REUSE_GRACE_MS } from '../src/lib/refreshToken';
+import { sha256Hex as sha256 } from '../src/lib/hash';
+import { logger } from '../src/logger';
 
 /**
  * Production-grade refresh-token rotation:
@@ -143,8 +145,16 @@ describe('refresh rotation', () => {
       data: { revokedAt: new Date(Date.now() - REFRESH_REUSE_GRACE_MS - 1000) },
     });
     // Attacker replays the already-spent rt0 → reuse detected → family nuked.
+    const warn = vi.spyOn(logger, 'warn');
     const replay = await request(app).post('/v1/auth/refresh').send({ refreshToken: rt0 });
     expect(replay.status).toBe(401);
+    // The log names the session that was signed out everywhere.
+    const family = await prisma.refreshToken.findUniqueOrThrow({ where: { tokenHash: sha256(rt0) } });
+    expect(warn).toHaveBeenCalledWith(
+      { via: 'bearer', reason: 'reuse', familyId: family.familyId, userId: family.userId },
+      'refresh token rotation failed',
+    );
+    warn.mockRestore();
     // The legitimate current token is now revoked too.
     const afterNuke = await request(app).post('/v1/auth/refresh').send({ refreshToken: rt1 });
     expect(afterNuke.status).toBe(401);

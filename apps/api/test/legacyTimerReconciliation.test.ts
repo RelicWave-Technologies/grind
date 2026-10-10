@@ -215,6 +215,26 @@ describe('legacy timer reconciliation', () => {
     expect(plan.skipped).toEqual([{ entryId, userId: user.userId, reason: 'FRESH_HEARTBEAT' }]);
   });
 
+  it('a fresh heartbeat protects only the entry the agent is on, not old abandoned ones', async () => {
+    const user = await seedUser();
+    const abandoned = await createLegacyEntry({ userId: user.userId, startedAt: new Date('2026-07-01T10:00:00.000Z') });
+    const older = await createLegacyEntry({ userId: user.userId, startedAt: new Date('2026-07-05T10:00:00.000Z') });
+    const current = await createLegacyEntry({ userId: user.userId });
+    await prisma.user.update({
+      where: { id: user.userId },
+      data: { agentLastSeenAt: new Date(now.getTime() - 60_000), agentState: 'RUNNING', agentActiveEntryId: older },
+    });
+    const named = await buildLegacyReconciliationPlan({ now });
+    expect(named.skipped).toEqual([{ entryId: older, userId: user.userId, reason: 'FRESH_HEARTBEAT' }]);
+    expect(named.entries.map((e) => e.entryId).sort()).toEqual([abandoned, current].sort());
+
+    // A paused agent names no entry: its newest open one is the one it is on.
+    await prisma.user.update({ where: { id: user.userId }, data: { agentState: 'PAUSED_IDLE', agentActiveEntryId: null } });
+    const paused = await buildLegacyReconciliationPlan({ now });
+    expect(paused.skipped).toEqual([{ entryId: current, userId: user.userId, reason: 'FRESH_HEARTBEAT' }]);
+    expect(paused.entries.map((e) => e.entryId).sort()).toEqual([abandoned, older].sort());
+  });
+
   it('does not invalidate a reviewed mutation set when an unrelated fresh timer appears', async () => {
     const staleUser = await seedUser();
     const staleEntryId = await createLegacyEntry({ userId: staleUser.userId });

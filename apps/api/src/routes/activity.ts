@@ -11,6 +11,7 @@ import { validate } from '../middleware/validate';
 import { requireAccessToken } from '../middleware/auth';
 import { persistFlagsForUser } from '../anticheat/persistFlags';
 import { logger } from '../logger';
+import { classifyEntryClaims, linkClaimsIfEntriesArrived } from '../timeEntries/claimedEvidence';
 
 export const activityRouter = Router();
 
@@ -19,6 +20,8 @@ activityRouter.use(requireAccessToken);
 interface IngestRow {
   id: string;
   timeEntryId: string | null;
+  /** The entry the agent named before the server had it (see claimedEvidence). */
+  claimedTimeEntryId: string | null;
   bucketStart: Date;
   keystrokes: number;
   clicks: number;
@@ -43,9 +46,12 @@ interface IngestRow {
 function mergeMinuteReports(a: IngestRow, b: IngestRow): IngestRow {
   const keysFromB = b.keystrokes >= a.keystrokes;
   const movesFromB = b.mouseDistancePx >= a.mouseDistancePx;
+  const timeEntryId = b.timeEntryId ?? a.timeEntryId;
   return {
     id: a.id,
-    timeEntryId: b.timeEntryId ?? a.timeEntryId,
+    timeEntryId,
+    // A claim only waits for an entry; once the minute is attached it is done.
+    claimedTimeEntryId: timeEntryId ? null : b.claimedTimeEntryId ?? a.claimedTimeEntryId,
     bucketStart: a.bucketStart,
     keystrokes: Math.max(a.keystrokes, b.keystrokes),
     clicks: Math.max(a.clicks, b.clicks),
@@ -61,7 +67,7 @@ function mergeMinuteReports(a: IngestRow, b: IngestRow): IngestRow {
   };
 }
 
-const INGEST_COLUMNS = 15;
+const INGEST_COLUMNS = 16;
 
 /**
  * Insert-or-merge a batch in one statement. The merge is the SQL twin of
@@ -78,11 +84,13 @@ async function upsertMinutes(userId: string, rows: IngestRow[], policy: PolicyFl
       r.keystrokes, r.clicks, r.mouseDistancePx, r.scrollEvents,
       r.ikiCv, r.moveSpeedCv, r.pathStraightness,
       r.activeApp, r.activeAppBundle, r.activeTitle, r.activeUrl,
+      r.claimedTimeEntryId,
     );
     return `($${o + 1}::text, $${o + 2}::text, $${o + 3}::text, ($${o + 4}::timestamptz AT TIME ZONE 'UTC'),
       $${o + 5}::int, $${o + 6}::int, $${o + 7}::int, $${o + 8}::int,
       $${o + 9}::double precision, $${o + 10}::double precision, $${o + 11}::double precision,
-      $${o + 12}::text, $${o + 13}::text, $${o + 14}::text, $${o + 15}::text)`;
+      $${o + 12}::text, $${o + 13}::text, $${o + 14}::text, $${o + 15}::text,
+      $${o + 16}::text)`;
   });
   const cur = '"ActivitySample"';
   // A field the policy does not capture is cleared, not kept from an earlier
@@ -93,10 +101,13 @@ async function upsertMinutes(userId: string, rows: IngestRow[], policy: PolicyFl
     `INSERT INTO "ActivitySample" ("id", "userId", "timeEntryId", "bucketStart",
        "keystrokes", "clicks", "mouseDistancePx", "scrollEvents",
        "ikiCv", "moveSpeedCv", "pathStraightness",
-       "activeApp", "activeAppBundle", "activeTitle", "activeUrl")
+       "activeApp", "activeAppBundle", "activeTitle", "activeUrl",
+       "claimedTimeEntryId")
      VALUES ${tuples.join(',\n')}
      ON CONFLICT ("userId", "bucketStart") DO UPDATE SET
        "timeEntryId" = COALESCE(EXCLUDED."timeEntryId", ${cur}."timeEntryId"),
+       "claimedTimeEntryId" = CASE WHEN COALESCE(EXCLUDED."timeEntryId", ${cur}."timeEntryId") IS NOT NULL
+         THEN NULL ELSE COALESCE(EXCLUDED."claimedTimeEntryId", ${cur}."claimedTimeEntryId") END,
        "keystrokes" = GREATEST(${cur}."keystrokes", EXCLUDED."keystrokes"),
        "clicks" = GREATEST(${cur}."clicks", EXCLUDED."clicks"),
        "mouseDistancePx" = GREATEST(${cur}."mouseDistancePx", EXCLUDED."mouseDistancePx"),
@@ -141,17 +152,15 @@ activityRouter.post('/', validate(ActivitySamplesRequest, 'body'), async (req, r
       : null;
     const policy = policyRow ?? WORKSPACE_POLICY_DEFAULTS;
 
-    // A timer entry is a parent of activity, but older agents may upload the
-    // child first after an offline retry. Preserve the activity evidence while
-    // refusing to attach it to a missing or another user's entry.
-    const submittedEntryIds = [...new Set(samples.flatMap((sample) => (sample.timeEntryId ? [sample.timeEntryId] : [])))];
-    const ownedEntries = submittedEntryIds.length
-      ? await prisma.timeEntry.findMany({
-          where: { id: { in: submittedEntryIds }, userId },
-          select: { id: true },
-        })
-      : [];
-    const ownedEntryIds = new Set(ownedEntries.map((entry) => entry.id));
+    // A timer entry is a parent of activity, but an agent whose entry create
+    // is stuck in its sync queue uploads the minutes first. The batch is never
+    // refused for that: a minute naming an entry we do not have yet is stored
+    // detached with the claim, and linked when the entry arrives; a minute
+    // naming somebody else's entry is stored detached, without the claim.
+    const claims = await classifyEntryClaims(
+      userId,
+      samples.flatMap((sample) => (sample.timeEntryId ? [sample.timeEntryId] : [])),
+    );
     let detached = 0;
 
     // One row per minute: a batch may carry the same minute twice (older
@@ -159,8 +168,8 @@ activityRouter.post('/', validate(ActivitySamplesRequest, 'body'), async (req, r
     // a row twice.
     const byMinute = new Map<number, IngestRow>();
     for (const s of samples) {
-      const timeEntryId = s.timeEntryId && ownedEntryIds.has(s.timeEntryId) ? s.timeEntryId : null;
-      if (s.timeEntryId && timeEntryId === null) detached += 1;
+      const claim = s.timeEntryId ? claims.get(s.timeEntryId) : undefined;
+      if (claim && claim.kind !== 'owned') detached += 1;
       const scrubbed = applyPolicyToActive(
         {
           activeApp: s.activeApp ?? null,
@@ -173,7 +182,8 @@ activityRouter.post('/', validate(ActivitySamplesRequest, 'body'), async (req, r
       const bucketStart = new Date(s.bucketStart);
       const row: IngestRow = {
         id: s.id,
-        timeEntryId,
+        timeEntryId: claim?.kind === 'owned' ? claim.timeEntryId : null,
+        claimedTimeEntryId: claim?.kind === 'claimed' ? claim.claimedTimeEntryId : null,
         bucketStart,
         keystrokes: s.keystrokes,
         clicks: s.clicks,
@@ -192,6 +202,10 @@ activityRouter.post('/', validate(ActivitySamplesRequest, 'body'), async (req, r
       byMinute.set(key, seen ? mergeMinuteReports(seen, row) : row);
     }
     await upsertMinutes(userId, [...byMinute.values()], policy);
+    await linkClaimsIfEntriesArrived(
+      userId,
+      [...claims.values()].flatMap((claim) => (claim.kind === 'claimed' ? [claim.claimedTimeEntryId] : [])),
+    );
 
     if (detached > 0) {
       logger.warn({ userId, detached, submitted: samples.length }, 'activity samples detached from unavailable timer entries');

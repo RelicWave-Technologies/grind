@@ -20,6 +20,7 @@ import {
   LarkReauthRequiredError,
   LarkTransientError,
   LarkTaskApiError,
+  parseAgentCallbackScheme,
 } from '../lark';
 import { localDayWindow } from '../insights/day';
 import { loadTimelineWindow } from '../time';
@@ -39,10 +40,6 @@ function closeTabPage(title: string, detail: string): string {
 .card{max-width:380px;text-align:center;padding:32px;border-radius:16px;background:#fff;box-shadow:0 8px 30px rgba(90,60,200,.12)}
 h1{font-size:18px;margin:0 0 8px}p{color:#6b6b76;margin:0}</style>
 <div class="card"><h1>${title}</h1><p>${detail}</p></div>`;
-}
-
-function parseAgentCallbackScheme(value: unknown): 'grind' | 'timo' | null {
-  return value === 'grind' || value === 'timo' ? value : null;
 }
 
 function finishOAuthConnect(

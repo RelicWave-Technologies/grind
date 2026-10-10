@@ -175,7 +175,25 @@ agentRouter.post('/heartbeat', validate(HeartbeatRequest, 'body'), async (req, r
             select: { id: true },
           })
         : null;
-      const timerStateAccepted = timer === null || timer.disposition === 'accepted' || timer.disposition === 'needs_sync';
+      // Two devices on one account: the one not tracking still heartbeats,
+      // with no checkpoint. Taking its word cleared the other device's running
+      // timer from presence every minute. While a v2 timer this heartbeat did
+      // not mention still holds a live lease, presence stays with that timer.
+      const otherDeviceTimer = !body.timerCheckpoint && !legacyActiveEntry
+        ? await tx.timeEntry.findFirst({
+            where: {
+              userId: req.user!.sub,
+              source: 'AUTO',
+              endedAt: null,
+              trackingProtocolVersion: TIMER_PROTOCOL_VERSION,
+              leaseExpiresAt: { gt: now },
+            },
+            select: { id: true },
+          })
+        : null;
+      const timerStateAccepted = timer === null
+        ? otherDeviceTimer === null
+        : timer.disposition === 'accepted' || timer.disposition === 'needs_sync';
       await tx.user.update({
         where: { id: user.id },
         data: {

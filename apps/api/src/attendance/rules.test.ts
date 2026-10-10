@@ -203,9 +203,9 @@ describe('ruleCode — paid as far as the balance reaches', () => {
 
 describe('late arrivals', () => {
   // Lateness is the first TRACKED activity after the shift start + grace, not
-  // the punch-in. Remote people are judged by their tracked time too; exempt
-  // people never. First-half leave is late after the afternoon time (14:00),
-  // no grace; second-half leave still expects the shift start.
+  // the punch-in. Only STANDARD people are judged — remote and exempt people
+  // never. First-half leave is late after the afternoon time (14:00), no
+  // grace; second-half leave is not checked.
   const shiftStartMs = Date.parse('2026-09-01T03:30:00Z'); // 09:00 IST
   const afternoonMs = Date.parse('2026-09-01T08:30:00Z'); // 14:00 IST
   const at = (minutesAfterStart: number) => shiftStartMs + minutesAfterStart * 60_000;
@@ -230,14 +230,19 @@ describe('late arrivals', () => {
     expect(isLateArrival({ ...base, status: HALF_PAID, mode: 'EXEMPT', firstTrackedMs: at(6 * 60) })).toBe(false);
   });
 
-  it('judges a remote person by tracked time, and second-half leave by the shift start', () => {
-    expect(isLateArrival({ ...base, mode: 'REMOTE', firstTrackedMs: at(120) })).toBe(true);
-    expect(isLateArrival({ ...base, status: HALF_PAID, mode: 'REMOTE', firstTrackedMs: at(6 * 60) })).toBe(true);
+  it('never counts a remote person late, nor a second-half leave day', () => {
+    expect(isLateArrival({ ...base, mode: 'REMOTE', firstTrackedMs: at(120) })).toBe(false);
+    expect(isLateArrival({ ...base, status: HALF_PAID, mode: 'REMOTE', firstTrackedMs: at(6 * 60) })).toBe(false);
     expect(isLateArrival({
       ...base,
       status: status('PAID_LEAVE', 0.5, 'SECOND_HALF'),
       firstTrackedMs: at(120),
-    })).toBe(true);
+    })).toBe(false);
+    expect(isLateArrival({
+      ...base,
+      status: status('UNPAID_LEAVE', 0.5, 'SECOND_HALF'),
+      firstTrackedMs: at(6 * 60),
+    })).toBe(false);
   });
 
   it('charges half a day from the first one past the allowance', () => {

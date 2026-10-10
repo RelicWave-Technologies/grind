@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { shutdownGracefully, onShutdown, isShuttingDown, _resetLifecycleForTests } from '../src/lib/lifecycle';
-import { inStartupGrace, TIMER_LEASE_MS } from '../src/timeLifecycle';
+import { reconcileGate, TIMER_LEASE_MS } from '../src/timeLifecycle';
 
 afterEach(() => {
   _resetLifecycleForTests();
@@ -69,11 +69,27 @@ describe('graceful shutdown', () => {
   });
 });
 
-describe('timer lease reconciler after a restart', () => {
+describe('timer lease reconciler after a restart or an outage', () => {
+  const start = Date.parse('2026-10-05T10:00:00.000Z');
+
   it('holds off for one lease length after the process starts', () => {
-    const start = Date.parse('2026-10-05T10:00:00.000Z');
-    expect(inStartupGrace(start, start)).toBe(true);
-    expect(inStartupGrace(start + TIMER_LEASE_MS - 1, start)).toBe(true);
-    expect(inStartupGrace(start + TIMER_LEASE_MS, start)).toBe(false);
+    const fresh = { resumedAtMs: start, lastOkAtMs: null };
+    expect(reconcileGate(start, fresh).finalize).toBe(false);
+    expect(reconcileGate(start + TIMER_LEASE_MS - 1, fresh).finalize).toBe(false);
+    expect(reconcileGate(start + TIMER_LEASE_MS, fresh).finalize).toBe(true);
+  });
+
+  it('holds off again for a lease after it could not reach the database for longer than one', () => {
+    const lastOk = start + 10 * TIMER_LEASE_MS;
+    const clock = { resumedAtMs: start, lastOkAtMs: lastOk };
+    // Ticking normally: finalize.
+    expect(reconcileGate(lastOk + 60_000, clock)).toEqual({ finalize: true, resumedAtMs: start });
+    // Back after a blind stretch: the wait restarts now.
+    const back = lastOk + TIMER_LEASE_MS + 1;
+    const gate = reconcileGate(back, clock);
+    expect(gate).toEqual({ finalize: false, resumedAtMs: back });
+    const resumed = { resumedAtMs: gate.resumedAtMs, lastOkAtMs: back };
+    expect(reconcileGate(back + 60_000, resumed).finalize).toBe(false);
+    expect(reconcileGate(back + TIMER_LEASE_MS, { ...resumed, lastOkAtMs: back + 120_000 }).finalize).toBe(true);
   });
 });

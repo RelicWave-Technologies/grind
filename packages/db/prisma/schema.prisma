@@ -531,32 +531,37 @@ enum ScreenshotUploadState {
 }
 
 model Screenshot {
-  id            String                @id
-  userId        String
-  user          User                  @relation("ScreenshotSubject", fields: [userId], references: [id], onDelete: Cascade)
-  timeEntryId   String?
-  timeEntry     TimeEntry?            @relation(fields: [timeEntryId], references: [id], onDelete: SetNull)
-  displayId     String?
-  capturedAt    DateTime
-  s3Key         String?
-  thumbS3Key    String?
-  fullUrl       String?
-  thumbUrl      String?
-  bytes         Int?
-  width         Int?
-  height        Int?
-  phash         BigInt?
-  uploadState   ScreenshotUploadState @default(PENDING)
-  blurred       Boolean               @default(false)
-  deletedAt     DateTime?
-  deletedById   String?
-  deletedBy     User?                 @relation("ScreenshotDeletedBy", fields: [deletedById], references: [id], onDelete: SetNull)
-  deletedReason String?
-  createdAt     DateTime              @default(now())
-  updatedAt     DateTime              @updatedAt
+  id                 String                @id
+  userId             String
+  user               User                  @relation("ScreenshotSubject", fields: [userId], references: [id], onDelete: Cascade)
+  timeEntryId        String?
+  timeEntry          TimeEntry?            @relation(fields: [timeEntryId], references: [id], onDelete: SetNull)
+  /// The entry id the agent named when the server did not have that entry yet
+  /// (its create still queued on the agent). No FK: the entry may never come.
+  /// Cleared once the entry arrives and the shot is linked (`linkEntryEvidence`).
+  claimedTimeEntryId String?
+  displayId          String?
+  capturedAt         DateTime
+  s3Key              String?
+  thumbS3Key         String?
+  fullUrl            String?
+  thumbUrl           String?
+  bytes              Int?
+  width              Int?
+  height             Int?
+  phash              BigInt?
+  uploadState        ScreenshotUploadState @default(PENDING)
+  blurred            Boolean               @default(false)
+  deletedAt          DateTime?
+  deletedById        String?
+  deletedBy          User?                 @relation("ScreenshotDeletedBy", fields: [deletedById], references: [id], onDelete: SetNull)
+  deletedReason      String?
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
 
   @@index([userId, capturedAt])
   @@index([timeEntryId])
+  @@index([claimedTimeEntryId])
 }
 
 model TimeSegment {
@@ -571,20 +576,24 @@ model TimeSegment {
 }
 
 model ActivitySample {
-  id               String     @id // ULID from agent
-  userId           String
-  user             User       @relation(fields: [userId], references: [id])
-  timeEntryId      String?
-  timeEntry        TimeEntry? @relation(fields: [timeEntryId], references: [id], onDelete: SetNull)
-  bucketStart      DateTime // 1-minute bucket
-  keystrokes       Int
-  clicks           Int
-  mouseDistancePx  Int
-  scrollEvents     Int
+  id                 String     @id // ULID from agent
+  userId             String
+  user               User       @relation(fields: [userId], references: [id])
+  timeEntryId        String?
+  timeEntry          TimeEntry? @relation(fields: [timeEntryId], references: [id], onDelete: SetNull)
+  /// As `Screenshot.claimedTimeEntryId`: the entry the agent named before the
+  /// server had it. Unindexed on purpose — the link looks it up within the
+  /// (userId, bucketStart) range from the entry's start.
+  claimedTimeEntryId String?
+  bucketStart        DateTime // 1-minute bucket
+  keystrokes         Int
+  clicks             Int
+  mouseDistancePx    Int
+  scrollEvents       Int
   // content-free anti-cheat signals (no key identity / content)
-  ikiCv            Float?
-  moveSpeedCv      Float?
-  pathStraightness Float?
+  ikiCv              Float?
+  moveSpeedCv        Float?
+  pathStraightness   Float?
 
   // Active app + site for the dominant minute. Captured only when the
   // workspace policy allows; otherwise stays null. The agent computes the
