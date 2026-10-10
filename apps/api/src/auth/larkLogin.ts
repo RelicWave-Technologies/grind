@@ -2,13 +2,8 @@ import crypto from 'node:crypto';
 import { prisma, type Prisma } from '@grind/db';
 import { env } from '../env';
 import { normalizeEmail, type LarkProfile } from '../lark/profile';
-
-/** Unique-constraint violation, duck-typed (the runtime Prisma class isn't
- *  re-exported from @grind/db — see its index.ts). Matches the convention in
- *  routes/admin.ts. */
-function isUniqueViolation(err: unknown): boolean {
-  return typeof err === 'object' && err !== null && (err as { code?: string }).code === 'P2002';
-}
+import { sha256Hex } from '../lib/hash';
+import { isUniqueViolation } from '../lib/prismaErrors';
 
 /**
  * Lark-login identity + provisioning service.
@@ -224,16 +219,12 @@ export class AgentCodeError extends Error {
   }
 }
 
-function sha256hex(s: string): string {
-  return crypto.createHash('sha256').update(s).digest('hex');
-}
-
 /** Mint a single-use deep-link code bound to the agent's PKCE challenge. */
 export async function createAgentAuthCode(userId: string, challenge: string): Promise<string> {
   const code = crypto.randomBytes(32).toString('base64url');
   await prisma.agentAuthCode.create({
     data: {
-      codeHash: sha256hex(code),
+      codeHash: sha256Hex(code),
       userId,
       challenge,
       expiresAt: new Date(Date.now() + AGENT_CODE_TTL_MS),
@@ -248,7 +239,7 @@ export async function createAgentAuthCode(userId: string, challenge: string): Pr
  * it can't redeem without the agent's verifier.
  */
 export async function redeemAgentAuthCode(code: string, codeVerifier: string): Promise<string> {
-  const row = await prisma.agentAuthCode.findUnique({ where: { codeHash: sha256hex(code) } });
+  const row = await prisma.agentAuthCode.findUnique({ where: { codeHash: sha256Hex(code) } });
   if (!row || row.consumedAt || row.expiresAt.getTime() <= Date.now()) {
     throw new AgentCodeError('code_invalid');
   }

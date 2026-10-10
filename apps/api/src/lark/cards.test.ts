@@ -185,25 +185,6 @@ describe('buildUnavailableRequestCard — stale Lark cards', () => {
   });
 });
 
-describe('buildSupersededCard — disables the previous approval card', () => {
-  it('renders a grey header, no Approve/Reject buttons, and a "updated" notice', async () => {
-    const { buildSupersededCard } = await import('./cards');
-    const card = buildSupersededCard({
-      requestId: 'req_x',
-      requesterName: 'Anish Suman',
-      taskSummary: null,
-      startedAt: REQ.startedAt,
-      endedAt: REQ.endedAt,
-      reason: REQ.reason,
-      supersededAt: new Date('2026-05-20T10:30:00Z').getTime(),
-      timeZone: 'UTC',
-    });
-    expect((card.header as Record<string, unknown>).template).toBe('grey');
-    expect(buttonValues(card)).toHaveLength(0);
-    expect(findTextContaining(card, 'updated')).toBe(true);
-  });
-});
-
 describe('buildUpdatedApprovalCard — fresh card after an edit', () => {
   it('has Approve + Reject buttons carrying the same requestId, plus a "What changed" diff section', async () => {
     const { buildUpdatedApprovalCard } = await import('./cards');

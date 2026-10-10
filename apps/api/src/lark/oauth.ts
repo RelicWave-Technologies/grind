@@ -13,6 +13,11 @@ import { LARK_SCOPE_STRING } from './config';
 export type OAuthReturnTarget = 'browser' | 'agent';
 export type AgentCallbackScheme = 'grind' | 'timo';
 
+/** The deep-link scheme an agent asked to be called back on, or null if it named none we know. */
+export function parseAgentCallbackScheme(value: unknown): AgentCallbackScheme | null {
+  return value === 'grind' || value === 'timo' ? value : null;
+}
+
 export type OAuthState = {
   sub: string;
   returnTo: OAuthReturnTarget;

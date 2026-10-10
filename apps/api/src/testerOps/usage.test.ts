@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { prisma } from '@grind/db';
 import { buildTesterUsageSnapshot } from './usage';
 import { loadEntryLiveEvidence } from '../insights/liveEntryEvidence';
-import { loggedMsByGuid } from '../lark/tasks';
+import { resolveTimeline } from '@grind/core';
+import { loggedMsFromTimeline } from '../lark/tasks';
 
 let counter = 0;
 
@@ -215,10 +216,14 @@ describe('buildTesterUsageSnapshot', () => {
 
     const snapshot = await buildTesterUsageSnapshot(workspace.id, 'UTC');
     const evidenceByEntry = await loadEntryLiveEvidence([entry], now);
-    const larkTotal = loggedMsByGuid([{
+    const larkTotal = loggedMsFromTimeline(resolveTimeline([{
       ...entry,
+      source: 'AUTO',
       segments: [{ kind: 'WORK', startedAt: entry.startedAt, endedAt: null }],
-    }], now.getTime(), { evidenceByEntry });
+    }], { now: now.getTime(), evidence: evidenceByEntry, invalidations: [] }), {
+      start: Number.NEGATIVE_INFINITY,
+      end: now.getTime(),
+    });
 
     expect(snapshot.testers[0]?.trackedMinutes).toBe(14);
     expect(larkTotal.get('heartbeat-task')).toBe(14 * 60_000);

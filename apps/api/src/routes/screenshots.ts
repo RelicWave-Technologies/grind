@@ -22,6 +22,7 @@ import { dashboardOrigins, env } from '../env';
 import { logger } from '../logger';
 import { getWorkspaceTimezone } from '../workspace/timezone';
 import { attachScope, canReadEvidenceOf } from '../middleware/scope';
+import { isUniqueViolation } from '../lib/prismaErrors';
 import { classifyEntryClaims, linkClaimsIfEntriesArrived } from '../timeEntries/claimedEvidence';
 
 export const screenshotsRouter = Router();
@@ -402,10 +403,6 @@ async function recordDriveFile(input: {
     select: { s3Key: true },
   });
   return row?.s3Key ?? input.fileId;
-}
-
-function isUniqueViolation(err: unknown): boolean {
-  return typeof err === 'object' && err !== null && (err as { code?: unknown }).code === 'P2002';
 }
 
 function sendDriveUploadResult(res: Response, fileId: string) {

@@ -21,7 +21,8 @@ const SESSION_COOKIE = 'grind_at';
 export const REFRESH_COOKIE = 'grind_rt';
 const REFRESH_COOKIE_PATH = '/v1/auth';
 
-function crossSite(): boolean {
+/** Production cookies are `SameSite=None; Secure`, dev ones `Lax` (see above). */
+export function crossSite(): boolean {
   return process.env.NODE_ENV === 'production';
 }
 

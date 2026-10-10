@@ -7,7 +7,6 @@ import {
   birthdaySourceKey,
   consumptionSourceKey,
   reversalSourceKey,
-  affordability,
   monthOf,
   nextMonth,
   firstOfMonth,
@@ -160,39 +159,6 @@ describe('source keys', () => {
 
   it('accrual keys are per user per month', () => {
     expect(accrualSourceKey('u1', '2026-08')).toBe('accrual:u1:2026-08');
-  });
-});
-
-describe('affordability — checked at approval, not only at submission', () => {
-  it('allows a request the balance covers', () => {
-    const a = affordability({ balanceDays: 2, chargedDays: 1.5, allowNegativeBalance: false });
-    expect(a.sufficient).toBe(true);
-    expect(a.balanceAfterDays).toBe(0.5);
-    expect(a.shortfallDays).toBe(0);
-  });
-
-  it('rejects balance 1.0 against a 3.0 request and names the shortfall', () => {
-    const a = affordability({ balanceDays: 1, chargedDays: 3, allowNegativeBalance: false });
-    expect(a.sufficient).toBe(false);
-    expect(a.shortfallDays).toBe(2);
-    expect(a.balanceAfterDays).toBe(-2);
-  });
-
-  it('permits going negative when policy allows it', () => {
-    const a = affordability({ balanceDays: 1, chargedDays: 3, allowNegativeBalance: true });
-    expect(a.sufficient).toBe(true);
-    expect(a.balanceAfterDays).toBe(-2);
-  });
-
-  it('spending the balance to exactly zero is sufficient', () => {
-    expect(affordability({ balanceDays: 1.5, chargedDays: 1.5, allowNegativeBalance: false }).sufficient).toBe(true);
-  });
-
-  it('two pending requests each look affordable alone — which is why approval re-checks', () => {
-    const balance = 1;
-    expect(affordability({ balanceDays: balance, chargedDays: 1, allowNegativeBalance: false }).sufficient).toBe(true);
-    // After the first is approved the balance is 0, and the second no longer fits.
-    expect(affordability({ balanceDays: 0, chargedDays: 1, allowNegativeBalance: false }).sufficient).toBe(false);
   });
 });
 

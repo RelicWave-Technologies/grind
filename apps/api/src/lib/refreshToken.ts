@@ -3,6 +3,7 @@ import { prisma, type Prisma } from '@grind/db';
 import { Role as RoleSchema, type Role } from '@grind/types';
 import { env } from '../env';
 import { signAccessToken } from './jwt';
+import { sha256Hex } from './hash';
 
 export type IssuedRefresh = {
   refreshToken: string;
@@ -20,10 +21,6 @@ export type IssuedRefresh = {
  */
 export const REFRESH_REUSE_GRACE_MS = 2 * 60_000;
 
-export function sha256(input: string): string {
-  return crypto.createHash('sha256').update(input).digest('hex');
-}
-
 function newSecret(): string {
   return crypto.randomBytes(32).toString('base64url');
 }
@@ -39,7 +36,7 @@ function refreshExpiry(): Date {
  */
 export async function issueRefreshToken(userId: string, deviceName?: string): Promise<IssuedRefresh> {
   const refreshToken = newSecret();
-  const tokenHash = sha256(refreshToken);
+  const tokenHash = sha256Hex(refreshToken);
   const expiresAt = refreshExpiry();
   // A fresh login starts its own family; familyId is set to the row id post-create.
   const row = await prisma.refreshToken.create({
@@ -56,7 +53,7 @@ export async function issueRefreshToken(userId: string, deviceName?: string): Pr
  * nothing at all.
  */
 export async function revokeRefreshToken(refreshToken: string): Promise<boolean> {
-  const tokenHash = sha256(refreshToken);
+  const tokenHash = sha256Hex(refreshToken);
   const row = await prisma.refreshToken.findUnique({ where: { tokenHash }, select: { familyId: true } });
   if (!row) return false;
   const revoked = await prisma.refreshToken.updateMany({
@@ -100,7 +97,7 @@ async function mintSuccessor(
   const successor = await tx.refreshToken.create({
     data: {
       userId: parent.userId,
-      tokenHash: sha256(refreshToken),
+      tokenHash: sha256Hex(refreshToken),
       deviceName: parent.deviceName,
       familyId: parent.familyId,
       expiresAt,
@@ -134,7 +131,7 @@ async function mintSuccessor(
  * The rule lives in the database, so it holds across restarts and instances.
  */
 export async function rotateRefreshToken(presented: string): Promise<RotateResult> {
-  const tokenHash = sha256(presented);
+  const tokenHash = sha256Hex(presented);
 
   return prisma.$transaction(async (tx): Promise<RotateResult> => {
     const row = await tx.refreshToken.findUnique({ where: { tokenHash }, include: { user: true } });

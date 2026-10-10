@@ -29,12 +29,11 @@ import {
   isCounted,
   mergeIntervals,
   resolveTimeline,
-  shiftTimesFromSchedule,
   subtractIntervals,
   type Interval,
   type TimelinePiece,
 } from '@grind/core';
-import { localDayWindowInTimeZone, type ShiftSchedule } from '@grind/types';
+import { localDayWindowInTimeZone } from '@grind/types';
 
 type SegmentKind = 'WORK' | 'MEETING' | 'IDLE_TRIMMED';
 /**
@@ -175,25 +174,6 @@ export interface DayInsightResult {
  */
 export function localDayWindow(date: string, tz: string): { start: Date; end: Date } | null {
   return localDayWindowInTimeZone(date, tz);
-}
-
-/**
- * The shift-bounded window for `date` in `tz`, or `null` to fall back to the
- * full calendar day (no shift, or a day off in the schedule). A shift that ends
- * after midnight ends on the next date; DST-correct via `@grind/core`.
- */
-export function shiftDayWindow(
-  date: string,
-  tz: string,
-  schedule: ShiftSchedule,
-): { start: Date; end: Date } | null {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
-  try {
-    const times = shiftTimesFromSchedule(schedule, date, tz);
-    return times ? { start: new Date(times.startMs), end: new Date(times.endMs) } : null;
-  } catch {
-    return null;
-  }
 }
 
 interface PendingIv {

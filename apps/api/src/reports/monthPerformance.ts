@@ -334,27 +334,6 @@ export interface DayOverride {
 }
 
 /**
- * The code for one day.
- *
- * The calendar is asked first and wins outright: a company holiday is a holiday
- * whether or not somebody badged in, and approved leave is leave. Somebody who
- * did come in on one of those days is not hidden — the IN, OUT and WORK rows
- * still show it — but the status code has to keep counting the day as what it
- * was, or the holiday and leave tallies stop adding up.
- *
- * Only a day the calendar calls WORKING, or has no opinion on, falls through to
- * the tracked time.
- */
-export function codeForDay(
-  status: DayStatus | null,
-  trackedMinutes: number,
-  override?: DayOverride | null,
-): MonthPerformanceCode {
-  if (override) return overrideCode(override);
-  return computedCodeForDay(status, trackedMinutes);
-}
-
-/**
  * A hand-set correction as the report renders it.
  *
  * The correction says what shape the day was — present, absent, half a day

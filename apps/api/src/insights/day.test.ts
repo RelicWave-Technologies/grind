@@ -5,7 +5,14 @@ import {
   instantForZonedDateTime,
   possibleInstantsForZonedDateTime,
 } from '@grind/types';
-import { buildDayInsight, localDayWindow, shiftDayWindow, type DayEntryInput, type PendingRequestInput } from './day';
+import { shiftTimesFromSchedule } from '@grind/core';
+import { buildDayInsight, localDayWindow, type DayEntryInput, type PendingRequestInput } from './day';
+
+/** The shift's window on a date, as the report routes build it from core. */
+function shiftDayWindow(date: string, tz: string, schedule: typeof NINE_TO_SIX): { start: Date; end: Date } | null {
+  const times = shiftTimesFromSchedule(schedule, date, tz);
+  return times ? { start: new Date(times.startMs), end: new Date(times.endMs) } : null;
+}
 
 /**
  * Pure tests for the day-insight composer. No DB. Carefully covers the

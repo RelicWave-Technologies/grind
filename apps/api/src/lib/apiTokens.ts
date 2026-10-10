@@ -1,4 +1,5 @@
-import { createHash, randomBytes, timingSafeEqual } from 'crypto';
+import { randomBytes, timingSafeEqual } from 'crypto';
+import { sha256Hex } from './hash';
 
 const TOKEN_PREFIX = 'timo_mcp_';
 
@@ -10,7 +11,7 @@ export interface GeneratedApiToken {
 }
 
 export function hashApiToken(rawToken: string): string {
-  return createHash('sha256').update(rawToken, 'utf8').digest('hex');
+  return sha256Hex(rawToken);
 }
 
 export function generateApiToken(): GeneratedApiToken {

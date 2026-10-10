@@ -3,7 +3,8 @@ import request from 'supertest';
 import { prisma } from '@grind/db';
 import { buildApp } from '../src/app';
 import { hashPassword } from '../src/lib/password';
-import { REFRESH_REUSE_GRACE_MS, sha256 } from '../src/lib/refreshToken';
+import { REFRESH_REUSE_GRACE_MS } from '../src/lib/refreshToken';
+import { sha256Hex as sha256 } from '../src/lib/hash';
 import { logger } from '../src/logger';
 
 /**

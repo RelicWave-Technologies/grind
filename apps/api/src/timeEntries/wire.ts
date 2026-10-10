@@ -1,6 +1,6 @@
-import { createHash } from 'node:crypto';
 import type { TimeEntryCloseReason } from '@grind/db';
 import { canonicalTimerEntryPayload } from '@grind/core';
+import { sha256Hex } from '../lib/hash';
 import type {
   SegmentDto,
   TimerSyncCorrection,
@@ -61,7 +61,7 @@ export function serializeTimeEntry(entry: SerializableTimeEntry): TimeEntryDto {
 }
 
 export function canonicalTimeEntryHash(entry: TimeEntryDto): string {
-  return createHash('sha256').update(canonicalTimerEntryPayload(entry)).digest('hex');
+  return sha256Hex(canonicalTimerEntryPayload(entry));
 }
 
 export function createTimerSyncReceipt(

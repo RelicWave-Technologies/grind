@@ -1,5 +1,5 @@
-import { createHash } from 'node:crypto';
 import { prisma } from '@grind/db';
+import { sha256Hex } from '../lib/hash';
 
 const ACTIVITY_SAMPLE_MS = 60_000;
 /**
@@ -100,7 +100,7 @@ function hashPlan(
       staleEntryEndedAt: repair.staleEntryEndedAt,
     })),
   };
-  return createHash('sha256').update(JSON.stringify(stable)).digest('hex');
+  return sha256Hex(JSON.stringify(stable));
 }
 
 export async function buildLegacyReconciliationPlan(args: {
