@@ -55,6 +55,7 @@ const LATEST: Release = {
   changes: [
     { tag: 'fixed', text: <>A timer forgotten on your laptop months ago can no longer wake up and claim today. An old entry that never closed now ends where its own work ended — not at the moment you last opened Timo — so a normal day can't read as fifteen hours.</> },
     { tag: 'fixed', text: <>When Timo recovers after a crash, it closes the entry the server asked about, not whichever one happened to be newest on disk.</> },
+    { tag: 'fixed', text: <>Timo's Today total agrees with the dashboard. When the server has already settled an entry differently from your laptop's copy, Timo now shows the server's version instead of its own.</> },
   ],
 };
 
