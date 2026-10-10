@@ -44,6 +44,12 @@ export interface ActivityWindowTotals {
   scrollEvents: number;
 }
 
+/**
+ * `synced` values: 0 waiting to upload, 1 on the server, 2 quarantined — the
+ * API refused this one sample outright, so it no longer blocks the queue.
+ */
+const SYNC_QUARANTINED = 2;
+
 /** Local per-minute activity sample queue (better-sqlite3). Counts + content-free CVs only. */
 export class ActivityStore {
   constructor(private readonly db: Database.Database) {
@@ -254,10 +260,19 @@ export class ActivityStore {
     return tx(sent);
   }
 
-  /** Drop synced minutes older than `beforeMs` (local retention). Unsynced ones are never pruned. */
+  /**
+   * Take a sample the API refused on its own out of the upload queue, so the
+   * samples behind it are not resent (and refused with it) forever. A later
+   * tail merged into the same minute, or a developer resend, queues it again.
+   */
+  quarantine(id: string): void {
+    this.db.prepare(`UPDATE activity_samples SET synced = ${SYNC_QUARANTINED} WHERE id = ? AND synced = 0`).run(id);
+  }
+
+  /** Drop settled minutes (synced or quarantined) older than `beforeMs`. Unsynced ones are never pruned. */
   pruneSynced(beforeMs: number): number {
     const info = this.db
-      .prepare(`DELETE FROM activity_samples WHERE synced = 1 AND bucket_start < ?`)
+      .prepare(`DELETE FROM activity_samples WHERE synced IN (1, ${SYNC_QUARANTINED}) AND bucket_start < ?`)
       .run(beforeMs);
     return Number(info.changes ?? 0);
   }

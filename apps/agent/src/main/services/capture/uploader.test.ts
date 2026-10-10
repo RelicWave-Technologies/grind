@@ -261,7 +261,7 @@ describe('draining the screenshot queue', () => {
     const init = mocks.fetch.mock.calls[0]![1] as RequestInit;
     expect([...(init.body as FormData).keys()]).toEqual(['file']); // no Cloudinary-era fields
     expect(init.credentials).toBe('omit');
-    expect(store().uploadSummary(ALICE)).toEqual({ pending: 0, uploading: 0, failed: 0 });
+    expect(store().rangeSummary(ALICE, 0, Number.MAX_SAFE_INTEGER)).toEqual({ pending: 0, uploaded: 12, failed: 0 });
     expect(mocks.claim).toHaveBeenCalledWith(ALICE);
   });
 
@@ -285,7 +285,7 @@ describe('draining the screenshot queue', () => {
 
     await uploader.drainUploads();
 
-    const uploaded = 12 - store().uploadSummary(ALICE).pending;
+    const { uploaded } = store().rangeSummary(ALICE, 0, Number.MAX_SAFE_INTEGER);
     expect(uploaded).toBeGreaterThan(0);
     expect(uploaded).toBeLessThan(12);
   });

@@ -3,7 +3,7 @@ import {
   type ActivitySampleInput,
   type ActivitySamplesResponse,
 } from '@grind/types';
-import { api } from '../apiClient';
+import { api, HttpError } from '../apiClient';
 import { log } from '../../logger';
 import type { ActivityOwner, ActivityStore, ActivityRow } from './store';
 
@@ -68,9 +68,56 @@ export interface FlushActivityOptions {
   stillOwner?: () => Promise<boolean>;
 }
 
+type Outgoing = { id: string; rev: number | undefined; input: ActivitySampleInput };
+
+/**
+ * The API itself refused the request body (a 4xx other than auth, timeout or
+ * throttling): something in the batch is bad, and resending it unchanged is
+ * refused again forever.
+ */
+function isBatchRefusal(err: unknown): boolean {
+  return err instanceof HttpError
+    && err.status >= 400 && err.status < 500
+    && ![401, 403, 408, 429].includes(err.status);
+}
+
+/**
+ * Send a batch; on a refusal, split it and send the halves, down to the single
+ * sample the API will not take, which is quarantined (and logged, once) so the
+ * rest of the queue moves on. Returns how many rows were settled.
+ */
+async function sendOrSplit(store: ActivityStore, batch: Outgoing[]): Promise<number> {
+  try {
+    const response = await api<ActivitySamplesResponse>('/v1/activity-samples', {
+      method: 'POST',
+      body: { samples: batch.map((b) => b.input) },
+    });
+    // Only what is still the version we sent: a tail merged in meanwhile stays queued.
+    store.markSynced(batch.map((b) => ({ id: b.id, rev: b.rev })));
+    if ((response?.detached ?? 0) > 0) {
+      log.warn('activity samples accepted without unavailable timer parent', { count: response.detached });
+    }
+    return batch.length;
+  } catch (err) {
+    if (!isBatchRefusal(err)) throw err;
+    if (batch.length === 1) {
+      const [bad] = batch as [Outgoing];
+      store.quarantine(bad.id);
+      log.warn('activity sample refused by the API; quarantined so the queue can move on', {
+        id: bad.id,
+        bucketStart: bad.input.bucketStart,
+        err: String(err),
+      });
+      return 1;
+    }
+    const mid = Math.ceil(batch.length / 2);
+    return (await sendOrSplit(store, batch.slice(0, mid))) + (await sendOrSplit(store, batch.slice(mid)));
+  }
+}
+
 /**
  * Push unsynced activity samples to the API in a byte-bounded batch. Returns the
- * number of rows synced (0 when nothing is pending). The remaining backlog
+ * number of rows settled (0 when nothing is pending). The remaining backlog
  * drains on subsequent calls (the sync drain loops), so a large backlog clears
  * in safe chunks instead of one oversized — and rejected — request.
  */
@@ -86,7 +133,7 @@ export async function flushActivity(store: ActivityStore, options: FlushActivity
 
   // Pack the longest prefix whose JSON stays under the byte budget — always at
   // least one row, so a single large sample still makes forward progress.
-  const batch: { id: string; rev: number | undefined; input: ActivitySampleInput }[] = [];
+  const batch: Outgoing[] = [];
   let bytes = 20; // {"samples":[ ... ]} envelope
   for (const r of rows) {
     const input = toInput(r);
@@ -102,17 +149,9 @@ export async function flushActivity(store: ActivityStore, options: FlushActivity
   }
 
   try {
-    const response = await api<ActivitySamplesResponse>('/v1/activity-samples', {
-      method: 'POST',
-      body: { samples: batch.map((b) => b.input) },
-    });
-    // Only what is still the version we sent: a tail merged in meanwhile stays queued.
-    store.markSynced(batch.map((b) => ({ id: b.id, rev: b.rev })));
-    if ((response?.detached ?? 0) > 0) {
-      log.warn('activity samples accepted without unavailable timer parent', { count: response.detached });
-    }
-    log.debug('flushed activity samples', { count: batch.length, bytes });
-    return batch.length;
+    const settled = await sendOrSplit(store, batch);
+    log.debug('flushed activity samples', { count: settled, bytes });
+    return settled;
   } catch (err) {
     log.warn('activity flush failed', { err: String(err) });
     throw err;

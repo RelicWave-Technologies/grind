@@ -110,6 +110,17 @@ describe('ActivityStore on a real database', () => {
     expect(store.unsynced(10, OWNER)).toHaveLength(0);
   });
 
+  it('quarantines a refused minute out of the queue until its minute changes again', () => {
+    const store = new ActivityStore(new Database(':memory:'));
+    store.persistMinute(minute(60_000, { keystrokes: 3 }));
+    const [bad] = store.unsynced(10, OWNER);
+    store.quarantine(bad!.id);
+    expect(store.unsynced(10, OWNER)).toHaveLength(0);
+
+    store.persistMinute(minute(60_000, { keystrokes: 1 })); // a tail: the minute is re-sent with its total
+    expect(store.unsynced(10, OWNER)).toMatchObject([{ id: bad!.id, keystrokes: 4 }]);
+  });
+
   it('prunes only synced minutes older than the cutoff', () => {
     const db = new Database(':memory:');
     const store = new ActivityStore(db);

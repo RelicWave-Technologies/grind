@@ -167,10 +167,8 @@ describe('ScreenshotStore upload queue', () => {
     store.insert(shot('legacy', { ownerUserId: null, ownerWorkspaceId: null }));
 
     expect(store.pending(OWNER, 10, 2_000).map((r) => r.id)).toEqual(['mine']);
-    expect(store.recent(OWNER, 10).map((r) => r.id)).toEqual(['mine']);
+    expect(store.inRange(OWNER, 0, 2_000).map((r) => r.id)).toEqual(['mine']);
     expect(store.inRange(OTHER, 0, 2_000).map((r) => r.id)).toEqual(['theirs']);
-    expect(store.uploadSummary(OWNER)).toEqual({ pending: 1, uploading: 0, failed: 0 });
-    expect(store.uploadSummary(null)).toEqual({ pending: 0, uploading: 0, failed: 0 });
   });
 
   it('claims legacy shots only through timer entries proven to be the owner\'s', () => {

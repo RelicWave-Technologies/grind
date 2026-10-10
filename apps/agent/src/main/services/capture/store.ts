@@ -61,12 +61,6 @@ export function relativeScreenshotPath(stored: string): string | null {
   return match?.[1] ?? null;
 }
 
-export interface ScreenshotUploadSummary {
-  pending: number;
-  uploading: number;
-  failed: number;
-}
-
 /** Local screenshot queue (better-sqlite3). Files live on disk under the screenshots dir; rows point to them. */
 export class ScreenshotStore {
   constructor(private readonly db: Database.Database) {
@@ -266,17 +260,6 @@ export class ScreenshotStore {
     return rows.map(mapRow);
   }
 
-  /** The owner's newest shots, newest first. */
-  recent(owner: CaptureOwner, limit: number): ScreenshotRow[] {
-    const rows = this.db
-      .prepare(
-        `SELECT * FROM screenshots WHERE owner_user_id = ? AND owner_workspace_id = ?
-         ORDER BY captured_at DESC, id DESC LIMIT ?`,
-      )
-      .all(owner.userId, owner.workspaceId, limit) as Record<string, unknown>[];
-    return rows.map(mapRow);
-  }
-
   /** When the same display was last captured before `beforeMs` (for per-shot activity windows). */
   previousCaptureOnDisplay(owner: CaptureOwner, displayId: string, beforeMs: number): number | null {
     const r = this.db
@@ -441,23 +424,6 @@ markTerminalFailed(id: string, lastError: string, failedAt = Date.now()): void {
       if (row.state === 'pending' || row.state === 'uploading') out.pending += Number(row.n);
       else if (row.state === 'uploaded') out.uploaded += Number(row.n);
       else if (row.state === 'failed') out.failed += Number(row.n);
-    }
-    return out;
-  }
-
-  uploadSummary(owner: CaptureOwner | null): ScreenshotUploadSummary {
-    const out: ScreenshotUploadSummary = { pending: 0, uploading: 0, failed: 0 };
-    if (!owner) return out;
-    const rows = this.db
-      .prepare(
-        `SELECT upload_state AS state, COUNT(*) AS n FROM screenshots
-         WHERE owner_user_id = ? AND owner_workspace_id = ? GROUP BY upload_state`,
-      )
-      .all(owner.userId, owner.workspaceId) as { state: string; n: number }[];
-    for (const row of rows) {
-      if (row.state === 'pending' || row.state === 'uploading' || row.state === 'failed') {
-        out[row.state] = Number(row.n);
-      }
     }
     return out;
   }

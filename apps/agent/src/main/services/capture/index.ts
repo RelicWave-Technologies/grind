@@ -4,7 +4,7 @@ import path from 'node:path';
 import { existsSync, promises as fs } from 'node:fs';
 import sharp from 'sharp';
 import { effectiveScreenshotRetentionDays } from '@grind/types';
-import { ScreenshotStore, type CaptureOwner, type ScreenshotRow, type ScreenshotUploadSummary } from './store';
+import { ScreenshotStore, type CaptureOwner, type ScreenshotRow } from './store';
 import { captureNow, isDiskFullError, thumbDataUrl, fullDataUrl } from './capture';
 import { CAPTURE_DEFER_MS, nextDelayMs, shouldDeferCapture } from './scheduler';
 import { localRetentionDays, planScreenshotRetention, type DiskFile } from './retention';
@@ -34,9 +34,7 @@ let timer: NodeJS.Timeout | null = null;
 let retentionStarted = false;
 /** The workspace's screenshot retention, as last read from the server (null until then). */
 let policyRetentionDays: number | null = null;
-/** Shots past the retention window still waiting to upload — kept, and surfaced. */
-let overdueUnuploaded = 0;
-/** The last capture could not be stored because the disk (or the database) is full. */
+/** The last capture could not be stored because the disk (or the database) is full — logged once per spell. */
 let diskFull = false;
 // How many times the pending capture has been held back for input.
 let captureDeferrals = 0;
@@ -279,7 +277,6 @@ async function runScreenshotRetention(now = serverAlignedNow()): Promise<void> {
       now,
       retentionDays,
     });
-    overdueUnuploaded = plan.overdueUnuploaded;
     if (plan.overdueUnuploaded > 0) {
       log.warn('screenshots past retention kept: not uploaded yet', {
         count: plan.overdueUnuploaded,
@@ -451,14 +448,6 @@ function toListItems(owner: CaptureOwner, rows: ScreenshotRow[]): ScreenshotList
   });
 }
 
-/** The signed-in account's newest shots. */
-export async function recentScreenshots(limit: number): Promise<ScreenshotListItem[]> {
-  const owner = currentOwner();
-  if (!owner) return [];
-  claimUnownedScreenshots(owner);
-  return toListItems(owner, getStore().recent(owner, limit));
-}
-
 /** Every shot the signed-in account captured in [from, to) — a whole day for the gallery. */
 export async function screenshotsInRange(fromMs: number, toMs: number): Promise<ScreenshotListItem[]> {
   const owner = currentOwner();
@@ -487,16 +476,4 @@ export async function fullScreenshot(id: string): Promise<string | null> {
   const row = ownedRow(id);
   if (!row) return null;
   return fullDataUrl(resolveScreenshotPath(row.filePath));
-}
-
-/** The upload queue plus the local-storage signals worth surfacing next to it. */
-export interface ScreenshotSyncHealth extends ScreenshotUploadSummary {
-  /** Shots past the retention window kept only because they have not uploaded. */
-  overdueUnuploaded: number;
-  /** The last capture could not be stored: the disk is full. */
-  diskFull: boolean;
-}
-
-export function screenshotUploadSummary(): ScreenshotSyncHealth {
-  return { ...getStore().uploadSummary(currentOwner()), overdueUnuploaded, diskFull };
 }

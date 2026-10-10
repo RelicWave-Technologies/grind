@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => {
     unsynced: false,
     unsyncedAfterStop: false,
     isRunning: vi.fn(() => timer.running),
+    currentOwner: vi.fn(() => ({ userId: 'u1', workspaceId: 'w1' })),
     hasUnsynced: vi.fn(() => timer.unsynced),
     syncBacklog: vi.fn(() => ({ pending: 1, oldestPendingAt: null, lastError: 'offline' })),
     stop: vi.fn(async () => {
@@ -72,6 +73,16 @@ vi.mock('../services/timer', () => ({
   getTimerService: () => mocks.timer,
 }));
 
+// The backlog check itself is covered in signOutSync.test.ts; here it drains
+// once and reports whatever the fake timer says is left.
+vi.mock('./signOutSync', () => ({
+  getSignOutLedger: () => ({}),
+  syncBeforeSignOut: async ({ drain }: { drain: () => Promise<void> }) => {
+    await drain();
+    const transient = mocks.timer.unsynced ? 1 : 0;
+    return { ok: transient === 0, backlog: { pending: transient, transient, refused: 0, parked: 0 } };
+  },
+}));
 vi.mock('../services/capture/uploader', () => ({
   stopUploads: mocks.stopUploads,
   resumeUploads: mocks.resumeUploads,
