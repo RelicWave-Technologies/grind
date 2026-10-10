@@ -139,6 +139,13 @@ function canonicalTimestampCeiling(entry: {
 }
 
 /**
+ * How far an agent's late snapshot may carry an entry past the server's own
+ * close for silence. Real restores are an outage or a laptop left offline —
+ * hours, at most an evening into the night; anything longer is a stale row.
+ */
+const MAX_RESTORE_PAST_SERVER_CLOSE_MS = 16 * 60 * 60 * 1000;
+
+/**
  * The answer for a revision the server already holds. A same-revision snapshot
  * reaches here only after its normalized payload matched what is stored, so the
  * agent has nothing more to send — but agents up to beta.37 hashed fractional
@@ -560,6 +567,36 @@ timeEntriesRouter.put('/:id/sync', validate(SyncTimeEntryRequest, 'body'), async
             return {
               kind: 'conflict' as const,
               payload: { error: 'timer_conflict', activeEntryId: otherActive.id },
+            };
+          }
+          // A restore that carries the entry far past the server's close is
+          // not late truth but a stale local row closed (or reopened) at
+          // today's time — beta.38 did this to an August entry and billed two
+          // months. Keep the server's end, take the revision, and close it as
+          // the agent's own (not for silence) so every agent settles instead
+          // of re-sending a newer revision forever.
+          const restoreEnd = clampedEndedAt ?? now.getTime();
+          if (isV2 && restoreEnd - current.endedAt.getTime() > MAX_RESTORE_PAST_SERVER_CLOSE_MS) {
+            logger.warn(
+              {
+                userId: current.userId,
+                entryId: id,
+                serverClosedAt: current.endedAt.toISOString(),
+                agentEnd: clampedEndedAt === null ? null : new Date(clampedEndedAt).toISOString(),
+                revision: body.revision,
+              },
+              'time-entry sync: refused a restore far past the server close',
+            );
+            const settled = await tx.timeEntry.update({
+              where: { id },
+              data: { agentRevision: body.revision, closeReason: 'AGENT_RECOVERY' },
+              include: { segments: true },
+            });
+            return {
+              kind: 'receipt' as const,
+              entry: settled,
+              disposition: 'FINALIZED' as const,
+              correction: 'LEASE_FINALIZED' as const,
             };
           }
         } else if (clampedEndedAt === null) {
