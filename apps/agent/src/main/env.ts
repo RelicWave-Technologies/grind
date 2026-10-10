@@ -10,7 +10,6 @@ const rawCallbackScheme = String(
   import.meta.env.MAIN_VITE_CALLBACK_SCHEME || process.env.AGENT_CALLBACK_SCHEME || 'timo',
 ).toLowerCase();
 export const CALLBACK_SCHEME: 'grind' | 'timo' = rawCallbackScheme === 'grind' ? 'grind' : 'timo';
-export const AGENT_VERSION: string = process.env.npm_package_version ?? '0.0.1';
 export const HEARTBEAT_INTERVAL_MS: number = 60_000;
 export type UpdateChannel = 'latest' | 'beta';
 

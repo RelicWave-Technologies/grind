@@ -266,16 +266,29 @@ describeSqlite('SqliteEntryStore sync state', () => {
     expect(store.getUnsynced(Number.MAX_SAFE_INTEGER)[0]?.entry.userId).toBe(owner.userId);
   });
 
-  it('hands out the open entry first, however many older rows are waiting', () => {
+  it('hands out entries oldest first, so an older close lands before a newer start', () => {
     const db = new Database(':memory:');
     const store = ownedStore(db);
-    for (let i = 0; i < 30; i += 1) store.upsert(closeTimeEntry(entry(`old_${i}`), T0 + MIN));
-    store.upsert(entry('live'));
+    const at = (id: string, startedAt: number) => ({ ...entry(id), startedAt, segments: [{ ...entry(id).segments[0]!, startedAt }] });
+    // Written out of order: the live entry's row is older than the close
+    // that a later sync rewrote (an upsert keeps a row's original rowid).
+    store.upsert(at('live', T0 + 10 * MIN));
+    store.upsert(closeTimeEntry(at('closed', T0), T0 + 9 * MIN));
 
-    const due = store.getUnsynced(T0);
-    expect(due).toHaveLength(31);
-    expect(due[0]?.entry.id).toBe('live');
-    expect(due[1]?.entry.id).toBe('old_0');
+    expect(store.getUnsynced(T0).map((row) => row.entry.id)).toEqual(['closed', 'live']);
+  });
+
+  it('never lets a failing older row hold back the open entry', () => {
+    const db = new Database(':memory:');
+    const store = ownedStore(db);
+    for (let i = 0; i < 30; i += 1) {
+      const old = closeTimeEntry(entry(`old_${i}`), T0 + MIN);
+      store.upsert(old);
+      store.noteSyncFailure(old.id, 'http_400:invalid_segments', T0 + 5 * MIN);
+    }
+    store.upsert({ ...entry('live'), startedAt: T0 + 2 * MIN, segments: [{ ...entry('live').segments[0]!, startedAt: T0 + 2 * MIN }] });
+
+    expect(store.getUnsynced(T0).map((row) => row.entry.id)).toEqual(['live']);
   });
 
   it('holds a failing row back until its retry time, and a local change releases it', () => {

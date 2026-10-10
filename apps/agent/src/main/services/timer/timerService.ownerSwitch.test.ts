@@ -82,7 +82,7 @@ describe('TimerService.switchOwner', () => {
     const aliceEntry = svc.status();
     if (aliceEntry.state !== 'RUNNING') throw new Error('expected running');
     clock.advance(10 * MIN);
-    svc.heartbeat(); // last liveness while Alice was really accruing
+    svc.noteAlive({ persist: true }); // last liveness while Alice was really accruing
     clock.advance(50 * MIN);
 
     const recovered = svc.switchOwner(BOB);
@@ -98,7 +98,7 @@ describe('TimerService.switchOwner', () => {
     await svc.start({});
     const entryId = (svc.status() as { entryId: string }).entryId;
     clock.advance(5 * MIN);
-    svc.heartbeat();
+    svc.noteAlive({ persist: true });
     svc.switchOwner(BOB);
     clock.advance(3 * 60 * MIN); // Bob's afternoon
 
@@ -116,7 +116,7 @@ describe('TimerService.switchOwner', () => {
     await svc.start({});
     await settle();
     clock.advance(MIN);
-    svc.heartbeat();
+    svc.noteAlive({ persist: true });
     sync.pushedUserIds = [];
 
     svc.switchOwner(BOB);
@@ -134,7 +134,7 @@ describe('TimerService.switchOwner', () => {
     before.switchOwner(BOB);
     await before.start({});
     clock.advance(2 * MIN);
-    before.heartbeat();
+    before.noteAlive({ persist: true });
     // The process dies here. A new one starts signed out, then Bob signs in.
     clock.advance(8 * 60 * MIN);
     const after = service();
@@ -183,7 +183,7 @@ describe('TimerService.resyncFromServer', () => {
     await svc.start({});
     const { entryId, revision } = svc.status() as { entryId: string; revision: number };
     clock.advance(5 * MIN);
-    svc.heartbeat();
+    svc.noteAlive({ persist: true });
     const provenAliveAt = svc.lastLiveness();
     clock.advance(60 * MIN); // asleep without the away handler noticing
 
@@ -199,7 +199,7 @@ describe('TimerService.resyncFromServer', () => {
     await svc.start({});
     const { entryId, revision } = svc.status() as { entryId: string; revision: number };
     clock.advance(20 * MIN);
-    svc.heartbeat();
+    svc.noteAlive({ persist: true });
 
     await svc.resyncFromServer(entryId, revision, { serverEndedAt: T0 + 8 * MIN, provenAliveAt: svc.lastLiveness() });
 

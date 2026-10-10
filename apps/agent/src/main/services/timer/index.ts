@@ -7,7 +7,7 @@ import { SqliteEntryStore } from './sqliteStore';
 import { SqliteTodayLedgerStore } from './todayLedgerStore';
 import { HttpSyncClient } from './syncClient';
 import { TimerSyncDrain, type TimerSyncDrainReason } from './syncDrain';
-import type { Clock, IdGen } from './types';
+import type { Clock, IdGen, MissedSleep } from './types';
 import { log } from '../../logger';
 import { getTrackingReadinessService } from '../trackingReadiness';
 import { getWorkspaceTimeContext } from '../workspaceTime';
@@ -23,7 +23,14 @@ import type { TodayLedgerMode } from '@grind/types';
 
 // Server-aligned: timer timestamps are validated (and clamped) by the server,
 // so they must be stamped in the server's frame rather than the laptop's.
-const realClock: Clock = { now: () => serverAlignedNow() };
+// The raw device readings are only ever compared with each other (the gap
+// between two proofs of life), never stamped on anything.
+const realClock: Clock = {
+  now: () => serverAlignedNow(),
+  // eslint-disable-next-line no-restricted-syntax -- device<->device: only the gap between two readings is used
+  wallNow: () => Date.now(),
+  monoNow: () => performance.now(),
+};
 const realIds: IdGen = { ulid: () => ulid() };
 
 let service: TimerService | null = null;
@@ -32,6 +39,16 @@ let todayLedgerStore: SqliteTodayLedgerStore | null = null;
 let todayLedgerHydrator: TodayLedgerHydrator | null = null;
 let configuredTodayLedgerMode: TodayLedgerMode | null = null;
 let timerRuntimeStarted = false;
+let missedSleepListener: ((missed: MissedSleep) => void) | null = null;
+
+/**
+ * Who handles a sleep the OS never reported (see TimerService.noteAlive).
+ * Registered without building the service, so wiring it never opens the DB
+ * ahead of boot.
+ */
+export function onTimerMissedSleep(listener: (missed: MissedSleep) => void): void {
+  missedSleepListener = listener;
+}
 
 /** Lazily build the timer service against the on-disk SQLite DB. */
 export function getTimerService(): TimerService {
@@ -57,6 +74,7 @@ export function getTimerService(): TimerService {
     todayLedgerStore,
   );
   service.setTodayLedgerMode(configuredTodayLedgerMode ?? getTodayLedgerMode());
+  service.setMissedSleepListener((missed) => missedSleepListener?.(missed));
   log.info('timer service initialized', { dbPath });
   return service;
 }
@@ -189,4 +207,4 @@ export function drainTimerSyncNow(reason: TimerSyncDrainReason): Promise<void> {
 
 export { TimerService } from './timerService';
 export type { TimerStatus } from '../../../shared/tracking';
-export type { TimerRecoveryNotice } from './types';
+export type { MissedSleep, TimerRecoveryNotice } from './types';

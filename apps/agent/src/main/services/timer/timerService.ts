@@ -16,11 +16,13 @@ import { createHash } from 'node:crypto';
 import type { TimerSyncReceipt, TodayLedgerMode } from '@grind/types';
 import type { TimerStatus } from '../../../shared/tracking';
 import { HttpError } from '../apiClient';
+import { isClosedForSilence } from './serverClose';
 import type {
   Clock,
   BusinessDayProvider,
   EntryStore,
   IdGen,
+  MissedSleep,
   PendingEntrySyncState,
   RangeBacklog,
   StartArgs,
@@ -62,6 +64,49 @@ const RESYNC_LOOKBACK_MS = 30 * 24 * 60 * 60_000;
 /** Backstop only — correctness comes from `ledgerEpoch`, not from this. */
 const LEDGER_MEMO_TTL_MS = 10_000;
 
+/**
+ * Longest silence between two proofs of life that still means "this process
+ * was running the whole time".
+ *
+ * The main loop proves life every second. A gap anywhere near this means the
+ * process was not scheduled at all: the machine slept — or Windows Modern
+ * Standby froze the process — and the suspend event that would have closed the
+ * timer never arrived (on Modern Standby it often does not). The running entry
+ * is then closed at the last proof of life before the gap, never across it.
+ *
+ * 90 seconds because it is:
+ *  - far above any stall of a process that is really running: interval jitter,
+ *    macOS App Nap timer throttling (seconds), a GC pause, a slow SQLite write;
+ *  - below the server's 3-minute lease, so a gap counted here as worked is one
+ *    the server would have counted too — the widget and the server agree;
+ *  - short enough that Modern Standby's brief maintenance wakes (a few seconds
+ *    of running every several minutes) cannot chain proofs of life across the
+ *    standby: each wake follows a freeze far longer than this, so its FIRST
+ *    proof closes the timer instead of vouching for the gap. Anything shorter
+ *    that slips under it is left to idle detection, which backdates to the
+ *    last input.
+ *
+ * A device clock stepped forward by more than this while working looks the
+ * same and is treated the same — the timer stops and offers to resume. That
+ * is the safe direction: it can cost a person a click, never bill a gap.
+ */
+export const MISSED_SLEEP_GAP_MS = 90_000;
+
+/**
+ * Persist the liveness tick at most this often while accruing. It bounds crash
+ * recovery (a hard power-off is credited at most this much); writing it every
+ * second would be one SQLite write per second for no real gain.
+ */
+export const LIVENESS_PERSIST_EVERY_MS = 15_000;
+
+/** One proof of life, read on every clock the gap check compares. */
+interface AliveSample {
+  /** Timer frame — where an entry closed for a missed sleep ends. */
+  at: number;
+  wallMs: number;
+  monoMs: number;
+}
+
 export class TimerService {
   private open: TimeEntry | null = null;
   /** Bumped by every durable write; keys the ledger memo. */
@@ -75,6 +120,11 @@ export class TimerService {
    * never qualifies: its time since the last proof of life is unproven.
    */
   private liveEntryId: string | null = null;
+  /** The last proof of life (in memory; see noteAlive). */
+  private lastAlive: AliveSample | null = null;
+  /** When the liveness tick was last persisted, timer frame. */
+  private livenessPersistedAt: number | null = null;
+  private missedSleepListener: ((missed: MissedSleep) => void) | null = null;
 
   constructor(
     private readonly store: EntryStore,
@@ -134,10 +184,14 @@ export class TimerService {
     return recovered;
   }
 
-  /** Close the bound owner's open entry at the last liveness tick written while it accrued. */
+  /**
+   * Close the bound owner's open entry at its last proof of life: the quit it
+   * was in the middle of (exit intent), else the last persisted liveness tick.
+   * With neither, nothing past the entry's own last boundary is credited —
+   * never "now", which would bill the whole time the process was dead.
+   */
   recoverAtLastProofOfLife(): TimerRecoveryResult | null {
-    // Falls back to now() only if liveness was never written (very first run).
-    return this.recoverAway() ?? this.recover(this.lastLiveness() ?? this.clock.now());
+    return this.recoverAway() ?? this.recover(this.lastProofOfLife());
   }
 
   claimServerMatchedEntries(matches: Array<{ id: string; clientUuid: string }>): number {
@@ -184,15 +238,16 @@ export class TimerService {
   /**
    * On boot, recover a left-open entry. We only trust time up to
    * `lastKnownActiveAt` (e.g. last heartbeat / last persisted tick), so a crash
-   * or power-off never over-credits the offline gap.
+   * or power-off never over-credits the offline gap. Null means nothing is
+   * proven past the entry's own last boundary.
    */
-  recover(lastKnownActiveAt: number): TimerRecoveryResult | null {
+  recover(lastKnownActiveAt: number | null): TimerRecoveryResult | null {
     const open = this.store.getOpen();
     if (!open) {
       this.store.clearExitIntent();
       return null;
     }
-    const recoveredAt = safeCloseAt(open, lastKnownActiveAt);
+    const recoveredAt = safeCloseAt(open, lastKnownActiveAt ?? Number.NEGATIVE_INFINITY);
     const recovered = { ...recoverStaleEntry(open, recoveredAt), closeReason: 'AGENT_RECOVERY' as const };
     // Persist only; the caller runs flushUnsynced() next, which performs the
     // single sync. Syncing here too would race that flush on the same entry.
@@ -209,6 +264,11 @@ export class TimerService {
     return { entryId: recovered.id, recoveredAt, notice };
   }
 
+  /**
+   * Boot-time half of prepareForAway's crash safety: an away close that could
+   * not be written left its boundary behind, and it beats the liveness tick
+   * (the person had already left by then).
+   */
   recoverAway(): TimerRecoveryResult | null {
     const away = this.store.getAwayState();
     if (!away) return null;
@@ -236,13 +296,34 @@ export class TimerService {
   }
 
   /**
-   * Write a "still alive" proof to durable storage. Call periodically while a
-   * timer is actively accruing — it bounds crash recovery on the next boot.
-   * Cheap (one indexed upsert); safe to call when nothing is open (no-op).
+   * The one proof-of-life entry point: the 1-second main loop, the server
+   * heartbeat, a resume/unlock, and Windows' end-of-session query all call it.
+   *
+   * First it checks how long it has been since the previous proof. A gap over
+   * MISSED_SLEEP_GAP_MS is a sleep the OS never reported: the open entry is
+   * closed at the previous proof — BEFORE anything new is written, so a brief
+   * wake can never vouch for the time asleep — and the missed-sleep listener
+   * runs the ordinary "you were away" flow.
+   *
+   * Otherwise, while accruing, it persists the liveness tick that bounds crash
+   * recovery: at most every LIVENESS_PERSIST_EVERY_MS, or now with `persist`.
+   *
+   * Throws only if the close for a missed sleep cannot be written; the gap is
+   * then still there for the next call to find.
    */
-  heartbeat(): void {
-    if (!this.open) return;
-    this.store.setLiveness(this.clock.now());
+  noteAlive(opts: { persist?: boolean } = {}): MissedSleep | null {
+    const sample = this.sampleClocks();
+    const missed = this.checkForMissedSleep(sample);
+    if (missed) return missed;
+    if (!this.open || !getOpenSegment(this.open)) return null;
+    const due = this.livenessPersistedAt === null
+      || sample.at - this.livenessPersistedAt >= LIVENESS_PERSIST_EVERY_MS;
+    if (opts.persist || due) this.persistLiveness(sample.at);
+    return null;
+  }
+
+  setMissedSleepListener(listener: ((missed: MissedSleep) => void) | null): void {
+    this.missedSleepListener = listener;
   }
 
   /** Last persisted liveness tick, or null if none. Used by boot recovery. */
@@ -261,6 +342,7 @@ export class TimerService {
       const [closedState, nextState] = this.store.switchEntry(closed, next);
       this.open = next;
       this.liveEntryId = next.id;
+      this.persistLiveness(now);
       this.notifyMutation();
       // In order: while the old entry is still open on the server, creating
       // the new one is refused as a second live timer.
@@ -270,6 +352,9 @@ export class TimerService {
     const entry = this.createEntry(nextTaskGuid, now);
     await this.commitOpen(entry, 'pending_create');
     this.liveEntryId = entry.id;
+    // Proven from the first second: a crash before the next tick must recover
+    // at this start, never at a stale tick of an older entry or at "now".
+    this.persistLiveness(now);
     return this.status();
   }
 
@@ -281,6 +366,9 @@ export class TimerService {
   }
 
   async prepareForQuit(reason: TimerExitReason): Promise<TimerStatus> {
+    // A quit can be the first thing to run after an unreported sleep (Windows
+    // installing an update out of Modern Standby); it must not bill the sleep.
+    this.closeOverUnreportedSleep();
     if (!this.open) {
       this.store.clearExitIntent();
       return this.status();
@@ -300,18 +388,35 @@ export class TimerService {
       return this.status();
     }
     const open = this.open;
-    const closeAt = safeCloseAt(open, this.boundaryAgo(awayForMs));
-    this.store.setAwayState({ reason, entryId: open.id, awayStartedAt: closeAt, observedAt: this.clock.now() });
+    // Never past the last proof of life. A lock or suspend event the OS
+    // delivers late — after the wake — would otherwise close at wake time and
+    // bill the whole sleep.
+    const provenUntil = this.lastAlive?.at ?? Number.POSITIVE_INFINITY;
+    const closeAt = safeCloseAt(open, Math.min(this.boundaryAgo(awayForMs), provenUntil));
     const closed = closeTimeEntry(open, closeAt);
     // The away boundary must exist durably before memory reports the timer as
     // closed. If SQLite rejects the write, keep `open` intact so the power
     // coordinator's one bounded retry can safely attempt the same boundary.
-    const nextState = this.writeEntry(closed);
+    let nextState: PendingEntrySyncState;
+    try {
+      nextState = this.writeEntry(closed);
+    } catch (err) {
+      // Leave the boundary behind so that if the retry fails too and the
+      // process dies, boot recovery closes here (recoverAway) rather than at
+      // the later liveness tick. Best effort: the store just failed once.
+      try {
+        this.store.setAwayState({ reason, entryId: open.id, awayStartedAt: closeAt, observedAt: this.clock.now() });
+      } catch {
+        // Recovery falls back to the liveness tick.
+      }
+      throw err;
+    }
     this.open = null;
+    // A boundary an earlier failed attempt left behind is now written.
+    this.store.clearAwayState();
     // No recovery notice: the welcome-back prompt already tells the person,
     // and a notice here overwrote any crash or server notice still unread
     // and left a banner that outlived the prompt.
-    this.store.clearAwayState();
     this.notifyMutation();
     this.syncInBackground([closed, nextState]);
     return this.status();
@@ -325,8 +430,11 @@ export class TimerService {
     if (!this.open) return this.status();
     if (getOpenSegment(this.open)) return this.status();
     await this.accrualGuard.assertCanAccrue();
-    const resumed = openSegment(this.open, { kind: 'WORK', at: this.clock.now(), segmentId: this.ids.ulid() });
+    const now = this.clock.now();
+    const resumed = openSegment(this.open, { kind: 'WORK', at: now, segmentId: this.ids.ulid() });
     await this.commitOpen(resumed);
+    // The tick written before the pause is no proof for this new segment.
+    this.persistLiveness(now);
     return this.status();
   }
 
@@ -458,6 +566,11 @@ export class TimerService {
     serverRevision: number | null,
     check: { serverEndedAt?: number | null; provenAliveAt?: number | null } = {},
   ): Promise<void> {
+    // The answer may have sat through a sleep (the request went out, the
+    // machine slept, the reply landed after the wake). If so the entry is
+    // closed at the sleep's start right here, and below finds nothing open to
+    // push — the truncated close goes up through the normal sync instead.
+    this.closeOverUnreportedSleep();
     const open = this.open;
     if (!open || open.id !== entryId) return;
     if (open.id !== this.liveEntryId) return;
@@ -535,6 +648,10 @@ export class TimerService {
    * @returns true when entries remain, so a caller can drain again promptly.
    */
   async flushUnsynced(limit = FLUSH_BATCH_LIMIT): Promise<boolean> {
+    // A drain can be the first thing to run after an unreported sleep. Close
+    // over the gap before pushing, or the open entry would go up claiming to
+    // be alive across it.
+    this.closeOverUnreportedSleep();
     if (this.backgroundSyncs.size > 0) {
       await Promise.allSettled([...this.backgroundSyncs]);
     }
@@ -739,6 +856,88 @@ export class TimerService {
     }
   }
 
+  private sampleClocks(): AliveSample {
+    const at = this.clock.now();
+    return { at, wallMs: this.clock.wallNow?.() ?? at, monoMs: this.clock.monoNow?.() ?? at };
+  }
+
+  /** noteAlive's gap check alone, for paths that must not fail on it (sync, quit). */
+  private closeOverUnreportedSleep(): void {
+    try {
+      this.checkForMissedSleep(this.sampleClocks());
+    } catch {
+      // The close could not be written; the gap stays for the next tick.
+    }
+  }
+
+  /**
+   * Record `sample` as the latest proof of life. When the gap since the
+   * previous one is a sleep nobody reported, first close the open entry at the
+   * previous proof and tell the listener.
+   */
+  private checkForMissedSleep(sample: AliveSample): MissedSleep | null {
+    const previous = this.lastAlive;
+    // The larger of the two: the wall clock catches a real sleep (a monotonic
+    // source stops during it on macOS), the monotonic one a frozen process
+    // whose wall clock was set back meanwhile.
+    const gapMs = previous
+      ? Math.max(sample.wallMs - previous.wallMs, sample.monoMs - previous.monoMs)
+      : 0;
+    if (!previous || gapMs <= MISSED_SLEEP_GAP_MS) {
+      this.lastAlive = sample;
+      return null;
+    }
+    // Throws if the close cannot be written, leaving `lastAlive` where it was
+    // so the next proof still sees the gap.
+    const missed = this.closeForMissedSleep(previous, gapMs);
+    this.lastAlive = sample;
+    try {
+      this.missedSleepListener?.(missed);
+    } catch {
+      // The close is durable; the prompt is the listener's business.
+    }
+    return missed;
+  }
+
+  private persistLiveness(at: number): void {
+    this.store.setLiveness(at);
+    this.livenessPersistedAt = at;
+  }
+
+  /** The latest instant the open entry was proven alive, for boot recovery. */
+  private lastProofOfLife(): number | null {
+    const open = this.store.getOpen();
+    const intent = this.store.getExitIntent();
+    // A quit that was writing its close when the process died: it was alive
+    // and tracking right up to that moment.
+    if (open && intent && intent.entryId === open.id) return intent.observedAt;
+    return this.store.getLiveness();
+  }
+
+  /**
+   * Close the open entry at `lastAlive` — the last proof before a gap nobody
+   * reported. Same close as a suspend: any open entry, paused or not, ends
+   * there; resuming afterwards starts a fresh one.
+   */
+  private closeForMissedSleep(lastAlive: AliveSample, gapMs: number): MissedSleep {
+    const missed: MissedSleep = { gapMs, lastAliveWallMs: lastAlive.wallMs, closed: null };
+    const open = this.open;
+    if (!open) return missed;
+    const closedAt = safeCloseAt(open, lastAlive.at);
+    const closed = closeTimeEntry(open, closedAt);
+    const nextState = this.writeEntry(closed);
+    this.open = null;
+    this.notifyMutation();
+    this.syncInBackground([closed, nextState]);
+    missed.closed = {
+      entryId: open.id,
+      closedAt,
+      larkTaskGuid: open.larkTaskGuid ?? null,
+      wasAccruing: getOpenSegment(open) !== null,
+    };
+    return missed;
+  }
+
   /**
    * Turn "it happened N ms ago" into an instant in THIS module's frame.
    *
@@ -781,7 +980,7 @@ export class TimerService {
     // compare against the server's — it is metadata, not tracked time.
     const localHash = this.hashWithTask(entry, receipt.canonicalEntry.larkTaskGuid);
     const exact = receipt.acceptedRevision === entry.revision && receipt.canonicalHash === localHash;
-    if (!exact && receipt.disposition === 'FINALIZED' && isServerClosedForSilence(receipt)) {
+    if (!exact && receipt.disposition === 'FINALIZED' && isClosedForSilence(receipt.canonicalEntry.closeReason)) {
       // The server closed this entry because it stopped hearing from us and
       // never learned the real end. Accepting that would lose the difference
       // for good. Re-send with a newer revision, which the server applies over
@@ -958,13 +1157,6 @@ function sameOwner(a: TimerOwner | null, b: TimerOwner | null): boolean {
   return a.userId === b.userId && a.workspaceId === b.workspaceId;
 }
 
-function latestSegmentBoundary(entry: TimeEntry): number {
-  return entry.segments.reduce((latest, segment) => {
-    const end = segment.endedAt ?? segment.startedAt;
-    return Math.max(latest, segment.startedAt, end);
-  }, entry.startedAt);
-}
-
 /**
  * The latest instant an entry claims, local (epoch ms) or from a receipt (ISO
  * strings) alike — where a clock clamp would have pulled it back to. Null when
@@ -985,17 +1177,13 @@ function latestBoundary(entry: {
   return Number.isFinite(latest) ? latest : null;
 }
 
+/** Never close before what the entry already holds: a boundary at `at` or later. */
 function safeCloseAt(entry: TimeEntry, at: number): number {
-  return Math.max(at, latestSegmentBoundary(entry));
+  return Math.max(at, latestBoundary(entry) ?? entry.startedAt);
 }
 
 function isNotFound(err: unknown): boolean {
   return err instanceof HttpError && err.status === 404;
-}
-
-function isServerClosedForSilence(receipt: TimerSyncReceipt): boolean {
-  const reason = receipt.canonicalEntry.closeReason;
-  return reason === 'LEASE_EXPIRED' || reason === 'SUPERSEDED';
 }
 
 /** Short, stable reason for the heartbeat diagnostics, e.g. `http_409:timer_conflict`. */

@@ -88,7 +88,7 @@ class MemStore implements EntryStore {
       }))
       .filter((r): r is UnsyncedEntry => r.syncState === 'pending_create' || r.syncState === 'pending_update')
       .filter((r) => (this.failures.get(r.entry.id)?.retryAt ?? 0) <= now)
-      .sort((a, b) => Number(b.entry.endedAt === null) - Number(a.entry.endedAt === null));
+      .sort((a, b) => a.entry.startedAt - b.entry.startedAt);
   }
   noteSyncFailure(id: string, error: string, retryAt: number) {
     if (this.syncStates.get(id) === 'synced') return;
@@ -1020,16 +1020,16 @@ describe('TimerService.recover (crash recovery)', () => {
 });
 
 describe('TimerService liveness (crash-recovery bound)', () => {
-  it('heartbeat persists the current time while an entry is open', async () => {
+  it('noteAlive persists the current time while an entry is open', async () => {
     await svc.start({});
     clock.advance(42 * 1000);
-    svc.heartbeat();
+    svc.noteAlive({ persist: true });
     expect(store.getLiveness()).toBe(clock.now());
     expect(svc.lastLiveness()).toBe(clock.now());
   });
 
-  it('heartbeat is a no-op when nothing is open', () => {
-    svc.heartbeat();
+  it('noteAlive writes nothing when nothing is open', () => {
+    svc.noteAlive({ persist: true });
     expect(store.getLiveness()).toBeNull();
   });
 
@@ -1038,7 +1038,7 @@ describe('TimerService liveness (crash-recovery bound)', () => {
     // app reboots an hour later. The dead hour must NOT be credited.
     await svc.start({});
     clock.advance(5 * MIN);
-    svc.heartbeat();
+    svc.noteAlive({ persist: true });
     const lastAlive = clock.now();
     clock.advance(60 * MIN); // an hour of being powered off
 
@@ -1050,15 +1050,15 @@ describe('TimerService liveness (crash-recovery bound)', () => {
     expect(totalWorkedMs(recovered)).toBe(5 * MIN); // the dead hour is gone
   });
 
-  it('falls back to now() when liveness was never written', async () => {
+  it('credits nothing past the entry when liveness was never written', async () => {
     await svc.start({});
+    store.liveness = null; // a store from before start wrote liveness
     clock.advance(3 * MIN);
-    // No heartbeat ever fired → lastLiveness null → caller uses now().
     const rebooted = new TimerService(store, sync, clock, ids, allowAccrual);
-    expect(rebooted.lastLiveness()).toBeNull();
-    rebooted.recover(rebooted.lastLiveness() ?? clock.now());
+    rebooted.recoverAtLastProofOfLife();
     const recovered = [...store.entries.values()][0]!;
-    expect(recovered.endedAt).toBe(clock.now());
+    expect(recovered.endedAt).toBe(T0);
+    expect(totalWorkedMs(recovered)).toBe(0);
   });
 });
 
@@ -1411,7 +1411,7 @@ describe('sync that converges (beta.38)', () => {
     expect(store.getUnsynced()).toHaveLength(0);
   });
 
-  it('pushes the open entry before a backlog the server keeps refusing', async () => {
+  it('reaches the open entry one pass behind a backlog the server keeps refusing', async () => {
     for (let i = 0; i < 30; i += 1) {
       store.upsert(closeTimeEntry(createOpenEntry(T0 - (40 - i) * MIN, `old_${i}`), T0 - (39 - i) * MIN), { syncState: 'pending_update' });
     }
@@ -1424,15 +1424,17 @@ describe('sync that converges (beta.38)', () => {
     const open = store.getOpen()!;
     clock.advance(MIN);
 
-    await svc.flushUnsynced(25);
-
-    expect(sync.creates).toEqual([open.id]);
+    // Oldest first: the first pass spends itself on 25 old rows and asks for
+    // another (the drain chains it at once).
+    expect(await svc.flushUnsynced(25)).toBe(true);
+    expect(sync.creates).toEqual([]);
     expect(store.syncBacklog()).toMatchObject({ lastError: 'http_400:invalid_segments' });
-    // The 24 old rows refused in that pass now wait; the next pass reaches the
-    // 6 it never got to instead of spending itself on them again.
+    // Those 25 now back off, so the next pass reaches the 5 it never got to
+    // and then the open entry, instead of spending itself on them again.
     const before = sync.calls.length;
-    await svc.flushUnsynced(25);
-    expect(sync.calls.length - before).toBe(6);
+    expect(await svc.flushUnsynced(25)).toBe(false);
+    expect(sync.creates).toEqual([open.id]);
+    expect(sync.calls.length - before).toBe(5 + 2);
   });
 
   it('backs off 30s, 1m, 2m … up to 15 minutes', () => {

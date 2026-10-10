@@ -31,6 +31,7 @@ const mocks = vi.hoisted(() => ({
   screenUiState: vi.fn(),
   logWarn: vi.fn(),
   logDebug: vi.fn(),
+  timerCalls: [] as string[],
   startupHealth: {
     state: 'READY',
     ready: true,
@@ -56,8 +57,18 @@ vi.mock('./auth', () => ({
 vi.mock('./timer', () => ({
   drainTimerSyncNow: mocks.drainTimerSyncNow,
   getTimerService: () => ({
-    status: () => ({ state: 'IDLE', paused: false, entryId: null }),
-    lastLiveness: () => null,
+    status: () => {
+      mocks.timerCalls.push('status');
+      return { state: 'IDLE', paused: false, entryId: null };
+    },
+    lastLiveness: () => {
+      mocks.timerCalls.push('lastLiveness');
+      return null;
+    },
+    noteAlive: (opts: unknown) => {
+      mocks.timerCalls.push(`noteAlive:${JSON.stringify(opts)}`);
+      return null;
+    },
     syncBacklog: () => ({ pending: 0, oldestPendingAt: null, lastError: null }),
   }),
 }));
@@ -93,7 +104,6 @@ vi.mock('./heartbeatPayload', () => ({
     permissions: args.permissions,
     startup: args.startup,
   }),
-  currentPlatform: () => 'darwin',
 }));
 
 vi.mock('./launchAtLogin', () => ({
@@ -130,6 +140,7 @@ describe('heartbeat config refresh', () => {
     mocks.screenUiState.mockReset();
     mocks.logWarn.mockReset();
     mocks.logDebug.mockReset();
+    mocks.timerCalls.length = 0;
     mocks.currentVersion = 'version-1';
     mocks.appVersion = '9.8.7';
     mocks.getScreenHealth.mockReturnValue('ok');
@@ -174,6 +185,17 @@ describe('heartbeat config refresh', () => {
         }),
       ),
     );
+  });
+
+  it('proves life (catching an unreported sleep) before it reads or reports the timer', async () => {
+    mocks.api.mockResolvedValue({ ok: true, serverTime: '2026-07-04T00:00:00.000Z', configVersion: 'version-1' });
+    const { sendHeartbeatNow } = await import('./heartbeat');
+
+    sendHeartbeatNow();
+
+    await vi.waitFor(() => expect(mocks.api).toHaveBeenCalled());
+    // The proven-alive instant is read before this beat writes a fresh one.
+    expect(mocks.timerCalls.slice(0, 3)).toEqual(['lastLiveness', 'noteAlive:{"persist":true}', 'status']);
   });
 
   it('sends the local desktop permission snapshot in the heartbeat payload', async () => {

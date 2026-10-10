@@ -26,7 +26,12 @@ export interface TimerCheckpointResult {
   closeReason: TimeEntryCloseReason | null;
 }
 
-function clampCheckpointAt(observedAt: string, now: Date, startedAt: Date): Date {
+/**
+ * An agent's "I was alive at" claim, bounded to what the server can accept:
+ * never in the server's future, never before the entry began. An unparseable
+ * claim counts as now. Shared by the heartbeat lease and the sync route.
+ */
+export function clampCheckpointAt(observedAt: string, now: Date, startedAt: Date): Date {
   const observedMs = new Date(observedAt).getTime();
   const bounded = Number.isFinite(observedMs) ? Math.min(observedMs, now.getTime()) : now.getTime();
   return new Date(Math.max(startedAt.getTime(), bounded));

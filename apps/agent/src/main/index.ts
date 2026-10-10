@@ -140,8 +140,7 @@ function attachMainWindowHandlers(win: BrowserWindow): void {
     onQueryEnd: () => {
       // The shutdown can still be vetoed by another app; only refresh the
       // proof of life so recovery is exact if Windows kills us mid-way.
-      const timer = getTimerService();
-      if (timer.isRunning() && !timer.isPaused()) timer.heartbeat();
+      getTimerService().noteAlive({ persist: true });
     },
     onEnd: () => {
       isQuitting = true;
@@ -268,15 +267,17 @@ function notifyStartupHealth(state: LaunchAtLoginHealth): void {
   showNotification({ title: 'Timo startup needs attention', body }, showSettingsWindow);
 }
 
-/** Single 1s heartbeat: tray ticker + floating-bar visibility + live broadcast
- *  + a throttled durable liveness tick (crash-recovery bound). */
+/** Single 1s heartbeat: proof of life + tray ticker + floating-bar visibility
+ *  + live broadcast. */
 function startTick(): void {
-  let tick = 0;
-  const LIVENESS_EVERY_TICKS = 15; // persist "proof of life" ~every 15s
   let lastTimerState: string | null = null;
   setInterval(() => {
     try {
-      tick += 1;
+      // Proof of life first, before anything reads the timer. It notices a
+      // sleep the OS never announced (a gap since the previous tick) and
+      // closes the entry at that previous tick; otherwise it persists the
+      // throttled liveness tick that bounds crash recovery.
+      getTimerService().noteAlive();
       // One status() per tick: it reconciles the day's ledger, which is the
       // expensive part of this loop.
       const s = getTimerService().status();
@@ -299,12 +300,6 @@ function startTick(): void {
       // the next second it is shown. Every state change is still pushed to
       // it by the command that caused it.
       if (running) broadcast('timer:status:push', s, { skipIfHidden: mainWindow });
-      // Liveness: only while genuinely accruing, throttled. The next boot
-      // closes any dangling entry at the last tick so a crash/hard-off never
-      // over-credits the dead gap. Worst-case over-count ≈ 15s.
-      if (accruing && tick % LIVENESS_EVERY_TICKS === 0) {
-        getTimerService().heartbeat();
-      }
     } catch {
       /* timer not ready */
     }

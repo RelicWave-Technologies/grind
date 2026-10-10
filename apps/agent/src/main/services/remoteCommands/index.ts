@@ -1,9 +1,8 @@
-import { app } from 'electron';
 import { release } from 'node:os';
 import type { AgentCommandWire } from '@grind/types';
-import { AGENT_VERSION } from '../../env';
 import { log } from '../../logger';
 import { api, HttpError } from '../apiClient';
+import { agentVersion } from '../agentIdentity';
 import { drainTimerSyncNow, getTimerService } from '../timer';
 import { drainActivityNow, getActivityStore } from '../activity';
 import { getScreenshotStore } from '../capture';
@@ -18,17 +17,9 @@ import { runResync } from './resync';
  * carried; this never throws and never makes the heartbeat wait.
  */
 
-function appVersion(): string {
-  try {
-    return app.getVersion() || AGENT_VERSION;
-  } catch {
-    return AGENT_VERSION;
-  }
-}
-
 function device() {
   const version = typeof process.getSystemVersion === 'function' ? process.getSystemVersion() : release();
-  return { appVersion: appVersion(), os: `${process.platform} ${version}`, arch: process.arch };
+  return { appVersion: agentVersion(), os: `${process.platform} ${version}`, arch: process.arch };
 }
 
 function memory(): RemoteCommandMemory | null {

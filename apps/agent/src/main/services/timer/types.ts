@@ -79,7 +79,36 @@ export interface ServerLedgerCache {
 
 /** Injected dependencies so TimerService is testable without Electron/SQLite. */
 export interface Clock {
+  /** The timer's frame: server-aligned, driven by a monotonic source. */
   now(): number;
+  /**
+   * Device wall clock. It keeps running while the machine sleeps, which is
+   * how a sleep the OS never announced is still noticed. Defaults to now().
+   */
+  wallNow?(): number;
+  /**
+   * Raw monotonic reading, independent of server-clock re-anchoring. Advances
+   * while a frozen process is not scheduled (Windows Modern Standby, a hung
+   * event loop); on macOS it stops during real sleep. Defaults to now().
+   */
+  monoNow?(): number;
+}
+
+/** A sleep nobody reported, noticed from the gap between two proofs of life. */
+export interface MissedSleep {
+  /** How long the process went without a proof of life. */
+  gapMs: number;
+  /** Device wall clock at the last proof of life before the gap (for display). */
+  lastAliveWallMs: number;
+  /** The entry that was closed at that proof, or null when none was open. */
+  closed: {
+    entryId: string;
+    /** Timer frame. */
+    closedAt: number;
+    larkTaskGuid: string | null;
+    /** It was accruing (not paused), so the person can be offered a resume. */
+    wasAccruing: boolean;
+  } | null;
 }
 
 export interface IdGen {
@@ -116,9 +145,15 @@ export interface EntryStore {
   /** The currently-open entry (endedAt === null), if any. */
   getOpen(): TimeEntry | null;
   /**
-   * Entries due a push at `now`, the open entry first and then oldest first.
+   * Entries due a push at `now`, oldest first — the open entry included, in
+   * its place. Order matters: the server refuses a new live timer while an
+   * older one of the same user is still open there, so an older close has to
+   * land before a newer start, or the start 409s and waits out a backoff.
+   *
    * Rows backing off after a failure are left out until their retry time, so
-   * one entry the server keeps refusing can never starve the rest.
+   * one entry the server keeps refusing can never starve the rest; and a pass
+   * that hits its batch limit chains straight into the next (TimerSyncDrain),
+   * so a long backlog delays the open entry by passes, not by intervals.
    */
   getUnsynced(now: number): UnsyncedEntry[];
   /** Count the failure and hold the row back until `retryAt`. */

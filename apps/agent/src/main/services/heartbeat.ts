@@ -1,14 +1,15 @@
-import { app } from 'electron';
 import { release } from 'node:os';
 import type { DesktopPermissionSnapshot, HeartbeatResponse } from '@grind/types';
-import { AGENT_VERSION, HEARTBEAT_INTERVAL_MS } from '../env';
+import { HEARTBEAT_INTERVAL_MS } from '../env';
 import { log } from '../logger';
 import { hasDeferredServerClockCorrection, noteServerTime, serverAlignedNow, serverClockOffsetMs } from './serverClock';
 import { api } from './apiClient';
 import { drainActivityNow } from './activity';
 import { drainTimerSyncNow, getTimerService } from './timer';
-import { buildHeartbeatRequest, currentPlatform } from './heartbeatPayload';
+import { buildHeartbeatRequest } from './heartbeatPayload';
+import { agentVersion, currentPlatform } from './agentIdentity';
 import type { TimerSyncDrainReason } from './timer/syncDrain';
+import { isClosedForSilence } from './timer/serverClose';
 import { getAgentConfigVersion, refreshAgentConfig } from './agentConfig';
 import { broadcast } from '../broadcast';
 import { getTrackingReadinessService } from './trackingReadiness';
@@ -17,14 +18,6 @@ import { handleRemoteCommands } from './remoteCommands';
 import { getUpdateDiagnostics } from './updates/diagnostics';
 
 let timer: NodeJS.Timeout | null = null;
-
-function agentVersion(): string {
-  try {
-    return app.getVersion() || AGENT_VERSION;
-  } catch {
-    return AGENT_VERSION;
-  }
-}
 
 async function currentPermissionSnapshot(): Promise<DesktopPermissionSnapshot> {
   return (await getTrackingReadinessService().inspect()).permissions;
@@ -83,11 +76,14 @@ function currentDiagnostics() {
 async function tick(): Promise<void> {
   try {
     const timerService = getTimerService();
-    const timerStatus = timerService.status();
     // Read before this tick writes a fresh one: a server close for silence is
     // only overridden for time this process can prove it was alive for.
     const provenAliveAt = timerService.lastLiveness();
-    if (timerStatus.state === 'RUNNING' && !timerStatus.paused) timerService.heartbeat();
+    // Before reporting anything: if this beat is the first thing to run after
+    // a sleep nobody announced, the entry is closed at the last tick here and
+    // the beat reports it stopped rather than vouching for the gap.
+    timerService.noteAlive({ persist: true });
+    const timerStatus = timerService.status();
     const body = buildHeartbeatRequest({
       agentVersion: agentVersion(),
       platform: currentPlatform(),
@@ -121,7 +117,7 @@ async function tick(): Promise<void> {
     }
     log.debug('heartbeat ok', { serverTime: res.serverTime, configVersion: res.configVersion });
     const checkpoint = res.timer;
-    const closedForSilence = checkpoint?.closeReason === 'LEASE_EXPIRED' || checkpoint?.closeReason === 'SUPERSEDED';
+    const closedForSilence = isClosedForSilence(checkpoint?.closeReason);
     if (checkpoint?.disposition === 'needs_sync' || (checkpoint?.disposition === 'finalized' && closedForSilence)) {
       // Missing, behind, or closed because the server stopped hearing from us:
       // local is the truth, so send it rather than giving up the time.

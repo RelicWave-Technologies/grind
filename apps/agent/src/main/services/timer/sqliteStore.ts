@@ -391,7 +391,7 @@ export class SqliteEntryStore implements EntryStore {
          WHERE owner_user_id = ? AND owner_workspace_id = ?
            AND sync_state IN ('pending_create', 'pending_update')
            AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
-         ORDER BY (ended_at IS NULL) DESC, rowid ASC`,
+         ORDER BY CAST(json_extract(json, '$.startedAt') AS INTEGER) ASC, rowid ASC`,
       )
       .all(owner.userId, owner.workspaceId, now) as { json: string; sync_state: string; sync_attempts: number }[];
     return rows.map((r) => ({

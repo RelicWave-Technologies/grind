@@ -9,12 +9,6 @@ import {
 } from '@grind/types';
 import type { TimerStatus } from './timer';
 
-export function currentPlatform(nodePlatform: NodeJS.Platform = process.platform): Platform {
-  if (nodePlatform === 'darwin') return 'darwin';
-  if (nodePlatform === 'win32') return 'win32';
-  return 'linux';
-}
-
 export function agentStateFromTimer(status: TimerStatus): AgentState {
   if (status.state !== 'RUNNING') return 'IDLE';
   if (!status.paused) return 'RUNNING';

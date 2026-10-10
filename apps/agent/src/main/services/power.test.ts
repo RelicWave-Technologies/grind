@@ -10,6 +10,8 @@ const mocks = vi.hoisted(() => {
     quit: vi.fn(),
     prepareForAway: vi.fn(),
     discardAway: vi.fn(),
+    noteAlive: vi.fn(),
+    onTimerMissedSleep: vi.fn(),
     status: vi.fn(),
     idleSeconds: vi.fn(() => 0),
     runQuitCleanup: vi.fn(),
@@ -28,8 +30,10 @@ vi.mock('./timer', () => ({
   getTimerService: () => ({
     prepareForAway: mocks.prepareForAway,
     discardAway: mocks.discardAway,
+    noteAlive: mocks.noteAlive,
     status: mocks.status,
   }),
+  onTimerMissedSleep: mocks.onTimerMissedSleep,
 }));
 
 vi.mock('./quitCleanup', () => ({
@@ -279,5 +283,94 @@ describe('registerPowerEvents', () => {
     await settle();
 
     expect(mocks.prepareForAway).toHaveBeenCalledWith('lock', 0);
+  });
+
+  describe('a sleep the OS never reported', () => {
+    const LAST_TICK_WALL = 1_700_000_000_000 - 90 * 60_000;
+    const missedListener = () => mocks.onTimerMissedSleep.mock.calls.at(-1)![0] as (missed: unknown) => void;
+
+    it('runs the full return flow and offers to resume the entry the gap closed', async () => {
+      const onAwayStart = vi.fn();
+      const onWake = vi.fn();
+      const onReturnFromAway = vi.fn();
+      const onReturnComplete = vi.fn();
+      registerPowerEvents({ onWake, onAwayStart, onReturnFromAway, onReturnComplete });
+
+      missedListener()({
+        gapMs: 90 * 60_000,
+        lastAliveWallMs: LAST_TICK_WALL,
+        closed: { entryId: 'e1', closedAt: 123, larkTaskGuid: 'task-1', wasAccruing: true },
+      });
+      await settle();
+      await settle();
+
+      expect(onAwayStart).toHaveBeenCalledTimes(1);
+      expect(onWake).toHaveBeenCalledTimes(1);
+      // The timer already closed the entry; nothing closes it a second time.
+      expect(mocks.prepareForAway).not.toHaveBeenCalled();
+      expect(onReturnFromAway).toHaveBeenCalledWith({ larkTaskGuid: 'task-1', stoppedAt: LAST_TICK_WALL, reason: 'suspend' });
+      expect(onReturnComplete).toHaveBeenCalledTimes(1);
+    });
+
+    it('with nothing closed, only does the wake work — a pending welcome-back prompt survives', async () => {
+      const onAwayStart = vi.fn();
+      const onWake = vi.fn();
+      const onReturnFromAway = vi.fn();
+      registerPowerEvents({ onWake, onAwayStart, onReturnFromAway });
+
+      missedListener()({ gapMs: 20 * 60_000, lastAliveWallMs: LAST_TICK_WALL, closed: null });
+      await settle();
+
+      expect(onWake).toHaveBeenCalledTimes(1);
+      expect(onAwayStart).not.toHaveBeenCalled();
+      expect(onReturnFromAway).not.toHaveBeenCalled();
+    });
+
+    it('leaves a lock that already closed the timer to its own unlock', async () => {
+      const onAwayStart = vi.fn();
+      const onReturnFromAway = vi.fn();
+      mocks.status.mockReturnValue({ state: 'RUNNING', entryId: 'e1', larkTaskGuid: 'task-1', paused: false });
+      registerPowerEvents({ onWake: vi.fn(), onAwayStart, onReturnFromAway });
+
+      mocks.listeners.get('lock-screen')!();
+      await settle();
+      missedListener()({ gapMs: 90 * 60_000, lastAliveWallMs: LAST_TICK_WALL, closed: null });
+      mocks.listeners.get('unlock-screen')!();
+      await settle();
+
+      expect(onAwayStart).toHaveBeenCalledTimes(1);
+      expect(onReturnFromAway).toHaveBeenCalledTimes(1);
+      expect(onReturnFromAway).toHaveBeenCalledWith(expect.objectContaining({ reason: 'lock' }));
+    });
+
+    it('checks for a gap on every resume/unlock before reading the timer', async () => {
+      registerPowerEvents({ onWake: vi.fn() });
+
+      mocks.listeners.get('resume')!();
+      await settle();
+
+      expect(mocks.noteAlive).toHaveBeenCalledTimes(1);
+    });
+
+    it('completes the return a resume started when its own gap check finds the sleep', async () => {
+      const onReturnFromAway = vi.fn();
+      const onWake = vi.fn();
+      registerPowerEvents({ onWake, onReturnFromAway });
+      mocks.noteAlive.mockImplementationOnce(() => {
+        missedListener()({
+          gapMs: 90 * 60_000,
+          lastAliveWallMs: LAST_TICK_WALL,
+          closed: { entryId: 'e1', closedAt: 123, larkTaskGuid: null, wasAccruing: true },
+        });
+      });
+
+      mocks.listeners.get('resume')!();
+      await settle();
+      await settle();
+
+      expect(onWake).toHaveBeenCalledTimes(1);
+      expect(onReturnFromAway).toHaveBeenCalledTimes(1);
+      expect(onReturnFromAway).toHaveBeenCalledWith({ larkTaskGuid: null, stoppedAt: LAST_TICK_WALL, reason: 'suspend' });
+    });
   });
 });

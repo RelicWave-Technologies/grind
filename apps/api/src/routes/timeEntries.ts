@@ -26,6 +26,7 @@ import { lockManualCarve, refillFreedManualTime } from '../manualTime/carve';
 import { ulid } from 'ulid';
 import { logger } from '../logger';
 import {
+  clampCheckpointAt,
   lockTimerOwner,
   supersedeExpiredTimersForUser,
   TIMER_LEASE_MS,
@@ -117,12 +118,6 @@ function hasAnyLifecycleField(input: {
     || input.revision !== undefined
     || input.observedAt !== undefined
     || input.closeReason !== undefined;
-}
-
-function clampObservedAt(observedAt: string, now: Date, startedAt: Date): Date {
-  const raw = new Date(observedAt).getTime();
-  const bounded = Number.isFinite(raw) ? Math.min(raw, now.getTime()) : now.getTime();
-  return new Date(Math.max(startedAt.getTime(), bounded));
 }
 
 function canonicalTimestampCeiling(entry: {
@@ -290,7 +285,7 @@ timeEntriesRouter.post('/', validate(CreateTimeEntryRequest, 'body'), async (req
 
     const now = new Date();
     const lastProvenAt = isV2
-      ? clampObservedAt(body.observedAt!, now, new Date(clamped.entry.startedAt))
+      ? clampCheckpointAt(body.observedAt!, now, new Date(clamped.entry.startedAt))
       : null;
     const outcome = await prisma.$transaction(async (tx) => {
       if (isV2 && clamped.entry.endedAt === null) {
@@ -437,7 +432,7 @@ timeEntriesRouter.put('/:id/sync', validate(SyncTimeEntryRequest, 'body'), async
         return { kind: 'receipt' as const, entry: current, disposition: 'STALE' as const, correction: null };
       }
 
-      const checkpointAt = isV2 ? clampObservedAt(body.observedAt!, now, current.startedAt) : null;
+      const checkpointAt = isV2 ? clampCheckpointAt(body.observedAt!, now, current.startedAt) : null;
       const observedAt = checkpointAt && current.lastProvenAt && current.lastProvenAt > checkpointAt
         ? current.lastProvenAt
         : checkpointAt;
