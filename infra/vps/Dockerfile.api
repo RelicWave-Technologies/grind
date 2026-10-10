@@ -21,5 +21,8 @@ ENV API_PORT=4000
 EXPOSE 4000
 
 # Run node directly so SIGTERM reaches the API (which drains requests on it)
-# instead of stopping at a pnpm wrapper process.
-CMD ["node", "apps/api/dist/index.cjs"]
+# instead of stopping at a pnpm wrapper process. From the package directory,
+# as `pnpm start` ran it: the bundled Prisma client finds its query engine
+# relative to there, and from /app it cannot.
+WORKDIR /app/apps/api
+CMD ["node", "dist/index.cjs"]
