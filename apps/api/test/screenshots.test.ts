@@ -43,6 +43,7 @@ vi.mock('../src/lib/googleDrive', async (importOriginal) => {
 const { buildApp } = await import('../src/app');
 const { capturedAtFromScreenshotId } = await import('../src/routes/screenshots');
 const { seedUser, createManagedTeam } = await import('./helpers');
+const { signAccessToken } = await import('../src/lib/jwt');
 const { linkClaimedEvidence, linkClaimsIfEntriesArrived } = await import('../src/timeEntries/claimedEvidence');
 
 let app: Express;
@@ -349,5 +350,39 @@ describe('serving screenshot images', () => {
       .get('/v1/screenshots/assets/member-file')
       .set('Authorization', `Bearer ${manager.accessToken}`);
     expect(res.status).toBe(200);
+  });
+
+  it('lets an admin, never a manager, open a suspended person\'s screenshots', async () => {
+    // The month report keeps a suspended person on the months they worked.
+    const admin = await seedUser({ role: 'ADMIN' });
+    const manager = await prisma.user.create({
+      data: { workspaceId: admin.workspaceId, email: `mgr-${Date.now()}@test.local`, name: 'Mgr', role: 'MEMBER', provisioningStatus: 'ACTIVE' },
+    });
+    const team = await createManagedTeam({ workspaceId: admin.workspaceId, name: 'Team', managerId: manager.id });
+    const suspended = await prisma.user.create({
+      data: {
+        workspaceId: admin.workspaceId,
+        email: `gone-${Date.now()}@test.local`,
+        name: 'Gone',
+        role: 'MEMBER',
+        provisioningStatus: 'ACTIVE',
+        teamId: team.id,
+        deactivatedAt: new Date(),
+      },
+    });
+    drive.files.set('gone-file', `${suspended.id}-${SHOT_AUG}.webp`);
+    await seedForeignRow({ ownerId: suspended.id, id: SHOT_AUG, s3Key: 'gone-file', fullUrl: null });
+    const managerToken = signAccessToken({ sub: manager.id, ws: admin.workspaceId, role: 'MANAGER' });
+    const get = (path: string, token: string) => request(app).get(path).set('Authorization', `Bearer ${token}`);
+
+    expect((await get(`/v1/screenshots/${SHOT_AUG}/image?variant=full`, admin.accessToken)).status).toBe(200);
+    expect((await get('/v1/screenshots/assets/gone-file', admin.accessToken)).status).toBe(200);
+    const day = `/v1/reports/team/member/day-screenshots?userId=${suspended.id}&date=2026-08-03`;
+    const adminDay = await get(day, admin.accessToken);
+    expect(adminDay.status).toBe(200);
+
+    expect((await get(`/v1/screenshots/${SHOT_AUG}/image?variant=full`, managerToken)).status).toBe(403);
+    expect((await get('/v1/screenshots/assets/gone-file', managerToken)).status).toBe(403);
+    expect((await get(day, managerToken)).status).toBe(403);
   });
 });

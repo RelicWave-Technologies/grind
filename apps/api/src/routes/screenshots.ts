@@ -21,7 +21,7 @@ import {
 import { dashboardOrigins, env } from '../env';
 import { logger } from '../logger';
 import { getWorkspaceTimezone } from '../workspace/timezone';
-import { attachScope } from '../middleware/scope';
+import { attachScope, canReadEvidenceOf } from '../middleware/scope';
 import { classifyEntryClaims, linkClaimsIfEntriesArrived } from '../timeEntries/claimedEvidence';
 
 export const screenshotsRouter = Router();
@@ -136,7 +136,7 @@ screenshotsRouter.get('/:id/image', attachScope, async (req, res, next) => {
     if (!row || row.deletedAt || row.uploadState !== 'UPLOADED') {
       return res.status(404).json({ error: 'screenshot_not_found' });
     }
-    if (!req.scope.userIds.includes(row.userId)) return res.status(403).json({ error: 'forbidden' });
+    if (!(await canReadEvidenceOf(req, row.userId))) return res.status(403).json({ error: 'forbidden' });
 
     const data = await loadScreenshotImage(row, variant);
     if (!data) return res.status(404).json({ error: 'screenshot_not_found' });
@@ -162,7 +162,8 @@ screenshotsRouter.get('/assets/:fileId', attachScope, async (req, res, next) => 
       select: { id: true, userId: true },
       take: 10,
     });
-    const visible = rows.filter((row) => req.scope!.userIds.includes(row.userId));
+    const visible = [];
+    for (const row of rows) if (await canReadEvidenceOf(req, row.userId)) visible.push(row);
     if (rows.length > 0 && visible.length === 0) return res.status(403).json({ error: 'forbidden' });
     for (const row of visible) {
       if (!(await driveFileBelongsTo(fileId, row.userId, row.id))) continue;
