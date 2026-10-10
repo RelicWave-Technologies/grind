@@ -493,6 +493,36 @@ describe('timer lifecycle protocol v2', () => {
     expect(await prisma.timeEntry.count({ where: { userId: user.userId } })).toBe(1);
   });
 
+  it('keeps presence on a running timer while a second device on the account heartbeats idle', async () => {
+    const user = await seedUser();
+    const body = v2Body(new Date(Date.now() - 5 * 60_000));
+    await request(app).post('/v1/time-entries').set(bearer(user.accessToken)).send(body);
+    const beat = (extra: Record<string, unknown>) => request(app).post('/v1/agent/heartbeat').set(bearer(user.accessToken)).send({
+      agentVersion: '0.0.2-beta.37',
+      platform: 'darwin',
+      trackingProtocolVersion: 2,
+      ...extra,
+    });
+    await beat({
+      state: 'RUNNING',
+      timerCheckpoint: { entryId: body.id, revision: 1, state: 'RUNNING', observedAt: new Date().toISOString() },
+    });
+    const presence = async () => prisma.user.findUniqueOrThrow({
+      where: { id: user.userId },
+      select: { agentState: true, agentActiveEntryId: true },
+    });
+    expect(await presence()).toEqual({ agentState: 'RUNNING', agentActiveEntryId: body.id });
+
+    // The other laptop, not tracking.
+    expect((await beat({ state: 'IDLE' })).status).toBe(200);
+    expect(await presence()).toEqual({ agentState: 'RUNNING', agentActiveEntryId: body.id });
+
+    // Once that timer's lease has run out, the idle report stands.
+    await prisma.timeEntry.update({ where: { id: body.id }, data: { leaseExpiresAt: new Date(Date.now() - 1_000) } });
+    await beat({ state: 'IDLE' });
+    expect(await presence()).toEqual({ agentState: 'IDLE', agentActiveEntryId: null });
+  });
+
   it('keeps legacy heartbeats compatible and outside the lease protocol', async () => {
     const user = await seedUser();
     const response = await request(app).post('/v1/agent/heartbeat').set(bearer(user.accessToken)).send({
