@@ -148,6 +148,17 @@ const EnvSchema = z.object({
   GOOGLE_DRIVE_PRIVATE_KEY_BASE64: z.string().min(1).optional(),
   GOOGLE_DRIVE_FOLDER_ID: z.string().min(1).optional(),
   GOOGLE_DRIVE_SHARED_DRIVE_ID: z.string().min(1).optional(),
+}).superRefine((value, ctx) => {
+  // Without an allowlist CORS reflects any origin, with credentials: any site
+  // could call the API as the signed-in dashboard user. Fine on a laptop, never
+  // in production.
+  if (value.NODE_ENV === 'production' && parseUrlList(value.DASHBOARD_URL).length === 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['DASHBOARD_URL'],
+      message: 'DASHBOARD_URL is required in production (the CORS allowlist)',
+    });
+  }
 });
 
 const parsed = EnvSchema.safeParse(process.env);

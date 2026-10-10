@@ -66,9 +66,12 @@ export async function revokeRefreshToken(refreshToken: string): Promise<boolean>
   return revoked.count > 0;
 }
 
+export type RotateFailureReason = 'invalid' | 'expired' | 'reuse' | 'reuse_grace' | 'stale_role' | 'deactivated';
+
 export type RotateResult =
   | { ok: true; accessToken: string; refreshToken: string; expiresAt: Date }
-  | { ok: false; reason: 'invalid' | 'expired' | 'reuse' | 'reuse_grace' | 'stale_role' | 'deactivated' };
+  /** `familyId` / `userId` name the session when the token was found, for the log. */
+  | { ok: false; reason: RotateFailureReason; familyId?: string; userId?: string };
 
 type Tx = Prisma.TransactionClient;
 
@@ -136,6 +139,8 @@ export async function rotateRefreshToken(presented: string): Promise<RotateResul
   return prisma.$transaction(async (tx): Promise<RotateResult> => {
     const row = await tx.refreshToken.findUnique({ where: { tokenHash }, include: { user: true } });
     if (!row) return { ok: false, reason: 'invalid' };
+    const fail = (reason: RotateFailureReason): RotateResult =>
+      ({ ok: false, reason, familyId: row.familyId, userId: row.userId });
     const now = new Date();
 
     if (row.revokedAt) {
@@ -147,14 +152,14 @@ export async function rotateRefreshToken(presented: string): Promise<RotateResul
         });
         if (successor && !successor.revokedAt && successor.expiresAt > now) {
           const gate = sessionGate(row.user);
-          if (!gate.ok) return gate;
+          if (!gate.ok) return fail(gate.reason);
           const retired = await tx.refreshToken.updateMany({
             where: { id: successor.id, revokedAt: null },
             data: { revokedAt: now },
           });
           // The successor was spent while we looked: someone else holds the
           // family now. Benign, but there is nothing to hand back.
-          if (retired.count !== 1) return { ok: false, reason: 'reuse_grace' };
+          if (retired.count !== 1) return fail('reuse_grace');
           // Link both the presented token and the retired successor forward, so
           // whichever of the two the client ends up holding can still recover.
           return mintSuccessor(tx, row, gate.role, [row.id, successor.id]);
@@ -165,19 +170,19 @@ export async function rotateRefreshToken(presented: string): Promise<RotateResul
           where: { familyId: row.familyId, revokedAt: null },
           select: { id: true },
         });
-        if (live) return { ok: false, reason: 'reuse_grace' };
+        if (live) return fail('reuse_grace');
       }
       // Reuse detected → nuke the whole family.
       await tx.refreshToken.updateMany({
         where: { familyId: row.familyId, revokedAt: null },
         data: { revokedAt: now },
       });
-      return { ok: false, reason: 'reuse' };
+      return fail('reuse');
     }
-    if (row.expiresAt < now) return { ok: false, reason: 'expired' };
+    if (row.expiresAt < now) return fail('expired');
 
     const gate = sessionGate(row.user);
-    if (!gate.ok) return gate;
+    if (!gate.ok) return fail(gate.reason);
 
     // Conditional on still being live: a parallel rotation that got here first
     // has already spent it, and this one must not mint a second successor.
@@ -185,7 +190,7 @@ export async function rotateRefreshToken(presented: string): Promise<RotateResul
       where: { id: row.id, revokedAt: null },
       data: { revokedAt: now },
     });
-    if (spent.count !== 1) return { ok: false, reason: 'reuse_grace' };
+    if (spent.count !== 1) return fail('reuse_grace');
     return mintSuccessor(tx, row, gate.role, [row.id]);
   });
 }
