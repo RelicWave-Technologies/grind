@@ -28,7 +28,7 @@ describe('DASHBOARD_URL', () => {
     // env.ts validates at import and exits, so load it in a fresh process.
     const boot = (extra: Record<string, string>) => spawnSync(
       process.execPath,
-      ['--import', 'tsx', '-e', "await import('./src/env.ts')"],
+      ['--import', 'tsx', '--input-type=module', '-e', "await import('./src/env.ts')"],
       {
         cwd: fileURLToPath(new URL('..', import.meta.url)),
         env: {

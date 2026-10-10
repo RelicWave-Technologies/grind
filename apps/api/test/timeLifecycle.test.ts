@@ -405,6 +405,57 @@ describe('timer lifecycle protocol v2', () => {
     }
   });
 
+  it('keeps the server close when a stale row is closed months later, and lets the agent settle', async () => {
+    // Real case: an August entry the server closed for silence came back from
+    // beta.38 closed "now", billing every day in between.
+    const user = await seedUser();
+    const startedAt = new Date(Date.now() - 61 * 24 * 60 * 60_000);
+    const body = v2Body(startedAt);
+    await request(app).post('/v1/time-entries').set(bearer(user.accessToken)).send(body);
+    await prisma.timeEntry.update({
+      where: { id: body.id },
+      data: { lastProvenAt: new Date(startedAt.getTime() + 2 * 60 * 60_000), leaseExpiresAt: new Date(Date.now() - 1_000) },
+    });
+    await reconcileExpiredTimersOnce();
+    const closed = await prisma.timeEntry.findUniqueOrThrow({ where: { id: body.id }, include: { segments: true } });
+
+    const now = new Date().toISOString();
+    const stale = await request(app).put(`/v1/time-entries/${body.id}/sync`).set(bearer(user.accessToken)).send({
+      trackingProtocolVersion: 2,
+      revision: 2,
+      observedAt: now,
+      endedAt: now,
+      closeReason: 'AGENT_RECOVERY',
+      segments: [{ ...body.segments[0], endedAt: now }],
+    });
+
+    expect(stale.status).toBe(200);
+    expect(stale.body).toMatchObject({ disposition: 'FINALIZED', correction: 'LEASE_FINALIZED', acceptedRevision: 2 });
+    const row = await prisma.timeEntry.findUniqueOrThrow({ where: { id: body.id }, include: { segments: true } });
+    expect(row.endedAt?.toISOString()).toBe(closed.endedAt?.toISOString());
+    expect(row.segments.map((s) => s.endedAt?.toISOString())).toEqual(closed.segments.map((s) => s.endedAt?.toISOString()));
+    expect(row.closeReason).toBe('AGENT_RECOVERY');
+    expect(row.serverFinalizedAt).not.toBeNull();
+    // Both installed agents settle this receipt instead of re-sending.
+    const settles = stale.body.acceptedRevision >= 2
+      && (stale.body.correction !== null || ['FINALIZED', 'STALE'].includes(stale.body.disposition))
+      && !['LEASE_EXPIRED', 'SUPERSEDED'].includes(stale.body.canonicalEntry.closeReason);
+    expect(settles).toBe(true);
+
+    // A stale open copy cannot reopen it either.
+    const reopen = await request(app).put(`/v1/time-entries/${body.id}/sync`).set(bearer(user.accessToken)).send({
+      trackingProtocolVersion: 2,
+      revision: 3,
+      observedAt: new Date().toISOString(),
+      endedAt: null,
+      closeReason: null,
+      segments: body.segments,
+    });
+    expect(reopen.body).toMatchObject({ disposition: 'FINALIZED' });
+    expect((await prisma.timeEntry.findUniqueOrThrow({ where: { id: body.id } })).endedAt?.toISOString())
+      .toBe(closed.endedAt?.toISOString());
+  });
+
   it('still refuses an older or equal revision on a server-closed entry', async () => {
     const user = await seedUser();
     const body = v2Body(new Date(Date.now() - 20 * 60_000), 3);
