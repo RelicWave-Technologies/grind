@@ -101,6 +101,17 @@ export const MISSED_SLEEP_GAP_MS = 90_000;
  */
 export const LIVENESS_PERSIST_EVERY_MS = 15_000;
 
+/**
+ * How far past an open row's own last boundary a liveness tick that does not
+ * say whose it is (one written before beta.39) may still vouch for that row.
+ *
+ * Such a tick is the newest proof of life on the machine, not of the row: a
+ * row left open by an old race, or a legacy row claimed after recovery, would
+ * otherwise be closed at it — one closed this way in the field spanned 61
+ * days. Beyond this the row ends at its own last boundary instead.
+ */
+export const UNTAGGED_LIVENESS_REACH_MS = 12 * 60 * 60_000;
+
 /** One proof of life, read on every clock the gap check compares. */
 interface AliveSample {
   /** Timer frame — where an entry closed for a missed sleep ends. */
@@ -196,7 +207,14 @@ export class TimerService {
    */
   recoverAtLastProofOfLife(): TimerRecoveryResult | null {
     this.closeStrayOpenEntries();
-    return this.recoverAway() ?? this.recover(this.lastProofOfLife());
+    const away = this.recoverAway();
+    if (away) return away;
+    const open = this.store.getOpen();
+    if (!open) {
+      this.store.clearExitIntent();
+      return null;
+    }
+    return this.recoverEntry(open, this.lastProofOfLife(open));
   }
 
   /**
@@ -208,12 +226,43 @@ export class TimerService {
    */
   private closeStrayOpenEntries(): void {
     const open = this.store.listOpen();
-    const liveness = this.store.getLiveness() ?? Number.NEGATIVE_INFINITY;
     for (let i = 0; i < open.length - 1; i += 1) {
       const stray = open[i]!;
-      const closeAt = safeCloseAt(stray, Math.min(liveness, open[i + 1]!.startedAt));
+      const proven = this.livenessFor(stray) ?? Number.NEGATIVE_INFINITY;
+      const closeAt = safeCloseAt(stray, Math.min(proven, open[i + 1]!.startedAt));
       this.writeEntry({ ...recoverStaleEntry(stray, closeAt), closeReason: 'AGENT_RECOVERY' });
     }
+  }
+
+  /**
+   * Close every open row this service is not running, each at its OWN last
+   * boundary. For rows that became visible after boot recovery already ran
+   * (legacy rows claimed afterwards): nothing ever proved them alive since.
+   */
+  private closeOrphanOpenEntries(): number {
+    let closed = 0;
+    for (const orphan of this.store.listOpen()) {
+      if (orphan.id === this.open?.id) continue;
+      const closeAt = safeCloseAt(orphan, Number.NEGATIVE_INFINITY);
+      this.writeEntry({ ...recoverStaleEntry(orphan, closeAt), closeReason: 'AGENT_RECOVERY' });
+      closed += 1;
+    }
+    return closed;
+  }
+
+  /**
+   * The liveness tick, only where it proves `entry` alive: a tick written for
+   * this entry, or an untagged one (pre-beta.39) within
+   * UNTAGGED_LIVENESS_REACH_MS of the entry's own last boundary. A tick
+   * written for any other entry proves nothing about this one.
+   */
+  private livenessFor(entry: TimeEntry): number | null {
+    const at = this.store.getLiveness();
+    if (at === null) return null;
+    const writtenFor = this.store.getLivenessEntryId();
+    if (writtenFor !== null) return writtenFor === entry.id ? at : null;
+    const own = latestBoundary(entry) ?? entry.startedAt;
+    return at - own <= UNTAGGED_LIVENESS_REACH_MS ? at : null;
   }
 
   /**
@@ -226,7 +275,13 @@ export class TimerService {
     const owner = this.store.currentOwner();
     if (!owner) return { claimed: 0, unclaimed: 0 };
     const result = this.store.claimLegacySelfEntries(owner);
-    if (result.claimed > 0) this.ledgerEpoch += 1;
+    if (result.claimed > 0) {
+      this.ledgerEpoch += 1;
+      // Boot recovery has already run, so a claimed row still open would stay
+      // open — counted from the start of today to now, and closed at a later
+      // proof of life that was never its own.
+      this.closeOrphanOpenEntries();
+    }
     return result;
   }
 
@@ -283,6 +338,11 @@ export class TimerService {
       this.store.clearExitIntent();
       return null;
     }
+    return this.recoverEntry(open, lastKnownActiveAt);
+  }
+
+  /** Close exactly `open` at `lastKnownActiveAt` (never before its own last boundary). */
+  private recoverEntry(open: TimeEntry, lastKnownActiveAt: number | null): TimerRecoveryResult {
     const recoveredAt = safeCloseAt(open, lastKnownActiveAt ?? Number.NEGATIVE_INFINITY);
     const recovered = { ...recoverStaleEntry(open, recoveredAt), closeReason: 'AGENT_RECOVERY' as const };
     // Persist only; the caller runs flushUnsynced() next, which performs the
@@ -354,7 +414,7 @@ export class TimerService {
     if (!this.open || !getOpenSegment(this.open)) return null;
     const due = this.livenessPersistedAt === null
       || sample.at - this.livenessPersistedAt >= LIVENESS_PERSIST_EVERY_MS;
-    if (opts.persist || due) this.persistLiveness(sample.at);
+    if (opts.persist || due) this.persistLiveness(sample.at, this.open.id);
     return null;
   }
 
@@ -380,7 +440,7 @@ export class TimerService {
       const [closedState, nextState] = this.store.switchEntry(closed, next);
       this.open = next;
       this.liveEntryId = next.id;
-      this.persistLiveness(now);
+      this.persistLiveness(now, next.id);
       this.notifyMutation();
       // In order: while the old entry is still open on the server, creating
       // the new one is refused as a second live timer.
@@ -392,7 +452,7 @@ export class TimerService {
     this.liveEntryId = entry.id;
     // Proven from the first second: a crash before the next tick must recover
     // at this start, never at a stale tick of an older entry or at "now".
-    this.persistLiveness(now);
+    this.persistLiveness(now, entry.id);
     return this.status();
   }
 
@@ -475,7 +535,7 @@ export class TimerService {
     const resumed = openSegment(this.open, { kind: 'WORK', at: now, segmentId: this.ids.ulid() });
     await this.commitOpen(resumed);
     // The tick written before the pause is no proof for this new segment.
-    this.persistLiveness(now);
+    this.persistLiveness(now, resumed.id);
     return this.status();
   }
 
@@ -622,7 +682,9 @@ export class TimerService {
       && provenAliveAt !== null
       && provenAliveAt < serverEndedAt
     ) {
-      this.recover(provenAliveAt);
+      // This entry — the one validated above — not whichever row is newest
+      // on disk.
+      this.recoverEntry(open, provenAliveAt);
       return;
     }
     if (serverRevision === null) {
@@ -994,19 +1056,18 @@ export class TimerService {
     return missed;
   }
 
-  private persistLiveness(at: number): void {
-    this.store.setLiveness(at);
+  private persistLiveness(at: number, entryId: string): void {
+    this.store.setLiveness(at, entryId);
     this.livenessPersistedAt = at;
   }
 
   /** The latest instant the open entry was proven alive, for boot recovery. */
-  private lastProofOfLife(): number | null {
-    const open = this.store.getOpen();
+  private lastProofOfLife(open: TimeEntry): number | null {
     const intent = this.store.getExitIntent();
     // A quit that was writing its close when the process died: it was alive
     // and tracking right up to that moment.
-    if (open && intent && intent.entryId === open.id) return intent.observedAt;
-    return this.store.getLiveness();
+    if (intent && intent.entryId === open.id) return intent.observedAt;
+    return this.livenessFor(open);
   }
 
   /**

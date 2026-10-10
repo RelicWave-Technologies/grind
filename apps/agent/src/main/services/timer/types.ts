@@ -215,8 +215,14 @@ export interface EntryStore {
    * with no `suspend`/`resume` to trim it, so we close it at the last liveness
    * tick instead of over-crediting the dead gap.
    */
-  setLiveness(ts: number): void;
+  setLiveness(ts: number, entryId: string): void;
   getLiveness(): number | null;
+  /**
+   * The entry the liveness tick was written for. Null when no tick exists or
+   * an agent before beta.39 wrote it (those did not record whose it was).
+   * A tick proves only that entry alive — never another open row.
+   */
+  getLivenessEntryId(): string | null;
   setExitIntent(intent: TimerExitIntent): void;
   getExitIntent(): TimerExitIntent | null;
   clearExitIntent(): void;
