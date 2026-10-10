@@ -62,6 +62,7 @@ function currentDiagnostics() {
     syncPending: backlog.pending,
     syncOldestPendingAt: backlog.oldestPendingAt === null ? null : new Date(backlog.oldestPendingAt).toISOString(),
     syncLastError: backlog.lastError,
+    syncParked: backlog.parked,
     // Why a Windows machine is stuck on an old version: a Program Files
     // install cannot update itself, and the last updater failure says the rest.
     ...getUpdateDiagnostics(),
@@ -116,6 +117,8 @@ async function tick(): Promise<void> {
       });
     }
     log.debug('heartbeat ok', { serverTime: res.serverTime, configVersion: res.configVersion });
+    // The server answered: a sync pause taken for "no response" is over.
+    timerService.noteServerReachable();
     const checkpoint = res.timer;
     const closedForSilence = isClosedForSilence(checkpoint?.closeReason);
     if (checkpoint?.disposition === 'needs_sync' || (checkpoint?.disposition === 'finalized' && closedForSilence)) {

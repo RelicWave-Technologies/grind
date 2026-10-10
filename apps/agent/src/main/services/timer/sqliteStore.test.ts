@@ -148,6 +148,60 @@ describeSqlite('SqliteEntryStore sync state', () => {
     expect(store.getUnsynced(Number.MAX_SAFE_INTEGER)).toHaveLength(0);
   });
 
+  it('reads the legacy synced mirror once, then never lets it pull a pending row back', () => {
+    const db = new Database(':memory:');
+    oldSchema(db);
+    const e = closeTimeEntry(entry('legacy'), T0 + MIN);
+    db.prepare(`INSERT INTO local_entries (id, client_uuid, ended_at, synced, json) VALUES (?, ?, ?, 1, ?)`).run(
+      e.id, e.clientUuid, e.endedAt, JSON.stringify(e),
+    );
+    const store = ownedStore(db);
+    store.claimUnownedEntries({ userId: 'user-1', workspaceId: 'workspace-1' });
+    expect(store.getUnsynced(Number.MAX_SAFE_INTEGER)).toEqual([]);
+
+    // The row changes and goes pending again; its stale synced = 1 stays.
+    store.upsert({ ...e, revision: e.revision + 1 });
+    const reopened = ownedStore(db);
+
+    expect(reopened.getUnsynced(Number.MAX_SAFE_INTEGER)).toMatchObject([{ syncState: 'pending_update' }]);
+    const indexes = db.prepare(`SELECT name FROM sqlite_master WHERE type = 'index'`).all() as { name: string }[];
+    expect(indexes.map((i) => i.name)).not.toContain('idx_local_entries_synced');
+  });
+
+  it('new databases have no synced mirror column at all', () => {
+    const db = new Database(':memory:');
+    ownedStore(db);
+    const columns = db.prepare(`PRAGMA table_info(local_entries)`).all() as { name: string }[];
+    expect(columns.map((c) => c.name)).not.toContain('synced');
+  });
+
+  it('prunes only synced, closed entries that ended before the cutoff', () => {
+    const db = new Database(':memory:');
+    const store = ownedStore(db);
+    const old = closeTimeEntry(entry('old'), T0 + MIN);
+    const oldPending = closeTimeEntry(entry('old_pending'), T0 + MIN);
+    const recent = closeTimeEntry({ ...entry('recent'), startedAt: T0 + 100 * MIN, segments: [{ ...entry('recent').segments[0]!, startedAt: T0 + 100 * MIN }] }, T0 + 101 * MIN);
+    for (const e of [old, oldPending, recent]) store.upsert(e);
+    store.markSynced(old.id, old, { revision: old.revision, hash: 'a'.repeat(64) });
+    store.markSynced(recent.id, recent, { revision: recent.revision, hash: 'b'.repeat(64) });
+    store.upsert(entry('open'));
+
+    expect(store.pruneSyncedBefore(T0 + 50 * MIN)).toBe(1);
+    expect(store.listSince(0).map((e) => e.id).sort()).toEqual(['old_pending', 'open', 'recent']);
+  });
+
+  it('remembers the task the server acknowledged, and forgets it when the row changes', () => {
+    const db = new Database(':memory:');
+    const store = ownedStore(db);
+    const e = closeTimeEntry(entry(), T0 + MIN);
+    store.upsert(e);
+    store.markSynced(e.id, e, { revision: e.revision, hash: 'a'.repeat(64), larkTaskGuid: 'task-from-dashboard' });
+    expect(store.listLedgerEntries(0)[0]).toMatchObject({ acknowledgedTaskGuid: 'task-from-dashboard' });
+
+    store.upsert({ ...e, revision: e.revision + 1 });
+    expect(store.listLedgerEntries(0)[0]).not.toHaveProperty('acknowledgedTaskGuid');
+  });
+
   it('migrates old unsynced rows to pending_create', () => {
     const db = new Database(':memory:');
     oldSchema(db);
@@ -300,7 +354,7 @@ describeSqlite('SqliteEntryStore sync state', () => {
     store.noteSyncFailure(e.id, 'http_400:invalid_segments', T0 + 5 * MIN);
     expect(store.getUnsynced(T0)).toEqual([]);
     expect(store.getUnsynced(T0 + 5 * MIN)).toMatchObject([{ attempts: 1 }]);
-    expect(store.syncBacklog()).toEqual({ pending: 1, oldestPendingAt: T0, lastError: 'http_400:invalid_segments' });
+    expect(store.syncBacklog(5)).toEqual({ pending: 1, oldestPendingAt: T0, lastError: 'http_400:invalid_segments', parked: 0 });
 
     store.upsert({ ...e, revision: e.revision + 1 });
     expect(store.getUnsynced(T0)).toMatchObject([{ attempts: 0 }]);
@@ -317,7 +371,7 @@ describeSqlite('SqliteEntryStore sync state', () => {
     expect(store.getUnsynced(T0)).toMatchObject([{ syncState: 'pending_create', attempts: 0 }]);
 
     store.markSynced(e.id, e, { revision: e.revision, hash: 'a'.repeat(64) });
-    expect(store.syncBacklog()).toEqual({ pending: 0, oldestPendingAt: null, lastError: null });
+    expect(store.syncBacklog(5)).toEqual({ pending: 0, oldestPendingAt: null, lastError: null, parked: 0 });
     expect(store.requeue(e.id, 'pending_update')).toBe(true);
     expect(store.getUnsynced(T0)).toMatchObject([{ syncState: 'pending_update' }]);
   });

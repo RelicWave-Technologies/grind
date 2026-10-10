@@ -129,4 +129,37 @@ describe('timer commands from any surface', () => {
     expect(mocks.clearTimerPrompts).not.toHaveBeenCalled();
     expect(mocks.requestPermission).toHaveBeenCalledWith('RESUME_ENTRY');
   });
+
+  it('runs commands one at a time, in order, even across a slow permission check', async () => {
+    const order: string[] = [];
+    let releaseResume!: () => void;
+    mocks.timer.resume.mockImplementation(async () => {
+      order.push('resume:start');
+      await new Promise<void>((resolve) => { releaseResume = resolve; });
+      order.push('resume:end');
+      return RUNNING;
+    });
+    mocks.timer.stop.mockImplementation(async () => {
+      order.push('stop');
+      return { state: 'IDLE', workedMs: 0 };
+    });
+
+    const resumed = resumeTracking();
+    const stopped = stopTracking();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(order).toEqual(['resume:start']);
+
+    releaseResume();
+    await Promise.all([resumed, stopped]);
+    expect(order).toEqual(['resume:start', 'resume:end', 'stop']);
+  });
+
+  it('a failed command does not wedge the ones queued behind it', async () => {
+    mocks.timer.start.mockRejectedValueOnce(new Error('disk full'));
+
+    await expect(startTracking('task-1')).rejects.toThrow('disk full');
+    await expect(stopTracking()).resolves.toEqual(RUNNING);
+  });
 });
+

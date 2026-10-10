@@ -142,7 +142,8 @@ describe('TimerService.resyncRange', () => {
     await svc.flushUnsynced();
     const backlog = svc.rangeBacklog(DAY_START, DAY_END);
     expect(backlog.pending).toBe(1);
-    expect(backlog.lastErrors).toEqual(['Error:offline']);
+    // The server could not be reached, so that is the reason given first.
+    expect(backlog.lastErrors[0]).toBe('Error:offline');
   });
 
   it('requeues the running entry, bumping its revision when the server already has it', async () => {

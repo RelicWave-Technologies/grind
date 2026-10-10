@@ -124,6 +124,8 @@ export const AgentDiagnostics = z.object({
   syncPending: z.number().int().min(0),
   syncOldestPendingAt: z.string().datetime().nullable(),
   syncLastError: z.string().max(200).nullable(),
+  /** Rows the server kept refusing, parked for a daily retry. Optional: agents before beta.38 omit it. */
+  syncParked: z.number().int().min(0).optional(),
   /**
    * Windows install location: "user" (%LOCALAPPDATA%\Programs, self-updates),
    * "machine" (Program Files — cannot update itself), "unknown" (custom

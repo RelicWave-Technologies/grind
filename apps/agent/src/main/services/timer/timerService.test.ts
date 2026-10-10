@@ -5,7 +5,8 @@ import { canonicalTimerEntryPayload } from '@grind/core';
 import { createHash } from 'node:crypto';
 import { dateKeyInTimeZone, localDayWindowInTimeZone, type TimerSyncReceipt } from '@grind/types';
 import { HttpError } from '../apiClient';
-import { CLOCK_CORRECTION_NOTICE_MS, syncRetryDelayMs, TimerService } from './timerService';
+import { CLOCK_CORRECTION_NOTICE_MS, TimerService } from './timerService';
+import { syncRetryDelayMs } from './syncPolicy';
 import { TrackingBlockedError } from '../trackingReadiness';
 import type {
   Clock,
@@ -76,10 +77,12 @@ class MemStore implements EntryStore {
     return [this.upsert(closed), this.upsert(next, { syncState: 'pending_create' })];
   }
   getOpen() {
-    for (const e of this.entries.values()) if (e.endedAt === null) return structuredClone(e);
-    return null;
+    return this.listOpen().at(-1) ?? null;
   }
-  getUnsynced(now = Number.MAX_SAFE_INTEGER): UnsyncedEntry[] {
+  listOpen() {
+    return [...this.entries.values()].filter((e) => e.endedAt === null).map((e) => structuredClone(e));
+  }
+  getUnsynced(now = Number.MAX_SAFE_INTEGER, limit = -1): UnsyncedEntry[] {
     return [...this.entries.values()]
       .map((e) => ({
         entry: structuredClone(e),
@@ -88,18 +91,20 @@ class MemStore implements EntryStore {
       }))
       .filter((r): r is UnsyncedEntry => r.syncState === 'pending_create' || r.syncState === 'pending_update')
       .filter((r) => (this.failures.get(r.entry.id)?.retryAt ?? 0) <= now)
-      .sort((a, b) => a.entry.startedAt - b.entry.startedAt);
+      .sort((a, b) => a.entry.startedAt - b.entry.startedAt)
+      .slice(0, limit < 0 ? undefined : limit);
   }
   noteSyncFailure(id: string, error: string, retryAt: number) {
     if (this.syncStates.get(id) === 'synced') return;
     this.failures.set(id, { attempts: (this.failures.get(id)?.attempts ?? 0) + 1, retryAt, error });
   }
-  syncBacklog() {
+  syncBacklog(parkedAtAttempts = 5) {
     const pending = this.getUnsynced();
     return {
       pending: pending.length,
       oldestPendingAt: pending.length ? Math.min(...pending.map((r) => r.entry.startedAt)) : null,
       lastError: [...this.failures.values()].at(-1)?.error ?? null,
+      parked: [...this.failures.values()].filter((f) => f.attempts >= parkedAtAttempts).length,
     };
   }
   requeue(id: string, syncState: PendingEntrySyncState) {
@@ -145,6 +150,7 @@ class MemStore implements EntryStore {
       syncState: this.syncStates.get(entry.id) ?? 'pending_create',
       acknowledgedRevision: this.acks.get(entry.id)?.revision ?? null,
       acknowledgedHash: this.acks.get(entry.id)?.hash ?? null,
+      ...(this.acks.get(entry.id)?.larkTaskGuid !== undefined ? { acknowledgedTaskGuid: this.acks.get(entry.id)!.larkTaskGuid } : {}),
     }));
   }
   markCreated(id: string, expectedEntry: TimeEntry) {
@@ -160,8 +166,14 @@ class MemStore implements EntryStore {
     this.syncStates.set(id, 'pending_create');
     return true;
   }
-  acks = new Map<string, { revision: number; hash: string }>();
-  markSynced(id: string, expectedEntry: TimeEntry, ack: { revision: number; hash: string }) {
+  acks = new Map<string, { revision: number; hash: string; larkTaskGuid?: string | null }>();
+  transaction<T>(work: () => T): T {
+    return work();
+  }
+  pruneSyncedBefore() {
+    return 0;
+  }
+  markSynced(id: string, expectedEntry: TimeEntry, ack: { revision: number; hash: string; larkTaskGuid?: string | null }) {
     const current = this.entries.get(id);
     if (!current || JSON.stringify(current) !== JSON.stringify(expectedEntry)) return false;
     this.syncStates.set(id, 'synced');
@@ -662,7 +674,12 @@ describe('TimerService offline behaviour', () => {
     await svc.start({});
     expect(svc.isRunning()).toBe(true); // timer unaffected by network
     expect(sync.creates).toHaveLength(0);
-    expect(store.getUnsynced()).toMatchObject([{ syncState: 'pending_create', attempts: 1 }]);
+    // No response is the server's problem, not the row's: the row is left
+    // as it was and the whole drain waits instead.
+    expect(store.getUnsynced()).toMatchObject([{ syncState: 'pending_create', attempts: 0 }]);
+    expect(svc.syncBacklog().lastError).toBe('Error:network down');
+    await svc.flushUnsynced();
+    expect(sync.creates).toHaveLength(0);
 
     // Network recovers; flush retries once the backoff has passed.
     clock.advance(MIN);
@@ -686,6 +703,7 @@ describe('TimerService offline behaviour', () => {
     expect(queued).toBeGreaterThan(2);
 
     sync.failCreateCount = 0;
+    clock.advance(15 * MIN); // past the drain's offline pause
     const moreRemaining = await svc.flushUnsynced(2);
 
     expect(moreRemaining).toBe(true);
@@ -1428,7 +1446,7 @@ describe('sync that converges (beta.38)', () => {
     // another (the drain chains it at once).
     expect(await svc.flushUnsynced(25)).toBe(true);
     expect(sync.creates).toEqual([]);
-    expect(store.syncBacklog()).toMatchObject({ lastError: 'http_400:invalid_segments' });
+    expect(svc.syncBacklog()).toMatchObject({ lastError: 'http_400:invalid_segments' });
     // Those 25 now back off, so the next pass reaches the 5 it never got to
     // and then the open entry, instead of spending itself on them again.
     const before = sync.calls.length;
@@ -1463,6 +1481,10 @@ describe('sync that converges (beta.38)', () => {
     store.requeue(local.id, 'pending_update');
 
     await svc.flushUnsynced();
+    // The resend waits one backoff step rather than going out on the next pass.
+    await svc.flushUnsynced();
+    expect(applied).toEqual([local.revision]);
+    clock.advance(30_000);
     await svc.flushUnsynced();
 
     expect(applied).toEqual([local.revision, local.revision + 1]);
@@ -1510,6 +1532,18 @@ describe('sync that converges (beta.38)', () => {
     expect(svc.resyncTruncatedOnce()).toBe(1);
     expect(store.getUnsynced()).toMatchObject([{ entry: { id: entry.id, revision: entry.revision + 1 } }]);
     expect(svc.resyncTruncatedOnce()).toBe(0);
+  });
+
+  it('does not re-send an entry whose only difference is a task changed on the dashboard', async () => {
+    sync.sync = async (e) => receipt({ ...e, larkTaskGuid: 'task-from-dashboard' });
+    await svc.start({ larkTaskGuid: 'task-a' });
+    clock.advance(20 * MIN);
+    await svc.stop();
+    await settle();
+    expect(store.getUnsynced()).toHaveLength(0);
+
+    expect(svc.resyncTruncatedOnce()).toBe(0);
+    expect(store.getUnsynced()).toHaveLength(0);
   });
 });
 

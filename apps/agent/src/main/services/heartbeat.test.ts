@@ -69,7 +69,8 @@ vi.mock('./timer', () => ({
       mocks.timerCalls.push(`noteAlive:${JSON.stringify(opts)}`);
       return null;
     },
-    syncBacklog: () => ({ pending: 0, oldestPendingAt: null, lastError: null }),
+    syncBacklog: () => ({ pending: 0, oldestPendingAt: null, lastError: null, parked: 0 }),
+    noteServerReachable: () => undefined,
   }),
 }));
 

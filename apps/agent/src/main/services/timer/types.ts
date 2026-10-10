@@ -57,6 +57,8 @@ export interface SyncBacklog {
   pending: number;
   oldestPendingAt: number | null;
   lastError: string | null;
+  /** Rows the server kept refusing, now retried only once a day. */
+  parked: number;
 }
 
 export interface TimerOwner {
@@ -69,6 +71,11 @@ export interface LocalLedgerEntry {
   syncState: EntrySyncState;
   acknowledgedRevision: number | null;
   acknowledgedHash: string | null;
+  /**
+   * The task the server held when it acknowledged. Absent when that was not
+   * recorded (acknowledged by an older agent).
+   */
+  acknowledgedTaskGuid?: string | null;
 }
 
 export interface ServerLedgerCache {
@@ -145,6 +152,11 @@ export interface EntryStore {
   /** The currently-open entry (endedAt === null), if any. */
   getOpen(): TimeEntry | null;
   /**
+   * Every open entry of the bound owner, oldest first. There should only ever
+   * be one; more is the residue of a race, and boot closes the extras.
+   */
+  listOpen(): TimeEntry[];
+  /**
    * Entries due a push at `now`, oldest first — the open entry included, in
    * its place. Order matters: the server refuses a new live timer while an
    * older one of the same user is still open there, so an older close has to
@@ -155,10 +167,11 @@ export interface EntryStore {
    * that hits its batch limit chains straight into the next (TimerSyncDrain),
    * so a long backlog delays the open entry by passes, not by intervals.
    */
-  getUnsynced(now: number): UnsyncedEntry[];
+  getUnsynced(now: number, limit?: number): UnsyncedEntry[];
   /** Count the failure and hold the row back until `retryAt`. */
   noteSyncFailure(entryId: string, error: string, retryAt: number): void;
-  syncBacklog(): SyncBacklog;
+  /** @param parkedAtAttempts refusals at which a row counts as parked. */
+  syncBacklog(parkedAtAttempts: number): SyncBacklog;
   /** Closed entries overlapping [startMs, endMs) not yet acknowledged by the server. */
   rangeBacklog(startMs: number, endMs: number): RangeBacklog;
   hasUnsynced(): boolean;
@@ -183,8 +196,12 @@ export interface EntryStore {
   markSynced(
     entryId: string,
     expectedEntry: TimeEntry,
-    acknowledgement: { revision: number; hash: string },
+    acknowledgement: { revision: number; hash: string; larkTaskGuid?: string | null },
   ): boolean;
+  /** Run `work` atomically: all of its writes land, or none do. */
+  transaction<T>(work: () => T): T;
+  /** Delete synced, closed entries (every owner) that ended before `cutoff`. */
+  pruneSyncedBefore(cutoff: number): number;
   /**
    * Durable "last proof of life" timestamp, written periodically while a timer
    * actively accrues. On boot it bounds crash recovery: an ungraceful

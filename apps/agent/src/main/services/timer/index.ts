@@ -158,6 +158,12 @@ export async function initTimerOnBoot(): Promise<void> {
   if (!svc.currentOwner()) return;
   const resent = svc.resyncTruncatedOnce();
   if (resent > 0) log.info('re-sending entries the server had cut short', { resent });
+  try {
+    const pruned = svc.pruneOldSyncedEntries();
+    if (pruned > 0) log.info('pruned old synced local entries', { pruned });
+  } catch (err) {
+    log.warn('pruning old synced local entries failed', { err: String(err) });
+  }
 }
 
 /**

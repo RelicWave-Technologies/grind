@@ -21,6 +21,20 @@ const SETUP_SETTLE_RECHECKS = 3;
 const SETUP_SETTLE_INTERVAL_MS = 5_000;
 
 let pending: PendingCommand | null = null;
+/**
+ * Timer commands run one at a time, in the order they were given. The popover,
+ * the main window, Ready-to-work and the welcome-back prompt can all fire at
+ * once, and start/resume wait on a permission check before they act; two of
+ * them interleaving across that wait raced a resume against a stop (resuming
+ * an entry that no longer existed) and could leave two entries open.
+ */
+let commandChain: Promise<unknown> = Promise.resolve();
+
+function serialized<T>(command: () => Promise<T>): Promise<T> {
+  const run = commandChain.then(command, command);
+  commandChain = run.catch(() => undefined);
+  return run;
+}
 let startupPromptOffered = false;
 // Bumped by a sign-out so a delayed offer from the old session stands down.
 let setupOfferGeneration = 0;
@@ -68,29 +82,33 @@ async function execute(command: PendingCommand): Promise<TrackingCommandResult> 
 }
 
 export function startTracking(larkTaskGuid?: string | null): Promise<TrackingCommandResult> {
-  return execute({ kind: 'START', larkTaskGuid: larkTaskGuid ?? null });
+  return serialized(() => execute({ kind: 'START', larkTaskGuid: larkTaskGuid ?? null }));
 }
 
 export function resumeTracking(): Promise<TrackingCommandResult> {
-  return execute({ kind: 'RESUME' });
+  return serialized(() => execute({ kind: 'RESUME' }));
 }
 
-export async function stopTracking(): Promise<TimerStatus> {
+export function stopTracking(): Promise<TimerStatus> {
   pending = null;
-  const status = await getTimerService().stop();
-  settled(status);
-  return status;
+  return serialized(async () => {
+    const status = await getTimerService().stop();
+    settled(status);
+    return status;
+  });
 }
 
-export async function pauseTracking(): Promise<TimerStatus> {
+export function pauseTracking(): Promise<TimerStatus> {
   pending = null;
-  const status = await getTimerService().pause();
-  settled(status);
-  return status;
+  return serialized(async () => {
+    const status = await getTimerService().pause();
+    settled(status);
+    return status;
+  });
 }
 
 export function retryPendingTrackingCommand(): Promise<TrackingCommandResult | null> {
-  return pending ? execute(pending) : Promise.resolve(null);
+  return serialized(() => (pending ? execute(pending) : Promise.resolve(null)));
 }
 
 export function offerPermissionResume(): void {

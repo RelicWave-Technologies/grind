@@ -39,10 +39,21 @@ class HttpError extends Error {
     public readonly path: string,
     public readonly status: number,
     public readonly body: string,
+    /** How long the server asked us to wait (Retry-After), when it said. */
+    public readonly retryAfterMs: number | null = null,
   ) {
     super(`${path} ${status}: ${body}`);
     this.name = 'HttpError';
   }
+}
+
+/** Retry-After as milliseconds: delta-seconds or an HTTP date. Null when absent or unreadable. */
+export function retryAfterMs(res: Pick<Response, 'headers'>, nowMs: number = Date.now()): number | null {
+  const raw = res.headers?.get?.('retry-after')?.trim();
+  if (!raw) return null;
+  if (/^\d+$/.test(raw)) return Number(raw) * 1000;
+  const at = Date.parse(raw);
+  return Number.isFinite(at) ? Math.max(0, at - nowMs) : null;
 }
 
 export type AuthStatus = 'loggedIn' | 'loggedOut';
@@ -146,7 +157,7 @@ async function retryWithNewerTokens<T>(
   if (res.status === 401) return { recovered: false };
 
   const text = await res.text().catch(() => '');
-  throw new HttpError(path, res.status, text);
+  throw new HttpError(path, res.status, text, retryAfterMs(res));
 }
 
 async function refreshFailureReason(res: Response): Promise<string | null> {
@@ -243,7 +254,7 @@ export async function api<T>(path: string, opts: FetchOptions = {}): Promise<T> 
   if (firstRes.status !== 401 || opts.auth === false) {
     if (!firstRes.ok) {
       const text = await firstRes.text().catch(() => '');
-      throw new HttpError(path, firstRes.status, text);
+      throw new HttpError(path, firstRes.status, text, retryAfterMs(firstRes));
     }
     return (await firstRes.json()) as T;
   }
@@ -274,7 +285,7 @@ export async function api<T>(path: string, opts: FetchOptions = {}): Promise<T> 
       await clearTokensIfUnchanged(outcome.tokens, opts.signOutReason ?? 'session_ended');
     }
     const text = await secondRes.text().catch(() => '');
-    throw new HttpError(path, secondRes.status, text);
+    throw new HttpError(path, secondRes.status, text, retryAfterMs(secondRes));
   }
   return (await secondRes.json()) as T;
 }
