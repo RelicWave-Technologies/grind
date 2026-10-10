@@ -1,5 +1,5 @@
-import { app, BrowserWindow, ipcMain, safeStorage, screen } from 'electron';
-import type { RenderProcessGoneDetails, Tray, WebContents } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, safeStorage, screen } from 'electron';
+import type { MessageBoxOptions, RenderProcessGoneDetails, Tray, WebContents } from 'electron';
 import { createTray, setTrayTitle } from './tray';
 import { createMainWindow } from './window';
 import {
@@ -45,23 +45,25 @@ import {
   flushQueuedDeepLink,
   setLarkConnectionHandler,
 } from './services/deepLink';
-import { hasQuitCleanupCompleted, registerGracefulQuitHandler, runQuitCleanupIfNeeded } from './services/quitCleanup';
-import { attachWindowsSessionEnd } from './services/updates/sessionEnd';
+import { attachWindowsSessionEnd, type SessionEndHandlers } from './services/updates/sessionEnd';
+import { getAppLifecycle } from './appLifecycle';
+import { guardBootStep, uiBootOutcome } from './bootGuard';
+import { registerChildProcessCrashLogging, setUpCrashHandlingBeforeReady } from './crashHandling';
 import { showNotification } from './notifications';
 import { runBoot } from './boot';
 import {
   getUpdateStatus,
-  holdUpdateInstallForSessionEnd,
   installUpdateNow,
   refreshUpdateInstallability,
   startUpdateService,
 } from './services/updates';
 import { getLaunchAtLoginService, isHiddenLaunch } from './services/launchAtLogin';
 import type { LaunchAtLoginHealth } from '../shared/launchAtLogin';
+import type { createLaunchAtLoginService } from './services/launchAtLogin';
 import { migrateLegacyUserData } from './services/legacyMigration';
 import { broadcast } from './broadcast';
 import { placeReadyToWorkOnScreen, readyToWorkReason } from './readyToWork';
-import { installApplicationMenu } from './applicationMenu';
+import { installApplicationMenu, quitFromMenu } from './applicationMenu';
 import {
   offerPermissionStart,
   offerPermissionSetupOnStartup,
@@ -94,6 +96,11 @@ if (!gotLock) {
   process.exit(0);
 }
 
+// Before ready: native crash dumps (kept local), and the GPU safe mode a
+// crashing GPU process earned on the previous run.
+setUpCrashHandlingBeforeReady();
+const lifecycle = getAppLifecycle();
+
 // A stray throw or rejection anywhere in the main process used to end up as
 // Electron's default crash dialog (or, for a rejection, nowhere at all). Log it
 // with enough to diagnose and keep running: the timer, the queues, and the
@@ -119,7 +126,6 @@ app.on('open-url', (event, url) => {
 
 let tray: Tray | null = null;
 let mainWindow: BrowserWindow | null = null;
-let isQuitting = false;
 /** Window + tray exist, so showing the main window is safe. */
 let uiReady = false;
 /** A second launch asked for the window before the UI existed. */
@@ -127,7 +133,7 @@ let showMainWhenReady = false;
 
 function attachMainWindowHandlers(win: BrowserWindow): void {
   win.on('close', (e) => {
-    if (!isQuitting) {
+    if (!lifecycle.isQuitting()) {
       e.preventDefault();
       win.hide();
     }
@@ -135,22 +141,76 @@ function attachMainWindowHandlers(win: BrowserWindow): void {
   win.on('closed', () => {
     if (mainWindow === win) mainWindow = null;
   });
-  // Windows shutdown/sign-off: powerMonitor 'shutdown' does not fire there.
-  attachWindowsSessionEnd(win, {
-    onQueryEnd: () => {
-      // The shutdown can still be vetoed by another app; only refresh the
-      // proof of life so recovery is exact if Windows kills us mid-way.
-      getTimerService().noteAlive({ persist: true });
-    },
-    onEnd: () => {
-      isQuitting = true;
-      // Never let a staged update start installing as Windows tears the
-      // session down; the next launch installs it instead.
-      holdUpdateInstallForSessionEnd();
-      log.info('windows session ending; finalizing tracked time');
-      void runQuitCleanupIfNeeded('shutdown');
-    },
-  });
+}
+
+const windowsSessionEndHandlers: SessionEndHandlers = {
+  onQueryEnd: () => {
+    // The shutdown can still be vetoed by another app; only refresh the
+    // proof of life so recovery is exact if Windows kills us mid-way.
+    getTimerService().noteAlive({ persist: true });
+  },
+  // Never lets a staged update start installing as Windows tears the session
+  // down (the next launch installs it), then finalizes tracked time.
+  onEnd: () => void lifecycle.endSession('windows-session-end'),
+};
+
+/**
+ * Windows shutdown/sign-off: powerMonitor 'shutdown' does not fire there, so
+ * the session end arrives as window messages. The hook used to hang off the
+ * main window — which no longer exists once the renderer crash limit is hit —
+ * so a hidden window that never loads anything owns it for the whole run.
+ */
+let sessionEndWindow: BrowserWindow | null = null;
+function watchWindowsSessionEnd(): void {
+  if (process.platform !== 'win32' || sessionEndWindow) return;
+  try {
+    sessionEndWindow = new BrowserWindow({
+      show: false,
+      width: 1,
+      height: 1,
+      frame: false,
+      skipTaskbar: true,
+      focusable: false,
+      webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false },
+    });
+    attachWindowsSessionEnd(sessionEndWindow, windowsSessionEndHandlers);
+  } catch (err) {
+    log.warn('session-end window unavailable; watching from the main window', { err: String(err) });
+    if (mainWindow && !mainWindow.isDestroyed()) attachWindowsSessionEnd(mainWindow, windowsSessionEndHandlers);
+  }
+}
+
+/** Cmd+Q while tracking asks first; two presses never stack two dialogs. */
+let quitConfirmOpen = false;
+async function confirmQuitWhileTracking(): Promise<boolean> {
+  if (quitConfirmOpen) return false;
+  quitConfirmOpen = true;
+  try {
+    const options: MessageBoxOptions = {
+      type: 'question',
+      message: 'Quit Timo while tracking?',
+      detail: 'Your timer is running. Quitting Timo stops it now.',
+      buttons: ['Quit Timo', 'Keep Tracking'],
+      defaultId: 1,
+      cancelId: 1,
+      noLink: true,
+    };
+    // Attached to the focused window (often the prompt that caught the
+    // keystroke) so it cannot open behind an always-on-top surface.
+    const parent = BrowserWindow.getFocusedWindow();
+    const { response } = parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options);
+    return response === 0;
+  } finally {
+    quitConfirmOpen = false;
+  }
+}
+
+function quitFromAppMenu(): void {
+  void quitFromMenu({
+    isTimerRunning: () => getTimerService().status().state === 'RUNNING',
+    confirm: confirmQuitWhileTracking,
+    quit: () => lifecycle.quit('menu'),
+  }).catch((err) => log.warn('menu quit failed', { err: String(err) }));
 }
 
 function ensureMainWindow(opts: { startHidden?: boolean } = {}): BrowserWindow {
@@ -164,7 +224,7 @@ function ensureMainWindow(opts: { startHidden?: boolean } = {}): BrowserWindow {
 let lastPromptRestoreAt: number | null = null;
 
 function showMainWindow(opts: { bypassAttention?: boolean } = {}) {
-  if (isQuitting) return;
+  if (lifecycle.isQuitting()) return;
 
   // A prompt outranks the main window — but only while it can actually be
   // answered. The rule for deciding that lives in promptReachability, which
@@ -215,7 +275,7 @@ function handleRenderProcessGone(contents: WebContents, details: RenderProcessGo
     exitCode: details.exitCode,
     window: isMain ? 'main' : 'other',
   });
-  if (isQuitting || details.reason === 'clean-exit' || !win || win.isDestroyed()) return;
+  if (lifecycle.isQuitting() || details.reason === 'clean-exit' || !win || win.isDestroyed()) return;
   if (!isMain) {
     win.destroy();
     return;
@@ -306,41 +366,13 @@ function startTick(): void {
   }, 1000);
 }
 
-app.whenReady().then(async () => {
-  // Before any window exists, so the stray Windows menu bar never paints.
-  installApplicationMenu();
-  // Timo has a Dock icon, a main window, and normal Cmd+Tab behavior. Overlay
-  // setup must never leave the whole app in macOS's UIElement utility mode.
-  ensureRegularMacApplication();
-
-  // Recover a session stranded by a prior app identity (Grind->Timo) BEFORE any
-  // token read. Windows-only: that's where the productName-based userData dir
-  // moved and orphaned tokens.bin.
-  if (process.platform === 'win32') migrateLegacyUserData();
-
-  // Boot diagnostics — the first line in every log file. Pinpoints the two
-  // known Windows failure modes at a glance: a moved data dir (userData /
-  // appName after the rebrand) and an unregistered deep-link scheme
-  // (protocolRegistered / isDefaultProtocolClient false ⇒ Lark login can't
-  // complete). Also confirms the baked API_URL/scheme and token encryption.
-  log.info('boot diagnostics', {
-    platform: process.platform,
-    arch: process.arch,
-    appName: app.getName(),
-    version: app.getVersion(),
-    userData: app.getPath('userData'),
-    logFile: logFilePath(),
-    apiUrl: API_URL,
-    callbackScheme: CALLBACK_SCHEME,
-    protocolRegistered,
-    isDefaultProtocolClient: app.isDefaultProtocolClient(CALLBACK_SCHEME),
-    safeStorageAvailable: safeStorage.isEncryptionAvailable(),
-  });
-
-  const launchAtLoginService = getLaunchAtLoginService();
-  const openedAtLogin = launchAtLoginService.shouldStartHidden();
-  const launchAtLoginBefore = launchAtLoginService.inspect();
-  const launchAtLogin = launchAtLoginService.reconcileOnBoot();
+/**
+ * The boot reconcile of the login item, with its two (independent) outcomes
+ * logged. Throws only if the service itself does; the caller guards it.
+ */
+function reconcileLaunchAtLoginOnBoot(service: ReturnType<typeof createLaunchAtLoginService>): LaunchAtLoginHealth {
+  const launchAtLoginBefore = service.inspect();
+  const launchAtLogin = service.reconcileOnBoot();
   // The two outcomes of the boot reconcile are logged separately: they are not
   // alternatives, and either can happen on a given boot.
   if (!launchAtLoginBefore.ready && launchAtLogin.ready) {
@@ -375,24 +407,104 @@ app.whenReady().then(async () => {
       });
     }
   }
+  return launchAtLogin;
+}
 
-  mainWindow = ensureMainWindow({ startHidden: openedAtLogin });
-  setLarkConnectionHandler(() => showMainWindow());
-  const attention = getTrackingAttentionCoordinator();
-  tray = createTray({
+/** One pre-UI boot step; see bootGuard for why each is isolated. */
+function bootStep<T>(name: string, run: () => T): T | undefined {
+  return guardBootStep(log, name, run);
+}
+
+app.whenReady().then(async () => {
+  // Before any window exists, so the stray Windows menu bar never paints.
+  bootStep('application menu', () => installApplicationMenu(process.platform, {
+    appName: app.getName(),
+    onQuit: quitFromAppMenu,
+  }));
+  // Timo has a Dock icon, a main window, and normal Cmd+Tab behavior. Overlay
+  // setup must never leave the whole app in macOS's UIElement utility mode.
+  bootStep('regular mac application', () => ensureRegularMacApplication());
+
+  // Recover a session stranded by a prior app identity (Grind->Timo) BEFORE any
+  // token read. Windows-only: that's where the productName-based userData dir
+  // moved and orphaned tokens.bin.
+  if (process.platform === 'win32') bootStep('legacy user data migration', () => migrateLegacyUserData());
+
+  // Boot diagnostics — the first line in every log file. Pinpoints the two
+  // known Windows failure modes at a glance: a moved data dir (userData /
+  // appName after the rebrand) and an unregistered deep-link scheme
+  // (protocolRegistered / isDefaultProtocolClient false ⇒ Lark login can't
+  // complete). Also confirms the baked API_URL/scheme and token encryption.
+  bootStep('boot diagnostics', () => log.info('boot diagnostics', {
+    platform: process.platform,
+    arch: process.arch,
+    appName: app.getName(),
+    version: app.getVersion(),
+    userData: app.getPath('userData'),
+    logFile: logFilePath(),
+    apiUrl: API_URL,
+    callbackScheme: CALLBACK_SCHEME,
+    protocolRegistered,
+    isDefaultProtocolClient: app.isDefaultProtocolClient(CALLBACK_SCHEME),
+    safeStorageAvailable: safeStorage.isEncryptionAvailable(),
+  }));
+  bootStep('crash logging', () => registerChildProcessCrashLogging());
+
+  // The tray first: it is the control a person falls back on when a window has
+  // gone missing, and with it up Timo can always be reopened.
+  tray = bootStep('tray', () => createTray({
     onToggle: (bounds) => {
       // The tray popover is never gated. Refusing it was how an unreachable
       // prompt turned into "nothing in the whole app opens" — the one control
       // a person falls back on when a window has gone missing must always
       // respond. A genuinely on-top prompt still outranks the popover by
       // window level, so both can be up without conflict.
-      attention.restoreActive();
+      getTrackingAttentionCoordinator().restoreActive();
       togglePopover(bounds);
     },
     onOpenMain: () => showMainWindow(),
+    onQuit: () => lifecycle.quit('tray'),
     onInstallUpdate: () => void installUpdateNow(),
     getUpdateStatus: () => getUpdateStatus(),
-  });
+  })) ?? null;
+
+  const launchAtLoginService = bootStep('launch at login service', () => getLaunchAtLoginService());
+  const openedAtLogin = (launchAtLoginService && bootStep('hidden launch check', () => launchAtLoginService.shouldStartHidden()))
+    ?? isHiddenLaunch(process.argv);
+  const launchAtLogin = (launchAtLoginService
+    && bootStep('launch at login reconcile', () => reconcileLaunchAtLoginOnBoot(launchAtLoginService))) || null;
+
+  mainWindow = bootStep('main window', () => ensureMainWindow({ startHidden: openedAtLogin })) ?? null;
+  if (uiBootOutcome({ hasTray: !!tray, hasWindow: !!mainWindow }) === 'exit') {
+    log.error('boot: neither the tray nor the main window could be built; exiting so Timo can start again');
+    await lifecycle.exitAfterFailedBoot('no-ui');
+    return;
+  }
+  // Everything below runs in this same tick, so a second launch can never see
+  // the UI before IPC and the update service are registered.
+  uiReady = true;
+  bootStep('quit handlers', () => lifecycle.registerQuitHandlers());
+  bootStep('windows session end', () => watchWindowsSessionEnd());
+  bootStep('lark connection handler', () => setLarkConnectionHandler(() => showMainWindow()));
+  bootStep('ipc', () => registerIpc({
+    onOpenMainWindow: () => showMainWindow(),
+    onDismissFloatingBar: () => dismissFloatingBar(),
+  }));
+  bootStep('workspace time listener', () => onWorkspaceTimeChange((context) => {
+    broadcast('workspaceTime:push', context);
+    if (context.ready) void refreshTodayLedger('config');
+  }));
+  bootStep('update service', () => startUpdateService({
+    showMainWindow: () => showMainWindow(),
+    isMainWindowVisible: () => !!mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible(),
+  }));
+  app.on('render-process-gone', (_event, contents, details) => handleRenderProcessGone(contents, details));
+  if (showMainWhenReady) {
+    showMainWhenReady = false;
+    showMainWindow();
+  }
+
+  const attention = getTrackingAttentionCoordinator();
   // Idle detection optionally warns first, then performs the same durable pause
   // at the real idle boundary. Both stages share the single attention window.
   const idleMonitor = new IdleMonitor({
@@ -422,38 +534,6 @@ app.whenReady().then(async () => {
   idleMonitor.start();
   onTrackedInputActivity(() => idleMonitor.noteActivity());
 
-  registerIpc({
-    onOpenMainWindow: () => showMainWindow(),
-    onDismissFloatingBar: () => dismissFloatingBar(),
-  });
-  onWorkspaceTimeChange((context) => {
-    broadcast('workspaceTime:push', context);
-    if (context.ready) void refreshTodayLedger('config');
-  });
-  startUpdateService({
-    showMainWindow: () => showMainWindow(),
-    isMainWindowVisible: () => !!mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible(),
-  });
-  app.on('render-process-gone', (_event, contents, details) => handleRenderProcessGone(contents, details));
-  uiReady = true;
-  if (showMainWhenReady) {
-    showMainWhenReady = false;
-    showMainWindow();
-  }
-
-  registerGracefulQuitHandler({
-    app,
-    hasCleanupCompleted: () => hasQuitCleanupCompleted(),
-    markQuitting: () => {
-      isQuitting = true;
-    },
-  });
-  (app as Electron.App & { on(event: 'before-quit-for-update', listener: () => void): Electron.App }).on('before-quit-for-update', () => {
-    isQuitting = true;
-    // installUpdateNow already ran this; only run it again if it no longer
-    // holds (a timer was started while the install was getting ready).
-    void runQuitCleanupIfNeeded('update');
-  });
   app.on('activate', () => {
     showMainWindow();
   });
@@ -570,9 +650,9 @@ app.whenReady().then(async () => {
         platform: process.platform,
         version: app.getVersion(),
         openedAtLogin,
-        launchAtLoginStatus: launchAtLogin.state,
+        launchAtLoginStatus: launchAtLogin?.state ?? null,
       });
-      notifyStartupHealth(launchAtLogin);
+      if (launchAtLogin) notifyStartupHealth(launchAtLogin);
     },
     refreshAgentConfig,
     drainBacklogs: () => {
@@ -591,6 +671,11 @@ app.whenReady().then(async () => {
     startShiftMonitor: () => shiftMonitor.start(),
     log,
   });
+}).catch(async (err: unknown) => {
+  log.error('boot failed', { err: String(err), stack: err instanceof Error ? err.stack ?? null : null });
+  // Without any UI this process only holds the single-instance lock; let go
+  // of it so the next launch can start properly.
+  if (!uiReady) await lifecycle.exitAfterFailedBoot('boot-threw');
 });
 
 app.on('window-all-closed', () => {

@@ -2,12 +2,15 @@ import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { MonitorCheck, Power, CheckCircle2, AlertCircle, Keyboard, PictureInPicture2, RefreshCw, DownloadCloud } from 'lucide-react';
 import larkIcon from '../assets/lark.svg';
+import { restartDidNotHelp } from '../../shared/permissionRelaunch';
 import { settingsUpdateSubtitle, updateAction, updatePercent } from '../lib/updateUi';
+import { useLarkConnectionRefresh, useLarkStatus } from '../lib/larkQueries';
 import {
   actionFor,
   actionLabel,
   isReady,
   offersRestart,
+  removeAndReAddText,
   RESTART_LABEL,
   statusText,
   type Capability,
@@ -20,7 +23,13 @@ export default function Settings() {
   const qc = useQueryClient();
   const info = useQuery({ queryKey: ['settings'], queryFn: () => window.agent.settings.get(), refetchInterval: 4000 });
   const permissions = useQuery({ queryKey: ['trackingReadiness'], queryFn: () => window.agent.permissions.readiness(), refetchInterval: 4000 });
-  const lark = useQuery({ queryKey: ['larkStatus'], queryFn: () => window.agent.lark.status(), refetchInterval: 4000 });
+  const relaunch = useQuery({
+    queryKey: ['permissionRelaunch'],
+    queryFn: () => window.agent.app.permissionRelaunch(),
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+  const lark = useLarkStatus();
+  useLarkConnectionRefresh();
   const updates = useQuery({ queryKey: ['updates'], queryFn: () => window.agent.updates.status(), refetchInterval: 60_000 });
 
   const repairLogin = useMutation({
@@ -83,13 +92,6 @@ export default function Settings() {
   }, [qc]);
 
   useEffect(() => {
-    return window.agent.lark.onConnectionChange(() => {
-      void qc.invalidateQueries({ queryKey: ['larkStatus'] });
-      void qc.invalidateQueries({ queryKey: ['larkTasks'] });
-    });
-  }, [qc]);
-
-  useEffect(() => {
     let alive = true;
     void window.agent.updates.checkQuietly()
       .then((s) => {
@@ -115,16 +117,20 @@ export default function Settings() {
   const permissionRows = ([
     { capability: 'screen', title: 'Screen Recording', Icon: MonitorCheck, state: permissions.data?.screenRecording ?? 'NEEDS_GRANT' },
     { capability: 'accessibility', title: 'Accessibility', Icon: Keyboard, state: permissions.data?.accessibility ?? 'NEEDS_GRANT' },
-  ] as const).map((row) => ({
-    ...row,
-    ready: isReady(row.state),
-    text: statusText(row.state, row.capability),
-    action: actionFor(row.state),
-    restart: offersRestart(row.state, row.capability, {
-      checkedAgain,
-      returnedFromSettings: row.capability === 'screen' && visitedScreenSettings,
-    }),
-  }));
+  ] as const).map((row) => {
+    const restartFailed = restartDidNotHelp(relaunch.data, row.capability, row.state);
+    return {
+      ...row,
+      ready: isReady(row.state),
+      text: restartFailed ? removeAndReAddText(row.capability) : statusText(row.state, row.capability),
+      action: actionFor(row.state),
+      restart: offersRestart(row.state, row.capability, {
+        checkedAgain,
+        returnedFromSettings: row.capability === 'screen' && visitedScreenSettings,
+        restartDidNotHelp: restartFailed,
+      }),
+    };
+  });
   const runPermissionAction = (capability: Capability, action: PermissionAction) => {
     if (action === 'check-again') recheckPermissions.mutate();
     else if (capability === 'accessibility') void window.agent.permissions.requestAccessibility();

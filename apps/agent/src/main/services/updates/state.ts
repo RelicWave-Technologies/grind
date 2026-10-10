@@ -43,6 +43,8 @@ export type UpdateEvent =
   | { type: 'download-progress'; percent: number }
   | { type: 'downloaded'; version: string | null; canInstallNow: boolean; at: number }
   | { type: 'installing'; at: number }
+  /** An install that never quit the app was abandoned; the update is ready again. */
+  | { type: 'install-aborted'; canInstallNow: boolean }
   | { type: 'not-available'; manual: boolean; at: number }
   | { type: 'error'; message: string; manual: boolean; at: number }
   | { type: 'timer-changed'; canInstallNow: boolean };
@@ -230,6 +232,13 @@ export function applyUpdateEvent(status: UpdateStatus, event: UpdateEvent): Upda
         error: null,
         checkedAt: event.at,
         manual: true,
+      };
+    case 'install-aborted':
+      if (status.phase !== 'installing') return status;
+      return {
+        ...status,
+        phase: 'ready',
+        canInstallNow: event.canInstallNow,
       };
     case 'not-available':
       return {

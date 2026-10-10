@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Search, Plus, X } from 'lucide-react';
 import type { TimerStatus } from '../lib/agent.d';
 import { sortTasks } from '../lib/taskFormat';
@@ -8,12 +8,14 @@ import TaskCard from '../components/TaskCard';
 import TaskComposer from '../components/TaskComposer';
 import SyncButton from '../components/SyncButton';
 import { useWorkspaceTime } from '../lib/workspaceTime';
+import { useLarkConnectionRefresh, useLarkStatus, useLarkTasks } from '../lib/larkQueries';
 
 /** Full Lark task list: open + completed, searchable, with quick create. */
 export default function Tasks() {
   const qc = useQueryClient();
-  const larkStatus = useQuery({ queryKey: ['larkStatus'], queryFn: () => window.agent.lark.status(), refetchInterval: 10_000 });
-  const larkTasks = useQuery({ queryKey: ['larkTasks'], queryFn: () => window.agent.lark.tasks(), refetchInterval: 60_000 });
+  const larkStatus = useLarkStatus();
+  const larkTasks = useLarkTasks();
+  useLarkConnectionRefresh();
   const workspaceTime = useWorkspaceTime();
   const [timer, setTimer] = useState<TimerStatus>({ state: 'IDLE', workedMs: 0 });
   const [now, setNow] = useState(() => Date.now());

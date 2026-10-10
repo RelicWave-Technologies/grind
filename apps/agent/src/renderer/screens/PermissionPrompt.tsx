@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertCircle, CheckCircle2, Keyboard, Lock, MonitorCheck, X } from 'lucide-react';
 import type { CapabilityState } from '../../shared/tracking';
 import type { AttentionPrompt } from '../../shared/attention';
+import { restartDidNotHelp } from '../../shared/permissionRelaunch';
 import timoMascot from '../assets/timo-mascot.svg';
 
 import {
@@ -10,6 +11,7 @@ import {
   actionLabel,
   isReady,
   offersRestart,
+  removeAndReAddText,
   RESTART_LABEL,
   statusText,
   type Capability,
@@ -25,13 +27,25 @@ function StatusLine({ state, capability }: { state: CapabilityState; capability:
 }
 
 /** The secondary links under a row: Open Settings beside Check again, and
- *  Restart Timo once it is the remaining fallback. */
-function RowLinks({ settings, restart, onSettings, disabled }: {
+ *  Restart Timo once it is the remaining fallback — or, once a restart already
+ *  failed to fix this, the remove-and-re-add steps instead. */
+function RowLinks({ settings, restart, guidance, onSettings, disabled }: {
   settings: boolean;
   restart: boolean;
+  guidance: string | null;
   onSettings: () => void;
   disabled: boolean;
 }) {
+  if (guidance) {
+    return (
+      <div className="set-sub">
+        {guidance}{' '}
+        <button className="link-btn no-drag" onClick={onSettings} disabled={disabled}>
+          {actionLabel('settings')}
+        </button>
+      </div>
+    );
+  }
   if (!settings && !restart) return null;
   return (
     <div className="set-sub">
@@ -77,6 +91,12 @@ export default function PermissionPrompt({ prompt }: { prompt: Extract<Attention
     mutationFn: () => window.agent.permissions.requestAccessibility(),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['trackingReadiness'] }),
   });
+  // Read once: whether this boot follows a permission restart, and for what.
+  const relaunch = useQuery({
+    queryKey: ['permissionRelaunch'],
+    queryFn: () => window.agent.app.permissionRelaunch(),
+    staleTime: Number.POSITIVE_INFINITY,
+  });
   const retry = useMutation({
     mutationFn: () => window.agent.attention.resolve(prompt.promptId, 'PERMISSION_RETRY'),
   });
@@ -86,13 +106,17 @@ export default function PermissionPrompt({ prompt }: { prompt: Extract<Attention
   const accessibilityState = state?.accessibility ?? 'NEEDS_GRANT';
   const screenAction = actionFor(screenState);
   const accessibilityAction = actionFor(accessibilityState);
+  const screenRestartFailed = restartDidNotHelp(relaunch.data, 'screen', screenState);
+  const accessibilityRestartFailed = restartDidNotHelp(relaunch.data, 'accessibility', accessibilityState);
   const screenRestart = offersRestart(screenState, 'screen', {
     checkedAgain,
     returnedFromSettings: returnedFromScreenSettings,
+    restartDidNotHelp: screenRestartFailed,
   });
   const accessibilityRestart = offersRestart(accessibilityState, 'accessibility', {
     checkedAgain,
     returnedFromSettings: false,
+    restartDidNotHelp: accessibilityRestartFailed,
   });
   const ready = state?.ready === true;
   const busy = requestScreen.isPending || requestAccessibility.isPending || recheck.isPending || retry.isPending;
@@ -148,6 +172,7 @@ export default function PermissionPrompt({ prompt }: { prompt: Extract<Attention
             <RowLinks
               settings={screenAction === 'check-again'}
               restart={screenRestart}
+              guidance={screenRestartFailed ? removeAndReAddText('screen') : null}
               onSettings={() => runScreenAction('settings')}
               disabled={busy}
             />
@@ -169,6 +194,7 @@ export default function PermissionPrompt({ prompt }: { prompt: Extract<Attention
             <RowLinks
               settings={accessibilityAction === 'check-again'}
               restart={accessibilityRestart}
+              guidance={accessibilityRestartFailed ? removeAndReAddText('accessibility') : null}
               onSettings={() => runAccessibilityAction('settings')}
               disabled={busy}
             />

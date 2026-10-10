@@ -1,6 +1,7 @@
-import { app, powerMonitor } from 'electron';
+import { powerMonitor } from 'electron';
 import { getTimerService, onTimerMissedSleep, type MissedSleep } from './timer';
 import { runQuitCleanup } from './quitCleanup';
+import { getAppLifecycle } from '../appLifecycle';
 import { broadcast } from '../broadcast';
 import { log } from '../logger';
 import type { TimerAwayReason } from './timer/types';
@@ -179,6 +180,6 @@ export function registerPowerEvents(opts: {
   shutdownMonitor.on('shutdown', (event: { preventDefault(): void }) => {
     event.preventDefault();
     log.info('system shutdown cleanup requested');
-    void runQuitCleanup('shutdown').finally(() => app.quit());
+    void runQuitCleanup('shutdown').finally(() => getAppLifecycle().quit('system-shutdown'));
   });
 }

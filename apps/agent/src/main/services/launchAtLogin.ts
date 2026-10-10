@@ -301,22 +301,29 @@ export function createLaunchAtLoginService(deps: LaunchAtLoginDeps) {
       // Keep startup non-fatal; repair() will surface a blocked state.
     }
 
+    // Best-effort like the loop above. A throw here used to escape boot before
+    // the tray or window existed, leaving an invisible Timo holding the
+    // single-instance lock.
     const programsDir = path.win32.dirname(path.win32.dirname(deps.execPath));
     for (const legacy of LEGACY_WINDOWS_ITEMS) {
       const legacyPath = path.win32.join(programsDir, legacy.appDir, legacy.executable);
-      deps.app.setLoginItemSettings({
-        openAtLogin: false,
-        enabled: false,
-        name: legacy.name,
-        path: legacyPath,
-        args: [HIDDEN_ARG],
-      });
-      deps.app.setLoginItemSettings({
-        openAtLogin: false,
-        enabled: false,
-        name: legacy.name,
-        path: legacyPath,
-      });
+      try {
+        deps.app.setLoginItemSettings({
+          openAtLogin: false,
+          enabled: false,
+          name: legacy.name,
+          path: legacyPath,
+          args: [HIDDEN_ARG],
+        });
+        deps.app.setLoginItemSettings({
+          openAtLogin: false,
+          enabled: false,
+          name: legacy.name,
+          path: legacyPath,
+        });
+      } catch {
+        // Keep startup non-fatal; a leftover legacy item is only cosmetic.
+      }
     }
   }
 
