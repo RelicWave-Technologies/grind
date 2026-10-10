@@ -27,6 +27,12 @@ import { ActivityAggregator, type ActivitySample } from './aggregator';
  *     was active *while it was captured* (`recordingEntryId`), not whatever the
  *     timer reads at seal time — which is null right after a stop.
  *
+ *  4b. **Owner stamped at record time.** A minute belongs to the account that
+ *     was signed in while it was recorded — captured with `setRecording`, not
+ *     read at seal time, when a sign-out or switch may already have happened.
+ *     If the account changes mid-minute, what was recorded so far is sealed
+ *     for the previous account first.
+ *
  *  5. **Seal-on-exit.** {@link sealPartial} seals the in-flight (sub-minute) bucket
  *     so quitting mid-minute keeps the partial, matching WakaTime/Hubstaff. The
  *     same minute sealed again — later in this process, or after a restart within
@@ -34,6 +40,17 @@ import { ActivityAggregator, type ActivitySample } from './aggregator';
  *     to the minute already stored (see `ActivityStore.persistMinute`), so the
  *     minute is never overwritten by its tail.
  */
+/** The account a minute is recorded for (structurally the timer's owner). */
+export interface SealOwner {
+  userId: string;
+  workspaceId: string;
+}
+
+function sameSealOwner(a: SealOwner | null, b: SealOwner | null): boolean {
+  if (a === null || b === null) return a === b;
+  return a.userId === b.userId && a.workspaceId === b.workspaceId;
+}
+
 export interface MinuteSealerDeps {
   /** Wall clock (ms). Injected so tests can drive time deterministically. */
   now: () => number;
@@ -42,7 +59,7 @@ export interface MinuteSealerDeps {
    * the same minute. `entryId` is the time-entry active while the minute was
    * captured (may be null only if recording somehow started without an entry).
    */
-  persist: (sample: ActivitySample, entryId: string | null) => void;
+  persist: (sample: ActivitySample, entryId: string | null, owner: SealOwner | null) => void;
   /**
    * Whether input is actually being observed right now (the OS hook is
    * running). A tracked minute we could not observe is not a zero-activity
@@ -59,6 +76,7 @@ export class MinuteSealer {
   private agg = new ActivityAggregator();
   private recording = false;
   private recordingEntryId: string | null = null;
+  private recordingOwner: SealOwner | null = null;
   /** The wall-clock minute currently accumulating. */
   private bucketStart: number;
   /** Input was recorded (and observable) at some point during the current bucket. */
@@ -68,9 +86,15 @@ export class MinuteSealer {
     this.bucketStart = minuteFloor(deps.now());
   }
 
-  /** Mirror of "timer running & not paused". Stashes the entry for attribution. */
-  setRecording(on: boolean, entryId: string | null): void {
+  /** Mirror of "timer running & not paused". Stashes the entry and account for attribution. */
+  setRecording(on: boolean, entryId: string | null, owner: SealOwner | null = null): void {
     this.roll();
+    if (on && !sameSealOwner(owner, this.recordingOwner)) {
+      // A different account from here on: what this minute holds so far was
+      // recorded for the previous one, so seal it for them now.
+      this.seal(this.bucketStart);
+      this.recordingOwner = owner ? { userId: owner.userId, workspaceId: owner.workspaceId } : null;
+    }
     this.recording = on;
     if (on) this.recordingEntryId = entryId;
     this.noteObserved();
@@ -105,9 +129,12 @@ export class MinuteSealer {
    * pruning.
    */
   tick(): number | null {
-    const sealed = this.roll();
-    this.noteObserved();
-    return sealed;
+    try {
+      return this.roll();
+    } finally {
+      // Even if persisting the sealed minute threw, the new one is observed.
+      this.noteObserved();
+    }
   }
 
   /**
@@ -123,9 +150,11 @@ export class MinuteSealer {
   private roll(): number | null {
     const current = minuteFloor(this.deps.now());
     if (current <= this.bucketStart) return null;
-    const sealed = this.seal(this.bucketStart);
+    // Advance first: a persist that throws must not leave the sealer stuck on
+    // a minute it already flushed.
+    const elapsed = this.bucketStart;
     this.bucketStart = current;
-    return sealed;
+    return this.seal(elapsed);
   }
 
   private noteObserved(): void {
@@ -138,7 +167,7 @@ export class MinuteSealer {
     const sample = this.agg.flush(bucket);
     this.observed = false;
     if (!hadInput && !wasObserved) return null;
-    this.deps.persist(sample, this.recordingEntryId);
+    this.deps.persist(sample, this.recordingEntryId, this.recordingOwner);
     return bucket;
   }
 }

@@ -17,8 +17,9 @@ import { app, net } from 'electron';
  * resolution falls back to the global fetch. Tests inject their own with
  * {@link setNetworkFetchForTests}.
  *
- * The screenshot uploader still calls the global fetch directly; switching it
- * is a one-line change to {@link networkFetch}.
+ * Every main-process request goes through here — the API client, and the
+ * screenshot uploader's byte upload (a multipart `FormData` body, which
+ * `net.fetch` serialises with its boundary like the browser does).
  */
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 

@@ -7,6 +7,8 @@ import { activateSignedInSession } from '../services/signIn';
 import { broadcast } from '../broadcast';
 import { log } from '../logger';
 import { bindTimerToStoredSession, drainTimerSyncNow, getTimerService } from '../services/timer';
+import { resumeUploads, stopUploads } from '../services/capture/uploader';
+import { getSignOutLedger, syncBeforeSignOut } from './signOutSync';
 
 /** What the Sign out button gets back. A refusal leaves the timer untouched. */
 type LogoutResult = { ok: true } | { ok: false; reason: 'time_waiting_to_sync' };
@@ -34,40 +36,58 @@ async function fetchImageAsDataUrl(url: string): Promise<string | null> {
  * had synced — so on a bad network the user was left with a stopped timer, a
  * rejected sign-out, and no message (the error never reached the screen).
  *
- * Now the sync question is asked FIRST, while the timer is still running: if
- * the backlog (the running entry's latest checkpoint included) cannot reach the
- * server right now, nothing is touched and the caller is told why. Only once
- * that passes is the timer stopped. If the final close then fails to upload,
- * sign-out still completes: the row is durable and bound to this account, and
- * uploads the next time this person signs in. Stopping and then refusing is the
- * one outcome this never produces.
+ * Now the sync question is asked FIRST, while the timer is still running: the
+ * whole backlog (the running entry's latest checkpoint included) is drained,
+ * backoff and all, and if something still cannot reach the server for a reason
+ * that can pass (offline, a 5xx), nothing is touched and the caller is told
+ * why. Entries the server refused outright never block (see signOutSync).
+ * Only once that passes is the timer stopped. If the final close then fails to
+ * upload, sign-out still completes: the row is durable and bound to this
+ * account, and uploads the next time this person signs in. Stopping and then
+ * refusing is the one outcome this never produces.
  */
 async function signOutSafely(): Promise<LogoutResult> {
   const timer = getTimerService();
-  await drainTimerSyncNow('manual').catch((err) => {
-    log.warn('sign-out pre-check drain failed', { err: String(err) });
+  const owner = timer.currentOwner();
+  const drain = () => drainTimerSyncNow('manual').catch((err) => {
+    log.warn('sign-out drain failed', { err: String(err) });
   });
-  if (timer.hasUnsynced()) {
-    log.warn('sign-out refused: tracked time still waiting to sync', { backlog: timer.syncBacklog() });
+  const ledger = getSignOutLedger();
+
+  const before = await syncBeforeSignOut({ ledger, owner, drain });
+  if (!before.ok) {
+    log.warn('sign-out refused: tracked time still waiting to sync', { backlog: before.backlog });
     return { ok: false, reason: 'time_waiting_to_sync' };
+  }
+  if (before.backlog.refused > 0) {
+    log.warn('signing out with entries the server refused; they stay on this machine for this account', {
+      backlog: before.backlog,
+    });
   }
 
   if (timer.isRunning()) {
     await timer.stop();
-    await drainTimerSyncNow('manual').catch((err) => {
-      log.warn('sign-out final drain failed', { err: String(err) });
-    });
-    if (timer.hasUnsynced()) {
+    const after = await syncBeforeSignOut({ ledger, owner, drain });
+    if (!after.ok) {
       log.warn('signing out with the final stop still queued; it uploads at the next sign-in', {
-        backlog: timer.syncBacklog(),
+        backlog: after.backlog,
       });
     }
   }
 
-  stopHeartbeat();
-  await logout();
-  // Tokens are gone, so this binds no owner.
-  await bindTimerToStoredSession(false);
+  // A screenshot pass still running would send its next request with whatever
+  // session is current. Stop it and wait for it before the tokens change; the
+  // interrupted shot stays queued for this account's next sign-in.
+  await stopUploads();
+  try {
+    stopHeartbeat();
+    await logout();
+    // Tokens are gone, so this binds no owner.
+    await bindTimerToStoredSession(false);
+  } finally {
+    // Passes no-op without an owner; the next sign-in's uploads start normally.
+    resumeUploads();
+  }
   notifyAuth('loggedOut', { reason: 'manual' });
   return { ok: true };
 }

@@ -87,7 +87,7 @@ describe('ActivityStore on a real database', () => {
     const store = new ActivityStore(new Database(':memory:'));
     store.persistMinute(minute(60_000, { keystrokes: 3, clicks: 1, ikiCv: 0.4 }));
     const [head] = store.unsynced(10, OWNER);
-    store.markSynced([head!.id]);
+    store.markSynced([head!]);
 
     store.persistMinute(minute(60_000, { keystrokes: 5, clicks: 2, ikiCv: 0.7 }));
 
@@ -96,10 +96,48 @@ describe('ActivityStore on a real database', () => {
     expect(rows[0]).toMatchObject({ id: head!.id, keystrokes: 8, clicks: 3, ikiCv: 0.7 });
   });
 
+  it('does not mark a minute synced when its tail was merged in while the sync was in flight', () => {
+    const store = new ActivityStore(new Database(':memory:'));
+    store.persistMinute(minute(60_000, { keystrokes: 3 }));
+    const sent = store.unsynced(10, OWNER); // read for the request
+    store.persistMinute(minute(60_000, { keystrokes: 4 })); // the tail lands mid-request
+
+    expect(store.markSynced(sent)).toBe(0);
+    const [queued] = store.unsynced(10, OWNER);
+    expect(queued).toMatchObject({ keystrokes: 7 });
+    // The resend of the new total is marked normally.
+    expect(store.markSynced([queued!])).toBe(1);
+    expect(store.unsynced(10, OWNER)).toHaveLength(0);
+  });
+
+  it('quarantines a refused minute out of the queue until its minute changes again', () => {
+    const store = new ActivityStore(new Database(':memory:'));
+    store.persistMinute(minute(60_000, { keystrokes: 3 }));
+    const [bad] = store.unsynced(10, OWNER);
+    store.quarantine(bad!.id);
+    expect(store.unsynced(10, OWNER)).toHaveLength(0);
+
+    store.persistMinute(minute(60_000, { keystrokes: 1 })); // a tail: the minute is re-sent with its total
+    expect(store.unsynced(10, OWNER)).toMatchObject([{ id: bad!.id, keystrokes: 4 }]);
+  });
+
+  it('prunes only synced minutes older than the cutoff', () => {
+    const db = new Database(':memory:');
+    const store = new ActivityStore(db);
+    store.insert(minute(1_000, { id: 'old-synced' }));
+    store.insert(minute(2_000, { id: 'old-unsynced' }));
+    store.insert(minute(9_000, { id: 'new-synced' }));
+    db.prepare(`UPDATE activity_samples SET synced = 1 WHERE id IN ('old-synced', 'new-synced')`).run();
+
+    expect(store.pruneSynced(5_000)).toBe(1);
+    const ids = (db.prepare('SELECT id FROM activity_samples ORDER BY id').all() as { id: string }[]).map((r) => r.id);
+    expect(ids).toEqual(['new-synced', 'old-unsynced']);
+  });
+
   it('a quiet tail leaves a stored minute (and its sync state) alone', () => {
     const store = new ActivityStore(new Database(':memory:'));
     store.persistMinute(minute(60_000, { keystrokes: 3 }));
-    store.markSynced(store.unsynced(10, OWNER).map((r) => r.id));
+    store.markSynced(store.unsynced(10, OWNER));
     expect(store.persistMinute(minute(60_000))).toBe(false);
     expect(store.unsynced(10, OWNER)).toHaveLength(0);
   });

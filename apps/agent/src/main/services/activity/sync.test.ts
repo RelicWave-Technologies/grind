@@ -1,11 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ActivitySamplesRequest } from '@grind/types';
+import type * as ApiClientModule from '../apiClient';
 
 const mocks = vi.hoisted(() => ({ api: vi.fn() }));
-vi.mock('../apiClient', () => ({ api: mocks.api }));
+vi.mock('../apiClient', async (importOriginal) => ({
+  ...(await importOriginal<typeof ApiClientModule>()),
+  api: mocks.api,
+}));
 vi.mock('../../logger', () => ({ log: { debug: vi.fn(), warn: vi.fn(), info: vi.fn(), error: vi.fn() } }));
 
 const { flushActivity } = await import('./sync');
+const { HttpError } = await import('../apiClient');
 const OWNER = { userId: 'u1', workspaceId: 'w1' };
 
 type Row = Record<string, unknown>;
@@ -20,7 +25,7 @@ function fakeStore(rows: Row[]) {
   const synced: string[] = [];
   const store = {
     unsynced: (n: number) => rows.slice(0, n),
-    markSynced: (ids: string[]) => synced.push(...ids),
+    markSynced: (sent: Array<{ id: string }>) => synced.push(...sent.map((r) => r.id)),
     claimUnowned: () => 0,
   } as unknown as Parameters<typeof flushActivity>[0];
   return { store, synced };
@@ -103,6 +108,27 @@ describe('flushActivity byte-bounded batching', () => {
     expect(synced).toEqual(['ready', 'unlinked']);
   });
 
+  it('sends nothing when the signed-in account changed after the rows were read', async () => {
+    const { store, synced } = fakeStore([row('r1')]);
+    expect(await flushActivity(store, { owner: OWNER, stillOwner: async () => false })).toBe(0);
+    expect(mocks.api).not.toHaveBeenCalled();
+    expect(synced).toEqual([]);
+  });
+
+  it('marks synced with the rev it sent, and claims through the caller\'s once-per-owner hook', async () => {
+    const marked: unknown[] = [];
+    const claim = vi.fn();
+    const store = {
+      unsynced: () => [row('r1', { rev: 3 })],
+      markSynced: (sent: unknown[]) => marked.push(...sent),
+      claimUnowned: () => { throw new Error('per-flush claim must not run'); },
+    } as unknown as Parameters<typeof flushActivity>[0];
+
+    expect(await flushActivity(store, { owner: OWNER, claimUnowned: claim, stillOwner: async () => true })).toBe(1);
+    expect(claim).toHaveBeenCalledWith(OWNER);
+    expect(marked).toEqual([{ id: 'r1', rev: 3 }]);
+  });
+
   it('sends nothing while signed out', async () => {
     const { store } = fakeStore([row('r1')]);
     expect(await flushActivity(store, { owner: null })).toBe(0);
@@ -141,5 +167,44 @@ describe('capping a title that ends in an emoji', () => {
     const { store } = fakeStore([row('r1', { activeTitle: fits })]);
     await flushActivity(store, { owner: OWNER });
     expect(bodyOf().samples[0]!.activeTitle).toBe(fits);
+  });
+});
+
+describe('a sample the API refuses', () => {
+  function storeWithQuarantine(rows: Row[]) {
+    const synced: string[] = [];
+    const quarantined: string[] = [];
+    const store = {
+      unsynced: (n: number) => rows.slice(0, n),
+      markSynced: (sent: Array<{ id: string }>) => synced.push(...sent.map((r) => r.id)),
+      quarantine: (id: string) => quarantined.push(id),
+      claimUnowned: () => 0,
+    } as unknown as Parameters<typeof flushActivity>[0];
+    return { store, synced, quarantined };
+  }
+
+  it('splits the batch, quarantines only the bad sample, and syncs the rest', async () => {
+    mocks.api.mockImplementation(async (_path: string, options: { body: { samples: Array<{ id: string }> } }) => {
+      if (options.body.samples.some((s) => s.id === 'bad')) {
+        throw new HttpError('/v1/activity-samples', 400, '{"error":"validation_failed"}');
+      }
+      return { accepted: options.body.samples.length, detached: 0 };
+    });
+    const rows = ['a', 'b', 'bad', 'c', 'd'].map((id, i) => row(id, { bucketStart: i * 60_000 }));
+    const { store, synced, quarantined } = storeWithQuarantine(rows);
+
+    expect(await flushActivity(store, { owner: OWNER })).toBe(5);
+    expect(quarantined).toEqual(['bad']);
+    expect(synced.sort()).toEqual(['a', 'b', 'c', 'd']);
+  });
+
+  it('keeps everything queued when the failure is not a refusal of the body', async () => {
+    mocks.api.mockRejectedValue(new HttpError('/v1/activity-samples', 503, 'down'));
+    const { store, synced, quarantined } = storeWithQuarantine([row('a'), row('b', { bucketStart: 60_000 })]);
+
+    await expect(flushActivity(store, { owner: OWNER })).rejects.toThrow('503');
+    expect(synced).toEqual([]);
+    expect(quarantined).toEqual([]);
+    expect(mocks.api).toHaveBeenCalledTimes(1);
   });
 });

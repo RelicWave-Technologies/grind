@@ -1,13 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { MinuteSealer } from './minuteSealer';
+import { MinuteSealer, type SealOwner } from './minuteSealer';
 import type { ActivitySample } from './aggregator';
 
 function harness(startMs: number) {
   let nowMs = startMs;
-  const persisted: { sample: ActivitySample; entryId: string | null }[] = [];
+  const persisted: { sample: ActivitySample; entryId: string | null; owner: SealOwner | null }[] = [];
   const sealer = new MinuteSealer({
     now: () => nowMs,
-    persist: (sample, entryId) => persisted.push({ sample, entryId }),
+    persist: (sample, entryId, owner) => persisted.push({ sample, entryId, owner }),
   });
   return {
     sealer,
@@ -212,5 +212,39 @@ describe('MinuteSealer', () => {
     const last = h.persisted.at(-1)!;
     expect(last.sample.bucketStart).toBe(120_000);
     expect(last.sample.keystrokes).toBe(1); // only the fresh key
+  });
+});
+
+describe('MinuteSealer owner attribution', () => {
+  const ALICE = { userId: 'alice', workspaceId: 'w' };
+  const BOB = { userId: 'bob', workspaceId: 'w' };
+
+  it('stamps a minute with the account signed in while it was recorded, not at seal time', () => {
+    const h = harness(60_000);
+    h.sealer.setRecording(true, 'e1', ALICE);
+    h.sealer.onKey(60_100);
+    h.sealer.setRecording(false, null, null); // stop + sign-out before the minute seals
+    h.advance(60_000);
+    h.sealer.tick();
+    expect(h.persisted).toHaveLength(1);
+    expect(h.persisted[0]!.owner).toEqual(ALICE);
+  });
+
+  it('seals what the previous account recorded before a mid-minute switch', () => {
+    const h = harness(60_000);
+    h.sealer.setRecording(true, 'e1', ALICE);
+    h.sealer.onKey(60_100);
+    h.sealer.onKey(60_200);
+    h.advance(10_000);
+    h.sealer.setRecording(true, 'e2', BOB);
+    h.sealer.onKey(70_100);
+    h.advance(60_000);
+    h.sealer.tick();
+
+    expect(h.persisted.map((p) => [p.owner?.userId, p.entryId, p.sample.keystrokes])).toEqual([
+      ['alice', 'e1', 2],
+      ['bob', 'e2', 1],
+    ]);
+    expect(h.persisted.every((p) => p.sample.bucketStart === 60_000)).toBe(true);
   });
 });

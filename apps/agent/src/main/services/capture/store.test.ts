@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
-import { ScreenshotStore, relativeScreenshotPath, type ScreenshotRow } from './store';
+import { RECOVER_FAILED_WITH_FILE, ScreenshotStore, relativeScreenshotPath, type ScreenshotRow } from './store';
 
 describe('ScreenshotStore migrations', () => {
   it('adds retry columns before creating indexes on older local databases', () => {
@@ -78,17 +78,29 @@ describe('recovering a backlog written off during a storage outage', () => {
       .toEqual({ upload_state: 'failed' });
   });
 
-  it('gives shots written off by the old five-attempt cap one more pass after upgrading', () => {
+  it('gives shots written off by older agents one more pass after upgrading — only those with a file', () => {
     const db = new Database(':memory:');
-    openStore(db);
-    // An agent that already ran the storage-outage recovery, then lost shots
-    // to the attempt cap while offline.
-    db.prepare(`DELETE FROM capture_meta WHERE key = 'requeue:attempt-cap-v38'`).run();
-    seed(db, [{ id: 'offline', state: 'failed', attempts: 5 }]);
-    openStore(db);
+    const store = openStore(db);
+    // Written off by the old five-attempt cap / the server's out_of_scope 400.
+    seed(db, [
+      { id: 'on-disk', state: 'failed', attempts: 5 },
+      { id: 'file-gone', state: 'failed', attempts: 5 },
+      { id: 'done', state: 'uploaded', attempts: 1 },
+    ]);
+    const exists = (p: string) => !p.endsWith('file-gone');
 
-    expect(db.prepare(`SELECT upload_state, attempts FROM screenshots WHERE id='offline'`).get())
-      .toEqual({ upload_state: 'pending', attempts: 0 });
+    expect(store.requeueFailedWithFileOnce(exists)).toBe(1);
+    expect(db.prepare(`SELECT id, upload_state, attempts FROM screenshots ORDER BY id`).all()).toEqual([
+      { id: 'done', upload_state: 'uploaded', attempts: 1 },
+      { id: 'file-gone', upload_state: 'failed', attempts: 5 },
+      { id: 'on-disk', upload_state: 'pending', attempts: 0 },
+    ]);
+    expect(db.prepare(`SELECT value FROM capture_meta WHERE key = ?`).get(RECOVER_FAILED_WITH_FILE)).toEqual({ value: '1' });
+
+    // Once only: a shot that fails again for a reason of its own stays failed.
+    db.prepare(`UPDATE screenshots SET upload_state='failed', attempts=1 WHERE id='on-disk'`).run();
+    expect(openStore(db).requeueFailedWithFileOnce(exists)).toBe(0);
+    expect(db.prepare(`SELECT upload_state FROM screenshots WHERE id='on-disk'`).get()).toEqual({ upload_state: 'failed' });
   });
 });
 
@@ -155,10 +167,8 @@ describe('ScreenshotStore upload queue', () => {
     store.insert(shot('legacy', { ownerUserId: null, ownerWorkspaceId: null }));
 
     expect(store.pending(OWNER, 10, 2_000).map((r) => r.id)).toEqual(['mine']);
-    expect(store.recent(OWNER, 10).map((r) => r.id)).toEqual(['mine']);
+    expect(store.inRange(OWNER, 0, 2_000).map((r) => r.id)).toEqual(['mine']);
     expect(store.inRange(OTHER, 0, 2_000).map((r) => r.id)).toEqual(['theirs']);
-    expect(store.uploadSummary(OWNER)).toEqual({ pending: 1, uploading: 0, failed: 0 });
-    expect(store.uploadSummary(null)).toEqual({ pending: 0, uploading: 0, failed: 0 });
   });
 
   it('claims legacy shots only through timer entries proven to be the owner\'s', () => {
@@ -175,20 +185,16 @@ describe('ScreenshotStore upload queue', () => {
     expect(store.find('c')?.ownerUserId).toBeNull();
   });
 
-  it('holds a shot whose entry is still being created for an hour, without stalling the rest', () => {
+  it('queues a shot whose entry is still being created like any other — the server links it later', () => {
     const db = withLocalEntries(new Database(':memory:'));
     db.prepare(`INSERT INTO local_entries VALUES ('e-new', 'pending_create', 'u1', 'w1'), ('e-ok', 'synced', 'u1', 'w1')`).run();
     const store = new ScreenshotStore(db);
-    const HOUR = 60 * 60_000;
-    const now = 10 * HOUR;
-    // Five held shots ahead of a ready one: the batch must still reach it.
-    for (let i = 0; i < 5; i++) store.insert(shot(`held-${i}`, { timeEntryId: 'e-new', capturedAt: now - 10 * 60_000 + i }));
-    store.insert(shot('ready', { timeEntryId: 'e-ok', capturedAt: now - 60_000 }));
-    store.insert(shot('stale', { timeEntryId: 'e-new', capturedAt: now - 2 * HOUR }));
-    store.insert(shot('no-entry', { capturedAt: now - 30_000 }));
+    store.insert(shot('fresh-of-new-entry', { timeEntryId: 'e-new', capturedAt: 1_000 }));
+    store.insert(shot('ready', { timeEntryId: 'e-ok', capturedAt: 2_000 }));
 
-    expect(store.pending(OWNER, 5, now).map((r) => r.id)).toEqual(['stale', 'ready', 'no-entry']);
+    expect(store.pending(OWNER, 5, 3_000).map((r) => r.id)).toEqual(['fresh-of-new-entry', 'ready']);
   });
+
 
   it('rewrites absolute file paths as relative to the screenshots dir', () => {
     const db = new Database(':memory:');

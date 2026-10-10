@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => {
     unsynced: false,
     unsyncedAfterStop: false,
     isRunning: vi.fn(() => timer.running),
+    currentOwner: vi.fn(() => ({ userId: 'u1', workspaceId: 'w1' })),
     hasUnsynced: vi.fn(() => timer.unsynced),
     syncBacklog: vi.fn(() => ({ pending: 1, oldestPendingAt: null, lastError: 'offline' })),
     stop: vi.fn(async () => {
@@ -38,6 +39,14 @@ const mocks = vi.hoisted(() => {
     ensureSession: vi.fn(async () => false),
     startLarkLogin: vi.fn(async () => undefined),
     activate: vi.fn(async () => true),
+    stopUploads: vi.fn(async () => {
+      calls.push('stopUploads:start');
+      await new Promise((resolve) => setTimeout(resolve, 5)); // the running pass winds down
+      calls.push('stopUploads:done');
+    }),
+    resumeUploads: vi.fn(() => {
+      calls.push('resumeUploads');
+    }),
   };
 });
 
@@ -62,6 +71,21 @@ vi.mock('../services/timer', () => ({
   bindTimerToStoredSession: mocks.bind,
   drainTimerSyncNow: mocks.drain,
   getTimerService: () => mocks.timer,
+}));
+
+// The backlog check itself is covered in signOutSync.test.ts; here it drains
+// once and reports whatever the fake timer says is left.
+vi.mock('./signOutSync', () => ({
+  getSignOutLedger: () => ({}),
+  syncBeforeSignOut: async ({ drain }: { drain: () => Promise<void> }) => {
+    await drain();
+    const transient = mocks.timer.unsynced ? 1 : 0;
+    return { ok: transient === 0, backlog: { pending: transient, transient, refused: 0, parked: 0 } };
+  },
+}));
+vi.mock('../services/capture/uploader', () => ({
+  stopUploads: mocks.stopUploads,
+  resumeUploads: mocks.resumeUploads,
 }));
 
 const { registerAuthIpc } = await import('./auth');
@@ -97,9 +121,12 @@ describe('auth:logout', () => {
       'drain',
       'stop',
       'drain',
+      'stopUploads:start',
+      'stopUploads:done',
       'stopHeartbeat',
       'logout',
       'bind',
+      'resumeUploads',
       'notify:loggedOut:{"reason":"manual"}',
     ]);
   });
@@ -119,7 +146,25 @@ describe('auth:logout', () => {
     await expect(invoke('auth:logout')).resolves.toEqual({ ok: true });
 
     expect(mocks.timer.stop).not.toHaveBeenCalled();
-    expect(mocks.calls).toEqual(['drain', 'stopHeartbeat', 'logout', 'bind', 'notify:loggedOut:{"reason":"manual"}']);
+    expect(mocks.calls).toEqual([
+      'drain',
+      'stopUploads:start',
+      'stopUploads:done',
+      'stopHeartbeat',
+      'logout',
+      'bind',
+      'resumeUploads',
+      'notify:loggedOut:{"reason":"manual"}',
+    ]);
+  });
+
+  it('lets screenshot uploads run again even when logout throws', async () => {
+    mocks.logout.mockRejectedValueOnce(new Error('disk'));
+
+    await expect(invoke('auth:logout')).rejects.toThrow('disk');
+
+    expect(mocks.stopUploads).toHaveBeenCalledOnce();
+    expect(mocks.resumeUploads).toHaveBeenCalledOnce();
   });
 
   it('runs one sign-out for a double click', async () => {
