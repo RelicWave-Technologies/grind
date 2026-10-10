@@ -121,9 +121,14 @@ export function reconcileTodayLedger(input: {
     }
 
     if (local.entry.revision === server.entry.revision) {
+      // Same revision, different payload. A pending or running row is still
+      // the laptop's to finish. A synced one was already answered for this
+      // revision, so the server's copy stands: a stale row the laptop
+      // stretched and the server refused must not count as today's work.
+      const keepLocal = local.syncState !== 'synced' || local.entry.id === input.activeLocalEntryId;
       projected.push({
-        entry: local.entry,
-        origin: 'LOCAL',
+        entry: keepLocal ? local.entry : server.entry,
+        origin: keepLocal ? 'LOCAL' : 'SERVER',
         pending: local.syncState !== 'synced',
         conflicts: ['REVISION_PAYLOAD_CONFLICT'],
       });
