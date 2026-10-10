@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { prisma } from '@grind/db';
+import { prisma, type Prisma } from '@grind/db';
 import {
   CreateTimeEntryRequest,
   ListTimeEntriesQuery,
@@ -436,15 +436,71 @@ timeEntriesRouter.put('/:id/sync', validate(SyncTimeEntryRequest, 'body'), async
 
     const incomingIds = clampedSegments.map((s) => s.id);
     const now = new Date();
-    const outcome = await prisma.$transaction(async (tx) => {
+
+    // Every answer for a revision the server already holds; none of them
+    // writes. Order matters and mirrors the write path below.
+    type StoredEntry = Prisma.TimeEntryGetPayload<{ include: { segments: true } }>;
+    const heldRevisionOutcome = (current: StoredEntry) => {
+      const currentRevision = current.agentRevision ?? 0;
+      if (!isV2 || body.revision! > currentRevision) return null;
+      if (body.revision! < currentRevision) {
+        return { kind: 'receipt' as const, entry: current, disposition: 'STALE' as const, correction: null };
+      }
+      if (current.endedAt && isServerFinalized(current.closeReason)) {
+        return {
+          kind: 'receipt' as const,
+          entry: current,
+          disposition: 'FINALIZED' as const,
+          correction: finalizedCorrection(current.closeReason),
+        };
+      }
+      if (current.endedAt && clampedEndedAt === null) {
+        return { kind: 'receipt' as const, entry: current, disposition: 'FINALIZED' as const, correction: null };
+      }
+      const comparisonBoundary = canonicalTimestampCeiling(current);
+      const comparison = clampEntryToServerClock(core, comparisonBoundary, 0).entry;
+      const incomingDto: TimeEntryDto = {
+        ...serializeTimeEntry(current),
+        revision: body.revision!,
+        endedAt: comparison.endedAt === null ? null : new Date(comparison.endedAt).toISOString(),
+        closeReason: comparison.endedAt === null ? null : (body.closeReason ?? 'AGENT'),
+        segments: comparison.segments.map((segment) => ({
+          id: segment.id,
+          kind: segment.kind,
+          startedAt: new Date(segment.startedAt).toISOString(),
+          endedAt: segment.endedAt === null ? null : new Date(segment.endedAt).toISOString(),
+        })),
+      };
+      if (canonicalTimeEntryHash(incomingDto) !== canonicalTimeEntryHash(serializeTimeEntry(current))) {
+        return {
+          kind: 'conflict' as const,
+          payload: { error: 'revision_payload_conflict', revision: currentRevision },
+        };
+      }
+      return {
+        kind: 'receipt' as const,
+        entry: current,
+        disposition: receiptForExistingRevision(body.revision!, currentRevision),
+        correction: null,
+      };
+    };
+
+    // A revision the server already holds is answered from a plain read, with
+    // no owner lock and no transaction. Revisions only grow, so what this read
+    // concludes stays true. Agents up to beta.37 resend such rows every few
+    // seconds; taking the owner lock for each one queued heartbeats behind them
+    // until transactions timed out and running timers lost their lease.
+    const held = heldRevisionOutcome(
+      await prisma.timeEntry.findUniqueOrThrow({ where: { id }, include: { segments: true } }),
+    );
+    const outcome = held ?? await prisma.$transaction(async (tx) => {
       if (isV2) await lockTimerOwner(tx, entry.userId);
       await tx.$queryRaw`SELECT "id" FROM "TimeEntry" WHERE "id" = ${id} FOR UPDATE`;
       const current = await tx.timeEntry.findUniqueOrThrow({ where: { id }, include: { segments: true } });
 
       const currentRevision = current.agentRevision ?? 0;
-      if (isV2 && body.revision! < currentRevision) {
-        return { kind: 'receipt' as const, entry: current, disposition: 'STALE' as const, correction: null };
-      }
+      const heldNow = heldRevisionOutcome(current);
+      if (heldNow) return heldNow;
 
       const checkpointAt = isV2 ? clampObservedAt(body.observedAt!, now, current.startedAt) : null;
       const observedAt = checkpointAt && current.lastProvenAt && current.lastProvenAt > checkpointAt
@@ -491,35 +547,6 @@ timeEntriesRouter.put('/:id/sync', validate(SyncTimeEntryRequest, 'body'), async
         } else if (clampedEndedAt === null) {
           return { kind: 'receipt' as const, entry: current, disposition: 'FINALIZED' as const, correction: null };
         }
-      }
-
-      if (isV2 && body.revision! === currentRevision) {
-        const comparisonBoundary = canonicalTimestampCeiling(current);
-        const comparison = clampEntryToServerClock(core, comparisonBoundary, 0).entry;
-        const incomingDto: TimeEntryDto = {
-          ...serializeTimeEntry(current),
-          revision: body.revision!,
-          endedAt: comparison.endedAt === null ? null : new Date(comparison.endedAt).toISOString(),
-          closeReason: comparison.endedAt === null ? null : (body.closeReason ?? 'AGENT'),
-          segments: comparison.segments.map((segment) => ({
-            id: segment.id,
-            kind: segment.kind,
-            startedAt: new Date(segment.startedAt).toISOString(),
-            endedAt: segment.endedAt === null ? null : new Date(segment.endedAt).toISOString(),
-          })),
-        };
-        if (canonicalTimeEntryHash(incomingDto) !== canonicalTimeEntryHash(serializeTimeEntry(current))) {
-          return {
-            kind: 'conflict' as const,
-            payload: { error: 'revision_payload_conflict', revision: currentRevision },
-          };
-        }
-        return {
-          kind: 'receipt' as const,
-          entry: current,
-          disposition: receiptForExistingRevision(body.revision!, currentRevision),
-          correction: null,
-        };
       }
 
       const foreignSegment = incomingIds.length === 0

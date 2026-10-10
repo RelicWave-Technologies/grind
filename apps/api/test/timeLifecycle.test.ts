@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
 import { prisma } from '@grind/db';
 import { buildApp } from '../src/app';
-import { reconcileExpiredTimersOnce, TIMER_LEASE_MS } from '../src/timeLifecycle';
+import { lockTimerOwner, reconcileExpiredTimersOnce, TIMER_LEASE_MS } from '../src/timeLifecycle';
 import { logger } from '../src/logger';
 import { effectiveEntrySegmentEnds as resolveEffectiveEntrySegmentEnds } from '@grind/core';
 import { fakeUlid, seedUser } from './helpers';
@@ -370,6 +370,39 @@ describe('timer lifecycle protocol v2', () => {
       'time-entry sync: agent revision restored time after a server close',
     );
     info.mockRestore();
+  });
+
+  it('answers a resend of a held revision without waiting for the owner lock', async () => {
+    const user = await seedUser();
+    const body = v2Body(new Date(Date.now() - 10 * 60_000));
+    await request(app).post('/v1/time-entries').set(bearer(user.accessToken)).send(body);
+
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    let locked!: () => void;
+    const lockTaken = new Promise<void>((resolve) => { locked = resolve; });
+    const holder = prisma.$transaction(async (tx) => {
+      await lockTimerOwner(tx, user.userId);
+      locked();
+      await held;
+    }, { timeout: 20_000 });
+    await lockTaken;
+
+    try {
+      const resend = await request(app).put(`/v1/time-entries/${body.id}/sync`).set(bearer(user.accessToken)).send({
+        trackingProtocolVersion: 2,
+        revision: 1,
+        observedAt: new Date().toISOString(),
+        endedAt: null,
+        closeReason: null,
+        segments: body.segments,
+      }).timeout(3_000);
+      expect(resend.status).toBe(200);
+      expect(resend.body).toMatchObject({ disposition: 'STALE', acceptedRevision: 1 });
+    } finally {
+      release();
+      await holder;
+    }
   });
 
   it('still refuses an older or equal revision on a server-closed entry', async () => {
