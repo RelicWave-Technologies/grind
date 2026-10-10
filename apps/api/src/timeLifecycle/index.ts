@@ -218,6 +218,8 @@ export async function supersedeExpiredTimersForUser(
 /** Finalize one bounded, multi-instance-safe batch of expired leases. */
 export async function reconcileExpiredTimersOnce(now = new Date()): Promise<number> {
   const utcNow = now.toISOString();
+  // Up to a hundred rows, a few statements each: under load that outlives
+  // Prisma's 5s default, and a timed-out batch rolls back every row in it.
   return prisma.$transaction(async (tx) => {
     const rows = await tx.$queryRaw<LockedExpiredEntry[]>`
       SELECT "id", "userId", "startedAt", "lastProvenAt"
@@ -236,33 +238,57 @@ export async function reconcileExpiredTimersOnce(now = new Date()): Promise<numb
       if (await finalizeLockedEntry(tx, row, 'LEASE_EXPIRED', now)) finalized += 1;
     }
     return finalized;
-  });
+  }, { timeout: 30_000 });
 }
 
 let schedulerStarted = false;
 
+/** When the reconciler last reached the database, and when it last came back from not reaching it. */
+export interface ReconcileClock {
+  resumedAtMs: number;
+  lastOkAtMs: number | null;
+}
+
 /**
- * True for one lease length after this process started.
+ * May this tick finalize expired leases?
  *
- * A deploy takes the API away for a while; every running timer's lease keeps
- * ticking down meanwhile, because agents cannot reach us to renew it. Sweeping
- * the moment we come back would close all of them for an outage that was ours.
- * One lease length is exactly the time a live agent needs to checkpoint again.
+ * Only once the API has been able to hear agents for a full lease length. A
+ * deploy, a database outage or an overload that timed every heartbeat out all
+ * leave leases ticking down while no agent could renew them; sweeping the
+ * moment we come back would close every running timer for an outage that was
+ * ours. So a start (resumedAtMs = process start) or a gap of more than one
+ * lease since the last tick that reached the database restarts the wait. One
+ * lease length is exactly the time a live agent needs to checkpoint again.
  */
-export function inStartupGrace(nowMs: number, processStartMs: number = START_TIME_MS): boolean {
-  return nowMs - processStartMs < TIMER_LEASE_MS;
+export function reconcileGate(nowMs: number, clock: ReconcileClock): { finalize: boolean; resumedAtMs: number } {
+  const wasBlind = clock.lastOkAtMs !== null && nowMs - clock.lastOkAtMs > TIMER_LEASE_MS;
+  const resumedAtMs = wasBlind ? nowMs : clock.resumedAtMs;
+  return { finalize: nowMs - resumedAtMs >= TIMER_LEASE_MS, resumedAtMs };
 }
 
 export function startTimerLifecycleScheduler(enabled: boolean): void {
   if (!enabled || schedulerStarted) return;
   schedulerStarted = true;
   let active = false;
+  const clock: ReconcileClock = { resumedAtMs: START_TIME_MS, lastOkAtMs: null };
   const tick = async () => {
-    if (active || inStartupGrace(Date.now())) return;
+    if (active) return;
     active = true;
     try {
-      const finalized = await reconcileExpiredTimersOnce();
-      if (finalized > 0) logger.warn({ finalized }, 'expired timer leases finalized');
+      const now = Date.now();
+      const gate = reconcileGate(now, clock);
+      if (gate.resumedAtMs !== clock.resumedAtMs) {
+        logger.warn({ lastOkAt: new Date(clock.lastOkAtMs!).toISOString() }, 'timer reconciler was blind for over a lease; holding off');
+      }
+      clock.resumedAtMs = gate.resumedAtMs;
+      if (gate.finalize) {
+        const finalized = await reconcileExpiredTimersOnce(new Date(now));
+        if (finalized > 0) logger.warn({ finalized }, 'expired timer leases finalized');
+      } else {
+        // Waiting out the grace still has to notice the database is back.
+        await prisma.$queryRaw`SELECT 1`;
+      }
+      clock.lastOkAtMs = now;
     } catch (err) {
       logger.error({ err: String(err) }, 'timer lifecycle reconciliation failed');
     } finally {
