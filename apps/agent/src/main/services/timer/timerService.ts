@@ -17,7 +17,7 @@ import type { TimerSyncReceipt, TodayLedgerMode } from '@grind/types';
 import type { TimerStatus } from '../../../shared/tracking';
 import { HttpError } from '../apiClient';
 import { isClosedForSilence } from './serverClose';
-import { classifySyncFailure, PARK_AFTER_ATTEMPTS, rowRetryAt, SyncPause, type SyncFailure } from './syncPolicy';
+import { classifySyncFailure, PARK_AFTER_ATTEMPTS, rowRetryAt, SyncPause, UNACKNOWLEDGED_RECEIPT, type SyncFailure } from './syncPolicy';
 import type {
   Clock,
   BusinessDayProvider,
@@ -913,7 +913,7 @@ export class TimerService {
       const settled = syncState === 'pending_create'
         ? await this.createThenUpdate(entry)
         : await this.update(entry, true);
-      failure = settled ? null : { scope: 'row', error: 'unacknowledged_receipt' };
+      failure = settled ? null : { scope: 'row', error: UNACKNOWLEDGED_RECEIPT };
     } catch (err) {
       failure = classifySyncFailure(err);
     }

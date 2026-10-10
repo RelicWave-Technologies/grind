@@ -61,6 +61,7 @@ import { getLaunchAtLoginService, isHiddenLaunch } from './services/launchAtLogi
 import type { LaunchAtLoginHealth } from '../shared/launchAtLogin';
 import type { createLaunchAtLoginService } from './services/launchAtLogin';
 import { migrateLegacyUserData } from './services/legacyMigration';
+import { openAgentDb } from './services/agentDb';
 import { broadcast } from './broadcast';
 import { placeReadyToWorkOnScreen, readyToWorkReason } from './readyToWork';
 import { installApplicationMenu, quitFromMenu } from './applicationMenu';
@@ -74,7 +75,7 @@ import {
   startTrackingPermissionMonitor,
 } from './services/trackingPermissionMonitor';
 import { API_URL, CALLBACK_SCHEME } from './env';
-import { log, logFilePath } from './logger';
+import { createRepeatLimitedErrorLog, log, logFilePath } from './logger';
 import {
   clearWorkspaceTimeSession,
   initializeWorkspaceTime,
@@ -331,6 +332,8 @@ function notifyStartupHealth(state: LaunchAtLoginHealth): void {
  *  + live broadcast. */
 function startTick(): void {
   let lastTimerState: string | null = null;
+  // A failure here repeats every second; log each kind once an hour at most.
+  const logTickError = createRepeatLimitedErrorLog('1s tick failed', 60 * 60_000);
   setInterval(() => {
     try {
       // Proof of life first, before anything reads the timer. It notices a
@@ -360,8 +363,9 @@ function startTick(): void {
       // the next second it is shown. Every state change is still pushed to
       // it by the command that caused it.
       if (running) broadcast('timer:status:push', s, { skipIfHidden: mainWindow });
-    } catch {
-      /* timer not ready */
+    } catch (err) {
+      // Never out of the interval: the next second tries again.
+      logTickError(err);
     }
   }, 1000);
 }
@@ -429,6 +433,10 @@ app.whenReady().then(async () => {
   // token read. Windows-only: that's where the productName-based userData dir
   // moved and orphaned tokens.bin.
   if (process.platform === 'win32') bootStep('legacy user data migration', () => migrateLegacyUserData());
+  // Open (and if need be repair) agent.db before anything else can touch it:
+  // moving a corrupt file aside fails on Windows while another handle is open.
+  // Every store shares this one connection.
+  bootStep('local database', () => openAgentDb());
 
   // Boot diagnostics — the first line in every log file. Pinpoints the two
   // known Windows failure modes at a glance: a moved data dir (userData /

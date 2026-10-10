@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../../logger', () => ({ log: { info: vi.fn(), warn: vi.fn(), debug: vi.fn(), error: mocks.error } }));
 vi.mock('electron', () => ({ app: { getPath: () => '/tmp/grind-test' } }));
-vi.mock('better-sqlite3', () => ({ default: class Database {} }));
+vi.mock('../agentDb', () => ({ openAgentDb: () => ({}) }));
 vi.mock('uiohook-napi', () => ({ uIOhook: { start: vi.fn(), stop: vi.fn(), on: vi.fn() } }));
 vi.mock('../permissions', () => ({ hasAccessibilityAccess: () => true }));
 vi.mock('../agentConfig', () => ({

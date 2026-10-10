@@ -38,11 +38,18 @@ export type SyncFailure =
   | { scope: 'server'; error: string; retryAfterMs: number | null; noResponse: boolean }
   | { scope: 'row'; error: string };
 
+/** The server answered but did not acknowledge the snapshot it was sent. */
+export const UNACKNOWLEDGED_RECEIPT = 'unacknowledged_receipt';
+
+/** A status that says the server could not cope right now, not that it refused the row. */
+function isServerTrouble(status: number): boolean {
+  return status >= 500 || status === 429 || status === 408;
+}
+
 export function classifySyncFailure(err: unknown): SyncFailure {
   const error = describeSyncError(err);
   if (err instanceof HttpError) {
-    const { status } = err;
-    if (status >= 500 || status === 429 || status === 408) {
+    if (isServerTrouble(err.status)) {
       return { scope: 'server', error, retryAfterMs: err.retryAfterMs, noResponse: false };
     }
     return { scope: 'row', error };
@@ -51,6 +58,20 @@ export function classifySyncFailure(err: unknown): SyncFailure {
   if (err instanceof Error && err.name === 'ZodError') return { scope: 'row', error };
   // No response at all (ApiNetworkError), or signed out (UnauthorizedError).
   return { scope: 'server', error, retryAfterMs: null, noResponse: true };
+}
+
+/**
+ * Whether a row's recorded `last_error` is the server refusing that row — the
+ * verdict classifySyncFailure gave when the error was written. Read back by
+ * sign-out, which must agree with the timer about which rows can never pass.
+ * Agents before beta.38 recorded network failures on the row too; those read
+ * as not refused.
+ */
+export function isRefusedRowError(lastError: string | null): boolean {
+  if (!lastError) return false;
+  if (lastError === UNACKNOWLEDGED_RECEIPT || lastError.startsWith('ZodError:')) return true;
+  const status = /^http_(\d{3})(?::|$)/u.exec(lastError)?.[1];
+  return status !== undefined && Number(status) >= 400 && !isServerTrouble(Number(status));
 }
 
 /** The drain-wide pause after the server could not be reached. */

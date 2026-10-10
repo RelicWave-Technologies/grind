@@ -1,6 +1,6 @@
-import Database from 'better-sqlite3';
-import { app } from 'electron';
-import path from 'node:path';
+import type Database from 'better-sqlite3';
+import { openAgentDb } from '../services/agentDb';
+import { isRefusedRowError, PARK_AFTER_ATTEMPTS } from '../services/timer/syncPolicy';
 
 /**
  * Whether tracked time is safe to leave behind at sign-out.
@@ -13,9 +13,10 @@ import path from 'node:path';
  * Now the owner's backoff is cleared, the backlog is drained until a pass
  * stops making progress, and sign-out is refused only while something is
  * still failing for a reason that can pass (no network, a 5xx, never tried).
- * Entries the server itself refused (a 4xx) — including the timer's "parked"
- * rows — do not block: they stay on this machine, stamped with their owner,
- * and are retried when that person signs in again.
+ * Entries the server itself refused (judged by the timer's own rule, so the
+ * two never disagree) — including its "parked" rows — do not block: they stay
+ * on this machine, stamped with their owner, and are retried when that person
+ * signs in again.
  */
 
 export interface SignOutOwner {
@@ -28,26 +29,13 @@ export interface SignOutBacklog {
   pending: number;
   /** Of those, failing for a reason that can pass — these refuse sign-out. */
   transient: number;
-  /** Of those, refused by the server with a 4xx. */
+  /** Of those, refused by the server (a 4xx, or an answer that did not acknowledge them). */
   refused: number;
   /** Of the refused, given up on by the timer (≥ {@link PARK_AFTER_ATTEMPTS} attempts). */
   parked: number;
 }
 
-/** Matches the timer's parked rows: this many failed attempts with a definitive 4xx. */
-export const PARK_AFTER_ATTEMPTS = 5;
 const MAX_DRAIN_ROUNDS = 20;
-
-/**
- * A push error the server answered with a 4xx that retrying cannot change —
- * not auth, timeout or throttling. Errors are recorded as `http_<status>[:code]`.
- */
-export function isServerRefusal(lastError: string | null): boolean {
-  const status = /^http_(\d{3})\b/u.exec(lastError ?? '')?.[1];
-  if (!status) return false;
-  const code = Number(status);
-  return code >= 400 && code < 500 && ![401, 403, 408, 429].includes(code);
-}
 
 /** Read/write view of the timer's local queue (`local_entries` in agent.db) for sign-out. */
 export class SignOutSyncLedger {
@@ -82,7 +70,7 @@ export class SignOutSyncLedger {
       .all(owner.userId, owner.workspaceId) as Array<{ attempts: number | null; lastError: string | null }>;
     for (const row of rows) {
       out.pending += 1;
-      if (isServerRefusal(row.lastError)) {
+      if (isRefusedRowError(row.lastError)) {
         out.refused += 1;
         if (Number(row.attempts ?? 0) >= PARK_AFTER_ATTEMPTS) out.parked += 1;
       } else {
@@ -96,7 +84,7 @@ export class SignOutSyncLedger {
 let ledger: SignOutSyncLedger | null = null;
 
 export function getSignOutLedger(): SignOutSyncLedger {
-  ledger ??= new SignOutSyncLedger(new Database(path.join(app.getPath('userData'), 'agent.db')));
+  ledger ??= new SignOutSyncLedger(openAgentDb());
   return ledger;
 }
 

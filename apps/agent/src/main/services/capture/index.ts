@@ -1,4 +1,3 @@
-import Database from 'better-sqlite3';
 import { app, powerMonitor } from 'electron';
 import path from 'node:path';
 import { existsSync, promises as fs } from 'node:fs';
@@ -16,10 +15,12 @@ import { activityPercent } from '../activity/percent';
 import { api } from '../apiClient';
 import { SCREENSHOT_RETENTION_DAYS } from '../../env';
 import { getScreenshotIntervalSec } from '../agentConfig';
+import { openAgentDb } from '../agentDb';
 import { type CaptureHealth } from '../permissions';
 import { serverAlignedNow } from '../serverClock';
 import { log } from '../../logger';
 import { broadcastScreenshotChange } from './events';
+import { isScreenshotDiskFull, noteOverdueScreenshots, noteScreenshotDiskFull } from './diagnostics';
 
 let store: ScreenshotStore | null = null;
 /** Keep the full-size local file this long after the server has it. */
@@ -34,8 +35,6 @@ let timer: NodeJS.Timeout | null = null;
 let retentionStarted = false;
 /** The workspace's screenshot retention, as last read from the server (null until then). */
 let policyRetentionDays: number | null = null;
-/** The last capture could not be stored because the disk (or the database) is full — logged once per spell. */
-let diskFull = false;
 // How many times the pending capture has been held back for input.
 let captureDeferrals = 0;
 let lastHealth: CaptureHealth = 'unknown';
@@ -90,8 +89,7 @@ function setScreenHealth(health: CaptureHealth): void {
 
 function getStore(): ScreenshotStore {
   if (store) return store;
-  const db = new Database(path.join(app.getPath('userData'), 'agent.db'));
-  store = new ScreenshotStore(db);
+  store = new ScreenshotStore(openAgentDb());
   try {
     const requeued = store.requeueFailedWithFileOnce((filePath) => existsSync(resolveScreenshotPath(filePath)));
     if (requeued > 0) log.info('requeued written-off screenshots whose file is still on disk', { requeued });
@@ -107,8 +105,9 @@ export const claimUnownedScreenshots: (owner: CaptureOwner) => void = oncePerOwn
 });
 
 function noteDiskFull(err: unknown, where: string): void {
-  if (!diskFull) log.error('screenshot could not be stored: disk full', { where, err: String(err) });
-  diskFull = true;
+  // Logged once per spell; the heartbeat reports it for as long as it lasts.
+  if (!isScreenshotDiskFull()) log.error('screenshot could not be stored: disk full', { where, err: String(err) });
+  noteScreenshotDiskFull(true);
 }
 
 /** Shared accessor so the uploader can drain the same local queue. */
@@ -150,7 +149,7 @@ async function tick() {
         ownerWorkspaceId: owner?.workspaceId ?? null,
       }));
       for (const r of rows) getStore().insert(r);
-      if (rows.length && !noSpace) diskFull = false;
+      if (rows.length && !noSpace) noteScreenshotDiskFull(false);
       if (rows.length) broadcastScreenshotChange();
       // Push fresh shots promptly, through the same single pass the
       // background drain uses (no-op if signed out or storage is off).
@@ -277,6 +276,7 @@ async function runScreenshotRetention(now = serverAlignedNow()): Promise<void> {
       now,
       retentionDays,
     });
+    noteOverdueScreenshots(plan.overdueUnuploaded);
     if (plan.overdueUnuploaded > 0) {
       log.warn('screenshots past retention kept: not uploaded yet', {
         count: plan.overdueUnuploaded,

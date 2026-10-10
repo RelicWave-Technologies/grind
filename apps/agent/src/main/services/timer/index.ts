@@ -1,7 +1,5 @@
-import Database from 'better-sqlite3';
 import { ulid } from 'ulid';
-import { app, net } from 'electron';
-import path from 'node:path';
+import { net } from 'electron';
 import { TimerService } from './timerService';
 import { SqliteEntryStore } from './sqliteStore';
 import { SqliteTodayLedgerStore } from './todayLedgerStore';
@@ -19,6 +17,7 @@ import { api } from '../apiClient';
 import { broadcast } from '../../broadcast';
 import { serverAlignedNow } from '../serverClock';
 import { getTodayLedgerMode } from '../agentConfig';
+import { openAgentDb } from '../agentDb';
 import type { TodayLedgerMode } from '@grind/types';
 
 // Server-aligned: timer timestamps are validated (and clamped) by the server,
@@ -53,8 +52,7 @@ export function onTimerMissedSleep(listener: (missed: MissedSleep) => void): voi
 /** Lazily build the timer service against the on-disk SQLite DB. */
 export function getTimerService(): TimerService {
   if (service) return service;
-  const dbPath = path.join(app.getPath('userData'), 'agent.db');
-  const db = new Database(dbPath);
+  const db = openAgentDb();
   const store = new SqliteEntryStore(db);
   todayLedgerStore = new SqliteTodayLedgerStore(db);
   service = new TimerService(
@@ -75,7 +73,7 @@ export function getTimerService(): TimerService {
   );
   service.setTodayLedgerMode(configuredTodayLedgerMode ?? getTodayLedgerMode());
   service.setMissedSleepListener((missed) => missedSleepListener?.(missed));
-  log.info('timer service initialized', { dbPath });
+  log.info('timer service initialized');
   return service;
 }
 

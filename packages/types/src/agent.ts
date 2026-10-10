@@ -134,6 +134,13 @@ export const AgentDiagnostics = z.object({
   installScope: AgentInstallScope.optional(),
   /** Last auto-update failure ("CODE: message"), null once a check succeeds. */
   updateError: z.string().max(200).nullable().optional(),
+  /**
+   * Screenshots past retention kept only because they have not uploaded yet,
+   * as of the last daily retention run. Optional: agents before beta.38 omit it.
+   */
+  screenshotsOverdue: z.number().int().min(0).optional(),
+  /** The last screenshot could not be stored: the disk is full. Optional: agents before beta.38 omit it. */
+  screenshotDiskFull: z.boolean().optional(),
 });
 export type AgentDiagnostics = z.infer<typeof AgentDiagnostics>;
 

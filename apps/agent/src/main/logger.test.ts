@@ -17,7 +17,7 @@ vi.mock('electron', () => ({
   },
 }));
 
-const { flushLogs, log, logFilePath, logRetryDelayMs, rotateLogFiles } = await import('./logger');
+const { createRepeatLimitedErrorLog, flushLogs, log, logFilePath, logRetryDelayMs, rotateLogFiles } = await import('./logger');
 
 afterAll(async () => {
   await flushLogs();
@@ -109,5 +109,29 @@ describe('logger resilience', () => {
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('createRepeatLimitedErrorLog', () => {
+  it('logs each distinct error once, then once per quiet period with what was held back', () => {
+    let now = 0;
+    const write = vi.fn();
+    const logError = createRepeatLimitedErrorLog('tick failed', 60_000, () => now, write);
+
+    for (let i = 0; i < 5; i += 1) logError(new Error('db locked'));
+    logError(new Error('disk full'));
+    expect(write.mock.calls.map(([, fields]) => fields.err)).toEqual(['Error: db locked', 'Error: disk full']);
+
+    now = 60_000;
+    logError(new Error('db locked'));
+    expect(write).toHaveBeenCalledTimes(3);
+    expect(write.mock.calls[2]![1]).toMatchObject({ err: 'Error: db locked', repeatsSinceLastLog: 4 });
+  });
+
+  it('never throws, even when the error cannot be printed or the write fails', () => {
+    const unprintable = { toString: () => { throw new Error('no'); } };
+    expect(() => createRepeatLimitedErrorLog('x', 1, () => 0, vi.fn())(unprintable)).not.toThrow();
+    const failingWrite = () => { throw new Error('sink down'); };
+    expect(() => createRepeatLimitedErrorLog('x', 1, () => 0, failingWrite)(new Error('e'))).not.toThrow();
   });
 });

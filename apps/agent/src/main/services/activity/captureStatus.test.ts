@@ -16,8 +16,8 @@ vi.mock('electron', () => ({
   app: { getPath: () => '/tmp/grind-test' },
 }));
 
-vi.mock('better-sqlite3', () => ({
-  default: class Database {},
+vi.mock('../agentDb', () => ({
+  openAgentDb: () => ({}),
 }));
 
 vi.mock('uiohook-napi', () => ({

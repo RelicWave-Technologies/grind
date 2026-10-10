@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('electron', () => ({ app: { getPath: () => '/tmp/timo-signout-test' } }));
 
-const { SignOutSyncLedger, isServerRefusal, syncBeforeSignOut } = await import('./signOutSync');
+const { SignOutSyncLedger, syncBeforeSignOut } = await import('./signOutSync');
 
 const ALICE = { userId: 'alice', workspaceId: 'w1' };
 
@@ -39,16 +39,6 @@ function fakeDrain(db: Database.Database, perPass: number, refuse: Record<string
   });
 }
 
-describe('isServerRefusal', () => {
-  it('reads definitive 4xx push errors as refusals, nothing else', () => {
-    expect(isServerRefusal('http_400:validation_failed')).toBe(true);
-    expect(isServerRefusal('http_409:entry_conflict')).toBe(true);
-    for (const e of ['http_401', 'http_403:forbidden', 'http_408', 'http_429', 'http_500', 'ApiNetworkError:x', null]) {
-      expect(isServerRefusal(e)).toBe(false);
-    }
-  });
-});
-
 describe('syncBeforeSignOut', () => {
   it('drains a backlog longer than one pass, including rows waiting out a backoff', async () => {
     const rows: Row[] = Array.from({ length: 60 }, (_, i) => ({ id: `e${String(i).padStart(2, '0')}`, nextAt: 9e15 }));
@@ -75,6 +65,21 @@ describe('syncBeforeSignOut', () => {
 
     expect(result.ok).toBe(true);
     expect(result.backlog).toEqual({ pending: 1, transient: 0, refused: 1, parked: 1 });
+  });
+
+  it('agrees with the timer: a 403 or an unacknowledged push is a refusal, not a reason to wait', async () => {
+    // The timer backs these off and parks them as row failures; sign-out used
+    // to read them as transient and refused forever.
+    const { db, ledger } = queue([{ id: 'forbidden' }, { id: 'unacked' }]);
+
+    const result = await syncBeforeSignOut({
+      ledger,
+      owner: ALICE,
+      drain: fakeDrain(db, 25, { forbidden: 'http_403:forbidden', unacked: 'unacknowledged_receipt' }),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.backlog).toMatchObject({ pending: 2, transient: 0, refused: 2 });
   });
 
   it('refuses while an entry is failing on the network or a 5xx', async () => {

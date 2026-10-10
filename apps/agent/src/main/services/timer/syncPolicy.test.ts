@@ -7,7 +7,7 @@ import { ApiNetworkError } from '../network';
 import { HttpError, retryAfterMs } from '../apiClient';
 import { SqliteEntryStore } from './sqliteStore';
 import { TimerService } from './timerService';
-import { classifySyncFailure, PARK_AFTER_ATTEMPTS, PARKED_RETRY_MS, rowRetryAt, SyncPause } from './syncPolicy';
+import { classifySyncFailure, isRefusedRowError, PARK_AFTER_ATTEMPTS, PARKED_RETRY_MS, rowRetryAt, SyncPause, UNACKNOWLEDGED_RECEIPT } from './syncPolicy';
 import type { Clock, IdGen, SyncClient, TimerOwner } from './types';
 
 const T0 = Date.UTC(2026, 9, 10, 2, 0, 0);
@@ -29,6 +29,35 @@ describe('classifySyncFailure', () => {
       error: 'http_409:timer_conflict',
     });
     expect(classifySyncFailure(new HttpError('/x', 400, ''))).toMatchObject({ scope: 'row' });
+  });
+});
+
+describe('isRefusedRowError', () => {
+  it('reads back exactly the errors the timer recorded as row refusals', () => {
+    const failures = [
+      new HttpError('/x', 400, '{"error":"validation_failed"}'),
+      new HttpError('/x', 401, ''),
+      new HttpError('/x', 403, '{"error":"forbidden"}'),
+      new HttpError('/x', 404, 'not json'),
+      new HttpError('/x', 409, '{"error":"timer_conflict"}'),
+      new HttpError('/x', 408, ''),
+      new HttpError('/x', 429, ''),
+      new HttpError('/x', 500, ''),
+      new HttpError('/x', 503, '{"error":"maintenance"}'),
+      Object.assign(new Error('bad receipt'), { name: 'ZodError' }),
+      new ApiNetworkError('/x', new TypeError('fetch failed')),
+    ];
+    for (const err of failures) {
+      const failure = classifySyncFailure(err);
+      expect(isRefusedRowError(failure.error), failure.error).toBe(failure.scope === 'row');
+    }
+    expect(isRefusedRowError(UNACKNOWLEDGED_RECEIPT)).toBe(true);
+  });
+
+  it('treats no error, and older agents\' network errors, as not refused', () => {
+    expect(isRefusedRowError(null)).toBe(false);
+    expect(isRefusedRowError('TypeError:fetch failed')).toBe(false);
+    expect(isRefusedRowError('http_4091')).toBe(false);
   });
 });
 

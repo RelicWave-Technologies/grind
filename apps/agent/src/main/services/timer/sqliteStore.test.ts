@@ -279,11 +279,10 @@ describeSqlite('SqliteEntryStore sync state', () => {
     expect(store.getRecoveryNotice()).toBeNull();
   });
 
-  it('uses FULL durability and never exposes one owner\'s rows to another', () => {
+  it('never exposes one owner\'s rows to another', () => {
     const db = new Database(':memory:');
     const store = ownedStore(db);
     store.upsert(entry('private-entry'));
-    expect(String(db.pragma('synchronous', { simple: true })).toLowerCase()).toBe('2');
 
     store.bindOwner({ userId: 'user-2', workspaceId: 'workspace-1' });
     expect(store.getOpen()).toBeNull();

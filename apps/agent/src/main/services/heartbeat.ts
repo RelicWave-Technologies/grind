@@ -16,6 +16,7 @@ import { getTrackingReadinessService } from './trackingReadiness';
 import { getLaunchAtLoginService } from './launchAtLogin';
 import { handleRemoteCommands } from './remoteCommands';
 import { getUpdateDiagnostics } from './updates/diagnostics';
+import { getScreenshotDiagnostics } from './capture/diagnostics';
 
 let timer: NodeJS.Timeout | null = null;
 
@@ -66,6 +67,8 @@ function currentDiagnostics() {
     // Why a Windows machine is stuck on an old version: a Program Files
     // install cannot update itself, and the last updater failure says the rest.
     ...getUpdateDiagnostics(),
+    // Screenshots that are not leaving the machine, or not being kept at all.
+    ...getScreenshotDiagnostics(),
   };
 }
 

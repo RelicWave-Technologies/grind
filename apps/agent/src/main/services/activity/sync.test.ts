@@ -9,7 +9,7 @@ vi.mock('../apiClient', async (importOriginal) => ({
 }));
 vi.mock('../../logger', () => ({ log: { debug: vi.fn(), warn: vi.fn(), info: vi.fn(), error: vi.fn() } }));
 
-const { flushActivity } = await import('./sync');
+const { flushActivity, MAX_ENTRY_HOLD_MS } = await import('./sync');
 const { HttpError } = await import('../apiClient');
 const OWNER = { userId: 'u1', workspaceId: 'w1' };
 
@@ -101,11 +101,28 @@ describe('flushActivity byte-bounded batching', () => {
       row('unlinked', { timeEntryId: null, bucketStart: 120_000 }),
     ]);
 
-    expect(await flushActivity(store, { owner: OWNER, isTimeEntryPendingCreate: (entryId) => entryId === 'pending-parent' })).toBe(2);
+    expect(await flushActivity(store, {
+      owner: OWNER,
+      isTimeEntryPendingCreate: (entryId) => entryId === 'pending-parent',
+      now: 120_000,
+    })).toBe(2);
 
     const sent = bodyOf().samples as unknown as { id: string }[];
     expect(sent.map((sample) => sample.id)).toEqual(['ready', 'unlinked']);
     expect(synced).toEqual(['ready', 'unlinked']);
+  });
+
+  it('sends a sample with its timeEntryId once it has waited out the hold for its entry', async () => {
+    const { store, synced } = fakeStore([row('waiting', { timeEntryId: 'pending-parent' })]);
+
+    expect(await flushActivity(store, {
+      owner: OWNER,
+      isTimeEntryPendingCreate: () => true,
+      now: MAX_ENTRY_HOLD_MS + 1,
+    })).toBe(1);
+
+    expect(bodyOf().samples).toMatchObject([{ id: 'waiting', timeEntryId: 'pending-parent' }]);
+    expect(synced).toEqual(['waiting']);
   });
 
   it('sends nothing when the signed-in account changed after the rows were read', async () => {

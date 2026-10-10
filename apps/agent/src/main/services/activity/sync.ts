@@ -5,6 +5,7 @@ import {
 } from '@grind/types';
 import { api, HttpError } from '../apiClient';
 import { log } from '../../logger';
+import { serverAlignedNow } from '../serverClock';
 import type { ActivityOwner, ActivityStore, ActivityRow } from './store';
 
 // A batch must stay comfortably under the API's body-size limit. If it doesn't,
@@ -15,6 +16,14 @@ import type { ActivityOwner, ActivityStore, ActivityRow } from './store';
 // past the limit.
 const MAX_BATCH_ROWS = 500; // also the server-side schema cap (ActivitySamplesRequest)
 const MAX_BATCH_BYTES = 48 * 1024; // headroom under the API's activity-route limit
+/**
+ * How long a sample waits for its timer entry to reach the server. Sent
+ * together, the minute lands already linked; but an entry can stay unsent for
+ * hours (offline, refused, parked) and its activity must not wait with it.
+ * After this the sample goes with its timeEntryId anyway, and the server links
+ * it when the entry arrives.
+ */
+export const MAX_ENTRY_HOLD_MS = 10 * 60_000;
 /**
  * Cap a metadata string without leaving half a character behind.
  *
@@ -55,10 +64,12 @@ export interface FlushActivityOptions {
   /** The signed-in account; only its samples are sent. None → nothing is sent. */
   owner: ActivityOwner | null;
   /**
-   * Belt and braces over the store's own SQL filter: a sample whose timer
-   * entry is still waiting to be created stays queued.
+   * Belt and braces over the store's own SQL filter: a recent sample whose
+   * timer entry is still waiting to be created stays queued.
    */
   isTimeEntryPendingCreate?: (entryId: string) => boolean;
+  /** Server-aligned now, the frame of `bucketStart`. */
+  now?: number;
   /** Claim legacy unowned samples for `owner` (the caller runs it once per owner change). */
   claimUnowned?: (owner: ActivityOwner) => void;
   /**
@@ -122,13 +133,14 @@ async function sendOrSplit(store: ActivityStore, batch: Outgoing[]): Promise<num
  * in safe chunks instead of one oversized — and rejected — request.
  */
 export async function flushActivity(store: ActivityStore, options: FlushActivityOptions): Promise<number> {
-  const { owner, isTimeEntryPendingCreate = () => false } = options;
+  const { owner, isTimeEntryPendingCreate = () => false, now = serverAlignedNow() } = options;
   if (!owner) return 0;
   if (options.claimUnowned) options.claimUnowned(owner);
   else store.claimUnowned(owner);
+  const holdFrom = now - MAX_ENTRY_HOLD_MS;
   const rows = store
-    .unsynced(MAX_BATCH_ROWS, owner)
-    .filter((row) => row.timeEntryId === null || !isTimeEntryPendingCreate(row.timeEntryId));
+    .unsynced(MAX_BATCH_ROWS, owner, holdFrom)
+    .filter((row) => row.timeEntryId === null || row.bucketStart < holdFrom || !isTimeEntryPendingCreate(row.timeEntryId));
   if (rows.length === 0) return 0;
 
   // Pack the longest prefix whose JSON stays under the byte budget — always at

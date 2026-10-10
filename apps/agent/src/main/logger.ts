@@ -197,6 +197,46 @@ export const log = {
   debug: (msg: string, fields?: Fields) => emit('DEBUG', console.debug, msg, fields),
 };
 
+/** Distinct failure messages remembered at once; a stream of ever-new ones starts over. */
+const REPEAT_MEMORY = 32;
+
+/**
+ * Error logging for a loop that runs every second. Swallowing its failures
+ * hid a broken timer completely; logging every one writes a line a second.
+ * Each distinct message is logged the first time it is seen, then again at
+ * most once per `quietMs` (with how many were held back), so a failure that
+ * persists stays visible in the log without flooding it. Never throws.
+ */
+export function createRepeatLimitedErrorLog(
+  message: string,
+  quietMs: number,
+  // Device clock: only the gap between two readings is used.
+  now: () => number = () => Date.now(),
+  write: (msg: string, fields?: Fields) => void = log.error,
+): (err: unknown) => void {
+  const seen = new Map<string, { loggedAt: number; heldBack: number }>();
+  return (err) => {
+    try {
+      const text = String(err);
+      const at = now();
+      const last = seen.get(text);
+      if (last && at - last.loggedAt < quietMs) {
+        last.heldBack += 1;
+        return;
+      }
+      if (!last && seen.size >= REPEAT_MEMORY) seen.clear();
+      seen.set(text, { loggedAt: at, heldBack: 0 });
+      write(message, {
+        err: text,
+        stack: err instanceof Error ? err.stack ?? null : null,
+        ...(last ? { repeatsSinceLastLog: last.heldBack } : {}),
+      });
+    } catch {
+      // Logging must never break the loop it reports on.
+    }
+  };
+}
+
 /** Absolute path to the active log file (null if file logging is unavailable).
  *  Handy for surfacing "open logs" in the UI or a support flow. */
 export function logFilePath(): string | null {

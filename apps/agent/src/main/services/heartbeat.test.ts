@@ -98,12 +98,13 @@ vi.mock('./permissions', () => ({
 }));
 
 vi.mock('./heartbeatPayload', () => ({
-  buildHeartbeatRequest: (args: { agentVersion: string; permissions?: unknown; startup?: unknown }) => ({
+  buildHeartbeatRequest: (args: { agentVersion: string; permissions?: unknown; startup?: unknown; diagnostics?: unknown }) => ({
     agentVersion: args.agentVersion,
     platform: 'darwin',
     state: 'IDLE',
     permissions: args.permissions,
     startup: args.startup,
+    diagnostics: args.diagnostics,
   }),
 }));
 
@@ -183,6 +184,27 @@ describe('heartbeat config refresh', () => {
         '/v1/agent/heartbeat',
         expect.objectContaining({
           body: expect.objectContaining({ agentVersion: '9.8.7' }),
+        }),
+      ),
+    );
+  });
+
+  it('reports parked timer rows, overdue screenshots and a full disk in the diagnostics', async () => {
+    mocks.api.mockResolvedValue({ ok: true, serverTime: '2026-07-04T00:00:00.000Z', configVersion: 'version-1' });
+    const screenshots = await import('./capture/diagnostics');
+    screenshots.noteOverdueScreenshots(7);
+    screenshots.noteScreenshotDiskFull(true);
+    const { sendHeartbeatNow } = await import('./heartbeat');
+
+    sendHeartbeatNow();
+
+    await vi.waitFor(() =>
+      expect(mocks.api).toHaveBeenCalledWith(
+        '/v1/agent/heartbeat',
+        expect.objectContaining({
+          body: expect.objectContaining({
+            diagnostics: expect.objectContaining({ syncParked: 0, screenshotsOverdue: 7, screenshotDiskFull: true }),
+          }),
         }),
       ),
     );

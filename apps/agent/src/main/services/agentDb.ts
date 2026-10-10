@@ -13,15 +13,21 @@ import { showNotification } from '../notifications';
  * corrupt file surfaced as an exception deep inside whichever feature touched
  * it first — swallowed by a catch, so the app just quietly stopped working.
  *
- * Here the connection is opened once, set up for a multi-writer app (WAL, a
- * busy timeout instead of an instant SQLITE_BUSY, synchronous=NORMAL, which
- * under WAL survives an app crash), and checked with `quick_check`. A file
- * that is not a database or fails the check is moved aside — together with
- * its -wal and -shm — and a fresh one is created, and the person is told.
- * The moved files are kept for support; nothing is deleted.
+ * Now the whole process shares ONE connection, opened here. better-sqlite3 is
+ * synchronous and the main process is a single thread, so one connection never
+ * contends with itself: no SQLITE_BUSY between our own stores, and one place
+ * for the pragmas. It is set up with WAL, a busy timeout (for the rare outside
+ * reader), and synchronous=FULL: the timer's entries are the record of paid
+ * time and must survive a power cut, not just an app crash (NORMAL under WAL
+ * can lose the last commits to one). A connection has a single sync mode, so
+ * every store gets FULL; the write rate (a few rows a minute) makes the extra
+ * fsync cheap.
  *
- * A store that needs a stronger guarantee (the timer's entries) can still
- * raise `synchronous` on this connection itself.
+ * It is checked with `quick_check` before anyone uses it. A file that is not a
+ * database or fails the check is moved aside — together with its -wal and
+ * -shm — and a fresh one is created, and the person is told. The moved files
+ * are kept for support; nothing is deleted. Boot opens it before anything
+ * else touches the file, so on Windows no other handle can block the rename.
  */
 export const AGENT_DB_BUSY_TIMEOUT_MS = 5_000;
 
@@ -53,7 +59,7 @@ function isCorruption(err: unknown): boolean {
 function configure(db: Database.Database): void {
   db.pragma(`busy_timeout = ${AGENT_DB_BUSY_TIMEOUT_MS}`);
   db.pragma('journal_mode = WAL');
-  db.pragma('synchronous = NORMAL');
+  db.pragma('synchronous = FULL');
 }
 
 function check(db: Database.Database, deps: OpenAgentDbDeps): void {
@@ -147,7 +153,7 @@ export function openAgentDbAt(file: string, deps: OpenAgentDbDeps): Database.Dat
 
 let shared: Database.Database | null = null;
 
-/** The shared connection to `userData/agent.db`, opened (and checked) once. */
+/** The process's one connection to `userData/agent.db`, opened (and checked) on first use. */
 export function openAgentDb(): Database.Database {
   if (shared) return shared;
   shared = openAgentDbAt(path.join(app.getPath('userData'), 'agent.db'), {

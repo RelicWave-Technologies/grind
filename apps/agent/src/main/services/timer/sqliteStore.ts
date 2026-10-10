@@ -78,16 +78,14 @@ function asAwayState(value: unknown): TimerAwayState | null {
 /**
  * better-sqlite3-backed EntryStore. Each entry is stored as a JSON blob with
  * indexed columns (ended_at, sync_state) for the two hot queries (open entry,
- * unsynced entries). WAL mode + synchronous=FULL makes acknowledged local
- * mutations survive process and OS crashes before they are published to UI.
+ * unsynced entries). The connection comes from openAgentDb, whose WAL +
+ * synchronous=FULL makes acknowledged local mutations survive process and OS
+ * crashes before they are published to UI.
  */
 export class SqliteEntryStore implements EntryStore {
   private owner: TimerOwner | null = null;
 
   constructor(private readonly db: Database.Database) {
-    this.db.pragma('journal_mode = WAL');
-    this.db.pragma('synchronous = FULL');
-    this.db.pragma('busy_timeout = 5000');
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS local_entries (
         id          TEXT PRIMARY KEY,

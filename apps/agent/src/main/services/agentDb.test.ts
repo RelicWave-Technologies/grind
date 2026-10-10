@@ -33,13 +33,14 @@ afterEach(() => {
 });
 
 describe('openAgentDbAt', () => {
-  it('opens a healthy database in WAL with a busy timeout and NORMAL sync', () => {
+  it('opens a healthy database in WAL with a busy timeout and FULL sync', () => {
     const d = deps();
     const db = openAgentDbAt(file, d);
     try {
       expect(db.pragma('journal_mode', { simple: true })).toBe('wal');
       expect(db.pragma('busy_timeout', { simple: true })).toBe(AGENT_DB_BUSY_TIMEOUT_MS);
-      expect(db.pragma('synchronous', { simple: true })).toBe(1); // NORMAL
+      // FULL: the timer's entries share this connection and must survive a power cut.
+      expect(db.pragma('synchronous', { simple: true })).toBe(2);
       expect(d.notifyReset).not.toHaveBeenCalled();
     } finally {
       db.close();

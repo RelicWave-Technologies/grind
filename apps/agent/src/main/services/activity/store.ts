@@ -197,16 +197,17 @@ export class ActivityStore {
   }
 
   /**
-   * The owner's oldest unsynced samples whose timer entry the server already
-   * has. Samples of an entry still waiting to be created are skipped HERE, in
-   * SQL — filtering after the LIMIT let 500 waiting rows fill every batch and
-   * stall the whole queue behind them.
+   * The owner's oldest unsynced samples, leaving out those measured at or after
+   * `holdFrom` whose timer entry is still waiting to be created — they go once
+   * it exists, already linked. Older ones go regardless (see flushActivity).
+   * The hold is applied HERE, in SQL — filtering after the LIMIT let 500
+   * waiting rows fill every batch and stall the whole queue behind them.
    */
-  unsynced(limit: number, owner: ActivityOwner): ActivityRow[] {
+  unsynced(limit: number, owner: ActivityOwner, holdFrom: number): ActivityRow[] {
     const waitingForEntry = this.hasLocalEntries()
-      ? `AND NOT EXISTS (
+      ? `AND (bucket_start < @holdFrom OR NOT EXISTS (
            SELECT 1 FROM local_entries le
-           WHERE le.id = activity_samples.time_entry_id AND le.sync_state = 'pending_create')`
+           WHERE le.id = activity_samples.time_entry_id AND le.sync_state = 'pending_create'))`
       : '';
     const rows = this.db
       .prepare(
@@ -215,7 +216,7 @@ export class ActivityStore {
            ${waitingForEntry}
          ORDER BY bucket_start ASC LIMIT @limit`,
       )
-      .all({ limit, userId: owner.userId, workspaceId: owner.workspaceId }) as Record<string, unknown>[];
+      .all({ limit, holdFrom, userId: owner.userId, workspaceId: owner.workspaceId }) as Record<string, unknown>[];
     return rows.map(map);
   }
 

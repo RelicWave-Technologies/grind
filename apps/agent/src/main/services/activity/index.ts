@@ -1,6 +1,3 @@
-import Database from 'better-sqlite3';
-import { app } from 'electron';
-import path from 'node:path';
 import { ulid } from 'ulid';
 import { uIOhook } from 'uiohook-napi';
 import { MinuteSealer, minuteFloor, type SealOwner } from './minuteSealer';
@@ -11,6 +8,7 @@ import { flushActivity } from './sync';
 import { ActivitySyncDrain, type ActivitySyncDrainReason, type ActivitySyncDrainResult } from './syncDrain';
 import { hasAccessibilityAccess } from '../permissions';
 import { getCapturePolicy } from '../agentConfig';
+import { openAgentDb } from '../agentDb';
 import { serverAlignedNow } from '../serverClock';
 import { log } from '../../logger';
 import { getWorkspaceTimeContext } from '../workspaceTime';
@@ -67,7 +65,7 @@ export function recordActiveWindow(obs: ActiveWindowObservation): void {
 
 function getStore(): ActivityStore {
   if (store) return store;
-  store = new ActivityStore(new Database(path.join(app.getPath('userData'), 'agent.db')));
+  store = new ActivityStore(openAgentDb());
   return store;
 }
 

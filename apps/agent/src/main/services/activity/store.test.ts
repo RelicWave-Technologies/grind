@@ -75,6 +75,9 @@ describe('ActivityStore on a real database', () => {
     ...over,
   });
 
+  /** Every sample in these tests is recent enough to wait for its entry. */
+  const HOLD_ALL = 0;
+
   const withLocalEntries = () => {
     const db = new Database(':memory:');
     db.exec(`CREATE TABLE local_entries (
@@ -86,12 +89,12 @@ describe('ActivityStore on a real database', () => {
   it('adds the tail of a minute to the head already stored — same row, back on the queue', () => {
     const store = new ActivityStore(new Database(':memory:'));
     store.persistMinute(minute(60_000, { keystrokes: 3, clicks: 1, ikiCv: 0.4 }));
-    const [head] = store.unsynced(10, OWNER);
+    const [head] = store.unsynced(10, OWNER, HOLD_ALL);
     store.markSynced([head!]);
 
     store.persistMinute(minute(60_000, { keystrokes: 5, clicks: 2, ikiCv: 0.7 }));
 
-    const rows = store.unsynced(10, OWNER);
+    const rows = store.unsynced(10, OWNER, HOLD_ALL);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ id: head!.id, keystrokes: 8, clicks: 3, ikiCv: 0.7 });
   });
@@ -99,26 +102,26 @@ describe('ActivityStore on a real database', () => {
   it('does not mark a minute synced when its tail was merged in while the sync was in flight', () => {
     const store = new ActivityStore(new Database(':memory:'));
     store.persistMinute(minute(60_000, { keystrokes: 3 }));
-    const sent = store.unsynced(10, OWNER); // read for the request
+    const sent = store.unsynced(10, OWNER, HOLD_ALL); // read for the request
     store.persistMinute(minute(60_000, { keystrokes: 4 })); // the tail lands mid-request
 
     expect(store.markSynced(sent)).toBe(0);
-    const [queued] = store.unsynced(10, OWNER);
+    const [queued] = store.unsynced(10, OWNER, HOLD_ALL);
     expect(queued).toMatchObject({ keystrokes: 7 });
     // The resend of the new total is marked normally.
     expect(store.markSynced([queued!])).toBe(1);
-    expect(store.unsynced(10, OWNER)).toHaveLength(0);
+    expect(store.unsynced(10, OWNER, HOLD_ALL)).toHaveLength(0);
   });
 
   it('quarantines a refused minute out of the queue until its minute changes again', () => {
     const store = new ActivityStore(new Database(':memory:'));
     store.persistMinute(minute(60_000, { keystrokes: 3 }));
-    const [bad] = store.unsynced(10, OWNER);
+    const [bad] = store.unsynced(10, OWNER, HOLD_ALL);
     store.quarantine(bad!.id);
-    expect(store.unsynced(10, OWNER)).toHaveLength(0);
+    expect(store.unsynced(10, OWNER, HOLD_ALL)).toHaveLength(0);
 
     store.persistMinute(minute(60_000, { keystrokes: 1 })); // a tail: the minute is re-sent with its total
-    expect(store.unsynced(10, OWNER)).toMatchObject([{ id: bad!.id, keystrokes: 4 }]);
+    expect(store.unsynced(10, OWNER, HOLD_ALL)).toMatchObject([{ id: bad!.id, keystrokes: 4 }]);
   });
 
   it('prunes only synced minutes older than the cutoff', () => {
@@ -137,9 +140,9 @@ describe('ActivityStore on a real database', () => {
   it('a quiet tail leaves a stored minute (and its sync state) alone', () => {
     const store = new ActivityStore(new Database(':memory:'));
     store.persistMinute(minute(60_000, { keystrokes: 3 }));
-    store.markSynced(store.unsynced(10, OWNER));
+    store.markSynced(store.unsynced(10, OWNER, HOLD_ALL));
     expect(store.persistMinute(minute(60_000))).toBe(false);
-    expect(store.unsynced(10, OWNER)).toHaveLength(0);
+    expect(store.unsynced(10, OWNER, HOLD_ALL)).toHaveLength(0);
   });
 
   it('skips samples of an entry still being created in SQL, so they never stall the queue', () => {
@@ -150,8 +153,18 @@ describe('ActivityStore on a real database', () => {
     store.insert(minute(700 * 60_000, { timeEntryId: 'ready', keystrokes: 1 }));
     store.insert(minute(701 * 60_000, { timeEntryId: null, keystrokes: 1 }));
 
-    const batch = store.unsynced(500, OWNER);
+    const batch = store.unsynced(500, OWNER, HOLD_ALL);
     expect(batch.map((r) => r.timeEntryId)).toEqual(['ready', null]);
+  });
+
+  it('stops holding a sample for its entry once it is older than the hold', () => {
+    const db = withLocalEntries();
+    db.prepare(`INSERT INTO local_entries VALUES ('waiting', 'pending_create', 'u1', 'w1')`).run();
+    const store = new ActivityStore(db);
+    store.insert(minute(0, { timeEntryId: 'waiting' }));
+    store.insert(minute(60_000, { timeEntryId: 'waiting' }));
+
+    expect(store.unsynced(10, OWNER, 60_000).map((r) => r.bucketStart)).toEqual([0]);
   });
 
   it('syncs and sums only the signed-in account\'s samples; claims legacy ones through owned entries', () => {
@@ -163,9 +176,9 @@ describe('ActivityStore on a real database', () => {
     store.insert(minute(120_000, { keystrokes: 4, ownerUserId: null, ownerWorkspaceId: null, timeEntryId: 'e1' }));
     store.insert(minute(180_000, { keystrokes: 2, ownerUserId: null, ownerWorkspaceId: null, timeEntryId: 'e9' }));
 
-    expect(store.unsynced(10, OWNER).map((r) => r.keystrokes)).toEqual([10]);
+    expect(store.unsynced(10, OWNER, HOLD_ALL).map((r) => r.keystrokes)).toEqual([10]);
     expect(store.claimUnowned(OWNER)).toBe(1);
-    expect(store.unsynced(10, OWNER).map((r) => r.keystrokes)).toEqual([10, 4]);
+    expect(store.unsynced(10, OWNER, HOLD_ALL).map((r) => r.keystrokes)).toEqual([10, 4]);
     expect(store.countSince(0, OWNER).keystrokes).toBe(14);
     expect(store.aggregate(0, 240_000, OWNER)).toMatchObject({ minutes: 2, keystrokes: 14 });
   });
@@ -193,6 +206,6 @@ describe('ActivityStore on a real database', () => {
     expect(store.markUnsyncedInRange(OWNER, 1_000, 5_000)).toBe(2);
     expect(store.unsyncedInRange(OWNER, 0, 10_000)).toBe(2);
     expect(store.unsyncedInRange(OTHER, 0, 10_000)).toBe(0);
-    expect(store.unsynced(10, OWNER).map((r) => r.bucketStart)).toEqual([1_000, 2_000]);
+    expect(store.unsynced(10, OWNER, HOLD_ALL).map((r) => r.bucketStart)).toEqual([1_000, 2_000]);
   });
 });
