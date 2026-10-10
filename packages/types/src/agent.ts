@@ -4,6 +4,7 @@ import {
   ScreenshotIntervalMinSchema,
 } from './teamSettings';
 import { TimeZoneSchema } from './timezone';
+import { AgentCommandWire } from './agentCommands';
 
 export const AgentState = z.enum(['IDLE', 'RUNNING', 'PAUSED_IDLE', 'PAUSED_PERMISSION', 'OFFLINE']);
 export type AgentState = z.infer<typeof AgentState>;
@@ -38,6 +39,32 @@ export type CaptureHealth = z.infer<typeof CaptureHealth>;
 export const ScreenPermissionState = z.enum(['ok', 'needs-grant', 'needs-settings', 'needs-restart']);
 export type ScreenPermissionState = z.infer<typeof ScreenPermissionState>;
 
+/** The desktop app's own readiness verdict for one capability. */
+export const TrackingCapabilityState = z.enum([
+  'NOT_REQUIRED',
+  'READY',
+  'CHECKING',
+  'NEEDS_GRANT',
+  'NEEDS_SETTINGS',
+  'FAILED',
+]);
+export type TrackingCapabilityState = z.infer<typeof TrackingCapabilityState>;
+
+export const DESKTOP_PERMISSION_ERROR_MAX = 200;
+
+/**
+ * What the agent concluded from the raw snapshot: the raw fields alone read as
+ * "Access OK" for a user whose input hook was refused and who is paused for it.
+ * Optional — older agents do not send it.
+ */
+export const DesktopPermissionVerdict = z.object({
+  screenRecording: TrackingCapabilityState,
+  accessibility: TrackingCapabilityState,
+  /** Why the input hook / activity service would not start, when it would not. */
+  accessibilityError: z.string().max(DESKTOP_PERMISSION_ERROR_MAX).nullable(),
+});
+export type DesktopPermissionVerdict = z.infer<typeof DesktopPermissionVerdict>;
+
 export const DesktopPermissionSnapshot = z.object({
   screen: z.object({
     status: ScreenPermissionStatus,
@@ -51,6 +78,9 @@ export const DesktopPermissionSnapshot = z.object({
     capturing: z.boolean(),
     hookRunning: z.boolean(),
   }),
+  // A verdict this server cannot read (a newer agent's state, say) is dropped
+  // rather than failing the whole heartbeat.
+  verdict: DesktopPermissionVerdict.optional().catch(undefined),
 });
 export type DesktopPermissionSnapshot = z.infer<typeof DesktopPermissionSnapshot>;
 
@@ -84,6 +114,36 @@ export const LaunchAtLoginSnapshot = z.object({
 });
 export type LaunchAtLoginSnapshot = z.infer<typeof LaunchAtLoginSnapshot>;
 
+export const AgentInstallScope = z.enum(['user', 'machine', 'unknown']);
+export type AgentInstallScope = z.infer<typeof AgentInstallScope>;
+
+/** Device and local sync-queue health. Lets support see stuck time without the laptop. */
+export const AgentDiagnostics = z.object({
+  osVersion: z.string().max(64),
+  arch: z.string().max(32),
+  syncPending: z.number().int().min(0),
+  syncOldestPendingAt: z.string().datetime().nullable(),
+  syncLastError: z.string().max(200).nullable(),
+  /** Rows the server kept refusing, parked for a daily retry. Optional: agents before beta.38 omit it. */
+  syncParked: z.number().int().min(0).optional(),
+  /**
+   * Windows install location: "user" (%LOCALAPPDATA%\Programs, self-updates),
+   * "machine" (Program Files — cannot update itself), "unknown" (custom
+   * directory, or not Windows). Optional: agents before beta.38 omit it.
+   */
+  installScope: AgentInstallScope.optional(),
+  /** Last auto-update failure ("CODE: message"), null once a check succeeds. */
+  updateError: z.string().max(200).nullable().optional(),
+  /**
+   * Screenshots past retention kept only because they have not uploaded yet,
+   * as of the last daily retention run. Optional: agents before beta.38 omit it.
+   */
+  screenshotsOverdue: z.number().int().min(0).optional(),
+  /** The last screenshot could not be stored: the disk is full. Optional: agents before beta.38 omit it. */
+  screenshotDiskFull: z.boolean().optional(),
+});
+export type AgentDiagnostics = z.infer<typeof AgentDiagnostics>;
+
 export const HeartbeatRequest = z.object({
   agentVersion: z.string(),
   platform: Platform,
@@ -93,6 +153,7 @@ export const HeartbeatRequest = z.object({
   timerCheckpoint: TimerCheckpoint.nullable().optional(),
   permissions: DesktopPermissionSnapshot.optional(),
   startup: LaunchAtLoginSnapshot.optional(),
+  diagnostics: AgentDiagnostics.optional(),
 });
 export type HeartbeatRequest = z.infer<typeof HeartbeatRequest>;
 
@@ -107,6 +168,11 @@ export const HeartbeatResponse = z.object({
     endedAt: z.string().nullable(),
     closeReason: z.enum(['AGENT', 'AGENT_RECOVERY', 'LEASE_EXPIRED', 'SUPERSEDED', 'LEGACY_RECONCILED']).nullable(),
   }).nullable().optional(),
+  /**
+   * Developer commands waiting for this agent (see ./agentCommands). Absent
+   * when there are none; older agents never read it.
+   */
+  commands: z.array(AgentCommandWire).optional(),
 });
 export type HeartbeatResponse = z.infer<typeof HeartbeatResponse>;
 

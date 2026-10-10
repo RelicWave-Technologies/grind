@@ -104,6 +104,25 @@ describe('GET /v1/admin/leave/balances — scope', () => {
   });
 });
 
+describe('GET /v1/admin/leave/balances — accrual start', () => {
+  it('falls back to the account creation day in the workspace calendar, not UTC', async () => {
+    const s = await seedWorkspace();
+    await prisma.workspace.update({ where: { id: s.ws }, data: { timezone: 'Asia/Kolkata' } });
+    // 01:30 IST on 1 August is still 31 July in UTC.
+    await prisma.user.update({
+      where: { id: s.report.userId },
+      data: { createdAt: new Date('2026-07-31T20:00:00.000Z'), joinedOn: null },
+    });
+
+    const res = await request(app).get('/v1/admin/leave/balances').set(auth(s.admin.accessToken));
+
+    expect(res.status).toBe(200);
+    const row = (res.body.rows as Array<{ userId: string; accrualStart: string }>)
+      .find((r) => r.userId === s.report.userId);
+    expect(row?.accrualStart).toBe('2026-08-01');
+  });
+});
+
 describe('leave writes stay admin-only', () => {
   it('refuses a manager posting an adjustment for their own report', async () => {
     const s = await seedWorkspace();

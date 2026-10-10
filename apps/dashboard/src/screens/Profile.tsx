@@ -2,7 +2,7 @@ import './profile.css';
 import { useQuery } from '@tanstack/react-query';
 import { CalendarDays, Clock3, Building2, Shield, Users, User, Mail, SunMedium } from 'lucide-react';
 import { useRouteContext } from '@tanstack/react-router';
-import { zonedDateTimeParts } from '@grind/types';
+import { fmtShiftClock, weekdayInTimeZone } from '../lib/format';
 import { api } from '../lib/api';
 import type { SelfProfileResponse } from '@grind/types/profile';
 import type { ShiftSchedule, Weekday } from '@grind/types/shifts';
@@ -71,7 +71,7 @@ export function ProfileScreen() {
 
 function ProfileBody({ profile, timezone }: { profile: SelfProfileResponse; timezone: string }) {
   const roleLabel = friendlyRole(profile.user.displayRole);
-  const todayKey = weekdayKey(new Date(), timezone);
+  const todayKey = weekdayInTimeZone(new Date(), timezone);
   const todayWindow = profile.shift ? formatScheduleRange(profile.shift.schedule[todayKey]) : 'Day off';
   const workingDays = profile.shift ? countWorkingDays(profile.shift.schedule) : 0;
   const captureCount = [profile.policy.captureApps, profile.policy.captureTitles, profile.policy.captureUrls]
@@ -322,15 +322,9 @@ function roleLine(role: SelfProfileResponse['user']['displayRole']) {
   return 'Self scope';
 }
 
-function weekdayKey(date: Date, timeZone: string): Weekday {
-  const local = zonedDateTimeParts(date, timeZone);
-  const weekday = new Date(Date.UTC(local.year, local.month - 1, local.day)).getUTCDay();
-  return ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'][weekday] as Weekday;
-}
-
 function formatScheduleRange(slot: ShiftSchedule[Weekday] | undefined) {
   if (!slot) return 'Day off';
-  return `${formatShiftClock(slot.start)} – ${formatShiftClock(slot.end)}`;
+  return `${fmtShiftClock(slot.start)} – ${fmtShiftClock(slot.end)}`;
 }
 
 function countWorkingDays(schedule: ShiftSchedule) {
@@ -340,15 +334,6 @@ function countWorkingDays(schedule: ShiftSchedule) {
 function shortName(name: string) {
   const [first] = name.trim().split(/\s+/u);
   return first || name;
-}
-
-function formatShiftClock(hhmm: string) {
-  const [hourRaw, minuteRaw] = hhmm.split(':').map((part) => Number.parseInt(part, 10));
-  const hour24 = hourRaw ?? 0;
-  const minute = minuteRaw ?? 0;
-  const suffix = hour24 >= 12 ? 'PM' : 'AM';
-  const hour12 = hour24 % 12 || 12;
-  return `${hour12}:${String(minute).padStart(2, '0')} ${suffix}`;
 }
 
 function formatLongDate(iso: string) {

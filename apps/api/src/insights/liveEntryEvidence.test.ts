@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { prisma } from '@grind/db';
-import { heartbeatIsFresh, loadEntryLiveEvidence, trustedObservedAt } from './liveEntryEvidence';
+import { loadEntryLiveEvidence } from './liveEntryEvidence';
 
 async function seedOpenEntry(id: string) {
   const workspace = await prisma.workspace.create({ data: { name: `Evidence ${id}` } });
@@ -28,46 +28,6 @@ async function seedOpenEntry(id: string) {
   });
   return { workspace, user, entry };
 }
-
-describe('trustedObservedAt', () => {
-  const now = new Date('2026-07-13T10:00:00.000Z');
-
-  it('rejects proof beyond the allowed client clock skew', () => {
-    expect(trustedObservedAt({
-      observedAt: new Date('2026-07-13T10:03:00.000Z'),
-      receivedAt: now,
-      now,
-    })).toBeNull();
-  });
-
-  it('never proves later than the server receipt time', () => {
-    expect(trustedObservedAt({
-      observedAt: new Date('2026-07-13T10:01:00.000Z'),
-      receivedAt: now,
-      now: new Date('2026-07-13T10:01:30.000Z'),
-    })?.toISOString()).toBe(now.toISOString());
-  });
-});
-
-describe('heartbeatIsFresh', () => {
-  const now = new Date('2026-07-13T10:00:00.000Z');
-
-  it('accepts the three-minute boundary and rejects older or future heartbeats', () => {
-    const evidenceAt = (timestamp: string) => ({
-      latestStoredProofAt: null,
-      latestHeartbeatAt: new Date(timestamp),
-    });
-
-    expect(heartbeatIsFresh(evidenceAt('2026-07-13T09:57:00.000Z'), now)).toBe(true);
-    expect(heartbeatIsFresh(evidenceAt('2026-07-13T09:56:59.999Z'), now)).toBe(false);
-    expect(heartbeatIsFresh(evidenceAt('2026-07-13T10:00:00.001Z'), now)).toBe(false);
-    expect(heartbeatIsFresh(
-      evidenceAt('2026-07-13T09:59:00.000Z'),
-      now,
-      new Date('2026-07-13T09:59:00.001Z'),
-    )).toBe(false);
-  });
-});
 
 describe('loadEntryLiveEvidence', () => {
   const now = new Date('2026-07-13T10:00:00.000Z');
@@ -165,5 +125,27 @@ describe('loadEntryLiveEvidence', () => {
 
     const evidence = await loadEntryLiveEvidence([entry], now);
     expect(evidence.get(entry.id)?.latestStoredProofAt?.toISOString()).toBe('2026-07-13T09:59:00.000Z');
+  });
+
+  it('reads no samples or screenshots for a v2 timer, but still its heartbeat', async () => {
+    const { user, entry } = await seedOpenEntry('v2-lease');
+    const v2 = await prisma.timeEntry.update({ where: { id: entry.id }, data: { trackingProtocolVersion: 2 } });
+    const heartbeat = new Date('2026-07-13T09:59:00.000Z');
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { agentState: 'RUNNING', agentActiveEntryId: entry.id, agentLastSeenAt: heartbeat },
+    });
+    await prisma.screenshot.create({
+      data: {
+        id: 'v2-shot',
+        userId: user.id,
+        timeEntryId: entry.id,
+        capturedAt: new Date('2026-07-13T09:58:00.000Z'),
+        createdAt: new Date('2026-07-13T09:58:05.000Z'),
+      },
+    });
+
+    const evidence = await loadEntryLiveEvidence([v2], now);
+    expect(evidence.get(entry.id)).toEqual({ latestStoredProofAt: null, latestHeartbeatAt: heartbeat });
   });
 });

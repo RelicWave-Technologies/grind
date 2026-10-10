@@ -3,7 +3,7 @@ import { type ReactNode, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { CalendarClock, CalendarDays, Check, Clock3, Mail, Pencil, Plus, Trash2, UserRound, Users2, X } from 'lucide-react';
-import { api, ApiError } from '../lib/api';
+import { api, type ApiError } from '../lib/api';
 import type { Shift, ShiftSchedule, DaySchedule, WeekdayKey } from '../lib/types';
 import {
   Page,
@@ -101,6 +101,9 @@ export function ShiftsScreen() {
     mutationFn: (id: string) => api(`/v1/admin/shifts/${id}`, { method: 'DELETE' }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['admin', 'shifts'] });
+      // Members on the deleted shift are left without one.
+      qc.invalidateQueries({ queryKey: ['admin', 'users'] });
+      qc.invalidateQueries({ queryKey: ['admin', 'team-member-settings'] });
       setSelectedShiftId(null);
     },
   });

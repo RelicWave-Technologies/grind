@@ -1,10 +1,12 @@
 import {
   canonicalTimerEntryPayload,
   reconcileTodayLedger,
-  applyIdleDiscard,
+  subtractIntervals,
+  unionMs,
   closeOpenSegment,
   closeTimeEntry,
   createTimeEntry,
+  dropZeroLengthSegments,
   getOpenSegment,
   openSegment,
   recoverStaleEntry,
@@ -14,13 +16,18 @@ import { createHash } from 'node:crypto';
 import type { TimerSyncReceipt, TodayLedgerMode } from '@grind/types';
 import type { TimerStatus } from '../../../shared/tracking';
 import { HttpError } from '../apiClient';
+import { isClosedForSilence } from './serverClose';
+import { classifySyncFailure, PARK_AFTER_ATTEMPTS, rowRetryAt, SyncPause, UNACKNOWLEDGED_RECEIPT, type SyncFailure } from './syncPolicy';
 import type {
   Clock,
   BusinessDayProvider,
   EntryStore,
   IdGen,
+  MissedSleep,
   PendingEntrySyncState,
+  RangeBacklog,
   StartArgs,
+  SyncBacklog,
   SyncClient,
   TrackingAccrualGuard,
   TimerAwayReason,
@@ -44,8 +51,63 @@ import type {
 // app is never wedged behind it. The drain re-runs until the backlog is empty.
 const FLUSH_BATCH_LIMIT = 25;
 
+/** A server clock correction smaller than this is not worth a banner. */
+export const CLOCK_CORRECTION_NOTICE_MS = 60_000;
+
+/** How far back the one-time beta.38 resync looks for server-truncated entries. */
+const RESYNC_LOOKBACK_MS = 30 * 24 * 60 * 60_000;
+
+/**
+ * How long a synced, closed entry is kept locally. The server has it; the
+ * local copy only serves today's widget and developer resends (30 days).
+ */
+const SYNCED_RETENTION_MS = 90 * 24 * 60 * 60_000;
+
 /** Backstop only — correctness comes from `ledgerEpoch`, not from this. */
 const LEDGER_MEMO_TTL_MS = 10_000;
+
+/**
+ * Longest silence between two proofs of life that still means "this process
+ * was running the whole time".
+ *
+ * The main loop proves life every second. A gap anywhere near this means the
+ * process was not scheduled at all: the machine slept — or Windows Modern
+ * Standby froze the process — and the suspend event that would have closed the
+ * timer never arrived (on Modern Standby it often does not). The running entry
+ * is then closed at the last proof of life before the gap, never across it.
+ *
+ * 90 seconds because it is:
+ *  - far above any stall of a process that is really running: interval jitter,
+ *    macOS App Nap timer throttling (seconds), a GC pause, a slow SQLite write;
+ *  - below the server's 3-minute lease, so a gap counted here as worked is one
+ *    the server would have counted too — the widget and the server agree;
+ *  - short enough that Modern Standby's brief maintenance wakes (a few seconds
+ *    of running every several minutes) cannot chain proofs of life across the
+ *    standby: each wake follows a freeze far longer than this, so its FIRST
+ *    proof closes the timer instead of vouching for the gap. Anything shorter
+ *    that slips under it is left to idle detection, which backdates to the
+ *    last input.
+ *
+ * A device clock stepped forward by more than this while working looks the
+ * same and is treated the same — the timer stops and offers to resume. That
+ * is the safe direction: it can cost a person a click, never bill a gap.
+ */
+export const MISSED_SLEEP_GAP_MS = 90_000;
+
+/**
+ * Persist the liveness tick at most this often while accruing. It bounds crash
+ * recovery (a hard power-off is credited at most this much); writing it every
+ * second would be one SQLite write per second for no real gain.
+ */
+export const LIVENESS_PERSIST_EVERY_MS = 15_000;
+
+/** One proof of life, read on every clock the gap check compares. */
+interface AliveSample {
+  /** Timer frame — where an entry closed for a missed sleep ends. */
+  at: number;
+  wallMs: number;
+  monoMs: number;
+}
 
 export class TimerService {
   private open: TimeEntry | null = null;
@@ -53,7 +115,20 @@ export class TimerService {
   private ledgerEpoch = 0;
   private mutationListener: (() => void) | null = null;
   private readonly backgroundSyncs = new Set<Promise<void>>();
+  /** Set while the server cannot be reached; no row is pushed until it lifts. */
+  private readonly syncPause = new SyncPause();
   private todayLedgerMode: TodayLedgerMode = 'OFF';
+  /**
+   * The entry THIS process opened and has been accruing. An open row read back
+   * from disk (a previous run, or another account's session on this machine)
+   * never qualifies: its time since the last proof of life is unproven.
+   */
+  private liveEntryId: string | null = null;
+  /** The last proof of life (in memory; see noteAlive). */
+  private lastAlive: AliveSample | null = null;
+  /** When the liveness tick was last persisted, timer frame. */
+  private livenessPersistedAt: number | null = null;
+  private missedSleepListener: ((missed: MissedSleep) => void) | null = null;
 
   constructor(
     private readonly store: EntryStore,
@@ -72,10 +147,87 @@ export class TimerService {
     this.store.bindOwner(owner);
     if (owner && claimLegacy) this.store.claimUnownedEntries(owner);
     this.open = this.store.getOpen();
+    if (this.open?.id !== this.liveEntryId) this.liveEntryId = null;
   }
 
   currentOwner(): TimerOwner | null {
     return this.store.currentOwner();
+  }
+
+  /**
+   * Bind to the signed-in session, closing whatever is left open on either
+   * side of an account change.
+   *
+   * Rebinding used to swap owners and nothing else. User A's open entry stayed
+   * open on disk; when A signed in again it was read back as running and the
+   * whole time in between — hours of B's session, or the machine switched off
+   * — was credited on the next resume or resync. So on any owner change:
+   *  - the previous owner's open entry is closed at its last proof of life,
+   *    durably and without syncing (A's tokens are gone; the row stays bound
+   *    to A and uploads when A signs in again);
+   *  - an open entry the new owner left behind is closed the same way, exactly
+   *    as boot recovery does.
+   * Rebinding the same owner leaves a running timer alone.
+   */
+  switchOwner(owner: TimerOwner | null, claimLegacy = false): TimerRecoveryResult[] {
+    const previous = this.store.currentOwner();
+    if (sameOwner(previous, owner)) {
+      this.bindOwner(owner, claimLegacy);
+      return [];
+    }
+    const recovered: TimerRecoveryResult[] = [];
+    if (previous) {
+      const closed = this.recoverAtLastProofOfLife();
+      if (closed) recovered.push(closed);
+    }
+    this.bindOwner(owner, claimLegacy);
+    if (owner) {
+      const closed = this.recoverAtLastProofOfLife();
+      if (closed) recovered.push(closed);
+    }
+    return recovered;
+  }
+
+  /**
+   * Close the bound owner's open entry at its last proof of life: the quit it
+   * was in the middle of (exit intent), else the last persisted liveness tick.
+   * With neither, nothing past the entry's own last boundary is credited —
+   * never "now", which would bill the whole time the process was dead.
+   */
+  recoverAtLastProofOfLife(): TimerRecoveryResult | null {
+    this.closeStrayOpenEntries();
+    return this.recoverAway() ?? this.recover(this.lastProofOfLife());
+  }
+
+  /**
+   * Only the newest open entry is ever recovered or resumed, so any older one
+   * a race left open would stay open forever — answered by the server with a
+   * 409 for a second live timer, or reopened there crediting phantom time.
+   * Close each at its last checkpoint: the liveness tick, but never past the
+   * start of the entry after it (one timer runs at a time).
+   */
+  private closeStrayOpenEntries(): void {
+    const open = this.store.listOpen();
+    const liveness = this.store.getLiveness() ?? Number.NEGATIVE_INFINITY;
+    for (let i = 0; i < open.length - 1; i += 1) {
+      const stray = open[i]!;
+      const closeAt = safeCloseAt(stray, Math.min(liveness, open[i + 1]!.startedAt));
+      this.writeEntry({ ...recoverStaleEntry(stray, closeAt), closeReason: 'AGENT_RECOVERY' });
+    }
+  }
+
+  /**
+   * Days older than today never get a server snapshot to prove a "self" row's
+   * owner (claimServerMatchedEntries), so on a single-account machine they are
+   * claimed outright. Anywhere else they stay quarantined; `unclaimed` says
+   * how many, for the log.
+   */
+  claimLegacySelfEntries(): { claimed: number; unclaimed: number } {
+    const owner = this.store.currentOwner();
+    if (!owner) return { claimed: 0, unclaimed: 0 };
+    const result = this.store.claimLegacySelfEntries(owner);
+    if (result.claimed > 0) this.ledgerEpoch += 1;
+    return result;
   }
 
   claimServerMatchedEntries(matches: Array<{ id: string; clientUuid: string }>): number {
@@ -110,6 +262,7 @@ export class TimerService {
     const mergedProjection = reconcileTodayLedger({
       ...shared,
       server: this.serverCache.list(owner, window.start, window.end, now),
+      invalidations: this.serverCache.invalidations?.(owner, window.start, window.end) ?? [],
     });
     return {
       localMs: localProjection.workedMs,
@@ -121,15 +274,16 @@ export class TimerService {
   /**
    * On boot, recover a left-open entry. We only trust time up to
    * `lastKnownActiveAt` (e.g. last heartbeat / last persisted tick), so a crash
-   * or power-off never over-credits the offline gap.
+   * or power-off never over-credits the offline gap. Null means nothing is
+   * proven past the entry's own last boundary.
    */
-  recover(lastKnownActiveAt: number): TimerRecoveryResult | null {
+  recover(lastKnownActiveAt: number | null): TimerRecoveryResult | null {
     const open = this.store.getOpen();
     if (!open) {
       this.store.clearExitIntent();
       return null;
     }
-    const recoveredAt = safeCloseAt(open, lastKnownActiveAt);
+    const recoveredAt = safeCloseAt(open, lastKnownActiveAt ?? Number.NEGATIVE_INFINITY);
     const recovered = { ...recoverStaleEntry(open, recoveredAt), closeReason: 'AGENT_RECOVERY' as const };
     // Persist only; the caller runs flushUnsynced() next, which performs the
     // single sync. Syncing here too would race that flush on the same entry.
@@ -146,6 +300,11 @@ export class TimerService {
     return { entryId: recovered.id, recoveredAt, notice };
   }
 
+  /**
+   * Boot-time half of prepareForAway's crash safety: an away close that could
+   * not be written left its boundary behind, and it beats the liveness tick
+   * (the person had already left by then).
+   */
   recoverAway(): TimerRecoveryResult | null {
     const away = this.store.getAwayState();
     if (!away) return null;
@@ -173,13 +332,34 @@ export class TimerService {
   }
 
   /**
-   * Write a "still alive" proof to durable storage. Call periodically while a
-   * timer is actively accruing — it bounds crash recovery on the next boot.
-   * Cheap (one indexed upsert); safe to call when nothing is open (no-op).
+   * The one proof-of-life entry point: the 1-second main loop, the server
+   * heartbeat, a resume/unlock, and Windows' end-of-session query all call it.
+   *
+   * First it checks how long it has been since the previous proof. A gap over
+   * MISSED_SLEEP_GAP_MS is a sleep the OS never reported: the open entry is
+   * closed at the previous proof — BEFORE anything new is written, so a brief
+   * wake can never vouch for the time asleep — and the missed-sleep listener
+   * runs the ordinary "you were away" flow.
+   *
+   * Otherwise, while accruing, it persists the liveness tick that bounds crash
+   * recovery: at most every LIVENESS_PERSIST_EVERY_MS, or now with `persist`.
+   *
+   * Throws only if the close for a missed sleep cannot be written; the gap is
+   * then still there for the next call to find.
    */
-  heartbeat(): void {
-    if (!this.open) return;
-    this.store.setLiveness(this.clock.now());
+  noteAlive(opts: { persist?: boolean } = {}): MissedSleep | null {
+    const sample = this.sampleClocks();
+    const missed = this.checkForMissedSleep(sample);
+    if (missed) return missed;
+    if (!this.open || !getOpenSegment(this.open)) return null;
+    const due = this.livenessPersistedAt === null
+      || sample.at - this.livenessPersistedAt >= LIVENESS_PERSIST_EVERY_MS;
+    if (opts.persist || due) this.persistLiveness(sample.at);
+    return null;
+  }
+
+  setMissedSleepListener(listener: ((missed: MissedSleep) => void) | null): void {
+    this.missedSleepListener = listener;
   }
 
   /** Last persisted liveness tick, or null if none. Used by boot recovery. */
@@ -189,6 +369,8 @@ export class TimerService {
 
   async start(args: StartArgs): Promise<TimerStatus> {
     await this.accrualGuard.assertCanAccrue();
+    // Read the open entry only now, after the wait: one opened meanwhile is
+    // switched or kept, never left open beside a second one.
     const now = this.clock.now();
     const nextTaskGuid = args.larkTaskGuid ?? null;
     if (this.open) {
@@ -197,13 +379,20 @@ export class TimerService {
       const next = this.createEntry(nextTaskGuid, now);
       const [closedState, nextState] = this.store.switchEntry(closed, next);
       this.open = next;
+      this.liveEntryId = next.id;
+      this.persistLiveness(now);
       this.notifyMutation();
-      this.syncInBackground(closed, closedState);
-      this.syncInBackground(next, nextState);
+      // In order: while the old entry is still open on the server, creating
+      // the new one is refused as a second live timer.
+      this.syncInBackground([closed, closedState], [next, nextState]);
       return this.status();
     }
     const entry = this.createEntry(nextTaskGuid, now);
     await this.commitOpen(entry, 'pending_create');
+    this.liveEntryId = entry.id;
+    // Proven from the first second: a crash before the next tick must recover
+    // at this start, never at a stale tick of an older entry or at "now".
+    this.persistLiveness(now);
     return this.status();
   }
 
@@ -215,6 +404,9 @@ export class TimerService {
   }
 
   async prepareForQuit(reason: TimerExitReason): Promise<TimerStatus> {
+    // A quit can be the first thing to run after an unreported sleep (Windows
+    // installing an update out of Modern Standby); it must not bill the sleep.
+    this.closeOverUnreportedSleep();
     if (!this.open) {
       this.store.clearExitIntent();
       return this.status();
@@ -234,26 +426,56 @@ export class TimerService {
       return this.status();
     }
     const open = this.open;
-    const closeAt = safeCloseAt(open, this.boundaryAgo(awayForMs));
-    this.store.setAwayState({ reason, entryId: open.id, awayStartedAt: closeAt, observedAt: this.clock.now() });
+    // Never past the last proof of life. A lock or suspend event the OS
+    // delivers late — after the wake — would otherwise close at wake time and
+    // bill the whole sleep.
+    const provenUntil = this.lastAlive?.at ?? Number.POSITIVE_INFINITY;
+    const closeAt = safeCloseAt(open, Math.min(this.boundaryAgo(awayForMs), provenUntil));
     const closed = closeTimeEntry(open, closeAt);
     // The away boundary must exist durably before memory reports the timer as
     // closed. If SQLite rejects the write, keep `open` intact so the power
     // coordinator's one bounded retry can safely attempt the same boundary.
-    const nextState = this.writeEntry(closed);
+    let nextState: PendingEntrySyncState;
+    try {
+      nextState = this.writeEntry(closed);
+    } catch (err) {
+      // Leave the boundary behind so that if the retry fails too and the
+      // process dies, boot recovery closes here (recoverAway) rather than at
+      // the later liveness tick. Best effort: the store just failed once.
+      try {
+        this.store.setAwayState({ reason, entryId: open.id, awayStartedAt: closeAt, observedAt: this.clock.now() });
+      } catch {
+        // Recovery falls back to the liveness tick.
+      }
+      throw err;
+    }
     this.open = null;
-    this.store.setRecoveryNotice(this.awayNotice(reason, closed.id, closeAt));
+    // A boundary an earlier failed attempt left behind is now written.
     this.store.clearAwayState();
+    // No recovery notice: the welcome-back prompt already tells the person,
+    // and a notice here overwrote any crash or server notice still unread
+    // and left a banner that outlived the prompt.
     this.notifyMutation();
-    this.syncInBackground(closed, nextState);
+    this.syncInBackground([closed, nextState]);
     return this.status();
   }
 
-  /** Resume a paused open entry. No-op when idle or already accruing. */
+  /**
+   * Resume a paused open entry with a fresh WORK segment from now. No-op when
+   * idle or already accruing.
+   */
   async resume(): Promise<TimerStatus> {
     if (!this.open) return this.status();
     if (getOpenSegment(this.open)) return this.status();
-    await this.resumeFromIdle(this.clock.now());
+    await this.accrualGuard.assertCanAccrue();
+    // The permission check is a wait: a stop, a sleep close or another resume
+    // may have landed meanwhile. Act on what is there now, never on what was.
+    if (!this.open || getOpenSegment(this.open)) return this.status();
+    const now = this.clock.now();
+    const resumed = openSegment(this.open, { kind: 'WORK', at: now, segmentId: this.ids.ulid() });
+    await this.commitOpen(resumed);
+    // The tick written before the pause is no proof for this new segment.
+    this.persistLiveness(now);
     return this.status();
   }
 
@@ -298,68 +520,9 @@ export class TimerService {
     return this.status();
   }
 
-  /** Resume from a paused (idle) state: open a fresh WORK segment at `at`. */
-  async resumeFromIdle(at: number): Promise<void> {
-    if (!this.open) return;
-    if (getOpenSegment(this.open)) return; // not paused
-    await this.accrualGuard.assertCanAccrue();
-    const readyAt = Math.max(at, this.clock.now());
-    const resumed = openSegment(this.open, { kind: 'WORK', at: readyAt, segmentId: this.ids.ulid() });
-    await this.commitOpen(resumed);
-  }
-
   /** True when running but paused (entry open, no open segment). */
   isPaused(): boolean {
     return this.open !== null && getOpenSegment(this.open) === null;
-  }
-
-  /** Currently in a MEETING segment. */
-  isInMeetingSegment(): boolean {
-    if (!this.open) return false;
-    return getOpenSegment(this.open)?.kind === 'MEETING';
-  }
-
-  /** Meeting started: switch the open WORK segment to MEETING. No-op if not
-   *  running, paused, or already in a MEETING segment. */
-  async beginMeeting(at: number): Promise<void> {
-    if (!this.open) return;
-    const open = getOpenSegment(this.open);
-    if (!open || open.kind === 'MEETING') return;
-    await this.accrualGuard.assertCanAccrue();
-    const updated = openSegment(this.open, { kind: 'MEETING', at, segmentId: this.ids.ulid() });
-    await this.commitOpen(updated);
-  }
-
-  /** Meeting ended: switch back to a WORK segment. No-op if not in MEETING. */
-  async endMeeting(at: number): Promise<void> {
-    if (!this.open) return;
-    const open = getOpenSegment(this.open);
-    if (!open || open.kind !== 'MEETING') return;
-    await this.accrualGuard.assertCanAccrue();
-    const updated = openSegment(this.open, { kind: 'WORK', at, segmentId: this.ids.ulid() });
-    await this.commitOpen(updated);
-  }
-
-  /**
-   * The machine was away (slept / locked) from `awayStart` until `resumeAt`.
-   * If a timer is running, trim that gap so the sleep time is never billed —
-   * the open WORK segment ends at `awayStart`, the gap is recorded as
-   * IDLE_TRIMMED, and a fresh WORK segment resumes at `resumeAt`.
-   * No-op if nothing is running or the gap is trivial (<1s).
-   */
-  async discardAway(awayStart: number, resumeAt: number): Promise<void> {
-    if (!this.open) return;
-    if (resumeAt - awayStart < 1000) return;
-    const open = getOpenSegment(this.open);
-    if (!open) return;
-    await this.accrualGuard.assertCanAccrue();
-    const updated = applyIdleDiscard(this.open, {
-      idleStartedAt: Math.max(awayStart, open.startedAt),
-      resumeAt,
-      idleSegmentId: this.ids.ulid(),
-      workSegmentId: this.ids.ulid(),
-    });
-    await this.commitOpen(updated);
   }
 
   status(): TimerStatus {
@@ -368,13 +531,14 @@ export class TimerService {
     if (!this.open) return { state: 'IDLE', workedMs };
     const open = this.open;
     const activeSegment = getOpenSegment(open);
-    const firstSeg = open.segments[0]!;
     return {
       state: 'RUNNING',
       entryId: open.id,
       revision: open.revision,
       larkTaskGuid: open.larkTaskGuid ?? null,
-      startedAt: firstSeg.startedAt,
+      // The entry's own start: a pause that landed on the first segment's
+      // start removed that segment, so there may be no segment to read.
+      startedAt: open.startedAt,
       segmentStartedAt: activeSegment?.startedAt ?? null,
       workedMs,
       paused: activeSegment === null,
@@ -404,7 +568,14 @@ export class TimerService {
       }
       intervals.set(entry.larkTaskGuid, taskIntervals);
     }
-    return new Map([...intervals].map(([taskGuid, values]) => [taskGuid, intervalUnionMs(values)]));
+    const owner = this.store.currentOwner();
+    const invalidated = owner && this.todayLedgerMode === 'VISIBLE'
+      ? this.serverCache.invalidations?.(owner, window.start, window.end) ?? []
+      : [];
+    return new Map([...intervals].map(([taskGuid, values]) => [
+      taskGuid,
+      unionMs(subtractIntervals(values, invalidated)),
+    ]));
   }
 
   recoveryNotice(): TimerRecoveryNotice | null {
@@ -415,18 +586,77 @@ export class TimerService {
     this.store.clearRecoveryNotice();
   }
 
-  /** Accept an authoritative non-recoverable server finalization and stop the
-   * local timer visibly. Lease-expired entries use normal sync reconciliation
-   * instead and never call this path. */
+  /**
+   * The server's copy of the open entry is missing, behind, or was closed by
+   * the server because it stopped hearing from us. Local is the truth: push it.
+   * A server close can only be overridden by a newer revision, so when the
+   * server already holds ours, bump it.
+   *
+   * Local is only the truth for time this process actually watched. An entry
+   * it did not open is never pushed over the server's close, and one whose last
+   * proof of life is older than that close is closed at the proof instead —
+   * otherwise a gap nobody tracked (sleep the away handler missed, another
+   * account's session) would be re-credited by the resend.
+   *
+   * @param check.serverEndedAt where the server closed it, when it did.
+   * @param check.provenAliveAt the liveness tick as it stood BEFORE this
+   *   heartbeat wrote a fresh one.
+   */
+  async resyncFromServer(
+    entryId: string,
+    serverRevision: number | null,
+    check: { serverEndedAt?: number | null; provenAliveAt?: number | null } = {},
+  ): Promise<void> {
+    // The answer may have sat through a sleep (the request went out, the
+    // machine slept, the reply landed after the wake). If so the entry is
+    // closed at the sleep's start right here, and below finds nothing open to
+    // push — the truncated close goes up through the normal sync instead.
+    this.closeOverUnreportedSleep();
+    const open = this.open;
+    if (!open || open.id !== entryId) return;
+    if (open.id !== this.liveEntryId) return;
+    const { serverEndedAt = null, provenAliveAt = null } = check;
+    if (
+      getOpenSegment(open)
+      && serverEndedAt !== null
+      && provenAliveAt !== null
+      && provenAliveAt < serverEndedAt
+    ) {
+      this.recover(provenAliveAt);
+      return;
+    }
+    if (serverRevision === null) {
+      this.store.requeue(entryId, 'pending_create');
+      return;
+    }
+    if (serverRevision >= open.revision) {
+      await this.commitOpen({ ...open, revision: serverRevision + 1 });
+      return;
+    }
+    this.store.requeue(entryId, 'pending_update');
+  }
+
+  /**
+   * The server will not take this entry back — another live timer owns the
+   * user (a second device), or it was closed on purpose — so stop visibly at
+   * the server's boundary. A close for silence goes through resyncFromServer
+   * instead and loses nothing.
+   */
   acceptServerFinalization(entryId: string, endedAt: number): TimerStatus {
     if (!this.open || this.open.id !== entryId) return this.status();
     const boundary = Math.max(this.open.startedAt, endedAt);
-    const segments = this.open.segments
-      .filter((segment) => segment.startedAt <= boundary)
-      .map((segment) => ({
-        ...segment,
-        endedAt: segment.endedAt === null || segment.endedAt > boundary ? boundary : segment.endedAt,
-      }));
+    // Cut at the boundary; whatever that leaves empty is removed, not kept as
+    // a zero-length span (ZERO-LENGTH SEGMENTS in @grind/core segments.ts).
+    const { entry: cut } = dropZeroLengthSegments({
+      ...this.open,
+      segments: this.open.segments
+        .filter((segment) => segment.startedAt <= boundary)
+        .map((segment) => ({
+          ...segment,
+          endedAt: segment.endedAt === null || segment.endedAt > boundary ? boundary : segment.endedAt,
+        })),
+    });
+    const segments = cut.segments;
     const closed: TimeEntry = {
       ...this.open,
       revision: this.open.revision + 1,
@@ -447,7 +677,6 @@ export class TimerService {
     return this.status();
   }
 
-  /** Retry pushing any locally-persisted entries that haven't synced yet. */
   /**
    * Push pending entries to the server, oldest first.
    *
@@ -460,33 +689,177 @@ export class TimerService {
    * @returns true when entries remain, so a caller can drain again promptly.
    */
   async flushUnsynced(limit = FLUSH_BATCH_LIMIT): Promise<boolean> {
+    // A drain can be the first thing to run after an unreported sleep. Close
+    // over the gap before pushing, or the open entry would go up claiming to
+    // be alive across it.
+    this.closeOverUnreportedSleep();
     if (this.backgroundSyncs.size > 0) {
       await Promise.allSettled([...this.backgroundSyncs]);
     }
-    let flushed = 0;
-    for (const { entry, syncState } of this.store.getUnsynced()) {
-      // Hitting the batch limit is the ONLY reason to ask for another pass.
-      //
-      // This used to end with `return this.store.hasUnsynced()`, which is a
-      // different question: it is true whenever ANY row is still pending, and
-      // the entry currently being tracked is pending by definition — every
-      // checkpoint marks it dirty again. The drain treats `true` as "come
-      // straight back", so a running timer put it in a permanent loop
-      // (6,440 passes in 68 minutes in one field log) which held the in-flight
-      // slot and made every scheduled drain a no-op.
-      //
-      // A row still pending after we tried it is pending because the server
-      // would not take it, or because it is the live entry. Neither is fixed by
-      // retrying immediately; the interval will come back for it.
-      if (flushed >= limit) return true;
-      await this.trySync(entry, syncState);
-      flushed += 1;
+    if (this.syncPause.isPaused(this.clock.now())) return false;
+    // One row past the limit says whether another pass is needed, without
+    // reading (and parsing) every due row each pass.
+    const due = this.store.getUnsynced(this.clock.now(), Number.isFinite(limit) ? limit + 1 : -1);
+    for (const { entry, syncState, attempts } of due.slice(0, limit)) {
+      // The server is unreachable or overloaded: every other row would fail
+      // the same way. Stop here; the pause decides when to come back.
+      if (await this.trySync(entry, syncState, attempts) === 'server') return false;
     }
-    return false;
+    // Hitting the batch limit is the ONLY reason to ask for another pass.
+    //
+    // This used to end with `return this.store.hasUnsynced()`, which is a
+    // different question: it is true whenever ANY row is still pending, and
+    // the entry currently being tracked is pending by definition — every
+    // checkpoint marks it dirty again. The drain treats `true` as "come
+    // straight back", so a running timer put it in a permanent loop
+    // (6,440 passes in 68 minutes in one field log) which held the in-flight
+    // slot and made every scheduled drain a no-op.
+    //
+    // A row still pending after we tried it is pending because the server
+    // would not take it, or because it is the live entry. Neither is fixed by
+    // retrying immediately; its own retry time will come back for it.
+    return due.length > limit;
+  }
+
+  /**
+   * Another request (the heartbeat) just got an answer, so a pause taken for
+   * "no response" is over. One the server asked for (5xx, 429) still stands.
+   */
+  noteServerReachable(): void {
+    this.syncPause.noteReachable();
   }
 
   hasUnsynced(): boolean {
     return this.store.hasUnsynced();
+  }
+
+  syncBacklog(): SyncBacklog {
+    const backlog = this.store.syncBacklog(PARK_AFTER_ATTEMPTS);
+    // An unreachable server is the more useful error: no row was even tried.
+    return { ...backlog, lastError: this.syncPause.lastError ?? backlog.lastError };
+  }
+
+  /**
+   * One-time repair for agents before beta.38. They accepted a server close
+   * for silence as final, so a closed entry can sit "synced" locally while the
+   * server holds a shorter copy. Re-send every recent closed entry whose local
+   * copy no longer matches what the server acknowledged; the server applies a
+   * newer revision over its own close. Entries this agent closed by recovery
+   * are skipped: their local end is a guess that may be shorter than the
+   * server's proven one.
+   */
+  resyncTruncatedOnce(): number {
+    // One transaction: the once-marker and every rewrite land together, so a
+    // crash part-way can neither skip the rest nor run the pass twice.
+    return this.store.transaction(() => {
+      if (!this.store.markOnce('resync_server_truncated_v38')) return 0;
+      let resent = 0;
+      const since = this.clock.now() - RESYNC_LOOKBACK_MS;
+      for (const row of this.store.listLedgerEntries(since)) {
+        const { entry } = row;
+        if (row.syncState !== 'synced' || entry.endedAt === null || entry.source !== 'AUTO') continue;
+        if (entry.closeReason !== 'AGENT') continue;
+        // Compare under the task the server acknowledged: a task changed on
+        // the dashboard is metadata, not time cut short, and the resend
+        // (which never carries the task) would change nothing. Rows an older
+        // agent acknowledged only did so when the tasks matched.
+        const acknowledgedTask = row.acknowledgedTaskGuid === undefined
+          ? entry.larkTaskGuid ?? null
+          : row.acknowledgedTaskGuid;
+        if (row.acknowledgedHash !== null && row.acknowledgedHash === this.hashWithTask(entry, acknowledgedTask)) continue;
+        this.writeEntry({ ...entry, revision: Math.max(entry.revision, row.acknowledgedRevision ?? 0) + 1 });
+        resent += 1;
+      }
+      return resent;
+    });
+  }
+
+  /** Drop local copies the server has held for a long time; see SYNCED_RETENTION_MS. */
+  pruneOldSyncedEntries(): number {
+    const pruned = this.store.pruneSyncedBefore(this.clock.now() - SYNCED_RETENTION_MS);
+    if (pruned > 0) this.ledgerEpoch += 1;
+    return pruned;
+  }
+
+  /**
+   * Developer-requested resend of everything this owner tracked in
+   * [startMs, endMs): local is the truth, so put it back on the upload queue
+   * and let the drain push it again.
+   *
+   * - A closed entry the server already has gets a revision above anything the
+   *   server acknowledged, so it replaces whatever copy the server holds (the
+   *   server applies a newer revision over its own close). One never created
+   *   stays a pending create.
+   * - The running entry is queued again; its revision is bumped only when this
+   *   process has been watching it (see resyncFromServer for why).
+   *
+   * Backoff is cleared on every row touched, so the next drain sends them all.
+   */
+  resyncRange(startMs: number, endMs: number): { requeued: number; openRequeued: boolean; skippedRecovered: number } {
+    if (!this.store.currentOwner()) throw new Error('timer_owner_unavailable');
+    let requeued = 0;
+    let openRequeued = false;
+    let skippedRecovered = 0;
+    for (const row of this.store.listLedgerEntries(startMs)) {
+      const { entry } = row;
+      if (entry.startedAt >= endMs) continue;
+      if (entry.endedAt !== null && entry.endedAt <= startMs) continue;
+      const nextRevision = Math.max(entry.revision, row.acknowledgedRevision ?? 0) + 1;
+      if (entry.endedAt === null) {
+        // Only the entry this service holds open is live; any other open row
+        // is closed by recovery on the next owner bind, not resent here.
+        if (!this.open || this.open.id !== entry.id) continue;
+        if (row.syncState === 'synced' && entry.id === this.liveEntryId) {
+          const bumped = { ...this.open, revision: Math.max(this.open.revision, nextRevision) };
+          this.writeEntry(bumped);
+          this.open = bumped;
+        } else {
+          this.store.requeue(entry.id, row.syncState === 'pending_create' ? 'pending_create' : 'pending_update');
+          this.ledgerEpoch += 1;
+        }
+        openRequeued = true;
+        continue;
+      }
+      // A crash-recovered entry's end is this agent's estimate (its last
+      // liveness); the server may hold a longer, proven copy. Re-sending it with
+      // a newer revision would replace that with the shorter guess.
+      if (entry.closeReason === 'AGENT_RECOVERY' && row.syncState === 'synced') {
+        skippedRecovered += 1;
+        continue;
+      }
+      if (row.syncState === 'pending_create') {
+        this.store.requeue(entry.id, 'pending_create');
+        this.ledgerEpoch += 1;
+      } else {
+        this.writeEntry({ ...entry, revision: nextRevision });
+      }
+      requeued += 1;
+    }
+    if (requeued > 0 || openRequeued) this.notifyMutation();
+    return { requeued, openRequeued, skippedRecovered };
+  }
+
+  /** Closed entries in [startMs, endMs) the server has not acknowledged yet. */
+  rangeBacklog(startMs: number, endMs: number): RangeBacklog {
+    const backlog = this.store.rangeBacklog(startMs, endMs);
+    // Rows waiting on an unreachable server were never tried, so carry no
+    // error of their own; the reason is the server's.
+    const reachability = this.syncPause.lastError;
+    if (backlog.pending === 0 || reachability === null) return backlog;
+    return { ...backlog, lastErrors: [reachability, ...backlog.lastErrors.filter((e) => e !== reachability)].slice(0, 5) };
+  }
+
+  /** True the first time `key` is marked for the bound owner. */
+  markOnce(key: string): boolean {
+    return this.store.markOnce(key);
+  }
+
+  getNote(key: string): string | null {
+    return this.store.getNote(key);
+  }
+
+  setNote(key: string, value: string): void {
+    this.store.setNote(key, value);
   }
 
   /** Activity linked to this entry must wait until its server parent exists. */
@@ -498,56 +871,166 @@ export class TimerService {
     const nextState = this.writeEntry(entry, syncState ? { syncState } : undefined);
     this.open = entry;
     this.notifyMutation();
-    this.syncInBackground(entry, nextState);
+    this.syncInBackground([entry, nextState]);
   }
 
   private async commitClosed(entry: TimeEntry): Promise<void> {
     const nextState = this.writeEntry(entry);
     this.open = null;
     this.notifyMutation();
-    this.syncInBackground(entry, nextState);
+    this.syncInBackground([entry, nextState]);
   }
 
-  private syncInBackground(entry: TimeEntry, syncState: PendingEntrySyncState): void {
-    const pending = this.trySync(entry, syncState).catch(() => {
-      // The durable row stays pending and the drain retries it later.
-    }).finally(() => {
+  /**
+   * Push now, in order, without making the caller wait on the network. While
+   * the server is unreachable the rows just stay queued for the drain.
+   */
+  private syncInBackground(...items: Array<[TimeEntry, PendingEntrySyncState]>): void {
+    if (this.syncPause.isPaused(this.clock.now())) return;
+    const pending = (async () => {
+      for (const [entry, syncState] of items) {
+        if (await this.trySync(entry, syncState, 0) === 'server') return;
+      }
+    })().finally(() => {
       this.backgroundSyncs.delete(pending);
     });
     this.backgroundSyncs.add(pending);
   }
 
-  private async trySync(entry: TimeEntry, syncState: PendingEntrySyncState): Promise<void> {
-    if (syncState === 'pending_create') {
-      await this.tryCreateThenSync(entry);
-      return;
-    }
-    await this.tryUpdate(entry, true);
-  }
-
-  private async tryCreateThenSync(entry: TimeEntry): Promise<void> {
+  /**
+   * One push attempt. Never throws. See syncPolicy for what a failure means:
+   * an unreachable server pauses every push ('server'); a row the server
+   * refused, or did not acknowledge, backs off — and eventually parks — on
+   * its own ('row'), so the drain moves on and support can see why.
+   */
+  private async trySync(
+    entry: TimeEntry,
+    syncState: PendingEntrySyncState,
+    attempts: number,
+  ): Promise<'ok' | 'row' | 'server'> {
+    let failure: SyncFailure | null;
     try {
-      const receipt = await this.sync.create(entry);
-      if (this.acknowledge(entry, receipt)) return;
-      if (!this.markEntryCreated(entry.id, entry)) return;
-    } catch {
-      // Best-effort: leave it pending_create; flushUnsynced will retry later.
-      return;
-    }
-    await this.tryUpdate(entry, false);
-  }
-
-  private async tryUpdate(entry: TimeEntry, retryCreateOnNotFound: boolean): Promise<void> {
-    try {
-      const receipt = await this.sync.sync(entry);
-      this.acknowledge(entry, receipt);
+      const settled = syncState === 'pending_create'
+        ? await this.createThenUpdate(entry)
+        : await this.update(entry, true);
+      failure = settled ? null : { scope: 'row', error: UNACKNOWLEDGED_RECEIPT };
     } catch (err) {
-      if (retryCreateOnNotFound && isNotFound(err)) {
-        if (!this.markEntryPendingCreate(entry.id, entry)) return;
-        await this.tryCreateThenSync(entry);
-      }
-      // Otherwise best-effort: leave its current pending state for a later flush.
+      failure = classifySyncFailure(err);
     }
+    const now = this.clock.now();
+    if (failure?.scope === 'server') {
+      this.syncPause.note(failure, now);
+      return 'server';
+    }
+    this.syncPause.clear();
+    if (!failure) return 'ok';
+    try {
+      this.store.noteSyncFailure(entry.id, failure.error, rowRetryAt(now, attempts + 1));
+    } catch {
+      // Bookkeeping only; the row stays pending either way.
+    }
+    return 'row';
+  }
+
+  /** @returns false when the server answered but did not acknowledge this snapshot. */
+  private async createThenUpdate(entry: TimeEntry): Promise<boolean> {
+    const receipt = await this.sync.create(entry);
+    if (this.acknowledge(entry, receipt)) return true;
+    // A newer local write replaced this snapshot; that write pushes itself.
+    if (!this.markEntryCreated(entry.id, entry)) return true;
+    return this.update(entry, false);
+  }
+
+  private async update(entry: TimeEntry, retryCreateOnNotFound: boolean): Promise<boolean> {
+    try {
+      return this.acknowledge(entry, await this.sync.sync(entry));
+    } catch (err) {
+      if (!retryCreateOnNotFound || !isNotFound(err)) throw err;
+      if (!this.markEntryPendingCreate(entry.id, entry)) return true;
+      return this.createThenUpdate(entry);
+    }
+  }
+
+  private sampleClocks(): AliveSample {
+    const at = this.clock.now();
+    return { at, wallMs: this.clock.wallNow?.() ?? at, monoMs: this.clock.monoNow?.() ?? at };
+  }
+
+  /** noteAlive's gap check alone, for paths that must not fail on it (sync, quit). */
+  private closeOverUnreportedSleep(): void {
+    try {
+      this.checkForMissedSleep(this.sampleClocks());
+    } catch {
+      // The close could not be written; the gap stays for the next tick.
+    }
+  }
+
+  /**
+   * Record `sample` as the latest proof of life. When the gap since the
+   * previous one is a sleep nobody reported, first close the open entry at the
+   * previous proof and tell the listener.
+   */
+  private checkForMissedSleep(sample: AliveSample): MissedSleep | null {
+    const previous = this.lastAlive;
+    // The larger of the two: the wall clock catches a real sleep (a monotonic
+    // source stops during it on macOS), the monotonic one a frozen process
+    // whose wall clock was set back meanwhile.
+    const gapMs = previous
+      ? Math.max(sample.wallMs - previous.wallMs, sample.monoMs - previous.monoMs)
+      : 0;
+    if (!previous || gapMs <= MISSED_SLEEP_GAP_MS) {
+      this.lastAlive = sample;
+      return null;
+    }
+    // Throws if the close cannot be written, leaving `lastAlive` where it was
+    // so the next proof still sees the gap.
+    const missed = this.closeForMissedSleep(previous, gapMs);
+    this.lastAlive = sample;
+    try {
+      this.missedSleepListener?.(missed);
+    } catch {
+      // The close is durable; the prompt is the listener's business.
+    }
+    return missed;
+  }
+
+  private persistLiveness(at: number): void {
+    this.store.setLiveness(at);
+    this.livenessPersistedAt = at;
+  }
+
+  /** The latest instant the open entry was proven alive, for boot recovery. */
+  private lastProofOfLife(): number | null {
+    const open = this.store.getOpen();
+    const intent = this.store.getExitIntent();
+    // A quit that was writing its close when the process died: it was alive
+    // and tracking right up to that moment.
+    if (open && intent && intent.entryId === open.id) return intent.observedAt;
+    return this.store.getLiveness();
+  }
+
+  /**
+   * Close the open entry at `lastAlive` — the last proof before a gap nobody
+   * reported. Same close as a suspend: any open entry, paused or not, ends
+   * there; resuming afterwards starts a fresh one.
+   */
+  private closeForMissedSleep(lastAlive: AliveSample, gapMs: number): MissedSleep {
+    const missed: MissedSleep = { gapMs, lastAliveWallMs: lastAlive.wallMs, closed: null };
+    const open = this.open;
+    if (!open) return missed;
+    const closedAt = safeCloseAt(open, lastAlive.at);
+    const closed = closeTimeEntry(open, closedAt);
+    const nextState = this.writeEntry(closed);
+    this.open = null;
+    this.notifyMutation();
+    this.syncInBackground([closed, nextState]);
+    missed.closed = {
+      entryId: open.id,
+      closedAt,
+      larkTaskGuid: open.larkTaskGuid ?? null,
+      wasAccruing: getOpenSegment(open) !== null,
+    };
+    return missed;
   }
 
   /**
@@ -558,8 +1041,8 @@ export class TimerService {
    * is meaningless without knowing which of the two produced it. On a machine a
    * few minutes out those two frames are not comparable, and `Math.max(at,
    * segment.startedAt)` — the guard meant to stop a boundary preceding its own
-   * segment — silently collapses the segment to zero length instead. The server
-   * then drops it and rejects the entry as invalid_segments, forever.
+   * segment — silently collapses the segment to nothing instead, losing the
+   * time it held.
    *
    * A duration has no frame. `now - elapsed`, computed here, always lands in the
    * same frame as the segment it is closing.
@@ -583,26 +1066,78 @@ export class TimerService {
     });
   }
 
+  /**
+   * @returns true when this snapshot is settled: acknowledged, or superseded
+   * by a newer local write that will push itself.
+   */
   private acknowledge(entry: TimeEntry, receipt: TimerSyncReceipt): boolean {
-    const localHash = createHash('sha256').update(canonicalTimerEntryPayload(entry)).digest('hex');
-    const exact = receipt.acceptedRevision === entry.revision && receipt.canonicalHash === localHash;
+    // Task attribution can be edited on the dashboard and is never pushed, so
+    // compare against the server's — it is metadata, not tracked time.
+    const localHash = this.hashWithTask(entry, receipt.canonicalEntry.larkTaskGuid);
+    // The server applied exactly this revision. Its canonical copy can still
+    // hash differently (it normalised a timestamp); that is its answer, not a
+    // refusal. Treating it as unacknowledged resent the same revision, which
+    // the server then rejects as revision_payload_conflict — forever.
+    const exact = receipt.acceptedRevision === entry.revision
+      && (receipt.canonicalHash === localHash || receipt.disposition === 'APPLIED');
+    if (!exact && receipt.disposition === 'FINALIZED' && isClosedForSilence(receipt.canonicalEntry.closeReason)) {
+      // The server closed this entry because it stopped hearing from us and
+      // never learned the real end. Accepting that would lose the difference
+      // for good. Re-send with a newer revision, which the server applies over
+      // its own close; if it already refused a newer one, back off instead.
+      if (entry.revision > receipt.acceptedRevision) return false;
+      // Only from the snapshot we hold; a newer local write pushes itself.
+      const isOpen = this.open?.id === entry.id;
+      if (isOpen && JSON.stringify(this.open) !== JSON.stringify(entry)) return true;
+      const resent = { ...entry, revision: receipt.acceptedRevision + 1 };
+      this.writeEntry(resent);
+      if (isOpen) this.open = resent;
+      // Not straight away: a server that keeps finalizing would otherwise be
+      // answered on every pass. One resend per row per backoff step, at most.
+      try {
+        this.store.noteSyncFailure(entry.id, 'resent_over_server_close', rowRetryAt(this.clock.now(), 1));
+      } catch {
+        // Bookkeeping only.
+      }
+      return true;
+    }
     const corrected = receipt.acceptedRevision >= entry.revision
       && (receipt.correction !== null || receipt.disposition === 'FINALIZED' || receipt.disposition === 'STALE');
     if (!exact && !corrected) return false;
     const marked = this.markEntrySynced(entry.id, entry, {
       revision: receipt.acceptedRevision,
       hash: receipt.canonicalHash,
+      larkTaskGuid: receipt.canonicalEntry.larkTaskGuid,
     });
-    if (marked && receipt.correction === 'CLOCK_CLAMP') {
-      const correctedAt = new Date(receipt.canonicalEntry.endedAt ?? receipt.serverTime).getTime();
-      this.store.setRecoveryNotice({
-        entryId: entry.id,
-        recoveredAt: Number.isFinite(correctedAt) ? correctedAt : this.clock.now(),
-        reason: 'server_clock_corrected',
-        observedAt: this.clock.now(),
-      });
-    }
+    if (marked && receipt.correction === 'CLOCK_CLAMP') this.noteClockCorrection(entry, receipt);
     return marked;
+  }
+
+  /**
+   * Tell the person the server moved this timer's end — only when it moved it
+   * far enough to notice. CLOCK_CLAMP means a timestamp sat past the server's
+   * now plus its skew allowance; a correction of seconds changes nothing the
+   * person can see, so it stays silent. A crash or server notice still unread
+   * matters more and is never overwritten.
+   */
+  private noteClockCorrection(entry: TimeEntry, receipt: TimerSyncReceipt): void {
+    // Measured without zero-length segments: a server that drops one (and an
+    // older server also called that a clamp) has not moved anything.
+    const localBoundary = latestBoundary(dropZeroLengthSegments(entry).entry);
+    const serverBoundary = latestBoundary(receipt.canonicalEntry);
+    if (serverBoundary === null || localBoundary === null) return;
+    if (localBoundary - serverBoundary <= CLOCK_CORRECTION_NOTICE_MS) return;
+    if (this.store.getRecoveryNotice()) return;
+    this.store.setRecoveryNotice({
+      entryId: entry.id,
+      recoveredAt: serverBoundary,
+      reason: 'server_clock_corrected',
+      observedAt: this.clock.now(),
+    });
+  }
+
+  private hashWithTask(entry: TimeEntry, larkTaskGuid: string | null): string {
+    return createHash('sha256').update(canonicalTimerEntryPayload({ ...entry, larkTaskGuid })).digest('hex');
   }
 
   private notifyMutation(): void {
@@ -631,12 +1166,12 @@ export class TimerService {
   private todayProjection(now: number, window: { start: number; end: number }) {
     const owner = this.store.currentOwner();
     const local = this.localLedgerEntries(window.start);
-    const server = owner && this.todayLedgerMode === 'VISIBLE'
-      ? this.serverCache.list(owner, window.start, window.end, now)
-      : [];
+    const visible = owner && this.todayLedgerMode === 'VISIBLE' ? owner : null;
+    const server = visible ? this.serverCache.list(visible, window.start, window.end, now) : [];
     return reconcileTodayLedger({
       local,
       server,
+      invalidations: visible ? this.serverCache.invalidations?.(visible, window.start, window.end) ?? [] : [],
       activeLocalEntryId: this.open?.id ?? null,
       windowStart: window.start,
       windowEnd: window.end,
@@ -707,6 +1242,7 @@ export class TimerService {
       syncState: item.syncState,
       acknowledgedRevision: item.acknowledgedRevision,
       acknowledgedHash: item.acknowledgedHash,
+      acknowledgedTaskGuid: item.acknowledgedTaskGuid,
     }));
   }
 }
@@ -725,32 +1261,37 @@ const EMPTY_SERVER_CACHE: ServerLedgerCache = {
   list: () => [],
 };
 
-function intervalUnionMs(values: Array<{ start: number; end: number }>): number {
-  values.sort((a, b) => a.start - b.start || a.end - b.end);
-  let total = 0;
-  let current: { start: number; end: number } | null = null;
-  for (const value of values) {
-    if (!current) current = { ...value };
-    else if (value.start <= current.end) current.end = Math.max(current.end, value.end);
-    else {
-      total += current.end - current.start;
-      current = { ...value };
-    }
+function sameOwner(a: TimerOwner | null, b: TimerOwner | null): boolean {
+  if (!a || !b) return a === b;
+  return a.userId === b.userId && a.workspaceId === b.workspaceId;
+}
+
+/**
+ * The latest instant an entry claims, local (epoch ms) or from a receipt (ISO
+ * strings) alike — where a clock clamp would have pulled it back to. Null when
+ * a receipt timestamp does not parse.
+ */
+function latestBoundary(entry: {
+  startedAt: number | string;
+  endedAt: number | string | null;
+  segments: Array<{ startedAt: number | string; endedAt: number | string | null }>;
+}): number | null {
+  const ms = (value: number | string) => (typeof value === 'number' ? value : Date.parse(value));
+  let latest = ms(entry.startedAt);
+  if (entry.endedAt !== null) latest = Math.max(latest, ms(entry.endedAt));
+  for (const segment of entry.segments) {
+    latest = Math.max(latest, ms(segment.startedAt));
+    if (segment.endedAt !== null) latest = Math.max(latest, ms(segment.endedAt));
   }
-  return current ? total + current.end - current.start : total;
+  return Number.isFinite(latest) ? latest : null;
 }
 
-function latestSegmentBoundary(entry: TimeEntry): number {
-  return entry.segments.reduce((latest, segment) => {
-    const end = segment.endedAt ?? segment.startedAt;
-    return Math.max(latest, segment.startedAt, end);
-  }, entry.startedAt);
-}
-
+/** Never close before what the entry already holds: a boundary at `at` or later. */
 function safeCloseAt(entry: TimeEntry, at: number): number {
-  return Math.max(at, latestSegmentBoundary(entry));
+  return Math.max(at, latestBoundary(entry) ?? entry.startedAt);
 }
 
 function isNotFound(err: unknown): boolean {
   return err instanceof HttpError && err.status === 404;
 }
+

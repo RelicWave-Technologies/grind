@@ -1,0 +1,124 @@
+/* Developer · Re-send agent data. Layout only — every value is a kit token. */
+
+.dev-form-card {
+  margin-bottom: var(--ui-sp-6);
+}
+
+.dev-form {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: var(--ui-sp-5);
+  align-items: start;
+}
+
+.dev-form > .ui-btn {
+  margin-top: calc(var(--ui-sp-4) + var(--ui-sp-2));
+}
+
+.dev-date {
+  font-family: var(--ui-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.dev-inline-banner {
+  margin-top: var(--ui-sp-4);
+}
+
+.dev-table-card {
+  overflow: hidden;
+}
+
+.dev-table-wrap {
+  overflow-x: auto;
+}
+
+.dev-toggle-cell {
+  width: calc(var(--ui-control-h) + var(--ui-sp-2));
+}
+
+.dev-person {
+  display: grid;
+  gap: var(--ui-sp-1);
+  min-width: 0;
+}
+
+.dev-person .ui-t-small {
+  color: var(--ui-ink-3);
+}
+
+.dev-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ui-sp-2);
+}
+
+.dev-mono {
+  font-family: var(--ui-font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.dev-detail-row > td {
+  background: var(--ui-surface-inset);
+}
+
+.dev-detail {
+  display: grid;
+  gap: var(--ui-sp-2);
+  padding: var(--ui-sp-2) 0;
+}
+
+.dev-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(calc(var(--ui-sp-12) * 5), 1fr));
+  gap: var(--ui-sp-3) var(--ui-sp-6);
+  margin: 0;
+}
+
+.dev-fact {
+  display: grid;
+  gap: var(--ui-sp-1);
+  min-width: 0;
+}
+
+.dev-fact dd {
+  margin: 0;
+  color: var(--ui-ink);
+  white-space: normal;
+}
+
+.dev-detail-note {
+  margin: 0;
+  padding: var(--ui-sp-2) 0;
+  color: var(--ui-ink-2);
+}
+
+.dev-json {
+  margin: 0;
+  padding: var(--ui-sp-4);
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-sm);
+  background: var(--ui-surface);
+  color: var(--ui-ink);
+  font-family: var(--ui-font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: calc(var(--ui-sp-12) * 8);
+  overflow: auto;
+}
+
+@media (max-width: 760px) {
+  .dev-form {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .dev-form > .ui-field:first-child {
+    grid-column: 1 / -1;
+  }
+
+  .dev-form > .ui-btn {
+    margin-top: 0;
+    grid-column: 1 / -1;
+  }
+}

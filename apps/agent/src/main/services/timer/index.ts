@@ -1,28 +1,35 @@
-import Database from 'better-sqlite3';
 import { ulid } from 'ulid';
-import { app, net } from 'electron';
-import path from 'node:path';
+import { net } from 'electron';
 import { TimerService } from './timerService';
 import { SqliteEntryStore } from './sqliteStore';
 import { SqliteTodayLedgerStore } from './todayLedgerStore';
 import { HttpSyncClient } from './syncClient';
 import { TimerSyncDrain, type TimerSyncDrainReason } from './syncDrain';
-import type { Clock, IdGen } from './types';
+import type { Clock, IdGen, MissedSleep } from './types';
 import { log } from '../../logger';
 import { getTrackingReadinessService } from '../trackingReadiness';
-import { getWorkspaceTimeContext } from '../workspaceTime';
+import { getTimerDayContext, getWorkspaceTimeContext } from '../workspaceTime';
 import { loadTokens } from '../tokenStore';
-import type { TimerOwner } from './types';
+import type { TimerOwner, TimerRecoveryResult } from './types';
+import { setPreferencesOwner } from '../preferences';
 import { TodayLedgerHydrator, type TodayLedgerRefreshReason } from './todayLedgerHydrator';
 import { api } from '../apiClient';
 import { broadcast } from '../../broadcast';
 import { serverAlignedNow } from '../serverClock';
 import { getTodayLedgerMode } from '../agentConfig';
+import { openAgentDb } from '../agentDb';
 import type { TodayLedgerMode } from '@grind/types';
 
 // Server-aligned: timer timestamps are validated (and clamped) by the server,
 // so they must be stamped in the server's frame rather than the laptop's.
-const realClock: Clock = { now: () => serverAlignedNow() };
+// The raw device readings are only ever compared with each other (the gap
+// between two proofs of life), never stamped on anything.
+const realClock: Clock = {
+  now: () => serverAlignedNow(),
+  // eslint-disable-next-line no-restricted-syntax -- device<->device: only the gap between two readings is used
+  wallNow: () => Date.now(),
+  monoNow: () => performance.now(),
+};
 const realIds: IdGen = { ulid: () => ulid() };
 
 let service: TimerService | null = null;
@@ -31,12 +38,21 @@ let todayLedgerStore: SqliteTodayLedgerStore | null = null;
 let todayLedgerHydrator: TodayLedgerHydrator | null = null;
 let configuredTodayLedgerMode: TodayLedgerMode | null = null;
 let timerRuntimeStarted = false;
+let missedSleepListener: ((missed: MissedSleep) => void) | null = null;
+
+/**
+ * Who handles a sleep the OS never reported (see TimerService.noteAlive).
+ * Registered without building the service, so wiring it never opens the DB
+ * ahead of boot.
+ */
+export function onTimerMissedSleep(listener: (missed: MissedSleep) => void): void {
+  missedSleepListener = listener;
+}
 
 /** Lazily build the timer service against the on-disk SQLite DB. */
 export function getTimerService(): TimerService {
   if (service) return service;
-  const dbPath = path.join(app.getPath('userData'), 'agent.db');
-  const db = new Database(dbPath);
+  const db = openAgentDb();
   const store = new SqliteEntryStore(db);
   todayLedgerStore = new SqliteTodayLedgerStore(db);
   service = new TimerService(
@@ -47,7 +63,7 @@ export function getTimerService(): TimerService {
     getTrackingReadinessService(),
     {
       window(now) {
-        const context = getWorkspaceTimeContext(now);
+        const context = getTimerDayContext(now, service?.currentOwner()?.workspaceId ?? null);
         return context.ready && context.dayStart !== null && context.dayEnd !== null
           ? { start: context.dayStart, end: context.dayEnd }
           : null;
@@ -56,7 +72,8 @@ export function getTimerService(): TimerService {
     todayLedgerStore,
   );
   service.setTodayLedgerMode(configuredTodayLedgerMode ?? getTodayLedgerMode());
-  log.info('timer service initialized', { dbPath });
+  service.setMissedSleepListener((missed) => missedSleepListener?.(missed));
+  log.info('timer service initialized');
   return service;
 }
 
@@ -88,6 +105,39 @@ function getTodayLedgerHydrator(): TodayLedgerHydrator {
   return todayLedgerHydrator;
 }
 
+function ownerFromTokens(tokens: Awaited<ReturnType<typeof loadTokens>>): TimerOwner | null {
+  return tokens ? { userId: tokens.userId, workspaceId: tokens.workspaceId } : null;
+}
+
+function logRecovered(recovered: TimerRecoveryResult[], context: string): void {
+  for (const item of recovered) {
+    log.warn('timer recovered stale open entry', {
+      context,
+      entryId: item.entryId,
+      recoveredAt: item.recoveredAt,
+      reason: item.notice.reason,
+    });
+  }
+}
+
+/**
+ * Point the timer, and the per-account preferences, at `owner`. Any entry left
+ * open on either side of an owner change is closed at its last proof of life
+ * first (see TimerService.switchOwner).
+ */
+function bindOwner(owner: TimerOwner | null, claimLegacy: boolean, context: string): void {
+  const timer = getTimerService();
+  const recovered = timer.switchOwner(owner, claimLegacy);
+  setPreferencesOwner(owner, { claimLegacy });
+  logRecovered(recovered, context);
+  if (!owner || !claimLegacy) return;
+  const legacy = timer.claimLegacySelfEntries();
+  if (legacy.claimed > 0) log.info('claimed legacy "self" timer entries for the only account on this machine', { context, ...legacy });
+  if (legacy.unclaimed > 0) {
+    log.warn('legacy "self" timer entries left unclaimed: more than one account has used this machine', { context, ...legacy });
+  }
+}
+
 /**
  * Recover any left-open entry on boot.
  *
@@ -97,41 +147,40 @@ function getTodayLedgerHydrator(): TodayLedgerHydrator {
  * hundreds of sequential requests — the app looked hung on launch and "first
  * sync" appeared to take forever. The backlog is drained in the background by
  * the sync drain instead, which is single-flighted and chunked.
+ *
+ * Local only — no network — so the boot can bind the owner and start the tick
+ * before anything online has answered.
  */
 export async function initTimerOnBoot(): Promise<void> {
   const svc = getTimerService();
-  const tokens = await loadTokens();
-  if (!tokens) {
-    svc.bindOwner(null);
-    return;
-  }
-  const owner: TimerOwner = { userId: tokens.userId, workspaceId: tokens.workspaceId };
-  svc.bindOwner(owner, true);
-  // Close any dangling entry at the LAST PROOF OF LIFE — the most recent
-  // liveness tick written while the timer was accruing. On a clean restart
-  // this is ~seconds ago; after an ungraceful shutdown (battery death,
+  // A fresh service has no owner yet, so binding the stored one counts as an
+  // owner change and closes any dangling entry at the LAST PROOF OF LIFE — the
+  // most recent liveness tick written while the timer was accruing. On a clean
+  // restart this is ~seconds ago; after an ungraceful shutdown (battery death,
   // force-quit, panic) it's whenever the machine died — so the dead gap is
-  // never credited. Falls back to now() only if liveness was never written
-  // (very first run), which matches the prior conservative behavior.
-  const lastAlive = svc.lastLiveness();
-  const recovered = svc.recoverAway() ?? svc.recover(lastAlive ?? serverAlignedNow());
-  if (recovered) {
-    log.warn('timer recovered stale open entry', {
-      entryId: recovered.entryId,
-      recoveredAt: recovered.recoveredAt,
-      reason: recovered.notice.reason,
-    });
+  // never credited.
+  bindOwner(ownerFromTokens(await loadTokens()), true, 'boot');
+  if (!svc.currentOwner()) return;
+  const resent = svc.resyncTruncatedOnce();
+  if (resent > 0) log.info('re-sending entries the server had cut short', { resent });
+  try {
+    const pruned = svc.pruneOldSyncedEntries();
+    if (pruned > 0) log.info('pruned old synced local entries', { pruned });
+  } catch (err) {
+    log.warn('pruning old synced local entries failed', { err: String(err) });
   }
 }
 
+/**
+ * Rebind after a sign-in. When the stored session belongs to someone else than
+ * the bound owner (an account switch, or a sign-in after a session ended), the
+ * previous owner's open entry is closed at its last proof of life BEFORE the
+ * new owner is bound — never left open to be resumed over the gap later.
+ */
 export async function bindTimerToStoredSession(claimLegacy = false): Promise<boolean> {
-  const tokens = await loadTokens();
-  if (!tokens) {
-    getTimerService().bindOwner(null);
-    return false;
-  }
-  getTimerService().bindOwner({ userId: tokens.userId, workspaceId: tokens.workspaceId }, claimLegacy);
-  return true;
+  const owner = ownerFromTokens(await loadTokens());
+  bindOwner(owner, claimLegacy, 'sign-in');
+  return owner !== null;
 }
 
 function getTimerSyncDrain(): TimerSyncDrain {
@@ -148,12 +197,6 @@ export function startTimerSyncDrain(): void {
   timerRuntimeStarted = true;
   getTimerSyncDrain().start();
   getTodayLedgerHydrator().start();
-}
-
-export function stopTimerSyncDrain(): void {
-  timerRuntimeStarted = false;
-  syncDrain?.stop();
-  todayLedgerHydrator?.stop();
 }
 
 export function applyTodayLedgerMode(mode: TodayLedgerMode): void {
@@ -175,4 +218,4 @@ export function drainTimerSyncNow(reason: TimerSyncDrainReason): Promise<void> {
 
 export { TimerService } from './timerService';
 export type { TimerStatus } from '../../../shared/tracking';
-export type { TimerRecoveryNotice } from './types';
+export type { MissedSleep, TimerRecoveryNotice } from './types';

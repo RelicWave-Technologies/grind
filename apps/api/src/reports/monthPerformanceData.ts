@@ -1,15 +1,10 @@
 import { prisma } from '@grind/db';
-import { isValidTimeZone, dateKeyInTimeZone } from '@grind/types';
-import { loadPunchLookup } from '../attendance/punches';
-import { loadAttendanceRuleContext } from '../attendance/ruleContext';
+import { dateKeyInTimeZone, dateKeysBetween, isValidTimeZone, localDayWindowInTimeZone, type DayStatus } from '@grind/types';
+import { loadAttendanceRuleContext, type AttendanceRuleContext } from '../attendance/ruleContext';
 import { reconcileRuleLedger, verdictKey, type RuleVerdicts } from '../attendance/ruleLedger';
-import { localDayWindow } from '../insights/day';
-import { loadEntryLiveEvidence } from '../insights/liveEntryEvidence';
-import { resolveEffectiveEntrySegmentEnds } from '../insights/openSegmentEvidence';
-import { loadTimeInvalidationsForUsers } from '../insights/timeInvalidations';
-import { buildTimesheetMatrix, type TimesheetSegmentInput } from '../insights/timesheets';
 import { timesheetCalendarInputs } from '../leave';
-import { loadBalances } from '../leave/repository';
+import { loadTimeline } from '../time';
+import { accrualStartDate, loadBalances } from '../leave/repository';
 import {
   buildMonthPerformance,
   type DayOverride,
@@ -18,7 +13,6 @@ import {
 } from './monthPerformance';
 
 const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/u;
-const DAY_MS = 24 * 60 * 60 * 1000;
 
 export interface ResolvedReportMonth {
   /** YYYY-MM. */
@@ -32,10 +26,6 @@ export interface ResolvedReportMonth {
 /**
  * Read the requested month off a query string, defaulting to the month it is
  * now in the workspace's own timezone.
- *
- * Local to this module rather than borrowed from payroll: this report no longer
- * has anything to do with payroll, and sharing a helper would be the thread by
- * which the dependency crept back.
  */
 export function resolveReportMonth(
   query: Record<string, unknown>,
@@ -63,33 +53,30 @@ export function resolveReportMonth(
   };
 }
 
-/**
- * Load the month performance grid.
- *
- * Four reads: the tracked time that decides whether a day was worked, the
- * Working Calendar that the Lark leave integration feeds, the punch records
- * behind the Office In / Office Out rows, and any corrections a manager or
- * admin has made to individual days.
- *
- * The timesheet matrix is built the same way every other surface builds it, so
- * the hours here cannot disagree with the hours on /attendance. What this does
- * NOT load is the payroll classifier: its monthly guarantee and carry allocator
- * would quietly rewrite days, and an attendance record has to stay literal.
- *
- * Scoped by `userIds` rather than by workspace, so a manager pulling this
- * export gets their team and nobody else.
- */
-export async function loadMonthPerformanceReport(input: {
+interface MonthInputs {
+  reportUsers: MonthPerformanceUser[];
+  userIds: string[];
+  companyName: string;
+  calendarInput: { workspaceId: string; tz: string; userIds: string[]; from: string; to: string };
+  overrides: Array<{ userId: string; date: Date; code: DayOverride['code']; computedCode: DayOverride['computedCode'] }>;
+  /** Counted milliseconds (work, meetings, approved manual; invalidated excluded). */
+  trackedMsFor: (userId: string, date: string) => number;
+  rules: AttendanceRuleContext;
+  nowMs: number;
+}
+
+/** Everything a month is judged on, read once. Nothing here writes. */
+async function loadMonthInputs(input: {
   workspaceId: string;
   userIds: string[];
   range: ResolvedReportMonth;
   nowMs?: number;
-}): Promise<MonthPerformanceReport> {
+}): Promise<MonthInputs> {
   const { range } = input;
+  const nowMs = input.nowMs ?? Date.now();
 
-  const firstDay = localDayWindow(range.from, range.tz);
-  const lastDay = localDayWindow(range.to, range.tz);
-  if (!firstDay || !lastDay) throw new Error('invalid_date_or_tz');
+  const firstDay = localDayWindowInTimeZone(range.from, range.tz);
+  if (!firstDay) throw new Error('invalid_date_or_tz');
 
   const [workspace, users] = await Promise.all([
     prisma.workspace.findUnique({ where: { id: input.workspaceId }, select: { name: true } }),
@@ -101,7 +88,7 @@ export async function loadMonthPerformanceReport(input: {
           where: {
             id: { in: input.userIds },
             workspaceId: input.workspaceId,
-            OR: [{ deactivatedAt: null }, { deactivatedAt: { gte: new Date(firstDay.start) } }],
+            OR: [{ deactivatedAt: null }, { deactivatedAt: { gte: firstDay.start } }],
           },
           select: {
             id: true, name: true, email: true, joinedOn: true, createdAt: true, deactivatedAt: true,
@@ -117,16 +104,10 @@ export async function loadMonthPerformanceReport(input: {
     email: u.email,
     teamName: u.team?.name ?? null,
     // The leave balance's own start (see loadWorkingCalendar's accrualStartFor).
-    startDate: (u.joinedOn ?? u.createdAt).toISOString().slice(0, 10),
+    startDate: accrualStartDate(u, range.tz),
     endDate: u.deactivatedAt ? dateKeyInTimeZone(u.deactivatedAt, range.tz) : null,
   }));
   const userIds = reportUsers.map((u) => u.id);
-
-  // A calendar day of slack on both sides: an entry that crosses local midnight
-  // belongs partly to a day inside the month, and a query bounded exactly at
-  // the month's edges would drop it.
-  const lookbackStart = new Date(firstDay.start.getTime() - DAY_MS);
-  const lookbackEnd = new Date(lastDay.end.getTime() + DAY_MS);
 
   const calendarInput = {
     workspaceId: input.workspaceId,
@@ -135,18 +116,11 @@ export async function loadMonthPerformanceReport(input: {
     from: range.from,
     to: range.to,
   };
-  const [initialCalendar, punchFor, entries, invalidations, overrides] = await Promise.all([
-    timesheetCalendarInputs(calendarInput),
-    loadPunchLookup({ userIds, from: range.from, to: range.to }),
-    userIds.length === 0 ? [] : prisma.timeEntry.findMany({
-      where: {
-        userId: { in: userIds },
-        startedAt: { lt: lookbackEnd },
-        OR: [{ endedAt: null }, { endedAt: { gt: lookbackStart } }],
-      },
-      include: { segments: { select: { kind: true, startedAt: true, endedAt: true } } },
-    }),
-    userIds.length === 0 ? [] : loadTimeInvalidationsForUsers(userIds, lookbackStart, lookbackEnd),
+  // Time comes from the shared timeline: the same owner-per-minute, proven
+  // open ends and invalidations as Edit Time and the reports, so the hours
+  // here cannot disagree with the hours anywhere else.
+  const [timeline, overrides] = await Promise.all([
+    loadTimeline({ userIds, from: range.from, to: range.to, tz: range.tz, now: new Date(nowMs) }),
     userIds.length === 0 ? [] : prisma.attendanceOverride.findMany({
       where: {
         userId: { in: userIds },
@@ -155,74 +129,103 @@ export async function loadMonthPerformanceReport(input: {
       select: { userId: true, date: true, code: true, computedCode: true },
     }),
   ]);
+  const rules = await loadAttendanceRuleContext({ ...calendarInput, nowMs });
 
-
-  // The attendance rules below may change what the balance paid for, and the
-  // calendar is then read again so the codes agree with the ledger.
-  let calendar = initialCalendar;
-
-  const nowMs = input.nowMs ?? Date.now();
-  const now = new Date(nowMs);
-  const evidenceByEntry = await loadEntryLiveEvidence(entries, now);
-  const segments: TimesheetSegmentInput[] = [];
-  for (const e of entries) {
-    const effectiveEnds = resolveEffectiveEntrySegmentEnds({
-      segments: e.segments,
-      entryEndedAt: e.endedAt,
-      now,
-      evidence: evidenceByEntry.get(e.id),
-      lifecycle: e,
-    });
-    for (const [index, seg] of e.segments.entries()) {
-      segments.push({
-        userId: e.userId,
-        source: e.source as 'AUTO' | 'MANUAL',
-        segmentKind: seg.kind as 'WORK' | 'MEETING' | 'IDLE_TRIMMED',
-        startedAt: seg.startedAt.getTime(),
-        endedAt: (effectiveEnds[index] ?? now).getTime(),
-      });
-    }
-  }
-
-  const matrix = buildTimesheetMatrix({
-    from: range.from,
-    to: range.to,
-    tz: range.tz,
-    segments,
-    invalidations,
-    dayStatusFor: calendar.dayStatusFor,
+  return {
+    reportUsers,
     userIds,
-  });
+    companyName: workspace?.name ?? '',
+    calendarInput,
+    overrides,
+    trackedMsFor: (userId, date) => timeline.bucket(userId, date).counted,
+    rules,
+    nowMs,
+  };
+}
 
-  /** Work, meetings and approved manual time — what Timo counts as worked. */
-  const trackedMinutesFor = (userId: string, date: string): number =>
-    Math.round((matrix?.cells[userId]?.[date]?.totalMs ?? 0) / 60_000);
-
-  // The attendance rules. Judged here, written to the ledger, and only then is
-  // the month priced: a day a rule turned into leave spends the same balance
-  // Lark's leave does, so a later day may stop being paid because of it.
-  const rules = await loadAttendanceRuleContext({ ...calendarInput, punchFor, nowMs });
-  const overridden = new Set(overrides.map((o) => `${o.userId}|${o.date.toISOString().slice(0, 10)}`));
+/** The rule verdict for every judged, uncorrected person-day. */
+function monthVerdicts(
+  m: MonthInputs,
+  days: readonly string[],
+  dayStatusFor: (userId: string, date: string) => DayStatus | null,
+): RuleVerdicts {
   const verdicts: RuleVerdicts = new Map();
-  if (rules.enabled) {
-    for (const userId of userIds) {
-      for (const date of matrix?.days ?? []) {
-        // A corrected day is the corrector's call, and costs what they said.
-        if (overridden.has(`${userId}|${date}`)) continue;
-        const verdict = rules.judge(userId, date, calendar.dayStatusFor(userId, date), trackedMinutesFor(userId, date));
-        if (verdict) verdicts.set(verdictKey(userId, date), verdict);
-      }
+  if (!m.rules.enabled) return verdicts;
+  const overridden = new Set(m.overrides.map((o) => `${o.userId}|${o.date.toISOString().slice(0, 10)}`));
+  for (const userId of m.userIds) {
+    for (const date of days) {
+      // A corrected day is the corrector's call, and costs what they said.
+      if (overridden.has(`${userId}|${date}`)) continue;
+      const verdict = m.rules.judge(
+        userId,
+        date,
+        dayStatusFor(userId, date),
+        Math.round(m.trackedMsFor(userId, date) / 60_000),
+      );
+      if (verdict) verdicts.set(verdictKey(userId, date), verdict);
     }
   }
-  const changed = await reconcileRuleLedger({
-    workspaceId: input.workspaceId,
-    userIds,
-    from: range.from,
-    to: range.to,
-    verdicts,
-  });
-  if (changed.written + changed.removed > 0) calendar = await timesheetCalendarInputs(calendarInput);
+  return verdicts;
+}
 
+/**
+ * Write the attendance rules' charges for a month to the leave ledger.
+ *
+ * The only writer of rule lines. Run by the scheduler (current and previous
+ * month) and after writes that change a verdict — an attendance correction,
+ * for instance. Reading the month report never writes: a GET must not move a
+ * balance.
+ */
+export async function reconcileMonthRules(input: {
+  workspaceId: string;
+  userIds: string[];
+  range: ResolvedReportMonth;
+  nowMs?: number;
+}): Promise<{ written: number; removed: number }> {
+  const m = await loadMonthInputs(input);
+  const calendar = await timesheetCalendarInputs(m.calendarInput);
+  const days = dateKeysBetween(input.range.from, input.range.to);
+  return reconcileRuleLedger({
+    workspaceId: input.workspaceId,
+    userIds: m.userIds,
+    from: input.range.from,
+    to: input.range.to,
+    verdicts: monthVerdicts(m, days, calendar.dayStatusFor),
+  });
+}
+
+/**
+ * Load the month performance grid.
+ *
+ * Four reads: the tracked time that decides whether a day was worked, the
+ * Working Calendar that the Lark leave integration feeds, the punch records
+ * behind the Office In / Office Out rows, and any corrections a manager or
+ * admin has made to individual days.
+ *
+ * The timesheet matrix is built the same way every other surface builds it, so
+ * the hours here cannot disagree with the hours on /attendance. Nothing here
+ * applies a monthly guarantee or carries time between days: either would
+ * quietly rewrite days, and an attendance record has to stay literal.
+ *
+ * Scoped by `userIds` rather than by workspace, so a manager pulling this
+ * export gets their team and nobody else.
+ *
+ * Read-only. The rules' ledger lines are written by `reconcileMonthRules`
+ * (scheduled, and after the writes that change a verdict), never here.
+ */
+export async function loadMonthPerformanceReport(input: {
+  workspaceId: string;
+  userIds: string[];
+  range: ResolvedReportMonth;
+  nowMs?: number;
+}): Promise<MonthPerformanceReport> {
+  const { range } = input;
+  const m = await loadMonthInputs(input);
+  const { reportUsers, userIds, overrides, trackedMsFor, rules, nowMs } = m;
+  // Read-only: the ledger lines the rules wrote are whatever the last
+  // reconcile left (see `reconcileMonthRules`), and the calendar prices the
+  // month from them.
+  const calendar = await timesheetCalendarInputs(m.calendarInput);
   const overrideIndex = new Map<string, DayOverride>();
   for (const o of overrides) {
     // A DATE column reads back as an epoch-anchored Date; no timezone applies.
@@ -246,11 +249,11 @@ export async function loadMonthPerformanceReport(input: {
   return buildMonthPerformance({
     month: range.month,
     tz: range.tz,
-    companyName: workspace?.name ?? '',
+    companyName: m.companyName,
     users: reportUsers,
     dayStatusFor: calendar.dayStatusFor,
-    trackedMinutesFor,
-    punchFor,
+    trackedMsFor,
+    punchFor: rules.punchFor,
     overrideFor,
     balanceFor: (userId) => balances[userId]?.balanceDays,
     leaveAccountFor: calendar.leaveAccountFor,

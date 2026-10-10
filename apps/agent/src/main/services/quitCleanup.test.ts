@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { QuitCleanupRunner, registerGracefulQuitHandler, type BeforeQuitEventLike } from './quitCleanup';
+import { QuitCleanupRunner } from './quitCleanup';
 
 function deferred<T = void>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -18,16 +18,19 @@ describe('QuitCleanupRunner', () => {
     const flushPartialActivity = vi.fn();
     const flushPreferences = vi.fn().mockResolvedValue(undefined);
     const flushLogs = vi.fn().mockResolvedValue(undefined);
+    const stopUploads = vi.fn().mockResolvedValue(undefined);
     const runner = new QuitCleanupRunner({
       getTimer: () => ({ prepareForQuit, flushUnsynced }),
       flushPartialActivity,
       flushPreferences,
       flushLogs,
+      stopUploads,
       logger: { debug: vi.fn(), warn: vi.fn() },
     });
 
     await runner.run('quit');
 
+    expect(stopUploads).toHaveBeenCalledTimes(1);
     expect(flushPartialActivity).toHaveBeenCalledTimes(1);
     expect(prepareForQuit).toHaveBeenCalledWith('quit');
     expect(flushUnsynced).toHaveBeenCalledTimes(1);
@@ -76,6 +79,7 @@ describe('QuitCleanupRunner', () => {
   });
 
   it('can invalidate an early cleanup when the quit-triggering action is cancelled', async () => {
+    const resumeUploads = vi.fn();
     const runner = new QuitCleanupRunner({
       getTimer: () => ({
         prepareForQuit: vi.fn().mockResolvedValue(undefined),
@@ -83,6 +87,8 @@ describe('QuitCleanupRunner', () => {
       }),
       flushPartialActivity: vi.fn(),
       flushPreferences: vi.fn(),
+      stopUploads: vi.fn().mockResolvedValue(undefined),
+      resumeUploads,
       logger: { debug: vi.fn(), warn: vi.fn() },
     });
 
@@ -90,56 +96,25 @@ describe('QuitCleanupRunner', () => {
     runner.invalidate();
 
     expect(runner.hasCompleted()).toBe(false);
-  });
-});
-
-describe('registerGracefulQuitHandler', () => {
-  it('prevents quit until cleanup finishes, then quits again', async () => {
-    const listeners = new Map<string, (event: BeforeQuitEventLike) => void>();
-    const app = {
-      on: vi.fn((event: 'before-quit', listener: (event: BeforeQuitEventLike) => void) => {
-        listeners.set(event, listener);
-      }),
-      quit: vi.fn(),
-    };
-    const cleanup = deferred();
-    const runCleanup = vi.fn().mockReturnValue(cleanup.promise);
-    const preventDefault = vi.fn();
-
-    registerGracefulQuitHandler({
-      app,
-      runCleanup,
-      hasCleanupCompleted: () => false,
-      markQuitting: vi.fn(),
-    });
-    listeners.get('before-quit')!({ preventDefault });
-
-    expect(preventDefault).toHaveBeenCalledTimes(1);
-    expect(runCleanup).toHaveBeenCalledWith('quit');
-    cleanup.resolve();
-    await cleanup.promise;
-    await Promise.resolve();
-    expect(app.quit).toHaveBeenCalledTimes(1);
+    // The app carries on, so screenshots must upload again.
+    expect(resumeUploads).toHaveBeenCalledTimes(1);
   });
 
-  it('allows quit after cleanup has already completed', () => {
-    const listeners = new Map<string, (event: BeforeQuitEventLike) => void>();
-    const app = {
-      on: vi.fn((event: 'before-quit', listener: (event: BeforeQuitEventLike) => void) => {
-        listeners.set(event, listener);
-      }),
-      quit: vi.fn(),
-    };
-    const preventDefault = vi.fn();
-
-    registerGracefulQuitHandler({
-      app,
-      runCleanup: vi.fn(),
-      hasCleanupCompleted: () => true,
+  it('still finalizes the timer when stopping uploads fails', async () => {
+    const prepareForQuit = vi.fn().mockResolvedValue(undefined);
+    const warn = vi.fn();
+    const runner = new QuitCleanupRunner({
+      getTimer: () => ({ prepareForQuit, flushUnsynced: vi.fn().mockResolvedValue(undefined) }),
+      flushPartialActivity: vi.fn(),
+      flushPreferences: vi.fn(),
+      stopUploads: vi.fn().mockRejectedValue(new Error('pass stuck')),
+      logger: { debug: vi.fn(), warn },
     });
-    listeners.get('before-quit')!({ preventDefault });
 
-    expect(preventDefault).not.toHaveBeenCalled();
-    expect(app.quit).not.toHaveBeenCalled();
+    await runner.run('quit');
+
+    expect(prepareForQuit).toHaveBeenCalledWith('quit');
+    expect(warn).toHaveBeenCalledWith('quit cleanup uploads failed', expect.objectContaining({ reason: 'quit' }));
+    expect(runner.hasCompleted()).toBe(true);
   });
 });

@@ -29,18 +29,32 @@ async function seed() {
       passwordHash: 'x'.repeat(60),
     },
   });
-  await createManagedTeam({ workspaceId: admin.workspaceId, name: 'Self Team', managerId: manager.id });
+  const team = await createManagedTeam({ workspaceId: admin.workspaceId, name: 'Self Team', managerId: manager.id });
+  const member = await prisma.user.create({
+    data: {
+      workspaceId: admin.workspaceId,
+      email: `mem-${Date.now()}-${Math.random().toString(36).slice(2, 7)}@test.local`,
+      name: 'Team Member',
+      role: 'MEMBER',
+      provisioningStatus: 'ACTIVE',
+      passwordHash: 'x'.repeat(60),
+      teamId: team.id,
+    },
+  });
   const token = signAccessToken({ sub: manager.id, ws: admin.workspaceId, role: 'MANAGER' });
-  return { admin, manager, token };
+  return { admin, manager, member, token };
 }
 
+let flagCounter = 0;
 async function ownFlag(userId: string) {
+  flagCounter += 1;
+  const windowStart = new Date(Date.UTC(2026, 8, 10, 9, flagCounter));
   return prisma.activityFlag.create({
     data: {
       userId,
       type: 'METRONOMIC',
-      windowStart: new Date('2026-09-10T09:15:00Z'),
-      windowEnd: new Date('2026-09-10T09:45:00Z'),
+      windowStart,
+      windowEnd: new Date(windowStart.getTime() + 30 * 60_000),
       riskScore: 60,
       evidence: {},
     },
@@ -68,6 +82,7 @@ describe('a manager cannot act on their own records', () => {
   it('cannot resolve their own anti-cheat flag, one at a time or in bulk', async () => {
     const s = await seed();
     const flag = await ownFlag(s.manager.id);
+    const teamFlag = await ownFlag(s.member.id);
 
     const one = await request(app)
       .post(`/v1/admin/flags/${flag.id}/resolve`)
@@ -79,11 +94,13 @@ describe('a manager cannot act on their own records', () => {
     const many = await request(app)
       .post('/v1/admin/flags/resolve-many')
       .set(bearer(s.token))
-      .send({ flagIds: [flag.id], resolution: 'DISMISSED' });
+      .send({ flagIds: [teamFlag.id, flag.id], resolution: 'DISMISSED' });
     expect(many.status).toBe(403);
     expect(many.body.error).toBe('self_review_forbidden');
 
-    expect((await prisma.activityFlag.findUniqueOrThrow({ where: { id: flag.id } })).status).toBe('OPEN');
+    // A refused batch resolves none of it, the team's flag included.
+    const still = await prisma.activityFlag.findMany({ where: { id: { in: [flag.id, teamFlag.id] } } });
+    expect(still.every((f) => f.status === 'OPEN')).toBe(true);
   });
 
   it('cannot change their own team settings', async () => {
@@ -96,6 +113,22 @@ describe('a manager cannot act on their own records', () => {
     expect(res.body.error).toBe('self_settings_forbidden');
   });
 
+  it('still lets a manager act on their team', async () => {
+    const s = await seed();
+    const day = await request(app)
+      .put('/v1/reports/attendance-override')
+      .set(bearer(s.token))
+      .send({ userId: s.member.id, date: '2026-09-10', code: 'P', reason: 'was in office' });
+    expect(day.status).toBe(200);
+
+    const teamFlag = await ownFlag(s.member.id);
+    const flag = await request(app)
+      .post(`/v1/admin/flags/${teamFlag.id}/resolve`)
+      .set(bearer(s.token))
+      .send({ resolution: 'DISMISSED' });
+    expect(flag.status).toBe(200);
+  });
+
   it('still lets an admin correct anyone, themselves included', async () => {
     const s = await seed();
     const res = await request(app)
@@ -103,5 +136,18 @@ describe('a manager cannot act on their own records', () => {
       .set(bearer(s.admin.accessToken))
       .send({ userId: s.manager.id, date: '2026-09-10', code: 'P', reason: 'checked with HR' });
     expect(res.status).toBe(200);
+
+    const own = await request(app)
+      .put('/v1/reports/attendance-override')
+      .set(bearer(s.admin.accessToken))
+      .send({ userId: s.admin.userId, date: '2026-09-10', code: 'P', reason: 'was in office' });
+    expect(own.status).toBe(200);
+
+    const adminFlag = await ownFlag(s.admin.userId);
+    const resolved = await request(app)
+      .post(`/v1/admin/flags/${adminFlag.id}/resolve`)
+      .set(bearer(s.admin.accessToken))
+      .send({ resolution: 'DISMISSED' });
+    expect(resolved.status).toBe(200);
   });
 });

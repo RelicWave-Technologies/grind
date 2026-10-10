@@ -3,10 +3,13 @@ import { prisma } from '@grind/db';
 import { dateKeyInTimeZone, isValidTimeZone } from '@grind/types';
 import { requireAccessToken } from '../middleware/auth';
 import { attachScope, requireManagerOrAbove } from '../middleware/scope';
+import { clipInterval, isCounted, trackingNow } from '@grind/core';
 import { localDayWindow } from '../insights/day';
-import { heartbeatIsFresh, loadEntryLiveEvidence } from '../insights/liveEntryEvidence';
-import { resolveEffectiveEntrySegmentEnds } from '../insights/openSegmentEvidence';
-import { DEFAULT_STUCK_THRESHOLD_MS } from '../digests/pendingDigest';
+import { loadTimelineWindow } from '../time';
+import { classifySyncHealth, SYNC_HEALTH_SELECT } from '../agent/syncHealth';
+
+/** A pending approval older than this counts as stuck. */
+const STUCK_THRESHOLD_MS = 48 * 60 * 60 * 1000;
 
 /**
  * Manager+ workspace overview (M16). One round-trip that powers the
@@ -67,6 +70,11 @@ interface OverviewResponse {
     openTotal: number;
     recent: OverviewFlagItem[];
   };
+  /** People in scope whose Timo uploads are stuck / behind (agent/syncHealth.ts). */
+  agentSync: {
+    stuck: number;
+    behind: number;
+  };
   recentRejected: Array<{
     id: string;
     user: { id: string; name: string };
@@ -92,65 +100,26 @@ overviewRouter.get('/', async (req, res, next) => {
 
     const userIds = req.scope.userIds;
 
-    // --- Today's totals (per-user totalMs threshold for "active") --------
-    const entries = userIds.length === 0
-      ? []
-      : await prisma.timeEntry.findMany({
-          where: {
-            userId: { in: userIds },
-            startedAt: { lt: win.end },
-            OR: [{ endedAt: null }, { endedAt: { gt: win.start } }],
-          },
-          select: {
-            id: true,
-            userId: true,
-            source: true,
-            startedAt: true,
-            endedAt: true,
-            trackingProtocolVersion: true,
-            lastProvenAt: true,
-            leaseExpiresAt: true,
-            segments: {
-              where: {
-                startedAt: { lt: win.end },
-                OR: [{ endedAt: null }, { endedAt: { gt: win.start } }],
-              },
-              select: { kind: true, startedAt: true, endedAt: true },
-              orderBy: { startedAt: 'asc' },
-            },
-          },
-        });
-    const evidenceByEntry = await loadEntryLiveEvidence(entries, now);
-
-    const dayStart = win.start.getTime();
-    const dayEnd = win.end.getTime();
-    const liveCap = Math.min(dayEnd, now.getTime());
+    // --- Today's totals --------------------------------------------------
+    // The shared timeline: one owner per minute (a manual claim on top of
+    // tracked time is not counted twice), open ends proven, invalidated time
+    // excluded — the same hours Edit Time and the reports show.
+    const timeline = await loadTimelineWindow({ userIds, start: win.start, end: win.end, now });
+    const sofar = { start: win.start.getTime(), end: Math.min(win.end.getTime(), now.getTime()) };
     let workedMs = 0;
     let meetingMs = 0;
     let manualMs = 0;
     const usersWithTime = new Set<string>();
-    const usersTrackingNow = new Set<string>();
-    for (const entry of entries) {
-      const evidence = evidenceByEntry.get(entry.id);
-      if (heartbeatIsFresh(evidence, now, entry.startedAt)) usersTrackingNow.add(entry.userId);
-      const effectiveEnds = resolveEffectiveEntrySegmentEnds({
-        segments: entry.segments,
-        entryEndedAt: entry.endedAt,
-        now,
-        evidence,
-        lifecycle: entry,
-      });
-      for (const [index, segment] of entry.segments.entries()) {
-        const a = Math.max(dayStart, segment.startedAt.getTime());
-        const b = Math.min(liveCap, (effectiveEnds[index] ?? new Date(liveCap)).getTime());
-        const dur = b - a;
-        if (dur <= 0) continue;
-        usersWithTime.add(entry.userId);
-        if (entry.source === 'MANUAL') manualMs += dur;
-        else if (segment.kind === 'MEETING') meetingMs += dur;
-        else if (segment.kind === 'WORK') workedMs += dur;
-        // IDLE_TRIMMED never counts toward billed time.
-      }
+    const usersTrackingNow = trackingNow(timeline.pieces);
+    for (const piece of timeline.pieces) {
+      if (!isCounted(piece)) continue;
+      const iv = clipInterval(piece, sofar.start, sofar.end);
+      if (!iv) continue;
+      const dur = iv.end - iv.start;
+      usersWithTime.add(piece.userId);
+      if (piece.kind === 'MANUAL') manualMs += dur;
+      else if (piece.kind === 'MEETING') meetingMs += dur;
+      else workedMs += dur;
     }
 
     // --- Pending approvals (scoped) --------------------------------------
@@ -167,7 +136,7 @@ overviewRouter.get('/', async (req, res, next) => {
     const recentPending: OverviewRecentItem[] = pendingRows.slice(0, 8).map((r) => {
       const ageMs = Math.max(0, pendingNow - r.createdAt.getTime());
       if (ageMs > oldestPendingAge) oldestPendingAge = ageMs;
-      const isStuck = ageMs >= DEFAULT_STUCK_THRESHOLD_MS;
+      const isStuck = ageMs >= STUCK_THRESHOLD_MS;
       if (isStuck) pendingStuck += 1;
       return {
         id: r.id,
@@ -180,7 +149,7 @@ overviewRouter.get('/', async (req, res, next) => {
     });
     // Stuck count is across all PENDING rows, not just the 8 we render.
     pendingStuck = pendingRows.reduce((n, r) => {
-      return n + (pendingNow - r.createdAt.getTime() >= DEFAULT_STUCK_THRESHOLD_MS ? 1 : 0);
+      return n + (pendingNow - r.createdAt.getTime() >= STUCK_THRESHOLD_MS ? 1 : 0);
     }, 0);
     if (pendingRows.length > 0) {
       const oldest = Math.max(0, pendingNow - pendingRows[0]!.createdAt.getTime());
@@ -225,6 +194,20 @@ overviewRouter.get('/', async (req, res, next) => {
           take: 5,
         });
 
+    // --- Timo sync health (scoped; deactivated people are not in scope) --
+    const syncRows = userIds.length === 0
+      ? []
+      : await prisma.user.findMany({
+          where: { id: { in: userIds }, deactivatedAt: null },
+          select: SYNC_HEALTH_SELECT,
+        });
+    const agentSync = { stuck: 0, behind: 0 };
+    for (const row of syncRows) {
+      const { status } = classifySyncHealth(row, now);
+      if (status === 'STUCK') agentSync.stuck += 1;
+      else if (status === 'BEHIND') agentSync.behind += 1;
+    }
+
     // --- Active users tally — userIds.length is "total in scope" --------
     const totalUsers = userIds.length;
 
@@ -259,6 +242,7 @@ overviewRouter.get('/', async (req, res, next) => {
           count: g.count,
         })),
       },
+      agentSync,
       recentRejected: rejected.map((r) => ({
         id: r.id,
         user: r.user,
@@ -277,5 +261,3 @@ overviewRouter.get('/', async (req, res, next) => {
 function roundH(ms: number): number {
   return Math.round((ms / HOUR) * 100) / 100;
 }
-
-export default overviewRouter;

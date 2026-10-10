@@ -1,17 +1,29 @@
 import { Router } from 'express';
 import { prisma, type Prisma } from '@grind/db';
 import { z } from 'zod';
-import { TimeZoneSchema, dateKeyInTimeZone } from '@grind/types';
-import { requireApiToken } from '../middleware/apiToken';
-import { buildTimesheetMatrix, dateRange, type TimesheetSegmentInput } from '../insights/timesheets';
-import { localDayWindow } from '../insights/day';
-import { loadTimeInvalidationsForUsers } from '../insights/timeInvalidations';
+import { ManualTimeRequestStatus, Role, TimeZoneSchema, addDays, todayKey } from '@grind/types';
 import {
   LIVE_HEARTBEAT_FRESH_MS,
-  loadEntryLiveEvidence,
-  type EntryLiveEvidenceMap,
-} from '../insights/liveEntryEvidence';
-import { resolveEffectiveEntrySegmentEnds } from '../insights/openSegmentEvidence';
+  clipInterval,
+  firstStretchStartWithin,
+  isCounted,
+  isTracked,
+  mergeIntervals,
+  overlapMs,
+  overlaps as overlapsMs,
+  type Interval,
+} from '@grind/core';
+import { requireApiToken } from '../middleware/apiToken';
+import { dateRange, timesheetMatrixFromBuckets } from '../insights/timesheets';
+import { localDayWindow } from '../insights/day';
+import {
+  loadCreditedManualMs,
+  loadTimeline,
+  loadTimelineWindow,
+  loadTrackingNow,
+  piecesForUser,
+  type TimelineRowPiece,
+} from '../time';
 
 export const mcpRouter = Router();
 
@@ -45,6 +57,7 @@ const deviceSelect = {
 } satisfies Prisma.UserSelect;
 
 type DeviceFields = {
+  id: string;
   agentLastSeenAt: Date | null;
   agentState: string | null;
   agentVersion: string | null;
@@ -101,7 +114,11 @@ type ManualRequestEvidence = {
   taskSummary: string | null;
   requestedStart: string;
   requestedEnd: string;
+  /** Time the request actually added (what approval carved). 0 unless APPROVED. */
   durationMs: number;
+  creditedMs: number;
+  /** The window that was asked for. */
+  requestedMs: number;
   reason: string;
   status: string;
   approver: { id: string; name: string; email: string } | null;
@@ -165,19 +182,9 @@ function userSearch(q: string | undefined): Prisma.UserWhereInput {
   };
 }
 
-function todayForTz(tz: string): string {
-  return dateKeyInTimeZone(new Date(), tz);
-}
-
-function addDaysIso(date: string, days: number): string {
-  const d = new Date(`${date}T00:00:00.000Z`);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-}
-
 function yesterdayForTz(tz: string): string {
-  const today = todayForTz(tz);
-  return addDaysIso(today, -1);
+  const today = todayKey(tz);
+  return addDays(today, -1);
 }
 
 function validateRange(input: { from: string; to: string; tz: string }) {
@@ -196,7 +203,7 @@ function resolveOptionalRange(input: { from?: string; to?: string; tz: string })
     return range ?? { error: 'invalid_date_range' as const, maxDays: MAX_SUMMARY_DAYS };
   }
 
-  const today = todayForTz(input.tz);
+  const today = todayKey(input.tz);
   const range = validateRange({ from: today, to: today, tz: input.tz });
   return range ?? { error: 'invalid_date_range' as const, maxDays: MAX_SUMMARY_DAYS };
 }
@@ -216,55 +223,13 @@ function addTotal(a: TimeTotal, b: TimeTotal): TimeTotal {
 }
 
 async function loadTimeMatrixForUsers(userIds: string[], range: ValidRange) {
-  const entries = userIds.length === 0
-    ? []
-    : await prisma.timeEntry.findMany({
-        where: {
-          userId: { in: userIds },
-          startedAt: { lt: range.toWindow.end },
-          OR: [{ endedAt: null }, { endedAt: { gt: range.fromWindow.start } }],
-        },
-        select: {
-          id: true,
-          userId: true,
-          source: true,
-          endedAt: true,
-          trackingProtocolVersion: true,
-          lastProvenAt: true,
-          leaseExpiresAt: true,
-          segments: {
-            select: { kind: true, startedAt: true, endedAt: true },
-            orderBy: { startedAt: 'asc' },
-          },
-        },
-        orderBy: { startedAt: 'asc' },
-      });
-
-  const now = new Date();
-  const evidenceByEntry = await loadEntryLiveEvidence(entries, now);
-  const segments: TimesheetSegmentInput[] = entries.flatMap((entry) => {
-    const effectiveEnds = resolveEffectiveEntrySegmentEnds({
-      segments: entry.segments,
-      entryEndedAt: entry.endedAt,
-      now,
-      evidence: evidenceByEntry.get(entry.id),
-      lifecycle: entry,
-    });
-    return entry.segments.map((segment, index) => ({
-      userId: entry.userId,
-      source: entry.source,
-      segmentKind: segment.kind,
-      startedAt: segment.startedAt.getTime(),
-      endedAt: (effectiveEnds[index] ?? now).getTime(),
-    }));
-  });
-  const invalidations = await loadTimeInvalidationsForUsers(userIds, range.fromWindow.start, range.toWindow.end);
-  return buildTimesheetMatrix({
+  const timeline = await loadTimeline({ userIds, from: range.from, to: range.to, tz: range.tz });
+  return timesheetMatrixFromBuckets({
     from: range.from,
     to: range.to,
     tz: range.tz,
-    segments,
-    invalidations,
+    days: timeline.days,
+    buckets: timeline.buckets,
   });
 }
 
@@ -296,69 +261,25 @@ function dayRows(range: ValidRange, cells: Record<string, SummaryCell | undefine
   }));
 }
 
-function overlapsMs(start: number, end: number, winStart: number, winEnd: number): boolean {
-  return start < winEnd && end > winStart;
-}
-
-function clipMs(start: number, end: number, winStart: number, winEnd: number) {
-  const a = Math.max(start, winStart);
-  const b = Math.min(end, winEnd);
-  return b > a ? { start: a, end: b } : null;
-}
-
-function mergeIntervals(intervals: Array<{ start: number; end: number }>) {
-  const sorted = intervals
-    .filter((interval) => interval.end > interval.start)
-    .sort((a, b) => a.start - b.start);
-  const merged: Array<{ start: number; end: number }> = [];
-  for (const interval of sorted) {
-    const last = merged.at(-1);
-    if (!last || interval.start > last.end) {
-      merged.push({ ...interval });
-      continue;
-    }
-    last.end = Math.max(last.end, interval.end);
+/** Counted stretches — core's merge, touching time joins — with the sources inside each. */
+function trackedBlocks(intervals: TrackedInterval[]): TrackedBlock[] {
+  const blocks: TrackedBlock[] = mergeIntervals(intervals).map((iv) => ({ ...iv, sources: [] }));
+  for (const iv of intervals) {
+    blocks.find((block) => iv.start >= block.start && iv.end <= block.end)?.sources.push(iv.source);
   }
-  return merged;
+  return blocks;
 }
 
-function mergeTrackedBlocks(intervals: TrackedInterval[]) {
-  const sorted = intervals
-    .filter((interval) => interval.end > interval.start)
-    .sort((a, b) => a.start - b.start);
-  const merged: TrackedBlock[] = [];
-  for (const interval of sorted) {
-    const last = merged.at(-1);
-    if (!last || interval.start > last.end) {
-      merged.push({ start: interval.start, end: interval.end, sources: [interval.source] });
-      continue;
-    }
-    last.end = Math.max(last.end, interval.end);
-    last.sources.push(interval.source);
-  }
-  return merged;
-}
-
-function serializeManualRequestEvidence(request: {
-  id: string;
-  taskSummary: string | null;
-  requestedStart: Date;
-  requestedEnd: Date;
-  reason: string;
-  status: string;
-  approver: { id: string; name: string; email: string } | null;
-  decidedBy: { id: string; name: string; email: string } | null;
-  decidedAt: Date | null;
-  decidedReason: string | null;
-  decisionSource: string | null;
-  autoApproved: boolean;
-}): ManualRequestEvidence {
+/** `creditedMs`: what approval actually added (see loadCreditedManualMs), not the window asked for. */
+function serializeManualRequestEvidence(request: ManualRequestDetail, creditedMs: number): ManualRequestEvidence {
   return {
     id: request.id,
     taskSummary: request.taskSummary,
     requestedStart: request.requestedStart.toISOString(),
     requestedEnd: request.requestedEnd.toISOString(),
-    durationMs: request.requestedEnd.getTime() - request.requestedStart.getTime(),
+    durationMs: creditedMs,
+    creditedMs,
+    requestedMs: request.requestedEnd.getTime() - request.requestedStart.getTime(),
     reason: request.reason,
     status: request.status,
     approver: request.approver,
@@ -413,6 +334,43 @@ function isLunchCandidate(input: {
   return startMin < lunchEnd && endMin > lunchStart;
 }
 
+type ManualRequestDetail = {
+  id: string;
+  userId: string;
+  taskSummary: string | null;
+  requestedStart: Date;
+  requestedEnd: Date;
+  reason: string;
+  status: string;
+  approver: { id: string; name: string; email: string } | null;
+  decidedBy: { id: string; name: string; email: string } | null;
+  decidedAt: Date | null;
+  decidedReason: string | null;
+  decisionSource: string | null;
+  autoApproved: boolean;
+};
+
+const MANUAL_REQUEST_DETAIL_SELECT = {
+  id: true,
+  userId: true,
+  taskSummary: true,
+  requestedStart: true,
+  requestedEnd: true,
+  reason: true,
+  status: true,
+  approver: { select: { id: true, name: true, email: true } },
+  decidedBy: { select: { id: true, name: true, email: true } },
+  decidedAt: true,
+  decidedReason: true,
+  decisionSource: true,
+  autoApproved: true,
+} satisfies Prisma.ManualTimeRequestSelect;
+
+/**
+ * Breaks for one person-day, inferred from the gaps in their counted time on
+ * the resolved timeline — the same one-owner-per-minute timeline every screen
+ * reads. Invalidated time does not count, so it does not close a break.
+ */
 function buildBreakSummaryForDay(input: {
   date: string;
   tz: string;
@@ -420,90 +378,49 @@ function buildBreakSummaryForDay(input: {
   dayEnd: number;
   minBreakMs: number;
   lunchMinMs: number;
-  entries: Array<{
-    id: string;
-    source: string;
-    larkTaskGuid: string | null;
-    notes: string | null;
-    endedAt: Date | null;
-    trackingProtocolVersion: number | null;
-    lastProvenAt: Date | null;
-    leaseExpiresAt: Date | null;
-    manualTimeRequest: {
-      id: string;
-      taskSummary: string | null;
-      requestedStart: Date;
-      requestedEnd: Date;
-      reason: string;
-      status: string;
-      approver: { id: string; name: string; email: string } | null;
-      decidedBy: { id: string; name: string; email: string } | null;
-      decidedAt: Date | null;
-      decidedReason: string | null;
-      decisionSource: string | null;
-      autoApproved: boolean;
-    } | null;
-    segments: Array<{ kind: string; startedAt: Date; endedAt: Date | null }>;
-  }>;
-  manualRequests: Array<{
-    id: string;
-    taskSummary: string | null;
-    requestedStart: Date;
-    requestedEnd: Date;
-    reason: string;
-    status: string;
-    approver: { id: string; name: string; email: string } | null;
-    decidedBy: { id: string; name: string; email: string } | null;
-    decidedAt: Date | null;
-    decidedReason: string | null;
-    decisionSource: string | null;
-    autoApproved: boolean;
-  }>;
-  evidenceByEntry?: EntryLiveEvidenceMap;
+  /** This person's resolved timeline pieces, with lookback. */
+  pieces: readonly TimelineRowPiece[];
+  /** This person's tracked (never manual) stretches, merged. */
+  trackedStretches: readonly Interval[];
+  /** Details of the requests behind approved manual entries, by request id. */
+  requestById: ReadonlyMap<string, ManualRequestDetail>;
+  manualRequests: ManualRequestDetail[];
+  creditedById: ReadonlyMap<string, number>;
   now: Date;
 }) {
   const nowMs = input.now.getTime();
+  const evidenceOf = (request: ManualRequestDetail) =>
+    serializeManualRequestEvidence(request, input.creditedById.get(request.id) ?? 0);
   const trackedIntervals: TrackedInterval[] = [];
-  const idleIntervals: Array<{ start: number; end: number }> = [];
+  const idleIntervals: Interval[] = [];
 
-  for (const entry of input.entries) {
-    const effectiveEnds = resolveEffectiveEntrySegmentEnds({
-      segments: entry.segments,
-      entryEndedAt: entry.endedAt,
-      now: input.now,
-      evidence: input.evidenceByEntry?.get(entry.id),
-      lifecycle: entry,
-    });
-    for (const [index, segment] of entry.segments.entries()) {
-      const rawStart = segment.startedAt.getTime();
-      const rawEnd = (effectiveEnds[index] ?? input.now).getTime();
-      if (!overlapsMs(rawStart, rawEnd, input.dayStart, input.dayEnd)) continue;
-      const clipped = clipMs(rawStart, rawEnd, input.dayStart, Math.min(input.dayEnd, nowMs));
-      if (!clipped) continue;
-      if (entry.source === 'MANUAL' || segment.kind === 'WORK' || segment.kind === 'MEETING') {
-        trackedIntervals.push({
-          ...clipped,
-          source: {
-            timeEntryId: entry.id,
-            source: entry.source,
-            kind: segment.kind,
-            startedAt: new Date(clipped.start).toISOString(),
-            endedAt: new Date(clipped.end).toISOString(),
-            durationMs: clipped.end - clipped.start,
-            taskGuid: entry.larkTaskGuid,
-            notes: entry.notes,
-            manualTimeRequest: entry.manualTimeRequest
-              ? serializeManualRequestEvidence(entry.manualTimeRequest)
-              : null,
-          },
-        });
-      } else if (segment.kind === 'IDLE_TRIMMED') {
-        idleIntervals.push(clipped);
-      }
+  for (const piece of input.pieces) {
+    const clipped = clipInterval(piece, input.dayStart, Math.min(input.dayEnd, nowMs));
+    if (!clipped) continue;
+    if (piece.kind === 'IDLE') {
+      idleIntervals.push(clipped);
+      continue;
     }
+    if (!isCounted(piece)) continue;
+    const entry = piece.entry;
+    const request = entry.manualTimeRequest ? input.requestById.get(entry.manualTimeRequest.id) : undefined;
+    trackedIntervals.push({
+      ...clipped,
+      source: {
+        timeEntryId: entry.id,
+        source: entry.source,
+        kind: piece.kind === 'MEETING' ? 'MEETING' : 'WORK',
+        startedAt: new Date(clipped.start).toISOString(),
+        endedAt: new Date(clipped.end).toISOString(),
+        durationMs: clipped.end - clipped.start,
+        taskGuid: entry.larkTaskGuid,
+        notes: entry.notes,
+        manualTimeRequest: request ? evidenceOf(request) : null,
+      },
+    });
   }
 
-  const tracked = mergeTrackedBlocks(trackedIntervals);
+  const tracked = trackedBlocks(trackedIntervals);
   const idle = mergeIntervals(idleIntervals);
   const breaks: BreakInterval[] = [];
   for (let i = 1; i < tracked.length; i += 1) {
@@ -513,10 +430,7 @@ function buildBreakSummaryForDay(input: {
     const end = next.start;
     const durationMs = end - start;
     if (durationMs < input.minBreakMs) continue;
-    const idleTrimmedMs = idle.reduce((sum, interval) => {
-      const overlap = clipMs(interval.start, interval.end, start, end);
-      return sum + (overlap ? overlap.end - overlap.start : 0);
-    }, 0);
+    const idleTrimmedMs = idle.reduce((sum, interval) => sum + overlapMs(interval, { start, end }), 0);
     const classification = isLunchCandidate({
       start,
       end,
@@ -536,7 +450,7 @@ function buildBreakSummaryForDay(input: {
       .filter((request) =>
         overlapsMs(request.requestedStart.getTime(), request.requestedEnd.getTime(), start, end),
       )
-      .map(serializeManualRequestEvidence);
+      .map(evidenceOf);
     breaks.push({
       date: input.date,
       startedAt: new Date(start).toISOString(),
@@ -569,9 +483,12 @@ function buildBreakSummaryForDay(input: {
     .filter((item) => item.classification === 'lunch_candidate')
     .reduce((max, item) => Math.max(max, item.durationMs), 0);
 
+  // The day's first real start, the one every screen shows: tracked time
+  // only, and a stretch running in from yesterday is not a start.
+  const firstTracked = firstStretchStartWithin(input.trackedStretches, input.dayStart, input.dayEnd);
   return {
     date: input.date,
-    firstTrackedAt: tracked[0] ? new Date(tracked[0].start).toISOString() : null,
+    firstTrackedAt: firstTracked === null ? null : new Date(firstTracked).toISOString(),
     lastTrackedAt: tracked.at(-1) ? new Date(tracked.at(-1)!.end).toISOString() : null,
     trackedBlockCount: tracked.length,
     breakCount: breaks.length,
@@ -600,11 +517,12 @@ function isBadStatus(value: string | null): boolean {
   ].some((marker) => normalized.includes(marker));
 }
 
-function serializeDevice(user: DeviceFields, now = new Date()) {
+/** `tracking`: who is tracking right now (loadTrackingNow) — `running` is exactly that. */
+function serializeDevice(user: DeviceFields, tracking: ReadonlyMap<string, string>, now: Date) {
   const lastSeenMs = user.agentLastSeenAt?.getTime() ?? null;
   const heartbeatAgeMs = lastSeenMs === null ? null : Math.max(0, now.getTime() - lastSeenMs);
   const heartbeatFresh = heartbeatAgeMs !== null && heartbeatAgeMs <= LIVE_HEARTBEAT_FRESH_MS;
-  const running = user.agentState === 'RUNNING' && heartbeatFresh;
+  const running = tracking.has(user.id);
   const stale = user.agentLastSeenAt !== null && !heartbeatFresh;
   const screenIssue =
     isBadStatus(user.agentScreenPermissionStatus) ||
@@ -708,12 +626,16 @@ mcpRouter.get('/workspace-overview', requireApiToken([
       }),
     ]);
 
-    const matrix = await loadTimeMatrixForUsers(users.map((user) => user.id), range);
+    const userIds = users.map((user) => user.id);
+    const [matrix, tracking] = await Promise.all([
+      loadTimeMatrixForUsers(userIds, range),
+      loadTrackingNow(userIds, now),
+    ]);
     if (!matrix) return res.status(400).json({ error: 'invalid_date_range', maxDays: MAX_SUMMARY_DAYS });
 
     let todayTotal = emptyTotal();
     let activeUsers = 0;
-    const deviceRows = users.map((user) => serializeDevice(user, now));
+    const deviceRows = users.map((user) => serializeDevice(user, tracking, now));
     for (const user of users) {
       const total = totalForCells(cellsForUser(matrix, user.id));
       if (total.totalMs > 0) activeUsers += 1;
@@ -761,7 +683,7 @@ mcpRouter.get('/workspace-overview', requireApiToken([
         email: user.email,
         role: user.role,
         team: user.team,
-        device: serializeDevice(user, now),
+        device: serializeDevice(user, tracking, now),
       })),
       truncatedSampleUsers: users.length > 25,
     });
@@ -774,7 +696,7 @@ mcpRouter.get('/people', requireApiToken(['read:people', 'read:device-health']),
   try {
     const query = z.object({
       q: OptionalTextSchema,
-      role: z.enum(['ADMIN', 'MANAGER', 'MEMBER']).optional(),
+      role: Role.optional(),
       limit: LimitSchema,
     }).safeParse(req.query);
     if (!query.success) return res.status(400).json({ error: 'invalid_query', issues: query.error.issues });
@@ -803,6 +725,7 @@ mcpRouter.get('/people', requireApiToken(['read:people', 'read:device-health']),
     });
 
     const now = new Date();
+    const tracking = await loadTrackingNow(users.map((user) => user.id), now);
     res.json({
       generatedAt: now.toISOString(),
       users: users.map((user) => ({
@@ -815,7 +738,7 @@ mcpRouter.get('/people', requireApiToken(['read:people', 'read:device-health']),
         managesTeam: user.managedTeamAssignment?.team ?? null,
         shift: user.shift,
         createdAt: user.createdAt.toISOString(),
-        device: serializeDevice(user, now),
+        device: serializeDevice(user, tracking, now),
       })),
     });
   } catch (err) {
@@ -892,10 +815,15 @@ mcpRouter.get('/user-detail', requireApiToken([
       orderBy: { createdAt: 'desc' },
       take: 20,
     });
+    const now = new Date();
+    const [tracking, credited] = await Promise.all([
+      loadTrackingNow([user.id], now),
+      loadCreditedManualMs(manualRequests.map((request) => ({ ...request, userId: user.id })), now),
+    ]);
     const cells = cellsForUser(matrix, user.id);
 
     res.json({
-      generatedAt: new Date().toISOString(),
+      generatedAt: now.toISOString(),
       matchCount: matches.length,
       user: {
         id: user.id,
@@ -907,7 +835,7 @@ mcpRouter.get('/user-detail', requireApiToken([
         managesTeam: user.managedTeamAssignment?.team ?? null,
         shift: user.shift,
         createdAt: user.createdAt.toISOString(),
-        device: serializeDevice(user),
+        device: serializeDevice(user, tracking, now),
       },
       time: {
         from: range.from,
@@ -921,7 +849,10 @@ mcpRouter.get('/user-detail', requireApiToken([
         taskSummary: request.taskSummary,
         requestedStart: request.requestedStart.toISOString(),
         requestedEnd: request.requestedEnd.toISOString(),
-        durationMs: request.requestedEnd.getTime() - request.requestedStart.getTime(),
+        // Credited time — what approval actually added — not the window asked for.
+        durationMs: credited.get(request.id) ?? 0,
+        creditedMs: credited.get(request.id) ?? 0,
+        requestedMs: request.requestedEnd.getTime() - request.requestedStart.getTime(),
         reason: request.reason,
         status: request.status,
         approver: request.approver,
@@ -966,7 +897,8 @@ mcpRouter.get('/device-health', requireApiToken(['read:device-health']), async (
     });
 
     const now = new Date();
-    const devices = users.map((user) => serializeDevice(user, now));
+    const tracking = await loadTrackingNow(users.map((user) => user.id), now);
+    const devices = users.map((user) => serializeDevice(user, tracking, now));
     res.json({
       generatedAt: now.toISOString(),
       counts: {
@@ -977,7 +909,7 @@ mcpRouter.get('/device-health', requireApiToken(['read:device-health']), async (
         permissionIssues: devices.filter((device) => device.permissionIssues.any).length,
       },
       users: users.map((user) => {
-        const device = serializeDevice(user, now);
+        const device = serializeDevice(user, tracking, now);
         return {
           id: user.id,
           name: user.name,
@@ -1020,14 +952,16 @@ mcpRouter.get('/version-adoption', requireApiToken(['read:device-health']), asyn
       orderBy: [{ agentVersion: 'asc' }, { name: 'asc' }],
     });
     const now = new Date();
+    const tracking = await loadTrackingNow(users.map((user) => user.id), now);
+    const deviceOf = (user: (typeof users)[number]) => serializeDevice(user, tracking, now);
 
     res.json({
       generatedAt: now.toISOString(),
       totalUsers: users.length,
       buckets: versionBuckets(users),
       unknownUsers: users.filter((user) => !user.agentVersion).length,
-      runningUsers: users.filter((user) => serializeDevice(user, now).running).length,
-      staleUsers: users.filter((user) => serializeDevice(user, now).status === 'stale').length,
+      runningUsers: users.filter((user) => deviceOf(user).running).length,
+      staleUsers: users.filter((user) => deviceOf(user).status === 'stale').length,
       users: users.slice(0, MAX_LIMIT).map((user) => ({
         id: user.id,
         name: user.name,
@@ -1036,7 +970,7 @@ mcpRouter.get('/version-adoption', requireApiToken(['read:device-health']), asyn
         version: user.agentVersion,
         state: user.agentState,
         lastSeenAt: user.agentLastSeenAt?.toISOString() ?? null,
-        deviceStatus: serializeDevice(user, now).status,
+        deviceStatus: deviceOf(user).status,
       })),
       truncatedUsers: users.length > MAX_LIMIT,
     });
@@ -1048,18 +982,17 @@ mcpRouter.get('/version-adoption', requireApiToken(['read:device-health']), asyn
 mcpRouter.get('/running-users', requireApiToken(['read:people', 'read:device-health']), async (req, res, next) => {
   try {
     const now = new Date();
+    const everyone = await prisma.user.findMany({
+      where: { workspaceId: workspaceId(req), deactivatedAt: null },
+      select: { id: true },
+    });
+    const tracking = await loadTrackingNow(everyone.map((user) => user.id), now);
     const users = await prisma.user.findMany({
-      where: {
-        workspaceId: workspaceId(req),
-        deactivatedAt: null,
-        agentState: 'RUNNING',
-        agentLastSeenAt: { gte: new Date(now.getTime() - LIVE_HEARTBEAT_FRESH_MS) },
-      },
+      where: { id: { in: [...tracking.keys()] } },
       select: {
         id: true,
         name: true,
         email: true,
-        agentActiveEntryId: true,
         ...deviceSelect,
       },
       orderBy: [{ agentLastSeenAt: 'desc' }, { name: 'asc' }],
@@ -1072,11 +1005,11 @@ mcpRouter.get('/running-users', requireApiToken(['read:people', 'read:device-hea
         id: user.id,
         name: user.name,
         email: user.email,
-        activeEntryId: user.agentActiveEntryId,
+        activeEntryId: tracking.get(user.id) ?? null,
         lastSeenAt: user.agentLastSeenAt?.toISOString() ?? null,
         version: user.agentVersion,
         platform: user.agentPlatform,
-        device: serializeDevice(user, now),
+        device: serializeDevice(user, tracking, now),
       })),
     });
   } catch (err) {
@@ -1129,10 +1062,13 @@ mcpRouter.get('/team-summary', requireApiToken(['read:people', 'read:device-heal
       ...team.members.map((user) => user.id),
       ...team.managers.map((manager) => manager.user.id),
     ]))];
-    const matrix = await loadTimeMatrixForUsers(userIds, range);
+    const now = new Date();
+    const [matrix, tracking] = await Promise.all([
+      loadTimeMatrixForUsers(userIds, range),
+      loadTrackingNow(userIds, now),
+    ]);
     if (!matrix) return res.status(400).json({ error: 'invalid_date_range', maxDays: MAX_SUMMARY_DAYS });
 
-    const now = new Date();
     res.json({
       generatedAt: now.toISOString(),
       from: range.from,
@@ -1143,7 +1079,7 @@ mcpRouter.get('/team-summary', requireApiToken(['read:people', 'read:device-heal
         for (const user of team.members) roster.set(user.id, user);
         for (const manager of team.managers) roster.set(manager.user.id, manager.user);
         let total = emptyTotal();
-        const devices = [...roster.values()].map((user) => serializeDevice(user, now));
+        const devices = [...roster.values()].map((user) => serializeDevice(user, tracking, now));
         for (const user of roster.values()) total = addTotal(total, totalForCells(cellsForUser(matrix, user.id)));
         return {
           id: team.id,
@@ -1169,7 +1105,7 @@ mcpRouter.get('/team-summary', requireApiToken(['read:people', 'read:device-heal
             name: user.name,
             email: user.email,
             role: user.role,
-            device: serializeDevice(user, now),
+            device: serializeDevice(user, tracking, now),
             time: {
               total: totalForCells(cellsForUser(matrix, user.id)),
             },
@@ -1187,7 +1123,7 @@ mcpRouter.get('/break-summary', requireApiToken(['read:people', 'read:time-summa
   try {
     const query = z.object({
       q: OptionalTextSchema,
-      role: z.enum(['ADMIN', 'MANAGER', 'MEMBER']).optional(),
+      role: Role.optional(),
       from: DateSchema.optional(),
       to: DateSchema.optional(),
       tz: OptionalTimezoneSchema,
@@ -1222,93 +1158,35 @@ mcpRouter.get('/break-summary', requireApiToken(['read:people', 'read:time-summa
       take: query.data.limit,
     });
     const userIds = users.map((user) => user.id);
-    const entries = userIds.length === 0
-      ? []
-      : await prisma.timeEntry.findMany({
-          where: {
-            userId: { in: userIds },
-            startedAt: { lt: range.toWindow.end },
-            OR: [{ endedAt: null }, { endedAt: { gt: range.fromWindow.start } }],
-          },
-          select: {
-            id: true,
-            userId: true,
-            source: true,
-            larkTaskGuid: true,
-            notes: true,
-            endedAt: true,
-            trackingProtocolVersion: true,
-            lastProvenAt: true,
-            leaseExpiresAt: true,
-            manualTimeRequest: {
-              select: {
-                id: true,
-                taskSummary: true,
-                requestedStart: true,
-                requestedEnd: true,
-                reason: true,
-                status: true,
-                approver: { select: { id: true, name: true, email: true } },
-                decidedBy: { select: { id: true, name: true, email: true } },
-                decidedAt: true,
-                decidedReason: true,
-                decisionSource: true,
-                autoApproved: true,
-              },
+    const now = new Date();
+    const [timeline, manualRequests] = await Promise.all([
+      loadTimelineWindow({ userIds, start: range.fromWindow.start, end: range.toWindow.end, now }),
+      userIds.length === 0
+        ? []
+        : prisma.manualTimeRequest.findMany({
+            where: {
+              userId: { in: userIds },
+              requestedStart: { lt: range.toWindow.end },
+              requestedEnd: { gt: range.fromWindow.start },
             },
-            segments: {
-              select: { kind: true, startedAt: true, endedAt: true },
-              orderBy: { startedAt: 'asc' },
-            },
-          },
-          orderBy: { startedAt: 'asc' },
-        });
-    const manualRequests = userIds.length === 0
+            select: MANUAL_REQUEST_DETAIL_SELECT,
+            orderBy: { requestedStart: 'asc' },
+          }),
+    ]);
+    const entryRequestIds = timeline.entries
+      .map((entry) => entry.manualTimeRequest?.id)
+      .filter((id): id is string => Boolean(id));
+    const requestDetails = entryRequestIds.length === 0
       ? []
       : await prisma.manualTimeRequest.findMany({
-          where: {
-            userId: { in: userIds },
-            requestedStart: { lt: range.toWindow.end },
-            requestedEnd: { gt: range.fromWindow.start },
-          },
-          select: {
-            id: true,
-            userId: true,
-            taskSummary: true,
-            requestedStart: true,
-            requestedEnd: true,
-            reason: true,
-            status: true,
-            approver: { select: { id: true, name: true, email: true } },
-            decidedBy: { select: { id: true, name: true, email: true } },
-            decidedAt: true,
-            decidedReason: true,
-            decisionSource: true,
-            autoApproved: true,
-          },
-          orderBy: { requestedStart: 'asc' },
+          where: { id: { in: entryRequestIds } },
+          select: MANUAL_REQUEST_DETAIL_SELECT,
         });
-    const now = new Date();
-    const evidenceByEntry = await loadEntryLiveEvidence(entries, now);
-    const resolvedEntries = entries.map((entry) => {
-      const effectiveEnds = resolveEffectiveEntrySegmentEnds({
-        segments: entry.segments,
-        entryEndedAt: entry.endedAt,
-        now,
-        evidence: evidenceByEntry.get(entry.id),
-        lifecycle: entry,
-      });
-      return {
-        ...entry,
-        segments: entry.segments.map((segment, index) => ({ ...segment, endedAt: effectiveEnds[index]! })),
-      };
-    });
-    const entriesByUser = new Map<string, typeof resolvedEntries>();
-    for (const entry of resolvedEntries) {
-      const list = entriesByUser.get(entry.userId) ?? [];
-      list.push(entry);
-      entriesByUser.set(entry.userId, list);
-    }
+    const requestById = new Map<string, ManualRequestDetail>(requestDetails.map((r) => [r.id, r]));
+    const creditedById = await loadCreditedManualMs(
+      [...new Map([...manualRequests, ...requestDetails].map((r) => [r.id, r])).values()],
+      now,
+    );
     const manualRequestsByUser = new Map<string, typeof manualRequests>();
     for (const request of manualRequests) {
       const list = manualRequestsByUser.get(request.userId) ?? [];
@@ -1319,7 +1197,8 @@ mcpRouter.get('/break-summary', requireApiToken(['read:people', 'read:time-summa
     const minBreakMs = query.data.minBreakMinutes * 60_000;
     const lunchMinMs = query.data.lunchMinMinutes * 60_000;
     const resultUsers = users.map((user) => {
-      const userEntries = entriesByUser.get(user.id) ?? [];
+      const userPieces = piecesForUser(timeline.pieces, user.id);
+      const trackedStretches = mergeIntervals(userPieces.filter(isTracked));
       const userManualRequests = manualRequestsByUser.get(user.id) ?? [];
       const days = range.days.map((date) => {
         const day = localDayWindow(date, range.tz);
@@ -1346,20 +1225,13 @@ mcpRouter.get('/break-summary', requireApiToken(['read:people', 'read:time-summa
           dayEnd,
           minBreakMs,
           lunchMinMs,
-          entries: userEntries.filter((entry) =>
-            entry.segments.some((segment) =>
-              overlapsMs(
-                segment.startedAt.getTime(),
-                (segment.endedAt ?? now).getTime(),
-                dayStart,
-                dayEnd,
-              ),
-            ),
-          ),
+          pieces: userPieces,
+          trackedStretches,
+          requestById,
+          creditedById,
           manualRequests: userManualRequests.filter((request) =>
             overlapsMs(request.requestedStart.getTime(), request.requestedEnd.getTime(), dayStart, dayEnd),
           ),
-          evidenceByEntry,
           now,
         });
       });
@@ -1461,7 +1333,7 @@ mcpRouter.get('/time-summary', requireApiToken(['read:time-summary']), async (re
 mcpRouter.get('/manual-time-requests', requireApiToken(['read:manual-time']), async (req, res, next) => {
   try {
     const query = z.object({
-      status: z.enum(['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED']).optional(),
+      status: ManualTimeRequestStatus.optional(),
       from: DateSchema.optional(),
       to: DateSchema.optional(),
       tz: OptionalTimezoneSchema,
@@ -1510,13 +1382,18 @@ mcpRouter.get('/manual-time-requests', requireApiToken(['read:manual-time']), as
       orderBy: [{ createdAt: 'desc' }],
       take: query.data.limit,
     });
+    const now = new Date();
+    const credited = await loadCreditedManualMs(
+      requests.map((request) => ({ ...request, userId: request.user.id })),
+      now,
+    );
     const statusCounts = requests.reduce<Record<string, number>>((acc, request) => {
       acc[request.status] = (acc[request.status] ?? 0) + 1;
       return acc;
     }, {});
 
     res.json({
-      generatedAt: new Date().toISOString(),
+      generatedAt: now.toISOString(),
       counts: statusCounts,
       requests: requests.map((request) => ({
         id: request.id,
@@ -1525,7 +1402,10 @@ mcpRouter.get('/manual-time-requests', requireApiToken(['read:manual-time']), as
         taskSummary: request.taskSummary,
         requestedStart: request.requestedStart.toISOString(),
         requestedEnd: request.requestedEnd.toISOString(),
-        durationMs: request.requestedEnd.getTime() - request.requestedStart.getTime(),
+        // Credited time — what approval actually added — not the window asked for.
+        durationMs: credited.get(request.id) ?? 0,
+        creditedMs: credited.get(request.id) ?? 0,
+        requestedMs: request.requestedEnd.getTime() - request.requestedStart.getTime(),
         reason: request.reason,
         status: request.status,
         approver: request.approver,

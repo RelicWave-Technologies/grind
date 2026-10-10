@@ -5,7 +5,7 @@ import { IDLE_POLL_MS } from '../../env';
 import { getIdleThresholdSec, getIdleWarningSeconds } from '../agentConfig';
 import { log } from '../../logger';
 
-export interface IdleWarningInfo {
+interface IdleWarningInfo {
   idleStartedAt: number;
   deadlineAt: number;
 }
@@ -13,9 +13,23 @@ export interface IdleWarningInfo {
 export interface IdleMonitorHandlers {
   onWarning: (info: IdleWarningInfo) => boolean | Promise<boolean>;
   onWarningCancelled: () => void;
-  onIdle: (idleStartedAt: number) => boolean | Promise<boolean>;
+  /** Pause the timer at the idle boundary. Called once per idle spell. */
+  onIdlePause: (idleStartedAt: number) => Promise<void>;
+  /** Ask for the idle prompt. False when another prompt owns the screen. */
+  onIdlePrompt: (idleStartedAt: number) => boolean;
 }
 
+/**
+ * NONE → WARNING (optional) → IDLE_PENDING → IDLE_PROMPT → NONE.
+ *
+ * IDLE_PENDING means the timer has been paused but the prompt could not be
+ * shown yet (another prompt owned the screen). Only the prompt is retried from
+ * there — never the pause. Re-pausing on every poll is what froze a timer the
+ * person had just resumed from the popover.
+ *
+ * IDLE_PROMPT ends when the coordinator stops showing the idle prompt, by any
+ * path; the owner wires that to `resolve()`. Until then idle detection is off.
+ */
 type IdlePhase = 'NONE' | 'WARNING' | 'IDLE_PENDING' | 'IDLE_PROMPT';
 
 /**
@@ -35,11 +49,7 @@ export class IdleMonitor {
   private thresholdSec = 0;
   private deadlineAt = 0;
 
-  /** `isProtected` returns true when idle should be ignored (e.g. in a meeting). */
-  constructor(
-    private readonly handlers: IdleMonitorHandlers,
-    private readonly isProtected: () => boolean = () => false,
-  ) {}
+  constructor(private readonly handlers: IdleMonitorHandlers) {}
 
   start(): void {
     if (this.interval) return;
@@ -65,19 +75,21 @@ export class IdleMonitor {
 
   private async tickOnce(): Promise<void> {
     if (this.suspended) return;
-
-    if (this.phase === 'IDLE_PENDING') {
-      await this.presentIdlePrompt();
-      return;
-    }
     if (this.phase === 'IDLE_PROMPT') return;
 
-    if (this.isProtected()) {
-      this.cancelWarning();
+    const status = getTimerService().status();
+    if (this.phase === 'IDLE_PENDING') {
+      // Our pause closed the open segment, so a timer that is accruing now was
+      // resumed (or restarted) since — the idle spell has been answered. A
+      // stopped timer has nothing left to ask about either.
+      if (status.state !== 'RUNNING' || !status.paused) {
+        this.reset();
+        return;
+      }
+      this.requestIdlePrompt();
       return;
     }
 
-    const status = getTimerService().status();
     const isAccruing = status.state === 'RUNNING' && !status.paused;
     if (!isAccruing) {
       this.cancelWarning();
@@ -129,19 +141,28 @@ export class IdleMonitor {
   }
 
   private async beginIdlePause(idleStartedAt: number): Promise<void> {
+    try {
+      await this.handlers.onIdlePause(idleStartedAt);
+    } catch (err) {
+      // Phase unchanged: the next poll sees the same idle and tries again.
+      log.warn('idle pause failed; will retry', { err: String(err) });
+      return;
+    }
+    // The machine went away while the pause was being written; the away
+    // handling owns what happens next.
+    if (this.suspended) return;
     this.clearDeadline();
     this.phase = 'IDLE_PENDING';
     this.idleStartedAt = idleStartedAt;
-    await this.presentIdlePrompt();
+    this.requestIdlePrompt();
   }
 
-  private async presentIdlePrompt(): Promise<void> {
+  private requestIdlePrompt(): void {
     try {
-      const accepted = await this.handlers.onIdle(this.idleStartedAt);
-      this.phase = accepted ? 'IDLE_PROMPT' : 'IDLE_PENDING';
+      const shown = this.handlers.onIdlePrompt(this.idleStartedAt);
+      if (this.phase === 'IDLE_PENDING') this.phase = shown ? 'IDLE_PROMPT' : 'IDLE_PENDING';
     } catch (err) {
-      this.phase = 'IDLE_PENDING';
-      log.warn('idle pause or prompt failed; will retry', { err: String(err) });
+      log.warn('idle prompt failed; will retry', { err: String(err) });
     }
   }
 
@@ -191,9 +212,5 @@ export class IdleMonitor {
   resume(): void {
     this.suspended = false;
     this.reset();
-  }
-
-  isPrompting(): boolean {
-    return this.phase !== 'NONE';
   }
 }

@@ -47,7 +47,7 @@ export interface Size {
  *     every non-normal always-on-top level into one topmost band): ambient
  *     raises are suppressed while a prompt is being held. See `holdPrompt()`.
  */
-export type OverlayRank = 'ambient' | 'prompt';
+type OverlayRank = 'ambient' | 'prompt';
 
 export interface OverlayOptions extends Size {
   /** Renderer hash-route (e.g. 'floating', 'idle', 'ready-to-work', 'popover'). */
@@ -78,7 +78,7 @@ function relativeLevelFor(rank: OverlayRank): number {
   return rank === 'prompt' ? 1 : 0;
 }
 
-export function overlayRankOf(win: BrowserWindow): OverlayRank {
+function overlayRankOf(win: BrowserWindow): OverlayRank {
   return ranks.get(win) ?? 'ambient';
 }
 

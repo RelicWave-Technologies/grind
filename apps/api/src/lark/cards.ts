@@ -31,6 +31,12 @@ export interface DecidedCardInput extends ApprovalCardInput {
   decision: 'APPROVED' | 'REJECTED';
   decidedByName: string;
   decidedAt: number; // epoch ms
+  /**
+   * What the approval actually added (the free stretches it carved). When it
+   * differs from the window asked for, the card says so instead of claiming
+   * the whole window.
+   */
+  creditedMs?: number | null;
 }
 
 export interface UnavailableRequestCardInput {
@@ -41,28 +47,6 @@ export interface StaleRequestCardInput {
   requestId: string;
   version?: number | null;
   currentVersion?: number | null;
-}
-
-export interface PayrollReminderItem {
-  requestId: string;
-  requesterName: string;
-  taskSummary?: string | null;
-  startedAt: number;
-  endedAt: number;
-  reason: string;
-  ageMs?: number;
-}
-
-export interface PayrollReminderCardInput {
-  month: string;
-  audience: 'requester' | 'approver';
-  teamName?: string | null;
-  recipientName?: string | null;
-  requests: PayrollReminderItem[];
-  dashboardUrl?: string;
-  generatedAt?: number;
-  /** Recipient workspace timezone for every calendar value in this card. */
-  timeZone: string;
 }
 
 function formatAt(ms: number, timeZone: string, options: Intl.DateTimeFormatOptions): string {
@@ -86,26 +70,6 @@ function fmtDurationMinutes(ms: number): string {
   return r ? `${h}h ${r}m` : `${h}h`;
 }
 
-function fmtAge(ms: number | undefined): string {
-  if (ms === undefined) return '—';
-  const hours = Math.max(0, Math.round(ms / (60 * 60 * 1000)));
-  if (hours < 24) return `${hours}h`;
-  const days = Math.floor(hours / 24);
-  const rest = hours % 24;
-  return rest ? `${days}d ${rest}h` : `${days}d`;
-}
-
-function fmtClockRange(startMs: number, endMs: number, timeZone: string): string {
-  const dOpts: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric' };
-  const tOpts: Intl.DateTimeFormatOptions = { hour: 'numeric', minute: '2-digit' };
-  const sameDay = formatAt(startMs, timeZone, { year: 'numeric', month: '2-digit', day: '2-digit' })
-    === formatAt(endMs, timeZone, { year: 'numeric', month: '2-digit', day: '2-digit' });
-  if (sameDay) {
-    return `${formatAt(startMs, timeZone, dOpts)} · ${formatAt(startMs, timeZone, tOpts)} – ${formatAt(endMs, timeZone, tOpts)}`;
-  }
-  return `${formatAt(startMs, timeZone, { ...dOpts, ...tOpts })} → ${formatAt(endMs, timeZone, { ...dOpts, ...tOpts })}`;
-}
-
 function fmtTimestamp(ms: number, timeZone: string): string {
   return formatAt(ms, timeZone, {
     month: 'short',
@@ -115,15 +79,18 @@ function fmtTimestamp(ms: number, timeZone: string): string {
   });
 }
 
-function truncate(s: string, n: number): string {
-  if (s.length <= n) return s;
-  return `${s.slice(0, n - 1).trimEnd()}…`;
+function durationText(req: ApprovalCardInput & { creditedMs?: number | null }): string {
+  const asked = req.endedAt - req.startedAt;
+  if (req.creditedMs === undefined || req.creditedMs === null || req.creditedMs === asked) {
+    return fmtDurationMinutes(asked);
+  }
+  return `${fmtDurationMinutes(req.creditedMs)} credited (${fmtDurationMinutes(asked)} asked; the rest was already tracked)`;
 }
 
-function detailFields(req: ApprovalCardInput) {
+function detailFields(req: ApprovalCardInput & { creditedMs?: number | null }) {
   const fields: Array<{ is_short: boolean; text: { tag: 'lark_md'; content: string } }> = [
     { is_short: true, text: { tag: 'lark_md', content: `**Who**\n${req.requesterName}` } },
-    { is_short: true, text: { tag: 'lark_md', content: `**Duration**\n${fmtDurationMinutes(req.endedAt - req.startedAt)}` } },
+    { is_short: true, text: { tag: 'lark_md', content: `**Duration**\n${durationText(req)}` } },
     { is_short: false, text: { tag: 'lark_md', content: `**When**\n${fmtRange(req.startedAt, req.endedAt, req.timeZone)}` } },
   ];
   fields.push({
@@ -174,37 +141,6 @@ export function buildApprovalCard(req: ApprovalCardInput): Record<string, unknow
             value: actionValue(req, 'reject'),
           },
         ],
-      },
-    ],
-  };
-}
-
-/**
- * Used when the requester EDITS a pending request. The previous card is
- * rewritten with this "superseded" variant: grey header, no Approve/Reject
- * buttons, and a clear note pointing the approver at the new card. Prevents
- * an in-flight approver from clicking stale buttons.
- */
-export interface SupersededCardInput extends ApprovalCardInput {
-  /** When the supersession happened (epoch ms). */
-  supersededAt: number;
-}
-export function buildSupersededCard(req: SupersededCardInput): Record<string, unknown> {
-  return {
-    config: { wide_screen_mode: true, update_multi: true },
-    header: {
-      title: { tag: 'plain_text', content: 'Manual time request — updated' },
-      template: 'grey',
-    },
-    elements: [
-      { tag: 'div', fields: detailFields(req) },
-      { tag: 'hr' },
-      {
-        tag: 'div',
-        text: {
-          tag: 'lark_md',
-          content: `**This request was updated** at ${fmtTimestamp(req.supersededAt, req.timeZone)}. See the new card below — these buttons no longer apply.`,
-        },
       },
     ],
   };
@@ -369,95 +305,3 @@ export function buildDecidedCard(req: DecidedCardInput): Record<string, unknown>
   };
 }
 
-/** Payroll month-close reminder card for pending manual-time approvals. */
-export function buildPayrollReminderCard(input: PayrollReminderCardInput): Record<string, unknown> {
-  const shown = input.requests.slice(0, 8);
-  const hidden = Math.max(0, input.requests.length - shown.length);
-  const totalMs = input.requests.reduce((sum, req) => sum + Math.max(0, req.endedAt - req.startedAt), 0);
-  const oldestAgeMs = input.requests.reduce((max, req) => Math.max(max, req.ageMs ?? 0), 0);
-  const isApprover = input.audience === 'approver';
-  const subtitle = isApprover
-    ? `Review before payroll close${input.teamName ? ` · ${input.teamName}` : ''}`
-    : 'Your payroll may be affected until these are decided';
-  const itemLines = shown.length
-    ? shown.map((req, index) => {
-      const task = req.taskSummary?.trim() || 'Manual time';
-      const age = req.ageMs !== undefined ? ` · waiting ${fmtAge(req.ageMs)}` : '';
-      return [
-        `**${index + 1}. ${req.requesterName}** · ${fmtDurationMinutes(req.endedAt - req.startedAt)}${age}`,
-        `${fmtClockRange(req.startedAt, req.endedAt, input.timeZone)} · ${task}`,
-        `_${truncate(req.reason, 110)}_`,
-      ].join('\n');
-    }).join('\n\n')
-    : '_No pending approvals._';
-
-  const elements: Array<Record<string, unknown>> = [
-    {
-      tag: 'div',
-      text: {
-        tag: 'lark_md',
-        content: `**${subtitle}**`,
-      },
-    },
-    {
-      tag: 'div',
-      fields: [
-        { is_short: true, text: { tag: 'lark_md', content: `**Pending**\n${input.requests.length}` } },
-        { is_short: true, text: { tag: 'lark_md', content: `**Total time**\n${fmtDurationMinutes(totalMs)}` } },
-        { is_short: true, text: { tag: 'lark_md', content: `**Oldest**\n${oldestAgeMs ? fmtAge(oldestAgeMs) : 'New'}` } },
-        {
-          is_short: true,
-          text: {
-            tag: 'lark_md',
-            content: `**Scope**\n${isApprover ? (input.teamName ?? 'Assigned queue') : 'Your requests'}`,
-          },
-        },
-      ],
-    },
-    { tag: 'hr' },
-    { tag: 'div', text: { tag: 'lark_md', content: itemLines } },
-  ];
-
-  if (hidden > 0) {
-    elements.push({
-      tag: 'div',
-      text: {
-        tag: 'lark_md',
-        content: `**+${hidden} more pending approval${hidden === 1 ? '' : 's'}** · open Timo to review the full list.`,
-      },
-    });
-  }
-  elements.push({
-    tag: 'div',
-    text: {
-      tag: 'lark_md',
-      content: input.generatedAt ? `_Generated ${fmtTimestamp(input.generatedAt, input.timeZone)}_` : '_Generated by Timo payroll month close_',
-    },
-  });
-  if (input.dashboardUrl) {
-    elements.push(
-      { tag: 'hr' },
-      {
-        tag: 'action',
-        actions: [
-          {
-            tag: 'button',
-            text: { tag: 'plain_text', content: isApprover ? 'Open approvals' : 'Open my approvals' },
-            type: 'primary',
-            url: input.dashboardUrl,
-          },
-        ],
-      },
-    );
-  }
-
-  return {
-    config: { wide_screen_mode: true, update_multi: true },
-    header: {
-      title: { tag: 'plain_text', content: `Payroll approvals · ${input.month}` },
-      subtitle: { tag: 'plain_text', content: input.recipientName ? `For ${input.recipientName}` : 'Month close reminder' },
-      template: input.requests.length > 0 ? 'orange' : 'green',
-    },
-    elements,
-  };
-}

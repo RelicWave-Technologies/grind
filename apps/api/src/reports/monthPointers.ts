@@ -39,7 +39,7 @@ import type { MonthPerformanceDay } from './monthPerformance';
  */
 
 /** Minutes. Named for the spec line each one comes from. */
-export const POINTER_THRESHOLDS = {
+const POINTER_THRESHOLDS = {
   /** "Full-day attendance mein agar working 6 ghante se kam hai" */
   fullDayShortOf: 6 * 60,
   /** "Half-day attendance mein agar 2 ghante ya usse kam" — inclusive. */
@@ -54,7 +54,7 @@ export const POINTER_THRESHOLDS = {
   averageStrongOver: 8 * 60 + 15,
 } as const;
 
-export type PerformanceBand = 'RED' | 'YELLOW' | 'GREEN';
+type PerformanceBand = 'RED' | 'YELLOW' | 'GREEN';
 
 export interface MonthPointers {
   /** `P` + `HD` days. The denominator of the average. */

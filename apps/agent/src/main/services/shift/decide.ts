@@ -26,8 +26,15 @@ export interface ResolvedShiftWindow {
  *     buffer. After buffer expiry we stop bothering and reset, so
  *     tomorrow's window starts clean.
  *
- * The reducer returns ONE of four actions per tick. The agent service
- * translates those into `show()`, schedule a one-shot, or no-op.
+ * Two things answer the question without it being asked: a timer that is
+ * already running counts as "Yes" (`ack`), and an idle / away / permission
+ * prompt on screen outranks this toast, which stands aside (`yield`) and comes
+ * back once that prompt is gone.
+ *
+ * A shift whose end is at or before its start runs past midnight; until it
+ * ends, it is still "today's" shift.
+ *
+ * The reducer returns ONE action per tick and never touches Electron.
  */
 
 export interface ShiftMonitorState {
@@ -42,7 +49,9 @@ export interface ShiftMonitorState {
 export type ShiftAction =
   | { kind: 'show'; startedAt: number; bufferUntil: number }
   | { kind: 'hide' /* popup is up but no longer in window — close it */ }
-  | { kind: 'schedule'; nextAt: number /* one-shot timer instead of polling */ }
+  | { kind: 'ack' /* already tracking — mark answered, close it if up */ }
+  | { kind: 'yield' /* another prompt owns the screen — close it for now */ }
+  | { kind: 'schedule'; nextAt: number /* outside the window; next start, for the record */ }
   | { kind: 'noop' };
 
 const FIVE_MIN_MS = 5 * 60_000;
@@ -54,12 +63,14 @@ export function tickShiftMonitor(input: {
   now: Date;
   timeZone: string;
   nudgeIntervalMs?: number;
+  /** A timer is running — the person has clocked in already. */
+  tracking?: boolean;
+  /** An idle / away / permission prompt is on screen. */
+  attentionBusy?: boolean;
 }): ShiftAction {
   const timeZone = input.timeZone;
   if (!input.schedule || !isValidTimeZone(timeZone)) return { kind: 'noop' };
-  const nowParts = zonedDateTimeParts(input.now, timeZone);
-  const day = scheduleForDate(input.schedule, nowParts);
-  const todaysStartMs = day ? shiftInstantForDate(nowParts, day.start, timeZone) : null;
+  const todaysStartMs = resolveShiftWindow(input.schedule, input.now, timeZone)?.startedAt ?? null;
   const bufferUntilMs = todaysStartMs === null
     ? null
     : todaysStartMs + Math.max(0, input.bufferMin) * 60_000;
@@ -78,16 +89,20 @@ export function tickShiftMonitor(input: {
     return nextAt !== null ? { kind: 'schedule', nextAt } : { kind: 'noop' };
   }
 
-  // Inside the buffer window. Three reasons to stay silent:
+  // Inside the buffer window. Reasons to stay silent:
   //   1. user already acked this morning's prompt with "Yes"
-  //   2. user said "Not yet" and the snooze hasn't elapsed
-  //   3. popup is already showing
+  //   2. a timer is running — that is a "Yes" nobody had to click
+  //   3. user said "Not yet" and the snooze hasn't elapsed
+  //   4. a more urgent prompt owns the screen
+  //   5. popup is already showing
   if (input.state.ackedFor !== null && todaysStartMs !== null && input.state.ackedFor === todaysStartMs) {
     return { kind: 'noop' };
   }
+  if (input.tracking) return { kind: 'ack' };
   if (input.state.snoozedUntil !== null && input.now.getTime() < input.state.snoozedUntil) {
     return { kind: 'noop' };
   }
+  if (input.attentionBusy) return input.state.prompting ? { kind: 'yield' } : { kind: 'noop' };
   if (input.state.prompting) return { kind: 'noop' };
 
   // Show it.
@@ -118,7 +133,31 @@ function shiftInstantForDate(
   }
 }
 
-/** Resolve the assigned shift for the workspace-local calendar day containing `now`. */
+function minutesOf(hhmm: string): number {
+  const [h, m] = hhmm.split(':').map((n) => Number.parseInt(n, 10));
+  return (h ?? 0) * 60 + (m ?? 0);
+}
+
+/** The shift that starts on `date`. One that ends at or before its start
+ *  runs past midnight, so it ends on the next calendar day. */
+function shiftStartingOn(
+  schedule: ShiftSchedule,
+  date: { year: number; month: number; day: number },
+  timeZone: string,
+): ResolvedShiftWindow | null {
+  const day = scheduleForDate(schedule, date);
+  if (!day) return null;
+  const endDate = minutesOf(day.end) <= minutesOf(day.start) ? addCalendarDays(date, 1) : date;
+  const startedAt = shiftInstantForDate(date, day.start, timeZone);
+  const endedAt = shiftInstantForDate(endDate, day.end, timeZone);
+  if (startedAt === null || endedAt === null || endedAt <= startedAt) return null;
+  return { start: day.start, end: day.end, startedAt, endedAt };
+}
+
+/**
+ * The user's current shift: last night's while an overnight shift is still
+ * running, otherwise the one for the workspace-local calendar day of `now`.
+ */
 export function resolveShiftWindow(
   schedule: ShiftSchedule,
   now: Date,
@@ -126,12 +165,9 @@ export function resolveShiftWindow(
 ): ResolvedShiftWindow | null {
   if (!isValidTimeZone(timeZone)) return null;
   const date = zonedDateTimeParts(now, timeZone);
-  const day = scheduleForDate(schedule, date);
-  if (!day) return null;
-  const startedAt = shiftInstantForDate(date, day.start, timeZone);
-  const endedAt = shiftInstantForDate(date, day.end, timeZone);
-  if (startedAt === null || endedAt === null || endedAt <= startedAt) return null;
-  return { start: day.start, end: day.end, startedAt, endedAt };
+  const carriedOver = shiftStartingOn(schedule, addCalendarDays(date, -1), timeZone);
+  if (carriedOver && now.getTime() < carriedOver.endedAt) return carriedOver;
+  return shiftStartingOn(schedule, date, timeZone);
 }
 
 function scheduleForDate(
@@ -163,15 +199,11 @@ function nextShiftStartMs(schedule: ShiftSchedule, now: Date, timeZone: string):
   return null;
 }
 
-/** Apply user's "Yes" — acknowledge today's window. */
+/** Apply user's "Yes" — acknowledge the current shift's window. */
 export function ackToday(state: ShiftMonitorState, schedule: ShiftSchedule, now: Date, timeZone: string): ShiftMonitorState {
-  if (!isValidTimeZone(timeZone)) return state;
-  const date = zonedDateTimeParts(now, timeZone);
-  const day = scheduleForDate(schedule, date);
-  if (!day) return state;
-  const startedAt = shiftInstantForDate(date, day.start, timeZone);
-  if (startedAt === null) return state;
-  return { ...state, ackedFor: startedAt, snoozedUntil: null, prompting: false };
+  const current = resolveShiftWindow(schedule, now, timeZone);
+  if (!current) return state;
+  return { ...state, ackedFor: current.startedAt, snoozedUntil: null, prompting: false };
 }
 
 /** Apply user's "Not yet" — snooze for `nudgeIntervalMs`. */

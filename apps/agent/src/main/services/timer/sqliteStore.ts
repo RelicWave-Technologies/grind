@@ -5,6 +5,8 @@ import type {
   EntrySyncState,
   LocalLedgerEntry,
   PendingEntrySyncState,
+  RangeBacklog,
+  SyncBacklog,
   TimerOwner,
   TimerAwayState,
   TimerExitIntent,
@@ -12,9 +14,6 @@ import type {
   UnsyncedEntry,
 } from './types';
 
-function syncedFlag(syncState: EntrySyncState): 0 | 1 {
-  return syncState === 'synced' ? 1 : 0;
-}
 
 function asSyncState(value: unknown): EntrySyncState {
   if (value === 'pending_create' || value === 'pending_update' || value === 'synced') return value;
@@ -78,23 +77,20 @@ function asAwayState(value: unknown): TimerAwayState | null {
 
 /**
  * better-sqlite3-backed EntryStore. Each entry is stored as a JSON blob with
- * indexed columns (ended_at, synced) for the two hot queries (open entry,
- * unsynced entries). WAL mode + synchronous=FULL makes acknowledged local
- * mutations survive process and OS crashes before they are published to UI.
+ * indexed columns (ended_at, sync_state) for the two hot queries (open entry,
+ * unsynced entries). The connection comes from openAgentDb, whose WAL +
+ * synchronous=FULL makes acknowledged local mutations survive process and OS
+ * crashes before they are published to UI.
  */
 export class SqliteEntryStore implements EntryStore {
   private owner: TimerOwner | null = null;
 
   constructor(private readonly db: Database.Database) {
-    this.db.pragma('journal_mode = WAL');
-    this.db.pragma('synchronous = FULL');
-    this.db.pragma('busy_timeout = 5000');
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS local_entries (
         id          TEXT PRIMARY KEY,
         client_uuid TEXT NOT NULL UNIQUE,
         ended_at    INTEGER,
-        synced      INTEGER NOT NULL DEFAULT 0,
         sync_state  TEXT NOT NULL DEFAULT 'pending_create'
           CHECK (sync_state IN ('pending_create', 'pending_update', 'synced')),
         owner_user_id TEXT,
@@ -104,7 +100,6 @@ export class SqliteEntryStore implements EntryStore {
         json        TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_local_entries_open ON local_entries(ended_at);
-      CREATE INDEX IF NOT EXISTS idx_local_entries_synced ON local_entries(synced);
       CREATE TABLE IF NOT EXISTS timer_meta (
         key   TEXT PRIMARY KEY,
         value TEXT NOT NULL
@@ -112,6 +107,16 @@ export class SqliteEntryStore implements EntryStore {
     `);
     this.migrateSyncState();
     this.migrateOwnership();
+  }
+
+  /**
+   * Older schemas mirrored sync_state in a `synced` 0/1 column. Nothing reads
+   * or writes it any more; the column stays on old databases (dropping one in
+   * SQLite means rebuilding the table) but its index goes.
+   */
+  private hasLegacySyncedColumn(): boolean {
+    const columns = this.db.prepare(`PRAGMA table_info(local_entries)`).all() as { name: string }[];
+    return columns.some((c) => c.name === 'synced');
   }
 
   bindOwner(owner: TimerOwner | null): void {
@@ -163,6 +168,42 @@ export class SqliteEntryStore implements EntryStore {
     return claim();
   }
 
+  claimLegacySelfEntries(owner: TimerOwner): { claimed: number; unclaimed: number } {
+    const claim = this.db.transaction(() => {
+      const rows = this.db.prepare(
+        `SELECT id, json FROM local_entries
+         WHERE owner_user_id IS NULL AND owner_workspace_id IS NULL
+           AND json_extract(json, '$.userId') = 'self'`,
+      ).all() as Array<{ id: string; json: string }>;
+      if (rows.length === 0) return { claimed: 0, unclaimed: 0 };
+      const owners = this.db.prepare(
+        `SELECT DISTINCT owner_user_id AS userId, owner_workspace_id AS workspaceId
+         FROM local_entries WHERE owner_user_id IS NOT NULL`,
+      ).all() as TimerOwner[];
+      const soleOwner = owners.length === 1
+        && owners[0]!.userId === owner.userId
+        && owners[0]!.workspaceId === owner.workspaceId;
+      if (!soleOwner) return { claimed: 0, unclaimed: rows.length };
+      const update = this.db.prepare(
+        `UPDATE local_entries
+         SET owner_user_id = @userId, owner_workspace_id = @workspaceId, json = @json
+         WHERE id = @id AND owner_user_id IS NULL AND owner_workspace_id IS NULL`,
+      );
+      let claimed = 0;
+      for (const row of rows) {
+        const entry = parseEntry(row.json);
+        claimed += update.run({
+          id: row.id,
+          userId: owner.userId,
+          workspaceId: owner.workspaceId,
+          json: JSON.stringify({ ...entry, userId: owner.userId }),
+        }).changes;
+      }
+      return { claimed, unclaimed: rows.length - claimed };
+    });
+    return claim();
+  }
+
   claimServerMatchedEntries(owner: TimerOwner, matches: Array<{ id: string; clientUuid: string }>): number {
     if (matches.length === 0) return 0;
     const claim = this.db.transaction(() => {
@@ -206,11 +247,27 @@ export class SqliteEntryStore implements EntryStore {
         SET sync_state = CASE WHEN synced = 1 THEN 'synced' ELSE 'pending_create' END;
       `);
     }
+    // The last read of the legacy `synced` column, once per database: from
+    // here on sync_state alone is the truth, so a row that goes pending again
+    // must never be pulled back to "synced" by a stale 1 left in the mirror.
+    const retired = this.db.prepare(`SELECT 1 AS found FROM timer_meta WHERE key = 'schema:synced_column_retired'`).get();
+    if (!retired) {
+      this.db.transaction(() => {
+        if (this.hasLegacySyncedColumn()) {
+          this.db.exec(`
+            UPDATE local_entries
+            SET sync_state = CASE WHEN synced = 1 THEN 'synced' ELSE sync_state END
+            WHERE sync_state NOT IN ('pending_create', 'pending_update', 'synced')
+               OR (synced = 1 AND sync_state <> 'synced');
+          `);
+        }
+        this.db.prepare(`INSERT INTO timer_meta (key, value) VALUES ('schema:synced_column_retired', '1')`).run();
+      })();
+    }
     this.db.exec(`
-      UPDATE local_entries
-      SET sync_state = CASE WHEN synced = 1 THEN 'synced' ELSE sync_state END
-      WHERE sync_state NOT IN ('pending_create', 'pending_update', 'synced')
-         OR (synced = 1 AND sync_state <> 'synced');
+      UPDATE local_entries SET sync_state = 'pending_update'
+      WHERE sync_state NOT IN ('pending_create', 'pending_update', 'synced');
+      DROP INDEX IF EXISTS idx_local_entries_synced;
       CREATE INDEX IF NOT EXISTS idx_local_entries_sync_state ON local_entries(sync_state);
     `);
   }
@@ -222,6 +279,12 @@ export class SqliteEntryStore implements EntryStore {
     if (!names.has('owner_workspace_id')) this.db.exec(`ALTER TABLE local_entries ADD COLUMN owner_workspace_id TEXT`);
     if (!names.has('acknowledged_revision')) this.db.exec(`ALTER TABLE local_entries ADD COLUMN acknowledged_revision INTEGER`);
     if (!names.has('acknowledged_hash')) this.db.exec(`ALTER TABLE local_entries ADD COLUMN acknowledged_hash TEXT`);
+    // JSON of the task the server held when it acknowledged (a GUID or null).
+    // NULL: acknowledged before this was recorded.
+    if (!names.has('acknowledged_task')) this.db.exec(`ALTER TABLE local_entries ADD COLUMN acknowledged_task TEXT`);
+    if (!names.has('sync_attempts')) this.db.exec(`ALTER TABLE local_entries ADD COLUMN sync_attempts INTEGER NOT NULL DEFAULT 0`);
+    if (!names.has('next_attempt_at')) this.db.exec(`ALTER TABLE local_entries ADD COLUMN next_attempt_at INTEGER`);
+    if (!names.has('last_error')) this.db.exec(`ALTER TABLE local_entries ADD COLUMN last_error TEXT`);
     this.db.exec(`
       CREATE INDEX IF NOT EXISTS idx_local_entries_owner_open
         ON local_entries(owner_user_id, owner_workspace_id, ended_at);
@@ -272,6 +335,30 @@ export class SqliteEntryStore implements EntryStore {
     this.deleteMeta('away_state');
   }
 
+  markOnce(key: string): boolean {
+    const owner = this.requireOwner();
+    const info = this.db.prepare(
+      `INSERT OR IGNORE INTO timer_meta (key, value) VALUES (?, '1')`,
+    ).run(this.ownerMetaKey(owner, `once:${key}`));
+    return info.changes > 0;
+  }
+
+  getNote(key: string): string | null {
+    const owner = this.owner;
+    if (!owner) return null;
+    const row = this.db.prepare(`SELECT value FROM timer_meta WHERE key = ?`)
+      .get(this.ownerMetaKey(owner, `note:${key}`)) as { value: string } | undefined;
+    return row?.value ?? null;
+  }
+
+  setNote(key: string, value: string): void {
+    const owner = this.requireOwner();
+    this.db.prepare(
+      `INSERT INTO timer_meta (key, value) VALUES (@key, @value)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    ).run({ key: this.ownerMetaKey(owner, `note:${key}`), value });
+  }
+
   setRecoveryNotice(notice: TimerRecoveryNotice): void {
     this.setJsonMeta('recovery_notice', notice);
   }
@@ -301,28 +388,30 @@ export class SqliteEntryStore implements EntryStore {
     this.db
       .prepare(
         `INSERT INTO local_entries (
-           id, client_uuid, ended_at, synced, sync_state,
+           id, client_uuid, ended_at, sync_state,
            owner_user_id, owner_workspace_id, acknowledged_revision, acknowledged_hash, json
          )
          VALUES (
-           @id, @clientUuid, @endedAt, @synced, @syncState,
+           @id, @clientUuid, @endedAt, @syncState,
            @ownerUserId, @ownerWorkspaceId, NULL, NULL, @json
          )
          ON CONFLICT(id) DO UPDATE SET
            ended_at = excluded.ended_at,
-           synced   = excluded.synced,
            sync_state = excluded.sync_state,
            acknowledged_revision = CASE WHEN excluded.json = local_entries.json
              THEN local_entries.acknowledged_revision ELSE NULL END,
            acknowledged_hash = CASE WHEN excluded.json = local_entries.json
              THEN local_entries.acknowledged_hash ELSE NULL END,
+           acknowledged_task = CASE WHEN excluded.json = local_entries.json
+             THEN local_entries.acknowledged_task ELSE NULL END,
+           sync_attempts = 0,
+           next_attempt_at = NULL,
            json     = excluded.json`,
       )
       .run({
         id: entry.id,
         clientUuid: entry.clientUuid,
         endedAt: entry.endedAt,
-        synced: syncedFlag(nextState),
         syncState: nextState,
         ownerUserId: owner.userId,
         ownerWorkspaceId: owner.workspaceId,
@@ -350,22 +439,101 @@ export class SqliteEntryStore implements EntryStore {
     return row ? parseEntry(row.json) : null;
   }
 
-  getUnsynced(): UnsyncedEntry[] {
+  transaction<T>(work: () => T): T {
+    return this.db.transaction(work)();
+  }
+
+  pruneSyncedBefore(cutoff: number): number {
+    // Every owner: the server holds these, and nothing local reads that far
+    // back (resend lookbacks are 30 days).
+    return this.db.prepare(
+      `DELETE FROM local_entries
+       WHERE sync_state = 'synced' AND ended_at IS NOT NULL AND ended_at < ?`,
+    ).run(cutoff).changes;
+  }
+
+  listOpen(): TimeEntry[] {
+    const owner = this.owner;
+    if (!owner) return [];
+    const rows = this.db.prepare(
+      `SELECT json FROM local_entries
+       WHERE owner_user_id = ? AND owner_workspace_id = ? AND ended_at IS NULL
+       ORDER BY rowid ASC`,
+    ).all(owner.userId, owner.workspaceId) as { json: string }[];
+    return rows.map((row) => parseEntry(row.json));
+  }
+
+  getUnsynced(now: number, limit = -1): UnsyncedEntry[] {
     const owner = this.owner;
     if (!owner) return [];
     const rows = this.db
       .prepare(
-        `SELECT json, sync_state
+        `SELECT json, sync_state, sync_attempts
          FROM local_entries
          WHERE owner_user_id = ? AND owner_workspace_id = ?
            AND sync_state IN ('pending_create', 'pending_update')
-         ORDER BY rowid ASC`,
+           AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
+         ORDER BY CAST(json_extract(json, '$.startedAt') AS INTEGER) ASC, rowid ASC
+         LIMIT ?`,
       )
-      .all(owner.userId, owner.workspaceId) as { json: string; sync_state: string }[];
+      .all(owner.userId, owner.workspaceId, now, limit) as { json: string; sync_state: string; sync_attempts: number }[];
     return rows.map((r) => ({
       entry: parseEntry(r.json),
       syncState: asSyncState(r.sync_state) as PendingEntrySyncState,
+      attempts: r.sync_attempts,
     }));
+  }
+
+  noteSyncFailure(entryId: string, error: string, retryAt: number): void {
+    const owner = this.requireOwner();
+    this.db.prepare(
+      `UPDATE local_entries
+       SET sync_attempts = sync_attempts + 1, next_attempt_at = ?, last_error = ?
+       WHERE id = ? AND owner_user_id = ? AND owner_workspace_id = ?
+         AND sync_state <> 'synced'`,
+    ).run(retryAt, error.slice(0, 200), entryId, owner.userId, owner.workspaceId);
+  }
+
+  syncBacklog(parkedAtAttempts: number): SyncBacklog {
+    const owner = this.owner;
+    if (!owner) return { pending: 0, oldestPendingAt: null, lastError: null, parked: 0 };
+    const summary = this.db.prepare(
+      `SELECT COUNT(*) AS pending, MIN(CAST(json_extract(json, '$.startedAt') AS INTEGER)) AS oldest,
+              SUM(CASE WHEN sync_attempts >= ? THEN 1 ELSE 0 END) AS parked
+       FROM local_entries
+       WHERE owner_user_id = ? AND owner_workspace_id = ?
+         AND sync_state IN ('pending_create', 'pending_update')`,
+    ).get(parkedAtAttempts, owner.userId, owner.workspaceId) as { pending: number; oldest: number | null; parked: number | null };
+    const failing = this.db.prepare(
+      `SELECT last_error FROM local_entries
+       WHERE owner_user_id = ? AND owner_workspace_id = ?
+         AND sync_state IN ('pending_create', 'pending_update') AND last_error IS NOT NULL
+       ORDER BY rowid DESC LIMIT 1`,
+    ).get(owner.userId, owner.workspaceId) as { last_error: string } | undefined;
+    return {
+      pending: summary.pending,
+      oldestPendingAt: summary.oldest,
+      lastError: failing?.last_error ?? null,
+      parked: summary.parked ?? 0,
+    };
+  }
+
+  rangeBacklog(startMs: number, endMs: number): RangeBacklog {
+    const owner = this.owner;
+    if (!owner) return { pending: 0, lastErrors: [] };
+    const where = `owner_user_id = @userId AND owner_workspace_id = @workspaceId
+      AND sync_state IN ('pending_create', 'pending_update')
+      AND ended_at IS NOT NULL AND ended_at > @startMs
+      AND CAST(json_extract(json, '$.startedAt') AS INTEGER) < @endMs`;
+    const params = { userId: owner.userId, workspaceId: owner.workspaceId, startMs, endMs };
+    const summary = this.db.prepare(`SELECT COUNT(*) AS pending FROM local_entries WHERE ${where}`)
+      .get(params) as { pending: number };
+    const errors = this.db.prepare(
+      `SELECT last_error FROM local_entries
+       WHERE ${where} AND last_error IS NOT NULL
+       GROUP BY last_error ORDER BY MAX(rowid) DESC LIMIT 5`,
+    ).all(params) as Array<{ last_error: string }>;
+    return { pending: summary.pending, lastErrors: errors.map((row) => row.last_error) };
   }
 
   hasUnsynced(): boolean {
@@ -381,17 +549,6 @@ export class SqliteEntryStore implements EntryStore {
 
   isPendingCreate(entryId: string): boolean {
     return this.getSyncState(entryId) === 'pending_create';
-  }
-
-  listRecent(limit: number): TimeEntry[] {
-    const owner = this.owner;
-    if (!owner) return [];
-    const rows = this.db.prepare(
-      `SELECT json FROM local_entries
-       WHERE owner_user_id = ? AND owner_workspace_id = ?
-       ORDER BY rowid DESC LIMIT ?`,
-    ).all(owner.userId, owner.workspaceId, limit) as { json: string }[];
-    return rows.map((r) => parseEntry(r.json));
   }
 
   listSince(since: number): TimeEntry[] {
@@ -412,7 +569,7 @@ export class SqliteEntryStore implements EntryStore {
     const owner = this.owner;
     if (!owner) return [];
     const rows = this.db.prepare(
-      `SELECT json, sync_state, acknowledged_revision, acknowledged_hash
+      `SELECT json, sync_state, acknowledged_revision, acknowledged_hash, acknowledged_task
        FROM local_entries
        WHERE owner_user_id = ? AND owner_workspace_id = ?
          AND (ended_at IS NULL OR ended_at >= ?)
@@ -422,29 +579,42 @@ export class SqliteEntryStore implements EntryStore {
       sync_state: string;
       acknowledged_revision: number | null;
       acknowledged_hash: string | null;
+      acknowledged_task: string | null;
     }>;
     return rows.map((row) => ({
       entry: parseEntry(row.json),
       syncState: asSyncState(row.sync_state),
       acknowledgedRevision: row.acknowledged_revision,
       acknowledgedHash: row.acknowledged_hash,
+      ...(row.acknowledged_task === null ? {} : { acknowledgedTaskGuid: JSON.parse(row.acknowledged_task) as string | null }),
     }));
   }
 
   markCreated(entryId: string, expectedEntry: TimeEntry): boolean {
     const owner = this.requireOwner();
     const info = this.db.prepare(
-      `UPDATE local_entries SET synced = 0, sync_state = 'pending_update'
+      `UPDATE local_entries SET sync_state = 'pending_update'
        WHERE id = ? AND owner_user_id = ? AND owner_workspace_id = ?
          AND json = ? AND sync_state = 'pending_create'`,
     ).run(entryId, owner.userId, owner.workspaceId, JSON.stringify(expectedEntry));
     return info.changes > 0;
   }
 
+  requeue(entryId: string, syncState: PendingEntrySyncState): boolean {
+    const owner = this.requireOwner();
+    const info = this.db.prepare(
+      `UPDATE local_entries
+       SET sync_state = CASE WHEN sync_state = 'pending_create' THEN 'pending_create' ELSE @syncState END,
+           sync_attempts = 0, next_attempt_at = NULL
+       WHERE id = @id AND owner_user_id = @ownerUserId AND owner_workspace_id = @ownerWorkspaceId`,
+    ).run({ id: entryId, ownerUserId: owner.userId, ownerWorkspaceId: owner.workspaceId, syncState });
+    return info.changes > 0;
+  }
+
   markPendingCreate(entryId: string, expectedEntry: TimeEntry): boolean {
     const owner = this.requireOwner();
     const info = this.db.prepare(
-      `UPDATE local_entries SET synced = 0, sync_state = 'pending_create'
+      `UPDATE local_entries SET sync_state = 'pending_create'
        WHERE id = ? AND owner_user_id = ? AND owner_workspace_id = ?
          AND json = ?`,
     ).run(entryId, owner.userId, owner.workspaceId, JSON.stringify(expectedEntry));
@@ -454,13 +624,14 @@ export class SqliteEntryStore implements EntryStore {
   markSynced(
     entryId: string,
     expectedEntry: TimeEntry,
-    acknowledgement: { revision: number; hash: string },
+    acknowledgement: { revision: number; hash: string; larkTaskGuid?: string | null },
   ): boolean {
     const owner = this.requireOwner();
     const info = this.db.prepare(
       `UPDATE local_entries
-       SET synced = 1, sync_state = 'synced',
-           acknowledged_revision = @revision, acknowledged_hash = @hash
+       SET sync_state = 'synced',
+           acknowledged_revision = @revision, acknowledged_hash = @hash, acknowledged_task = @task,
+           sync_attempts = 0, next_attempt_at = NULL, last_error = NULL
        WHERE id = @id AND owner_user_id = @ownerUserId AND owner_workspace_id = @ownerWorkspaceId
          AND json = @json`,
     ).run({
@@ -470,6 +641,7 @@ export class SqliteEntryStore implements EntryStore {
       json: JSON.stringify(expectedEntry),
       revision: acknowledgement.revision,
       hash: acknowledgement.hash,
+      task: acknowledgement.larkTaskGuid === undefined ? null : JSON.stringify(acknowledgement.larkTaskGuid),
     });
     return info.changes > 0;
   }

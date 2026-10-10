@@ -1,4 +1,9 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { promises as fs } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+let userData = '';
 
 const mocks = vi.hoisted(() => ({
   api: vi.fn(),
@@ -8,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   warn: vi.fn(),
 }));
 
+vi.mock('electron', () => ({ app: { getPath: () => userData } }));
 vi.mock('./apiClient', () => ({ api: mocks.api }));
 vi.mock('./tokenStore', () => ({ loadTokens: mocks.loadTokens }));
 vi.mock('./workspaceTime', () => ({
@@ -48,10 +54,15 @@ const config = {
   workspaceTimezone: 'Asia/Kolkata',
 };
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.resetModules();
   vi.clearAllMocks();
   mocks.applyServerWorkspaceTimeZone.mockResolvedValue(undefined);
+  userData = await fs.mkdtemp(path.join(os.tmpdir(), 'timo-agent-config-'));
+});
+
+afterEach(async () => {
+  await fs.rm(userData, { recursive: true, force: true });
 });
 
 describe('agent config session isolation', () => {
@@ -87,5 +98,37 @@ describe('agent config session isolation', () => {
     expect(mocks.info).toHaveBeenCalledWith(
       'agent config response discarded because the stored session changed',
     );
+  });
+});
+
+describe('agent config offline cache', () => {
+  it('an offline boot runs on the last config this account received, not the build defaults', async () => {
+    mocks.loadTokens.mockResolvedValue(sessionA);
+    mocks.api.mockResolvedValue({ ...config, idleThresholdMin: 12, todayLedgerMode: 'VISIBLE' as const });
+    await (await import('./agentConfig')).refreshAgentConfig();
+
+    vi.resetModules(); // a new process
+    mocks.api.mockRejectedValue(new Error('fetch failed'));
+    const offline = await import('./agentConfig');
+    await offline.refreshAgentConfig();
+
+    expect(offline.getIdleThresholdSec()).toBe(12 * 60);
+    expect(offline.getTodayLedgerMode()).toBe('VISIBLE');
+    // The business day restores from its own cache, not from this one.
+    expect(mocks.applyServerWorkspaceTimeZone).toHaveBeenCalledTimes(1);
+  });
+
+  it("never applies another account's cached policy", async () => {
+    mocks.loadTokens.mockResolvedValue(sessionA);
+    mocks.api.mockResolvedValue({ ...config, idleThresholdMin: 12 });
+    await (await import('./agentConfig')).refreshAgentConfig();
+
+    vi.resetModules();
+    mocks.loadTokens.mockResolvedValue(sessionB);
+    mocks.api.mockRejectedValue(new Error('fetch failed'));
+    const offline = await import('./agentConfig');
+    await offline.refreshAgentConfig();
+
+    expect(offline.getIdleThresholdSec()).toBe(300);
   });
 });

@@ -3,7 +3,7 @@ import { deepseek } from '@ai-sdk/deepseek';
 import type { LanguageModel } from 'ai';
 import { env } from '../../env';
 
-export type TimoAiProvider = 'openrouter' | 'deepseek';
+type TimoAiProvider = 'openrouter' | 'deepseek';
 
 export interface TimoAiSettings {
   enabled: boolean;

@@ -1,5 +1,4 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { UserDto } from '@grind/types';
 import type {
   TimerStatus,
   TrackingCommandResult,
@@ -9,13 +8,13 @@ import type { LaunchAtLoginHealth, MoveToApplicationsResult } from '../shared/la
 import type { AttentionAction, AttentionActionResult, AttentionPrompt } from '../shared/attention';
 import type { WorkspaceTimeContext } from '../shared/workspaceTime';
 import type { ShiftPromptReason, TodayShiftWindow } from '../shared/shift';
+import type { PermissionRelaunchRecord } from '../shared/permissionRelaunch';
 
 type AuthStatus = 'loggedIn' | 'loggedOut';
-type LarkOutcome = { kind: 'pending' } | { kind: 'error'; reason: string };
-type AgentStatus = { state: 'IDLE' | 'OFFLINE'; lastHeartbeatAt: string | null };
-type TimerRecoveryNotice = { entryId: string; recoveredAt: number; reason: 'unexpected_shutdown' | 'sleep_stop' | 'lock_stop' | 'server_finalized'; observedAt: number };
-type TodaySegment = { kind: 'WORK' | 'MEETING' | 'IDLE_TRIMMED'; startedAt: number; endedAt: number | null };
-type TodayEntry = { id: string; source: 'AUTO' | 'MANUAL'; larkTaskGuid: string | null; segments: TodaySegment[] };
+type LarkOutcome = { kind: 'pending' } | { kind: 'error'; reason: string; host?: string };
+export type TimerRecoveryNotice = { entryId: string; recoveredAt: number; reason: 'unexpected_shutdown' | 'sleep_stop' | 'lock_stop' | 'server_finalized' | 'server_clock_corrected'; observedAt: number };
+export type TodaySegment = { kind: 'WORK' | 'MEETING' | 'IDLE_TRIMMED'; startedAt: number; endedAt: number | null };
+export type TodayEntry = { id: string; source: 'AUTO' | 'MANUAL'; larkTaskGuid: string | null; segments: TodaySegment[] };
 type ScreenshotItem = {
   id: string;
   capturedAt: number;
@@ -25,17 +24,8 @@ type ScreenshotItem = {
   attempts: number;
   lastError: string | null;
 };
-type ScreenshotUploadSummary = { pending: number; uploading: number; failed: number };
-type AccessibilityStatus = {
-  trusted: boolean;
-  capturing: boolean;
-  ready: boolean;
-  recording: boolean;
-  hookRunning: boolean;
-  lastHookError: string | null;
-};
 type UpdatePhase = 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'installing' | 'not-available' | 'error';
-type UpdateStatus = {
+export type UpdateStatus = {
   phase: UpdatePhase;
   enabled: boolean;
   currentVersion: string;
@@ -47,14 +37,15 @@ type UpdateStatus = {
   readyAt: number | null;
   manual: boolean;
   canInstallNow: boolean;
+  installScope: 'user' | 'machine' | 'unknown';
+  blockedReason: 'machine-install' | null;
 };
 
 const api = {
   auth: {
-    login: (email: string, password: string): Promise<UserDto> =>
-      ipcRenderer.invoke('auth:login', { email, password }),
     loginWithLark: (): Promise<{ ok: true }> => ipcRenderer.invoke('auth:loginWithLark'),
-    logout: (): Promise<{ ok: true }> => ipcRenderer.invoke('auth:logout'),
+    logout: (): Promise<{ ok: true } | { ok: false; reason: 'time_waiting_to_sync' }> =>
+      ipcRenderer.invoke('auth:logout'),
     status: (): Promise<AuthStatus> => ipcRenderer.invoke('auth:status'),
     me: (): Promise<{ name: string; avatarUrl: string | null } | null> => ipcRenderer.invoke('auth:me'),
     onStatusChange: (cb: (s: AuthStatus) => void): (() => void) => {
@@ -72,9 +63,6 @@ const api = {
         ipcRenderer.off('auth:lark:push', sub);
       };
     },
-  },
-  agent: {
-    status: (): Promise<AgentStatus> => ipcRenderer.invoke('agent:status'),
   },
   workspaceTime: {
     get: (): Promise<WorkspaceTimeContext> => ipcRenderer.invoke('workspaceTime:get'),
@@ -121,7 +109,6 @@ const api = {
   },
   shift: {
     decide: (decision: 'yes' | 'not_yet'): Promise<void> => ipcRenderer.invoke('shift:decide', decision),
-    refresh: (): Promise<void> => ipcRenderer.invoke('shift:refresh'),
     today: (): Promise<TodayShiftWindow | null> => ipcRenderer.invoke('shift:today'),
     promptReason: (): Promise<ShiftPromptReason> => ipcRenderer.invoke('shift:promptReason'),
     onPromptReason: (cb: (reason: ShiftPromptReason) => void): (() => void) => {
@@ -131,13 +118,10 @@ const api = {
     },
   },
   screenshots: {
-    recent: (limit?: number): Promise<ScreenshotItem[]> => ipcRenderer.invoke('screenshots:recent', limit),
-    countToday: (): Promise<number> => ipcRenderer.invoke('screenshots:countToday'),
-    captureOnce: (): Promise<number> => ipcRenderer.invoke('screenshots:captureOnce'),
+    /** Every shot captured in [fromMs, toMs) — the gallery loads a whole day. */
+    range: (fromMs: number, toMs: number): Promise<ScreenshotItem[]> => ipcRenderer.invoke('screenshots:range', fromMs, toMs),
     thumbnail: (id: string): Promise<string | null> => ipcRenderer.invoke('screenshots:thumbnail', id),
     full: (id: string): Promise<string | null> => ipcRenderer.invoke('screenshots:full', id),
-    uploadSummary: (): Promise<ScreenshotUploadSummary> => ipcRenderer.invoke('screenshots:uploadSummary'),
-    retryFailedUploads: (): Promise<{ reset: number }> => ipcRenderer.invoke('screenshots:retryFailedUploads'),
     onChange: (cb: () => void): (() => void) => {
       const sub = () => cb();
       ipcRenderer.on('screenshots:changed', sub);
@@ -147,30 +131,28 @@ const api = {
   permissions: {
     readiness: (): Promise<TrackingReadiness> => ipcRenderer.invoke('permissions:readiness'),
     requestScreen: (): Promise<TrackingReadiness> => ipcRenderer.invoke('permissions:requestScreen'),
-    screen: (): Promise<{ status: string; health: string; state: 'ok' | 'needs-grant' | 'needs-settings' | 'needs-restart' }> =>
-      ipcRenderer.invoke('permissions:screen'),
-    accessibility: (): Promise<AccessibilityStatus> => ipcRenderer.invoke('permissions:accessibility'),
+    recheck: (): Promise<TrackingReadiness> => ipcRenderer.invoke('permissions:recheck'),
     requestAccessibility: (): Promise<void> => ipcRenderer.invoke('permissions:requestAccessibility'),
   },
   settings: {
-    get: (): Promise<{ version: string; platform: string; launchAtLogin: LaunchAtLoginHealth; screenStatus: string; floatingBarVisible: boolean }> =>
+    get: (): Promise<{ version: string; platform: string; launchAtLogin: LaunchAtLoginHealth; floatingBarVisible: boolean }> =>
       ipcRenderer.invoke('settings:get'),
     repairLaunchAtLogin: (): Promise<LaunchAtLoginHealth> => ipcRenderer.invoke('settings:repairLaunchAtLogin'),
     moveToApplications: (): Promise<MoveToApplicationsResult> => ipcRenderer.invoke('settings:moveToApplications'),
     setFloatingBarVisible: (enabled: boolean): Promise<boolean> => ipcRenderer.invoke('settings:setFloatingBarVisible', enabled),
     resetFloatingBarPosition: (): Promise<void> => ipcRenderer.invoke('settings:resetFloatingBarPosition'),
     openScreenPrefs: (): Promise<void> => ipcRenderer.invoke('settings:openScreenPrefs'),
-    openInputMonitoringPrefs: (): Promise<void> => ipcRenderer.invoke('settings:openInputMonitoringPrefs'),
     openStartupPrefs: (): Promise<void> => ipcRenderer.invoke('settings:openStartupPrefs'),
     onOpen: (cb: () => void): (() => void) => {
       const sub = () => cb();
       ipcRenderer.on('settings:open:push', sub);
       return () => ipcRenderer.off('settings:open:push', sub);
     },
-    openDataFolder: (): Promise<void> => ipcRenderer.invoke('settings:openDataFolder'),
   },
   app: {
     relaunch: (): Promise<void> => ipcRenderer.invoke('app:relaunch'),
+    /** The permission restart that led to this boot, if any (loop breaker). */
+    permissionRelaunch: (): Promise<PermissionRelaunchRecord | null> => ipcRenderer.invoke('app:permissionRelaunch'),
     openDashboard: (): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('app:openDashboard'),
   },
   updates: {
@@ -178,6 +160,7 @@ const api = {
     checkNow: (): Promise<UpdateStatus> => ipcRenderer.invoke('updates:checkNow'),
     checkQuietly: (): Promise<UpdateStatus> => ipcRenderer.invoke('updates:checkQuietly'),
     installNow: (): Promise<UpdateStatus> => ipcRenderer.invoke('updates:installNow'),
+    openInstallerDownload: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('updates:openInstallerDownload'),
     onStatusChange: (cb: (s: UpdateStatus) => void): (() => void) => {
       const sub = (_e: unknown, s: UpdateStatus) => cb(s);
       ipcRenderer.on('updates:status:push', sub);
@@ -202,7 +185,7 @@ const api = {
     }> => ipcRenderer.invoke('insights:today'),
   },
   lark: {
-    status: (): Promise<{ configured: boolean; connected: boolean; reauthRequired: boolean; scopes: string[]; offline?: boolean }> =>
+    status: (): Promise<{ configured: boolean; connected: boolean; reauthRequired: boolean; scopes: string[]; missingScopes?: string[]; offline?: boolean }> =>
       ipcRenderer.invoke('lark:status'),
     connect: (): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('lark:connect'),
     disconnect: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('lark:disconnect'),

@@ -31,7 +31,7 @@ export const SNOOZE_MS = 30 * 60_000;
  * minute of no input is enough to say the streak should not keep growing,
  * and it means a break never silently matures into a nudge.
  */
-export const AWAY_RESET_SEC = 60;
+const AWAY_RESET_SEC = 60;
 
 export interface UntrackedNudgeState {
   /** Epoch ms when the current active-and-untracked streak began. */

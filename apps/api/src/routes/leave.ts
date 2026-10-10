@@ -3,12 +3,11 @@ import { prisma } from '@grind/db';
 import {
   AttendanceRuleModeSchema,
   CreateHolidaySchema,
-  CreateLeaveRequestSchema,
-  DecideLeaveRequestSchema,
   PatchHolidaySchema,
   PatchLeavePolicySchema,
   SignedLeaveDaysSchema,
   leaveDaysSchema,
+  todayKey,
   type HolidayDto,
   type LeaveBalanceDto,
 } from '@grind/types';
@@ -16,21 +15,19 @@ import { z } from 'zod';
 import { requireAccessToken } from '../middleware/auth';
 import { attachScope, requireAdmin } from '../middleware/scope';
 import {
-  cancelLeaveRequest,
-  decideLeaveRequest,
   ensureAccruals,
   leaveDecidedInLark,
   leaveDateRange,
   loadBalance,
+  loadApprovedWfh,
   loadBalances,
   loadLedgerEntries,
   loadOrCreateLeavePolicy,
   loadWorkingCalendar,
-  quoteLeave,
-  submitLeaveRequest,
   toLeavePolicyDto,
   toIsoDate,
   fromIsoDate,
+  accrualStartDate,
   REQUEST_INCLUDE,
   toLeaveRequestDto,
 } from '../leave';
@@ -54,9 +51,6 @@ const RangeQuery = z.object({
 /** Longest window any calendar query may span. */
 const MAX_RANGE_DAYS = 120;
 
-function today(tz: string): string {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date());
-}
 
 // ---------------------------------------------------------------------------
 // Self-service
@@ -66,7 +60,7 @@ function today(tz: string): string {
 leaveRouter.get('/me/balance', async (req, res, next) => {
   try {
     if (!req.user || !req.scope) return res.status(401).json({ error: 'unauthorized' });
-    const asOf = today(req.scope.workspaceTimezone);
+    const asOf = todayKey(req.scope.workspaceTimezone);
     await ensureAccruals({ workspaceId: req.scope.workspaceId, userId: req.user.sub, asOf });
     const [balance, entries, calendar] = await Promise.all([
       loadBalance(req.user.sub, asOf),
@@ -115,78 +109,9 @@ leaveRouter.get('/me/requests', async (req, res, next) => {
   }
 });
 
-/** Price a prospective request before submitting it. */
-leaveRouter.post('/quote', async (req, res, next) => {
-  try {
-    if (!req.user || !req.scope) return res.status(401).json({ error: 'unauthorized' });
-    const parsed = CreateLeaveRequestSchema.safeParse(req.body);
-    if (!parsed.success) {
-      return res.status(400).json({ error: 'invalid_body', detail: parsed.error.issues[0]?.message });
-    }
-    const result = await quoteLeave({
-      workspaceId: req.scope.workspaceId,
-      userId: req.user.sub,
-      tz: req.scope.workspaceTimezone,
-      body: parsed.data,
-    });
-    if (!result.ok) return res.status(400).json({ error: result.error, detail: result.detail });
-    res.json(result.value);
-  } catch (err) {
-    next(err);
-  }
-});
-
-/** Submit a request. */
-leaveRouter.post('/requests', async (req, res, next) => {
-  try {
-    if (!req.user || !req.scope) return res.status(401).json({ error: 'unauthorized' });
-    const clientUuid = typeof req.body?.clientUuid === 'string' && req.body.clientUuid.trim()
-      ? req.body.clientUuid.trim()
-      : crypto.randomUUID();
-
-    const result = await submitLeaveRequest({
-      workspaceId: req.scope.workspaceId,
-      userId: req.user.sub,
-      tz: req.scope.workspaceTimezone,
-      clientUuid,
-      body: req.body,
-    });
-    if (!result.ok) {
-      const status = result.error === 'approval_dispatch_failed' ? 502 : 400;
-      return res.status(status).json({ error: result.error, detail: result.detail });
-    }
-    res.status(201).json(result.value);
-  } catch (err) {
-    next(err);
-  }
-});
-
-/** Cancel my own request. */
-leaveRouter.post('/requests/:id/cancel', async (req, res, next) => {
-  try {
-    if (!req.user) return res.status(401).json({ error: 'unauthorized' });
-    const existing = await prisma.leaveRequest.findUnique({
-      where: { id: req.params.id },
-      select: { userId: true },
-    });
-    if (!existing) return res.status(404).json({ error: 'not_found' });
-    if (existing.userId !== req.user.sub) return res.status(403).json({ error: 'forbidden' });
-
-    const result = await cancelLeaveRequest({
-      requestId: req.params.id,
-      actorId: req.user.sub,
-      isSelf: true,
-    });
-    if (!result.ok) return res.status(400).json({ error: result.error });
-    res.json(result.value);
-  } catch (err) {
-    next(err);
-  }
-});
-
 /**
- * Who is away across a range, for everyone in scope. Powers the calendar
- * screen's "who is on leave today" and the day-cell markers.
+ * Who is away or working from home across a range, for everyone in scope.
+ * Powers the calendar screen's day-cell markers and its day list.
  */
 leaveRouter.get('/calendar', async (req, res, next) => {
   try {
@@ -198,10 +123,16 @@ leaveRouter.get('/calendar', async (req, res, next) => {
       return res.status(400).json({ error: 'range_too_long', maxDays: MAX_RANGE_DAYS });
     }
 
-    const [calendar, users, holidays] = await Promise.all([
+    const [calendar, wfhApproved, users, holidays] = await Promise.all([
       loadWorkingCalendar({
         workspaceId: req.scope.workspaceId,
         tz: req.scope.workspaceTimezone,
+        userIds: req.scope.userIds,
+        from: parsed.data.from,
+        to: parsed.data.to,
+      }),
+      loadApprovedWfh({
+        workspaceId: req.scope.workspaceId,
         userIds: req.scope.userIds,
         from: parsed.data.from,
         to: parsed.data.to,
@@ -225,12 +156,20 @@ leaveRouter.get('/calendar', async (req, res, next) => {
     // calendar screen renders absence, and a full matrix of "WORKING" would be
     // mostly noise on the wire.
     const away: Record<string, Array<{ date: string; kind: string; portion: string | null; label: string | null }>> = {};
+    // Approved work-from-home, only on days the person was due to work — the
+    // same days the attendance rules look at it. A weekly off or a holiday asks
+    // for no work, so a WFH range spanning one says nothing about it. Leave
+    // wins over WFH: a leave day is never WORKING, and leave is what the
+    // balance and the month sheet charge, so that is what the day must read as.
+    const wfh: Record<string, string[]> = {};
     for (const u of users) {
-      const rows = calendar
-        .dayStatuses(u.id, dates)
+      const statuses = calendar.dayStatuses(u.id, dates);
+      const rows = statuses
         .filter((d) => d.kind === 'PAID_LEAVE' || d.kind === 'UNPAID_LEAVE')
         .map((d) => ({ date: d.date, kind: d.kind, portion: d.portion, label: d.label }));
       if (rows.length) away[u.id] = rows;
+      const home = statuses.filter((d) => d.kind === 'WORKING' && wfhApproved(u.id, d.date)).map((d) => d.date);
+      if (home.length) wfh[u.id] = home;
     }
 
     res.json({
@@ -239,6 +178,7 @@ leaveRouter.get('/calendar', async (req, res, next) => {
       tz: req.scope.workspaceTimezone,
       users,
       away,
+      wfh,
       holidays: holidays.map(toHolidayDto),
     });
   } catch (err) {
@@ -253,7 +193,6 @@ leaveRouter.get('/policy', async (req, res, next) => {
     const policy = await loadOrCreateLeavePolicy(req.scope.workspaceId);
     res.json({
       policy: toLeavePolicyDto(policy),
-      approvalGateway: leaveDecidedInLark() ? 'lark' : 'dashboard',
       decidesInTimo: !leaveDecidedInLark(),
     });
   } catch (err) {
@@ -408,67 +347,6 @@ adminLeaveRouter.patch('/policy', requireAdmin, async (req, res, next) => {
   }
 });
 
-adminLeaveRouter.get('/requests', async (req, res, next) => {
-  try {
-    if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
-    const status = typeof req.query.status === 'string' ? req.query.status.toUpperCase() : null;
-    const rows = await prisma.leaveRequest.findMany({
-      where: {
-        workspaceId: req.scope.workspaceId,
-        userId: { in: req.scope.userIds },
-        ...(status && ['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED'].includes(status)
-          ? { status: status as 'PENDING' }
-          : {}),
-      },
-      include: REQUEST_INCLUDE,
-      orderBy: { createdAt: 'desc' },
-      take: 200,
-    });
-    res.json({ requests: rows.map(toLeaveRequestDto) });
-  } catch (err) {
-    next(err);
-  }
-});
-
-/**
- * Decide a request from inside Timo. Refused when Lark owns approval — a
- * request must not read APPROVED here while it is still sitting in somebody's
- * Lark inbox.
- */
-adminLeaveRouter.post('/requests/:id/decide', async (req, res, next) => {
-  try {
-    if (!req.user || !req.scope) return res.status(401).json({ error: 'unauthorized' });
-    const parsed = DecideLeaveRequestSchema.safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ error: 'invalid_body' });
-
-    const target = await prisma.leaveRequest.findFirst({
-      where: { id: req.params.id, workspaceId: req.scope.workspaceId },
-      select: { userId: true },
-    });
-    if (!target) return res.status(404).json({ error: 'not_found' });
-    if (!req.scope.userIds.includes(target.userId)) return res.status(403).json({ error: 'forbidden' });
-    if (target.userId === req.user.sub && !req.scope.isAdmin) {
-      return res.status(403).json({ error: 'self_approval_forbidden' });
-    }
-
-    const result = await decideLeaveRequest({
-      requestId: req.params.id,
-      decision: parsed.data.decision,
-      deciderId: req.user.sub,
-      source: 'DASHBOARD',
-      note: parsed.data.note,
-      tz: req.scope.workspaceTimezone,
-    });
-    if (!result.ok) {
-      const status = result.error === 'external_approval' ? 409 : 400;
-      return res.status(status).json({ error: result.error, detail: result.detail });
-    }
-    res.json(result.value);
-  } catch (err) {
-    next(err);
-  }
-});
-
 /**
  * Balances for everyone in scope, with enough to render and edit a row.
  *
@@ -479,9 +357,10 @@ adminLeaveRouter.post('/requests/:id/decide', async (req, res, next) => {
 adminLeaveRouter.get('/balances', async (req, res, next) => {
   try {
     if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
+    const tz = req.scope.workspaceTimezone;
     const asOf = typeof req.query.asOf === 'string' && /^\d{4}-\d{2}-\d{2}$/u.test(req.query.asOf)
       ? req.query.asOf
-      : today(req.scope.workspaceTimezone);
+      : todayKey(tz);
 
     for (const userId of req.scope.userIds) {
       await ensureAccruals({ workspaceId: req.scope.workspaceId, userId, asOf });
@@ -530,7 +409,7 @@ adminLeaveRouter.get('/balances', async (req, res, next) => {
         lastSaturdayOff: p.lastSaturdayOffOverride,
         effectiveLastSaturdayOff: p.lastSaturdayOffOverride ?? policy.lastSaturdayOff,
         attendanceRuleMode: p.attendanceRuleMode,
-        accrualStart: toIsoDate(p.joinedOn ?? p.createdAt),
+        accrualStart: accrualStartDate(p, tz),
         joinedOnSet: p.joinedOn !== null,
         ...(balances[p.id] ?? { balanceDays: 0, accruedDays: 0, consumedDays: 0, adjustedDays: 0 }),
         month: calendar.leaveAccountFor(p.id) ?? { opening: 0, earned: 0, paid: 0, closing: 0, lines: [] },
@@ -591,7 +470,7 @@ adminLeaveRouter.patch('/members/:userId', requireAdmin, async (req, res, next) 
     await ensureAccruals({
       workspaceId: req.scope.workspaceId,
       userId: updated.id,
-      asOf: today(req.scope.workspaceTimezone),
+      asOf: todayKey(req.scope.workspaceTimezone),
     });
 
     res.json({
@@ -599,7 +478,7 @@ adminLeaveRouter.patch('/members/:userId', requireAdmin, async (req, res, next) 
       accrualDays: updated.leaveAccrualDaysOverride,
       lastSaturdayOff: updated.lastSaturdayOffOverride,
       attendanceRuleMode: updated.attendanceRuleMode,
-      accrualStart: toIsoDate(updated.joinedOn ?? updated.createdAt),
+      accrualStart: accrualStartDate(updated, req.scope.workspaceTimezone),
       balance: await loadBalance(updated.id),
     });
   } catch (err) {

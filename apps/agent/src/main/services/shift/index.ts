@@ -21,6 +21,8 @@ import {
 } from './untracked';
 import { getTimerService } from '../timer';
 import { getTrackingAttentionCoordinator } from '../trackingAttention';
+import { startTracking } from '../trackingCommands';
+import { getPreferences } from '../preferences';
 import { getWorkspaceTimeZone } from '../workspaceTime';
 import type { TodayShiftWindow } from '../../../shared/shift';
 
@@ -32,12 +34,13 @@ import type { TodayShiftWindow } from '../../../shared/shift';
  *  - Poll the reducer every 30 s. The reducer returns:
  *      show     → render the toast (top-right, non-stealing focus)
  *      hide     → buffer expired; close the toast, run `expire()`
- *      schedule → outside the window; set a one-shot timer for the next
- *                 start so we stop spinning the 30 s interval
+ *      ack      → a timer is already running; count it as "Yes"
+ *      yield    → another prompt is up; close the toast until it is gone
+ *      schedule → outside the window (the 30 s poll covers the next start)
  *      noop     → silence
  *  - `onUserDecision('yes' | 'not_yet')` is called by the renderer via
- *    IPC; we apply ackToday / snooze respectively and the next tick
- *    quiets the toast.
+ *    IPC. "Yes" starts tracking (permissions permitting) and acks;
+ *    "Not yet" snoozes.
  *
  * The state lives in memory — fresh on each agent boot is fine. A user
  * who killed the agent mid-buffer will get the toast again on relaunch
@@ -45,19 +48,31 @@ import type { TodayShiftWindow } from '../../../shared/shift';
  */
 
 const POLL_MS = 30_000;
+
+/** No session, or the server refused it — the only failures that mean "no shift". */
+function isSignedOutError(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const { name, status } = err as { name?: unknown; status?: unknown };
+  return name === 'UnauthorizedError' || status === 401;
+}
 const NUDGE_INTERVAL_MS = 5 * 60_000;
 
 export class ShiftMonitor {
   private state: ShiftMonitorState = { ...INITIAL_STATE };
   private untracked: UntrackedNudgeState = { ...UNTRACKED_INITIAL_STATE };
   private shift: ShiftDto | null = null;
+  /**
+   * True once the server has answered for the current session, even with "no
+   * shift". False after a failed fetch with nothing to fall back on: the 30 s
+   * poll keeps asking until it gets an answer.
+   */
+  private shiftKnown = false;
+  private refreshInFlight: Promise<void> | null = null;
   private pollTimer: NodeJS.Timeout | null = null;
-  private oneShotTimer: NodeJS.Timeout | null = null;
   private started = false;
 
-  /** Called whenever the user clicks "Yes" (opens the main window) so the
-   *  agent owner can plug in main-window-show logic without coupling this
-   *  service to it. */
+  /** Opened after "Yes" when there is no task to start on, so the person can
+   *  pick one — and as the fallback if starting fails outright. */
   constructor(private readonly openMainWindow: () => void) {}
 
   async start(): Promise<void> {
@@ -77,25 +92,56 @@ export class ShiftMonitor {
   stop(): void {
     this.started = false;
     if (this.pollTimer) clearInterval(this.pollTimer);
-    if (this.oneShotTimer) clearTimeout(this.oneShotTimer);
     this.pollTimer = null;
-    this.oneShotTimer = null;
     hideReadyToWork();
   }
 
   /** External hook so the agent can refetch when the user is reassigned
-   *  in the dashboard without restarting the app. */
-  async refreshShift(): Promise<void> {
+   *  in the dashboard without restarting the app. Single-flight. */
+  refreshShift(): Promise<void> {
+    this.refreshInFlight ??= this.fetchShift().finally(() => {
+      this.refreshInFlight = null;
+    });
+    return this.refreshInFlight;
+  }
+
+  /** Forget the shift at sign-out; the next account fetches its own. */
+  clearShift(): void {
+    this.shift = null;
+    this.shiftKnown = false;
+    hideReadyToWork();
+  }
+
+  /**
+   * One failed request used to wipe the shift for the rest of the day: the
+   * catch set it to null and nothing retried until the next wake. A timeout
+   * or a 5xx says nothing about the assignment, so the last good shift is
+   * kept; only "not signed in" (no session, or the server refusing it) clears
+   * it. While no answer has come back at all, the poll retries.
+   */
+  private async fetchShift(): Promise<void> {
     try {
       const res = await api<MyShiftResponse>('/v1/auth/me/shift');
       this.shift = res.shift;
+      this.shiftKnown = true;
       log.info('shift refreshed', { hasShift: this.shift !== null, name: this.shift?.name });
     } catch (err) {
-      // No tokens / 401 → treat as "no shift" silently. We re-try after
-      // the next powerMonitor resume / next start() call.
-      log.warn('shift refresh failed (non-fatal)', { err: String(err) });
-      this.shift = null;
+      if (isSignedOutError(err)) {
+        log.info('shift refresh skipped: not signed in');
+        this.shift = null;
+        this.shiftKnown = false;
+        return;
+      }
+      log.warn('shift refresh failed; keeping the last known shift', {
+        err: String(err),
+        hasShift: this.shift !== null,
+      });
     }
+  }
+
+  /** Whether the poll should ask the server again before ticking. */
+  needsRetry(): boolean {
+    return !this.shiftKnown && this.shift === null;
   }
 
   todayWindow(now = Date.now()): TodayShiftWindow | null {
@@ -120,14 +166,14 @@ export class ShiftMonitor {
           ? acceptUntrackedNudge(this.untracked)
           : snoozeUntrackedNudge(this.untracked, now.getTime());
       hideReadyToWork();
-      if (decision === 'yes') this.openMainWindow();
+      if (decision === 'yes') void this.startTracking();
       return;
     }
 
     if (decision === 'yes') {
       this.state = ackToday(this.state, this.shift.schedule, now, timeZone);
       hideReadyToWork();
-      this.openMainWindow();
+      void this.startTracking();
     } else {
       this.state = snooze(this.state, now, NUDGE_INTERVAL_MS);
       hideReadyToWork();
@@ -137,9 +183,33 @@ export class ShiftMonitor {
     this.tick();
   }
 
+  /**
+   * "Yes, start" / "Start tracking" start tracking, on the task the person
+   * last tracked. A missing permission is handled the same way as any other
+   * start: the permission prompt opens and the start resumes once granted.
+   */
+  private async startTracking(): Promise<void> {
+    const larkTaskGuid = getPreferences().lastLarkTaskGuid;
+    try {
+      await startTracking(larkTaskGuid);
+      if (!larkTaskGuid) this.openMainWindow();
+    } catch (err) {
+      log.warn('start from ready-to-work failed', { err: String(err) });
+      this.openMainWindow();
+    }
+  }
+
   private startPolling(): void {
     if (this.pollTimer) return;
-    this.pollTimer = setInterval(() => this.tick(), POLL_MS);
+    this.pollTimer = setInterval(() => this.poll(), POLL_MS);
+  }
+
+  private poll(): void {
+    if (!this.needsRetry()) {
+      this.tick();
+      return;
+    }
+    void this.refreshShift().then(() => this.tick());
   }
 
   private tick(): void {
@@ -156,21 +226,20 @@ export class ShiftMonitor {
     const showingShiftStart = isReadyToWorkVisible() && readyToWorkReason() === 'SHIFT_START';
     this.state = { ...this.state, prompting: showingShiftStart };
 
+    const now = new Date();
     const action = tickShiftMonitor({
       schedule: this.shift.schedule,
       bufferMin: this.shift.bufferMin,
       state: this.state,
-      now: new Date(),
+      now,
       timeZone,
       nudgeIntervalMs: NUDGE_INTERVAL_MS,
+      tracking: getTimerService().status().state === 'RUNNING',
+      attentionBusy: getTrackingAttentionCoordinator().get().kind !== 'NONE',
     });
 
     switch (action.kind) {
       case 'show':
-        if (this.oneShotTimer) {
-          clearTimeout(this.oneShotTimer);
-          this.oneShotTimer = null;
-        }
         showReadyToWork();
         this.state = { ...this.state, prompting: true };
         break;
@@ -178,21 +247,20 @@ export class ShiftMonitor {
         hideReadyToWork();
         this.state = expire(this.state);
         break;
-      case 'schedule': {
-        const ms = Math.max(0, action.nextAt - Date.now());
-        // Bound to a sensible max (1 day) so a long sleep doesn't get a
-        // huge integer to chew on.
-        const clamped = Math.min(ms, 24 * 60 * 60_000);
-        if (this.oneShotTimer) clearTimeout(this.oneShotTimer);
-        this.oneShotTimer = setTimeout(() => this.tick(), clamped);
+      case 'ack':
+        if (showingShiftStart) hideReadyToWork();
+        this.state = ackToday(this.state, this.shift.schedule, now, timeZone);
+        break;
+      case 'yield':
+        hideReadyToWork();
+        this.state = { ...this.state, prompting: false };
+        break;
+      case 'schedule':
         // `schedule` means "no clock-in question right now", not "nothing to
         // do". The shift reducer's window is only the buffer after shift
         // start, so it returns `schedule` for almost the whole shift — which
         // is exactly when someone can be working with the timer off. Falling
         // through here is what makes the untracked nudge reachable at all.
-        this.tickUntracked(timeZone);
-        break;
-      }
       case 'noop':
       default:
         this.tickUntracked(timeZone);

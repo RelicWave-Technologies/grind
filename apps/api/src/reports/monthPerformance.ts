@@ -30,11 +30,10 @@ import { weekdayForDate } from '../leave';
  * badged in at 09:55, tracked two hours — the row shows both and the reader can
  * see the gap rather than having it silently resolved.
  *
- * The payroll classifier is deliberately NOT used. Its monthly guarantee
- * upgrades every eligible day once the month total clears a floor, and its
- * carry allocator moves surplus time between days. Both are right for deciding
- * pay and both would make an attendance record untrue. Every day here is judged
- * on its own tracked time and nothing else.
+ * Nothing upgrades a day: no monthly guarantee that lifts every eligible day
+ * once the month total clears a floor, no carry allocator moving surplus time
+ * between days. Either would make an attendance record untrue. Every day here
+ * is judged on its own tracked time and nothing else.
  *
  * ## How a day is judged
  *
@@ -98,7 +97,7 @@ export type MonthPerformanceCode =
   /** No shift assignment covers this date, and nothing tracked either. */
   | '--';
 
-export interface RuleSettings {
+interface RuleSettings {
   fullDay: number;
   halfDay: number;
   lateAllowed: number;
@@ -234,8 +233,8 @@ export interface MonthPerformanceInput {
   users: MonthPerformanceUser[];
   /** The Working Calendar's answer for a person-day. null = it has none. */
   dayStatusFor: (userId: string, date: string) => DayStatus | null;
-  /** Minutes Timo tracked for this person on this date. */
-  trackedMinutesFor: (userId: string, date: string) => number;
+  /** Counted milliseconds for this person on this date (work, meetings, approved manual). */
+  trackedMsFor: (userId: string, date: string) => number;
   punchFor: PunchLookup;
   /** A manager's or admin's correction for this person-day, if one exists. */
   overrideFor?: (userId: string, date: string) => DayOverride | null;
@@ -278,7 +277,7 @@ const WEEKDAY_LABEL: Record<string, string> = {
 };
 
 /** 'August-2026' from '2026-08'. */
-export function monthLabelOf(month: string): string {
+function monthLabelOf(month: string): string {
   const [y, m] = month.split('-').map((n) => Number.parseInt(n, 10));
   const name = MONTH_NAMES[(m ?? 1) - 1];
   return name && y ? `${name}-${y}` : month;
@@ -335,27 +334,6 @@ export interface DayOverride {
 }
 
 /**
- * The code for one day.
- *
- * The calendar is asked first and wins outright: a company holiday is a holiday
- * whether or not somebody badged in, and approved leave is leave. Somebody who
- * did come in on one of those days is not hidden — the IN, OUT and WORK rows
- * still show it — but the status code has to keep counting the day as what it
- * was, or the holiday and leave tallies stop adding up.
- *
- * Only a day the calendar calls WORKING, or has no opinion on, falls through to
- * the tracked time.
- */
-export function codeForDay(
-  status: DayStatus | null,
-  trackedMinutes: number,
-  override?: DayOverride | null,
-): MonthPerformanceCode {
-  if (override) return overrideCode(override);
-  return computedCodeForDay(status, trackedMinutes);
-}
-
-/**
  * A hand-set correction as the report renders it.
  *
  * The correction says what shape the day was — present, absent, half a day
@@ -391,7 +369,7 @@ export function overrideCode(override: DayOverride): MonthPerformanceCode {
  * day whose ground has moved since is flagged rather than silently disagreeing
  * with the calendar.
  */
-export function computedCodeForDay(
+function computedCodeForDay(
   status: DayStatus | null,
   trackedMinutes: number,
 ): MonthPerformanceCode {
@@ -475,12 +453,16 @@ export function buildMonthPerformance(input: MonthPerformanceInput): MonthPerfor
 
   const rows: MonthPerformanceRow[] = input.users.map((user) => {
     const totals = emptyTotals();
+    // The month's hours are the sum of the time, rounded once. Adding up the
+    // rounded days drifts from the team report by up to half a minute a day.
+    let trackedMs = 0;
     const days: MonthPerformanceDay[] = dates.map((date) => {
       const punch = input.punchFor(user.id, date);
       const status = input.dayStatusFor(user.id, date);
       const inMinute = punch?.inMinute ?? null;
       const outMinute = punch?.outMinute ?? null;
-      const workMinutes = Math.max(0, Math.round(input.trackedMinutesFor(user.id, date)));
+      const dayMs = Math.max(0, input.trackedMsFor(user.id, date));
+      const workMinutes = Math.round(dayMs / 60_000);
       const override = input.overrideFor?.(user.id, date) ?? null;
       // Judged even under a correction, so the correction can be flagged when
       // the computed answer moves — but a corrected day is charged nothing by a
@@ -497,7 +479,7 @@ export function buildMonthPerformance(input: MonthPerformanceInput): MonthPerfor
       countInto(totals, code);
       if (rule) countRuleInto(totals, rule);
       if (late !== null) totals.lateDays += 1;
-      totals.workMinutes += workMinutes;
+      trackedMs += dayMs;
 
       return {
         date,
@@ -516,6 +498,7 @@ export function buildMonthPerformance(input: MonthPerformanceInput): MonthPerfor
         late,
       };
     });
+    totals.workMinutes = Math.round(trackedMs / 60_000);
     return {
       user,
       days,
@@ -682,7 +665,7 @@ export function payableDays(
 }
 
 /** Calendar days of the month from the person's start to their suspension. */
-export function payableBaseDays(
+function payableBaseDays(
   report: Pick<MonthPerformanceReport, 'dates'>,
   row: Pick<MonthPerformanceRow, 'user'>,
 ): number {

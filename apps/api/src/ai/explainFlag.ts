@@ -13,7 +13,7 @@
  * fill-in numbers from the evidence bag.
  */
 
-export type FlagType =
+type FlagType =
   | 'IMPOSSIBLE_RATE'
   | 'METRONOMIC'
   | 'LINEAR_MOUSE'

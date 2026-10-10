@@ -151,6 +151,9 @@
 
 .cal-mark--paid   { background: var(--ui-lilac); }
 .cal-mark--unpaid { background: var(--ui-pink); }
+/* Mint, the kit's "fine" pastel: somebody at home is working, not away, so it
+   must not borrow either leave colour. */
+.cal-mark--wfh    { background: var(--ui-mint); }
 
 /* ── Half days ──────────────────────────────────────────────────────────── */
 
@@ -210,6 +213,7 @@
 .cal-legend__swatch--holiday { background: var(--ui-lime); }
 .cal-legend__swatch--paid    { background: var(--ui-lilac); }
 .cal-legend__swatch--unpaid  { background: var(--ui-pink); }
+.cal-legend__swatch--wfh     { background: var(--ui-mint); }
 .cal-legend__swatch--off     { background: var(--ui-surface-inset); }
 
 /* ── Month title ────────────────────────────────────────────────────────── */

@@ -3,3 +3,5 @@ export * from './segments';
 export * from './clamp';
 export * from './timerLedger';
 export * from './todayLedger';
+export * from './time';
+export * from './activityPercent';

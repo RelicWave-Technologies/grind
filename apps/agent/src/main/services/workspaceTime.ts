@@ -24,6 +24,23 @@ let initialization: Promise<void> | null = null;
 let sessionGeneration = 0;
 let writeChain = Promise.resolve();
 const listeners = new Set<(context: WorkspaceTimeContext) => void>();
+/**
+ * The business day of the session that just ended. A timer can outlive its
+ * session (the server ended it; tracked time keeps accruing and uploads after
+ * sign-in), and its widget still needs a day to total — see getTimerDayContext.
+ */
+let endedSession: { workspaceId: string; timeZone: string } | null = null;
+/** The date listeners last heard about; a change of date is news too. */
+let notifiedDate: string | null = null;
+let rolloverWatch: NodeJS.Timeout | null = null;
+
+/**
+ * How often to check whether the business day has turned over. Polled rather
+ * than one timeout aimed at midnight: timers run on a monotonic clock that
+ * stops while a Mac sleeps, so a timeout set before a sleep fires late by the
+ * whole sleep. A poll looks at the clock itself.
+ */
+const DAY_ROLLOVER_CHECK_MS = 30_000;
 
 function cachePath(): string {
   return path.join(app.getPath('userData'), 'workspace-time.json');
@@ -43,8 +60,9 @@ function unavailableContext(): WorkspaceTimeContext {
   return { ready: false, timeZone: null, source: 'unavailable', date: null, dayStart: null, dayEnd: null };
 }
 
-function notifyListeners(): void {
-  const context = contextAt(serverAlignedNow());
+function notifyListeners(now = serverAlignedNow()): void {
+  const context = contextAt(now);
+  notifiedDate = context.date;
   for (const listener of listeners) {
     try {
       listener(context);
@@ -95,19 +113,47 @@ export async function initializeWorkspaceTime(): Promise<void> {
   return initialization;
 }
 
-function contextAt(now: number): WorkspaceTimeContext {
-  if (!timeZone) return unavailableContext();
-  const date = dateKeyInTimeZone(now, timeZone);
-  const window = localDayWindowInTimeZone(date, timeZone);
+function contextAt(
+  now: number,
+  zone: string | null = timeZone,
+  zoneSource: WorkspaceTimeContext['source'] = source,
+): WorkspaceTimeContext {
+  if (!zone) return unavailableContext();
+  const date = dateKeyInTimeZone(now, zone);
+  const window = localDayWindowInTimeZone(date, zone);
   if (!window) return unavailableContext();
   return {
     ready: true,
-    timeZone,
-    source,
+    timeZone: zone,
+    source: zoneSource,
     date,
     dayStart: window.start.getTime(),
     dayEnd: window.end.getTime(),
   };
+}
+
+/**
+ * The business day the timer totals against. Same as the session's, except
+ * after a session ENDS: an entry of that workspace may still be running, and
+ * without a day the tray and floating bar read 00:00 while it accrues. It
+ * keeps the ended session's day — but only for a timer of that workspace, so
+ * a shared machine never shows one workspace's time on another's calendar.
+ */
+export function getTimerDayContext(now: number, timerWorkspaceId: string | null): WorkspaceTimeContext {
+  const context = contextAt(now);
+  if (context.ready || !endedSession || endedSession.workspaceId !== timerWorkspaceId) return context;
+  return contextAt(now, endedSession.timeZone, 'cache');
+}
+
+/** Fire the listeners when the business day turns over, not only when the zone changes. */
+export function checkDayRollover(now = serverAlignedNow()): void {
+  const { date } = contextAt(now);
+  if (date === null) return;
+  if (notifiedDate === null) {
+    notifiedDate = date;
+    return;
+  }
+  if (date !== notifiedDate) notifyListeners(now);
 }
 
 /**
@@ -126,6 +172,10 @@ export function getWorkspaceTimeZone(): string | null {
 
 export function onWorkspaceTimeChange(listener: (context: WorkspaceTimeContext) => void): () => void {
   listeners.add(listener);
+  if (!rolloverWatch) {
+    rolloverWatch = setInterval(() => checkDayRollover(), DAY_ROLLOVER_CHECK_MS);
+    rolloverWatch.unref?.();
+  }
   return () => listeners.delete(listener);
 }
 
@@ -172,6 +222,7 @@ export async function applyServerWorkspaceTimeZone(value: string, expectedWorksp
  * retained so the same workspace can recover offline on the next boot. */
 export function clearWorkspaceTimeSession(): void {
   const changed = timeZone !== null || workspaceId !== null || source !== 'unavailable';
+  if (workspaceId !== null && timeZone !== null) endedSession = { workspaceId, timeZone };
   sessionGeneration += 1;
   initialized = true;
   workspaceId = null;

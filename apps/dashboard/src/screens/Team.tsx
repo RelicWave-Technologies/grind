@@ -12,7 +12,14 @@ import type {
   TeamSettingsResponse,
   WorkspacePolicyDto,
 } from '@grind/types';
-import { SCREENSHOT_INTERVAL_OPTIONS, dateKeyInTimeZone } from '@grind/types';
+import {
+  IDLE_THRESHOLD_OPTIONS,
+  IDLE_WARNING_SECONDS_MAX,
+  IDLE_WARNING_SECONDS_MIN,
+  SCREENSHOT_INTERVAL_OPTIONS,
+  addDays,
+  dateKeyInTimeZone,
+} from '@grind/types';
 import { api } from '../lib/api';
 import type { Role } from '../lib/auth';
 import {
@@ -62,9 +69,6 @@ type MonitoringTiming = { screenshotIntervalMin: number; idleThresholdMin: numbe
 
 const TEAM_SETTINGS_QUERY_KEY = ['admin', 'team-member-settings'] as const;
 
-const IDLE_THRESHOLD_OPTIONS = [1, 3, 5, 10, 15, 30, 45, 60, 120];
-const IDLE_WARNING_MIN_SECONDS = 5;
-const IDLE_WARNING_MAX_SECONDS = 120;
 const IDLE_WARNING_STEP_SECONDS = 5;
 
 export function TeamScreen() {
@@ -111,7 +115,7 @@ export function TeamScreen() {
   const policy = policyQ.data;
   const tz = me.workspaceTimezone;
   const today = dateKeyInTimeZone(Date.now(), tz);
-  const drawerFrom = addLocalDays(today, -6);
+  const drawerFrom = addDays(today, -6);
 
   function patchMember(userId: string, field: PendingField, patch: PatchTeamMemberSettingsRequest) {
     setPendingEdit({ userId, field });
@@ -133,7 +137,9 @@ export function TeamScreen() {
     setRowDraft((current) => {
       if (current?.userId !== memberId) return current;
       const next = { ...current, ...patch };
-      if (next.idleWarningSeconds != null) {
+      // The countdown is admin-only (hidden from managers, and the API 403s a
+      // manager who sends it), so only an admin's edit may reshape it.
+      if (next.idleWarningSeconds != null && me.role === 'ADMIN') {
         next.idleWarningSeconds = clampIdleWarningSeconds(next.idleWarningSeconds, next.idleThresholdMin);
       }
       return next;
@@ -150,7 +156,7 @@ export function TeamScreen() {
     if (rowDraft.idleThresholdMin !== member.idleThresholdMin) {
       patch.idleThresholdMin = rowDraft.idleThresholdMin;
     }
-    if (rowDraft.idleWarningSeconds !== member.idleWarningSeconds) {
+    if (me.role === 'ADMIN' && rowDraft.idleWarningSeconds !== member.idleWarningSeconds) {
       patch.idleWarningSeconds = rowDraft.idleWarningSeconds;
     }
     if (rowDraft.attendanceRuleMode !== member.attendanceRuleMode) {
@@ -618,7 +624,7 @@ function IdleWarningControl({
         <Input
           className="tm-countdown-input"
           type="number"
-          min={IDLE_WARNING_MIN_SECONDS}
+          min={IDLE_WARNING_SECONDS_MIN}
           max={max}
           step={IDLE_WARNING_STEP_SECONDS}
           value={current}
@@ -675,12 +681,12 @@ function formatCadence(minutes: number): string {
 
 function maxIdleWarningSeconds(idleThresholdMin: number): number {
   const belowThreshold = idleThresholdMin * 60 - IDLE_WARNING_STEP_SECONDS;
-  return Math.max(IDLE_WARNING_MIN_SECONDS, Math.min(IDLE_WARNING_MAX_SECONDS, belowThreshold));
+  return Math.max(IDLE_WARNING_SECONDS_MIN, Math.min(IDLE_WARNING_SECONDS_MAX, belowThreshold));
 }
 
 function clampIdleWarningSeconds(seconds: number, idleThresholdMin: number): number {
   const rounded = Math.round(seconds / IDLE_WARNING_STEP_SECONDS) * IDLE_WARNING_STEP_SECONDS;
-  return Math.min(maxIdleWarningSeconds(idleThresholdMin), Math.max(IDLE_WARNING_MIN_SECONDS, rounded));
+  return Math.min(maxIdleWarningSeconds(idleThresholdMin), Math.max(IDLE_WARNING_SECONDS_MIN, rounded));
 }
 
 function monitoringRiskLevel(timing: MonitoringTiming): MonitoringRisk {
@@ -757,14 +763,3 @@ function TeamMonitoringRiskModal({
   );
 }
 
-function localDateKey(d = new Date()): string {
-  return d.toISOString().slice(0, 10);
-}
-
-function addLocalDays(key: string, delta: number): string {
-  const parts = key.split('-').map(Number);
-  const y = parts[0] ?? new Date().getUTCFullYear();
-  const m = parts[1] ?? 1;
-  const d = parts[2] ?? 1;
-  return localDateKey(new Date(Date.UTC(y, m - 1, d + delta, 12)));
-}

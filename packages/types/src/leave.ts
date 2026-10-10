@@ -55,12 +55,6 @@ export function roundToHalfDay(days: number): number {
   return Math.round(days / LEAVE_DAY_STEP) * LEAVE_DAY_STEP + 0;
 }
 
-/** Render a day amount the way reports and cards show it: "1", "0.5", "2.5". */
-export function formatLeaveDays(days: number): string {
-  const r = roundToHalfDay(days);
-  return Number.isInteger(r) ? String(r) : r.toFixed(1);
-}
-
 // ---------------------------------------------------------------------------
 // Portion — which half of the day
 // ---------------------------------------------------------------------------
@@ -169,7 +163,6 @@ export const CreateHolidaySchema = z.object({
   name: z.string().trim().min(1).max(120),
   teamId: z.string().nullable().optional(),
 });
-export type CreateHoliday = z.infer<typeof CreateHolidaySchema>;
 
 export const PatchHolidaySchema = z
   .object({
@@ -178,7 +171,6 @@ export const PatchHolidaySchema = z
     teamId: z.string().nullable().optional(),
   })
   .refine((v) => Object.keys(v).length > 0, { message: 'nothing_to_update' });
-export type PatchHoliday = z.infer<typeof PatchHolidaySchema>;
 
 // ---------------------------------------------------------------------------
 // Leave policy
@@ -186,8 +178,8 @@ export type PatchHoliday = z.infer<typeof PatchHolidaySchema>;
 
 /**
  * Admin-owned leave settings, one row per workspace. Kept separate from
- * WorkspacePolicy (capture / privacy) and PayrollPolicy (a derived finance
- * worksheet) for the same reason those two are separate from each other.
+ * WorkspacePolicy (capture / privacy): leave is an HR ledger, not a capture
+ * setting.
  */
 export const LeavePolicyDtoSchema = z.object({
   /** Days granted per calendar month. */
@@ -224,7 +216,7 @@ export const LeavePolicyDtoSchema = z.object({
   lateAllowedPerMonth: z.number().int(),
   /** Minutes after the shift start that still count as on time, for everyone. */
   lateGraceMinutes: z.number().int(),
-  /** First-half leave day: late when punched in after this minute of the day (840 = 14:00), no grace. */
+  /** First-half leave day: late when the punch-in is after this minute of the day (840 = 14:00), no grace. */
   halfDayLateAfterMinute: z.number().int(),
   updatedAt: z.string(),
 });
@@ -267,7 +259,6 @@ export const PatchLeavePolicySchema = z
       v.halfDayMinMinutes <= v.fullDayMinMinutes,
     { message: 'half_day_min_must_be_lte_full_day_min' },
   );
-export type PatchLeavePolicy = z.infer<typeof PatchLeavePolicySchema>;
 
 // ---------------------------------------------------------------------------
 // Ledger
@@ -291,7 +282,6 @@ export const LeaveLedgerEntryDtoSchema = z.object({
   reason: z.string().nullable(),
   createdAt: z.string(),
 });
-export type LeaveLedgerEntryDto = z.infer<typeof LeaveLedgerEntryDtoSchema>;
 
 export const LeaveBalanceDtoSchema = z.object({
   userId: z.string(),
@@ -321,7 +311,6 @@ export const LeaveDecisionSourceSchema = z.enum([
   'DASHBOARD',
   'REQUESTER_CANCEL',
 ]);
-export type LeaveDecisionSource = z.infer<typeof LeaveDecisionSourceSchema>;
 
 /** Paid draws down the balance; unpaid does not. */
 export const LeaveKindSchema = z.enum(['PAID', 'UNPAID']);
@@ -349,32 +338,3 @@ export const LeaveRequestDtoSchema = z.object({
 });
 export type LeaveRequestDto = z.infer<typeof LeaveRequestDtoSchema>;
 
-export const CreateLeaveRequestSchema = z
-  .object({
-    startDate: IsoDateSchema,
-    endDate: IsoDateSchema,
-    portion: LeavePortionSchema.default('FULL'),
-    kind: LeaveKindSchema.default('PAID'),
-    reason: z.string().trim().min(1).max(1000),
-  })
-  .refine((v) => v.endDate >= v.startDate, { message: 'endDate must not be before startDate' })
-  .refine((v) => v.portion === 'FULL' || v.startDate === v.endDate, {
-    message: 'a half-day request must start and end on the same date',
-  });
-export type CreateLeaveRequest = z.infer<typeof CreateLeaveRequestSchema>;
-
-export const DecideLeaveRequestSchema = z.object({
-  decision: z.enum(['APPROVE', 'REJECT']),
-  note: z.string().trim().max(500).optional(),
-});
-export type DecideLeaveRequest = z.infer<typeof DecideLeaveRequestSchema>;
-
-/** Quote returned before submitting, so the requester sees the real cost. */
-export const LeaveQuoteSchema = z.object({
-  chargedDays: z.number(),
-  balanceDays: z.number(),
-  balanceAfterDays: z.number(),
-  sufficient: z.boolean(),
-  days: z.array(DayStatusSchema),
-});
-export type LeaveQuote = z.infer<typeof LeaveQuoteSchema>;

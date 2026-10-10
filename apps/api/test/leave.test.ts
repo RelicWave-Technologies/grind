@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach } from 'vitest';
-import { setLeaveDecidedInLarkForTests } from '../src/leave';
+import { consumptionSourceKey, setLeaveDecidedInLarkForTests } from '../src/leave';
 import request from 'supertest';
 import { prisma } from '@grind/db';
 import { NINE_TO_SIX } from '@grind/types';
@@ -82,156 +82,7 @@ describe('accrual', () => {
   });
 });
 
-describe('quote — pricing before submitting', () => {
-  it('charges 1 day for a single working day', async () => {
-    const u = await seedAdminWithShift();
-    const res = await request(app)
-      .post('/v1/leave/quote')
-      .set(auth(u.accessToken))
-      .send({ startDate: '2026-08-17', endDate: '2026-08-17', portion: 'FULL', kind: 'PAID', reason: 'x' });
-    expect(res.status).toBe(200);
-    expect(res.body.chargedDays).toBe(1);
-  });
-
-  it('charges 0.5 for a half day', async () => {
-    const u = await seedAdminWithShift();
-    const res = await request(app)
-      .post('/v1/leave/quote')
-      .set(auth(u.accessToken))
-      .send({ startDate: '2026-08-17', endDate: '2026-08-17', portion: 'FIRST_HALF', kind: 'PAID', reason: 'x' });
-    expect(res.body.chargedDays).toBe(0.5);
-  });
-
-  it('does not charge for a company holiday inside the range', async () => {
-    const u = await seedAdminWithShift();
-    await request(app)
-      .post('/v1/admin/leave/holidays')
-      .set(auth(u.accessToken))
-      .send({ date: '2026-08-19', name: 'Holi' })
-      .expect(201);
-
-    const res = await request(app)
-      .post('/v1/leave/quote')
-      .set(auth(u.accessToken))
-      .send({ startDate: '2026-08-18', endDate: '2026-08-20', portion: 'FULL', kind: 'PAID', reason: 'x' });
-    // Three days requested, one of them a holiday.
-    expect(res.body.chargedDays).toBe(2);
-    expect(res.body.days.map((d: { kind: string }) => d.kind)).toEqual(['PAID_LEAVE', 'HOLIDAY', 'PAID_LEAVE']);
-  });
-
-  it('does not charge for the weekend inside the range', async () => {
-    const u = await seedAdminWithShift();
-    const res = await request(app)
-      .post('/v1/leave/quote')
-      .set(auth(u.accessToken))
-      .send({ startDate: '2026-08-21', endDate: '2026-08-24', portion: 'FULL', kind: 'PAID', reason: 'x' });
-    expect(res.body.chargedDays).toBe(2);
-  });
-
-  it('charges nothing for unpaid leave', async () => {
-    const u = await seedAdminWithShift();
-    const res = await request(app)
-      .post('/v1/leave/quote')
-      .set(auth(u.accessToken))
-      .send({ startDate: '2026-08-17', endDate: '2026-08-21', portion: 'FULL', kind: 'UNPAID', reason: 'x' });
-    expect(res.body.chargedDays).toBe(0);
-  });
-});
-
-describe('request lifecycle', () => {
-  it('submitting then approving draws exactly the quoted amount', async () => {
-    const u = await seedAdminWithShift();
-    const before = await request(app).get('/v1/leave/me/balance').set(auth(u.accessToken));
-    const startBalance = before.body.balance.balanceDays;
-
-    const submitted = await request(app)
-      .post('/v1/leave/requests')
-      .set(auth(u.accessToken))
-      .send({ startDate: '2026-08-17', endDate: '2026-08-17', portion: 'FIRST_HALF', kind: 'PAID', reason: 'exam' });
-    expect(submitted.status).toBe(201);
-    expect(submitted.body.chargedDays).toBe(0.5);
-    expect(submitted.body.status).toBe('PENDING');
-
-    // Pending draws nothing.
-    const mid = await request(app).get('/v1/leave/me/balance').set(auth(u.accessToken));
-    expect(mid.body.balance.balanceDays).toBe(startBalance);
-
-    const other = await seedUser({ role: 'ADMIN' });
-    void other;
-    const decided = await request(app)
-      .post(`/v1/admin/leave/requests/${submitted.body.id}/decide`)
-      .set(auth(u.accessToken))
-      .send({ decision: 'APPROVE' });
-    expect(decided.status).toBe(200);
-    expect(decided.body.status).toBe('APPROVED');
-
-    const after = await request(app).get('/v1/leave/me/balance').set(auth(u.accessToken));
-    expect(after.body.balance.balanceDays).toBe(startBalance - 0.5);
-  });
-
-  it('approving twice charges once', async () => {
-    const u = await seedAdminWithShift();
-    const before = await request(app).get('/v1/leave/me/balance').set(auth(u.accessToken));
-    const start = before.body.balance.balanceDays;
-
-    const r = await request(app)
-      .post('/v1/leave/requests')
-      .set(auth(u.accessToken))
-      .send({ startDate: '2026-08-17', endDate: '2026-08-17', reason: 'x' });
-
-    await request(app)
-      .post(`/v1/admin/leave/requests/${r.body.id}/decide`)
-      .set(auth(u.accessToken))
-      .send({ decision: 'APPROVE' })
-      .expect(200);
-    // A replayed decision — Lark can deliver the same one twice.
-    await request(app)
-      .post(`/v1/admin/leave/requests/${r.body.id}/decide`)
-      .set(auth(u.accessToken))
-      .send({ decision: 'APPROVE' })
-      .expect(200);
-
-    const after = await request(app).get('/v1/leave/me/balance').set(auth(u.accessToken));
-    expect(after.body.balance.balanceDays).toBe(start - 1);
-    const consumptions = await prisma.leaveLedgerEntry.count({
-      where: { userId: u.userId, kind: 'CONSUMPTION' },
-    });
-    expect(consumptions).toBe(1);
-  });
-
-  it('cancelling an approved request gives the days back as a visible reversal', async () => {
-    const u = await seedAdminWithShift();
-    const before = await request(app).get('/v1/leave/me/balance').set(auth(u.accessToken));
-    const start = before.body.balance.balanceDays;
-
-    const r = await request(app)
-      .post('/v1/leave/requests')
-      .set(auth(u.accessToken))
-      .send({ startDate: '2026-08-17', endDate: '2026-08-17', reason: 'x' });
-    await request(app)
-      .post(`/v1/admin/leave/requests/${r.body.id}/decide`)
-      .set(auth(u.accessToken))
-      .send({ decision: 'APPROVE' })
-      .expect(200);
-
-    await request(app)
-      .post(`/v1/leave/requests/${r.body.id}/cancel`)
-      .set(auth(u.accessToken))
-      .expect(200);
-
-    const after = await request(app).get('/v1/leave/me/balance').set(auth(u.accessToken));
-    expect(after.body.balance.balanceDays).toBe(start);
-    // Given back by a reversing entry, not by deleting the charge.
-    const kinds = await prisma.leaveLedgerEntry.findMany({
-      where: { requestId: r.body.id },
-      select: { kind: true, days: true },
-      orderBy: { createdAt: 'asc' },
-    });
-    expect(kinds.map((k) => k.kind)).toEqual(['CONSUMPTION', 'ADJUSTMENT']);
-    expect(kinds[0]!.days).toBe(-1);
-    expect(kinds[1]!.days).toBe(1);
-  });
-
+describe('adjustments', () => {
   it('posts an adjustment to the date it was given, not to today', async () => {
     const u = await seedAdminWithShift();
     await request(app)
@@ -266,88 +117,6 @@ describe('request lifecycle', () => {
       .set(auth(u.accessToken))
       .send({ userId: u.userId, days: 1, effectiveOn: '2026-08-01', reason: '   ' })
       .expect(400);
-  });
-
-  it('rejects a request the balance cannot cover', async () => {
-    const u = await seedAdminWithShift();
-    // Drain the balance to zero with an adjustment.
-    const bal = await request(app).get('/v1/leave/me/balance').set(auth(u.accessToken));
-    await request(app)
-      .post('/v1/admin/leave/adjust')
-      .set(auth(u.accessToken))
-      .send({
-        userId: u.userId,
-        days: -bal.body.balance.balanceDays,
-        effectiveOn: '2026-01-01',
-        reason: 'zero it out',
-      })
-      .expect(201);
-
-    const r = await request(app)
-      .post('/v1/leave/requests')
-      .set(auth(u.accessToken))
-      .send({ startDate: '2026-08-17', endDate: '2026-08-21', reason: 'x' });
-    expect(r.status).toBe(201);
-
-    const decided = await request(app)
-      .post(`/v1/admin/leave/requests/${r.body.id}/decide`)
-      .set(auth(u.accessToken))
-      .send({ decision: 'APPROVE' });
-    expect(decided.status).toBe(400);
-    expect(decided.body.error).toBe('insufficient_balance');
-  });
-
-  it('refuses a second request overlapping an existing one', async () => {
-    const u = await seedAdminWithShift();
-    await request(app)
-      .post('/v1/leave/requests')
-      .set(auth(u.accessToken))
-      .send({ startDate: '2026-08-17', endDate: '2026-08-18', reason: 'x' })
-      .expect(201);
-
-    const clash = await request(app)
-      .post('/v1/leave/requests')
-      .set(auth(u.accessToken))
-      .send({ startDate: '2026-08-18', endDate: '2026-08-19', reason: 'y' });
-    expect(clash.status).toBe(400);
-    expect(clash.body.error).toBe('overlapping_request');
-  });
-
-  it('refuses a request that covers no working day at all', async () => {
-    const u = await seedAdminWithShift();
-    const res = await request(app)
-      .post('/v1/leave/requests')
-      .set(auth(u.accessToken))
-      .send({ startDate: '2026-08-22', endDate: '2026-08-23', reason: 'weekend' });
-    expect(res.status).toBe(400);
-    expect(res.body.error).toBe('no_working_days');
-  });
-
-  it('resubmitting the same clientUuid returns the original request', async () => {
-    const u = await seedAdminWithShift();
-    const body = { startDate: '2026-08-17', endDate: '2026-08-17', reason: 'x', clientUuid: 'fixed-uuid-1' };
-    const a = await request(app).post('/v1/leave/requests').set(auth(u.accessToken)).send(body);
-    const b = await request(app).post('/v1/leave/requests').set(auth(u.accessToken)).send(body);
-    expect(a.body.id).toBe(b.body.id);
-    expect(await prisma.leaveRequest.count({ where: { userId: u.userId } })).toBe(1);
-  });
-
-  it('a rejected request costs nothing', async () => {
-    const u = await seedAdminWithShift();
-    const before = await request(app).get('/v1/leave/me/balance').set(auth(u.accessToken));
-    const r = await request(app)
-      .post('/v1/leave/requests')
-      .set(auth(u.accessToken))
-      .send({ startDate: '2026-08-17', endDate: '2026-08-17', reason: 'x' });
-    await request(app)
-      .post(`/v1/admin/leave/requests/${r.body.id}/decide`)
-      .set(auth(u.accessToken))
-      .send({ decision: 'REJECT', note: 'busy week' })
-      .expect(200);
-
-    const after = await request(app).get('/v1/leave/me/balance').set(auth(u.accessToken));
-    expect(after.body.balance.balanceDays).toBe(before.body.balance.balanceDays);
-    expect(await prisma.leaveLedgerEntry.count({ where: { userId: u.userId, kind: 'CONSUMPTION' } })).toBe(0);
   });
 });
 
@@ -396,15 +165,36 @@ describe('calendar view', () => {
       .send({ date: '2026-08-19', name: 'Holi' })
       .expect(201);
 
-    const r = await request(app)
-      .post('/v1/leave/requests')
-      .set(auth(u.accessToken))
-      .send({ startDate: '2026-08-17', endDate: '2026-08-17', portion: 'SECOND_HALF', reason: 'x' });
-    await request(app)
-      .post(`/v1/admin/leave/requests/${r.body.id}/decide`)
-      .set(auth(u.accessToken))
-      .send({ decision: 'APPROVE' })
-      .expect(200);
+    // Materialise accruals so the charge below is funded.
+    await request(app).get('/v1/leave/me/balance').set(auth(u.accessToken)).expect(200);
+    // Leave arrives approved from Lark; write what the ingest would.
+    const leave = await prisma.leaveRequest.create({
+      data: {
+        clientUuid: `cal-${u.userId}`,
+        workspaceId: u.workspaceId,
+        userId: u.userId,
+        startDate: new Date('2026-08-17T00:00:00Z'),
+        endDate: new Date('2026-08-17T00:00:00Z'),
+        portion: 'SECOND_HALF',
+        chargedDays: 0.5,
+        reason: 'x',
+        status: 'APPROVED',
+        decisionSource: 'LARK_APPROVAL',
+        decidedAt: new Date(),
+      },
+    });
+    await prisma.leaveLedgerEntry.create({
+      data: {
+        workspaceId: u.workspaceId,
+        userId: u.userId,
+        kind: 'CONSUMPTION',
+        days: -0.5,
+        effectiveOn: new Date('2026-08-17T00:00:00Z'),
+        sourceKey: consumptionSourceKey(leave.id),
+        reason: 'Paid leave (Lark)',
+        requestId: leave.id,
+      },
+    });
 
     const cal = await request(app)
       .get('/v1/leave/calendar?from=2026-08-15&to=2026-08-25')
@@ -414,59 +204,87 @@ describe('calendar view', () => {
     expect(cal.body.away[u.userId]).toEqual([
       { date: '2026-08-17', kind: 'PAID_LEAVE', portion: 'SECOND_HALF', label: 'Paid leave' },
     ]);
+    expect(cal.body.wfh).toEqual({});
   });
-});
 
-
-
-describe('a person with no shift assigned', () => {
-  async function seedWithoutShift() {
-    const u = await seedUser({ role: 'ADMIN' });
-    await prisma.workspace.update({
-      where: { id: u.workspaceId },
-      data: { timezone: 'Asia/Kolkata' },
+  /** A WFH request as the Lark ingest writes it: whole days, end inclusive. */
+  async function wfh(workspaceId: string, userId: string, start: string, end: string, status: 'APPROVED' | 'PENDING' = 'APPROVED') {
+    await prisma.wfhRequest.create({
+      data: {
+        workspaceId,
+        userId,
+        startDate: new Date(`${start}T00:00:00Z`),
+        endDate: new Date(`${end}T00:00:00Z`),
+        reason: 'x',
+        status,
+        larkInstanceCode: `wfh-${userId}-${start}-${status}`,
+      },
     });
-    await prisma.user.update({
-      where: { id: u.userId },
-      data: { joinedOn: new Date('2026-01-01T00:00:00Z') },
-    });
-    return u; // deliberately no shift + no assignment
   }
 
-  it('is told their shift is missing, not to pick another day', async () => {
-    const u = await seedWithoutShift();
-    // A Monday — this fails for the shift, not for the date.
-    const res = await request(app)
-      .post('/v1/leave/requests')
-      .set(auth(u.accessToken))
-      .send({ startDate: '2026-08-24', endDate: '2026-08-24', reason: 'test' });
-
-    expect(res.status).toBe(400);
-    expect(res.body.error).toBe('no_shift_assigned');
-  });
-
-  it('quotes every day as NO_SHIFT so the UI can block before submitting', async () => {
-    const u = await seedWithoutShift();
-    const q = await request(app)
-      .post('/v1/leave/quote')
-      .set(auth(u.accessToken))
-      .send({ startDate: '2026-08-24', endDate: '2026-08-26', reason: 'test' });
-
-    expect(q.status).toBe(200);
-    expect(q.body.chargedDays).toBe(0);
-    expect(q.body.days.every((d: { kind: string }) => d.kind === 'NO_SHIFT')).toBe(true);
-  });
-
-  it('still says no_working_days when the shift exists but the dates are a weekend', async () => {
+  it('reports approved work-from-home on working days, apart from leave', async () => {
     const u = await seedAdminWithShift();
-    const res = await request(app)
-      .post('/v1/leave/requests')
-      .set(auth(u.accessToken))
-      .send({ startDate: '2026-08-22', endDate: '2026-08-23', reason: 'weekend' });
+    await request(app).get('/v1/leave/me/balance').set(auth(u.accessToken)).expect(200);
 
-    expect(res.status).toBe(400);
-    // The distinction that matters: this one IS the person's to fix.
-    expect(res.body.error).toBe('no_working_days');
+    // Starts before the window: only its days inside it count.
+    await wfh(u.workspaceId, u.userId, '2026-09-10', '2026-09-15');
+    // Fri to Mon: the end is inclusive, and the weekend between asks for no work.
+    await wfh(u.workspaceId, u.userId, '2026-09-18', '2026-09-21');
+    // Not approved yet, so not on the calendar.
+    await wfh(u.workspaceId, u.userId, '2026-09-23', '2026-09-23', 'PENDING');
+    // WFH and leave on the same day: leave wins.
+    await wfh(u.workspaceId, u.userId, '2026-09-24', '2026-09-24');
+    await prisma.leaveRequest.create({
+      data: {
+        clientUuid: `cal-wfh-${u.userId}`,
+        workspaceId: u.workspaceId,
+        userId: u.userId,
+        startDate: new Date('2026-09-24T00:00:00Z'),
+        endDate: new Date('2026-09-24T00:00:00Z'),
+        portion: 'FULL',
+        chargedDays: 1,
+        reason: 'x',
+        status: 'APPROVED',
+        decisionSource: 'LARK_APPROVAL',
+        decidedAt: new Date(),
+      },
+    });
+
+    const cal = await request(app)
+      .get('/v1/leave/calendar?from=2026-09-14&to=2026-09-27')
+      .set(auth(u.accessToken));
+    expect(cal.status).toBe(200);
+    expect(cal.body.wfh).toEqual({ [u.userId]: ['2026-09-14', '2026-09-15', '2026-09-18', '2026-09-21'] });
+    expect(cal.body.away[u.userId].map((d: { date: string }) => d.date)).toEqual(['2026-09-24']);
+  });
+
+  it('shows work-from-home only for the people in the caller’s scope', async () => {
+    const admin = await seedAdminWithShift();
+    const member = await prisma.user.create({
+      data: {
+        workspaceId: admin.workspaceId,
+        email: `m-${Date.now()}@test.local`,
+        name: 'Member',
+        role: 'MEMBER',
+        provisioningStatus: 'ACTIVE',
+      },
+    });
+    await giveShift(admin.workspaceId, member.id);
+    await wfh(admin.workspaceId, admin.userId, '2026-09-16', '2026-09-16');
+    await wfh(admin.workspaceId, member.id, '2026-09-17', '2026-09-17');
+    const { signAccessToken } = await import('../src/lib/jwt');
+    const memberToken = signAccessToken({ sub: member.id, ws: admin.workspaceId, role: 'MEMBER' });
+
+    const mine = await request(app)
+      .get('/v1/leave/calendar?from=2026-09-14&to=2026-09-20')
+      .set(auth(memberToken));
+    expect(mine.status).toBe(200);
+    expect(mine.body.wfh).toEqual({ [member.id]: ['2026-09-17'] });
+
+    const everyone = await request(app)
+      .get('/v1/leave/calendar?from=2026-09-14&to=2026-09-20')
+      .set(auth(admin.accessToken));
+    expect(everyone.body.wfh).toEqual({ [admin.userId]: ['2026-09-16'], [member.id]: ['2026-09-17'] });
   });
 });
 

@@ -202,28 +202,47 @@ describe('ruleCode — paid as far as the balance reaches', () => {
 });
 
 describe('late arrivals', () => {
-  const base = { status: WORKING, mode: 'STANDARD' as const, shiftStart: '09:00', graceMinutes: 30, halfDayLateAfterMinute: 14 * 60 };
+  // Lateness is the door punch-in after the shift start + grace, not when
+  // tracked work started. Only STANDARD people are judged — remote and exempt
+  // people never. First-half leave is late after the afternoon time (14:00),
+  // no grace; second-half leave is not checked.
+  const shiftStartMs = Date.parse('2026-09-01T03:30:00Z'); // 09:00 IST
+  const afternoonMs = Date.parse('2026-09-01T08:30:00Z'); // 14:00 IST
+  const at = (minutesAfterStart: number) => shiftStartMs + minutesAfterStart * 60_000;
+  const base = { status: WORKING, mode: 'STANDARD' as const, shiftStartMs, graceMinutes: 30, halfDayLateAfterMs: afternoonMs };
 
   it('is late only past the start plus the grace', () => {
-    expect(isLateArrival({ ...base, punchInMinute: 9 * 60 + 30 })).toBe(false);
-    expect(isLateArrival({ ...base, punchInMinute: 9 * 60 + 31 })).toBe(true);
+    expect(isLateArrival({ ...base, punchInMs: at(30) })).toBe(false);
+    expect(isLateArrival({ ...base, punchInMs: at(31) })).toBe(true);
   });
 
-  it('is never late for a remote or exempt person, or without a punch', () => {
-    expect(isLateArrival({ ...base, mode: 'REMOTE', punchInMinute: 11 * 60 })).toBe(false);
-    expect(isLateArrival({ ...base, mode: 'EXEMPT', punchInMinute: 11 * 60 })).toBe(false);
-    expect(isLateArrival({ ...base, punchInMinute: null })).toBe(false);
+  it('is never late for an exempt person or without a punch-in', () => {
+    expect(isLateArrival({ ...base, mode: 'EXEMPT', punchInMs: at(120) })).toBe(false);
+    expect(isLateArrival({ ...base, punchInMs: null })).toBe(false);
   });
 
   it('on a first-half leave day is late only after 14:00, with no grace', () => {
-    expect(isLateArrival({ ...base, status: HALF_PAID, punchInMinute: 14 * 60 })).toBe(false);
-    expect(isLateArrival({ ...base, status: HALF_PAID, punchInMinute: 14 * 60 + 1 })).toBe(true);
-    expect(isLateArrival({ ...base, status: status('UNPAID_LEAVE', 0.5, 'FIRST_HALF'), punchInMinute: 15 * 60 })).toBe(true);
-    expect(isLateArrival({ ...base, status: HALF_PAID, mode: 'REMOTE', punchInMinute: 15 * 60 })).toBe(false);
+    expect(isLateArrival({ ...base, status: HALF_PAID, punchInMs: afternoonMs })).toBe(false);
+    expect(isLateArrival({ ...base, status: HALF_PAID, punchInMs: afternoonMs + 60_000 })).toBe(true);
+    expect(isLateArrival({ ...base, status: status('UNPAID_LEAVE', 0.5, 'FIRST_HALF'), punchInMs: at(6 * 60) })).toBe(true);
+    // Hours past the shift start, still before the afternoon: on time.
+    expect(isLateArrival({ ...base, status: HALF_PAID, punchInMs: at(240) })).toBe(false);
+    expect(isLateArrival({ ...base, status: HALF_PAID, mode: 'EXEMPT', punchInMs: at(6 * 60) })).toBe(false);
   });
 
-  it('does not check a second-half leave day', () => {
-    expect(isLateArrival({ ...base, status: status('PAID_LEAVE', 0.5, 'SECOND_HALF'), punchInMinute: 11 * 60 })).toBe(false);
+  it('never counts a remote person late, nor a second-half leave day', () => {
+    expect(isLateArrival({ ...base, mode: 'REMOTE', punchInMs: at(120) })).toBe(false);
+    expect(isLateArrival({ ...base, status: HALF_PAID, mode: 'REMOTE', punchInMs: at(6 * 60) })).toBe(false);
+    expect(isLateArrival({
+      ...base,
+      status: status('PAID_LEAVE', 0.5, 'SECOND_HALF'),
+      punchInMs: at(120),
+    })).toBe(false);
+    expect(isLateArrival({
+      ...base,
+      status: status('UNPAID_LEAVE', 0.5, 'SECOND_HALF'),
+      punchInMs: at(6 * 60),
+    })).toBe(false);
   });
 
   it('charges half a day from the first one past the allowance', () => {

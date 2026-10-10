@@ -69,6 +69,8 @@ describe('active-window polling policy gate', () => {
     await vi.advanceTimersByTimeAsync(10_000);
 
     await vi.waitFor(() => expect(mocks.activeWindow).toHaveBeenCalledTimes(1));
+    // The OS is not even asked for the title or URL.
+    expect(mocks.activeWindow).toHaveBeenCalledWith({ accessibilityPermission: false, screenRecordingPermission: false });
     expect(mocks.recordActiveWindow).toHaveBeenCalledWith(
       expect.objectContaining({
         app: 'Google Chrome',
@@ -82,5 +84,18 @@ describe('active-window polling policy gate', () => {
       bundleId: 'com.google.Chrome',
       path: '/Applications/Google Chrome.app',
     });
+  });
+
+  it('asks for the title and URL only when policy captures them', async () => {
+    mocks.policy = { captureApps: true, captureTitles: true, captureUrls: true };
+    mocks.activeWindow.mockResolvedValue({ owner: { name: 'Safari' }, title: 'Docs', url: 'https://docs.test' });
+    const { startActiveWindowPolling } = await import('./windowPoller');
+
+    startActiveWindowPolling();
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    await vi.waitFor(() => expect(mocks.activeWindow).toHaveBeenCalledTimes(1));
+    expect(mocks.activeWindow).toHaveBeenCalledWith({ accessibilityPermission: true, screenRecordingPermission: true });
+    expect(mocks.recordActiveWindow).toHaveBeenCalledWith(expect.objectContaining({ title: 'Docs', url: 'https://docs.test' }));
   });
 });

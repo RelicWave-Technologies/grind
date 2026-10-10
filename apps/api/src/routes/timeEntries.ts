@@ -13,6 +13,8 @@ import {
 import {
   validateEntry,
   clampEntryToServerClock,
+  totalWorkedMs,
+  type ClampResult,
   type Segment,
   type TimeEntry as CoreEntry,
 } from '@grind/core';
@@ -21,8 +23,11 @@ import { requireAccessToken } from '../middleware/auth';
 import { attachScope } from '../middleware/scope';
 import { authorizeTimeEditForUser } from '../authz/timeEdit';
 import { queueManualTimeFinalizeCards } from '../manualTime/larkOutbox';
+import { lockManualCarve, refillFreedManualTime } from '../manualTime/carve';
+import { ulid } from 'ulid';
 import { logger } from '../logger';
 import {
+  clampCheckpointAt,
   lockTimerOwner,
   supersedeExpiredTimersForUser,
   TIMER_LEASE_MS,
@@ -34,6 +39,8 @@ import {
   serializeTimeEntry,
   type SerializableTimeEntry,
 } from '../timeEntries/wire';
+import { linkClaimedEvidence } from '../timeEntries/claimedEvidence';
+import { isUniqueViolation } from '../lib/prismaErrors';
 
 export const timeEntriesRouter = Router();
 
@@ -71,6 +78,28 @@ function toCoreEntry(args: {
   };
 }
 
+/**
+ * A clock clamp (a timestamp beyond server now + skew) is a WARN and the only
+ * thing that earns the CLOCK_CLAMP correction on the receipt. A dropped
+ * zero-length segment is routine — agents up to beta.38 send them whenever a
+ * pause lands on a segment's start — so it is counted at info, never reported
+ * as a clock problem (the agent shows CLOCK_CLAMP to the person).
+ */
+function logClampOutcome(route: 'create' | 'sync', userId: string, entryId: string, clamped: ClampResult): void {
+  if (clamped.adjusted) {
+    logger.warn(
+      { userId, entryId, notes: clamped.notes },
+      `time-entry ${route}: clamped future timestamps to server clock`,
+    );
+  }
+  if (clamped.dropped.length > 0) {
+    logger.info(
+      { userId, entryId, droppedZeroLengthSegments: clamped.dropped.length, segmentIds: clamped.dropped.slice(0, 20) },
+      `time-entry ${route}: dropped zero-length segments`,
+    );
+  }
+}
+
 function hasCompleteV2Lifecycle(input: {
   trackingProtocolVersion?: number;
   revision?: number;
@@ -92,12 +121,6 @@ function hasAnyLifecycleField(input: {
     || input.revision !== undefined
     || input.observedAt !== undefined
     || input.closeReason !== undefined;
-}
-
-function clampObservedAt(observedAt: string, now: Date, startedAt: Date): Date {
-  const raw = new Date(observedAt).getTime();
-  const bounded = Number.isFinite(raw) ? Math.min(raw, now.getTime()) : now.getTime();
-  return new Date(Math.max(startedAt.getTime(), bounded));
 }
 
 function canonicalTimestampCeiling(entry: {
@@ -130,13 +153,20 @@ function receiptForExistingRevision(bodyRevision: number, currentRevision: numbe
   return bodyRevision <= currentRevision ? 'STALE' : 'ALREADY_APPLIED';
 }
 
-/** Closed by the server for silence, not by the agent — the real end is unknown. */
-function isServerFinalized(closeReason: string | null): closeReason is 'LEASE_EXPIRED' | 'SUPERSEDED' {
-  return closeReason === 'LEASE_EXPIRED' || closeReason === 'SUPERSEDED';
+type ServerCloseReason = 'LEASE_EXPIRED' | 'SUPERSEDED' | 'LEGACY_RECONCILED';
+
+/**
+ * Closed by the server, not by the agent — the real end is unknown: a lease
+ * that ran out, a timer superseded by a newer one, or a legacy entry the
+ * cleanup closed at its last proof.
+ */
+function isServerFinalized(closeReason: string | null): closeReason is ServerCloseReason {
+  return closeReason === 'LEASE_EXPIRED' || closeReason === 'SUPERSEDED' || closeReason === 'LEGACY_RECONCILED';
 }
 
-function finalizedCorrection(closeReason: 'LEASE_EXPIRED' | 'SUPERSEDED') {
-  return closeReason === 'LEASE_EXPIRED' ? 'LEASE_FINALIZED' as const : 'SUPERSEDED' as const;
+/** The receipt correction installed agents know for each server close. */
+function finalizedCorrection(closeReason: ServerCloseReason) {
+  return closeReason === 'SUPERSEDED' ? 'SUPERSEDED' as const : 'LEASE_FINALIZED' as const;
 }
 
 function evaluateExistingCreate(args: {
@@ -222,22 +252,24 @@ timeEntriesRouter.post('/', validate(CreateTimeEntryRequest, 'body'), async (req
       return res.status(400).json({ error: 'incomplete_timer_lifecycle' });
     }
     const isV2 = hasCompleteV2Lifecycle(body);
-    if (isV2 && body.source !== 'AUTO') {
-      return res.status(400).json({ error: 'timer_lifecycle_requires_auto_entry' });
-    }
+    // Manual time exists only through a ManualTimeRequest and its approval.
+    // Accepting it here let a member write themselves unapproved hours; no
+    // agent has ever sent anything but AUTO.
+    if (body.source !== 'AUTO') return res.status(400).json({ error: 'manual_requires_request' });
 
     // Idempotency: existing clientUuid => return as-is.
     // An entry can also exist under the agent's id with a different clientUuid:
     // time restored by hand for an agent whose create never arrived keeps the
     // agent's entry id, so a late create must land on it instead of failing
     // on the primary key forever.
-    const existing = await prisma.timeEntry.findUnique({
+    const findExisting = async () => await prisma.timeEntry.findUnique({
       where: { clientUuid: body.clientUuid },
       include: { segments: true },
     }) ?? await prisma.timeEntry.findUnique({
       where: { id: body.id },
       include: { segments: true },
     });
+    const existing = await findExisting();
     if (existing) {
       const decision = evaluateExistingCreate({ entry: existing, body, userId: req.user.sub, isV2 });
       return res.status(decision.status).json(decision.payload);
@@ -261,18 +293,13 @@ timeEntriesRouter.post('/', validate(CreateTimeEntryRequest, 'body'), async (req
     // Server-authoritative clock clamp: never trust the laptop's clock to push
     // time into the future. A fast/tampered client clock can't inflate hours.
     const clamped = clampEntryToServerClock(core, Date.now());
-    if (clamped.adjusted) {
-      logger.warn(
-        { userId: req.user.sub, entryId: body.id, notes: clamped.notes },
-        'time-entry create: clamped future timestamps to server clock',
-      );
-    }
+    logClampOutcome('create', req.user.sub, body.id, clamped);
 
     const now = new Date();
     const lastProvenAt = isV2
-      ? clampObservedAt(body.observedAt!, now, new Date(clamped.entry.startedAt))
+      ? clampCheckpointAt(body.observedAt!, now, new Date(clamped.entry.startedAt))
       : null;
-    const outcome = await prisma.$transaction(async (tx) => {
+    const creating = prisma.$transaction(async (tx) => {
       if (isV2 && clamped.entry.endedAt === null) {
         await lockTimerOwner(tx, req.user!.sub);
         const racedExisting = await tx.timeEntry.findUnique({
@@ -333,6 +360,15 @@ timeEntriesRouter.post('/', validate(CreateTimeEntryRequest, 'body'), async (req
       });
       return { kind: 'created' as const, entry: created };
     });
+    // Two identical creates in flight (an agent retrying before the first
+    // answer) race to the insert; the loser's unique violation is the
+    // winner's row, answered like any other retry.
+    const outcome = await creating.catch(async (err: unknown) => {
+      if (!isUniqueViolation(err)) throw err;
+      const raced = await findExisting();
+      if (!raced) throw err;
+      return { kind: 'existing' as const, entry: raced };
+    });
     if (outcome.kind === 'conflict') {
       return res.status(409).json({ error: 'active_timer_conflict', activeEntryId: outcome.activeEntryId });
     }
@@ -343,6 +379,13 @@ timeEntriesRouter.post('/', validate(CreateTimeEntryRequest, 'body'), async (req
       const decision = evaluateExistingCreate({ entry: outcome.entry, body, userId: req.user.sub, isV2 });
       return res.status(decision.status).json(decision.payload);
     }
+    // The entry is committed: attach the screenshots and minutes that named it
+    // while its create sat in the agent's queue. A failure here leaves them
+    // detached (the backfill script can still link them) and must not turn a
+    // stored entry into an error the agent would retry.
+    await linkClaimedEvidence(outcome.entry).catch((err: unknown) => {
+      logger.warn({ err, userId: req.user!.sub, entryId: outcome.entry.id }, 'linking claimed evidence failed');
+    });
     res.status(201).json(isV2
       ? createTimerSyncReceipt(outcome.entry, 'APPLIED', clamped.adjusted ? 'CLOCK_CLAMP' : null, now)
       : serializeTimeEntry(outcome.entry));
@@ -380,6 +423,9 @@ timeEntriesRouter.put('/:id/sync', validate(SyncTimeEntryRequest, 'body'), async
     });
     if (!entry) return res.status(404).json({ error: 'not_found' });
     if (entry.userId !== req.user.sub) return res.status(403).json({ error: 'forbidden' });
+    // Only the agent's own timer entries are synced; approved manual time is
+    // never stretched or rewritten from a client.
+    if (entry.source !== 'AUTO') return res.status(409).json({ error: 'manual_requires_request' });
     if (entry.trackingProtocolVersion === TIMER_PROTOCOL_VERSION && !isV2) {
       return res.status(409).json({ error: 'timer_protocol_required' });
     }
@@ -401,12 +447,7 @@ timeEntriesRouter.put('/:id/sync', validate(SyncTimeEntryRequest, 'body'), async
     // Server-authoritative clock clamp (same guard as create): the agent owns
     // the running entry's segments, but never the right to bill future time.
     const clamped = clampEntryToServerClock(core, Date.now());
-    if (clamped.adjusted) {
-      logger.warn(
-        { userId: req.user.sub, entryId: id, notes: clamped.notes },
-        'time-entry sync: clamped future timestamps to server clock',
-      );
-    }
+    logClampOutcome('sync', req.user.sub, id, clamped);
     const clampedSegments = clamped.entry.segments;
     const clampedEndedAt = clamped.entry.endedAt;
 
@@ -478,7 +519,7 @@ timeEntriesRouter.put('/:id/sync', validate(SyncTimeEntryRequest, 'body'), async
       const heldNow = heldRevisionOutcome(current);
       if (heldNow) return heldNow;
 
-      const checkpointAt = isV2 ? clampObservedAt(body.observedAt!, now, current.startedAt) : null;
+      const checkpointAt = isV2 ? clampCheckpointAt(body.observedAt!, now, current.startedAt) : null;
       const observedAt = checkpointAt && current.lastProvenAt && current.lastProvenAt > checkpointAt
         ? current.lastProvenAt
         : checkpointAt;
@@ -488,9 +529,10 @@ timeEntriesRouter.put('/:id/sync', validate(SyncTimeEntryRequest, 'body'), async
           // agent; it never knew the real end. A newer agent revision is that
           // truth arriving late, so apply it. Overlap with a later entry is
           // harmless — every report unions intervals.
+          // A legacy (pre-v2) agent has no revision to compare: its closed
+          // snapshot is the real end, as it always was before the cleanup.
           const reopens = clampedEndedAt === null;
-          const mayReconcile = isV2
-            && body.revision! > currentRevision
+          const mayReconcile = (isV2 ? body.revision! > currentRevision : current.closeReason === 'LEGACY_RECONCILED')
             && (!reopens || (observedAt !== null && observedAt > current.endedAt));
           if (!mayReconcile) {
             return {
@@ -538,6 +580,26 @@ timeEntriesRouter.put('/:id/sync', validate(SyncTimeEntryRequest, 'body'), async
         };
       }
 
+      // Applying a newer revision over a server close (see above). The agent's
+      // time wins, but the record that the server had closed it stays:
+      // serverFinalizedAt is kept, and the restore is logged below.
+      const serverClose = current.endedAt && isServerFinalized(current.closeReason)
+        ? {
+            closeReason: current.closeReason,
+            closedAt: current.endedAt,
+            finalizedAt: current.serverFinalizedAt,
+            workedMs: totalWorkedMs({
+              ...clamped.entry,
+              segments: current.segments.map((segment) => ({
+                id: segment.id,
+                kind: segment.kind,
+                startedAt: segment.startedAt.getTime(),
+                endedAt: segment.endedAt?.getTime() ?? null,
+              })),
+            }, now.getTime()),
+          }
+        : null;
+
       // Incoming ids owned by another entry are rejected above. Never delete
       // another entry's audit rows while replacing this entry's snapshot.
       await tx.timeSegment.deleteMany({ where: { timeEntryId: id } });
@@ -554,7 +616,6 @@ timeEntriesRouter.put('/:id/sync', validate(SyncTimeEntryRequest, 'body'), async
           closeReason: clampedEndedAt !== null
             ? (body.closeReason ?? (isV2 ? 'AGENT' : current.closeReason))
             : null,
-          serverFinalizedAt: null,
         },
       });
       await tx.timeSegment.createMany({
@@ -572,10 +633,28 @@ timeEntriesRouter.put('/:id/sync', validate(SyncTimeEntryRequest, 'body'), async
         entry: updated,
         disposition: 'APPLIED' as const,
         correction: clamped.adjusted ? 'CLOCK_CLAMP' as const : null,
+        serverClose,
       };
     });
 
     if (outcome.kind === 'conflict') return res.status(409).json(outcome.payload);
+    // A legacy agent resends the same close; only a moved end is a restore.
+    if ('serverClose' in outcome && outcome.serverClose && clampedEndedAt !== outcome.serverClose.closedAt.getTime()) {
+      const restoredMs = totalWorkedMs(clamped.entry, now.getTime()) - outcome.serverClose.workedMs;
+      logger.info(
+        {
+          userId: entry.userId,
+          entryId: id,
+          serverCloseReason: outcome.serverClose.closeReason,
+          serverClosedAt: outcome.serverClose.closedAt.toISOString(),
+          serverFinalizedAt: outcome.serverClose.finalizedAt?.toISOString() ?? null,
+          agentEndedAt: clampedEndedAt === null ? null : new Date(clampedEndedAt).toISOString(),
+          agentRevision: body.revision ?? null,
+          restoredMinutes: Math.round(restoredMs / 60_000),
+        },
+        'time-entry sync: agent revision restored time after a server close',
+      );
+    }
     res.json(isV2
       ? createTimerSyncReceipt(outcome.entry, outcome.disposition, outcome.correction, now)
       : serializeTimeEntry(outcome.entry));
@@ -708,6 +787,16 @@ timeEntriesRouter.delete('/:id', attachScope, async (req, res, next) => {
 
     const now = new Date();
     await prisma.$transaction(async (tx) => {
+      // Same lock order as an approval (request row, then the person's carve
+      // lock) so the two can never deadlock.
+      if (existing.manualTimeRequest) {
+        await tx.$queryRaw`SELECT id FROM "ManualTimeRequest" WHERE id = ${existing.manualTimeRequest.id} FOR UPDATE`;
+      }
+      await lockManualCarve(tx, existing.userId);
+      const freed = await tx.timeSegment.findMany({
+        where: { timeEntryId: id, kind: { not: 'IDLE_TRIMMED' } },
+        select: { startedAt: true, endedAt: true },
+      });
       if (existing.manualTimeRequest) {
         await tx.manualTimeRequest.update({
           where: { id: existing.manualTimeRequest.id },
@@ -724,6 +813,14 @@ timeEntriesRouter.delete('/:id', attachScope, async (req, res, next) => {
         await queueManualTimeFinalizeCards(tx, existing.manualTimeRequest.id);
       }
       await tx.timeEntry.delete({ where: { id } });
+      // Other approved requests carved around this entry; give them back the
+      // minutes it was holding, so its deletion does not leave a hole.
+      await refillFreedManualTime(tx, {
+        userId: existing.userId,
+        freed: freed.map((s) => ({ start: s.startedAt.getTime(), end: (s.endedAt ?? s.startedAt).getTime() })),
+        nextId: ulid,
+        now,
+      });
     });
 
     res.json({ ok: true });

@@ -44,6 +44,10 @@ export class SqliteTodayLedgerStore implements ServerLedgerCache {
     if (!columns.some((column) => column.name === 'effective_json')) {
       this.db.exec(`ALTER TABLE server_entry_cache ADD COLUMN effective_json TEXT`);
     }
+    const metaColumns = this.db.prepare(`PRAGMA table_info(server_snapshot_meta)`).all() as { name: string }[];
+    if (!metaColumns.some((column) => column.name === 'invalidations_json')) {
+      this.db.exec(`ALTER TABLE server_snapshot_meta ADD COLUMN invalidations_json TEXT`);
+    }
   }
 
   replaceSnapshot(
@@ -70,6 +74,9 @@ fetchedAt = Date.now(),
     const effectiveByEntry = validateEffectiveEntries(autoEntries, response.effectiveEntries);
     const serverTime = new Date(response.serverTime).getTime();
     if (!Number.isFinite(serverTime)) throw new Error('invalid_today_ledger_server_time');
+    const invalidations = (response.invalidations ?? [])
+      .map((iv) => ({ start: new Date(iv.startedAt).getTime(), end: new Date(iv.endedAt).getTime() }))
+      .filter((iv) => Number.isFinite(iv.start) && Number.isFinite(iv.end) && iv.end > iv.start);
 
     const replace = this.db.transaction(() => {
       this.db.prepare(
@@ -120,8 +127,29 @@ fetchedAt = Date.now(),
         response.workspaceTimezone,
         fetchedAt,
       );
+      this.db.prepare(
+        `UPDATE server_snapshot_meta SET invalidations_json = ?
+         WHERE owner_user_id = ? AND owner_workspace_id = ? AND day_start = ?`,
+      ).run(JSON.stringify(invalidations), owner.userId, owner.workspaceId, window.start);
     });
     replace();
+  }
+
+  invalidations(owner: TimerOwner, windowStart: number, windowEnd: number): Array<{ start: number; end: number }> {
+    const meta = this.db.prepare(
+      `SELECT day_end, invalidations_json FROM server_snapshot_meta
+       WHERE owner_user_id = ? AND owner_workspace_id = ? AND day_start = ?`,
+    ).get(owner.userId, owner.workspaceId, windowStart) as { day_end: number; invalidations_json: string | null } | undefined;
+    if (!meta || meta.day_end !== windowEnd || !meta.invalidations_json) return [];
+    try {
+      const parsed = JSON.parse(meta.invalidations_json) as unknown;
+      if (!Array.isArray(parsed)) return [];
+      return parsed.filter((iv): iv is { start: number; end: number } => (
+        typeof iv?.start === 'number' && typeof iv?.end === 'number' && iv.end > iv.start
+      ));
+    } catch {
+      return [];
+    }
   }
 
   list(owner: TimerOwner, windowStart: number, windowEnd: number, now: number): ServerLedgerEntry[] {

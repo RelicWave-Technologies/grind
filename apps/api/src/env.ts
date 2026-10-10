@@ -1,9 +1,52 @@
 import 'dotenv/config';
 import { z } from 'zod';
 
+/**
+ * Split a comma-separated list of origins, trimming whitespace and trailing
+ * slashes. Entries that are not absolute URLs are dropped.
+ */
+export function parseUrlList(raw: string | undefined | null): string[] {
+  return (raw ?? '')
+    .split(',')
+    .map((s) => s.trim().replace(/\/+$/u, ''))
+    .filter((s) => {
+      if (!s) return false;
+      try {
+        return Boolean(new URL(s).host);
+      } catch {
+        return false;
+      }
+    });
+}
+
+const UrlListSchema = z
+  .string()
+  .optional()
+  .refine((v) => {
+    if (!v || !v.trim()) return true;
+    const parts = v.split(',').map((s) => s.trim()).filter(Boolean);
+    return parts.length > 0 && parseUrlList(v).length === parts.length;
+  }, 'must be one URL or a comma-separated list of URLs');
+
+/** Split a comma-separated email allowlist: trimmed, lowercased, blanks dropped. */
+export function parseEmailList(raw: string | undefined | null): string[] {
+  return (raw ?? '')
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+const EmailListSchema = z
+  .string()
+  .optional()
+  .refine(
+    (v) => parseEmailList(v).every((e) => z.string().email().safeParse(e).success),
+    'must be one email or a comma-separated list of emails',
+  );
+
 const EnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
-  // PORT is injected by most PaaS hosts (Render, Heroku, Railway). When set it
+  // PORT is injected by most PaaS hosts (Heroku, Railway, ...). When set it
   // wins over API_PORT so the service binds where the platform expects.
   PORT: z.coerce.number().int().min(1).max(65535).optional(),
   API_PORT: z.coerce.number().int().min(1).max(65535).default(4000),
@@ -29,7 +72,10 @@ const EnvSchema = z.object({
   LARK_CONNECT_REDIRECT_URI: z.string().url().optional(),
   // Legacy single-redirect config. Prefer the two flow-specific values above.
   LARK_OAUTH_REDIRECT_URI: z.string().url().optional(),
-  DASHBOARD_URL: z.string().url().optional(),
+  // Dashboard origin(s): CORS allowlist + post-login redirects (first entry).
+  // One URL or a comma-separated list; empty means unset. Read it through
+  // dashboardOrigins(), never process.env directly.
+  DASHBOARD_URL: UrlListSchema,
 
   // --- Lark login provisioning ---
   // Comma-separated emails created as ACTIVE ADMIN on first Lark login (they
@@ -37,15 +83,18 @@ const EnvSchema = z.object({
   // provisioned PENDING. Matching is case-insensitive + trimmed.
   LARK_BOOTSTRAP_ADMIN_EMAILS: z.string().optional(),
   /// approval_code of the workspace's Lark "Leave" approval. Present = leave is
-  /// decided in Lark; absent = decided in Timo. Deliberately all-or-nothing: a
-  /// half-configured Lark accepts requests that reach nobody.
+  /// mirrored from Lark into the ledger. Read it through larkLeaveApprovalCode().
   LARK_LEAVE_APPROVAL_CODE: z.string().min(1).optional(),
   /// approval_code of the Lark "Work From Home Request" approval. Present =
   /// WFH requests are mirrored into Timo, which the attendance rules read.
+  /// Read it through larkWfhApprovalCode().
   LARK_WFH_APPROVAL_CODE: z.string().min(1).optional(),
-  LARK_LEAVE_TYPE_FULL: z.string().min(1).optional(),
-  LARK_LEAVE_TYPE_HALF: z.string().min(1).optional(),
-  LARK_LEAVE_TZ_OFFSET_MIN: z.coerce.number().int().optional(),
+  // --- Developer tools ---
+  // Comma-separated emails allowed to use the hidden developer tools (remote
+  // agent resync at /dev/resync). Empty or unset = the feature is off and its
+  // routes answer 404. Matching is case-insensitive + trimmed. Read it through
+  // developerEmails(), never process.env directly.
+  DEVELOPER_EMAILS: EmailListSchema,
   // Fixed id for the single workspace, used with upsert so concurrent first
   // logins never create duplicates.
   WORKSPACE_ID: z.string().min(1).default('ws_default'),
@@ -64,7 +113,6 @@ const EnvSchema = z.object({
   TIMO_AI_MAX_INPUT_CHARS: z.coerce.number().int().min(1000).max(50000).default(12000),
   TIMO_TESTER_BOT_ENABLED: z.enum(['true', 'false']).default('false'),
   TIMO_TESTER_GROUP_CHAT_ID: z.string().min(1).optional(),
-  TIMO_TESTER_GROUP_TIMEZONE: z.string().min(1).default('UTC'),
   TIMO_TESTER_PING_TIMES: z.string().min(1).default('11:00,17:00'),
   TIMO_TESTER_HISTORY_POLL_INTERVAL_MS: z.coerce.number().int().min(3000).max(300000).default(5000),
   TIMO_PASSIVE_ISSUE_DETECTION_ENABLED: z.enum(['true', 'false']).default('false'),
@@ -81,27 +129,36 @@ const EnvSchema = z.object({
 
   // --- Screenshots (optional; direct URLs on Screenshot rows also work) ---
   PUBLIC_APP_URL: z.string().url().optional(),
-  SCREENSHOT_ASSET_BASE_URL: z.string().url().optional(),
-  SCREENSHOT_URL_SIGNING_SECRET: z.string().min(16).optional(),
 
-  // --- Cloudinary (screenshot storage) ---
-  // When all three are set, /v1/screenshots/sign mints signed direct-upload
-  // params for the agent. The api_secret never leaves the server.
+  // --- Cloudinary (legacy screenshot storage) ---
+  // New shots go to Google Drive. These only let the screenshot routes keep
+  // serving and completing rows uploaded to Cloudinary before that switch.
   CLOUDINARY_CLOUD_NAME: z.string().min(1).optional(),
   CLOUDINARY_API_KEY: z.string().min(1).optional(),
   CLOUDINARY_API_SECRET: z.string().min(1).optional(),
-  // Folder screenshots land in. Defaults to "grind/screenshots".
+  // Folder legacy screenshots were filed in. Defaults to "grind/screenshots".
   CLOUDINARY_FOLDER: z.string().min(1).default('grind/screenshots'),
 
   // --- Google Drive (screenshot storage) ---
-  // When configured, /v1/screenshots/sign returns a Grind upload URL that the
-  // existing agent posts to with its Cloudinary-shaped multipart body. The API
-  // stores bytes in Drive using this service account.
+  // /v1/screenshots/sign returns a Grind upload URL that the agent posts to
+  // with its Cloudinary-shaped multipart body. The API stores the bytes in
+  // Drive using this service account. Unset = screenshot upload is off.
   GOOGLE_DRIVE_CLIENT_EMAIL: z.string().email().optional(),
   GOOGLE_DRIVE_PRIVATE_KEY: z.string().min(1).optional(),
   GOOGLE_DRIVE_PRIVATE_KEY_BASE64: z.string().min(1).optional(),
   GOOGLE_DRIVE_FOLDER_ID: z.string().min(1).optional(),
   GOOGLE_DRIVE_SHARED_DRIVE_ID: z.string().min(1).optional(),
+}).superRefine((value, ctx) => {
+  // Without an allowlist CORS reflects any origin, with credentials: any site
+  // could call the API as the signed-in dashboard user. Fine on a laptop, never
+  // in production.
+  if (value.NODE_ENV === 'production' && parseUrlList(value.DASHBOARD_URL).length === 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['DASHBOARD_URL'],
+      message: 'DASHBOARD_URL is required in production (the CORS allowlist)',
+    });
+  }
 });
 
 const parsed = EnvSchema.safeParse(process.env);
@@ -111,3 +168,39 @@ if (!parsed.success) {
 }
 
 export const env = parsed.data;
+
+/**
+ * The configured dashboard origins, first one canonical. Parsed on each call so
+ * a value set after this module loaded (a test, a process manager) is honoured
+ * the same way at every read site.
+ */
+export function dashboardOrigins(): string[] {
+  return parseUrlList(process.env.DASHBOARD_URL ?? env.DASHBOARD_URL);
+}
+
+/**
+ * The developer allowlist, lowercased. Parsed on each call (like
+ * dashboardOrigins) so a value set after this module loaded is honoured.
+ */
+export function developerEmails(): string[] {
+  return parseEmailList(process.env.DEVELOPER_EMAILS ?? env.DEVELOPER_EMAILS);
+}
+
+/**
+ * The Lark "Leave" approval_code, trimmed; undefined when unset or blank.
+ * Parsed on each call (like dashboardOrigins) so a value set after this module
+ * loaded is honoured.
+ */
+export function larkLeaveApprovalCode(): string | undefined {
+  return (process.env.LARK_LEAVE_APPROVAL_CODE ?? env.LARK_LEAVE_APPROVAL_CODE)?.trim() || undefined;
+}
+
+/** The Lark "Work From Home Request" approval_code; see larkLeaveApprovalCode. */
+export function larkWfhApprovalCode(): string | undefined {
+  return (process.env.LARK_WFH_APPROVAL_CODE ?? env.LARK_WFH_APPROVAL_CODE)?.trim() || undefined;
+}
+
+export function isDeveloperEmail(email: string | null | undefined): boolean {
+  if (!email) return false;
+  return developerEmails().includes(email.trim().toLowerCase());
+}

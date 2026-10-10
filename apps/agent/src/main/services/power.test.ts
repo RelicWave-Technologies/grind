@@ -10,7 +10,10 @@ const mocks = vi.hoisted(() => {
     quit: vi.fn(),
     prepareForAway: vi.fn(),
     discardAway: vi.fn(),
+    noteAlive: vi.fn(),
+    onTimerMissedSleep: vi.fn(),
     status: vi.fn(),
+    idleSeconds: vi.fn(() => 0),
     runQuitCleanup: vi.fn(),
     broadcast: vi.fn(),
     info: vi.fn(),
@@ -20,19 +23,25 @@ const mocks = vi.hoisted(() => {
 
 vi.mock('electron', () => ({
   app: { quit: mocks.quit },
-  powerMonitor: { on: mocks.powerOn },
+  powerMonitor: { on: mocks.powerOn, getSystemIdleTime: mocks.idleSeconds },
 }));
 
 vi.mock('./timer', () => ({
   getTimerService: () => ({
     prepareForAway: mocks.prepareForAway,
     discardAway: mocks.discardAway,
+    noteAlive: mocks.noteAlive,
     status: mocks.status,
   }),
+  onTimerMissedSleep: mocks.onTimerMissedSleep,
 }));
 
 vi.mock('./quitCleanup', () => ({
   runQuitCleanup: mocks.runQuitCleanup,
+}));
+
+vi.mock('../appLifecycle', () => ({
+  getAppLifecycle: () => ({ quit: mocks.quit }),
 }));
 
 vi.mock('../broadcast', () => ({
@@ -58,6 +67,7 @@ describe('registerPowerEvents', () => {
     mocks.prepareForAway.mockResolvedValue({ state: 'IDLE', workedMs: 0 });
     mocks.status.mockReturnValue({ state: 'IDLE', workedMs: 0 });
     mocks.runQuitCleanup.mockResolvedValue(undefined);
+    mocks.idleSeconds.mockReturnValue(0);
   });
 
   afterEach(() => {
@@ -219,5 +229,152 @@ describe('registerPowerEvents', () => {
     expect(mocks.prepareForAway).toHaveBeenNthCalledWith(2, 'suspend', 30_000);
     expect(onReturnFromAway).not.toHaveBeenCalled();
     expect(onReturnComplete).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not offer resume for a timer that was already paused', async () => {
+    const onReturnFromAway = vi.fn();
+    mocks.status.mockReturnValue({ state: 'RUNNING', entryId: 'e1', larkTaskGuid: 'task-1', paused: true, pauseReason: 'MANUAL' });
+    registerPowerEvents({ onWake: vi.fn(), onReturnFromAway });
+
+    mocks.listeners.get('lock-screen')!();
+    await settle();
+    mocks.listeners.get('unlock-screen')!();
+    await settle();
+
+    // The paused entry is still closed by the away, but nothing asks to resume it.
+    expect(mocks.prepareForAway).toHaveBeenCalledWith('lock', 0);
+    expect(onReturnFromAway).not.toHaveBeenCalled();
+  });
+
+  it('still retries closing a paused timer when the first close failed', async () => {
+    mocks.status.mockReturnValue({ state: 'RUNNING', larkTaskGuid: 'task-1', paused: true });
+    mocks.prepareForAway.mockRejectedValueOnce(new Error('disk unavailable'));
+    registerPowerEvents({ onWake: vi.fn() });
+
+    mocks.listeners.get('suspend')!();
+    mocks.listeners.get('resume')!();
+    await settle();
+    await settle();
+
+    expect(mocks.prepareForAway).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not bill the idle stretch before an auto-lock', async () => {
+    const onReturnFromAway = vi.fn();
+    mocks.status.mockReturnValue({ state: 'RUNNING', larkTaskGuid: 'task-1', paused: false });
+    mocks.idleSeconds.mockReturnValue(120); // no input for 2 min, then the screen locked
+    registerPowerEvents({ onWake: vi.fn(), onReturnFromAway });
+
+    mocks.listeners.get('lock-screen')!();
+    await settle();
+
+    // Handed over as elapsed time: the boundary is two minutes before the lock.
+    expect(mocks.prepareForAway).toHaveBeenCalledWith('lock', 120_000);
+
+    mocks.listeners.get('unlock-screen')!();
+    await settle();
+    expect(onReturnFromAway).toHaveBeenCalledWith(expect.objectContaining({
+      stoppedAt: 1_700_000_000_000 - 120_000,
+    }));
+  });
+
+  it('keeps counting a short pause between keystrokes before a manual lock', async () => {
+    mocks.status.mockReturnValue({ state: 'RUNNING', larkTaskGuid: 'task-1', paused: false });
+    mocks.idleSeconds.mockReturnValue(5);
+    registerPowerEvents({ onWake: vi.fn() });
+
+    mocks.listeners.get('lock-screen')!();
+    await settle();
+
+    expect(mocks.prepareForAway).toHaveBeenCalledWith('lock', 0);
+  });
+
+  describe('a sleep the OS never reported', () => {
+    const LAST_TICK_WALL = 1_700_000_000_000 - 90 * 60_000;
+    const missedListener = () => mocks.onTimerMissedSleep.mock.calls.at(-1)![0] as (missed: unknown) => void;
+
+    it('runs the full return flow and offers to resume the entry the gap closed', async () => {
+      const onAwayStart = vi.fn();
+      const onWake = vi.fn();
+      const onReturnFromAway = vi.fn();
+      const onReturnComplete = vi.fn();
+      registerPowerEvents({ onWake, onAwayStart, onReturnFromAway, onReturnComplete });
+
+      missedListener()({
+        gapMs: 90 * 60_000,
+        lastAliveWallMs: LAST_TICK_WALL,
+        closed: { entryId: 'e1', closedAt: 123, larkTaskGuid: 'task-1', wasAccruing: true },
+      });
+      await settle();
+      await settle();
+
+      expect(onAwayStart).toHaveBeenCalledTimes(1);
+      expect(onWake).toHaveBeenCalledTimes(1);
+      // The timer already closed the entry; nothing closes it a second time.
+      expect(mocks.prepareForAway).not.toHaveBeenCalled();
+      expect(onReturnFromAway).toHaveBeenCalledWith({ larkTaskGuid: 'task-1', stoppedAt: LAST_TICK_WALL, reason: 'suspend' });
+      expect(onReturnComplete).toHaveBeenCalledTimes(1);
+    });
+
+    it('with nothing closed, only does the wake work — a pending welcome-back prompt survives', async () => {
+      const onAwayStart = vi.fn();
+      const onWake = vi.fn();
+      const onReturnFromAway = vi.fn();
+      registerPowerEvents({ onWake, onAwayStart, onReturnFromAway });
+
+      missedListener()({ gapMs: 20 * 60_000, lastAliveWallMs: LAST_TICK_WALL, closed: null });
+      await settle();
+
+      expect(onWake).toHaveBeenCalledTimes(1);
+      expect(onAwayStart).not.toHaveBeenCalled();
+      expect(onReturnFromAway).not.toHaveBeenCalled();
+    });
+
+    it('leaves a lock that already closed the timer to its own unlock', async () => {
+      const onAwayStart = vi.fn();
+      const onReturnFromAway = vi.fn();
+      mocks.status.mockReturnValue({ state: 'RUNNING', entryId: 'e1', larkTaskGuid: 'task-1', paused: false });
+      registerPowerEvents({ onWake: vi.fn(), onAwayStart, onReturnFromAway });
+
+      mocks.listeners.get('lock-screen')!();
+      await settle();
+      missedListener()({ gapMs: 90 * 60_000, lastAliveWallMs: LAST_TICK_WALL, closed: null });
+      mocks.listeners.get('unlock-screen')!();
+      await settle();
+
+      expect(onAwayStart).toHaveBeenCalledTimes(1);
+      expect(onReturnFromAway).toHaveBeenCalledTimes(1);
+      expect(onReturnFromAway).toHaveBeenCalledWith(expect.objectContaining({ reason: 'lock' }));
+    });
+
+    it('checks for a gap on every resume/unlock before reading the timer', async () => {
+      registerPowerEvents({ onWake: vi.fn() });
+
+      mocks.listeners.get('resume')!();
+      await settle();
+
+      expect(mocks.noteAlive).toHaveBeenCalledTimes(1);
+    });
+
+    it('completes the return a resume started when its own gap check finds the sleep', async () => {
+      const onReturnFromAway = vi.fn();
+      const onWake = vi.fn();
+      registerPowerEvents({ onWake, onReturnFromAway });
+      mocks.noteAlive.mockImplementationOnce(() => {
+        missedListener()({
+          gapMs: 90 * 60_000,
+          lastAliveWallMs: LAST_TICK_WALL,
+          closed: { entryId: 'e1', closedAt: 123, larkTaskGuid: null, wasAccruing: true },
+        });
+      });
+
+      mocks.listeners.get('resume')!();
+      await settle();
+      await settle();
+
+      expect(onWake).toHaveBeenCalledTimes(1);
+      expect(onReturnFromAway).toHaveBeenCalledTimes(1);
+      expect(onReturnFromAway).toHaveBeenCalledWith({ larkTaskGuid: null, stoppedAt: LAST_TICK_WALL, reason: 'suspend' });
+    });
   });
 });

@@ -5,7 +5,8 @@ import { canonicalTimerEntryPayload } from '@grind/core';
 import { createHash } from 'node:crypto';
 import { dateKeyInTimeZone, localDayWindowInTimeZone, type TimerSyncReceipt } from '@grind/types';
 import { HttpError } from '../apiClient';
-import { TimerService } from './timerService';
+import { CLOCK_CORRECTION_NOTICE_MS, TimerService } from './timerService';
+import { syncRetryDelayMs } from './syncPolicy';
 import { TrackingBlockedError } from '../trackingReadiness';
 import type {
   Clock,
@@ -23,6 +24,9 @@ import type {
 
 const T0 = 1_700_000_000_000;
 const MIN = 60_000;
+
+/** Let background pushes (which now run in order) finish. */
+const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 class FakeClock implements Clock {
   constructor(public t = T0) {}
@@ -47,10 +51,13 @@ class MemStore implements EntryStore {
   failNextUpsert = false;
   entries = new Map<string, TimeEntry>();
   syncStates = new Map<string, EntrySyncState>();
+  failures = new Map<string, { attempts: number; retryAt: number; error: string }>();
+  onceKeys = new Set<string>();
   bindOwner(owner: TimerOwner | null) { this.owner = owner; }
   currentOwner() { return this.owner; }
   claimUnownedEntries() { return 0; }
   claimServerMatchedEntries() { return 0; }
+  claimLegacySelfEntries() { return { claimed: 0, unclaimed: 0 }; }
   upsert(e: TimeEntry, opts?: { syncState?: PendingEntrySyncState }) {
     if (this.failNextUpsert) {
       this.failNextUpsert = false;
@@ -60,6 +67,7 @@ class MemStore implements EntryStore {
     const nextState = opts?.syncState ?? (existing === 'pending_create' ? 'pending_create' : existing ? 'pending_update' : 'pending_create');
     this.entries.set(e.id, structuredClone(e));
     this.syncStates.set(e.id, nextState);
+    this.failures.delete(e.id);
     return nextState;
   }
   switchEntry(closed: TimeEntry, next: TimeEntry): [PendingEntrySyncState, PendingEntrySyncState] {
@@ -70,21 +78,65 @@ class MemStore implements EntryStore {
     return [this.upsert(closed), this.upsert(next, { syncState: 'pending_create' })];
   }
   getOpen() {
-    for (const e of this.entries.values()) if (e.endedAt === null) return structuredClone(e);
-    return null;
+    return this.listOpen().at(-1) ?? null;
   }
-  getUnsynced(): UnsyncedEntry[] {
+  listOpen() {
+    return [...this.entries.values()].filter((e) => e.endedAt === null).map((e) => structuredClone(e));
+  }
+  getUnsynced(now = Number.MAX_SAFE_INTEGER, limit = -1): UnsyncedEntry[] {
     return [...this.entries.values()]
-      .map((e) => ({ entry: structuredClone(e), syncState: this.syncStates.get(e.id) ?? 'pending_create' }))
-      .filter((r): r is UnsyncedEntry => r.syncState === 'pending_create' || r.syncState === 'pending_update');
+      .map((e) => ({
+        entry: structuredClone(e),
+        syncState: this.syncStates.get(e.id) ?? 'pending_create',
+        attempts: this.failures.get(e.id)?.attempts ?? 0,
+      }))
+      .filter((r): r is UnsyncedEntry => r.syncState === 'pending_create' || r.syncState === 'pending_update')
+      .filter((r) => (this.failures.get(r.entry.id)?.retryAt ?? 0) <= now)
+      .sort((a, b) => a.entry.startedAt - b.entry.startedAt)
+      .slice(0, limit < 0 ? undefined : limit);
+  }
+  noteSyncFailure(id: string, error: string, retryAt: number) {
+    if (this.syncStates.get(id) === 'synced') return;
+    this.failures.set(id, { attempts: (this.failures.get(id)?.attempts ?? 0) + 1, retryAt, error });
+  }
+  syncBacklog(parkedAtAttempts = 5) {
+    const pending = this.getUnsynced();
+    return {
+      pending: pending.length,
+      oldestPendingAt: pending.length ? Math.min(...pending.map((r) => r.entry.startedAt)) : null,
+      lastError: [...this.failures.values()].at(-1)?.error ?? null,
+      parked: [...this.failures.values()].filter((f) => f.attempts >= parkedAtAttempts).length,
+    };
+  }
+  requeue(id: string, syncState: PendingEntrySyncState) {
+    if (!this.entries.has(id)) return false;
+    if (this.syncStates.get(id) !== 'pending_create') this.syncStates.set(id, syncState);
+    this.failures.delete(id);
+    return true;
+  }
+  markOnce(key: string) {
+    if (this.onceKeys.has(key)) return false;
+    this.onceKeys.add(key);
+    return true;
+  }
+  notes = new Map<string, string>();
+  getNote(key: string) {
+    return this.notes.get(key) ?? null;
+  }
+  setNote(key: string, value: string) {
+    this.notes.set(key, value);
+  }
+  rangeBacklog(startMs: number, endMs: number) {
+    const pending = this.getUnsynced().filter(
+      (r) => r.entry.endedAt !== null && r.entry.endedAt > startMs && r.entry.startedAt < endMs,
+    );
+    return { pending: pending.length, lastErrors: [] };
   }
   hasUnsynced() { return this.getUnsynced().length > 0; }
   isPendingCreate(id: string) {
     return this.syncStates.get(id) === 'pending_create';
   }
-  listRecent(limit: number) {
-    return [...this.entries.values()].reverse().slice(0, limit).map((e) => structuredClone(e));
-  }
+
   listSince(since: number) {
     return [...this.entries.values()]
       .filter((e) => e.endedAt === null || e.endedAt >= since)
@@ -97,8 +149,9 @@ class MemStore implements EntryStore {
     return this.listSince(since).map((entry) => ({
       entry,
       syncState: this.syncStates.get(entry.id) ?? 'pending_create',
-      acknowledgedRevision: null,
-      acknowledgedHash: null,
+      acknowledgedRevision: this.acks.get(entry.id)?.revision ?? null,
+      acknowledgedHash: this.acks.get(entry.id)?.hash ?? null,
+      ...(this.acks.get(entry.id)?.larkTaskGuid !== undefined ? { acknowledgedTaskGuid: this.acks.get(entry.id)!.larkTaskGuid } : {}),
     }));
   }
   markCreated(id: string, expectedEntry: TimeEntry) {
@@ -114,10 +167,19 @@ class MemStore implements EntryStore {
     this.syncStates.set(id, 'pending_create');
     return true;
   }
-  markSynced(id: string, expectedEntry: TimeEntry) {
+  acks = new Map<string, { revision: number; hash: string; larkTaskGuid?: string | null }>();
+  transaction<T>(work: () => T): T {
+    return work();
+  }
+  pruneSyncedBefore() {
+    return 0;
+  }
+  markSynced(id: string, expectedEntry: TimeEntry, ack: { revision: number; hash: string; larkTaskGuid?: string | null }) {
     const current = this.entries.get(id);
     if (!current || JSON.stringify(current) !== JSON.stringify(expectedEntry)) return false;
     this.syncStates.set(id, 'synced');
+    this.failures.delete(id);
+    this.acks.set(id, ack);
     return true;
   }
   liveness: number | null = null;
@@ -311,18 +373,6 @@ describe('TimerService.start', () => {
     expect(pendingEntry.id).toBe(store.getOpen()?.id);
   });
 
-  it('records a visible notice for an acknowledged server clock correction', async () => {
-    const correctingSync: SyncClient = {
-      create: async (entryValue) => receipt(entryValue, { correction: 'CLOCK_CLAMP' }),
-      sync: async (entryValue) => receipt(entryValue),
-    };
-    const correctingService = new TimerService(store, correctingSync, clock, ids, allowAccrual);
-
-    await correctingService.start({});
-    await correctingService.flushUnsynced();
-
-    expect(correctingService.recoveryNotice()).toMatchObject({ reason: 'server_clock_corrected' });
-  });
 
   it('switches to another task without requiring a stop first', async () => {
     await svc.start({ larkTaskGuid: 'task-a' });
@@ -340,6 +390,8 @@ describe('TimerService.start', () => {
     expect(newEntry.endedAt).toBeNull();
     expect(newEntry.startedAt).toBe(T0 + 10 * MIN);
     expect(store.getOpen()?.larkTaskGuid).toBe('task-b');
+    await settle();
+    expect(sync.calls.indexOf(`sync:${oldEntry.id}`)).toBeLessThan(sync.calls.indexOf(`create:${newEntry.id}`));
     expect(sync.creates).toEqual([oldEntry.id, newEntry.id]);
     expect(sync.syncs).toEqual([oldEntry.id, oldEntry.id, newEntry.id]);
   });
@@ -537,7 +589,7 @@ describe('TimerService.prepareForQuit', () => {
 });
 
 describe('TimerService.prepareForAway', () => {
-  it('stops a running timer at sleep start and records a sleep notice', async () => {
+  it('stops a running timer at sleep start without a recovery notice', async () => {
     await svc.start({});
     clock.advance(5 * MIN);
 
@@ -549,11 +601,19 @@ describe('TimerService.prepareForAway', () => {
     const closed = [...store.entries.values()][0]!;
     expect(closed.endedAt).toBe(T0 + 5 * MIN);
     expect(totalWorkedMs(closed)).toBe(5 * MIN);
-    expect(store.getRecoveryNotice()).toMatchObject({
-      entryId: closed.id,
-      recoveredAt: T0 + 5 * MIN,
-      reason: 'sleep_stop',
-    });
+    // The welcome-back prompt says so; a banner as well never went away.
+    expect(store.getRecoveryNotice()).toBeNull();
+  });
+
+  it('leaves an unread crash notice alone', async () => {
+    await svc.start({});
+    const crash = { entryId: 'older', recoveredAt: T0 - MIN, reason: 'unexpected_shutdown' as const, observedAt: T0 };
+    store.setRecoveryNotice(crash);
+    clock.advance(MIN);
+
+    await svc.prepareForAway('lock', 0);
+
+    expect(store.getRecoveryNotice()).toEqual(crash);
   });
 
   it('stops a paused timer without counting the away gap', async () => {
@@ -567,11 +627,6 @@ describe('TimerService.prepareForAway', () => {
     const closed = [...store.entries.values()][0]!;
     expect(closed.endedAt).toBe(T0 + 25 * MIN);
     expect(totalWorkedMs(closed)).toBe(5 * MIN);
-    expect(store.getRecoveryNotice()).toMatchObject({
-      entryId: closed.id,
-      recoveredAt: T0 + 25 * MIN,
-      reason: 'lock_stop',
-    });
   });
 
   it('leaves the closed row pending when sleep-stop sync fails', async () => {
@@ -620,9 +675,15 @@ describe('TimerService offline behaviour', () => {
     await svc.start({});
     expect(svc.isRunning()).toBe(true); // timer unaffected by network
     expect(sync.creates).toHaveLength(0);
-    expect(store.getUnsynced()).toMatchObject([{ syncState: 'pending_create' }]);
+    // No response is the server's problem, not the row's: the row is left
+    // as it was and the whole drain waits instead.
+    expect(store.getUnsynced()).toMatchObject([{ syncState: 'pending_create', attempts: 0 }]);
+    expect(svc.syncBacklog().lastError).toBe('Error:network down');
+    await svc.flushUnsynced();
+    expect(sync.creates).toHaveLength(0);
 
-    // Network recovers; flush retries.
+    // Network recovers; flush retries once the backoff has passed.
+    clock.advance(MIN);
     await svc.flushUnsynced();
     expect(sync.creates).toHaveLength(1);
     expect(sync.syncs).toHaveLength(1);
@@ -643,6 +704,7 @@ describe('TimerService offline behaviour', () => {
     expect(queued).toBeGreaterThan(2);
 
     sync.failCreateCount = 0;
+    clock.advance(15 * MIN); // past the drain's offline pause
     const moreRemaining = await svc.flushUnsynced(2);
 
     expect(moreRemaining).toBe(true);
@@ -653,6 +715,7 @@ describe('TimerService offline behaviour', () => {
     sync.failCreateCount = 1;
     await svc.start({});
     expect(store.getUnsynced()).toHaveLength(1);
+    clock.advance(MIN);
 
     expect(await svc.flushUnsynced(10)).toBe(false);
     expect(store.getUnsynced()).toHaveLength(0);
@@ -681,6 +744,7 @@ describe('TimerService offline behaviour', () => {
     expect(entry.endedAt).toBe(T0 + 10 * MIN);
     expect(store.getUnsynced()).toMatchObject([{ syncState: 'pending_create' }]);
 
+    clock.advance(MIN);
     await svc.flushUnsynced();
 
     expect(sync.calls).toEqual([`create:${entry.id}`, `sync:${entry.id}`]);
@@ -707,12 +771,14 @@ describe('TimerService offline behaviour', () => {
     expect(store.getUnsynced()).toMatchObject([{ syncState: 'pending_create' }]);
 
     sync.failSyncCount = 1;
+    clock.advance(MIN);
     await svc.flushUnsynced();
 
     expect(sync.creates).toHaveLength(1);
     expect(sync.syncs).toHaveLength(0);
     expect(store.getUnsynced()).toMatchObject([{ syncState: 'pending_update' }]);
 
+    clock.advance(5 * MIN);
     await svc.flushUnsynced();
     expect(sync.syncs).toHaveLength(1);
     expect(store.getUnsynced()).toHaveLength(0);
@@ -761,6 +827,7 @@ describe('TimerService offline behaviour', () => {
       return result;
     };
 
+    clock.advance(MIN);
     await svc.flushUnsynced();
 
     expect(sync.creates).toHaveLength(1);
@@ -769,39 +836,7 @@ describe('TimerService offline behaviour', () => {
   });
 });
 
-describe('TimerService.discardAway (sleep/lock)', () => {
-  it('trims the away gap and keeps the timer running', async () => {
-    await svc.start({}); // WORK from T0
-    clock.advance(5 * MIN); // worked 5 min, then machine sleeps
-    const awayStart = clock.now();
-    clock.advance(30 * MIN); // asleep 30 min
-    await svc.discardAway(awayStart, clock.now());
-
-    expect(svc.isRunning()).toBe(true);
-    const s = svc.status();
-    if (s.state === 'RUNNING') expect(s.workedMs).toBe(5 * MIN); // sleep not billed
-    // resume + a bit more
-    clock.advance(2 * MIN);
-    const s2 = svc.status();
-    if (s2.state === 'RUNNING') expect(s2.workedMs).toBe(7 * MIN);
-  });
-
-  it('is a no-op when idle', async () => {
-    await svc.discardAway(T0, T0 + 10 * MIN);
-    expect(svc.isRunning()).toBe(false);
-  });
-
-  it('ignores trivially short gaps', async () => {
-    await svc.start({});
-    clock.advance(3 * MIN);
-    const before = svc.status();
-    await svc.discardAway(clock.now(), clock.now() + 500); // <1s
-    const after = svc.status();
-    expect(after).toEqual(before);
-  });
-});
-
-describe('TimerService.pauseForIdle / resumeFromIdle', () => {
+describe('TimerService.pauseForIdle / resume', () => {
   it('freezes at the last healthy proof and records a permission pause', async () => {
     await svc.start({});
     clock.advance(5 * MIN);
@@ -850,7 +885,7 @@ describe('TimerService.pauseForIdle / resumeFromIdle', () => {
     if (s.state === 'RUNNING') expect(s.workedMs).toBe(5 * MIN);
 
     // Continue: resume a fresh WORK segment; idle gap excluded.
-    await svc.resumeFromIdle(clock.now());
+    await svc.resume();
     expect(svc.isPaused()).toBe(false);
     clock.advance(3 * MIN);
     s = svc.status();
@@ -905,38 +940,6 @@ describe('TimerService.pauseForIdle / resumeFromIdle', () => {
     await svc.pauseForIdle(0);
     const before = svc.status();
     await svc.pauseForIdle(0); // already paused
-    expect(svc.status()).toEqual(before);
-  });
-});
-
-describe('TimerService meeting segments', () => {
-  it('switches WORK→MEETING→WORK and counts both as worked', async () => {
-    await svc.start({}); // WORK from T0
-    clock.advance(5 * MIN);
-    await svc.beginMeeting(clock.now()); // MEETING from T0+5
-    expect(svc.isInMeetingSegment()).toBe(true);
-    clock.advance(20 * MIN);
-    await svc.endMeeting(clock.now()); // WORK from T0+25
-    expect(svc.isInMeetingSegment()).toBe(false);
-    clock.advance(3 * MIN);
-    const s = svc.status();
-    if (s.state === 'RUNNING') expect(s.workedMs).toBe(28 * MIN); // 5 + 20 + 3, all counted
-  });
-
-  it('beginMeeting is a no-op when not running or already in a meeting', async () => {
-    await svc.beginMeeting(clock.now()); // not running
-    expect(svc.isRunning()).toBe(false);
-    await svc.start({});
-    await svc.beginMeeting(clock.now());
-    const before = svc.status();
-    await svc.beginMeeting(clock.now()); // already meeting
-    expect(svc.status()).toEqual(before);
-  });
-
-  it('endMeeting is a no-op when not in a meeting', async () => {
-    await svc.start({});
-    const before = svc.status();
-    await svc.endMeeting(clock.now());
     expect(svc.status()).toEqual(before);
   });
 });
@@ -1036,16 +1039,16 @@ describe('TimerService.recover (crash recovery)', () => {
 });
 
 describe('TimerService liveness (crash-recovery bound)', () => {
-  it('heartbeat persists the current time while an entry is open', async () => {
+  it('noteAlive persists the current time while an entry is open', async () => {
     await svc.start({});
     clock.advance(42 * 1000);
-    svc.heartbeat();
+    svc.noteAlive({ persist: true });
     expect(store.getLiveness()).toBe(clock.now());
     expect(svc.lastLiveness()).toBe(clock.now());
   });
 
-  it('heartbeat is a no-op when nothing is open', () => {
-    svc.heartbeat();
+  it('noteAlive writes nothing when nothing is open', () => {
+    svc.noteAlive({ persist: true });
     expect(store.getLiveness()).toBeNull();
   });
 
@@ -1054,7 +1057,7 @@ describe('TimerService liveness (crash-recovery bound)', () => {
     // app reboots an hour later. The dead hour must NOT be credited.
     await svc.start({});
     clock.advance(5 * MIN);
-    svc.heartbeat();
+    svc.noteAlive({ persist: true });
     const lastAlive = clock.now();
     clock.advance(60 * MIN); // an hour of being powered off
 
@@ -1066,15 +1069,15 @@ describe('TimerService liveness (crash-recovery bound)', () => {
     expect(totalWorkedMs(recovered)).toBe(5 * MIN); // the dead hour is gone
   });
 
-  it('falls back to now() when liveness was never written', async () => {
+  it('credits nothing past the entry when liveness was never written', async () => {
     await svc.start({});
+    store.liveness = null; // a store from before start wrote liveness
     clock.advance(3 * MIN);
-    // No heartbeat ever fired → lastLiveness null → caller uses now().
     const rebooted = new TimerService(store, sync, clock, ids, allowAccrual);
-    expect(rebooted.lastLiveness()).toBeNull();
-    rebooted.recover(rebooted.lastLiveness() ?? clock.now());
+    rebooted.recoverAtLastProofOfLife();
     const recovered = [...store.entries.values()][0]!;
-    expect(recovered.endedAt).toBe(clock.now());
+    expect(recovered.endedAt).toBe(T0);
+    expect(totalWorkedMs(recovered)).toBe(0);
   });
 });
 
@@ -1398,5 +1401,396 @@ describe('TimerService — ledger memo must not change worked time', () => {
     svc.status();
 
     expect(store.ledgerReads).toBeGreaterThan(before);
+  });
+});
+
+describe('sync that converges (beta.38)', () => {
+  /** What the server holds after an upload: ISO strings, so whole milliseconds. */
+  function serverCopy(entry: TimeEntry): TimeEntry {
+    const ms = (value: number) => new Date(new Date(value).toISOString()).getTime();
+    return {
+      ...entry,
+      startedAt: ms(entry.startedAt),
+      endedAt: entry.endedAt === null ? null : ms(entry.endedAt),
+      segments: entry.segments.map((segment) => ({
+        ...segment,
+        startedAt: ms(segment.startedAt),
+        endedAt: segment.endedAt === null ? null : ms(segment.endedAt),
+      })),
+    };
+  }
+
+  it('acknowledges a row stamped with fractional milliseconds', async () => {
+    const fractional = closeTimeEntry(createOpenEntry(T0 + 0.37), T0 + 10 * MIN + 0.5);
+    store.upsert(fractional, { syncState: 'pending_update' });
+    sync.sync = async (e) => receipt(serverCopy(e), { disposition: 'ALREADY_APPLIED' });
+
+    await svc.flushUnsynced();
+
+    expect(store.getUnsynced()).toHaveLength(0);
+  });
+
+  it('reaches the open entry one pass behind a backlog the server keeps refusing', async () => {
+    for (let i = 0; i < 30; i += 1) {
+      store.upsert(closeTimeEntry(createOpenEntry(T0 - (40 - i) * MIN, `old_${i}`), T0 - (39 - i) * MIN), { syncState: 'pending_update' });
+    }
+    sync.sync = async (e) => {
+      sync.calls.push(`sync:${e.id}`);
+      throw new HttpError(`/v1/time-entries/${e.id}/sync`, 400, '{"error":"invalid_segments"}');
+    };
+    sync.failCreateCount = 1;
+    await svc.start({});
+    const open = store.getOpen()!;
+    clock.advance(MIN);
+
+    // Oldest first: the first pass spends itself on 25 old rows and asks for
+    // another (the drain chains it at once).
+    expect(await svc.flushUnsynced(25)).toBe(true);
+    expect(sync.creates).toEqual([]);
+    expect(svc.syncBacklog()).toMatchObject({ lastError: 'http_400:invalid_segments' });
+    // Those 25 now back off, so the next pass reaches the 5 it never got to
+    // and then the open entry, instead of spending itself on them again.
+    const before = sync.calls.length;
+    expect(await svc.flushUnsynced(25)).toBe(false);
+    expect(sync.creates).toEqual([open.id]);
+    expect(sync.calls.length - before).toBe(5 + 2);
+  });
+
+  it('backs off 30s, 1m, 2m … up to 15 minutes', () => {
+    expect([1, 2, 3, 4, 5, 6, 12].map(syncRetryDelayMs)).toEqual([
+      30_000, 60_000, 120_000, 240_000, 480_000, 900_000, 900_000,
+    ]);
+  });
+
+  it('re-sends instead of accepting a server close for silence that cut time off', async () => {
+    await svc.start({});
+    clock.advance(30 * MIN);
+    await svc.stop();
+    const local = store.entries.values().next().value!;
+    const cut = { ...local, endedAt: T0 + 5 * MIN };
+    const finalized = receipt(cut, {
+      disposition: 'FINALIZED',
+      correction: 'LEASE_FINALIZED',
+      acceptedRevision: local.revision,
+    });
+    finalized.canonicalEntry.closeReason = 'LEASE_EXPIRED';
+    const applied: number[] = [];
+    sync.sync = async (e) => {
+      applied.push(e.revision);
+      return e.revision > local.revision ? receipt(e) : finalized;
+    };
+    store.requeue(local.id, 'pending_update');
+
+    await svc.flushUnsynced();
+    // The resend waits one backoff step rather than going out on the next pass.
+    await svc.flushUnsynced();
+    expect(applied).toEqual([local.revision]);
+    clock.advance(30_000);
+    await svc.flushUnsynced();
+
+    expect(applied).toEqual([local.revision, local.revision + 1]);
+    expect(store.entries.get(local.id)!.endedAt).toBe(T0 + 30 * MIN);
+    expect(store.getUnsynced()).toHaveLength(0);
+  });
+
+  it('acknowledges an entry whose task was re-attributed on the dashboard', async () => {
+    sync.sync = async (e) => {
+      const edited = receipt({ ...e, larkTaskGuid: 'task-from-dashboard' });
+      return edited;
+    };
+    await svc.start({ larkTaskGuid: 'task-a' });
+    clock.advance(MIN);
+    await svc.stop();
+    await settle();
+
+    expect(store.getUnsynced()).toHaveLength(0);
+  });
+
+  it('pushes the open entry again when the server says its copy is missing or behind', async () => {
+    await svc.start({});
+    await settle();
+    const open = store.getOpen()!;
+    expect(store.getUnsynced()).toHaveLength(0);
+
+    await svc.resyncFromServer(open.id, null);
+    expect(store.getUnsynced()).toMatchObject([{ syncState: 'pending_create' }]);
+
+    store.markSynced(open.id, store.getOpen()!, { revision: open.revision, hash: 'x' });
+    await svc.resyncFromServer(open.id, open.revision);
+    await settle();
+    expect(store.getOpen()!.revision).toBe(open.revision + 1);
+  });
+
+  it('re-sends recent entries the server had cut short, once', async () => {
+    await svc.start({});
+    clock.advance(20 * MIN);
+    await svc.stop();
+    await settle();
+    const entry = store.entries.values().next().value!;
+    // A pre-beta.38 agent accepted the server's shorter copy as final.
+    store.acks.set(entry.id, { revision: entry.revision, hash: 'server-copy-was-shorter' });
+
+    expect(svc.resyncTruncatedOnce()).toBe(1);
+    expect(store.getUnsynced()).toMatchObject([{ entry: { id: entry.id, revision: entry.revision + 1 } }]);
+    expect(svc.resyncTruncatedOnce()).toBe(0);
+  });
+
+  it('does not re-send an entry whose only difference is a task changed on the dashboard', async () => {
+    sync.sync = async (e) => receipt({ ...e, larkTaskGuid: 'task-from-dashboard' });
+    await svc.start({ larkTaskGuid: 'task-a' });
+    clock.advance(20 * MIN);
+    await svc.stop();
+    await settle();
+    expect(store.getUnsynced()).toHaveLength(0);
+
+    expect(svc.resyncTruncatedOnce()).toBe(0);
+    expect(store.getUnsynced()).toHaveLength(0);
+  });
+});
+
+function createOpenEntry(startedAt: number, id = 'fractional'): TimeEntry {
+  return {
+    id,
+    clientUuid: `client_${id}`,
+    userId: 'test-user',
+    larkTaskGuid: null,
+    source: 'AUTO',
+    revision: 1,
+    startedAt,
+    endedAt: null,
+    pauseReason: null,
+    closeReason: null,
+    segments: [{ id: `segment_${id}`, kind: 'WORK', startedAt, endedAt: null }],
+  };
+}
+
+
+/** No closed segment in any stored row starts and ends in the same millisecond. */
+function expectNoZeroLengthSegments(target: MemStore) {
+  for (const entry of target.entries.values()) {
+    for (const segment of entry.segments) {
+      if (segment.endedAt !== null) expect(Math.trunc(segment.endedAt)).toBeGreaterThan(Math.trunc(segment.startedAt));
+    }
+    expect(validateEntry(entry)).toEqual([]);
+  }
+}
+
+describe('zero-length segments are never produced (one rule, core segments.ts)', () => {
+  /** Records the segment lists the server was sent. */
+  function recordingSync() {
+    const sent: Array<{ op: 'create' | 'sync'; entry: TimeEntry }> = [];
+    const client: SyncClient = {
+      create: async (e) => {
+        sent.push({ op: 'create', entry: structuredClone(e) });
+        return receipt(e);
+      },
+      sync: async (e) => {
+        sent.push({ op: 'sync', entry: structuredClone(e) });
+        return receipt(e);
+      },
+    };
+    return { sent, client };
+  }
+
+  it('an idle cut that lands on the segment start removes the segment and keeps the timer paused', async () => {
+    const { sent, client } = recordingSync();
+    const service = new TimerService(store, client, clock, ids, allowAccrual);
+    await service.start({});
+    clock.advance(2 * MIN);
+
+    await service.pauseForIdle(10 * MIN); // went idle before the segment began
+    await settle();
+
+    const open = store.getOpen()!;
+    expect(open.segments).toEqual([]);
+    expect(open.pauseReason).toBe('IDLE');
+    const status = service.status();
+    expect(status).toMatchObject({ state: 'RUNNING', paused: true, startedAt: T0, workedMs: 0 });
+    expect(sent.at(-1)!.entry.segments).toEqual([]);
+    expectNoZeroLengthSegments(store);
+
+    clock.advance(MIN);
+    await service.resume();
+    clock.advance(3 * MIN);
+    await service.stop();
+    await settle();
+    const [closed] = [...store.entries.values()];
+    expect(closed!.startedAt).toBe(T0);
+    expect(closed!.segments).toHaveLength(1);
+    expect(closed!.segments[0]!.startedAt).toBe(T0 + 3 * MIN);
+    expect(totalWorkedMs(closed!)).toBe(3 * MIN);
+    expectNoZeroLengthSegments(store);
+  });
+
+  it('a permission cut at the segment start removes it', async () => {
+    await svc.start({});
+    clock.advance(MIN);
+    await svc.pauseForPermission(5 * MIN);
+    expect(store.getOpen()!.segments).toEqual([]);
+    expect(store.getOpen()!.pauseReason).toBe('PERMISSION_REQUIRED');
+    expectNoZeroLengthSegments(store);
+  });
+
+  it('a manual pause in the same millisecond as the start removes the segment', async () => {
+    await svc.start({});
+    await svc.pause();
+    expect(store.getOpen()!.segments).toEqual([]);
+    expect(svc.isPaused()).toBe(true);
+    expectNoZeroLengthSegments(store);
+  });
+
+  it('start then stop in the same millisecond leaves a closed entry with no segments, still synced', async () => {
+    const { sent, client } = recordingSync();
+    const service = new TimerService(store, client, clock, ids, allowAccrual);
+    await service.start({});
+    await service.stop();
+    await settle();
+    await service.flushUnsynced();
+
+    const [closed] = [...store.entries.values()];
+    expect(closed).toMatchObject({ startedAt: T0, endedAt: T0, segments: [] });
+    // The server already holds the open copy, so the close must reach it.
+    expect(sent.some((call) => call.entry.endedAt === T0 && call.entry.segments.length === 0)).toBe(true);
+    expect(store.getUnsynced()).toHaveLength(0);
+    expectNoZeroLengthSegments(store);
+  });
+
+  it('switching task in the same millisecond closes the first entry without an empty segment', async () => {
+    await svc.start({ larkTaskGuid: 'task-a' });
+    await svc.start({ larkTaskGuid: 'task-b' });
+    await settle();
+    const closed = [...store.entries.values()].find((entry) => entry.endedAt !== null)!;
+    expect(closed.larkTaskGuid).toBe('task-a');
+    expect(closed.segments).toEqual([]);
+    expect(store.getOpen()!.segments).toHaveLength(1);
+    expectNoZeroLengthSegments(store);
+  });
+
+  it('crash recovery and an away boundary at the segment start leave no empty segment', async () => {
+    await svc.start({});
+    clock.advance(10 * MIN);
+    await svc.pause();
+    clock.advance(MIN);
+    await svc.resume();
+    // Recovered at a liveness tick older than the resumed segment's start.
+    svc.recover(T0 + 5 * MIN);
+    const recovered = [...store.entries.values()][0]!;
+    expect(recovered.segments).toHaveLength(1);
+    expect(recovered.endedAt).toBe(T0 + 11 * MIN);
+    expectNoZeroLengthSegments(store);
+
+    const awayStore = new MemStore();
+    const away = new TimerService(awayStore, new SpySync(), clock, new SeqIdGen(), allowAccrual);
+    await away.start({});
+    await away.prepareForAway('suspend', 30 * MIN);
+    const awayEntry = [...awayStore.entries.values()][0]!;
+    expect(awayEntry.segments).toEqual([]);
+    expect(awayEntry.endedAt).toBe(awayEntry.startedAt);
+    expectNoZeroLengthSegments(awayStore);
+  });
+
+  it('a server finalization at a segment start drops that segment instead of keeping it empty', async () => {
+    const running = await svc.start({});
+    if (running.state !== 'RUNNING') throw new Error('expected running timer');
+    clock.advance(5 * MIN);
+    await svc.pause();
+    clock.advance(MIN);
+    await svc.resume(); // second segment starts at T0 + 6m
+    clock.advance(MIN);
+
+    svc.acceptServerFinalization(running.entryId, T0 + 6 * MIN);
+
+    const closed = [...store.entries.values()][0]!;
+    expect(closed.endedAt).toBe(T0 + 6 * MIN);
+    expect(closed.segments.map((segment) => [segment.startedAt, segment.endedAt])).toEqual([[T0, T0 + 5 * MIN]]);
+    expectNoZeroLengthSegments(store);
+  });
+
+  it('acknowledges a server receipt that dropped a zero-length segment an older build stored locally', async () => {
+    // A row written by beta.38: a pause on the segment start kept an empty span.
+    const legacy: TimeEntry = {
+      ...closeTimeEntry(createOpenEntry(T0, 'legacy'), T0 + 10 * MIN),
+      segments: [
+        { id: 'legacy_z', kind: 'WORK', startedAt: T0, endedAt: T0 },
+        { id: 'legacy_w', kind: 'WORK', startedAt: T0, endedAt: T0 + 10 * MIN },
+      ],
+    };
+    store.upsert(legacy, { syncState: 'pending_update' });
+    // The server stores it without the empty span and says nothing about it.
+    sync.sync = async (e) => receipt({ ...e, segments: e.segments.filter((x) => x.endedAt !== x.startedAt) });
+
+    await svc.flushUnsynced();
+
+    expect(store.getUnsynced()).toHaveLength(0);
+    expect(svc.recoveryNotice()).toBeNull();
+  });
+});
+
+describe('server clock correction notice', () => {
+  /** A receipt whose copy of the entry ends `pulledBackMs` earlier than ours. */
+  function clampedReceipt(entry: TimeEntry, pulledBackMs: number): TimerSyncReceipt {
+    const end = entry.endedAt! - pulledBackMs;
+    return receipt(
+      {
+        ...entry,
+        endedAt: end,
+        segments: entry.segments.map((segment) => ({
+          ...segment,
+          endedAt: segment.endedAt !== null && segment.endedAt > end ? end : segment.endedAt,
+        })),
+      },
+      { correction: 'CLOCK_CLAMP' },
+    );
+  }
+
+  async function stopWith(pulledBackMs: number, service = svc) {
+    await service.start({});
+    clock.advance(30 * MIN);
+    sync.sync = async (e) => (e.endedAt === null ? receipt(e) : clampedReceipt(e, pulledBackMs));
+    await service.stop();
+    await settle();
+    await service.flushUnsynced();
+  }
+
+  it('tells the person when the server moved the end by more than a minute', async () => {
+    await stopWith(10 * MIN);
+    expect(store.getUnsynced()).toHaveLength(0);
+    expect(svc.recoveryNotice()).toMatchObject({
+      reason: 'server_clock_corrected',
+      recoveredAt: T0 + 20 * MIN,
+    });
+  });
+
+  it('stays silent for a correction of a minute or less, but still settles the row', async () => {
+    await stopWith(CLOCK_CORRECTION_NOTICE_MS);
+    expect(store.getUnsynced()).toHaveLength(0);
+    expect(svc.recoveryNotice()).toBeNull();
+  });
+
+  it('stays silent when the receipt says CLOCK_CLAMP but nothing moved (an older server dropping a segment)', async () => {
+    await stopWith(0);
+    expect(store.getUnsynced()).toHaveLength(0);
+    expect(svc.recoveryNotice()).toBeNull();
+  });
+
+  it('never overwrites an unread crash or server notice', async () => {
+    const crash: TimerRecoveryNotice = { entryId: 'earlier', recoveredAt: T0 - MIN, reason: 'unexpected_shutdown', observedAt: T0 };
+    store.setRecoveryNotice(crash);
+    await stopWith(10 * MIN);
+    expect(svc.recoveryNotice()).toEqual(crash);
+  });
+
+  it('measures an open entry by its latest instant (a clamped future segment start)', async () => {
+    const future = T0 + 30 * MIN;
+    const open: TimeEntry = createOpenEntry(future, 'ahead');
+    store.upsert(open, { syncState: 'pending_create' });
+    sync.create = async (e) => receipt(
+      { ...e, startedAt: T0 + 2 * MIN, segments: e.segments.map((segment) => ({ ...segment, startedAt: T0 + 2 * MIN })) },
+      { correction: 'CLOCK_CLAMP' },
+    );
+
+    await svc.flushUnsynced();
+
+    expect(svc.recoveryNotice()).toMatchObject({ reason: 'server_clock_corrected', recoveredAt: T0 + 2 * MIN });
   });
 });

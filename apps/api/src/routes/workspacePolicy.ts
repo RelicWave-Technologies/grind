@@ -3,9 +3,11 @@ import { prisma } from '@grind/db';
 import {
   PatchWorkspacePolicyRequest,
   WORKSPACE_POLICY_DEFAULTS,
+  effectiveScreenshotRetentionDays,
   normalizeScreenshotIntervalMin,
   type WorkspacePolicyDto,
 } from '@grind/types';
+import { logger } from '../logger';
 import { requireAccessToken } from '../middleware/auth';
 import { attachScope, requireAdmin } from '../middleware/scope';
 import {
@@ -55,7 +57,7 @@ function toDto(row: {
     captureApps: row.captureApps,
     captureTitles: row.captureTitles,
     captureUrls: row.captureUrls,
-    retentionDaysScreenshots: row.retentionDaysScreenshots,
+    retentionDaysScreenshots: effectiveScreenshotRetentionDays(row.retentionDaysScreenshots),
     defaultScreenshotIntervalMin: normalizeScreenshotIntervalMin(
       row.defaultScreenshotIntervalMin,
       WORKSPACE_POLICY_DEFAULTS.defaultScreenshotIntervalMin,
@@ -129,12 +131,13 @@ workspacePolicyRouter.patch('/', requireAdmin, async (req, res, next) => {
 
     const workspaceId = req.scope.workspaceId;
     const actorId = req.user.sub;
+    const policyChanges = changedPolicyFlags(current, updateData);
     const row = await prisma.$transaction(async (tx) => {
       const updated = await tx.workspacePolicy.update({
         where: { workspaceId },
         data: updateData,
       });
-      if (timingChanged) {
+      if (timingChanged || policyChanges) {
         await tx.monitoringSettingsAudit.create({
           data: {
             workspaceId,
@@ -146,15 +149,61 @@ workspacePolicyRouter.patch('/', requireAdmin, async (req, res, next) => {
             nextIdleThresholdMin: nextTiming.idleThresholdMin,
             riskLevel,
             reason: auditReason,
+            ...(policyChanges ? { policyChanges } : {}),
           },
         });
       }
       return updated;
     });
+
+    // Turning title or URL capture off also takes back what was already
+    // collected — the policy is about what the workspace holds, not only
+    // about what agents send from now on. (Reports additionally hide every
+    // field the current policy disallows at read time.)
+    const titlesOff = current.captureTitles && !row.captureTitles;
+    const urlsOff = current.captureUrls && !row.captureUrls;
+    if (titlesOff || urlsOff) {
+      const { count } = await prisma.activitySample.updateMany({
+        where: {
+          user: { workspaceId },
+          OR: [
+            ...(titlesOff ? [{ activeTitle: { not: null } }] : []),
+            ...(urlsOff ? [{ activeUrl: { not: null } }] : []),
+          ],
+        },
+        data: {
+          ...(titlesOff ? { activeTitle: null } : {}),
+          ...(urlsOff ? { activeUrl: null } : {}),
+        },
+      });
+      logger.info({ workspaceId, titlesOff, urlsOff, samples: count }, 'activity titles/URLs cleared after policy change');
+    }
     res.json(toDto(row));
   } catch (err) {
     next(err);
   }
 });
 
-export default workspacePolicyRouter;
+type PolicyFlagField = 'captureApps' | 'captureTitles' | 'captureUrls' | 'retentionDaysScreenshots';
+const AUDITED_POLICY_FIELDS: PolicyFlagField[] = ['captureApps', 'captureTitles', 'captureUrls', 'retentionDaysScreenshots'];
+
+/**
+ * The capture-policy fields this edit changes, as `{ field: { from, to } }`,
+ * or null. Every one of them changes what is collected about people (or for
+ * how long), so each change is audited — not only timing changes.
+ */
+function changedPolicyFlags(
+  current: Record<PolicyFlagField, boolean | number>,
+  update: Partial<Record<PolicyFlagField, boolean | number>>,
+): Record<string, { from: boolean | number; to: boolean | number }> | null {
+  const changes: Record<string, { from: boolean | number; to: boolean | number }> = {};
+  for (const field of AUDITED_POLICY_FIELDS) {
+    const next = update[field];
+    if (next === undefined) continue;
+    const from = field === 'retentionDaysScreenshots'
+      ? effectiveScreenshotRetentionDays(current[field] as number)
+      : current[field];
+    if (next !== from) changes[field] = { from, to: next };
+  }
+  return Object.keys(changes).length > 0 ? changes : null;
+}

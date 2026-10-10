@@ -22,6 +22,9 @@ Grind
 ├── Grind — References/
 │    └── Time Tracker — Architecture & Tech Plan
 └── Grind — Updates/
+     ├── Agent Remote Resync/
+     │    ├── Plan
+     │    └── Updates
      ├── Attendance Rules (Sept 2026)/
      │    ├── Plan
      │    └── Updates
@@ -51,6 +54,9 @@ Grind
 | Feature: Attendance Rules (folder) | `HbjxdygzAo5k3jxQEtMlbDHYgvg` | `FfMpw3EKHipTaMkkLHKlIHnygeb` |
 | Attendance Rules — Plan | `QH1OdrshDoqhjhx73KKlJnvsgkh` | `M1lIw2JmliENc2ktblFlRoWrgzc` |
 | Attendance Rules — Updates | `TzdxdXR0Tou3kLxePeKlAtp7gkh` | `QRXbwrFEpiVrdtkugf0lq4hvgxn` |
+| Feature: Agent Remote Resync (folder) | `BMbkdBPxnonc5VxRrKWluPRdgGq` | `Oh6Gw9BdNiSzRRkN1xClVuTZgRf` |
+| Agent Remote Resync — Plan | `YHy8d3dVJoK6PZxqzl8llhw3gVb` | `Pc8Lw8ZbdiNTgrkPWHelCVu2grU` |
+| Agent Remote Resync — Updates | `SYkZd3GekoGtwmxE0Nflg7CHgWh` | `CeyowRLO1i7VvektvwVlx7yqgMf` |
 
 **Wiki space ID:** `7635896570625396443` (Tech Hub)
 **Project node token:** `CNhTwn36iiIr8JkaFj2lOIHhgOg`
@@ -108,7 +114,7 @@ lark-cli wiki +node-create --space-id 7635896570625396443 --parent-node-token <P
 ## MANDATORY: Design & product consistency
 
 Before building ANY user-facing feature, read:
-- **`docs/design.md`** — the design system (tokens, components, patterns). Light/premium/violet, day-timeline hero, no progress rings. Use tokens; never hardcode hex/px/fonts. If a value isn't there, add a token first.
+- **`docs/design.md`** — the design system (tokens, components, patterns). Figma editorial: black-and-white frame, Inter + JetBrains Mono, pill buttons, no shadows, at most one pastel colour block per viewport, no gradients, no violet (the desktop agent still runs the legacy violet system until it is migrated). Use tokens; never hardcode hex/px/fonts. If a value isn't there, add a token first.
 - **`docs/product.md`** — what we're building, who for, principles, scope guards, the three surfaces, privacy contract.
 
 Desktop agent and web dashboard MUST share the same design system. Keep both docs current when the system changes.
@@ -117,5 +123,4 @@ Desktop agent and web dashboard MUST share the same design system. Keep both doc
 
 - `docs/design.md` — design system (canonical, in-repo)
 - `docs/product.md` — product overview (canonical, in-repo)
-- `tracker-plan/PLAN.md` — local copy of the architectural plan (also pushed to wiki under References)
 - `.context/` — scratch dir for wiki-sync snapshots; do not commit large files here

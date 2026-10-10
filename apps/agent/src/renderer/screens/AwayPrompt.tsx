@@ -1,7 +1,9 @@
+import { useId } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Coffee } from 'lucide-react';
 import type { AttentionPrompt } from '../../shared/attention';
 import { formatWorkspaceTime, useWorkspaceTime } from '../lib/workspaceTime';
+import { usePromptKeys } from '../lib/promptA11y';
 
 /**
  * "Welcome back — resume tracking?" toast. Shown at top-right after the user
@@ -19,16 +21,19 @@ export default function AwayPrompt({ prompt }: { prompt: Extract<AttentionPrompt
   const reasonText = prompt.reason === 'suspend' ? 'your computer slept' : 'your screen locked';
   const when = ` at ${formatWorkspaceTime(prompt.stoppedAt, workspaceTime.data?.timeZone ?? null)}`;
   const busy = resume.isPending || dismiss.isPending;
+  const titleId = useId();
+  const subId = useId();
+  usePromptKeys({ primary: () => resume.mutate(), secondary: () => dismiss.mutate(), disabled: busy });
 
   return (
-    <div className="rtw">
+    <div className="rtw" role="dialog" aria-labelledby={titleId} aria-describedby={subId}>
       <div className="rtw-head">
         <span className="rtw-icon" aria-hidden>
           <Coffee size={20} strokeWidth={2} />
         </span>
         <div className="rtw-title">
-          <div className="h3">Welcome back</div>
-          <div className="rtw-sub callout secondary">
+          <div className="h3" id={titleId}>Welcome back</div>
+          <div className="rtw-sub callout secondary" id={subId}>
             Tracking stopped when {reasonText}{when}.
           </div>
           {task ? (
@@ -44,7 +49,7 @@ export default function AwayPrompt({ prompt }: { prompt: Extract<AttentionPrompt
         <button className="btn no-drag" onClick={() => dismiss.mutate()} disabled={busy}>
           Not now
         </button>
-        <button className="btn btn-prominent no-drag" onClick={() => resume.mutate()} disabled={busy}>
+        <button className="btn btn-prominent no-drag" onClick={() => resume.mutate()} disabled={busy} autoFocus>
           Resume
         </button>
       </div>

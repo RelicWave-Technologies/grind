@@ -19,11 +19,9 @@
     "db:deploy": "dotenv -e .env -- pnpm --filter @grind/db exec prisma migrate deploy",
     "db:seed": "dotenv -e .env -- pnpm --filter @grind/db exec tsx prisma/seed.ts",
     "db:studio": "dotenv -e .env -- pnpm --filter @grind/db exec prisma studio",
-    "clean": "turbo run clean && rm -rf node_modules"
+    "clean": "rm -rf node_modules"
   },
   "devDependencies": {
-    "@typescript-eslint/eslint-plugin": "8.12.2",
-    "@typescript-eslint/parser": "8.12.2",
     "dotenv-cli": "^11.0.0",
     "eslint": "9.13.0",
     "turbo": "2.2.3",

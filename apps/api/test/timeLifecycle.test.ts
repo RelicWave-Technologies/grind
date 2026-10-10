@@ -1,9 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
 import { prisma } from '@grind/db';
 import { buildApp } from '../src/app';
 import { lockTimerOwner, reconcileExpiredTimersOnce, TIMER_LEASE_MS } from '../src/timeLifecycle';
-import { resolveEffectiveEntrySegmentEnds } from '../src/insights/openSegmentEvidence';
+import { logger } from '../src/logger';
+import { effectiveEntrySegmentEnds as resolveEffectiveEntrySegmentEnds } from '@grind/core';
 import { fakeUlid, seedUser } from './helpers';
 
 const app = buildApp();
@@ -334,8 +335,11 @@ describe('timer lifecycle protocol v2', () => {
     });
     const second = v2Body(new Date(Date.now() - 5 * 60_000));
     expect((await request(app).post('/v1/time-entries').set(bearer(user.accessToken)).send(second)).status).toBe(201);
-    expect((await prisma.timeEntry.findUniqueOrThrow({ where: { id: first.id } })).closeReason).toBe('SUPERSEDED');
+    const closed = await prisma.timeEntry.findUniqueOrThrow({ where: { id: first.id } });
+    expect(closed.closeReason).toBe('SUPERSEDED');
+    expect(closed.serverFinalizedAt).toBeInstanceOf(Date);
 
+    const info = vi.spyOn(logger, 'info');
     const realEnd = new Date(Date.now() - 5 * 60_000).toISOString();
     const late = await request(app).put(`/v1/time-entries/${first.id}/sync`).set(bearer(user.accessToken)).send({
       trackingProtocolVersion: 2,
@@ -351,8 +355,54 @@ describe('timer lifecycle protocol v2', () => {
     const row = await prisma.timeEntry.findUniqueOrThrow({ where: { id: first.id }, include: { segments: true } });
     expect(row.endedAt?.toISOString()).toBe(realEnd);
     expect(row.closeReason).toBe('AGENT');
-    expect(row.serverFinalizedAt).toBeNull();
+    // The agent's time wins, but the record that the server had closed it stays.
+    expect(row.serverFinalizedAt?.toISOString()).toBe(closed.serverFinalizedAt!.toISOString());
     expect(row.segments[0]?.endedAt?.toISOString()).toBe(realEnd);
+    expect(info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: user.userId,
+        entryId: first.id,
+        serverCloseReason: 'SUPERSEDED',
+        serverClosedAt: closed.endedAt!.toISOString(),
+        agentEndedAt: realEnd,
+        restoredMinutes: 30,
+      }),
+      'time-entry sync: agent revision restored time after a server close',
+    );
+    info.mockRestore();
+  });
+
+  it('answers a resend of a held revision without waiting for the owner lock', async () => {
+    const user = await seedUser();
+    const body = v2Body(new Date(Date.now() - 10 * 60_000));
+    await request(app).post('/v1/time-entries').set(bearer(user.accessToken)).send(body);
+
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    let locked!: () => void;
+    const lockTaken = new Promise<void>((resolve) => { locked = resolve; });
+    const holder = prisma.$transaction(async (tx) => {
+      await lockTimerOwner(tx, user.userId);
+      locked();
+      await held;
+    }, { timeout: 20_000 });
+    await lockTaken;
+
+    try {
+      const resend = await request(app).put(`/v1/time-entries/${body.id}/sync`).set(bearer(user.accessToken)).send({
+        trackingProtocolVersion: 2,
+        revision: 1,
+        observedAt: new Date().toISOString(),
+        endedAt: null,
+        closeReason: null,
+        segments: body.segments,
+      }).timeout(3_000);
+      expect(resend.status).toBe(200);
+      expect(resend.body).toMatchObject({ disposition: 'STALE', acceptedRevision: 1 });
+    } finally {
+      release();
+      await holder;
+    }
   });
 
   it('still refuses an older or equal revision on a server-closed entry', async () => {
@@ -391,39 +441,6 @@ describe('timer lifecycle protocol v2', () => {
     const retry = await request(app).post('/v1/time-entries').set(bearer(user.accessToken)).send({ ...body, revision: 2 });
     expect(retry.status).toBe(200);
     expect(retry.body).toMatchObject({ disposition: 'ALREADY_APPLIED', acceptedRevision: 1 });
-  });
-
-  it('answers a resend of a held revision without waiting for the owner lock', async () => {
-    const user = await seedUser();
-    const body = v2Body(new Date(Date.now() - 10 * 60_000));
-    await request(app).post('/v1/time-entries').set(bearer(user.accessToken)).send(body);
-
-    let release!: () => void;
-    const held = new Promise<void>((resolve) => { release = resolve; });
-    let locked!: () => void;
-    const lockTaken = new Promise<void>((resolve) => { locked = resolve; });
-    const holder = prisma.$transaction(async (tx) => {
-      await lockTimerOwner(tx, user.userId);
-      locked();
-      await held;
-    }, { timeout: 20_000 });
-    await lockTaken;
-
-    try {
-      const resend = await request(app).put(`/v1/time-entries/${body.id}/sync`).set(bearer(user.accessToken)).send({
-        trackingProtocolVersion: 2,
-        revision: 1,
-        observedAt: new Date().toISOString(),
-        endedAt: null,
-        closeReason: null,
-        segments: body.segments,
-      }).timeout(3_000);
-      expect(resend.status).toBe(200);
-      expect(resend.body).toMatchObject({ disposition: 'STALE', acceptedRevision: 1 });
-    } finally {
-      release();
-      await holder;
-    }
   });
 
   it('lets a pre-beta.38 agent settle a revision the server already holds', async () => {
@@ -474,6 +491,36 @@ describe('timer lifecycle protocol v2', () => {
     expect(late.status).toBe(200);
     expect(late.body).toMatchObject({ disposition: 'ALREADY_APPLIED', acceptedRevision: 0 });
     expect(await prisma.timeEntry.count({ where: { userId: user.userId } })).toBe(1);
+  });
+
+  it('keeps presence on a running timer while a second device on the account heartbeats idle', async () => {
+    const user = await seedUser();
+    const body = v2Body(new Date(Date.now() - 5 * 60_000));
+    await request(app).post('/v1/time-entries').set(bearer(user.accessToken)).send(body);
+    const beat = (extra: Record<string, unknown>) => request(app).post('/v1/agent/heartbeat').set(bearer(user.accessToken)).send({
+      agentVersion: '0.0.2-beta.37',
+      platform: 'darwin',
+      trackingProtocolVersion: 2,
+      ...extra,
+    });
+    await beat({
+      state: 'RUNNING',
+      timerCheckpoint: { entryId: body.id, revision: 1, state: 'RUNNING', observedAt: new Date().toISOString() },
+    });
+    const presence = async () => prisma.user.findUniqueOrThrow({
+      where: { id: user.userId },
+      select: { agentState: true, agentActiveEntryId: true },
+    });
+    expect(await presence()).toEqual({ agentState: 'RUNNING', agentActiveEntryId: body.id });
+
+    // The other laptop, not tracking.
+    expect((await beat({ state: 'IDLE' })).status).toBe(200);
+    expect(await presence()).toEqual({ agentState: 'RUNNING', agentActiveEntryId: body.id });
+
+    // Once that timer's lease has run out, the idle report stands.
+    await prisma.timeEntry.update({ where: { id: body.id }, data: { leaseExpiresAt: new Date(Date.now() - 1_000) } });
+    await beat({ state: 'IDLE' });
+    expect(await presence()).toEqual({ agentState: 'IDLE', agentActiveEntryId: null });
   });
 
   it('keeps legacy heartbeats compatible and outside the lease protocol', async () => {
@@ -658,13 +705,128 @@ describe('timer lifecycle protocol v2', () => {
     expect(await count()).toEqual(before);
   });
 
-  it('rejects protocol-v2 lifecycle metadata on manual entries', async () => {
+  it('never creates or syncs manual time: that goes through a request and its approval', async () => {
     const user = await seedUser();
-    const body = { ...v2Body(new Date()), source: 'MANUAL' };
-    const response = await request(app).post('/v1/time-entries').set(bearer(user.accessToken)).send(body);
+    const v2 = await request(app).post('/v1/time-entries').set(bearer(user.accessToken))
+      .send({ ...v2Body(new Date()), source: 'MANUAL' });
+    expect(v2.status).toBe(400);
+    expect(v2.body.error).toBe('manual_requires_request');
 
-    expect(response.status).toBe(400);
-    expect(response.body.error).toBe('timer_lifecycle_requires_auto_entry');
+    // A legacy-shaped create (no lifecycle fields) used to slip through.
+    const startedAt = new Date(Date.now() - 60 * 60_000);
+    const endedAt = new Date(Date.now() - 1_000);
+    const legacy = await request(app).post('/v1/time-entries').set(bearer(user.accessToken)).send({
+      id: fakeUlid('manual-entry'),
+      clientUuid: fakeUlid('manual-client'),
+      source: 'MANUAL',
+      startedAt: startedAt.toISOString(),
+      endedAt: endedAt.toISOString(),
+      segments: [{ id: fakeUlid('manual-seg'), kind: 'WORK', startedAt: startedAt.toISOString(), endedAt: endedAt.toISOString() }],
+    });
+    expect(legacy.status).toBe(400);
+    expect(legacy.body.error).toBe('manual_requires_request');
+    expect(await prisma.timeEntry.count({ where: { userId: user.userId } })).toBe(0);
+
+    // Approved manual time cannot be stretched from a client either.
+    const approved = await prisma.timeEntry.create({
+      data: {
+        id: fakeUlid('approved'),
+        clientUuid: fakeUlid('approved-client'),
+        userId: user.userId,
+        source: 'MANUAL',
+        startedAt,
+        endedAt: new Date(startedAt.getTime() + 10 * 60_000),
+      },
+    });
+    const stretch = await request(app).put(`/v1/time-entries/${approved.id}/sync`).set(bearer(user.accessToken)).send({
+      endedAt: endedAt.toISOString(),
+      segments: [{ id: fakeUlid('stretch-seg'), kind: 'WORK', startedAt: startedAt.toISOString(), endedAt: endedAt.toISOString() }],
+    });
+    expect(stretch.status).toBe(409);
+    expect(stretch.body.error).toBe('manual_requires_request');
+  });
+
+  it('still lets a legacy agent close an entry the legacy cleanup closed', async () => {
+    const user = await seedUser();
+    const startedAt = new Date(Date.now() - 60 * 60_000);
+    const cutAt = new Date(Date.now() - 40 * 60_000);
+    const id = fakeUlid('legacy-entry');
+    const segmentId = fakeUlid('legacy-seg');
+    await prisma.timeEntry.create({
+      data: {
+        id,
+        clientUuid: fakeUlid('legacy-client'),
+        userId: user.userId,
+        source: 'AUTO',
+        startedAt,
+        endedAt: cutAt,
+        closeReason: 'LEGACY_RECONCILED',
+        serverFinalizedAt: cutAt,
+        segments: { create: { id: segmentId, kind: 'WORK', startedAt, endedAt: cutAt } },
+      },
+    });
+    const realEnd = new Date(Date.now() - 10 * 60_000).toISOString();
+    const res = await request(app).put(`/v1/time-entries/${id}/sync`).set(bearer(user.accessToken)).send({
+      endedAt: realEnd,
+      segments: [{ id: segmentId, kind: 'WORK', startedAt: startedAt.toISOString(), endedAt: realEnd }],
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.endedAt).toBe(realEnd);
+    // Reopening it is still refused.
+    const reopen = await request(app).put(`/v1/time-entries/${id}/sync`).set(bearer(user.accessToken)).send({
+      endedAt: null,
+      segments: [{ id: segmentId, kind: 'WORK', startedAt: startedAt.toISOString(), endedAt: null }],
+    });
+    expect(reopen.body.endedAt).toBe(realEnd);
+  });
+
+  it('answers two identical creates racing to the insert as one entry, never a 500', async () => {
+    const user = await seedUser();
+    const body = v2Body(new Date(Date.now() - 5 * 60_000));
+    const [a, b] = await Promise.all([
+      request(app).post('/v1/time-entries').set(bearer(user.accessToken)).send(body),
+      request(app).post('/v1/time-entries').set(bearer(user.accessToken)).send(body),
+    ]);
+    expect([a.status, b.status].sort()).toEqual([200, 201]);
+    expect(await prisma.timeEntry.count({ where: { userId: user.userId } })).toBe(1);
+  });
+
+  it('applies a newer agent revision over a legacy-reconciled close', async () => {
+    const user = await seedUser();
+    const body = v2Body(new Date(Date.now() - 60 * 60_000));
+    const cutAt = new Date(Date.now() - 40 * 60_000);
+    await prisma.timeEntry.create({
+      data: {
+        id: body.id,
+        clientUuid: body.clientUuid,
+        userId: user.userId,
+        source: 'AUTO',
+        startedAt: new Date(body.startedAt),
+        endedAt: cutAt,
+        trackingProtocolVersion: 2,
+        agentRevision: 1,
+        closeReason: 'LEGACY_RECONCILED',
+        serverFinalizedAt: cutAt,
+        segments: { create: { id: body.segments[0]!.id, kind: 'WORK', startedAt: new Date(body.startedAt), endedAt: cutAt } },
+      },
+    });
+    const realEnd = new Date(Date.now() - 10 * 60_000).toISOString();
+    const sync = (revision: number) => request(app).put(`/v1/time-entries/${body.id}/sync`).set(bearer(user.accessToken)).send({
+      trackingProtocolVersion: 2,
+      revision,
+      observedAt: realEnd,
+      endedAt: realEnd,
+      closeReason: 'AGENT',
+      segments: [{ ...body.segments[0], endedAt: realEnd }],
+    });
+
+    // Nothing newer than what the server holds: the server's close stands.
+    expect((await sync(1)).body).toMatchObject({ disposition: 'FINALIZED', correction: 'LEASE_FINALIZED' });
+    const applied = await sync(2);
+    expect(applied.body).toMatchObject({ disposition: 'APPLIED', acceptedRevision: 2 });
+    const row = await prisma.timeEntry.findUniqueOrThrow({ where: { id: body.id } });
+    expect(row.endedAt?.toISOString()).toBe(realEnd);
+    expect(row.serverFinalizedAt?.toISOString()).toBe(cutAt.toISOString());
   });
 
   it('does not resurrect a closed legacy entry from a delayed heartbeat', async () => {

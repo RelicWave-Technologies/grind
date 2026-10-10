@@ -1,3 +1,6 @@
+import { app } from 'electron';
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
 import {
   AgentConfigResponse as AgentConfigResponseSchema,
   type AgentConfigResponse as AgentConfigResponseType,
@@ -14,7 +17,7 @@ import { loadTokens, type StoredTokens } from './tokenStore';
 
 export type CapturePolicy = PolicyFlags;
 
-export interface RuntimeAgentConfig {
+interface RuntimeAgentConfig {
   configVersion: string | null;
   screenshotIntervalSec: number;
   idleThresholdSec: number;
@@ -128,18 +131,75 @@ function notifyConfigChange(previous: RuntimeAgentConfig | null, current: Runtim
   }
 }
 
+function sameSession(a: Pick<StoredTokens, 'userId' | 'workspaceId'> | null, b: Pick<StoredTokens, 'userId' | 'workspaceId'>): boolean {
+  return Boolean(a && a.userId === b.userId && a.workspaceId === b.workspaceId);
+}
+
+/**
+ * The last config this session's server sent, on disk, so an offline boot
+ * keeps the real idle threshold, screenshot interval and ledger mode instead
+ * of the build's defaults. Scoped to user + workspace: a shared machine never
+ * applies one account's policy to another.
+ */
+interface CachedAgentConfig {
+  userId: string;
+  workspaceId: string;
+  config: unknown;
+}
+
+function configCachePath(): string {
+  return path.join(app.getPath('userData'), 'agent-config.json');
+}
+
+async function writeConfigCache(session: StoredTokens, config: AgentConfigResponseType): Promise<void> {
+  const target = configCachePath();
+  const tmp = `${target}.${process.pid}.tmp`;
+  try {
+    const cached: CachedAgentConfig = { userId: session.userId, workspaceId: session.workspaceId, config };
+    await fs.writeFile(tmp, JSON.stringify(cached), { mode: 0o600 });
+    await fs.rename(tmp, target);
+  } catch (err) {
+    void fs.unlink(tmp).catch(() => undefined);
+    log.warn('agent config cache write failed', { err: String(err) });
+  }
+}
+
+async function readConfigCache(session: StoredTokens): Promise<AgentConfigResponseType | null> {
+  try {
+    const cached = JSON.parse(await fs.readFile(configCachePath(), 'utf8')) as Partial<CachedAgentConfig>;
+    if (cached.userId !== session.userId || cached.workspaceId !== session.workspaceId) return null;
+    const parsed = AgentConfigResponseSchema.safeParse(cached.config);
+    return parsed.success ? parsed.data : null;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') log.warn('agent config cache unreadable', { err: String(err) });
+    return null;
+  }
+}
+
 async function applyAgentConfig(cfg: AgentConfigResponseType, requestedSession: StoredTokens): Promise<void> {
   const nextWorkspaceTimezone = cfg.workspaceTimezone || 'UTC';
   await applyServerWorkspaceTimeZone(nextWorkspaceTimezone, requestedSession.workspaceId);
-  const currentSession = await loadTokens();
-  if (
-    !currentSession
-    || currentSession.userId !== requestedSession.userId
-    || currentSession.workspaceId !== requestedSession.workspaceId
-  ) {
+  if (!sameSession(await loadTokens(), requestedSession)) {
     throw new Error('agent_config_session_changed');
   }
+  applyConfigValues(cfg);
+}
 
+/**
+ * Before the network: the cached config, so the boot-to-online window (or an
+ * offline day) runs on this account's real policy. The business day is not
+ * touched — workspace time restores its own cache.
+ */
+async function applyCachedAgentConfig(session: StoredTokens): Promise<void> {
+  if (hasAppliedConfig) return;
+  const cached = await readConfigCache(session);
+  if (!cached || hasAppliedConfig || !sameSession(await loadTokens(), session)) return;
+  applyConfigValues(cached);
+  log.info('agent config restored from cache', { configVersion });
+}
+
+function applyConfigValues(cfg: AgentConfigResponseType): void {
+  const nextWorkspaceTimezone = cfg.workspaceTimezone || 'UTC';
   const previous = hasAppliedConfig ? snapshot() : null;
   configVersion = cfg.configVersion || null;
   if (!SHOT_SEC_LOCKED) screenshotIntervalSec = Math.max(60, cfg.screenshotIntervalMin * 60);
@@ -181,6 +241,7 @@ export async function refreshAgentConfig(): Promise<void> {
 }
 
 async function refreshAgentConfigOnce(requestedSession: StoredTokens): Promise<void> {
+  await applyCachedAgentConfig(requestedSession);
   try {
     const raw = await api<unknown>('/v1/agent/config');
     const currentSession = await loadTokens();
@@ -198,6 +259,7 @@ async function refreshAgentConfigOnce(requestedSession: StoredTokens): Promise<v
       return;
     }
     await applyAgentConfig(parsed.data, requestedSession);
+    await writeConfigCache(requestedSession, parsed.data);
     log.info('agent config applied', {
       configVersion,
       screenshotIntervalSec,

@@ -5,6 +5,7 @@ import {
   ATTENDANCE_RULE_REASON,
   AttendanceRuleTagSchema,
   attendanceOverrideShape,
+  dateKeyInTimeZone,
   LEAVE_POLICY_DEFAULTS,
   roundToHalfDay,
   type AttendanceOverrideCode,
@@ -38,6 +39,16 @@ const WHOLE_HISTORY_FROM = '2000-01-01';
 /** A `Date` from a Postgres `date` column, as YYYY-MM-DD. */
 export function toIsoDate(d: Date): string {
   return d.toISOString().slice(0, 10);
+}
+
+/**
+ * The day a person's leave starts accruing: `joinedOn` when somebody set it,
+ * otherwise the day their Timo account was created — in the workspace's
+ * calendar. `createdAt` is an instant, and its UTC date is the day before for
+ * anybody added in the first hours of an IST morning.
+ */
+export function accrualStartDate(user: { joinedOn: Date | null; createdAt: Date }, tz: string): string {
+  return user.joinedOn ? toIsoDate(user.joinedOn) : dateKeyInTimeZone(user.createdAt, tz);
 }
 
 /** YYYY-MM-DD to the UTC midnight `Date` a `date` column round-trips to. */
@@ -261,7 +272,7 @@ export async function loadWorkingCalendar(input: {
   const priced = new WorkingCalendar(shared);
 
   const accrualStartFor: Record<string, string | undefined> = {};
-  for (const u of users) accrualStartFor[u.id] = toIsoDate(u.joinedOn ?? u.createdAt);
+  for (const u of users) accrualStartFor[u.id] = accrualStartDate(u, input.tz);
 
   const overrideFor = new Map<string, AttendanceOverrideCode>();
   for (const o of overrides) overrideFor.set(`${o.userId}\u0000${toIsoDate(o.date)}`, o.code);
@@ -349,6 +360,42 @@ export async function loadWorkingCalendar(input: {
     leaveFunding: resolveLeaveFunding(walk),
     leaveAccounts: resolveLeaveAccounts({ ...walk, from: input.from, to: input.to }),
   });
+}
+
+/**
+ * Approved work-from-home for a set of people over [from, to], as a lookup.
+ *
+ * The one reader of `WfhRequest`: the attendance rules (is this remote day
+ * covered?) and the calendar (who is at home today?) both ask here, so the two
+ * cannot disagree about which days a request covers. Overlap, not containment,
+ * for the same reason as leave — a request that starts before the window still
+ * covers its days inside it. The stored range is inclusive at both ends.
+ */
+export async function loadApprovedWfh(input: {
+  workspaceId: string;
+  userIds: string[];
+  from: string;
+  to: string;
+}): Promise<(userId: string, date: string) => boolean> {
+  const rows = input.userIds.length === 0
+    ? []
+    : await prisma.wfhRequest.findMany({
+        where: {
+          workspaceId: input.workspaceId,
+          userId: { in: input.userIds },
+          status: 'APPROVED',
+          startDate: { lte: fromIsoDate(input.to) },
+          endDate: { gte: fromIsoDate(input.from) },
+        },
+        select: { userId: true, startDate: true, endDate: true },
+      });
+  const byUser = new Map<string, Array<[string, string]>>();
+  for (const r of rows) {
+    const list = byUser.get(r.userId) ?? [];
+    list.push([toIsoDate(r.startDate), toIsoDate(r.endDate)]);
+    byUser.set(r.userId, list);
+  }
+  return (userId, date) => (byUser.get(userId) ?? []).some(([s, e]) => date >= s && date <= e);
 }
 
 /** A ledger credit in words, for the leave details list. */

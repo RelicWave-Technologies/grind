@@ -1,3 +1,5 @@
+import { outboundTimeoutSignal } from '../lib/outboundTimeout';
+
 export type AgentDownloadPlatform = 'mac' | 'windows';
 
 interface GitHubAsset {
@@ -117,6 +119,7 @@ async function fetchReleases(): Promise<GitHubRelease[]> {
       'User-Agent': 'timo-api-download-redirect',
       'X-GitHub-Api-Version': '2022-11-28',
     },
+    signal: outboundTimeoutSignal(),
   });
   if (!response.ok) {
     throw new Error(`github_releases_${response.status}`);
@@ -130,8 +133,4 @@ async function fetchReleases(): Promise<GitHubRelease[]> {
 export async function getLatestAgentDownloadUrl(platform: AgentDownloadPlatform): Promise<string | null> {
   const asset = pickLatestAgentAsset(await fetchReleases(), platform);
   return asset?.browser_download_url ?? null;
-}
-
-export function clearAgentDownloadCacheForTests(): void {
-  releaseCache = null;
 }

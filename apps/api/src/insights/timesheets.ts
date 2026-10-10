@@ -1,20 +1,5 @@
-import type { DayStatus } from '@grind/types';
-import { localDayWindow } from './day';
-import { CLAIM_PRIORITY, resolveOverlaps } from './overlap';
-import {
-  groupInvalidationsByUser,
-  subtractInvalidations,
-  type TimeInvalidationInput,
-} from './invalidations';
-
-export interface TimesheetSegmentInput {
-  userId: string;
-  /** TimeEntry.source — AUTO becomes WORK/MEETING by segment.kind; MANUAL collapses to MANUAL regardless. */
-  source: 'AUTO' | 'MANUAL';
-  segmentKind: 'WORK' | 'MEETING' | 'IDLE_TRIMMED';
-  startedAt: number;
-  endedAt: number;
-}
+import { emptyDayBucket, type DayBucket } from '@grind/core';
+import { dateKeysBetween, type DayStatus } from '@grind/types';
 
 export interface TimesheetCell {
   workedMs: number;
@@ -36,7 +21,7 @@ export interface TimesheetCell {
    * and if not, was it a holiday, a weekly off or approved leave.
    *
    * Carried on the cell so every consumer of the matrix (attendance, member
-   * reports, payroll, MCP) gets leave without each one re-deriving it, and
+   * reports, the month report, MCP) gets leave without each one re-deriving it, and
    * without four subtly different answers to "was this person meant to be
    * here". `null` when the caller did not supply a calendar.
    */
@@ -52,173 +37,67 @@ export interface TimesheetMatrix {
   cells: Record<string, Record<string, TimesheetCell>>;
 }
 
-const DAY_MS = 24 * 60 * 60 * 1000;
-
-/**
- * One owner per instant, per person. Overlap only ever happens within a single
- * user's own timeline, so users are resolved independently — two people working
- * the same hour is not a conflict.
- */
-function resolveSegmentOverlapsPerUser(
-  segments: readonly TimesheetSegmentInput[],
-): TimesheetSegmentInput[] {
-  const byUser = new Map<string, TimesheetSegmentInput[]>();
-  for (const s of segments) {
-    const list = byUser.get(s.userId);
-    if (list) list.push(s);
-    else byUser.set(s.userId, [s]);
-  }
-  const out: TimesheetSegmentInput[] = [];
-  for (const list of byUser.values()) {
-    out.push(...resolveOverlaps(list, (s) => (
-      s.source === 'MANUAL' ? CLAIM_PRIORITY.manual
-        : s.segmentKind === 'IDLE_TRIMMED' ? CLAIM_PRIORITY.idle
-          : CLAIM_PRIORITY.tracked)));
-  }
-  return out;
-}
-
-/** Add `delta` days to a YYYY-MM-DD string. */
-export function addDays(date: string, delta: number): string {
-  const d = new Date(`${date}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + delta);
-  return d.toISOString().slice(0, 10);
-}
-
-/** Inclusive list of YYYY-MM-DD strings from `from` to `to`. */
+/** Inclusive list of YYYY-MM-DD strings from `from` to `to` (capped at 367). */
 export function dateRange(from: string, to: string): string[] {
-  const out: string[] = [];
-  let cur = from;
-  // Hard cap at 366 to short-circuit pathological input — the route caps at 60.
-  for (let i = 0; i < 367; i++) {
-    out.push(cur);
-    if (cur === to) return out;
-    cur = addDays(cur, 1);
-  }
-  return out;
+  return dateKeysBetween(from, to, 367);
+}
+
+function cellOf(bucket: DayBucket, dayStatus: DayStatus | null): TimesheetCell {
+  return {
+    workedMs: bucket.worked,
+    meetingMs: bucket.meeting,
+    manualMs: bucket.manual,
+    invalidatedMs: bucket.invalidated,
+    totalMs: bucket.counted,
+    firstActivityMs: bucket.first,
+    lastActivityMs: bucket.last,
+    activitySampleCount: 0,
+    dayStatus,
+  };
+}
+
+/** A user-day with no time and no calendar status. */
+export function emptyTimesheetCell(): TimesheetCell {
+  return cellOf(emptyDayBucket(), null);
 }
 
 /**
- * Aggregate TimeSegment durations into a per-user × per-day matrix, clipped
- * to each local-day window and bucketed by kind. IDLE_TRIMMED contributes
- * nothing (it's *not* worked time — that's the whole point of the trim).
- *
- * MANUAL entries collapse to `manualMs` regardless of segment.kind because
- * the user-facing semantic is "this came from an approved request, not from
- * live tracking" — segment.kind on a MANUAL entry is always WORK anyway.
+ * The matrix from day buckets already attributed by `@grind/core`'s
+ * `bucketByDay` — the same buckets every other surface reads, so a cell here
+ * cannot disagree with Edit Time or the reports.
  */
-export function buildTimesheetMatrix(input: {
+export function timesheetMatrixFromBuckets(input: {
   from: string;
   to: string;
   tz: string;
-  segments: TimesheetSegmentInput[];
-  invalidations?: TimeInvalidationInput[];
-  /**
-   * Resolves a user-day to its calendar status. Passed as a function rather
-   * than a materialised map so the matrix stays independent of how the
-   * calendar is loaded, and so a 60-day x 40-person range does not have to
-   * build 2400 objects the caller may never read.
-   */
+  days: string[];
+  buckets: ReadonlyMap<string, ReadonlyMap<string, DayBucket>>;
   dayStatusFor?: (userId: string, date: string) => DayStatus | null;
-  /**
-   * Users to materialise cells for even when they tracked nothing. A person on
-   * leave for a whole week has no segments, and without this their leave would
-   * be invisible in exactly the report that most needs to show it.
-   */
   userIds?: readonly string[];
-}): TimesheetMatrix | null {
-  const fromWin = localDayWindow(input.from, input.tz);
-  const toWin = localDayWindow(input.to, input.tz);
-  if (!fromWin || !toWin) return null;
-  if (toWin.end <= fromWin.start) return null;
-
-  const days = dateRange(input.from, input.to);
-  // Pre-compute every day's window so we don't call localDayWindow per segment.
-  const dayWindows: Array<{ key: string; startMs: number; endMs: number }> = [];
-  for (const day of days) {
-    const w = localDayWindow(day, input.tz);
-    if (!w) return null;
-    dayWindows.push({ key: day, startMs: w.start.getTime(), endMs: w.end.getTime() });
-  }
-  const rangeStart = dayWindows[0]!.startMs;
-  const rangeEnd = dayWindows[dayWindows.length - 1]!.endMs;
-
-  // An approved manual entry is a real TimeEntry, so it can sit on top of
-  // tracked time — and this loop adds every segment's duration, which counted
-  // those minutes twice and carried the error into payroll's
-  // workedMs + meetingMs + manualMs. Resolve each user's timeline to a single
-  // owner per instant first; observed time wins, manual keeps what is free.
-  const segments = resolveSegmentOverlapsPerUser(input.segments);
-
+}): TimesheetMatrix {
   const cells: Record<string, Record<string, TimesheetCell>> = {};
-  const invalidationsByUser = groupInvalidationsByUser(input.invalidations);
-  const ensure = (userId: string, day: string): TimesheetCell => {
-    let perUser = cells[userId];
-    if (!perUser) {
-      perUser = {};
-      cells[userId] = perUser;
-    }
-    let cell = perUser[day];
-    if (!cell) {
-      cell = {
-        workedMs: 0,
-        meetingMs: 0,
-        manualMs: 0,
-        invalidatedMs: 0,
-        totalMs: 0,
-        firstActivityMs: null,
-        lastActivityMs: null,
-        activitySampleCount: 0,
-        dayStatus: input.dayStatusFor?.(userId, day) ?? null,
-      };
-      perUser[day] = cell;
-    }
-    return cell;
+  const put = (userId: string, date: string, bucket: DayBucket) => {
+    (cells[userId] ??= {})[date] = cellOf(bucket, input.dayStatusFor?.(userId, date) ?? null);
   };
-
-  for (const s of segments) {
-    if (s.endedAt <= s.startedAt) continue;
-    if (s.endedAt <= rangeStart || s.startedAt >= rangeEnd) continue;
-    if (s.segmentKind === 'IDLE_TRIMMED') continue;
-
-    // Binary search would be neat but linear scan is fine for <=60 days.
-    for (const dw of dayWindows) {
-      if (s.endedAt <= dw.startMs) break; // segments are time-ordered? not guaranteed; can't rely on this
-      if (s.startedAt >= dw.endMs) continue;
-      const start = Math.max(s.startedAt, dw.startMs);
-      const end = Math.min(s.endedAt, dw.endMs);
-      if (end <= start) continue;
-      const cell = ensure(s.userId, dw.key);
-      const { valid, invalidatedMs } = subtractInvalidations(invalidationsByUser, s.userId, start, end);
-      cell.invalidatedMs += invalidatedMs;
-      for (const part of valid) {
-        const dur = part.end - part.start;
-        if (s.source === 'MANUAL') cell.manualMs += dur;
-        else if (s.segmentKind === 'MEETING') cell.meetingMs += dur;
-        else cell.workedMs += dur;
-        cell.totalMs += dur;
-        if (cell.firstActivityMs === null || part.start < cell.firstActivityMs) cell.firstActivityMs = part.start;
-        if (cell.lastActivityMs === null || part.end > cell.lastActivityMs) cell.lastActivityMs = part.end;
-      }
+  for (const [userId, perDay] of input.buckets) {
+    for (const [date, bucket] of perDay) {
+      if (bucket.counted > 0 || bucket.invalidated > 0) put(userId, date, bucket);
     }
   }
 
-  // Days a person was absent carry no segments, so nothing above created a
-  // cell for them. Materialise those now — a week of leave must not read as a
-  // week of silence.
+  // Days a person was absent carry no time, so nothing above created a cell
+  // for them. Materialise those now — a week of leave must not read as a week
+  // of silence.
   if (input.dayStatusFor && input.userIds) {
     for (const userId of input.userIds) {
-      for (const dw of dayWindows) {
-        if (cells[userId]?.[dw.key]) continue;
-        const status = input.dayStatusFor(userId, dw.key);
+      for (const date of input.days) {
+        if (cells[userId]?.[date]) continue;
+        const status = input.dayStatusFor(userId, date);
         if (!status || status.kind === 'WORKING' || status.kind === 'NO_SHIFT') continue;
-        ensure(userId, dw.key);
+        put(userId, date, emptyDayBucket());
       }
     }
   }
 
-  return { from: input.from, to: input.to, tz: input.tz, days, cells };
+  return { from: input.from, to: input.to, tz: input.tz, days: input.days, cells };
 }
-
-/** Helper exposed for tests + a deterministic helper for the route layer. */
-export const TIMESHEETS_DAY_MS = DAY_MS;

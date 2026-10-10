@@ -43,6 +43,7 @@ model Workspace {
   wfhRequests               WfhRequest[]
   attendanceOverrides       AttendanceOverride[]
   attendanceOverrideEvents  AttendanceOverrideEvent[]
+  agentCommands             AgentCommand[]
 }
 
 /// Workspace-wide capture policy. A single row per workspace (unique on
@@ -85,6 +86,7 @@ enum PayrollSheetRecipientMode {
 /// Admin-owned payroll classification settings. This is intentionally
 /// separate from WorkspacePolicy because payroll is a derived finance
 /// worksheet, while WorkspacePolicy controls capture/privacy behavior.
+/// Unused since 2026-10-05 (payroll removed); drop in a later migration.
 model PayrollPolicy {
   id                   String                    @id @default(cuid())
   workspaceId          String                    @unique
@@ -119,6 +121,7 @@ enum PayrollRunStatus {
 /// One row per scheduled month-close send. The unique key is the
 /// idempotency boundary so API restarts do not resend Lark reminders or
 /// payroll sheets for the same workspace/month/scheduled instant.
+/// Unused since 2026-10-05 (payroll removed); drop in a later migration.
 model PayrollRunLog {
   id                     String           @id @default(cuid())
   workspaceId            String
@@ -339,6 +342,29 @@ model User {
   agentLaunchAtLoginState       String?
   agentLaunchOrigin             String?
   agentLaunchAtLoginUpdatedAt   DateTime?
+  /// Device + local sync-queue health from agent heartbeat. A non-zero
+  /// pending count with an old oldest-pending time means time is stuck on the
+  /// laptop. Nullable for older desktop agents.
+  agentOsVersion                String?
+  agentArch                     String?
+  agentSyncPending              Int?
+  agentSyncOldestPendingAt      DateTime?
+  agentSyncLastError            String?
+  agentDiagnosticsUpdatedAt     DateTime?
+  /// Auto-update health from agent heartbeat (beta.38+). "machine" = a Windows
+  /// Program Files install that cannot update itself; agentUpdateError is the
+  /// last updater failure, null once a check succeeds. Nullable for older agents.
+  agentInstallScope             String?
+  agentUpdateError              String?
+  /// Server time the sync queue was first reported non-empty, carried across
+  /// uninterrupted heartbeats; null when empty. Server clock, so a wrong
+  /// laptop clock cannot make sync look stuck (apps/api/src/agent/syncHealth.ts).
+  agentSyncPendingSince         DateTime?
+  /// Server time agentSyncLastError was first reported with its current value.
+  agentSyncErrorSince           DateTime?
+  /// When the stuck-sync alert fired for this person; cleared once the queue
+  /// empties, so the next time they get stuck alerts again.
+  agentSyncAlertedAt            DateTime?
 
   refreshTokens                    RefreshToken[]
   timeEntries                      TimeEntry[]
@@ -379,6 +405,8 @@ model User {
   attendanceOverridesAuthored      AttendanceOverride[]      @relation("AttendanceOverrideAuthor")
   attendanceOverrideEvents         AttendanceOverrideEvent[] @relation("AttendanceOverrideEventSubject")
   attendanceOverrideEventsAuthored AttendanceOverrideEvent[] @relation("AttendanceOverrideEventAuthor")
+  agentCommands                    AgentCommand[]            @relation("AgentCommandTarget")
+  agentCommandsRequested           AgentCommand[]            @relation("AgentCommandRequester")
 
   @@index([workspaceId])
   @@index([teamId])
@@ -503,32 +531,39 @@ enum ScreenshotUploadState {
 }
 
 model Screenshot {
-  id            String                @id
-  userId        String
-  user          User                  @relation("ScreenshotSubject", fields: [userId], references: [id], onDelete: Cascade)
-  timeEntryId   String?
-  timeEntry     TimeEntry?            @relation(fields: [timeEntryId], references: [id], onDelete: SetNull)
-  displayId     String?
-  capturedAt    DateTime
-  s3Key         String?
-  thumbS3Key    String?
-  fullUrl       String?
-  thumbUrl      String?
-  bytes         Int?
-  width         Int?
-  height        Int?
-  phash         BigInt?
-  uploadState   ScreenshotUploadState @default(PENDING)
-  blurred       Boolean               @default(false)
-  deletedAt     DateTime?
-  deletedById   String?
-  deletedBy     User?                 @relation("ScreenshotDeletedBy", fields: [deletedById], references: [id], onDelete: SetNull)
-  deletedReason String?
-  createdAt     DateTime              @default(now())
-  updatedAt     DateTime              @updatedAt
+  id                 String                @id
+  userId             String
+  user               User                  @relation("ScreenshotSubject", fields: [userId], references: [id], onDelete: Cascade)
+  timeEntryId        String?
+  timeEntry          TimeEntry?            @relation(fields: [timeEntryId], references: [id], onDelete: SetNull)
+  /// The entry id the agent named when the server did not have that entry yet
+  /// (its create still queued on the agent). No FK: the entry may never come.
+  /// Cleared once the entry arrives and the shot is linked (`linkEntryEvidence`).
+  claimedTimeEntryId String?
+  displayId          String?
+  capturedAt         DateTime
+  s3Key              String?
+  thumbS3Key         String?
+  fullUrl            String?
+  thumbUrl           String?
+  bytes              Int?
+  width              Int?
+  height             Int?
+  phash              BigInt?
+  uploadState        ScreenshotUploadState @default(PENDING)
+  blurred            Boolean               @default(false)
+  deletedAt          DateTime?
+  deletedById        String?
+  deletedBy          User?                 @relation("ScreenshotDeletedBy", fields: [deletedById], references: [id], onDelete: SetNull)
+  deletedReason      String?
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
 
   @@index([userId, capturedAt])
   @@index([timeEntryId])
+  @@index([claimedTimeEntryId])
+  // Latest screenshot per open entry (live evidence).
+  @@index([timeEntryId, capturedAt])
 }
 
 model TimeSegment {
@@ -543,20 +578,24 @@ model TimeSegment {
 }
 
 model ActivitySample {
-  id               String     @id // ULID from agent
-  userId           String
-  user             User       @relation(fields: [userId], references: [id])
-  timeEntryId      String?
-  timeEntry        TimeEntry? @relation(fields: [timeEntryId], references: [id], onDelete: SetNull)
-  bucketStart      DateTime // 1-minute bucket
-  keystrokes       Int
-  clicks           Int
-  mouseDistancePx  Int
-  scrollEvents     Int
+  id                 String     @id // ULID from agent
+  userId             String
+  user               User       @relation(fields: [userId], references: [id])
+  timeEntryId        String?
+  timeEntry          TimeEntry? @relation(fields: [timeEntryId], references: [id], onDelete: SetNull)
+  /// As `Screenshot.claimedTimeEntryId`: the entry the agent named before the
+  /// server had it. Unindexed on purpose — the link looks it up within the
+  /// (userId, bucketStart) range from the entry's start.
+  claimedTimeEntryId String?
+  bucketStart        DateTime // 1-minute bucket
+  keystrokes         Int
+  clicks             Int
+  mouseDistancePx    Int
+  scrollEvents       Int
   // content-free anti-cheat signals (no key identity / content)
-  ikiCv            Float?
-  moveSpeedCv      Float?
-  pathStraightness Float?
+  ikiCv              Float?
+  moveSpeedCv        Float?
+  pathStraightness   Float?
 
   // Active app + site for the dominant minute. Captured only when the
   // workspace policy allows; otherwise stays null. The agent computes the
@@ -570,9 +609,12 @@ model ActivitySample {
 
   createdAt DateTime @default(now())
 
+  // The unique constraint is already a (userId, bucketStart) btree; a second
+  // identical index only doubled the write cost of every sample.
   @@unique([userId, bucketStart])
-  @@index([userId, bucketStart])
   @@index([timeEntryId])
+  // Latest sample per open entry (live evidence).
+  @@index([timeEntryId, bucketStart])
   @@index([userId, activeApp])
 }
 
@@ -783,6 +825,9 @@ enum TesterOpsEventSource {
 
 enum TesterOpsEventStatus {
   PENDING
+  /// Claimed by one worker (PENDING -> PROCESSING via a conditional update)
+  /// before any AI call or reply, so a message can never be answered twice.
+  PROCESSING
   PROCESSED
   IGNORED
   FAILED
@@ -845,7 +890,12 @@ model TesterOpsConfig {
   pingTimes                    String[]  @default(["11:00", "17:00"])
   passiveIssueDetectionEnabled Boolean   @default(false)
   announcementSentAt           DateTime?
+  /// Unused. Lark history page tokens only make sense inside one query, so the
+  /// poller pages within a tick and resumes from `lastHistoryPollAt` instead.
   pollCursor                   String?
+  /// createTime of the newest history message the poller has handled; the next
+  /// poll starts here (never at wall-clock "now", which would skip anything
+  /// still unread when a tick stopped early).
   lastHistoryPollAt            DateTime?
   createdAt                    DateTime  @default(now())
   updatedAt                    DateTime  @updatedAt
@@ -912,6 +962,10 @@ model TesterOpsEvent {
   aiRuns TesterOpsAiRun[]
 
   @@unique([workspaceId, source, sourceId])
+  /// One Lark message is one event, whichever path saw it first: the websocket
+  /// delivers it keyed by event_id, the history poll by message_id. NULLs stay
+  /// distinct in Postgres, so manual replays (no messageId) are unaffected.
+  @@unique([workspaceId, messageId])
   @@index([workspaceId, status, receivedAt])
   @@index([messageId])
 }
@@ -1166,6 +1220,8 @@ model MonitoringSettingsAudit {
   nextIdleWarningSeconds        Int?
   riskLevel                     MonitoringSettingsRiskLevel
   reason                        String?
+  /// Capture-policy flags changed in the same edit: { field: { from, to } }.
+  policyChanges                 Json?
   createdAt                     DateTime                    @default(now())
 
   @@index([workspaceId, createdAt])
@@ -1174,18 +1230,22 @@ model MonitoringSettingsAudit {
 }
 
 model RefreshToken {
-  id         String    @id @default(cuid())
-  userId     String
-  user       User      @relation(fields: [userId], references: [id])
-  tokenHash  String    @unique
-  deviceName String?
+  id           String    @id @default(cuid())
+  userId       String
+  user         User      @relation(fields: [userId], references: [id])
+  tokenHash    String    @unique
+  deviceName   String?
   // Rotation family: every token minted by rotating an earlier one inherits the
   // same familyId. Presenting an already-revoked token (replay/theft) revokes
   // the whole family — OAuth 2.0 BCP refresh-token reuse detection.
-  familyId   String
-  expiresAt  DateTime
-  revokedAt  DateTime?
-  createdAt  DateTime  @default(now())
+  familyId     String
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  /// The token minted when this one was spent. A replay of a just-spent token
+  /// whose successor has never been used is a lost response, not a theft: it
+  /// rotates again from here instead of revoking the family.
+  replacedById String?
+  createdAt    DateTime  @default(now())
 
   @@index([userId])
   @@index([familyId])
@@ -1193,7 +1253,8 @@ model RefreshToken {
 
 /// Cached real app icons, keyed by macOS/Windows bundle id. Workspace-agnostic —
 /// an app's icon is the same for everyone, so agents upload the PNG once per
-/// bundle (idempotent upsert) and the insights API inlines it as a data URL.
+/// bundle (insert-only: the first upload wins, nobody overwrites it) and the
+/// insights API inlines it as a data URL.
 model AppIcon {
   bundleId  String   @id
   app       String
@@ -1302,10 +1363,11 @@ model LeavePolicy {
   /// Late arrivals a month that cost nothing. From the next one on, each late
   /// arrival is half a day of leave.
   lateAllowedPerMonth  Int       @default(4)
-  /// Minutes after the shift start that still count as on time — the same for
-  /// everyone, whatever buffer an individual shift carries.
+  /// Minutes after the shift start that a punch-in still counts as on time —
+  /// the same for everyone, whatever buffer an individual shift carries.
+  /// Lateness is judged by the door punch-in, not by when Timo work started.
   lateGraceMinutes     Int       @default(30)
-  /// On a first-half leave day, the clock time (minutes after midnight) a
+  /// On a first-half leave day, the clock time (minutes after midnight) the
   /// punch-in must beat — no grace. 840 = 14:00.
   halfDayLateAfterMinute Int     @default(840)
   createdAt            DateTime  @default(now())
@@ -1563,6 +1625,8 @@ model AttendancePunch {
   /// instants, so nothing is converted on write or on read. Seed them as they
   /// appear on the punch report: '09:15:00'. Either side may be null: a
   /// missing punch out is a real thing that happens, and is not a zero.
+  /// Lateness is judged on punchInAt: that clock time on `date`, read in the
+  /// workspace timezone.
   punchInAt   DateTime? @db.Time
   punchOutAt  DateTime? @db.Time
   /// Free-form provenance for whoever loaded the row ("biometric export
@@ -1640,4 +1704,48 @@ model MonthPerformancePointer {
 
   @@unique([userId, month])
   @@index([workspaceId, month, band])
+}
+
+enum AgentCommandType {
+  /// Re-send the laptop's local time, activity and screenshots for a date range.
+  RESYNC
+}
+
+enum AgentCommandStatus {
+  /// Waiting for the target's next heartbeat.
+  PENDING
+  /// Handed to the agent; no result yet. Handed again after 10 minutes.
+  DELIVERED
+  DONE
+  FAILED
+  /// Never completed within 7 days (the daily prune).
+  EXPIRED
+}
+
+/// A developer's request for one person's desktop agent to do something, such
+/// as re-sending its local data for a date range. The agent pulls commands on
+/// its heartbeat and posts the outcome back here, so nothing has to reach into
+/// the laptop. Developer-only (DEVELOPER_EMAILS); the person is not notified.
+model AgentCommand {
+  id            String             @id @default(cuid())
+  workspaceId   String
+  workspace     Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  /// The person whose agent runs it.
+  userId        String
+  user          User               @relation("AgentCommandTarget", fields: [userId], references: [id], onDelete: Cascade)
+  requestedById String
+  requestedBy   User               @relation("AgentCommandRequester", fields: [requestedById], references: [id], onDelete: Cascade)
+  type          AgentCommandType
+  /// RESYNC: { from: YYYY-MM-DD, to: YYYY-MM-DD, timeZone }.
+  params        Json
+  status        AgentCommandStatus @default(PENDING)
+  createdAt     DateTime           @default(now())
+  deliveredAt   DateTime?
+  completedAt   DateTime?
+  /// What the agent reported: counts requeued, still pending, errors, device.
+  result        Json?
+  error         String?
+
+  @@index([userId, status])
+  @@index([workspaceId, createdAt])
 }

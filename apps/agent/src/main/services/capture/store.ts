@@ -6,14 +6,28 @@ import type Database from 'better-sqlite3';
  * one-off recovery — never to re-run this one.
  */
 const RECOVER_STORAGE_OUTAGE = 'requeue:storage-outage-500';
+/**
+ * Before beta.38 a shot was written off after five failures of any kind — a
+ * quarter hour offline, a server hiccup, or the server's `out_of_scope` 400 for
+ * a shot whose timer entry it did not have yet. Those whose file is still on
+ * disk deserve one more pass now that only a definitive refusal is terminal.
+ */
+export const RECOVER_FAILED_WITH_FILE = 'requeue:failed-with-file-v38';
 
 export type UploadState = 'pending' | 'uploading' | 'uploaded' | 'failed';
+
+/** The signed-in account a local row was captured for. */
+export interface CaptureOwner {
+  userId: string;
+  workspaceId: string;
+}
 
 export interface ScreenshotRow {
   id: string;
   timeEntryId: string | null;
   displayId: string;
   capturedAt: number;
+  /** Relative to the screenshots directory (older rows: absolute, migrated on open). */
   filePath: string;
   bytes: number;
   width: number;
@@ -24,15 +38,30 @@ export interface ScreenshotRow {
   lastError: string | null;
   nextAttemptAt: number | null;
   failedAt: number | null;
+  /** Who captured it. Rows from before owner scoping are null until claimed. */
+  ownerUserId?: string | null;
+  ownerWorkspaceId?: string | null;
+  uploadedAt?: number | null;
+  /** When the full-size local file was swapped for a small thumbnail. */
+  localTrimmedAt?: number | null;
 }
 
-export interface ScreenshotUploadSummary {
-  pending: number;
-  uploading: number;
-  failed: number;
+/**
+ * The path below the screenshots directory, for a path stored by an older
+ * agent as absolute (`<userData>/screenshots/2026-10-05/<id>.webp`).
+ *
+ * Absolute paths broke whenever userData moved — a rename of the app, a
+ * migrated profile — and every row then read as a missing file. Returns null
+ * for a path that is already relative or does not sit under a screenshots dir.
+ */
+export function relativeScreenshotPath(stored: string): string | null {
+  const isAbsolute = stored.startsWith('/') || /^[A-Za-z]:[\\/]/u.test(stored) || stored.startsWith('\\\\');
+  if (!isAbsolute) return null;
+  const match = /^.*[\\/]screenshots[\\/](.+)$/u.exec(stored);
+  return match?.[1] ?? null;
 }
 
-/** Local screenshot queue (better-sqlite3). Files live on disk; rows point to them. */
+/** Local screenshot queue (better-sqlite3). Files live on disk under the screenshots dir; rows point to them. */
 export class ScreenshotStore {
   constructor(private readonly db: Database.Database) {
     this.db.exec(`
@@ -53,7 +82,15 @@ export class ScreenshotStore {
         failed_at    INTEGER
       );
     `);
-    for (const col of ['last_error TEXT', 'next_attempt_at INTEGER', 'failed_at INTEGER']) {
+    for (const col of [
+      'last_error TEXT',
+      'next_attempt_at INTEGER',
+      'failed_at INTEGER',
+      'owner_user_id TEXT',
+      'owner_workspace_id TEXT',
+      'uploaded_at INTEGER',
+      'local_trimmed_at INTEGER',
+    ]) {
       try {
         this.db.exec(`ALTER TABLE screenshots ADD COLUMN ${col}`);
       } catch {
@@ -68,24 +105,45 @@ export class ScreenshotStore {
       );
       CREATE INDEX IF NOT EXISTS idx_shots_upload ON screenshots(upload_state);
       CREATE INDEX IF NOT EXISTS idx_shots_next_attempt ON screenshots(upload_state, next_attempt_at);
+      CREATE INDEX IF NOT EXISTS idx_shots_owner ON screenshots(owner_user_id, owner_workspace_id, captured_at);
     `);
+    this.migrateAbsolutePaths();
     // Crash recovery: any 'uploading' left mid-flight goes back to 'pending'.
     this.db
       .prepare(`UPDATE screenshots SET upload_state='pending', next_attempt_at=NULL WHERE upload_state='uploading'`)
       .run();
-    // Older agents left capped rows as forever-pending. Make the cap visible.
-    this.db
-      .prepare(
-        `UPDATE screenshots
-         SET upload_state='failed',
-             failed_at=COALESCE(failed_at, ?),
-             next_attempt_at=NULL,
-             last_error=COALESCE(last_error, 'retry limit reached')
-         WHERE upload_state='pending' AND attempts >= 5`,
-      )
-// eslint-disable-next-line no-restricted-syntax -- device<->device: local retry scheduling, never sent
-.run(Date.now());
     this.requeueOnce(RECOVER_STORAGE_OUTAGE);
+  }
+
+  /**
+   * One-time requeue of written-off shots whose local file still exists (see
+   * {@link RECOVER_FAILED_WITH_FILE}). A shot without its file can never upload,
+   * so it stays failed. `fileExists` is injected so the store needs no fs.
+   * Returns how many were requeued (0 once the marker is set).
+   */
+  requeueFailedWithFileOnce(fileExists: (filePath: string) => boolean): number {
+    if (this.db.prepare(`SELECT 1 FROM capture_meta WHERE key = ?`).get(RECOVER_FAILED_WITH_FILE)) return 0;
+    const failed = this.db
+      .prepare(`SELECT id, file_path FROM screenshots WHERE upload_state='failed'`)
+      .all() as { id: string; file_path: string }[];
+    const withFile = failed.filter((r) => {
+      try {
+        return fileExists(String(r.file_path));
+      } catch {
+        return false;
+      }
+    });
+    const requeue = this.db.prepare(
+      `UPDATE screenshots
+       SET upload_state='pending', attempts=0, next_attempt_at=NULL, failed_at=NULL, last_error=NULL
+       WHERE id = ? AND upload_state='failed'`,
+    );
+    return this.db.transaction(() => {
+      for (const r of withFile) requeue.run(r.id);
+      this.db.prepare(`INSERT OR REPLACE INTO capture_meta (key, value) VALUES (?, ?)`)
+        .run(RECOVER_FAILED_WITH_FILE, String(withFile.length));
+      return withFile.length;
+    })();
   }
 
   /**
@@ -132,23 +190,85 @@ export class ScreenshotStore {
     requeue();
   }
 
+  /**
+   * Rewrite absolute file paths left by older agents as paths relative to the
+   * screenshots directory. Idempotent: relative rows are never selected again.
+   */
+  private migrateAbsolutePaths(): void {
+    const rows = this.db
+      .prepare(`SELECT id, file_path FROM screenshots WHERE file_path LIKE '/%' OR file_path LIKE '_:%' OR file_path LIKE '\\%'`)
+      .all() as { id: string; file_path: string }[];
+    if (rows.length === 0) return;
+    const update = this.db.prepare(`UPDATE screenshots SET file_path = ? WHERE id = ?`);
+    this.db.transaction(() => {
+      for (const row of rows) {
+        const relative = relativeScreenshotPath(row.file_path);
+        if (relative) update.run(relative, row.id);
+      }
+    })();
+  }
+
   insert(row: ScreenshotRow): void {
     this.db
       .prepare(
         `INSERT INTO screenshots
           (id, time_entry_id, display_id, captured_at, file_path, bytes, width, height,
-           upload_state, attempts, s3_key, last_error, next_attempt_at, failed_at)
+           upload_state, attempts, s3_key, last_error, next_attempt_at, failed_at,
+           owner_user_id, owner_workspace_id)
          VALUES (@id, @timeEntryId, @displayId, @capturedAt, @filePath, @bytes, @width, @height,
-           @uploadState, @attempts, @s3Key, @lastError, @nextAttemptAt, @failedAt)`,
+           @uploadState, @attempts, @s3Key, @lastError, @nextAttemptAt, @failedAt,
+           @ownerUserId, @ownerWorkspaceId)`,
       )
-      .run(row);
+      .run({ ...row, ownerUserId: row.ownerUserId ?? null, ownerWorkspaceId: row.ownerWorkspaceId ?? null });
   }
 
-  recent(limit: number): ScreenshotRow[] {
+  /**
+   * Claim rows captured before owner scoping for the account whose timer
+   * entries they belong to. A row is claimed only through an entry the timer
+   * store has already proven is this owner's — so a shot taken under one
+   * account is never uploaded under another. Rows of an unproven entry wait.
+   */
+  claimUnowned(owner: CaptureOwner): number {
+    if (!this.hasLocalEntries()) return 0;
+    const info = this.db
+      .prepare(
+        `UPDATE screenshots
+         SET owner_user_id = @userId, owner_workspace_id = @workspaceId
+         WHERE owner_user_id IS NULL AND time_entry_id IN (
+           SELECT id FROM local_entries WHERE owner_user_id = @userId AND owner_workspace_id = @workspaceId
+         )`,
+      )
+      .run({ userId: owner.userId, workspaceId: owner.workspaceId });
+    return Number(info.changes ?? 0);
+  }
+
+  private hasLocalEntries(): boolean {
+    return Boolean(
+      this.db.prepare(`SELECT 1 FROM sqlite_master WHERE type='table' AND name='local_entries'`).get(),
+    );
+  }
+
+  /** The owner's shots captured in [from, to), newest first. */
+  inRange(owner: CaptureOwner, fromMs: number, toMs: number): ScreenshotRow[] {
     const rows = this.db
-      .prepare(`SELECT * FROM screenshots ORDER BY captured_at DESC LIMIT ?`)
-      .all(limit) as Record<string, unknown>[];
+      .prepare(
+        `SELECT * FROM screenshots
+         WHERE owner_user_id = ? AND owner_workspace_id = ? AND captured_at >= ? AND captured_at < ?
+         ORDER BY captured_at DESC, id DESC`,
+      )
+      .all(owner.userId, owner.workspaceId, fromMs, toMs) as Record<string, unknown>[];
     return rows.map(mapRow);
+  }
+
+  /** When the same display was last captured before `beforeMs` (for per-shot activity windows). */
+  previousCaptureOnDisplay(owner: CaptureOwner, displayId: string, beforeMs: number): number | null {
+    const r = this.db
+      .prepare(
+        `SELECT MAX(captured_at) AS t FROM screenshots
+         WHERE owner_user_id = ? AND owner_workspace_id = ? AND display_id = ? AND captured_at < ?`,
+      )
+      .get(owner.userId, owner.workspaceId, displayId, beforeMs) as { t: number | null } | undefined;
+    return r?.t ?? null;
   }
 
   find(id: string): ScreenshotRow | null {
@@ -156,43 +276,71 @@ export class ScreenshotStore {
     return r ? mapRow(r) : null;
   }
 
-  countSince(sinceMs: number): number {
-    const r = this.db
-      .prepare(`SELECT COUNT(*) AS n FROM screenshots WHERE captured_at >= ?`)
-      .get(sinceMs) as { n: number };
-    return r.n;
-  }
-
+  /**
+   * The owner's next shots to upload, oldest first. A shot goes up with its
+   * timer entry id whether or not that entry has reached the server yet: the
+   * server keeps it unlinked and links it when the entry arrives.
+   */
+  pending(
+    owner: CaptureOwner,
+    limit: number,
 // eslint-disable-next-line no-restricted-syntax -- device<->device: compared against nextAttemptAt, written by this same store
-pending(limit: number, now = Date.now()): ScreenshotRow[] {
+now = Date.now(),
+  ): ScreenshotRow[] {
     const rows = this.db
       .prepare(
         `SELECT * FROM screenshots
-         WHERE upload_state='pending' AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
-         ORDER BY captured_at ASC LIMIT ?`,
+         WHERE upload_state='pending' AND (next_attempt_at IS NULL OR next_attempt_at <= @now)
+           AND owner_user_id = @userId AND owner_workspace_id = @workspaceId
+         ORDER BY captured_at ASC LIMIT @limit`,
       )
-      .all(now, limit) as Record<string, unknown>[];
+      .all({ now, limit, userId: owner.userId, workspaceId: owner.workspaceId }) as Record<string, unknown>[];
     return rows.map(mapRow);
   }
 
-  /** Mark a row as actively uploading (so a concurrent drain skips it). */
-  markUploading(id: string): void {
-    this.db.prepare(`UPDATE screenshots SET upload_state='uploading', next_attempt_at=NULL WHERE id = ?`).run(id);
+  /**
+   * Take a pending row for upload. Atomic: of two passes racing for the same
+   * shot only one sees `changes = 1`, so a shot is never uploaded twice.
+   */
+  claimForUpload(id: string): boolean {
+    const info = this.db
+      .prepare(`UPDATE screenshots SET upload_state='uploading', next_attempt_at=NULL WHERE id = ? AND upload_state='pending'`)
+      .run(id);
+    return Number(info.changes ?? 0) === 1;
   }
 
-  /** Mark a row uploaded and record the Cloudinary public_id as the key. */
-  markUploaded(id: string, key: string): void {
+  /** Mark a row uploaded and record the storage key the server returned. */
+// eslint-disable-next-line no-restricted-syntax -- device<->device: local bookkeeping for the local-file trim, never sent
+markUploaded(id: string, key: string, uploadedAt = Date.now()): void {
     this.db
       .prepare(
         `UPDATE screenshots
          SET upload_state='uploaded',
              s3_key=@key,
+             uploaded_at=@uploadedAt,
              last_error=NULL,
              next_attempt_at=NULL,
              failed_at=NULL
          WHERE id=@id`,
       )
-      .run({ id, key });
+      .run({ id, key, uploadedAt });
+  }
+
+  /** Uploaded shots whose full-size local file is older than `beforeMs` and not yet trimmed. */
+  uploadedToTrim(beforeMs: number, limit: number): ScreenshotRow[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM screenshots
+         WHERE upload_state='uploaded' AND local_trimmed_at IS NULL
+           AND COALESCE(uploaded_at, captured_at) < ?
+         ORDER BY captured_at ASC LIMIT ?`,
+      )
+      .all(beforeMs, limit) as Record<string, unknown>[];
+    return rows.map(mapRow);
+  }
+
+  markTrimmed(id: string, bytes: number, at: number): void {
+    this.db.prepare(`UPDATE screenshots SET local_trimmed_at = ?, bytes = ? WHERE id = ?`).run(at, bytes, id);
   }
 
   /** Return a row to pending without consuming an attempt (auth/storage unavailable). */
@@ -240,40 +388,57 @@ markTerminalFailed(id: string, lastError: string, failedAt = Date.now()): void {
       .run({ id, lastError, failedAt });
   }
 
-  resetFailedUploads(): number {
-    const info = this.db
-      .prepare(
-        `UPDATE screenshots
-         SET upload_state='pending',
-             attempts=0,
-             last_error=NULL,
-             next_attempt_at=NULL,
-             failed_at=NULL
-         WHERE upload_state='failed'`,
-      )
-      .run();
-    return Number(info.changes ?? 0);
+  /**
+   * A developer-requested resend of the owner's shots in [fromMs, toMs):
+   * anything pending or written off goes back on the queue with a clean
+   * slate. Uploaded shots are only counted — their local copy may already be
+   * trimmed to a thumbnail, so they are never sent again.
+   */
+  requeueRange(owner: CaptureOwner, fromMs: number, toMs: number): { requeued: number; uploaded: number } {
+    const requeue = this.db.transaction(() => {
+      const { changes } = this.db
+        .prepare(
+          `UPDATE screenshots
+           SET upload_state='pending', attempts=0, next_attempt_at=NULL, failed_at=NULL, last_error=NULL
+           WHERE owner_user_id = ? AND owner_workspace_id = ? AND captured_at >= ? AND captured_at < ?
+             AND upload_state IN ('pending', 'failed')`,
+        )
+        .run(owner.userId, owner.workspaceId, fromMs, toMs);
+      return Number(changes ?? 0);
+    });
+    const requeued = requeue();
+    return { requeued, uploaded: this.rangeSummary(owner, fromMs, toMs).uploaded };
   }
 
-  uploadSummary(): ScreenshotUploadSummary {
-    const out: ScreenshotUploadSummary = { pending: 0, uploading: 0, failed: 0 };
+  /** The owner's shots in [fromMs, toMs) by upload state (uploading counts as pending). */
+  rangeSummary(owner: CaptureOwner, fromMs: number, toMs: number): { pending: number; uploaded: number; failed: number } {
     const rows = this.db
-      .prepare(`SELECT upload_state AS state, COUNT(*) AS n FROM screenshots GROUP BY upload_state`)
-      .all() as { state: string; n: number }[];
+      .prepare(
+        `SELECT upload_state AS state, COUNT(*) AS n FROM screenshots
+         WHERE owner_user_id = ? AND owner_workspace_id = ? AND captured_at >= ? AND captured_at < ?
+         GROUP BY upload_state`,
+      )
+      .all(owner.userId, owner.workspaceId, fromMs, toMs) as { state: string; n: number }[];
+    const out = { pending: 0, uploaded: 0, failed: 0 };
     for (const row of rows) {
-      if (row.state === 'pending' || row.state === 'uploading' || row.state === 'failed') {
-        out[row.state] = Number(row.n);
-      }
+      if (row.state === 'pending' || row.state === 'uploading') out.pending += Number(row.n);
+      else if (row.state === 'uploaded') out.uploaded += Number(row.n);
+      else if (row.state === 'failed') out.failed += Number(row.n);
     }
     return out;
   }
 
   /** Minimal projection of every row, for the retention planner. */
-  allForRetention(): { id: string; filePath: string; capturedAt: number }[] {
+  allForRetention(): { id: string; filePath: string; capturedAt: number; uploadState: UploadState }[] {
     const rows = this.db
-      .prepare(`SELECT id, file_path, captured_at FROM screenshots`)
-      .all() as { id: string; file_path: string; captured_at: number }[];
-    return rows.map((r) => ({ id: String(r.id), filePath: String(r.file_path), capturedAt: Number(r.captured_at) }));
+      .prepare(`SELECT id, file_path, captured_at, upload_state FROM screenshots`)
+      .all() as { id: string; file_path: string; captured_at: number; upload_state: string }[];
+    return rows.map((r) => ({
+      id: String(r.id),
+      filePath: String(r.file_path),
+      capturedAt: Number(r.captured_at),
+      uploadState: String(r.upload_state) as UploadState,
+    }));
   }
 
   /** Delete rows by id (retention / reconciliation). */
@@ -301,5 +466,9 @@ function mapRow(r: Record<string, unknown>): ScreenshotRow {
     lastError: r.last_error === null || r.last_error === undefined ? null : String(r.last_error),
     nextAttemptAt: r.next_attempt_at === null || r.next_attempt_at === undefined ? null : Number(r.next_attempt_at),
     failedAt: r.failed_at === null || r.failed_at === undefined ? null : Number(r.failed_at),
+    ownerUserId: r.owner_user_id == null ? null : String(r.owner_user_id),
+    ownerWorkspaceId: r.owner_workspace_id == null ? null : String(r.owner_workspace_id),
+    uploadedAt: r.uploaded_at == null ? null : Number(r.uploaded_at),
+    localTrimmedAt: r.local_trimmed_at == null ? null : Number(r.local_trimmed_at),
   };
 }

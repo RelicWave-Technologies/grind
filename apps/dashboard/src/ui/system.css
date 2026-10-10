@@ -279,13 +279,6 @@
 /* The flush Card that hosts the tiles is just a layout shell — drop its frame. */
 .ui-card--flush:has(.ui-stat-row) { background: transparent; border-color: transparent; }
 
-/* The rarer boxed-card layout. */
-.ui-stat-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: var(--ui-sp-5);
-}
-
 /* ============================================================================
    §5.5 Table — data grid. Hosted in a flush Card.
    ========================================================================== */
@@ -525,7 +518,7 @@
 .ui-seg--lg .ui-seg__item { height: 30px; }
 
 /* ============================================================================
-   §5.9 Field (+ Input / Select / Textarea / Toggle / Checkbox / Radio).
+   §5.9 Field (+ Input / Select / Textarea / Toggle / Checkbox).
    ========================================================================== */
 .ui-field { display: flex; flex-direction: column; }
 .ui-field__label { display: block; margin-bottom: var(--ui-sp-2); }
@@ -591,8 +584,8 @@ textarea.ui-control { height: auto; min-height: 80px; padding: var(--ui-sp-3) va
 .ui-toggle:focus-visible { outline: none; box-shadow: var(--ui-focus-ring); }
 .ui-toggle:disabled { background: var(--ui-surface-inset); cursor: not-allowed; }
 
-/* Checkbox + Radio — 16px, accent when checked. */
-.ui-checkbox, .ui-radio {
+/* Checkbox — 16px, accent when checked. */
+.ui-checkbox {
   appearance: none;
   width: 16px; height: 16px;
   border: 1px solid var(--ui-line-strong);
@@ -602,14 +595,12 @@ textarea.ui-control { height: auto; min-height: 80px; padding: var(--ui-sp-3) va
   transition: background var(--ui-dur-fast) var(--ui-ease), border-color var(--ui-dur-fast) var(--ui-ease);
 }
 .ui-checkbox { border-radius: 4px; }
-.ui-radio { border-radius: var(--ui-r-full); }
-.ui-checkbox:checked, .ui-radio:checked { background: var(--ui-accent); border-color: var(--ui-accent); }
+.ui-checkbox:checked { background: var(--ui-accent); border-color: var(--ui-accent); }
 .ui-checkbox:checked {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none'%3E%3Cpath d='M3.5 8.5l3 3 6-6.5' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   background-size: 14px; background-position: center; background-repeat: no-repeat;
 }
-.ui-radio:checked { box-shadow: inset 0 0 0 3px var(--ui-surface); }
-.ui-checkbox:focus-visible, .ui-radio:focus-visible { outline: none; box-shadow: var(--ui-focus-ring); }
+.ui-checkbox:focus-visible { outline: none; box-shadow: var(--ui-focus-ring); }
 
 /* ============================================================================
    §5.10 Tag — status & labels. Squared-soft, never pill.
@@ -683,7 +674,6 @@ textarea.ui-control { height: auto; min-height: 80px; padding: var(--ui-sp-3) va
    §5.12 Toolbar — header / table-top control cluster.
    ========================================================================== */
 .ui-toolbar { display: flex; align-items: center; gap: var(--ui-sp-3); flex-wrap: wrap; }
-.ui-toolbar__divider { width: 1px; align-self: stretch; background: var(--ui-line); margin: 0 var(--ui-sp-1); }
 
 .ui-date-stepper { display: inline-flex; align-items: center; gap: var(--ui-sp-2); }
 .ui-date-stepper__pill {
@@ -848,61 +838,6 @@ textarea.ui-control { height: auto; min-height: 80px; padding: var(--ui-sp-3) va
   border-top: 1px solid var(--ui-line-faint);
 }
 @keyframes ui-fade-in { from { opacity: 0; } to { opacity: 1; } }
-
-.ui-popover-wrap { position: relative; display: inline-flex; }
-.ui-popover {
-  position: absolute;
-  z-index: 50;
-  top: calc(100% + var(--ui-sp-2));
-  right: 0;
-  min-width: 180px;
-  background: var(--ui-surface-raised);
-  border: 1px solid var(--ui-line);
-  border-radius: var(--ui-r-lg);
-  box-shadow: var(--ui-shadow-pop);
-  padding: var(--ui-sp-2);
-  animation: ui-page-rise var(--ui-dur-base) var(--ui-ease) both;
-}
-.ui-menu { display: flex; flex-direction: column; }
-.ui-menu-item {
-  appearance: none; border: 0; background: transparent;
-  font-family: var(--ui-font-sans);
-  font-size: 13px; font-weight: 450;
-  color: var(--ui-ink);
-  text-align: left;
-  display: flex; align-items: center; gap: var(--ui-sp-3);
-  height: 32px; padding: 0 var(--ui-sp-3);
-  border-radius: var(--ui-r-sm);
-  cursor: pointer;
-  transition: background var(--ui-dur-fast) var(--ui-ease);
-}
-.ui-menu-item:hover { background: var(--ui-surface-inset); }
-.ui-menu-item:focus-visible { outline: none; box-shadow: var(--ui-focus-ring); }
-.ui-menu-item--danger { color: var(--ui-danger-ink); }
-.ui-menu-item:disabled { color: var(--ui-ink-disabled); cursor: not-allowed; background: transparent; }
-
-.ui-toast {
-  position: fixed;
-  right: var(--ui-sp-7); bottom: var(--ui-sp-7);
-  z-index: 100;
-  min-width: 280px; max-width: 420px;
-  background: var(--ui-surface-raised);
-  border: 1px solid var(--ui-line);
-  border-radius: var(--ui-r-lg);
-  box-shadow: var(--ui-shadow-pop);
-  padding: var(--ui-sp-4) var(--ui-sp-5);
-  font-family: var(--ui-font-sans);
-  font-size: 13px;
-  color: var(--ui-ink);
-  display: flex; align-items: center; gap: var(--ui-sp-3);
-  animation: ui-page-rise var(--ui-dur-base) var(--ui-ease) both;
-  border-left-width: 4px;
-}
-.ui-toast--success { border-left-color: var(--ui-success-solid); }
-.ui-toast--warn    { border-left-color: var(--ui-warn-solid); }
-.ui-toast--danger  { border-left-color: var(--ui-danger-solid); }
-.ui-toast--info    { border-left-color: var(--ui-info-solid); }
-.ui-toast--neutral { border-left-color: var(--ui-neutral-solid); }
 
 /* Modal scrim reuses popover chrome centered over the overlay. */
 .ui-overlay {

@@ -1,5 +1,6 @@
 import { canonicalTimerEntryPayload } from './timerLedger';
 import { COUNTED_KINDS, type TimeEntry } from './types';
+import { subtractIntervals, unionMs, type Interval } from './time/intervals';
 
 export type LedgerSyncState = 'pending_create' | 'pending_update' | 'synced';
 export type LedgerConflict =
@@ -59,6 +60,12 @@ export function reconcileTodayLedger(input: {
   windowStart: number;
   windowEnd: number;
   now: number;
+  /**
+   * Windows a reviewer invalidated (server-supplied). They stay visible as
+   * entries but never count toward the day — the same rule every server
+   * surface applies.
+   */
+  invalidations?: readonly Interval[];
 }): TodayLedgerProjection {
   const serverById = new Map(input.server.map((item) => [item.entry.id, item]));
   const serverByClientUuid = new Map(input.server.map((item) => [item.entry.clientUuid, item]));
@@ -149,7 +156,7 @@ export function reconcileTodayLedger(input: {
 
   return {
     entries: projected,
-    workedMs: unionDuration(intervals),
+    workedMs: unionMs(subtractIntervals(intervals, input.invalidations ?? [])),
     conflicts: projected.filter((entry) => entry.conflicts.length > 0).length,
   };
 }
@@ -188,25 +195,4 @@ function overlappingEntryIds(
     active.push({ entryId: interval.entryId, end: interval.end });
   }
   return overlapping;
-}
-
-function unionDuration(intervals: readonly { start: number; end: number }[]): number {
-  let total = 0;
-  let start: number | null = null;
-  let end: number | null = null;
-  for (const interval of intervals) {
-    if (start === null || end === null) {
-      start = interval.start;
-      end = interval.end;
-      continue;
-    }
-    if (interval.start <= end) {
-      end = Math.max(end, interval.end);
-      continue;
-    }
-    total += end - start;
-    start = interval.start;
-    end = interval.end;
-  }
-  return start === null || end === null ? total : total + end - start;
 }

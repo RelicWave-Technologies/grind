@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import {
   AgentAppIconsRequest,
+  AgentCommandResultRequest,
   HeartbeatRequest,
   TodayLedgerQuery,
   WORKSPACE_POLICY_DEFAULTS,
@@ -12,12 +13,16 @@ import {
 import { validate } from '../middleware/validate';
 import { requireAccessToken } from '../middleware/auth';
 import { prisma, type Prisma } from '@grind/db';
-import { env } from '../env';
+import { dashboardOrigins, env } from '../env';
 import { renewTimerLease, TIMER_PROTOCOL_VERSION, type TimerCheckpointResult } from '../timeLifecycle';
 import { serializeTimeEntry } from '../timeEntries/wire';
+import { effectiveEntrySegmentEnds } from '@grind/core';
 import { loadEntryLiveEvidence } from '../insights/liveEntryEvidence';
-import { resolveEffectiveEntrySegmentEnds } from '../insights/openSegmentEvidence';
+import { loadInvalidations } from '../time';
 import { resolveTodayLedgerMode } from '../agent/todayLedgerMode';
+import { agentPermissionColumns } from '../agentPermissionColumns';
+import { deliverAgentCommands, recordAgentCommandResult } from '../agent/commands';
+import { nextSyncTrackingColumns, SYNC_TRACKING_SELECT } from '../agent/syncHealth';
 
 export const agentRouter = Router();
 
@@ -25,7 +30,7 @@ agentRouter.use(requireAccessToken);
 
 /** First entry of the (possibly comma-separated) DASHBOARD_URL, trailing-slash trimmed. */
 function dashboardOrigin(): string {
-  return (env.DASHBOARD_URL ?? '').split(',')[0]?.trim().replace(/\/$/u, '') ?? '';
+  return dashboardOrigins()[0] ?? '';
 }
 
 async function buildAgentConfig(userId: string, workspaceId: string): Promise<AgentConfigResponse | null> {
@@ -124,14 +129,7 @@ agentRouter.post('/heartbeat', validate(HeartbeatRequest, 'body'), async (req, r
       agentPlatform: body.platform,
     };
     if (body.permissions) {
-      data.agentScreenPermissionStatus = body.permissions.screen.status;
-      data.agentScreenCaptureHealth = body.permissions.screen.health;
-      data.agentScreenPermissionState = body.permissions.screen.state;
-      data.agentAccessibilityTrusted = body.permissions.accessibility.trusted;
-      data.agentAccessibilityReady = body.permissions.accessibility.ready;
-      data.agentAccessibilityRecording = body.permissions.accessibility.recording;
-      data.agentAccessibilityCapturing = body.permissions.accessibility.capturing;
-      data.agentAccessibilityHookRunning = body.permissions.accessibility.hookRunning;
+      Object.assign(data, agentPermissionColumns(body.permissions));
       data.agentPermissionsUpdatedAt = now;
     }
     if (body.startup) {
@@ -139,15 +137,31 @@ agentRouter.post('/heartbeat', validate(HeartbeatRequest, 'body'), async (req, r
       data.agentLaunchOrigin = body.startup.origin;
       data.agentLaunchAtLoginUpdatedAt = now;
     }
+    if (body.diagnostics) {
+      data.agentOsVersion = body.diagnostics.osVersion;
+      data.agentArch = body.diagnostics.arch;
+      data.agentSyncPending = body.diagnostics.syncPending;
+      data.agentSyncOldestPendingAt = body.diagnostics.syncOldestPendingAt
+        ? new Date(body.diagnostics.syncOldestPendingAt)
+        : null;
+      data.agentSyncLastError = body.diagnostics.syncLastError;
+      // Update health arrived with beta.38: an older agent's diagnostics leave
+      // these columns as they were rather than wiping them.
+      if (body.diagnostics.installScope !== undefined) data.agentInstallScope = body.diagnostics.installScope;
+      if (body.diagnostics.updateError !== undefined) data.agentUpdateError = body.diagnostics.updateError;
+      data.agentDiagnosticsUpdatedAt = now;
+    }
     const heartbeatResult = await prisma.$transaction(async (tx): Promise<{
       authorized: boolean;
       timer: TimerCheckpointResult | null;
     }> => {
       const user = await tx.user.findFirst({
         where: { id: req.user!.sub, workspaceId: req.user!.ws, deactivatedAt: null },
-        select: { id: true },
+        select: { id: true, ...SYNC_TRACKING_SELECT },
       });
       if (!user) return { authorized: false, timer: null };
+      // Server-clock sync bookkeeping; also caps a pending count the column can't hold.
+      const syncTracking = body.diagnostics ? nextSyncTrackingColumns(user, body.diagnostics, now) : {};
       const timer = body.timerCheckpoint
         ? await renewTimerLease(tx, req.user!.sub, body.timerCheckpoint, now)
         : null;
@@ -161,11 +175,30 @@ agentRouter.post('/heartbeat', validate(HeartbeatRequest, 'body'), async (req, r
             select: { id: true },
           })
         : null;
-      const timerStateAccepted = timer === null || timer.disposition === 'accepted' || timer.disposition === 'needs_sync';
+      // Two devices on one account: the one not tracking still heartbeats,
+      // with no checkpoint. Taking its word cleared the other device's running
+      // timer from presence every minute. While a v2 timer this heartbeat did
+      // not mention still holds a live lease, presence stays with that timer.
+      const otherDeviceTimer = !body.timerCheckpoint && !legacyActiveEntry
+        ? await tx.timeEntry.findFirst({
+            where: {
+              userId: req.user!.sub,
+              source: 'AUTO',
+              endedAt: null,
+              trackingProtocolVersion: TIMER_PROTOCOL_VERSION,
+              leaseExpiresAt: { gt: now },
+            },
+            select: { id: true },
+          })
+        : null;
+      const timerStateAccepted = timer === null
+        ? otherDeviceTimer === null
+        : timer.disposition === 'accepted' || timer.disposition === 'needs_sync';
       await tx.user.update({
         where: { id: user.id },
         data: {
           ...data,
+          ...syncTracking,
           ...(timerStateAccepted
             ? {
                 agentState: body.state,
@@ -179,13 +212,40 @@ agentRouter.post('/heartbeat', validate(HeartbeatRequest, 'body'), async (req, r
     if (!heartbeatResult.authorized) return res.status(401).json({ error: 'unauthorized' });
     const config = await buildAgentConfig(req.user.sub, req.user.ws);
     if (!config) return res.status(401).json({ error: 'unauthorized' });
+    const commands = await deliverAgentCommands(req.user.sub, now);
     const response: HeartbeatResponse = {
       ok: true,
       serverTime: now.toISOString(),
       configVersion: config.configVersion,
       timer: heartbeatResult.timer,
+      ...(commands.length > 0 ? { commands } : {}),
     };
     res.json(response);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * The agent's outcome for a developer command it was handed on a heartbeat.
+ * Only the command's target can report it; repeats are answered as success.
+ */
+agentRouter.post('/commands/:id/result', validate(AgentCommandResultRequest, 'body'), async (req, res, next) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: 'unauthorized' });
+    const body = req.body as AgentCommandResultRequest;
+    const outcome = await recordAgentCommandResult({
+      id: req.params.id!,
+      userId: req.user.sub,
+      workspaceId: req.user.ws,
+      body,
+      now: new Date(),
+    });
+    if (outcome.kind === 'not_found') return res.status(404).json({ error: 'not_found' });
+    if (outcome.kind === 'recorded') {
+      req.log?.info({ commandId: req.params.id, status: body.status }, 'agent command completed');
+    }
+    res.json({ ok: true as const, status: outcome.status, alreadyCompleted: outcome.kind === 'already_completed' });
   } catch (err) {
     next(err);
   }
@@ -241,12 +301,13 @@ agentRouter.get('/today-ledger', validate(TodayLedgerQuery, 'query'), async (req
     }
 
     const now = new Date();
+    const invalidations = await loadInvalidations([req.user.sub], from, to);
     const autoEntries = allEntries.filter((entry) => entry.source === 'AUTO');
     const approvedManualEntries = allEntries.filter((entry) => entry.source === 'MANUAL');
     const evidence = await loadEntryLiveEvidence(autoEntries, now);
     const serialized = autoEntries.map(serializeTimeEntry);
     const effectiveEntries = autoEntries.map((entry) => {
-      const effectiveEnds = resolveEffectiveEntrySegmentEnds({
+      const effectiveEnds = effectiveEntrySegmentEnds({
         segments: entry.segments,
         entryEndedAt: entry.endedAt,
         now,
@@ -271,6 +332,10 @@ agentRouter.get('/today-ledger', validate(TodayLedgerQuery, 'query'), async (req
       entries: serialized,
       approvedManualEntries: approvedManualEntries.map(serializeTimeEntry),
       effectiveEntries,
+      invalidations: invalidations.map((iv) => ({
+        startedAt: new Date(iv.start).toISOString(),
+        endedAt: new Date(iv.end).toISOString(),
+      })),
     };
     return res.json(response);
   } catch (err) {
@@ -280,9 +345,10 @@ agentRouter.get('/today-ledger', validate(TodayLedgerQuery, 'query'), async (req
 
 /**
  * Agents upload real extracted app icons (PNG, base64), keyed by bundle id.
- * Idempotent upsert — icons are workspace-agnostic, so the latest upload for a
- * bundle wins. Oversized/empty payloads are skipped, not rejected, so one bad
- * icon never fails the batch.
+ * Insert-only — icons are workspace-agnostic, so the first upload for a bundle
+ * is kept and later uploads are ignored. Oversized/empty payloads are skipped,
+ * not rejected, so one bad icon never fails the batch. The body stays under the
+ * global 64kb JSON cap; a bigger batch is answered 413 for the agent to split.
  */
 agentRouter.post('/app-icons', validate(AgentAppIconsRequest, 'body'), async (req, res, next) => {
   try {
@@ -295,17 +361,15 @@ agentRouter.post('/app-icons', validate(AgentAppIconsRequest, 'body'), async (re
       return res.json({ ok: true as const, stored: 0 });
     }
     const { icons } = req.body as AgentAppIconsRequest;
-    let stored = 0;
-    for (const it of icons) {
-      const png = Buffer.from(it.pngBase64, 'base64');
-      if (png.length === 0 || png.length > 150_000) continue;
-      await prisma.appIcon.upsert({
-        where: { bundleId: it.bundleId },
-        create: { bundleId: it.bundleId, app: it.app, png },
-        update: { app: it.app, png },
-      });
-      stored += 1;
-    }
+    // Icons are shared by every workspace, keyed only by bundle id. Insert-only:
+    // the first upload of a bundle wins and nobody's agent — in this workspace
+    // or another — can overwrite the icon everyone else is shown.
+    const rows = icons
+      .map((it) => ({ bundleId: it.bundleId, app: it.app, png: Buffer.from(it.pngBase64, 'base64') }))
+      .filter((row) => row.png.length > 0 && row.png.length <= 150_000);
+    const { count: stored } = rows.length
+      ? await prisma.appIcon.createMany({ data: rows, skipDuplicates: true })
+      : { count: 0 };
     res.json({ ok: true as const, stored });
   } catch (err) {
     next(err);

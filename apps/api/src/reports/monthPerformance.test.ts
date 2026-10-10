@@ -3,7 +3,7 @@ import type { AttendanceOverrideCode, DayStatus, WorkingDayKind } from '@grind/t
 import type { PunchLookup } from '../attendance/punches';
 import {
   buildMonthPerformance,
-  codeForDay,
+  computedCodeWithRule,
   fmtClock,
   fmtMinutes,
   formatMonthPerformanceCsv,
@@ -21,8 +21,8 @@ import {
  *
  * The assertions that matter most are the ones about which source wins. A
  * calendar day off has to beat tracked time, tracked time has to beat a badge
- * reading, and neither may be quietly upgraded the way payroll would upgrade
- * it — that last one is what makes this an attendance record rather than a
+ * reading, and neither may be quietly upgraded the way a pay calculation would
+ * upgrade it — that last one is what makes this an attendance record rather than a
  * pay sheet.
  */
 
@@ -76,7 +76,7 @@ function report(opts: {
     companyName: 'EMIAC TECHNOLOGIES PRIVATE LIMITED',
     users: [user],
     dayStatusFor: (_u, date) => opts.statuses?.[date] ?? null,
-    trackedMinutesFor: (_u, date) => opts.tracked?.[date] ?? 0,
+    trackedMsFor: (_u, date) => (opts.tracked?.[date] ?? 0) * 60_000,
     punchFor,
     generatedAtMs: Date.UTC(2026, 8, 1),
   });
@@ -147,7 +147,7 @@ describe('a day is present or absent, with no minimum', () => {
   });
 
   it('never upgrades a thin day because the month total was good', () => {
-    // Payroll's monthly guarantee would upgrade every day once the month total
+    // A monthly pay guarantee would upgrade every day once the month total
     // cleared a floor. Nothing here does that — each day stands on its own.
     const statuses: Record<string, DayStatus> = {};
     const tracked: Record<string, number> = {};
@@ -277,9 +277,9 @@ describe('the calendar outranks tracked time', () => {
   });
 
   it('is a pure function of the two inputs', () => {
-    expect(codeForDay(null, 1)).toBe('P');
-    expect(codeForDay(null, 0)).toBe('--');
-    expect(codeForDay(status('2026-08-03', 'WORKING'), 0)).toBe('A');
+    expect(computedCodeWithRule(null, 1, null, undefined)).toBe('P');
+    expect(computedCodeWithRule(null, 0, null, undefined)).toBe('--');
+    expect(computedCodeWithRule(status('2026-08-03', 'WORKING'), 0, null, undefined)).toBe('A');
   });
 });
 
@@ -332,6 +332,18 @@ describe('totals', () => {
       tracked: { '2026-08-03': 11 * 60 + 58 },
     }).rows[0]!.totals;
     expect(fmtMinutes(totals.workMinutes)).toBe('11:58');
+  });
+
+  it('rounds the month total once, not day by day', () => {
+    // Four days of 8h 0m 20s: each day reads 08:00, the month 32:01 — not
+    // 32:00 from adding four rounded days.
+    const dates = ['2026-08-03', '2026-08-04', '2026-08-05', '2026-08-06'];
+    const row = report({
+      statuses: Object.fromEntries(dates.map((d) => [d, status(d, 'WORKING')])),
+      tracked: Object.fromEntries(dates.map((d) => [d, 8 * 60 + 1 / 3])),
+    }).rows[0]!;
+    expect(fmtMinutes(row.days.find((d) => d.date === '2026-08-03')!.workMinutes)).toBe('08:00');
+    expect(fmtMinutes(row.totals.workMinutes)).toBe('32:01');
   });
 });
 
@@ -387,7 +399,7 @@ describe('a human correction to a day', () => {
       companyName: 'EMIAC',
       users: [user],
       dayStatusFor: (_u, date) => opts.statuses?.[date] ?? null,
-      trackedMinutesFor: (_u, date) => opts.tracked?.[date] ?? 0,
+      trackedMsFor: (_u, date) => (opts.tracked?.[date] ?? 0) * 60_000,
       punchFor: noPunches,
       overrideFor: (_u, date) => opts.overrides?.[date] ?? null,
       generatedAtMs: Date.UTC(2026, 8, 1),
@@ -482,7 +494,7 @@ describe('the leave account the month left behind', () => {
       companyName: 'EMIAC',
       users: [user],
       dayStatusFor: () => null,
-      trackedMinutesFor: () => 0,
+      trackedMsFor: () => 0,
       punchFor: noPunches,
       generatedAtMs: Date.UTC(2026, 8, 1),
       ...extra,
@@ -521,7 +533,7 @@ describe('the leave account the month left behind', () => {
     const rep = build({
       dayStatusFor: (_u, date) =>
         date === '2026-08-03' ? status(date, 'UNPAID_LEAVE') : date === '2026-08-04' ? status(date, 'WORKING') : null,
-      trackedMinutesFor: (_u, date) => (date === '2026-08-04' ? 480 : 0),
+      trackedMsFor: (_u, date) => (date === '2026-08-04' ? 480 * 60_000 : 0),
     });
     expect(monthPerformanceSummaryPairs(rep, rep.rows[0]!)).toEqual([
       ['Present', '1'],

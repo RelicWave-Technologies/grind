@@ -12,6 +12,10 @@ import { useWorkspaceTime, workspaceTimeReady } from '../lib/workspaceTime';
 
 type Tab = 'today' | 'tasks' | 'reports' | 'settings';
 
+const SIGN_OUT_ERROR_COPY: Record<'time_waiting_to_sync', string> = {
+  time_waiting_to_sync: 'Some tracked time hasn’t synced yet. Check your connection, then sign out again.',
+};
+
 const NAV: { id: Tab; label: string; icon: typeof CalendarClock }[] = [
   { id: 'today', label: 'Today', icon: CalendarClock },
   { id: 'tasks', label: 'Tasks', icon: ListTodo },
@@ -23,10 +27,30 @@ export default function MainLayout() {
   const qc = useQueryClient();
   const [tab, setTab] = useState<Tab>('today');
 
+  const [signOutError, setSignOutError] = useState<string | null>(null);
   const logout = useMutation({
     mutationFn: () => window.agent.auth.logout(),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ['authStatus'] }),
+    onMutate: () => setSignOutError(null),
+    onSuccess: (result) => {
+      if (!result.ok) {
+        setSignOutError(SIGN_OUT_ERROR_COPY[result.reason]);
+        return;
+      }
+      void qc.invalidateQueries({ queryKey: ['authStatus'] });
+    },
+    onError: () => setSignOutError('Sign-out failed. Please try again.'),
   });
+
+  // Ask first: signing out stops a running timer.
+  async function requestSignOut() {
+    if (logout.isPending) return;
+    const status = await window.agent.timer.status().catch(() => null);
+    const question = status?.state === 'RUNNING'
+      ? 'Sign out of Timo? Your running timer will be stopped.'
+      : 'Sign out of Timo?';
+    if (!window.confirm(question)) return;
+    logout.mutate();
+  }
 
   const openDashboard = useMutation({ mutationFn: () => window.agent.app.openDashboard() });
   const installUpdate = useMutation({
@@ -89,13 +113,18 @@ export default function MainLayout() {
           <span>{openDashboard.isPending ? 'Opening…' : 'Dashboard'}</span>
         </button>
 
-        <button className="sidebar-user" onClick={() => logout.mutate()} title="Sign out">
+        {signOutError && (
+          <div className="error-text small no-drag" role="alert" style={{ padding: '0 var(--sp-3)', marginBottom: 'var(--sp-2)', textAlign: 'left' }}>
+            {signOutError}
+          </div>
+        )}
+        <button className="sidebar-user" onClick={() => void requestSignOut()} disabled={logout.isPending} title="Sign out">
           <span className="avatar">
             {showAvatar ? <img src={me.data!.avatarUrl!} alt="" onError={() => setAvatarFailed(true)} /> : meInitial}
           </span>
           <span style={{ flex: 1, minWidth: 0 }}>
             <span className="callout" style={{ display: 'block', fontWeight: 600 }}>{meName}</span>
-            <span className="small secondary">Sign out</span>
+            <span className="small secondary">{logout.isPending ? 'Signing out…' : 'Sign out'}</span>
           </span>
           <LogOut size={16} strokeWidth={2} color="var(--label-tertiary)" />
         </button>
@@ -128,7 +157,6 @@ function fmtHM(min: number): { h: number; m: number } {
 
 function Reports() {
   const insights = useQuery({ queryKey: ['insightsToday'], queryFn: () => window.agent.insights.today(), refetchInterval: 15_000 });
-  const allShots = useQuery({ queryKey: ['shotsAll'], queryFn: () => window.agent.screenshots.recent(200) });
   const workspaceTime = useWorkspaceTime();
   const d = insights.data;
   const tracked = fmtHM(d?.score.trackedMinutes ?? 0);
@@ -136,9 +164,16 @@ function Reports() {
   const timeContext = workspaceTime.data;
   const hasWorkspaceTime = workspaceTimeReady(timeContext);
   const timeZone = hasWorkspaceTime ? timeContext.timeZone : null;
-  const todayShots = hasWorkspaceTime
-    ? (allShots.data ?? []).filter((shot) => shot.capturedAt >= timeContext.dayStart && shot.capturedAt < timeContext.dayEnd)
-    : [];
+  // The whole workspace day, however many shots it holds — a fixed "latest
+  // 200" cut a busy day (several displays, short cadence) off at midday.
+  const dayStart = hasWorkspaceTime ? timeContext.dayStart : null;
+  const dayEnd = hasWorkspaceTime ? timeContext.dayEnd : null;
+  const allShots = useQuery({
+    queryKey: ['shotsAll', dayStart, dayEnd],
+    queryFn: () => window.agent.screenshots.range(dayStart as number, dayEnd as number),
+    enabled: dayStart !== null && dayEnd !== null,
+  });
+  const todayShots = allShots.data ?? [];
 
   // The backend returns workspace-local hourly buckets for the whole day.
   // Keep the full 24-hour frame visible so early/late activity is not hidden.

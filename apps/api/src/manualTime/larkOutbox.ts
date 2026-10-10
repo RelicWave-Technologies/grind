@@ -9,6 +9,9 @@ import {
   type DiffEntry,
 } from '../lark';
 import { logger } from '../logger';
+import { onShutdown } from '../lib/lifecycle';
+import { reclaimStaleOutboxClaims } from '../lib/outboxReclaim';
+import { loadCreditedManualMs } from '../time';
 
 type Tx = Prisma.TransactionClient;
 type LarkMessageKind = 'APPROVAL' | 'UPDATED_APPROVAL' | 'DECIDED_NOTICE';
@@ -74,6 +77,18 @@ async function loadRequest(requestId: string) {
   });
 }
 
+/** What an approved request actually added, for its card; null when it was not approved. */
+export async function loadCardCreditedMs(req: {
+  id: string;
+  userId: string;
+  status: string;
+  requestedStart: Date;
+  requestedEnd: Date;
+}): Promise<number | null> {
+  if (req.status !== 'APPROVED') return null;
+  return (await loadCreditedManualMs([req])).get(req.id) ?? 0;
+}
+
 async function handleSendCard(event: { id: string; requestId: string; messageLedgerId: string | null; payload: Prisma.JsonValue }): Promise<void> {
   const messenger = getLarkMessenger();
   if (!messenger) throw new Error('lark_not_configured');
@@ -85,6 +100,11 @@ async function handleSendCard(event: { id: string; requestId: string; messageLed
   ]);
   if (!message) throw new Error('message_ledger_not_found');
   if (!req) throw new Error('manual_time_request_not_found');
+
+  // Already delivered: a retry after the send succeeded but before the event
+  // was marked DONE (crash, reclaimed claim, failed settle) must not post the
+  // approver a second card.
+  if (message.status === 'SENT' && message.messageId) return;
 
   if (message.kind !== 'DECIDED_NOTICE' && (req.status !== 'PENDING' || message.version !== req.version)) {
     await prisma.manualTimeLarkMessage.update({
@@ -121,13 +141,17 @@ async function handleSendCard(event: { id: string; requestId: string; messageLed
             decision: req.status === 'REJECTED' ? 'REJECTED' : 'APPROVED',
             decidedByName: req.approver?.name ?? 'Approver',
             decidedAt: (req.decidedAt ?? new Date()).getTime(),
+            creditedMs: await loadCardCreditedMs(req),
           })
       : message.kind === 'UPDATED_APPROVAL'
         ? buildUpdatedApprovalCard({ ...common, diff })
         : buildApprovalCard(common);
 
   try {
-    const { messageId } = await messenger.sendCard(message.recipientOpenId, card);
+    // The ledger id doubles as Lark's idempotency key, so a resend that slips
+    // past the check above (send landed, ledger write did not) is deduplicated
+    // by Lark instead of reaching the approver twice.
+    const { messageId } = await messenger.sendCard(message.recipientOpenId, card, message.id);
     await prisma.$transaction(async (tx) => {
       await tx.manualTimeLarkMessage.update({
         where: { id: message.id },
@@ -233,6 +257,7 @@ async function handleFinalizeCards(event: { requestId: string }): Promise<void> 
           decision: req.status === 'REJECTED' ? 'REJECTED' : 'APPROVED',
           decidedByName: req.approver?.name ?? 'Approver',
           decidedAt: (req.decidedAt ?? new Date()).getTime(),
+          creditedMs: await loadCardCreditedMs(req),
         });
   const nextStatus = req.status === 'CANCELLED' ? 'CANCELLED' : 'DECIDED';
 
@@ -265,7 +290,18 @@ async function handleEvent(event: {
   return handleFinalizeCards(event);
 }
 
+/** Hand claims a dead worker left PROCESSING back to the queue. */
+async function reclaimStaleManualTimeLarkOutboxClaims(now: Date = new Date()): Promise<number> {
+  return reclaimStaleOutboxClaims('manual_time_lark', (cutoff) =>
+    prisma.manualTimeLarkOutboxEvent.updateMany({
+      where: { status: 'PROCESSING', lockedAt: { lt: cutoff } },
+      data: { status: 'PENDING', lockedAt: null, lockedBy: null },
+    }),
+  now);
+}
+
 export async function processManualTimeLarkOutboxOnce(limit = 10): Promise<number> {
+  await reclaimStaleManualTimeLarkOutboxClaims();
   const now = new Date();
   const workerId = `${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
   const due = await prisma.manualTimeLarkOutboxEvent.findMany({
@@ -318,4 +354,8 @@ export function startManualTimeLarkOutboxWorker(intervalMs = 5000): void {
     });
   }, intervalMs);
   timer.unref?.();
+  onShutdown(() => {
+    if (timer) clearInterval(timer);
+    timer = null;
+  });
 }

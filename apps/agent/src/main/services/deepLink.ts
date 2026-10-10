@@ -1,12 +1,11 @@
 import path from 'node:path';
 import { app } from 'electron';
 import { completeLarkLogin, cancelLarkLogin } from './auth';
-import { startHeartbeat } from './heartbeat';
 import { broadcast } from '../broadcast';
-import { CALLBACK_SCHEME } from '../env';
+import { API_URL, CALLBACK_SCHEME } from '../env';
 import { log } from '../logger';
-import { refreshAgentConfig } from './agentConfig';
-import { bindTimerToStoredSession, drainTimerSyncNow, refreshTodayLedger } from './timer';
+import { activateSignedInSession } from './signIn';
+import { ApiNetworkError, describeNetworkError } from './network';
 
 /**
  * Custom-scheme handling for Lark login. The system browser, after the OAuth
@@ -53,6 +52,26 @@ export function flushQueuedDeepLink(): void {
   }
 }
 
+function apiHost(): string {
+  try {
+    return new URL(API_URL).host;
+  } catch {
+    return API_URL;
+  }
+}
+
+/**
+ * Why the code exchange failed, in terms the login screen can explain. A
+ * TLS-inspecting proxy is called out by name: "sign-in failed, try again"
+ * sends people round in circles when the fix is an IT allow-list entry.
+ */
+function loginFailureOutcome(err: unknown): { kind: 'error'; reason: string; host?: string } {
+  const info = describeNetworkError(err);
+  if (info.tlsIntercepted) return { kind: 'error', reason: 'network_intercepted', host: apiHost() };
+  if (err instanceof ApiNetworkError) return { kind: 'error', reason: 'network_unreachable', host: apiHost() };
+  return { kind: 'error', reason: 'auth_failed' };
+}
+
 export async function handleDeepLink(url: string): Promise<void> {
   if (!ready) {
     queued = url; // arrived before the app finished booting — replay on ready
@@ -90,12 +109,7 @@ export async function handleDeepLink(url: string): Promise<void> {
     if (code) {
       const ok = await completeLarkLogin(code);
       if (ok) {
-        await bindTimerToStoredSession(false);
-        await drainTimerSyncNow('auth');
-        await refreshAgentConfig();
-        void refreshTodayLedger('auth');
-        startHeartbeat();
-        broadcast('auth:status:push', 'loggedIn');
+        await activateSignedInSession('lark_callback');
       } else {
         log.warn('deep link: login code was not exchanged');
         broadcast('auth:lark:push', { kind: 'error', reason: 'auth_failed' });
@@ -109,7 +123,12 @@ export async function handleDeepLink(url: string): Promise<void> {
     }
   } catch (err) {
     cancelLarkLogin();
-    log.warn('deep link: login exchange failed', { err: String(err) });
-    broadcast('auth:lark:push', { kind: 'error', reason: 'auth_failed' });
+    const outcome = loginFailureOutcome(err);
+    log.warn('deep link: login exchange failed', {
+      reason: outcome.reason,
+      code: describeNetworkError(err).code,
+      err: String(err),
+    });
+    broadcast('auth:lark:push', outcome);
   }
 }

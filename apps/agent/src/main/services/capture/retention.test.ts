@@ -1,11 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { planScreenshotRetention, type RetentionInput } from './retention';
+import { localRetentionDays, planScreenshotRetention, type RetentionInput } from './retention';
 
 const NOW = 1_700_000_000_000;
 const DAY = 86_400_000;
 
-function row(id: string, filePath: string, ageDays: number) {
-  return { id, filePath, capturedAt: NOW - ageDays * DAY };
+type State = 'pending' | 'uploading' | 'uploaded' | 'failed';
+function row(id: string, filePath: string, ageDays: number, uploadState: State = 'uploaded') {
+  return { id, filePath, capturedAt: NOW - ageDays * DAY, uploadState };
 }
 
 function plan(partial: Partial<RetentionInput> & Pick<RetentionInput, 'rows' | 'filesOnDisk'>) {
@@ -76,5 +77,54 @@ describe('planScreenshotRetention', () => {
   it('handles the empty case', () => {
     const p = plan({ rows: [], filesOnDisk: [] });
     expect(p).toMatchObject({ filesToDelete: [], rowIdsToDelete: [], expired: 0, orphanFiles: 0, danglingRows: 0 });
+  });
+});
+
+describe('planScreenshotRetention racing a capture', () => {
+  it('never deletes a file too new to have its row yet', () => {
+    const p = plan({
+      rows: [row('a', '/s/a.webp', 1)],
+      filesOnDisk: ['/s/a.webp', '/s/just-written.webp'],
+      protectedFiles: ['/s/just-written.webp'],
+    });
+    expect(p.filesToDelete).toEqual([]);
+    expect(p.orphanFiles).toBe(0);
+  });
+});
+
+describe('planScreenshotRetention never deletes the only copy', () => {
+  it('keeps a shot the server does not have yet, however old, and counts it', () => {
+    const p = plan({
+      rows: [
+        row('pending', '/s/pending.webp', 90, 'pending'),
+        row('uploading', '/s/uploading.webp', 90, 'uploading'),
+        row('refused', '/s/refused.webp', 90, 'failed'),
+        row('done', '/s/done.webp', 90, 'uploaded'),
+      ],
+      filesOnDisk: ['/s/pending.webp', '/s/uploading.webp', '/s/refused.webp', '/s/done.webp'],
+    });
+    expect(p.rowIdsToDelete).toEqual(['done']);
+    expect(p.filesToDelete).toEqual(['/s/done.webp']);
+    expect(p.overdueUnuploaded).toBe(3);
+    expect(p.expired).toBe(1);
+  });
+
+  it('keeps a pending row whose file vanished so the uploader can report it; drops a failed one', () => {
+    const p = plan({
+      rows: [row('pending-gone', '/s/p.webp', 1, 'pending'), row('failed-gone', '/s/f.webp', 1, 'failed'), row('old-failed-gone', '/s/o.webp', 90, 'failed')],
+      filesOnDisk: [],
+    });
+    expect(p.rowIdsToDelete.sort()).toEqual(['failed-gone', 'old-failed-gone']);
+    expect(p.overdueUnuploaded).toBe(0);
+  });
+});
+
+describe('localRetentionDays', () => {
+  it('follows a shorter workspace policy but never exceeds the agent cap', () => {
+    expect(localRetentionDays(7, 60)).toBe(7);
+    expect(localRetentionDays(90, 60)).toBe(60);
+    expect(localRetentionDays(null, 60)).toBe(60);
+    expect(localRetentionDays(0, 60)).toBe(60); // "forever" / unknown reads as the cap
+    expect(localRetentionDays(7, 0)).toBe(0); // dev: expiry disabled stays disabled
   });
 });

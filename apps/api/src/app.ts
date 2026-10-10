@@ -6,6 +6,8 @@ import cookieParser from 'cookie-parser';
 import pinoHttp from 'pino-http';
 import { prisma } from '@grind/db';
 import { logger } from './logger';
+import { requestLogLevel } from './lib/requestLogLevel';
+import { dashboardOrigins } from './env';
 import { API_VERSION, START_TIME_MS } from './lib/version';
 import { authRouter } from './routes/auth';
 import { authLarkRouter } from './routes/authLark';
@@ -23,27 +25,28 @@ import { mcpRouter } from './routes/mcp';
 import { workspaceRouter } from './routes/workspace';
 import { workspacePolicyRouter } from './routes/workspacePolicy';
 import { adminLeaveRouter, leaveRouter } from './routes/leave';
-import { digestsRouter } from './routes/digests';
-import { payrollRouter } from './routes/payroll';
 import { overviewRouter } from './routes/overview';
-import { testerOpsRouter } from './routes/testerOps';
 import { downloadsRouter } from './routes/downloads';
+import { devRouter } from './routes/dev';
 import { errorHandler } from './middleware/errorHandler';
 
 export function buildApp() {
   const app = express();
+  // nginx on the host terminates every request and appends the client to
+  // X-Forwarded-For. Trust only the hops in front of us — loopback, plus the
+  // Docker bridge gateway (a private address) that the published
+  // 127.0.0.1:4100 port forwards through — so req.ip is the client, and a
+  // client-sent X-Forwarded-For can never stand in for it.
+  app.set('trust proxy', ['loopback', 'uniquelocal']);
 
   app.use(helmet());
   app.use(compression());
   // CORS: allow credentials so the dashboard (separate origin) can ship the
-  // grind_at cookie. In production, restrict to the configured dashboard
-  // origin(s) — DASHBOARD_URL may be a comma-separated list (e.g. the prod
-  // domain plus Vercel preview URLs). In dev with nothing configured we
-  // reflect the request origin so localhost:5174 just works.
-  const allowlist = (process.env.DASHBOARD_URL ?? '')
-    .split(',')
-    .map((s) => s.trim().replace(/\/$/, ''))
-    .filter(Boolean);
+  // grind_at cookie. Restricted to the configured dashboard origin(s) —
+  // DASHBOARD_URL may be a comma-separated list, and env.ts refuses to start
+  // production without it. In dev with nothing configured we reflect the
+  // request origin so localhost:5174 just works.
+  const allowlist = dashboardOrigins();
   app.use(
     cors({
       origin: allowlist.length
@@ -51,7 +54,9 @@ export function buildApp() {
             // Allow same-origin / non-browser callers (no Origin header), e.g.
             // the agent and health probes.
             if (!origin || allowlist.includes(origin.replace(/\/$/, ''))) return cb(null, true);
-            return cb(new Error('not_allowed_by_cors'));
+            // A 403 the error handler answers as such — not a 500 that pages
+            // Sentry every time a stray origin probes the API.
+            return cb(Object.assign(new Error('not_allowed_by_cors'), { status: 403, code: 'cors_rejected' }));
           }
         : true,
       credentials: true,
@@ -70,8 +75,19 @@ export function buildApp() {
   app.use(
     pinoHttp({
       logger,
+      customLogLevel: (req, res, err) =>
+        requestLogLevel(req.method, (req as express.Request).originalUrl ?? req.url, res.statusCode, err),
       redact: {
-        paths: ['req.headers.authorization', 'req.body.password', 'req.body.refreshToken'],
+        // Cookies carry the dashboard session (grind_at / grind_rt), and
+        // Set-Cookie hands out a fresh 90-day refresh token: anyone reading
+        // the logs could take over a session.
+        paths: [
+          'req.headers.authorization',
+          'req.headers.cookie',
+          'res.headers["set-cookie"]',
+          'req.body.password',
+          'req.body.refreshToken',
+        ],
         censor: '[redacted]',
       },
     }),
@@ -128,15 +144,18 @@ export function buildApp() {
   app.use('/v1/screenshots', screenshotsRouter);
   app.use('/v1/downloads', downloadsRouter);
   app.use('/v1/mcp', mcpRouter);
-  app.use('/v1/admin', adminRouter);
-  app.use('/v1/workspace', workspaceRouter);
+  // The /v1/admin/* sub-routers go BEFORE the generic admin router. Mounted
+  // after it, every request to them first ran adminRouter's auth + scope
+  // middleware (a user lookup and a workspace-wide user list) and then its own
+  // again, for nothing.
   app.use('/v1/admin/workspace-policy', workspacePolicyRouter);
   app.use('/v1/admin/leave', adminLeaveRouter);
-  app.use('/v1/leave', leaveRouter);
-  app.use('/v1/admin/digests', digestsRouter);
-  app.use('/v1/admin/payroll', payrollRouter);
   app.use('/v1/admin/overview', overviewRouter);
-  app.use('/v1/admin/tester-ops', testerOpsRouter);
+  app.use('/v1/admin', adminRouter);
+  app.use('/v1/workspace', workspaceRouter);
+  app.use('/v1/leave', leaveRouter);
+  // Developer-only tools (DEVELOPER_EMAILS); 404 for everyone else.
+  app.use('/v1/dev', devRouter);
 
   app.use(errorHandler);
 

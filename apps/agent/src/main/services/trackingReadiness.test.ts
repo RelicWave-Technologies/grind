@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
-vi.mock('../logger', () => ({ log: { info: vi.fn(), warn: vi.fn(), debug: vi.fn(), error: vi.fn() } }));
+const logMocks = vi.hoisted(() => ({ warn: vi.fn() }));
+vi.mock('../logger', () => ({ log: { info: vi.fn(), warn: logMocks.warn, debug: vi.fn(), error: vi.fn() } }));
 import type { ActivityCaptureStatus } from './activity';
 import {
   createTrackingReadinessService,
@@ -8,6 +9,8 @@ import {
   TrackingBlockedError,
 } from './trackingReadiness';
 import type { CaptureHealth, ScreenStatus } from './permissions';
+
+const T0 = 1_700_000_000_000;
 
 function accessibility(patch: Partial<ActivityCaptureStatus> = {}): ActivityCaptureStatus {
   return {
@@ -28,16 +31,22 @@ function setup(opts: {
   accessibility?: ActivityCaptureStatus;
   probeHealth?: CaptureHealth;
 } = {}) {
+  const clock = { now: T0 };
   const probeScreen = vi.fn().mockResolvedValue(opts.probeHealth ?? 'ok');
+  const startActivityCapture = vi.fn();
+  const accessibilityStatus = vi.fn(() => opts.accessibility ?? accessibility());
+  const retryActivityHook = vi.fn(() => accessibilityStatus());
   const service = createTrackingReadinessService({
     platform: opts.platform ?? 'darwin',
-    now: () => 1_700_000_000_000,
+    now: () => clock.now,
     screenStatus: () => opts.screenStatus ?? 'granted',
     screenHealth: () => opts.screenHealth ?? 'unknown',
-    accessibilityStatus: () => opts.accessibility ?? accessibility(),
+    accessibilityStatus,
+    startActivityCapture,
+    retryActivityHook,
     probeScreen,
   });
-  return { service, probeScreen };
+  return { service, probeScreen, startActivityCapture, retryActivityHook, accessibilityStatus, clock };
 }
 
 describe('TrackingReadinessService', () => {
@@ -68,22 +77,195 @@ describe('TrackingReadinessService', () => {
     });
   });
 
-  it('maps denied screen access to System Settings and a failed effective grant to restart', async () => {
+  it('maps denied screen access to System Settings', async () => {
     const denied = setup({ screenStatus: 'denied', screenHealth: 'no-permission' });
-    const ineffective = setup({ screenStatus: 'granted', screenHealth: 'error', probeHealth: 'error' });
 
     expect((await denied.service.inspect()).readiness.screenRecording).toBe('NEEDS_SETTINGS');
-    expect((await ineffective.service.inspect({ verifyScreen: true })).readiness.screenRecording).toBe('NEEDS_RESTART');
+  });
+
+  it('never asks for a restart when a granted screen probes blank', async () => {
+    // getMediaAccessStatus('screen') === 'granted' means the grant is already
+    // effective in this process. Slow Macs return blank frames from the first
+    // captures of a fresh process; a restart reproduces that, it cannot fix it.
+    for (const probeHealth of ['empty', 'error'] as const) {
+      const { service } = setup({ probeHealth });
+
+      const result = await service.inspect({ verifyScreen: true });
+
+      expect(result.readiness.screenRecording).toBe('CHECKING');
+      expect(result.readiness.blockingCapabilities).toEqual(['SCREEN_RECORDING']);
+      expect(result.permissions.screen.health).toBe(probeHealth);
+    }
+  });
+
+  it('re-probes a blank screen no more than every five seconds', async () => {
+    const { service, probeScreen, clock } = setup({ probeHealth: 'empty' });
+
+    await service.inspect({ verifyScreen: true });
+    clock.now = T0 + 4_999;
+    const throttled = await service.inspect({ verifyScreen: true });
+    expect(probeScreen).toHaveBeenCalledTimes(1);
+    // The skipped inspect still reports the blank reading, not 'unknown'.
+    expect(throttled.permissions.screen.health).toBe('empty');
+
+    probeScreen.mockResolvedValue('ok');
+    clock.now = T0 + 5_000;
+    const recovered = await service.inspect({ verifyScreen: true });
+
+    expect(probeScreen).toHaveBeenCalledTimes(2);
+    expect(recovered.readiness).toMatchObject({ ready: true, screenRecording: 'READY' });
+  });
+
+  it('reports a screen that stays blank as FAILED, still not as a restart', async () => {
+    const { service, clock } = setup({ probeHealth: 'empty' });
+
+    const states = [];
+    for (let i = 0; i < 3; i += 1) {
+      clock.now = T0 + i * 5_000;
+      states.push((await service.inspect({ verifyScreen: true })).readiness.screenRecording);
+    }
+
+    expect(states).toEqual(['CHECKING', 'CHECKING', 'FAILED']);
+  });
+
+  it('lets an explicit recheck probe straight away', async () => {
+    const { service, probeScreen } = setup({ probeHealth: 'empty' });
+
+    await service.inspect({ verifyScreen: true });
+    probeScreen.mockResolvedValue('ok');
+    const result = await service.recheck();
+
+    expect(probeScreen).toHaveBeenCalledTimes(2);
+    expect(result.readiness.screenRecording).toBe('READY');
+  });
+
+  it('re-verifies on Start even inside the re-probe spacing', async () => {
+    const { service, probeScreen } = setup({ probeHealth: 'empty' });
+    await service.inspect({ verifyScreen: true });
+    probeScreen.mockResolvedValue('ok');
+
+    await expect(service.assertCanAccrue()).resolves.toBeUndefined();
+    expect(probeScreen).toHaveBeenCalledTimes(2);
   });
 
   it('requires accessibility trust and an initialized native activity service', async () => {
     const untrusted = setup({ accessibility: accessibility({ trusted: false }) });
-    const restart = setup({ accessibility: accessibility({ ready: false }) });
+    const notStarted = setup({ accessibility: accessibility({ ready: false }) });
     const failed = setup({ accessibility: accessibility({ lastHookError: 'native hook denied' }) });
 
     expect((await untrusted.service.inspect({ verifyScreen: true })).readiness.accessibility).toBe('NEEDS_GRANT');
-    expect((await restart.service.inspect({ verifyScreen: true })).readiness.accessibility).toBe('NEEDS_RESTART');
+    // Trusted, but the activity service still would not start in-process.
+    expect((await notStarted.service.inspect({ verifyScreen: true })).readiness.accessibility).toBe('FAILED');
+    expect(notStarted.startActivityCapture).toHaveBeenCalled();
     expect((await failed.service.inspect({ verifyScreen: true })).readiness.accessibility).toBe('FAILED');
+    expect(untrusted.startActivityCapture).not.toHaveBeenCalled();
+  });
+
+  it('starts activity capture in-process once accessibility is trusted, instead of asking for a restart', async () => {
+    const { service, startActivityCapture, accessibilityStatus } = setup();
+    accessibilityStatus
+      .mockReturnValueOnce(accessibility({ ready: false }))
+      .mockReturnValue(accessibility({ ready: true }));
+
+    const result = await service.inspect();
+
+    expect(startActivityCapture).toHaveBeenCalledOnce();
+    expect(result.readiness.accessibility).toBe('READY');
+  });
+
+  it('shares one in-flight probe between overlapping callers and counts it once', async () => {
+    const { service, probeScreen, clock } = setup();
+    let finish!: (health: CaptureHealth) => void;
+    probeScreen.mockImplementation(() => new Promise<CaptureHealth>((resolve) => {
+      finish = resolve;
+    }));
+
+    // Prompt, Settings, monitor and resume poll all verifying at once — and the
+    // clock moving past the re-probe spacing while the first probe is slow.
+    const first = service.inspect({ verifyScreen: true });
+    clock.now = T0 + 6_000;
+    const others = [
+      service.inspect({ verifyScreen: true }),
+      service.inspect({ verifyScreen: true }),
+      service.recheck(),
+    ];
+    finish('empty');
+    const results = await Promise.all([first, ...others]);
+
+    expect(probeScreen).toHaveBeenCalledTimes(1);
+    expect(results.map((result) => result.readiness.screenRecording)).toEqual(['CHECKING', 'CHECKING', 'CHECKING', 'CHECKING']);
+  });
+
+  it('spaces probes from when they started, not when they finished', async () => {
+    const { service, probeScreen, clock } = setup({ probeHealth: 'empty' });
+    probeScreen.mockImplementation(async () => {
+      clock.now += 3_000; // a slow probe
+      return 'empty';
+    });
+
+    await service.inspect({ verifyScreen: true });
+    clock.now = T0 + 5_000;
+    await service.inspect({ verifyScreen: true });
+
+    expect(probeScreen).toHaveBeenCalledTimes(2);
+  });
+
+  it('retries a failed input hook on an explicit check and clears the failure', async () => {
+    const { service, accessibilityStatus, retryActivityHook } = setup({
+      accessibility: accessibility({ lastHookError: 'native hook denied' }),
+    });
+    expect((await service.inspect({ verifyScreen: true })).readiness.accessibility).toBe('FAILED');
+    // A passive poll never touches the native hook.
+    expect(retryActivityHook).not.toHaveBeenCalled();
+
+    retryActivityHook.mockImplementation(() => {
+      accessibilityStatus.mockReturnValue(accessibility());
+      return accessibility();
+    });
+    const result = await service.recheck();
+
+    expect(retryActivityHook).toHaveBeenCalledOnce();
+    expect(result.readiness.accessibility).toBe('READY');
+    expect(result.accessibilityError).toBeNull();
+  });
+
+  it('lets Start resume past a hook failure that a retry clears', async () => {
+    const { service, accessibilityStatus, retryActivityHook } = setup({
+      accessibility: accessibility({ lastHookError: 'native hook denied' }),
+    });
+    retryActivityHook.mockImplementation(() => {
+      accessibilityStatus.mockReturnValue(accessibility());
+      return accessibility();
+    });
+
+    await expect(service.assertCanAccrue()).resolves.toBeUndefined();
+  });
+
+  it('stays FAILED when the explicit hook retry fails again', async () => {
+    const { service, retryActivityHook } = setup({
+      accessibility: accessibility({ lastHookError: 'native hook denied' }),
+    });
+
+    const result = await service.recheck();
+
+    expect(retryActivityHook).toHaveBeenCalledOnce();
+    expect(result.readiness.accessibility).toBe('FAILED');
+    expect(result.accessibilityError).toBe('native hook denied');
+  });
+
+  it('logs a standing verdict once, not once per probe', async () => {
+    logMocks.warn.mockClear();
+    const { service, clock } = setup({ probeHealth: 'empty' });
+
+    for (let i = 0; i < 6; i += 1) {
+      clock.now = T0 + i * 5_000;
+      await service.inspect({ verifyScreen: true });
+    }
+
+    const verdicts = logMocks.warn.mock.calls
+      .filter(([message]) => message === 'tracking readiness not ready')
+      .map(([, fields]) => (fields as { screenRecording: string }).screenRecording);
+    expect(verdicts).toEqual(['CHECKING', 'FAILED']);
   });
 
   it('blocks accrual with a typed, serializable readiness payload', async () => {
@@ -112,6 +294,49 @@ describe('TrackingReadinessService', () => {
       screenRecording: 'NOT_REQUIRED',
       accessibility: 'NOT_REQUIRED',
       blockingCapabilities: [],
+    });
+  });
+});
+
+describe('permission verdict sent with the heartbeat', () => {
+  it('carries a refused hook on macOS so the dashboard does not read it as OK', async () => {
+    const { service } = setup({ accessibility: accessibility({ lastHookError: 'native hook denied' }) });
+
+    const { permissions } = await service.inspect({ verifyScreen: true });
+
+    // The raw fields alone look healthy: trusted, ready, not recording.
+    expect(permissions.accessibility).toMatchObject({ trusted: true, ready: true, recording: false });
+    expect(permissions.verdict).toEqual({
+      screenRecording: 'READY',
+      accessibility: 'FAILED',
+      accessibilityError: 'native hook denied',
+    });
+  });
+
+  it('surfaces a Windows hook failure without blocking tracking there', async () => {
+    const { service } = setup({
+      platform: 'win32',
+      accessibility: accessibility({ recording: true, lastHookError: 'x'.repeat(500) }),
+    });
+
+    const result = await service.inspect({ verifyScreen: true });
+
+    expect(result.readiness.ready).toBe(true);
+    expect(result.accessibilityError).toBe('x'.repeat(500));
+    expect(result.permissions.verdict).toEqual({
+      screenRecording: 'NOT_REQUIRED',
+      accessibility: 'FAILED',
+      accessibilityError: 'x'.repeat(200),
+    });
+  });
+
+  it('reports a healthy Windows hook as not required', async () => {
+    const { service } = setup({ platform: 'win32' });
+
+    expect((await service.inspect()).permissions.verdict).toEqual({
+      screenRecording: 'NOT_REQUIRED',
+      accessibility: 'NOT_REQUIRED',
+      accessibilityError: null,
     });
   });
 });

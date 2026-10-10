@@ -46,19 +46,6 @@ export async function ingestHistoryMessage(args: {
   });
 }
 
-export async function replayTesterMessage(args: { workspaceId: string; messageText: string; directMention?: boolean }) {
-  const event = await prisma.testerOpsEvent.create({
-    data: {
-      workspaceId: args.workspaceId,
-      source: 'MANUAL_REPLAY',
-      sourceId: `replay:${Date.now()}:${Math.random().toString(36).slice(2)}`,
-      messageText: args.messageText,
-      status: 'PENDING',
-    },
-  });
-  return processTesterEvent(event.id, args.directMention);
-}
-
 async function ingestTesterMessage(args: {
   workspaceId?: string;
   source: 'LARK_EVENT' | 'HISTORY_POLL';
@@ -82,16 +69,29 @@ async function ingestTesterMessage(args: {
   const configuredChat = Boolean(cfg.chatId && args.chatId === cfg.chatId);
   if (!configuredChat && !directMention) return;
 
+  // One Lark message is one event. The websocket keys it by event_id and the
+  // history poll by message_id, so the (source, sourceId) key alone let the
+  // same @mention through twice. Look it up by messageId first; the unique
+  // (workspaceId, messageId) index settles a race between the two paths.
+  const existing = await findExistingEvent(workspaceId, args);
+  if (existing) {
+    // Already seen. If it is still PENDING (its first ingest has not claimed
+    // it yet, or crashed before it could) the claim in processTesterEvent
+    // makes sure exactly one caller ever processes it.
+    if (existing.status === 'PENDING') dispatchTesterEvent(existing.id);
+    return;
+  }
+
   const member = await prisma.testerOpsMember.upsert({
     where: { workspaceId_openId: { workspaceId, openId: args.senderOpenId } },
     update: { lastSeenAt: new Date() },
     create: { workspaceId, openId: args.senderOpenId, lastSeenAt: new Date() },
   });
 
-  const event = await prisma.testerOpsEvent.upsert({
-    where: { workspaceId_source_sourceId: { workspaceId, source: args.source, sourceId: args.sourceId } },
-    update: {},
-    create: {
+  // ON CONFLICT DO NOTHING: if the other path inserted the same message
+  // between our lookup and this insert, it owns the reply and we stop here.
+  const inserted = await prisma.testerOpsEvent.createMany({
+    data: {
       workspaceId,
       source: args.source,
       sourceId: args.sourceId,
@@ -102,14 +102,74 @@ async function ingestTesterMessage(args: {
       messageText: redactText(args.messageText),
       raw: redactJson(args.raw) as Prisma.InputJsonValue,
     },
+    skipDuplicates: true,
   });
-  if (event.status !== 'PENDING') return;
-  void processTesterEvent(event.id).catch((err) => {
-    logger.error({ err: String(err), eventId: event.id }, 'tester ops event processing failed');
+  if (inserted.count !== 1) return;
+  const event = await prisma.testerOpsEvent.findUnique({
+    where: { workspaceId_source_sourceId: { workspaceId, source: args.source, sourceId: args.sourceId } },
+    select: { id: true },
+  });
+  if (!event) return;
+  const eventId = event.id;
+  dispatchTesterEvent(eventId);
+}
+
+async function findExistingEvent(
+  workspaceId: string,
+  args: { source: 'LARK_EVENT' | 'HISTORY_POLL'; sourceId: string; messageId: string | null },
+) {
+  if (args.messageId) {
+    const byMessage = await prisma.testerOpsEvent.findUnique({
+      where: { workspaceId_messageId: { workspaceId, messageId: args.messageId } },
+      select: { id: true, status: true },
+    });
+    if (byMessage) return byMessage;
+  }
+  return prisma.testerOpsEvent.findUnique({
+    where: { workspaceId_source_sourceId: { workspaceId, source: args.source, sourceId: args.sourceId } },
+    select: { id: true, status: true },
   });
 }
 
-export async function processTesterEvent(eventId: string, forceDirectMention?: boolean) {
+function dispatchTesterEvent(eventId: string): void {
+  void processTesterEvent(eventId).catch((err) => {
+    logger.error({ err: String(err), eventId }, 'tester ops event processing failed');
+  });
+}
+
+/**
+ * Process one event at most once. The PENDING -> PROCESSING claim is a
+ * conditional update, so when the same event is dispatched twice (websocket +
+ * poll, Lark redelivery) only the caller that wins
+ * the claim gets anywhere near the AI or the chat; everyone else gets
+ * `{ skipped: true }`.
+ */
+export async function processTesterEvent(eventId: string) {
+  const claimed = await prisma.testerOpsEvent.updateMany({
+    where: { id: eventId, status: 'PENDING' },
+    data: { status: 'PROCESSING' },
+  });
+  if (claimed.count !== 1) {
+    const exists = await prisma.testerOpsEvent.count({ where: { id: eventId } });
+    if (!exists) throw new Error('event_not_found');
+    return { skipped: true as const };
+  }
+  try {
+    return await runClaimedTesterEvent(eventId);
+  } catch (err) {
+    // Never leave a claimed row in PROCESSING: that would read as "someone is
+    // still answering" forever.
+    await prisma.testerOpsEvent
+      .update({
+        where: { id: eventId },
+        data: { status: 'FAILED', processedAt: new Date(), error: redactText(err instanceof Error ? err.message : String(err)).slice(0, 500) },
+      })
+      .catch(() => undefined);
+    throw err;
+  }
+}
+
+async function runClaimedTesterEvent(eventId: string) {
   const event = await prisma.testerOpsEvent.findUnique({ where: { id: eventId }, include: { member: true } });
   if (!event) throw new Error('event_not_found');
   const cfg = await loadOrCreateTesterOpsConfig(event.workspaceId);
@@ -117,7 +177,7 @@ export async function processTesterEvent(eventId: string, forceDirectMention?: b
   const rawChatType = event.raw && typeof event.raw === 'object'
     ? getLarkMessageChatType(event.raw)
     : null;
-  const directMention = forceDirectMention ?? isDirectTesterMessage(event.messageText, rawChatType);
+  const directMention = isDirectTesterMessage(event.messageText, rawChatType);
   const replyChatId = event.chatId ?? cfg.chatId;
   if (!directMention && !cfg.passiveIssueDetectionEnabled) {
     await prisma.testerOpsEvent.update({ where: { id: event.id }, data: { status: 'IGNORED', processedAt: new Date() } });

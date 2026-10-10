@@ -46,17 +46,45 @@ const DEFAULTS: Preferences = {
   lastLarkTaskGuid: null,
 };
 
-let cache: Preferences | null = null;
+/**
+ * What is on disk. The last task is remembered per account: on a shared
+ * machine one person's last Lark task must never be pre-selected for the next.
+ * `lastLarkTaskGuid` survives only as the slot an install wrote before tasks
+ * were scoped (and the one used while nobody is signed in); the first owner
+ * bound at boot claims it.
+ */
+interface StoredPreferences {
+  floatingBar: FloatingBarPreferences;
+  lastLarkTaskGuid: string | null;
+  lastLarkTaskByOwner: Record<string, string>;
+}
+
+export type PreferencesOwner = { userId: string; workspaceId: string };
+
+let cache: StoredPreferences | null = null;
+let ownerKey: string | null = null;
 const listeners = new Set<(prefs: Preferences) => void>();
 let writeTimer: NodeJS.Timeout | null = null;
+/** Writes run one at a time: two flushes sharing one temp path could rename a half-written file. */
+let writeChain: Promise<void> = Promise.resolve();
+let tempSequence = 0;
 
 function filePath(): string {
   return path.join(app.getPath('userData'), 'preferences.json');
 }
 
+function isGuid(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0;
+}
+
 /** Merge a parsed (possibly partial / old) object over defaults defensively. */
-function coerce(raw: unknown): Preferences {
-  const r = (raw ?? {}) as Partial<Preferences>;
+function coerce(raw: unknown): StoredPreferences {
+  const r = (raw ?? {}) as Partial<StoredPreferences>;
+  const byOwnerRaw = r.lastLarkTaskByOwner && typeof r.lastLarkTaskByOwner === 'object' ? r.lastLarkTaskByOwner : {};
+  const lastLarkTaskByOwner: Record<string, string> = {};
+  for (const [key, guid] of Object.entries(byOwnerRaw)) {
+    if (isGuid(guid)) lastLarkTaskByOwner[key] = guid;
+  }
   const fb = (r.floatingBar ?? {}) as Partial<FloatingBarPreferences>;
   return {
     floatingBar: {
@@ -64,14 +92,13 @@ function coerce(raw: unknown): Preferences {
       x: typeof fb.x === 'number' && Number.isFinite(fb.x) ? fb.x : null,
       y: typeof fb.y === 'number' && Number.isFinite(fb.y) ? fb.y : null,
     },
-    lastLarkTaskGuid: typeof r.lastLarkTaskGuid === 'string' && r.lastLarkTaskGuid.length > 0
-      ? r.lastLarkTaskGuid
-      : null,
+    lastLarkTaskGuid: isGuid(r.lastLarkTaskGuid) ? r.lastLarkTaskGuid : null,
+    lastLarkTaskByOwner,
   };
 }
 
 /** Load once at boot (sync — file is tiny + only read at startup). */
-function ensureLoaded(): Preferences {
+function ensureLoaded(): StoredPreferences {
   if (cache) return cache;
   try {
     const txt = readFileSync(filePath(), 'utf8');
@@ -80,15 +107,55 @@ function ensureLoaded(): Preferences {
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
       log.warn('preferences: unreadable, using defaults', { err: String(err) });
     }
-    cache = { ...DEFAULTS, floatingBar: { ...DEFAULTS.floatingBar } };
+    cache = { ...DEFAULTS, floatingBar: { ...DEFAULTS.floatingBar }, lastLarkTaskByOwner: {} };
   }
   return cache;
+}
+
+function keyFor(owner: PreferencesOwner): string {
+  return `${owner.userId}:${owner.workspaceId}`;
+}
+
+function lastTaskFor(c: StoredPreferences): string | null {
+  return ownerKey === null ? c.lastLarkTaskGuid : c.lastLarkTaskByOwner[ownerKey] ?? null;
+}
+
+/**
+ * Scope per-account preferences to the signed-in session. `claimLegacy` (boot
+ * only) hands an unscoped remembered task to this owner, once.
+ */
+export function setPreferencesOwner(owner: PreferencesOwner | null, opts: { claimLegacy?: boolean } = {}): void {
+  const nextKey = owner ? keyFor(owner) : null;
+  const c = ensureLoaded();
+  if (nextKey !== null && opts.claimLegacy && c.lastLarkTaskGuid !== null) {
+    if (!(nextKey in c.lastLarkTaskByOwner)) c.lastLarkTaskByOwner[nextKey] = c.lastLarkTaskGuid;
+    c.lastLarkTaskGuid = null;
+    scheduleWrite();
+  }
+  if (nextKey === ownerKey) return;
+  ownerKey = nextKey;
+  notify();
 }
 
 export function getPreferences(): Preferences {
   const c = ensureLoaded();
   // Hand back a structural copy so callers can't mutate the cache in place.
-  return { floatingBar: { ...c.floatingBar }, lastLarkTaskGuid: c.lastLarkTaskGuid };
+  return {
+    floatingBar: { ...c.floatingBar },
+    lastLarkTaskGuid: lastTaskFor(c),
+  };
+}
+
+function notify(): Preferences {
+  const snapshot = getPreferences();
+  for (const fn of listeners) {
+    try {
+      fn(snapshot);
+    } catch (err) {
+      log.warn('preferences: listener threw', { err: String(err) });
+    }
+  }
+  return snapshot;
 }
 
 /**
@@ -99,15 +166,7 @@ export function patchFloatingBar(patch: Partial<FloatingBarPreferences>): Prefer
   const c = ensureLoaded();
   c.floatingBar = { ...c.floatingBar, ...patch };
   scheduleWrite();
-  const snapshot = getPreferences();
-  for (const fn of listeners) {
-    try {
-      fn(snapshot);
-    } catch (err) {
-      log.warn('preferences: listener threw', { err: String(err) });
-    }
-  }
-  return snapshot;
+  return notify();
 }
 
 /**
@@ -117,18 +176,12 @@ export function patchFloatingBar(patch: Partial<FloatingBarPreferences>): Prefer
  */
 export function rememberLastLarkTask(guid: string | null): Preferences {
   const c = ensureLoaded();
-  if (c.lastLarkTaskGuid === guid) return getPreferences();
-  c.lastLarkTaskGuid = guid;
+  if (lastTaskFor(c) === guid) return getPreferences();
+  if (ownerKey === null) c.lastLarkTaskGuid = guid;
+  else if (guid === null) delete c.lastLarkTaskByOwner[ownerKey];
+  else c.lastLarkTaskByOwner[ownerKey] = guid;
   scheduleWrite();
-  const snapshot = getPreferences();
-  for (const fn of listeners) {
-    try {
-      fn(snapshot);
-    } catch (err) {
-      log.warn('preferences: listener threw', { err: String(err) });
-    }
-  }
-  return snapshot;
+  return notify();
 }
 
 export function onPreferencesChange(fn: (prefs: Preferences) => void): () => void {
@@ -144,11 +197,25 @@ function scheduleWrite(): void {
   }, 250);
 }
 
-/** Atomic write: temp file + rename, so a crash mid-write never corrupts. */
-async function flush(): Promise<void> {
+/**
+ * Atomic write: temp file + rename, so a crash mid-write never corrupts.
+ *
+ * Serialized, and each write snapshots the cache when its turn comes. The
+ * debounced write and the quit flush used to run concurrently through the
+ * same temp path: one rename could move the other's half-written file into
+ * place, or fail with ENOENT and leave the older contents on disk.
+ */
+function flush(): Promise<void> {
+  const run = writeChain.then(writeOnce, writeOnce);
+  writeChain = run;
+  return run;
+}
+
+async function writeOnce(): Promise<void> {
   if (!cache) return;
   const target = filePath();
-  const tmp = `${target}.${process.pid}.tmp`;
+  tempSequence += 1;
+  const tmp = `${target}.${process.pid}.${tempSequence}.tmp`;
   try {
     await fs.writeFile(tmp, JSON.stringify(cache, null, 2), { mode: 0o600 });
     await fs.rename(tmp, target);

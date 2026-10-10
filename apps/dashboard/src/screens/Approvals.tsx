@@ -9,6 +9,7 @@ import { api, type ApiError } from '../lib/api';
 import { hasCapability, isManagerOrAbove } from '../lib/auth';
 import type { DecideResult, ManualTimeRequest, MtrStatus, MtrUserSummary } from '../lib/types';
 import { addDays, fmtAgeShort, fmtDayLabel, fmtDurationMs, fmtTime, todayKey } from '../lib/format';
+import { dateKeyInTimeZone, daysBetween } from '@grind/types';
 import { reportQueryKeys } from '../lib/reportQueries';
 import type { TaskOption } from '../components/TaskCombo';
 import {
@@ -163,6 +164,9 @@ export function ApprovalsScreen() {
       queryClient.invalidateQueries({ queryKey: ['approvals', 'team'] });
       queryClient.invalidateQueries({ queryKey: ['reports', 'team', 'member'] });
       queryClient.invalidateQueries({ queryKey: reportQueryKeys.teamSummaryRoot });
+      // Team today's pending queue and the person's day both move with a decision.
+      queryClient.invalidateQueries({ queryKey: ['admin', 'overview'] });
+      queryClient.invalidateQueries({ queryKey: ['insights', 'day'] });
     },
   });
 
@@ -908,19 +912,6 @@ function editTimeSearch(date: string, req: ApprovalRequest, userId?: string) {
   return search;
 }
 
-function dateKeyInTimeZone(ms: number, tz: string): string {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: tz,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(new Date(ms));
-  const year = parts.find((part) => part.type === 'year')?.value;
-  const month = parts.find((part) => part.type === 'month')?.value;
-  const day = parts.find((part) => part.type === 'day')?.value;
-  return year && month && day ? `${year}-${month}-${day}` : new Date(ms).toISOString().slice(0, 10);
-}
-
 function cleanTaskLabel(value: string | null | undefined): string | null {
   const trimmed = typeof value === 'string' ? value.trim() : '';
   return trimmed.length > 0 ? trimmed : null;
@@ -969,10 +960,6 @@ function monthStart(date: Date): Date {
 
 function addMonths(date: Date, delta: number): Date {
   return new Date(date.getFullYear(), date.getMonth() + delta, 1);
-}
-
-function daysBetween(a: string, b: string): number {
-  return Math.round((parseDateKey(b).getTime() - parseDateKey(a).getTime()) / (24 * 60 * 60 * 1000));
 }
 
 function calendarCells(month: Date): Array<string | null> {

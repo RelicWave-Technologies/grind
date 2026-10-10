@@ -94,7 +94,6 @@ export const AttendanceOverrideDtoSchema = z.object({
    */
   stale: z.boolean(),
 });
-export type AttendanceOverrideDto = z.infer<typeof AttendanceOverrideDtoSchema>;
 
 export const SetAttendanceOverrideRequest = z.object({
   userId: z.string().min(1),
@@ -151,6 +150,10 @@ export const MemberReportDaySchema = z.object({
    */
   punchInMinute: z.number().int().min(0).max(1439).nullable(),
   punchOutMinute: z.number().int().min(0).max(1439).nullable(),
+  /**
+   * Early / late against the shift start, judged on `punchInMinute` (the door),
+   * never on `firstActivityMs`. A worked day with no punch-in is `on_time`.
+   */
   shiftStatus: ShiftStatusSchema,
   gaps: z.object({
     count: z.number().int().min(0),
@@ -211,7 +214,6 @@ export const TeamReportApprovalCountsSchema = z.object({
   pending: z.number().int().min(0),
   rejected: z.number().int().min(0),
 });
-export type TeamReportApprovalCounts = z.infer<typeof TeamReportApprovalCountsSchema>;
 
 export const TeamReportMemberSchema = z.object({
   user: TeamReportUserSchema,
@@ -286,53 +288,6 @@ export const TeamReportsSummaryResponseSchema = z.object({
 });
 export type TeamReportsSummaryResponse = z.infer<typeof TeamReportsSummaryResponseSchema>;
 
-export const TeamReportAttentionKindSchema = z.enum([
-  'pending_approval',
-  'late',
-  'no_activity',
-  'gap',
-  'missing_activity',
-  'low_activity',
-]);
-export type TeamReportAttentionKind = z.infer<typeof TeamReportAttentionKindSchema>;
-
-export const TeamReportAttentionItemSchema = z.object({
-  id: z.string(),
-  userId: z.string(),
-  userName: z.string(),
-  date: z.string(),
-  kind: TeamReportAttentionKindSchema,
-  severity: z.enum(['danger', 'warn', 'neutral']),
-  title: z.string(),
-  detail: z.string(),
-});
-export type TeamReportAttentionItem = z.infer<typeof TeamReportAttentionItemSchema>;
-
-export const TeamReportsResponseSchema = z.object({
-  from: z.string(),
-  to: z.string(),
-  tz: z.string(),
-  days: z.array(z.string()),
-  summary: z.object({
-    memberCount: z.number().int().min(0),
-    workedMs: z.number().int().min(0),
-    manualMs: z.number().int().min(0),
-    invalidatedMs: z.number().int().min(0),
-    activeDays: z.number().int().min(0),
-    memberDays: z.number().int().min(0),
-    lateDays: z.number().int().min(0),
-    noActivityDays: z.number().int().min(0),
-    gapCount: z.number().int().min(0),
-    gapMs: z.number().int().min(0),
-    pendingApprovals: z.number().int().min(0),
-    activityPercent: z.number().int().min(0).max(100).nullable(),
-    screenshots: z.number().int().min(0),
-  }),
-  attention: z.array(TeamReportAttentionItemSchema),
-  members: z.array(TeamReportMemberSchema),
-});
-export type TeamReportsResponse = z.infer<typeof TeamReportsResponseSchema>;
-
 export const TeamMemberReportsResponseSchema = z.object({
   from: z.string(),
   to: z.string(),
@@ -364,7 +319,6 @@ export const ReportActivityHeatmapSchema = z.object({
   buckets: z.array(z.number().int().min(0).max(100).nullable()),
   sampleCounts: z.array(z.number().int().min(0)),
 });
-export type ReportActivityHeatmap = z.infer<typeof ReportActivityHeatmapSchema>;
 
 export const MemberReportScreenshotSchema = z.object({
   id: z.string(),
@@ -397,27 +351,6 @@ export const MemberReportDayScreenshotsResponseSchema = z.object({
 export type MemberReportDayScreenshotsResponse = z.infer<typeof MemberReportDayScreenshotsResponseSchema>;
 
 export const ScreenshotUploadStateSchema = z.enum(['PENDING', 'UPLOADED', 'FAILED']);
-export type ScreenshotUploadState = z.infer<typeof ScreenshotUploadStateSchema>;
-
-export const PendingScreenshotUploadRequest = z.object({
-  id: z.string().min(1),
-  timeEntryId: z.string().min(1).nullable().optional(),
-  displayId: z.string().max(120).nullable().optional(),
-  capturedAt: z.string().datetime({ offset: true }),
-  bytes: z.number().int().min(0).nullable().optional(),
-  width: z.number().int().min(0).nullable().optional(),
-  height: z.number().int().min(0).nullable().optional(),
-  blurred: z.boolean().optional(),
-});
-export type PendingScreenshotUploadRequest = z.infer<typeof PendingScreenshotUploadRequest>;
-
-export const PendingScreenshotUploadResponse = z.object({
-  id: z.string(),
-  uploadState: z.literal('PENDING'),
-  uploadUrl: z.string().nullable(),
-  uploadHeaders: z.record(z.string()),
-});
-export type PendingScreenshotUploadResponse = z.infer<typeof PendingScreenshotUploadResponse>;
 
 export const CompleteScreenshotUploadRequest = z.object({
   id: z.string().min(1),
@@ -444,10 +377,9 @@ export const CompleteScreenshotUploadResponse = z.object({
 export type CompleteScreenshotUploadResponse = z.infer<typeof CompleteScreenshotUploadResponse>;
 
 /**
- * Ask the API to mint a short-lived Cloudinary signature so the agent can
- * upload a screenshot directly to Cloudinary without ever holding the
- * api_secret. The agent supplies the screenshot id; the server derives the
- * public_id + folder and signs the upload params.
+ * Ask the API for a short-lived upload target for one screenshot. The agent
+ * supplies the screenshot id; the server answers with a signed Google Drive
+ * upload URL in the Cloudinary-shaped contract the agent was built against.
  */
 export const SignScreenshotUploadRequest = z.object({
   id: z.string().min(1),
@@ -455,7 +387,7 @@ export const SignScreenshotUploadRequest = z.object({
 export type SignScreenshotUploadRequest = z.infer<typeof SignScreenshotUploadRequest>;
 
 export const SignScreenshotUploadResponse = z.object({
-  // Cloudinary unsigned-upload coordinates the agent POSTs the file to.
+  // Upload coordinates the agent POSTs the file to (Cloudinary-shaped).
   cloudName: z.string(),
   apiKey: z.string(),
   uploadUrl: z.string().url(),

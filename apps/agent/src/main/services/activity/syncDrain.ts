@@ -2,9 +2,9 @@ import type { ActivityStore } from './store';
 
 export type ActivitySyncDrainReason = 'boot' | 'auth' | 'heartbeat' | 'wake' | 'periodic' | 'sample' | 'manual';
 
-export const DEFAULT_ACTIVITY_SYNC_DRAIN_INTERVAL_MS = 5 * 60_000;
-export const HEARTBEAT_ACTIVITY_DRAIN_THROTTLE_MS = 60_000;
-export const ACTIVITY_SYNC_DRAIN_MAX_BATCHES = 10;
+const DEFAULT_ACTIVITY_SYNC_DRAIN_INTERVAL_MS = 5 * 60_000;
+const HEARTBEAT_ACTIVITY_DRAIN_THROTTLE_MS = 60_000;
+const ACTIVITY_SYNC_DRAIN_MAX_BATCHES = 10;
 
 export interface ActivitySyncDrainLogger {
   debug(message: string, meta?: Record<string, unknown>): void;

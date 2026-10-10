@@ -1,12 +1,13 @@
 import './users.css';
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useRouteContext } from '@tanstack/react-router';
+import { useNavigate, useRouteContext, useSearch } from '@tanstack/react-router';
 import { Pencil, Check, X, UserPlus, UserMinus, UserCheck, Trash2, Users as UsersIcon } from 'lucide-react';
 import type { LaunchAtLoginState, LaunchOrigin } from '@grind/types';
 import { api, type ApiError } from '../lib/api';
 import { isAdmin, type Role } from '../lib/auth';
 import type { Team, Shift } from '../lib/types';
+import { matchesSyncFilter, syncTag, type SyncFilter, type SyncHealth } from '../lib/syncHealth';
 import {
   Page,
   PageHeader,
@@ -82,6 +83,8 @@ interface AdminUser {
   agentLaunchAtLoginState: LaunchAtLoginState | null;
   agentLaunchOrigin: LaunchOrigin | null;
   agentLaunchAtLoginUpdatedAt: string | null;
+  /** Is their tracked time reaching the server? Null for a member's own view and deactivated people. */
+  sync: SyncHealth | null;
 }
 
 interface UsersResponse {
@@ -110,6 +113,12 @@ const STATUS_FILTER = [
   { value: 'all', label: 'All' },
 ] as const;
 
+const SYNC_FILTER_LABEL: Record<SyncFilter, string> = {
+  stuck: 'is stuck',
+  behind: 'is behind',
+  unknown: 'is unknown',
+};
+
 const PLATFORM_META: Record<string, { label: string; iconSrc?: string }> = {
   darwin: { label: 'macOS', iconSrc: '/brand/apple.svg' },
   win32: { label: 'Windows', iconSrc: '/brand/windows.svg' },
@@ -126,6 +135,8 @@ function joinedDateLabel(value: string): string {
 
 export function UsersScreen() {
   const { me } = useRouteContext({ from: '/authed' });
+  const { sync: syncFilter } = useSearch({ from: '/authed/users' });
+  const navigate = useNavigate();
   const canEdit = isAdmin(me.role);
   const qc = useQueryClient();
   const [showDeactivated, setShowDeactivated] = useState(false);
@@ -221,10 +232,15 @@ export function UsersScreen() {
   const onlineCount = presenceEligible.filter((u) => u.agentPresence === 'ONLINE').length;
   const offlineCount = presenceEligible.length - onlineCount;
   const showDeviceHealth = canEdit;
+  // Managers (their team) and admins see whether each person's time arrives.
+  const showSync = usersQ.data !== undefined && usersQ.data.scope !== 'self';
+  const syncStuckCount = activePeople.filter((u) => u.sync?.status === 'STUCK').length;
+  const syncBehindCount = activePeople.filter((u) => u.sync?.status === 'BEHIND').length;
+  const visible = syncFilter && showSync ? sorted.filter((u) => matchesSyncFilter(u.sync, syncFilter)) : sorted;
 
   // Person, Role, Presence, Team, Shift, Joined = 6, plus the admin-only
-  // Birth date and actions columns, plus the two device-health ones.
-  const colSpan = (canEdit ? 8 : 6) + (showDeviceHealth ? 2 : 0);
+  // Birth date and actions columns, plus the two device-health ones, plus Sync.
+  const colSpan = (canEdit ? 8 : 6) + (showDeviceHealth ? 2 : 0) + (showSync ? 1 : 0);
 
   return (
     <Page>
@@ -263,10 +279,31 @@ export function UsersScreen() {
             {canEdit && <Stat label="Online" value={String(onlineCount)} />}
             {canEdit && <Stat label="Offline" value={String(offlineCount)} />}
             {canEdit && <Stat label="Pending setup" value={String(pendingCount)} />}
+            {showSync && (
+              <Stat
+                label="Sync stuck"
+                value={String(syncStuckCount)}
+                hint={syncBehindCount > 0 ? `${syncBehindCount} behind` : 'Timo uploads'}
+              />
+            )}
             <Stat label="Deactivated" value={String(offCount)} />
             <Stat label="Total" value={String(sorted.length)} />
           </StatRow>
         </Card>
+      )}
+
+      {showSync && syncFilter && (
+        <Banner
+          status={syncFilter === 'stuck' ? 'danger' : syncFilter === 'behind' ? 'warn' : 'info'}
+          className="rise rise-1"
+          action={
+            <Button variant="ghost" size="sm" onClick={() => navigate({ to: '/users', search: {} })}>
+              Show everyone
+            </Button>
+          }
+        >
+          {`Showing ${visible.length} ${visible.length === 1 ? 'person' : 'people'} whose Timo sync ${SYNC_FILTER_LABEL[syncFilter]}.`}
+        </Banner>
       )}
 
       {canEdit && inviting && (
@@ -300,9 +337,22 @@ export function UsersScreen() {
             title="No people yet"
             description="Nobody is visible in your current scope."
           />
+        ) : visible.length === 0 ? (
+          <EmptyState
+            icon={<UsersIcon size={22} strokeWidth={1.6} />}
+            title="Nobody matches"
+            description={`No one's Timo sync ${syncFilter ? SYNC_FILTER_LABEL[syncFilter] : 'matches'} right now.`}
+          />
         ) : (
           <div className="usr-table-wrap">
-            <Table density="comfortable" className={showDeviceHealth ? 'usr-table usr-table--device' : 'usr-table'}>
+            <Table
+              density="comfortable"
+              className={[
+                'usr-table',
+                showDeviceHealth && 'usr-table--device',
+                showSync && 'usr-table--sync',
+              ].filter(Boolean).join(' ')}
+            >
               <colgroup>
                 <col className="usr-col-person" />
                 <col className="usr-col-role" />
@@ -311,6 +361,7 @@ export function UsersScreen() {
                 <col className="usr-col-shift" />
                 {showDeviceHealth && <col className="usr-col-device" />}
                 {showDeviceHealth && <col className="usr-col-permissions" />}
+                {showSync && <col className="usr-col-sync" />}
                 {canEdit && <col className="usr-col-birth" />}
                 <col className="usr-col-joined" />
                 {canEdit && <col className="usr-col-actions" />}
@@ -324,13 +375,14 @@ export function UsersScreen() {
                   <Th>Shift</Th>
                   {showDeviceHealth && <Th>Device</Th>}
                   {showDeviceHealth && <Th>Health</Th>}
+                  {showSync && <Th>Sync</Th>}
                   {canEdit && <Th align="right">Birth date</Th>}
                   <Th align="right">Joined</Th>
                   {canEdit && <Th align="right">{''}</Th>}
                 </Tr>
               </THead>
               <Tbody>
-                {sorted.map((u) => (
+                {visible.map((u) => (
                   <PersonRow
                     key={u.id}
                     user={u}
@@ -338,6 +390,7 @@ export function UsersScreen() {
                     canEdit={canEdit}
                     colSpan={colSpan}
                     showDeviceHealth={showDeviceHealth}
+                    showSync={showSync}
                     teams={teamsQ.data?.teams ?? []}
                     teamName={teamName(u.teamId)}
                     shifts={shiftsQ.data?.shifts ?? []}
@@ -390,6 +443,7 @@ interface RowProps {
   canEdit: boolean;
   colSpan: number;
   showDeviceHealth: boolean;
+  showSync: boolean;
   teams: Team[];
   teamName: string;
   shifts: Shift[];
@@ -415,6 +469,7 @@ function PersonRow({
   canEdit,
   colSpan,
   showDeviceHealth,
+  showSync,
   teams,
   teamName,
   shifts,
@@ -582,6 +637,13 @@ function PersonRow({
           </Td>
         )}
 
+        {/* Sync — is their tracked time reaching the server? -------------- */}
+        {showSync && (
+          <Td>
+            <SyncCell sync={user.sync} />
+          </Td>
+        )}
+
         {/* Birth date — admin only, both to see and to change ------------- */}
         {canEdit && (
           <Td align="right" mono className="usr-joined">
@@ -708,6 +770,15 @@ function presenceTag(
     return { label: 'Online', status: 'success', title: 'Timo is actively tracking and sent a heartbeat within the last 3 minutes.' };
   }
   if (user.agentPresence === 'OFFLINE') {
+    // Paused because a permission stopped working is not "offline": the person
+    // is at the machine and cannot track until it is fixed.
+    if (user.agentState === 'PAUSED_PERMISSION' && isHeartbeatFresh(user.agentLastSeenAt)) {
+      return {
+        label: 'Blocked: permission',
+        status: 'danger',
+        title: 'Tracking is paused until Screen Recording or Accessibility works again on this device.',
+      };
+    }
     const title = user.agentState === 'IDLE'
       ? 'Timo is connected but not tracking right now.'
       : user.agentState === 'PAUSED_IDLE' || user.agentState === 'PAUSED_PERMISSION'
@@ -716,6 +787,14 @@ function presenceTag(
     return { label: 'Offline', status: 'neutral', title };
   }
   return { label: 'Unknown', status: 'neutral', title: 'Live device presence is visible to workspace admins only.' };
+}
+
+// Mirrors the API's AGENT_HEARTBEAT_FRESH_MS: a state older than this is
+// whatever the device last said, not what it is doing now.
+const AGENT_HEARTBEAT_FRESH_MS = 3 * 60 * 1000;
+
+function isHeartbeatFresh(lastSeenAt: string | null): boolean {
+  return lastSeenAt !== null && Date.now() - Date.parse(lastSeenAt) <= AGENT_HEARTBEAT_FRESH_MS;
 }
 
 function DeviceCell({ user }: { user: AdminUser }) {
@@ -736,6 +815,19 @@ function DeviceCell({ user }: { user: AdminUser }) {
         <span className="usr-device-name">{meta.label}</span>
         <span className="usr-device-version">{version}</span>
       </span>
+    </span>
+  );
+}
+
+function SyncCell({ sync }: { sync: SyncHealth | null }) {
+  if (!sync) return <span className="usr-device-empty">—</span>;
+  const tag = syncTag(sync);
+  return (
+    <span className="usr-role-stack" title={tag.title}>
+      <Tag status={tag.status} dot>
+        {tag.label}
+      </Tag>
+      <span className="ui-t-small ui-ink-3">{tag.summary}</span>
     </span>
   );
 }
@@ -801,7 +893,12 @@ function screenPermissionTag(user: AdminUser): { label: string; status: Status; 
   }
   if (user.agentScreenPermissionState === 'ok') return { label: 'Screen OK', status: 'success', title: 'Screen Recording is ready.' };
   if (user.agentScreenPermissionState === 'needs-restart') {
-    return { label: 'Screen restart', status: 'warn', title: 'Permission changed; Timo needs a restart.' };
+    // Wire name kept for older agents; it means granted but not capturing.
+    return {
+      label: 'Screen not verified',
+      status: 'warn',
+      title: 'Screen Recording is granted, but Timo has not captured a working frame yet.',
+    };
   }
   if (user.agentScreenPermissionState === 'needs-settings') {
     return { label: 'Screen off', status: 'danger', title: 'Screen Recording is denied or restricted.' };
@@ -812,6 +909,14 @@ function screenPermissionTag(user: AdminUser): { label: string; status: Status; 
 function accessibilityPermissionTag(user: AdminUser): { label: string; status: Status; title: string } {
   if (!user.agentPlatform) return { label: 'Access ?', status: 'neutral', title: 'No desktop heartbeat yet.' };
   if (user.agentPlatform !== 'darwin') {
+    // No grant exists here, but the keyboard & mouse hook can still fail.
+    if (user.agentPermissionsUpdatedAt && user.agentAccessibilityReady === false) {
+      return {
+        label: 'Input failed',
+        status: 'warn',
+        title: 'Timo could not start its keyboard & mouse counter on this device, so activity counts are missing.',
+      };
+    }
     return {
       label: 'Access N/A',
       status: 'neutral',
@@ -823,10 +928,14 @@ function accessibilityPermissionTag(user: AdminUser): { label: string; status: S
   }
   if (!user.agentAccessibilityTrusted) return { label: 'Access off', status: 'danger', title: 'Accessibility is not granted.' };
   if (!user.agentAccessibilityReady) {
-    return { label: 'Access restart', status: 'warn', title: 'Accessibility is granted, but Timo needs a restart.' };
+    return {
+      label: 'Access blocked',
+      status: 'danger',
+      title: 'Blocked: permission. Accessibility is granted, but macOS refused Timo\'s keyboard & mouse hook. Turn Timo off and on under Accessibility.',
+    };
   }
   if (user.agentAccessibilityRecording && !user.agentAccessibilityHookRunning) {
-    return { label: 'Access restart', status: 'danger', title: 'Timo is tracking, but the input hook is not running.' };
+    return { label: 'Access blocked', status: 'danger', title: 'Timo is tracking, but the input hook is not running.' };
   }
   return { label: 'Access OK', status: 'success', title: 'Accessibility is ready.' };
 }

@@ -19,14 +19,26 @@ export interface CanonicalTimerEntryLike {
   }>;
 }
 
+/**
+ * Whole milliseconds, the precision the server stores. Agents before beta.38
+ * persisted fractional timestamps; truncating here lets those rows hash equal
+ * to the server's copy instead of staying unacknowledged forever.
+ */
 function epoch(value: Timestamp): number {
-  if (typeof value === 'number') return value;
-  const parsed = value instanceof Date ? value.getTime() : new Date(value).getTime();
+  const parsed = typeof value === 'number'
+    ? value
+    : value instanceof Date ? value.getTime() : new Date(value).getTime();
   if (!Number.isFinite(parsed)) throw new Error('invalid_timer_timestamp');
-  return parsed;
+  return Math.trunc(parsed);
 }
 
-/** Stable agent-owned payload used for exact revision acknowledgement. */
+/**
+ * Stable agent-owned payload used for exact revision acknowledgement.
+ *
+ * Zero-length segments are left out: the server never stores them (see
+ * ZERO-LENGTH SEGMENTS in segments.ts), so an entry is hashed the way it will
+ * be stored and a local copy still holding one matches the server's receipt.
+ */
 export function canonicalTimerEntryPayload(entry: CanonicalTimerEntryLike): string {
   const segments = entry.segments
     .map((segment) => ({
@@ -35,6 +47,8 @@ export function canonicalTimerEntryPayload(entry: CanonicalTimerEntryLike): stri
       startedAt: epoch(segment.startedAt),
       endedAt: segment.endedAt === null ? null : epoch(segment.endedAt),
     }))
+    // After `epoch`, so a sub-millisecond span counts as the zero it arrives as.
+    .filter((segment) => segment.endedAt === null || segment.endedAt !== segment.startedAt)
     .sort((a, b) => a.startedAt - b.startedAt || a.id.localeCompare(b.id));
 
   return JSON.stringify({

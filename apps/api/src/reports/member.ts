@@ -1,34 +1,41 @@
 import {
-  WEEKDAYS,
-  ShiftScheduleSchema,
-  dateKeyInTimeZone,
+  addDays,
   isValidTimeZone,
+  isYmd,
+  todayKey,
   type MemberReportApp,
   type MemberReportDay,
   type MemberReportScreenshot,
-  type ShiftSchedule,
-  type ShiftStatus,
 } from '@grind/types';
+import {
+  DEFAULT_HALF_DAY_LATE_AFTER_MINUTE,
+  DEFAULT_LATE_GRACE_MINUTES,
+  instantForLocalMinute,
+  bucketByDay,
+  containsInstant,
+  emptyDayBucket,
+  invalidationsByUser,
+  shiftStatusFor,
+  shiftWindowFor,
+  type Interval,
+  type TimelineInvalidation,
+  type TimelinePiece,
+  activityPercentOverTrackedMinutes,
+  clipInterval,
+} from '@grind/core';
+import { punchInMs, type PunchLookup } from '../attendance/punches';
 import { appUsageIdentity, buildAppUsage } from '../insights/appUsage';
 import { appIconUrl } from '../insights/appIcon';
-import { buildDayInsight, localDayWindow, shiftDayWindow } from '../insights/day';
+import { buildDayInsight, localDayWindow, type DayEntryMeta } from '../insights/day';
 import { buildHeatmap, DEFAULT_BUCKET_MS, type HeatmapSample } from '../insights/heatmap';
-import {
-  groupInvalidationsByUser,
-  isInvalidatedAt,
-  type InvalidationsByUser,
-  type TimeInvalidationInput,
-} from '../insights/invalidations';
-import type { EntryLiveEvidenceMap } from '../insights/liveEntryEvidence';
-import { resolveEffectiveEntrySegmentEnds } from '../insights/openSegmentEvidence';
-import type { AttendanceRuleVerdict, DayStatus } from '@grind/types';
+import type { AttendanceRuleMode, AttendanceRuleVerdict, DayStatus } from '@grind/types';
 import { computedCodeWithRule, overrideCode, type DayOverride } from './monthPerformance';
-import { buildTimesheetMatrix, dateRange, type TimesheetSegmentInput } from '../insights/timesheets';
+import { dateRange } from '../insights/timesheets';
 import type { RoleTitle } from '../scoring/presets';
 import { scoreMinute } from '../scoring/score';
 
-export const MEMBER_REPORT_MAX_DAYS = 60;
-export const MEMBER_REPORT_DEFAULT_DAYS = 7;
+const MEMBER_REPORT_MAX_DAYS = 60;
+const MEMBER_REPORT_DEFAULT_DAYS = 7;
 
 export interface ReportRange {
   from: string;
@@ -45,23 +52,13 @@ export interface ReportRangeError {
   extras?: Record<string, unknown>;
 }
 
-export interface ReportTimeEntry {
-  id: string;
-  userId: string;
-  source: 'AUTO' | 'MANUAL';
-  larkTaskGuid: string | null;
-  notes: string | null;
-  endedAt: Date | null;
-  trackingProtocolVersion?: number | null;
-  lastProvenAt?: Date | null;
-  leaseExpiresAt?: Date | null;
-  segments: Array<{
-    kind: 'WORK' | 'MEETING' | 'IDLE_TRIMMED';
-    startedAt: Date;
-    endedAt: Date | null;
-  }>;
-  attendees: Array<{ userId: string }>;
-}
+/**
+ * One person's resolved timeline (from `apps/api/src/time`): one owner per
+ * instant, open ends proven, invalidated minutes flagged. Include a day of
+ * lookback before the range so work running into the first day reads as a
+ * continuation.
+ */
+export type ReportTimelinePiece = TimelinePiece<DayEntryMeta>;
 
 export interface ReportManualRequest {
   id: string;
@@ -110,22 +107,6 @@ export interface ReportShiftAssignment {
   bufferMinSnapshot: number | null;
 }
 
-export function isYmd(value: unknown): value is string {
-  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-  const d = new Date(`${value}T00:00:00.000Z`);
-  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value;
-}
-
-export function todayKeyForTz(tz: string, now = new Date()): string {
-  return dateKeyInTimeZone(now, tz);
-}
-
-export function addDaysKey(day: string, delta: number): string {
-  const d = new Date(`${day}T00:00:00.000Z`);
-  d.setUTCDate(d.getUTCDate() + delta);
-  return d.toISOString().slice(0, 10);
-}
-
 export function resolveReportRange(query: Record<string, unknown>, workspaceTz: string): ReportRange | ReportRangeError {
   // Authenticated report routes are workspace-calendar views. Older clients
   // may still send their device timezone; it must never redefine business
@@ -142,8 +123,8 @@ export function resolveReportRange(query: Record<string, unknown>, workspaceTz: 
 
   if (query.from !== undefined && !isYmd(query.from)) return { status: 400, error: 'invalid_date' };
   if (query.to !== undefined && !isYmd(query.to)) return { status: 400, error: 'invalid_date' };
-  const to = isYmd(query.to) ? query.to : todayKeyForTz(tz);
-  const from = isYmd(query.from) ? query.from : addDaysKey(to, -(MEMBER_REPORT_DEFAULT_DAYS - 1));
+  const to = isYmd(query.to) ? query.to : todayKey(tz);
+  const from = isYmd(query.from) ? query.from : addDays(to, -(MEMBER_REPORT_DEFAULT_DAYS - 1));
   if (from > to) return { status: 400, error: 'invalid_range' };
 
   const days = dateRange(from, to);
@@ -177,13 +158,18 @@ export function buildMemberReportDays(input: {
   userId: string;
   range: ReportRange;
   now: Date;
-  entries: ReportTimeEntry[];
+  /** This person's resolved timeline (see {@link ReportTimelinePiece}). */
+  timeline: readonly ReportTimelinePiece[];
+  /** Reviewer invalidations, for the activity samples. */
+  invalidations?: readonly TimelineInvalidation[];
   manualRequests: ReportManualRequest[];
   samples: ReportActivitySample[];
   screenshots: ReportScreenshotRow[];
-  evidenceByEntry?: EntryLiveEvidenceMap;
   shiftAssignments: ReportShiftAssignment[];
-  invalidations?: TimeInvalidationInput[];
+  /** Company grace after the shift start (leave policy). Defaults to 30. */
+  lateGraceMinutes?: number;
+  /** First-half leave day: late after this minute of the day (leave policy). Defaults to 14:00. */
+  halfDayLateAfterMinute?: number;
   activityRoleTitle?: RoleTitle | null;
   iconFor?: IconResolver;
   /** Working Calendar lookup, supplied by the route that loaded it. */
@@ -191,9 +177,10 @@ export function buildMemberReportDays(input: {
   /**
    * External punch record lookup, supplied by the route that loaded it. Absent
    * or returning null means the day has no punch, which stays null rather than
-   * falling back to activity — the two are different measurements.
+   * falling back to activity — the two are different measurements. The
+   * punch-in is also what the Start column judges early and late on.
    */
-  punchFor?: (userId: string, date: string) => { inMinute: number | null; outMinute: number | null } | null;
+  punchFor?: PunchLookup;
   /**
    * A manager's or admin's correction for a day, supplied by the route. The
    * report table shows the corrected code and marks it as corrected, so a
@@ -206,39 +193,23 @@ export function buildMemberReportDays(input: {
   fundedDaysFor?: (userId: string, date: string) => number | undefined;
   /**
    * The attendance rules' late count, when the rules are on. From `from` on, a
-   * day reads Late exactly when the rules counted a late arrival — punch-in
-   * past the shift start plus the policy's grace — so the Start column and the
-   * month sheet's Late number cannot disagree.
+   * day reads Late exactly when the rules counted a late arrival — the door
+   * punch-in past the shift start plus the policy's grace, by the one core
+   * rule — so the Start column and the month sheet's Late number cannot
+   * disagree.
    */
   lateFor?: { from: string; ordinalFor: (userId: string, date: string) => number | null };
+  /**
+   * How the attendance rules treat the person. A REMOTE or EXEMPT person never
+   * reads Late, rules on or off — the rules never count them late.
+   */
+  attendanceModeFor?: (userId: string) => AttendanceRuleMode;
 }): MemberReportDay[] {
   const iconFor = input.iconFor ?? appIconUrl;
-  const entries = capOpenEntries(input.entries, input.evidenceByEntry, input.now);
-  const invalidationsByUser = groupInvalidationsByUser(input.invalidations);
-  const segments: TimesheetSegmentInput[] = [];
-  const nowMs = input.now.getTime();
-  for (const e of entries) {
-    for (const s of e.segments) {
-      segments.push({
-        userId: e.userId,
-        source: e.source,
-        segmentKind: s.kind,
-        startedAt: s.startedAt.getTime(),
-        endedAt: (s.endedAt ?? input.now).getTime(),
-      });
-    }
-  }
-
-  const matrix = buildTimesheetMatrix({
-    from: input.range.from,
-    to: input.range.to,
-    tz: input.range.tz,
-    segments,
-    invalidations: input.invalidations,
-    dayStatusFor: input.dayStatusFor,
-    userIds: [input.userId],
-  });
-  const cells = matrix?.cells[input.userId] ?? {};
+  const pieces = input.timeline.filter((p) => p.userId === input.userId);
+  const invalidated = invalidatedLookup(input.invalidations, input.userId);
+  const buckets = bucketByDay(pieces, input.range.tz, input.range.days).get(input.userId);
+  const grace = input.lateGraceMinutes ?? DEFAULT_LATE_GRACE_MINUTES;
 
   return input.range.days.map((date) => {
     const win = localDayWindow(date, input.range.tz);
@@ -247,37 +218,25 @@ export function buildMemberReportDays(input: {
     }
     const dayStart = win.start.getTime();
     const dayEnd = win.end.getTime();
-    const dayEntries = entries.filter((e) =>
-      e.segments.some((s) => overlaps(s.startedAt.getTime(), (s.endedAt ?? input.now).getTime(), dayStart, dayEnd)),
-    );
-    const meetingIntervals = meetingIntervalsForEntries(dayEntries, input.now);
+    const dayPieces = pieces.filter((p) => p.end > dayStart && p.start < dayEnd);
+    const meetings = meetingIntervalsOf(dayPieces);
     const dayPending = input.manualRequests.filter((r) =>
       r.status === 'PENDING' && overlaps(r.requestedStart.getTime(), r.requestedEnd.getTime(), dayStart, dayEnd),
     );
     const dayRejected = input.manualRequests.filter((r) =>
       r.status === 'REJECTED' && overlaps(r.requestedStart.getTime(), r.requestedEnd.getTime(), dayStart, dayEnd),
     );
-    const shift = resolveShiftForDay(date, input.range.tz, win, input.shiftAssignments);
+    const shift = shiftWindowFor(input.shiftAssignments, date, input.range.tz);
+    const shiftWindow = shift ? { start: new Date(shift.startMs), end: new Date(shift.endMs) } : null;
     const insight = buildDayInsight({
       date,
       tz: input.range.tz,
       now: input.now,
-      window: shift.window ?? win,
+      window: shiftWindow ?? win,
       calendarDay: win,
-      shift: shift.label,
-      shiftWindow: shift.window,
-      entries: dayEntries.map((e) => ({
-        id: e.id,
-        source: e.source,
-        larkTaskGuid: e.larkTaskGuid,
-        notes: e.notes,
-        attendeeIds: e.attendees.map((a) => a.userId),
-        segments: e.segments.map((s) => ({
-          kind: s.kind,
-          startedAt: s.startedAt,
-          endedAt: s.endedAt,
-        })),
-      })),
+      shift: shift ? { name: shift.name, start: shift.start, end: shift.end } : null,
+      shiftWindow,
+      timeline: pieces,
       pending: dayPending.map((p) => ({
         id: p.id,
         requestedStart: p.requestedStart,
@@ -296,18 +255,9 @@ export function buildMemberReportDays(input: {
       })),
     });
 
-    const cell = cells[date] ?? {
-      workedMs: 0,
-      meetingMs: 0,
-      manualMs: 0,
-      invalidatedMs: 0,
-      totalMs: 0,
-      firstActivityMs: null,
-      lastActivityMs: null,
-      activitySampleCount: 0,
-    };
+    const bucket = buckets?.get(date) ?? emptyDayBucket();
     const gaps = insight.blocks.filter((b) => b.kind === 'GAP');
-    const daySamples = samplesForWindow(input.samples, dayStart, dayEnd, invalidationsByUser, input.userId);
+    const daySamples = samplesForWindow(input.samples, dayStart, dayEnd, invalidated);
     const appUsage = buildAppUsage(
       daySamples.map((s) => ({
         activeApp: s.activeApp,
@@ -334,7 +284,7 @@ export function buildMemberReportDays(input: {
     const override = input.overrideFor?.(input.userId, date) ?? null;
     // Total tracked time, in minutes — the same measure the month performance
     // report bands on, so the two surfaces cannot call a day differently.
-    const trackedMinutes = Math.round(cell.totalMs / 60_000);
+    const trackedMinutes = Math.round(bucket.counted / 60_000);
     const rule = input.ruleFor?.(input.userId, date, dayStatus, trackedMinutes) ?? null;
     const computedCode = computedCodeWithRule(
       dayStatus,
@@ -348,33 +298,46 @@ export function buildMemberReportDays(input: {
 
     return {
       date,
-      workedMs: cell.workedMs,
-      meetingMs: cell.meetingMs,
-      manualMs: cell.manualMs,
-      invalidatedMs: cell.invalidatedMs,
-      firstActivityMs: cell.firstActivityMs,
-      lastActivityMs: cell.lastActivityMs,
+      workedMs: bucket.worked,
+      meetingMs: bucket.meeting,
+      manualMs: bucket.manual,
+      invalidatedMs: bucket.invalidated,
+      firstActivityMs: bucket.first,
+      lastActivityMs: bucket.last,
       punchInMinute: punch?.inMinute ?? null,
       punchOutMinute: punch?.outMinute ?? null,
-      shiftStatus:
-        input.lateFor && date >= input.lateFor.from
-          ? ruleShiftStatus({
-              shift,
-              firstActivityMs: cell.firstActivityMs,
-              punchInMinute: punch?.inMinute ?? null,
-              late: input.lateFor.ordinalFor(input.userId, date) !== null,
-            })
-          : computeShiftStatus({
-              shift,
-              firstActivityMs: cell.firstActivityMs,
-              nowMs,
-            }),
+      // One late rule everywhere: the door punch-in after the shift assigned
+      // for this date plus the company grace — on a first-half leave day,
+      // after the afternoon time — for a STANDARD person only. With the
+      // attendance rules on, Late is what the rules counted, so the Start
+      // column and the month sheet agree day for day.
+      shiftStatus: shiftStatusFor({
+        shiftStartMs: shift?.startMs ?? null,
+        punchInMs: punchInMs(punch, date, input.range.tz),
+        countedMs: bucket.counted,
+        graceMinutes: grace,
+        halfDayLateAfterMs: instantForLocalMinute(
+          date,
+          input.halfDayLateAfterMinute ?? DEFAULT_HALF_DAY_LATE_AFTER_MINUTE,
+          input.range.tz,
+        ),
+        status: dayStatus,
+        mode: input.attendanceModeFor?.(input.userId),
+        late: input.lateFor && date >= input.lateFor.from
+          ? input.lateFor.ordinalFor(input.userId, date) !== null
+          : undefined,
+      }),
       gaps: {
         count: gaps.length,
         totalMs: gaps.reduce((sum, g) => sum + g.durationMs, 0),
       },
       approvals,
-      activityPercent: activityPercent(daySamples, input.activityRoleTitle, meetingIntervals),
+      activityPercent: activityPercent(
+        daySamples,
+        input.activityRoleTitle,
+        meetings,
+        Math.round(bucket.worked / 60_000),
+      ),
       screenshots: { count: screenshotCount },
       topApps,
       dayStatus: dayStatus ?? null,
@@ -393,39 +356,18 @@ export function buildMemberReportDays(input: {
   });
 }
 
-function capOpenEntries(
-  entries: ReportTimeEntry[],
-  evidenceByEntry: EntryLiveEvidenceMap | undefined,
-  now: Date,
-): ReportTimeEntry[] {
-  return entries.map((entry) => {
-    const effectiveEnds = resolveEffectiveEntrySegmentEnds({
-      segments: entry.segments,
-      entryEndedAt: entry.endedAt,
-      now,
-      evidence: evidenceByEntry?.get(entry.id),
-      lifecycle: entry,
-    });
-    return {
-      ...entry,
-      segments: entry.segments.map((segment, index) => ({ ...segment, endedAt: effectiveEnds[index]! })),
-    };
-  });
-}
-
 export function buildMemberReportApps(input: {
   userId: string;
   range: ReportRange;
   samples: ReportActivitySample[];
-  invalidations?: TimeInvalidationInput[];
+  invalidations?: readonly TimelineInvalidation[];
   iconFor?: IconResolver;
 }): { date: string; tz: string; totalMinutes: number; apps: MemberReportApp[] } {
   const iconFor = input.iconFor ?? appIconUrl;
   const win = localDayWindow(input.range.from, input.range.tz);
   const dayStart = win?.start.getTime() ?? 0;
   const dayEnd = win?.end.getTime() ?? 0;
-  const invalidationsByUser = groupInvalidationsByUser(input.invalidations);
-  const samples = samplesForWindow(input.samples, dayStart, dayEnd, invalidationsByUser, input.userId);
+  const samples = samplesForWindow(input.samples, dayStart, dayEnd, invalidatedLookup(input.invalidations, input.userId));
   const byApp = new Map<string, MemberReportApp & { scrolls: number; keystrokes: number; clicks: number }>();
   let totalMinutes = 0;
   for (const s of samples) {
@@ -470,11 +412,10 @@ export function buildMemberReportScreenshots(input: {
   range: ReportRange;
   samples: ReportActivitySample[];
   screenshots: ReportScreenshotRow[];
-  entries?: ReportTimeEntry[];
-  evidenceByEntry?: EntryLiveEvidenceMap;
-  invalidations?: TimeInvalidationInput[];
+  /** This person's resolved timeline; its meetings protect quiet minutes. */
+  timeline?: readonly ReportTimelinePiece[];
+  invalidations?: readonly TimelineInvalidation[];
   activityRoleTitle?: RoleTitle | null;
-  now?: Date;
   toUrl: (row: ReportScreenshotRow, variant: 'full' | 'thumb') => string | null;
 }): {
   date: string;
@@ -486,13 +427,10 @@ export function buildMemberReportScreenshots(input: {
   const win = localDayWindow(input.range.from, input.range.tz);
   const dayStart = win?.start.getTime() ?? 0;
   const dayEnd = win?.end.getTime() ?? 0;
-  const invalidationsByUser = groupInvalidationsByUser(input.invalidations);
-  const samples = samplesForWindow(input.samples, dayStart, dayEnd, invalidationsByUser, input.userId);
-  const reportNow = input.now ?? new Date();
-  const meetingIntervals = meetingIntervalsForEntries(
-    capOpenEntries(input.entries ?? [], input.evidenceByEntry, reportNow),
-    reportNow,
-  );
+  const invalidated = invalidatedLookup(input.invalidations, input.userId);
+  const samples = samplesForWindow(input.samples, dayStart, dayEnd, invalidated);
+  const userPieces = (input.timeline ?? []).filter((p) => p.userId === input.userId);
+  const meetingIntervals = meetingIntervalsOf(userPieces);
   const heatmap = buildHeatmap({
     dayStart,
     dayEnd,
@@ -505,7 +443,6 @@ export function buildMemberReportScreenshots(input: {
     .sort((a, b) => a.capturedAt.getTime() - b.capturedAt.getTime())
     .map((s) => {
       const sample = sampleForScreenshot(samples, s.capturedAt.getTime());
-      const invalidated = isInvalidatedAt(invalidationsByUser, input.userId, s.capturedAt.getTime());
       return {
         id: s.id,
         capturedAt: s.capturedAt.toISOString(),
@@ -515,7 +452,7 @@ export function buildMemberReportScreenshots(input: {
         height: s.height,
         bytes: s.bytes,
         blurred: s.blurred,
-        invalidated,
+        invalidated: invalidated(s.capturedAt.getTime()),
         activityPercent: sample ? Math.round(100 * scoreSample(sample, input.activityRoleTitle, meetingIntervals)) : null,
         keystrokes: sample?.keystrokes ?? null,
         clicks: sample?.clicks ?? null,
@@ -529,7 +466,12 @@ export function buildMemberReportScreenshots(input: {
   return {
     date: input.range.from,
     tz: input.range.tz,
-    activityPercent: activityPercent(samples, input.activityRoleTitle, meetingIntervals),
+    activityPercent: activityPercent(
+      samples,
+      input.activityRoleTitle,
+      meetingIntervals,
+      input.timeline ? trackedWorkMinutes(userPieces, dayStart, dayEnd) : null,
+    ),
     heatmap,
     screenshots,
   };
@@ -563,14 +505,22 @@ function samplesForWindow(
   samples: ReportActivitySample[],
   startMs: number,
   endMs: number,
-  invalidationsByUser?: InvalidationsByUser,
-  userId?: string,
+  invalidated: (t: number) => boolean,
 ): ReportActivitySample[] {
   return samples.filter((s) => {
     const t = s.bucketStart.getTime();
     if (t < startMs || t >= endMs) return false;
-    return !(invalidationsByUser && userId && isInvalidatedAt(invalidationsByUser, userId, t));
+    return !invalidated(t);
   });
+}
+
+/** Is an instant inside one of this person's reviewer invalidations? */
+function invalidatedLookup(
+  invalidations: readonly TimelineInvalidation[] | undefined,
+  userId: string,
+): (t: number) => boolean {
+  const merged: Interval[] = invalidationsByUser(invalidations).get(userId) ?? [];
+  return (t) => containsInstant(merged, t);
 }
 
 function heatmapSamples(samples: ReportActivitySample[], meetingIntervals: Array<{ a: number; b: number }>): HeatmapSample[] {
@@ -584,17 +534,50 @@ function heatmapSamples(samples: ReportActivitySample[], meetingIntervals: Array
   }));
 }
 
+/**
+ * 0–100 over the minutes the person was TRACKED, through the one shared
+ * definition (@grind/core). `trackedWorkMinutes` is agent work time from the
+ * timer (meetings excluded — a meeting minute counts where it was sampled, at
+ * full credit). Dividing by stored samples instead read a day of one busy
+ * minute in ten as 100%: older agents stored nothing for a quiet minute.
+ * Null when there is no activity data at all (e.g. input capture was off).
+ */
 function activityPercent(
   samples: ReportActivitySample[],
   role: RoleTitle | null | undefined,
   meetingIntervals: Array<{ a: number; b: number }>,
+  trackedWorkMinutes: number | null,
 ): number | null {
   if (samples.length === 0) return null;
-  let sum = 0;
+  let scoreSum = 0;
+  let activeMinutes = 0;
+  let meetingMinutes = 0;
   for (const s of samples) {
-    sum += scoreSample(s, role, meetingIntervals);
+    const score = scoreSample(s, role, meetingIntervals);
+    scoreSum += score;
+    if (score > 0) activeMinutes += 1;
+    if (isInMeeting(meetingIntervals, s.bucketStart.getTime())) meetingMinutes += 1;
   }
-  return Math.round((100 * sum) / samples.length);
+  return activityPercentOverTrackedMinutes(scoreSum, {
+    sampledMinutes: samples.length,
+    trackedMinutes: trackedWorkMinutes === null ? null : trackedWorkMinutes + meetingMinutes,
+    activeMinutes,
+  });
+}
+
+/**
+ * Agent WORK time inside [startMs, endMs), in minutes — read from the resolved
+ * timeline, so invalidated minutes and minutes another entry owns are excluded
+ * (the same figure as the day's `workedMs`).
+ */
+function trackedWorkMinutes(pieces: readonly ReportTimelinePiece[], startMs: number, endMs: number): number {
+  let ms = 0;
+  for (const piece of pieces) {
+    if (piece.kind !== 'WORK' || piece.invalidated) continue;
+    const iv = clipInterval(piece, startMs, endMs);
+    if (iv) ms += iv.end - iv.start;
+  }
+  return Math.round(ms / 60_000);
 }
 
 function scoreSample(
@@ -614,17 +597,8 @@ function scoreSample(
   );
 }
 
-function meetingIntervalsForEntries(entries: ReportTimeEntry[], now: Date): Array<{ a: number; b: number }> {
-  const out: Array<{ a: number; b: number }> = [];
-  for (const entry of entries) {
-    for (const segment of entry.segments) {
-      if (segment.kind !== 'MEETING') continue;
-      const a = segment.startedAt.getTime();
-      const b = (segment.endedAt ?? now).getTime();
-      if (b > a) out.push({ a, b });
-    }
-  }
-  return out;
+function meetingIntervalsOf(pieces: readonly ReportTimelinePiece[]): Array<{ a: number; b: number }> {
+  return pieces.filter((p) => p.kind === 'MEETING').map((p) => ({ a: p.start, b: p.end }));
 }
 
 function isInMeeting(intervals: Array<{ a: number; b: number }>, epochMs: number): boolean {
@@ -645,96 +619,6 @@ function countApprovalsForWindow(
     else if (r.status === 'REJECTED') out.rejected += 1;
   }
   return out;
-}
-
-interface ResolvedShiftForDay {
-  assignment: ReportShiftAssignment | null;
-  schedule: ShiftSchedule | null;
-  bufferMin: number;
-  window: { start: Date; end: Date } | null;
-  label: { name: string; start: string; end: string } | null;
-}
-
-function resolveShiftForDay(
-  date: string,
-  tz: string,
-  win: { start: Date; end: Date },
-  assignments: ReportShiftAssignment[],
-): ResolvedShiftForDay {
-  const startMs = win.start.getTime();
-  const endMs = win.end.getTime();
-  const assignment = assignments
-    .filter((a) =>
-      a.effectiveFrom.getTime() < endMs &&
-      (a.effectiveTo === null || a.effectiveTo.getTime() > startMs),
-    )
-    .sort((a, b) => b.effectiveFrom.getTime() - a.effectiveFrom.getTime())[0] ?? null;
-  if (!assignment?.shiftId) {
-    return { assignment, schedule: null, bufferMin: 0, window: null, label: null };
-  }
-  const parsed = ShiftScheduleSchema.safeParse(assignment.scheduleSnapshot);
-  if (!parsed.success) {
-    return { assignment, schedule: null, bufferMin: assignment.bufferMinSnapshot ?? 0, window: null, label: null };
-  }
-  const window = shiftDayWindow(date, tz, parsed.data);
-  const weekday = weekdayForDate(date);
-  const day = parsed.data[weekday];
-  const label =
-    window && day
-      ? {
-          name: assignment.shiftNameSnapshot ?? 'Shift',
-          start: day.start,
-          end: day.end,
-        }
-      : null;
-  return {
-    assignment,
-    schedule: parsed.data,
-    bufferMin: assignment.bufferMinSnapshot ?? 0,
-    window,
-    label,
-  };
-}
-
-function computeShiftStatus(input: {
-  shift: ResolvedShiftForDay;
-  firstActivityMs: number | null;
-  nowMs: number;
-}): ShiftStatus {
-  if (!input.shift.assignment || !input.shift.schedule || !input.shift.window) return 'no_shift';
-  if (input.firstActivityMs === null) return 'no_activity';
-  const startMs = input.shift.window.start.getTime();
-  if (input.firstActivityMs < startMs) return 'early';
-  const bufferMs = Math.max(0, input.shift.bufferMin) * 60_000;
-  return input.firstActivityMs <= startMs + bufferMs ? 'on_time' : 'late';
-}
-
-/**
- * Start status under the attendance rules: Late only when the rules counted a
- * late arrival. Otherwise early when the punch (or, with no punch, the first
- * activity) came before the shift start, on time when it came after.
- */
-function ruleShiftStatus(input: {
-  shift: ResolvedShiftForDay;
-  firstActivityMs: number | null;
-  punchInMinute: number | null;
-  late: boolean;
-}): ShiftStatus {
-  if (!input.shift.assignment || !input.shift.schedule || !input.shift.window) return 'no_shift';
-  if (input.punchInMinute === null && input.firstActivityMs === null) return 'no_activity';
-  if (input.late) return 'late';
-  const m = /^(\d{2}):(\d{2})$/u.exec(input.shift.label?.start ?? '');
-  if (input.punchInMinute !== null && m) {
-    const start = Number.parseInt(m[1]!, 10) * 60 + Number.parseInt(m[2]!, 10);
-    return input.punchInMinute < start ? 'early' : 'on_time';
-  }
-  if (input.firstActivityMs !== null && input.firstActivityMs < input.shift.window.start.getTime()) return 'early';
-  return 'on_time';
-}
-
-function weekdayForDate(date: string): (typeof WEEKDAYS)[number] {
-  const [yy, mm, dd] = date.split('-').map((n) => parseInt(n, 10));
-  return WEEKDAYS[new Date(Date.UTC(yy!, mm! - 1, dd!)).getUTCDay()]!;
 }
 
 function sampleForScreenshot(samples: ReportActivitySample[], capturedAtMs: number): ReportActivitySample | null {

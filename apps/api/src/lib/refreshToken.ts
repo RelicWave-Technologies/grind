@@ -1,8 +1,9 @@
 import crypto from 'node:crypto';
-import { prisma } from '@grind/db';
-import { Role as RoleSchema } from '@grind/types';
+import { prisma, type Prisma } from '@grind/db';
+import { Role as RoleSchema, type Role } from '@grind/types';
 import { env } from '../env';
 import { signAccessToken } from './jwt';
+import { sha256Hex } from './hash';
 
 export type IssuedRefresh = {
   refreshToken: string;
@@ -10,15 +11,15 @@ export type IssuedRefresh = {
   familyId: string;
 };
 
-// Browser tabs can hit the 15-minute access-token expiry at the same time.
-// One tab rotates the cookie refresh token; another may replay the just-spent
-// token milliseconds later before the shared cookie jar settles. Treat that as
-// benign for a tiny window instead of revoking the whole family.
-export const REFRESH_REUSE_GRACE_MS = 30_000;
-
-export function sha256(input: string): string {
-  return crypto.createHash('sha256').update(input).digest('hex');
-}
+/**
+ * How long a just-spent refresh token may still be replayed without being
+ * treated as theft. Two clients legitimately do this: a browser whose tabs
+ * refresh at the same moment, and any client whose rotation response was lost
+ * (5xx, dropped socket, timeout) and who retries with the token it still holds.
+ * Inside this window, a replay whose successor has never been used rotates
+ * again from it; see {@link rotateRefreshToken}.
+ */
+export const REFRESH_REUSE_GRACE_MS = 2 * 60_000;
 
 function newSecret(): string {
   return crypto.randomBytes(32).toString('base64url');
@@ -35,7 +36,7 @@ function refreshExpiry(): Date {
  */
 export async function issueRefreshToken(userId: string, deviceName?: string): Promise<IssuedRefresh> {
   const refreshToken = newSecret();
-  const tokenHash = sha256(refreshToken);
+  const tokenHash = sha256Hex(refreshToken);
   const expiresAt = refreshExpiry();
   // A fresh login starts its own family; familyId is set to the row id post-create.
   const row = await prisma.refreshToken.create({
@@ -45,148 +46,148 @@ export async function issueRefreshToken(userId: string, deviceName?: string): Pr
   return { refreshToken, expiresAt, familyId: row.id };
 }
 
+/**
+ * Log out: revoke the presented token's whole rotation family, not just the
+ * one token. Revoking only the presented token left any sibling a lost-response
+ * re-rotation had minted alive, and a logout from a stale token revoked
+ * nothing at all.
+ */
 export async function revokeRefreshToken(refreshToken: string): Promise<boolean> {
-  const tokenHash = sha256(refreshToken);
-  const row = await prisma.refreshToken.findUnique({ where: { tokenHash } });
-  if (!row || row.revokedAt) return false;
-  await prisma.refreshToken.update({
-    where: { id: row.id },
+  const tokenHash = sha256Hex(refreshToken);
+  const row = await prisma.refreshToken.findUnique({ where: { tokenHash }, select: { familyId: true } });
+  if (!row) return false;
+  const revoked = await prisma.refreshToken.updateMany({
+    where: { familyId: row.familyId, revokedAt: null },
     data: { revokedAt: new Date() },
   });
-  return true;
+  return revoked.count > 0;
 }
+
+export type RotateFailureReason = 'invalid' | 'expired' | 'reuse' | 'reuse_grace' | 'stale_role' | 'deactivated';
 
 export type RotateResult =
   | { ok: true; accessToken: string; refreshToken: string; expiresAt: Date }
-  | { ok: false; reason: 'invalid' | 'expired' | 'reuse' | 'reuse_grace' | 'stale_role' | 'deactivated' };
+  /** `familyId` / `userId` name the session when the token was found, for the log. */
+  | { ok: false; reason: RotateFailureReason; familyId?: string; userId?: string };
 
-/**
- * Successful rotations, keyed by the hash of the token that was spent, retained
- * for the reuse-grace window so a replay of that token returns the SAME
- * successor rather than a bare 409.
- *
- * This closes the lost-response hole. The rotation commits inside a
- * transaction; if the HTTP response is then lost (5xx, dropped socket, client
- * timeout) the caller still holds a token the server has already revoked, and
- * has no way to learn the successor. Previously its retry got a token-less 409
- * during the grace window and a family-nuking 401 immediately after — a single
- * flaky refresh call forced a re-login ~30s later.
- *
- * Returning the same pair is also the tightest option: a replayer gets exactly
- * what the legitimate client already has (and loses it on the next rotation)
- * rather than an independent live token of its own.
- *
- * In-process only, and deliberately so — no plaintext secret is written at
- * rest. A cache miss (restart, or a second API instance) simply falls back to
- * the previous 409 behaviour, so this can only ever help.
- */
-const recentRotations = new Map<string, { result: RotateResult; cachedAt: number }>();
+type Tx = Prisma.TransactionClient;
 
-function rememberRotation(spentTokenHash: string, result: RotateResult, now: number): void {
-  for (const [hash, entry] of recentRotations) {
-    if (now - entry.cachedAt > REFRESH_REUSE_GRACE_MS) recentRotations.delete(hash);
-  }
-  recentRotations.set(spentTokenHash, { result, cachedAt: now });
+type RotatableUser = { workspaceId: string; role: string; deactivatedAt: Date | null };
+
+/** May this user be issued a fresh session at all? */
+function sessionGate(user: RotatableUser): { ok: true; role: Role } | { ok: false; reason: 'deactivated' | 'stale_role' } {
+  // A suspended account must not be able to mint itself a fresh session.
+  // Without this the flag stopped only NEW logins: an agent already holding a
+  // refresh token rotated it forever.
+  if (user.deactivatedAt) return { ok: false, reason: 'deactivated' };
+  const parsedRole = RoleSchema.safeParse(user.role);
+  if (!parsedRole.success) return { ok: false, reason: 'stale_role' };
+  return { ok: true, role: parsedRole.data };
 }
 
-function replayRotation(spentTokenHash: string, now: number): RotateResult | null {
-  const entry = recentRotations.get(spentTokenHash);
-  if (!entry) return null;
-  if (now - entry.cachedAt > REFRESH_REUSE_GRACE_MS) {
-    recentRotations.delete(spentTokenHash);
-    return null;
-  }
-  return entry.result;
-}
-
-/** Test seam — rotation replay state is process-global. */
-export function __resetRotationReplayCache(): void {
-  recentRotations.clear();
+/** Mint the next token in `parent`'s family and link `linkFrom` rows to it. */
+async function mintSuccessor(
+  tx: Tx,
+  parent: { userId: string; deviceName: string | null; familyId: string; user: RotatableUser },
+  role: Role,
+  linkFrom: string[],
+): Promise<RotateResult> {
+  const refreshToken = newSecret();
+  const expiresAt = refreshExpiry();
+  const successor = await tx.refreshToken.create({
+    data: {
+      userId: parent.userId,
+      tokenHash: sha256Hex(refreshToken),
+      deviceName: parent.deviceName,
+      familyId: parent.familyId,
+      expiresAt,
+    },
+    select: { id: true },
+  });
+  await tx.refreshToken.updateMany({ where: { id: { in: linkFrom } }, data: { replacedById: successor.id } });
+  const accessToken = signAccessToken({ sub: parent.userId, ws: parent.user.workspaceId, role });
+  return { ok: true, accessToken, refreshToken, expiresAt };
 }
 
 /**
  * Single-use rotation with reuse detection. Validates the presented token,
  * revokes it, and mints a successor in the SAME family — all in one
- * transaction so concurrent rotations can't both succeed.
+ * transaction, and the revoke is conditional on the token still being live, so
+ * two parallel rotations of one token can never both mint a successor: the
+ * loser gets `reuse_grace` and keeps whatever the winner stored.
  *
- * If an ALREADY-REVOKED token is presented, that's a replay (a stolen token, or
- * a client that double-spent): we revoke every live token in the family and
- * reject. The legitimate client's current token dies too, forcing a clean
- * re-login — the safe response to a possible theft.
+ * Presenting an ALREADY-SPENT token is judged from what the database recorded:
+ *
+ *   - spent within {@link REFRESH_REUSE_GRACE_MS} and its successor has never
+ *     been used: the caller never received that successor (lost response, or a
+ *     second tab). Retire the unused successor and rotate again from here. A
+ *     thief replaying the token gains nothing durable: the legitimate client's
+ *     next use of the retired successor is itself a replay, outside the window
+ *     or with a used successor, and revokes the family.
+ *   - spent within the window but the family has already moved on: benign
+ *     browser concurrency — `reuse_grace`, nothing revoked, nothing minted.
+ *   - anything else is reuse: revoke every live token in the family.
+ *
+ * The rule lives in the database, so it holds across restarts and instances.
  */
 export async function rotateRefreshToken(presented: string): Promise<RotateResult> {
-  const tokenHash = sha256(presented);
-  // Set when the result came from the replay cache rather than a fresh rotation,
-  // so repeated replays can't keep pushing the cache entry's expiry forward.
-  let servedFromReplay = false;
+  const tokenHash = sha256Hex(presented);
 
-  const rotated = await prisma.$transaction(async (tx): Promise<RotateResult> => {
+  return prisma.$transaction(async (tx): Promise<RotateResult> => {
     const row = await tx.refreshToken.findUnique({ where: { tokenHash }, include: { user: true } });
     if (!row) return { ok: false, reason: 'invalid' };
+    const fail = (reason: RotateFailureReason): RotateResult =>
+      ({ ok: false, reason, familyId: row.familyId, userId: row.userId });
+    const now = new Date();
 
     if (row.revokedAt) {
-      const liveSuccessor = await tx.refreshToken.findFirst({
-        where: {
-          familyId: row.familyId,
-          revokedAt: null,
-          createdAt: { gte: row.revokedAt },
-        },
-        select: { id: true },
-      });
-      if (liveSuccessor && Date.now() - row.revokedAt.getTime() <= REFRESH_REUSE_GRACE_MS) {
-        // Already judged benign by the stored revokedAt — the database, not the
-        // cache, decides grace vs. reuse. Hand back the successor this exact
-        // token minted so a caller whose response was lost can recover; if we
-        // no longer hold it, fall back to the old token-less answer.
-        const replayed = replayRotation(tokenHash, Date.now());
-        if (!replayed) return { ok: false, reason: 'reuse_grace' };
-        servedFromReplay = true;
-        return replayed;
+      const withinGrace = now.getTime() - row.revokedAt.getTime() <= REFRESH_REUSE_GRACE_MS;
+      if (withinGrace && row.replacedById) {
+        const successor = await tx.refreshToken.findUnique({
+          where: { id: row.replacedById },
+          select: { id: true, revokedAt: true, expiresAt: true },
+        });
+        if (successor && !successor.revokedAt && successor.expiresAt > now) {
+          const gate = sessionGate(row.user);
+          if (!gate.ok) return fail(gate.reason);
+          const retired = await tx.refreshToken.updateMany({
+            where: { id: successor.id, revokedAt: null },
+            data: { revokedAt: now },
+          });
+          // The successor was spent while we looked: someone else holds the
+          // family now. Benign, but there is nothing to hand back.
+          if (retired.count !== 1) return fail('reuse_grace');
+          // Link both the presented token and the retired successor forward, so
+          // whichever of the two the client ends up holding can still recover.
+          return mintSuccessor(tx, row, gate.role, [row.id, successor.id]);
+        }
+      }
+      if (withinGrace) {
+        const live = await tx.refreshToken.findFirst({
+          where: { familyId: row.familyId, revokedAt: null },
+          select: { id: true },
+        });
+        if (live) return fail('reuse_grace');
       }
       // Reuse detected → nuke the whole family.
       await tx.refreshToken.updateMany({
         where: { familyId: row.familyId, revokedAt: null },
-        data: { revokedAt: new Date() },
+        data: { revokedAt: now },
       });
-      return { ok: false, reason: 'reuse' };
+      return fail('reuse');
     }
-    if (row.expiresAt < new Date()) return { ok: false, reason: 'expired' };
+    if (row.expiresAt < now) return fail('expired');
 
-    // A suspended account must not be able to mint itself a fresh session.
-    // Without this the flag stopped only NEW logins: an agent already holding a
-    // refresh token rotated it forever, so "revoked" access was really just the
-    // shipped agent choosing to stop when its heartbeat came back unauthorized.
-    // The row's user is already loaded for the role check below, so this costs
-    // no extra query.
-    if (row.user.deactivatedAt) return { ok: false, reason: 'deactivated' };
+    const gate = sessionGate(row.user);
+    if (!gate.ok) return fail(gate.reason);
 
-    const parsedRole = RoleSchema.safeParse(row.user.role);
-    if (!parsedRole.success) return { ok: false, reason: 'stale_role' };
-
-    // Revoke the presented token, mint its successor in the same family.
-    await tx.refreshToken.update({ where: { id: row.id }, data: { revokedAt: new Date() } });
-    const refreshToken = newSecret();
-    const expiresAt = refreshExpiry();
-    await tx.refreshToken.create({
-      data: {
-        userId: row.userId,
-        tokenHash: sha256(refreshToken),
-        deviceName: row.deviceName,
-        familyId: row.familyId,
-        expiresAt,
-      },
+    // Conditional on still being live: a parallel rotation that got here first
+    // has already spent it, and this one must not mint a second successor.
+    const spent = await tx.refreshToken.updateMany({
+      where: { id: row.id, revokedAt: null },
+      data: { revokedAt: now },
     });
-
-    const accessToken = signAccessToken({
-      sub: row.userId,
-      ws: row.user.workspaceId,
-      role: parsedRole.data,
-    });
-    return { ok: true, accessToken, refreshToken, expiresAt };
+    if (spent.count !== 1) return fail('reuse_grace');
+    return mintSuccessor(tx, row, gate.role, [row.id]);
   });
-
-  // Only fresh successful rotations are cached: a failure carries no successor
-  // to hand back, and re-caching a replay would roll its expiry forward forever.
-  if (rotated.ok && !servedFromReplay) rememberRotation(tokenHash, rotated, Date.now());
-  return rotated;
 }

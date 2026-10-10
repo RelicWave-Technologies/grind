@@ -1,17 +1,16 @@
-import { app, ipcMain, shell } from 'electron';
-import Database from 'better-sqlite3';
-import path from 'node:path';
-import { api } from '../services/apiClient';
+import { ipcMain, shell } from 'electron';
+import { api, HttpError } from '../services/apiClient';
 import { log } from '../logger';
-import { dateKeyInTimeZone } from '@grind/types';
+import { todayKey as businessToday } from '@grind/types';
 import { getWorkspaceTimeZone } from '../services/workspaceTime';
 import { getTimerService, refreshTodayLedger } from '../services/timer';
 import { refreshAgentConfig } from '../services/agentConfig';
 import { loadTokens } from '../services/tokenStore';
 import { LarkTaskCache, type CachedLarkTask } from '../services/larkTaskCache';
+import { openAgentDb } from '../services/agentDb';
 import { CALLBACK_SCHEME } from '../env';
 
-export type LarkStatus = {
+type LarkStatus = {
   configured: boolean;
   connected: boolean;
   reauthRequired: boolean;
@@ -21,11 +20,11 @@ export type LarkStatus = {
   offline?: boolean;
 };
 
-export type LarkTask = CachedLarkTask;
+type LarkTask = CachedLarkTask;
 
-export type CreateTaskInput = { summary: string; due?: number | null; description?: string | null };
+type CreateTaskInput = { summary: string; due?: number | null; description?: string | null };
 
-export type LarkSyncResult = {
+type LarkSyncResult = {
   ok: boolean;
   connected: boolean;
   reauthRequired: boolean;
@@ -38,7 +37,7 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
 let taskCache: LarkTaskCache | null = null;
 
 function getTaskCache(): LarkTaskCache {
-  if (!taskCache) taskCache = new LarkTaskCache(new Database(path.join(app.getPath('userData'), 'agent.db')));
+  if (!taskCache) taskCache = new LarkTaskCache(openAgentDb());
   return taskCache;
 }
 
@@ -57,10 +56,11 @@ async function cacheTasks(tasks: LarkTask[]): Promise<void> {
   if (tokens) getTaskCache().replace(tokens, tasks);
 }
 
+/** Today on the workspace calendar (the shared helper), never the laptop's. */
 function todayKey(): string {
   const timeZone = getWorkspaceTimeZone();
   if (!timeZone) throw new Error('workspace_time_unavailable');
-  return dateKeyInTimeZone(new Date(), timeZone);
+  return businessToday(timeZone);
 }
 
 function myTasksPath(): string {
@@ -73,28 +73,41 @@ function myTasksPath(): string {
   return `/v1/lark/my-tasks?${params.toString()}`;
 }
 
-function createTaskErrorMessage(raw: string): string {
-  if (raw.includes('409')) return 'reauth_required';
-  const jsonStart = raw.indexOf('{');
-  if (jsonStart >= 0) {
-    try {
-      const body = JSON.parse(raw.slice(jsonStart)) as { error?: string; detail?: string };
-      if (body.detail) return body.detail;
-      if (body.error === 'lark_create_failed') return 'Lark rejected the task';
-      if (body.error === 'internal_error') return raw;
-      if (body.error) return body.error;
-    } catch {
-      // Fall through to a generic message below.
-    }
+/**
+ * The backend answers 409 when the user's Lark grant needs re-authorising.
+ * Read the status off the error: matching "409" in the message also matched
+ * any URL, date, or response body that happened to contain those digits.
+ */
+function isReauthRequired(err: unknown): boolean {
+  return err instanceof HttpError && err.status === 409;
+}
+
+function createTaskErrorMessage(err: unknown): string {
+  if (isReauthRequired(err)) return 'reauth_required';
+  if (!(err instanceof HttpError)) return 'Could not create task in Lark';
+  try {
+    const body = JSON.parse(err.body) as { error?: string; detail?: string };
+    if (body.detail) return body.detail;
+    if (body.error === 'lark_create_failed') return 'Lark rejected the task';
+    if (body.error === 'internal_error') return err.message;
+    if (body.error) return body.error;
+  } catch {
+    // Fall through to a generic message below.
   }
   return 'Could not create task in Lark';
 }
 
+/**
+ * Today's time per task: the larger of the server's figure and this machine's.
+ * The server's includes other devices and approved manual time this machine
+ * never sees; this machine's includes what has not uploaded yet. Replacing one
+ * with the other showed whichever happened to be smaller as "logged today".
+ */
 function withProjectedToday(tasks: LarkTask[]): LarkTask[] {
   const byTask = getTimerService().workedMsByTask();
   return tasks.map((task) => ({
     ...task,
-    loggedTodayMs: byTask.get(task.guid) ?? task.loggedTodayMs,
+    loggedTodayMs: Math.max(byTask.get(task.guid) ?? 0, task.loggedTodayMs ?? 0),
   }));
 }
 
@@ -138,7 +151,7 @@ export function registerLarkIpc(): void {
       return { tasks: withProjectedToday(tasks), reauthRequired: false };
     } catch (err) {
       const msg = String(err);
-      if (msg.includes('409')) return { tasks: [], reauthRequired: true };
+      if (isReauthRequired(err)) return { tasks: [], reauthRequired: true };
       const tasks = withProjectedToday(await cachedTasks());
       log.warn('lark:tasks unavailable', { cachedTasks: tasks.length, err: msg });
       return { tasks, reauthRequired: false, offline: true };
@@ -173,7 +186,7 @@ export function registerLarkIpc(): void {
         };
       } catch (err) {
         const msg = String(err);
-        if (msg.includes('409')) {
+        if (isReauthRequired(err)) {
           return { ok: false, connected: true, reauthRequired: true, ...empty, error: 'reauth_required' };
         }
         lastErr = msg;
@@ -190,9 +203,8 @@ export function registerLarkIpc(): void {
       const { task } = await api<{ task: LarkTask }>('/v1/lark/tasks', { method: 'POST', body: input });
       return { ok: true, task };
     } catch (err) {
-      const msg = String(err);
-      log.warn('lark:createTask failed', { err: msg });
-      return { ok: false, error: createTaskErrorMessage(msg) };
+      log.warn('lark:createTask failed', { err: String(err) });
+      return { ok: false, error: createTaskErrorMessage(err) };
     }
   });
 

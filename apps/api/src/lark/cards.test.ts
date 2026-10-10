@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest';
 import {
   buildApprovalCard,
   buildDecidedCard,
-  buildPayrollReminderCard,
   buildUnavailableRequestCard,
   type ApprovalCardInput,
 } from './cards';
@@ -123,6 +122,18 @@ describe('buildDecidedCard — post-decision', () => {
     expect(findTextContaining(card, 'Manager Mira')).toBe(true);
   });
 
+  it('shows the credited time, not the window, when tracked time covered part of it', () => {
+    const card = buildDecidedCard({
+      ...REQ,
+      decision: 'APPROVED',
+      decidedByName: 'Manager Mira',
+      decidedAt,
+      creditedMs: 30 * 60_000,
+    });
+    expect(findTextContaining(card, '30 min credited')).toBe(true);
+    expect(findTextContaining(card, '1h 30m asked')).toBe(true);
+  });
+
   it('shows the rejected state with a red template', () => {
     const card = buildDecidedCard({ ...REQ, decision: 'REJECTED', decidedByName: 'Manager Mira', decidedAt });
     expect((card.header as Record<string, unknown>).template).toBe('red');
@@ -138,58 +149,6 @@ describe('buildDecidedCard — post-decision', () => {
   it('enables update_multi so the original card can be replaced in place', () => {
     const card = buildDecidedCard({ ...REQ, decision: 'APPROVED', decidedByName: 'M', decidedAt });
     expect((card.config as Record<string, unknown>).update_multi).toBe(true);
-  });
-});
-
-describe('buildPayrollReminderCard', () => {
-  const base = {
-    requestId: 'req_1',
-    requesterName: 'Manager Demo Member',
-    taskSummary: 'Payroll reminder test',
-    startedAt: new Date('2026-06-08T03:30:00Z').getTime(),
-    endedAt: new Date('2026-06-08T11:30:00Z').getTime(),
-    reason: 'Created to test the manager payroll pending-reminder flow.',
-    ageMs: 16 * 60 * 60 * 1000,
-  };
-
-  it('renders a readable approver card with KPI fields and an action URL', () => {
-    const card = buildPayrollReminderCard({
-      month: '2026-06',
-      audience: 'approver',
-      recipientName: 'Abhishek Verma',
-      teamName: 'tech',
-      requests: [base],
-      dashboardUrl: 'http://localhost:5174/approvals',
-      generatedAt: new Date('2026-06-08T12:00:00Z').getTime(),
-      timeZone: 'UTC',
-    });
-    expect(card).toMatchObject({
-      config: { wide_screen_mode: true, update_multi: true },
-      header: { template: 'orange', title: { tag: 'plain_text', content: 'Payroll approvals · 2026-06' } },
-    });
-    expect(findTextContaining(card, 'Pending')).toBe(true);
-    expect(findTextContaining(card, '8h')).toBe(true);
-    expect(findTextContaining(card, 'tech')).toBe(true);
-    expect(findTextContaining(card, 'Manager Demo Member')).toBe(true);
-    expect(JSON.stringify(card)).toContain('http://localhost:5174/approvals');
-  });
-
-  it('shows only eight rows and adds an overflow summary for long lists', () => {
-    const requests = Array.from({ length: 12 }, (_, index) => ({
-      ...base,
-      requestId: `req_${index + 1}`,
-      requesterName: `Member ${index + 1}`,
-    }));
-    const card = buildPayrollReminderCard({
-      month: '2026-06',
-      audience: 'approver',
-      teamName: 'tech',
-      requests,
-      timeZone: 'UTC',
-    });
-    expect(findTextContaining(card, 'Member 8')).toBe(true);
-    expect(findTextContaining(card, 'Member 9')).toBe(false);
-    expect(findTextContaining(card, '+4 more pending approvals')).toBe(true);
   });
 });
 
@@ -223,25 +182,6 @@ describe('buildUnavailableRequestCard — stale Lark cards', () => {
     expect(findTextContaining(card, 'req_missing')).toBe(true);
     expect(findTextContaining(card, 'Time approved')).toBe(false);
     expect(findTextContaining(card, 'Time rejected')).toBe(false);
-  });
-});
-
-describe('buildSupersededCard — disables the previous approval card', () => {
-  it('renders a grey header, no Approve/Reject buttons, and a "updated" notice', async () => {
-    const { buildSupersededCard } = await import('./cards');
-    const card = buildSupersededCard({
-      requestId: 'req_x',
-      requesterName: 'Anish Suman',
-      taskSummary: null,
-      startedAt: REQ.startedAt,
-      endedAt: REQ.endedAt,
-      reason: REQ.reason,
-      supersededAt: new Date('2026-05-20T10:30:00Z').getTime(),
-      timeZone: 'UTC',
-    });
-    expect((card.header as Record<string, unknown>).template).toBe('grey');
-    expect(buttonValues(card)).toHaveLength(0);
-    expect(findTextContaining(card, 'updated')).toBe(true);
   });
 });
 

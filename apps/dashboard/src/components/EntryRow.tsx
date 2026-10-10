@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Send, Check, X, AlertCircle, RotateCcw, Trash2 } from 'lucide-react';
 import TimePopover from './TimePopover';
 import TaskCombo, { type TaskOption } from './TaskCombo';
@@ -26,7 +26,7 @@ import { Button } from '../ui';
  * scoped RBAC; the API repeats the same check server-side.
  */
 
-export type RowKind = 'tracked' | 'manual_approved' | 'pending' | 'gap';
+type RowKind = 'tracked' | 'manual_approved' | 'pending' | 'gap';
 
 interface BaseProps {
   tasks: TaskOption[];
@@ -74,6 +74,8 @@ interface GapRowProps extends BaseProps {
   kind: 'gap';
   block: DayBlock;
   onCreate: (vars: {
+    /** Idempotency key for POST /v1/time-requests — one per composed request. */
+    clientUuid: string;
     requestedStart: number;
     requestedEnd: number;
     larkTaskGuid: string | null;
@@ -92,6 +94,13 @@ interface RejectedRowProps {
 }
 
 export type EntryRowProps = TrackedRowProps | PendingRowProps | GapRowProps | RejectedRowProps;
+
+function newClientUuid(): string {
+  const random = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
+  return `web-${random}`;
+}
 
 /** Order-independent equality check for two string arrays. */
 function sameStringSet(a: string[], b: string[]): boolean {
@@ -462,6 +471,11 @@ function GapRow({ block, tasks, timeZone, disabled, preset, presetTick, onCreate
   const [attendees, setAttendees] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // One idempotency key per request being composed: a retry after a lost
+  // response (or a double click) re-sends the SAME key, so the server returns
+  // the request it already created instead of filing a duplicate. A new key is
+  // minted only once a request has gone through or the row is reset.
+  const [clientUuid, setClientUuid] = useState(newClientUuid);
 
   // When the parent fires a click-to-fill (presetTick changes), snap to that preset.
   useEffect(() => {
@@ -471,8 +485,14 @@ function GapRow({ block, tasks, timeZone, disabled, preset, presetTick, onCreate
     }
   }, [presetTick]);
 
-  // Reset on block change (different gap row entirely).
+  // Reset only when this row now describes a different gap (new start). Not on
+  // mount (that would discard a click-to-fill preset) and not when only the
+  // end moves: today's trailing gap ends at "now", so its end changes on every
+  // 15s refetch, and resetting then wiped whatever the user was typing.
+  const gapStartRef = useRef(block.startedAt);
   useEffect(() => {
+    if (gapStartRef.current === block.startedAt) return;
+    gapStartRef.current = block.startedAt;
     const r = defaultRange(block);
     setStart(r.startedAt);
     setEnd(r.endedAt);
@@ -480,7 +500,15 @@ function GapRow({ block, tasks, timeZone, disabled, preset, presetTick, onCreate
     setReason('');
     setAttendees([]);
     setErr(null);
-  }, [block.startedAt, block.endedAt]);
+    setClientUuid(newClientUuid());
+  }, [block.startedAt]);
+
+  // The gap can also shrink (a timer started inside it): keep the draft, just
+  // pull the selected range back inside the gap.
+  useEffect(() => {
+    setEnd((e) => Math.min(e, block.endedAt));
+    setStart((st) => Math.min(st, block.endedAt));
+  }, [block.endedAt]);
 
   const duration = Math.max(0, end - start);
 
@@ -497,6 +525,7 @@ function GapRow({ block, tasks, timeZone, disabled, preset, presetTick, onCreate
     setErr(null);
     try {
       await onCreate({
+        clientUuid,
         requestedStart: start,
         requestedEnd: end,
         larkTaskGuid: task || null,
@@ -511,6 +540,7 @@ function GapRow({ block, tasks, timeZone, disabled, preset, presetTick, onCreate
       setTask('');
       setReason('');
       setAttendees([]);
+      setClientUuid(newClientUuid());
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Send failed');
     } finally {

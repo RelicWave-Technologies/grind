@@ -1,3 +1,4 @@
+import { dayCredit, isLate } from '@grind/core';
 import {
   roundToHalfDay,
   type AttendanceRuleMode,
@@ -20,9 +21,11 @@ import type { MonthPerformanceCode } from '../reports/monthPerformance';
  *      half-day leave would cost more than taking nothing and working an hour.
  *   3. Working from home without an approved WFH request is leave.
  *   4. Absent without an approved leave application is leave without approval.
- *   5. Arriving after the shift start plus the grace period is a late arrival.
- *      A few a month are allowed; each one after that is half a day of leave —
- *      unless another rule already charged that day, which is the one cut.
+ *   5. Punching in at the door after the shift start plus the grace period is
+ *      a late arrival — on a first-half leave day, after the afternoon time
+ *      (14:00 by default), no grace. A few a month are allowed; each one after
+ *      that is half a day of leave — unless another rule already charged that
+ *      day, which is the one cut.
  *
  * A verdict is a number of days of leave, never a new kind of day. Whether that
  * leave is paid is the balance's answer, decided by the same funding walk that
@@ -93,7 +96,8 @@ export function judgeDay(
 
   // The working half of an approved half-day leave.
   if (expected < 1) {
-    return minutes >= policy.halfDayMinMinutes ? null : verdict('HALF_DAY_SHORT', expected);
+    const half = dayCredit(minutes, { fullDayMinutes: policy.fullDayMinMinutes, halfDayMinutes: policy.halfDayMinMinutes });
+    return half !== 'NONE' ? null : verdict('HALF_DAY_SHORT', expected);
   }
 
   // Nobody at the door and nothing tracked: away, and the only question is
@@ -108,39 +112,45 @@ export function judgeDay(
     return verdict('WFH_UNAPPROVED', expected);
   }
 
-  if (minutes >= policy.fullDayMinMinutes) return null;
-  if (minutes >= policy.halfDayMinMinutes) return verdict('SHORT_DAY', 0.5);
+  // Full day 7 h, half day 3 h 30 unless the policy names its own minimums —
+  // the one definition in @grind/core.
+  const credit = dayCredit(minutes, {
+    fullDayMinutes: policy.fullDayMinMinutes,
+    halfDayMinutes: policy.halfDayMinMinutes,
+  });
+  if (credit === 'FULL') return null;
+  if (credit === 'HALF') return verdict('SHORT_DAY', 0.5);
   return verdict('UNDER_MIN', 1);
 }
 
 /**
- * Was this arrival late? After the shift's start plus the grace, by the punch.
- * Measured only on an ordinary full working day by somebody who punches: a
- * half-day leave moves the start, and a remote person has no door to be late
- * through.
+ * Was this arrival late, for the rules' count?
+ *
+ * The one company definition from `@grind/core`: the door punch-in after the
+ * start of the shift assigned for that date plus the policy grace; on a
+ * first-half leave day, after the policy's afternoon time with no grace. Never
+ * without a punch-in, never on a holiday, a weekly off, full-day or
+ * second-half leave, and only for a STANDARD person — REMOTE and EXEMPT people
+ * are never counted late.
  */
 export function isLateArrival(input: {
   status: DayStatus | null;
   mode: AttendanceRuleMode;
-  punchInMinute: number | null;
-  shiftStart: string | null;
+  /** The door punch-in as an instant (see `punchInMs`). */
+  punchInMs: number | null;
+  shiftStartMs: number | null;
   graceMinutes: number;
-  /** First-half leave day: late after this minute of the day, no grace. */
-  halfDayLateAfterMinute: number;
+  /** First-half leave day: late after this instant (the policy's afternoon time), no grace. */
+  halfDayLateAfterMs: number | null;
 }): boolean {
-  if (input.mode !== 'STANDARD') return false;
-  if (input.punchInMinute === null) return false;
-  // Off for the morning, due in the afternoon: one fixed time for everyone.
-  // A second-half leave day is not checked.
-  if (input.status?.portion === 'FIRST_HALF' && input.status.expectedFraction > 0) {
-    return input.punchInMinute > input.halfDayLateAfterMinute;
-  }
-  if (input.status?.kind !== 'WORKING' || input.status.expectedFraction < 1) return false;
-  if (!input.shiftStart) return false;
-  const m = /^(\d{2}):(\d{2})$/u.exec(input.shiftStart);
-  if (!m) return false;
-  const start = Number.parseInt(m[1]!, 10) * 60 + Number.parseInt(m[2]!, 10);
-  return input.punchInMinute > start + input.graceMinutes;
+  return isLate({
+    punchInMs: input.punchInMs,
+    shiftStartMs: input.shiftStartMs,
+    graceMinutes: input.graceMinutes,
+    halfDayLateAfterMs: input.halfDayLateAfterMs,
+    status: input.status,
+    mode: input.mode,
+  });
 }
 
 /**

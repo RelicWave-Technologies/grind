@@ -8,7 +8,6 @@ import { HttpLarkMessenger, type LarkMessenger } from './messenger';
 import { HttpProfileClient, type ProfileClient } from './profile';
 
 export {
-  hasLarkCredentials,
   isLarkConfigured,
   isLarkLoginConfigured,
   getLarkConfig,
@@ -17,9 +16,8 @@ export {
 } from './config';
 export { TokenManager } from './tokenManager';
 export { LarkReauthRequiredError, LarkTransientError } from './oauthClient';
-export type { OAuthClient, LarkTokenResponse } from './oauthClient';
 export { resolveIdentity } from './identity';
-export type { TenantClient, ResolvedLarkUser } from './identity';
+export type { TenantClient } from './identity';
 export {
   signOAuthState,
   verifyOAuthState,
@@ -27,34 +25,21 @@ export {
   signLoginState,
   verifyLoginState,
   verifyExpiredAgentLoginRouteHint,
+  parseAgentCallbackScheme,
 } from './oauth';
-export type { AgentLoginRouteHint, LarkLoginStatePayload } from './oauth';
-export type { ProfileClient, LarkProfile } from './profile';
-export { normalizeEmail } from './profile';
-export { mapTasks, loggedMsByGuid, toEpochMs, buildCreateTaskPayload, LarkTaskApiError } from './tasks';
-export type { UserTaskClient, LarkTaskDto, CreateLarkTaskInput } from './tasks';
+export type { AgentCallbackScheme } from './oauth';
+export type { ProfileClient } from './profile';
+export { LarkTaskApiError } from './tasks';
+export type { UserTaskClient } from './tasks';
 export {
   buildApprovalCard,
   buildDecidedCard,
-  buildSupersededCard,
   buildUpdatedApprovalCard,
   buildCancelledCard,
-  buildUnavailableRequestCard,
   buildStaleRequestCard,
 } from './cards';
-export { decideRequest } from './decide';
-export { startCardCallback, startLarkEventHarness } from './cardCallback';
-export type {
-  ApprovalCardInput,
-  DecidedCardInput,
-  ApprovalAction,
-  SupersededCardInput,
-  UpdatedApprovalCardInput,
-  DiffEntry,
-  CancelledCardInput,
-  UnavailableRequestCardInput,
-  StaleRequestCardInput,
-} from './cards';
+export { startCardCallback } from './cardCallback';
+export type { DiffEntry } from './cards';
 export type { LarkMessenger, SendCardResult } from './messenger';
 
 let manager: TokenManager | null = null;

@@ -93,4 +93,45 @@ describe('last tracked task memory', () => {
       lastLarkTaskGuid: null,
     });
   });
+
+  it("never offers one account's last task to another on the same machine", async () => {
+    const prefs = await import('./preferences');
+    prefs.setPreferencesOwner({ userId: 'alice', workspaceId: 'w1' });
+    prefs.rememberLastLarkTask('alice-task');
+    prefs.setPreferencesOwner({ userId: 'bob', workspaceId: 'w1' });
+
+    expect(prefs.getPreferences().lastLarkTaskGuid).toBeNull();
+    prefs.rememberLastLarkTask('bob-task');
+    await prefs.flushPreferences();
+
+    vi.resetModules();
+    const afterRestart = await import('./preferences');
+    afterRestart.setPreferencesOwner({ userId: 'alice', workspaceId: 'w1' });
+    expect(afterRestart.getPreferences().lastLarkTaskGuid).toBe('alice-task');
+    afterRestart.setPreferencesOwner({ userId: 'bob', workspaceId: 'w1' });
+    expect(afterRestart.getPreferences().lastLarkTaskGuid).toBe('bob-task');
+  });
+
+  it('hands a task remembered before scoping to the owner bound at boot, once', async () => {
+    files.set('/userData/preferences.json', JSON.stringify({ lastLarkTaskGuid: 'old-task' }));
+    const prefs = await import('./preferences');
+
+    prefs.setPreferencesOwner({ userId: 'alice', workspaceId: 'w1' }, { claimLegacy: true });
+    expect(prefs.getPreferences().lastLarkTaskGuid).toBe('old-task');
+    prefs.setPreferencesOwner({ userId: 'bob', workspaceId: 'w1' }, { claimLegacy: true });
+    expect(prefs.getPreferences().lastLarkTaskGuid).toBeNull();
+  });
+
+  it('serializes overlapping writes so the newest state is what lands on disk', async () => {
+    const prefs = await import('./preferences');
+    prefs.patchFloatingBar({ x: 1 });
+    const first = prefs.flushPreferences();
+    prefs.patchFloatingBar({ x: 2 });
+    const second = prefs.flushPreferences();
+    await Promise.all([first, second]);
+
+    expect(JSON.parse(files.get('/userData/preferences.json')!).floatingBar.x).toBe(2);
+    // No temp file left behind by either write.
+    expect([...files.keys()].filter((key) => key.endsWith('.tmp'))).toEqual([]);
+  });
 });

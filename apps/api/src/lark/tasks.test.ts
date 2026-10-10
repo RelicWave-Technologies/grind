@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildCreateTaskPayload, mapTasks, toEpochMs, loggedMsByGuid, type RawLarkTask } from './tasks';
+import { buildCreateTaskPayload, mapTasks, toEpochMs, type RawLarkTask } from './tasks';
 
 describe('mapTasks', () => {
   it('returns [] for undefined or empty input', () => {
@@ -54,93 +54,6 @@ describe('toEpochMs', () => {
   it('treats 10-digit values as seconds and 13-digit as ms', () => {
     expect(toEpochMs('1623124318')).toBe(1623124318000);
     expect(toEpochMs('1623124318000')).toBe(1623124318000);
-  });
-});
-
-describe('loggedMsByGuid', () => {
-  const now = 1_700_000_100_000;
-  const d = (ms: number) => new Date(ms);
-
-  it('sums WORK + MEETING durations per guid, ignoring idle', () => {
-    const entries = [
-      { larkTaskGuid: 'a', segments: [
-        { kind: 'WORK', startedAt: d(now - 60_000), endedAt: d(now) },
-        { kind: 'IDLE_TRIMMED', startedAt: d(now - 30_000), endedAt: d(now) },
-      ] },
-      { larkTaskGuid: 'a', segments: [{ kind: 'MEETING', startedAt: d(now - 120_000), endedAt: d(now - 60_000) }] },
-      { larkTaskGuid: 'b', segments: [{ kind: 'WORK', startedAt: d(now - 10_000), endedAt: null }] },
-    ];
-    const m = loggedMsByGuid(entries, now);
-    expect(m.get('a')).toBe(120_000); // 60s work + 60s meeting, idle excluded
-    expect(m.get('b')).toBe(10_000); // open segment counts to now
-  });
-
-  it('skips entries without a guid', () => {
-    const m = loggedMsByGuid([{ larkTaskGuid: null, segments: [{ kind: 'WORK', startedAt: d(0), endedAt: d(1000) }] }], now);
-    expect(m.size).toBe(0);
-  });
-
-  it('clips durations to a requested day window', () => {
-    const entries = [
-      {
-        larkTaskGuid: 'a',
-        segments: [
-          { kind: 'WORK', startedAt: d(now - 90 * 60_000), endedAt: d(now - 45 * 60_000) },
-          { kind: 'MEETING', startedAt: d(now - 40 * 60_000), endedAt: d(now - 20 * 60_000) },
-        ],
-      },
-    ];
-
-    const m = loggedMsByGuid(entries, now, {
-      windowStart: now - 60 * 60_000,
-      windowEnd: now - 30 * 60_000,
-    });
-
-    expect(m.get('a')).toBe(25 * 60_000);
-  });
-
-  it('counts overlapping entries for the same Lark task once', () => {
-    const entries = [
-      {
-        larkTaskGuid: 'a',
-        segments: [{ kind: 'WORK', startedAt: d(now - 90 * 60_000), endedAt: d(now - 30 * 60_000) }],
-      },
-      {
-        larkTaskGuid: 'a',
-        segments: [{ kind: 'WORK', startedAt: d(now - 60 * 60_000), endedAt: d(now) }],
-      },
-    ];
-
-    const m = loggedMsByGuid(entries, now);
-    expect(m.get('a')).toBe(90 * 60_000);
-  });
-
-  it('caps stale open segments at latest activity evidence instead of now', () => {
-    const entries = [
-      { id: 'e1', larkTaskGuid: 'a', segments: [{ kind: 'WORK', startedAt: d(now - 30 * 60_000), endedAt: null }] },
-      { id: 'e2', larkTaskGuid: 'b', segments: [{ kind: 'WORK', startedAt: d(now - 30 * 60_000), endedAt: null }] },
-    ];
-
-    const evidenceByEntry = new Map([
-      ['e1', { latestStoredProofAt: d(now - 19 * 60_000), latestHeartbeatAt: null }],
-    ]);
-    const m = loggedMsByGuid(entries, now, { evidenceByEntry });
-
-    expect(m.get('a')).toBe(11 * 60_000);
-    expect(m.get('b')).toBe(0);
-  });
-
-  it('caps an expired protocol-v2 timer at its server-proven boundary', () => {
-    const entries = [{
-      id: 'v2-expired',
-      larkTaskGuid: 'a',
-      trackingProtocolVersion: 2,
-      lastProvenAt: d(now - 20 * 60_000),
-      leaseExpiresAt: d(now - 60_000),
-      segments: [{ kind: 'WORK', startedAt: d(now - 30 * 60_000), endedAt: null }],
-    }];
-
-    expect(loggedMsByGuid(entries, now).get('a')).toBe(10 * 60_000);
   });
 });
 

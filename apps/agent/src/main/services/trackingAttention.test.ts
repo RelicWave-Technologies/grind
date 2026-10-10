@@ -5,6 +5,8 @@ vi.mock('../attentionWindow', () => ({ attentionHost: {} }));
 import { createTrackingAttentionCoordinator } from './trackingAttention';
 import type { OverlayHost } from '../attentionWindow';
 
+type Coordinator = ReturnType<typeof createTrackingAttentionCoordinator>;
+
 /**
  * Every test drives the coordinator through a fake OverlayHost.
  *
@@ -96,6 +98,7 @@ describe('TrackingAttentionCoordinator — priority', () => {
   it('discards idle before presenting one welcome-back prompt', () => {
     const { coordinator, host } = setup();
     coordinator.requestIdle(100);
+    vi.mocked(host.hide).mockClear();
 
     coordinator.beginMachineAway();
     expect(coordinator.get()).toEqual({ kind: 'NONE' });
@@ -366,42 +369,51 @@ describe('TrackingAttentionCoordinator — a prompt leaves a trace', () => {
 /**
  * The stranding fix, expressed at the seam.
  *
- * A window only reaches a Space it was not built into if something activates
- * it — on macOS that is `makeKeyAndOrderFront:`, which is what the original
- * prompt did on every show and what every rewrite since dropped. So the
- * coordinator's contract is: every presentation activates exactly once, and
- * holding never does.
+ * A window only belongs to the Spaces that existed when it was built. So every
+ * presentation discards the old surface and builds a fresh one, which reaches
+ * the Space the person is on now without having to activate the app.
  */
-describe('TrackingAttentionCoordinator — presentation activates, holding does not', () => {
-  it('releases the surface whenever a prompt ends', () => {
+describe('TrackingAttentionCoordinator — one surface per presentation', () => {
+  it('discards the surface whenever a prompt ends', () => {
     const { coordinator, host } = setup();
 
     coordinator.requestIdle(100);
+    vi.mocked(host.hide).mockClear();
     coordinator.clear();
     expect(host.hide).toHaveBeenCalledTimes(1);
+  });
 
-    coordinator.requestIdle(200);
-    coordinator.clear();
+  it('builds a fresh surface for every presentation, restores included', () => {
+    const { coordinator, host } = setup();
+
+    coordinator.requestIdle(100);
+    expect(host.hide).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(host.hide).mock.invocationCallOrder[0]!)
+      .toBeLessThan(vi.mocked(host.place).mock.invocationCallOrder[0]!);
+
+    coordinator.restoreActive();
     expect(host.hide).toHaveBeenCalledTimes(2);
+    expect(host.place).toHaveBeenCalledTimes(2);
   });
 
-  it('places the surface again for every prompt rather than assuming it survived', () => {
-    const { coordinator, host } = setup();
+  it('waits for the renderer before revealing, so it never shows an empty window', () => {
+    const { coordinator, host, fireReady } = setup();
+    vi.mocked(host.isReady).mockReturnValue(false);
 
-    coordinator.requestIdle(100);
-    const placedForFirst = vi.mocked(host.place).mock.calls.length;
-    coordinator.clear();
+    coordinator.requestPermission('SETUP');
+    expect(host.keep).not.toHaveBeenCalled();
+    expect(host.activate).not.toHaveBeenCalled();
 
-    coordinator.requestAway({ larkTaskGuid: null, stoppedAt: 1_000, reason: 'suspend' });
-
-    // A second placement is what proves the coordinator does not depend on the
-    // previous window still existing.
-    expect(vi.mocked(host.place).mock.calls.length).toBeGreaterThan(placedForFirst);
+    vi.mocked(host.isReady).mockReturnValue(true);
+    fireReady();
+    expect(host.activate).toHaveBeenCalledTimes(1);
+    expect(host.keep).toHaveBeenCalledTimes(1);
   });
 
-  it('hides on release too, so an unreachable prompt does not leave a window behind', () => {
+  it('discards the surface on release too, so an unreachable prompt leaves nothing behind', () => {
     const { coordinator, host } = setup();
     coordinator.requestIdle(100);
+    vi.mocked(host.hide).mockClear();
 
     coordinator.releaseUnreachable('main_window_requested_twice');
 
@@ -409,20 +421,44 @@ describe('TrackingAttentionCoordinator — presentation activates, holding does 
   });
 });
 
-
-describe('TrackingAttentionCoordinator — activation is rationed to presentation', () => {
-  it('activates when a prompt is shown', () => {
+describe('TrackingAttentionCoordinator — only a blocking prompt takes focus', () => {
+  it('activates for a permission prompt', () => {
     const { coordinator, host } = setup();
-    coordinator.requestIdle(100);
+    coordinator.requestPermission('START_TASK');
     expect(host.activate).toHaveBeenCalledTimes(1);
   });
 
-  it('activates again when the prompt is restored, because that is a new ask', () => {
+  it('shows idle, idle-warning and welcome-back prompts without activating', () => {
     const { coordinator, host } = setup();
+    coordinator.requestIdleWarning({ idleStartedAt: 100, deadlineAt: 200 });
     coordinator.requestIdle(100);
+    coordinator.clear();
+    coordinator.requestAway({ larkTaskGuid: null, stoppedAt: 1_000, reason: 'lock' });
+
+    expect(host.activate).not.toHaveBeenCalled();
+    expect(host.keep).toHaveBeenCalledTimes(3);
+  });
+
+  it('does not activate when a tray click restores a prompt', () => {
+    const { coordinator, host } = setup();
+    coordinator.requestPermission('SETUP');
     vi.mocked(host.activate).mockClear();
 
     coordinator.restoreActive();
+
+    expect(host.activate).not.toHaveBeenCalled();
+    expect(host.keep).toHaveBeenCalledTimes(2);
+  });
+
+  it('activates once when a permission prompt comes back from System Settings', async () => {
+    const { coordinator, host, tick } = setup();
+    const prompt = coordinator.requestPermission('SETUP');
+    if (prompt.kind !== 'PERMISSION') throw new Error('expected a permission prompt');
+    coordinator.yieldPermissionToSystemSettings(prompt.promptId, { resumeWhen: () => true });
+    vi.mocked(host.activate).mockClear();
+
+    tick();
+    await flush();
 
     expect(host.activate).toHaveBeenCalledTimes(1);
   });
@@ -435,18 +471,103 @@ describe('TrackingAttentionCoordinator — activation is rationed to presentatio
 
     coordinator.yieldPermissionToSystemSettings(prompt.promptId, { resumeWhen: () => false });
 
-    // Yielding is the opposite of asking for attention; stealing focus here
-    // would sit on top of the very Settings pane the person was sent to.
     expect(host.activate).not.toHaveBeenCalled();
   });
+});
 
-  it('never activates more than once per presentation', () => {
-    const { coordinator, host } = setup();
-    coordinator.requestIdleWarning({ idleStartedAt: 100, deadlineAt: 200 });
-    expect(host.activate).toHaveBeenCalledTimes(1);
+describe('TrackingAttentionCoordinator — every change is observable', () => {
+  function watched() {
+    const ctx = setup();
+    const changes: Array<[string, string]> = [];
+    ctx.coordinator.onChange((next, previous) => changes.push([previous.kind, next.kind]));
+    return { ...ctx, changes };
+  }
 
-    // The warning becoming a paused idle prompt is a second presentation.
+  it('reports an idle prompt replaced by a permission prompt', () => {
+    const { coordinator, changes } = watched();
     coordinator.requestIdle(100);
-    expect(host.activate).toHaveBeenCalledTimes(2);
+    coordinator.requestPermission('RESUME_ENTRY');
+    expect(changes).toEqual([['NONE', 'IDLE'], ['IDLE', 'PERMISSION']]);
+  });
+
+  it('reports an idle prompt released as unreachable', () => {
+    const { coordinator, changes } = watched();
+    coordinator.requestIdle(100);
+    coordinator.releaseUnreachable('main_window_requested_twice');
+    expect(changes.at(-1)).toEqual(['IDLE', 'NONE']);
+  });
+
+  it('reports an idle prompt discarded for machine-away', () => {
+    const { coordinator, changes } = watched();
+    coordinator.requestIdleWarning({ idleStartedAt: 100, deadlineAt: 200 });
+    coordinator.beginMachineAway();
+    expect(changes.at(-1)).toEqual(['IDLE_WARNING', 'NONE']);
+  });
+
+  it('stops reporting once unsubscribed', () => {
+    const { coordinator } = setup();
+    const listener = vi.fn();
+    const off = coordinator.onChange(listener);
+    off();
+    coordinator.requestIdle(100);
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it('keeps going when a listener throws', () => {
+    const { coordinator, logger } = setup();
+    coordinator.onChange(() => {
+      throw new Error('boom');
+    });
+    coordinator.requestIdle(100);
+    expect(coordinator.get().kind).toBe('IDLE');
+    expect(logger.warn).toHaveBeenCalledWith('attention listener failed', expect.anything());
+  });
+});
+
+describe('TrackingAttentionCoordinator — a timer command answers the timer prompts', () => {
+  it.each([
+    ['idle warning', (c: Coordinator) => c.requestIdleWarning({ idleStartedAt: 100, deadlineAt: 200 })],
+    ['idle', (c: Coordinator) => c.requestIdle(100)],
+    ['welcome back', (c: Coordinator) => c.requestAway({ larkTaskGuid: 't', stoppedAt: 1, reason: 'lock' })],
+  ])('clears a stale %s prompt', (_name, request) => {
+    const { coordinator } = setup();
+    request(coordinator);
+
+    expect(coordinator.clearTimerPrompts()).toBe(true);
+    expect(coordinator.get()).toEqual({ kind: 'NONE' });
+  });
+
+  it('leaves a permission prompt alone', () => {
+    const { coordinator } = setup();
+    coordinator.requestPermission('START_TASK');
+
+    expect(coordinator.clearTimerPrompts()).toBe(false);
+    expect(coordinator.get().kind).toBe('PERMISSION');
+  });
+});
+
+describe('TrackingAttentionCoordinator — displays changing', () => {
+  it('re-places a prompt that is on screen', () => {
+    const { coordinator, host } = setup();
+    coordinator.requestAway({ larkTaskGuid: null, stoppedAt: 1, reason: 'lock' });
+    vi.mocked(host.place).mockClear();
+
+    coordinator.placeOnScreen();
+
+    expect(host.place).toHaveBeenCalledWith({ width: 360, height: 222, placement: 'topRight' });
+  });
+
+  it('leaves alone a prompt that has stood down for System Settings', () => {
+    const { coordinator, host } = setup();
+    const prompt = coordinator.requestPermission('SETUP');
+    if (prompt.kind !== 'PERMISSION') throw new Error('expected a permission prompt');
+    coordinator.yieldPermissionToSystemSettings(prompt.promptId);
+    vi.mocked(host.place).mockClear();
+
+    coordinator.placeOnScreen();
+    coordinator.clear();
+    coordinator.placeOnScreen();
+
+    expect(host.place).not.toHaveBeenCalled();
   });
 });

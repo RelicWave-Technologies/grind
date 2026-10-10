@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { prisma } from '@grind/db';
 import { ulid } from 'ulid';
-import { carveManualWindow, segmentCreateData } from '../manualTime/carve';
+import { carveManualWindow, lockManualCarve, segmentCreateData } from '../manualTime/carve';
 import {
   CreateManualTimeRequest,
   ListManualTimeRequestsQuery,
@@ -220,7 +220,8 @@ timeRequestsRouter.post('/', validate(CreateManualTimeRequest, 'body'), async (r
       const created = await prisma.$transaction(async (tx) => {
         // Store only the stretches this user has no real time for yet. A
         // supervisor entry that lands on top of tracked time must not add
-        // those minutes twice — the totals and payroll sum segments.
+        // those minutes twice — the totals and reports sum segments.
+        await lockManualCarve(tx, targetUserId);
         const { slices } = await carveManualWindow(tx, {
           userId: targetUserId,
           start: new Date(start),
@@ -236,8 +237,8 @@ timeRequestsRouter.post('/', validate(CreateManualTimeRequest, 'body'), async (r
               userId: targetUserId,
               larkTaskGuid: body.larkTaskGuid ?? null,
               source: 'MANUAL',
-              startedAt: new Date(slices[0]!.startedAt),
-              endedAt: new Date(slices[slices.length - 1]!.endedAt),
+              startedAt: new Date(slices[0]!.start),
+              endedAt: new Date(slices[slices.length - 1]!.end),
               shiftIdAtStart: requester.shiftId ?? null,
               segments: { create: segmentCreateData(slices, ulid) },
               attendees: attendeeIds.length
@@ -430,8 +431,14 @@ timeRequestsRouter.patch('/:id', validate(PatchManualTimeRequest, 'body'), async
     }
 
 	    const updated = await prisma.$transaction(async (tx) => {
+	      // Re-check under the row lock: an approval that landed after the read
+	      // above must not have its request window rewritten underneath it.
+	      const locked = await tx.$queryRaw<Array<{ status: string }>>`
+	        SELECT status FROM "ManualTimeRequest" WHERE id = ${id} FOR UPDATE
+	      `;
+	      if (locked[0]?.status !== 'PENDING') return { conflict: locked[0]?.status ?? 'missing' } as const;
 	      const row = await tx.manualTimeRequest.update({
-	        where: { id },
+	        where: { id, status: 'PENDING' },
 	        data: {
 	          requestedStart: start,
 	          requestedEnd: end,
@@ -481,6 +488,9 @@ timeRequestsRouter.patch('/:id', validate(PatchManualTimeRequest, 'body'), async
 	      return row;
 	    });
 
+	    if ('conflict' in updated) {
+	      return res.status(409).json({ error: 'immutable_after_decision', status: updated.conflict });
+	    }
 	    const hydrated = await prisma.manualTimeRequest.findUniqueOrThrow({
 	      where: { id: updated.id },
 	      include: {
@@ -528,5 +538,3 @@ timeRequestsRouter.post('/:id/cancel', attachScope, async (req, res, next) => {
     next(err);
   }
 });
-
-export default timeRequestsRouter;

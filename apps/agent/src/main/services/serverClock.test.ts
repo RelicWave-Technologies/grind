@@ -4,6 +4,7 @@ import {
   hasDeferredServerClockCorrection,
   hasServerClockSample,
   noteServerTime,
+  noteSystemResumed,
   serverAlignedNow,
   serverClockOffsetMs,
   setServerClockTrackingActive,
@@ -304,5 +305,61 @@ describe('robustness', () => {
     }
 
     expect(serverAlignedNow()).toBe(anchored);
+  });
+});
+
+describe('waking from sleep', () => {
+  it('catches up with the sleep before any heartbeat lands', () => {
+    const d = device(3 * MINUTE);
+    installDeviceClock(d);
+    heartbeat(d);
+
+    d.suspend(2 * 60 * MINUTE);
+    noteSystemResumed();
+
+    // A timer started now must not be stamped at lid-close time.
+    expect(serverAlignedNow()).toBeCloseTo(d.trueNow(), -2);
+  });
+
+  it('holds the catch-up while an entry is open, like any other correction', () => {
+    const d = device(0);
+    installDeviceClock(d);
+    heartbeat(d);
+
+    setServerClockTrackingActive(true);
+    const startedAt = serverAlignedNow();
+    d.suspend(30 * MINUTE);
+    noteSystemResumed();
+    d.advance(MINUTE);
+
+    expect(hasDeferredServerClockCorrection()).toBe(true);
+    expect(serverAlignedNow() - startedAt).toBeCloseTo(MINUTE, -3);
+
+    setServerClockTrackingActive(false);
+    expect(serverAlignedNow()).toBeCloseTo(d.trueNow(), -2);
+  });
+
+  it('does nothing when the machine did not really sleep', () => {
+    const d = device(0);
+    installDeviceClock(d);
+    heartbeat(d);
+    const before = serverAlignedNow();
+
+    noteSystemResumed();
+
+    expect(serverAlignedNow()).toBe(before);
+    expect(hasDeferredServerClockCorrection()).toBe(false);
+  });
+});
+
+describe('whole milliseconds', () => {
+  it('never hands out a fractional timestamp', () => {
+    let mono = 5_000.123;
+    __resetServerClock(() => mono);
+    vi.spyOn(Date, 'now').mockReturnValue(Date.UTC(2026, 7, 8, 12, 0, 0));
+    noteServerTime(new Date(Date.UTC(2026, 7, 8, 12, 5, 0)).toISOString(), Date.now(), Date.now() + 37);
+    mono += 1234.567;
+
+    expect(Number.isInteger(serverAlignedNow())).toBe(true);
   });
 });

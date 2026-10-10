@@ -15,17 +15,18 @@ export type ScreenUiState = 'ok' | 'needs-grant' | 'needs-settings' | 'needs-res
  * systemPreferences (no native module / Linux build issues).
  *
  * NOTE: `getMediaAccessStatus('screen')` can return a STALE value after the user
- * toggles the permission (electron#36722) until the app restarts — which is also
- * required for screen capture to actually start working. The `needs-restart`
- * UI state + relaunch flow handle this.
+ * toggles the permission (electron#36722) until the app restarts. A stale value
+ * lags a grant made while Timo runs; once it reads 'granted' the grant is
+ * already effective in this process, so trackingReadiness never answers a
+ * blank capture under 'granted' with a restart.
  */
 /**
  * macOS 15 (Sequoia) re-asks. Any app that captures the screen now gets a
  * recurring TCC prompt — weekly at 15.0, relaxed to roughly monthly from 15.1 —
  * whether or not ScreenCaptureKit is used. If the user dismisses or denies it,
  * capture returns blank frames exactly like a manual revocation, which is why
- * the monitor requires several consecutive unhealthy checks (plus an idle test)
- * before pausing tracking. Suppressing the prompt needs
+ * readiness needs several spaced blank probes (CHECKING → FAILED) and the
+ * monitor an active user before pausing tracking. Suppressing the prompt needs
  * com.apple.developer.persistent-content-capture, a managed entitlement Apple
  * neither documents nor offers a public request form for.
  */
@@ -44,28 +45,23 @@ export function hasScreenAccess(): boolean {
 
 /**
  * Accessibility trust (macOS) — required for the global keyboard & mouse hook.
+ * `prompt=true` shows the system dialog.
  *
- * This checks Accessibility (kTCCServiceAccessibility) specifically, which is
- * the right gate for how libuiohook works: it creates an ACTIVE tap
- * (kCGEventTapOptionDefault) and gates itself on AXIsProcessTrustedWithOptions.
+ * Accessibility (kTCCServiceAccessibility) is the one grant the hook needs.
+ * libuiohook creates an ACTIVE event tap (kCGEventTapOptionDefault, see
+ * input_hook.c) and gates itself on AXIsProcessTrustedWithOptions; active taps
+ * are governed by Accessibility, and Input Monitoring (kTCCServiceListenEvent)
+ * only governs listen-only taps, which Timo never creates or requests.
  *
- * Do not assume it covers Input Monitoring. kTCCServiceAccessibility,
- * kTCCServiceListenEvent (Input Monitoring) and kTCCServicePostEvent are three
- * independent TCC rows, and Accessibility does not imply Input Monitoring.
- * Electron exposes no API for the Input Monitoring row, so when a machine does
- * demand it the only signal is uIOhook.start() failing while
- * isTrustedAccessibilityClient() still says true — surfaced as FAILED (not
- * NEEDS_RESTART), with UI copy naming Input Monitoring, because relaunching
- * cannot supply a grant.
+ * So when uIOhook.start() fails while this still says true, the trust entry is
+ * stale — typically left behind by an earlier build of the app — and the fix
+ * is to turn Timo off and on under Accessibility. trackingReadiness reports it
+ * as FAILED and Check again retries the hook in-process.
  *
  * Windows and Linux need no equivalent grant. One known Windows limitation: a
  * non-elevated process receives no input events while a UAC-elevated window is
  * focused, so counts under-report for admin apps. Fixing that would mean
  * running Timo elevated, which we will not do.
- *
- * Original note — Accessibility / Input Monitoring trust — required for global keyboard & mouse
- * counting via uiohook (uIOhook.start() crashes without it). `prompt=true` shows
- * the system dialog. Non-macOS platforms don't gate this.
  */
 export function hasAccessibilityAccess(prompt = false): boolean {
   if (process.platform !== 'darwin') return true;
@@ -77,11 +73,10 @@ export function hasAccessibilityAccess(prompt = false): boolean {
 }
 
 /**
- * Pure decision: given the reported status and the last capture outcome, what
- * should the UI show? Crucially:
+ * Coarse screen state reported in the heartbeat's permission snapshot (the
+ * agent's own surfaces use trackingReadiness instead):
  *  - status granted but captures come back empty/error  → 'needs-restart'
- *    (covers both "granted, not yet effective (needs relaunch)" and
- *     "revoked mid-session" — both are fixed by a relaunch / re-grant).
+ *    (the wire name for "granted but not capturing")
  *  - never asked                                        → 'needs-grant'
  *  - denied / restricted                                → 'needs-settings'
  */

@@ -15,26 +15,44 @@
  *      array so the UI can render a striped overlay without confusing them
  *      with real, already-approved blocks.
  *
+ * The owner of every minute comes from `@grind/core`'s `resolveTimeline` —
+ * the same resolution the reports, the overview and Lark read — so this view
+ * cannot count a minute another screen does not. Invalidated minutes stay on
+ * the timeline (flagged) but never reach worked/meeting/manual totals.
+ *
  * No prisma/network calls in this file. The route owns I/O; this owns logic.
  */
 
-import { CLAIM_PRIORITY, resolveOverlaps } from './overlap';
 import {
-  WEEKDAYS,
-  hhmmToMin,
-  instantForZonedDateTime,
-  localDayWindowInTimeZone,
-  type ShiftSchedule,
-} from '@grind/types';
+  clipInterval,
+  firstStretchStartWithin,
+  isCounted,
+  mergeIntervals,
+  resolveTimeline,
+  subtractIntervals,
+  type Interval,
+  type TimelinePiece,
+} from '@grind/core';
+import { localDayWindowInTimeZone } from '@grind/types';
 
-export type SegmentKind = 'WORK' | 'MEETING' | 'IDLE_TRIMMED';
+type SegmentKind = 'WORK' | 'MEETING' | 'IDLE_TRIMMED';
 /**
  * Every minute of the day belongs to exactly ONE block kind — the timeline is a
  * single partition (Time-Doctor style), no overlapping layers. PENDING requests
  * are carved out of the gaps they sit in, so a pending slot is never *also* a
  * gap row (that was the old "duplicacy").
  */
-export type BlockKind = SegmentKind | 'MANUAL' | 'PENDING' | 'GAP';
+type BlockKind = SegmentKind | 'MANUAL' | 'PENDING' | 'GAP';
+
+/** What a day block needs to know about the entry behind it. */
+export interface DayEntryMeta {
+  id: string;
+  source: 'AUTO' | 'MANUAL';
+  requestId?: string | null;
+  larkTaskGuid: string | null;
+  notes?: string | null;
+  attendeeIds?: string[];
+}
 
 export interface DayEntryInput {
   id: string;
@@ -64,7 +82,7 @@ export interface RejectedRequestInput extends PendingRequestInput {
   decidedReason: string | null;
 }
 
-export interface DayBlock {
+interface DayBlock {
   kind: BlockKind;
   startedAt: number; // epoch ms
   endedAt: number; // epoch ms (exclusive)
@@ -88,6 +106,8 @@ export interface DayBlock {
   requestId?: string;
   /** PENDING blocks only: the request reason (shown + editable inline). */
   reason?: string;
+  /** A reviewer invalidated these minutes: drawn, never counted. */
+  invalidated?: boolean;
 }
 
 export interface DayInsightResult {
@@ -115,7 +135,16 @@ export interface DayInsightResult {
   } | null;
   firstActivityAt: number | null;
   lastActivityAt: number | null;
-  totals: { workedMs: number; meetingMs: number; manualMs: number; idleTrimmedMs: number; pendingMs: number; gapMs: number };
+  totals: {
+    workedMs: number;
+    meetingMs: number;
+    manualMs: number;
+    idleTrimmedMs: number;
+    pendingMs: number;
+    gapMs: number;
+    /** Work/meeting/manual minutes a reviewer invalidated (excluded above). */
+    invalidatedMs: number;
+  };
   /**
    * The single sorted review partition: tracked · meeting · manual · idle ·
    * pending · gap, contiguous and non-overlapping across [dayStart, dayEnd]
@@ -147,65 +176,6 @@ export function localDayWindow(date: string, tz: string): { start: Date; end: Da
   return localDayWindowInTimeZone(date, tz);
 }
 
-/**
- * The shift-bounded window for `date` in `tz`, or `null` to fall back to the
- * full calendar day (no shift, or a day off in the schedule). The schedule
- * forbids overnight shifts (`end > start`), so the window stays within the day.
- * DST-correct via the same solver as {@link localDayWindow}.
- */
-export function shiftDayWindow(
-  date: string,
-  tz: string,
-  schedule: ShiftSchedule,
-): { start: Date; end: Date } | null {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
-  const [y, m, d] = date.split('-').map((n) => parseInt(n, 10));
-  if (!y || !m || !d) return null;
-  // Weekday of the *calendar* date (date string is already user-local), derived
-  // tz-independently so it can't drift near midnight.
-  const weekday = WEEKDAYS[new Date(Date.UTC(y, m - 1, d)).getUTCDay()]!;
-  const day = schedule[weekday];
-  if (!day) return null; // day off → caller uses the full calendar day
-  const startMin = hhmmToMin(day.start);
-  const endMin = hhmmToMin(day.end);
-  try {
-    return {
-      start: utcInstantForLocalTime(y, m, d, startMin, tz),
-      end: utcInstantForLocalTime(y, m, d, endMin, tz),
-    };
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Delegate all wall-clock resolution to the shared timezone boundary. This
- * rejects impossible DST times and documents the deterministic fall-back rule.
- */
-function utcInstantForLocalTime(
-  year: number,
-  month: number,
-  day: number,
-  minutesOfDay: number,
-  tz: string,
-): Date {
-  return instantForZonedDateTime({
-    year,
-    month,
-    day,
-    hour: Math.floor(minutesOfDay / 60),
-    minute: minutesOfDay % 60,
-    second: 0,
-  }, tz);
-}
-
-/** Clip [a,b) by [lo,hi) → returns null when disjoint. */
-function clip(a: number, b: number, lo: number, hi: number): { a: number; b: number } | null {
-  const start = Math.max(a, lo);
-  const end = Math.min(b, hi);
-  return end > start ? { a: start, b: end } : null;
-}
-
 interface PendingIv {
   id: string;
   a: number;
@@ -217,56 +187,41 @@ interface PendingIv {
 }
 
 /**
- * Complement of sorted, non-overlapping `solids` over [lo, hi) — i.e. the empty
- * stretches. Robust to solids that touch, overlap, or spill past the bounds.
+ * Carve PENDING requests exactly the way approving them will: a request keeps
+ * only what is not already tracked or approved manual time. Trimmed idle does
+ * not block it — correcting a bad idle trim is the main thing manual time is
+ * for — so a pending stripe can sit where idle was drawn. Overlapping requests
+ * are de-overlapped first-come (earliest start), so the partition stays clean.
  */
-function emptyStretches(solids: DayBlock[], lo: number, hi: number): Array<{ a: number; b: number }> {
-  const out: Array<{ a: number; b: number }> = [];
-  let cursor = lo;
-  for (const s of solids) {
-    if (s.startedAt > cursor) out.push({ a: cursor, b: Math.min(s.startedAt, hi) });
-    cursor = Math.max(cursor, s.endedAt);
-    if (cursor >= hi) break;
-  }
-  if (cursor < hi) out.push({ a: cursor, b: hi });
-  return out.filter((x) => x.b > x.a);
-}
-
-/**
- * Fill one empty stretch [lo, hi) with GAP blocks, carving any PENDING requests
- * out of it as their own blocks. Pending is clipped to the stretch and
- * de-overlapped (a monotonic cursor), so the output is always a clean,
- * non-overlapping GAP/PENDING/GAP… sequence — even with messy/overlapping
- * requests. This is what makes pending and gap mutually exclusive (no duplicacy).
- */
-function carveGap(lo: number, hi: number, pendingIv: PendingIv[], out: DayBlock[]): void {
-  let cursor = lo;
+function carvePending(pendingIv: PendingIv[], occupied: Interval[], lo: number, hi: number): DayBlock[] {
+  const out: DayBlock[] = [];
+  let taken = mergeIntervals(occupied);
   for (const p of pendingIv) {
-    const a = Math.max(p.a, cursor);
-    const b = Math.min(p.b, hi);
-    if (b <= a) continue; // disjoint with this stretch, or already consumed
-    if (a > cursor) out.push({ kind: 'GAP', startedAt: cursor, endedAt: a, durationMs: a - cursor });
-    out.push({
-      kind: 'PENDING',
-      startedAt: a,
-      endedAt: b,
-      durationMs: b - a,
-      requestId: p.id,
-      reason: p.reason,
-      larkTaskGuid: p.larkTaskGuid,
-      taskSummary: p.taskSummary ?? null,
-      ...(p.attendeeIds ? { attendeeIds: p.attendeeIds } : {}),
-    });
-    cursor = b;
+    const win = clipInterval({ start: p.a, end: p.b }, lo, hi);
+    if (!win) continue;
+    for (const part of subtractIntervals([win], taken)) {
+      out.push({
+        kind: 'PENDING',
+        startedAt: part.start,
+        endedAt: part.end,
+        durationMs: part.end - part.start,
+        requestId: p.id,
+        reason: p.reason,
+        larkTaskGuid: p.larkTaskGuid,
+        taskSummary: p.taskSummary ?? null,
+        ...(p.attendeeIds ? { attendeeIds: p.attendeeIds } : {}),
+      });
+    }
+    taken = mergeIntervals([...taken, win]);
   }
-  if (cursor < hi) out.push({ kind: 'GAP', startedAt: cursor, endedAt: hi, durationMs: hi - cursor });
+  return out;
 }
 
 /** Sub-`COALESCE_MIN_MS` idle/gaps fold INTO the surrounding work; adjacent
  *  same-kind + same-task work merges into one continuous block. Time-Doctor
  *  style — totals are computed from the raw partition BEFORE this, so folding a
  *  short idle into work never changes the hour counts. */
-export const COALESCE_MIN_MS = 120_000; // 2 minutes
+const COALESCE_MIN_MS = 120_000; // 2 minutes
 
 function isTracked(k: BlockKind): boolean {
   return k === 'WORK' || k === 'MEETING' || k === 'MANUAL';
@@ -344,14 +299,14 @@ function emitRun(run: DayBlock[], minMs: number): DayBlock[] {
  * Totals are computed from the RAW partition before this, so folding never
  * changes the hour counts.
  */
-export function coalesceForDisplay(blocks: DayBlock[], minMs: number): DayBlock[] {
+function coalesceForDisplay(blocks: DayBlock[], minMs: number): DayBlock[] {
   const out: DayBlock[] = [];
   let i = 0;
   while (i < blocks.length) {
     const b = blocks[i]!;
     if (isFiller(b.kind)) {
       const prev = out[out.length - 1];
-      if (b.durationMs < minMs && prev && isTracked(prev.kind)) {
+      if (b.durationMs < minMs && prev && isTracked(prev.kind) && !prev.invalidated) {
         prev.endedAt = Math.max(prev.endedAt, b.endedAt);
         prev.durationMs = prev.endedAt - prev.startedAt;
         prev.isOpen = false;
@@ -383,6 +338,7 @@ export function coalesceForDisplay(blocks: DayBlock[], minMs: number): DayBlock[
       }
       if (!isTracked(n.kind)) break; // PENDING
       if ((n.larkTaskGuid ?? null) !== task) break; // task change
+      if (Boolean(n.invalidated) !== Boolean(b.invalidated)) break; // counted vs invalidated
       if (n.startedAt - runEnd >= minMs) break; // long intra-task gap
       run.push(n);
       runEnd = Math.max(runEnd, n.endedAt);
@@ -400,17 +356,30 @@ export function coalesceForDisplay(blocks: DayBlock[], minMs: number): DayBlock[
   return out;
 }
 
+const DAY_USER = 'day';
+
+function blockKindOf(kind: TimelinePiece['kind']): BlockKind {
+  return kind === 'IDLE' ? 'IDLE_TRIMMED' : kind;
+}
+
 /**
  * Main composer — builds the single, contiguous, non-overlapping day partition.
  * `now` lets tests be deterministic. `frame` is the shift window (or full day);
  * `calendarDay` is the true midnight→midnight span (drives isToday/isFuture and
  * caps the frame so it can never exceed the calendar day).
+ *
+ * Time comes in one of two shapes: `timeline`, pieces already resolved by
+ * `@grind/core` (what the routes pass), or `entries` whose segment ends are
+ * already effective (`null` = running), resolved here by the same rule.
  */
 export function buildDayInsight(input: {
   date: string;
   tz: string;
   now: Date;
-  entries: DayEntryInput[];
+  entries?: DayEntryInput[];
+  timeline?: ReadonlyArray<TimelinePiece<DayEntryMeta>>;
+  /** Reviewer invalidations, applied when time comes in as `entries`. */
+  invalidations?: readonly Interval[];
   pending: PendingRequestInput[];
   rejected?: RejectedRequestInput[];
   /** Shift-bounded window (or full day when no shift / day off). */
@@ -423,7 +392,7 @@ export function buildDayInsight(input: {
   /** Exact shift instants. Defaults to `window` for backwards-compatible callers. */
   shiftWindow?: { start: Date; end: Date } | null;
 }): DayInsightResult {
-  const { date, tz, now, entries, pending, rejected = [], window: frame, shift = null } = input;
+  const { date, tz, now, pending, rejected = [], window: frame, shift = null } = input;
   const calendarDay = input.calendarDay ?? frame;
   const nowMs = now.getTime();
   const calStart = calendarDay.start.getTime();
@@ -431,32 +400,37 @@ export function buildDayInsight(input: {
   const isToday = calStart <= nowMs && nowMs < calEnd;
   const isFuture = nowMs < calStart;
 
-  // 1. Flatten + tag real ("solid") blocks. Not clipped yet — we need true
-  //    extents to expand the frame so off-shift work is never hidden.
+  // 1. One owner per minute — the shared resolution every screen reads.
+  const pieces = input.timeline ?? resolveTimeline(
+    (input.entries ?? []).map((e) => ({ ...e, userId: DAY_USER })),
+    {
+      now,
+      trustOpenSegments: true,
+      invalidations: (input.invalidations ?? []).map((iv) => ({ userId: DAY_USER, ...iv })),
+    },
+  );
   const solids: DayBlock[] = [];
-  for (const e of entries) {
-    for (const s of e.segments) {
-      const a = s.startedAt.getTime();
-      const b = s.endedAt ? s.endedAt.getTime() : nowMs; // open running → now
-      if (b <= a) continue;
-      const kind: BlockKind = e.source === 'MANUAL' ? 'MANUAL' : s.kind;
-      const attendeeIds =
-        (kind === 'MEETING' || kind === 'MANUAL') && e.attendeeIds && e.attendeeIds.length > 0
-          ? e.attendeeIds
-          : undefined;
-      solids.push({
-        kind,
-        startedAt: a,
-        endedAt: b,
-        durationMs: b - a,
-        timeEntryId: e.id,
-        ...(e.requestId ? { requestId: e.requestId } : {}),
-        larkTaskGuid: e.larkTaskGuid,
-        notes: e.notes ?? null,
-        isOpen: s.endedAt === null && isToday,
-        ...(attendeeIds ? { attendeeIds } : {}),
-      });
-    }
+  for (const p of pieces) {
+    if (p.end <= calStart || p.start >= calEnd) continue;
+    const kind = blockKindOf(p.kind);
+    const e = p.entry;
+    const attendeeIds =
+      (kind === 'MEETING' || kind === 'MANUAL') && e.attendeeIds && e.attendeeIds.length > 0
+        ? e.attendeeIds
+        : undefined;
+    solids.push({
+      kind,
+      startedAt: p.start,
+      endedAt: p.end,
+      durationMs: p.end - p.start,
+      timeEntryId: e.id,
+      ...(e.requestId ? { requestId: e.requestId } : {}),
+      larkTaskGuid: e.larkTaskGuid,
+      notes: e.notes ?? null,
+      isOpen: p.live && isToday,
+      ...(attendeeIds ? { attendeeIds } : {}),
+      ...(p.invalidated ? { invalidated: true } : {}),
+    });
   }
   solids.sort((x, y) => x.startedAt - y.startedAt);
 
@@ -483,6 +457,7 @@ export function buildDayInsight(input: {
     winEnd = Math.max(winEnd, s.endedAt);
   }
   for (const p of pendingIv) {
+    if (p.b <= calStart || p.a >= calEnd) continue;
     winStart = Math.min(winStart, p.a);
     winEnd = Math.max(winEnd, p.b);
   }
@@ -496,51 +471,63 @@ export function buildDayInsight(input: {
   // 3. Clip solids to the frame.
   const clippedSolids: DayBlock[] = [];
   for (const s of solids) {
-    const c = clip(s.startedAt, s.endedAt, dayStart, dayEnd);
+    const c = clipInterval({ start: s.startedAt, end: s.endedAt }, dayStart, dayEnd);
     if (!c) continue;
-    clippedSolids.push({ ...s, startedAt: c.a, endedAt: c.b, durationMs: c.b - c.a });
+    clippedSolids.push({ ...s, startedAt: c.start, endedAt: c.end, durationMs: c.end - c.start });
   }
 
-  // 3b. Solids can genuinely overlap: an approved manual entry is a real
-  //     TimeEntry, and nothing stopped one from landing on top of tracked
-  //     time. Both rows then survived into the partition and the totals below
-  //     added both, so the same minutes were counted twice — on this page and,
-  //     through the timesheet cells, in payroll.
-  //
-  //     Resolve them the way this file already resolves PENDING: real time
-  //     wins. A manual claim keeps only what is genuinely free.
-  const resolvedSolids = resolveOverlaps(clippedSolids, (b) => (
-    b.kind === 'MANUAL' ? CLAIM_PRIORITY.manual
-      : b.kind === 'IDLE_TRIMMED' ? CLAIM_PRIORITY.idle
-        : CLAIM_PRIORITY.tracked));
-  for (const b of resolvedSolids) b.durationMs = b.endedAt - b.startedAt;
-
-  // Activity envelope (real blocks only). Safe to read off the ends now that
-  // the list is non-overlapping and sorted.
-  const firstActivityAt = resolvedSolids.length ? resolvedSolids[0]!.startedAt : null;
-  let lastActivityAt: number | null = null;
-  if (resolvedSolids.length) {
-    const lastEnd = resolvedSolids[resolvedSolids.length - 1]!.endedAt;
-    lastActivityAt = isToday ? Math.max(lastEnd, nowMs) : lastEnd;
+  // Activity envelope: counted time only, and a stretch that started before
+  // midnight is a continuation, not this day's first activity.
+  const counted = mergeIntervals(pieces.filter(isCounted));
+  const firstActivityAt = firstStretchStartWithin(counted, calStart, calEnd);
+  let lastEnd: number | null = null;
+  for (const iv of counted) {
+    const c = clipInterval(iv, dayStart, dayEnd);
+    if (c && (lastEnd === null || c.end > lastEnd)) lastEnd = c.end;
   }
+  const lastActivityAt = lastEnd === null ? null : isToday ? Math.max(lastEnd, nowMs) : lastEnd;
 
-  // 4. Single partition: solids are authoritative; carve PENDING out of the
-  //    empty stretches between them; everything else is GAP. Future days have
-  //    no rows at all.
+  // 4. Single partition: tracked and manual time are authoritative; PENDING is
+  //    carved the way approval will carve it (over gaps and trimmed idle);
+  //    everything else is GAP. Future days have no rows at all.
   const blocks: DayBlock[] = [];
   if (!isFuture) {
-    const carved: DayBlock[] = [];
-    for (const stretch of emptyStretches(resolvedSolids, dayStart, gapCap)) {
-      carveGap(stretch.a, stretch.b, pendingIv, carved);
+    const occupied = clippedSolids
+      .filter((b) => b.kind !== 'IDLE_TRIMMED')
+      .map((b) => ({ start: b.startedAt, end: b.endedAt }));
+    const pendingBlocks = carvePending(pendingIv, occupied, dayStart, gapCap);
+    const pendingIvs = pendingBlocks.map((b) => ({ start: b.startedAt, end: b.endedAt }));
+    for (const b of clippedSolids) {
+      if (b.kind !== 'IDLE_TRIMMED') {
+        blocks.push(b);
+        continue;
+      }
+      for (const part of subtractIntervals([{ start: b.startedAt, end: b.endedAt }], pendingIvs)) {
+        blocks.push({ ...b, startedAt: part.start, endedAt: part.end, durationMs: part.end - part.start });
+      }
     }
-    blocks.push(...resolvedSolids, ...carved);
-    blocks.sort((x, y) => x.startedAt - y.startedAt);
+    blocks.push(...pendingBlocks);
+    const filled = blocks.map((b) => ({ start: b.startedAt, end: b.endedAt }));
+    for (const gap of subtractIntervals([{ start: dayStart, end: gapCap }], filled)) {
+      blocks.push({ kind: 'GAP', startedAt: gap.start, endedAt: gap.end, durationMs: gap.end - gap.start });
+    }
+    blocks.sort((x, y) => x.startedAt - y.startedAt || x.endedAt - y.endedAt);
   }
 
   // 5. Totals (partition sums to the framed, capped day).
-  const totals = { workedMs: 0, meetingMs: 0, manualMs: 0, idleTrimmedMs: 0, pendingMs: 0, gapMs: 0 };
+  const totals = {
+    workedMs: 0,
+    meetingMs: 0,
+    manualMs: 0,
+    idleTrimmedMs: 0,
+    pendingMs: 0,
+    gapMs: 0,
+    invalidatedMs: 0,
+  };
   for (const b of blocks) {
-    if (b.kind === 'WORK') totals.workedMs += b.durationMs;
+    if (b.invalidated && (b.kind === 'WORK' || b.kind === 'MEETING' || b.kind === 'MANUAL')) {
+      totals.invalidatedMs += b.durationMs;
+    } else if (b.kind === 'WORK') totals.workedMs += b.durationMs;
     else if (b.kind === 'MEETING') totals.meetingMs += b.durationMs;
     else if (b.kind === 'MANUAL') totals.manualMs += b.durationMs;
     else if (b.kind === 'IDLE_TRIMMED') totals.idleTrimmedMs += b.durationMs;
@@ -550,12 +537,12 @@ export function buildDayInsight(input: {
 
   const recentRejected = rejected
     .map((r) => {
-      const c = clip(r.requestedStart.getTime(), r.requestedEnd.getTime(), dayStart, dayEnd);
+      const c = clipInterval({ start: r.requestedStart.getTime(), end: r.requestedEnd.getTime() }, dayStart, dayEnd);
       if (!c) return null;
       return {
         id: r.id,
-        requestedStart: c.a,
-        requestedEnd: c.b,
+        requestedStart: c.start,
+        requestedEnd: c.end,
         reason: r.reason,
         decidedReason: r.decidedReason,
         larkTaskGuid: r.larkTaskGuid,

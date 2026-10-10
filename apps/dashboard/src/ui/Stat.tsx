@@ -54,16 +54,3 @@ export function StatRow({ children, className, ...rest }: StatRowProps) {
     </div>
   );
 }
-
-/** The rarer boxed-card layout: auto-fit grid of Stat-in-Card. Layout only. */
-export interface StatGridProps extends React.HTMLAttributes<HTMLDivElement> {
-  children: ReactNode;
-}
-
-export function StatGrid({ children, className, ...rest }: StatGridProps) {
-  return (
-    <div className={cx('ui-stat-grid', className)} {...rest}>
-      {children}
-    </div>
-  );
-}

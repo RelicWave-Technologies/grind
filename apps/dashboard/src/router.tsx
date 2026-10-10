@@ -9,6 +9,7 @@ import type { QueryClient } from '@tanstack/react-query';
 import { api, ApiError } from './lib/api';
 import { hasCapability, landingPath } from './lib/auth';
 import type { Me } from './lib/auth';
+import { parseSyncFilter, type SyncFilter } from './lib/syncHealth';
 import { Layout } from './components/Layout';
 import { LoginScreen } from './screens/Login';
 
@@ -22,7 +23,6 @@ const TeamsScreen = lazyRouteComponent(() => import('./screens/Teams'), 'TeamsSc
 const FlagsScreen = lazyRouteComponent(() => import('./screens/Flags'), 'FlagsScreen');
 const ShiftsScreen = lazyRouteComponent(() => import('./screens/Shifts'), 'ShiftsScreen');
 const PolicyScreen = lazyRouteComponent(() => import('./screens/Policy'), 'PolicyScreen');
-const PayrollScreen = lazyRouteComponent(() => import('./screens/Payroll'), 'PayrollScreen');
 const OverviewScreen = lazyRouteComponent(() => import('./screens/Overview'), 'OverviewScreen');
 const IntegrationsScreen = lazyRouteComponent(() => import('./screens/Integrations'), 'IntegrationsScreen');
 const ReportsScreen = lazyRouteComponent(() => import('./screens/Reports'), 'ReportsScreen');
@@ -30,6 +30,7 @@ const ProfileScreen = lazyRouteComponent(() => import('./screens/Profile'), 'Pro
 const ChangelogScreen = lazyRouteComponent(() => import('./screens/Changelog'), 'ChangelogScreen');
 const CalendarScreen = lazyRouteComponent(() => import('./screens/Calendar'), 'CalendarScreen');
 const WelcomeScreen = lazyRouteComponent(() => import('./screens/Welcome'), 'WelcomeScreen');
+const DevResyncScreen = lazyRouteComponent(() => import('./screens/DevResync'), 'DevResyncScreen');
 
 interface RouterContext {
   queryClient: QueryClient;
@@ -88,6 +89,10 @@ const homeRoute = createRoute({
 const usersRoute = createRoute({
   getParentRoute: () => authedRoot,
   path: '/users',
+  // Optional ?sync=stuck|behind|unknown — the Overview "sync stuck" card links here.
+  validateSearch: (s: Record<string, unknown>): { sync?: SyncFilter } => ({
+    sync: parseSyncFilter(s.sync),
+  }),
   beforeLoad: ({ context }) => {
     const me = (context as { me?: Me }).me;
     if (!hasCapability(me, 'people.read')) {
@@ -190,11 +195,6 @@ const attendanceRoute = createRoute({
   component: AttendanceScreen,
 });
 
-/**
- * Admin-only while leave is still being rolled out. Hiding the nav entry is not
- * access control on its own — the URL is still typeable — so the route guards
- * too, and the page's own admin affordances remain gated separately.
- */
 // Open to anybody signed in. Every read behind it is scoped by the caller's
 // own `req.scope.userIds` — a member's month grid and balance row are their
 // own, a manager's are their team's — and every write on the page is
@@ -260,14 +260,16 @@ const integrationsRoute = createRoute({
   component: IntegrationsScreen,
 });
 
-const payrollRoute = createRoute({
+// Hidden developer tool (DEVELOPER_EMAILS on the API). Reached by URL only —
+// no nav entry — and anyone else lands where they normally would.
+const devResyncRoute = createRoute({
   getParentRoute: () => authedRoot,
-  path: '/payroll',
+  path: '/dev/resync',
   beforeLoad: ({ context }) => {
     const me = (context as { me?: Me }).me;
-    requireAnyRouteCapability(me, ['payroll.manage']);
+    if (!me?.isDeveloper) throw redirect({ to: landingPath(me) });
   },
-  component: PayrollScreen,
+  component: DevResyncScreen,
 });
 
 const overviewRoute = createRoute({
@@ -336,7 +338,7 @@ const indexRoute = createRoute({
 });
 
 export const routeTree = rootRoute.addChildren([
-  authedRoot.addChildren([homeRoute, overviewRoute, editTimeRoute, meTodayLegacyRoute, reportsRoute, approvalsRoute, profileRoute, teamRoute, attendanceRoute, calendarRoute, flagsRoute, usersRoute, teamsAdminRoute, shiftsRoute, policyRoute, integrationsRoute, payrollRoute]),
+  authedRoot.addChildren([homeRoute, overviewRoute, editTimeRoute, meTodayLegacyRoute, reportsRoute, approvalsRoute, profileRoute, teamRoute, attendanceRoute, calendarRoute, flagsRoute, usersRoute, teamsAdminRoute, shiftsRoute, policyRoute, integrationsRoute, devResyncRoute]),
   loginRoute,
   changelogRoute,
   welcomeRoute,

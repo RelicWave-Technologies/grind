@@ -12,7 +12,8 @@
     "lint": "eslint src",
     "test": "dotenv -e ../../.env -- vitest run",
     "test:watch": "dotenv -e ../../.env -- vitest",
-    "reconcile:legacy-timers": "dotenv -e ../../.env -- tsx scripts/reconcile-legacy-timers.ts"
+    "reconcile:legacy-timers": "dotenv -e ../../.env -- tsx scripts/reconcile-legacy-timers.ts",
+    "link:orphaned-evidence": "dotenv -e ../../.env -- tsx scripts/link-orphaned-evidence.ts"
   },
   "dependencies": {
     "@ai-sdk/deepseek": "0.2.14",
@@ -34,6 +35,7 @@
     "pino": "9.5.0",
     "pino-http": "10.3.0",
     "pino-pretty": "11.3.0",
+    "ulid": "2.3.0",
     "zod": "3.25.76"
   },
   "devDependencies": {

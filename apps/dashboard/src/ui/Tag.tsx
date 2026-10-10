@@ -29,6 +29,3 @@ export function Tag({ status = 'neutral', dot, mono, className, children, ...res
     </span>
   );
 }
-
-/** Alias — the spec names this pattern "Tag/Badge". */
-export const Badge = Tag;

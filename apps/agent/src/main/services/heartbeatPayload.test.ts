@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { agentStateFromTimer, buildHeartbeatRequest, currentPlatform } from './heartbeatPayload';
+import { agentStateFromTimer, buildHeartbeatRequest } from './heartbeatPayload';
 import type { TimerStatus } from './timer';
 
 describe('heartbeat payload', () => {
@@ -148,11 +148,5 @@ describe('heartbeat payload', () => {
         origin: 'USER',
       },
     });
-  });
-
-  it('normalizes unknown node platforms to linux', () => {
-    expect(currentPlatform('darwin')).toBe('darwin');
-    expect(currentPlatform('win32')).toBe('win32');
-    expect(currentPlatform('freebsd')).toBe('linux');
   });
 });

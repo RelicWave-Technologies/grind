@@ -17,5 +17,3 @@ profileRouter.get('/me', async (req, res, next) => {
     next(err);
   }
 });
-
-export default profileRouter;

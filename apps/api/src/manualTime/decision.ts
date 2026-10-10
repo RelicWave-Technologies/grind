@@ -1,5 +1,6 @@
 import { prisma } from '@grind/db';
-import { carveManualWindow, segmentCreateData } from './carve';
+import { carveManualWindow, lockManualCarve, segmentCreateData } from './carve';
+import { requestRuleReconcile } from '../attendance/ruleScheduler';
 import { ulid } from 'ulid';
 import {
   buildCancelledCard,
@@ -8,7 +9,7 @@ import {
   type ApprovalAction,
 } from '../lark/cards';
 import { logger } from '../logger';
-import { queueManualTimeApprovalCard, queueManualTimeFinalizeCards } from './larkOutbox';
+import { loadCardCreditedMs, queueManualTimeApprovalCard, queueManualTimeFinalizeCards } from './larkOutbox';
 
 type ManualTimeStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
 type ManualTimeNoop =
@@ -34,8 +35,9 @@ function canSelfApproveManualTime(role: string): boolean {
   return role === 'ADMIN' || role === 'MANAGER';
 }
 
-function finalCard(req: {
+interface FinalCardRequest {
   id: string;
+  userId: string;
   taskSummary: string | null;
   requestedStart: Date;
   requestedEnd: Date;
@@ -44,7 +46,14 @@ function finalCard(req: {
   decidedAt: Date | null;
   user: { name: string; workspace: { timezone: string } };
   approver: { name: string } | null;
-}, now: Date): Record<string, unknown> {
+}
+
+/**
+ * The card for a decided request. Built after the decision commits: what an
+ * approval credited is read from the shared timeline, which only sees the
+ * carved entry once it is written.
+ */
+async function finalCard(req: FinalCardRequest, now: Date): Promise<Record<string, unknown>> {
   const common = {
     requestId: req.id,
     requesterName: req.user.name,
@@ -65,6 +74,7 @@ function finalCard(req: {
     decision: req.status === 'REJECTED' ? 'REJECTED' : 'APPROVED',
     decidedByName: req.approver?.name ?? 'Approver',
     decidedAt: (req.decidedAt ?? now).getTime(),
+    creditedMs: await loadCardCreditedMs(req),
   });
 }
 
@@ -82,7 +92,10 @@ export async function decideManualTimeRequest(args: {
   now?: Date;
 }): Promise<ManualTimeDecisionResult | null> {
   const now = args.now ?? new Date();
-  return prisma.$transaction(async (tx) => {
+  let approvedWorkspaceId: string | null = null;
+  // `decided`: the answer is the decided card, built once the tx commits.
+  type TxResult = ManualTimeDecisionResult & { decided?: FinalCardRequest };
+  const result = await prisma.$transaction(async (tx): Promise<TxResult | null> => {
     const locked = await tx.$queryRaw<Array<{ id: string }>>`
       SELECT id FROM "ManualTimeRequest" WHERE id = ${args.requestId} FOR UPDATE
     `;
@@ -97,6 +110,7 @@ export async function decideManualTimeRequest(args: {
         user: {
           select: {
             name: true,
+            workspaceId: true,
             workspace: { select: { timezone: true } },
             larkIdentity: { select: { openId: true } },
           },
@@ -154,7 +168,8 @@ export async function decideManualTimeRequest(args: {
 
     if (req.status !== 'PENDING') {
       return {
-        card: finalCard(req, now),
+        decided: req,
+        card: {},
         status: req.status,
         timeEntryId: req.timeEntryId,
         decidedAt: req.decidedAt ? req.decidedAt.toISOString() : null,
@@ -195,6 +210,9 @@ export async function decideManualTimeRequest(args: {
     const requesterShift = await tx.user.findUnique({ where: { id: req.userId }, select: { shiftId: true } });
     let timeEntryId: string | null = null;
     if (decision === 'APPROVED') {
+      // One approval at a time per person: two overlapping requests approved
+      // together must not both carve the same free minutes.
+      await lockManualCarve(tx, req.userId);
       const clientUuid = `mtr-${req.id}`;
       const existingEntry = await tx.timeEntry.findUnique({ where: { clientUuid }, select: { id: true } });
       if (existingEntry) {
@@ -206,6 +224,7 @@ export async function decideManualTimeRequest(args: {
           userId: req.userId,
           start: req.requestedStart,
           end: req.requestedEnd,
+          now,
         });
         if (slices.length > 0) {
           const teId = ulid();
@@ -217,8 +236,8 @@ export async function decideManualTimeRequest(args: {
               userId: req.userId,
               larkTaskGuid: req.larkTaskGuid,
               source: 'MANUAL',
-              startedAt: new Date(slices[0]!.startedAt),
-              endedAt: new Date(slices[slices.length - 1]!.endedAt),
+              startedAt: new Date(slices[0]!.start),
+              endedAt: new Date(slices[slices.length - 1]!.end),
               shiftIdAtStart: requesterShift?.shiftId ?? null,
               segments: { create: segmentCreateData(slices, ulid) },
               attendees: attendeeIds.length ? { create: attendeeIds.map((userId) => ({ userId })) } : undefined,
@@ -263,8 +282,10 @@ export async function decideManualTimeRequest(args: {
       });
     }
 
+    if (decision === 'APPROVED') approvedWorkspaceId = req.user.workspaceId;
     return {
-      card: finalCard(updated, now),
+      decided: updated,
+      card: {},
       status: decision,
       timeEntryId,
       decidedAt: now.toISOString(),
@@ -272,6 +293,12 @@ export async function decideManualTimeRequest(args: {
       noop: null,
     };
   });
+  // Approved time can change a day's attendance verdict.
+  if (approvedWorkspaceId) requestRuleReconcile(approvedWorkspaceId);
+  if (!result) return null;
+  const { decided, ...out } = result;
+  if (decided) out.card = await finalCard(decided, now);
+  return out;
 }
 
 export async function cancelManualTimeRequest(args: {

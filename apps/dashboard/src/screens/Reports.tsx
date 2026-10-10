@@ -25,13 +25,25 @@ import {
 } from 'lucide-react';
 import { api, API_BASE } from '../lib/api';
 import { useMonthReportDownload, fmtMonthShort, fmtMonthLong } from '../lib/useMonthReportDownload';
-import { addDays, fmtAgeShort, fmtDayLabel, fmtDurationMs, fmtMinuteOfDay, fmtTime, todayKey } from '../lib/format';
+import {
+  addDays,
+  calendarDateInstant,
+  fmtAgeShort,
+  fmtDayLabel,
+  fmtDurationMs,
+  fmtMinuteOfDay,
+  fmtShiftClock,
+  fmtTime,
+  todayKey,
+  weekdayInTimeZone,
+} from '../lib/format';
 import { hasCapability, isManagerOrAbove } from '../lib/auth';
 import {
+  anchorDateKey as localDateKey,
+  dateKeyAnchor as parseDateKey,
   dateKeyInTimeZone,
-  instantForZonedDateTime,
+  daysBetween,
   localDayWindowInTimeZone,
-  zonedDateTimeParts,
   type ManualTimeRequestDto,
 } from '@grind/types';
 import type { SelfProfileResponse } from '@grind/types/profile';
@@ -44,7 +56,6 @@ import {
   displayDayCode,
 } from '@grind/types';
 import type {
-  AttendanceOverrideCode,
   AttendanceOverrideHistoryResponse,
   AttendanceOverrideShape,
   MemberReportDay,
@@ -973,7 +984,8 @@ function TeamMemberDrawer({
       queryClient.invalidateQueries({ queryKey: ['reports', 'team', 'member', userId] });
       queryClient.invalidateQueries({ queryKey: reportQueryKeys.teamSummaryRoot });
       queryClient.invalidateQueries({ queryKey: ['approvals', 'team'] });
-      queryClient.invalidateQueries({ queryKey: ['overview'] });
+      // The overview is cached as ['admin', 'overview', tz]; ['overview'] matched nothing.
+      queryClient.invalidateQueries({ queryKey: ['admin', 'overview'] });
     },
   });
 
@@ -1075,6 +1087,9 @@ function TeamMemberDrawer({
             // drawer and the table beneath it disagree about the same date.
             void queryClient.invalidateQueries({ queryKey: ['reports', 'team', 'member', userId] });
             void queryClient.invalidateQueries({ queryKey: ['reports', 'team'] });
+            // Attendance's month summary and this dialog's own history list too.
+            void queryClient.invalidateQueries({ queryKey: ['admin', 'month-summary'] });
+            void queryClient.invalidateQueries({ queryKey: ['attendance-override-history', userId] });
           }}
         />
       )}
@@ -1657,7 +1672,7 @@ function ReportApprovalDetailField({ label, children }: { label: string; childre
 }
 
 function TeamMemberProfilePanel({ profile, timezone }: { profile: SelfProfileResponse; timezone: string }) {
-  const todayWindow = profile.shift ? formatScheduleRange(profile.shift.schedule[weekdayKey(new Date(), timezone)]) : 'Day off';
+  const todayWindow = profile.shift ? formatScheduleRange(profile.shift.schedule[weekdayInTimeZone(new Date(), timezone)]) : 'Day off';
   const workingDays = profile.shift ? countWorkingDays(profile.shift.schedule) : 0;
   const captureCount = [profile.policy.captureApps, profile.policy.captureTitles, profile.policy.captureUrls].filter(Boolean).length;
   return (
@@ -1684,7 +1699,7 @@ function TeamMemberProfilePanel({ profile, timezone }: { profile: SelfProfileRes
       {profile.shift && (
         <div className="rep-drawer-week">
           {WEEKDAY_LABELS.map((day) => {
-            const isToday = day.key === weekdayKey(new Date(), timezone);
+            const isToday = day.key === weekdayInTimeZone(new Date(), timezone);
             return (
               <div key={day.key} className={`rep-drawer-week-day${isToday ? ' is-today' : ''}`}>
                 <span className="ui-t-eyebrow">{day.label}</span>
@@ -2370,28 +2385,13 @@ function friendlyRole(role: SelfProfileResponse['user']['displayRole']) {
   return 'Member';
 }
 
-function weekdayKey(date: Date, timeZone: string): Weekday {
-  const local = zonedDateTimeParts(date, timeZone);
-  const weekday = new Date(Date.UTC(local.year, local.month - 1, local.day)).getUTCDay();
-  return ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'][weekday] as Weekday;
-}
-
 function formatScheduleRange(slot: ShiftSchedule[Weekday] | undefined) {
   if (!slot) return 'Day off';
-  return `${formatShiftClock(slot.start)} - ${formatShiftClock(slot.end)}`;
+  return `${fmtShiftClock(slot.start)} - ${fmtShiftClock(slot.end)}`;
 }
 
 function countWorkingDays(schedule: ShiftSchedule) {
   return WEEKDAY_LABELS.filter((day) => schedule[day.key] !== null).length;
-}
-
-function formatShiftClock(hhmm: string) {
-  const [hourRaw, minuteRaw] = hhmm.split(':').map((part) => Number.parseInt(part, 10));
-  const hour24 = hourRaw ?? 0;
-  const minute = minuteRaw ?? 0;
-  const suffix = hour24 >= 12 ? 'PM' : 'AM';
-  const hour12 = hour24 % 12 || 12;
-  return `${hour12}:${String(minute).padStart(2, '0')} ${suffix}`;
 }
 
 function formatLongDate(iso: string, timeZone: string) {
@@ -2431,23 +2431,8 @@ function shiftLabel(status: ShiftStatus): string {
   return status.slice(0, 1).toUpperCase() + status.slice(1);
 }
 
-function localDateKey(d: Date): string {
-  return d.toISOString().slice(0, 10);
-}
-
-function parseDateKey(key: string): Date {
-  const [y, m, d] = key.split('-').map((n) => Number.parseInt(n, 10));
-  return new Date(Date.UTC(y!, m! - 1, d!, 12));
-}
-
 function compareDateKeys(a: string, b: string): number {
   return a.localeCompare(b);
-}
-
-function daysBetween(a: string, b: string): number {
-  const start = parseDateKey(a).getTime();
-  const end = parseDateKey(b).getTime();
-  return Math.round((end - start) / (24 * 60 * 60 * 1000));
 }
 
 function monthStart(date: Date): Date {
@@ -2467,11 +2452,6 @@ function calendarCells(month: Date): Array<string | null> {
     cells.push(localDateKey(new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), day, 12))));
   }
   return cells;
-}
-
-function calendarDateInstant(key: string, timeZone: string): Date {
-  const [year, month, day] = key.split('-').map((part) => Number.parseInt(part, 10));
-  return instantForZonedDateTime({ year: year!, month: month!, day: day!, hour: 12, minute: 0, second: 0 }, timeZone);
 }
 
 function formatRangeLabel(from: string, to: string, timeZone: string): string {

@@ -1,6 +1,5 @@
 import { z } from 'zod';
-
-export const DEFAULT_TIME_ZONE = 'UTC';
+import { WEEKDAYS, type Weekday } from './shifts';
 
 export interface ZonedDateTimeParts {
   year: number;
@@ -54,8 +53,6 @@ export const TimeZoneSchema = z
   .min(1)
   .max(80)
   .refine(isValidTimeZone, { message: 'invalid_timezone' });
-
-export type TimeZone = z.infer<typeof TimeZoneSchema>;
 
 export function zonedDateTimeParts(value: Date | number | string, timeZone: string): ZonedDateTimeParts {
   const date = value instanceof Date ? value : new Date(value);
@@ -152,7 +149,8 @@ export function instantForZonedDateTime(parts: ZonedDateTimeParts, timeZone: str
 /**
  * The real [start, end) instants for one YYYY-MM-DD on a workspace calendar.
  * A day can be 23, 24, or 25 hours long; callers must never derive this by
- * adding 24 hours to the first instant.
+ * adding 24 hours to the first instant. When local midnight does not exist
+ * (a spring-forward at 00:00) the day starts at its first existing instant.
  */
 export function localDayWindowInTimeZone(
   date: string,
@@ -168,16 +166,14 @@ export function localDayWindowInTimeZone(
   if (!year || !month || !day) return null;
 
   try {
-    const start = instantForZonedDateTime({ year, month, day, hour: 0, minute: 0, second: 0 }, timeZone);
+    const start = firstInstantOfLocalDate(year, month, day, timeZone);
     const nextCalendarDate = new Date(Date.UTC(year, month - 1, day + 1));
-    const end = instantForZonedDateTime({
-      year: nextCalendarDate.getUTCFullYear(),
-      month: nextCalendarDate.getUTCMonth() + 1,
-      day: nextCalendarDate.getUTCDate(),
-      hour: 0,
-      minute: 0,
-      second: 0,
-    }, timeZone);
+    const end = firstInstantOfLocalDate(
+      nextCalendarDate.getUTCFullYear(),
+      nextCalendarDate.getUTCMonth() + 1,
+      nextCalendarDate.getUTCDate(),
+      timeZone,
+    );
     cacheBounded(localDayWindows, cacheKey, {
       startMs: start.getTime(),
       endMs: end.getTime(),
@@ -187,6 +183,34 @@ export function localDayWindowInTimeZone(
     cacheBounded(localDayWindows, cacheKey, null, MAX_DAY_WINDOW_CACHE_ENTRIES);
     return null;
   }
+}
+
+/**
+ * The first real instant whose workspace-local calendar date is this date.
+ *
+ * Normally that is local 00:00. A few zones (Santiago, Havana, Beirut…) spring
+ * forward AT midnight, so 00:00 never happens and the day starts at 01:00.
+ * Rejecting those days made every report treat them as unknowable; the day
+ * still exists, it is just 23 hours long and starts late.
+ */
+function firstInstantOfLocalDate(year: number, month: number, day: number, timeZone: string): Date {
+  const midnight = possibleInstantsForZonedDateTime({ year, month, day, hour: 0, minute: 0, second: 0 }, timeZone);
+  if (midnight.length > 0) return midnight[0]!;
+  // Local noon always exists, so the day's first instant lies within the 36
+  // hours before it. Search on whole minutes: zone transitions never fall
+  // between them, so the answer is exact.
+  const noon = instantForZonedDateTime({ year, month, day, hour: 12, minute: 0, second: 0 }, timeZone).getTime();
+  const key = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  const MINUTE = 60_000;
+  let lo = noon - 36 * 60 * MINUTE; // a previous-date instant
+  let hi = noon; // an instant on this date
+  while (hi - lo > MINUTE) {
+    const mid = lo + Math.floor((hi - lo) / 2 / MINUTE) * MINUTE;
+    if (mid === lo) break;
+    if (dateKeyInTimeZone(mid, timeZone) === key) hi = mid;
+    else lo = mid;
+  }
+  return new Date(hi);
 }
 
 /** Calendar date for an instant in an explicit business timezone. */
@@ -226,4 +250,71 @@ export function medianMinute(minutes: Array<number | null | undefined>): number 
   return present.length % 2 === 1
     ? present[mid]!
     : Math.round((present[mid - 1]! + present[mid]!) / 2);
+}
+
+// ---------------------------------------------------------------------------
+// Calendar-date (YYYY-MM-DD) arithmetic
+//
+// Business dates are plain calendar keys. Their arithmetic must never touch the
+// host or browser timezone, so it all runs on the UTC grid where every day is
+// exactly one day. One copy here, shared by the API, the agent and the
+// dashboard (which may depend on @grind/types and nothing else).
+// ---------------------------------------------------------------------------
+
+const DATE_KEY_RE = /^\d{4}-\d{2}-\d{2}$/u;
+
+/** A real YYYY-MM-DD calendar date (rejects 2026-02-30). */
+export function isYmd(value: unknown): value is string {
+  if (typeof value !== 'string' || !DATE_KEY_RE.test(value)) return false;
+  const d = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value;
+}
+
+/**
+ * A formatting/arithmetic anchor for a calendar key: noon UTC on that date.
+ * Noon keeps the calendar date stable under any offset within ±11h.
+ */
+export function dateKeyAnchor(key: string): Date {
+  const [year, month, day] = key.split('-').map((part) => Number.parseInt(part, 10));
+  return new Date(Date.UTC(year!, month! - 1, day!, 12));
+}
+
+/** The calendar key of a UTC-grid anchor (inverse of {@link dateKeyAnchor}). */
+export function anchorDateKey(anchor: Date): string {
+  return anchor.toISOString().slice(0, 10);
+}
+
+/** Shift a YYYY-MM-DD key by whole calendar days. */
+export function addDays(key: string, delta: number): string {
+  const d = dateKeyAnchor(key);
+  d.setUTCDate(d.getUTCDate() + delta);
+  return anchorDateKey(d);
+}
+
+/** Whole calendar days from `from` to `to` (negative when `to` is earlier). */
+export function daysBetween(from: string, to: string): number {
+  return Math.round((dateKeyAnchor(to).getTime() - dateKeyAnchor(from).getTime()) / 86_400_000);
+}
+
+/** Inclusive list of calendar keys, capped so pathological input cannot spin. */
+export function dateKeysBetween(from: string, to: string, maxDays = 400): string[] {
+  const out: string[] = [];
+  let cur = from;
+  for (let i = 0; i < maxDays; i++) {
+    if (cur > to) break;
+    out.push(cur);
+    if (cur === to) break;
+    cur = addDays(cur, 1);
+  }
+  return out;
+}
+
+/** Weekday key of a calendar date — the date itself, never an instant. */
+export function weekdayForDate(key: string): Weekday {
+  return WEEKDAYS[dateKeyAnchor(key).getUTCDay()]!;
+}
+
+/** Today's calendar key in an explicit business timezone. */
+export function todayKey(timeZone: string, now: Date | number = new Date()): string {
+  return dateKeyInTimeZone(now, timeZone);
 }

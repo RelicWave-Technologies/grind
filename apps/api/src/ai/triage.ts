@@ -14,7 +14,7 @@
  * `signals[]`.
  */
 
-export type TriageVerdict = 'approve' | 'review' | 'reject';
+type TriageVerdict = 'approve' | 'review' | 'reject';
 
 export interface TriageRequestInput {
   /** The manual-time request to triage. */
@@ -42,7 +42,7 @@ export interface TriageContext {
   requestAgeMs: number;
 }
 
-export interface TriageSignal {
+interface TriageSignal {
   /** Internal id — useful in tests + dashboard tooltips. */
   id:
     | 'duration_in_range'

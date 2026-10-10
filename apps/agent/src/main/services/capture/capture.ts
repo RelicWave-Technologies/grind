@@ -22,10 +22,40 @@ sharp.cache({ memory: 32, files: 0, items: 64 });
 export interface CaptureResult {
   rows: ScreenshotRow[];
   health: CaptureHealth;
+  /** A frame was captured but could not be written: the disk is full. */
+  diskFull?: boolean;
 }
 
-/** Permission/readiness probe. It never writes, uploads, or retains pixels. */
+/** Out of space for a file (`ENOSPC`, `EDQUOT`) or for the local database (`SQLITE_FULL`). */
+export function isDiskFullError(err: unknown): boolean {
+  const code = typeof err === 'object' && err !== null ? (err as { code?: unknown }).code : undefined;
+  return code === 'ENOSPC' || code === 'EDQUOT' || code === 'SQLITE_FULL';
+}
+
+// Waits before the second and third probe attempts.
+const PROBE_RETRY_DELAYS_MS = [500, 1_000];
+
+/**
+ * Permission/readiness probe. It never writes, uploads, or retains pixels.
+ *
+ * A blank reading is retried before it is reported: the first desktopCapturer
+ * call in a fresh process often comes back empty on slow Macs (Intel, macOS
+ * 11–13, launched at login) even though the grant is fine. A single blank
+ * reading at boot is what put people in front of a Restart button every launch.
+ */
 export async function probeScreenCapture(): Promise<CaptureHealth> {
+  let health = await probeOnce();
+  for (const delayMs of PROBE_RETRY_DELAYS_MS) {
+    // Without a grant another attempt reads the same answer — and only delays
+    // the system prompt the caller may be waiting on.
+    if (health === 'ok' || health === 'no-permission' || !hasScreenAccess()) break;
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+    health = await probeOnce();
+  }
+  return health;
+}
+
+async function probeOnce(): Promise<CaptureHealth> {
   try {
     const sources = await desktopCapturer.getSources({
       types: ['screen'],
@@ -93,8 +123,9 @@ function decodableSource(thumbnail: Electron.NativeImage): {
   return { data: thumbnail.toPNG(), options: undefined };
 }
 
-function dayDir(now: number): string {
-  return path.join(app.getPath('userData'), 'screenshots', new Date(now).toISOString().slice(0, 10));
+/** The day folder below the screenshots dir — what rows store, so a moved userData still resolves. */
+function dayFolder(now: number): string {
+  return new Date(now).toISOString().slice(0, 10);
 }
 
 /**
@@ -129,10 +160,18 @@ export async function captureNow(
 
   const now = serverAlignedNow();
   const sourceMs = performance.now() - startedAt;
-  const dir = dayDir(now);
-  await fs.mkdir(dir, { recursive: true });
+  const folder = dayFolder(now);
+  const dir = path.join(app.getPath('userData'), 'screenshots', folder);
+  try {
+    await fs.mkdir(dir, { recursive: true });
+  } catch (err) {
+    if (!isDiskFullError(err)) throw err;
+    log.warn('screenshot not stored: disk full', { err: String(err) });
+    return { rows: [], health: 'ok', diskFull: true };
+  }
 
   let sawEmpty = false;
+  let diskFull = false;
   let transformMs = 0;
   let writeMs = 0;
   const rows: ScreenshotRow[] = [];
@@ -150,9 +189,20 @@ export async function captureNow(
       .toBuffer();
     transformMs += performance.now() - transformStartedAt;
     const id = ulid();
-    const filePath = path.join(dir, `${id}.webp`);
+    const filePath = path.join(folder, `${id}.webp`);
     const writeStartedAt = performance.now();
-    await fs.writeFile(filePath, webp, { mode: 0o600 });
+    const target = path.join(dir, `${id}.webp`);
+    try {
+      await fs.writeFile(target, webp, { mode: 0o600 });
+    } catch (err) {
+      if (!isDiskFullError(err)) throw err;
+      // Out of space: drop the partial file and stop — the other displays
+      // would hit the same wall. The loop carries on and retries next tick.
+      await fs.unlink(target).catch(() => undefined);
+      log.warn('screenshot not stored: disk full', { err: String(err) });
+      diskFull = true;
+      break;
+    }
     writeMs += performance.now() - writeStartedAt;
     const size = s.thumbnail.getSize();
     rows.push({
@@ -180,8 +230,9 @@ export async function captureNow(
     writeMs: Math.round(writeMs),
     totalMs: Math.round(performance.now() - startedAt),
   });
-  const health: CaptureHealth = rows.length > 0 ? 'ok' : sawEmpty ? 'empty' : 'error';
-  return { rows, health };
+  // A full disk says nothing about screen access: the frame itself was fine.
+  const health: CaptureHealth = rows.length > 0 || diskFull ? 'ok' : sawEmpty ? 'empty' : 'error';
+  return { rows, health, ...(diskFull ? { diskFull } : {}) };
 }
 
 /** Read a stored screenshot and return a small base64 WebP thumbnail data URL. */

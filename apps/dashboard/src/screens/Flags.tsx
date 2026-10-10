@@ -117,6 +117,12 @@ export function FlagsScreen() {
     onSuccess: (data, vars) => {
       setLastInvalidation(data.timeInvalidated ? { id: vars.key, invalidatedMs: data.invalidatedMs } : null);
       qc.invalidateQueries({ queryKey: ['admin', 'flags'] });
+      qc.invalidateQueries({ queryKey: ['admin', 'overview'] });
+      if (data.timeInvalidated) {
+        // Invalidated time leaves the totals everywhere it was counted.
+        qc.invalidateQueries({ queryKey: ['reports'] });
+        qc.invalidateQueries({ queryKey: ['insights', 'day'] });
+      }
     },
   });
 

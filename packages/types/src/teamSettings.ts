@@ -2,18 +2,13 @@ import { z } from 'zod';
 import { Role } from './auth';
 import { ShiftDtoSchema } from './shifts';
 
-export const MEMBER_SETTING_DEFAULTS = {
-  screenshotIntervalMin: 3,
-  idleThresholdMin: 5,
-} as const;
-
 export const SCREENSHOT_INTERVAL_OPTIONS = [1, 2, 3] as const;
 export type ScreenshotIntervalMin = (typeof SCREENSHOT_INTERVAL_OPTIONS)[number];
 export const DEFAULT_SCREENSHOT_INTERVAL_MIN: ScreenshotIntervalMin = 3;
-export const SCREENSHOT_INTERVAL_MIN = 1;
-export const SCREENSHOT_INTERVAL_MAX = 3;
 export const IDLE_THRESHOLD_MIN = 1;
 export const IDLE_THRESHOLD_MAX = 120;
+/** The idle-threshold minutes the dashboard offers, workspace default and per member. */
+export const IDLE_THRESHOLD_OPTIONS = [1, 3, 5, 10, 15, 30, 45, 60, 120] as const;
 
 export function isScreenshotIntervalMin(value: unknown): value is ScreenshotIntervalMin {
   return typeof value === 'number' &&
@@ -41,14 +36,10 @@ export const TeamSettingsPersonSchema = z.object({
   avatarUrl: z.string().nullable().default(null),
 });
 
-export type TeamSettingsPerson = z.infer<typeof TeamSettingsPersonSchema>;
-
 export const TeamSettingsTeamSchema = z.object({
   id: z.string(),
   name: z.string(),
 });
-
-export type TeamSettingsTeam = z.infer<typeof TeamSettingsTeamSchema>;
 
 export const TeamMemberSettingsDtoSchema = z.object({
   id: z.string(),

@@ -11,8 +11,37 @@ import { COUNTED_KINDS, type Segment, type SegmentKind, type TimeEntry, type Tim
  *  - At most one open segment (endedAt === null), and it must be the last one.
  *  - Segments are ordered by startedAt and never overlap.
  *  - Every segment has endedAt === null OR endedAt >= startedAt.
- *  - entry.startedAt === segments[0].startedAt (when any segment exists).
+ *  - entry.startedAt <= segments[0].startedAt (when any segment exists).
  *  - If entry.endedAt !== null, no segment is open.
+ *
+ * ZERO-LENGTH SEGMENTS — one rule, agent and server:
+ *
+ *  A closed segment that starts and ends at the same instant carried no time,
+ *  so it is not part of the entry. It is REMOVED, never kept as an empty span:
+ *
+ *  - At the source. Closing a segment at its own start (a pause, idle or
+ *    permission cut that lands on the segment start, start→stop or a task
+ *    switch in the same millisecond, crash recovery at the start) removes the
+ *    segment — `closeOpenSegment`, `openSegment`, `closeTimeEntry` and
+ *    `recoverStaleEntry` all do it. The agent builds entries only through
+ *    these, so it never produces one.
+ *  - Removing a segment never moves the entry. `entry.startedAt` stays where
+ *    the timer was started, so it may precede the first remaining segment,
+ *    and an entry can be left with no segments at all. Such an entry is real
+ *    (it may already exist on the server and must be closed there); it simply
+ *    counts zero time. It is synced like any other, never discarded.
+ *  - At the server boundary. Agents up to beta.38 still send zero-length
+ *    segments. `validateEntry` tolerates them — they are not a violation, so
+ *    an old agent never gets a 400 for one — and `clampEntryToServerClock`
+ *    drops them before anything is stored, reporting them in `dropped`,
+ *    separately from clock clamps. Dropping one is not a clock correction.
+ *    `dropZeroLengthSegments` is the same rule for callers that hash or
+ *    compare an entry the way the server will store it.
+ *
+ * "Zero-length" is judged at millisecond resolution, the wire's: an agent
+ * timestamp's fraction of a millisecond does not survive the ISO string.
+ *
+ * Inverted segments (endedAt < startedAt) are still invalid everywhere.
  *
  * All functions are pure: they return a new TimeEntry and never mutate input.
  */
@@ -59,7 +88,38 @@ export function createTimeEntry(args: CreateArgs): TimeEntry {
   };
 }
 
-/** Close the currently-open segment at `at`. No-op if nothing is open (idempotent). */
+/**
+ * Same instant at the wire's resolution. Agent timestamps can carry fractions
+ * of a millisecond; ISO strings (and the server's Dates) truncate them, so a
+ * span shorter than a millisecond inside one millisecond arrives as zero.
+ */
+function sameMillisecond(a: number, b: number): boolean {
+  return Math.trunc(a) === Math.trunc(b);
+}
+
+/** True for a closed segment that carried no time (see ZERO-LENGTH SEGMENTS). */
+export function isZeroLengthSegment(segment: Segment): boolean {
+  return segment.endedAt !== null && sameMillisecond(segment.endedAt, segment.startedAt);
+}
+
+/**
+ * The entry without its zero-length segments, and which ones were removed.
+ * Returns the same object when there are none. Never touches the revision:
+ * this is how an entry is stored, not a new local mutation.
+ */
+export function dropZeroLengthSegments(entry: TimeEntry): { entry: TimeEntry; droppedIds: string[] } {
+  const droppedIds = entry.segments.filter(isZeroLengthSegment).map((s) => s.id);
+  if (droppedIds.length === 0) return { entry, droppedIds };
+  return {
+    entry: { ...entry, segments: cloneSegments(entry.segments.filter((s) => !isZeroLengthSegment(s))) },
+    droppedIds,
+  };
+}
+
+/**
+ * Close the currently-open segment at `at`. No-op if nothing is open (idempotent).
+ * Closing it at its own start removes it: it carried no time.
+ */
 export function closeOpenSegment(entry: TimeEntry, at: number): TimeEntry {
   const i = openIndex(entry.segments);
   if (i === -1) return entry;
@@ -68,7 +128,8 @@ export function closeOpenSegment(entry: TimeEntry, at: number): TimeEntry {
     throw new SegmentError(`closeOpenSegment: at (${at}) < segment.startedAt (${open.startedAt})`);
   }
   const segments = cloneSegments(entry.segments);
-  segments[i] = { ...open, endedAt: at };
+  if (sameMillisecond(at, open.startedAt)) segments.splice(i, 1);
+  else segments[i] = { ...open, endedAt: at };
   return { ...entry, revision: entry.revision + 1, segments };
 }
 
@@ -98,60 +159,6 @@ export function closeTimeEntry(entry: TimeEntry, at: number): TimeEntry {
   if (entry.endedAt !== null) return entry;
   const closed = closeOpenSegment(entry, at);
   return { ...closed, revision: entry.revision + 1, endedAt: at, pauseReason: null, closeReason: 'AGENT' };
-}
-
-/**
- * User went idle starting at `idleStartedAt` and chose to DISCARD the idle gap.
- * - The open WORK segment is trimmed to end at `idleStartedAt`.
- * - The gap [idleStartedAt, resumeAt) is recorded as IDLE_TRIMMED (audit/timeline; not counted).
- * - A fresh open WORK segment starts at `resumeAt`.
- *
- * Edge: if `idleStartedAt` <= the open segment's start, the whole open segment was
- * idle, so it is dropped entirely and IDLE_TRIMMED covers [origStart, resumeAt).
- */
-export function applyIdleDiscard(
-  entry: TimeEntry,
-  args: { idleStartedAt: number; resumeAt: number; idleSegmentId: string; workSegmentId: string },
-): TimeEntry {
-  if (entry.endedAt !== null) {
-    throw new SegmentError('applyIdleDiscard: entry already closed');
-  }
-  const i = openIndex(entry.segments);
-  if (i === -1) throw new SegmentError('applyIdleDiscard: no open segment');
-  const open = entry.segments[i]!;
-  const { idleStartedAt, resumeAt } = args;
-
-  if (resumeAt < idleStartedAt) {
-    throw new SegmentError(`applyIdleDiscard: resumeAt (${resumeAt}) < idleStartedAt (${idleStartedAt})`);
-  }
-
-  const segments = cloneSegments(entry.segments);
-  // Clamp the idle start so we never produce a negative-length WORK segment.
-  const effectiveIdleStart = Math.max(idleStartedAt, open.startedAt);
-  const idleGapStart = open.startedAt > idleStartedAt ? open.startedAt : effectiveIdleStart;
-
-  if (effectiveIdleStart <= open.startedAt) {
-    // Entire open segment was idle -> drop it; IDLE_TRIMMED covers [origStart, resumeAt).
-    segments.splice(i, 1, {
-      id: args.idleSegmentId,
-      kind: 'IDLE_TRIMMED',
-      startedAt: open.startedAt,
-      endedAt: resumeAt,
-    });
-  } else {
-    // Trim WORK to the idle start, then record the idle gap.
-    segments[i] = { ...open, endedAt: effectiveIdleStart };
-    segments.push({
-      id: args.idleSegmentId,
-      kind: 'IDLE_TRIMMED',
-      startedAt: idleGapStart,
-      endedAt: resumeAt,
-    });
-  }
-
-  // Resume a fresh WORK segment.
-  segments.push({ id: args.workSegmentId, kind: 'WORK', startedAt: resumeAt, endedAt: null });
-  return { ...entry, revision: entry.revision + 1, pauseReason: null, closeReason: null, segments };
 }
 
 /**
@@ -199,13 +206,16 @@ export function validateEntry(entry: TimeEntry): string[] {
   const errors: string[] = [];
   const segs = entry.segments;
 
-  if (segs.length === 0) {
-    errors.push('entry has no segments');
-    return errors;
-  }
+  // No segments is valid: everything the entry held was zero-length (see
+  // ZERO-LENGTH SEGMENTS). It counts no time but still has to be closed.
+  if (segs.length === 0) return errors;
 
-  if (entry.startedAt !== segs[0]!.startedAt) {
-    errors.push(`entry.startedAt (${entry.startedAt}) !== first segment.startedAt (${segs[0]!.startedAt})`);
+  // `<=`, not `===`: a dropped zero-length first segment leaves the entry
+  // starting before its first remaining segment, and the server keeps the
+  // start it stored at create (clamped, if the clock was ahead) while later
+  // syncs carry the agent's own segment starts.
+  if (entry.startedAt > segs[0]!.startedAt) {
+    errors.push(`entry.startedAt (${entry.startedAt}) > first segment.startedAt (${segs[0]!.startedAt})`);
   }
 
   const seenIds = new Set<string>();

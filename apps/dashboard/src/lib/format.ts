@@ -1,4 +1,12 @@
-import { dateKeyInTimeZone, instantForZonedDateTime } from '@grind/types';
+import { addDays, dateKeyInTimeZone, instantForZonedDateTime, todayKey, weekdayForDate, type Weekday } from '@grind/types';
+
+/** Calendar-key arithmetic is the shared one in @grind/types. */
+export { addDays, todayKey };
+
+/** The weekday an instant falls on in a business timezone. */
+export function weekdayInTimeZone(date: Date, timeZone: string): Weekday {
+  return weekdayForDate(dateKeyInTimeZone(date, timeZone));
+}
 
 /**
  * Tiny time/duration formatters for the dashboard. Match the agent's
@@ -30,8 +38,14 @@ export function fmtMinuteOfDay(minute: number): string {
   }).format(d);
 }
 
-export function fmtRange(startMs: number, endMs: number, timeZone: string): string {
-  return `${fmtTime(startMs, timeZone)} – ${fmtTime(endMs, timeZone)}`;
+/** A shift's wall-clock "HH:MM" on the 12h clock, e.g. "9:30 AM". */
+export function fmtShiftClock(hhmm: string): string {
+  const [hourRaw, minuteRaw] = hhmm.split(':').map((part) => Number.parseInt(part, 10));
+  const hour24 = hourRaw ?? 0;
+  const minute = minuteRaw ?? 0;
+  const suffix = hour24 >= 12 ? 'PM' : 'AM';
+  const hour12 = hour24 % 12 || 12;
+  return `${hour12}:${String(minute).padStart(2, '0')} ${suffix}`;
 }
 
 export function fmtDateShort(ms: number, timeZone: string): string {
@@ -65,22 +79,6 @@ export function fmtDayLabel(yyyyMmDd: string, timeZone: string): string {
     day: 'numeric',
     timeZone,
   }).format(d);
-}
-
-/** Shift a YYYY-MM-DD string by a number of calendar days. */
-export function addDays(yyyyMmDd: string, delta: number): string {
-  const d = parseDateKey(yyyyMmDd);
-  d.setUTCDate(d.getUTCDate() + delta);
-  return d.toISOString().slice(0, 10);
-}
-
-export function todayKey(timeZone: string): string {
-  return dateKeyInTimeZone(new Date(), timeZone);
-}
-
-function parseDateKey(key: string): Date {
-  const [year, month, day] = key.split('-').map((part) => Number.parseInt(part, 10));
-  return new Date(Date.UTC(year!, month! - 1, day!, 12));
 }
 
 /** A formatting-only local-noon instant. Noon is valid through DST changes,

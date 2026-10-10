@@ -91,6 +91,54 @@ describe('POST /v1/agent/heartbeat', () => {
     expect(row.agentLaunchAtLoginUpdatedAt).toBeInstanceOf(Date);
   });
 
+  it("folds the agent's permission verdict into the stored permission columns", async () => {
+    const user = await seedUser();
+    const send = (verdict: unknown, platform = 'darwin') => request(app)
+      .post('/v1/agent/heartbeat')
+      .set(bearer(user.accessToken))
+      .send({
+        agentVersion: '0.0.2-beta.39',
+        platform,
+        state: 'IDLE',
+        permissions: {
+          // Paused for a refused hook: the raw fields alone look healthy.
+          screen: { status: 'granted', health: 'ok', state: 'ok' },
+          accessibility: { trusted: true, ready: true, recording: false, capturing: false, hookRunning: false },
+          verdict,
+        },
+      });
+    const stored = () => prisma.user.findUniqueOrThrow({
+      where: { id: user.userId },
+      select: { agentAccessibilityTrusted: true, agentAccessibilityReady: true, agentScreenPermissionState: true },
+    });
+
+    expect((await send({ screenRecording: 'READY', accessibility: 'FAILED', accessibilityError: 'native hook denied' })).status).toBe(200);
+    await expect(stored()).resolves.toEqual({
+      agentAccessibilityTrusted: true,
+      agentAccessibilityReady: false,
+      agentScreenPermissionState: 'ok',
+    });
+
+    expect((await send({ screenRecording: 'FAILED', accessibility: 'READY', accessibilityError: null })).status).toBe(200);
+    await expect(stored()).resolves.toEqual({
+      agentAccessibilityTrusted: true,
+      agentAccessibilityReady: true,
+      agentScreenPermissionState: 'needs-restart',
+    });
+
+    // Windows: nothing to grant, but a hook that will not start still shows.
+    expect((await send({ screenRecording: 'NOT_REQUIRED', accessibility: 'FAILED', accessibilityError: 'hook refused' }, 'win32')).status).toBe(200);
+    await expect(stored()).resolves.toMatchObject({ agentAccessibilityReady: false });
+
+    // A verdict this server cannot read is dropped, never the heartbeat.
+    expect((await send({ screenRecording: 'SOMETHING_NEW', accessibility: 'FAILED', accessibilityError: null })).status).toBe(200);
+    await expect(stored()).resolves.toEqual({
+      agentAccessibilityTrusted: true,
+      agentAccessibilityReady: true,
+      agentScreenPermissionState: 'ok',
+    });
+  });
+
   it('accepts a permission-enforced pause without changing legacy entry ownership checks', async () => {
     const user = await seedUser();
     await prisma.timeEntry.create({
@@ -222,5 +270,105 @@ describe('POST /v1/agent/heartbeat', () => {
       .send({ agentVersion: '0.0.2', platform: 'darwin' });
     expect(second.status).toBe(200);
     expect(second.body.configVersion).not.toBe(first.body.configVersion);
+  });
+
+  it('stores device and sync-queue diagnostics, and leaves them alone for older agents', async () => {
+    const user = await seedUser();
+    const oldestPendingAt = new Date(Date.now() - 3 * 24 * 60 * 60_000);
+    const res = await request(app)
+      .post('/v1/agent/heartbeat')
+      .set(bearer(user.accessToken))
+      .send({
+        agentVersion: '0.0.2-beta.38',
+        platform: 'darwin',
+        diagnostics: {
+          osVersion: '12.7.6',
+          arch: 'x64',
+          syncPending: 70,
+          syncOldestPendingAt: oldestPendingAt.toISOString(),
+          syncLastError: 'http_409:timer_conflict',
+        },
+      });
+    expect(res.status).toBe(200);
+
+    await request(app)
+      .post('/v1/agent/heartbeat')
+      .set(bearer(user.accessToken))
+      .send({ agentVersion: '0.0.2-beta.37', platform: 'darwin' });
+
+    const row = await prisma.user.findUniqueOrThrow({ where: { id: user.userId } });
+    expect(row).toMatchObject({
+      agentOsVersion: '12.7.6',
+      agentArch: 'x64',
+      agentSyncPending: 70,
+      agentSyncOldestPendingAt: oldestPendingAt,
+      agentSyncLastError: 'http_409:timer_conflict',
+    });
+    expect(row.agentDiagnosticsUpdatedAt).toBeInstanceOf(Date);
+  });
+
+  it('stores auto-update health, and keeps it when an older agent omits it', async () => {
+    const user = await seedUser();
+    const diagnostics = {
+      osVersion: '10.0.22631',
+      arch: 'x64',
+      syncPending: 0,
+      syncOldestPendingAt: null,
+      syncLastError: null,
+    };
+    const res = await request(app)
+      .post('/v1/agent/heartbeat')
+      .set(bearer(user.accessToken))
+      .send({
+        agentVersion: '0.0.2-beta.38',
+        platform: 'win32',
+        diagnostics: {
+          ...diagnostics,
+          installScope: 'machine',
+          updateError: 'UPDATES_BLOCKED_MACHINE_INSTALL: installed for all users under Program Files; cannot update itself',
+        },
+      });
+    expect(res.status).toBe(200);
+
+    let row = await prisma.user.findUniqueOrThrow({ where: { id: user.userId } });
+    expect(row).toMatchObject({
+      agentInstallScope: 'machine',
+      agentUpdateError: 'UPDATES_BLOCKED_MACHINE_INSTALL: installed for all users under Program Files; cannot update itself',
+    });
+
+    // A beta.37 agent sends diagnostics without the update fields.
+    await request(app)
+      .post('/v1/agent/heartbeat')
+      .set(bearer(user.accessToken))
+      .send({ agentVersion: '0.0.2-beta.37', platform: 'win32', diagnostics });
+    row = await prisma.user.findUniqueOrThrow({ where: { id: user.userId } });
+    expect(row).toMatchObject({ agentInstallScope: 'machine', agentArch: 'x64' });
+
+    // After a per-user reinstall the error clears.
+    await request(app)
+      .post('/v1/agent/heartbeat')
+      .set(bearer(user.accessToken))
+      .send({
+        agentVersion: '0.0.2-beta.39',
+        platform: 'win32',
+        diagnostics: { ...diagnostics, installScope: 'user', updateError: null },
+      });
+    row = await prisma.user.findUniqueOrThrow({ where: { id: user.userId } });
+    expect(row).toMatchObject({ agentInstallScope: 'user', agentUpdateError: null });
+  });
+
+  it('rejects an unknown install scope and an oversized update error', async () => {
+    const user = await seedUser();
+    const base = { osVersion: '10.0.22631', arch: 'x64', syncPending: 0, syncOldestPendingAt: null, syncLastError: null };
+    const badScope = await request(app)
+      .post('/v1/agent/heartbeat')
+      .set(bearer(user.accessToken))
+      .send({ agentVersion: '0.0.2-beta.38', platform: 'win32', diagnostics: { ...base, installScope: 'everyone' } });
+    expect(badScope.status).toBe(400);
+    const longError = await request(app)
+      .post('/v1/agent/heartbeat')
+      .set(bearer(user.accessToken))
+      .send({ agentVersion: '0.0.2-beta.38', platform: 'win32', diagnostics: { ...base, updateError: 'x'.repeat(201) } });
+    expect(longError.status).toBe(400);
   });
 });

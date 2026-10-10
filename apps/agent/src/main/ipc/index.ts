@@ -1,6 +1,5 @@
 import { ipcMain } from 'electron';
 import { registerAuthIpc } from './auth';
-import { registerStatusIpc } from './status';
 import { registerTimerIpc } from './timer';
 import { registerCaptureIpc } from './capture';
 import { registerSettingsIpc } from './settings';
@@ -15,10 +14,8 @@ import { getWorkspaceTimeContext } from '../services/workspaceTime';
 export function registerIpc(opts: {
   onOpenMainWindow: () => void;
   onDismissFloatingBar: () => void;
-  onIdleResolved: () => void;
 }): void {
   registerAuthIpc();
-  registerStatusIpc();
   registerTimerIpc();
   registerCaptureIpc();
   registerSettingsIpc();
@@ -27,7 +24,7 @@ export function registerIpc(opts: {
   registerAppIpc();
   registerUpdatesIpc();
   registerPermissionsIpc();
-  registerAttentionIpc({ onIdleResolved: opts.onIdleResolved });
+  registerAttentionIpc();
   ipcMain.handle('workspaceTime:get', () => getWorkspaceTimeContext());
 
   // Lets the floating bar / popover ask to bring up the main window.

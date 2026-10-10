@@ -1,30 +1,53 @@
 import type { CapabilityState } from '../../shared/tracking';
 
 /**
- * What the permission prompt tells the user, and which button it offers.
+ * What a permission row tells the user, and which button it offers — shared by
+ * the permission prompt and Settings so the two can never disagree.
  *
  * Pure so it can be tested: this is the copy a blocked user reads, and getting
  * it wrong sends them round a loop that cannot resolve their problem.
  */
 export type Capability = 'screen' | 'accessibility';
-export type PermissionAction = 'enable' | 'settings' | 'restart' | 'input-monitoring';
+/** `check-again` re-verifies in place and comes with an Open Settings link. */
+export type PermissionAction = 'enable' | 'settings' | 'check-again';
 
 export function isReady(state: CapabilityState): boolean {
   return state === 'READY' || state === 'NOT_REQUIRED';
 }
 
-export function actionFor(state: CapabilityState, capability: Capability): PermissionAction | null {
+export function actionFor(state: CapabilityState): PermissionAction | null {
   // Still resolving: offering any button here is how the relaunch loop started.
   if (state === 'CHECKING') return null;
   if (state === 'NEEDS_GRANT') return 'enable';
   if (state === 'NEEDS_SETTINGS') return 'settings';
-  // FAILED on the input hook means macOS refused the event tap even though
-  // Accessibility is trusted — the missing grant is Input Monitoring, a
-  // separate TCC service (kTCCServiceListenEvent) with no prompt API.
-  // Relaunching cannot supply it, so send the user to that pane instead.
-  if (state === 'FAILED' && capability === 'accessibility') return 'input-monitoring';
-  if (state === 'NEEDS_RESTART' || state === 'FAILED') return 'restart';
+  // Granted, yet not working: a screen whose probes stay blank, or an input
+  // hook macOS refused. Check again re-probes the screen and retries the hook.
+  if (state === 'FAILED') return 'check-again';
   return null;
+}
+
+/**
+ * Whether to add a plain "Restart Timo" link beside the row's own action. Only
+ * as a fallback, never first:
+ *  - FAILED, once Check again has run and the verdict still stands;
+ *  - Screen Recording still not granted after the user came back from System
+ *    Settings — macOS can keep reporting a grant made while Timo runs as
+ *    missing until the app relaunches (electron#36722).
+ * Never for CHECKING: a granted-but-blank screen is not fixed by a restart.
+ * Never once a restart was already tried for this exact verdict and it came
+ * straight back (`restartDidNotHelp`): removeAndReAddText says what to do then.
+ */
+export function offersRestart(
+  state: CapabilityState,
+  capability: Capability,
+  context: { checkedAgain: boolean; returnedFromSettings: boolean; restartDidNotHelp?: boolean },
+): boolean {
+  if (context.restartDidNotHelp) return false;
+  if (state === 'FAILED') return context.checkedAgain;
+  if (capability === 'screen' && (state === 'NEEDS_GRANT' || state === 'NEEDS_SETTINGS')) {
+    return context.returnedFromSettings;
+  }
+  return false;
 }
 
 export function statusText(state: CapabilityState, capability: Capability): string {
@@ -32,8 +55,30 @@ export function statusText(state: CapabilityState, capability: Capability): stri
   if (state === 'CHECKING') return 'Checking…';
   if (state === 'NEEDS_GRANT') return 'Permission required';
   if (state === 'NEEDS_SETTINGS') return 'Enable in System Settings';
-  if (state === 'NEEDS_RESTART') return 'Restart Timo to apply';
+  // libuiohook's event tap is gated on Accessibility trust. When macOS says
+  // trusted but refuses the tap, the trust entry is stale (typically after an
+  // update replaced the binary); toggling it off and on re-issues it.
   return capability === 'accessibility'
-    ? 'Also allow Timo under Input Monitoring'
-    : 'Permission service needs restart';
+    ? 'Not responding — turn Timo off and on under Accessibility'
+    : 'Not capturing yet — check System Settings';
+}
+
+export function actionLabel(action: PermissionAction): string {
+  if (action === 'enable') return 'Enable';
+  if (action === 'check-again') return 'Check again';
+  return 'Open Settings';
+}
+
+export const RESTART_LABEL = 'Restart Timo';
+
+/**
+ * What to do once a restart did not clear the verdict. macOS keeps the grant
+ * for the binary it was given to; after an update replaced that binary the
+ * entry can look switched on and still be refused — on macOS 11/12 and Intel
+ * Macs especially. Removing Timo from the list and adding it back re-issues
+ * it. Worded for both System Settings and the older System Preferences.
+ */
+export function removeAndReAddText(capability: Capability): string {
+  const pane = capability === 'screen' ? 'Screen Recording' : 'Accessibility';
+  return `Restarting didn’t fix this. In System Settings (System Preferences on older macOS) › Privacy & Security › ${pane}, select Timo, remove it with −, then add it back with + and switch it on.`;
 }

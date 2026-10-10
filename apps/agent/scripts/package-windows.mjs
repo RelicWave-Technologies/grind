@@ -13,8 +13,10 @@
 //            Default is unsigned, which is expected for v1 internal Windows IT.
 //   PUBLISH=1 upload artifacts + update metadata to the configured GitHub Release.
 //   UPDATE_CHANNEL=latest|beta controls both the baked app channel and metadata channel.
+//            Unset, it follows MAIN_VITE_UPDATE_CHANNEL (env or .env.production),
+//            then the package version: a -beta.N version is "beta".
 import { spawn } from 'node:child_process';
-import { promises as fs } from 'node:fs';
+import { promises as fs, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -34,12 +36,50 @@ const defaultStage =
     : path.join(os.tmpdir(), 'grind-agent-win-deploy');
 const stage = process.env.STAGE_DIR || defaultStage;
 const electronVersion = '33.2.0';
-let channel = process.env.UPDATE_CHANNEL || process.env.MAIN_VITE_UPDATE_CHANNEL || 'latest';
-if (channel !== 'beta') channel = 'latest';
+
+function readEnvProduction() {
+  try {
+    const out = {};
+    for (const raw of readFileSync(path.join(agentDir, '.env.production'), 'utf8').split('\n')) {
+      const line = raw.trim();
+      const eq = line.indexOf('=');
+      if (line && !line.startsWith('#') && eq > 0) out[line.slice(0, eq).trim()] = line.slice(eq + 1).trim();
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+// The baked app channel and the published feed must agree with the version.
+// electron-updater on "latest" only looks at the newest NON-prerelease GitHub
+// release, so a -beta.N build baked or published as "latest" never finds an
+// update (every Timo release so far is a prerelease). This used to default to
+// "latest" — and silently override a .env.production that said "beta".
+const version = JSON.parse(readFileSync(path.join(agentDir, 'package.json'), 'utf8')).version;
+const versionChannel = /-beta\.\d+$/.test(version) ? 'beta' : 'latest';
+const fileEnv = readEnvProduction();
+const requestedChannel = String(
+  process.env.UPDATE_CHANNEL || process.env.MAIN_VITE_UPDATE_CHANNEL || fileEnv.MAIN_VITE_UPDATE_CHANNEL || versionChannel,
+).toLowerCase();
+if (requestedChannel !== 'beta' && requestedChannel !== 'latest') {
+  console.error(`Unknown update channel "${requestedChannel}". Use "beta" or "latest".`);
+  process.exit(1);
+}
+if (requestedChannel === 'latest' && versionChannel === 'beta') {
+  console.error(
+    `Version ${version} is a beta, but the update channel is "latest": that build would never ` +
+      'find an update. Use UPDATE_CHANNEL=beta (or unset it).',
+  );
+  process.exit(1);
+}
+const channel = requestedChannel;
 process.env.MAIN_VITE_UPDATE_CHANNEL = channel;
 if (process.env.PUBLISH === '1') {
   process.env.MAIN_VITE_AUTO_UPDATE_ENABLED = '1';
 }
+const autoUpdate =
+  String(process.env.MAIN_VITE_AUTO_UPDATE_ENABLED || fileEnv.MAIN_VITE_AUTO_UPDATE_ENABLED || '') === '1';
 
 function bin(name) {
   return process.platform === 'win32' ? `${name}.cmd` : name;
@@ -86,6 +126,7 @@ async function main() {
     );
   }
 
+  console.log(`> version ${version}, update channel ${channel}, auto-update ${autoUpdate ? 'on' : 'OFF'}`);
   console.log('> asserting build env (API_URL + callback scheme)');
   // Import (don't spawn) — the shared run() helper appends `.cmd` on Windows,
   // which turns `node` into the nonexistent `node.cmd`. The assert module runs

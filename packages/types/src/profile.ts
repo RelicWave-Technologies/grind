@@ -11,15 +11,11 @@ export const ProfilePersonSchema = z.object({
   avatarUrl: z.string().nullable().default(null),
 });
 
-export type ProfilePerson = z.infer<typeof ProfilePersonSchema>;
-
 export const ProfileTeamSchema = z.object({
   id: z.string(),
   name: z.string(),
   memberCount: z.number().int().min(0),
 });
-
-export type ProfileTeam = z.infer<typeof ProfileTeamSchema>;
 
 export const ProfileWorkspaceSchema = z.object({
   id: z.string(),
@@ -27,8 +23,6 @@ export const ProfileWorkspaceSchema = z.object({
   timezone: TimeZoneSchema,
   createdAt: z.string().datetime({ offset: true }),
 });
-
-export type ProfileWorkspace = z.infer<typeof ProfileWorkspaceSchema>;
 
 export const SelfProfileUserSchema = z.object({
   id: z.string(),
@@ -40,13 +34,9 @@ export const SelfProfileUserSchema = z.object({
   createdAt: z.string().datetime({ offset: true }),
 });
 
-export type SelfProfileUser = z.infer<typeof SelfProfileUserSchema>;
-
 export const SelfProfileShiftSchema = ShiftDtoSchema.extend({
   assignedAt: z.string().datetime({ offset: true }).nullable(),
 }).nullable();
-
-export type SelfProfileShift = z.infer<typeof SelfProfileShiftSchema>;
 
 export const SelfProfilePolicySchema = WorkspacePolicyDto.pick({
   captureApps: true,
@@ -54,8 +44,6 @@ export const SelfProfilePolicySchema = WorkspacePolicyDto.pick({
   captureUrls: true,
   retentionDaysScreenshots: true,
 });
-
-export type SelfProfilePolicy = z.infer<typeof SelfProfilePolicySchema>;
 
 export const SelfProfileResponseSchema = z.object({
   user: SelfProfileUserSchema,

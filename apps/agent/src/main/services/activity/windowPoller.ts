@@ -25,7 +25,13 @@ type ActiveWindow =
       url?: string;
     }
   | undefined;
-type GetWindows = { activeWindow: () => Promise<ActiveWindow> };
+type ActiveWindowOptions = {
+  /** macOS: false never asks for Accessibility and never reads the URL. */
+  accessibilityPermission: boolean;
+  /** macOS: false never asks for Screen Recording and never reads the title. */
+  screenRecordingPermission: boolean;
+};
+type GetWindows = { activeWindow: (options?: ActiveWindowOptions) => Promise<ActiveWindow> };
 
 let mod: GetWindows | null = null;
 let modLoaded = false;
@@ -55,7 +61,13 @@ async function tick(): Promise<void> {
 
     const gw = await loadModule();
     if (!gw) return;
-    const win = await gw.activeWindow();
+    // Ask the OS only for what policy allows. With no options get-windows
+    // reads the title and the URL every poll — content we then threw away —
+    // and can raise a permission prompt for data we are not collecting.
+    const win = await gw.activeWindow({
+      accessibilityPermission: policy.captureUrls,
+      screenRecordingPermission: policy.captureTitles,
+    });
     recordActiveWindow({
       ts: serverAlignedNow(),
       app: win?.owner?.name ?? null,

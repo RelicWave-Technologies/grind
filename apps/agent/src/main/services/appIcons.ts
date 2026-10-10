@@ -24,6 +24,44 @@ const ICON_PX = 44;
 const FLUSH_DELAY_MS = 4000;
 const MAX_RETRY_DELAY_MS = 5 * 60_000;
 const MAX_BATCH = 50;
+/**
+ * The API parses JSON bodies with a 64kb cap. Fifty base64 icons blow well
+ * past it, the request is refused with 413, and the same oversized batch was
+ * retried forever. Stay under it with headroom for the envelope.
+ */
+export const MAX_BATCH_BYTES = 48 * 1024;
+
+export interface IconUpload {
+  bundleId: string;
+  app: string;
+  pngBase64: string;
+}
+
+/**
+ * The next request's icons: as many as fit in {@link MAX_BATCH_BYTES} of JSON
+ * (and {@link MAX_BATCH}), in queue order. An icon too big to ever fit on its
+ * own is returned in `oversized` so the caller can drop it instead of
+ * retrying it forever.
+ */
+export function packIconBatch(
+  queued: IconUpload[],
+  maxBytes = MAX_BATCH_BYTES,
+): { batch: IconUpload[]; oversized: IconUpload[] } {
+  const batch: IconUpload[] = [];
+  const oversized: IconUpload[] = [];
+  let bytes = Buffer.byteLength('{"icons":[]}');
+  for (const icon of queued) {
+    const size = Buffer.byteLength(JSON.stringify(icon)) + 1; // + comma
+    if (Buffer.byteLength('{"icons":[]}') + size > maxBytes) {
+      oversized.push(icon);
+      continue;
+    }
+    if (bytes + size > maxBytes || batch.length >= MAX_BATCH) break;
+    batch.push(icon);
+    bytes += size;
+  }
+  return { batch, oversized };
+}
 
 // Retry pacing. A flat 4s retry with no ceiling turned a signed-out session into
 // a 6-hour, 4,239-attempt hot loop that re-serialised base64 icons every time
@@ -176,9 +214,18 @@ onAuthChange((status) => {
 async function flush(): Promise<void> {
   flushTimer = null;
   if (pending.size === 0) return;
-  const batch = [...pending.entries()]
-    .slice(0, MAX_BATCH)
-    .map(([bundleId, v]) => ({ bundleId, app: v.app, pngBase64: v.pngBase64 }));
+  const { batch, oversized } = packIconBatch(
+    [...pending.entries()].map(([bundleId, v]) => ({ bundleId, app: v.app, pngBase64: v.pngBase64 })),
+  );
+  for (const icon of oversized) {
+    pending.delete(icon.bundleId);
+    uploaded.add(icon.bundleId); // never fits the API's body limit; don't re-extract it this session
+    log.warn('app icon too large to upload — skipped', { bundleId: icon.bundleId });
+  }
+  if (batch.length === 0) {
+    if (pending.size > 0) scheduleFlush();
+    return;
+  }
   try {
     await api('/v1/agent/app-icons', { method: 'POST', body: { icons: batch } });
     for (const it of batch) {

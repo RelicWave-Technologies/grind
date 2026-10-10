@@ -119,8 +119,8 @@ _Avoid_: workday, business day
 **Working Calendar**:
 The module that answers "was this person expected to work on this date, and if
 not, why". It owns the precedence between shift, holiday and leave, so the same
-question cannot get four different answers in attendance, reports, payroll and
-the request quote.
+question cannot get different answers in attendance, reports and the
+timesheet.
 _Avoid_: schedule, roster
 
 **Day**:

@@ -1,7 +1,7 @@
 import type { TimeEntry, Segment } from '@grind/core';
 import { TimerSyncReceipt, type TimerSyncReceipt as TimerSyncReceiptValue } from '@grind/types';
 import { api } from '../apiClient';
-import { AGENT_VERSION } from '../../env';
+import { agentVersion, currentPlatform } from '../agentIdentity';
 import { serverAlignedNow } from '../serverClock';
 import type { SyncClient } from './types';
 
@@ -12,12 +12,6 @@ function segIso(s: Segment) {
     startedAt: new Date(s.startedAt).toISOString(),
     endedAt: s.endedAt === null ? null : new Date(s.endedAt).toISOString(),
   };
-}
-
-function platform(): 'darwin' | 'win32' | 'linux' {
-  if (process.platform === 'darwin') return 'darwin';
-  if (process.platform === 'win32') return 'win32';
-  return 'linux';
 }
 
 function lifecycle(entry: TimeEntry) {
@@ -46,8 +40,8 @@ export class HttpSyncClient implements SyncClient {
         source: entry.source,
         startedAt: new Date(entry.startedAt).toISOString(),
         endedAt: entry.endedAt === null ? null : new Date(entry.endedAt).toISOString(),
-        agentVersion: AGENT_VERSION,
-        platform: platform(),
+        agentVersion: agentVersion(),
+        platform: currentPlatform(),
         segments: entry.segments.map(segIso),
       },
     });

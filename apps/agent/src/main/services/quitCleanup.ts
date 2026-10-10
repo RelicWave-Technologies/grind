@@ -1,4 +1,5 @@
 import { flushPartialActivity } from './activity';
+import { resumeUploads, stopUploads } from './capture/uploader';
 import { flushPreferences } from './preferences';
 import { getTimerService } from './timer';
 import type { TimerExitReason } from './timer/types';
@@ -19,19 +20,13 @@ export interface QuitCleanupDeps {
   flushPartialActivity: () => void;
   flushPreferences: () => Promise<unknown> | unknown;
   flushLogs?: () => Promise<unknown> | unknown;
+  /** Stop the screenshot pass and wait for it; {@link resumeUploads} undoes it. */
+  stopUploads?: () => Promise<unknown>;
+  resumeUploads?: () => void;
   logger?: QuitCleanupLogger;
   timeoutMs?: number;
   setTimeout?: typeof setTimeout;
   clearTimeout?: typeof clearTimeout;
-}
-
-export interface BeforeQuitEventLike {
-  preventDefault(): void;
-}
-
-export interface AppQuitLike {
-  on(event: 'before-quit', listener: (event: BeforeQuitEventLike) => void): unknown;
-  quit(): void;
 }
 
 export class QuitCleanupRunner {
@@ -53,8 +48,10 @@ export class QuitCleanupRunner {
     return this.completed;
   }
 
+  /** The exit this cleanup prepared for did not happen; the app carries on. */
   invalidate(): void {
     this.completed = false;
+    this.deps.resumeUploads?.();
   }
 
   run(reason: TimerExitReason): Promise<void> {
@@ -73,6 +70,13 @@ export class QuitCleanupRunner {
   private async runOnce(reason: TimerExitReason): Promise<void> {
     this.logger.debug('quit cleanup started', { reason });
 
+    // Stop screenshot uploads first: the next one would compete with the
+    // timer's final push for the network, and a shot aborted now goes back on
+    // the queue cleanly instead of being cut off by the exit mid-request.
+    const uploadsStopped = Promise.resolve()
+      .then(() => this.deps.stopUploads?.())
+      .catch((err) => this.logger.warn('quit cleanup uploads failed', { reason, err: String(err) }));
+
     try {
       this.deps.flushPartialActivity();
     } catch (err) {
@@ -88,6 +92,8 @@ export class QuitCleanupRunner {
     } catch (err) {
       this.logger.warn('quit cleanup timer failed', { reason, err: String(err) });
     }
+
+    await this.withTimeout('screenshot uploads', uploadsStopped);
 
     try {
       await this.withTimeout('preferences', Promise.resolve(this.deps.flushPreferences()));
@@ -132,6 +138,8 @@ const defaultRunner = new QuitCleanupRunner({
   flushPartialActivity,
   flushPreferences,
   flushLogs,
+  stopUploads,
+  resumeUploads,
   logger: log,
 });
 
@@ -145,20 +153,4 @@ export function hasQuitCleanupCompleted(): boolean {
 
 export function invalidateQuitCleanup(): void {
   defaultRunner.invalidate();
-}
-
-export function registerGracefulQuitHandler(opts: {
-  app: AppQuitLike;
-  runCleanup?: (reason: TimerExitReason) => Promise<void>;
-  hasCleanupCompleted?: () => boolean;
-  markQuitting?: () => void;
-}): void {
-  const runCleanup = opts.runCleanup ?? runQuitCleanup;
-  const hasCleanupCompleted = opts.hasCleanupCompleted ?? hasQuitCleanupCompleted;
-  opts.app.on('before-quit', (event) => {
-    opts.markQuitting?.();
-    if (hasCleanupCompleted()) return;
-    event.preventDefault();
-    void runCleanup('quit').finally(() => opts.app.quit());
-  });
 }

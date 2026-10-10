@@ -65,10 +65,14 @@ export interface ReportContext {
 export async function reportError(err: unknown, ctx: ReportContext = {}): Promise<void> {
   const dsn = parseDsn();
   if (!dsn) return;
+  const errOb = err instanceof Error ? err : new Error(String(err));
+  await postEnvelope(dsn, (eventId) => buildEnvelope(eventId, errOb, ctx));
+}
+
+/** One best-effort POST: 2s timeout, every failure swallowed. */
+async function postEnvelope(dsn: ParsedDsn, build: (eventId: string) => string): Promise<void> {
   try {
-    const eventId = newEventId();
-    const errOb = err instanceof Error ? err : new Error(String(err));
-    const envelope = buildEnvelope(eventId, errOb, ctx);
+    const envelope = build(newEventId());
     const headers: Record<string, string> = {
       'Content-Type': 'application/x-sentry-envelope',
       'X-Sentry-Auth':
@@ -76,7 +80,6 @@ export async function reportError(err: unknown, ctx: ReportContext = {}): Promis
         `sentry_client=grind/${API_VERSION},` +
         `sentry_key=${dsn.publicKey}`,
     };
-    // Best-effort: 2s timeout, swallow any failure.
     const controller = new AbortController();
     const t = setTimeout(() => controller.abort(), 2000);
     try {
@@ -92,6 +95,36 @@ export async function reportError(err: unknown, ctx: ReportContext = {}): Promis
   } catch (postErr) {
     logger.debug({ err: String(postErr) }, 'sentry: report failed (non-fatal)');
   }
+}
+
+/**
+ * Capture a notable condition that is not an exception (Sentry's
+ * captureMessage). Same transport and guarantees as `reportError`.
+ */
+export async function reportMessage(
+  message: string,
+  ctx: ReportContext = {},
+  level: 'warning' | 'error' | 'info' = 'warning',
+): Promise<void> {
+  const dsn = parseDsn();
+  if (!dsn) return;
+  await postEnvelope(dsn, (eventId) => {
+    const now = new Date().toISOString();
+    const event = {
+      event_id: eventId,
+      timestamp: now,
+      platform: 'node',
+      level,
+      release: API_VERSION,
+      environment: process.env.NODE_ENV ?? 'development',
+      server_name: process.env.HOSTNAME ?? undefined,
+      user: ctx.userId ? { id: ctx.userId } : undefined,
+      extra: ctx.extras,
+      message: { formatted: message },
+    };
+    const header = JSON.stringify({ event_id: eventId, sent_at: now });
+    return `${header}\n${JSON.stringify({ type: 'event' })}\n${JSON.stringify(event)}\n`;
+  });
 }
 
 function buildEnvelope(eventId: string, err: Error, ctx: ReportContext): string {

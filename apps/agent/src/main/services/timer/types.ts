@@ -1,6 +1,5 @@
 import type { ServerLedgerEntry, TimeEntry } from '@grind/core';
 import type { TimerSyncReceipt } from '@grind/types';
-import type { TrackingReadiness } from '../../../shared/tracking';
 
 export type EntrySyncState = 'pending_create' | 'pending_update' | 'synced';
 export type PendingEntrySyncState = Exclude<EntrySyncState, 'synced'>;
@@ -42,6 +41,24 @@ export interface TimerRecoveryResult {
 export interface UnsyncedEntry {
   entry: TimeEntry;
   syncState: PendingEntrySyncState;
+  /** Consecutive failed pushes since the row last changed or synced. */
+  attempts: number;
+}
+
+/** Closed entries in a time range still waiting on the server. */
+export interface RangeBacklog {
+  pending: number;
+  /** Distinct recent push errors among them, newest first. */
+  lastErrors: string[];
+}
+
+/** What is still waiting on this machine, for the heartbeat's diagnostics. */
+export interface SyncBacklog {
+  pending: number;
+  oldestPendingAt: number | null;
+  lastError: string | null;
+  /** Rows the server kept refusing, now retried only once a day. */
+  parked: number;
 }
 
 export interface TimerOwner {
@@ -54,15 +71,51 @@ export interface LocalLedgerEntry {
   syncState: EntrySyncState;
   acknowledgedRevision: number | null;
   acknowledgedHash: string | null;
+  /**
+   * The task the server held when it acknowledged. Absent when that was not
+   * recorded (acknowledged by an older agent).
+   */
+  acknowledgedTaskGuid?: string | null;
 }
 
 export interface ServerLedgerCache {
   list(owner: TimerOwner, windowStart: number, windowEnd: number, now: number): ServerLedgerEntry[];
+  /** Reviewer-invalidated windows from the same snapshot (never counted). */
+  invalidations?(owner: TimerOwner, windowStart: number, windowEnd: number): Array<{ start: number; end: number }>;
 }
 
 /** Injected dependencies so TimerService is testable without Electron/SQLite. */
 export interface Clock {
+  /** The timer's frame: server-aligned, driven by a monotonic source. */
   now(): number;
+  /**
+   * Device wall clock. It keeps running while the machine sleeps, which is
+   * how a sleep the OS never announced is still noticed. Defaults to now().
+   */
+  wallNow?(): number;
+  /**
+   * Raw monotonic reading, independent of server-clock re-anchoring. Advances
+   * while a frozen process is not scheduled (Windows Modern Standby, a hung
+   * event loop); on macOS it stops during real sleep. Defaults to now().
+   */
+  monoNow?(): number;
+}
+
+/** A sleep nobody reported, noticed from the gap between two proofs of life. */
+export interface MissedSleep {
+  /** How long the process went without a proof of life. */
+  gapMs: number;
+  /** Device wall clock at the last proof of life before the gap (for display). */
+  lastAliveWallMs: number;
+  /** The entry that was closed at that proof, or null when none was open. */
+  closed: {
+    entryId: string;
+    /** Timer frame. */
+    closedAt: number;
+    larkTaskGuid: string | null;
+    /** It was accruing (not paused), so the person can be offered a resume. */
+    wasAccruing: boolean;
+  } | null;
 }
 
 export interface IdGen {
@@ -75,11 +128,6 @@ export interface TrackingAccrualGuard {
 
 export interface BusinessDayProvider {
   window(now: number): { start: number; end: number } | null;
-}
-
-export interface TrackingBlockedErrorLike extends Error {
-  code: 'TRACKING_PERMISSIONS_REQUIRED';
-  readiness: TrackingReadiness;
 }
 
 /**
@@ -102,19 +150,49 @@ export interface EntryStore {
   /** Atomically close the old task and create the replacement task. */
   switchEntry(closed: TimeEntry, next: TimeEntry): [PendingEntrySyncState, PendingEntrySyncState];
   /** The currently-open entry (endedAt === null), if any. */
+  /**
+   * Rows the oldest agents wrote under the placeholder user "self". Claimed
+   * for `owner` only when every owned row on this machine is `owner`'s — the
+   * machine has only ever had this one account — otherwise left alone.
+   */
+  claimLegacySelfEntries(owner: TimerOwner): { claimed: number; unclaimed: number };
   getOpen(): TimeEntry | null;
-  /** Entries that still need to be pushed to the server. */
-  getUnsynced(): UnsyncedEntry[];
+  /**
+   * Every open entry of the bound owner, oldest first. There should only ever
+   * be one; more is the residue of a race, and boot closes the extras.
+   */
+  listOpen(): TimeEntry[];
+  /**
+   * Entries due a push at `now`, oldest first — the open entry included, in
+   * its place. Order matters: the server refuses a new live timer while an
+   * older one of the same user is still open there, so an older close has to
+   * land before a newer start, or the start 409s and waits out a backoff.
+   *
+   * Rows backing off after a failure are left out until their retry time, so
+   * one entry the server keeps refusing can never starve the rest; and a pass
+   * that hits its batch limit chains straight into the next (TimerSyncDrain),
+   * so a long backlog delays the open entry by passes, not by intervals.
+   */
+  getUnsynced(now: number, limit?: number): UnsyncedEntry[];
+  /** Count the failure and hold the row back until `retryAt`. */
+  noteSyncFailure(entryId: string, error: string, retryAt: number): void;
+  /** @param parkedAtAttempts refusals at which a row counts as parked. */
+  syncBacklog(parkedAtAttempts: number): SyncBacklog;
+  /** Closed entries overlapping [startMs, endMs) not yet acknowledged by the server. */
+  rangeBacklog(startMs: number, endMs: number): RangeBacklog;
   hasUnsynced(): boolean;
   /** True until the entry has been created successfully on the server. */
   isPendingCreate(entryId: string): boolean;
-  /** Most recent entries (newest first), for the day timeline / recent views. */
-  listRecent(limit: number): TimeEntry[];
   /** Entries that overlap or continue after `since`, newest first. */
   listSince(since: number): TimeEntry[];
   listLedgerEntries(since: number): LocalLedgerEntry[];
   /** Mark this exact snapshot as created remotely; stale responses cannot dirty newer JSON. */
   markCreated(entryId: string, expectedEntry: TimeEntry): boolean;
+  /**
+   * Push this entry again now, whatever its state or backoff — the server told
+   * us its copy is missing or behind. Never demotes a pending create.
+   */
+  requeue(entryId: string, syncState: PendingEntrySyncState): boolean;
   /** Mark this exact snapshot as requiring a create retry. */
   markPendingCreate(entryId: string, expectedEntry: TimeEntry): boolean;
   /**
@@ -124,8 +202,12 @@ export interface EntryStore {
   markSynced(
     entryId: string,
     expectedEntry: TimeEntry,
-    acknowledgement: { revision: number; hash: string },
+    acknowledgement: { revision: number; hash: string; larkTaskGuid?: string | null },
   ): boolean;
+  /** Run `work` atomically: all of its writes land, or none do. */
+  transaction<T>(work: () => T): T;
+  /** Delete synced, closed entries (every owner) that ended before `cutoff`. */
+  pruneSyncedBefore(cutoff: number): number;
   /**
    * Durable "last proof of life" timestamp, written periodically while a timer
    * actively accrues. On boot it bounds crash recovery: an ungraceful
@@ -141,6 +223,11 @@ export interface EntryStore {
   setAwayState(state: TimerAwayState): void;
   getAwayState(): TimerAwayState | null;
   clearAwayState(): void;
+  /** True the first time `key` is marked for the bound owner, false after. */
+  markOnce(key: string): boolean;
+  /** Small owner-scoped notes (remote command outcomes). Null when unset or signed out. */
+  getNote(key: string): string | null;
+  setNote(key: string, value: string): void;
   setRecoveryNotice(notice: TimerRecoveryNotice): void;
   getRecoveryNotice(): TimerRecoveryNotice | null;
   clearRecoveryNotice(): void;

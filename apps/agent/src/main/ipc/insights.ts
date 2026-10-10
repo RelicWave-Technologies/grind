@@ -4,7 +4,7 @@ import { log } from '../logger';
 import { dateKeyInTimeZone } from '@grind/types';
 import { getWorkspaceTimeContext, getWorkspaceTimeZone } from '../services/workspaceTime';
 
-export type InsightsToday = {
+type InsightsToday = {
   day: string;
   score: { score: number; trackedMinutes: number; engagedMinutes: number; protectedMinutes: number; idleMinutes: number };
   totals: { keystrokes: number; clicks: number; mouseDistancePx: number; scrollEvents: number };

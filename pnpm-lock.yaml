@@ -8,12 +8,6 @@ importers:
 
   .:
     devDependencies:
-      '@typescript-eslint/eslint-plugin':
-        specifier: 8.12.2
-        version: 8.12.2(@typescript-eslint/parser@8.12.2(eslint@9.13.0)(typescript@5.6.3))(eslint@9.13.0)(typescript@5.6.3)
-      '@typescript-eslint/parser':
-        specifier: 8.12.2
-        version: 8.12.2(eslint@9.13.0)(typescript@5.6.3)
       dotenv-cli:
         specifier: ^11.0.0
         version: 11.0.0
@@ -97,9 +91,6 @@ importers:
       '@vitejs/plugin-react':
         specifier: 4.3.3
         version: 4.3.3(vite@5.4.10(@types/node@20.16.13))
-      cross-env:
-        specifier: ^7.0.3
-        version: 7.0.3
       electron:
         specifier: 33.2.0
         version: 33.2.0
@@ -178,6 +169,9 @@ importers:
       pino-pretty:
         specifier: 11.3.0
         version: 11.3.0
+      ulid:
+        specifier: 2.3.0
+        version: 2.3.0
       zod:
         specifier: 3.25.76
         version: 3.25.76
@@ -261,6 +255,9 @@ importers:
       vite:
         specifier: 5.4.10
         version: 5.4.10(@types/node@20.16.13)
+      vitest:
+        specifier: 2.1.4
+        version: 2.1.4(@types/node@20.16.13)
 
   apps/mcp:
     dependencies:
@@ -291,6 +288,10 @@ importers:
         version: 2.1.4(@types/node@20.16.13)
 
   packages/core:
+    dependencies:
+      '@grind/types':
+        specifier: workspace:*
+        version: link:../types
     devDependencies:
       '@grind/tsconfig':
         specifier: workspace:*
@@ -2198,11 +2199,6 @@ packages:
 
   crc@3.8.0:
     resolution: {integrity: sha512-iX3mfgcTMIq3ZKLIsVFAbv7+Mc10kxabAGQb8HvjA1o3T1PIYprbakQ65d3I+2HGHt6nSKkM9PYjgoJO2KcFBQ==}
-
-  cross-env@7.0.3:
-    resolution: {integrity: sha512-+/HKd6EgcQCJGh2PSjZuUitQBQynKor4wrFbRg4DtAgS1aWO+gU52xpH7M9ScGgXSYmAVS9bIJ8EzuaGw0oNAw==}
-    engines: {node: '>=10.14', npm: '>=6', yarn: '>=1'}
-    hasBin: true
 
   cross-spawn@7.0.6:
     resolution: {integrity: sha512-uV2QOWP2nWzsy2aMp8aRibhi9dlzF5Hgh5SHaB9OiTGEyDTiJJyx0uy51QXdyWbtAHNua4XJzUKca3OzKUd3vA==}
@@ -6447,10 +6443,6 @@ snapshots:
     dependencies:
       buffer: 5.7.1
     optional: true
-
-  cross-env@7.0.3:
-    dependencies:
-      cross-spawn: 7.0.6
 
   cross-spawn@7.0.6:
     dependencies:

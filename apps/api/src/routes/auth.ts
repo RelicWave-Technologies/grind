@@ -7,6 +7,7 @@ import {
   Role as RoleSchema,
   roleCapabilities,
   type LoginResponse,
+  type MeResponse,
   type RefreshResponse,
   type UserDto,
 } from '@grind/types';
@@ -14,7 +15,8 @@ import { validate } from '../middleware/validate';
 import { requireAccessToken } from '../middleware/auth';
 import { signAccessToken } from '../lib/jwt';
 import { verifyPassword } from '../lib/password';
-import { issueRefreshToken, revokeRefreshToken, rotateRefreshToken } from '../lib/refreshToken';
+import { issueRefreshToken, revokeRefreshToken, rotateRefreshToken, type RotateResult } from '../lib/refreshToken';
+import { logger } from '../logger';
 import {
   setSessionCookie,
   clearSessionCookie,
@@ -22,7 +24,7 @@ import {
   clearRefreshCookie,
   REFRESH_COOKIE,
 } from '../lib/cookies';
-import { env } from '../env';
+import { env, isDeveloperEmail } from '../env';
 
 export const authRouter = Router();
 
@@ -33,7 +35,7 @@ export const authRouter = Router();
  */
 const PASSWORD_LOGIN_ENABLED = env.NODE_ENV !== 'production' && env.ALLOW_PASSWORD_LOGIN === 'true';
 
-export type AuthUserRow = {
+type AuthUserRow = {
   id: string;
   email: string;
   name: string;
@@ -48,7 +50,7 @@ export type AuthUserRow = {
 };
 
 /** Minimal Prisma `select` that satisfies {@link serializeAuthUser}. */
-export const AUTH_USER_SELECT = {
+const AUTH_USER_SELECT = {
   id: true,
   email: true,
   name: true,
@@ -62,7 +64,7 @@ export const AUTH_USER_SELECT = {
   workspace: { select: { timezone: true } },
 } as const;
 
-export function serializeAuthUser(user: AuthUserRow): UserDto | null {
+function serializeAuthUser(user: AuthUserRow): UserDto | null {
   const parsedRole = RoleSchema.safeParse(user.role);
   if (!parsedRole.success) return null;
   const role = parsedRole.data;
@@ -150,7 +152,8 @@ authRouter.get('/me', requireAccessToken, async (req, res, next) => {
     if (!user) return res.status(401).json({ error: 'unauthorized' });
     const payloadUser = serializeAuthUser(user);
     if (!payloadUser) return res.status(503).json({ error: 'stale_role_migration_required' });
-    res.json({ user: payloadUser });
+    const response: MeResponse = { user: { ...payloadUser, isDeveloper: isDeveloperEmail(user.email) } };
+    res.json(response);
   } catch (err) {
     next(err);
   }
@@ -194,6 +197,16 @@ authRouter.get('/me/shift', requireAccessToken, async (req, res, next) => {
 });
 
 /**
+ * A failed rotation, with the session it belonged to. A reused token revokes
+ * its whole family and signs the person out everywhere, so that one — and a
+ * suspended or stale-role account — is a warning; the rest are routine.
+ */
+function logRefreshFailure(via: 'bearer' | 'cookie', result: Extract<RotateResult, { ok: false }>): void {
+  const level = result.reason === 'invalid' || result.reason === 'expired' || result.reason === 'reuse_grace' ? 'info' : 'warn';
+  logger[level]({ via, reason: result.reason, familyId: result.familyId, userId: result.userId }, 'refresh token rotation failed');
+}
+
+/**
  * Bearer-token refresh for the agent (and any non-browser client). Rotates the
  * refresh token in the request body with reuse detection and returns the new
  * pair as JSON. The dashboard uses /refresh-cookie instead (httpOnly cookies).
@@ -203,6 +216,7 @@ authRouter.post('/refresh', validate(RefreshRequest, 'body'), async (req, res, n
     const { refreshToken } = req.body as RefreshRequest;
     const result = await rotateRefreshToken(refreshToken);
     if (!result.ok) {
+      logRefreshFailure('bearer', result);
       if (result.reason === 'stale_role') return res.status(503).json({ error: 'stale_role_migration_required' });
       if (result.reason === 'reuse_grace') {
         return res.status(409).json({ error: 'refresh_reuse_grace', reason: result.reason });
@@ -228,6 +242,7 @@ authRouter.post('/refresh-cookie', async (req, res, next) => {
     if (!presented) return res.status(401).json({ error: 'no_refresh' });
     const result = await rotateRefreshToken(presented);
     if (!result.ok) {
+      logRefreshFailure('cookie', result);
       if (result.reason === 'reuse_grace') return res.json({ ok: true as const });
       clearSessionCookie(res);
       clearRefreshCookie(res);

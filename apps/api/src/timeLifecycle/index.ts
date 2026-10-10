@@ -2,10 +2,11 @@ import { prisma, type Prisma, type TimeEntryCloseReason } from '@grind/db';
 import type { TimerCheckpoint, TimerCheckpointDisposition } from '@grind/types';
 import { logger } from '../logger';
 import { START_TIME_MS } from '../lib/version';
+import { onShutdown } from '../lib/lifecycle';
 
 export const TIMER_PROTOCOL_VERSION = 2;
 export const TIMER_LEASE_MS = 3 * 60 * 1000;
-export const TIMER_RECONCILE_INTERVAL_MS = 60 * 1000;
+const TIMER_RECONCILE_INTERVAL_MS = 60 * 1000;
 const RECONCILE_BATCH_SIZE = 100;
 
 type Tx = Prisma.TransactionClient;
@@ -25,7 +26,12 @@ export interface TimerCheckpointResult {
   closeReason: TimeEntryCloseReason | null;
 }
 
-function clampCheckpointAt(observedAt: string, now: Date, startedAt: Date): Date {
+/**
+ * An agent's "I was alive at" claim, bounded to what the server can accept:
+ * never in the server's future, never before the entry began. An unparseable
+ * claim counts as now. Shared by the heartbeat lease and the sync route.
+ */
+export function clampCheckpointAt(observedAt: string, now: Date, startedAt: Date): Date {
   const observedMs = new Date(observedAt).getTime();
   const bounded = Number.isFinite(observedMs) ? Math.min(observedMs, now.getTime()) : now.getTime();
   return new Date(Math.max(startedAt.getTime(), bounded));
@@ -164,6 +170,11 @@ async function finalizeLockedEntry(
     row.startedAt.getTime(),
   );
   const closeAt = new Date(Math.max(row.lastProvenAt?.getTime() ?? 0, latestBoundaryMs));
+  // An open segment that would close at its own start carried no time; it is
+  // removed, never stored as a zero-length span (ZERO-LENGTH SEGMENTS, core).
+  await tx.timeSegment.deleteMany({
+    where: { timeEntryId: row.id, endedAt: null, startedAt: { gte: closeAt } },
+  });
   await tx.timeSegment.updateMany({
     where: { timeEntryId: row.id, endedAt: null },
     data: { endedAt: closeAt },
@@ -212,6 +223,8 @@ export async function supersedeExpiredTimersForUser(
 /** Finalize one bounded, multi-instance-safe batch of expired leases. */
 export async function reconcileExpiredTimersOnce(now = new Date()): Promise<number> {
   const utcNow = now.toISOString();
+  // Up to a hundred rows, a few statements each: under load that outlives
+  // Prisma's 5s default, and a timed-out batch rolls back every row in it.
   return prisma.$transaction(async (tx) => {
     const rows = await tx.$queryRaw<LockedExpiredEntry[]>`
       SELECT "id", "userId", "startedAt", "lastProvenAt"
@@ -230,33 +243,57 @@ export async function reconcileExpiredTimersOnce(now = new Date()): Promise<numb
       if (await finalizeLockedEntry(tx, row, 'LEASE_EXPIRED', now)) finalized += 1;
     }
     return finalized;
-  });
+  }, { timeout: 30_000 });
 }
 
 let schedulerStarted = false;
 
+/** When the reconciler last reached the database, and when it last came back from not reaching it. */
+export interface ReconcileClock {
+  resumedAtMs: number;
+  lastOkAtMs: number | null;
+}
+
 /**
- * True for one lease length after this process started.
+ * May this tick finalize expired leases?
  *
- * A deploy takes the API away for a while; every running timer's lease keeps
- * ticking down meanwhile, because agents cannot reach us to renew it. Sweeping
- * the moment we come back would close all of them for an outage that was ours.
- * One lease length is exactly the time a live agent needs to checkpoint again.
+ * Only once the API has been able to hear agents for a full lease length. A
+ * deploy, a database outage or an overload that timed every heartbeat out all
+ * leave leases ticking down while no agent could renew them; sweeping the
+ * moment we come back would close every running timer for an outage that was
+ * ours. So a start (resumedAtMs = process start) or a gap of more than one
+ * lease since the last tick that reached the database restarts the wait. One
+ * lease length is exactly the time a live agent needs to checkpoint again.
  */
-export function inStartupGrace(nowMs: number, processStartMs: number = START_TIME_MS): boolean {
-  return nowMs - processStartMs < TIMER_LEASE_MS;
+export function reconcileGate(nowMs: number, clock: ReconcileClock): { finalize: boolean; resumedAtMs: number } {
+  const wasBlind = clock.lastOkAtMs !== null && nowMs - clock.lastOkAtMs > TIMER_LEASE_MS;
+  const resumedAtMs = wasBlind ? nowMs : clock.resumedAtMs;
+  return { finalize: nowMs - resumedAtMs >= TIMER_LEASE_MS, resumedAtMs };
 }
 
 export function startTimerLifecycleScheduler(enabled: boolean): void {
   if (!enabled || schedulerStarted) return;
   schedulerStarted = true;
   let active = false;
+  const clock: ReconcileClock = { resumedAtMs: START_TIME_MS, lastOkAtMs: null };
   const tick = async () => {
-    if (active || inStartupGrace(Date.now())) return;
+    if (active) return;
     active = true;
     try {
-      const finalized = await reconcileExpiredTimersOnce();
-      if (finalized > 0) logger.warn({ finalized }, 'expired timer leases finalized');
+      const now = Date.now();
+      const gate = reconcileGate(now, clock);
+      if (gate.resumedAtMs !== clock.resumedAtMs) {
+        logger.warn({ lastOkAt: new Date(clock.lastOkAtMs!).toISOString() }, 'timer reconciler was blind for over a lease; holding off');
+      }
+      clock.resumedAtMs = gate.resumedAtMs;
+      if (gate.finalize) {
+        const finalized = await reconcileExpiredTimersOnce(new Date(now));
+        if (finalized > 0) logger.warn({ finalized }, 'expired timer leases finalized');
+      } else {
+        // Waiting out the grace still has to notice the database is back.
+        await prisma.$queryRaw`SELECT 1`;
+      }
+      clock.lastOkAtMs = now;
     } catch (err) {
       logger.error({ err: String(err) }, 'timer lifecycle reconciliation failed');
     } finally {
@@ -265,5 +302,10 @@ export function startTimerLifecycleScheduler(enabled: boolean): void {
   };
   const handle = setInterval(() => void tick(), TIMER_RECONCILE_INTERVAL_MS);
   handle.unref?.();
-  setTimeout(() => void tick(), TIMER_RECONCILE_INTERVAL_MS).unref?.();
+  const first = setTimeout(() => void tick(), TIMER_RECONCILE_INTERVAL_MS);
+  first.unref?.();
+  onShutdown(() => {
+    clearInterval(handle);
+    clearTimeout(first);
+  });
 }

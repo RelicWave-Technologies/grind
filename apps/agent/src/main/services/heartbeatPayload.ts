@@ -1,5 +1,6 @@
 import {
   TIMER_TRACKING_PROTOCOL_VERSION,
+  type AgentDiagnostics,
   type AgentState,
   type DesktopPermissionSnapshot,
   type HeartbeatRequest,
@@ -7,12 +8,6 @@ import {
   type Platform,
 } from '@grind/types';
 import type { TimerStatus } from './timer';
-
-export function currentPlatform(nodePlatform: NodeJS.Platform = process.platform): Platform {
-  if (nodePlatform === 'darwin') return 'darwin';
-  if (nodePlatform === 'win32') return 'win32';
-  return 'linux';
-}
 
 export function agentStateFromTimer(status: TimerStatus): AgentState {
   if (status.state !== 'RUNNING') return 'IDLE';
@@ -26,9 +21,10 @@ export function buildHeartbeatRequest(args: {
   timerStatus: TimerStatus;
   permissions?: DesktopPermissionSnapshot;
   startup?: LaunchAtLoginSnapshot;
+  diagnostics?: AgentDiagnostics;
   observedAt?: number;
 }): HeartbeatRequest {
-  const { agentVersion, platform, timerStatus, permissions, startup } = args;
+  const { agentVersion, platform, timerStatus, permissions, startup, diagnostics } = args;
   const timerCheckpoint = timerStatus.state === 'RUNNING'
     ? {
         entryId: timerStatus.entryId,
@@ -46,5 +42,6 @@ export function buildHeartbeatRequest(args: {
     timerCheckpoint,
     ...(permissions ? { permissions } : {}),
     ...(startup ? { startup } : {}),
+    ...(diagnostics ? { diagnostics } : {}),
   };
 }

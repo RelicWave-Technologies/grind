@@ -172,6 +172,31 @@ describe('admin API tokens', () => {
     });
     const created = await createToken(admin.accessToken, ALL_READ_SCOPES);
 
+    // RUNNING with a fresh heartbeat but no timer it proves: not running —
+    // the same "tracking now" the overview and Tester Ops read.
+    const idle = await request(app).get('/v1/mcp/device-health').set(bearer(created.token));
+    expect(idle.body.counts.running).toBe(0);
+
+    const liveId = fakeUlid('te');
+    const liveStart = new Date(Date.now() - 10 * 60 * 1000);
+    await prisma.timeEntry.create({
+      data: {
+        id: liveId,
+        clientUuid: fakeUlid('client'),
+        userId: admin.userId,
+        source: 'AUTO',
+        startedAt: liveStart,
+        segments: { create: { id: fakeUlid('seg'), kind: 'WORK', startedAt: liveStart } },
+      },
+    });
+    await prisma.user.update({
+      where: { id: admin.userId },
+      data: { agentActiveEntryId: liveId, agentLastSeenAt: new Date() },
+    });
+
+    const running = await request(app).get('/v1/mcp/running-users').set(bearer(created.token));
+    expect(running.body.users).toEqual([expect.objectContaining({ id: admin.userId, activeEntryId: liveId })]);
+
     const overview = await request(app)
       .get('/v1/mcp/workspace-overview?tz=UTC')
       .set(bearer(created.token));
@@ -326,6 +351,7 @@ describe('admin API tokens', () => {
     ]);
     expect(res.body.users[0].days[0].manualTimeBlocks).toHaveLength(1);
     expect(res.body.users[0].days[0].manualTimeBlocks[0].manualTimeRequest).toMatchObject({
+      creditedMs: 60 * 60 * 1000,
       taskSummary: 'Customer escalation',
       reason: 'Worked during lunch but forgot to start timer',
       status: 'APPROVED',
@@ -344,6 +370,60 @@ describe('admin API tokens', () => {
     expect(res.body.users[0].days[0].breaks[1].evidence.manualRequestsOverlappingGap[0]).toMatchObject({
       status: 'PENDING',
       reason: 'Asked to cover part of this gap',
+    });
+  });
+
+  it('credits approved manual time by what it still owns on the shared timeline', async () => {
+    const admin = await seedUser({ role: 'ADMIN' });
+    const at = (hhmm: string) => new Date(`2026-07-08T${hhmm}:00.000Z`);
+    const entry = (source: 'AUTO' | 'MANUAL', start: string, end: string) => prisma.timeEntry.create({
+      data: {
+        id: fakeUlid('te'),
+        clientUuid: fakeUlid('client'),
+        userId: admin.userId,
+        source,
+        startedAt: at(start),
+        endedAt: at(end),
+        segments: { create: { id: fakeUlid('seg'), kind: 'WORK', startedAt: at(start), endedAt: at(end) } },
+      },
+    });
+    // Approved 12:00-13:00 while nothing was tracked; tracked time for
+    // 12:30-13:00 synced afterwards, and a reviewer invalidated 12:00-12:10.
+    const manual = await entry('MANUAL', '12:00', '13:00');
+    await entry('AUTO', '12:30', '13:00');
+    await prisma.manualTimeRequest.create({
+      data: {
+        clientUuid: fakeUlid('mtr-client'),
+        userId: admin.userId,
+        requestedStart: at('12:00'),
+        requestedEnd: at('13:00'),
+        reason: 'Forgot the timer',
+        status: 'APPROVED',
+        timeEntryId: manual.id,
+      },
+    });
+    const flag = await prisma.activityFlag.create({
+      data: { userId: admin.userId, type: 'METRONOMIC', windowStart: at('12:00'), windowEnd: at('12:10'), riskScore: 90, evidence: {} },
+    });
+    await prisma.timeInvalidation.create({
+      data: {
+        workspaceId: admin.workspaceId,
+        flagId: flag.id,
+        userId: admin.userId,
+        windowStart: at('12:00'),
+        windowEnd: at('12:10'),
+        reason: 'jiggler',
+      },
+    });
+    const created = await createToken(admin.accessToken, ['read:manual-time']);
+
+    const res = await request(app).get('/v1/mcp/manual-time-requests').set(bearer(created.token));
+
+    expect(res.status).toBe(200);
+    expect(res.body.requests[0]).toMatchObject({
+      requestedMs: 60 * 60 * 1000,
+      creditedMs: 20 * 60 * 1000,
+      durationMs: 20 * 60 * 1000,
     });
   });
 

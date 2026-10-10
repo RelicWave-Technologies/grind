@@ -167,7 +167,7 @@ export interface LeaveAccount {
   lines: LeaveAccountLine[];
 }
 
-export interface LeaveAccountLine {
+interface LeaveAccountLine {
   /** YYYY-MM-DD. */
   date: string;
   kind: 'credit' | 'leave';

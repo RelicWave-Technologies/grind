@@ -1,14 +1,13 @@
+import { assignmentForDate } from '@grind/core';
 import {
-  LEAVE_DAY_STEP,
   ShiftScheduleSchema,
-  WEEKDAYS,
   portionDays,
+  weekdayForDate,
   roundToHalfDay,
   type DayStatus,
   type LeaveKind,
   type LeavePortion,
 } from '@grind/types';
-import { localDayWindow } from '../insights/day';
 import type { LeaveAccount, LeaveFundingDays } from './leaveFunding';
 
 /**
@@ -21,8 +20,8 @@ import type { LeaveAccount, LeaveFundingDays } from './leaveFunding';
  * holiday list, and approved leave — and it owns the precedence between them.
  * Keeping that precedence in one module is the point: the rule that *nobody is
  * charged for a day they were never expected to work* has to hold identically
- * in the request quote, the ledger write, the timesheet and the payroll
- * worksheet. Spread across four callers it would be four subtly different
+ * in the request quote, the ledger write, the timesheet and the month
+ * report. Spread across four callers it would be four subtly different
  * rules, and the balances would disagree.
  *
  * Everything here is pure — no DB, no clock. Callers load the rows and hand
@@ -104,7 +103,6 @@ export class WorkingCalendar {
   private readonly holidaysByDate: Map<string, HolidayInput[]>;
   /** userId -> approved leave, in submission order. */
   private readonly leaveByUser: Map<string, ApprovedLeaveInput[]>;
-  private readonly dayWindowCache = new Map<string, { startMs: number; endMs: number } | null>();
 
   private readonly lastSaturdayOffFor: Record<string, boolean>;
   /** userId -> date -> days of leave a balance covered, where it fell short. */
@@ -315,43 +313,8 @@ export class WorkingCalendar {
     return list.find((l) => date >= l.startDate && date <= l.endDate) ?? null;
   }
 
-  private dayWindow(date: string): { startMs: number; endMs: number } | null {
-    const cached = this.dayWindowCache.get(date);
-    if (cached !== undefined) return cached;
-    const win = localDayWindow(date, this.tz);
-    const value = win ? { startMs: win.start.getTime(), endMs: win.end.getTime() } : null;
-    this.dayWindowCache.set(date, value);
-    return value;
-  }
-
-  /**
-   * The shift's clock window for a working day — which shift, and its start and
-   * end as HH:MM — or null on a day that is not a working day for this person.
-   * What a late arrival is measured against.
-   */
-  shiftWindowFor(userId: string, date: string): { shiftId: string; start: string; end: string } | null {
-    if (this.resolveShiftForDay(userId, date).kind !== 'working') return null;
-    const assignment = this.assignmentFor(userId, date);
-    if (!assignment?.shiftId) return null;
-    const parsed = ShiftScheduleSchema.safeParse(assignment.scheduleSnapshot);
-    const day = parsed.success ? parsed.data[weekdayForDate(date)] : null;
-    return day ? { shiftId: assignment.shiftId, start: day.start, end: day.end } : null;
-  }
-
   private assignmentFor(userId: string, date: string): ShiftAssignmentInput | null {
-    const assignments = this.shiftAssignments[userId];
-    if (!assignments?.length) return null;
-    const win = this.dayWindow(date);
-    if (!win) return null;
-    return (
-      assignments
-        .filter(
-          (a) =>
-            a.effectiveFrom.getTime() < win.endMs &&
-            (a.effectiveTo === null || a.effectiveTo.getTime() > win.startMs),
-        )
-        .sort((a, b) => b.effectiveFrom.getTime() - a.effectiveFrom.getTime())[0] ?? null
-    );
+    return assignmentForDate(this.shiftAssignments[userId] ?? [], date, this.tz);
   }
 
   private resolveShiftForDay(userId: string, date: string): ShiftForDay {
@@ -362,7 +325,7 @@ export class WorkingCalendar {
     const day = parsed.data[weekdayForDate(date)];
     if (!day) return { kind: 'weekly_off', shiftName: assignment.shiftNameSnapshot };
     // Resolved here rather than at each caller, so "was this a working day"
-    // has one answer for the quote, the timesheet and the payroll worksheet.
+    // has one answer for the quote, the timesheet and the month report.
     if (this.lastSaturdayOffFor[userId] && isLastSaturdayOfMonth(date)) {
       return { kind: 'weekly_off', shiftName: assignment.shiftNameSnapshot };
     }
@@ -404,31 +367,12 @@ export function isLastSaturdayOfMonth(date: string): boolean {
   return dd! + 7 > lastDay;
 }
 
-/** Weekday key for a YYYY-MM-DD business date (calendar date, not an instant). */
-export function weekdayForDate(date: string): (typeof WEEKDAYS)[number] {
-  const [yy, mm, dd] = date.split('-').map((n) => Number.parseInt(n, 10));
-  return WEEKDAYS[new Date(Date.UTC(yy!, mm! - 1, dd!)).getUTCDay()]!;
-}
-
-/** Inclusive YYYY-MM-DD range, capped so pathological input cannot spin. */
-export function leaveDateRange(from: string, to: string, maxDays = 400): string[] {
-  const out: string[] = [];
-  let cur = from;
-  for (let i = 0; i < maxDays; i++) {
-    if (cur > to) break;
-    out.push(cur);
-    if (cur === to) break;
-    cur = addIsoDays(cur, 1);
-  }
-  return out;
-}
-
-/** Add whole days to a YYYY-MM-DD string, staying on the calendar grid. */
-export function addIsoDays(date: string, delta: number): string {
-  const d = new Date(`${date}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + delta);
-  return d.toISOString().slice(0, 10);
-}
-
-/** Half a day, exported so callers never hand-write the literal. */
-export const HALF_DAY = LEAVE_DAY_STEP;
+/**
+ * Calendar-key arithmetic lives in `@grind/types` (one copy for the API, the
+ * agent and the dashboard); these names are kept for the leave module's callers.
+ */
+export {
+  weekdayForDate,
+  addDays as addIsoDays,
+  dateKeysBetween as leaveDateRange,
+} from '@grind/types';

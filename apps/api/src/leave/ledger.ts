@@ -262,33 +262,3 @@ export function reversalSourceKey(requestId: string): string {
   return `leave-reversal:${requestId}`;
 }
 
-// ---------------------------------------------------------------------------
-// Affordability
-// ---------------------------------------------------------------------------
-
-export interface AffordabilityInput {
-  balanceDays: number;
-  chargedDays: number;
-  allowNegativeBalance: boolean;
-}
-
-export interface Affordability {
-  sufficient: boolean;
-  balanceAfterDays: number;
-  shortfallDays: number;
-}
-
-/**
- * Can this request be afforded? Checked at APPROVAL, not only at submission —
- * two requests submitted while one is pending both look affordable against the
- * same balance, and only the approving transaction sees the truth.
- */
-export function affordability(input: AffordabilityInput): Affordability {
-  const after = roundToHalfDay(input.balanceDays - input.chargedDays);
-  const shortfall = after < 0 ? roundToHalfDay(-after) : 0;
-  return {
-    sufficient: input.allowNegativeBalance || after >= 0,
-    balanceAfterDays: after,
-    shortfallDays: shortfall,
-  };
-}
