@@ -1,6 +1,7 @@
 import type { ErrorRequestHandler } from 'express';
 import { logger } from '../logger';
 import { reportError } from '../lib/errorReporter';
+import { isTransientDbError, prismaErrorCode } from '../lib/prismaErrors';
 
 /** Client errors raised before a route runs, mapped to a stable error code. */
 const CLIENT_ERROR_CODES: Record<string, string> = {
@@ -41,6 +42,17 @@ export const errorHandler: ErrorRequestHandler = (err, req, res, _next) => {
     logger.warn({ status, error, path: req.path, method: req.method }, 'request rejected');
     if (res.headersSent) return;
     res.status(status).json({ error });
+    return;
+  }
+
+  // An overloaded database (pool or transaction timeout, deadlock, write
+  // conflict) is not a bug: answer 503 with a retry hint — every agent already
+  // retries a 5xx — and keep it out of Sentry.
+  if (isTransientDbError(err)) {
+    logger.warn({ code: prismaErrorCode(err), path: req.path, method: req.method }, 'database busy; asked the client to retry');
+    if (res.headersSent) return;
+    res.setHeader('Retry-After', '5');
+    res.status(503).json({ error: 'database_busy' });
     return;
   }
 

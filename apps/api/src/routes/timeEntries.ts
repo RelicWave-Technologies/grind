@@ -39,6 +39,7 @@ import {
   type SerializableTimeEntry,
 } from '../timeEntries/wire';
 import { linkClaimedEvidence } from '../timeEntries/claimedEvidence';
+import { isUniqueViolation } from '../lib/prismaErrors';
 
 export const timeEntriesRouter = Router();
 
@@ -157,13 +158,20 @@ function receiptForExistingRevision(bodyRevision: number, currentRevision: numbe
   return bodyRevision <= currentRevision ? 'STALE' : 'ALREADY_APPLIED';
 }
 
-/** Closed by the server for silence, not by the agent — the real end is unknown. */
-function isServerFinalized(closeReason: string | null): closeReason is 'LEASE_EXPIRED' | 'SUPERSEDED' {
-  return closeReason === 'LEASE_EXPIRED' || closeReason === 'SUPERSEDED';
+type ServerCloseReason = 'LEASE_EXPIRED' | 'SUPERSEDED' | 'LEGACY_RECONCILED';
+
+/**
+ * Closed by the server, not by the agent — the real end is unknown: a lease
+ * that ran out, a timer superseded by a newer one, or a legacy entry the
+ * cleanup closed at its last proof.
+ */
+function isServerFinalized(closeReason: string | null): closeReason is ServerCloseReason {
+  return closeReason === 'LEASE_EXPIRED' || closeReason === 'SUPERSEDED' || closeReason === 'LEGACY_RECONCILED';
 }
 
-function finalizedCorrection(closeReason: 'LEASE_EXPIRED' | 'SUPERSEDED') {
-  return closeReason === 'LEASE_EXPIRED' ? 'LEASE_FINALIZED' as const : 'SUPERSEDED' as const;
+/** The receipt correction installed agents know for each server close. */
+function finalizedCorrection(closeReason: ServerCloseReason) {
+  return closeReason === 'SUPERSEDED' ? 'SUPERSEDED' as const : 'LEASE_FINALIZED' as const;
 }
 
 function evaluateExistingCreate(args: {
@@ -249,22 +257,24 @@ timeEntriesRouter.post('/', validate(CreateTimeEntryRequest, 'body'), async (req
       return res.status(400).json({ error: 'incomplete_timer_lifecycle' });
     }
     const isV2 = hasCompleteV2Lifecycle(body);
-    if (isV2 && body.source !== 'AUTO') {
-      return res.status(400).json({ error: 'timer_lifecycle_requires_auto_entry' });
-    }
+    // Manual time exists only through a ManualTimeRequest and its approval.
+    // Accepting it here let a member write themselves unapproved hours; no
+    // agent has ever sent anything but AUTO.
+    if (body.source !== 'AUTO') return res.status(400).json({ error: 'manual_requires_request' });
 
     // Idempotency: existing clientUuid => return as-is.
     // An entry can also exist under the agent's id with a different clientUuid:
     // time restored by hand for an agent whose create never arrived keeps the
     // agent's entry id, so a late create must land on it instead of failing
     // on the primary key forever.
-    const existing = await prisma.timeEntry.findUnique({
+    const findExisting = async () => await prisma.timeEntry.findUnique({
       where: { clientUuid: body.clientUuid },
       include: { segments: true },
     }) ?? await prisma.timeEntry.findUnique({
       where: { id: body.id },
       include: { segments: true },
     });
+    const existing = await findExisting();
     if (existing) {
       const decision = evaluateExistingCreate({ entry: existing, body, userId: req.user.sub, isV2 });
       return res.status(decision.status).json(decision.payload);
@@ -294,7 +304,7 @@ timeEntriesRouter.post('/', validate(CreateTimeEntryRequest, 'body'), async (req
     const lastProvenAt = isV2
       ? clampObservedAt(body.observedAt!, now, new Date(clamped.entry.startedAt))
       : null;
-    const outcome = await prisma.$transaction(async (tx) => {
+    const creating = prisma.$transaction(async (tx) => {
       if (isV2 && clamped.entry.endedAt === null) {
         await lockTimerOwner(tx, req.user!.sub);
         const racedExisting = await tx.timeEntry.findUnique({
@@ -355,6 +365,15 @@ timeEntriesRouter.post('/', validate(CreateTimeEntryRequest, 'body'), async (req
       });
       return { kind: 'created' as const, entry: created };
     });
+    // Two identical creates in flight (an agent retrying before the first
+    // answer) race to the insert; the loser's unique violation is the
+    // winner's row, answered like any other retry.
+    const outcome = await creating.catch(async (err: unknown) => {
+      if (!isUniqueViolation(err)) throw err;
+      const raced = await findExisting();
+      if (!raced) throw err;
+      return { kind: 'existing' as const, entry: raced };
+    });
     if (outcome.kind === 'conflict') {
       return res.status(409).json({ error: 'active_timer_conflict', activeEntryId: outcome.activeEntryId });
     }
@@ -409,6 +428,9 @@ timeEntriesRouter.put('/:id/sync', validate(SyncTimeEntryRequest, 'body'), async
     });
     if (!entry) return res.status(404).json({ error: 'not_found' });
     if (entry.userId !== req.user.sub) return res.status(403).json({ error: 'forbidden' });
+    // Only the agent's own timer entries are synced; approved manual time is
+    // never stretched or rewritten from a client.
+    if (entry.source !== 'AUTO') return res.status(409).json({ error: 'manual_requires_request' });
     if (entry.trackingProtocolVersion === TIMER_PROTOCOL_VERSION && !isV2) {
       return res.status(409).json({ error: 'timer_protocol_required' });
     }
@@ -512,9 +534,10 @@ timeEntriesRouter.put('/:id/sync', validate(SyncTimeEntryRequest, 'body'), async
           // agent; it never knew the real end. A newer agent revision is that
           // truth arriving late, so apply it. Overlap with a later entry is
           // harmless — every report unions intervals.
+          // A legacy (pre-v2) agent has no revision to compare: its closed
+          // snapshot is the real end, as it always was before the cleanup.
           const reopens = clampedEndedAt === null;
-          const mayReconcile = isV2
-            && body.revision! > currentRevision
+          const mayReconcile = (isV2 ? body.revision! > currentRevision : current.closeReason === 'LEGACY_RECONCILED')
             && (!reopens || (observedAt !== null && observedAt > current.endedAt));
           if (!mayReconcile) {
             return {
@@ -620,7 +643,8 @@ timeEntriesRouter.put('/:id/sync', validate(SyncTimeEntryRequest, 'body'), async
     });
 
     if (outcome.kind === 'conflict') return res.status(409).json(outcome.payload);
-    if ('serverClose' in outcome && outcome.serverClose) {
+    // A legacy agent resends the same close; only a moved end is a restore.
+    if ('serverClose' in outcome && outcome.serverClose && clampedEndedAt !== outcome.serverClose.closedAt.getTime()) {
       const restoredMs = totalWorkedMs(clamped.entry, now.getTime()) - outcome.serverClose.workedMs;
       logger.info(
         {

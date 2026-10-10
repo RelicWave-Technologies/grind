@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import request from 'supertest';
 import { prisma } from '@grind/db';
+import express from 'express';
 import { buildApp } from '../src/app';
+import { errorHandler } from '../src/middleware/errorHandler';
 import { reportError } from '../src/lib/errorReporter';
 import { seedUser } from './helpers';
 
@@ -82,6 +84,34 @@ describe('client errors keep their status', () => {
       if (prev === undefined) delete process.env.DASHBOARD_URL;
       else process.env.DASHBOARD_URL = prev;
     }
+  });
+});
+
+describe('a busy database is a 503 the client retries, not a 500', () => {
+  const failing = (err: unknown) => {
+    const mini = express();
+    mini.get('/x', () => { throw err; });
+    mini.use(errorHandler);
+    return request(mini).get('/x');
+  };
+
+  it.each([
+    ['pool timeout', { code: 'P2024' }],
+    ['transaction timeout', { code: 'P2028' }],
+    ['write conflict', { code: 'P2034' }],
+    ['raw-query deadlock', { code: 'P2010', meta: { code: '40P01' } }],
+    ['raw-query serialization failure', { code: 'P2010', meta: { code: '40001' } }],
+  ])('%s', async (_name, err) => {
+    const res = await failing(Object.assign(new Error('db'), err));
+    expect(res.status).toBe(503);
+    expect(res.headers['retry-after']).toBe('5');
+    expect(res.body.error).toBe('database_busy');
+  });
+
+  it('a real failure is still a 500', async () => {
+    const res = await failing(Object.assign(new Error('boom'), { code: 'P2003' }));
+    expect(res.status).toBe(500);
+    vi.mocked(reportError).mockClear();
   });
 });
 

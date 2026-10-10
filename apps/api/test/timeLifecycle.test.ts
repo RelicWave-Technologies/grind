@@ -675,13 +675,128 @@ describe('timer lifecycle protocol v2', () => {
     expect(await count()).toEqual(before);
   });
 
-  it('rejects protocol-v2 lifecycle metadata on manual entries', async () => {
+  it('never creates or syncs manual time: that goes through a request and its approval', async () => {
     const user = await seedUser();
-    const body = { ...v2Body(new Date()), source: 'MANUAL' };
-    const response = await request(app).post('/v1/time-entries').set(bearer(user.accessToken)).send(body);
+    const v2 = await request(app).post('/v1/time-entries').set(bearer(user.accessToken))
+      .send({ ...v2Body(new Date()), source: 'MANUAL' });
+    expect(v2.status).toBe(400);
+    expect(v2.body.error).toBe('manual_requires_request');
 
-    expect(response.status).toBe(400);
-    expect(response.body.error).toBe('timer_lifecycle_requires_auto_entry');
+    // A legacy-shaped create (no lifecycle fields) used to slip through.
+    const startedAt = new Date(Date.now() - 60 * 60_000);
+    const endedAt = new Date(Date.now() - 1_000);
+    const legacy = await request(app).post('/v1/time-entries').set(bearer(user.accessToken)).send({
+      id: fakeUlid('manual-entry'),
+      clientUuid: fakeUlid('manual-client'),
+      source: 'MANUAL',
+      startedAt: startedAt.toISOString(),
+      endedAt: endedAt.toISOString(),
+      segments: [{ id: fakeUlid('manual-seg'), kind: 'WORK', startedAt: startedAt.toISOString(), endedAt: endedAt.toISOString() }],
+    });
+    expect(legacy.status).toBe(400);
+    expect(legacy.body.error).toBe('manual_requires_request');
+    expect(await prisma.timeEntry.count({ where: { userId: user.userId } })).toBe(0);
+
+    // Approved manual time cannot be stretched from a client either.
+    const approved = await prisma.timeEntry.create({
+      data: {
+        id: fakeUlid('approved'),
+        clientUuid: fakeUlid('approved-client'),
+        userId: user.userId,
+        source: 'MANUAL',
+        startedAt,
+        endedAt: new Date(startedAt.getTime() + 10 * 60_000),
+      },
+    });
+    const stretch = await request(app).put(`/v1/time-entries/${approved.id}/sync`).set(bearer(user.accessToken)).send({
+      endedAt: endedAt.toISOString(),
+      segments: [{ id: fakeUlid('stretch-seg'), kind: 'WORK', startedAt: startedAt.toISOString(), endedAt: endedAt.toISOString() }],
+    });
+    expect(stretch.status).toBe(409);
+    expect(stretch.body.error).toBe('manual_requires_request');
+  });
+
+  it('still lets a legacy agent close an entry the legacy cleanup closed', async () => {
+    const user = await seedUser();
+    const startedAt = new Date(Date.now() - 60 * 60_000);
+    const cutAt = new Date(Date.now() - 40 * 60_000);
+    const id = fakeUlid('legacy-entry');
+    const segmentId = fakeUlid('legacy-seg');
+    await prisma.timeEntry.create({
+      data: {
+        id,
+        clientUuid: fakeUlid('legacy-client'),
+        userId: user.userId,
+        source: 'AUTO',
+        startedAt,
+        endedAt: cutAt,
+        closeReason: 'LEGACY_RECONCILED',
+        serverFinalizedAt: cutAt,
+        segments: { create: { id: segmentId, kind: 'WORK', startedAt, endedAt: cutAt } },
+      },
+    });
+    const realEnd = new Date(Date.now() - 10 * 60_000).toISOString();
+    const res = await request(app).put(`/v1/time-entries/${id}/sync`).set(bearer(user.accessToken)).send({
+      endedAt: realEnd,
+      segments: [{ id: segmentId, kind: 'WORK', startedAt: startedAt.toISOString(), endedAt: realEnd }],
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.endedAt).toBe(realEnd);
+    // Reopening it is still refused.
+    const reopen = await request(app).put(`/v1/time-entries/${id}/sync`).set(bearer(user.accessToken)).send({
+      endedAt: null,
+      segments: [{ id: segmentId, kind: 'WORK', startedAt: startedAt.toISOString(), endedAt: null }],
+    });
+    expect(reopen.body.endedAt).toBe(realEnd);
+  });
+
+  it('answers two identical creates racing to the insert as one entry, never a 500', async () => {
+    const user = await seedUser();
+    const body = v2Body(new Date(Date.now() - 5 * 60_000));
+    const [a, b] = await Promise.all([
+      request(app).post('/v1/time-entries').set(bearer(user.accessToken)).send(body),
+      request(app).post('/v1/time-entries').set(bearer(user.accessToken)).send(body),
+    ]);
+    expect([a.status, b.status].sort()).toEqual([200, 201]);
+    expect(await prisma.timeEntry.count({ where: { userId: user.userId } })).toBe(1);
+  });
+
+  it('applies a newer agent revision over a legacy-reconciled close', async () => {
+    const user = await seedUser();
+    const body = v2Body(new Date(Date.now() - 60 * 60_000));
+    const cutAt = new Date(Date.now() - 40 * 60_000);
+    await prisma.timeEntry.create({
+      data: {
+        id: body.id,
+        clientUuid: body.clientUuid,
+        userId: user.userId,
+        source: 'AUTO',
+        startedAt: new Date(body.startedAt),
+        endedAt: cutAt,
+        trackingProtocolVersion: 2,
+        agentRevision: 1,
+        closeReason: 'LEGACY_RECONCILED',
+        serverFinalizedAt: cutAt,
+        segments: { create: { id: body.segments[0]!.id, kind: 'WORK', startedAt: new Date(body.startedAt), endedAt: cutAt } },
+      },
+    });
+    const realEnd = new Date(Date.now() - 10 * 60_000).toISOString();
+    const sync = (revision: number) => request(app).put(`/v1/time-entries/${body.id}/sync`).set(bearer(user.accessToken)).send({
+      trackingProtocolVersion: 2,
+      revision,
+      observedAt: realEnd,
+      endedAt: realEnd,
+      closeReason: 'AGENT',
+      segments: [{ ...body.segments[0], endedAt: realEnd }],
+    });
+
+    // Nothing newer than what the server holds: the server's close stands.
+    expect((await sync(1)).body).toMatchObject({ disposition: 'FINALIZED', correction: 'LEASE_FINALIZED' });
+    const applied = await sync(2);
+    expect(applied.body).toMatchObject({ disposition: 'APPLIED', acceptedRevision: 2 });
+    const row = await prisma.timeEntry.findUniqueOrThrow({ where: { id: body.id } });
+    expect(row.endedAt?.toISOString()).toBe(realEnd);
+    expect(row.serverFinalizedAt?.toISOString()).toBe(cutAt.toISOString());
   });
 
   it('does not resurrect a closed legacy entry from a delayed heartbeat', async () => {
