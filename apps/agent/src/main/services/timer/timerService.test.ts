@@ -183,11 +183,16 @@ class MemStore implements EntryStore {
     return true;
   }
   liveness: number | null = null;
-  setLiveness(ts: number) {
+  livenessEntryId: string | null = null;
+  setLiveness(ts: number, entryId: string) {
     this.liveness = ts;
+    this.livenessEntryId = entryId;
   }
   getLiveness() {
     return this.liveness;
+  }
+  getLivenessEntryId() {
+    return this.liveness === null ? null : this.livenessEntryId;
   }
   exitIntent: TimerExitIntent | null = null;
   awayState: TimerAwayState | null = null;

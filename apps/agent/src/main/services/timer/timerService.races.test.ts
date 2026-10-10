@@ -89,10 +89,10 @@ describe('boot with more than one open entry', () => {
     return createTimeEntry({ id, clientUuid: `c_${id}`, userId: OWNER.userId, source: 'AUTO', startedAt, segmentId: `s_${id}` });
   }
 
-  it('closes every open entry but the newest at its last checkpoint, then recovers the newest', () => {
+  it('closes every open entry but the newest at its own last checkpoint, then recovers the newest', () => {
     store.upsert(openAt('older', T0));
     store.upsert(openAt('newer', T0 + 30 * MIN));
-    store.setLiveness(T0 + 40 * MIN);
+    store.setLiveness(T0 + 40 * MIN, 'newer');
     clock.t = T0 + 5 * 60 * MIN;
 
     // A new process: a fresh store on the same database, bound at boot.
@@ -100,6 +100,23 @@ describe('boot with more than one open entry', () => {
     rebooted.switchOwner(OWNER);
 
     expect(store.listOpen()).toEqual([]);
+    const byId = new Map(store.listLedgerEntries(0).map((row) => [row.entry.id, row.entry]));
+    // The tick was the newer entry's: it proves nothing about the older one,
+    // which ends at its own last boundary.
+    expect(byId.get('older')).toMatchObject({ endedAt: T0, closeReason: 'AGENT_RECOVERY' });
+    expect(byId.get('newer')).toMatchObject({ endedAt: T0 + 40 * MIN, closeReason: 'AGENT_RECOVERY' });
+  });
+
+  it('an untagged (pre-beta.39) tick near both rows still bounds the older at the newer start', () => {
+    store.upsert(openAt('older', T0));
+    store.upsert(openAt('newer', T0 + 30 * MIN));
+    db.prepare(`INSERT INTO timer_meta (key, value) VALUES (?, ?)`)
+      .run(`${OWNER.workspaceId}:${OWNER.userId}:liveness`, String(T0 + 40 * MIN));
+    clock.t = T0 + 5 * 60 * MIN;
+
+    const rebooted = new TimerService(new SqliteEntryStore(db), offline, clock, new SeqIds(), guard);
+    rebooted.switchOwner(OWNER);
+
     const byId = new Map(store.listLedgerEntries(0).map((row) => [row.entry.id, row.entry]));
     // Never past the start of the entry after it: one timer runs at a time.
     expect(byId.get('older')).toMatchObject({ endedAt: T0 + 30 * MIN, closeReason: 'AGENT_RECOVERY' });

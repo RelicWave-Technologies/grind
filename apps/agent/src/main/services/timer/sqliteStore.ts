@@ -293,12 +293,25 @@ export class SqliteEntryStore implements EntryStore {
     `);
   }
 
-  setLiveness(ts: number): void {
+  setLiveness(ts: number, entryId: string): void {
     const owner = this.requireOwner();
-    this.db.prepare(
+    const upsert = this.db.prepare(
       `INSERT INTO timer_meta (key, value) VALUES (@key, @value)
        ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-    ).run({ key: this.ownerMetaKey(owner, 'liveness'), value: String(ts) });
+    );
+    // Together: a tick must never be read back as proof for the wrong entry.
+    this.db.transaction(() => {
+      upsert.run({ key: this.ownerMetaKey(owner, 'liveness'), value: String(ts) });
+      upsert.run({ key: this.ownerMetaKey(owner, 'liveness_entry'), value: entryId });
+    })();
+  }
+
+  getLivenessEntryId(): string | null {
+    const owner = this.owner;
+    if (!owner) return null;
+    const row = this.db.prepare(`SELECT value FROM timer_meta WHERE key = ?`)
+      .get(this.ownerMetaKey(owner, 'liveness_entry')) as { value: string } | undefined;
+    return row && row.value.length > 0 ? row.value : null;
   }
 
   getLiveness(): number | null {

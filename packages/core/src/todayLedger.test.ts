@@ -171,6 +171,36 @@ describe('reconcileTodayLedger', () => {
     expect(projection.workedMs).toBe(60 * 60_000);
   });
 
+  describe('same revision, different payload', () => {
+    const DAY = 24 * 60 * 60_000;
+    const dayStart = 100 * DAY;
+    // The journal stretched an August row to 15h into today; the server kept its end.
+    const stretched = entry('stale', 2, dayStart - 60 * DAY, dayStart + 15 * 60 * 60_000);
+    const kept = entry('stale', 2, dayStart - 60 * DAY, dayStart - 60 * DAY + 60 * 60_000);
+    const project = (syncState: 'synced' | 'pending_update', activeLocalEntryId: string | null = null) => reconcileTodayLedger({
+      local: [{ entry: stretched, syncState }],
+      server: [server(kept)],
+      activeLocalEntryId,
+      windowStart: dayStart,
+      windowEnd: dayStart + DAY,
+      now: dayStart + 16 * 60 * 60_000,
+    });
+
+    it('a synced row takes the server copy the server answered with', () => {
+      const projection = project('synced');
+      expect(projection.workedMs).toBe(0);
+      expect(projection.entries[0]).toMatchObject({ origin: 'SERVER', conflicts: ['REVISION_PAYLOAD_CONFLICT'] });
+    });
+
+    it('a row still waiting to sync stays the laptop\'s', () => {
+      expect(project('pending_update').workedMs).toBe(15 * 60 * 60_000);
+    });
+
+    it('the running entry stays the laptop\'s', () => {
+      expect(project('synced', 'stale').workedMs).toBe(15 * 60 * 60_000);
+    });
+  });
+
   it('applies only a server correction that was explicitly acknowledged', () => {
     const localEntry = entry('corrected', 2, 0, 80_000);
     const corrected = entry('corrected', 2, 0, 60_000);

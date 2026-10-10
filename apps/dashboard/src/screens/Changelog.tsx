@@ -48,22 +48,36 @@ function Card({ src, alt, w, h }: { src: string; alt: string; w: number; h: numb
 }
 
 const LATEST: Release = {
-  id: 'beta-38',
-  version: 'beta.38',
-  name: 'the hours come home',
+  id: 'beta-39',
+  version: 'beta.39',
+  name: 'the day that stays a day',
   meta: 'OCT 10, 2026 · MAC + WINDOWS',
   changes: [
-    { tag: 'fixed', text: <>Hours that went missing came back. When the server stopped hearing from Timo for a while, it closed your timer early — and kept the shorter version even after Timo sent the real one. It now takes the real one.</> },
-    { tag: 'fixed', text: <>A sleeping laptop is not a working laptop. Windows does not always announce that it is going to sleep; Timo now notices on its own and stops counting.</> },
-    { tag: 'fixed', text: <>Screenshots stopped disappearing. A shot whose time entry had not reached the server yet was refused and, after five tries, thrown away. Now it waits, uploads, and joins its entry when the entry arrives.</> },
-    { tag: 'improved', text: <>Screenshots upload on office networks that inspect traffic (Fortinet and friends), and are never deleted from your laptop before they reach us.</> },
-    { tag: 'fixed', text: <>Timo stopped vanishing. A startup hiccup used to leave it running with no window and no tray — alive, invisible, and impossible to reopen.</> },
-    { tag: 'fixed', text: <>Updates wait for you. An update never quits Timo while you are tracking, and Timo comes back on its own once the update is in.</> },
-    { tag: 'fixed', text: <>The permission restart loop is gone. If a restart did not fix screen recording, Timo stops offering it and tells you exactly what to toggle instead.</> },
-    { tag: 'fixed', text: <>Two clicks on Start no longer open two timers.</> },
-    { tag: 'improved', text: <>Cmd+Q asks first while your timer is running.</> },
+    { tag: 'fixed', text: <>A timer forgotten on your laptop months ago can no longer wake up and claim today. An old entry that never closed now ends where its own work ended — not at the moment you last opened Timo — so a normal day can't read as fifteen hours.</> },
+    { tag: 'fixed', text: <>When Timo recovers after a crash, it closes the entry the server asked about, not whichever one happened to be newest on disk.</> },
+    { tag: 'fixed', text: <>Timo's Today total agrees with the dashboard. When the server has already settled an entry differently from your laptop's copy, Timo now shows the server's version instead of its own.</> },
   ],
 };
+
+const OCTOBER: Release[] = [
+  {
+    id: 'beta-38',
+    version: 'beta.38',
+    name: 'the hours come home',
+    meta: 'OCT 10, 2026 · MAC + WINDOWS',
+    changes: [
+      { tag: 'fixed', text: <>Hours that went missing came back. When the server stopped hearing from Timo for a while, it closed your timer early — and kept the shorter version even after Timo sent the real one. It now takes the real one.</> },
+      { tag: 'fixed', text: <>A sleeping laptop is not a working laptop. Windows does not always announce that it is going to sleep; Timo now notices on its own and stops counting.</> },
+      { tag: 'fixed', text: <>Screenshots stopped disappearing. A shot whose time entry had not reached the server yet was refused and, after five tries, thrown away. Now it waits, uploads, and joins its entry when the entry arrives.</> },
+      { tag: 'improved', text: <>Screenshots upload on office networks that inspect traffic (Fortinet and friends), and are never deleted from your laptop before they reach us.</> },
+      { tag: 'fixed', text: <>Timo stopped vanishing. A startup hiccup used to leave it running with no window and no tray — alive, invisible, and impossible to reopen.</> },
+      { tag: 'fixed', text: <>Updates wait for you. An update never quits Timo while you are tracking, and Timo comes back on its own once the update is in.</> },
+      { tag: 'fixed', text: <>The permission restart loop is gone. If a restart did not fix screen recording, Timo stops offering it and tells you exactly what to toggle instead.</> },
+      { tag: 'fixed', text: <>Two clicks on Start no longer open two timers.</> },
+      { tag: 'improved', text: <>Cmd+Q asks first while your timer is running.</> },
+    ],
+  },
+];
 
 const AUGUST: Release[] = [
   {
@@ -300,6 +314,7 @@ const JUNE: Release[] = [
 
 const PLATFORM: Array<{ date: string; text: ReactNode }> = [
   { date: 'OCT 10', text: <>Old Timo builds had been re-sending months-old entries every few seconds — thousands a minute — and real heartbeats queued behind them. The server now answers those in one cheap read; the queue drained and about 150 stuck hours landed where they belong.</> },
+  { date: 'OCT 10', text: <>The server stopped believing a timer that claims to have run for weeks. If an old entry tries to stretch far past the point where the server closed it, the server keeps its own end — so one stale entry can't turn into a fifteen-hour day.</> },
   { date: 'OCT 10', text: <>Late is judged by your door punch-in again, not by when Timo started. Approved work-from-home days show on the calendar.</> },
   { date: 'JUL 18', text: <>The screenshot carousel stopped gaslighting you. Arrows and keyboard keys now move the photo, timestamp and stats together — never an old frame wearing a new caption.</> },
   { date: 'JUL 16', text: <>The dashboard got fast: team pages answer with summaries first, routes load lazily, JSON travels compressed, assets cache hard. Answers first, details on click.</> },
@@ -324,6 +339,7 @@ const FOUNDATION: Array<[string, ReactNode]> = [
 ];
 
 const MARQUEE = [
+  'BETA.39 — THE DAY THAT STAYS A DAY',
   'BETA.38 — THE HOURS COME HOME',
   'BETA.31 — HONEST CLOCK',
   'BETA.28 — RELIABILITY',
@@ -423,7 +439,7 @@ export function ChangelogScreen() {
           </a>
           <div className="cl-nav-links">
             <a href="#latest">Latest</a>
-            <a href="#july-2026">Releases</a>
+            <a href="#october-2026">Releases</a>
             <a href="#platform">Platform</a>
             <a href="#foundation">Foundation</a>
           </div>
@@ -489,6 +505,15 @@ export function ChangelogScreen() {
         </section>
 
         {/* ---- Release ledgers on white canvas ------------------------------ */}
+        <section className="cl-section" id="october-2026">
+          <div className="cl-container">
+            <h2 className="cl-display-lg cl-reveal">October 2026</h2>
+            <div className="cl-entries">
+              {OCTOBER.map((r) => <ReleaseEntry key={r.id} release={r} />)}
+            </div>
+          </div>
+        </section>
+
         <section className="cl-section" id="august-2026">
           <div className="cl-container">
             <h2 className="cl-display-lg cl-reveal">August 2026</h2>
