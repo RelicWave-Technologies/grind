@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { prisma } from '@grind/db';
 import { buildTesterUsageSnapshot } from './usage';
-import { loadEntryLiveEvidence } from '../insights/liveEntryEvidence';
-import { loggedMsByGuid } from '../lark/tasks';
+import { totalsByTask } from '@grind/core';
+import { loadTimelineWindow } from '../time';
 
 let counter = 0;
 
@@ -90,6 +90,10 @@ describe('buildTesterUsageSnapshot', () => {
     expect(snapshot.date).toBe('2026-07-10');
     expect(snapshot.testers).toHaveLength(1);
     expect(snapshot.testers[0]?.trackedMinutes).toBe(0);
+    // The agent reports RUNNING with a fresh heartbeat, but nothing proves
+    // this timer: not tracking now, the same answer as the hours.
+    expect(snapshot.testers[0]?.isLiveNow).toBe(false);
+    expect(snapshot.totals.trackingNow).toBe(0);
   });
 
   it('counts work segments, excludes trimmed idle, and keeps fresh work live', async () => {
@@ -149,6 +153,7 @@ describe('buildTesterUsageSnapshot', () => {
 
     const snapshot = await buildTesterUsageSnapshot(workspace.id, 'Asia/Kolkata');
     expect(snapshot.testers[0]?.trackedMinutes).toBe(10);
+    expect(snapshot.testers[0]?.isLiveNow).toBe(false);
   });
 
   it('counts overlapping duplicate entries once in the Tester Ops card', async () => {
@@ -214,13 +219,12 @@ describe('buildTesterUsageSnapshot', () => {
     });
 
     const snapshot = await buildTesterUsageSnapshot(workspace.id, 'UTC');
-    const evidenceByEntry = await loadEntryLiveEvidence([entry], now);
-    const larkTotal = loggedMsByGuid([{
-      ...entry,
-      segments: [{ kind: 'WORK', startedAt: entry.startedAt, endedAt: null }],
-    }], now.getTime(), { evidenceByEntry });
+    // The Lark task list reads the same timeline (routes/lark.ts).
+    const { pieces } = await loadTimelineWindow({ userIds: [user.id], start: entry.startedAt, end: now, now, lookbackMs: 0 });
+    const larkTotal = totalsByTask(pieces);
 
     expect(snapshot.testers[0]?.trackedMinutes).toBe(14);
+    expect(snapshot.testers[0]?.isLiveNow).toBe(true);
     expect(larkTotal.get('heartbeat-task')).toBe(14 * 60_000);
   });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { effectiveEntrySegmentEnds, effectiveSegmentEnd } from './evidence';
+import { effectiveEntrySegmentEnds, effectiveSegmentEnd, heartbeatIsFresh, trustedObservedAt } from './evidence';
 
 const now = new Date('2026-07-11T10:00:00.000Z');
 const startedAt = new Date('2026-07-11T09:00:00.000Z');
@@ -111,5 +111,45 @@ describe('effectiveEntrySegmentEnds', () => {
       '2026-07-11T09:30:00.000Z',
       '2026-07-11T09:50:00.000Z',
     ]);
+  });
+});
+
+describe('trustedObservedAt', () => {
+  const now = new Date('2026-07-13T10:00:00.000Z');
+
+  it('rejects proof beyond the allowed client clock skew', () => {
+    expect(trustedObservedAt({
+      observedAt: new Date('2026-07-13T10:03:00.000Z'),
+      receivedAt: now,
+      now,
+    })).toBeNull();
+  });
+
+  it('never proves later than the server receipt time', () => {
+    expect(trustedObservedAt({
+      observedAt: new Date('2026-07-13T10:01:00.000Z'),
+      receivedAt: now,
+      now: new Date('2026-07-13T10:01:30.000Z'),
+    })?.toISOString()).toBe(now.toISOString());
+  });
+});
+
+describe('heartbeatIsFresh', () => {
+  const now = new Date('2026-07-13T10:00:00.000Z');
+
+  it('accepts the three-minute boundary and rejects older or future heartbeats', () => {
+    const evidenceAt = (timestamp: string) => ({
+      latestStoredProofAt: null,
+      latestHeartbeatAt: new Date(timestamp),
+    });
+
+    expect(heartbeatIsFresh(evidenceAt('2026-07-13T09:57:00.000Z'), now)).toBe(true);
+    expect(heartbeatIsFresh(evidenceAt('2026-07-13T09:56:59.999Z'), now)).toBe(false);
+    expect(heartbeatIsFresh(evidenceAt('2026-07-13T10:00:00.001Z'), now)).toBe(false);
+    expect(heartbeatIsFresh(
+      evidenceAt('2026-07-13T09:59:00.000Z'),
+      now,
+      new Date('2026-07-13T09:59:00.001Z'),
+    )).toBe(false);
   });
 });

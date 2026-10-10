@@ -5,14 +5,25 @@ import { ManualTimeRequestStatus, Role, TimeZoneSchema, addDays, todayKey } from
 import {
   LIVE_HEARTBEAT_FRESH_MS,
   clipInterval,
+  firstStretchStartWithin,
+  isCounted,
+  isTracked,
   mergeIntervals,
   overlapMs,
   overlaps as overlapsMs,
+  type Interval,
 } from '@grind/core';
 import { requireApiToken } from '../middleware/apiToken';
 import { dateRange, timesheetMatrixFromBuckets } from '../insights/timesheets';
 import { localDayWindow } from '../insights/day';
-import { loadTimeline, loadTimelineWindow, piecesForUser, type TimelineRowPiece } from '../time';
+import {
+  loadCreditedManualMs,
+  loadTimeline,
+  loadTimelineWindow,
+  loadTrackingNow,
+  piecesForUser,
+  type TimelineRowPiece,
+} from '../time';
 
 export const mcpRouter = Router();
 
@@ -46,6 +57,7 @@ const deviceSelect = {
 } satisfies Prisma.UserSelect;
 
 type DeviceFields = {
+  id: string;
   agentLastSeenAt: Date | null;
   agentState: string | null;
   agentVersion: string | null;
@@ -249,39 +261,17 @@ function dayRows(range: ValidRange, cells: Record<string, SummaryCell | undefine
   }));
 }
 
-function mergeTrackedBlocks(intervals: TrackedInterval[]) {
-  const sorted = intervals
-    .filter((interval) => interval.end > interval.start)
-    .sort((a, b) => a.start - b.start);
-  const merged: TrackedBlock[] = [];
-  for (const interval of sorted) {
-    const last = merged.at(-1);
-    if (!last || interval.start > last.end) {
-      merged.push({ start: interval.start, end: interval.end, sources: [interval.source] });
-      continue;
-    }
-    last.end = Math.max(last.end, interval.end);
-    last.sources.push(interval.source);
+/** Counted stretches — core's merge, touching time joins — with the sources inside each. */
+function trackedBlocks(intervals: TrackedInterval[]): TrackedBlock[] {
+  const blocks: TrackedBlock[] = mergeIntervals(intervals).map((iv) => ({ ...iv, sources: [] }));
+  for (const iv of intervals) {
+    blocks.find((block) => iv.start >= block.start && iv.end <= block.end)?.sources.push(iv.source);
   }
-  return merged;
+  return blocks;
 }
 
-function serializeManualRequestEvidence(request: {
-  id: string;
-  taskSummary: string | null;
-  requestedStart: Date;
-  requestedEnd: Date;
-  reason: string;
-  status: string;
-  approver: { id: string; name: string; email: string } | null;
-  decidedBy: { id: string; name: string; email: string } | null;
-  decidedAt: Date | null;
-  decidedReason: string | null;
-  decisionSource: string | null;
-  autoApproved: boolean;
-  timeEntry?: { segments: Array<{ startedAt: Date; endedAt: Date | null }> } | null;
-}): ManualRequestEvidence {
-  const creditedMs = creditedManualMs(request);
+/** `creditedMs`: what approval actually added (see loadCreditedManualMs), not the window asked for. */
+function serializeManualRequestEvidence(request: ManualRequestDetail, creditedMs: number): ManualRequestEvidence {
   return {
     id: request.id,
     taskSummary: request.taskSummary,
@@ -299,22 +289,6 @@ function serializeManualRequestEvidence(request: {
     decisionSource: request.decisionSource,
     autoApproved: request.autoApproved,
   };
-}
-
-/**
- * What an approved request actually added: the free stretches approval carved
- * into its entry, not the window that was asked for. Anything not approved
- * added nothing.
- */
-function creditedManualMs(request: {
-  status: string;
-  timeEntry?: { segments: Array<{ startedAt: Date; endedAt: Date | null }> } | null;
-}): number {
-  if (request.status !== 'APPROVED' || !request.timeEntry) return 0;
-  return request.timeEntry.segments.reduce(
-    (sum, s) => sum + Math.max(0, (s.endedAt ?? s.startedAt).getTime() - s.startedAt.getTime()),
-    0,
-  );
 }
 
 function serializeTrackedBlock(block: TrackedBlock): TrackedBlockEvidence {
@@ -362,6 +336,7 @@ function isLunchCandidate(input: {
 
 type ManualRequestDetail = {
   id: string;
+  userId: string;
   taskSummary: string | null;
   requestedStart: Date;
   requestedEnd: Date;
@@ -373,11 +348,11 @@ type ManualRequestDetail = {
   decidedReason: string | null;
   decisionSource: string | null;
   autoApproved: boolean;
-  timeEntry: { segments: Array<{ startedAt: Date; endedAt: Date | null }> } | null;
 };
 
 const MANUAL_REQUEST_DETAIL_SELECT = {
   id: true,
+  userId: true,
   taskSummary: true,
   requestedStart: true,
   requestedEnd: true,
@@ -389,12 +364,12 @@ const MANUAL_REQUEST_DETAIL_SELECT = {
   decidedReason: true,
   decisionSource: true,
   autoApproved: true,
-  timeEntry: { select: { segments: { select: { startedAt: true, endedAt: true } } } },
 } satisfies Prisma.ManualTimeRequestSelect;
 
 /**
- * Breaks for one person-day, inferred from the gaps in their resolved
- * timeline — the same one-owner-per-minute timeline every screen reads.
+ * Breaks for one person-day, inferred from the gaps in their counted time on
+ * the resolved timeline — the same one-owner-per-minute timeline every screen
+ * reads. Invalidated time does not count, so it does not close a break.
  */
 function buildBreakSummaryForDay(input: {
   date: string;
@@ -403,16 +378,21 @@ function buildBreakSummaryForDay(input: {
   dayEnd: number;
   minBreakMs: number;
   lunchMinMs: number;
-  /** This person's resolved timeline pieces. */
+  /** This person's resolved timeline pieces, with lookback. */
   pieces: readonly TimelineRowPiece[];
+  /** This person's tracked (never manual) stretches, merged. */
+  trackedStretches: readonly Interval[];
   /** Details of the requests behind approved manual entries, by request id. */
   requestById: ReadonlyMap<string, ManualRequestDetail>;
   manualRequests: ManualRequestDetail[];
+  creditedById: ReadonlyMap<string, number>;
   now: Date;
 }) {
   const nowMs = input.now.getTime();
+  const evidenceOf = (request: ManualRequestDetail) =>
+    serializeManualRequestEvidence(request, input.creditedById.get(request.id) ?? 0);
   const trackedIntervals: TrackedInterval[] = [];
-  const idleIntervals: Array<{ start: number; end: number }> = [];
+  const idleIntervals: Interval[] = [];
 
   for (const piece of input.pieces) {
     const clipped = clipInterval(piece, input.dayStart, Math.min(input.dayEnd, nowMs));
@@ -421,6 +401,7 @@ function buildBreakSummaryForDay(input: {
       idleIntervals.push(clipped);
       continue;
     }
+    if (!isCounted(piece)) continue;
     const entry = piece.entry;
     const request = entry.manualTimeRequest ? input.requestById.get(entry.manualTimeRequest.id) : undefined;
     trackedIntervals.push({
@@ -434,12 +415,12 @@ function buildBreakSummaryForDay(input: {
         durationMs: clipped.end - clipped.start,
         taskGuid: entry.larkTaskGuid,
         notes: entry.notes,
-        manualTimeRequest: request ? serializeManualRequestEvidence(request) : null,
+        manualTimeRequest: request ? evidenceOf(request) : null,
       },
     });
   }
 
-  const tracked = mergeTrackedBlocks(trackedIntervals);
+  const tracked = trackedBlocks(trackedIntervals);
   const idle = mergeIntervals(idleIntervals);
   const breaks: BreakInterval[] = [];
   for (let i = 1; i < tracked.length; i += 1) {
@@ -469,7 +450,7 @@ function buildBreakSummaryForDay(input: {
       .filter((request) =>
         overlapsMs(request.requestedStart.getTime(), request.requestedEnd.getTime(), start, end),
       )
-      .map(serializeManualRequestEvidence);
+      .map(evidenceOf);
     breaks.push({
       date: input.date,
       startedAt: new Date(start).toISOString(),
@@ -502,9 +483,12 @@ function buildBreakSummaryForDay(input: {
     .filter((item) => item.classification === 'lunch_candidate')
     .reduce((max, item) => Math.max(max, item.durationMs), 0);
 
+  // The day's first real start, the one every screen shows: tracked time
+  // only, and a stretch running in from yesterday is not a start.
+  const firstTracked = firstStretchStartWithin(input.trackedStretches, input.dayStart, input.dayEnd);
   return {
     date: input.date,
-    firstTrackedAt: tracked[0] ? new Date(tracked[0].start).toISOString() : null,
+    firstTrackedAt: firstTracked === null ? null : new Date(firstTracked).toISOString(),
     lastTrackedAt: tracked.at(-1) ? new Date(tracked.at(-1)!.end).toISOString() : null,
     trackedBlockCount: tracked.length,
     breakCount: breaks.length,
@@ -533,11 +517,12 @@ function isBadStatus(value: string | null): boolean {
   ].some((marker) => normalized.includes(marker));
 }
 
-function serializeDevice(user: DeviceFields, now = new Date()) {
+/** `tracking`: who is tracking right now (loadTrackingNow) — `running` is exactly that. */
+function serializeDevice(user: DeviceFields, tracking: ReadonlyMap<string, string>, now: Date) {
   const lastSeenMs = user.agentLastSeenAt?.getTime() ?? null;
   const heartbeatAgeMs = lastSeenMs === null ? null : Math.max(0, now.getTime() - lastSeenMs);
   const heartbeatFresh = heartbeatAgeMs !== null && heartbeatAgeMs <= LIVE_HEARTBEAT_FRESH_MS;
-  const running = user.agentState === 'RUNNING' && heartbeatFresh;
+  const running = tracking.has(user.id);
   const stale = user.agentLastSeenAt !== null && !heartbeatFresh;
   const screenIssue =
     isBadStatus(user.agentScreenPermissionStatus) ||
@@ -641,12 +626,16 @@ mcpRouter.get('/workspace-overview', requireApiToken([
       }),
     ]);
 
-    const matrix = await loadTimeMatrixForUsers(users.map((user) => user.id), range);
+    const userIds = users.map((user) => user.id);
+    const [matrix, tracking] = await Promise.all([
+      loadTimeMatrixForUsers(userIds, range),
+      loadTrackingNow(userIds, now),
+    ]);
     if (!matrix) return res.status(400).json({ error: 'invalid_date_range', maxDays: MAX_SUMMARY_DAYS });
 
     let todayTotal = emptyTotal();
     let activeUsers = 0;
-    const deviceRows = users.map((user) => serializeDevice(user, now));
+    const deviceRows = users.map((user) => serializeDevice(user, tracking, now));
     for (const user of users) {
       const total = totalForCells(cellsForUser(matrix, user.id));
       if (total.totalMs > 0) activeUsers += 1;
@@ -694,7 +683,7 @@ mcpRouter.get('/workspace-overview', requireApiToken([
         email: user.email,
         role: user.role,
         team: user.team,
-        device: serializeDevice(user, now),
+        device: serializeDevice(user, tracking, now),
       })),
       truncatedSampleUsers: users.length > 25,
     });
@@ -736,6 +725,7 @@ mcpRouter.get('/people', requireApiToken(['read:people', 'read:device-health']),
     });
 
     const now = new Date();
+    const tracking = await loadTrackingNow(users.map((user) => user.id), now);
     res.json({
       generatedAt: now.toISOString(),
       users: users.map((user) => ({
@@ -748,7 +738,7 @@ mcpRouter.get('/people', requireApiToken(['read:people', 'read:device-health']),
         managesTeam: user.managedTeamAssignment?.team ?? null,
         shift: user.shift,
         createdAt: user.createdAt.toISOString(),
-        device: serializeDevice(user, now),
+        device: serializeDevice(user, tracking, now),
       })),
     });
   } catch (err) {
@@ -825,10 +815,15 @@ mcpRouter.get('/user-detail', requireApiToken([
       orderBy: { createdAt: 'desc' },
       take: 20,
     });
+    const now = new Date();
+    const [tracking, credited] = await Promise.all([
+      loadTrackingNow([user.id], now),
+      loadCreditedManualMs(manualRequests.map((request) => ({ ...request, userId: user.id })), now),
+    ]);
     const cells = cellsForUser(matrix, user.id);
 
     res.json({
-      generatedAt: new Date().toISOString(),
+      generatedAt: now.toISOString(),
       matchCount: matches.length,
       user: {
         id: user.id,
@@ -840,7 +835,7 @@ mcpRouter.get('/user-detail', requireApiToken([
         managesTeam: user.managedTeamAssignment?.team ?? null,
         shift: user.shift,
         createdAt: user.createdAt.toISOString(),
-        device: serializeDevice(user),
+        device: serializeDevice(user, tracking, now),
       },
       time: {
         from: range.from,
@@ -855,8 +850,8 @@ mcpRouter.get('/user-detail', requireApiToken([
         requestedStart: request.requestedStart.toISOString(),
         requestedEnd: request.requestedEnd.toISOString(),
         // Credited time — what approval actually added — not the window asked for.
-        durationMs: creditedManualMs(request),
-        creditedMs: creditedManualMs(request),
+        durationMs: credited.get(request.id) ?? 0,
+        creditedMs: credited.get(request.id) ?? 0,
         requestedMs: request.requestedEnd.getTime() - request.requestedStart.getTime(),
         reason: request.reason,
         status: request.status,
@@ -902,7 +897,8 @@ mcpRouter.get('/device-health', requireApiToken(['read:device-health']), async (
     });
 
     const now = new Date();
-    const devices = users.map((user) => serializeDevice(user, now));
+    const tracking = await loadTrackingNow(users.map((user) => user.id), now);
+    const devices = users.map((user) => serializeDevice(user, tracking, now));
     res.json({
       generatedAt: now.toISOString(),
       counts: {
@@ -913,7 +909,7 @@ mcpRouter.get('/device-health', requireApiToken(['read:device-health']), async (
         permissionIssues: devices.filter((device) => device.permissionIssues.any).length,
       },
       users: users.map((user) => {
-        const device = serializeDevice(user, now);
+        const device = serializeDevice(user, tracking, now);
         return {
           id: user.id,
           name: user.name,
@@ -956,14 +952,16 @@ mcpRouter.get('/version-adoption', requireApiToken(['read:device-health']), asyn
       orderBy: [{ agentVersion: 'asc' }, { name: 'asc' }],
     });
     const now = new Date();
+    const tracking = await loadTrackingNow(users.map((user) => user.id), now);
+    const deviceOf = (user: (typeof users)[number]) => serializeDevice(user, tracking, now);
 
     res.json({
       generatedAt: now.toISOString(),
       totalUsers: users.length,
       buckets: versionBuckets(users),
       unknownUsers: users.filter((user) => !user.agentVersion).length,
-      runningUsers: users.filter((user) => serializeDevice(user, now).running).length,
-      staleUsers: users.filter((user) => serializeDevice(user, now).status === 'stale').length,
+      runningUsers: users.filter((user) => deviceOf(user).running).length,
+      staleUsers: users.filter((user) => deviceOf(user).status === 'stale').length,
       users: users.slice(0, MAX_LIMIT).map((user) => ({
         id: user.id,
         name: user.name,
@@ -972,7 +970,7 @@ mcpRouter.get('/version-adoption', requireApiToken(['read:device-health']), asyn
         version: user.agentVersion,
         state: user.agentState,
         lastSeenAt: user.agentLastSeenAt?.toISOString() ?? null,
-        deviceStatus: serializeDevice(user, now).status,
+        deviceStatus: deviceOf(user).status,
       })),
       truncatedUsers: users.length > MAX_LIMIT,
     });
@@ -984,18 +982,17 @@ mcpRouter.get('/version-adoption', requireApiToken(['read:device-health']), asyn
 mcpRouter.get('/running-users', requireApiToken(['read:people', 'read:device-health']), async (req, res, next) => {
   try {
     const now = new Date();
+    const everyone = await prisma.user.findMany({
+      where: { workspaceId: workspaceId(req), deactivatedAt: null },
+      select: { id: true },
+    });
+    const tracking = await loadTrackingNow(everyone.map((user) => user.id), now);
     const users = await prisma.user.findMany({
-      where: {
-        workspaceId: workspaceId(req),
-        deactivatedAt: null,
-        agentState: 'RUNNING',
-        agentLastSeenAt: { gte: new Date(now.getTime() - LIVE_HEARTBEAT_FRESH_MS) },
-      },
+      where: { id: { in: [...tracking.keys()] } },
       select: {
         id: true,
         name: true,
         email: true,
-        agentActiveEntryId: true,
         ...deviceSelect,
       },
       orderBy: [{ agentLastSeenAt: 'desc' }, { name: 'asc' }],
@@ -1008,11 +1005,11 @@ mcpRouter.get('/running-users', requireApiToken(['read:people', 'read:device-hea
         id: user.id,
         name: user.name,
         email: user.email,
-        activeEntryId: user.agentActiveEntryId,
+        activeEntryId: tracking.get(user.id) ?? null,
         lastSeenAt: user.agentLastSeenAt?.toISOString() ?? null,
         version: user.agentVersion,
         platform: user.agentPlatform,
-        device: serializeDevice(user, now),
+        device: serializeDevice(user, tracking, now),
       })),
     });
   } catch (err) {
@@ -1065,10 +1062,13 @@ mcpRouter.get('/team-summary', requireApiToken(['read:people', 'read:device-heal
       ...team.members.map((user) => user.id),
       ...team.managers.map((manager) => manager.user.id),
     ]))];
-    const matrix = await loadTimeMatrixForUsers(userIds, range);
+    const now = new Date();
+    const [matrix, tracking] = await Promise.all([
+      loadTimeMatrixForUsers(userIds, range),
+      loadTrackingNow(userIds, now),
+    ]);
     if (!matrix) return res.status(400).json({ error: 'invalid_date_range', maxDays: MAX_SUMMARY_DAYS });
 
-    const now = new Date();
     res.json({
       generatedAt: now.toISOString(),
       from: range.from,
@@ -1079,7 +1079,7 @@ mcpRouter.get('/team-summary', requireApiToken(['read:people', 'read:device-heal
         for (const user of team.members) roster.set(user.id, user);
         for (const manager of team.managers) roster.set(manager.user.id, manager.user);
         let total = emptyTotal();
-        const devices = [...roster.values()].map((user) => serializeDevice(user, now));
+        const devices = [...roster.values()].map((user) => serializeDevice(user, tracking, now));
         for (const user of roster.values()) total = addTotal(total, totalForCells(cellsForUser(matrix, user.id)));
         return {
           id: team.id,
@@ -1105,7 +1105,7 @@ mcpRouter.get('/team-summary', requireApiToken(['read:people', 'read:device-heal
             name: user.name,
             email: user.email,
             role: user.role,
-            device: serializeDevice(user, now),
+            device: serializeDevice(user, tracking, now),
             time: {
               total: totalForCells(cellsForUser(matrix, user.id)),
             },
@@ -1169,7 +1169,7 @@ mcpRouter.get('/break-summary', requireApiToken(['read:people', 'read:time-summa
               requestedStart: { lt: range.toWindow.end },
               requestedEnd: { gt: range.fromWindow.start },
             },
-            select: { ...MANUAL_REQUEST_DETAIL_SELECT, userId: true },
+            select: MANUAL_REQUEST_DETAIL_SELECT,
             orderBy: { requestedStart: 'asc' },
           }),
     ]);
@@ -1183,6 +1183,10 @@ mcpRouter.get('/break-summary', requireApiToken(['read:people', 'read:time-summa
           select: MANUAL_REQUEST_DETAIL_SELECT,
         });
     const requestById = new Map<string, ManualRequestDetail>(requestDetails.map((r) => [r.id, r]));
+    const creditedById = await loadCreditedManualMs(
+      [...new Map([...manualRequests, ...requestDetails].map((r) => [r.id, r])).values()],
+      now,
+    );
     const manualRequestsByUser = new Map<string, typeof manualRequests>();
     for (const request of manualRequests) {
       const list = manualRequestsByUser.get(request.userId) ?? [];
@@ -1194,6 +1198,7 @@ mcpRouter.get('/break-summary', requireApiToken(['read:people', 'read:time-summa
     const lunchMinMs = query.data.lunchMinMinutes * 60_000;
     const resultUsers = users.map((user) => {
       const userPieces = piecesForUser(timeline.pieces, user.id);
+      const trackedStretches = mergeIntervals(userPieces.filter(isTracked));
       const userManualRequests = manualRequestsByUser.get(user.id) ?? [];
       const days = range.days.map((date) => {
         const day = localDayWindow(date, range.tz);
@@ -1221,7 +1226,9 @@ mcpRouter.get('/break-summary', requireApiToken(['read:people', 'read:time-summa
           minBreakMs,
           lunchMinMs,
           pieces: userPieces,
+          trackedStretches,
           requestById,
+          creditedById,
           manualRequests: userManualRequests.filter((request) =>
             overlapsMs(request.requestedStart.getTime(), request.requestedEnd.getTime(), dayStart, dayEnd),
           ),
@@ -1371,18 +1378,22 @@ mcpRouter.get('/manual-time-requests', requireApiToken(['read:manual-time']), as
         autoApproved: true,
         createdAt: true,
         updatedAt: true,
-        timeEntry: { select: { segments: { select: { startedAt: true, endedAt: true } } } },
       },
       orderBy: [{ createdAt: 'desc' }],
       take: query.data.limit,
     });
+    const now = new Date();
+    const credited = await loadCreditedManualMs(
+      requests.map((request) => ({ ...request, userId: request.user.id })),
+      now,
+    );
     const statusCounts = requests.reduce<Record<string, number>>((acc, request) => {
       acc[request.status] = (acc[request.status] ?? 0) + 1;
       return acc;
     }, {});
 
     res.json({
-      generatedAt: new Date().toISOString(),
+      generatedAt: now.toISOString(),
       counts: statusCounts,
       requests: requests.map((request) => ({
         id: request.id,
@@ -1392,8 +1403,8 @@ mcpRouter.get('/manual-time-requests', requireApiToken(['read:manual-time']), as
         requestedStart: request.requestedStart.toISOString(),
         requestedEnd: request.requestedEnd.toISOString(),
         // Credited time — what approval actually added — not the window asked for.
-        durationMs: creditedManualMs(request),
-        creditedMs: creditedManualMs(request),
+        durationMs: credited.get(request.id) ?? 0,
+        creditedMs: credited.get(request.id) ?? 0,
         requestedMs: request.requestedEnd.getTime() - request.requestedStart.getTime(),
         reason: request.reason,
         status: request.status,

@@ -1,11 +1,4 @@
 import { getLarkConfig } from './config';
-import {
-  resolveTimeline,
-  totalsByTask,
-  type EntryLiveEvidenceMap,
-  type Interval,
-  type TimelinePiece,
-} from '@grind/core';
 import { outboundTimeoutSignal } from '../lib/outboundTimeout';
 
 /**
@@ -131,60 +124,6 @@ export function buildCreateTaskPayload(input: CreateLarkTaskInput): Record<strin
     payload.members = [{ id: input.assigneeOpenId, type: 'user', role: 'assignee' }];
   }
   return payload;
-}
-
-/**
- * Counted time per larkTaskGuid for ONE person's entries: work, meetings and
- * approved manual time, open ends proven, invalidated minutes excluded.
- *
- * Resolved on the person's whole timeline, not per task: a minute two tasks
- * both claim belongs to one of them, so the task totals can never add up to
- * more than the day. Pass every entry overlapping the window (not only the
- * tasks being listed) so contested minutes land on the right task.
- */
-export function loggedMsByGuid(
-  entries: Array<{
-    id?: string;
-    larkTaskGuid: string | null;
-    source?: string;
-    endedAt?: Date | null;
-    trackingProtocolVersion?: number | null;
-    lastProvenAt?: Date | null;
-    leaseExpiresAt?: Date | null;
-    segments: Array<{ kind: string; startedAt: Date; endedAt: Date | null }>;
-  }>,
-  now: number,
-  options: {
-    windowStart?: number;
-    windowEnd?: number;
-    evidenceByEntry?: EntryLiveEvidenceMap;
-    /** Reviewer invalidations for this person. */
-    invalidations?: readonly Interval[];
-  } = {},
-): Map<string, number> {
-  const pieces = resolveTimeline(
-    entries.map((e, index) => ({ ...e, id: e.id ?? `entry-${index}`, userId: 'self', source: e.source ?? 'AUTO' })),
-    {
-      now,
-      evidence: options.evidenceByEntry ?? new Map(),
-      invalidations: (options.invalidations ?? []).map((iv) => ({ userId: 'self', ...iv })),
-    },
-  );
-  const totals = loggedMsFromTimeline(pieces, {
-    start: options.windowStart ?? Number.NEGATIVE_INFINITY,
-    end: options.windowEnd ?? now,
-  });
-  // Every task that was asked about gets an answer, zero included.
-  for (const e of entries) if (e.larkTaskGuid && !totals.has(e.larkTaskGuid)) totals.set(e.larkTaskGuid, 0);
-  return totals;
-}
-
-/** Task totals straight from an already-resolved timeline. */
-export function loggedMsFromTimeline(
-  pieces: ReadonlyArray<TimelinePiece<{ larkTaskGuid?: string | null }>>,
-  window?: Interval,
-): Map<string, number> {
-  return totalsByTask(pieces, window);
 }
 
 /** Real client: paginates `my_tasks` with the user token. */

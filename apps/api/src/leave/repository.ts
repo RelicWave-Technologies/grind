@@ -5,6 +5,7 @@ import {
   ATTENDANCE_RULE_REASON,
   AttendanceRuleTagSchema,
   attendanceOverrideShape,
+  dateKeyInTimeZone,
   LEAVE_POLICY_DEFAULTS,
   roundToHalfDay,
   type AttendanceOverrideCode,
@@ -38,6 +39,16 @@ const WHOLE_HISTORY_FROM = '2000-01-01';
 /** A `Date` from a Postgres `date` column, as YYYY-MM-DD. */
 export function toIsoDate(d: Date): string {
   return d.toISOString().slice(0, 10);
+}
+
+/**
+ * The day a person's leave starts accruing: `joinedOn` when somebody set it,
+ * otherwise the day their Timo account was created — in the workspace's
+ * calendar. `createdAt` is an instant, and its UTC date is the day before for
+ * anybody added in the first hours of an IST morning.
+ */
+export function accrualStartDate(user: { joinedOn: Date | null; createdAt: Date }, tz: string): string {
+  return user.joinedOn ? toIsoDate(user.joinedOn) : dateKeyInTimeZone(user.createdAt, tz);
 }
 
 /** YYYY-MM-DD to the UTC midnight `Date` a `date` column round-trips to. */
@@ -261,7 +272,7 @@ export async function loadWorkingCalendar(input: {
   const priced = new WorkingCalendar(shared);
 
   const accrualStartFor: Record<string, string | undefined> = {};
-  for (const u of users) accrualStartFor[u.id] = toIsoDate(u.joinedOn ?? u.createdAt);
+  for (const u of users) accrualStartFor[u.id] = accrualStartDate(u, input.tz);
 
   const overrideFor = new Map<string, AttendanceOverrideCode>();
   for (const o of overrides) overrideFor.set(`${o.userId}\u0000${toIsoDate(o.date)}`, o.code);

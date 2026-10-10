@@ -2,6 +2,8 @@ import { prisma, type Prisma } from '@grind/db';
 import {
   bucketByDay,
   containsInstant,
+  isCounted,
+  trackingNow,
   emptyDayBucket,
   invalidationsByUser,
   resolveTimeline,
@@ -98,7 +100,11 @@ export async function loadTimelineWindow(input: {
   end: Date;
   now?: Date;
   lookbackMs?: number;
-  /** Narrow to some entries (e.g. one Lark task's). Owner resolution still sees all. */
+  /**
+   * Narrow the read further. Owners are resolved among what is read, so a
+   * narrowing must keep every entry that overlaps the instants the caller
+   * will look at.
+   */
   where?: Prisma.TimeEntryWhereInput;
 }): Promise<LoadedTimeline> {
   const now = input.now ?? new Date();
@@ -113,7 +119,7 @@ export async function loadTimelineWindow(input: {
         userId: { in: userIds },
         startedAt: { lt: input.end },
         OR: [{ endedAt: null }, { endedAt: { gt: readStart } }],
-        ...(input.where ?? {}),
+        ...(input.where ? { AND: [input.where] } : {}),
       },
       select: TIMELINE_ENTRY_SELECT,
       orderBy: [{ userId: 'asc' }, { startedAt: 'asc' }, { id: 'asc' }],
@@ -173,6 +179,64 @@ function withDays(loaded: LoadedTimeline, tz: string, from: string, to: string):
 /** Pieces for one user, in order. */
 export function piecesForUser<P extends { userId: string }>(pieces: readonly P[], userId: string): P[] {
   return pieces.filter((p) => p.userId === userId);
+}
+
+/**
+ * Who is tracking right now (userId → the running entry's id), from the
+ * shared timeline. Only an open entry can be live, so the read is a sliver at
+ * `now` — the open entries and nothing else.
+ */
+export async function loadTrackingNow(userIds: readonly string[], now = new Date()): Promise<Map<string, string>> {
+  const { pieces } = await loadTimelineWindow({
+    userIds,
+    start: now,
+    end: new Date(now.getTime() + 1),
+    now,
+    lookbackMs: 0,
+    where: { endedAt: null },
+  });
+  return trackingNow(pieces);
+}
+
+/**
+ * What approved manual-time requests count for, by request id: the counted
+ * time their entries own on the shared timeline.
+ *
+ * Approval stores only the minutes that were free at the time, but tracked
+ * time that syncs later still takes a minute back, and a reviewer's
+ * invalidation still removes one — the stored segments know neither. A
+ * request that is not approved added nothing and is absent from the map.
+ */
+export async function loadCreditedManualMs(
+  requests: ReadonlyArray<{ id: string; userId: string; status: string; requestedStart: Date; requestedEnd: Date }>,
+  now = new Date(),
+): Promise<Map<string, number>> {
+  const approved = requests.filter((r) => r.status === 'APPROVED' && r.requestedEnd > r.requestedStart);
+  const out = new Map<string, number>();
+  if (approved.length === 0) return out;
+  // Approval carves inside the requested window, so the request's time and
+  // everything that can contest it overlap that window: read just those.
+  const { pieces } = await loadTimelineWindow({
+    userIds: approved.map((r) => r.userId),
+    start: new Date(Math.min(...approved.map((r) => r.requestedStart.getTime()))),
+    end: new Date(Math.max(...approved.map((r) => r.requestedEnd.getTime()))),
+    now,
+    lookbackMs: 0,
+    where: {
+      OR: approved.map((r) => ({
+        userId: r.userId,
+        startedAt: { lt: r.requestedEnd },
+        OR: [{ endedAt: null }, { endedAt: { gt: r.requestedStart } }],
+      })),
+    },
+  });
+  for (const r of approved) out.set(r.id, 0);
+  for (const piece of pieces) {
+    const requestId = piece.entry.manualTimeRequest?.id;
+    if (!requestId || !out.has(requestId) || !isCounted(piece)) continue;
+    out.set(requestId, out.get(requestId)! + (piece.end - piece.start));
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------

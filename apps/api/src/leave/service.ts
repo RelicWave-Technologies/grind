@@ -1,7 +1,7 @@
 import { prisma, type Prisma } from '@grind/db';
 import { roundToHalfDay, type LeaveRequestDto } from '@grind/types';
 import { accrualsDue, birthdayAccrualsDue } from './ledger';
-import { fromIsoDate, loadOrCreateLeavePolicy, toIsoDate } from './repository';
+import { accrualStartDate, fromIsoDate, loadOrCreateLeavePolicy, toIsoDate } from './repository';
 
 /**
  * Leave accrual and request serialisation.
@@ -39,13 +39,14 @@ export async function ensureAccruals(input: {
       select: {
         id: true, joinedOn: true, createdAt: true, deactivatedAt: true,
         leaveAccrualDaysOverride: true, birthDate: true,
+        workspace: { select: { timezone: true } },
       },
     }),
     loadOrCreateLeavePolicy(input.workspaceId, db),
   ]);
   if (!user) return 0;
 
-  const joinedOn = toIsoDate(user.joinedOn ?? user.createdAt);
+  const joinedOn = accrualStartDate(user, user.workspace.timezone);
   const due = accrualsDue({
     userId: input.userId,
     joinedOn,

@@ -6,7 +6,7 @@ import { requestRuleReconcile } from '../attendance/ruleScheduler';
 import { getLarkConfig, hasLarkCredentials } from '../lark/config';
 import { getTenantAccessToken } from '../lark/tenantToken';
 import { consumptionSourceKey, reversalSourceKey } from './ledger';
-import { fromIsoDate, loadWorkingCalendar, toIsoDate } from './repository';
+import { accrualStartDate, fromIsoDate, loadWorkingCalendar } from './repository';
 import { leaveDateRange } from './workingCalendar';
 import { decisionFromLarkStatus, type ExternalDecision } from './approvalGateway';
 
@@ -252,7 +252,7 @@ async function mirrorInstance(input: {
    * predates the accrual start is still mirrored, so the calendar and reports
    * show it, but it is not charged.
    */
-  const accrualStart = toIsoDate(identity.user.joinedOn ?? identity.user.createdAt);
+  const accrualStart = accrualStartDate(identity.user, input.tz);
   const chargeable = instance.startDate >= accrualStart;
 
   const kind = 'PAID' as const;

@@ -284,52 +284,6 @@ export const TeamReportsSummaryResponseSchema = z.object({
 });
 export type TeamReportsSummaryResponse = z.infer<typeof TeamReportsSummaryResponseSchema>;
 
-export const TeamReportAttentionKindSchema = z.enum([
-  'pending_approval',
-  'late',
-  'no_activity',
-  'gap',
-  'missing_activity',
-  'low_activity',
-]);
-
-export const TeamReportAttentionItemSchema = z.object({
-  id: z.string(),
-  userId: z.string(),
-  userName: z.string(),
-  date: z.string(),
-  kind: TeamReportAttentionKindSchema,
-  severity: z.enum(['danger', 'warn', 'neutral']),
-  title: z.string(),
-  detail: z.string(),
-});
-export type TeamReportAttentionItem = z.infer<typeof TeamReportAttentionItemSchema>;
-
-export const TeamReportsResponseSchema = z.object({
-  from: z.string(),
-  to: z.string(),
-  tz: z.string(),
-  days: z.array(z.string()),
-  summary: z.object({
-    memberCount: z.number().int().min(0),
-    workedMs: z.number().int().min(0),
-    manualMs: z.number().int().min(0),
-    invalidatedMs: z.number().int().min(0),
-    activeDays: z.number().int().min(0),
-    memberDays: z.number().int().min(0),
-    lateDays: z.number().int().min(0),
-    noActivityDays: z.number().int().min(0),
-    gapCount: z.number().int().min(0),
-    gapMs: z.number().int().min(0),
-    pendingApprovals: z.number().int().min(0),
-    activityPercent: z.number().int().min(0).max(100).nullable(),
-    screenshots: z.number().int().min(0),
-  }),
-  attention: z.array(TeamReportAttentionItemSchema),
-  members: z.array(TeamReportMemberSchema),
-});
-export type TeamReportsResponse = z.infer<typeof TeamReportsResponseSchema>;
-
 export const TeamMemberReportsResponseSchema = z.object({
   from: z.string(),
   to: z.string(),

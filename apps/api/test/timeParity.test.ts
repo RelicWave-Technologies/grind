@@ -8,6 +8,7 @@ import { setTokenManagerForTests } from '../src/lark';
 import type { TokenManager } from '../src/lark/tokenManager';
 import { decideManualTimeRequest } from '../src/manualTime/decision';
 import { loadMonthPerformanceReport, resolveReportMonth } from '../src/reports/monthPerformanceData';
+import { loadCreditedManualMs } from '../src/time';
 import { seedUser } from './helpers';
 
 /**
@@ -202,11 +203,8 @@ describe('manual time carving', () => {
   }
 
   async function creditedMs(requestId: string): Promise<number> {
-    const r = await prisma.manualTimeRequest.findUniqueOrThrow({
-      where: { id: requestId },
-      include: { timeEntry: { include: { segments: true } } },
-    });
-    return (r.timeEntry?.segments ?? []).reduce((sum, s) => sum + (s.endedAt!.getTime() - s.startedAt.getTime()), 0);
+    const r = await prisma.manualTimeRequest.findUniqueOrThrow({ where: { id: requestId } });
+    return (await loadCreditedManualMs([r])).get(requestId) ?? 0;
   }
 
   it('an open legacy entry capped at its last proof does not swallow an approved request', async () => {

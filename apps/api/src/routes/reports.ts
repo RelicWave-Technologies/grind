@@ -31,7 +31,7 @@ import {
   type ReportScreenshotRow,
   type ReportTimelinePiece,
 } from '../reports/member';
-import { buildTeamReportsResponse, buildTeamReportsSummaryResponse } from '../reports/team';
+import { buildTeamReportMember, buildTeamReportsSummaryResponse } from '../reports/team';
 import { loadProfileForUser } from '../profile/service';
 import { resolveAppIcon, storedIconDataUrls } from '../insights/appIcon';
 import type { IconResolver } from '../reports/member';
@@ -126,111 +126,6 @@ reportsRouter.get('/me', async (req, res, next) => {
       }),
     };
     res.json(response);
-  } catch (err) {
-    next(err);
-  }
-});
-
-reportsRouter.get('/team', requireCapability('reports.team.read'), async (req, res, next) => {
-  try {
-    if (!req.user || !req.scope) return res.status(401).json({ error: 'unauthorized' });
-    if (!req.scope) return res.status(500).json({ error: 'scope_unresolved' });
-    const range = resolveReportRange(req.query as Record<string, unknown>, req.scope.workspaceTimezone);
-    if ('error' in range) return res.status(range.status).json({ error: range.error, ...(range.extras ?? {}) });
-    if (range.days.length > TEAM_REPORT_MAX_DAYS) {
-      return res.status(400).json({ error: 'range_too_long', maxDays: TEAM_REPORT_MAX_DAYS });
-    }
-
-    const scopedUserIds = req.scope.userIds.filter((id) => id !== req.user!.sub);
-    const users = scopedUserIds.length > 0
-      ? await prisma.user.findMany({
-          where: {
-            id: { in: scopedUserIds },
-            workspaceId: req.user.ws,
-            deactivatedAt: null,
-          },
-          select: {
-            id: true,
-            name: true,
-            email: true,
-            avatarUrl: true,
-            activityRoleTitle: true,
-            teamId: true,
-            team: { select: { name: true } },
-          },
-          orderBy: [{ name: 'asc' }, { email: 'asc' }],
-        })
-      : [];
-    const reportUsersWithRole: Array<TeamReportUser & { activityRoleTitle: RoleTitle }> = users.map((u) => ({
-      id: u.id,
-      name: u.name,
-      email: u.email,
-      avatarUrl: u.avatarUrl,
-      activityRoleTitle: u.activityRoleTitle as RoleTitle,
-      teamId: u.teamId,
-      teamName: u.team?.name ?? null,
-    }));
-    const reportUsers: TeamReportUser[] = reportUsersWithRole.map((user) => ({
-      id: user.id,
-      name: user.name,
-      email: user.email,
-      avatarUrl: user.avatarUrl,
-      teamId: user.teamId,
-      teamName: user.teamName,
-    }));
-
-    const now = new Date();
-    const reportData = await loadTeamReportData(reportUsers.map((u) => u.id), range, now);
-    const iconFor = await iconForSamples([...reportData.values()].flatMap((d) => d.samples));
-    const calendar = await timesheetCalendarInputs({
-      workspaceId: req.scope.workspaceId,
-      tz: range.tz,
-      userIds: reportUsers.map((u) => u.id),
-      from: range.from,
-      to: range.to,
-    });
-    const punchFor = await loadPunchLookup({ userIds: reportUsers.map((u) => u.id), from: range.from, to: range.to });
-    const rules = await loadAttendanceRuleContext({
-      workspaceId: req.scope!.workspaceId,
-      tz: range.tz,
-      userIds: reportUsers.map((u) => u.id),
-      from: range.from,
-      to: range.to,
-      punchFor,
-    });
-    const overrideFor = await loadOverrideLookup({
-      userIds: reportUsers.map((u) => u.id),
-      from: range.from,
-      to: range.to,
-      fundedDaysFor: calendar.fundedDaysFor,
-    });
-    const daysByUser = new Map<string, ReturnType<typeof buildMemberReportDays>>();
-    for (const user of reportUsersWithRole) {
-      const data = reportData.get(user.id) ?? emptyTeamReportData();
-      daysByUser.set(user.id, buildMemberReportDays({
-        dayStatusFor: calendar.dayStatusFor,
-        ruleFor: rules.judge,
-        lateFor: lateLookup(rules),
-        fundedDaysFor: calendar.fundedDaysFor,
-        punchFor,
-        overrideFor,
-        userId: user.id,
-        range,
-        now,
-        timeline: data.timeline,
-        manualRequests: data.manualRequests,
-        samples: data.samples,
-        screenshots: data.screenshots,
-        shiftAssignments: data.shiftAssignments,
-        lateGraceMinutes: rules.policy.lateGraceMinutes,
-        halfDayLateAfterMinute: rules.policy.halfDayLateAfterMinute,
-        invalidations: data.invalidations,
-        activityRoleTitle: user.activityRoleTitle,
-        iconFor,
-      }));
-    }
-
-    res.json(buildTeamReportsResponse({ range, users: reportUsers, daysByUser }));
   } catch (err) {
     next(err);
   }
@@ -390,20 +285,12 @@ reportsRouter.get('/team/member', requireCapability('reports.team.read'), async 
       activityRoleTitle: target.user.activityRoleTitle,
       iconFor,
     });
-    const teamReport = buildTeamReportsResponse({
-      range,
-      users: [target.user],
-      daysByUser: new Map([[target.user.id, days]]),
-    });
-    const member = teamReport.members[0];
-    if (!member) return res.status(404).json({ error: 'user_not_found' });
-
     const response: TeamMemberReportsResponse = {
       from: range.from,
       to: range.to,
       tz: range.tz,
       days: range.days,
-      member,
+      member: buildTeamReportMember(target.user, days),
       approvals,
       profile,
     };

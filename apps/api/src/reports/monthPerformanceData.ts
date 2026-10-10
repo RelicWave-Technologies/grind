@@ -5,7 +5,7 @@ import { loadAttendanceRuleContext, type AttendanceRuleContext } from '../attend
 import { reconcileRuleLedger, verdictKey, type RuleVerdicts } from '../attendance/ruleLedger';
 import { timesheetCalendarInputs } from '../leave';
 import { loadTimeline } from '../time';
-import { loadBalances } from '../leave/repository';
+import { accrualStartDate, loadBalances } from '../leave/repository';
 import {
   buildMonthPerformance,
   type DayOverride,
@@ -61,8 +61,8 @@ interface MonthInputs {
   calendarInput: { workspaceId: string; tz: string; userIds: string[]; from: string; to: string };
   punchFor: Awaited<ReturnType<typeof loadPunchLookup>>;
   overrides: Array<{ userId: string; date: Date; code: DayOverride['code']; computedCode: DayOverride['computedCode'] }>;
-  /** Counted minutes (work, meetings, approved manual; invalidated excluded). */
-  trackedMinutesFor: (userId: string, date: string) => number;
+  /** Counted milliseconds (work, meetings, approved manual; invalidated excluded). */
+  trackedMsFor: (userId: string, date: string) => number;
   rules: AttendanceRuleContext;
   nowMs: number;
 }
@@ -106,7 +106,7 @@ async function loadMonthInputs(input: {
     email: u.email,
     teamName: u.team?.name ?? null,
     // The leave balance's own start (see loadWorkingCalendar's accrualStartFor).
-    startDate: (u.joinedOn ?? u.createdAt).toISOString().slice(0, 10),
+    startDate: accrualStartDate(u, range.tz),
     endDate: u.deactivatedAt ? dateKeyInTimeZone(u.deactivatedAt, range.tz) : null,
   }));
   const userIds = reportUsers.map((u) => u.id);
@@ -141,7 +141,7 @@ async function loadMonthInputs(input: {
     calendarInput,
     punchFor,
     overrides,
-    trackedMinutesFor: (userId, date) => Math.round(timeline.bucket(userId, date).counted / 60_000),
+    trackedMsFor: (userId, date) => timeline.bucket(userId, date).counted,
     rules,
     nowMs,
   };
@@ -160,7 +160,12 @@ function monthVerdicts(
     for (const date of days) {
       // A corrected day is the corrector's call, and costs what they said.
       if (overridden.has(`${userId}|${date}`)) continue;
-      const verdict = m.rules.judge(userId, date, dayStatusFor(userId, date), m.trackedMinutesFor(userId, date));
+      const verdict = m.rules.judge(
+        userId,
+        date,
+        dayStatusFor(userId, date),
+        Math.round(m.trackedMsFor(userId, date) / 60_000),
+      );
       if (verdict) verdicts.set(verdictKey(userId, date), verdict);
     }
   }
@@ -220,7 +225,7 @@ export async function loadMonthPerformanceReport(input: {
 }): Promise<MonthPerformanceReport> {
   const { range } = input;
   const m = await loadMonthInputs(input);
-  const { reportUsers, userIds, punchFor, overrides, trackedMinutesFor, rules, nowMs } = m;
+  const { reportUsers, userIds, punchFor, overrides, trackedMsFor, rules, nowMs } = m;
   // Read-only: the ledger lines the rules wrote are whatever the last
   // reconcile left (see `reconcileMonthRules`), and the calendar prices the
   // month from them.
@@ -251,7 +256,7 @@ export async function loadMonthPerformanceReport(input: {
     companyName: m.companyName,
     users: reportUsers,
     dayStatusFor: calendar.dayStatusFor,
-    trackedMinutesFor,
+    trackedMsFor,
     punchFor,
     overrideFor,
     balanceFor: (userId) => balances[userId]?.balanceDays,
