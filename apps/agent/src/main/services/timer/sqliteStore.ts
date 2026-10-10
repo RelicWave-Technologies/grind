@@ -170,6 +170,42 @@ export class SqliteEntryStore implements EntryStore {
     return claim();
   }
 
+  claimLegacySelfEntries(owner: TimerOwner): { claimed: number; unclaimed: number } {
+    const claim = this.db.transaction(() => {
+      const rows = this.db.prepare(
+        `SELECT id, json FROM local_entries
+         WHERE owner_user_id IS NULL AND owner_workspace_id IS NULL
+           AND json_extract(json, '$.userId') = 'self'`,
+      ).all() as Array<{ id: string; json: string }>;
+      if (rows.length === 0) return { claimed: 0, unclaimed: 0 };
+      const owners = this.db.prepare(
+        `SELECT DISTINCT owner_user_id AS userId, owner_workspace_id AS workspaceId
+         FROM local_entries WHERE owner_user_id IS NOT NULL`,
+      ).all() as TimerOwner[];
+      const soleOwner = owners.length === 1
+        && owners[0]!.userId === owner.userId
+        && owners[0]!.workspaceId === owner.workspaceId;
+      if (!soleOwner) return { claimed: 0, unclaimed: rows.length };
+      const update = this.db.prepare(
+        `UPDATE local_entries
+         SET owner_user_id = @userId, owner_workspace_id = @workspaceId, json = @json
+         WHERE id = @id AND owner_user_id IS NULL AND owner_workspace_id IS NULL`,
+      );
+      let claimed = 0;
+      for (const row of rows) {
+        const entry = parseEntry(row.json);
+        claimed += update.run({
+          id: row.id,
+          userId: owner.userId,
+          workspaceId: owner.workspaceId,
+          json: JSON.stringify({ ...entry, userId: owner.userId }),
+        }).changes;
+      }
+      return { claimed, unclaimed: rows.length - claimed };
+    });
+    return claim();
+  }
+
   claimServerMatchedEntries(owner: TimerOwner, matches: Array<{ id: string; clientUuid: string }>): number {
     if (matches.length === 0) return 0;
     const claim = this.db.transaction(() => {

@@ -98,11 +98,17 @@ function createTaskErrorMessage(err: unknown): string {
   return 'Could not create task in Lark';
 }
 
+/**
+ * Today's time per task: the larger of the server's figure and this machine's.
+ * The server's includes other devices and approved manual time this machine
+ * never sees; this machine's includes what has not uploaded yet. Replacing one
+ * with the other showed whichever happened to be smaller as "logged today".
+ */
 function withProjectedToday(tasks: LarkTask[]): LarkTask[] {
   const byTask = getTimerService().workedMsByTask();
   return tasks.map((task) => ({
     ...task,
-    loggedTodayMs: byTask.get(task.guid) ?? task.loggedTodayMs,
+    loggedTodayMs: Math.max(byTask.get(task.guid) ?? 0, task.loggedTodayMs ?? 0),
   }));
 }
 

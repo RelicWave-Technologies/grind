@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   handlers: new Map<string, (...args: unknown[]) => unknown>(),
   api: vi.fn(),
+  localByTask: new Map<string, number>(),
 }));
 
 vi.mock('electron', () => ({
@@ -21,7 +22,7 @@ vi.mock('../services/apiClient', async () => {
 vi.mock('../logger', () => ({ log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } }));
 vi.mock('../services/workspaceTime', () => ({ getWorkspaceTimeZone: () => 'UTC' }));
 vi.mock('../services/timer', () => ({
-  getTimerService: () => ({ workedMsByTask: () => new Map() }),
+  getTimerService: () => ({ workedMsByTask: () => mocks.localByTask }),
   refreshTodayLedger: vi.fn(),
 }));
 vi.mock('../services/agentConfig', () => ({ refreshAgentConfig: vi.fn() }));
@@ -60,3 +61,20 @@ describe('Lark reauth detection', () => {
     await expect(invoke('lark:createTask', { summary: 'x' })).resolves.toEqual({ ok: false, error: 'Lark rejected the task' });
   });
 });
+
+describe("today's time per task", () => {
+  it('shows the larger of the server figure (other devices, manual time) and this machine’s', async () => {
+    const task = (guid: string, loggedTodayMs: number) => ({ guid, summary: guid, loggedTodayMs });
+    mocks.localByTask = new Map([['ahead-locally', 50 * 60_000], ['ahead-on-server', 10 * 60_000]]);
+    mocks.api.mockResolvedValue({ tasks: [task('ahead-locally', 40 * 60_000), task('ahead-on-server', 90 * 60_000), task('server-only', 5 * 60_000)] });
+
+    const result = await invoke('lark:tasks') as { tasks: Array<{ guid: string; loggedTodayMs: number }> };
+
+    expect(Object.fromEntries(result.tasks.map((t) => [t.guid, t.loggedTodayMs]))).toEqual({
+      'ahead-locally': 50 * 60_000,
+      'ahead-on-server': 90 * 60_000,
+      'server-only': 5 * 60_000,
+    });
+  });
+});
+

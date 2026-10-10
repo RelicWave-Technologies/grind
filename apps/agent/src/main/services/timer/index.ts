@@ -10,7 +10,7 @@ import { TimerSyncDrain, type TimerSyncDrainReason } from './syncDrain';
 import type { Clock, IdGen, MissedSleep } from './types';
 import { log } from '../../logger';
 import { getTrackingReadinessService } from '../trackingReadiness';
-import { getWorkspaceTimeContext } from '../workspaceTime';
+import { getTimerDayContext, getWorkspaceTimeContext } from '../workspaceTime';
 import { loadTokens } from '../tokenStore';
 import type { TimerOwner, TimerRecoveryResult } from './types';
 import { setPreferencesOwner } from '../preferences';
@@ -65,7 +65,7 @@ export function getTimerService(): TimerService {
     getTrackingReadinessService(),
     {
       window(now) {
-        const context = getWorkspaceTimeContext(now);
+        const context = getTimerDayContext(now, service?.currentOwner()?.workspaceId ?? null);
         return context.ready && context.dayStart !== null && context.dayEnd !== null
           ? { start: context.dayStart, end: context.dayEnd }
           : null;
@@ -128,9 +128,16 @@ function logRecovered(recovered: TimerRecoveryResult[], context: string): void {
  * first (see TimerService.switchOwner).
  */
 function bindOwner(owner: TimerOwner | null, claimLegacy: boolean, context: string): void {
-  const recovered = getTimerService().switchOwner(owner, claimLegacy);
+  const timer = getTimerService();
+  const recovered = timer.switchOwner(owner, claimLegacy);
   setPreferencesOwner(owner, { claimLegacy });
   logRecovered(recovered, context);
+  if (!owner || !claimLegacy) return;
+  const legacy = timer.claimLegacySelfEntries();
+  if (legacy.claimed > 0) log.info('claimed legacy "self" timer entries for the only account on this machine', { context, ...legacy });
+  if (legacy.unclaimed > 0) {
+    log.warn('legacy "self" timer entries left unclaimed: more than one account has used this machine', { context, ...legacy });
+  }
 }
 
 /**

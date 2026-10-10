@@ -91,4 +91,34 @@ describe('workspaceTime', () => {
 
     expect(service.getWorkspaceTimeContext().ready).toBe(false);
   });
+
+  it("keeps a running timer's day after its session ends — for that workspace only", async () => {
+    const service = await import('./workspaceTime');
+    await service.applyServerWorkspaceTimeZone('Asia/Kolkata', 'workspace_1');
+    service.clearWorkspaceTimeSession();
+    const now = Date.parse('2026-07-14T20:00:00.000Z');
+
+    expect(service.getTimerDayContext(now, 'workspace_1')).toMatchObject({
+      ready: true,
+      timeZone: 'Asia/Kolkata',
+      date: '2026-07-15',
+    });
+    expect(service.getTimerDayContext(now, 'workspace_other').ready).toBe(false);
+    expect(service.getWorkspaceTimeContext(now).ready).toBe(false);
+  });
+
+  it('tells listeners when the business day turns over, not only when the zone changes', async () => {
+    const service = await import('./workspaceTime');
+    await service.applyServerWorkspaceTimeZone('Asia/Kolkata', 'workspace_1');
+    service.checkDayRollover(Date.parse('2026-07-14T18:00:00.000Z')); // 23:30 IST
+    const seen: Array<string | null> = [];
+    service.onWorkspaceTimeChange((context) => seen.push(context.date));
+
+    service.checkDayRollover(Date.parse('2026-07-14T18:20:00.000Z'));
+    expect(seen).toEqual([]);
+    service.checkDayRollover(Date.parse('2026-07-14T18:31:00.000Z')); // 00:01 IST
+
+    expect(seen).toEqual(['2026-07-15']);
+  });
 });
+

@@ -150,6 +150,12 @@ export interface EntryStore {
   /** Atomically close the old task and create the replacement task. */
   switchEntry(closed: TimeEntry, next: TimeEntry): [PendingEntrySyncState, PendingEntrySyncState];
   /** The currently-open entry (endedAt === null), if any. */
+  /**
+   * Rows the oldest agents wrote under the placeholder user "self". Claimed
+   * for `owner` only when every owned row on this machine is `owner`'s — the
+   * machine has only ever had this one account — otherwise left alone.
+   */
+  claimLegacySelfEntries(owner: TimerOwner): { claimed: number; unclaimed: number };
   getOpen(): TimeEntry | null;
   /**
    * Every open entry of the bound owner, oldest first. There should only ever

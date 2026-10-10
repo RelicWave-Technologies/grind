@@ -202,6 +202,31 @@ describeSqlite('SqliteEntryStore sync state', () => {
     expect(store.listLedgerEntries(0)[0]).not.toHaveProperty('acknowledgedTaskGuid');
   });
 
+  it('claims legacy "self" rows only on a machine that has had a single account', () => {
+    const insertSelf = (db: Database.Database, id: string) => {
+      const legacy = { ...closeTimeEntry(entry(id), T0 + MIN), userId: 'self' };
+      db.prepare(`INSERT INTO local_entries (id, client_uuid, ended_at, sync_state, json) VALUES (?, ?, ?, 'synced', ?)`)
+        .run(legacy.id, legacy.clientUuid, legacy.endedAt, JSON.stringify(legacy));
+    };
+    const alice = { userId: 'user-1', workspaceId: 'workspace-1' };
+
+    const single = new Database(':memory:');
+    const store = ownedStore(single);
+    store.upsert(closeTimeEntry(entry('mine'), T0 + MIN));
+    insertSelf(single, 'old_self');
+    expect(store.claimLegacySelfEntries(alice)).toEqual({ claimed: 1, unclaimed: 0 });
+    expect(store.listSince(0).find((e) => e.id === 'old_self')?.userId).toBe('user-1');
+
+    const shared = new Database(':memory:');
+    const other = new SqliteEntryStore(shared);
+    other.bindOwner({ userId: 'user-2', workspaceId: 'workspace-1' });
+    other.upsert(closeTimeEntry({ ...entry('theirs'), userId: 'user-2' }, T0 + MIN));
+    const mine = ownedStore(shared);
+    mine.upsert(closeTimeEntry(entry('mine'), T0 + MIN));
+    insertSelf(shared, 'old_self');
+    expect(mine.claimLegacySelfEntries(alice)).toEqual({ claimed: 0, unclaimed: 1 });
+  });
+
   it('migrates old unsynced rows to pending_create', () => {
     const db = new Database(':memory:');
     oldSchema(db);

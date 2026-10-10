@@ -57,6 +57,7 @@ class MemStore implements EntryStore {
   currentOwner() { return this.owner; }
   claimUnownedEntries() { return 0; }
   claimServerMatchedEntries() { return 0; }
+  claimLegacySelfEntries() { return { claimed: 0, unclaimed: 0 }; }
   upsert(e: TimeEntry, opts?: { syncState?: PendingEntrySyncState }) {
     if (this.failNextUpsert) {
       this.failNextUpsert = false;

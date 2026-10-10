@@ -1,6 +1,7 @@
 import { ipcMain } from 'electron';
 import { getPreferences } from '../services/preferences';
 import { getTimerService } from '../services/timer';
+import { serverAlignedNow } from '../services/serverClock';
 import { pauseTracking, resumeTracking, startTracking, stopTracking } from '../services/trackingCommands';
 
 export function registerTimerIpc(): void {
@@ -32,7 +33,9 @@ export function registerTimerIpc(): void {
   });
 
   ipcMain.handle('timer:today', () => {
-    const entries = getTimerService().listToday(Date.now());
+    // The timer's own frame: the device clock can sit on the other side of
+    // midnight from the entries it is filtering.
+    const entries = getTimerService().listToday(serverAlignedNow());
     return entries.map((e) => ({
       id: e.id,
       source: e.source,

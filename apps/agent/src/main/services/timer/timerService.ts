@@ -216,6 +216,20 @@ export class TimerService {
     }
   }
 
+  /**
+   * Days older than today never get a server snapshot to prove a "self" row's
+   * owner (claimServerMatchedEntries), so on a single-account machine they are
+   * claimed outright. Anywhere else they stay quarantined; `unclaimed` says
+   * how many, for the log.
+   */
+  claimLegacySelfEntries(): { claimed: number; unclaimed: number } {
+    const owner = this.store.currentOwner();
+    if (!owner) return { claimed: 0, unclaimed: 0 };
+    const result = this.store.claimLegacySelfEntries(owner);
+    if (result.claimed > 0) this.ledgerEpoch += 1;
+    return result;
+  }
+
   claimServerMatchedEntries(matches: Array<{ id: string; clientUuid: string }>): number {
     const owner = this.store.currentOwner();
     if (!owner) return 0;
