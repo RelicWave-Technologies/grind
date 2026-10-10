@@ -125,6 +125,30 @@ describe('GET /v1/auth/lark/callback — dashboard', () => {
     expect((res.headers['set-cookie'] ?? []).join(';')).not.toContain('grind_at=');
     const u = await prisma.user.findUnique({ where: { email: 'newbie@co.com' } });
     expect(u?.provisioningStatus).toBe('PENDING');
+    // Nobody who is not let in keeps live Lark credentials.
+    expect(await prisma.larkOAuthToken.count()).toBe(0);
+  });
+
+  it('refuses an email match whose user is linked to another Lark account', async () => {
+    const ws = await prisma.workspace.create({ data: { id: 'ws_test', name: 'W' } });
+    const victim = await prisma.user.create({
+      data: {
+        workspaceId: ws.id,
+        email: 'boss@co.com',
+        name: 'Boss',
+        role: 'ADMIN',
+        provisioningStatus: 'ACTIVE',
+        larkIdentity: { create: { openId: 'ou_real_boss', unionId: null } },
+      },
+    });
+    configure({ profile: { openId: 'ou_impostor', unionId: null, name: 'Boss', email: 'boss@co.com', avatarUrl: null } });
+    const state = lark.signLoginState({ nonce: 'n9', client: 'dashboard' });
+    const res = await callback(state, { code: 'abc' }, 'n9');
+    expect(res.headers.location).toBe('https://dash.example/login?error=identity_conflict');
+    expect((res.headers['set-cookie'] ?? []).join(';')).not.toContain('grind_at=');
+    const ident = await prisma.larkIdentity.findUniqueOrThrow({ where: { userId: victim.id } });
+    expect(ident.openId).toBe('ou_real_boss');
+    expect(await prisma.larkOAuthToken.count()).toBe(0);
   });
 
   it('preserves a safe dashboard next path through the signed state', async () => {

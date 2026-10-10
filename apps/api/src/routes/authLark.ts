@@ -23,6 +23,7 @@ import {
   createAgentAuthCode,
   redeemAgentAuthCode,
   AgentCodeError,
+  LarkIdentityConflictError,
 } from '../auth/larkLogin';
 import { signAccessToken } from '../lib/jwt';
 import { issueRefreshToken } from '../lib/refreshToken';
@@ -214,17 +215,29 @@ authLarkRouter.get('/callback', async (req, res, next) => {
     if (!profile.email) return finish(res, client, { error: 'no_email' }, agentCallbackScheme, payload.nextPath);
 
     // 3. Resolve / provision.
-    const user = await resolveUser(profile);
-
-    // 4. Persist Lark tokens before redirecting so login leaves task/approval
-    // features connected. Failure is still non-terminal: the next login can
-    // re-grant a fresh single-use refresh token.
-    await tm
-      .persistTokens(user.id, tokens)
-      .catch((err) => logger.warn({ err: String(err), userId: user.id }, 'lark login: token persist failed'));
+    let user;
+    try {
+      user = await resolveUser(profile);
+    } catch (err) {
+      if (!(err instanceof LarkIdentityConflictError)) throw err;
+      logger.warn(
+        { openId: profile.openId, userId: err.userId, client },
+        'lark login: email matches a user linked to another Lark account; refused',
+      );
+      return finish(res, client, { error: 'identity_conflict' }, agentCallbackScheme, payload.nextPath);
+    }
 
     if (user.deactivatedAt) return finish(res, client, { error: 'deactivated' }, agentCallbackScheme, payload.nextPath);
     if (user.provisioningStatus !== 'ACTIVE') return finish(res, client, { status: 'pending' }, agentCallbackScheme, payload.nextPath);
+
+    // 4. Persist Lark tokens before redirecting so login leaves task/approval
+    // features connected — only for someone who is let in: a suspended or
+    // not-yet-activated account must not hold live Lark credentials here.
+    // Failure is still non-terminal: the next login can re-grant a fresh
+    // single-use refresh token.
+    await tm
+      .persistTokens(user.id, tokens)
+      .catch((err) => logger.warn({ err: String(err), userId: user.id }, 'lark login: token persist failed'));
 
     // 5. Issue the Timo session.
     const accessToken = signAccessToken({ sub: user.id, ws: user.workspaceId, role: user.role });

@@ -99,7 +99,10 @@ export async function resolveUser(profile: LarkProfile): Promise<ResolvedLoginUs
       const again = await prisma.larkIdentity.findUnique({ where: { openId: profile.openId } });
       if (again) return syncAndReturn(again.userId, profile);
       const byEmailAgain = await prisma.user.findUnique({ where: { email }, select: { id: true } });
-      if (byEmailAgain) return syncAndReturn(byEmailAgain.id, profile);
+      if (byEmailAgain) {
+        await linkIdentity(byEmailAgain.id, profile);
+        return syncAndReturn(byEmailAgain.id, profile);
+      }
     }
     throw err;
   }
@@ -136,11 +139,25 @@ async function createUser(profile: LarkProfile, email: string): Promise<Resolved
   });
 }
 
+/**
+ * The email matched a Timo user already linked to a DIFFERENT Lark account.
+ * Linking anyway would hand that person's account to whoever holds this one —
+ * a recycled or re-assigned mailbox, a second tenant — so the login is refused.
+ */
+export class LarkIdentityConflictError extends Error {
+  constructor(readonly userId: string) {
+    super('lark_identity_conflict');
+  }
+}
+
+/** Link `profile` to an email-matched user, unless they already have another Lark identity. */
 async function linkIdentity(userId: string, profile: LarkProfile): Promise<void> {
+  const existing = await prisma.larkIdentity.findUnique({ where: { userId }, select: { openId: true } });
+  if (existing && existing.openId !== profile.openId) throw new LarkIdentityConflictError(userId);
   await prisma.larkIdentity.upsert({
     where: { userId },
     create: { userId, openId: profile.openId, unionId: profile.unionId },
-    update: { openId: profile.openId, unionId: profile.unionId },
+    update: { unionId: profile.unionId },
   });
 }
 
