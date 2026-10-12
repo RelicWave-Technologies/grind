@@ -31,14 +31,15 @@ export interface AttendanceRuleContext {
   lateOrdinalFor: (userId: string, date: string) => number | null;
   /**
    * How the rules treat a person, loaded even while the rules are off: the
-   * Start column's Late label follows the same mode rule as the count.
+   * reports' arrival label never calls an EXEMPT person late either.
    */
   modeFor: (userId: string) => AttendanceRuleMode;
   /**
    * The door punches the late count was judged on, from the start of the
-   * month on, loaded even while the rules are off. The reports print and label
-   * from this same lookup, so the Punch in column, the Start label and the
-   * late count read one record.
+   * month on, loaded even while the rules are off. The month sheet prints its
+   * Office In/Out from this lookup, and the member report carries the
+   * punch-in to explain a late charge; the reports' start time and arrival
+   * label read Timo instead.
    */
   punchFor: PunchLookup;
 }
@@ -198,9 +199,4 @@ export async function loadAttendanceRuleContext(input: {
       return withLateRule(base, lateOrdinalFor(userId, date), policy.lateAllowedPerMonth);
     },
   };
-}
-
-/** The late lookup the member report reads, or undefined when the rules are off. */
-export function lateLookup(rules: AttendanceRuleContext): { from: string; ordinalFor: (userId: string, date: string) => number | null } | undefined {
-  return rules.enabled && rules.policy.from ? { from: rules.policy.from, ordinalFor: rules.lateOrdinalFor } : undefined;
 }
