@@ -298,19 +298,32 @@ interface DayFacts {
  * punch-in — the inputs to the one late definition in core. Lateness itself is
  * judged by the caller (`isLateArrival`), which knows the person's
  * attendance-rule mode and the policy.
+ *
+ * Two halves, so a caller can put the one read (the shift assignments) in the
+ * same round as its other reads: `loadDayFactAssignments`, then
+ * `dayFactsFrom`.
  */
-export async function loadDayFacts(input: {
+export async function loadDayFactAssignments(input: {
   userIds: readonly string[];
   from: string;
   to: string;
   tz: string;
-  calendar: { dayStatusFor(userId: string, date: string): DayStatus | null };
-  punchFor: PunchLookup;
-}): Promise<{ factsFor(userId: string, date: string): DayFacts }> {
+}): Promise<Map<string, ShiftAssignmentRow[]>> {
   const first = localDayWindowInTimeZone(input.from, input.tz);
   const last = localDayWindowInTimeZone(input.to, input.tz);
   if (!first || !last) throw new Error('invalid_date_or_tz');
-  const assignments = await loadShiftAssignments([...new Set(input.userIds)], first.start, last.end);
+  return loadShiftAssignments([...new Set(input.userIds)], first.start, last.end);
+}
+
+/** The day facts over assignments loaded with `loadDayFactAssignments`. */
+export function dayFactsFrom(
+  assignments: Map<string, ShiftAssignmentRow[]>,
+  input: {
+    tz: string;
+    calendar: { dayStatusFor(userId: string, date: string): DayStatus | null };
+    punchFor: PunchLookup;
+  },
+): { factsFor(userId: string, date: string): DayFacts } {
   return {
     factsFor: (userId, date) => ({
       status: input.calendar.dayStatusFor(userId, date),
