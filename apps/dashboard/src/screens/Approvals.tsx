@@ -10,7 +10,7 @@ import { hasCapability, isManagerOrAbove } from '../lib/auth';
 import type { DecideResult, ManualTimeRequest, MtrStatus, MtrUserSummary } from '../lib/types';
 import { addDays, fmtAgeShort, fmtDayLabel, fmtDurationMs, fmtTime, todayKey } from '../lib/format';
 import { dateKeyInTimeZone, daysBetween } from '@grind/types';
-import { reportQueryKeys } from '../lib/reportQueries';
+import { larkMyTasksQuery, myApprovalsQuery, reportQueryKeys, teamApprovalsQuery } from '../lib/queries';
 import { useTableFilter } from '../lib/tableFilter';
 import type { TaskOption } from '../components/TaskCombo';
 import {
@@ -120,35 +120,18 @@ export function ApprovalsScreen() {
   const [selectedRow, setSelectedRow] = useState<ApprovalTableRow | null>(null);
 
   const selfQ = useQuery({
-    queryKey: ['approvals', 'you', from, to, tz],
+    ...myApprovalsQuery<ApprovalListResponse<SelfApprovalRequest>>({ from, to, tz }),
     enabled: activeMode === 'you',
-    queryFn: () =>
-      api<ApprovalListResponse<SelfApprovalRequest>>(
-        `/v1/time-requests?${new URLSearchParams({ role: 'mine', from, to, tz }).toString()}`,
-      ),
   });
 
   const teamQ = useQuery({
-    queryKey: ['approvals', 'team', from, to, tz],
+    ...teamApprovalsQuery<ApprovalListResponse<ManualTimeRequest>>({ from, to, tz }),
     enabled: canReview && activeMode === 'team',
-    queryFn: () =>
-      api<ApprovalListResponse<ManualTimeRequest>>(
-        `/v1/admin/manual-time-requests?${new URLSearchParams({ status: 'ALL', from, to, tz }).toString()}`,
-      ),
   });
 
   const tasksQ = useQuery({
-    queryKey: ['lark', 'my-tasks', 'approval-labels'],
+    ...larkMyTasksQuery<{ tasks: TaskOption[] }>(),
     enabled: activeMode === 'you',
-    queryFn: async () => {
-      try {
-        return await api<{ tasks: TaskOption[] }>('/v1/lark/my-tasks');
-      } catch {
-        return { tasks: [] };
-      }
-    },
-    staleTime: 5 * 60_000,
-    retry: false,
   });
 
   const taskMap = useMemo(() => {

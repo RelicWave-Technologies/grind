@@ -75,7 +75,7 @@ import type { Rail, Status } from '../ui';
 import type {
   DayInsight,
 } from '../lib/types';
-import { reportQueryKeys, teamReportSummaryQuery } from '../lib/reportQueries';
+import { myReportQuery, reportQueryKeys, teamReportSummaryQuery } from '../lib/queries';
 import { useTableFilter } from '../lib/tableFilter';
 import { DayRibbon } from '../components/DayRibbon';
 import { ActivityHeatmap } from '../components/ActivityHeatmap';
@@ -165,14 +165,8 @@ export function ReportsScreen() {
   const activeMode: ReportsMode = canReadTeam ? mode : 'you';
 
   const reportQ = useQuery({
-    queryKey: ['reports', 'me', from, to, tz],
+    ...myReportQuery<MemberReportsMeResponse>({ from, to, tz }),
     enabled: activeMode === 'you',
-    queryFn: () => {
-      const params = new URLSearchParams({ from, to, tz });
-      return api<MemberReportsMeResponse>(`/v1/reports/me?${params.toString()}`);
-    },
-    staleTime: 60_000,
-    refetchOnWindowFocus: false,
   });
 
   const teamQ = useQuery({

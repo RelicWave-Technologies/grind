@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouteContext } from '@tanstack/react-router';
 import { CalendarRange, FileSpreadsheet, Sheet } from 'lucide-react';
 import { api, ApiError, API_BASE } from '../lib/api';
+import { attendanceQuery, monthSummaryQuery } from '../lib/queries';
 import { useMonthReportDownload, fmtMonthLong } from '../lib/useMonthReportDownload';
 import type { TimesheetMatrix } from '../lib/types';
 import type { MonthSummaryResponse, MonthSummaryRow } from '@grind/types';
@@ -81,13 +82,7 @@ export function AttendanceScreen() {
   const days = RANGES.find((r) => r.key === rangeKey)!.days;
   const from = addDays(anchor, -(days - 1));
 
-  const q = useQuery({
-    queryKey: ['admin', 'attendance', from, anchor, tz],
-    queryFn: () => {
-      const params = new URLSearchParams({ from, to: anchor, tz });
-      return api<TimesheetMatrix>(`/v1/admin/timesheets?${params.toString()}`);
-    },
-  });
+  const q = useQuery(attendanceQuery<TimesheetMatrix>({ from, to: anchor, tz }));
 
   function csvUrl(): string {
     const params = new URLSearchParams({ from, to: anchor, tz });
@@ -414,11 +409,7 @@ function AttendanceSummary({ data, timeZone }: { data: TimesheetMatrix; timeZone
  */
 function MonthSummary({ month, isAdmin }: { month: string; isAdmin: boolean }) {
   const [open, setOpen] = useState<MonthSummaryRow | null>(null);
-  const q = useQuery({
-    queryKey: ['admin', 'month-summary', month],
-    queryFn: () => api<MonthSummaryResponse>(`/v1/reports/month-summary?month=${month}`),
-    retry: false,
-  });
+  const q = useQuery(monthSummaryQuery<MonthSummaryResponse>(month));
   const data = q.data;
   const filter = useTableFilter(
     data?.rows ?? [],

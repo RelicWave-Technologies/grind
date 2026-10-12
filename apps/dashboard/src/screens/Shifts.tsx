@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { CalendarClock, CalendarDays, Check, Clock3, Mail, Pencil, Plus, Trash2, UserRound, Users2, X } from 'lucide-react';
 import { api, type ApiError } from '../lib/api';
+import { adminShiftsQuery, adminUsersQuery } from '../lib/queries';
 import type { Shift, ShiftSchedule, DaySchedule, WeekdayKey } from '../lib/types';
 import { useTableFilter } from '../lib/tableFilter';
 import {
@@ -79,14 +80,8 @@ export function ShiftsScreen() {
   const qc = useQueryClient();
   const [createOpen, setCreateOpen] = useState(false);
   const [selectedShiftId, setSelectedShiftId] = useState<string | null>(null);
-  const q = useQuery({
-    queryKey: ['admin', 'shifts'],
-    queryFn: () => api<{ shifts: Shift[] }>('/v1/admin/shifts'),
-  });
-  const usersQ = useQuery({
-    queryKey: ['admin', 'users'],
-    queryFn: () => api<{ users: AdminUser[] }>('/v1/admin/users'),
-  });
+  const q = useQuery(adminShiftsQuery<{ shifts: Shift[] }>());
+  const usersQ = useQuery(adminUsersQuery<{ users: AdminUser[] }>());
 
   const create = useMutation({
     mutationFn: (body: { name: string; schedule: ShiftSchedule; bufferMin: number }) =>

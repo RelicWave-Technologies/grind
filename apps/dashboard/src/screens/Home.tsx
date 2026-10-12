@@ -13,7 +13,7 @@ import {
   ChevronRight,
   User,
 } from 'lucide-react';
-import { api } from '../lib/api';
+import { myDayQuery, myPendingTimeRequestsQuery } from '../lib/queries';
 import { dateKeyInTimeZone, zonedDateTimeParts } from '@grind/types';
 import type { AppUsageEntry, DayInsight, ManualTimeRequest } from '../lib/types';
 import { fmtDayLabel, fmtDurationMs, fmtTime, todayKey } from '../lib/format';
@@ -52,15 +52,10 @@ export function HomeScreen() {
 
   const today = todayKey(tz);
   const dayQ = useQuery({
-    queryKey: ['insights', 'day', today, tz, me.id],
-    queryFn: () => api<DayInsight>(`/v1/insights/day?date=${today}&tz=${encodeURIComponent(tz)}`),
+    ...myDayQuery<DayInsight>({ date: today, tz, userId: me.id }),
     refetchInterval: 15_000,
   });
-  const pendingApprovalsQ = useQuery({
-    queryKey: ['time-requests', 'mine', 'PENDING', me.id],
-    queryFn: () => api<ListResponse<ManualTimeRequest>>('/v1/time-requests?role=mine&status=PENDING'),
-    retry: false,
-  });
+  const pendingApprovalsQ = useQuery(myPendingTimeRequestsQuery<ListResponse<ManualTimeRequest>>(me.id));
 
   const day = dayQ.data;
   // A failed load must not read as "no tracked time / nothing pending".

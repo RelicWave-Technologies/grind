@@ -11,6 +11,7 @@ import type {
 } from '@grind/types';
 import { IDLE_THRESHOLD_OPTIONS, SCREENSHOT_INTERVAL_OPTIONS, minToHhmm } from '@grind/types';
 import { api } from '../lib/api';
+import { adminLeavePolicyQuery, monitoringAuditsQuery, workspacePolicyQuery } from '../lib/queries';
 import {
   Page,
   PageHeader,
@@ -52,21 +53,12 @@ export function PolicyScreen() {
   const { me } = useRouteContext({ from: '/authed' });
   const timeZone = me.workspaceTimezone;
   const qc = useQueryClient();
-  const q = useQuery({
-    queryKey: ['workspace-policy'],
-    queryFn: () => api<WorkspacePolicyDto>('/v1/admin/workspace-policy'),
-  });
-  const auditQ = useQuery({
-    queryKey: ['admin', 'monitoring-settings-audits'],
-    queryFn: () => api<MonitoringSettingsAuditListResponse>('/v1/admin/monitoring-settings-audits?limit=20'),
-  });
+  const q = useQuery(workspacePolicyQuery<WorkspacePolicyDto>());
+  const auditQ = useQuery(monitoringAuditsQuery<MonitoringSettingsAuditListResponse>());
 
   const [draft, setDraft] = useState<WorkspacePolicyDto | null>(null);
   const [rulesOpen, setRulesOpen] = useState(false);
-  const leaveQ = useQuery({
-    queryKey: ['admin', 'leave-policy'],
-    queryFn: () => api<LeavePolicyDto>('/v1/admin/leave/policy'),
-  });
+  const leaveQ = useQuery(adminLeavePolicyQuery<LeavePolicyDto>());
   const rulesMutation = useMutation({
     mutationFn: (patch: Record<string, unknown>) =>
       api<LeavePolicyDto>('/v1/admin/leave/policy', { method: 'PATCH', json: patch }),

@@ -6,11 +6,11 @@ import {
   redirect,
 } from '@tanstack/react-router';
 import type { QueryClient } from '@tanstack/react-query';
-import { api, ApiError } from './lib/api';
-import { hasCapability, landingPath } from './lib/auth';
+import { hasCapability, landingPath, meQuery } from './lib/auth';
 import type { Me } from './lib/auth';
+import type { PrefetchPage, RouteSearch } from './lib/routeData';
 import { parseSyncFilter, type SyncFilter } from './lib/syncHealth';
-import { Layout } from './components/Layout';
+import { Layout, LayoutPending } from './components/Layout';
 import { LoginScreen } from './screens/Login';
 
 const UsersScreen = lazyRouteComponent(() => import('./screens/Users'), 'UsersScreen');
@@ -36,19 +36,26 @@ interface RouterContext {
   queryClient: QueryClient;
 }
 
-const meQuery = {
-  queryKey: ['me'],
-  queryFn: async (): Promise<Me | null> => {
-    try {
-      const res = await api<{ user: Me }>('/v1/auth/me');
-      return res.user;
-    } catch (e) {
-      if (e instanceof ApiError && e.status === 401) return null;
-      throw e;
-    }
-  },
-  staleTime: 5 * 60_000,
-};
+/*
+ * Data loading: every page route's `loader` prefetches the queries its screen
+ * reads on first paint (lib/routeData.ts, built on the factories in
+ * lib/queries.ts — the same keys the screen uses). Loaders never await, so
+ * navigation is gated only by the page's code chunk; the request runs in
+ * parallel with it, and with `defaultPreload: 'intent'` (main.tsx) it already
+ * starts on nav-link hover. routeData is imported lazily to keep the shared
+ * date helpers (and zod, via @grind/types) out of the entry chunk; main.tsx
+ * warms it at boot.
+ */
+export const loadRouteData = () => import('./lib/routeData');
+
+function prefetchPage(page: PrefetchPage) {
+  return ({ context, deps }: { context: { queryClient: QueryClient; me: Me }; deps?: RouteSearch }) => {
+    loadRouteData()
+      .then(({ pagePrefetch }) => pagePrefetch[page](context.queryClient, context.me, deps ?? {}))
+      // Best effort: if the prefetch can't run, the screen's own useQuery fetches.
+      .catch(() => undefined);
+  };
+}
 
 const rootRoute = createRootRouteWithContext<RouterContext>()({
   component: () => <Outlet />,
@@ -61,12 +68,18 @@ const authedRoot = createRoute({
   getParentRoute: () => rootRoute,
   id: 'authed',
   beforeLoad: async ({ context, location }) => {
-    const me = await context.queryClient.fetchQuery<Me | null>(meQuery);
+    // A cached session answers at once — a stale one is revalidated in the
+    // background rather than holding every navigation on a /me round-trip
+    // (plus a cookie refresh) after five idle minutes. If that revalidation
+    // finds the session gone, the next navigation lands on /login.
+    const me = await context.queryClient.ensureQueryData({ ...meQuery, revalidateIfStale: true });
     if (!me) {
       throw redirect({ to: '/login', search: { next: location.href } });
     }
     return { me };
   },
+  // Cold load only: shown if /me takes longer than the router's pendingMs.
+  pendingComponent: LayoutPending,
   component: Layout,
 });
 
@@ -83,6 +96,7 @@ function requireAnyRouteCapability(me: Me | null | undefined, permissions: Array
 const homeRoute = createRoute({
   getParentRoute: () => authedRoot,
   path: '/home',
+  loader: prefetchPage('home'),
   component: HomeScreen,
 });
 
@@ -99,6 +113,7 @@ const usersRoute = createRoute({
       throw redirect({ to: '/reports' });
     }
   },
+  loader: prefetchPage('users'),
   component: UsersScreen,
 });
 
@@ -115,6 +130,8 @@ const editTimeRoute = createRoute({
     focusStart: typeof s.focusStart === 'string' ? s.focusStart : undefined,
     focusEnd: typeof s.focusEnd === 'string' ? s.focusEnd : undefined,
   }),
+  loaderDeps: ({ search }) => ({ date: search.date, userId: search.userId }),
+  loader: prefetchPage('editTime'),
   component: MeTodayScreen,
 });
 
@@ -142,6 +159,7 @@ const reportsRoute = createRoute({
       throw redirect({ to: '/edit-time' });
     }
   },
+  loader: prefetchPage('reports'),
   component: ReportsScreen,
 });
 
@@ -158,6 +176,7 @@ const approvalsRoute = createRoute({
       throw redirect({ to: '/edit-time' });
     }
   },
+  loader: prefetchPage('approvals'),
   component: ApprovalsScreen,
 });
 
@@ -170,6 +189,7 @@ const profileRoute = createRoute({
       throw redirect({ to: '/edit-time' });
     }
   },
+  loader: prefetchPage('profile'),
   component: ProfileScreen,
 });
 
@@ -182,6 +202,7 @@ const teamRoute = createRoute({
       throw redirect({ to: '/home' });
     }
   },
+  loader: prefetchPage('team'),
   component: TeamScreen,
 });
 
@@ -192,6 +213,7 @@ const attendanceRoute = createRoute({
     const me = (context as { me?: Me }).me;
     requireAnyRouteCapability(me, ['reports.team.read', 'reports.workspace.read']);
   },
+  loader: prefetchPage('attendance'),
   component: AttendanceScreen,
 });
 
@@ -202,6 +224,7 @@ const attendanceRoute = createRoute({
 const calendarRoute = createRoute({
   getParentRoute: () => authedRoot,
   path: '/calendar',
+  loader: prefetchPage('calendar'),
   component: CalendarScreen,
 });
 
@@ -212,6 +235,7 @@ const teamsAdminRoute = createRoute({
     const me = (context as { me?: Me }).me;
     requireAnyRouteCapability(me, ['teams.manage']);
   },
+  loader: prefetchPage('teams'),
   component: TeamsScreen,
 });
 
@@ -227,6 +251,7 @@ const flagsRoute = createRoute({
       throw redirect({ to: '/home' });
     }
   },
+  loader: prefetchPage('flags'),
   component: FlagsScreen,
 });
 
@@ -237,6 +262,7 @@ const shiftsRoute = createRoute({
     const me = (context as { me?: Me }).me;
     requireAnyRouteCapability(me, ['shifts.manage']);
   },
+  loader: prefetchPage('shifts'),
   component: ShiftsScreen,
 });
 
@@ -247,6 +273,7 @@ const policyRoute = createRoute({
     const me = (context as { me?: Me }).me;
     requireAnyRouteCapability(me, ['policy.manage']);
   },
+  loader: prefetchPage('policy'),
   component: PolicyScreen,
 });
 
@@ -257,6 +284,7 @@ const integrationsRoute = createRoute({
     const me = (context as { me?: Me }).me;
     requireAnyRouteCapability(me, ['api-tokens.manage']);
   },
+  loader: prefetchPage('integrations'),
   component: IntegrationsScreen,
 });
 
@@ -281,6 +309,7 @@ const overviewRoute = createRoute({
       throw redirect({ to: '/edit-time' });
     }
   },
+  loader: prefetchPage('overview'),
   component: OverviewScreen,
 });
 
@@ -294,7 +323,7 @@ const loginRoute = createRoute({
   }),
   beforeLoad: async ({ context, search }) => {
     if (search.status || search.error) return;
-    const me = await context.queryClient.fetchQuery<Me | null>(meQuery);
+    const me = await context.queryClient.fetchQuery(meQuery);
     if (me) throw redirect({ to: landingPath(me) });
   },
   component: LoginScreen,
@@ -328,7 +357,7 @@ const indexRoute = createRoute({
     // session sends you into the app.
     let me: Me | null = null;
     try {
-      me = await context.queryClient.fetchQuery<Me | null>(meQuery);
+      me = await context.queryClient.fetchQuery(meQuery);
     } catch {
       me = null;
     }

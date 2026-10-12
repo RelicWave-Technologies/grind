@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { queryOptions, useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import type { ActivityRoleTitle } from '@grind/types/auth';
 import type { Permission } from '@grind/types/rbac';
 import { api, ApiError, API_BASE } from './api';
@@ -41,22 +41,25 @@ export interface Me {
  * Hits GET /v1/auth/me with the cookie. 401 means "not signed in" — we
  * return null and let the router route to /login. Any other failure
  * propagates so we don't silently treat infra errors as logged-out.
+ * Shared by the router's auth gate and `useMe`, so both read one cache entry.
  */
+export const meQuery = queryOptions({
+  queryKey: ['me'],
+  queryFn: async (): Promise<Me | null> => {
+    try {
+      const res = await api<{ user: Me }>('/v1/auth/me');
+      return res.user;
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) return null;
+      throw e;
+    }
+  },
+  staleTime: 5 * 60_000,
+  retry: false,
+});
+
 export function useMe() {
-  return useQuery({
-    queryKey: ['me'],
-    queryFn: async (): Promise<Me | null> => {
-      try {
-        const res = await api<{ user: Me }>('/v1/auth/me');
-        return res.user;
-      } catch (e) {
-        if (e instanceof ApiError && e.status === 401) return null;
-        throw e;
-      }
-    },
-    staleTime: 5 * 60_000,
-    retry: false,
-  });
+  return useQuery(meQuery);
 }
 
 export function useLogout() {

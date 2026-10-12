@@ -5,6 +5,7 @@ import { useNavigate, useRouteContext, useSearch } from '@tanstack/react-router'
 import { Pencil, Check, X, UserPlus, UserMinus, UserCheck, Trash2, Users as UsersIcon } from 'lucide-react';
 import type { LaunchAtLoginState, LaunchOrigin } from '@grind/types';
 import { api, type ApiError } from '../lib/api';
+import { adminShiftsQuery, adminTeamsQuery, adminUsersQuery } from '../lib/queries';
 import { isAdmin, type Role } from '../lib/auth';
 import type { Team, Shift } from '../lib/types';
 import { matchesSyncFilter, syncTag, type SyncFilter, type SyncHealth } from '../lib/syncHealth';
@@ -152,26 +153,12 @@ export function UsersScreen() {
   const [inviting, setInviting] = useState(false);
 
   const usersQ = useQuery({
-    queryKey: ['admin', 'users', showDeactivated && canEdit],
-    queryFn: () =>
-      api<UsersResponse>(
-        showDeactivated && canEdit
-          ? '/v1/admin/users?includeDeactivated=true'
-          : '/v1/admin/users',
-      ),
+    ...adminUsersQuery<UsersResponse>({ includeDeactivated: showDeactivated && canEdit }),
     refetchInterval: canEdit ? 60_000 : false,
   });
   // Only admins need the team + shift lists — pickers are hidden for everyone else.
-  const teamsQ = useQuery({
-    queryKey: ['admin', 'teams'],
-    queryFn: () => api<{ teams: Team[] }>('/v1/admin/teams'),
-    enabled: canEdit,
-  });
-  const shiftsQ = useQuery({
-    queryKey: ['admin', 'shifts'],
-    queryFn: () => api<{ shifts: Shift[] }>('/v1/admin/shifts'),
-    enabled: canEdit,
-  });
+  const teamsQ = useQuery({ ...adminTeamsQuery<{ teams: Team[] }>(), enabled: canEdit });
+  const shiftsQ = useQuery({ ...adminShiftsQuery<{ shifts: Shift[] }>(), enabled: canEdit });
 
   const patch = useMutation({
     mutationFn: (vars: {
