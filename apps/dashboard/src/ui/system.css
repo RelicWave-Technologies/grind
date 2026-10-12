@@ -89,6 +89,14 @@
   --ui-page-max:      1180px;
   --ui-control-h:      32px;   /* the one control height (sm 28 / lg 36) */
   --ui-row-h:          44px;   /* table/list row (compact 36) */
+  /* A table scrolls inside its own region, never taller than the screen, so
+     its pinned header is always on it. */
+  --ui-table-max-h:   calc(100vh - var(--ui-sp-10));
+  --ui-search-w:      260px;  /* table-top search field */
+  --ui-filter-select-max: 220px;
+}
+@supports (height: 100dvh) {
+  :root { --ui-table-max-h: calc(100dvh - var(--ui-sp-10)); }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -282,7 +290,17 @@
 /* ============================================================================
    §5.5 Table — data grid. Hosted in a flush Card.
    ========================================================================== */
-.ui-table { width: 100%; border-collapse: collapse; }
+/* The table's own scroll region (rendered by <Table>). Scrolls both ways and
+   is capped at the viewport, so the sticky header below always has something
+   to stick to — independent of clipping cards or how the shell scrolls. */
+.ui-table-scroll {
+  max-width: 100%;
+  max-height: var(--ui-table-max-h);
+  overflow: auto;
+}
+/* Separate borders: in the collapsed model a sticky cell leaves its hairline
+   behind when it pins. Every divider here is drawn on the cell itself. */
+.ui-table { width: 100%; border-collapse: separate; border-spacing: 0; }
 .ui-table__head { }
 .ui-table__head .ui-th {
   font-family: var(--ui-font-mono);
@@ -343,10 +361,24 @@
 .ui-table__row--rail-info    > .ui-td:first-child { box-shadow: inset 3px 0 0 var(--ui-info-solid); }
 .ui-table__row--rail-accent  > .ui-td:first-child { box-shadow: inset 3px 0 0 var(--ui-accent); }
 
-/* Sticky helpers. */
-.ui-table--sticky-head .ui-table__head .ui-th { position: sticky; top: 0; z-index: 2; background: var(--ui-surface); }
+/* Sticky helpers. The header is sticky by default (<Table stickyHead>): an
+   opaque surface with the kit hairline under it, above the rows it covers. */
+.ui-table--sticky-head .ui-table__head .ui-th {
+  position: sticky; top: 0; z-index: 2;
+  background: var(--ui-surface);
+}
+/* A pinned first column (wide matrices) keeps its own hairline on the right
+   so the rows sliding under it read as underneath. */
 .ui-table--sticky-col .ui-td:first-child,
-.ui-table--sticky-col .ui-th:first-child { position: sticky; left: 0; z-index: 1; background: var(--ui-surface); }
+.ui-table--sticky-col .ui-th:first-child {
+  position: sticky; left: 0; z-index: 1;
+  background: var(--ui-surface);
+  border-right: 1px solid var(--ui-line);
+}
+.ui-table--sticky-col .ui-table__row:hover > .ui-td:first-child { background: var(--ui-surface-inset); }
+.ui-table--sticky-col .ui-table__row.is-selected > .ui-td:first-child { background: var(--ui-accent-tint); }
+/* The corner cell is pinned both ways and sits above both. */
+.ui-table--sticky-head.ui-table--sticky-col .ui-table__head .ui-th:first-child { z-index: 3; }
 
 /* ============================================================================
    §5.6 List + ListRow — lightweight row stack.
@@ -705,6 +737,40 @@ textarea.ui-control { height: auto; min-height: 80px; padding: var(--ui-sp-3) va
   outline: none;
   box-shadow: var(--ui-focus-ring);
 }
+
+/* ============================================================================
+   §5.12b Filtering — FilterBar (table-top row) + SearchInput.
+   ========================================================================== */
+.ui-filter-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--ui-sp-3) var(--ui-sp-5);
+  padding: var(--ui-sp-4) var(--ui-sp-6);
+  border-bottom: 1px solid var(--ui-line);
+}
+.ui-filter-bar__controls {
+  display: flex; align-items: center; flex-wrap: wrap;
+  gap: var(--ui-sp-3);
+  flex: 1 1 auto; min-width: 0;
+}
+.ui-filter-bar__select { width: auto; max-width: var(--ui-filter-select-max); }
+.ui-filter-bar__meta { display: flex; align-items: center; gap: var(--ui-sp-3); flex-shrink: 0; }
+.ui-filter-bar__count { color: var(--ui-ink-2); white-space: nowrap; }
+
+.ui-search {
+  position: relative;
+  display: inline-flex; align-items: center;
+  width: var(--ui-search-w); max-width: 100%;
+}
+.ui-search__icon {
+  position: absolute; left: var(--ui-sp-4);
+  display: inline-flex; align-items: center;
+  color: var(--ui-ink-3);
+  pointer-events: none;
+}
+.ui-search__input { padding-left: var(--ui-sp-9); padding-right: var(--ui-sp-8); }
+.ui-search__input::-webkit-search-cancel-button { appearance: none; }
+.ui-search__clear { position: absolute; right: var(--ui-sp-1); }
 
 /* ============================================================================
    §5.13 EmptyState.

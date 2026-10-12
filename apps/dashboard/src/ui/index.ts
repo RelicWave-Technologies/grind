@@ -68,6 +68,17 @@ export type { AvatarProps, AvatarGroupProps, IdentityProps, AvatarSize } from '.
 export { Toolbar, DateStepper } from './Toolbar';
 export type { ToolbarProps, DateStepperProps } from './Toolbar';
 
+// ── §5.12b — table filtering (logic: src/lib/tableFilter.ts) ──────────────
+export { SearchInput, FilterBar, NoMatches } from './Filter';
+export type {
+  SearchInputProps,
+  FilterBarProps,
+  NoMatchesProps,
+  FilterOption,
+  FilterFacetControl,
+  TableFilterControls,
+} from './Filter';
+
 // ── §5.13 / §5.15 — empty + inline notices ──────────────────────────────────
 export { EmptyState, Banner } from './Feedback';
 export type { EmptyStateProps, BannerProps, BannerStatus } from './Feedback';

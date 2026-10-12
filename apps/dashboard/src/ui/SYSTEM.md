@@ -391,7 +391,16 @@ The kit is **17 components**:
     `.table__row--rail-{success|warn|danger|info|accent}` (e.g. self = `accent`, pending =
     `warn`). **Never tint a full row** beyond the selected wash.
   - Numbers `.td--num` — right-aligned, `--font-mono`, `tabular-nums`.
-  - Sticky helpers: `.table--sticky-col`, `.table--sticky-head`.
+  - **Scroll region + sticky header (default).** `<Table>` renders inside its own
+    `.ui-table-scroll` region: it scrolls both ways and is capped at
+    `--ui-table-max-h` (the viewport less a margin), and the header row is
+    **sticky by default** (`stickyHead`, opt out with `stickyHead={false}`) on an opaque
+    `--surface` with the `--line` hairline under it. The region is the only place a
+    table scrolls — pages never wrap a `Table` in their own `overflow` container
+    (a wrapper or the shell's `overflow-x` turns into the sticky scroll container and
+    silently un-pins the header). Borders are `separate` so the hairline travels with
+    the pinned header. `stickyCol` pins the first column too (wide matrices), with a
+    `--line` hairline on its right edge; the corner cell sits above both.
 - **States:** row hover, `is-selected`, `Th` sort active.
 ```tsx
 <Card variant="flush"><Table density="comfortable">
@@ -522,6 +531,38 @@ The kit is **17 components**:
   <Segmented … /><Select … /><DateStepper … /><Button variant="primary">New</Button>
 </Toolbar>
 ```
+
+### 5.12b `FilterBar` + `SearchInput` + `NoMatches` — table filtering
+- **Purpose:** the one way to filter a table or list. Built once: the matching lives in
+  `useTableFilter` (`src/lib/tableFilter.ts`), the look lives here. **Pages never
+  hand-roll filter logic.**
+- **Hook:** `useTableFilter(rows, { text: row => [fields…], facets: { key: { label, value,
+  options?, optionLabel? } } }, { urlPrefix?, persist?, initial? })` → `{ rows, …controls }`.
+  Text search is case- and accent-insensitive; every term must hit some field. Facets
+  AND together; options derive from the data unless given. State is mirrored to the URL
+  (`q`, one param per facet key, prefixed per table) so a filtered view survives reload;
+  pass `persist: false` inside modals/drawers.
+- **`<FilterBar filter placeholder? noun? hideFacets?>`** — the table-top row inside the
+  flush `Card`, above the `Table`: `SearchInput` → one `Select` per facet ("All …"; a
+  facet with a single choice hides) → extra children → mono result count (`12 of 40
+  people`) + ghost **Clear** when anything is set. A facet the page already shows with its
+  own control (status `Tabs`) goes in `hideFacets` and binds through `filter.value/setValue`.
+- **`<NoMatches onClear>`** — the `EmptyState` for "filters matched nothing", always with
+  a **Clear filters** action. (The plain `EmptyState` stays for "there is no data".)
+- **Classes:** `.ui-filter-bar`, `__controls`, `__select`, `__meta`, `__count`; `.ui-search`,
+  `__icon`, `__input`, `__clear`. Tokens: `--ui-search-w`, `--ui-filter-select-max`.
+```tsx
+const filter = useTableFilter(users, {
+  text: (u) => [u.name, u.email],
+  facets: { role: { label: 'Roles', value: (u) => u.role } },
+});
+<Card variant="flush">
+  <FilterBar filter={filter} placeholder="Search people" noun={{ one: 'person', other: 'people' }} />
+  {filter.rows.length === 0 ? <NoMatches onClear={filter.clear} /> : <Table>…</Table>}
+</Card>
+```
+- Server-paginated lists filter on the server instead; this hook only ever sees the
+  rows already loaded.
 
 ### 5.13 `EmptyState`
 - **Purpose:** the one empty/zero-data treatment for every empty list/table/page.
