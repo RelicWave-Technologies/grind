@@ -48,10 +48,6 @@
   padding: var(--ui-sp-4) var(--ui-sp-6) 0;
 }
 
-.apv-table-wrap {
-  overflow-x: auto;
-}
-
 .apv-table {
   width: 100%;
   table-layout: fixed;

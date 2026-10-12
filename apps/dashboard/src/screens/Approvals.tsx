@@ -11,6 +11,7 @@ import type { DecideResult, ManualTimeRequest, MtrStatus, MtrUserSummary } from 
 import { addDays, fmtAgeShort, fmtDayLabel, fmtDurationMs, fmtTime, todayKey } from '../lib/format';
 import { dateKeyInTimeZone, daysBetween } from '@grind/types';
 import { reportQueryKeys } from '../lib/reportQueries';
+import { useTableFilter } from '../lib/tableFilter';
 import type { TaskOption } from '../components/TaskCombo';
 import {
   Avatar,
@@ -18,8 +19,10 @@ import {
   Button,
   Card,
   EmptyState,
+  FilterBar,
   IconButton,
   Identity,
+  NoMatches,
   Page,
   PageHeader,
   Segmented,
@@ -39,7 +42,8 @@ import {
 import type { Rail, Status } from '../ui';
 
 type ApprovalMode = 'you' | 'team';
-type ApprovalFilter = 'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED';
+/** Status tab value; '' is "All" (the filter hook's empty facet). */
+type ApprovalFilter = '' | 'PENDING' | 'APPROVED' | 'REJECTED';
 
 const MODE_TABS: ReadonlyArray<{ value: ApprovalMode; label: string }> = [
   { value: 'you', label: 'You' },
@@ -47,11 +51,13 @@ const MODE_TABS: ReadonlyArray<{ value: ApprovalMode; label: string }> = [
 ];
 
 const FILTER_TABS: ReadonlyArray<{ value: ApprovalFilter; label: string }> = [
-  { value: 'ALL', label: 'All' },
+  { value: '', label: 'All' },
   { value: 'PENDING', label: 'Pending' },
   { value: 'APPROVED', label: 'Accepted' },
   { value: 'REJECTED', label: 'Rejected' },
 ];
+
+const STATUS_OPTIONS = FILTER_TABS.filter((tab) => tab.value !== '');
 
 const STATUS_TAG: Record<MtrStatus, Status> = {
   PENDING: 'warn',
@@ -111,8 +117,6 @@ export function ApprovalsScreen() {
   const activeMode: ApprovalMode = canReview ? mode : 'you';
   const [from, setFrom] = useState(() => addDays(today, -6));
   const [to, setTo] = useState(today);
-  // A reviewer opens on the queue: everything still waiting, whatever its date.
-  const [filter, setFilter] = useState<ApprovalFilter>(() => (canReview ? 'PENDING' : 'ALL'));
   const [selectedRow, setSelectedRow] = useState<ApprovalTableRow | null>(null);
 
   const selfQ = useQuery({
@@ -177,14 +181,35 @@ export function ApprovalsScreen() {
     return (selfQ.data?.requests ?? []).map((req) => ({ source: 'you', req, requester: null }));
   }, [activeMode, selfQ.data?.requests, teamQ.data?.requests]);
 
-  const visible = useMemo(() => {
-    const filtered = filter === 'ALL' ? rows : rows.filter((row) => row.req.status === filter);
-    return [...filtered].sort((a, b) => {
-      const priority = statusPriority(a.req.status) - statusPriority(b.req.status);
-      if (priority !== 0) return priority;
-      return new Date(b.req.requestedStart).getTime() - new Date(a.req.requestedStart).getTime();
-    });
-  }, [filter, rows]);
+  const filter = useTableFilter(
+    rows,
+    {
+      text: (row) => {
+        const task = approvalTaskReadout(row.req, taskMap);
+        return [
+          row.requester?.name,
+          row.requester?.email,
+          row.req.reason,
+          task.kind === 'none' ? null : task.label,
+          dateKeyInTimeZone(new Date(row.req.requestedStart).getTime(), tz),
+        ];
+      },
+      facets: {
+        status: { label: 'Statuses', value: (row) => row.req.status, options: STATUS_OPTIONS },
+        // Only the team view has other people's requests to pick between.
+        person: { label: 'People', value: (row) => (row.source === 'team' ? row.requester?.name ?? null : null) },
+      },
+    },
+    // A reviewer opens on the queue: everything still waiting, whatever its date.
+    { initial: canReview ? { status: 'PENDING' } : undefined },
+  );
+  const statusFilter = filter.value('status') as ApprovalFilter;
+
+  const visible = [...filter.rows].sort((a, b) => {
+    const priority = statusPriority(a.req.status) - statusPriority(b.req.status);
+    if (priority !== 0) return priority;
+    return new Date(b.req.requestedStart).getTime() - new Date(a.req.requestedStart).getTime();
+  });
 
   const summary = useMemo(() => summarizeApprovals(rows.map((row) => row.req)), [rows]);
   const activeQuery = activeMode === 'team' ? teamQ : selfQ;
@@ -211,7 +236,8 @@ export function ApprovalsScreen() {
                 value={activeMode}
                 onChange={(next) => {
                   setMode(next);
-                  setFilter('ALL');
+                  filter.setValue('status', '');
+                  filter.setValue('person', '');
                   setSelectedRow(null);
                 }}
                 items={MODE_TABS}
@@ -252,8 +278,8 @@ export function ApprovalsScreen() {
           </div>
           <Tabs
             aria-label="Approval status"
-            value={filter}
-            onChange={setFilter}
+            value={statusFilter}
+            onChange={(next) => filter.setValue('status', next)}
             items={FILTER_TABS}
             className="apv-status-tabs"
           />
@@ -273,29 +299,48 @@ export function ApprovalsScreen() {
 
         {activeQuery.isLoading ? (
           <SkeletonTable rows={7} />
-        ) : visible.length === 0 ? (
+        ) : rows.length === 0 ? (
           <EmptyState
             icon={<Inbox size={22} strokeWidth={1.8} />}
-            title={filter === 'ALL' ? 'No approvals in this range' : `No ${filterLabel(filter).toLowerCase()} approvals`}
-            description="Try a wider date range or a different status."
+            title="No approvals in this range"
+            description="Try a wider date range."
           />
         ) : (
-          <ApprovalTable
-            mode={activeMode}
-            rows={visible}
-            tz={tz}
-            taskMap={taskMap}
-            currentUserId={me.id}
-            canSelfApproveOwn={canSelfApproveOwn}
-            busyRequestId={decide.isPending ? decide.variables?.id ?? null : null}
-            busyAction={decide.isPending ? decide.variables?.action ?? null : null}
-            onSelect={setSelectedRow}
-            onOpenDay={(date, req, userId) => {
-              navigate({ to: '/edit-time', search: editTimeSearch(date, req, userId) });
-            }}
-            onApprove={(id) => decide.mutate({ id, action: 'approve' })}
-            onReject={(id) => decide.mutate({ id, action: 'reject' })}
-          />
+          <>
+            <FilterBar
+              filter={filter}
+              placeholder={activeMode === 'team' ? 'Search member, reason, task…' : 'Search reason, task, date…'}
+              noun={{ one: 'request', other: 'requests' }}
+              hideFacets={['status']}
+            />
+            {visible.length === 0 ? (
+              <NoMatches
+                onClear={filter.clear}
+                description={
+                  statusFilter && !filter.query.trim() && !filter.value('person')
+                    ? `No ${filterLabel(statusFilter).toLowerCase()} approvals in this range.`
+                    : undefined
+                }
+              />
+            ) : (
+              <ApprovalTable
+                mode={activeMode}
+                rows={visible}
+                tz={tz}
+                taskMap={taskMap}
+                currentUserId={me.id}
+                canSelfApproveOwn={canSelfApproveOwn}
+                busyRequestId={decide.isPending ? decide.variables?.id ?? null : null}
+                busyAction={decide.isPending ? decide.variables?.action ?? null : null}
+                onSelect={setSelectedRow}
+                onOpenDay={(date, req, userId) => {
+                  navigate({ to: '/edit-time', search: editTimeSearch(date, req, userId) });
+                }}
+                onApprove={(id) => decide.mutate({ id, action: 'approve' })}
+                onReject={(id) => decide.mutate({ id, action: 'reject' })}
+              />
+            )}
+          </>
         )}
       </Card>
 
@@ -343,119 +388,117 @@ function ApprovalTable({
   onReject: (id: string) => void;
 }) {
   return (
-    <div className="apv-table-wrap">
-      <Table density="compact" stickyHead className={`apv-table apv-table--${mode}`}>
-        <THead>
-          <Tr>
-            {mode === 'team' && <Th className="apv-col-member">Member</Th>}
-            <Th className="apv-col-date">Date</Th>
-            <Th className="apv-col-time">Requested</Th>
-            <Th className="apv-col-status" align="center">Status</Th>
-            <Th className="apv-col-reason">Reason</Th>
-            {mode === 'team' && <Th className="apv-col-actions" align="center">Action</Th>}
-          </Tr>
-        </THead>
-        <Tbody>
-          {rows.map((row) => {
-            const req = row.req;
-            const startMs = new Date(req.requestedStart).getTime();
-            const endMs = new Date(req.requestedEnd).getTime();
-            const date = dateKeyInTimeZone(startMs, tz);
-            const createdMs = new Date(req.createdAt).getTime();
-            const decidedMs = req.decidedAt ? new Date(req.decidedAt).getTime() : null;
-            const task = approvalTaskReadout(req, taskMap);
-            const userId = row.requester?.id;
-            const isOwnRequest = userId === currentUserId;
-            const isBusy = busyRequestId === req.id;
-            return (
-              <Tr
-                key={`${row.source}-${req.id}`}
-                rail={railForApprovalStatus(req.status)}
-                className="apv-row"
-                tabIndex={0}
-                aria-label={`View approval details for ${date}`}
-                onClick={() => onSelect(row)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    onSelect(row);
-                  }
-                }}
-              >
-                {mode === 'team' && (
-                  <Td className="apv-col-member">
-                    {row.requester ? (
-                      <Identity
-                        name={row.requester.name}
-                        subtitle={row.requester.email}
-                        avatar={<Avatar name={row.requester.name} src={row.requester.avatarUrl ?? undefined} size={32} />}
-                      />
-                    ) : (
-                      <span className="ui-t-small">Unknown member</span>
-                    )}
-                  </Td>
-                )}
-                <Td className="apv-col-date">
-                  <div className="apv-date-cell">
-                    <span className="ui-t-strong">{fmtDayLabel(date, tz)}</span>
-                    <span className="ui-t-small ui-ink-3">{date}</span>
-                  </div>
-                </Td>
-                <Td className="apv-col-time">
-                  <div className="apv-time-cell">
-                    <span className="ui-mono">{fmtTime(startMs, tz)} - {fmtTime(endMs, tz)}</span>
-                    <Tag mono>{fmtDurationMs(endMs - startMs)}</Tag>
-                  </div>
-                </Td>
-                <Td className="apv-col-status" align="center">
-                  <ApprovalStatusCell req={req} createdMs={createdMs} decidedMs={decidedMs} timeZone={tz} />
-                </Td>
-                <Td className="apv-col-reason">
-                  <div className="apv-reason-row">
-                    <div className="apv-reason-cell">
-                      <span className="apv-reason-main">{req.reason}</span>
-                      {task.kind !== 'none' && (
-                        <span className={`apv-reason-meta ui-t-small${task.kind === 'missing' ? ' is-missing' : ''}`}>
-                          {task.label}
-                        </span>
-                      )}
-                    </div>
-                    {mode === 'you' && (
-                      <IconButton
-                        className="apv-open-day"
-                        size="sm"
-                        variant="ghost"
-                        icon={<Clock4 size={13} strokeWidth={1.8} />}
-                        aria-label={`Open Edit Time for ${date}`}
-                        title="Open day"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onOpenDay(date, req);
-                        }}
-                      />
-                    )}
-                  </div>
-                </Td>
-                {mode === 'team' && (
-                  <Td className="apv-col-actions" align="center">
-                    <TeamDecisionCell
-                      req={req}
-                      isOwnRequest={isOwnRequest}
-                      canSelfApproveOwn={canSelfApproveOwn}
-                      busy={isBusy}
-                      busyAction={isBusy ? busyAction : null}
-                      onApprove={() => onApprove(req.id)}
-                      onReject={() => onReject(req.id)}
-                      onOpenDay={() => onOpenDay(date, req, userId)}
+    <Table density="compact" className={`apv-table apv-table--${mode}`}>
+      <THead>
+        <Tr>
+          {mode === 'team' && <Th className="apv-col-member">Member</Th>}
+          <Th className="apv-col-date">Date</Th>
+          <Th className="apv-col-time">Requested</Th>
+          <Th className="apv-col-status" align="center">Status</Th>
+          <Th className="apv-col-reason">Reason</Th>
+          {mode === 'team' && <Th className="apv-col-actions" align="center">Action</Th>}
+        </Tr>
+      </THead>
+      <Tbody>
+        {rows.map((row) => {
+          const req = row.req;
+          const startMs = new Date(req.requestedStart).getTime();
+          const endMs = new Date(req.requestedEnd).getTime();
+          const date = dateKeyInTimeZone(startMs, tz);
+          const createdMs = new Date(req.createdAt).getTime();
+          const decidedMs = req.decidedAt ? new Date(req.decidedAt).getTime() : null;
+          const task = approvalTaskReadout(req, taskMap);
+          const userId = row.requester?.id;
+          const isOwnRequest = userId === currentUserId;
+          const isBusy = busyRequestId === req.id;
+          return (
+            <Tr
+              key={`${row.source}-${req.id}`}
+              rail={railForApprovalStatus(req.status)}
+              className="apv-row"
+              tabIndex={0}
+              aria-label={`View approval details for ${date}`}
+              onClick={() => onSelect(row)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  onSelect(row);
+                }
+              }}
+            >
+              {mode === 'team' && (
+                <Td className="apv-col-member">
+                  {row.requester ? (
+                    <Identity
+                      name={row.requester.name}
+                      subtitle={row.requester.email}
+                      avatar={<Avatar name={row.requester.name} src={row.requester.avatarUrl ?? undefined} size={32} />}
                     />
-                  </Td>
-                )}
-              </Tr>
-            );
-          })}
-        </Tbody>
-      </Table>
-    </div>
+                  ) : (
+                    <span className="ui-t-small">Unknown member</span>
+                  )}
+                </Td>
+              )}
+              <Td className="apv-col-date">
+                <div className="apv-date-cell">
+                  <span className="ui-t-strong">{fmtDayLabel(date, tz)}</span>
+                  <span className="ui-t-small ui-ink-3">{date}</span>
+                </div>
+              </Td>
+              <Td className="apv-col-time">
+                <div className="apv-time-cell">
+                  <span className="ui-mono">{fmtTime(startMs, tz)} - {fmtTime(endMs, tz)}</span>
+                  <Tag mono>{fmtDurationMs(endMs - startMs)}</Tag>
+                </div>
+              </Td>
+              <Td className="apv-col-status" align="center">
+                <ApprovalStatusCell req={req} createdMs={createdMs} decidedMs={decidedMs} timeZone={tz} />
+              </Td>
+              <Td className="apv-col-reason">
+                <div className="apv-reason-row">
+                  <div className="apv-reason-cell">
+                    <span className="apv-reason-main">{req.reason}</span>
+                    {task.kind !== 'none' && (
+                      <span className={`apv-reason-meta ui-t-small${task.kind === 'missing' ? ' is-missing' : ''}`}>
+                        {task.label}
+                      </span>
+                    )}
+                  </div>
+                  {mode === 'you' && (
+                    <IconButton
+                      className="apv-open-day"
+                      size="sm"
+                      variant="ghost"
+                      icon={<Clock4 size={13} strokeWidth={1.8} />}
+                      aria-label={`Open Edit Time for ${date}`}
+                      title="Open day"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onOpenDay(date, req);
+                      }}
+                    />
+                  )}
+                </div>
+              </Td>
+              {mode === 'team' && (
+                <Td className="apv-col-actions" align="center">
+                  <TeamDecisionCell
+                    req={req}
+                    isOwnRequest={isOwnRequest}
+                    canSelfApproveOwn={canSelfApproveOwn}
+                    busy={isBusy}
+                    busyAction={isBusy ? busyAction : null}
+                    onApprove={() => onApprove(req.id)}
+                    onReject={() => onReject(req.id)}
+                    onOpenDay={() => onOpenDay(date, req, userId)}
+                  />
+                </Td>
+              )}
+            </Tr>
+          );
+        })}
+      </Tbody>
+    </Table>
   );
 }
 
