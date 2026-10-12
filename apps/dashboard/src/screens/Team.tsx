@@ -17,11 +17,11 @@ import {
   IDLE_WARNING_SECONDS_MAX,
   IDLE_WARNING_SECONDS_MIN,
   SCREENSHOT_INTERVAL_OPTIONS,
-  addDays,
   dateKeyInTimeZone,
 } from '@grind/types';
 import { api } from '../lib/api';
 import type { Role } from '../lib/auth';
+import { defaultReportRange } from '../lib/reportRange';
 import {
   Avatar,
   Banner,
@@ -115,7 +115,8 @@ export function TeamScreen() {
   const policy = policyQ.data;
   const tz = me.workspaceTimezone;
   const today = dateKeyInTimeZone(Date.now(), tz);
-  const drawerFrom = addDays(today, -6);
+  // The member report drawer opens on the same payroll-timed range as Reports.
+  const drawerRange = defaultReportRange(today);
 
   function patchMember(userId: string, field: PendingField, patch: PatchTeamMemberSettingsRequest) {
     setPendingEdit({ userId, field });
@@ -293,8 +294,8 @@ export function TeamScreen() {
       {selectedUserId && (
         <TeamMemberDetailDrawer
           userId={selectedUserId}
-          initialFrom={drawerFrom}
-          initialTo={today}
+          initialFrom={drawerRange.from}
+          initialTo={drawerRange.to}
           today={today}
           tz={tz}
           onClose={() => setSelectedUserId(null)}

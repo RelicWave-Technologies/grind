@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { api, API_BASE } from '../lib/api';
 import { useMonthReportDownload, fmtMonthShort, fmtMonthLong } from '../lib/useMonthReportDownload';
+import { defaultReportRange } from '../lib/reportRange';
 import {
   addDays,
   calendarDateInstant,
@@ -136,8 +137,9 @@ export function ReportsScreen() {
   const { me } = useRouteContext({ from: '/authed' });
   const tz = me.workspaceTimezone;
   const today = todayKey(tz);
-  const [from, setFrom] = useState(() => addDays(today, -6));
-  const [to, setTo] = useState(today);
+  // Payroll timing: up to the 10th the whole previous month, then this month so far.
+  const [from, setFrom] = useState(() => defaultReportRange(today).from);
+  const [to, setTo] = useState(() => defaultReportRange(today).to);
   const [modal, setModal] = useState<ReportModalState | null>(null);
   const canReadTeam = hasCapability(me, 'reports.team.read');
 
