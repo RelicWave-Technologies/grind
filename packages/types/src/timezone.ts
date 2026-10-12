@@ -25,6 +25,15 @@ const MAX_DAY_WINDOW_CACHE_ENTRIES = 512;
 const validTimeZones = new Map<string, boolean>();
 const zonedPartsFormatters = new Map<string, Intl.DateTimeFormat>();
 const localDayWindows = new Map<string, { startMs: number; endMs: number } | null>();
+/**
+ * Resolved wall clocks, as epoch ms. Each resolution formats the instant seven
+ * times or more through Intl, and the reports resolve the same few clocks (a
+ * shift start, a punch-in minute, a cut-off) for every person on every date —
+ * thousands of times per month report. The answer is a pure function of the
+ * clock and the zone, so it is safe to keep.
+ */
+const MAX_ZONED_INSTANT_CACHE_ENTRIES = 50_000;
+const zonedInstants = new Map<string, readonly number[]>();
 
 function cacheBounded<K, V>(cache: Map<K, V>, key: K, value: V, maxEntries: number): V {
   if (!cache.has(key) && cache.size >= maxEntries) {
@@ -116,6 +125,15 @@ function utcMillis(parts: ZonedDateTimeParts): number {
  */
 export function possibleInstantsForZonedDateTime(parts: ZonedDateTimeParts, timeZone: string): Date[] {
   if (!isValidTimeZone(timeZone)) throw new Error('invalid_timezone');
+  const cacheKey = `${timeZone}\u0000${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}`;
+  const cached = zonedInstants.get(cacheKey);
+  if (cached) return cached.map((ms) => new Date(ms));
+  const resolved = resolvePossibleInstants(parts, timeZone);
+  cacheBounded(zonedInstants, cacheKey, resolved.map((d) => d.getTime()), MAX_ZONED_INSTANT_CACHE_ENTRIES);
+  return resolved;
+}
+
+function resolvePossibleInstants(parts: ZonedDateTimeParts, timeZone: string): Date[] {
   const target = utcMillis(parts);
   const offsets = new Set<number>();
   // Both offsets around every modern DST transition occur within this window.

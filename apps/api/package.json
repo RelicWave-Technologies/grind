@@ -12,6 +12,7 @@
     "lint": "eslint src",
     "test": "dotenv -e ../../.env -- vitest run",
     "test:watch": "dotenv -e ../../.env -- vitest",
+    "test:perf": "dotenv -e ../../.env -- vitest run --config vitest.perf.config.ts",
     "reconcile:legacy-timers": "dotenv -e ../../.env -- tsx scripts/reconcile-legacy-timers.ts",
     "link:orphaned-evidence": "dotenv -e ../../.env -- tsx scripts/link-orphaned-evidence.ts"
   },

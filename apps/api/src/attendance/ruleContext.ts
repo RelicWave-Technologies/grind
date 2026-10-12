@@ -10,7 +10,7 @@ import { leaveDateRange } from '../leave/workingCalendar';
 import { loadApprovedWfh, loadOrCreateLeavePolicy, loadWorkingCalendar } from '../leave/repository';
 import { loadPunchLookup, type PunchLookup } from './punches';
 import { isLateArrival, judgeDay, withLateRule, type AttendanceRulePolicy } from './rules';
-import { loadDayFacts } from '../time';
+import { dayFactsFrom, loadDayFactAssignments } from '../time';
 
 /**
  * Everything the attendance rules need beyond the calendar and the hours,
@@ -64,7 +64,17 @@ export async function loadAttendanceRuleContext(input: {
   // Late arrivals are counted per calendar month, so the count for a day in the
   // middle of the range needs every day since its month began.
   const monthStart = `${input.from.slice(0, 7)}-01`;
-  const [people, punchFor] = await Promise.all([
+  const rulesFrom = policy.from && policy.from <= input.to && input.userIds.length > 0 ? policy.from : null;
+
+  const fromDate = new Date(`${input.from}T00:00:00Z`);
+  const toDate = new Date(`${input.to}T00:00:00Z`);
+  const overlap = { startDate: { lte: toDate }, endDate: { gte: fromDate } };
+  const lateFrom = rulesFrom && monthStart <= rulesFrom ? rulesFrom : monthStart;
+  const dates = !rulesFrom || input.to < lateFrom ? [] : leaveDateRange(lateFrom, input.to, 400);
+
+  // One round of reads: none of them needs another's rows, and the rule rows
+  // are only read when the rules are on.
+  const [people, punchFor, ruleRows] = await Promise.all([
     input.userIds.length === 0
       ? []
       : prisma.user.findMany({
@@ -72,42 +82,42 @@ export async function loadAttendanceRuleContext(input: {
           select: { id: true, attendanceRuleMode: true },
         }),
     loadPunchLookup({ userIds: input.userIds, from: monthStart, to: input.to }),
+    rulesFrom === null
+      ? null
+      : Promise.all([
+          prisma.attendancePunch.groupBy({
+            by: ['date'],
+            where: { workspaceId: input.workspaceId, date: { gte: fromDate, lte: toDate } },
+          }),
+          loadApprovedWfh({ workspaceId: input.workspaceId, userIds: input.userIds, from: input.from, to: input.to }),
+          prisma.leaveRequest.findMany({
+            where: {
+              workspaceId: input.workspaceId,
+              userId: { in: input.userIds },
+              status: { in: ['PENDING', 'REJECTED'] },
+              ...overlap,
+            },
+            select: { userId: true, startDate: true, endDate: true },
+          }),
+          loadWorkingCalendar({ workspaceId: input.workspaceId, tz: input.tz, userIds: input.userIds, from: lateFrom, to: input.to }),
+          prisma.attendanceOverride.findMany({
+            where: {
+              userId: { in: input.userIds },
+              date: { gte: new Date(`${lateFrom}T00:00:00Z`), lte: toDate },
+            },
+            select: { userId: true, date: true },
+          }),
+          dates.length === 0
+            ? null
+            : loadDayFactAssignments({ userIds: input.userIds, from: lateFrom, to: input.to, tz: input.tz }),
+        ]),
   ]);
   const modeOf = new Map(people.map((p) => [p.id, p.attendanceRuleMode]));
   const modeFor = (userId: string): AttendanceRuleMode => modeOf.get(userId) ?? 'STANDARD';
-  if (!policy.from || policy.from > input.to || input.userIds.length === 0) {
+  if (!ruleRows || !policy.from) {
     return { policy, enabled: false, judge: () => null, lateOrdinalFor: () => null, modeFor, punchFor };
   }
-
-  const fromDate = new Date(`${input.from}T00:00:00Z`);
-  const toDate = new Date(`${input.to}T00:00:00Z`);
-  const overlap = { startDate: { lte: toDate }, endDate: { gte: fromDate } };
-  const lateFrom = monthStart > policy.from ? monthStart : policy.from;
-
-  const [coveredDates, wfhApproved, unapprovedLeave, calendar, overrides] = await Promise.all([
-    prisma.attendancePunch.groupBy({
-      by: ['date'],
-      where: { workspaceId: input.workspaceId, date: { gte: fromDate, lte: toDate } },
-    }),
-    loadApprovedWfh({ workspaceId: input.workspaceId, userIds: input.userIds, from: input.from, to: input.to }),
-    prisma.leaveRequest.findMany({
-      where: {
-        workspaceId: input.workspaceId,
-        userId: { in: input.userIds },
-        status: { in: ['PENDING', 'REJECTED'] },
-        ...overlap,
-      },
-      select: { userId: true, startDate: true, endDate: true },
-    }),
-    loadWorkingCalendar({ workspaceId: input.workspaceId, tz: input.tz, userIds: input.userIds, from: lateFrom, to: input.to }),
-    prisma.attendanceOverride.findMany({
-      where: {
-        userId: { in: input.userIds },
-        date: { gte: new Date(`${lateFrom}T00:00:00Z`), lte: toDate },
-      },
-      select: { userId: true, date: true },
-    }),
-  ]);
+  const [coveredDates, wfhApproved, unapprovedLeave, calendar, overrides, shiftAssignments] = ruleRows;
 
   const coverage = new Set(coveredDates.map((r) => r.date.toISOString().slice(0, 10)));
   const ranges = (rows: Array<{ userId: string; startDate: Date; endDate: Date }>) => {
@@ -126,13 +136,9 @@ export async function loadAttendanceRuleContext(input: {
   // Late arrivals, numbered within each month in date order: the door punch-in
   // against the shift assigned for that date, one grace for everyone (on a
   // first-half leave day, the policy's afternoon time instead).
-  const dates = input.to < lateFrom ? [] : leaveDateRange(lateFrom, input.to, 400);
-  const facts = dates.length === 0
+  const facts = shiftAssignments === null
     ? null
-    : await loadDayFacts({
-        userIds: input.userIds,
-        from: lateFrom,
-        to: input.to,
+    : dayFactsFrom(shiftAssignments, {
         tz: input.tz,
         calendar: { dayStatusFor: (userId, date) => calendar.dayStatus(userId, date) },
         punchFor,

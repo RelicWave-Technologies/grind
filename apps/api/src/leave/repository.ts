@@ -20,6 +20,8 @@ import {
   type LeaveCredit,
 } from './leaveFunding';
 import { RULE_SOURCE_PREFIX } from '../attendance/ruleLedger';
+import { memoizedRead } from '../lib/readMemo';
+import { isUniqueViolation } from '../lib/prismaErrors';
 
 /**
  * The seam between the database and the two pure modules.
@@ -57,9 +59,24 @@ export function fromIsoDate(date: string): Date {
 }
 
 export async function loadOrCreateLeavePolicy(workspaceId: string, db: Tx | typeof prisma = prisma) {
-  const existing = await db.leavePolicy.findUnique({ where: { workspaceId } });
-  if (existing) return existing;
-  return db.leavePolicy.create({ data: { workspaceId, ...LEAVE_POLICY_DEFAULTS } });
+  const load = async () => {
+    const existing = await db.leavePolicy.findUnique({ where: { workspaceId } });
+    if (existing) return existing;
+    try {
+      return await db.leavePolicy.create({ data: { workspaceId, ...LEAVE_POLICY_DEFAULTS } });
+    } catch (err) {
+      // Two loaders running side by side (the reports read the policy from
+      // several places at once) can both find no row and both create it; the
+      // loser reads the winner's. Not inside a transaction, which the failed
+      // insert has already aborted.
+      if (db !== prisma || !isUniqueViolation(err)) throw err;
+      const created = await db.leavePolicy.findUnique({ where: { workspaceId } });
+      if (!created) throw err;
+      return created;
+    }
+  };
+  // Read once per read-only request (see lib/readMemo); never inside a transaction.
+  return db === prisma ? memoizedRead(`leavePolicy\u0000${workspaceId}`, load) : load();
 }
 
 export function toLeavePolicyDto(row: {
@@ -134,7 +151,10 @@ export async function loadWorkingCalendar(input: {
   const fromDate = fromIsoDate(loadFrom);
   const toDate = fromIsoDate(input.to);
 
-  const [users, assignments, holidays, leave, credits, overrides, ruleCharges] = await Promise.all([
+  // The same rows for the same window are asked for twice by a report (the
+  // rules' late count and the report itself, from different `from`s that
+  // resolve to the same funding window); read them once per request.
+  const loadRows = () => Promise.all([
     db.user.findMany({
       where: { id: { in: input.userIds } },
       select: {
@@ -221,6 +241,12 @@ export async function loadWorkingCalendar(input: {
       select: { userId: true, effectiveOn: true, days: true, reason: true },
     }),
   ]);
+  const [users, assignments, holidays, leave, credits, overrides, ruleCharges] = db === prisma
+    ? await memoizedRead(
+        `calendarRows\u0000${input.workspaceId}\u0000${loadFrom}\u0000${input.to}\u0000${input.userIds.join(',')}`,
+        loadRows,
+      )
+    : await loadRows();
 
   const userTeamIds: Record<string, string | null> = {};
   const lastSaturdayOffFor: Record<string, boolean> = {};
