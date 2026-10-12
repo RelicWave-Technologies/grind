@@ -1,10 +1,11 @@
 import './shifts.css';
-import { type ReactNode, useState } from 'react';
+import { type ReactNode, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { CalendarClock, CalendarDays, Check, Clock3, Mail, Pencil, Plus, Trash2, UserRound, Users2, X } from 'lucide-react';
 import { api, type ApiError } from '../lib/api';
 import type { Shift, ShiftSchedule, DaySchedule, WeekdayKey } from '../lib/types';
+import { useTableFilter } from '../lib/tableFilter';
 import {
   Page,
   PageHeader,
@@ -28,6 +29,9 @@ import {
   Skeleton,
   Avatar,
   List,
+  FilterBar,
+  NoMatches,
+  SearchInput,
 } from '../ui';
 
 const WEEK: { key: WeekdayKey; label: string }[] = [
@@ -129,6 +133,20 @@ export function ShiftsScreen() {
   const avgWorkingDays = shifts.length
     ? shifts.reduce((sum, shift) => sum + countWorkingDays(shift.schedule), 0) / shifts.length
     : null;
+  const memberNamesByShift = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const user of users) {
+      if (!user.shiftId) continue;
+      map.set(user.shiftId, [...(map.get(user.shiftId) ?? []), user.name]);
+    }
+    return map;
+  }, [users]);
+  const filter = useTableFilter(shifts, {
+    text: (sh) => [sh.name, summariseSchedule(sh.schedule), ...(memberNamesByShift.get(sh.id) ?? [])],
+    facets: {
+      days: { label: 'Working days', value: (sh) => workingDaysLabel(countWorkingDays(sh.schedule)) },
+    },
+  });
 
   return (
     <Page className="shf-page">
@@ -176,7 +194,6 @@ export function ShiftsScreen() {
               <span className="ui-t-eyebrow">Saved shifts</span>
               <h2 className="shf-section-title ui-t-title">Schedule templates</h2>
             </div>
-            <Tag mono>{q.data ? count : '—'}</Tag>
           </div>
 
           {q.isLoading && (
@@ -207,24 +224,36 @@ export function ShiftsScreen() {
             />
           )}
           {q.data && q.data.shifts.length > 0 && (
-            <div className="shf-stack">
-              {q.data.shifts.map((sh) => (
-                <ShiftRow
-                  key={sh.id}
-                  shift={sh}
-                  busy={(patch.isPending && patch.variables?.id === sh.id) || (del.isPending && del.variables === sh.id)}
-                  error={
-                    (patch.isError && patch.variables?.id === sh.id
-                      ? (patch.error as Error | ApiError).message
-                      : null) ||
-                    (del.isError && del.variables === sh.id ? (del.error as Error | ApiError).message : null)
-                  }
-                  onPatch={(p) => patch.mutate({ id: sh.id, patch: p })}
-                  onDelete={() => del.mutate(sh.id)}
-                  onOpen={() => setSelectedShiftId(sh.id)}
+            <>
+              <Card variant="flush">
+                <FilterBar
+                  filter={filter}
+                  placeholder="Search shift, days, member…"
+                  noun={{ one: 'shift', other: 'shifts' }}
                 />
-              ))}
-            </div>
+                {filter.rows.length === 0 && <NoMatches onClear={filter.clear} />}
+              </Card>
+              {filter.rows.length > 0 && (
+                <div className="shf-stack">
+                  {filter.rows.map((sh) => (
+                    <ShiftRow
+                      key={sh.id}
+                      shift={sh}
+                      busy={(patch.isPending && patch.variables?.id === sh.id) || (del.isPending && del.variables === sh.id)}
+                      error={
+                        (patch.isError && patch.variables?.id === sh.id
+                          ? (patch.error as Error | ApiError).message
+                          : null) ||
+                        (del.isError && del.variables === sh.id ? (del.error as Error | ApiError).message : null)
+                      }
+                      onPatch={(p) => patch.mutate({ id: sh.id, patch: p })}
+                      onDelete={() => del.mutate(sh.id)}
+                      onOpen={() => setSelectedShiftId(sh.id)}
+                    />
+                  ))}
+                </div>
+              )}
+            </>
           )}
         </section>
       </div>
@@ -470,9 +499,7 @@ function ShiftRow({
             ) : (
               <Tag mono>Buffer {shift.bufferMin}m</Tag>
             )}
-            <Tag status="info">
-              {workingDays} working {workingDays === 1 ? 'day' : 'days'}
-            </Tag>
+            <Tag status="info">{workingDaysLabel(workingDays)}</Tag>
           </div>
 
           <div className="shf-actions" onClick={(event) => event.stopPropagation()}>
@@ -560,6 +587,7 @@ function ShiftDrawer({
   const activeSchedule = editing ? schedule : shift.schedule;
   const activeBufferMin = editing ? bufferMin : shift.bufferMin;
   const workingDays = countWorkingDays(activeSchedule);
+  const memberFilter = useTableFilter(members, { text: (m) => [m.name, m.email] }, { persist: false });
 
   function resetDraft() {
     setName(shift.name);
@@ -715,29 +743,42 @@ function ShiftDrawer({
                 description="Add people to make this shift available in their day and reports."
               />
             ) : (
-              <List className="shf-member-list">
-                {members.map((member) => (
-                  <div key={member.id} className="shf-member-row">
-                    <Avatar name={member.name} size={32} />
-                    <div className="shf-member-main">
-                      <span className="ui-t-strong">{member.name}</span>
-                      <span className="ui-t-small">
-                        <Mail size={13} strokeWidth={1.8} aria-hidden /> {member.email}
-                      </span>
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      icon={<X size={13} strokeWidth={2} />}
-                      loading={busyUserId === member.id}
-                      disabled={Boolean(busyUserId)}
-                      onClick={() => onRemove(member.id)}
-                    >
-                      Remove
-                    </Button>
-                  </div>
-                ))}
-              </List>
+              <>
+                <SearchInput
+                  block
+                  className="shf-search"
+                  value={memberFilter.query}
+                  onChange={memberFilter.setQuery}
+                  placeholder="Search members"
+                />
+                {memberFilter.rows.length === 0 ? (
+                  <NoMatches onClear={memberFilter.clear} />
+                ) : (
+                  <List className="shf-member-list">
+                    {memberFilter.rows.map((member) => (
+                      <div key={member.id} className="shf-member-row">
+                        <Avatar name={member.name} size={32} />
+                        <div className="shf-member-main">
+                          <span className="ui-t-strong">{member.name}</span>
+                          <span className="ui-t-small">
+                            <Mail size={13} strokeWidth={1.8} aria-hidden /> {member.email}
+                          </span>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          icon={<X size={13} strokeWidth={2} />}
+                          loading={busyUserId === member.id}
+                          disabled={Boolean(busyUserId)}
+                          onClick={() => onRemove(member.id)}
+                        >
+                          Remove
+                        </Button>
+                      </div>
+                    ))}
+                  </List>
+                )}
+              </>
             )}
           </section>
         </div>
@@ -791,6 +832,11 @@ function ShiftAddMemberModal({
 }) {
   const [userId, setUserId] = useState('');
   const canSubmit = Boolean(userId);
+  const picker = useTableFilter(users, { text: (u) => [u.name, u.email, roleLabel(u.role)] }, { persist: false });
+  // The picked person stays listed while the search narrows the rest.
+  const options = picker.rows.some((u) => u.id === userId)
+    ? picker.rows
+    : [...users.filter((u) => u.id === userId), ...picker.rows];
 
   return (
     <div className="shf-nested-layer" role="presentation" onMouseDown={onClose}>
@@ -816,12 +862,25 @@ function ShiftAddMemberModal({
           <IconButton icon={<X size={18} strokeWidth={1.9} />} aria-label="Close add member dialog" onClick={onClose} />
         </div>
         <div className="shf-modal-body">
-          <Field label="Person">
+          <Field label="Person" className="shf-picker">
+            {users.length > 0 && (
+              <SearchInput
+                block
+                className="shf-search"
+                value={picker.query}
+                onChange={picker.setQuery}
+                placeholder="Search name or email"
+              />
+            )}
             <Select value={userId} onChange={(event) => setUserId(event.target.value)} disabled={users.length === 0} required>
               <option value="" disabled>
-                {users.length === 0 ? 'No people available' : 'Select a person'}
+                {users.length === 0
+                  ? 'No people available'
+                  : picker.rows.length === 0
+                    ? 'No matches'
+                    : 'Select a person'}
               </option>
-              {users.map((user) => (
+              {options.map((user) => (
                 <option key={user.id} value={user.id}>
                   {user.name} · {roleLabel(user.role)}
                 </option>
@@ -867,7 +926,8 @@ function ScheduleEditor({
 
   return (
     <div className="shf-editor">
-      <Table density="compact">
+      {/* A fixed seven-row form inside its own frame: nothing to pin. */}
+      <Table density="compact" stickyHead={false}>
         <THead>
           <Tr>
             <Th>Day</Th>
@@ -967,6 +1027,10 @@ function summariseSchedule(s: ShiftSchedule): string {
 
 function countWorkingDays(s: ShiftSchedule): number {
   return WEEK.filter((w) => s[w.key] !== null).length;
+}
+
+function workingDaysLabel(count: number): string {
+  return `${count} working ${count === 1 ? 'day' : 'days'}`;
 }
 
 function formatNumber(value: number): string {

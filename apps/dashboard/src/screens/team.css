@@ -35,10 +35,6 @@
   margin-top: var(--ui-sp-1);
 }
 
-.tm-table-wrap {
-  overflow-x: auto;
-}
-
 .tm-members-table {
   min-width: 100%;
   width: 100%;
