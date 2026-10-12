@@ -31,9 +31,9 @@ function minuteOfTimeColumn(value: Date | null): number | null {
 
 /**
  * The punch-in as an instant: its clock reading on that date in the workspace
- * timezone. The attendance rules' late count is judged on this, so it is the
- * very minute the month sheet's Office In prints — the eTime import stores the
- * wall clock it shows ('09:20:00' for a 09:20 badge-in), never a UTC time.
+ * timezone. Lateness is judged on this, so it is the very minute the Punch in
+ * column prints — the eTime import stores the wall clock it shows ('09:20:00'
+ * for a 09:20 badge-in), never a UTC time.
  */
 export function punchInMs(punch: DayPunch | null, date: string, tz: string): number | null {
   return punch?.inMinute == null ? null : instantForLocalMinute(date, punch.inMinute, tz);

@@ -14,10 +14,10 @@ import {
   DEFAULT_LATE_GRACE_MINUTES,
   FULL_DAY_MINUTES,
   HALF_DAY_MINUTES,
-  arrivalStatusFor,
   dayCredit,
   isLate,
   lateExempt,
+  shiftStatusFor,
 } from './classify';
 
 const MIN = 60_000;
@@ -283,6 +283,9 @@ describe('late rule', () => {
     expect(isLate({ punchInMs: lateStart, shiftStartMs, mode: null })).toBe(true);
     expect(isLate({ punchInMs: lateStart, shiftStartMs, mode: 'REMOTE' })).toBe(false);
     expect(isLate({ punchInMs: lateStart, shiftStartMs, mode: 'EXEMPT' })).toBe(false);
+    // The label agrees: a remote person past the start is on time, not late.
+    expect(shiftStatusFor({ shiftStartMs, punchInMs: lateStart, countedMs: H, mode: 'REMOTE' })).toBe('on_time');
+    expect(shiftStatusFor({ shiftStartMs, punchInMs: lateStart, countedMs: H, mode: 'STANDARD' })).toBe('late');
   });
 
   it('on first-half leave is late only after the afternoon time, with no grace', () => {
@@ -302,11 +305,42 @@ describe('late rule', () => {
     expect(firstHalf('PAID_LEAVE', shiftStartMs + 3 * H)).toBe(false);
     // Without an afternoon time the day is not judged.
     expect(firstHalf('PAID_LEAVE', afternoon + H, null)).toBe(false);
+    expect(shiftStatusFor({
+      shiftStartMs,
+      punchInMs: afternoon + MIN,
+      countedMs: H,
+      halfDayLateAfterMs: afternoon,
+      status: { kind: 'PAID_LEAVE', portion: 'FIRST_HALF', expectedFraction: 0.5 },
+    })).toBe('late');
   });
 
-  // Naina, 2026-10-09: badged in at 09:20, Timo started at 09:33. For the
-  // rules the door decides — she was on time, and when Timo started does not
-  // enter into it.
+  it('labels the day the same way the rule does', () => {
+    expect(shiftStatusFor({ shiftStartMs, punchInMs: shiftStartMs - MIN, countedMs: H })).toBe('early');
+    expect(shiftStatusFor({ shiftStartMs, punchInMs: shiftStartMs + 10 * MIN, countedMs: H })).toBe('on_time');
+    expect(shiftStatusFor({ shiftStartMs, punchInMs: shiftStartMs + H, countedMs: H })).toBe('late');
+    expect(shiftStatusFor({ shiftStartMs, punchInMs: null, countedMs: 0 })).toBe('no_activity');
+    // Punched in but nothing counted: still no activity.
+    expect(shiftStatusFor({ shiftStartMs, punchInMs: shiftStartMs + H, countedMs: 0 })).toBe('no_activity');
+    // Worked but never punched in: no arrival to judge, never late or early.
+    expect(shiftStatusFor({ shiftStartMs, punchInMs: null, countedMs: H })).toBe('on_time');
+    expect(shiftStatusFor({ shiftStartMs: null, punchInMs: null, countedMs: 0 })).toBe('no_shift');
+    expect(shiftStatusFor({
+      shiftStartMs,
+      punchInMs: shiftStartMs + H,
+      countedMs: H,
+      status: { kind: 'HOLIDAY', portion: null, expectedFraction: 0 },
+    })).toBe('on_time');
+  });
+
+  it('reads Late exactly as the rules counted it when they say', () => {
+    // Late by the clock, but the rules did not count it (exempt / corrected).
+    expect(shiftStatusFor({ shiftStartMs, punchInMs: shiftStartMs + H, countedMs: H, late: false })).toBe('on_time');
+    expect(shiftStatusFor({ shiftStartMs, punchInMs: shiftStartMs - MIN, countedMs: H, late: false })).toBe('early');
+    expect(shiftStatusFor({ shiftStartMs, punchInMs: shiftStartMs + H, countedMs: H, late: true })).toBe('late');
+  });
+
+  // Naina, 2026-10-09: badged in at 09:20, Timo started at 09:33. The door
+  // decides — she was on time, and when Timo started does not enter into it.
   it('judges by the door punch-in, not by when tracked work started', () => {
     const date = '2026-10-09';
     const tz = 'Asia/Kolkata';
@@ -316,9 +350,12 @@ describe('late rule', () => {
     const working = { kind: 'WORKING', portion: null, expectedFraction: 1 } as const;
 
     expect(isLate({ ...base, status: working, punchInMs: clock(9 * 60 + 20) })).toBe(false);
+    expect(shiftStatusFor({ ...base, status: working, punchInMs: clock(9 * 60 + 20), countedMs: 8 * H })).toBe('on_time');
     expect(isLate({ ...base, status: working, punchInMs: clock(9 * 60 + 35) })).toBe(true);
+    expect(shiftStatusFor({ ...base, status: working, punchInMs: clock(9 * 60 + 35), countedMs: 8 * H })).toBe('late');
     // No punch-in, tracked from 10:30: not late.
     expect(isLate({ ...base, status: working, punchInMs: null })).toBe(false);
+    expect(shiftStatusFor({ ...base, status: working, punchInMs: null, countedMs: 6 * H })).toBe('on_time');
     // First-half leave: the afternoon time, no grace.
     const firstHalf = { kind: 'PAID_LEAVE', portion: 'FIRST_HALF', expectedFraction: 0.5 } as const;
     expect(isLate({ ...base, status: firstHalf, punchInMs: clock(14 * 60 + 10) })).toBe(true);
@@ -326,79 +363,7 @@ describe('late rule', () => {
     // REMOTE and EXEMPT people are never late, whatever the door says.
     expect(isLate({ ...base, status: working, mode: 'REMOTE', punchInMs: clock(11 * 60) })).toBe(false);
     expect(isLate({ ...base, status: working, mode: 'EXEMPT', punchInMs: clock(11 * 60) })).toBe(false);
-  });
-});
-
-describe('arrival label (Timo start)', () => {
-  const date = '2026-10-09';
-  const tz = 'Asia/Kolkata';
-  const clock = (minute: number) => instantForLocalMinute(date, minute, tz)!;
-  const shiftStartMs = clock(9 * 60);
-  const working = { kind: 'WORKING', portion: null, expectedFraction: 1 } as const;
-  const base = { shiftStartMs, graceMinutes: 30, halfDayLateAfterMs: clock(14 * 60), status: working, countedMs: 8 * H };
-
-  it('reads late, early and on time from when Timo started, with the company grace', () => {
-    expect(arrivalStatusFor({ ...base, startMs: clock(8 * 60 + 59) })).toBe('early');
-    expect(arrivalStatusFor({ ...base, startMs: clock(9 * 60) })).toBe('on_time');
-    expect(arrivalStatusFor({ ...base, startMs: clock(9 * 60 + 30) })).toBe('on_time');
-    expect(arrivalStatusFor({ ...base, startMs: clock(9 * 60 + 30) + 1 })).toBe('late');
-    expect(arrivalStatusFor({ ...base, startMs: clock(9 * 60 + 31) })).toBe('late');
-    // The policy's own grace, and 30 minutes when none is given.
-    expect(arrivalStatusFor({ ...base, graceMinutes: 45, startMs: clock(9 * 60 + 40) })).toBe('on_time');
-    expect(arrivalStatusFor({ ...base, graceMinutes: 15, startMs: clock(9 * 60 + 20) })).toBe('late');
-    expect(arrivalStatusFor({ ...base, graceMinutes: undefined, startMs: clock(9 * 60 + 31) })).toBe('late');
-  });
-
-  // Naina's day the other way round: badged in at 09:20 (the rules: on time),
-  // Timo from 09:33 — inside the grace, on time; from 09:45 the label reads
-  // Late, though the rules count nothing.
-  it('ignores the door entirely', () => {
-    expect(isLate({ ...base, mode: 'STANDARD', punchInMs: clock(9 * 60 + 20) })).toBe(false);
-    expect(arrivalStatusFor({ ...base, mode: 'STANDARD', startMs: clock(9 * 60 + 45) })).toBe('late');
-    expect(isLate({ ...base, mode: 'STANDARD', punchInMs: clock(9 * 60 + 55) })).toBe(true);
-    expect(arrivalStatusFor({ ...base, mode: 'STANDARD', startMs: clock(9 * 60 + 25) })).toBe('on_time');
-  });
-
-  it('on first-half leave is late only after the afternoon time, with no grace', () => {
-    const firstHalf = { kind: 'PAID_LEAVE', portion: 'FIRST_HALF', expectedFraction: 0.5 } as const;
-    expect(arrivalStatusFor({ ...base, status: firstHalf, startMs: clock(14 * 60) })).toBe('on_time');
-    expect(arrivalStatusFor({ ...base, status: firstHalf, startMs: clock(14 * 60 + 1) })).toBe('late');
-    // Past the shift start plus grace, but before the afternoon: on time.
-    expect(arrivalStatusFor({ ...base, status: firstHalf, startMs: clock(12 * 60) })).toBe('on_time');
-    // Without an afternoon time the day is not judged late.
-    expect(arrivalStatusFor({ ...base, status: firstHalf, halfDayLateAfterMs: null, startMs: clock(15 * 60) })).toBe('on_time');
-  });
-
-  it('is never late on second-half leave', () => {
-    const secondHalf = { kind: 'PAID_LEAVE', portion: 'SECOND_HALF', expectedFraction: 0.5 } as const;
-    expect(arrivalStatusFor({ ...base, status: secondHalf, startMs: clock(11 * 60) })).toBe('on_time');
-  });
-
-  it('never calls an EXEMPT person late; judges STANDARD and REMOTE people', () => {
-    const late = clock(11 * 60);
-    expect(arrivalStatusFor({ ...base, mode: 'EXEMPT', startMs: late })).toBe('on_time');
-    expect(arrivalStatusFor({ ...base, mode: 'EXEMPT', startMs: clock(8 * 60) })).toBe('early');
-    expect(arrivalStatusFor({ ...base, mode: 'REMOTE', startMs: late })).toBe('late');
-    expect(arrivalStatusFor({ ...base, mode: 'STANDARD', startMs: late })).toBe('late');
-    expect(arrivalStatusFor({ ...base, mode: null, startMs: late })).toBe('late');
-    // The rules still never count the remote person.
-    expect(isLate({ ...base, mode: 'REMOTE', punchInMs: late })).toBe(false);
-  });
-
-  it('reads no activity, no shift and carried-over days', () => {
-    expect(arrivalStatusFor({ ...base, countedMs: 0, startMs: null })).toBe('no_activity');
-    expect(arrivalStatusFor({ ...base, shiftStartMs: null, startMs: clock(11 * 60) })).toBe('no_shift');
-    expect(arrivalStatusFor({ ...base, shiftStartMs: null, countedMs: 0, startMs: null })).toBe('no_shift');
-    const holiday = { kind: 'HOLIDAY', portion: null, expectedFraction: 0 } as const;
-    expect(arrivalStatusFor({ ...base, status: holiday, countedMs: 0, startMs: null })).toBe('no_shift');
-    // Worked on a holiday: nobody was due, so never late.
-    expect(arrivalStatusFor({ ...base, status: holiday, startMs: clock(11 * 60) })).toBe('on_time');
-    // Full-day leave with nothing counted is an off day.
-    const leave = { kind: 'PAID_LEAVE', portion: 'FULL', expectedFraction: 0 } as const;
-    expect(arrivalStatusFor({ ...base, status: leave, countedMs: 0, startMs: null })).toBe('no_shift');
-    // Counted time, but only a stretch carried over from last night: no start
-    // that day to judge.
-    expect(arrivalStatusFor({ ...base, countedMs: H, startMs: null })).toBe('on_time');
+    expect(shiftStatusFor({ ...base, status: working, mode: 'REMOTE', punchInMs: clock(11 * 60), countedMs: 8 * H })).toBe('on_time');
   });
 });
 

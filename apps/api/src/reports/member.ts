@@ -15,7 +15,7 @@ import {
   containsInstant,
   emptyDayBucket,
   invalidationsByUser,
-  arrivalStatusFor,
+  shiftStatusFor,
   shiftWindowFor,
   type Interval,
   type TimelineInvalidation,
@@ -23,7 +23,7 @@ import {
   activityPercentOverTrackedMinutes,
   clipInterval,
 } from '@grind/core';
-import type { PunchLookup } from '../attendance/punches';
+import { punchInMs, type PunchLookup } from '../attendance/punches';
 import { appUsageIdentity, buildAppUsage } from '../insights/appUsage';
 import { appIconUrl } from '../insights/appIcon';
 import { buildDayInsight, localDayWindow, type DayEntryMeta } from '../insights/day';
@@ -177,9 +177,8 @@ export function buildMemberReportDays(input: {
   /**
    * External punch record lookup, supplied by the route that loaded it. Absent
    * or returning null means the day has no punch, which stays null rather than
-   * falling back to activity — the two are different measurements. Carried
-   * only to explain the attendance rules, which judge late arrivals on it; the
-   * day's start and its arrival label come from Timo.
+   * falling back to activity — the two are different measurements. The
+   * punch-in is also what the Start column judges early and late on.
    */
   punchFor?: PunchLookup;
   /**
@@ -193,8 +192,16 @@ export function buildMemberReportDays(input: {
   /** How much of a day's cost a balance covered, undefined when it covered all. */
   fundedDaysFor?: (userId: string, date: string) => number | undefined;
   /**
-   * How the attendance rules treat the person. An EXEMPT person never reads
-   * Late; STANDARD and REMOTE people are labelled from when Timo started.
+   * The attendance rules' late count, when the rules are on. From `from` on, a
+   * day reads Late exactly when the rules counted a late arrival — the door
+   * punch-in past the shift start plus the policy's grace, by the one core
+   * rule — so the Start column and the month sheet's Late number cannot
+   * disagree.
+   */
+  lateFor?: { from: string; ordinalFor: (userId: string, date: string) => number | null };
+  /**
+   * How the attendance rules treat the person. A REMOTE or EXEMPT person never
+   * reads Late, rules on or off — the rules never count them late.
    */
   attendanceModeFor?: (userId: string) => AttendanceRuleMode;
 }): MemberReportDay[] {
@@ -297,16 +304,16 @@ export function buildMemberReportDays(input: {
       invalidatedMs: bucket.invalidated,
       firstActivityMs: bucket.first,
       lastActivityMs: bucket.last,
-      // The door, for explaining the rules' late charge only.
       punchInMinute: punch?.inMinute ?? null,
-      // The arrival label reads Timo: the day's first counted time against
-      // the shift assigned for this date plus the company grace — on a
-      // first-half leave day, against the afternoon time. Display only; the
-      // attendance rules count late arrivals from the door punch-in, so the
-      // two can disagree on a day.
-      shiftStatus: arrivalStatusFor({
+      punchOutMinute: punch?.outMinute ?? null,
+      // One late rule everywhere: the door punch-in after the shift assigned
+      // for this date plus the company grace — on a first-half leave day,
+      // after the afternoon time — for a STANDARD person only. With the
+      // attendance rules on, Late is what the rules counted, so the Start
+      // column and the month sheet agree day for day.
+      shiftStatus: shiftStatusFor({
         shiftStartMs: shift?.startMs ?? null,
-        startMs: bucket.first,
+        punchInMs: punchInMs(punch, date, input.range.tz),
         countedMs: bucket.counted,
         graceMinutes: grace,
         halfDayLateAfterMs: instantForLocalMinute(
@@ -316,6 +323,9 @@ export function buildMemberReportDays(input: {
         ),
         status: dayStatus,
         mode: input.attendanceModeFor?.(input.userId),
+        late: input.lateFor && date >= input.lateFor.from
+          ? input.lateFor.ordinalFor(input.userId, date) !== null
+          : undefined,
       }),
       gaps: {
         count: gaps.length,
@@ -477,6 +487,7 @@ function emptyReportDay(date: string): MemberReportDay {
     firstActivityMs: null,
     lastActivityMs: null,
     punchInMinute: null,
+    punchOutMinute: null,
     shiftStatus: 'no_shift',
     gaps: { count: 0, totalMs: 0 },
     approvals: { approved: 0, pending: 0, rejected: 0 },

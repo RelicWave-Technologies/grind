@@ -5,24 +5,8 @@ import type {
   TeamReportsSummaryResponse,
   TeamReportUser,
 } from '@grind/types';
-import { dateKeyInTimeZone, medianMinute, minuteOfDayInTimeZone } from '@grind/types';
+import { medianMinute } from '@grind/types';
 import type { ReportRange } from './member';
-
-/** When Timo started that day, as a clock reading in the workspace timezone. */
-function startMinuteOf(day: MemberReportDay, tz: string): number | null {
-  return day.firstActivityMs === null ? null : minuteOfDayInTimeZone(day.firstActivityMs, tz);
-}
-
-/**
- * When the day's last counted Timo time ended, as a clock reading. Work that
- * runs to midnight ends at the next day's 00:00, which reads as the last
- * minute of this day rather than as its first.
- */
-function endMinuteOf(day: MemberReportDay, tz: string): number | null {
-  if (day.lastActivityMs === null) return null;
-  if (dateKeyInTimeZone(day.lastActivityMs, tz) !== day.date) return 24 * 60 - 1;
-  return minuteOfDayInTimeZone(day.lastActivityMs, tz);
-}
 
 export function buildTeamReportsSummaryResponse(input: {
   range: ReportRange;
@@ -47,8 +31,8 @@ export function buildTeamReportsSummaryResponse(input: {
       gapMs: member.gapMs,
       approvals: member.approvals,
       screenshots: input.screenshotCountByUser.get(user.id) ?? 0,
-      typicalStartMinute: medianMinute(days.map((d) => startMinuteOf(d, input.range.tz))),
-      typicalEndMinute: medianMinute(days.map((d) => endMinuteOf(d, input.range.tz))),
+      typicalPunchInMinute: medianMinute(days.map((d) => d.punchInMinute)),
+      typicalPunchOutMinute: medianMinute(days.map((d) => d.punchOutMinute)),
     };
   });
 
@@ -100,8 +84,6 @@ export function buildTeamReportMember(user: TeamReportUser, days: MemberReportDa
     manualMs += day.manualMs;
     invalidatedMs += day.invalidatedMs;
     if (dayWorkedMs > 0) activeDays += 1;
-    // The arrival label (Timo start), not the rules' late count — that one is
-    // the month sheet's.
     if (day.shiftStatus === 'late') lateDays += 1;
     if (day.shiftStatus === 'on_time' || day.shiftStatus === 'early') onTimeDays += 1;
     if (day.shiftStatus === 'no_shift') offDays += 1;
