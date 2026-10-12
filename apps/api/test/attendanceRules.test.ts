@@ -132,6 +132,29 @@ async function september(s: Awaited<ReturnType<typeof seed>>) {
   return { report, row, day };
 }
 
+/**
+ * The member report as a manager reads it: each day's arrival label (judged on
+ * the Timo start) and the range's late-day count.
+ */
+async function memberReport(s: Awaited<ReturnType<typeof seed>>, from: string, to: string) {
+  const params = new URLSearchParams({ userId: s.member.id, from, to, tz: 'Asia/Kolkata' });
+  const res = await request(app)
+    .get(`/v1/reports/team/member?${params.toString()}`)
+    .set({ Authorization: `Bearer ${s.adminToken}` });
+  expect(res.status).toBe(200);
+  const days = res.body.member.days as Array<{
+    date: string;
+    shiftStatus: string;
+    punchInMinute: number | null;
+    attendanceRule: { tag: string; penaltyDays: number } | null;
+  }>;
+  return {
+    days,
+    labels: days.map((d) => [d.date, d.shiftStatus]),
+    lateDays: res.body.member.lateDays as number,
+  };
+}
+
 async function ruleLines(userId: string) {
   const rows = await prisma.leaveLedgerEntry.findMany({
     where: { userId, sourceKey: { startsWith: 'rule:' } },
@@ -368,68 +391,117 @@ describe('attendance rules — late arrivals', () => {
     expect((await september(s)).day('2026-09-01').late).toBe(1);
   });
 
-  // Start reads Late exactly when the rules counted a late arrival, and both
-  // go by the door. The 1st is Naina's 2026-10-09: punched in 09:20, Timo
-  // started 09:33 — on time. The 2nd is the reverse: Timo from 09:25 but
-  // punched in at 09:55 — late.
-  it('shows Start as Late on the dashboard exactly when the rule counted a late punch-in', async () => {
+  // Two clocks: the arrival label every report shows reads when Timo started;
+  // the rules count and charge late arrivals from the door punch-in. Naina's
+  // 2026-10-09 was the first kind: punched in 09:20 (the rules: on time),
+  // Timo from 09:33.
+  it('labels the day from the Timo start while the rules count and charge the punch-in', async () => {
     const s = await seed();
-    await work(s.member.id, '2026-09-01', 8, '09:33');
+    // Timo late, door on time: reads Late, costs nothing.
+    await work(s.member.id, '2026-09-01', 8, '09:45');
     await punch(s.ws.id, s.member.id, '2026-09-01', '09:20');
-    await work(s.member.id, '2026-09-02', 8, '09:25');
-    await punch(s.ws.id, s.member.id, '2026-09-02', '09:55');
+    // Door late, Timo on time — five of them, so the fifth is charged.
+    const doorLate = ['2026-09-02', '2026-09-03', '2026-09-04', '2026-09-05', '2026-09-07'];
+    for (const date of doorLate) {
+      await work(s.member.id, date, 8, '09:10');
+      await punch(s.ws.id, s.member.id, date, '09:55');
+    }
 
-    const params = new URLSearchParams({ userId: s.member.id, from: '2026-09-01', to: '2026-09-02', tz: 'Asia/Kolkata' });
-    const res = await request(app)
-      .get(`/v1/reports/team/member?${params.toString()}`)
-      .set({ Authorization: `Bearer ${s.adminToken}` });
-    expect(res.status).toBe(200);
-    const status = (res.body.member.days as Array<{ date: string; shiftStatus: string }>).map((d) => [d.date, d.shiftStatus]);
-    expect(status).toEqual([
-      ['2026-09-01', 'on_time'],
-      ['2026-09-02', 'late'],
+    const report = await memberReport(s, '2026-09-01', '2026-09-07');
+    expect(report.labels).toEqual([
+      ['2026-09-01', 'late'],
+      ['2026-09-02', 'on_time'],
+      ['2026-09-03', 'on_time'],
+      ['2026-09-04', 'on_time'],
+      ['2026-09-05', 'on_time'],
+      ['2026-09-06', 'no_shift'],
+      ['2026-09-07', 'on_time'],
     ]);
-    expect(res.body.member.lateDays).toBe(1);
-    // And the month sheet counted the same one.
-    const { day } = await september(s);
+    // The range's late days are the label's, not the rules'.
+    expect(report.lateDays).toBe(1);
+    const byDate = new Map(report.days.map((d) => [d.date, d]));
+    expect(byDate.get('2026-09-01')!.attendanceRule).toBeNull();
+    // The charge carries the punch-in it was judged on, to explain it.
+    expect(byDate.get('2026-09-07')!.attendanceRule).toEqual({ tag: 'LATE', penaltyDays: 0.5 });
+    expect(byDate.get('2026-09-07')!.punchInMinute).toBe(9 * 60 + 55);
+
+    // The month sheet and the ledger go by the door, exactly as before.
+    const { day, row } = await september(s);
     expect(day('2026-09-01').late).toBeNull();
-    expect(day('2026-09-02').late).toBe(1);
+    expect(doorLate.map((d) => day(d).late)).toEqual([1, 2, 3, 4, 5]);
+    expect(row.totals.lateDays).toBe(5);
+    const lines = await ruleLines(s.member.id);
+    expect(lines.has('2026-09-01')).toBe(false);
+    expect(lines.get('2026-09-07')).toBe(-0.5);
+    expect(['2026-09-02', '2026-09-03', '2026-09-04', '2026-09-05'].some((d) => lines.has(d))).toBe(false);
   });
 
-  it('never calls a day without a punch-in late or early, however late work started', async () => {
+  it('team summary counts late days and the typical start from Timo, not the door', async () => {
+    const s = await seed();
+    // Timo 09:45, door 09:20: a late label, no late counted.
+    await work(s.member.id, '2026-09-01', 8, '09:45');
+    await punch(s.ws.id, s.member.id, '2026-09-01', '09:20');
+    // Timo 09:10, door 09:55: on time, a late counted.
+    await work(s.member.id, '2026-09-02', 8, '09:10');
+    await punch(s.ws.id, s.member.id, '2026-09-02', '09:55');
+    // Timo 09:20, no door reading.
+    await work(s.member.id, '2026-09-03', 8, '09:20');
+
+    const params = new URLSearchParams({ from: '2026-09-01', to: '2026-09-03', tz: 'Asia/Kolkata' });
+    const res = await request(app)
+      .get(`/v1/reports/team/summary?${params.toString()}`)
+      .set({ Authorization: `Bearer ${s.adminToken}` });
+    expect(res.status).toBe(200);
+    const member = (res.body.members as Array<Record<string, unknown> & { user: { id: string } }>)
+      .find((m) => m.user.id === s.member.id)!;
+    expect(member).toMatchObject({
+      lateDays: 1,
+      onTimeDays: 2,
+      // Medians of 09:45 / 09:10 / 09:20 and of 17:45 / 17:10 / 17:20, IST.
+      typicalStartMinute: 9 * 60 + 20,
+      typicalEndMinute: 17 * 60 + 20,
+    });
+    expect(member).not.toHaveProperty('typicalPunchInMinute');
+    expect(member).not.toHaveProperty('typicalPunchOutMinute');
+
+    const { day, row } = await september(s);
+    expect(day('2026-09-01').late).toBeNull();
+    expect(day('2026-09-02').late).toBe(1);
+    expect(row.totals.lateDays).toBe(1);
+  });
+
+  it('labels a day with no punch-in from the Timo start; the rules never count it', async () => {
     const s = await seed();
     await work(s.member.id, '2026-09-01', 7, '10:30');
     await work(s.member.id, '2026-09-02', 8, '08:30');
-    const params = new URLSearchParams({ userId: s.member.id, from: '2026-09-01', to: '2026-09-02', tz: 'Asia/Kolkata' });
-    const res = await request(app)
-      .get(`/v1/reports/team/member?${params.toString()}`)
-      .set({ Authorization: `Bearer ${s.adminToken}` });
-    expect(res.status).toBe(200);
-    expect((res.body.member.days as Array<{ shiftStatus: string }>).map((d) => d.shiftStatus)).toEqual(['on_time', 'on_time']);
-    expect((await september(s)).day('2026-09-01').late).toBeNull();
+    await work(s.member.id, '2026-09-03', 8, '09:30');
+    const report = await memberReport(s, '2026-09-01', '2026-09-03');
+    expect(report.labels).toEqual([
+      ['2026-09-01', 'late'],
+      ['2026-09-02', 'early'],
+      // Exactly at the end of the grace: still on time.
+      ['2026-09-03', 'on_time'],
+    ]);
+    const { day } = await september(s);
+    expect(day('2026-09-01').late).toBeNull();
   });
 
-  it('reads Start as on time for a late punch-in the rules do not count (exempt person)', async () => {
+  it('never labels an exempt person late, however late Timo started', async () => {
     const s = await seed();
     await prisma.user.update({ where: { id: s.member.id }, data: { attendanceRuleMode: 'EXEMPT' } });
     await work(s.member.id, '2026-09-02', 8, '11:00');
     await punch(s.ws.id, s.member.id, '2026-09-02', '11:00');
-    const params = new URLSearchParams({ userId: s.member.id, from: '2026-09-02', to: '2026-09-02' });
-    const res = await request(app)
-      .get(`/v1/reports/team/member?${params.toString()}`)
-      .set({ Authorization: `Bearer ${s.adminToken}` });
-    expect(res.status).toBe(200);
-    expect(res.body.member.days[0].shiftStatus).toBe('on_time');
-    expect(res.body.member.lateDays).toBe(0);
+    const report = await memberReport(s, '2026-09-02', '2026-09-02');
+    expect(report.labels).toEqual([['2026-09-02', 'on_time']]);
+    expect(report.lateDays).toBe(0);
   });
 
   // From main (#150): on a first-half leave day the afternoon is due at 14:00,
-  // so a punch-in after it is late — no grace — and Start reads Late on the
-  // same day the sheet counts it. Tracked work starts at 14:20 both days: the
-  // door decides.
-  it('on a first-half leave day counts a punch-in after 14:00 as late, with no grace', async () => {
+  // no grace. The rules count a punch-in after it; the label reads a Timo
+  // start after it — each on its own clock.
+  it('on a first-half leave day counts a punch-in after 14:00 as late, and labels a Timo start after 14:00 late', async () => {
     const s = await seed();
-    for (const [date, punchIn] of [['2026-09-01', '13:55'], ['2026-09-02', '14:10']] as const) {
+    for (const [date, timoStart, punchIn] of [['2026-09-01', '14:20', '13:55'], ['2026-09-02', '13:50', '14:10']] as const) {
       await prisma.leaveRequest.create({
         data: {
           clientUuid: ulid(),
@@ -442,7 +514,7 @@ describe('attendance rules — late arrivals', () => {
           status: 'APPROVED',
         },
       });
-      await work(s.member.id, date, 4, '14:20');
+      await work(s.member.id, date, 4, timoStart);
       await punch(s.ws.id, s.member.id, date, punchIn);
     }
 
@@ -450,22 +522,17 @@ describe('attendance rules — late arrivals', () => {
     expect(day('2026-09-01').late).toBeNull();
     expect(day('2026-09-02').late).toBe(1);
 
-    const params = new URLSearchParams({ userId: s.member.id, from: '2026-09-01', to: '2026-09-02', tz: 'Asia/Kolkata' });
-    const res = await request(app)
-      .get(`/v1/reports/team/member?${params.toString()}`)
-      .set({ Authorization: `Bearer ${s.adminToken}` });
-    expect(res.status).toBe(200);
-    const status = (res.body.member.days as Array<{ date: string; shiftStatus: string }>).map((d) => [d.date, d.shiftStatus]);
-    expect(status).toEqual([
-      ['2026-09-01', 'on_time'],
-      ['2026-09-02', 'late'],
+    const report = await memberReport(s, '2026-09-01', '2026-09-02');
+    expect(report.labels).toEqual([
+      ['2026-09-01', 'late'],
+      ['2026-09-02', 'on_time'],
     ]);
   });
 
-  // Production's rule (#150): only a STANDARD person can be late. Remote and
-  // exempt people are never counted, and the Start column agrees — rules on
-  // or off.
-  it('never counts a remote or exempt person late, and Start never says Late for them', async () => {
+  // Production's rule (#150): only a STANDARD person is counted late. The
+  // label is not the rules: a remote person who starts Timo late reads Late
+  // (costing nothing), an exempt person never does — rules on or off.
+  it('never counts a remote or exempt person late; labels the remote person from the Timo start', async () => {
     const s = await seed();
     await prisma.user.update({ where: { id: s.member.id }, data: { attendanceRuleMode: 'REMOTE' } });
     for (const date of ['2026-09-01', '2026-09-02', '2026-09-03', '2026-09-04', '2026-09-05', '2026-09-07']) {
@@ -476,20 +543,15 @@ describe('attendance rules — late arrivals', () => {
     expect(remote.row.totals.lateDays).toBe(0);
     expect(remote.row.days.filter((d) => d.rule?.tag === 'LATE')).toHaveLength(0);
 
-    const start = async () => {
-      const params = new URLSearchParams({ userId: s.member.id, from: '2026-09-01', to: '2026-09-02', tz: 'Asia/Kolkata' });
-      const res = await request(app)
-        .get(`/v1/reports/team/member?${params.toString()}`)
-        .set({ Authorization: `Bearer ${s.adminToken}` });
-      expect(res.status).toBe(200);
-      return (res.body.member.days as Array<{ shiftStatus: string }>).map((d) => d.shiftStatus);
-    };
-    expect(await start()).toEqual(['on_time', 'on_time']);
-    // With the rules off the label falls back to the core rule — same answer.
+    const labels = async () => (await memberReport(s, '2026-09-01', '2026-09-02')).labels.map(([, label]) => label);
+    expect(await labels()).toEqual(['late', 'late']);
+    // With the rules off the label is the same: it never read the rules.
     await prisma.leavePolicy.update({ where: { workspaceId: s.ws.id }, data: { attendanceRulesFrom: null } });
-    expect(await start()).toEqual(['on_time', 'on_time']);
+    expect(await labels()).toEqual(['late', 'late']);
+    await prisma.user.update({ where: { id: s.member.id }, data: { attendanceRuleMode: 'EXEMPT' } });
+    expect(await labels()).toEqual(['on_time', 'on_time']);
     await prisma.user.update({ where: { id: s.member.id }, data: { attendanceRuleMode: 'STANDARD' } });
-    expect(await start()).toEqual(['late', 'late']);
+    expect(await labels()).toEqual(['late', 'late']);
     await prisma.leavePolicy.update({ where: { workspaceId: s.ws.id }, data: { attendanceRulesFrom: '2026-09-01' } });
 
     await prisma.user.update({ where: { id: s.member.id }, data: { attendanceRuleMode: 'EXEMPT' } });

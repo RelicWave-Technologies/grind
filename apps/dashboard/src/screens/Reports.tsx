@@ -423,6 +423,16 @@ const OVERRIDE_SHAPES = [
 ] as const;
 
 /**
+ * The fact a rule charge rests on, when the row does not already show it. The
+ * late rule goes by the door punch-in, not by the Timo start the row prints,
+ * so a late charge names the punch-in it counted.
+ */
+function ruleEvidence(day: MemberReportDay, rule: NonNullable<MemberReportDay['attendanceRule']>): string {
+  if (rule.tag !== 'LATE' || day.punchInMinute === null) return '';
+  return ` (door punch-in ${fmtMinuteOfDay(day.punchInMinute)})`;
+}
+
+/**
  * One day's attendance status, and — for a manager or admin — the way to
  * correct it.
  *
@@ -448,7 +458,7 @@ function AttendanceStatusCell({
   const base = override
     ? `${DISPLAY_DAY_LABEL[code]} — corrected by hand${override.stale ? '; the computed answer has changed since' : ''}`
     : DISPLAY_DAY_LABEL[code];
-  const title = rule ? `${base} — ${ATTENDANCE_RULE_LABEL[rule.tag]}` : base;
+  const title = rule ? `${base} — ${ATTENDANCE_RULE_LABEL[rule.tag]}${ruleEvidence(day, rule)}` : base;
 
   const chip = (
     <span className="rep-status">
@@ -532,8 +542,8 @@ function SelfReportTable({
                 <Th className="rep-col-worked" align="center">Worked</Th>
                 <Th className="rep-col-start" align="center">Start</Th>
                 <Th className="rep-col-status" align="center">Status</Th>
-                <Th className="rep-col-punch" align="center">Punch in</Th>
-                <Th className="rep-col-punch" align="center">Punch out</Th>
+                <Th className="rep-col-clock" align="center">Timo in</Th>
+                <Th className="rep-col-clock" align="center">Timo out</Th>
                 <Th className="rep-col-approvals" align="center">Approvals</Th>
                 <Th className="rep-col-apps" align="center">Apps</Th>
                 <Th className="rep-col-activity" align="center">Activity</Th>
@@ -561,11 +571,11 @@ function SelfReportTable({
                   <Td className="rep-col-status" align="center">
                     <AttendanceStatusCell day={day} onEdit={onEditStatus} />
                   </Td>
-                  <Td className="rep-col-punch" mono>
-                    {day.punchInMinute === null ? '—' : fmtMinuteOfDay(day.punchInMinute)}
+                  <Td className="rep-col-clock" mono>
+                    {day.firstActivityMs === null ? '—' : fmtTime(day.firstActivityMs, tz)}
                   </Td>
-                  <Td className="rep-col-punch" mono>
-                    {day.punchOutMinute === null ? '—' : fmtMinuteOfDay(day.punchOutMinute)}
+                  <Td className="rep-col-clock" mono>
+                    {day.lastActivityMs === null ? '—' : fmtTime(day.lastActivityMs, tz)}
                   </Td>
                   <Td className="rep-col-approvals" align="center">
                     <ReportApprovalCounts approvals={day.approvals} />
@@ -732,8 +742,8 @@ function TeamMembersTable({ members, onOpenMember }: { members: TeamReportSummar
             <Th>Member</Th>
             <Th align="center">Worked</Th>
             <Th align="center">Approved hours</Th>
-            <Th align="center">Punch in</Th>
-            <Th align="center">Punch out</Th>
+            <Th align="center">Timo in</Th>
+            <Th align="center">Timo out</Th>
             <Th align="center">Starts</Th>
             <Th align="center">Approvals</Th>
             <Th align="center">Gaps</Th>
@@ -760,11 +770,11 @@ function TeamMembersTable({ members, onOpenMember }: { members: TeamReportSummar
               <Td align="center">
                 <span className="ui-mono">{fmtDurationMs(member.manualMs)}</span>
               </Td>
-              <Td className="rep-col-punch" mono>
-                {member.typicalPunchInMinute === null ? '—' : fmtMinuteOfDay(member.typicalPunchInMinute)}
+              <Td className="rep-col-clock" mono>
+                {member.typicalStartMinute === null ? '—' : fmtMinuteOfDay(member.typicalStartMinute)}
               </Td>
-              <Td className="rep-col-punch" mono>
-                {member.typicalPunchOutMinute === null ? '—' : fmtMinuteOfDay(member.typicalPunchOutMinute)}
+              <Td className="rep-col-clock" mono>
+                {member.typicalEndMinute === null ? '—' : fmtMinuteOfDay(member.typicalEndMinute)}
               </Td>
               <Td align="center"><StartCounts member={member} /></Td>
               <Td align="center">

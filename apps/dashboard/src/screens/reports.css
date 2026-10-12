@@ -859,8 +859,8 @@
 }
 
 .rep-table .ui-td.rep-col-worked,
-.rep-table .ui-td.rep-col-punch,
-.rep-team-members-table .ui-td.rep-col-punch {
+.rep-table .ui-td.rep-col-clock,
+.rep-team-members-table .ui-td.rep-col-clock {
   text-align: center;
 }
 
@@ -901,9 +901,9 @@
   width: calc(var(--ui-sp-12) * 2);
 }
 
-/* A punch time is five glyphs; two narrow columns cost less width than the
-   single combined one they replace. */
-.rep-col-punch {
+/* A clock reading (Timo in / out) is a handful of glyphs; two narrow columns
+   cost less width than one combined one. */
+.rep-col-clock {
   width: calc(var(--ui-sp-9) * 2);
 }
 
