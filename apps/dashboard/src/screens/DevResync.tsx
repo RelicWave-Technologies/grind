@@ -11,6 +11,7 @@ import {
 } from '@grind/types';
 import { api } from '../lib/api';
 import { useMe } from '../lib/auth';
+import { useTableFilter } from '../lib/tableFilter';
 import {
   Page,
   PageHeader,
@@ -22,6 +23,8 @@ import {
   IconButton,
   Banner,
   EmptyState,
+  FilterBar,
+  NoMatches,
   Table,
   THead,
   Tbody,
@@ -67,6 +70,11 @@ function stamp(value: string | null): string {
     minute: '2-digit',
   }).format(date);
 }
+
+const STATUS_OPTIONS = (Object.keys(STATUS_LABEL) as AgentCommandStatus[]).map((value) => ({
+  value,
+  label: STATUS_LABEL[value],
+}));
 
 function rangeLabel(params: Record<string, unknown>): string {
   const from = typeof params.from === 'string' ? params.from : '?';
@@ -126,6 +134,13 @@ export function DevResyncScreen() {
         ? `At most ${RESYNC_MAX_DAYS} days at a time.`
         : null;
   const selected = peopleQ.data?.people.find((p) => p.id === userId) ?? null;
+  const commandFilter = useTableFilter(commandsQ.data?.commands ?? [], {
+    text: (c) => [c.user.name, c.user.email, c.type, STATUS_LABEL[c.status], rangeLabel(c.params), c.requestedBy.name],
+    facets: {
+      status: { label: 'Statuses', value: (c) => c.status, options: STATUS_OPTIONS },
+      person: { label: 'People', value: (c) => c.user.name },
+    },
+  });
   const canSend = Boolean(userId) && rangeError === null && !send.isPending;
 
   return (
@@ -182,7 +197,15 @@ export function DevResyncScreen() {
         ) : commandsQ.isError ? (
           <EmptyState tone="danger" title="Couldn’t load requests" description={(commandsQ.error as Error).message} />
         ) : commandsQ.data?.commands.length ? (
-          <div className="dev-table-wrap">
+          <>
+            <FilterBar
+              filter={commandFilter}
+              placeholder="Search person, status, range…"
+              noun={{ one: 'request', other: 'requests' }}
+            />
+            {commandFilter.rows.length === 0 ? (
+              <NoMatches onClear={commandFilter.clear} />
+            ) : (
             <Table density="compact">
               <THead>
                 <Tr>
@@ -195,7 +218,7 @@ export function DevResyncScreen() {
                 </Tr>
               </THead>
               <Tbody>
-                {commandsQ.data.commands.map((c) => {
+                {commandFilter.rows.map((c) => {
                   const expanded = open === c.id;
                   const timedOut = c.result?.timedOut === true;
                   return (
@@ -241,7 +264,8 @@ export function DevResyncScreen() {
                 })}
               </Tbody>
             </Table>
-          </div>
+            )}
+          </>
         ) : (
           <EmptyState title="No requests yet" description="Pick a person and a date range above." />
         )}

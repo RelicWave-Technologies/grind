@@ -4,14 +4,6 @@
    (src/ui/*) + tokens. No bespoke component styling lives here.
    ========================================================================== */
 
-/* Roster row action cluster — right-aligned icon buttons. */
-.usr-table-wrap {
-  max-width: 100%;
-  width: 100%;
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-}
-
 .usr-table {
   min-width: calc(var(--ui-sp-12) * 14);
   table-layout: fixed;

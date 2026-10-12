@@ -59,10 +59,6 @@
   padding-bottom: var(--ui-sp-5);
 }
 
-.tms-list {
-  border-top: 1px solid var(--ui-line);
-}
-
 .tms-row {
   min-width: 0;
 }
@@ -432,6 +428,15 @@
 
 .tms-person-list {
   display: grid;
+}
+
+/* Spacing around the drawer and picker search fields. */
+.tms-section .tms-search {
+  margin-top: var(--ui-sp-4);
+}
+
+.tms-picker .tms-search {
+  margin-bottom: var(--ui-sp-2);
 }
 
 .tms-person {

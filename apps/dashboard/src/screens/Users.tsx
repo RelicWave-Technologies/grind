@@ -5,9 +5,11 @@ import { useNavigate, useRouteContext, useSearch } from '@tanstack/react-router'
 import { Pencil, Check, X, UserPlus, UserMinus, UserCheck, Trash2, Users as UsersIcon } from 'lucide-react';
 import type { LaunchAtLoginState, LaunchOrigin } from '@grind/types';
 import { api, type ApiError } from '../lib/api';
+import { adminShiftsQuery, adminTeamsQuery, adminUsersQuery } from '../lib/queries';
 import { isAdmin, type Role } from '../lib/auth';
 import type { Team, Shift } from '../lib/types';
 import { matchesSyncFilter, syncTag, type SyncFilter, type SyncHealth } from '../lib/syncHealth';
+import { useTableFilter } from '../lib/tableFilter';
 import {
   Page,
   PageHeader,
@@ -34,6 +36,8 @@ import {
   Modal,
   EmptyState,
   SkeletonTable,
+  FilterBar,
+  NoMatches,
   type Status,
 } from '../ui';
 
@@ -108,6 +112,12 @@ const ROLE_STATUS: Record<Role, Status> = {
   MEMBER: 'neutral',
 };
 
+const ROLE_OPTIONS = [
+  { value: 'ADMIN', label: 'Admin' },
+  { value: 'MANAGER', label: 'Manager' },
+  { value: 'MEMBER', label: 'Member' },
+];
+
 const STATUS_FILTER = [
   { value: 'active', label: 'Active' },
   { value: 'all', label: 'All' },
@@ -143,26 +153,12 @@ export function UsersScreen() {
   const [inviting, setInviting] = useState(false);
 
   const usersQ = useQuery({
-    queryKey: ['admin', 'users', showDeactivated && canEdit],
-    queryFn: () =>
-      api<UsersResponse>(
-        showDeactivated && canEdit
-          ? '/v1/admin/users?includeDeactivated=true'
-          : '/v1/admin/users',
-      ),
+    ...adminUsersQuery<UsersResponse>({ includeDeactivated: showDeactivated && canEdit }),
     refetchInterval: canEdit ? 60_000 : false,
   });
   // Only admins need the team + shift lists — pickers are hidden for everyone else.
-  const teamsQ = useQuery({
-    queryKey: ['admin', 'teams'],
-    queryFn: () => api<{ teams: Team[] }>('/v1/admin/teams'),
-    enabled: canEdit,
-  });
-  const shiftsQ = useQuery({
-    queryKey: ['admin', 'shifts'],
-    queryFn: () => api<{ shifts: Shift[] }>('/v1/admin/shifts'),
-    enabled: canEdit,
-  });
+  const teamsQ = useQuery({ ...adminTeamsQuery<{ teams: Team[] }>(), enabled: canEdit });
+  const shiftsQ = useQuery({ ...adminShiftsQuery<{ shifts: Shift[] }>(), enabled: canEdit });
 
   const patch = useMutation({
     mutationFn: (vars: {
@@ -237,6 +233,33 @@ export function UsersScreen() {
   const syncStuckCount = activePeople.filter((u) => u.sync?.status === 'STUCK').length;
   const syncBehindCount = activePeople.filter((u) => u.sync?.status === 'BEHIND').length;
   const visible = syncFilter && showSync ? sorted.filter((u) => matchesSyncFilter(u.sync, syncFilter)) : sorted;
+  const filter = useTableFilter(visible, {
+    text: (u) => [
+      u.name,
+      u.email,
+      u.teamId ? teamName(u.teamId) : null,
+      u.shiftId ? shiftName(u.shiftId) : null,
+      u.managesTeamName,
+      u.agentVersion,
+      u.agentPlatform ? platformLabel(u.agentPlatform) : null,
+    ],
+    facets: {
+      role: { label: 'Roles', value: (u) => u.role, options: ROLE_OPTIONS },
+      // Team names come from the admin-only team list; without it there is nothing to pick.
+      team: { label: 'Teams', value: (u) => (u.teamId && teamsQ.data ? teamName(u.teamId) : null) },
+      presence: { label: 'Presence', value: (u) => userPresence(u).label },
+      platform: {
+        label: 'Platforms',
+        value: (u) => (showDeviceHealth ? u.agentPlatform : null),
+        optionLabel: platformLabel,
+      },
+      version: {
+        label: 'Versions',
+        value: (u) => (showDeviceHealth && u.agentVersion ? u.agentVersion.replace(/^v/u, '') : null),
+        optionLabel: (v) => `v${v}`,
+      },
+    },
+  });
 
   // Person, Role, Presence, Team, Shift, Joined = 6, plus the admin-only
   // Birth date and actions columns, plus the two device-health ones, plus Sync.
@@ -344,7 +367,15 @@ export function UsersScreen() {
             description={`No one's Timo sync ${syncFilter ? SYNC_FILTER_LABEL[syncFilter] : 'matches'} right now.`}
           />
         ) : (
-          <div className="usr-table-wrap">
+          <>
+            <FilterBar
+              filter={filter}
+              placeholder="Search name, email, team…"
+              noun={{ one: 'person', other: 'people' }}
+            />
+            {filter.rows.length === 0 ? (
+              <NoMatches onClear={filter.clear} />
+            ) : (
             <Table
               density="comfortable"
               className={[
@@ -382,7 +413,7 @@ export function UsersScreen() {
                 </Tr>
               </THead>
               <Tbody>
-                {visible.map((u) => (
+                {filter.rows.map((u) => (
                   <PersonRow
                     key={u.id}
                     user={u}
@@ -421,7 +452,8 @@ export function UsersScreen() {
                 ))}
               </Tbody>
             </Table>
-          </div>
+            )}
+          </>
         )}
       </Card>
 
@@ -522,7 +554,7 @@ function PersonRow({
   const isDeactivated = user.deactivatedAt !== null;
   const isPending = !isDeactivated && user.provisioningStatus === 'PENDING';
   const teamLockedByManagement = user.role === 'MANAGER' && Boolean(user.managesTeamId);
-  const presence = presenceTag(user, { isDeactivated, isPending });
+  const presence = userPresence(user);
 
   const joined = joinedDateLabel(user.createdAt);
 
@@ -758,6 +790,16 @@ function PersonRow({
       )}
     </>
   );
+}
+
+function platformLabel(platform: string): string {
+  return PLATFORM_META[platform]?.label ?? platform;
+}
+
+function userPresence(user: AdminUser): { label: string; status: Status; title: string } {
+  const isDeactivated = user.deactivatedAt !== null;
+  const isPending = !isDeactivated && user.provisioningStatus === 'PENDING';
+  return presenceTag(user, { isDeactivated, isPending });
 }
 
 function presenceTag(

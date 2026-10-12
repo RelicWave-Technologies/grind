@@ -22,7 +22,8 @@ import { addDays, fmtDurationMs, todayKey } from '../lib/format';
 import type { Team } from '../lib/types';
 import type { Role } from '../lib/auth';
 import type { TeamReportSummaryMember } from '@grind/types/reports';
-import { reportQueryKeys, teamReportSummaryQuery } from '../lib/reportQueries';
+import { adminTeamsQuery, adminUsersQuery, reportQueryKeys, teamReportSummaryQuery } from '../lib/queries';
+import { useTableFilter } from '../lib/tableFilter';
 import {
   Avatar,
   Banner,
@@ -30,11 +31,14 @@ import {
   Card,
   EmptyState,
   Field,
+  FilterBar,
   IconButton,
   Input,
   List,
+  NoMatches,
   Page,
   PageHeader,
+  SearchInput,
   Select,
   SkeletonTable,
   Tag,
@@ -58,11 +62,8 @@ type UserPatch = Partial<{ teamId: string | null }>;
 export function TeamsScreen() {
   const { me } = useRouteContext({ from: '/authed' });
   const qc = useQueryClient();
-  const teamsQ = useQuery({ queryKey: ['admin', 'teams'], queryFn: () => api<{ teams: Team[] }>('/v1/admin/teams') });
-  const usersQ = useQuery({
-    queryKey: ['admin', 'users'],
-    queryFn: () => api<{ users: AdminUser[] }>('/v1/admin/users'),
-  });
+  const teamsQ = useQuery(adminTeamsQuery<{ teams: Team[] }>());
+  const usersQ = useQuery(adminUsersQuery<{ users: AdminUser[] }>());
 
   const [createOpen, setCreateOpen] = useState(false);
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
@@ -90,6 +91,21 @@ export function TeamsScreen() {
     }
     return map;
   }, [teams, users]);
+
+  const filter = useTableFilter(teams, {
+    text: (team) => [
+      team.name,
+      ...team.managers.map((manager) => manager.name),
+      ...(membersByTeam.get(team.id) ?? []).map((member) => member.name),
+    ],
+    facets: {
+      manager: {
+        label: 'Managers',
+        value: (team) => (team.managerCount > 0 ? 'assigned' : 'none'),
+        optionLabel: (value) => (value === 'none' ? 'No manager' : 'Has manager'),
+      },
+    },
+  });
 
   const teamCount = teams.length;
   const totalMembers = teams.reduce((sum, team) => sum + team.memberCount, 0);
@@ -195,7 +211,6 @@ export function TeamsScreen() {
 
       <Card
         title="Directory"
-        action={<Tag mono>{teamCount}</Tag>}
         variant="flush"
         className="tms-directory tms-rise tms-rise-1"
       >
@@ -214,30 +229,41 @@ export function TeamsScreen() {
             description="Create your first team with a manager to start grouping members."
           />
         ) : (
-          <List className="tms-list">
-            {teams.map((team) => (
-              <TeamRow
-                key={team.id}
-                team={team}
-                busy={(patch.isPending && patch.variables?.id === team.id) || (del.isPending && del.variables === team.id)}
-                error={
-                  (patch.isError && patch.variables?.id === team.id
-                    ? (patch.error as Error | ApiError).message
-                    : null) ||
-                  (del.isError && del.variables === team.id ? (del.error as Error | ApiError).message : null)
-                }
-                onOpen={() => setSelectedTeamId(team.id)}
-                onPatch={(nextPatch) => patch.mutate({ id: team.id, patch: nextPatch })}
-                onDelete={() =>
-                  del.mutate(team.id, {
-                    onSuccess: () => {
-                      if (selectedTeamId === team.id) setSelectedTeamId(null);
-                    },
-                  })
-                }
-              />
-            ))}
-          </List>
+          <>
+            <FilterBar
+              filter={filter}
+              placeholder="Search team, manager, member…"
+              noun={{ one: 'team', other: 'teams' }}
+            />
+            {filter.rows.length === 0 ? (
+              <NoMatches onClear={filter.clear} />
+            ) : (
+              <List>
+                {filter.rows.map((team) => (
+                  <TeamRow
+                    key={team.id}
+                    team={team}
+                    busy={(patch.isPending && patch.variables?.id === team.id) || (del.isPending && del.variables === team.id)}
+                    error={
+                      (patch.isError && patch.variables?.id === team.id
+                        ? (patch.error as Error | ApiError).message
+                        : null) ||
+                      (del.isError && del.variables === team.id ? (del.error as Error | ApiError).message : null)
+                    }
+                    onOpen={() => setSelectedTeamId(team.id)}
+                    onPatch={(nextPatch) => patch.mutate({ id: team.id, patch: nextPatch })}
+                    onDelete={() =>
+                      del.mutate(team.id, {
+                        onSuccess: () => {
+                          if (selectedTeamId === team.id) setSelectedTeamId(null);
+                        },
+                      })
+                    }
+                  />
+                ))}
+              </List>
+            )}
+          </>
         )}
       </Card>
 
@@ -595,6 +621,7 @@ function TeamDrawer({
   const availableUsers = users.filter((user) => user.teamId !== team.id && (!user.managesTeamId || user.managesTeamId === team.id));
   const managerOptions = availableManagerOptions(users, teamByManagerId, team.id)
     .filter((user) => !team.managerIds.includes(user.id));
+  const memberFilter = useTableFilter(members, { text: (m) => [m.name, m.email] }, { persist: false });
 
   return createPortal(
     <div className="tms-drawer-layer" role="presentation" onMouseDown={onClose}>
@@ -679,25 +706,38 @@ function TeamDrawer({
             {members.length === 0 ? (
               <div className="tms-empty-line ui-t-small">No members are assigned to this team yet.</div>
             ) : (
-              <div className="tms-person-list">
-                {members.map((member) => (
-                  <PersonLine
-                    key={member.id}
-                    user={member}
-                    action={
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        icon={<Minus size={13} strokeWidth={2} />}
-                        onClick={() => onRemoveMember(member.id)}
-                        loading={memberMutationUserId === member.id}
-                      >
-                        Remove
-                      </Button>
-                    }
-                  />
-                ))}
-              </div>
+              <>
+                <SearchInput
+                  block
+                  className="tms-search"
+                  value={memberFilter.query}
+                  onChange={memberFilter.setQuery}
+                  placeholder="Search members"
+                />
+                {memberFilter.rows.length === 0 ? (
+                  <NoMatches onClear={memberFilter.clear} />
+                ) : (
+                  <div className="tms-person-list">
+                    {memberFilter.rows.map((member) => (
+                      <PersonLine
+                        key={member.id}
+                        user={member}
+                        action={
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            icon={<Minus size={13} strokeWidth={2} />}
+                            onClick={() => onRemoveMember(member.id)}
+                            loading={memberMutationUserId === member.id}
+                          >
+                            Remove
+                          </Button>
+                        }
+                      />
+                    ))}
+                  </div>
+                )}
+              </>
             )}
           </section>
 
@@ -821,6 +861,11 @@ function AddMemberModal({
 }) {
   const [userId, setUserId] = useState('');
   const canSubmit = Boolean(userId);
+  const picker = useTableFilter(users, { text: (u) => [u.name, u.email, roleLabel(u.role)] }, { persist: false });
+  // The picked person stays listed while the search narrows the rest.
+  const options = picker.rows.some((u) => u.id === userId)
+    ? picker.rows
+    : [...users.filter((u) => u.id === userId), ...picker.rows];
   return (
     <div className="tms-nested-layer" role="presentation" onMouseDown={onClose}>
       <form
@@ -845,12 +890,25 @@ function AddMemberModal({
           <IconButton icon={<X size={18} strokeWidth={1.9} />} aria-label="Close add member dialog" onClick={onClose} />
         </div>
         <div className="tms-modal-body">
-          <Field label="Person">
+          <Field label="Person" className="tms-picker">
+            {users.length > 0 && (
+              <SearchInput
+                block
+                className="tms-search"
+                value={picker.query}
+                onChange={picker.setQuery}
+                placeholder="Search name or email"
+              />
+            )}
             <Select value={userId} onChange={(event) => setUserId(event.target.value)} disabled={users.length === 0} required>
               <option value="" disabled>
-                {users.length === 0 ? 'No people available' : 'Select a person'}
+                {users.length === 0
+                  ? 'No people available'
+                  : picker.rows.length === 0
+                    ? 'No matches'
+                    : 'Select a person'}
               </option>
-              {users.map((user) => {
+              {options.map((user) => {
                 const currentTeam = user.teamId ? teamsById.get(user.teamId)?.name ?? 'Another team' : 'Unassigned';
                 return (
                   <option key={user.id} value={user.id}>
@@ -901,6 +959,11 @@ function AddManagerModal({
 }) {
   const [userId, setUserId] = useState('');
   const canSubmit = Boolean(userId);
+  const picker = useTableFilter(users, { text: (u) => [u.name, u.email, roleLabel(u.role)] }, { persist: false });
+  // The picked person stays listed while the search narrows the rest.
+  const options = picker.rows.some((u) => u.id === userId)
+    ? picker.rows
+    : [...users.filter((u) => u.id === userId), ...picker.rows];
   return (
     <div className="tms-nested-layer" role="presentation" onMouseDown={onClose}>
       <form
@@ -925,12 +988,25 @@ function AddManagerModal({
           <IconButton icon={<X size={18} strokeWidth={1.9} />} aria-label="Close add manager dialog" onClick={onClose} />
         </div>
         <div className="tms-modal-body">
-          <Field label="Person">
+          <Field label="Person" className="tms-picker">
+            {users.length > 0 && (
+              <SearchInput
+                block
+                className="tms-search"
+                value={picker.query}
+                onChange={picker.setQuery}
+                placeholder="Search name or email"
+              />
+            )}
             <Select value={userId} onChange={(event) => setUserId(event.target.value)} disabled={users.length === 0} required>
               <option value="" disabled>
-                {users.length === 0 ? 'No people available' : 'Select a manager'}
+                {users.length === 0
+                  ? 'No people available'
+                  : picker.rows.length === 0
+                    ? 'No matches'
+                    : 'Select a manager'}
               </option>
-              {users.map((user) => {
+              {options.map((user) => {
                 const managedTeam = teamByManagerId.get(user.id);
                 return (
                   <option key={user.id} value={user.id}>

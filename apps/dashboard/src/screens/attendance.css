@@ -43,12 +43,6 @@
   flex-wrap: wrap;
 }
 
-/* The matrix scrolls horizontally inside the flush card. */
-.atd-scroll {
-  overflow-x: auto;
-  scrollbar-gutter: stable;
-}
-
 .atd-table {
   --atd-person-w: calc(var(--ui-sp-12) * 4 + var(--ui-sp-5));
   --atd-day-w: calc(var(--ui-sp-12) * 2 + var(--ui-sp-6));
@@ -103,15 +97,6 @@
   width: var(--atd-present-w);
   min-width: var(--atd-present-w);
   max-width: var(--atd-present-w);
-}
-
-.atd-table.ui-table--sticky-col .ui-th:first-child,
-.atd-table.ui-table--sticky-col .ui-td:first-child {
-  border-right: 1px solid var(--ui-line);
-}
-
-.atd-table.ui-table--sticky-col .ui-th:first-child {
-  z-index: 3;
 }
 
 .atd-table .atd-col-person .ui-identity {

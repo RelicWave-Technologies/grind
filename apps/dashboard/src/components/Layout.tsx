@@ -11,6 +11,11 @@ import {
   Tabs,
   Avatar,
   Button,
+  Page,
+  PageHeader,
+  Skeleton,
+  SkeletonStat,
+  SkeletonTable,
 } from '../ui';
 
 type Show = 'all' | { permission: Permission } | { anyPermission: Permission[] };
@@ -179,6 +184,36 @@ export function Layout() {
           )}
           <Outlet />
         </div>
+      </main>
+    </AppShell>
+  );
+}
+
+/** Page-body placeholder while a route's code or session check is slow
+ *  (the router shows it only after `pendingMs`). Kit skeletons sized like a
+ *  PageHeader + one table, never a full-page spinner. */
+export function PagePending() {
+  return (
+    <Page aria-busy="true">
+      <PageHeader eyebrow={<Skeleton w={160} h={11} />} title={<Skeleton w={280} h={22} />} />
+      <SkeletonStat />
+      <SkeletonTable rows={6} />
+    </Page>
+  );
+}
+
+/** The app frame before `/me` resolves on a cold load: the shell renders at
+ *  once so the page doesn't sit blank, and the real Layout swaps in place. */
+export function LayoutPending() {
+  return (
+    <AppShell>
+      <Sidebar brand={<SidebarBrand name="Timo" />}>
+        {[0, 1, 2, 3, 4].map((i) => (
+          <Skeleton key={i} h={28} />
+        ))}
+      </Sidebar>
+      <main className="ui-main">
+        <PagePending />
       </main>
     </AppShell>
   );

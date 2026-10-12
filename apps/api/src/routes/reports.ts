@@ -15,6 +15,7 @@ import type {
 } from '@grind/types';
 import { lateLookup, loadAttendanceRuleContext } from '../attendance/ruleContext';
 import { requireAccessToken } from '../middleware/auth';
+import { readMemoScope } from '../lib/readMemo';
 import { hideDisallowedActiveFields, policyFlagsForUser } from '../workspacePolicy/readScrub';
 import { attachScope, canReadEvidenceOf, requireCapability } from '../middleware/scope';
 import {
@@ -56,6 +57,8 @@ import {
 
 export const reportsRouter = Router();
 reportsRouter.use(requireAccessToken, attachScope, requireCapability('reports.self.read'));
+// Every GET here only reads: let its loaders share repeated reads (lib/readMemo).
+reportsRouter.use(readMemoScope);
 
 const TEAM_REPORT_MAX_DAYS = 31;
 
@@ -74,28 +77,33 @@ reportsRouter.get('/me', async (req, res, next) => {
     if ('error' in range) return res.status(range.status).json({ error: range.error, ...(range.extras ?? {}) });
 
     const now = new Date();
-    const data = await loadReportData(req.user.sub, range, now);
-    const iconFor = await iconForSamples(data.samples);
-    const calendar = await timesheetCalendarInputs({
-      workspaceId: req.scope.workspaceId,
-      tz: range.tz,
-      userIds: [req.user.sub],
-      from: range.from,
-      to: range.to,
-    });
-    const rules = await loadAttendanceRuleContext({
-      workspaceId: req.scope!.workspaceId,
-      tz: range.tz,
-      userIds: [req.user.sub],
-      from: range.from,
-      to: range.to,
-    });
-    const overrideFor = await loadOverrideLookup({
-      userIds: [req.user.sub],
-      from: range.from,
-      to: range.to,
-      fundedDaysFor: calendar.fundedDaysFor,
-    });
+    // Independent reads, side by side; then the two that need their rows.
+    const [data, calendar, rules] = await Promise.all([
+      loadReportData(req.user.sub, range, now),
+      timesheetCalendarInputs({
+        workspaceId: req.scope.workspaceId,
+        tz: range.tz,
+        userIds: [req.user.sub],
+        from: range.from,
+        to: range.to,
+      }),
+      loadAttendanceRuleContext({
+        workspaceId: req.scope.workspaceId,
+        tz: range.tz,
+        userIds: [req.user.sub],
+        from: range.from,
+        to: range.to,
+      }),
+    ]);
+    const [iconFor, overrideFor] = await Promise.all([
+      iconForSamples(data.samples),
+      loadOverrideLookup({
+        userIds: [req.user.sub],
+        from: range.from,
+        to: range.to,
+        fundedDaysFor: calendar.fundedDaysFor,
+      }),
+    ]);
     const response: MemberReportsMeResponse = {
       from: range.from,
       to: range.to,
@@ -170,22 +178,25 @@ reportsRouter.get('/team/summary', requireCapability('reports.team.read'), async
     }));
 
     const now = new Date();
-    const summaryData = await loadTeamReportSummaryData(reportUsers.map((user) => user.id), range, now);
-    const calendar = await timesheetCalendarInputs({
-      workspaceId: req.scope.workspaceId,
-      tz: range.tz,
-      userIds: reportUsers.map((user) => user.id),
-      from: range.from,
-      to: range.to,
-    });
-    const rules = await loadAttendanceRuleContext({
-      workspaceId: req.scope!.workspaceId,
-      tz: range.tz,
-      userIds: reportUsers.map((user) => user.id),
-      from: range.from,
-      to: range.to,
-    });
-    const overrideFor = await loadOverrideLookup({ userIds: reportUsers.map((user) => user.id), from: range.from, to: range.to });
+    const reportUserIds = reportUsers.map((user) => user.id);
+    const [summaryData, calendar, rules, overrideFor] = await Promise.all([
+      loadTeamReportSummaryData(reportUserIds, range, now),
+      timesheetCalendarInputs({
+        workspaceId: req.scope.workspaceId,
+        tz: range.tz,
+        userIds: reportUserIds,
+        from: range.from,
+        to: range.to,
+      }),
+      loadAttendanceRuleContext({
+        workspaceId: req.scope.workspaceId,
+        tz: range.tz,
+        userIds: reportUserIds,
+        from: range.from,
+        to: range.to,
+      }),
+      loadOverrideLookup({ userIds: reportUserIds, from: range.from, to: range.to }),
+    ]);
     const daysByUser = new Map<string, ReturnType<typeof buildMemberReportDays>>();
     for (const user of reportUsers) {
       const data = summaryData.buckets.get(user.id) ?? emptyTeamReportSummaryData();
@@ -234,31 +245,31 @@ reportsRouter.get('/team/member', requireCapability('reports.team.read'), async 
     if ('error' in range) return res.status(range.status).json({ error: range.error, ...(range.extras ?? {}) });
 
     const now = new Date();
-    const [profile, reportData, approvals] = await Promise.all([
+    const [profile, reportData, approvals, calendar, rules, overrideFor] = await Promise.all([
       loadProfileForUser(target.user.id, req.user.ws),
       loadTeamReportData([target.user.id], range, now),
       loadManualRequestsForUser(target.user.id, range),
+      timesheetCalendarInputs({
+        workspaceId: req.scope.workspaceId,
+        tz: range.tz,
+        userIds: [target.user.id],
+        from: range.from,
+        to: range.to,
+      }),
+      loadAttendanceRuleContext({
+        workspaceId: req.scope.workspaceId,
+        tz: range.tz,
+        userIds: [target.user.id],
+        from: range.from,
+        to: range.to,
+      }),
+      loadOverrideLookup({ userIds: [target.user.id], from: range.from, to: range.to }),
     ]);
     if (!profile) return res.status(404).json({ error: 'user_not_found' });
     if ('error' in profile) return res.status(503).json({ error: profile.error });
 
     const data = reportData.get(target.user.id) ?? emptyTeamReportData();
     const iconFor = await iconForSamples(data.samples);
-    const calendar = await timesheetCalendarInputs({
-      workspaceId: req.scope.workspaceId,
-      tz: range.tz,
-      userIds: [target.user.id],
-      from: range.from,
-      to: range.to,
-    });
-    const rules = await loadAttendanceRuleContext({
-      workspaceId: req.scope!.workspaceId,
-      tz: range.tz,
-      userIds: [target.user.id],
-      from: range.from,
-      to: range.to,
-    });
-    const overrideFor = await loadOverrideLookup({ userIds: [target.user.id], from: range.from, to: range.to });
     const days = buildMemberReportDays({
       dayStatusFor: calendar.dayStatusFor,
       ruleFor: rules.judge,
@@ -1061,7 +1072,7 @@ async function loadTeamReportData(
   for (const userId of userIds) grouped.set(userId, emptyTeamReportData());
   if (userIds.length === 0) return grouped;
 
-  const [timelines, manualRequests, samples, screenshots, shiftAssignments] = await Promise.all([
+  const [timelines, manualRequests, samples, screenshots, shiftAssignments, policy] = await Promise.all([
     loadTimelinesByUser(userIds, range, now),
     prisma.manualTimeRequest.findMany({
       where: {
@@ -1142,6 +1153,8 @@ async function loadTeamReportData(
       },
       orderBy: [{ userId: 'asc' }, { effectiveFrom: 'asc' }],
     }),
+    // One workspace per scope: hide what its current capture policy disallows.
+    policyFlagsForUser(userIds[0]!),
   ]);
 
   for (const [userId, t] of timelines) {
@@ -1152,8 +1165,6 @@ async function loadTeamReportData(
     const { userId, ...request } = row;
     grouped.get(userId)?.manualRequests.push(request);
   }
-  // One workspace per scope: hide what its current capture policy disallows.
-  const policy = await policyFlagsForUser(userIds[0]!);
   for (const row of hideDisallowedActiveFields(samples, policy)) {
     const { userId, ...sample } = row;
     grouped.get(userId)?.samples.push(sample);

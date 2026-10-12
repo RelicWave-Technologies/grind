@@ -125,12 +125,6 @@
   overflow-x: auto;
 }
 
-.int-table-wrap {
-  max-width: 100%;
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-}
-
 .int-table {
   min-width: calc(var(--ui-sp-12) * 15);
   table-layout: fixed;

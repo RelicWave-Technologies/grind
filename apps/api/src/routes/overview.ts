@@ -104,7 +104,41 @@ overviewRouter.get('/', async (req, res, next) => {
     // The shared timeline: one owner per minute (a manual claim on top of
     // tracked time is not counted twice), open ends proven, invalidated time
     // excluded — the same hours Edit Time and the reports show.
-    const timeline = await loadTimelineWindow({ userIds, start: win.start, end: win.end, now });
+    // Every read on this page is independent of the others: one round.
+    const [timeline, pendingRows, openFlagRows, rejected, syncRows] = await Promise.all([
+      loadTimelineWindow({ userIds, start: win.start, end: win.end, now }),
+      userIds.length === 0
+        ? []
+        : prisma.manualTimeRequest.findMany({
+            where: { status: 'PENDING', userId: { in: userIds } },
+            include: { user: { select: { id: true, name: true } } },
+            orderBy: { createdAt: 'asc' },
+          }),
+      userIds.length === 0
+        ? []
+        : prisma.activityFlag.findMany({
+            where: { status: 'OPEN', userId: { in: userIds } },
+            select: {
+              id: true, type: true, windowStart: true, riskScore: true, createdAt: true,
+              user: { select: { id: true, name: true } },
+            },
+            orderBy: { createdAt: 'desc' },
+          }),
+      userIds.length === 0
+        ? []
+        : prisma.manualTimeRequest.findMany({
+            where: { status: 'REJECTED', userId: { in: userIds } },
+            include: { user: { select: { id: true, name: true } } },
+            orderBy: { decidedAt: 'desc' },
+            take: 5,
+          }),
+      userIds.length === 0
+        ? []
+        : prisma.user.findMany({
+            where: { id: { in: userIds }, deactivatedAt: null },
+            select: SYNC_HEALTH_SELECT,
+          }),
+    ]);
     const sofar = { start: win.start.getTime(), end: Math.min(win.end.getTime(), now.getTime()) };
     let workedMs = 0;
     let meetingMs = 0;
@@ -123,13 +157,6 @@ overviewRouter.get('/', async (req, res, next) => {
     }
 
     // --- Pending approvals (scoped) --------------------------------------
-    const pendingRows = userIds.length === 0
-      ? []
-      : await prisma.manualTimeRequest.findMany({
-          where: { status: 'PENDING', userId: { in: userIds } },
-          include: { user: { select: { id: true, name: true } } },
-          orderBy: { createdAt: 'asc' },
-        });
     const pendingNow = now.getTime();
     let oldestPendingAge = 0;
     let pendingStuck = 0;
@@ -160,16 +187,6 @@ overviewRouter.get('/', async (req, res, next) => {
     // Counted the way the review queue shows them: one per person, day and
     // signal. The detector raises a flag per offending minute, and "5835 open"
     // describes the detector, not the work waiting for a reviewer.
-    const openFlagRows = userIds.length === 0
-      ? []
-      : await prisma.activityFlag.findMany({
-          where: { status: 'OPEN', userId: { in: userIds } },
-          select: {
-            id: true, type: true, windowStart: true, riskScore: true, createdAt: true,
-            user: { select: { id: true, name: true } },
-          },
-          orderBy: { createdAt: 'desc' },
-        });
     const flagGroups = new Map<string, { first: (typeof openFlagRows)[number]; count: number; riskScore: number }>();
     for (const f of openFlagRows) {
       const key = `${f.user.id}|${dateKeyInTimeZone(f.windowStart, tz)}|${f.type}`;
@@ -185,22 +202,8 @@ overviewRouter.get('/', async (req, res, next) => {
     const flagCount = flagGroups.size;
 
     // --- Recent rejections (last 5) for the "what's been pushed back" -----
-    const rejected = userIds.length === 0
-      ? []
-      : await prisma.manualTimeRequest.findMany({
-          where: { status: 'REJECTED', userId: { in: userIds } },
-          include: { user: { select: { id: true, name: true } } },
-          orderBy: { decidedAt: 'desc' },
-          take: 5,
-        });
 
     // --- Timo sync health (scoped; deactivated people are not in scope) --
-    const syncRows = userIds.length === 0
-      ? []
-      : await prisma.user.findMany({
-          where: { id: { in: userIds }, deactivatedAt: null },
-          select: SYNC_HEALTH_SELECT,
-        });
     const agentSync = { stuck: 0, behind: 0 };
     for (const row of syncRows) {
       const { status } = classifySyncHealth(row, now);

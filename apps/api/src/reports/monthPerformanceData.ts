@@ -62,6 +62,10 @@ interface MonthInputs {
   /** Counted milliseconds (work, meetings, approved manual; invalidated excluded). */
   trackedMsFor: (userId: string, date: string) => number;
   rules: AttendanceRuleContext;
+  /** The Working Calendar over the month (see `timesheetCalendarInputs`). */
+  calendar: Awaited<ReturnType<typeof timesheetCalendarInputs>>;
+  /** Leave balances as of `balancesAsOf`, when asked for. */
+  balances: Awaited<ReturnType<typeof loadBalances>>;
   nowMs: number;
 }
 
@@ -71,6 +75,8 @@ async function loadMonthInputs(input: {
   userIds: string[];
   range: ResolvedReportMonth;
   nowMs?: number;
+  /** Also read the leave balances as of this date, in the same round. */
+  balancesAsOf?: string;
 }): Promise<MonthInputs> {
   const { range } = input;
   const nowMs = input.nowMs ?? Date.now();
@@ -119,7 +125,8 @@ async function loadMonthInputs(input: {
   // Time comes from the shared timeline: the same owner-per-minute, proven
   // open ends and invalidations as Edit Time and the reports, so the hours
   // here cannot disagree with the hours anywhere else.
-  const [timeline, overrides] = await Promise.all([
+  // One round: none of these needs another's rows.
+  const [timeline, overrides, rules, calendar, balances] = await Promise.all([
     loadTimeline({ userIds, from: range.from, to: range.to, tz: range.tz, now: new Date(nowMs) }),
     userIds.length === 0 ? [] : prisma.attendanceOverride.findMany({
       where: {
@@ -128,8 +135,10 @@ async function loadMonthInputs(input: {
       },
       select: { userId: true, date: true, code: true, computedCode: true },
     }),
+    loadAttendanceRuleContext({ ...calendarInput, nowMs }),
+    timesheetCalendarInputs(calendarInput),
+    input.balancesAsOf && userIds.length > 0 ? loadBalances(userIds, input.balancesAsOf) : {},
   ]);
-  const rules = await loadAttendanceRuleContext({ ...calendarInput, nowMs });
 
   return {
     reportUsers,
@@ -139,6 +148,8 @@ async function loadMonthInputs(input: {
     overrides,
     trackedMsFor: (userId, date) => timeline.bucket(userId, date).counted,
     rules,
+    calendar,
+    balances,
     nowMs,
   };
 }
@@ -183,7 +194,7 @@ export async function reconcileMonthRules(input: {
   nowMs?: number;
 }): Promise<{ written: number; removed: number }> {
   const m = await loadMonthInputs(input);
-  const calendar = await timesheetCalendarInputs(m.calendarInput);
+  const { calendar } = m;
   const days = dateKeysBetween(input.range.from, input.range.to);
   return reconcileRuleLedger({
     workspaceId: input.workspaceId,
@@ -220,12 +231,14 @@ export async function loadMonthPerformanceReport(input: {
   nowMs?: number;
 }): Promise<MonthPerformanceReport> {
   const { range } = input;
-  const m = await loadMonthInputs(input);
-  const { reportUsers, userIds, overrides, trackedMsFor, rules, nowMs } = m;
+  // As of the last day of the month, not today: a report of August has to keep
+  // saying the same thing in October, and a balance read at render time would
+  // drift away from the days printed beside it.
+  const m = await loadMonthInputs({ ...input, balancesAsOf: range.to });
   // Read-only: the ledger lines the rules wrote are whatever the last
   // reconcile left (see `reconcileMonthRules`), and the calendar prices the
   // month from them.
-  const calendar = await timesheetCalendarInputs(m.calendarInput);
+  const { reportUsers, overrides, trackedMsFor, rules, nowMs, calendar, balances } = m;
   const overrideIndex = new Map<string, DayOverride>();
   for (const o of overrides) {
     // A DATE column reads back as an epoch-anchored Date; no timezone applies.
@@ -240,11 +253,6 @@ export async function loadMonthPerformanceReport(input: {
   }
   const overrideFor = (userId: string, date: string): DayOverride | null =>
     overrideIndex.get(`${userId}|${date}`) ?? null;
-
-  // As of the last day of the month, not today: a report of August has to keep
-  // saying the same thing in October, and a balance read at render time would
-  // drift away from the days printed beside it.
-  const balances = userIds.length === 0 ? {} : await loadBalances(userIds, range.to);
 
   return buildMonthPerformance({
     month: range.month,

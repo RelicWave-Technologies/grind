@@ -1,6 +1,7 @@
 import { Router, type Request } from 'express';
 import { prisma, type Prisma } from '@grind/db';
 import { requireAccessToken } from '../middleware/auth';
+import { readMemoScope } from '../lib/readMemo';
 import { attachScope, requireAdmin, requireAnyCapability, requireCapability, requireManagerOrAbove } from '../middleware/scope';
 import { decideByUser } from '../lark/decideByUser';
 import { triageRequest, type TriageResult } from '../ai/triage';
@@ -15,8 +16,8 @@ import {
   dateRange,
   timesheetMatrixFromBuckets,
   emptyTimesheetCell,
-  type TimesheetMatrix,
 } from '../insights/timesheets';
+import { countActivitySamplesByDay } from '../insights/sampleCounts';
 import { localDayWindow } from '../insights/day';
 import {
   countedMs,
@@ -25,10 +26,8 @@ import {
   isTracked as isTrackedPiece,
   mergeIntervals,
   unionMs,
-  type TimelineInvalidation,
 } from '@grind/core';
 import {
-  invalidatedAt,
   loadTimeline,
   loadTimelineWindow,
   piecesForUser,
@@ -48,6 +47,7 @@ import {
   WORKSPACE_POLICY_DEFAULTS,
   addDays,
   dateKeyInTimeZone,
+  dateKeysBetween,
   isYmd,
   normalizeScreenshotIntervalMin,
   type ApiTokenDto,
@@ -777,23 +777,30 @@ const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
  * counted time from the shared timeline — idle never counts, overlaps count
  * once, invalidated time is excluded — the same figure the reports show.
  */
-async function buildTriageContextByUser(
+/**
+ * Approval + rejection counts over the last 30 days (Prisma's groupBy returns
+ * one row per (userId, status) combo). Read in the same round as the triage
+ * timeline.
+ */
+async function loadTriageDecisionCounts(userIds: string[], now: number) {
+  if (userIds.length === 0) return [];
+  return prisma.manualTimeRequest.groupBy({
+    by: ['userId', 'status'],
+    where: { userId: { in: userIds }, createdAt: { gte: new Date(now - THIRTY_DAYS_MS) } },
+    _count: { _all: true },
+  });
+}
+
+function buildTriageContextByUser(
   userIds: string[],
   now: number,
   pieces: readonly TimelineRowPiece[],
+  counts: Awaited<ReturnType<typeof loadTriageDecisionCounts>>,
 ) {
   if (userIds.length === 0) {
     return new Map<string, { avgDailyTotalMs: number; approved: number; rejected: number }>();
   }
   const since = new Date(now - THIRTY_DAYS_MS);
-
-  // Approval + rejection counts (one round-trip per status — Prisma's
-  // groupBy returns one row per (userId, status) combo).
-  const counts = await prisma.manualTimeRequest.groupBy({
-    by: ['userId', 'status'],
-    where: { userId: { in: userIds }, createdAt: { gte: since } },
-    _count: { _all: true },
-  });
 
   const window = { start: since.getTime(), end: now };
   const out = new Map<string, { avgDailyTotalMs: number; approved: number; rejected: number }>();
@@ -918,26 +925,27 @@ adminRouter.get('/manual-time-requests', requireManagerOrAbove, async (req, res,
     // hidden by the date range. A request left waiting two months is the one
     // that most needs a decision, and a range that ends last week used to put
     // it out of sight while the overview still counted it as stuck.
-    const pendingRowsAll = wantsPending
-      ? await prisma.manualTimeRequest.findMany({
-          where: { userId: { in: req.scope.userIds }, status: 'PENDING' },
-          include,
-          orderBy: [{ createdAt: 'asc' }],
-        })
-      : [];
-
-    // History: capped, newest first.
+    // History: capped, newest first. Read alongside the queue.
     const decidedStatuses = statusParam === 'ALL'
       ? (['APPROVED', 'REJECTED', 'CANCELLED'] as const)
       : ([statusParam] as unknown as readonly (typeof validStatuses)[number][]);
-    const decidedRows = wantsDecided
-      ? await prisma.manualTimeRequest.findMany({
-          where: { ...scoped, status: { in: [...decidedStatuses] } },
-          include,
-          orderBy: [{ createdAt: 'desc' }],
-          take: DECIDED_PAGE_SIZE + 1,
-        })
-      : [];
+    const [pendingRowsAll, decidedRows] = await Promise.all([
+      wantsPending
+        ? prisma.manualTimeRequest.findMany({
+            where: { userId: { in: req.scope.userIds }, status: 'PENDING' },
+            include,
+            orderBy: [{ createdAt: 'asc' }],
+          })
+        : [],
+      wantsDecided
+        ? prisma.manualTimeRequest.findMany({
+            where: { ...scoped, status: { in: [...decidedStatuses] } },
+            include,
+            orderBy: [{ createdAt: 'desc' }],
+            take: DECIDED_PAGE_SIZE + 1,
+          })
+        : [],
+    ]);
     const truncated = decidedRows.length > DECIDED_PAGE_SIZE;
     const rows = [...pendingRowsAll, ...decidedRows.slice(0, DECIDED_PAGE_SIZE)];
     // Triage enrichment for PENDING rows only (decided rows already have
@@ -959,13 +967,16 @@ adminRouter.get('/manual-time-requests', requireManagerOrAbove, async (req, res,
         (max, r) => Math.max(max, dayOf(r.requestedStart)?.end.getTime() ?? r.requestedEnd.getTime()),
         now,
       );
-      const triageTimeline = await loadTimelineWindow({
-        userIds,
-        start: new Date(earliest),
-        end: new Date(latest),
-        now: new Date(now),
-      });
-      const perUser = await buildTriageContextByUser(userIds, now, triageTimeline.pieces);
+      const [triageTimeline, decisionCounts] = await Promise.all([
+        loadTimelineWindow({
+          userIds,
+          start: new Date(earliest),
+          end: new Date(latest),
+          now: new Date(now),
+        }),
+        loadTriageDecisionCounts(userIds, now),
+      ]);
+      const perUser = buildTriageContextByUser(userIds, now, triageTimeline.pieces, decisionCounts);
 
       triageByRequest = new Map<string, TriageResult>();
       for (const r of pendingRows) {
@@ -1133,7 +1144,10 @@ async function loadTimesheetData(
     throw new Error('timesheet_range_unresolvable');
   }
 
-  const [timeline, calendarInputs] = await Promise.all([
+  // Four independent reads, one round trip deep. The sample column is counted
+  // in Postgres (see countActivitySamplesByDay) rather than by shipping every
+  // sample of the range here to add them up.
+  const [timeline, calendarInputs, sampleCounts, users] = await Promise.all([
     loadTimeline({ userIds: scope.userIds, from: range.from, to: range.to, tz: range.tz }),
     timesheetCalendarInputs({
       workspaceId: scope.workspaceId,
@@ -1141,6 +1155,12 @@ async function loadTimesheetData(
       userIds: scope.userIds,
       from: range.from,
       to: range.to,
+    }),
+    countActivitySamplesByDay({ userIds: scope.userIds, days: dateKeysBetween(range.from, range.to), tz: range.tz }),
+    prisma.user.findMany({
+      where: { id: { in: scope.userIds } },
+      select: { id: true, name: true, email: true, avatarUrl: true, role: true },
+      orderBy: [{ role: 'asc' }, { name: 'asc' }],
     }),
   ]);
   const matrix = timesheetMatrixFromBuckets({
@@ -1151,50 +1171,15 @@ async function loadTimesheetData(
     buckets: timeline.buckets,
     ...calendarInputs,
   });
-  const samples = await prisma.activitySample.findMany({
-    where: {
-      userId: { in: scope.userIds },
-      bucketStart: { gte: timeline.start, lt: timeline.end },
-    },
-    select: { userId: true, bucketStart: true },
-    orderBy: [{ userId: 'asc' }, { bucketStart: 'asc' }],
-  });
-  attachActivitySampleCounts(matrix, samples, timeline.invalidations);
-  const users = await prisma.user.findMany({
-    where: { id: { in: scope.userIds } },
-    select: { id: true, name: true, email: true, avatarUrl: true, role: true },
-    orderBy: [{ role: 'asc' }, { name: 'asc' }],
-  });
-  return { matrix, users, calendar: calendarInputs };
-}
-
-function attachActivitySampleCounts(
-  matrix: TimesheetMatrix,
-  samples: Array<{ userId: string; bucketStart: Date }>,
-  invalidations: TimelineInvalidation[] = [],
-) {
-  const invalidated = invalidatedAt(invalidations);
-  const windows = matrix.days
-    .map((day) => {
-      const win = localDayWindow(day, matrix.tz);
-      return win
-        ? { day, startMs: win.start.getTime(), endMs: win.end.getTime() }
-        : null;
-    })
-    .filter((win): win is { day: string; startMs: number; endMs: number } => win !== null);
-
-  for (const sample of samples) {
-    const userCells = matrix.cells[sample.userId];
+  for (const [userId, perDay] of sampleCounts) {
+    const userCells = matrix.cells[userId];
     if (!userCells) continue;
-    const t = sample.bucketStart.getTime();
-    if (invalidated(sample.userId, t)) continue;
-    for (const win of windows) {
-      if (t < win.startMs || t >= win.endMs) continue;
-      const cell = userCells[win.day];
-      if (cell) cell.activitySampleCount += 1;
-      break;
+    for (const [day, n] of perDay) {
+      const cell = userCells[day];
+      if (cell) cell.activitySampleCount += n;
     }
   }
+  return { matrix, users, calendar: calendarInputs };
 }
 
 /**
@@ -1207,7 +1192,7 @@ function attachActivitySampleCounts(
  * Defaults: trailing 14 days ending today in the workspace timezone. Hard cap
  * at 60 days so a typo can't melt the DB.
  */
-adminRouter.get('/timesheets', requireAnyCapability(['reports.team.read', 'reports.workspace.read']), async (req, res, next) => {
+adminRouter.get('/timesheets', requireAnyCapability(['reports.team.read', 'reports.workspace.read']), readMemoScope, async (req, res, next) => {
   try {
     if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
     const range = resolveTimesheetRange(req, req.scope.workspaceTimezone);
@@ -1229,7 +1214,7 @@ adminRouter.get('/timesheets', requireAnyCapability(['reports.team.read', 'repor
  * scroll through "Sat: 0" — but a day the rules charged (leave nobody
  * applied for) stays, with no hours: that is the row the export is for.
  */
-adminRouter.get('/timesheets.csv', requireAnyCapability(['reports.team.read', 'reports.workspace.read']), async (req, res, next) => {
+adminRouter.get('/timesheets.csv', requireAnyCapability(['reports.team.read', 'reports.workspace.read']), readMemoScope, async (req, res, next) => {
   try {
     if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
     const range = resolveTimesheetRange(req, req.scope.workspaceTimezone);

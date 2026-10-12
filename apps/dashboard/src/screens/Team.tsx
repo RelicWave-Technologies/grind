@@ -17,11 +17,13 @@ import {
   IDLE_WARNING_SECONDS_MAX,
   IDLE_WARNING_SECONDS_MIN,
   SCREENSHOT_INTERVAL_OPTIONS,
-  addDays,
   dateKeyInTimeZone,
 } from '@grind/types';
 import { api } from '../lib/api';
+import { TEAM_SETTINGS_QUERY_KEY, teamMemberSettingsQuery, teamWorkspacePolicyQuery } from '../lib/queries';
 import type { Role } from '../lib/auth';
+import { defaultReportRange } from '../lib/reportRange';
+import { useTableFilter } from '../lib/tableFilter';
 import {
   Avatar,
   Banner,
@@ -30,9 +32,11 @@ import {
   Checkbox,
   EmptyState,
   Field,
+  FilterBar,
   IconButton,
   Identity,
   Input,
+  NoMatches,
   Page,
   PageHeader,
   Select,
@@ -67,7 +71,6 @@ const RULE_MODE_LABEL: Record<RuleMode, string> = { STANDARD: 'Office', REMOTE: 
 type MonitoringRisk = 'NORMAL' | 'CAUTION' | 'HIGH';
 type MonitoringTiming = { screenshotIntervalMin: number; idleThresholdMin: number };
 
-const TEAM_SETTINGS_QUERY_KEY = ['admin', 'team-member-settings'] as const;
 
 const IDLE_WARNING_STEP_SECONDS = 5;
 
@@ -83,14 +86,8 @@ export function TeamScreen() {
     next: MonitoringTiming;
   } | null>(null);
 
-  const settingsQ = useQuery({
-    queryKey: TEAM_SETTINGS_QUERY_KEY,
-    queryFn: () => api<TeamSettingsResponse>('/v1/admin/team-member-settings'),
-  });
-  const policyQ = useQuery({
-    queryKey: ['admin', 'workspace-policy'],
-    queryFn: () => api<WorkspacePolicyDto>('/v1/admin/workspace-policy'),
-  });
+  const settingsQ = useQuery(teamMemberSettingsQuery<TeamSettingsResponse>());
+  const policyQ = useQuery(teamWorkspacePolicyQuery<WorkspacePolicyDto>());
 
   const updateMember = useMutation({
     mutationFn: ({ userId, patch }: { userId: string; patch: PatchTeamMemberSettingsRequest }) =>
@@ -115,7 +112,8 @@ export function TeamScreen() {
   const policy = policyQ.data;
   const tz = me.workspaceTimezone;
   const today = dateKeyInTimeZone(Date.now(), tz);
-  const drawerFrom = addDays(today, -6);
+  // The member report drawer opens on the same payroll-timed range as Reports.
+  const drawerRange = defaultReportRange(today);
 
   function patchMember(userId: string, field: PendingField, patch: PatchTeamMemberSettingsRequest) {
     setPendingEdit({ userId, field });
@@ -271,7 +269,6 @@ export function TeamScreen() {
                 <h2 className="ui-t-title">Members</h2>
                 <p className="ui-t-small">Edit settings with the pencil, then confirm with the tick.</p>
               </div>
-              <Tag mono>{members.length}</Tag>
             </div>
             <TeamSettingsTable
               members={members}
@@ -293,8 +290,8 @@ export function TeamScreen() {
       {selectedUserId && (
         <TeamMemberDetailDrawer
           userId={selectedUserId}
-          initialFrom={drawerFrom}
-          initialTo={today}
+          initialFrom={drawerRange.from}
+          initialTo={drawerRange.to}
           today={today}
           tz={tz}
           onClose={() => setSelectedUserId(null)}
@@ -341,179 +338,204 @@ function TeamSettingsTable({
   onOpenMember: (userId: string) => void;
 }) {
   const showIdleCountdown = currentUserRole === 'ADMIN';
+  const shiftName = (shiftId: string | null) =>
+    (shiftId ? shifts.find((s) => s.id === shiftId)?.name : null) ?? 'No shift';
+  // Filters read the saved settings, not an open row draft: a row being edited
+  // stays put until it is saved.
+  const filter = useTableFilter(members, {
+    text: (m) => [m.name, m.email, m.team?.name, shiftName(m.shiftId), m.manager?.name],
+    facets: {
+      shift: { label: 'Shifts', value: (m) => shiftName(m.shiftId) },
+      team: { label: 'Teams', value: (m) => m.team?.name },
+      works: {
+        label: 'Work modes',
+        value: (m) => m.attendanceRuleMode,
+        optionLabel: (mode) => RULE_MODE_LABEL[mode as RuleMode] ?? mode,
+      },
+      manager: { label: 'Managers', value: (m) => m.manager?.name ?? 'No manager' },
+    },
+  });
   return (
-    <div className="tm-table-wrap">
-      <Table
-        density="compact"
-        stickyHead
-        className={showIdleCountdown ? 'tm-members-table tm-members-table--countdown' : 'tm-members-table'}
-      >
-        <THead>
-          <Tr>
-            <Th className="tm-col-member">Member</Th>
-            <Th className="tm-col-shift" align="center">Shift</Th>
-            <Th className="tm-col-shot" align="center">Screenshot interval</Th>
-            <Th className="tm-col-idle" align="center">Idle break</Th>
-            {showIdleCountdown && <Th className="tm-col-countdown" align="center">Idle countdown</Th>}
-            <Th className="tm-col-works" align="center">Works from</Th>
-            <Th className="tm-col-manager" align="center">Manager</Th>
-            <Th className="tm-col-action" align="center">Action</Th>
-          </Tr>
-        </THead>
-        <Tbody>
-          {members.map((member) => {
-            const draft = rowDraft?.userId === member.id ? rowDraft : null;
-            const editing = Boolean(draft);
-            const rowBusy = isPending(pendingEdit, member.id, 'settings');
-            const shiftId = draft ? draft.shiftId : member.shiftId;
-            const screenshotIntervalMin = draft ? draft.screenshotIntervalMin : member.screenshotIntervalMin;
-            const idleThresholdMin = draft ? draft.idleThresholdMin : member.idleThresholdMin;
-            const idleWarningSeconds = draft ? draft.idleWarningSeconds : member.idleWarningSeconds;
-            const ruleMode = draft ? draft.attendanceRuleMode : member.attendanceRuleMode;
-            const shift = shifts.find((s) => s.id === shiftId) ?? null;
-            const isCurrentUser = member.id === currentUserId;
-            const selfEditLocked = isCurrentUser && currentUserRole !== 'ADMIN';
+    <>
+      <FilterBar
+        filter={filter}
+        placeholder="Search name, email, team, shift…"
+        noun={{ one: 'member', other: 'members' }}
+      />
+      {filter.rows.length === 0 ? (
+        <NoMatches onClear={filter.clear} />
+      ) : (
+        <Table
+          density="compact"
+          className={showIdleCountdown ? 'tm-members-table tm-members-table--countdown' : 'tm-members-table'}
+        >
+          <THead>
+            <Tr>
+              <Th className="tm-col-member">Member</Th>
+              <Th className="tm-col-shift" align="center">Shift</Th>
+              <Th className="tm-col-shot" align="center">Screenshot interval</Th>
+              <Th className="tm-col-idle" align="center">Idle break</Th>
+              {showIdleCountdown && <Th className="tm-col-countdown" align="center">Idle countdown</Th>}
+              <Th className="tm-col-works" align="center">Works from</Th>
+              <Th className="tm-col-manager" align="center">Manager</Th>
+              <Th className="tm-col-action" align="center">Action</Th>
+            </Tr>
+          </THead>
+          <Tbody>
+            {filter.rows.map((member) => {
+              const draft = rowDraft?.userId === member.id ? rowDraft : null;
+              const editing = Boolean(draft);
+              const rowBusy = isPending(pendingEdit, member.id, 'settings');
+              const shiftId = draft ? draft.shiftId : member.shiftId;
+              const screenshotIntervalMin = draft ? draft.screenshotIntervalMin : member.screenshotIntervalMin;
+              const idleThresholdMin = draft ? draft.idleThresholdMin : member.idleThresholdMin;
+              const idleWarningSeconds = draft ? draft.idleWarningSeconds : member.idleWarningSeconds;
+              const ruleMode = draft ? draft.attendanceRuleMode : member.attendanceRuleMode;
+              const shift = shifts.find((s) => s.id === shiftId) ?? null;
+              const isCurrentUser = member.id === currentUserId;
+              const selfEditLocked = isCurrentUser && currentUserRole !== 'ADMIN';
 
-            return (
-              <Tr key={member.id} className="tm-member-row">
-                <Td className="tm-col-member">
-                  <Identity
-                    avatar={<Avatar name={member.name} src={member.avatarUrl ?? undefined} size={32} />}
-                    name={isCurrentUser ? `${member.name} (you)` : member.name}
-                    subtitle={member.team?.name ?? member.email}
-                  />
-                </Td>
-                <Td className="tm-col-shift" align="center">
-                  {editing ? (
-                    <ShiftSelect
-                      memberName={member.name}
-                      value={shiftId}
-                      shifts={shifts}
-                      busy={rowBusy}
-                      onChange={(nextShiftId) => onDraftChange(member.id, { shiftId: nextShiftId })}
+              return (
+                <Tr key={member.id} className="tm-member-row">
+                  <Td className="tm-col-member">
+                    <Identity
+                      avatar={<Avatar name={member.name} src={member.avatarUrl ?? undefined} size={32} />}
+                      name={isCurrentUser ? `${member.name} (you)` : member.name}
+                      subtitle={member.team?.name ?? member.email}
                     />
-                  ) : (
-                    <SettingValue value={shift?.name ?? 'No shift'} />
-                  )}
-                </Td>
-                <Td className="tm-col-shot" align="center">
-                  {editing ? (
-                    <CadenceSelect
-                      ariaLabel={`${member.name} screenshot interval`}
-                      value={screenshotIntervalMin}
-                      options={SCREENSHOT_INTERVAL_OPTIONS}
-                      busy={rowBusy}
-                      prefix="Every"
-                      onChange={(next) => onDraftChange(member.id, { screenshotIntervalMin: next })}
-                    />
-                  ) : (
-                    <SettingValue label="Every" value={formatCadence(screenshotIntervalMin)} />
-                  )}
-                </Td>
-                <Td className="tm-col-idle" align="center">
-                  {editing ? (
-                    <CadenceSelect
-                      ariaLabel={`${member.name} idle break threshold`}
-                      value={idleThresholdMin}
-                      options={IDLE_THRESHOLD_OPTIONS}
-                      busy={rowBusy}
-                      prefix="After"
-                      onChange={(next) => onDraftChange(member.id, { idleThresholdMin: next })}
-                    />
-                  ) : (
-                    <SettingValue label="After" value={formatCadence(idleThresholdMin)} />
-                  )}
-                </Td>
-                {showIdleCountdown && (
-                  <Td className="tm-col-countdown" align="center">
+                  </Td>
+                  <Td className="tm-col-shift" align="center">
                     {editing ? (
-                      <IdleWarningControl
+                      <ShiftSelect
                         memberName={member.name}
-                        value={idleWarningSeconds}
-                        idleThresholdMin={idleThresholdMin}
+                        value={shiftId}
+                        shifts={shifts}
                         busy={rowBusy}
-                        onChange={(next) => onDraftChange(member.id, { idleWarningSeconds: next })}
+                        onChange={(nextShiftId) => onDraftChange(member.id, { shiftId: nextShiftId })}
                       />
                     ) : (
-                      <IdleWarningValue value={idleWarningSeconds} />
+                      <SettingValue value={shift?.name ?? 'No shift'} />
                     )}
                   </Td>
-                )}
-                <Td className="tm-col-works" align="center">
-                  {/* Office: all attendance rules. Remote: no punch expected, so
-                      no work-from-home or late rule. Only an admin may change it. */}
-                  {editing && currentUserRole === 'ADMIN' ? (
-                    <div className="tm-setting-control">
-                      <Select
-                        value={ruleMode}
-                        aria-label={`${member.name} works from`}
-                        disabled={rowBusy}
-                        onChange={(e) => onDraftChange(member.id, { attendanceRuleMode: e.target.value as RuleMode })}
-                      >
-                        <option value="STANDARD">Office</option>
-                        <option value="REMOTE">Remote</option>
-                        <option value="EXEMPT">No rules</option>
-                      </Select>
-                    </div>
-                  ) : (
-                    <SettingValue value={RULE_MODE_LABEL[ruleMode]} />
-                  )}
-                </Td>
-                <Td className="tm-col-manager" align="center">
-                  <div className="tm-stack tm-stack--center">
-                    <span className="ui-t-strong">{member.manager?.name ?? 'No manager'}</span>
-                    <span className="ui-t-small ui-ink-3">{member.manager?.email ?? 'Workspace scope'}</span>
-                  </div>
-                </Td>
-                <Td className="tm-col-action" align="center">
-                  <div className="tm-row-actions">
+                  <Td className="tm-col-shot" align="center">
                     {editing ? (
-                      <>
-                        <IconButton
-                          icon={<X size={15} strokeWidth={1.9} />}
-                          aria-label="Cancel settings edit"
-                          disabled={rowBusy}
-                          onClick={onCancelEdit}
-                        />
-                        <IconButton
-                          icon={<Check size={15} strokeWidth={2.2} />}
-                          aria-label="Save settings"
-                          variant="primary"
-                          loading={rowBusy}
-                          onClick={() => onSaveEdit(member)}
-                        />
-                      </>
+                      <CadenceSelect
+                        ariaLabel={`${member.name} screenshot interval`}
+                        value={screenshotIntervalMin}
+                        options={SCREENSHOT_INTERVAL_OPTIONS}
+                        busy={rowBusy}
+                        prefix="Every"
+                        onChange={(next) => onDraftChange(member.id, { screenshotIntervalMin: next })}
+                      />
                     ) : (
-                      <>
-                        <IconButton
-                          icon={<Pencil size={14} strokeWidth={1.9} />}
-                          aria-label={
-                            selfEditLocked
-                              ? `Admin controls ${member.name} settings`
-                              : `Edit ${member.name} settings`
-                          }
-                          title={selfEditLocked ? 'Admins control your settings' : undefined}
-                          disabled={Boolean(pendingEdit) || Boolean(rowDraft) || selfEditLocked}
-                          onClick={() => onStartEdit(member)}
-                        />
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          icon={<ArrowUpRight size={14} strokeWidth={1.8} />}
-                          onClick={() => onOpenMember(member.id)}
-                        >
-                          Open
-                        </Button>
-                      </>
+                      <SettingValue label="Every" value={formatCadence(screenshotIntervalMin)} />
                     )}
-                  </div>
-                </Td>
-              </Tr>
-            );
-          })}
-        </Tbody>
-      </Table>
-    </div>
+                  </Td>
+                  <Td className="tm-col-idle" align="center">
+                    {editing ? (
+                      <CadenceSelect
+                        ariaLabel={`${member.name} idle break threshold`}
+                        value={idleThresholdMin}
+                        options={IDLE_THRESHOLD_OPTIONS}
+                        busy={rowBusy}
+                        prefix="After"
+                        onChange={(next) => onDraftChange(member.id, { idleThresholdMin: next })}
+                      />
+                    ) : (
+                      <SettingValue label="After" value={formatCadence(idleThresholdMin)} />
+                    )}
+                  </Td>
+                  {showIdleCountdown && (
+                    <Td className="tm-col-countdown" align="center">
+                      {editing ? (
+                        <IdleWarningControl
+                          memberName={member.name}
+                          value={idleWarningSeconds}
+                          idleThresholdMin={idleThresholdMin}
+                          busy={rowBusy}
+                          onChange={(next) => onDraftChange(member.id, { idleWarningSeconds: next })}
+                        />
+                      ) : (
+                        <IdleWarningValue value={idleWarningSeconds} />
+                      )}
+                    </Td>
+                  )}
+                  <Td className="tm-col-works" align="center">
+                    {/* Office: all attendance rules. Remote: no punch expected, so
+                        no work-from-home or late rule. Only an admin may change it. */}
+                    {editing && currentUserRole === 'ADMIN' ? (
+                      <div className="tm-setting-control">
+                        <Select
+                          value={ruleMode}
+                          aria-label={`${member.name} works from`}
+                          disabled={rowBusy}
+                          onChange={(e) => onDraftChange(member.id, { attendanceRuleMode: e.target.value as RuleMode })}
+                        >
+                          <option value="STANDARD">Office</option>
+                          <option value="REMOTE">Remote</option>
+                          <option value="EXEMPT">No rules</option>
+                        </Select>
+                      </div>
+                    ) : (
+                      <SettingValue value={RULE_MODE_LABEL[ruleMode]} />
+                    )}
+                  </Td>
+                  <Td className="tm-col-manager" align="center">
+                    <div className="tm-stack tm-stack--center">
+                      <span className="ui-t-strong">{member.manager?.name ?? 'No manager'}</span>
+                      <span className="ui-t-small ui-ink-3">{member.manager?.email ?? 'Workspace scope'}</span>
+                    </div>
+                  </Td>
+                  <Td className="tm-col-action" align="center">
+                    <div className="tm-row-actions">
+                      {editing ? (
+                        <>
+                          <IconButton
+                            icon={<X size={15} strokeWidth={1.9} />}
+                            aria-label="Cancel settings edit"
+                            disabled={rowBusy}
+                            onClick={onCancelEdit}
+                          />
+                          <IconButton
+                            icon={<Check size={15} strokeWidth={2.2} />}
+                            aria-label="Save settings"
+                            variant="primary"
+                            loading={rowBusy}
+                            onClick={() => onSaveEdit(member)}
+                          />
+                        </>
+                      ) : (
+                        <>
+                          <IconButton
+                            icon={<Pencil size={14} strokeWidth={1.9} />}
+                            aria-label={
+                              selfEditLocked
+                                ? `Admin controls ${member.name} settings`
+                                : `Edit ${member.name} settings`
+                            }
+                            title={selfEditLocked ? 'Admins control your settings' : undefined}
+                            disabled={Boolean(pendingEdit) || Boolean(rowDraft) || selfEditLocked}
+                            onClick={() => onStartEdit(member)}
+                          />
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            icon={<ArrowUpRight size={14} strokeWidth={1.8} />}
+                            onClick={() => onOpenMember(member.id)}
+                          >
+                            Open
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  </Td>
+                </Tr>
+              );
+            })}
+          </Tbody>
+        </Table>
+      )}
+    </>
   );
 }
 

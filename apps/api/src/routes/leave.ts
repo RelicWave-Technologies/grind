@@ -13,6 +13,7 @@ import {
 } from '@grind/types';
 import { z } from 'zod';
 import { requireAccessToken } from '../middleware/auth';
+import { readMemoScope } from '../lib/readMemo';
 import { attachScope, requireAdmin } from '../middleware/scope';
 import {
   ensureAccruals,
@@ -113,7 +114,7 @@ leaveRouter.get('/me/requests', async (req, res, next) => {
  * Who is away or working from home across a range, for everyone in scope.
  * Powers the calendar screen's day-cell markers and its day list.
  */
-leaveRouter.get('/calendar', async (req, res, next) => {
+leaveRouter.get('/calendar', readMemoScope, async (req, res, next) => {
   try {
     if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
     const parsed = RangeQuery.safeParse(req.query);

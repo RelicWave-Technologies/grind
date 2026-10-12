@@ -3,6 +3,13 @@ import { addDays, dateKeyInTimeZone, instantForZonedDateTime, todayKey, weekdayF
 /** Calendar-key arithmetic is the shared one in @grind/types. */
 export { addDays, todayKey };
 
+/** First and last date key of a calendar month (`YYYY-MM`). */
+export function monthBounds(month: string): { from: string; to: string } {
+  const [y, m] = month.split('-').map((n) => Number.parseInt(n, 10));
+  const last = new Date(Date.UTC(y!, m!, 0)).getUTCDate();
+  return { from: `${month}-01`, to: `${month}-${String(last).padStart(2, '0')}` };
+}
+
 /** The weekday an instant falls on in a business timezone. */
 export function weekdayInTimeZone(date: Date, timeZone: string): Weekday {
   return weekdayForDate(dateKeyInTimeZone(date, timeZone));

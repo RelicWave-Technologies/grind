@@ -5,40 +5,53 @@ import type { Rail } from './util';
 /* §5.5 Table — the one tabular surface. Host in <Card variant="flush">.
    Header labels are eyebrows; numbers are mono + tabular, right-aligned.
    Identity/status via a 3px inset left-rail on the first cell — never a full
-   row tint beyond the selected wash. */
+   row tint beyond the selected wash.
+
+   Every Table sits in its own scroll region (`.ui-table-scroll`): it scrolls
+   both ways and is capped at the viewport height, so the header row stays
+   pinned while the rows scroll — whatever the page around it does (cards that
+   clip, a shell that scrolls, a table wider than the page). The region is the
+   ONE place a table scrolls; pages never wrap a Table in their own overflow
+   container. */
 export type TableDensity = 'comfortable' | 'compact';
 export type Align = 'left' | 'right' | 'center';
 
 export interface TableProps extends React.TableHTMLAttributes<HTMLTableElement> {
   density?: TableDensity;
-  /** Make the header sticky on vertical scroll. */
+  /** Pin the header row while the rows scroll. On by default; pass false only
+   *  for a table with no header worth keeping (e.g. a two-row readout). */
   stickyHead?: boolean;
-  /** Make the first column sticky on horizontal scroll. */
+  /** Pin the first column on horizontal scroll (wide matrices). */
   stickyCol?: boolean;
+  /** Layout class for the scroll region (e.g. a page-specific max-height). */
+  scrollClassName?: string;
   children: ReactNode;
 }
 
 export function Table({
   density = 'comfortable',
-  stickyHead,
+  stickyHead = true,
   stickyCol,
   className,
+  scrollClassName,
   children,
   ...rest
 }: TableProps) {
   return (
-    <table
-      className={cx(
-        'ui-table',
-        density === 'compact' && 'ui-table--compact',
-        stickyHead && 'ui-table--sticky-head',
-        stickyCol && 'ui-table--sticky-col',
-        className,
-      )}
-      {...rest}
-    >
-      {children}
-    </table>
+    <div className={cx('ui-table-scroll', scrollClassName)}>
+      <table
+        className={cx(
+          'ui-table',
+          density === 'compact' && 'ui-table--compact',
+          stickyHead && 'ui-table--sticky-head',
+          stickyCol && 'ui-table--sticky-col',
+          className,
+        )}
+        {...rest}
+      >
+        {children}
+      </table>
+    </div>
   );
 }
 

@@ -24,12 +24,10 @@
   margin-top: var(--ui-sp-4);
 }
 
+/* Clips row hover/selection to the card's rounded corners; the Table's own
+   region does the scrolling. */
 .dev-table-card {
   overflow: hidden;
-}
-
-.dev-table-wrap {
-  overflow-x: auto;
 }
 
 .dev-toggle-cell {

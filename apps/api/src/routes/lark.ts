@@ -25,6 +25,7 @@ import { localDayWindow } from '../insights/day';
 import { totalsByTask } from '@grind/core';
 import { loadTimelineWindow } from '../time';
 import { assertLarkProfileBelongsToUser, LarkIdentityMismatchError } from '../lark/connectIdentity';
+import { cloneTasks, creatorNameCache, myTasksCache } from '../lark/myTasksCache';
 
 export const larkRouter = Router();
 
@@ -113,6 +114,8 @@ larkRouter.get('/oauth/callback', async (req, res) => {
       }
       throw err;
     }
+    // A (re)connected account may see different tasks.
+    myTasksCache.invalidate(userId);
 
     // Best-effort identity resolution; the OAuth connection still succeeds if
     // the tenant lookup fails (e.g. missing contact scope on the app).
@@ -200,7 +203,27 @@ larkRouter.get('/my-tasks', async (req, res, next) => {
       }
       throw err;
     }
-    const tasks = await client.listMyTasks(accessToken);
+    const userId = req.user.sub;
+    const tenant = getTenantClient();
+    // Lark's half (the list and its creators' names) comes through a short
+    // per-person cache that also bounds how long a slow Lark can hold this
+    // request up; see lark/myTasksCache.ts. The logged time below is always
+    // read fresh.
+    const { snapshot } = await myTasksCache.get(userId, async () => {
+      const listed = await client.listMyTasks(accessToken);
+      const creatorIds = listed.map((t) => t.creatorId).filter((id): id is string => !!id);
+      let creatorNames: Map<string, string> | null = null;
+      // Best-effort; needs a tenant token + contact scope.
+      if (tenant && creatorIds.length) {
+        try {
+          creatorNames = await creatorNameCache.resolve(creatorIds, (missing) => tenant.namesByOpenId(missing));
+        } catch (err) {
+          logger.warn({ err: String(err) }, 'lark creator name resolution failed (non-fatal)');
+        }
+      }
+      return { tasks: listed, creatorNames };
+    });
+    const tasks = cloneTasks(snapshot.tasks);
     const nowMs = Date.now();
     const rawDate = typeof req.query.date === 'string' && req.query.date.length > 0 ? req.query.date : null;
     const rawTz = typeof req.query.tz === 'string' && req.query.tz.length > 0 ? req.query.tz : null;
@@ -242,16 +265,8 @@ larkRouter.get('/my-tasks', async (req, res, next) => {
         t.loggedMs = dayWindow ? t.loggedTodayMs : t.loggedTotalMs;
       }
     }
-    // Resolve creator display names (best-effort; needs a tenant token + contact scope).
-    const tenant = getTenantClient();
-    const creatorIds = tasks.map((t) => t.creatorId).filter((id): id is string => !!id);
-    if (tenant && creatorIds.length) {
-      try {
-        const names = await tenant.namesByOpenId(creatorIds);
-        for (const t of tasks) if (t.creatorId) t.creatorName = names.get(t.creatorId) ?? null;
-      } catch (err) {
-        logger.warn({ err: String(err) }, 'lark creator name resolution failed (non-fatal)');
-      }
+    if (snapshot.creatorNames) {
+      for (const t of tasks) if (t.creatorId) t.creatorName = snapshot.creatorNames.get(t.creatorId) ?? null;
     }
     res.json({ tasks });
   } catch (err) {
@@ -310,6 +325,8 @@ larkRouter.post('/tasks', async (req, res, next) => {
       logger.warn({ err: detail, userId: req.user.sub }, 'lark task create failed unexpectedly');
       return res.status(502).json({ error: 'lark_create_failed', detail });
     }
+    // The next list must include the task just created.
+    myTasksCache.invalidate(req.user.sub);
     res.status(201).json({ task });
   } catch (err) {
     next(err);
@@ -322,6 +339,7 @@ larkRouter.post('/disconnect', async (req, res, next) => {
     if (!req.user) return res.status(401).json({ error: 'unauthorized' });
     const tm = getTokenManager();
     if (tm) await tm.disconnect(req.user.sub);
+    myTasksCache.invalidate(req.user.sub);
     res.json({ ok: true });
   } catch (err) {
     next(err);

@@ -4,12 +4,14 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouteContext } from '@tanstack/react-router';
 import { CalendarRange, FileSpreadsheet, Sheet } from 'lucide-react';
 import { api, ApiError, API_BASE } from '../lib/api';
+import { attendanceQuery, monthSummaryQuery } from '../lib/queries';
 import { useMonthReportDownload, fmtMonthLong } from '../lib/useMonthReportDownload';
 import type { TimesheetMatrix } from '../lib/types';
 import type { MonthSummaryResponse, MonthSummaryRow } from '@grind/types';
 import type { LeaveBalanceRow, LeaveBalancesResponse } from '../lib/types';
 import { EditMemberModal } from './Calendar';
 import { fmtTime, fmtDurationMs, fmtDayLabel, addDays, todayKey } from '../lib/format';
+import { useTableFilter } from '../lib/tableFilter';
 import {
   Tabs,
   Page,
@@ -32,6 +34,8 @@ import {
   Avatar,
   Tag,
   EmptyState,
+  FilterBar,
+  NoMatches,
   SkeletonTable,
   Modal,
 } from '../ui';
@@ -41,6 +45,10 @@ const SCOPE_LABEL: Record<TimesheetMatrix['scope'], string> = {
   team: 'Your team',
   workspace: 'Entire workspace',
 };
+
+const ROLE_LABEL: Record<string, string> = { ADMIN: 'Admin', MANAGER: 'Manager', MEMBER: 'Member' };
+
+const MODE_LABEL: Record<string, string> = { STANDARD: 'Standard', EXEMPT: 'No rules', REMOTE: 'Remote' };
 
 const RANGES: Array<{ key: '7' | '14' | '30'; label: string; days: number }> = [
   { key: '7', label: '7d', days: 7 },
@@ -74,13 +82,7 @@ export function AttendanceScreen() {
   const days = RANGES.find((r) => r.key === rangeKey)!.days;
   const from = addDays(anchor, -(days - 1));
 
-  const q = useQuery({
-    queryKey: ['admin', 'attendance', from, anchor, tz],
-    queryFn: () => {
-      const params = new URLSearchParams({ from, to: anchor, tz });
-      return api<TimesheetMatrix>(`/v1/admin/timesheets?${params.toString()}`);
-    },
-  });
+  const q = useQuery(attendanceQuery<TimesheetMatrix>({ from, to: anchor, tz }));
 
   function csvUrl(): string {
     const params = new URLSearchParams({ from, to: anchor, tz });
@@ -107,6 +109,16 @@ export function AttendanceScreen() {
   const tzLabel = tz.replace(/_/g, ' ');
   const data = q.data;
   const hasPeople = !!data && data.users.length > 0;
+  const people = useTableFilter(
+    data?.users ?? [],
+    {
+      text: (u) => [u.name, u.email, ROLE_LABEL[u.role] ?? u.role],
+      facets: {
+        role: { label: 'Roles', value: (u) => u.role, optionLabel: (r) => ROLE_LABEL[r] ?? r },
+      },
+    },
+    { urlPrefix: 'daily.' },
+  );
 
   const subtitle =
     view === 'month'
@@ -231,8 +243,15 @@ export function AttendanceScreen() {
                 </Tag>
               </div>
             </div>
-            <div className="atd-scroll">
-              <Table density="compact" stickyHead stickyCol className="atd-table">
+            <FilterBar
+              filter={people}
+              placeholder="Search name, email, role…"
+              noun={{ one: 'person', other: 'people' }}
+            />
+            {people.rows.length === 0 ? (
+              <NoMatches onClear={people.clear} />
+            ) : (
+              <Table density="compact" stickyCol className="atd-table">
                 <colgroup>
                   <col className="atd-col-person" />
                   {data!.days.map((d) => (
@@ -265,7 +284,7 @@ export function AttendanceScreen() {
                   </Tr>
                 </THead>
                 <Tbody>
-                  {data!.users.map((u) => {
+                  {people.rows.map((u) => {
                     const row = data!.cells[u.id] ?? {};
                     const total = data!.days.length;
                     const daysPresent = data!.days.filter(
@@ -326,7 +345,7 @@ export function AttendanceScreen() {
                   })}
                 </Tbody>
               </Table>
-            </div>
+            )}
           </>
         )}
       </Card>
@@ -390,12 +409,19 @@ function AttendanceSummary({ data, timeZone }: { data: TimesheetMatrix; timeZone
  */
 function MonthSummary({ month, isAdmin }: { month: string; isAdmin: boolean }) {
   const [open, setOpen] = useState<MonthSummaryRow | null>(null);
-  const q = useQuery({
-    queryKey: ['admin', 'month-summary', month],
-    queryFn: () => api<MonthSummaryResponse>(`/v1/reports/month-summary?month=${month}`),
-    retry: false,
-  });
+  const q = useQuery(monthSummaryQuery<MonthSummaryResponse>(month));
   const data = q.data;
+  const filter = useTableFilter(
+    data?.rows ?? [],
+    {
+      text: (r) => [r.name, r.email, r.teamName],
+      facets: {
+        team: { label: 'Teams', value: (r) => r.teamName },
+        mode: { label: 'Modes', value: (r) => r.mode, optionLabel: (m) => MODE_LABEL[m] ?? m },
+      },
+    },
+    { urlPrefix: 'month.' },
+  );
   // Hidden only when the viewer may not read the team (403). Loading and
   // other failures used to return null too, leaving this — the default
   // view — as a blank page with no spinner, error or retry.
@@ -429,8 +455,19 @@ function MonthSummary({ month, isAdmin }: { month: string; isAdmin: boolean }) {
           </p>
         </div>
       </div>
-      <div className="atd-scroll">
-        <Table density="compact" stickyHead>
+      {data.rows.length > 0 && (
+        <FilterBar
+          filter={filter}
+          placeholder="Search name, email, team…"
+          noun={{ one: 'person', other: 'people' }}
+        />
+      )}
+      {data.rows.length === 0 ? (
+        <EmptyState title="No people this month" description="There’s no one in scope for this month." />
+      ) : filter.rows.length === 0 ? (
+        <NoMatches onClear={filter.clear} />
+      ) : (
+        <Table density="compact">
           <THead>
             <Tr>
               <Th>Person</Th>
@@ -446,7 +483,7 @@ function MonthSummary({ month, isAdmin }: { month: string; isAdmin: boolean }) {
             </Tr>
           </THead>
           <Tbody>
-            {data.rows.map((r) => (
+            {filter.rows.map((r) => (
               <Tr key={r.userId}>
                 <Td>
                   <Identity
@@ -485,7 +522,7 @@ function MonthSummary({ month, isAdmin }: { month: string; isAdmin: boolean }) {
             ))}
           </Tbody>
         </Table>
-      </div>
+      )}
       <MonthDetails row={open} month={month} isAdmin={isAdmin} onClose={() => setOpen(null)} />
     </Card>
   );
