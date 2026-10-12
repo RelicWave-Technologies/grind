@@ -748,6 +748,9 @@ textarea.ui-control { height: auto; min-height: 80px; padding: var(--ui-sp-3) va
   padding: var(--ui-sp-4) var(--ui-sp-6);
   border-bottom: 1px solid var(--ui-line);
 }
+/* Alone in its card (filtering a stack of cards below it): the card's own
+   edge is the rule — never double-border. */
+.ui-filter-bar:last-child { border-bottom: 0; }
 .ui-filter-bar__controls {
   display: flex; align-items: center; flex-wrap: wrap;
   gap: var(--ui-sp-3);

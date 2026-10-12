@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouteContext } from '@tanstack/react-router';
 import { ShieldAlert, Check, X, AlertOctagon, ShieldCheck, Sparkles, Ban } from 'lucide-react';
 import { api, type ApiError } from '../lib/api';
+import { useTableFilter } from '../lib/tableFilter';
 import type { ActivityFlag, FlagResolution, FlagType } from '../lib/types';
 import {
   Page,
@@ -19,6 +20,8 @@ import {
   Banner,
   EmptyState,
   SkeletonTable,
+  FilterBar,
+  NoMatches,
 } from '../ui';
 import type { Status } from '../ui';
 import { fmtTime, fmtDayLabel, fmtDurationMs, fmtDateShort } from '../lib/format';
@@ -82,6 +85,22 @@ function riskStatus(score: number, isResolved: boolean): Status {
   return score >= HIGH_RISK ? 'danger' : 'warn';
 }
 
+/** The risk Tag's words — shared by the card and the risk filter. */
+function riskLabel(sev: Status): string {
+  return sev === 'danger' ? 'High' : sev === 'warn' ? 'Elevated' : 'Closed';
+}
+
+const RISK_OPTIONS = [
+  { value: 'High', label: 'High' },
+  { value: 'Elevated', label: 'Elevated' },
+];
+
+const VERDICT_LABEL: Record<FlagResolution, string> = {
+  DISMISSED: 'Dismissed',
+  CONFIRMED: 'Confirmed',
+  TIME_INVALIDATED: 'Time invalidated',
+};
+
 /** Map a resolution verdict onto the taxonomy: dismissed = legitimate (success). */
 function verdictStatus(resolution: FlagResolution): Status {
   return resolution === 'DISMISSED' ? 'success' : 'danger';
@@ -127,6 +146,30 @@ export function FlagsScreen() {
   });
 
   const count = q.data?.groups.length ?? 0;
+  const filter = useTableFilter(q.data?.groups ?? [], {
+    text: (g) => [
+      g.user.name,
+      g.user.email,
+      FLAG_LABEL[g.type],
+      g.explanation?.headline,
+      g.resolvedNote,
+      g.resolvedBy?.name,
+    ],
+    facets: {
+      person: { label: 'People', value: (g) => g.user.name },
+      kind: { label: 'Signals', value: (g) => g.type, optionLabel: (t) => FLAG_LABEL[t as FlagType] ?? t },
+      // Open cards only: a resolved card's risk reads "Closed", so the facet hides there.
+      risk: {
+        label: 'Risk levels',
+        value: (g) => (g.resolution ? null : riskLabel(riskStatus(g.riskScore, false))),
+        options: tab === 'OPEN' ? RISK_OPTIONS : [],
+      },
+      verdict: {
+        label: 'Verdicts',
+        value: (g) => (g.resolution ? VERDICT_LABEL[g.resolution] : null),
+      },
+    },
+  });
 
   return (
     <Page>
@@ -138,7 +181,12 @@ export function FlagsScreen() {
           <Tabs
             aria-label="Flag status"
             value={tab}
-            onChange={setTab}
+            onChange={(next) => {
+              // Risk only exists on open cards and verdicts only on resolved ones.
+              filter.setValue('risk', '');
+              filter.setValue('verdict', '');
+              setTab(next);
+            }}
             items={[
               { value: 'OPEN', label: tab === 'OPEN' && count > 0 ? `Open · ${count}` : 'Open' },
               {
@@ -179,8 +227,22 @@ export function FlagsScreen() {
       )}
 
       {q.data && q.data.groups.length > 0 && (
+        <Card variant="flush">
+          <FilterBar
+            filter={filter}
+            placeholder="Search person, signal, note…"
+            noun={{ one: 'card', other: 'cards' }}
+          />
+        </Card>
+      )}
+
+      {q.data && q.data.groups.length > 0 && filter.rows.length === 0 && (
+        <NoMatches onClear={filter.clear} />
+      )}
+
+      {q.data && filter.rows.length > 0 && (
         <div className="flg-queue">
-          {q.data.groups.map((g) => (
+          {filter.rows.map((g) => (
             <FlagCard
               key={g.key}
               flag={g}
@@ -241,7 +303,7 @@ function FlagCard({
         <div className="flg-risk">
           <span className="ui-t-eyebrow flg-risk__cap">Risk</span>
           <span className="ui-t-num flg-risk__num">{flag.riskScore}</span>
-          <Tag status={sev}>{sev === 'danger' ? 'High' : sev === 'warn' ? 'Elevated' : 'Closed'}</Tag>
+          <Tag status={sev}>{riskLabel(sev)}</Tag>
         </div>
       </div>
 

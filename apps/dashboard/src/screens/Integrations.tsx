@@ -8,6 +8,7 @@ import type {
 } from '@grind/types';
 import { API_TOKEN_SCOPES } from '@grind/types';
 import { api, API_BASE } from '../lib/api';
+import { useTableFilter } from '../lib/tableFilter';
 import {
   Page,
   PageHeader,
@@ -19,6 +20,8 @@ import {
   IconButton,
   Banner,
   EmptyState,
+  FilterBar,
+  NoMatches,
   Table,
   THead,
   Tbody,
@@ -44,6 +47,13 @@ const SCOPE_STATUS: Record<ApiTokenScope, 'neutral' | 'info' | 'success' | 'warn
   'read:time-summary': 'success',
   'read:manual-time': 'warn',
 };
+
+const STATUS_OPTIONS = [
+  { value: 'active', label: 'Active' },
+  { value: 'revoked', label: 'Revoked' },
+];
+
+const SCOPE_OPTIONS = API_TOKEN_SCOPES.map((scope) => ({ value: scope, label: SCOPE_LABELS[scope] }));
 
 const MCP_PACKAGE = '@anish23_05/timo-mcp@latest';
 
@@ -112,6 +122,24 @@ export function IntegrationsScreen() {
     () => tokensQ.data?.tokens.filter((token) => !token.revokedAt).length ?? 0,
     [tokensQ.data?.tokens],
   );
+
+  const filter = useTableFilter(tokensQ.data?.tokens ?? [], {
+    text: (token) => [
+      token.name,
+      token.tokenPrefix,
+      token.createdBy.name,
+      token.createdBy.email,
+      ...token.scopes.map((scope) => SCOPE_LABELS[scope]),
+    ],
+    facets: {
+      status: {
+        label: 'Statuses',
+        value: (token) => (token.revokedAt ? 'revoked' : 'active'),
+        options: STATUS_OPTIONS,
+      },
+      scope: { label: 'Scopes', value: (token) => token.scopes, options: SCOPE_OPTIONS },
+    },
+  });
 
   const createdMcpConfig = useMemo(() => {
     if (!createdToken) return '';
@@ -193,7 +221,6 @@ export function IntegrationsScreen() {
         variant="flush"
         className="int-token-table-card rise rise-1"
         title="Tokens"
-        action={tokensQ.data?.tokens.length ? <Tag status="neutral">{tokensQ.data.tokens.length} total</Tag> : null}
       >
         <div className="int-create-strip">
           <div className="int-create-name">
@@ -288,7 +315,15 @@ export function IntegrationsScreen() {
             description={(tokensQ.error as Error).message}
           />
         ) : tokensQ.data?.tokens.length ? (
-          <div className="int-table-wrap">
+          <>
+            <FilterBar
+              filter={filter}
+              placeholder="Search name, prefix, scope…"
+              noun={{ one: 'token', other: 'tokens' }}
+            />
+            {filter.rows.length === 0 ? (
+              <NoMatches onClear={filter.clear} />
+            ) : (
             <Table className="int-table">
               <colgroup>
                 <col className="int-col-name" />
@@ -309,7 +344,7 @@ export function IntegrationsScreen() {
                 </Tr>
               </THead>
               <Tbody>
-                {tokensQ.data.tokens.map((token) => {
+                {filter.rows.map((token) => {
                   const revoked = !!token.revokedAt;
                   const confirming = confirmRevokeId === token.id;
                   return (
@@ -375,7 +410,8 @@ export function IntegrationsScreen() {
                 })}
               </Tbody>
             </Table>
-          </div>
+            )}
+          </>
         ) : (
           <EmptyState
             title="No API tokens yet"
