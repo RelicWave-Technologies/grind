@@ -13,7 +13,7 @@ import type {
   TeamReportsSummaryResponse,
   TeamReportUser,
 } from '@grind/types';
-import { loadAttendanceRuleContext } from '../attendance/ruleContext';
+import { lateLookup, loadAttendanceRuleContext } from '../attendance/ruleContext';
 import { requireAccessToken } from '../middleware/auth';
 import { readMemoScope } from '../lib/readMemo';
 import { hideDisallowedActiveFields, policyFlagsForUser } from '../workspacePolicy/readScrub';
@@ -111,6 +111,7 @@ reportsRouter.get('/me', async (req, res, next) => {
       days: buildMemberReportDays({
         dayStatusFor: calendar.dayStatusFor,
         ruleFor: rules.judge,
+        lateFor: lateLookup(rules),
         attendanceModeFor: rules.modeFor,
         fundedDaysFor: calendar.fundedDaysFor,
         punchFor: rules.punchFor,
@@ -202,6 +203,7 @@ reportsRouter.get('/team/summary', requireCapability('reports.team.read'), async
       daysByUser.set(user.id, buildMemberReportDays({
         dayStatusFor: calendar.dayStatusFor,
         ruleFor: rules.judge,
+        lateFor: lateLookup(rules),
         attendanceModeFor: rules.modeFor,
         fundedDaysFor: calendar.fundedDaysFor,
         punchFor: rules.punchFor,
@@ -271,6 +273,7 @@ reportsRouter.get('/team/member', requireCapability('reports.team.read'), async 
     const days = buildMemberReportDays({
       dayStatusFor: calendar.dayStatusFor,
       ruleFor: rules.judge,
+      lateFor: lateLookup(rules),
       attendanceModeFor: rules.modeFor,
       fundedDaysFor: calendar.fundedDaysFor,
       punchFor: rules.punchFor,

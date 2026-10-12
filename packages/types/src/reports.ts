@@ -139,26 +139,20 @@ export const MemberReportDaySchema = z.object({
   meetingMs: z.number().int().min(0),
   manualMs: z.number().int().min(0),
   invalidatedMs: z.number().int().min(0),
-  /**
-   * When the day's first counted Timo time (work, meeting or manual) began —
-   * the start every report shows. Null when no counted stretch started that
-   * day (nothing counted, or only a stretch carried over from last night).
-   */
   firstActivityMs: z.number().int().nullable(),
-  /** End of the day's last counted Timo time, clipped to the day. */
   lastActivityMs: z.number().int().nullable(),
   /**
-   * The door punch-in for the day, as minutes since local midnight, from the
-   * external punch record — never from Timo. Null when none was recorded.
-   * Reports do not show it as the day's start; it is here to explain the
-   * attendance rules, which judge late arrivals on it.
+   * Punch in / punch out for the day, as minutes since local midnight, from
+   * the external punch record — NOT from tracked activity. Null when no punch
+   * was recorded, which the UI shows as a dash rather than guessing from
+   * firstActivityMs. The two live side by side on purpose: where they
+   * disagree is usually the interesting part.
    */
   punchInMinute: z.number().int().min(0).max(1439).nullable(),
+  punchOutMinute: z.number().int().min(0).max(1439).nullable(),
   /**
-   * Early / late / on time against the shift start, judged on
-   * `firstActivityMs` (when Timo started), never on the door punch-in — see
-   * `arrivalStatusFor` in core. Display only: it can differ from the
-   * attendance rules' late count, which goes by `punchInMinute`.
+   * Early / late against the shift start, judged on `punchInMinute` (the door),
+   * never on `firstActivityMs`. A worked day with no punch-in is `on_time`.
    */
   shiftStatus: ShiftStatusSchema,
   gaps: z.object({
@@ -256,19 +250,18 @@ export const TeamReportSummaryMemberSchema = z.object({
   approvals: TeamReportApprovalCountsSchema,
   screenshots: z.number().int().min(0),
   /**
-   * Typical Timo start / end across the range, as minutes since local
-   * midnight in the workspace timezone: the median of each day's first
-   * counted time (`firstActivityMs`) and of its last (`lastActivityMs`).
+   * Typical punch in / punch out across the range, as minutes since local
+   * midnight, taken from the external punch records.
    *
    * A range summary cannot carry an instant — "when does this person start?"
    * is a time of day, not a date — so the median is taken across the days
-   * that have one. Median, not mean: one 03:00 start should not drag a whole
-   * fortnight's typical start earlier.
+   * that have a punch. Median, not mean: one 03:00 badge-in should not drag a
+   * whole fortnight's typical start earlier.
    *
-   * Null when no day in the range had counted time.
+   * Null when no day in the range had a punch recorded.
    */
-  typicalStartMinute: z.number().int().min(0).max(1439).nullable(),
-  typicalEndMinute: z.number().int().min(0).max(1439).nullable(),
+  typicalPunchInMinute: z.number().int().min(0).max(1439).nullable(),
+  typicalPunchOutMinute: z.number().int().min(0).max(1439).nullable(),
 });
 export type TeamReportSummaryMember = z.infer<typeof TeamReportSummaryMemberSchema>;
 

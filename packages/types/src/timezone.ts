@@ -242,26 +242,21 @@ export function dateKeyInTimeZone(value: Date | number | string, timeZone: strin
 }
 
 /**
- * Minutes since local midnight for an instant, read in an explicit business
- * timezone — the clock reading a person in that zone would see.
- */
-export function minuteOfDayInTimeZone(value: Date | number | string, timeZone: string): number {
-  const parts = zonedDateTimeParts(value, timeZone);
-  return parts.hour * 60 + parts.minute;
-}
-
-/**
  * The median of a set of minute-of-day readings, or null when there is nothing
  * to summarise. Nulls are skipped rather than counted as midnight.
  *
- * Used for range summaries like "typically starts around 09:15", where the
+ * Used for range summaries like "typically punches in around 09:15", where the
  * answer is a clock reading rather than a moment. Median rather than mean so a
- * single odd day — one 03:00 start — cannot drag the answer with it.
+ * single odd day — one 03:00 badge-in — cannot drag the answer with it.
+ *
+ * Lives here rather than in either app because two callers must agree on the
+ * number: the API computes it for /reports/team/summary, and the dashboard
+ * recomputes it in the legacy-API fallback.
  *
  * Caveat worth naming: minute-of-day wraps at midnight, so a shift that
- * regularly ends after 00:00 summarises to an early-morning end. That reads
- * correctly for day shifts; night shifts would need a shift-anchored window
- * instead.
+ * regularly ends after 00:00 summarises to an early-morning punch out. That
+ * reads correctly for day shifts; night shifts would need a shift-anchored
+ * window instead.
  */
 export function medianMinute(minutes: Array<number | null | undefined>): number | null {
   const present = minutes
