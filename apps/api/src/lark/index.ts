@@ -46,6 +46,8 @@ let manager: TokenManager | null = null;
 let managerOverride: TokenManager | null = null;
 let tenant: TenantClient | null = null;
 let taskClient: UserTaskClient | null = null;
+let taskClientOverride: UserTaskClient | null = null;
+let tenantOverride: TenantClient | null = null;
 let messenger: LarkMessenger | null = null;
 let messengerOverride: LarkMessenger | null = null;
 let profileClient: ProfileClient | null = null;
@@ -76,6 +78,7 @@ export function setTokenManagerForTests(m: TokenManager | null): void {
 
 /** Process-wide tenant client (email→open_id), lazily built once configured. */
 export function getTenantClient(): TenantClient | null {
+  if (tenantOverride) return tenantOverride;
   if (!hasLarkCredentials()) return null;
   if (!tenant) tenant = new HttpTenantClient();
   return tenant;
@@ -83,9 +86,19 @@ export function getTenantClient(): TenantClient | null {
 
 /** Process-wide user-task client (my_tasks), lazily built once configured. */
 export function getUserTaskClient(): UserTaskClient | null {
+  if (taskClientOverride) return taskClientOverride;
   if (!hasLarkCredentials()) return null;
   if (!taskClient) taskClient = new HttpUserTaskClient();
   return taskClient;
+}
+
+/** Inject fake task / tenant clients for route tests (null restores the real ones). */
+export function setUserTaskClientForTests(c: UserTaskClient | null): void {
+  taskClientOverride = c;
+}
+
+export function setTenantClientForTests(c: TenantClient | null): void {
+  tenantOverride = c;
 }
 
 /**
