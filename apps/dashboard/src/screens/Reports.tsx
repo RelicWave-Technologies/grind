@@ -556,7 +556,15 @@ function SelfReportTable({
                     </div>
                   </Td>
                   <Td className="rep-col-start" align="center">
-                    <Tag status={statusTag(day.shiftStatus)}>{shiftLabel(day.shiftStatus)}</Tag>
+                    <div className="rep-start-cell">
+                      <Tag status={statusTag(day.shiftStatus)}>{shiftLabel(day.shiftStatus)}</Tag>
+                      {/* Judged on the door punch-in; the bracket is when Timo started, for reference. */}
+                      {day.firstActivityMs !== null && (
+                        <span className="ui-mono ui-t-small ui-ink-3" title="Timo start">
+                          ({fmtTime(day.firstActivityMs, tz)})
+                        </span>
+                      )}
+                    </div>
                   </Td>
                   <Td className="rep-col-status" align="center">
                     <AttendanceStatusCell day={day} onEdit={onEditStatus} />
