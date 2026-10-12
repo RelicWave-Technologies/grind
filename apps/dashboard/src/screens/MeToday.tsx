@@ -26,6 +26,11 @@ import {
   Stat,
   StatRow,
   SkeletonTable,
+  Table,
+  THead,
+  Tbody,
+  Tr,
+  Th,
 } from '../ui';
 
 interface AdminUser {
@@ -483,132 +488,130 @@ export function MeTodayScreen() {
               </div>
             </div>
 
-            <div className="myd-table-wrap">
-              <table className="myd-table">
-                <thead>
-                  <tr>
-                    <th className="ui-t-eyebrow myd-col-kind">Kind</th>
-                    <th className="ui-t-eyebrow myd-col-time">Time</th>
-                    <th className="ui-t-eyebrow myd-col-duration">Duration</th>
-                    <th className="ui-t-eyebrow myd-col-task">Task</th>
-                    <th className="ui-t-eyebrow">Notes / Reason</th>
-                    <th className="ui-t-eyebrow myd-col-actions" />
-                  </tr>
-                </thead>
-                <tbody key={`${targetUserId}:${date}`}>
-                  {/* One sorted partition: gap · tracked · meeting · manual ·
-                      idle · pending, contiguous and non-overlapping. */}
-                  {day.blocks.map((b) => {
-                    if (b.kind === 'GAP') {
-                      const blockKey = String(b.startedAt); // gap identity = its start (end tracks now)
-                      const rowId = dayBlockRowId(b);
-                      return (
-                        <EntryRow
-                          key={rowId}
-                          rowId={rowId}
-                          highlighted={highlightedRowId === rowId}
-                          kind="gap"
-                          block={b}
-                          tasks={tasks}
-                          timeZone={tz}
-                          disabled={!editable}
-                          workspaceUsers={workspaceUsers}
-                          selfId={me.id}
-                          preset={gapPreset && gapPreset.blockKey === blockKey ? gapPreset.range : undefined}
-                          presetTick={gapPreset && gapPreset.blockKey === blockKey ? gapPreset.tick : 0}
-                          onCreate={async (vars) => {
-                            await createRequest.mutateAsync(vars);
-                          }}
-                        />
-                      );
-                    }
-                    if (b.kind === 'PENDING') {
-                      const rowId = dayBlockRowId(b);
-                      return (
-                        <EntryRow
-                          key={rowId}
-                          rowId={rowId}
-                          highlighted={highlightedRowId === rowId}
-                          kind="pending"
-                          block={b}
-                          tasks={tasks}
-                          timeZone={tz}
-                          disabled={!editable}
-                          workspaceUsers={workspaceUsers}
-                          selfId={me.id}
-                          onPatch={async (vars) => {
-                            await patchRequest.mutateAsync(vars);
-                          }}
-                          onWithdraw={async (id) => {
-                            await cancelRequest.mutateAsync(id);
-                          }}
-                        />
-                      );
-                    }
-                    if (b.kind === 'IDLE_TRIMMED') {
-                      const rowId = dayBlockRowId(b);
-                      return (
-                        <tr
-                          key={rowId}
-                          data-row-id={rowId}
-                          className={`et-row entry-row-idle_trimmed${highlightedRowId === rowId ? ' et-row-highlighted' : ''}`}
-                        >
-                          <td><span className="kind-chip kind-idle_trimmed">Idle (trimmed)</span></td>
-                          <td className="tabular">{fmtTime(b.startedAt, tz)} – {fmtTime(b.endedAt, tz)}</td>
-                          <td className="tabular secondary">{fmtDurationMs(b.durationMs)}</td>
-                          <td className="tertiary">—</td>
-                          <td className="tertiary">Trimmed via the agent&apos;s idle prompt.</td>
-                          <td />
-                        </tr>
-                      );
-                    }
-                    // WORK / MEETING / MANUAL
-                    const kind = b.kind === 'MANUAL' ? 'manual_approved' : 'tracked';
+            <Table className="myd-table">
+              <THead>
+                <Tr>
+                  <Th className="myd-col-kind">Kind</Th>
+                  <Th className="myd-col-time">Time</Th>
+                  <Th className="myd-col-duration">Duration</Th>
+                  <Th className="myd-col-task">Task</Th>
+                  <Th>Notes / Reason</Th>
+                  <Th className="myd-col-actions" aria-label="Actions" />
+                </Tr>
+              </THead>
+              <Tbody key={`${targetUserId}:${date}`}>
+                {/* One sorted partition: gap · tracked · meeting · manual ·
+                    idle · pending, contiguous and non-overlapping. */}
+                {day.blocks.map((b) => {
+                  if (b.kind === 'GAP') {
+                    const blockKey = String(b.startedAt); // gap identity = its start (end tracks now)
                     const rowId = dayBlockRowId(b);
-                    const isMeeting = b.kind === 'MEETING';
                     return (
                       <EntryRow
                         key={rowId}
                         rowId={rowId}
                         highlighted={highlightedRowId === rowId}
-                        kind={kind}
+                        kind="gap"
                         block={b}
                         tasks={tasks}
                         timeZone={tz}
                         disabled={!editable}
-                        isMeeting={isMeeting}
                         workspaceUsers={workspaceUsers}
                         selfId={me.id}
-                        onSave={async (vars) => {
-                          await patchEntry.mutateAsync(vars);
+                        preset={gapPreset && gapPreset.blockKey === blockKey ? gapPreset.range : undefined}
+                        presetTick={gapPreset && gapPreset.blockKey === blockKey ? gapPreset.tick : 0}
+                        onCreate={async (vars) => {
+                          await createRequest.mutateAsync(vars);
                         }}
-                        onDeleteManual={
-                          kind === 'manual_approved'
-                            ? async (id) => {
-                                await deleteManualEntry.mutateAsync(id);
-                              }
-                            : undefined
-                        }
                       />
                     );
-                  })}
-
-                  {day.recentRejected.map((r) => {
-                    const rowId = `rejected-${r.id}`;
+                  }
+                  if (b.kind === 'PENDING') {
+                    const rowId = dayBlockRowId(b);
                     return (
                       <EntryRow
                         key={rowId}
                         rowId={rowId}
                         highlighted={highlightedRowId === rowId}
-                        kind="rejected"
-                        rejected={r}
+                        kind="pending"
+                        block={b}
+                        tasks={tasks}
                         timeZone={tz}
+                        disabled={!editable}
+                        workspaceUsers={workspaceUsers}
+                        selfId={me.id}
+                        onPatch={async (vars) => {
+                          await patchRequest.mutateAsync(vars);
+                        }}
+                        onWithdraw={async (id) => {
+                          await cancelRequest.mutateAsync(id);
+                        }}
                       />
                     );
-                  })}
-                </tbody>
-              </table>
-            </div>
+                  }
+                  if (b.kind === 'IDLE_TRIMMED') {
+                    const rowId = dayBlockRowId(b);
+                    return (
+                      <tr
+                        key={rowId}
+                        data-row-id={rowId}
+                        className={`et-row entry-row-idle_trimmed${highlightedRowId === rowId ? ' et-row-highlighted' : ''}`}
+                      >
+                        <td><span className="kind-chip kind-idle_trimmed">Idle (trimmed)</span></td>
+                        <td className="tabular">{fmtTime(b.startedAt, tz)} – {fmtTime(b.endedAt, tz)}</td>
+                        <td className="tabular secondary">{fmtDurationMs(b.durationMs)}</td>
+                        <td className="tertiary">—</td>
+                        <td className="tertiary">Trimmed via the agent&apos;s idle prompt.</td>
+                        <td />
+                      </tr>
+                    );
+                  }
+                  // WORK / MEETING / MANUAL
+                  const kind = b.kind === 'MANUAL' ? 'manual_approved' : 'tracked';
+                  const rowId = dayBlockRowId(b);
+                  const isMeeting = b.kind === 'MEETING';
+                  return (
+                    <EntryRow
+                      key={rowId}
+                      rowId={rowId}
+                      highlighted={highlightedRowId === rowId}
+                      kind={kind}
+                      block={b}
+                      tasks={tasks}
+                      timeZone={tz}
+                      disabled={!editable}
+                      isMeeting={isMeeting}
+                      workspaceUsers={workspaceUsers}
+                      selfId={me.id}
+                      onSave={async (vars) => {
+                        await patchEntry.mutateAsync(vars);
+                      }}
+                      onDeleteManual={
+                        kind === 'manual_approved'
+                          ? async (id) => {
+                              await deleteManualEntry.mutateAsync(id);
+                            }
+                          : undefined
+                      }
+                    />
+                  );
+                })}
+
+                {day.recentRejected.map((r) => {
+                  const rowId = `rejected-${r.id}`;
+                  return (
+                    <EntryRow
+                      key={rowId}
+                      rowId={rowId}
+                      highlighted={highlightedRowId === rowId}
+                      kind="rejected"
+                      rejected={r}
+                      timeZone={tz}
+                    />
+                  );
+                })}
+              </Tbody>
+            </Table>
           </Card>
         </div>
       )}

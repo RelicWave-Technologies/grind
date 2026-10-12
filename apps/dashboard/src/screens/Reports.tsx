@@ -55,6 +55,7 @@ import {
   DISPLAY_DAY_LABEL,
   attendanceOverrideShape,
   displayDayCode,
+  type DisplayDayCode,
 } from '@grind/types';
 import type {
   AttendanceOverrideHistoryResponse,
@@ -75,6 +76,7 @@ import type {
   DayInsight,
 } from '../lib/types';
 import { reportQueryKeys, teamReportSummaryQuery } from '../lib/reportQueries';
+import { useTableFilter } from '../lib/tableFilter';
 import { DayRibbon } from '../components/DayRibbon';
 import { ActivityHeatmap } from '../components/ActivityHeatmap';
 import { AppIcon } from '../components/AppIcon';
@@ -104,6 +106,8 @@ import {
   Field,
   Input,
   Select,
+  FilterBar,
+  NoMatches,
 } from '../ui';
 
 type ModalKind = 'apps' | 'activity' | 'timeline';
@@ -322,7 +326,7 @@ export function ReportsScreen() {
             </StatRow>
           </Card>
 
-          <SelfReportTable days={days} loading={reportQ.isLoading} tz={tz} onOpenModal={setModal} />
+          <SelfReportTable days={days} loading={reportQ.isLoading} tz={tz} onOpenModal={setModal} persistFilter />
         </>
       )}
 
@@ -446,7 +450,7 @@ function AttendanceStatusCell({
   // in the tooltip, so a leave never appears without its reason.
   const rule = day.attendanceRule ?? null;
   // The same six words the exported sheet prints.
-  const code = displayDayCode(day.attendanceCode ?? '--', rule?.tag);
+  const code = dayDisplayCode(day);
   const base = override
     ? `${DISPLAY_DAY_LABEL[code]} — corrected by hand${override.stale ? '; the computed answer has changed since' : ''}`
     : DISPLAY_DAY_LABEL[code];
@@ -479,6 +483,7 @@ function SelfReportTable({
   tz,
   onOpenModal,
   onEditStatus,
+  persistFilter = false,
 }: {
   days: MemberReportDay[];
   loading: boolean;
@@ -487,7 +492,29 @@ function SelfReportTable({
   /** Present only where the viewer may correct a day — the manager/admin
    *  drawer. Absent on a person's own report, which is a record, not a form. */
   onEditStatus?: (day: MemberReportDay) => void;
+  /** Keep the filter in the URL — only on the page's own report, never in the drawer. */
+  persistFilter?: boolean;
 }) {
+  const filter = useTableFilter(
+    days,
+    {
+      text: (day) => {
+        const code = dayDisplayCode(day);
+        return [day.date, fmtDayLabel(day.date, tz), shiftLabel(day.shiftStatus), code, DISPLAY_DAY_LABEL[code]];
+      },
+      facets: {
+        start: { label: 'Starts', value: (day) => shiftLabel(day.shiftStatus) },
+        status: {
+          label: 'Statuses',
+          value: (day) => dayDisplayCode(day),
+          optionLabel: (code) => `${code} · ${DISPLAY_DAY_LABEL[code as DisplayDayCode] ?? code}`,
+        },
+        review: { label: 'Review states', value: (day) => (dayNeedsReview(day) ? 'review' : 'ok'), options: REVIEW_OPTIONS },
+      },
+    },
+    { urlPrefix: 'day.', persist: persistFilter },
+  );
+
   return (
     <Card variant="flush" className="rep-table-card">
       {loading ? (
@@ -499,8 +526,12 @@ function SelfReportTable({
           description="Try a different date range."
         />
       ) : (
-        <div className="rep-table-wrap">
-          <Table density="compact" stickyHead className="rep-table">
+        <>
+          <FilterBar filter={filter} placeholder="Search date or status…" noun={{ one: 'day', other: 'days' }} />
+          {filter.rows.length === 0 ? (
+            <NoMatches onClear={filter.clear} />
+          ) : (
+          <Table density="compact" className="rep-table">
             <THead>
               <Tr>
                 <Th className="rep-col-date">Date</Th>
@@ -516,7 +547,7 @@ function SelfReportTable({
               </Tr>
             </THead>
             <Tbody>
-              {days.map((day) => (
+              {filter.rows.map((day) => (
                 <Tr key={day.date} rail={railForDay(day)}>
                   <Td className="rep-col-date">
                     <div className="rep-date-cell">
@@ -598,7 +629,8 @@ function SelfReportTable({
               ))}
             </Tbody>
           </Table>
-        </div>
+          )}
+        </>
       )}
     </Card>
   );
@@ -649,7 +681,6 @@ function TeamReportsView({
             <h2 className="ui-t-title">Members</h2>
             <p className="ui-t-small">Range totals, punctuality, approvals, evidence counts, and member drill-in.</p>
           </div>
-          <Tag mono>{data.members.length}</Tag>
         </div>
         <TeamMembersTable members={data.members} onOpenMember={onOpenMember} />
       </Card>
@@ -678,8 +709,29 @@ function TeamKpi({
 }
 
 function TeamMembersTable({ members, onOpenMember }: { members: TeamReportSummaryMember[]; onOpenMember: (userId: string) => void }) {
+  const filter = useTableFilter(members, {
+    text: (member) => [member.user.name, member.user.email, member.user.teamName],
+    facets: {
+      team: { label: 'Teams', value: (member) => member.user.teamName },
+      review: {
+        label: 'Review states',
+        value: (member) => (summaryMemberNeedsReview(member) ? 'review' : 'ok'),
+        options: REVIEW_OPTIONS,
+      },
+      approvals: {
+        label: 'Approvals',
+        value: (member) => (member.approvals.pending > 0 ? 'pending' : 'clear'),
+        options: PENDING_APPROVAL_OPTIONS,
+      },
+    },
+  });
+
   return (
-    <div className="rep-table-wrap">
+    <>
+      <FilterBar filter={filter} placeholder="Search name, email, team…" noun={{ one: 'member', other: 'members' }} />
+      {filter.rows.length === 0 ? (
+        <NoMatches onClear={filter.clear} />
+      ) : (
       <Table density="compact" className="rep-team-members-table">
         <THead>
           <Tr>
@@ -696,7 +748,7 @@ function TeamMembersTable({ members, onOpenMember }: { members: TeamReportSummar
           </Tr>
         </THead>
         <Tbody>
-          {members.map((member) => (
+          {filter.rows.map((member) => (
             <Tr key={member.user.id} rail={summaryMemberNeedsReview(member) ? 'warn' : undefined}>
               <Td>
                 <Identity
@@ -745,7 +797,8 @@ function TeamMembersTable({ members, onOpenMember }: { members: TeamReportSummar
           ))}
         </Tbody>
       </Table>
-    </div>
+      )}
+    </>
   );
 }
 
@@ -1331,91 +1384,89 @@ function TeamMemberApprovalsPanel({
         <DrawerMetric tone="pink" label="Rejected" value={summary.rejected} hint={fmtDurationMs(summary.rejectedMs)} />
       </div>
       {decisionError && <Banner status="danger">Decision failed — {decisionError}</Banner>}
-      <div className="rep-table-wrap">
-        <Table density="compact" stickyHead className="rep-drawer-approvals-table">
-          <THead>
-            <Tr>
-              <Th className="rep-drawer-apv-col-date">Date</Th>
-              <Th className="rep-drawer-apv-col-time">Requested</Th>
-              <Th className="rep-drawer-apv-col-status" align="center">Status</Th>
-              <Th className="rep-drawer-apv-col-reason">Reason</Th>
-              {canDecide && <Th className="rep-drawer-apv-col-actions" align="center">Action</Th>}
-            </Tr>
-          </THead>
-          <Tbody>
-            {approvals.map((req) => {
-              const startMs = new Date(req.requestedStart).getTime();
-              const endMs = new Date(req.requestedEnd).getTime();
-              const date = dateKeyInTimeZone(startMs, tz);
-              const decidedMs = req.decidedAt ? new Date(req.decidedAt).getTime() : null;
-              const task = reportApprovalTask(req);
-              const isBusy = busyRequestId === req.id;
-              const isOwnRequest = req.userId === currentUserId;
-              return (
-                <Tr
-                  key={req.id}
-                  rail={approvalRail(req.status)}
-                  className="rep-drawer-approval-row"
-                  tabIndex={0}
-                  aria-label={`View approval details for ${date}`}
-                  onClick={() => setSelectedApproval(req)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      setSelectedApproval(req);
-                    }
-                  }}
-                >
-                  <Td className="rep-drawer-apv-col-date">
-                    <div className="rep-drawer-approval-date">
-                      <span className="ui-t-strong">{fmtDayLabel(date, tz)}</span>
-                      <span className="ui-t-small ui-ink-3">{date}</span>
-                    </div>
-                  </Td>
-                  <Td className="rep-drawer-apv-col-time">
-                    <div className="rep-drawer-approval-time">
-                      <span className="ui-mono">{fmtTime(startMs, tz)} - {fmtTime(endMs, tz)}</span>
-                      <Tag mono>{fmtDurationMs(endMs - startMs)}</Tag>
-                    </div>
-                  </Td>
-                  <Td className="rep-drawer-apv-col-status" align="center">
-                    <div className="rep-drawer-approval-status">
-                      <Tag status={approvalStatus(req.status)} mono>{approvalLabel(req.status)}</Tag>
-                      <span className="ui-t-small ui-ink-3">
-                        {approvalDecisionMeta(req, decidedMs)}
+      <Table density="compact" className="rep-drawer-approvals-table">
+        <THead>
+          <Tr>
+            <Th className="rep-drawer-apv-col-date">Date</Th>
+            <Th className="rep-drawer-apv-col-time">Requested</Th>
+            <Th className="rep-drawer-apv-col-status" align="center">Status</Th>
+            <Th className="rep-drawer-apv-col-reason">Reason</Th>
+            {canDecide && <Th className="rep-drawer-apv-col-actions" align="center">Action</Th>}
+          </Tr>
+        </THead>
+        <Tbody>
+          {approvals.map((req) => {
+            const startMs = new Date(req.requestedStart).getTime();
+            const endMs = new Date(req.requestedEnd).getTime();
+            const date = dateKeyInTimeZone(startMs, tz);
+            const decidedMs = req.decidedAt ? new Date(req.decidedAt).getTime() : null;
+            const task = reportApprovalTask(req);
+            const isBusy = busyRequestId === req.id;
+            const isOwnRequest = req.userId === currentUserId;
+            return (
+              <Tr
+                key={req.id}
+                rail={approvalRail(req.status)}
+                className="rep-drawer-approval-row"
+                tabIndex={0}
+                aria-label={`View approval details for ${date}`}
+                onClick={() => setSelectedApproval(req)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    setSelectedApproval(req);
+                  }
+                }}
+              >
+                <Td className="rep-drawer-apv-col-date">
+                  <div className="rep-drawer-approval-date">
+                    <span className="ui-t-strong">{fmtDayLabel(date, tz)}</span>
+                    <span className="ui-t-small ui-ink-3">{date}</span>
+                  </div>
+                </Td>
+                <Td className="rep-drawer-apv-col-time">
+                  <div className="rep-drawer-approval-time">
+                    <span className="ui-mono">{fmtTime(startMs, tz)} - {fmtTime(endMs, tz)}</span>
+                    <Tag mono>{fmtDurationMs(endMs - startMs)}</Tag>
+                  </div>
+                </Td>
+                <Td className="rep-drawer-apv-col-status" align="center">
+                  <div className="rep-drawer-approval-status">
+                    <Tag status={approvalStatus(req.status)} mono>{approvalLabel(req.status)}</Tag>
+                    <span className="ui-t-small ui-ink-3">
+                      {approvalDecisionMeta(req, decidedMs)}
+                    </span>
+                  </div>
+                </Td>
+                <Td className="rep-drawer-apv-col-reason">
+                  <div className="rep-drawer-approval-reason-row">
+                    <div className="rep-drawer-approval-reason">
+                      <span className="rep-drawer-approval-reason-main">{req.reason}</span>
+                      <span className={`rep-drawer-approval-reason-meta ui-t-small${task.kind === 'missing' ? ' is-missing' : ''}`}>
+                        {task.label}
                       </span>
                     </div>
+                  </div>
+                </Td>
+                {canDecide && (
+                  <Td className="rep-drawer-apv-col-actions" align="center">
+                    <ReportApprovalDecisionCell
+                      req={req}
+                      isOwnRequest={isOwnRequest}
+                      canSelfApproveOwn={canSelfApproveOwn}
+                      busy={isBusy}
+                      busyAction={isBusy ? busyAction : null}
+                      onApprove={() => onApprove(req.id)}
+                      onReject={() => onReject(req.id)}
+                      onOpenDay={() => onOpenDay(date, req)}
+                    />
                   </Td>
-                  <Td className="rep-drawer-apv-col-reason">
-                    <div className="rep-drawer-approval-reason-row">
-                      <div className="rep-drawer-approval-reason">
-                        <span className="rep-drawer-approval-reason-main">{req.reason}</span>
-                        <span className={`rep-drawer-approval-reason-meta ui-t-small${task.kind === 'missing' ? ' is-missing' : ''}`}>
-                          {task.label}
-                        </span>
-                      </div>
-                    </div>
-                  </Td>
-                  {canDecide && (
-                    <Td className="rep-drawer-apv-col-actions" align="center">
-                      <ReportApprovalDecisionCell
-                        req={req}
-                        isOwnRequest={isOwnRequest}
-                        canSelfApproveOwn={canSelfApproveOwn}
-                        busy={isBusy}
-                        busyAction={isBusy ? busyAction : null}
-                        onApprove={() => onApprove(req.id)}
-                        onReject={() => onReject(req.id)}
-                        onOpenDay={() => onOpenDay(date, req)}
-                      />
-                    </Td>
-                  )}
-                </Tr>
-              );
-            })}
-          </Tbody>
-        </Table>
-      </div>
+                )}
+              </Tr>
+            );
+          })}
+        </Tbody>
+      </Table>
       {selectedApproval && (
         <ReportApprovalDetailsModal
           req={selectedApproval}
@@ -2256,6 +2307,23 @@ function totalDayWorkedMs(day: MemberReportDay): number {
 function dayNeedsReview(day: MemberReportDay): boolean {
   return autoTrackedMs(day) > 0 && day.activityPercent === null;
 }
+
+/** The day's attendance code as the report and the exported sheet print it. */
+function dayDisplayCode(day: MemberReportDay): DisplayDayCode {
+  return displayDayCode(day.attendanceCode ?? '--', day.attendanceRule?.tag);
+}
+
+/** Choices for a table's "needs review" facet. */
+const REVIEW_OPTIONS = [
+  { value: 'review', label: 'Needs review' },
+  { value: 'ok', label: 'OK' },
+] as const;
+
+/** Choices for the team table's approvals facet. */
+const PENDING_APPROVAL_OPTIONS = [
+  { value: 'pending', label: 'Has pending' },
+  { value: 'clear', label: 'Nothing pending' },
+] as const;
 
 function summaryMemberNeedsReview(member: TeamReportSummaryMember): boolean {
   return member.lateDays > 0 || member.noActivityDays > 0;

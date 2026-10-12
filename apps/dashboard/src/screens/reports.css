@@ -836,10 +836,6 @@
   border-color: transparent;
 }
 
-.rep-table-wrap {
-  overflow-x: auto;
-}
-
 .rep-table {
   min-width: calc(var(--ui-sp-12) * 15);
 }

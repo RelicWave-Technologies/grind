@@ -270,8 +270,9 @@
 
 /* ============================================================================
    Timesheet — flush Card. Head strip + the exact 6-column EntryRow table.
-   The table is a plain <table> (NOT the kit <Table>) so the EntryRow <tr>/<td>
-   contract and its styles.css row chrome stay intact; we only place the grid.
+   The shell (scroll region, sticky header, header look) is the kit <Table>;
+   the rows stay EntryRow's raw <tr>/<td> with their styles.css row chrome, so
+   here we only place the grid.
    ========================================================================== */
 .myd-sheet-head {
   display: flex;
@@ -288,22 +289,10 @@
   align-items: baseline;
   gap: var(--ui-sp-4);
 }
-.myd-table-wrap {
-  overflow-x: auto;
-}
-.myd-table {
-  width: 100%;
-  border-collapse: collapse;
-}
-/* Column heads: eyebrow look comes from the kit's .ui-t-eyebrow utility on the
-   <th>; here we only place + colour the hairline + gutter. */
-.myd-table thead th {
-  text-align: left;
-  color: var(--ui-ink-3);
-  padding: var(--ui-sp-4) var(--ui-sp-7);
-  border-bottom: 1px solid var(--ui-line);
-  white-space: nowrap;
-  vertical-align: middle;
+/* Column heads come from the kit Th; only the gutter moves, so each label
+   lines up with the EntryRow cells below it (.et-row td). */
+.myd-table .ui-table__head .ui-th {
+  padding-inline: var(--ui-sp-7);
 }
 .myd-col-kind { width: calc(var(--ui-sp-10) * 2); }
 .myd-col-time { width: calc(var(--ui-sp-10) * 4); }
