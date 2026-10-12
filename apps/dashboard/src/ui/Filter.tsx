@@ -15,15 +15,17 @@ export interface SearchInputProps
   extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange' | 'type'> {
   value: string;
   onChange: (value: string) => void;
+  /** Span the column (pickers, drawers) instead of the toolbar width. */
+  block?: boolean;
 }
 
 /** A search field: leading glyph, Esc or the × clears it. */
 export const SearchInput = forwardRef<HTMLInputElement, SearchInputProps>(function SearchInput(
-  { value, onChange, className, placeholder = 'Search', onKeyDown, ...rest },
+  { value, onChange, block, className, placeholder = 'Search', onKeyDown, ...rest },
   ref,
 ) {
   return (
-    <div className={cx('ui-search', className)}>
+    <div className={cx('ui-search', block && 'ui-search--block', className)}>
       <span className="ui-search__icon" aria-hidden>
         <Search size={14} strokeWidth={1.9} />
       </span>

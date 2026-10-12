@@ -222,8 +222,7 @@ export function useTableFilter<T, K extends string = never>(
       });
     }, URL_WRITE_DELAY_MS);
     return () => window.clearTimeout(timer);
-    // `keys`/`state` are captured through stateKey + the facet spec shape.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // `state` changes exactly when stateKey does; keys/defaults are fixed per table.
   }, [stateKey, persist, urlPrefix]);
 
   const filtered = applyTableFilter(rows, spec, state);

@@ -765,6 +765,7 @@ textarea.ui-control { height: auto; min-height: 80px; padding: var(--ui-sp-3) va
   display: inline-flex; align-items: center;
   width: var(--ui-search-w); max-width: 100%;
 }
+.ui-search--block { width: 100%; }
 .ui-search__icon {
   position: absolute; left: var(--ui-sp-4);
   display: inline-flex; align-items: center;
