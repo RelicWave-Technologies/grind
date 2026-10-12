@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouteContext } from '@tanstack/react-router';
 import { ShieldAlert, Check, X, AlertOctagon, ShieldCheck, Sparkles, Ban } from 'lucide-react';
 import { api, type ApiError } from '../lib/api';
+import { flagGroupsQuery } from '../lib/queries';
 import type { ActivityFlag, FlagResolution, FlagType } from '../lib/types';
 import {
   Page,
@@ -103,10 +104,7 @@ export function FlagsScreen() {
   const [lastInvalidation, setLastInvalidation] = useState<null | { id: string; invalidatedMs: number }>(null);
   const qc = useQueryClient();
 
-  const q = useQuery({
-    queryKey: ['admin', 'flags', 'groups', tab],
-    queryFn: () => api<ListResponse>(`/v1/admin/flags/groups?status=${tab}`),
-  });
+  const q = useQuery(flagGroupsQuery<ListResponse>(tab));
 
   const resolve = useMutation({
     mutationFn: async (vars: { key: string; flagIds: string[]; resolution: FlagResolution; note?: string }) =>

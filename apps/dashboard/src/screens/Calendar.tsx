@@ -5,7 +5,8 @@ import { useRouteContext } from '@tanstack/react-router';
 import { CalendarDays, ChevronLeft, ChevronRight, Plus, Trash2 } from 'lucide-react';
 import { api } from '../lib/api';
 import { hasCapability } from '../lib/auth';
-import { todayKey, fmtDayLabel } from '../lib/format';
+import { todayKey, fmtDayLabel, monthBounds } from '../lib/format';
+import { leaveBalanceQuery, leaveCalendarQuery, leavePolicyQuery, myLeaveRequestsQuery } from '../lib/queries';
 import type {
   HolidayDto,
   LeaveAwayDay,
@@ -150,12 +151,6 @@ function monthCells(month: string): MonthCell[] {
   return cells.slice(-7).every((c) => !c.inMonth) ? cells.slice(0, 35) : cells;
 }
 
-function monthBounds(month: string): { from: string; to: string } {
-  const [y, m] = month.split('-').map((n) => Number.parseInt(n, 10));
-  const last = new Date(Date.UTC(y!, m!, 0)).getUTCDate();
-  return { from: `${month}-01`, to: `${month}-${String(last).padStart(2, '0')}` };
-}
-
 function shiftMonth(month: string, delta: number): string {
   const [y, m] = month.split('-').map((n) => Number.parseInt(n, 10));
   const d = new Date(Date.UTC(y!, m! - 1 + delta, 1));
@@ -182,22 +177,10 @@ export function CalendarScreen() {
   const cells = useMemo(() => monthCells(month), [month]);
   const [tab, setTab] = useState<'month' | 'holidays' | 'mine'>('month');
 
-  const calendarQ = useQuery({
-    queryKey: ['leave', 'calendar', from, to],
-    queryFn: () => api<LeaveCalendarResponse>(`/v1/leave/calendar?from=${from}&to=${to}`),
-  });
-  const balanceQ = useQuery({
-    queryKey: ['leave', 'balance'],
-    queryFn: () => api<LeaveBalanceResponse>('/v1/leave/me/balance'),
-  });
-  const policyQ = useQuery({
-    queryKey: ['leave', 'policy'],
-    queryFn: () => api<LeavePolicyResponse>('/v1/leave/policy'),
-  });
-  const mineQ = useQuery({
-    queryKey: ['leave', 'me', 'requests'],
-    queryFn: () => api<{ requests: LeaveRequestDto[] }>('/v1/leave/me/requests'),
-  });
+  const calendarQ = useQuery(leaveCalendarQuery<LeaveCalendarResponse>({ from, to }));
+  const balanceQ = useQuery(leaveBalanceQuery<LeaveBalanceResponse>());
+  const policyQ = useQuery(leavePolicyQuery<LeavePolicyResponse>());
+  const mineQ = useQuery(myLeaveRequestsQuery<{ requests: LeaveRequestDto[] }>());
 
   const policy = policyQ.data;
   const data = calendarQ.data;

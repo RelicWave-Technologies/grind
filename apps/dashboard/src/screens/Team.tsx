@@ -21,6 +21,7 @@ import {
   dateKeyInTimeZone,
 } from '@grind/types';
 import { api } from '../lib/api';
+import { TEAM_SETTINGS_QUERY_KEY, teamMemberSettingsQuery, teamWorkspacePolicyQuery } from '../lib/queries';
 import type { Role } from '../lib/auth';
 import {
   Avatar,
@@ -67,7 +68,6 @@ const RULE_MODE_LABEL: Record<RuleMode, string> = { STANDARD: 'Office', REMOTE: 
 type MonitoringRisk = 'NORMAL' | 'CAUTION' | 'HIGH';
 type MonitoringTiming = { screenshotIntervalMin: number; idleThresholdMin: number };
 
-const TEAM_SETTINGS_QUERY_KEY = ['admin', 'team-member-settings'] as const;
 
 const IDLE_WARNING_STEP_SECONDS = 5;
 
@@ -83,14 +83,8 @@ export function TeamScreen() {
     next: MonitoringTiming;
   } | null>(null);
 
-  const settingsQ = useQuery({
-    queryKey: TEAM_SETTINGS_QUERY_KEY,
-    queryFn: () => api<TeamSettingsResponse>('/v1/admin/team-member-settings'),
-  });
-  const policyQ = useQuery({
-    queryKey: ['admin', 'workspace-policy'],
-    queryFn: () => api<WorkspacePolicyDto>('/v1/admin/workspace-policy'),
-  });
+  const settingsQ = useQuery(teamMemberSettingsQuery<TeamSettingsResponse>());
+  const policyQ = useQuery(teamWorkspacePolicyQuery<WorkspacePolicyDto>());
 
   const updateMember = useMutation({
     mutationFn: ({ userId, patch }: { userId: string; patch: PatchTeamMemberSettingsRequest }) =>

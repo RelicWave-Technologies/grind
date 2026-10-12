@@ -22,7 +22,7 @@ import { addDays, fmtDurationMs, todayKey } from '../lib/format';
 import type { Team } from '../lib/types';
 import type { Role } from '../lib/auth';
 import type { TeamReportSummaryMember } from '@grind/types/reports';
-import { reportQueryKeys, teamReportSummaryQuery } from '../lib/reportQueries';
+import { adminTeamsQuery, adminUsersQuery, reportQueryKeys, teamReportSummaryQuery } from '../lib/queries';
 import {
   Avatar,
   Banner,
@@ -58,11 +58,8 @@ type UserPatch = Partial<{ teamId: string | null }>;
 export function TeamsScreen() {
   const { me } = useRouteContext({ from: '/authed' });
   const qc = useQueryClient();
-  const teamsQ = useQuery({ queryKey: ['admin', 'teams'], queryFn: () => api<{ teams: Team[] }>('/v1/admin/teams') });
-  const usersQ = useQuery({
-    queryKey: ['admin', 'users'],
-    queryFn: () => api<{ users: AdminUser[] }>('/v1/admin/users'),
-  });
+  const teamsQ = useQuery(adminTeamsQuery<{ teams: Team[] }>());
+  const usersQ = useQuery(adminUsersQuery<{ users: AdminUser[] }>());
 
   const [createOpen, setCreateOpen] = useState(false);
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);

@@ -8,6 +8,7 @@ import type {
 } from '@grind/types';
 import { API_TOKEN_SCOPES } from '@grind/types';
 import { api, API_BASE } from '../lib/api';
+import { apiTokensQuery } from '../lib/queries';
 import {
   Page,
   PageHeader,
@@ -103,10 +104,7 @@ export function IntegrationsScreen() {
   const [copiedConfig, setCopiedConfig] = useState(false);
   const [confirmRevokeId, setConfirmRevokeId] = useState<string | null>(null);
 
-  const tokensQ = useQuery({
-    queryKey: ['admin', 'api-tokens'],
-    queryFn: () => api<{ tokens: ApiTokenDto[] }>('/v1/admin/api-tokens'),
-  });
+  const tokensQ = useQuery(apiTokensQuery<{ tokens: ApiTokenDto[] }>());
 
   const activeTokens = useMemo(
     () => tokensQ.data?.tokens.filter((token) => !token.revokedAt).length ?? 0,

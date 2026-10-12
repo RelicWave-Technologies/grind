@@ -2,7 +2,7 @@ import './overview.css';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate, useRouteContext } from '@tanstack/react-router';
 import { Clock4, LayoutGrid, CalendarCheck, CloudOff } from 'lucide-react';
-import { api } from '../lib/api';
+import { overviewQuery } from '../lib/queries';
 import { fmtAgeShort } from '../lib/format';
 import {
   Page,
@@ -89,11 +89,7 @@ export function OverviewScreen() {
   const { me } = useRouteContext({ from: '/authed' });
   const navigate = useNavigate();
   const tz = me.workspaceTimezone;
-  const q = useQuery({
-    queryKey: ['admin', 'overview', tz],
-    queryFn: () => api<OverviewResponse>(`/v1/admin/overview?tz=${encodeURIComponent(tz)}`),
-    staleTime: 30_000,
-  });
+  const q = useQuery(overviewQuery<OverviewResponse>(tz));
 
   const firstName = me.name.split(' ')[0] ?? 'there';
   const scopeLabel = q.data?.scope === 'workspace' ? 'this workspace' : 'your team';

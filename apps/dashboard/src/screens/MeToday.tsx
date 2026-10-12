@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouteContext, useSearch } from '@tanstack/react-router';
 import { CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react';
 import { api } from '../lib/api';
+import { adminUsersQuery, editTimeDayQuery, larkMyTasksQuery, workspaceUsersQuery } from '../lib/queries';
 import { hasCapability, isManagerOrAbove } from '../lib/auth';
 import { dayBlockRowId } from '../lib/dayBlockIdentity';
 import type { DayInsight, WorkspaceUser } from '../lib/types';
@@ -88,48 +89,22 @@ export function MeTodayScreen() {
     setTargetUserId(searchUserId);
   }, [searchUserId]);
 
-  const usersQ = useQuery({
-    queryKey: ['admin', 'users'],
-    enabled: showPicker,
-    queryFn: () => api<{ users: AdminUser[] }>('/v1/admin/users'),
-  });
+  const usersQ = useQuery({ ...adminUsersQuery<{ users: AdminUser[] }>(), enabled: showPicker });
 
   // Workspace directory for the attendee picker. Available to every
   // authenticated user (server-side handler is /v1/workspace/users) — needed
   // so MEMBERs can tag co-workers on MEETING/MANUAL rows without leaking
   // role/team metadata.
-  const wsUsersQ = useQuery({
-    queryKey: ['workspace', 'users'],
-    queryFn: () => api<{ users: WorkspaceUser[] }>('/v1/workspace/users'),
-    staleTime: 5 * 60_000,
-  });
+  const wsUsersQ = useQuery(workspaceUsersQuery<{ users: WorkspaceUser[] }>());
   const workspaceUsers = wsUsersQ.data?.users ?? [];
 
   // Lark tasks — fetched once for the day view; cached for 5 min so the
   // TaskCombos open instantly. Falls back to empty list if Lark isn't
   // configured (the user gets the "Untracked" sentinel anyway).
-  const tasksQ = useQuery({
-    queryKey: ['lark', 'my-tasks'],
-    queryFn: async () => {
-      try {
-        return await api<{ tasks: TaskOption[] }>('/v1/lark/my-tasks');
-      } catch {
-        return { tasks: [] };
-      }
-    },
-    staleTime: 5 * 60_000,
-    retry: false,
-  });
+  const tasksQ = useQuery(larkMyTasksQuery<{ tasks: TaskOption[] }>());
 
-  // Memoised: a fresh array every render made anything depending on it unstable.
-  const dayKey = useMemo(() => ['insights', 'day', date, tz, targetUserId, 'calendar-day-gaps'], [date, tz, targetUserId]);
   const dayQ = useQuery({
-    queryKey: dayKey,
-    queryFn: () => {
-      const params = new URLSearchParams({ date, tz, gapScope: 'calendar-day' });
-      if (targetUserId !== me.id) params.set('userId', targetUserId);
-      return api<DayInsight>(`/v1/insights/day?${params.toString()}`);
-    },
+    ...editTimeDayQuery<DayInsight>({ date, tz, userId: targetUserId, meId: me.id }),
     refetchInterval: date === todayKey(tz) ? 15_000 : false,
   });
 
