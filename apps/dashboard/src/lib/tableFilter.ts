@@ -50,7 +50,11 @@ export interface UseTableFilterOptions<K extends string> {
   urlPrefix?: string;
   /** Keep the filter in the URL. Off for tables inside modals and drawers. */
   persist?: boolean;
-  /** Starting facet values when the URL carries none. */
+  /**
+   * Facet defaults (e.g. an approval queue that opens on Pending). The URL
+   * overrides them per facet; a value equal to its default stays out of the URL.
+   * Clear still means "show everything".
+   */
   initial?: Partial<Record<K, string>>;
 }
 
@@ -119,38 +123,56 @@ export function facetOptions<T>(rows: ReadonlyArray<T>, facet: FacetSpec<T>): Fi
     .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base', numeric: true }));
 }
 
-/** Read this table's filter from parsed URL search params. */
+/**
+ * URL spelling of "all" for a facet whose default is NOT all (e.g. an approval
+ * queue that opens on Pending): without it, choosing All and reloading would
+ * bring the default back.
+ */
+const ALL_PARAM = 'all';
+
+/**
+ * Read this table's filter from parsed URL search params. A facet present in
+ * the URL is returned even when it says "all" (as ''), so it overrides a default.
+ */
 export function readFilterParams<K extends string>(
   search: Record<string, unknown>,
   prefix: string,
   keys: ReadonlyArray<K>,
 ): FilterState<K> {
-  const read = (name: string): string => {
+  const read = (name: string): string | undefined => {
     const raw = search[`${prefix}${name}`];
-    return raw === undefined || raw === null ? '' : String(raw);
+    return raw === undefined || raw === null || raw === '' ? undefined : String(raw);
   };
   const facets: Partial<Record<K, string>> = {};
   for (const key of keys) {
     const value = read(key);
-    if (value) facets[key] = value;
+    if (value !== undefined) facets[key] = value === ALL_PARAM ? '' : value;
   }
-  return { query: read('q'), facets };
+  return { query: read('q') ?? '', facets };
 }
 
-/** `search` with this table's params replaced by `state` (empty values dropped). */
+/**
+ * `search` with this table's params replaced by `state`. Values equal to the
+ * default are dropped, so an untouched table leaves the URL alone.
+ */
 export function writeFilterParams<K extends string>(
   search: Record<string, unknown>,
   prefix: string,
   keys: ReadonlyArray<K>,
   state: FilterState<K>,
+  defaults: Partial<Record<K, string>> = {},
 ): Record<string, unknown> {
   const next: Record<string, unknown> = { ...search };
-  const put = (name: string, value: string) => {
+  const put = (name: string, value: string | undefined) => {
     if (value) next[`${prefix}${name}`] = value;
     else delete next[`${prefix}${name}`];
   };
-  put('q', state.query.trim() ? state.query : '');
-  for (const key of keys) put(key, state.facets[key] ?? '');
+  put('q', state.query.trim() ? state.query : undefined);
+  for (const key of keys) {
+    const value = state.facets[key] ?? '';
+    const fallback = defaults[key] ?? '';
+    put(key, value === fallback ? undefined : value === '' ? ALL_PARAM : value);
+  }
   return next;
 }
 
@@ -177,8 +199,8 @@ export function useTableFilter<T, K extends string = never>(
     const fromUrl = persist
       ? readFilterParams(router.state.location.search as Record<string, unknown>, urlPrefix, keys)
       : { query: '', facets: {} };
-    const urlHasFacets = Object.keys(fromUrl.facets).length > 0;
-    return { query: fromUrl.query, facets: urlHasFacets ? fromUrl.facets : { ...initial } };
+    // Per facet: the URL wins, otherwise the page's default.
+    return { query: fromUrl.query, facets: { ...initial, ...fromUrl.facets } };
   });
 
   // URL is persistence, not the source of truth: typing stays instant, and the
@@ -188,7 +210,7 @@ export function useTableFilter<T, K extends string = never>(
     if (!persist) return;
     const timer = window.setTimeout(() => {
       const current = router.state.location.search as Record<string, unknown>;
-      const next = writeFilterParams(current, urlPrefix, keys, state);
+      const next = writeFilterParams(current, urlPrefix, keys, state, initial);
       if (sameParams(current, next)) return;
       // Same page, new query string. The search type is the union of every
       // route's params; this only rewrites its own keys, hence the cast.

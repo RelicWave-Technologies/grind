@@ -108,4 +108,15 @@ describe('URL params', () => {
     });
     expect(next).toEqual({ sync: 'stuck', role: 'ADMIN' });
   });
+
+  it('keeps defaults out of the URL but spells out "all" when it overrides one', () => {
+    const defaults = { status: 'PENDING' };
+    const write = (status: string) =>
+      writeFilterParams({}, '', ['status'], { query: '', facets: { status } }, defaults);
+    expect(write('PENDING')).toEqual({});
+    expect(write('APPROVED')).toEqual({ status: 'APPROVED' });
+    expect(write('')).toEqual({ status: 'all' });
+    // …and "all" reads back as an explicit empty choice, overriding the default.
+    expect(readFilterParams({ status: 'all' }, '', ['status'])).toEqual({ query: '', facets: { status: '' } });
+  });
 });
