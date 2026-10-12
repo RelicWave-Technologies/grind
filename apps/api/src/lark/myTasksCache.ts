@@ -12,11 +12,13 @@ import type { LarkTaskDto } from './tasks';
  *  - FRESH: a list fetched less than `ttlMs` ago is served as is.
  *  - COALESCED: callers that arrive while a fetch for the same person is in
  *    flight share it instead of starting their own.
- *  - BOUNDED WAIT: when a refresh is slow and a last-good list exists (younger
- *    than `staleMaxMs`), the caller gets that list after `softTimeoutMs`; the
- *    refresh keeps running and updates the cache when it lands. With no
- *    last-good list the caller waits for the fetch, as before (still bounded
- *    by the outbound timeout).
+ *  - BOUNDED WAIT: when a last-good list exists (younger than `staleMaxMs`),
+ *    a refresh gets `softTimeoutMs` to land; past that the caller gets the
+ *    last-good list and the refresh keeps running, updating the cache when it
+ *    lands. Lark takes 1-3 s on a good day, so the wait is short: a person who
+ *    already has a list is not made to wait on Lark again. With no last-good
+ *    list the caller waits for the fetch, as before (still bounded by the
+ *    outbound timeout).
  *
  * A failed refresh never poisons the cache: the last-good list stays. Errors
  * the caller must see (a revoked grant) are the fetcher's to throw and are
@@ -67,7 +69,7 @@ export class MyTasksCache {
   constructor(opts: MyTasksCacheOptions = {}) {
     this.ttlMs = opts.ttlMs ?? 45_000;
     this.staleMaxMs = opts.staleMaxMs ?? 60 * 60_000;
-    this.softTimeoutMs = opts.softTimeoutMs ?? 5_000;
+    this.softTimeoutMs = opts.softTimeoutMs ?? 250;
     this.maxEntries = opts.maxEntries ?? 5_000;
     this.now = opts.now ?? Date.now;
     this.canServeStaleOn = opts.canServeStaleOn ?? (() => false);
