@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 /**
- * Tiny popover positioning + dismiss hook used by TimePopover and TaskCombo.
+ * §5.16 — the kit's one floating-layer hook: positioning + dismiss for every
+ * popover (Combobox, DateRangePicker, and Edit Time's TimePopover/TaskCombo).
  *
  * Why hand-rolled (no @floating-ui dep): the Edit Time dropdowns only need:
  *   - place the popover below the trigger; flip above when there isn't

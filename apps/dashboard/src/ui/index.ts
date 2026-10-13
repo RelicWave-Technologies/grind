@@ -56,6 +56,10 @@ export type {
   CheckboxProps,
 } from './Field';
 
+// ── §5.9b — searchable select ───────────────────────────────────────────────
+export { Combobox, COMBOBOX_SEARCH_MIN } from './Combobox';
+export type { ComboboxProps, ComboboxOption } from './Combobox';
+
 // ── §5.10 — status & labels ─────────────────────────────────────────────────
 export { Tag } from './Tag';
 export type { TagProps } from './Tag';
@@ -67,11 +71,15 @@ export type { AvatarProps, AvatarGroupProps, IdentityProps, AvatarSize } from '.
 // ── §5.12 — control clusters ────────────────────────────────────────────────
 export { Toolbar, DateStepper } from './Toolbar';
 export type { ToolbarProps, DateStepperProps } from './Toolbar';
+export { DateRangePicker } from './DateRangePicker';
+export type { DateRangePickerProps } from './DateRangePicker';
 
 // ── §5.12b — table filtering (logic: src/lib/tableFilter.ts) ──────────────
-export { SearchInput, FilterBar, NoMatches } from './Filter';
+export { SearchInput } from './SearchInput';
+export type { SearchInputProps } from './SearchInput';
+export { normalizeText, matchesQuery } from './match';
+export { FilterBar, NoMatches } from './Filter';
 export type {
-  SearchInputProps,
   FilterBarProps,
   NoMatchesProps,
   FilterOption,
@@ -87,9 +95,11 @@ export type { EmptyStateProps, BannerProps, BannerStatus } from './Feedback';
 export { Skeleton, SkeletonTable, SkeletonStat } from './Loading';
 export type { SkeletonProps } from './Loading';
 
-// ── §5.16 — modal ───────────────────────────────────────────────────────────
+// ── §5.16 — floating layers ─────────────────────────────────────────────────
 export { Modal } from './Overlay';
 export type { ModalProps } from './Overlay';
+export { usePopover, computePopoverPosition } from './popover';
+export type { PopoverState, PopoverRect, PopoverPosition } from './popover';
 
 // ── §5.17 — app chrome ──────────────────────────────────────────────────────
 export { AppShell, Sidebar, SidebarBrand, NavSection, NavItem } from './Shell';

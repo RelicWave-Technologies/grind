@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronDown, Search, X, Users } from 'lucide-react';
-import { usePopover } from '../lib/popover';
+import { usePopover } from '../ui';
 
 /**
  * Multi-select picker for tagging meeting attendees from the workspace.

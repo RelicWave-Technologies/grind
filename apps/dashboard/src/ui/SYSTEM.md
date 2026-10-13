@@ -296,10 +296,11 @@ these — passing data and layout, not styles. React components live in
 > props **and nothing that alters the palette** (no `color`, `bg`, `border`, `radius`,
 > `shadow` props). Layout-affecting props (`span`, `align`, `density`) are fine.
 
-The kit is **17 components**:
+The kit is **19 components**:
 `Page` · `PageHeader` · `Card` · `Stat`/`StatRow` · `Table` · `List`/`ListRow` · `Button` ·
-`Tabs`/`Segmented` · `Field` (+ controls) · `Tag` · `Avatar`/`Identity` · `Toolbar` ·
-`EmptyState` · `Skeleton`/`Spinner` · `Banner` · `Popover`/`Menu`/`Toast` · `AppShell`/`Sidebar`.
+`Tabs`/`Segmented` · `Field` (+ controls) · `Combobox` · `Tag` · `Avatar`/`Identity` · `Toolbar` ·
+`DateRangePicker` · `EmptyState` · `Skeleton`/`Spinner` · `Banner` · `Popover`/`Menu`/`Toast` ·
+`AppShell`/`Sidebar`.
 
 ---
 
@@ -488,6 +489,31 @@ The kit is **17 components**:
 <Field label="Notifications"><Toggle checked={on} onChange={setOn} /></Field>
 ```
 
+### 5.9b `Combobox` — a select you can search
+- **Purpose:** the one control for choosing from a list that may be long — every
+  `FilterBar` facet (90 people included) and every "choose a person" field
+  (`components/PersonPicker.tsx` composes it). A native `<Select>` stays for short,
+  fixed form choices.
+- **Component:** `<Combobox value options onChange aria-label emptyLabel? placeholder?
+  searchPlaceholder? searchable? disabled? block?>` · `options: { value, label,
+  keywords? }[]` (`keywords` are searched, never shown — an email, a team).
+- **Anatomy:** the closed control **is** a `.ui-control.ui-select` button (`role=combobox`)
+  naming the current choice, so it reads exactly like the select it replaced. It opens a
+  `.ui-popover` (§5.16): a `SearchInput` once there are more than `COMBOBOX_SEARCH_MIN`
+  (8) options, then the `role=listbox` list — `emptyLabel` (e.g. "All people") pinned
+  first, the chosen option ticked.
+- **Behaviour:** ↑/↓/Home/End move, Enter picks, Esc clears the search and then closes,
+  Tab closes; typing on the closed button opens it already filtering; outside click,
+  scroll or resize closes. Matching is the kit's `matchesQuery` (case- and
+  accent-insensitive, every term must hit) — the same as table search.
+- **Classes:** `.ui-combobox` (`--block`), `__label`, `__pop`, `__search`, `__list`,
+  `__option` (`.is-active`, `.is-all`, `[aria-selected]`), `__tick`, `__empty`. Token:
+  `--ui-combobox-w`.
+```tsx
+<Combobox aria-label="Filter by people" emptyLabel="All people"
+          value={person} options={people} onChange={setPerson} />
+```
+
 ### 5.10 `Tag` — status & labels
 - **Purpose:** status pills, counts, kinds. The visual face of the §2 taxonomy.
 - **Component:** `<Tag status? dot? mono?>` ·
@@ -541,20 +567,33 @@ The kit is **17 components**:
   Text search is case- and accent-insensitive; every term must hit some field. Facets
   AND together; options derive from the data unless given. State is mirrored to the URL
   (`q`, one param per facet key, prefixed per table) so a filtered view survives reload;
-  pass `persist: false` inside modals/drawers.
-- **`<FilterBar filter placeholder? noun? hideFacets?>`** — the table-top row inside the
-  flush `Card`, above the `Table`: `SearchInput` → one `Select` per facet ("All …"; a
-  facet with a single choice hides) → extra children → mono result count (`12 of 40
-  people`) + ghost **Clear** when anything is set. A facet the page already shows with its
-  own control (status `Tabs`) goes in `hideFacets` and binds through `filter.value/setValue`.
-- **`<NoMatches onClear>`** — the `EmptyState` for "filters matched nothing", always with
-  a **Clear filters** action. (The plain `EmptyState` stays for "there is no data".)
-- **Classes:** `.ui-filter-bar`, `__controls`, `__select`, `__meta`, `__count`; `.ui-search`,
-  `__icon`, `__input`, `__clear`. Tokens: `--ui-search-w`, `--ui-filter-select-max`.
+  pass `persist: false` inside modals/drawers. `filter.counts(key)` says how many rows
+  each choice of one facet would leave under the other filters — a facet shown as its own
+  control (status `Tabs`) uses it to label the tabs and to point at matches it hides.
+- **People · Teams · Roles.** Every table whose rows belong to a person spreads
+  `personFacets((row) => row.user)` first into its facets — the same three, in that order,
+  with those labels — and searches `personSearchFields(person)` (name, email, team). The
+  options come from the rows, which the API has already scoped to whom the viewer may see,
+  so a filter never names anyone outside a manager's team; never build them from a wider
+  list. The API sends `role` and `teamName` on each row's person (`PersonFacets` in
+  `@grind/types`). Role labels come from `ROLE_LABEL`/`roleLabel` in `src/lib/auth.ts`.
+- **`<FilterBar filter placeholder? noun? hideFacets? plain?>`** — the table-top row inside
+  the flush `Card`, above the `Table`: `SearchInput` → one `Combobox` per facet ("All …";
+  searchable once long; a facet with a single choice hides) → extra children → mono result
+  count (`12 of 40 people`) + ghost **Clear** when anything is set. A facet the page
+  already shows with its own control (status `Tabs`) goes in `hideFacets` and binds
+  through `filter.value/setValue`. `plain` drops the padding and rule for a list outside a
+  flush Card (a drawer section).
+- **`<NoMatches onClear description? action?>`** — the `EmptyState` for "filters matched
+  nothing", always with a **Clear filters** action; `action` adds a nearer way out before
+  it (e.g. "Show all statuses"). (The plain `EmptyState` stays for "there is no data".)
+- **Classes:** `.ui-filter-bar` (`--plain`), `__controls`, `__select`, `__meta`, `__count`;
+  `.ui-search`, `__icon`, `__input`, `__clear`. Tokens: `--ui-search-w`,
+  `--ui-filter-select-max`.
 ```tsx
-const filter = useTableFilter(users, {
-  text: (u) => [u.name, u.email],
-  facets: { role: { label: 'Roles', value: (u) => u.role } },
+const filter = useTableFilter(requests, {
+  text: (r) => [...personSearchFields(r.user), r.reason],
+  facets: { ...personFacets((r: Request) => r.user), status: { label: 'Statuses', value: (r) => r.status } },
 });
 <Card variant="flush">
   <FilterBar filter={filter} placeholder="Search people" noun={{ one: 'person', other: 'people' }} />
@@ -563,6 +602,24 @@ const filter = useTableFilter(users, {
 ```
 - Server-paginated lists filter on the server instead; this hook only ever sees the
   rows already loaded.
+
+### 5.12c `DateRangePicker` — the one period picker
+- **Purpose:** choose a from–to range of days (Reports, the member drawer, Approvals).
+- **Component:** `<DateRangePicker from to today maxDays onChange aria-label?>` — keys are
+  `YYYY-MM-DD`; nothing after `today`, nor further than `maxDays` from the start, can be
+  picked.
+- **Anatomy:** a mono `--r-full` pill naming the range; a `.ui-popover` with two months
+  (one under 39rem). First click sets the start, second the end (either order). Closes on
+  pick, outside click or Esc.
+- **Default:** a screen showing a period of records **opens on the month rule** —
+  `defaultReportRange(today)` / `defaultReportMonth(today)` in `src/lib/reportRange.ts`:
+  through the 10th the whole previous month, from the 11th this month so far. Route
+  loaders prefetch with the same helper so the first query is already in flight.
+  Single-day pickers (Today, Edit Time), the leave calendar's month and policy
+  effective-from dates are not periods and keep their own defaults.
+- **Classes:** `.ui-date-range` (`.is-open`), `__pop`, `__head`, `__months`, `__month`,
+  `__title`, `__weekdays`, `__days`, `__day` (`.is-in-range`, `.is-start`, `.is-end`,
+  `.is-today`).
 
 ### 5.13 `EmptyState`
 - **Purpose:** the one empty/zero-data treatment for every empty list/table/page.
@@ -603,6 +660,12 @@ const filter = useTableFilter(users, {
 ### 5.16 `Popover` / `Menu` / `Toast` — the floating layers
 - **Purpose:** the **only** components that use `--shadow-pop`. Dropdowns, action menus, select
   menus, transient toasts.
+- **In code:** `usePopover()` (`src/ui/popover.ts`) places a floating panel under its trigger
+  (flipping above when there is no room, clamped to the viewport) and closes it on outside
+  click, Esc, outside scroll and resize; the panel is portalled to `<body>` with the
+  `.ui-popover` chrome (`--surface-raised`, `--line`, `--r-lg`, `--shadow-pop`, z-index
+  `--ui-z-pop`, above drawers and modals). `Combobox` and `DateRangePicker` are built on
+  it; build any new floating panel the same way.
 - **Components:** `<Popover trigger>{content}</Popover>`; `<Menu items>` (`MenuItem` destructive?
   disabled?); `<Toast status>` (bottom-right, `--surface-raised`, `--shadow-pop`, 4px semantic
   left-rail, auto-dismiss).

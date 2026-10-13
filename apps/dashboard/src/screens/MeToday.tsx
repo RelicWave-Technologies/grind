@@ -5,7 +5,7 @@ import { useRouteContext, useSearch } from '@tanstack/react-router';
 import { CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react';
 import { api } from '../lib/api';
 import { adminUsersQuery, editTimeDayQuery, larkMyTasksQuery, workspaceUsersQuery } from '../lib/queries';
-import { hasCapability, isManagerOrAbove } from '../lib/auth';
+import { hasCapability, isManagerOrAbove, roleLabel } from '../lib/auth';
 import { dayBlockRowId } from '../lib/dayBlockIdentity';
 import type { DayInsight, WorkspaceUser } from '../lib/types';
 import { addDays, calendarDateInstant, fmtDayLabel, fmtDurationMs, fmtTime, todayKey } from '../lib/format';
@@ -13,13 +13,13 @@ import { anchorDateKey as localDateKey, dateKeyAnchor as parseDateKey } from '@g
 import { DayRibbon } from '../components/DayRibbon';
 import { ActivityHeatmap } from '../components/ActivityHeatmap';
 import { EntryRow } from '../components/EntryRow';
+import { PersonPicker } from '../components/PersonPicker';
 import type { TaskOption } from '../components/TaskCombo';
 import {
   Page,
   PageHeader,
   Card,
   Toolbar,
-  Select,
   DateStepper,
   IconButton,
   Tag,
@@ -333,20 +333,18 @@ export function MeTodayScreen() {
         actions={
           <Toolbar className="myd-header-toolbar">
             {showPicker && usersQ.data && (
-              <Select
+              <PersonPicker
                 className="myd-user-select"
-                value={targetUserId}
-                onChange={(e) => setTargetUserId(e.target.value)}
                 aria-label="View someone's day"
-              >
-                {[...usersQ.data.users]
-                  .sort((a, b) => (a.id === me.id ? -1 : b.id === me.id ? 1 : a.name.localeCompare(b.name)))
-                  .map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.id === me.id ? `${u.name} (you)` : `${u.name} · ${u.role.toLowerCase()}`}
-                    </option>
-                  ))}
-              </Select>
+                block={false}
+                users={[...usersQ.data.users].sort((a, b) =>
+                  a.id === me.id ? -1 : b.id === me.id ? 1 : a.name.localeCompare(b.name),
+                )}
+                value={targetUserId}
+                onChange={setTargetUserId}
+                placeholder="Choose a person"
+                label={(u) => (u.id === me.id ? `${u.name} (you)` : `${u.name} · ${roleLabel(u.role)}`)}
+              />
             )}
             <SingleDatePicker
               date={date}

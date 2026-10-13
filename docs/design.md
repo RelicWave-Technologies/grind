@@ -79,6 +79,7 @@ Negative letter‑spacing scales with size; tight on titles, near‑zero on body
 - **List row — `.fg-row`**: hairline‑separated; `.fg-row-name` (weight) + `.fg-row-sub`, with `.fg-row-meta`/`.fg-tag`/`.fg-risk` and a right‑aligned mono `.fg-age` (`--stuck` → magenta).
 - **Pill button — `.fg-pill` / global `.btn`**: black = primary, white + 1px hairline = secondary; `:hover` fills black. Icon buttons are circles.
 - **States**: `.fg-empty` (quiet editorial line), `.fg-note` (mono loading), `.fg-error`.
+- **Filters & periods** (kit, `apps/dashboard/src/ui/SYSTEM.md` §5.9b/§5.12b/§5.12c): every table filters through one `FilterBar` whose facets are searchable `Combobox`es; every table of people's rows offers **People · Teams · Roles** (`personFacets`); every screen that lists a period of records opens on the **month rule** (`lib/reportRange.ts`: the previous month through the 10th, this month so far from the 11th) and changes it with the one `DateRangePicker`.
 
 These live in `styles.css` under **"FIGMA THEME … Overview"** and the global **"FIGMA GLOBAL"** override layer. The override layer is where the shared primitives (`.btn`, `.stat-chip`, `.hero`, `.login-*`, `.nav-*`) are flipped to Figma centrally — change the global look there, not per page.
 

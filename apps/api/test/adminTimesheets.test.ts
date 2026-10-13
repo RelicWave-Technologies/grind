@@ -149,6 +149,10 @@ describe('GET /v1/admin/timesheets', () => {
     expect(userIds.has(s.mgrA.id)).toBe(true);
     expect(userIds.has(s.memA.id)).toBe(true);
     expect(userIds.has(s.memB.id)).toBe(false);
+    // Each person carries their team and role (People · Teams · Roles), never the raw relation.
+    const memA = res.body.users.find((u: { id: string }) => u.id === s.memA.id);
+    expect(memA).toMatchObject({ role: 'MEMBER', teamName: 'A' });
+    expect(memA).not.toHaveProperty('team');
     // member-A: 90 min worked + 30 min meeting on May 26.
     expect(res.body.cells[s.memA.id]['2026-05-26'].workedMs).toBe(90 * 60 * 1000);
     expect(res.body.cells[s.memA.id]['2026-05-26'].meetingMs).toBe(30 * 60 * 1000);

@@ -396,6 +396,8 @@ describe('grouped review queue', () => {
     const big = res.body.groups.find((g: { count: number }) => g.count === 5);
     expect(big).toMatchObject({ type: 'IMPOSSIBLE_RATE', riskScore: 64 });
     expect(big.flagIds).toHaveLength(5);
+    // Each card names the person's team and role, for the People · Teams · Roles filters.
+    expect(big.user).toMatchObject({ id: s.memA.id, role: 'MEMBER', teamName: 'A' });
 
     // A manager sees only their team's cards.
     const mgr = await request(app).get('/v1/admin/flags/groups').set(auth(s.mgrA.token));

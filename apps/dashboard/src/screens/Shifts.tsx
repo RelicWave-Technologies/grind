@@ -6,7 +6,8 @@ import { CalendarClock, CalendarDays, Check, Clock3, Mail, Pencil, Plus, Trash2,
 import { api, type ApiError } from '../lib/api';
 import { adminShiftsQuery, adminUsersQuery } from '../lib/queries';
 import type { Shift, ShiftSchedule, DaySchedule, WeekdayKey } from '../lib/types';
-import { useTableFilter } from '../lib/tableFilter';
+import { personFacets, personSearchFields, useTableFilter } from '../lib/tableFilter';
+import { PersonPicker } from '../components/PersonPicker';
 import {
   Page,
   PageHeader,
@@ -16,7 +17,6 @@ import {
   IconButton,
   Field,
   Input,
-  Select,
   Toggle,
   Tag,
   Table,
@@ -32,7 +32,6 @@ import {
   List,
   FilterBar,
   NoMatches,
-  SearchInput,
 } from '../ui';
 
 const WEEK: { key: WeekdayKey; label: string }[] = [
@@ -61,6 +60,7 @@ interface AdminUser {
   email: string;
   role: 'ADMIN' | 'MANAGER' | 'MEMBER';
   teamId: string | null;
+  teamName: string | null;
   shiftId?: string | null;
 }
 
@@ -582,7 +582,11 @@ function ShiftDrawer({
   const activeSchedule = editing ? schedule : shift.schedule;
   const activeBufferMin = editing ? bufferMin : shift.bufferMin;
   const workingDays = countWorkingDays(activeSchedule);
-  const memberFilter = useTableFilter(members, { text: (m) => [m.name, m.email] }, { persist: false });
+  const memberFilter = useTableFilter(
+    members,
+    { text: (m) => personSearchFields(m), facets: personFacets((m: AdminUser) => m) },
+    { persist: false },
+  );
 
   function resetDraft() {
     setName(shift.name);
@@ -739,12 +743,11 @@ function ShiftDrawer({
               />
             ) : (
               <>
-                <SearchInput
-                  block
-                  className="shf-search"
-                  value={memberFilter.query}
-                  onChange={memberFilter.setQuery}
+                <FilterBar
+                  plain
+                  filter={memberFilter}
                   placeholder="Search members"
+                  noun={{ one: 'member', other: 'members' }}
                 />
                 {memberFilter.rows.length === 0 ? (
                   <NoMatches onClear={memberFilter.clear} />
@@ -827,11 +830,6 @@ function ShiftAddMemberModal({
 }) {
   const [userId, setUserId] = useState('');
   const canSubmit = Boolean(userId);
-  const picker = useTableFilter(users, { text: (u) => [u.name, u.email, roleLabel(u.role)] }, { persist: false });
-  // The picked person stays listed while the search narrows the rest.
-  const options = picker.rows.some((u) => u.id === userId)
-    ? picker.rows
-    : [...users.filter((u) => u.id === userId), ...picker.rows];
 
   return (
     <div className="shf-nested-layer" role="presentation" onMouseDown={onClose}>
@@ -857,30 +855,8 @@ function ShiftAddMemberModal({
           <IconButton icon={<X size={18} strokeWidth={1.9} />} aria-label="Close add member dialog" onClick={onClose} />
         </div>
         <div className="shf-modal-body">
-          <Field label="Person" className="shf-picker">
-            {users.length > 0 && (
-              <SearchInput
-                block
-                className="shf-search"
-                value={picker.query}
-                onChange={picker.setQuery}
-                placeholder="Search name or email"
-              />
-            )}
-            <Select value={userId} onChange={(event) => setUserId(event.target.value)} disabled={users.length === 0} required>
-              <option value="" disabled>
-                {users.length === 0
-                  ? 'No people available'
-                  : picker.rows.length === 0
-                    ? 'No matches'
-                    : 'Select a person'}
-              </option>
-              {options.map((user) => (
-                <option key={user.id} value={user.id}>
-                  {user.name} · {roleLabel(user.role)}
-                </option>
-              ))}
-            </Select>
+          <Field label="Person">
+            <PersonPicker users={users} value={userId} onChange={setUserId} placeholder="Select a person" />
           </Field>
           <Banner status="info">Adding a person moves them onto this shift.</Banner>
           {error && <Banner status="danger">{error}</Banner>}
@@ -1039,8 +1015,3 @@ function memberCountLabel(count: number): string {
   return 'assigned people';
 }
 
-function roleLabel(role: AdminUser['role']): string {
-  if (role === 'ADMIN') return 'Admin';
-  if (role === 'MANAGER') return 'Manager';
-  return 'Member';
-}

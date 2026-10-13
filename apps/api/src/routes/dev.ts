@@ -9,6 +9,7 @@ import {
 } from '@grind/types';
 import { requireAccessToken } from '../middleware/auth';
 import { validate } from '../middleware/validate';
+import { PERSON_FACETS_SELECT, personFacets } from '../lib/personFacets';
 import { developerEmails, isDeveloperEmail } from '../env';
 import { createResyncCommand, getAgentCommand, listAgentCommands } from '../agent/commands';
 
@@ -55,13 +56,15 @@ devRouter.get('/people', async (req, res, next) => {
         id: true,
         name: true,
         email: true,
+        ...PERSON_FACETS_SELECT,
         agentVersion: true,
         agentPlatform: true,
         agentLastSeenAt: true,
       },
     });
-    const people: AgentCommandTargetDto[] = users.map((u) => ({
+    const people: AgentCommandTargetDto[] = users.map(({ team, ...u }) => ({
       ...u,
+      ...personFacets({ role: u.role, team }),
       agentLastSeenAt: u.agentLastSeenAt?.toISOString() ?? null,
     }));
     res.json({ people });

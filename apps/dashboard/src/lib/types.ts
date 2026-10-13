@@ -5,6 +5,8 @@
  * @grind/db (no Prisma in the browser bundle).
  */
 
+import type { PersonFacets } from '@grind/types/auth';
+
 type BlockKind = 'WORK' | 'MEETING' | 'MANUAL' | 'IDLE_TRIMMED' | 'PENDING' | 'GAP';
 
 export interface DayBlock {
@@ -141,7 +143,7 @@ export interface ManualTimeRequest {
   decidedAt: string | null;
   decidedReason: string | null;
   createdAt: string;
-  user: MtrUserSummary;
+  user: MtrUserSummary & PersonFacets;
   approver?: MtrUserSummary | null;
   /** AI-assist verdict for PENDING rows. Null for already-decided ones. */
   triage?: TriageResult | null;
@@ -170,12 +172,11 @@ interface TimesheetCell {
   activitySampleCount: number;
 }
 
-interface TimesheetUser {
+interface TimesheetUser extends PersonFacets {
   id: string;
   name: string;
   email: string;
   avatarUrl?: string | null;
-  role: 'ADMIN' | 'MANAGER' | 'MEMBER';
 }
 
 // ---------------------------------------------------------------------------
@@ -189,7 +190,7 @@ export type FlagResolution = 'DISMISSED' | 'CONFIRMED' | 'TIME_INVALIDATED';
 export interface ActivityFlag {
   id: string;
   userId: string;
-  user: { id: string; name: string; email: string; avatarUrl: string | null };
+  user: { id: string; name: string; email: string; avatarUrl: string | null } & PersonFacets;
   type: FlagType;
   windowStart: string;
   windowEnd: string;

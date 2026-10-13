@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronDown, Search } from 'lucide-react';
-import { usePopover } from '../lib/popover';
+import { usePopover } from '../ui';
 
 /**
  * Searchable Lark task picker. Trigger is an on-brand chip showing the

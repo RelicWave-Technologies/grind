@@ -108,6 +108,8 @@ describe('GET /v1/admin/users — role-scoped list', () => {
     expect(ids.has(w.member2.id)).toBe(true);
     expect(ids.has(w.outsider.id)).toBe(false);
     expect(ids.has(w.admin.id)).toBe(false);
+    // The team's name rides along, so a manager (who has no team list) can show and filter by it.
+    expect(res.body.users.map((u: { teamName: string | null }) => u.teamName)).toEqual(['Squad A', 'Squad A', 'Squad A']);
   });
 
   it('ADMIN → returns every user in the workspace, scope=workspace', async () => {

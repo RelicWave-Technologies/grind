@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { AttendanceRuleVerdictSchema } from './attendanceRules';
+import { PersonFacetsSchema } from './auth';
 import { DayStatusSchema } from './leave';
 import { ManualTimeRequestDto } from './manualTimeRequests';
 import { SelfProfileResponseSchema } from './profile';
@@ -205,8 +206,7 @@ export const TeamReportUserSchema = z.object({
   email: z.string(),
   avatarUrl: z.string().nullable().default(null),
   teamId: z.string().nullable(),
-  teamName: z.string().nullable(),
-});
+}).merge(PersonFacetsSchema);
 export type TeamReportUser = z.infer<typeof TeamReportUserSchema>;
 
 export const TeamReportApprovalCountsSchema = z.object({

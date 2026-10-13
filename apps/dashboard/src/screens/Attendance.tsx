@@ -10,8 +10,18 @@ import type { TimesheetMatrix } from '../lib/types';
 import type { MonthSummaryResponse, MonthSummaryRow } from '@grind/types';
 import type { LeaveBalanceRow, LeaveBalancesResponse } from '../lib/types';
 import { EditMemberModal } from './Calendar';
-import { fmtTime, fmtDurationMs, fmtDayLabel, addDays, todayKey } from '../lib/format';
-import { useTableFilter } from '../lib/tableFilter';
+import { roleLabel } from '../lib/auth';
+import { fmtTime, fmtDurationMs, fmtDayLabel, monthBounds, todayKey } from '../lib/format';
+import { personFacets, personSearchFields, useTableFilter } from '../lib/tableFilter';
+import {
+  addMonths,
+  defaultReportMonth,
+  defaultReportRange,
+  monthRange,
+  stepRange,
+  trailingRange,
+  type DateRange,
+} from '../lib/reportRange';
 import {
   Tabs,
   Page,
@@ -46,15 +56,17 @@ const SCOPE_LABEL: Record<TimesheetMatrix['scope'], string> = {
   workspace: 'Entire workspace',
 };
 
-const ROLE_LABEL: Record<string, string> = { ADMIN: 'Admin', MANAGER: 'Manager', MEMBER: 'Member' };
-
 const MODE_LABEL: Record<string, string> = { STANDARD: 'Standard', EXEMPT: 'No rules', REMOTE: 'Remote' };
 
-const RANGES: Array<{ key: '7' | '14' | '30'; label: string; days: number }> = [
-  { key: '7', label: '7d', days: 7 },
-  { key: '14', label: '14d', days: 14 },
-  { key: '30', label: '30d', days: 30 },
+/** The daily grid's spans: the month (opens on the month rule) or the last N days. */
+type DailySpan = 'month' | '7' | '14' | '30';
+const SPANS: ReadonlyArray<{ value: DailySpan; label: string }> = [
+  { value: 'month', label: 'Month' },
+  { value: '7', label: '7d' },
+  { value: '14', label: '14d' },
+  { value: '30', label: '30d' },
 ];
+const spanDays = (span: DailySpan): 'month' | number => (span === 'month' ? 'month' : Number(span));
 
 /** A user-day is "present" when they tracked at least PRESENT_MIN_MS. */
 const PRESENT_MIN_MS = 30 * 60 * 1000;
@@ -77,45 +89,43 @@ export function AttendanceScreen() {
   const { me } = useRouteContext({ from: '/authed' });
   const tz = me.workspaceTimezone;
 
-  const [anchor, setAnchor] = useState<string>(() => todayKey(tz));
-  const [rangeKey, setRangeKey] = useState<'7' | '14' | '30'>('14');
-  const days = RANGES.find((r) => r.key === rangeKey)!.days;
-  const from = addDays(anchor, -(days - 1));
+  const today = todayKey(tz);
 
-  const q = useQuery(attendanceQuery<TimesheetMatrix>({ from, to: anchor, tz }));
+  // Both views open on the month rule (lib/reportRange): up to the 10th the
+  // month just closed, from the 11th this month so far.
+  const [span, setSpan] = useState<DailySpan>('month');
+  const [range, setRange] = useState<DateRange>(() => defaultReportRange(today));
+  const { from, to } = range;
+
+  function changeSpan(next: DailySpan) {
+    setSpan(next);
+    setRange(next === 'month' ? monthRange(to.slice(0, 7), today) : trailingRange(to, Number(next)));
+  }
+
+  const q = useQuery(attendanceQuery<TimesheetMatrix>({ from, to, tz }));
 
   function csvUrl(): string {
-    const params = new URLSearchParams({ from, to: anchor, tz });
+    const params = new URLSearchParams({ from, to, tz });
     return `${API_BASE}/v1/admin/timesheets.csv?${params.toString()}`;
   }
 
-  /**
-   * The month performance report — the monthly attendance grid HR reads, with
-   * punch in / punch out, worked hours and a status code per day.
-   *
-   * Always a WHOLE month, taken from the month the anchor sits in, because the
-   * report's own header says "Report Month" and a 14-day slice of one is not a
-   * thing anyone can file. It ignores the range selector above deliberately.
-   */
   // Two views, one at a time: the month as HR closes it (default), and the
-  // day-by-day activity grid.
+  // day-by-day activity grid. The month report (Excel/CSV) is always a WHOLE
+  // month — its header says "Report Month" — so it follows the month view.
   const [view, setView] = useState<'month' | 'daily'>('month');
-  const [reportMonth, setReportMonth] = useState<string>(() => todayKey(tz).slice(0, 7));
-  const thisMonth = todayKey(tz).slice(0, 7);
+  const [reportMonth, setReportMonth] = useState<string>(() => defaultReportMonth(today));
+  const thisMonth = today.slice(0, 7);
   const monthReport = useMonthReportDownload();
 
-  const isToday = anchor === todayKey(tz);
-  const today = todayKey(tz);
   const tzLabel = tz.replace(/_/g, ' ');
+  const days = spanDays(span);
   const data = q.data;
   const hasPeople = !!data && data.users.length > 0;
   const people = useTableFilter(
     data?.users ?? [],
     {
-      text: (u) => [u.name, u.email, ROLE_LABEL[u.role] ?? u.role],
-      facets: {
-        role: { label: 'Roles', value: (u) => u.role, optionLabel: (r) => ROLE_LABEL[r] ?? r },
-      },
+      text: (u) => [...personSearchFields(u), roleLabel(u.role)],
+      facets: personFacets((u: TimesheetMatrix['users'][number]) => u),
     },
     { urlPrefix: 'daily.' },
   );
@@ -138,8 +148,8 @@ export function AttendanceScreen() {
           <Toolbar>
             <DateStepper
               value={fmtMonthLong(reportMonth)}
-              onPrev={() => setReportMonth((m) => shiftMonth(m, -1))}
-              onNext={() => setReportMonth((m) => shiftMonth(m, 1))}
+              onPrev={() => setReportMonth((m) => addMonths(m, -1))}
+              onNext={() => setReportMonth((m) => addMonths(m, 1))}
               nextDisabled={reportMonth >= thisMonth}
               prevLabel="Previous month"
               nextLabel="Next month"
@@ -165,18 +175,20 @@ export function AttendanceScreen() {
           </Toolbar>
           ) : (
           <Toolbar>
-            <Segmented
-              value={rangeKey}
-              onChange={(v) => setRangeKey(v as '7' | '14' | '30')}
-              items={RANGES.map((r) => ({ value: r.key, label: r.label }))}
-            />
+            <Segmented aria-label="Days shown" value={span} onChange={changeSpan} items={SPANS} />
             <DateStepper
-              value={isToday ? 'Today' : fmtDayLabel(anchor, tz)}
-              onPrev={() => setAnchor((d) => addDays(d, -days))}
-              onNext={() => setAnchor((d) => addDays(d, days))}
-              nextDisabled={isToday}
-              prevLabel="Previous range"
-              nextLabel="Next range"
+              value={
+                days === 'month'
+                  ? fmtMonthLong(to.slice(0, 7))
+                  : to === today
+                    ? 'Today'
+                    : fmtDayLabel(to, tz)
+              }
+              onPrev={() => setRange((r) => stepRange(r, days, -1, today))}
+              onNext={() => setRange((r) => stepRange(r, days, 1, today))}
+              nextDisabled={to >= today}
+              prevLabel={days === 'month' ? 'Previous month' : 'Previous range'}
+              nextLabel={days === 'month' ? 'Next month' : 'Next range'}
             />
             <a className="ui-btn ui-btn--primary ui-btn--md" href={csvUrl()} download>
               <span className="ui-btn__icon">
@@ -245,7 +257,7 @@ export function AttendanceScreen() {
             </div>
             <FilterBar
               filter={people}
-              placeholder="Search name, email, role…"
+              placeholder="Search name, email, team, role…"
               noun={{ one: 'person', other: 'people' }}
             />
             {people.rows.length === 0 ? (
@@ -297,7 +309,7 @@ export function AttendanceScreen() {
                         <Td className="atd-col-person">
                           <Identity
                             name={u.name}
-                            subtitle={u.role.toLowerCase()}
+                            subtitle={u.teamName ?? roleLabel(u.role)}
                             avatar={<Avatar name={u.name} src={u.avatarUrl ?? undefined} size={32} />}
                           />
                         </Td>
@@ -414,9 +426,9 @@ function MonthSummary({ month, isAdmin }: { month: string; isAdmin: boolean }) {
   const filter = useTableFilter(
     data?.rows ?? [],
     {
-      text: (r) => [r.name, r.email, r.teamName],
+      text: (r) => personSearchFields(r),
       facets: {
-        team: { label: 'Teams', value: (r) => r.teamName },
+        ...personFacets((r: MonthSummaryRow) => r),
         mode: { label: 'Modes', value: (r) => r.mode, optionLabel: (m) => MODE_LABEL[m] ?? m },
       },
     },
@@ -544,7 +556,7 @@ function MonthDetails({
 }: { row: MonthSummaryRow | null; month: string; isAdmin: boolean; onClose: () => void }) {
   const qc = useQueryClient();
   const [editing, setEditing] = useState<LeaveBalanceRow | null>(null);
-  const monthEnd = lastDayOf(month);
+  const monthEnd = monthBounds(month).to;
   // The settings behind the balance, fetched only when an admin asks to edit.
   const [settingsError, setSettingsError] = useState<string | null>(null);
   useEffect(() => setSettingsError(null), [row?.userId]);
@@ -632,16 +644,4 @@ function MonthDetails({
       />
     </>
   );
-}
-
-function lastDayOf(month: string): string {
-  const [y, m] = month.split('-').map(Number);
-  return `${month}-${String(new Date(Date.UTC(y!, m!, 0)).getUTCDate()).padStart(2, '0')}`;
-}
-
-/** "2026-09" moved by n months. */
-function shiftMonth(month: string, n: number): string {
-  const [y, m] = month.split('-').map(Number);
-  const d = new Date(Date.UTC(y!, m! - 1 + n, 1));
-  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
 }

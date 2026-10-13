@@ -529,7 +529,8 @@ describe('/v1/reports/team/*', () => {
     });
     expect(summary.body.members).toHaveLength(1);
     expect(summary.body.members[0]).toMatchObject({
-      user: { id: s.member.id },
+      // Team and role ride along for the People · Teams · Roles filters.
+      user: { id: s.member.id, role: 'MEMBER', teamName: 'Reports Team' },
       workedMs: 60 * 60_000,
       onTimeDays: 1,
       screenshots: 1,

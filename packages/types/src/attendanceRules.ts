@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { Role } from './auth';
 
 /**
  * Attendance rules — the company's minimum-hours and approval rules, applied to
@@ -111,6 +112,8 @@ export const MonthSummaryRowSchema = z.object({
   userId: z.string(),
   name: z.string(),
   email: z.string(),
+  // People · Teams · Roles, as every people table filters.
+  role: Role,
   teamName: z.string().nullable(),
   mode: z.enum(['STANDARD', 'REMOTE', 'EXEMPT']),
   present: z.number(),

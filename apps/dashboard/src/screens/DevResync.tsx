@@ -11,14 +11,14 @@ import {
 } from '@grind/types';
 import { api } from '../lib/api';
 import { useMe } from '../lib/auth';
-import { useTableFilter } from '../lib/tableFilter';
+import { personFacets, personSearchFields, useTableFilter } from '../lib/tableFilter';
+import { PersonPicker } from '../components/PersonPicker';
 import {
   Page,
   PageHeader,
   Card,
   Field,
   Input,
-  Select,
   Button,
   IconButton,
   Banner,
@@ -135,10 +135,10 @@ export function DevResyncScreen() {
         : null;
   const selected = peopleQ.data?.people.find((p) => p.id === userId) ?? null;
   const commandFilter = useTableFilter(commandsQ.data?.commands ?? [], {
-    text: (c) => [c.user.name, c.user.email, c.type, STATUS_LABEL[c.status], rangeLabel(c.params), c.requestedBy.name],
+    text: (c) => [...personSearchFields(c.user), c.type, STATUS_LABEL[c.status], rangeLabel(c.params), c.requestedBy.name],
     facets: {
+      ...personFacets((c: AgentCommandDto) => c.user),
       status: { label: 'Statuses', value: (c) => c.status, options: STATUS_OPTIONS },
-      person: { label: 'People', value: (c) => c.user.name },
     },
   });
   const canSend = Boolean(userId) && rangeError === null && !send.isPending;
@@ -154,14 +154,14 @@ export function DevResyncScreen() {
       <Card className="dev-form-card rise rise-1">
         <div className="dev-form">
           <Field label="Person" hint={selected ? lastSeen(selected) : 'Everyone active in the workspace.'}>
-            <Select value={userId} onChange={(e) => setUserId(e.target.value)} disabled={peopleQ.isLoading}>
-              <option value="">{peopleQ.isLoading ? 'Loading…' : 'Choose a person'}</option>
-              {peopleQ.data?.people.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name} — {p.email}
-                </option>
-              ))}
-            </Select>
+            <PersonPicker
+              users={peopleQ.data?.people ?? []}
+              value={userId}
+              onChange={setUserId}
+              loading={peopleQ.isLoading}
+              placeholder="Choose a person"
+              detail={(p) => p.email}
+            />
           </Field>
           <Field label="From" error={rangeError ?? undefined}>
             <Input className="dev-date" type="date" value={from} max={today} onChange={(e) => setFrom(e.target.value)} />
@@ -200,7 +200,7 @@ export function DevResyncScreen() {
           <>
             <FilterBar
               filter={commandFilter}
-              placeholder="Search person, status, range…"
+              placeholder="Search name, team, status, range…"
               noun={{ one: 'request', other: 'requests' }}
             />
             {commandFilter.rows.length === 0 ? (

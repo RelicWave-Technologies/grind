@@ -430,13 +430,9 @@
   display: grid;
 }
 
-/* Spacing around the drawer and picker search fields. */
+/* Spacing above the drawer's member filter. */
 .tms-section .tms-search {
   margin-top: var(--ui-sp-4);
-}
-
-.tms-picker .tms-search {
-  margin-bottom: var(--ui-sp-2);
 }
 
 .tms-person {
