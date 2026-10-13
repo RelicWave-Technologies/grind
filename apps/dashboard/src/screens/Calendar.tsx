@@ -6,6 +6,7 @@ import { CalendarDays, ChevronLeft, ChevronRight, Plus, Trash2 } from 'lucide-re
 import { api } from '../lib/api';
 import { hasCapability } from '../lib/auth';
 import { todayKey, fmtDayLabel, monthBounds } from '../lib/format';
+import { addMonths } from '../lib/reportRange';
 import { leaveBalanceQuery, leaveCalendarQuery, leavePolicyQuery, myLeaveRequestsQuery } from '../lib/queries';
 import type {
   HolidayDto,
@@ -151,12 +152,6 @@ function monthCells(month: string): MonthCell[] {
   return cells.slice(-7).every((c) => !c.inMonth) ? cells.slice(0, 35) : cells;
 }
 
-function shiftMonth(month: string, delta: number): string {
-  const [y, m] = month.split('-').map((n) => Number.parseInt(n, 10));
-  const d = new Date(Date.UTC(y!, m! - 1 + delta, 1));
-  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
-}
-
 function monthName(month: string): string {
   const [y, m] = month.split('-').map((n) => Number.parseInt(n, 10));
   return new Date(Date.UTC(y!, m! - 1, 1)).toLocaleDateString('en-GB', {
@@ -276,13 +271,13 @@ export function CalendarScreen() {
             <IconButton
               aria-label="Previous month"
               icon={<ChevronLeft />}
-              onClick={() => setMonth(shiftMonth(month, -1))}
+              onClick={() => setMonth(addMonths(month, -1))}
             />
             <span className="cal-month-label">{monthLabel}</span>
             <IconButton
               aria-label="Next month"
               icon={<ChevronRight />}
-              onClick={() => setMonth(shiftMonth(month, 1))}
+              onClick={() => setMonth(addMonths(month, 1))}
             />
             <Button variant="secondary" onClick={() => setMonth(today.slice(0, 7))}>
               Today

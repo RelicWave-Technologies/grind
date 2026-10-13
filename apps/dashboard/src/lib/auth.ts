@@ -13,6 +13,14 @@ export function larkLoginUrl(next?: string): string {
 }
 
 export type Role = 'ADMIN' | 'MANAGER' | 'MEMBER';
+
+/** How a role reads in the dashboard — the one mapping every page uses. */
+export const ROLE_LABEL: Record<Role, string> = { ADMIN: 'Admin', MANAGER: 'Manager', MEMBER: 'Member' };
+
+/** A role's label; an unknown value reads as itself. */
+export function roleLabel(role: string): string {
+  return ROLE_LABEL[role as Role] ?? role;
+}
 // One source of truth with the API's RBAC table, so a new capability can't
 // exist server-side and be untypeable here (or vice versa).
 export type { Permission } from '@grind/types/rbac';

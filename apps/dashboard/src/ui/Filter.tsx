@@ -1,71 +1,22 @@
-import { forwardRef } from 'react';
 import type { ReactNode } from 'react';
-import { Search, SearchX, X } from 'lucide-react';
+import { SearchX } from 'lucide-react';
 import { cx } from './util';
-import { Button, IconButton } from './Button';
-import { Select } from './Field';
+import { Button } from './Button';
+import { Combobox } from './Combobox';
 import { EmptyState } from './Feedback';
+import { SearchInput } from './SearchInput';
 
 /* §5.12b Filtering — the table-top filter row, its search box, and the
    "no matches" state. The matching itself lives in one hook
    (src/lib/tableFilter.ts → useTableFilter); these components only render
    the state it hands them, so every filtered table looks and behaves alike. */
 
-export interface SearchInputProps
-  extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange' | 'type'> {
-  value: string;
-  onChange: (value: string) => void;
-  /** Span the column (pickers, drawers) instead of the toolbar width. */
-  block?: boolean;
-}
-
-/** A search field: leading glyph, Esc or the × clears it. */
-export const SearchInput = forwardRef<HTMLInputElement, SearchInputProps>(function SearchInput(
-  { value, onChange, block, className, placeholder = 'Search', onKeyDown, ...rest },
-  ref,
-) {
-  return (
-    <div className={cx('ui-search', block && 'ui-search--block', className)}>
-      <span className="ui-search__icon" aria-hidden>
-        <Search size={14} strokeWidth={1.9} />
-      </span>
-      <input
-        ref={ref}
-        type="search"
-        className="ui-control ui-search__input"
-        value={value}
-        placeholder={placeholder}
-        aria-label={rest['aria-label'] ?? placeholder}
-        onChange={(e) => onChange(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Escape' && value) {
-            e.preventDefault();
-            onChange('');
-          }
-          onKeyDown?.(e);
-        }}
-        {...rest}
-      />
-      {value && (
-        <IconButton
-          className="ui-search__clear"
-          size="sm"
-          variant="ghost"
-          icon={<X size={14} strokeWidth={1.9} />}
-          aria-label="Clear search"
-          onClick={() => onChange('')}
-        />
-      )}
-    </div>
-  );
-});
-
 export interface FilterOption {
   value: string;
   label: string;
 }
 
-/** One facet as the bar renders it: a Select with an "All …" choice. */
+/** One facet as the bar renders it: a Combobox with an "All …" choice. */
 export interface FilterFacetControl {
   key: string;
   /** Plural noun — the empty choice reads "All <label>". */
@@ -95,38 +46,37 @@ export interface FilterBarProps {
   hideFacets?: ReadonlyArray<string>;
   /** Extra controls after the facets (a Segmented, a toggle). */
   children?: ReactNode;
+  /** Outside a flush Card (a drawer section): no padding, no rule under it. */
+  plain?: boolean;
   className?: string;
 }
 
 /**
  * The filter row that sits on top of a table, inside its flush Card: search,
- * one Select per facet, then the live result count and Clear. A facet with a
- * single choice is hidden — there is nothing to pick between.
+ * one Combobox per facet, then the live result count and Clear. A facet with a
+ * single choice is hidden — there is nothing to pick between. Every facet is
+ * the same control; a long one (People) leads its list with a search box.
  */
-export function FilterBar({ filter, placeholder, noun, hideFacets, children, className }: FilterBarProps) {
+export function FilterBar({ filter, placeholder, noun, hideFacets, children, plain, className }: FilterBarProps) {
   const facets = filter.facets.filter(
     (f) => !hideFacets?.includes(f.key) && (f.options.length > 1 || f.value !== ''),
   );
   const unit = noun ? ` ${filter.total === 1 && !filter.active ? noun.one : noun.other}` : '';
   return (
-    <div className={cx('ui-filter-bar', className)} role="search">
+    <div className={cx('ui-filter-bar', plain && 'ui-filter-bar--plain', className)} role="search">
       <div className="ui-filter-bar__controls">
         <SearchInput value={filter.query} onChange={filter.setQuery} placeholder={placeholder} />
         {facets.map((f) => (
-          <Select
+          <Combobox
             key={f.key}
             className="ui-filter-bar__select"
             aria-label={`Filter by ${f.label.toLowerCase()}`}
+            emptyLabel={`All ${f.label.toLowerCase()}`}
+            searchPlaceholder={`Search ${f.label.toLowerCase()}`}
             value={f.value}
-            onChange={(e) => f.onChange(e.target.value)}
-          >
-            <option value="">{`All ${f.label.toLowerCase()}`}</option>
-            {f.options.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </Select>
+            options={f.options}
+            onChange={f.onChange}
+          />
         ))}
         {children}
       </div>
@@ -148,11 +98,13 @@ export function FilterBar({ filter, placeholder, noun, hideFacets, children, cla
 export interface NoMatchesProps {
   onClear: () => void;
   description?: ReactNode;
+  /** A nearer way out than clearing everything (e.g. "Show all statuses"), before Clear. */
+  action?: ReactNode;
   className?: string;
 }
 
 /** The empty state for a filter that matched nothing — always offers the way out. */
-export function NoMatches({ onClear, description = 'Nothing matches the current search and filters.', className }: NoMatchesProps) {
+export function NoMatches({ onClear, description = 'Nothing matches the current search and filters.', action, className }: NoMatchesProps) {
   return (
     <EmptyState
       className={className}
@@ -160,9 +112,12 @@ export function NoMatches({ onClear, description = 'Nothing matches the current 
       title="No matches"
       description={description}
       action={
-        <Button variant="secondary" onClick={onClear}>
-          Clear filters
-        </Button>
+        <>
+          {action}
+          <Button variant="secondary" onClick={onClear}>
+            Clear filters
+          </Button>
+        </>
       }
     />
   );

@@ -657,9 +657,13 @@ describe('attendance rules — HTTP surfaces', () => {
     const sum = await request(app).get('/v1/reports/month-summary?month=2026-09').set(auth);
     expect(sum.status).toBe(200);
     const me = (sum.body.rows as Array<Record<string, unknown>>).find((r) => r.email === s.member.email) as {
+      role: string; teamName: string | null;
       present: number; halfDay: number; leave: number; lwa: number; salaryCut: number;
       account: { opening: number; earned: number; paid: number; closing: number; lines: Array<{ kind: string; days: number; paid?: number; code?: string }> };
     };
+    // Each row names the person's role (and team) for the People · Teams · Roles filters.
+    expect(me.role).toBe('MEMBER');
+    expect(me).toHaveProperty('teamName');
     expect(me.halfDay).toBe(1);
     expect(me.lwa).toBeGreaterThanOrEqual(2);
     const a = me.account;

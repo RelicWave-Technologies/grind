@@ -92,7 +92,7 @@ describe('POST /v1/dev/agent-commands', () => {
       type: 'RESYNC',
       status: 'PENDING',
       params: { from: '2026-10-01', to: '2026-10-05', timeZone: 'Asia/Kolkata' },
-      user: { id: target.id, name: 'Target Person' },
+      user: { id: target.id, name: 'Target Person', role: 'MEMBER', teamName: null },
       requestedBy: { id: developer.userId },
       deliveredAt: null,
       completedAt: null,

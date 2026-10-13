@@ -2,6 +2,7 @@ import { Router, type Request } from 'express';
 import { prisma, type Prisma } from '@grind/db';
 import { requireAccessToken } from '../middleware/auth';
 import { readMemoScope } from '../lib/readMemo';
+import { PERSON_FACETS_SELECT, personFacets } from '../lib/personFacets';
 import { attachScope, requireAdmin, requireAnyCapability, requireCapability, requireManagerOrAbove } from '../middleware/scope';
 import { decideByUser } from '../lark/decideByUser';
 import { triageRequest, type TriageResult } from '../ai/triage';
@@ -53,6 +54,7 @@ import {
   type ApiTokenDto,
   type AttendanceRuleVerdict,
   type MonitoringSettingsAuditDto,
+  type PersonFacets,
   type TeamMemberSettingsDto,
   type TeamSettingsResponse,
   type ShiftDto,
@@ -120,6 +122,8 @@ interface UserListEntry {
   role: 'ADMIN' | 'MANAGER' | 'MEMBER';
   activityRoleTitle: 'DEVELOPER' | 'DESIGNER' | 'SALES' | 'OTHER';
   teamId: string | null;
+  /** The team's name, so any viewer can show and filter by it (not only admins with the team list). */
+  teamName: string | null;
   managerId: string | null;
   managesTeamId: string | null;
   managesTeamName: string | null;
@@ -191,6 +195,7 @@ adminRouter.get('/users', async (req, res, next) => {
         role: true,
         activityRoleTitle: true,
         teamId: true,
+        team: { select: { name: true } },
         managerId: true,
         managedTeamAssignment: { select: { teamId: true, team: { select: { name: true } } } },
         shiftId: true,
@@ -227,6 +232,7 @@ adminRouter.get('/users', async (req, res, next) => {
       role: u.role,
       activityRoleTitle: u.activityRoleTitle,
       teamId: u.teamId,
+      teamName: u.team?.name ?? null,
       managerId: u.managerId,
       managesTeamId: u.managedTeamAssignment?.teamId ?? null,
       managesTeamName: u.managedTeamAssignment?.team.name ?? null,
@@ -764,7 +770,7 @@ interface MtrListEntry {
   decidedAt: string | null;
   decidedReason: string | null;
   createdAt: string;
-  user: { id: string; name: string; email: string };
+  user: { id: string; name: string; email: string } & PersonFacets;
   approver: { id: string; name: string; email: string } | null;
   /** AI-assist verdict + reasons (PENDING only — set to null otherwise). */
   triage: TriageResult | null;
@@ -913,7 +919,7 @@ adminRouter.get('/manual-time-requests', requireManagerOrAbove, async (req, res,
     const scoped: Prisma.ManualTimeRequestWhereInput = { userId: { in: req.scope.userIds }, ...inRange };
 
     const include = {
-      user: { select: { id: true, name: true, email: true } },
+      user: { select: { id: true, name: true, email: true, ...PERSON_FACETS_SELECT } },
       approver: { select: { id: true, name: true, email: true } },
       larkMessages: { select: { status: true, attempts: true, version: true, createdAt: true } },
     } as const;
@@ -1031,7 +1037,7 @@ adminRouter.get('/manual-time-requests', requireManagerOrAbove, async (req, res,
       decidedAt: r.decidedAt ? r.decidedAt.toISOString() : null,
       decidedReason: r.decidedReason,
       createdAt: r.createdAt.toISOString(),
-      user: { id: r.user.id, name: r.user.name, email: r.user.email },
+      user: { id: r.user.id, name: r.user.name, email: r.user.email, ...personFacets(r.user) },
       approver: r.approver ? { id: r.approver.id, name: r.approver.name, email: r.approver.email } : null,
       triage: triageByRequest?.get(r.id) ?? null,
     }));
@@ -1159,7 +1165,7 @@ async function loadTimesheetData(
     countActivitySamplesByDay({ userIds: scope.userIds, days: dateKeysBetween(range.from, range.to), tz: range.tz }),
     prisma.user.findMany({
       where: { id: { in: scope.userIds } },
-      select: { id: true, name: true, email: true, avatarUrl: true, role: true },
+      select: { id: true, name: true, email: true, avatarUrl: true, ...PERSON_FACETS_SELECT },
       orderBy: [{ role: 'asc' }, { name: 'asc' }],
     }),
   ]);
@@ -1179,7 +1185,11 @@ async function loadTimesheetData(
       if (cell) cell.activitySampleCount += n;
     }
   }
-  return { matrix, users, calendar: calendarInputs };
+  return {
+    matrix,
+    users: users.map(({ team, ...u }) => ({ ...u, ...personFacets({ role: u.role, team }) })),
+    calendar: calendarInputs,
+  };
 }
 
 /**
@@ -2265,7 +2275,7 @@ adminRouter.get('/flags/groups', requireAnyCapability(['flags.team.review', 'fla
     const rows = await prisma.activityFlag.findMany({
       where: { userId: { in: req.scope.userIds }, status },
       include: {
-        user: { select: { id: true, name: true, email: true, avatarUrl: true } },
+        user: { select: { id: true, name: true, email: true, avatarUrl: true, ...PERSON_FACETS_SELECT } },
         resolvedBy: { select: { id: true, name: true } },
       },
       orderBy: [{ windowStart: 'asc' }],
@@ -2288,7 +2298,13 @@ adminRouter.get('/flags/groups', requireAnyCapability(['flags.team.review', 'fla
       const last = list[list.length - 1]!;
       return {
         key,
-        user: { id: first.user.id, name: first.user.name, email: first.user.email, avatarUrl: first.user.avatarUrl },
+        user: {
+          id: first.user.id,
+          name: first.user.name,
+          email: first.user.email,
+          avatarUrl: first.user.avatarUrl,
+          ...personFacets(first.user),
+        },
         date: dateKeyInTimeZone(first.windowStart, tz),
         type: first.type,
         count: list.length,

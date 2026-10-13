@@ -18,12 +18,14 @@ import {
   X,
 } from 'lucide-react';
 import { api, type ApiError } from '../lib/api';
-import { addDays, fmtDurationMs, todayKey } from '../lib/format';
+import { fmtDurationMs, todayKey } from '../lib/format';
 import type { Team } from '../lib/types';
-import type { Role } from '../lib/auth';
+import { roleLabel, type Role } from '../lib/auth';
+import { defaultReportRange } from '../lib/reportRange';
+import { PersonPicker } from '../components/PersonPicker';
 import type { TeamReportSummaryMember } from '@grind/types/reports';
 import { adminTeamsQuery, adminUsersQuery, reportQueryKeys, teamReportSummaryQuery } from '../lib/queries';
-import { useTableFilter } from '../lib/tableFilter';
+import { personFacets, personSearchFields, useTableFilter } from '../lib/tableFilter';
 import {
   Avatar,
   Banner,
@@ -38,8 +40,6 @@ import {
   NoMatches,
   Page,
   PageHeader,
-  SearchInput,
-  Select,
   SkeletonTable,
   Tag,
   Toolbar,
@@ -52,6 +52,7 @@ interface AdminUser {
   role: Role;
   avatarUrl: string | null;
   teamId: string | null;
+  teamName: string | null;
   managesTeamId: string | null;
   managesTeamName: string | null;
 }
@@ -69,12 +70,11 @@ export function TeamsScreen() {
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
   const tz = me.workspaceTimezone;
   const today = todayKey(tz);
-  const performanceFrom = addDays(today, -6);
-  const performanceTo = today;
+  // The drawer's performance strip opens on the month rule, like Reports.
+  const { from: performanceFrom, to: performanceTo } = defaultReportRange(today);
 
   const teams = teamsQ.data?.teams ?? [];
   const users = usersQ.data?.users ?? [];
-  const teamsById = useMemo(() => new Map(teams.map((team) => [team.id, team])), [teams]);
   const teamByManagerId = useMemo(() => {
     const map = new Map<string, Team>();
     for (const team of teams) {
@@ -288,7 +288,6 @@ export function TeamsScreen() {
           members={membersByTeam.get(selectedTeam.id) ?? []}
           users={users}
           teamByManagerId={teamByManagerId}
-          teamsById={teamsById}
           performanceMembers={selectedPerformanceMembers}
           performanceFrom={performanceFrom}
           performanceTo={performanceTo}
@@ -388,20 +387,14 @@ function NewTeamModal({
             />
           </Field>
           <Field label="Manager">
-            <Select
+            <PersonPicker
+              aria-label="Manager"
+              users={managerOptions}
               value={managerId}
-              onChange={(event) => setManagerId(event.target.value)}
-              disabled={managerOptions.length === 0}
-            >
-              <option value="">
-                {managerOptions.length === 0 ? 'No available managers' : 'No manager yet'}
-              </option>
-              {managerOptions.map((user) => (
-                <option key={user.id} value={user.id}>
-                  {user.name} · {roleLabel(user.role)}
-                </option>
-              ))}
-            </Select>
+              onChange={setManagerId}
+              placeholder="No available managers"
+              emptyLabel="No manager yet"
+            />
           </Field>
           <Banner status="info">A team can have multiple managers. Non-admin managers are moved into the team they manage.</Banner>
           {error && <Banner status="danger">{error}</Banner>}
@@ -580,7 +573,6 @@ function TeamDrawer({
   members,
   users,
   teamByManagerId,
-  teamsById,
   performanceMembers,
   performanceFrom,
   performanceTo,
@@ -600,7 +592,6 @@ function TeamDrawer({
   members: AdminUser[];
   users: AdminUser[];
   teamByManagerId: Map<string, Team>;
-  teamsById: Map<string, Team>;
   performanceMembers: TeamReportSummaryMember[];
   performanceFrom: string;
   performanceTo: string;
@@ -621,7 +612,11 @@ function TeamDrawer({
   const availableUsers = users.filter((user) => user.teamId !== team.id && (!user.managesTeamId || user.managesTeamId === team.id));
   const managerOptions = availableManagerOptions(users, teamByManagerId, team.id)
     .filter((user) => !team.managerIds.includes(user.id));
-  const memberFilter = useTableFilter(members, { text: (m) => [m.name, m.email] }, { persist: false });
+  const memberFilter = useTableFilter(
+    members,
+    { text: (m) => personSearchFields(m), facets: personFacets((m: AdminUser) => m) },
+    { persist: false },
+  );
 
   return createPortal(
     <div className="tms-drawer-layer" role="presentation" onMouseDown={onClose}>
@@ -707,12 +702,12 @@ function TeamDrawer({
               <div className="tms-empty-line ui-t-small">No members are assigned to this team yet.</div>
             ) : (
               <>
-                <SearchInput
-                  block
+                <FilterBar
+                  plain
                   className="tms-search"
-                  value={memberFilter.query}
-                  onChange={memberFilter.setQuery}
+                  filter={memberFilter}
                   placeholder="Search members"
+                  noun={{ one: 'member', other: 'members' }}
                 />
                 {memberFilter.rows.length === 0 ? (
                   <NoMatches onClear={memberFilter.clear} />
@@ -759,7 +754,6 @@ function TeamDrawer({
         <AddMemberModal
           team={team}
           users={availableUsers}
-          teamsById={teamsById}
           busyUserId={memberMutationUserId}
           error={memberMutationError}
           onAdd={(userId) => {
@@ -845,7 +839,6 @@ function PerformanceMetric({ label, value, hint }: { label: string; value: React
 function AddMemberModal({
   team,
   users,
-  teamsById,
   busyUserId,
   error,
   onAdd,
@@ -853,7 +846,6 @@ function AddMemberModal({
 }: {
   team: Team;
   users: AdminUser[];
-  teamsById: Map<string, Team>;
   busyUserId: string | null;
   error: string | null;
   onAdd: (userId: string) => void;
@@ -861,11 +853,6 @@ function AddMemberModal({
 }) {
   const [userId, setUserId] = useState('');
   const canSubmit = Boolean(userId);
-  const picker = useTableFilter(users, { text: (u) => [u.name, u.email, roleLabel(u.role)] }, { persist: false });
-  // The picked person stays listed while the search narrows the rest.
-  const options = picker.rows.some((u) => u.id === userId)
-    ? picker.rows
-    : [...users.filter((u) => u.id === userId), ...picker.rows];
   return (
     <div className="tms-nested-layer" role="presentation" onMouseDown={onClose}>
       <form
@@ -890,33 +877,14 @@ function AddMemberModal({
           <IconButton icon={<X size={18} strokeWidth={1.9} />} aria-label="Close add member dialog" onClick={onClose} />
         </div>
         <div className="tms-modal-body">
-          <Field label="Person" className="tms-picker">
-            {users.length > 0 && (
-              <SearchInput
-                block
-                className="tms-search"
-                value={picker.query}
-                onChange={picker.setQuery}
-                placeholder="Search name or email"
-              />
-            )}
-            <Select value={userId} onChange={(event) => setUserId(event.target.value)} disabled={users.length === 0} required>
-              <option value="" disabled>
-                {users.length === 0
-                  ? 'No people available'
-                  : picker.rows.length === 0
-                    ? 'No matches'
-                    : 'Select a person'}
-              </option>
-              {options.map((user) => {
-                const currentTeam = user.teamId ? teamsById.get(user.teamId)?.name ?? 'Another team' : 'Unassigned';
-                return (
-                  <option key={user.id} value={user.id}>
-                    {user.name} · {roleLabel(user.role)} · {currentTeam}
-                  </option>
-                );
-              })}
-            </Select>
+          <Field label="Person">
+            <PersonPicker
+              users={users}
+              value={userId}
+              onChange={setUserId}
+              placeholder="Select a person"
+              detail={(user) => user.teamName ?? 'Unassigned'}
+            />
           </Field>
           <Banner status="info">Adding a person moves them into this team. Managers of another team are locked to that team.</Banner>
           {error && <Banner status="danger">{error}</Banner>}
@@ -959,11 +927,6 @@ function AddManagerModal({
 }) {
   const [userId, setUserId] = useState('');
   const canSubmit = Boolean(userId);
-  const picker = useTableFilter(users, { text: (u) => [u.name, u.email, roleLabel(u.role)] }, { persist: false });
-  // The picked person stays listed while the search narrows the rest.
-  const options = picker.rows.some((u) => u.id === userId)
-    ? picker.rows
-    : [...users.filter((u) => u.id === userId), ...picker.rows];
   return (
     <div className="tms-nested-layer" role="presentation" onMouseDown={onClose}>
       <form
@@ -988,33 +951,17 @@ function AddManagerModal({
           <IconButton icon={<X size={18} strokeWidth={1.9} />} aria-label="Close add manager dialog" onClick={onClose} />
         </div>
         <div className="tms-modal-body">
-          <Field label="Person" className="tms-picker">
-            {users.length > 0 && (
-              <SearchInput
-                block
-                className="tms-search"
-                value={picker.query}
-                onChange={picker.setQuery}
-                placeholder="Search name or email"
-              />
-            )}
-            <Select value={userId} onChange={(event) => setUserId(event.target.value)} disabled={users.length === 0} required>
-              <option value="" disabled>
-                {users.length === 0
-                  ? 'No people available'
-                  : picker.rows.length === 0
-                    ? 'No matches'
-                    : 'Select a manager'}
-              </option>
-              {options.map((user) => {
+          <Field label="Person">
+            <PersonPicker
+              users={users}
+              value={userId}
+              onChange={setUserId}
+              placeholder="Select a manager"
+              detail={(user) => {
                 const managedTeam = teamByManagerId.get(user.id);
-                return (
-                  <option key={user.id} value={user.id}>
-                    {user.name} · {roleLabel(user.role)} · {managedTeam ? `Manages ${managedTeam.name}` : 'Available'}
-                  </option>
-                );
-              })}
-            </Select>
+                return managedTeam ? `Manages ${managedTeam.name}` : 'Available';
+              }}
+            />
           </Field>
           <Banner status="info">Adding a manager also moves them into this team.</Banner>
           {error && <Banner status="danger">{error}</Banner>}
@@ -1117,10 +1064,6 @@ function managerNames(managers: Team['managers']) {
   if (managers.length === 1) return managers[0]!.name;
   if (managers.length === 2) return `${managers[0]!.name}, ${managers[1]!.name}`;
   return `${managers[0]!.name} + ${managers.length - 1} more`;
-}
-
-function roleLabel(role: Role) {
-  return role.charAt(0) + role.slice(1).toLowerCase();
 }
 
 function memberCountLabel(count: number) {

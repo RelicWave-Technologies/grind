@@ -105,6 +105,15 @@ describe('GET /v1/admin/manual-time-requests', () => {
     expect(ids).not.toContain(s.mtrB.id);
   });
 
+  it('carries each requester\'s team and role for the People · Teams · Roles filters', async () => {
+    const s = await seed();
+    const res = await request(app).get('/v1/admin/manual-time-requests').set(bearer(s.admin.token));
+    expect(res.status).toBe(200);
+    const byId = new Map(res.body.requests.map((r: { id: string; user: unknown }) => [r.id, r.user]));
+    expect(byId.get(s.mtrA.id)).toMatchObject({ id: s.memA.id, role: 'MEMBER', teamName: 'A' });
+    expect(byId.get(s.mtrB.id)).toMatchObject({ id: s.memB.id, role: 'MEMBER', teamName: 'B' });
+  });
+
   it('ADMIN → sees both team requests', async () => {
     const s = await seed();
     const res = await request(app).get('/v1/admin/manual-time-requests').set(bearer(s.admin.token));

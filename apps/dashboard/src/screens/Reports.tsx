@@ -40,8 +40,6 @@ import {
 } from '../lib/format';
 import { hasCapability, isManagerOrAbove } from '../lib/auth';
 import {
-  anchorDateKey as localDateKey,
-  dateKeyAnchor as parseDateKey,
   dateKeyInTimeZone,
   daysBetween,
   localDayWindowInTimeZone,
@@ -76,7 +74,7 @@ import type {
   DayInsight,
 } from '../lib/types';
 import { myReportQuery, reportQueryKeys, teamReportSummaryQuery } from '../lib/queries';
-import { useTableFilter } from '../lib/tableFilter';
+import { personFacets, personSearchFields, useTableFilter } from '../lib/tableFilter';
 import { DayRibbon } from '../components/DayRibbon';
 import { ActivityHeatmap } from '../components/ActivityHeatmap';
 import { AppIcon } from '../components/AppIcon';
@@ -108,6 +106,7 @@ import {
   Select,
   FilterBar,
   NoMatches,
+  DateRangePicker,
 } from '../ui';
 
 type ModalKind = 'apps' | 'activity' | 'timeline';
@@ -254,10 +253,10 @@ export function ReportsScreen() {
               />
             )}
             <DateRangePicker
+              aria-label="Report date range"
               from={from}
               to={to}
               today={today}
-              timeZone={tz}
               maxDays={activeMode === 'team' ? 31 : 60}
               onChange={applyCalendarRange}
             />
@@ -712,9 +711,9 @@ function TeamKpi({
 
 function TeamMembersTable({ members, onOpenMember }: { members: TeamReportSummaryMember[]; onOpenMember: (userId: string) => void }) {
   const filter = useTableFilter(members, {
-    text: (member) => [member.user.name, member.user.email, member.user.teamName],
+    text: (member) => personSearchFields(member.user),
     facets: {
-      team: { label: 'Teams', value: (member) => member.user.teamName },
+      ...personFacets((member: TeamReportSummaryMember) => member.user),
       review: {
         label: 'Review states',
         value: (member) => (summaryMemberNeedsReview(member) ? 'review' : 'ok'),
@@ -1079,10 +1078,10 @@ function TeamMemberDrawer({
           </div>
           <Toolbar>
             <DateRangePicker
+              aria-label="Member report date range"
               from={from}
               to={to}
               today={today}
-              timeZone={tz}
               maxDays={60}
               onChange={(nextFrom, nextTo) => {
                 setFrom(nextFrom);
@@ -1781,161 +1780,6 @@ function ProfileFact({ icon, label, value, detail }: { icon: ReactNode; label: s
   );
 }
 
-function DateRangePicker({
-  from,
-  to,
-  today,
-  timeZone,
-  maxDays,
-  onChange,
-}: {
-  from: string;
-  to: string;
-  today: string;
-  timeZone: string;
-  maxDays: number;
-  onChange: (from: string, to: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [draftFrom, setDraftFrom] = useState(from);
-  const [draftTo, setDraftTo] = useState<string | null>(to);
-  const [visibleMonth, setVisibleMonth] = useState(() => monthStart(parseDateKey(from)));
-
-  const months: [Date, Date] = [visibleMonth, addMonths(visibleMonth, 1)];
-
-  function openPicker() {
-    setDraftFrom(from);
-    setDraftTo(to);
-    setVisibleMonth(monthStart(parseDateKey(from)));
-    setOpen((v) => !v);
-  }
-
-  function chooseDay(day: string) {
-    if (!draftFrom || draftTo) {
-      setDraftFrom(day);
-      setDraftTo(null);
-      return;
-    }
-    if (Math.abs(daysBetween(draftFrom, day)) > maxDays - 1) {
-      setDraftFrom(day);
-      setDraftTo(null);
-      return;
-    }
-    const [nextFrom, nextTo] = compareDateKeys(day, draftFrom) < 0 ? [day, draftFrom] : [draftFrom, day];
-    setDraftFrom(nextFrom);
-    setDraftTo(nextTo);
-    onChange(nextFrom, nextTo);
-    setOpen(false);
-  }
-
-  return (
-    <div className="rep-date-range">
-      <button
-        type="button"
-        className={`rep-date-trigger${open ? ' is-open' : ''}`}
-        onClick={openPicker}
-        aria-expanded={open}
-        aria-haspopup="dialog"
-      >
-        <CalendarDays size={15} strokeWidth={1.8} />
-        <span>{formatRangeLabel(from, to, timeZone)}</span>
-      </button>
-
-      {open && (
-        <div className="rep-date-popover" role="dialog" aria-label="Report date range">
-          <div className="rep-date-popover-head">
-            <IconButton
-              size="sm"
-              icon={<ChevronLeft size={15} strokeWidth={1.8} />}
-              aria-label="Previous month"
-              onClick={() => setVisibleMonth(addMonths(visibleMonth, -1))}
-            />
-            <span className="ui-t-eyebrow">{formatMonthRange(months[0], months[1], timeZone)}</span>
-            <IconButton
-              size="sm"
-              icon={<ChevronRight size={15} strokeWidth={1.8} />}
-              aria-label="Next month"
-              onClick={() => setVisibleMonth(addMonths(visibleMonth, 1))}
-            />
-          </div>
-          <div className="rep-calendars">
-            {months.map((month) => (
-              <CalendarMonth
-                key={localDateKey(month)}
-                month={month}
-                today={today}
-                timeZone={timeZone}
-                draftFrom={draftFrom}
-                draftTo={draftTo}
-                maxDays={maxDays}
-                onChoose={chooseDay}
-              />
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function CalendarMonth({
-  month,
-  today,
-  timeZone,
-  draftFrom,
-  draftTo,
-  maxDays,
-  onChoose,
-}: {
-  month: Date;
-  today: string;
-  timeZone: string;
-  draftFrom: string;
-  draftTo: string | null;
-  maxDays: number;
-  onChoose: (day: string) => void;
-}) {
-  const days = calendarCells(month);
-  return (
-    <section className="rep-calendar" aria-label={formatMonthLabel(month, timeZone)}>
-      <div className="rep-calendar-title">{formatMonthLabel(month, timeZone)}</div>
-      <div className="rep-calendar-weekdays" aria-hidden>
-        {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d, index) => (
-          <span key={`${d}-${index}`}>{d}</span>
-        ))}
-      </div>
-      <div className="rep-calendar-days">
-        {days.map((day, index) => {
-          if (!day) return <span key={`blank-${index}`} aria-hidden />;
-          const disabled = compareDateKeys(day, today) > 0 || (!draftTo && Math.abs(daysBetween(draftFrom, day)) > maxDays - 1);
-          const selectedStart = day === draftFrom;
-          const selectedEnd = day === draftTo;
-          const inRange = draftTo ? compareDateKeys(day, draftFrom) >= 0 && compareDateKeys(day, draftTo) <= 0 : day === draftFrom;
-          return (
-            <button
-              key={day}
-              type="button"
-              className={[
-                'rep-calendar-day',
-                inRange ? ' is-in-range' : '',
-                selectedStart ? ' is-start' : '',
-                selectedEnd ? ' is-end' : '',
-                day === today ? ' is-today' : '',
-              ].join('')}
-              disabled={disabled}
-              onClick={() => onChoose(day)}
-              aria-label={formatFullDateLabel(day, timeZone)}
-              aria-pressed={inRange}
-            >
-              {Number(day.slice(-2))}
-            </button>
-          );
-        })}
-      </div>
-    </section>
-  );
-}
-
 function AppsPanel({ data }: { data: MemberReportDayAppsResponse }) {
   if (data.apps.length === 0) {
     return <EmptyState icon={<Rows3 size={22} strokeWidth={1.8} />} title="No app activity" description="No app minutes were captured for this day." />;
@@ -2503,49 +2347,12 @@ function shiftLabel(status: ShiftStatus): string {
   return status.slice(0, 1).toUpperCase() + status.slice(1);
 }
 
-function compareDateKeys(a: string, b: string): number {
-  return a.localeCompare(b);
-}
-
-function monthStart(date: Date): Date {
-  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1, 12));
-}
-
-function addMonths(date: Date, delta: number): Date {
-  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + delta, 1, 12));
-}
-
-function calendarCells(month: Date): Array<string | null> {
-  const start = monthStart(month);
-  const firstDay = (start.getUTCDay() + 6) % 7;
-  const count = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 0)).getUTCDate();
-  const cells: Array<string | null> = Array.from({ length: firstDay }, () => null);
-  for (let day = 1; day <= count; day += 1) {
-    cells.push(localDateKey(new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), day, 12))));
-  }
-  return cells;
-}
-
 function formatRangeLabel(from: string, to: string, timeZone: string): string {
   return `${formatShortDateLabel(from, timeZone)} - ${formatShortDateLabel(to, timeZone)}`;
 }
 
 function formatShortDateLabel(key: string, timeZone: string): string {
   return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', timeZone }).format(calendarDateInstant(key, timeZone));
-}
-
-function formatFullDateLabel(key: string, timeZone: string): string {
-  return new Intl.DateTimeFormat(undefined, {
-    weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', timeZone,
-  }).format(calendarDateInstant(key, timeZone));
-}
-
-function formatMonthLabel(date: Date, timeZone: string): string {
-  return new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric', timeZone }).format(date);
-}
-
-function formatMonthRange(first: Date, second: Date, timeZone: string): string {
-  return `${formatMonthLabel(first, timeZone)} / ${formatMonthLabel(second, timeZone)}`;
 }
 
 /**

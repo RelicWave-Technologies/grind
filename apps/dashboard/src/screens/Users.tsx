@@ -9,7 +9,7 @@ import { adminShiftsQuery, adminTeamsQuery, adminUsersQuery } from '../lib/queri
 import { isAdmin, type Role } from '../lib/auth';
 import type { Team, Shift } from '../lib/types';
 import { matchesSyncFilter, syncTag, type SyncFilter, type SyncHealth } from '../lib/syncHealth';
-import { useTableFilter } from '../lib/tableFilter';
+import { personFacets, personSearchFields, useTableFilter } from '../lib/tableFilter';
 import {
   Page,
   PageHeader,
@@ -61,6 +61,7 @@ interface AdminUser {
   role: Role;
   avatarUrl: string | null;
   teamId: string | null;
+  teamName: string | null;
   managerId: string | null;
   managesTeamId: string | null;
   managesTeamName: string | null;
@@ -111,12 +112,6 @@ const ROLE_STATUS: Record<Role, Status> = {
   MANAGER: 'success',
   MEMBER: 'neutral',
 };
-
-const ROLE_OPTIONS = [
-  { value: 'ADMIN', label: 'Admin' },
-  { value: 'MANAGER', label: 'Manager' },
-  { value: 'MEMBER', label: 'Member' },
-];
 
 const STATUS_FILTER = [
   { value: 'active', label: 'Active' },
@@ -201,10 +196,6 @@ export function UsersScreen() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'users'] }),
   });
 
-  const teamName = (id: string | null): string => {
-    if (!id) return '—';
-    return teamsQ.data?.teams.find((t) => t.id === id)?.name ?? id;
-  };
   const shiftName = (id: string | null | undefined): string => {
     if (!id) return '—';
     return shiftsQ.data?.shifts.find((s) => s.id === id)?.name ?? id;
@@ -235,18 +226,14 @@ export function UsersScreen() {
   const visible = syncFilter && showSync ? sorted.filter((u) => matchesSyncFilter(u.sync, syncFilter)) : sorted;
   const filter = useTableFilter(visible, {
     text: (u) => [
-      u.name,
-      u.email,
-      u.teamId ? teamName(u.teamId) : null,
+      ...personSearchFields(u),
       u.shiftId ? shiftName(u.shiftId) : null,
       u.managesTeamName,
       u.agentVersion,
       u.agentPlatform ? platformLabel(u.agentPlatform) : null,
     ],
     facets: {
-      role: { label: 'Roles', value: (u) => u.role, options: ROLE_OPTIONS },
-      // Team names come from the admin-only team list; without it there is nothing to pick.
-      team: { label: 'Teams', value: (u) => (u.teamId && teamsQ.data ? teamName(u.teamId) : null) },
+      ...personFacets((u: AdminUser) => u),
       presence: { label: 'Presence', value: (u) => userPresence(u).label },
       platform: {
         label: 'Platforms',
@@ -423,7 +410,7 @@ export function UsersScreen() {
                     showDeviceHealth={showDeviceHealth}
                     showSync={showSync}
                     teams={teamsQ.data?.teams ?? []}
-                    teamName={teamName(u.teamId)}
+                    teamName={u.teamName ?? '—'}
                     shifts={shiftsQ.data?.shifts ?? []}
                     shiftName={shiftName(u.shiftId)}
                     busy={

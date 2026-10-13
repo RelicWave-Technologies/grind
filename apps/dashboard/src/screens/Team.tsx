@@ -23,7 +23,7 @@ import { api } from '../lib/api';
 import { TEAM_SETTINGS_QUERY_KEY, teamMemberSettingsQuery, teamWorkspacePolicyQuery } from '../lib/queries';
 import type { Role } from '../lib/auth';
 import { defaultReportRange } from '../lib/reportRange';
-import { useTableFilter } from '../lib/tableFilter';
+import { personFacets, personSearchFields, useTableFilter } from '../lib/tableFilter';
 import {
   Avatar,
   Banner,
@@ -342,11 +342,12 @@ function TeamSettingsTable({
     (shiftId ? shifts.find((s) => s.id === shiftId)?.name : null) ?? 'No shift';
   // Filters read the saved settings, not an open row draft: a row being edited
   // stays put until it is saved.
+  const person = (m: TeamMemberSettingsDto) => ({ ...m, teamName: m.team?.name ?? null });
   const filter = useTableFilter(members, {
-    text: (m) => [m.name, m.email, m.team?.name, shiftName(m.shiftId), m.manager?.name],
+    text: (m) => [...personSearchFields(person(m)), shiftName(m.shiftId), m.manager?.name],
     facets: {
+      ...personFacets(person),
       shift: { label: 'Shifts', value: (m) => shiftName(m.shiftId) },
-      team: { label: 'Teams', value: (m) => m.team?.name },
       works: {
         label: 'Work modes',
         value: (m) => m.attendanceRuleMode,

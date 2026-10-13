@@ -94,6 +94,8 @@
   --ui-table-max-h:   calc(100vh - var(--ui-sp-10));
   --ui-search-w:      260px;  /* table-top search field */
   --ui-filter-select-max: 220px;
+  --ui-combobox-w:    280px;  /* Combobox popover (at least the trigger's width) */
+  --ui-z-pop:         1000;   /* floating layers sit above drawers and modals */
 }
 @supports (height: 100dvh) {
   :root { --ui-table-max-h: calc(100dvh - var(--ui-sp-10)); }
@@ -591,6 +593,47 @@ textarea.ui-control { height: auto; min-height: 80px; padding: var(--ui-sp-3) va
   background-repeat: no-repeat;
 }
 
+/* Combobox (§5.9b) — the closed control IS a .ui-select, so a facet reads
+   exactly like the native select it replaced; the list floats in a .ui-popover. */
+.ui-combobox {
+  display: inline-flex; align-items: center;
+  width: auto; min-width: 0;
+  text-align: left;
+}
+.ui-combobox--block { width: 100%; }
+.ui-combobox[aria-expanded='true'] { border-color: var(--ui-accent); box-shadow: var(--ui-focus-ring); }
+.ui-combobox__label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui-combobox__label.is-placeholder { color: var(--ui-ink-3); }
+.ui-combobox__pop {
+  width: var(--ui-combobox-w);
+  max-width: calc(100vw - var(--ui-sp-5));
+  display: flex; flex-direction: column; gap: var(--ui-sp-2);
+  padding: var(--ui-sp-2);
+}
+.ui-combobox__list {
+  max-height: calc(var(--ui-control-h) * 8);
+  overflow-y: auto;
+  display: flex; flex-direction: column; gap: var(--ui-sp-1);
+  outline: none;
+}
+.ui-combobox__option {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--ui-sp-3);
+  min-height: var(--ui-control-h);
+  padding: 0 var(--ui-sp-3);
+  border-radius: var(--ui-r-sm);
+  font-family: var(--ui-font-sans);
+  font-size: 13px;
+  color: var(--ui-ink);
+  cursor: pointer;
+  transition: background var(--ui-dur-fast) var(--ui-ease);
+}
+.ui-combobox__option.is-active { background: var(--ui-surface-inset); }
+.ui-combobox__option.is-all { color: var(--ui-ink-2); }
+.ui-combobox__option[aria-selected='true'] { font-weight: 600; }
+.ui-combobox__option-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui-combobox__tick { flex-shrink: 0; color: var(--ui-accent); }
+.ui-combobox__empty { padding: var(--ui-sp-3); color: var(--ui-ink-3); }
+
 /* Toggle — 36×20 track, knob slides. */
 .ui-toggle {
   appearance: none;
@@ -738,6 +781,83 @@ textarea.ui-control { height: auto; min-height: 80px; padding: var(--ui-sp-3) va
   box-shadow: var(--ui-focus-ring);
 }
 
+/* DateRangePicker (§5.12c) — a mono pill; two months float in a .ui-popover. */
+.ui-date-range {
+  appearance: none;
+  height: var(--ui-control-h);
+  min-width: calc(var(--ui-sp-12) * 3);
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--ui-sp-2);
+  padding: 0 var(--ui-sp-6);
+  border: 1px solid transparent;
+  border-radius: var(--ui-r-full);
+  background: var(--ui-surface-inset);
+  color: var(--ui-ink);
+  font-family: var(--ui-font-mono);
+  font-size: 12.5px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--ui-dur-fast) var(--ui-ease), border-color var(--ui-dur-fast) var(--ui-ease);
+}
+.ui-date-range:hover,
+.ui-date-range.is-open { background: var(--ui-surface); border-color: var(--ui-line); }
+.ui-date-range:focus-visible { outline: none; box-shadow: var(--ui-focus-ring); }
+.ui-date-range__pop {
+  width: min(calc(var(--ui-sp-12) * 9), calc(100vw - var(--ui-sp-5)));
+  padding: var(--ui-sp-5);
+}
+.ui-date-range__head {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--ui-sp-4);
+  padding-bottom: var(--ui-sp-4);
+  border-bottom: 1px solid var(--ui-line-faint);
+}
+.ui-date-range__months {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--ui-sp-5);
+  padding-top: var(--ui-sp-5);
+}
+.ui-date-range__month { min-width: 0; }
+.ui-date-range__title {
+  margin-bottom: var(--ui-sp-3);
+  text-align: center;
+  font-family: var(--ui-font-sans);
+  font-size: 13px; font-weight: 600;
+  color: var(--ui-ink);
+}
+.ui-date-range__weekdays,
+.ui-date-range__days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: var(--ui-sp-1); }
+.ui-date-range__weekdays {
+  margin-bottom: var(--ui-sp-2);
+  font-family: var(--ui-font-mono);
+  font-size: 10px; font-weight: 600;
+  color: var(--ui-ink-3);
+  text-align: center;
+}
+.ui-date-range__day {
+  appearance: none;
+  display: grid; place-items: center;
+  height: var(--ui-sp-8);
+  border: 1px solid transparent;
+  border-radius: var(--ui-r-full);
+  background: transparent;
+  color: var(--ui-ink);
+  font-family: var(--ui-font-mono);
+  font-size: 12.5px; font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: background var(--ui-dur-fast) var(--ui-ease), border-color var(--ui-dur-fast) var(--ui-ease), color var(--ui-dur-fast) var(--ui-ease);
+}
+.ui-date-range__day:hover:not(:disabled) { background: var(--ui-surface-inset); }
+.ui-date-range__day.is-in-range { background: var(--ui-accent-tint); }
+.ui-date-range__day.is-start,
+.ui-date-range__day.is-end { background: var(--ui-accent); color: var(--ui-on-accent); }
+.ui-date-range__day.is-today:not(.is-start):not(.is-end) { border-color: var(--ui-line-strong); }
+.ui-date-range__day:disabled { color: var(--ui-ink-disabled); cursor: not-allowed; }
+@media (max-width: 39rem) {
+  .ui-date-range__months { grid-template-columns: 1fr; }
+}
+
 /* ============================================================================
    §5.12b Filtering — FilterBar (table-top row) + SearchInput.
    ========================================================================== */
@@ -751,6 +871,7 @@ textarea.ui-control { height: auto; min-height: 80px; padding: var(--ui-sp-3) va
 /* Alone in its card (filtering a stack of cards below it): the card's own
    edge is the rule — never double-border. */
 .ui-filter-bar:last-child { border-bottom: 0; }
+.ui-filter-bar--plain { padding: 0; border-bottom: 0; }
 .ui-filter-bar__controls {
   display: flex; align-items: center; flex-wrap: wrap;
   gap: var(--ui-sp-3);
@@ -796,7 +917,7 @@ textarea.ui-control { height: auto; min-height: 80px; padding: var(--ui-sp-3) va
 }
 .ui-empty__title { margin: 0; }
 .ui-empty__desc { color: var(--ui-ink-2); max-width: 360px; }
-.ui-empty__action { margin-top: var(--ui-sp-3); }
+.ui-empty__action { margin-top: var(--ui-sp-3); display: flex; flex-wrap: wrap; justify-content: center; gap: var(--ui-sp-3); }
 .ui-empty--danger .ui-empty__icon { background: var(--ui-danger-bg); color: var(--ui-danger-ink); }
 .ui-empty--danger .ui-empty__title { color: var(--ui-danger-ink); }
 
@@ -857,6 +978,18 @@ textarea.ui-control { height: auto; min-height: 80px; padding: var(--ui-sp-3) va
 /* ============================================================================
    §5.16 Popover / Menu / Toast — the floating layers (the ONLY --ui-shadow-pop).
    ========================================================================== */
+/* Popover — the chrome every floating panel shares (Combobox list, date range).
+   Portalled to <body> and placed by usePopover, so no page or drawer clips it. */
+.ui-popover {
+  position: fixed;
+  z-index: var(--ui-z-pop);
+  background: var(--ui-surface-raised);
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-lg);
+  box-shadow: var(--ui-shadow-pop);
+  animation: ui-fade-in var(--ui-dur-fast) var(--ui-ease) both;
+}
+
 /* Modal — popover chrome, centered over the scrim, per §5.16. */
 .ui-modal-layer {
   position: fixed;

@@ -32,9 +32,9 @@ import {
 
 /**
  * What each page reads on first paint, for the route loaders in router.tsx.
- * Arguments mirror each screen's initial state (Reports/Approvals open on the
- * last 7 days, Attendance on this month + a 14-day grid, …) so the prefetched
- * entry is exactly the one the screen's `useQuery` asks for.
+ * Arguments mirror each screen's initial state — Reports, Approvals and both
+ * Attendance views open on the month rule (lib/reportRange) — so the
+ * prefetched entry is exactly the one the screen's `useQuery` asks for.
  *
  * Loaded on demand (router.tsx imports it dynamically). The date helpers
  * come from lib/format → @grind/types (and zod), so they're imported only by
@@ -51,10 +51,11 @@ type PagePrefetch = (queryClient: QueryClient, me: Me, search: RouteSearch) => v
 
 const dates = () => import('./format');
 
-async function lastWeek(tz: string) {
-  const { addDays, todayKey } = await dates();
-  const to = todayKey(tz);
-  return { from: addDays(to, -6), to, tz };
+/** The month rule (lib/reportRange) for today in the workspace — what every period screen opens on. */
+async function openingPeriod(tz: string) {
+  const [{ todayKey }, rule] = await Promise.all([dates(), import('./reportRange')]);
+  const today = todayKey(tz);
+  return { range: { ...rule.defaultReportRange(today), tz }, month: rule.defaultReportMonth(today) };
 }
 
 export const pagePrefetch = {
@@ -77,22 +78,18 @@ export const pagePrefetch = {
     );
   },
   reports: async (qc, me) => {
-    const [{ todayKey }, { defaultReportRange }] = await Promise.all([dates(), import('./reportRange')]);
-    const tz = me.workspaceTimezone;
-    const range = { ...defaultReportRange(todayKey(tz)), tz };
+    const { range } = await openingPeriod(me.workspaceTimezone);
     prefetch(qc, hasCapability(me, 'reports.team.read') ? teamReportSummaryQuery(range) : myReportQuery(range));
   },
   approvals: async (qc, me) => {
-    const range = await lastWeek(me.workspaceTimezone);
+    const { range } = await openingPeriod(me.workspaceTimezone);
     const canReview = hasCapability(me, 'approvals.team.decide') || hasCapability(me, 'approvals.workspace.decide');
     if (canReview) prefetch(qc, teamApprovalsQuery(range));
     else prefetch(qc, myApprovalsQuery(range), larkMyTasksQuery());
   },
   attendance: async (qc, me) => {
-    const { addDays, todayKey } = await dates();
-    const tz = me.workspaceTimezone;
-    const today = todayKey(tz);
-    prefetch(qc, monthSummaryQuery(today.slice(0, 7)), attendanceQuery({ from: addDays(today, -13), to: today, tz }));
+    const { range, month } = await openingPeriod(me.workspaceTimezone);
+    prefetch(qc, monthSummaryQuery(month), attendanceQuery(range));
   },
   calendar: async (qc, me) => {
     const { monthBounds, todayKey } = await dates();

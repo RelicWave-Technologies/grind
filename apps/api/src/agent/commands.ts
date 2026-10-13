@@ -1,4 +1,5 @@
 import { prisma, type Prisma } from '@grind/db';
+import { PERSON_FACETS_SELECT, personFacets } from '../lib/personFacets';
 import type {
   AgentCommandDto,
   AgentCommandResultRequest,
@@ -22,7 +23,7 @@ const REDELIVER_AFTER_MS = 10 * 60_000;
 const MAX_DELIVERED_PER_HEARTBEAT = 5;
 
 const COMMAND_INCLUDE = {
-  user: { select: { id: true, name: true, email: true } },
+  user: { select: { id: true, name: true, email: true, ...PERSON_FACETS_SELECT } },
   requestedBy: { select: { id: true, name: true } },
 } as const satisfies Prisma.AgentCommandInclude;
 
@@ -43,7 +44,7 @@ function serializeAgentCommand(row: CommandRow): AgentCommandDto {
     completedAt: row.completedAt?.toISOString() ?? null,
     result: asRecord(row.result),
     error: row.error,
-    user: row.user,
+    user: { id: row.user.id, name: row.user.name, email: row.user.email, ...personFacets(row.user) },
     requestedBy: row.requestedBy,
   };
 }

@@ -4,6 +4,17 @@ import { TimeZoneSchema } from './timezone';
 export const Role = z.enum(['ADMIN', 'MANAGER', 'MEMBER']);
 export type Role = z.infer<typeof Role>;
 
+/**
+ * What a dashboard people table filters a row's person by — the Teams and Roles
+ * of its People · Teams · Roles facets. Every list endpoint whose rows belong to
+ * a person carries these on that person (`teamName` null when unassigned).
+ */
+export const PersonFacetsSchema = z.object({
+  role: Role,
+  teamName: z.string().nullable(),
+});
+export type PersonFacets = z.infer<typeof PersonFacetsSchema>;
+
 export const ActivityRoleTitle = z.enum(['DEVELOPER', 'DESIGNER', 'SALES', 'OTHER']);
 export type ActivityRoleTitle = z.infer<typeof ActivityRoleTitle>;
 

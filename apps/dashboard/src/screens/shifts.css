@@ -396,10 +396,6 @@
 }
 
 /* ── 7-day editor table cells ─────────────────────────────────────────────── */
-.shf-picker .shf-search {
-  margin-bottom: var(--ui-sp-2);
-}
-
 .shf-editor {
   overflow: hidden;
   border: 1px solid var(--ui-line);

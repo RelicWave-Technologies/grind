@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronDown } from 'lucide-react';
 import { zonedDateTimeParts } from '@grind/types';
-import { usePopover } from '../lib/popover';
+import { usePopover } from '../ui';
 import { buildTimeGrid } from '../lib/timeGrid';
 
 /**

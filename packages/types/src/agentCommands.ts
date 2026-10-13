@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { isYmd, TimeZoneSchema } from './timezone';
+import type { PersonFacets } from './auth';
 
 /**
  * Developer-triggered commands for one person's desktop agent.
@@ -94,7 +95,7 @@ export interface ResyncCommandResult {
   timedOut: boolean;
 }
 
-export interface AgentCommandPerson {
+export interface AgentCommandPerson extends PersonFacets {
   id: string;
   name: string;
   email: string;

@@ -1,5 +1,6 @@
 import { Router, type Request } from 'express';
 import { prisma } from '@grind/db';
+import { PERSON_FACETS_SELECT, personFacets } from '../lib/personFacets';
 import type {
   AttendanceRuleException,
   AttendanceRuleExceptionsResponse,
@@ -163,7 +164,7 @@ reportsRouter.get('/team/summary', requireCapability('reports.team.read'), async
             email: true,
             avatarUrl: true,
             teamId: true,
-            team: { select: { name: true } },
+            ...PERSON_FACETS_SELECT,
           },
           orderBy: [{ name: 'asc' }, { email: 'asc' }],
         })
@@ -174,7 +175,7 @@ reportsRouter.get('/team/summary', requireCapability('reports.team.read'), async
       email: user.email,
       avatarUrl: user.avatarUrl,
       teamId: user.teamId,
-      teamName: user.team?.name ?? null,
+      ...personFacets(user),
     }));
 
     const now = new Date();
@@ -690,11 +691,11 @@ reportsRouter.get('/month-summary', requireCapability('reports.team.read'), asyn
   try {
     const result = await monthPerformanceFor(req);
     if (result.status !== 200) return res.status(result.status).json({ error: result.error });
-    const modes = await prisma.user.findMany({
+    const people = await prisma.user.findMany({
       where: { id: { in: result.report.rows.map((r) => r.user.id) } },
-      select: { id: true, attendanceRuleMode: true },
+      select: { id: true, attendanceRuleMode: true, role: true },
     });
-    const modeOf = new Map(modes.map((m) => [m.id, m.attendanceRuleMode]));
+    const personOf = new Map(people.map((p) => [p.id, p]));
     const rows: MonthSummaryRow[] = result.report.rows.map((row) => {
       const codeOn = new Map(row.days.map((d) => [d.date, sheetCode(d)]));
       const count = (code: string) => row.days.filter((d) => sheetCode(d) === code).length;
@@ -704,8 +705,9 @@ reportsRouter.get('/month-summary', requireCapability('reports.team.read'), asyn
         userId: row.user.id,
         name: row.user.name,
         email: row.user.email,
+        role: personOf.get(row.user.id)?.role ?? 'MEMBER',
         teamName: row.user.teamName,
-        mode: modeOf.get(row.user.id) ?? 'STANDARD',
+        mode: personOf.get(row.user.id)?.attendanceRuleMode ?? 'STANDARD',
         present: count('P'),
         halfDay: count('HD'),
         pl: count('PL'),
@@ -797,7 +799,7 @@ async function resolveScopedReportUser(
       avatarUrl: true,
       activityRoleTitle: true,
       teamId: true,
-      team: { select: { name: true } },
+      ...PERSON_FACETS_SELECT,
     },
   });
   if (!user) return { ok: false, status: 404, error: 'user_not_found' };
@@ -810,7 +812,7 @@ async function resolveScopedReportUser(
       avatarUrl: user.avatarUrl,
       activityRoleTitle: user.activityRoleTitle as RoleTitle,
       teamId: user.teamId,
-      teamName: user.team?.name ?? null,
+      ...personFacets(user),
     },
   };
 }

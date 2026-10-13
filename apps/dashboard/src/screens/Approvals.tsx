@@ -4,20 +4,22 @@ import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate, useRouteContext } from '@tanstack/react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CalendarDays, Check, ChevronLeft, ChevronRight, Clock4, Inbox, X } from 'lucide-react';
+import { Check, Clock4, Inbox, X } from 'lucide-react';
 import { api, type ApiError } from '../lib/api';
 import { hasCapability, isManagerOrAbove } from '../lib/auth';
 import type { DecideResult, ManualTimeRequest, MtrStatus, MtrUserSummary } from '../lib/types';
-import { addDays, fmtAgeShort, fmtDayLabel, fmtDurationMs, fmtTime, todayKey } from '../lib/format';
-import { dateKeyInTimeZone, daysBetween } from '@grind/types';
+import { fmtAgeShort, fmtDayLabel, fmtDurationMs, fmtTime, todayKey } from '../lib/format';
+import { dateKeyInTimeZone } from '@grind/types';
+import { defaultReportRange } from '../lib/reportRange';
 import { larkMyTasksQuery, myApprovalsQuery, reportQueryKeys, teamApprovalsQuery } from '../lib/queries';
-import { useTableFilter } from '../lib/tableFilter';
+import { personFacets, personSearchFields, useTableFilter } from '../lib/tableFilter';
 import type { TaskOption } from '../components/TaskCombo';
 import {
   Avatar,
   Banner,
   Button,
   Card,
+  DateRangePicker,
   EmptyState,
   FilterBar,
   IconButton,
@@ -94,7 +96,8 @@ type ApprovalRequest = SelfApprovalRequest | ManualTimeRequest;
 interface ApprovalTableRow {
   source: ApprovalMode;
   req: ApprovalRequest;
-  requester: MtrUserSummary | null;
+  /** The person who asked — team view only; carries team + role for the filters. */
+  requester: ManualTimeRequest['user'] | null;
 }
 
 type ApprovalTaskReadout = {
@@ -115,8 +118,9 @@ export function ApprovalsScreen() {
   const canSelfApproveOwn = isManagerOrAbove(me.role);
   const [mode, setMode] = useState<ApprovalMode>(() => (canReview ? 'team' : 'you'));
   const activeMode: ApprovalMode = canReview ? mode : 'you';
-  const [from, setFrom] = useState(() => addDays(today, -6));
-  const [to, setTo] = useState(today);
+  // The month rule (lib/reportRange): the previous month up to the 10th, then this one.
+  const [from, setFrom] = useState(() => defaultReportRange(today).from);
+  const [to, setTo] = useState(() => defaultReportRange(today).to);
   const [selectedRow, setSelectedRow] = useState<ApprovalTableRow | null>(null);
 
   const selfQ = useQuery({
@@ -167,26 +171,39 @@ export function ApprovalsScreen() {
   const filter = useTableFilter(
     rows,
     {
+      // Everything a row shows is searchable: who (name, email, team), the
+      // reason, the task, the day both as a key and as it reads, and the status.
       text: (row) => {
         const task = approvalTaskReadout(row.req, taskMap);
+        const date = dateKeyInTimeZone(new Date(row.req.requestedStart).getTime(), tz);
         return [
-          row.requester?.name,
-          row.requester?.email,
+          ...personSearchFields(row.requester),
           row.req.reason,
           task.kind === 'none' ? null : task.label,
-          dateKeyInTimeZone(new Date(row.req.requestedStart).getTime(), tz),
+          date,
+          fmtDayLabel(date, tz),
+          approvalStatusLabel(row.req.status),
         ];
       },
       facets: {
+        // Only the team view has a requester; on "You" these find one value and hide.
+        ...personFacets((row: ApprovalTableRow) => row.requester),
         status: { label: 'Statuses', value: (row) => row.req.status, options: STATUS_OPTIONS },
-        // Only the team view has other people's requests to pick between.
-        person: { label: 'People', value: (row) => (row.source === 'team' ? row.requester?.name ?? null : null) },
       },
     },
     // A reviewer opens on the queue: everything still waiting, whatever its date.
     { initial: canReview ? { status: 'PENDING' } : undefined },
   );
   const statusFilter = filter.value('status') as ApprovalFilter;
+  // The status tabs are a facet too, so a search can be hidden by the tab it
+  // happens to sit on (a reviewer opens on Pending). Each tab says how many of
+  // the search's matches it holds, and an empty tab points at the others.
+  const statusCounts = filter.counts('status');
+  const statusTabs = FILTER_TABS.map((tab) => {
+    const n = tab.value === '' ? statusCounts.all : statusCounts.byValue.get(tab.value) ?? 0;
+    return { ...tab, label: rows.length > 0 ? `${tab.label} · ${n}` : tab.label };
+  });
+  const hiddenByStatus = statusFilter !== '' ? statusCounts.all : 0;
 
   const visible = [...filter.rows].sort((a, b) => {
     const priority = statusPriority(a.req.status) - statusPriority(b.req.status);
@@ -219,17 +236,18 @@ export function ApprovalsScreen() {
                 value={activeMode}
                 onChange={(next) => {
                   setMode(next);
-                  filter.setValue('status', '');
-                  filter.setValue('person', '');
+                  filter.clear();
                   setSelectedRow(null);
                 }}
                 items={MODE_TABS}
               />
             )}
-            <ApprovalDateRangePicker
+            <DateRangePicker
+              aria-label="Approval date range"
               from={from}
               to={to}
               today={today}
+              maxDays={60}
               onChange={(nextFrom, nextTo) => {
                 setFrom(nextFrom);
                 setTo(nextTo);
@@ -263,7 +281,7 @@ export function ApprovalsScreen() {
             aria-label="Approval status"
             value={statusFilter}
             onChange={(next) => filter.setValue('status', next)}
-            items={FILTER_TABS}
+            items={statusTabs}
             className="apv-status-tabs"
           />
         </div>
@@ -292,7 +310,7 @@ export function ApprovalsScreen() {
           <>
             <FilterBar
               filter={filter}
-              placeholder={activeMode === 'team' ? 'Search member, reason, task…' : 'Search reason, task, date…'}
+              placeholder={activeMode === 'team' ? 'Search name, email, team, reason…' : 'Search reason, task, date…'}
               noun={{ one: 'request', other: 'requests' }}
               hideFacets={['status']}
             />
@@ -300,9 +318,16 @@ export function ApprovalsScreen() {
               <NoMatches
                 onClear={filter.clear}
                 description={
-                  statusFilter && !filter.query.trim() && !filter.value('person')
-                    ? `No ${filterLabel(statusFilter).toLowerCase()} approvals in this range.`
+                  hiddenByStatus > 0
+                    ? `No ${filterLabel(statusFilter).toLowerCase()} requests ${statusCounts.all < rows.length ? 'match' : 'in this range'} — ${hiddenByStatus} ${hiddenByStatus === 1 ? 'is' : 'are'} under other statuses.`
                     : undefined
+                }
+                action={
+                  hiddenByStatus > 0 ? (
+                    <Button variant="primary" onClick={() => filter.setValue('status', '')}>
+                      Show all statuses
+                    </Button>
+                  ) : undefined
                 }
               />
             ) : (
@@ -739,150 +764,6 @@ function DetailField({ label, children }: { label: string; children: ReactNode }
   );
 }
 
-function ApprovalDateRangePicker({
-  from,
-  to,
-  today,
-  onChange,
-}: {
-  from: string;
-  to: string;
-  today: string;
-  onChange: (from: string, to: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [draftFrom, setDraftFrom] = useState(from);
-  const [draftTo, setDraftTo] = useState<string | null>(to);
-  const [visibleMonth, setVisibleMonth] = useState(() => monthStart(parseDateKey(from)));
-  const months: [Date, Date] = [visibleMonth, addMonths(visibleMonth, 1)];
-
-  function openPicker() {
-    setDraftFrom(from);
-    setDraftTo(to);
-    setVisibleMonth(monthStart(parseDateKey(from)));
-    setOpen((v) => !v);
-  }
-
-  function chooseDay(day: string) {
-    if (!draftFrom || draftTo) {
-      setDraftFrom(day);
-      setDraftTo(null);
-      return;
-    }
-    if (Math.abs(daysBetween(draftFrom, day)) > 59) {
-      setDraftFrom(day);
-      setDraftTo(null);
-      return;
-    }
-    const [nextFrom, nextTo] = day < draftFrom ? [day, draftFrom] : [draftFrom, day];
-    setDraftFrom(nextFrom);
-    setDraftTo(nextTo);
-    onChange(nextFrom, nextTo);
-    setOpen(false);
-  }
-
-  return (
-    <div className="apv-date-range">
-      <button
-        type="button"
-        className={`apv-date-trigger${open ? ' is-open' : ''}`}
-        onClick={openPicker}
-        aria-expanded={open}
-        aria-haspopup="dialog"
-      >
-        <CalendarDays size={15} strokeWidth={1.8} />
-        <span>{formatRangeLabel(from, to)}</span>
-      </button>
-
-      {open && (
-        <div className="apv-date-popover" role="dialog" aria-label="Approval date range">
-          <div className="apv-date-popover-head">
-            <IconButton
-              size="sm"
-              icon={<ChevronLeft size={15} strokeWidth={1.8} />}
-              aria-label="Previous month"
-              onClick={() => setVisibleMonth(addMonths(visibleMonth, -1))}
-            />
-            <span className="ui-t-eyebrow">{formatMonthRange(months[0], months[1])}</span>
-            <IconButton
-              size="sm"
-              icon={<ChevronRight size={15} strokeWidth={1.8} />}
-              aria-label="Next month"
-              onClick={() => setVisibleMonth(addMonths(visibleMonth, 1))}
-            />
-          </div>
-          <div className="apv-calendars">
-            {months.map((month) => (
-              <ApprovalCalendarMonth
-                key={dateKey(month)}
-                month={month}
-                today={today}
-                draftFrom={draftFrom}
-                draftTo={draftTo}
-                onChoose={chooseDay}
-              />
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ApprovalCalendarMonth({
-  month,
-  today,
-  draftFrom,
-  draftTo,
-  onChoose,
-}: {
-  month: Date;
-  today: string;
-  draftFrom: string;
-  draftTo: string | null;
-  onChoose: (day: string) => void;
-}) {
-  const days = calendarCells(month);
-  return (
-    <section className="apv-calendar" aria-label={formatMonthLabel(month)}>
-      <div className="apv-calendar-title">{formatMonthLabel(month)}</div>
-      <div className="apv-calendar-weekdays" aria-hidden>
-        {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d, index) => (
-          <span key={`${d}-${index}`}>{d}</span>
-        ))}
-      </div>
-      <div className="apv-calendar-days">
-        {days.map((day, index) => {
-          if (!day) return <span key={`blank-${index}`} aria-hidden />;
-          const disabled = day > today || (!draftTo && Math.abs(daysBetween(draftFrom, day)) > 59);
-          const selectedStart = day === draftFrom;
-          const selectedEnd = day === draftTo;
-          const inRange = draftTo ? day >= draftFrom && day <= draftTo : day === draftFrom;
-          return (
-            <button
-              key={day}
-              type="button"
-              className={[
-                'apv-calendar-day',
-                inRange ? ' is-in-range' : '',
-                selectedStart ? ' is-start' : '',
-                selectedEnd ? ' is-end' : '',
-                day === today ? ' is-today' : '',
-              ].join('')}
-              disabled={disabled}
-              onClick={() => onChoose(day)}
-              aria-label={formatFullDateLabel(day)}
-              aria-pressed={inRange}
-            >
-              {Number(day.slice(-2))}
-            </button>
-          );
-        })}
-      </div>
-    </section>
-  );
-}
-
 function summarizeApprovals(requests: ApprovalRequest[]) {
   const out = {
     total: requests.length,
@@ -969,53 +850,4 @@ function railForApprovalStatus(status: MtrStatus): Rail | undefined {
   if (status === 'PENDING') return 'warn';
   if (status === 'REJECTED') return 'danger';
   return undefined;
-}
-
-function parseDateKey(key: string): Date {
-  const [year, month, day] = key.split('-').map((part) => Number.parseInt(part, 10));
-  return new Date(year!, month! - 1, day!);
-}
-
-function dateKey(date: Date): string {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-}
-
-function monthStart(date: Date): Date {
-  return new Date(date.getFullYear(), date.getMonth(), 1);
-}
-
-function addMonths(date: Date, delta: number): Date {
-  return new Date(date.getFullYear(), date.getMonth() + delta, 1);
-}
-
-function calendarCells(month: Date): Array<string | null> {
-  const start = monthStart(month);
-  const firstDay = (start.getDay() + 6) % 7;
-  const count = new Date(start.getFullYear(), start.getMonth() + 1, 0).getDate();
-  const cells: Array<string | null> = Array.from({ length: firstDay }, () => null);
-  for (let day = 1; day <= count; day += 1) {
-    cells.push(dateKey(new Date(start.getFullYear(), start.getMonth(), day)));
-  }
-  return cells;
-}
-
-function formatRangeLabel(from: string, to: string): string {
-  return `${formatShortDateLabel(from)} - ${formatShortDateLabel(to)}`;
-}
-
-function formatShortDateLabel(key: string): string {
-  const d = parseDateKey(key);
-  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(d);
-}
-
-function formatMonthLabel(date: Date): string {
-  return new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' }).format(date);
-}
-
-function formatMonthRange(a: Date, b: Date): string {
-  return `${formatMonthLabel(a)} / ${formatMonthLabel(b)}`;
-}
-
-function formatFullDateLabel(key: string): string {
-  return new Intl.DateTimeFormat('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }).format(parseDateKey(key));
 }

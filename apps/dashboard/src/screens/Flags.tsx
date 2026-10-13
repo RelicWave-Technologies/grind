@@ -5,7 +5,7 @@ import { useRouteContext } from '@tanstack/react-router';
 import { ShieldAlert, Check, X, AlertOctagon, ShieldCheck, Sparkles, Ban } from 'lucide-react';
 import { api, type ApiError } from '../lib/api';
 import { flagGroupsQuery } from '../lib/queries';
-import { useTableFilter } from '../lib/tableFilter';
+import { personFacets, personSearchFields, useTableFilter } from '../lib/tableFilter';
 import type { ActivityFlag, FlagResolution, FlagType } from '../lib/types';
 import {
   Page,
@@ -146,15 +146,14 @@ export function FlagsScreen() {
   const count = q.data?.groups.length ?? 0;
   const filter = useTableFilter(q.data?.groups ?? [], {
     text: (g) => [
-      g.user.name,
-      g.user.email,
+      ...personSearchFields(g.user),
       FLAG_LABEL[g.type],
       g.explanation?.headline,
       g.resolvedNote,
       g.resolvedBy?.name,
     ],
     facets: {
-      person: { label: 'People', value: (g) => g.user.name },
+      ...personFacets((g: FlagGroup) => g.user),
       kind: { label: 'Signals', value: (g) => g.type, optionLabel: (t) => FLAG_LABEL[t as FlagType] ?? t },
       // Open cards only: a resolved card's risk reads "Closed", so the facet hides there.
       risk: {
@@ -228,7 +227,7 @@ export function FlagsScreen() {
         <Card variant="flush">
           <FilterBar
             filter={filter}
-            placeholder="Search person, signal, note…"
+            placeholder="Search name, team, signal, note…"
             noun={{ one: 'card', other: 'cards' }}
           />
         </Card>
