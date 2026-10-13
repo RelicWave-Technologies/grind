@@ -270,8 +270,9 @@ describe('GET /v1/admin/manual-time-requests', () => {
       })),
     });
 
+    // Without a range the read is all history, so it is a short page.
     const res = await request(app)
-      .get('/v1/admin/manual-time-requests?status=ALL&from=2026-05-30&to=2026-05-30&tz=UTC')
+      .get('/v1/admin/manual-time-requests?status=ALL')
       .set(bearer(s.admin.token));
     const rows = res.body.requests as Array<{ id: string; status: string }>;
 
@@ -279,6 +280,15 @@ describe('GET /v1/admin/manual-time-requests', () => {
     expect(res.body.truncated).toBe(true);
     // The cap applies to history only; pending is returned in full on top.
     expect(rows.filter((r) => r.status !== 'PENDING')).toHaveLength(200);
+
+    // A range bounds the read itself: a busy month's decisions all come back.
+    const ranged = await request(app)
+      .get('/v1/admin/manual-time-requests?status=ALL&from=2026-05-30&to=2026-05-30&tz=UTC')
+      .set(bearer(s.admin.token));
+    const rangedRows = ranged.body.requests as Array<{ id: string; status: string }>;
+    expect(ranged.body.truncated).toBe(false);
+    expect(rangedRows.some((r) => r.id === s.mtrA.id)).toBe(true);
+    expect(rangedRows.filter((r) => r.status === 'APPROVED').length).toBeGreaterThanOrEqual(205);
   });
 
   it('invalid status → 400', async () => {

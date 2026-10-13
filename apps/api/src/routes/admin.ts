@@ -888,8 +888,14 @@ function adjacencyFor(
  * have everything — a single `take` over the combined set silently dropped 107
  * of 124 pending requests behind two thousand approved ones.
  */
-/** How much decided history one page carries. Pending is never capped. */
+/**
+ * How much decided history one response carries. Pending is never capped. A
+ * date range already bounds the read (a busy month is about 2,000 decisions),
+ * so its cap is only a safety net; without a range the read is all history
+ * and stays a short page.
+ */
 const DECIDED_PAGE_SIZE = 200;
+const DECIDED_RANGED_MAX = 5_000;
 
 adminRouter.get('/manual-time-requests', requireManagerOrAbove, async (req, res, next) => {
   try {
@@ -935,6 +941,7 @@ adminRouter.get('/manual-time-requests', requireManagerOrAbove, async (req, res,
     const decidedStatuses = statusParam === 'ALL'
       ? (['APPROVED', 'REJECTED', 'CANCELLED'] as const)
       : ([statusParam] as unknown as readonly (typeof validStatuses)[number][]);
+    const decidedCap = range ? DECIDED_RANGED_MAX : DECIDED_PAGE_SIZE;
     const [pendingRowsAll, decidedRows] = await Promise.all([
       wantsPending
         ? prisma.manualTimeRequest.findMany({
@@ -948,12 +955,12 @@ adminRouter.get('/manual-time-requests', requireManagerOrAbove, async (req, res,
             where: { ...scoped, status: { in: [...decidedStatuses] } },
             include,
             orderBy: [{ createdAt: 'desc' }],
-            take: DECIDED_PAGE_SIZE + 1,
+            take: decidedCap + 1,
           })
         : [],
     ]);
-    const truncated = decidedRows.length > DECIDED_PAGE_SIZE;
-    const rows = [...pendingRowsAll, ...decidedRows.slice(0, DECIDED_PAGE_SIZE)];
+    const truncated = decidedRows.length > decidedCap;
+    const rows = [...pendingRowsAll, ...decidedRows.slice(0, decidedCap)];
     // Triage enrichment for PENDING rows only (decided rows already have
     // a verdict). Skips entirely if there are no PENDING rows — keeps
     // historical / decided-only queries cheap.

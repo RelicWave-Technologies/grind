@@ -74,6 +74,8 @@ interface ApprovalListResponse<T> {
   tz?: string;
   scope?: 'self' | 'team' | 'workspace';
   requests: T[];
+  /** Decided history was cut short (pending never is). */
+  truncated?: boolean;
 }
 
 interface SelfApprovalRequest {
@@ -289,6 +291,14 @@ export function ApprovalsScreen() {
         {activeQuery.isError && (
           <div className="apv-table-banner">
             <Banner status="danger">Couldn&apos;t load approvals — {(activeQuery.error as Error).message}</Banner>
+          </div>
+        )}
+
+        {activeQuery.data?.truncated && (
+          <div className="apv-table-banner">
+            <Banner status="warn">
+              Showing the newest decided requests only — counts and lists are incomplete. Pick a shorter date range to see all of them.
+            </Banner>
           </div>
         )}
 
