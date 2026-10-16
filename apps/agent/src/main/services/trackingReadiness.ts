@@ -23,8 +23,14 @@ import { log } from '../logger';
 // A blank probe is re-run at most this often while the screen is unverified,
 // so the polling surfaces converge without hammering desktopCapturer.
 const SCREEN_REPROBE_INTERVAL_MS = 5_000;
-// Consecutive blank probes before "still checking" becomes "not working".
+// Consecutive blank probes before "still checking" can become "not working".
 const SCREEN_FAILED_AFTER_PROBES = 3;
+// Past those quick re-probes, a screen still blank is checked this often...
+const SCREEN_SLOW_REPROBE_INTERVAL_MS = 30_000;
+// ...and is "not working" only once it has stayed blank this long. Older Macs
+// return blank frames for 20-60 s at a time mid-session and recover on their
+// own; pausing after 15 s paused a working user several times a day.
+const SCREEN_FAILED_AFTER_MS = 90_000;
 
 interface TrackingReadinessDeps {
   platform: NodeJS.Platform;
@@ -62,7 +68,12 @@ function wireError(error: string | null): string | null {
   return error === null ? null : error.slice(0, DESKTOP_PERMISSION_ERROR_MAX);
 }
 
-function screenCapability(status: ScreenStatus, probeHealthy: boolean | null, failedProbes: number): CapabilityState {
+function screenCapability(
+  status: ScreenStatus,
+  probeHealthy: boolean | null,
+  failedProbes: number,
+  blankForMs: number,
+): CapabilityState {
   if (status === 'not-determined' || status === 'unknown') return 'NEEDS_GRANT';
   if (status === 'denied' || status === 'restricted') return 'NEEDS_SETTINGS';
   if (probeHealthy === true) return 'READY';
@@ -71,7 +82,7 @@ function screenCapability(status: ScreenStatus, probeHealthy: boolean | null, fa
   // slow Macs just return blank frames from the first captures of a fresh
   // process. Keep re-probing; only a failure that persists is reported, and
   // even then as something to check, not something to restart.
-  return failedProbes >= SCREEN_FAILED_AFTER_PROBES ? 'FAILED' : 'CHECKING';
+  return failedProbes >= SCREEN_FAILED_AFTER_PROBES && blankForMs >= SCREEN_FAILED_AFTER_MS ? 'FAILED' : 'CHECKING';
 }
 
 function accessibilityCapability(status: ActivityCaptureStatus): CapabilityState {
@@ -123,6 +134,8 @@ export function createTrackingReadinessService(deps: TrackingReadinessDeps) {
   // reports it instead of a stale or 'unknown' capture-loop value.
   let screenFailure: CaptureHealth | null = null;
   let screenProbeFailures = 0;
+  // Device clock: when the current unbroken run of blank readings began.
+  let screenBlankSince: number | null = null;
   let lastProbeAt: number | null = null;
   let probeInFlight: Promise<CaptureHealth> | null = null;
   let lastActivityStartError = '';
@@ -161,7 +174,10 @@ export function createTrackingReadinessService(deps: TrackingReadinessDeps) {
   }
 
   function probeDue(): boolean {
-    return lastProbeAt === null || deps.now() - lastProbeAt >= SCREEN_REPROBE_INTERVAL_MS;
+    const interval = screenProbeFailures >= SCREEN_FAILED_AFTER_PROBES
+      ? SCREEN_SLOW_REPROBE_INTERVAL_MS
+      : SCREEN_REPROBE_INTERVAL_MS;
+    return lastProbeAt === null || deps.now() - lastProbeAt >= interval;
   }
 
   /**
@@ -235,13 +251,15 @@ export function createTrackingReadinessService(deps: TrackingReadinessDeps) {
       screenProbeHealthy = false;
       screenFailure = null;
       screenProbeFailures = 0;
+      screenBlankSince = null;
     }
 
     if (opts.verifyScreen && rawScreenStatus === 'granted' && screenProbeHealthy !== true && (probeInFlight || probeDue())) {
       await probe();
     }
 
-    const screenRecording = screenCapability(rawScreenStatus, screenProbeHealthy, screenProbeFailures);
+    const blankForMs = screenBlankSince === null ? 0 : deps.now() - screenBlankSince;
+    const screenRecording = screenCapability(rawScreenStatus, screenProbeHealthy, screenProbeFailures, blankForMs);
     const accessibility = accessibilityCapability(rawAccessibility);
     const effectiveScreenHealth: CaptureHealth = screenProbeHealthy === true ? 'ok' : screenFailure ?? rawScreenHealth;
     const blockingCapabilities: BlockingCapability[] = [];
@@ -322,9 +340,11 @@ export function createTrackingReadinessService(deps: TrackingReadinessDeps) {
       screenProbeHealthy = true;
       screenFailure = null;
       screenProbeFailures = 0;
+      screenBlankSince = null;
     } else if (health !== 'unknown') {
       screenProbeHealthy = false;
       screenFailure = health;
+      screenBlankSince ??= deps.now();
     }
   }
 
