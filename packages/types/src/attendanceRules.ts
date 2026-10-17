@@ -158,6 +158,64 @@ export const MonthSummaryResponseSchema = z.object({
 });
 export type MonthSummaryResponse = z.infer<typeof MonthSummaryResponseSchema>;
 
+/**
+ * The month performance sheet as data — the Excel's main grid, for the
+ * dashboard to draw. Every cell is the string the workbook prints, so the
+ * screen and the download cannot read differently.
+ */
+export const MonthSheetDaySchema = z.object({
+  /** YYYY-MM-DD. */
+  date: z.string(),
+  /** Office In / Office Out, "09:42"; "--:--" when no punch. */
+  officeIn: z.string(),
+  officeOut: z.string(),
+  /** Total Working Hours, "07:35". */
+  work: z.string(),
+  /** The same, as minutes — for totals over a range. */
+  workMinutes: z.number(),
+  /** Status — one of the display codes. */
+  code: z.string(),
+  /** What the status would be with nobody's correction. */
+  computed: z.string(),
+  /** The Why row: "<7h", "late 3", or empty. */
+  why: z.string(),
+  /** A late arrival this day, charged or not. */
+  late: z.boolean(),
+  /** 'Diwali', 'Paid leave' — whatever the calendar called the day. */
+  label: z.string().nullable(),
+  /** Set when somebody corrected the day by hand. */
+  override: z.object({ code: z.string(), stale: z.boolean() }).nullable(),
+});
+export type MonthSheetDay = z.infer<typeof MonthSheetDaySchema>;
+
+export const MonthSheetRowSchema = z.object({
+  userId: z.string(),
+  name: z.string(),
+  email: z.string(),
+  role: Role,
+  teamName: z.string().nullable(),
+  /** The count strip opposite the name: [label, value], in sheet order. */
+  counts: z.array(z.tuple([z.string(), z.string()])),
+  /** The leave account line below it. */
+  leave: z.array(z.tuple([z.string(), z.string()])),
+  /** One per `dates` entry, same order. */
+  days: z.array(MonthSheetDaySchema),
+});
+export type MonthSheetRow = z.infer<typeof MonthSheetRowSchema>;
+
+export const MonthSheetResponseSchema = z.object({
+  month: z.string(),
+  /** 'October-2026'. */
+  monthLabel: z.string(),
+  companyName: z.string(),
+  tz: z.string(),
+  rulesFrom: z.string().nullable(),
+  /** The column axis: day of month and weekday. */
+  dates: z.array(z.object({ date: z.string(), day: z.number(), weekday: z.string() })),
+  rows: z.array(MonthSheetRowSchema),
+});
+export type MonthSheetResponse = z.infer<typeof MonthSheetResponseSchema>;
+
 /** One charged day, as the exceptions list shows it. */
 export const AttendanceRuleExceptionSchema = z.object({
   userId: z.string(),

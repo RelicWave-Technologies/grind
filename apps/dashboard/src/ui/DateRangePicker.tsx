@@ -40,14 +40,16 @@ export function DateRangePicker({
   const pop = usePopover({ estimatedHeight: 340 });
   const [draftFrom, setDraftFrom] = useState(from);
   const [draftTo, setDraftTo] = useState<string | null>(to);
-  const [visibleMonth, setVisibleMonth] = useState(() => from.slice(0, 7));
+  // The left month of the two shown. Opening on the END month and the one
+  // before it means the pair never starts on a month that is all future.
+  const [visibleMonth, setVisibleMonth] = useState(() => endPair(to));
   const months = [visibleMonth, shiftMonth(visibleMonth, 1)] as const;
 
   function toggle() {
     if (pop.open) return pop.setOpen(false);
     setDraftFrom(from);
     setDraftTo(to);
-    setVisibleMonth(from.slice(0, 7));
+    setVisibleMonth(endPair(to));
     pop.setOpen(true);
   }
 
@@ -63,6 +65,15 @@ export function DateRangePicker({
     onChange(nextFrom, nextTo);
     pop.setOpen(false);
   }
+
+  function applyPreset(nextFrom: string, nextTo: string) {
+    setDraftFrom(nextFrom);
+    setDraftTo(nextTo);
+    onChange(nextFrom, nextTo);
+    pop.setOpen(false);
+  }
+
+  const presets = rangePresets(today).filter((p) => daysBetween(p.from, p.to) + 1 <= maxDays);
 
   return (
     <>
@@ -103,6 +114,20 @@ export function DateRangePicker({
                 onClick={() => setVisibleMonth(shiftMonth(visibleMonth, 1))}
               />
             </div>
+            {presets.length > 0 && (
+              <div className="ui-date-range__presets">
+                {presets.map((p) => (
+                  <button
+                    key={p.label}
+                    type="button"
+                    className={cx('ui-date-range__preset', p.from === from && p.to === to && 'is-active')}
+                    onClick={() => applyPreset(p.from, p.to)}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+            )}
             <div className="ui-date-range__months">
               {months.map((month) => (
                 <section key={month} className="ui-date-range__month" aria-label={monthLabel(month)}>
@@ -140,6 +165,11 @@ export function DateRangePicker({
                 </section>
               ))}
             </div>
+            <p className="ui-date-range__hint">
+              {draftTo
+                ? `Pick a start date, then an end date · up to ${maxDays} days`
+                : `Now pick the end date · up to ${maxDays} days from ${shortDay(draftFrom)}`}
+            </p>
           </div>,
           document.body,
         )}
@@ -156,6 +186,27 @@ function anchor(key: string): Date {
 
 function daysBetween(a: string, b: string): number {
   return Math.round((anchor(b).getTime() - anchor(a).getTime()) / 86_400_000);
+}
+
+/** The left month of the pair that ends on `to`'s month. */
+function endPair(to: string): string {
+  return shiftMonth(to.slice(0, 7), -1);
+}
+
+/** One-click ranges, ending no later than today. Callers only see the ones that fit `maxDays`. */
+function rangePresets(today: string): Array<{ label: string; from: string; to: string }> {
+  const month = today.slice(0, 7);
+  const lastMonth = shiftMonth(month, -1);
+  const lastMonthEnd = new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)) - 1, 0)).toISOString().slice(0, 10);
+  return [
+    { label: 'This month', from: `${month}-01`, to: today },
+    { label: 'Last month', from: `${lastMonth}-01`, to: lastMonthEnd },
+    { label: 'Last 3 months', from: `${shiftMonth(month, -2)}-01`, to: today },
+  ];
+}
+
+function shortDay(key: string): string {
+  return fmt({ month: 'short', day: 'numeric' }).format(anchor(key));
 }
 
 function shiftMonth(month: string, delta: number): string {

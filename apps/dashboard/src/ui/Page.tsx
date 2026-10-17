@@ -5,11 +5,14 @@ import { cx } from './util';
    and the mount animation. Every page's root. */
 export interface PageProps extends React.HTMLAttributes<HTMLDivElement> {
   children: ReactNode;
+  /** Drop the max-width for a surface that needs every column it can get
+   *  (a month grid). The gutter stays. */
+  wide?: boolean;
 }
 
-export function Page({ children, className, ...rest }: PageProps) {
+export function Page({ children, className, wide, ...rest }: PageProps) {
   return (
-    <div className={cx('ui-page', className)} {...rest}>
+    <div className={cx('ui-page', wide && 'ui-page--wide', className)} {...rest}>
       {children}
     </div>
   );

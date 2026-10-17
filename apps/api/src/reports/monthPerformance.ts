@@ -6,6 +6,8 @@ import {
   type AttendanceRuleTag,
   type AttendanceRuleVerdict,
   type DayStatus,
+  type MonthSheetResponse,
+  type Role,
 } from '@grind/types';
 import type { PunchLookup } from '../attendance/punches';
 import type { LeaveAccount } from '../leave/leaveFunding';
@@ -733,6 +735,58 @@ export function monthPerformanceBlock(
     ],
     ...monthPerformanceGridRows(report, row),
   ];
+}
+
+/**
+ * The month sheet as the dashboard draws it — the workbook's grid, cell for
+ * cell. Each value is the same string `monthPerformanceGridRows` prints, so the
+ * screen, the CSV and the Excel can never read differently.
+ */
+export function monthSheetResponse(
+  report: MonthPerformanceReport,
+  roleOf: (userId: string) => Role,
+): MonthSheetResponse {
+  const dates = report.dates.map((date) => ({
+    date,
+    day: Number.parseInt(date.slice(8, 10), 10),
+    weekday: WEEKDAY_LABEL[weekdayForDate(date)] ?? '',
+  }));
+  return {
+    month: report.month,
+    monthLabel: report.monthLabel,
+    companyName: report.companyName,
+    tz: report.tz,
+    rulesFrom: report.rulesFrom,
+    dates,
+    rows: report.rows.map((row) => {
+      const byDate = new Map(row.days.map((d) => [d.date, d]));
+      return {
+        userId: row.user.id,
+        name: row.user.name,
+        email: row.user.email,
+        role: roleOf(row.user.id),
+        teamName: row.user.teamName,
+        counts: monthPerformanceSummaryPairs(report, row),
+        leave: monthPerformanceLeavePairs(row),
+        days: report.dates.map((date) => {
+          const d = byDate.get(date);
+          return {
+            date,
+            officeIn: fmtClock(d?.punchInMinute ?? null),
+            officeOut: fmtClock(d?.punchOutMinute ?? null),
+            work: fmtMinutes(d?.workMinutes ?? 0),
+            workMinutes: d?.workMinutes ?? 0,
+            code: d ? sheetCode(d) : '--',
+            computed: d ? displayDayCode(d.computedCode, d.rule?.tag) : '--',
+            why: d && report.rulesFrom ? sheetWhy(report, d) : '',
+            late: !!d?.late,
+            label: d?.label ?? null,
+            override: d?.override ? { code: attendanceOverrideShape(d.override.code), stale: d.override.stale } : null,
+          };
+        }),
+      };
+    }),
+  };
 }
 
 /**

@@ -170,6 +170,15 @@ export function monthSummaryQuery<T = unknown>(month: string) {
   });
 }
 
+/** The month performance sheet as data — the Excel grid, drawn on Reports. */
+export function monthSheetQuery<T = unknown>(month: string) {
+  return queryOptions({
+    queryKey: ['reports', 'month-sheet', month],
+    queryFn: () => api<T>(`/v1/reports/month-sheet?${qs({ month })}`),
+    retry: false,
+  });
+}
+
 // ── Leave calendar ──────────────────────────────────────────────────────────
 
 /** Leave and holidays for a date range — the Calendar asks for one month (`monthBounds`). */
