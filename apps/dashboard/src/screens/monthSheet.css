@@ -1,0 +1,342 @@
+/* Month sheet — the Excel download, on the page.
+   The workbook's own rules (monthPerformanceXlsx.ts): black ink on white, no
+   gridlines, mono for every reading and label, a hairline over each person's
+   block and whitespace between blocks, colour only in the Status row — each
+   day its own pastel block from the kit tokens. */
+
+/* --- status blocks -------------------------------------------------------------- */
+.xl-s--p    { --xl-fill: var(--ui-lime); }
+.xl-s--hd   { --xl-fill: var(--ui-cream); }
+.xl-s--pl   { --xl-fill: var(--ui-mint); }
+.xl-s--l    { --xl-fill: var(--ui-pink); }
+.xl-s--lwa  { --xl-fill: var(--ui-coral); }
+.xl-s--hl   { --xl-fill: var(--ui-lilac); }
+.xl-s--wo   { --xl-fill: var(--ui-surface-sunken); }
+.xl-s--none { --xl-fill: var(--ui-surface-inset); }
+
+.xl-key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  height: 18px;
+  padding: 0 var(--ui-sp-2);
+  background: var(--xl-fill);
+  font-family: var(--ui-font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--ui-ink);
+}
+
+/* --- the toolbar: one row, pinned to the top of the window ------------------------- */
+.xl-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  padding: var(--ui-sp-4) var(--ui-sp-6);
+  background: var(--ui-surface);
+  border-bottom: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-md) var(--ui-r-md) 0 0;
+}
+/* The count adds nothing beside the sheet itself; Clear stays. */
+.xl-toolbar .ui-filter-bar__count { display: none; }
+/* The days-in-view control sits at the right end of the filter row. */
+.xl-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-sp-1);
+  margin-left: auto;
+  height: var(--ui-control-h);
+  padding: 0 2px;
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-full);
+}
+.xl-nav-range {
+  min-width: 112px;
+  text-align: center;
+  font-family: var(--ui-font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.xl-legend {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--ui-sp-2) var(--ui-sp-4);
+  max-width: 720px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+  color: var(--ui-ink-2);
+}
+.xl-legend li { display: inline-flex; align-items: center; gap: var(--ui-sp-2); white-space: nowrap; }
+.xl-hint { display: block; margin-top: var(--ui-sp-3); font-size: 12px; color: var(--ui-ink-3); }
+
+/* --- a month: masthead, then the blocks ----------------------------------------------- */
+.xl-month { padding: var(--ui-sp-6) var(--ui-sp-6) 0; }
+.xl-masthead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--ui-sp-4) var(--ui-sp-7);
+  margin-bottom: var(--ui-sp-6);
+}
+.xl-masthead h2 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.01em; }
+.xl-masthead p {
+  margin: var(--ui-sp-2) 0 0;
+  font-family: var(--ui-font-mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: pre-wrap;
+}
+
+/* --- a person's block ------------------------------------------------------------------- */
+/* One scroll area for the whole sheet: everybody moves together, and its
+   scrollbar sits at the foot of the window instead of under each person. */
+.xl-sheet {
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  /* Its own bar would sit under the last person; .xl-hbar stands in for it. */
+  scrollbar-width: none;
+}
+.xl-sheet::-webkit-scrollbar { display: none; }
+
+/* The sideways scrollbar, pinned to the foot of the window while the sheet is
+   on screen. A plain native bar, styled thin. */
+.xl-hbar {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  height: 14px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  background: var(--ui-surface);
+  border-top: 1px solid var(--ui-line-faint);
+  scrollbar-width: thin;
+  scrollbar-color: var(--ui-line-strong) transparent;
+}
+.xl-hbar > div { height: 1px; }
+.xl-hbar::-webkit-scrollbar { height: 8px; }
+.xl-hbar::-webkit-scrollbar-thumb { background: var(--ui-line-strong); border-radius: var(--ui-r-full); }
+.xl-hbar::-webkit-scrollbar-thumb:hover { background: var(--ui-ink-3); }
+.xl-hbar::-webkit-scrollbar-track { background: transparent; }
+
+.xl-block {
+  width: fit-content;
+  min-width: 100%;
+  padding-top: var(--ui-sp-4);
+  border-top: 1px solid var(--ui-line);
+  /* Whitespace is the section break, as on the sheet. */
+  margin-bottom: var(--ui-sp-9);
+  content-visibility: auto;
+  contain-intrinsic-size: auto 230px;
+}
+.xl-caption {
+  /* Pinned while the sheet scrolls sideways, as wide as what is visible. */
+  position: sticky;
+  left: 0;
+  width: var(--xl-view, 100%);
+  box-sizing: border-box;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--ui-sp-2) var(--ui-sp-7);
+  margin-bottom: var(--ui-sp-4);
+}
+.xl-who h3 { margin: 0; font-size: 15px; font-weight: 700; }
+.xl-who p {
+  margin: var(--ui-sp-1) 0 0;
+  font-family: var(--ui-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: pre-wrap;
+}
+.xl-strips { display: flex; flex-direction: column; align-items: flex-end; gap: var(--ui-sp-2); }
+.xl-strip { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--ui-sp-1) var(--ui-sp-6); margin: 0; }
+.xl-strip > div { display: flex; align-items: baseline; gap: var(--ui-sp-2); }
+.xl-strip dt { font-family: var(--ui-font-mono); font-size: 10px; letter-spacing: 0.04em; text-transform: uppercase; }
+.xl-strip dd { margin: 0; font-family: var(--ui-font-mono); font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.xl-strip--quiet dd { font-size: 12px; }
+
+/* --- the grid: label column, then a narrow column per day, fitting the page --------- */
+.xl-scroll { overflow: visible; }
+.xl-grid {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-family: var(--ui-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.xl-col-label { width: 128px; }
+.xl-grid th,
+.xl-grid td {
+  padding: 0 6px;
+  height: 20px;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  font-size: 10.5px;
+  font-weight: 400;
+  color: var(--ui-ink);
+}
+/* The label column stays pinned on the left. */
+.xl-grid th:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--ui-surface);
+}
+/* Where one month ends and the next begins. */
+.xl-grid .is-mo { border-left: 1px solid var(--ui-ink); }
+.xl-monthrow th {
+  padding-bottom: var(--ui-sp-2);
+  text-align: left;
+  padding-left: var(--ui-sp-3);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+/* Row labels: bold mono capitals, as the sheet sets them. */
+.xl-grid tbody th {
+  text-align: left;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.xl-daynum th { font-weight: 700; font-size: 10px; }
+.xl-weekday th { font-size: 9.5px; padding-bottom: var(--ui-sp-1); border-bottom: 1px solid var(--ui-line-faint); }
+
+/* Empty readings stay in place but step back, so the times read as a pattern. */
+.xl-reading td.is-empty { color: var(--ui-line-strong); }
+.xl-reading td.is-late { font-weight: 700; }
+.xl-reading td.is-open { cursor: pointer; }
+.xl-reading td.is-open:hover { background: var(--ui-accent-tint); }
+
+/* Status: the one row in colour — each day its own block, white hairline between. */
+.xl-status td {
+  position: relative;
+  height: 22px;
+  background: var(--xl-fill);
+  border-left: 1px solid var(--ui-surface);
+  font-weight: 700;
+}
+.xl-status td.xl-s--wo,
+.xl-status td.xl-s--none { color: var(--ui-ink-3); font-weight: 500; }
+.xl-status td.is-edit { cursor: pointer; }
+.xl-status td.is-edit:hover { box-shadow: inset 0 0 0 1.5px var(--ui-line-strong); }
+.xl-status td.is-sel,
+.xl-status td.is-sel:hover { box-shadow: inset 0 0 0 2px var(--ui-ink); }
+/* A corrected day carries a corner mark; magenta once the computed answer has moved. */
+.xl-status td.is-fix::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 4px;
+  height: 4px;
+  border-radius: var(--ui-r-full);
+  background: var(--ui-ink);
+}
+.xl-status td.is-stale::after { background: var(--ui-magenta); }
+.xl-status td.is-saving { animation: xl-pulse 900ms var(--ui-ease) infinite alternate; }
+@keyframes xl-pulse { to { opacity: 0.45; } }
+
+.xl-why td { height: auto; padding: 2px 0; font-size: 9.5px; line-height: 1.3; vertical-align: top; }
+.xl-why td span { display: block; }
+
+/* --- the correction bar -------------------------------------------------------------------- */
+.xl-bar {
+  position: fixed;
+  left: 50%;
+  bottom: var(--ui-sp-6);
+  z-index: var(--ui-z-pop);
+  width: min(900px, calc(100vw - 32px));
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-sp-3);
+  padding: var(--ui-sp-4) var(--ui-sp-5);
+  background: var(--ui-surface-raised);
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-lg);
+  box-shadow: var(--ui-shadow-pop);
+  animation: xl-bar-in var(--ui-dur-base) var(--ui-ease) both;
+}
+@keyframes xl-bar-in { from { opacity: 0; transform: translate(-50%, 8px); } }
+.xl-bar-top { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--ui-sp-3); }
+.xl-bar-top p { margin: 0; font-size: 13px; }
+.xl-bar-facts { font-family: var(--ui-font-mono); font-size: 11.5px; color: var(--ui-ink-2); white-space: pre-wrap; }
+.xl-bar-close {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: var(--ui-r-full);
+  background: transparent;
+  color: var(--ui-ink-2);
+  cursor: pointer;
+}
+.xl-bar-close:hover { background: var(--ui-surface-inset); color: var(--ui-ink); }
+.xl-bar-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--ui-sp-3); }
+.xl-bar-row--quiet { justify-content: space-between; }
+.xl-shapes { display: flex; flex-wrap: wrap; gap: var(--ui-sp-2); }
+.xl-shape {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-sp-2);
+  height: var(--ui-control-h);
+  padding: 0 var(--ui-sp-3) 0 var(--ui-sp-2);
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-full);
+  background: var(--ui-surface);
+  font: inherit;
+  font-size: 13px;
+  color: var(--ui-ink);
+  cursor: pointer;
+}
+.xl-shape .xl-key { border-radius: var(--ui-r-full); }
+.xl-shape:hover { border-color: var(--ui-line-strong); }
+.xl-shape.is-on { border-color: var(--ui-ink); box-shadow: inset 0 0 0 1px var(--ui-ink); background: var(--ui-accent-tint); }
+.xl-shape:focus-visible { outline: none; box-shadow: var(--ui-focus-ring); }
+.xl-shape kbd { font-family: var(--ui-font-mono); font-size: 10px; color: var(--ui-ink-3); }
+.xl-reason { flex: 1 1 200px; min-width: 180px; }
+.xl-quick { display: flex; flex-wrap: wrap; gap: var(--ui-sp-2); }
+.xl-quick button {
+  appearance: none;
+  height: 24px;
+  padding: 0 var(--ui-sp-3);
+  border: 0;
+  border-radius: var(--ui-r-full);
+  background: var(--ui-surface-inset);
+  font: inherit;
+  font-size: 12px;
+  color: var(--ui-ink-2);
+  cursor: pointer;
+}
+.xl-quick button:hover { background: var(--ui-accent-tint); color: var(--ui-ink); }
+.xl-bar-error { margin: 0; font-size: 12.5px; color: var(--ui-danger-ink); }
+
+@media (max-width: 720px) {
+  .xl-month { padding-left: var(--ui-sp-4); padding-right: var(--ui-sp-4); }
+  .xl-strips { align-items: flex-start; }
+  .xl-strip { justify-content: flex-start; }
+}
+
+.xl-toolbar--solo { display: flex; }

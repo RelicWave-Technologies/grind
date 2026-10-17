@@ -40,7 +40,7 @@ import type { TimelineInvalidation } from '@grind/core';
 import { loadInvalidations, loadTimeline, withEntryMeta } from '../time';
 import type { RoleTitle } from '../scoring/presets';
 import { timesheetCalendarInputs } from '../leave';
-import { earnedParts, formatMonthPerformanceCsv, payableDays, salaryCutDays, sheetCode } from '../reports/monthPerformance';
+import { earnedParts, formatMonthPerformanceCsv, monthSheetResponse, payableDays, salaryCutDays, sheetCode } from '../reports/monthPerformance';
 import { monthPerformanceXlsx } from '../reports/monthPerformanceXlsx';
 import { loadMonthPerformanceReport, reconcileMonthRules, resolveReportMonth } from '../reports/monthPerformanceData';
 import { computeMonthPointers, storeMonthPointers } from '../reports/monthPointersData';
@@ -727,6 +727,29 @@ reportsRouter.get('/month-summary', requireCapability('reports.team.read'), asyn
     });
     const response: MonthSummaryResponse = { month: result.month, rulesFrom: result.report.rulesFrom, rows };
     res.json(response);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * The month performance sheet as data, for the dashboard to draw the same grid
+ * the Excel download carries — a block per person, a column per day.
+ *
+ * Open to everyone, because `req.scope.userIds` already says whose it is: a
+ * member gets their own block, a manager their team, an admin the workspace.
+ * The file exports stay `reports.team.read`.
+ */
+reportsRouter.get('/month-sheet', requireCapability('reports.self.read'), async (req, res, next) => {
+  try {
+    const result = await monthPerformanceFor(req);
+    if (result.status !== 200) return res.status(result.status).json({ error: result.error });
+    const people = await prisma.user.findMany({
+      where: { id: { in: result.report.rows.map((r) => r.user.id) } },
+      select: { id: true, role: true },
+    });
+    const roleOf = new Map(people.map((p) => [p.id, p.role]));
+    res.json(monthSheetResponse(result.report, (id) => roleOf.get(id) ?? 'MEMBER'));
   } catch (err) {
     next(err);
   }

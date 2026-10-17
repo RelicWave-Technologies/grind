@@ -9,6 +9,8 @@ import {
   formatMonthPerformanceCsv,
   monthDates,
   monthPerformanceBlock,
+  monthPerformanceGridRows,
+  monthSheetResponse,
   monthPerformanceLeavePairs,
   monthPerformanceSummaryPairs,
   type MonthPerformanceUser,
@@ -559,5 +561,32 @@ describe('the leave account the month left behind', () => {
   it('falls back to the ledger balance without the walk, and says nothing with neither', () => {
     expect(monthPerformanceLeavePairs(build({ balanceFor: () => 2 }).rows[0]!)).toEqual([['Leave Balance', '2']]);
     expect(monthPerformanceLeavePairs(build({}).rows[0]!)).toEqual([]);
+  });
+});
+
+describe('monthSheetResponse — the dashboard month sheet', () => {
+  it('prints every cell exactly as the exported grid does', () => {
+    const r = report({
+      statuses: {
+        '2026-08-03': status('2026-08-03', 'WORKING'),
+        '2026-08-04': status('2026-08-04', 'WORKING'),
+        '2026-08-15': status('2026-08-15', 'HOLIDAY', { label: 'Independence Day' }),
+      },
+      punches: { '2026-08-03': { in: '09:42', out: '18:10' } },
+      tracked: { '2026-08-03': 455 },
+    });
+    const sheet = monthSheetResponse(r, () => 'MANAGER');
+    const grid = monthPerformanceGridRows(r, r.rows[0]!);
+    const row = sheet.rows[0]!;
+
+    expect(sheet.dates.map((d) => String(d.day))).toEqual(grid[0]!.slice(1));
+    expect(sheet.dates.map((d) => d.weekday)).toEqual(grid[1]!.slice(1));
+    expect(row.days.map((d) => d.officeIn)).toEqual(grid[2]!.slice(1));
+    expect(row.days.map((d) => d.officeOut)).toEqual(grid[3]!.slice(1));
+    expect(row.days.map((d) => d.work)).toEqual(grid[4]!.slice(1));
+    expect(row.days.map((d) => d.code)).toEqual(grid[5]!.slice(1));
+    expect(row.counts).toEqual(monthPerformanceSummaryPairs(r, r.rows[0]!));
+    expect(row.role).toBe('MANAGER');
+    expect(row.days.find((d) => d.date === '2026-08-15')?.label).toBe('Independence Day');
   });
 });

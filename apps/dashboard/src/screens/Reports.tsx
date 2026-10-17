@@ -9,7 +9,9 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   Clock4,
+  Download,
   FileSpreadsheet,
   Images,
   ListTree,
@@ -24,7 +26,7 @@ import {
   X,
 } from 'lucide-react';
 import { api, API_BASE } from '../lib/api';
-import { useMonthReportDownload, fmtMonthShort, fmtMonthLong } from '../lib/useMonthReportDownload';
+import { useMonthReportDownload, fmtMonthLong } from '../lib/useMonthReportDownload';
 import { defaultReportRange } from '../lib/reportRange';
 import {
   addDays,
@@ -76,6 +78,7 @@ import type {
 import { myReportQuery, reportQueryKeys, teamReportSummaryQuery } from '../lib/queries';
 import { personFacets, personSearchFields, useTableFilter } from '../lib/tableFilter';
 import { DayRibbon } from '../components/DayRibbon';
+import { MonthSheetView } from './MonthSheet';
 import { ActivityHeatmap } from '../components/ActivityHeatmap';
 import { AppIcon } from '../components/AppIcon';
 import {
@@ -107,10 +110,13 @@ import {
   FilterBar,
   NoMatches,
   DateRangePicker,
+  usePopover,
 } from '../ui';
 
 type ModalKind = 'apps' | 'activity' | 'timeline';
 type ReportsMode = 'you' | 'team';
+/** Team mode: the Excel-style month grid, or the range's member table. */
+type TeamView = 'sheet' | 'members';
 type ReportModalState = { kind: ModalKind; date: string; userId?: string };
 type DrawerTab = 'reports' | 'approvals' | 'profile';
 type ApprovalDecisionAction = 'approve' | 'reject';
@@ -159,9 +165,16 @@ export function ReportsScreen() {
 
   const monthReport = useMonthReportDownload();
 
-  const [mode, setMode] = useState<ReportsMode>(() => (canReadTeam ? 'team' : 'you'));
+  // Everyone opens on the month sheet — scoped by the API to whom they may see:
+  // a member sees their own block, a manager their team, an admin everyone.
+  const [mode, setMode] = useState<ReportsMode>('team');
   const [memberDrawer, setMemberDrawer] = useState<{ userId: string; from: string; to: string } | null>(null);
-  const activeMode: ReportsMode = canReadTeam ? mode : 'you';
+  const activeMode: ReportsMode = mode;
+  const [teamViewState, setTeamView] = useState<TeamView>('sheet');
+  /** The member table is for people who can read a team; everyone else stays on the sheet. */
+  const teamView: TeamView = canReadTeam ? teamViewState : 'sheet';
+  /** The sheet takes the full width and up to three months; the member table keeps a month. */
+  const sheetActive = activeMode === 'team' && teamView === 'sheet';
 
   const reportQ = useQuery({
     ...myReportQuery<MemberReportsMeResponse>({ from, to, tz }),
@@ -170,7 +183,7 @@ export function ReportsScreen() {
 
   const teamQ = useQuery({
     ...teamReportSummaryQuery({ from, to, tz }),
-    enabled: activeMode === 'team' && canReadTeam,
+    enabled: activeMode === 'team' && canReadTeam && teamView === 'members',
   });
 
   const days = reportQ.data?.days ?? [];
@@ -228,64 +241,55 @@ export function ReportsScreen() {
     setMode(nextMode);
   }
 
+  /** One switch for all three views: the two team views, and your own. */
+  function switchView(next: TeamView | 'you') {
+    if (next === 'you') return switchMode('you');
+    if (activeMode === 'you') switchMode('team');
+    switchTeamView(next);
+  }
+
+  function switchTeamView(next: TeamView) {
+    if (next === 'members' && daysBetween(from, to) > 30) setFrom(addDays(to, -30));
+    setTeamView(next);
+  }
+
   function openTeamMember(userId: string) {
     setModal(null);
     setMemberDrawer({ userId, from, to });
   }
 
   return (
-    <Page className="rep-page">
+    <Page className="rep-page" wide={sheetActive}>
+      {/* One row of controls: what to look at, for which dates, and the file. */}
       <PageHeader
-        eyebrow={`${tz.replace(/_/g, ' ')} · ${from} to ${to}`}
         title="Reports"
-        subtitle={activeMode === 'team' ? 'Team activity, approvals, apps, and exceptions in one scoped view.' : 'Daily activity, approvals, apps, screenshots, and read-only timelines.'}
         actions={
           <Toolbar>
-            {canReadTeam && (
-              <Segmented
-                items={[
-                  { value: 'you', label: 'You' },
-                  { value: 'team', label: 'Team' },
-                ]}
-                value={activeMode}
-                onChange={switchMode}
-                aria-label="Report mode"
-              />
-            )}
+            <Segmented
+              items={[
+                { value: 'sheet', label: 'Month sheet' },
+                ...(canReadTeam ? [{ value: 'members' as const, label: 'Members' }] : []),
+                { value: 'you', label: 'My report' },
+              ]}
+              value={activeMode === 'you' ? 'you' : teamView}
+              onChange={switchView}
+              aria-label="Report view"
+            />
             <DateRangePicker
               aria-label="Report date range"
               from={from}
               to={to}
               today={today}
-              maxDays={activeMode === 'team' ? 31 : 60}
+              maxDays={sheetActive ? 92 : activeMode === 'team' ? 31 : 60}
               onChange={applyCalendarRange}
             />
-            {activeMode === 'team' && canReadTeam && (
-              <>
-                {/* The month is in the label, not just the tooltip: these follow
-                    the range above, and a button that does not say which month
-                    it will hand you reads as if it ignores the picker. */}
-                <Button
-                  variant="secondary"
-                  icon={<FileSpreadsheet size={14} strokeWidth={2} />}
-                  loading={monthReport.downloading === 'xlsx'}
-                  disabled={monthReport.downloading !== null}
-                  onClick={() => void monthReport.download(reportMonth, 'xlsx')}
-                  title={`Office in and out, hours and status per day, for ${fmtMonthLong(reportMonth)}`}
-                >
-                  {`${fmtMonthShort(reportMonth)} · Excel`}
-                </Button>
-                <Button
-                  variant="secondary"
-                  icon={<Sheet size={14} strokeWidth={2} />}
-                  loading={monthReport.downloading === 'csv'}
-                  disabled={monthReport.downloading !== null}
-                  onClick={() => void monthReport.download(reportMonth, 'csv')}
-                  title={`The same report for ${fmtMonthLong(reportMonth)}, as CSV`}
-                >
-                  {`${fmtMonthShort(reportMonth)} · CSV`}
-                </Button>
-              </>
+            {/* The files stay a team report; a member's own month is on screen. */}
+            {sheetActive && canReadTeam && (
+              <DownloadMenu
+                month={reportMonth}
+                downloading={monthReport.downloading}
+                onDownload={(format) => void monthReport.download(reportMonth, format)}
+              />
             )}
           </Toolbar>
         }
@@ -294,18 +298,32 @@ export function ReportsScreen() {
       {activeMode === 'you' && reportQ.isError && (
         <Banner status="danger">Couldn’t load reports: {(reportQ.error as Error).message}</Banner>
       )}
-      {activeMode === 'team' && teamQ.isError && (
+      {activeMode === 'team' && teamView === 'members' && teamQ.isError && (
         <Banner status="danger">Couldn’t load team reports: {(teamQ.error as Error).message}</Banner>
       )}
 
       {monthReport.error && <Banner status="danger">{monthReport.error}</Banner>}
 
       {activeMode === 'team' ? (
-        <TeamReportsView
-          data={teamQ.data}
-          loading={teamQ.isLoading}
-          onOpenMember={openTeamMember}
-        />
+        <>
+          {teamView === 'sheet' ? (
+            <MonthSheetView
+              from={from}
+              to={to}
+              canEdit={canReadTeam}
+              meId={me.id}
+              isAdmin={me.role === 'ADMIN'}
+              // Your own day goes through /me; someone else's through the team route.
+              onOpenDay={(userId, date) => setModal(userId === me.id ? { kind: 'activity', date } : { kind: 'activity', date, userId })}
+            />
+          ) : (
+            <TeamReportsView
+              data={teamQ.data}
+              loading={teamQ.isLoading}
+              onOpenMember={openTeamMember}
+            />
+          )}
+        </>
       ) : (
         <>
           <Card variant="flush">
@@ -634,6 +652,55 @@ function SelfReportTable({
         </>
       )}
     </Card>
+  );
+}
+
+/**
+ * The month report as a file — one button, Excel or CSV. The month is in the
+ * menu: the file is always a whole month, the one the date range ends in.
+ */
+function DownloadMenu({
+  month,
+  downloading,
+  onDownload,
+}: {
+  month: string;
+  downloading: 'xlsx' | 'csv' | null;
+  onDownload: (format: 'xlsx' | 'csv') => void;
+}) {
+  const pop = usePopover({ estimatedHeight: 120 });
+  const pick = (format: 'xlsx' | 'csv') => {
+    pop.setOpen(false);
+    onDownload(format);
+  };
+  return (
+    <>
+      <Button
+        ref={pop.triggerRef as React.RefObject<HTMLButtonElement>}
+        variant="secondary"
+        icon={<Download size={14} strokeWidth={2} />}
+        loading={downloading !== null}
+        onClick={() => pop.setOpen(!pop.open)}
+        aria-haspopup="menu"
+        aria-expanded={pop.open}
+      >
+        Download <ChevronDown size={13} strokeWidth={2} aria-hidden />
+      </Button>
+      {pop.open &&
+        createPortal(
+          <div ref={pop.popoverRef} className="ui-popover rep-download-menu" style={pop.popoverStyle} data-flip={pop.flip} role="menu">
+            <button type="button" role="menuitem" onClick={() => pick('xlsx')}>
+              <FileSpreadsheet size={15} strokeWidth={1.8} />
+              <span>Excel<small>{fmtMonthLong(month)}</small></span>
+            </button>
+            <button type="button" role="menuitem" onClick={() => pick('csv')}>
+              <Sheet size={15} strokeWidth={1.8} />
+              <span>CSV<small>{fmtMonthLong(month)}</small></span>
+            </button>
+          </div>,
+          document.body,
+        )}
+    </>
   );
 }
 

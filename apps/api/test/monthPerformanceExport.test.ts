@@ -260,6 +260,26 @@ describe('GET /v1/reports/month-performance.csv', () => {
     expect(res.status).toBe(403);
   });
 
+  it('shows everyone the month sheet, scoped to whom they may see', async () => {
+    const s = await seed();
+    const sheet = async (token: string) => {
+      const res = await request(app).get('/v1/reports/month-sheet?month=2026-08').set(bearer(token));
+      expect(res.status).toBe(200);
+      return (res.body as { rows: Array<{ userId: string }> }).rows.map((r) => r.userId).sort();
+    };
+
+    // A member: their own block and nobody else's.
+    expect(await sheet(s.inTeam.token)).toEqual([s.inTeam.id]);
+    // A manager: their team (themselves included), not the other team.
+    const team = await sheet(s.manager.token);
+    expect(team).toEqual(expect.arrayContaining([s.manager.id, s.inTeam.id]));
+    expect(team).not.toContain(s.outsider.id);
+    // An admin: the workspace.
+    expect(await sheet(s.admin.token)).toEqual(
+      expect.arrayContaining([s.admin.id, s.manager.id, s.inTeam.id, s.outsider.id]),
+    );
+  });
+
   it('rejects a month it cannot parse rather than guessing one', async () => {
     const s = await seed();
     const res = await request(app)

@@ -1714,3 +1714,27 @@
   border-top: 1px solid var(--ui-line);
 }
 .rep-modal-foot-right { display: flex; gap: var(--ui-sp-3); margin-left: auto; }
+
+
+/* The Download menu: two rows, the format with the month under it. */
+.rep-download-menu { min-width: 200px; padding: var(--ui-sp-2); }
+.rep-download-menu button {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  gap: var(--ui-sp-3);
+  width: 100%;
+  padding: var(--ui-sp-3);
+  border: 0;
+  border-radius: var(--ui-r-sm);
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  color: var(--ui-ink);
+  text-align: left;
+  cursor: pointer;
+}
+.rep-download-menu button:hover,
+.rep-download-menu button:focus-visible { background: var(--ui-surface-inset); outline: none; }
+.rep-download-menu span { display: flex; flex-direction: column; }
+.rep-download-menu small { font-size: 11.5px; color: var(--ui-ink-3); }
