@@ -116,16 +116,47 @@ describe('TrackingReadinessService', () => {
     expect(recovered.readiness).toMatchObject({ ready: true, screenRecording: 'READY' });
   });
 
-  it('reports a screen that stays blank as FAILED, still not as a restart', async () => {
+  // Quick re-probes at 0/5/10 s, then every 30 s: FAILED once blank for 90 s.
+  const BLANK_SCHEDULE = [0, 5_000, 10_000, 40_000, 70_000, 100_000];
+
+  it('reports a screen that stays blank for 90 s as FAILED, still not as a restart', async () => {
     const { service, clock } = setup({ probeHealth: 'empty' });
 
     const states = [];
-    for (let i = 0; i < 3; i += 1) {
-      clock.now = T0 + i * 5_000;
+    for (const at of BLANK_SCHEDULE) {
+      clock.now = T0 + at;
       states.push((await service.inspect({ verifyScreen: true })).readiness.screenRecording);
     }
 
-    expect(states).toEqual(['CHECKING', 'CHECKING', 'FAILED']);
+    expect(states).toEqual(['CHECKING', 'CHECKING', 'CHECKING', 'CHECKING', 'CHECKING', 'FAILED']);
+  });
+
+  it('never fails a blank spell that clears inside 90 s', async () => {
+    const { service, probeScreen, clock } = setup({ probeHealth: 'empty' });
+
+    for (const at of BLANK_SCHEDULE.slice(0, 4)) {
+      clock.now = T0 + at;
+      expect((await service.inspect({ verifyScreen: true })).readiness.screenRecording).toBe('CHECKING');
+    }
+    probeScreen.mockResolvedValue('ok');
+    clock.now = T0 + 70_000;
+
+    expect((await service.inspect({ verifyScreen: true })).readiness.screenRecording).toBe('READY');
+  });
+
+  it('after three quick re-probes, checks a blank screen every 30 s', async () => {
+    const { service, probeScreen, clock } = setup({ probeHealth: 'empty' });
+    for (const at of BLANK_SCHEDULE.slice(0, 3)) {
+      clock.now = T0 + at;
+      await service.inspect({ verifyScreen: true });
+    }
+
+    clock.now = T0 + 39_999;
+    await service.inspect({ verifyScreen: true });
+    expect(probeScreen).toHaveBeenCalledTimes(3);
+    clock.now = T0 + 40_000;
+    await service.inspect({ verifyScreen: true });
+    expect(probeScreen).toHaveBeenCalledTimes(4);
   });
 
   it('lets an explicit recheck probe straight away', async () => {
@@ -257,8 +288,8 @@ describe('TrackingReadinessService', () => {
     logMocks.warn.mockClear();
     const { service, clock } = setup({ probeHealth: 'empty' });
 
-    for (let i = 0; i < 6; i += 1) {
-      clock.now = T0 + i * 5_000;
+    for (const at of [...BLANK_SCHEDULE, 130_000]) {
+      clock.now = T0 + at;
       await service.inspect({ verifyScreen: true });
     }
 
