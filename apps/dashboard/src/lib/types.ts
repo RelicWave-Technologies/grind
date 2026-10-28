@@ -24,7 +24,7 @@ export interface DayBlock {
   attendeeIds?: string[];
   /** ManualTimeRequest id for PENDING and approved MANUAL blocks. */
   requestId?: string;
-  /** PENDING blocks only: the request reason (shown + editable inline). */
+  /** The request reason: PENDING blocks (editable inline) and approved MANUAL blocks (read-only). */
   reason?: string;
 }
 

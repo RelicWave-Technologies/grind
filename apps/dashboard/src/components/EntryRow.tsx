@@ -230,6 +230,11 @@ function TrackedRow({
         />
       </td>
       <td>
+        {kind === 'manual_approved' && block.reason && (
+          <div className="et-manual-reason small secondary">
+            <span className="tertiary">Reason · </span>{block.reason}
+          </div>
+        )}
         <input
           className="et-reason"
           placeholder="Notes…"

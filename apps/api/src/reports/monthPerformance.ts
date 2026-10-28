@@ -147,7 +147,7 @@ export interface MonthPerformanceDay {
    * changed since the correction was made, so the two now disagree about a day
    * they once agreed on.
    */
-  override: { code: AttendanceOverrideCode; stale: boolean } | null;
+  override: { code: AttendanceOverrideCode; stale: boolean; reason?: string } | null;
   /** What the day reads as with nobody's correction. */
   computedCode: MonthPerformanceCode;
   /** The attendance rule that charged this day, when one did. */
@@ -343,6 +343,8 @@ export interface DayOverride {
   code: AttendanceOverrideCode;
   /** What the report computed when the override was written. */
   computedCode: string | null;
+  /** Why it was corrected, as the corrector wrote it. */
+  reason?: string;
   /**
    * Days of this date's leave a balance covered, when it did not cover the
    * whole cost. Undefined means covered — or that nobody asked, which reads the
@@ -517,7 +519,11 @@ export function buildMonthPerformance(input: MonthPerformanceInput): MonthPerfor
         code,
         label: status?.label ?? null,
         override: override
-          ? { code: override.code, stale: override.computedCode !== null && override.computedCode !== computed }
+          ? {
+            code: override.code,
+            stale: override.computedCode !== null && override.computedCode !== computed,
+            ...(override.reason ? { reason: override.reason } : {}),
+          }
           : null,
         computedCode: computed,
         rule,
@@ -828,7 +834,9 @@ export function monthSheetResponse(
             manualMinutes: d?.manualMinutes ?? 0,
             workingDay: d?.workingDay ?? false,
             label: d?.label ?? null,
-            override: d?.override ? { code: attendanceOverrideShape(d.override.code), stale: d.override.stale } : null,
+            override: d?.override
+              ? { code: attendanceOverrideShape(d.override.code), stale: d.override.stale, reason: d.override.reason ?? '' }
+              : null,
           };
         }),
       };

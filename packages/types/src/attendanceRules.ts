@@ -188,7 +188,7 @@ export const MonthSheetDaySchema = z.object({
   /** 'Diwali', 'Paid leave' — whatever the calendar called the day. */
   label: z.string().nullable(),
   /** Set when somebody corrected the day by hand. */
-  override: z.object({ code: z.string(), stale: z.boolean() }).nullable(),
+  override: z.object({ code: z.string(), stale: z.boolean(), reason: z.string().default('') }).nullable(),
 });
 export type MonthSheetDay = z.infer<typeof MonthSheetDaySchema>;
 

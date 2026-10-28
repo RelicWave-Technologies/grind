@@ -50,7 +50,7 @@ const TIMELINE_ENTRY_SELECT = {
     orderBy: { startedAt: 'asc' },
   },
   attendees: { select: { userId: true } },
-  manualTimeRequest: { select: { id: true } },
+  manualTimeRequest: { select: { id: true, reason: true } },
 } satisfies Prisma.TimeEntrySelect;
 
 type TimelineRow = Prisma.TimeEntryGetPayload<{ select: typeof TIMELINE_ENTRY_SELECT }>;
@@ -83,6 +83,53 @@ export async function loadInvalidations(
   return rows.map((r) => ({ userId: r.userId, start: r.windowStart.getTime(), end: r.windowEnd.getTime() }));
 }
 
+const { segments: _segments, attendees: _attendees, manualTimeRequest: _manual, ...TIMELINE_ENTRY_SCALARS } = TIMELINE_ENTRY_SELECT;
+
+/**
+ * The entries matching `where`, with their segments, attendees and manual
+ * request — the `TIMELINE_ENTRY_SELECT` shape.
+ *
+ * Read as four queries side by side rather than one nested select: a nested
+ * select makes Prisma fetch each relation with an `IN` list of every entry id,
+ * which for a workspace's month (~10k entries) took over two seconds; filtering
+ * each relation by the same entry filter takes a fraction of that.
+ */
+async function loadTimelineEntries(where: Prisma.TimeEntryWhereInput): Promise<TimelineRow[]> {
+  const [rows, segments, attendees, manual] = await Promise.all([
+    prisma.timeEntry.findMany({
+      where,
+      select: TIMELINE_ENTRY_SCALARS,
+      orderBy: [{ userId: 'asc' }, { startedAt: 'asc' }, { id: 'asc' }],
+    }),
+    prisma.timeSegment.findMany({
+      where: { timeEntry: where },
+      select: { id: true, timeEntryId: true, kind: true, startedAt: true, endedAt: true },
+      orderBy: [{ startedAt: 'asc' }, { id: 'asc' }],
+    }),
+    prisma.timeEntryAttendee.findMany({ where: { timeEntry: where }, select: { timeEntryId: true, userId: true } }),
+    prisma.manualTimeRequest.findMany({ where: { timeEntry: where }, select: { id: true, reason: true, timeEntryId: true } }),
+  ]);
+  const segmentsOf = new Map<string, TimelineRow['segments']>();
+  for (const { timeEntryId, ...segment } of segments) {
+    const list = segmentsOf.get(timeEntryId);
+    if (list) list.push(segment);
+    else segmentsOf.set(timeEntryId, [segment]);
+  }
+  const attendeesOf = new Map<string, TimelineRow['attendees']>();
+  for (const { timeEntryId, userId } of attendees) {
+    const list = attendeesOf.get(timeEntryId);
+    if (list) list.push({ userId });
+    else attendeesOf.set(timeEntryId, [{ userId }]);
+  }
+  const manualOf = new Map(manual.map((m) => [m.timeEntryId, { id: m.id, reason: m.reason }]));
+  return rows.map((row) => ({
+    ...row,
+    segments: segmentsOf.get(row.id) ?? [],
+    attendees: attendeesOf.get(row.id) ?? [],
+    manualTimeRequest: manualOf.get(row.id) ?? null,
+  }));
+}
+
 /**
  * Resolved time for `userIds` over an instant window.
  *
@@ -108,17 +155,14 @@ export async function loadTimelineWindow(input: {
   if (userIds.length === 0 || input.end <= readStart) {
     return { start: input.start, end: input.end, now, entries: [], evidence: new Map(), invalidations: [], pieces: [] };
   }
+  const where: Prisma.TimeEntryWhereInput = {
+    userId: { in: userIds },
+    startedAt: { lt: input.end },
+    OR: [{ endedAt: null }, { endedAt: { gt: readStart } }],
+    ...(input.where ? { AND: [input.where] } : {}),
+  };
   const [entries, invalidations] = await Promise.all([
-    prisma.timeEntry.findMany({
-      where: {
-        userId: { in: userIds },
-        startedAt: { lt: input.end },
-        OR: [{ endedAt: null }, { endedAt: { gt: readStart } }],
-        ...(input.where ? { AND: [input.where] } : {}),
-      },
-      select: TIMELINE_ENTRY_SELECT,
-      orderBy: [{ userId: 'asc' }, { startedAt: 'asc' }, { id: 'asc' }],
-    }),
+    loadTimelineEntries(where),
     loadInvalidations(userIds, readStart, input.end),
   ]);
   const evidence = await loadEntryLiveEvidence(entries, now);
@@ -343,6 +387,8 @@ export interface TimelineEntryMeta {
   requestId: string | null;
   larkTaskGuid: string | null;
   notes: string | null;
+  /** Why the manual time was asked for — the request's reason. Null for tracked time. */
+  reason: string | null;
   attendeeIds: string[];
 }
 
@@ -358,6 +404,7 @@ export function withEntryMeta(pieces: readonly TimelineRowPiece[]): Array<Timeli
         requestId: p.entry.manualTimeRequest?.id ?? null,
         larkTaskGuid: p.entry.larkTaskGuid,
         notes: p.entry.notes ?? null,
+        reason: p.entry.manualTimeRequest?.reason ?? null,
         attendeeIds: p.entry.attendees.map((a) => a.userId),
       };
       metaById.set(p.entry.id, meta);

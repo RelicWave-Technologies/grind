@@ -77,6 +77,7 @@ import type {
 } from '../lib/types';
 import { myReportQuery, reportQueryKeys, teamReportSummaryQuery } from '../lib/queries';
 import { personFacets, personSearchFields, useTableFilter } from '../lib/tableFilter';
+import { useTableSort } from '../lib/tableSort';
 import { DayRibbon } from '../components/DayRibbon';
 import { MonthSheetView } from './MonthSheet';
 import { ActivityHeatmap } from '../components/ActivityHeatmap';
@@ -525,6 +526,14 @@ function SelfReportTable({
     },
     { urlPrefix: 'day.', persist: persistFilter },
   );
+  const sort = useTableSort(filter.rows, {
+    date: (day) => day.date,
+    worked: (day) => totalDayWorkedMs(day),
+    start: (day) => day.firstActivityMs,
+    punchIn: (day) => day.punchInMinute,
+    punchOut: (day) => day.punchOutMinute,
+    activity: (day) => day.activityPercent,
+  });
 
   return (
     <Card variant="flush" className="rep-table-card">
@@ -545,20 +554,20 @@ function SelfReportTable({
           <Table density="compact" className="rep-table">
             <THead>
               <Tr>
-                <Th className="rep-col-date">Date</Th>
-                <Th className="rep-col-worked" align="center">Worked</Th>
-                <Th className="rep-col-start" align="center">Start</Th>
+                <Th className="rep-col-date" {...sort.th('date')}>Date</Th>
+                <Th className="rep-col-worked" align="center" {...sort.th('worked')}>Worked</Th>
+                <Th className="rep-col-start" align="center" {...sort.th('start')} title="Sort by Timo start">Start</Th>
                 <Th className="rep-col-status" align="center">Status</Th>
-                <Th className="rep-col-punch" align="center">Punch in</Th>
-                <Th className="rep-col-punch" align="center">Punch out</Th>
+                <Th className="rep-col-punch" align="center" {...sort.th('punchIn')}>Punch in</Th>
+                <Th className="rep-col-punch" align="center" {...sort.th('punchOut')}>Punch out</Th>
                 <Th className="rep-col-approvals" align="center">Approvals</Th>
                 <Th className="rep-col-apps" align="center">Apps</Th>
-                <Th className="rep-col-activity" align="center">Activity</Th>
+                <Th className="rep-col-activity" align="center" {...sort.th('activity')}>Activity</Th>
                 <Th className="rep-col-actions" align="center">Actions</Th>
               </Tr>
             </THead>
             <Tbody>
-              {filter.rows.map((day) => (
+              {sort.rows.map((day) => (
                 <Tr key={day.date} rail={railForDay(day)}>
                   <Td className="rep-col-date">
                     <div className="rep-date-cell">
@@ -793,6 +802,17 @@ function TeamMembersTable({ members, onOpenMember }: { members: TeamReportSummar
       },
     },
   });
+  const sort = useTableSort(filter.rows, {
+    member: (m) => m.user.name,
+    worked: (m) => m.workedMs,
+    manual: (m) => m.manualMs,
+    punchIn: (m) => m.typicalPunchInMinute,
+    punchOut: (m) => m.typicalPunchOutMinute,
+    late: (m) => m.lateDays,
+    pending: (m) => m.approvals.pending,
+    gaps: (m) => m.gapMs,
+    screenshots: (m) => m.screenshots,
+  });
 
   return (
     <>
@@ -803,20 +823,20 @@ function TeamMembersTable({ members, onOpenMember }: { members: TeamReportSummar
       <Table density="compact" className="rep-team-members-table">
         <THead>
           <Tr>
-            <Th>Member</Th>
-            <Th align="center">Worked</Th>
-            <Th align="center">Approved hours</Th>
-            <Th align="center">Punch in</Th>
-            <Th align="center">Punch out</Th>
-            <Th align="center">Starts</Th>
-            <Th align="center">Approvals</Th>
-            <Th align="center">Gaps</Th>
-            <Th align="center">Screenshots</Th>
+            <Th {...sort.th('member')}>Member</Th>
+            <Th align="center" {...sort.th('worked')}>Worked</Th>
+            <Th align="center" {...sort.th('manual')}>Approved hours</Th>
+            <Th align="center" {...sort.th('punchIn')}>Punch in</Th>
+            <Th align="center" {...sort.th('punchOut')}>Punch out</Th>
+            <Th align="center" {...sort.th('late')} title="Sort by late days">Starts</Th>
+            <Th align="center" {...sort.th('pending')} title="Sort by pending approvals">Approvals</Th>
+            <Th align="center" {...sort.th('gaps')}>Gaps</Th>
+            <Th align="center" {...sort.th('screenshots')}>Screenshots</Th>
             <Th align="center">Open</Th>
           </Tr>
         </THead>
         <Tbody>
-          {filter.rows.map((member) => (
+          {sort.rows.map((member) => (
             <Tr key={member.user.id} rail={summaryMemberNeedsReview(member) ? 'warn' : undefined}>
               <Td>
                 <Identity

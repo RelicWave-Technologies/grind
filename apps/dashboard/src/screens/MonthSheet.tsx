@@ -353,7 +353,7 @@ export function MonthSheetView({ from, to, canEdit, meId, isAdmin, onOpenDay }: 
     try {
       for (const day of days) {
         if (action === 'set') {
-          patchDay(userId, day.date, (d) => ({ ...d, code: PROVISIONAL[shape], override: { code: shape, stale: false } }));
+          patchDay(userId, day.date, (d) => ({ ...d, code: PROVISIONAL[shape], override: { code: shape, stale: false, reason } }));
           await api('/v1/reports/attendance-override', { method: 'PUT', json: { userId, date: day.date, code: shape, reason } });
         } else {
           patchDay(userId, day.date, (d) => ({ ...d, code: d.computed, override: null }));
@@ -629,7 +629,9 @@ const PersonBlock = memo(function PersonBlock({
                 const title = [
                   `${dayLabel(date)} — ${DISPLAY_DAY_LABEL[d.code as DisplayDayCode] ?? d.code}`,
                   d.label,
-                  d.override ? `Corrected by hand (computed: ${d.computed})` : null,
+                  d.override
+                    ? `Corrected by hand (computed: ${d.computed})${d.override.reason ? ` — “${d.override.reason}”` : ''}`
+                    : null,
                   editable ? 'Click to correct' : null,
                 ].filter(Boolean).join('\n');
                 return (
@@ -696,7 +698,8 @@ function EditBar({
   const single = days.length === 1 ? days[0]! : null;
   const corrected = days.filter((d) => d.override);
   const [shape, setShape] = useState<Shape | null>(single?.override ? (single.override.code as Shape) : null);
-  const [reason, setReason] = useState('');
+  // A corrected day opens with the reason it was corrected for, ready to keep or change.
+  const [reason, setReason] = useState(single?.override?.reason ?? '');
   const reasonRef = useRef<HTMLInputElement>(null);
   const seenRequest = useRef(shapeRequest?.n ?? 0);
 

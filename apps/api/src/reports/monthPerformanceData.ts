@@ -58,7 +58,7 @@ interface MonthInputs {
   userIds: string[];
   companyName: string;
   calendarInput: { workspaceId: string; tz: string; userIds: string[]; from: string; to: string };
-  overrides: Array<{ userId: string; date: Date; code: DayOverride['code']; computedCode: DayOverride['computedCode'] }>;
+  overrides: Array<{ userId: string; date: Date; code: DayOverride['code']; computedCode: DayOverride['computedCode']; reason: string }>;
   /** Counted milliseconds (work, meetings, approved manual; invalidated excluded). */
   trackedMsFor: (userId: string, date: string) => number;
   /** The approved manual part of `trackedMsFor`. */
@@ -135,7 +135,7 @@ async function loadMonthInputs(input: {
         userId: { in: userIds },
         date: { gte: new Date(`${range.from}T00:00:00Z`), lte: new Date(`${range.to}T00:00:00Z`) },
       },
-      select: { userId: true, date: true, code: true, computedCode: true },
+      select: { userId: true, date: true, code: true, computedCode: true, reason: true },
     }),
     loadAttendanceRuleContext({ ...calendarInput, nowMs }),
     timesheetCalendarInputs(calendarInput),
@@ -249,6 +249,7 @@ export async function loadMonthPerformanceReport(input: {
     overrideIndex.set(`${o.userId}|${date}`, {
       code: o.code,
       computedCode: o.computedCode,
+      reason: o.reason,
       // The correction says the day was leave; this says how much of it the
       // balance paid for. Same walk that answers it for leave filed in Lark.
       fundedDays: calendar.fundedDaysFor(o.userId, date),
