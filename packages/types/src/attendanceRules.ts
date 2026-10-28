@@ -183,8 +183,8 @@ export const MonthSheetDaySchema = z.object({
   late: z.boolean(),
   /** Approved manual minutes inside `workMinutes`. */
   manualMinutes: z.number().default(0),
-  /** A working day (shift or leave) that has come — what average hours divide by. */
-  workingDay: z.boolean().default(false),
+  /** What average hours divide by for this day: P 1, HD 0.5, leave / off / to come 0. */
+  dayWeight: z.number().default(0),
   /** 'Diwali', 'Paid leave' — whatever the calendar called the day. */
   label: z.string().nullable(),
   /** Set when somebody corrected the day by hand. */

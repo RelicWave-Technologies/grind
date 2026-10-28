@@ -353,7 +353,7 @@ function buildSummarySheet(wb: ExcelJS.Workbook, report: MonthPerformanceReport)
       leave: count('L'),
       lwa: count('LWA'),
       late: row.totals.lateDays,
-      avg: fmtMinutes(averageWorkMinutes(row)),
+      avg: fmtMinutes(averageWorkMinutes(report, row)),
       manual: fmtMinutes(row.totals.manualMinutes),
       opening: row.leaveAccount?.opening ?? '',
       monthly: parts?.monthly ?? '',
@@ -445,7 +445,7 @@ function buildLegendSheet(wb: ExcelJS.Workbook, report: MonthPerformanceReport):
     'Leave account: Opening + Monthly + Birthday (+ Adjusted) - Paid Leave = Closing.',
     'Leave the balance could not pay for is unpaid (full days 1, halves 0.5) — never a',
     'negative balance. Payable Days = days in the month so far - unpaid days.',
-    'Avg Hours = every hour tracked in the month (a Sunday worked included) / working days so far.',
+    'Avg Hours = every hour tracked in the month (a Sunday worked included) / days worked: P 1, HD 0.5, leave 0.',
     ...(report.rulesFrom
       ? [
           `Attendance rules apply from ${report.rulesFrom}. A day is cut once at most: if it is already`,

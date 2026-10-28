@@ -42,7 +42,6 @@ function day(
     rule: null,
     late: null,
     manualMinutes: 0,
-    workingDay: true,
   };
 }
 

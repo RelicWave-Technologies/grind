@@ -533,7 +533,7 @@ const PersonBlock = memo(function PersonBlock({
   // own figures when the whole month is shown. Payable is the month's.
   const count = (code: string) => shown.filter((d) => d?.code === code).length;
   const sum = (pick: (d: MonthSheetDay) => number) => shown.reduce((t, d) => t + (d ? pick(d) : 0), 0);
-  const workingDays = shown.filter((d) => d?.workingDay).length;
+  const workingDays = sum((d) => d.dayWeight);
   const counts: Array<[string, string]> = [
     ['Present', String(count('P'))],
     ['Half Day', String(count('HD'))],
@@ -541,7 +541,7 @@ const PersonBlock = memo(function PersonBlock({
     ['Leave', String(count('L'))],
     ['LWA', String(count('LWA'))],
     ['Late', String(shown.filter((d) => d?.late).length)],
-    // Every hour shown, a Sunday worked included, over the working days shown.
+    // Every hour shown, a Sunday worked included, over the days worked (P 1, HD ½, leave 0).
     ['Avg Hours', hhmm(workingDays === 0 ? 0 : sum((d) => d.workMinutes) / workingDays)],
     ['Manual Time', hhmm(sum((d) => d.manualMinutes))],
     // Payable is a month's figure, so a range across months gets one per month.
