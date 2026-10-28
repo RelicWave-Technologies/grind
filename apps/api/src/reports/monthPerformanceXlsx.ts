@@ -438,7 +438,7 @@ function buildLegendSheet(wb: ExcelJS.Workbook, report: MonthPerformanceReport):
     'not the gap between Office In and Office Out. --:-- means no punch.',
     'Leave account: Opening + Monthly + Birthday (+ Adjusted) - Paid Leave = Closing.',
     'Leave the balance could not pay for is unpaid (full days 1, halves 0.5) — never a',
-    'negative balance. Payable Days = days in the month - unpaid days.',
+    'negative balance. Payable Days = days in the month so far - unpaid days.',
     ...(report.rulesFrom
       ? [
           `Attendance rules apply from ${report.rulesFrom}. A day is cut once at most: if it is already`,
