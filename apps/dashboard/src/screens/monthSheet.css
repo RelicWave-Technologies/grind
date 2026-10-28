@@ -145,12 +145,14 @@
   width: var(--xl-view, 100%);
   box-sizing: border-box;
   display: flex;
-  flex-wrap: wrap;
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--ui-sp-2) var(--ui-sp-7);
   margin-bottom: var(--ui-sp-4);
 }
+/* The name keeps its width; the counts take the rest and wrap inside it,
+   still flush right, rather than dropping the whole strip under the name. */
+.xl-who { flex: none; }
 .xl-who h3 { margin: 0; font-size: 15px; font-weight: 700; }
 .xl-who p {
   margin: var(--ui-sp-1) 0 0;
@@ -160,8 +162,8 @@
   text-transform: uppercase;
   white-space: pre-wrap;
 }
-.xl-strips { display: flex; flex-direction: column; align-items: flex-end; gap: var(--ui-sp-2); }
-.xl-strip { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--ui-sp-1) var(--ui-sp-6); margin: 0; }
+.xl-strips { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: flex-end; gap: var(--ui-sp-2); }
+.xl-strip { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--ui-sp-1) var(--ui-sp-5); margin: 0; }
 .xl-strip > div { display: flex; align-items: baseline; gap: var(--ui-sp-2); }
 .xl-strip dt { font-family: var(--ui-font-mono); font-size: 10px; letter-spacing: 0.04em; text-transform: uppercase; }
 .xl-strip dd { margin: 0; font-family: var(--ui-font-mono); font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; }
@@ -335,7 +337,8 @@
 
 @media (max-width: 720px) {
   .xl-month { padding-left: var(--ui-sp-4); padding-right: var(--ui-sp-4); }
-  .xl-strips { align-items: flex-start; }
+  .xl-caption { flex-wrap: wrap; }
+  .xl-strips { flex-basis: 100%; align-items: flex-start; }
   .xl-strip { justify-content: flex-start; }
 }
 

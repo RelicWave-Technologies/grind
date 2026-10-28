@@ -101,6 +101,12 @@ const EMPTY_READING = new Set(['--:--', '00:00', '']);
 
 type SheetPerson = MonthSheetRow & { codes: Set<string> };
 type SheetDate = MonthSheetResponse['dates'][number] & { monthStart: boolean };
+/** "08:12" — minutes as the sheet's own hours reading. */
+function hhmm(minutes: number): string {
+  const total = Math.max(0, Math.round(minutes));
+  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+}
+
 /** A person across every month in range; `payable` is each month's own figure. */
 type MergedRow = MonthSheetRow & { payable: Array<[string, string]> };
 
@@ -347,7 +353,7 @@ export function MonthSheetView({ from, to, canEdit, meId, isAdmin, onOpenDay }: 
     try {
       for (const day of days) {
         if (action === 'set') {
-          patchDay(userId, day.date, (d) => ({ ...d, code: PROVISIONAL[shape], override: { code: shape, stale: false } }));
+          patchDay(userId, day.date, (d) => ({ ...d, code: PROVISIONAL[shape], override: { code: shape, stale: false, reason } }));
           await api('/v1/reports/attendance-override', { method: 'PUT', json: { userId, date: day.date, code: shape, reason } });
         } else {
           patchDay(userId, day.date, (d) => ({ ...d, code: d.computed, override: null }));
@@ -526,6 +532,8 @@ const PersonBlock = memo(function PersonBlock({
   // The strip opposite the name, counted over the days shown — the workbook's
   // own figures when the whole month is shown. Payable is the month's.
   const count = (code: string) => shown.filter((d) => d?.code === code).length;
+  const sum = (pick: (d: MonthSheetDay) => number) => shown.reduce((t, d) => t + (d ? pick(d) : 0), 0);
+  const workingDays = sum((d) => d.dayWeight);
   const counts: Array<[string, string]> = [
     ['Present', String(count('P'))],
     ['Half Day', String(count('HD'))],
@@ -533,6 +541,9 @@ const PersonBlock = memo(function PersonBlock({
     ['Leave', String(count('L'))],
     ['LWA', String(count('LWA'))],
     ['Late', String(shown.filter((d) => d?.late).length)],
+    // Every hour shown, a Sunday worked included, over the days worked (P 1, HD ½, leave 0).
+    ['Avg Hours', hhmm(workingDays === 0 ? 0 : sum((d) => d.workMinutes) / workingDays)],
+    ['Manual Time', hhmm(sum((d) => d.manualMinutes))],
     // Payable is a month's figure, so a range across months gets one per month.
     ...row.payable.map(([month, v]): [string, string] =>
       [row.payable.length > 1 ? `Payable · ${fmtMonthLong(month).slice(0, 3)}` : 'Payable Days', v]),
@@ -618,7 +629,9 @@ const PersonBlock = memo(function PersonBlock({
                 const title = [
                   `${dayLabel(date)} — ${DISPLAY_DAY_LABEL[d.code as DisplayDayCode] ?? d.code}`,
                   d.label,
-                  d.override ? `Corrected by hand (computed: ${d.computed})` : null,
+                  d.override
+                    ? `Corrected by hand (computed: ${d.computed})${d.override.reason ? ` — “${d.override.reason}”` : ''}`
+                    : null,
                   editable ? 'Click to correct' : null,
                 ].filter(Boolean).join('\n');
                 return (
@@ -685,7 +698,8 @@ function EditBar({
   const single = days.length === 1 ? days[0]! : null;
   const corrected = days.filter((d) => d.override);
   const [shape, setShape] = useState<Shape | null>(single?.override ? (single.override.code as Shape) : null);
-  const [reason, setReason] = useState('');
+  // A corrected day opens with the reason it was corrected for, ready to keep or change.
+  const [reason, setReason] = useState(single?.override?.reason ?? '');
   const reasonRef = useRef<HTMLInputElement>(null);
   const seenRequest = useRef(shapeRequest?.n ?? 0);
 

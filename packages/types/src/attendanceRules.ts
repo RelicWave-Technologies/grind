@@ -181,10 +181,14 @@ export const MonthSheetDaySchema = z.object({
   why: z.string(),
   /** A late arrival this day, charged or not. */
   late: z.boolean(),
+  /** Approved manual minutes inside `workMinutes`. */
+  manualMinutes: z.number().default(0),
+  /** What average hours divide by for this day: P 1, HD 0.5, leave / off / to come 0. */
+  dayWeight: z.number().default(0),
   /** 'Diwali', 'Paid leave' — whatever the calendar called the day. */
   label: z.string().nullable(),
   /** Set when somebody corrected the day by hand. */
-  override: z.object({ code: z.string(), stale: z.boolean() }).nullable(),
+  override: z.object({ code: z.string(), stale: z.boolean(), reason: z.string().default('') }).nullable(),
 });
 export type MonthSheetDay = z.infer<typeof MonthSheetDaySchema>;
 

@@ -13,6 +13,7 @@ import { EditMemberModal } from './Calendar';
 import { roleLabel } from '../lib/auth';
 import { fmtTime, fmtDurationMs, fmtDayLabel, monthBounds, todayKey } from '../lib/format';
 import { personFacets, personSearchFields, useTableFilter } from '../lib/tableFilter';
+import { useTableSort } from '../lib/tableSort';
 import {
   addMonths,
   defaultReportMonth,
@@ -129,6 +130,13 @@ export function AttendanceScreen() {
     },
     { urlPrefix: 'daily.' },
   );
+  const peopleSort = useTableSort(people.rows, {
+    person: (u) => u.name,
+    present: (u) => {
+      const row = data?.cells[u.id] ?? {};
+      return (data?.days ?? []).filter((d) => (row[d]?.totalMs ?? 0) >= PRESENT_MIN_MS).length;
+    },
+  });
 
   const subtitle =
     view === 'month'
@@ -273,7 +281,7 @@ export function AttendanceScreen() {
                 </colgroup>
                 <THead>
                   <Tr>
-                    <Th className="atd-col-person">Person</Th>
+                    <Th className="atd-col-person" {...peopleSort.th('person')}>Person</Th>
                     {data!.days.map((d) => {
                       const date = new Date(`${d}T00:00:00`);
                       const dow = new Intl.DateTimeFormat(undefined, { weekday: 'short' }).format(date);
@@ -292,11 +300,11 @@ export function AttendanceScreen() {
                         </Th>
                       );
                     })}
-                    <Th className="atd-col-present" align="center">Present</Th>
+                    <Th className="atd-col-present" align="center" {...peopleSort.th('present')}>Present</Th>
                   </Tr>
                 </THead>
                 <Tbody>
-                  {people.rows.map((u) => {
+                  {peopleSort.rows.map((u) => {
                     const row = data!.cells[u.id] ?? {};
                     const total = data!.days.length;
                     const daysPresent = data!.days.filter(
@@ -434,6 +442,17 @@ function MonthSummary({ month, isAdmin }: { month: string; isAdmin: boolean }) {
     },
     { urlPrefix: 'month.' },
   );
+  const sort = useTableSort(filter.rows, {
+    person: (r) => r.name,
+    present: (r) => r.present,
+    halfDay: (r) => r.halfDay,
+    pl: (r) => r.pl,
+    leave: (r) => r.leave,
+    lwa: (r) => r.lwa,
+    late: (r) => r.late,
+    payable: (r) => r.payableDays,
+    left: (r) => r.account.closing,
+  });
   // Hidden only when the viewer may not read the team (403). Loading and
   // other failures used to return null too, leaving this — the default
   // view — as a blank page with no spinner, error or retry.
@@ -462,7 +481,7 @@ function MonthSummary({ month, isAdmin }: { month: string; isAdmin: boolean }) {
           <h2 className="ui-t-title">Month summary · {fmtMonthLong(month)}</h2>
           <p className="ui-t-small">
             {data.rulesFrom
-              ? 'Same numbers as the Excel. Payable days = days in the month − leave the balance could not pay for.'
+              ? 'Same numbers as the Excel. Payable days = days in the month so far − leave the balance could not pay for.'
               : 'Attendance rules are off — set them in Policy.'}
           </p>
         </div>
@@ -482,20 +501,20 @@ function MonthSummary({ month, isAdmin }: { month: string; isAdmin: boolean }) {
         <Table density="compact">
           <THead>
             <Tr>
-              <Th>Person</Th>
-              <Th align="right">Present</Th>
-              <Th align="right">Half day</Th>
-              <Th align="right">PL</Th>
-              <Th align="right">Leave</Th>
-              <Th align="right">LWA</Th>
-              <Th align="right">Late</Th>
-              <Th align="right">Payable days</Th>
-              <Th align="right">Leave left</Th>
+              <Th {...sort.th('person')}>Person</Th>
+              <Th align="right" {...sort.th('present')}>Present</Th>
+              <Th align="right" {...sort.th('halfDay')}>Half day</Th>
+              <Th align="right" {...sort.th('pl')}>PL</Th>
+              <Th align="right" {...sort.th('leave')}>Leave</Th>
+              <Th align="right" {...sort.th('lwa')}>LWA</Th>
+              <Th align="right" {...sort.th('late')}>Late</Th>
+              <Th align="right" {...sort.th('payable')}>Payable days</Th>
+              <Th align="right" {...sort.th('left')}>Leave left</Th>
               <Th align="right" />
             </Tr>
           </THead>
           <Tbody>
-            {filter.rows.map((r) => (
+            {sort.rows.map((r) => (
               <Tr key={r.userId}>
                 <Td>
                   <Identity
