@@ -357,6 +357,32 @@ describe('attendance rules — late arrivals', () => {
     expect(lines.has('2026-09-04')).toBe(false);
   });
 
+  it('does not count a punch on an approved WFH day as a late arrival', async () => {
+    const s = await seed();
+    const lateDays = ['2026-09-01', '2026-09-02', '2026-09-03', '2026-09-04', '2026-09-05'];
+    for (const date of lateDays) {
+      await work(s.member.id, date, 8, '09:55');
+      await punch(s.ws.id, s.member.id, date);
+    }
+    // Approved WFH on the 3rd, but dropped by the office in the evening.
+    await prisma.wfhRequest.create({
+      data: {
+        workspaceId: s.ws.id,
+        userId: s.member.id,
+        startDate: new Date('2026-09-03T00:00:00Z'),
+        endDate: new Date('2026-09-03T00:00:00Z'),
+        reason: 'Illness',
+        status: 'APPROVED',
+        larkInstanceCode: `wfh-${ulid()}`,
+      },
+    });
+
+    const { day } = await september(s);
+    expect(lateDays.map((d) => day(d).late)).toEqual([1, 2, null, 3, 4]);
+    // Four lates, so nothing charged: without the WFH the 5th would be cut.
+    expect(day('2026-09-05')).toMatchObject({ code: 'P', rule: null });
+  });
+
   it('gives everyone the policy grace, even on a shift whose own buffer is 0', async () => {
     const s = await seed();
     await prisma.shift.updateMany({ where: { workspaceId: s.ws.id }, data: { bufferMin: 0 } });

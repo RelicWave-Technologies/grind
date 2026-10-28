@@ -89,7 +89,8 @@ export async function loadAttendanceRuleContext(input: {
             by: ['date'],
             where: { workspaceId: input.workspaceId, date: { gte: fromDate, lte: toDate } },
           }),
-          loadApprovedWfh({ workspaceId: input.workspaceId, userIds: input.userIds, from: input.from, to: input.to }),
+          // From the month's start: the late count walks every day since then.
+          loadApprovedWfh({ workspaceId: input.workspaceId, userIds: input.userIds, from: lateFrom < input.from ? lateFrom : input.from, to: input.to }),
           prisma.leaveRequest.findMany({
             where: {
               workspaceId: input.workspaceId,
@@ -162,6 +163,7 @@ export async function loadAttendanceRuleContext(input: {
       const late = isLateArrival({
         status: day.status,
         mode: modeFor(userId),
+        wfhApproved: wfhApproved(userId, date),
         punchInMs: day.punchInMs,
         shiftStartMs: day.shift?.startMs ?? null,
         graceMinutes: policy.lateGraceMinutes,
