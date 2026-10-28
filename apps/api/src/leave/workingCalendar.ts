@@ -7,6 +7,7 @@ import {
   type DayStatus,
   type LeaveKind,
   type LeavePortion,
+  type ShiftSchedule,
 } from '@grind/types';
 import type { LeaveAccount, LeaveFundingDays } from './leaveFunding';
 
@@ -320,9 +321,9 @@ export class WorkingCalendar {
   private resolveShiftForDay(userId: string, date: string): ShiftForDay {
     const assignment = this.assignmentFor(userId, date);
     if (!assignment?.shiftId) return { kind: 'no_shift' };
-    const parsed = ShiftScheduleSchema.safeParse(assignment.scheduleSnapshot);
-    if (!parsed.success) return { kind: 'no_shift' };
-    const day = parsed.data[weekdayForDate(date)];
+    const schedule = scheduleOf(assignment);
+    if (!schedule) return { kind: 'no_shift' };
+    const day = schedule[weekdayForDate(date)];
     if (!day) return { kind: 'weekly_off', shiftName: assignment.shiftNameSnapshot };
     // Resolved here rather than at each caller, so "was this a working day"
     // has one answer for the quote, the timesheet and the month report.
@@ -331,6 +332,20 @@ export class WorkingCalendar {
     }
     return { kind: 'working', shiftName: assignment.shiftNameSnapshot };
   }
+}
+
+/**
+ * An assignment's schedule snapshot, validated once per assignment rather than
+ * once per person-day: a workspace's month asked zod the same question ~2,600
+ * times, which was the single largest cost of the month report.
+ */
+const scheduleCache = new WeakMap<ShiftAssignmentInput, ShiftSchedule | null>();
+function scheduleOf(assignment: ShiftAssignmentInput): ShiftSchedule | null {
+  if (scheduleCache.has(assignment)) return scheduleCache.get(assignment)!;
+  const parsed = ShiftScheduleSchema.safeParse(assignment.scheduleSnapshot);
+  const schedule = parsed.success ? parsed.data : null;
+  scheduleCache.set(assignment, schedule);
+  return schedule;
 }
 
 function base(
