@@ -131,11 +131,15 @@ export function judgeDay(
  * first-half leave day, after the policy's afternoon time with no grace. Never
  * without a punch-in, never on a holiday, a weekly off, full-day or
  * second-half leave, and only for a STANDARD person — REMOTE and EXEMPT people
- * are never counted late.
+ * are never counted late. Nor on an approved WFH day: the person was not
+ * expected at the door, so a punch that day (dropping by in the evening) is
+ * not an arrival.
  */
 export function isLateArrival(input: {
   status: DayStatus | null;
   mode: AttendanceRuleMode;
+  /** An approved WFH request covers this date. */
+  wfhApproved?: boolean;
   /** The door punch-in as an instant (see `punchInMs`). */
   punchInMs: number | null;
   shiftStartMs: number | null;
@@ -143,6 +147,7 @@ export function isLateArrival(input: {
   /** First-half leave day: late after this instant (the policy's afternoon time), no grace. */
   halfDayLateAfterMs: number | null;
 }): boolean {
+  if (input.wfhApproved) return false;
   return isLate({
     punchInMs: input.punchInMs,
     shiftStartMs: input.shiftStartMs,
