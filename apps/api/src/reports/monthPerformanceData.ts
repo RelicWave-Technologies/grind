@@ -61,6 +61,8 @@ interface MonthInputs {
   overrides: Array<{ userId: string; date: Date; code: DayOverride['code']; computedCode: DayOverride['computedCode'] }>;
   /** Counted milliseconds (work, meetings, approved manual; invalidated excluded). */
   trackedMsFor: (userId: string, date: string) => number;
+  /** The approved manual part of `trackedMsFor`. */
+  manualMsFor: (userId: string, date: string) => number;
   rules: AttendanceRuleContext;
   /** The Working Calendar over the month (see `timesheetCalendarInputs`). */
   calendar: Awaited<ReturnType<typeof timesheetCalendarInputs>>;
@@ -147,6 +149,7 @@ async function loadMonthInputs(input: {
     calendarInput,
     overrides,
     trackedMsFor: (userId, date) => timeline.bucket(userId, date).counted,
+    manualMsFor: (userId, date) => timeline.bucket(userId, date).manual,
     rules,
     calendar,
     balances,
@@ -238,7 +241,7 @@ export async function loadMonthPerformanceReport(input: {
   // Read-only: the ledger lines the rules wrote are whatever the last
   // reconcile left (see `reconcileMonthRules`), and the calendar prices the
   // month from them.
-  const { reportUsers, overrides, trackedMsFor, rules, nowMs, calendar, balances } = m;
+  const { reportUsers, overrides, trackedMsFor, manualMsFor, rules, nowMs, calendar, balances } = m;
   const overrideIndex = new Map<string, DayOverride>();
   for (const o of overrides) {
     // A DATE column reads back as an epoch-anchored Date; no timezone applies.
@@ -261,6 +264,7 @@ export async function loadMonthPerformanceReport(input: {
     users: reportUsers,
     dayStatusFor: calendar.dayStatusFor,
     trackedMsFor,
+    manualMsFor,
     punchFor: rules.punchFor,
     overrideFor,
     balanceFor: (userId) => balances[userId]?.balanceDays,

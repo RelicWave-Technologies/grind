@@ -41,6 +41,8 @@ function day(
     computedCode: code,
     rule: null,
     late: null,
+    manualMinutes: 0,
+    workingDay: true,
   };
 }
 

@@ -154,6 +154,13 @@ export interface MonthPerformanceDay {
   rule: AttendanceRuleVerdict | null;
   /** The month's Nth late arrival, when this day was one. */
   late: number | null;
+  /** Approved manual minutes inside `workMinutes`. */
+  manualMinutes: number;
+  /**
+   * A day the calendar expects work (a shift day, leave included) that has
+   * come — today or before. What the average hours divide by.
+   */
+  workingDay: boolean;
 }
 
 export interface MonthPerformanceTotals {
@@ -174,6 +181,8 @@ export interface MonthPerformanceTotals {
   noShift: number;
   /** Sum of the WORK row. */
   workMinutes: number;
+  /** Approved manual minutes inside `workMinutes`. */
+  manualMinutes: number;
   /** Days each attendance rule charged, by rule. */
   shortDay: number;
   underMin: number;
@@ -242,6 +251,8 @@ export interface MonthPerformanceInput {
   dayStatusFor: (userId: string, date: string) => DayStatus | null;
   /** Counted milliseconds for this person on this date (work, meetings, approved manual). */
   trackedMsFor: (userId: string, date: string) => number;
+  /** The approved manual part of `trackedMsFor`. Absent = none. */
+  manualMsFor?: (userId: string, date: string) => number;
   punchFor: PunchLookup;
   /** A manager's or admin's correction for this person-day, if one exists. */
   overrideFor?: (userId: string, date: string) => DayOverride | null;
@@ -418,7 +429,7 @@ function emptyTotals(): MonthPerformanceTotals {
   return {
     present: 0, paidHalfDay: 0, unpaidHalfDay: 0, splitLeave: 0,
     weeklyOff: 0, holiday: 0, paidLeave: 0,
-    unpaidLeave: 0, absent: 0, noShift: 0, workMinutes: 0,
+    unpaidLeave: 0, absent: 0, noShift: 0, workMinutes: 0, manualMinutes: 0,
     shortDay: 0, underMin: 0, halfDayShort: 0, wfhUnapproved: 0,
     leaveWithoutApproval: 0, ruleDays: 0, lateDays: 0,
   };
@@ -451,6 +462,11 @@ function countInto(totals: MonthPerformanceTotals, code: MonthPerformanceCode): 
   }
 }
 
+/** A shift day or a leave day — what the company counts as a working day. */
+function expectsWork(status: DayStatus | null): boolean {
+  return !!status && (status.kind === 'WORKING' || status.kind === 'PAID_LEAVE' || status.kind === 'UNPAID_LEAVE');
+}
+
 /**
  * Assemble the grid. Pure — the calendar and the punches are handed in as
  * lookups, which is what makes the whole layout testable without a database.
@@ -463,6 +479,7 @@ export function buildMonthPerformance(input: MonthPerformanceInput): MonthPerfor
     // The month's hours are the sum of the time, rounded once. Adding up the
     // rounded days drifts from the team report by up to half a minute a day.
     let trackedMs = 0;
+    let manualMs = 0;
     const days: MonthPerformanceDay[] = dates.map((date) => {
       const punch = input.punchFor(user.id, date);
       const status = input.dayStatusFor(user.id, date);
@@ -470,6 +487,7 @@ export function buildMonthPerformance(input: MonthPerformanceInput): MonthPerfor
       const outMinute = punch?.outMinute ?? null;
       const dayMs = Math.max(0, input.trackedMsFor(user.id, date));
       const workMinutes = Math.round(dayMs / 60_000);
+      const dayManualMs = Math.max(0, input.manualMsFor?.(user.id, date) ?? 0);
       const override = input.overrideFor?.(user.id, date) ?? null;
       // Judged even under a correction, so the correction can be flagged when
       // the computed answer moves — but a corrected day is charged nothing by a
@@ -487,6 +505,7 @@ export function buildMonthPerformance(input: MonthPerformanceInput): MonthPerfor
       if (rule) countRuleInto(totals, rule);
       if (late !== null) totals.lateDays += 1;
       trackedMs += dayMs;
+      manualMs += dayManualMs;
 
       return {
         date,
@@ -503,9 +522,12 @@ export function buildMonthPerformance(input: MonthPerformanceInput): MonthPerfor
         computedCode: computed,
         rule,
         late,
+        manualMinutes: Math.round(dayManualMs / 60_000),
+        workingDay: expectsWork(status) && (!input.today || date <= input.today),
       };
     });
     totals.workMinutes = Math.round(trackedMs / 60_000);
+    totals.manualMinutes = Math.round(manualMs / 60_000);
     return {
       user,
       days,
@@ -655,10 +677,22 @@ export function monthPerformanceSummaryPairs(
     ['Leave', String(count('L'))],
     ['LWA', String(count('LWA'))],
     ['Late', String(row.totals.lateDays)],
+    ['Avg Hours', fmtMinutes(averageWorkMinutes(row))],
+    ['Manual Time', fmtMinutes(row.totals.manualMinutes)],
     // The one figure that decides pay: every day of the month, less the
     // leave the balance could not pay for.
     ['Payable Days', `${fmtDays(payable)} of ${of}`],
   ];
+}
+
+/**
+ * Average hours a working day: every counted minute of the month — a Sunday
+ * or a holiday worked included — over the working days that have come. Weekly
+ * offs and holidays are not divided by.
+ */
+export function averageWorkMinutes(row: Pick<MonthPerformanceRow, 'days' | 'totals'>): number {
+  const days = row.days.filter((d) => d.workingDay).length;
+  return days === 0 ? 0 : row.totals.workMinutes / days;
 }
 
 /**
@@ -791,6 +825,8 @@ export function monthSheetResponse(
             computed: d ? displayDayCode(d.computedCode, d.rule?.tag) : '--',
             why: d && report.rulesFrom ? sheetWhy(report, d) : '',
             late: !!d?.late,
+            manualMinutes: d?.manualMinutes ?? 0,
+            workingDay: d?.workingDay ?? false,
             label: d?.label ?? null,
             override: d?.override ? { code: attendanceOverrideShape(d.override.code), stale: d.override.stale } : null,
           };

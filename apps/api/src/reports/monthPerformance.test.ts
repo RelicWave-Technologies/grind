@@ -544,9 +544,35 @@ describe('the leave account the month left behind', () => {
       ['Leave', '1'],
       ['LWA', '0'],
       ['Late', '0'],
+      // 8 h over two working days: the 4th and the unpaid 3rd.
+      ['Avg Hours', '04:00'],
+      ['Manual Time', '00:00'],
       // August has 31 days; one unpaid day.
       ['Payable Days', '30 of 31'],
     ]);
+  });
+
+  it('averages every hour, a Sunday worked included, over working days only, and adds up manual time', () => {
+    const rep = build({
+      // Mon 3 and Tue 4 are working days; Sun 9 is a weekly off somebody worked.
+      dayStatusFor: (_u, date) =>
+        date === '2026-08-03' || date === '2026-08-04' ? status(date, 'WORKING') : date === '2026-08-09' ? status(date, 'WEEKLY_OFF') : null,
+      trackedMsFor: (_u, date) => (date === '2026-08-03' ? 480 : date === '2026-08-04' ? 420 : date === '2026-08-09' ? 120 : 0) * 60_000,
+      manualMsFor: (_u, date) => (date === '2026-08-04' ? 90 * 60_000 : 0),
+    });
+    const pairs = monthPerformanceSummaryPairs(rep, rep.rows[0]!);
+    // (8 h + 7 h + 2 h) / 2 working days.
+    expect(pairs).toContainEqual(['Avg Hours', '08:30']);
+    expect(pairs).toContainEqual(['Manual Time', '01:30']);
+  });
+
+  it('does not divide by working days still to come', () => {
+    const rep = build({
+      today: '2026-08-04',
+      dayStatusFor: (_u, date) => status(date, 'WORKING'),
+      trackedMsFor: (_u, date) => (date <= '2026-08-04' ? 480 * 60_000 : 0),
+    });
+    expect(monthPerformanceSummaryPairs(rep, rep.rows[0]!)).toContainEqual(['Avg Hours', '08:00']);
   });
 
   it('counts payable days only from the person\'s start date', () => {
