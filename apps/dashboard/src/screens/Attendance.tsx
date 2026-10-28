@@ -462,7 +462,7 @@ function MonthSummary({ month, isAdmin }: { month: string; isAdmin: boolean }) {
           <h2 className="ui-t-title">Month summary · {fmtMonthLong(month)}</h2>
           <p className="ui-t-small">
             {data.rulesFrom
-              ? 'Same numbers as the Excel. Payable days = days in the month − leave the balance could not pay for.'
+              ? 'Same numbers as the Excel. Payable days = days in the month so far − leave the balance could not pay for.'
               : 'Attendance rules are off — set them in Policy.'}
           </p>
         </div>

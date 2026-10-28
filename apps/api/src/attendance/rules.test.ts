@@ -245,6 +245,11 @@ describe('late arrivals', () => {
     })).toBe(false);
   });
 
+  it('never counts an approved WFH day late, even with a punch that day', () => {
+    expect(isLateArrival({ ...base, punchInMs: at(7 * 60), wfhApproved: true })).toBe(false);
+    expect(isLateArrival({ ...base, punchInMs: at(7 * 60), wfhApproved: false })).toBe(true);
+  });
+
   it('charges half a day from the first one past the allowance', () => {
     expect(withLateRule(null, 4, 4)).toBeNull();
     expect(withLateRule(null, 5, 4)).toEqual({ tag: 'LATE', penaltyDays: 0.5 });

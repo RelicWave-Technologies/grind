@@ -226,6 +226,11 @@ export interface MonthPerformanceReport {
    * minimum minutes, free late arrivals a month, and the late grace.
    */
   ruleMinutes: RuleSettings | null;
+  /**
+   * Today in the workspace timezone when the report was built, or null. Days
+   * after it have not happened, so they are not payable yet.
+   */
+  today: string | null;
 }
 
 export interface MonthPerformanceInput {
@@ -524,6 +529,7 @@ export function buildMonthPerformance(input: MonthPerformanceInput): MonthPerfor
     rows,
     rulesFrom: input.rulesFrom ?? null,
     ruleMinutes: input.ruleMinutes ?? null,
+    today: input.today ?? null,
   };
 }
 
@@ -636,7 +642,7 @@ export function monthPerformanceGridRows(
  * them added up to decide anything.
  */
 export function monthPerformanceSummaryPairs(
-  report: Pick<MonthPerformanceReport, 'dates'>,
+  report: Pick<MonthPerformanceReport, 'dates'> & { today?: string | null },
   row: MonthPerformanceRow,
 ): Array<[string, string]> {
   const count = (code: SheetCode) => row.days.filter((d) => sheetCode(d) === code).length;
@@ -657,22 +663,27 @@ export function monthPerformanceSummaryPairs(
 
 /**
  * Days of the month salary is paid for: every calendar day from the person's
- * start — weekly offs, holidays and paid leave included — less the salary cut.
+ * start up to today — weekly offs, holidays and paid leave included — less the
+ * salary cut. A month still running is paid only for the days it has had.
  */
 export function payableDays(
-  report: Pick<MonthPerformanceReport, 'dates'>,
+  report: Pick<MonthPerformanceReport, 'dates'> & { today?: string | null },
   row: Pick<MonthPerformanceRow, 'totals' | 'user'>,
 ): number {
   return Math.max(0, payableBaseDays(report, row) - salaryCutDays(row.totals));
 }
 
-/** Calendar days of the month from the person's start to their suspension. */
+/**
+ * Calendar days of the month from the person's start to their suspension, and
+ * no later than today — a day that has not come yet is not paid for yet.
+ */
 function payableBaseDays(
-  report: Pick<MonthPerformanceReport, 'dates'>,
+  report: Pick<MonthPerformanceReport, 'dates'> & { today?: string | null },
   row: Pick<MonthPerformanceRow, 'user'>,
 ): number {
   const { startDate: start, endDate: end } = row.user;
-  return report.dates.filter((d) => (!start || d >= start) && (!end || d <= end)).length;
+  const today = report.today ?? null;
+  return report.dates.filter((d) => (!start || d >= start) && (!end || d <= end) && (!today || d <= today)).length;
 }
 
 /** What the month added to the balance, by where it came from. */
