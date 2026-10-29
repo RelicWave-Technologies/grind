@@ -165,6 +165,7 @@ export function CalendarScreen() {
   const tz = me.workspaceTimezone;
   const qc = useQueryClient();
   const isAdmin = hasCapability(me, 'policy.manage');
+  const readsWorkspace = hasCapability(me, 'reports.workspace.read');
 
   const today = todayKey(tz);
   const [month, setMonth] = useState<string>(() => today.slice(0, 7));
@@ -331,7 +332,7 @@ export function CalendarScreen() {
           // The calendar answers in the caller's scope, so "everyone" is only
           // true for an admin. A manager reading it as the whole company would
           // be reading their own team's number.
-          hint={`${monthLabel} · ${isAdmin ? 'everyone' : 'you and your team'}`}
+          hint={`${monthLabel} · ${readsWorkspace ? 'everyone' : 'you and your team'}`}
         />
       </StatRow>
 

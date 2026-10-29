@@ -302,6 +302,7 @@ reportsRouter.get('/team/member', requireCapability('reports.team.read'), async 
       approvals,
       profile,
       canCorrect: canCorrectAttendanceOf(req, target.user.id),
+      canEdit: req.scope.editUserIds.includes(target.user.id),
     };
     res.json(response);
   } catch (err) {
@@ -464,7 +465,7 @@ reportsRouter.put('/attendance-override', requireCapability('attendance.correct'
     const parsed = SetAttendanceOverrideRequest.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: 'invalid_request', details: parsed.error.flatten() });
     const { userId, date, code, reason } = parsed.data;
-    // Who may change a day, not who may read it: HR reads everyone, corrects only her own team.
+    // Who may change a day (editUserIds), not who may read it.
     if (!req.scope.editUserIds.includes(userId)) return res.status(403).json({ error: 'out_of_scope' });
     // Nobody but an admin corrects their own attendance: a manager is in their
     // own scope, and marking your own LWA day present is exactly what this

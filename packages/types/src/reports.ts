@@ -296,8 +296,10 @@ export const TeamMemberReportsResponseSchema = z.object({
   member: TeamReportMemberSchema,
   approvals: z.array(ManualTimeRequestDto),
   profile: SelfProfileResponseSchema,
-  /** May the caller correct this person's attendance (HR: only her own team). */
+  /** May the caller correct this person's attendance (never their own unless an admin). */
   canCorrect: z.boolean().default(false),
+  /** May the caller change this person's time and decide their requests? */
+  canEdit: z.boolean().default(false),
 });
 export type TeamMemberReportsResponse = z.infer<typeof TeamMemberReportsResponseSchema>;
 

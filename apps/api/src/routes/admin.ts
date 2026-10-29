@@ -3,7 +3,7 @@ import { prisma, type Prisma } from '@grind/db';
 import { requireAccessToken } from '../middleware/auth';
 import { readMemoScope } from '../lib/readMemo';
 import { PERSON_FACETS_SELECT, personFacets } from '../lib/personFacets';
-import { attachScope, requireAdmin, requireAnyCapability, requireCapability, requireManagerOrAbove } from '../middleware/scope';
+import { attachScope, requireAdmin, requireAnyCapability, requireCapability } from '../middleware/scope';
 import { decideByUser } from '../lark/decideByUser';
 import { triageRequest, type TriageResult } from '../ai/triage';
 import { explainFlag } from '../ai/explainFlag';
@@ -158,6 +158,11 @@ interface UserListEntry {
    * and admins only; null for a member's own row and for deactivated people.
    */
   sync: SyncHealthDto | null;
+  /**
+   * May the caller change this person's time, approvals and flags? Their own
+   * scope's people — not everyone HR's People list shows her.
+   */
+  canEdit: boolean;
 }
 
 /**
@@ -178,14 +183,20 @@ adminRouter.get('/users', async (req, res, next) => {
     const exposeAgentHealth = managesPeople;
     // Sync health is operational, not personal: whoever can see the person's
     // reports (a manager's team, an admin's workspace) sees whether their time
-    // is arriving. The row set is already scoped above.
+    // is arriving — per row below, since a People list can reach further.
     const exposeSyncHealth = req.scope.scope !== 'self';
     // ?status=pending → the admin "Needs setup" view (Lark-provisioned users
     // awaiting a team/role + activation).
     const pendingOnly = managesPeople && req.query.status === 'pending';
 
+    // Whoever runs People (an admin, HR) lists the whole workspace — HR's
+    // reports scope is only self or her team, but People is hers everywhere.
     const where = {
-      ...(includeDeactivated ? { workspaceId: req.scope.workspaceId } : { id: { in: req.scope.userIds } }),
+      ...(includeDeactivated
+        ? { workspaceId: req.scope.workspaceId }
+        : managesPeople
+          ? { workspaceId: req.scope.workspaceId, deactivatedAt: null }
+          : { id: { in: req.scope.userIds } }),
       ...(pendingOnly ? { provisioningStatus: 'PENDING' as const } : {}),
     };
 
@@ -231,6 +242,8 @@ adminRouter.get('/users', async (req, res, next) => {
       orderBy: [{ deactivatedAt: 'asc' }, { role: 'asc' }, { name: 'asc' }],
     });
     const presenceCheckedAt = new Date();
+    const editable = new Set(req.scope.editUserIds);
+    const readable = new Set(req.scope.userIds);
     const out: UserListEntry[] = users.map((u) => ({
       id: u.id,
       email: u.email,
@@ -279,7 +292,10 @@ adminRouter.get('/users', async (req, res, next) => {
           ? u.agentLaunchAtLoginUpdatedAt.toISOString()
           : null,
       ...(exposeAgentHealth ? { idleWarningSeconds: u.idleWarningSeconds } : {}),
-      sync: exposeSyncHealth && u.deactivatedAt === null ? classifySyncHealth(u, presenceCheckedAt) : null,
+      // Only for people whose reports the caller reads: HR's People list
+      // reaches further than her reports, and sync health is about their time.
+      sync: exposeSyncHealth && u.deactivatedAt === null && readable.has(u.id) ? classifySyncHealth(u, presenceCheckedAt) : null,
+      canEdit: editable.has(u.id),
     }));
     res.json({ users: out, scope: req.scope.scope });
   } catch (err) {
@@ -479,9 +495,10 @@ async function loadTeamSettingsMembers(userIds: string[], exposeIdleWarning = fa
   );
 }
 
+/** Whose capture settings the caller may change — HR only her own team's, never the workspace she reads. */
 function scopedTeamSettingIds(req: Request): string[] {
   if (!req.scope || !req.user) return [];
-  return req.scope.userIds;
+  return req.scope.editUserIds;
 }
 
 adminRouter.get('/team-member-settings', requireCapability('team.settings.manage'), async (req, res, next) => {
@@ -496,7 +513,7 @@ adminRouter.get('/team-member-settings', requireCapability('team.settings.manage
       }),
     ]);
     const response: TeamSettingsResponse = {
-      scope: req.scope.scope === 'workspace' ? 'workspace' : 'team',
+      scope: req.scope.isAdmin ? 'workspace' : 'team',
       members,
       shifts: shifts.map(serializeShift),
     };
@@ -904,9 +921,11 @@ function adjacencyFor(
  * and stays a short page.
  */
 const DECIDED_PAGE_SIZE = 200;
+/** Who has an approvals queue: managers, admins, and HR for the team she manages. */
+const APPROVAL_DECIDERS = ['approvals.team.decide', 'approvals.workspace.decide'] as const;
 const DECIDED_RANGED_MAX = 5_000;
 
-adminRouter.get('/manual-time-requests', requireManagerOrAbove, async (req, res, next) => {
+adminRouter.get('/manual-time-requests', requireAnyCapability(APPROVAL_DECIDERS), async (req, res, next) => {
   try {
     if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
     const hasRange = req.query.from !== undefined || req.query.to !== undefined || req.query.tz !== undefined;
@@ -955,7 +974,7 @@ adminRouter.get('/manual-time-requests', requireManagerOrAbove, async (req, res,
     const [pendingRowsAll, decidedRows] = await Promise.all([
       wantsPending
         ? prisma.manualTimeRequest.findMany({
-            where: { userId: { in: req.scope.userIds }, status: 'PENDING' },
+            where: { userId: { in: req.scope.editUserIds }, status: 'PENDING' },
             include,
             orderBy: [{ createdAt: 'asc' }],
           })
@@ -1082,7 +1101,7 @@ adminRouter.get('/manual-time-requests', requireManagerOrAbove, async (req, res,
  * userId is in `req.scope.userIds`. We block MEMBERs at the router level so
  * a MEMBER hitting this endpoint never even hits the service.
  */
-adminRouter.post('/manual-time-requests/:id/decide', requireManagerOrAbove, async (req, res, next) => {
+adminRouter.post('/manual-time-requests/:id/decide', requireAnyCapability(APPROVAL_DECIDERS), async (req, res, next) => {
   try {
     if (!req.scope || !req.user) return res.status(401).json({ error: 'unauthorized' });
     const id = req.params.id;
@@ -1487,7 +1506,9 @@ adminRouter.get('/teams', requireCapability('teams.read'), async (req, res, next
   try {
     if (!req.scope || !req.user) return res.status(401).json({ error: 'unauthorized' });
     const where: Prisma.TeamWhereInput = { workspaceId: req.scope.workspaceId };
-    if (!req.scope.isAdmin) where.managers = { some: { userId: req.user.sub } };
+    // Whoever runs People (admin, HR — who assigns people to teams) sees every
+    // team; a manager the one they manage.
+    if (!hasPermission(req.scope.capabilities, 'people.manage')) where.managers = { some: { userId: req.user.sub } };
     const teams = await prisma.team.findMany({
       where,
       include: includeTeamForDto(),
@@ -1776,6 +1797,8 @@ adminRouter.patch('/users/:id', requireCapability('people.manage'), async (req, 
     }
 
     if ('idleWarningSeconds' in (req.body ?? {})) {
+      // A monitoring setting, like the countdown on Team settings: an admin's.
+      if (!req.scope.isAdmin) return res.status(403).json({ error: 'admin_required_for_idle_warning' });
       const raw = req.body.idleWarningSeconds;
       const parsedWarning = raw === null ? { success: true as const, data: null } : IdleWarningSecondsSchema.safeParse(raw);
       if (!parsedWarning.success) {
@@ -2279,7 +2302,8 @@ adminRouter.get('/flags', requireAnyCapability(['flags.team.review', 'flags.work
     const validTypes = ['IMPOSSIBLE_RATE', 'METRONOMIC', 'LINEAR_MOUSE', 'SINGLE_CHANNEL', 'JIGGLER'] as const;
     const status = typeof req.query.status === 'string' ? req.query.status.toUpperCase() : 'OPEN';
     const where: { userId: { in: string[] }; status?: (typeof validStatuses)[number]; type?: (typeof validTypes)[number] } = {
-      userId: { in: req.scope.userIds },
+      // A review queue: what the caller may resolve (HR: only her own team).
+      userId: { in: req.scope.editUserIds },
     };
     if (status !== 'ALL') {
       if (!(validStatuses as readonly string[]).includes(status)) return res.status(400).json({ error: 'invalid_status' });
@@ -2348,7 +2372,7 @@ adminRouter.get('/flags/groups', requireAnyCapability(['flags.team.review', 'fla
     if (status !== 'OPEN' && status !== 'RESOLVED') return res.status(400).json({ error: 'invalid_status' });
     const tz = req.scope.workspaceTimezone;
     const rows = await prisma.activityFlag.findMany({
-      where: { userId: { in: req.scope.userIds }, status },
+      where: { userId: { in: req.scope.editUserIds }, status },
       include: {
         user: { select: { id: true, name: true, email: true, avatarUrl: true, ...PERSON_FACETS_SELECT } },
         resolvedBy: { select: { id: true, name: true } },

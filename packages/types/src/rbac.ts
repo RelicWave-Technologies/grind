@@ -49,15 +49,13 @@ const MANAGER_CAPABILITIES = [
 ] as const satisfies readonly Permission[];
 
 /**
- * HR runs the People tab — adds, edits, activates and suspends people (never an
- * admin or another HR, and never into either role) — and reads every report and
- * download. It does not correct attendance, decide approvals, or touch
- * settings, policy, shifts, teams or integrations.
+ * HR's one extra is the People tab — adds, edits, activates and suspends people
+ * (never an admin or another HR, and never into either role). Everything else
+ * is what her position would give anyone: her own reports, and — when she
+ * manages a team — a manager's reads and edits for that team.
  */
 const HR_CAPABILITIES = [
   ...MEMBER_CAPABILITIES,
-  'reports.team.read',
-  'reports.workspace.read',
   'people.read',
   'people.manage',
   'teams.read',
@@ -71,22 +69,11 @@ export const ROLE_CAPABILITIES: Record<Role, readonly Permission[]> = {
   ADMIN: PERMISSIONS,
 };
 
-/**
- * What an HR who also manages a team may do for that team — a manager's
- * powers to change things. The changes reach only the team: `editUserIds` on
- * the request scope is what every edit route checks.
- */
-const HR_TEAM_EDIT_CAPABILITIES = [
-  'time.team.edit',
-  'attendance.correct',
-  'approvals.team.decide',
-  'flags.team.review',
-] as const satisfies readonly Permission[];
-
 export function roleCapabilities(role: Role, opts: { managesTeam?: boolean } = {}): Permission[] {
   const base = [...ROLE_CAPABILITIES[role]];
+  // An HR who manages a team is that team's manager, with a manager's reads and edits.
   if (role === 'HR' && opts.managesTeam) {
-    for (const p of HR_TEAM_EDIT_CAPABILITIES) if (!base.includes(p)) base.push(p);
+    for (const p of MANAGER_CAPABILITIES) if (!base.includes(p)) base.push(p);
   }
   return base;
 }
