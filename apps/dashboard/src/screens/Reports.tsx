@@ -1111,7 +1111,8 @@ function TeamMemberDrawer({
   const canDecideApprovals =
     hasCapability(me, 'approvals.team.decide') ||
     hasCapability(me, 'approvals.workspace.decide');
-  const canSelfApproveOwn = isManagerOrAbove(me.role);
+  // Admins, managers and HR approve their own manual time (the API's canSelfApproveManualTime).
+  const canSelfApproveOwn = isManagerOrAbove(me.role) || me.role === 'HR';
 
   const q = useQuery({
     queryKey: ['reports', 'team', 'member', userId, from, to, tz],
@@ -2394,6 +2395,7 @@ function approvalLabel(status: ManualTimeRequestDto['status']): string {
 function friendlyRole(role: SelfProfileResponse['user']['displayRole']) {
   if (role === 'ADMIN') return 'Admin';
   if (role === 'MANAGER') return 'Manager';
+  if (role === 'HR') return 'HR';
   return 'Member';
 }
 

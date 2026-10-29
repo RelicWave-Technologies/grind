@@ -31,8 +31,9 @@ export interface ManualTimeDecisionResult {
   noop: ManualTimeNoop;
 }
 
+/** Admins, managers and HR approve their own manual time (HR with or without a team). */
 function canSelfApproveManualTime(role: string): boolean {
-  return role === 'ADMIN' || role === 'MANAGER';
+  return role === 'ADMIN' || role === 'MANAGER' || role === 'HR';
 }
 
 interface FinalCardRequest {

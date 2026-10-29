@@ -172,6 +172,17 @@ describe('HR without a team: People everywhere, reports like a member', () => {
     }
   });
 
+  it('approves her own manual time, like a manager', async () => {
+    const s = await seed();
+    const t = bearer(s.hr.token);
+    const res = await request(app).post('/v1/time-requests').set(t).send(manualTime(s.hr.id, 'self'));
+    expect(res.status).toBe(201);
+    expect(res.body.status).toBe('APPROVED');
+    // A member's own request still waits for their approver.
+    const mem = await request(app).post('/v1/time-requests').set(bearer(s.loner.token)).send(manualTime(s.loner.id, 'self'));
+    expect(mem.body.status).toBe('PENDING');
+  });
+
   it('reads only her own month sheet row', async () => {
     const s = await seed();
     const res = await request(app).get('/v1/reports/month-sheet?month=2026-09').set(bearer(s.hr.token));

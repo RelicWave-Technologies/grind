@@ -117,7 +117,8 @@ export function ApprovalsScreen() {
   const canReview =
     hasCapability(me, 'approvals.team.decide') ||
     hasCapability(me, 'approvals.workspace.decide');
-  const canSelfApproveOwn = isManagerOrAbove(me.role);
+  // Admins, managers and HR approve their own manual time (the API's canSelfApproveManualTime).
+  const canSelfApproveOwn = isManagerOrAbove(me.role) || me.role === 'HR';
   const [mode, setMode] = useState<ApprovalMode>(() => (canReview ? 'team' : 'you'));
   const activeMode: ApprovalMode = canReview ? mode : 'you';
   // The month rule (lib/reportRange): the previous month up to the 10th, then this one.

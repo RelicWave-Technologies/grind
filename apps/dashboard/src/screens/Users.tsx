@@ -568,7 +568,8 @@ function PersonRow({
 
   const isDeactivated = user.deactivatedAt !== null;
   const isPending = !isDeactivated && user.provisioningStatus === 'PENDING';
-  const teamLockedByManagement = user.role === 'MANAGER' && Boolean(user.managesTeamId);
+  // A manager — or an HR who manages a team — stays on the team they manage.
+  const teamLockedByManagement = (user.role === 'MANAGER' || user.role === 'HR') && Boolean(user.managesTeamId);
   const presence = userPresence(user);
 
   const joined = joinedDateLabel(user.createdAt);

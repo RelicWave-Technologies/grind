@@ -98,8 +98,9 @@ function cleanTaskSummary(value: string | null | undefined): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+/** Admins, managers and HR approve their own manual time (HR with or without a team). */
 function canSelfApproveManualTime(role: string): boolean {
-  return role === 'ADMIN' || role === 'MANAGER';
+  return role === 'ADMIN' || role === 'MANAGER' || role === 'HR';
 }
 
 /**

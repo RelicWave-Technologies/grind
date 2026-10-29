@@ -310,12 +310,14 @@ function ProfileSkeleton() {
 function friendlyRole(role: SelfProfileResponse['user']['displayRole']) {
   if (role === 'ADMIN') return 'Admin';
   if (role === 'MANAGER') return 'Manager';
+  if (role === 'HR') return 'HR';
   return 'Member';
 }
 
 function roleLine(role: SelfProfileResponse['user']['displayRole']) {
   if (role === 'ADMIN') return 'Workspace access';
   if (role === 'MANAGER') return 'Team scope';
+  if (role === 'HR') return 'People · own team scope';
   return 'Self scope';
 }
 
