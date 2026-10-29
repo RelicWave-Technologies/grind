@@ -57,6 +57,9 @@ Grind
 | Feature: Agent Remote Resync (folder) | `BMbkdBPxnonc5VxRrKWluPRdgGq` | `Oh6Gw9BdNiSzRRkN1xClVuTZgRf` |
 | Agent Remote Resync — Plan | `YHy8d3dVJoK6PZxqzl8llhw3gVb` | `Pc8Lw8ZbdiNTgrkPWHelCVu2grU` |
 | Agent Remote Resync — Updates | `SYkZd3GekoGtwmxE0Nflg7CHgWh` | `CeyowRLO1i7VvektvwVlx7yqgMf` |
+| Feature: Lark Access Approval (folder) | `MFypdsU8foGGNwxHxAZlgVmigxd` | `DXHxwZ27yinyp7kfMiFlGlmtgaf` |
+| Lark Access Approval — Plan | `USdOdM1ieoAlsjxBnPMljnDFgsb` | `MTYHw6TJdirqZVkw3QTlLZl3gVf` |
+| Lark Access Approval — Updates | `E0fxdQtVzo9tuIx38e0l8Wfigke` | `JAuwwskwYiFOFMkgY1OlUCTngwc` |
 
 **Wiki space ID:** `7635896570625396443` (Tech Hub)
 **Project node token:** `CNhTwn36iiIr8JkaFj2lOIHhgOg`

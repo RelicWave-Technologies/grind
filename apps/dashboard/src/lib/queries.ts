@@ -248,6 +248,13 @@ export function workspacePolicyQuery<T = unknown>() {
   return queryOptions({ queryKey: ['workspace-policy'], queryFn: () => api<T>('/v1/admin/workspace-policy') });
 }
 
+export function accessRequestRecipientsQuery<T = unknown>() {
+  return queryOptions({
+    queryKey: ['admin', 'access-request-recipients'],
+    queryFn: () => api<T>('/v1/admin/access-requests/recipients'),
+  });
+}
+
 export function teamWorkspacePolicyQuery<T = unknown>() {
   return queryOptions({ queryKey: ['admin', 'workspace-policy'], queryFn: () => api<T>('/v1/admin/workspace-policy') });
 }
