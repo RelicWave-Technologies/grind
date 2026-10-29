@@ -60,6 +60,9 @@ Grind
 | Feature: Person Unit (folder) | `Xy3Gd6FLDoJqmpxH1e8lWLWCgyn` | `KsjuwNRaIiufHokkGInloEhQgJd` |
 | Person Unit — Plan | `Tonid6ybjov2Q7xGTezl2H6jgph` | `TH4QwKzYDizrD9kpvs0l1yzngff` |
 | Person Unit — Updates | `BR7Id5WYqorrJmxKhlslbU9mg4g` | `XqkSwstE3iUVddk3Sv8lEYtSgLc` |
+| Feature: Lark Access Approval (folder) | `MFypdsU8foGGNwxHxAZlgVmigxd` | `DXHxwZ27yinyp7kfMiFlGlmtgaf` |
+| Lark Access Approval — Plan | `USdOdM1ieoAlsjxBnPMljnDFgsb` | `MTYHw6TJdirqZVkw3QTlLZl3gVf` |
+| Lark Access Approval — Updates | `E0fxdQtVzo9tuIx38e0l8Wfigke` | `JAuwwskwYiFOFMkgY1OlUCTngwc` |
 
 **Wiki space ID:** `7635896570625396443` (Tech Hub)
 **Project node token:** `CNhTwn36iiIr8JkaFj2lOIHhgOg`

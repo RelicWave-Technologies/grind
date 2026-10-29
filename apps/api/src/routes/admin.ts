@@ -75,6 +75,7 @@ import {
   replaceTeamManagers,
   type OrgMutationResult,
 } from '../org/teamManagers';
+import { settleAccessRequestFromDashboard } from '../access/requests';
 
 /**
  * Mounted under `/v1/admin`. Every route requires a valid access token and
@@ -676,6 +677,9 @@ adminRouter.patch('/team-member-settings/:id', requireCapability('team.settings.
           });
         }
         await tx.user.update({ where: { id }, data });
+        if (data.provisioningStatus === 'ACTIVE') {
+          await settleAccessRequestFromDashboard(tx, { userId: id, decision: 'APPROVED', decidedById: req.user!.sub });
+        }
         if (timingChanged || idleWarningChanged) {
           await tx.monitoringSettingsAudit.create({
             data: {
@@ -1876,6 +1880,9 @@ adminRouter.patch('/users/:id', requireAdmin, async (req, res, next) => {
           data,
         });
       }
+      if (data.provisioningStatus === 'ACTIVE') {
+        await settleAccessRequestFromDashboard(tx, { userId: id, decision: 'APPROVED', decidedById: req.user!.sub });
+      }
       if (idleWarningAudit) {
         await tx.monitoringSettingsAudit.create({
           data: {
@@ -2042,17 +2049,20 @@ adminRouter.post('/users/:id/deactivate', requireAdmin, async (req, res, next) =
       });
       if (admins <= 1) return res.status(400).json({ error: 'last_admin_protected' });
     }
-    const [updated, revoked] = await prisma.$transaction([
-      prisma.user.update({
+    const [updated, revoked] = await prisma.$transaction(async (tx) => {
+      const user = await tx.user.update({
         where: { id },
         data: { deactivatedAt: new Date() },
         select: { id: true, deactivatedAt: true },
-      }),
-      prisma.refreshToken.updateMany({
+      });
+      const tokens = await tx.refreshToken.updateMany({
         where: { userId: id, revokedAt: null },
         data: { revokedAt: new Date() },
-      }),
-    ]);
+      });
+      // Turning away someone who was still waiting closes their Lark cards.
+      await settleAccessRequestFromDashboard(tx, { userId: id, decision: 'REJECTED', decidedById: req.user!.sub });
+      return [user, tokens] as const;
+    });
     res.json({
       id: updated.id,
       deactivatedAt: updated.deactivatedAt!.toISOString(),
@@ -2203,10 +2213,14 @@ adminRouter.post('/users/:id/activate', requireAdmin, async (req, res, next) => 
     if (existing.provisioningStatus === 'ACTIVE') {
       return res.json({ id: existing.id, provisioningStatus: 'ACTIVE' });
     }
-    const updated = await prisma.user.update({
-      where: { id },
-      data: { provisioningStatus: 'ACTIVE' },
-      select: { id: true, provisioningStatus: true },
+    const updated = await prisma.$transaction(async (tx) => {
+      const user = await tx.user.update({
+        where: { id },
+        data: { provisioningStatus: 'ACTIVE' },
+        select: { id: true, provisioningStatus: true },
+      });
+      await settleAccessRequestFromDashboard(tx, { userId: id, decision: 'APPROVED', decidedById: req.user!.sub });
+      return user;
     });
     res.json({ id: updated.id, provisioningStatus: updated.provisioningStatus });
   } catch (err) {

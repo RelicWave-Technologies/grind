@@ -4,6 +4,8 @@ import { decideRequest } from './decide';
 import { buildUnavailableRequestCard } from './cards';
 import { logger } from '../logger';
 import { ingestRawLarkMessage } from '../testerOps/inbound';
+import { ACCESS_REQUEST_CARD_KIND } from './accessCards';
+import { decideAccessRequestFromLark } from '../access/requests';
 
 /**
  * Subscribes to Lark long-connection events. Approval-card clicks stay on the
@@ -18,9 +20,62 @@ import { ingestRawLarkMessage } from '../testerOps/inbound';
 let wsClient: WSClient | null = null;
 
 type CardActionEvent = {
-  action?: { value?: unknown };
+  action?: { value?: unknown; form_value?: unknown };
   operator?: { open_id?: string };
 };
+
+function asRecord(raw: unknown): Record<string, unknown> | null {
+  if (typeof raw === 'string') {
+    try {
+      return asRecord(JSON.parse(raw));
+    } catch {
+      return null;
+    }
+  }
+  return raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : null;
+}
+
+const ACCESS_ERROR_TOASTS = {
+  forbidden: 'Only an admin can let someone in.',
+  team_required: 'Pick a team first.',
+  shift_required: 'Pick a shift first.',
+  team_invalid: 'That team no longer exists. Pick another.',
+  shift_invalid: 'That shift no longer exists. Pick another.',
+  team_locked: 'This person manages another team. Finish setup in the dashboard.',
+} as const;
+
+/** Approve / Reject on an access-request card (a new person waiting to get in). */
+async function handleAccessRequestAction(raw: CardActionEvent, value: Record<string, unknown>) {
+  const accessRequestId = typeof value.accessRequestId === 'string' ? value.accessRequestId : undefined;
+  const action = value.action === 'approve' || value.action === 'reject' ? value.action : undefined;
+  const decidedByOpenId = raw.operator?.open_id;
+  if (!accessRequestId || !action || !decidedByOpenId) {
+    return { toast: { type: 'error', content: 'Bad payload' } };
+  }
+  const form = asRecord(raw.action?.form_value) ?? {};
+  const pick = (key: string) => (typeof form[key] === 'string' && form[key] ? (form[key] as string) : null);
+  const result = await decideAccessRequestFromLark({
+    accessRequestId,
+    action,
+    decidedByOpenId,
+    teamId: pick('teamId'),
+    shiftId: pick('shiftId'),
+  });
+  logger.info({ accessRequestId, action, decidedByOpenId, ok: result.ok, error: result.ok ? null : result.error }, 'card.action.trigger: access request');
+  if (!result.ok) {
+    if (result.error === 'not_found') {
+      return { toast: { type: 'error', content: 'This person was removed from Timo.' }, card: { type: 'raw', data: result.card } };
+    }
+    return { toast: { type: 'error', content: ACCESS_ERROR_TOASTS[result.error] } };
+  }
+  const content = result.alreadyDecided
+    ? 'Someone already decided this one.'
+    : result.status === 'APPROVED' ? 'Approved. They can sign in now.' : 'Rejected.';
+  return {
+    toast: { type: result.alreadyDecided ? 'info' : 'success', content },
+    card: { type: 'raw', data: result.card },
+  };
+}
 
 function parseValue(raw: unknown): { requestId?: string; cardId?: string; version?: number; action?: 'approve' | 'reject' } {
   // value is the object we put in the button at build time.
@@ -57,6 +112,8 @@ export function startCardCallback(): void {
   const dispatcher = new EventDispatcher({}).register({
     'card.action.trigger': async (raw: CardActionEvent) => {
       try {
+        const value = asRecord(raw.action?.value);
+        if (value?.kind === ACCESS_REQUEST_CARD_KIND) return await handleAccessRequestAction(raw, value);
         const { requestId, cardId, version, action } = parseValue(raw.action?.value);
         const decidedByOpenId = raw.operator?.open_id;
         if (!requestId || !action || !decidedByOpenId) {

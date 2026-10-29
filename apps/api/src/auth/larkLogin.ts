@@ -4,6 +4,7 @@ import { env } from '../env';
 import { normalizeEmail, type LarkProfile } from '../lark/profile';
 import { sha256Hex } from '../lib/hash';
 import { isUniqueViolation } from '../lib/prismaErrors';
+import { openAccessRequest, settleAccessRequestFromDashboard } from '../access/requests';
 
 /**
  * Lark-login identity + provisioning service.
@@ -130,6 +131,9 @@ async function createUser(profile: LarkProfile, email: string): Promise<Resolved
       },
       select: LOGIN_USER_SELECT,
     });
+    // Ask the admins on Lark. Inside this transaction, so a retry login (which
+    // finds the user) never asks twice.
+    if (user.provisioningStatus === 'PENDING') await openAccessRequest(tx, user.id);
     return user as ResolvedLoginUser;
   });
 }
@@ -193,6 +197,7 @@ async function syncAndReturn(userId: string, profile: LarkProfile): Promise<Reso
         data: { ...data, email: profile.email },
         select: LOGIN_USER_SELECT,
       });
+      await settleIfActivated(current.provisioningStatus, updated);
       return updated as ResolvedLoginUser;
     } catch (err) {
       if (!isUniqueViolation(err)) throw err;
@@ -200,7 +205,17 @@ async function syncAndReturn(userId: string, profile: LarkProfile): Promise<Reso
     }
   }
   const updated = await prisma.user.update({ where: { id: userId }, data, select: LOGIN_USER_SELECT });
+  await settleIfActivated(current.provisioningStatus, updated);
   return updated as ResolvedLoginUser;
+}
+
+/** Login just let a waiting person in (setup was done, or bootstrap email): close their Lark cards. */
+async function settleIfActivated(before: string, after: { id: string; provisioningStatus: string }): Promise<void> {
+  if (before === 'PENDING' && after.provisioningStatus === 'ACTIVE') {
+    await prisma.$transaction((tx) =>
+      settleAccessRequestFromDashboard(tx, { userId: after.id, decision: 'APPROVED', decidedById: null }),
+    );
+  }
 }
 
 // --- Agent one-time deep-link codes (PKCE-bound, single-use) ----------------

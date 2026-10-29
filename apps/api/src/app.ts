@@ -21,6 +21,7 @@ import { profileRouter } from './routes/profile';
 import { timeRequestsRouter } from './routes/timeRequests';
 import { screenshotsRouter } from './routes/screenshots';
 import { adminRouter } from './routes/admin';
+import { accessRecipientsRouter } from './routes/accessRecipients';
 import { mcpRouter } from './routes/mcp';
 import { workspaceRouter } from './routes/workspace';
 import { workspacePolicyRouter } from './routes/workspacePolicy';
@@ -151,6 +152,7 @@ export function buildApp() {
   app.use('/v1/admin/workspace-policy', workspacePolicyRouter);
   app.use('/v1/admin/leave', adminLeaveRouter);
   app.use('/v1/admin/overview', overviewRouter);
+  app.use('/v1/admin/access-requests', accessRecipientsRouter);
   app.use('/v1/admin', adminRouter);
   app.use('/v1/workspace', workspaceRouter);
   app.use('/v1/leave', leaveRouter);
