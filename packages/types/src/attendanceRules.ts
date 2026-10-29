@@ -112,9 +112,10 @@ export const MonthSummaryRowSchema = z.object({
   userId: z.string(),
   name: z.string(),
   email: z.string(),
-  // People · Teams · Roles, as every people table filters.
+  // People · Teams · Units · Roles, as every people table filters.
   role: Role,
   teamName: z.string().nullable(),
+  unitName: z.string().nullable().default(null),
   mode: z.enum(['STANDARD', 'REMOTE', 'EXEMPT']),
   present: z.number(),
   halfDay: z.number(),
@@ -198,6 +199,7 @@ export const MonthSheetRowSchema = z.object({
   email: z.string(),
   role: Role,
   teamName: z.string().nullable(),
+  unitName: z.string().nullable().default(null),
   /** The count strip opposite the name: [label, value], in sheet order. */
   counts: z.array(z.tuple([z.string(), z.string()])),
   /** The leave account line below it. */
@@ -226,6 +228,7 @@ export const AttendanceRuleExceptionSchema = z.object({
   name: z.string(),
   email: z.string(),
   teamName: z.string().nullable(),
+  unitName: z.string().nullable().default(null),
   /** YYYY-MM-DD. */
   date: z.string(),
   tag: AttendanceRuleTagSchema,

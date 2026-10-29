@@ -194,6 +194,7 @@ export function MonthSheetView({ from, to, canEdit, meId, isAdmin, onOpenDay }: 
         } else {
           cur.days.push(...r.days);
           cur.teamName = r.teamName;
+          cur.unitName = r.unitName;
           cur.leave = r.leave; // the account as the range ends
           if (pay) cur.payable.push([sheet.month, pay]);
         }
@@ -582,7 +583,7 @@ const PersonBlock = memo(function PersonBlock({
       <div className="xl-caption">
         <div className="xl-who">
           <h3>{row.name}</h3>
-          <p>{[row.teamName, row.email].filter(Boolean).join('   ·   ')}</p>
+          <p>{[row.teamName, row.unitName, row.email].filter(Boolean).join('   ·   ')}</p>
         </div>
         <div className="xl-strips">
           <Strip pairs={counts} />

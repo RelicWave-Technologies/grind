@@ -80,6 +80,7 @@ import { personFacets, personSearchFields, useTableFilter } from '../lib/tableFi
 import { useTableSort } from '../lib/tableSort';
 import { DayRibbon } from '../components/DayRibbon';
 import { MonthSheetView } from './MonthSheet';
+import { UnitPicker } from '../components/UnitPicker';
 import { ActivityHeatmap } from '../components/ActivityHeatmap';
 import { AppIcon } from '../components/AppIcon';
 import {
@@ -165,6 +166,7 @@ export function ReportsScreen() {
   const reportMonth = to.slice(0, 7);
 
   const monthReport = useMonthReportDownload();
+  const [downloadUnit, setDownloadUnit] = useState('');
 
   // Everyone opens on the month sheet — scoped by the API to whom they may see:
   // a member sees their own block, a manager their team, an admin everyone.
@@ -285,11 +287,13 @@ export function ReportsScreen() {
               onChange={applyCalendarRange}
             />
             {/* The files stay a team report; a member's own month is on screen. */}
+            {sheetActive && canReadTeam && <UnitPicker value={downloadUnit} onChange={setDownloadUnit} />}
             {sheetActive && canReadTeam && (
               <DownloadMenu
                 month={reportMonth}
+                unit={downloadUnit}
                 downloading={monthReport.downloading}
-                onDownload={(format) => void monthReport.download(reportMonth, format)}
+                onDownload={(format) => void monthReport.download(reportMonth, format, downloadUnit || undefined)}
               />
             )}
           </Toolbar>
@@ -670,10 +674,13 @@ function SelfReportTable({
  */
 function DownloadMenu({
   month,
+  unit,
   downloading,
   onDownload,
 }: {
   month: string;
+  /** The unit picked beside the button; '' = every unit. */
+  unit: string;
   downloading: 'xlsx' | 'csv' | null;
   onDownload: (format: 'xlsx' | 'csv') => void;
 }) {
@@ -700,11 +707,11 @@ function DownloadMenu({
           <div ref={pop.popoverRef} className="ui-popover rep-download-menu" style={pop.popoverStyle} data-flip={pop.flip} role="menu">
             <button type="button" role="menuitem" onClick={() => pick('xlsx')}>
               <FileSpreadsheet size={15} strokeWidth={1.8} />
-              <span>Excel<small>{fmtMonthLong(month)}</small></span>
+              <span>Excel<small>{[fmtMonthLong(month), unit].filter(Boolean).join(' · ')}</small></span>
             </button>
             <button type="button" role="menuitem" onClick={() => pick('csv')}>
               <Sheet size={15} strokeWidth={1.8} />
-              <span>CSV<small>{fmtMonthLong(month)}</small></span>
+              <span>CSV<small>{[fmtMonthLong(month), unit].filter(Boolean).join(' · ')}</small></span>
             </button>
           </div>,
           document.body,

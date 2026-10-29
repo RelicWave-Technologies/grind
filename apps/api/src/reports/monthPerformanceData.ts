@@ -101,6 +101,7 @@ async function loadMonthInputs(input: {
           select: {
             id: true, name: true, email: true, joinedOn: true, createdAt: true, deactivatedAt: true,
             team: { select: { name: true } },
+            unit: { select: { name: true } },
           },
           orderBy: [{ name: 'asc' }, { email: 'asc' }],
         }),
@@ -111,6 +112,7 @@ async function loadMonthInputs(input: {
     name: u.name,
     email: u.email,
     teamName: u.team?.name ?? null,
+    unitName: u.unit?.name ?? null,
     // The leave balance's own start (see loadWorkingCalendar's accrualStartFor).
     startDate: accrualStartDate(u, range.tz),
     endDate: u.deactivatedAt ? dateKeyInTimeZone(u.deactivatedAt, range.tz) : null,

@@ -114,6 +114,8 @@ export interface MonthPerformanceUser {
   email: string;
   /** Team name — the report's "Dept. Name". */
   teamName: string | null;
+  /** Employer (EMIAC, MACOBS) — the report's "CompName" when set. */
+  unitName?: string | null;
   /**
    * YYYY-MM-DD the person started: their joining date, else the day their
    * account was made — the same start the leave balance accrues from. Days
@@ -782,7 +784,7 @@ export function monthPerformanceBlock(
   row: MonthPerformanceRow,
 ): string[][] {
   return [
-    ['Dept. Name', row.user.teamName ?? '', '', 'CompName', report.companyName, '', 'Report Month', report.monthLabel],
+    ['Dept. Name', row.user.teamName ?? '', '', 'CompName', row.user.unitName ?? report.companyName, '', 'Report Month', report.monthLabel],
     [
       'Email', row.user.email, '', 'Name', row.user.name, '',
       ...monthPerformanceSummaryPairs(report, row).flat(),
@@ -821,6 +823,7 @@ export function monthSheetResponse(
         email: row.user.email,
         role: roleOf(row.user.id),
         teamName: row.user.teamName,
+        unitName: row.user.unitName ?? null,
         counts: monthPerformanceSummaryPairs(report, row),
         leave: monthPerformanceLeavePairs(row),
         days: report.dates.map((date) => {

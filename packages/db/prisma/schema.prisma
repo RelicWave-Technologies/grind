@@ -17,6 +17,7 @@ model Workspace {
 
   users                     User[]
   teams                     Team[]
+  units                     Unit[]
   teamManagers              TeamManager[]
   shifts                    Shift[]
   monthPointers             MonthPerformancePointer[]
@@ -191,6 +192,21 @@ model Team {
   @@index([workspaceId])
 }
 
+/// An employer inside the workspace (EMIAC, MACOBS). The workspace runs two
+/// companies under one roof, and teams do not divide along company lines —
+/// Media Buying holds people from both — so the company sits on the person.
+/// HR reads and downloads the month sheet one unit at a time.
+model Unit {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  name        String
+  members     User[]    @relation("UnitMembers")
+  createdAt   DateTime  @default(now())
+
+  @@unique([workspaceId, name])
+}
+
 /// Team management assignment. Product rule for v1: one team can have many
 /// managers, but one user can manage only one team. A non-admin user's
 /// workspace role is derived from this table.
@@ -253,6 +269,9 @@ model User {
   /// scoping applies; admin sees them, no manager does).
   teamId                   String?
   team                     Team?              @relation("TeamMembers", fields: [teamId], references: [id], onDelete: SetNull)
+  /// Which employer this person works for (see Unit). NULL = not yet set.
+  unitId                   String?
+  unit                     Unit?              @relation("UnitMembers", fields: [unitId], references: [id], onDelete: SetNull)
   /// Deprecated: old direct-manager pointer. v1 org scope and manual-time
   /// approval now resolve through TeamManager + User.teamId.
   managerId                String?
@@ -293,9 +312,8 @@ model User {
   /// inherits the workspace policy. Like the accrual rate, this varies by which
   /// company somebody belongs to, and teams do not divide along company lines.
   ///
-  /// Two per-person overrides on the same axis is the shape of a missing
-  /// concept: this workspace holds two employers, and neither Team nor
-  /// Workspace models that. Worth naming properly if a third rule appears.
+  /// Two per-person overrides on the same axis: both really follow the
+  /// person's Unit. They stay per-person until a third rule moves them there.
   lastSaturdayOffOverride  Boolean?
   /// How the attendance rules treat this person. STANDARD gets every rule;
   /// REMOTE works away from the office by arrangement, so a day with no punch
@@ -412,6 +430,7 @@ model User {
   @@index([teamId])
   @@index([managerId])
   @@index([shiftId])
+  @@index([unitId])
   @@index([workspaceId, agentState, agentLastSeenAt])
 }
 

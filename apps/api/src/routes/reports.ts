@@ -375,12 +375,46 @@ async function monthPerformanceFor(req: Request) {
   if (!req.scope) return { status: 500 as const, error: 'scope_unresolved' };
   const range = resolveReportMonth(req.query as Record<string, unknown>, req.scope.workspaceTimezone);
   if ('error' in range) return { status: 400 as const, error: range.error };
-  const report = await loadMonthPerformanceReport({
-    workspaceId: req.scope.workspaceId,
-    userIds: [...req.scope.userIds, ...(await suspendedInScope(req, range.from))],
-    range,
+  const unit = await resolveUnitFilter(req.scope.workspaceId, req.query.unit);
+  if (unit === 'invalid') return { status: 400 as const, error: 'invalid_unit' };
+  let userIds = [...req.scope.userIds, ...(await suspendedInScope(req, range.from))];
+  if (unit) {
+    // Narrows the scope, never widens it: a manager picking a unit still gets
+    // only the people of their team who belong to it.
+    const inUnit = await prisma.user.findMany({
+      where: { id: { in: userIds }, unitId: unit.id },
+      select: { id: true },
+    });
+    userIds = inUnit.map((u) => u.id);
+  }
+  const report = await loadMonthPerformanceReport({ workspaceId: req.scope.workspaceId, userIds, range });
+  // One company's sheet carries that company's name in its header.
+  if (unit?.name) report.companyName = unit.name;
+  return { status: 200 as const, report, month: range.month, unitName: unit ? (unit.name ?? 'no-unit') : null };
+}
+
+/**
+ * `?unit=` on the month reports: a unit's name (EMIAC), case-insensitive, or
+ * `none` for people with no unit yet. Absent = everyone in scope.
+ */
+async function resolveUnitFilter(
+  workspaceId: string,
+  raw: unknown,
+): Promise<{ id: string | null; name: string | null } | null | 'invalid'> {
+  if (raw === undefined || raw === '') return null;
+  if (typeof raw !== 'string') return 'invalid';
+  if (raw.toLowerCase() === 'none') return { id: null, name: null };
+  const unit = await prisma.unit.findFirst({
+    where: { workspaceId, name: { equals: raw, mode: 'insensitive' } },
+    select: { id: true, name: true },
   });
-  return { status: 200 as const, report, month: range.month };
+  return unit ?? 'invalid';
+}
+
+/** 'month-performance-2026-10' or, for one unit, 'month-performance-EMIAC-2026-10'. */
+function monthFileName(result: { month: string; unitName: string | null }, ext: string): string {
+  const unit = result.unitName ? `${result.unitName.replace(/[^A-Za-z0-9_-]/gu, '')}-` : '';
+  return `month-performance-${unit}${result.month}.${ext}`;
 }
 
 /**
@@ -632,7 +666,7 @@ reportsRouter.get('/month-performance.csv', requireCapability('reports.team.read
     const result = await monthPerformanceFor(req);
     if (result.status !== 200) return res.status(result.status).json({ error: result.error });
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="month-performance-${result.month}.csv"`);
+    res.setHeader('Content-Disposition', `attachment; filename="${monthFileName(result, 'csv')}"`);
     res.send(formatMonthPerformanceCsv(result.report));
   } catch (err) {
     next(err);
@@ -660,6 +694,7 @@ reportsRouter.get('/attendance-exceptions', requireCapability('reports.team.read
           name: row.user.name,
           email: row.user.email,
           teamName: row.user.teamName,
+          unitName: row.user.unitName ?? null,
           date: day.date,
           tag: day.rule.tag,
           penaltyDays: day.rule.penaltyDays,
@@ -707,6 +742,7 @@ reportsRouter.get('/month-summary', requireCapability('reports.team.read'), asyn
         email: row.user.email,
         role: personOf.get(row.user.id)?.role ?? 'MEMBER',
         teamName: row.user.teamName,
+        unitName: row.user.unitName ?? null,
         mode: personOf.get(row.user.id)?.attendanceRuleMode ?? 'STANDARD',
         present: count('P'),
         halfDay: count('HD'),
@@ -761,7 +797,7 @@ reportsRouter.get('/month-performance.xlsx', requireCapability('reports.team.rea
     if (result.status !== 200) return res.status(result.status).json({ error: result.error });
     const buffer = await monthPerformanceXlsx(result.report);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename="month-performance-${result.month}.xlsx"`);
+    res.setHeader('Content-Disposition', `attachment; filename="${monthFileName(result, 'xlsx')}"`);
     res.send(buffer);
   } catch (err) {
     next(err);

@@ -124,6 +124,9 @@ interface UserListEntry {
   teamId: string | null;
   /** The team's name, so any viewer can show and filter by it (not only admins with the team list). */
   teamName: string | null;
+  /** The employer this person works for (EMIAC, MACOBS), when set. */
+  unitId: string | null;
+  unitName: string | null;
   managerId: string | null;
   managesTeamId: string | null;
   managesTeamName: string | null;
@@ -196,6 +199,8 @@ adminRouter.get('/users', async (req, res, next) => {
         activityRoleTitle: true,
         teamId: true,
         team: { select: { name: true } },
+        unitId: true,
+        unit: { select: { name: true } },
         managerId: true,
         managedTeamAssignment: { select: { teamId: true, team: { select: { name: true } } } },
         shiftId: true,
@@ -233,6 +238,8 @@ adminRouter.get('/users', async (req, res, next) => {
       activityRoleTitle: u.activityRoleTitle,
       teamId: u.teamId,
       teamName: u.team?.name ?? null,
+      unitId: u.unitId,
+      unitName: u.unit?.name ?? null,
       managerId: u.managerId,
       managesTeamId: u.managedTeamAssignment?.teamId ?? null,
       managesTeamName: u.managedTeamAssignment?.team.name ?? null,
@@ -1194,7 +1201,7 @@ async function loadTimesheetData(
   }
   return {
     matrix,
-    users: users.map(({ team, ...u }) => ({ ...u, ...personFacets({ role: u.role, team }) })),
+    users: users.map(({ team, unit, ...u }) => ({ ...u, ...personFacets({ role: u.role, team, unit }) })),
     calendar: calendarInputs,
   };
 }
@@ -1453,6 +1460,25 @@ function hasCompletedMemberSetup(input: { teamId: string | null; shiftId: string
  * MANAGER       → their managed team.
  * MEMBER        → 403 (members don't need a team list; their teamId is on /me).
  */
+/**
+ * GET /v1/admin/units — the employers in this workspace (EMIAC, MACOBS), for
+ * the People unit picker and the report downloads' unit choice. Names only,
+ * nothing personal, so anyone signed in may read them.
+ */
+adminRouter.get('/units', async (req, res, next) => {
+  try {
+    if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
+    const units = await prisma.unit.findMany({
+      where: { workspaceId: req.scope.workspaceId },
+      select: { id: true, name: true },
+      orderBy: { name: 'asc' },
+    });
+    res.json({ units });
+  } catch (err) {
+    next(err);
+  }
+});
+
 adminRouter.get('/teams', requireCapability('teams.read'), async (req, res, next) => {
   try {
     if (!req.scope || !req.user) return res.status(401).json({ error: 'unauthorized' });
@@ -1632,6 +1658,7 @@ adminRouter.patch('/users/:id', requireAdmin, async (req, res, next) => {
       idleWarningSeconds?: number | null;
       provisioningStatus?: 'ACTIVE';
       birthDate?: Date | null;
+      unitId?: string | null;
     } = {};
     let idleWarningAudit:
       | {
@@ -1702,6 +1729,23 @@ adminRouter.patch('/users/:id', requireAdmin, async (req, res, next) => {
         requestedTeamId = raw;
       } else {
         return res.status(400).json({ error: 'invalid_teamId' });
+      }
+    }
+
+    // unitId: a Unit of this workspace, or null to clear. Says which employer
+    // the person works for; reports filter and download by it.
+    if ('unitId' in (req.body ?? {})) {
+      const raw = req.body.unitId;
+      if (raw === null || raw === '') {
+        data.unitId = null;
+      } else if (typeof raw === 'string') {
+        const unit = await prisma.unit.findUnique({ where: { id: raw }, select: { workspaceId: true } });
+        if (!unit || unit.workspaceId !== req.scope.workspaceId) {
+          return res.status(400).json({ error: 'unit_out_of_workspace' });
+        }
+        data.unitId = raw;
+      } else {
+        return res.status(400).json({ error: 'invalid_unitId' });
       }
     }
 
@@ -1870,6 +1914,7 @@ adminRouter.patch('/users/:id', requireAdmin, async (req, res, next) => {
           role: true,
           activityRoleTitle: true,
           teamId: true,
+          unitId: true,
           managerId: true,
           shiftId: true,
           idleWarningSeconds: true,

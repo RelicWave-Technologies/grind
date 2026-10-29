@@ -62,9 +62,9 @@ devRouter.get('/people', async (req, res, next) => {
         agentLastSeenAt: true,
       },
     });
-    const people: AgentCommandTargetDto[] = users.map(({ team, ...u }) => ({
+    const people: AgentCommandTargetDto[] = users.map(({ team, unit, ...u }) => ({
       ...u,
-      ...personFacets({ role: u.role, team }),
+      ...personFacets({ role: u.role, team, unit }),
       agentLastSeenAt: u.agentLastSeenAt?.toISOString() ?? null,
     }));
     res.json({ people });

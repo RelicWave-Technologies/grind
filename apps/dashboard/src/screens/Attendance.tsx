@@ -10,6 +10,7 @@ import type { TimesheetMatrix } from '../lib/types';
 import type { MonthSummaryResponse, MonthSummaryRow } from '@grind/types';
 import type { LeaveBalanceRow, LeaveBalancesResponse } from '../lib/types';
 import { EditMemberModal } from './Calendar';
+import { UnitPicker } from '../components/UnitPicker';
 import { roleLabel } from '../lib/auth';
 import { fmtTime, fmtDurationMs, fmtDayLabel, monthBounds, todayKey } from '../lib/format';
 import { personFacets, personSearchFields, useTableFilter } from '../lib/tableFilter';
@@ -117,6 +118,7 @@ export function AttendanceScreen() {
   const [reportMonth, setReportMonth] = useState<string>(() => defaultReportMonth(today));
   const thisMonth = today.slice(0, 7);
   const monthReport = useMonthReportDownload();
+  const [downloadUnit, setDownloadUnit] = useState('');
 
   const tzLabel = tz.replace(/_/g, ' ');
   const days = spanDays(span);
@@ -162,12 +164,13 @@ export function AttendanceScreen() {
               prevLabel="Previous month"
               nextLabel="Next month"
             />
+            <UnitPicker value={downloadUnit} onChange={setDownloadUnit} />
             <Button
               variant="secondary"
               icon={<FileSpreadsheet size={14} strokeWidth={2} />}
               loading={monthReport.downloading === 'xlsx'}
               disabled={monthReport.downloading !== null}
-              onClick={() => void monthReport.download(reportMonth, 'xlsx')}
+              onClick={() => void monthReport.download(reportMonth, 'xlsx', downloadUnit || undefined)}
             >
               Excel
             </Button>
@@ -176,7 +179,7 @@ export function AttendanceScreen() {
               icon={<Sheet size={14} strokeWidth={2} />}
               loading={monthReport.downloading === 'csv'}
               disabled={monthReport.downloading !== null}
-              onClick={() => void monthReport.download(reportMonth, 'csv')}
+              onClick={() => void monthReport.download(reportMonth, 'csv', downloadUnit || undefined)}
             >
               CSV
             </Button>

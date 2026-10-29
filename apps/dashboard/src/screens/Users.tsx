@@ -5,9 +5,9 @@ import { useNavigate, useRouteContext, useSearch } from '@tanstack/react-router'
 import { Pencil, Check, X, UserPlus, UserMinus, UserCheck, Trash2, Users as UsersIcon } from 'lucide-react';
 import type { LaunchAtLoginState, LaunchOrigin } from '@grind/types';
 import { api, type ApiError } from '../lib/api';
-import { adminShiftsQuery, adminTeamsQuery, adminUsersQuery } from '../lib/queries';
+import { adminShiftsQuery, adminTeamsQuery, adminUnitsQuery, adminUsersQuery } from '../lib/queries';
 import { isAdmin, type Role } from '../lib/auth';
-import type { Team, Shift } from '../lib/types';
+import type { Team, Shift, Unit } from '../lib/types';
 import { matchesSyncFilter, syncTag, type SyncFilter, type SyncHealth } from '../lib/syncHealth';
 import { personFacets, personSearchFields, useTableFilter } from '../lib/tableFilter';
 import {
@@ -62,6 +62,9 @@ interface AdminUser {
   avatarUrl: string | null;
   teamId: string | null;
   teamName: string | null;
+  /** Employer (EMIAC, MACOBS); null until an admin sets it. */
+  unitId?: string | null;
+  unitName?: string | null;
   managerId: string | null;
   managesTeamId: string | null;
   managesTeamName: string | null;
@@ -154,6 +157,7 @@ export function UsersScreen() {
   // Only admins need the team + shift lists — pickers are hidden for everyone else.
   const teamsQ = useQuery({ ...adminTeamsQuery<{ teams: Team[] }>(), enabled: canEdit });
   const shiftsQ = useQuery({ ...adminShiftsQuery<{ shifts: Shift[] }>(), enabled: canEdit });
+  const unitsQ = useQuery({ ...adminUnitsQuery(), enabled: canEdit });
 
   const patch = useMutation({
     mutationFn: (vars: {
@@ -162,6 +166,7 @@ export function UsersScreen() {
         name: string;
         role: Role;
         teamId: string | null;
+        unitId: string | null;
         shiftId: string | null;
       }>;
     }) =>
@@ -357,7 +362,7 @@ export function UsersScreen() {
           <>
             <FilterBar
               filter={filter}
-              placeholder="Search name, email, team…"
+              placeholder="Search name, email, team, unit…"
               noun={{ one: 'person', other: 'people' }}
             />
             {filter.rows.length === 0 ? (
@@ -389,7 +394,7 @@ export function UsersScreen() {
                   <Th>Person</Th>
                   <Th>Role</Th>
                   <Th>Presence</Th>
-                  <Th>Team</Th>
+                  <Th>Team · Unit</Th>
                   <Th>Shift</Th>
                   {showDeviceHealth && <Th>Device</Th>}
                   {showDeviceHealth && <Th>Health</Th>}
@@ -411,6 +416,7 @@ export function UsersScreen() {
                     showSync={showSync}
                     teams={teamsQ.data?.teams ?? []}
                     teamName={u.teamName ?? '—'}
+                    units={unitsQ.data?.units ?? []}
                     shifts={shiftsQ.data?.shifts ?? []}
                     shiftName={shiftName(u.shiftId)}
                     busy={
@@ -465,6 +471,7 @@ interface RowProps {
   showSync: boolean;
   teams: Team[];
   teamName: string;
+  units: Unit[];
   shifts: Shift[];
   shiftName: string;
   busy: boolean;
@@ -473,6 +480,7 @@ interface RowProps {
     name: string;
     role: Role;
     teamId: string | null;
+    unitId: string | null;
     shiftId: string | null;
     birthDate: string | null;
   }>) => void;
@@ -491,6 +499,7 @@ function PersonRow({
   showSync,
   teams,
   teamName,
+  units,
   shifts,
   shiftName,
   busy,
@@ -505,6 +514,7 @@ function PersonRow({
   const [name, setName] = useState(user.name);
   const [role, setRole] = useState<Role>(user.role === 'MANAGER' ? 'MEMBER' : user.role);
   const [teamId, setTeamId] = useState<string>(user.teamId ?? '');
+  const [unitId, setUnitId] = useState<string>(user.unitId ?? '');
   const [shiftId, setShiftId] = useState<string>(user.shiftId ?? '');
   const [birthDate, setBirthDate] = useState<string>(user.birthDate ?? '');
 
@@ -513,6 +523,7 @@ function PersonRow({
       name: string;
       role: Role;
       teamId: string | null;
+      unitId: string | null;
       shiftId: string | null;
       birthDate: string | null;
     }> = {};
@@ -520,6 +531,8 @@ function PersonRow({
     if (user.role !== 'MANAGER' && role !== user.role) next.role = role;
     const nextTeam = teamId === '' ? null : teamId;
     if (nextTeam !== (user.teamId ?? null)) next.teamId = nextTeam;
+    const nextUnit = unitId === '' ? null : unitId;
+    if (nextUnit !== (user.unitId ?? null)) next.unitId = nextUnit;
     const nextShift = shiftId === '' ? null : shiftId;
     if (nextShift !== (user.shiftId ?? null)) next.shiftId = nextShift;
     // An emptied field clears the date rather than being ignored, so a wrong
@@ -535,6 +548,7 @@ function PersonRow({
     setName(user.name);
     setRole(user.role === 'MANAGER' ? 'MEMBER' : user.role);
     setTeamId(user.teamId ?? '');
+    setUnitId(user.unitId ?? '');
     setShiftId(user.shiftId ?? '');
   }
 
@@ -620,9 +634,20 @@ function PersonRow({
                 ))}
               </Select>
               {teamLockedByManagement && <span className="ui-t-small ui-ink-3">Locked to managed team</span>}
+              <Select value={unitId} onChange={(e) => setUnitId(e.target.value)} aria-label="Unit">
+                <option value="">— no unit —</option>
+                {units.map((un) => (
+                  <option key={un.id} value={un.id}>
+                    {un.name}
+                  </option>
+                ))}
+              </Select>
             </span>
           ) : (
-            teamName
+            <span className="usr-role-stack">
+              {teamName}
+              {user.unitName && <span className="ui-t-small ui-ink-3">{user.unitName}</span>}
+            </span>
           )}
         </Td>
 

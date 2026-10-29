@@ -211,6 +211,12 @@ export interface ActivityFlag {
 // Admin CRUD: Teams + User patches
 // ---------------------------------------------------------------------------
 
+/** An employer inside the workspace (EMIAC, MACOBS). */
+export interface Unit {
+  id: string;
+  name: string;
+}
+
 export interface Team {
   id: string;
   name: string;

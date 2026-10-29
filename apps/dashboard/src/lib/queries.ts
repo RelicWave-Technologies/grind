@@ -1,6 +1,7 @@
 import { keepPreviousData, queryOptions, type FetchQueryOptions, type QueryClient } from '@tanstack/react-query';
 import type { TeamReportsSummaryResponse } from '@grind/types/reports';
 import { api } from './api';
+import type { Unit } from './types';
 
 /**
  * Query options for every page's first-paint data — the ONE place a query's
@@ -214,6 +215,15 @@ export function adminUsersQuery<T = unknown>(opts: { includeDeactivated?: boolea
 
 export function adminTeamsQuery<T = unknown>() {
   return queryOptions({ queryKey: ['admin', 'teams'], queryFn: () => api<T>('/v1/admin/teams'), ...REFERENCE });
+}
+
+/** The workspace's units (employers: EMIAC, MACOBS). Any signed-in user. */
+export function adminUnitsQuery() {
+  return queryOptions({
+    queryKey: ['admin', 'units'],
+    queryFn: () => api<{ units: Unit[] }>('/v1/admin/units'),
+    ...REFERENCE,
+  });
 }
 
 export function adminShiftsQuery<T = unknown>() {
