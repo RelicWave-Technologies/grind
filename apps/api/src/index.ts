@@ -7,6 +7,7 @@ import { startLarkTokenRefreshScheduler } from './lark/refreshScheduler';
 import { startAttendanceRulesScheduler } from './attendance/ruleScheduler';
 import { startLarkLeaveIngest, startLarkWfhIngest } from './leave';
 import { startManualTimeLarkOutboxWorker } from './manualTime/larkOutbox';
+import { startAccessRequestLarkOutboxWorker } from './access/larkOutbox';
 import { startScreenshotRetentionScheduler } from './screenshots/retention';
 import { startTesterOpsSchedulers } from './testerOps/scheduler';
 import { startTimerLifecycleScheduler } from './timeLifecycle';
@@ -22,6 +23,7 @@ const server = app.listen(port, () => {
   // No-op when Lark isn't configured.
   startCardCallback();
   startManualTimeLarkOutboxWorker();
+  startAccessRequestLarkOutboxWorker();
   // Mirrors leave decided in Lark into Timo; no-op without an approval code.
   startLarkLeaveIngest();
   // Mirrors Lark "Work From Home Request" decisions; no-op without a code.

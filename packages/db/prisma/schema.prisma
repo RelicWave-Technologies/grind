@@ -75,6 +75,9 @@ model WorkspacePolicy {
   /// Workspace default idle threshold for newly-created members.
   /// Per-member overrides live on User.idleThresholdMin.
   defaultIdleThresholdMin      Int       @default(5)
+  /// Who gets the Lark card when a new person asks for access. Empty = every
+  /// active admin. Only admins can approve, so only admin ids are kept.
+  accessRequestRecipientIds    String[]  @default([])
   createdAt                    DateTime  @default(now())
   updatedAt                    DateTime  @updatedAt
 }
@@ -379,6 +382,8 @@ model User {
   manualTimeRequests               ManualTimeRequest[]       @relation("MtrRequester")
   manualTimeApprovals              ManualTimeRequest[]       @relation("MtrApprover")
   manualTimeDecisions              ManualTimeRequest[]       @relation("MtrDecider")
+  accessRequest                    AccessRequest?            @relation("AccessRequester")
+  accessDecisions                  AccessRequest[]           @relation("AccessDecider")
   managedTeamAssignment            TeamManager?
   activityFlags                    ActivityFlag[]            @relation("FlagSubject")
   resolvedFlags                    ActivityFlag[]            @relation("FlagResolver")
@@ -654,6 +659,93 @@ model LarkOAuthToken {
 enum ProvisioningStatus {
   PENDING // created on first Lark login; no session until setup or activation
   ACTIVE // admin completed setup/activated access (or bootstrap admin); may sign in
+}
+
+enum AccessRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum AccessDecisionSource {
+  LARK_CARD
+  DASHBOARD
+}
+
+/// One per person who signed in with Lark and landed PENDING. Workspace admins
+/// get a Lark card for it; the row records who let the person in (or turned
+/// them away), from where, and with which team and shift.
+model AccessRequest {
+  id          String                @id @default(cuid())
+  userId      String                @unique
+  user        User                  @relation("AccessRequester", fields: [userId], references: [id], onDelete: Cascade)
+  status      AccessRequestStatus   @default(PENDING)
+  decidedById String?
+  decidedBy   User?                 @relation("AccessDecider", fields: [decidedById], references: [id], onDelete: SetNull)
+  decidedVia  AccessDecisionSource?
+  decidedAt   DateTime?
+  /// Team and shift the Lark approver picked (null for a dashboard decision).
+  teamId      String?
+  shiftId     String?
+  createdAt   DateTime              @default(now())
+  updatedAt   DateTime              @updatedAt
+
+  messages     AccessRequestLarkMessage[]
+  outboxEvents AccessRequestLarkOutboxEvent[]
+
+  @@index([status])
+}
+
+enum AccessRequestLarkMessageStatus {
+  PENDING
+  SENT
+  SEND_FAILED
+  UPDATE_FAILED
+  DECIDED
+  /// Older than Lark's 14-day update window; left as it was.
+  EXPIRED
+}
+
+/// One admin's copy of an access-request card.
+model AccessRequestLarkMessage {
+  id              String                         @id @default(cuid())
+  accessRequestId String
+  accessRequest   AccessRequest                  @relation(fields: [accessRequestId], references: [id], onDelete: Cascade)
+  recipientOpenId String
+  messageId       String?                        @unique
+  status          AccessRequestLarkMessageStatus @default(PENDING)
+  attempts        Int                            @default(0)
+  lastError       String?
+  sentAt          DateTime?
+  createdAt       DateTime                       @default(now())
+  updatedAt       DateTime                       @updatedAt
+
+  @@unique([accessRequestId, recipientOpenId])
+  @@index([status, updatedAt])
+}
+
+enum AccessRequestLarkOutboxKind {
+  SEND_CARDS
+  FINALIZE_CARDS
+}
+
+model AccessRequestLarkOutboxEvent {
+  id              String                      @id @default(cuid())
+  accessRequestId String
+  accessRequest   AccessRequest               @relation(fields: [accessRequestId], references: [id], onDelete: Cascade)
+  kind            AccessRequestLarkOutboxKind
+  status          ManualTimeLarkOutboxStatus  @default(PENDING)
+  attempts        Int                         @default(0)
+  nextRunAt       DateTime                    @default(now())
+  lockedAt        DateTime?
+  lockedBy        String?
+  lastError       String?
+  processedAt     DateTime?
+  createdAt       DateTime                    @default(now())
+  updatedAt       DateTime                    @updatedAt
+
+  @@index([status, nextRunAt, createdAt])
+  @@index([accessRequestId])
 }
 
 /// Short-lived, single-use handoff codes for the DESKTOP AGENT's Lark login.
@@ -1313,21 +1405,21 @@ enum LeaveLedgerKind {
 /// worksheet) for the same reason those two are separate from each other:
 /// different owner, different cadence of change, different blast radius.
 model LeavePolicy {
-  id                   String    @id @default(cuid())
-  workspaceId          String    @unique
-  workspace            Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  id                     String    @id @default(cuid())
+  workspaceId            String    @unique
+  workspace              Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   /// Days granted per calendar month. Stored on the 0.5 grid like everything else.
-  monthlyAccrualDays   Float     @default(1)
+  monthlyAccrualDays     Float     @default(1)
   /// Whether an unused balance survives the year end. Carry-forward is not
   /// really a feature — it is what happens when nothing resets — so turning
   /// this OFF is the case that needs code (an expiry ADJUSTMENT entry).
-  carryForward         Boolean   @default(true)
+  carryForward           Boolean   @default(true)
   /// Ceiling on the carried balance in days. NULL = uncapped.
-  carryForwardCapDays  Float?
+  carryForwardCapDays    Float?
   /// May an approved request take a balance below zero?
-  allowNegativeBalance Boolean   @default(false)
+  allowNegativeBalance   Boolean   @default(false)
   /// Accrue for the joining month itself, or start the month after.
-  accrueOnJoinMonth    Boolean   @default(true)
+  accrueOnJoinMonth      Boolean   @default(true)
   /// The month leave accounting begins, as YYYY-MM. NULL = from each person's
   /// joining month, which is the original behaviour.
   ///
@@ -1336,42 +1428,42 @@ model LeavePolicy {
   /// is left out of the balance. The rows stay — this is a statement about what
   /// counts, not an instruction to destroy history, and somebody auditing last
   /// quarter can still see what was there.
-  ledgerStartMonth     String?
+  ledgerStartMonth       String?
   /// Extra paid-leave days granted on a person's birthday, once a year.
   /// 0 turns it off, which is the default for a workspace that has not asked
   /// for it. Granted on the day itself, and never before `ledgerStartMonth`.
-  birthdayLeaveDays    Float     @default(0)
+  birthdayLeaveDays      Float     @default(0)
   /// Company-wide: the last Saturday of each month is not a working day. A
   /// weekly shift pattern has no way to express a monthly exception, so the
   /// rule lives here and the Working Calendar applies it.
-  lastSaturdayOff      Boolean   @default(false)
+  lastSaturdayOff        Boolean   @default(false)
   /// First business date (YYYY-MM-DD) the attendance rules judge. NULL = the
   /// rules are off and no day is charged for falling short.
   ///
   /// The rules turn a short day, an unapproved work-from-home day or an absence
   /// with no approved application into leave drawn from this same balance, which
   /// is why they live beside it rather than on a policy of their own.
-  attendanceRulesFrom  String?
+  attendanceRulesFrom    String?
   /// Tracked minutes a full working day needs. Short of it the day is half a
   /// day of leave; short of `halfDayMinMinutes` too, a whole one.
-  fullDayMinMinutes    Int       @default(420)
+  fullDayMinMinutes      Int       @default(420)
   /// Tracked minutes the working half of an approved half-day leave needs, and
   /// the floor below which a full working day becomes a full leave.
-  halfDayMinMinutes    Int       @default(210)
+  halfDayMinMinutes      Int       @default(210)
   /// Working from home without an approved request counts as leave.
-  wfhRequiresApproval  Boolean   @default(true)
+  wfhRequiresApproval    Boolean   @default(true)
   /// Late arrivals a month that cost nothing. From the next one on, each late
   /// arrival is half a day of leave.
-  lateAllowedPerMonth  Int       @default(4)
+  lateAllowedPerMonth    Int       @default(4)
   /// Minutes after the shift start that a punch-in still counts as on time —
   /// the same for everyone, whatever buffer an individual shift carries.
   /// Lateness is judged by the door punch-in, not by when Timo work started.
-  lateGraceMinutes     Int       @default(30)
+  lateGraceMinutes       Int       @default(30)
   /// On a first-half leave day, the clock time (minutes after midnight) the
   /// punch-in must beat — no grace. 840 = 14:00.
-  halfDayLateAfterMinute Int     @default(840)
-  createdAt            DateTime  @default(now())
-  updatedAt            DateTime  @updatedAt
+  halfDayLateAfterMinute Int       @default(840)
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
 }
 
 /// A company holiday. Paid for everyone and it must never consume anybody's

@@ -34,6 +34,7 @@ import {
   StatRow,
 } from '../ui';
 import type { Rail } from '../ui';
+import { AccessRecipientsCard } from './AccessRecipients';
 import './policy.css';
 
 const RETENTION_OPTIONS = [30, 60, 90, 180, 365];
@@ -261,6 +262,8 @@ export function PolicyScreen() {
             </Card>
           </div>
         )}
+
+        <AccessRecipientsCard />
 
         <div className="pol-grid">
           <Card title="Workspace defaults" className="pol-card-compact" action={<Tag mono>New members</Tag>}>
