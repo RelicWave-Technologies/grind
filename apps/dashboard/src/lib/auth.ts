@@ -12,10 +12,10 @@ export function larkLoginUrl(next?: string): string {
   return `${API_BASE}/v1/auth/lark/start?${params.toString()}`;
 }
 
-export type Role = 'ADMIN' | 'MANAGER' | 'MEMBER';
+export type Role = 'ADMIN' | 'MANAGER' | 'MEMBER' | 'HR';
 
 /** How a role reads in the dashboard — the one mapping every page uses. */
-export const ROLE_LABEL: Record<Role, string> = { ADMIN: 'Admin', MANAGER: 'Manager', MEMBER: 'Member' };
+export const ROLE_LABEL: Record<Role, string> = { ADMIN: 'Admin', MANAGER: 'Manager', MEMBER: 'Member', HR: 'HR' };
 
 /** A role's label; an unknown value reads as itself. */
 export function roleLabel(role: string): string {

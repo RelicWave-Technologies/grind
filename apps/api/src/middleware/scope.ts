@@ -12,7 +12,7 @@ import {
  * Three scope tiers:
  *   - self       MEMBER → can only see their own data
  *   - team       MANAGER → can see every user in the one team they manage
- *   - workspace  ADMIN → can see every user in their workspace
+ *   - workspace  ADMIN, HR → can see every user in their workspace
  *
  * The middleware attaches `req.scope` so route handlers don't have to repeat
  * the SQL filter. Always combine with `requireAccessToken` upstream so
@@ -25,11 +25,18 @@ export interface ResolvedScope {
   scope: Scope;
   /** The full list of userIds the caller is allowed to see (incl. self). */
   userIds: string[];
+  /**
+   * Whose time, attendance, approvals and flags the caller may CHANGE. The
+   * same as `userIds` for an admin or a manager; for HR, who reads the whole
+   * workspace, only herself and the team she manages, if she manages one.
+   * Every edit route checks this, never `userIds`.
+   */
+  editUserIds: string[];
   /** The caller's workspaceId. */
   workspaceId: string;
   /** Canonical workspace-owned business timezone. */
   workspaceTimezone: string;
-  /** True only for ADMIN. Useful for admin-only routes within /v1/admin. */
+  /** True only for ADMIN — not HR, who reads the workspace but holds no admin powers. */
   isAdmin: boolean;
   capabilities: Permission[];
 }
@@ -64,12 +71,20 @@ export const attachScope: RequestHandler = async (req, res, next) => {
     if (!currentUser) return res.status(401).json({ error: 'unauthorized' });
     const role = currentUser.role;
     req.user.role = role;
-    const capabilities = roleCapabilities(role);
-    const isAdmin = hasPermission(capabilities, 'people.manage');
+    const managedTeam = role === 'HR' || role === 'MANAGER'
+      ? await prisma.teamManager.findUnique({
+          where: { userId: req.user.sub },
+          include: { team: { include: { members: { where: { deactivatedAt: null }, select: { id: true } } } } },
+        })
+      : null;
+    const capabilities = roleCapabilities(role, { managesTeam: managedTeam !== null });
+    const isAdmin = role === 'ADMIN';
+    const teamIds = new Set<string>([req.user.sub]);
+    if (managedTeam) for (const m of managedTeam.team.members) teamIds.add(m.id);
     let scope: Scope;
     let userIds: string[];
 
-    if (isAdmin) {
+    if (hasPermission(capabilities, 'reports.workspace.read')) {
       scope = 'workspace';
       // Skip deactivated users so the admin queue, /overview, reports, etc.
       // don't surface offboarded teammates. Their history stays
@@ -81,23 +96,15 @@ export const attachScope: RequestHandler = async (req, res, next) => {
       userIds = users.map((u) => u.id);
     } else if (role === 'MANAGER') {
       scope = 'team';
-      const managed = await prisma.teamManager.findUnique({
-        where: { userId: req.user.sub },
-        include: {
-          team: {
-            include: { members: { where: { deactivatedAt: null }, select: { id: true } } },
-          },
-        },
-      });
-      const memberIds = new Set<string>([req.user.sub]);
-      if (managed) for (const m of managed.team.members) memberIds.add(m.id);
-      userIds = [...memberIds];
+      userIds = [...teamIds];
     } else {
       scope = 'self';
       userIds = [req.user.sub];
     }
 
-    req.scope = { scope, userIds, workspaceId, workspaceTimezone: currentUser.workspace.timezone, isAdmin, capabilities };
+    // HR reads the workspace but changes only herself and her own team.
+    const editUserIds = role === 'HR' ? [...teamIds] : userIds;
+    req.scope = { scope, userIds, editUserIds, workspaceId, workspaceTimezone: currentUser.workspace.timezone, isAdmin, capabilities };
     next();
   } catch (err) {
     next(err);
@@ -120,6 +127,18 @@ export async function canReadEvidenceOf(req: Request, userId: string): Promise<b
     select: { id: true },
   });
   return suspended !== null;
+}
+
+/**
+ * May the caller correct this person's attendance? Their own team's (an
+ * admin's: anyone's), never their own unless they are an admin. HR reads
+ * everyone's sheet but corrects only the team she manages.
+ */
+export function canCorrectAttendanceOf(req: Request, userId: string): boolean {
+  if (!req.scope || !req.user) return false;
+  if (!hasPermission(req.scope.capabilities, 'attendance.correct')) return false;
+  if (!req.scope.editUserIds.includes(userId)) return false;
+  return req.scope.isAdmin || userId !== req.user.sub;
 }
 
 /** Gate a route to ADMIN only. Use after attachScope. */

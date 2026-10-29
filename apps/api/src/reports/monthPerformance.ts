@@ -802,6 +802,7 @@ export function monthPerformanceBlock(
 export function monthSheetResponse(
   report: MonthPerformanceReport,
   roleOf: (userId: string) => Role,
+  canEditOf: (userId: string) => boolean = () => false,
 ): MonthSheetResponse {
   const dates = report.dates.map((date) => ({
     date,
@@ -822,6 +823,7 @@ export function monthSheetResponse(
         name: row.user.name,
         email: row.user.email,
         role: roleOf(row.user.id),
+        canEdit: canEditOf(row.user.id),
         teamName: row.user.teamName,
         unitName: row.user.unitName ?? null,
         counts: monthPerformanceSummaryPairs(report, row),

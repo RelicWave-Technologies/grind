@@ -2,7 +2,7 @@ import type { Prisma } from '@grind/db';
 import { prisma } from '@grind/db';
 
 type Tx = Prisma.TransactionClient;
-type Role = 'ADMIN' | 'MANAGER' | 'MEMBER';
+type Role = 'ADMIN' | 'MANAGER' | 'MEMBER' | 'HR';
 
 export type OrgMutationResult =
   | { ok: true }
@@ -30,7 +30,8 @@ async function syncDerivedRole(tx: Tx, userId: string): Promise<void> {
     where: { id: userId },
     select: { id: true, role: true, teamId: true, managerId: true },
   });
-  if (!user || user.role === 'ADMIN') return;
+  // Admin and HR keep their role when they manage a team; MANAGER is derived only for members.
+  if (!user || user.role === 'ADMIN' || user.role === 'HR') return;
 
   const managesTeam = await tx.teamManager.findUnique({
     where: { userId },
@@ -220,7 +221,7 @@ export async function activeManagersForHomeTeam(workspaceId: string, teamId: str
       user: {
         deactivatedAt: null,
         provisioningStatus: 'ACTIVE',
-        role: { in: ['MANAGER', 'ADMIN'] },
+        role: { in: ['MANAGER', 'ADMIN', 'HR'] },
       },
     },
     orderBy: { createdAt: 'asc' },

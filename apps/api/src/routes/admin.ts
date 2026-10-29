@@ -37,6 +37,7 @@ import {
 import { agentPresence, type AgentPresence } from '../agentPresence';
 import { classifySyncHealth, SYNC_HEALTH_SELECT, type SyncHealthDto } from '../agent/syncHealth';
 import {
+  hasPermission,
   CreateApiTokenRequest,
   API_TOKEN_SCOPES,
   ATTENDANCE_RULE_LABEL,
@@ -119,7 +120,7 @@ interface UserListEntry {
   email: string;
   name: string;
   avatarUrl: string | null;
-  role: 'ADMIN' | 'MANAGER' | 'MEMBER';
+  role: 'ADMIN' | 'MANAGER' | 'MEMBER' | 'HR';
   activityRoleTitle: 'DEVELOPER' | 'DESIGNER' | 'SALES' | 'OTHER';
   teamId: string | null;
   /** The team's name, so any viewer can show and filter by it (not only admins with the team list). */
@@ -171,16 +172,17 @@ interface UserListEntry {
 adminRouter.get('/users', async (req, res, next) => {
   try {
     if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
+    const managesPeople = hasPermission(req.scope.capabilities, 'people.manage');
     const includeDeactivated =
-      req.scope.isAdmin && req.query.includeDeactivated === 'true';
-    const exposeAgentHealth = req.scope.isAdmin;
+      managesPeople && req.query.includeDeactivated === 'true';
+    const exposeAgentHealth = managesPeople;
     // Sync health is operational, not personal: whoever can see the person's
     // reports (a manager's team, an admin's workspace) sees whether their time
     // is arriving. The row set is already scoped above.
     const exposeSyncHealth = req.scope.scope !== 'self';
     // ?status=pending → the admin "Needs setup" view (Lark-provisioned users
     // awaiting a team/role + activation).
-    const pendingOnly = req.scope.isAdmin && req.query.status === 'pending';
+    const pendingOnly = managesPeople && req.query.status === 'pending';
 
     const where = {
       ...(includeDeactivated ? { workspaceId: req.scope.workspaceId } : { id: { in: req.scope.userIds } }),
@@ -365,7 +367,7 @@ type TeamSettingsUserRow = {
   email: string;
   name: string;
   avatarUrl: string | null;
-  role: 'ADMIN' | 'MANAGER' | 'MEMBER';
+  role: 'ADMIN' | 'MANAGER' | 'MEMBER' | 'HR';
   teamId: string | null;
   managerId: string | null;
   shiftId: string | null;
@@ -929,7 +931,8 @@ adminRouter.get('/manual-time-requests', requireManagerOrAbove, async (req, res,
           ],
         }
       : {};
-    const scoped: Prisma.ManualTimeRequestWhereInput = { userId: { in: req.scope.userIds }, ...inRange };
+    // The queue is what the caller may decide — HR only her own team's requests.
+    const scoped: Prisma.ManualTimeRequestWhereInput = { userId: { in: req.scope.editUserIds }, ...inRange };
 
     const include = {
       user: { select: { id: true, name: true, email: true, ...PERSON_FACETS_SELECT } },
@@ -1094,7 +1097,8 @@ adminRouter.post('/manual-time-requests/:id/decide', requireManagerOrAbove, asyn
       action,
       deciderUserId: req.user.sub,
       deciderRole: req.user.role,
-      scopeUserIds: req.scope.userIds,
+      // Who may decide, not who may read: HR decides only for her own team.
+      scopeUserIds: req.scope.editUserIds,
       reason,
     });
     if (!out) return res.status(404).json({ error: 'not_found' });
@@ -1343,7 +1347,7 @@ interface TeamDto {
     name: string;
     email: string;
     avatarUrl: string | null;
-    role: 'ADMIN' | 'MANAGER' | 'MEMBER';
+    role: 'ADMIN' | 'MANAGER' | 'MEMBER' | 'HR';
     teamId: string | null;
   }>;
   managerIds: string[];
@@ -1363,7 +1367,7 @@ function serializeTeam(t: {
       name: string;
       email: string;
       avatarUrl: string | null;
-      role: 'ADMIN' | 'MANAGER' | 'MEMBER';
+      role: 'ADMIN' | 'MANAGER' | 'MEMBER' | 'HR';
       teamId: string | null;
     };
   }>;
@@ -1633,12 +1637,20 @@ adminRouter.delete('/teams/:id', requireAdmin, async (req, res, next) => {
 // PATCH a user (ADMIN-only). role / name / teamId / shiftId.
 // ============================================================================
 
-const VALID_ROLES = ['ADMIN', 'MANAGER', 'MEMBER'] as const;
+const VALID_ROLES = ['ADMIN', 'MANAGER', 'MEMBER', 'HR'] as const;
 type ValidRole = (typeof VALID_ROLES)[number];
 const VALID_ACTIVITY_ROLE_TITLES = ['DEVELOPER', 'DESIGNER', 'SALES', 'OTHER'] as const;
 type ValidActivityRoleTitle = (typeof VALID_ACTIVITY_ROLE_TITLES)[number];
 
-adminRouter.patch('/users/:id', requireAdmin, async (req, res, next) => {
+/**
+ * HR manages people, but never an admin or another HR: those, and handing out
+ * either role, stay with admins.
+ */
+function hrMayNotManage(req: Request, target: { role: string }): boolean {
+  return !req.scope!.isAdmin && (target.role === 'ADMIN' || target.role === 'HR');
+}
+
+adminRouter.patch('/users/:id', requireCapability('people.manage'), async (req, res, next) => {
   try {
     if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
     const id = req.params.id;
@@ -1647,6 +1659,7 @@ adminRouter.patch('/users/:id', requireAdmin, async (req, res, next) => {
     if (!existing || existing.workspaceId !== req.scope.workspaceId) {
       return res.status(404).json({ error: 'not_found' });
     }
+    if (hrMayNotManage(req, existing)) return res.status(403).json({ error: 'admin_only_target' });
 
     const data: {
       name?: string;
@@ -1710,6 +1723,10 @@ adminRouter.patch('/users/:id', requireAdmin, async (req, res, next) => {
       }
       if (req.body.role === 'MANAGER') {
         return res.status(400).json({ error: 'manager_role_is_derived' });
+      }
+      // HR can make someone a member; admin and HR are an admin's to give.
+      if (!req.scope.isAdmin && req.body.role !== 'MEMBER') {
+        return res.status(403).json({ error: 'role_not_allowed' });
       }
       data.role = req.body.role as ValidRole;
     }
@@ -1947,7 +1964,7 @@ adminRouter.patch('/users/:id', requireAdmin, async (req, res, next) => {
  * Returns 409 on a duplicate email (the email is workspace-global per
  * the schema's @unique constraint on User.email).
  */
-adminRouter.post('/users', requireAdmin, async (req, res, next) => {
+adminRouter.post('/users', requireCapability('people.manage'), async (req, res, next) => {
   try {
     if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
 
@@ -1967,6 +1984,9 @@ adminRouter.post('/users', requireAdmin, async (req, res, next) => {
     }
     if (roleRaw === 'MANAGER') {
       return res.status(400).json({ error: 'manager_role_is_derived' });
+    }
+    if (!req.scope.isAdmin && roleRaw !== 'MEMBER') {
+      return res.status(403).json({ error: 'role_not_allowed' });
     }
     if (!(VALID_ACTIVITY_ROLE_TITLES as readonly string[]).includes(activityRoleRaw)) {
       return res.status(400).json({ error: 'invalid_activity_role_title' });
@@ -2013,7 +2033,7 @@ adminRouter.post('/users', requireAdmin, async (req, res, next) => {
  * default) — that is the window, and it cannot be closed without a database
  * read on every authenticated request.
  */
-adminRouter.post('/users/:id/deactivate', requireAdmin, async (req, res, next) => {
+adminRouter.post('/users/:id/deactivate', requireCapability('people.manage'), async (req, res, next) => {
   try {
     if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
     const id = req.params.id;
@@ -2022,6 +2042,7 @@ adminRouter.post('/users/:id/deactivate', requireAdmin, async (req, res, next) =
     if (!existing || existing.workspaceId !== req.scope.workspaceId) {
       return res.status(404).json({ error: 'not_found' });
     }
+    if (hrMayNotManage(req, existing)) return res.status(403).json({ error: 'admin_only_target' });
     if (existing.deactivatedAt) {
       return res.status(409).json({ error: 'already_deactivated' });
     }
@@ -2157,7 +2178,7 @@ adminRouter.delete('/users/:id', requireAdmin, async (req, res, next) => {
  * user is a no-op + 200. Reactivation does NOT reset the password —
  * the user resumes with whatever creds they had before deactivation.
  */
-adminRouter.post('/users/:id/reactivate', requireAdmin, async (req, res, next) => {
+adminRouter.post('/users/:id/reactivate', requireCapability('people.manage'), async (req, res, next) => {
   try {
     if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
     const id = req.params.id;
@@ -2166,6 +2187,7 @@ adminRouter.post('/users/:id/reactivate', requireAdmin, async (req, res, next) =
     if (!existing || existing.workspaceId !== req.scope.workspaceId) {
       return res.status(404).json({ error: 'not_found' });
     }
+    if (hrMayNotManage(req, existing)) return res.status(403).json({ error: 'admin_only_target' });
     if (!existing.deactivatedAt) {
       return res.json({ id: existing.id, deactivatedAt: null });
     }
@@ -2187,18 +2209,19 @@ adminRouter.post('/users/:id/reactivate', requireAdmin, async (req, res, next) =
  * The admin assigns team/manager/role via PATCH /users/:id first if desired;
  * this is the explicit "let them in" gate. Idempotent on an already-ACTIVE user.
  */
-adminRouter.post('/users/:id/activate', requireAdmin, async (req, res, next) => {
+adminRouter.post('/users/:id/activate', requireCapability('people.manage'), async (req, res, next) => {
   try {
     if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
     const id = req.params.id;
     if (!id) return res.status(400).json({ error: 'missing_id' });
     const existing = await prisma.user.findUnique({
       where: { id },
-      select: { id: true, workspaceId: true, provisioningStatus: true, deactivatedAt: true },
+      select: { id: true, workspaceId: true, provisioningStatus: true, deactivatedAt: true, role: true },
     });
     if (!existing || existing.workspaceId !== req.scope.workspaceId) {
       return res.status(404).json({ error: 'not_found' });
     }
+    if (hrMayNotManage(req, existing)) return res.status(403).json({ error: 'admin_only_target' });
     if (existing.deactivatedAt) return res.status(409).json({ error: 'deactivated' });
     if (existing.provisioningStatus === 'ACTIVE') {
       return res.json({ id: existing.id, provisioningStatus: 'ACTIVE' });
@@ -2415,7 +2438,7 @@ adminRouter.post('/flags/resolve-many', requireAnyCapability(['flags.team.review
       where: { id: { in: ids }, status: 'OPEN' },
       include: { user: { select: { workspaceId: true } } },
     });
-    if (flags.some((f) => !req.scope!.userIds.includes(f.userId))) {
+    if (flags.some((f) => !req.scope!.editUserIds.includes(f.userId))) {
       return res.status(403).json({ error: 'forbidden' });
     }
     // A manager is in their own scope; their own flags are an admin's call.
@@ -2493,7 +2516,7 @@ adminRouter.post('/flags/:id/resolve', requireAnyCapability(['flags.team.review'
       include: { user: { select: { workspaceId: true } } },
     });
     if (!existing) return res.status(404).json({ error: 'not_found' });
-    if (!req.scope.userIds.includes(existing.userId)) return res.status(403).json({ error: 'forbidden' });
+    if (!req.scope.editUserIds.includes(existing.userId)) return res.status(403).json({ error: 'forbidden' });
     // A manager is in their own scope; their own flags are an admin's call.
     if (!req.scope.isAdmin && existing.userId === req.user.sub) {
       return res.status(403).json({ error: 'self_review_forbidden' });

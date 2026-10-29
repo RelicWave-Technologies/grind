@@ -6,7 +6,7 @@ import { Pencil, Check, X, UserPlus, UserMinus, UserCheck, Trash2, Users as User
 import type { LaunchAtLoginState, LaunchOrigin } from '@grind/types';
 import { api, type ApiError } from '../lib/api';
 import { adminShiftsQuery, adminTeamsQuery, adminUnitsQuery, adminUsersQuery } from '../lib/queries';
-import { isAdmin, type Role } from '../lib/auth';
+import { hasCapability, isAdmin, type Role } from '../lib/auth';
 import type { Team, Shift, Unit } from '../lib/types';
 import { matchesSyncFilter, syncTag, type SyncFilter, type SyncHealth } from '../lib/syncHealth';
 import { personFacets, personSearchFields, useTableFilter } from '../lib/tableFilter';
@@ -106,14 +106,17 @@ const SCOPE_LABEL: Record<UsersResponse['scope'], string> = {
   workspace: 'Entire workspace',
 };
 
-const ROLE_RANK: Record<Role, number> = { ADMIN: 0, MANAGER: 1, MEMBER: 2 };
-const EDITABLE_ROLES: Role[] = ['ADMIN', 'MEMBER'];
+const ROLE_RANK: Record<Role, number> = { ADMIN: 0, HR: 1, MANAGER: 2, MEMBER: 3 };
+/** Roles an admin hands out here; HR can only make someone a member. MANAGER comes from Teams. */
+const EDITABLE_ROLES: Role[] = ['ADMIN', 'HR', 'MEMBER'];
+const HR_EDITABLE_ROLES: Role[] = ['MEMBER'];
 
 // Role → fixed status taxonomy (§2): one hue per role, never the accent.
 const ROLE_STATUS: Record<Role, Status> = {
   ADMIN: 'warn',
   MANAGER: 'success',
   MEMBER: 'neutral',
+  HR: 'info',
 };
 
 const STATUS_FILTER = [
@@ -145,7 +148,9 @@ export function UsersScreen() {
   const { me } = useRouteContext({ from: '/authed' });
   const { sync: syncFilter } = useSearch({ from: '/authed/users' });
   const navigate = useNavigate();
-  const canEdit = isAdmin(me.role);
+  // Admins and HR run this page; HR never edits an admin or another HR.
+  const canEdit = hasCapability(me, 'people.manage');
+  const meIsAdmin = isAdmin(me.role);
   const qc = useQueryClient();
   const [showDeactivated, setShowDeactivated] = useState(false);
   const [inviting, setInviting] = useState(false);
@@ -323,6 +328,7 @@ export function UsersScreen() {
 
       {canEdit && inviting && (
         <InviteForm
+          inviterIsAdmin={meIsAdmin}
           onClose={() => setInviting(false)}
           onCreated={() => {
             setInviting(false);
@@ -410,7 +416,9 @@ export function UsersScreen() {
                     key={u.id}
                     user={u}
                     isSelf={u.id === me.id}
-                    canEdit={canEdit}
+                    canEdit={canEdit && (meIsAdmin || (u.role !== 'ADMIN' && u.role !== 'HR'))}
+                    canDelete={meIsAdmin}
+                    roleOptions={meIsAdmin ? EDITABLE_ROLES : HR_EDITABLE_ROLES}
                     colSpan={colSpan}
                     showDeviceHealth={showDeviceHealth}
                     showSync={showSync}
@@ -488,6 +496,10 @@ interface RowProps {
   onReactivate: () => void;
   onActivate: () => void;
   onDelete: () => void;
+  /** Hard delete is an admin's alone. */
+  canDelete: boolean;
+  /** Roles this viewer may hand out (HR: member only). */
+  roleOptions: Role[];
 }
 
 function PersonRow({
@@ -509,6 +521,8 @@ function PersonRow({
   onReactivate,
   onActivate,
   onDelete,
+  canDelete,
+  roleOptions,
 }: RowProps) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(user.name);
@@ -599,7 +613,7 @@ function PersonRow({
               <Tag status={ROLE_STATUS[user.role]}>{user.role}</Tag>
             ) : (
               <Select value={role} onChange={(e) => setRole(e.target.value as Role)} aria-label="Role">
-                {EDITABLE_ROLES.map((r) => (
+                {roleOptions.map((r) => (
                   <option key={r} value={r}>
                     {r}
                   </option>
@@ -777,7 +791,7 @@ function PersonRow({
                       it sits to the left. This one opens a dialog rather than a
                       confirm() because it has to show what will be destroyed
                       before anybody agrees to destroy it. */}
-                  {!isSelf && (
+                  {!isSelf && canDelete && (
                     <IconButton
                       icon={<Trash2 size={14} strokeWidth={1.9} />}
                       aria-label="Delete permanently"
@@ -998,7 +1012,7 @@ function accessibilityPermissionTag(user: AdminUser): { label: string; status: S
 // Invite form — a calm Card above the roster. Escape cancels the email field,
 // errors render in a Banner. Same mutation + contract.
 
-function InviteForm({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+function InviteForm({ onClose, onCreated, inviterIsAdmin }: { onClose: () => void; onCreated: () => void; inviterIsAdmin: boolean }) {
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
   const [role, setRole] = useState<Role>('MEMBER');
@@ -1056,8 +1070,8 @@ function InviteForm({ onClose, onCreated }: { onClose: () => void; onCreated: ()
         <Field label="Role">
           <Select value={role} onChange={(e) => setRole(e.target.value as Role)}>
             <option value="MEMBER">MEMBER</option>
-            <option value="MANAGER">MANAGER</option>
-            <option value="ADMIN">ADMIN</option>
+            {inviterIsAdmin && <option value="HR">HR</option>}
+            {inviterIsAdmin && <option value="ADMIN">ADMIN</option>}
           </Select>
         </Field>
         <div className="usr-invite-actions">

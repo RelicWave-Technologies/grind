@@ -58,7 +58,7 @@ interface AdminUser {
   id: string;
   name: string;
   email: string;
-  role: 'ADMIN' | 'MANAGER' | 'MEMBER';
+  role: 'ADMIN' | 'MANAGER' | 'MEMBER' | 'HR';
   teamId: string | null;
   teamName: string | null;
   shiftId?: string | null;

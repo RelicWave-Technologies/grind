@@ -38,7 +38,7 @@ interface AdminUser {
   id: string;
   name: string;
   email: string;
-  role: 'ADMIN' | 'MANAGER' | 'MEMBER';
+  role: 'ADMIN' | 'MANAGER' | 'MEMBER' | 'HR';
 }
 
 /**
@@ -83,7 +83,8 @@ export function MeTodayScreen() {
   const focusEndMs = parseSearchEpochMs(search.focusEnd);
   const [date, setDate] = useState<string>(searchDate);
   const [targetUserId, setTargetUserId] = useState<string>(searchUserId);
-  const showPicker = isManagerOrAbove(me.role);
+  // Whoever may edit someone else's time picks whose; HR only for her team.
+  const showPicker = isManagerOrAbove(me.role) || hasCapability(me, 'time.team.edit');
   const editable = targetUserId === me.id || hasCapability(me, 'time.team.edit');
 
   useEffect(() => {
