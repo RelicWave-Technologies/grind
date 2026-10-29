@@ -78,6 +78,7 @@ export const ROLE_CAPABILITIES: Record<Role, readonly Permission[]> = {
  */
 const HR_TEAM_EDIT_CAPABILITIES = [
   'time.team.edit',
+  'team.settings.manage',
   'attendance.correct',
   'approvals.team.decide',
   'flags.team.review',

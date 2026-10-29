@@ -302,6 +302,7 @@ reportsRouter.get('/team/member', requireCapability('reports.team.read'), async 
       approvals,
       profile,
       canCorrect: canCorrectAttendanceOf(req, target.user.id),
+      canEdit: req.scope.editUserIds.includes(target.user.id),
     };
     res.json(response);
   } catch (err) {

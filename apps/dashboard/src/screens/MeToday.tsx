@@ -5,7 +5,7 @@ import { useRouteContext, useSearch } from '@tanstack/react-router';
 import { CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react';
 import { api } from '../lib/api';
 import { adminUsersQuery, editTimeDayQuery, larkMyTasksQuery, workspaceUsersQuery } from '../lib/queries';
-import { hasCapability, isManagerOrAbove, roleLabel } from '../lib/auth';
+import { hasCapability, roleLabel } from '../lib/auth';
 import { dayBlockRowId } from '../lib/dayBlockIdentity';
 import type { DayInsight, WorkspaceUser } from '../lib/types';
 import { addDays, calendarDateInstant, fmtDayLabel, fmtDurationMs, fmtTime, todayKey } from '../lib/format';
@@ -39,6 +39,8 @@ interface AdminUser {
   name: string;
   email: string;
   role: 'ADMIN' | 'MANAGER' | 'MEMBER' | 'HR';
+  /** May the caller change this person's time (server-decided; HR: only her own team). */
+  canEdit?: boolean;
 }
 
 /**
@@ -83,9 +85,9 @@ export function MeTodayScreen() {
   const focusEndMs = parseSearchEpochMs(search.focusEnd);
   const [date, setDate] = useState<string>(searchDate);
   const [targetUserId, setTargetUserId] = useState<string>(searchUserId);
-  // Whoever may edit someone else's time picks whose; HR only for her team.
-  const showPicker = isManagerOrAbove(me.role) || hasCapability(me, 'time.team.edit');
-  const editable = targetUserId === me.id || hasCapability(me, 'time.team.edit');
+  // Whoever may edit someone else's time picks whose — among the people the
+  // server says they may change (HR: only her own team, not everyone she reads).
+  const showPicker = hasCapability(me, 'time.team.edit');
 
   useEffect(() => {
     setDate(searchDate);
@@ -95,7 +97,13 @@ export function MeTodayScreen() {
     setTargetUserId(searchUserId);
   }, [searchUserId]);
 
-  const usersQ = useQuery({ ...adminUsersQuery<{ users: AdminUser[] }>(), enabled: showPicker });
+  // Also loaded for a deep link to someone else's day (Reports → a member's
+  // day), so the page can name them and know whether it may edit.
+  const usersQ = useQuery({ ...adminUsersQuery<{ users: AdminUser[] }>(), enabled: showPicker || targetUserId !== me.id });
+  const editableUsers = useMemo(() => (usersQ.data?.users ?? []).filter((u) => u.canEdit), [usersQ.data]);
+  const editable =
+    targetUserId === me.id ||
+    (hasCapability(me, 'time.team.edit') && editableUsers.some((u) => u.id === targetUserId));
 
   // Workspace directory for the attendee picker. Available to every
   // authenticated user (server-side handler is /v1/workspace/users) — needed
@@ -294,7 +302,7 @@ export function MeTodayScreen() {
 
   const isToday = date === todayKey(tz);
   const tzLabel = tz.replace(/_/g, ' ');
-  const isSelf = !targetUser || targetUser.id === me.id;
+  const isSelf = targetUserId === me.id;
   const titleName = targetUser
     ? targetUser.id === me.id
       ? 'Edit Time'
@@ -328,17 +336,19 @@ export function MeTodayScreen() {
           isSelf
             ? 'Review and edit your timesheet.'
             : targetUser
-              ? `Editing ${targetUser.name}’s time with manager scope.`
+              ? editable
+                ? `Editing ${targetUser.name}’s time with manager scope.`
+                : `Viewing ${targetUser.name}’s time.`
               : 'Loading selected teammate…'
         }
         actions={
           <Toolbar className="myd-header-toolbar">
-            {showPicker && usersQ.data && (
+            {showPicker && editableUsers.length > 0 && (
               <PersonPicker
                 className="myd-user-select"
                 aria-label="View someone's day"
                 block={false}
-                users={[...usersQ.data.users].sort((a, b) =>
+                users={[...editableUsers].sort((a, b) =>
                   a.id === me.id ? -1 : b.id === me.id ? 1 : a.name.localeCompare(b.name),
                 )}
                 value={targetUserId}

@@ -1211,7 +1211,8 @@ function TeamMemberDrawer({
             <TeamMemberApprovalsPanel
               approvals={q.data.approvals}
               tz={tz}
-              canDecide={canDecideApprovals}
+              // HR reads everyone but decides only for her own team: the server says whose.
+              canDecide={canDecideApprovals && !!q.data?.canEdit}
               currentUserId={me.id}
               canSelfApproveOwn={canSelfApproveOwn}
               decisionError={decisionError}

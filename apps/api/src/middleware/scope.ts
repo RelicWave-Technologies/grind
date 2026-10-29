@@ -113,15 +113,16 @@ export const attachScope: RequestHandler = async (req, res, next) => {
 
 /**
  * May the caller read this person's evidence (screenshots)? Everyone in scope,
- * plus — for an admin — a suspended person of the same workspace. Scope leaves
- * suspended people out so lists stay current, but the month report keeps them
- * on the months they worked, and an admin reviewing those months must be able
- * to open what they captured. Managers never see past their live team.
+ * plus — for a workspace reader (an admin, HR) — a suspended person of the same
+ * workspace. Scope leaves suspended people out so lists stay current, but the
+ * month report keeps them on the months they worked, and whoever reviews those
+ * months must be able to open what they captured. Managers never see past
+ * their live team.
  */
 export async function canReadEvidenceOf(req: Request, userId: string): Promise<boolean> {
   if (!req.scope) return false;
   if (req.scope.userIds.includes(userId)) return true;
-  if (!req.scope.isAdmin) return false;
+  if (req.scope.scope !== 'workspace') return false;
   const suspended = await prisma.user.findFirst({
     where: { id: userId, workspaceId: req.scope.workspaceId, deactivatedAt: { not: null } },
     select: { id: true },
@@ -167,14 +168,3 @@ export function requireAnyCapability(permissions: readonly Permission[]): Reques
     next();
   };
 }
-
-/**
- * Gate a route to MANAGER or ADMIN. The approvals queue lives here:
- * MEMBERs have their own self-view via /v1/time-requests and don't need —
- * shouldn't see — anyone else's queue.
- */
-export const requireManagerOrAbove: RequestHandler = (req, res, next) => {
-  if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
-  if (req.scope.scope === 'self') return res.status(403).json({ error: 'manager_or_above_only' });
-  next();
-};
