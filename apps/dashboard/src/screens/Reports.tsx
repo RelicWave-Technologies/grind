@@ -1122,7 +1122,7 @@ function TeamMemberDrawer({
     staleTime: 60_000,
     refetchOnWindowFocus: false,
   });
-  // The server decides (HR reads everyone but corrects only her own team).
+  // The server decides whose days the caller may correct.
   const canCorrectAttendance = !!q.data?.canCorrect;
 
   const decide = useMutation({
@@ -1211,7 +1211,7 @@ function TeamMemberDrawer({
             <TeamMemberApprovalsPanel
               approvals={q.data.approvals}
               tz={tz}
-              // HR reads everyone but decides only for her own team: the server says whose.
+              // The server says whose requests the caller may decide.
               canDecide={canDecideApprovals && !!q.data?.canEdit}
               currentUserId={me.id}
               canSelfApproveOwn={canSelfApproveOwn}

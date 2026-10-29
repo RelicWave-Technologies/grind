@@ -9,7 +9,7 @@ import { signAccessToken } from '../src/lib/jwt';
  * endpoint that changes somebody's records is tried by the people who must be
  * refused — an HR without a team, an HR outside her team, a manager on another
  * team, a member on anyone, HR on an admin — and by the ones who must not be.
- * Reads are checked for HR's workspace-wide reach.
+ * HR's extra is People alone: her reports are her position's.
  */
 
 const app = buildApp();
@@ -157,30 +157,39 @@ describe('HR runs People — never on an admin or another HR', () => {
   });
 });
 
-describe('HR without a team reads everything and changes nothing', () => {
-  it('reads every row of the month sheet, none editable', async () => {
+describe('HR without a team: People everywhere, reports like a member', () => {
+  it('lists every active person on People, but may change none of their time', async () => {
+    const s = await seed();
+    const res = await request(app).get('/v1/admin/users').set(bearer(s.hr.token));
+    expect(res.status).toBe(200);
+    const users = res.body.users as Array<{ id: string; canEdit: boolean; sync: unknown }>;
+    expect(users.map((u) => u.id)).toEqual(expect.arrayContaining([s.admin.id, s.memA.id, s.memH.id, s.loner.id, s.hr2.id]));
+    for (const u of users) {
+      if (u.id === s.hr.id) continue;
+      expect(u.canEdit).toBe(false);
+      // Sync health is about someone's time — not hers to read.
+      expect(u.sync).toBeNull();
+    }
+  });
+
+  it('reads only her own month sheet row', async () => {
     const s = await seed();
     const res = await request(app).get('/v1/reports/month-sheet?month=2026-09').set(bearer(s.hr.token));
     expect(res.status).toBe(200);
-    const rows = res.body.rows as Array<{ userId: string; canEdit: boolean }>;
-    expect(rows.map((r) => r.userId)).toEqual(expect.arrayContaining([s.memA.id, s.memH.id, s.admin.id, s.loner.id]));
-    expect(rows.every((r) => r.canEdit === false)).toBe(true);
+    expect((res.body.rows as Array<{ userId: string }>).map((r) => r.userId)).toEqual([s.hr.id]);
   });
 
-  it('opens anyone’s member report without edit rights', async () => {
+  it('cannot open anyone else’s report, screenshots, downloads or team views', async () => {
     const s = await seed();
-    const res = await request(app)
-      .get(`/v1/reports/team/member?userId=${s.memA.id}&from=2026-09-01&to=2026-09-30`)
-      .set(bearer(s.hr.token));
-    expect(res.status).toBe(200);
-    expect(res.body.canCorrect).toBe(false);
-    expect(res.body.canEdit).toBe(false);
-  });
-
-  it('can download the month and the timesheets', async () => {
-    const s = await seed();
-    expect((await request(app).get('/v1/reports/month-performance.csv?month=2026-09').set(bearer(s.hr.token))).status).toBe(200);
-    expect((await request(app).get('/v1/admin/timesheets.csv?from=2026-09-01&to=2026-09-14').set(bearer(s.hr.token))).status).toBe(200);
+    const t = bearer(s.hr.token);
+    expect((await request(app).get(`/v1/reports/team/member?userId=${s.memA.id}&from=2026-09-01&to=2026-09-30`).set(t)).status).toBe(403);
+    expect((await request(app).get(`/v1/reports/team/member/day-screenshots?userId=${s.memA.id}&date=2026-09-10`).set(t)).status).toBe(403);
+    expect((await request(app).get(`/v1/insights/day?userId=${s.memA.id}&date=2026-09-10`).set(t)).status).toBe(403);
+    expect((await request(app).get('/v1/reports/team/summary?from=2026-09-01&to=2026-09-30').set(t)).status).toBe(403);
+    expect((await request(app).get('/v1/reports/month-performance.csv?month=2026-09').set(t)).status).toBe(403);
+    expect((await request(app).get('/v1/reports/month-performance.xlsx?month=2026-09').set(t)).status).toBe(403);
+    expect((await request(app).get('/v1/admin/timesheets?from=2026-09-01&to=2026-09-14').set(t)).status).toBe(403);
+    expect((await request(app).get('/v1/admin/timesheets.csv?from=2026-09-01&to=2026-09-14').set(t)).status).toBe(403);
   });
 
   it('is refused every write on someone else', async () => {
@@ -225,17 +234,30 @@ describe('HR without a team reads everything and changes nothing', () => {
     expect((await request(app).get('/v1/admin/monitoring-settings-audits').set(t)).status).toBe(403);
   });
 
-  it('may open a suspended person’s screenshots, as an admin may; a manager may not', async () => {
+  it('a suspended person’s screenshots stay an admin’s', async () => {
     const s = await seed();
     await prisma.user.update({ where: { id: s.memA.id }, data: { deactivatedAt: new Date() } });
     const path = `/v1/reports/team/member/day-screenshots?userId=${s.memA.id}&date=2026-09-10`;
-    expect((await request(app).get(path).set(bearer(s.hr.token))).status).toBe(200);
     expect((await request(app).get(path).set(bearer(s.admin.token))).status).toBe(200);
+    expect((await request(app).get(path).set(bearer(s.hr.token))).status).toBe(403);
     expect((await request(app).get(path).set(bearer(s.mgrA.token))).status).toBe(403);
   });
 });
 
-describe('HR who manages a team gets a manager’s edit powers for that team only', () => {
+describe('HR who manages a team is that team’s manager, and no more', () => {
+  it('reads her team’s reports and Team today, not anyone else’s', async () => {
+    const s = await seed();
+    const t = bearer(s.hrLead.token);
+    const sheet = await request(app).get('/v1/reports/month-sheet?month=2026-09').set(t);
+    expect((sheet.body.rows as Array<{ userId: string }>).map((r) => r.userId).sort()).toEqual([s.hrLead.id, s.memH.id].sort());
+    expect((await request(app).get(`/v1/reports/team/member?userId=${s.memH.id}&from=2026-09-01&to=2026-09-30`).set(t)).status).toBe(200);
+    expect((await request(app).get(`/v1/reports/team/member?userId=${s.memA.id}&from=2026-09-01&to=2026-09-30`).set(t)).status).toBe(403);
+    const overview = await request(app).get('/v1/admin/overview').set(t);
+    expect(overview.status).toBe(200);
+    expect(overview.body.scope).toBe('team');
+    expect((await request(app).get('/v1/reports/month-performance.csv?month=2026-09').set(t)).status).toBe(200);
+  });
+
   it('corrects her team’s attendance, not anyone else’s, not her own', async () => {
     const s = await seed();
     const t = bearer(s.hrLead.token);
@@ -301,7 +323,7 @@ describe('HR who manages a team gets a manager’s edit powers for that team onl
     const sheet = await request(app).get('/v1/reports/month-sheet?month=2026-09').set(t);
     const rows = sheet.body.rows as Array<{ userId: string; canEdit: boolean }>;
     expect(rows.find((r) => r.userId === s.memH.id)?.canEdit).toBe(true);
-    expect(rows.find((r) => r.userId === s.memA.id)?.canEdit).toBe(false);
+    expect(rows.find((r) => r.userId === s.memA.id)).toBeUndefined();
     const report = await request(app).get(`/v1/reports/team/member?userId=${s.memH.id}&from=2026-09-01&to=2026-09-30`).set(t);
     expect(report.body.canEdit).toBe(true);
     expect(report.body.canCorrect).toBe(true);

@@ -39,7 +39,7 @@ interface AdminUser {
   name: string;
   email: string;
   role: 'ADMIN' | 'MANAGER' | 'MEMBER' | 'HR';
-  /** May the caller change this person's time (server-decided; HR: only her own team). */
+  /** May the caller change this person's time (server-decided). */
   canEdit?: boolean;
 }
 
@@ -86,7 +86,7 @@ export function MeTodayScreen() {
   const [date, setDate] = useState<string>(searchDate);
   const [targetUserId, setTargetUserId] = useState<string>(searchUserId);
   // Whoever may edit someone else's time picks whose — among the people the
-  // server says they may change (HR: only her own team, not everyone she reads).
+  // server says they may change (HR's People list reaches further than that).
   const showPicker = hasCapability(me, 'time.team.edit');
 
   useEffect(() => {

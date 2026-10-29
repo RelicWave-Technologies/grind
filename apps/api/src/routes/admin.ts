@@ -159,8 +159,8 @@ interface UserListEntry {
    */
   sync: SyncHealthDto | null;
   /**
-   * May the caller change this person's time, approvals and flags? The same as
-   * seeing them for an admin or a manager; for HR, only her own team.
+   * May the caller change this person's time, approvals and flags? Their own
+   * scope's people — not everyone HR's People list shows her.
    */
   canEdit: boolean;
 }
@@ -183,14 +183,20 @@ adminRouter.get('/users', async (req, res, next) => {
     const exposeAgentHealth = managesPeople;
     // Sync health is operational, not personal: whoever can see the person's
     // reports (a manager's team, an admin's workspace) sees whether their time
-    // is arriving. The row set is already scoped above.
+    // is arriving — per row below, since a People list can reach further.
     const exposeSyncHealth = req.scope.scope !== 'self';
     // ?status=pending → the admin "Needs setup" view (Lark-provisioned users
     // awaiting a team/role + activation).
     const pendingOnly = managesPeople && req.query.status === 'pending';
 
+    // Whoever runs People (an admin, HR) lists the whole workspace — HR's
+    // reports scope is only self or her team, but People is hers everywhere.
     const where = {
-      ...(includeDeactivated ? { workspaceId: req.scope.workspaceId } : { id: { in: req.scope.userIds } }),
+      ...(includeDeactivated
+        ? { workspaceId: req.scope.workspaceId }
+        : managesPeople
+          ? { workspaceId: req.scope.workspaceId, deactivatedAt: null }
+          : { id: { in: req.scope.userIds } }),
       ...(pendingOnly ? { provisioningStatus: 'PENDING' as const } : {}),
     };
 
@@ -237,6 +243,7 @@ adminRouter.get('/users', async (req, res, next) => {
     });
     const presenceCheckedAt = new Date();
     const editable = new Set(req.scope.editUserIds);
+    const readable = new Set(req.scope.userIds);
     const out: UserListEntry[] = users.map((u) => ({
       id: u.id,
       email: u.email,
@@ -285,7 +292,9 @@ adminRouter.get('/users', async (req, res, next) => {
           ? u.agentLaunchAtLoginUpdatedAt.toISOString()
           : null,
       ...(exposeAgentHealth ? { idleWarningSeconds: u.idleWarningSeconds } : {}),
-      sync: exposeSyncHealth && u.deactivatedAt === null ? classifySyncHealth(u, presenceCheckedAt) : null,
+      // Only for people whose reports the caller reads: HR's People list
+      // reaches further than her reports, and sync health is about their time.
+      sync: exposeSyncHealth && u.deactivatedAt === null && readable.has(u.id) ? classifySyncHealth(u, presenceCheckedAt) : null,
       canEdit: editable.has(u.id),
     }));
     res.json({ users: out, scope: req.scope.scope });
@@ -1497,9 +1506,9 @@ adminRouter.get('/teams', requireCapability('teams.read'), async (req, res, next
   try {
     if (!req.scope || !req.user) return res.status(401).json({ error: 'unauthorized' });
     const where: Prisma.TeamWhereInput = { workspaceId: req.scope.workspaceId };
-    // A workspace reader (admin, HR — who assigns people to teams) sees every
+    // Whoever runs People (admin, HR — who assigns people to teams) sees every
     // team; a manager the one they manage.
-    if (req.scope.scope !== 'workspace') where.managers = { some: { userId: req.user.sub } };
+    if (!hasPermission(req.scope.capabilities, 'people.manage')) where.managers = { some: { userId: req.user.sub } };
     const teams = await prisma.team.findMany({
       where,
       include: includeTeamForDto(),

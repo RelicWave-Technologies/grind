@@ -11,8 +11,11 @@ import {
  *
  * Three scope tiers:
  *   - self       MEMBER → can only see their own data
- *   - team       MANAGER → can see every user in the one team they manage
- *   - workspace  ADMIN, HR → can see every user in their workspace
+ *   - team       MANAGER, or HR who manages a team → every user in that team
+ *   - workspace  ADMIN → every user in their workspace
+ *
+ * HR's People tab reaches the whole workspace through `people.manage` on its
+ * own routes, never through this scope: her reports are her position's.
  *
  * The middleware attaches `req.scope` so route handlers don't have to repeat
  * the SQL filter. Always combine with `requireAccessToken` upstream so
@@ -26,9 +29,9 @@ export interface ResolvedScope {
   /** The full list of userIds the caller is allowed to see (incl. self). */
   userIds: string[];
   /**
-   * Whose time, attendance, approvals and flags the caller may CHANGE. The
-   * same as `userIds` for an admin or a manager; for HR, who reads the whole
-   * workspace, only herself and the team she manages, if she manages one.
+   * Whose time, attendance, approvals and flags the caller may CHANGE. Today
+   * the same list as `userIds` for every role; kept apart so that a role which
+   * reads more than it may change can never widen its edits by accident.
    * Every edit route checks this, never `userIds`.
    */
   editUserIds: string[];
@@ -36,7 +39,7 @@ export interface ResolvedScope {
   workspaceId: string;
   /** Canonical workspace-owned business timezone. */
   workspaceTimezone: string;
-  /** True only for ADMIN — not HR, who reads the workspace but holds no admin powers. */
+  /** True only for ADMIN — never HR, whose People powers come from `people.manage`. */
   isAdmin: boolean;
   capabilities: Permission[];
 }
@@ -94,7 +97,7 @@ export const attachScope: RequestHandler = async (req, res, next) => {
         select: { id: true },
       });
       userIds = users.map((u) => u.id);
-    } else if (role === 'MANAGER') {
+    } else if (role === 'MANAGER' || (role === 'HR' && managedTeam)) {
       scope = 'team';
       userIds = [...teamIds];
     } else {
@@ -102,8 +105,7 @@ export const attachScope: RequestHandler = async (req, res, next) => {
       userIds = [req.user.sub];
     }
 
-    // HR reads the workspace but changes only herself and her own team.
-    const editUserIds = role === 'HR' ? [...teamIds] : userIds;
+    const editUserIds = userIds;
     req.scope = { scope, userIds, editUserIds, workspaceId, workspaceTimezone: currentUser.workspace.timezone, isAdmin, capabilities };
     next();
   } catch (err) {
@@ -113,16 +115,15 @@ export const attachScope: RequestHandler = async (req, res, next) => {
 
 /**
  * May the caller read this person's evidence (screenshots)? Everyone in scope,
- * plus — for a workspace reader (an admin, HR) — a suspended person of the same
- * workspace. Scope leaves suspended people out so lists stay current, but the
- * month report keeps them on the months they worked, and whoever reviews those
- * months must be able to open what they captured. Managers never see past
- * their live team.
+ * plus — for an admin — a suspended person of the same workspace. Scope leaves
+ * suspended people out so lists stay current, but the month report keeps them
+ * on the months they worked, and an admin reviewing those months must be able
+ * to open what they captured. Managers never see past their live team.
  */
 export async function canReadEvidenceOf(req: Request, userId: string): Promise<boolean> {
   if (!req.scope) return false;
   if (req.scope.userIds.includes(userId)) return true;
-  if (req.scope.scope !== 'workspace') return false;
+  if (!req.scope.isAdmin) return false;
   const suspended = await prisma.user.findFirst({
     where: { id: userId, workspaceId: req.scope.workspaceId, deactivatedAt: { not: null } },
     select: { id: true },
@@ -132,8 +133,8 @@ export async function canReadEvidenceOf(req: Request, userId: string): Promise<b
 
 /**
  * May the caller correct this person's attendance? Their own team's (an
- * admin's: anyone's), never their own unless they are an admin. HR reads
- * everyone's sheet but corrects only the team she manages.
+ * admin's: anyone's), never their own unless they are an admin. HR corrects
+ * only the team she manages, like any manager.
  */
 export function canCorrectAttendanceOf(req: Request, userId: string): boolean {
   if (!req.scope || !req.user) return false;
