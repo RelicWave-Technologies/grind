@@ -3,7 +3,7 @@ import { prisma, type Prisma } from '@grind/db';
 import { requireAccessToken } from '../middleware/auth';
 import { readMemoScope } from '../lib/readMemo';
 import { PERSON_FACETS_SELECT, personFacets } from '../lib/personFacets';
-import { attachScope, requireAdmin, requireAnyCapability, requireCapability, requireManagerOrAbove } from '../middleware/scope';
+import { attachScope, requireAdmin, requireAnyCapability, requireCapability } from '../middleware/scope';
 import { decideByUser } from '../lark/decideByUser';
 import { triageRequest, type TriageResult } from '../ai/triage';
 import { explainFlag } from '../ai/explainFlag';
@@ -37,6 +37,7 @@ import {
 import { agentPresence, type AgentPresence } from '../agentPresence';
 import { classifySyncHealth, SYNC_HEALTH_SELECT, type SyncHealthDto } from '../agent/syncHealth';
 import {
+  hasPermission,
   CreateApiTokenRequest,
   API_TOKEN_SCOPES,
   ATTENDANCE_RULE_LABEL,
@@ -120,7 +121,7 @@ interface UserListEntry {
   email: string;
   name: string;
   avatarUrl: string | null;
-  role: 'ADMIN' | 'MANAGER' | 'MEMBER';
+  role: 'ADMIN' | 'MANAGER' | 'MEMBER' | 'HR';
   activityRoleTitle: 'DEVELOPER' | 'DESIGNER' | 'SALES' | 'OTHER';
   teamId: string | null;
   /** The team's name, so any viewer can show and filter by it (not only admins with the team list). */
@@ -158,6 +159,11 @@ interface UserListEntry {
    * and admins only; null for a member's own row and for deactivated people.
    */
   sync: SyncHealthDto | null;
+  /**
+   * May the caller change this person's time, approvals and flags? Their own
+   * scope's people — not everyone HR's People list shows her.
+   */
+  canEdit: boolean;
 }
 
 /**
@@ -172,19 +178,26 @@ interface UserListEntry {
 adminRouter.get('/users', async (req, res, next) => {
   try {
     if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
+    const managesPeople = hasPermission(req.scope.capabilities, 'people.manage');
     const includeDeactivated =
-      req.scope.isAdmin && req.query.includeDeactivated === 'true';
-    const exposeAgentHealth = req.scope.isAdmin;
+      managesPeople && req.query.includeDeactivated === 'true';
+    const exposeAgentHealth = managesPeople;
     // Sync health is operational, not personal: whoever can see the person's
     // reports (a manager's team, an admin's workspace) sees whether their time
-    // is arriving. The row set is already scoped above.
+    // is arriving — per row below, since a People list can reach further.
     const exposeSyncHealth = req.scope.scope !== 'self';
     // ?status=pending → the admin "Needs setup" view (Lark-provisioned users
     // awaiting a team/role + activation).
-    const pendingOnly = req.scope.isAdmin && req.query.status === 'pending';
+    const pendingOnly = managesPeople && req.query.status === 'pending';
 
+    // Whoever runs People (an admin, HR) lists the whole workspace — HR's
+    // reports scope is only self or her team, but People is hers everywhere.
     const where = {
-      ...(includeDeactivated ? { workspaceId: req.scope.workspaceId } : { id: { in: req.scope.userIds } }),
+      ...(includeDeactivated
+        ? { workspaceId: req.scope.workspaceId }
+        : managesPeople
+          ? { workspaceId: req.scope.workspaceId, deactivatedAt: null }
+          : { id: { in: req.scope.userIds } }),
       ...(pendingOnly ? { provisioningStatus: 'PENDING' as const } : {}),
     };
 
@@ -230,6 +243,8 @@ adminRouter.get('/users', async (req, res, next) => {
       orderBy: [{ deactivatedAt: 'asc' }, { role: 'asc' }, { name: 'asc' }],
     });
     const presenceCheckedAt = new Date();
+    const editable = new Set(req.scope.editUserIds);
+    const readable = new Set(req.scope.userIds);
     const out: UserListEntry[] = users.map((u) => ({
       id: u.id,
       email: u.email,
@@ -278,7 +293,10 @@ adminRouter.get('/users', async (req, res, next) => {
           ? u.agentLaunchAtLoginUpdatedAt.toISOString()
           : null,
       ...(exposeAgentHealth ? { idleWarningSeconds: u.idleWarningSeconds } : {}),
-      sync: exposeSyncHealth && u.deactivatedAt === null ? classifySyncHealth(u, presenceCheckedAt) : null,
+      // Only for people whose reports the caller reads: HR's People list
+      // reaches further than her reports, and sync health is about their time.
+      sync: exposeSyncHealth && u.deactivatedAt === null && readable.has(u.id) ? classifySyncHealth(u, presenceCheckedAt) : null,
+      canEdit: editable.has(u.id),
     }));
     res.json({ users: out, scope: req.scope.scope });
   } catch (err) {
@@ -366,7 +384,7 @@ type TeamSettingsUserRow = {
   email: string;
   name: string;
   avatarUrl: string | null;
-  role: 'ADMIN' | 'MANAGER' | 'MEMBER';
+  role: 'ADMIN' | 'MANAGER' | 'MEMBER' | 'HR';
   teamId: string | null;
   managerId: string | null;
   shiftId: string | null;
@@ -478,9 +496,10 @@ async function loadTeamSettingsMembers(userIds: string[], exposeIdleWarning = fa
   );
 }
 
+/** Whose capture settings the caller may change — HR only her own team's, never the workspace she reads. */
 function scopedTeamSettingIds(req: Request): string[] {
   if (!req.scope || !req.user) return [];
-  return req.scope.userIds;
+  return req.scope.editUserIds;
 }
 
 adminRouter.get('/team-member-settings', requireCapability('team.settings.manage'), async (req, res, next) => {
@@ -495,7 +514,7 @@ adminRouter.get('/team-member-settings', requireCapability('team.settings.manage
       }),
     ]);
     const response: TeamSettingsResponse = {
-      scope: req.scope.scope === 'workspace' ? 'workspace' : 'team',
+      scope: req.scope.isAdmin ? 'workspace' : 'team',
       members,
       shifts: shifts.map(serializeShift),
     };
@@ -906,9 +925,11 @@ function adjacencyFor(
  * and stays a short page.
  */
 const DECIDED_PAGE_SIZE = 200;
+/** Who has an approvals queue: managers, admins, and HR for the team she manages. */
+const APPROVAL_DECIDERS = ['approvals.team.decide', 'approvals.workspace.decide'] as const;
 const DECIDED_RANGED_MAX = 5_000;
 
-adminRouter.get('/manual-time-requests', requireManagerOrAbove, async (req, res, next) => {
+adminRouter.get('/manual-time-requests', requireAnyCapability(APPROVAL_DECIDERS), async (req, res, next) => {
   try {
     if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
     const hasRange = req.query.from !== undefined || req.query.to !== undefined || req.query.tz !== undefined;
@@ -933,7 +954,8 @@ adminRouter.get('/manual-time-requests', requireManagerOrAbove, async (req, res,
           ],
         }
       : {};
-    const scoped: Prisma.ManualTimeRequestWhereInput = { userId: { in: req.scope.userIds }, ...inRange };
+    // The queue is what the caller may decide — HR only her own team's requests.
+    const scoped: Prisma.ManualTimeRequestWhereInput = { userId: { in: req.scope.editUserIds }, ...inRange };
 
     const include = {
       user: { select: { id: true, name: true, email: true, ...PERSON_FACETS_SELECT } },
@@ -956,7 +978,7 @@ adminRouter.get('/manual-time-requests', requireManagerOrAbove, async (req, res,
     const [pendingRowsAll, decidedRows] = await Promise.all([
       wantsPending
         ? prisma.manualTimeRequest.findMany({
-            where: { userId: { in: req.scope.userIds }, status: 'PENDING' },
+            where: { userId: { in: req.scope.editUserIds }, status: 'PENDING' },
             include,
             orderBy: [{ createdAt: 'asc' }],
           })
@@ -1083,7 +1105,7 @@ adminRouter.get('/manual-time-requests', requireManagerOrAbove, async (req, res,
  * userId is in `req.scope.userIds`. We block MEMBERs at the router level so
  * a MEMBER hitting this endpoint never even hits the service.
  */
-adminRouter.post('/manual-time-requests/:id/decide', requireManagerOrAbove, async (req, res, next) => {
+adminRouter.post('/manual-time-requests/:id/decide', requireAnyCapability(APPROVAL_DECIDERS), async (req, res, next) => {
   try {
     if (!req.scope || !req.user) return res.status(401).json({ error: 'unauthorized' });
     const id = req.params.id;
@@ -1098,7 +1120,8 @@ adminRouter.post('/manual-time-requests/:id/decide', requireManagerOrAbove, asyn
       action,
       deciderUserId: req.user.sub,
       deciderRole: req.user.role,
-      scopeUserIds: req.scope.userIds,
+      // Who may decide, not who may read: HR decides only for her own team.
+      scopeUserIds: req.scope.editUserIds,
       reason,
     });
     if (!out) return res.status(404).json({ error: 'not_found' });
@@ -1347,7 +1370,7 @@ interface TeamDto {
     name: string;
     email: string;
     avatarUrl: string | null;
-    role: 'ADMIN' | 'MANAGER' | 'MEMBER';
+    role: 'ADMIN' | 'MANAGER' | 'MEMBER' | 'HR';
     teamId: string | null;
   }>;
   managerIds: string[];
@@ -1367,7 +1390,7 @@ function serializeTeam(t: {
       name: string;
       email: string;
       avatarUrl: string | null;
-      role: 'ADMIN' | 'MANAGER' | 'MEMBER';
+      role: 'ADMIN' | 'MANAGER' | 'MEMBER' | 'HR';
       teamId: string | null;
     };
   }>;
@@ -1487,7 +1510,9 @@ adminRouter.get('/teams', requireCapability('teams.read'), async (req, res, next
   try {
     if (!req.scope || !req.user) return res.status(401).json({ error: 'unauthorized' });
     const where: Prisma.TeamWhereInput = { workspaceId: req.scope.workspaceId };
-    if (!req.scope.isAdmin) where.managers = { some: { userId: req.user.sub } };
+    // Whoever runs People (admin, HR — who assigns people to teams) sees every
+    // team; a manager the one they manage.
+    if (!hasPermission(req.scope.capabilities, 'people.manage')) where.managers = { some: { userId: req.user.sub } };
     const teams = await prisma.team.findMany({
       where,
       include: includeTeamForDto(),
@@ -1637,12 +1662,20 @@ adminRouter.delete('/teams/:id', requireAdmin, async (req, res, next) => {
 // PATCH a user (ADMIN-only). role / name / teamId / shiftId.
 // ============================================================================
 
-const VALID_ROLES = ['ADMIN', 'MANAGER', 'MEMBER'] as const;
+const VALID_ROLES = ['ADMIN', 'MANAGER', 'MEMBER', 'HR'] as const;
 type ValidRole = (typeof VALID_ROLES)[number];
 const VALID_ACTIVITY_ROLE_TITLES = ['DEVELOPER', 'DESIGNER', 'SALES', 'OTHER'] as const;
 type ValidActivityRoleTitle = (typeof VALID_ACTIVITY_ROLE_TITLES)[number];
 
-adminRouter.patch('/users/:id', requireAdmin, async (req, res, next) => {
+/**
+ * HR manages people, but never an admin or another HR: those, and handing out
+ * either role, stay with admins.
+ */
+function hrMayNotManage(req: Request, target: { role: string }): boolean {
+  return !req.scope!.isAdmin && (target.role === 'ADMIN' || target.role === 'HR');
+}
+
+adminRouter.patch('/users/:id', requireCapability('people.manage'), async (req, res, next) => {
   try {
     if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
     const id = req.params.id;
@@ -1651,6 +1684,7 @@ adminRouter.patch('/users/:id', requireAdmin, async (req, res, next) => {
     if (!existing || existing.workspaceId !== req.scope.workspaceId) {
       return res.status(404).json({ error: 'not_found' });
     }
+    if (hrMayNotManage(req, existing)) return res.status(403).json({ error: 'admin_only_target' });
 
     const data: {
       name?: string;
@@ -1715,6 +1749,10 @@ adminRouter.patch('/users/:id', requireAdmin, async (req, res, next) => {
       if (req.body.role === 'MANAGER') {
         return res.status(400).json({ error: 'manager_role_is_derived' });
       }
+      // HR can make someone a member; admin and HR are an admin's to give.
+      if (!req.scope.isAdmin && req.body.role !== 'MEMBER') {
+        return res.status(403).json({ error: 'role_not_allowed' });
+      }
       data.role = req.body.role as ValidRole;
     }
 
@@ -1763,6 +1801,8 @@ adminRouter.patch('/users/:id', requireAdmin, async (req, res, next) => {
     }
 
     if ('idleWarningSeconds' in (req.body ?? {})) {
+      // A monitoring setting, like the countdown on Team settings: an admin's.
+      if (!req.scope.isAdmin) return res.status(403).json({ error: 'admin_required_for_idle_warning' });
       const raw = req.body.idleWarningSeconds;
       const parsedWarning = raw === null ? { success: true as const, data: null } : IdleWarningSecondsSchema.safeParse(raw);
       if (!parsedWarning.success) {
@@ -1954,7 +1994,7 @@ adminRouter.patch('/users/:id', requireAdmin, async (req, res, next) => {
  * Returns 409 on a duplicate email (the email is workspace-global per
  * the schema's @unique constraint on User.email).
  */
-adminRouter.post('/users', requireAdmin, async (req, res, next) => {
+adminRouter.post('/users', requireCapability('people.manage'), async (req, res, next) => {
   try {
     if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
 
@@ -1974,6 +2014,9 @@ adminRouter.post('/users', requireAdmin, async (req, res, next) => {
     }
     if (roleRaw === 'MANAGER') {
       return res.status(400).json({ error: 'manager_role_is_derived' });
+    }
+    if (!req.scope.isAdmin && roleRaw !== 'MEMBER') {
+      return res.status(403).json({ error: 'role_not_allowed' });
     }
     if (!(VALID_ACTIVITY_ROLE_TITLES as readonly string[]).includes(activityRoleRaw)) {
       return res.status(400).json({ error: 'invalid_activity_role_title' });
@@ -2020,7 +2063,7 @@ adminRouter.post('/users', requireAdmin, async (req, res, next) => {
  * default) — that is the window, and it cannot be closed without a database
  * read on every authenticated request.
  */
-adminRouter.post('/users/:id/deactivate', requireAdmin, async (req, res, next) => {
+adminRouter.post('/users/:id/deactivate', requireCapability('people.manage'), async (req, res, next) => {
   try {
     if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
     const id = req.params.id;
@@ -2029,6 +2072,7 @@ adminRouter.post('/users/:id/deactivate', requireAdmin, async (req, res, next) =
     if (!existing || existing.workspaceId !== req.scope.workspaceId) {
       return res.status(404).json({ error: 'not_found' });
     }
+    if (hrMayNotManage(req, existing)) return res.status(403).json({ error: 'admin_only_target' });
     if (existing.deactivatedAt) {
       return res.status(409).json({ error: 'already_deactivated' });
     }
@@ -2167,7 +2211,7 @@ adminRouter.delete('/users/:id', requireAdmin, async (req, res, next) => {
  * user is a no-op + 200. Reactivation does NOT reset the password —
  * the user resumes with whatever creds they had before deactivation.
  */
-adminRouter.post('/users/:id/reactivate', requireAdmin, async (req, res, next) => {
+adminRouter.post('/users/:id/reactivate', requireCapability('people.manage'), async (req, res, next) => {
   try {
     if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
     const id = req.params.id;
@@ -2176,6 +2220,7 @@ adminRouter.post('/users/:id/reactivate', requireAdmin, async (req, res, next) =
     if (!existing || existing.workspaceId !== req.scope.workspaceId) {
       return res.status(404).json({ error: 'not_found' });
     }
+    if (hrMayNotManage(req, existing)) return res.status(403).json({ error: 'admin_only_target' });
     if (!existing.deactivatedAt) {
       return res.json({ id: existing.id, deactivatedAt: null });
     }
@@ -2197,18 +2242,19 @@ adminRouter.post('/users/:id/reactivate', requireAdmin, async (req, res, next) =
  * The admin assigns team/manager/role via PATCH /users/:id first if desired;
  * this is the explicit "let them in" gate. Idempotent on an already-ACTIVE user.
  */
-adminRouter.post('/users/:id/activate', requireAdmin, async (req, res, next) => {
+adminRouter.post('/users/:id/activate', requireCapability('people.manage'), async (req, res, next) => {
   try {
     if (!req.scope) return res.status(401).json({ error: 'unauthorized' });
     const id = req.params.id;
     if (!id) return res.status(400).json({ error: 'missing_id' });
     const existing = await prisma.user.findUnique({
       where: { id },
-      select: { id: true, workspaceId: true, provisioningStatus: true, deactivatedAt: true },
+      select: { id: true, workspaceId: true, provisioningStatus: true, deactivatedAt: true, role: true },
     });
     if (!existing || existing.workspaceId !== req.scope.workspaceId) {
       return res.status(404).json({ error: 'not_found' });
     }
+    if (hrMayNotManage(req, existing)) return res.status(403).json({ error: 'admin_only_target' });
     if (existing.deactivatedAt) return res.status(409).json({ error: 'deactivated' });
     if (existing.provisioningStatus === 'ACTIVE') {
       return res.json({ id: existing.id, provisioningStatus: 'ACTIVE' });
@@ -2270,7 +2316,8 @@ adminRouter.get('/flags', requireAnyCapability(['flags.team.review', 'flags.work
     const validTypes = ['IMPOSSIBLE_RATE', 'METRONOMIC', 'LINEAR_MOUSE', 'SINGLE_CHANNEL', 'JIGGLER'] as const;
     const status = typeof req.query.status === 'string' ? req.query.status.toUpperCase() : 'OPEN';
     const where: { userId: { in: string[] }; status?: (typeof validStatuses)[number]; type?: (typeof validTypes)[number] } = {
-      userId: { in: req.scope.userIds },
+      // A review queue: what the caller may resolve (HR: only her own team).
+      userId: { in: req.scope.editUserIds },
     };
     if (status !== 'ALL') {
       if (!(validStatuses as readonly string[]).includes(status)) return res.status(400).json({ error: 'invalid_status' });
@@ -2339,7 +2386,7 @@ adminRouter.get('/flags/groups', requireAnyCapability(['flags.team.review', 'fla
     if (status !== 'OPEN' && status !== 'RESOLVED') return res.status(400).json({ error: 'invalid_status' });
     const tz = req.scope.workspaceTimezone;
     const rows = await prisma.activityFlag.findMany({
-      where: { userId: { in: req.scope.userIds }, status },
+      where: { userId: { in: req.scope.editUserIds }, status },
       include: {
         user: { select: { id: true, name: true, email: true, avatarUrl: true, ...PERSON_FACETS_SELECT } },
         resolvedBy: { select: { id: true, name: true } },
@@ -2429,7 +2476,7 @@ adminRouter.post('/flags/resolve-many', requireAnyCapability(['flags.team.review
       where: { id: { in: ids }, status: 'OPEN' },
       include: { user: { select: { workspaceId: true } } },
     });
-    if (flags.some((f) => !req.scope!.userIds.includes(f.userId))) {
+    if (flags.some((f) => !req.scope!.editUserIds.includes(f.userId))) {
       return res.status(403).json({ error: 'forbidden' });
     }
     // A manager is in their own scope; their own flags are an admin's call.
@@ -2507,7 +2554,7 @@ adminRouter.post('/flags/:id/resolve', requireAnyCapability(['flags.team.review'
       include: { user: { select: { workspaceId: true } } },
     });
     if (!existing) return res.status(404).json({ error: 'not_found' });
-    if (!req.scope.userIds.includes(existing.userId)) return res.status(403).json({ error: 'forbidden' });
+    if (!req.scope.editUserIds.includes(existing.userId)) return res.status(403).json({ error: 'forbidden' });
     // A manager is in their own scope; their own flags are an admin's call.
     if (!req.scope.isAdmin && existing.userId === req.user.sub) {
       return res.status(403).json({ error: 'self_review_forbidden' });

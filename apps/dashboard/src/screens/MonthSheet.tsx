@@ -280,7 +280,11 @@ export function MonthSheetView({ from, to, canEdit, meId, isAdmin, onOpenDay }: 
   const [saveError, setSaveError] = useState<string | null>(null);
   const [shapeRequest, setShapeRequest] = useState<{ shape: Shape; n: number } | null>(null);
 
-  const canEditPerson = useCallback((userId: string) => canEdit && (isAdmin || userId !== meId), [canEdit, isAdmin, meId]);
+  // The server says whose days the caller may correct (HR: only her own team's).
+  const canEditPerson = useCallback(
+    (userId: string) => canEdit && !!sheets.some((s) => s.rows.some((r) => r.userId === userId && r.canEdit)),
+    [canEdit, sheets],
+  );
 
   const dayOf = useCallback(
     (userId: string, date: string) =>

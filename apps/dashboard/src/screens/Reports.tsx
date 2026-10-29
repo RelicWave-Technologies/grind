@@ -1108,7 +1108,6 @@ function TeamMemberDrawer({
   // Correcting a day is the same authority as reading somebody else's report:
   // whoever can see the row can fix it, and nobody else. Never your own days —
   // a manager is in their own scope, and only an admin corrects a manager.
-  const canCorrectAttendance = hasCapability(me, 'reports.team.read') && (me.role === 'ADMIN' || userId !== me.id);
   const canDecideApprovals =
     hasCapability(me, 'approvals.team.decide') ||
     hasCapability(me, 'approvals.workspace.decide');
@@ -1123,6 +1122,8 @@ function TeamMemberDrawer({
     staleTime: 60_000,
     refetchOnWindowFocus: false,
   });
+  // The server decides whose days the caller may correct.
+  const canCorrectAttendance = !!q.data?.canCorrect;
 
   const decide = useMutation({
     mutationFn: async (vars: { id: string; action: ApprovalDecisionAction }) =>
@@ -1210,7 +1211,8 @@ function TeamMemberDrawer({
             <TeamMemberApprovalsPanel
               approvals={q.data.approvals}
               tz={tz}
-              canDecide={canDecideApprovals}
+              // The server says whose requests the caller may decide.
+              canDecide={canDecideApprovals && !!q.data?.canEdit}
               currentUserId={me.id}
               canSelfApproveOwn={canSelfApproveOwn}
               decisionError={decisionError}

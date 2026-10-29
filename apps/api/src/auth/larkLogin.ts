@@ -22,7 +22,7 @@ export type ResolvedLoginUser = {
   id: string;
   email: string;
   name: string;
-  role: 'ADMIN' | 'MANAGER' | 'MEMBER';
+  role: 'ADMIN' | 'MANAGER' | 'MEMBER' | 'HR';
   workspaceId: string;
   teamId: string | null;
   shiftId: string | null;

@@ -101,7 +101,7 @@ export interface WorkspaceUser {
   name: string;
   email: string;
   avatarUrl?: string | null;
-  role: 'ADMIN' | 'MANAGER' | 'MEMBER';
+  role: 'ADMIN' | 'MANAGER' | 'MEMBER' | 'HR';
 }
 
 // ---------------------------------------------------------------------------
@@ -225,7 +225,7 @@ export interface Team {
     name: string;
     email: string;
     avatarUrl: string | null;
-    role: 'ADMIN' | 'MANAGER' | 'MEMBER';
+    role: 'ADMIN' | 'MANAGER' | 'MEMBER' | 'HR';
     teamId: string | null;
   }>;
   managerIds: string[];

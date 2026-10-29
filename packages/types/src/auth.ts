@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { TimeZoneSchema } from './timezone';
 
-export const Role = z.enum(['ADMIN', 'MANAGER', 'MEMBER']);
+export const Role = z.enum(['ADMIN', 'MANAGER', 'MEMBER', 'HR']);
 export type Role = z.infer<typeof Role>;
 
 /**

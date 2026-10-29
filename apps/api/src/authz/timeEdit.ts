@@ -8,7 +8,7 @@ export type TimeEditTarget =
 /**
  * Dashboard time edits are user-scoped, not route-scoped:
  * - members can edit only themselves (`time.self.edit`)
- * - managers/admins can edit users already exposed by attachScope
+ * - managers/admins can edit users in `editUserIds` (HR: only her own team)
  *
  * Agent create/sync routes intentionally do not use this helper; the agent is
  * always self-owned and remains locked to req.user.sub.
@@ -27,7 +27,7 @@ export function authorizeTimeEditForUser(req: Request, userId?: string | null): 
   if (!hasPermission(req.scope.capabilities, requiredPermission)) {
     return { ok: false, status: 403, error: 'forbidden' };
   }
-  if (!req.scope.userIds.includes(targetUserId)) {
+  if (!req.scope.editUserIds.includes(targetUserId)) {
     return { ok: false, status: 403, error: 'forbidden' };
   }
 

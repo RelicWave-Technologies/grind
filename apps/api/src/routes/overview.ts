@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { prisma } from '@grind/db';
 import { dateKeyInTimeZone, isValidTimeZone } from '@grind/types';
 import { requireAccessToken } from '../middleware/auth';
-import { attachScope, requireManagerOrAbove } from '../middleware/scope';
+import { attachScope, requireCapability } from '../middleware/scope';
 import { clipInterval, isCounted, trackingNow } from '@grind/core';
 import { localDayWindow } from '../insights/day';
 import { loadTimelineWindow } from '../time';
@@ -23,7 +23,8 @@ const STUCK_THRESHOLD_MS = 48 * 60 * 60 * 1000;
  * "command center" view.
  */
 export const overviewRouter = Router();
-overviewRouter.use(requireAccessToken, attachScope, requireManagerOrAbove);
+// Team today: managers and admins. HR reads the workspace through the reports, not here.
+overviewRouter.use(requireAccessToken, attachScope, requireCapability('overview.read'));
 
 const HOUR = 60 * 60 * 1000;
 

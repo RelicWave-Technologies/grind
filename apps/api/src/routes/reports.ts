@@ -18,7 +18,7 @@ import { lateLookup, loadAttendanceRuleContext } from '../attendance/ruleContext
 import { requireAccessToken } from '../middleware/auth';
 import { readMemoScope } from '../lib/readMemo';
 import { hideDisallowedActiveFields, policyFlagsForUser } from '../workspacePolicy/readScrub';
-import { attachScope, canReadEvidenceOf, requireCapability } from '../middleware/scope';
+import { attachScope, canCorrectAttendanceOf, canReadEvidenceOf, requireCapability } from '../middleware/scope';
 import {
   buildMemberReportApps,
   buildMemberReportDays,
@@ -301,6 +301,8 @@ reportsRouter.get('/team/member', requireCapability('reports.team.read'), async 
       member: buildTeamReportMember(target.user, days),
       approvals,
       profile,
+      canCorrect: canCorrectAttendanceOf(req, target.user.id),
+      canEdit: req.scope.editUserIds.includes(target.user.id),
     };
     res.json(response);
   } catch (err) {
@@ -457,13 +459,14 @@ async function suspendedInScope(req: Request, from: string): Promise<string[]> {
  * arriving from Lark after somebody marked the day present — instead of
  * silently disagreeing with the calendar.
  */
-reportsRouter.put('/attendance-override', requireCapability('reports.team.read'), async (req, res, next) => {
+reportsRouter.put('/attendance-override', requireCapability('attendance.correct'), async (req, res, next) => {
   try {
     if (!req.user || !req.scope) return res.status(401).json({ error: 'unauthorized' });
     const parsed = SetAttendanceOverrideRequest.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: 'invalid_request', details: parsed.error.flatten() });
     const { userId, date, code, reason } = parsed.data;
-    if (!req.scope.userIds.includes(userId)) return res.status(403).json({ error: 'out_of_scope' });
+    // Who may change a day (editUserIds), not who may read it.
+    if (!req.scope.editUserIds.includes(userId)) return res.status(403).json({ error: 'out_of_scope' });
     // Nobody but an admin corrects their own attendance: a manager is in their
     // own scope, and marking your own LWA day present is exactly what this
     // must not allow.
@@ -529,12 +532,12 @@ reportsRouter.get('/attendance-override/history', requireCapability('reports.tea
 });
 
 /** Drop a correction, returning the day to whatever the report computes. */
-reportsRouter.delete('/attendance-override', requireCapability('reports.team.read'), async (req, res, next) => {
+reportsRouter.delete('/attendance-override', requireCapability('attendance.correct'), async (req, res, next) => {
   try {
     if (!req.user || !req.scope) return res.status(401).json({ error: 'unauthorized' });
     const parsed = ClearAttendanceOverrideRequest.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: 'invalid_request', details: parsed.error.flatten() });
-    if (!req.scope.userIds.includes(parsed.data.userId)) return res.status(403).json({ error: 'out_of_scope' });
+    if (!req.scope.editUserIds.includes(parsed.data.userId)) return res.status(403).json({ error: 'out_of_scope' });
     if (!req.scope.isAdmin && parsed.data.userId === req.user.sub) {
       return res.status(403).json({ error: 'self_override_forbidden' });
     }
@@ -785,7 +788,7 @@ reportsRouter.get('/month-sheet', requireCapability('reports.self.read'), async 
       select: { id: true, role: true },
     });
     const roleOf = new Map(people.map((p) => [p.id, p.role]));
-    res.json(monthSheetResponse(result.report, (id) => roleOf.get(id) ?? 'MEMBER'));
+    res.json(monthSheetResponse(result.report, (id) => roleOf.get(id) ?? 'MEMBER', (id) => canCorrectAttendanceOf(req, id)));
   } catch (err) {
     next(err);
   }

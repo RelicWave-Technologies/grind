@@ -200,6 +200,8 @@ export const MonthSheetRowSchema = z.object({
   role: Role,
   teamName: z.string().nullable(),
   unitName: z.string().nullable().default(null),
+  /** May the caller correct this person's days (HR: only her own team). */
+  canEdit: z.boolean().default(false),
   /** The count strip opposite the name: [label, value], in sheet order. */
   counts: z.array(z.tuple([z.string(), z.string()])),
   /** The leave account line below it. */

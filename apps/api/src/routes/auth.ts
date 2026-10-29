@@ -47,6 +47,8 @@ type AuthUserRow = {
   provisioningStatus: 'PENDING' | 'ACTIVE';
   avatarUrl: string | null;
   workspace: { timezone: string };
+  /** Present when they manage a team: HR then holds that team's edit powers. */
+  managedTeamAssignment?: { id: string } | null;
 };
 
 /** Minimal Prisma `select` that satisfies {@link serializeAuthUser}. */
@@ -62,6 +64,7 @@ const AUTH_USER_SELECT = {
   provisioningStatus: true,
   avatarUrl: true,
   workspace: { select: { timezone: true } },
+  managedTeamAssignment: { select: { id: true } },
 } as const;
 
 function serializeAuthUser(user: AuthUserRow): UserDto | null {
@@ -75,7 +78,7 @@ function serializeAuthUser(user: AuthUserRow): UserDto | null {
     role,
     activityRoleTitle: user.activityRoleTitle,
     displayRole: role,
-    capabilities: roleCapabilities(role),
+    capabilities: roleCapabilities(role, { managesTeam: !!user.managedTeamAssignment }),
     workspaceId: user.workspaceId,
     workspaceTimezone: user.workspace.timezone,
     teamId: user.teamId,
@@ -96,7 +99,7 @@ if (PASSWORD_LOGIN_ENABLED) {
       const { email, password, deviceName } = req.body as LoginRequest;
       const user = await prisma.user.findUnique({
         where: { email },
-        include: { workspace: { select: { timezone: true } } },
+        include: { workspace: { select: { timezone: true } }, managedTeamAssignment: { select: { id: true } } },
       });
       // passwordHash is nullable (Lark-only users have none) — missing = no password login.
       if (!user || !user.passwordHash || !(await verifyPassword(user.passwordHash, password))) {
