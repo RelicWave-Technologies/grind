@@ -544,9 +544,50 @@ describe('the leave account the month left behind', () => {
       ['Leave', '1'],
       ['LWA', '0'],
       ['Late', '0'],
+      // 8 h over the one day worked: the unpaid 3rd is leave, not divided by.
+      ['Avg Hours', '08:00'],
+      ['Manual Time', '00:00'],
       // August has 31 days; one unpaid day.
       ['Payable Days', '30 of 31'],
     ]);
+  });
+
+  it('averages every hour, a Sunday worked included, over working days only, and adds up manual time', () => {
+    const rep = build({
+      // Mon 3 and Tue 4 are working days; Sun 9 is a weekly off somebody worked.
+      dayStatusFor: (_u, date) =>
+        date === '2026-08-03' || date === '2026-08-04' ? status(date, 'WORKING') : date === '2026-08-09' ? status(date, 'WEEKLY_OFF') : null,
+      trackedMsFor: (_u, date) => (date === '2026-08-03' ? 480 : date === '2026-08-04' ? 420 : date === '2026-08-09' ? 120 : 0) * 60_000,
+      manualMsFor: (_u, date) => (date === '2026-08-04' ? 90 * 60_000 : 0),
+    });
+    const pairs = monthPerformanceSummaryPairs(rep, rep.rows[0]!);
+    // (8 h + 7 h + 2 h) / 2 working days.
+    expect(pairs).toContainEqual(['Avg Hours', '08:30']);
+    expect(pairs).toContainEqual(['Manual Time', '01:30']);
+  });
+
+  it('divides by a half day as half and leaves full-day leave out', () => {
+    const halfLeave = (date: string) =>
+      status(date, 'PAID_LEAVE', { portion: 'FIRST_HALF', expectedFraction: 0.5, chargedDays: 0.5 });
+    const rep = build({
+      dayStatusFor: (_u, date) =>
+        date === '2026-08-03' || date === '2026-08-04' ? status(date, 'WORKING')
+          : date === '2026-08-05' ? halfLeave(date)
+            : date === '2026-08-06' ? status(date, 'PAID_LEAVE')
+              : null,
+      trackedMsFor: (_u, date) => (date === '2026-08-03' || date === '2026-08-04' ? 480 : date === '2026-08-05' ? 240 : 0) * 60_000,
+    });
+    // 8 + 8 + 4 = 20 h over P 1 + P 1 + HD 0.5 = 2.5 days; the paid leave day is not divided by.
+    expect(monthPerformanceSummaryPairs(rep, rep.rows[0]!)).toContainEqual(['Avg Hours', '08:00']);
+  });
+
+  it('does not divide by working days still to come', () => {
+    const rep = build({
+      today: '2026-08-04',
+      dayStatusFor: (_u, date) => status(date, 'WORKING'),
+      trackedMsFor: (_u, date) => (date <= '2026-08-04' ? 480 * 60_000 : 0),
+    });
+    expect(monthPerformanceSummaryPairs(rep, rep.rows[0]!)).toContainEqual(['Avg Hours', '08:00']);
   });
 
   it('counts payable days only from the person\'s start date', () => {
@@ -556,6 +597,15 @@ describe('the leave account the month left behind', () => {
     });
     // 22–31 August is 10 days; one of them unpaid.
     expect(monthPerformanceSummaryPairs(rep, rep.rows[0]!)).toContainEqual(['Payable Days', '9 of 10']);
+  });
+
+  it('counts payable days only up to today in a month still running', () => {
+    const rep = build({
+      today: '2026-08-20',
+      dayStatusFor: (_u, date) => (date === '2026-08-05' ? status(date, 'UNPAID_LEAVE') : null),
+    });
+    // 1–20 August is 20 days; one of them unpaid. The 11 days to come are not paid yet.
+    expect(monthPerformanceSummaryPairs(rep, rep.rows[0]!)).toContainEqual(['Payable Days', '19 of 20']);
   });
 
   it('falls back to the ledger balance without the walk, and says nothing with neither', () => {

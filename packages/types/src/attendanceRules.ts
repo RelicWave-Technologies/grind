@@ -112,9 +112,10 @@ export const MonthSummaryRowSchema = z.object({
   userId: z.string(),
   name: z.string(),
   email: z.string(),
-  // People · Teams · Roles, as every people table filters.
+  // People · Teams · Units · Roles, as every people table filters.
   role: Role,
   teamName: z.string().nullable(),
+  unitName: z.string().nullable().default(null),
   mode: z.enum(['STANDARD', 'REMOTE', 'EXEMPT']),
   present: z.number(),
   halfDay: z.number(),
@@ -181,10 +182,14 @@ export const MonthSheetDaySchema = z.object({
   why: z.string(),
   /** A late arrival this day, charged or not. */
   late: z.boolean(),
+  /** Approved manual minutes inside `workMinutes`. */
+  manualMinutes: z.number().default(0),
+  /** What average hours divide by for this day: P 1, HD 0.5, leave / off / to come 0. */
+  dayWeight: z.number().default(0),
   /** 'Diwali', 'Paid leave' — whatever the calendar called the day. */
   label: z.string().nullable(),
   /** Set when somebody corrected the day by hand. */
-  override: z.object({ code: z.string(), stale: z.boolean() }).nullable(),
+  override: z.object({ code: z.string(), stale: z.boolean(), reason: z.string().default('') }).nullable(),
 });
 export type MonthSheetDay = z.infer<typeof MonthSheetDaySchema>;
 
@@ -194,6 +199,7 @@ export const MonthSheetRowSchema = z.object({
   email: z.string(),
   role: Role,
   teamName: z.string().nullable(),
+  unitName: z.string().nullable().default(null),
   /** The count strip opposite the name: [label, value], in sheet order. */
   counts: z.array(z.tuple([z.string(), z.string()])),
   /** The leave account line below it. */
@@ -222,6 +228,7 @@ export const AttendanceRuleExceptionSchema = z.object({
   name: z.string(),
   email: z.string(),
   teamName: z.string().nullable(),
+  unitName: z.string().nullable().default(null),
   /** YYYY-MM-DD. */
   date: z.string(),
   tag: AttendanceRuleTagSchema,

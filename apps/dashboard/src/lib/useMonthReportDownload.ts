@@ -12,17 +12,19 @@ export type MonthReportFormat = 'csv' | 'xlsx';
  * navigated the tab to a page of JSON instead of saying what went wrong.
  *
  * `downloading` names the format in flight, so the button that was pressed is
- * the one that spins.
+ * the one that spins. `unit` (a unit's name, e.g. 'EMIAC') narrows the file to
+ * that employer's people; omitted, it is everyone the viewer can see.
  */
 export function useMonthReportDownload() {
   const [downloading, setDownloading] = useState<MonthReportFormat | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  async function download(month: string, format: MonthReportFormat): Promise<void> {
+  async function download(month: string, format: MonthReportFormat, unit?: string): Promise<void> {
     setDownloading(format);
     setError(null);
     try {
       const params = new URLSearchParams({ month });
+      if (unit) params.set('unit', unit);
       const res = await fetch(
         `${API_BASE}/v1/reports/month-performance.${format}?${params.toString()}`,
         { credentials: 'include' },
@@ -33,7 +35,9 @@ export function useMonthReportDownload() {
         setError(
           code === 'invalid_month'
             ? 'That month could not be read. Pick a date inside a single month.'
-            : res.status === 403
+            : code === 'invalid_unit'
+              ? 'That unit no longer exists. Pick another one.'
+              : res.status === 403
               ? 'You do not have permission to download this report.'
               : `The report could not be built (${res.status}).`,
         );
@@ -43,7 +47,7 @@ export function useMonthReportDownload() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `month-performance-${month}.${format}`;
+      a.download = `month-performance-${unit ? `${unit}-` : ''}${month}.${format}`;
       document.body.appendChild(a);
       a.click();
       a.remove();

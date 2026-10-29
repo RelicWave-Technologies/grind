@@ -51,6 +51,8 @@ export interface DayEntryMeta {
   requestId?: string | null;
   larkTaskGuid: string | null;
   notes?: string | null;
+  /** The manual request's reason, for an approved manual entry. */
+  reason?: string | null;
   attendeeIds?: string[];
 }
 
@@ -60,6 +62,7 @@ export interface DayEntryInput {
   requestId?: string | null;
   larkTaskGuid: string | null;
   notes?: string | null;
+  reason?: string | null;
   attendeeIds?: string[];
   segments: Array<{
     kind: SegmentKind;
@@ -104,7 +107,11 @@ interface DayBlock {
   attendeeIds?: string[];
   /** ManualTimeRequest id for PENDING and approved MANUAL blocks. */
   requestId?: string;
-  /** PENDING blocks only: the request reason (shown + editable inline). */
+  /**
+   * The request's reason: PENDING blocks (shown + editable inline) and
+   * approved MANUAL blocks (shown read-only — the entry's own notes are
+   * separate and usually empty).
+   */
   reason?: string;
   /** A reviewer invalidated these minutes: drawn, never counted. */
   invalidated?: boolean;
@@ -427,6 +434,7 @@ export function buildDayInsight(input: {
       ...(e.requestId ? { requestId: e.requestId } : {}),
       larkTaskGuid: e.larkTaskGuid,
       notes: e.notes ?? null,
+      ...(kind === 'MANUAL' && e.reason ? { reason: e.reason } : {}),
       isOpen: p.live && isToday,
       ...(attendeeIds ? { attendeeIds } : {}),
       ...(p.invalidated ? { invalidated: true } : {}),

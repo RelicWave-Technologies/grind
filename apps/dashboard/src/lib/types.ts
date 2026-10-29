@@ -24,7 +24,7 @@ export interface DayBlock {
   attendeeIds?: string[];
   /** ManualTimeRequest id for PENDING and approved MANUAL blocks. */
   requestId?: string;
-  /** PENDING blocks only: the request reason (shown + editable inline). */
+  /** The request reason: PENDING blocks (editable inline) and approved MANUAL blocks (read-only). */
   reason?: string;
 }
 
@@ -210,6 +210,12 @@ export interface ActivityFlag {
 // ---------------------------------------------------------------------------
 // Admin CRUD: Teams + User patches
 // ---------------------------------------------------------------------------
+
+/** An employer inside the workspace (EMIAC, MACOBS). */
+export interface Unit {
+  id: string;
+  name: string;
+}
 
 export interface Team {
   id: string;

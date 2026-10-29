@@ -108,11 +108,11 @@ describe('URL params', () => {
 interface Approval {
   status: 'PENDING' | 'APPROVED' | 'REJECTED';
   reason: string;
-  requester: { name: string; email: string; teamName: string | null; role: 'ADMIN' | 'MANAGER' | 'MEMBER' };
+  requester: { name: string; email: string; teamName: string | null; unitName?: string | null; role: 'ADMIN' | 'MANAGER' | 'MEMBER' };
 }
 
-const RAHUL = { name: 'Rahul Verma', email: 'rahul@example.com', teamName: 'Technical', role: 'MEMBER' as const };
-const ZOE = { name: 'Zoë Kraft', email: 'zoe@example.com', teamName: 'Design', role: 'MANAGER' as const };
+const RAHUL = { name: 'Rahul Verma', email: 'rahul@example.com', teamName: 'Technical', unitName: 'EMIAC', role: 'MEMBER' as const };
+const ZOE = { name: 'Zoë Kraft', email: 'zoe@example.com', teamName: 'Design', unitName: 'MACOBS', role: 'MANAGER' as const };
 
 const APPROVALS: Approval[] = [
   { status: 'APPROVED', reason: 'Client call', requester: RAHUL },
@@ -121,7 +121,7 @@ const APPROVALS: Approval[] = [
   { status: 'REJECTED', reason: 'Lunch', requester: RAHUL },
 ];
 
-const APPROVAL_SPEC: FilterSpec<Approval, 'person' | 'team' | 'role' | 'status'> = {
+const APPROVAL_SPEC: FilterSpec<Approval, 'person' | 'team' | 'unit' | 'role' | 'status'> = {
   text: (a) => [...personSearchFields(a.requester), a.reason],
   facets: {
     ...personFacets((a: Approval) => a.requester),
@@ -130,10 +130,15 @@ const APPROVAL_SPEC: FilterSpec<Approval, 'person' | 'team' | 'role' | 'status'>
 };
 
 describe('personFacets', () => {
-  it('is People · Teams · Roles, in that order, with those labels', () => {
+  it('is People · Teams · Units · Roles, in that order, with those labels', () => {
     const facets = personFacets((a: Approval) => a.requester);
-    expect(Object.keys(facets)).toEqual(['person', 'team', 'role']);
-    expect(Object.values(facets).map((f) => f.label)).toEqual(['People', 'Teams', 'Roles']);
+    expect(Object.keys(facets)).toEqual(['person', 'team', 'unit', 'role']);
+    expect(Object.values(facets).map((f) => f.label)).toEqual(['People', 'Teams', 'Units', 'Roles']);
+  });
+
+  it('narrows by unit — one employer across teams', () => {
+    const rows = applyTableFilter(APPROVALS, APPROVAL_SPEC, { query: '', facets: { unit: 'MACOBS' } });
+    expect(rows.map((a) => a.reason)).toEqual(['Forgot to start']);
   });
 
   it('derives its options from the rows only — nobody outside them can appear', () => {

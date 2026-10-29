@@ -157,14 +157,55 @@ export function resolveByPriority<T extends Interval>(
       || b.end - a.end);
 
   const out: T[] = [];
-  let claimed: Interval[] = [];
+  // Sorted, disjoint, touching spans merged — the shape `mergeIntervals`
+  // returns — kept in place with binary search. Re-merging the whole list for
+  // every item made a busy month quadratic: seconds for one workspace.
+  const claimed: Interval[] = [];
   for (const item of order) {
-    for (const piece of subtractIntervals([item], claimed)) {
-      out.push({ ...item, start: piece.start, end: piece.end });
+    // The free parts of the item: the gaps between the claimed spans it meets.
+    let cursor = item.start;
+    for (let j = firstEndingAfter(claimed, item.start); j < claimed.length; j += 1) {
+      const h = claimed[j]!;
+      if (h.start >= item.end) break;
+      if (h.start > cursor) out.push({ ...item, start: cursor, end: h.start });
+      cursor = Math.max(cursor, h.end);
+      if (cursor >= item.end) break;
     }
-    claimed = mergeIntervals([...claimed, item]);
+    if (cursor < item.end) out.push({ ...item, start: cursor, end: item.end });
+
+    // Claim it: replace every span it overlaps or touches with their union.
+    const from = firstEndingAtOrAfter(claimed, item.start);
+    let to = from;
+    while (to < claimed.length && claimed[to]!.start <= item.end) to += 1;
+    const start = from < to ? Math.min(item.start, claimed[from]!.start) : item.start;
+    const end = from < to ? Math.max(item.end, claimed[to - 1]!.end) : item.end;
+    claimed.splice(from, to - from, { start, end });
   }
   return out.sort((a, b) => a.start - b.start || a.end - b.end);
+}
+
+/** First index of sorted disjoint `spans` whose end is past `at`. */
+function firstEndingAfter(spans: readonly Interval[], at: number): number {
+  let lo = 0;
+  let hi = spans.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (spans[mid]!.end <= at) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
+/** First index of sorted disjoint `spans` whose end is at or past `at`. */
+function firstEndingAtOrAfter(spans: readonly Interval[], at: number): number {
+  let lo = 0;
+  let hi = spans.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (spans[mid]!.end < at) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
 }
 
 /**

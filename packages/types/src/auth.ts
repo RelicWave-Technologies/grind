@@ -5,13 +5,16 @@ export const Role = z.enum(['ADMIN', 'MANAGER', 'MEMBER']);
 export type Role = z.infer<typeof Role>;
 
 /**
- * What a dashboard people table filters a row's person by — the Teams and Roles
- * of its People · Teams · Roles facets. Every list endpoint whose rows belong to
- * a person carries these on that person (`teamName` null when unassigned).
+ * What a dashboard people table filters a row's person by — the Teams, Units
+ * and Roles of its People · Teams · Units · Roles facets. Every list endpoint
+ * whose rows belong to a person carries these on that person (`teamName` /
+ * `unitName` null when unassigned).
  */
 export const PersonFacetsSchema = z.object({
   role: Role,
   teamName: z.string().nullable(),
+  /** The employer (EMIAC, MACOBS). Defaulted so an older API still parses. */
+  unitName: z.string().nullable().default(null),
 });
 export type PersonFacets = z.infer<typeof PersonFacetsSchema>;
 

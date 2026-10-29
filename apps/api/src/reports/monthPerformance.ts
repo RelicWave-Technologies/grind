@@ -114,6 +114,8 @@ export interface MonthPerformanceUser {
   email: string;
   /** Team name — the report's "Dept. Name". */
   teamName: string | null;
+  /** Employer (EMIAC, MACOBS) — the report's "CompName" when set. */
+  unitName?: string | null;
   /**
    * YYYY-MM-DD the person started: their joining date, else the day their
    * account was made — the same start the leave balance accrues from. Days
@@ -147,13 +149,15 @@ export interface MonthPerformanceDay {
    * changed since the correction was made, so the two now disagree about a day
    * they once agreed on.
    */
-  override: { code: AttendanceOverrideCode; stale: boolean } | null;
+  override: { code: AttendanceOverrideCode; stale: boolean; reason?: string } | null;
   /** What the day reads as with nobody's correction. */
   computedCode: MonthPerformanceCode;
   /** The attendance rule that charged this day, when one did. */
   rule: AttendanceRuleVerdict | null;
   /** The month's Nth late arrival, when this day was one. */
   late: number | null;
+  /** Approved manual minutes inside `workMinutes`. */
+  manualMinutes: number;
 }
 
 export interface MonthPerformanceTotals {
@@ -174,6 +178,8 @@ export interface MonthPerformanceTotals {
   noShift: number;
   /** Sum of the WORK row. */
   workMinutes: number;
+  /** Approved manual minutes inside `workMinutes`. */
+  manualMinutes: number;
   /** Days each attendance rule charged, by rule. */
   shortDay: number;
   underMin: number;
@@ -226,6 +232,11 @@ export interface MonthPerformanceReport {
    * minimum minutes, free late arrivals a month, and the late grace.
    */
   ruleMinutes: RuleSettings | null;
+  /**
+   * Today in the workspace timezone when the report was built, or null. Days
+   * after it have not happened, so they are not payable yet.
+   */
+  today: string | null;
 }
 
 export interface MonthPerformanceInput {
@@ -237,6 +248,8 @@ export interface MonthPerformanceInput {
   dayStatusFor: (userId: string, date: string) => DayStatus | null;
   /** Counted milliseconds for this person on this date (work, meetings, approved manual). */
   trackedMsFor: (userId: string, date: string) => number;
+  /** The approved manual part of `trackedMsFor`. Absent = none. */
+  manualMsFor?: (userId: string, date: string) => number;
   punchFor: PunchLookup;
   /** A manager's or admin's correction for this person-day, if one exists. */
   overrideFor?: (userId: string, date: string) => DayOverride | null;
@@ -327,6 +340,8 @@ export interface DayOverride {
   code: AttendanceOverrideCode;
   /** What the report computed when the override was written. */
   computedCode: string | null;
+  /** Why it was corrected, as the corrector wrote it. */
+  reason?: string;
   /**
    * Days of this date's leave a balance covered, when it did not cover the
    * whole cost. Undefined means covered — or that nobody asked, which reads the
@@ -413,7 +428,7 @@ function emptyTotals(): MonthPerformanceTotals {
   return {
     present: 0, paidHalfDay: 0, unpaidHalfDay: 0, splitLeave: 0,
     weeklyOff: 0, holiday: 0, paidLeave: 0,
-    unpaidLeave: 0, absent: 0, noShift: 0, workMinutes: 0,
+    unpaidLeave: 0, absent: 0, noShift: 0, workMinutes: 0, manualMinutes: 0,
     shortDay: 0, underMin: 0, halfDayShort: 0, wfhUnapproved: 0,
     leaveWithoutApproval: 0, ruleDays: 0, lateDays: 0,
   };
@@ -458,6 +473,7 @@ export function buildMonthPerformance(input: MonthPerformanceInput): MonthPerfor
     // The month's hours are the sum of the time, rounded once. Adding up the
     // rounded days drifts from the team report by up to half a minute a day.
     let trackedMs = 0;
+    let manualMs = 0;
     const days: MonthPerformanceDay[] = dates.map((date) => {
       const punch = input.punchFor(user.id, date);
       const status = input.dayStatusFor(user.id, date);
@@ -465,6 +481,7 @@ export function buildMonthPerformance(input: MonthPerformanceInput): MonthPerfor
       const outMinute = punch?.outMinute ?? null;
       const dayMs = Math.max(0, input.trackedMsFor(user.id, date));
       const workMinutes = Math.round(dayMs / 60_000);
+      const dayManualMs = Math.max(0, input.manualMsFor?.(user.id, date) ?? 0);
       const override = input.overrideFor?.(user.id, date) ?? null;
       // Judged even under a correction, so the correction can be flagged when
       // the computed answer moves — but a corrected day is charged nothing by a
@@ -482,6 +499,7 @@ export function buildMonthPerformance(input: MonthPerformanceInput): MonthPerfor
       if (rule) countRuleInto(totals, rule);
       if (late !== null) totals.lateDays += 1;
       trackedMs += dayMs;
+      manualMs += dayManualMs;
 
       return {
         date,
@@ -493,14 +511,20 @@ export function buildMonthPerformance(input: MonthPerformanceInput): MonthPerfor
         code,
         label: status?.label ?? null,
         override: override
-          ? { code: override.code, stale: override.computedCode !== null && override.computedCode !== computed }
+          ? {
+            code: override.code,
+            stale: override.computedCode !== null && override.computedCode !== computed,
+            ...(override.reason ? { reason: override.reason } : {}),
+          }
           : null,
         computedCode: computed,
         rule,
         late,
+        manualMinutes: Math.round(dayManualMs / 60_000),
       };
     });
     totals.workMinutes = Math.round(trackedMs / 60_000);
+    totals.manualMinutes = Math.round(manualMs / 60_000);
     return {
       user,
       days,
@@ -524,6 +548,7 @@ export function buildMonthPerformance(input: MonthPerformanceInput): MonthPerfor
     rows,
     rulesFrom: input.rulesFrom ?? null,
     ruleMinutes: input.ruleMinutes ?? null,
+    today: input.today ?? null,
   };
 }
 
@@ -636,7 +661,7 @@ export function monthPerformanceGridRows(
  * them added up to decide anything.
  */
 export function monthPerformanceSummaryPairs(
-  report: Pick<MonthPerformanceReport, 'dates'>,
+  report: Pick<MonthPerformanceReport, 'dates'> & { today?: string | null },
   row: MonthPerformanceRow,
 ): Array<[string, string]> {
   const count = (code: SheetCode) => row.days.filter((d) => sheetCode(d) === code).length;
@@ -649,6 +674,8 @@ export function monthPerformanceSummaryPairs(
     ['Leave', String(count('L'))],
     ['LWA', String(count('LWA'))],
     ['Late', String(row.totals.lateDays)],
+    ['Avg Hours', fmtMinutes(averageWorkMinutes(report, row))],
+    ['Manual Time', fmtMinutes(row.totals.manualMinutes)],
     // The one figure that decides pay: every day of the month, less the
     // leave the balance could not pay for.
     ['Payable Days', `${fmtDays(payable)} of ${of}`],
@@ -656,23 +683,53 @@ export function monthPerformanceSummaryPairs(
 }
 
 /**
+ * How much of a day the average hours divide by, read from the code the sheet
+ * prints — so a hand correction counts as corrected. Present 1, half day ½
+ * (half-day leave and a half day a rule made alike), and nothing for a full
+ * day of leave, a weekly off, a holiday or a day still to come.
+ */
+export function dayWeight(day: Pick<MonthPerformanceDay, 'date' | 'code' | 'rule'>, today: string | null): number {
+  if (today && day.date > today) return 0;
+  const code = sheetCode(day);
+  return code === 'P' ? 1 : code === 'HD' ? 0.5 : 0;
+}
+
+/**
+ * Average hours a day worked: every counted minute of the month — a Sunday or
+ * a holiday worked included — over the days that were worked, a half day
+ * counting half (see `dayWeight`).
+ */
+export function averageWorkMinutes(
+  report: { today?: string | null },
+  row: Pick<MonthPerformanceRow, 'days' | 'totals'>,
+): number {
+  const days = row.days.reduce((n, d) => n + dayWeight(d, report.today ?? null), 0);
+  return days === 0 ? 0 : row.totals.workMinutes / days;
+}
+
+/**
  * Days of the month salary is paid for: every calendar day from the person's
- * start — weekly offs, holidays and paid leave included — less the salary cut.
+ * start up to today — weekly offs, holidays and paid leave included — less the
+ * salary cut. A month still running is paid only for the days it has had.
  */
 export function payableDays(
-  report: Pick<MonthPerformanceReport, 'dates'>,
+  report: Pick<MonthPerformanceReport, 'dates'> & { today?: string | null },
   row: Pick<MonthPerformanceRow, 'totals' | 'user'>,
 ): number {
   return Math.max(0, payableBaseDays(report, row) - salaryCutDays(row.totals));
 }
 
-/** Calendar days of the month from the person's start to their suspension. */
+/**
+ * Calendar days of the month from the person's start to their suspension, and
+ * no later than today — a day that has not come yet is not paid for yet.
+ */
 function payableBaseDays(
-  report: Pick<MonthPerformanceReport, 'dates'>,
+  report: Pick<MonthPerformanceReport, 'dates'> & { today?: string | null },
   row: Pick<MonthPerformanceRow, 'user'>,
 ): number {
   const { startDate: start, endDate: end } = row.user;
-  return report.dates.filter((d) => (!start || d >= start) && (!end || d <= end)).length;
+  const today = report.today ?? null;
+  return report.dates.filter((d) => (!start || d >= start) && (!end || d <= end) && (!today || d <= today)).length;
 }
 
 /** What the month added to the balance, by where it came from. */
@@ -727,7 +784,7 @@ export function monthPerformanceBlock(
   row: MonthPerformanceRow,
 ): string[][] {
   return [
-    ['Dept. Name', row.user.teamName ?? '', '', 'CompName', report.companyName, '', 'Report Month', report.monthLabel],
+    ['Dept. Name', row.user.teamName ?? '', '', 'CompName', row.user.unitName ?? report.companyName, '', 'Report Month', report.monthLabel],
     [
       'Email', row.user.email, '', 'Name', row.user.name, '',
       ...monthPerformanceSummaryPairs(report, row).flat(),
@@ -766,6 +823,7 @@ export function monthSheetResponse(
         email: row.user.email,
         role: roleOf(row.user.id),
         teamName: row.user.teamName,
+        unitName: row.user.unitName ?? null,
         counts: monthPerformanceSummaryPairs(report, row),
         leave: monthPerformanceLeavePairs(row),
         days: report.dates.map((date) => {
@@ -780,8 +838,12 @@ export function monthSheetResponse(
             computed: d ? displayDayCode(d.computedCode, d.rule?.tag) : '--',
             why: d && report.rulesFrom ? sheetWhy(report, d) : '',
             late: !!d?.late,
+            manualMinutes: d?.manualMinutes ?? 0,
+            dayWeight: d ? dayWeight(d, report.today) : 0,
             label: d?.label ?? null,
-            override: d?.override ? { code: attendanceOverrideShape(d.override.code), stale: d.override.stale } : null,
+            override: d?.override
+              ? { code: attendanceOverrideShape(d.override.code), stale: d.override.stale, reason: d.override.reason ?? '' }
+              : null,
           };
         }),
       };

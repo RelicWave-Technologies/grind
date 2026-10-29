@@ -123,13 +123,15 @@ export interface FacetPerson {
   name: string;
   email?: string | null;
   teamName?: string | null;
+  /** Employer (EMIAC, MACOBS). Teams do not divide along it, so it is its own facet. */
+  unitName?: string | null;
   role?: string | null;
 }
 
-export type PersonFacetKey = 'person' | 'team' | 'role';
+export type PersonFacetKey = 'person' | 'team' | 'unit' | 'role';
 
 /**
- * People · Teams · Roles — the three facets every table of people's rows
+ * People · Teams · Units · Roles — the facets every table of people's rows
  * offers, in this order and with these labels. Options come from the rows,
  * which the API has already scoped to whom the viewer may see, so a manager's
  * lists never name anyone outside their team. A facet with one value hides
@@ -141,13 +143,14 @@ export function personFacets<T>(person: (row: T) => FacetPerson | null | undefin
   return {
     person: { label: 'People', value: (row) => person(row)?.name },
     team: { label: 'Teams', value: (row) => person(row)?.teamName },
+    unit: { label: 'Units', value: (row) => person(row)?.unitName },
     role: { label: 'Roles', value: (row) => person(row)?.role, optionLabel: roleLabel },
   };
 }
 
-/** The fields a people table's search box always covers: name, email, team. */
+/** The fields a people table's search box always covers: name, email, team, unit. */
 export function personSearchFields(person: FacetPerson | null | undefined): Array<string | null | undefined> {
-  return [person?.name, person?.email, person?.teamName];
+  return [person?.name, person?.email, person?.teamName, person?.unitName];
 }
 
 /** A facet's choices: the fixed list, or every distinct value in the rows. */

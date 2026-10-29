@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { freeSlices, resolveByPriority, unionMs } from './intervals';
+import { freeSlices, mergeIntervals, resolveByPriority, subtractIntervals, unionMs, type Interval } from './intervals';
 import { CLAIM_PRIORITY } from './timeline';
 
 const MIN = 60_000;
@@ -147,5 +147,32 @@ describe('unionMs', () => {
       { start: t(0), end: t(10) },
       { start: t(10), end: t(20) },
     ])).toBe(20 * MIN);
+  });
+});
+
+describe('resolveByPriority matches the plain merge-every-time version', () => {
+  // The straightforward algorithm it replaced, kept as the reference.
+  function reference<T extends Interval>(items: readonly T[], priorityOf: (item: T) => number): T[] {
+    const order = [...items].filter((iv) => iv.end > iv.start)
+      .sort((a, b) => priorityOf(b) - priorityOf(a) || a.start - b.start || b.end - a.end);
+    const out: T[] = [];
+    let claimed: Interval[] = [];
+    for (const item of order) {
+      for (const piece of subtractIntervals([item], claimed)) out.push({ ...item, start: piece.start, end: piece.end });
+      claimed = mergeIntervals([...claimed, item]);
+    }
+    return out.sort((a, b) => a.start - b.start || a.end - b.end);
+  }
+
+  it('on thousands of random overlapping, touching and empty items', () => {
+    let seed = 7;
+    const rand = (n: number) => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % n; };
+    for (let run = 0; run < 2000; run += 1) {
+      const items = Array.from({ length: 1 + rand(40) }, (_, id) => {
+        const start = rand(100);
+        return { id, start, end: start + rand(25) - 2, p: rand(4) };
+      });
+      expect(resolveByPriority(items, (i) => i.p)).toEqual(reference(items, (i) => i.p));
+    }
   });
 });

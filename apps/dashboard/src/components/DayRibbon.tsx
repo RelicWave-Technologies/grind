@@ -112,6 +112,8 @@ export function DayRibbon({
   const futureStartsAt = clamp(day.isToday ? now : day.isFuture ? displayStart : displayEnd, displayStart, displayEnd);
   const trackRef = useRef<HTMLDivElement>(null);
   const [hoverMs, setHoverMs] = useState<number | null>(null);
+  /** A manual block clicked to read why it was added. */
+  const [picked, setPicked] = useState<DayBlock | null>(null);
 
   const pct = (ms: number) => `${((ms - displayStart) / span) * 100}%`;
   const interactive = !!onClickEpoch;
@@ -158,103 +160,120 @@ export function DayRibbon({
   }, [editable, hoverMs, day.blocks, day.dayStart, day.dayEnd, now]);
 
   return (
-    <div className="ribbon" aria-hidden>
-      <div
-        ref={trackRef}
-        className={`ribbon-track${interactive ? ' is-clickable' : ''}`}
-        onMouseMove={handleMove}
-        onMouseLeave={handleLeave}
-        onClick={handleClick}
-      >
-        {visibleMarkedWindow && (
-          <div
-            className="ribbon-marked-window"
-            style={{
-              left: pct(visibleMarkedWindow.startedAt),
-              width: `${((visibleMarkedWindow.endedAt - visibleMarkedWindow.startedAt) / span) * 100}%`,
-            }}
-            title={markedWindow?.label}
-          />
-        )}
+    <>
+      <div className="ribbon" aria-hidden>
+        <div
+          ref={trackRef}
+          className={`ribbon-track${interactive ? ' is-clickable' : ''}`}
+          onMouseMove={handleMove}
+          onMouseLeave={handleLeave}
+          onClick={handleClick}
+        >
+          {visibleMarkedWindow && (
+            <div
+              className="ribbon-marked-window"
+              style={{
+                left: pct(visibleMarkedWindow.startedAt),
+                width: `${((visibleMarkedWindow.endedAt - visibleMarkedWindow.startedAt) / span) * 100}%`,
+              }}
+              title={markedWindow?.label}
+            />
+          )}
 
-        {futureStartsAt < displayEnd && (
-          <div
-            className="ribbon-future"
-            style={{ left: pct(futureStartsAt), width: `${((displayEnd - futureStartsAt) / span) * 100}%` }}
-          />
-        )}
+          {futureStartsAt < displayEnd && (
+            <div
+              className="ribbon-future"
+              style={{ left: pct(futureStartsAt), width: `${((displayEnd - futureStartsAt) / span) * 100}%` }}
+            />
+          )}
 
-        {day.blocks.map((b) => {
-          if (b.kind === 'GAP') return null; // gap is the absence of a block
-          const visible = clip(b.startedAt, b.endedAt, displayStart, displayEnd);
-          if (!visible) return null;
-          const rowId = dayBlockRowId(b);
-          const att = b.attendeeIds?.length ?? 0;
-          const attSuffix = att > 0 ? ` · ${att} attendee${att === 1 ? '' : 's'}` : '';
-          const width = `${((visible.endedAt - visible.startedAt) / span) * 100}%`;
-          if (b.kind === 'PENDING') {
+          {day.blocks.map((b) => {
+            if (b.kind === 'GAP') return null; // gap is the absence of a block
+            const visible = clip(b.startedAt, b.endedAt, displayStart, displayEnd);
+            if (!visible) return null;
+            const rowId = dayBlockRowId(b);
+            const att = b.attendeeIds?.length ?? 0;
+            const attSuffix = att > 0 ? ` · ${att} attendee${att === 1 ? '' : 's'}` : '';
+            const width = `${((visible.endedAt - visible.startedAt) / span) * 100}%`;
+            if (b.kind === 'PENDING') {
+              return (
+                <div
+                  key={`ribbon-${rowId}`}
+                  className="ribbon-pending"
+                  style={{ left: pct(visible.startedAt), width }}
+                  title={`Pending approval — ${b.reason ?? ''}${attSuffix}`}
+                  onMouseEnter={() => onHoverRowId?.(rowId)}
+                  onMouseLeave={() => onHoverRowId?.(null)}
+                />
+              );
+            }
+            const why = b.kind === 'MANUAL' && b.reason ? ` — ${b.reason}` : '';
             return (
               <div
                 key={`ribbon-${rowId}`}
-                className="ribbon-pending"
+                className={`ribbon-block ribbon-block-${b.kind.toLowerCase()}${why ? ' is-pickable' : ''}`}
                 style={{ left: pct(visible.startedAt), width }}
-                title={`Pending approval — ${b.reason ?? ''}${attSuffix}`}
+                title={`${b.kind} · ${fmtTime(b.startedAt, timeZone)} – ${fmtTime(b.endedAt, timeZone)}${attSuffix}${why}`}
                 onMouseEnter={() => onHoverRowId?.(rowId)}
                 onMouseLeave={() => onHoverRowId?.(null)}
+                onClick={why ? (e) => {
+                  // Read the reason; don't also start a new manual entry here.
+                  e.stopPropagation();
+                  setPicked((cur) => (cur && dayBlockRowId(cur) === rowId ? null : b));
+                } : undefined}
               />
             );
-          }
-          return (
+          })}
+
+          {ghost && (
             <div
-              key={`ribbon-${rowId}`}
-              className={`ribbon-block ribbon-block-${b.kind.toLowerCase()}`}
-              style={{ left: pct(visible.startedAt), width }}
-              title={`${b.kind} · ${fmtTime(b.startedAt, timeZone)} – ${fmtTime(b.endedAt, timeZone)}${attSuffix}`}
-              onMouseEnter={() => onHoverRowId?.(rowId)}
-              onMouseLeave={() => onHoverRowId?.(null)}
+              className="ribbon-ghost"
+              style={{
+                left: pct(ghost.startedAt),
+                width: `${((ghost.endedAt - ghost.startedAt) / span) * 100}%`,
+              }}
+              title={`Click to add manual time · ${fmtTime(ghost.startedAt, timeZone)} – ${fmtTime(ghost.endedAt, timeZone)}`}
             />
-          );
-        })}
+          )}
 
-        {ghost && (
-          <div
-            className="ribbon-ghost"
-            style={{
-              left: pct(ghost.startedAt),
-              width: `${((ghost.endedAt - ghost.startedAt) / span) * 100}%`,
-            }}
-            title={`Click to add manual time · ${fmtTime(ghost.startedAt, timeZone)} – ${fmtTime(ghost.endedAt, timeZone)}`}
-          />
-        )}
+          {day.isToday && now >= displayStart && now < displayEnd && (
+            <div className="ribbon-now" style={{ left: pct(now) }} aria-hidden />
+          )}
 
-        {day.isToday && now >= displayStart && now < displayEnd && (
-          <div className="ribbon-now" style={{ left: pct(now) }} aria-hidden />
-        )}
+          {hoverMs != null && (
+            <div className="ribbon-hover-line" style={{ left: pct(hoverMs) }} aria-hidden />
+          )}
+        </div>
 
-        {hoverMs != null && (
-          <div className="ribbon-hover-line" style={{ left: pct(hoverMs) }} aria-hidden />
-        )}
+        <div className="ribbon-ticks">
+          {ticks.map((t) => (
+            <div key={t.ms} className="ribbon-tick" style={{ left: pct(t.ms) }}>
+              <div className="ribbon-tick-line" />
+              <div className="ribbon-tick-label small tertiary">{fmtTime(t.ms, timeZone)}</div>
+            </div>
+          ))}
+          {hoverMs != null && (
+            <div
+              className="ribbon-tick ribbon-tick-hover"
+              style={{ left: pct(hoverMs) }}
+              aria-hidden
+            >
+              <div className="ribbon-tick-line ribbon-tick-line-hover" />
+              <div className="ribbon-tick-label ribbon-tick-label-hover">{fmtTime(hoverMs, timeZone)}</div>
+            </div>
+          )}
+        </div>
       </div>
 
-      <div className="ribbon-ticks">
-        {ticks.map((t) => (
-          <div key={t.ms} className="ribbon-tick" style={{ left: pct(t.ms) }}>
-            <div className="ribbon-tick-line" />
-            <div className="ribbon-tick-label small tertiary">{fmtTime(t.ms, timeZone)}</div>
-          </div>
-        ))}
-        {hoverMs != null && (
-          <div
-            className="ribbon-tick ribbon-tick-hover"
-            style={{ left: pct(hoverMs) }}
-            aria-hidden
-          >
-            <div className="ribbon-tick-line ribbon-tick-line-hover" />
-            <div className="ribbon-tick-label ribbon-tick-label-hover">{fmtTime(hoverMs, timeZone)}</div>
-          </div>
-        )}
-      </div>
-    </div>
+      {picked && (
+        <p className="ribbon-note small">
+          <span className="tertiary">
+            Manual · {fmtTime(picked.startedAt, timeZone)} – {fmtTime(picked.endedAt, timeZone)} ·{' '}
+          </span>
+          {picked.reason}
+        </p>
+      )}
+    </>
   );
 }
 

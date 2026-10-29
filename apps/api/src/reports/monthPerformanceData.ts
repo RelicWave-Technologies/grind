@@ -58,9 +58,11 @@ interface MonthInputs {
   userIds: string[];
   companyName: string;
   calendarInput: { workspaceId: string; tz: string; userIds: string[]; from: string; to: string };
-  overrides: Array<{ userId: string; date: Date; code: DayOverride['code']; computedCode: DayOverride['computedCode'] }>;
+  overrides: Array<{ userId: string; date: Date; code: DayOverride['code']; computedCode: DayOverride['computedCode']; reason: string }>;
   /** Counted milliseconds (work, meetings, approved manual; invalidated excluded). */
   trackedMsFor: (userId: string, date: string) => number;
+  /** The approved manual part of `trackedMsFor`. */
+  manualMsFor: (userId: string, date: string) => number;
   rules: AttendanceRuleContext;
   /** The Working Calendar over the month (see `timesheetCalendarInputs`). */
   calendar: Awaited<ReturnType<typeof timesheetCalendarInputs>>;
@@ -99,6 +101,7 @@ async function loadMonthInputs(input: {
           select: {
             id: true, name: true, email: true, joinedOn: true, createdAt: true, deactivatedAt: true,
             team: { select: { name: true } },
+            unit: { select: { name: true } },
           },
           orderBy: [{ name: 'asc' }, { email: 'asc' }],
         }),
@@ -109,6 +112,7 @@ async function loadMonthInputs(input: {
     name: u.name,
     email: u.email,
     teamName: u.team?.name ?? null,
+    unitName: u.unit?.name ?? null,
     // The leave balance's own start (see loadWorkingCalendar's accrualStartFor).
     startDate: accrualStartDate(u, range.tz),
     endDate: u.deactivatedAt ? dateKeyInTimeZone(u.deactivatedAt, range.tz) : null,
@@ -133,7 +137,7 @@ async function loadMonthInputs(input: {
         userId: { in: userIds },
         date: { gte: new Date(`${range.from}T00:00:00Z`), lte: new Date(`${range.to}T00:00:00Z`) },
       },
-      select: { userId: true, date: true, code: true, computedCode: true },
+      select: { userId: true, date: true, code: true, computedCode: true, reason: true },
     }),
     loadAttendanceRuleContext({ ...calendarInput, nowMs }),
     timesheetCalendarInputs(calendarInput),
@@ -147,6 +151,7 @@ async function loadMonthInputs(input: {
     calendarInput,
     overrides,
     trackedMsFor: (userId, date) => timeline.bucket(userId, date).counted,
+    manualMsFor: (userId, date) => timeline.bucket(userId, date).manual,
     rules,
     calendar,
     balances,
@@ -238,7 +243,7 @@ export async function loadMonthPerformanceReport(input: {
   // Read-only: the ledger lines the rules wrote are whatever the last
   // reconcile left (see `reconcileMonthRules`), and the calendar prices the
   // month from them.
-  const { reportUsers, overrides, trackedMsFor, rules, nowMs, calendar, balances } = m;
+  const { reportUsers, overrides, trackedMsFor, manualMsFor, rules, nowMs, calendar, balances } = m;
   const overrideIndex = new Map<string, DayOverride>();
   for (const o of overrides) {
     // A DATE column reads back as an epoch-anchored Date; no timezone applies.
@@ -246,6 +251,7 @@ export async function loadMonthPerformanceReport(input: {
     overrideIndex.set(`${o.userId}|${date}`, {
       code: o.code,
       computedCode: o.computedCode,
+      reason: o.reason,
       // The correction says the day was leave; this says how much of it the
       // balance paid for. Same walk that answers it for leave filed in Lark.
       fundedDays: calendar.fundedDaysFor(o.userId, date),
@@ -261,6 +267,7 @@ export async function loadMonthPerformanceReport(input: {
     users: reportUsers,
     dayStatusFor: calendar.dayStatusFor,
     trackedMsFor,
+    manualMsFor,
     punchFor: rules.punchFor,
     overrideFor,
     balanceFor: (userId) => balances[userId]?.balanceDays,
