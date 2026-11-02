@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { Role } from './auth';
 import { ShiftDtoSchema } from './shifts';
+import { leaveDaysSchema } from './leave';
 
 export const SCREENSHOT_INTERVAL_OPTIONS = [1, 2, 3] as const;
 export type ScreenshotIntervalMin = (typeof SCREENSHOT_INTERVAL_OPTIONS)[number];
@@ -56,6 +57,12 @@ export const TeamMemberSettingsDtoSchema = z.object({
   idleWarningSeconds: z.number().int().min(5).max(120).nullable(),
   /** How the attendance rules treat them: office, remote (no punch), or outside the rules. */
   attendanceRuleMode: z.enum(['STANDARD', 'REMOTE', 'EXEMPT']).default('STANDARD'),
+  /** The employer they work for (EMIAC / MACOBS); null when unset. */
+  unit: TeamSettingsTeamSchema.nullable().default(null),
+  /** Paid leave earned each month: their own rate, or null to follow the leave policy. */
+  leaveAccrualDays: z.number().nullable().default(null),
+  /** The rate that applies — their own, else the leave policy's. */
+  effectiveLeaveAccrualDays: z.number().default(1),
   createdAt: z.string().datetime({ offset: true }),
 });
 
@@ -65,6 +72,8 @@ export const TeamSettingsResponseSchema = z.object({
   scope: z.enum(['team', 'workspace']),
   members: z.array(TeamMemberSettingsDtoSchema),
   shifts: z.array(ShiftDtoSchema),
+  /** The workspace's units, for the admin's unit picker. */
+  units: z.array(TeamSettingsTeamSchema).default([]),
 });
 
 export type TeamSettingsResponse = z.infer<typeof TeamSettingsResponseSchema>;
@@ -78,6 +87,10 @@ export const PatchTeamMemberSettingsRequest = z
     idleThresholdMin: z.number().int().min(IDLE_THRESHOLD_MIN).max(IDLE_THRESHOLD_MAX).nullable().optional(),
     idleWarningSeconds: z.number().int().min(5).max(120).nullable().optional(),
     attendanceRuleMode: z.enum(['STANDARD', 'REMOTE', 'EXEMPT']).optional(),
+    // Admin only. null clears the unit.
+    unitId: z.string().nullable().optional(),
+    // Admin only. null follows the workspace leave policy's monthly rate.
+    leaveAccrualDays: leaveDaysSchema(31).nullable().optional(),
     auditReason: z.string().max(500).optional(),
   })
   .refine(
@@ -86,7 +99,9 @@ export const PatchTeamMemberSettingsRequest = z
       v.screenshotIntervalMin !== undefined ||
       v.idleThresholdMin !== undefined ||
       v.idleWarningSeconds !== undefined ||
-      v.attendanceRuleMode !== undefined,
+      v.attendanceRuleMode !== undefined ||
+      v.unitId !== undefined ||
+      v.leaveAccrualDays !== undefined,
     { message: 'nothing_to_update' },
   );
 

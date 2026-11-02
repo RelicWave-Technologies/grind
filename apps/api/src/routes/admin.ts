@@ -10,7 +10,7 @@ import { explainFlag } from '../ai/explainFlag';
 import { deleteMember, planMemberDeletion } from '../admin/deleteMember';
 import { logger } from '../logger';
 import { resolveReportRange } from '../reports/member';
-import { timesheetCalendarInputs } from '../leave';
+import { ensureAccruals, timesheetCalendarInputs } from '../leave';
 import { loadAttendanceRuleContext } from '../attendance/ruleContext';
 import { loadOverrideLookup } from '../reports/attendanceOverrides';
 import {
@@ -394,6 +394,8 @@ type TeamSettingsUserRow = {
   idleThresholdMin: number | null;
   idleWarningSeconds: number | null;
   attendanceRuleMode: 'STANDARD' | 'REMOTE' | 'EXEMPT';
+  leaveAccrualDaysOverride: number | null;
+  unit: { id: string; name: string } | null;
   createdAt: Date;
   team: {
     id: string;
@@ -404,6 +406,12 @@ type TeamSettingsUserRow = {
 
 /** Effective capture defaults for a workspace (per-member NULLs fall back here). */
 type PolicyDefaults = { screenshotIntervalMin: number; idleThresholdMin: number };
+
+/** The leave policy's monthly paid-leave rate — what a person without their own rate earns. */
+async function loadPolicyAccrualDays(workspaceId: string): Promise<number> {
+  const policy = await prisma.leavePolicy.findUnique({ where: { workspaceId }, select: { monthlyAccrualDays: true } });
+  return policy?.monthlyAccrualDays ?? 1;
+}
 
 async function loadPolicyDefaults(workspaceId: string): Promise<PolicyDefaults> {
   const policy = await prisma.workspacePolicy.findUnique({
@@ -424,6 +432,7 @@ function serializeTeamSettingsMember(
   manager: { id: string; name: string; email: string; avatarUrl: string | null } | null,
   defaults: PolicyDefaults,
   exposeIdleWarning: boolean,
+  policyAccrualDays: number,
 ): TeamMemberSettingsDto {
   return {
     id: user.id,
@@ -440,6 +449,9 @@ function serializeTeamSettingsMember(
     idleThresholdMin: user.idleThresholdMin ?? defaults.idleThresholdMin,
     idleWarningSeconds: exposeIdleWarning ? user.idleWarningSeconds : null,
     attendanceRuleMode: user.attendanceRuleMode,
+    unit: user.unit,
+    leaveAccrualDays: user.leaveAccrualDaysOverride,
+    effectiveLeaveAccrualDays: user.leaveAccrualDaysOverride ?? policyAccrualDays,
     createdAt: user.createdAt.toISOString(),
   };
 }
@@ -462,6 +474,8 @@ async function loadTeamSettingsMembers(userIds: string[], exposeIdleWarning = fa
       idleThresholdMin: true,
       idleWarningSeconds: true,
       attendanceRuleMode: true,
+      leaveAccrualDaysOverride: true,
+      unit: { select: { id: true, name: true } },
       createdAt: true,
       workspaceId: true,
       team: {
@@ -481,10 +495,12 @@ async function loadTeamSettingsMembers(userIds: string[], exposeIdleWarning = fa
   // All members share one workspace (scope is workspace-bounded); resolve its
   // policy defaults once so per-member NULL overrides fall back to them.
   const workspaceId = users[0]?.workspaceId;
-  const defaults = workspaceId ? await loadPolicyDefaults(workspaceId) : {
-    screenshotIntervalMin: WORKSPACE_POLICY_DEFAULTS.defaultScreenshotIntervalMin,
-    idleThresholdMin: WORKSPACE_POLICY_DEFAULTS.defaultIdleThresholdMin,
-  };
+  const [defaults, policyAccrualDays] = workspaceId
+    ? await Promise.all([loadPolicyDefaults(workspaceId), loadPolicyAccrualDays(workspaceId)])
+    : [{
+        screenshotIntervalMin: WORKSPACE_POLICY_DEFAULTS.defaultScreenshotIntervalMin,
+        idleThresholdMin: WORKSPACE_POLICY_DEFAULTS.defaultIdleThresholdMin,
+      }, 1];
 
   return users.map((u) =>
     serializeTeamSettingsMember(
@@ -492,6 +508,7 @@ async function loadTeamSettingsMembers(userIds: string[], exposeIdleWarning = fa
       u.team?.managers.find((m) => m.user.id !== u.id)?.user ?? u.team?.managers[0]?.user ?? null,
       defaults,
       exposeIdleWarning,
+      policyAccrualDays,
     ),
   );
 }
@@ -505,11 +522,16 @@ function scopedTeamSettingIds(req: Request): string[] {
 adminRouter.get('/team-member-settings', requireCapability('team.settings.manage'), async (req, res, next) => {
   try {
     if (!req.scope || !req.user) return res.status(401).json({ error: 'unauthorized' });
-    const [members, shifts] = await Promise.all([
+    const [members, shifts, units] = await Promise.all([
       loadTeamSettingsMembers(scopedTeamSettingIds(req), req.scope.isAdmin),
       prisma.shift.findMany({
         where: { workspaceId: req.scope.workspaceId },
         include: { members: { select: { id: true } } },
+        orderBy: { name: 'asc' },
+      }),
+      prisma.unit.findMany({
+        where: { workspaceId: req.scope.workspaceId },
+        select: { id: true, name: true },
         orderBy: { name: 'asc' },
       }),
     ]);
@@ -517,6 +539,7 @@ adminRouter.get('/team-member-settings', requireCapability('team.settings.manage
       scope: req.scope.isAdmin ? 'workspace' : 'team',
       members,
       shifts: shifts.map(serializeShift),
+      units,
     };
     res.json(response);
   } catch (err) {
@@ -547,6 +570,10 @@ adminRouter.patch('/team-member-settings/:id', requireCapability('team.settings.
     // admin's call, like the leave settings it used to sit beside.
     if (!req.scope.isAdmin && parsed.data.attendanceRuleMode !== undefined) {
       return res.status(403).json({ error: 'admin_required_for_attendance_rule_mode' });
+    }
+    // The employer and the leave rate are payroll facts, so they are an admin's too.
+    if (!req.scope.isAdmin && (parsed.data.unitId !== undefined || parsed.data.leaveAccrualDays !== undefined)) {
+      return res.status(403).json({ error: 'admin_required_for_unit_or_leave_rate' });
     }
 
     const existing = await prisma.user.findUnique({
@@ -605,6 +632,8 @@ adminRouter.patch('/team-member-settings/:id', requireCapability('team.settings.
       idleThresholdMin?: number | null;
       idleWarningSeconds?: number | null;
       attendanceRuleMode?: 'STANDARD' | 'REMOTE' | 'EXEMPT';
+      unitId?: string | null;
+      leaveAccrualDaysOverride?: number | null;
       provisioningStatus?: 'ACTIVE';
     } = {};
     let shiftAssignment:
@@ -628,6 +657,18 @@ adminRouter.patch('/team-member-settings/:id', requireCapability('team.settings.
     }
     if (parsed.data.attendanceRuleMode !== undefined) {
       data.attendanceRuleMode = parsed.data.attendanceRuleMode;
+    }
+    if (parsed.data.unitId !== undefined) {
+      if (parsed.data.unitId !== null) {
+        const unit = await prisma.unit.findUnique({ where: { id: parsed.data.unitId }, select: { workspaceId: true } });
+        if (!unit || unit.workspaceId !== req.scope.workspaceId) {
+          return res.status(400).json({ error: 'unit_out_of_workspace' });
+        }
+      }
+      data.unitId = parsed.data.unitId;
+    }
+    if (parsed.data.leaveAccrualDays !== undefined) {
+      data.leaveAccrualDaysOverride = parsed.data.leaveAccrualDays;
     }
     if ('shiftId' in parsed.data) {
       const raw = parsed.data.shiftId;
@@ -717,6 +758,16 @@ adminRouter.patch('/team-member-settings/:id', requireCapability('team.settings.
             },
           });
         }
+      });
+    }
+
+    // A new rate can make months newly due; write them now so the balance
+    // shown next reflects it.
+    if (data.leaveAccrualDaysOverride !== undefined) {
+      await ensureAccruals({
+        workspaceId: req.scope.workspaceId,
+        userId: id,
+        asOf: dateKeyInTimeZone(Date.now(), req.scope.workspaceTimezone),
       });
     }
 

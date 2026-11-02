@@ -65,7 +65,11 @@ type RowDraft = {
   idleThresholdMin: number;
   idleWarningSeconds: number | null;
   attendanceRuleMode: RuleMode;
+  unitId: string | null;
+  /** The PL-per-month box as typed; empty follows the leave policy. */
+  leaveAccrualDays: string;
 } | null;
+type UnitOption = { id: string; name: string };
 type RuleMode = 'STANDARD' | 'REMOTE' | 'EXEMPT';
 const RULE_MODE_LABEL: Record<RuleMode, string> = { STANDARD: 'Office', REMOTE: 'Remote', EXEMPT: 'No rules' };
 type MonitoringRisk = 'NORMAL' | 'CAUTION' | 'HIGH';
@@ -108,6 +112,7 @@ export function TeamScreen() {
 
   const members = settingsQ.data?.members ?? [];
   const shifts = settingsQ.data?.shifts ?? [];
+  const units = settingsQ.data?.units ?? [];
   const summary = useMemo(() => summarizeMembers(members), [members]);
   const policy = policyQ.data;
   const tz = me.workspaceTimezone;
@@ -128,6 +133,8 @@ export function TeamScreen() {
       idleThresholdMin: member.idleThresholdMin,
       idleWarningSeconds: member.idleWarningSeconds,
       attendanceRuleMode: member.attendanceRuleMode,
+      unitId: member.unit?.id ?? null,
+      leaveAccrualDays: member.leaveAccrualDays === null ? '' : String(member.leaveAccrualDays),
     });
   }
 
@@ -160,6 +167,12 @@ export function TeamScreen() {
     if (rowDraft.attendanceRuleMode !== member.attendanceRuleMode) {
       patch.attendanceRuleMode = rowDraft.attendanceRuleMode;
     }
+    if (me.role === 'ADMIN') {
+      if (rowDraft.unitId !== (member.unit?.id ?? null)) patch.unitId = rowDraft.unitId;
+      const rate = parseLeaveRate(rowDraft.leaveAccrualDays);
+      if (rate === undefined) return;
+      if (rate !== member.leaveAccrualDays) patch.leaveAccrualDays = rate;
+    }
     if (Object.keys(patch).length === 0) {
       setRowDraft(null);
       return;
@@ -189,7 +202,7 @@ export function TeamScreen() {
       <PageHeader
         eyebrow="Manager workspace"
         title="Team Settings"
-        subtitle="Edit each member's shift, screenshot cadence, idle-break threshold, and admin idle countdown."
+        subtitle="Edit each member's shift, screenshot cadence, idle-break threshold, unit, paid leave per month, and admin idle countdown."
         actions={
           <Toolbar>
             <Button
@@ -220,6 +233,12 @@ export function TeamScreen() {
 
       {updateMember.isError && (
         <Banner status="danger">Couldn&apos;t save the member setting: {(updateMember.error as Error).message}</Banner>
+      )}
+
+      {rowDraft && parseLeaveRate(rowDraft.leaveAccrualDays) === undefined && (
+        <Banner status="warn">
+          Paid leave per month takes whole or half days from 0 to 31. Leave it empty to follow the leave policy.
+        </Banner>
       )}
 
       {rowDraft && draftRisk === 'HIGH' && (
@@ -273,6 +292,7 @@ export function TeamScreen() {
             <TeamSettingsTable
               members={members}
               shifts={shifts}
+              units={units}
               currentUserId={me.id}
               currentUserRole={me.role}
               pendingEdit={pendingEdit}
@@ -315,6 +335,7 @@ export function TeamScreen() {
 function TeamSettingsTable({
   members,
   shifts,
+  units,
   currentUserId,
   currentUserRole,
   pendingEdit,
@@ -327,6 +348,7 @@ function TeamSettingsTable({
 }: {
   members: TeamMemberSettingsDto[];
   shifts: ShiftDto[];
+  units: UnitOption[];
   currentUserId: string | null;
   currentUserRole: Role | null;
   pendingEdit: PendingEdit;
@@ -348,6 +370,7 @@ function TeamSettingsTable({
     facets: {
       ...personFacets(person),
       shift: { label: 'Shifts', value: (m) => shiftName(m.shiftId) },
+      unit: { label: 'Units', value: (m) => m.unit?.name ?? 'No unit' },
       works: {
         label: 'Work modes',
         value: (m) => m.attendanceRuleMode,
@@ -378,6 +401,8 @@ function TeamSettingsTable({
               <Th className="tm-col-idle" align="center">Idle break</Th>
               {showIdleCountdown && <Th className="tm-col-countdown" align="center">Idle countdown</Th>}
               <Th className="tm-col-works" align="center">Works from</Th>
+              <Th className="tm-col-unit" align="center">Unit</Th>
+              <Th className="tm-col-pl" align="center">PL / month</Th>
               <Th className="tm-col-manager" align="center">Manager</Th>
               <Th className="tm-col-action" align="center">Action</Th>
             </Tr>
@@ -392,6 +417,7 @@ function TeamSettingsTable({
               const idleThresholdMin = draft ? draft.idleThresholdMin : member.idleThresholdMin;
               const idleWarningSeconds = draft ? draft.idleWarningSeconds : member.idleWarningSeconds;
               const ruleMode = draft ? draft.attendanceRuleMode : member.attendanceRuleMode;
+              const adminEditing = editing && currentUserRole === 'ADMIN';
               const shift = shifts.find((s) => s.id === shiftId) ?? null;
               const isCurrentUser = member.id === currentUserId;
               const selfEditLocked = isCurrentUser && currentUserRole !== 'ADMIN';
@@ -481,6 +507,51 @@ function TeamSettingsTable({
                       <SettingValue value={RULE_MODE_LABEL[ruleMode]} />
                     )}
                   </Td>
+                  <Td className="tm-col-unit" align="center">
+                    {/* The employer, which decides whose payroll the person is on. Admin only. */}
+                    {adminEditing && draft ? (
+                      <div className="tm-setting-control">
+                        <Select
+                          value={draft.unitId ?? ''}
+                          aria-label={`${member.name} unit`}
+                          disabled={rowBusy}
+                          onChange={(e) => onDraftChange(member.id, { unitId: e.target.value === '' ? null : e.target.value })}
+                        >
+                          <option value="">No unit</option>
+                          {units.map((unit) => (
+                            <option key={unit.id} value={unit.id}>{unit.name}</option>
+                          ))}
+                        </Select>
+                      </div>
+                    ) : (
+                      <SettingValue value={member.unit?.name ?? 'No unit'} />
+                    )}
+                  </Td>
+                  <Td className="tm-col-pl" align="center">
+                    {/* Paid leave earned each month. Empty follows the leave policy. Admin only. */}
+                    {adminEditing && draft ? (
+                      <div className="tm-setting-control">
+                        <Input
+                          type="number"
+                          inputMode="decimal"
+                          min={0}
+                          max={31}
+                          step={0.5}
+                          value={draft.leaveAccrualDays}
+                          placeholder="Policy"
+                          aria-label={`${member.name} paid leave per month`}
+                          error={parseLeaveRate(draft.leaveAccrualDays) === undefined}
+                          disabled={rowBusy}
+                          onChange={(e) => onDraftChange(member.id, { leaveAccrualDays: e.target.value })}
+                        />
+                      </div>
+                    ) : (
+                      <SettingValue
+                        label={member.leaveAccrualDays === null ? 'Policy' : undefined}
+                        value={`${formatDays(member.effectiveLeaveAccrualDays)} d`}
+                      />
+                    )}
+                  </Td>
                   <Td className="tm-col-manager" align="center">
                     <div className="tm-stack tm-stack--center">
                       <span className="ui-t-strong">{member.manager?.name ?? 'No manager'}</span>
@@ -538,6 +609,22 @@ function TeamSettingsTable({
       )}
     </>
   );
+}
+
+/**
+ * The PL-per-month box as a patch value: null when empty (follow the policy),
+ * a number for whole or half days 0–31, undefined when it is neither.
+ */
+function parseLeaveRate(raw: string): number | null | undefined {
+  const text = raw.trim();
+  if (text === '') return null;
+  const n = Number(text);
+  if (!Number.isFinite(n) || n < 0 || n > 31 || !Number.isInteger(n * 2)) return undefined;
+  return n;
+}
+
+function formatDays(days: number): string {
+  return Number.isInteger(days) ? String(days) : days.toFixed(1);
 }
 
 function SettingValue({ label, value }: { label?: string; value: string }) {

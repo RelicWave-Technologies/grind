@@ -36,13 +36,13 @@
 }
 
 .tm-members-table {
-  min-width: 100%;
+  min-width: calc(var(--ui-sp-12) * 18);
   width: 100%;
   table-layout: fixed;
 }
 
 .tm-members-table--countdown {
-  min-width: calc(var(--ui-sp-12) * 16);
+  min-width: calc(var(--ui-sp-12) * 21);
 }
 
 .tm-members-table.ui-table--compact .ui-table__row {
@@ -78,6 +78,11 @@
 
 .tm-col-works {
   width: calc(var(--ui-sp-12) * 2 + var(--ui-sp-7));
+}
+
+.tm-col-unit,
+.tm-col-pl {
+  width: calc(var(--ui-sp-12) * 2);
 }
 
 .tm-col-manager {
