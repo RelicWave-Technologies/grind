@@ -12,7 +12,7 @@ export function UnitPicker({ value, onChange }: { value: string; onChange: (unit
   const units = q.data?.units ?? [];
   if (units.length === 0) return null;
   return (
-    <Select value={value} onChange={(e) => onChange(e.target.value)} aria-label="Unit to download" title="Unit to download">
+    <Select className="ui-select--pill" value={value} onChange={(e) => onChange(e.target.value)} aria-label="Unit to download" title="Unit to download">
       <option value="">All units</option>
       {units.map((u) => (
         <option key={u.id} value={u.name}>

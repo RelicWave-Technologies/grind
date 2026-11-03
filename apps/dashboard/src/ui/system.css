@@ -205,7 +205,7 @@
 .ui-page-head__eyebrow { display: block; margin-bottom: var(--ui-sp-2); }
 .ui-page-head__title { margin: 0; }
 .ui-page-head__sub { margin-top: var(--ui-sp-2); color: var(--ui-ink-2); }
-.ui-page-head__actions { display: flex; align-items: center; flex-shrink: 0; }
+.ui-page-head__actions { display: flex; align-items: center; flex-shrink: 0; max-width: 100%; }
 /* The optional tabs row docks onto the bottom hairline of the header. */
 .ui-page-head--with-tabs { padding-bottom: 0; gap: var(--ui-sp-4); }
 .ui-page-head__tabs {
@@ -593,6 +593,10 @@ textarea.ui-control { height: auto; min-height: 80px; padding: var(--ui-sp-3) va
   background-size: 5px 5px, 5px 5px;
   background-repeat: no-repeat;
 }
+
+/* A select that sits in a toolbar beside pill buttons: as wide as its label,
+   never the whole row. */
+.ui-select--pill { width: auto; flex: none; border-radius: var(--ui-r-full); }
 
 /* Combobox (§5.9b) — the closed control IS a .ui-select, so a facet reads
    exactly like the native select it replaced; the list floats in a .ui-popover. */
