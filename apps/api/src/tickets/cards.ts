@@ -277,6 +277,8 @@ export interface DraftCardInput {
   related?: { id: string; number: number; subject: string } | null;
   /** One question that would help an admin act, in the person's own language. */
   question?: string | null;
+  /** The closing line, when the default ("send more and it is added") does not fit. */
+  hint?: string | null;
 }
 
 /** "Open a ticket?" — the confirm card for something sent to the bot in DM. */
@@ -289,7 +291,7 @@ export function buildDraftCard(d: DraftCardInput): Record<string, unknown> {
   if (d.attachmentCount > 0) elements.push(md(`📎 ${d.attachmentCount} attachment${d.attachmentCount === 1 ? '' : 's'}`));
   if (d.related) elements.push(md(`🔗 This looks like your open ticket **#${d.related.number} ${plain(clip(d.related.subject, 80))}**. Add it there, or open a new one.`));
   if (d.question) elements.push(md(`💡 ${plain(clip(d.question, 300))}\n_Reply here and it is added to this draft._`));
-  else elements.push(md('_Send more messages or screenshots now and they are added here._'));
+  else elements.push(md(d.hint ?? '_Send more messages or screenshots now and they are added here._'));
   const formElements: Array<Record<string, unknown>> = [
     {
       tag: 'input',

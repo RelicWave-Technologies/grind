@@ -32,7 +32,12 @@ import { downloadsRouter } from './routes/downloads';
 import { devRouter } from './routes/dev';
 import { errorHandler } from './middleware/errorHandler';
 
-export function buildApp() {
+/**
+ * `requestLogs: false` silences per-request lines while keeping errors: the
+ * support agent's private copy reads several routes per answer, and those
+ * reads are already recorded with the answer.
+ */
+export function buildApp(opts: { requestLogs?: boolean } = {}) {
   const app = express();
   // nginx on the host terminates every request and appends the client to
   // X-Forwarded-For. Trust only the hops in front of us — loopback, plus the
@@ -77,8 +82,10 @@ export function buildApp() {
   app.use(
     pinoHttp({
       logger,
-      customLogLevel: (req, res, err) =>
-        requestLogLevel(req.method, (req as express.Request).originalUrl ?? req.url, res.statusCode, err),
+      customLogLevel: (req, res, err) => {
+        if (opts.requestLogs === false && !err && res.statusCode < 500) return 'silent';
+        return requestLogLevel(req.method, (req as express.Request).originalUrl ?? req.url, res.statusCode, err);
+      },
       redact: {
         // Cookies carry the dashboard session (grind_at / grind_rt), and
         // Set-Cookie hands out a fresh 90-day refresh token: anyone reading

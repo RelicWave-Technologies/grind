@@ -47,6 +47,7 @@ model Workspace {
   agentCommands             AgentCommand[]
   tickets                   Ticket[]
   ticketDrafts              TicketDraft[]
+  supportChats              SupportChat[]
   ticketDigests             TicketDigest[]
 }
 
@@ -443,6 +444,7 @@ model User {
   ticketEvents                     TicketEvent[]             @relation("TicketEventActor")
   ticketAttachments                TicketAttachment[]        @relation("TicketAttachmentUploader")
   ticketDrafts                     TicketDraft[]
+  supportChats                     SupportChat[]
 
   @@index([workspaceId])
   @@index([teamId])
@@ -2164,4 +2166,23 @@ model TicketDigest {
 model TicketInboundMessage {
   messageId String   @id
   createdAt DateTime @default(now())
+}
+
+/// A Lark DM conversation between one person and Timo's support agent. A new
+/// one starts after a quiet spell, so an old chat never colours a new problem.
+/// `messages` is the Claude conversation as sent (thinking blocks dropped,
+/// images kept as attachment ids), so the next turn can carry on from it.
+model SupportChat {
+  id            String    @id @default(cuid())
+  workspaceId   String
+  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages      Json      @default("[]")
+  turns         Int       @default(0)
+  lastMessageAt DateTime  @default(now())
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([userId, lastMessageAt])
 }

@@ -3,10 +3,14 @@ import {
   TICKET_ATTACHMENT_MAX_BYTES,
   TICKET_ATTACHMENT_MIME_TYPES,
   TICKET_BODY_MAX,
+  TICKET_CATEGORIES,
   TICKET_REOPEN_WINDOW_DAYS,
+  TICKET_SUBJECT_MAX,
+  type TicketCategory,
 } from '@grind/types';
 import { getLarkMessenger } from '../lark';
 import { logger } from '../logger';
+import { enqueueSupportDm, supportAgentAvailable, type SupportHooks } from '../support/agent';
 import { getTicketAi, intakeHash, ruleIntake, todayLabel, type OpenTicketRef, type TicketIntake } from './ai';
 import { buildDraftCard } from './cards';
 import { downloadLarkMessageResource } from './larkApi';
@@ -212,7 +216,7 @@ async function refreshDraftIntake(draftId: string, actor: TicketActor, known?: T
   });
 }
 
-export async function draftCardFor(draftId: string): Promise<Record<string, unknown> | null> {
+export async function draftCardFor(draftId: string, hint?: string): Promise<Record<string, unknown> | null> {
   const draft = await prisma.ticketDraft.findUnique({
     where: { id: draftId },
     include: { _count: { select: { attachments: true } } },
@@ -230,12 +234,13 @@ export async function draftCardFor(draftId: string): Promise<Record<string, unkn
     // Only while that ticket is still open; it may have closed since.
     related: openTickets.find((t) => t.id === draft.aiRelatedTicketId) ?? null,
     question: draft.aiQuestion,
+    hint,
   });
 }
 
 /** Send (or refresh) the confirm card for a draft. */
-async function showDraft(draftId: string, openId: string): Promise<void> {
-  const card = await draftCardFor(draftId);
+async function showDraft(draftId: string, openId: string, hint?: string): Promise<void> {
+  const card = await draftCardFor(draftId, hint);
   if (!card) return;
   const draft = await prisma.ticketDraft.findUniqueOrThrow({ where: { id: draftId }, select: { offerMessageId: true } });
   const messenger = getLarkMessenger();
@@ -325,6 +330,17 @@ export async function handleTicketDm(raw: unknown, opts: { fallback: boolean }):
   const ticketMessage = quoted
     ? await prisma.ticketLarkMessage.findUnique({ where: { messageId: quoted }, select: { ticketId: true } })
     : null;
+  // Everything else from a known person goes to the support agent when it is on.
+  if (!ticketMessage && supportAgentAvailable()) {
+    if (!(await claimMessage(dm.messageId))) return true;
+    void enqueueSupportDm(
+      actor,
+      { messageId: dm.messageId, openId: dm.openId, text: dm.text, hasResources: dm.resources.length > 0, raw },
+      supportHooks,
+    ).catch((err) => logger.error({ err: String(err) }, 'support agent queue failed'));
+    return true;
+  }
+
   const keyword = TICKET_KEYWORD.exec(dm.text);
   const draft = ticketMessage || keyword ? null : await openDraftOf(actor.id);
   const claims = Boolean(ticketMessage || keyword || draft || dm.resources.length > 0 || !opts.fallback);
@@ -359,6 +375,83 @@ export async function handleTicketDm(raw: unknown, opts: { fallback: boolean }):
   }
   return true;
 }
+
+// ---------------------------------------------------------------------------
+// The support agent's side of the intake
+// ---------------------------------------------------------------------------
+
+const AGENT_DRAFT_HINT = '_Anything to add? Tell me here and I will update this card before you press Open ticket._';
+
+/**
+ * The agent asked for a ticket: put its title, category and summary on the
+ * person's draft (a new one, or the open one, replaced) with the screenshots
+ * from the chat, and show the card. Filing stays the person's press.
+ */
+export async function offerAgentDraft(
+  actor: TicketActor,
+  openId: string,
+  offer: { subject: string; category: string; body: string; relatedTicketNumber: number | null; attachmentIds: string[] },
+): Promise<void> {
+  const open = await openTicketsOf(actor.id);
+  const related = offer.relatedTicketNumber == null ? null : open.find((t) => t.number === offer.relatedTicketNumber) ?? null;
+  const category = (TICKET_CATEGORIES as readonly string[]).includes(offer.category) ? (offer.category as TicketCategory) : 'OTHER';
+  const text = offer.body.slice(0, TICKET_BODY_MAX);
+  const subject = offer.subject.replace(/\s+/gu, ' ').trim();
+  const data = {
+    text,
+    aiSubject: subject.length > TICKET_SUBJECT_MAX ? `${subject.slice(0, TICKET_SUBJECT_MAX - 1).trimEnd()}…` : subject,
+    aiCategory: category,
+    aiRelatedTicketId: related?.id ?? null,
+    aiQuestion: null,
+    // Marks this text as already read, so the draft is not re-read by the intake model.
+    aiTextHash: intakeHash(text, open),
+  };
+  const existing = await openDraftOf(actor.id);
+  const draft = existing
+    ? await prisma.ticketDraft.update({ where: { id: existing.id }, data })
+    : await prisma.ticketDraft.create({ data: { workspaceId: actor.workspaceId, userId: actor.id, ...data } });
+  if (offer.attachmentIds.length) {
+    // Only this person's own uploads that no ticket or other draft holds yet.
+    await prisma.ticketAttachment.updateMany({
+      where: { id: { in: offer.attachmentIds.slice(-5) }, uploaderId: actor.id, ticketId: null, OR: [{ draftId: null }, { draftId: draft.id }] },
+      data: { draftId: draft.id },
+    });
+  }
+  await showDraft(draft.id, openId, AGENT_DRAFT_HINT);
+}
+
+/** The agent could not answer: the plain intake takes over, with what was already downloaded. */
+export async function fallbackFromAgent(actor: TicketActor, openId: string, text: string, attachmentIds: string[]): Promise<void> {
+  const trimmed = text.trim();
+  if (trimmed && attachmentIds.length === 0) {
+    const reading = await readIntake(actor, trimmed);
+    if (reading.fromAi && reading.kind === 'CHITCHAT') {
+      await replyText(openId, 'Hi! If something is wrong in Timo, tell me what happened (a screenshot helps) and I will get it to the admins.');
+      return;
+    }
+  }
+  await replyText(openId, 'I could not look into this right now, so here is a ticket for the admins. Check it and press Open ticket.');
+  const draft = (await openDraftOf(actor.id)) ?? (await prisma.ticketDraft.create({ data: { workspaceId: actor.workspaceId, userId: actor.id, text: '' } }));
+  const joined = [draft.text, trimmed].filter((t) => t.trim()).join('\n').slice(0, TICKET_BODY_MAX);
+  if (joined !== draft.text) await prisma.ticketDraft.update({ where: { id: draft.id }, data: { text: joined } });
+  if (attachmentIds.length) {
+    await prisma.ticketAttachment.updateMany({
+      where: { id: { in: attachmentIds }, uploaderId: actor.id, ticketId: null, draftId: null },
+      data: { draftId: draft.id },
+    });
+  }
+  await refreshDraftIntake(draft.id, actor);
+  await showDraft(draft.id, openId);
+}
+
+const supportHooks: SupportHooks = {
+  async storeAttachments(_dm, raw, uploaderId) {
+    const parsed = parseLarkDm(raw);
+    return parsed ? storeResources(parsed, uploaderId, {}) : [];
+  },
+  offerDraft: offerAgentDraft,
+  fallback: fallbackFromAgent,
+};
 
 /** The tester-ops bot read a problem report in a DM: offer a ticket with that text. */
 export async function offerTicketFromDm(openId: string, text: string): Promise<boolean> {

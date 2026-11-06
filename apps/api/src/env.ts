@@ -115,6 +115,17 @@ const EnvSchema = z.object({
   ANTHROPIC_API_KEY: z.string().min(1).optional(),
   TICKET_AI_MODEL: z.string().min(1).default('claude-haiku-5-5'),
   TICKET_AI_TIMEOUT_MS: z.coerce.number().int().min(1000).max(60000).default(15000),
+  /**
+   * The support agent: Claude answers Lark DMs like a support person, reading
+   * the asker's own Timo data and offering a ticket when an admin must act.
+   * On whenever ANTHROPIC_API_KEY is set, unless switched off here.
+   */
+  SUPPORT_AGENT_ENABLED: z.enum(['true', 'false']).default('true'),
+  SUPPORT_AI_MODEL: z.string().min(1).default('claude-sonnet-5-5'),
+  SUPPORT_AI_EFFORT: z.enum(['low', 'medium', 'high']).default('medium'),
+  SUPPORT_AI_TIMEOUT_MS: z.coerce.number().int().min(5000).max(180000).default(90000),
+  /** Agent replies one person can get in a day before it hands them to a ticket instead. */
+  SUPPORT_AI_DAILY_TURNS: z.coerce.number().int().min(1).max(1000).default(60),
   TIMO_TESTER_BOT_ENABLED: z.enum(['true', 'false']).default('false'),
   TIMO_TESTER_GROUP_CHAT_ID: z.string().min(1).optional(),
   TIMO_TESTER_PING_TIMES: z.string().min(1).default('11:00,17:00'),
