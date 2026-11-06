@@ -4,11 +4,10 @@ import {
   TICKET_ATTACHMENT_MIME_TYPES,
   TICKET_BODY_MAX,
   TICKET_REOPEN_WINDOW_DAYS,
-  TICKET_SUBJECT_MAX,
-  type TicketCategory,
 } from '@grind/types';
 import { getLarkMessenger } from '../lark';
 import { logger } from '../logger';
+import { getTicketAi, intakeHash, ruleIntake, todayLabel, type OpenTicketRef, type TicketIntake } from './ai';
 import { buildDraftCard } from './cards';
 import { downloadLarkMessageResource } from './larkApi';
 import { addTicketComment, applyTicketAction, loadTicketActorByOpenId, TicketError, type TicketActor } from './service';
@@ -98,21 +97,7 @@ export function parseLarkDm(raw: unknown): ParsedDm | null {
   };
 }
 
-/** A guess at the category from the words used. The person can change it on the card. */
-export function guessCategory(text: string): TicketCategory {
-  const t = text.toLowerCase();
-  if (/\b(leave|salary|payroll|payslip|pl\b|holiday|chhutti|wfh|work from home)/u.test(t)) return 'LEAVE_PAYROLL';
-  if (/\b(login|access|authori[sz]|sign ?in|password|permission|account)/u.test(t)) return 'ACCESS';
-  if (/\b(time|hours|attendance|late|punch|timesheet|manual|lwa|half day|ghante)/u.test(t)) return 'TIME_ATTENDANCE';
-  if (/\b(timo|app|crash|update|install|screenshot|sync|idle|popup|white screen|not opening|band)/u.test(t)) return 'TIMO_APP';
-  return 'OTHER';
-}
-
-export function suggestSubject(text: string): string {
-  const firstLine = text.split('\n').map((l) => l.trim()).find(Boolean) ?? '';
-  const s = firstLine.length > 0 ? firstLine : 'Screenshot from Lark';
-  return s.length > TICKET_SUBJECT_MAX ? `${s.slice(0, TICKET_SUBJECT_MAX - 1)}…` : s;
-}
+export { guessCategory, suggestSubject } from './ai';
 
 async function claimMessage(messageId: string): Promise<boolean> {
   const inserted = await prisma.ticketInboundMessage.createMany({ data: [{ messageId }], skipDuplicates: true });
@@ -174,12 +159,56 @@ async function storeResources(dm: ParsedDm, uploaderId: string, target: { draftI
   return ids;
 }
 
-async function openTicketsOf(userId: string) {
+async function openTicketsOf(userId: string): Promise<OpenTicketRef[]> {
   return prisma.ticket.findMany({
     where: { requesterId: userId, status: { in: ['OPEN', 'IN_PROGRESS', 'WAITING_ON_USER', 'RESOLVED'] } },
     orderBy: { updatedAt: 'desc' },
     take: 10,
-    select: { id: true, number: true, subject: true },
+    select: { id: true, number: true, subject: true, category: true },
+  });
+}
+
+/** Ask the AI what a piece of text is about, with the person's open tickets and today's date. */
+async function readIntake(actor: TicketActor, text: string, openTickets?: OpenTicketRef[]): Promise<TicketIntake> {
+  const open = openTickets ?? (await openTicketsOf(actor.id));
+  const ws = await prisma.workspace.findUnique({ where: { id: actor.workspaceId }, select: { timezone: true } });
+  try {
+    return await getTicketAi().analyze({ workspaceId: actor.workspaceId, text, openTickets: open, today: todayLabel(ws?.timezone ?? 'Asia/Kolkata') });
+  } catch (err) {
+    logger.warn({ err: String(err) }, 'ticket ai threw; using rules');
+    return ruleIntake(text);
+  }
+}
+
+/**
+ * Bring the draft's AI reading up to date with its text. Skipped when the text
+ * (and the open tickets it was read against) has not changed since last time.
+ * `known` is a reading already made of exactly this text.
+ */
+async function refreshDraftIntake(draftId: string, actor: TicketActor, known?: TicketIntake): Promise<void> {
+  const draft = await prisma.ticketDraft.findUnique({ where: { id: draftId }, select: { text: true, aiTextHash: true } });
+  if (!draft) return;
+  const open = await openTicketsOf(actor.id);
+  const hash = intakeHash(draft.text, open);
+  if (draft.aiTextHash === hash) return;
+  if (!draft.text.trim()) {
+    await prisma.ticketDraft.update({
+      where: { id: draftId },
+      data: { aiSubject: null, aiCategory: null, aiRelatedTicketId: null, aiQuestion: null, aiTextHash: hash },
+    });
+    return;
+  }
+  const r = known ?? (await readIntake(actor, draft.text, open));
+  await prisma.ticketDraft.update({
+    where: { id: draftId },
+    data: {
+      aiSubject: r.fromAi ? r.subject : null,
+      aiCategory: r.fromAi ? r.category : null,
+      aiRelatedTicketId: r.relatedTicketId,
+      aiQuestion: r.question,
+      // A rules-only reading is not cached: the model may answer next time.
+      aiTextHash: r.fromAi ? hash : null,
+    },
   });
 }
 
@@ -189,13 +218,18 @@ export async function draftCardFor(draftId: string): Promise<Record<string, unkn
     include: { _count: { select: { attachments: true } } },
   });
   if (!draft) return null;
+  const openTickets = await openTicketsOf(draft.userId);
+  const rules = ruleIntake(draft.text);
   return buildDraftCard({
     draftId: draft.id,
     text: draft.text,
     attachmentCount: draft._count.attachments,
-    suggestedSubject: suggestSubject(draft.text),
-    suggestedCategory: guessCategory(draft.text),
-    openTickets: await openTicketsOf(draft.userId),
+    suggestedSubject: draft.aiSubject ?? rules.subject,
+    suggestedCategory: draft.aiCategory ?? rules.category,
+    openTickets,
+    // Only while that ticket is still open; it may have closed since.
+    related: openTickets.find((t) => t.id === draft.aiRelatedTicketId) ?? null,
+    question: draft.aiQuestion,
   });
 }
 
@@ -224,7 +258,7 @@ async function openDraftOf(userId: string) {
   });
 }
 
-async function startOrExtendDraft(actor: TicketActor, dm: ParsedDm, text: string): Promise<void> {
+async function startOrExtendDraft(actor: TicketActor, dm: ParsedDm, text: string, known?: TicketIntake): Promise<void> {
   const draft = (await openDraftOf(actor.id)) ?? (await prisma.ticketDraft.create({
     data: { workspaceId: actor.workspaceId, userId: actor.id, text: '' },
   }));
@@ -232,6 +266,8 @@ async function startOrExtendDraft(actor: TicketActor, dm: ParsedDm, text: string
   if (joined !== draft.text) await prisma.ticketDraft.update({ where: { id: draft.id }, data: { text: joined } });
   else await prisma.ticketDraft.update({ where: { id: draft.id }, data: { updatedAt: new Date() } });
   await storeResources(dm, actor.id, { draftId: draft.id });
+  // `known` was read from this message alone; it is the draft's reading only when the draft is just this message.
+  await refreshDraftIntake(draft.id, actor, joined === text ? known : undefined);
   await showDraft(draft.id, dm.openId);
 }
 
@@ -305,8 +341,17 @@ export async function handleTicketDm(raw: unknown, opts: { fallback: boolean }):
       } else {
         await startOrExtendDraft(actor, dm, rest);
       }
-    } else {
+    } else if (draft || dm.resources.length > 0) {
       await startOrExtendDraft(actor, dm, dm.text);
+    } else {
+      // Nobody else will answer this (the tester bot is off): let the AI tell a
+      // problem from a "hi" or a "thanks", so small talk does not open drafts.
+      const reading = await readIntake(actor, dm.text);
+      if (reading.fromAi && reading.kind === 'CHITCHAT') {
+        await replyText(dm.openId, 'Hi! If something is wrong in Timo, tell me what happened (a screenshot helps) and I will open a ticket for the admins.');
+      } else {
+        await startOrExtendDraft(actor, dm, dm.text, reading);
+      }
     }
   } catch (err) {
     logger.error({ err: String(err), messageId: dm.messageId }, 'ticket DM intake failed');
@@ -322,6 +367,7 @@ export async function offerTicketFromDm(openId: string, text: string): Promise<b
   const draft = (await openDraftOf(actor.id)) ?? (await prisma.ticketDraft.create({
     data: { workspaceId: actor.workspaceId, userId: actor.id, text: text.slice(0, TICKET_BODY_MAX) },
   }));
+  await refreshDraftIntake(draft.id, actor);
   await showDraft(draft.id, openId);
   return true;
 }

@@ -273,6 +273,10 @@ export interface DraftCardInput {
   suggestedSubject: string;
   suggestedCategory: TicketCategory;
   openTickets: Array<{ id: string; number: number; subject: string }>;
+  /** An open ticket of theirs this is probably about (the AI's reading); the card leads with adding to it. */
+  related?: { id: string; number: number; subject: string } | null;
+  /** One question that would help an admin act, in the person's own language. */
+  question?: string | null;
 }
 
 /** "Open a ticket?" — the confirm card for something sent to the bot in DM. */
@@ -283,7 +287,9 @@ export function buildDraftCard(d: DraftCardInput): Record<string, unknown> {
     : '_No description yet. Send a message saying what went wrong, then press Open ticket._';
   const elements: Array<Record<string, unknown>> = [md(preview)];
   if (d.attachmentCount > 0) elements.push(md(`📎 ${d.attachmentCount} attachment${d.attachmentCount === 1 ? '' : 's'}`));
-  elements.push(md('_Send more messages or screenshots now and they are added here._'));
+  if (d.related) elements.push(md(`🔗 This looks like your open ticket **#${d.related.number} ${plain(clip(d.related.subject, 80))}**. Add it there, or open a new one.`));
+  if (d.question) elements.push(md(`💡 ${plain(clip(d.question, 300))}\n_Reply here and it is added to this draft._`));
+  else elements.push(md('_Send more messages or screenshots now and they are added here._'));
   const formElements: Array<Record<string, unknown>> = [
     {
       tag: 'input',
@@ -302,8 +308,9 @@ export function buildDraftCard(d: DraftCardInput): Record<string, unknown> {
       options: TICKET_CATEGORIES.map((c) => ({ text: { tag: 'plain_text', content: TICKET_CATEGORY_LABEL[c] }, value: c })),
     },
   ];
+  const related = d.related && d.openTickets.some((t) => t.id === d.related!.id) ? d.related : null;
   const buttons: Array<Record<string, unknown>> = [
-    { tag: 'column', width: 'auto', elements: [formButton('Open ticket', 'primary_filled', value('open_draft', ids))] },
+    { tag: 'column', width: 'auto', elements: [formButton(related ? 'Open new ticket' : 'Open ticket', related ? 'default' : 'primary_filled', value('open_draft', ids))] },
   ];
   if (d.openTickets.length > 0) {
     formElements.push({
@@ -311,9 +318,13 @@ export function buildDraftCard(d: DraftCardInput): Record<string, unknown> {
       name: 'ticketId',
       placeholder: { tag: 'plain_text', content: 'Or add to an open ticket' },
       width: 'fill',
+      ...(related ? { initial_option: related.id } : {}),
       options: d.openTickets.slice(0, 10).map((t) => ({ text: { tag: 'plain_text', content: clip(`#${t.number} ${t.subject}`, 60) }, value: t.id })),
     });
-    buttons.push({ tag: 'column', width: 'auto', elements: [formButton('Add to that ticket', 'default', value('add_draft', ids))] });
+    const add = formButton(related ? `Add to #${related.number}` : 'Add to that ticket', related ? 'primary_filled' : 'default', value('add_draft', ids));
+    // When the AI matched a ticket, adding to it is the likely move, so it goes first.
+    if (related) buttons.unshift({ tag: 'column', width: 'auto', elements: [add] });
+    else buttons.push({ tag: 'column', width: 'auto', elements: [add] });
   }
   buttons.push({ tag: 'column', width: 'auto', elements: [formButton('Cancel', 'default', value('cancel_draft', ids))] });
   formElements.push({ tag: 'column_set', flex_mode: 'flow', columns: buttons });

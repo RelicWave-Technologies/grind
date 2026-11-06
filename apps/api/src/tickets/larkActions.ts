@@ -2,7 +2,7 @@ import { prisma } from '@grind/db';
 import { TICKET_CATEGORIES, TICKET_SUBJECT_MAX, type TicketCategory } from '@grind/types';
 import { logger } from '../logger';
 import { buildDraftDoneCard, buildResolvedAnsweredCard, type TicketCardAction } from './cards';
-import { guessCategory, suggestSubject } from './larkIntake';
+import { guessCategory, suggestSubject } from './ai';
 import { adminCardFor, loadTicketForCard } from './outbox';
 import {
   addTicketComment,
@@ -118,7 +118,8 @@ async function onDraftAction(actor: TicketActor, action: 'open_draft' | 'add_dra
   }
 
   if (action === 'add_draft') {
-    const ticketId = text(form, 'ticketId');
+    // The card preselects the ticket the AI matched; fall back to it if the form came back without a pick.
+    const ticketId = text(form, 'ticketId') || draft.aiRelatedTicketId || '';
     if (!ticketId) return { toast: { type: 'error', content: 'Pick the ticket to add this to.' } };
     const attachmentIds = (await prisma.ticketAttachment.findMany({ where: { draftId: draft.id, ticketId: null }, select: { id: true } })).map((a) => a.id);
     const body = draft.text.trim() || (attachmentIds.length ? '(attachment)' : '');
@@ -136,9 +137,9 @@ async function onDraftAction(actor: TicketActor, action: 'open_draft' | 'add_dra
   if (!draft.text.trim() && draft._count.attachments === 0) {
     return { toast: { type: 'error', content: 'Send a message saying what went wrong first.' } };
   }
-  const subject = (text(form, 'subject') || suggestSubject(draft.text)).slice(0, TICKET_SUBJECT_MAX);
+  const subject = (text(form, 'subject') || draft.aiSubject || suggestSubject(draft.text)).slice(0, TICKET_SUBJECT_MAX);
   const picked = text(form, 'category');
-  const category: TicketCategory = (TICKET_CATEGORIES as readonly string[]).includes(picked) ? (picked as TicketCategory) : guessCategory(draft.text);
+  const category: TicketCategory = (TICKET_CATEGORIES as readonly string[]).includes(picked) ? (picked as TicketCategory) : draft.aiCategory ?? guessCategory(draft.text);
   const ticket = await createTicket({
     actor,
     subject: subject.length >= 3 ? subject : `${subject} (Lark)`,

@@ -22,6 +22,10 @@ const { handleTicketCardAction } = await import('../src/tickets/larkActions');
 const { handleTicketDm } = await import('../src/tickets/larkIntake');
 const { runTicketSchedulerOnce } = await import('../src/tickets/reminders');
 const { applyTicketAction, loadTicketActor } = await import('../src/tickets/service');
+const { setTicketAiForTests, ruleIntake, normalizeIntake } = await import('../src/tickets/ai');
+const { offerTicketFromDm } = await import('../src/tickets/larkIntake');
+type TicketIntake = import('../src/tickets/ai').TicketIntake;
+type IntakeInput = import('../src/tickets/ai').TicketIntakeInput;
 
 const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63f8ffff3f0005fe02fea7d6a5d00000000049454e44ae426082', 'hex');
 
@@ -46,14 +50,45 @@ class FakeMessenger implements LarkMessenger {
   titles(openId: string) { return this.to(openId).map((s) => (s.card.header as { title: { content: string } }).title.content); }
 }
 
+/** A stand-in for Claude: answers from `reply`, and records what it was asked. Rules by default, so no test calls the real API. */
+const ai = {
+  calls: [] as IntakeInput[],
+  reply: (input: IntakeInput): TicketIntake => ruleIntake(input.text),
+};
+
 let fake: FakeMessenger;
 beforeEach(() => {
   fake = new FakeMessenger();
   setLarkMessengerForTests(fake);
+  ai.calls = [];
+  ai.reply = (input) => ruleIntake(input.text);
+  setTicketAiForTests({ analyze: async (input) => { ai.calls.push(input); return ai.reply(input); } });
   pins.pinned.clear();
   pins.calls.length = 0;
 });
-afterAll(() => setLarkMessengerForTests(null));
+afterAll(() => {
+  setLarkMessengerForTests(null);
+  setTicketAiForTests(null);
+});
+
+/** Every markdown line and the ticket picker's preselection on a card. */
+function cardText(card: Record<string, unknown>): string {
+  const out: string[] = [];
+  const walk = (n: unknown) => {
+    if (Array.isArray(n)) return n.forEach(walk);
+    if (n && typeof n === 'object') {
+      const o = n as Record<string, unknown>;
+      if (o.tag === 'markdown' && typeof o.content === 'string') out.push(o.content);
+      if (o.tag === 'button') out.push(`[${(o.text as { content?: string })?.content}]`);
+      if (o.name === 'subject') out.push(`subject=${o.default_value}`);
+      if (o.name === 'category') out.push(`category=${o.initial_option}`);
+      if (o.name === 'ticketId') out.push(`picked=${o.initial_option ?? ''}`);
+      Object.values(o).forEach(walk);
+    }
+  };
+  walk(card);
+  return out.join('\n');
+}
 
 async function drain() {
   for (let i = 0; i < 10; i += 1) {
@@ -325,6 +360,165 @@ describe('tickets: from a Lark DM', () => {
       event: { sender: { sender_type: 'user', sender_id: { open_id: 'ou_stranger' } }, message: { message_id: 'om_s', chat_type: 'p2p', message_type: 'text', content: '{"text":"ticket hi"}' } },
     }, { fallback: false });
     expect(res).toBe(false);
+  });
+});
+
+describe('tickets: Timo AI reads a Lark draft', () => {
+  const dm = (text: string, id: string, extra: Record<string, unknown> = {}) => ({
+    event: {
+      sender: { sender_type: 'user', sender_id: { open_id: 'ou_mira' } },
+      message: { message_id: id, chat_type: 'p2p', chat_id: 'oc_mira', message_type: 'text', content: JSON.stringify({ text }), ...extra },
+    },
+  });
+  const image = (id: string) => ({
+    event: {
+      sender: { sender_type: 'user', sender_id: { open_id: 'ou_mira' } },
+      message: { message_id: id, chat_type: 'p2p', message_type: 'image', content: JSON.stringify({ image_key: `img_${id}` }) },
+    },
+  });
+  const read = (over: Partial<TicketIntake>): TicketIntake => ({ kind: 'PROBLEM', subject: 'x', category: 'OTHER', relatedTicketId: null, question: null, fromAi: true, ...over });
+
+  it('fills the card with its subject and category, and [Open ticket] files them when the form comes back empty', async () => {
+    const { mira } = await seed();
+    ai.reply = () => read({ subject: '3 hours missing on 5 Nov 2026', category: 'TIME_ATTENDANCE' });
+    await handleTicketDm(dm('ticket kal ka 3 ghante ka time gayab hai', 'om_1'), { fallback: true });
+    expect(ai.calls[0]).toMatchObject({ text: 'kal ka 3 ghante ka time gayab hai', openTickets: [] });
+    expect(ai.calls[0]!.today).toMatch(/\d{4}$/u);
+    const card = fake.to('ou_mira').at(-1)!.card;
+    expect(cardText(card)).toContain('subject=3 hours missing on 5 Nov 2026');
+    expect(cardText(card)).toContain('category=TIME_ATTENDANCE');
+    const open = value(card, 'Open ticket');
+    await handleTicketCardAction({ operator: { open_id: 'ou_mira' }, action: { value: open, form_value: {} } }, open);
+    // The person's own words stay the description; only the title and category come from the AI.
+    expect(await prisma.ticket.findFirstOrThrow()).toMatchObject({
+      subject: '3 hours missing on 5 Nov 2026', category: 'TIME_ATTENDANCE', description: 'kal ka 3 ghante ka time gayab hai', requesterId: mira.id,
+    });
+  });
+
+  it('what the person types on the card wins over the AI', async () => {
+    await seed();
+    ai.reply = () => read({ subject: 'AI title', category: 'TIMO_APP' });
+    await handleTicketDm(dm('ticket app band ho gaya', 'om_1'), { fallback: true });
+    const open = value(fake.to('ou_mira').at(-1)!.card, 'Open ticket');
+    await handleTicketCardAction({ operator: { open_id: 'ou_mira' }, action: { value: open, form_value: { subject: 'My own title', category: 'OTHER' } } }, open);
+    expect(await prisma.ticket.findFirstOrThrow()).toMatchObject({ subject: 'My own title', category: 'OTHER' });
+  });
+
+  it('keeps working on the plain rules when the AI fails or throws', async () => {
+    await seed();
+    ai.reply = () => { throw new Error('model down'); };
+    expect(await handleTicketDm(dm('ticket my leave balance is wrong', 'om_1'), { fallback: true })).toBe(true);
+    const card = fake.to('ou_mira').at(-1)!.card;
+    expect(cardText(card)).toContain('subject=my leave balance is wrong');
+    expect(cardText(card)).toContain('category=LEAVE_PAYROLL');
+    // Nothing was cached, so the next message asks the model again.
+    expect((await prisma.ticketDraft.findFirstOrThrow()).aiTextHash).toBeNull();
+  });
+
+  it('answers small talk instead of opening a draft when the tester bot is off', async () => {
+    await seed();
+    ai.reply = () => read({ kind: 'CHITCHAT', subject: 'Greeting' });
+    expect(await handleTicketDm(dm('hi', 'om_1'), { fallback: false })).toBe(true);
+    expect(await prisma.ticketDraft.count()).toBe(0);
+    expect(fake.texts.at(-1)?.text).toMatch(/tell me what happened/u);
+    // …but if the model cannot answer, a message still becomes a draft rather than being dropped.
+    ai.reply = (input) => ruleIntake(input.text);
+    await handleTicketDm(dm('hi again', 'om_2'), { fallback: false });
+    expect(await prisma.ticketDraft.count()).toBe(1);
+  });
+
+  it('"ticket hi" is still a draft: the keyword is the person asking for one', async () => {
+    await seed();
+    ai.reply = () => read({ kind: 'CHITCHAT' });
+    await handleTicketDm(dm('ticket hi', 'om_1'), { fallback: false });
+    expect(await prisma.ticketDraft.count()).toBe(1);
+  });
+
+  it('points at the open ticket it is about, preselects it, and [Add to #N] adds the message there', async () => {
+    const { mira } = await seed();
+    const sync = await file(mira, { subject: 'Sync failed every morning', category: 'TIMO_APP' });
+    ai.reply = () => read({ kind: 'FOLLOW_UP', subject: 'Sync failed again', category: 'TIMO_APP', relatedTicketId: sync.id });
+    await handleTicketDm(dm('ticket still not fixed, aaj bhi wahi error', 'om_1'), { fallback: true });
+    expect(ai.calls[0]!.openTickets).toEqual([{ id: sync.id, number: sync.number, subject: 'Sync failed every morning', category: 'TIMO_APP' }]);
+    const card = fake.to('ou_mira').at(-1)!.card;
+    const text = cardText(card);
+    expect(text).toContain(`This looks like your open ticket **#${sync.number}`);
+    expect(text).toContain(`picked=${sync.id}`);
+    expect(text.indexOf(`[Add to #${sync.number}]`)).toBeLessThan(text.indexOf('[Open new ticket]'));
+    const add = value(card, `Add to #${sync.number}`);
+    // Lark may send the form back without the preselected value; the AI's match stands in.
+    await handleTicketCardAction({ operator: { open_id: 'ou_mira' }, action: { value: add, form_value: {} } }, add);
+    expect(await prisma.ticket.count()).toBe(1);
+    const comment = await prisma.ticketEvent.findFirstOrThrow({ where: { ticketId: sync.id, kind: 'COMMENT' } });
+    expect(comment.body).toBe('still not fixed, aaj bhi wahi error');
+  });
+
+  it('drops a match to a ticket that has closed since', async () => {
+    const { mira, asha } = await seed();
+    const t = await file(mira);
+    ai.reply = () => read({ kind: 'FOLLOW_UP', relatedTicketId: t.id });
+    await handleTicketDm(dm('ticket same problem', 'om_1'), { fallback: true });
+    const actor = await loadTicketActor(asha.id);
+    await applyTicketAction({ ticketId: t.id, actor: actor!, action: { action: 'close' }, via: 'DASHBOARD' });
+    await handleTicketDm(image('om_2'), { fallback: true });
+    // The screenshot refreshes the same card in place.
+    const text = cardText(fake.updates.at(-1)!.card);
+    expect(text).not.toContain('This looks like');
+    expect(text).toContain('[Open ticket]');
+  });
+
+  it('shows its question, reads the draft again when the person answers, and not when only a screenshot arrives', async () => {
+    await seed();
+    ai.reply = (input) => input.text.includes('4 Nov')
+      ? read({ subject: 'Manual time for 4 Nov rejected', category: 'TIME_ATTENDANCE' })
+      : read({ subject: 'Manual time rejected', category: 'TIME_ATTENDANCE', question: 'Kis din ki request thi?' });
+    await handleTicketDm(dm('ticket manual time reject ho gaya', 'om_1'), { fallback: true });
+    expect(cardText(fake.to('ou_mira').at(-1)!.card)).toContain('💡 Kis din ki request thi?');
+    await handleTicketDm(dm('4 Nov ki', 'om_2'), { fallback: true });
+    expect(ai.calls.map((c) => c.text)).toEqual(['manual time reject ho gaya', 'manual time reject ho gaya\n4 Nov ki']);
+    const after = cardText(fake.updates.at(-1)!.card);
+    expect(after).toContain('subject=Manual time for 4 Nov rejected');
+    expect(after).not.toContain('💡');
+    await handleTicketDm(image('om_3'), { fallback: true });
+    expect(ai.calls).toHaveLength(2);
+  });
+
+  it('a problem the tester bot spots gets the same reading', async () => {
+    await seed();
+    ai.reply = () => read({ subject: 'Leave balance wrong', category: 'LEAVE_PAYROLL' });
+    expect(await offerTicketFromDm('ou_mira', 'mera PL galat dikh raha hai')).toBe(true);
+    expect(cardText(fake.to('ou_mira').at(-1)!.card)).toContain('subject=Leave balance wrong');
+  });
+
+  it('only matches the person\'s own tickets', async () => {
+    const { omar } = await seed();
+    const theirs = await file(omar);
+    ai.reply = () => read({ kind: 'FOLLOW_UP', relatedTicketId: theirs.id });
+    await handleTicketDm(dm('ticket any update?', 'om_1'), { fallback: true });
+    expect(cardText(fake.to('ou_mira').at(-1)!.card)).not.toContain('This looks like');
+  });
+});
+
+describe('tickets: cleaning what the AI says', () => {
+  const open = [{ id: 't6', number: 6, subject: 'Sync failed', category: 'TIMO_APP' as const }];
+  const raw = { kind: 'PROBLEM' as const, subject: 'Ticket: Hours missing.', category: 'TIME_ATTENDANCE' as const, relatedTicketNumber: null, followUpQuestion: null, language: 'English' };
+
+  it('strips a "Ticket:" prefix and a trailing full stop, and clips a long title', () => {
+    expect(normalizeIntake(raw, { text: 'x', openTickets: [] }).subject).toBe('Hours missing');
+    const long = normalizeIntake({ ...raw, subject: 'a'.repeat(300) }, { text: 'x', openTickets: [] }).subject;
+    expect(long.length).toBe(120);
+    expect(long.endsWith('…')).toBe(true);
+  });
+
+  it('ignores a ticket number that is not one of theirs, and keeps one that is', () => {
+    expect(normalizeIntake({ ...raw, relatedTicketNumber: 99 }, { text: 'x', openTickets: open }).relatedTicketId).toBeNull();
+    expect(normalizeIntake({ ...raw, relatedTicketNumber: 6 }, { text: 'x', openTickets: open }).relatedTicketId).toBe('t6');
+  });
+
+  it('never asks a question of small talk, and falls back to the first line for an empty title', () => {
+    const r = normalizeIntake({ ...raw, kind: 'CHITCHAT', subject: ' ', followUpQuestion: 'Why?' }, { text: 'hello there', openTickets: [] });
+    expect(r.question).toBeNull();
+    expect(r.subject).toBe('hello there');
   });
 });
 

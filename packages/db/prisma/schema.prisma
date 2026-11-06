@@ -1974,12 +1974,12 @@ model Ticket {
   createdAt            DateTime           @default(now())
   updatedAt            DateTime           @updatedAt
 
-  events      TicketEvent[]
-  attachments TicketAttachment[]
-  larkCards   TicketLarkCard[]
+  events       TicketEvent[]
+  attachments  TicketAttachment[]
+  larkCards    TicketLarkCard[]
   larkMessages TicketLarkMessage[]
-  outbox      TicketOutboxEvent[]
-  drafts      TicketDraft[]
+  outbox       TicketOutboxEvent[]
+  drafts       TicketDraft[]
 
   @@unique([workspaceId, number])
   @@unique([createdById, idempotencyKey])
@@ -2122,18 +2122,27 @@ enum TicketDraftStatus {
 /// A ticket being put together in a Lark DM: the text and images so far, and
 /// the confirm card the bot sent. Becomes a Ticket on [Open ticket].
 model TicketDraft {
-  id             String            @id @default(cuid())
-  workspaceId    String
-  workspace      Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  userId         String
-  user           User              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  text           String            @default("")
-  status         TicketDraftStatus @default(OPEN)
-  offerMessageId String?
-  ticketId       String?
-  ticket         Ticket?           @relation(fields: [ticketId], references: [id], onDelete: SetNull)
-  createdAt      DateTime          @default(now())
-  updatedAt      DateTime          @updatedAt
+  id                String            @id @default(cuid())
+  workspaceId       String
+  workspace         Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  userId            String
+  user              User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  text              String            @default("")
+  status            TicketDraftStatus @default(OPEN)
+  offerMessageId    String?
+  /// What Timo's AI made of `text` (subject, category, an open ticket it is
+  /// probably about, one question that would help). `aiTextHash` says which
+  /// text it read, so an unchanged draft is not read twice. All advisory: the
+  /// person sees them on the card and can change them.
+  aiSubject         String?
+  aiCategory        TicketCategory?
+  aiRelatedTicketId String?
+  aiQuestion        String?
+  aiTextHash        String?
+  ticketId          String?
+  ticket            Ticket?           @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
 
   attachments TicketAttachment[]
 

@@ -20,6 +20,7 @@
   "dependencies": {
     "@ai-sdk/deepseek": "0.2.14",
     "@ai-sdk/openai-compatible": "0.2.16",
+    "@anthropic-ai/sdk": "1.6.0",
     "@grind/core": "workspace:*",
     "@grind/db": "workspace:*",
     "@grind/types": "workspace:*",
