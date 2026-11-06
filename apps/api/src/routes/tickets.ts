@@ -15,6 +15,7 @@ import {
   type TicketPersonDto,
   type TicketStatus,
   type TicketSummaryDto,
+  ticketTurn,
 } from '@grind/types';
 import { PutAccessRequestRecipientsRequest, type AccessRequestRecipientsResponse } from '@grind/types';
 import { requireAccessToken } from '../middleware/auth';
@@ -61,7 +62,27 @@ const ATTACHMENT_META = { select: { id: true, fileName: true, mimeType: true, si
 
 type SummaryRow = Prisma.TicketGetPayload<{ include: { requester: typeof PERSON; assignee: typeof PERSON } }>;
 
-function summaryDto(t: SummaryRow): TicketSummaryDto {
+type LastReply = TicketSummaryDto['lastReply'];
+
+/** The latest public reply on each ticket, in one query. */
+async function lastReplies(tickets: Array<{ id: string; requesterId: string }>): Promise<Map<string, LastReply>> {
+  if (tickets.length === 0) return new Map();
+  const rows = await prisma.ticketEvent.findMany({
+    where: { ticketId: { in: tickets.map((t) => t.id) }, kind: 'COMMENT' },
+    orderBy: [{ ticketId: 'asc' }, { createdAt: 'desc' }],
+    distinct: ['ticketId'],
+    select: { ticketId: true, body: true, createdAt: true, actorId: true, actor: { select: { name: true } } },
+  });
+  const requesterOf = new Map(tickets.map((t) => [t.id, t.requesterId]));
+  return new Map(rows.map((r) => [r.ticketId, {
+    by: r.actor?.name ?? 'Someone',
+    fromRequester: r.actorId === requesterOf.get(r.ticketId),
+    snippet: (r.body ?? '').replace(/\s+/gu, ' ').slice(0, 140),
+    at: r.createdAt.toISOString(),
+  }]));
+}
+
+function summaryDto(t: SummaryRow, lastReply: LastReply = null): TicketSummaryDto {
   return {
     id: t.id,
     number: t.number,
@@ -79,6 +100,8 @@ function summaryDto(t: SummaryRow): TicketSummaryDto {
     lastUserActivityAt: t.lastUserActivityAt.toISOString(),
     lastAdminActivityAt: t.lastAdminActivityAt?.toISOString() ?? null,
     requesterUnreachable: t.requesterUnreachable,
+    turn: ticketTurn(t),
+    lastReply,
   };
 }
 
@@ -120,7 +143,8 @@ ticketsRouter.get('/', handle(async (req, res) => {
   ]);
   const counts = Object.fromEntries(TICKET_STATUSES.map((s) => [s, 0])) as Record<TicketStatus, number>;
   for (const g of grouped) counts[g.status] = g._count._all;
-  const body: TicketListResponse = { tickets: tickets.map(summaryDto), counts };
+  const replies = await lastReplies(tickets);
+  const body: TicketListResponse = { tickets: tickets.map((t) => summaryDto(t, replies.get(t.id) ?? null)), counts };
   res.json(body);
 }));
 
@@ -238,8 +262,9 @@ async function detailDto(id: string, actor: TicketActor): Promise<TicketDetailDt
   const isRequester = t.requesterId === actor.id;
   const closedRecently = t.status === 'CLOSED' && t.closedAt
     && Date.now() - t.closedAt.getTime() <= TICKET_REOPEN_WINDOW_DAYS * 86_400_000 && t.closeReason !== 'DUPLICATE';
+  const replies = await lastReplies([t]);
   return {
-    ...summaryDto(t),
+    ...summaryDto(t, replies.get(t.id) ?? null),
     description: t.description,
     createdBy: person(t.createdBy)!,
     duplicateOf: t.duplicateOf,

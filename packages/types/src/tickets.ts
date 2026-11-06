@@ -140,7 +140,25 @@ export type TicketSummaryDto = {
   lastUserActivityAt: string;
   lastAdminActivityAt: string | null;
   requesterUnreachable: boolean;
+  /** Who owes the next move: an admin, the requester (answer / confirm), or nobody. */
+  turn: TicketTurn;
+  /** The latest public reply, for the list's preview line. */
+  lastReply: { by: string; fromRequester: boolean; snippet: string; at: string } | null;
 };
+
+export type TicketTurn = 'ADMIN' | 'REQUESTER' | 'NONE';
+
+/** Worked out the same way on the server for every list and detail. */
+export function ticketTurn(t: {
+  status: TicketStatus;
+  lastUserActivityAt: string | Date;
+  lastAdminActivityAt: string | Date | null;
+}): TicketTurn {
+  if (t.status === 'WAITING_ON_USER' || t.status === 'RESOLVED') return 'REQUESTER';
+  if (t.status === 'CLOSED') return 'NONE';
+  if (!t.lastAdminActivityAt) return 'ADMIN';
+  return new Date(t.lastUserActivityAt).getTime() > new Date(t.lastAdminActivityAt).getTime() ? 'ADMIN' : 'NONE';
+}
 
 export type TicketEventDto = {
   id: string;

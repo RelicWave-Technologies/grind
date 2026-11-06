@@ -1,12 +1,11 @@
-import { useRef, useState } from 'react';
-import { Paperclip, X } from 'lucide-react';
+import { useState } from 'react';
+import { Paperclip } from 'lucide-react';
 import {
   TICKET_ATTACHMENT_MAX_BYTES,
   TICKET_ATTACHMENTS_PER_POST,
   type TicketAttachmentDto,
 } from '@grind/types';
 import { API_BASE, ApiError } from '../lib/api';
-import { Button, IconButton } from '../ui';
 
 /** Upload one file for a ticket; the server checks what the bytes really are. */
 async function uploadTicketFile(file: File): Promise<TicketAttachmentDto> {
@@ -83,48 +82,6 @@ export function useTicketUploads() {
 }
 
 export type TicketUploads = ReturnType<typeof useTicketUploads>;
-
-export function TicketUploadPicker({ uploads }: { uploads: TicketUploads }) {
-  const input = useRef<HTMLInputElement>(null);
-  return (
-    <div className="tk-uploads">
-      <div className="tk-uploads__row">
-        <Button
-          variant="secondary"
-          size="sm"
-          icon={<Paperclip size={14} strokeWidth={1.8} />}
-          loading={uploads.busy}
-          onClick={() => input.current?.click()}
-        >
-          Attach
-        </Button>
-        <span className="ui-t-small ui-ink-3">Images, PDF or text, up to 5 MB. You can paste a screenshot too.</span>
-        <input
-          ref={input}
-          type="file"
-          multiple
-          hidden
-          accept="image/png,image/jpeg,image/webp,image/gif,application/pdf,text/plain"
-          onChange={(e) => {
-            if (e.target.files) void uploads.add(e.target.files);
-            e.target.value = '';
-          }}
-        />
-      </div>
-      {uploads.files.length > 0 && (
-        <ul className="tk-uploads__list">
-          {uploads.files.map((f) => (
-            <li key={f.id} className="tk-uploads__item">
-              <span className="ui-t-small">{f.fileName}</span>
-              <IconButton icon={<X size={13} strokeWidth={2} />} aria-label={`Remove ${f.fileName}`} onClick={() => uploads.remove(f.id)} />
-            </li>
-          ))}
-        </ul>
-      )}
-      {uploads.error && <span className="ui-t-small tk-uploads__error">{uploads.error}</span>}
-    </div>
-  );
-}
 
 /** Attachments already on a ticket: images as thumbnails, files as links. */
 export function TicketAttachmentList({ items }: { items: TicketAttachmentDto[] }) {
