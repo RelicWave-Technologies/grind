@@ -285,3 +285,27 @@ export const TEAM_SETTINGS_QUERY_KEY = ['admin', 'team-member-settings'] as cons
 export function teamMemberSettingsQuery<T = unknown>() {
   return queryOptions({ queryKey: TEAM_SETTINGS_QUERY_KEY, queryFn: () => api<T>('/v1/admin/team-member-settings') });
 }
+
+// ── Support tickets ─────────────────────────────────────────────────────────
+
+export const ticketQueryKeys = {
+  all: ['tickets'] as const,
+  list: (scope: 'mine' | 'all') => ['tickets', 'list', scope] as const,
+  detail: (id: string) => ['tickets', 'detail', id] as const,
+};
+
+export function ticketListQuery<T = unknown>(scope: 'mine' | 'all') {
+  return queryOptions({ queryKey: ticketQueryKeys.list(scope), queryFn: () => api<T>(`/v1/tickets?${qs({ scope })}`) });
+}
+
+export function ticketDetailQuery<T = unknown>(id: string) {
+  return queryOptions({ queryKey: ticketQueryKeys.detail(id), queryFn: () => api<T>(`/v1/tickets/${id}`) });
+}
+
+export function ticketAssigneesQuery<T = unknown>() {
+  return queryOptions({ queryKey: ['tickets', 'assignees'], queryFn: () => api<T>('/v1/tickets/assignees'), ...REFERENCE });
+}
+
+export function ticketRecipientsQuery<T = unknown>() {
+  return queryOptions({ queryKey: ['tickets', 'recipients'], queryFn: () => api<T>('/v1/tickets/recipients') });
+}

@@ -8,6 +8,8 @@ import { startAttendanceRulesScheduler } from './attendance/ruleScheduler';
 import { startLarkLeaveIngest, startLarkWfhIngest } from './leave';
 import { startManualTimeLarkOutboxWorker } from './manualTime/larkOutbox';
 import { startAccessRequestLarkOutboxWorker } from './access/larkOutbox';
+import { startTicketOutboxWorker } from './tickets/outbox';
+import { startTicketScheduler } from './tickets/reminders';
 import { startScreenshotRetentionScheduler } from './screenshots/retention';
 import { startTesterOpsSchedulers } from './testerOps/scheduler';
 import { startTimerLifecycleScheduler } from './timeLifecycle';
@@ -24,6 +26,9 @@ const server = app.listen(port, () => {
   startCardCallback();
   startManualTimeLarkOutboxWorker();
   startAccessRequestLarkOutboxWorker();
+  // Support tickets: Lark cards and notices, then reminders, digest and auto-close.
+  startTicketOutboxWorker();
+  startTicketScheduler();
   // Mirrors leave decided in Lark into Timo; no-op without an approval code.
   startLarkLeaveIngest();
   // Mirrors Lark "Work From Home Request" decisions; no-op without a code.

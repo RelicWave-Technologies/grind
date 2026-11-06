@@ -22,6 +22,7 @@ import { timeRequestsRouter } from './routes/timeRequests';
 import { screenshotsRouter } from './routes/screenshots';
 import { adminRouter } from './routes/admin';
 import { accessRecipientsRouter } from './routes/accessRecipients';
+import { ticketsRouter } from './routes/tickets';
 import { mcpRouter } from './routes/mcp';
 import { workspaceRouter } from './routes/workspace';
 import { workspacePolicyRouter } from './routes/workspacePolicy';
@@ -156,6 +157,7 @@ export function buildApp() {
   app.use('/v1/admin', adminRouter);
   app.use('/v1/workspace', workspaceRouter);
   app.use('/v1/leave', leaveRouter);
+  app.use('/v1/tickets', ticketsRouter);
   // Developer-only tools (DEVELOPER_EMAILS); 404 for everyone else.
   app.use('/v1/dev', devRouter);
 

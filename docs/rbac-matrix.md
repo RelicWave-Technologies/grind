@@ -36,6 +36,11 @@ says whose time she may change.
 
 | Action | API gate | ADMIN | MANAGER | HR | HR + team | MEMBER |
 |---|---|---|---|---|---|---|
+| **Tickets** — file / follow own (`/v1/tickets`) | `tickets.self` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Ticket queue, any ticket, reply as admin, internal notes, resolve / close / duplicate / assign | `tickets.manage` | ✅ | ❌ | ❌ | ❌ | ❌ |
+| File a ticket for someone else | `tickets.manage` | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Withdraw / confirm fixed / reopen (7 days) | requester of that ticket | 🙋 (reopen any) | 🙋 | 🙋 | 🙋 | 🙋 |
+| Ticket card buttons on Lark | same rules, checked against the clicker's Lark identity | ✅ | 🙋 | 🙋 | 🙋 | 🙋 |
 | **People** — list (`GET /admin/users`) | `people.manage` → workspace, else `userIds` | ✅ | 👥 | ✅ | ✅ | 🙋 |
 | Invite (`POST /admin/users`) | `people.manage`; non-admin → MEMBER only | ✅ any role | ❌ | ✅ MEMBER | ✅ MEMBER | ❌ |
 | Edit name/team/unit/shift/birth date (`PATCH /admin/users/:id`) | `people.manage` + `hrMayNotManage` | ✅ | ❌ | ✅ not ADMIN/HR | ✅ not ADMIN/HR | ❌ |

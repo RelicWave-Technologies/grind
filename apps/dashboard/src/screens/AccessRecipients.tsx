@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { AccessRequestRecipientsResponse } from '@grind/types';
 import { api } from '../lib/api';
-import { accessRequestRecipientsQuery } from '../lib/queries';
+import { accessRequestRecipientsQuery, ticketRecipientsQuery } from '../lib/queries';
 import { Banner, Card, List, ListRow, Skeleton, Tag, Toggle } from '../ui';
 
 /**
@@ -11,12 +11,44 @@ import { Banner, Card, List, ListRow, Skeleton, Tag, Toggle } from '../ui';
  * since nobody chosen means everyone.
  */
 export function AccessRecipientsCard() {
+  return (
+    <RecipientsCard
+      title="Who approves new people on Lark"
+      path="/v1/admin/access-requests/recipients"
+      query={accessRequestRecipientsQuery<AccessRequestRecipientsResponse>()}
+      what="access requests"
+    />
+  );
+}
+
+/** Policy card: which admins get the pinned Lark card for every support ticket. */
+export function TicketRecipientsCard() {
+  return (
+    <RecipientsCard
+      title="Who gets support tickets on Lark"
+      path="/v1/tickets/recipients"
+      query={ticketRecipientsQuery<AccessRequestRecipientsResponse>()}
+      what="support tickets"
+    />
+  );
+}
+
+function RecipientsCard({
+  title,
+  path,
+  query,
+  what,
+}: {
+  title: string;
+  path: string;
+  query: ReturnType<typeof accessRequestRecipientsQuery<AccessRequestRecipientsResponse>>;
+  what: string;
+}) {
   const qc = useQueryClient();
-  const q = useQuery(accessRequestRecipientsQuery<AccessRequestRecipientsResponse>());
+  const q = useQuery(query);
   const m = useMutation({
-    mutationFn: (userIds: string[]) =>
-      api<AccessRequestRecipientsResponse>('/v1/admin/access-requests/recipients', { method: 'PUT', json: { userIds } }),
-    onSuccess: (next) => qc.setQueryData(accessRequestRecipientsQuery().queryKey, next),
+    mutationFn: (userIds: string[]) => api<AccessRequestRecipientsResponse>(path, { method: 'PUT', json: { userIds } }),
+    onSuccess: (next) => qc.setQueryData(query.queryKey, next),
   });
 
   const data = m.isPending && m.variables && q.data ? optimistic(q.data, m.variables) : q.data;
@@ -33,7 +65,7 @@ export function AccessRecipientsCard() {
 
   return (
     <Card
-      title="Who approves new people on Lark"
+      title={title}
       className="pol-card-compact"
       action={<Tag mono>{!data ? 'Lark' : data.allAdmins ? 'All admins' : `${on.size} of ${data.admins.length}`}</Tag>}
     >
@@ -52,7 +84,7 @@ export function AccessRecipientsCard() {
                     <Toggle
                       checked={checked}
                       disabled={last || m.isPending}
-                      aria-label={`Send access requests to ${a.name}`}
+                      aria-label={`Send ${what} to ${a.name}`}
                       title={last ? 'At least one admin gets the card' : undefined}
                       onChange={(v) => flip(a.id, v)}
                     />

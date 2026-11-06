@@ -1,0 +1,201 @@
+/* Support tickets — layout only; every color, type and radius comes from the kit. */
+
+.tk-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-sp-6);
+}
+
+.tk-back {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-sp-2);
+  color: var(--ui-ink-3);
+  text-decoration: none;
+  width: fit-content;
+}
+.tk-back:hover { color: var(--ui-ink); }
+
+.tk-col-num { width: calc(var(--ui-sp-12) + var(--ui-sp-4)); }
+.tk-table .ui-table__row { cursor: pointer; }
+
+.tk-subject {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-sp-1);
+  min-width: 0;
+}
+
+.tk-head-tags {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ui-sp-3);
+}
+
+.tk-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) calc(var(--ui-sp-12) * 5);
+  gap: var(--ui-sp-6);
+  align-items: start;
+}
+@media (max-width: 960px) {
+  .tk-layout { grid-template-columns: minmax(0, 1fr); }
+}
+
+.tk-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-sp-6);
+  min-width: 0;
+}
+
+.tk-entry {
+  display: flex;
+  gap: var(--ui-sp-4);
+  padding: var(--ui-sp-5) 0;
+  border-bottom: 1px solid var(--ui-line-faint);
+}
+.tk-entry:first-child { padding-top: 0; }
+.tk-entry:last-child { border-bottom: 0; padding-bottom: 0; }
+.tk-entry--internal {
+  background: var(--ui-warn-bg);
+  border-radius: var(--ui-r-sm);
+  padding: var(--ui-sp-4);
+  margin: var(--ui-sp-2) 0;
+}
+.tk-entry__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-sp-3);
+  min-width: 0;
+  flex: 1;
+}
+.tk-entry__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--ui-sp-3);
+}
+.tk-entry__time { margin-left: auto; }
+
+.tk-body {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.55;
+}
+
+.tk-event {
+  padding: var(--ui-sp-3) 0 var(--ui-sp-3) calc(32px + var(--ui-sp-4));
+  border-bottom: 1px solid var(--ui-line-faint);
+}
+.tk-event:last-child { border-bottom: 0; }
+.tk-event__note { margin-top: var(--ui-sp-2); color: var(--ui-ink-2); }
+
+.tk-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-sp-4);
+}
+.tk-form__row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(calc(var(--ui-sp-12) * 3), 1fr));
+  gap: var(--ui-sp-4);
+}
+
+.tk-composer__actions { justify-content: flex-end; }
+
+.tk-check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-sp-2);
+  margin-right: auto;
+  cursor: pointer;
+}
+
+.tk-uploads {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-sp-2);
+}
+.tk-uploads__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ui-sp-3);
+}
+.tk-uploads__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ui-sp-2);
+}
+.tk-uploads__item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-sp-1);
+  padding: 0 var(--ui-sp-1) 0 var(--ui-sp-3);
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-full);
+}
+.tk-uploads__error { color: var(--ui-danger-ink); }
+
+.tk-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ui-sp-3);
+}
+.tk-files__thumb {
+  display: block;
+  width: calc(var(--ui-sp-12) * 2);
+  height: calc(var(--ui-sp-12) * 1.5);
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-sm);
+  overflow: hidden;
+  background: var(--ui-surface-inset);
+}
+.tk-files__thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.tk-files__file {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ui-sp-2);
+  padding: var(--ui-sp-2) var(--ui-sp-3);
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-full);
+  color: var(--ui-ink);
+  text-decoration: none;
+}
+
+.tk-facts {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--ui-sp-3) var(--ui-sp-4);
+  margin: 0;
+  align-items: center;
+}
+.tk-facts dt {
+  color: var(--ui-ink-3);
+  font-size: 12px;
+}
+.tk-facts dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.tk-admin-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ui-sp-2);
+  margin-top: var(--ui-sp-5);
+  padding-top: var(--ui-sp-5);
+  border-top: 1px solid var(--ui-line-faint);
+}

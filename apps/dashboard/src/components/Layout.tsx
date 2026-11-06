@@ -1,5 +1,5 @@
 import { Outlet, Link, useRouteContext, useNavigate, useLocation } from '@tanstack/react-router';
-import { Home, Clock4, Inbox, CalendarCheck, ShieldAlert, LogOut, ShieldCheck, FileText, User, Users, CalendarDays, Compass } from 'lucide-react';
+import { Home, Clock4, Inbox, CalendarCheck, ShieldAlert, LogOut, ShieldCheck, FileText, User, Users, CalendarDays, Compass, LifeBuoy } from 'lucide-react';
 import { hasCapability, useLogout, type Permission } from '../lib/auth';
 import { AGENT_DOWNLOADS, agentDownloadUrl } from '../lib/downloads';
 import {
@@ -34,7 +34,7 @@ interface NavEntry {
 }
 
 /**
- * Three groups, nine places. Pages that answer the same question share one
+ * Three groups, ten places. Pages that answer the same question share one
  * sidebar item and a tab bar — every old address still works, it just lives
  * under the item it belongs to.
  */
@@ -46,6 +46,7 @@ const NAV: Array<{ section: string; items: NavEntry[] }> = [
       { label: 'Edit time', Icon: Clock4, tabs: [{ to: '/edit-time', label: 'Edit time', show: 'all' }] },
       { label: 'Leave', Icon: CalendarDays, tabs: [{ to: '/calendar', label: 'Leave', show: 'all' }] },
       { label: 'Profile', Icon: User, tabs: [{ to: '/profile', label: 'Profile', show: { permission: 'profile.self.read' } }] },
+      { label: 'Support', Icon: LifeBuoy, tabs: [{ to: '/tickets', label: 'Tickets', show: { permission: 'tickets.self' } }] },
     ],
   },
   {

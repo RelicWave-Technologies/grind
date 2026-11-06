@@ -45,6 +45,9 @@ model Workspace {
   attendanceOverrides       AttendanceOverride[]
   attendanceOverrideEvents  AttendanceOverrideEvent[]
   agentCommands             AgentCommand[]
+  tickets                   Ticket[]
+  ticketDrafts              TicketDraft[]
+  ticketDigests             TicketDigest[]
 }
 
 /// Workspace-wide capture policy. A single row per workspace (unique on
@@ -79,6 +82,8 @@ model WorkspacePolicy {
   /// Who gets the Lark card when a new person asks for access. Empty = every
   /// active admin. Only admins can approve, so only admin ids are kept.
   accessRequestRecipientIds    String[]  @default([])
+  /// Admins who get a pinned Lark card for every support ticket. Empty = every active admin.
+  ticketAdminIds               String[]  @default([])
   createdAt                    DateTime  @default(now())
   updatedAt                    DateTime  @updatedAt
 }
@@ -432,6 +437,12 @@ model User {
   attendanceOverrideEventsAuthored AttendanceOverrideEvent[] @relation("AttendanceOverrideEventAuthor")
   agentCommands                    AgentCommand[]            @relation("AgentCommandTarget")
   agentCommandsRequested           AgentCommand[]            @relation("AgentCommandRequester")
+  ticketsRequested                 Ticket[]                  @relation("TicketRequester")
+  ticketsCreated                   Ticket[]                  @relation("TicketCreator")
+  ticketsAssigned                  Ticket[]                  @relation("TicketAssignee")
+  ticketEvents                     TicketEvent[]             @relation("TicketEventActor")
+  ticketAttachments                TicketAttachment[]        @relation("TicketAttachmentUploader")
+  ticketDrafts                     TicketDraft[]
 
   @@index([workspaceId])
   @@index([teamId])
@@ -1861,4 +1872,287 @@ model AgentCommand {
 
   @@index([userId, status])
   @@index([workspaceId, createdAt])
+}
+
+// ============================================================================
+// Support tickets
+// ============================================================================
+// Anyone files a ticket from the dashboard or by messaging the Timo bot on
+// Lark; an admin may file one on someone's behalf. Every admin gets a pinned
+// Lark card, both sides hear about each change on Lark, and reminders chase
+// whoever owes the next move.
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  WAITING_ON_USER
+  RESOLVED
+  CLOSED
+}
+
+enum TicketCloseReason {
+  USER_CONFIRMED
+  AUTO_CONFIRMED
+  WITHDRAWN
+  DUPLICATE
+  NO_RESPONSE
+  ADMIN
+}
+
+enum TicketCategory {
+  TIMO_APP
+  TIME_ATTENDANCE
+  LEAVE_PAYROLL
+  ACCESS
+  OTHER
+}
+
+enum TicketPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum TicketSource {
+  DASHBOARD
+  LARK
+  ADMIN
+}
+
+enum TicketVia {
+  DASHBOARD
+  LARK
+  SYSTEM
+}
+
+enum TicketEventKind {
+  CREATED
+  COMMENT
+  INTERNAL_NOTE
+  STATUS
+  ASSIGNED
+  PRIORITY
+}
+
+model Ticket {
+  id                   String             @id @default(cuid())
+  workspaceId          String
+  workspace            Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  /// Human number, #1, #2 … per workspace.
+  number               Int
+  subject              String
+  description          String
+  category             TicketCategory     @default(OTHER)
+  priority             TicketPriority     @default(NORMAL)
+  status               TicketStatus       @default(OPEN)
+  closeReason          TicketCloseReason?
+  source               TicketSource
+  requesterId          String
+  requester            User               @relation("TicketRequester", fields: [requesterId], references: [id], onDelete: Cascade)
+  createdById          String
+  createdBy            User               @relation("TicketCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  assigneeId           String?
+  assignee             User?              @relation("TicketAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  duplicateOfId        String?
+  duplicateOf          Ticket?            @relation("TicketDuplicate", fields: [duplicateOfId], references: [id], onDelete: SetNull)
+  duplicates           Ticket[]           @relation("TicketDuplicate")
+  /// Client-sent key so a double click files one ticket, not two.
+  idempotencyKey       String?
+  statusChangedAt      DateTime           @default(now())
+  firstAdminResponseAt DateTime?
+  lastAdminActivityAt  DateTime?
+  lastUserActivityAt   DateTime           @default(now())
+  resolvedAt           DateTime?
+  closedAt             DateTime?
+  adminReminderCount   Int                @default(0)
+  lastAdminReminderAt  DateTime?
+  userReminderCount    Int                @default(0)
+  lastUserReminderAt   DateTime?
+  /// The requester could not be messaged on Lark (no identity, or outside the bot's availability).
+  requesterUnreachable Boolean            @default(false)
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  events      TicketEvent[]
+  attachments TicketAttachment[]
+  larkCards   TicketLarkCard[]
+  larkMessages TicketLarkMessage[]
+  outbox      TicketOutboxEvent[]
+  drafts      TicketDraft[]
+
+  @@unique([workspaceId, number])
+  @@unique([createdById, idempotencyKey])
+  @@index([workspaceId, status])
+  @@index([requesterId, createdAt])
+  @@index([assigneeId, status])
+}
+
+model TicketEvent {
+  id         String          @id @default(cuid())
+  ticketId   String
+  ticket     Ticket          @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  kind       TicketEventKind
+  actorId    String?
+  actor      User?           @relation("TicketEventActor", fields: [actorId], references: [id], onDelete: SetNull)
+  body       String?
+  fromStatus TicketStatus?
+  toStatus   TicketStatus?
+  via        TicketVia
+  meta       Json?
+  createdAt  DateTime        @default(now())
+
+  attachments TicketAttachment[]
+
+  @@index([ticketId, createdAt])
+}
+
+/// An image or file someone attached. The bytes live here (≤5 MB each) so a
+/// ticket never depends on the screenshot drive. Uploaded first, then bound
+/// to a ticket or a comment; an unbound upload is pruned after a day.
+model TicketAttachment {
+  id         String       @id @default(cuid())
+  ticketId   String?
+  ticket     Ticket?      @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  eventId    String?
+  event      TicketEvent? @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  draftId    String?
+  draft      TicketDraft? @relation(fields: [draftId], references: [id], onDelete: SetNull)
+  uploaderId String
+  uploader   User         @relation("TicketAttachmentUploader", fields: [uploaderId], references: [id], onDelete: Cascade)
+  fileName   String
+  mimeType   String
+  sizeBytes  Int
+  data       Bytes
+  createdAt  DateTime     @default(now())
+
+  @@index([ticketId])
+  @@index([uploaderId, createdAt])
+  @@index([draftId])
+}
+
+enum TicketLarkCardStatus {
+  PENDING
+  SENT
+  SEND_FAILED
+  EXPIRED
+  RETIRED
+}
+
+/// One admin's card for one ticket: the Lark message, and whether it is pinned.
+model TicketLarkCard {
+  id              String               @id @default(cuid())
+  ticketId        String
+  ticket          Ticket               @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  recipientUserId String
+  recipientOpenId String
+  messageId       String?
+  status          TicketLarkCardStatus @default(PENDING)
+  pinned          Boolean              @default(false)
+  attempts        Int                  @default(0)
+  lastError       String?
+  sentAt          DateTime?
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+
+  @@unique([ticketId, recipientOpenId])
+}
+
+/// Every Lark message Timo sent about a ticket, so a quote-reply to it lands on the right ticket.
+model TicketLarkMessage {
+  id              String   @id @default(cuid())
+  ticketId        String
+  ticket          Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  messageId       String   @unique
+  recipientOpenId String
+  toAdmin         Boolean  @default(false)
+  createdAt       DateTime @default(now())
+
+  @@index([ticketId])
+}
+
+enum TicketOutboxKind {
+  CREATED
+  COMMENT
+  ASK_USER
+  USER_REPLY
+  STATUS
+  ASSIGNED
+  RESOLVED
+  REOPENED
+  CLOSED
+  ADMIN_REMINDER
+  USER_REMINDER
+  REFRESH
+}
+
+enum TicketOutboxStatus {
+  PENDING
+  PROCESSING
+  DONE
+  FAILED
+}
+
+model TicketOutboxEvent {
+  id          String             @id @default(cuid())
+  ticketId    String
+  ticket      Ticket             @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  kind        TicketOutboxKind
+  /// The TicketEvent this notice is about (a comment's text, a status note).
+  eventId     String?
+  status      TicketOutboxStatus @default(PENDING)
+  attempts    Int                @default(0)
+  nextRunAt   DateTime           @default(now())
+  lockedAt    DateTime?
+  lockedBy    String?
+  lastError   String?
+  processedAt DateTime?
+  createdAt   DateTime           @default(now())
+
+  @@index([status, nextRunAt])
+  @@index([ticketId])
+}
+
+enum TicketDraftStatus {
+  OPEN
+  USED
+  CANCELLED
+}
+
+/// A ticket being put together in a Lark DM: the text and images so far, and
+/// the confirm card the bot sent. Becomes a Ticket on [Open ticket].
+model TicketDraft {
+  id             String            @id @default(cuid())
+  workspaceId    String
+  workspace      Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  text           String            @default("")
+  status         TicketDraftStatus @default(OPEN)
+  offerMessageId String?
+  ticketId       String?
+  ticket         Ticket?           @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  attachments TicketAttachment[]
+
+  @@index([userId, status])
+}
+
+/// One daily digest per workspace per day, claimed before it is sent.
+model TicketDigest {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  day         String
+  createdAt   DateTime  @default(now())
+
+  @@unique([workspaceId, day])
+}
+
+/// A Lark message the ticket intake already handled, claimed by insert so a redelivery is ignored.
+model TicketInboundMessage {
+  messageId String   @id
+  createdAt DateTime @default(now())
 }

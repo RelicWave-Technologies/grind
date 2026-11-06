@@ -23,6 +23,8 @@ export const PERMISSIONS = [
   'flags.workspace.review',
   'overview.read',
   'api-tokens.manage',
+  'tickets.self',
+  'tickets.manage',
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
@@ -32,6 +34,7 @@ const MEMBER_CAPABILITIES = [
   'reports.self.read',
   'time.self.edit',
   'approvals.self.read',
+  'tickets.self',
 ] as const satisfies readonly Permission[];
 
 const MANAGER_CAPABILITIES = [

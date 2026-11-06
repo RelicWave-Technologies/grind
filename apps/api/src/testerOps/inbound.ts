@@ -19,10 +19,17 @@ import { getTesterOpsLarkMessenger } from './larkRuntime';
 import { enqueueTesterOpsCard } from './outbox';
 import { redactJson, redactText } from './redact';
 import { buildTesterUsageSnapshot } from './usage';
+import { handleTicketDm, offerTicketFromDm } from '../tickets/larkIntake';
 
 export async function ingestRawLarkMessage(raw: unknown): Promise<void> {
   const parsed = parseLarkMessageEvent(raw);
   if (!parsed) return;
+  // A DM about a ticket (or any DM, when the tester bot is off) is the ticket
+  // intake's; everything else goes on to the tester bot.
+  if (parsed.chatType === 'p2p') {
+    const cfg = await loadOrCreateTesterOpsConfig(parsed.workspaceId);
+    if (await handleTicketDm(raw, { fallback: cfg.enabled })) return;
+  }
   await ingestTesterMessage({ ...parsed, source: 'LARK_EVENT' });
 }
 
@@ -260,6 +267,28 @@ async function runClaimedTesterEvent(eventId: string) {
         idempotencyKey: `issue-list:${event.id}`,
         card: buildTesterOpsIssueListCard(issueList),
       });
+    } else if (
+      (safeAction === 'LOG_ISSUE' || safeAction === 'ASK_CLARIFICATION') && decision.intent === 'ISSUE_REPORT'
+      && rawChatType === 'p2p' && event.senderOpenId
+    ) {
+      // A problem reported to the bot in DM becomes a ticket offer, not a tester-ops issue.
+      progress?.stop();
+      const offered = await offerTicketFromDm(event.senderOpenId, event.messageText);
+      if (replyChatId) {
+        await deliverReplyCard({
+          workspaceId: event.workspaceId,
+          chatId: replyChatId,
+          progressMessageId,
+          idempotencyKey: `ticket-offer:${event.id}`,
+          card: buildTesterOpsGeneralCard({
+            title: 'Timo',
+            text: offered
+              ? 'That sounds like something an admin should look at. Use the card below to open a ticket.'
+              : 'That sounds like something an admin should look at. Sign in to Timo first, then open a ticket from the dashboard.',
+            template: 'blue',
+          }),
+        });
+      }
     } else if ((safeAction === 'LOG_ISSUE' || safeAction === 'ASK_CLARIFICATION') && decision.intent === 'ISSUE_REPORT') {
       const status = decision.confidence >= policy.highConfidenceThreshold ? 'OPEN' : 'CANDIDATE';
       await prisma.testerOpsIssue.create({

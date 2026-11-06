@@ -31,6 +31,8 @@ const ChangelogScreen = lazyRouteComponent(() => import('./screens/Changelog'), 
 const CalendarScreen = lazyRouteComponent(() => import('./screens/Calendar'), 'CalendarScreen');
 const WelcomeScreen = lazyRouteComponent(() => import('./screens/Welcome'), 'WelcomeScreen');
 const DevResyncScreen = lazyRouteComponent(() => import('./screens/DevResync'), 'DevResyncScreen');
+const TicketsScreen = lazyRouteComponent(() => import('./screens/Tickets'), 'TicketsScreen');
+const TicketDetailScreen = lazyRouteComponent(() => import('./screens/TicketDetail'), 'TicketDetailScreen');
 
 interface RouterContext {
   queryClient: QueryClient;
@@ -266,6 +268,26 @@ const shiftsRoute = createRoute({
   component: ShiftsScreen,
 });
 
+const ticketsRoute = createRoute({
+  getParentRoute: () => authedRoot,
+  path: '/tickets',
+  beforeLoad: ({ context }) => {
+    const me = (context as { me?: Me }).me;
+    requireAnyRouteCapability(me, ['tickets.self']);
+  },
+  component: TicketsScreen,
+});
+
+const ticketDetailRoute = createRoute({
+  getParentRoute: () => authedRoot,
+  path: '/tickets/$ticketId',
+  beforeLoad: ({ context }) => {
+    const me = (context as { me?: Me }).me;
+    requireAnyRouteCapability(me, ['tickets.self']);
+  },
+  component: TicketDetailScreen,
+});
+
 const policyRoute = createRoute({
   getParentRoute: () => authedRoot,
   path: '/policy',
@@ -367,7 +389,7 @@ const indexRoute = createRoute({
 });
 
 export const routeTree = rootRoute.addChildren([
-  authedRoot.addChildren([homeRoute, overviewRoute, editTimeRoute, meTodayLegacyRoute, reportsRoute, approvalsRoute, profileRoute, teamRoute, attendanceRoute, calendarRoute, flagsRoute, usersRoute, teamsAdminRoute, shiftsRoute, policyRoute, integrationsRoute, devResyncRoute]),
+  authedRoot.addChildren([homeRoute, overviewRoute, editTimeRoute, meTodayLegacyRoute, reportsRoute, approvalsRoute, profileRoute, teamRoute, attendanceRoute, calendarRoute, flagsRoute, usersRoute, teamsAdminRoute, shiftsRoute, policyRoute, integrationsRoute, ticketsRoute, ticketDetailRoute, devResyncRoute]),
   loginRoute,
   changelogRoute,
   welcomeRoute,

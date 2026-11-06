@@ -6,6 +6,8 @@ import { logger } from '../logger';
 import { ingestRawLarkMessage } from '../testerOps/inbound';
 import { ACCESS_REQUEST_CARD_KIND } from './accessCards';
 import { decideAccessRequestFromLark } from '../access/requests';
+import { TICKET_CARD_KIND } from '../tickets/cards';
+import { handleTicketCardAction } from '../tickets/larkActions';
 
 /**
  * Subscribes to Lark long-connection events. Approval-card clicks stay on the
@@ -114,6 +116,7 @@ export function startCardCallback(): void {
       try {
         const value = asRecord(raw.action?.value);
         if (value?.kind === ACCESS_REQUEST_CARD_KIND) return await handleAccessRequestAction(raw, value);
+        if (value?.kind === TICKET_CARD_KIND) return await handleTicketCardAction(raw, value);
         const { requestId, cardId, version, action } = parseValue(raw.action?.value);
         const decidedByOpenId = raw.operator?.open_id;
         if (!requestId || !action || !decidedByOpenId) {
