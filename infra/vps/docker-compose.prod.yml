@@ -3,6 +3,12 @@ services:
     image: ${GRIND_API_IMAGE}:${IMAGE_TAG}
     env_file:
       - ./.env.production
+      # Set by hand on the box (chmod 600), never by CI: deploys rewrite
+      # .env.production from the GitHub secret, so a key added there by hand
+      # disappears on the next release. Holds ANTHROPIC_API_KEY for the
+      # ticket intake. Missing is fine: the intake falls back to rules.
+      - path: ./.env.manual
+        required: false
     environment:
       NODE_ENV: production
       API_PORT: 4000
