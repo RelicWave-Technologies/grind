@@ -3,14 +3,12 @@ import { useMemo, useRef, useState } from 'react';
 import { useNavigate, useRouteContext } from '@tanstack/react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  ArrowRight,
   CalendarDays,
   Clock4,
   HelpCircle,
   ImagePlus,
   KeyRound,
   LifeBuoy,
-  MessageSquareText,
   Monitor,
   Plus,
   Send,
@@ -35,11 +33,11 @@ import { useTableFilter } from '../lib/tableFilter';
 import type { WorkspaceUser } from '../lib/types';
 import { attachmentUrl, useTicketUploads, type TicketUploads } from '../components/TicketAttachments';
 import {
-  Avatar,
   Banner,
   Button,
   Card,
   Combobox,
+  EmptyState,
   Field,
   FilterBar,
   IconButton,
@@ -51,8 +49,7 @@ import {
   Segmented,
   Select,
   SkeletonTable,
-  Stat,
-  StatRow,
+  Tabs,
   Tag,
   Textarea,
   type Status,
@@ -103,14 +100,12 @@ export function timeAgo(iso: string, tz: string, now = Date.now()): string {
   return new Intl.DateTimeFormat('en-IN', { timeZone: tz, day: 'numeric', month: 'short' }).format(new Date(iso));
 }
 
-type View = 'attention' | 'progress' | 'waiting' | 'resolved' | 'closed' | 'all';
+type View = 'open' | 'resolved' | 'closed' | 'all';
 
-/** Which band tile a ticket counts under. */
 function viewOf(t: TicketSummaryDto): Exclude<View, 'all'> {
   if (t.status === 'CLOSED') return 'closed';
   if (t.status === 'RESOLVED') return 'resolved';
-  if (t.status === 'WAITING_ON_USER') return 'waiting';
-  return t.turn === 'ADMIN' ? 'attention' : 'progress';
+  return 'open';
 }
 
 /** Support: your own tickets, and for admins the workspace queue. */
@@ -121,7 +116,7 @@ export function TicketsScreen() {
   const [scope, setScope] = useState<'mine' | 'all'>(() =>
     canManage && new URLSearchParams(window.location.search).get('scope') !== 'mine' ? 'all' : 'mine',
   );
-  const [view, setView] = useState<View>('all');
+  const [view, setView] = useState<View>('open');
   const [creating, setCreating] = useState(false);
   const q = useQuery({ ...ticketListQuery<TicketListResponse>(scope), refetchInterval: 60_000 });
   const tickets = q.data?.tickets ?? [];
@@ -137,41 +132,17 @@ export function TicketsScreen() {
   });
 
   const tally = useMemo(() => {
-    const c: Record<Exclude<View, 'all'>, number> = { attention: 0, progress: 0, waiting: 0, resolved: 0, closed: 0 };
+    const c: Record<View, number> = { open: 0, resolved: 0, closed: 0, all: tickets.length };
     for (const t of tickets) c[viewOf(t)] += 1;
     return c;
   }, [tickets]);
 
-  // Whoever owes the next move first, then priority, then most recently touched.
+  // Whoever owes the next move first, then most recently touched.
   const rows = useMemo(() => {
     const shown = view === 'all' ? filter.rows : filter.rows.filter((t) => viewOf(t) === view);
-    const rank = (t: TicketSummaryDto) => {
-      const v = viewOf(t);
-      if (queue) return ['attention', 'progress', 'waiting', 'resolved', 'closed'].indexOf(v);
-      return t.turn === 'REQUESTER' ? 0 : v === 'closed' ? 2 : 1;
-    };
-    return [...shown].sort((a, b) =>
-      rank(a) - rank(b)
-      || TICKET_PRIORITIES.indexOf(b.priority) - TICKET_PRIORITIES.indexOf(a.priority)
-      || b.updatedAt.localeCompare(a.updatedAt));
+    const owes = (t: TicketSummaryDto) => (queue ? t.turn === 'ADMIN' : t.turn === 'REQUESTER') ? 0 : 1;
+    return [...shown].sort((x, y) => owes(x) - owes(y) || y.updatedAt.localeCompare(x.updatedAt));
   }, [filter.rows, view, queue]);
-
-  const tiles: Array<{ key: Exclude<View, 'all'>; label: string; hint: string }> = queue
-    ? [
-        { key: 'attention', label: 'Needs a reply', hint: 'waiting on an admin' },
-        { key: 'progress', label: 'In progress', hint: 'being worked on' },
-        { key: 'waiting', label: 'With requester', hint: 'asked for more info' },
-        { key: 'resolved', label: 'Resolved', hint: 'awaiting confirmation' },
-        { key: 'closed', label: 'Closed', hint: 'done' },
-      ]
-    : [
-        { key: 'waiting', label: 'Your reply needed', hint: 'an admin asked you' },
-        { key: 'resolved', label: 'Check the fix', hint: 'confirm it works' },
-        { key: 'attention', label: 'With support', hint: 'waiting for an admin' },
-        { key: 'progress', label: 'In progress', hint: 'being worked on' },
-        { key: 'closed', label: 'Closed', hint: 'done' },
-      ];
-  const toggle = (key: Exclude<View, 'all'>) => setView((cur) => (cur === key ? 'all' : key));
 
   return (
     <Page className="tk-page">
@@ -194,7 +165,7 @@ export function TicketsScreen() {
         <Segmented
           aria-label="Which tickets"
           value={scope}
-          onChange={(v) => { setScope(v); setView('all'); }}
+          onChange={setScope}
           items={[
             { value: 'all', label: 'Team queue' },
             { value: 'mine', label: 'Opened by me' },
@@ -209,56 +180,35 @@ export function TicketsScreen() {
       ) : tickets.length === 0 ? (
         <HowItWorks onCreate={() => setCreating(true)} queue={queue} />
       ) : (
-        <>
-          <Card variant="flush" className="tk-band">
-            <StatRow>
-              {tiles.map((tile) => (
-                <Stat
-                  key={tile.key}
-                  label={tile.label}
-                  value={tally[tile.key]}
-                  hint={tile.hint}
-                  role="button"
-                  tabIndex={0}
-                  aria-pressed={view === tile.key}
-                  className={view === tile.key ? 'tk-tile tk-tile--on' : 'tk-tile'}
-                  onClick={() => toggle(tile.key)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      toggle(tile.key);
-                    }
-                  }}
+        <Card variant="flush">
+          <div className="tk-listhead">
+            <Tabs
+              aria-label="Status"
+              value={view}
+              onChange={setView}
+              items={(['open', 'resolved', 'closed', 'all'] as const).map((v) => ({
+                value: v,
+                label: `${v === 'open' ? 'Open' : v === 'resolved' ? 'Resolved' : v === 'closed' ? 'Closed' : 'All'} ${tally[v]}`,
+              }))}
+            />
+          </div>
+          <FilterBar filter={filter} placeholder="Search tickets" noun={{ one: 'ticket', other: 'tickets' }} />
+          {rows.length === 0 ? (
+            <NoMatches onClear={() => { filter.clear(); setView('all'); }} />
+          ) : (
+            <ul className="tk-list" aria-label="Tickets">
+              {rows.map((t) => (
+                <TicketRow
+                  key={t.id}
+                  t={t}
+                  tz={tz}
+                  queue={queue}
+                  onOpen={() => void navigate({ to: '/tickets/$ticketId', params: { ticketId: t.id } })}
                 />
               ))}
-            </StatRow>
-          </Card>
-
-          <Card variant="flush">
-            <FilterBar filter={filter} placeholder="Search #, subject, person, reply…" noun={{ one: 'ticket', other: 'tickets' }} />
-            {view !== 'all' && (
-              <div className="tk-viewing ui-t-small">
-                Showing <strong>{tiles.find((t) => t.key === view)?.label}</strong>
-                <button type="button" className="tk-linkish" onClick={() => setView('all')}>Show all</button>
-              </div>
-            )}
-            {rows.length === 0 ? (
-              <NoMatches onClear={() => { filter.clear(); setView('all'); }} />
-            ) : (
-              <ul className="tk-list" aria-label="Tickets">
-                {rows.map((t) => (
-                  <TicketRow
-                    key={t.id}
-                    t={t}
-                    tz={tz}
-                    queue={queue}
-                    onOpen={() => void navigate({ to: '/tickets/$ticketId', params: { ticketId: t.id } })}
-                  />
-                ))}
-              </ul>
-            )}
-          </Card>
-        </>
+            </ul>
+          )}
+        </Card>
       )}
 
       {creating && (
@@ -276,92 +226,36 @@ export function TicketsScreen() {
   );
 }
 
-/** The nudge on a row: whose move it is, said plainly. */
-function TurnBadge({ t, queue }: { t: TicketSummaryDto; queue: boolean }) {
-  if (queue) {
-    if (t.turn === 'ADMIN') return <span className="tk-turn">{t.lastReply?.fromRequester ? 'New reply' : 'New'}</span>;
-    return null;
-  }
-  if (t.status === 'WAITING_ON_USER') return <span className="tk-turn">Reply needed</span>;
-  if (t.status === 'RESOLVED') return <span className="tk-turn">Confirm fix</span>;
-  return null;
-}
-
 function TicketRow({ t, tz, queue, onOpen }: { t: TicketSummaryDto; tz: string; queue: boolean; onOpen: () => void }) {
-  const Icon = CATEGORY_ICON[t.category];
+  const yourMove = queue ? t.turn === 'ADMIN' : t.turn === 'REQUESTER';
   return (
     <li>
-      <button type="button" className={t.status === 'CLOSED' ? 'tk-row tk-row--closed' : 'tk-row'} onClick={onOpen}>
-        <span className="tk-row__icon" aria-hidden><Icon size={16} strokeWidth={1.8} /></span>
+      <button type="button" className={yourMove ? 'tk-row tk-row--due' : 'tk-row'} onClick={onOpen}>
         <span className="tk-row__main">
-          <span className="tk-row__title">
-            <span className="tk-row__num">#{t.number}</span>
-            <span className="tk-row__subject">{t.subject}</span>
-            <TurnBadge t={t} queue={queue} />
-          </span>
-          <span className="tk-row__preview">
-            {t.lastReply ? (
-              <>
-                <strong>{t.lastReply.by.split(' ')[0]}:</strong> {t.lastReply.snippet}
-              </>
-            ) : (
-              <span className="tk-row__quiet">{queue ? 'No reply yet' : 'Waiting for an admin to pick it up'}</span>
-            )}
-          </span>
-          <span className="tk-row__meta">
-            <span>{TICKET_CATEGORY_LABEL[t.category]}</span>
-            {queue && <span>{t.requester.name}</span>}
-            {t.source === 'LARK' && <span>via Lark</span>}
-            {t.source === 'ADMIN' && <span>opened by admin</span>}
-            <span title={formatTicketTime(t.updatedAt, tz)}>{timeAgo(t.updatedAt, tz)}</span>
+          <span className="tk-row__subject"><span className="tk-row__num">#{t.number}</span> {t.subject}</span>
+          <span className="tk-row__meta ui-t-small">
+            {[queue ? t.requester.name : null, TICKET_CATEGORY_LABEL[t.category], t.assignee && queue ? `with ${t.assignee.name.split(' ')[0]}` : null]
+              .filter(Boolean).join(' · ')}
           </span>
         </span>
         <span className="tk-row__side">
-          <span className="tk-row__tags">
-            {(t.priority === 'HIGH' || t.priority === 'URGENT') && <Tag status={TICKET_PRIORITY_TONE[t.priority]}>{TICKET_PRIORITY_LABEL[t.priority]}</Tag>}
-            <Tag status={TICKET_STATUS_TONE[t.status]} dot>{TICKET_STATUS_LABEL[t.status]}</Tag>
-          </span>
-          {queue && (
-            <span className="tk-row__assignee ui-t-small">
-              {t.assignee ? (
-                <><Avatar name={t.assignee.name} src={t.assignee.avatarUrl ?? undefined} size={24} /> {t.assignee.name.split(' ')[0]}</>
-              ) : (
-                <span className="tk-row__quiet">Unassigned</span>
-              )}
-            </span>
-          )}
+          <Tag status={TICKET_STATUS_TONE[t.status]} dot>{TICKET_STATUS_LABEL[t.status]}</Tag>
+          <span className="tk-row__time ui-t-small" title={formatTicketTime(t.updatedAt, tz)}>{timeAgo(t.updatedAt, tz)}</span>
         </span>
-        <ArrowRight className="tk-row__go" size={16} strokeWidth={1.8} aria-hidden />
       </button>
     </li>
   );
 }
 
 function HowItWorks({ onCreate, queue }: { onCreate: () => void; queue: boolean }) {
-  const steps = [
-    { Icon: Send, title: 'Tell us what is wrong', body: 'Here, or message the Timo bot on Lark starting with “ticket”. Add a screenshot if you can.' },
-    { Icon: MessageSquareText, title: 'An admin replies', body: 'Every reply reaches you on Lark. Reply to that message, or here, to answer.' },
-    { Icon: LifeBuoy, title: 'Confirm the fix', body: 'Once it is resolved you are asked if it works. “Still a problem” sends it back.' },
-  ];
   return (
-    <Card className="tk-how">
-      <div className="tk-how__head">
-        <span className="ui-t-eyebrow">{queue ? 'Queue is empty' : 'How support works'}</span>
-        <h2 className="tk-how__title">{queue ? 'Nothing waiting. Nice.' : 'Something not right? We will sort it out.'}</h2>
-      </div>
-      <ol className="tk-how__steps">
-        {steps.map(({ Icon, title, body }, i) => (
-          <li key={title} className="tk-how__step">
-            <span className="tk-how__num ui-t-eyebrow">0{i + 1}</span>
-            <Icon size={20} strokeWidth={1.6} aria-hidden />
-            <span className="ui-t-strong">{title}</span>
-            <span className="ui-t-small">{body}</span>
-          </li>
-        ))}
-      </ol>
-      <div>
-        <Button variant="primary" icon={<Plus size={14} strokeWidth={2} />} onClick={onCreate}>Open a ticket</Button>
-      </div>
+    <Card variant="flush">
+      <EmptyState
+        icon={<LifeBuoy size={22} strokeWidth={1.8} />}
+        title={queue ? 'No tickets yet' : 'No tickets'}
+        description={queue ? 'New tickets show up here and on Lark.' : 'Open one when something is wrong. You can also message the Timo bot on Lark starting with “ticket”.'}
+        action={<Button variant="secondary" onClick={onCreate}>New ticket</Button>}
+      />
     </Card>
   );
 }
@@ -449,16 +343,15 @@ function NewTicketModal({
             </Field>
           </div>
         )}
-        <Field label="What is it about?">
+        <Field label="Category">
           <div className="tk-cats" role="radiogroup" aria-label="Category">
             {TICKET_CATEGORIES.map((c) => {
               const Icon = CATEGORY_ICON[c];
               const on = category === c;
               return (
-                <button key={c} type="button" role="radio" aria-checked={on} className={on ? 'tk-cat tk-cat--on' : 'tk-cat'} onClick={() => setCategory(c)}>
-                  <Icon size={16} strokeWidth={1.8} aria-hidden />
-                  <span className="tk-cat__label">{TICKET_CATEGORY_LABEL[c]}</span>
-                  <span className="tk-cat__hint">{CATEGORY_HINT[c]}</span>
+                <button key={c} type="button" role="radio" aria-checked={on} title={CATEGORY_HINT[c]} className={on ? 'tk-cat tk-cat--on' : 'tk-cat'} onClick={() => setCategory(c)}>
+                  <Icon size={14} strokeWidth={1.8} aria-hidden />
+                  {TICKET_CATEGORY_LABEL[c]}
                 </button>
               );
             })}

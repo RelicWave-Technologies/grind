@@ -1,6 +1,5 @@
 /* Support tickets — layout only; colour, type and radius come from the kit
-   tokens. One pastel zone per view: the status band on the list, the
-   "your move" callout on a ticket. */
+   tokens. Monochrome: status lives in the kit's tags. */
 
 .tk-page {
   display: flex;
@@ -34,27 +33,12 @@
 .tk-linkish:hover { text-decoration-color: var(--ui-ink); }
 .tk-linkish:disabled { color: var(--ui-ink-disabled); cursor: not-allowed; }
 
-/* ── List: status band ─────────────────────────────────────────────────── */
+/* ── List ──────────────────────────────────────────────────────────────── */
 
-.tk-tile {
-  cursor: pointer;
-  outline: none;
-  transition: transform var(--ui-dur-fast) var(--ui-ease), box-shadow var(--ui-dur-fast) var(--ui-ease);
-}
-.tk-tile:hover { transform: translateY(-1px); }
-.tk-tile:focus-visible { box-shadow: var(--ui-focus-ring); }
-.tk-tile--on { box-shadow: inset 0 0 0 2px var(--ui-ink); }
-
-.tk-viewing {
-  display: flex;
-  align-items: center;
-  gap: var(--ui-sp-3);
-  padding: var(--ui-sp-3) var(--ui-sp-5);
+.tk-listhead {
+  padding: 0 var(--ui-sp-5);
   border-bottom: 1px solid var(--ui-line-faint);
-  color: var(--ui-ink-2);
 }
-
-/* ── List: rows ────────────────────────────────────────────────────────── */
 
 .tk-list {
   list-style: none;
@@ -66,11 +50,11 @@
 .tk-row {
   appearance: none;
   width: 100%;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: var(--ui-sp-5);
-  padding: var(--ui-sp-5);
+  padding: var(--ui-sp-4) var(--ui-sp-5);
   background: var(--ui-surface);
   border: 0;
   text-align: left;
@@ -81,139 +65,42 @@
 }
 .tk-row:hover { background: var(--ui-surface-sunken); }
 .tk-row:focus-visible { outline: none; box-shadow: inset var(--ui-focus-ring); }
-.tk-row--closed .tk-row__subject { font-weight: 450; color: var(--ui-ink-2); }
-
-.tk-row__icon {
-  display: grid;
-  place-items: center;
-  width: 36px;
-  height: 36px;
-  border-radius: var(--ui-r-full);
-  border: 1px solid var(--ui-line);
-  color: var(--ui-ink);
-}
-
 .tk-row__main {
   display: flex;
   flex-direction: column;
-  gap: var(--ui-sp-2);
+  gap: var(--ui-sp-1);
   min-width: 0;
 }
-.tk-row__title {
-  display: flex;
-  align-items: baseline;
-  gap: var(--ui-sp-3);
-  min-width: 0;
+.tk-row__subject {
+  font-size: 14px;
+  font-weight: 450;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
+.tk-row--due .tk-row__subject { font-weight: 600; }
 .tk-row__num {
   font-family: var(--ui-font-mono);
   font-size: 12px;
   color: var(--ui-ink-3);
-  flex: none;
 }
-.tk-row__subject {
-  font-size: 14.5px;
-  font-weight: 560;
-  letter-spacing: -0.01em;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.tk-row__preview {
-  font-size: 13px;
+.tk-row__meta {
   color: var(--ui-ink-2);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.tk-row__preview strong { color: var(--ui-ink); font-weight: 560; }
-.tk-row__quiet { color: var(--ui-ink-3); }
-.tk-row__meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--ui-sp-2) var(--ui-sp-4);
-  font-family: var(--ui-font-mono);
-  font-size: 10.5px;
-  font-weight: 500;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--ui-ink-3);
-}
-
 .tk-row__side {
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: var(--ui-sp-3);
-}
-.tk-row__tags { display: inline-flex; gap: var(--ui-sp-2); }
-.tk-row__assignee {
-  display: inline-flex;
   align-items: center;
-  gap: var(--ui-sp-2);
-  color: var(--ui-ink-2);
-}
-.tk-row__go {
-  color: var(--ui-ink-3);
-  transition: transform var(--ui-dur-fast) var(--ui-ease), color var(--ui-dur-fast) var(--ui-ease);
-}
-.tk-row:hover .tk-row__go { color: var(--ui-ink); transform: translateX(2px); }
-
-.tk-turn {
+  gap: var(--ui-sp-4);
   flex: none;
-  display: inline-flex;
-  align-items: center;
-  height: 20px;
-  padding: 0 var(--ui-sp-3);
-  border-radius: var(--ui-r-full);
-  background: var(--ui-ink);
-  color: var(--ui-on-accent);
-  font-family: var(--ui-font-mono);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
 }
-
-@media (max-width: 760px) {
-  .tk-row { grid-template-columns: auto minmax(0, 1fr); }
-  .tk-row__side { grid-column: 2; align-items: flex-start; flex-direction: row; }
-  .tk-row__go { display: none; }
+.tk-row__time {
+  color: var(--ui-ink-3);
+  min-width: 56px;
+  text-align: right;
 }
-
-/* ── Empty: how it works ───────────────────────────────────────────────── */
-
-.tk-how {
-  display: flex;
-  flex-direction: column;
-  gap: var(--ui-sp-7);
-  padding: var(--ui-sp-8);
-}
-.tk-how__head { display: flex; flex-direction: column; gap: var(--ui-sp-2); }
-.tk-how__title {
-  margin: 0;
-  font-size: 22px;
-  font-weight: 540;
-  letter-spacing: -0.025em;
-}
-.tk-how__steps {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(calc(var(--ui-sp-12) * 3.5), 1fr));
-  gap: var(--ui-sp-5);
-}
-.tk-how__step {
-  display: flex;
-  flex-direction: column;
-  gap: var(--ui-sp-3);
-  padding: var(--ui-sp-5);
-  border: 1px solid var(--ui-line);
-  border-radius: var(--ui-r-lg);
-}
-.tk-how__step .ui-t-small { color: var(--ui-ink-2); line-height: 1.5; }
-.tk-how__num { color: var(--ui-ink-3); }
 
 /* ── New ticket form ───────────────────────────────────────────────────── */
 
@@ -234,34 +121,29 @@
 }
 
 .tk-cats {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(calc(var(--ui-sp-12) * 2.6), 1fr));
+  display: flex;
+  flex-wrap: wrap;
   gap: var(--ui-sp-2);
 }
 .tk-cat {
   appearance: none;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  grid-template-rows: auto auto;
-  column-gap: var(--ui-sp-3);
-  row-gap: var(--ui-sp-1);
+  display: inline-flex;
   align-items: center;
-  padding: var(--ui-sp-3) var(--ui-sp-4);
+  gap: var(--ui-sp-2);
+  height: 32px;
+  padding: 0 var(--ui-sp-4);
   border: 1px solid var(--ui-line);
-  border-radius: var(--ui-r-md);
+  border-radius: var(--ui-r-full);
   background: var(--ui-surface);
   color: var(--ui-ink);
   font: inherit;
-  text-align: left;
+  font-size: 13px;
   cursor: pointer;
   transition: border-color var(--ui-dur-fast) var(--ui-ease), background var(--ui-dur-fast) var(--ui-ease);
 }
-.tk-cat svg { grid-row: 1 / span 2; }
 .tk-cat:hover { border-color: var(--ui-line-strong); }
 .tk-cat:focus-visible { outline: none; box-shadow: var(--ui-focus-ring); }
-.tk-cat--on { border-color: var(--ui-ink); box-shadow: inset 0 0 0 1px var(--ui-ink); }
-.tk-cat__label { font-size: 13px; font-weight: 560; }
-.tk-cat__hint { font-size: 11.5px; color: var(--ui-ink-3); line-height: 1.35; }
+.tk-cat--on { background: var(--ui-ink); border-color: var(--ui-ink); color: var(--ui-on-accent); }
 
 .tk-drop-wrap { display: flex; flex-direction: column; gap: var(--ui-sp-3); }
 .tk-drop {
@@ -318,129 +200,45 @@
 
 /* ── Ticket: header ────────────────────────────────────────────────────── */
 
-.tk-hero {
+.tk-head {
   display: flex;
-  flex-direction: column;
-  gap: var(--ui-sp-3);
-  padding-bottom: var(--ui-sp-6);
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--ui-sp-6);
+  padding-bottom: var(--ui-sp-5);
   border-bottom: 1px solid var(--ui-ink);
 }
-.tk-hero__eyebrow {
-  display: inline-flex;
-  align-items: center;
+.tk-head__text {
+  display: flex;
+  flex-direction: column;
   gap: var(--ui-sp-2);
-  color: var(--ui-ink-2);
+  min-width: 0;
 }
-.tk-hero__title {
+.tk-head__title {
   margin: 0;
-  font-size: 26px;
+  font-size: 24px;
   font-weight: 540;
   letter-spacing: -0.025em;
-  line-height: 1.2;
+  line-height: 1.25;
   overflow-wrap: anywhere;
 }
-.tk-hero__tags {
+.tk-head__meta {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--ui-sp-3);
 }
-.tk-hero__tags .ui-t-small { color: var(--ui-ink-2); }
-
-.tk-steps {
-  list-style: none;
-  margin: var(--ui-sp-3) 0 0;
-  padding: 0;
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  max-width: calc(var(--ui-sp-12) * 11);
-}
-.tk-step {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: var(--ui-sp-2);
-  padding-top: var(--ui-sp-1);
-}
-.tk-step::before {
-  content: '';
-  position: absolute;
-  top: 10px;
-  left: 20px;
-  right: 0;
-  height: 1px;
-  background: var(--ui-line);
-}
-.tk-step:last-child::before { display: none; }
-.tk-step--done::before { background: var(--ui-ink); }
-.tk-step__dot {
-  position: relative;
-  z-index: 1;
-  display: grid;
-  place-items: center;
-  width: 18px;
-  height: 18px;
-  border-radius: var(--ui-r-full);
-  border: 1px solid var(--ui-line-strong);
-  background: var(--ui-surface);
-  color: var(--ui-on-accent);
-}
-.tk-step--done .tk-step__dot { background: var(--ui-ink); border-color: var(--ui-ink); }
-.tk-step--now .tk-step__dot { border: 5px solid var(--ui-ink); }
-.tk-step__label {
-  font-family: var(--ui-font-mono);
-  font-size: 10.5px;
-  font-weight: 500;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--ui-ink-3);
-  padding-right: var(--ui-sp-3);
-}
-.tk-step--done .tk-step__label,
-.tk-step--now .tk-step__label { color: var(--ui-ink); }
-
-/* ── Ticket: whose move ────────────────────────────────────────────────── */
-
-.tk-next {
-  display: flex;
-  align-items: center;
-  gap: var(--ui-sp-4);
-  padding: var(--ui-sp-5) var(--ui-sp-6);
-  border: 1px solid var(--ui-line);
-  border-radius: var(--ui-r-lg);
-  background: var(--ui-surface);
-}
-.tk-next--hot { background: var(--ui-lime); border-color: transparent; }
-.tk-next__icon {
-  display: grid;
-  place-items: center;
-  width: 40px;
-  height: 40px;
-  flex: none;
-  border-radius: var(--ui-r-full);
-  background: var(--ui-ink);
-  color: var(--ui-on-accent);
-}
-.tk-next__text {
-  display: flex;
-  flex-direction: column;
-  gap: var(--ui-sp-1);
-  min-width: 0;
-  flex: 1;
-}
-.tk-next__text .ui-t-strong { font-size: 15px; }
-.tk-next__text .ui-t-small { color: var(--ui-ink-2); }
-.tk-next--hot .tk-next__text .ui-t-small { color: var(--ui-ink); }
-.tk-next__warn { color: var(--ui-danger-ink) !important; }
-.tk-next__actions {
+.tk-head__meta .ui-t-small { color: var(--ui-ink-2); }
+.tk-head__actions {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: var(--ui-sp-2);
+  flex: none;
 }
 @media (max-width: 760px) {
-  .tk-next { flex-wrap: wrap; }
-  .tk-next__actions { width: 100%; justify-content: flex-start; }
+  .tk-head { flex-direction: column; align-items: flex-start; }
+  .tk-head__actions { justify-content: flex-start; }
 }
 
 /* ── Ticket: layout ────────────────────────────────────────────────────── */
@@ -463,70 +261,50 @@
 .tk-side { position: sticky; top: var(--ui-sp-6); }
 .tk-side__stack { display: flex; flex-direction: column; gap: var(--ui-sp-4); }
 
-/* ── Ticket: conversation ──────────────────────────────────────────────── */
+/* ── Ticket: comments ──────────────────────────────────────────────────── */
 
 .tk-thread {
   display: flex;
   flex-direction: column;
-  gap: var(--ui-sp-5);
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-r-lg);
+  background: var(--ui-surface);
 }
+.tk-thread > * + * { border-top: 1px solid var(--ui-line-faint); }
 
-.tk-msg {
+.tk-comment {
   display: flex;
-  gap: var(--ui-sp-3);
-  max-width: 88%;
+  gap: var(--ui-sp-4);
+  padding: var(--ui-sp-5);
 }
-.tk-msg--admin { align-self: flex-end; flex-direction: row-reverse; }
-.tk-msg__col {
+.tk-comment--internal { background: var(--ui-warn-bg); }
+.tk-comment__body {
   display: flex;
   flex-direction: column;
-  gap: var(--ui-sp-2);
+  gap: var(--ui-sp-3);
   min-width: 0;
+  flex: 1;
 }
-.tk-msg--admin .tk-msg__col { align-items: flex-end; }
-.tk-msg__head {
+.tk-comment__head {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
   gap: var(--ui-sp-2) var(--ui-sp-3);
 }
-.tk-msg--admin .tk-msg__head { flex-direction: row-reverse; }
-.tk-msg__head .ui-t-small { color: var(--ui-ink-2); }
-.tk-msg__role {
+.tk-comment__note { color: var(--ui-ink-2); }
+.tk-comment__role {
   font-family: var(--ui-font-mono);
   font-size: 10px;
-  font-weight: 600;
+  font-weight: 500;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  padding: 1px var(--ui-sp-2);
-  border-radius: var(--ui-r-full);
-  border: 1px solid var(--ui-line-strong);
+  color: var(--ui-ink-2);
 }
-.tk-msg__role--note { border-color: var(--ui-warn-ink); color: var(--ui-warn-ink); }
-.tk-msg__time {
-  font-family: var(--ui-font-mono);
-  font-size: 10.5px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+.tk-comment__role--note { color: var(--ui-warn-ink); }
+.tk-comment__time {
+  margin-left: auto;
+  font-size: 12px;
   color: var(--ui-ink-3);
-}
-.tk-msg__bubble {
-  display: flex;
-  flex-direction: column;
-  gap: var(--ui-sp-3);
-  padding: var(--ui-sp-4) var(--ui-sp-5);
-  border: 1px solid var(--ui-line);
-  border-radius: 4px var(--ui-r-lg) var(--ui-r-lg) var(--ui-r-lg);
-  background: var(--ui-surface);
-}
-.tk-msg--admin .tk-msg__bubble {
-  background: var(--ui-surface-sunken);
-  border-color: transparent;
-  border-radius: var(--ui-r-lg) 4px var(--ui-r-lg) var(--ui-r-lg);
-}
-.tk-msg--internal .tk-msg__bubble {
-  background: var(--ui-warn-bg);
-  border: 1px dashed var(--ui-warn-ink);
 }
 
 .tk-body {
@@ -538,25 +316,13 @@
 }
 
 .tk-sys {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--ui-sp-1);
-  text-align: center;
+  padding: var(--ui-sp-3) var(--ui-sp-5) var(--ui-sp-3) calc(32px + var(--ui-sp-4) + var(--ui-sp-5));
+  color: var(--ui-ink-3);
 }
-.tk-sys__text {
-  padding: var(--ui-sp-1) var(--ui-sp-4);
-  border-radius: var(--ui-r-full);
-  border: 1px solid var(--ui-line-faint);
-  color: var(--ui-ink-2);
-}
-.tk-sys__text strong { color: var(--ui-ink); font-weight: 560; }
-.tk-sys__time { color: var(--ui-ink-3); }
+.tk-sys strong { color: var(--ui-ink-2); font-weight: 560; }
 .tk-sys__note {
-  margin: 0;
-  max-width: 70%;
+  margin: var(--ui-sp-1) 0 0;
   color: var(--ui-ink-2);
-  font-style: italic;
   white-space: pre-wrap;
 }
 
@@ -643,18 +409,14 @@
 
 /* ── Ticket: side panel ────────────────────────────────────────────────── */
 
-.tk-actions-card .ui-card__body,
-.tk-actions-card {
-  display: flex;
-  flex-direction: column;
-  gap: var(--ui-sp-2);
-}
-.tk-actions-card__minor {
+.tk-minor {
   display: flex;
   flex-wrap: wrap;
   justify-content: space-between;
   gap: var(--ui-sp-2);
-  margin-top: var(--ui-sp-2);
+  margin-top: var(--ui-sp-4);
+  padding-top: var(--ui-sp-4);
+  border-top: 1px solid var(--ui-line-faint);
 }
 
 .tk-facts {

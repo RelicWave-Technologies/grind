@@ -5,10 +5,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeft,
   Check,
-  CircleDot,
   Lock,
   MessageCircleQuestion,
-  Radio,
   RotateCcw,
   Send,
   UserCheck,
@@ -45,7 +43,7 @@ import {
   Tag,
   Textarea,
 } from '../ui';
-import { CATEGORY_ICON, DropZone, TICKET_PRIORITY_TONE, TICKET_STATUS_TONE, formatTicketTime, timeAgo } from './Tickets';
+import { DropZone, TICKET_PRIORITY_TONE, TICKET_STATUS_TONE, formatTicketTime, timeAgo } from './Tickets';
 
 const ERRORS: Record<string, string> = {
   invalid_transition: 'The ticket changed meanwhile. It has been refreshed.',
@@ -102,7 +100,6 @@ export function TicketDetailScreen() {
     );
   }
 
-  const Icon = CATEGORY_ICON[t.category];
   const isRequester = t.requester.id === me.id;
   // Files on the opening message: those not attached to a later reply.
   const replyFiles = new Set(t.events.flatMap((e) => (e.kind === 'CREATED' ? [] : e.attachments.map((a) => a.id))));
@@ -111,45 +108,48 @@ export function TicketDetailScreen() {
     <Page className="tk-page">
       <BackLink />
 
-      <header className="tk-hero">
-        <div className="tk-hero__eyebrow ui-t-eyebrow">
-          <Icon size={13} strokeWidth={1.8} aria-hidden />
-          <span>Ticket #{t.number}</span>
-          <span>·</span>
-          <span>{TICKET_CATEGORY_LABEL[t.category]}</span>
-          {t.source === 'LARK' && (<><span>·</span><span>via Lark</span></>)}
+      <header className="tk-head">
+        <div className="tk-head__text">
+          <span className="ui-t-eyebrow">#{t.number} · {TICKET_CATEGORY_LABEL[t.category]}{t.source === 'LARK' ? ' · via Lark' : ''}</span>
+          <h1 className="tk-head__title">{t.subject}</h1>
+          <div className="tk-head__meta">
+            <Tag status={TICKET_STATUS_TONE[t.status]} dot>{TICKET_STATUS_LABEL[t.status]}</Tag>
+            {t.priority !== 'NORMAL' && <Tag status={TICKET_PRIORITY_TONE[t.priority]}>{TICKET_PRIORITY_LABEL[t.priority]}</Tag>}
+            {t.closeReason && <span className="ui-t-small">{TICKET_CLOSE_REASON_LABEL[t.closeReason]}</span>}
+            {t.duplicateOf && (
+              <Link to="/tickets/$ticketId" params={{ ticketId: t.duplicateOf.id }} className="ui-t-small tk-linkish">
+                Duplicate of #{t.duplicateOf.number}
+              </Link>
+            )}
+          </div>
         </div>
-        <h1 className="tk-hero__title">{t.subject}</h1>
-        <div className="tk-hero__tags">
-          <Tag status={TICKET_STATUS_TONE[t.status]} dot>{TICKET_STATUS_LABEL[t.status]}</Tag>
-          {t.priority !== 'NORMAL' && <Tag status={TICKET_PRIORITY_TONE[t.priority]}>{TICKET_PRIORITY_LABEL[t.priority]} priority</Tag>}
-          {t.closeReason && <span className="ui-t-small">{TICKET_CLOSE_REASON_LABEL[t.closeReason]}</span>}
-          {t.duplicateOf && (
-            <Link to="/tickets/$ticketId" params={{ ticketId: t.duplicateOf.id }} className="ui-t-small tk-linkish">
-              Follow #{t.duplicateOf.number} instead
-            </Link>
-          )}
-        </div>
-        <Progress t={t} />
+        <HeaderActions t={t} isRequester={isRequester} busy={act.isPending} onAct={(a) => act.mutate(a)} />
       </header>
 
       {act.isError && <Banner status="danger">{errorText(act.error)}</Banner>}
-
-      <NextStep t={t} isRequester={isRequester} busy={act.isPending} onAct={(a) => act.mutate(a)} />
+      {isRequester && t.status === 'WAITING_ON_USER' && (
+        <Banner status="warn">{t.assignee ? first(t.assignee.name) : 'An admin'} asked you something. Reply below or on Lark.</Banner>
+      )}
+      {isRequester && t.status === 'RESOLVED' && (
+        <Banner status="success">Marked resolved. Is it fixed? Use the buttons above.</Banner>
+      )}
+      {t.requesterUnreachable && t.can.manage && (
+        <Banner status="warn">Timo cannot message {first(t.requester.name)} on Lark, so they only see replies here.</Banner>
+      )}
 
       <div className="tk-layout">
         <div className="tk-main">
-          <section className="tk-thread" aria-label="Conversation">
-            <Bubble
+          <section className="tk-thread" aria-label="Comments">
+            <Comment
               who={t.createdBy}
-              side={t.createdBy.id === t.requester.id ? 'requester' : 'admin'}
+              support={t.createdBy.id !== t.requester.id}
               at={t.createdAt}
               tz={tz}
-              label={t.createdBy.id !== t.requester.id ? `opened this for ${first(t.requester.name)}` : undefined}
+              note={t.createdBy.id !== t.requester.id ? `opened this for ${t.requester.name}` : undefined}
             >
               <p className="tk-body">{t.description}</p>
               <TicketAttachmentList items={t.attachments.filter((a) => !replyFiles.has(a.id))} />
-            </Bubble>
+            </Comment>
             {t.events.filter((e) => e.kind !== 'CREATED').map((e) => (
               <EventItem key={e.id} e={e} tz={tz} requesterId={t.requester.id} />
             ))}
@@ -179,109 +179,36 @@ function BackLink() {
   );
 }
 
-const STEPS = [
-  { key: 'open', label: 'Opened' },
-  { key: 'work', label: 'Being worked on' },
-  { key: 'resolved', label: 'Resolved' },
-  { key: 'closed', label: 'Closed' },
-] as const;
-
-/** Where the ticket is on its way: opened → worked on → resolved → closed. */
-function Progress({ t }: { t: TicketDetailDto }) {
-  const at = t.status === 'OPEN' ? 0 : t.status === 'IN_PROGRESS' || t.status === 'WAITING_ON_USER' ? 1 : t.status === 'RESOLVED' ? 2 : 3;
-  return (
-    <ol className="tk-steps" aria-label="Progress">
-      {STEPS.map((s, i) => (
-        <li key={s.key} className={i < at ? 'tk-step tk-step--done' : i === at ? 'tk-step tk-step--now' : 'tk-step'} aria-current={i === at ? 'step' : undefined}>
-          <span className="tk-step__dot">{i < at ? <Check size={11} strokeWidth={3} /> : null}</span>
-          <span className="tk-step__label">{i === 1 && t.status === 'WAITING_ON_USER' ? 'Waiting on requester' : s.label}</span>
-        </li>
-      ))}
-    </ol>
-  );
-}
-
-/** One plain sentence on whose move it is, with the move itself as the button. */
-function NextStep({ t, isRequester, busy, onAct }: { t: TicketDetailDto; isRequester: boolean; busy: boolean; onAct: (a: TicketActionRequest) => void }) {
+/** The moves the viewer can make right now, as a few buttons by the title. */
+function HeaderActions({ t, isRequester, busy, onAct }: { t: TicketDetailDto; isRequester: boolean; busy: boolean; onAct: (a: TicketActionRequest) => void }) {
   const [confirmWithdraw, setConfirmWithdraw] = useState(false);
-  const focusReply = () => document.getElementById('tk-reply')?.focus();
-  let icon = <CircleDot size={18} strokeWidth={1.8} />;
-  let title = '';
-  let body = '';
-  let actions: React.ReactNode = null;
-
-  if (isRequester && t.status === 'RESOLVED') {
-    icon = <Check size={18} strokeWidth={2} />;
-    title = 'Is it fixed?';
-    body = `${t.assignee ? first(t.assignee.name) : 'An admin'} marked this resolved. Tell us if it works, or send it back.`;
-    actions = (
-      <>
-        <Button variant="primary" loading={busy} onClick={() => onAct({ action: 'confirm' })}>Yes, it is fixed</Button>
-        <Button variant="secondary" disabled={busy} onClick={() => onAct({ action: 'reopen', note: 'Still a problem' })}>Still a problem</Button>
-      </>
-    );
-  } else if (isRequester && t.status === 'WAITING_ON_USER') {
-    icon = <MessageCircleQuestion size={18} strokeWidth={1.8} />;
-    title = 'Your reply is needed';
-    body = `${t.assignee ? first(t.assignee.name) : 'An admin'} asked you something below. Answer here or on Lark.`;
-    actions = <Button variant="primary" onClick={focusReply}>Reply</Button>;
-  } else if (isRequester && t.status === 'CLOSED') {
-    icon = <Lock size={18} strokeWidth={1.8} />;
-    title = 'Closed';
-    body = t.can.reopen ? 'If the problem comes back within 7 days, reopen it.' : 'Open a new ticket if you need more help.';
-    actions = t.can.reopen ? <Button variant="secondary" icon={<RotateCcw size={14} strokeWidth={1.8} />} loading={busy} onClick={() => onAct({ action: 'reopen' })}>Reopen</Button> : null;
-  } else if (isRequester) {
-    icon = <Radio size={18} strokeWidth={1.8} />;
-    title = t.assignee ? `${first(t.assignee.name)} is on it` : 'Sent to support';
-    body = t.assignee ? 'You will get their reply here and on Lark.' : 'An admin will pick it up soon. You will hear on Lark.';
-  } else if (t.can.manage) {
-    if (t.turn === 'ADMIN') {
-      icon = <MessageCircleQuestion size={18} strokeWidth={1.8} />;
-      title = t.lastReply?.fromRequester ? `${first(t.requester.name)} replied` : 'Waiting for a reply';
-      body = t.assignee ? `Assigned to ${t.assignee.name}.` : 'Nobody has taken it yet.';
-      actions = (
-        <>
-          {!t.assignee && <Button variant="secondary" icon={<UserCheck size={14} strokeWidth={1.8} />} disabled={busy} onClick={() => onAct({ action: 'start' })}>Take it</Button>}
-          <Button variant="primary" onClick={focusReply}>Reply</Button>
-        </>
-      );
-    } else if (t.status === 'WAITING_ON_USER') {
-      icon = <Radio size={18} strokeWidth={1.8} />;
-      title = `Waiting on ${first(t.requester.name)}`;
-      body = 'They are reminded after one and two days, and it closes itself after five.';
-    } else if (t.status === 'RESOLVED') {
-      icon = <Check size={18} strokeWidth={2} />;
-      title = 'Resolved, awaiting confirmation';
-      body = `${first(t.requester.name)} is asked if it works. It closes itself after three quiet days.`;
-    } else if (t.status === 'CLOSED') {
-      icon = <Lock size={18} strokeWidth={1.8} />;
-      title = 'Closed';
-      body = t.closeReason ? TICKET_CLOSE_REASON_LABEL[t.closeReason] : '';
-    } else {
-      icon = <Radio size={18} strokeWidth={1.8} />;
-      title = 'In progress';
-      body = t.assignee ? `${t.assignee.name} has it.` : 'Being worked on.';
-    }
-  }
-  if (!title) return null;
-  const hot = (isRequester && (t.status === 'RESOLVED' || t.status === 'WAITING_ON_USER')) || (!isRequester && t.turn === 'ADMIN');
-
+  const [resolving, setResolving] = useState(false);
+  const [note, setNote] = useState('');
+  const active = t.status === 'OPEN' || t.status === 'IN_PROGRESS' || t.status === 'WAITING_ON_USER';
   return (
-    <div className={hot ? 'tk-next tk-next--hot' : 'tk-next'}>
-      <span className="tk-next__icon" aria-hidden>{icon}</span>
-      <div className="tk-next__text">
-        <span className="ui-t-strong">{title}</span>
-        {body && <span className="ui-t-small">{body}</span>}
-        {t.requesterUnreachable && t.can.manage && (
-          <span className="ui-t-small tk-next__warn">Timo cannot message {first(t.requester.name)} on Lark, so they only see replies here.</span>
-        )}
-      </div>
-      <div className="tk-next__actions">
-        {actions}
-        {t.can.withdraw && isRequester && (
-          <Button variant="ghost" disabled={busy} onClick={() => setConfirmWithdraw(true)}>Withdraw</Button>
-        )}
-      </div>
+    <div className="tk-head__actions">
+      {t.can.confirm && (
+        <>
+          <Button variant="secondary" disabled={busy} onClick={() => onAct({ action: 'reopen', note: 'Still a problem' })}>Still a problem</Button>
+          <Button variant="primary" loading={busy} onClick={() => onAct({ action: 'confirm' })}>Yes, it is fixed</Button>
+        </>
+      )}
+      {isRequester && !t.can.manage && !t.can.confirm && t.can.reopen && (
+        <Button variant="secondary" icon={<RotateCcw size={14} strokeWidth={1.8} />} loading={busy} onClick={() => onAct({ action: 'reopen' })}>Reopen</Button>
+      )}
+      {isRequester && t.can.withdraw && !t.can.confirm && (
+        <Button variant="ghost" disabled={busy} onClick={() => setConfirmWithdraw(true)}>Withdraw</Button>
+      )}
+      {t.can.manage && active && !t.assignee && (
+        <Button variant="secondary" icon={<UserCheck size={14} strokeWidth={1.8} />} disabled={busy} onClick={() => onAct({ action: 'start' })}>Take it</Button>
+      )}
+      {t.can.manage && active && (
+        <Button variant="primary" icon={<Check size={14} strokeWidth={2} />} disabled={busy} onClick={() => setResolving(true)}>Resolve</Button>
+      )}
+      {t.can.manage && !active && (
+        <Button variant="secondary" icon={<RotateCcw size={14} strokeWidth={1.8} />} disabled={busy} onClick={() => onAct({ action: 'reopen' })}>Reopen</Button>
+      )}
+
       <Modal
         open={confirmWithdraw}
         onClose={() => setConfirmWithdraw(false)}
@@ -294,41 +221,57 @@ function NextStep({ t, isRequester, busy, onAct }: { t: TicketDetailDto; isReque
           </>
         }
       />
+      <Modal
+        open={resolving}
+        onClose={() => setResolving(false)}
+        title={`Resolve #${t.number}`}
+        description={`${first(t.requester.name)} is asked on Lark to confirm it works. It closes by itself after 3 days without an answer.`}
+        actions={
+          <>
+            <Button variant="secondary" onClick={() => setResolving(false)}>Cancel</Button>
+            <Button variant="primary" onClick={() => { setResolving(false); onAct({ action: 'resolve', note: note.trim() || undefined }); setNote(''); }}>Resolve</Button>
+          </>
+        }
+      >
+        <Field label="What was done (they see this)">
+          <Textarea rows={3} value={note} maxLength={5000} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Restored your Tuesday entry." autoFocus />
+        </Field>
+      </Modal>
     </div>
   );
 }
 
-function Bubble({
+function Comment({
   who,
-  side,
+  support,
   at,
   tz,
-  label,
+  note,
   internal,
   via,
   children,
 }: {
   who: TicketPersonDto | null;
-  side: 'requester' | 'admin';
+  support?: boolean;
   at: string;
   tz: string;
-  label?: string;
+  note?: string;
   internal?: boolean;
   via?: string;
   children?: React.ReactNode;
 }) {
   return (
-    <article className={['tk-msg', `tk-msg--${side}`, internal && 'tk-msg--internal'].filter(Boolean).join(' ')}>
+    <article className={internal ? 'tk-comment tk-comment--internal' : 'tk-comment'}>
       <Avatar name={who?.name ?? 'Timo'} src={who?.avatarUrl ?? undefined} size={32} />
-      <div className="tk-msg__col">
-        <div className="tk-msg__head">
+      <div className="tk-comment__body">
+        <div className="tk-comment__head">
           <span className="ui-t-strong">{who?.name ?? 'Timo'}</span>
-          {side === 'admin' && !internal && <span className="tk-msg__role">Support</span>}
-          {internal && <span className="tk-msg__role tk-msg__role--note">Internal note</span>}
-          {label && <span className="ui-t-small">{label}</span>}
-          <span className="tk-msg__time" title={formatTicketTime(at, tz)}>{timeAgo(at, tz)}{via ? ` · ${via}` : ''}</span>
+          {support && !internal && <span className="tk-comment__role">Support</span>}
+          {internal && <span className="tk-comment__role tk-comment__role--note">Internal note</span>}
+          {note && <span className="ui-t-small tk-comment__note">{note}</span>}
+          <span className="tk-comment__time" title={formatTicketTime(at, tz)}>{timeAgo(at, tz)}{via ? ` · ${via}` : ''}</span>
         </div>
-        <div className="tk-msg__bubble">{children}</div>
+        {children}
       </div>
     </article>
   );
@@ -337,9 +280,9 @@ function Bubble({
 function EventItem({ e, tz, requesterId }: { e: TicketEventDto; tz: string; requesterId: string }) {
   if (e.kind === 'COMMENT' || e.kind === 'INTERNAL_NOTE') {
     return (
-      <Bubble
+      <Comment
         who={e.actor}
-        side={e.actor?.id === requesterId ? 'requester' : 'admin'}
+        support={e.actor?.id !== requesterId}
         at={e.createdAt}
         tz={tz}
         internal={e.kind === 'INTERNAL_NOTE'}
@@ -347,7 +290,7 @@ function EventItem({ e, tz, requesterId }: { e: TicketEventDto; tz: string; requ
       >
         {e.body && e.body !== '(attachment)' && <p className="tk-body">{e.body}</p>}
         <TicketAttachmentList items={e.attachments} />
-      </Bubble>
+      </Comment>
     );
   }
   let line = '';
@@ -362,12 +305,9 @@ function EventItem({ e, tz, requesterId }: { e: TicketEventDto; tz: string; requ
       : e.meta?.categoryTo ? `moved it to ${TICKET_CATEGORY_LABEL[e.meta.categoryTo as TicketCategory]}` : 'changed it';
   }
   return (
-    <div className="tk-sys">
-      <span className="tk-sys__text ui-t-small">
-        <strong>{e.actor?.name ?? 'Timo'}</strong> {line}{e.via === 'LARK' ? ' on Lark' : ''}
-        <span className="tk-sys__time" title={formatTicketTime(e.createdAt, tz)}> · {timeAgo(e.createdAt, tz)}</span>
-      </span>
-      {e.body && <p className="tk-sys__note ui-t-small">“{e.body}”</p>}
+    <div className="tk-sys ui-t-small">
+      <span><strong>{e.actor?.name ?? 'Timo'}</strong> {line}{e.via === 'LARK' ? ' on Lark' : ''} · <span title={formatTicketTime(e.createdAt, tz)}>{timeAgo(e.createdAt, tz)}</span></span>
+      {e.body && <p className="tk-sys__note">{e.body}</p>}
     </div>
   );
 }
@@ -451,33 +391,11 @@ function Composer({ t, onSaved }: { t: TicketDetailDto; onSaved: (t: TicketDetai
 
 function DetailsCard({ t, tz, busy, onAct }: { t: TicketDetailDto; tz: string; busy: boolean; onAct: (a: TicketActionRequest) => void }) {
   const assigneesQ = useQuery({ ...ticketAssigneesQuery<{ assignees: TicketPersonDto[] }>(), enabled: t.can.manage });
-  const [resolving, setResolving] = useState(false);
-  const [note, setNote] = useState('');
   const [dupOf, setDupOf] = useState('');
   const [dupOpen, setDupOpen] = useState(false);
-  const active = t.status === 'OPEN' || t.status === 'IN_PROGRESS' || t.status === 'WAITING_ON_USER';
 
   return (
     <div className="tk-side__stack">
-      {t.can.manage && (
-        <Card className="tk-actions-card">
-          {active ? (
-            <>
-              <Button variant="primary" icon={<Check size={14} strokeWidth={2} />} disabled={busy} onClick={() => setResolving(true)}>Resolve</Button>
-              {!t.assignee && <Button variant="secondary" icon={<UserCheck size={14} strokeWidth={1.8} />} disabled={busy} onClick={() => onAct({ action: 'start' })}>Take it</Button>}
-            </>
-          ) : (
-            <Button variant="secondary" icon={<RotateCcw size={14} strokeWidth={1.8} />} disabled={busy} onClick={() => onAct({ action: 'reopen' })}>Reopen</Button>
-          )}
-          {t.status !== 'CLOSED' && (
-            <div className="tk-actions-card__minor">
-              <button type="button" className="tk-linkish ui-t-small" disabled={busy} onClick={() => setDupOpen(true)}>Duplicate of…</button>
-              <button type="button" className="tk-linkish ui-t-small" disabled={busy} onClick={() => onAct({ action: 'close' })}>Close without resolving</button>
-            </div>
-          )}
-        </Card>
-      )}
-
       <Card title="Details">
         <dl className="tk-facts">
           <dt>Requester</dt>
@@ -520,24 +438,13 @@ function DetailsCard({ t, tz, busy, onAct }: { t: TicketDetailDto; tz: string; b
           {t.closedAt && <li><span>Closed</span><span>{formatTicketTime(t.closedAt, tz)}</span></li>}
           <li><span>Last activity</span><span>{timeAgo(t.updatedAt, tz)}</span></li>
         </ul>
+        {t.can.manage && t.status !== 'CLOSED' && (
+          <div className="tk-minor">
+            <button type="button" className="tk-linkish ui-t-small" disabled={busy} onClick={() => setDupOpen(true)}>Duplicate of…</button>
+            <button type="button" className="tk-linkish ui-t-small" disabled={busy} onClick={() => onAct({ action: 'close' })}>Close without resolving</button>
+          </div>
+        )}
       </Card>
-
-      <Modal
-        open={resolving}
-        onClose={() => setResolving(false)}
-        title={`Resolve #${t.number}`}
-        description={`${first(t.requester.name)} is asked on Lark to confirm it works. It closes by itself after 3 days without an answer.`}
-        actions={
-          <>
-            <Button variant="secondary" onClick={() => setResolving(false)}>Cancel</Button>
-            <Button variant="primary" onClick={() => { setResolving(false); onAct({ action: 'resolve', note: note.trim() || undefined }); setNote(''); }}>Resolve</Button>
-          </>
-        }
-      >
-        <Field label="What was done (they see this)">
-          <Textarea rows={3} value={note} maxLength={5000} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Restored your Tuesday entry. Update Timo to beta.39." autoFocus />
-        </Field>
-      </Modal>
 
       <Modal
         open={dupOpen}
