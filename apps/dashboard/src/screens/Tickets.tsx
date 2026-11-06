@@ -104,6 +104,14 @@ export function timeAgo(iso: string, tz: string, now = Date.now()): string {
   return new Intl.DateTimeFormat('en-IN', { timeZone: tz, day: 'numeric', month: 'short' }).format(new Date(iso));
 }
 
+/** Status in the reader's words: the requester is "you", not "requester". */
+export function statusLabel(status: TicketStatus, asRequester: boolean): string {
+  if (!asRequester) return TICKET_STATUS_LABEL[status];
+  if (status === 'WAITING_ON_USER') return 'Waiting on you';
+  if (status === 'RESOLVED') return 'Check the fix';
+  return TICKET_STATUS_LABEL[status];
+}
+
 type View = 'open' | 'resolved' | 'closed' | 'all';
 
 function viewOf(t: TicketSummaryDto): Exclude<View, 'all'> {
@@ -165,22 +173,27 @@ export function TicketsScreen() {
   const tz = me.workspaceTimezone;
   const queue = scope === 'all';
 
+  // Search narrows every tab at once, so the counts say where the matches are.
+  const matched = useMemo(() => {
+    const needle = normalizeText(query);
+    return needle
+      ? tickets.filter((t) => matchesQuery([`#${t.number}`, String(t.number), t.subject, t.requester.name, t.assignee?.name, TICKET_CATEGORY_LABEL[t.category]], needle))
+      : tickets;
+  }, [tickets, query]);
   const tally = useMemo(() => {
-    const c: Record<View, number> = { open: 0, resolved: 0, closed: 0, all: tickets.length };
-    for (const t of tickets) c[viewOf(t)] += 1;
+    const c: Record<View, number> = { open: 0, resolved: 0, closed: 0, all: matched.length };
+    for (const t of matched) c[viewOf(t)] += 1;
     return c;
-  }, [tickets]);
+  }, [matched]);
   // Open first; if nothing is open, whatever has something in it.
   const current: View = view ?? (tally.open > 0 ? 'open' : tally.resolved > 0 ? 'resolved' : 'all');
 
   const groups = useMemo(() => {
-    const needle = normalizeText(query);
-    const matched = needle
-      ? tickets.filter((t) => matchesQuery([`#${t.number}`, t.subject, t.requester.name, t.assignee?.name, TICKET_CATEGORY_LABEL[t.category]], needle))
-      : tickets;
     const inView = current === 'all' ? matched : matched.filter((t) => viewOf(t) === current);
     return groupTickets(inView, current, queue);
-  }, [tickets, query, current, queue]);
+  }, [matched, current, queue]);
+  // When the open tab has no match but another tab does, point there.
+  const elsewhere = (['open', 'resolved', 'closed'] as const).find((v) => v !== current && tally[v] > 0);
 
   // The page's one colour zone: where the tickets stand, at a glance.
   const band = useMemo(() => {
@@ -260,8 +273,19 @@ export function TicketsScreen() {
         <HowItWorks onCreate={() => setCreating(true)} queue={queue} />
       ) : groups.length === 0 ? (
         <div className="tk-none">
-          <span className="ui-t-strong">{query ? `Nothing matches “${query}”` : 'Nothing here'}</span>
-          {query && <button type="button" className="tk-linkish ui-t-small" onClick={() => setQuery('')}>Clear search</button>}
+          <span className="ui-t-strong">
+            {query
+              ? `No ${current === 'all' ? '' : `${current} `}tickets match “${query}”`
+              : current === 'open' ? 'Nothing open. All caught up.' : `No ${current} tickets`}
+          </span>
+          <span className="tk-none__actions">
+            {elsewhere && (
+              <button type="button" className="tk-linkish ui-t-small" onClick={() => setView(elsewhere)}>
+                See {tally[elsewhere]} in {elsewhere[0]!.toUpperCase() + elsewhere.slice(1)}
+              </button>
+            )}
+            {query && <button type="button" className="tk-linkish ui-t-small" onClick={() => setQuery('')}>Clear search</button>}
+          </span>
         </div>
       ) : (
         <div className="tk-panel">
@@ -316,7 +340,7 @@ function TicketRow({ t, tz, queue, onOpen }: { t: TicketSummaryDto; tz: string; 
             {urgent && <span className={`tk-row__prio tk-row__prio--${t.priority.toLowerCase()}`}>{TICKET_PRIORITY_LABEL[t.priority]}</span>}
           </span>
           <span className="tk-row__sub">
-            <Tag status={TICKET_STATUS_TONE[t.status]}>{TICKET_STATUS_LABEL[t.status]}</Tag>
+            <Tag status={TICKET_STATUS_TONE[t.status]}>{statusLabel(t.status, !queue)}</Tag>
             {TICKET_CATEGORY_LABEL[t.category]}
             {t.source === 'LARK' ? ' · from Lark' : ''}
           </span>
@@ -406,6 +430,7 @@ function NewTicketModal({
   return (
     <Modal
       open
+      size="lg"
       onClose={onClose}
       title={forName ? `New ticket for ${forName}` : 'New ticket'}
       description={forName ? `${forName.split(' ')[0]} gets it on Lark and can reply there.` : 'An admin replies here and on Lark.'}

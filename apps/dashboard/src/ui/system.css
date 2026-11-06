@@ -1050,6 +1050,8 @@ textarea.ui-control { height: auto; min-height: 80px; padding: var(--ui-sp-3) va
   padding: var(--ui-sp-7);
   animation: ui-page-rise var(--ui-dur-base) var(--ui-ease) both;
 }
+.ui-modal--lg { width: min(640px, 100%); }
+.ui-modal:focus { outline: none; }
 .ui-modal__head {
   padding-bottom: var(--ui-sp-4);
   margin-bottom: var(--ui-sp-6);

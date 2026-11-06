@@ -19,6 +19,7 @@ import {
   TICKET_PRIORITY_LABEL,
   TICKET_STATUS_LABEL,
   type TicketActionRequest,
+  type TicketStatus,
   type TicketCategory,
   type TicketDetailDto,
   type TicketEventDto,
@@ -43,7 +44,7 @@ import {
   Tag,
   Textarea,
 } from '../ui';
-import { DropZone, TICKET_PRIORITY_TONE, TICKET_STATUS_TONE, formatTicketTime, timeAgo } from './Tickets';
+import { DropZone, StatusIcon, TICKET_PRIORITY_TONE, formatTicketTime, timeAgo } from './Tickets';
 
 const ERRORS: Record<string, string> = {
   invalid_transition: 'The ticket changed meanwhile. It has been refreshed.',
@@ -101,6 +102,7 @@ export function TicketDetailScreen() {
   }
 
   const isRequester = t.requester.id === me.id;
+  const nameOf = (p: TicketPersonDto) => (p.id === me.id ? 'you' : p.name);
   // Files on the opening message: those not attached to a later reply.
   const replyFiles = new Set(t.events.flatMap((e) => (e.kind === 'CREATED' ? [] : e.attachments.map((a) => a.id))));
 
@@ -109,62 +111,68 @@ export function TicketDetailScreen() {
       <BackLink />
 
       <header className="tk-head">
-        <div className="tk-head__text">
-          <span className="ui-t-eyebrow">#{t.number} · {TICKET_CATEGORY_LABEL[t.category]}{t.source === 'LARK' ? ' · via Lark' : ''}</span>
-          <h1 className="tk-head__title">{t.subject}</h1>
-          <div className="tk-head__meta">
-            <Tag status={TICKET_STATUS_TONE[t.status]}>{TICKET_STATUS_LABEL[t.status]}</Tag>
-            {t.priority !== 'NORMAL' && <Tag status={TICKET_PRIORITY_TONE[t.priority]}>{TICKET_PRIORITY_LABEL[t.priority]}</Tag>}
-            {t.closeReason && <span className="ui-t-small">{TICKET_CLOSE_REASON_LABEL[t.closeReason]}</span>}
-            {t.duplicateOf && (
-              <Link to="/tickets/$ticketId" params={{ ticketId: t.duplicateOf.id }} className="ui-t-small tk-linkish">
-                Duplicate of #{t.duplicateOf.number}
-              </Link>
-            )}
-          </div>
+        <span className="ui-t-eyebrow">#{t.number} · {TICKET_CATEGORY_LABEL[t.category]}{t.source === 'LARK' ? ' · via Lark' : ''}</span>
+        <h1 className="tk-head__title">{t.subject}</h1>
+        <div className="tk-head__meta">
+          <Avatar name={t.createdBy.name} src={t.createdBy.avatarUrl ?? undefined} size={24} />
+          <span>
+            {t.createdBy.id === t.requester.id ? (
+              <><strong>{isRequester ? 'You' : t.requester.name}</strong> opened this</>
+            ) : (
+              <><strong>{t.createdBy.id === me.id ? 'You' : t.createdBy.name}</strong> opened this for <strong>{nameOf(t.requester)}</strong></>
+            )}{' '}
+            <span title={formatTicketTime(t.createdAt, tz)}>{timeAgo(t.createdAt, tz)}</span>
+          </span>
+          {t.priority !== 'NORMAL' && <Tag status={TICKET_PRIORITY_TONE[t.priority]}>{TICKET_PRIORITY_LABEL[t.priority]} priority</Tag>}
+          {t.duplicateOf && (
+            <Link to="/tickets/$ticketId" params={{ ticketId: t.duplicateOf.id }} className="tk-linkish">
+              Duplicate of #{t.duplicateOf.number}
+            </Link>
+          )}
         </div>
-        <HeaderActions t={t} isRequester={isRequester} busy={act.isPending} onAct={(a) => act.mutate(a)} />
       </header>
 
+      <section className={`tk-state tk-state--${STATE_TONE[t.status]}`} aria-label="Where this ticket stands">
+        <span className="tk-state__icon"><StatusIcon status={t.status} size={20} /></span>
+        <div className="tk-state__text">
+          <span className="tk-state__title">{stateCopy(t, isRequester).title}</span>
+          <span className="tk-state__sub">{stateCopy(t, isRequester).sub}</span>
+        </div>
+        <HeaderActions key={t.id} t={t} isRequester={isRequester} busy={act.isPending} onAct={(a) => act.mutate(a)} />
+      </section>
+
       {act.isError && <Banner status="danger">{errorText(act.error)}</Banner>}
-      {isRequester && t.status === 'WAITING_ON_USER' && (
-        <Banner status="warn">{t.assignee ? first(t.assignee.name) : 'An admin'} asked you something. Reply below or on Lark.</Banner>
-      )}
-      {isRequester && t.status === 'RESOLVED' && (
-        <Banner status="success">Marked resolved. Is it fixed? Use the buttons above.</Banner>
-      )}
       {t.requesterUnreachable && t.can.manage && (
         <Banner status="warn">Timo cannot message {first(t.requester.name)} on Lark, so they only see replies here.</Banner>
       )}
 
       <div className="tk-layout">
         <div className="tk-main">
-          <section className="tk-thread" aria-label="Comments">
+          <section className="tk-feed" aria-label="Conversation">
             <Comment
               who={t.createdBy}
               support={t.createdBy.id !== t.requester.id}
               at={t.createdAt}
               tz={tz}
-              note={t.createdBy.id !== t.requester.id ? `opened this for ${t.requester.name}` : undefined}
+              note={t.createdBy.id !== t.requester.id ? `opened this for ${nameOf(t.requester)}` : 'opened the ticket'}
+              lead
             >
               <p className="tk-body">{t.description}</p>
               <TicketAttachmentList items={t.attachments.filter((a) => !replyFiles.has(a.id))} />
             </Comment>
-            {t.events.filter((e) => e.kind !== 'CREATED').map((e) => (
-              <EventItem key={e.id} e={e} tz={tz} requesterId={t.requester.id} />
+            {compactFeed(t.events).map(({ e, asked }) => (
+              <EventItem key={e.id} e={e} tz={tz} requesterId={t.requester.id} meId={me.id} asked={asked} />
             ))}
+            {t.can.comment ? (
+              <div className="tk-feed__item">
+                <span className="tk-feed__rail"><Avatar name={me.name} src={me.avatarUrl ?? undefined} size={32} /></span>
+                <Composer key={t.id} t={t} onSaved={onSaved} />
+              </div>
+            ) : null}
           </section>
-          {t.can.comment ? (
-            <Composer t={t} onSaved={onSaved} />
-          ) : t.status === 'CLOSED' && !t.can.manage ? (
-            <div className="tk-closed-note ui-t-small">
-              <Lock size={14} strokeWidth={1.8} aria-hidden />
-              This ticket is closed.{t.can.reopen ? ' Reopen it if the problem is back.' : ' Open a new ticket if you need more help.'}
-            </div>
-          ) : null}
         </div>
         <aside className="tk-side">
-          <DetailsCard t={t} tz={tz} busy={act.isPending} onAct={(a) => act.mutate(a)} />
+          <DetailsCard key={t.id} t={t} tz={tz} isRequester={isRequester} busy={act.isPending} onAct={(a) => act.mutate(a)} />
         </aside>
       </div>
     </Page>
@@ -189,7 +197,17 @@ function HeaderActions({ t, isRequester, busy, onAct }: { t: TicketDetailDto; is
     <div className="tk-head__actions">
       {t.can.confirm && (
         <>
-          <Button variant="secondary" disabled={busy} onClick={() => onAct({ action: 'reopen', note: 'Still a problem' })}>Still a problem</Button>
+          <Button
+            variant="secondary"
+            disabled={busy}
+            onClick={() => {
+              onAct({ action: 'reopen', note: 'Still a problem' });
+              // Next thing they want is to say what is still wrong.
+              document.getElementById('tk-reply')?.focus();
+            }}
+          >
+            Still a problem
+          </Button>
           <Button variant="primary" loading={busy} onClick={() => onAct({ action: 'confirm' })}>Yes, it is fixed</Button>
         </>
       )}
@@ -249,6 +267,8 @@ function Comment({
   note,
   internal,
   via,
+  lead,
+  chip,
   children,
 }: {
   who: TicketPersonDto | null;
@@ -258,26 +278,31 @@ function Comment({
   note?: string;
   internal?: boolean;
   via?: string;
+  lead?: boolean;
+  /** A small chip after the name: "Question", "Fix", … */
+  chip?: { label: string; tone: 'ask' | 'fix' | 'closed' };
   children?: React.ReactNode;
 }) {
+  const cls = ['tk-comment', internal && 'tk-comment--internal', support && !internal && 'tk-comment--support', lead && 'tk-comment--lead'].filter(Boolean).join(' ');
   return (
-    <article className={internal ? 'tk-comment tk-comment--internal' : 'tk-comment'}>
-      <Avatar name={who?.name ?? 'Timo'} src={who?.avatarUrl ?? undefined} size={32} />
-      <div className="tk-comment__body">
+    <article className="tk-feed__item">
+      <span className="tk-feed__rail"><Avatar name={who?.name ?? 'Timo'} src={who?.avatarUrl ?? undefined} size={32} /></span>
+      <div className={cls}>
         <div className="tk-comment__head">
-          <span className="ui-t-strong">{who?.name ?? 'Timo'}</span>
+          <span className="tk-comment__name">{who?.name ?? 'Timo'}</span>
           {support && !internal && <span className="tk-comment__role">Support</span>}
-          {internal && <span className="tk-comment__role tk-comment__role--note">Internal note</span>}
-          {note && <span className="ui-t-small tk-comment__note">{note}</span>}
+          {internal && <span className="tk-comment__role tk-comment__role--note"><Lock size={10} strokeWidth={2.4} aria-hidden /> Internal note</span>}
+          {chip && <span className={`tk-comment__chip tk-comment__chip--${chip.tone}`}>{chip.label}</span>}
+          {note && <span className="tk-comment__note">{note}</span>}
           <span className="tk-comment__time" title={formatTicketTime(at, tz)}>{timeAgo(at, tz)}{via ? ` · ${via}` : ''}</span>
         </div>
-        {children}
+        <div className="tk-comment__body">{children}</div>
       </div>
     </article>
   );
 }
 
-function EventItem({ e, tz, requesterId }: { e: TicketEventDto; tz: string; requesterId: string }) {
+function EventItem({ e, tz, requesterId, meId, asked }: { e: TicketEventDto; tz: string; requesterId: string; meId: string; asked?: boolean }) {
   if (e.kind === 'COMMENT' || e.kind === 'INTERNAL_NOTE') {
     return (
       <Comment
@@ -287,16 +312,37 @@ function EventItem({ e, tz, requesterId }: { e: TicketEventDto; tz: string; requ
         tz={tz}
         internal={e.kind === 'INTERNAL_NOTE'}
         via={e.via === 'LARK' ? 'on Lark' : undefined}
+        chip={asked ? { label: 'Question', tone: 'ask' } : undefined}
       >
         {e.body && e.body !== '(attachment)' && <p className="tk-body">{e.body}</p>}
         <TicketAttachmentList items={e.attachments} />
       </Comment>
     );
   }
+  // A resolution or closing note is something the requester reads: give it a card.
+  if (e.kind === 'STATUS' && e.body && (e.toStatus === 'RESOLVED' || e.toStatus === 'CLOSED')) {
+    return (
+      <Comment
+        who={e.actor}
+        support={e.actor?.id !== requesterId}
+        at={e.createdAt}
+        tz={tz}
+        via={e.via === 'LARK' ? 'on Lark' : undefined}
+        chip={e.toStatus === 'RESOLVED' ? { label: 'Resolved', tone: 'fix' } : { label: 'Closed', tone: 'closed' }}
+      >
+        <p className="tk-body">{e.body}</p>
+      </Comment>
+    );
+  }
   let line = '';
   if (e.kind === 'STATUS') {
     const reason = e.meta?.closeReason as keyof typeof TICKET_CLOSE_REASON_LABEL | undefined;
-    line = e.toStatus === 'CLOSED' && reason ? `closed it · ${TICKET_CLOSE_REASON_LABEL[reason]}` : `moved it to ${e.toStatus ? TICKET_STATUS_LABEL[e.toStatus] : '?'}`;
+    const reopened = (e.fromStatus === 'RESOLVED' || e.fromStatus === 'CLOSED') && e.toStatus !== 'CLOSED' && e.toStatus !== 'RESOLVED';
+    line = e.toStatus === 'CLOSED'
+      ? reason === 'WITHDRAWN' ? 'withdrew it'
+        : reason === 'USER_CONFIRMED' ? 'confirmed it is fixed'
+        : reason ? `closed it · ${TICKET_CLOSE_REASON_LABEL[reason]}` : 'closed it'
+      : reopened ? 'reopened it' : `moved it to ${e.toStatus ? TICKET_STATUS_LABEL[e.toStatus] : '?'}`;
   } else if (e.kind === 'ASSIGNED') {
     line = e.meta?.assigneeId ? (e.meta.assigneeId === e.actor?.id ? 'took it' : 'assigned it') : 'unassigned it';
   } else if (e.kind === 'PRIORITY') {
@@ -305,16 +351,22 @@ function EventItem({ e, tz, requesterId }: { e: TicketEventDto; tz: string; requ
       : e.meta?.categoryTo ? `moved it to ${TICKET_CATEGORY_LABEL[e.meta.categoryTo as TicketCategory]}` : 'changed it';
   }
   return (
-    <div className="tk-sys ui-t-small">
-      <span><strong>{e.actor?.name ?? 'Timo'}</strong> {line}{e.via === 'LARK' ? ' on Lark' : ''} · <span title={formatTicketTime(e.createdAt, tz)}>{timeAgo(e.createdAt, tz)}</span></span>
-      {e.body && <p className="tk-sys__note">{e.body}</p>}
+    <div className="tk-feed__item tk-feed__item--sys">
+      <span className="tk-feed__rail">
+        <span className="tk-feed__dot">{e.kind === 'STATUS' && e.toStatus ? <StatusIcon status={e.toStatus} size={14} /> : <UserCheck size={12} strokeWidth={2} aria-hidden />}</span>
+      </span>
+      <div className="tk-sys">
+        <span><strong>{e.actor ? (e.actor.id === meId ? 'You' : e.actor.name) : 'Timo'}</strong> {line}{e.via === 'LARK' ? ' on Lark' : ''} · <span title={formatTicketTime(e.createdAt, tz)}>{timeAgo(e.createdAt, tz)}</span></span>
+        {e.body && <p className="tk-sys__note">{e.body}</p>}
+      </div>
     </div>
   );
 }
 
 function Composer({ t, onSaved }: { t: TicketDetailDto; onSaved: (t: TicketDetailDto) => void }) {
   const [body, setBody] = useState('');
-  const [internal, setInternal] = useState(false);
+  // On a closed ticket an admin is usually leaving a note, not writing to the requester.
+  const [internal, setInternal] = useState(t.status === 'CLOSED' && t.can.manage);
   const uploads = useTicketUploads();
   const send = useMutation({
     mutationFn: (opts: { askUser: boolean }) =>
@@ -324,7 +376,7 @@ function Composer({ t, onSaved }: { t: TicketDetailDto; onSaved: (t: TicketDetai
       }),
     onSuccess: (next) => {
       setBody('');
-      setInternal(false);
+      setInternal(t.status === 'CLOSED' && t.can.manage);
       uploads.clear();
       onSaved(next);
     },
@@ -332,10 +384,14 @@ function Composer({ t, onSaved }: { t: TicketDetailDto; onSaved: (t: TicketDetai
   const ready = (body.trim().length > 0 || uploads.ids.length > 0) && !uploads.busy && !send.isPending;
   const canAsk = t.can.manage && !internal && t.status !== 'CLOSED';
   const placeholder = internal
-    ? 'Only admins see this note.'
+    ? t.status === 'CLOSED' ? 'Closed. Add a note only admins see, or reopen it to work on it again.' : 'Only admins see this note.'
     : t.can.manage
       ? `Write to ${first(t.requester.name)}. They get it on Lark.`
-      : t.status === 'RESOLVED' ? 'Still a problem? Say what is still wrong.' : 'Add details or answer the admin.';
+      : t.status === 'RESOLVED'
+        ? 'Still a problem? Say what is still wrong.'
+        : t.status === 'WAITING_ON_USER'
+          ? `Answer ${t.assignee ? first(t.assignee.name) : 'support'} here. They get it on Lark.`
+          : 'Add anything that helps: dates, times, screenshots.';
 
   return (
     <div className={internal ? 'tk-compose tk-compose--internal' : 'tk-compose'}>
@@ -389,45 +445,51 @@ function Composer({ t, onSaved }: { t: TicketDetailDto; onSaved: (t: TicketDetai
   );
 }
 
-function DetailsCard({ t, tz, busy, onAct }: { t: TicketDetailDto; tz: string; busy: boolean; onAct: (a: TicketActionRequest) => void }) {
+function DetailsCard({ t, tz, isRequester, busy, onAct }: { t: TicketDetailDto; tz: string; isRequester: boolean; busy: boolean; onAct: (a: TicketActionRequest) => void }) {
   const assigneesQ = useQuery({ ...ticketAssigneesQuery<{ assignees: TicketPersonDto[] }>(), enabled: t.can.manage });
   const [dupOf, setDupOf] = useState('');
   const [dupOpen, setDupOpen] = useState(false);
+  // A closed ticket's facts are history: shown, not edited (reopen to change them).
+  const editable = t.can.manage && t.status !== 'CLOSED';
 
   return (
     <div className="tk-side__stack">
-      <Card title="Details" className="tk-details">
+      <Card className="tk-details">
         <dl className="tk-facts">
-          <dt>Requester</dt>
-          <dd className="tk-person">
-            <Avatar name={t.requester.name} src={t.requester.avatarUrl ?? undefined} size={24} />
+          {!isRequester && <dt>Requester</dt>}
+          {!isRequester && <dd className="tk-person">
+            <Avatar name={t.requester.name} src={t.requester.avatarUrl ?? undefined} size={32} />
             <span className="tk-person__text">
               <span className="ui-t-strong">{t.requester.name}</span>
               <span className="ui-t-small">{t.requester.email}</span>
             </span>
-          </dd>
-          <dt>Assignee</dt>
+          </dd>}
+          <dt>{isRequester ? 'Handled by' : 'Assignee'}</dt>
           <dd>
-            {t.can.manage ? (
+            {editable ? (
               <Select aria-label="Assignee" value={t.assignee?.id ?? ''} disabled={busy} onChange={(e) => onAct({ action: 'assign', assigneeId: e.target.value || null })}>
                 <option value="">Unassigned</option>
                 {(assigneesQ.data?.assignees ?? (t.assignee ? [t.assignee] : [])).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
               </Select>
-            ) : (t.assignee?.name ?? 'Not picked up yet')}
+            ) : (t.assignee?.name ?? (t.status === 'CLOSED' ? 'Nobody' : 'Not picked up yet'))}
           </dd>
           {t.can.manage && (
             <>
               <dt>Priority</dt>
               <dd>
-                <Select aria-label="Priority" value={t.priority} disabled={busy} onChange={(e) => onAct({ action: 'priority', priority: e.target.value as TicketPriority })}>
-                  {TICKET_PRIORITIES.map((p) => <option key={p} value={p}>{TICKET_PRIORITY_LABEL[p]}</option>)}
-                </Select>
+                {editable ? (
+                  <Select aria-label="Priority" value={t.priority} disabled={busy} onChange={(e) => onAct({ action: 'priority', priority: e.target.value as TicketPriority })}>
+                    {TICKET_PRIORITIES.map((p) => <option key={p} value={p}>{TICKET_PRIORITY_LABEL[p]}</option>)}
+                  </Select>
+                ) : TICKET_PRIORITY_LABEL[t.priority]}
               </dd>
               <dt>Category</dt>
               <dd>
-                <Select aria-label="Category" value={t.category} disabled={busy} onChange={(e) => onAct({ action: 'category', category: e.target.value as TicketCategory })}>
-                  {TICKET_CATEGORIES.map((c) => <option key={c} value={c}>{TICKET_CATEGORY_LABEL[c]}</option>)}
-                </Select>
+                {editable ? (
+                  <Select aria-label="Category" value={t.category} disabled={busy} onChange={(e) => onAct({ action: 'category', category: e.target.value as TicketCategory })}>
+                    {TICKET_CATEGORIES.map((c) => <option key={c} value={c}>{TICKET_CATEGORY_LABEL[c]}</option>)}
+                  </Select>
+                ) : TICKET_CATEGORY_LABEL[t.category]}
               </dd>
             </>
           )}
@@ -470,4 +532,85 @@ function DetailsCard({ t, tz, busy, onAct }: { t: TicketDetailDto; tz: string; b
       </Modal>
     </div>
   );
+}
+
+const STATE_TONE: Record<TicketStatus, string> = {
+  OPEN: 'open',
+  IN_PROGRESS: 'progress',
+  WAITING_ON_USER: 'waiting',
+  RESOLVED: 'resolved',
+  CLOSED: 'closed',
+};
+
+/** The one sentence that says where the ticket stands and whose move it is. */
+function stateCopy(t: TicketDetailDto, isRequester: boolean): { title: string; sub: string } {
+  const req = first(t.requester.name);
+  const who = t.assignee ? first(t.assignee.name) : null;
+  const closed = t.closeReason ? TICKET_CLOSE_REASON_LABEL[t.closeReason] : 'No more replies expected.';
+  const reopenHint = t.can.reopen ? ' Reopen it if the problem is back.' : '';
+  const closedForYou: Record<string, string> = {
+    USER_CONFIRMED: 'You confirmed it is fixed.',
+    AUTO_CONFIRMED: 'Closed after 3 days without an answer to “is it fixed?”.',
+    WITHDRAWN: 'You withdrew it.',
+    DUPLICATE: `Closed as a duplicate${t.duplicateOf ? ` of #${t.duplicateOf.number}` : ''}. Follow that one.`,
+    NO_RESPONSE: 'Closed after 5 days without your answer.',
+    ADMIN: 'Support closed it.',
+  };
+  if (t.can.manage && !isRequester) {
+    switch (t.status) {
+      case 'OPEN':
+        return who
+          ? { title: 'Needs a reply', sub: `${req} is waiting. ${who} has it.` }
+          : { title: 'Needs a reply', sub: `${req} is waiting and nobody has picked it up yet.` };
+      case 'IN_PROGRESS':
+        return t.turn === 'ADMIN'
+          ? { title: 'Needs a reply', sub: `${req} wrote back. ${who ?? 'Nobody'} is on it.` }
+          : { title: 'In progress', sub: `${who ?? 'Support'} is working on it.` };
+      case 'WAITING_ON_USER':
+        return { title: `Waiting on ${req}`, sub: 'You asked a question. Timo reminds them on Lark.' };
+      case 'RESOLVED':
+        return { title: 'Resolved', sub: `${req} is asked to confirm. It closes by itself after 3 days.` };
+      default:
+        return { title: 'Closed', sub: closed };
+    }
+  }
+  switch (t.status) {
+    case 'OPEN':
+      return { title: 'With support', sub: 'An admin replies here and on Lark.' };
+    case 'IN_PROGRESS':
+      return { title: `${who ?? 'Support'} is on it`, sub: 'You get every reply on Lark too.' };
+    case 'WAITING_ON_USER':
+      return { title: `${who ?? 'Support'} asked you something`, sub: 'Reply below or on Lark.' };
+    case 'RESOLVED':
+      return { title: 'Is it fixed?', sub: 'Tell us if it works, or say what is still wrong.' };
+    default:
+      return { title: 'Closed', sub: (t.closeReason ? closedForYou[t.closeReason] ?? closed : closed) + reopenHint };
+  }
+}
+
+/**
+ * Drop status lines that only repeat the line next to them: "took it" already
+ * says it moved to In progress, and a question already says it now waits on
+ * the requester (that comment gets a "Question" chip instead).
+ */
+function compactFeed(events: TicketEventDto[]): Array<{ e: TicketEventDto; asked: boolean }> {
+  const list = events.filter((e) => e.kind !== 'CREATED');
+  const near = (a: TicketEventDto, b: TicketEventDto | undefined) =>
+    Boolean(b) && a.actor?.id === b!.actor?.id && Math.abs(new Date(a.createdAt).getTime() - new Date(b!.createdAt).getTime()) < 10_000;
+  const out: Array<{ e: TicketEventDto; asked: boolean }> = [];
+  list.forEach((e, i) => {
+    const prev = list[i - 1];
+    const next = list[i + 1];
+    if (e.kind === 'STATUS' && e.toStatus === 'IN_PROGRESS' && !e.body &&
+        ((prev?.kind === 'ASSIGNED' && near(e, prev)) || (next?.kind === 'ASSIGNED' && near(e, next)) ||
+         // A requester's reply moves it back by itself; the reply says enough.
+         (prev?.kind === 'COMMENT' && near(e, prev)))) return;
+    if (e.kind === 'STATUS' && e.toStatus === 'WAITING_ON_USER' && !e.body && prev?.kind === 'COMMENT' && near(e, prev)) {
+      const last = out[out.length - 1];
+      if (last && last.e.id === prev.id) last.asked = true;
+      return;
+    }
+    out.push({ e, asked: false });
+  });
+  return out;
 }
