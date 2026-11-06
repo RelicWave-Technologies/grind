@@ -170,6 +170,9 @@
 .tk-row__prio--high { color: var(--ui-warn-ink); }
 .tk-row__prio--urgent { color: var(--ui-danger-ink); }
 .tk-row__sub {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-sp-2);
   font-size: 12.5px;
   color: var(--ui-ink-3);
   overflow: hidden;
@@ -200,10 +203,10 @@
 }
 
 .tk-si { flex: none; }
-.tk-si--open { color: var(--ui-danger-ink); }
-.tk-si--progress { color: var(--ui-info-ink); }
-.tk-si--waiting { color: var(--ui-warn-ink); }
-.tk-si--resolved { color: var(--ui-success-ink); }
+.tk-si--open { color: var(--ui-danger-solid); }
+.tk-si--progress { color: var(--ui-info-solid); }
+.tk-si--waiting { color: var(--ui-warn-solid); }
+.tk-si--resolved { color: var(--ui-success-solid); }
 .tk-si--closed { color: var(--ui-ink-3); }
 
 .tk-none {
@@ -575,3 +578,10 @@
   font-size: 12.5px;
 }
 .tk-timeline li span:first-child { color: var(--ui-ink-3); }
+
+/* The list's one colour zone (kit StatRow pastels). */
+.tk-band { margin-bottom: var(--ui-sp-5); }
+
+/* Detail page's one colour zone: the facts card on cream. */
+.tk-details.ui-card { background: var(--ui-cream); border-color: transparent; }
+.tk-details .ui-select { background-color: var(--ui-surface); }

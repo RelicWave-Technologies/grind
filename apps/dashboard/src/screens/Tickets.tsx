@@ -50,6 +50,9 @@ import {
   Select,
   SearchInput,
   SkeletonTable,
+  Stat,
+  StatRow,
+  Tag,
   matchesQuery,
   normalizeText,
   Textarea,
@@ -121,7 +124,7 @@ export function StatusIcon({ status, size = 16 }: { status: TicketStatus; size?:
   }
 }
 
-type Group = { key: string; label: string; rows: TicketSummaryDto[] };
+type Group = { key: string; label: string; status: TicketStatus; rows: TicketSummaryDto[] };
 
 /** Sections that answer "what needs me": who owes the next move, then the rest. */
 function groupTickets(rows: TicketSummaryDto[], view: View, queue: boolean): Group[] {
@@ -130,19 +133,19 @@ function groupTickets(rows: TicketSummaryDto[], view: View, queue: boolean): Gro
   const groups: Group[] = view === 'open' || view === 'all'
     ? queue
       ? [
-          { key: 'reply', label: 'Needs a reply', rows: by((t) => viewOf(t) === 'open' && t.turn === 'ADMIN') },
-          { key: 'progress', label: 'In progress', rows: by((t) => t.status === 'IN_PROGRESS' && t.turn !== 'ADMIN') },
-          { key: 'waiting', label: 'Waiting on requester', rows: by((t) => t.status === 'WAITING_ON_USER') },
+          { key: 'reply', label: 'Needs a reply', status: 'OPEN', rows: by((t) => viewOf(t) === 'open' && t.turn === 'ADMIN') },
+          { key: 'progress', label: 'In progress', status: 'IN_PROGRESS', rows: by((t) => t.status === 'IN_PROGRESS' && t.turn !== 'ADMIN') },
+          { key: 'waiting', label: 'Waiting on requester', status: 'WAITING_ON_USER', rows: by((t) => t.status === 'WAITING_ON_USER') },
         ]
       : [
-          { key: 'you', label: 'Waiting on you', rows: by((t) => t.status === 'WAITING_ON_USER') },
-          { key: 'support', label: 'With support', rows: by((t) => t.status === 'OPEN' || t.status === 'IN_PROGRESS') },
+          { key: 'you', label: 'Waiting on you', status: 'WAITING_ON_USER', rows: by((t) => t.status === 'WAITING_ON_USER') },
+          { key: 'support', label: 'With support', status: 'IN_PROGRESS', rows: by((t) => t.status === 'OPEN' || t.status === 'IN_PROGRESS') },
         ]
     : [];
   if (view === 'resolved' || view === 'all') {
-    groups.push({ key: 'resolved', label: queue ? 'Resolved, awaiting confirmation' : 'Check the fix', rows: by((t) => t.status === 'RESOLVED') });
+    groups.push({ key: 'resolved', label: queue ? 'Resolved, awaiting confirmation' : 'Check the fix', status: 'RESOLVED', rows: by((t) => t.status === 'RESOLVED') });
   }
-  if (view === 'closed' || view === 'all') groups.push({ key: 'closed', label: 'Closed', rows: by((t) => t.status === 'CLOSED') });
+  if (view === 'closed' || view === 'all') groups.push({ key: 'closed', label: 'Closed', status: 'CLOSED', rows: by((t) => t.status === 'CLOSED') });
   return groups.map((g) => ({ ...g, rows: recent(g.rows) })).filter((g) => g.rows.length > 0);
 }
 
@@ -179,6 +182,24 @@ export function TicketsScreen() {
     return groupTickets(inView, current, queue);
   }, [tickets, query, current, queue]);
 
+  // The page's one colour zone: where the tickets stand, at a glance.
+  const band = useMemo(() => {
+    const n = (pred: (t: TicketSummaryDto) => boolean) => tickets.filter(pred).length;
+    return queue
+      ? [
+          { label: 'Needs a reply', value: n((t) => viewOf(t) === 'open' && t.turn === 'ADMIN'), hint: 'your move' },
+          { label: 'In progress', value: n((t) => t.status === 'IN_PROGRESS'), hint: 'being worked on' },
+          { label: 'Waiting on requester', value: n((t) => t.status === 'WAITING_ON_USER'), hint: 'their move' },
+          { label: 'Resolved', value: n((t) => t.status === 'RESOLVED'), hint: 'awaiting confirmation' },
+        ]
+      : [
+          { label: 'Waiting on you', value: n((t) => t.status === 'WAITING_ON_USER'), hint: 'support asked something' },
+          { label: 'With support', value: n((t) => t.status === 'OPEN' || t.status === 'IN_PROGRESS'), hint: 'we are on it' },
+          { label: 'Check the fix', value: n((t) => t.status === 'RESOLVED'), hint: 'confirm it works' },
+          { label: 'Closed', value: n((t) => t.status === 'CLOSED'), hint: 'all done' },
+        ];
+  }, [tickets, queue]);
+
   const tabs: Array<{ key: View; label: string }> = [
     { key: 'open', label: 'Open' },
     { key: 'resolved', label: 'Resolved' },
@@ -197,6 +218,12 @@ export function TicketsScreen() {
           New ticket
         </Button>
       </div>
+
+      {tickets.length > 0 && (
+        <StatRow className="tk-band">
+          {band.map((b) => <Stat key={b.label} label={b.label} value={b.value} hint={b.hint} />)}
+        </StatRow>
+      )}
 
       <div className="tk-bar">
         <div className="tk-seg" role="tablist" aria-label="Status">
@@ -241,6 +268,7 @@ export function TicketsScreen() {
           {groups.map((g) => (
             <section key={g.key} className="tk-group" aria-label={g.label}>
               <h2 className="tk-group__head">
+                <StatusIcon status={g.status} size={14} />
                 <span>{g.label}</span>
                 <span className="tk-group__count">{g.rows.length}</span>
               </h2>
@@ -288,7 +316,8 @@ function TicketRow({ t, tz, queue, onOpen }: { t: TicketSummaryDto; tz: string; 
             {urgent && <span className={`tk-row__prio tk-row__prio--${t.priority.toLowerCase()}`}>{TICKET_PRIORITY_LABEL[t.priority]}</span>}
           </span>
           <span className="tk-row__sub">
-            {TICKET_STATUS_LABEL[t.status]} · {TICKET_CATEGORY_LABEL[t.category]}
+            <Tag status={TICKET_STATUS_TONE[t.status]}>{TICKET_STATUS_LABEL[t.status]}</Tag>
+            {TICKET_CATEGORY_LABEL[t.category]}
             {t.source === 'LARK' ? ' · from Lark' : ''}
           </span>
         </span>

@@ -113,7 +113,7 @@ export function TicketDetailScreen() {
           <span className="ui-t-eyebrow">#{t.number} · {TICKET_CATEGORY_LABEL[t.category]}{t.source === 'LARK' ? ' · via Lark' : ''}</span>
           <h1 className="tk-head__title">{t.subject}</h1>
           <div className="tk-head__meta">
-            <Tag status={TICKET_STATUS_TONE[t.status]} dot>{TICKET_STATUS_LABEL[t.status]}</Tag>
+            <Tag status={TICKET_STATUS_TONE[t.status]}>{TICKET_STATUS_LABEL[t.status]}</Tag>
             {t.priority !== 'NORMAL' && <Tag status={TICKET_PRIORITY_TONE[t.priority]}>{TICKET_PRIORITY_LABEL[t.priority]}</Tag>}
             {t.closeReason && <span className="ui-t-small">{TICKET_CLOSE_REASON_LABEL[t.closeReason]}</span>}
             {t.duplicateOf && (
@@ -396,7 +396,7 @@ function DetailsCard({ t, tz, busy, onAct }: { t: TicketDetailDto; tz: string; b
 
   return (
     <div className="tk-side__stack">
-      <Card title="Details">
+      <Card title="Details" className="tk-details">
         <dl className="tk-facts">
           <dt>Requester</dt>
           <dd className="tk-person">
