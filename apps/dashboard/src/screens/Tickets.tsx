@@ -4,6 +4,10 @@ import { useNavigate, useRouteContext } from '@tanstack/react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   CalendarDays,
+  CircleCheck,
+  CircleDashed,
+  CircleDot,
+  CirclePause,
   Clock4,
   HelpCircle,
   ImagePlus,
@@ -29,28 +33,25 @@ import {
 import { api } from '../lib/api';
 import { hasCapability } from '../lib/auth';
 import { ticketQueryKeys, ticketListQuery, workspaceUsersQuery } from '../lib/queries';
-import { useTableFilter } from '../lib/tableFilter';
 import type { WorkspaceUser } from '../lib/types';
 import { attachmentUrl, useTicketUploads, type TicketUploads } from '../components/TicketAttachments';
 import {
+  Avatar,
   Banner,
   Button,
   Card,
   Combobox,
   EmptyState,
   Field,
-  FilterBar,
   IconButton,
   Input,
   Modal,
-  NoMatches,
   Page,
-  PageHeader,
-  Segmented,
   Select,
+  SearchInput,
   SkeletonTable,
-  Tabs,
-  Tag,
+  matchesQuery,
+  normalizeText,
   Textarea,
   type Status,
 } from '../ui';
@@ -108,7 +109,44 @@ function viewOf(t: TicketSummaryDto): Exclude<View, 'all'> {
   return 'open';
 }
 
-/** Support: your own tickets, and for admins the workspace queue. */
+/** The status glyph: the one place colour says where a ticket stands. */
+export function StatusIcon({ status, size = 16 }: { status: TicketStatus; size?: number }) {
+  const props = { size, strokeWidth: 2, 'aria-label': TICKET_STATUS_LABEL[status] } as const;
+  switch (status) {
+    case 'OPEN': return <CircleDot {...props} className="tk-si tk-si--open" />;
+    case 'IN_PROGRESS': return <CircleDashed {...props} className="tk-si tk-si--progress" />;
+    case 'WAITING_ON_USER': return <CirclePause {...props} className="tk-si tk-si--waiting" />;
+    case 'RESOLVED': return <CircleCheck {...props} className="tk-si tk-si--resolved" />;
+    default: return <CircleCheck {...props} className="tk-si tk-si--closed" />;
+  }
+}
+
+type Group = { key: string; label: string; rows: TicketSummaryDto[] };
+
+/** Sections that answer "what needs me": who owes the next move, then the rest. */
+function groupTickets(rows: TicketSummaryDto[], view: View, queue: boolean): Group[] {
+  const by = (pred: (t: TicketSummaryDto) => boolean) => rows.filter(pred);
+  const recent = (list: TicketSummaryDto[]) => [...list].sort((x, y) => y.updatedAt.localeCompare(x.updatedAt));
+  const groups: Group[] = view === 'open' || view === 'all'
+    ? queue
+      ? [
+          { key: 'reply', label: 'Needs a reply', rows: by((t) => viewOf(t) === 'open' && t.turn === 'ADMIN') },
+          { key: 'progress', label: 'In progress', rows: by((t) => t.status === 'IN_PROGRESS' && t.turn !== 'ADMIN') },
+          { key: 'waiting', label: 'Waiting on requester', rows: by((t) => t.status === 'WAITING_ON_USER') },
+        ]
+      : [
+          { key: 'you', label: 'Waiting on you', rows: by((t) => t.status === 'WAITING_ON_USER') },
+          { key: 'support', label: 'With support', rows: by((t) => t.status === 'OPEN' || t.status === 'IN_PROGRESS') },
+        ]
+    : [];
+  if (view === 'resolved' || view === 'all') {
+    groups.push({ key: 'resolved', label: queue ? 'Resolved, awaiting confirmation' : 'Check the fix', rows: by((t) => t.status === 'RESOLVED') });
+  }
+  if (view === 'closed' || view === 'all') groups.push({ key: 'closed', label: 'Closed', rows: by((t) => t.status === 'CLOSED') });
+  return groups.map((g) => ({ ...g, rows: recent(g.rows) })).filter((g) => g.rows.length > 0);
+}
+
+/** Support: your own tickets, and for admins the team's queue. */
 export function TicketsScreen() {
   const { me } = useRouteContext({ from: '/authed' });
   const navigate = useNavigate();
@@ -116,62 +154,76 @@ export function TicketsScreen() {
   const [scope, setScope] = useState<'mine' | 'all'>(() =>
     canManage && new URLSearchParams(window.location.search).get('scope') !== 'mine' ? 'all' : 'mine',
   );
-  const [view, setView] = useState<View>('open');
+  const [view, setView] = useState<View | null>(null);
+  const [query, setQuery] = useState('');
   const [creating, setCreating] = useState(false);
   const q = useQuery({ ...ticketListQuery<TicketListResponse>(scope), refetchInterval: 60_000 });
   const tickets = q.data?.tickets ?? [];
   const tz = me.workspaceTimezone;
   const queue = scope === 'all';
 
-  const filter = useTableFilter(tickets, {
-    text: (t) => [`#${t.number}`, t.subject, t.requester.name, t.requester.email, t.assignee?.name, t.lastReply?.snippet],
-    facets: {
-      category: { label: 'Categories', value: (t) => t.category, optionLabel: (c) => TICKET_CATEGORY_LABEL[c as TicketCategory] ?? c },
-      assignee: { label: 'Assignees', value: (t: TicketSummaryDto) => t.assignee?.name ?? 'Unassigned' },
-    },
-  });
-
   const tally = useMemo(() => {
     const c: Record<View, number> = { open: 0, resolved: 0, closed: 0, all: tickets.length };
     for (const t of tickets) c[viewOf(t)] += 1;
     return c;
   }, [tickets]);
+  // Open first; if nothing is open, whatever has something in it.
+  const current: View = view ?? (tally.open > 0 ? 'open' : tally.resolved > 0 ? 'resolved' : 'all');
 
-  // Whoever owes the next move first, then most recently touched.
-  const rows = useMemo(() => {
-    const shown = view === 'all' ? filter.rows : filter.rows.filter((t) => viewOf(t) === view);
-    const owes = (t: TicketSummaryDto) => (queue ? t.turn === 'ADMIN' : t.turn === 'REQUESTER') ? 0 : 1;
-    return [...shown].sort((x, y) => owes(x) - owes(y) || y.updatedAt.localeCompare(x.updatedAt));
-  }, [filter.rows, view, queue]);
+  const groups = useMemo(() => {
+    const needle = normalizeText(query);
+    const matched = needle
+      ? tickets.filter((t) => matchesQuery([`#${t.number}`, t.subject, t.requester.name, t.assignee?.name, TICKET_CATEGORY_LABEL[t.category]], needle))
+      : tickets;
+    const inView = current === 'all' ? matched : matched.filter((t) => viewOf(t) === current);
+    return groupTickets(inView, current, queue);
+  }, [tickets, query, current, queue]);
+
+  const tabs: Array<{ key: View; label: string }> = [
+    { key: 'open', label: 'Open' },
+    { key: 'resolved', label: 'Resolved' },
+    { key: 'closed', label: 'Closed' },
+    { key: 'all', label: 'All' },
+  ];
 
   return (
     <Page className="tk-page">
-      <PageHeader
-        eyebrow="Support"
-        title="Tickets"
-        subtitle={
-          canManage
-            ? 'Problems and questions from the team. Each one also reaches you on Lark, pinned until it is solved.'
-            : 'Tell us what is wrong and an admin replies here and on Lark.'
-        }
-        actions={
-          <Button variant="primary" icon={<Plus size={14} strokeWidth={2} />} onClick={() => setCreating(true)}>
-            New ticket
-          </Button>
-        }
-      />
+      <div className="tk-top">
+        <div>
+          <span className="ui-t-eyebrow">Support</span>
+          <h1 className="tk-top__title">{queue ? 'Tickets' : 'My tickets'}</h1>
+        </div>
+        <Button variant="primary" icon={<Plus size={14} strokeWidth={2} />} onClick={() => setCreating(true)}>
+          New ticket
+        </Button>
+      </div>
 
-      {canManage && (
-        <Segmented
-          aria-label="Which tickets"
-          value={scope}
-          onChange={setScope}
-          items={[
-            { value: 'all', label: 'Team queue' },
-            { value: 'mine', label: 'Opened by me' },
-          ]}
-        />
-      )}
+      <div className="tk-bar">
+        <div className="tk-seg" role="tablist" aria-label="Status">
+          {tabs.map((tab) => (
+            <button
+              key={tab.key}
+              type="button"
+              role="tab"
+              aria-selected={current === tab.key}
+              className={current === tab.key ? 'tk-seg__btn tk-seg__btn--on' : 'tk-seg__btn'}
+              onClick={() => setView(tab.key)}
+            >
+              {tab.label}
+              <span className="tk-seg__count">{tally[tab.key]}</span>
+            </button>
+          ))}
+        </div>
+        <div className="tk-bar__right">
+          {canManage && (
+            <Select className="ui-select--pill" aria-label="Whose tickets" value={scope} onChange={(e) => { setScope(e.target.value as 'mine' | 'all'); setView(null); }}>
+              <option value="all">Team queue</option>
+              <option value="mine">Opened by me</option>
+            </Select>
+          )}
+          <SearchInput value={query} onChange={setQuery} placeholder="Search" aria-label="Search tickets" />
+        </div>
+      </div>
 
       {q.isError && <Banner status="danger">Couldn’t load tickets: {(q.error as Error).message}</Banner>}
 
@@ -179,36 +231,33 @@ export function TicketsScreen() {
         <Card variant="flush"><SkeletonTable rows={6} /></Card>
       ) : tickets.length === 0 ? (
         <HowItWorks onCreate={() => setCreating(true)} queue={queue} />
+      ) : groups.length === 0 ? (
+        <div className="tk-none">
+          <span className="ui-t-strong">{query ? `Nothing matches “${query}”` : 'Nothing here'}</span>
+          {query && <button type="button" className="tk-linkish ui-t-small" onClick={() => setQuery('')}>Clear search</button>}
+        </div>
       ) : (
-        <Card variant="flush">
-          <div className="tk-listhead">
-            <Tabs
-              aria-label="Status"
-              value={view}
-              onChange={setView}
-              items={(['open', 'resolved', 'closed', 'all'] as const).map((v) => ({
-                value: v,
-                label: `${v === 'open' ? 'Open' : v === 'resolved' ? 'Resolved' : v === 'closed' ? 'Closed' : 'All'} ${tally[v]}`,
-              }))}
-            />
-          </div>
-          <FilterBar filter={filter} placeholder="Search tickets" noun={{ one: 'ticket', other: 'tickets' }} />
-          {rows.length === 0 ? (
-            <NoMatches onClear={() => { filter.clear(); setView('all'); }} />
-          ) : (
-            <ul className="tk-list" aria-label="Tickets">
-              {rows.map((t) => (
-                <TicketRow
-                  key={t.id}
-                  t={t}
-                  tz={tz}
-                  queue={queue}
-                  onOpen={() => void navigate({ to: '/tickets/$ticketId', params: { ticketId: t.id } })}
-                />
-              ))}
-            </ul>
-          )}
-        </Card>
+        <div className="tk-panel">
+          {groups.map((g) => (
+            <section key={g.key} className="tk-group" aria-label={g.label}>
+              <h2 className="tk-group__head">
+                <span>{g.label}</span>
+                <span className="tk-group__count">{g.rows.length}</span>
+              </h2>
+              <ul className="tk-list">
+                {g.rows.map((t) => (
+                  <TicketRow
+                    key={t.id}
+                    t={t}
+                    tz={tz}
+                    queue={queue}
+                    onOpen={() => void navigate({ to: '/tickets/$ticketId', params: { ticketId: t.id } })}
+                  />
+                ))}
+              </ul>
+            </section>
+          ))}
+        </div>
       )}
 
       {creating && (
@@ -227,21 +276,32 @@ export function TicketsScreen() {
 }
 
 function TicketRow({ t, tz, queue, onOpen }: { t: TicketSummaryDto; tz: string; queue: boolean; onOpen: () => void }) {
-  const yourMove = queue ? t.turn === 'ADMIN' : t.turn === 'REQUESTER';
+  const urgent = t.priority === 'HIGH' || t.priority === 'URGENT';
   return (
     <li>
-      <button type="button" className={yourMove ? 'tk-row tk-row--due' : 'tk-row'} onClick={onOpen}>
+      <button type="button" className={queue ? 'tk-row tk-row--queue' : 'tk-row'} onClick={onOpen}>
+        <StatusIcon status={t.status} />
         <span className="tk-row__main">
-          <span className="tk-row__subject"><span className="tk-row__num">#{t.number}</span> {t.subject}</span>
-          <span className="tk-row__meta ui-t-small">
-            {[queue ? t.requester.name : null, TICKET_CATEGORY_LABEL[t.category], t.assignee && queue ? `with ${t.assignee.name.split(' ')[0]}` : null]
-              .filter(Boolean).join(' · ')}
+          <span className="tk-row__line">
+            <span className="tk-row__num">{t.number}</span>
+            <span className="tk-row__subject">{t.subject}</span>
+            {urgent && <span className={`tk-row__prio tk-row__prio--${t.priority.toLowerCase()}`}>{TICKET_PRIORITY_LABEL[t.priority]}</span>}
+          </span>
+          <span className="tk-row__sub">
+            {TICKET_STATUS_LABEL[t.status]} · {TICKET_CATEGORY_LABEL[t.category]}
+            {t.source === 'LARK' ? ' · from Lark' : ''}
           </span>
         </span>
-        <span className="tk-row__side">
-          <Tag status={TICKET_STATUS_TONE[t.status]} dot>{TICKET_STATUS_LABEL[t.status]}</Tag>
-          <span className="tk-row__time ui-t-small" title={formatTicketTime(t.updatedAt, tz)}>{timeAgo(t.updatedAt, tz)}</span>
+        {queue && (
+          <span className="tk-row__who">
+            <Avatar name={t.requester.name} src={t.requester.avatarUrl ?? undefined} size={24} />
+            <span>{t.requester.name}</span>
+          </span>
+        )}
+        <span className="tk-row__assignee" title={t.assignee ? `With ${t.assignee.name}` : 'Unassigned'}>
+          {t.assignee ? <Avatar name={t.assignee.name} src={t.assignee.avatarUrl ?? undefined} size={24} /> : <span className="tk-row__nobody" />}
         </span>
+        <span className="tk-row__time" title={formatTicketTime(t.updatedAt, tz)}>{timeAgo(t.updatedAt, tz)}</span>
       </button>
     </li>
   );
