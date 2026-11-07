@@ -12,7 +12,7 @@ import { getLarkMessenger } from '../lark';
 import { logger } from '../logger';
 import { enqueueSupportDm, supportAgentAvailable, type SupportHooks } from '../support/agent';
 import { getTicketAi, intakeHash, ruleIntake, todayLabel, type OpenTicketRef, type TicketIntake } from './ai';
-import { buildDraftCard } from './cards';
+import { buildDraftCard, buildDraftDoneCard } from './cards';
 import { downloadLarkMessageResource } from './larkApi';
 import { addTicketComment, applyTicketAction, loadTicketActorByOpenId, TicketError, type TicketActor } from './service';
 
@@ -239,12 +239,21 @@ export async function draftCardFor(draftId: string, hint?: string): Promise<Reco
 }
 
 /** Send (or refresh) the confirm card for a draft. */
-async function showDraft(draftId: string, openId: string, hint?: string): Promise<void> {
+/**
+ * Show the draft's card. Normally the card already in the chat is updated in
+ * place; with `fresh`, a new card goes to the bottom of the chat (where the
+ * support agent just said it is) and the old one points down to it.
+ */
+async function showDraft(draftId: string, openId: string, hint?: string, opts: { fresh?: boolean } = {}): Promise<void> {
   const card = await draftCardFor(draftId, hint);
   if (!card) return;
   const draft = await prisma.ticketDraft.findUniqueOrThrow({ where: { id: draftId }, select: { offerMessageId: true } });
   const messenger = getLarkMessenger();
-  if (draft.offerMessageId && messenger) {
+  if (opts.fresh && draft.offerMessageId && messenger) {
+    await messenger
+      .updateCard(draft.offerMessageId, buildDraftDoneCard({ title: 'Updated ticket card below', body: 'This card was replaced. Use the newest one further down this chat.' }))
+      .catch((err) => logger.warn({ err: String(err), draftId }, 'could not retire the old draft card'));
+  } else if (draft.offerMessageId && messenger) {
     try {
       await messenger.updateCard(draft.offerMessageId, card);
       return;
@@ -417,7 +426,7 @@ export async function offerAgentDraft(
       data: { draftId: draft.id },
     });
   }
-  await showDraft(draft.id, openId, AGENT_DRAFT_HINT);
+  await showDraft(draft.id, openId, AGENT_DRAFT_HINT, { fresh: true });
 }
 
 /** The agent could not answer: the plain intake takes over, with what was already downloaded. */

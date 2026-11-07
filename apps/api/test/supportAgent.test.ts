@@ -308,6 +308,30 @@ describe('support agent: a conversation on Lark', () => {
     expect(ticket.attachments).toHaveLength(1);
   });
 
+  it('sends the card again at the bottom when asked, and retires the old one', async () => {
+    const { mira } = await seed();
+    const offer = (id: string) => () => ({
+      content: [toolUse(id, 'offer_ticket', { subject: 'App not reporting', category: 'TIMO_APP', details: 'App silent since 5 Nov.', related_ticket_number: null })],
+      stop: 'tool_use' as const,
+    });
+    const done = () => ({ content: [text('Card neeche bhej diya hai.')], stop: 'end_turn' as const });
+    claude.steps = [offer('tu_1'), done];
+    await handleTicketDm(dm('ou_mira', 'om_a', 'i want to raise a ticket'), { fallback: true });
+    await supportIdleForTests();
+    claude.steps = [offer('tu_2'), done];
+    await handleTicketDm(dm('ou_mira', 'om_b', 'firse bhejna'), { fallback: true });
+    await supportIdleForTests();
+
+    // Two cards were sent; the first now points down to the second.
+    expect(fake.sends.map((s) => s.messageId)).toEqual(['om_1', 'om_2']);
+    expect(fake.updates).toHaveLength(1);
+    expect(fake.updates[0]!.messageId).toBe('om_1');
+    expect(JSON.stringify(fake.updates[0]!.card)).toContain('Updated ticket card below');
+    const draft = await prisma.ticketDraft.findFirstOrThrow({ where: { userId: mira.id } });
+    expect(draft.offerMessageId).toBe('om_2');
+    expect(await prisma.ticketDraft.count()).toBe(1);
+  });
+
   it('falls back to the plain intake when Claude is down', async () => {
     const { mira } = await seed();
     claude.steps = [() => new Error('overloaded')];
