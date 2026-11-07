@@ -295,6 +295,17 @@ describe('support agent: a conversation on Lark', () => {
     expect(draft.attachments).toHaveLength(1);
     expect(await prisma.ticket.count()).toBe(0);
     expect(JSON.stringify(fake.sends[0]!.card)).toContain('Open ticket');
+
+    // Pressing Open ticket on that card files it, with the screenshot.
+    const { handleTicketCardAction } = await import('../src/tickets/larkActions');
+    const reply = await handleTicketCardAction(
+      { operator: { open_id: 'ou_mira' }, action: { form_value: { subject: draft.aiSubject, category: 'TIME_ATTENDANCE' } } },
+      { kind: 'ticket', action: 'open_draft', draftId: draft.id },
+    );
+    expect(reply.toast.type).toBe('success');
+    const ticket = await prisma.ticket.findFirstOrThrow({ include: { attachments: true } });
+    expect(ticket.subject).toBe(`Tracked time missing on ${day}`);
+    expect(ticket.attachments).toHaveLength(1);
   });
 
   it('falls back to the plain intake when Claude is down', async () => {

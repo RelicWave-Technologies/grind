@@ -189,9 +189,15 @@ export function buildAdminTicketCard(t: AdminTicketCardInput): Record<string, un
   return card(`#${t.number} · ${t.subject}`, STATUS_TEMPLATE[t.status], elements);
 }
 
+/**
+ * A submit button inside a form. Lark refuses the click (client error 200530)
+ * when any interactive element in a form has no `name`, so each one is named
+ * after its action, which is unique within a card.
+ */
 function formButton(text: string, type: string, v: Record<string, unknown>): Record<string, unknown> {
   return {
     tag: 'button',
+    name: `btn_${String(v.action)}`,
     text: { tag: 'plain_text', content: text },
     type,
     form_action_type: 'submit',
