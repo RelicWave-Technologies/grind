@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import type { DayStatus } from '@grind/types';
+import { minimumsOn, type DayStatus } from '@grind/types';
+import { nextMinimumsHistory } from './minimums';
 import {
   isLateArrival,
   judgeDay,
+  judgeSandwich,
   ruleCode,
   withLateRule,
   type AttendanceDayFacts,
   type AttendanceRulePolicy,
+  type SandwichSideDay,
 } from './rules';
 
 const POLICY: AttendanceRulePolicy = {
@@ -54,16 +57,16 @@ describe('judgeDay — full working day', () => {
   });
 
   it('3h30 up to 7h is a half day', () => {
-    expect(judgeDay(POLICY, facts({ trackedMinutes: 419 }))).toEqual({ tag: 'SHORT_DAY', penaltyDays: 0.5 });
-    expect(judgeDay(POLICY, facts({ trackedMinutes: 210 }))).toEqual({ tag: 'SHORT_DAY', penaltyDays: 0.5 });
+    expect(judgeDay(POLICY, facts({ trackedMinutes: 419 }))).toEqual({ tag: 'SHORT_DAY', penaltyDays: 0.5, minMinutes: 420 });
+    expect(judgeDay(POLICY, facts({ trackedMinutes: 210 }))).toEqual({ tag: 'SHORT_DAY', penaltyDays: 0.5, minMinutes: 420 });
   });
 
   it('under 3h30 is a full leave', () => {
-    expect(judgeDay(POLICY, facts({ trackedMinutes: 209 }))).toEqual({ tag: 'UNDER_MIN', penaltyDays: 1 });
+    expect(judgeDay(POLICY, facts({ trackedMinutes: 209 }))).toEqual({ tag: 'UNDER_MIN', penaltyDays: 1, minMinutes: 210 });
   });
 
   it('at the office but nothing tracked is under the minimum, not an absence', () => {
-    expect(judgeDay(POLICY, facts({ trackedMinutes: 0, punched: true }))).toEqual({ tag: 'UNDER_MIN', penaltyDays: 1 });
+    expect(judgeDay(POLICY, facts({ trackedMinutes: 0, punched: true }))).toEqual({ tag: 'UNDER_MIN', penaltyDays: 1, minMinutes: 210 });
   });
 });
 
@@ -76,10 +79,12 @@ describe('judgeDay — half-day leave', () => {
     expect(judgeDay(POLICY, facts({ status: HALF_PAID, trackedMinutes: 120 }))).toEqual({
       tag: 'HALF_DAY_SHORT',
       penaltyDays: 0.5,
+      minMinutes: 210,
     });
     expect(judgeDay(POLICY, facts({ status: HALF_PAID, trackedMinutes: 0, punched: false }))).toEqual({
       tag: 'HALF_DAY_SHORT',
       penaltyDays: 0.5,
+      minMinutes: 210,
     });
   });
 
@@ -87,6 +92,7 @@ describe('judgeDay — half-day leave', () => {
     expect(judgeDay(POLICY, facts({ status: status('UNPAID_LEAVE', 0.5, 'SECOND_HALF'), trackedMinutes: 60 }))).toEqual({
       tag: 'HALF_DAY_SHORT',
       penaltyDays: 0.5,
+      minMinutes: 210,
     });
   });
 });
@@ -127,6 +133,7 @@ describe('judgeDay — work from home', () => {
     expect(judgeDay(POLICY, facts({ trackedMinutes: 300, punched: false, wfhApproved: true }))).toEqual({
       tag: 'SHORT_DAY',
       penaltyDays: 0.5,
+      minMinutes: 420,
     });
   });
 
@@ -145,6 +152,7 @@ describe('judgeDay — per-person mode', () => {
     expect(judgeDay(POLICY, facts({ trackedMinutes: 300, punched: false, mode: 'REMOTE' }))).toEqual({
       tag: 'SHORT_DAY',
       penaltyDays: 0.5,
+      minMinutes: 420,
     });
     expect(judgeDay(POLICY, facts({ trackedMinutes: 0, punched: false, mode: 'REMOTE' }))).toEqual({
       tag: 'NO_APPLICATION',
@@ -259,5 +267,146 @@ describe('late arrivals', () => {
   it('takes one cut a day: another rule\'s verdict stands alone', () => {
     const short = { tag: 'SHORT_DAY' as const, penaltyDays: 0.5 };
     expect(withLateRule(short, 7, 4)).toBe(short);
+  });
+});
+
+
+describe('judgeDay — the 8h / 4h minimums', () => {
+  const EIGHT: AttendanceRulePolicy = { ...POLICY, fullDayMinMinutes: 480, halfDayMinMinutes: 240 };
+
+  it('exactly 8h is a full day; a minute less is a half day', () => {
+    expect(judgeDay(EIGHT, facts({ trackedMinutes: 480 }))).toBeNull();
+    expect(judgeDay(EIGHT, facts({ trackedMinutes: 479 }))).toEqual({ tag: 'SHORT_DAY', penaltyDays: 0.5, minMinutes: 480 });
+  });
+
+  it('exactly 4h is a half day; a minute less is a full leave', () => {
+    expect(judgeDay(EIGHT, facts({ trackedMinutes: 240 }))).toEqual({ tag: 'SHORT_DAY', penaltyDays: 0.5, minMinutes: 480 });
+    expect(judgeDay(EIGHT, facts({ trackedMinutes: 239 }))).toEqual({ tag: 'UNDER_MIN', penaltyDays: 1, minMinutes: 240 });
+  });
+
+  it('7h30 was a full day under 7h and is a half day under 8h', () => {
+    expect(judgeDay(POLICY, facts({ trackedMinutes: 450 }))).toBeNull();
+    expect(judgeDay(EIGHT, facts({ trackedMinutes: 450 }))?.tag).toBe('SHORT_DAY');
+  });
+});
+
+describe('minimums history — a change never reaches back', () => {
+  const OLD = { fullDayMinMinutes: 420, halfDayMinMinutes: 210 };
+  const NEW = { fullDayMinMinutes: 480, halfDayMinMinutes: 240 };
+
+  it('keeps the old pair for every date before the change', () => {
+    const next = nextMinimumsHistory({ current: OLD, history: [], next: NEW, from: '2026-11-21' });
+    expect(next).toEqual({ changed: true, eras: [{ until: '2026-11-21', ...OLD }] });
+    const eras = 'eras' in next ? next.eras : [];
+    expect(minimumsOn('2026-11-20', NEW, eras)).toEqual(OLD);
+    expect(minimumsOn('2026-09-01', NEW, eras)).toEqual(OLD);
+    expect(minimumsOn('2026-11-21', NEW, eras)).toEqual(NEW);
+    expect(minimumsOn('2027-01-01', NEW, eras)).toEqual(NEW);
+  });
+
+  it('saving the same numbers writes nothing', () => {
+    expect(nextMinimumsHistory({ current: OLD, history: [], next: OLD, from: '2026-11-21' })).toEqual({ changed: false, eras: [] });
+  });
+
+  it('correcting the numbers on the same start date keeps one era', () => {
+    const eras = [{ until: '2026-11-21', ...OLD }];
+    expect(nextMinimumsHistory({ current: NEW, history: eras, next: { fullDayMinMinutes: 470, halfDayMinMinutes: 240 }, from: '2026-11-21' }))
+      .toEqual({ changed: false, eras });
+  });
+
+  it('a second change stacks, and cannot start before the first', () => {
+    const eras = [{ until: '2026-11-21', ...OLD }];
+    const later = nextMinimumsHistory({ current: NEW, history: eras, next: { fullDayMinMinutes: 510, halfDayMinMinutes: 255 }, from: '2027-01-01' });
+    expect(later).toEqual({ changed: true, eras: [...eras, { until: '2027-01-01', ...NEW }] });
+    expect(minimumsOn('2026-12-15', { fullDayMinMinutes: 510, halfDayMinMinutes: 255 }, 'eras' in later ? later.eras : [])).toEqual(NEW);
+    expect(nextMinimumsHistory({ current: NEW, history: eras, next: OLD, from: '2026-11-01' }))
+      .toEqual({ error: 'minimums_from_before_last_change' });
+  });
+});
+
+describe('sandwich rule', () => {
+  const OFF = status('WEEKLY_OFF', 0);
+  const HOLIDAY = status('HOLIDAY', 0);
+  const FULL_PAID = status('PAID_LEAVE', 0);
+  const FULL_UNPAID = status('UNPAID_LEAVE', 0);
+  const LWA = { tag: 'NO_APPLICATION' as const, penaltyDays: 1 };
+  const side = (date: string, over: Partial<SandwichSideDay> = {}) => ({
+    date,
+    status: WORKING,
+    verdict: null,
+    override: null,
+    ...over,
+  });
+  // Sat 21 – Sun 22 – Mon 23 November 2026, judged on the 25th.
+  const sandwich = (over: Partial<Parameters<typeof judgeSandwich>[0]> = {}) =>
+    judgeSandwich({
+      date: '2026-11-22',
+      today: '2026-11-25',
+      rulesFrom: '2026-09-01',
+      sandwichFrom: '2026-11-21',
+      status: OFF,
+      saturday: side('2026-11-21', { verdict: LWA }),
+      monday: side('2026-11-23', { verdict: LWA }),
+      ...over,
+    });
+
+  it('charges the Sunday when both Saturday and Monday were absent', () => {
+    expect(sandwich()).toEqual({ tag: 'SANDWICH', penaltyDays: 1 });
+  });
+
+  it('counts approved full-day leave, paid or unpaid, as away', () => {
+    expect(sandwich({ saturday: side('2026-11-21', { status: FULL_PAID }), monday: side('2026-11-23', { status: FULL_UNPAID }) }))
+      .toEqual({ tag: 'SANDWICH', penaltyDays: 1 });
+    // Half-day leave whose working half fell short is a whole day away too.
+    expect(sandwich({ monday: side('2026-11-23', { status: HALF_PAID, verdict: { tag: 'HALF_DAY_SHORT', penaltyDays: 0.5 } }) }))
+      .toEqual({ tag: 'SANDWICH', penaltyDays: 1 });
+  });
+
+  it('counts a day under the half-day minimum as away', () => {
+    expect(sandwich({ monday: side('2026-11-23', { verdict: { tag: 'UNDER_MIN', penaltyDays: 1 } }) }))
+      .toEqual({ tag: 'SANDWICH', penaltyDays: 1 });
+  });
+
+  it('does not charge when either side was worked, even as a half day', () => {
+    expect(sandwich({ monday: side('2026-11-23') })).toBeNull();
+    expect(sandwich({ saturday: side('2026-11-21', { verdict: { tag: 'SHORT_DAY', penaltyDays: 0.5 } }) })).toBeNull();
+    expect(sandwich({ saturday: side('2026-11-21', { status: HALF_PAID }) })).toBeNull();
+  });
+
+  it('does not charge when the Saturday or Monday is a holiday or a week off', () => {
+    expect(sandwich({ saturday: side('2026-11-21', { status: HOLIDAY }) })).toBeNull();
+    expect(sandwich({ saturday: side('2026-11-21', { status: OFF }) })).toBeNull();
+    expect(sandwich({ monday: side('2026-11-23', { status: HOLIDAY }) })).toBeNull();
+  });
+
+  it('leaves a Sunday holiday alone', () => {
+    expect(sandwich({ status: HOLIDAY })).toBeNull();
+  });
+
+  it('follows a manager correction on either side', () => {
+    expect(sandwich({ monday: side('2026-11-23', { verdict: LWA, override: 'P' }) })).toBeNull();
+    expect(sandwich({ monday: side('2026-11-23', { override: 'FULL_LEAVE' }) })).toEqual({ tag: 'SANDWICH', penaltyDays: 1 });
+    expect(sandwich({ monday: side('2026-11-23', { override: 'HALF_LEAVE' }) })).toBeNull();
+  });
+
+  it('waits until the Monday is over', () => {
+    expect(sandwich({ today: '2026-11-23' })).toBeNull();
+    expect(sandwich({ today: '2026-11-24' })).toEqual({ tag: 'SANDWICH', penaltyDays: 1 });
+  });
+
+  it('is off without a start date, and never reaches a weekend that starts before it', () => {
+    expect(sandwich({ sandwichFrom: null })).toBeNull();
+    expect(sandwich({ sandwichFrom: '2026-11-22' })).toBeNull();
+    expect(sandwich({ rulesFrom: null })).toBeNull();
+  });
+
+  it('never charges an exempt person', () => {
+    expect(sandwich({ mode: 'EXEMPT' })).toBeNull();
+    expect(sandwich({ mode: 'REMOTE' })).toEqual({ tag: 'SANDWICH', penaltyDays: 1 });
+  });
+
+  it('costs a full day of leave on the sheet: paid while the balance lasts', () => {
+    expect(ruleCode(OFF, { tag: 'SANDWICH', penaltyDays: 1 }, undefined)).toBe('PL');
+    expect(ruleCode(OFF, { tag: 'SANDWICH', penaltyDays: 1 }, 0)).toBe('LWP');
   });
 });

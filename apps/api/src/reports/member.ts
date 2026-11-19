@@ -188,7 +188,13 @@ export function buildMemberReportDays(input: {
    */
   overrideFor?: (userId: string, date: string) => DayOverride | null;
   /** The attendance rules' verdict for a day, when the rules are on. */
-  ruleFor?: (userId: string, date: string, status: DayStatus | null, trackedMinutes: number) => AttendanceRuleVerdict | null;
+  ruleFor?: (
+    userId: string,
+    date: string,
+    status: DayStatus | null,
+    trackedMinutes: number,
+    minutesOn?: (date: string) => number,
+  ) => AttendanceRuleVerdict | null;
   /** How much of a day's cost a balance covered, undefined when it covered all. */
   fundedDaysFor?: (userId: string, date: string) => number | undefined;
   /**
@@ -285,7 +291,13 @@ export function buildMemberReportDays(input: {
     // Total tracked time, in minutes — the same measure the month performance
     // report bands on, so the two surfaces cannot call a day differently.
     const trackedMinutes = Math.round(bucket.counted / 60_000);
-    const rule = input.ruleFor?.(input.userId, date, dayStatus, trackedMinutes) ?? null;
+    const rule = input.ruleFor?.(
+      input.userId,
+      date,
+      dayStatus,
+      trackedMinutes,
+      (other) => Math.round((buckets?.get(other) ?? emptyDayBucket()).counted / 60_000),
+    ) ?? null;
     const computedCode = computedCodeWithRule(
       dayStatus,
       trackedMinutes,

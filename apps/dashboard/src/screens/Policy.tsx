@@ -240,8 +240,13 @@ export function PolicyScreen() {
                   value={leaveQ.data.attendanceRulesFrom ?? 'Off'}
                   hint={leaveQ.data.attendanceRulesFrom ? 'Every working day since' : 'No day is charged'}
                 />
-                <PolicyRule label="Full day" value={formatMinutes(leaveQ.data.fullDayMinMinutes)} hint="Less is a half day" />
-                <PolicyRule label="Half day" value={formatMinutes(leaveQ.data.halfDayMinMinutes)} hint="Less is a full leave" />
+                <PolicyRule label="Full day" value={formatMinutes(leaveQ.data.fullDayMinMinutes)} hint={minimumsHint(leaveQ.data, 'full')} />
+                <PolicyRule label="Half day" value={formatMinutes(leaveQ.data.halfDayMinMinutes)} hint={minimumsHint(leaveQ.data, 'half')} />
+                <PolicyRule
+                  label="Sandwich"
+                  value={leaveQ.data.sandwichRuleFrom ?? 'Off'}
+                  hint={leaveQ.data.sandwichRuleFrom ? 'Sat + Mon off → Sunday is leave' : 'Sundays never charged'}
+                />
               </div>
             </Card>
             <Card title="Approvals" className="pol-card-compact" action={<Tag mono>Lark</Tag>}>
@@ -572,6 +577,20 @@ function MonitoringRiskModal({
  * Charges are real — a day that falls short draws on the leave balance — so the
  * dialog says so in plain words before anybody saves.
  */
+/** Where today's minimum came from, when it has changed before. */
+function minimumsHint(policy: LeavePolicyDto, which: 'full' | 'half'): string {
+  const base = which === 'full' ? 'Less is a half day' : 'Less is a full leave';
+  const last = policy.minimumsHistory.at(-1);
+  if (!last) return base;
+  const before = which === 'full' ? last.fullDayMinMinutes : last.halfDayMinMinutes;
+  return `${base} · from ${last.until} (was ${formatMinutes(before)})`;
+}
+
+/** Today as YYYY-MM-DD on this device. */
+function localDateKey(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 function AttendanceRulesModal({
   policy,
   saving,
@@ -588,6 +607,10 @@ function AttendanceRulesModal({
   const [from, setFrom] = useState(policy.attendanceRulesFrom ?? '');
   const [fullDay, setFullDay] = useState(String(policy.fullDayMinMinutes));
   const [halfDay, setHalfDay] = useState(String(policy.halfDayMinMinutes));
+  // New minimums apply from a date; days before it keep the old ones.
+  const lastChange = policy.minimumsHistory.at(-1)?.until ?? null;
+  const [minimumsFrom, setMinimumsFrom] = useState(localDateKey(new Date()));
+  const [sandwichFrom, setSandwichFrom] = useState(policy.sandwichRuleFrom ?? '');
   const [wfh, setWfh] = useState(policy.wfhRequiresApproval);
   const [lateAllowed, setLateAllowed] = useState(String(policy.lateAllowedPerMonth));
   const late = Number.parseInt(lateAllowed, 10);
@@ -598,8 +621,11 @@ function AttendanceRulesModal({
 
   const full = Number.parseInt(fullDay, 10);
   const half = Number.parseInt(halfDay, 10);
+  const minimumsChanged = full !== policy.fullDayMinMinutes || half !== policy.halfDayMinMinutes;
+  const minimumsFromValid = !minimumsChanged || (/^\d{4}-\d{2}-\d{2}$/u.test(minimumsFrom) && (!lastChange || minimumsFrom >= lastChange));
   const valid =
     Number.isFinite(full) && Number.isFinite(half) && half >= 0 && full <= 1440 && half <= full &&
+    minimumsFromValid &&
     Number.isFinite(late) && late >= 0 && late <= 31 &&
     Number.isFinite(grace) && grace >= 0 && grace <= 240 &&
     halfLate !== null;
@@ -609,6 +635,8 @@ function AttendanceRulesModal({
       attendanceRulesFrom: from.trim() === '' ? null : from,
       fullDayMinMinutes: full,
       halfDayMinMinutes: half,
+      ...(minimumsChanged ? { minimumsFrom } : {}),
+      sandwichRuleFrom: sandwichFrom.trim() === '' ? null : sandwichFrom,
       wfhRequiresApproval: wfh,
       lateAllowedPerMonth: late,
       lateGraceMinutes: grace,
@@ -646,6 +674,17 @@ function AttendanceRulesModal({
               <Field label="Half day" hint={Number.isFinite(half) ? `${formatMinutes(half)} — less is a full leave.` : 'Minutes.'}>
                 <Input className="pol-input-mono" value={halfDay} onChange={(e) => setHalfDay(e.target.value)} inputMode="numeric" />
               </Field>
+              {minimumsChanged && (
+                <Field
+                  label="New minimums from"
+                  hint={`Days before keep ${formatMinutes(policy.fullDayMinMinutes)} / ${formatMinutes(policy.halfDayMinMinutes)}.`}
+                >
+                  <Input className="pol-input-mono" type="date" value={minimumsFrom} onChange={(e) => setMinimumsFrom(e.target.value)} />
+                </Field>
+              )}
+              <Field label="Sandwich rule from" hint="Sat + Mon both off → Sunday is leave. Empty turns it off.">
+                <Input className="pol-input-mono" type="date" value={sandwichFrom} onChange={(e) => setSandwichFrom(e.target.value)} />
+              </Field>
               <Field label="Late allowed" hint="A month. Each one after is half a day.">
                 <Input className="pol-input-mono" value={lateAllowed} onChange={(e) => setLateAllowed(e.target.value)} inputMode="numeric" />
               </Field>
@@ -675,7 +714,8 @@ function AttendanceRulesModal({
           {!valid && (
             <Banner status="warn">
               The half-day minimum has to be at most the full-day minimum, late allowed 0–31, grace 0–240 minutes,
-              and the half-day late time a valid time.
+              the half-day late time a valid time, and new minimums can start no earlier than the last change
+              {lastChange ? ` (${lastChange})` : ''}.
             </Banner>
           )}
           {error && <Banner status="danger">{error}</Banner>}

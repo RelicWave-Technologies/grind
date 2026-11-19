@@ -26,6 +26,10 @@ import type { MonthPerformanceCode } from '../reports/monthPerformance';
  *      (14:00 by default), no grace. A few a month are allowed; each one after
  *      that is half a day of leave — unless another rule already charged that
  *      day, which is the one cut.
+ *   6. Sandwich: a Sunday between a Saturday and a Monday that were both normal
+ *      working days and that the person was away for in full — leave of any
+ *      kind, or a rule that made the whole day leave — is a day of leave too.
+ *      Not when the Saturday or the Monday is a holiday or a weekly off.
  *
  * A verdict is a number of days of leave, never a new kind of day. Whether that
  * leave is paid is the balance's answer, decided by the same funding walk that
@@ -97,7 +101,7 @@ export function judgeDay(
   // The working half of an approved half-day leave.
   if (expected < 1) {
     const half = dayCredit(minutes, { fullDayMinutes: policy.fullDayMinMinutes, halfDayMinutes: policy.halfDayMinMinutes });
-    return half !== 'NONE' ? null : verdict('HALF_DAY_SHORT', expected);
+    return half !== 'NONE' ? null : { ...verdict('HALF_DAY_SHORT', expected), minMinutes: policy.halfDayMinMinutes };
   }
 
   // Nobody at the door and nothing tracked: away, and the only question is
@@ -112,15 +116,77 @@ export function judgeDay(
     return verdict('WFH_UNAPPROVED', expected);
   }
 
-  // Full day 7 h, half day 3 h 30 unless the policy names its own minimums —
-  // the one definition in @grind/core.
+  // The minimums in force on this date (the caller resolves them from the
+  // policy's history) — the one definition in @grind/core. Exactly the minimum
+  // is enough: only less falls short.
   const credit = dayCredit(minutes, {
     fullDayMinutes: policy.fullDayMinMinutes,
     halfDayMinutes: policy.halfDayMinMinutes,
   });
   if (credit === 'FULL') return null;
-  if (credit === 'HALF') return verdict('SHORT_DAY', 0.5);
-  return verdict('UNDER_MIN', 1);
+  if (credit === 'HALF') return { ...verdict('SHORT_DAY', 0.5), minMinutes: policy.fullDayMinMinutes };
+  return { ...verdict('UNDER_MIN', 1), minMinutes: policy.halfDayMinMinutes };
+}
+
+/** A correction's code, as far as the sandwich rule cares. */
+export type SandwichOverrideCode = 'P' | 'A' | 'HALF_LEAVE' | 'FULL_LEAVE' | 'PL_HD' | 'LWP_HD' | 'PL' | 'LWP' | 'HD';
+
+/** A correction that says the person was away all day. */
+const AWAY_ALL_DAY_OVERRIDES = new Set<SandwichOverrideCode>(['A', 'FULL_LEAVE', 'PL', 'LWP']);
+
+/** What the sandwich rule needs to know about the Saturday or the Monday. */
+export interface SandwichSideDay {
+  status: DayStatus | null;
+  /** That day's own rule verdict (late rule aside). */
+  verdict: AttendanceRuleVerdict | null;
+  /** A manager's correction for that day, which answers for it. */
+  override: SandwichOverrideCode | null;
+}
+
+/**
+ * Was the person away for the whole of a normal working day? Only a working
+ * day counts — a holiday or weekly off on either side means no sandwich — and
+ * away means a full day of leave of any kind, approved or charged by a rule.
+ * A half day, or any part of the day worked and counted, is not away.
+ */
+export function awayAllWorkingDay(day: SandwichSideDay): boolean {
+  const status = day.status;
+  if (!status || (status.kind !== 'WORKING' && status.kind !== 'PAID_LEAVE' && status.kind !== 'UNPAID_LEAVE')) {
+    return false;
+  }
+  if (day.override) return AWAY_ALL_DAY_OVERRIDES.has(day.override);
+  const away = roundToHalfDay(1 - status.expectedFraction) + (day.verdict?.penaltyDays ?? 0);
+  return away >= 1;
+}
+
+/**
+ * The sandwich rule's verdict for a Sunday, or null.
+ *
+ * Charged only once the Monday is over — until then the Monday's own verdict
+ * is not settled — and only when the whole Saturday–Monday stretch is on or
+ * after the date the policy switched the rule on.
+ */
+export function judgeSandwich(input: {
+  /** YYYY-MM-DD of the Sunday. */
+  date: string;
+  today: string;
+  /** The rules' own start, or null when they are off. */
+  rulesFrom: string | null;
+  /** The sandwich rule's start, or null when it is off. */
+  sandwichFrom: string | null;
+  mode?: AttendanceRuleMode;
+  status: DayStatus | null;
+  saturday: SandwichSideDay & { date: string };
+  monday: SandwichSideDay & { date: string };
+}): AttendanceRuleVerdict | null {
+  if (!input.rulesFrom || !input.sandwichFrom) return null;
+  if (input.mode === 'EXEMPT') return null;
+  if (input.saturday.date < input.rulesFrom || input.saturday.date < input.sandwichFrom) return null;
+  if (input.monday.date >= input.today) return null;
+  // The Sunday itself is a weekly off; a holiday on a Sunday stays a holiday.
+  if (input.status?.kind !== 'WEEKLY_OFF') return null;
+  if (!awayAllWorkingDay(input.saturday) || !awayAllWorkingDay(input.monday)) return null;
+  return { tag: 'SANDWICH', penaltyDays: 1 };
 }
 
 /**
