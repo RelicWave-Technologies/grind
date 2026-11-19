@@ -410,7 +410,8 @@ function buildLegendSheet(wb: ExcelJS.Workbook, report: MonthPerformanceReport):
     const heading = sheet.addRow(['Why']);
     heading.getCell(1).font = TYPE.cardTitle;
     const why = (tag: Parameters<typeof sheetWhy>[1]['rule']) => sheetWhy(report, { rule: tag });
-    const settings = report.ruleMinutes ?? { fullDay: 420, halfDay: 210, lateAllowed: 4, lateGrace: 30 };
+    const settings: NonNullable<typeof report.ruleMinutes> =
+      report.ruleMinutes ?? { fullDay: 420, halfDay: 210, lateAllowed: 4, lateGrace: 30 };
     const reasons: Array<[string, string]> = [
       [why({ tag: 'SHORT_DAY', penaltyDays: 0.5 }), 'Worked less than a full day, so it counts as a half day'],
       [why({ tag: 'UNDER_MIN', penaltyDays: 1 }), 'Worked less than half a day, so it counts as leave'],
@@ -429,6 +430,23 @@ function buildLegendSheet(wb: ExcelJS.Workbook, report: MonthPerformanceReport):
         'Both on one day: short hours and the 2nd late arrival. The day is cut once, for the hours',
       ],
     ];
+    if (settings.minimumsChange) {
+      const c = settings.minimumsChange;
+      const was = (tag: 'SHORT_DAY' | 'UNDER_MIN', min: number) => sheetWhy(report, { rule: { tag, penaltyDays: 1, minMinutes: min } });
+      reasons.push([
+        `${was('SHORT_DAY', c.fullDay)} · ${was('UNDER_MIN', c.halfDay)}`,
+        `The minimums before ${c.from}: under ${minToHhmm(c.fullDay)} was a half day and under ` +
+          `${minToHhmm(c.halfDay)} a leave. From ${c.from}: under ${minToHhmm(settings.fullDay)} and ` +
+          `${minToHhmm(settings.halfDay)}. Each day shows the minimum it was judged on`,
+      ]);
+    }
+    if (settings.sandwichFrom) {
+      reasons.push([
+        'sandwich',
+        'A Sunday between a Saturday and a Monday both taken off in full (both normal working days) ' +
+          'counts as leave too. Not when either day is a holiday or a week off',
+      ]);
+    }
     for (const [word, means] of reasons) {
       const row = sheet.addRow([word, means]);
       row.getCell(1).font = TYPE.readingStrong;

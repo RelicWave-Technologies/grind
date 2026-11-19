@@ -22,6 +22,7 @@ import { Role } from './auth';
  *   NO_APPLICATION      nothing worked, nothing applied for
  *   LEAVE_NOT_APPROVED  nothing worked; leave was applied for but is pending or rejected
  *   LATE                punched in after the shift start plus its grace, past the month's allowance
+ *   SANDWICH            a Sunday between a Saturday and a Monday the person was away for in full
  */
 export const AttendanceRuleTagSchema = z.enum([
   'SHORT_DAY',
@@ -31,6 +32,7 @@ export const AttendanceRuleTagSchema = z.enum([
   'NO_APPLICATION',
   'LEAVE_NOT_APPROVED',
   'LATE',
+  'SANDWICH',
 ]);
 export type AttendanceRuleTag = z.infer<typeof AttendanceRuleTagSchema>;
 
@@ -46,6 +48,7 @@ export const ATTENDANCE_RULE_SHORT: Record<AttendanceRuleTag, string> = {
   NO_APPLICATION: 'LWA',
   LEAVE_NOT_APPROVED: 'LWA PENDING',
   LATE: 'LATE',
+  SANDWICH: 'SANDWICH',
 };
 
 /** Spelled out, for a legend or a tooltip. */
@@ -57,6 +60,7 @@ export const ATTENDANCE_RULE_LABEL: Record<AttendanceRuleTag, string> = {
   NO_APPLICATION: 'Absent without a leave application — leave without approval',
   LEAVE_NOT_APPROVED: 'Absent; the leave applied for was not approved — leave without approval',
   LATE: 'Late arrival past the monthly allowance — half a day of leave',
+  SANDWICH: 'Sunday between a Saturday and a Monday both taken off — the Sunday counts as leave too',
 };
 
 /**
@@ -79,6 +83,7 @@ export const ATTENDANCE_RULE_REASON: Record<AttendanceRuleTag, string> = {
   NO_APPLICATION: 'Absent, no leave applied',
   LEAVE_NOT_APPROVED: 'Absent, leave not approved',
   LATE: 'Late arrival',
+  SANDWICH: 'Sandwich Sunday',
 };
 
 /** What a rule decided about one person-day. */
@@ -86,6 +91,13 @@ export const AttendanceRuleVerdictSchema = z.object({
   tag: AttendanceRuleTagSchema,
   /** Days of the day the rule turned into leave: 0.5 or 1. */
   penaltyDays: z.number(),
+  /**
+   * The minimum the day fell short of, in tracked minutes, for the hour rules
+   * (SHORT_DAY, UNDER_MIN, HALF_DAY_SHORT). The minimums change over time, so
+   * the reason printed beside a day ("<7h", "<8h") comes from the day, not from
+   * today's policy.
+   */
+  minMinutes: z.number().int().optional(),
 });
 export type AttendanceRuleVerdict = z.infer<typeof AttendanceRuleVerdictSchema>;
 
@@ -95,6 +107,8 @@ export const ATTENDANCE_RULE_DEFAULTS = {
   fullDayMinMinutes: 420,
   /** 3 h 30 m. */
   halfDayMinMinutes: 210,
+  /** The sandwich rule is off until a date is set. */
+  sandwichRuleFrom: null,
   wfhRequiresApproval: true,
   /** Late arrivals a month that cost nothing; each one after is half a day. */
   lateAllowedPerMonth: 4,
@@ -290,3 +304,40 @@ export const DISPLAY_DAY_LABEL: Record<DisplayDayCode, string> = {
   WO: 'Weekly off',
   '--': 'No shift',
 };
+
+/**
+ * The minimum hours that applied before a change. Each era covers the dates
+ * before `until` (and on or after the previous era's `until`); dates on or
+ * after the last era's `until` use the policy's current minimums. A change to
+ * the minimums therefore never re-judges a day that was already judged.
+ */
+export const AttendanceMinimumsEraSchema = z.object({
+  /** First YYYY-MM-DD these minimums no longer applied to. */
+  until: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
+  fullDayMinMinutes: z.number().int(),
+  halfDayMinMinutes: z.number().int(),
+});
+export type AttendanceMinimumsEra = z.infer<typeof AttendanceMinimumsEraSchema>;
+
+/** Read the stored history, dropping anything malformed, oldest first. */
+export function parseMinimumsHistory(raw: unknown): AttendanceMinimumsEra[] {
+  if (!Array.isArray(raw)) return [];
+  const eras: AttendanceMinimumsEra[] = [];
+  for (const item of raw) {
+    const parsed = AttendanceMinimumsEraSchema.safeParse(item);
+    if (parsed.success) eras.push(parsed.data);
+  }
+  return eras.sort((a, b) => a.until.localeCompare(b.until));
+}
+
+/** The minimum hours in force on a date. */
+export function minimumsOn(
+  date: string,
+  current: { fullDayMinMinutes: number; halfDayMinMinutes: number },
+  history: readonly AttendanceMinimumsEra[],
+): { fullDayMinMinutes: number; halfDayMinMinutes: number } {
+  for (const era of history) {
+    if (date < era.until) return { fullDayMinMinutes: era.fullDayMinMinutes, halfDayMinMinutes: era.halfDayMinMinutes };
+  }
+  return { fullDayMinMinutes: current.fullDayMinMinutes, halfDayMinMinutes: current.halfDayMinMinutes };
+}

@@ -3,7 +3,6 @@ import {
   attendanceOverrideShape,
   type DisplayDayCode,
   type AttendanceOverrideCode,
-  type AttendanceRuleTag,
   type AttendanceRuleVerdict,
   type DayStatus,
   type MonthSheetResponse,
@@ -106,6 +105,13 @@ interface RuleSettings {
   lateGrace: number;
   /** First-half leave day: late after this minute of the day. Absent on older reports. */
   halfDayLateAfter?: number;
+  /**
+   * The minimums changed during this month: days before `from` were judged on
+   * `fullDay` / `halfDay` here, days from it on the numbers above.
+   */
+  minimumsChange?: { from: string; fullDay: number; halfDay: number };
+  /** The sandwich rule judges this month's Sundays from this date, when on. */
+  sandwichFrom?: string | null;
 }
 
 export interface MonthPerformanceUser {
@@ -263,7 +269,13 @@ export interface MonthPerformanceInput {
   /** The month's leave account per person. */
   leaveAccountFor?: (userId: string) => LeaveAccount | undefined;
   /** The attendance rules' verdict for a person-day, null when nothing is charged. */
-  ruleFor?: (userId: string, date: string, status: DayStatus | null, trackedMinutes: number) => AttendanceRuleVerdict | null;
+  ruleFor?: (
+    userId: string,
+    date: string,
+    status: DayStatus | null,
+    trackedMinutes: number,
+    minutesOn?: (date: string) => number,
+  ) => AttendanceRuleVerdict | null;
   /** How much of a day's cost a balance covered, undefined when it covered all. */
   fundedDaysFor?: (userId: string, date: string) => number | undefined;
   /** The month's Nth late arrival on this day, null when on time. */
@@ -484,7 +496,13 @@ export function buildMonthPerformance(input: MonthPerformanceInput): MonthPerfor
       // Judged even under a correction, so the correction can be flagged when
       // the computed answer moves — but a corrected day is charged nothing by a
       // rule, because the person who corrected it is the better authority.
-      const verdict = input.ruleFor?.(user.id, date, status, workMinutes) ?? null;
+      const verdict = input.ruleFor?.(
+        user.id,
+        date,
+        status,
+        workMinutes,
+        (other) => Math.round(Math.max(0, input.trackedMsFor(user.id, other)) / 60_000),
+      ) ?? null;
       let computed = computedCodeWithRule(status, workMinutes, verdict, input.fundedDaysFor?.(user.id, date));
       if (computed === 'A' && input.today && date >= input.today) computed = '--';
       const code = override ? overrideCode(override) : computed;
@@ -582,19 +600,25 @@ export function sheetWhy(
   // still count up 1, 2, 3 with none missing.
   const late = day.late ? `late ${day.late}` : '';
   if (!day.rule || day.rule.tag === 'LATE') return late;
-  const reason = ruleReason(report, day.rule.tag);
+  const reason = ruleReason(report, day.rule);
   return late && reason ? `${reason} · ${late}` : reason || late;
 }
 
-function ruleReason(report: Pick<MonthPerformanceReport, 'ruleMinutes'>, tag: AttendanceRuleTag): string {
+function ruleReason(
+  report: Pick<MonthPerformanceReport, 'ruleMinutes'>,
+  rule: Pick<AttendanceRuleVerdict, 'tag' | 'minMinutes'>,
+): string {
   const m = report.ruleMinutes ?? { fullDay: 420, halfDay: 210, lateAllowed: 4, lateGrace: 30 };
-  switch (tag) {
-    case 'SHORT_DAY': return `<${hoursWord(m.fullDay)}`;
+  // The minimum the day itself was judged on: the minimums change over time,
+  // and a day from before a change keeps the number it fell short of.
+  switch (rule.tag) {
+    case 'SHORT_DAY': return `<${hoursWord(rule.minMinutes ?? m.fullDay)}`;
     case 'UNDER_MIN':
-    case 'HALF_DAY_SHORT': return `<${hoursWord(m.halfDay)}`;
+    case 'HALF_DAY_SHORT': return `<${hoursWord(rule.minMinutes ?? m.halfDay)}`;
     case 'WFH_UNAPPROVED': return 'WFH';
     case 'NO_APPLICATION': return 'no leave';
     case 'LEAVE_NOT_APPROVED': return 'unapproved';
+    case 'SANDWICH': return 'sandwich';
     default: return '';
   }
 }

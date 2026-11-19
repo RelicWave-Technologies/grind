@@ -1358,6 +1358,16 @@ model LeavePolicy {
   /// Tracked minutes the working half of an approved half-day leave needs, and
   /// the floor below which a full working day becomes a full leave.
   halfDayMinMinutes    Int       @default(210)
+  /// Earlier minimums, as [{ until, fullDayMinMinutes, halfDayMinMinutes }]
+  /// oldest first: a date before an era's `until` is judged on that era's
+  /// numbers, a date after the last one on the two columns above. Changing the
+  /// minimums appends the old pair here, so a day already judged keeps its
+  /// verdict.
+  minimumsHistory      Json      @default("[]")
+  /// First business date (YYYY-MM-DD) the sandwich rule judges: a Sunday
+  /// between a Saturday and a Monday the person was away for in full (both
+  /// normal working days) is a day of leave too. NULL = off.
+  sandwichRuleFrom     String?
   /// Working from home without an approved request counts as leave.
   wfhRequiresApproval  Boolean   @default(true)
   /// Late arrivals a month that cost nothing. From the next one on, each late

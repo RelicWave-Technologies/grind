@@ -1,5 +1,12 @@
 import { prisma } from '@grind/db';
-import { dateKeyInTimeZone, dateKeysBetween, isValidTimeZone, localDayWindowInTimeZone, type DayStatus } from '@grind/types';
+import {
+  dateKeyInTimeZone,
+  dateKeysBetween,
+  isValidTimeZone,
+  localDayWindowInTimeZone,
+  minimumsOn,
+  type DayStatus,
+} from '@grind/types';
 import { loadAttendanceRuleContext, type AttendanceRuleContext } from '../attendance/ruleContext';
 import { reconcileRuleLedger, verdictKey, type RuleVerdicts } from '../attendance/ruleLedger';
 import { timesheetCalendarInputs } from '../leave';
@@ -157,6 +164,28 @@ async function loadMonthInputs(input: {
   };
 }
 
+/**
+ * The minimums as the month's sheet should state them: the ones in force on
+ * its last day, and the earlier pair when they changed partway through.
+ */
+function monthMinimums(
+  policy: AttendanceRuleContext['policy'],
+  range: ResolvedReportMonth,
+): { fullDay: number; halfDay: number; minimumsChange?: { from: string; fullDay: number; halfDay: number } } {
+  const end = minimumsOn(range.to, policy, policy.minimumsHistory);
+  const start = minimumsOn(range.from, policy, policy.minimumsHistory);
+  const changeFrom = policy.minimumsHistory.find((e) => e.until > range.from && e.until <= range.to)?.until;
+  const changed = changeFrom !== undefined &&
+    (start.fullDayMinMinutes !== end.fullDayMinMinutes || start.halfDayMinMinutes !== end.halfDayMinMinutes);
+  return {
+    fullDay: end.fullDayMinMinutes,
+    halfDay: end.halfDayMinMinutes,
+    ...(changed
+      ? { minimumsChange: { from: changeFrom, fullDay: start.fullDayMinMinutes, halfDay: start.halfDayMinMinutes } }
+      : {}),
+  };
+}
+
 /** The rule verdict for every judged, uncorrected person-day. */
 function monthVerdicts(
   m: MonthInputs,
@@ -175,6 +204,7 @@ function monthVerdicts(
         date,
         dayStatusFor(userId, date),
         Math.round(m.trackedMsFor(userId, date) / 60_000),
+        (other) => Math.round(m.trackedMsFor(userId, other) / 60_000),
       );
       if (verdict) verdicts.set(verdictKey(userId, date), verdict);
     }
@@ -277,11 +307,11 @@ export async function loadMonthPerformanceReport(input: {
     rulesFrom: rules.enabled ? rules.policy.from : null,
     ruleMinutes: rules.enabled
       ? {
-          fullDay: rules.policy.fullDayMinMinutes,
-          halfDay: rules.policy.halfDayMinMinutes,
           lateAllowed: rules.policy.lateAllowedPerMonth,
           lateGrace: rules.policy.lateGraceMinutes,
           halfDayLateAfter: rules.policy.halfDayLateAfterMinute,
+          ...monthMinimums(rules.policy, range),
+          sandwichFrom: rules.policy.sandwichFrom && rules.policy.sandwichFrom <= range.to ? rules.policy.sandwichFrom : null,
         }
       : null,
     generatedAtMs: nowMs,

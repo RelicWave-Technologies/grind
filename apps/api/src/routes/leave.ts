@@ -6,12 +6,15 @@ import {
   PatchHolidaySchema,
   PatchLeavePolicySchema,
   SignedLeaveDaysSchema,
+  parseMinimumsHistory,
   leaveDaysSchema,
   todayKey,
   type HolidayDto,
   type LeaveBalanceDto,
 } from '@grind/types';
 import { z } from 'zod';
+import { nextMinimumsHistory } from '../attendance/minimums';
+import { requestRuleReconcile } from '../attendance/ruleScheduler';
 import { requireAccessToken } from '../middleware/auth';
 import { readMemoScope } from '../lib/readMemo';
 import { attachScope, requireAdmin } from '../middleware/scope';
@@ -337,11 +340,28 @@ adminLeaveRouter.patch('/policy', requireAdmin, async (req, res, next) => {
     if (!parsed.success) {
       return res.status(400).json({ error: 'invalid_body', detail: parsed.error.issues[0]?.message });
     }
-    await loadOrCreateLeavePolicy(req.scope.workspaceId);
+    const current = await loadOrCreateLeavePolicy(req.scope.workspaceId);
+    const { minimumsFrom, ...data } = parsed.data;
+    const history = nextMinimumsHistory({
+      current: {
+        fullDayMinMinutes: current.fullDayMinMinutes,
+        halfDayMinMinutes: current.halfDayMinMinutes,
+      },
+      history: parseMinimumsHistory(current.minimumsHistory),
+      next: {
+        fullDayMinMinutes: data.fullDayMinMinutes ?? current.fullDayMinMinutes,
+        halfDayMinMinutes: data.halfDayMinMinutes ?? current.halfDayMinMinutes,
+      },
+      from: minimumsFrom ?? todayKey(req.scope.workspaceTimezone),
+    });
+    if ('error' in history) return res.status(400).json({ error: history.error });
     const updated = await prisma.leavePolicy.update({
       where: { workspaceId: req.scope.workspaceId },
-      data: parsed.data,
+      data: { ...data, ...(history.changed ? { minimumsHistory: history.eras } : {}) },
     });
+    // New minimums or a new sandwich date change verdicts; write them soon
+    // rather than at the next half-hour sweep.
+    requestRuleReconcile(req.scope.workspaceId);
     res.json(toLeavePolicyDto(updated));
   } catch (err) {
     next(err);
