@@ -1,6 +1,7 @@
 import { prisma, type Prisma } from '@grind/db';
 import {
   ATTENDANCE_RULE_DEFAULTS,
+  parseMinimumsHistory,
   ATTENDANCE_RULE_LABEL,
   ATTENDANCE_RULE_REASON,
   AttendanceRuleTagSchema,
@@ -90,6 +91,8 @@ export function toLeavePolicyDto(row: {
   attendanceRulesFrom?: string | null;
   fullDayMinMinutes?: number;
   halfDayMinMinutes?: number;
+  minimumsHistory?: unknown;
+  sandwichRuleFrom?: string | null;
   wfhRequiresApproval?: boolean;
   lateAllowedPerMonth?: number;
   lateGraceMinutes?: number;
@@ -107,6 +110,8 @@ export function toLeavePolicyDto(row: {
     attendanceRulesFrom: row.attendanceRulesFrom ?? ATTENDANCE_RULE_DEFAULTS.attendanceRulesFrom,
     fullDayMinMinutes: row.fullDayMinMinutes ?? ATTENDANCE_RULE_DEFAULTS.fullDayMinMinutes,
     halfDayMinMinutes: row.halfDayMinMinutes ?? ATTENDANCE_RULE_DEFAULTS.halfDayMinMinutes,
+    minimumsHistory: parseMinimumsHistory(row.minimumsHistory),
+    sandwichRuleFrom: row.sandwichRuleFrom ?? ATTENDANCE_RULE_DEFAULTS.sandwichRuleFrom,
     wfhRequiresApproval: row.wfhRequiresApproval ?? ATTENDANCE_RULE_DEFAULTS.wfhRequiresApproval,
     lateAllowedPerMonth: row.lateAllowedPerMonth ?? ATTENDANCE_RULE_DEFAULTS.lateAllowedPerMonth,
     lateGraceMinutes: row.lateGraceMinutes ?? ATTENDANCE_RULE_DEFAULTS.lateGraceMinutes,
@@ -338,7 +343,9 @@ export async function loadWorkingCalendar(input: {
   const costOf = (userId: string, date: string): number => {
     const status = priced.dayStatus(userId, date);
     const free = status.kind === 'WEEKLY_OFF' || status.kind === 'HOLIDAY' || status.kind === 'NO_SHIFT';
-    if (free) return 0;
+    // A weekly off costs nothing — except the Sunday the sandwich rule turned
+    // into leave, the one rule that charges a day off. Its line says what.
+    if (free) return status.kind === 'WEEKLY_OFF' ? roundToHalfDay(ruleCostFor.get(`${userId}\u0000${date}`) ?? 0) : 0;
     const override = overrideFor.get(`${userId}\u0000${date}`);
     // A rule's leave sits on top of whatever was approved: half a day of
     // approved leave plus half a day the rule added is a whole day spent.

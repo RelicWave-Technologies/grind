@@ -1349,7 +1349,13 @@ adminRouter.get('/timesheets.csv', requireAnyCapability(['reports.team.read', 'r
         const cell = matrix.cells[u.id]?.[day] ?? emptyTimesheetCell();
         const verdict = overrideFor(u.id, day)
           ? null
-          : rules.judge(u.id, day, calendar.dayStatusFor(u.id, day), Math.round(cell.totalMs / 60_000));
+          : rules.judge(
+            u.id,
+            day,
+            calendar.dayStatusFor(u.id, day),
+            Math.round(cell.totalMs / 60_000),
+            (other) => Math.round((matrix.cells[u.id]?.[other]?.totalMs ?? 0) / 60_000),
+          );
         if (cell.totalMs === 0 && !verdict) continue;
         const first = cell.firstActivityMs ? fmtTimeForTz(cell.firstActivityMs, matrix.tz) : '';
         const last = cell.lastActivityMs ? fmtTimeForTz(cell.lastActivityMs, matrix.tz) : '';

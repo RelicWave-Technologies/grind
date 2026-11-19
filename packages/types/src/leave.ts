@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { AttendanceMinimumsEraSchema } from './attendanceRules';
 
 /**
  * Leave, company holidays and paid-leave balances — wire types shared by API,
@@ -210,6 +211,16 @@ export const LeavePolicyDtoSchema = z.object({
   fullDayMinMinutes: z.number().int(),
   /** Tracked minutes half a working day needs. */
   halfDayMinMinutes: z.number().int(),
+  /**
+   * Earlier minimums, oldest first: dates before an era's `until` are judged on
+   * its numbers. Empty when the minimums never changed.
+   */
+  minimumsHistory: z.array(AttendanceMinimumsEraSchema),
+  /**
+   * First YYYY-MM-DD the sandwich rule judges (a Sunday between a fully-off
+   * Saturday and Monday is leave too). null = off.
+   */
+  sandwichRuleFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u).nullable(),
   /** Working from home without an approved request is leave. */
   wfhRequiresApproval: z.boolean(),
   /** Late arrivals a month that cost nothing; each one after is half a day. */
@@ -246,6 +257,12 @@ export const PatchLeavePolicySchema = z
     attendanceRulesFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u, 'must be YYYY-MM-DD').nullable().optional(),
     fullDayMinMinutes: MinutesOfDaySchema.optional(),
     halfDayMinMinutes: MinutesOfDaySchema.optional(),
+    /**
+     * First date new minimums apply to. Days before it keep the minimums they
+     * were judged on. Defaults to today when the minimums change without one.
+     */
+    minimumsFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u, 'must be YYYY-MM-DD').optional(),
+    sandwichRuleFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u, 'must be YYYY-MM-DD').nullable().optional(),
     wfhRequiresApproval: z.boolean().optional(),
     lateAllowedPerMonth: z.number().int().min(0).max(31).optional(),
     lateGraceMinutes: z.number().int().min(0).max(240).optional(),
