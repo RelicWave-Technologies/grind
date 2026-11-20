@@ -26,6 +26,7 @@ export function fmtTime(ms: number, timeZone: string): string {
   return new Intl.DateTimeFormat(undefined, {
     hour: 'numeric',
     minute: '2-digit',
+    hour12: true,
     timeZone,
   }).format(new Date(ms));
 }
@@ -34,13 +35,15 @@ export function fmtTime(ms: number, timeZone: string): string {
  * A time of day held as minutes since local midnight — not an instant, so it
  * carries no timezone of its own. Used for range summaries like "typically
  * punches in around 09:45", where the answer is a clock reading rather than a
- * moment. Rendered on the same 12h clock as `fmtTime` so the two read alike.
+ * moment. Always on the 12h clock ("7:43 PM"), whatever the browser locale,
+ * like `fmtTime`, so the two read alike.
  */
 export function fmtMinuteOfDay(minute: number): string {
   const d = new Date(Date.UTC(2000, 0, 1, Math.floor(minute / 60), minute % 60));
   return new Intl.DateTimeFormat(undefined, {
     hour: 'numeric',
     minute: '2-digit',
+    hour12: true,
     timeZone: 'UTC',
   }).format(d);
 }

@@ -55,6 +55,7 @@ function fmt(ms: number, timeZone: string): string {
   return new Intl.DateTimeFormat(undefined, {
     hour: 'numeric',
     minute: '2-digit',
+    hour12: true,
     timeZone,
   }).format(new Date(ms));
 }
