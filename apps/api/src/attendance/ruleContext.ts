@@ -5,7 +5,6 @@ import {
   dateKeyInTimeZone,
   minimumsOn,
   parseMinimumsHistory,
-  weekdayForDate,
   type AttendanceMinimumsEra,
   type AttendanceRuleMode,
   type AttendanceRuleVerdict,
@@ -16,8 +15,11 @@ import { loadApprovedWfh, loadOrCreateLeavePolicy, loadWorkingCalendar } from '.
 import { loadPunchLookup, type PunchLookup } from './punches';
 import {
   isLateArrival,
+  isSandwichOffDay,
   judgeDay,
   judgeSandwich,
+  sandwichSides,
+  SANDWICH_MAX_OFF_RUN,
   withLateRule,
   type AttendanceRulePolicy,
   type SandwichOverrideCode,
@@ -49,7 +51,8 @@ export interface AttendanceRuleContext {
   /**
    * The verdict for one person-day. `minutesOn` gives the same person's tracked
    * minutes on another date of the caller's range: the sandwich rule judges a
-   * Sunday by its Saturday and Monday. Without it, no Sunday is charged.
+   * day off by the working days either side. Without it, only approved leave or
+   * a correction on those days can charge one.
    */
   judge: (
     userId: string,
@@ -99,18 +102,12 @@ export async function loadAttendanceRuleContext(input: {
   const monthStart = `${input.from.slice(0, 7)}-01`;
   const rulesFrom = policy.from && policy.from <= input.to && input.userIds.length > 0 ? policy.from : null;
 
-  // The sandwich rule judges a Sunday by the Saturday before and the Monday
-  // after, which can fall one day outside the range: read one day wider.
+  // The sandwich rule judges a day off by the working days either side of its
+  // run of days off, which can fall outside the range: read as far as the
+  // longest run the rule looks across.
   const sandwichOn = rulesFrom !== null && policy.sandwichFrom !== null && policy.sandwichFrom <= input.to;
-  const wideFrom = sandwichOn ? addDays(input.from, -1) : input.from;
-  const wideTo = sandwichOn ? addDays(input.to, 1) : input.to;
-  // Tracked minutes for those two outside days, which no caller holds.
-  const edgeDays = sandwichOn
-    ? [
-      ...(weekdayForDate(wideFrom) === 'sat' ? [wideFrom] : []),
-      ...(weekdayForDate(wideTo) === 'mon' ? [wideTo] : []),
-    ]
-    : [];
+  const wideFrom = sandwichOn ? addDays(input.from, -SANDWICH_MAX_OFF_RUN) : input.from;
+  const wideTo = sandwichOn ? addDays(input.to, SANDWICH_MAX_OFF_RUN) : input.to;
 
   const fromDate = new Date(`${wideFrom}T00:00:00Z`);
   const toDate = new Date(`${wideTo}T00:00:00Z`);
@@ -158,10 +155,6 @@ export async function loadAttendanceRuleContext(input: {
           dates.length === 0
             ? null
             : loadDayFactAssignments({ userIds: input.userIds, from: lateFrom, to: input.to, tz: input.tz }),
-          Promise.all(edgeDays.map(async (day) => {
-            const timeline = await loadTimeline({ userIds: input.userIds, from: day, to: day, tz: input.tz });
-            return [day, timeline] as const;
-          })),
         ]),
   ]);
   const modeOf = new Map(people.map((p) => [p.id, p.attendanceRuleMode]));
@@ -169,7 +162,32 @@ export async function loadAttendanceRuleContext(input: {
   if (!ruleRows || !policy.from) {
     return { policy, enabled: false, judge: () => null, lateOrdinalFor: () => null, modeFor, punchFor };
   }
-  const [coveredDates, wfhApproved, unapprovedLeave, calendar, overrides, shiftAssignments, edgeTimelines] = ruleRows;
+  const [coveredDates, wfhApproved, unapprovedLeave, calendar, overrides, shiftAssignments] = ruleRows;
+
+  // Tracked minutes for working days outside the range that flank a run of days
+  // off reaching the range's edge, which no caller holds. Only a run through
+  // the first or the last day of the range can reach outside it.
+  const outsideBefore: string[] = [];
+  const outsideAfter: string[] = [];
+  if (sandwichOn) {
+    for (const userId of input.userIds) {
+      const statusOn = (day: string) => calendar.dayStatus(userId, day);
+      if (isSandwichOffDay(statusOn(input.from))) {
+        const sides = sandwichSides(input.from, statusOn);
+        if (sides) outsideBefore.push(sides.before);
+      }
+      if (isSandwichOffDay(statusOn(input.to))) {
+        const sides = sandwichSides(input.to, statusOn);
+        if (sides) outsideAfter.push(sides.after);
+      }
+    }
+  }
+  const span = (days: string[]) => days.length === 0 ? null : { from: days.reduce((a, b) => (a < b ? a : b)), to: days.reduce((a, b) => (a > b ? a : b)) };
+  const edgeSpans = [span(outsideBefore), span(outsideAfter)].filter((x): x is { from: string; to: string } => x !== null);
+  const edgeTimelines = await Promise.all(edgeSpans.map(async (range) => ({
+    ...range,
+    timeline: await loadTimeline({ userIds: input.userIds, from: range.from, to: range.to, tz: input.tz }),
+  })));
 
   const coverage = new Set(coveredDates.map((r) => r.date.toISOString().slice(0, 10)));
   const ranges = (rows: Array<{ userId: string; startDate: Date; endDate: Date }>) => {
@@ -199,7 +217,7 @@ export async function loadAttendanceRuleContext(input: {
     overrides.map((o) => [`${o.userId}|${o.date.toISOString().slice(0, 10)}`, o.code]),
   );
   const overridden = new Set(overrideCode.keys());
-  const edgeMinutes = new Map(edgeTimelines.map(([day, timeline]) => [day, timeline] as const));
+  const edgeTimelineFor = (day: string) => edgeTimelines.find((e) => day >= e.from && day <= e.to)?.timeline ?? null;
 
   const lateOrdinal = new Map<string, number>();
   for (const userId of input.userIds) {
@@ -249,9 +267,10 @@ export async function loadAttendanceRuleContext(input: {
   };
 
   /**
-   * The sandwich rule for a Sunday. Its Saturday and Monday are judged here the
-   * way the caller judges any day, on this context's calendar; their minutes
-   * come from the caller inside its range, from the edge reads outside it.
+   * The sandwich rule for a weekly off or a holiday. The working days either
+   * side of its run of days off are judged here the way the caller judges any
+   * day, on this context's calendar; their minutes come from the caller inside
+   * its range, from the edge reads outside it.
    */
   const sandwichVerdict = (
     userId: string,
@@ -260,7 +279,7 @@ export async function loadAttendanceRuleContext(input: {
     minutesOn: ((date: string) => number) | undefined,
   ): AttendanceRuleVerdict | null => {
     const side = (day: string) => {
-      const edge = edgeMinutes.get(day);
+      const edge = day < input.from || day > input.to ? edgeTimelineFor(day) : null;
       const minutes = edge
         ? Math.round(edge.bucket(userId, day).counted / 60_000)
         : day >= input.from && day <= input.to && minutesOn
@@ -268,6 +287,8 @@ export async function loadAttendanceRuleContext(input: {
           : null;
       const sideStatus = calendar.dayStatus(userId, day);
       const override = overrideCode.get(`${userId}|${day}`) ?? null;
+      // Without the minutes a side's own rules cannot be judged, so only
+      // approved leave or a correction can say it was away.
       return {
         date: day,
         status: sideStatus,
@@ -275,10 +296,7 @@ export async function loadAttendanceRuleContext(input: {
         verdict: minutes === null ? null : dayVerdict(userId, day, sideStatus, minutes),
       };
     };
-    const saturday = side(addDays(date, -1));
-    const monday = side(addDays(date, 1));
-    // Without the minutes a side's own rules cannot be judged, so only approved
-    // leave or a correction can say it was away.
+    const sides = sandwichSides(date, (day) => calendar.dayStatus(userId, day));
     return judgeSandwich({
       date,
       today,
@@ -286,8 +304,8 @@ export async function loadAttendanceRuleContext(input: {
       sandwichFrom: policy.sandwichFrom,
       mode: modeFor(userId),
       status,
-      saturday,
-      monday,
+      before: sides ? side(sides.before) : null,
+      after: sides ? side(sides.after) : null,
     });
   };
 
@@ -299,7 +317,7 @@ export async function loadAttendanceRuleContext(input: {
     punchFor,
     judge: (userId, date, status, trackedMinutes, minutesOn) => {
       let base = dayVerdict(userId, date, status, trackedMinutes);
-      if (!base && sandwichOn && weekdayForDate(date) === 'sun') {
+      if (!base && sandwichOn && isSandwichOffDay(status)) {
         base = sandwichVerdict(userId, date, status, minutesOn);
       }
       if (!policy.from || date < policy.from || date >= today) return base;

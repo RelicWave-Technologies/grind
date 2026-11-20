@@ -10,9 +10,10 @@ import { sheetWhy } from '../src/reports/monthPerformance';
 /**
  * The November 2026 rule changes end to end: the minimums go from 7h / 3h30
  * to 8h / 4h from 21 November without touching earlier days, and the sandwich
- * rule charges a Sunday between a fully-off Saturday and Monday.
+ * rule charges a weekly off or a holiday — or a run of them — between two
+ * working days the person was away for in full.
  *
- * Asia/Kolkata, Monday-to-Saturday shift. "Now" is 2 December, so every
+ * Asia/Kolkata, Monday-to-Saturday shift unless a test says otherwise. "Now" is 2 December, so every
  * November day is in the past and judged.
  */
 
@@ -28,6 +29,8 @@ const SIX_DAY = {
   sat: { start: '09:00', end: '18:00' },
   sun: null,
 };
+
+const FIVE_DAY = { ...SIX_DAY, sat: null };
 
 /** Hours of tracked work on a date, starting at an IST wall clock (09:00 by default). */
 async function work(userId: string, date: string, hours: number, startIst = '09:00') {
@@ -66,7 +69,7 @@ async function punch(workspaceId: string, userId: string, date: string, inIst = 
   });
 }
 
-async function seed() {
+async function seed(schedule: Record<string, { start: string; end: string } | null> = SIX_DAY) {
   const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
   const ws = await prisma.workspace.create({ data: { name: `EMIAC ${stamp}`, timezone: 'Asia/Kolkata' } });
   await prisma.leavePolicy.create({
@@ -87,14 +90,14 @@ async function seed() {
     });
   const admin = await mk('admin', 'ADMIN');
   const member = await mk('member', 'MEMBER');
-  const shift = await prisma.shift.create({ data: { workspaceId: ws.id, name: 'General', schedule: SIX_DAY } });
+  const shift = await prisma.shift.create({ data: { workspaceId: ws.id, name: 'General', schedule } });
   await prisma.shiftAssignment.create({
     data: {
       userId: member.id,
       shiftId: shift.id,
       effectiveFrom: new Date('2020-01-01T00:00:00Z'),
       shiftNameSnapshot: shift.name,
-      scheduleSnapshot: SIX_DAY,
+      scheduleSnapshot: schedule,
     },
   });
   // One day of balance for September, nothing else.
@@ -124,6 +127,15 @@ async function november(s: Awaited<ReturnType<typeof seed>>) {
   });
   const line = (date: string) => lines.find((l) => l.effectiveOn.toISOString().slice(0, 10) === date)?.days ?? null;
   return { report, day, line };
+}
+
+/** Every working day of November worked in full, except `skip` and the days off. */
+async function workNovember(s: Awaited<ReturnType<typeof seed>>, skip: string[], offWeekdays: number[] = [0]) {
+  for (let d = 1; d <= 30; d++) {
+    const date = `2026-11-${String(d).padStart(2, '0')}`;
+    if (offWeekdays.includes(new Date(`${date}T00:00:00Z`).getUTCDay()) || skip.includes(date)) continue;
+    await officeDay(s, date, 8.5);
+  }
 }
 
 /** A full office day: punched in on time, `hours` tracked. */
@@ -244,6 +256,49 @@ describe('November 2026 rules — 8h / 4h from a date, and the sandwich rule', (
     const s = await seed();
     await prisma.leavePolicy.update({ where: { workspaceId: s.ws.id }, data: { sandwichRuleFrom: '2026-10-01' } });
     // Sat 31 Oct absent (October unworked), Sun 1 Nov, Mon 2 Nov absent.
+    const { day } = await november(s);
+    expect(day('2026-11-01').rule).toEqual({ tag: 'SANDWICH', penaltyDays: 1 });
+  });
+
+  it('charges a holiday between two days away, and not one next to a worked day', async () => {
+    const s = await seed();
+    await prisma.leavePolicy.update({ where: { workspaceId: s.ws.id }, data: { sandwichRuleFrom: '2026-11-20' } });
+    await prisma.companyHoliday.createMany({
+      data: [
+        { workspaceId: s.ws.id, date: new Date('2026-11-25T00:00:00Z'), name: 'Mid-week holiday' },
+        { workspaceId: s.ws.id, date: new Date('2026-11-27T00:00:00Z'), name: 'Friday holiday' },
+      ],
+    });
+    // Tue 24 + Thu 26 absent around the Wed 25 holiday; Sat 28 worked after the Fri 27 one.
+    await workNovember(s, ['2026-11-24', '2026-11-25', '2026-11-26', '2026-11-27']);
+    const { day, line, report } = await november(s);
+    expect(day('2026-11-25').rule).toEqual({ tag: 'SANDWICH', penaltyDays: 1 });
+    expect(line('2026-11-25')).toBe(-1);
+    expect(sheetWhy(report, day('2026-11-25'))).toBe('sandwich');
+    expect(['PL', 'LWP']).toContain(day('2026-11-25').code);
+    expect(day('2026-11-27').rule).toBeNull();
+    expect(day('2026-11-27').code).toBe('HL');
+  });
+
+  it('charges every day of a two-day weekend between a Friday and a Monday away', async () => {
+    const s = await seed(FIVE_DAY);
+    await prisma.leavePolicy.update({ where: { workspaceId: s.ws.id }, data: { sandwichRuleFrom: '2026-11-20' } });
+    // Fri 27 + Mon 30 absent around Sat 28 / Sun 29; Fri 20 absent but Mon 23 worked.
+    await workNovember(s, ['2026-11-20', '2026-11-27', '2026-11-30'], [0, 6]);
+    const { day, line } = await november(s);
+    expect(day('2026-11-28').rule).toEqual({ tag: 'SANDWICH', penaltyDays: 1 });
+    expect(day('2026-11-29').rule).toEqual({ tag: 'SANDWICH', penaltyDays: 1 });
+    expect(line('2026-11-28')).toBe(-1);
+    expect(line('2026-11-29')).toBe(-1);
+    expect(day('2026-11-21').rule).toBeNull();
+    expect(day('2026-11-22').rule).toBeNull();
+  });
+
+  it('reaches across the month end over a two-day weekend', async () => {
+    const s = await seed(FIVE_DAY);
+    await prisma.leavePolicy.update({ where: { workspaceId: s.ws.id }, data: { sandwichRuleFrom: '2026-10-01' } });
+    // Fri 30 Oct absent (October unworked), Sat 31 Oct + Sun 1 Nov off, Mon 2 Nov absent.
+    await workNovember(s, ['2026-11-02'], [0, 6]);
     const { day } = await november(s);
     expect(day('2026-11-01').rule).toEqual({ tag: 'SANDWICH', penaltyDays: 1 });
   });

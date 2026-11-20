@@ -5,6 +5,8 @@ import {
   isLateArrival,
   judgeDay,
   judgeSandwich,
+  sandwichSides,
+  SANDWICH_MAX_OFF_RUN,
   ruleCode,
   withLateRule,
   type AttendanceDayFacts,
@@ -345,8 +347,8 @@ describe('sandwich rule', () => {
       rulesFrom: '2026-09-01',
       sandwichFrom: '2026-11-21',
       status: OFF,
-      saturday: side('2026-11-21', { verdict: LWA }),
-      monday: side('2026-11-23', { verdict: LWA }),
+      before: side('2026-11-21', { verdict: LWA }),
+      after: side('2026-11-23', { verdict: LWA }),
       ...over,
     });
 
@@ -354,47 +356,51 @@ describe('sandwich rule', () => {
     expect(sandwich()).toEqual({ tag: 'SANDWICH', penaltyDays: 1 });
   });
 
+  it('charges a holiday between two days away the same way', () => {
+    expect(sandwich({ status: HOLIDAY })).toEqual({ tag: 'SANDWICH', penaltyDays: 1 });
+  });
+
+  it('never charges a working day, or a day off past the longest run', () => {
+    expect(sandwich({ status: WORKING })).toBeNull();
+    expect(sandwich({ before: null })).toBeNull();
+    expect(sandwich({ after: null })).toBeNull();
+  });
+
   it('counts approved full-day leave, paid or unpaid, as away', () => {
-    expect(sandwich({ saturday: side('2026-11-21', { status: FULL_PAID }), monday: side('2026-11-23', { status: FULL_UNPAID }) }))
+    expect(sandwich({ before: side('2026-11-21', { status: FULL_PAID }), after: side('2026-11-23', { status: FULL_UNPAID }) }))
       .toEqual({ tag: 'SANDWICH', penaltyDays: 1 });
     // Half-day leave whose working half fell short is a whole day away too.
-    expect(sandwich({ monday: side('2026-11-23', { status: HALF_PAID, verdict: { tag: 'HALF_DAY_SHORT', penaltyDays: 0.5 } }) }))
+    expect(sandwich({ after: side('2026-11-23', { status: HALF_PAID, verdict: { tag: 'HALF_DAY_SHORT', penaltyDays: 0.5 } }) }))
       .toEqual({ tag: 'SANDWICH', penaltyDays: 1 });
   });
 
   it('counts a day under the half-day minimum as away', () => {
-    expect(sandwich({ monday: side('2026-11-23', { verdict: { tag: 'UNDER_MIN', penaltyDays: 1 } }) }))
+    expect(sandwich({ after: side('2026-11-23', { verdict: { tag: 'UNDER_MIN', penaltyDays: 1 } }) }))
       .toEqual({ tag: 'SANDWICH', penaltyDays: 1 });
   });
 
   it('does not charge when either side was worked, even as a half day', () => {
-    expect(sandwich({ monday: side('2026-11-23') })).toBeNull();
-    expect(sandwich({ saturday: side('2026-11-21', { verdict: { tag: 'SHORT_DAY', penaltyDays: 0.5 } }) })).toBeNull();
-    expect(sandwich({ saturday: side('2026-11-21', { status: HALF_PAID }) })).toBeNull();
+    expect(sandwich({ after: side('2026-11-23') })).toBeNull();
+    expect(sandwich({ before: side('2026-11-21', { verdict: { tag: 'SHORT_DAY', penaltyDays: 0.5 } }) })).toBeNull();
+    expect(sandwich({ before: side('2026-11-21', { status: HALF_PAID }) })).toBeNull();
   });
 
-  it('does not charge when the Saturday or Monday is a holiday or a week off', () => {
-    expect(sandwich({ saturday: side('2026-11-21', { status: HOLIDAY }) })).toBeNull();
-    expect(sandwich({ saturday: side('2026-11-21', { status: OFF }) })).toBeNull();
-    expect(sandwich({ monday: side('2026-11-23', { status: HOLIDAY }) })).toBeNull();
-  });
-
-  it('leaves a Sunday holiday alone', () => {
-    expect(sandwich({ status: HOLIDAY })).toBeNull();
+  it('does not charge when a side has no shift', () => {
+    expect(sandwich({ before: side('2026-11-21', { status: status('NO_SHIFT', 0), verdict: LWA }) })).toBeNull();
   });
 
   it('follows a manager correction on either side', () => {
-    expect(sandwich({ monday: side('2026-11-23', { verdict: LWA, override: 'P' }) })).toBeNull();
-    expect(sandwich({ monday: side('2026-11-23', { override: 'FULL_LEAVE' }) })).toEqual({ tag: 'SANDWICH', penaltyDays: 1 });
-    expect(sandwich({ monday: side('2026-11-23', { override: 'HALF_LEAVE' }) })).toBeNull();
+    expect(sandwich({ after: side('2026-11-23', { verdict: LWA, override: 'P' }) })).toBeNull();
+    expect(sandwich({ after: side('2026-11-23', { override: 'FULL_LEAVE' }) })).toEqual({ tag: 'SANDWICH', penaltyDays: 1 });
+    expect(sandwich({ after: side('2026-11-23', { override: 'HALF_LEAVE' }) })).toBeNull();
   });
 
-  it('waits until the Monday is over', () => {
+  it('waits until the working day after the run is over', () => {
     expect(sandwich({ today: '2026-11-23' })).toBeNull();
     expect(sandwich({ today: '2026-11-24' })).toEqual({ tag: 'SANDWICH', penaltyDays: 1 });
   });
 
-  it('is off without a start date, and never reaches a weekend that starts before it', () => {
+  it('is off without a start date, and never reaches a run whose day before is earlier', () => {
     expect(sandwich({ sandwichFrom: null })).toBeNull();
     expect(sandwich({ sandwichFrom: '2026-11-22' })).toBeNull();
     expect(sandwich({ rulesFrom: null })).toBeNull();
@@ -405,8 +411,43 @@ describe('sandwich rule', () => {
     expect(sandwich({ mode: 'REMOTE' })).toEqual({ tag: 'SANDWICH', penaltyDays: 1 });
   });
 
+  describe('finding the working days either side', () => {
+    // 2026-11: Fri 20, Sat 21, Sun 22, Mon 23, Tue 24.
+    const calendar = (off: string[]) => (day: string) => (off.includes(day) ? OFF : WORKING);
+
+    it('a single Sunday off: Saturday and Monday', () => {
+      expect(sandwichSides('2026-11-22', calendar(['2026-11-22']))).toEqual({ before: '2026-11-21', after: '2026-11-23' });
+    });
+
+    it('a Saturday and Sunday off: Friday and Monday, from either day', () => {
+      const cal = calendar(['2026-11-21', '2026-11-22']);
+      expect(sandwichSides('2026-11-21', cal)).toEqual({ before: '2026-11-20', after: '2026-11-23' });
+      expect(sandwichSides('2026-11-22', cal)).toEqual({ before: '2026-11-20', after: '2026-11-23' });
+    });
+
+    it('a holiday next to a weekly off joins the run', () => {
+      const cal = (day: string) => (day === '2026-11-23' ? HOLIDAY : day === '2026-11-22' ? OFF : WORKING);
+      expect(sandwichSides('2026-11-23', cal)).toEqual({ before: '2026-11-21', after: '2026-11-24' });
+    });
+
+    it('a weekday week off, any day of the week', () => {
+      expect(sandwichSides('2026-11-24', calendar(['2026-11-24']))).toEqual({ before: '2026-11-23', after: '2026-11-25' });
+    });
+
+    it(`gives up on a run longer than ${SANDWICH_MAX_OFF_RUN} days`, () => {
+      const run = (n: number) => Array.from({ length: n }, (_, i) => `2026-12-${String(i + 1).padStart(2, '0')}`);
+      expect(sandwichSides('2026-12-01', calendar(run(SANDWICH_MAX_OFF_RUN)))).toEqual({
+        before: '2026-11-30',
+        after: `2026-12-${String(SANDWICH_MAX_OFF_RUN + 1).padStart(2, '0')}`,
+      });
+      expect(sandwichSides('2026-12-01', calendar(run(SANDWICH_MAX_OFF_RUN + 1)))).toBeNull();
+      expect(sandwichSides('2026-12-05', calendar(run(SANDWICH_MAX_OFF_RUN + 1)))).toBeNull();
+    });
+  });
+
   it('costs a full day of leave on the sheet: paid while the balance lasts', () => {
     expect(ruleCode(OFF, { tag: 'SANDWICH', penaltyDays: 1 }, undefined)).toBe('PL');
     expect(ruleCode(OFF, { tag: 'SANDWICH', penaltyDays: 1 }, 0)).toBe('LWP');
+    expect(ruleCode(HOLIDAY, { tag: 'SANDWICH', penaltyDays: 1 }, undefined)).toBe('PL');
   });
 });

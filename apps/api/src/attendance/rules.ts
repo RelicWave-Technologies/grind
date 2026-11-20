@@ -1,5 +1,6 @@
 import { dayCredit, isLate } from '@grind/core';
 import {
+  addDays,
   roundToHalfDay,
   type AttendanceRuleMode,
   type AttendanceRuleTag,
@@ -26,10 +27,13 @@ import type { MonthPerformanceCode } from '../reports/monthPerformance';
  *      (14:00 by default), no grace. A few a month are allowed; each one after
  *      that is half a day of leave — unless another rule already charged that
  *      day, which is the one cut.
- *   6. Sandwich: a Sunday between a Saturday and a Monday that were both normal
- *      working days and that the person was away for in full — leave of any
- *      kind, or a rule that made the whole day leave — is a day of leave too.
- *      Not when the Saturday or the Monday is a holiday or a weekly off.
+ *   6. Sandwich: a weekly off or a holiday — or a run of them — between two
+ *      normal working days that the person was away for in full (leave of any
+ *      kind, or a rule that made the whole day leave) is leave too, a day for
+ *      each day off in the run. Saturday leave + Sunday off + Monday leave makes
+ *      the Sunday leave; Friday leave + Saturday and Sunday off + Monday leave
+ *      makes both. A run longer than `SANDWICH_MAX_OFF_RUN` days is never
+ *      charged.
  *
  * A verdict is a number of days of leave, never a new kind of day. Whether that
  * leave is paid is the balance's answer, decided by the same funding walk that
@@ -134,7 +138,7 @@ export type SandwichOverrideCode = 'P' | 'A' | 'HALF_LEAVE' | 'FULL_LEAVE' | 'PL
 /** A correction that says the person was away all day. */
 const AWAY_ALL_DAY_OVERRIDES = new Set<SandwichOverrideCode>(['A', 'FULL_LEAVE', 'PL', 'LWP']);
 
-/** What the sandwich rule needs to know about the Saturday or the Monday. */
+/** What the sandwich rule needs to know about a working day either side of the days off. */
 export interface SandwichSideDay {
   status: DayStatus | null;
   /** That day's own rule verdict (late rule aside). */
@@ -143,11 +147,50 @@ export interface SandwichSideDay {
   override: SandwichOverrideCode | null;
 }
 
+/** The longest run of days off the sandwich rule looks across. */
+export const SANDWICH_MAX_OFF_RUN = 9;
+
+/** A day the sandwich rule can turn into leave: a weekly off or a holiday. */
+export function isSandwichOffDay(status: DayStatus | null): boolean {
+  return status?.kind === 'WEEKLY_OFF' || status?.kind === 'HOLIDAY';
+}
+
+/**
+ * The days either side of the run of days off that `date` belongs to: the last
+ * day before it and the first day after it that is not a day off. null on a
+ * side whose run goes on past `SANDWICH_MAX_OFF_RUN` days.
+ */
+export function sandwichSides(
+  date: string,
+  statusOn: (date: string) => DayStatus | null,
+): { before: string; after: string } | null {
+  const walk = (step: 1 | -1): string | null => {
+    let day = date;
+    // `date` itself is one of the run; at most MAX - 1 more off days on this side.
+    for (let i = 0; i < SANDWICH_MAX_OFF_RUN; i++) {
+      day = addDays(day, step);
+      if (!isSandwichOffDay(statusOn(day))) return day;
+    }
+    return null;
+  };
+  const before = walk(-1);
+  const after = walk(1);
+  if (!before || !after) return null;
+  // The whole run, both ends counted, is what the limit is about.
+  if (dayDiff(before, after) - 1 > SANDWICH_MAX_OFF_RUN) return null;
+  return { before, after };
+}
+
+function dayDiff(from: string, to: string): number {
+  return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
+}
+
 /**
  * Was the person away for the whole of a normal working day? Only a working
- * day counts — a holiday or weekly off on either side means no sandwich — and
- * away means a full day of leave of any kind, approved or charged by a rule.
- * A half day, or any part of the day worked and counted, is not away.
+ * day counts — the days either side of a run of days off are working days by
+ * construction, but a day with no shift is not — and away means a full day of
+ * leave of any kind, approved or charged by a rule. A half day, or any part of
+ * the day worked and counted, is not away.
  */
 export function awayAllWorkingDay(day: SandwichSideDay): boolean {
   const status = day.status;
@@ -160,14 +203,14 @@ export function awayAllWorkingDay(day: SandwichSideDay): boolean {
 }
 
 /**
- * The sandwich rule's verdict for a Sunday, or null.
+ * The sandwich rule's verdict for a weekly off or a holiday, or null.
  *
- * Charged only once the Monday is over — until then the Monday's own verdict
- * is not settled — and only when the whole Saturday–Monday stretch is on or
- * after the date the policy switched the rule on.
+ * Charged only once the working day after the run is over — until then that
+ * day's own verdict is not settled — and only when the working day before it
+ * is on or after the date the policy switched the rule on.
  */
 export function judgeSandwich(input: {
-  /** YYYY-MM-DD of the Sunday. */
+  /** YYYY-MM-DD of the day off. */
   date: string;
   today: string;
   /** The rules' own start, or null when they are off. */
@@ -176,16 +219,17 @@ export function judgeSandwich(input: {
   sandwichFrom: string | null;
   mode?: AttendanceRuleMode;
   status: DayStatus | null;
-  saturday: SandwichSideDay & { date: string };
-  monday: SandwichSideDay & { date: string };
+  /** The working days either side of the run of days off; null past the limit. */
+  before: (SandwichSideDay & { date: string }) | null;
+  after: (SandwichSideDay & { date: string }) | null;
 }): AttendanceRuleVerdict | null {
   if (!input.rulesFrom || !input.sandwichFrom) return null;
   if (input.mode === 'EXEMPT') return null;
-  if (input.saturday.date < input.rulesFrom || input.saturday.date < input.sandwichFrom) return null;
-  if (input.monday.date >= input.today) return null;
-  // The Sunday itself is a weekly off; a holiday on a Sunday stays a holiday.
-  if (input.status?.kind !== 'WEEKLY_OFF') return null;
-  if (!awayAllWorkingDay(input.saturday) || !awayAllWorkingDay(input.monday)) return null;
+  if (!isSandwichOffDay(input.status)) return null;
+  if (!input.before || !input.after) return null;
+  if (input.before.date < input.rulesFrom || input.before.date < input.sandwichFrom) return null;
+  if (input.after.date >= input.today) return null;
+  if (!awayAllWorkingDay(input.before) || !awayAllWorkingDay(input.after)) return null;
   return { tag: 'SANDWICH', penaltyDays: 1 };
 }
 

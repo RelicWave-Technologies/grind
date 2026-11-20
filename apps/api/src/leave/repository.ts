@@ -343,9 +343,10 @@ export async function loadWorkingCalendar(input: {
   const costOf = (userId: string, date: string): number => {
     const status = priced.dayStatus(userId, date);
     const free = status.kind === 'WEEKLY_OFF' || status.kind === 'HOLIDAY' || status.kind === 'NO_SHIFT';
-    // A weekly off costs nothing — except the Sunday the sandwich rule turned
-    // into leave, the one rule that charges a day off. Its line says what.
-    if (free) return status.kind === 'WEEKLY_OFF' ? roundToHalfDay(ruleCostFor.get(`${userId}\u0000${date}`) ?? 0) : 0;
+    // A day off costs nothing — except a weekly off or holiday the sandwich
+    // rule turned into leave, the one rule that charges a day off. Its line
+    // says what.
+    if (free) return status.kind === 'NO_SHIFT' ? 0 : roundToHalfDay(ruleCostFor.get(`${userId}\u0000${date}`) ?? 0);
     const override = overrideFor.get(`${userId}\u0000${date}`);
     // A rule's leave sits on top of whatever was approved: half a day of
     // approved leave plus half a day the rule added is a whole day spent.

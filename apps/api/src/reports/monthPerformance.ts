@@ -110,7 +110,7 @@ interface RuleSettings {
    * `fullDay` / `halfDay` here, days from it on the numbers above.
    */
   minimumsChange?: { from: string; fullDay: number; halfDay: number };
-  /** The sandwich rule judges this month's Sundays from this date, when on. */
+  /** The sandwich rule judges this month's weekly offs and holidays from this date, when on. */
   sandwichFrom?: string | null;
 }
 

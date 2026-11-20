@@ -443,8 +443,8 @@ function buildLegendSheet(wb: ExcelJS.Workbook, report: MonthPerformanceReport):
     if (settings.sandwichFrom) {
       reasons.push([
         'sandwich',
-        'A Sunday between a Saturday and a Monday both taken off in full (both normal working days) ' +
-          'counts as leave too. Not when either day is a holiday or a week off',
+        'A week off or holiday (or a run of them) between two working days both taken off in full ' +
+          'counts as leave too, a day for each day off',
       ]);
     }
     for (const [word, means] of reasons) {

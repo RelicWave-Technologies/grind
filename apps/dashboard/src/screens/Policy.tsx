@@ -246,7 +246,7 @@ export function PolicyScreen() {
                 <PolicyRule
                   label="Sandwich"
                   value={leaveQ.data.sandwichRuleFrom ?? 'Off'}
-                  hint={leaveQ.data.sandwichRuleFrom ? 'Sat + Mon off → Sunday is leave' : 'Sundays never charged'}
+                  hint={leaveQ.data.sandwichRuleFrom ? 'Away both sides → days off between are leave' : 'Days off never charged'}
                 />
               </div>
             </Card>
@@ -687,7 +687,7 @@ function AttendanceRulesModal({
                   <Input className="pol-input-mono" type="date" value={minimumsFrom} onChange={(e) => setMinimumsFrom(e.target.value)} />
                 </Field>
               )}
-              <Field label="Sandwich rule from" hint="Sat + Mon both off → Sunday is leave. Empty turns it off.">
+              <Field label="Sandwich rule from" hint="Away in full on both working days around a week off or holiday → those days off are leave. Empty turns it off.">
                 <Input className="pol-input-mono" type="date" value={sandwichFrom} onChange={(e) => setSandwichFrom(e.target.value)} />
               </Field>
               <Field label="Late allowed" hint="A month. Each one after is half a day.">

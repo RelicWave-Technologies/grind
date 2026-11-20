@@ -22,7 +22,7 @@ import { Role } from './auth';
  *   NO_APPLICATION      nothing worked, nothing applied for
  *   LEAVE_NOT_APPROVED  nothing worked; leave was applied for but is pending or rejected
  *   LATE                punched in after the shift start plus its grace, past the month's allowance
- *   SANDWICH            a Sunday between a Saturday and a Monday the person was away for in full
+ *   SANDWICH            a weekly off or holiday between two working days the person was away for in full
  */
 export const AttendanceRuleTagSchema = z.enum([
   'SHORT_DAY',
@@ -60,7 +60,7 @@ export const ATTENDANCE_RULE_LABEL: Record<AttendanceRuleTag, string> = {
   NO_APPLICATION: 'Absent without a leave application — leave without approval',
   LEAVE_NOT_APPROVED: 'Absent; the leave applied for was not approved — leave without approval',
   LATE: 'Late arrival past the monthly allowance — half a day of leave',
-  SANDWICH: 'Sunday between a Saturday and a Monday both taken off — the Sunday counts as leave too',
+  SANDWICH: 'Week off or holiday between two working days both taken off — counts as leave too',
 };
 
 /**
@@ -83,7 +83,7 @@ export const ATTENDANCE_RULE_REASON: Record<AttendanceRuleTag, string> = {
   NO_APPLICATION: 'Absent, no leave applied',
   LEAVE_NOT_APPROVED: 'Absent, leave not approved',
   LATE: 'Late arrival',
-  SANDWICH: 'Sandwich Sunday',
+  SANDWICH: 'Sandwich day',
 };
 
 /** What a rule decided about one person-day. */

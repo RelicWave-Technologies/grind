@@ -217,8 +217,8 @@ export const LeavePolicyDtoSchema = z.object({
    */
   minimumsHistory: z.array(AttendanceMinimumsEraSchema),
   /**
-   * First YYYY-MM-DD the sandwich rule judges (a Sunday between a fully-off
-   * Saturday and Monday is leave too). null = off.
+   * First YYYY-MM-DD the sandwich rule judges (a weekly off or holiday between
+   * two working days taken off in full is leave too). null = off.
    */
   sandwichRuleFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u).nullable(),
   /** Working from home without an approved request is leave. */
