@@ -11,8 +11,10 @@ import { logger } from '../src/logger';
  * Production-grade refresh-token rotation:
  *   - /v1/auth/refresh (agent, bearer body) rotates single-use.
  *   - /v1/auth/refresh-cookie (dashboard, httpOnly cookie) rotates + re-sets cookies.
- *   - Reuse of an already-spent token outside a short browser-concurrency
- *     grace trips reuse-detection and revokes the whole family.
+ *   - A spent token whose successor was never rotated is a lost response and
+ *     rotates again, however late (a laptop asleep with a refresh in flight).
+ *   - Any other reuse of a spent token, outside a short browser-concurrency
+ *     grace, trips reuse-detection and revokes the whole family.
  */
 
 const app = buildApp();
@@ -33,6 +35,16 @@ async function login() {
   });
   const res = await request(app).post('/v1/auth/login').send({ email: user.email, password });
   return { user, res };
+}
+
+const HOUR_MS = 60 * 60_000;
+
+/** Age a spent token as if the clock had moved on: it was spent `ms` ago. */
+async function spentAgo(token: string, ms: number): Promise<void> {
+  await prisma.refreshToken.update({
+    where: { tokenHash: sha256(token) },
+    data: { revokedAt: new Date(Date.now() - ms) },
+  });
 }
 
 function grindRt(setCookie: string[] | string | undefined): string | null {
@@ -121,29 +133,55 @@ describe('refresh rotation', () => {
     expect(live).toHaveLength(1);
   });
 
-  it('a replay outside the grace window with an unused successor is still reuse', async () => {
-    const { res } = await login();
+  it('a laptop that slept through the response still rotates when it wakes', async () => {
+    const { user, res } = await login();
     const rt0 = res.body.refreshToken as string;
-    const r1 = await request(app).post('/v1/auth/refresh').send({ refreshToken: rt0 });
-    await prisma.refreshToken.update({
-      where: { tokenHash: sha256(rt0) },
-      data: { revokedAt: new Date(Date.now() - REFRESH_REUSE_GRACE_MS - 1000) },
+    // The server rotated, the laptop went to sleep before the reply landed.
+    const lost = await request(app).post('/v1/auth/refresh').send({ refreshToken: rt0 });
+    expect(lost.status).toBe(200);
+    await spentAgo(rt0, 9 * HOUR_MS);
+
+    // It wakes holding rt0 and retries. The successor was never rotated, so
+    // this is the same lost response as an immediate retry, only later.
+    const woke = await request(app).post('/v1/auth/refresh').send({ refreshToken: rt0 });
+    expect(woke.status).toBe(200);
+    expect(woke.body.accessToken).toBeTruthy();
+
+    const live = await prisma.refreshToken.findMany({
+      where: { userId: user.id, revokedAt: null },
+      select: { tokenHash: true },
     });
-    const replay = await request(app).post('/v1/auth/refresh').send({ refreshToken: rt0 });
-    expect(replay.status).toBe(401);
-    const afterNuke = await request(app).post('/v1/auth/refresh').send({ refreshToken: r1.body.refreshToken });
-    expect(afterNuke.status).toBe(401);
+    expect(live).toHaveLength(1);
+    expect(live[0].tokenHash).toBe(sha256(woke.body.refreshToken as string));
+
+    const next = await request(app).post('/v1/auth/refresh').send({ refreshToken: woke.body.refreshToken });
+    expect(next.status).toBe(200);
   });
 
-  it('reuse-detection: replaying a spent token revokes the whole family', async () => {
+  it('a second lost response on the next wake rotates again from the same token', async () => {
+    const { res } = await login();
+    const rt0 = res.body.refreshToken as string;
+    await request(app).post('/v1/auth/refresh').send({ refreshToken: rt0 });
+    await spentAgo(rt0, HOUR_MS);
+    const firstWake = await request(app).post('/v1/auth/refresh').send({ refreshToken: rt0 });
+    expect(firstWake.status).toBe(200);
+
+    // That reply was lost as well; the laptop still holds rt0 on the next wake.
+    const secondWake = await request(app).post('/v1/auth/refresh').send({ refreshToken: rt0 });
+    expect(secondWake.status).toBe(200);
+
+    const stillLive = await request(app).post('/v1/auth/refresh').send({ refreshToken: secondWake.body.refreshToken });
+    expect(stillLive.status).toBe(200);
+  });
+
+  it('reuse-detection: replaying a token whose successor was used revokes the whole family', async () => {
     const { res } = await login();
     const rt0 = res.body.refreshToken as string;
     const r1 = await request(app).post('/v1/auth/refresh').send({ refreshToken: rt0 });
-    const rt1 = r1.body.refreshToken as string; // the legitimate live token
-    await prisma.refreshToken.update({
-      where: { tokenHash: sha256(rt0) },
-      data: { revokedAt: new Date(Date.now() - REFRESH_REUSE_GRACE_MS - 1000) },
-    });
+    // The legitimate client stored rt1 and has rotated on from it.
+    const r2 = await request(app).post('/v1/auth/refresh').send({ refreshToken: r1.body.refreshToken });
+    const rt2 = r2.body.refreshToken as string; // the legitimate live token
+    await spentAgo(rt0, REFRESH_REUSE_GRACE_MS + 1000);
     // Attacker replays the already-spent rt0 → reuse detected → family nuked.
     const warn = vi.spyOn(logger, 'warn');
     const replay = await request(app).post('/v1/auth/refresh').send({ refreshToken: rt0 });
@@ -156,8 +194,44 @@ describe('refresh rotation', () => {
     );
     warn.mockRestore();
     // The legitimate current token is now revoked too.
-    const afterNuke = await request(app).post('/v1/auth/refresh').send({ refreshToken: rt1 });
+    const afterNuke = await request(app).post('/v1/auth/refresh').send({ refreshToken: rt2 });
     expect(afterNuke.status).toBe(401);
+  });
+
+  it('reuse-detection: a retired successor replayed after its replacement was used revokes the family', async () => {
+    const { res } = await login();
+    const rt0 = res.body.refreshToken as string;
+    const r1 = await request(app).post('/v1/auth/refresh').send({ refreshToken: rt0 });
+    const rt1 = r1.body.refreshToken as string;
+    await spentAgo(rt0, HOUR_MS);
+    // Someone replays rt0 and rotates on; rt1 is retired without being used.
+    const taken = await request(app).post('/v1/auth/refresh').send({ refreshToken: rt0 });
+    expect(taken.status).toBe(200);
+    const moved = await request(app).post('/v1/auth/refresh').send({ refreshToken: taken.body.refreshToken });
+    expect(moved.status).toBe(200);
+    await spentAgo(rt1, HOUR_MS);
+
+    // The other holder now presents rt1: two parties hold this family.
+    const clash = await request(app).post('/v1/auth/refresh').send({ refreshToken: rt1 });
+    expect(clash.status).toBe(401);
+    expect(clash.body.reason).toBe('reuse');
+    const afterNuke = await request(app).post('/v1/auth/refresh').send({ refreshToken: moved.body.refreshToken });
+    expect(afterNuke.status).toBe(401);
+  });
+
+  it('a spent token replayed after logout does not bring the session back', async () => {
+    const { res } = await login();
+    const rt0 = res.body.refreshToken as string;
+    const r1 = await request(app).post('/v1/auth/refresh').send({ refreshToken: rt0 });
+    const out = await request(app)
+      .post('/v1/auth/logout')
+      .set('Authorization', `Bearer ${r1.body.accessToken as string}`)
+      .send({ refreshToken: r1.body.refreshToken });
+    expect(out.status).toBe(200);
+    await spentAgo(rt0, HOUR_MS);
+
+    const replay = await request(app).post('/v1/auth/refresh').send({ refreshToken: rt0 });
+    expect(replay.status).toBe(401);
   });
 
   it('POST /v1/auth/refresh-cookie rotates via cookie + re-sets both cookies', async () => {

@@ -12,8 +12,10 @@ import { runSyncHealthAlertOnce } from './syncHealthAlert';
  * AgentAuthCode, every manual-time card an outbox event and a message ledger
  * row. None of them is read again once it is settled and old:
  *
- *   - RefreshToken: expired, or revoked, more than 7 days ago. Reuse detection
- *     only needs a spent token for the grace window (minutes); a week is slack.
+ *   - RefreshToken: expired, or revoked, more than 7 days ago. A spent token
+ *     must outlive the longest a laptop sleeps with a refresh in flight: its
+ *     replay on wake is honoured only while the row exists (lib/refreshToken.ts).
+ *     Past a week the replay is `invalid` and that person signs in once.
  *   - AgentAuthCode: expired (they live 120s and are single-use).
  *   - ManualTimeLarkOutboxEvent: DONE more than 30 days ago.
  *   - ManualTimeLarkMessage: in a terminal state (superseded, decided,
