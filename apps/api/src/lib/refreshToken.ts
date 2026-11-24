@@ -12,12 +12,10 @@ export type IssuedRefresh = {
 };
 
 /**
- * How long a just-spent refresh token may still be replayed without being
- * treated as theft. Two clients legitimately do this: a browser whose tabs
- * refresh at the same moment, and any client whose rotation response was lost
- * (5xx, dropped socket, timeout) and who retries with the token it still holds.
- * Inside this window, a replay whose successor has never been used rotates
- * again from it; see {@link rotateRefreshToken}.
+ * How long a just-spent refresh token may still be replayed after the family
+ * has moved on without being treated as theft: a browser whose tabs refresh at
+ * the same moment. A replay whose successor was never used is a lost response
+ * and has no such window; see {@link rotateRefreshToken}.
  */
 export const REFRESH_REUSE_GRACE_MS = 2 * 60_000;
 
@@ -118,14 +116,18 @@ async function mintSuccessor(
  *
  * Presenting an ALREADY-SPENT token is judged from what the database recorded:
  *
- *   - spent within {@link REFRESH_REUSE_GRACE_MS} and its successor has never
- *     been used: the caller never received that successor (lost response, or a
- *     second tab). Retire the unused successor and rotate again from here. A
- *     thief replaying the token gains nothing durable: the legitimate client's
- *     next use of the retired successor is itself a replay, outside the window
- *     or with a used successor, and revokes the family.
- *   - spent within the window but the family has already moved on: benign
- *     browser concurrency — `reuse_grace`, nothing revoked, nothing minted.
+ *   - its successor is still live and has never been rotated: the caller never
+ *     stored that successor (lost response, or a second tab). Retire the unused
+ *     successor and rotate again from here, however long ago the token was
+ *     spent. A laptop that sleeps with a refresh in flight replays the spent
+ *     token when it wakes, minutes or days later; a time limit here signed
+ *     those people out every evening. The cost is that a thief holding the
+ *     direct parent of an unrotated token can rotate from it; the family is
+ *     still revoked as soon as either side replays a token whose successor
+ *     has been used.
+ *   - spent within {@link REFRESH_REUSE_GRACE_MS} but the family has already
+ *     moved on: benign browser concurrency — `reuse_grace`, nothing revoked,
+ *     nothing minted.
  *   - anything else is reuse: revoke every live token in the family.
  *
  * The rule lives in the database, so it holds across restarts and instances.
@@ -141,8 +143,9 @@ export async function rotateRefreshToken(presented: string): Promise<RotateResul
     const now = new Date();
 
     if (row.revokedAt) {
-      const withinGrace = now.getTime() - row.revokedAt.getTime() <= REFRESH_REUSE_GRACE_MS;
-      if (withinGrace && row.replacedById) {
+      // No time limit on this branch: an unrotated successor means the caller
+      // never stored it, whether it retries a second later or after a night asleep.
+      if (row.replacedById) {
         const successor = await tx.refreshToken.findUnique({
           where: { id: row.replacedById },
           select: { id: true, revokedAt: true, expiresAt: true },
@@ -162,6 +165,7 @@ export async function rotateRefreshToken(presented: string): Promise<RotateResul
           return mintSuccessor(tx, row, gate.role, [row.id, successor.id]);
         }
       }
+      const withinGrace = now.getTime() - row.revokedAt.getTime() <= REFRESH_REUSE_GRACE_MS;
       if (withinGrace) {
         const live = await tx.refreshToken.findFirst({
           where: { familyId: row.familyId, revokedAt: null },

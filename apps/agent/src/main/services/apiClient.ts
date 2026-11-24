@@ -175,11 +175,11 @@ async function refreshFailureReason(res: Response): Promise<string | null> {
  * Send the refresh, retrying ONCE straight away when no answer came back.
  *
  * A timeout does not mean the server did nothing: it may have rotated the token
- * and lost the reply. The server keeps that rotation's result for a 30-second
- * reuse grace and hands the same successor back to a replay of the spent
- * token — but only inside that window. Waiting for the next scheduled request
- * (a heartbeat is a minute away) lands outside it, where the replay reads as
- * token theft and the whole family is revoked. So the retry is immediate.
+ * and lost the reply. The server rotates again from a replay of the spent
+ * token for as long as the successor it minted has never been rotated, so the
+ * retry is safe whether it lands a second later or after the laptop slept
+ * through the first attempt. It is immediate so the session is back before the
+ * next scheduled request (a heartbeat is a minute away) has to fail first.
  */
 async function sendRefresh(current: StoredTokens): Promise<Response> {
   const request = () => rawFetch('/v1/auth/refresh', {
