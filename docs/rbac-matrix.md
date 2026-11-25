@@ -58,6 +58,8 @@ says whose time she may change.
 | Team today (`/admin/overview`) | `overview.read` | ✅ | 👥 | ❌ | 👥 | ❌ |
 | **Edits** — correct attendance | `attendance.correct` + `editUserIds`, never self (non-admin) | ✅ | 👥 | ❌ | 👥 | ❌ |
 | Add/edit/delete someone's time | `time.team.edit` + `editUserIds` | ✅ | 👥 | 🙋 | 👥 | 🙋 |
+| Remove part of tracked time (reason required) | `time.self.edit` own · `time.team.edit` + `editUserIds` others | ✅ | 👥 + own | 🙋 own | 👥 + own | 🙋 own |
+| Put removed time back | `time.team.edit` + `editUserIds`, never self (non-admin) | ✅ | 👥 | ❌ | 👥 | ❌ |
 | Approvals queue + decide | `approvals.*.decide` + `editUserIds`; self-approve ADMIN/MANAGER/HR | ✅ | 👥 + own | 🙋 own (auto-approved on create) | 👥 + own | ❌ |
 | Reopen a decided request | `requireAdmin` | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Anti-cheat flags list + resolve | `flags.*.review` + `editUserIds`, never self (non-admin) | ✅ | 👥 | ❌ | 👥 | ❌ |

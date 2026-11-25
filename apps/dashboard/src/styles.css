@@ -435,6 +435,20 @@ body {
 }
 .ribbon-block-gap { background: transparent; }
 .ribbon-block.is-pickable { cursor: pointer; }
+/* Time taken out of the day: the block keeps its place but loses its fill — a
+   dashed outline with a strike through it, so it reads as crossed out. */
+.ribbon-block.is-removed {
+  background: transparent;
+  box-shadow: none;
+  border: 1px dashed var(--ui-ink-3);
+}
+.ribbon-block.is-removed::after {
+  content: '';
+  position: absolute;
+  left: 2px; right: 2px; top: 50%;
+  height: 1px;
+  background: var(--ui-ink-3);
+}
 .ribbon-note { margin: var(--ui-sp-3) 0 0; }
 
 .ribbon-pending {
@@ -535,6 +549,8 @@ body {
 .kind-pending::before  { background: var(--danger); }
 .kind-rejected::before { background: var(--danger); }
 .kind-gap::before { background: transparent; box-shadow: inset 0 0 0 1px var(--separator-strong); }
+/* A minus sign, not a dot: this time was taken away. */
+.kind-removed::before { width: 8px; height: 2px; border-radius: 0; background: var(--ui-ink-3); }
 
 /* ============================================================================
    Approvals
@@ -835,6 +851,8 @@ body {
 .et-row-tracked      { box-shadow: inset var(--ui-sp-1) 0 0 var(--ui-success-solid); }
 .et-row-manual       { box-shadow: inset var(--ui-sp-1) 0 0 var(--ui-warn-solid); }
 .et-row-pending-edit { box-shadow: inset var(--ui-sp-1) 0 0 var(--ui-danger-solid); }
+.et-row-removed      { box-shadow: inset var(--ui-sp-1) 0 0 var(--ui-line-strong); }
+.et-row-removed td   { color: var(--ui-ink-2); }
 .et-row-gap td       { color: var(--ui-ink-2); }
 .et-row-rejected td  { color: var(--ui-ink-3); }
 
@@ -870,8 +888,15 @@ body {
   margin-top: var(--ui-sp-2);
 }
 .et-time-cell { white-space: nowrap; }
-.et-times-inline { display: inline-flex; align-items: center; gap: var(--ui-sp-2); }
-.et-times-sep { color: var(--ui-ink-3); font-size: 12px; }
+
+/* Removed time: struck figures, the reason in full ink so it is what you read. */
+.et-row-removed .et-removed-struck { text-decoration: line-through; color: var(--ui-ink-3); }
+.et-row-removed .et-removed-reason { color: var(--ui-ink); white-space: normal; }
+
+/* Remove time: a plain row under the tracked row it cuts from, its buttons always shown. */
+.et-row-removing { box-shadow: inset var(--ui-sp-1) 0 0 var(--ui-line-strong); background: var(--ui-surface-sunken); }
+.et-row-removing .et-actions { opacity: 1; }
+.et-row-removing .et-reason { background: var(--ui-surface); border-color: var(--ui-line-strong); }
 
 /* ============================================================================
    Activity heatmap (per-10-min productivity grid under the ribbon)

@@ -19,6 +19,7 @@ import { insightsRouter } from './routes/insights';
 import { reportsRouter } from './routes/reports';
 import { profileRouter } from './routes/profile';
 import { timeRequestsRouter } from './routes/timeRequests';
+import { timeRemovalsRouter } from './routes/timeRemovals';
 import { screenshotsRouter } from './routes/screenshots';
 import { adminRouter } from './routes/admin';
 import { accessRecipientsRouter } from './routes/accessRecipients';
@@ -150,6 +151,7 @@ export function buildApp(opts: { requestLogs?: boolean } = {}) {
   app.use('/v1/reports', reportsRouter);
   app.use('/v1/profile', profileRouter);
   app.use('/v1/time-requests', timeRequestsRouter);
+  app.use('/v1/time-removals', timeRemovalsRouter);
   app.use('/v1/screenshots', screenshotsRouter);
   app.use('/v1/downloads', downloadsRouter);
   app.use('/v1/mcp', mcpRouter);

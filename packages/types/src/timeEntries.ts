@@ -87,6 +87,40 @@ export const PatchTimeEntryRequest = z
   );
 export type PatchTimeEntryRequest = z.infer<typeof PatchTimeEntryRequest>;
 
+/** A removal reason has to say something: shorter than this is refused. */
+export const TIME_REMOVAL_REASON_MIN = 5;
+export const TIME_REMOVAL_REASON_MAX = 500;
+/** The shortest stretch that can be removed. */
+export const TIME_REMOVAL_MIN_MS = 60_000;
+
+/**
+ * Remove part of a person's tracked time on Edit Time. The window can only
+ * take time away: it is kept and drawn, with this reason, and stops counting
+ * on every screen. There is no request that gives tracked time back to
+ * yourself — putting removed time back is a manager's call.
+ */
+export const CreateTimeRemovalRequest = z.object({
+  /** Whose time. Omitted = the caller's own. */
+  userId: z.string().min(1).optional(),
+  start: Iso,
+  end: Iso,
+  reason: z.string().trim().min(TIME_REMOVAL_REASON_MIN).max(TIME_REMOVAL_REASON_MAX),
+});
+export type CreateTimeRemovalRequest = z.infer<typeof CreateTimeRemovalRequest>;
+
+/** Why a stretch of the day does not count, as Edit Time shows it. */
+export interface TimeRemovalInfo {
+  id: string;
+  /** `SELF`: removed on Edit Time. `REVIEW`: a reviewer resolved a flag. */
+  source: 'SELF' | 'REVIEW';
+  /** Null when the viewer is not shown it (a reviewer's note, to its subject). */
+  reason: string | null;
+  byUserId: string | null;
+  byName: string | null;
+  /** Epoch ms the time was removed. */
+  at: number;
+}
+
 /**
  * Sync the full segment list for an entry (agent is the source of truth for an
  * open entry). Server replaces segments + optionally closes the entry. This is

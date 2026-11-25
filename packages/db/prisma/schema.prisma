@@ -1306,14 +1306,18 @@ model ActivityFlag {
   @@index([status, createdAt])
 }
 
-/// Immutable audit record that removes a reviewed anti-cheat window from
-/// counted totals without deleting raw TimeEntry/Screenshot/ActivitySample rows.
+/// A window of a person's time that is kept and drawn but never counted. Made
+/// by a reviewer resolving an anti-cheat flag, or by a person removing part of
+/// their own tracked time on Edit Time. Raw TimeEntry/Screenshot/ActivitySample
+/// rows are never deleted.
 model TimeInvalidation {
   id              String       @id @default(cuid())
   workspaceId     String
   workspace       Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  flagId          String       @unique
-  flag            ActivityFlag @relation(fields: [flagId], references: [id], onDelete: Cascade)
+  /// The flag whose review made this invalidation. NULL when a person removed
+  /// the time themselves on Edit Time (or a manager did it for them there).
+  flagId          String?       @unique
+  flag            ActivityFlag? @relation(fields: [flagId], references: [id], onDelete: Cascade)
   userId          String
   user            User         @relation("TimeInvalidationSubject", fields: [userId], references: [id], onDelete: Cascade)
   windowStart     DateTime

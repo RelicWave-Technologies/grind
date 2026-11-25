@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { Send, Check, X, AlertCircle, RotateCcw, Trash2 } from 'lucide-react';
+import { Send, Check, X, AlertCircle, RotateCcw, Trash2, Scissors, Undo2 } from 'lucide-react';
 import TimePopover from './TimePopover';
 import TaskCombo, { type TaskOption } from './TaskCombo';
 import AttendeePicker, { type WorkspaceUser } from './AttendeePicker';
 import AttendeeChips from './AttendeeChips';
-import { fmtTime, fmtDurationMs } from '../lib/format';
+import { TIME_REMOVAL_MIN_MS, TIME_REMOVAL_REASON_MAX, TIME_REMOVAL_REASON_MIN } from '@grind/types';
+import { fmtDateShort, fmtTime, fmtDurationMs } from '../lib/format';
 import type { DayBlock, RejectedRequest } from '../lib/types';
 import { Button } from '../ui';
 
@@ -21,6 +22,12 @@ import { Button } from '../ui';
  *     Withdraw action (POST /:id/cancel).
  *   - kind='gap' (no entry, white): a composer for a fresh manual-time
  *     request — pick start / end / task / reason → POST /v1/time-requests.
+ *   - kind='removed' (time that was taken out, grey rail): read-only — the
+ *     stretch, the reason, who removed it. A manager may restore it.
+ *
+ * A tracked row can also open the Remove time composer: pick a range inside
+ * the block and say why → POST /v1/time-removals. It only ever takes time
+ * away; there is no way to lengthen tracked time from here.
  *
  * `disabled=true` short-circuits ALL writes. The parent decides this from
  * scoped RBAC; the API repeats the same check server-side.
@@ -52,6 +59,20 @@ interface TrackedRowProps extends BaseProps {
   isMeeting?: boolean;
   onSave: (vars: { id: string; larkTaskGuid: string | null; notes: string; attendeeIds?: string[] }) => Promise<void>;
   onDeleteManual?: (id: string) => Promise<void>;
+  /** Take part of this tracked block out of the day. Tracked rows only. */
+  onRemoveTime?: (vars: { start: number; end: number; reason: string }) => Promise<void>;
+}
+
+interface RemovedRowProps {
+  kind: 'removed';
+  block: DayBlock;
+  tasks: TaskOption[];
+  timeZone: string;
+  selfId?: string;
+  rowId?: string;
+  highlighted?: boolean;
+  /** Given only to someone who may put this time back (a manager, never the person themselves). */
+  onRestore?: (removalId: string) => Promise<void>;
 }
 
 interface PendingRowProps extends BaseProps {
@@ -93,7 +114,7 @@ interface RejectedRowProps {
   highlighted?: boolean;
 }
 
-export type EntryRowProps = TrackedRowProps | PendingRowProps | GapRowProps | RejectedRowProps;
+export type EntryRowProps = TrackedRowProps | PendingRowProps | GapRowProps | RejectedRowProps | RemovedRowProps;
 
 function newClientUuid(): string {
   const random = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
@@ -119,6 +140,7 @@ function taskSummaryFor(tasks: TaskOption[], guid: string, fallback?: string | n
 
 export function EntryRow(props: EntryRowProps) {
   if (props.kind === 'rejected') return <RejectedRow {...props} />;
+  if (props.kind === 'removed') return <RemovedRow {...props} />;
   if (props.kind === 'gap') return <GapRow {...props} />;
   if (props.kind === 'pending') return <PendingRow {...props} />;
   return <TrackedRow {...props} />;
@@ -141,7 +163,9 @@ function TrackedRow({
   selfId,
   onSave,
   onDeleteManual,
+  onRemoveTime,
 }: TrackedRowProps) {
+  const [removing, setRemoving] = useState(false);
   const [task, setTask] = useState<string>(block.larkTaskGuid ?? '');
   const [notes, setNotes] = useState<string>(block.notes ?? '');
   const [attendees, setAttendees] = useState<string[]>(block.attendeeIds ?? []);
@@ -207,10 +231,13 @@ function TrackedRow({
     }
   }
 
+  const canRemove = kind === 'tracked' && !disabled && Boolean(onRemoveTime) && block.durationMs >= TIME_REMOVAL_MIN_MS;
+
   return (
+    <>
     <tr
       data-row-id={rowId}
-      className={`et-row et-row-${kind === 'tracked' ? 'tracked' : 'manual'}${dirty ? ' et-row-dirty' : ''}${highlighted ? ' et-row-highlighted' : ''}`}
+      className={`et-row et-row-${kind === 'tracked' ? 'tracked' : 'manual'}${dirty || removing ? ' et-row-dirty' : ''}${highlighted ? ' et-row-highlighted' : ''}`}
     >
       <td className="et-time-cell tabular">
         <KindBadge kind={isMeeting ? 'meeting' : kind} />
@@ -296,6 +323,18 @@ function TrackedRow({
                 Delete
               </Button>
             )}
+            {canRemove && (
+              <Button
+                size="sm"
+                variant="secondary"
+                icon={<Scissors size={12} strokeWidth={2} />}
+                onClick={() => setRemoving((open) => !open)}
+                aria-expanded={removing}
+                disabled={saving}
+              >
+                Remove time
+              </Button>
+            )}
             <Button
               size="sm"
               variant={saved ? 'soft' : 'primary'}
@@ -309,6 +348,205 @@ function TrackedRow({
           </span>
         )}
       </td>
+    </tr>
+    {removing && canRemove && onRemoveTime && (
+      <RemoveTimeRow
+        block={block}
+        timeZone={timeZone}
+        onCancel={() => setRemoving(false)}
+        onRemove={async (vars) => {
+          await onRemoveTime(vars);
+          setRemoving(false);
+        }}
+      />
+    )}
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Remove time: take a range out of a tracked block, with a reason
+// ---------------------------------------------------------------------------
+
+const REMOVE_ERRORS: Record<string, string> = {
+  no_tracked_time: 'There is no counted tracked time in that range.',
+  window_in_future: 'That range is not over yet.',
+  window_too_short: 'Pick at least one minute.',
+  invalid_window: 'End must be after start.',
+  forbidden: 'You can’t change this person’s time.',
+};
+
+function RemoveTimeRow({
+  block,
+  timeZone,
+  onCancel,
+  onRemove,
+}: {
+  block: DayBlock;
+  timeZone: string;
+  onCancel: () => void;
+  onRemove: (vars: { start: number; end: number; reason: string }) => Promise<void>;
+}) {
+  // Starts on the whole block; the person narrows it to the part that was not
+  // work. The pickers cannot leave the block, so this can only take time away.
+  const [start, setStart] = useState(block.startedAt);
+  const [end, setEnd] = useState(block.endedAt);
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const reasonRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    reasonRef.current?.focus({ preventScroll: true });
+  }, []);
+
+  // A running block's end moves with every refetch; keep the picked range inside it.
+  useEffect(() => {
+    setStart((st) => Math.min(Math.max(st, block.startedAt), block.endedAt));
+    setEnd((e) => Math.min(Math.max(e, block.startedAt), block.endedAt));
+  }, [block.startedAt, block.endedAt]);
+
+  const duration = Math.max(0, end - start);
+  const reasonOk = reason.trim().length >= TIME_REMOVAL_REASON_MIN;
+  const rangeOk = duration >= TIME_REMOVAL_MIN_MS;
+
+  async function submit() {
+    if (!reasonOk || !rangeOk || busy) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      await onRemove({ start, end, reason: reason.trim() });
+    } catch (e) {
+      const code = e instanceof Error ? e.message : '';
+      setErr(REMOVE_ERRORS[code] ?? (code || 'Could not remove the time'));
+      setBusy(false);
+    }
+  }
+
+  // The same six columns as every other row: time, how much, why, the action.
+  return (
+    <tr className="et-row et-row-removing">
+      <td><span className="kind-chip kind-removed">Remove</span></td>
+      <td className="et-time-cell">
+        <span className="et-times-inline">
+          <TimePopover
+            value={start}
+            timeZone={timeZone}
+            minTime={block.startedAt}
+            maxTime={Math.max(block.startedAt, end - TIME_REMOVAL_MIN_MS)}
+            onChange={setStart}
+            ariaLabel="Remove from"
+          />
+          <span className="et-times-sep">–</span>
+          <TimePopover
+            value={end}
+            timeZone={timeZone}
+            minTime={Math.min(block.endedAt, start + TIME_REMOVAL_MIN_MS)}
+            maxTime={block.endedAt}
+            onChange={setEnd}
+            ariaLabel="Remove until"
+          />
+        </span>
+      </td>
+      <td className="tabular secondary">−{fmtDurationMs(duration)}</td>
+      <td className="tertiary">—</td>
+      <td>
+        <input
+          ref={reasonRef}
+          className="et-reason"
+          placeholder="Reason (required)"
+          value={reason}
+          maxLength={TIME_REMOVAL_REASON_MAX}
+          onChange={(e) => setReason(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') submit();
+            if (e.key === 'Escape') onCancel();
+          }}
+        />
+        {err
+          ? <div className="et-row-err">{err}</div>
+          : <div className="small tertiary et-review-note">Only a manager can undo this.</div>}
+      </td>
+      <td className="et-action-cell">
+        <span className="et-actions">
+          <Button size="sm" variant="secondary" onClick={onCancel} disabled={busy}>Cancel</Button>
+          <Button
+            size="sm"
+            variant="danger"
+            onClick={submit}
+            loading={busy}
+            disabled={busy || !reasonOk || !rangeOk}
+          >
+            {busy ? 'Removing…' : `Remove ${fmtDurationMs(duration)}`}
+          </Button>
+        </span>
+      </td>
+    </tr>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Removed time (read-only; a manager may restore it)
+// ---------------------------------------------------------------------------
+
+function RemovedRow({ block, tasks, timeZone, selfId, rowId, highlighted, onRestore }: RemovedRowProps) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const removal = block.removal;
+  const byReview = removal?.source === 'REVIEW';
+  const who = removal?.byUserId && removal.byUserId === selfId ? 'you' : removal?.byName ?? (byReview ? 'a reviewer' : 'someone');
+  const when = removal ? `${fmtDateShort(removal.at, timeZone)}, ${fmtTime(removal.at, timeZone)}` : null;
+  const task = block.larkTaskGuid ? taskSummaryFor(tasks, block.larkTaskGuid) : null;
+  const canRestore = Boolean(onRestore && removal && !byReview);
+
+  async function restore() {
+    if (!removal || !onRestore) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      await onRestore(removal.id);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Restore failed');
+      setBusy(false);
+    }
+  }
+
+  return (
+    <tr data-row-id={rowId} className={`et-row et-row-removed${highlighted ? ' et-row-highlighted' : ''}`}>
+      <td><KindBadge kind={byReview ? 'excluded' : 'removed'} /></td>
+      <td className="et-time-cell tabular et-removed-struck">
+        {fmtTime(block.startedAt, timeZone)} <span className="et-times-sep">–</span> {fmtTime(block.endedAt, timeZone)}
+      </td>
+      <td className="tabular et-removed-struck">{fmtDurationMs(block.durationMs)}</td>
+      <td className="secondary">{task ?? <span className="tertiary">—</span>}</td>
+      {/* With nothing to do in the actions column, the reason takes its room. */}
+      <td colSpan={canRestore ? 1 : 2}>
+        <div className="et-removed-reason">
+          {removal?.reason ?? (byReview ? 'A reviewer excluded this time.' : 'Not counted.')}
+        </div>
+        {removal && (
+          <div className="small tertiary et-review-note">
+            {byReview ? 'Excluded' : 'Removed'} by {who}{when ? ` · ${when}` : ''}
+          </div>
+        )}
+        {err && <div className="et-row-err">{err}</div>}
+      </td>
+      {canRestore && (
+        <td className="et-action-cell">
+          <span className="et-actions">
+            <Button
+              size="sm"
+              variant="secondary"
+              icon={<Undo2 size={12} strokeWidth={2} />}
+              onClick={restore}
+              loading={busy}
+              disabled={busy}
+            >
+              Restore
+            </Button>
+          </span>
+        </td>
+      )}
     </tr>
   );
 }
@@ -667,13 +905,16 @@ function RejectedRow({ rejected, timeZone, rowId, highlighted }: RejectedRowProp
 
 // ---------------------------------------------------------------------------
 
-function KindBadge({ kind }: { kind: RowKind | 'rejected' | 'meeting' }) {
+function KindBadge({ kind }: { kind: RowKind | 'rejected' | 'meeting' | 'removed' | 'excluded' }) {
   const label =
     kind === 'tracked' ? 'Tracked'
+    : kind === 'removed' ? 'Removed'
+    : kind === 'excluded' ? 'Excluded'
     : kind === 'meeting' ? 'Meeting'
     : kind === 'manual_approved' ? 'Manual'
     : kind === 'pending' ? 'Pending'
     : kind === 'rejected' ? 'Rejected'
     : 'Gap';
-  return <span className={`kind-chip kind-${kind === 'manual_approved' ? 'manual' : kind}`}>{label}</span>;
+  const cls = kind === 'manual_approved' ? 'manual' : kind === 'excluded' ? 'removed' : kind;
+  return <span className={`kind-chip kind-${cls}`}>{label}</span>;
 }

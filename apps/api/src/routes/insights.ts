@@ -6,7 +6,7 @@ import { attachScope } from '../middleware/scope';
 import { scoreDay } from '../scoring/score';
 import { assessWindow, type RiskSample } from '../anticheat/risk';
 import type { RoleTitle } from '../scoring/presets';
-import { buildDayInsight, localDayWindow } from '../insights/day';
+import { attachRemovals, buildDayInsight, localDayWindow } from '../insights/day';
 import { shiftTimesFromSchedule, shiftWindowFor } from '@grind/core';
 import { dateKeyInTimeZone, isValidTimeZone, zonedDateTimeParts, type ShiftSchedule } from '@grind/types';
 import { buildHeatmap, DEFAULT_BUCKET_MS, type HeatmapSample } from '../insights/heatmap';
@@ -331,7 +331,26 @@ insightsRouter.get('/day', async (req, res, next) => {
       })),
     };
 
-    res.json({ ...result, activity: heatmap, fullDayActivity, appUsage });
+    // Why each removed or invalidated stretch does not count. Read only when
+    // the day has one — most days have none.
+    const removals = result.totals.invalidatedMs > 0 || result.blocks.some((b) => b.invalidated)
+      ? await prisma.timeInvalidation.findMany({
+          where: { userId, windowStart: { lt: win.end }, windowEnd: { gt: win.start } },
+          select: {
+            id: true,
+            flagId: true,
+            windowStart: true,
+            windowEnd: true,
+            reason: true,
+            createdAt: true,
+            invalidatedBy: { select: { id: true, name: true } },
+          },
+          orderBy: { createdAt: 'asc' },
+        })
+      : [];
+    const blocks = attachRemovals(result.blocks, removals, { hideReviewNotes: userId === req.user.sub });
+
+    res.json({ ...result, blocks, activity: heatmap, fullDayActivity, appUsage });
   } catch (err) {
     next(err);
   }
