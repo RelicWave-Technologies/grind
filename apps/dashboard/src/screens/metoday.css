@@ -228,6 +228,10 @@
   background: var(--timeline-manual-bg);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--timeline-manual-ink) 32%, transparent);
 }
+.myd-legend .myd-legend-removed .ui-tag__dot {
+  background: transparent;
+  border: 1px dashed var(--ui-ink-3);
+}
 
 /* The well the ribbon + heatmap live in — inset surface, hairline, no shadow. */
 .myd-canvas {

@@ -6,6 +6,7 @@
  */
 
 import type { PersonFacets } from '@grind/types/auth';
+import type { TimeRemovalInfo } from '@grind/types';
 
 type BlockKind = 'WORK' | 'MEETING' | 'MANUAL' | 'IDLE_TRIMMED' | 'PENDING' | 'GAP';
 
@@ -19,8 +20,10 @@ export interface DayBlock {
   taskSummary?: string | null;
   notes?: string | null;
   isOpen?: boolean;
-  /** A reviewer invalidated these minutes: still drawn, never in the totals. */
+  /** These minutes were removed or invalidated: still drawn, never in the totals. */
   invalidated?: boolean;
+  /** Why an invalidated block does not count: who removed it, when, and their reason. */
+  removal?: TimeRemovalInfo;
   attendeeIds?: string[];
   /** ManualTimeRequest id for PENDING and approved MANUAL blocks. */
   requestId?: string;

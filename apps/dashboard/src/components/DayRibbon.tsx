@@ -112,7 +112,7 @@ export function DayRibbon({
   const futureStartsAt = clamp(day.isToday ? now : day.isFuture ? displayStart : displayEnd, displayStart, displayEnd);
   const trackRef = useRef<HTMLDivElement>(null);
   const [hoverMs, setHoverMs] = useState<number | null>(null);
-  /** A manual block clicked to read why it was added. */
+  /** A manual or removed block clicked to read why it was added or taken out. */
   const [picked, setPicked] = useState<DayBlock | null>(null);
 
   const pct = (ms: number) => `${((ms - displayStart) / span) * 100}%`;
@@ -207,13 +207,15 @@ export function DayRibbon({
                 />
               );
             }
-            const why = b.kind === 'MANUAL' && b.reason ? ` — ${b.reason}` : '';
+            const removed = Boolean(b.invalidated);
+            const reason = removed ? removedReason(b) : b.kind === 'MANUAL' ? b.reason : undefined;
+            const why = reason ? ` — ${reason}` : '';
             return (
               <div
                 key={`ribbon-${rowId}`}
-                className={`ribbon-block ribbon-block-${b.kind.toLowerCase()}${why ? ' is-pickable' : ''}`}
+                className={`ribbon-block ribbon-block-${b.kind.toLowerCase()}${removed ? ' is-removed' : ''}${why ? ' is-pickable' : ''}`}
                 style={{ left: pct(visible.startedAt), width }}
-                title={`${b.kind} · ${fmtTime(b.startedAt, timeZone)} – ${fmtTime(b.endedAt, timeZone)}${attSuffix}${why}`}
+                title={`${removed ? 'Removed' : b.kind} · ${fmtTime(b.startedAt, timeZone)} – ${fmtTime(b.endedAt, timeZone)}${attSuffix}${why}`}
                 onMouseEnter={() => onHoverRowId?.(rowId)}
                 onMouseLeave={() => onHoverRowId?.(null)}
                 onClick={why ? (e) => {
@@ -268,13 +270,22 @@ export function DayRibbon({
       {picked && (
         <p className="ribbon-note small">
           <span className="tertiary">
-            Manual · {fmtTime(picked.startedAt, timeZone)} – {fmtTime(picked.endedAt, timeZone)} ·{' '}
+            {picked.invalidated ? 'Removed' : 'Manual'} · {fmtTime(picked.startedAt, timeZone)} – {fmtTime(picked.endedAt, timeZone)} ·{' '}
           </span>
-          {picked.reason}
+          {picked.invalidated ? removedReason(picked) : picked.reason}
         </p>
       )}
     </>
   );
+}
+
+/** What to say about a block that was taken out of the day. */
+function removedReason(b: DayBlock): string {
+  const r = b.removal;
+  if (!r) return 'Not counted';
+  const by = r.byName ? ` (by ${r.byName})` : '';
+  if (r.source === 'REVIEW') return `${r.reason ?? 'Excluded by a reviewer'}${by}`;
+  return `${r.reason ?? 'Removed'}${by}`;
 }
 
 function clip(

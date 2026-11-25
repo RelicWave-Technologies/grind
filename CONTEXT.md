@@ -88,6 +88,14 @@ The server-side window during which an open time entry is considered still alive
 Renewed by the agent's heartbeat; expiry closes the entry server-side.
 _Avoid_: keepalive, TTL
 
+**Invalidation**:
+A window of a person's time that is kept and drawn but never counted. Made by a
+reviewer resolving a flag, or by a person removing part of their own tracked
+time on Edit Time (a **removal** — an invalidation with no flag). Nothing is
+deleted, and removing is the only time edit a person makes without approval,
+because it can only take time away.
+_Avoid_: deletion, trim (that is idle), exclusion
+
 ### Time
 
 **Frame**:

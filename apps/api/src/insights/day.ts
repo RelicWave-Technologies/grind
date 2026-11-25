@@ -33,7 +33,7 @@ import {
   type Interval,
   type TimelinePiece,
 } from '@grind/core';
-import { localDayWindowInTimeZone } from '@grind/types';
+import { localDayWindowInTimeZone, type TimeRemovalInfo } from '@grind/types';
 
 type SegmentKind = 'WORK' | 'MEETING' | 'IDLE_TRIMMED';
 /**
@@ -113,8 +113,68 @@ interface DayBlock {
    * separate and usually empty).
    */
   reason?: string;
-  /** A reviewer invalidated these minutes: drawn, never counted. */
+  /** These minutes were removed or invalidated: drawn, never counted. */
   invalidated?: boolean;
+  /** Why an invalidated block does not count (see `attachRemovals`). */
+  removal?: TimeRemovalInfo;
+}
+
+/** An invalidation row, as `attachRemovals` needs it. */
+export interface RemovalRow {
+  id: string;
+  flagId: string | null;
+  windowStart: Date;
+  windowEnd: Date;
+  reason: string;
+  createdAt: Date;
+  invalidatedBy: { id: string; name: string } | null;
+}
+
+/**
+ * Say why each invalidated block does not count: who removed it, when, and
+ * the reason they gave. Windows can overlap, so a block takes the row that
+ * covers most of it (the newest on a tie).
+ *
+ * A reviewer's note on a flag is written for other reviewers; the person it
+ * is about is told that a reviewer excluded the time, not the note itself.
+ */
+export function attachRemovals(
+  blocks: DayBlock[],
+  rows: readonly RemovalRow[],
+  opts: { hideReviewNotes: boolean },
+): DayBlock[] {
+  if (rows.length === 0) return blocks;
+  return blocks.map((block) => {
+    if (!block.invalidated) return block;
+    let best: RemovalRow | null = null;
+    let bestMs = 0;
+    for (const row of rows) {
+      const iv = clipInterval(
+        { start: block.startedAt, end: block.endedAt },
+        row.windowStart.getTime(),
+        row.windowEnd.getTime(),
+      );
+      const ms = iv ? iv.end - iv.start : 0;
+      if (ms <= 0) continue;
+      if (ms > bestMs || (ms === bestMs && best !== null && row.createdAt > best.createdAt)) {
+        best = row;
+        bestMs = ms;
+      }
+    }
+    if (!best) return block;
+    const source = best.flagId ? 'REVIEW' : 'SELF';
+    return {
+      ...block,
+      removal: {
+        id: best.id,
+        source,
+        reason: source === 'REVIEW' && opts.hideReviewNotes ? null : best.reason,
+        byUserId: best.invalidatedBy?.id ?? null,
+        byName: best.invalidatedBy?.name ?? null,
+        at: best.createdAt.getTime(),
+      },
+    };
+  });
 }
 
 export interface DayInsightResult {

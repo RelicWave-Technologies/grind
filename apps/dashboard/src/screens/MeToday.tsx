@@ -67,6 +67,8 @@ interface AdminUser {
  *   - POST  /v1/time-requests         (gap rows → new request)
  *   - PATCH /v1/time-requests/:id     (pending edit)
  *   - POST  /v1/time-requests/:id/cancel (pending withdraw)
+ *   - POST  /v1/time-removals         (take part of a tracked block away, with a reason)
+ *   - DELETE /v1/time-removals/:id    (a manager puts removed time back)
  *
  * Each mutation invalidates the day query so the ribbon + heatmap +
  * pending overlay all stay in sync without manual `setState`.
@@ -181,6 +183,30 @@ export function MeTodayScreen() {
   const deleteManualEntry = useMutation({
     mutationFn: (id: string) => api(`/v1/time-entries/${id}`, { method: 'DELETE' }),
     onSuccess: invalidate,
+  });
+
+  // Removing time changes hours everywhere, so the reports' caches go too.
+  const invalidateHours = useCallback(() => {
+    invalidate();
+    qc.invalidateQueries({ queryKey: ['reports'] });
+  }, [invalidate, qc]);
+
+  const removeTime = useMutation({
+    mutationFn: (vars: { start: number; end: number; reason: string }) => {
+      const body: Record<string, unknown> = {
+        start: new Date(vars.start).toISOString(),
+        end: new Date(vars.end).toISOString(),
+        reason: vars.reason,
+      };
+      if (targetUserId !== me.id) body.userId = targetUserId;
+      return api('/v1/time-removals', { method: 'POST', json: body });
+    },
+    onSuccess: invalidateHours,
+  });
+
+  const restoreRemoval = useMutation({
+    mutationFn: (id: string) => api(`/v1/time-removals/${id}`, { method: 'DELETE' }),
+    onSuccess: invalidateHours,
   });
 
   // ---- Click-to-fill from ribbon --------------------------------------------
@@ -313,6 +339,11 @@ export function MeTodayScreen() {
   const countedMs = day
     ? day.totals.workedMs + day.totals.meetingMs + day.totals.manualMs
     : 0;
+  const removedMs = day?.totals.invalidatedMs ?? 0;
+  // Putting removed time back adds hours, so it is never your own call (an
+  // admin aside) — the server holds the same line.
+  const canRestore =
+    editable && hasCapability(me, 'time.team.edit') && (me.role === 'ADMIN' || targetUserId !== me.id);
   const calendarWindow = day
     ? {
         startedAt: day.calendarDayStart ?? day.dayStart,
@@ -389,7 +420,11 @@ export function MeTodayScreen() {
               <Stat
                 label="Total time"
                 value={fmtDurationMs(countedMs)}
-                hint="Tracked + meetings + approved manual"
+                hint={
+                  removedMs > 0
+                    ? `Tracked + meetings + approved manual · ${fmtDurationMs(removedMs)} removed`
+                    : 'Tracked + meetings + approved manual'
+                }
               />
               <Stat
                 label="Tracked work"
@@ -431,6 +466,7 @@ export function MeTodayScreen() {
                 <Tag status="warn" dot>Manual</Tag>
                 <Tag status="danger" dot>Pending</Tag>
                 <Tag status="neutral" dot>Idle</Tag>
+                {removedMs > 0 && <Tag status="neutral" dot className="myd-legend-removed">Removed</Tag>}
               </div>
             </div>
 
@@ -553,6 +589,28 @@ export function MeTodayScreen() {
                   // WORK / MEETING / MANUAL
                   const kind = b.kind === 'MANUAL' ? 'manual_approved' : 'tracked';
                   const rowId = dayBlockRowId(b);
+                  if (b.invalidated) {
+                    // Taken out of the day: shown with its reason, never editable.
+                    return (
+                      <EntryRow
+                        key={rowId}
+                        rowId={rowId}
+                        highlighted={highlightedRowId === rowId}
+                        kind="removed"
+                        block={b}
+                        tasks={tasks}
+                        timeZone={tz}
+                        selfId={me.id}
+                        onRestore={
+                          canRestore
+                            ? async (id) => {
+                                await restoreRemoval.mutateAsync(id);
+                              }
+                            : undefined
+                        }
+                      />
+                    );
+                  }
                   const isMeeting = b.kind === 'MEETING';
                   return (
                     <EntryRow
@@ -574,6 +632,13 @@ export function MeTodayScreen() {
                         kind === 'manual_approved'
                           ? async (id) => {
                               await deleteManualEntry.mutateAsync(id);
+                            }
+                          : undefined
+                      }
+                      onRemoveTime={
+                        kind === 'tracked'
+                          ? async (vars) => {
+                              await removeTime.mutateAsync(vars);
                             }
                           : undefined
                       }
